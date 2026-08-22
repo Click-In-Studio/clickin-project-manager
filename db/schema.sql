@@ -799,6 +799,11 @@ CREATE TABLE IF NOT EXISTS production_wiki_config (
   reports_tree_enabled BOOLEAN NOT NULL DEFAULT true,
   reports_root_title   TEXT    NOT NULL DEFAULT '报告',
   reports_root_wiki_id UUID    NULL REFERENCES wiki(id) ON DELETE SET NULL,
+  -- 「戏剧构作」单层系统根（Phase 2）：场景侧新建文档的默认落位。不做 per-scene
+  -- 子目录——scene 易变且 wiki↔scene 是 m:n，归属由 wiki_entity_link manual 边表达
+  dramaturgy_tree_enabled BOOLEAN NOT NULL DEFAULT true,
+  dramaturgy_root_title   TEXT    NOT NULL DEFAULT '戏剧构作',
+  dramaturgy_root_wiki_id UUID    NULL REFERENCES wiki(id) ON DELETE SET NULL,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );

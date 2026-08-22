@@ -2760,6 +2760,23 @@
       "nullable": true
     },
     {
+      "column": "dramaturgy_tree_enabled",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true"
+    },
+    {
+      "column": "dramaturgy_root_title",
+      "type": "text",
+      "nullable": false,
+      "default": "'戏剧构作'::text"
+    },
+    {
+      "column": "dramaturgy_root_wiki_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,

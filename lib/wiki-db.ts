@@ -144,7 +144,8 @@ export async function listWikiLibrary(productionId: string): Promise<WikiListEnt
     `SELECT w.id::text AS id, w.production_id, w.title, w.created_by, w.parent_id::text AS parent_id,
             w.sort_key, w.is_public, w.created_at, w.updated_at, '' AS body, '[]'::jsonb AS mentions,
             array_remove(array_agg(t.tag ORDER BY t.tag), NULL) AS tags,
-            (EXISTS (SELECT 1 FROM production_wiki_config c WHERE c.reports_root_wiki_id = w.id)
+            (EXISTS (SELECT 1 FROM production_wiki_config c
+                     WHERE c.reports_root_wiki_id = w.id OR c.dramaturgy_root_wiki_id = w.id)
              OR EXISTS (SELECT 1 FROM production_event pe WHERE pe.report_doc_wiki_id = w.id)) AS is_anchor
      FROM wiki w LEFT JOIN wiki_tag t ON t.wiki_id = w.id
      WHERE w.production_id = $1 AND w.title IS NOT NULL
@@ -344,7 +345,8 @@ export async function deleteWiki(
     `SELECT 1 FROM wiki WHERE id = $1::uuid AND production_id = $2`, [id, productionId]);
   if (!exists.rows[0]) return { ok: false, reason: "not_found" };
   const anchor = await pool.query(
-    `SELECT 1 FROM production_wiki_config WHERE reports_root_wiki_id = $1::uuid
+    `SELECT 1 FROM production_wiki_config
+     WHERE reports_root_wiki_id = $1::uuid OR dramaturgy_root_wiki_id = $1::uuid
      UNION ALL
      SELECT 1 FROM production_event WHERE report_doc_wiki_id = $1::uuid LIMIT 1`,
     [id],
@@ -473,6 +475,56 @@ export async function ensureReportTreeAnchors(
 
     await client.query("COMMIT");
     return eventDocId;
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * 懒建「戏剧构作」单层系统根，返回根 wiki id；配置关闭时返回 null。
+ * 并发/重建语义与 ensureReportTreeAnchors 同款（FOR UPDATE 串行化、
+ * 锚被删则 FK SET NULL 后自动重建），只是没有第二层。
+ */
+export async function ensureDramaturgyRootAnchor(productionId: string): Promise<string | null> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO production_wiki_config (production_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+      [productionId],
+    );
+    const cfg = await client.query<{ dramaturgy_tree_enabled: boolean; dramaturgy_root_title: string; dramaturgy_root_wiki_id: string | null }>(
+      `SELECT dramaturgy_tree_enabled, dramaturgy_root_title, dramaturgy_root_wiki_id::text AS dramaturgy_root_wiki_id
+       FROM production_wiki_config WHERE production_id = $1 FOR UPDATE`,
+      [productionId],
+    );
+    if (!cfg.rows[0]?.dramaturgy_tree_enabled) { await client.query("COMMIT"); return null; }
+
+    let rootId = cfg.rows[0].dramaturgy_root_wiki_id;
+    if (!rootId) {
+      const lastRoot = await client.query<{ sort_key: string | null }>(
+        `SELECT sort_key FROM wiki
+         WHERE production_id = $1 AND parent_id IS NULL AND sort_key IS NOT NULL
+         ORDER BY sort_key DESC LIMIT 1`,
+        [productionId],
+      );
+      const rootRow = await client.query<{ id: string }>(
+        `INSERT INTO wiki (production_id, title, is_public, sort_key)
+         VALUES ($1, $2, true, $3) RETURNING id::text AS id`,
+        [productionId, cfg.rows[0].dramaturgy_root_title, keyBetween(lastRoot.rows[0]?.sort_key ?? null, null)],
+      );
+      rootId = rootRow.rows[0].id;
+      await client.query(
+        `UPDATE production_wiki_config SET dramaturgy_root_wiki_id = $2::uuid, updated_at = now()
+         WHERE production_id = $1`,
+        [productionId, rootId],
+      );
+    }
+    await client.query("COMMIT");
+    return rootId;
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
@@ -615,19 +667,76 @@ export async function listOutgoingLinks(wikiId: string, productionId: string): P
   return res.rows.map(r => ({ id: r.id, title: r.title }));
 }
 
+export type EntityWikiRef = WikiRef & {
+  /** 存在 origin='manual' 行（UI 据此暴露解除入口；body 边只能改正文） */
+  manual: boolean;
+};
+
 /** 对象侧反向面板：引用了该实体的 wiki（标题级列出——§4.1，不过滤 wiki 可见性，
  *  点击处由 wiki 页过门+申请）。production_id 过滤兼防跨剧组 mention 泄漏。 */
 export async function listWikiRefsForEntity(
   productionId: string, entityType: string, entityId: string,
-): Promise<WikiRef[]> {
-  const res = await getPool().query<{ id: string; title: string | null }>(
-    `SELECT DISTINCT w.id::text AS id, w.title, w.updated_at FROM wiki_entity_link l
+): Promise<EntityWikiRef[]> {
+  const res = await getPool().query<{ id: string; title: string | null; manual: boolean }>(
+    `SELECT w.id::text AS id, w.title, bool_or(l.origin = 'manual') AS manual
+     FROM wiki_entity_link l
      JOIN wiki w ON w.id = l.wiki_id
      WHERE l.production_id = $1 AND l.entity_type = $2 AND l.entity_id = $3
+     GROUP BY w.id, w.title, w.updated_at
      ORDER BY w.updated_at DESC LIMIT 50`,
     [productionId, entityType, entityId],
   );
-  return res.rows.map(r => ({ id: r.id, title: r.title }));
+  return res.rows.map(r => ({ id: r.id, title: r.title, manual: r.manual }));
+}
+
+export type WikiEntityRef = { entityType: string; entityId: string; manual: boolean };
+
+/** wiki 侧"关联对象"面板：本文的非 wiki 出边（body+manual 合并；wiki↔wiki
+ *  已有 backlinks/正文 chip 承载）。标签由调用方经 mention-resolve 逐观看者解析。 */
+export async function listEntityRefsForWiki(
+  wikiId: string, productionId: string,
+): Promise<WikiEntityRef[]> {
+  const res = await getPool().query<{ entity_type: string; entity_id: string; manual: boolean }>(
+    `SELECT entity_type, entity_id, bool_or(origin = 'manual') AS manual
+     FROM wiki_entity_link
+     WHERE wiki_id = $1::uuid AND production_id = $2 AND entity_type <> 'wiki'
+     GROUP BY entity_type, entity_id
+     ORDER BY entity_type, entity_id LIMIT 100`,
+    [wikiId, productionId],
+  );
+  return res.rows.map(r => ({ entityType: r.entity_type, entityId: r.entity_id, manual: r.manual }));
+}
+
+/** 显式建链（origin='manual'，Phase 2）。wiki 归属校验内含：跨 production 不落行。
+ *  重复建链幂等（PK 冲突吞掉）。返回是否落行/已存在。 */
+export async function addManualWikiEntityLink(params: {
+  wikiId: string; productionId: string; entityType: string; entityId: string; createdBy: string;
+}): Promise<boolean> {
+  const res = await getPool().query(
+    `INSERT INTO wiki_entity_link (wiki_id, production_id, entity_type, entity_id, origin, created_by)
+     SELECT w.id, w.production_id, $3, $4, 'manual', $5::uuid
+     FROM wiki w WHERE w.id = $1::uuid AND w.production_id = $2
+     ON CONFLICT DO NOTHING`,
+    [params.wikiId, params.productionId, params.entityType, params.entityId, params.createdBy],
+  );
+  if (res.rowCount && res.rowCount > 0) return true;
+  const exists = await getPool().query(
+    `SELECT 1 FROM wiki_entity_link
+     WHERE wiki_id = $1::uuid AND production_id = $2 AND entity_type = $3 AND entity_id = $4 AND origin = 'manual'`,
+    [params.wikiId, params.productionId, params.entityType, params.entityId],
+  );
+  return exists.rows.length > 0;
+}
+
+/** 解除显式建链。只删 manual 行——body 边归正文管理，面板不得越权抹。 */
+export async function removeManualWikiEntityLink(
+  wikiId: string, productionId: string, entityType: string, entityId: string,
+): Promise<void> {
+  await getPool().query(
+    `DELETE FROM wiki_entity_link
+     WHERE wiki_id = $1::uuid AND production_id = $2 AND entity_type = $3 AND entity_id = $4 AND origin = 'manual'`,
+    [wikiId, productionId, entityType, entityId],
+  );
 }
 
 /** unlinked references：正文含目标标题但无链接边的文档（pg_trgm 加速的 ILIKE）。 */
