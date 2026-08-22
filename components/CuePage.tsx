@@ -9,7 +9,6 @@ import { BASE_PATH } from "@/lib/base-path";
 import type { Block, Character, Scene } from "@/lib/script-types";
 import type { CueList } from "@/lib/cue-list-types";
 import type { Cue, CueAnchor } from "@/lib/cue-types";
-import type { Version, VersionStatus } from "@/lib/db";
 import CueMountAssets from "@/components/assets/CueMountAssets";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/SmartTextarea";
@@ -138,9 +137,7 @@ type Props = {
   myUserId: string;
   isAdmin: boolean;
   pageMap: Record<string, number>;
-  versions?: Version[];
   versionId?: string;
-  versionStatus?: VersionStatus;
 };
 
 type Selection =
@@ -880,7 +877,7 @@ function ExportModal({
 export default function CuePage({
   productionId, productionName, blocks: rawBlocks, characters, scenes,
   cueLists, initialCues, editableListIds, manageListIds, myUserId, isAdmin, pageMap,
-  versions = [], versionId, versionStatus,
+  versionId,
 }: Props) {
   const { stage: toolbarStage, closeOverflow, overflowOpen } = useProductionToolbar();
   const router = useRouter();
@@ -1157,13 +1154,11 @@ export default function CuePage({
     return m;
   }, [cueLists]);
 
-  // Frozen/archived versions make cues read-only; editing/committed allow cue edits
-  const cueEditAllowed = !versionStatus || versionStatus === "editing" || versionStatus === "committed";
-  const canEditActive = cueEditAllowed && localEditableIds.has(activeListId ?? "");
+  const canEditActive = localEditableIds.has(activeListId ?? "");
   // Editing any cue requires an active list — prevents accidental edits with no context
   const canEditCue = useCallback((cue: Cue) =>
-    cueEditAllowed && cue.cueListId === activeListId && localEditableIds.has(cue.cueListId),
-  [activeListId, localEditableIds, cueEditAllowed]);
+    cue.cueListId === activeListId && localEditableIds.has(cue.cueListId),
+  [activeListId, localEditableIds]);
 
   // Phase 4: activate a cue list, showing access modal if not yet granted
   const handleActivateList = useCallback(async (listId: string | null) => {

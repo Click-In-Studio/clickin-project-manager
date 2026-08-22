@@ -15,10 +15,10 @@ export default async function ProductionScriptPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ v?: string; q?: string }>;
+  searchParams: Promise<{ q?: string }>;
 }) {
   const { id } = await params;
-  const { v, q } = await searchParams;
+  const { q } = await searchParams;
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
@@ -37,9 +37,6 @@ export default async function ProductionScriptPage({
     session.userId, id, access.permCtx.isAdmin || access.permCtx.isOwner,
   );
 
-  // Resolve initial version: URL param > cookie
-  const versionId = v ?? cookieStore.get(`ver_${id}`)?.value ?? null;
-
   return (
     <>
       <ScriptEditor
@@ -50,7 +47,6 @@ export default async function ProductionScriptPage({
         canEditSceneName={sceneFieldPerms.name}
         canEditRehearsalMark={access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(session.userId, id, "script", "*", "rehearsal_marks", "create")}
         canImport={access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(session.userId, id, "script", "*", "imports", "create")}
-        versionId={versionId}
         initialSearchQuery={q}
       />
       <PageActivationGate productionId={id} scope="script" />

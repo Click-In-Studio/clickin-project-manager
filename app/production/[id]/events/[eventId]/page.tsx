@@ -3,7 +3,7 @@ import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getProductionName, listProductionMembersWithRoles, listVersions } from "@/lib/db";
+import { getProductionPermissionContext, getProductionName, listProductionMembersWithRoles } from "@/lib/db";
 import {
   getProductionEvent,
   listScheduleItemsWithParticipants,
@@ -62,7 +62,7 @@ export default async function EventDetailPage({
 
   const eventPermCtx = await loadEventPermContext(session.userId, eventId);
 
-  const [scheduleItems, eventPeople, callTimes, techReqs, rawReports, departments, members, selfRole, versions] =
+  const [scheduleItems, eventPeople, callTimes, techReqs, rawReports, departments, members, selfRole] =
     await Promise.all([
       listScheduleItemsWithParticipants(eventId),
       listEventPeople(eventId),
@@ -72,7 +72,6 @@ export default async function EventDetailPage({
       listEventDepartments(productionId),
       listProductionMembersWithRoles(productionId),
       getSelfParticipantRole(eventId, session.userId),
-      listVersions(productionId),
     ]);
 
   // W5：默认报告懒建已移除（浏览即建会在文档树留足迹）——空态由
@@ -111,7 +110,6 @@ export default async function EventDetailPage({
       initialReports={reports}
       departments={departments}
       members={members}
-      versions={versions}
       canEdit={canEdit}
       canScheduleEdit={canScheduleEdit}
       canAssignPeople={canAssignPeople}
