@@ -1612,6 +1612,62 @@
       "default": "now()"
     }
   ],
+  "phase": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "dept_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "start_date",
+      "type": "date",
+      "nullable": false
+    },
+    {
+      "column": "end_date",
+      "type": "date",
+      "nullable": true
+    },
+    {
+      "column": "sort_order",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "phase_milestone": [
+    {
+      "column": "phase_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "milestone_id",
+      "type": "text",
+      "nullable": false
+    }
+  ],
   "production": [
     {
       "column": "id",
@@ -3391,14 +3447,14 @@
       "default": "now()"
     }
   ],
-  "task_milestone": [
+  "task_phase": [
     {
       "column": "task_id",
       "type": "text",
       "nullable": false
     },
     {
-      "column": "milestone_id",
+      "column": "phase_id",
       "type": "text",
       "nullable": false
     }

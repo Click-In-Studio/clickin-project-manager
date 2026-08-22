@@ -55,7 +55,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     presetMinutes?: number | null; departmentId?: string | null; groupId?: string | null;
     assignees?: { userId: string; name: string }[];
     startTime?: string | null; endTime?: string | null;
-    milestoneIds?: string[];
+    phaseIds?: string[];
   };
   const title = body.title?.trim();
   if (!title) return Response.json({ error: "标题不能为空" }, { status: 400 });
@@ -112,7 +112,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     assignees: body.assignees ?? [],
     startTime: body.startTime ?? null,
     endTime: body.endTime ?? null,
-    milestoneIds: body.milestoneIds ?? [],
+    phaseIds: body.phaseIds ?? [],
     createdBy: session.userId,
     createdVia: viaPoc ? "poc" : "explicit",
   });

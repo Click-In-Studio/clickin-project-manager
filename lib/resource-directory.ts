@@ -15,6 +15,7 @@ export const RESOURCE_DIRECTORY_QUERIES: Record<string, string> = {
   event: "SELECT id, COALESCE(title, id) AS label FROM production_event WHERE production_id = $1 ORDER BY created_at DESC",
   asset: "SELECT id, COALESCE(name, file_name) AS label FROM asset WHERE production_id = $1 ORDER BY created_at DESC",
   milestone: "SELECT id, COALESCE(name, id) AS label FROM milestone WHERE production_id = $1 ORDER BY end_date",
+  phase: "SELECT id, COALESCE(name, id) AS label FROM phase WHERE production_id = $1 ORDER BY start_date, sort_order",
   material: `SELECT id::text AS id, (code || ' ' || name) AS label FROM production_material
              WHERE production_id = $1 ORDER BY category, code`,
   // 权限键的 id 位指向预算科目——「只能看/管舞美那一档预算」是真实需求

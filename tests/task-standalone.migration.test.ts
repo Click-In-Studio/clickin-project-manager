@@ -12,7 +12,7 @@
  *   1. Schema    — event_tech_req family gone, task family present;
  *                  production_id NOT NULL / event_id nullable SET NULL /
  *                  start_time+end_time; schedule_item_id dropped;
- *                  task_milestone + task_dependency exist
+ *                  task_dependency exists（task_milestone 已由后续 phase 迁移退役）
  *   2. Integrity — no orphan production_id / join rows; no 'tech_req' or
  *                  'event_tech_req' vocabulary residue in grants tables
  *   3. Invariance — production_id backfilled from the original event;
@@ -46,13 +46,15 @@ describe("schema verification", () => {
         AND table_name IN ('event_tech_req', 'event_tech_req_item', 'event_tech_assignee')
     `);
     expect(gone).toHaveLength(0);
+    // task_milestone 后来被 migrate-drop-task-milestone.sql 退役（task 换轨挂 phase），
+    // 不再断言它存在——那属于 drop-task-milestone.migration.test.ts 的管辖。
     const { rows: present } = await getPool().query(`
       SELECT table_name FROM information_schema.tables
       WHERE table_schema = 'public'
         AND table_name IN ('task', 'task_schedule_item', 'task_assignee',
-                           'task_milestone', 'task_dependency')
+                           'task_dependency')
     `);
-    expect(present).toHaveLength(5);
+    expect(present).toHaveLength(4);
   });
 
   it("task.production_id is TEXT NOT NULL; event_id nullable", async () => {

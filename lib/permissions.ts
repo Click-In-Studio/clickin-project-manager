@@ -31,7 +31,7 @@ export type PermissionContext = {
 
 export const ADMIN_PANEL_NODE_PREFIXES: readonly string[] = [
   "node:member/", "node:role/", "node:org_dept/",
-  "node:milestone/", "node:announcement/", "node:*",
+  "node:milestone/", "node:phase/", "node:announcement/", "node:*",
 ];
 
 export function hasAdminPanelEligibility(memberPermissions: Set<string> | null): boolean {

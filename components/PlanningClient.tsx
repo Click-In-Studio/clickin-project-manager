@@ -2,9 +2,12 @@
 
 /**
  * 计划与日程（v3 原型 planning 三视图）：
- *   ① 项目日历 —— 月历统一展示事件、任务（未绑定 event 的）与里程碑
- *   ② 任务甘特 —— 任务时间条（有效起止：自身→schedule→event 解析链），可拖拽改期
+ *   ① 项目日历 —— 月历统一展示事件、任务（未绑定 event 的）、里程碑与阶段
+ *   ② 任务甘特 —— 阶段背景带 + 任务时间条（有效起止：自身→schedule→event 解析链），可拖拽改期
  *   ③ 执行日程 —— 按事件的多部门 rundown（schedule 条目 + 绑定 event 未绑 schedule 的任务）
+ *
+ * 阶段（phase）的管理面也收在本面板（管理阶段弹窗）：创建门 = phase/*@create ∨
+ * 部门 POC（policy 开关，活引用判定），与 API 同门；此处布尔仅控 UI 显隐。
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -16,6 +19,26 @@ import type { ProductionEvent, EventScheduleItemWithParticipants, EventTechReq }
 
 type PlanningMilestone = { id: string; name: string; endDate: string };
 type PlanningDept = { id: string; name: string };
+
+export type PlanningPhase = {
+  id: string;
+  name: string;
+  /** null = production-level */
+  deptId: string | null;
+  deptName: string | null;
+  startDate: string;
+  /** null = 尾巴未定（日历持续覆盖；甘特画到轴右缘渐隐） */
+  endDate: string | null;
+  milestoneIds: string[];
+};
+
+type PhasePerm = {
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  pocDeptIds: string[];
+  deptPocEnabled: boolean;
+};
 
 /** 三视图共用的任务形状（server page 按 task/*@view 全量或"与我相关"降级投喂）。 */
 export type PlanningTask = {
@@ -40,8 +63,34 @@ type Props = {
   events: ProductionEvent[];
   tasks: PlanningTask[];
   milestones: PlanningMilestone[];
+  phases: PlanningPhase[];
   departments: PlanningDept[];
+  /** 阶段归属候选（仅 kind='dept'——用户组不该有阶段） */
+  deptOptions: PlanningDept[];
+  phasePerm: PhasePerm;
 };
+
+// 阶段条配色（按列表序循环；同一 phase 在日历/甘特同色）
+const PHASE_TONES = [
+  { bg: "rgba(47,102,112,.16)", solid: "#2f6670" },
+  { bg: "rgba(176,106,59,.16)", solid: "#b06a3b" },
+  { bg: "rgba(83,80,120,.16)", solid: "#535078" },
+  { bg: "rgba(95,112,64,.16)", solid: "#5f7040" },
+  { bg: "rgba(138,68,52,.16)", solid: "#8a4434" },
+];
+
+function phaseTone(index: number) {
+  return PHASE_TONES[((index % PHASE_TONES.length) + PHASE_TONES.length) % PHASE_TONES.length];
+}
+
+function phaseRangeLabel(p: PlanningPhase): string {
+  return `${p.startDate} ~ ${p.endDate ?? "未定"}`;
+}
+
+/** 该日期（YYYY-MM-DD）是否落在阶段区间内；开放尾 = 从 start 起持续覆盖 */
+function phaseCoversDate(p: PlanningPhase, date: string): boolean {
+  return date >= p.startDate && (p.endDate === null || date <= p.endDate);
+}
 
 const TASK_STATUS_LABELS: Record<string, string> = {
   awaiting: "待确认", pending: "待处理", in_progress: "进行中", done: "完成",
@@ -58,7 +107,7 @@ function hhmm(iso: string): string {
 
 // ─── 项目日历 ─────────────────────────────────────────────────────────────────
 
-function CalendarView({ productionId, events, tasks, milestones }: Props) {
+function CalendarView({ productionId, events, tasks, milestones, phases }: Props) {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());  // 0-based
@@ -120,7 +169,7 @@ function CalendarView({ productionId, events, tasks, milestones }: Props) {
             项目日历
           </h2>
           <small style={{ display: "block", marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
-            月历统一展示事件、任务与里程碑；点击条目直接打开。
+            月历统一展示事件、任务、里程碑与阶段；点击条目直接打开。
           </small>
         </div>
         {/* 月导航 + legend（原型 legend 右上） */}
@@ -144,6 +193,9 @@ function CalendarView({ productionId, events, tasks, milestones }: Props) {
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <i style={{ width: 7, height: 7, borderRadius: 2, background: "var(--ink)", transform: "rotate(45deg)" }} />里程碑
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <i style={{ width: 10, height: 4, borderRadius: 2, background: PHASE_TONES[0].solid, opacity: .55 }} />阶段
             </span>
           </div>
         </div>
@@ -179,6 +231,21 @@ function CalendarView({ productionId, events, tasks, milestones }: Props) {
               }}
             >
               <b style={{ fontSize: 9, color: "var(--muted)" }}>{d.getDate()}</b>
+              {/* 阶段覆盖：起始日显示名称 chip，其余覆盖日显示细色条延续 */}
+              {phases.map((p, pi) => {
+                if (!phaseCoversDate(p, date)) return null;
+                const tone = phaseTone(pi);
+                const label = p.deptName ? `${p.name}（${p.deptName}）` : p.name;
+                return date === p.startDate ? (
+                  <span key={p.id} title={`${label} · ${phaseRangeLabel(p)}`}
+                    style={{ ...CAL_CHIP, background: tone.bg, color: tone.solid, fontWeight: 700 }}>
+                    ▸ {label}
+                  </span>
+                ) : (
+                  <i key={p.id} title={`${label} · ${phaseRangeLabel(p)}`}
+                    style={{ height: 3, borderRadius: 2, background: tone.solid, opacity: .4, flexShrink: 0 }} />
+                );
+              })}
               {day?.milestones.map(m => (
                 <span key={m.id} title={m.name} style={{ ...CAL_CHIP, background: "var(--ink)", color: "#fff" }}>
                   ◆ {m.name}
@@ -253,7 +320,7 @@ function addDaysIso(iso: string, days: number): string {
   return new Date(new Date(iso).getTime() + days * DAY_MS).toISOString();
 }
 
-function TaskGanttView({ productionId, tasks, milestones }: Props) {
+function TaskGanttView({ productionId, tasks, milestones, phases }: Props) {
   const router = useRouter();
   const [scale, setScale] = useState<GanttScale>("month");
   const [localTasks, setLocalTasks] = useState<PlanningTask[]>(tasks);
@@ -266,13 +333,14 @@ function TaskGanttView({ productionId, tasks, milestones }: Props) {
     [localTasks],
   );
 
-  // 轴锚点：最早内容与今天取早者，按粒度取整；跨度固定
+  // 轴锚点：最早内容（任务∪阶段）与今天取早者，按粒度取整；跨度固定。
+  // 开放尾阶段只贡献 start，不拉长轴。
   const { axisStart, axisDays, labels } = useMemo(() => {
     const today = new Date();
-    const earliest = timedTasks[0]?.effectiveStartTime
-      ? new Date(timedTasks[0].effectiveStartTime)
-      : today;
-    const base = earliest < today ? earliest : today;
+    const candidates: Date[] = [today];
+    if (timedTasks[0]?.effectiveStartTime) candidates.push(new Date(timedTasks[0].effectiveStartTime));
+    for (const p of phases) candidates.push(new Date(`${p.startDate}T00:00:00`));
+    const base = candidates.reduce((min, d) => (d < min ? d : min), today);
     if (scale === "day") {
       const start = floorToMonday(base);
       return {
@@ -310,7 +378,7 @@ function TaskGanttView({ productionId, tasks, milestones }: Props) {
       axisStart: start, axisDays: 365,
       labels: Array.from({ length: 12 }, (_, i) => `${i + 1} 月`),
     };
-  }, [scale, timedTasks]);
+  }, [scale, timedTasks, phases]);
 
   const axisEndMs = axisStart.getTime() + axisDays * DAY_MS;
   const pct = (ms: number) => Math.max(0, Math.min(100, (ms - axisStart.getTime()) / (axisEndMs - axisStart.getTime()) * 100));
@@ -437,9 +505,9 @@ function TaskGanttView({ productionId, tasks, milestones }: Props) {
         </div>
       </div>
 
-      {timedTasks.length === 0 ? (
+      {timedTasks.length === 0 && phases.length === 0 ? (
         <p style={{ margin: 0, padding: "36px 0", textAlign: "center", fontSize: 12, color: "var(--muted)" }}>
-          暂无带时间的任务。在任务上设置起止时间，或绑定带时间的日程/事件后此处生成时间条。
+          暂无阶段或带时间的任务。在任务上设置起止时间，或绑定带时间的日程/事件后此处生成时间条。
         </p>
       ) : (
         <div style={{ overflowX: "auto" }}>
@@ -465,6 +533,56 @@ function TaskGanttView({ productionId, tasks, milestones }: Props) {
                 })}
               </div>
             </div>
+            {/* 阶段背景带行（在任务行上方；开放尾渐隐到轴右缘） */}
+            {phases.map((p, pi) => {
+              const tone = phaseTone(pi);
+              const sMs = new Date(`${p.startDate}T00:00:00`).getTime();
+              const eMs = p.endDate ? new Date(`${p.endDate}T23:59:59`).getTime() : null;
+              const outOfAxis = sMs >= axisEndMs || (eMs !== null && eMs < axisStart.getTime());
+              const left = pct(sMs);
+              const right = eMs === null ? 100 : pct(eMs);
+              const width = Math.max(right - left, 1);
+              const open = eMs === null;
+              const label = p.deptName ? `${p.name}（${p.deptName}）` : p.name;
+              return (
+                <div key={p.id} style={{ display: "grid", gridTemplateColumns: "200px 1fr", minHeight: 34, borderTop: "1px solid var(--line)" }}>
+                  <div style={{ padding: "6px 10px 6px 0", minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center", gap: 2 }}>
+                    <b style={{ fontSize: 11, color: tone.solid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {p.name}
+                    </b>
+                    <small style={{ fontSize: 9, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {[p.deptName ?? "全项目", `阶段`].join(" · ")}
+                    </small>
+                  </div>
+                  <div style={{
+                    position: "relative", minHeight: 34,
+                    backgroundImage: "linear-gradient(to right, var(--line) 1px, transparent 1px)",
+                    backgroundSize: `${100 / labels.length}% 100%`,
+                  }}>
+                    {!outOfAxis && (
+                      <div
+                        title={`${label} · ${phaseRangeLabel(p)}`}
+                        style={{
+                          position: "absolute", top: 7, height: 20, left: `${left}%`, width: `${width}%`,
+                          borderRadius: 5,
+                          background: open
+                            ? `linear-gradient(to right, ${tone.bg} 65%, transparent)`
+                            : tone.bg,
+                          borderLeft: `2px solid ${tone.solid}`,
+                          borderRight: open ? "none" : `2px solid ${tone.solid}`,
+                          color: tone.solid, display: "flex", alignItems: "center",
+                          padding: "0 6px", fontSize: 8, fontWeight: 700,
+                          overflow: "hidden", whiteSpace: "nowrap",
+                        }}
+                      >
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+                        {open && <em style={{ marginLeft: 6, fontStyle: "normal", fontSize: 7, opacity: .7 }}>进行中</em>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
             {/* 任务行 */}
             {timedTasks.map(t => {
               const startMs = new Date(t.effectiveStartTime!).getTime();
@@ -836,18 +954,287 @@ const CONTROL_SELECT: React.CSSProperties = {
   outline: 0, fontSize: 10, fontWeight: 700,
 };
 
+// ─── 阶段管理弹窗（创建/编辑/删除 + milestone 绑定；与 phases API 同门）───────
+
+function PhaseManageModal({
+  productionId, phases, milestones, deptOptions, perm, onClose,
+}: {
+  productionId: string;
+  phases: PlanningPhase[];
+  milestones: PlanningMilestone[];
+  deptOptions: PlanningDept[];
+  perm: PhasePerm;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const today = ymd(new Date());
+
+  // null = 未在编辑；"new" = 创建表单；否则为 phase id
+  const [editing, setEditing] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [deptId, setDeptId] = useState("");
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState("");
+  const [milestoneIds, setMilestoneIds] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const pocOnly = !perm.canCreate;
+  // 创建时的归属候选：有 phase 键 ⇒ 全项目 + 任意部门；仅 POC 路径 ⇒ 只有自己 POC 的部门
+  const createDeptChoices = pocOnly
+    ? deptOptions.filter(d => perm.pocDeptIds.includes(d.id))
+    : deptOptions;
+
+  const canEditPhase = (p: PlanningPhase) =>
+    perm.canEdit || (p.deptId !== null && perm.deptPocEnabled && perm.pocDeptIds.includes(p.deptId));
+  const canDeletePhase = (p: PlanningPhase) =>
+    perm.canDelete || (p.deptId !== null && perm.deptPocEnabled && perm.pocDeptIds.includes(p.deptId));
+  const canCreateAny = perm.canCreate || (perm.deptPocEnabled && createDeptChoices.length > 0);
+
+  function startCreate() {
+    setEditing("new");
+    setName("");
+    setDeptId(pocOnly ? (createDeptChoices[0]?.id ?? "") : "");
+    setStartDate(today);
+    setEndDate("");
+    setMilestoneIds(new Set());
+    setError(null);
+  }
+
+  function startEdit(p: PlanningPhase) {
+    setEditing(p.id);
+    setName(p.name);
+    setDeptId(p.deptId ?? "");
+    setStartDate(p.startDate);
+    setEndDate(p.endDate ?? "");
+    setMilestoneIds(new Set(p.milestoneIds));
+    setError(null);
+  }
+
+  async function submit() {
+    if (!name.trim() || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const isNew = editing === "new";
+      const url = isNew
+        ? `${BASE_PATH}/api/production/${productionId}/phases`
+        : `${BASE_PATH}/api/production/${productionId}/phases/${editing}`;
+      const payload: Record<string, unknown> = {
+        name: name.trim(),
+        startDate: startDate || undefined,
+        endDate: endDate || null,
+        milestoneIds: [...milestoneIds],
+      };
+      if (isNew) payload.deptId = deptId || null;  // 归属只在创建时定（编辑面不换轨）
+      const res = await fetch(url, {
+        method: isNew ? "POST" : "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { setError(data?.error ?? "保存失败"); return; }
+      setEditing(null);
+      router.refresh();
+    } catch {
+      setError("网络错误，保存失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(p: PlanningPhase) {
+    if (!confirm(`删除阶段「${p.name}」？绑定的任务与里程碑不受影响。`)) return;
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/phases/${p.id}`, { method: "DELETE" });
+    if (res.ok) router.refresh();
+    else {
+      const data = await res.json().catch(() => null);
+      alert(data?.error ?? "删除失败");
+    }
+  }
+
+  const formBlock = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 14, borderRadius: 10, border: "1px solid var(--line)", background: "var(--paper)" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input
+          value={name}
+          onChange={e => setName(e.target.value)}
+          autoFocus
+          placeholder="阶段名称，例如「排练期」「装台与技排」"
+          style={{ flex: 1, minWidth: 150, fontSize: 12, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", outline: "none" }}
+        />
+        {editing === "new" && (
+          <select
+            value={deptId}
+            onChange={e => setDeptId(e.target.value)}
+            style={{ fontSize: 12, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", outline: "none" }}
+          >
+            {!pocOnly && <option value="">全项目</option>}
+            {createDeptChoices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--muted)" }}>
+          开始
+          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+            style={{ fontSize: 12, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", outline: "none" }} />
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--muted)" }}>
+          结束
+          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+            style={{ fontSize: 12, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", outline: "none" }} />
+          <span style={{ fontSize: 10 }}>留空 = 未定</span>
+        </label>
+      </div>
+      {milestones.length > 0 && (
+        <div>
+          <span style={{ display: "block", marginBottom: 5, fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)" }}>
+            关联里程碑（可多选）
+          </span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {milestones.map(m => {
+              const active = milestoneIds.has(m.id);
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setMilestoneIds(prev => {
+                    const next = new Set(prev);
+                    if (next.has(m.id)) next.delete(m.id); else next.add(m.id);
+                    return next;
+                  })}
+                  style={{
+                    border: `1px solid ${active ? "var(--ink)" : "var(--line)"}`,
+                    borderRadius: 999, padding: "4px 10px", fontSize: 10, fontWeight: 700, cursor: "pointer",
+                    background: active ? "var(--ink)" : "var(--surface)",
+                    color: active ? "#fff" : "var(--muted)",
+                  }}
+                >
+                  ◆ {m.name} · {m.endDate.slice(5, 10).replace("-", "/")}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {error && <p style={{ margin: 0, fontSize: 11, color: "var(--danger)" }}>{error}</p>}
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button onClick={() => setEditing(null)} style={{ fontSize: 12, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: "6px 10px" }}>取消</button>
+        <button
+          onClick={submit}
+          disabled={!name.trim() || !startDate || saving}
+          style={{
+            fontSize: 12, fontWeight: 700, padding: "6px 16px", borderRadius: 8, border: "none",
+            background: name.trim() ? "var(--ink)" : "var(--line)",
+            color: name.trim() ? "#fff" : "var(--muted)",
+            cursor: name.trim() ? "pointer" : "default",
+          }}
+        >
+          {saving ? "保存中…" : editing === "new" ? "创建" : "保存"}
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div
+      role="presentation"
+      onMouseDown={onClose}
+      style={{ position: "fixed", zIndex: 80, inset: 0, background: "rgba(18,28,27,.65)", display: "grid", placeItems: "center", padding: 20 }}
+    >
+      <div
+        role="dialog"
+        aria-label="管理阶段"
+        onMouseDown={e => e.stopPropagation()}
+        style={{ width: "min(640px, 100%)", maxHeight: "84vh", overflowY: "auto", background: "var(--surface)", borderRadius: 13, border: "1px solid var(--line)", padding: 22, display: "flex", flexDirection: "column", gap: 14 }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div>
+            <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>Phases</p>
+            <h2 style={{ margin: "4px 0 0", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 18, fontWeight: 500, color: "var(--ink)" }}>管理阶段</h2>
+          </div>
+          <button onClick={onClose} aria-label="关闭" style={{ marginLeft: "auto", border: 0, background: "none", color: "var(--muted)", fontSize: 16, cursor: "pointer" }}>✕</button>
+        </div>
+
+        {editing === "new" && formBlock}
+        {editing === null && canCreateAny && (
+          <button
+            onClick={startCreate}
+            style={{ alignSelf: "flex-start", fontSize: 12, fontWeight: 700, padding: "7px 14px", borderRadius: 8, border: "1px dashed var(--line)", background: "var(--paper)", color: "var(--ink)", cursor: "pointer" }}
+          >
+            ＋ 新增阶段
+          </button>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {phases.length === 0 && editing !== "new" && (
+            <p style={{ margin: 0, padding: "24px 0", textAlign: "center", fontSize: 12, color: "var(--muted)" }}>
+              暂无阶段。{canCreateAny ? "点击「新增阶段」创建第一个项目大阶段。" : ""}
+            </p>
+          )}
+          {phases.map((p, pi) => {
+            const tone = phaseTone(pi);
+            if (editing === p.id) return <div key={p.id}>{formBlock}</div>;
+            return (
+              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--paper)" }}>
+                <i style={{ width: 10, height: 10, borderRadius: 3, background: tone.solid, opacity: .7, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <b style={{ display: "block", fontSize: 12, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {p.name}
+                    <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 400, color: "var(--muted)" }}>{p.deptName ?? "全项目"}</span>
+                  </b>
+                  <small style={{ fontSize: 10, color: "var(--muted)" }}>
+                    {phaseRangeLabel(p)}
+                    {p.milestoneIds.length > 0 && ` · ◆ ${p.milestoneIds.length} 个里程碑`}
+                  </small>
+                </div>
+                {canEditPhase(p) && (
+                  <button onClick={() => startEdit(p)} style={{ fontSize: 11, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: "4px 6px" }}>编辑</button>
+                )}
+                {canDeletePhase(p) && (
+                  <button onClick={() => remove(p)} style={{ fontSize: 11, color: "var(--danger)", background: "none", border: "none", cursor: "pointer", padding: "4px 6px" }}>删除</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── 主组件：三视图 tab ────────────────────────────────────────────────────────
 
 export default function PlanningClient(props: Props) {
   const [mode, setMode] = useState<"calendar" | "gantt" | "timetable">("calendar");
+  const [phaseModalOpen, setPhaseModalOpen] = useState(false);
+  const { phasePerm } = props;
+  const showPhaseManage =
+    phasePerm.canCreate || phasePerm.canEdit || phasePerm.canDelete
+    || (phasePerm.deptPocEnabled && phasePerm.pocDeptIds.length > 0);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {showPhaseManage && (
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button
+            onClick={() => setPhaseModalOpen(true)}
+            style={{
+              fontSize: 11, fontWeight: 700, padding: "7px 14px", borderRadius: 8,
+              border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", cursor: "pointer",
+            }}
+          >
+            管理阶段（{props.phases.length}）
+          </button>
+        </div>
+      )}
       {/* viewTabs（原型：三等宽撑满、62px 卡、选中 ink 反色） */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
         {([
-          ["calendar", "项目日历", "事件、任务与里程碑"],
-          ["gantt", "任务甘特", "任务周期与里程碑标记"],
+          ["calendar", "项目日历", "事件、任务、里程碑与阶段"],
+          ["gantt", "任务甘特", "阶段背景带与任务周期"],
           ["timetable", "执行日程", "按日期查看、导入与编辑"],
         ] as const).map(([id, label, hint]) => (
           <button
@@ -870,6 +1257,17 @@ export default function PlanningClient(props: Props) {
       {mode === "calendar" && <CalendarView {...props} />}
       {mode === "gantt" && <TaskGanttView {...props} />}
       {mode === "timetable" && <TimetableView {...props} />}
+
+      {phaseModalOpen && (
+        <PhaseManageModal
+          productionId={props.productionId}
+          phases={props.phases}
+          milestones={props.milestones}
+          deptOptions={props.deptOptions}
+          perm={phasePerm}
+          onClose={() => setPhaseModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
