@@ -107,9 +107,11 @@ describe("phase 创建门", () => {
     expect(res.status).toBe(403);
   });
 
-  it("结束早于开始 → 400；用户组作归属 → 400", async () => {
+  it("结束早于开始 → 400；用户组作归属 → 400；畸形 deptId → 400 而非 500", async () => {
     expect((await ownerCreate({ name: "倒置", startDate: "2027-02-01", endDate: "2027-01-01" })).status).toBe(400);
     expect((await ownerCreate({ name: "组阶段", deptId: groupId })).status).toBe(400);
+    // review 意见：裸 ::uuid cast 遇畸形输入会 PG 抛错变 500——先验格式回 400
+    expect((await ownerCreate({ name: "畸形归属", deptId: "not-a-uuid" })).status).toBe(400);
   });
 
   it("部门 POC（policy 默认 ON）：可建自己部门的；不可建 production-level 或别的部门的", async () => {
@@ -180,11 +182,20 @@ describe("phase 读面与改删门", () => {
 // ── 边表不变量 ────────────────────────────────────────────────────────────────
 
 describe("phase_milestone / task_phase 边", () => {
-  it("phase↔milestone 绑定：跨剧组 milestone id 静默丢弃", async () => {
+  it("phase↔milestone 绑定：跨剧组 milestone id 静默丢弃（创建同事务携带 + 独立替换两条路径）", async () => {
     const ms = await createMilestone(`ms${shortId()}`, prodId, "首演", "2027-06-01", 0);
     const foreign = await createMilestone(`ms${shortId()}`, otherProdId, "别家首演", "2027-06-01", 0);
 
-    const { phase } = await ownerCreate({ name: "演出季", startDate: "2027-05-01" });
+    // 路径一：创建时携带（createPhase 单事务落本体+边）
+    const { status, phase } = await ownerCreate({
+      name: "演出季", startDate: "2027-05-01", milestoneIds: [ms.id, foreign.id],
+    });
+    expect(status).toBe(201);
+    expect((phase as unknown as { milestoneIds: string[] }).milestoneIds).toEqual([ms.id]);
+
+    // 路径二：独立整体替换
+    await setPhaseMilestones(phase!.id, prodId, [foreign.id]);
+    expect((await getPhase(phase!.id))!.milestoneIds).toEqual([]);
     await setPhaseMilestones(phase!.id, prodId, [ms.id, foreign.id]);
     expect((await getPhase(phase!.id))!.milestoneIds).toEqual([ms.id]);
   });

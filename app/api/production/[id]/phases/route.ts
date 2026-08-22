@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
-import { toActor, hasEffectiveGrant } from "@/lib/grant-check";
+import { toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { listPhases, createPhase, setPhaseMilestones, getPhase } from "@/lib/phase-db";
-import { isPolicyOn } from "@/lib/policy-db";
+import { listPhases, createPhase } from "@/lib/phase-db";
+import { canManagePhaseScope } from "@/lib/phase-perm";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -12,9 +12,12 @@ let _seq = 0;
 const uid = () => `ph${Date.now().toString(36)}${(++_seq).toString(36)}`;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// 先验格式再进 SQL：裸 $1::uuid 遇畸形输入会让 PG 抛错变 500，而这里该回 400
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** deptId 合法性：属于本 production 且 kind='dept'（用户组不该有阶段）。 */
 async function isDeptOfProduction(deptId: string, productionId: string): Promise<boolean> {
+  if (!UUID_RE.test(deptId)) return false;
   const res = await getPool().query(
     "SELECT 1 FROM production_dept WHERE id = $1::uuid AND production_id = $2 AND kind = 'dept'",
     [deptId, productionId],
@@ -68,32 +71,24 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
   const deptId = body.deptId ?? null;
 
-  // 门：phase/*@create（制作人经 owner 旁路）∨ 部门 POC 建自己部门的
-  // dept-level phase（policy 开关，形状 C 活引用判定——换 POC 自动跟随）
-  const hasGrantPath = await hasEffectiveGrant(
-    toActor(session, permCtx), productionId, "phase", "*", "*", "create",
-  );
-  if (!hasGrantPath) {
-    const pocPath = deptId !== null
-      && permCtx.pocDeptIds.includes(deptId)
-      && await isPolicyOn(productionId, "policy.phase_dept_poc_create");
-    if (!pocPath) return Response.json({ error: "无权操作" }, { status: 403 });
+  if (!await canManagePhaseScope(toActor(session, permCtx), permCtx.pocDeptIds, productionId, deptId, "create")) {
+    return Response.json({ error: "无权操作" }, { status: 403 });
   }
 
   if (deptId !== null && !await isDeptOfProduction(deptId, productionId)) {
     return Response.json({ error: "部门不存在或不是部门类型" }, { status: 400 });
   }
 
+  // 本体与 milestone 边同事务落库（phase-db 内 BEGIN/COMMIT，边失败整体回滚）
   const phase = await createPhase(uid(), productionId, {
     name: body.name.trim(),
     startDate,
     endDate,
     deptId,
     sortOrder: body.sortOrder ?? 0,
+    milestoneIds: Array.isArray(body.milestoneIds)
+      ? body.milestoneIds.filter(x => typeof x === "string")
+      : undefined,
   });
-  if (Array.isArray(body.milestoneIds) && body.milestoneIds.length > 0) {
-    await setPhaseMilestones(phase.id, productionId, body.milestoneIds.filter(x => typeof x === "string"));
-    return Response.json({ phase: await getPhase(phase.id) }, { status: 201 });
-  }
   return Response.json({ phase }, { status: 201 });
 }

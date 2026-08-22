@@ -5,6 +5,7 @@
  * task ↔ phase 多对多（task_phase，读写在 lib/event-db.ts 的 task 域）。
  * 可见性全员；dept_id 只表达归属与管理权（NULL = production-level）。
  */
+import type { PoolClient } from "pg";
 import { getPool } from "./pg";
 
 export type Phase = {
@@ -74,6 +75,24 @@ export async function getPhase(id: string): Promise<Phase | null> {
   return res.rows[0] ? mapPhaseRow(res.rows[0]) : null;
 }
 
+/** 事务内整体替换 milestone 边。应用层不变量：milestone 与 phase 同 production（跨剧组 id 过滤丢弃）。 */
+async function replaceMilestoneEdges(
+  client: PoolClient, phaseId: string, productionId: string, milestoneIds: string[],
+): Promise<void> {
+  await client.query("DELETE FROM phase_milestone WHERE phase_id = $1", [phaseId]);
+  const unique = [...new Set(milestoneIds)];
+  if (unique.length > 0) {
+    await client.query(
+      `INSERT INTO phase_milestone (phase_id, milestone_id)
+       SELECT $1, m.id FROM milestone m
+       WHERE m.id = ANY($2::text[]) AND m.production_id = $3
+       ON CONFLICT DO NOTHING`,
+      [phaseId, unique, productionId],
+    );
+  }
+}
+
+/** 创建 phase；milestoneIds 一并给出时本体与边同事务落库（边失败则整体回滚，不留无绑定残行）。 */
 export async function createPhase(
   id: string,
   productionId: string,
@@ -83,27 +102,44 @@ export async function createPhase(
     endDate?: string | null;
     deptId?: string | null;
     sortOrder?: number;
+    milestoneIds?: string[];
   },
 ): Promise<Phase> {
-  await getPool().query(
-    `INSERT INTO phase (id, production_id, dept_id, name, start_date, end_date, sort_order)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [id, productionId, fields.deptId ?? null, fields.name,
-     fields.startDate, fields.endDate ?? null, fields.sortOrder ?? 0],
-  );
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO phase (id, production_id, dept_id, name, start_date, end_date, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, productionId, fields.deptId ?? null, fields.name,
+       fields.startDate, fields.endDate ?? null, fields.sortOrder ?? 0],
+    );
+    if (fields.milestoneIds !== undefined && fields.milestoneIds.length > 0) {
+      await replaceMilestoneEdges(client, id, productionId, fields.milestoneIds);
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
   const created = await getPhase(id);
   if (!created) throw new Error(`phase not found after create: ${id}`);
   return created;
 }
 
+/** 更新 phase；milestoneIds !== undefined 时同事务整体替换绑定。 */
 export async function updatePhase(
   id: string,
+  productionId: string,
   fields: {
     name?: string;
     startDate?: string;
     /** null = 清空（尾巴未定） */
     endDate?: string | null;
     sortOrder?: number;
+    milestoneIds?: string[];
   },
 ): Promise<void> {
   const sets: string[] = [];
@@ -112,33 +148,40 @@ export async function updatePhase(
   if (fields.startDate !== undefined) { sets.push(`start_date = $${vals.push(fields.startDate)}`); }
   if (fields.endDate !== undefined) { sets.push(`end_date = $${vals.push(fields.endDate)}`); }
   if (fields.sortOrder !== undefined) { sets.push(`sort_order = $${vals.push(fields.sortOrder)}`); }
-  if (!sets.length) return;
-  vals.push(id);
-  await getPool().query(`UPDATE phase SET ${sets.join(", ")} WHERE id = $${vals.length}`, vals);
+  if (!sets.length && fields.milestoneIds === undefined) return;
+
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    if (sets.length) {
+      await client.query(
+        `UPDATE phase SET ${sets.join(", ")} WHERE id = $${vals.push(id)}`, vals,
+      );
+    }
+    if (fields.milestoneIds !== undefined) {
+      await replaceMilestoneEdges(client, id, productionId, fields.milestoneIds);
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function deletePhase(id: string): Promise<void> {
   await getPool().query("DELETE FROM phase WHERE id = $1", [id]);
 }
 
-/** 整体替换 milestone 绑定。应用层不变量：milestone 与 phase 同 production（跨剧组 id 过滤丢弃）。 */
+/** 独立入口的整体替换（自成事务）。路由的创建/更新走 createPhase/updatePhase 的同事务路径。 */
 export async function setPhaseMilestones(
   phaseId: string, productionId: string, milestoneIds: string[],
 ): Promise<void> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    await client.query("DELETE FROM phase_milestone WHERE phase_id = $1", [phaseId]);
-    const unique = [...new Set(milestoneIds)];
-    if (unique.length > 0) {
-      await client.query(
-        `INSERT INTO phase_milestone (phase_id, milestone_id)
-         SELECT $1, m.id FROM milestone m
-         WHERE m.id = ANY($2::text[]) AND m.production_id = $3
-         ON CONFLICT DO NOTHING`,
-        [phaseId, unique, productionId],
-      );
-    }
+    await replaceMilestoneEdges(client, phaseId, productionId, milestoneIds);
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
