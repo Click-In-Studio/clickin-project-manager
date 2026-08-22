@@ -8,6 +8,7 @@ import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasGrant } from "@/lib/grant-check";
 import { diffState } from "@/lib/script-ops";
 import { insertHierarchyMarker, projectMarkers } from "@/lib/script-marker-domain";
+import { rejectNonHeadWrite } from "@/lib/head-version";
 
 const createId = () => crypto.randomUUID();
 
@@ -56,6 +57,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
   const body = await req.json();
+  const nonHead = await rejectNonHeadWrite(id, typeof body.versionId === "string" ? body.versionId : null);
+  if (nonHead) return nonHead;
   const resolved = await resolveProductionVersion(id, body.versionId);
   if (resolved.error) return resolved.error;
   if (resolved.version.status !== "editing") {

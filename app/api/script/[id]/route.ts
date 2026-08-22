@@ -4,6 +4,7 @@ import { patchAffectsMarkerProjection, type ScriptPatch, requiredPermissions } f
 import { hasGrant } from "@/lib/grant-check";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSession } from "@/lib/session";
+import { rejectNonHeadWrite } from "@/lib/head-version";
 import {
   getProductionPermissionContext, getActiveVersionId, getVersion,
   loadProduction, applyPatchToDB,
@@ -52,6 +53,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
     return Response.json({ error: "无权访问该剧本" }, { status: 403 });
   }
 
+  const nonHead = await rejectNonHeadWrite(id, req.nextUrl.searchParams.get("v"));
+  if (nonHead) return nonHead;
   const versionId = await resolveVersion(req, id);
   if (!versionId) return Response.json({ error: "无可用版本" }, { status: 404 });
 

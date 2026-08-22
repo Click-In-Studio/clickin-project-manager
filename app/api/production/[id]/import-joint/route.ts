@@ -5,6 +5,7 @@ import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { getProductionPermissionContext, getVersion, getActiveVersionId } from "@/lib/db";
+import { rejectNonHeadWrite } from "@/lib/head-version";
 import type { JointImportMarker, JointImportMappingRow, JointImportPreview, SceneColMap, ScriptColMap } from "@/lib/import/types";
 
 const SCENE_MARKER_COLLATOR = new Intl.Collator("zh-Hans-CN", { numeric: true, sensitivity: "base" });
@@ -54,6 +55,8 @@ async function resolveImportVersionId(req: NextRequest, productionId: string): P
   if (ver.status !== "editing") {
     return Response.json({ error: "只能向编辑中的版本导入数据" }, { status: 400 });
   }
+  const nonHead = await rejectNonHeadWrite(productionId, versionIdParam);
+  if (nonHead) return nonHead;
   return versionIdParam;
 }
 

@@ -54,6 +54,53 @@ export async function cleanupProduction(prodId: string): Promise<void> {
   await deleteProduction(prodId);
 }
 
+// ── Legacy multi-version state ────────────────────────────────────────────────
+
+/**
+ * 模拟「版本退役 Phase B」之前的遗留多版本数据：从 fromVersionId 复制出一个
+ * 新的活跃版本（共享 snapshot / cue revision，ref_count 变为 2+），旧版本转为
+ * committed 只读历史。生产代码已不再有制造这种状态的入口——这个工厂用裸 SQL
+ * 复刻老 createVersion 的复制语义，专供 CoW（历史只读保护）分支的测试。
+ */
+export async function makeLegacyVersion(
+  prodId: string,
+  fromVersionId: string,
+  name = "遗留版本",
+): Promise<string> {
+  const pool = getPool();
+  const newVersionId = `ver_${faker.string.alphanumeric(10).toLowerCase()}`;
+  await pool.query("UPDATE version SET status = 'committed' WHERE id = $1", [fromVersionId]);
+  await pool.query(
+    `INSERT INTO version (id, production_id, name, parent_version_id, status, created_at, script_config, marker_structure_revision)
+     SELECT $1, $2, $3, $4, 'editing', now(), COALESCE(script_config, '{}'::jsonb), marker_structure_revision
+     FROM version WHERE id = $4`,
+    [newVersionId, prodId, name, fromVersionId],
+  );
+  await pool.query(
+    "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) SELECT snapshot_id, $1, block_id, sort_key FROM script_version WHERE version_id = $2",
+    [newVersionId, fromVersionId],
+  );
+  await pool.query(
+    "INSERT INTO cue_version (revision_id, version_id, cue_id) SELECT revision_id, $1, cue_id FROM cue_version WHERE version_id = $2",
+    [newVersionId, fromVersionId],
+  );
+  await pool.query(
+    `INSERT INTO scene_version (scene_id, version_id, name, sort_order, parent_id,
+                                synopsis, action_line, music, stage_notes, expected_duration)
+     SELECT scene_id, $1, name, sort_order, parent_id,
+            synopsis, action_line, music, stage_notes, expected_duration
+     FROM scene_version WHERE version_id = $2`,
+    [newVersionId, fromVersionId],
+  );
+  await pool.query(
+    `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate, gender, biography, role_type)
+     SELECT character_id, $1, name, sort_order, is_aggregate, gender, biography, role_type FROM character_version WHERE version_id = $2`,
+    [newVersionId, fromVersionId],
+  );
+  await pool.query("UPDATE production SET active_version_id = $1 WHERE id = $2", [newVersionId, prodId]);
+  return newVersionId;
+}
+
 // ── Scene ─────────────────────────────────────────────────────────────────────
 
 /**

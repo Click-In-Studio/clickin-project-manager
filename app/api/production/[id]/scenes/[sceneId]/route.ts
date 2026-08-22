@@ -11,6 +11,7 @@ import {
   convertMarker, executeMarkerDeletion, planMarkerDeletion, projectMarkers, resolveMarkerId,
   updateMarkerMeta, type MarkerDeleteOperation, type MarkerKind,
 } from "@/lib/script-marker-domain";
+import { rejectNonHeadWrite } from "@/lib/head-version";
 
 const createId = () => crypto.randomUUID();
 const META_KEYS = ["synopsis", "actionLine", "music", "stageNotes", "expectedDuration"] as const;
@@ -39,6 +40,9 @@ async function context(req: NextRequest, productionId: string, requestedVersionI
   // 权限判定不在这里：PATCH 逐字段查（SCENE_FIELD_SUBS），DELETE 查自己的
   // delete 门。原先共用的 meta/name 总钥匙对 DELETE 也是错的——删场次不该
   // 要求改名权。
+  // context() 只被写 handler 使用——历史版本只读。
+  const nonHead = await rejectNonHeadWrite(productionId, typeof requestedVersionId === "string" ? requestedVersionId : null);
+  if (nonHead) return { error: nonHead };
   const resolved = await resolveProductionVersion(productionId, requestedVersionId);
   if (resolved.error) return resolved;
   if (resolved.version.status !== "editing") {

@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
 import { getProductionPermissionContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, listTagGroups, getVersionOpeningChapterId, listScenesByVersion } from "@/lib/db";
+import { rejectNonHeadWrite } from "@/lib/head-version";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, guessIsAggregate } from "@/lib/import/parse-character";
 import { buildImportTagFormatLookup } from "@/lib/import/tag-format";
@@ -125,6 +126,8 @@ async function resolveImportVersionId(req: NextRequest, productionId: string): P
   if (ver.status !== "editing") {
     return Response.json({ error: "只能向编辑中的版本导入剧本" }, { status: 400 });
   }
+  const nonHead = await rejectNonHeadWrite(productionId, versionIdParam);
+  if (nonHead) return nonHead;
   return versionIdParam;
 }
 

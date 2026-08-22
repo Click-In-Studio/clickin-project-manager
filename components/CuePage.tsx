@@ -1222,9 +1222,7 @@ export default function CuePage({
         setCues(prev => prev.map(c => c.id === cue.id ? { ...c, ...fields } : c));
       } else if (res.status === 409) {
         const body = await res.json() as { error: string };
-        if (body.error === "cue_number_conflict") {
-          alert(`编号 "${fields.number}" 与其他版本中的 Cue 冲突，无法修改。`);
-        }
+        alert(body.error || "修改被拒绝");
       }
     } finally {
       setSavingCueId(null);

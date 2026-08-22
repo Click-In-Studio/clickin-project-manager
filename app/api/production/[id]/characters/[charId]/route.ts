@@ -6,6 +6,7 @@ import {
 } from "@/lib/db";
 import { tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasGrant } from "@/lib/grant-check";
+import { rejectNonHeadWrite } from "@/lib/head-version";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -36,6 +37,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   }
 
   const body = await req.json();
+  const nonHead = await rejectNonHeadWrite(id, typeof body.versionId === "string" ? body.versionId : null);
+  if (nonHead) return nonHead;
 
   // memberIds: replace the full set of aggregate members
   if ("memberIds" in body) {
@@ -110,6 +113,8 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext<"/api/producti
   }
 
   const body = await _req.json().catch(() => ({}));
+  const nonHead = await rejectNonHeadWrite(id, typeof body.versionId === "string" ? body.versionId : null);
+  if (nonHead) return nonHead;
   const resolved = await resolveProductionVersion(id, body.versionId);
   if (resolved.error) return resolved.error;
   const { versionId } = resolved;
