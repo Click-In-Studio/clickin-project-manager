@@ -13,6 +13,7 @@ import {
 } from "@/lib/agent-gateway/stream-reducer";
 import { parseSessionIdentity } from "@/lib/mcp/session-identity";
 import { buildUiContextMessage } from "@/lib/agent-ui-context";
+import { derivePageKey, pageLabelFor, pageSuggestionsFor } from "@/lib/agent-page-context";
 import { toolLabel } from "@/lib/agent-tool-labels";
 import WikiProposalPreviewModal from "@/components/WikiProposalPreviewModal";
 import ChevronIcon from "@/components/ChevronIcon";
@@ -69,6 +70,7 @@ export default function AgentPopout({
   const [currentDocTitle, setCurrentDocTitle] = useState<string | null>(null);
   const [currentDocTags, setCurrentDocTags] = useState<string[]>([]);
   const [docAttached, setDocAttached] = useState(true);
+  const [pageAttached, setPageAttached] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -76,6 +78,18 @@ export default function AgentPopout({
   activeKeyRef.current = activeKey;
   const pathname = usePathname();
   const router = useRouter();
+
+  // 页面感知（「主动就位、被动发言」）：pageKey/label 来自 allowlist 注册表
+  // （lib/agent-page-context.ts），不在表里的页面什么都不附带。建议 chip 点击
+  // 只填入输入框、绝不自动发送；页面信息只随用户下一条真实消息的信封附带。
+  const pageKey = derivePageKey(pathname ?? "", productionId);
+  const pageLabel = pageLabelFor(pageKey);
+  const pageSuggestions = pageSuggestionsFor(pageKey);
+
+  // 换页面后默认重新勾选附带（与文档 chip 同款语义）。
+  useEffect(() => {
+    setPageAttached(true);
+  }, [pageKey]);
 
   const inScope = useCallback(
     (key: string) => {
@@ -347,16 +361,17 @@ export default function AgentPopout({
     setInput("");
     setBubbles((prev) => [...prev, { kind: "user", text: raw }]); // 气泡显示原始输入，附带内容不进可见文本
 
-    // 附带当前文档：只带标题/tag/id 这几个指针字段，不塞正文——AI 已经有
-    // wiki_read(id) 工具，需要正文自己按 id 取；把整篇文章暴力拼进每条消息
-    // 既浪费 token，文档一大还可能顶爆上下文。信封形态与"为什么挂在用户
-    // 消息上而不是 system prompt"见 lib/agent-ui-context.ts。
-    const message = buildUiContextMessage(
-      raw,
-      docAttached && currentWikiId && currentDocTitle
-        ? { wikiId: currentWikiId, title: currentDocTitle, tags: currentDocTags }
-        : null,
-    );
+    // 附带界面状态：页面只带一个中文页面名；文档只带标题/tag/id 这几个指针
+    // 字段，不塞正文——AI 已经有 wiki_read(id) 工具，需要正文自己按 id 取；
+    // 把整篇文章暴力拼进每条消息既浪费 token，文档一大还可能顶爆上下文。
+    // 信封形态与"为什么挂在用户消息上而不是 system prompt"见 lib/agent-ui-context.ts。
+    const message = buildUiContextMessage(raw, {
+      pageLabel: pageAttached ? pageLabel : null,
+      doc:
+        docAttached && currentWikiId && currentDocTitle
+          ? { wikiId: currentWikiId, title: currentDocTitle, tags: currentDocTags }
+          : null,
+    });
 
     const res = await fetch("/api/agent/chat/stream", {
       method: "POST",
@@ -371,7 +386,7 @@ export default function AgentPopout({
     } else {
       consumeStream(res, key);
     }
-  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId, currentDocTitle, currentDocTags]);
+  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId, currentDocTitle, currentDocTags, pageAttached, pageLabel]);
 
   const abort = useCallback(async () => {
     if (!activeKey) return;
@@ -775,21 +790,60 @@ export default function AgentPopout({
           })()}
       </div>
 
-      {/* 附带当前文档：仅在文档页出现，默认勾选、可点掉 */}
-      {currentWikiId && currentDocTitle && (
-        <div className="flex shrink-0 items-center border-t border-[var(--line)] bg-[var(--paper)] px-3 py-1.5">
-          <button
-            type="button"
-            onClick={() => setDocAttached((v) => !v)}
-            title={docAttached ? "点击取消附带" : "点击重新附带"}
-            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
-              docAttached
-                ? "border-[var(--ink)] bg-[var(--surface)] text-[var(--ink)]"
-                : "border-[var(--line)] text-[var(--muted)] line-through"
-            }`}
-          >
-            📎 附带《{currentDocTitle}》
-          </button>
+      {/* 页面感知栏：本页建议（点击填入输入框，不发送）+ 附带 chip（页面/文档，
+          默认勾选、可点掉——附带的内容对用户始终可见、可摘除）。 */}
+      {(pageLabel || (currentWikiId && currentDocTitle) || pageSuggestions.length > 0) && (
+        <div className="shrink-0 space-y-1.5 border-t border-[var(--line)] bg-[var(--paper)] px-3 py-1.5">
+          {pageSuggestions.length > 0 && input.trim() === "" && (
+            <div className="flex flex-wrap gap-1.5">
+              {pageSuggestions.map((s) => (
+                <button
+                  key={s.label}
+                  type="button"
+                  title="点击填入输入框（不会直接发送）"
+                  onClick={() => {
+                    setInput(s.prompt);
+                    textareaRef.current?.focus();
+                  }}
+                  className="rounded-full border border-dashed border-[var(--line)] px-2 py-0.5 text-[11px] text-[var(--muted)] transition-colors hover:border-[var(--ink)] hover:text-[var(--ink)]"
+                >
+                  ✨ {s.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {(pageLabel || (currentWikiId && currentDocTitle)) && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {pageLabel && (
+                <button
+                  type="button"
+                  onClick={() => setPageAttached((v) => !v)}
+                  title={pageAttached ? "点击取消附带当前页面" : "点击重新附带当前页面"}
+                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                    pageAttached
+                      ? "border-[var(--ink)] bg-[var(--surface)] text-[var(--ink)]"
+                      : "border-[var(--line)] text-[var(--muted)] line-through"
+                  }`}
+                >
+                  📍 {pageLabel}
+                </button>
+              )}
+              {currentWikiId && currentDocTitle && (
+                <button
+                  type="button"
+                  onClick={() => setDocAttached((v) => !v)}
+                  title={docAttached ? "点击取消附带" : "点击重新附带"}
+                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                    docAttached
+                      ? "border-[var(--ink)] bg-[var(--surface)] text-[var(--ink)]"
+                      : "border-[var(--line)] text-[var(--muted)] line-through"
+                  }`}
+                >
+                  📎 附带《{currentDocTitle}》
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
