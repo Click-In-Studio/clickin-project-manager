@@ -52,6 +52,7 @@ export const THEATRE_DEPT_PERMISSIONS: Record<string, readonly string[]> = {
   管理组: ["node:asset/*@create"],
   制作管理组: [
     "node:milestone/*@create", "node:milestone/*@edit", "node:milestone/*@delete",
+    "node:phase/*@create", "node:phase/*@edit", "node:phase/*@delete",
     "node:announcement/*@create", "node:announcement/*@edit", "node:announcement/*@delete",
     "node:task/*@view",
     // draft 日程与报告对制作管理可见
@@ -165,6 +166,9 @@ export const THEATRE_TEMPLATE: ProductionTemplate = {
         "node:milestone/*@create",
         "node:milestone/*@delete",
         "node:milestone/*@edit",
+        "node:phase/*@create",
+        "node:phase/*@delete",
+        "node:phase/*@edit",
         "node:task/*@view",
       ],
       "编剧": [

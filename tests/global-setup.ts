@@ -144,6 +144,12 @@ import {
   WIKI_ENTITY_LINK_SNAPSHOT_PATH,
   type WikiEntityLinkSnapshot,
 } from "./wiki-entity-link-snapshot";
+import {
+  isDropTaskMilestonePreMigrationSchema,
+  createDropTaskMilestonePreMigrationData,
+  DROP_TASK_MILESTONE_SNAPSHOT_PATH,
+  type DropTaskMilestoneSnapshot,
+} from "./drop-task-milestone-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -571,6 +577,18 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  // task 换轨挂 phase：task_milestone 边表退役。工厂造 task+milestone+旧边与
+  // phase 家族新边（add-phase.sql 已由 CI 先行应用），迁移测试验证 DROP 只带走边表。
+  if (await isDropTaskMilestonePreMigrationSchema(pool)) {
+    const dropTaskMilestoneSnapshot = await createDropTaskMilestonePreMigrationData(pool, TEST_USER);
+    await writeFile(DROP_TASK_MILESTONE_SNAPSHOT_PATH, JSON.stringify(dropTaskMilestoneSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-drop-task-milestone.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
@@ -593,6 +611,23 @@ export async function teardown() {
       // production 删除级联 wiki / wiki_entity_link
       await pool.query("DELETE FROM production WHERE id = $1", [wikiEntityLinkSnapshot.prodId]).catch(() => {});
       await unlink(WIKI_ENTITY_LINK_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // task_milestone 退役快照的工厂演出（migration path only）
+  {
+    let dropTaskMilestoneSnapshot: DropTaskMilestoneSnapshot | null = null;
+    try {
+      dropTaskMilestoneSnapshot = JSON.parse(
+        await readFile(DROP_TASK_MILESTONE_SNAPSHOT_PATH, "utf8"),
+      ) as DropTaskMilestoneSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (dropTaskMilestoneSnapshot) {
+      // production 删除级联 task / milestone / phase 及其边
+      await pool.query("DELETE FROM production WHERE id = $1", [dropTaskMilestoneSnapshot.prodId]).catch(() => {});
+      await unlink(DROP_TASK_MILESTONE_SNAPSHOT_PATH).catch(() => {});
     }
   }
 

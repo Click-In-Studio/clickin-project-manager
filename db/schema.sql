@@ -666,7 +666,7 @@ CREATE TABLE IF NOT EXISTS task_assignee (
   PRIMARY KEY (task_id, user_id)
 );
 
--- （task_milestone 定义在 milestone 表之后——语句顺序即执行顺序）
+-- （task_phase 定义在 phase 表之后——语句顺序即执行顺序）
 
 -- Blocking 依赖边（GitHub 语义：blocking 挡住 blocked；纯信息性不进状态机，
 -- isBlocked 读侧派生；应用层写入时递归 CTE 禁环）
@@ -1115,7 +1115,10 @@ CREATE INDEX IF NOT EXISTS scene_table_view_user_prod_idx
 CREATE UNIQUE INDEX IF NOT EXISTS scene_table_view_one_default_idx
   ON scene_table_view_config (user_id, production_id) WHERE is_default;
 
--- ── Milestones ────────────────────────────────────────────────────────────────
+-- ── Milestones & Phases ───────────────────────────────────────────────────────
+-- milestone（时间节点，点）与 phase（项目大阶段，区间）平级，无从属关系；
+-- 任务=项目小阶段挂 phase。原 task_milestone 边已退役
+-- （migrate-drop-task-milestone.sql，退役时全库零数据）。
 
 CREATE TABLE IF NOT EXISTS milestone (
   id            TEXT PRIMARY KEY,
@@ -1128,15 +1131,42 @@ CREATE TABLE IF NOT EXISTS milestone (
 
 CREATE INDEX IF NOT EXISTS milestone_production_idx ON milestone(production_id, end_date);
 
--- Task 里程碑关联（0..n；不约束 task 截止 ≤ 里程碑时间，前端仅软提示。
--- task 表见 event 域段落；本表因引用 milestone 置于其后）
-CREATE TABLE IF NOT EXISTS task_milestone (
-  task_id      TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
-  milestone_id TEXT NOT NULL REFERENCES milestone(id) ON DELETE CASCADE,
-  PRIMARY KEY (task_id, milestone_id)
+-- dept_id NULL = production-level；非 NULL = department-specific（仅 kind='dept'，
+-- 应用层校验）。部门解散 SET NULL 升级为全局（与 task.department_id 同语义）。
+-- 可见性全员（这是 phase 与 blocking task 的根本区别），dept_id 只表达归属与管理权。
+-- end_date 可空 = 尾巴未定；甘特图画到轴右缘渐隐。
+CREATE TABLE IF NOT EXISTS phase (
+  id            TEXT PRIMARY KEY,
+  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  dept_id       UUID REFERENCES production_dept(id) ON DELETE SET NULL,
+  name          TEXT NOT NULL,
+  start_date    DATE NOT NULL,
+  end_date      DATE,
+  sort_order    INTEGER NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT phase_date_order_check CHECK (end_date IS NULL OR end_date >= start_date)
 );
 
-CREATE INDEX IF NOT EXISTS task_milestone_milestone_idx ON task_milestone(milestone_id);
+CREATE INDEX IF NOT EXISTS phase_production_idx ON phase(production_id, start_date);
+
+-- phase ↔ milestone 多对多：「首演」这种全局节点可同时收尾多个部门 phase
+CREATE TABLE IF NOT EXISTS phase_milestone (
+  phase_id     TEXT NOT NULL REFERENCES phase(id) ON DELETE CASCADE,
+  milestone_id TEXT NOT NULL REFERENCES milestone(id) ON DELETE CASCADE,
+  PRIMARY KEY (phase_id, milestone_id)
+);
+
+CREATE INDEX IF NOT EXISTS phase_milestone_milestone_idx ON phase_milestone(milestone_id);
+
+-- Task 阶段关联（0..n；不约束 task 起止 ⊆ phase 区间，前端仅软提示。
+-- task 表见 event 域段落；本表因引用 phase 置于其后）
+CREATE TABLE IF NOT EXISTS task_phase (
+  task_id  TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
+  phase_id TEXT NOT NULL REFERENCES phase(id) ON DELETE CASCADE,
+  PRIMARY KEY (task_id, phase_id)
+);
+
+CREATE INDEX IF NOT EXISTS task_phase_phase_idx ON task_phase(phase_id);
 
 -- ── rundown 版面（add-event-group-4-rundown.sql）────────────────────────────────
 -- 组是跨 event 共享的，「在这场排第几列 / 显不显示 / 钉不钉左边」只能记在
@@ -1447,6 +1477,7 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('role',         'view', 0), ('role',         'create', 0), ('role',         'edit', 0), ('role',         'delete', 0),
   ('org_dept',     'view', 0), ('org_dept',     'create', 0), ('org_dept',     'edit', 0), ('org_dept',     'delete', 0),
   ('milestone',    'view', 0), ('milestone',    'create', 0), ('milestone',    'edit', 0), ('milestone',    'delete', 0),
+  ('phase',        'view', 0), ('phase',        'create', 0), ('phase',        'edit', 0), ('phase',        'delete', 0),
   ('announcement', 'view', 0), ('announcement', 'create', 0), ('announcement', 'edit', 0), ('announcement', 'delete', 0)
 ON CONFLICT DO NOTHING;
 

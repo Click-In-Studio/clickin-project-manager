@@ -50,7 +50,7 @@ export default async function ProductionTasksPage({ params, searchParams }: {
           endTime: null as string | null,
           effectiveStartTime: t.effectiveStartTime,
           effectiveEndTime: t.effectiveEndTime,
-          milestones: [] as { id: string; name: string; endDate: string }[],
+          phases: [] as { id: string; name: string; startDate: string; endDate: string | null }[],
           isBlocked: false,
           assignees: t.assignees,
         }));

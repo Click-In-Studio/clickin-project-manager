@@ -291,6 +291,24 @@ export const POLICY_QUESTIONS: readonly PolicyQuestion[] = [
       },
     ],
   },
+  {
+    id: "phase_dept_poc", group: "任务",
+    title: "部门 POC 能否创建并管理本部门的阶段？",
+    help: "阶段（phase）是项目大阶段区间，全员可见。此键只管部门级阶段；"
+      + "production-level 阶段始终归持 phase 键的人（制作人兜底）。",
+    answers: [
+      {
+        id: "yes", label: "可以",
+        values: { "policy.phase_dept_poc_create": ON },
+        disposition: [ACTOR("部门 POC"), SCOPE("被授予阶段管理权的角色 / 部门成员")],
+      },
+      {
+        id: "no", label: "不可以",
+        values: { "policy.phase_dept_poc_create": OFF },
+        disposition: [SCOPE("被授予阶段管理权的角色 / 部门成员"), FALLBACK],
+      },
+    ],
+  },
 
   // ── 报告与文档 ───────────────────────────────────────────────────────────
   {

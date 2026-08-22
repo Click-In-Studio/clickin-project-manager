@@ -4,7 +4,8 @@ import { Suspense } from "react";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, listProductionMembersWithRoles, listMilestones } from "@/lib/db";
+import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
+import { listPhases } from "@/lib/phase-db";
 import {
   getTechReqByProduction,
   getProductionEvent,
@@ -37,20 +38,22 @@ export default async function TaskDetailPage({ params }: Ctx) {
 
   const eventId = req.eventId;
 
-  const [event, scheduleItems, departments, productionMembers, allMilestones, dependencies, allTasks] = await Promise.all([
+  const [event, scheduleItems, departments, productionMembers, allPhases, dependencies, allTasks] = await Promise.all([
     eventId ? getProductionEvent(eventId, productionId) : Promise.resolve(null),
     eventId ? listScheduleItems(eventId) : Promise.resolve([]),
     listEventDepartments(productionId),
     listProductionMembersWithRoles(productionId),
-    listMilestones(productionId),
+    listPhases(productionId),
     getTaskDependencies(taskId),
     listProductionTechReqs(productionId),
   ]);
 
   if (eventId && !event) notFound();
 
-  const milestoneOptions = allMilestones.map(m => ({ id: m.id, name: m.name, endDate: m.endDate }));
-  const boundMilestones = milestoneOptions.filter(m => req.milestoneIds.includes(m.id));
+  const phaseOptions = allPhases.map(p => ({
+    id: p.id, name: p.name, startDate: p.startDate, endDate: p.endDate, deptName: p.deptName,
+  }));
+  const boundPhases = phaseOptions.filter(p => req.phaseIds.includes(p.id));
   // 依赖候选：同 production 的其他任务（成环由服务端递归 CTE 兜底拒绝）
   const taskOptions = allTasks
     .filter(t => t.id !== taskId)
@@ -84,8 +87,8 @@ export default async function TaskDetailPage({ params }: Ctx) {
         deptName={dept?.name ?? null}
         deptPeople={deptPeople}
         allPeople={allPeople}
-        milestones={boundMilestones}
-        milestoneOptions={milestoneOptions}
+        phases={boundPhases}
+        phaseOptions={phaseOptions}
         taskOptions={taskOptions}
         blockedBy={dependencies.blockedBy}
         blocks={dependencies.blocks}
