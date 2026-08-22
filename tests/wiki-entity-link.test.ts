@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import {
-  createWiki, updateWiki,
+  createWiki, updateWiki, deleteWiki,
   extractMentionEdges, listBacklinks, listWikiRefsForEntity,
 } from "@/lib/wiki-db";
 import { GET as wikiRefsGET } from "@/app/api/production/[id]/wiki-refs/route";
@@ -104,6 +104,18 @@ describe("sync on save", () => {
     expect(rows.rows.map(r => r.origin).sort()).toEqual(["manual", "wiki_body"]);
     const refs = await listWikiRefsForEntity(prodId, "scene", sceneId);
     expect(refs.filter(r => r.id === doc.id)).toHaveLength(1);
+  });
+
+  it("deleting a target wiki clears entity-side edges pointing at it (review #303-2)", async () => {
+    const target = await createWiki({ productionId: prodId, title: "将被删目标", createdBy: creator });
+    await createWiki({
+      productionId: prodId, title: "指向者", body: `[#wiki:${target.id}]`, createdBy: creator });
+    expect((await listBacklinks(target.id, prodId)).length).toBeGreaterThan(0);
+
+    expect(await deleteWiki(target.id, prodId)).toEqual({ ok: true });
+    const leftover = await getPool().query(
+      `SELECT 1 FROM wiki_entity_link WHERE entity_type = 'wiki' AND entity_id = $1`, [target.id]);
+    expect(leftover.rows).toHaveLength(0);
   });
 
   it("cross-production mention never surfaces on the target production's side", async () => {

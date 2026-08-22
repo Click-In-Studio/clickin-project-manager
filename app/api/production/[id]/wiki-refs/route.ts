@@ -1,9 +1,8 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext, getCueListIdForCue } from "@/lib/db";
 import { hasGrant } from "@/lib/grant-check";
 import { canAccessNode } from "@/lib/grant-template";
-import { getPool } from "@/lib/pg";
 import { listWikiRefsForEntity } from "@/lib/wiki-db";
 import { canViewAsset } from "@/lib/asset-perm";
 import { getAsset } from "@/lib/asset-db";
@@ -28,15 +27,10 @@ async function hostViewPermitted(
       return permCtx.isAdmin || permCtx.isOwner
         || await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view");
     case "cue": {
-      const r = await getPool().query<{ cue_list_id: string }>(
-        `SELECT c.cue_list_id FROM cue c
-         JOIN cue_list cl ON cl.id = c.cue_list_id
-         WHERE c.id = $1 AND cl.production_id = $2`,
-        [entityId, productionId],
-      );
-      if (!r.rows[0]) return false;
+      const cueListId = await getCueListIdForCue(entityId, productionId);
+      if (!cueListId) return false;
       const access = await canAccessNode(
-        permCtx, productionId, "cue_list", r.rows[0].cue_list_id, "cues", "view");
+        permCtx, productionId, "cue_list", cueListId, "cues", "view");
       return access.allowed;
     }
     case "asset": {
