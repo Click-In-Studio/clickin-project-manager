@@ -469,28 +469,45 @@ describe("PATCH /api/production/[id] — happy path", () => {
 describe("head-only 写保护 — 历史版本只读", () => {
   let headProdId = "";
   let legacyVersionId = "";
+  let headVersionId = "";
 
   beforeAll(async () => {
-    let headVersionId = "";
     ({ prodId: headProdId, versionId: legacyVersionId } = await makeProduction());
     await makeBlocks(headProdId, legacyVersionId, 1);
     headVersionId = await makeLegacyVersion(headProdId, legacyVersionId);
-    void headVersionId;
   });
 
   afterAll(async () => {
     await cleanupProduction(headProdId).catch(() => {});
   });
 
-  it("PATCH /api/script/[id]?v=<历史版本> → 409", async () => {
-    const res = await patchScriptHandler(
-      req(`/api/script/${headProdId}?v=${legacyVersionId}`, {
-        method: "PATCH", body: JSON.stringify({ clientSeq: 1, blockOps: [], charOps: [], sceneOps: [] }),
-        session: adminSession(),
-      }),
-      ctx({ id: headProdId }),
-    );
-    expect(res.status).toBe(409);
+  const patchWith = (v: string) => patchScriptHandler(
+    req(`/api/script/${headProdId}?v=${v}`, {
+      method: "PATCH", body: JSON.stringify({ clientSeq: 1, blockOps: [], charOps: [], sceneOps: [] }),
+      session: adminSession(),
+    }),
+    ctx({ id: headProdId }),
+  );
+
+  it("PATCH ?v=<历史版本> → 409（本演出的旧版本只读）", async () => {
+    expect((await patchWith(legacyVersionId)).status).toBe(409);
+  });
+
+  it("PATCH ?v=<head> → 200（活跃版本放行）", async () => {
+    expect((await patchWith(headVersionId)).status).toBe(200);
+  });
+
+  it("PATCH ?v=<不存在的版本> → 404（守卫自带归属判定，不误报 409）", async () => {
+    expect((await patchWith("ver_no_such_version")).status).toBe(404);
+  });
+
+  it("PATCH ?v=<别的演出的版本> → 404（跨演出 versionId 不泄露只读语义）", async () => {
+    const other = await makeProduction();
+    try {
+      expect((await patchWith(other.versionId)).status).toBe(404);
+    } finally {
+      await cleanupProduction(other.prodId).catch(() => {});
+    }
   });
 });
 
