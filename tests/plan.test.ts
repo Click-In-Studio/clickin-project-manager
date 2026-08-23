@@ -18,6 +18,7 @@ import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { getPool } from "@/lib/pg";
 import { POST as createProductionHandler } from "@/app/api/productions/route";
 import { POST as accountRedeemHandler } from "@/app/api/account/redeem-code/route";
+import { PATCH as memberPermPatch } from "@/app/api/production/[id]/permissions/route";
 
 function req(url: string, opts: { session?: string; method?: string; body?: string } = {}): NextRequest {
   const headers = new Headers();
@@ -275,5 +276,31 @@ describe("项目功能门", () => {
     expect(await productionFeatureAllowed(prodId, "ai")).toBe(true);
     expect(await requireProductionFeature(prodId, "ai")).toBeNull();
     expect(await productionFeatureAllowed(prodId, "advancedPerms")).toBe(true);
+  });
+
+  // 个人区间（production_member_permission）是权限中心三块写入里的第三块。首 PR 只给
+  // 角色权限集 / 部门区间加了门，这条补齐——前端「权限中心」整个菜单项按 advancedPerms
+  // 显隐，API 不设门的话付费墙只有半截。
+  it("个人区间写入同样在高级权限配置门内（free → 403，pro 放行）", async () => {
+    const { userId, session } = await makeUser("creator");
+    const { prodId } = await makeProduction(userId);
+    createdProds.push(prodId);
+
+    const body = JSON.stringify({ userId, permission: "node:script/blocks@edit", granted: true });
+    const patch = () =>
+      memberPermPatch(
+        req(`/api/production/${prodId}/permissions`, { session, method: "PATCH", body }),
+        { params: Promise.resolve({ id: prodId }) },
+      );
+
+    const denied = await patch();
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error).toContain("高级权限配置");
+
+    await getPool().query(
+      "INSERT INTO production_plan (production_id, tier, source) VALUES ($1, 'pro', 'test') ON CONFLICT (production_id) DO UPDATE SET tier = 'pro'",
+      [prodId],
+    );
+    expect((await patch()).status).toBe(200);
   });
 });

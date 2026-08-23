@@ -9,6 +9,7 @@ import {
 } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 import { isGovernanceNodeKey } from "@/lib/grant-template";
+import { requireProductionFeature } from "@/lib/plan";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -49,6 +50,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const { deny, isArchived, isRoot } = await requireManage(req, productionId);
   if (deny) return deny;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
+  // 项目档位功能门（#280）：个人区间编辑与角色权限集 / 部门区间同属「高级权限配置」，
+  // 独立于 grant 判定。首 PR 只给了后两者加门，这条是补齐——前端「权限中心」整个菜单
+  // 项按 advancedPerms 显隐，API 不设门的话付费墙只有半截。
+  const planDeny = await requireProductionFeature(productionId, "advancedPerms");
+  if (planDeny) return planDeny;
 
   const { userId, permission, granted } = (await req.json()) as {
     userId?: string;
@@ -73,6 +79,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { deny, isArchived, isRoot } = await requireManage(req, productionId);
   if (deny) return deny;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
+  // 项目档位功能门（#280）：同 PATCH，批量写入走同一道门。
+  const planDeny = await requireProductionFeature(productionId, "advancedPerms");
+  if (planDeny) return planDeny;
 
   const { userIds, permission, granted } = (await req.json()) as {
     userIds?: string[];

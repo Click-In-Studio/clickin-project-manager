@@ -22,6 +22,7 @@ import {
   type ApprovalStage, type ApprovalStageName, type ApprovalTarget, type StagePosition,
 } from "./approval-routing";
 import { isValidTtlInterval } from "./approval-ttl";
+import { normalizeProductionTier, type ProductionTier } from "./plan";
 
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
@@ -2386,6 +2387,7 @@ export type MyProductionEntry = {
   sortOrder: number; roles: string[]; firstTag: string | null; avatarUrl: string | null;
   isOwner: boolean;
   hasAdminPerm: boolean; // true if FK-backed role 区间含治理域节点键（ADMIN_PANEL_NODE_PREFIXES）
+  planTier: ProductionTier; // 项目付费档位（#280）：无 production_plan 行 = free
 };
 
 export async function listMyProductionsWithRoles(
@@ -2397,9 +2399,10 @@ export async function listMyProductionsWithRoles(
     id: string; name: string; created_at: Date; archived_at: Date | null;
     sort_order: number; roles: string[] | null; first_tag: string | null;
     avatar_url: string | null; is_owner: boolean; has_admin_perm: boolean;
+    plan_tier: string | null;
   }>(
     `SELECT p.id, p.name, p.created_at, p.archived_at, p.sort_order, p.avatar_url,
-            pm.roles,
+            pm.roles, ppl.tier AS plan_tier,
             (
               SELECT pmt.name
               FROM production_member_tag_assignment pmta
@@ -2419,6 +2422,7 @@ export async function listMyProductionsWithRoles(
             ) AS has_admin_perm
      FROM production p
      LEFT JOIN production_member pm ON pm.production_id = p.id AND pm.user_id = $1
+     LEFT JOIN production_plan ppl ON ppl.production_id = p.id
      WHERE ($2 OR pm.user_id IS NOT NULL OR p.owner_id = $1)
      ORDER BY ${orderBy}`,
     [userId, isAdmin, adminPanelPrefixes.map((p) => `${p}%`)],
@@ -2433,6 +2437,7 @@ export async function listMyProductionsWithRoles(
     avatarUrl: r.avatar_url ?? null,
     isOwner: r.is_owner,
     hasAdminPerm: r.has_admin_perm,
+    planTier: normalizeProductionTier(r.plan_tier),
   }));
 }
 

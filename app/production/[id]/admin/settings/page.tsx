@@ -54,6 +54,9 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
         initialMeta={meta ?? { name: "", description: "", avatarUrl: null, type: null, typeLabel: null, language: null, watermarkEnabled: false }}
         isArchived={isArchived}
         perms={perms}
+        // 档位（付费维度）与 perms（权限维度）分开传：AI 未开通的项目里，制作级
+        // agents.md 这一节整块不出现——为一个用不了的功能留配置面没有意义。
+        planAi={tierConf.ai}
       />
       <ProductionPlanCard
         productionId={id}
