@@ -1520,6 +1520,11 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('material', 'view', 0), ('material', 'create', 0), ('material', 'edit', 0), ('material', 'delete', 0)
 ON CONFLICT DO NOTHING;
 
+-- finance 预算与支出：按 budget / categories / expenses 子面授权，动词仍是 REST 四元组。
+INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  ('finance', 'view', 0), ('finance', 'create', 0), ('finance', 'edit', 0), ('finance', 'delete', 0)
+ON CONFLICT DO NOTHING;
+
 -- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────
 -- 所有实际资源权限的单一权威来源。
 
