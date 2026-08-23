@@ -1363,14 +1363,24 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     return { rowStart, rowSpan };
   }
 
-  /** 版面落库：顺序 / 显隐 / 粘性 / 地点列。列身份由服务端按 group|地点 认。 */
-  const persistLayout = useCallback(async (next: RundownColumn[]) => {
+  /**
+   * 版面落库：顺序 / 显隐 / 粘性 / 地点列。列身份由服务端按 group|地点 认。
+   *
+   * opts 只给切事件时的 flush 用：expectedTag 是卸载当刻同步捕获的旧事件指纹
+   * （共享 ref 随后会被新事件的 GET 覆盖，落盘时不能再读）；applyResult=false
+   * 表示不回写指纹与列状态——那时组件已经在渲染新事件了。
+   */
+  const persistLayout = useCallback(async (
+    next: RundownColumn[],
+    opts?: { expectedTag?: string; applyResult?: boolean },
+  ) => {
     if (!eventId) return;
-    setLayoutError(null);
+    const applyResult = opts?.applyResult ?? true;
+    if (applyResult) setLayoutError(null);
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/rundown`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        expectedColumnsTag: columnsTagRef.current || undefined,
+        expectedColumnsTag: (opts?.expectedTag ?? columnsTagRef.current) || undefined,
         columns: next.map(c => c.kind === "location"
           ? { matchLocation: c.location, isVisible: c.visible, isPinned: c.pinned }
           : { groupId: c.groupId, isVisible: c.visible, isPinned: c.pinned }),
@@ -1378,9 +1388,11 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setLayoutError(res.status === 409 ? "版面已被其他成员更新，请刷新页面后再编辑" : (data.error ?? "版面保存失败"));
+      if (applyResult)
+        setLayoutError(res.status === 409 ? "版面已被其他成员更新，请刷新页面后再编辑" : (data.error ?? "版面保存失败"));
       return;
     }
+    if (!applyResult) return;
     if (typeof data.columnsTag === "string") columnsTagRef.current = data.columnsTag;
     // 用服务端回来的 id 回填——新建的列在本地是 `new-*`，条目钉列要引用真实 id。
     // 服务端按 order_index 返回，而 order_index 就是这次入参的下标，故按位对齐。
@@ -1390,6 +1402,14 @@ function TimetableView({ productionId, events, departments, members }: Props) {
 
   /** 同一浏览器的保存严格串行，避免自己的两个请求也拿着同一个旧指纹互撞。 */
   const saveLayout = useCallback((next: RundownColumn[]) => {
+    // 立即保存的 next 构建自最新列状态，已经包含 pending 里的改动；把防抖计时器
+    // 一并取消，否则它稍后会拿着**不含本次新列**的过期版面、顶着刚刷新的指纹
+    // 再写一遍，把这里刚建的列静默删掉。
+    if (layoutDebounceRef.current) {
+      clearTimeout(layoutDebounceRef.current);
+      layoutDebounceRef.current = null;
+    }
+    pendingLayoutRef.current = null;
     const run = layoutSaveInFlightRef.current
       .catch(() => undefined)
       .then(() => persistLayout(next));
@@ -1409,11 +1429,20 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     }, 300);
   }, [saveLayout]);
 
+  // 切事件/卸载时把 pending 的防抖保存冲掉，而不是丢弃——否则最后 300ms 内的
+  // 修改会静默消失。cleanup 闭包持有的是旧事件的 persistLayout，落的是旧事件。
   useEffect(() => () => {
     if (layoutDebounceRef.current) clearTimeout(layoutDebounceRef.current);
     layoutDebounceRef.current = null;
+    const pending = pendingLayoutRef.current;
     pendingLayoutRef.current = null;
-  }, [eventId]);
+    if (!pending) return;
+    const expectedTag = columnsTagRef.current || undefined;
+    const run = layoutSaveInFlightRef.current
+      .catch(() => undefined)
+      .then(() => persistLayout(pending, { expectedTag, applyResult: false }));
+    layoutSaveInFlightRef.current = run;
+  }, [persistLayout]);
 
   /** 条目表现落库：颜色 + 钉列。 */
   const persistPlacements = useCallback(async (

@@ -2040,6 +2040,11 @@ export type MyScheduleEntry = {
  * 与纯 Call Sheet 不同，这里合并四条用户相关通道：我的 call、事件参与名单、
  * 指派给我的任务、以及直接/部门/用户组排给我的流程项。用户组已经冻结时读取快照，
  * 未冻结时读取实时成员，和事件权限口径保持一致。
+ *
+ * 同一事件按「call > 流程项 > 参与事件」折叠：有 call 的人几乎必然也在参与名单里，
+ * call 条目的标题就是事件标题，不折叠的话月历同一格会把同一件事显示两三遍。
+ * 「参与事件」只在既没有我的 call、也没有排给我的流程项时兜底出现；
+ * call 与流程项彼此不折叠——call 是到场时刻，流程项是具体环节，信息不重复。
  */
 export async function listMyScheduleRange(
   userId: string,
@@ -2065,33 +2070,19 @@ export async function listMyScheduleRange(
          LEFT JOIN event_schedule_item esi ON esi.id = tsi.item_id
          LEFT JOIN production_event pe ON pe.id = t.event_id
         GROUP BY t.id, pe.start_time, pe.end_time, pe.location
-     ), entries AS (
+     ), call_entries AS (
        SELECT 'call:' || ect.id AS id, 'call'::text AS kind,
               pe.title, ect.call_at AS starts_at, NULL::timestamptz AS ends_at,
               pe.location, ect.notes, pe.id AS event_id, pe.production_id
          FROM event_call_time ect
          JOIN production_event pe ON pe.id = ect.event_id
         WHERE ect.user_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
-       UNION ALL
-       SELECT 'event:' || pe.id, 'event', pe.title,
-              COALESCE(pe.start_time, pe.end_time), pe.end_time, pe.location, pe.description,
-              pe.id, pe.production_id
-         FROM event_participant ep
-         JOIN production_event pe ON pe.id = ep.event_id
-        WHERE ep.user_id = $1
-          AND COALESCE(pe.start_time, pe.end_time) >= $2
-          AND COALESCE(pe.start_time, pe.end_time) < $3
-       UNION ALL
-       SELECT 'task:' || tt.id, 'task', tt.title, tt.starts_at, tt.ends_at,
-              tt.location, tt.notes, tt.event_id, tt.production_id
-         FROM task_times tt
-        WHERE tt.starts_at >= $2 AND tt.starts_at < $3
-       UNION ALL
-       SELECT 'schedule:' || esi.id, 'schedule', esi.title,
-              COALESCE(esi.start_time, pe.start_time, esi.end_time, pe.end_time),
-              COALESCE(esi.end_time, pe.end_time),
-              COALESCE(NULLIF(esi.location, ''), pe.location), esi.notes,
-              pe.id, pe.production_id
+     ), schedule_entries AS (
+       SELECT 'schedule:' || esi.id AS id, 'schedule'::text AS kind, esi.title,
+              COALESCE(esi.start_time, pe.start_time, esi.end_time, pe.end_time) AS starts_at,
+              COALESCE(esi.end_time, pe.end_time) AS ends_at,
+              COALESCE(NULLIF(esi.location, ''), pe.location) AS location, esi.notes,
+              pe.id AS event_id, pe.production_id
          FROM event_schedule_item esi
          JOIN production_event pe ON pe.id = esi.event_id
         WHERE COALESCE(esi.start_time, pe.start_time, esi.end_time, pe.end_time) >= $2
@@ -2131,6 +2122,27 @@ export async function listMyScheduleRange(
                  )
             )
           )
+     ), entries AS (
+       SELECT * FROM call_entries
+       UNION ALL
+       SELECT * FROM schedule_entries
+       UNION ALL
+       -- 参与事件是兜底条目：同一事件已有我的 call 或流程项时折叠掉（见函数注释）
+       SELECT 'event:' || pe.id, 'event', pe.title,
+              COALESCE(pe.start_time, pe.end_time), pe.end_time, pe.location, pe.description,
+              pe.id, pe.production_id
+         FROM event_participant ep
+         JOIN production_event pe ON pe.id = ep.event_id
+        WHERE ep.user_id = $1
+          AND COALESCE(pe.start_time, pe.end_time) >= $2
+          AND COALESCE(pe.start_time, pe.end_time) < $3
+          AND NOT EXISTS (SELECT 1 FROM call_entries c WHERE c.event_id = pe.id)
+          AND NOT EXISTS (SELECT 1 FROM schedule_entries s WHERE s.event_id = pe.id)
+       UNION ALL
+       SELECT 'task:' || tt.id, 'task', tt.title, tt.starts_at, tt.ends_at,
+              tt.location, tt.notes, tt.event_id, tt.production_id
+         FROM task_times tt
+        WHERE tt.starts_at >= $2 AND tt.starts_at < $3
      )
      SELECT e.id, e.kind, e.title, e.starts_at, e.ends_at,
             COALESCE(e.location, '') AS location, COALESCE(e.notes, '') AS notes,
