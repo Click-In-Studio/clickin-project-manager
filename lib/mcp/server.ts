@@ -4,7 +4,7 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import { z } from "zod";
 import http from "http";
 import type { Request, Response } from "express";
-import { WIKI_LINK_SYNTAX_NOTE } from "./wiki-link-syntax";
+import { WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "./wiki-link-syntax";
 import { INSTRUCTIONS_MAX_LEN } from "@/lib/agent-instructions";
 
 const rawPort = Number(process.env.MCP_PORT ?? 3101);
@@ -206,7 +206,7 @@ export function buildMcpServer(): McpServer {
   });
 
   s.registerTool("production.wiki_read", {
-    description: `按 id 读取一篇文档的完整内容（标题/标签/正文）。${WIKI_LINK_SYNTAX_NOTE}`,
+    description: `按 id 读取一篇文档的完整内容（标题/标签/正文）。${WIKI_LINK_SYNTAX_NOTE}${WIKI_DIALECT_NOTE}`,
     inputSchema: { wikiId: z.string().describe("文档 id（来自 wiki_tree/wiki_search 的结果）"), ...callerShape },
     annotations: READ_ONLY,
   }, async ({ wikiId, _caller_user_id, _caller_production_id }) => {
@@ -237,7 +237,7 @@ export function buildMcpServer(): McpServer {
 
   s.registerTool("production.wiki_propose_create", {
     description: `在某篇文档下（或在根下）提议新建一篇子文档，需要人工在聊天栏确认；` +
-      `确认后若你没有新建文档的权限，调用会被直接拦截并转入审批流。${WIKI_LINK_SYNTAX_NOTE}`,
+      `确认后若你没有新建文档的权限，调用会被直接拦截并转入审批流。${WIKI_LINK_SYNTAX_NOTE}${WIKI_DIALECT_NOTE}`,
     inputSchema: {
       parentId: z.string().optional().describe("父文档 id；建在文档库根下就整个省略这个字段，不要传空字符串"),
       title: z.string().describe("新文档标题"),
@@ -257,7 +257,7 @@ export function buildMcpServer(): McpServer {
 
   s.registerTool("production.wiki_propose_update", {
     description: `提议修改一篇既有文档的标题和/或正文（只传要改的字段，不传的保持不变），` +
-      `需要人工在聊天栏确认；确认后若你没有编辑这篇文档的权限，调用会被直接拦截并转入审批流。${WIKI_LINK_SYNTAX_NOTE}`,
+      `需要人工在聊天栏确认；确认后若你没有编辑这篇文档的权限，调用会被直接拦截并转入审批流。${WIKI_LINK_SYNTAX_NOTE}${WIKI_DIALECT_NOTE}`,
     inputSchema: {
       wikiId: z.string().describe("要修改的文档 id（来自 wiki_tree/wiki_search 的结果）"),
       title: z.string().optional().describe("新标题；不改标题就整个省略这个字段"),
