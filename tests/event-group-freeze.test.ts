@@ -135,11 +135,40 @@ describe("2. 完整快照：人 + 身份 + 当时的 POC", () => {
     const viaDept = snap.members.find(m => m.userId === pocId);
     expect(viaDept?.viaDeptId).toBe(deptId);
     expect(viaDept?.viaDeptName).toBeTruthy();  // 「他当时以灯光部的身份在场」
+    expect(viaDept?.wasPoc).toBe(true);
+    expect(direct?.wasPoc).toBe(false);
 
     // POC 部门型：部门与「当时该部门的实际 POC 那个人」都冻下来
     expect(snap.pocDeptId).toBe(deptId);
     expect(snap.pocUserId).toBe(pocId);
     expect(snap.pocUserName).toBeTruthy();
+  });
+
+  it("部门有多个 POC 时全部写入快照并获得冻结后的 POC 权限", async () => {
+    const ev = await makeEvent("多 POC 快照场");
+    const g = await makeBGroup("多 POC 组");
+    await bindGroupToNewItem(ev, g.id);
+    await getPool().query(
+      `UPDATE production_dept_member SET is_poc = true
+        WHERE production_id = $1 AND dept_id = $2 AND user_id = $3`,
+      [prodId, deptId, newbieId],
+    );
+
+    try {
+      await freezeEventGroups(ev, organizerId);
+      const pocIds = await frozenGroupPocUserIds(ev, g.id);
+      expect(new Set(pocIds)).toEqual(new Set([pocId, newbieId]));
+
+      const [snap] = await describeFrozenGroups(ev);
+      const markedPocs = snap.members.filter(m => m.wasPoc).map(m => m.userId);
+      expect(new Set(markedPocs)).toEqual(new Set([pocId, newbieId]));
+    } finally {
+      await getPool().query(
+        `UPDATE production_dept_member SET is_poc = (user_id = $3)
+          WHERE production_id = $1 AND dept_id = $2`,
+        [prodId, deptId, pocId],
+      );
+    }
   });
 });
 

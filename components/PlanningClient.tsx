@@ -174,22 +174,6 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
         const eventData = await eventRes.json().catch(() => ({}));
         if (!eventRes.ok) throw new Error(eventData.error ?? "事件创建失败");
 
-        const scheduleRes = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventData.event.id}/schedule`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: `${title.trim()} · 执行日程`,
-            itemType: eventType === "rehearsal" ? "scene_rehearsal" : eventType === "meeting" ? "meeting" : "custom",
-            startTime: start,
-            endTime: end,
-            departmentIds: allMembers ? [] : [...departmentIds],
-            notes: "由项目日历快捷创建并自动关联。",
-          }),
-        });
-        if (!scheduleRes.ok) {
-          const scheduleData = await scheduleRes.json().catch(() => ({}));
-          throw new Error(`事件已创建，但执行日程生成失败：${scheduleData.error ?? "未知错误"}`);
-        }
       } else {
         const taskRes = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks`, {
           method: "POST",
@@ -234,7 +218,7 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginBottom: 14 }}>
-          {([['event', '事件', '自动生成执行日程'], ['task', '任务', '同步进入任务与甘特']] as const).map(([value, label, hint]) => {
+          {([['event', '事件', '创建后按实际流程添加日程'], ['task', '任务', '同步进入任务与甘特']] as const).map(([value, label, hint]) => {
             const active = kind === value;
             return (
               <button key={value} type="button" onClick={() => {
@@ -275,9 +259,9 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
               </select>
             </label>
           )}
-          <div>
+          {kind === "task" && <div>
             <span style={{ display: "block", marginBottom: 5, fontSize: 11, color: "var(--muted)" }}>
-              {kind === "event" ? "参与部门（可多选）" : "责任部门（任务的责任方唯一，只能选一个）"}
+              责任部门（任务的责任方唯一，只能选一个）
             </span>
             <div className={styles.multiPicker}>
               <button
@@ -285,7 +269,7 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
                 className={`${styles.toggleChip} ${allMembers ? styles.toggleChipActive : ""}`}
                 onClick={() => { setAllMembers(true); setDepartmentIds(new Set()); }}
               >
-                全体成员
+                暂不指定
               </button>
               {departments.map(dept => {
                 const active = !allMembers && departmentIds.has(dept.id);
@@ -299,14 +283,8 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
                       setDepartmentIds(current => {
                         // 任务的责任主体是**单值**（POC 从它推），所以这里是单选：
                         // 让用户多选却只取第一个，等于静默丢弃他的选择
-                        if (kind === "task") {
-                          if (current.has(dept.id)) { setAllMembers(true); return new Set(); }
-                          return new Set([dept.id]);
-                        }
-                        const next = new Set(current);
-                        if (next.has(dept.id)) next.delete(dept.id); else next.add(dept.id);
-                        if (next.size === 0) setAllMembers(true);
-                        return next;
+                        if (current.has(dept.id)) { setAllMembers(true); return new Set(); }
+                        return new Set([dept.id]);
                       });
                     }}
                   >
@@ -315,7 +293,7 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
                 );
               })}
             </div>
-          </div>
+          </div>}
         </div>
         {error && <p style={{ margin: "12px 0 0", color: "var(--danger)", fontSize: 11 }}>{error}</p>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
@@ -596,7 +574,7 @@ function CalendarView({ productionId, events, tasks, milestones, phases, departm
         })}
       </div>
       <p style={{ margin: "10px 0 0", fontSize: 9, color: "var(--muted)" }}>
-        点击任意日期空白处可快捷新建事件或任务；事件将自动生成并关联一条执行日程。绑定事件的任务随事件显示，不单独占格。
+        点击任意日期空白处可快捷新建事件或任务；新事件保持空流程，由用户按真实安排添加第一项。绑定事件的任务随事件显示，不单独占格。
       </p>
       {quickCreateDate && (
         <QuickCreateModal
@@ -634,6 +612,7 @@ type GanttScale = "day" | "month" | "quarter" | "year";
 type GanttDragMode = "move" | "resize-start" | "resize-end";
 
 const DAY_MS = 86_400_000;
+const CST_AXIS_OFFSET_MS = 8 * 3_600_000;
 
 /** 状态→条形配色（原型 milestoneBar* 色板；受阻优先于状态） */
 function barTone(t: PlanningTask): { bg: string; color: string } {
@@ -644,9 +623,21 @@ function barTone(t: PlanningTask): { bg: string; color: string } {
 }
 
 function floorToMonday(d: Date): Date {
-  const r = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  r.setDate(r.getDate() - ((r.getDay() + 6) % 7));
+  const r = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  r.setUTCDate(r.getUTCDate() - ((r.getUTCDay() + 6) % 7));
   return r;
+}
+
+/**
+ * 甘特轴把 Date 当作“CST 墙上日期”的无时区坐标使用，统一读取 UTC 部件。
+ * ISO 时刻先平移 +8h；纯日期直接按 UTC 构造，避免浏览器所在时区改变分桶。
+ */
+function cstAxisDateFromIso(iso: string): Date {
+  return new Date(new Date(iso).getTime() + CST_AXIS_OFFSET_MS);
+}
+
+function dateOnlyAxisMs(date: string, endOfDay = false): number {
+  return Date.parse(`${date}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
 }
 
 function addDaysIso(iso: string, days: number): string {
@@ -669,44 +660,45 @@ function TaskGanttView({ productionId, tasks, milestones, phases }: Props) {
   // 轴锚点：最早内容（任务∪阶段）与今天取早者，按粒度取整；跨度固定。
   // 开放尾阶段只贡献 start，不拉长轴。
   const { axisStart, axisDays, labels } = useMemo(() => {
-    const today = new Date();
+    const [todayYear, todayMonth, todayDay] = todayCSTStr().split("-").map(Number);
+    const today = new Date(Date.UTC(todayYear, todayMonth - 1, todayDay));
     const candidates: Date[] = [today];
-    if (timedTasks[0]?.effectiveStartTime) candidates.push(new Date(timedTasks[0].effectiveStartTime));
-    for (const p of phases) candidates.push(new Date(`${p.startDate}T00:00:00`));
+    if (timedTasks[0]?.effectiveStartTime) candidates.push(cstAxisDateFromIso(timedTasks[0].effectiveStartTime));
+    for (const p of phases) candidates.push(new Date(dateOnlyAxisMs(p.startDate)));
     const base = candidates.reduce((min, d) => (d < min ? d : min), today);
     if (scale === "day") {
       const start = floorToMonday(base);
       return {
         axisStart: start, axisDays: 42,
         labels: Array.from({ length: 6 }, (_, i) => {
-          const d = new Date(start); d.setDate(d.getDate() + i * 7);
-          return `${d.getMonth() + 1}/${d.getDate()}`;
+          const d = new Date(start); d.setUTCDate(d.getUTCDate() + i * 7);
+          return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
         }),
       };
     }
     if (scale === "month") {
-      const start = new Date(base.getFullYear(), base.getMonth(), 1);
-      const end = new Date(start.getFullYear(), start.getMonth() + 6, 1);
+      const start = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), 1));
+      const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 6, 1));
       return {
         axisStart: start, axisDays: Math.round((end.getTime() - start.getTime()) / DAY_MS),
         labels: Array.from({ length: 6 }, (_, i) => {
-          const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
-          return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+          const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + i, 1));
+          return `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
         }),
       };
     }
     if (scale === "quarter") {
-      const start = new Date(base.getFullYear(), Math.floor(base.getMonth() / 3) * 3, 1);
-      const end = new Date(start.getFullYear(), start.getMonth() + 18, 1);
+      const start = new Date(Date.UTC(base.getUTCFullYear(), Math.floor(base.getUTCMonth() / 3) * 3, 1));
+      const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 18, 1));
       return {
         axisStart: start, axisDays: Math.round((end.getTime() - start.getTime()) / DAY_MS),
         labels: Array.from({ length: 6 }, (_, i) => {
-          const d = new Date(start.getFullYear(), start.getMonth() + i * 3, 1);
-          return `${d.getFullYear()} Q${Math.floor(d.getMonth() / 3) + 1}`;
+          const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + i * 3, 1));
+          return `${d.getUTCFullYear()} Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
         }),
       };
     }
-    const start = new Date(base.getFullYear(), 0, 1);
+    const start = new Date(Date.UTC(base.getUTCFullYear(), 0, 1));
     return {
       axisStart: start, axisDays: 365,
       labels: Array.from({ length: 12 }, (_, i) => `${i + 1} 月`),
@@ -717,7 +709,7 @@ function TaskGanttView({ productionId, tasks, milestones, phases }: Props) {
   const pct = (ms: number) => Math.max(0, Math.min(100, (ms - axisStart.getTime()) / (axisEndMs - axisStart.getTime()) * 100));
 
   const visibleMilestones = milestones.filter(m => {
-    const ms = new Date(`${m.endDate.slice(0, 10)}T12:00:00`).getTime();
+    const ms = Date.parse(`${m.endDate.slice(0, 10)}T12:00:00Z`);
     return ms >= axisStart.getTime() && ms < axisEndMs;
   });
 
@@ -853,7 +845,7 @@ function TaskGanttView({ productionId, tasks, milestones, phases }: Props) {
                   <b key={l} style={{ fontSize: 9, fontWeight: 400, color: "var(--muted)", textAlign: "left", paddingTop: 4, borderLeft: "1px solid var(--line)", paddingLeft: 5 }}>{l}</b>
                 ))}
                 {visibleMilestones.map(m => {
-                  const left = pct(new Date(`${m.endDate.slice(0, 10)}T12:00:00`).getTime());
+                  const left = pct(Date.parse(`${m.endDate.slice(0, 10)}T12:00:00Z`));
                   return (
                     <strong
                       key={m.id}
@@ -869,8 +861,8 @@ function TaskGanttView({ productionId, tasks, milestones, phases }: Props) {
             {/* 阶段背景带行（在任务行上方；开放尾渐隐到轴右缘） */}
             {phases.map((p, pi) => {
               const tone = phaseTone(pi);
-              const sMs = new Date(`${p.startDate}T00:00:00`).getTime();
-              const eMs = p.endDate ? new Date(`${p.endDate}T23:59:59`).getTime() : null;
+              const sMs = dateOnlyAxisMs(p.startDate);
+              const eMs = p.endDate ? dateOnlyAxisMs(p.endDate, true) : null;
               const outOfAxis = sMs >= axisEndMs || (eMs !== null && eMs < axisStart.getTime());
               const left = pct(sMs);
               const right = eMs === null ? 100 : pct(eMs);
@@ -918,8 +910,8 @@ function TaskGanttView({ productionId, tasks, milestones, phases }: Props) {
             })}
             {/* 任务行 */}
             {timedTasks.map(t => {
-              const startMs = new Date(t.effectiveStartTime!).getTime();
-              const endMs = Math.max(startMs + DAY_MS * 0.5, new Date(t.effectiveEndTime ?? t.effectiveStartTime!).getTime());
+              const startMs = cstAxisDateFromIso(t.effectiveStartTime!).getTime();
+              const endMs = Math.max(startMs + DAY_MS * 0.5, cstAxisDateFromIso(t.effectiveEndTime ?? t.effectiveStartTime!).getTime());
               const left = pct(startMs);
               const width = Math.max(pct(endMs) - left, 1.5);
               const tone = barTone(t);
@@ -1017,7 +1009,7 @@ function fmtMin(total: number): string {
 
 /**
  * 版面的一列。服务端由两张表拼出来：
- *   event_rundown_column  → id / 顺序 / visible / frozen(is_pinned) / matchLocation
+ *   event_rundown_column  → id / 顺序 / visible / pinned(is_pinned) / matchLocation
  *   event_group           → name / 成员（部门 + 人）
  *
  * 没有 roleNames：role 是项目可配置表、会改名，落库会漂。角色 chip 保留在编辑器里，
@@ -1036,7 +1028,7 @@ type RundownColumn = {
   location: string;
   visible: boolean;
   /** 横向滚动时钉在左侧 → 服务端 is_pinned。与用户组的冻结快照无关。 */
-  frozen: boolean;
+  pinned: boolean;
 };
 
 type ServerUserGroup = {
@@ -1094,9 +1086,9 @@ function RundownColumnEditor({ column, departments, members, roles, onChange, on
           onBlur={() => { if (draftName.trim() && draftName !== column.name) onRename(draftName.trim()); }}
         />
       </label>
-      <button type="button" className={styles.menuAction} onClick={() => onChange({ frozen: !column.frozen })}>
-        <span>{column.frozen ? "▣" : "▢"}</span>
-        <span><b>{column.frozen ? "取消冻结此列" : "冻结此列"}</b><small>横向滚动时保持在左侧</small></span>
+      <button type="button" className={styles.menuAction} onClick={() => onChange({ pinned: !column.pinned })}>
+        <span>{column.pinned ? "▣" : "▢"}</span>
+        <span><b>{column.pinned ? "取消钉住此列" : "钉住此列"}</b><small>横向滚动时保持在左侧</small></span>
       </button>
       <div className={styles.optionSection}><b>部门</b><div className={styles.multiPicker}>{departments.map(dept => <button key={dept.id} type="button" className={`${styles.toggleChip} ${column.departmentIds.includes(dept.id) ? styles.toggleChipActive : ""}`} onClick={() => onToggleValue("departmentIds", dept.id)}>{dept.name}</button>)}</div></div>
       {/* 角色是「按角色批量勾人」的快捷方式，不落库——role 是项目可配置表，会改名。
@@ -1186,6 +1178,12 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   const [entryColors, setEntryColors] = useState<Record<string, string>>({});
   const [entryLaneOverrides, setEntryLaneOverrides] = useState<Record<string, string[]>>({});
   const [layoutError, setLayoutError] = useState<string | null>(null);
+  const columnsTagRef = useRef("");
+  const placementsTagRef = useRef("");
+  const layoutSaveInFlightRef = useRef<Promise<void>>(Promise.resolve());
+  const placementsSaveInFlightRef = useRef<Promise<void>>(Promise.resolve());
+  const layoutDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingLayoutRef = useRef<RundownColumn[] | null>(null);
   const dragColumnId = useRef<string | null>(null);
   const dragEntryRef = useRef<RundownDragEntry | null>(null);
   const resizeRef = useRef<{ selection: RundownEntrySelection; edge: "start" | "end"; startY: number; startIso: string; endIso: string; nextStart: string; nextEnd: string } | null>(null);
@@ -1193,7 +1191,12 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   // 版面来自服务端，不再是每人一份的 localStorage——rundown 是 organizer 定好
   // 大家遵守的东西。列 = event_rundown_column ⋈ event_group。
   useEffect(() => {
-    if (!eventId) { setColumns([]); return; }
+    if (!eventId) {
+      setColumns([]);
+      columnsTagRef.current = "";
+      placementsTagRef.current = "";
+      return;
+    }
     let cancelled = false;
     Promise.all([
       fetch(`${BASE_PATH}/api/production/${productionId}/user-groups?eventId=${eventId}`).then(r => r.json()).catch(() => ({})),
@@ -1214,7 +1217,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
           userIds: (group?.members ?? []).filter(m => m.kind === "user").map(m => m.id),
           location: col.matchLocation ?? "",
           visible: col.isVisible,
-          frozen: col.isPinned,
+          pinned: col.isPinned,
         };
       }));
       const colors: Record<string, string> = {};
@@ -1226,6 +1229,8 @@ function TimetableView({ productionId, events, departments, members }: Props) {
       }
       setEntryColors(colors);
       setEntryLaneOverrides(lanes);
+      columnsTagRef.current = typeof layoutRes.columnsTag === "string" ? layoutRes.columnsTag : "";
+      placementsTagRef.current = typeof layoutRes.placementsTag === "string" ? layoutRes.placementsTag : "";
     });
     return () => { cancelled = true; };
   }, [productionId, eventId]);
@@ -1255,10 +1260,10 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   const lanes = useMemo<RundownColumn[]>(() => {
     if (viewMode === "custom") {
       const active = columns.filter(column => column.visible);
-      return active.length ? active : [{ id: "__empty", groupId: null, name: "未选择列", kind: "people", departmentIds: [], userIds: [], location: "", visible: true, frozen: false }];
+      return active.length ? active : [{ id: "__empty", groupId: null, name: "未选择列", kind: "people", departmentIds: [], userIds: [], location: "", visible: true, pinned: false }];
     }
-    const all = departments.map(dept => ({ id: `all-${dept.id}`, groupId: null, name: dept.name, kind: "people" as const, departmentIds: [dept.id], userIds: [], location: "", visible: true, frozen: false }));
-    return all.length ? all : [{ id: "__all", groupId: null, name: "全体成员", kind: "people", departmentIds: [], userIds: [], location: "", visible: true, frozen: false }];
+    const all = departments.map(dept => ({ id: `all-${dept.id}`, groupId: null, name: dept.name, kind: "people" as const, departmentIds: [dept.id], userIds: [], location: "", visible: true, pinned: false }));
+    return all.length ? all : [{ id: "__all", groupId: null, name: "全体成员", kind: "people", departmentIds: [], userIds: [], location: "", visible: true, pinned: false }];
   }, [columns, departments, viewMode]);
 
   // 人员选项：schedule 参与人 + 任务 assignee 聚合
@@ -1359,27 +1364,59 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   }
 
   /** 版面落库：顺序 / 显隐 / 粘性 / 地点列。列身份由服务端按 group|地点 认。 */
-  const saveLayout = useCallback(async (next: RundownColumn[]) => {
+  const persistLayout = useCallback(async (next: RundownColumn[]) => {
     if (!eventId) return;
     setLayoutError(null);
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/rundown`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        expectedColumnsTag: columnsTagRef.current || undefined,
         columns: next.map(c => c.kind === "location"
-          ? { matchLocation: c.location, isVisible: c.visible, isPinned: c.frozen }
-          : { groupId: c.groupId, isVisible: c.visible, isPinned: c.frozen }),
+          ? { matchLocation: c.location, isVisible: c.visible, isPinned: c.pinned }
+          : { groupId: c.groupId, isVisible: c.visible, isPinned: c.pinned }),
       }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) { setLayoutError(data.error ?? "版面保存失败"); return; }
+    if (!res.ok) {
+      setLayoutError(res.status === 409 ? "版面已被其他成员更新，请刷新页面后再编辑" : (data.error ?? "版面保存失败"));
+      return;
+    }
+    if (typeof data.columnsTag === "string") columnsTagRef.current = data.columnsTag;
     // 用服务端回来的 id 回填——新建的列在本地是 `new-*`，条目钉列要引用真实 id。
     // 服务端按 order_index 返回，而 order_index 就是这次入参的下标，故按位对齐。
     const serverColumns = (data.columns ?? []) as ServerRundownColumn[];
     setColumns(next.map((c, i) => serverColumns[i] ? { ...c, id: serverColumns[i].id } : c));
   }, [productionId, eventId]);
 
+  /** 同一浏览器的保存严格串行，避免自己的两个请求也拿着同一个旧指纹互撞。 */
+  const saveLayout = useCallback((next: RundownColumn[]) => {
+    const run = layoutSaveInFlightRef.current
+      .catch(() => undefined)
+      .then(() => persistLayout(next));
+    layoutSaveInFlightRef.current = run;
+    return run;
+  }, [persistLayout]);
+
+  /** 连续拖列/切显隐合并为一次写入；需要服务端 id 的新列仍走立即保存。 */
+  const queueLayoutSave = useCallback((next: RundownColumn[]) => {
+    pendingLayoutRef.current = next;
+    if (layoutDebounceRef.current) clearTimeout(layoutDebounceRef.current);
+    layoutDebounceRef.current = setTimeout(() => {
+      const pending = pendingLayoutRef.current;
+      pendingLayoutRef.current = null;
+      layoutDebounceRef.current = null;
+      if (pending) void saveLayout(pending);
+    }, 300);
+  }, [saveLayout]);
+
+  useEffect(() => () => {
+    if (layoutDebounceRef.current) clearTimeout(layoutDebounceRef.current);
+    layoutDebounceRef.current = null;
+    pendingLayoutRef.current = null;
+  }, [eventId]);
+
   /** 条目表现落库：颜色 + 钉列。 */
-  const savePlacements = useCallback(async (
+  const persistPlacements = useCallback(async (
     colors: Record<string, string>, lanes: Record<string, string[]>,
   ) => {
     if (!eventId) return;
@@ -1387,6 +1424,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/rundown`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        expectedPlacementsTag: placementsTagRef.current || undefined,
         placements: keys.map(key => {
           const [entryType, ...rest] = key.split(":");
           return {
@@ -1398,8 +1436,23 @@ function TimetableView({ productionId, events, departments, members }: Props) {
         }),
       }),
     });
-    if (!res.ok) setLayoutError((await res.json().catch(() => ({}))).error ?? "事项表现保存失败");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setLayoutError(res.status === 409 ? "事项版面已被其他成员更新，请刷新页面后再编辑" : (data.error ?? "事项表现保存失败"));
+      return;
+    }
+    if (typeof data.placementsTag === "string") placementsTagRef.current = data.placementsTag;
   }, [productionId, eventId]);
+
+  const savePlacements = useCallback((
+    colors: Record<string, string>, lanes: Record<string, string[]>,
+  ) => {
+    const run = placementsSaveInFlightRef.current
+      .catch(() => undefined)
+      .then(() => persistPlacements(colors, lanes));
+    placementsSaveInFlightRef.current = run;
+    return run;
+  }, [persistPlacements]);
 
   /**
    * 改列的展示属性（显隐 / 粘性）——只动版面，不动用户组。
@@ -1410,7 +1463,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   function updateColumn(id: string, patch: Partial<RundownColumn>) {
     const next = columns.map(column => column.id === id ? { ...column, ...patch } : column);
     setColumns(next);
-    void saveLayout(next);
+    queueLayoutSave(next);
   }
 
   /**
@@ -1479,7 +1532,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
       groupId: null,
       name: kind === "people" ? `人员组 ${suffix}` : `地点 ${suffix}`,
       kind,
-      departmentIds: [], userIds: [], location: "", visible: true, frozen: false,
+      departmentIds: [], userIds: [], location: "", visible: true, pinned: false,
     };
     const next = [...columns];
     next.splice(Math.max(0, Math.min(insertAt, next.length)), 0, nextColumn);
@@ -1494,7 +1547,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     const next = columns.filter(c => c.id !== id);
     setColumns(next);
     setEditingColumnId(null);
-    void saveLayout(next);
+    queueLayoutSave(next);
   }
 
   function dropColumn(targetId: string) {
@@ -1508,7 +1561,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
     setColumns(next);
-    void saveLayout(next);
+    queueLayoutSave(next);
   }
 
   function entryKey(selection: RundownEntrySelection): string {
@@ -1743,9 +1796,15 @@ function TimetableView({ productionId, events, departments, members }: Props) {
       ) : loading ? (
         <p style={{ margin: 0, padding: "36px 0", textAlign: "center", fontSize: 12, color: "var(--muted)" }}>加载中…</p>
       ) : items.length === 0 && eventTasks.length === 0 ? (
-        <p style={{ margin: 0, padding: "36px 0", textAlign: "center", fontSize: 12, color: "var(--muted)" }}>
-          该事件暂无日程条目。在事件详情页添加日程后此处生成执行表。
-        </p>
+        <div style={{ padding: "36px 18px", textAlign: "center", color: "var(--muted)" }}>
+          <p style={{ margin: 0, fontSize: 12 }}>这个事件还没有执行流程。</p>
+          <Link
+            href={`/production/${productionId}/events/${event.id}`}
+            style={{ display: "inline-flex", marginTop: 12, border: "1px solid var(--ink)", borderRadius: 8, padding: "8px 13px", background: "var(--ink)", color: "#fff", textDecoration: "none", fontSize: 11, fontWeight: 700 }}
+          >
+            ＋ 前往事件详情添加第一项
+          </Link>
+        </div>
       ) : (
         /* 原型 rundownMatrixWrap：690px 限高滚动容器 + 38px 横纹底 + sticky 表头/时间列 */
         <div style={{ maxHeight: 690, overflow: "auto", border: "1px solid var(--line)", borderRadius: 11, background: "#f7f7f3" }}>
@@ -1784,7 +1843,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
             ))}
             {/* 泳道表头（sticky top，ink 底白字） */}
             {lanes.map((lane, i) => {
-              const frozenIndex = lanes.slice(0, i).filter(column => column.frozen).length;
+              const pinnedIndex = lanes.slice(0, i).filter(column => column.pinned).length;
               return (
                 <div
                   key={lane.id}
@@ -1801,13 +1860,13 @@ function TimetableView({ productionId, events, departments, members }: Props) {
                   title={editMode ? "长按拖动调整顺序；双击编辑人员组" : lane.name}
                   style={{
                     gridColumn: i + 2, gridRow: headerRow, position: "sticky", top: hasLocationRow ? 34 : 0,
-                    left: lane.frozen ? 86 + frozenIndex * 150 : undefined, zIndex: lane.frozen ? 24 : 14,
+                    left: lane.pinned ? 86 + pinnedIndex * 150 : undefined, zIndex: lane.pinned ? 24 : 14,
                     padding: 10, borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)",
-                    background: lane.frozen ? "#294340" : "var(--ink)", color: "#fff", display: "flex", flexDirection: "column",
+                    background: lane.pinned ? "#294340" : "var(--ink)", color: "#fff", display: "flex", flexDirection: "column",
                     cursor: editMode ? "grab" : "default",
                   }}
                 >
-                  <b style={{ paddingRight: editMode ? 22 : 0, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{lane.frozen ? "▣ " : ""}{lane.name}</b>
+                  <b style={{ paddingRight: editMode ? 22 : 0, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{lane.pinned ? "▣ " : ""}{lane.name}</b>
                   {editMode && <>
                     <button type="button" draggable={false} className={styles.columnMenuButton} aria-label={`编辑人员组 ${lane.name}`} aria-expanded={editingColumnId === lane.id} onClick={event => { event.stopPropagation(); setSelectedEntry(null); setEditingColumnId(current => current === lane.id ? null : lane.id); }}><span aria-hidden="true">⌄</span></button>
                     <button type="button" draggable={false} className={styles.insertColumnButton} aria-label={`在 ${lane.name} 右侧插入人员组`} onClick={event => { event.stopPropagation(); addColumn("people", i + 1); }}><span className={styles.insertColumnGlyph} aria-hidden="true">+</span></button>
@@ -1845,8 +1904,8 @@ function TimetableView({ productionId, events, departments, members }: Props) {
               const tone = ITEM_TONE[it.itemType] ?? ITEM_TONE.custom;
               const dur = minutesOfIso(it.endTime!) - minutesOfIso(it.startTime!);
               const laneIndex = pl.start - 2;
-              const frozenIndex = lanes.slice(0, laneIndex).filter(column => column.frozen).length;
-              const sticky = pl.span === 1 && lanes[laneIndex]?.frozen;
+              const pinnedIndex = lanes.slice(0, laneIndex).filter(column => column.pinned).length;
+              const sticky = pl.span === 1 && lanes[laneIndex]?.pinned;
               const selected = selectedEntry?.kind === "item" && selectedEntry.id === it.id;
               return (
                 <article
@@ -1859,7 +1918,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
                   style={{
                   gridColumn: `${pl.start} / span ${pl.span}`,
                   gridRow: `${rowStart} / span ${rowSpan}`,
-                  position: sticky ? "sticky" : undefined, left: sticky ? 86 + frozenIndex * 150 : undefined,
+                  position: sticky ? "sticky" : undefined, left: sticky ? 86 + pinnedIndex * 150 : undefined,
                   zIndex: sticky ? 9 : 4, minWidth: 0, margin: 2, padding: "7px 8px", overflow: "hidden",
                   border: `1px solid ${selected ? "#2463d4" : tone.border}`, borderRadius: 7,
                   outline: selected ? "2px solid rgba(36,99,212,.24)" : undefined,
@@ -1893,8 +1952,8 @@ function TimetableView({ productionId, events, departments, members }: Props) {
               const tone = ITEM_TONE.task;
               const dur = minutesOfIso(t.effectiveEndTime!) - minutesOfIso(t.effectiveStartTime!);
               const laneIndex = pl.start - 2;
-              const frozenIndex = lanes.slice(0, laneIndex).filter(column => column.frozen).length;
-              const sticky = pl.span === 1 && lanes[laneIndex]?.frozen;
+              const pinnedIndex = lanes.slice(0, laneIndex).filter(column => column.pinned).length;
+              const sticky = pl.span === 1 && lanes[laneIndex]?.pinned;
               const selected = selectedEntry?.kind === "task" && selectedEntry.id === t.id;
               return (
                 <Link
@@ -1908,7 +1967,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
                   style={{
                     gridColumn: `${pl.start} / span ${pl.span}`,
                     gridRow: `${rowStart} / span ${rowSpan}`,
-                    position: sticky ? "sticky" : undefined, left: sticky ? 86 + frozenIndex * 150 : undefined,
+                    position: sticky ? "sticky" : undefined, left: sticky ? 86 + pinnedIndex * 150 : undefined,
                     zIndex: sticky ? 9 : 4, minWidth: 0, margin: 2, padding: "7px 8px", overflow: "hidden",
                     border: `1px ${selected ? "solid" : "dashed"} ${selected ? "#2463d4" : tone.border}`, borderRadius: 7,
                     outline: selected ? "2px solid rgba(36,99,212,.24)" : undefined,

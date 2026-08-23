@@ -39,6 +39,8 @@ export type FrozenGroupMember = {
   /** null = 直接个人成员，不是被某个部门带进来的 */
   viaDeptId: string | null;
   viaDeptName: string | null;
+  /** 冻结当刻，这个自然人是不是该组 POC（支持一个部门有多个 POC）。 */
+  wasPoc: boolean;
 };
 
 export type FrozenGroup = {
@@ -97,14 +99,24 @@ export async function frozenGroupUserIds(eventId: string, groupId: string): Prom
   return res.rows.map(r => r.user_id);
 }
 
-/** 生效中快照里这个组**当时**的 POC 是谁。追责用；善后不要用这个自动跳转。 */
+/** 生效中快照里这个组**当时**的全部 POC。追责用；善后不要用这个自动跳转。 */
 export async function frozenGroupPocUserIds(eventId: string, groupId: string): Promise<string[]> {
-  const res = await getPool().query<{ poc_user_id: string | null }>(
-    `SELECT poc_user_id FROM event_group_freeze
-      WHERE event_id = $1 AND group_id = $2 AND released_at IS NULL`,
+  const res = await getPool().query<{ user_id: string }>(
+    `SELECT DISTINCT m.user_id
+       FROM event_group_freeze f
+       JOIN event_group_freeze_member m
+         ON m.event_id = f.event_id AND m.group_id = f.group_id AND m.frozen_at = f.frozen_at
+      WHERE f.event_id = $1 AND f.group_id = $2 AND f.released_at IS NULL
+        AND m.was_poc = true AND m.user_id IS NOT NULL
+      UNION
+     -- 兼容迁移前已经生成、成员行尚未带 was_poc 标记的历史快照。
+     SELECT f.poc_user_id AS user_id
+       FROM event_group_freeze f
+      WHERE f.event_id = $1 AND f.group_id = $2 AND f.released_at IS NULL
+        AND f.poc_user_id IS NOT NULL`,
     [eventId, groupId],
   );
-  return res.rows.map(r => r.poc_user_id).filter((v): v is string => v !== null);
+  return res.rows.map(r => r.user_id);
 }
 
 /**
@@ -143,9 +155,9 @@ export async function describeFrozenGroups(eventId: string): Promise<(FrozenGrou
 
   const members = await pool.query<{
     group_id: string; user_id: string | null; user_name: string;
-    via_dept_id: string | null; via_dept_name: string | null;
+    via_dept_id: string | null; via_dept_name: string | null; was_poc: boolean;
   }>(
-    `SELECT m.group_id, m.user_id, m.user_name, m.via_dept_id, m.via_dept_name
+    `SELECT m.group_id, m.user_id, m.user_name, m.via_dept_id, m.via_dept_name, m.was_poc
        FROM event_group_freeze f
        JOIN event_group_freeze_member m
          ON m.event_id = f.event_id AND m.group_id = f.group_id AND m.frozen_at = f.frozen_at
@@ -159,6 +171,7 @@ export async function describeFrozenGroups(eventId: string): Promise<(FrozenGrou
     byGroup.get(r.group_id)!.push({
       userId: r.user_id, userName: r.user_name,
       viaDeptId: r.via_dept_id, viaDeptName: r.via_dept_name,
+      wasPoc: r.was_poc,
     });
   }
 
@@ -243,9 +256,8 @@ export async function freezeEventGroups(
          SELECT $1, g.id, $4::timestamptz, g.name,
                 g.poc_dept_id,
                 (SELECT d.name FROM production_dept d WHERE d.id = g.poc_dept_id),
-                -- POC 部门型：把「当时该部门的实际 POC 那个人」一起冻下来。只记部门
-                -- 的话，一年后追责追到的是现任而不是当时那位。多 POC 取定序第一个：
-                -- 责任单点指主体唯一，落到自然人时取一个可追的代表。
+                -- 头表保留一个代表 POC，兼容既有展示；全部自然人 POC 由下方成员行
+                -- 的 was_poc 保存，权限判定不会再丢掉同部门的其他 POC。
                 COALESCE(g.poc_user_id, (
                   SELECT pdm.user_id FROM production_dept_member pdm
                    WHERE pdm.dept_id = g.poc_dept_id AND pdm.is_poc = true
@@ -268,20 +280,22 @@ export async function freezeEventGroups(
 
       await client.query(
         `INSERT INTO event_group_freeze_member
-           (event_id, group_id, frozen_at, user_id, user_name, via_dept_id, via_dept_name)
+           (event_id, group_id, frozen_at, user_id, user_name, via_dept_id, via_dept_name, was_poc)
          -- 直接个人成员：via_dept_* 为空
          SELECT $1::text, $2::uuid, $3::timestamptz, egm.user_id,
                 COALESCE(NULLIF(up.display_name, ''), up.name, egm.user_id::text),
-                NULL, NULL
+                NULL, NULL, COALESCE(egm.user_id = g.poc_user_id, false)
            FROM event_group_member egm
+           JOIN event_group g ON g.id = egm.group_id
            LEFT JOIN user_profile up ON up.user_id = egm.user_id
           WHERE egm.group_id = $2 AND egm.user_id IS NOT NULL
           UNION ALL
          -- 部门带入：记下他当时以哪个部门的身份在场，善后靠这条顺藤摸瓜
          SELECT $1::text, $2::uuid, $3::timestamptz, pdm.user_id,
                 COALESCE(NULLIF(up.display_name, ''), up.name, pdm.user_id::text),
-                d.id, d.name
+                d.id, d.name, COALESCE(egm.dept_id = g.poc_dept_id AND pdm.is_poc, false)
            FROM event_group_member egm
+           JOIN event_group g ON g.id = egm.group_id
            JOIN production_dept d ON d.id = egm.dept_id
            JOIN production_dept_member pdm ON pdm.dept_id = d.id
            LEFT JOIN user_profile up ON up.user_id = pdm.user_id

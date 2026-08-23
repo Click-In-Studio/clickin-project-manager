@@ -7,6 +7,7 @@ import {
   AMOUNT_RE,
   deleteBudgetCategory, FinanceError, getBudgetCategory, updateBudgetCategory,
 } from "@/lib/finance-db";
+import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string; categoryId: string }> };
 
@@ -22,9 +23,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "finance", categoryId, "budget", "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const body = (await req.json()) as {
-    name?: unknown; amount?: unknown; deptId?: unknown; orderIndex?: unknown; notes?: unknown;
-  };
+  const parsedBody = await readJsonObject(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.value;
   // 给了 name 就必须是非空的。db 层只 trim 不拒，DDL 只有 NOT NULL——
   // 少了这道，PATCH {name:"   "} 会静静落成一个空名科目，而 POST 明明是拦的
   if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim()))

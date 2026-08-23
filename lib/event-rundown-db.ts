@@ -20,6 +20,7 @@
  * 条件，不是一个存起来的地点实体。
  */
 
+import type { PoolClient } from "pg";
 import { getPool } from "./pg";
 
 export type RundownColumn = {
@@ -45,6 +46,55 @@ export type RundownPlacement = {
 export class RundownError extends Error {
   constructor(readonly reason: "bad_column" | "bad_entry", message: string) {
     super(message);
+  }
+}
+
+export class RundownConflictError extends Error {
+  constructor(readonly aspect: "columns" | "placements") {
+    super("执行表已被其他成员更新，请刷新后再试");
+  }
+}
+
+type RundownTags = { columnsTag: string; placementsTag: string };
+
+async function columnsTag(client: PoolClient, eventId: string): Promise<string> {
+  const res = await client.query<{ tag: string }>(
+    `SELECT md5(COALESCE(jsonb_agg(
+       jsonb_build_array(group_id::text, match_location, order_index, is_visible, is_pinned)
+       ORDER BY order_index, id
+     ), '[]'::jsonb)::text) AS tag
+       FROM event_rundown_column WHERE event_id = $1`,
+    [eventId],
+  );
+  return res.rows[0].tag;
+}
+
+async function placementsTag(client: PoolClient, eventId: string): Promise<string> {
+  const res = await client.query<{ tag: string }>(
+    `SELECT md5(COALESCE(jsonb_agg(
+       jsonb_build_array(
+         CASE WHEN p.item_id IS NOT NULL THEN 'item' ELSE 'task' END,
+         COALESCE(p.item_id::text, p.task_id::text), p.color,
+         COALESCE((SELECT jsonb_agg(pc.column_id::text ORDER BY pc.column_id)
+                     FROM event_rundown_placement_column pc
+                    WHERE pc.placement_id = p.id), '[]'::jsonb)
+       ) ORDER BY COALESCE(p.item_id::text, p.task_id::text)
+     ), '[]'::jsonb)::text) AS tag
+       FROM event_rundown_placement p WHERE p.event_id = $1`,
+    [eventId],
+  );
+  return res.rows[0].tag;
+}
+
+export async function getRundownTags(eventId: string): Promise<RundownTags> {
+  const client = await getPool().connect();
+  try {
+    const [columns, placements] = await Promise.all([
+      columnsTag(client, eventId), placementsTag(client, eventId),
+    ]);
+    return { columnsTag: columns, placementsTag: placements };
+  } finally {
+    client.release();
   }
 }
 
@@ -113,10 +163,14 @@ export async function setRundownColumns(
   eventId: string,
   productionId: string,
   columns: RundownColumnInput[],
+  expectedTag?: string,
 ): Promise<RundownColumn[]> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1), 1)", [eventId]);
+    if (expectedTag !== undefined && await columnsTag(client, eventId) !== expectedTag)
+      throw new RundownConflictError("columns");
 
     const keep: string[] = [];
     for (const [index, col] of columns.entries()) {
@@ -182,10 +236,14 @@ export async function setRundownColumns(
 export async function setRundownPlacements(
   eventId: string,
   placements: { entryType: "item" | "task"; entryId: string; color?: string | null; pinnedColumnIds?: string[] }[],
+  expectedTag?: string,
 ): Promise<RundownPlacement[]> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1), 2)", [eventId]);
+    if (expectedTag !== undefined && await placementsTag(client, eventId) !== expectedTag)
+      throw new RundownConflictError("placements");
     await client.query("DELETE FROM event_rundown_placement WHERE event_id = $1", [eventId]);
 
     for (const p of placements) {

@@ -4,6 +4,7 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { canEditTechReq } from "@/lib/event-permissions";
 import { isTaskPoc } from "@/lib/task-poc";
+import { readJsonObject } from "@/lib/request-json";
 import {
   getProductionEvent,
   getTechReqByProduction,
@@ -63,7 +64,9 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 
-  const body = await req.json() as { taskIds?: unknown; milestoneIds?: unknown };
+  const parsedBody = await readJsonObject(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.value;
   const asIdList = (v: unknown): string[] | undefined =>
     Array.isArray(v) ? [...new Set(v.filter((id): id is string => typeof id === "string"))] : undefined;
   const nextTaskIds = asIdList(body.taskIds);

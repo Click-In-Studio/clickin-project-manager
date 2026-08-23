@@ -5,6 +5,7 @@ import { toActor } from "@/lib/grant-check";
 import { getProductionEvent, getScheduleItem } from "@/lib/event-db";
 import { canBindGroupToSchedule } from "@/lib/event-group-perm";
 import { EventGroupError, listScheduleItemGroupIds, setScheduleItemGroups } from "@/lib/event-group-db";
+import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; itemId: string }> };
 
@@ -35,7 +36,9 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const item = await getScheduleItem(itemId, eventId);
   if (!item) return Response.json({ error: "流程项不存在" }, { status: 404 });
 
-  const body = (await req.json()) as { groupIds?: unknown };
+  const parsedBody = await readJsonObject(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.value;
   if (!Array.isArray(body.groupIds) || body.groupIds.some(x => typeof x !== "string"))
     return Response.json({ error: "groupIds 必须是 string[]" }, { status: 400 });
 

@@ -1167,6 +1167,12 @@
       "column": "via_dept_name",
       "type": "text",
       "nullable": true
+    },
+    {
+      "column": "was_poc",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
     }
   ],
   "event_group_member": [

@@ -5,6 +5,7 @@ import { toActor } from "@/lib/grant-check";
 import { canWriteMaterial } from "@/lib/material-perm";
 import { resolveSubjectPatch } from "@/lib/task-poc";
 import { deleteMaterial, getMaterial, MaterialError, updateMaterial } from "@/lib/material-db";
+import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string; materialId: string }> };
 
@@ -21,11 +22,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!await canWriteMaterial(toActor(session, access.permCtx), productionId, existing, "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const body = (await req.json()) as {
-    code?: unknown; name?: unknown; category?: unknown;
-    departmentId?: unknown; groupId?: unknown; statusId?: unknown;
-    location?: unknown; quantity?: unknown; notes?: unknown;
-  };
+  const parsedBody = await readJsonObject(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.value;
   if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim()))
     return Response.json({ error: "名称不能为空" }, { status: 400 });
   if (body.quantity !== undefined && (typeof body.quantity !== "number" || body.quantity < 0))

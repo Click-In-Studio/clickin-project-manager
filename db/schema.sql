@@ -580,6 +580,7 @@ CREATE TABLE IF NOT EXISTS event_group_freeze_member (
   user_name     TEXT        NOT NULL,
   via_dept_id   UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
   via_dept_name TEXT,
+  was_poc       BOOLEAN     NOT NULL DEFAULT false,
   FOREIGN KEY (event_id, group_id, frozen_at)
     REFERENCES event_group_freeze (event_id, group_id, frozen_at) ON DELETE CASCADE
 );

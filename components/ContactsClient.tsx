@@ -47,7 +47,14 @@ const ROLE_TONES = [
 ];
 
 function roleTone(role: string): React.CSSProperties {
-  const index = Math.max(0, ROLE_ORDER.indexOf(role));
+  const defaultIndex = ROLE_ORDER.indexOf(role);
+  if (defaultIndex >= 0) return ROLE_TONES[defaultIndex % ROLE_TONES.length];
+
+  // ROLE_ORDER 是默认模板顺序，不是角色白名单。自定义角色按名称稳定散列，
+  // 避免所有未命中项都回落到第一种颜色。
+  let hash = 0;
+  for (const char of role) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  const index = Math.abs(hash);
   return ROLE_TONES[index % ROLE_TONES.length];
 }
 

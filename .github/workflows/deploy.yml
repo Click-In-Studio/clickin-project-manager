@@ -78,8 +78,13 @@ jobs:
       - name: Backup production DB before migrations
         run: |
           SHARED="/var/www/production-manager/shared"
+          # 只部署当前 HEAD 仍存在的迁移。分支中途新增后又改名/删除的文件不能进入
+          # 清单，否则会把从未进主干的名字写成「已执行」幽灵记录，更危险时还会先
+          # 执行一份已经废弃的表结构。awk 同时去掉删除后重加造成的重复路径。
           ORDERED=$(git log --reverse --diff-filter=A --format="%H" -- 'db/add-*.sql' 'db/migrate-*.sql'             | while read commit; do
                 git diff-tree --no-commit-id -r --name-only --diff-filter=A "$commit" -- 'db/add-*.sql' 'db/migrate-*.sql' | sort
+              done | awk '!seen[$0]++' | while IFS= read -r filepath; do
+                [ -f "$filepath" ] && printf '%s\n' "$filepath"
               done)
           ssh prod "cat $SHARED/db-applied.txt 2>/dev/null || true" < /dev/null > /tmp/db-applied-backup-check.txt
           PENDING=0
@@ -114,6 +119,8 @@ jobs:
           ORDERED=$(git log --reverse --diff-filter=A --format="%H" -- 'db/add-*.sql' 'db/migrate-*.sql' \
             | while read commit; do
                 git diff-tree --no-commit-id -r --name-only --diff-filter=A "$commit" -- 'db/add-*.sql' 'db/migrate-*.sql' | sort
+              done | awk '!seen[$0]++' | while IFS= read -r filepath; do
+                [ -f "$filepath" ] && printf '%s\n' "$filepath"
               done)
 
           if [ -z "$ORDERED" ]; then
@@ -131,12 +138,6 @@ jobs:
             FILENAME=$(basename "$FILEPATH")
             if grep -qxF "$FILENAME" /tmp/db-applied.txt 2>/dev/null; then
               echo "SKIP  $FILENAME (already applied)"
-            elif [ ! -f "$FILEPATH" ]; then
-              # File was deleted from the repo (e.g. consolidated into schema.sql).
-              # Mark as applied so future runs don't warn about it.
-              echo "SKIP  $FILENAME (deleted from repo, marking as applied)"
-              ssh prod "echo '$FILENAME' >> $SHARED/db-applied.txt" < /dev/null
-              echo "$FILENAME" >> /tmp/db-applied.txt
             else
               echo "APPLY $FILENAME"
               scp "$FILEPATH" prod:/tmp/migration.sql

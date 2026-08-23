@@ -5,9 +5,10 @@ import { toActor } from "@/lib/grant-check";
 import { canEnterEvent, hasEventContentEdit } from "@/lib/event-permissions";
 import { getProductionEvent } from "@/lib/event-db";
 import {
-  listRundownColumns, listRundownPlacements, RundownError,
+  getRundownTags, listRundownColumns, listRundownPlacements, RundownConflictError, RundownError,
   setRundownColumns, setRundownPlacements,
 } from "@/lib/event-rundown-db";
+import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -28,11 +29,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!await canEnterEvent(toActor(session, access.permCtx), productionId, eventId))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const [columns, placements] = await Promise.all([
+  const [columns, placements, tags] = await Promise.all([
     listRundownColumns(eventId),
     listRundownPlacements(eventId),
+    getRundownTags(eventId),
   ]);
-  return Response.json({ columns, placements });
+  return Response.json({ columns, placements, ...tags });
 }
 
 /**
@@ -55,7 +57,9 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   if (!await hasEventContentEdit(toActor(session, access.permCtx), productionId, eventId, event.status))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const body = (await req.json()) as { columns?: unknown; placements?: unknown };
+  const parsedBody = await readJsonObject(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.value;
 
   try {
     if (body.columns !== undefined) {
@@ -69,7 +73,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
           isVisible: o.isVisible === undefined ? true : !!o.isVisible,
           isPinned: !!o.isPinned,
         };
-      }));
+      }), typeof body.expectedColumnsTag === "string" ? body.expectedColumnsTag : undefined);
     }
     if (body.placements !== undefined) {
       if (!Array.isArray(body.placements))
@@ -88,16 +92,22 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
             : [],
         });
       }
-      await setRundownPlacements(eventId, parsed);
+      await setRundownPlacements(
+        eventId, parsed,
+        typeof body.expectedPlacementsTag === "string" ? body.expectedPlacementsTag : undefined,
+      );
     }
   } catch (e) {
+    if (e instanceof RundownConflictError)
+      return Response.json({ error: e.message, conflict: e.aspect }, { status: 409 });
     if (e instanceof RundownError) return Response.json({ error: e.message }, { status: 400 });
     throw e;
   }
 
-  const [columns, placements] = await Promise.all([
+  const [columns, placements, tags] = await Promise.all([
     listRundownColumns(eventId),
     listRundownPlacements(eventId),
+    getRundownTags(eventId),
   ]);
-  return Response.json({ columns, placements });
+  return Response.json({ columns, placements, ...tags });
 }

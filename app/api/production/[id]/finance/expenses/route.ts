@@ -6,6 +6,7 @@ import {
   AMOUNT_RE,
   FinanceError, getBudgetCategory, listExpenses, submitExpense,
 } from "@/lib/finance-db";
+import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -49,9 +50,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "finance", "*", "expenses", "create"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const body = (await req.json()) as {
-    categoryId?: unknown; title?: unknown; amount?: unknown; currency?: unknown; note?: unknown;
-  };
+  const parsedBody = await readJsonObject(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.value;
   const title = typeof body.title === "string" ? body.title.trim() : "";
   if (!title) return Response.json({ error: "事由不能为空" }, { status: 400 });
   const amount = typeof body.amount === "string" ? body.amount : String(body.amount ?? "");

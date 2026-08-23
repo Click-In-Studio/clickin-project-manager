@@ -7,6 +7,7 @@ import { parseTaskSubject } from "@/lib/task-poc";
 import {
   createMaterial, listMaterials, listMaterialStatuses, MaterialError,
 } from "@/lib/material-db";
+import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -40,11 +41,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   if (access.isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  const body = (await req.json()) as {
-    code?: unknown; name?: unknown; category?: unknown;
-    departmentId?: unknown; groupId?: unknown; statusId?: unknown;
-    location?: unknown; quantity?: unknown; notes?: unknown;
-  };
+  const parsedBody = await readJsonObject(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.value;
   const code = typeof body.code === "string" ? body.code.trim() : "";
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!code) return Response.json({ error: "编号不能为空" }, { status: 400 });
