@@ -105,6 +105,24 @@ describe("transformFeishuHtml", () => {
     expect(out).toContain("[飞书视频：家.mp4]");
   });
 
+  it("飞书文档图片（鉴权 URL）→ 带文件名/尺寸的占位文本", () => {
+    const snapshot = { image: { name: "剧照.jpg", width: 864, height: 1080 } };
+    const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
+    const b64 = btoa(String.fromCharCode(...bytes));
+    const html = `<div data-lark-html-role="root"><img src="https://x.feishu.cn/space/api/box/stream/download/asynccode/?code=abc" data-snapshot="${b64}"></div>`;
+    const out = transformFeishuHtml(html);
+    expect(out).not.toContain("<img");
+    expect(out).toContain("剧照.jpg");
+    expect(out).toContain("864×1080");
+    expect(out).toContain("复制图片");
+  });
+
+  it("飞书图片无元数据 → 匿名占位；非飞书图片原样保留", () => {
+    const out = transformFeishuHtml(`<div data-lark-html-role="root"><img src="https://y.feishu.cn/img/1"><img src="https://example.com/normal.png"></div>`);
+    expect(out).toContain("[图片");
+    expect(out).toContain('<img src="https://example.com/normal.png">');
+  });
+
   it("标准结构（标题/表格/引用/加粗）原样保留", () => {
     const html = `<div data-lark-html-role="root"><h2 class="heading-2">标题</h2><table class="ace-table"><tbody><tr><td colspan="1" rowspan="1">格</td></tr></tbody></table><blockquote data-type="quote_container">引</blockquote><strong>粗</strong></div>`;
     const out = transformFeishuHtml(html);

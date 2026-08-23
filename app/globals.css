@@ -147,6 +147,18 @@ body {
 .wiki-callout > p { margin: 0; }
 .wiki-callout > p + p { margin-top: 4px; }
 
+/* wiki 正文图片（![alt](/__cm__asset:<id>)）——编辑器与只读渲染共用 */
+.wiki-image {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.ProseMirror-selectednode.wiki-image,
+img.wiki-image.ProseMirror-selectednode {
+  outline: 2px solid #0ea5e9;
+  outline-offset: 2px;
+}
+
 /* Inline stage directions within dialogue blocks */
 .stage-inline,
 span[data-stage-inline] {

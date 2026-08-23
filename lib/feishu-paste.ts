@@ -22,8 +22,35 @@ export function transformFeishuHtml(html: string, opts: { members?: FeishuMember
   normalizeCodeBlocks(body);
   normalizeChecklists(body);
   mapAtMentions(doc, body, opts.members ?? []);
+  replaceFeishuImages(doc, body);
   replaceVideos(doc, body);
   return body.innerHTML;
+}
+
+// ── 图片：整篇粘贴路径降级为占位文本 ─────────────────────────────────────────
+// 实测：飞书文档 HTML 里的 img src 是鉴权 URL（~1h 过期 token + 需飞书登录态
+// + 水印），我们既过不了 CORS 也没有登录态，无法转存；data-snapshot(base64)
+// 里有原文件名/尺寸，用它把占位做得有信息量。单图「复制图片」路径剪贴板携带
+// 真文件，由编辑器 handlePaste 上传，不经此处。
+function replaceFeishuImages(doc: Document, body: HTMLElement) {
+  for (const img of Array.from(body.querySelectorAll("img"))) {
+    const src = img.getAttribute("src") ?? "";
+    const snapshotRaw = img.getAttribute("data-snapshot");
+    if (snapshotRaw == null && !/feishu|larksuite/.test(src)) continue; // 非飞书图不动
+    let name = "";
+    let dims = "";
+    if (snapshotRaw) {
+      try {
+        const bytes = Uint8Array.from(atob(snapshotRaw), c => c.charCodeAt(0));
+        const snap = JSON.parse(new TextDecoder().decode(bytes)) as { image?: { name?: string; width?: number; height?: number } };
+        name = snap.image?.name ?? "";
+        if (snap.image?.width && snap.image?.height) dims = ` ${snap.image.width}×${snap.image.height}`;
+      } catch { /* 元数据坏了就匿名占位 */ }
+    }
+    const p = doc.createElement("p");
+    p.textContent = `[图片${name ? `：${name}` : ""}${dims} —— 请在飞书中对原图「复制图片」后粘贴到此处替换]`;
+    img.replaceWith(p);
+  }
 }
 
 // ── callout：映射到 wiki callout 方言的 HTML 形态（lib/tiptap-callout）────────

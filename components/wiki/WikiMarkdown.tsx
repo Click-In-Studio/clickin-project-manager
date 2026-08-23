@@ -86,6 +86,29 @@ function splitCalloutChildren(children: ReactNode): { emoji: string; color: stri
   return { emoji: m[1] ?? "", color: m[2] ?? null, rest };
 }
 
+// ── 图片（![alt](/__cm__asset:<id>)，正文只存 id）──────────────────────────────
+// 初始 src 用 thumb（session 鉴权可直接流，秒出）；随后取 preview-url 换全尺寸
+// 预签名 URL。取不到就停在缩略图，不空窗。
+
+function CmAssetImage({ productionId, assetId, alt }: { productionId: string; assetId: string; alt?: string }) {
+  const thumb = `${BASE_PATH}/api/production/${productionId}/assets/${assetId}/thumb`;
+  const [src, setSrc] = useState(thumb);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}/preview-url`);
+        if (!res.ok) return;
+        const data = await res.json() as { url?: string | null };
+        if (alive && data.url) setSrc(data.url);
+      } catch { /* 缩略图兜底 */ }
+    })();
+    return () => { alive = false; };
+  }, [productionId, assetId]);
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt={alt ?? ""} className="wiki-image" loading="lazy" />;
+}
+
 // ── 代码高亮（shiki 懒加载，MindWeave 同款思路；亮色主题贴纸面 UI 与打印）────
 
 const shikiCache = new Map<string, string>();
@@ -197,6 +220,13 @@ export default function WikiMarkdown({
                 {callout.rest}
               </div>
             );
+          },
+          img: ({ src, alt }) => {
+            const s = typeof src === "string" ? src : "";
+            const m = /^\/__cm__asset:([^/?#\s]+)$/.exec(s);
+            if (m) return <CmAssetImage productionId={productionId} assetId={m[1]} alt={alt} />;
+            // eslint-disable-next-line @next/next/no-img-element
+            return <img src={s} alt={alt ?? ""} className="wiki-image" loading="lazy" />;
           },
           pre: ({ children }) => {
             // 解包 <pre><code class="language-x">：交给 shiki（未知语言/无语言留素排版）

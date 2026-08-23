@@ -24,6 +24,7 @@ import {
 import { parseToDoc, serializeAtMention, normalizeLegacyMentions } from "@/lib/mention-format";
 import { isFeishuHtml, transformFeishuHtml } from "@/lib/feishu-paste";
 import { Callout } from "@/lib/tiptap-callout";
+import { WikiImage } from "@/lib/tiptap-wiki-image";
 export { normalizeLegacyMentions };
 import { serializeMention } from "@/lib/mention-types";
 
@@ -378,6 +379,10 @@ export interface SmartTextareaProps {
   frameless?: boolean;
   /** Extra custom-trigger plugins (escape hatch) */
   plugins?: DropPlugin[];
+  /** 图片粘贴上传（wiki 文档场景）。提供即解锁 image 节点：粘贴的图片文件
+   *  经此上传，返回存储形态 src（/__cm__asset:<id>）；未提供的面（活动纪要等）
+   *  不注册 image 节点，粘贴图片行为与从前一致（被 schema 丢弃）。 */
+  imageUpload?: (file: File) => Promise<{ src: string; alt: string } | null>;
   placeholder?: string;
   rows?: number;
   minHeight?: number;
@@ -405,6 +410,7 @@ export default function SmartTextarea({
   markdown = false,
   frameless = false,
   plugins: extraPlugins = [],
+  imageUpload,
   placeholder,
   rows = 3,
   minHeight,
@@ -432,6 +438,9 @@ export default function SmartTextarea({
   memberMentionRef.current = memberMention;
   const contentMentionRef = useRef(contentMention);
   contentMentionRef.current = contentMention;
+  const imageUploadRef = useRef(imageUpload);
+  imageUploadRef.current = imageUpload;
+  const hasImageUpload = !!imageUpload;
 
   useEffect(() => { dropRef.current = drop; });
 
@@ -608,6 +617,17 @@ export default function SmartTextarea({
       atMentionCfg,
     ];
 
+    // image 节点仅在提供 imageUpload 的面（wiki）注册：src 存 /__cm__asset:<id>，
+    // 展示经 thumb 端点（session 鉴权，img src 直接可流）
+    const imageExt = WikiImage.configure({
+      resolveSrc: (src) => {
+        const m = /^\/__cm__asset:([^/?#\s]+)$/.exec(src);
+        const pid = contentMentionRef.current?.productionId;
+        if (m && pid) return `${BASE_PATH}/api/production/${pid}/assets/${m[1]}/thumb`;
+        return src;
+      },
+    });
+
     return markdown
       // breaks: 单回车=换行（CJK 写作习惯，与 WikiMarkdown remark-breaks 对齐）；
       // TableKit: StarterKit 不含表格节点，缺了它 markdown 表格进编辑器会被吞
@@ -615,10 +635,11 @@ export default function SmartTextarea({
          TableKit.configure({ table: { resizable: false } }),
          TaskList, TaskItem.configure({ nested: true }),
          Callout,
+         ...(hasImageUpload ? [imageExt] : []),
          ...commonExts, wikiTriggerCfg, remoteCursorExt]
       : [base, ...commonExts];
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markdown, remoteCursorExt]);
+  }, [markdown, remoteCursorExt, hasImageUpload]);
 
   const editorMinHeight = minHeight != null
     ? `${minHeight}px`
@@ -646,6 +667,29 @@ export default function SmartTextarea({
         } catch {
           return html;
         }
+      },
+      // 图片文件粘贴（wiki 场景）：拦 file items 上传转存后插节点。
+      // 飞书「复制图片」实测剪贴板携带真文件走此路径；整篇文档粘贴无 file，
+      // 不会被此分支劫持（照走 transformPastedHTML）
+      handlePaste: (view, event) => {
+        const upload = imageUploadRef.current;
+        if (!upload) return false;
+        const files = Array.from(event.clipboardData?.files ?? []).filter(f => f.type.startsWith("image/"));
+        if (files.length === 0) return false;
+        event.preventDefault();
+        void (async () => {
+          for (const f of files) {
+            try {
+              const res = await upload(f);
+              const imgType = view.state.schema.nodes.image;
+              if (!res || !imgType) continue;
+              view.dispatch(
+                view.state.tr.replaceSelectionWith(imgType.create({ src: res.src, alt: res.alt })).scrollIntoView(),
+              );
+            } catch { /* 单张失败不影响其余 */ }
+          }
+        })();
+        return true;
       },
       handleKeyDown: (_view, event) => {
         if (!dropRef.current) {
