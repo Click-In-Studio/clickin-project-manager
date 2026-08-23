@@ -147,6 +147,47 @@ body {
 .wiki-callout > p { margin: 0; }
 .wiki-callout > p + p { margin-top: 4px; }
 
+/* 任务列表（checklist）—— TipTap TaskItem 渲染为 li > label + div，
+   div 是块级元素，不配 flex 内容会掉到 checkbox 下一行 */
+.smart-textarea-content ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 4px;
+}
+.smart-textarea-content ul[data-type="taskList"] > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.smart-textarea-content ul[data-type="taskList"] > li > label {
+  flex-shrink: 0;
+  margin-top: 0.28em;
+  user-select: none;
+}
+.smart-textarea-content ul[data-type="taskList"] > li > div {
+  flex: 1;
+  min-width: 0;
+}
+.smart-textarea-content ul[data-type="taskList"] > li[data-checked="true"] > div {
+  color: #a1a1aa;
+  text-decoration: line-through;
+}
+/* 只读渲染（remark-gfm：ul.contains-task-list > li.task-list-item）——
+   去掉圆点弹头（checkbox 就是弹头），对齐缩进 */
+.prose ul.contains-task-list {
+  list-style: none;
+  padding-left: 4px;
+}
+.prose ul.contains-task-list > li.task-list-item {
+  padding-left: 0;
+}
+.prose ul.contains-task-list > li.task-list-item::marker {
+  content: "";
+}
+.prose li.task-list-item input[type="checkbox"] {
+  margin-right: 8px;
+  vertical-align: -0.1em;
+}
+
 /* wiki 分栏（方言 :::cols，lib/tiptap-columns / lib/remark-columns）——
    编辑器与只读渲染共用；窄屏折叠为纵排 */
 .wiki-cols {
