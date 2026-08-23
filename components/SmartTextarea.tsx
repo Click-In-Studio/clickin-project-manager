@@ -22,6 +22,7 @@ import {
   type ContentMentionAttrs,
 } from "@/lib/mention-types";
 import { parseToDoc, serializeAtMention, normalizeLegacyMentions } from "@/lib/mention-format";
+import { isFeishuHtml, transformFeishuHtml } from "@/lib/feishu-paste";
 export { normalizeLegacyMentions };
 import { serializeMention } from "@/lib/mention-types";
 
@@ -632,6 +633,16 @@ export default function SmartTextarea({
           ? "prose prose-zinc max-w-none focus:outline-none px-3 py-2 smart-textarea-content"
           : "outline-none smart-textarea-content",
         style: readOnly ? "" : `min-height:${editorMinHeight}`,
+      },
+      // 飞书粘贴归一化（junk 清理/代码块/checklist/@提及映射，lib/feishu-paste）。
+      // 只认飞书来源标记，其他粘贴源原样放行；失败也放行——宁可少归一化不拦粘贴
+      transformPastedHTML: (html) => {
+        if (!isFeishuHtml(html)) return html;
+        try {
+          return transformFeishuHtml(html, { members: memberMentionRef.current?.members });
+        } catch {
+          return html;
+        }
       },
       handleKeyDown: (_view, event) => {
         if (!dropRef.current) {
