@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "seed:local-demo": "tsx scripts/seed-local-demo.ts",
     "seed:schema": "tsx scripts/gen-seed-schema.ts > db/seed-schema.json",
     "test": "vitest run",
     "test:markers": "tsc -p tsconfig.marker-tests.json && node .marker-test-dist/tests/marker-transitions.js",

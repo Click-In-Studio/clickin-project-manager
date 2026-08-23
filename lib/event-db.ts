@@ -2021,6 +2021,151 @@ export type WeeklyCallEvent = {
   schedItems: { title: string; startTime: string | null }[];
 };
 
+export type MyScheduleEntry = {
+  id: string;
+  kind: "call" | "event" | "task" | "schedule";
+  title: string;
+  startsAt: string;
+  endsAt: string | null;
+  location: string;
+  notes: string;
+  eventId: string | null;
+  productionId: string;
+  productionName: string;
+};
+
+/**
+ * 个人月历 / 日程表的数据源。
+ *
+ * 与纯 Call Sheet 不同，这里合并四条用户相关通道：我的 call、事件参与名单、
+ * 指派给我的任务、以及直接/部门/用户组排给我的流程项。用户组已经冻结时读取快照，
+ * 未冻结时读取实时成员，和事件权限口径保持一致。
+ *
+ * 同一事件按「call > 流程项 > 参与事件」折叠：有 call 的人几乎必然也在参与名单里，
+ * call 条目的标题就是事件标题，不折叠的话月历同一格会把同一件事显示两三遍。
+ * 「参与事件」只在既没有我的 call、也没有排给我的流程项时兜底出现；
+ * call 与流程项彼此不折叠——call 是到场时刻，流程项是具体环节，信息不重复。
+ */
+export async function listMyScheduleRange(
+  userId: string,
+  rangeStart: Date,
+  rangeEnd: Date,
+): Promise<MyScheduleEntry[]> {
+  type Row = {
+    id: string; kind: MyScheduleEntry["kind"]; title: string;
+    starts_at: Date; ends_at: Date | null; location: string; notes: string;
+    event_id: string | null; production_id: string; production_name: string;
+  };
+  const res = await getPool().query<Row>(
+    `WITH task_times AS (
+       SELECT t.id, t.title, t.production_id, t.event_id,
+              COALESCE(t.start_time, min(esi.start_time), pe.start_time,
+                       t.end_time, min(esi.end_time), pe.end_time) AS starts_at,
+              COALESCE(t.end_time, max(esi.end_time), pe.end_time) AS ends_at,
+              COALESCE(pe.location, '') AS location,
+              t.description AS notes
+         FROM task t
+         JOIN task_assignee ta ON ta.task_id = t.id AND ta.user_id = $1
+         LEFT JOIN task_schedule_item tsi ON tsi.task_id = t.id
+         LEFT JOIN event_schedule_item esi ON esi.id = tsi.item_id
+         LEFT JOIN production_event pe ON pe.id = t.event_id
+        GROUP BY t.id, pe.start_time, pe.end_time, pe.location
+     ), call_entries AS (
+       SELECT 'call:' || ect.id AS id, 'call'::text AS kind,
+              pe.title, ect.call_at AS starts_at, NULL::timestamptz AS ends_at,
+              pe.location, ect.notes, pe.id AS event_id, pe.production_id
+         FROM event_call_time ect
+         JOIN production_event pe ON pe.id = ect.event_id
+        WHERE ect.user_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
+     ), schedule_entries AS (
+       SELECT 'schedule:' || esi.id AS id, 'schedule'::text AS kind, esi.title,
+              COALESCE(esi.start_time, pe.start_time, esi.end_time, pe.end_time) AS starts_at,
+              COALESCE(esi.end_time, pe.end_time) AS ends_at,
+              COALESCE(NULLIF(esi.location, ''), pe.location) AS location, esi.notes,
+              pe.id AS event_id, pe.production_id
+         FROM event_schedule_item esi
+         JOIN production_event pe ON pe.id = esi.event_id
+        WHERE COALESCE(esi.start_time, pe.start_time, esi.end_time, pe.end_time) >= $2
+          AND COALESCE(esi.start_time, pe.start_time, esi.end_time, pe.end_time) < $3
+          AND (
+            EXISTS (SELECT 1 FROM schedule_item_participant sip
+                     WHERE sip.item_id = esi.id AND sip.user_id = $1)
+            OR EXISTS (
+              SELECT 1 FROM schedule_item_department sid
+              JOIN production_dept_member pdm ON pdm.dept_id = sid.dept_id
+              WHERE sid.item_id = esi.id AND pdm.user_id = $1
+            )
+            OR EXISTS (
+              SELECT 1 FROM schedule_item_group sig
+               WHERE sig.item_id = esi.id
+                 AND (
+                   EXISTS (
+                     SELECT 1 FROM event_group_freeze f
+                     JOIN event_group_freeze_member m
+                       ON m.event_id = f.event_id AND m.group_id = f.group_id
+                      AND m.frozen_at = f.frozen_at
+                    WHERE f.event_id = esi.event_id AND f.group_id = sig.group_id
+                      AND f.released_at IS NULL AND m.user_id = $1
+                   )
+                   OR (
+                     NOT EXISTS (SELECT 1 FROM event_group_freeze f
+                                  WHERE f.event_id = esi.event_id AND f.group_id = sig.group_id
+                                    AND f.released_at IS NULL)
+                     AND EXISTS (
+                       SELECT 1 FROM event_group_member egm
+                       LEFT JOIN production_dept_member pdm
+                         ON pdm.dept_id = egm.dept_id AND pdm.user_id = $1
+                      WHERE egm.group_id = sig.group_id
+                        AND (egm.user_id = $1 OR pdm.user_id IS NOT NULL)
+                     )
+                   )
+                 )
+            )
+          )
+     ), entries AS (
+       SELECT * FROM call_entries
+       UNION ALL
+       SELECT * FROM schedule_entries
+       UNION ALL
+       -- 参与事件是兜底条目：同一事件已有我的 call 或流程项时折叠掉（见函数注释）
+       SELECT 'event:' || pe.id, 'event', pe.title,
+              COALESCE(pe.start_time, pe.end_time), pe.end_time, pe.location, pe.description,
+              pe.id, pe.production_id
+         FROM event_participant ep
+         JOIN production_event pe ON pe.id = ep.event_id
+        WHERE ep.user_id = $1
+          AND COALESCE(pe.start_time, pe.end_time) >= $2
+          AND COALESCE(pe.start_time, pe.end_time) < $3
+          AND NOT EXISTS (SELECT 1 FROM call_entries c WHERE c.event_id = pe.id)
+          AND NOT EXISTS (SELECT 1 FROM schedule_entries s WHERE s.event_id = pe.id)
+       UNION ALL
+       SELECT 'task:' || tt.id, 'task', tt.title, tt.starts_at, tt.ends_at,
+              tt.location, tt.notes, tt.event_id, tt.production_id
+         FROM task_times tt
+        WHERE tt.starts_at >= $2 AND tt.starts_at < $3
+     )
+     SELECT e.id, e.kind, e.title, e.starts_at, e.ends_at,
+            COALESCE(e.location, '') AS location, COALESCE(e.notes, '') AS notes,
+            e.event_id, e.production_id, p.name AS production_name
+       FROM entries e
+       JOIN production p ON p.id = e.production_id
+      ORDER BY e.starts_at, e.kind, e.title`,
+    [userId, rangeStart.toISOString(), rangeEnd.toISOString()],
+  );
+  return res.rows.map(r => ({
+    id: r.id,
+    kind: r.kind,
+    title: r.title,
+    startsAt: new Date(r.starts_at).toISOString(),
+    endsAt: r.ends_at ? new Date(r.ends_at).toISOString() : null,
+    location: r.location,
+    notes: r.notes,
+    eventId: r.event_id,
+    productionId: r.production_id,
+    productionName: r.production_name,
+  }));
+}
+
 export async function listWeeklyCallSchedule(
   userId: string,
   weekStart: Date,
@@ -2314,6 +2459,78 @@ export async function listEventTaskCounts(productionId: string): Promise<Record<
   );
   return Object.fromEntries(res.rows.map(r => [r.event_id, Number(r.count)]));
 }
+
+export async function listEventMilestoneIds(eventId: string, productionId: string): Promise<string[]> {
+  const res = await getPool().query<{ milestone_id: string }>(
+    `SELECT em.milestone_id
+     FROM event_milestone em
+     JOIN production_event pe ON pe.id = em.event_id
+     JOIN milestone m ON m.id = em.milestone_id AND m.production_id = pe.production_id
+     WHERE em.event_id = $1 AND pe.production_id = $2
+     ORDER BY m.end_date, m.sort_order`,
+    [eventId, productionId],
+  );
+  return res.rows.map(row => row.milestone_id);
+}
+
+/** 事件下的任务 id（关联面板读侧；不做权限过滤，调用方负责）。 */
+export async function listEventTaskIds(eventId: string, productionId: string): Promise<string[]> {
+  const res = await getPool().query<{ id: string }>(
+    "SELECT id FROM task WHERE production_id = $1 AND event_id = $2 ORDER BY id",
+    [productionId, eventId],
+  );
+  return res.rows.map(row => row.id);
+}
+
+/**
+ * 事件 ↔ 里程碑关联的全量覆盖写。
+ *
+ * 只管 event_milestone 这一张边表。**不要**把 task.event_id 的重绑放进来——
+ * 换绑 event 是 task 侧的写入，带三件连带动作（清 task_schedule_item、#236 形状 L
+ * 的孤儿处置 disposeOrphanedTasks / clearOrphanMark），全部在 updateTaskByProduction
+ * 里，绕过它就会留下孤儿标记不一致的 task 和悬空的日程绑定。
+ */
+export async function setEventMilestones(
+  eventId: string,
+  productionId: string,
+  milestoneIds: string[],
+): Promise<void> {
+  const unique = [...new Set(milestoneIds)];
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const event = await client.query(
+      "SELECT 1 FROM production_event WHERE id = $1 AND production_id = $2",
+      [eventId, productionId],
+    );
+    if (!event.rowCount) throw new Error("事件不存在");
+
+    if (unique.length) {
+      const milestones = await client.query(
+        "SELECT id FROM milestone WHERE production_id = $1 AND id = ANY($2::text[])",
+        [productionId, unique],
+      );
+      if (milestones.rowCount !== unique.length) throw new Error("包含不存在的里程碑");
+    }
+
+    await client.query("DELETE FROM event_milestone WHERE event_id = $1", [eventId]);
+    if (unique.length) {
+      await client.query(
+        `INSERT INTO event_milestone (event_id, milestone_id)
+         SELECT $1, id FROM milestone WHERE production_id = $2 AND id = ANY($3::text[])`,
+        [eventId, productionId, unique],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+
 
 export async function listProductionTechReqs(productionId: string): Promise<ProductionTechReqEntry[]> {
   const res = await getPool().query<{

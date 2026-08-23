@@ -179,14 +179,15 @@ export default function AnnouncementsClient({ announcements, cueWarnings, initia
                         key={item.id}
                         onClick={() => handleSelect(item)}
                         style={{
-                          border: `1px solid ${isSelected ? "var(--ink)" : "var(--line)"}`,
+                          border: `1px solid ${isSelected ? "var(--ink)" : item.isPinned ? "#aebbb5" : "var(--line)"}`,
                           borderRadius: 10,
                           padding: "14px 16px",
-                          background: isSelected ? "var(--ink)" : "var(--surface)",
+                          background: isSelected ? "var(--ink)" : item.isPinned ? "#e2e7e4" : "var(--surface)",
+                          boxShadow: !isSelected && item.isPinned ? "inset 4px 0 0 #536a62" : "none",
                           cursor: "pointer",
                           textAlign: "left",
                           width: "100%",
-                          transition: "border-color .1s, background .1s",
+                          transition: "border-color .1s, background .1s, box-shadow .1s",
                         }}
                       >
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>

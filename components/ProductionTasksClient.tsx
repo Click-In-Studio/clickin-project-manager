@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { ProductionTechReqEntry } from "@/lib/event-db";
 import { BASE_PATH } from "@/lib/base-path";
+import { datetimeLocalToIso, fmtDate, fmtTime, isoToDatetimeLocal } from "@/lib/tz";
 import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
 import type { PickerMember, PickerDept } from "@/components/MemberPickerModal";
 import DropdownPicker, { type DropdownPickerItem } from "@/components/DropdownPicker";
@@ -73,6 +74,10 @@ const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
 
 const VALID_STATUSES = ["awaiting", "pending", "in_progress", "done"] as const;
 
+// 时间一律 CST，不跟浏览器时区走（全库口径见 lib/tz.ts）。原实现用
+// getTimezoneOffset 转成浏览器本地时间填进 datetime-local，非 CST 用户看到的
+// 是偏移过的时刻，改完保存又按本地时区解析写回去，读写两头都歪。
+
 // ─── 新建任务模态框 ───────────────────────────────────────────────────────────
 
 type CreateOptions = {
@@ -83,8 +88,29 @@ type CreateOptions = {
   canAssignAnyone: boolean;
   phases: { id: string; name: string; startDate: string; endDate: string | null; deptName: string | null }[];
   events: { id: string; title: string; startTime: string | null; requiresPocDept: boolean }[];
+  /** 用户组也是 task 的责任主体（部门 | 用户组，二选一） */
+  userGroups: { id: string; name: string }[];
   canCreateStandalone: boolean;
 };
+
+/**
+ * 抽屉里的「责任方」是**一个**下拉，值域是部门 ∪ 用户组，用前缀区分。
+ * task 的责任主体必须唯一（POC 从它推），所以不能做成两个各自可选的字段。
+ */
+type SubjectValue = `dept:${string}` | `group:${string}` | "";
+
+function subjectValueOf(task: { departmentId: string | null; groupId: string | null }): SubjectValue {
+  if (task.departmentId) return `dept:${task.departmentId}`;
+  if (task.groupId) return `group:${task.groupId}`;
+  return "";
+}
+
+/** 下拉值 → PATCH body 的主体字段。空 = 清空主体（两支都置 null）。 */
+function subjectBody(v: SubjectValue): { departmentId: string | null; groupId: string | null } {
+  if (v.startsWith("dept:")) return { departmentId: v.slice(5), groupId: null };
+  if (v.startsWith("group:")) return { departmentId: null, groupId: v.slice(6) };
+  return { departmentId: null, groupId: null };
+}
 
 const FIELD_LABEL: React.CSSProperties = {
   display: "block", marginBottom: 5, fontSize: 10, fontWeight: 700,
@@ -209,8 +235,8 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
           description,
           departmentId: deptId || null,
           assignees: [...assignees.entries()].map(([userId, name]) => ({ userId, name })),
-          startTime: startTime ? new Date(startTime).toISOString() : null,
-          endTime: endTime ? new Date(endTime).toISOString() : null,
+          startTime: startTime ? datetimeLocalToIso(startTime) : null,
+          endTime: endTime ? datetimeLocalToIso(endTime) : null,
           phaseIds: [...phaseIds],
           eventId: eventId || null,
           scheduleItemIds: [...scheduleItemIds],
@@ -380,7 +406,7 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
               <DropdownPicker
                 items={options.events.map(ev => ({
                   id: ev.id,
-                  label: `${ev.startTime ? `${new Date(ev.startTime).getMonth() + 1}/${new Date(ev.startTime).getDate()} · ` : ""}${ev.title}`,
+                  label: `${ev.startTime ? `${fmtDate(ev.startTime)} · ` : ""}${ev.title}`,
                   sublabel: ev.requiresPocDept ? "需绑定你负责的部门（POC 路径）" : undefined,
                 }))}
                 value={eventId || null}
@@ -415,7 +441,7 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
                         style={CHIP_TOGGLE(active)}
                       >
                         {it.title}
-                        {it.startTime ? ` · ${new Date(it.startTime).getHours().toString().padStart(2, "0")}:${new Date(it.startTime).getMinutes().toString().padStart(2, "0")}` : ""}
+                        {it.startTime ? ` · ${fmtTime(it.startTime)}` : ""}
                       </button>
                     );
                   })}
@@ -472,6 +498,12 @@ export default function ProductionTasksClient({
   useEffect(() => { setTasks(initialTasks); }, [initialTasks]);
   const [createOpen, setCreateOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [completingIds, setCompletingIds] = useState<Set<string>>(() => new Set());
+  const completionTimers = useRef<Map<string, number>>(new Map());
+  useEffect(() => () => {
+    completionTimers.current.forEach(timer => window.clearTimeout(timer));
+    completionTimers.current.clear();
+  }, []);
   // 筛选态初始化自 URL query（详情页 ↗ 跳走返回 / 分享链接不丢上下文）
   // 三 scope（原型）：我的 / 全部 / 按事件（仅看关联了事件的 Task）。
   const [scope, setScope] = useState<"mine" | "all" | "event">(() => {
@@ -494,6 +526,20 @@ export default function ProductionTasksClient({
   // 抽屉态：selected 非空 = 抽屉开（点击行开/切换，点外部/Esc/×/再点同行关）
   const [selected, setSelected] = useState<ProductionTechReqEntry | null>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
+  const [drawerEditing, setDrawerEditing] = useState(false);
+  const [drawerTitle, setDrawerTitle] = useState("");
+  const [drawerDescription, setDrawerDescription] = useState("");
+  const [drawerStart, setDrawerStart] = useState("");
+  const [drawerEnd, setDrawerEnd] = useState("");
+  const [drawerEventId, setDrawerEventId] = useState("");
+  const [drawerSubject, setDrawerSubject] = useState<SubjectValue>("");
+  const [drawerOptions, setDrawerOptions] = useState<CreateOptions | null>(null);
+  const [drawerError, setDrawerError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDrawerEditing(false);
+    setDrawerError(null);
+  }, [selected?.id]);
 
   // 筛选态回写 URL（replaceState，不触发导航）
   useEffect(() => {
@@ -536,6 +582,96 @@ export default function ProductionTasksClient({
       const patch = { ...task, status: newStatus };
       setTasks(prev => prev.map(t => t.id === task.id ? patch : t));
       setSelected(prev => prev?.id === task.id ? patch : prev);
+      const previousTimer = completionTimers.current.get(task.id);
+      if (previousTimer) window.clearTimeout(previousTimer);
+      if (newStatus === "done") {
+        setCompletingIds(current => new Set(current).add(task.id));
+        const timer = window.setTimeout(() => {
+          setCompletingIds(current => {
+            const next = new Set(current);
+            next.delete(task.id);
+            return next;
+          });
+          setSelected(current => current?.id === task.id ? null : current);
+          completionTimers.current.delete(task.id);
+        }, 1600);
+        completionTimers.current.set(task.id, timer);
+      } else {
+        completionTimers.current.delete(task.id);
+        setCompletingIds(current => {
+          const next = new Set(current);
+          next.delete(task.id);
+          return next;
+        });
+      }
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  function beginDrawerEdit(task: ProductionTechReqEntry) {
+    setDrawerTitle(task.title);
+    setDrawerDescription(task.description);
+    setDrawerStart(isoToDatetimeLocal(task.startTime));
+    setDrawerEnd(isoToDatetimeLocal(task.endTime));
+    setDrawerEventId(task.eventId ?? "");
+    setDrawerSubject(subjectValueOf(task));
+    setDrawerError(null);
+    setDrawerEditing(true);
+    if (!drawerOptions) {
+      fetch(`${BASE_PATH}/api/production/${productionId}/tasks/create-options`)
+        .then(r => r.json())
+        .then((data: CreateOptions) => setDrawerOptions(data))
+        .catch(() => setDrawerError("无法加载事件和部门选项"));
+    }
+  }
+
+  async function saveDrawerEdit(task: ProductionTechReqEntry) {
+    if (!drawerTitle.trim()) { setDrawerError("任务名称不能为空"); return; }
+    if (drawerStart && drawerEnd && new Date(drawerEnd) <= new Date(drawerStart)) { setDrawerError("结束时间必须晚于开始时间"); return; }
+    setUpdating(true);
+    setDrawerError(null);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: drawerTitle.trim(),
+          description: drawerDescription,
+          startTime: drawerStart ? datetimeLocalToIso(drawerStart) : null,
+          endTime: drawerEnd ? datetimeLocalToIso(drawerEnd) : null,
+          eventId: drawerEventId || null,
+          ...subjectBody(drawerSubject),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setDrawerError(data.error ?? "保存失败"); return; }
+      const eventTitle = drawerOptions?.events.find(event => event.id === drawerEventId)?.title ?? null;
+      const sub = subjectBody(drawerSubject);
+      const departmentName = sub.departmentId
+        ? drawerOptions?.depts.find(dept => dept.id === sub.departmentId)?.name ?? null : null;
+      const groupName = sub.groupId
+        ? drawerOptions?.userGroups.find(g => g.id === sub.groupId)?.name ?? null : null;
+      const patch: ProductionTechReqEntry = {
+        ...task,
+        ...data.task,
+        title: drawerTitle.trim(),
+        description: drawerDescription,
+        eventId: drawerEventId || null,
+        eventTitle,
+        departmentId: sub.departmentId,
+        departmentName,
+        groupId: sub.groupId,
+        groupName,
+        startTime: drawerStart ? datetimeLocalToIso(drawerStart) : null,
+        endTime: drawerEnd ? datetimeLocalToIso(drawerEnd) : null,
+        effectiveStartTime: drawerStart ? datetimeLocalToIso(drawerStart) : data.task?.effectiveStartTime ?? task.effectiveStartTime,
+        effectiveEndTime: drawerEnd ? datetimeLocalToIso(drawerEnd) : data.task?.effectiveEndTime ?? task.effectiveEndTime,
+      };
+      setTasks(current => current.map(item => item.id === task.id ? patch : item));
+      setSelected(patch);
+      setDrawerEditing(false);
+      router.refresh();
     } finally {
       setUpdating(false);
     }
@@ -555,7 +691,7 @@ export default function ProductionTasksClient({
     if (scope === "event" && !t.eventId) return false;  // 仅看关联事件的
     if (selectedEvent === "__standalone" ? t.eventId != null : (selectedEvent !== "all" && t.eventId !== selectedEvent)) return false;
     if (selectedDept !== "all" && t.departmentId !== selectedDept) return false;
-    if (statusFilter === "active") return t.status !== "done";
+    if (statusFilter === "active") return t.status !== "done" || completingIds.has(t.id);
     return t.status === statusFilter;
   });
 
@@ -904,6 +1040,7 @@ export default function ProductionTasksClient({
                       className={[
                         styles.taskRow,
                         isDone ? styles.taskRowDone : "",
+                        completingIds.has(t.id) ? styles.taskRowCompleting : "",
                         isSelected ? styles.taskRowSelected : "",
                       ].filter(Boolean).join(" ")}
                     >
@@ -1048,7 +1185,48 @@ export default function ProductionTasksClient({
                 ))}
               </select>
               {isBlockedActive(visibleSelected) && <BlockedChip />}
+              <button
+                type="button"
+                onClick={() => drawerEditing ? setDrawerEditing(false) : beginDrawerEdit(visibleSelected)}
+                style={{ marginLeft: "auto", border: "1px solid var(--ink)", borderRadius: 7, background: drawerEditing ? "var(--surface-2)" : "transparent", padding: "5px 10px", color: "var(--ink)", fontSize: 10, fontWeight: 700, cursor: "pointer" }}
+              >
+                {drawerEditing ? "取消编辑" : "编辑任务信息"}
+              </button>
             </div>
+
+            {drawerEditing && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 11, margin: "4px 0 16px", padding: 13, border: "1px solid var(--line)", borderRadius: 10, background: "var(--paper)" }}>
+                <label><span style={FIELD_LABEL}>任务名称</span><input value={drawerTitle} onChange={e => setDrawerTitle(e.target.value)} style={FIELD_INPUT} /></label>
+                <label><span style={FIELD_LABEL}>任务说明</span><textarea value={drawerDescription} onChange={e => setDrawerDescription(e.target.value)} rows={3} style={{ ...FIELD_INPUT, resize: "vertical" }} /></label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <label><span style={FIELD_LABEL}>开始时间</span><input type="datetime-local" value={drawerStart} onChange={e => setDrawerStart(e.target.value)} style={FIELD_INPUT} /></label>
+                  <label><span style={FIELD_LABEL}>结束时间</span><input type="datetime-local" value={drawerEnd} onChange={e => setDrawerEnd(e.target.value)} style={FIELD_INPUT} /></label>
+                </div>
+                <label>
+                  <span style={FIELD_LABEL}>关联事件</span>
+                  <select value={drawerEventId} onChange={e => setDrawerEventId(e.target.value)} style={FIELD_INPUT}>
+                    <option value="">独立任务</option>
+                    {(drawerOptions?.events ?? []).map(event => <option key={event.id} value={event.id}>{event.title}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span style={FIELD_LABEL}>责任方</span>
+                  <select value={drawerSubject} onChange={e => setDrawerSubject(e.target.value as SubjectValue)} style={FIELD_INPUT}>
+                    <option value="">暂不指定</option>
+                    <optgroup label="部门">
+                      {(drawerOptions?.depts ?? []).map(dept => <option key={dept.id} value={`dept:${dept.id}`}>{dept.name}</option>)}
+                    </optgroup>
+                    {(drawerOptions?.userGroups ?? []).length > 0 && (
+                      <optgroup label="用户组">
+                        {(drawerOptions?.userGroups ?? []).map(g => <option key={g.id} value={`group:${g.id}`}>{g.name}</option>)}
+                      </optgroup>
+                    )}
+                  </select>
+                </label>
+                {drawerError && <p style={{ margin: 0, color: "var(--danger)", fontSize: 11 }}>{drawerError}</p>}
+                <button type="button" disabled={updating} onClick={() => saveDrawerEdit(visibleSelected)} style={{ border: "1px solid var(--ink)", borderRadius: 8, background: "var(--ink)", color: "#fff", padding: "9px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", opacity: updating ? .55 : 1 }}>{updating ? "保存中…" : "保存任务信息"}</button>
+              </div>
+            )}
 
             {visibleSelected.assignees.length > 0 && (
               <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)" }}>

@@ -1,9 +1,11 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+import { toActor } from "@/lib/grant-check";
+import { canWriteMaterial } from "@/lib/material-perm";
 import { resolveSubjectPatch } from "@/lib/task-poc";
 import { deleteMaterial, getMaterial, MaterialError, updateMaterial } from "@/lib/material-db";
+import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string; materialId: string }> };
 
@@ -17,14 +19,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const existing = await getMaterial(materialId, productionId);
   if (!existing) return Response.json({ error: "物料不存在" }, { status: 404 });
-  if (!await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "material", materialId, "*", "edit"))
+  if (!await canWriteMaterial(toActor(session, access.permCtx), productionId, existing, "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const body = (await req.json()) as {
-    code?: unknown; name?: unknown; category?: unknown;
-    departmentId?: unknown; groupId?: unknown; statusId?: unknown;
-    location?: unknown; quantity?: unknown; notes?: unknown;
-  };
+  const parsedBody = await readJsonObject(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.value;
   if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim()))
     return Response.json({ error: "名称不能为空" }, { status: 400 });
   if (body.quantity !== undefined && (typeof body.quantity !== "number" || body.quantity < 0))
@@ -62,9 +62,9 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   if (access.isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
-  if (!await getMaterial(materialId, productionId))
-    return Response.json({ error: "物料不存在" }, { status: 404 });
-  if (!await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "material", materialId, "*", "delete"))
+  const existing = await getMaterial(materialId, productionId);
+  if (!existing) return Response.json({ error: "物料不存在" }, { status: 404 });
+  if (!await canWriteMaterial(toActor(session, access.permCtx), productionId, existing, "delete"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   await deleteMaterial(materialId, productionId);

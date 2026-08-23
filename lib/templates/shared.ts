@@ -50,6 +50,11 @@ export const OPEN_BASELINE: readonly string[] = [
   "node:event/*/details@view",
   "node:event/*/followers@create",
   "node:event/*/meta@view",
+  // 报销是全员能力：谁都可能垫过钱。填单要选科目，故科目表的**只读窄面**
+  // （只有名字与归属部门，不含额度）也进基线——额度走 finance/*/budget@view，
+  // 那才是「有的剧组连设计人员都看得到」的那一档，属剧组自选，不进模版。
+  "node:finance/*/categories@view",
+  "node:finance/*/expenses@create",
   "node:material/*@view",
   "node:member/*/contact@view",
   "node:member/*/meta@view",
@@ -152,6 +157,9 @@ export const SCRIPT_EDIT: readonly string[] = [
  * 往对应模版的部门权限里挂；在那之前靠 owner 旁路与申请通道拿。
  * 同 user_group 那批键的处理（#285）。
  */
+// 补记（用户组批之后）：物料的写权限**不再只有这一条路**。lib/material-perm.ts
+// 给了「责任方的 POC 管自己那一摊」的上下文判定，于是「各部门自管自的」剧组
+// 什么键都不用发。这组键现在的含义收窄成「**统管**」——道具组替全组管台账时才发。
 export const MATERIAL_ADMIN: readonly string[] = [
   "node:material/*@create",
   "node:material/*@edit",

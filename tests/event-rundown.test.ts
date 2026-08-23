@@ -19,7 +19,7 @@ import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { createProductionEvent, createScheduleItem, createEventTechReq } from "@/lib/event-db";
 import { createEventGroup, deleteEventGroup, EventGroupError } from "@/lib/event-group-db";
 import {
-  listRundownColumns, listRundownPlacements, RundownError,
+  getRundownTags, listRundownColumns, listRundownPlacements, RundownConflictError, RundownError,
   setRundownColumns, setRundownPlacements,
 } from "@/lib/event-rundown-db";
 
@@ -245,5 +245,40 @@ describe("8. 组作为版面的列也是活引用", () => {
 
     await setRundownColumns(ev, prodId, []);
     await deleteEventGroup(g.id, prodId);
+  });
+});
+
+describe("9. 并发覆盖保护", () => {
+  it("拿旧列指纹保存会冲突，不覆盖别人刚排好的顺序", async () => {
+    const ev = await makeEvent("并发列场");
+    await setRundownColumns(ev, prodId, [{ groupId: groupX }, { groupId: groupY }]);
+    const { columnsTag } = await getRundownTags(ev);
+
+    await setRundownColumns(
+      ev, prodId, [{ groupId: groupY }, { groupId: groupX }], columnsTag,
+    );
+    await expect(setRundownColumns(
+      ev, prodId, [{ groupId: groupX }], columnsTag,
+    )).rejects.toThrow(RundownConflictError);
+
+    expect((await listRundownColumns(ev)).map(c => c.groupId)).toEqual([groupY, groupX]);
+  });
+
+  it("拿旧事项指纹保存会冲突，不覆盖别人刚改的颜色", async () => {
+    const ev = await makeEvent("并发事项场");
+    const first = await makeItem(ev);
+    const second = await makeItem(ev);
+    const { placementsTag } = await getRundownTags(ev);
+
+    await setRundownPlacements(
+      ev, [{ entryType: "item", entryId: first, color: "#111" }], placementsTag,
+    );
+    await expect(setRundownPlacements(
+      ev, [{ entryType: "item", entryId: second, color: "#222" }], placementsTag,
+    )).rejects.toThrow(RundownConflictError);
+
+    expect(await listRundownPlacements(ev)).toEqual([
+      { entryType: "item", entryId: first, color: "#111", pinnedColumnIds: [] },
+    ]);
   });
 });

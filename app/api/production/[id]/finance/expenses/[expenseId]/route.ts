@@ -4,6 +4,7 @@ import { getProductionPermissionContext } from "@/lib/db";
 import {
   approveExpense, cancelExpense, getExpense, isExpenseApprover, rejectExpense,
 } from "@/lib/finance-db";
+import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string; expenseId: string }> };
 
@@ -28,7 +29,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const expense = await getExpense(expenseId, productionId);
   if (!expense) return Response.json({ error: "支出不存在" }, { status: 404 });
 
-  const body = (await req.json()) as { action?: unknown };
+  const parsedBody = await readJsonObject(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.value;
   const action = body.action;
   if (action !== "approve" && action !== "reject" && action !== "cancel")
     return Response.json({ error: "action 必须是 approve / reject / cancel" }, { status: 400 });

@@ -1,0 +1,499 @@
+.calendarCell {
+  position: relative;
+  height: 126px;
+  min-width: 0;
+  padding: 7px;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: background-color .14s ease, box-shadow .14s ease;
+}
+
+.calendarCell:hover,
+.calendarCell:focus-visible {
+  z-index: 1;
+  background: #eef2f0;
+  box-shadow: inset 0 0 0 1px #80948d;
+  outline: none;
+}
+
+.calendarCellToday {
+  background: #f8f0e7;
+}
+
+.calendarChip {
+  width: 100%;
+  min-height: 23px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 5px;
+  text-align: left;
+  font-size: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: filter .12s ease, border-color .12s ease, transform .12s ease;
+}
+
+.calendarChip:hover,
+.calendarChip:focus-visible {
+  filter: brightness(.92);
+  border-color: currentColor;
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.timeField {
+  position: relative;
+}
+
+.timeButton {
+  width: 100%;
+  min-height: 42px;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.timeButton:hover,
+.timeButton[aria-expanded="true"] {
+  border-color: #738981;
+  background: #eef2f0;
+}
+
+.timePopover {
+  position: absolute;
+  z-index: 120;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 174px;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 12px 34px rgba(24, 42, 42, .18);
+}
+
+.timeList {
+  max-height: 190px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timeOption {
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 7px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.timeOption:hover,
+.timeOptionActive {
+  background: var(--ink);
+  color: #fff;
+}
+
+.multiPicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.toggleChip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.toggleChip:hover {
+  border-color: #738981;
+  background: #e7ece9;
+  color: var(--ink);
+}
+
+.toggleChipActive {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+
+.detailDrawer {
+  position: fixed;
+  z-index: 90;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  width: min(420px, calc(100vw - 32px));
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: -15px 0 52px rgba(24, 42, 42, .17);
+  animation: drawerIn .18s ease-out;
+}
+
+.drawerBackdrop,
+.editorBackdrop {
+  position: fixed;
+  inset: 0;
+  border: 0;
+  background: rgba(20, 31, 30, .08);
+  cursor: default;
+}
+
+.drawerBackdrop { z-index: 89; }
+.editorBackdrop { z-index: 119; }
+
+@keyframes drawerIn {
+  from { transform: translateX(18px); opacity: 0; }
+}
+
+.columnMenuButton {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .1);
+  color: #fff;
+  cursor: pointer;
+  transition: background .14s, border-color .14s, transform .14s;
+}
+
+.columnMenuButton span {
+  display: block;
+  margin-top: -4px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.columnMenuButton:hover,
+.columnMenuButton[aria-expanded="true"] {
+  background: rgba(255, 255, 255, .28);
+  border-color: rgba(255, 255, 255, .3);
+}
+
+.columnMenuButton:active {
+  transform: translateY(1px);
+}
+
+.rundownColumnHeader:hover,
+.rundownColumnHeader:focus-within {
+  z-index: 40 !important;
+}
+
+.insertColumnButton,
+.firstInsertButton {
+  position: absolute;
+  z-index: 35;
+  top: 0;
+  right: -14px;
+  width: 28px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+}
+
+.firstInsertButton {
+  top: auto;
+  bottom: 0;
+  height: 58px;
+}
+
+.insertColumnGlyph {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, .7);
+  border-radius: 50%;
+  background: #2d68db;
+  color: #fff;
+  box-shadow: 0 2px 7px rgba(22, 62, 140, .3);
+  font: 600 16px/1 Arial, sans-serif;
+  opacity: 0;
+  transform: scale(.78);
+  transition: opacity .14s, transform .14s, background .14s, box-shadow .14s;
+}
+
+.insertColumnButton:hover .insertColumnGlyph,
+.firstInsertButton:hover .insertColumnGlyph,
+.insertColumnButton:focus-visible .insertColumnGlyph,
+.firstInsertButton:focus-visible .insertColumnGlyph {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.insertColumnButton:active .insertColumnGlyph,
+.firstInsertButton:active .insertColumnGlyph {
+  background: #2056bd;
+  box-shadow: 0 1px 3px rgba(22, 62, 140, .35);
+  transform: scale(.92);
+}
+
+.columnEditor,
+.locationEditor,
+.entryEditor {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  bottom: 18px;
+  z-index: 120;
+  width: min(390px, calc(100vw - 36px));
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: 17px;
+  border: 1px solid #aebcb7;
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: -14px 0 50px rgba(24, 42, 42, .19);
+  cursor: default;
+}
+
+.inlineEditorHeader {
+  position: sticky;
+  top: -17px;
+  z-index: 4;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -17px -17px 13px;
+  padding: 17px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.inlineEditorHeader > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.inlineEditorHeader small {
+  color: var(--muted);
+  font-size: 8px;
+  letter-spacing: .12em;
+}
+
+.inlineEditorHeader button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.inlineField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 11px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.inlineField input,
+.inlineField textarea,
+.inlineField select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 8px 9px;
+  font: inherit;
+  font-size: 11px;
+}
+
+.twoFields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 11px;
+}
+
+.menuAction {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 9px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuAction span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menuAction small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.optionSection {
+  margin: 11px 0;
+}
+
+.optionSection > b {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 10px;
+}
+
+.deleteAction,
+.primaryEditorAction {
+  width: 100%;
+  border-radius: 8px;
+  padding: 9px 11px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.deleteAction {
+  margin-top: 10px;
+  border: 1px solid #d6a89d;
+  background: #fff7f5;
+  color: var(--danger);
+}
+
+.primaryEditorAction {
+  margin-top: 14px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+
+.locationEditorFooter {
+  position: sticky;
+  bottom: -17px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px -17px -17px;
+  padding: 12px 17px 17px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.locationEditorFooter small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.locationEditorFooter .primaryEditorAction {
+  width: auto;
+  min-width: 92px;
+  margin-top: 0;
+}
+
+.colorPicker {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.colorPicker button {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.colorPicker button[aria-pressed="true"] {
+  outline: 2px solid #2d68db;
+  outline-offset: 2px;
+}
+
+.editorError {
+  color: var(--danger);
+  font-size: 10px;
+}
+
+.rundownDropCell {
+  z-index: 2;
+  border-right: 1px solid rgba(122, 139, 134, .12);
+  transition: background .08s;
+}
+
+.rundownDropCell:hover {
+  background: rgba(45, 104, 219, .08);
+}
+
+.resizeHandle {
+  position: absolute;
+  z-index: 8;
+  left: 5px;
+  right: 5px;
+  height: 7px;
+  border-radius: 999px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.resizeHandle:hover {
+  background: rgba(45, 104, 219, .55);
+}
+
+.resizeHandleTop { top: -2px; }
+.resizeHandleBottom { bottom: -2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .detailDrawer { animation: none; }
+}

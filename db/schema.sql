@@ -580,6 +580,7 @@ CREATE TABLE IF NOT EXISTS event_group_freeze_member (
   user_name     TEXT        NOT NULL,
   via_dept_id   UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
   via_dept_name TEXT,
+  was_poc       BOOLEAN     NOT NULL DEFAULT false,
   FOREIGN KEY (event_id, group_id, frozen_at)
     REFERENCES event_group_freeze (event_id, group_id, frozen_at) ON DELETE CASCADE
 );
@@ -1168,6 +1169,15 @@ CREATE TABLE IF NOT EXISTS task_phase (
 
 CREATE INDEX IF NOT EXISTS task_phase_phase_idx ON task_phase(phase_id);
 
+-- Event 里程碑关联（事件可关注 0..n 个项目里程碑）
+CREATE TABLE IF NOT EXISTS event_milestone (
+  event_id     TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
+  milestone_id TEXT NOT NULL REFERENCES milestone(id) ON DELETE CASCADE,
+  PRIMARY KEY (event_id, milestone_id)
+);
+
+CREATE INDEX IF NOT EXISTS event_milestone_milestone_idx ON event_milestone(milestone_id);
+
 -- ── rundown 版面（add-event-group-4-rundown.sql）────────────────────────────────
 -- 组是跨 event 共享的，「在这场排第几列 / 显不显示 / 钉不钉左边」只能记在
 -- (event, group) 这一层。is_pinned = 横向滚动时钉在左侧，与冻结快照无关。
@@ -1508,6 +1518,11 @@ ON CONFLICT DO NOTHING;
 -- 登记在后的线上事故补账——模版 resource_type ⊆ 词汇表由 conventions 测试守护
 INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
   ('material', 'view', 0), ('material', 'create', 0), ('material', 'edit', 0), ('material', 'delete', 0)
+ON CONFLICT DO NOTHING;
+
+-- finance 预算与支出：按 budget / categories / expenses 子面授权，动词仍是 REST 四元组。
+INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  ('finance', 'view', 0), ('finance', 'create', 0), ('finance', 'edit', 0), ('finance', 'delete', 0)
 ON CONFLICT DO NOTHING;
 
 -- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────

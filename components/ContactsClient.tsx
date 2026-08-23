@@ -38,6 +38,26 @@ function resolvePhoto(raw: string | null): string | null {
   return `${BASE_PATH}/api/media?token=${encodeURIComponent(raw)}`;
 }
 
+const ROLE_TONES = [
+  { background: "#e8f1f2", color: "#315f66" },
+  { background: "#f5eadf", color: "#8a4d2f" },
+  { background: "#ece9f6", color: "#5c527f" },
+  { background: "#e8f3e9", color: "#3f6b48" },
+  { background: "#f7e8eb", color: "#8c4654" },
+];
+
+function roleTone(role: string): React.CSSProperties {
+  const defaultIndex = ROLE_ORDER.indexOf(role);
+  if (defaultIndex >= 0) return ROLE_TONES[defaultIndex % ROLE_TONES.length];
+
+  // ROLE_ORDER 是默认模板顺序，不是角色白名单。自定义角色按名称稳定散列，
+  // 避免所有未命中项都回落到第一种颜色。
+  let hash = 0;
+  for (const char of role) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  const index = Math.abs(hash);
+  return ROLE_TONES[index % ROLE_TONES.length];
+}
+
 function MemberCard({ member }: { member: MemberWithRoles }) {
   const photo = resolvePhoto(member.photoUrl) ?? member.avatarUrl;
 
@@ -70,7 +90,7 @@ function MemberCard({ member }: { member: MemberWithRoles }) {
         {member.roles.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 3, justifyContent: "center", marginTop: 6 }}>
             {member.roles.map((r) => (
-              <span key={r} style={{ borderRadius: 999, background: "var(--surface-2)", padding: "2px 7px", fontSize: 9, fontWeight: 700, color: "var(--muted)" }}>
+              <span key={r} style={{ borderRadius: 999, padding: "2px 7px", fontSize: 9, fontWeight: 700, ...roleTone(r) }}>
                 {r}
               </span>
             ))}

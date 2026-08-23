@@ -11,15 +11,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   const { userId } = await ctx.params;
   const r2Key = `avatars/${userId}/avatar`;
-  const stream = await getR2Stream(r2Key);
-  if (stream) {
-    const contentType = stream.headers.get("content-type") ?? "image/jpeg";
-    return new Response(stream.body, {
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": "private, max-age=0, must-revalidate",
-      },
-    });
+  try {
+    const stream = await getR2Stream(r2Key);
+    if (stream) {
+      const contentType = stream.headers.get("content-type") ?? "image/jpeg";
+      return new Response(stream.body, {
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "private, max-age=0, must-revalidate",
+        },
+      });
+    }
+  } catch (error) {
+    // Local environments commonly have no R2 credentials. The provider avatar
+    // below is still a valid fallback, so an R2 failure must not turn into 500.
+    console.warn("User avatar R2 lookup failed; using provider avatar", error);
   }
 
   // Fallback: redirect to the profile avatar URL (feishu sync value as last resort)

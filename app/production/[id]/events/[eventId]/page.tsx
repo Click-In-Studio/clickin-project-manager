@@ -3,7 +3,7 @@ import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getProductionName, listProductionMembersWithRoles } from "@/lib/db";
+import { getProductionPermissionContext, getProductionName, listMilestones, listProductionMembersWithRoles } from "@/lib/db";
 import {
   getProductionEvent,
   listScheduleItemsWithParticipants,
@@ -11,6 +11,9 @@ import {
   listEventCallTimes,
   listEventTechReqs,
   listEventReports,
+  listEventMilestoneIds,
+  listMyTechReqsFull,
+  listProductionTechReqs,
 
   listEventDepartments,
   getSelfParticipantRole,
@@ -62,7 +65,13 @@ export default async function EventDetailPage({
 
   const eventPermCtx = await loadEventPermContext(session.userId, eventId);
 
-  const [scheduleItems, eventPeople, callTimes, techReqs, rawReports, departments, members, selfRole] =
+  // 关联面的任务候选清单与 /api/production/[id]/tasks 同门：没有 task/*@view 就只给
+  // 「与我相关」，否则等于把全项目每条任务的标题 SSR 进 HTML（planning 页已是此口径）。
+  const canViewAllTasks = await hasEffectiveGrant(
+    toActor(session, prodPermCtx), productionId, "task", "*", "*", "view",
+  );
+
+  const [scheduleItems, eventPeople, callTimes, techReqs, rawReports, departments, members, selfRole, relationTasks, milestoneOptions, eventMilestoneIds] =
     await Promise.all([
       listScheduleItemsWithParticipants(eventId),
       listEventPeople(eventId),
@@ -72,6 +81,11 @@ export default async function EventDetailPage({
       listEventDepartments(productionId),
       listProductionMembersWithRoles(productionId),
       getSelfParticipantRole(eventId, session.userId),
+      canViewAllTasks
+        ? listProductionTechReqs(productionId)
+        : listMyTechReqsFull(session.userId).then(rows => rows.filter(t => t.productionId === productionId)),
+      listMilestones(productionId),
+      listEventMilestoneIds(eventId, productionId),
     ]);
 
   // W5：默认报告懒建已移除（浏览即建会在文档树留足迹）——空态由
@@ -107,6 +121,9 @@ export default async function EventDetailPage({
       initialEventPeople={eventPeople}
       initialCallTimes={callTimes}
       initialTechReqs={techReqs}
+      relationTaskOptions={relationTasks.map(task => ({ id: task.id, title: task.title, status: task.status, eventId: task.eventId, eventTitle: task.eventTitle }))}
+      milestoneOptions={milestoneOptions.map(milestone => ({ id: milestone.id, name: milestone.name, endDate: milestone.endDate }))}
+      initialEventMilestoneIds={eventMilestoneIds}
       initialReports={reports}
       departments={departments}
       members={members}

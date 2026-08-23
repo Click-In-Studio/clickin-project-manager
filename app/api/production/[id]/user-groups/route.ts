@@ -9,6 +9,7 @@ import {
   createEventGroup, EventGroupError, listEventGroups,
   type EventGroupMember, type EventGroupPoc,
 } from "@/lib/event-group-db";
+import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -78,10 +79,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   if (access.isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
-  const body = (await req.json()) as {
-    eventId?: unknown; name?: unknown; color?: unknown;
-    orderIndex?: unknown; members?: unknown; poc?: unknown;
-  };
+  const parsedBody = await readJsonObject(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.value;
 
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return Response.json({ error: "组名不能为空" }, { status: 400 });

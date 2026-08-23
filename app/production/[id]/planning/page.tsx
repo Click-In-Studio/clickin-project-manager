@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { toActor, hasEffectiveGrant } from "@/lib/grant-check";
 import { hasEventDomainView, filterDraftVisibleEvents } from "@/lib/event-permissions";
-import { getProductionPermissionContext, getProductionName, listMilestones } from "@/lib/db";
+import { getProductionPermissionContext, getProductionName, listMilestones, listProductionMembersWithRoles } from "@/lib/db";
 import { listPhases } from "@/lib/phase-db";
 import { isPolicyOn } from "@/lib/policy-db";
 import { listProductionEvents, listEventDepartments, listProductionTechReqs, listMyTechReqsFull } from "@/lib/event-db";
@@ -26,7 +26,7 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
 
   const actor = toActor(session, access.permCtx);
   const [
-    name, allEvents, milestones, phases, departments, canViewAllTasks,
+    name, allEvents, milestones, phases, departments, members, canViewAllTasks,
     canCreatePhase, canEditPhase, canDeletePhase, phaseDeptPocEnabled,
   ] = await Promise.all([
     getProductionName(id),
@@ -34,6 +34,7 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
     listMilestones(id),
     listPhases(id),
     listEventDepartments(id),
+    listProductionMembersWithRoles(id),
     hasEffectiveGrant(actor, id, "task", "*", "*", "view"),
     hasEffectiveGrant(actor, id, "phase", "*", "*", "create"),
     hasEffectiveGrant(actor, id, "phase", "*", "*", "edit"),
@@ -54,6 +55,7 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
         startTime: t.startTime, endTime: t.endTime,
         effectiveStartTime: t.effectiveStartTime, effectiveEndTime: t.effectiveEndTime,
         isBlocked: t.isBlocked,
+        description: t.description,
       }))
     : (await listMyTechReqsFull(session.userId))
         .filter(t => t.productionId === id)
@@ -64,6 +66,7 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
           startTime: null, endTime: null,
           effectiveStartTime: t.effectiveStartTime, effectiveEndTime: t.effectiveEndTime,
           isBlocked: false,
+          description: t.description,
         }));
 
   // 阶段管理资格：phase 键（owner 旁路内建）∨ 部门 POC（policy 开关，活引用）
@@ -84,6 +87,12 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
           startDate: p.startDate, endDate: p.endDate, milestoneIds: p.milestoneIds,
         }))}
         departments={departments.map(d => ({ id: d.id, name: d.name }))}
+        members={members.map(member => ({
+          userId: member.userId,
+          name: member.name,
+          roles: member.roles,
+          departmentIds: departments.filter(dept => dept.memberUserIds.includes(member.userId) || dept.pocUserIds.includes(member.userId)).map(dept => dept.id),
+        }))}
         deptOptions={departments.filter(d => d.kind === "dept").map(d => ({ id: d.id, name: d.name }))}
         phasePerm={{
           canCreate: canCreatePhase,

@@ -9,6 +9,7 @@ import {
   deleteEventGroup, EventGroupError, getEventGroup, updateEventGroup,
   type EventGroup, type EventGroupMember, type EventGroupPoc,
 } from "@/lib/event-group-db";
+import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string; groupId: string }> };
 
@@ -58,10 +59,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const group = await getEventGroup(groupId, productionId);
   if (!group) return Response.json({ error: "用户组不存在" }, { status: 404 });
 
-  const body = (await req.json()) as {
-    name?: unknown; color?: unknown;
-    orderIndex?: unknown; members?: unknown; poc?: unknown;
-  };
+  const parsedBody = await readJsonObject(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.value;
 
   let members: EventGroupMember[] | undefined;
   if (body.members !== undefined) {
