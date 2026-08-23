@@ -7,6 +7,8 @@ import { getProductionPermissionContext, getProductionMeta } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import AdminSettingsClient from "@/components/AdminSettingsClient";
+import ProductionPlanCard from "@/components/ProductionPlanCard";
+import { getProductionPlan, PRODUCTION_TIERS } from "@/lib/plan";
 
 export default async function SettingsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -15,11 +17,12 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
 
-  const [meta, access] = await Promise.all([
+  const [meta, access, plan] = await Promise.all([
     getProductionMeta(id),
     session
       ? getProductionPermissionContext(session.userId, session.isAdmin, id)
       : Promise.resolve(null),
+    getProductionPlan(id),
   ]);
 
   const permCtx = access?.permCtx ?? null;
@@ -43,12 +46,27 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
     canEditAiInstructions: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "ai_instructions", "*", "*", "edit")),
   };
 
+  const tierConf = PRODUCTION_TIERS[plan.tier];
   return (
-    <AdminSettingsClient
-      productionId={id}
-      initialMeta={meta ?? { name: "", description: "", avatarUrl: null, type: null, typeLabel: null, language: null, watermarkEnabled: false }}
-      isArchived={isArchived}
-      perms={perms}
-    />
+    <>
+      <AdminSettingsClient
+        productionId={id}
+        initialMeta={meta ?? { name: "", description: "", avatarUrl: null, type: null, typeLabel: null, language: null, watermarkEnabled: false }}
+        isArchived={isArchived}
+        perms={perms}
+      />
+      <ProductionPlanCard
+        productionId={id}
+        isOwner={!!permCtx?.isOwner}
+        initial={{
+          tier: plan.tier,
+          label: tierConf.label,
+          billingExempt: plan.billingExempt,
+          seatLimit: tierConf.seatLimit,
+          ai: tierConf.ai,
+          advancedPerms: tierConf.advancedPerms,
+        }}
+      />
+    </>
   );
 }

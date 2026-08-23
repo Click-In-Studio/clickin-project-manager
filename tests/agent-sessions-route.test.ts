@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/agent/sessions/route";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { makeProduction, cleanupProduction, shortId } from "./factories";
+import { makeProduction, cleanupProduction, setProductionTier, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 
 // production 会话签发的守卫测试：sessionKey 由后端签发是隔离的根——
@@ -17,6 +17,8 @@ beforeAll(async () => {
   outsiderId = (await upsertFeishuUser(`test-open-${shortId()}`, `签发乙${shortId()}`, null, false)).userId;
   ({ prodId } = await makeProduction(memberId));
   await addProductionMember(prodId, memberId);
+  // #280：production 会话签发被项目档位 AI 门覆盖，free 档不签发——升到 pro
+  await setProductionTier(prodId, "pro");
 });
 
 afterAll(async () => {
@@ -44,6 +46,18 @@ describe("POST /api/agent/sessions（production 签发）", () => {
   it("非成员 403", async () => {
     const res = await POST(makeReq(outsiderId, { productionId: prodId }));
     expect(res.status).toBe(403);
+  });
+
+  it("free 档项目不签发 production 会话（#280 档位 AI 门）", async () => {
+    let freeProdId = "";
+    try {
+      ({ prodId: freeProdId } = await makeProduction(memberId));
+      await addProductionMember(freeProdId, memberId);
+      const res = await POST(makeReq(memberId, { productionId: freeProdId }));
+      expect(res.status).toBe(403);
+    } finally {
+      if (freeProdId) await cleanupProduction(freeProdId).catch(() => {});
+    }
   });
 
   it("格式非法的 productionId 400", async () => {

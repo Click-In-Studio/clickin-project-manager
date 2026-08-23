@@ -201,6 +201,14 @@ export async function setup() {
      ON CONFLICT DO NOTHING`,
     [TEST_USER],
   );
+  // #280 建项目门：既有路由测试全部用 TEST_USER 会话建项目，给 internal 档
+  // （无数量上限——测试 DB 状态共享，creator 的配额会被历史残骸挤爆产生 flake）。
+  // 「无档 → 403」「creator 配额」分支由 tests/plan.test.ts 用新造用户专测。
+  await pool.query(
+    `INSERT INTO user_plan (user_id, tier, source) VALUES ($1, 'internal', 'test-setup')
+     ON CONFLICT (user_id) DO NOTHING`,
+    [TEST_USER],
+  );
 
   if (await isCueListRolePreMigrationSchema(pool)) {
     // Migration path: DB has default_edit_roles column (pre-cue-list-role).

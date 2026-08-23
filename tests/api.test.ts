@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { deleteProduction, createProduction, archiveProduction, addProductionMember, getActiveVersionId } from "@/lib/db";
+import { deleteProduction, createProduction, archiveProduction, addProductionMember, getActiveVersionId, upsertFeishuUser } from "@/lib/db";
 import { deleteProductionEvent } from "@/lib/event-db";
 import { TEST_USER, TEST_OWNER } from "./helpers";
 import { makeProduction, makeBlocks, cleanupProduction, makeLegacyVersion } from "./factories";
@@ -143,9 +143,21 @@ describe("POST /api/productions — authorization", () => {
     expect(res.status).toBe(401);
   });
 
-  // 建项目不是全局特权（#280 之前）。这条曾断言非 admin → 403：那道门在 isAdmin 恒 false
-  // 之后变成无人能过，线上没人建得了项目。红了说明门被退回 isAdmin —— 别改断言，改路由。
-  it("普通登录用户 → 201，且创建者即 owner", async () => {
+  // #280 建项目门 = 用户等级：user_plan 无行的普通注册用户 → 403（不是 isAdmin——
+  // 那道门是无人能过的孤门，不要退回）。TEST_USER 在 global-setup 里给了 internal 档。
+  it("无等级的普通注册用户 → 403", async () => {
+    const { userId } = await upsertFeishuUser(`test-noplan-${Date.now().toString(36)}`, "无档用户", null, false);
+    const res = await createProductionHandler(
+      req("/api/productions", {
+        method: "POST",
+        body: JSON.stringify({ name: "无档用户不应建成" }),
+        session: createSession({ userId, name: "无档用户", avatarUrl: null, isAdmin: false }),
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("有等级（internal）的登录用户 → 201，且创建者即 owner", async () => {
     const res = await createProductionHandler(
       req("/api/productions", {
         method: "POST",

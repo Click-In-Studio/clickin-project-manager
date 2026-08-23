@@ -38,6 +38,18 @@ export async function makeProduction(ownerUserId?: string): Promise<{ prodId: st
 }
 
 /**
+ * 设置项目档位（#280）。工厂项目默认无 production_plan 行 = free 档；
+ * 要测 AI / 高级权限配置等档位门内的功能，先升到 "pro"。
+ */
+export async function setProductionTier(prodId: string, tier: string): Promise<void> {
+  await getPool().query(
+    `INSERT INTO production_plan (production_id, tier, source) VALUES ($1, $2, 'test-factory')
+     ON CONFLICT (production_id) DO UPDATE SET tier = EXCLUDED.tier, updated_at = now()`,
+    [prodId, tier],
+  );
+}
+
+/**
  * Delete a production, cleaning up scene_version and character_version rows
  * first (those FKs lack ON DELETE CASCADE and would otherwise block the delete).
  */

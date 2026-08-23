@@ -2229,6 +2229,9 @@ export async function createProduction(
   ownerUserId: string,
   productionType?: string,
   productionTypeLabel?: string | null,
+  /** 初始项目档位（#280）：free 时不落行（production_plan 无行 = free），高于 free
+   *  （internal owner 建项即最高档）与本体同事务落行。档位决策在路由层（lib/plan.ts）。 */
+  initialPlan?: { tier: string; source: string },
 ): Promise<void> {
   // 建项目全程一个事务：production 行、owner 的成员行、初始 version、模版灌入，
   // 要么全成要么全不成。以前是三段各自提交（裸 pool.query + createInitialVersion 自己
@@ -2259,6 +2262,12 @@ export async function createProduction(
       "INSERT INTO production_member (production_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
       [id, ownerUserId],
     );
+    if (initialPlan && initialPlan.tier !== "free") {
+      await client.query(
+        "INSERT INTO production_plan (production_id, tier, source) VALUES ($1, $2, $3)",
+        [id, initialPlan.tier, initialPlan.source],
+      );
+    }
     await createInitialVersion(id, client);
     // 建项目的全部初始状态——角色名单、部门树、部门静态区间键、cue 模版体系的初始行、
     // 策略档位、审批 TTL——统一由项目模版按类型灌入。

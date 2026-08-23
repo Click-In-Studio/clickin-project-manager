@@ -61,6 +61,18 @@ export function sessionKeyOwnedBy(sessionKey: string, userId: string): boolean {
   return bare.startsWith(`${SESSION_NAMESPACE}${userId}:`);
 }
 
+/**
+ * production 会话 → productionId，个人会话/非法 key → null。
+ * 结构见 createNewSessionKey：namespace 后 2 段 = 个人（userId:uuid），
+ * 3 段 = production（userId:productionId:uuid）。
+ */
+export function productionIdOfSessionKey(sessionKey: string): string | null {
+  const bare = sessionKey.replace(/^agent:[^:]+:/, "");
+  if (!bare.startsWith(SESSION_NAMESPACE)) return null;
+  const parts = bare.slice(SESSION_NAMESPACE.length).split(":");
+  return parts.length === 3 && PRODUCTION_ID_RE.test(parts[1]) ? parts[1] : null;
+}
+
 interface GatewayStore {
   client: GatewayClient | null;
   status: GatewayStatus;

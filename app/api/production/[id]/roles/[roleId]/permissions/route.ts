@@ -4,6 +4,7 @@ import { isGovernanceNodeKey } from "@/lib/grant-template";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
+import { requireProductionFeature } from "@/lib/plan";
 
 import { setRolePermissions } from "@/lib/db";
 
@@ -24,6 +25,9 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const { id, roleId } = await ctx.params;
   const { deny, access } = await requireManage(req, id);
   if (deny) return deny;
+  // 项目档位功能门（#280）：角色权限集编辑属「高级权限配置」，独立于 grant 判定。
+  const planDeny = await requireProductionFeature(id, "advancedPerms");
+  if (planDeny) return planDeny;
   // 批G：修改制作人权限集合 = ROOT OPERATION（owner∨admin 硬判），与普通治理分开
   const target = await getPool().query<{ name: string }>(
     "SELECT name FROM production_role WHERE id = $1 AND production_id = $2", [roleId, id]);

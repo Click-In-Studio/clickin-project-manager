@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { createProduction, listProductions, updateProductionSortOrders } from "@/lib/db";
 import { getSession } from "@/lib/session";
+import { getUserTier, countOwnedActiveProductions, USER_TIERS } from "@/lib/plan";
 
 let _seq = 0;
 function uid(): string {
@@ -41,16 +42,34 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// 建项目不是全局特权：任何登录用户都能建，建出来自己就是 owner（createProduction 把
-// session.userId 写进 production.owner_id，NOT NULL），项目内权限照常走树模型。
+// 建项目的门是用户等级（#280，本文件曾无门放开）：user_plan 无行的普通注册用户
+// 不能建（可正常使用被邀请进入的项目），有行（creator/internal）才可建、按档位限
+// 「能建几个」。这是用户等级全站唯一的消费点——功能跟项目走，人的等级不影响项目内
+// 功能（那些看 production_plan，见 lib/plan.ts）。
 //
-// 这里原本的门是 session.isAdmin。isAdmin 唯一来源是 feishu_user.is_super_admin，
-// 65e1a78 起飞书登录写死 false、db/add-strip-super-admin.sql 又把存量清零，于是这条门
-// 变成无人能过的孤门——线上所有人都建不了项目。收口「谁能建、能建几个」由用户等级承担，
-// 见 #280；不要退回 isAdmin（那是 hasPermission 时代的全站旁路，65e1a78 正是为砍它）。
+// 历史：这里原本的门是 session.isAdmin。isAdmin 唯一来源是 feishu_user.is_super_admin，
+// 65e1a78 起飞书登录写死 false、db/add-strip-super-admin.sql 又把存量清零，于是那条门
+// 变成无人能过的孤门。不要退回 isAdmin（那是 hasPermission 时代的全站旁路）。
 export async function POST(req: NextRequest) {
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+
+  // 等级实时查库、不走 session payload（HMAC cookie 7 天 TTL 会让升级不生效）。
+  const tier = await getUserTier(session.userId);
+  if (!tier) {
+    return Response.json(
+      { error: "当前账号暂无创建项目权限，请在个人中心兑换邀请码提升等级" },
+      { status: 403 },
+    );
+  }
+  const tierConf = USER_TIERS[tier];
+  const owned = await countOwnedActiveProductions(session.userId);
+  if (owned >= tierConf.maxOwnedProductions) {
+    return Response.json(
+      { error: `已达当前等级可创建的项目数上限（${tierConf.maxOwnedProductions} 个）` },
+      { status: 403 },
+    );
+  }
 
   const ikey = req.headers.get("Idempotency-Key");
   if (ikey) {
@@ -83,6 +102,8 @@ export async function POST(req: NextRequest) {
       session.userId,
       type,
       type === "other" ? (typeLabel?.trim() ?? null) : null,
+      // internal 建项即最高档（声明式例外，常量表一格）；free 不落行。
+      { tier: tierConf.initialProductionTier, source: tier === "internal" ? "internal_owner" : "initial" },
     );
     const metaFields: Parameters<typeof updateProductionMeta>[1] = {};
     if (description?.trim()) metaFields.description = description.trim();
