@@ -2,6 +2,7 @@ import { getPool } from "./pg";
 import { hasGrant, hasAnyGrant, listGrantedResourceIds } from "./grant-check";
 import { type PermissionContext } from "./permissions";
 import { isPolicyOn } from "./policy-db";
+import { canEditWiki, listVisibleWikiIds } from "./wiki-perm";
 import type { Asset } from "./asset-db";
 
 // ─── 批D：asset 可见性判定（隐私/公开模型）──────────────────────────────────
@@ -57,6 +58,13 @@ async function anyMountHostVisible(
       && await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view")) return true;
   if (mounts.some(m => SCENE_MOUNT_TYPES.includes(m.mount_type))
       && await hasAnyGrant(permCtx.userId, productionId, "scene", ["meta"], "view")) return true;
+  // wiki 边：文档可见 ⇒ 正文里的图可见。批量走 listVisibleWikiIds（与
+  // structurallyVisibleAssetIds 同一实现，天然不分叉），多挂载也只一趟
+  const wikiMounts = mounts.filter(m => m.mount_type === "wiki");
+  if (wikiMounts.length > 0) {
+    const vis = await listVisibleWikiIds(permCtx, productionId);
+    if (wikiMounts.some(m => vis.wildcard || vis.ids.has(m.mount_id))) return true;
+  }
   return cueMountHostVisible(permCtx.userId, productionId, mounts);
 }
 
@@ -108,7 +116,20 @@ async function structurallyVisibleAssetIds(
     [productionId, SCRIPT_MOUNT_TYPES, SCENE_MOUNT_TYPES, hasScriptView, hasSceneView,
      CUE_MOUNT_TYPES, permCtx.userId],
   );
-  return new Set(rows.map(r => r.asset_id));
+  const visible = new Set(rows.map(r => r.asset_id));
+  // wiki 边（与 canViewAsset 的 wiki 分支同源——列表与单实例判定不得分叉，批D 教训）：
+  // 可见性程序化（canViewWiki），SQL 内联不了，单独一趟集合式补齐
+  const wikiMounts = (await getPool().query<{ asset_id: string; mount_id: string }>(
+    `SELECT asset_id, mount_id FROM asset_mount WHERE production_id = $1 AND mount_type = 'wiki'`,
+    [productionId],
+  )).rows;
+  if (wikiMounts.length > 0) {
+    const vis = await listVisibleWikiIds(permCtx, productionId);
+    for (const m of wikiMounts) {
+      if (vis.wildcard || vis.ids.has(m.mount_id)) visible.add(m.asset_id);
+    }
+  }
+  return visible;
 }
 
 /** 列表过滤：按可见性判定过滤 assets（与 canViewAsset(meta) 同语义的集合式实现）。 */
@@ -158,6 +179,8 @@ export async function mountHostSidePermitted(
   if (mountType === "production") return (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, productionId, "production", "*", "mounts", "create"));
   if (SCENE_MOUNT_TYPES.includes(mountType))
     return hasGrant(permCtx.userId, productionId, "scene", mountId, "mounts", "create");
+  // wiki 边：把图挂进文档 = 编辑该文档
+  if (mountType === "wiki") return canEditWiki(permCtx, productionId, mountId);
   // version/block/block_snapshot/comment/cue/cue_revision 均属剧本流
   return hasGrant(permCtx.userId, productionId, "script", "*", "mounts", "create");
 }

@@ -84,6 +84,11 @@ async function validateMountTarget(productionId: string, mountType: MountType, m
       );
       return res.rows.length > 0;
     }
+    case "wiki": {
+      // wiki PK 是 uuid——用 id::text 对比，坏 id 不炸 cast
+      const res = await pool.query("SELECT 1 FROM wiki WHERE id::text = $1 AND production_id = $2", [mountId, productionId]);
+      return res.rows.length > 0;
+    }
     default:
       return false;
   }

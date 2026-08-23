@@ -186,6 +186,48 @@ export default function WikiDocClient({
 
   const memberName = (userId: string) => members.find(m => m.userId === userId)?.name ?? userId.slice(0, 8);
 
+  // 图片粘贴上传：presign → PUT R2 → 登记 asset → 挂载到本文档（mount_type=wiki，
+  // 文档可见 ⇒ 图可见的让渡边）。返回存储形态 src——正文只存 asset id 不存 URL
+  async function uploadWikiImage(file: File): Promise<{ src: string; alt: string } | null> {
+    const base = `${BASE_PATH}/api/production/${productionId}/assets`;
+    const fileName = file.name || "粘贴图片.png";
+    try {
+      const presignRes = await fetch(`${base}/presign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName, mimeType: file.type }),
+      });
+      if (!presignRes.ok) return null;
+      const presign = await presignRes.json() as { uploadUrl: string; r2Key: string; fileId: string; contentType: string };
+      const putRes = await fetch(presign.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": presign.contentType },
+        body: file,
+      });
+      if (!putRes.ok) return null;
+      const regRes = await fetch(base, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          storageType: "r2", r2Key: presign.r2Key, fileId: presign.fileId,
+          mimeType: file.type, fileSize: file.size,
+          assetType: "reference", fileName,
+        }),
+      });
+      if (!regRes.ok) return null;
+      const { asset } = await regRes.json() as { asset: { id: string } };
+      // 挂载失败不拦插入：上传者自己的行集仍可见，其余观看者等下次挂载补
+      await fetch(`${base}/${asset.id}/mounts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mountType: "wiki", mountId: wiki.id }),
+      }).catch(() => {});
+      return { src: `/__cm__asset:${asset.id}`, alt: fileName };
+    } catch {
+      return null;
+    }
+  }
+
   // 换文档时重置本地态（同组件复用于不同 wikiId 的导航）
   useEffect(() => {
     setTitle(wiki.title ?? "");
@@ -445,6 +487,7 @@ export default function WikiDocClient({
               }}
               contentMention={{ productionId }}
               plugins={[wikiLinkDropPlugin(productionId)]}
+              imageUpload={uploadWikiImage}
               onInitialRoundTrip={handleRoundTrip}
               remoteCursors={peers
                 .filter(p => p.blockIndex != null)

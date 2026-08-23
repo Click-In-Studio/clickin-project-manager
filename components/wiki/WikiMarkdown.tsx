@@ -7,7 +7,8 @@
 // 覆写成 chip；标签经 mention-resolve 逐观看者刷新（§4.1：正文只存 id，
 // label 是编辑期快照，渲染不信任它）。
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Children, cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactElement, ReactNode } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -17,6 +18,7 @@ import {
   decodeMentionHref, CM_HREF_PREFIX, type ContentMentionAttrs,
 } from "@/lib/mention-types";
 import { normalizeLegacyMentions } from "@/lib/mention-format";
+import { CALLOUT_MARKER_RE } from "@/lib/tiptap-callout";
 
 type Resolved = { label: string | null; url: string | null };
 
@@ -51,6 +53,60 @@ function preprocessRawWikilinks(md: string): { text: string; titles: string[] } 
   t = t.replace(RAW_WIKILINK_RE, sub);
   t = t.replace(/\u0000C(\d+)\u0000/g, (_m, i) => parts[Number(i)] ?? "");
   return { text: t, titles: [...titles] };
+}
+
+// ── callout 方言渲染（> [!emoji|#color]，lib/tiptap-callout 同一 marker）─────
+// blockquote 首段以 marker 开头 → 剥 marker 渲染成 callout 框；否则原样引用块。
+// 在 React children 层剥（而非 markdown 字符串层）：marker 后内容可能与正文行
+// 同段（remark-breaks 的 <br> 分行），字符串层改写会破坏 mention 链接等结构。
+
+function splitCalloutChildren(children: ReactNode): { emoji: string; color: string | null; rest: ReactNode[] } | null {
+  const arr = Children.toArray(children);
+  const idx = arr.findIndex(c => isValidElement(c));
+  if (idx < 0) return null;
+  const p = arr[idx] as ReactElement<{ children?: ReactNode }>;
+  const pKids = Children.toArray(p.props.children);
+  const first = pKids[0];
+  if (typeof first !== "string") return null;
+  const m = first.match(CALLOUT_MARKER_RE);
+  if (!m) return null;
+  const restFirst = first.slice(m[0].length).replace(/^[ \t]*/, "");
+  const newKids = [...pKids];
+  if (restFirst) {
+    newKids[0] = restFirst;
+  } else {
+    newKids.shift();
+    // marker 独占一行时连同其后的 <br> 一起剥
+    const next = newKids[0];
+    if (isValidElement(next) && next.type === "br") newKids.shift();
+  }
+  const rest = [...arr];
+  if (newKids.length === 0) rest.splice(idx, 1);
+  else rest[idx] = cloneElement(p, {}, ...newKids);
+  return { emoji: m[1] ?? "", color: m[2] ?? null, rest };
+}
+
+// ── 图片（![alt](/__cm__asset:<id>)，正文只存 id）──────────────────────────────
+// 初始 src 用 thumb（session 鉴权可直接流，秒出）；随后取 preview-url 换全尺寸
+// 预签名 URL。取不到就停在缩略图，不空窗。
+
+function CmAssetImage({ productionId, assetId, alt }: { productionId: string; assetId: string; alt?: string }) {
+  const thumb = `${BASE_PATH}/api/production/${productionId}/assets/${assetId}/thumb`;
+  const [src, setSrc] = useState(thumb);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}/preview-url`);
+        if (!res.ok) return;
+        const data = await res.json() as { url?: string | null };
+        if (alive && data.url) setSrc(data.url);
+      } catch { /* 缩略图兜底 */ }
+    })();
+    return () => { alive = false; };
+  }, [productionId, assetId]);
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt={alt ?? ""} className="wiki-image" loading="lazy" />;
 }
 
 // ── 代码高亮（shiki 懒加载，MindWeave 同款思路；亮色主题贴纸面 UI 与打印）────
@@ -152,6 +208,26 @@ export default function WikiMarkdown({
         // breaks：单回车即换行（对齐 MindWeave 与编辑器 tiptap breaks:true——CJK 写作习惯）
         remarkPlugins={[remarkGfm, remarkBreaks]}
         components={{
+          blockquote: ({ children }) => {
+            const callout = splitCalloutChildren(children);
+            if (!callout) return <blockquote>{children}</blockquote>;
+            return (
+              <div
+                className="wiki-callout not-prose text-[15px] leading-relaxed text-zinc-800"
+                data-emoji={callout.emoji}
+                style={callout.color ? { ["--callout-bg" as string]: callout.color } : undefined}
+              >
+                {callout.rest}
+              </div>
+            );
+          },
+          img: ({ src, alt }) => {
+            const s = typeof src === "string" ? src : "";
+            const m = /^\/__cm__asset:([^/?#\s]+)$/.exec(s);
+            if (m) return <CmAssetImage productionId={productionId} assetId={m[1]} alt={alt} />;
+            // eslint-disable-next-line @next/next/no-img-element
+            return <img src={s} alt={alt ?? ""} className="wiki-image" loading="lazy" />;
+          },
           pre: ({ children }) => {
             // 解包 <pre><code class="language-x">：交给 shiki（未知语言/无语言留素排版）
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

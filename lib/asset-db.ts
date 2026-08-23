@@ -17,7 +17,8 @@ export type MountType =
   | "scene" | "scene_snapshot"
   | "block" | "block_snapshot"
   | "cue" | "cue_revision"
-  | "comment" | "event" | "event_schedule" | "task" | "event_report";
+  | "comment" | "event" | "event_schedule" | "task" | "event_report"
+  | "wiki";
 
 export type MountMode = "inherit" | "tracking" | "version_only";
 
