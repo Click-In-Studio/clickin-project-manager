@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import PageHeader from "@/components/PageHeader";
-import SmartText from "@/components/SmartText";
+import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 
@@ -108,10 +108,9 @@ export default function ProductionAnnouncementsClient({ productionId, production
         {/* Content */}
         <div style={{ borderTop: "1px solid var(--line)", paddingTop: 20 }}>
           {a.content ? (
-            <SmartText
+            <WikiMarkdown
               content={a.content}
-              markdown
-              contentMention={{ productionId }}
+              productionId={productionId}
               className={styles.bodyText}
             />
           ) : (
@@ -269,7 +268,7 @@ export default function ProductionAnnouncementsClient({ productionId, production
                     {isExpanded && (
                       <div className={styles.mobileCardDetail}>
                         {a.content ? (
-                          <SmartText content={a.content} markdown contentMention={{ productionId }} className={styles.bodyText} />
+                          <WikiMarkdown content={a.content} productionId={productionId} className={styles.bodyText} />
                         ) : (
                           <p style={{ color: "var(--muted)", fontSize: 13 }}>（无内容）</p>
                         )}

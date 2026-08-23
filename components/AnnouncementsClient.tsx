@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import SmartText from "@/components/SmartText";
+import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 import type { CrossProjectAnnouncement, CueWarningEntry } from "@/lib/db";
@@ -147,10 +147,9 @@ export default function AnnouncementsClient({ announcements, cueWarnings, initia
                       </button>
                       {isExpanded && (
                         <div className={styles.mobileCardDetail}>
-                          <SmartText
+                          <WikiMarkdown
                             content={item.content}
-                            markdown
-                            contentMention={{ productionId: item.productionId }}
+                            productionId={item.productionId}
                             className={styles.bodyText}
                           />
                         </div>
@@ -249,10 +248,9 @@ export default function AnnouncementsClient({ announcements, cueWarnings, initia
                     </p>
                   </div>
                   <div style={{ borderTop: "1px solid var(--line)", paddingTop: 22 }}>
-                    <SmartText
+                    <WikiMarkdown
                       content={selected.content}
-                      markdown
-                      contentMention={{ productionId: selected.productionId }}
+                      productionId={selected.productionId}
                       className={styles.bodyText}
                     />
                   </div>

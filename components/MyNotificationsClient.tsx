@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import PageHeader from "@/components/PageHeader";
 import Link from "next/link";
-import SmartText from "@/components/SmartText";
+import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import styles from "@/components/my-pages.module.css";
 import type { UserNotification, NotificationAction } from "@/lib/inbox-db";
 
@@ -356,10 +356,9 @@ export default function MyNotificationsClient({ productions = [], productionId }
 
         {n.body && (
           <div style={{ borderTop: "1px solid var(--line)", paddingTop: 20, marginBottom: 24 }}>
-            <SmartText
+            <WikiMarkdown
               content={n.body}
-              markdown
-              contentMention={n.productionId ? { productionId: n.productionId } : undefined}
+              productionId={n.productionId ?? undefined}
               className={styles.bodyText}
             />
           </div>
@@ -563,10 +562,9 @@ export default function MyNotificationsClient({ productions = [], productionId }
                       </div>
 
                       {n.body && (
-                        <SmartText
+                        <WikiMarkdown
                           content={n.body}
-                          markdown
-                          contentMention={n.productionId ? { productionId: n.productionId } : undefined}
+                          productionId={n.productionId ?? undefined}
                           className={styles.bodyText}
                         />
                       )}
