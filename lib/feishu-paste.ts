@@ -74,11 +74,16 @@ type FeishuRecordMap = Record<string, { snapshot?: FeishuSnapshot }>;
  *  span[data-lark-record-data] 属性里（五份 probe 样本全有），Safari 一定给
  *  text/html，两源合并后跨浏览器可用。span 是元数据载体不是内容，读完即删。 */
 function collectRecordMap(body: HTMLElement, record?: string | null): FeishuRecordMap {
-  const merged: FeishuRecordMap = {};
+  // 剪贴板内容不可信：无原型对象 + 跳过危险键，堵原型污染面
+  const merged: FeishuRecordMap = Object.create(null) as FeishuRecordMap;
   const add = (raw: string | null | undefined) => {
     if (!raw) return;
     try {
-      Object.assign(merged, (JSON.parse(raw) as { recordMap?: FeishuRecordMap }).recordMap ?? {});
+      const rm = (JSON.parse(raw) as { recordMap?: FeishuRecordMap }).recordMap ?? {};
+      for (const [k, v] of Object.entries(rm)) {
+        if (k === "__proto__" || k === "constructor" || k === "prototype") continue;
+        merged[k] = v; // 后加者胜：两源正常时同键同值，span 覆盖 record 无实义差
+      }
     } catch { /* 单源坏了不影响其余 */ }
   };
   add(record);
