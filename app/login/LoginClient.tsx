@@ -10,10 +10,18 @@ function loginDest(): string {
   return next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
 }
 
-export default function LoginClient({ feishuAppId }: { feishuAppId: string }) {
+// 从邀请链接落地（/invite/<token> → /login?next=/invite/<token>）时透传 token 作
+// 注册正当性——受邀者不需要额外要注册码（lib/registration-gate.ts）。
+function inviteTokenFromDest(): string | undefined {
+  const m = loginDest().match(/^\/invite\/([0-9a-f-]{36})$/i);
+  return m?.[1];
+}
+
+export default function LoginClient({ feishuAppId, inviteOnly }: { feishuAppId: string; inviteOnly?: boolean }) {
   const [mode, setMode] = useState<"idle" | "email_sent" | "loading" | "otp_loading">("idle");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [regCode, setRegCode] = useState("");
   const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -82,13 +90,20 @@ export default function LoginClient({ feishuAppId }: { feishuAppId: string }) {
       const res = await fetch("/api/auth/email/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmedEmail, name: trimmedName }),
+        body: JSON.stringify({
+          email: trimmedEmail,
+          name: trimmedName,
+          ...(regCode.trim() ? { registrationCode: regCode.trim() } : {}),
+          ...(inviteTokenFromDest() ? { inviteToken: inviteTokenFromDest() } : {}),
+        }),
       });
       if (res.ok) {
         setMode("email_sent");
       } else {
         setMode("idle");
-        setError("发送失败，请稍后重试");
+        // 403 = 注册邀请制拒绝，服务端文案已面向用户（如「测试期间需受邀注册」）
+        const data = await res.json().catch(() => null) as { error?: string } | null;
+        setError(res.status === 403 || res.status === 429 ? (data?.error ?? "发送失败，请稍后重试") : "发送失败，请稍后重试");
       }
     } catch {
       setMode("idle");
@@ -214,8 +229,22 @@ export default function LoginClient({ feishuAppId }: { feishuAppId: string }) {
                 onChange={e => setName(e.target.value)}
                 placeholder="你的名字"
                 required
-                style={{ ...inp, marginBottom: 14 }}
+                style={{ ...inp, marginBottom: inviteOnly && !inviteTokenFromDest() ? 10 : 14 }}
               />
+              {inviteOnly && !inviteTokenFromDest() && (
+                <>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>
+                    邀请码<span style={{ fontWeight: 400 }}>（新用户填写；邮箱已被邀请可留空）</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={regCode}
+                    onChange={e => setRegCode(e.target.value)}
+                    placeholder="测试期间需受邀注册"
+                    style={{ ...inp, marginBottom: 14 }}
+                  />
+                </>
+              )}
               {error && <p style={{ fontSize: 12, color: "#c53030", margin: "0 0 10px" }}>{error}</p>}
               <button
                 type="submit"

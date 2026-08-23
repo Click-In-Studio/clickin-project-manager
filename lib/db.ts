@@ -2924,7 +2924,11 @@ export async function consumeEmailOtp(email: string, code: string): Promise<stri
 export async function upsertEmailUser(
   email: string,
   name: string,
+  /** 注册邀请制（lib/registration-gate.ts）：正当性是邀请码时传入，在建号事务内
+   *  锁行消耗 + 落流水；并发用尽则整个事务回滚，不产生账号。老用户路径不触码。 */
+  registrationCode?: string,
 ): Promise<{ userId: string }> {
+  const { consumeRegistrationCode } = await import("./registration-gate");
   const pool = getPool();
   const client = await pool.connect();
   try {
@@ -2950,6 +2954,9 @@ export async function upsertEmailUser(
         `INSERT INTO user_profile (user_id, name) VALUES ($1, $2)`,
         [userId, name],
       );
+      if (registrationCode) {
+        await consumeRegistrationCode(client, registrationCode, userId, email);
+      }
     }
     await client.query("COMMIT");
     return { userId };

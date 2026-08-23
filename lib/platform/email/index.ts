@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import { signMagicToken, verifyMagicToken } from "./email-tokens";
 import { sendEmail } from "./email-send";
 import { upsertEmailUser, getUserProfile, createEmailOtp } from "../../db";
+import { requireEmailRegistrationJustification } from "../../registration-gate";
 import { buildNotificationEmail } from "./email-templates";
 import type {
   PersonalChannel,
@@ -47,7 +48,20 @@ class EmailPlatform implements PersonalChannel, InboundGateway {
     const name = params.name?.trim() || email;
     if (!email) throw new Error("email: missing email param");
 
-    const { userId } = await upsertEmailUser(email, name);
+    // 注册邀请制（REGISTRATION_INVITE_ONLY）：这里是新账号的唯一写点——发验证码
+    // 即建号，邮箱验证之前就落 app_user 行。开关开启时，新邮箱需正当性
+    // （邀请码 / 指定邮箱登记 / 定向邀请 / 邀请链接透传），全落空抛
+    // RegistrationDeniedError（路由转 403）。老用户登录不受影响。
+    const justification = await requireEmailRegistrationJustification({
+      email,
+      inviteToken: params.inviteToken,
+      registrationCode: params.registrationCode,
+    });
+    const { userId } = await upsertEmailUser(
+      email,
+      name,
+      justification?.type === "code" ? justification.code : undefined,
+    );
 
     // Generate magic link (stateless JWT)
     const token = signMagicToken(userId, email);

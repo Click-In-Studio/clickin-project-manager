@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getPersonalChannel } from "@/lib/platform/registry";
 import { generateOAuthState, OAUTH_STATE_COOKIE } from "@/lib/session";
+import { RegistrationDeniedError, registrationRateLimited } from "@/lib/registration-gate";
 
 function requestBaseUrl(req: NextRequest): string {
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
@@ -58,10 +59,19 @@ export async function POST(req: NextRequest, { params }: Params) {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
 
+  // 注册邀请制：initiate 无会话，按 IP 滑窗限流防注册码暴破（开关关闭时不计数）
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  if (registrationRateLimited(ip)) {
+    return Response.json({ error: "尝试过于频繁，请稍后再试" }, { status: 429 });
+  }
+
   const baseUrl = requestBaseUrl(req);
   try {
     await ch.initiateLogin(body, { baseUrl });
   } catch (e) {
+    if (e instanceof RegistrationDeniedError) {
+      return Response.json({ error: e.message }, { status: 403 });
+    }
     console.error(`[auth/${platform}/initiate]`, e);
     return Response.json({ error: "failed to initiate login" }, { status: 502 });
   }

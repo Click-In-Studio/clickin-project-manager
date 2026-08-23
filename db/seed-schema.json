@@ -2963,6 +2963,87 @@
       "default": "now()"
     }
   ],
+  "registration_code": [
+    {
+      "column": "code",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "max_uses",
+      "type": "integer",
+      "nullable": false,
+      "default": "1"
+    },
+    {
+      "column": "used_count",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "expires_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "note",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "registration_code_redemption": [
+    {
+      "column": "id",
+      "type": "bigint",
+      "nullable": false
+    },
+    {
+      "column": "code",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "email",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "redeemed_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "registration_email": [
+    {
+      "column": "email",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "note",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "resource_dept_manage": [
     {
       "column": "id",
