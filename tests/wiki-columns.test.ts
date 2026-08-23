@@ -150,6 +150,26 @@ describe("飞书 grid 经 docx/record 重组", () => {
     expect(out).toContain("右栏文字");
   });
 
+  it("id 互为前缀不串块（token 精确匹配，非子串）", () => {
+    // KID_A2 元素排在 KID_A 之前——子串匹配会把 KID_A 错配到 KID_A2 的块上
+    const prefixHtml = `<div data-lark-html-role="root">` +
+      `<div data-type="grid" class=" old-record-id-GRID1"></div>` +
+      `<p class="ace-line old-record-id-KID_A2">乙栏文字</p>` +
+      `<p class="ace-line old-record-id-KID_A">甲栏文字</p>` +
+      `</div>`;
+    const rec = JSON.stringify({
+      recordMap: {
+        GRID1: { snapshot: { type: "grid", children: ["COL1", "COL2"] } },
+        COL1: { snapshot: { type: "grid_column", children: ["KID_A"] } },
+        COL2: { snapshot: { type: "grid_column", children: ["KID_A2"] } },
+      },
+    });
+    const out = transformFeishuHtml(prefixHtml, { record: rec });
+    expect(out).toContain("data-cols");
+    // 第一栏必须是甲（KID_A），第二栏是乙（KID_A2）
+    expect(out.indexOf("甲栏文字")).toBeLessThan(out.indexOf("乙栏文字"));
+  });
+
   it("无 record → 不重组不报错", () => {
     const out = transformFeishuHtml(html);
     expect(out).not.toContain("data-cols");

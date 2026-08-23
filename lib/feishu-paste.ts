@@ -76,7 +76,16 @@ function mapGrids(doc: Document, body: HTMLElement, record?: string | null) {
   } catch {
     return; // 私有格式读不懂就不重组，HTML 拍平形态照走
   }
-  const byId = (id: string) => /^[\w-]+$/.test(id) ? body.querySelector(`[class*="old-record-id-${id}"]`) : null;
+  // class*= 是子串匹配——id 互为前缀时会选错块（错误重组比缺块放弃更糟），
+  // 选择器只当预筛，classList 整 token 精确判定
+  const byId = (id: string): Element | null => {
+    if (!/^[\w-]+$/.test(id)) return null;
+    const cls = `old-record-id-${id}`;
+    for (const el of Array.from(body.querySelectorAll(`[class*="${cls}"]`))) {
+      if (el.classList.contains(cls)) return el;
+    }
+    return null;
+  };
 
   for (const [gridId, rec] of Object.entries(rm)) {
     if (rec?.snapshot?.type !== "grid") continue;
