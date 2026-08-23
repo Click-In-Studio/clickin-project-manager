@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { startChatRun, steerChatRun } from "@/lib/agent-gateway/client";
+import { startChatRun, steerChatRun, productionIdOfSessionKey } from "@/lib/agent-gateway/client";
+import { requireProductionFeature } from "@/lib/plan";
 import { createChatStreamResponse } from "@/lib/agent-gateway/relay";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
 import { neutralizeInboundMessage } from "@/lib/agent-ui-context";
@@ -36,6 +37,14 @@ export async function POST(req: NextRequest) {
   }
   const denied = requireOwnership(sessionKey, auth.userId);
   if (denied) return denied;
+
+  // 项目档位功能门（#280）：签发时已拦（sessions POST），这里对存量已签发的
+  // production 会话兜底——降级后旧 sessionKey 不能继续产生 AI 消耗。
+  const prodId = productionIdOfSessionKey(sessionKey);
+  if (prodId) {
+    const planDeny = await requireProductionFeature(prodId, "ai");
+    if (planDeny) return planDeny;
+  }
 
   // steer: the session already has a run in flight and this message should
   // be injected into it (queue-aware on 2026.7.x). The reply rides the

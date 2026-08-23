@@ -12,6 +12,7 @@ import { type NextRequest } from "next/server";
 import { requireGrantGate } from "@/lib/api-guard";
 import { listPolicies, setPolicies, listPolicyAudit } from "@/lib/policy-db";
 import { POLICY_QUESTIONS, matchAnswer, QUESTION_COVERED_KEYS } from "@/lib/policy-questions";
+import { requireProductionFeature } from "@/lib/plan";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -58,6 +59,9 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     req, id, [["production", "config", "edit"]], { blockArchived: true },
   );
   if (deny) return deny;
+  // 项目档位功能门（#280）：策略配置中心写入属「高级权限配置」，独立于 grant 判定。
+  const planDeny = await requireProductionFeature(id, "advancedPerms");
+  if (planDeny) return planDeny;
 
   const body = (await req.json().catch(() => null)) as { changes?: Record<string, string> } | null;
   const changes = body?.changes;

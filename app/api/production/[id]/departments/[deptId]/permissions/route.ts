@@ -3,6 +3,7 @@ import { requireGrantGate } from "@/lib/api-guard";
 import { getProductionDept } from "@/lib/dept-db";
 import { listDeptPermissionView, setDeptPermissionRows } from "@/lib/perm-center-db";
 import { isGovernanceNodeKey } from "@/lib/grant-template";
+import { requireProductionFeature } from "@/lib/plan";
 
 type Ctx = { params: Promise<{ id: string; deptId: string }> };
 
@@ -30,6 +31,9 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const { id, deptId } = await ctx.params;
   const { deny } = await requireGrantGate(req, id, [["org_dept", "grants", "edit"]], { blockArchived: true });
   if (deny) return deny;
+  // 项目档位功能门（#280）：部门权限区间编辑属「高级权限配置」，独立于 grant 判定。
+  const planDeny = await requireProductionFeature(id, "advancedPerms");
+  if (planDeny) return planDeny;
   const dept = await getProductionDept(deptId, id);
   if (!dept) return Response.json({ error: "部门不存在" }, { status: 404 });
 

@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createNewSessionKey, listChatSessions, getStatus } from "@/lib/agent-gateway/client";
 import { requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
 import { getProductionPermissionContext, listMyProductionsWithRoles, getUserProfile } from "@/lib/db";
+import { requireProductionFeature } from "@/lib/plan";
 import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
 import { PRODUCTION_ID_RE } from "@/lib/mcp/session-identity";
 
@@ -61,6 +62,10 @@ export async function POST(req: NextRequest) {
       if (!access) {
         return NextResponse.json({ error: "你不是该制作的成员" }, { status: 403 });
       }
+      // 项目档位功能门（#280）：独立于成员/grant 判定的一层，档位未开 AI 不签发
+      // production 会话。个人会话（无 productionId）不受项目档位约束。
+      const planDeny = await requireProductionFeature(productionId, "ai");
+      if (planDeny) return planDeny;
     } catch (err) {
       return toErrorResponse(err);
     }

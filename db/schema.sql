@@ -1850,3 +1850,49 @@ CREATE TABLE IF NOT EXISTS ai_usage (
 );
 
 CREATE INDEX IF NOT EXISTS ai_usage_created_idx ON ai_usage (created_at);
+
+-- ── 等级体系（#280，db/add-plan.sql，付费功能地基）─────────────────────────────
+-- user_plan 无行 = 普通用户（不能建项目）；production_plan 无行 = free 档。
+-- tier → limit 映射是代码常量（lib/plan.ts），库里只存档名。
+-- billing_exempt = 项目级豁免（「特邀项目」），写点仅管理员改库 + grants_exempt 码；
+-- internal 档 owner 的豁免则在计费时按当前 owner 推导，不物化到这里。豁免 ≠ 不记账。
+-- plan_code 无创建界面：管理员手工 INSERT。
+
+CREATE TABLE IF NOT EXISTS user_plan (
+  user_id    UUID        PRIMARY KEY REFERENCES app_user(id) ON DELETE CASCADE,
+  tier       TEXT        NOT NULL,
+  source     TEXT        NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS production_plan (
+  production_id  TEXT        PRIMARY KEY REFERENCES production(id) ON DELETE CASCADE,
+  tier           TEXT        NOT NULL,
+  billing_exempt BOOLEAN     NOT NULL DEFAULT false,
+  exempt_note    TEXT        NULL,
+  source         TEXT        NULL,
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS plan_code (
+  code          TEXT        PRIMARY KEY,
+  kind          TEXT        NOT NULL CHECK (kind IN ('user_upgrade', 'production_upgrade')),
+  grants_tier   TEXT        NOT NULL,
+  grants_exempt BOOLEAN     NOT NULL DEFAULT false,
+  exempt_note   TEXT        NULL,
+  max_uses      INTEGER     NOT NULL DEFAULT 1 CHECK (max_uses > 0),
+  used_count    INTEGER     NOT NULL DEFAULT 0,
+  expires_at    TIMESTAMPTZ NULL,
+  note          TEXT        NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS plan_code_redemption (
+  id            BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  code          TEXT        NOT NULL REFERENCES plan_code(code) ON DELETE CASCADE,
+  user_id       UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  production_id TEXT        NULL REFERENCES production(id) ON DELETE CASCADE,
+  redeemed_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS plan_code_redemption_code_idx ON plan_code_redemption (code);
