@@ -170,9 +170,35 @@ describe("飞书 grid 经 docx/record 重组", () => {
     expect(out.indexOf("甲栏文字")).toBeLessThan(out.indexOf("乙栏文字"));
   });
 
-  it("无 record → 不重组不报错", () => {
+  it("完全无结构信息（无剪贴板 record、无内嵌 span）→ 不重组不报错", () => {
     const out = transformFeishuHtml(html);
     expect(out).not.toContain("data-cols");
     expect(out).toContain("左栏文字");
+  });
+
+  it("Safari 路径：剪贴板拿不到 record，仅凭 HTML 内嵌 span 也能重组", () => {
+    // WKWebView getData 不暴露自定义类型（docx/record 恒空）；飞书把同一份
+    // recordMap 嵌在 span[data-lark-record-data]，text/html 恒可得
+    const embedded = record.replace(/"/g, "&quot;");
+    const htmlWithSpan = html.replace(
+      "</div>",
+      `<span data-lark-record-data="${embedded}"></span></div>`,
+    );
+    const out = transformFeishuHtml(htmlWithSpan); // 不传 record！
+    expect(out).toContain('data-cols=""');
+    expect(out).toContain('data-ratio="46"');
+    expect(out).toMatch(/data-col[^>]*>.*左栏文字/);
+    // 元数据 span 读完即删，不残留进内容
+    expect(out).not.toContain("data-lark-record-data");
+  });
+
+  it("两源合并：剪贴板与内嵌 span 各持一半记录也能拼出完整结构", () => {
+    const full = JSON.parse(record) as { recordMap: Record<string, unknown> };
+    const half1: Record<string, unknown> = {}, half2: Record<string, unknown> = {};
+    Object.entries(full.recordMap).forEach(([k, v], i) => { (i % 2 ? half1 : half2)[k] = v; });
+    const spanJson = JSON.stringify({ recordMap: half2 }).replace(/"/g, "&quot;");
+    const htmlWithSpan = html.replace("</div>", `<span data-lark-record-data="${spanJson}"></span></div>`);
+    const out = transformFeishuHtml(htmlWithSpan, { record: JSON.stringify({ recordMap: half1 }) });
+    expect(out).toContain('data-cols=""');
   });
 });

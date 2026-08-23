@@ -68,14 +68,30 @@ function replaceFeishuImages(doc: Document, body: HTMLElement) {
 type FeishuSnapshot = { type?: string; children?: string[]; width_ratio?: number };
 type FeishuRecordMap = Record<string, { snapshot?: FeishuSnapshot }>;
 
-function mapGrids(doc: Document, body: HTMLElement, record?: string | null) {
-  if (!record) return;
-  let rm: FeishuRecordMap;
-  try {
-    rm = (JSON.parse(record) as { recordMap?: FeishuRecordMap }).recordMap ?? {};
-  } catch {
-    return; // 私有格式读不懂就不重组，HTML 拍平形态照走
+/** 收集 record（结构真相源）：DOM 内嵌 span 优先 + 剪贴板 docx/record 合并。
+ *  WKWebView/Safari 的 getData 不暴露自定义剪贴板类型（docx/record 拿不到，
+ *  Tauri dashboard 实测踩坑）——但飞书把同一份 recordMap 也嵌在 text/html 的
+ *  span[data-lark-record-data] 属性里（五份 probe 样本全有），Safari 一定给
+ *  text/html，两源合并后跨浏览器可用。span 是元数据载体不是内容，读完即删。 */
+function collectRecordMap(body: HTMLElement, record?: string | null): FeishuRecordMap {
+  const merged: FeishuRecordMap = {};
+  const add = (raw: string | null | undefined) => {
+    if (!raw) return;
+    try {
+      Object.assign(merged, (JSON.parse(raw) as { recordMap?: FeishuRecordMap }).recordMap ?? {});
+    } catch { /* 单源坏了不影响其余 */ }
+  };
+  add(record);
+  for (const span of Array.from(body.querySelectorAll("[data-lark-record-data]"))) {
+    add(span.getAttribute("data-lark-record-data"));
+    span.remove();
   }
+  return merged;
+}
+
+function mapGrids(doc: Document, body: HTMLElement, record?: string | null) {
+  const rm = collectRecordMap(body, record);
+  if (Object.keys(rm).length === 0) return; // 无结构信息就不重组，HTML 拍平形态照走
   // class*= 是子串匹配——id 互为前缀时会选错块（错误重组比缺块放弃更糟），
   // 选择器只当预筛，classList 整 token 精确判定
   const byId = (id: string): Element | null => {
