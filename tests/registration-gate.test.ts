@@ -142,6 +142,38 @@ describe("码在建号事务内消耗", () => {
     expect(orphan.rows.length).toBe(0);
   });
 
+  it("真并发：两个请求同抢 max_uses=1 的码 → 恰好一个成功（FOR UPDATE 串行化）", async () => {
+    const code = await makeRegCode({ maxUses: 1 });
+    const emailA = freshEmail();
+    const emailB = freshEmail();
+    const results = await Promise.allSettled([
+      upsertEmailUser(emailA, "并发甲", code),
+      upsertEmailUser(emailB, "并发乙", code),
+    ]);
+    const ok = results.filter(r => r.status === "fulfilled");
+    const failed = results.filter(r => r.status === "rejected");
+    expect(ok.length).toBe(1);
+    expect(failed.length).toBe(1);
+    expect((failed[0] as PromiseRejectedResult).reason).toBeInstanceOf(RegistrationDeniedError);
+    const c = await getPool().query<{ used_count: number }>(
+      "SELECT used_count FROM registration_code WHERE code = $1", [code],
+    );
+    expect(c.rows[0].used_count).toBe(1);
+    // 输家整体回滚：只有赢家的身份行存在
+    const ids = await getPool().query(
+      "SELECT platform_user_id FROM user_platform_identity WHERE platform_id = 'email' AND platform_user_id = ANY($1)",
+      [[emailA, emailB]],
+    );
+    expect(ids.rows.length).toBe(1);
+  });
+
+  it("大小写变体不裂出重复账号（upsertEmailUser 入口归一）", async () => {
+    const email = freshEmail();
+    const { userId: a } = await upsertEmailUser(email, "小写注册");
+    const { userId: b } = await upsertEmailUser(email.toUpperCase(), "大写再来");
+    expect(b).toBe(a);
+  });
+
   it("老用户路径不触码（不消耗）", async () => {
     const email = freshEmail();
     await upsertEmailUser(email, "先注册");

@@ -59,8 +59,14 @@ export async function POST(req: NextRequest, { params }: Params) {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
 
-  // 注册邀请制：initiate 无会话，按 IP 滑窗限流防注册码暴破（开关关闭时不计数）
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  // 注册邀请制：initiate 无会话，按 IP 滑窗限流防注册码暴破（开关关闭时不计数）。
+  // IP 取信链（review #308 finding 2）：优先 X-Real-IP（nginx 以 $remote_addr 覆写，
+  // 不可伪造）；退而取 X-Forwarded-For **末段**（$proxy_add_x_forwarded_for 是追加
+  // 语义，首段是客户端自报的、可伪造，末段才是我们的反代补的真实来源）。
+  const xff = req.headers.get("x-forwarded-for");
+  const ip = req.headers.get("x-real-ip")?.trim()
+    || xff?.split(",").at(-1)?.trim()
+    || "unknown";
   if (registrationRateLimited(ip)) {
     return Response.json({ error: "尝试过于频繁，请稍后再试" }, { status: 429 });
   }

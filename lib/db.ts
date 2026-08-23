@@ -2928,6 +2928,10 @@ export async function upsertEmailUser(
    *  锁行消耗 + 落流水；并发用尽则整个事务回滚，不产生账号。老用户路径不触码。 */
   registrationCode?: string,
 ): Promise<{ userId: string }> {
+  // 防御性归一（review #308 finding 1）：email 身份全库约定存小写（两个写点的
+  // 路由各自 lower 过），在唯一的账号创建入口把不变量收为本地——大小写变体
+  // 不可能绕过注册门检查或裂出重复账号。
+  email = email.trim().toLowerCase();
   const { consumeRegistrationCode } = await import("./registration-gate");
   const pool = getPool();
   const client = await pool.connect();
