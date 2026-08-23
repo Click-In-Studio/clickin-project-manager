@@ -304,6 +304,7 @@
   color: var(--ink);
   font-family: Georgia, "Noto Serif SC", serif;
   font-size: 13px;
+  text-decoration: none;
 }
 
 .monthToday {
@@ -318,7 +319,8 @@
   margin-top: 6px;
 }
 
-.monthDayEvents > span {
+.monthDayEvents > span,
+.monthDayEvents > a {
   overflow: hidden;
   border-radius: 4px;
   background: #f2e4d9;
@@ -328,6 +330,18 @@
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-decoration: none;
+}
+
+.monthDayEvents > a.monthEntryRelated {
+  background: var(--surface-2);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.monthDayEvents > a.monthEntryCall {
+  background: #f2e4d9;
+  color: var(--stage);
 }
 
 .monthDayEvents small {
@@ -356,11 +370,20 @@
 
 .agendaItem:last-child { border-bottom: 0; }
 .agendaItem:hover { background: var(--paper); }
+.agendaItemCall { border-left: 3px solid var(--stage); }
 .agendaItem time,
 .agendaItem > span { display: flex; flex-direction: column; gap: 3px; }
 .agendaItem b { color: var(--ink); font-size: 12px; }
 .agendaItem small,
 .agendaItem time span { color: var(--muted); font-size: 10px; }
+
+.calendarLegend {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.calendarLegend b { color: var(--stage); }
 
 .callBadgeRow {
   display: flex;

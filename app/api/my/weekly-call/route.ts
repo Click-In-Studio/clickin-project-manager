@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { verifyCardToken } from "@/lib/card-token";
-import { listWeeklyCallSchedule } from "@/lib/event-db";
+import { listMyScheduleRange, listWeeklyCallSchedule } from "@/lib/event-db";
 
 type CalendarView = "week" | "month" | "agenda";
 
@@ -85,10 +85,31 @@ export async function GET(req: NextRequest) {
   const view: CalendarView = requestedView === "month" || requestedView === "agenda" ? requestedView : "week";
   const requestedAnchor = parseCstDate(req.nextUrl.searchParams.get("anchor"));
   const { rangeStart, rangeEnd } = rangeFor(view, requestedAnchor);
-  const events = await listWeeklyCallSchedule(userId, rangeStart, rangeEnd);
+  const [events, richEntries] = await Promise.all([
+    listWeeklyCallSchedule(userId, rangeStart, rangeEnd),
+    view !== "week" && session
+      ? listMyScheduleRange(userId, rangeStart, rangeEnd)
+      : Promise.resolve([]),
+  ]);
+  // 分享 token 仍然只披露 Call Sheet 数据；更广的个人日程只对已登录本人开放。
+  const calendarEntries = view === "week" || session
+    ? richEntries
+    : events.flatMap(event => event.calls.map((call, index) => ({
+        id: `call:${event.eventId}:${index}:${call.callAt}`,
+        kind: "call" as const,
+        title: event.eventTitle,
+        startsAt: call.callAt,
+        endsAt: null,
+        location: event.eventLocation,
+        notes: call.notes,
+        eventId: event.eventId,
+        productionId: event.productionId,
+        productionName: event.productionName,
+      })));
 
   return NextResponse.json({
     events,
+    calendarEntries,
     view,
     anchor: requestedAnchor ? cstDateString(requestedAnchor) : cstDateString(new Date()),
     rangeStart: rangeStart.toISOString(),

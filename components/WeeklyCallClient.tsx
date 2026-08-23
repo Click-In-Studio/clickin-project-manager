@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { WeeklyCallEvent } from "@/lib/event-db";
+import type { MyScheduleEntry, WeeklyCallEvent } from "@/lib/event-db";
 import { BASE_PATH } from "@/lib/base-path";
 import styles from "@/components/my-pages.module.css";
 
 type CalendarView = "week" | "month" | "agenda";
 type ApiResponse = {
   events: WeeklyCallEvent[];
+  calendarEntries: MyScheduleEntry[];
   view: CalendarView;
   anchor: string;
   rangeStart: string;
@@ -66,21 +67,20 @@ export default function WeeklyCallClient({ token }: { token?: string } = {}) {
   }, [token, view, anchor]);
 
   const events = useMemo(() => data?.events ?? [], [data]);
+  const calendarEntries = useMemo(() => data?.calendarEntries ?? [], [data]);
   const rangeStart = data?.rangeStart ?? "";
   const rangeEnd = data?.rangeEnd ?? "";
   const todayIso = isoDateCST(new Date().toISOString());
 
   const byDateKey = useMemo(() => {
-    const grouped = new Map<string, WeeklyCallEvent[]>();
-    for (const event of events) {
-      for (const call of event.calls) {
-        const key = isoDateCST(call.callAt);
-        if (!grouped.has(key)) grouped.set(key, []);
-        if (!grouped.get(key)!.some(item => item.eventId === event.eventId)) grouped.get(key)!.push(event);
-      }
+    const grouped = new Map<string, MyScheduleEntry[]>();
+    for (const entry of calendarEntries) {
+      const key = isoDateCST(entry.startsAt);
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(entry);
     }
     return grouped;
-  }, [events]);
+  }, [calendarEntries]);
 
   const calendarDays = rangeStart && rangeEnd
     ? Array.from({ length: Math.round((new Date(rangeEnd).getTime() - new Date(rangeStart).getTime()) / DAY) }, (_, index) => {
@@ -92,7 +92,7 @@ export default function WeeklyCallClient({ token }: { token?: string } = {}) {
           isoDate,
           date: shifted.getUTCDate(),
           month: shifted.getUTCMonth(),
-          events: byDateKey.get(isoDate) ?? [],
+          entries: byDateKey.get(isoDate) ?? [],
         };
       })
     : [];
@@ -117,6 +117,7 @@ export default function WeeklyCallClient({ token }: { token?: string } = {}) {
           <p className={styles.eyebrow}>Platform · 日程</p>
           <h1 className={styles.pageTitle}>{view === "week" ? "本周日程" : view === "month" ? "月历" : "日程表"}</h1>
           {rangeLabel && <p className={styles.calendarRange}>{rangeLabel} · UTC+8</p>}
+          {view !== "week" && <p className={styles.calendarLegend}><b>Call</b> 高亮显示 · 事件、任务与流程项淡显</p>}
         </div>
         <div className={styles.calendarControls} aria-label="日历视图控制">
           <div className={styles.calendarPager}>
@@ -151,7 +152,7 @@ export default function WeeklyCallClient({ token }: { token?: string } = {}) {
                   <Link key={day.isoDate} href={`/my/daily-call?date=${day.isoDate}`} className={`${styles.weekDay} ${styles.weekDayLink}`}>
                     <div className={styles.weekDayLabel}>{["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"][index]}</div>
                     <div className={`${styles.weekDayDate} ${day.isoDate === todayIso ? styles.today : ""}`}>{day.date}</div>
-                    {day.events.flatMap(event => event.calls.filter(call => isoDateCST(call.callAt) === day.isoDate).map(call => (
+                    {events.flatMap(event => event.calls.filter(call => isoDateCST(call.callAt) === day.isoDate).map(call => (
                       <span key={`${event.eventId}-${call.callAt}`} className={styles.weekCallPill}>{fmtTime(call.callAt)} <small>{event.eventTitle}</small></span>
                     )))}
                   </Link>
@@ -165,13 +166,23 @@ export default function WeeklyCallClient({ token }: { token?: string } = {}) {
               <div className={styles.monthWeekdays}>{["一", "二", "三", "四", "五", "六", "日"].map(day => <span key={day}>周{day}</span>)}</div>
               <div className={styles.monthGrid}>
                 {calendarDays.map(day => (
-                  <Link key={day.isoDate} href={`/my/daily-call?date=${day.isoDate}`} className={`${styles.monthDay} ${day.month !== anchorMonth ? styles.monthDayMuted : ""}`}>
-                    <span className={`${styles.monthDayNumber} ${day.isoDate === todayIso ? styles.monthToday : ""}`}>{day.date}</span>
+                  <div key={day.isoDate} className={`${styles.monthDay} ${day.month !== anchorMonth ? styles.monthDayMuted : ""}`}>
+                    <Link href={`/my/daily-call?date=${day.isoDate}`} className={`${styles.monthDayNumber} ${day.isoDate === todayIso ? styles.monthToday : ""}`}>{day.date}</Link>
                     <span className={styles.monthDayEvents}>
-                      {day.events.slice(0, 3).map(event => <span key={event.eventId}>{event.eventTitle}</span>)}
-                      {day.events.length > 3 && <small>另有 {day.events.length - 3} 项</small>}
+                      {day.entries.slice(0, 3).map(entry => (
+                        <Link
+                          key={entry.id}
+                          href={entry.kind === "task"
+                            ? `/production/${entry.productionId}/tasks/${entry.id.slice(5)}`
+                            : entry.eventId ? `/production/${entry.productionId}/events/${entry.eventId}/callsheet` : "/my/weekly-call"}
+                          className={entry.kind === "call" ? styles.monthEntryCall : styles.monthEntryRelated}
+                        >
+                          {entry.kind === "call" ? `${fmtTime(entry.startsAt)} ` : ""}{entry.title}
+                        </Link>
+                      ))}
+                      {day.entries.length > 3 && <small>另有 {day.entries.length - 3} 项</small>}
                     </span>
-                  </Link>
+                  </div>
                 ))}
               </div>
             </div>
@@ -179,20 +190,20 @@ export default function WeeklyCallClient({ token }: { token?: string } = {}) {
 
           {view === "agenda" && (
             <div className={styles.agendaList}>
-              {events.flatMap(event => event.calls.map(call => ({ event, call })))
-                .sort((a, b) => a.call.callAt.localeCompare(b.call.callAt))
-                .map(({ event, call }) => (
-                  <Link key={`${event.eventId}-${call.callAt}`} href={`/production/${event.productionId}/events/${event.eventId}/callsheet`} className={styles.agendaItem}>
-                    <time><b>{fmtDate(call.callAt)}</b><span>{fmtDow(call.callAt)} · {fmtTime(call.callAt)}</span></time>
-                    <span><b>{event.eventTitle}</b><small>{event.productionName}{event.eventLocation ? ` · ${event.eventLocation}` : ""}{call.notes ? ` · ${call.notes}` : ""}</small></span>
+              {calendarEntries.map(entry => (
+                  <Link key={entry.id} href={entry.kind === "task"
+                    ? `/production/${entry.productionId}/tasks/${entry.id.slice(5)}`
+                    : entry.eventId ? `/production/${entry.productionId}/events/${entry.eventId}/callsheet` : "/my/weekly-call"} className={`${styles.agendaItem} ${entry.kind === "call" ? styles.agendaItemCall : ""}`}>
+                    <time><b>{fmtDate(entry.startsAt)}</b><span>{fmtDow(entry.startsAt)} · {fmtTime(entry.startsAt)}</span></time>
+                    <span><b>{entry.title}</b><small>{entry.kind === "call" ? "Call" : entry.kind === "event" ? "参与事件" : entry.kind === "task" ? "我的任务" : "我的流程"} · {entry.productionName}{entry.location ? ` · ${entry.location}` : ""}{entry.notes ? ` · ${entry.notes}` : ""}</small></span>
                   </Link>
                 ))}
             </div>
           )}
 
-          {events.length === 0 ? (
-            <div className={styles.emptyState}>当前周期暂无 Call 安排<small>你仍可使用上方按钮切换周、月或日程表视图</small></div>
-          ) : view !== "agenda" ? (
+          {(view === "week" ? events.length === 0 : calendarEntries.length === 0) ? (
+            <div className={styles.emptyState}>{view === "week" ? "当前周期暂无 Call 安排" : "当前周期暂无与你相关的日程"}<small>你仍可使用上方按钮切换周、月或日程表视图</small></div>
+          ) : view === "week" ? (
             <div className={styles.eventCardGrid}>
               {events.map(event => (
                 <div key={event.eventId} className={styles.eventBlock}>

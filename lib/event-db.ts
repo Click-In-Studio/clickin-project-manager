@@ -2021,6 +2021,139 @@ export type WeeklyCallEvent = {
   schedItems: { title: string; startTime: string | null }[];
 };
 
+export type MyScheduleEntry = {
+  id: string;
+  kind: "call" | "event" | "task" | "schedule";
+  title: string;
+  startsAt: string;
+  endsAt: string | null;
+  location: string;
+  notes: string;
+  eventId: string | null;
+  productionId: string;
+  productionName: string;
+};
+
+/**
+ * 个人月历 / 日程表的数据源。
+ *
+ * 与纯 Call Sheet 不同，这里合并四条用户相关通道：我的 call、事件参与名单、
+ * 指派给我的任务、以及直接/部门/用户组排给我的流程项。用户组已经冻结时读取快照，
+ * 未冻结时读取实时成员，和事件权限口径保持一致。
+ */
+export async function listMyScheduleRange(
+  userId: string,
+  rangeStart: Date,
+  rangeEnd: Date,
+): Promise<MyScheduleEntry[]> {
+  type Row = {
+    id: string; kind: MyScheduleEntry["kind"]; title: string;
+    starts_at: Date; ends_at: Date | null; location: string; notes: string;
+    event_id: string | null; production_id: string; production_name: string;
+  };
+  const res = await getPool().query<Row>(
+    `WITH task_times AS (
+       SELECT t.id, t.title, t.production_id, t.event_id,
+              COALESCE(t.start_time, min(esi.start_time), pe.start_time,
+                       t.end_time, min(esi.end_time), pe.end_time) AS starts_at,
+              COALESCE(t.end_time, max(esi.end_time), pe.end_time) AS ends_at,
+              COALESCE(pe.location, '') AS location,
+              t.description AS notes
+         FROM task t
+         JOIN task_assignee ta ON ta.task_id = t.id AND ta.user_id = $1
+         LEFT JOIN task_schedule_item tsi ON tsi.task_id = t.id
+         LEFT JOIN event_schedule_item esi ON esi.id = tsi.item_id
+         LEFT JOIN production_event pe ON pe.id = t.event_id
+        GROUP BY t.id, pe.start_time, pe.end_time, pe.location
+     ), entries AS (
+       SELECT 'call:' || ect.id AS id, 'call'::text AS kind,
+              pe.title, ect.call_at AS starts_at, NULL::timestamptz AS ends_at,
+              pe.location, ect.notes, pe.id AS event_id, pe.production_id
+         FROM event_call_time ect
+         JOIN production_event pe ON pe.id = ect.event_id
+        WHERE ect.user_id = $1 AND ect.call_at >= $2 AND ect.call_at < $3
+       UNION ALL
+       SELECT 'event:' || pe.id, 'event', pe.title,
+              COALESCE(pe.start_time, pe.end_time), pe.end_time, pe.location, pe.description,
+              pe.id, pe.production_id
+         FROM event_participant ep
+         JOIN production_event pe ON pe.id = ep.event_id
+        WHERE ep.user_id = $1
+          AND COALESCE(pe.start_time, pe.end_time) >= $2
+          AND COALESCE(pe.start_time, pe.end_time) < $3
+       UNION ALL
+       SELECT 'task:' || tt.id, 'task', tt.title, tt.starts_at, tt.ends_at,
+              tt.location, tt.notes, tt.event_id, tt.production_id
+         FROM task_times tt
+        WHERE tt.starts_at >= $2 AND tt.starts_at < $3
+       UNION ALL
+       SELECT 'schedule:' || esi.id, 'schedule', esi.title,
+              COALESCE(esi.start_time, pe.start_time, esi.end_time, pe.end_time),
+              COALESCE(esi.end_time, pe.end_time),
+              COALESCE(NULLIF(esi.location, ''), pe.location), esi.notes,
+              pe.id, pe.production_id
+         FROM event_schedule_item esi
+         JOIN production_event pe ON pe.id = esi.event_id
+        WHERE COALESCE(esi.start_time, pe.start_time, esi.end_time, pe.end_time) >= $2
+          AND COALESCE(esi.start_time, pe.start_time, esi.end_time, pe.end_time) < $3
+          AND (
+            EXISTS (SELECT 1 FROM schedule_item_participant sip
+                     WHERE sip.item_id = esi.id AND sip.user_id = $1)
+            OR EXISTS (
+              SELECT 1 FROM schedule_item_department sid
+              JOIN production_dept_member pdm ON pdm.dept_id = sid.dept_id
+              WHERE sid.item_id = esi.id AND pdm.user_id = $1
+            )
+            OR EXISTS (
+              SELECT 1 FROM schedule_item_group sig
+               WHERE sig.item_id = esi.id
+                 AND (
+                   EXISTS (
+                     SELECT 1 FROM event_group_freeze f
+                     JOIN event_group_freeze_member m
+                       ON m.event_id = f.event_id AND m.group_id = f.group_id
+                      AND m.frozen_at = f.frozen_at
+                    WHERE f.event_id = esi.event_id AND f.group_id = sig.group_id
+                      AND f.released_at IS NULL AND m.user_id = $1
+                   )
+                   OR (
+                     NOT EXISTS (SELECT 1 FROM event_group_freeze f
+                                  WHERE f.event_id = esi.event_id AND f.group_id = sig.group_id
+                                    AND f.released_at IS NULL)
+                     AND EXISTS (
+                       SELECT 1 FROM event_group_member egm
+                       LEFT JOIN production_dept_member pdm
+                         ON pdm.dept_id = egm.dept_id AND pdm.user_id = $1
+                      WHERE egm.group_id = sig.group_id
+                        AND (egm.user_id = $1 OR pdm.user_id IS NOT NULL)
+                     )
+                   )
+                 )
+            )
+          )
+     )
+     SELECT e.id, e.kind, e.title, e.starts_at, e.ends_at,
+            COALESCE(e.location, '') AS location, COALESCE(e.notes, '') AS notes,
+            e.event_id, e.production_id, p.name AS production_name
+       FROM entries e
+       JOIN production p ON p.id = e.production_id
+      ORDER BY e.starts_at, e.kind, e.title`,
+    [userId, rangeStart.toISOString(), rangeEnd.toISOString()],
+  );
+  return res.rows.map(r => ({
+    id: r.id,
+    kind: r.kind,
+    title: r.title,
+    startsAt: new Date(r.starts_at).toISOString(),
+    endsAt: r.ends_at ? new Date(r.ends_at).toISOString() : null,
+    location: r.location,
+    notes: r.notes,
+    eventId: r.event_id,
+    productionId: r.production_id,
+    productionName: r.production_name,
+  }));
+}
+
 export async function listWeeklyCallSchedule(
   userId: string,
   weekStart: Date,
