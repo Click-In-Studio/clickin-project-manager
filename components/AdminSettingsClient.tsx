@@ -162,11 +162,14 @@ export default function AdminSettingsClient({
   initialMeta,
   isArchived,
   perms,
+  planAi = false,
 }: {
   productionId: string;
   initialMeta: InitialMeta;
   isArchived: boolean;
   perms: SettingsPerms;
+  /** 项目档位（付费维度）是否开通 AI——与 perms 那条权限维度正交。 */
+  planAi?: boolean;
 }) {
   return (
     <div style={{ overflowY: "auto", background: "var(--paper)", minHeight: "100%" }}>
@@ -197,8 +200,9 @@ export default function AdminSettingsClient({
         {/* ── 成员标签 ── */}
         <MemberTagsCard productionId={productionId} perms={perms} />
 
-        {/* ── AI 助手指令（制作级 agents.md；无编辑权则整节不渲染） ── */}
-        {perms.canEditAiInstructions && <AiInstructionsCard productionId={productionId} />}
+        {/* ── AI 助手指令（制作级 agents.md）──
+            两道独立判定：档位没开 AI 则整节不存在（付费维度），有 AI 但无编辑权也不渲染（权限维度）。 */}
+        {planAi && perms.canEditAiInstructions && <AiInstructionsCard productionId={productionId} />}
 
       </div>
     </div>

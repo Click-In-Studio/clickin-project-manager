@@ -16,10 +16,15 @@ import {
 import { listProductionDepts } from "@/lib/dept-db";
 import { listDeptPermissionView, getPermissionVocabulary, type DeptPermissionView } from "@/lib/perm-center-db";
 import AdminPermissionCenterClient from "@/components/AdminPermissionCenterClient";
+import { productionFeatureAllowed } from "@/lib/plan";
 
 export default async function PermissionCenterPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   await requireAdminAccess(id);
+
+  // 项目档位（付费维度）：菜单里已按 advancedPerms 隐藏本项，URL 直达也不放行——
+  // 否则页面看着能用、一保存撞 API 的 403。与权限维度无关，故排在权限判定之前。
+  if (!(await productionFeatureAllowed(id, "advancedPerms"))) redirect(`/production/${id}/admin`);
 
   const cookieStore = await cookies();
   const session = getSession(cookieStore);

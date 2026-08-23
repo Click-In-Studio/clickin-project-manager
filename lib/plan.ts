@@ -54,6 +54,15 @@ const FEATURE_LABELS: Record<ProductionFeature, string> = {
 function isUserTier(t: string): t is UserTier { return t in USER_TIERS; }
 function isProductionTier(t: string): t is ProductionTier { return t in PRODUCTION_TIERS; }
 
+/**
+ * 库里的原始档名 → 档位。无行 / 未知档名都归 free，与 getProductionPlan 同语义。
+ * 给已经在别处 JOIN 出 production_plan.tier 的查询用（如 listMyProductionsWithRoles），
+ * 免得为了菜单显隐再逐项目查一次库。
+ */
+export function normalizeProductionTier(raw: string | null | undefined): ProductionTier {
+  return raw && isProductionTier(raw) ? raw : "free";
+}
+
 // ─── 读取 ─────────────────────────────────────────────────────────────────────
 
 /** 无行 = null（普通用户）。库里出现未知档名视同无行（常量表回滚过的防御）。 */

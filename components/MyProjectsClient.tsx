@@ -25,7 +25,8 @@ function ProductionAvatar({ productionId, name }: { productionId: string; name: 
   );
 }
 
-export default function MyProjectsClient() {
+/** canCreate = 用户等级（付费维度）允许建项目。权限维度不参与——见 app/layout.tsx 注释。 */
+export default function MyProjectsClient({ canCreate = false }: { canCreate?: boolean }) {
   const router = useRouter();
   const [projects, setProjects] = useState<MyProductionEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,16 +75,18 @@ export default function MyProjectsClient() {
           <p className={styles.eyebrow}>Platform · 项目</p>
           <h1 className={styles.pageTitle}>我的项目</h1>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          style={{
-            border: "1px solid var(--ink)", borderRadius: 9, padding: "10px 20px",
-            background: "var(--ink)", color: "#fff",
-            fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
-          }}
-        >
-          + 新建项目
-        </button>
+        {canCreate && (
+          <button
+            onClick={() => setShowCreate(true)}
+            style={{
+              border: "1px solid var(--ink)", borderRadius: 9, padding: "10px 20px",
+              background: "var(--ink)", color: "#fff",
+              fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+            }}
+          >
+            + 新建项目
+          </button>
+        )}
       </div>
 
       {showCreate && (

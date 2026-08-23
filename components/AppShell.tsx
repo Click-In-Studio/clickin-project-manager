@@ -21,12 +21,17 @@ import {
   useAnchoredMenu,
 } from "./ProductionTopMenu";
 
-type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; firstTag: string | null; canAdmin: boolean; avatarUrl: string | null };
+// planAi / planAdvancedPerms 是**付费档位**开关（#280），与 canAdmin 那条权限维度正交：
+// 权限决定视图里能看到什么内容，档位决定菜单里有没有这一项。两者都由服务端解析好下发
+// （lib/plan.ts 的常量表不能进客户端包）。
+type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; firstTag: string | null; canAdmin: boolean; avatarUrl: string | null; planAi: boolean; planAdvancedPerms: boolean };
 type ShellSession = { userId: string; name: string; avatarUrl: string | null };
 
 interface AppShellProps {
   session: ShellSession | null;
   productions: Production[];
+  /** 用户等级（付费维度）：无等级的普通注册用户菜单里不出现「新建项目」。 */
+  canCreateProduction?: boolean;
   children: React.ReactNode;
   /** Server-rendered initial counts for sidebar badges. */
   initialUnreadCount?: number;
@@ -54,7 +59,9 @@ const PRODUCTION_NAV = [
   { label: "数字资产", hint: "文件 · 图纸 · 音视频", path: "assets", symbol: "数" },
 ] as const;
 
-const ADMIN_NAV_GROUPS: { title: string | null; items: { label: string; hint: string; path: string }[] }[] = [
+// feature 标的是**付费档位**依赖（#280），不是权限：带 feature 的项在档位没开通该功能
+// 的项目里整条不出现在菜单里。权限维度（canAdmin）管的是能不能进管理面板本身，两者正交。
+const ADMIN_NAV_GROUPS: { title: string | null; items: { label: string; hint: string; path: string; feature?: "advancedPerms" }[] }[] = [
   {
     title: null,
     items: [
@@ -78,9 +85,9 @@ const ADMIN_NAV_GROUPS: { title: string | null; items: { label: string; hint: st
   {
     title: "安全设置",
     items: [
-      { label: "权限中心", hint: "部门 · 角色 · 人事", path: "permissions" },
+      { label: "权限中心", hint: "部门 · 角色 · 人事", path: "permissions", feature: "advancedPerms" },
       { label: "权限模版", hint: "Cue 表模版", path: "templates" },
-      { label: "策略中心", hint: "Policy 配置", path: "policies" },
+      { label: "策略中心", hint: "Policy 配置", path: "policies", feature: "advancedPerms" },
     ],
   },
   {
@@ -517,11 +524,13 @@ function ProjectSwitcher({
   activeProductions,
   currentProduction,
   currentProductionId,
+  canCreateProduction,
   onOpen,
 }: {
   activeProductions: Production[];
   currentProduction: Production | null;
   currentProductionId: string | null;
+  canCreateProduction: boolean;
   onOpen?: () => void;
 }) {
   const router = useRouter();
@@ -719,7 +728,8 @@ function ProjectSwitcher({
             </p>
           )}
 
-          {/* New project */}
+          {/* New project — 用户等级（付费维度）决定这一项在不在菜单里 */}
+          {canCreateProduction && (
           <button
             onClick={() => { setOpen(false); setNewProdOpen(true); }}
             onMouseEnter={() => setHoveredItem("__new__")}
@@ -742,6 +752,7 @@ function ProjectSwitcher({
             </span>
             <span style={{ fontSize: 13, fontWeight: 600, color: "var(--script)" }}>新建项目</span>
           </button>
+          )}
         </div>
       )}
 
@@ -755,7 +766,7 @@ function ProjectSwitcher({
   );
 }
 
-export default function AppShell({ session, productions, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0 }: AppShellProps) {
+export default function AppShell({ session, productions, canCreateProduction = false, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0 }: AppShellProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -1094,8 +1105,20 @@ export default function AppShell({ session, productions, children, initialUnread
     ? productions.find((p) => p.id === productionId)
     : null;
   const activeProductions = productions.filter((p) => !p.archivedAt);
+  // AI 助手入口的显隐是项目档位（付费维度）。边界与后端门一致：只有 production 会话
+  // 过 requireProductionFeature(id, "ai")，项目视图外是个人会话、不归项目档位管，
+  // 所以那里照常显示。
+  const aiEntryVisible = productionId ? (currentProduction?.planAi ?? false) : true;
   const isAdminMode = !!(productionId && pathname.startsWith(`/production/${productionId}/admin`));
   const activeAdminModule = isAdminMode ? extractAdminModule(pathname, productionId!) : null;
+  // 管理后台菜单的档位过滤（付费维度）：档位没开「高级权限配置」的项目，权限中心 /
+  // 策略中心根本不出现在菜单里。整组被滤空时连组标题一起去掉。
+  // 不用 useMemo：这一段在 `if (!session)` 的 early return 之后，包 hook 就成了条件调用
+  // （react-hooks/rules-of-hooks）。六组菜单过一遍 filter，每次渲染重算的代价可以忽略。
+  const planAdvancedPerms = currentProduction?.planAdvancedPerms ?? false;
+  const adminNavGroups = ADMIN_NAV_GROUPS
+    .map((g) => ({ ...g, items: g.items.filter((it) => !it.feature || planAdvancedPerms) }))
+    .filter((g) => g.items.length > 0);
   const toggleScriptProductionSidebar = () => {
     if (scriptProductionSidebarAutoFolded) {
       setScriptProductionSidebarOverlayOpen((open) => !open);
@@ -1170,6 +1193,7 @@ export default function AppShell({ session, productions, children, initialUnread
           activeProductions={activeProductions}
           currentProduction={currentProduction ?? null}
           currentProductionId={productionId}
+          canCreateProduction={canCreateProduction}
           onOpen={() => setDropdownOpen(false)}
         />
 
@@ -1204,7 +1228,9 @@ export default function AppShell({ session, productions, children, initialUnread
             onOpenChange={hasProductionTopMenu ? handleProductionSearchOpenChange : undefined}
           />
 
-          {/* AI 助手：右侧浮动 popout 开关（原通知铃铛已迁至侧栏"通知提醒"，此处让位） */}
+          {/* AI 助手：右侧浮动 popout 开关（原通知铃铛已迁至侧栏"通知提醒"，此处让位）。
+              免费档项目里整个入口不出现——见 aiEntryVisible。 */}
+          {aiEntryVisible && (
           <button
             type="button"
             data-ai-toggle
@@ -1216,6 +1242,7 @@ export default function AppShell({ session, productions, children, initialUnread
           >
             AI
           </button>
+          )}
 
           {/* User avatar + dropdown: sm+ only */}
           <div className={`relative shrink-0 ${productionHeaderStage >= 2 ? "hidden" : "block"}`} ref={dropdownRef}>
@@ -1355,7 +1382,7 @@ export default function AppShell({ session, productions, children, initialUnread
                 <p className="text-[11px] text-[#667676] mt-0.5 truncate">{currentProduction?.name}</p>
               </div>
 
-              {ADMIN_NAV_GROUPS.map((group, gi) => (
+              {adminNavGroups.map((group, gi) => (
                 <div key={gi} className="flex flex-col gap-0.5">
                   {group.title ? (
                     <p className="px-2.5 pt-3 pb-1 text-[9px] font-bold tracking-[0.14em] uppercase text-[#667676]">{group.title}</p>
@@ -1397,7 +1424,7 @@ export default function AppShell({ session, productions, children, initialUnread
               {!productionId && (
                 <div className="mt-1 flex flex-col gap-0.5">
                   <NavItem href="/" symbol="⌂" label="我的工作" hint="今天与我有关" active={isHome} folded={productionSidebarContentFolded} />
-                  <NavItem href="/my/projects" symbol="◈" label="我的项目" hint="管理与新建项目" active={pathname.startsWith("/my/projects")} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/projects" symbol="◈" label="我的项目" hint={canCreateProduction ? "管理与新建项目" : "我参与的项目"} active={pathname.startsWith("/my/projects")} folded={productionSidebarContentFolded} />
                   <NavItem href="/my/announcements" symbol="⊟" label="公告" hint="演出公告与风险提醒" active={pathname.startsWith("/my/announcements")} folded={productionSidebarContentFolded} />
                   <NavItem href="/my/weekly-call" symbol="◷" label="日程" hint="完整 Weekly Call" active={pathname.startsWith("/my/weekly-call") || pathname.startsWith("/my/daily-call")} folded={productionSidebarContentFolded} />
                   <NavItem href="/my/tasks" symbol="✓" label="任务" hint="需求 · 跟进 · 完成" active={pathname.startsWith("/my/tasks")} badge={pendingTasks} folded={productionSidebarContentFolded} />
@@ -1613,7 +1640,7 @@ export default function AppShell({ session, productions, children, initialUnread
           <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-[var(--stage)] px-2.5 pt-1 pb-2">
             管理后台
           </p>
-          {ADMIN_NAV_GROUPS.map((group, gi) => (
+          {adminNavGroups.map((group, gi) => (
             <div key={gi} className="flex flex-col gap-0.5">
               {group.title ? (
                 <p className="px-2.5 pt-3 pb-1 text-[9px] font-bold tracking-[0.14em] uppercase text-[#667676]">{group.title}</p>
@@ -1715,7 +1742,9 @@ export default function AppShell({ session, productions, children, initialUnread
 
       {/* AI 助手浮动 popout（对应左侧剧本页折叠导航的浮出样式，宽得多）——
           项目视图外只看得到个人会话，项目视图内只看得到该项目会话，范围
-          由 productionId 决定。始终挂载，靠 CSS 隐藏，收起后台流不中断。 */}
+          由 productionId 决定。始终挂载，靠 CSS 隐藏，收起后台流不中断——
+          但免费档项目里连挂都不挂（入口都没有，挂着只会白拉一次会话列表）。 */}
+      {aiEntryVisible && (
       <AgentPopout
         open={aiPopoutOpen}
         onClose={() => setAiPopoutOpen(false)}
@@ -1723,6 +1752,7 @@ export default function AppShell({ session, productions, children, initialUnread
         productionName={currentProduction?.name ?? null}
         currentWikiId={currentWikiId}
       />
+      )}
     </div>
     </NavPendingContext.Provider>
     </ProductionToolbarContext.Provider>
