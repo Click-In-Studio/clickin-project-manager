@@ -18,11 +18,62 @@ export function transformFeishuHtml(html: string, opts: { members?: FeishuMember
   const doc = new DOMParser().parseFromString(html, "text/html");
   const body = doc.body;
   stripBlockPlaceholders(body);
+  mapCallouts(doc, body);
   normalizeCodeBlocks(body);
   normalizeChecklists(body);
   mapAtMentions(doc, body, opts.members ?? []);
   replaceVideos(doc, body);
   return body.innerHTML;
+}
+
+// ── callout：映射到 wiki callout 方言的 HTML 形态（lib/tiptap-callout）────────
+// 实测形态：<div class="zoneType-calloutBlock"><div class="callout-container"
+//   data-emoji-id="cake"><div class="callout-block" style="background-color:…;
+//   border-color:…"><div class="ace-line">内容行</div>…
+// 识别认结构特征（data-emoji-id 容器 + 内层内联背景色块），不认 class 名——
+// 飞书改版时漏判的代价只是降级成普通段落，不吃内容。
+
+// 飞书 data-emoji-id 是标准 emoji shortcode；只映射 callout 常用集，
+// 未收录的落默认 💡（emoji 只是视觉记号，语义在内容里）
+const FEISHU_EMOJI: Record<string, string> = {
+  bulb: "💡", pushpin: "📌", star: "⭐", star2: "🌟", fire: "🔥",
+  warning: "⚠️", exclamation: "❗", question: "❓",
+  white_check_mark: "✅", heavy_check_mark: "✔️", x: "❌",
+  memo: "📝", book: "📖", books: "📚", dart: "🎯", bell: "🔔",
+  loudspeaker: "📢", mega: "📣", speech_balloon: "💬", bookmark: "🔖",
+  cake: "🍰", chestnut: "🌰", trophy: "🏆", gift: "🎁", rocket: "🚀",
+  eyes: "👀", point_right: "👉", thumbsup: "👍", "+1": "👍", heart: "❤️",
+  sparkles: "✨", calendar: "📅", alarm_clock: "⏰", hourglass: "⏳",
+  link: "🔗", lock: "🔒", key: "🔑", gear: "⚙️", wrench: "🔧",
+  bug: "🐛", package: "📦", file_folder: "📁", clipboard: "📋",
+};
+
+// 飞书默认灰底——与我们方言的默认底色等价，不落颜色，保持 marker 最短形态
+const FEISHU_DEFAULT_BG = "#f5f6f7";
+
+function cssColorToHex(v: string): string | null {
+  const m = v.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (m) return "#" + [m[1], m[2], m[3]].map(n => Number(n).toString(16).padStart(2, "0")).join("");
+  const t = v.trim();
+  return /^#[0-9a-fA-F]{3,8}$/.test(t) ? t : null;
+}
+
+function mapCallouts(doc: Document, body: HTMLElement) {
+  for (const container of Array.from(body.querySelectorAll("div[data-emoji-id]"))) {
+    const inner = Array.from(container.children).find(
+      el => el instanceof HTMLElement && el.style.backgroundColor,
+    ) as HTMLElement | undefined;
+    const content = inner ?? container;
+    const emoji = FEISHU_EMOJI[container.getAttribute("data-emoji-id") ?? ""] ?? "💡";
+    const bg = inner ? cssColorToHex(inner.style.backgroundColor) : null;
+    const out = doc.createElement("div");
+    out.setAttribute("data-callout", "");
+    out.setAttribute("data-emoji", emoji);
+    if (bg && bg.toLowerCase() !== FEISHU_DEFAULT_BG) out.setAttribute("data-color", bg);
+    while (content.firstChild) out.appendChild(content.firstChild);
+    // 外层 zoneType 包裹一并替换掉，避免残留空容器
+    (container.closest(".zoneType-calloutBlock") ?? container).replaceWith(out);
+  }
 }
 
 // ── junk：ISV 等无法外显的块 ──────────────────────────────────────────────────

@@ -126,6 +126,27 @@ body {
   line-height: 1.5;
 }
 
+/* wiki callout（方言 > [!emoji|#color]，lib/tiptap-callout）——
+   编辑器（TipTap renderHTML）与只读渲染（WikiMarkdown）共用同一形态 */
+.wiki-callout {
+  --callout-bg: #f5f6f7;
+  position: relative;
+  background: var(--callout-bg);
+  border-radius: 8px;
+  padding: 10px 14px 10px 40px;
+  margin: 8px 0;
+}
+.wiki-callout::before {
+  content: attr(data-emoji);
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.wiki-callout > p { margin: 0; }
+.wiki-callout > p + p { margin-top: 4px; }
+
 /* Inline stage directions within dialogue blocks */
 .stage-inline,
 span[data-stage-inline] {
