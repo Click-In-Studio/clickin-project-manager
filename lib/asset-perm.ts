@@ -2,7 +2,7 @@ import { getPool } from "./pg";
 import { hasGrant, hasAnyGrant, listGrantedResourceIds } from "./grant-check";
 import { type PermissionContext } from "./permissions";
 import { isPolicyOn } from "./policy-db";
-import { canViewWiki, canEditWiki, listVisibleWikiIds } from "./wiki-perm";
+import { canEditWiki, listVisibleWikiIds } from "./wiki-perm";
 import type { Asset } from "./asset-db";
 
 // ─── 批D：asset 可见性判定（隐私/公开模型）──────────────────────────────────
@@ -58,9 +58,12 @@ async function anyMountHostVisible(
       && await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view")) return true;
   if (mounts.some(m => SCENE_MOUNT_TYPES.includes(m.mount_type))
       && await hasAnyGrant(permCtx.userId, productionId, "scene", ["meta"], "view")) return true;
-  // wiki 边：文档可见 ⇒ 正文里的图可见（canViewWiki 已含 is_public/部门分享/report 边全链）
-  for (const m of mounts.filter(m => m.mount_type === "wiki")) {
-    if (await canViewWiki(permCtx, productionId, m.mount_id)) return true;
+  // wiki 边：文档可见 ⇒ 正文里的图可见。批量走 listVisibleWikiIds（与
+  // structurallyVisibleAssetIds 同一实现，天然不分叉），多挂载也只一趟
+  const wikiMounts = mounts.filter(m => m.mount_type === "wiki");
+  if (wikiMounts.length > 0) {
+    const vis = await listVisibleWikiIds(permCtx, productionId);
+    if (wikiMounts.some(m => vis.wildcard || vis.ids.has(m.mount_id))) return true;
   }
   return cueMountHostVisible(permCtx.userId, productionId, mounts);
 }

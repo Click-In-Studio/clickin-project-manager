@@ -15,6 +15,9 @@ export function isFeishuHtml(html: string): boolean {
  * 任何一步失败都应由调用方兜底回原 HTML——宁可少归一化，不可拦粘贴。
  */
 export function transformFeishuHtml(html: string, opts: { members?: FeishuMember[] } = {}): string {
+  if (typeof DOMParser === "undefined") {
+    throw new Error("transformFeishuHtml 仅限浏览器端调用（依赖 DOMParser）");
+  }
   const doc = new DOMParser().parseFromString(html, "text/html");
   const body = doc.body;
   stripBlockPlaceholders(body);
