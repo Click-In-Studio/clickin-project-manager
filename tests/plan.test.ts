@@ -4,21 +4,26 @@
  *   层 2 兑换码 —— 只升不降、过期/用尽/错类不消耗、特邀豁免落库
  *   层 3 座位上限 —— acceptInvite 事务内按档位拦 seats_full，升档后放行
  *   层 4 功能门 —— requireProductionFeature 独立于 grant 判定
+ *   层 5 菜单显隐数据源 —— listMyProductionsWithRoles 带出的 planTier（PR #312）
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { upsertFeishuUser, deleteProduction, createProduction, ProductionQuotaError } from "@/lib/db";
+import {
+  upsertFeishuUser, deleteProduction, createProduction, ProductionQuotaError,
+  listMyProductionsWithRoles,
+} from "@/lib/db";
+import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
 import { createInvite, acceptInvite } from "@/lib/invite-db";
 import {
   getUserTier, getProductionPlan, redeemPlanCode, requireProductionFeature,
-  productionFeatureAllowed, PRODUCTION_TIERS, USER_TIERS,
+  productionFeatureAllowed, normalizeProductionTier, PRODUCTION_TIERS, USER_TIERS,
 } from "@/lib/plan";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { getPool } from "@/lib/pg";
 import { POST as createProductionHandler } from "@/app/api/productions/route";
 import { POST as accountRedeemHandler } from "@/app/api/account/redeem-code/route";
-import { PATCH as memberPermPatch } from "@/app/api/production/[id]/permissions/route";
+import { PATCH as memberPermPatch, POST as memberPermPost } from "@/app/api/production/[id]/permissions/route";
 
 function req(url: string, opts: { session?: string; method?: string; body?: string } = {}): NextRequest {
   const headers = new Headers();
@@ -302,5 +307,65 @@ describe("项目功能门", () => {
       [prodId],
     );
     expect((await patch()).status).toBe(200);
+  });
+
+  it("个人区间**批量**写入走同一道门（POST，free → 403，pro 放行）", async () => {
+    const { userId, session } = await makeUser("creator");
+    const { prodId } = await makeProduction(userId);
+    createdProds.push(prodId);
+
+    const body = JSON.stringify({ userIds: [userId], permission: "node:script/blocks@edit", granted: true });
+    const post = () =>
+      memberPermPost(
+        req(`/api/production/${prodId}/permissions`, { session, method: "POST", body }),
+        { params: Promise.resolve({ id: prodId }) },
+      );
+
+    const denied = await post();
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error).toContain("高级权限配置");
+
+    await getPool().query(
+      "INSERT INTO production_plan (production_id, tier, source) VALUES ($1, 'pro', 'test') ON CONFLICT (production_id) DO UPDATE SET tier = 'pro'",
+      [prodId],
+    );
+    const allowed = await post();
+    expect(allowed.status).toBe(200);
+    expect((await allowed.json()).affected).toBe(1);
+  });
+});
+
+// ── 层 5：菜单显隐的数据源 ─────────────────────────────────────────────────────
+// 前端按档位藏菜单（PR #312）靠的是 listMyProductionsWithRoles 带出来的 planTier，
+// 这条错了菜单就错，所以直接测这个字段而不是只经 API 间接验证。
+
+describe("档位下发（菜单显隐数据源）", () => {
+  it("normalizeProductionTier：无行 / 未知档名 → free，已知档名原样", () => {
+    expect(normalizeProductionTier(null)).toBe("free");
+    expect(normalizeProductionTier(undefined)).toBe("free");
+    // 常量表回滚过、库里留着旧档名时不能把未知值当成开通（与 getProductionPlan 同语义）
+    expect(normalizeProductionTier("legacy_enterprise")).toBe("free");
+    expect(normalizeProductionTier("free")).toBe("free");
+    expect(normalizeProductionTier("pro")).toBe("pro");
+  });
+
+  it("listMyProductionsWithRoles：无 production_plan 行 → free，有行 → 该档；LEFT JOIN 不放大行数", async () => {
+    const { userId } = await makeUser("creator");
+    const { prodId: freeProd } = await makeProduction(userId);
+    const { prodId: proProd } = await makeProduction(userId);
+    createdProds.push(freeProd, proProd);
+    await getPool().query(
+      "INSERT INTO production_plan (production_id, tier, source) VALUES ($1, 'pro', 'test') ON CONFLICT (production_id) DO UPDATE SET tier = 'pro'",
+      [proProd],
+    );
+
+    const entries = await listMyProductionsWithRoles(userId, false, [...ADMIN_PANEL_NODE_PREFIXES]);
+    const byId = new Map(entries.map(e => [e.id, e]));
+    expect(byId.get(freeProd)?.planTier).toBe("free");
+    expect(byId.get(proProd)?.planTier).toBe("pro");
+    // production_plan 的 PK 是 production_id，JOIN 后每个项目仍只有一行——
+    // 放大了的话前端项目列表会出现重复条目。
+    expect(entries.filter(e => e.id === proProd)).toHaveLength(1);
+    expect(entries.filter(e => e.id === freeProd)).toHaveLength(1);
   });
 });

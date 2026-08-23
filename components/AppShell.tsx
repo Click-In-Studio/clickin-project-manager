@@ -1113,14 +1113,12 @@ export default function AppShell({ session, productions, canCreateProduction = f
   const activeAdminModule = isAdminMode ? extractAdminModule(pathname, productionId!) : null;
   // 管理后台菜单的档位过滤（付费维度）：档位没开「高级权限配置」的项目，权限中心 /
   // 策略中心根本不出现在菜单里。整组被滤空时连组标题一起去掉。
+  // 不用 useMemo：这一段在 `if (!session)` 的 early return 之后，包 hook 就成了条件调用
+  // （react-hooks/rules-of-hooks）。六组菜单过一遍 filter，每次渲染重算的代价可以忽略。
   const planAdvancedPerms = currentProduction?.planAdvancedPerms ?? false;
-  const adminNavGroups = useMemo(
-    () =>
-      ADMIN_NAV_GROUPS
-        .map((g) => ({ ...g, items: g.items.filter((it) => !it.feature || planAdvancedPerms) }))
-        .filter((g) => g.items.length > 0),
-    [planAdvancedPerms],
-  );
+  const adminNavGroups = ADMIN_NAV_GROUPS
+    .map((g) => ({ ...g, items: g.items.filter((it) => !it.feature || planAdvancedPerms) }))
+    .filter((g) => g.items.length > 0);
   const toggleScriptProductionSidebar = () => {
     if (scriptProductionSidebarAutoFolded) {
       setScriptProductionSidebarOverlayOpen((open) => !open);
