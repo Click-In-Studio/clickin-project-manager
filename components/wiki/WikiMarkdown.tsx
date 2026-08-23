@@ -13,6 +13,7 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
+import remarkColumns from "@/lib/remark-columns";
 import { BASE_PATH } from "@/lib/base-path";
 import {
   decodeMentionHref, CM_HREF_PREFIX, type ContentMentionAttrs,
@@ -206,7 +207,7 @@ export default function WikiMarkdown({
     <div className={`prose prose-zinc max-w-none ${className}`}>
       <ReactMarkdown
         // breaks：单回车即换行（对齐 MindWeave 与编辑器 tiptap breaks:true——CJK 写作习惯）
-        remarkPlugins={[remarkGfm, remarkBreaks]}
+        remarkPlugins={[remarkGfm, remarkBreaks, remarkColumns]}
         components={{
           blockquote: ({ children }) => {
             const callout = splitCalloutChildren(children);

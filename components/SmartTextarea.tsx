@@ -26,6 +26,7 @@ import { isFeishuHtml, transformFeishuHtml } from "@/lib/feishu-paste";
 import { Callout } from "@/lib/tiptap-callout";
 import { WikiImage } from "@/lib/tiptap-wiki-image";
 import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/tiptap-upload-placeholder";
+import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 export { normalizeLegacyMentions };
 import { serializeMention } from "@/lib/mention-types";
 
@@ -186,6 +187,17 @@ function Toolbar({ editor }: { editor: TiptapEditor | null }) {
       <span className="w-px bg-zinc-200 mx-1 self-stretch" />
       <ToolbarBtn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="引用">&ldquo;</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleWrap("callout").run()} active={editor.isActive("callout")} title="Callout 高亮块">💡</ToolbarBtn>
+      <ToolbarBtn
+        onClick={() => editor.chain().focus().insertContent({
+          type: "columnGroup",
+          content: [
+            { type: "column", content: [{ type: "paragraph" }] },
+            { type: "column", content: [{ type: "paragraph" }] },
+          ],
+        }).run()}
+        active={editor.isActive("columnGroup")}
+        title="两栏分栏"
+      >◫</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} active={editor.isActive("table")} title="插入表格">⊞</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleCode().run()} active={editor.isActive("code")} title="行内代码">{"</>"}</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive("codeBlock")} title="代码块">{"{ }"}</ToolbarBtn>
@@ -455,6 +467,9 @@ export default function SmartTextarea({
   const imageUploadRef = useRef(imageUpload);
   imageUploadRef.current = imageUpload;
   const hasImageUpload = !!imageUpload;
+  // 飞书私有格式（docx/record）：分栏结构真相源。transformPastedHTML 只拿得到
+  // HTML 字符串，record 在 DOM paste 事件先行截获经 ref 递进去
+  const pasteRecordRef = useRef<string | null>(null);
 
   useEffect(() => { dropRef.current = drop; });
 
@@ -648,7 +663,7 @@ export default function SmartTextarea({
       ? [base, Markdown.configure({ transformCopiedText: true, breaks: true }),
          TableKit.configure({ table: { resizable: false } }),
          TaskList, TaskItem.configure({ nested: true }),
-         Callout,
+         Callout, Column, ColumnGroup,
          ...(hasImageUpload ? [imageExt, UploadPlaceholder] : []),
          ...commonExts, wikiTriggerCfg, remoteCursorExt]
       : [base, ...commonExts];
@@ -674,10 +689,23 @@ export default function SmartTextarea({
       },
       // 飞书粘贴归一化（junk 清理/代码块/checklist/@提及映射，lib/feishu-paste）。
       // 只认飞书来源标记，其他粘贴源原样放行；失败也放行——宁可少归一化不拦粘贴
+      handleDOMEvents: {
+        // 在 PM 处理 paste 之前截获飞书私有格式（返回 false 不拦默认流程）
+        paste: (_view, event) => {
+          try {
+            pasteRecordRef.current = event.clipboardData?.getData("docx/record") || null;
+          } catch {
+            pasteRecordRef.current = null;
+          }
+          return false;
+        },
+      },
       transformPastedHTML: (html) => {
         if (!isFeishuHtml(html)) return html;
         try {
-          return transformFeishuHtml(html, { members: memberMentionRef.current?.members });
+          const record = pasteRecordRef.current;
+          pasteRecordRef.current = null;
+          return transformFeishuHtml(html, { members: memberMentionRef.current?.members, record });
         } catch {
           return html;
         }
