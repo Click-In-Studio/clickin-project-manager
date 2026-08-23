@@ -127,11 +127,29 @@ import {
   GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH,
 } from "./grant-template-retire-snapshot";
 import {
+  isVersionRetirePreMigrationSchema,
+  createVersionRetirePreMigrationData,
+  VERSION_RETIRE_SNAPSHOT_PATH,
+  type VersionRetireSnapshot,
+} from "./version-retire-snapshot";
+import {
   isWikiCreateBaselinePreMigrationSchema,
   createWikiCreateBaselinePreMigrationData,
   WIKI_CREATE_BASELINE_SNAPSHOT_PATH,
   type WikiCreateBaselineSnapshot,
 } from "./wiki-create-baseline-snapshot";
+import {
+  isWikiEntityLinkPreMigrationSchema,
+  createWikiEntityLinkPreMigrationData,
+  WIKI_ENTITY_LINK_SNAPSHOT_PATH,
+  type WikiEntityLinkSnapshot,
+} from "./wiki-entity-link-snapshot";
+import {
+  isDropTaskMilestonePreMigrationSchema,
+  createDropTaskMilestonePreMigrationData,
+  DROP_TASK_MILESTONE_SNAPSHOT_PATH,
+  type DropTaskMilestoneSnapshot,
+} from "./drop-task-milestone-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -181,6 +199,14 @@ export async function setup() {
     `INSERT INTO feishu_user (open_id, user_id, name, is_super_admin, created_at, updated_at)
      VALUES ('test-sys-feishu', $1, '测试系统用户', FALSE, NOW(), NOW())
      ON CONFLICT DO NOTHING`,
+    [TEST_USER],
+  );
+  // #280 建项目门：既有路由测试全部用 TEST_USER 会话建项目，给 internal 档
+  // （无数量上限——测试 DB 状态共享，creator 的配额会被历史残骸挤爆产生 flake）。
+  // 「无档 → 403」「creator 配额」分支由 tests/plan.test.ts 用新造用户专测。
+  await pool.query(
+    `INSERT INTO user_plan (user_id, tier, source) VALUES ($1, 'internal', 'test-setup')
+     ON CONFLICT (user_id) DO NOTHING`,
     [TEST_USER],
   );
 
@@ -534,6 +560,43 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  // 版本退役收尾（PR #300）：造一个「旧文件被版本 pin」的资产快照下来，
+  // 迁移测试验证 latest-wins 解析不丢文件，然后删 asset_version_rel /
+  // is_universal / version 化石列。
+  if (await isVersionRetirePreMigrationSchema(pool)) {
+    const versionRetireSnapshot = await createVersionRetirePreMigrationData(pool, TEST_OWNER);
+    await writeFile(VERSION_RETIRE_SNAPSHOT_PATH, JSON.stringify(versionRetireSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-version-retire.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // wiki 引用边泛化（wiki_link → wiki_entity_link）：先裸 SQL 造存量 wiki→wiki
+  // 边（应用代码已改写新表，不能走 createWiki），迁移测试验证平移。
+  if (await isWikiEntityLinkPreMigrationSchema(pool)) {
+    const wikiEntityLinkSnapshot = await createWikiEntityLinkPreMigrationData(pool, TEST_USER);
+    await writeFile(WIKI_ENTITY_LINK_SNAPSHOT_PATH, JSON.stringify(wikiEntityLinkSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-wiki-entity-link.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // task 换轨挂 phase：task_milestone 边表退役。工厂造 task+milestone+旧边与
+  // phase 家族新边（add-phase.sql 已由 CI 先行应用），迁移测试验证 DROP 只带走边表。
+  if (await isDropTaskMilestonePreMigrationSchema(pool)) {
+    const dropTaskMilestoneSnapshot = await createDropTaskMilestonePreMigrationData(pool, TEST_USER);
+    await writeFile(DROP_TASK_MILESTONE_SNAPSHOT_PATH, JSON.stringify(dropTaskMilestoneSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-drop-task-milestone.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
@@ -541,6 +604,56 @@ export async function teardown() {
 
   // grant_template 退役快照：纯表内容 dump，没有工厂行要清，只删文件。
   await unlink(GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH).catch(() => {});
+
+  // wiki 引用边泛化快照的工厂演出（migration path only）
+  {
+    let wikiEntityLinkSnapshot: WikiEntityLinkSnapshot | null = null;
+    try {
+      wikiEntityLinkSnapshot = JSON.parse(
+        await readFile(WIKI_ENTITY_LINK_SNAPSHOT_PATH, "utf8"),
+      ) as WikiEntityLinkSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (wikiEntityLinkSnapshot) {
+      // production 删除级联 wiki / wiki_entity_link
+      await pool.query("DELETE FROM production WHERE id = $1", [wikiEntityLinkSnapshot.prodId]).catch(() => {});
+      await unlink(WIKI_ENTITY_LINK_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // task_milestone 退役快照的工厂演出（migration path only）
+  {
+    let dropTaskMilestoneSnapshot: DropTaskMilestoneSnapshot | null = null;
+    try {
+      dropTaskMilestoneSnapshot = JSON.parse(
+        await readFile(DROP_TASK_MILESTONE_SNAPSHOT_PATH, "utf8"),
+      ) as DropTaskMilestoneSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (dropTaskMilestoneSnapshot) {
+      // production 删除级联 task / milestone / phase 及其边
+      await pool.query("DELETE FROM production WHERE id = $1", [dropTaskMilestoneSnapshot.prodId]).catch(() => {});
+      await unlink(DROP_TASK_MILESTONE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // 版本退役收尾快照的工厂演出（migration path only）
+  {
+    let versionRetireSnapshot: VersionRetireSnapshot | null = null;
+    try {
+      versionRetireSnapshot = JSON.parse(
+        await readFile(VERSION_RETIRE_SNAPSHOT_PATH, "utf8"),
+      ) as VersionRetireSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (versionRetireSnapshot) {
+      await pool.query("DELETE FROM production WHERE id = $1", [versionRetireSnapshot.prodId]).catch(() => {});
+      await unlink(VERSION_RETIRE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
 
   // 部门权限来源分道（#274）的工厂演出（migration path only）
   {

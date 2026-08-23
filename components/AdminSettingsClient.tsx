@@ -1,6 +1,7 @@
 "use client";
 
 import PageHeader from "@/components/PageHeader";
+import AiInstructionsCard from "@/components/AiInstructionsCard";
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -143,6 +144,7 @@ export type SettingsPerms = {
   canImportScenes: boolean;
   canManageTags: boolean;
   canToggleWatermark: boolean;
+  canEditAiInstructions: boolean;
 };
 
 export type InitialMeta = {
@@ -194,6 +196,9 @@ export default function AdminSettingsClient({
 
         {/* ── 成员标签 ── */}
         <MemberTagsCard productionId={productionId} perms={perms} />
+
+        {/* ── AI 助手指令（制作级 agents.md；无编辑权则整节不渲染） ── */}
+        {perms.canEditAiInstructions && <AiInstructionsCard productionId={productionId} />}
 
       </div>
     </div>

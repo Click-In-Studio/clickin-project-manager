@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { getUserProfile, getUserIdentities } from "@/lib/db";
 import { getUserPrefs } from "@/lib/notification-prefs";
+import { getUserTier, USER_TIERS } from "@/lib/plan";
 import AccountClient from "./AccountClient";
 
 export const metadata: Metadata = { title: "个人中心" };
@@ -13,10 +14,11 @@ export default async function AccountPage() {
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
 
-  const [profile, identities, notifPrefs] = await Promise.all([
+  const [profile, identities, notifPrefs, userTier] = await Promise.all([
     getUserProfile(session.userId),
     getUserIdentities(session.userId),
     getUserPrefs(session.userId),
+    getUserTier(session.userId),
   ]);
 
   return (
@@ -31,6 +33,7 @@ export default async function AccountPage() {
       }}
       initialIdentities={identities}
       initialNotifPrefs={notifPrefs}
+      initialPlan={userTier ? { tier: userTier, label: USER_TIERS[userTier].label } : null}
     />
   );
 }

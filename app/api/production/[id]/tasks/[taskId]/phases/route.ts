@@ -1,14 +1,14 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getTechReqByProduction, setTaskMilestones } from "@/lib/event-db";
+import { getTechReqByProduction, setTaskPhases } from "@/lib/event-db";
 import { canEditTechReq } from "@/lib/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; taskId: string }> };
 
 /**
- * PUT — replace the milestone bindings. Body: { milestoneIds: string[] }
- * 不约束任务截止 ≤ 里程碑时间（用户规范）；跨剧组 milestone id 静默丢弃。
+ * PUT — replace the phase bindings. Body: { phaseIds: string[] }
+ * 不约束任务起止 ⊆ 阶段区间（用户规范，与原 milestone 边同款）；跨剧组 phase id 静默丢弃。
  */
 export async function PUT(req: NextRequest, ctx: Ctx) {
   const { id: productionId, taskId } = await ctx.params;
@@ -25,11 +25,11 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   if (!await canEditTechReq(permCtx, taskId, existing.eventId, productionId))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const body = (await req.json()) as { milestoneIds?: unknown };
-  if (!Array.isArray(body.milestoneIds) || body.milestoneIds.some(x => typeof x !== "string"))
-    return Response.json({ error: "milestoneIds 必须是 string[]" }, { status: 400 });
+  const body = (await req.json()) as { phaseIds?: unknown };
+  if (!Array.isArray(body.phaseIds) || body.phaseIds.some(x => typeof x !== "string"))
+    return Response.json({ error: "phaseIds 必须是 string[]" }, { status: 400 });
 
-  await setTaskMilestones(taskId, productionId, body.milestoneIds as string[]);
+  await setTaskPhases(taskId, productionId, body.phaseIds as string[]);
   const updated = await getTechReqByProduction(taskId, productionId);
   return Response.json({ task: updated });
 }

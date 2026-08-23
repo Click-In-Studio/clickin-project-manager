@@ -6,6 +6,7 @@ import Link from "next/link";
 import AssetUploadPanel from "./AssetUploadPanel";
 import type { UploadResult } from "./AssetUploadPanel";
 import MountPointAssets from "./MountPointAssets";
+import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import AssetShareModal from "./AssetShareModal";
 import { BASE_PATH } from "@/lib/base-path";
 import type { Asset, AssetMount, AssetType } from "@/lib/asset-db";
@@ -126,7 +127,6 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
         </p>
         <AssetUploadPanel
           productionId={productionId}
-          versionId={versionId}
           onUploaded={() => { setView("all"); setUploadTarget(null); load(); }}
           onCancel={() => { setView("all"); setUploadTarget(null); }}
         />
@@ -226,9 +226,6 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" }}>
                       {a.name && <span style={{ fontSize: 10, color: "var(--muted)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.fileName}</span>}
                       <span style={{ fontSize: 10, color: "var(--muted)" }}>{ASSET_TYPE_LABELS[a.assetType]}</span>
-                      {!a.isUniversal && (
-                        <span style={{ borderRadius: 4, padding: "1px 5px", fontSize: 9, background: "#fffbeb", color: "#d97706", fontWeight: 600 }}>版本相关</span>
-                      )}
                       {a.storageType === "feishu_link" && (
                         <span style={{ borderRadius: 4, padding: "1px 5px", fontSize: 9, background: "#eff6ff", color: "#3b82f6", fontWeight: 600 }}>飞书</span>
                       )}
@@ -290,6 +287,9 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
                         ))}
                       </div>
                     )}
+                    <div className="mt-3">
+                      <RelatedWikiChips productionId={productionId} entityType="asset" entityId={a.id} />
+                    </div>
                   </div>
                 )}
               </div>
@@ -310,7 +310,6 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
             </div>
             <AssetUploadPanel
               productionId={productionId}
-              versionId={versionId}
               onUploaded={(result: UploadResult) => { setShowUploadModal(false); setAssets(prev => [...prev, result as unknown as Asset]); load(); }}
               onCancel={() => setShowUploadModal(false)}
             />

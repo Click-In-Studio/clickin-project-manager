@@ -16,15 +16,18 @@ describe("MCP server skeleton", () => {
       "approvals.list",
       "my.call_times",
       "my.events",
+      "my.memory_search",
       "my.milestones",
       "my.productions",
       "my.tech_reqs",
+      "my.update_instructions",
       "production.contact_list",
       "production.department_list",
       "production.info",
       "production.milestones",
       "production.my_role",
       "production.notifications",
+      "production.update_instructions",
       "production.wiki_backlinks",
       "production.wiki_propose_create",
       "production.wiki_propose_delete",
@@ -43,7 +46,7 @@ describe("MCP server skeleton", () => {
   it("all my.* tools are read-only (Level A direct pass)", async () => {
     const server = buildMcpServer();
     const registry = server["_registeredTools"] as ToolRegistry;
-    for (const name of ["my.call_times", "my.events", "my.milestones", "my.productions", "my.tech_reqs"]) {
+    for (const name of ["my.call_times", "my.events", "my.memory_search", "my.milestones", "my.productions", "my.tech_reqs"]) {
       expect(registry[name]?.annotations?.readOnlyHint, name).toBe(true);
     }
     await server.close();

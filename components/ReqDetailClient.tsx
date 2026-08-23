@@ -66,10 +66,10 @@ type Props = {
   deptName: string | null;
   deptPeople: { userId: string; name: string }[];
   allPeople?: { userId: string; name: string }[];
-  /** 当前绑定的里程碑（展示用） */
-  milestones: { id: string; name: string; endDate: string }[];
-  /** 全量里程碑（编辑面选项） */
-  milestoneOptions: { id: string; name: string; endDate: string }[];
+  /** 当前绑定的阶段（展示用） */
+  phases: { id: string; name: string; startDate: string; endDate: string | null; deptName: string | null }[];
+  /** 全量阶段（编辑面选项） */
+  phaseOptions: { id: string; name: string; startDate: string; endDate: string | null; deptName: string | null }[];
   /** 依赖候选：同 production 其他任务（编辑面选项） */
   taskOptions: { id: string; title: string; status: string }[];
   blockedBy: TaskDependencyRef[];
@@ -237,7 +237,7 @@ function ReqChatSection({
 export default function ReqDetailClient({
   req: initialReq, event, scheduleItems,
   deptName, deptPeople, allPeople,
-  milestones, milestoneOptions, taskOptions, blockedBy, blocks,
+  phases, phaseOptions, taskOptions, blockedBy, blocks,
   isPocOfDept, isAssignee, canViewFull,
   productionId,
 }: Props) {
@@ -265,7 +265,7 @@ export default function ReqDetailClient({
   const [requestModalOpen, setRequestModalOpen] = useState(false);
   const [editStartTime, setEditStartTime] = useState("");
   const [editEndTime, setEditEndTime] = useState("");
-  const [editMilestoneIds, setEditMilestoneIds] = useState<Set<string>>(new Set());
+  const [editPhaseIds, setEditPhaseIds] = useState<Set<string>>(new Set());
   const [editBlockedByIds, setEditBlockedByIds] = useState<Set<string>>(new Set());
   // 事件改绑：可挂载事件列表懒加载（create-options 的服务端过滤复用）
   const [editEventId, setEditEventId] = useState("");
@@ -281,7 +281,7 @@ export default function ReqDetailClient({
     setAssignees(req.assignees);
     setEditStartTime(isoToLocalInput(req.startTime));
     setEditEndTime(isoToLocalInput(req.endTime));
-    setEditMilestoneIds(new Set(req.milestoneIds));
+    setEditPhaseIds(new Set(req.phaseIds));
     setEditBlockedByIds(new Set(blockedBy.map(d => d.id)));
     setEditEventId(req.eventId ?? "");
     setEditScheduleItemIds(new Set(req.scheduleItemIds));
@@ -409,16 +409,16 @@ export default function ReqDetailClient({
         });
         if (!r.ok) errs.push("负责人未保存（需要指派权限：部门 POC 或任务指派授权）");
       }
-      const milestonesChanged =
-        editMilestoneIds.size !== req.milestoneIds.length
-        || req.milestoneIds.some(id => !editMilestoneIds.has(id));
-      if (milestonesChanged) {
-        const r = await fetch(`${base}/milestones`, {
+      const phasesChanged =
+        editPhaseIds.size !== req.phaseIds.length
+        || req.phaseIds.some(id => !editPhaseIds.has(id));
+      if (phasesChanged) {
+        const r = await fetch(`${base}/phases`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ milestoneIds: [...editMilestoneIds] }),
+          body: JSON.stringify({ phaseIds: [...editPhaseIds] }),
         });
-        if (!r.ok) errs.push("里程碑未保存");
+        if (!r.ok) errs.push("阶段未保存");
       }
       const blockedChanged =
         editBlockedByIds.size !== blockedBy.length
@@ -804,22 +804,22 @@ export default function ReqDetailClient({
                   )}
                 </div>
                 {assigneePickerBlock("负责人（保存需指派权限：部门 POC 或任务指派授权）")}
-                {milestoneOptions.length > 0 && (
+                {phaseOptions.length > 0 && (
                   <div>
-                    <span style={FIELD_LABEL}>里程碑</span>
+                    <span style={FIELD_LABEL}>阶段</span>
                     <DropdownPicker
                       multi
-                      items={milestoneOptions.map(m => ({
-                        id: m.id,
-                        label: `◆ ${m.name}`,
-                        sublabel: m.endDate.slice(0, 10),
+                      items={phaseOptions.map(p => ({
+                        id: p.id,
+                        label: p.deptName ? `${p.name}（${p.deptName}）` : p.name,
+                        sublabel: `${p.startDate} ~ ${p.endDate ?? "未定"}`,
                       }))}
-                      values={editMilestoneIds}
-                      placeholder="绑定里程碑（可多选）"
-                      multiCountLabel={n => `已绑定 ${n} 个里程碑`}
-                      searchPlaceholder="搜索里程碑…"
+                      values={editPhaseIds}
+                      placeholder="绑定阶段（可多选）"
+                      multiCountLabel={n => `已绑定 ${n} 个阶段`}
+                      searchPlaceholder="搜索阶段…"
                       onChange={() => {}}
-                      onToggle={id => setEditMilestoneIds(prev => {
+                      onToggle={id => setEditPhaseIds(prev => {
                         const next = new Set(prev);
                         if (next.has(id)) next.delete(id); else next.add(id);
                         return next;
@@ -1017,14 +1017,16 @@ export default function ReqDetailClient({
               </Link>
             )}
 
-            {/* 里程碑 */}
-            {milestones.length > 0 && (
+            {/* 阶段 */}
+            {phases.length > 0 && (
               <div style={{ marginBottom: 12 }}>
-                <span style={FIELD_LABEL}>里程碑</span>
+                <span style={FIELD_LABEL}>阶段</span>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {milestones.map(m => (
-                    <span key={m.id} title={m.endDate} style={CHIP}>
-                      ◆ {m.name} · {m.endDate.slice(5, 10).replace("-", "/")}
+                  {phases.map(p => (
+                    <span key={p.id} title={`${p.startDate} ~ ${p.endDate ?? "未定"}`} style={CHIP}>
+                      {p.deptName ? `${p.name}（${p.deptName}）` : p.name}
+                      {" · "}
+                      {p.startDate.slice(5).replace("-", "/")}–{p.endDate ? p.endDate.slice(5).replace("-", "/") : "未定"}
                     </span>
                   ))}
                 </div>

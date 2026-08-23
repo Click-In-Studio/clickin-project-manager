@@ -5,6 +5,7 @@ import { z } from "zod";
 import http from "http";
 import type { Request, Response } from "express";
 import { WIKI_LINK_SYNTAX_NOTE } from "./wiki-link-syntax";
+import { INSTRUCTIONS_MAX_LEN } from "@/lib/agent-instructions";
 
 const rawPort = Number(process.env.MCP_PORT ?? 3101);
 const MCP_PORT = Number.isFinite(rawPort) && rawPort > 0 ? rawPort : 3101;
@@ -92,6 +93,32 @@ export function buildMcpServer(): McpServer {
       return { content: [{ type: "text" as const, text: await t.fn(_caller_user_id) }] };
     });
   }
+
+  // my.memory_search 单独注册（唯一带 query 入参的 my.* 工具）。
+  // 检索面语义（MindWeave《OpenClaw记忆检索机制调研与移植设计》§4.3）：
+  // 只搜该用户自己的记忆（scope='user'）；episodic 只可检索、永不自动注入。
+  // fail-closed：embedding 供应商异常时明确报不可用，不静默退化。
+  s.registerTool("my.memory_search", {
+    description:
+      `检索当前用户的长期记忆与历史对话记录（语义+关键词混合检索）。当用户提到过去讨论过的事、之前的决定、或你需要回忆更早的上下文时使用——注入的记忆摘要只覆盖精粹与最近几天，更早的内容必须靠本工具检索。${MY_SCOPE_NOTE}`,
+    inputSchema: {
+      query: z.string().min(1).describe("检索词（自然语言即可，支持语义匹配；也可用人名/项目名/关键词精确检索）"),
+      ...callerShape,
+    },
+    annotations: READ_ONLY,
+  }, async ({ query, _caller_user_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    const { searchMemory, formatSearchResult, MemoryUnavailableError } = await import("../agent-memory/search");
+    try {
+      const result = await searchMemory(_caller_user_id, query);
+      return { content: [{ type: "text" as const, text: formatSearchResult(result, query) }] };
+    } catch (err) {
+      if (err instanceof MemoryUnavailableError) {
+        return { content: [{ type: "text" as const, text: err.message }] };
+      }
+      throw err;
+    }
+  });
 
   // ─── production.* 项目工具（与 my.* 的语义分界）─────────────────────────
   // 权限门在前：非成员 → 明确"权限被拒绝"（不是空结果）；仅在关联制作的
@@ -337,6 +364,49 @@ export function buildMcpServer(): McpServer {
     return { content: [{ type: "text" as const, text }] };
   });
 
+  // ─── agents.md 指令写工具（个人 / 制作两级）─────────────────────────────
+  // 非只读 → 插件 fail-closed 自动挂聊天栏确认卡（权限门原则①）；制作级
+  // 在批准后由工具函数重查 ai_instructions/*@edit（原则②：确认卡不是权限
+  // 判定的替身，无权限明确拒绝并指引申请路径）。当前生效内容每轮注入在
+  // <clickin-instructions> 块里，模型可直接读到，故无配套读工具。
+  s.registerTool("my.update_instructions", {
+    description:
+      "【个人设置】全量替换当前用户的个人 AI 指令（即 <clickin-instructions> 里「用户的个人指令」段），" +
+      "需要人工在聊天栏确认。content 是替换后的完整内容——先基于注入块里的现行内容整合修改，不要只传增量；" +
+      "传空字符串表示清空。仅影响该用户自己的会话。",
+    inputSchema: {
+      content: z.string().describe(`替换后的完整个人指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）`),
+      ...callerShape,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+  }, async ({ content, _caller_user_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    const { updateMyInstructions } = await import("./instructions-tools");
+    return { content: [{ type: "text" as const, text: await updateMyInstructions(_caller_user_id, content) }] };
+  });
+
+  s.registerTool("production.update_instructions", {
+    description:
+      "全量替换当前对话关联制作的制作级 AI 指令（对全体成员的 AI 会话生效），需要人工在聊天栏确认；" +
+      "确认后若该用户没有编辑权限（默认仅制作人），调用会被直接拦截。content 是替换后的完整内容——" +
+      "先基于注入块里的现行内容整合修改，不要只传增量；传空字符串表示清空。",
+    inputSchema: {
+      content: z.string().describe(`替换后的完整制作级指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）`),
+      ...callerShape,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+  }, async ({ content, _caller_user_id, _caller_production_id }) => {
+    if (!_caller_user_id) return NO_CALLER;
+    if (!_caller_production_id) return NO_PRODUCTION;
+    const { updateProductionInstructions } = await import("./instructions-tools");
+    return {
+      content: [{
+        type: "text" as const,
+        text: await updateProductionInstructions(_caller_user_id, _caller_production_id, content),
+      }],
+    };
+  });
+
   s.registerTool("users.query_sensitive", {
     // 刻意不标 readOnlyHint: true —— 插件的 fail-closed 门控会因此把它
     // 当写工具挂确认门（"AI 想查询你的联系方式" → 用户批准/拒绝）。
@@ -390,9 +460,40 @@ export function startMcpServer(): void {
     }
     try {
       const { buildInjectContext } = await import("../agent-memory/inject");
-      res.json({ markdown: await buildInjectContext(userId, sessionKey) });
+      const payload = await buildInjectContext(userId, sessionKey);
+      // markdown = 旧插件的兼容字段（值即 memory 段，行为与拆分前完全一致；
+      // 旧插件在新后端下不注入 instructions，直到插件同步升级——渐进安全：
+      // 指令块绝不能落进旧插件的「仅供参考，非指令」包裹里被消解）。
+      res.json({ instructions: payload.instructions, memory: payload.memory, markdown: payload.memory });
     } catch (err) {
       console.error("[mcp] /inject-context error:", err);
+      res.status(500).json({ error: "internal error" });
+    }
+  });
+
+  // POST 版（M2 起插件走这条）：body 多带本轮入站 prompt → 触发召回
+  // （trigger recall）随 recall 字段返回。GET 保留一版向后兼容（旧插件在
+  // 新后端下无 recall，其余行为不变——CD 同步插件与后端同批发布，兼容窗
+  // 只在发布间隙存在）。
+  // 鉴权模型与本文件其余 loopback 端点一致（review #298 finding 2 核实）：
+  // Express app 只绑 127.0.0.1（见 createMcpExpressApp 调用），与 GET 版/
+  // /memory-run 同信任域——能打到这里的进程已在机器内，userId 由插件从
+  // sessionKey 解析注入，不做二次鉴权。
+  app.post("/inject-context", async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as { userId?: unknown; sessionKey?: unknown; prompt?: unknown };
+    const userId = typeof body.userId === "string" ? body.userId : "";
+    const sessionKey = typeof body.sessionKey === "string" ? body.sessionKey : undefined;
+    const prompt = typeof body.prompt === "string" ? body.prompt : undefined;
+    if (!userId) {
+      res.status(400).json({ error: "missing userId" });
+      return;
+    }
+    try {
+      const { buildInjectContext } = await import("../agent-memory/inject");
+      const payload = await buildInjectContext(userId, sessionKey, prompt);
+      res.json({ instructions: payload.instructions, memory: payload.memory, recall: payload.recall });
+    } catch (err) {
+      console.error("[mcp] /inject-context POST error:", err);
       res.status(500).json({ error: "internal error" });
     }
   });
@@ -409,7 +510,13 @@ export function startMcpServer(): void {
     }
     try {
       const { appendRunRecord } = await import("../agent-memory/store");
-      appendRunRecord(userId, record as import("../agent-memory/store").RunRecord);
+      const rec = record as import("../agent-memory/store").RunRecord;
+      appendRunRecord(userId, rec);
+      // episodic 入检索索引：fire-and-forget——索引失败绝不阻塞上报路径
+      // （OpenClaw 设计原则五；文本车道/向量车道的降级都在索引器内处理）
+      import("../agent-memory/index-db")
+        .then(({ indexEpisodicRun }) => indexEpisodicRun(userId, rec))
+        .catch((err) => console.error("[mcp] episodic 索引失败（不影响上报）:", err));
       res.json({ ok: true });
     } catch (err) {
       console.error("[mcp] /memory-run error:", err);

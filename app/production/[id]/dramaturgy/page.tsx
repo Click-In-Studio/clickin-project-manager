@@ -10,7 +10,7 @@ import { getSceneFieldPerms } from "@/lib/scene-field-perms";
 import {
   getProductionPermissionContext,
   getProductionName,
-  listVersions,
+  getActiveVersionId,
   listMarkerProjectionByVersion,
   listCharactersByVersion,
 } from "@/lib/db";
@@ -22,10 +22,10 @@ export default async function DramaturgyPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ v?: string; sceneId?: string }>;
+  searchParams: Promise<{ sceneId?: string }>;
 }) {
   const { id } = await params;
-  const { v, sceneId } = await searchParams;
+  const { sceneId } = await searchParams;
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
   if (!session) redirect("/login");
@@ -42,23 +42,11 @@ export default async function DramaturgyPage({
   );
   const canEdit = fieldPerms.any;
 
-  const cookieVersionId = cookieStore.get(`ver_${id}`)?.value ?? null;
-
-  const [name, versions] = await Promise.all([
+  const [name, resolvedVersionId] = await Promise.all([
     getProductionName(id),
-    listVersions(id),
+    getActiveVersionId(id),
   ]);
   if (!name) notFound();
-
-  const validCookieVersionId = cookieVersionId && versions.some(ver => ver.id === cookieVersionId)
-    ? cookieVersionId
-    : null;
-  const resolvedVersionId =
-    (v && versions.some(ver => ver.id === v) ? v : null)
-    ?? validCookieVersionId
-    ?? versions.find(ver => ver.status === "editing")?.id
-    ?? versions[0]?.id
-    ?? null;
 
   const [scenes] = resolvedVersionId
     ? await Promise.all([

@@ -18,11 +18,6 @@ ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'chapter_marker';
 ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'scene_marker';
 ALTER TYPE block_type ADD VALUE IF NOT EXISTS 'rehearsal_marker';
 
-DO $$ BEGIN
-  CREATE TYPE version_status AS ENUM ('editing', 'committed', 'frozen', 'archived');
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
 -- ── Users ─────────────────────────────────────────────────────────────────────
 -- app_user is the internal identity anchor (UUID PK).
 -- feishu_user retains open_id as PK for Feishu-layer calls (bot, webhook, DMs).
@@ -91,14 +86,13 @@ CREATE TABLE IF NOT EXISTS production (
 
 -- ── Versions ──────────────────────────────────────────────────────────────────
 
+-- 版本退役 Phase B（migrate-version-retire.sql）：name/description/tags/status
+-- 已删——版本不再是用户概念。表本体与 parent_version_id 留作未来「历史记录 /
+-- checkpoint」的线性链地基。
 CREATE TABLE IF NOT EXISTS version (
   id                TEXT PRIMARY KEY,
   production_id     TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  name              TEXT NOT NULL DEFAULT '',
-  description       TEXT NOT NULL DEFAULT '',
-  tags              TEXT[] NOT NULL DEFAULT '{}',
   parent_version_id TEXT REFERENCES version(id) ON DELETE SET NULL,
-  status            version_status NOT NULL DEFAULT 'editing',
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   script_config     JSONB NOT NULL DEFAULT '{}',
   marker_structure_revision BIGINT NOT NULL DEFAULT 0
@@ -672,7 +666,7 @@ CREATE TABLE IF NOT EXISTS task_assignee (
   PRIMARY KEY (task_id, user_id)
 );
 
--- （task_milestone 定义在 milestone 表之后——语句顺序即执行顺序）
+-- （task_phase 定义在 phase 表之后——语句顺序即执行顺序）
 
 -- Blocking 依赖边（GitHub 语义：blocking 挡住 blocked；纯信息性不进状态机，
 -- isBlocked 读侧派生；应用层写入时递归 CTE 禁环）
@@ -719,14 +713,24 @@ CREATE INDEX IF NOT EXISTS wiki_mentions_idx   ON wiki USING GIN (mentions);
 CREATE INDEX IF NOT EXISTS wiki_title_trgm_idx ON wiki USING GIN (title gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS wiki_body_trgm_idx  ON wiki USING GIN (body gin_trgm_ops);
 
--- 交叉引用边（保存时服务端解析正文提取；backlinks/unlinked references 数据基础）
-CREATE TABLE IF NOT EXISTS wiki_link (
-  source_wiki_id UUID NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
-  target_wiki_id UUID NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
-  PRIMARY KEY (source_wiki_id, target_wiki_id)
+-- 交叉引用边（wiki↔任意对象；backlinks/unlinked references/对象侧"相关 wiki"面板的数据基础）。
+-- entity 多态无 FK（scene/cue 等 TEXT short id、wiki UUID 存文本），存在性校验在应用层，
+-- 悬空边容忍（反向查询只从活宿主页发起）。production_id 反范式=反向查询过滤锚+跨剧组防泄漏。
+-- origin：'wiki_body'=正文保存时解析派生（全删全插只清这种）；'manual'=显式建链，重建不得触碰。
+-- 边零权限语义：不进任何可见性谓词——标题级列出、点击处由目标页过门（§4.1）。
+CREATE TABLE IF NOT EXISTS wiki_entity_link (
+  wiki_id       UUID        NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  entity_type   TEXT        NOT NULL,
+  entity_id     TEXT        NOT NULL,
+  origin        TEXT        NOT NULL DEFAULT 'wiki_body',
+  created_by    UUID        NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (wiki_id, entity_type, entity_id, origin)
 );
 
-CREATE INDEX IF NOT EXISTS wiki_link_target_idx ON wiki_link (target_wiki_id);
+CREATE INDEX IF NOT EXISTS wiki_entity_link_entity_idx
+  ON wiki_entity_link (production_id, entity_type, entity_id);
 
 -- 自由 tag（必可手写，非受控词表；production 归属经 wiki join）
 CREATE TABLE IF NOT EXISTS wiki_tag (
@@ -795,6 +799,11 @@ CREATE TABLE IF NOT EXISTS production_wiki_config (
   reports_tree_enabled BOOLEAN NOT NULL DEFAULT true,
   reports_root_title   TEXT    NOT NULL DEFAULT '报告',
   reports_root_wiki_id UUID    NULL REFERENCES wiki(id) ON DELETE SET NULL,
+  -- 「戏剧构作」单层系统根（Phase 2）：场景侧新建文档的默认落位。不做 per-scene
+  -- 子目录——scene 易变且 wiki↔scene 是 m:n，归属由 wiki_entity_link manual 边表达
+  dramaturgy_tree_enabled BOOLEAN NOT NULL DEFAULT true,
+  dramaturgy_root_title   TEXT    NOT NULL DEFAULT '戏剧构作',
+  dramaturgy_root_wiki_id UUID    NULL REFERENCES wiki(id) ON DELETE SET NULL,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -1025,7 +1034,6 @@ CREATE TABLE IF NOT EXISTS asset (
   asset_type        TEXT NOT NULL DEFAULT 'reference',
   file_name         TEXT NOT NULL,
   mime_type         TEXT,
-  is_universal      BOOLEAN NOT NULL DEFAULT true,
   -- 批D 隐私/公开：可见 = 能力票 ∧ (is_public ∨ ∃挂载边:宿主可见) ∨ publication@view。
   -- 存量迁移置 true（保真）；新建默认隐私
   is_public         BOOLEAN NOT NULL DEFAULT false,
@@ -1067,16 +1075,8 @@ CREATE INDEX IF NOT EXISTS asset_mount_production_idx ON asset_mount(production_
 CREATE INDEX IF NOT EXISTS asset_mount_point_idx ON asset_mount(mount_type, mount_id);
 CREATE INDEX IF NOT EXISTS asset_mount_asset_idx ON asset_mount(asset_id);
 
--- Links an asset (with a specific file version) to a script version.
-CREATE TABLE IF NOT EXISTS asset_version_rel (
-  asset_id      TEXT NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
-  version_id    TEXT NOT NULL REFERENCES version(id) ON DELETE CASCADE,
-  asset_file_id TEXT NOT NULL REFERENCES asset_file(id) ON DELETE CASCADE,
-  PRIMARY KEY (asset_id, version_id)
-);
-
-CREATE INDEX IF NOT EXISTS asset_version_rel_version_idx ON asset_version_rel(version_id);
-CREATE INDEX IF NOT EXISTS asset_version_rel_file_idx ON asset_version_rel(asset_file_id);
+-- asset_version_rel（资产文件按版本 pin）已随版本退役删除
+-- （migrate-version-retire.sql）：文件解析一律 latest-wins。
 
 -- Share tokens for public (unauthenticated) asset preview.
 -- one_time=true: token is consumed on first access, but streaming continues for 4h (grace period).
@@ -1115,7 +1115,10 @@ CREATE INDEX IF NOT EXISTS scene_table_view_user_prod_idx
 CREATE UNIQUE INDEX IF NOT EXISTS scene_table_view_one_default_idx
   ON scene_table_view_config (user_id, production_id) WHERE is_default;
 
--- ── Milestones ────────────────────────────────────────────────────────────────
+-- ── Milestones & Phases ───────────────────────────────────────────────────────
+-- milestone（时间节点，点）与 phase（项目大阶段，区间）平级，无从属关系；
+-- 任务=项目小阶段挂 phase。原 task_milestone 边已退役
+-- （migrate-drop-task-milestone.sql，退役时全库零数据）。
 
 CREATE TABLE IF NOT EXISTS milestone (
   id            TEXT PRIMARY KEY,
@@ -1128,15 +1131,42 @@ CREATE TABLE IF NOT EXISTS milestone (
 
 CREATE INDEX IF NOT EXISTS milestone_production_idx ON milestone(production_id, end_date);
 
--- Task 里程碑关联（0..n；不约束 task 截止 ≤ 里程碑时间，前端仅软提示。
--- task 表见 event 域段落；本表因引用 milestone 置于其后）
-CREATE TABLE IF NOT EXISTS task_milestone (
-  task_id      TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
-  milestone_id TEXT NOT NULL REFERENCES milestone(id) ON DELETE CASCADE,
-  PRIMARY KEY (task_id, milestone_id)
+-- dept_id NULL = production-level；非 NULL = department-specific（仅 kind='dept'，
+-- 应用层校验）。部门解散 SET NULL 升级为全局（与 task.department_id 同语义）。
+-- 可见性全员（这是 phase 与 blocking task 的根本区别），dept_id 只表达归属与管理权。
+-- end_date 可空 = 尾巴未定；甘特图画到轴右缘渐隐。
+CREATE TABLE IF NOT EXISTS phase (
+  id            TEXT PRIMARY KEY,
+  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  dept_id       UUID REFERENCES production_dept(id) ON DELETE SET NULL,
+  name          TEXT NOT NULL,
+  start_date    DATE NOT NULL,
+  end_date      DATE,
+  sort_order    INTEGER NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT phase_date_order_check CHECK (end_date IS NULL OR end_date >= start_date)
 );
 
-CREATE INDEX IF NOT EXISTS task_milestone_milestone_idx ON task_milestone(milestone_id);
+CREATE INDEX IF NOT EXISTS phase_production_idx ON phase(production_id, start_date);
+
+-- phase ↔ milestone 多对多：「首演」这种全局节点可同时收尾多个部门 phase
+CREATE TABLE IF NOT EXISTS phase_milestone (
+  phase_id     TEXT NOT NULL REFERENCES phase(id) ON DELETE CASCADE,
+  milestone_id TEXT NOT NULL REFERENCES milestone(id) ON DELETE CASCADE,
+  PRIMARY KEY (phase_id, milestone_id)
+);
+
+CREATE INDEX IF NOT EXISTS phase_milestone_milestone_idx ON phase_milestone(milestone_id);
+
+-- Task 阶段关联（0..n；不约束 task 起止 ⊆ phase 区间，前端仅软提示。
+-- task 表见 event 域段落；本表因引用 phase 置于其后）
+CREATE TABLE IF NOT EXISTS task_phase (
+  task_id  TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
+  phase_id TEXT NOT NULL REFERENCES phase(id) ON DELETE CASCADE,
+  PRIMARY KEY (task_id, phase_id)
+);
+
+CREATE INDEX IF NOT EXISTS task_phase_phase_idx ON task_phase(phase_id);
 
 -- Event 里程碑关联（事件可关注 0..n 个项目里程碑）
 CREATE TABLE IF NOT EXISTS event_milestone (
@@ -1456,6 +1486,7 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('role',         'view', 0), ('role',         'create', 0), ('role',         'edit', 0), ('role',         'delete', 0),
   ('org_dept',     'view', 0), ('org_dept',     'create', 0), ('org_dept',     'edit', 0), ('org_dept',     'delete', 0),
   ('milestone',    'view', 0), ('milestone',    'create', 0), ('milestone',    'edit', 0), ('milestone',    'delete', 0),
+  ('phase',        'view', 0), ('phase',        'create', 0), ('phase',        'edit', 0), ('phase',        'delete', 0),
   ('announcement', 'view', 0), ('announcement', 'create', 0), ('announcement', 'edit', 0), ('announcement', 'delete', 0)
 ON CONFLICT DO NOTHING;
 
@@ -1480,6 +1511,12 @@ ON CONFLICT DO NOTHING;
 -- （拍板 §4.7 默认不可见，分享/挂载驱动）；制作人通配区间自动覆盖
 INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
   ('wiki', 'view', 0), ('wiki', 'create', 0), ('wiki', 'edit', 0), ('wiki', 'delete', 0)
+ON CONFLICT DO NOTHING;
+
+-- material 物料台账（add-material-verbs.sql）：四动词。模版发键在先、词汇表
+-- 登记在后的线上事故补账——模版 resource_type ⊆ 词汇表由 conventions 测试守护
+INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  ('material', 'view', 0), ('material', 'create', 0), ('material', 'edit', 0), ('material', 'delete', 0)
 ON CONFLICT DO NOTHING;
 
 -- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────
@@ -1696,3 +1733,175 @@ CREATE TABLE IF NOT EXISTS production_invite_claim (
 
 CREATE INDEX IF NOT EXISTS production_invite_claim_token_idx
   ON production_invite_claim (token);
+
+-- agents.md 分级注入：制作级/个人级指令（系统级在 openclaw-workspace/AGENTS.md，
+-- repo 版本控制不进库）。scope_id 因 scope 类型而异（user uuid / production 短 id），
+-- TEXT 不挂 FK，孤儿行无害。
+CREATE TABLE IF NOT EXISTS agent_instructions (
+  scope_type TEXT NOT NULL CHECK (scope_type IN ('user', 'production')),
+  scope_id   TEXT NOT NULL,
+  content    TEXT NOT NULL DEFAULT '',
+  updated_by UUID REFERENCES app_user(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (scope_type, scope_id)
+);
+
+-- ── Agent 记忆检索索引（add-agent-memory-index.sql）─────────────────────────
+-- 设计出处：MindWeave《OpenClaw记忆检索机制调研与移植设计》。多租户边界=
+-- scope 谓词列；pgvector 钉 0.6 兼容面 + vector(1024)（text-embedding-v4）。
+
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- ── 记忆块（对应 OpenClaw memory_index_chunks + recall_metadata + provenance 合表）──
+--
+-- 三表合一的理由：OpenClaw 拆表是因为 recall_metadata/provenance 是后加的
+-- （可空列 + 旧索引零迁移）；我们全新建表，没有历史包袱，合表省两次 JOIN。
+-- 「provenance 是模型经 prose 写不到的列」这条安全属性由写入路径保证（只有
+-- 索引器代码写这些列，没有任何 MCP 工具暴露写入口），与拆不拆表无关。
+CREATE TABLE IF NOT EXISTS agent_memory_chunk (
+  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- 多租户边界：一切查询强制带 scope 谓词。scope_id 多态（user=app_user
+  -- UUID 文本 / production=uid() 短串），故无 FK；清理由归属方生命周期驱动。
+  scope_type     TEXT        NOT NULL CHECK (scope_type IN ('user', 'production')),
+  scope_id       TEXT        NOT NULL,
+  -- curated=蒸馏产物 MEMORY.md 切块（常青，不衰减）；episodic=runs.jsonl
+  -- 逐条（30 天半衰期）。episodic 永不自动注入是安全属性，检索工具可见。
+  source         TEXT        NOT NULL CHECK (source IN ('curated', 'episodic')),
+  text           TEXT        NOT NULL,
+  -- 关键词车道语料：CJK 逐对 bigram + ASCII 整词（空格分隔，索引器生成）。
+  -- 不用 pg_trgm：实测 word_similarity 对连续中文近乎失效（短查询串的
+  -- trigram 边界填充在无空格文本上对不上，「张三」对含张三的句子=0 分）；
+  -- bigram 切词是中文检索标准做法，也与 OpenClaw FTS5 的 CJK n-gram
+  -- tokenizer 同思路。评分=查询 bigram 命中占比（0..1 天然归一）。
+  text_tokens    TEXT        NOT NULL,
+  -- 内容 hash（sha256 hex）：幂等键 + embedding 缓存键。
+  content_hash   TEXT        NOT NULL,
+  -- 生成该 embedding 的模型；NULL = 嵌入尚未完成（供应商挂掉时仍索引文本，
+  -- 关键词车道可用，向量车道跳过——对应 OpenClaw creation-time fallback）。
+  model          TEXT        NULL,
+  embedding      vector(1024) NULL,
+  -- 召回元数据（对应 recall_metadata；可空=中性，M2 蒸馏升级后才开始产出）
+  importance     SMALLINT    NULL CHECK (importance IS NULL OR importance BETWEEN 1 AND 10),
+  triggers       TEXT        NULL,
+  -- provenance（对应 chunk_provenance；只有索引器写，无任何工具暴露写入口）
+  origin_class   TEXT        NOT NULL CHECK (origin_class IN ('owner', 'agent', 'untrusted', 'system')),
+  session_kind   TEXT        NOT NULL CHECK (session_kind IN ('interactive', 'cron', 'heartbeat', 'subagent', 'unknown')),
+  observed_at    TIMESTAMPTZ NOT NULL,
+  supersedes_key TEXT        NULL,
+  -- production 域多作者记账（user 域恒等于 scope_id，冗余但统一查询面）
+  author_user_id UUID        NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- 幂等：同 scope 同 source 下同内容只存一份（也是防召回回环的一半——
+  -- 同一事实被反复上报仍是一行）
+  UNIQUE (scope_type, scope_id, source, content_hash)
+);
+
+-- 向量车道：HNSW + cosine（0.6.0 起可用）。语料量级小（每 scope 千行级），
+-- 默认参数足够。
+CREATE INDEX IF NOT EXISTS agent_memory_chunk_embedding_idx
+  ON agent_memory_chunk USING hnsw (embedding vector_cosine_ops);
+
+-- 关键词车道无专用索引：评分是逐查询 bigram 的 LIKE 命中占比，在 scope
+-- 谓词过滤后的行集（每用户千行级）上顺扫，量级内无索引必要。
+CREATE INDEX IF NOT EXISTS agent_memory_chunk_scope_idx
+  ON agent_memory_chunk (scope_type, scope_id, source);
+
+-- ── embedding 缓存（对应 OpenClaw embedding cache 表）────────────────────────
+-- curated 重建是「整 scope 删了重插」，没有缓存的话每次蒸馏都全量重嵌；
+-- 按 (model, content_hash) 查重后未变更的行零 API 调用。
+CREATE TABLE IF NOT EXISTS agent_memory_embedding_cache (
+  model        TEXT         NOT NULL,
+  content_hash TEXT         NOT NULL,
+  embedding    vector(1024) NOT NULL,
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  PRIMARY KEY (model, content_hash)
+);
+
+-- ── 索引身份（对应 OpenClaw index identity）──────────────────────────────────
+-- 运行时配置的 (model, dim) 与此不一致 → 向量车道拒绝服务并要求显式重建，
+-- 绝不静默混维度。单行表。
+CREATE TABLE IF NOT EXISTS agent_memory_index_meta (
+  id         SMALLINT    PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  model      TEXT        NOT NULL,
+  dim        INTEGER     NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ── 召回记账（Phase B 晋升门的确定性信号源）─────────────────────────────────
+-- memory_search 每次命中记一行：召回频次/查询多样性是 OpenClaw deep 阶段
+-- 确定性门的头两个加权信号，从 M1 就开始攒。
+CREATE TABLE IF NOT EXISTS agent_memory_recall_log (
+  id         BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  chunk_id   UUID        NOT NULL REFERENCES agent_memory_chunk(id) ON DELETE CASCADE,
+  user_id    UUID        NOT NULL,
+  query_hash TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS agent_memory_recall_log_chunk_idx
+  ON agent_memory_recall_log (chunk_id, created_at);
+
+-- ── AI 用量账本（内部核算 + 失控告警；未来转嫁定价的数据地基）────────────────
+-- embedding 与 chat 共用一张表，按 kind 区分。M1 只接 embedding 两个 kind，
+-- chat 侧接入另行处理。
+-- 归属不变量（review #297 finding 2）：每行必须至少归到一个主体——无主行
+-- 对失控告警/分摊核算都是废数据。回填等批处理按块的 scope 分组归账
+-- （index-db.ts embedMissing），不允许"批量所以记不到人"。
+CREATE TABLE IF NOT EXISTS ai_usage (
+  id            BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id       UUID        NULL,
+  production_id TEXT        NULL,
+  kind          TEXT        NOT NULL,
+  model         TEXT        NOT NULL,
+  tokens        INTEGER     NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (user_id IS NOT NULL OR production_id IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS ai_usage_created_idx ON ai_usage (created_at);
+
+-- ── 等级体系（#280，db/add-plan.sql，付费功能地基）─────────────────────────────
+-- user_plan 无行 = 普通用户（不能建项目）；production_plan 无行 = free 档。
+-- tier → limit 映射是代码常量（lib/plan.ts），库里只存档名。
+-- billing_exempt = 项目级豁免（「特邀项目」），写点仅管理员改库 + grants_exempt 码；
+-- internal 档 owner 的豁免则在计费时按当前 owner 推导，不物化到这里。豁免 ≠ 不记账。
+-- plan_code 无创建界面：管理员手工 INSERT。
+
+CREATE TABLE IF NOT EXISTS user_plan (
+  user_id    UUID        PRIMARY KEY REFERENCES app_user(id) ON DELETE CASCADE,
+  tier       TEXT        NOT NULL,
+  source     TEXT        NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS production_plan (
+  production_id  TEXT        PRIMARY KEY REFERENCES production(id) ON DELETE CASCADE,
+  tier           TEXT        NOT NULL,
+  billing_exempt BOOLEAN     NOT NULL DEFAULT false,
+  exempt_note    TEXT        NULL,
+  source         TEXT        NULL,
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS plan_code (
+  code          TEXT        PRIMARY KEY,
+  kind          TEXT        NOT NULL CHECK (kind IN ('user_upgrade', 'production_upgrade')),
+  grants_tier   TEXT        NOT NULL,
+  grants_exempt BOOLEAN     NOT NULL DEFAULT false,
+  exempt_note   TEXT        NULL,
+  max_uses      INTEGER     NOT NULL DEFAULT 1 CHECK (max_uses > 0),
+  used_count    INTEGER     NOT NULL DEFAULT 0,
+  expires_at    TIMESTAMPTZ NULL,
+  note          TEXT        NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS plan_code_redemption (
+  id            BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  code          TEXT        NOT NULL REFERENCES plan_code(code) ON DELETE CASCADE,
+  user_id       UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  production_id TEXT        NULL REFERENCES production(id) ON DELETE CASCADE,
+  redeemed_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS plan_code_redemption_code_idx ON plan_code_redemption (code);

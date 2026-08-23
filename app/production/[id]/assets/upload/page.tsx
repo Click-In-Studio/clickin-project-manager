@@ -16,7 +16,5 @@ export default async function AssetUploadPage({ params }: { params: Promise<{ id
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
 
-  const versionId = cookieStore.get(`ver_${id}`)?.value ?? null;
-
-  return <AssetUploadPageClient productionId={id} versionId={versionId} />;
+  return <AssetUploadPageClient productionId={id} />;
 }

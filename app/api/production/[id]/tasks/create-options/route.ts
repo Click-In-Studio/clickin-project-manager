@@ -2,7 +2,8 @@ import { type NextRequest } from "next/server";
 import { canAccessNode } from "@/lib/grant-template";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, listProductionMembersWithRoles, listMilestones } from "@/lib/db";
+import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
+import { listPhases } from "@/lib/phase-db";
 import { listProductionEvents } from "@/lib/event-db";
 import { listProductionDepts } from "@/lib/dept-db";
 import { filterDraftVisibleEvents } from "@/lib/event-permissions";
@@ -17,7 +18,7 @@ type Ctx = { params: Promise<{ id: string }> };
 //              否则 ⇒ 我 POC 部门的成员并集
 //              （已绑定 event 且我是 organizer ⇒ 任何人：产品语义待定，暂未实现）
 //   depts      人员 picker 的分组树（与 members 同口径裁剪）
-//   milestones 全部里程碑
+//   phases     全部阶段
 //   events     可挂载事件（服务端过滤：event tasks@create，或 POC 路径=
 //              我有 POC 部门且对该 event 有 details@view——后者标 requiresPocDept）
 //   canCreateStandalone 无绑定创建资格（node:task/*@create）
@@ -30,10 +31,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const { permCtx } = access;
   const actor = toActor(session, permCtx);
 
-  const [depts, membersRaw, milestones, allEvents, standaloneAccess, canAssignAnyone, canViewContact] = await Promise.all([
+  const [depts, membersRaw, phases, allEvents, standaloneAccess, canAssignAnyone, canViewContact] = await Promise.all([
     listProductionDepts(productionId),
     listProductionMembersWithRoles(productionId),
-    listMilestones(productionId),
+    listPhases(productionId),
     listProductionEvents(productionId),
     canAccessNode(permCtx, productionId, "task", "*", "*", "create"),
     hasEffectiveGrant(actor, productionId, "task", "*", "assignees", "edit"),
@@ -98,7 +99,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     members,
     depts: pickerDepts,
     canAssignAnyone,
-    milestones: milestones.map(m => ({ id: m.id, name: m.name, endDate: m.endDate })),
+    phases: phases.map(p => ({ id: p.id, name: p.name, startDate: p.startDate, endDate: p.endDate, deptName: p.deptName })),
     events,
     canCreateStandalone: standaloneAccess.allowed,
   });

@@ -86,7 +86,7 @@ type CreateOptions = {
   members: PickerMember[];
   depts: PickerDept[];
   canAssignAnyone: boolean;
-  milestones: { id: string; name: string; endDate: string }[];
+  phases: { id: string; name: string; startDate: string; endDate: string | null; deptName: string | null }[];
   events: { id: string; title: string; startTime: string | null; requiresPocDept: boolean }[];
   /** 用户组也是 task 的责任主体（部门 | 用户组，二选一） */
   userGroups: { id: string; name: string }[];
@@ -178,7 +178,7 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
   const [assignees, setAssignees] = useState<Map<string, string>>(new Map());
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
-  const [milestoneIds, setMilestoneIds] = useState<Set<string>>(new Set());
+  const [phaseIds, setPhaseIds] = useState<Set<string>>(new Set());
   const [eventId, setEventId] = useState("");
   const [scheduleItems, setScheduleItems] = useState<{ id: string; title: string; startTime: string | null }[]>([]);
   const [scheduleItemIds, setScheduleItemIds] = useState<Set<string>>(new Set());
@@ -237,7 +237,7 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
           assignees: [...assignees.entries()].map(([userId, name]) => ({ userId, name })),
           startTime: startTime ? datetimeLocalToIso(startTime) : null,
           endTime: endTime ? datetimeLocalToIso(endTime) : null,
-          milestoneIds: [...milestoneIds],
+          phaseIds: [...phaseIds],
           eventId: eventId || null,
           scheduleItemIds: [...scheduleItemIds],
         }),
@@ -373,25 +373,27 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
               />
             </div>
 
-            {options.milestones.length > 0 && (
+            {options.phases.length > 0 && (
               <div>
-                <span style={FIELD_LABEL}>里程碑（可多选，不约束截止先后）</span>
+                <span style={FIELD_LABEL}>阶段（可多选，不约束起止先后）</span>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {options.milestones.map(m => {
-                    const active = milestoneIds.has(m.id);
+                  {options.phases.map(p => {
+                    const active = phaseIds.has(p.id);
                     return (
                       <button
-                        key={m.id}
+                        key={p.id}
                         type="button"
                         aria-pressed={active}
-                        onClick={() => setMilestoneIds(prev => {
+                        onClick={() => setPhaseIds(prev => {
                           const next = new Set(prev);
-                          if (next.has(m.id)) next.delete(m.id); else next.add(m.id);
+                          if (next.has(p.id)) next.delete(p.id); else next.add(p.id);
                           return next;
                         })}
                         style={CHIP_TOGGLE(active)}
                       >
-                        ◆ {m.name} · {m.endDate.slice(5, 10).replace("-", "/")}
+                        {p.deptName ? `${p.name}（${p.deptName}）` : p.name}
+                        {" · "}
+                        {p.startDate.slice(5).replace("-", "/")}–{p.endDate ? p.endDate.slice(5).replace("-", "/") : "未定"}
                       </button>
                     );
                   })}
@@ -1240,15 +1242,15 @@ export default function ProductionTasksClient({
                 {!visibleSelected.startTime && <span style={{ fontSize: 10 }}>（继承自{visibleSelected.eventId ? "事件/日程" : "绑定对象"}）</span>}
               </p>
             )}
-            {visibleSelected.milestones.length > 0 && (
+            {visibleSelected.phases.length > 0 && (
               <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                里程碑：
-                {visibleSelected.milestones.map(m => (
-                  <span key={m.id} title={m.endDate} style={{
+                阶段：
+                {visibleSelected.phases.map(p => (
+                  <span key={p.id} title={`${p.startDate} ~ ${p.endDate ?? "未定"}`} style={{
                     borderRadius: 6, padding: "2px 8px", fontSize: 10, fontWeight: 700,
                     background: "var(--surface-2)", color: "var(--ink)",
                   }}>
-                    ◆ {m.name} · {m.endDate.slice(5).replace("-", "/")}
+                    {p.name} · {p.startDate.slice(5).replace("-", "/")}–{p.endDate ? p.endDate.slice(5).replace("-", "/") : "未定"}
                   </span>
                 ))}
               </p>

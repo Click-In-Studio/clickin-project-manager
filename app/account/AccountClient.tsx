@@ -44,6 +44,8 @@ type Props = {
   };
   initialIdentities: Identity[];
   initialNotifPrefs: NotifPref[];
+  /** 用户等级（#280）：null = 普通注册用户。label 在服务端解析（lib/plan.ts 不可入客户端包）。 */
+  initialPlan: { tier: string; label: string } | null;
 };
 
 type Page = "profile" | "security" | "preferences";
@@ -77,7 +79,7 @@ function resolveAvatarSrc(userId: string, avatarUrl: string | null): string | nu
   return `/api/user/avatar/${userId}`;
 }
 
-export default function AccountClient({ userId, initialProfile, initialIdentities, initialNotifPrefs }: Props) {
+export default function AccountClient({ userId, initialProfile, initialIdentities, initialNotifPrefs, initialPlan }: Props) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -96,6 +98,12 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
   const [saveMsgOk, setSaveMsgOk] = useState(false);
+
+  // 用户等级与兑换码（#280）
+  const [planInfo, setPlanInfo] = useState(initialPlan);
+  const [redeemCode, setRedeemCode] = useState("");
+  const [redeemBusy, setRedeemBusy] = useState(false);
+  const [redeemMsg, setRedeemMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Avatar upload state
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -340,6 +348,29 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
     } catch {
       setBindMsg("网络错误");
       setBindMsgOk(false);
+    }
+  }
+
+  async function handleRedeem(e: FormEvent) {
+    e.preventDefault();
+    if (!redeemCode.trim() || redeemBusy) return;
+    setRedeemBusy(true);
+    setRedeemMsg(null);
+    try {
+      const res = await fetch("/api/account/redeem-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: redeemCode.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setRedeemMsg({ ok: false, text: data.error ?? "兑换失败" }); return; }
+      setPlanInfo({ tier: data.tier, label: data.tierLabel ?? data.tier });
+      setRedeemCode("");
+      setRedeemMsg({ ok: true, text: `兑换成功，当前等级：${data.tierLabel ?? data.tier}` });
+    } catch {
+      setRedeemMsg({ ok: false, text: "网络错误，请重试" });
+    } finally {
+      setRedeemBusy(false);
     }
   }
 
@@ -802,6 +833,43 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                     ))}
                   </>
                 )}
+              </section>
+
+              {/* ── 用户等级与兑换码（#280）── */}
+              <section className={styles.card}>
+                <div className={styles.cardTitle}>
+                  <div>
+                    <h2>用户等级</h2>
+                    <p>等级决定你能否创建项目以及可创建的数量；项目内功能不受个人等级影响。</p>
+                  </div>
+                </div>
+                <div className={styles.prefRow}>
+                  <div className={styles.prefRowInfo}>
+                    <b>当前等级</b>
+                    <span>{planInfo ? planInfo.label : "普通用户（可参与受邀项目，暂不可创建项目）"}</span>
+                  </div>
+                </div>
+                <form onSubmit={handleRedeem} className={styles.formGrid} style={{ marginTop: 14 }}>
+                  <label>
+                    兑换码
+                    <input
+                      value={redeemCode}
+                      onChange={e => setRedeemCode(e.target.value)}
+                      placeholder="输入邀请码提升等级"
+                      disabled={redeemBusy}
+                    />
+                  </label>
+                  <div>
+                    <button type="submit" className={styles.primaryButton} disabled={redeemBusy || !redeemCode.trim()}>
+                      {redeemBusy ? "兑换中…" : "兑换"}
+                    </button>
+                  </div>
+                  {redeemMsg && (
+                    <p style={{ margin: 0, fontSize: 12, color: redeemMsg.ok ? "var(--ok, #2c7a4b)" : "var(--danger, #b3261e)" }}>
+                      {redeemMsg.text}
+                    </p>
+                  )}
+                </form>
               </section>
             </>
           )}

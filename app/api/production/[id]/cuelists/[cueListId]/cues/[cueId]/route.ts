@@ -7,6 +7,7 @@ import { broadcastCueUpdate } from "@/lib/server-cache";
 import { buildCueWarningCard } from "@/lib/platform/feishu/feishu-bot";
 import { SERVER_URL } from "@/lib/server-url";
 import { notifyUsers } from "@/lib/notify";
+import { rejectNonHeadWrite } from "@/lib/head-version";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -46,6 +47,8 @@ export async function PATCH(
   const check = await checkEdit(req, id, cueListId);
   if (!check.ok) return Response.json({ error: "权限不足或不存在" }, { status: check.status });
 
+  const nonHead = await rejectNonHeadWrite(id, req.nextUrl.searchParams.get("v"));
+  if (nonHead) return nonHead;
   const resolved = await resolveVersion(id, req.nextUrl.searchParams.get("v"));
   if (resolved.error) return resolved.error;
   const { versionId } = resolved;
@@ -58,25 +61,14 @@ export async function PATCH(
   const prevCue = body.warning === true ? await getCue(cueId, cueListId) : null;
   const warningNewlySet = body.warning === true && prevCue !== null && !prevCue.warning;
 
-  try {
-    await updateCue(cueId, cueListId, {
-      number:  body.number  !== undefined ? body.number.trim()  : undefined,
-      name:    body.name    !== undefined ? body.name.trim()    : undefined,
-      content: body.content !== undefined ? body.content.trim() : undefined,
-      start:   body.start,
-      end:     body.end,
-      warning: body.warning,
-    }, versionId);
-  } catch (e) {
-    if (e instanceof Error && e.message.startsWith("CUE_NUMBER_CONFLICT:")) {
-      const conflictVersionId = e.message.slice("CUE_NUMBER_CONFLICT:".length);
-      return Response.json(
-        { error: "cue_number_conflict", conflictVersionId },
-        { status: 409 }
-      );
-    }
-    throw e;
-  }
+  await updateCue(cueId, cueListId, {
+    number:  body.number  !== undefined ? body.number.trim()  : undefined,
+    name:    body.name    !== undefined ? body.name.trim()    : undefined,
+    content: body.content !== undefined ? body.content.trim() : undefined,
+    start:   body.start,
+    end:     body.end,
+    warning: body.warning,
+  }, versionId);
   broadcastCueUpdate(id);
 
   // Fire-and-forget: notify cue list editors when a warning is newly set
@@ -135,6 +127,8 @@ export async function DELETE(
   const check = await checkEdit(req, id, cueListId);
   if (!check.ok) return Response.json({ error: "权限不足或不存在" }, { status: check.status });
 
+  const nonHead = await rejectNonHeadWrite(id, req.nextUrl.searchParams.get("v"));
+  if (nonHead) return nonHead;
   const resolved = await resolveVersion(id, req.nextUrl.searchParams.get("v"));
   if (resolved.error) return resolved.error;
   const { versionId } = resolved;

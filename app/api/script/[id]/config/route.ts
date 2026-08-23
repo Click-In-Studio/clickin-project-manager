@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getActiveVersionId, getFirstRehearsalMarkerLabel, getVersion, saveScriptConfig } from "@/lib/db";
 import { hasGrant } from "@/lib/grant-check";
 import { broadcastEvent } from "@/lib/server-cache";
+import { rejectNonHeadWrite } from "@/lib/head-version";
 import type { ScriptConfig } from "@/lib/script-types";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
 
@@ -19,6 +20,8 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
     return Response.json({ error: "无权修改剧本设置" }, { status: 403 });
   }
 
+  const nonHead = await rejectNonHeadWrite(id, req.nextUrl.searchParams.get("v"));
+  if (nonHead) return nonHead;
   const versionId = req.nextUrl.searchParams.get("v") ?? await getActiveVersionId(id) ?? '';
   if (versionId) {
     const version = await getVersion(versionId);

@@ -28,9 +28,15 @@ const SYSTEM_PROMPT = `你是 Click-In 演艺制作平台 AI 助手的记忆整�
 规则：
 - 只保留对后续协作有持续价值的内容：用户的偏好与工作习惯、进行中的项目/事项及其状态、重要决策与结论、明确的待办
 - 丢弃：寒暄闲聊、一次性问答、系统测试内容、已完结且无后续价值的事项
-- 新信息与旧记忆冲突时以新为准；旧记忆中仍有效的条目要保留
-- 用简洁的中文要点组织，可分「偏好与习惯」「进行中的事项」「重要结论」等小节；小节标题用**三级标题（### ）或加粗行**，不要使用一级/二级标题（# / ##）——摘要会被嵌进上层文档结构
-- 总长度不超过 3000 字符
+- 新信息与旧记忆冲突时**就地改写该条目取代旧说法**，绝不新旧并列（并列会导致后续按旧值回答）；旧记忆中仍有效的条目要保留
+- 用简洁的中文要点组织（每条一行、以 - 开头），可分「偏好与习惯」「进行中的事项」「重要结论」等小节；小节标题用**三级标题（### ）或加粗行**，不要使用一级/二级标题（# / ##）——摘要会被嵌进上层文档结构
+
+每条要点的行尾注释元数据（供检索索引使用，格式必须严格一致）：
+- 每条要点行尾附重要性评分：\`<!-- importance: n -->\`，n 为 1-10 整数——衡量该条对后续协作的持续价值（10=核心偏好/长期项目，1=边缘信息）
+- 仅当条目有明确的触发场景（"聊到什么话题时该想起它"）才附：\`<!-- trigger: 短语1, 短语2 -->\`，短语用逗号分隔、每条最多 3 个短语；没有明确场景就不要附
+- 示例：\`- 排练通告默认下午 2 点发出 <!-- trigger: 排练通告, 通告时间 --> <!-- importance: 7 -->\`
+
+- 正文总长度（不含行尾注释）不超过 3000 字符
 - 直接输出摘要正文，不要任何解释或前后缀`;
 
 function formatEntries(entries: RunRecord[]): string {
@@ -85,6 +91,14 @@ export async function distillUser(userId: string): Promise<DistillResult> {
 
         writeMemory(userId, next.trim());
         commitDistill(userId, nextOffset);
+        // curated 重建检索索引：蒸馏是离线批处理，可以等；但索引失败不算
+        // 蒸馏失败（记忆文件已落盘是事实，索引可由回填脚本补）
+        try {
+          const { indexCurated } = await import("./index-db");
+          await indexCurated("user", userId, next.trim());
+        } catch (err) {
+          console.error(`[distill] ${userId} curated 索引重建失败（蒸馏本身已成功）:`, err);
+        }
         return {
           userId, status: "distilled", entries: entries.length,
           inputChars: maxChars, shrunk: i > 0,

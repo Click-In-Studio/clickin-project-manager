@@ -6,6 +6,7 @@ import { GATEWAY_CLIENT_CAPS, GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES } from "@
 import { GATEWAY_URL, getGatewayToken, isGatewayConfigured } from "./config";
 import * as device from "./device";
 import type { ChatSessionSummary, ChatTranscriptEntry, GatewayStatus } from "./types";
+import { TOOL_PAYLOAD_MAX_CHARS } from "./types";
 import { PRODUCTION_ID_RE } from "@/lib/mcp/session-identity";
 import { stripUiContext } from "@/lib/agent-ui-context";
 
@@ -60,6 +61,18 @@ export function sessionKeyOwnedBy(sessionKey: string, userId: string): boolean {
   return bare.startsWith(`${SESSION_NAMESPACE}${userId}:`);
 }
 
+/**
+ * production 会话 → productionId，个人会话/非法 key → null。
+ * 结构见 createNewSessionKey：namespace 后 2 段 = 个人（userId:uuid），
+ * 3 段 = production（userId:productionId:uuid）。
+ */
+export function productionIdOfSessionKey(sessionKey: string): string | null {
+  const bare = sessionKey.replace(/^agent:[^:]+:/, "");
+  if (!bare.startsWith(SESSION_NAMESPACE)) return null;
+  const parts = bare.slice(SESSION_NAMESPACE.length).split(":");
+  return parts.length === 3 && PRODUCTION_ID_RE.test(parts[1]) ? parts[1] : null;
+}
+
 interface GatewayStore {
   client: GatewayClient | null;
   status: GatewayStatus;
@@ -77,16 +90,21 @@ interface GatewayStore {
   // clickin-memory 经 MCP 同进程端点取走（一次性），用于把理由重写进
   // 被拒工具结果——与拒绝同帧到达模型，避免 steer 注入造成的双回复。
   denyReasons: Map<string, { reason: string; ts: number }>;
-  // Timestamps of steers whose extra "final" a session's relay connection
-  // should still wait for before closing — appended by steerChatRun(),
-  // consumed by the relay. A steered message is a genuinely separate run
-  // from the Gateway's perspective, so without this the relay would close
-  // on the first run's own final and never see the steered run's reply
-  // live. Entries expire (see STEER_EXPECTATION_TTL_MS): if the relay that
-  // registered one died before its final arrived, a permanent counter would
-  // make the session's NEXT stream swallow a genuine final and stall to its
-  // timeout fallback.
-  pendingSteers: Map<string, number[]>;
+  // Steer expectations, owned by the relay connection that will wait for
+  // them: each open relay registers a SteerOwner under its session key(s);
+  // steerChatRun() bumps every owner currently listening on that session,
+  // and each owner's count dies with its connection (release()). Ownership
+  // instead of TTL: expectations can't outlive or undercut the connection
+  // they belong to, however long an approval gate or tool call keeps it
+  // open — no stale entry can make the session's NEXT stream swallow a
+  // genuine final.
+  steerOwners: Map<string, Set<SteerOwner>>;
+  // question.requested → owning sessionKey, because question.resolved does
+  // NOT carry a sessionKey and couldn't be routed without this. Entries are
+  // bounded by the question's own expiresAtMs (gateway default 15min) — an
+  // intrinsic lifetime, not a guess at someone else's. Reseeded from
+  // question.list after a server restart (listSessionQuestions).
+  questionSessions: Map<string, { sessionKey: string; expiresAtMs: number }>;
 }
 
 declare global {
@@ -108,38 +126,74 @@ function store(): GatewayStore {
       events,
       pendingApprovals: new Map(),
       denyReasons: new Map(),
-      pendingSteers: new Map(),
+      steerOwners: new Map(),
+      questionSessions: new Map(),
     };
   }
   return globalThis.__clickinAgentGateway;
 }
 
-// Matches the relay's overallTimeoutMs: an expectation older than this
-// belongs to an exchange whose relay has certainly stopped waiting.
-const STEER_EXPECTATION_TTL_MS = 180_000;
-
-export function markSteerPending(sessionKey: string): void {
-  const s = store();
-  const list = s.pendingSteers.get(sessionKey) ?? [];
-  list.push(Date.now());
-  s.pendingSteers.set(sessionKey, list);
+interface SteerOwner {
+  pending: number;
 }
 
-/** Called by the relay on every genuine (non-yielded) final — returns true
- * if there's still at least one more steered run it should keep waiting
- * for, having consumed one unit of that expectation. Stale expectations
- * (whose relay died before the final arrived) are pruned, not consumed. */
-export function consumeExpectedSteerFinal(sessionKey: string): boolean {
+export interface SteerOwnerHandle {
+  /** Also listen for steers registered under `key` (the canonical form the
+   * gateway echoes back, learned only after the run-start RPC). Idempotent. */
+  attachKey(key: string): void;
+  /** Called on every genuine (non-yielded) terminal event — true if there's
+   * still at least one steered run this connection should keep waiting for,
+   * having consumed one unit of that expectation. */
+  consume(): boolean;
+  /** Drops this owner and every expectation it held. Must run when the
+   * connection closes, normal finish and client abort alike. */
+  release(): void;
+}
+
+/** Registers a relay connection as the owner of this session's future steer
+ * expectations. Ownership replaces the old TTL bookkeeping: the expectation
+ * lives exactly as long as the connection that would consume it. */
+export function createSteerOwner(sessionKey: string): SteerOwnerHandle {
   const s = store();
-  const now = Date.now();
-  const fresh = (s.pendingSteers.get(sessionKey) ?? []).filter((t) => now - t < STEER_EXPECTATION_TTL_MS);
-  if (fresh.length === 0) {
-    s.pendingSteers.delete(sessionKey);
-    return false;
-  }
-  fresh.shift();
-  if (fresh.length === 0) s.pendingSteers.delete(sessionKey);
-  else s.pendingSteers.set(sessionKey, fresh);
+  const owner: SteerOwner = { pending: 0 };
+  const keys = new Set<string>();
+  const attachKey = (key: string) => {
+    if (!key || keys.has(key)) return;
+    keys.add(key);
+    let set = s.steerOwners.get(key);
+    if (!set) {
+      set = new Set();
+      s.steerOwners.set(key, set);
+    }
+    set.add(owner);
+  };
+  attachKey(sessionKey);
+  return {
+    attachKey,
+    consume() {
+      if (owner.pending <= 0) return false;
+      owner.pending -= 1;
+      return true;
+    },
+    release() {
+      for (const key of keys) {
+        const set = s.steerOwners.get(key);
+        if (!set) continue;
+        set.delete(owner);
+        if (set.size === 0) s.steerOwners.delete(key);
+      }
+      keys.clear();
+    },
+  };
+}
+
+/** Tells every relay connection currently watching `sessionKey` to wait for
+ * one more final (a steered run). Returns false when nobody is listening —
+ * the steered run still executes, its reply just arrives via chat.history. */
+export function markSteerPending(sessionKey: string): boolean {
+  const owners = store().steerOwners.get(sessionKey);
+  if (!owners || owners.size === 0) return false;
+  for (const owner of owners) owner.pending += 1;
   return true;
 }
 
@@ -189,6 +243,12 @@ interface AgentEventPayload {
     delta?: string;
     text?: string;
     replace?: boolean;
+    // 仅 stream:"tool" 事件携带（gateway 源码 handleToolExecutionStart/End）：
+    // phase "start" 带 args（sanitize 后的完整调用参数），phase "result" 带
+    // result（MCP 结果对象）与 isError。stream:"item" 的 tool 条目不带这些。
+    args?: unknown;
+    result?: unknown;
+    isError?: boolean;
   };
 }
 
@@ -233,12 +293,86 @@ function extractApprovalRequest(payload: unknown): ApprovalRequest | null {
   };
 }
 
+// ask_user 走的是独立于 tool 事件的 question.* 协议通道（MindWeave《OpenClaw
+// ask_user 问题机制调研》）：工具侧阻塞在 question.waitAnswer 等人回答，没人
+// 回答 = run 静默挂到问题过期（默认 15 分钟）。不路由这两个事件的后果不是
+// "少一条通知"，而是一个看不见的卡死 run。scope 无需新增：本连接的
+// operator.admin 在事件守卫与 RPC 鉴权处均被短路放行（实测结论见调研第三节）。
+export interface AgentQuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface AgentQuestionItem {
+  questionId: string;
+  header: string;
+  question: string;
+  options: AgentQuestionOption[];
+  multiSelect?: boolean;
+  isOther?: boolean;
+  isSecret?: boolean;
+}
+
+export interface AgentQuestionRecord {
+  id: string;
+  questions: AgentQuestionItem[];
+  sessionKey?: string;
+  createdAtMs?: number;
+  expiresAtMs?: number;
+  status: "pending" | "answered" | "cancelled" | "expired";
+}
+
+const QUESTION_DEFAULT_TTL_MS = 900_000; // gateway 默认 expiresAtMs - createdAtMs
+
+function extractQuestionRecord(payload: unknown): AgentQuestionRecord | null {
+  const p = payload as Record<string, unknown> | undefined;
+  if (!p) return null;
+  // 防御式：record 可能平铺在 payload 上，也可能包在 question/record 字段里
+  // （schema 里 QuestionRequestedEvent 是空对象，形状只能实测+防御）。
+  const flat = typeof p.id === "string" && Array.isArray(p.questions) ? p : null;
+  const nested = [p.question, p.record].find(
+    (v) => v && typeof (v as Record<string, unknown>).id === "string" && Array.isArray((v as Record<string, unknown>).questions),
+  ) as Record<string, unknown> | undefined;
+  const r = flat ?? nested;
+  if (!r) return null;
+  return {
+    id: r.id as string,
+    questions: (r.questions as AgentQuestionItem[]).filter((q) => q && typeof q.question === "string"),
+    sessionKey: typeof r.sessionKey === "string" ? r.sessionKey : undefined,
+    createdAtMs: typeof r.createdAtMs === "number" ? r.createdAtMs : undefined,
+    expiresAtMs: typeof r.expiresAtMs === "number" ? r.expiresAtMs : undefined,
+    status: (r.status as AgentQuestionRecord["status"]) ?? "pending",
+  };
+}
+
+function pruneQuestionSessions(s: GatewayStore): void {
+  const now = Date.now();
+  for (const [id, entry] of s.questionSessions) {
+    if (now > entry.expiresAtMs) s.questionSessions.delete(id);
+  }
+}
+
+function rememberQuestionSession(s: GatewayStore, record: AgentQuestionRecord): void {
+  if (!record.sessionKey) return;
+  pruneQuestionSessions(s);
+  s.questionSessions.set(record.id, {
+    sessionKey: record.sessionKey,
+    expiresAtMs: record.expiresAtMs ?? Date.now() + QUESTION_DEFAULT_TTL_MS,
+  });
+}
+
 // Session-bus payloads for approval lifecycle, discriminated by marker keys.
 interface ApprovalRequestBusPayload {
   approvalRequest: ApprovalRequest;
 }
 interface ApprovalResolvedBusPayload {
   approvalResolved: { id: string; decision: string };
+}
+interface QuestionRequestedBusPayload {
+  questionRequested: AgentQuestionRecord;
+}
+interface QuestionResolvedBusPayload {
+  questionResolved: { id: string; status: string };
 }
 
 function attemptConnect(): Promise<GatewayStatus> {
@@ -288,8 +422,20 @@ function attemptConnect(): Promise<GatewayStatus> {
             payload.stream === "item" &&
             payload.data?.kind === "tool" &&
             (payload.data?.phase === "start" || payload.data?.phase === "end");
-          const isAssistantDelta = payload.stream === "assistant" && typeof payload.data?.delta === "string";
-          if (isToolLifecycle || isAssistantDelta) s.events.emit(`session:${payload.sessionKey}`, payload);
+          // stream:"tool" 是同一批调用的"详情通道"：start 带 sanitize 后的
+          // 完整参数 args，result 带结果与 isError（gateway 源码
+          // handleToolExecutionStart/End 双流并发，toolCallId 一致）。
+          // update（partialResult 进度噪声）不放行。
+          const isToolDetail =
+            payload.stream === "tool" &&
+            (payload.data?.phase === "start" || payload.data?.phase === "result");
+          // delta 或 text 任一存在都放行：实测两种形态并存（replace 快照
+          // delta 为空串、增量事件带 delta），只认 delta 会把假设外的
+          // 纯快照事件在门口静默扔掉——不报错、只是内容没了。
+          const isAssistantText =
+            payload.stream === "assistant" &&
+            (typeof payload.data?.delta === "string" || typeof payload.data?.text === "string");
+          if (isToolLifecycle || isToolDetail || isAssistantText) s.events.emit(`session:${payload.sessionKey}`, payload);
           return;
         }
         if (evt.event === "plugin.approval.requested") {
@@ -327,6 +473,41 @@ function attemptConnect(): Promise<GatewayStatus> {
             s.events.emit(`session:${pending.sessionKey}`, {
               approvalResolved: { id, decision: String(p?.decision ?? "unknown") },
             } satisfies ApprovalResolvedBusPayload);
+          }
+          return;
+        }
+        if (evt.event === "question.requested") {
+          const record = extractQuestionRecord(evt.payload);
+          if (!record) {
+            // 形状不认识就静默丢弃 = 复刻"看不见的卡死 run"。大声记录，
+            // 让协议形状漂移（gateway 升级换 payload）在日志里可见。
+            console.error(
+              "[agent-gateway] question.requested payload shape not recognized — question will be invisible:",
+              JSON.stringify(evt.payload)?.slice(0, 400),
+            );
+            return;
+          }
+          if (!record.sessionKey) {
+            // 无法路由到会话的问题会静默挂满 15 分钟然后过期——大声记录。
+            console.error(`[agent-gateway] question ${record.id} has no sessionKey — cannot surface in webchat`);
+            return;
+          }
+          rememberQuestionSession(s, record);
+          s.events.emit(`session:${record.sessionKey}`, { questionRequested: record } satisfies QuestionRequestedBusPayload);
+          return;
+        }
+        if (evt.event === "question.resolved") {
+          // 该事件不带 sessionKey，路由只能靠 requested 时记下的映射（服务端
+          // 重启后由 listSessionQuestions 补种）。回答可能来自任何 OpenClaw
+          // 客户端，照单转发，不假设只有我们自己会回答。
+          const p = evt.payload as { id?: string; status?: string } | undefined;
+          if (!p?.id) return;
+          const known = s.questionSessions.get(p.id);
+          s.questionSessions.delete(p.id);
+          if (known) {
+            s.events.emit(`session:${known.sessionKey}`, {
+              questionResolved: { id: p.id, status: String(p.status ?? "answered") },
+            } satisfies QuestionResolvedBusPayload);
           }
         }
       },
@@ -422,14 +603,39 @@ export interface ChatStreamEvent {
   // "approval"/"approval-resolved": plugin approval gate lifecycle for a
   // write tool this session invoked — the /agent page is the team gateway's
   // only approval surface.
-  type: "delta" | "replace" | "chat-delta" | "final" | "aborted" | "error" | "tool" | "tool-end" | "approval" | "approval-resolved";
+  // "question"/"question-resolved": ask_user 的 question.* 通道——问题挂着
+  // 时 run 阻塞在 waitAnswer，卡片必须可见可答。
+  // "tool-result": stream:"tool" 的 result 阶段——完整调用结果 + 是否失败，
+  // 在 "tool-end"（item 流的 done 标记）之前到达，按 toolId 归并到同一气泡。
+  type:
+    | "delta"
+    | "replace"
+    | "chat-delta"
+    | "final"
+    | "aborted"
+    | "error"
+    | "tool"
+    | "tool-result"
+    | "tool-end"
+    | "approval"
+    | "approval-resolved"
+    | "question"
+    | "question-resolved";
   text: string;
   errorMessage?: string;
   toolName?: string;
   toolId?: string;
+  /** "tool" 事件的调用参数（stream:"tool" start 的 args，可能缺席）。 */
+  toolInput?: unknown;
+  /** "tool-result" 事件的调用结果（MCP 结果对象，可能缺席）。 */
+  toolResult?: unknown;
+  toolIsError?: boolean;
   approval?: ApprovalRequest;
   approvalId?: string;
   decision?: string;
+  question?: AgentQuestionRecord;
+  questionId?: string;
+  questionStatus?: string;
 }
 
 /**
@@ -524,8 +730,16 @@ export function subscribeToSession(sessionKey: string, onEvent: (event: ChatStre
   // Scoped to this one subscription so the same tool call isn't
   // re-announced if its "start" event is ever redelivered.
   const seenToolCalls = new Set<string>();
-  const handler = (rawPayload: ChatEventPayload | AgentEventPayload | ApprovalRequestBusPayload | ApprovalResolvedBusPayload) => {
-    // Approval lifecycle payloads are discriminated by their marker keys.
+  const handler = (
+    rawPayload:
+      | ChatEventPayload
+      | AgentEventPayload
+      | ApprovalRequestBusPayload
+      | ApprovalResolvedBusPayload
+      | QuestionRequestedBusPayload
+      | QuestionResolvedBusPayload,
+  ) => {
+    // Approval/question lifecycle payloads are discriminated by marker keys.
     if ("approvalRequest" in rawPayload) {
       onEvent({ type: "approval", text: "", approval: rawPayload.approvalRequest });
       return;
@@ -539,6 +753,19 @@ export function subscribeToSession(sessionKey: string, onEvent: (event: ChatStre
       });
       return;
     }
+    if ("questionRequested" in rawPayload) {
+      onEvent({ type: "question", text: "", question: rawPayload.questionRequested });
+      return;
+    }
+    if ("questionResolved" in rawPayload) {
+      onEvent({
+        type: "question-resolved",
+        text: "",
+        questionId: rawPayload.questionResolved.id,
+        questionStatus: rawPayload.questionResolved.status,
+      });
+      return;
+    }
     // "agent" events (tool start / assistant delta) vs "chat" events (state
     // machine) — "stream" only exists on the former, discriminating the union.
     if ("stream" in rawPayload) {
@@ -546,17 +773,47 @@ export function subscribeToSession(sessionKey: string, onEvent: (event: ChatStre
       if (agentPayload.stream === "assistant") {
         const delta = agentPayload.data?.delta;
         const text = agentPayload.data?.text;
-        // `text` is the authoritative cumulative text for the current
-        // segment — prefer it as a replace-style snapshot whenever present.
-        // Do NOT accumulate `delta` when `text` exists: some gateway builds
-        // emit snapshot events whose `delta` carries the full text rather
-        // than an increment (observed live: treating those as fragments
-        // duplicates the whole reply once per snapshot). `delta`
-        // accumulation is only the fallback for events with no `text`.
+        // `text` 是该段的权威累计值（实测 deltaLen=2/textLen=2 →
+        // deltaLen=31/textLen=33 → deltaLen=4/textLen=37）——有它就走
+        // replace 赋值，绝不累加：赋值对 Gateway 的重复投递天然幂等，模型
+        // 真的重复输出时累计值自身会增长、不可能丢。delta 累加只是 text
+        // 缺席时的兜底，且 relay 侧对"快照在场后的裸增量"另有忽略保护
+        // （同段两种形态并存时 += 会双份，见 relay.ts agentSnapshotSeen）。
         if (typeof text === "string" && text) {
           onEvent({ type: "replace", text });
         } else if (typeof delta === "string" && delta) {
           onEvent({ type: "delta", text: delta });
+        }
+        return;
+      }
+      // stream:"tool" 详情通道：start（带 args）先于 item 流的 start 到达，
+      // 所以气泡由这里创建、携带参数；item 流的 start 随后被 seenToolCalls
+      // 去重。result 带完整结果，归并进已有气泡；done 标记仍由 item 流的
+      // "end" 负责（两者都会来）。顺序不是猜的，是上游强制的：gateway 的
+      // handleToolExecutionStart 在同一同步调用里先 emit tool 流再 emit
+      // item 流，两者走同一条 websocket（单连接 FIFO 投递）——若这条契约
+      // 破裂（item 先到），退化行为是气泡无参数，不炸。
+      if (agentPayload.stream === "tool") {
+        const toolId = agentPayload.data?.toolCallId ?? "";
+        if (agentPayload.data?.phase === "result") {
+          onEvent({
+            type: "tool-result",
+            text: "",
+            toolId: toolId || undefined,
+            toolResult: agentPayload.data?.result,
+            toolIsError: agentPayload.data?.isError === true,
+          });
+          return;
+        }
+        if (toolId && !seenToolCalls.has(toolId)) {
+          seenToolCalls.add(toolId);
+          onEvent({
+            type: "tool",
+            text: "",
+            toolName: agentPayload.data?.name || "工具",
+            toolId,
+            toolInput: agentPayload.data?.args,
+          });
         }
         return;
       }
@@ -641,7 +898,16 @@ export async function getChatHistory(sessionKey: string): Promise<ChatTranscript
       continue;
     }
     if (m.role === "toolResult") {
-      if (m.toolName) entries.push({ role: "tool", name: m.toolName, id: m.toolCallId || undefined });
+      if (m.toolName) {
+        // 展示用途，截断保护：单条 wiki_read 结果可能是整篇文档。
+        const result = blocksToText(m.content).slice(0, TOOL_PAYLOAD_MAX_CHARS);
+        entries.push({
+          role: "tool",
+          name: m.toolName,
+          id: m.toolCallId || undefined,
+          ...(result ? { result } : {}),
+        });
+      }
       continue;
     }
     if (m.role !== "assistant") continue;
@@ -779,4 +1045,105 @@ export async function resolveApproval(approvalId: string, decision: "allow-once"
   const status = await connect();
   const client = requireConnectedClient(status);
   await client.request("plugin.approval.resolve", { id: approvalId, decision });
+}
+
+// ─── Session run state（权威来源）───────────────────────────────────────────
+
+export type SessionRunState = "running" | "not-running" | "unknown";
+
+/**
+ * 权威回答"这个会话还在跑吗"。事件流的静默不能回答这个问题——tool call
+ * 期间完全静默，和 run 已结束在流上长得一模一样（MindWeave《Agent 流式
+ * 中继：静默不等于结束》）。relay 的计时器到点后来这里问一次，而不是把
+ * 静默当作结束的判决。
+ *
+ * "unknown" = 瞬时查询失败（RPC 错误、网关重连中），按"还在跑"处理但由
+ * 调用方限次；"not-running" 包括会话不存在与 status 非 running。这里主动
+ * connect()：若 WS 曾断开，这一步顺带把事件订阅的底层连接也救活。
+ */
+export async function fetchSessionRunState(sessionKey: string): Promise<SessionRunState> {
+  let status: GatewayStatus;
+  try {
+    status = await connect();
+  } catch {
+    return "unknown";
+  }
+  // 未配置是永久状态，不是瞬时故障——按"没在跑"收尾，避免无限等待。
+  if (status.state === "unconfigured") return "not-running";
+  try {
+    const client = requireConnectedClient(status);
+    const result = await client.request<{ sessions: SessionRow[] }>(
+      "sessions.list",
+      { search: sessionKey, limit: 10 },
+      { timeoutMs: 10_000 },
+    );
+    // canonical vs raw：行 key 是 canonical 形式，查询 key 可能是 raw——
+    // 必须后缀容错比较，=== 会静默匹配不到任何东西。
+    const row = result.sessions.find((r) => r.key === sessionKey || r.key.endsWith(`:${sessionKey}`));
+    if (!row) return "not-running";
+    return row.status === "running" ? "running" : "not-running";
+  } catch {
+    return "unknown";
+  }
+}
+
+// ─── ask_user questions ─────────────────────────────────────────────────────
+
+/** 某会话的全部待答问题（question.list 无过滤参数，只能客户端自己筛，
+ * 同样必须后缀容错比较 session key）。顺带补种 id→sessionKey 路由映射：
+ * 服务端重启后内存映射为空，重启前发出的问题其 resolved 事件会无处路由。
+ *
+ * 活体探针实测（2026-08-21，scripts/gateway-probe.ts）：生产 gateway
+ * 2026.7.1-2 尚无 question.* 协议（unknown method），ask_user 也不存在——
+ * 该版本上这整套集成是前向兼容的休眠代码，unknown method 按"没有待答
+ * 问题"处理，不能让每次重开 running 会话都对着老 gateway 报错。gateway
+ * 升级后用 gateway-probe --questions / --question-roundtrip 复验信封形状。 */
+export async function listSessionQuestions(sessionKey: string): Promise<AgentQuestionRecord[]> {
+  const status = await connect();
+  if (status.state !== "connected") return [];
+  const client = requireConnectedClient(status);
+  let result: { questions?: unknown[] };
+  try {
+    result = await client.request<{ questions?: unknown[] }>("question.list", {});
+  } catch (err) {
+    if (err instanceof Error && /unknown method/i.test(err.message)) return [];
+    throw err;
+  }
+  const records = (result.questions ?? [])
+    .map(extractQuestionRecord)
+    .filter((r): r is AgentQuestionRecord => r !== null)
+    .filter((r) => r.sessionKey === sessionKey || r.sessionKey?.endsWith(`:${sessionKey}`));
+  const s = store();
+  for (const r of records) rememberQuestionSession(s, r);
+  return records.filter((r) => r.status === "pending");
+}
+
+/** 问题归属的 sessionKey（回答 API 的所有权检查用）。内存映射未命中时退到
+ * question.get——重启后映射为空不能当"问题不存在"。 */
+export async function getQuestionSessionKey(questionId: string): Promise<string | undefined> {
+  const s = store();
+  pruneQuestionSessions(s);
+  const known = s.questionSessions.get(questionId);
+  if (known) return known.sessionKey;
+  const status = await connect();
+  const client = requireConnectedClient(status);
+  const result = await client.request<unknown>("question.get", { id: questionId }).catch(() => null);
+  const record = extractQuestionRecord(result);
+  if (record) rememberQuestionSession(s, record);
+  return record?.sessionKey;
+}
+
+/** 回答或取消一个待答问题。回答格式：answers 双层包裹、值恒为数组（单选也
+ * 是）；重复 resolve 会被 Gateway 拒绝——多客户端竞态属正常，原样抛给调用方。 */
+export async function resolveQuestion(
+  questionId: string,
+  outcome: { answers: Record<string, string[]> } | { cancel: true },
+): Promise<void> {
+  const status = await connect();
+  const client = requireConnectedClient(status);
+  if ("cancel" in outcome) {
+    await client.request("question.resolve", { id: questionId, cancel: true });
+    return;
+  }
+  await client.request("question.resolve", { id: questionId, answers: { answers: outcome.answers } });
 }

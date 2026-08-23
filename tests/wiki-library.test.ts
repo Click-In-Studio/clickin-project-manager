@@ -43,13 +43,13 @@ describe("W1 schema", () => {
     expect(cols).toEqual(expect.arrayContaining(["parent_id", "sort_key", "is_public"]));
   });
 
-  it("wiki_link / wiki_tag / wiki_dept_share / wiki_revision tables exist", async () => {
+  it("wiki_entity_link / wiki_tag / wiki_dept_share / wiki_revision tables exist", async () => {
     const res = await getPool().query<{ table_name: string }>(
       `SELECT table_name FROM information_schema.tables
-       WHERE table_name IN ('wiki_link', 'wiki_tag', 'wiki_dept_share', 'wiki_revision')`,
+       WHERE table_name IN ('wiki_entity_link', 'wiki_tag', 'wiki_dept_share', 'wiki_revision')`,
     );
     expect(res.rows.map(r => r.table_name).sort()).toEqual(
-      ["wiki_dept_share", "wiki_link", "wiki_revision", "wiki_tag"],
+      ["wiki_dept_share", "wiki_entity_link", "wiki_revision", "wiki_tag"],
     );
   });
 

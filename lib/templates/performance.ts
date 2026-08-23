@@ -102,6 +102,7 @@ const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   制作助理: [
     "node:announcement/*@create", "node:announcement/*@edit", "node:announcement/*@delete",
     "node:milestone/*@create", "node:milestone/*@edit", "node:milestone/*@delete",
+    "node:phase/*@create", "node:phase/*@edit", "node:phase/*@delete",
     "node:task/*@view",
   ],
 

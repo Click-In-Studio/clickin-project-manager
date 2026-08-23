@@ -1,4 +1,235 @@
 {
+  "agent_instructions": [
+    {
+      "column": "scope_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "scope_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "content",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "updated_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "agent_memory_chunk": [
+    {
+      "column": "id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "column": "scope_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "scope_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "source",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "text",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "text_tokens",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "content_hash",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "model",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "embedding",
+      "type": "USER-DEFINED",
+      "nullable": true
+    },
+    {
+      "column": "importance",
+      "type": "smallint",
+      "nullable": true
+    },
+    {
+      "column": "triggers",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "origin_class",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "session_kind",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "observed_at",
+      "type": "timestamp with time zone",
+      "nullable": false
+    },
+    {
+      "column": "supersedes_key",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "author_user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "agent_memory_embedding_cache": [
+    {
+      "column": "model",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "content_hash",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "embedding",
+      "type": "USER-DEFINED",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "agent_memory_index_meta": [
+    {
+      "column": "id",
+      "type": "smallint",
+      "nullable": false,
+      "default": "1"
+    },
+    {
+      "column": "model",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "dim",
+      "type": "integer",
+      "nullable": false
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "agent_memory_recall_log": [
+    {
+      "column": "id",
+      "type": "bigint",
+      "nullable": false
+    },
+    {
+      "column": "chunk_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "query_hash",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "ai_usage": [
+    {
+      "column": "id",
+      "type": "bigint",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "kind",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "model",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "tokens",
+      "type": "integer",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "announcement_read": [
     {
       "column": "announcement_id",
@@ -179,12 +410,6 @@
       "nullable": true
     },
     {
-      "column": "is_universal",
-      "type": "boolean",
-      "nullable": false,
-      "default": "true"
-    },
-    {
       "column": "is_public",
       "type": "boolean",
       "nullable": false,
@@ -356,23 +581,6 @@
       "column": "revoked_at",
       "type": "timestamp with time zone",
       "nullable": true
-    }
-  ],
-  "asset_version_rel": [
-    {
-      "column": "asset_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "version_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "asset_file_id",
-      "type": "text",
-      "nullable": false
     }
   ],
   "block_tag": [
@@ -1416,6 +1624,146 @@
       "default": "now()"
     }
   ],
+  "phase": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "dept_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "start_date",
+      "type": "date",
+      "nullable": false
+    },
+    {
+      "column": "end_date",
+      "type": "date",
+      "nullable": true
+    },
+    {
+      "column": "sort_order",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "phase_milestone": [
+    {
+      "column": "phase_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "milestone_id",
+      "type": "text",
+      "nullable": false
+    }
+  ],
+  "plan_code": [
+    {
+      "column": "code",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "kind",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "grants_tier",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "grants_exempt",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    },
+    {
+      "column": "exempt_note",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "max_uses",
+      "type": "integer",
+      "nullable": false,
+      "default": "1"
+    },
+    {
+      "column": "used_count",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "expires_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "note",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "plan_code_redemption": [
+    {
+      "column": "id",
+      "type": "bigint",
+      "nullable": false
+    },
+    {
+      "column": "code",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "redeemed_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "production": [
     {
       "column": "id",
@@ -2398,6 +2746,40 @@
       "nullable": false
     }
   ],
+  "production_plan": [
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "tier",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "billing_exempt",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    },
+    {
+      "column": "exempt_note",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "source",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "production_platform_channel": [
     {
       "column": "id",
@@ -2560,6 +2942,23 @@
     },
     {
       "column": "reports_root_wiki_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "dramaturgy_tree_enabled",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true"
+    },
+    {
+      "column": "dramaturgy_root_title",
+      "type": "text",
+      "nullable": false,
+      "default": "'戏剧构作'::text"
+    },
+    {
+      "column": "dramaturgy_root_wiki_id",
       "type": "uuid",
       "nullable": true
     },
@@ -3178,14 +3577,14 @@
       "default": "now()"
     }
   ],
-  "task_milestone": [
+  "task_phase": [
     {
       "column": "task_id",
       "type": "text",
       "nullable": false
     },
     {
-      "column": "milestone_id",
+      "column": "phase_id",
       "type": "text",
       "nullable": false
     }
@@ -3299,6 +3698,29 @@
       "nullable": true
     }
   ],
+  "user_plan": [
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "tier",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "source",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "user_platform_identity": [
     {
       "column": "id",
@@ -3406,33 +3828,9 @@
       "nullable": false
     },
     {
-      "column": "name",
-      "type": "text",
-      "nullable": false,
-      "default": "''::text"
-    },
-    {
-      "column": "description",
-      "type": "text",
-      "nullable": false,
-      "default": "''::text"
-    },
-    {
-      "column": "tags",
-      "type": "ARRAY",
-      "nullable": false,
-      "default": "'{}'::text[]"
-    },
-    {
       "column": "parent_version_id",
       "type": "text",
       "nullable": true
-    },
-    {
-      "column": "status",
-      "type": "USER-DEFINED",
-      "nullable": false,
-      "default": "'editing'::version_status"
     },
     {
       "column": "created_at",
@@ -3579,16 +3977,43 @@
       "default": "now()"
     }
   ],
-  "wiki_link": [
+  "wiki_entity_link": [
     {
-      "column": "source_wiki_id",
+      "column": "wiki_id",
       "type": "uuid",
       "nullable": false
     },
     {
-      "column": "target_wiki_id",
-      "type": "uuid",
+      "column": "production_id",
+      "type": "text",
       "nullable": false
+    },
+    {
+      "column": "entity_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "entity_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "origin",
+      "type": "text",
+      "nullable": false,
+      "default": "'wiki_body'::text"
+    },
+    {
+      "column": "created_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
     }
   ],
   "wiki_proposal": [

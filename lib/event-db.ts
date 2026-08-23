@@ -110,7 +110,7 @@ export type EventTechReq = {
   endTime: string | null;
   effectiveStartTime: string | null;
   effectiveEndTime: string | null;
-  milestoneIds: string[];
+  phaseIds: string[];
 };
 
 export type Mention = { userId: string; name: string };
@@ -285,7 +285,7 @@ function rowToTechReq(
   r: TechReqRow,
   assignees: EventTechReqAssignee[],
   scheduleItemIds: string[],
-  milestoneIds: string[] = [],
+  phaseIds: string[] = [],
 ): EventTechReq {
   return {
     id: r.id, productionId: r.production_id, eventId: r.event_id, scheduleItemIds,
@@ -298,7 +298,7 @@ function rowToTechReq(
     endTime: r.end_time?.toISOString() ?? null,
     effectiveStartTime: r.effective_start_time?.toISOString() ?? null,
     effectiveEndTime: r.effective_end_time?.toISOString() ?? null,
-    milestoneIds,
+    phaseIds,
   };
 }
 
@@ -1020,7 +1020,7 @@ export async function deleteEventCallTime(id: string, eventId: string): Promise<
 
 export async function listEventTechReqs(eventId: string): Promise<EventTechReq[]> {
   const pool = getPool();
-  const [reqRes, assigneeRes, itemRes, milestoneRes] = await Promise.all([
+  const [reqRes, assigneeRes, itemRes, phaseRes] = await Promise.all([
     pool.query<TechReqRow>(
       `SELECT ${TASK_SELECT_COLS}
        FROM task t
@@ -1042,10 +1042,10 @@ export async function listEventTechReqs(eventId: string): Promise<EventTechReq[]
        WHERE t.event_id = $1`,
       [eventId]
     ),
-    pool.query<{ task_id: string; milestone_id: string }>(
-      `SELECT tm.task_id, tm.milestone_id
-       FROM task_milestone tm
-       JOIN task t ON t.id = tm.task_id
+    pool.query<{ task_id: string; phase_id: string }>(
+      `SELECT tp.task_id, tp.phase_id
+       FROM task_phase tp
+       JOIN task t ON t.id = tp.task_id
        WHERE t.event_id = $1`,
       [eventId]
     ),
@@ -1060,13 +1060,13 @@ export async function listEventTechReqs(eventId: string): Promise<EventTechReq[]
     if (!itemMap.has(r.task_id)) itemMap.set(r.task_id, []);
     itemMap.get(r.task_id)!.push(r.item_id);
   }
-  const milestoneMap = new Map<string, string[]>();
-  for (const r of milestoneRes.rows) {
-    if (!milestoneMap.has(r.task_id)) milestoneMap.set(r.task_id, []);
-    milestoneMap.get(r.task_id)!.push(r.milestone_id);
+  const phaseMap = new Map<string, string[]>();
+  for (const r of phaseRes.rows) {
+    if (!phaseMap.has(r.task_id)) phaseMap.set(r.task_id, []);
+    phaseMap.get(r.task_id)!.push(r.phase_id);
   }
   return reqRes.rows.map(r => rowToTechReq(
-    r, assigneeMap.get(r.id) ?? [], itemMap.get(r.id) ?? [], milestoneMap.get(r.id) ?? [],
+    r, assigneeMap.get(r.id) ?? [], itemMap.get(r.id) ?? [], phaseMap.get(r.id) ?? [],
   ));
 }
 
@@ -1081,22 +1081,22 @@ async function getTaskWhere(whereSql: string, params: unknown[]): Promise<EventT
   );
   if (!reqRes.rows[0]) return null;
   const id = reqRes.rows[0].id;
-  const [assigneeRes, itemRes, milestoneRes] = await Promise.all([
+  const [assigneeRes, itemRes, phaseRes] = await Promise.all([
     pool.query<TechAssigneeRow>(
       "SELECT task_id, user_id, name FROM task_assignee WHERE task_id = $1", [id]
     ),
     pool.query<{ item_id: string }>(
       "SELECT item_id FROM task_schedule_item WHERE task_id = $1", [id]
     ),
-    pool.query<{ milestone_id: string }>(
-      "SELECT milestone_id FROM task_milestone WHERE task_id = $1", [id]
+    pool.query<{ phase_id: string }>(
+      "SELECT phase_id FROM task_phase WHERE task_id = $1", [id]
     ),
   ]);
   return rowToTechReq(
     reqRes.rows[0],
     assigneeRes.rows.map(r => ({ userId: r.user_id, name: r.name })),
     itemRes.rows.map(r => r.item_id),
-    milestoneRes.rows.map(r => r.milestone_id),
+    phaseRes.rows.map(r => r.phase_id),
   );
 }
 
@@ -1179,22 +1179,22 @@ export async function setTaskBlockedBy(
 }
 
 /**
- * 整体替换里程碑绑定。应用层不变量：milestone 与 task 同 production
- * （跨剧组 id 直接过滤丢弃）。不约束 task 截止 ≤ 里程碑时间。
+ * 整体替换阶段绑定。应用层不变量：phase 与 task 同 production
+ * （跨剧组 id 直接过滤丢弃）。不约束 task 起止 ⊆ phase 区间。
  */
-export async function setTaskMilestones(
-  taskId: string, productionId: string, milestoneIds: string[],
+export async function setTaskPhases(
+  taskId: string, productionId: string, phaseIds: string[],
 ): Promise<void> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    await client.query("DELETE FROM task_milestone WHERE task_id = $1", [taskId]);
-    const unique = [...new Set(milestoneIds)];
+    await client.query("DELETE FROM task_phase WHERE task_id = $1", [taskId]);
+    const unique = [...new Set(phaseIds)];
     if (unique.length > 0) {
       await client.query(
-        `INSERT INTO task_milestone (task_id, milestone_id)
-         SELECT $1, m.id FROM milestone m
-         WHERE m.id = ANY($2::text[]) AND m.production_id = $3
+        `INSERT INTO task_phase (task_id, phase_id)
+         SELECT $1, p.id FROM phase p
+         WHERE p.id = ANY($2::text[]) AND p.production_id = $3
          ON CONFLICT DO NOTHING`,
         [taskId, unique, productionId],
       );
@@ -1243,7 +1243,7 @@ export async function createEventTechReq(data: {
   departmentId: string | null; groupId?: string | null;
   assignees: EventTechReqAssignee[];
   startTime?: string | null; endTime?: string | null;
-  milestoneIds?: string[];
+  phaseIds?: string[];
   createdVia?: "explicit" | "poc";
   createdBy: string;
 }): Promise<EventTechReq> {
@@ -1276,14 +1276,14 @@ export async function createEventTechReq(data: {
         [data.id, a.userId, a.name]
       );
     }
-    const milestones = [...new Set(data.milestoneIds ?? [])];
-    if (milestones.length > 0) {
+    const phases = [...new Set(data.phaseIds ?? [])];
+    if (phases.length > 0) {
       await client.query(
-        `INSERT INTO task_milestone (task_id, milestone_id)
-         SELECT $1, m.id FROM milestone m
-         WHERE m.id = ANY($2::text[]) AND m.production_id = $3
+        `INSERT INTO task_phase (task_id, phase_id)
+         SELECT $1, p.id FROM phase p
+         WHERE p.id = ANY($2::text[]) AND p.production_id = $3
          ON CONFLICT DO NOTHING`,
-        [data.id, milestones, data.productionId]
+        [data.id, phases, data.productionId]
       );
     }
     await client.query("COMMIT");
@@ -2297,7 +2297,7 @@ export type ProductionTechReqEntry = {
   endTime: string | null;
   effectiveStartTime: string | null;
   effectiveEndTime: string | null;
-  milestones: { id: string; name: string; endDate: string }[];
+  phases: { id: string; name: string; startDate: string; endDate: string | null }[];
   /** 存在未 done 的 blocker（读侧派生，GitHub 语义，不进状态机） */
   isBlocked: boolean;
   assignees: { userId: string; name: string }[];
@@ -2395,7 +2395,7 @@ export async function listProductionTechReqs(productionId: string): Promise<Prod
     event_id: string | null; event_title: string | null; event_start_time: Date | null;
     start_time: Date | null; end_time: Date | null;
     effective_start_time: Date | null; effective_end_time: Date | null;
-    milestones_json: { id: string; name: string; endDate: string }[] | null;
+    phases_json: { id: string; name: string; startDate: string; endDate: string | null }[] | null;
     is_blocked: boolean;
     assignees_json: { userId: string; name: string }[] | null;
   }>(
@@ -2414,11 +2414,12 @@ export async function listProductionTechReqs(productionId: string): Promise<Prod
           JOIN event_schedule_item esi ON esi.id = tsi.item_id WHERE tsi.task_id = t.id),
          pe.end_time) AS effective_end_time,
        (
-         SELECT json_agg(json_build_object('id', m.id, 'name', m.name, 'endDate', m.end_date)
-                ORDER BY m.end_date)
-         FROM task_milestone tm JOIN milestone m ON m.id = tm.milestone_id
-         WHERE tm.task_id = t.id
-       ) AS milestones_json,
+         SELECT json_agg(json_build_object('id', p.id, 'name', p.name,
+                  'startDate', p.start_date, 'endDate', p.end_date)
+                ORDER BY p.start_date)
+         FROM task_phase tp JOIN phase p ON p.id = tp.phase_id
+         WHERE tp.task_id = t.id
+       ) AS phases_json,
        EXISTS (
          SELECT 1 FROM task_dependency d
          JOIN task bt ON bt.id = d.blocking_id
@@ -2452,7 +2453,7 @@ export async function listProductionTechReqs(productionId: string): Promise<Prod
     endTime: r.end_time?.toISOString() ?? null,
     effectiveStartTime: r.effective_start_time?.toISOString() ?? null,
     effectiveEndTime: r.effective_end_time?.toISOString() ?? null,
-    milestones: r.milestones_json ?? [],
+    phases: r.phases_json ?? [],
     isBlocked: r.is_blocked,
     assignees: r.assignees_json ?? [],
   }));

@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
-import { loadProduction, getProductionPermissionContext, getActiveVersionId, listVersions, updateProductionName, updateProductionMeta, updateProductionType, getVersion, deleteProduction } from "@/lib/db";
+import { loadProduction, getProductionPermissionContext, getActiveVersionId, updateProductionName, updateProductionMeta, updateProductionType, getVersion, deleteProduction } from "@/lib/db";
 import { getSession } from "@/lib/session";
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]">) {
@@ -29,16 +29,13 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
       return Response.json({ error: "版本不存在" }, { status: 404 });
     }
 
-    const [result, versions] = await Promise.all([
-      loadProduction(id, versionId),
-      listVersions(id),
-    ]);
+    const result = await loadProduction(id, versionId);
 
     if (!result) {
       return Response.json({ error: "剧本不存在" }, { status: 404 });
     }
 
-    return Response.json({ state: result.state, versionId, versions });
+    return Response.json({ state: result.state, versionId });
   } catch (err) {
     console.error("[production] load error:", err);
     return Response.json({ error: "加载失败" }, { status: 500 });

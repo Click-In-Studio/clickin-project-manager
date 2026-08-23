@@ -5,6 +5,7 @@ import { canAccessNode } from "@/lib/grant-template";
 import type { PermissionContext } from "@/lib/permissions";
 import type { CueAnchor } from "@/lib/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
+import { rejectNonHeadWrite } from "@/lib/head-version";
 
 let _seq = 0;
 const uid = () => `cue${Date.now().toString(36)}${(++_seq).toString(36)}`;
@@ -60,6 +61,8 @@ export async function POST(
   if (!cueList) return Response.json({ error: "不存在" }, { status: 404 });
   if (!canEdit) return Response.json({ error: "权限不足" }, { status: 403 });
 
+  const nonHead = await rejectNonHeadWrite(id, req.nextUrl.searchParams.get("v"));
+  if (nonHead) return nonHead;
   const resolved = await resolveVersion(id, req.nextUrl.searchParams.get("v"));
   if (resolved.error) return resolved.error;
   const { versionId } = resolved;

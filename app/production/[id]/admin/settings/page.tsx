@@ -7,6 +7,8 @@ import { getProductionPermissionContext, getProductionMeta } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import AdminSettingsClient from "@/components/AdminSettingsClient";
+import ProductionPlanCard from "@/components/ProductionPlanCard";
+import { getProductionPlan, PRODUCTION_TIERS } from "@/lib/plan";
 
 export default async function SettingsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -15,11 +17,12 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
 
-  const [meta, access] = await Promise.all([
+  const [meta, access, plan] = await Promise.all([
     getProductionMeta(id),
     session
       ? getProductionPermissionContext(session.userId, session.isAdmin, id)
       : Promise.resolve(null),
+    getProductionPlan(id),
   ]);
 
   const permCtx = access?.permCtx ?? null;
@@ -38,14 +41,32 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
     canImportScenes: !!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "dramaturgy", "*", "imports", "create")),
     canManageTags: !!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "member", "*", "roles", "edit")),
     canToggleWatermark: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "config", "edit")),
+    // 制作级 agents.md：制作人经模版 node:*/*@* 类型通配持有区间（激活成行
+    // 后 hasGrant 命中），POC 部门区间无此键——「默认仅制作人」由此天然成立。
+    canEditAiInstructions: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "ai_instructions", "*", "*", "edit")),
   };
 
+  const tierConf = PRODUCTION_TIERS[plan.tier];
   return (
-    <AdminSettingsClient
-      productionId={id}
-      initialMeta={meta ?? { name: "", description: "", avatarUrl: null, type: null, typeLabel: null, language: null, watermarkEnabled: false }}
-      isArchived={isArchived}
-      perms={perms}
-    />
+    <>
+      <AdminSettingsClient
+        productionId={id}
+        initialMeta={meta ?? { name: "", description: "", avatarUrl: null, type: null, typeLabel: null, language: null, watermarkEnabled: false }}
+        isArchived={isArchived}
+        perms={perms}
+      />
+      <ProductionPlanCard
+        productionId={id}
+        isOwner={!!permCtx?.isOwner}
+        initial={{
+          tier: plan.tier,
+          label: tierConf.label,
+          billingExempt: plan.billingExempt,
+          seatLimit: tierConf.seatLimit,
+          ai: tierConf.ai,
+          advancedPerms: tierConf.advancedPerms,
+        }}
+      />
+    </>
   );
 }

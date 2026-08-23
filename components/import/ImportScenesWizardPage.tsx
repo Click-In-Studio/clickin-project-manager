@@ -9,7 +9,7 @@ export default function ImportScenesWizardPage({ productionId, versionId }: { pr
     <ImportJointWizard
       productionId={productionId}
       versionId={versionId}
-      onDone={() => router.push(`/production/${productionId}/scenes`)}
+      onDone={() => router.push(`/production/${productionId}/dramaturgy`)}
     />
   );
 }

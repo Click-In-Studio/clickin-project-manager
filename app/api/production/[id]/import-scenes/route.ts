@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, listScenesByVersion, listSceneVersionsByVersion, flushToDBVersioned, updateSceneMetadata, getActiveVersionId, getVersion } from "@/lib/db";
+import { rejectNonHeadWrite } from "@/lib/head-version";
 import type { SceneColMap, SceneConflict, ImportScenePreview } from "@/lib/import/types";
 import { buildSceneRows, buildSceneMap } from "@/lib/import/scene-builder";
 import type { SceneRow } from "@/lib/import/scene-builder";
@@ -37,9 +38,8 @@ async function resolveImportVersionId(req: NextRequest, productionId: string): P
   if (!ver || ver.productionId !== productionId) {
     return Response.json({ error: "版本不存在" }, { status: 404 });
   }
-  if (ver.status !== "editing") {
-    return Response.json({ error: "只能向编辑中的版本导入构作" }, { status: 400 });
-  }
+  const nonHead = await rejectNonHeadWrite(productionId, versionIdParam);
+  if (nonHead) return nonHead;
   return versionIdParam;
 }
 

@@ -1,12 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
 import Markdown from "@/components/Markdown";
-import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-gateway/stream-reducer";
+import {
+  applyStreamLine,
+  type Bubble,
+  type QuestionInfo,
+  type QuestionItem,
+  type StreamLine,
+} from "@/lib/agent-gateway/stream-reducer";
 import { parseSessionIdentity } from "@/lib/mcp/session-identity";
 import { buildUiContextMessage } from "@/lib/agent-ui-context";
+import { derivePageKey, pageLabelFor, pageSuggestionsFor } from "@/lib/agent-page-context";
+import { toolLabel } from "@/lib/agent-tool-labels";
 import WikiProposalPreviewModal from "@/components/WikiProposalPreviewModal";
+import ChevronIcon from "@/components/ChevronIcon";
 
 /** 按语境（个人 / 某个制作）分桶持久化最后一次活跃会话，重开 popout 时恢复。 */
 function lastSessionStorageKey(productionId: string | null): string {
@@ -60,6 +70,7 @@ export default function AgentPopout({
   const [currentDocTitle, setCurrentDocTitle] = useState<string | null>(null);
   const [currentDocTags, setCurrentDocTags] = useState<string[]>([]);
   const [docAttached, setDocAttached] = useState(true);
+  const [pageAttached, setPageAttached] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -67,6 +78,18 @@ export default function AgentPopout({
   activeKeyRef.current = activeKey;
   const pathname = usePathname();
   const router = useRouter();
+
+  // 页面感知（「主动就位、被动发言」）：pageKey/label 来自 allowlist 注册表
+  // （lib/agent-page-context.ts），不在表里的页面什么都不附带。建议 chip 点击
+  // 只填入输入框、绝不自动发送；页面信息只随用户下一条真实消息的信封附带。
+  const pageKey = derivePageKey(pathname ?? "", productionId);
+  const pageLabel = pageLabelFor(pageKey);
+  const pageSuggestions = pageSuggestionsFor(pageKey);
+
+  // 换页面后默认重新勾选附带（与文档 chip 同款语义）。
+  useEffect(() => {
+    setPageAttached(true);
+  }, [pageKey]);
 
   const inScope = useCallback(
     (key: string) => {
@@ -261,13 +284,13 @@ export default function AgentPopout({
       const res = await fetch(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`);
       if (res.ok) {
         const data = (await res.json()) as {
-          messages: ({ role: "user" | "assistant"; content: string } | { role: "tool"; name: string; id?: string })[];
+          messages: ({ role: "user" | "assistant"; content: string } | { role: "tool"; name: string; id?: string; result?: string })[];
         };
         if (activeKeyRef.current !== key) return;
         setBubbles(
           data.messages.map((m) =>
             m.role === "tool"
-              ? { kind: "tool", name: m.name, id: m.id, done: true }
+              ? { kind: "tool", name: m.name, id: m.id, done: true, ...(m.result ? { result: m.result } : {}) }
               : { kind: m.role, text: m.content }
           )
         );
@@ -276,6 +299,22 @@ export default function AgentPopout({
       if (activeKeyRef.current === key) setLoadingHistory(false);
     }
     if (status === "running") {
+      // 待答的 ask_user 问题卡片先恢复再接流：question.list 是真实事实来源，
+      // 卡片看不见就等于 agent 在隐形卡死（run 阻塞在 waitAnswer 直到过期）。
+      // 经 reducer 注入以复用按 id 去重——实时 question 事件再来也不会重卡。
+      try {
+        const qres = await fetch(`/api/agent/questions?sessionKey=${encodeURIComponent(key)}`);
+        if (qres.ok) {
+          const data = (await qres.json()) as { questions?: QuestionInfo[] };
+          if (activeKeyRef.current === key && data.questions?.length) {
+            setBubbles((prev) =>
+              data.questions!.reduce((acc, q) => applyStreamLine(acc, { type: "question", question: q }), prev)
+            );
+          }
+        }
+      } catch {
+        // 恢复失败不挡接流；卡片还有实时事件这条路
+      }
       const res = await fetch(`/api/agent/chat/stream?sessionKey=${encodeURIComponent(key)}`);
       consumeStream(res, key);
     }
@@ -322,16 +361,17 @@ export default function AgentPopout({
     setInput("");
     setBubbles((prev) => [...prev, { kind: "user", text: raw }]); // 气泡显示原始输入，附带内容不进可见文本
 
-    // 附带当前文档：只带标题/tag/id 这几个指针字段，不塞正文——AI 已经有
-    // wiki_read(id) 工具，需要正文自己按 id 取；把整篇文章暴力拼进每条消息
-    // 既浪费 token，文档一大还可能顶爆上下文。信封形态与"为什么挂在用户
-    // 消息上而不是 system prompt"见 lib/agent-ui-context.ts。
-    const message = buildUiContextMessage(
-      raw,
-      docAttached && currentWikiId && currentDocTitle
-        ? { wikiId: currentWikiId, title: currentDocTitle, tags: currentDocTags }
-        : null,
-    );
+    // 附带界面状态：页面只带一个中文页面名；文档只带标题/tag/id 这几个指针
+    // 字段，不塞正文——AI 已经有 wiki_read(id) 工具，需要正文自己按 id 取；
+    // 把整篇文章暴力拼进每条消息既浪费 token，文档一大还可能顶爆上下文。
+    // 信封形态与"为什么挂在用户消息上而不是 system prompt"见 lib/agent-ui-context.ts。
+    const message = buildUiContextMessage(raw, {
+      pageLabel: pageAttached ? pageLabel : null,
+      doc:
+        docAttached && currentWikiId && currentDocTitle
+          ? { wikiId: currentWikiId, title: currentDocTitle, tags: currentDocTags }
+          : null,
+    });
 
     const res = await fetch("/api/agent/chat/stream", {
       method: "POST",
@@ -346,7 +386,7 @@ export default function AgentPopout({
     } else {
       consumeStream(res, key);
     }
-  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId, currentDocTitle, currentDocTags]);
+  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId, currentDocTitle, currentDocTags, pageAttached, pageLabel]);
 
   const abort = useCallback(async () => {
     if (!activeKey) return;
@@ -359,6 +399,45 @@ export default function AgentPopout({
 
   const [denyingId, setDenyingId] = useState<string | null>(null);
   const [denyReason, setDenyReason] = useState("");
+
+  // 「AI 偏好」= 个人级 agents.md（制作级在制作设置页，系统级不在线编辑）。
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  const [prefsText, setPrefsText] = useState("");
+  const [prefsBusy, setPrefsBusy] = useState(false);
+  const [prefsError, setPrefsError] = useState<string | null>(null);
+
+  const openPrefs = useCallback(async () => {
+    setPrefsOpen(true);
+    setPrefsBusy(true);
+    setPrefsError(null);
+    try {
+      const res = await fetch("/api/agent/instructions");
+      if (!res.ok) throw new Error();
+      const data = (await res.json()) as { user?: string };
+      setPrefsText(data.user ?? "");
+    } catch {
+      setPrefsError("读取失败，请重试");
+    } finally {
+      setPrefsBusy(false);
+    }
+  }, []);
+
+  const savePrefs = useCallback(async () => {
+    setPrefsBusy(true);
+    setPrefsError(null);
+    const res = await fetch("/api/agent/instructions", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: "user", content: prefsText }),
+    }).catch(() => null);
+    setPrefsBusy(false);
+    if (!res?.ok) {
+      const err = res ? ((await res.json().catch(() => ({}))) as { error?: string }) : {};
+      setPrefsError(err.error || "保存失败，请重试");
+      return;
+    }
+    setPrefsOpen(false);
+  }, [prefsText]);
 
   const decideApproval = useCallback(async (approvalId: string, decision: string, reason?: string) => {
     setDenyingId(null);
@@ -379,6 +458,36 @@ export default function AgentPopout({
       setBubbles((prev) => [...prev, { kind: "notice", text: err.error || "确认请求处理失败" }]);
     }
   }, []);
+
+  const answerQuestion = useCallback(
+    async (questionId: string, payload: { answers: Record<string, string[]> } | { cancel: true }) => {
+      setBubbles((prev) =>
+        prev.map((b) => (b.kind === "question" && b.question.id === questionId ? { ...b, resolving: true } : b))
+      );
+      const res = await fetch("/api/agent/questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: questionId, ...payload }),
+      }).catch(() => null);
+      if (!res?.ok) {
+        const err = res ? ((await res.json().catch(() => ({}))) as { error?: string }) : {};
+        setBubbles((prev) =>
+          prev.map((b) => (b.kind === "question" && b.question.id === questionId ? { ...b, resolving: false } : b))
+        );
+        setBubbles((prev) => [...prev, { kind: "notice", text: err.error || "回答提交失败" }]);
+        return;
+      }
+      // 乐观翻状态；question-resolved 事件回来会按 id 再翻一次（幂等）。
+      // 事件仍然要转发渲染——回答也可能来自别的 OpenClaw 客户端。
+      const status = "cancel" in payload ? "cancelled" : "answered";
+      setBubbles((prev) =>
+        prev.map((b) =>
+          b.kind === "question" && b.question.id === questionId ? { ...b, status, resolving: false } : b
+        )
+      );
+    },
+    []
+  );
 
   const removeSession = useCallback(async (key: string) => {
     if (!confirm("删除这个对话？")) return;
@@ -453,6 +562,14 @@ export default function AgentPopout({
             className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-[var(--line)] bg-[var(--surface)] text-sm text-[var(--muted)] hover:bg-[var(--paper)]"
           >
             +
+          </button>
+          <button
+            type="button"
+            onClick={() => openPrefs()}
+            title="AI 偏好（个人指令）"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-[var(--line)] bg-[var(--surface)] text-sm text-[var(--muted)] hover:bg-[var(--paper)]"
+          >
+            ⚙
           </button>
           <button
             type="button"
@@ -540,10 +657,7 @@ export default function AgentPopout({
           if (b.kind === "tool") {
             return (
               <div key={i} className="flex justify-start">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs text-zinc-500">
-                  {b.done ? "✓" : <span className="inline-block h-2 w-2 animate-spin rounded-full border border-zinc-400 border-t-transparent" />}
-                  {b.name}
-                </span>
+                <ToolCallBubble name={b.name} done={b.done} isError={b.isError} input={b.input} result={b.result} />
               </div>
             );
           }
@@ -636,6 +750,19 @@ export default function AgentPopout({
               </div>
             );
           }
+          if (b.kind === "question") {
+            return (
+              <div key={i} className="flex justify-start">
+                <QuestionCard
+                  question={b.question}
+                  status={b.status}
+                  resolving={b.resolving}
+                  onSubmit={(answers) => answerQuestion(b.question.id, { answers })}
+                  onCancel={() => answerQuestion(b.question.id, { cancel: true })}
+                />
+              </div>
+            );
+          }
           return (
             <p key={i} className="text-center text-xs text-zinc-400">
               {b.text}
@@ -648,7 +775,8 @@ export default function AgentPopout({
             const activelyRendering =
               (last?.kind === "assistant" && last.streaming) ||
               (last?.kind === "tool" && !last.done) ||
-              (last?.kind === "approval" && !last.decision);
+              (last?.kind === "approval" && !last.decision) ||
+              (last?.kind === "question" && !last.status);
             if (activelyRendering) return null;
             return (
               <div className="flex justify-start">
@@ -662,21 +790,60 @@ export default function AgentPopout({
           })()}
       </div>
 
-      {/* 附带当前文档：仅在文档页出现，默认勾选、可点掉 */}
-      {currentWikiId && currentDocTitle && (
-        <div className="flex shrink-0 items-center border-t border-[var(--line)] bg-[var(--paper)] px-3 py-1.5">
-          <button
-            type="button"
-            onClick={() => setDocAttached((v) => !v)}
-            title={docAttached ? "点击取消附带" : "点击重新附带"}
-            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
-              docAttached
-                ? "border-[var(--ink)] bg-[var(--surface)] text-[var(--ink)]"
-                : "border-[var(--line)] text-[var(--muted)] line-through"
-            }`}
-          >
-            📎 附带《{currentDocTitle}》
-          </button>
+      {/* 页面感知栏：本页建议（点击填入输入框，不发送）+ 附带 chip（页面/文档，
+          默认勾选、可点掉——附带的内容对用户始终可见、可摘除）。 */}
+      {(pageLabel || (currentWikiId && currentDocTitle) || pageSuggestions.length > 0) && (
+        <div className="shrink-0 space-y-1.5 border-t border-[var(--line)] bg-[var(--paper)] px-3 py-1.5">
+          {pageSuggestions.length > 0 && input.trim() === "" && (
+            <div className="flex flex-wrap gap-1.5">
+              {pageSuggestions.map((s) => (
+                <button
+                  key={s.label}
+                  type="button"
+                  title="点击填入输入框（不会直接发送）"
+                  onClick={() => {
+                    setInput(s.prompt);
+                    textareaRef.current?.focus();
+                  }}
+                  className="rounded-full border border-dashed border-[var(--line)] px-2 py-0.5 text-[11px] text-[var(--muted)] transition-colors hover:border-[var(--ink)] hover:text-[var(--ink)]"
+                >
+                  ✨ {s.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {(pageLabel || (currentWikiId && currentDocTitle)) && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {pageLabel && (
+                <button
+                  type="button"
+                  onClick={() => setPageAttached((v) => !v)}
+                  title={pageAttached ? "点击取消附带当前页面" : "点击重新附带当前页面"}
+                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                    pageAttached
+                      ? "border-[var(--ink)] bg-[var(--surface)] text-[var(--ink)]"
+                      : "border-[var(--line)] text-[var(--muted)] line-through"
+                  }`}
+                >
+                  📍 {pageLabel}
+                </button>
+              )}
+              {currentWikiId && currentDocTitle && (
+                <button
+                  type="button"
+                  onClick={() => setDocAttached((v) => !v)}
+                  title={docAttached ? "点击取消附带" : "点击重新附带"}
+                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                    docAttached
+                      ? "border-[var(--ink)] bg-[var(--surface)] text-[var(--ink)]"
+                      : "border-[var(--line)] text-[var(--muted)] line-through"
+                  }`}
+                >
+                  📎 附带《{currentDocTitle}》
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -723,6 +890,303 @@ export default function AgentPopout({
           toolCallId={previewToolCallId}
         />
       )}
+
+      {/* portal 到 body：popout 容器带 transition-transform，transform 祖先会成为
+          fixed 子孙的 containing block——不传送的话这个 modal 会被困在 440px
+          侧栏里看不全（WikiProposalPreviewModal 同款问题同款修法）。 */}
+      {prefsOpen && createPortal(
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30" onClick={() => !prefsBusy && setPrefsOpen(false)}>
+          <div
+            className="w-[520px] max-w-[92vw] rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm font-semibold text-[var(--ink)]">AI 偏好（个人指令）</p>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              写给 AI 助手的个人指令，在你的所有会话中生效。语言、语气、回复习惯等都可以写；
+              与制作级指令冲突时以制作级为准。指令不会改变你的任何权限。
+            </p>
+            <textarea
+              value={prefsText}
+              onChange={(e) => setPrefsText(e.target.value)}
+              disabled={prefsBusy}
+              maxLength={4000}
+              rows={10}
+              placeholder="例如：回复保持简短；专业术语保留英文原文；列清单时不超过 5 条…"
+              className="mt-3 w-full resize-none rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none disabled:opacity-50"
+            />
+            <div className="mt-1 flex items-center justify-between">
+              <span className="text-[11px] text-[var(--muted)]">{prefsText.length}/4000</span>
+              {prefsError && <span className="text-[11px] text-[var(--danger)]">{prefsError}</span>}
+            </div>
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                onClick={() => setPrefsOpen(false)}
+                disabled={prefsBusy}
+                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 disabled:opacity-40"
+              >
+                取消
+              </button>
+              <button
+                onClick={savePrefs}
+                disabled={prefsBusy}
+                className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+              >
+                {prefsBusy ? "保存中…" : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+/** 调用参数里插件注入的调用者身份字段（_caller_user_id 等）——对模型是
+ * 强制覆写的信道，对用户是噪声，展示时剥掉。 */
+function stripCallerFields(v: unknown): unknown {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return v;
+  const out: Record<string, unknown> = {};
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    if (k.startsWith("_caller_")) continue;
+    out[k] = val;
+  }
+  return out;
+}
+
+/** 参数/结果 → 可读文本：MCP 结果对象取其 text 块；relay 的截断包裹标注
+ * "已截断"（preview 是掐断的 JSON 碎片、语法不保证完整，只能当纯文本渲染，
+ * 永远不得 JSON.parse——relay 侧 boundToolPayload 注释同款约定）；其余
+ * JSON pretty-print。空/无内容返回 ""（调用方隐藏该栏）。 */
+function formatToolPayload(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object") {
+    const rec = v as Record<string, unknown>;
+    if (rec.truncated === true && typeof rec.preview === "string") {
+      return `${rec.preview}\n…（内容过长，已截断）`;
+    }
+    if (Array.isArray(rec.content)) {
+      const texts = (rec.content as unknown[])
+        .filter(
+          (b): b is { type: string; text: string } =>
+            typeof b === "object" && b !== null &&
+            (b as Record<string, unknown>).type === "text" &&
+            typeof (b as Record<string, unknown>).text === "string",
+        )
+        .map((b) => b.text);
+      if (texts.length > 0) return texts.join("\n");
+    }
+    if (Object.keys(rec).length === 0) return "";
+  }
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
+
+/** 工具调用气泡：中文显示名 + 状态（转圈/✓/✗），有参数或结果时可点开
+ * 查看详情（openclaw dashboard 同款交互——不需要确认的调用也能看）。 */
+function ToolCallBubble({
+  name,
+  done,
+  isError,
+  input,
+  result,
+}: {
+  name: string;
+  done: boolean;
+  isError?: boolean;
+  input?: unknown;
+  result?: unknown;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const inputText = formatToolPayload(stripCallerFields(input));
+  const resultText = formatToolPayload(result);
+  const hasDetail = inputText !== "" || resultText !== "";
+  const failed = done && isError;
+
+  const statusIcon = failed ? (
+    <span className="text-red-500">✗</span>
+  ) : done ? (
+    "✓"
+  ) : (
+    <span className="inline-block h-2 w-2 animate-spin rounded-full border border-zinc-400 border-t-transparent" />
+  );
+
+  return (
+    <div className="max-w-[92%]">
+      <button
+        type="button"
+        disabled={!hasDetail}
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        title={hasDetail ? (expanded ? "收起详情" : "查看详情") : undefined}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${
+          failed ? "border-red-200 bg-red-50 text-red-600" : "border-zinc-200 bg-zinc-50 text-zinc-500"
+        } ${hasDetail ? "cursor-pointer hover:border-zinc-400 hover:text-zinc-700" : "cursor-default"}`}
+      >
+        {statusIcon}
+        {toolLabel(name)}
+        {hasDetail && <ChevronIcon direction={expanded ? "up" : "down"} size={10} />}
+      </button>
+      {expanded && hasDetail && (
+        <div className="mt-1 space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+          <p className="font-mono text-[10px] text-zinc-400">{name}</p>
+          {inputText !== "" && (
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-400">参数</p>
+              <pre className="mt-0.5 max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-zinc-600">
+                {inputText}
+              </pre>
+            </div>
+          )}
+          {resultText !== "" && (
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-400">
+                {failed ? "结果（失败）" : "结果"}
+              </p>
+              <pre className="mt-0.5 max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-zinc-600">
+                {resultText}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** ask_user 问题卡片：AI 主动向人索取输入，run 阻塞到有人回答或问题过期
+ * （默认 15 分钟）。单题单选且不允许自由文本时点选项即提交；其余情况选完
+ * 按"提交回答"。isSecret 按凭据对待：password 输入框、不回显。 */
+function QuestionCard({
+  question,
+  status,
+  resolving,
+  onSubmit,
+  onCancel,
+}: {
+  question: QuestionInfo;
+  status?: string;
+  resolving?: boolean;
+  onSubmit: (answers: Record<string, string[]>) => void;
+  onCancel: () => void;
+}) {
+  const [selected, setSelected] = useState<Record<string, string[]>>({});
+  const [otherText, setOtherText] = useState<Record<string, string>>({});
+
+  const quickSubmit =
+    question.questions.length === 1 && !question.questions[0].multiSelect && !question.questions[0].isOther;
+
+  const toggle = (item: QuestionItem, label: string) => {
+    if (quickSubmit) {
+      onSubmit({ [item.questionId]: [label] });
+      return;
+    }
+    setSelected((prev) => {
+      const cur = prev[item.questionId] ?? [];
+      const next = item.multiSelect
+        ? cur.includes(label)
+          ? cur.filter((l) => l !== label)
+          : [...cur, label]
+        : cur.includes(label)
+          ? []
+          : [label];
+      return { ...prev, [item.questionId]: next };
+    });
+  };
+
+  // 每题必答（选项或自由文本至少一样）才可提交；凑不齐返回 null。
+  const collectAnswers = (): Record<string, string[]> | null => {
+    const out: Record<string, string[]> = {};
+    for (const item of question.questions) {
+      const chosen = [...(selected[item.questionId] ?? [])];
+      const other = (otherText[item.questionId] ?? "").trim();
+      if (other) chosen.push(other);
+      if (chosen.length === 0) return null;
+      out[item.questionId] = chosen;
+    }
+    return out;
+  };
+  const ready = collectAnswers() !== null;
+
+  if (status) {
+    const label =
+      status === "answered" ? "✓ 已回答" : status === "cancelled" ? "已取消提问" : status === "expired" ? "已过期" : `已处理（${status}）`;
+    return (
+      <div className="max-w-[92%] rounded-xl border border-indigo-200 bg-indigo-50/60 px-3.5 py-3 text-sm">
+        <p className="font-medium text-zinc-800">❓ AI 提问{question.questions.length > 1 ? `（${question.questions.length} 题）` : `：${question.questions[0]?.question ?? ""}`}</p>
+        <p className="mt-1.5 text-xs font-medium text-zinc-600">{label}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-[92%] rounded-xl border border-indigo-300 bg-indigo-50 px-3.5 py-3 text-sm">
+      <p className="font-medium text-zinc-800">❓ AI 需要你的选择才能继续</p>
+      {question.questions.map((item) => (
+        <div key={item.questionId} className="mt-2">
+          <p className="text-xs text-zinc-700">
+            <span className="mr-1.5 rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-indigo-700">
+              {item.header}
+            </span>
+            {item.question}
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {item.options.map((opt) => {
+              const active = (selected[item.questionId] ?? []).includes(opt.label);
+              return (
+                <button
+                  key={opt.label}
+                  disabled={resolving}
+                  title={opt.description}
+                  onClick={() => toggle(item, opt.label)}
+                  className={`rounded-md px-2.5 py-1 text-xs disabled:opacity-40 ${
+                    active
+                      ? "bg-indigo-600 text-white"
+                      : "border border-indigo-300 bg-white text-zinc-700 hover:bg-indigo-100"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          {item.isOther && (
+            <input
+              type={item.isSecret ? "password" : "text"}
+              autoComplete={item.isSecret ? "new-password" : "off"}
+              value={otherText[item.questionId] ?? ""}
+              onChange={(e) => setOtherText((prev) => ({ ...prev, [item.questionId]: e.target.value }))}
+              placeholder={item.isSecret ? "输入（不会回显在对话里）" : "其他：自由输入…"}
+              className="mt-1.5 w-full rounded-md border border-indigo-200 bg-white px-2 py-1.5 text-xs focus:border-indigo-500 focus:outline-none"
+            />
+          )}
+        </div>
+      ))}
+      <div className="mt-2.5 flex gap-2">
+        {!quickSubmit && (
+          <button
+            disabled={resolving || !ready}
+            onClick={() => {
+              const answers = collectAnswers();
+              if (answers) onSubmit(answers);
+            }}
+            className="rounded-md bg-indigo-600 px-3 py-1 text-xs text-white hover:bg-indigo-500 disabled:opacity-40"
+          >
+            提交回答
+          </button>
+        )}
+        <button
+          disabled={resolving}
+          onClick={onCancel}
+          className="rounded-md border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-40"
+        >
+          取消提问
+        </button>
+      </div>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { getPool } from "./pg";
 import { addProductionMember, setMemberRoles } from "./db";
+import { seatsFullForNewMember } from "./plan";
 
 // #156 邀请制数据层：开放链接 + 定向邮件邀请（production_invite 一表两用）。
 // 接受 = 事务内校验（撤销/过期/次数/定向邮箱匹配）→ 入组 → 预配角色/部门 → 计数。
@@ -189,7 +190,7 @@ export async function getInviteInfo(token: string): Promise<InviteInfo | null> {
 
 export type AcceptResult =
   | { ok: true; productionId: string; alreadyMember: boolean }
-  | { ok: false; reason: "not_found" | "revoked" | "expired" | "exhausted" | "email_mismatch" | "target_mismatch" | "needs_claim" };
+  | { ok: false; reason: "not_found" | "revoked" | "expired" | "exhausted" | "email_mismatch" | "target_mismatch" | "needs_claim" | "seats_full" };
 
 export async function acceptInvite(token: string, userId: string): Promise<AcceptResult> {
   const pool = getPool();
@@ -244,6 +245,11 @@ export async function acceptInvite(token: string, userId: string): Promise<Accep
       [inv.production_id, userId],
     );
     const alreadyMember = existing.rows.length > 0;
+    // 档位人数上限（#280）：与 FOR UPDATE 同事务判，并发接受不会超编。
+    if (!alreadyMember && (await seatsFullForNewMember(client, inv.production_id))) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "seats_full" };
+    }
     await client.query(
       `UPDATE production_invite SET used_count = used_count + 1 WHERE token = $1`,
       [token],
@@ -288,7 +294,7 @@ async function joinWithPresets(
 
 export type ClaimResult =
   | { ok: true; productionId: string; alreadyMember: boolean }
-  | { ok: false; reason: "not_found" | "revoked" | "expired" | "exhausted" | "claim_taken" };
+  | { ok: false; reason: "not_found" | "revoked" | "expired" | "exhausted" | "claim_taken" | "seats_full" };
 
 /** 认领批量链接名额：按 claim 行入组+该行预配，一名一次。 */
 export async function claimInvite(token: string, claimId: string, userId: string): Promise<ClaimResult> {
@@ -323,6 +329,11 @@ export async function claimInvite(token: string, claimId: string, userId: string
       [inv.production_id, userId],
     );
     const alreadyMember = existing.rows.length > 0;
+    // 档位人数上限（#280）：与 FOR UPDATE 同事务判，并发认领不会超编。
+    if (!alreadyMember && (await seatsFullForNewMember(client, inv.production_id))) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "seats_full" };
+    }
 
     await client.query(
       "UPDATE production_invite_claim SET claimed_by = $2, claimed_at = NOW() WHERE id = $1",

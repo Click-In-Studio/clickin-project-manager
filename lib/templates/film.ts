@@ -30,6 +30,7 @@ import {
 const FILM_BASELINE: readonly string[] = [
   "node:announcement/*@view",
   "node:milestone/*@view",
+  "node:phase/*@view",
   "node:member/*/meta@view",
   "node:production/*/meta@view",
   "node:event/*/meta@view",

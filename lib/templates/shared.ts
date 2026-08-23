@@ -59,6 +59,7 @@ export const OPEN_BASELINE: readonly string[] = [
   "node:member/*/contact@view",
   "node:member/*/meta@view",
   "node:milestone/*@view",
+  "node:phase/*@view",
   "node:production/*/meta@view",
   "node:production/*/mounts@view",
   "node:scene/*/action_line@view",
@@ -173,6 +174,9 @@ export const SCHEDULE_ADMIN: readonly string[] = [
   "node:milestone/*@create",
   "node:milestone/*@edit",
   "node:milestone/*@delete",
+  "node:phase/*@create",
+  "node:phase/*@edit",
+  "node:phase/*@delete",
 ];
 
 // ─── cue 声明行的两档 ─────────────────────────────────────────────────────────

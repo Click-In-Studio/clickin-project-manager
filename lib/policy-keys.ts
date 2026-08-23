@@ -265,6 +265,12 @@ const SHAPE_C: PolicyKeyDef[] = [
     label: "已确认的任务对关联部门全员可见",
     help: "关掉后只有指派到的人和 POC 能看见——部门其他人无法自行了解本部门在做什么。",
   },
+  {
+    key: "policy.phase_dept_poc_create", shape: "C", values: ON_OFF, defaultValue: POLICY_ON,
+    label: "部门 POC 可创建并管理本部门的阶段",
+    help: "判定端活引用（Type B）：现任 POC 即有权，换 POC 自动跟随，不发行。"
+      + "关掉后阶段只归持 phase 键的人管；production-level 阶段本就不走此键。",
+  },
 ];
 
 // ─── 形状 L：生命周期规则（边变更的副作用，不碰权限）─────────────────────────────

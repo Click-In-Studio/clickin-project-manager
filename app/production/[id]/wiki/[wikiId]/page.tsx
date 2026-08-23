@@ -7,7 +7,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName, listProductionMembers } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { getWiki, listWikiLibrary, listBacklinks, listUnlinkedReferences } from "@/lib/wiki-db";
+import { getWiki, listWikiLibrary, listBacklinks, listUnlinkedReferences, listEntityRefsForWiki } from "@/lib/wiki-db";
 import { canViewWiki, canEditWiki, canShareWiki, listVisibleWikiIds } from "@/lib/wiki-perm";
 import { listEventDepartments } from "@/lib/event-db";
 import PageHeader from "@/components/PageHeader";
@@ -62,11 +62,12 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
     );
   }
 
-  const [canEdit, canShare, backlinks, unlinked, members, allDepts] = await Promise.all([
+  const [canEdit, canShare, backlinks, unlinked, entityRefs, members, allDepts] = await Promise.all([
     canEditWiki(actor, productionId, wikiId),
     canShareWiki(actor, productionId, wikiId),
     listBacklinks(wikiId, productionId),
     listUnlinkedReferences(wikiId, productionId),
+    listEntityRefsForWiki(wikiId, productionId),
     listProductionMembers(productionId),
     listEventDepartments(productionId),
   ]);
@@ -85,6 +86,7 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
             departments={allDepts.filter(d => d.kind === "dept").map(d => ({ id: d.id, name: d.name }))}
             backlinks={backlinks}
             unlinked={unlinked}
+            entityRefs={entityRefs}
           />
         </WikiShell>
       </div>

@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   createNewSessionKey,
   sessionKeyOwnedBy,
   markSteerPending,
-  consumeExpectedSteerFinal,
+  createSteerOwner,
 } from "../lib/agent-gateway/client";
 
 // Pure-function tests for the per-user session namespace — the entire
@@ -74,38 +74,64 @@ describe("agent gateway session keys", () => {
   });
 });
 
-describe("steer expectation bookkeeping", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+describe("steer expectation bookkeeping (connection-owned)", () => {
+  // 期望的所有权在连接上，不再用 TTL 猜孤儿：连接关闭（release）期望随之
+  // 消失，无论连接因 approval/长工具调用活了多久，都不会误删或漏删。
 
   it("consumes exactly as many finals as steers were marked", () => {
     const key = createNewSessionKey(USER_A);
-    markSteerPending(key);
-    markSteerPending(key);
-    expect(consumeExpectedSteerFinal(key)).toBe(true);
-    expect(consumeExpectedSteerFinal(key)).toBe(true);
-    expect(consumeExpectedSteerFinal(key)).toBe(false);
+    const owner = createSteerOwner(key);
+    expect(markSteerPending(key)).toBe(true);
+    expect(markSteerPending(key)).toBe(true);
+    expect(owner.consume()).toBe(true);
+    expect(owner.consume()).toBe(true);
+    expect(owner.consume()).toBe(false);
+    owner.release();
   });
 
-  it("expired expectations are pruned, not consumed", () => {
-    vi.useFakeTimers();
+  it("steer with nobody listening reports false and leaves nothing behind", () => {
     const key = createNewSessionKey(USER_A);
-    markSteerPending(key);
-    // Past the relay's 180s overall timeout: the relay that registered this
-    // expectation has certainly stopped waiting — a fresh stream on the same
-    // session must not have its genuine final swallowed by the stale entry.
-    vi.advanceTimersByTime(181_000);
-    expect(consumeExpectedSteerFinal(key)).toBe(false);
+    expect(markSteerPending(key)).toBe(false);
+    const lateOwner = createSteerOwner(key);
+    expect(lateOwner.consume()).toBe(false); // 早于注册的 steer 不会凭空出现
+    lateOwner.release();
   });
 
-  it("fresh expectation survives while stale ones are pruned", () => {
-    vi.useFakeTimers();
+  it("released owner's expectations die with it — next stream is unaffected", () => {
     const key = createNewSessionKey(USER_A);
+    const dying = createSteerOwner(key);
     markSteerPending(key);
-    vi.advanceTimersByTime(181_000);
+    dying.release(); // 连接中断（用户关标签页）
+    const next = createSteerOwner(key);
+    expect(next.consume()).toBe(false); // 下一条流不会误吞真 final
+    expect(markSteerPending(key)).toBe(true);
+    expect(next.consume()).toBe(true);
+    next.release();
+  });
+
+  it("canonical key attach routes steers to the same owner without double-count", () => {
+    const raw = createNewSessionKey(USER_A);
+    const canonical = `agent:main:${raw}`;
+    const owner = createSteerOwner(raw);
+    owner.attachKey(canonical);
+    owner.attachKey(canonical); // 幂等
+    expect(markSteerPending(canonical)).toBe(true);
+    expect(owner.consume()).toBe(true);
+    expect(owner.consume()).toBe(false);
+    owner.release();
+    expect(markSteerPending(canonical)).toBe(false);
+    expect(markSteerPending(raw)).toBe(false);
+  });
+
+  it("multiple watchers on one session each get their own expectation", () => {
+    const key = createNewSessionKey(USER_A);
+    const a = createSteerOwner(key);
+    const b = createSteerOwner(key);
     markSteerPending(key);
-    expect(consumeExpectedSteerFinal(key)).toBe(true);
-    expect(consumeExpectedSteerFinal(key)).toBe(false);
+    expect(a.consume()).toBe(true);
+    expect(b.consume()).toBe(true); // 各自独立，互不抢占
+    expect(a.consume()).toBe(false);
+    a.release();
+    b.release();
   });
 });

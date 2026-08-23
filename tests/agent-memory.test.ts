@@ -28,7 +28,8 @@ type FakeStore = {
   events: EventEmitter;
   pendingApprovals: Map<string, unknown>;
   denyReasons: Map<string, unknown>;
-  pendingSteers: Map<string, number[]>;
+  steerOwners: Map<string, Set<{ pending: number }>>;
+  questionSessions: Map<string, { sessionKey: string; expiresAtMs: number }>;
 };
 const g = globalThis as unknown as {
   __mcpHttpServer?: { close: (cb?: () => void) => void };
@@ -47,7 +48,7 @@ beforeAll(async () => {
     events: new EventEmitter(),
     pendingApprovals: new Map(),
     denyReasons: new Map(),
-    pendingSteers: new Map(),
+    steerOwners: new Map(), questionSessions: new Map(),
   };
   userName = `测试记忆${shortId()}`;
   userId = (await upsertFeishuUser(`test-open-${shortId()}`, userName, null, false)).userId;
@@ -65,6 +66,9 @@ afterAll(async () => {
   if (server) await new Promise<void>((r) => server.close(() => r()));
   delete g.__mcpHttpServer;
   await cleanupProduction(prodId).catch(() => {});
+  // 蒸馏/上报现在会同步写检索索引（agent_memory_chunk），清掉本测试用户的行
+  const { getPool } = await import("@/lib/pg");
+  await getPool().query("DELETE FROM agent_memory_chunk WHERE scope_id = $1", [userId]).catch(() => {});
 });
 
 describe("store：字节偏移增量语义", () => {
@@ -138,6 +142,46 @@ describe("MCP 端点：上报与组装取件", () => {
     expect(data.markdown!).toContain("## 当前用户");
     expect(data.markdown!).toContain(userName);
     expect(data.markdown!).toContain("端点上报测试"); // 近期对话段
+  });
+
+  // M2：POST 版路由级覆盖（review #298 finding 2——路由与 triggerRecall 单元
+  // 分开测；鉴权模型=loopback 同信任域，与 GET 版一致，见 server.ts 注释）
+  it("POST /inject-context：happy path 带 recall 字段、缺 userId 400", async () => {
+    const { writeMemory } = await import("@/lib/agent-memory/store");
+    const { indexCurated } = await import("@/lib/agent-memory/index-db");
+    const md = "- 灯光 cue 表改动要先过舞监确认 <!-- trigger: 灯光cue --> <!-- importance: 8 -->";
+    writeMemory(userId, md);
+    await indexCurated("user", userId, md);
+    try {
+      const hit = await fetch(`${BASE}/inject-context`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, prompt: "灯光cue表今天要改一版" }),
+      });
+      expect(hit.status).toBe(200);
+      const data = (await hit.json()) as { memory: string | null; recall: string | null };
+      expect(data.memory).toContain("## 长期记忆摘要");
+      expect(data.memory).not.toContain("<!--"); // 注释剥离
+      expect(data.recall).toContain("灯光 cue 表改动要先过舞监确认");
+
+      // 无关 prompt → recall 为 null（不触发即不注入）
+      const miss = await fetch(`${BASE}/inject-context`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, prompt: "今天天气如何" }),
+      });
+      expect(((await miss.json()) as { recall: string | null }).recall).toBeNull();
+
+      const bad = await fetch(`${BASE}/inject-context`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: "无 userId" }),
+      });
+      expect(bad.status).toBe(400);
+    } finally {
+      const { getPool } = await import("@/lib/pg");
+      await getPool().query("DELETE FROM agent_memory_chunk WHERE scope_id = $1", [userId]).catch(() => {});
+    }
   });
 
   // 界面上下文的载荷随每条用户消息走，规则常驻这里（静态、可缓存）。规则

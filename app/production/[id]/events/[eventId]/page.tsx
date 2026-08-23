@@ -3,7 +3,7 @@ import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getProductionName, listMilestones, listProductionMembersWithRoles, listVersions } from "@/lib/db";
+import { getProductionPermissionContext, getProductionName, listMilestones, listProductionMembersWithRoles } from "@/lib/db";
 import {
   getProductionEvent,
   listScheduleItemsWithParticipants,
@@ -71,7 +71,7 @@ export default async function EventDetailPage({
     toActor(session, prodPermCtx), productionId, "task", "*", "*", "view",
   );
 
-  const [scheduleItems, eventPeople, callTimes, techReqs, rawReports, departments, members, selfRole, versions, relationTasks, milestoneOptions, eventMilestoneIds] =
+  const [scheduleItems, eventPeople, callTimes, techReqs, rawReports, departments, members, selfRole, relationTasks, milestoneOptions, eventMilestoneIds] =
     await Promise.all([
       listScheduleItemsWithParticipants(eventId),
       listEventPeople(eventId),
@@ -81,7 +81,6 @@ export default async function EventDetailPage({
       listEventDepartments(productionId),
       listProductionMembersWithRoles(productionId),
       getSelfParticipantRole(eventId, session.userId),
-      listVersions(productionId),
       canViewAllTasks
         ? listProductionTechReqs(productionId)
         : listMyTechReqsFull(session.userId).then(rows => rows.filter(t => t.productionId === productionId)),
@@ -128,7 +127,6 @@ export default async function EventDetailPage({
       initialReports={reports}
       departments={departments}
       members={members}
-      versions={versions}
       canEdit={canEdit}
       canScheduleEdit={canScheduleEdit}
       canAssignPeople={canAssignPeople}

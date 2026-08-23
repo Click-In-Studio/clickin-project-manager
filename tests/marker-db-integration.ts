@@ -5,13 +5,11 @@ import { randomUUID } from "node:crypto";
 import {
   applyPatchToDB,
   createProduction,
-  createVersion,
   deleteProduction,
   flushToDBVersioned,
   getActiveVersionId,
   loadPageMap,
   getMarkerLabelIndex,
-  rollbackToVersion,
   savePageMap,
   saveScriptConfig,
 } from "../lib/db";
@@ -34,6 +32,43 @@ function marker(id: string, type: Block["type"], parentMarkerId: string | null):
     forceShowCharacterName: false,
     markerMeta: { parentMarkerId },
   };
+}
+
+/**
+ * 版本退役 Phase B 后生产代码不再有分支入口——本测试需要的多版本共享态
+ * 用裸 SQL 模拟遗留数据（复刻老 createVersion 的复制语义）。
+ */
+async function legacyVersion(prodId: string, fromVersionId: string): Promise<string> {
+  const pool = getPool();
+  const newVersionId = `ver_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  await pool.query(
+    `INSERT INTO version (id, production_id, parent_version_id, created_at, script_config, marker_structure_revision)
+     SELECT $1, $2, $3, now(), COALESCE(script_config, '{}'::jsonb), marker_structure_revision
+     FROM version WHERE id = $3`,
+    [newVersionId, prodId, fromVersionId],
+  );
+  await pool.query(
+    "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) SELECT snapshot_id, $1, block_id, sort_key FROM script_version WHERE version_id = $2",
+    [newVersionId, fromVersionId],
+  );
+  await pool.query(
+    "INSERT INTO cue_version (revision_id, version_id, cue_id) SELECT revision_id, $1, cue_id FROM cue_version WHERE version_id = $2",
+    [newVersionId, fromVersionId],
+  );
+  await pool.query(
+    `INSERT INTO scene_version (scene_id, version_id, name, sort_order, parent_id,
+                                synopsis, action_line, music, stage_notes, expected_duration)
+     SELECT scene_id, $1, name, sort_order, parent_id,
+            synopsis, action_line, music, stage_notes, expected_duration
+     FROM scene_version WHERE version_id = $2`,
+    [newVersionId, fromVersionId],
+  );
+  await pool.query(
+    `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate, gender, biography, role_type)
+     SELECT character_id, $1, name, sort_order, is_aggregate, gender, biography, role_type FROM character_version WHERE version_id = $2`,
+    [newVersionId, fromVersionId],
+  );
+  return newVersionId;
 }
 
 async function revision(versionId: string): Promise<string> {
@@ -104,10 +139,10 @@ async function run() {
     });
     await saveScriptConfig(productionId, sourceVersionId, scriptConfig);
 
-    const repairVersion = await createVersion(productionId, sourceVersionId, "Parent repair");
+    const repairVersionId = await legacyVersion(productionId, sourceVersionId);
     const repairSceneId = `scene_${randomUUID()}`;
     const repairScene = marker(repairSceneId, "scene_marker", chapterId);
-    await applyPatchToDB(productionId, repairVersion.id, {
+    await applyPatchToDB(productionId, repairVersionId, {
       clientSeq: 2,
       blockOps: [{ op: "insert", block: repairScene, afterId: chapterId }],
       charOps: [],
@@ -115,13 +150,13 @@ async function run() {
     });
     const repairRow = await getPool().query<{ snapshot_id: string; sort_key: string }>(
       "SELECT snapshot_id, sort_key FROM script_version WHERE version_id = $1 AND block_id = $2",
-      [repairVersion.id, repairSceneId],
+      [repairVersionId, repairSceneId],
     );
     await getPool().query(
       "UPDATE script SET marker_meta = jsonb_set(marker_meta, '{parentMarkerId}', 'null'::jsonb) WHERE id = $1",
       [repairRow.rows[0].snapshot_id],
     );
-    await flushToDBVersioned(productionId, repairVersion.id, {
+    await flushToDBVersioned(productionId, repairVersionId, {
       upsertBlocks: [{
         ...repairScene,
         snapshotId: repairRow.rows[0].snapshot_id,
@@ -139,7 +174,7 @@ async function run() {
       [repairRow.rows[0].snapshot_id],
     );
     assert.equal(repairedParent.rows[0]?.parent_marker_id, chapterId);
-    assert.equal((await getMarkerLabelIndex(repairVersion.id)).labelByMarkerId.get(repairSceneId), "0-1");
+    assert.equal((await getMarkerLabelIndex(repairVersionId)).labelByMarkerId.get(repairSceneId), "0-1");
 
     const cached = await getMarkerLabelIndex(sourceVersionId);
     const textBlock = marker(`text_${randomUUID()}`, "dialogue", null);
@@ -259,10 +294,10 @@ async function run() {
     );
     assert.equal(pageMapRowAfter.rows[0]?.xmin, pageMapRowBefore.rows[0]?.xmin);
 
-    const scopedSceneVersion = await createVersion(productionId, sourceVersionId, "Scoped scene sync");
+    const scopedSceneVersionId = await legacyVersion(productionId, sourceVersionId);
     const laterSceneId = `scene_${randomUUID()}`;
     const laterScene = marker(laterSceneId, "scene_marker", chapterId);
-    await applyPatchToDB(productionId, scopedSceneVersion.id, {
+    await applyPatchToDB(productionId, scopedSceneVersionId, {
       clientSeq: 33,
       blockOps: [{ op: "insert", block: laterScene, afterId: chapterId }],
       charOps: [],
@@ -273,10 +308,10 @@ async function run() {
     });
     const laterSceneBefore = await getPool().query<{ xmin: string }>(
       "SELECT xmin::text FROM scene_version WHERE version_id = $1 AND scene_id = $2",
-      [scopedSceneVersion.id, laterSceneId],
+      [scopedSceneVersionId, laterSceneId],
     );
     const middleSceneId = `scene_${randomUUID()}`;
-    await applyPatchToDB(productionId, scopedSceneVersion.id, {
+    await applyPatchToDB(productionId, scopedSceneVersionId, {
       clientSeq: 34,
       blockOps: [{
         op: "insert",
@@ -291,7 +326,7 @@ async function run() {
     });
     const laterSceneAfter = await getPool().query<{ xmin: string }>(
       "SELECT xmin::text FROM scene_version WHERE version_id = $1 AND scene_id = $2",
-      [scopedSceneVersion.id, laterSceneId],
+      [scopedSceneVersionId, laterSceneId],
     );
     assert.equal(laterSceneAfter.rows[0]?.xmin, laterSceneBefore.rows[0]?.xmin);
 
@@ -400,10 +435,10 @@ async function run() {
     assert.ok(secondRepairedChapterIndex > repairedChapterIndex);
     assert.equal(repairedOrder.rows[secondRepairedChapterIndex - 1].type, "dialogue");
 
-    const child = await createVersion(productionId, sourceVersionId, "Child");
-    assert.equal(await revision(child.id), "3");
-    const rollback = await rollbackToVersion(child.id, sourceVersionId, productionId, "Rollback");
-    assert.equal(await revision(rollback.id), "3");
+    // 分支/rollback 已退役（Phase B）——遗留复制语义由 legacyVersion 覆盖：
+    // marker_structure_revision 随复制继承。
+    const childId = await legacyVersion(productionId, sourceVersionId);
+    assert.equal(await revision(childId), "3");
   } finally {
     await deleteProduction(productionId);
   }

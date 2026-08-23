@@ -1,7 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { startChatRun, steerChatRun } from "@/lib/agent-gateway/client";
+import { startChatRun, steerChatRun, productionIdOfSessionKey } from "@/lib/agent-gateway/client";
+import { requireProductionFeature } from "@/lib/plan";
 import { createChatStreamResponse } from "@/lib/agent-gateway/relay";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
+import { neutralizeInboundMessage } from "@/lib/agent-ui-context";
 
 export const runtime = "nodejs";
 
@@ -20,18 +22,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { message, sessionKey, steer } = body;
-  if (!message || typeof message !== "string") {
+  const { message: rawMessage, sessionKey, steer } = body;
+  if (!rawMessage || typeof rawMessage !== "string") {
     return NextResponse.json({ error: "缺少 message" }, { status: 400 });
   }
-  if (message.length > 16_000) {
+  if (rawMessage.length > 16_000) {
     return NextResponse.json({ error: "消息过长（上限 16000 字符）" }, { status: 400 });
   }
+  // 服务端净化注入分隔符（真边界，客户端 buildUiContextMessage 的净化不可信）：
+  // 中和用户消息里伪造/闭合 <clickin-…> 包裹块的企图，保留合法 ui-context 信封。
+  const message = neutralizeInboundMessage(rawMessage);
   if (!sessionKey || typeof sessionKey !== "string") {
     return NextResponse.json({ error: "缺少 sessionKey" }, { status: 400 });
   }
   const denied = requireOwnership(sessionKey, auth.userId);
   if (denied) return denied;
+
+  // 项目档位功能门（#280）：签发时已拦（sessions POST），这里对存量已签发的
+  // production 会话兜底——降级后旧 sessionKey 不能继续产生 AI 消耗。
+  const prodId = productionIdOfSessionKey(sessionKey);
+  if (prodId) {
+    const planDeny = await requireProductionFeature(prodId, "ai");
+    if (planDeny) return planDeny;
+  }
 
   // steer: the session already has a run in flight and this message should
   // be injected into it (queue-aware on 2026.7.x). The reply rides the
@@ -69,8 +82,8 @@ export async function GET(req: NextRequest) {
   const denied = requireOwnership(sessionKey, auth.userId);
   if (denied) return denied;
 
-  // Shorter cap than a fresh send: if nothing arrives quickly, the run most
-  // likely already finished before this attach landed — fail fast to
-  // chat.history instead of sitting idle for 180s.
-  return createChatStreamResponse(req, sessionKey, { overallTimeoutMs: 20_000 });
+  // Shorter quiet window than a fresh send: attach 上来 20s 没动静，多半是
+  // run 在 attach 落地前就已结束——尽快触发一次权威状态查询：确实结束就走
+  // chat.history 收尾；还在跑（长工具调用静默期）则继续等，不会误杀。
+  return createChatStreamResponse(req, sessionKey, { quietTimeoutMs: 20_000 });
 }

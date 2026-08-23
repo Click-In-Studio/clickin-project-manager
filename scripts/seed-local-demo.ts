@@ -27,6 +27,7 @@ import { createAsset } from "../lib/asset-db";
 import { createUserNotification } from "../lib/inbox-db";
 import { createMaterial, listMaterialStatuses } from "../lib/material-db";
 import { approveExpense, createBudgetCategory, submitExpense } from "../lib/finance-db";
+import { createPhase } from "../lib/phase-db";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 
@@ -302,6 +303,33 @@ async function main() {
     );
   }
 
+  const phaseByMilestone = new Map<string, string>([
+    ["demo-milestone-workshop", "demo-phase-workshop"],
+    ["demo-milestone-tech", "demo-phase-tech"],
+    ["demo-milestone-premiere", "demo-phase-premiere"],
+  ]);
+  await createPhase("demo-phase-workshop", PRODUCTION_ID, {
+    name: "创作与工作坊",
+    startDate: new Date(weekStart.getTime() - 14 * DAY).toISOString().slice(0, 10),
+    endDate: new Date(weekStart.getTime() + 6 * DAY).toISOString().slice(0, 10),
+    sortOrder: 0,
+    milestoneIds: ["demo-milestone-workshop"],
+  });
+  await createPhase("demo-phase-tech", PRODUCTION_ID, {
+    name: "技术合成",
+    startDate: new Date(weekStart.getTime() + 7 * DAY).toISOString().slice(0, 10),
+    endDate: new Date(weekStart.getTime() + 18 * DAY).toISOString().slice(0, 10),
+    sortOrder: 1,
+    milestoneIds: ["demo-milestone-tech"],
+  });
+  await createPhase("demo-phase-premiere", PRODUCTION_ID, {
+    name: "预演与首演",
+    startDate: new Date(weekStart.getTime() + 19 * DAY).toISOString().slice(0, 10),
+    endDate: new Date(weekStart.getTime() + 32 * DAY).toISOString().slice(0, 10),
+    sortOrder: 2,
+    milestoneIds: ["demo-milestone-premiere"],
+  });
+
   const eventSpecs = [
     { id: "demo-event-design", title: "舞美概念评审", type: "meeting", day: -10, start: 10, end: 12, location: "创作会议室", description: "确认灯塔、码头与雾幕的视觉方向。" },
     { id: "demo-event-music", title: "终曲音乐工作坊", type: "rehearsal", day: -7, start: 13, end: 17, location: "音乐排练厅", description: "完成终曲结构与合唱声部第一轮磨合。" },
@@ -406,7 +434,7 @@ async function main() {
       assignees: [{ userId: user.id, name: user.name }],
       startTime: at(weekStart, task.days[0], 9),
       endTime: at(weekStart, task.days[1], 18),
-      milestoneIds: [task.milestone],
+      phaseIds: [phaseByMilestone.get(task.milestone)!],
       createdBy: user.id,
     });
     await pool.query("UPDATE task SET status = $2 WHERE id = $1", [task.id, task.status]);
@@ -459,9 +487,9 @@ async function main() {
   await pool.query("UPDATE event_report SET published_at = now() - interval '2 days' WHERE id = $1", [publishedReport.id]);
   await createEventReport({ id: "demo-report-tech-draft", eventId: "demo-event-completed", reportType: "technical", title: "技术问题汇总（草稿）", body: "# 待补充\n\n- 转台噪声\n- 追光角度\n- 无线麦频点规划", createdBy: user.id });
 
-  await createAsset({ productionId: PRODUCTION_ID, uploaderUserId: user.id, assetType: "drafting", name: "舞台平面图 V3", fileName: "misty-harbor-stage-plan-v3.pdf", mimeType: "application/pdf", isUniversal: true, isPublic: false, storageType: "feishu_link", feishuUrl: "https://example.com/demo/stage-plan", fileSize: 2_480_000, versionId });
-  await createAsset({ productionId: PRODUCTION_ID, uploaderUserId: user.id, assetType: "demo", name: "终曲编曲 Demo", fileName: "tomorrow-arrangement-demo.mp3", mimeType: "audio/mpeg", isUniversal: false, isPublic: false, storageType: "feishu_link", feishuUrl: "https://example.com/demo/finale", fileSize: 8_120_000, versionId });
-  await createAsset({ productionId: PRODUCTION_ID, uploaderUserId: user.id, assetType: "reference", name: "灯塔视觉参考", fileName: "lighthouse-reference.jpg", mimeType: "image/jpeg", isUniversal: true, isPublic: true, storageType: "feishu_link", feishuUrl: "https://example.com/demo/lighthouse", fileSize: 980_000, versionId });
+  await createAsset({ productionId: PRODUCTION_ID, uploaderUserId: user.id, assetType: "drafting", name: "舞台平面图 V3", fileName: "misty-harbor-stage-plan-v3.pdf", mimeType: "application/pdf", isPublic: false, storageType: "feishu_link", feishuUrl: "https://example.com/demo/stage-plan", fileSize: 2_480_000 });
+  await createAsset({ productionId: PRODUCTION_ID, uploaderUserId: user.id, assetType: "demo", name: "终曲编曲 Demo", fileName: "tomorrow-arrangement-demo.mp3", mimeType: "audio/mpeg", isPublic: false, storageType: "feishu_link", feishuUrl: "https://example.com/demo/finale", fileSize: 8_120_000 });
+  await createAsset({ productionId: PRODUCTION_ID, uploaderUserId: user.id, assetType: "reference", name: "灯塔视觉参考", fileName: "lighthouse-reference.jpg", mimeType: "image/jpeg", isPublic: true, storageType: "feishu_link", feishuUrl: "https://example.com/demo/lighthouse", fileSize: 980_000 });
 
   await createUserNotification({ userId: user.id, productionId: PRODUCTION_ID, kind: "call_reminder", entityType: "event", entityId: "demo-event-table-read", title: "全剧围读 Call 已发布", body: "周一 09:30 · A3 排练厅", viewHref: `/production/${PRODUCTION_ID}/events/demo-event-table-read/callsheet`, category: "info" });
   await createUserNotification({ userId: user.id, productionId: PRODUCTION_ID, kind: "task_due", entityType: "task", entityId: "demo-task-light", title: "灯塔追光任务临近截止", body: "请在技术联排前完成机位与安全绳确认。", viewHref: `/production/${PRODUCTION_ID}/tasks/demo-task-light`, category: "warning", actionRequired: true });

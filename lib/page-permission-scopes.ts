@@ -65,6 +65,11 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:milestone/*@create",
     "node:milestone/*@edit",
     "node:milestone/*@delete",
+    // phase 与 milestone 平级同规范（读面全员门票；写面统筹位），同收 base
+    "node:phase/*@view",
+    "node:phase/*@create",
+    "node:phase/*@edit",
+    "node:phase/*@delete",
   ]),
 
   // 批E-2：剧本页写面。blocks 写是一把总钥匙（requiredPermissions 对 insert /

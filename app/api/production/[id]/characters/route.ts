@@ -6,6 +6,7 @@ import {
 } from "@/lib/db";
 import { tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasGrant } from "@/lib/grant-check";
+import { rejectNonHeadWrite } from "@/lib/head-version";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);
@@ -61,6 +62,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
     ? body.memberIds.filter((m: unknown) => typeof m === "string")
     : [];
 
+  const nonHead = await rejectNonHeadWrite(id, typeof body.versionId === "string" ? body.versionId : null);
+  if (nonHead) return nonHead;
   const resolved = await resolveProductionVersion(id, body.versionId);
   if (resolved.error) return resolved.error;
   const { versionId } = resolved;

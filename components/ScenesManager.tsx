@@ -3,9 +3,9 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import VersionSelector from "./VersionSelector";
 import MountPointAssets from "./assets/MountPointAssets";
-import type { SceneDetail, Version } from "@/lib/db";
+import RelatedWikiChips from "./wiki/RelatedWikiChips";
+import type { SceneDetail } from "@/lib/db";
 import DurationInput from "@/components/DurationInput";
 import { parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/scene-duration";
@@ -25,7 +25,6 @@ type Props = {
   /** 逐字段编辑权限；canEdit 是「值得显示编辑态」的粗门 */
   fieldPerms: SceneFieldPerms;
   embedded?: boolean;
-  versions?: Version[];
   versionId?: string | null;
   initialExpandedId?: string;
 };
@@ -328,6 +327,15 @@ function SceneEditRow({
                 display="compact"
               />
             </div>
+            <div className="mt-3">
+              <RelatedWikiChips
+                productionId={productionId}
+                entityType="scene"
+                entityId={scene.id}
+                canEdit={canEdit}
+                createDefaultTitle={`${scene.number}${scene.name ? ` ${scene.name}` : ""} · 大纲`}
+              />
+            </div>
           </td>
         </tr>
       )}
@@ -443,24 +451,11 @@ function InsertSceneRow({
   );
 }
 
-export default function ScenesManager({ productionId, productionName, initialScenes, canEdit, fieldPerms, embedded, canImport, versions, versionId, initialExpandedId }: Props & { canImport?: boolean }) {
+export default function ScenesManager({ productionId, productionName, initialScenes, canEdit, fieldPerms, embedded, canImport, versionId, initialExpandedId }: Props & { canImport?: boolean }) {
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
-  const [currentVersionId, setCurrentVersionId] = useState<string | null>(versionId ?? null);
+  const currentVersionId = versionId ?? null;
   const [deleteDialog, setDeleteDialog] = useState<MarkerDeleteDialogState | null>(null);
   const [deleteDialogBusy, setDeleteDialogBusy] = useState(false);
-
-  const currentVersion = (versions ?? []).find(v => v.id === currentVersionId);
-  const effectiveCanEdit = canEdit && (!currentVersionId || !currentVersion || currentVersion.status === "editing" || currentVersion.status === "committed");
-
-  const handleVersionChange = async (vId: string) => {
-    const data: MarkerProjection[] =
-      await fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${vId}`).then(r => r.json());
-    if (isUpdatingResponse(data)) {
-      return;
-    }
-    setScenes(data);
-    setCurrentVersionId(vId);
-  };
 
   const applyCanonicalPayload = (data: { scenes?: MarkerProjection[] }) => {
     if (data.scenes) setScenes(data.scenes);
@@ -585,7 +580,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
           {acts.length === 0 ? (
             <div>
               <p className="px-4 py-8 text-center text-sm text-zinc-300">暂无章节</p>
-              {effectiveCanEdit && (
+              {canEdit && (
                 <table className="w-full border-t border-zinc-100">
                   <tbody>
                     <InsertSceneRow
@@ -609,7 +604,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                 </tr>
               </thead>
               <tbody>
-                {effectiveCanEdit && (
+                {canEdit && (
                   <InsertSceneRow
                     colSpan={colSpan}
                     onAddChapter={(name) => add(name, null, beforeMarker(acts[0]))}
@@ -627,7 +622,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         indent={false}
                         marks={act.rehearsalMarks}
                         childScenes={children}
-                        canEdit={effectiveCanEdit}
+                        canEdit={canEdit}
                         fieldPerms={fieldPerms}
                         canDelete
                         productionId={productionId}
@@ -638,7 +633,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         onDelete={() => del(act.id)}
                         onPatchMeta={(fields) => patchMeta(act.id, fields)}
                       />
-                      {effectiveCanEdit && (
+                      {canEdit && (
                         <InsertSceneRow
                           colSpan={colSpan}
                           onAddChapter={(name) => add(name, null, beforeMarker(children[0] ?? nextAct))}
@@ -651,7 +646,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                             scene={sub}
                             indent={true}
                             marks={sub.rehearsalMarks}
-                            canEdit={effectiveCanEdit}
+                            canEdit={canEdit}
                             fieldPerms={fieldPerms}
                             canDelete
                             productionId={productionId}
@@ -662,7 +657,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                             onDelete={() => del(sub.id)}
                             onPatchMeta={(fields) => patchMeta(sub.id, fields)}
                           />
-                          {effectiveCanEdit && (
+                          {canEdit && (
                             <InsertSceneRow
                               colSpan={colSpan}
                               onAddChapter={(name) => add(name, null, beforeMarker(children[childIndex + 1] ?? nextAct))}
@@ -702,14 +697,6 @@ export default function ScenesManager({ productionId, productionName, initialSce
           <div className="text-right flex flex-col items-end gap-1">
             <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase">Scenes</p>
             <p className="text-sm font-bold text-zinc-500">{productionName}</p>
-            {versions && versions.length > 0 && (
-              <VersionSelector
-                productionId={productionId}
-                versions={versions}
-                currentVersionId={currentVersionId}
-                onChange={handleVersionChange}
-              />
-            )}
             {canImport && (
               <Link href={`/production/${productionId}/import-scenes`} className="text-xs text-blue-500 hover:underline">
                 导入章节信息

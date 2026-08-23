@@ -6,10 +6,9 @@ import AssetUploadPanel from "./AssetUploadPanel";
 
 interface Props {
   productionId: string;
-  versionId: string | null;
 }
 
-export default function AssetUploadPageClient({ productionId, versionId }: Props) {
+export default function AssetUploadPageClient({ productionId }: Props) {
   const router = useRouter();
 
   return (
@@ -26,7 +25,6 @@ export default function AssetUploadPageClient({ productionId, versionId }: Props
         <div className="rounded-2xl bg-white shadow-sm p-5">
           <AssetUploadPanel
             productionId={productionId}
-            versionId={versionId}
             onUploaded={() => router.push(`/production/${productionId}/assets`)}
             onCancel={() => router.push(`/production/${productionId}/assets`)}
           />

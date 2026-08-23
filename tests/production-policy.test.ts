@@ -8,7 +8,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
-import { makeProduction, cleanupProduction, shortId } from "./factories";
+import { makeProduction, cleanupProduction, setProductionTier, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
@@ -50,6 +50,8 @@ beforeAll(async () => {
   editorId = await makeUser("policy-editor");
   plainId = await makeUser("policy-plain");
   ({ prodId } = await makeProduction(ownerId));
+  // #280：policies 写入在「高级权限配置」档位门内，工厂项目默认 free——升 pro
+  await setProductionTier(prodId, "pro");
   for (const u of [editorId, plainId]) await addProductionMember(prodId, u);
   await getPool().query(
     `INSERT INTO production_member_grant
