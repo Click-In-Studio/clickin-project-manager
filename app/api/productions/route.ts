@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { createProduction, listProductions, updateProductionSortOrders } from "@/lib/db";
+import { createProduction, listProductions, updateProductionSortOrders, ProductionQuotaError } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { getUserTier, countOwnedActiveProductions, USER_TIERS } from "@/lib/plan";
 
@@ -63,6 +63,8 @@ export async function POST(req: NextRequest) {
     );
   }
   const tierConf = USER_TIERS[tier];
+  // 快路径预检（省一次事务）；硬上限在 createProduction 事务内锁 user_plan 行重判，
+  // 并发双请求不会双双越过（#307 review finding 1）。
   const owned = await countOwnedActiveProductions(session.userId);
   if (owned >= tierConf.maxOwnedProductions) {
     return Response.json(
@@ -104,6 +106,7 @@ export async function POST(req: NextRequest) {
       type === "other" ? (typeLabel?.trim() ?? null) : null,
       // internal 建项即最高档（声明式例外，常量表一格）；free 不落行。
       { tier: tierConf.initialProductionTier, source: tier === "internal" ? "internal_owner" : "initial" },
+      Number.isFinite(tierConf.maxOwnedProductions) ? { maxOwned: tierConf.maxOwnedProductions } : undefined,
     );
     const metaFields: Parameters<typeof updateProductionMeta>[1] = {};
     if (description?.trim()) metaFields.description = description.trim();
@@ -113,6 +116,12 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     // Remove reservation so the client can retry with a fresh key.
     if (ikey) _idemCache.delete(ikey);
+    if (err instanceof ProductionQuotaError) {
+      return Response.json(
+        { error: `已达当前等级可创建的项目数上限（${err.maxOwned} 个）` },
+        { status: 403 },
+      );
+    }
     console.error("[productions] create error:", err);
     return Response.json({ error: "创建失败" }, { status: 500 });
   }

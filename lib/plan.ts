@@ -223,6 +223,32 @@ export async function redeemPlanCode(args: {
   }
 }
 
+// ── 兑换尝试限流（#307 review finding 2）───────────────────────────────────────
+// 码是管理员手工生成的高价值凭证，裸端点是暴破面。按 userId 滑动窗口限次；
+// module-level 状态是进程级的——与本仓 Idempotency 缓存同一个单进程部署假设。
+
+const _redeemAttempts = new Map<string, { count: number; windowStart: number }>();
+const REDEEM_WINDOW_MS = 10 * 60_000;
+const REDEEM_MAX_ATTEMPTS = 10;
+
+/** true = 已超限（调用方回 429）。每次调用计一次尝试，成功兑换也计——正常使用远够。 */
+export function redeemRateLimited(userId: string): boolean {
+  const now = Date.now();
+  const entry = _redeemAttempts.get(userId);
+  if (!entry || now - entry.windowStart > REDEEM_WINDOW_MS) {
+    _redeemAttempts.set(userId, { count: 1, windowStart: now });
+    // Evict stale entries opportunistically
+    if (_redeemAttempts.size > 1000) {
+      for (const [k, v] of _redeemAttempts) {
+        if (now - v.windowStart > REDEEM_WINDOW_MS) _redeemAttempts.delete(k);
+      }
+    }
+    return false;
+  }
+  entry.count++;
+  return entry.count > REDEEM_MAX_ATTEMPTS;
+}
+
 export const REDEEM_ERROR_MESSAGES: Record<Extract<RedeemResult, { ok: false }>["reason"], string> = {
   not_found: "兑换码不存在",
   wrong_kind: "该兑换码不适用于此处（用户码与项目码不通用）",

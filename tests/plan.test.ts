@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { upsertFeishuUser, deleteProduction } from "@/lib/db";
+import { upsertFeishuUser, deleteProduction, createProduction, ProductionQuotaError } from "@/lib/db";
 import { createInvite, acceptInvite } from "@/lib/invite-db";
 import {
   getUserTier, getProductionPlan, redeemPlanCode, requireProductionFeature,
@@ -17,6 +17,7 @@ import {
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { getPool } from "@/lib/pg";
 import { POST as createProductionHandler } from "@/app/api/productions/route";
+import { POST as accountRedeemHandler } from "@/app/api/account/redeem-code/route";
 
 function req(url: string, opts: { session?: string; method?: string; body?: string } = {}): NextRequest {
   const headers = new Headers();
@@ -89,6 +90,23 @@ describe("建项目门（用户等级）", () => {
     expect(row.rows[0]?.source).toBe("internal_owner");
   });
 
+  it("配额硬上限在 createProduction 事务内（并发兜底，#307 review 1）", async () => {
+    const { userId } = await makeUser("creator");
+    const max = USER_TIERS.creator.maxOwnedProductions;
+    for (let i = 0; i < max; i++) {
+      const pid = shortId();
+      createdProds.push(pid);
+      await getPool().query(
+        "INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)",
+        [pid, `硬上限占位${i}`, userId],
+      );
+    }
+    // 绕过路由预检直接调库层：事务内锁 user_plan 行后重判，仍要拒绝
+    await expect(
+      createProduction(shortId(), "越过预检的项目", userId, undefined, null, undefined, { maxOwned: max }),
+    ).rejects.toThrow(ProductionQuotaError);
+  });
+
   it("creator 达到配额上限 → 403", async () => {
     const { userId, session } = await makeUser("creator");
     // 直插 production 行占满配额（不走路由，省模版灌入的开销）
@@ -153,6 +171,20 @@ describe("兑换码", () => {
     createdCodes.push(userCode);
     expect(await redeemPlanCode({ code: userCode, userId, productionId: prodId })).toMatchObject({ ok: false, reason: "wrong_kind" });
     expect(await redeemPlanCode({ code: "不存在的码", userId })).toMatchObject({ ok: false, reason: "not_found" });
+  });
+
+  it("兑换端点限流：窗口内超过尝试上限 → 429（#307 review 2）", async () => {
+    const { session } = await makeUser();
+    for (let i = 0; i < 10; i++) {
+      const res = await accountRedeemHandler(
+        req("/api/account/redeem-code", { method: "POST", body: JSON.stringify({ code: `暴破尝试${i}` }), session }),
+      );
+      expect(res.status).toBe(404);
+    }
+    const blocked = await accountRedeemHandler(
+      req("/api/account/redeem-code", { method: "POST", body: JSON.stringify({ code: "第十一次" }), session }),
+    );
+    expect(blocked.status).toBe(429);
   });
 
   it("production_upgrade 码：free → pro；特邀码落 billing_exempt + exempt_note", async () => {

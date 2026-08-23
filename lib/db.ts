@@ -2222,6 +2222,14 @@ async function ensureEmptyScriptBlocksForEmptyScenesInTx(
 
 // ─── Production management ────────────────────────────────────────────────────
 
+/** 建项目配额超限（事务内硬上限命中）。路由层捕获后转 403。 */
+export class ProductionQuotaError extends Error {
+  constructor(public readonly maxOwned: number) {
+    super(`production quota exceeded (max ${maxOwned})`);
+    this.name = "ProductionQuotaError";
+  }
+}
+
 export async function createProduction(
   id: string,
   name: string,
@@ -2232,6 +2240,10 @@ export async function createProduction(
   /** 初始项目档位（#280）：free 时不落行（production_plan 无行 = free），高于 free
    *  （internal owner 建项即最高档）与本体同事务落行。档位决策在路由层（lib/plan.ts）。 */
   initialPlan?: { tier: string; source: string },
+  /** 配额硬上限（#307 review finding 1）：路由层的 count 预检是 TOCTOU 软门，这里在
+   *  事务内锁 owner 的 user_plan 行串行化同 owner 并发建项，锁内重数超限抛
+   *  ProductionQuotaError。Infinity 档（internal）不传即可。 */
+  quota?: { maxOwned: number },
 ): Promise<void> {
   // 建项目全程一个事务：production 行、owner 的成员行、初始 version、模版灌入，
   // 要么全成要么全不成。以前是三段各自提交（裸 pool.query + createInitialVersion 自己
@@ -2243,6 +2255,16 @@ export async function createProduction(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    if (quota && Number.isFinite(quota.maxOwned)) {
+      // 建项目门保证 creator 必有 user_plan 行；锁它让同 owner 的并发创建排队，
+      // 排到的事务在锁内重新 count（READ COMMITTED 每语句新快照，看得见前一个的提交）。
+      await client.query("SELECT 1 FROM user_plan WHERE user_id = $1 FOR UPDATE", [ownerUserId]);
+      const { rows } = await client.query<{ n: string }>(
+        "SELECT count(*) AS n FROM production WHERE owner_id = $1 AND archived_at IS NULL",
+        [ownerUserId],
+      );
+      if (Number(rows[0].n) >= quota.maxOwned) throw new ProductionQuotaError(quota.maxOwned);
+    }
     await client.query(
       "INSERT INTO production (id, name, owner_id, type, type_label, script_config) VALUES ($1, $2, $3, $4, $5, $6::jsonb)",
       [
