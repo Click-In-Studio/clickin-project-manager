@@ -159,6 +159,32 @@ img.wiki-image.ProseMirror-selectednode {
   outline-offset: 2px;
 }
 
+/* 图片上传占位（decoration，不进正史）——lib/tiptap-upload-placeholder */
+.wiki-upload-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  margin: 2px 0;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #f0f9ff;
+  color: #0369a1;
+  border: 1px dashed #7dd3fc;
+  animation: wiki-upload-pulse 1.2s ease-in-out infinite;
+  user-select: none;
+}
+.wiki-upload-placeholder-failed {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+  animation: none;
+}
+@keyframes wiki-upload-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
 /* Inline stage directions within dialogue blocks */
 .stage-inline,
 span[data-stage-inline] {
