@@ -1896,3 +1896,33 @@ CREATE TABLE IF NOT EXISTS plan_code_redemption (
 );
 
 CREATE INDEX IF NOT EXISTS plan_code_redemption_code_idx ON plan_code_redemption (code);
+
+-- ── 注册邀请制（db/add-registration-gate.sql，测试期收口「登录即注册」）────────
+-- 开关 = 环境变量 REGISTRATION_INVITE_ONLY；正当性判定见 lib/registration-gate.ts。
+-- 两张登记表均无创建界面：管理员手工 INSERT。
+
+CREATE TABLE IF NOT EXISTS registration_code (
+  code       TEXT        PRIMARY KEY,
+  max_uses   INTEGER     NOT NULL DEFAULT 1 CHECK (max_uses > 0),
+  used_count INTEGER     NOT NULL DEFAULT 0,
+  expires_at TIMESTAMPTZ NULL,
+  note       TEXT        NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS registration_code_redemption (
+  id          BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  code        TEXT        NOT NULL REFERENCES registration_code(code) ON DELETE CASCADE,
+  user_id     UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  email       TEXT        NOT NULL,
+  redeemed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS registration_code_redemption_code_idx
+  ON registration_code_redemption (code);
+
+CREATE TABLE IF NOT EXISTS registration_email (
+  email      TEXT        PRIMARY KEY,  -- 存小写
+  note       TEXT        NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
