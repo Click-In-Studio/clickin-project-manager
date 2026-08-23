@@ -188,194 +188,12 @@ function extractPlainTokens(text: string): { key: string; attrs: ContentMentionA
   return out;
 }
 
-function extractCmLinks(text: string): { key: string; attrs: ContentMentionAttrs }[] {
-  // href 前缀恒为 CM_HREF_PREFIX（/__cm__），不是 cm://——这里曾经写错前缀，
-  // 导致 markdown 模式的 mention-resolve 请求永远抓不到任何链接（提取的正则
-  // 匹配不了任何真实存量内容，resolved 恒空，chip 卡死在 pending）。
-  const pattern = new RegExp(`\\[#[^\\]]*\\]\\((${CM_HREF_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\\s)"]+)\\)`, "g");
-  const out: { key: string; attrs: ContentMentionAttrs }[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = pattern.exec(text)) !== null) {
-    const attrs = decodeMentionHref(m[1]);
-    if (attrs) out.push({ key: m[1], attrs });
-  }
-  return out;
-}
-
-// ── Markdown inline renderer ──────────────────────────────────────────────────
-
-// Splits on structural markdown tokens and HTML spans (old @ mention format)
-const MD_INLINE_SPLIT = /(<span[^>]*>[\s\S]*?<\/span>|\*\*[^*]+\*\*|\*[^*\n]+\*|~~[^~\n]+~~|\[[^\]\n]*\]\([^\s)"]+(?:\s+"[^"]*")?\))/g;
-
-function renderMdInline(
-  text: string,
-  keyBase: string,
-  members: MentionMember[],
-  resolved: ResolvedMap,
-  resolveFailed: boolean,
-  pid?: string,
-): React.ReactNode[] {
-  const segments = text.split(MD_INLINE_SPLIT);
-  const nodes: React.ReactNode[] = [];
-
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i];
-    if (!seg) continue;
-    const key = `${keyBase}-${i}`;
-
-    // HTML span — old tiptap-markdown @mention: <span ...>@name</span>
-    if (seg.startsWith("<span")) {
-      const inner = seg.replace(/<[^>]+>/g, "");
-      const name = inner.startsWith("@") ? inner.slice(1) : inner;
-      nodes.push(<MemberChip key={key} name={name} members={members} />);
-      continue;
-    }
-    // Bold
-    if (seg.startsWith("**") && seg.endsWith("**")) {
-      nodes.push(<strong key={key}>{renderMdInline(seg.slice(2, -2), `${key}-b`, members, resolved, resolveFailed, pid)}</strong>);
-      continue;
-    }
-    // Italic
-    if (seg.startsWith("*") && seg.endsWith("*")) {
-      nodes.push(<em key={key}>{renderMdInline(seg.slice(1, -1), `${key}-i`, members, resolved, resolveFailed, pid)}</em>);
-      continue;
-    }
-    // Strikethrough
-    if (seg.startsWith("~~") && seg.endsWith("~~")) {
-      nodes.push(<s key={key}>{renderMdInline(seg.slice(2, -2), `${key}-s`, members, resolved, resolveFailed, pid)}</s>);
-      continue;
-    }
-    // Link: content mention, legacy script ref, or regular link
-    if (seg.startsWith("[")) {
-      const m = seg.match(/^\[([^\]]*)\]\(([^\s)"]+)(?:\s+"([^"]*)")?\)$/);
-      if (m) {
-        const [, linkText, href, title] = m;
-        // @成员：[@名](uid:x)（存量 @[名](uid:x) 已在入口归一化）
-        if (href.startsWith("uid:")) {
-          nodes.push(<MemberChip key={key} name={linkText.replace(/^@/, "")} members={members} />);
-          continue;
-        }
-        if (href.startsWith(CM_HREF_PREFIX)) {
-          const r = resolved.get(href);
-          const attrs = decodeMentionHref(href);
-          // wiki 标题恒不信任正文快照——快照可能是改名前的旧标题，未 resolve 完成/
-          // 失败时只给中性占位，绝不拿 linkText 顶上去冒充"当前标题"（同 WikiMarkdown）。
-          if (attrs?.kind === "wiki") {
-            const directUrl = pid ? `${BASE_PATH}/production/${pid}/wiki/${attrs.id}` : null;
-            if (!r) {
-              nodes.push(<WikiChip key={key} label="" state={resolveFailed ? "failed" : "pending"} />);
-              continue;
-            }
-            if (r.label === "#[已删除]") {
-              nodes.push(<WikiChip key={key} label="" state="deleted" />);
-              continue;
-            }
-            const url = r.url ? `${BASE_PATH}${r.url}` : directUrl;
-            nodes.push(<WikiChip key={key} label={r.label} href={url} />);
-            continue;
-          }
-          const label = r?.label ?? linkText;
-          const url = r?.url ? `${BASE_PATH}${r.url}` : null;
-          nodes.push(<ContentChip key={key} label={label.replace(/^#/, "") ? label : linkText} deleted={label === "#[已删除]"} href={url} />);
-          continue;
-        }
-        if (linkText.startsWith("#") && !href.startsWith("http")) {
-          nodes.push(<ScriptChip key={key} label={linkText.slice(1)} href={href} title={title} />);
-          continue;
-        }
-        nodes.push(
-          <a key={key} href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
-            {linkText}
-          </a>
-        );
-        continue;
-      }
-    }
-
-    // Plain text — scan for @member names
-    if (members.length > 0) {
-      const escaped = members.map(m => m.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-      const atRe = new RegExp(`(@(?:${escaped}))`, "g");
-      const atParts = seg.split(atRe);
-      if (atParts.length > 1) {
-        atParts.forEach((part, pi) => {
-          if (!part) return;
-          if (members.some(m => part === `@${m.name}`)) {
-            nodes.push(<MemberChip key={`${key}-at-${pi}`} name={part.slice(1)} members={members} />);
-          } else {
-            nodes.push(part);
-          }
-        });
-        continue;
-      }
-    }
-
-    nodes.push(seg);
-  }
-
-  return nodes;
-}
-
-// ── Markdown block renderer ───────────────────────────────────────────────────
-
-function renderMdBlock(
-  block: string,
-  idx: number,
-  members: MentionMember[],
-  resolved: ResolvedMap,
-  resolveFailed: boolean,
-  pid?: string,
-): React.ReactNode {
-  const lines = block.split("\n").filter(l => l.trim() !== "");
-  if (!lines.length) return null;
-
-  const headMatch = lines[0].match(/^(#{1,3}) (.+)$/);
-  if (headMatch) {
-    const level = headMatch[1].length;
-    const cls = level === 1 ? "text-xl font-bold mt-4 mb-1"
-      : level === 2 ? "text-lg font-semibold mt-3 mb-1"
-      : "text-base font-semibold mt-2 mb-0.5";
-    const Tag = `h${level}` as "h1" | "h2" | "h3";
-    return <Tag key={idx} className={cls}>{renderMdInline(headMatch[2], `${idx}-h`, members, resolved, resolveFailed, pid)}</Tag>;
-  }
-
-  if (lines.every(l => /^[*-] /.test(l))) {
-    return (
-      <ul key={idx} className="list-disc pl-5 my-1 space-y-0.5">
-        {lines.map((l, i) => (
-          <li key={i} className="text-sm">{renderMdInline(l.slice(2), `${idx}-ul-${i}`, members, resolved, resolveFailed, pid)}</li>
-        ))}
-      </ul>
-    );
-  }
-
-  if (lines.every(l => /^\d+\. /.test(l))) {
-    return (
-      <ol key={idx} className="list-decimal pl-5 my-1 space-y-0.5">
-        {lines.map((l, i) => (
-          <li key={i} className="text-sm">{renderMdInline(l.replace(/^\d+\. /, ""), `${idx}-ol-${i}`, members, resolved, resolveFailed, pid)}</li>
-        ))}
-      </ol>
-    );
-  }
-
-  // Paragraph — split on TipTap hard breaks (\\\n)
-  const hardParts = block.split(/\\\n/);
-  const nodes: React.ReactNode[] = [];
-  hardParts.forEach((part, i) => {
-    nodes.push(...renderMdInline(part, `${idx}-p-${i}`, members, resolved, resolveFailed, pid));
-    if (i < hardParts.length - 1) nodes.push(<br key={`${idx}-br-${i}`} />);
-  });
-  return <p key={idx} className="text-sm my-1">{nodes}</p>;
-}
-
 // ── SmartText ─────────────────────────────────────────────────────────────────
 
 export default function SmartText({
   content,
   memberMention,
   contentMention,
-  markdown = false,
   // backward-compat props
   plugins: extraPlugins = [],
   className,
@@ -387,8 +205,6 @@ export default function SmartText({
   memberMention?: { members: MentionMember[] };
   /** Enable # content mention resolution */
   contentMention?: { productionId: string; versionId?: string | null };
-  /** Render as markdown */
-  markdown?: boolean;
   plugins?: InlinePlugin[];
   className?: string;
   productionId?: string;
@@ -404,7 +220,7 @@ export default function SmartText({
 
   useEffect(() => {
     if (!productionId || resolveAttempted.current) return;
-    const items = markdown ? extractCmLinks(normalizeLegacyMentions(content)) : extractPlainTokens(content);
+    const items = extractPlainTokens(content);
     if (!items.length) return;
     resolveAttempted.current = true;
 
@@ -425,20 +241,9 @@ export default function SmartText({
         setResolved(map);
       })
       .catch(() => setResolveFailed(true));
-  }, [content, productionId, versionId, markdown]);
+  }, [content, productionId, versionId]);
 
   if (!content) return null;
-
-  // ── Markdown mode ──────────────────────────────────────────────────────────
-  if (markdown) {
-    if (!content.trim()) return null;
-    const blocks = normalizeLegacyMentions(content).split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
-    return (
-      <div className={`text-zinc-800 ${className ?? ""}`}>
-        {blocks.map((block, i) => renderMdBlock(block, i, members, resolved, resolveFailed, productionId))}
-      </div>
-    );
-  }
 
   // ── Plain text mode ────────────────────────────────────────────────────────
 

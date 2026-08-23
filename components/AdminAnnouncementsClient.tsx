@@ -3,7 +3,7 @@
 import PageHeader, { PRIMARY_BTN } from "@/components/PageHeader";
 
 import { useState, useCallback, useEffect } from "react";
-import SmartText from "@/components/SmartText";
+import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import SmartTextarea from "@/components/SmartTextarea";
 import { BASE_PATH } from "@/lib/base-path";
 
@@ -506,10 +506,9 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
 
             {/* Content */}
             {selected.content ? (
-              <SmartText
+              <WikiMarkdown
                 content={selected.content}
-                markdown
-                contentMention={{ productionId }}
+                productionId={productionId}
               />
             ) : (
               <p style={{ color: "var(--muted)", fontSize: 13 }}>（无内容）</p>

@@ -14,13 +14,14 @@ export function isFeishuHtml(html: string): boolean {
  * 归一化飞书粘贴 HTML。仅在浏览器端调用（依赖 DOMParser）。
  * 任何一步失败都应由调用方兜底回原 HTML——宁可少归一化，不可拦粘贴。
  */
-export function transformFeishuHtml(html: string, opts: { members?: FeishuMember[] } = {}): string {
+export function transformFeishuHtml(html: string, opts: { members?: FeishuMember[]; record?: string | null } = {}): string {
   if (typeof DOMParser === "undefined") {
     throw new Error("transformFeishuHtml 仅限浏览器端调用（依赖 DOMParser）");
   }
   const doc = new DOMParser().parseFromString(html, "text/html");
   const body = doc.body;
   stripBlockPlaceholders(body);
+  mapGrids(doc, body, opts.record);
   mapCallouts(doc, body);
   normalizeCodeBlocks(body);
   normalizeChecklists(body);
@@ -53,6 +54,72 @@ function replaceFeishuImages(doc: Document, body: HTMLElement) {
     const p = doc.createElement("p");
     p.textContent = `[图片${name ? `：${name}` : ""}${dims} —— 请在飞书中对原图「复制图片」后粘贴到此处替换]`;
     img.replaceWith(p);
+  }
+}
+
+// ── 分栏：经 docx/record 重组（HTML 出口把分栏拍平了）─────────────────────────
+// 实测：飞书 text/html 里 <div data-type="grid"> 是空壳标记，栏内容块被展平
+// 成顺序兄弟块（66/66 全在，只是失去分组）。但内容块的 old-record-id-* 类名
+// 与 docx/record 私有格式的 block 树 id 一一对应——用 record 当结构真相源
+// （grid → grid_column(width_ratio) → 子块 id），把散落的 DOM 块重新归栏，
+// 落成 div[data-cols] > div[data-col]（lib/tiptap-columns 认这个形态）。
+// 缺任何一块 → 整组放弃重组，维持拍平——降级可见，零内容损失。
+
+type FeishuSnapshot = { type?: string; children?: string[]; width_ratio?: number };
+type FeishuRecordMap = Record<string, { snapshot?: FeishuSnapshot }>;
+
+function mapGrids(doc: Document, body: HTMLElement, record?: string | null) {
+  if (!record) return;
+  let rm: FeishuRecordMap;
+  try {
+    rm = (JSON.parse(record) as { recordMap?: FeishuRecordMap }).recordMap ?? {};
+  } catch {
+    return; // 私有格式读不懂就不重组，HTML 拍平形态照走
+  }
+  // class*= 是子串匹配——id 互为前缀时会选错块（错误重组比缺块放弃更糟），
+  // 选择器只当预筛，classList 整 token 精确判定
+  const byId = (id: string): Element | null => {
+    if (!/^[\w-]+$/.test(id)) return null;
+    const cls = `old-record-id-${id}`;
+    for (const el of Array.from(body.querySelectorAll(`[class*="${cls}"]`))) {
+      if (el.classList.contains(cls)) return el;
+    }
+    return null;
+  };
+
+  for (const [gridId, rec] of Object.entries(rm)) {
+    if (rec?.snapshot?.type !== "grid") continue;
+    const marker = byId(gridId);
+    if (!marker) continue;
+    const colRecs = (rec.snapshot.children ?? [])
+      .map(cid => rm[cid]?.snapshot)
+      .filter((s): s is FeishuSnapshot => s?.type === "grid_column");
+    if (colRecs.length < 2) continue;
+
+    const cols: { ratio: number | null; els: Element[] }[] = [];
+    let ok = true;
+    for (const c of colRecs) {
+      const els: Element[] = [];
+      for (const kid of c.children ?? []) {
+        const el = byId(kid);
+        if (!el) { ok = false; break; }
+        els.push(el);
+      }
+      if (!ok) break;
+      cols.push({ ratio: c.width_ratio ? Math.round(c.width_ratio * 100) : null, els });
+    }
+    if (!ok || cols.some(c => c.els.length === 0)) continue;
+
+    const group = doc.createElement("div");
+    group.setAttribute("data-cols", "");
+    for (const c of cols) {
+      const col = doc.createElement("div");
+      col.setAttribute("data-col", "");
+      if (c.ratio) col.setAttribute("data-ratio", String(c.ratio));
+      for (const el of c.els) col.appendChild(el);
+      group.appendChild(col);
+    }
+    marker.replaceWith(group);
   }
 }
 

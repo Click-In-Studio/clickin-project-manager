@@ -16,6 +16,20 @@
 // 里固定写 #，渲染时永远用实时标题覆盖，模型完全不用关心、也不该费心填什么
 // "有意义的文字"——写了也会被忽略。旧版裸 token [#wiki:<uuid>] 已废弃：它在
 // 实际 UI 里从未被渲染成真正的链接，只是原样显示成一段无用的方括号文字。
+// 链接之外的三个私有方言（callout/分栏/图片）+ @提及形态。AI 能读懂标准
+// markdown 但不认识私有方言——不教就不会用，编辑时还可能当噪音改写掉。
+// 与 lib/tiptap-callout.ts / lib/tiptap-columns.ts / lib/tiptap-wiki-image.ts
+// 的 canonical 形态同批维护：方言变，这里必须同批变（方言两侧同落纪律的
+// 第三落点：编辑器 roundtrip、渲染器、AI 说明书）。
+export const WIKI_DIALECT_NOTE =
+  "本库 Markdown 另有三个私有方言（渲染器按此解析；写作按此使用，编辑他人正文时原样保留不得改写）：" +
+  "① callout 高亮块——blockquote 首行放 marker：`> [!💡]`，可带底色 `> [!📌|#fff5eb]`" +
+  "（emoji 位写字面 emoji 字符；第二段可选 hex 底色），后续内容行继续用 > 前缀；" +
+  "② 分栏——`:::cols` 独占一行开组（可带各栏宽度百分比：`:::cols 46,54`），" +
+  "栏之间用独占一行的 `---` 分隔（前后必须空行），`:::` 独占一行关组；不支持嵌套，栏内不能再放水平线；" +
+  "③ 图片——`![说明](/__cm__asset:<assetId>)`，只存 asset id 不存 URL，渲染时按观看者权限取图。" +
+  "@提及成员写 [@名字](uid:<userId>)。凡 /__cm__ 开头的链接一律原样保留，不要展开或改写。";
+
 export const WIKI_LINK_SYNTAX_NOTE =
   "文档正文是 Markdown（支持 GFM）。链接到另一篇文档用 [#](/__cm__wiki:<uuid>) 这种行内 markdown 链接——" +
   "方括号内固定写 #，里面写别的文字也没用，渲染时永远替换成目标文档的实时标题，" +

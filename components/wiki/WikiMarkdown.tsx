@@ -13,6 +13,7 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
+import remarkColumns from "@/lib/remark-columns";
 import { BASE_PATH } from "@/lib/base-path";
 import {
   decodeMentionHref, CM_HREF_PREFIX, type ContentMentionAttrs,
@@ -138,7 +139,9 @@ export default function WikiMarkdown({
   className = "",
 }: {
   content: string;
-  productionId: string;
+  /** 统一 renderer：production 上下文之外（全站通知/管理公告）可省略——
+   *  mention/wiki 链/asset 图片优雅降级（无法解析态/幻影/占位），方言排版照常 */
+  productionId?: string;
   className?: string;
 }) {
   // 手写 [[标题]] 预处理（码内保护）+ 标题清单
@@ -149,6 +152,7 @@ export default function WikiMarkdown({
   const [titleMap, setTitleMap] = useState<Map<string, string> | null>(null);
   useEffect(() => {
     if (rawTitles.length === 0) { setTitleMap(null); return; }
+    if (!productionId) { setTitleMap(new Map()); return; } // 无 production 上下文：全部幻影
     let alive = true;
     (async () => {
       try {
@@ -182,6 +186,7 @@ export default function WikiMarkdown({
 
   useEffect(() => {
     if (mentionAttrs.length === 0) return;
+    if (!productionId) { setResolveFailed(true); return; } // 无上下文：chip 落「无法解析」态
     const sig = mentionAttrs.map(attrsKey).join("|");
     if (attemptedRef.current === sig) return;
     attemptedRef.current = sig;
@@ -206,7 +211,7 @@ export default function WikiMarkdown({
     <div className={`prose prose-zinc max-w-none ${className}`}>
       <ReactMarkdown
         // breaks：单回车即换行（对齐 MindWeave 与编辑器 tiptap breaks:true——CJK 写作习惯）
-        remarkPlugins={[remarkGfm, remarkBreaks]}
+        remarkPlugins={[remarkGfm, remarkBreaks, remarkColumns]}
         components={{
           blockquote: ({ children }) => {
             const callout = splitCalloutChildren(children);
@@ -224,7 +229,10 @@ export default function WikiMarkdown({
           img: ({ src, alt }) => {
             const s = typeof src === "string" ? src : "";
             const m = /^\/__cm__asset:([^/?#\s]+)$/.exec(s);
-            if (m) return <CmAssetImage productionId={productionId} assetId={m[1]} alt={alt} />;
+            if (m && !productionId) {
+              return <span className="inline-flex items-center px-1 py-0.5 rounded text-[12px] bg-zinc-50 text-zinc-400 border border-dashed border-zinc-300">[图片{alt ? `：${alt}` : ""}]</span>;
+            }
+            if (m && productionId) return <CmAssetImage productionId={productionId} assetId={m[1]} alt={alt} />;
             // eslint-disable-next-line @next/next/no-img-element
             return <img src={s} alt={alt ?? ""} className="wiki-image" loading="lazy" />;
           },

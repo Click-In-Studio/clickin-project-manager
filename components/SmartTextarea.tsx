@@ -25,6 +25,8 @@ import { parseToDoc, serializeAtMention, normalizeLegacyMentions } from "@/lib/m
 import { isFeishuHtml, transformFeishuHtml } from "@/lib/feishu-paste";
 import { Callout } from "@/lib/tiptap-callout";
 import { WikiImage } from "@/lib/tiptap-wiki-image";
+import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/tiptap-upload-placeholder";
+import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 export { normalizeLegacyMentions };
 import { serializeMention } from "@/lib/mention-types";
 
@@ -185,6 +187,17 @@ function Toolbar({ editor }: { editor: TiptapEditor | null }) {
       <span className="w-px bg-zinc-200 mx-1 self-stretch" />
       <ToolbarBtn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="引用">&ldquo;</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleWrap("callout").run()} active={editor.isActive("callout")} title="Callout 高亮块">💡</ToolbarBtn>
+      <ToolbarBtn
+        onClick={() => editor.chain().focus().insertContent({
+          type: "columnGroup",
+          content: [
+            { type: "column", content: [{ type: "paragraph" }] },
+            { type: "column", content: [{ type: "paragraph" }] },
+          ],
+        }).run()}
+        active={editor.isActive("columnGroup")}
+        title="两栏分栏"
+      >◫</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} active={editor.isActive("table")} title="插入表格">⊞</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleCode().run()} active={editor.isActive("code")} title="行内代码">{"</>"}</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive("codeBlock")} title="代码块">{"{ }"}</ToolbarBtn>
@@ -353,6 +366,19 @@ function serializeDoc(editor: ReturnType<typeof useEditor>): string {
   });
 }
 
+// ── Upload placeholder helpers ───────────────────────────────────────────────
+
+/** 占位翻失败态，几秒后自动撤——静默消失＝又回到「粘了没反应」 */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function failPlaceholder(view: any, id: object) {
+  view.dispatch(view.state.tr.setMeta(uploadPlaceholderKey, { fail: { id } }));
+  setTimeout(() => {
+    try {
+      view.dispatch(view.state.tr.setMeta(uploadPlaceholderKey, { remove: { id } }));
+    } catch { /* 编辑器已销毁 */ }
+  }, 4000);
+}
+
 // ── Drop state ────────────────────────────────────────────────────────────────
 
 type DropState = {
@@ -441,6 +467,9 @@ export default function SmartTextarea({
   const imageUploadRef = useRef(imageUpload);
   imageUploadRef.current = imageUpload;
   const hasImageUpload = !!imageUpload;
+  // 飞书私有格式（docx/record）：分栏结构真相源。transformPastedHTML 只拿得到
+  // HTML 字符串，record 在 DOM paste 事件先行截获经 ref 递进去
+  const pasteRecordRef = useRef<string | null>(null);
 
   useEffect(() => { dropRef.current = drop; });
 
@@ -634,8 +663,8 @@ export default function SmartTextarea({
       ? [base, Markdown.configure({ transformCopiedText: true, breaks: true }),
          TableKit.configure({ table: { resizable: false } }),
          TaskList, TaskItem.configure({ nested: true }),
-         Callout,
-         ...(hasImageUpload ? [imageExt] : []),
+         Callout, Column, ColumnGroup,
+         ...(hasImageUpload ? [imageExt, UploadPlaceholder] : []),
          ...commonExts, wikiTriggerCfg, remoteCursorExt]
       : [base, ...commonExts];
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -660,17 +689,32 @@ export default function SmartTextarea({
       },
       // 飞书粘贴归一化（junk 清理/代码块/checklist/@提及映射，lib/feishu-paste）。
       // 只认飞书来源标记，其他粘贴源原样放行；失败也放行——宁可少归一化不拦粘贴
+      handleDOMEvents: {
+        // 在 PM 处理 paste 之前截获飞书私有格式（返回 false 不拦默认流程）
+        paste: (_view, event) => {
+          try {
+            pasteRecordRef.current = event.clipboardData?.getData("docx/record") || null;
+          } catch {
+            pasteRecordRef.current = null;
+          }
+          return false;
+        },
+      },
       transformPastedHTML: (html) => {
         if (!isFeishuHtml(html)) return html;
         try {
-          return transformFeishuHtml(html, { members: memberMentionRef.current?.members });
+          const record = pasteRecordRef.current;
+          pasteRecordRef.current = null;
+          return transformFeishuHtml(html, { members: memberMentionRef.current?.members, record });
         } catch {
           return html;
         }
       },
       // 图片文件粘贴（wiki 场景）：拦 file items 上传转存后插节点。
       // 飞书「复制图片」实测剪贴板携带真文件走此路径；整篇文档粘贴无 file，
-      // 不会被此分支劫持（照走 transformPastedHTML）
+      // 不会被此分支劫持（照走 transformPastedHTML）。
+      // 粘贴瞬间挂 decoration 占位（lib/tiptap-upload-placeholder）——没有即时
+      // 反馈用户会以为粘贴无效而反复贴；decoration 不进正史不广播，天然安全
       handlePaste: (view, event) => {
         const upload = imageUploadRef.current;
         if (!upload) return false;
@@ -679,14 +723,33 @@ export default function SmartTextarea({
         event.preventDefault();
         void (async () => {
           for (const f of files) {
+            const id = {}; // 对象身份即占位句柄
+            const name = f.name || "粘贴图片";
+            {
+              const tr = view.state.tr;
+              if (!tr.selection.empty) tr.deleteSelection();
+              tr.setMeta(uploadPlaceholderKey, { add: { id, pos: tr.selection.from, name } });
+              view.dispatch(tr);
+            }
             try {
               const res = await upload(f);
+              // 占位已被用户删掉 = 取消，不再插入
+              const pos = findUploadPlaceholder(view.state, id);
+              if (pos == null) continue;
               const imgType = view.state.schema.nodes.image;
-              if (!res || !imgType) continue;
-              view.dispatch(
-                view.state.tr.replaceSelectionWith(imgType.create({ src: res.src, alt: res.alt })).scrollIntoView(),
-              );
-            } catch { /* 单张失败不影响其余 */ }
+              if (res && imgType) {
+                view.dispatch(
+                  view.state.tr
+                    .insert(pos, imgType.create({ src: res.src, alt: res.alt }))
+                    .setMeta(uploadPlaceholderKey, { remove: { id } })
+                    .scrollIntoView(),
+                );
+              } else {
+                failPlaceholder(view, id);
+              }
+            } catch {
+              failPlaceholder(view, id); // 单张失败不影响其余
+            }
           }
         })();
         return true;

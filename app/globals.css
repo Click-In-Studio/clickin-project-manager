@@ -147,6 +147,71 @@ body {
 .wiki-callout > p { margin: 0; }
 .wiki-callout > p + p { margin-top: 4px; }
 
+/* 任务列表（checklist）—— TipTap TaskItem 渲染为 li > label + div，
+   div 是块级元素，不配 flex 内容会掉到 checkbox 下一行 */
+.smart-textarea-content ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 4px;
+}
+.smart-textarea-content ul[data-type="taskList"] > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.smart-textarea-content ul[data-type="taskList"] > li > label {
+  flex-shrink: 0;
+  margin-top: 0.28em;
+  user-select: none;
+}
+.smart-textarea-content ul[data-type="taskList"] > li > div {
+  flex: 1;
+  min-width: 0;
+}
+.smart-textarea-content ul[data-type="taskList"] > li[data-checked="true"] > div {
+  color: #a1a1aa;
+  text-decoration: line-through;
+}
+/* 只读渲染（remark-gfm：ul.contains-task-list > li.task-list-item）——
+   去掉圆点弹头（checkbox 就是弹头），对齐缩进 */
+.prose ul.contains-task-list {
+  list-style: none;
+  padding-left: 4px;
+}
+.prose ul.contains-task-list > li.task-list-item {
+  padding-left: 0;
+}
+.prose ul.contains-task-list > li.task-list-item::marker {
+  content: "";
+}
+.prose li.task-list-item input[type="checkbox"] {
+  margin-right: 8px;
+  vertical-align: -0.1em;
+}
+
+/* wiki 分栏（方言 :::cols，lib/tiptap-columns / lib/remark-columns）——
+   编辑器与只读渲染共用；窄屏折叠为纵排 */
+.wiki-cols {
+  display: flex;
+  gap: 16px;
+  margin: 8px 0;
+}
+.wiki-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.ProseMirror .wiki-col {
+  border: 1px dashed transparent;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.ProseMirror .wiki-cols:hover .wiki-col {
+  border-color: #e4e4e7;
+}
+@media (max-width: 640px) {
+  .wiki-cols { flex-direction: column; }
+  .wiki-col { flex: none !important; }
+}
+
 /* wiki 正文图片（![alt](/__cm__asset:<id>)）——编辑器与只读渲染共用 */
 .wiki-image {
   max-width: 100%;
@@ -157,6 +222,32 @@ body {
 img.wiki-image.ProseMirror-selectednode {
   outline: 2px solid #0ea5e9;
   outline-offset: 2px;
+}
+
+/* 图片上传占位（decoration，不进正史）——lib/tiptap-upload-placeholder */
+.wiki-upload-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  margin: 2px 0;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #f0f9ff;
+  color: #0369a1;
+  border: 1px dashed #7dd3fc;
+  animation: wiki-upload-pulse 1.2s ease-in-out infinite;
+  user-select: none;
+}
+.wiki-upload-placeholder-failed {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+  animation: none;
+}
+@keyframes wiki-upload-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 /* Inline stage directions within dialogue blocks */
