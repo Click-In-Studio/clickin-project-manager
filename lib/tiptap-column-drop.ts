@@ -22,6 +22,7 @@ import type { EditorState, Transaction } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { removeColumnsAt } from "./tiptap-column-editing";
+import { COLUMN_DROP_ACTIVE_CLASS } from "./editor-drop-indicator";
 
 /** 边缘感应带：固定 40px，但不超过目标自身宽度的 1/4——否则窄栏整个都是
  *  "边缘"，就没有普通落点可言了 */
@@ -220,7 +221,17 @@ export const ColumnDrop = Extension.create({
 
   // 只要落点属于我们管的三种情形（含禁区），就让内建 dropcursor 退场。
   // prosemirror-dropcursor 读的是**光标所在节点**的 spec，所以必须挂到所有
-  // 节点上——extendNodeSchema 正是干这个的
+  // 节点上——extendNodeSchema 正是干这个的。
+  //
+  // 但这一条**不足以**让横线消失，必须配合下面的 CSS 抑制。原因在
+  // prosemirror-dropcursor 的 dragover 里：
+  //
+  //     if (pos && !disabled) { this.setCursor(target); this.scheduleRemoval(5000) }
+  //
+  // 禁用分支什么都不做——既不清除也不重新计时。于是只要鼠标在进入栏边缘之前
+  // 有任何一刻停在普通区域，那条横线就已经画上了，之后整个禁用期间它都不会
+  // 被清掉（要等那 5 秒的 scheduleRemoval）。拖动过程中鼠标必然扫过普通区域，
+  // 结果就是「不管有没有竖线，横线永远都在」。
   extendNodeSchema() {
     return {
       disableDropCursor: (view: EditorView, _pos: unknown, event: DragEvent) =>
@@ -231,7 +242,20 @@ export const ColumnDrop = Extension.create({
   addProseMirrorPlugins() {
     let indicator: HTMLElement | null = null;
 
-    const hide = () => { if (indicator) indicator.style.display = "none"; };
+    // 内建横线的抑制开关。挂 body 而不是编辑器容器——dropcursor 把自己的元素
+    // append 到 view.dom 的 offsetParent 上，那一层是谁由布局决定，从 body
+    // 往下选是唯一稳的写法。选择器命中的是我们自己配的 .wiki-dropcursor 类
+    // （见 lib/editor-drop-indicator.ts），不依赖库的内部命名。
+    const setSuppressed = (on: boolean) => {
+      document.body.classList.toggle(COLUMN_DROP_ACTIVE_CLASS, on);
+    };
+
+    const hide = () => {
+      if (indicator) indicator.style.display = "none";
+    };
+
+    /** 拖拽结束 / 离开：竖线收起，横线的抑制也要一并解除 */
+    const reset = () => { hide(); setSuppressed(false); };
 
     const show = (line: LineRect) => {
       if (!indicator) {
@@ -249,21 +273,30 @@ export const ColumnDrop = Extension.create({
 
     return [new Plugin({
       key: columnDropKey,
-      view: () => ({ destroy() { indicator?.remove(); indicator = null; } }),
+      view: () => ({
+        destroy() {
+          indicator?.remove();
+          indicator = null;
+          setSuppressed(false);
+        },
+      }),
       props: {
         handleDOMEvents: {
           dragover: (view, event) => {
             const target = computeColumnDropTarget(view, event as DragEvent);
+            // 只要落点归我们管（含禁区），内建横线一律抑制：禁区里画横线等于
+            // 谎称"这里能放"，比没有指示更糟
+            setSuppressed(!!target);
             if (target && target.kind !== "forbidden") show(target.line);
             else hide(); // 禁区不画线——没有指示本身就是"这里不能放"的表达
             return false; // 只画线，不拦事件
           },
-          dragleave: () => { hide(); return false; },
-          dragend: () => { hide(); return false; },
-          drop: () => { hide(); return false; },
+          dragleave: () => { reset(); return false; },
+          dragend: () => { reset(); return false; },
+          drop: () => { reset(); return false; },
         },
         handleDrop: (view, event, slice, moved) => {
-          hide();
+          reset();
           if (slice.content.childCount !== 1) return false;
           const dragged = slice.content.firstChild;
           if (!dragged) return false;

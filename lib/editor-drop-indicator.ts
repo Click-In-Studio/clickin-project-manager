@@ -28,3 +28,15 @@ export const DROP_INDICATOR_OPTIONS = {
   color: "#0ea5e9",
   class: "wiki-dropcursor",
 } as const;
+
+/**
+ * 挂在 body 上的横线抑制开关：造栏拖放接管落点时打开，globals.css 里据此
+ * 把 `.wiki-dropcursor` 藏起来。
+ *
+ * 为什么需要这个开关——单靠节点 spec 的 disableDropCursor 不够：
+ * prosemirror-dropcursor 的 dragover 在禁用分支里**什么都不做**，既不清除
+ * 已经画上的横线也不重新计时（它的 scheduleRemoval 是 5 秒）。于是鼠标只要
+ * 在进入造栏区之前扫过普通区域，那条横线就会一直挂着，看起来就是"横线永远
+ * 都在"。disableDropCursor 负责不画新的，这个类负责藏掉旧的，两者缺一不可。
+ */
+export const COLUMN_DROP_ACTIVE_CLASS = "wiki-column-drop-active";
