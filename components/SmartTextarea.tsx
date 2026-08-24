@@ -35,7 +35,6 @@ import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor-slash-commands
 import { DROP_INDICATOR_OPTIONS } from "@/lib/editor-drop-indicator";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 import BlockHandle from "@/components/editor/BlockHandle";
-import BlockBubbleMenu from "@/components/editor/BlockBubbleMenu";
 export { normalizeLegacyMentions };
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -1035,7 +1034,6 @@ export default function SmartTextarea({
           才是 1:1 替换而不是能力平移 */}
       {markdown && !readOnly && <TextBubbleMenu editor={editor} />}
       {markdown && blockTools && !readOnly && <BlockHandle editor={editor} />}
-      {markdown && blockTools && !readOnly && <BlockBubbleMenu editor={editor} />}
       {drop && rect && !dropHidden && typeof document !== "undefined" &&
         createPortal(
           <div

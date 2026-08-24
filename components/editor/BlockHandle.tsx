@@ -11,11 +11,12 @@
 // 把**唯一一个**手柄 DOM 移过去。官方 DragHandle 就是这套（floating-ui 定位 +
 // onNodeChange 回调给出当前 hover 的 node）。
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { NodeSelection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
+import BlockMenu from "@/components/editor/BlockMenu";
 
 /** 表格内部结构只能整表拖，不能把行/单元格拖出去 */
 const UNDRAGGABLE = new Set(["tableRow", "tableCell", "tableHeader"]);
@@ -27,8 +28,8 @@ const UNDRAGGABLE = new Set(["tableRow", "tableCell", "tableHeader"]);
  * 不定死的话，命中评分会在「栏里的块」「栏」「整个分栏组」之间摇摆——同一个
  * 位置有时拽走一段、有时拽走整组，是实测到的不确定行为。
  *
- * 排除整组也是刻意的：组本身不给手柄。要整组移动/删除，用块浮动条上的
- * 「整组」按钮先把选中提升到组。
+ * 排除整组也是刻意的：组本身不给手柄。要整组移动/删除，用手柄菜单里的
+ * 「选中整个分栏」把选中提升到组。
  */
 function scoreForColumns({ node, $pos }: { node: PMNode; $pos: { depth: number; node: (d: number) => PMNode } }): number {
   const name = node.type.name;
@@ -43,23 +44,36 @@ function scoreForColumns({ node, $pos }: { node: PMNode; $pos: { depth: number; 
 
 export default function BlockHandle({ editor }: { editor: Editor | null }) {
   const [target, setTarget] = useState<{ node: PMNode | null; pos: number }>({ node: null, pos: -1 });
+  // 菜单打开时手柄自己会因为鼠标移开而隐藏，所以锚点在点击那一刻就取好存下来
+  const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
+  const gripRef = useRef<HTMLSpanElement>(null);
 
   if (!editor) return null;
 
   /** 选中整块 —— NodeSelection 是块级操作的统一入口（复制/删除/移动都吃它） */
-  function selectBlock() {
-    if (!editor || target.pos < 0) return;
+  function selectBlock(): boolean {
+    if (!editor || target.pos < 0) return false;
     const { doc } = editor.state;
-    if (target.pos >= doc.content.size) return;
+    if (target.pos >= doc.content.size) return false;
+    let ok = false;
     editor.chain().focus().command(({ tr, dispatch }) => {
       try {
         const sel = NodeSelection.create(tr.doc, target.pos);
         if (dispatch) dispatch(tr.setSelection(sel));
+        ok = true;
         return true;
       } catch {
         return false; // pos 已失效（并发回灌改了文档）——不选，别崩
       }
     }).run();
+    return ok;
+  }
+
+  /** 点 ⠿：选中整块并弹出块操作菜单（飞书/Notion 都是把重心放在手柄上） */
+  function openMenu() {
+    if (!selectBlock()) return;
+    const rect = gripRef.current?.getBoundingClientRect();
+    if (rect) setMenuAnchor(rect);
   }
 
   /** 在当前块后插空段并唤起 `/`（§2.6 ④：＋ 号顺势唤起 slash 菜单） */
@@ -87,6 +101,7 @@ export default function BlockHandle({ editor }: { editor: Editor | null }) {
   }
 
   return (
+    <>
     <DragHandle
       editor={editor}
       // 列表项、引用块内部的块也要能拖（Notion 同款），否则列表里每一条都拖不动
@@ -117,12 +132,17 @@ export default function BlockHandle({ editor }: { editor: Editor | null }) {
         className="wiki-block-handle-btn"
       >＋</span>
       <span
+        ref={gripRef}
         role="button"
         tabIndex={-1}
-        onClick={selectBlock}
-        title="拖动排序 / 点击选中整块"
+        onClick={openMenu}
+        title="拖动排序 / 点击打开块操作"
         className="wiki-block-handle-btn wiki-block-handle-grip"
       >⠿</span>
     </DragHandle>
+    {menuAnchor && (
+      <BlockMenu editor={editor} anchor={menuAnchor} onClose={() => setMenuAnchor(null)} />
+    )}
+    </>
   );
 }
