@@ -3,6 +3,9 @@
 import { useState, useEffect, type FormEvent } from "react";
 
 const AUTO_LOGIN_KEY = "feishu_auto_login_attempted";
+const DEVICE_SEEN_KEY = "backstage_auth_device_seen_v1";
+
+type AuthMode = "login" | "register";
 
 // 登录成功后的回跳目标（仅允许站内相对路径，防 open redirect）
 function loginDest(): string {
@@ -19,12 +22,31 @@ function inviteTokenFromDest(): string | undefined {
 
 export default function LoginClient({ feishuAppId, inviteOnly }: { feishuAppId: string; inviteOnly?: boolean }) {
   const [mode, setMode] = useState<"idle" | "email_sent" | "loading" | "otp_loading">("idle");
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [authModeReady, setAuthModeReady] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [regCode, setRegCode] = useState("");
   const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
+
+  useEffect(() => {
+    let initialMode: AuthMode = "login";
+    try {
+      if (!window.localStorage.getItem(DEVICE_SEEN_KEY)) {
+        initialMode = "register";
+        window.localStorage.setItem(DEVICE_SEEN_KEY, "1");
+      }
+    } catch {
+      // Storage may be unavailable in privacy-restricted browsers; login is the safe default.
+    }
+
+    // TODO(backend): replace this device-local fallback with the canonical first-launch
+    // signal/default auth mode supplied by the backend, while retaining manual switching.
+    setAuthMode(initialMode);
+    setAuthModeReady(true);
+  }, []);
 
   // Feishu in-app auto-login
   useEffect(() => {
@@ -83,7 +105,7 @@ export default function LoginClient({ feishuAppId, inviteOnly }: { feishuAppId: 
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedName = name.trim();
     if (!trimmedEmail) { setError("请输入邮箱地址"); return; }
-    if (!trimmedName) { setError("请输入你的姓名"); return; }
+    if (authMode === "register" && !trimmedName) { setError("请输入你的姓名"); return; }
 
     setMode("loading");
     try {
@@ -92,9 +114,12 @@ export default function LoginClient({ feishuAppId, inviteOnly }: { feishuAppId: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: trimmedEmail,
-          name: trimmedName,
-          ...(regCode.trim() ? { registrationCode: regCode.trim() } : {}),
+          ...(authMode === "register" && trimmedName ? { name: trimmedName } : {}),
+          ...(authMode === "register" && regCode.trim() ? { registrationCode: regCode.trim() } : {}),
           ...(inviteTokenFromDest() ? { inviteToken: inviteTokenFromDest() } : {}),
+          // TODO(backend): enforce login vs. registration intent server-side. The current
+          // email initiation endpoint intentionally remains backward-compatible and unified.
+          authIntent: authMode,
         }),
       });
       if (res.ok) {
@@ -109,6 +134,13 @@ export default function LoginClient({ feishuAppId, inviteOnly }: { feishuAppId: 
       setMode("idle");
       setError("网络错误，请稍后重试");
     }
+  }
+
+  function switchAuthMode(nextMode: AuthMode) {
+    setAuthMode(nextMode);
+    setMode("idle");
+    setOtp("");
+    setError("");
   }
 
   async function handleOtpSubmit(e: FormEvent) {
@@ -138,7 +170,7 @@ export default function LoginClient({ feishuAppId, inviteOnly }: { feishuAppId: 
     }
   }
 
-  if (!showForm) {
+  if (!showForm || !authModeReady) {
     return (
       <div className="flex min-h-screen items-center justify-center" style={{ background: "var(--paper)" }}>
         <p style={{ fontSize: 12, color: "var(--muted)" }}>正在登录…</p>
@@ -159,9 +191,41 @@ export default function LoginClient({ feishuAppId, inviteOnly }: { feishuAppId: 
         <p style={{ margin: "0 0 6px", fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--stage)", textAlign: "center" }}>
           BACKSTAGE
         </p>
-        <h1 style={{ margin: "0 0 32px", fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", textAlign: "center" }}>
+        <h1 style={{ margin: "0 0 16px", fontSize: 20, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", textAlign: "center" }}>
           后台
         </h1>
+
+        <div
+          role="tablist"
+          aria-label="选择登录或注册"
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, padding: 4, marginBottom: 28, borderRadius: 10, background: "var(--paper)", border: "1px solid var(--line)" }}
+        >
+          {(["login", "register"] as const).map(item => {
+            const selected = authMode === item;
+            return (
+              <button
+                key={item}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => switchAuthMode(item)}
+                style={{
+                  padding: "8px 0",
+                  border: "none",
+                  borderRadius: 7,
+                  background: selected ? "var(--ink)" : "transparent",
+                  color: selected ? "#fff" : "var(--muted)",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  transition: "background-color 160ms ease, color 160ms ease",
+                }}
+              >
+                {item === "login" ? "登录" : "注册"}
+              </button>
+            );
+          })}
+        </div>
 
         {mode === "email_sent" || mode === "otp_loading" ? (
           /* OTP entry state */
@@ -194,7 +258,7 @@ export default function LoginClient({ feishuAppId, inviteOnly }: { feishuAppId: 
                 disabled={mode === "otp_loading"}
                 style={{ display: "block", width: "100%", padding: "10px 0", fontSize: 13, fontWeight: 700, borderRadius: 9, background: "var(--ink)", color: "#fff", border: "none", cursor: mode === "otp_loading" ? "default" : "pointer", opacity: mode === "otp_loading" ? 0.6 : 1 }}
               >
-                {mode === "otp_loading" ? "验证中…" : "确认登录"}
+                {mode === "otp_loading" ? "验证中…" : authMode === "login" ? "确认登录" : "确认注册"}
               </button>
             </form>
 
@@ -222,27 +286,31 @@ export default function LoginClient({ feishuAppId, inviteOnly }: { feishuAppId: 
                 required
                 style={{ ...inp, marginBottom: 10 }}
               />
-              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>姓名</label>
-              <input
-                type="text"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="你的名字"
-                required
-                style={{ ...inp, marginBottom: inviteOnly && !inviteTokenFromDest() ? 10 : 14 }}
-              />
-              {inviteOnly && !inviteTokenFromDest() && (
+              {authMode === "register" && (
                 <>
-                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>
-                    邀请码<span style={{ fontWeight: 400 }}>（新用户填写；邮箱已被邀请可留空）</span>
-                  </label>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>姓名</label>
                   <input
                     type="text"
-                    value={regCode}
-                    onChange={e => setRegCode(e.target.value)}
-                    placeholder="测试期间需受邀注册"
-                    style={{ ...inp, marginBottom: 14 }}
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    placeholder="你的名字"
+                    required
+                    style={{ ...inp, marginBottom: inviteOnly && !inviteTokenFromDest() ? 10 : 14 }}
                   />
+                  {inviteOnly && !inviteTokenFromDest() && (
+                    <>
+                      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>
+                        邀请码<span style={{ fontWeight: 400 }}>（邮箱已被邀请可留空）</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={regCode}
+                        onChange={e => setRegCode(e.target.value)}
+                        placeholder="测试期间需受邀注册"
+                        style={{ ...inp, marginBottom: 14 }}
+                      />
+                    </>
+                  )}
                 </>
               )}
               {error && <p style={{ fontSize: 12, color: "#c53030", margin: "0 0 10px" }}>{error}</p>}
@@ -251,7 +319,7 @@ export default function LoginClient({ feishuAppId, inviteOnly }: { feishuAppId: 
                 disabled={mode === "loading"}
                 style={{ display: "block", width: "100%", padding: "10px 0", fontSize: 13, fontWeight: 700, borderRadius: 9, background: "var(--ink)", color: "#fff", border: "none", cursor: mode === "loading" ? "default" : "pointer", opacity: mode === "loading" ? 0.6 : 1 }}
               >
-                {mode === "loading" ? "发送中…" : "获取验证码"}
+                {mode === "loading" ? "发送中…" : authMode === "login" ? "获取登录验证码" : "获取注册验证码"}
               </button>
             </form>
 
@@ -265,7 +333,7 @@ export default function LoginClient({ feishuAppId, inviteOnly }: { feishuAppId: 
               href="/api/auth/feishu/initiate"
               style={{ display: "block", textAlign: "center", borderRadius: 9, padding: "10px 0", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink)", textDecoration: "none" }}
             >
-              使用飞书登录
+              {authMode === "login" ? "使用飞书登录" : "使用飞书注册"}
             </a>
           </>
         )}
