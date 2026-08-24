@@ -17,13 +17,27 @@
 // 形态（marker 独占段落），serializer 保证 canonical，保真锁安全。
 import { Node, mergeAttributes } from "@tiptap/core";
 
-export const COLS_OPEN_RE = /^:::cols(?:[ \t]+([\d,\s]+))?[ \t]*$/;
+// 参数位遵循布局类统一文法（语法大纲 §5.2）：`:::cols <主参数> [k=v ...]`
+// 主参数 = 各栏宽度百分比（`46,54`），其余一律 k=v。本轮不新增任何 k=v 参数，
+// 但**文法必须先能接**——否则将来加 `gap=24` 就得再动一次三落点，而旧版
+// 解析器遇到不认识的参数会整组 fence 匹配失败（内容掉出分栏，属于吃结构）。
+// 未知 k=v 一律忽略、不报错、不影响分栏成立。
+export const COLS_OPEN_RE = /^:::cols(?:[ \t]+([^\n]*?))?[ \t]*$/;
 export const COLS_CLOSE_RE = /^:::[ \t]*$/;
 
-/** 解析开 fence 的宽度参数（"46,54" → [46,54]；非法/缺失 → null） */
+/** 解析开 fence 的宽度参数（"46,54" → [46,54]；"46,54 gap=24" 亦可；
+ *  非法/缺失 → null）。k=v 参数被跳过。 */
 export function parseColsRatios(params: string | undefined | null): number[] | null {
   if (!params) return null;
-  const nums = params.split(",").map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n) && n > 0);
+  // 主参数可含空格（`33, 33, 34` 是人手写的常见形态，canonical 序列化则无空格）：
+  // 取开头连续的「纯数字/逗号」token 拼回来，遇到第一个 k=v（含 `=`）即停。
+  const head = params.trim().split(/\s+/)
+    .reduce<{ parts: string[]; done: boolean }>((acc, tok) => {
+      if (acc.done || !/^[\d,]+$/.test(tok)) return { ...acc, done: true };
+      return { parts: [...acc.parts, tok], done: false };
+    }, { parts: [], done: false }).parts.join("");
+  if (!head) return null; // 主参数位不是宽度串（缺失或只有 k=v）
+  const nums = head.split(",").map(s => parseInt(s, 10)).filter(n => Number.isFinite(n) && n > 0);
   return nums.length >= 2 ? nums : null;
 }
 

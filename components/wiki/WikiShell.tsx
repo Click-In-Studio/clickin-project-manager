@@ -320,7 +320,7 @@ export default function WikiShell({
                     // 源码 textarea 靠 text/plain 走浏览器原生插入
                     const label = entry.title ?? "（无标题）";
                     e.dataTransfer.setData("application/x-clickin-wiki", JSON.stringify({ id: entry.id, label }));
-                    e.dataTransfer.setData("text/plain", `[#${label}](/__cm__wiki:${entry.id})`);
+                    e.dataTransfer.setData("text/plain", `[#](/__cm__/wiki/${entry.id})`);
                   }}
                   onDragEnd={() => { setDragId(null); setDropHint(null); }}
                   onDragOver={e => {

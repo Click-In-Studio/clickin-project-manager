@@ -127,6 +127,13 @@ import {
   GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH,
 } from "./grant-template-retire-snapshot";
 import {
+  isWikiDialectV2PreMigration,
+  createWikiDialectV2PreMigrationData,
+  WIKI_DIALECT_V2_SNAPSHOT_PATH,
+  type WikiDialectV2Snapshot,
+} from "./wiki-dialect-v2-snapshot";
+import { normalizeWikiDialect } from "@/lib/wiki-dialect-migrate";
+import {
   isVersionRetirePreMigrationSchema,
   createVersionRetirePreMigrationData,
   VERSION_RETIRE_SNAPSHOT_PATH,
@@ -597,6 +604,28 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  // wiki 正文方言 v1 → v2：必须排在全部结构迁移之后（工厂正文要往已成型的
+  // wiki 表里写）。SQL 只建备份表，正文改写由 lib/wiki-dialect-migrate 执行——
+  // 与 scripts/migrate-wiki-dialect.ts 同一份实现，CI 跑的就是线上要跑的东西。
+  if (await isWikiDialectV2PreMigration(pool)) {
+    const dialectSnapshot = await createWikiDialectV2PreMigrationData(pool, TEST_USER);
+    await writeFile(WIKI_DIALECT_V2_SNAPSHOT_PATH, JSON.stringify(dialectSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-wiki-dialect-v2.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+    const { rows } = await pool.query<{ id: string; body: string }>(
+      "SELECT id::text AS id, body FROM wiki",
+    );
+    for (const row of rows) {
+      const next = normalizeWikiDialect(row.body);
+      if (next !== row.body) {
+        await pool.query("UPDATE wiki SET body = $1 WHERE id = $2::uuid", [next, row.id]);
+      }
+    }
+  }
 }
 
 export async function teardown() {
@@ -619,6 +648,23 @@ export async function teardown() {
       // production 删除级联 wiki / wiki_entity_link
       await pool.query("DELETE FROM production WHERE id = $1", [wikiEntityLinkSnapshot.prodId]).catch(() => {});
       await unlink(WIKI_ENTITY_LINK_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // wiki 方言 v2 迁移快照的工厂演出（migration path only）
+  {
+    let dialectSnapshot: WikiDialectV2Snapshot | null = null;
+    try {
+      dialectSnapshot = JSON.parse(
+        await readFile(WIKI_DIALECT_V2_SNAPSHOT_PATH, "utf8"),
+      ) as WikiDialectV2Snapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (dialectSnapshot) {
+      // production 删除级联 wiki，wiki 删除级联备份表行
+      await pool.query("DELETE FROM production WHERE id = $1", [dialectSnapshot.productionId]).catch(() => {});
+      await unlink(WIKI_DIALECT_V2_SNAPSHOT_PATH).catch(() => {});
     }
   }
 

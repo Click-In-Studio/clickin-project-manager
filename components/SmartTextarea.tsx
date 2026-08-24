@@ -19,16 +19,17 @@ import type { SuggestionProps, SuggestionKeyDownProps } from "@tiptap/suggestion
 import type { MentionSearchResult } from "@/lib/mention-types";
 import {
   encodeMentionHref, decodeMentionHref, CM_HREF_PREFIX,
+  encodeUserHref, decodeUserHref, decodeAssetSrc,
   type ContentMentionAttrs,
 } from "@/lib/mention-types";
-import { parseToDoc, serializeAtMention, normalizeLegacyMentions } from "@/lib/mention-format";
+import { normalizeLegacyMentions } from "@/lib/mention-format";
+import { normalizeWikiDialect } from "@/lib/wiki-dialect-migrate";
 import { isFeishuHtml, transformFeishuHtml } from "@/lib/feishu-paste";
 import { Callout } from "@/lib/tiptap-callout";
 import { WikiImage } from "@/lib/tiptap-wiki-image";
 import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/tiptap-upload-placeholder";
 import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 export { normalizeLegacyMentions };
-import { serializeMention } from "@/lib/mention-types";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -109,7 +110,7 @@ export function contentRefPlugin(productionId: string, versionId?: string | null
     format: (item) => {
       const r = item.data as MentionSearchResult | undefined;
       if (!r) return `#${item.label}`;
-      return serializeMention({ kind: r.kind, displayMode: r.displayMode ?? null, id: r.id, aux: r.aux ?? null, versionId: null });
+      return `[#](${encodeMentionHref({ kind: r.kind, displayMode: r.displayMode ?? null, id: r.id, aux: r.aux ?? null, versionId: null })})`;
     },
     toNode: (item) => {
       const r = item.data as MentionSearchResult | undefined;
@@ -123,7 +124,7 @@ export { contentRefPlugin as scriptRefDropPlugin };
 
 // ── Factory: [[wikilink ───────────────────────────────────────────────────────
 // wiki 文档库 W4：`[[` 触发文档补全。落节点 kind='wiki' 的 contentMention 语义，
-// markdown 序列化为 [#标题](/__cm__wiki:<id>)（存 id 不存标题——标题仅编辑期快照，
+// markdown 序列化为 [#](/__cm__/wiki/<id>)（存 id 不存标题——显示位是恒定哨兵，
 // 渲染端逐观看者经 mention-resolve 刷新，账本 §4.1）。
 
 export function wikiLinkDropPlugin(productionId: string): DropPlugin {
@@ -147,7 +148,7 @@ export function wikiLinkDropPlugin(productionId: string): DropPlugin {
         [[{item.label}]]
       </span>
     ),
-    format: (item) => `[#${item.label}](${CM_HREF_PREFIX}wiki:${item.id})`,
+    format: (item) => `[#](${encodeMentionHref({ kind: "wiki", displayMode: null, id: item.id, aux: null, versionId: null })})`,
     toNode: (item) => ({ id: item.id, label: item.label }),
   };
 }
@@ -277,13 +278,15 @@ const MarkdownContentMentionExt = Mention.extend({
   addStorage() {
     return {
       markdown: {
-        serialize(state: { write: (s: string) => void }, node: { attrs: ContentMentionAttrs & { label?: string } }) {
-          const { kind, displayMode, id, aux, versionId, label } = node.attrs;
+        serialize(state: { write: (s: string) => void }, node: { attrs: ContentMentionAttrs }) {
+          const { kind, displayMode, id, aux, versionId } = node.attrs;
           const href = encodeMentionHref({ kind, displayMode, id, aux, versionId });
-          // wiki 标题不落存量文字——label 只是 chip 展示用的活刷新快照，写回正文
-          // 只会留一段迟早过期的旧标题（同 wiki-link-syntax.ts 教模型的写法一致）
-          const text = kind === "wiki" ? "#" : `#${label ?? kind}`;
-          state.write(`[${text}](${href})`);
+          // 显示位恒为固定哨兵 "#"，**所有 kind 一视同仁**（语法大纲 G4：显示位是
+          // 缓存不是真相）。原先只有 wiki 落 "#"、其余 kind 落 `#${label}`——那段
+          // label 是编辑期快照，目标改名后就冻在正文里，看着像"链接坏了"。
+          // 为什么不真的留空 `[](…)`：空链接文字在不认方言的渲染器里**完全不可见**，
+          // 违反 G5「降级可读」；`#` 携带零信息、永不过期，是"留空"的可降级写法。
+          state.write(`[#](${href})`);
         },
       },
     };
@@ -316,8 +319,17 @@ function insertWikiMentionAt(editor: any, range: { from: number; to: number } | 
 }
 
 // @ mention — works in both modes; adds markdown serialization for markdown mode.
-// markdown 形态 [@名](uid:id)（@ 收进链接文本）：原 @[名](uid:id) 只有序列化没有
-// 反序列化（被 StarterKit Link 抢走），重载即失真 → 保真警告 → 源码保存毁 chip
+// markdown 形态 [@名](/__cm__/user/<id>)：@ 收进链接文本（原 @[名](uid:id) 只有
+// 序列化没有反序列化，被 StarterKit Link 抢走，重载即失真 → 保真警告 → 源码保存毁 chip）。
+//
+// href 从 `uid:` 换成引用 URI 路径形态是**线上 bug 修复**，不只是形态统一：
+// react-markdown 的 defaultUrlTransform 会把 `uid:` 当未知协议剥成空串，
+// WikiMarkdown 里 `h.startsWith("uid:")` 分支因此永不命中，wiki 正文的 @提及
+// 一直渲染成 <a href="">（点击重载页面）而不是蓝色 chip。详见 mention-types.ts。
+//
+// 唯一保留 label 的引用类型：姓名没有解析端点（mention-resolve 不支持 user
+// kind），留空就彻底没得显示。等 user 解析接上后，这里收敛成 `[@](…)`，与
+// contentMention 的固定哨兵一致。姓名改动远低频于文档改名，冻结代价可接受。
 const AtMentionExt = Mention.extend({
   name: "atMention",
   parseHTML() {
@@ -329,9 +341,10 @@ const AtMentionExt = Mention.extend({
         getAttrs(el) {
           if (typeof el === "string") return false;
           const href = el.getAttribute("href") ?? "";
-          if (!href.startsWith("uid:")) return false;
+          const id = decodeUserHref(href); // 新形态 + 旧 uid: 双读（历史版本）
+          if (!id) return false;
           const label = (el.textContent ?? "").replace(/^@/, "");
-          return { id: href.slice(4) || null, label };
+          return { id, label };
         },
       },
     ];
@@ -341,7 +354,7 @@ const AtMentionExt = Mention.extend({
       markdown: {
         serialize(state: { write: (s: string) => void }, node: { attrs: { id: string | null; label: string } }) {
           const { id, label } = node.attrs;
-          state.write(id ? `[@${label}](uid:${id})` : `@${label}`);
+          state.write(id ? `[@${label}](${encodeUserHref(id)})` : `@${label}`);
         },
       },
     };
@@ -349,22 +362,6 @@ const AtMentionExt = Mention.extend({
 });
 
 
-// ── Plain-text serialisation (non-markdown mode) ───────────────────────────────
-
-function serializeDoc(editor: ReturnType<typeof useEditor>): string {
-  if (!editor) return "";
-  return editor.getText({
-    blockSeparator: "\n",
-    textSerializers: {
-      hardBreak: () => "\n",
-      contentMention: ({ node }) => {
-        const { kind, displayMode, id, aux, versionId } = node.attrs as ContentMentionAttrs;
-        return serializeMention({ kind, displayMode, id, aux, versionId });
-      },
-      atMention: ({ node }) => serializeAtMention(node.attrs.id as string | null, node.attrs.label as string),
-    },
-  });
-}
 
 // ── Upload placeholder helpers ───────────────────────────────────────────────
 
@@ -406,7 +403,7 @@ export interface SmartTextareaProps {
   /** Extra custom-trigger plugins (escape hatch) */
   plugins?: DropPlugin[];
   /** 图片粘贴上传（wiki 文档场景）。提供即解锁 image 节点：粘贴的图片文件
-   *  经此上传，返回存储形态 src（/__cm__asset:<id>）；未提供的面（活动纪要等）
+   *  经此上传，返回存储形态 src（/__cm__/asset/<id>）；未提供的面（活动纪要等）
    *  不注册 image 节点，粘贴图片行为与从前一致（被 schema 丢弃）。 */
   imageUpload?: (file: File) => Promise<{ src: string; alt: string } | null>;
   placeholder?: string;
@@ -581,13 +578,13 @@ export default function SmartTextarea({
   const ContentMentionExt = markdown ? MarkdownContentMentionExt : PlainContentMentionExt;
 
   const extensions = useMemo(() => {
-    const base = markdown
-      ? StarterKit
-      : StarterKit.configure({
-          bold: false, italic: false, strike: false, code: false, codeBlock: false,
-          heading: false, blockquote: false, bulletList: false, orderedList: false,
-          listItem: false, horizontalRule: false,
-        });
+    // 全站同一套文档 schema。原先 plain 面阉掉了 bold/heading/list 等节点——
+    // 那在「正文按自定义 token 存」的时代无害，但存储统一成 markdown 之后就是
+    // **内容丢失**：`*foo*` 会被 tiptap-markdown 解析成 emphasis、再被没有该 mark
+    // 的 schema 丢弃，重新序列化时星号就消失了，而 plain 面没有保真锁兜底。
+    // 生产库实测：plain 列里带 markdown 语法的一共 3 行（两条有序列表），
+    // 所以「统一 schema」的观感代价可忽略，而丢内容的风险是实打实的。
+    const base = StarterKit;
 
     const contentMentionCfg = ContentMentionExt.configure({
       // v3 Mention 退格默认把 chip 还原成 mentionSuggestionChar（未设=@）——
@@ -595,7 +592,7 @@ export default function SmartTextarea({
       deleteTriggerWithBackspace: true,
       renderText: ({ node }) => {
         const { kind, displayMode, id, aux, versionId } = node.attrs as ContentMentionAttrs;
-        return serializeMention({ kind, displayMode, id, aux, versionId });
+        return `[#](${encodeMentionHref({ kind, displayMode, id, aux, versionId })})`;
       },
       renderHTML: ({ node }) => {
         const { kind, displayMode, id, aux, versionId, label } = node.attrs;
@@ -646,27 +643,33 @@ export default function SmartTextarea({
       atMentionCfg,
     ];
 
-    // image 节点仅在提供 imageUpload 的面（wiki）注册：src 存 /__cm__asset:<id>，
+    // image 节点仅在提供 imageUpload 的面（wiki）注册：src 存 /__cm__/asset/<id>，
     // 展示经 thumb 端点（session 鉴权，img src 直接可流）
     const imageExt = WikiImage.configure({
       resolveSrc: (src) => {
-        const m = /^\/__cm__asset:([^/?#\s]+)$/.exec(src);
+        const assetId = decodeAssetSrc(src); // 新旧形态双读
         const pid = contentMentionRef.current?.productionId;
-        if (m && pid) return `${BASE_PATH}/api/production/${pid}/assets/${m[1]}/thumb`;
+        if (assetId && pid) return `${BASE_PATH}/api/production/${pid}/assets/${assetId}/thumb`;
         return src;
       },
     });
 
-    return markdown
-      // breaks: 单回车=换行（CJK 写作习惯，与 WikiMarkdown remark-breaks 对齐）；
-      // TableKit: StarterKit 不含表格节点，缺了它 markdown 表格进编辑器会被吞
-      ? [base, Markdown.configure({ transformCopiedText: true, breaks: true }),
-         TableKit.configure({ table: { resizable: false } }),
-         TaskList, TaskItem.configure({ nested: true }),
-         Callout, Column, ColumnGroup,
-         ...(hasImageUpload ? [imageExt, UploadPlaceholder] : []),
-         ...commonExts, wikiTriggerCfg, remoteCursorExt]
-      : [base, ...commonExts];
+    // breaks: 单回车=换行（CJK 写作习惯，与 WikiMarkdown remark-breaks 对齐）
+    const markdownExt = Markdown.configure({ transformCopiedText: true, breaks: true });
+
+    // 「一切文本皆文档」：**两个分支都挂 Markdown 扩展**，存储形态统一为 markdown。
+    // `markdown` prop 从此只决定「开哪些富文本能力 + 要不要工具栏」，不再决定
+    // 正文怎么存——原先 plain 分支走 serializeDoc 自造 [#kind:id] token，那是
+    // 文档概念成型之前各造各的产物（生产库实测：plain 面一条 token 都没有）。
+    // 扩展集也只有一套：`markdown` prop 只决定要不要工具栏（见下方渲染），
+    // 不再决定能力。image 仍按 imageUpload 是否提供门控——它需要一个上传器。
+    // TableKit: StarterKit 不含表格节点，缺了它 markdown 表格进编辑器会被吞。
+    return [base, markdownExt,
+      TableKit.configure({ table: { resizable: false } }),
+      TaskList, TaskItem.configure({ nested: true }),
+      Callout, Column, ColumnGroup,
+      ...(hasImageUpload ? [imageExt, UploadPlaceholder] : []),
+      ...commonExts, wikiTriggerCfg, remoteCursorExt];
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markdown, remoteCursorExt, hasImageUpload]);
 
@@ -678,7 +681,7 @@ export default function SmartTextarea({
     immediatelyRender: false,
     editable: !readOnly,
     extensions,
-    content: markdown ? normalizeLegacyMentions(value) : parseToDoc(value),
+    content: normalizeWikiDialect(value),
     autofocus: autoFocus,
     editorProps: {
       attributes: {
@@ -823,7 +826,7 @@ export default function SmartTextarea({
       } catch { /* selection 在非常规位置时忽略 */ }
     },
     onCreate: ({ editor }) => {
-      if (markdown && onInitialRoundTripRef.current) {
+      if (onInitialRoundTripRef.current) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onInitialRoundTripRef.current((editor.storage as any).markdown.getMarkdown());
       }
@@ -833,13 +836,8 @@ export default function SmartTextarea({
       // 纯展示刷新，不算真实编辑，不触发 onChange/自动保存
       if (transaction.getMeta("wikiLabelRefresh")) return;
       if (readOnly) return;
-      let text: string;
-      if (markdown) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        text = (editor.storage as any).markdown.getMarkdown();
-      } else {
-        text = serializeDoc(editor);
-      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const text: string = (editor.storage as any).markdown.getMarkdown();
       if (text !== lastEmittedRef.current) {
         lastEmittedRef.current = text;
         onChange(text);
@@ -876,7 +874,7 @@ export default function SmartTextarea({
     if (!editor || editor.isDestroyed) return;
     if (value === lastEmittedRef.current) return;
     lastEmittedRef.current = value;
-    const newContent = markdown ? normalizeLegacyMentions(value) : parseToDoc(value);
+    const newContent = normalizeWikiDialect(value);
     const { from, to } = editor.state.selection;
     editor.commands.setContent(newContent, { emitUpdate: false });
     // 协作合并回灌时保留本端选区（钳到新文档尺寸内）

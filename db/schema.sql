@@ -750,6 +750,27 @@ CREATE TABLE IF NOT EXISTS wiki_dept_share (
   PRIMARY KEY (wiki_id, dept_id)
 );
 
+-- 方言 v1→v2 迁移的正文备份（migrate-wiki-dialect-v2.sql）。既是回滚依据，也是
+-- 「本库是否已迁移」的判据——本迁移是纯 DML 正文改写，没有可供判定的列变化。
+-- 迁移落稳后可单独 DROP，但在那之前它是唯一能还原迁移前正文的地方
+-- （wiki_revision 只有编辑历史，不含迁移这一次的改写）。
+CREATE TABLE IF NOT EXISTS wiki_body_backup_dialect_v2 (
+  wiki_id    UUID        PRIMARY KEY REFERENCES wiki(id) ON DELETE CASCADE,
+  body       TEXT        NOT NULL,
+  taken_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 方言 v1→v2 迁移里 wiki.body 之外那几列的正文备份（agent_memory_chunk.text /
+-- comment.body / user_notification.body）。通用形状，行数极少。
+CREATE TABLE IF NOT EXISTS dialect_v2_text_backup (
+  table_name  TEXT        NOT NULL,
+  row_id      TEXT        NOT NULL,
+  column_name TEXT        NOT NULL,
+  body        TEXT        NOT NULL,
+  taken_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (table_name, row_id, column_name)
+);
+
 -- 线性历史（每次内容 update 落一行；origin 为 AI 化 provenance 预留）
 CREATE TABLE IF NOT EXISTS wiki_revision (
   id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),

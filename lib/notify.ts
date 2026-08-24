@@ -28,6 +28,12 @@ import {
   type WeeklyCallEntry, type DailyCallScheduleItem,
 } from "./event-db";
 import { createCardToken } from "./card-token";
+import { renderNotifyDoc } from "./notify-doc/from-markdown";
+import { createNotifyRefResolver } from "./notify-doc/resolver";
+import { toSummary } from "./notify-doc/platform-text";
+import { toLarkMd } from "./notify-doc/platform-feishu";
+import { toEmailHtml } from "./notify-doc/platform-html";
+import { truncateDoc } from "./notify-doc/ast";
 import { signRsvpToken } from "./platform/email/email-tokens";
 import {
   buildEventPublishEmail, buildWeeklyCallEmail, buildDailyCallEmail,
@@ -57,6 +63,19 @@ export type DispatchResult = {
   errors: string[];
   dryMessages?: { platformUserId: string; platformId: string; message: PlatformMessage }[];
 };
+
+// ─── 用户正文 → 通道可用文本（通知管线的调用侧薄封装）────────────────────────
+// 管线：markdown → 通知 variant renderer → 通用 AST → 平台 renderer。
+// 站内信这一"通道"的能力是纯文本单行，所以用 toSummary；飞书卡片走
+// notify-doc/platform-feishu，邮件走各自模板。共同点是**都不再碰 markdown 源码**。
+async function projectInline(md: string | null | undefined, productionId: string): Promise<string> {
+  if (!md?.trim()) return "";
+  try {
+    return toSummary(await renderNotifyDoc(md, createNotifyRefResolver(productionId)), 200);
+  } catch {
+    return md; // 投影失败不拖垮通知：宁可漏形态，不可少内容
+  }
+}
 
 // ─── Shared inbox content shape ───────────────────────────────────────────────
 
@@ -430,18 +449,22 @@ export async function dispatchWeeklyCall(dryRun = false): Promise<DispatchResult
       entityType: "weekly_call",
       entityId,
       title: `本周有 ${entries.length} 个安排`,
-      body: entries.map((e) => {
+      body: (await Promise.all(entries.map(async (e) => {
         const time = new Date(e.callAt).toLocaleString("zh-CN", {
           month: "numeric", day: "numeric",
           hour: "2-digit", minute: "2-digit",
           timeZone: "Asia/Shanghai",
         });
+        // 用户正文经通知管线投影：正文里的 [#](/__cm__/…) 引用会被解析成实时
+        // 标签，方言排版拍平成一行。不投影就会把私有 href 原样漏进站内信。
         const parts = [e.eventTitle];
-        if (e.eventDescription) parts.push(e.eventDescription);
+        const desc = await projectInline(e.eventDescription, e.productionId);
+        if (desc) parts.push(desc);
         parts.push(`Call：${time}`);
-        if (e.callNotes) parts.push(`备注：${e.callNotes}`);
+        const notes = await projectInline(e.callNotes, e.productionId);
+        if (notes) parts.push(`备注：${notes}`);
         return parts.join(" · ");
-      }).join("\n"),
+      }))).join("\n"),
       viewHref,
       category: "info",
       buildExternalMessage: !userEnabled ? undefined : async (target) => {
@@ -765,7 +788,16 @@ export async function dispatchReportNotification(
   ]);
   const eventTitle = evRes.rows[0]?.title ?? "";
   const rptProductionName = rptProdNameRes.rows[0]?.name ?? "后台";
-  const notes = notesRes.rows.map((r) => ({ deptName: r.dept_name, content: r.content }));
+  // 正文/备注是完整 wiki markdown（含四类方言与 id 引用）。**AST 只渲染一次**，
+  // 各通道自己投影：飞书要 lark_md、邮件要 HTML。原先直接把裸 markdown 交给
+  // 模板、模板再按字符数切——正好会把 [#](/__cm__/wiki/<uuid>) 拦腰截断，
+  // 半截私有 href 漏进通知；截断现在在 AST 层做。
+  const refResolver = createNotifyRefResolver(productionId);
+  const reportDoc = await renderNotifyDoc(report.body ?? "", refResolver);
+  const noteDocs = await Promise.all(notesRes.rows.map(async (r) => ({
+    deptName: r.dept_name,
+    doc: await renderNotifyDoc(r.content ?? "", refResolver),
+  })));
 
   const recipRes = await pool.query<{ user_id: string }>(
     `SELECT DISTINCT user_id FROM (
@@ -798,9 +830,19 @@ export async function dispatchReportNotification(
       const actionUrl = target.adapter.buildActionUrl(`${viewHref}/${token}`);
       let richContent: unknown;
       if (target.platformId === "email") {
-        richContent = buildReportEmail({ reportTitle: report.title, eventTitle, reportBody: report.body, notes, viewUrl: actionUrl });
+        const html = (d: Parameters<typeof toEmailHtml>[0], max: number) =>
+          toEmailHtml(truncateDoc(d, max), { buildUrl: target.adapter.buildActionUrl, ink: "#182a2a", link: "#2f6670", muted: "#667676" });
+        richContent = buildReportEmail({
+          reportTitle: report.title, eventTitle, viewUrl: actionUrl,
+          reportBodyHtml: html(reportDoc, 200),
+          notes: noteDocs.map(n => ({ deptName: n.deptName, contentHtml: html(n.doc, 120) })),
+        });
       } else {
-        richContent = buildReportCard(report.title, eventTitle, report.body, notes, report.published_at, actionUrl);
+        richContent = buildReportCard(
+          report.title, eventTitle,
+          toLarkMd(truncateDoc(reportDoc, 120), { buildUrl: target.adapter.buildActionUrl }),
+          noteDocs.map(n => ({ deptName: n.deptName, content: toLarkMd(truncateDoc(n.doc, 100), { buildUrl: target.adapter.buildActionUrl }) })),
+          report.published_at, actionUrl);
       }
       const message: PlatformMessage = {
         text: `新报告：${report.title}（${eventTitle}），查看：${actionUrl}`,

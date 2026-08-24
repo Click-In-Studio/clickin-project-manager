@@ -249,20 +249,24 @@ export function buildDailyCallEmail(params: {
 
 // ── Report notification ───────────────────────────────────────────────────────
 
+// 正文/备注由 lib/notify-doc/platform-html 预渲染成 HTML（已转义、已在 AST 层
+// 截断）。本模板**不再自己剥标签也不再自己切字**：
+//   · `.replace(/<[^>]*>/g,"")` 是"看起来像消毒"的写法——剥不掉实体、挡不住 &，
+//     而且会吃掉正文里以 < 开头的合法文本
+//   · 按字符数切渲染结果会把 <a href="…"> 拦腰截断，直接毁掉 HTML
 export function buildReportEmail(params: {
   reportTitle: string;
   eventTitle: string;
-  reportBody: string;
-  notes: { deptName: string; content: string }[];
+  reportBodyHtml: string;
+  notes: { deptName: string; contentHtml: string }[];
   viewUrl: string;
 }): string {
-  const { reportTitle, eventTitle, reportBody, notes, viewUrl } = params;
+  const { reportTitle, eventTitle, reportBodyHtml, notes, viewUrl } = params;
 
-  const excerpt = reportBody.replace(/<[^>]*>/g, "").slice(0, 200);
   const noteRows = notes.slice(0, 5).map(n =>
     `<tr>
        <td style="padding:10px 0;border-top:1px solid ${LINE};font-size:11px;font-weight:700;color:${SCRIPT};white-space:nowrap;padding-right:16px;vertical-align:top">${n.deptName}</td>
-       <td style="padding:10px 0;border-top:1px solid ${LINE};font-size:11px;color:${MUTED};line-height:1.5">${n.content.slice(0, 120)}${n.content.length > 120 ? "…" : ""}</td>
+       <td style="padding:10px 0;border-top:1px solid ${LINE};font-size:11px;color:${MUTED};line-height:1.5">${n.contentHtml}</td>
      </tr>`,
   ).join("");
 
@@ -270,7 +274,7 @@ export function buildReportEmail(params: {
     ${label("新报告")}
     <h1 style="margin:0 0 4px;font-size:22px;font-weight:700;color:${INK}">${reportTitle}</h1>
     <p style="margin:0 0 16px;font-size:13px;color:${MUTED}">${eventTitle}</p>
-    ${excerpt ? `<p style="margin:0 0 20px;font-size:13px;color:${MUTED};line-height:1.6">${excerpt}${reportBody.replace(/<[^>]*>/g, "").length > 200 ? "…" : ""}</p>` : ""}
+    ${reportBodyHtml ? `<div style="margin:0 0 20px">${reportBodyHtml}</div>` : ""}
     ${noteRows ? `<table width="100%" cellpadding="0" cellspacing="0">${noteRows}</table>${divider()}` : ""}
     ${btn("查看完整报告", viewUrl)}
   `;

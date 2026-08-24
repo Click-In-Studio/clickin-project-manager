@@ -51,7 +51,7 @@ import { isoToDatetimeLocal, isoToDateInput, isoToTimeInput, datetimeLocalToIso,
 import MarkdownEditor from "@/components/MarkdownEditor";
 import type { MentionMember } from "@/components/SmartTextarea";
 import SmartTextarea from "@/components/SmartTextarea";
-import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
+import SmartText from "@/components/SmartText";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
 
@@ -284,7 +284,7 @@ function InfoTab({
         {event.description && (
           <div className="col-span-2">
             <dt className="text-xs text-zinc-400 mb-0.5">备注</dt>
-            <dd className="text-zinc-700"><SmartText content={event.description} plugins={[scriptRefTextPlugin]} productionId={productionId} versionId={versionId} /></dd>
+            <dd className="text-zinc-700"><SmartText content={event.description} productionId={productionId} versionId={versionId} /></dd>
           </div>
         )}
         {SM_EVENT_TYPES.has(event.eventType) && (
@@ -1503,7 +1503,7 @@ function ScheduleTableView({
                 </span>
               )}
               {!cell.isBreak && cell.item.notes && (
-                <span className="opacity-60 w-full mt-0.5 italic"><SmartText content={cell.item.notes} plugins={[scriptRefTextPlugin]} productionId={productionId} /></span>
+                <span className="opacity-60 w-full mt-0.5 italic"><SmartText content={cell.item.notes} productionId={productionId} /></span>
               )}
             </div>
           );
@@ -1746,7 +1746,7 @@ function PersonCallTimeRow({
             {fmtTime(callTime.callAt)}
           </span>
           {isLate && <span className="text-xs text-amber-500">⚠ 偏晚</span>}
-          {callTime.notes && <span className="text-xs text-zinc-400"><SmartText content={callTime.notes} plugins={[scriptRefTextPlugin]} productionId={productionId} /></span>}
+          {callTime.notes && <span className="text-xs text-zinc-400"><SmartText content={callTime.notes} productionId={productionId} /></span>}
           {canEdit && <button onClick={startEdit} className="text-xs text-zinc-400 hover:text-zinc-600">编辑</button>}
         </>
       ) : (
@@ -1920,7 +1920,7 @@ function TechReqCard({
             </>
           ) : (
             <>
-              {req.description && <p className="text-sm text-zinc-600 pt-2"><SmartText content={req.description} plugins={[scriptRefTextPlugin]} productionId={productionId} /></p>}
+              {req.description && <p className="text-sm text-zinc-600 pt-2"><SmartText content={req.description} productionId={productionId} /></p>}
               {req.presetMinutes != null && (
                 <p className="text-xs text-zinc-400">提前 {req.presetMinutes} 分钟准备</p>
               )}

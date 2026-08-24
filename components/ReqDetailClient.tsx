@@ -12,7 +12,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import SmartTextarea from "@/components/SmartTextarea";
-import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
+import SmartText from "@/components/SmartText";
 import PageHeader, { PAGE_TITLE_FONT, PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import AccessRequestModal from "@/components/AccessRequestModal";
 import DropdownPicker from "@/components/DropdownPicker";
@@ -864,7 +864,7 @@ export default function ReqDetailClient({
               /* 只读 + 状态推进 */
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 {req.description ? (
-                  <SmartText content={req.description} plugins={[scriptRefTextPlugin]} productionId={productionId} />
+                  <SmartText content={req.description} productionId={productionId} />
                 ) : (
                   <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>（无详情）</p>
                 )}
@@ -1000,7 +1000,7 @@ export default function ReqDetailClient({
                       )}
                       {item.notes && (
                         <div style={{ margin: "3px 0 0", fontSize: 10.5, color: "var(--muted)" }}>
-                          <SmartText content={item.notes} plugins={[scriptRefTextPlugin]} productionId={productionId} />
+                          <SmartText content={item.notes} productionId={productionId} />
                         </div>
                       )}
                     </div>
