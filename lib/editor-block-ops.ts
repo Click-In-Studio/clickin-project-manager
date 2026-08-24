@@ -9,7 +9,7 @@
 import { NodeSelection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { removeColumnsAt } from "./tiptap-column-editing";
+import { removeColumnsAt, insertColumnAt } from "./tiptap-column-editing";
 import { BLOCK_TYPES, type BlockTypeId } from "./editor-block-types";
 
 export type SelectedBlock = { node: PMNode; pos: number; end: number };
@@ -191,21 +191,21 @@ export function changeColumnCount(editor: Editor, delta: 1 | -1): boolean {
   if (!block) return false;
   const group = block.node;
   const count = group.childCount;
-  const next = count + delta;
   // content 是 `column column+`：少于两栏组就不成立
-  if (next < 2) return false;
+  if (count + delta < 2) return false;
 
-  const { schema } = editor.state;
-  const columns: PMNode[] = [];
-  for (let i = 0; i < Math.min(count, next); i++) {
-    columns.push(schema.nodes.column.create(null, group.child(i).content));
-  }
-  if (delta > 0) {
-    columns.push(schema.nodes.column.create(null, schema.nodes.paragraph.create()));
-  }
   const tr = editor.state.tr;
-  tr.replaceWith(block.pos, block.end, schema.nodes.columnGroup.create(group.attrs, columns));
-  tr.setSelection(NodeSelection.create(tr.doc, block.pos));
+  if (delta > 0) {
+    if (!insertColumnAt(tr, block.pos, count)) return false; // 追加到末尾
+  } else {
+    // 末尾那一栏的位置
+    let last = block.pos + 1;
+    for (let i = 0; i < count - 1; i++) last += group.child(i).nodeSize;
+    if (!removeColumnsAt(tr, [last])) return false;
+  }
+  try {
+    tr.setSelection(NodeSelection.create(tr.doc, block.pos));
+  } catch { /* 组已被拆掉（减到一栏）——不强求选中 */ }
   editor.view.dispatch(tr);
   return true;
 }

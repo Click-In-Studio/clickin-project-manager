@@ -80,6 +80,80 @@ export function removeColumnsAt(tr: Transaction, positions: number[]): boolean {
   return changed;
 }
 
+/**
+ * 往组里 index 处插一个空栏。与 removeColumnsAt 互为镜像，同样负责「栏数变了
+ * 就清空所有 ratio」——旧宽度串是按旧栏数配的，留着会让 serializer 走进
+ * ratios.length !== childCount 分支、主参数位整个不写。
+ */
+export function insertColumnAt(tr: Transaction, groupPos: number, index: number): boolean {
+  const schema = tr.doc.type.schema;
+  const colType = schema.nodes.column;
+  const groupType = schema.nodes.columnGroup;
+  const paraType = schema.nodes.paragraph;
+  if (!colType || !groupType || !paraType) return false;
+  const group = tr.doc.nodeAt(groupPos);
+  if (!group || group.type !== groupType) return false;
+
+  const cols: PMNode[] = [];
+  for (let i = 0; i < group.childCount; i++) {
+    cols.push(colType.create(null, group.child(i).content)); // 清 ratio
+  }
+  const idx = Math.max(0, Math.min(index, cols.length));
+  cols.splice(idx, 0, colType.create(null, paraType.create()));
+  tr.replaceWith(groupPos, groupPos + group.nodeSize, groupType.create(group.attrs, cols));
+  return true;
+}
+
+/**
+ * 一次性写入各栏宽度。用 setNodeMarkup 逐栏改 attr 而不是重建整组——重建会
+ * 换掉所有节点、丢掉选区，而调宽度是个高频的连续操作。
+ *
+ * ratios 必须与栏数等长；serializer 只在**每一栏都有 ratio** 时才写主参数位
+ * （见 tiptap-columns 的 columnGroup.serialize），所以只写一部分等于白写。
+ */
+export function setColumnRatios(tr: Transaction, groupPos: number, ratios: number[]): boolean {
+  const group = tr.doc.nodeAt(groupPos);
+  if (!group || group.type.name !== "columnGroup") return false;
+  if (ratios.length !== group.childCount) return false;
+  let pos = groupPos + 1;
+  for (let i = 0; i < group.childCount; i++) {
+    const col = group.child(i);
+    tr.setNodeMarkup(pos, undefined, { ...col.attrs, ratio: ratios[i] });
+    pos += col.nodeSize;
+  }
+  return true;
+}
+
+/**
+ * 像素宽度 → 整数百分比，和恒为 100。
+ *
+ * 和必须精确是因为它要落进正文（`:::cols 46,54`）：99 或 101 都会让下次读回来
+ * 的布局与用户当初看到的不一致。做法是前 n-1 项四舍五入、最后一项拿差值兜底，
+ * 再保证每项至少 1（否则会出现 0% 的栏，视觉上等于消失但结构还在）。
+ */
+export function normalizeRatios(widths: number[]): number[] {
+  const n = widths.length;
+  if (n === 0) return [];
+  const total = widths.reduce((a, b) => a + b, 0);
+  if (!(total > 0)) {
+    const even = Math.floor(100 / n);
+    const out = Array<number>(n).fill(even);
+    out[n - 1] = 100 - even * (n - 1);
+    return out;
+  }
+  const out = widths.slice(0, -1).map(w => Math.max(1, Math.round((w / total) * 100)));
+  let last = 100 - out.reduce((a, b) => a + b, 0);
+  // 前面几项占满了 → 从最大的那项借一点给最后一项，保证每栏都 ≥1%
+  while (last < 1) {
+    const maxIdx = out.reduce((best, v, i) => (v > out[best] ? i : best), 0);
+    if (out[maxIdx] <= 1) break;
+    out[maxIdx] -= 1;
+    last += 1;
+  }
+  out.push(last);
+  return out;
+}
+
 /** 找出嵌套在别的栏里的分栏组（新文档里的位置，深到浅） */
 export function findNestedColumnGroups(doc: PMNode): number[] {
   const found: number[] = [];

@@ -230,6 +230,66 @@ body {
 .smart-textarea-blocktools .wiki-col {
   padding-left: 34px;
 }
+
+/* 栏宽拖拽（lib/tiptap-column-resize）—— 栏与栏之间那条分割线。
+   它是 widget decoration，作为该栏 DOM 的首个子节点插入，再绝对定位挪到左侧
+   的栏间隙里。第一栏没有左邻居，自然也就没有这个 widget。 */
+.wiki-col {
+  position: relative;
+}
+.wiki-col-resizer {
+  position: absolute;
+  /* 栏间隙是 34px，占据 [-34, 0]；把 16px 的命中区摆在它正中 */
+  left: -25px;
+  width: 16px;
+  top: 0;
+  bottom: 0;
+  cursor: col-resize;
+  /* 压过块手柄——两者都在栏左侧，重叠处应当归分割线（它更细、更难点） */
+  z-index: 8;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.wiki-col-resizer-line {
+  position: absolute;
+  left: 7px;
+  width: 2px;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.wiki-col-resizer:hover .wiki-col-resizer-line,
+body.wiki-col-resizing .wiki-col-resizer-line {
+  background: #0ea5e9;
+}
+/* 顶端的 ⊕：点它直接在这个位置插一栏。摆在组的上沿之外，避开块手柄那一带 */
+.wiki-col-resizer-add {
+  position: absolute;
+  left: 50%;
+  top: -11px;
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  background: #0ea5e9;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.wiki-col-resizer:hover .wiki-col-resizer-add {
+  display: inline-flex;
+}
+/* 拖动期间全局换光标，免得指针滑出那 16px 命中区就变回箭头 */
+body.wiki-col-resizing,
+body.wiki-col-resizing * {
+  cursor: col-resize !important;
+}
 /* 显隐由插件用 style.visibility 直接控制，**这里绝不能设 opacity/display**
    —— 设了就是永久隐藏，插件那套 visibility 切换永远救不回来 */
 .wiki-block-handle {

@@ -31,6 +31,7 @@ import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "
 import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 import { ColumnDrop } from "@/lib/tiptap-column-drop";
 import { ColumnEditing } from "@/lib/tiptap-column-editing";
+import { ColumnResize } from "@/lib/tiptap-column-resize";
 import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor-slash-commands";
 import { DROP_INDICATOR_OPTIONS } from "@/lib/editor-drop-indicator";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
@@ -591,6 +592,10 @@ export default function SmartTextarea({
 
   const ContentMentionExt = markdown ? MarkdownContentMentionExt : PlainContentMentionExt;
 
+  // 栏操作件（造栏落点 + 栏宽拖拽）的开关。dropcursor 的取舍要跟它一致：
+  // 关了内建横线却又没装 ColumnDrop，就会一条落点指示都没有
+  const hasColumnTools = blockTools && !readOnly;
+
   const extensions = useMemo(() => {
     // 全站同一套文档 schema。原先 plain 面阉掉了 bold/heading/list 等节点——
     // 那在「正文按自定义 token 存」的时代无害，但存储统一成 markdown 之后就是
@@ -606,7 +611,7 @@ export default function SmartTextarea({
     // 上的线，抑制不干净（详见 tiptap-column-drop.ts）。只留一个元素，互斥由
     // 「同一时刻只可能有一种形态」天然保证。
     const base = StarterKit.configure({
-      dropcursor: blockTools ? false : { ...DROP_INDICATOR_OPTIONS },
+      dropcursor: hasColumnTools ? false : { ...DROP_INDICATOR_OPTIONS },
     });
 
     const contentMentionCfg = ContentMentionExt.configure({
@@ -704,12 +709,12 @@ export default function SmartTextarea({
       // ColumnEditing 不随 blockTools 门控：空栏退格、禁止嵌套是分栏方言自身
       // 的不变量，哪个面都得维护（粘贴、AI 写入都可能造出嵌套组）
       Callout, Column, ColumnGroup, ColumnEditing,
-      // 拖拽造栏只在有手柄的面才有意义——没有手柄就拖不动块
-      ...(blockTools ? [ColumnDrop] : []),
+      // 拖拽造栏、栏宽拖拽只在有手柄的面才有意义（也才有那条栏间沟槽放操作件）
+      ...(hasColumnTools ? [ColumnDrop, ColumnResize] : []),
       ...(hasImageUpload ? [imageExt, UploadPlaceholder] : []),
       ...commonExts, wikiTriggerCfg, slashTriggerCfg, remoteCursorExt];
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markdown, remoteCursorExt, hasImageUpload, blockTools]);
+  }, [markdown, remoteCursorExt, hasImageUpload, blockTools, hasColumnTools]);
 
   const editorMinHeight = minHeight != null
     ? `${minHeight}px`
