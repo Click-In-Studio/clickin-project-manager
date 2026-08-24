@@ -11,6 +11,7 @@ import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 import {
   ColumnEditing, insertColumnAt, setColumnRatios, normalizeRatios,
 } from "@/lib/tiptap-column-editing";
+import { ColumnResize } from "@/lib/tiptap-column-resize";
 
 function makeEditor(content: string) {
   return new Editor({
@@ -27,6 +28,78 @@ function makeEditor(content: string) {
 const md = (e: Editor) => (e.storage as any).markdown.getMarkdown() as string;
 
 const TWO = ":::cols\n\n左\n\n---\n\n右\n\n:::";
+
+describe("分割线的 DOM 结构与插入下标", () => {
+  // jsdom 没有布局，但 DOM 结构和事件是真的——而这次踩的坑恰恰是结构问题：
+  // 两端的 ⊕ 原先挂在首/末栏里，末栏于是同时背着「左侧分割线」和「右端 ⊕」
+  // 两个 widget，那一栏就坏了（竖线点不到、⊕ 插错位置、右端 ⊕ 不出现）。
+  function mount(content: string) {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const editor = new Editor({
+      element: el,
+      extensions: [
+        StarterKit, Markdown.configure({ breaks: true }),
+        Column, ColumnGroup, ColumnEditing, ColumnResize,
+      ],
+      content,
+    });
+    return { editor, el, cleanup: () => { editor.destroy(); el.remove(); } };
+  }
+
+  const SRC: Record<number, string> = {
+    2: ":::cols\n\n一\n\n---\n\n二\n\n:::",
+    3: ":::cols\n\n一\n\n---\n\n二\n\n---\n\n三\n\n:::",
+    4: ":::cols\n\n一\n\n---\n\n二\n\n---\n\n三\n\n---\n\n四\n\n:::",
+  };
+
+  it.each([2, 3, 4])("%i 栏：n+1 个操作件，两端的挂在组上、可拖的挂在各自栏里", (n) => {
+    const { el, cleanup } = mount(SRC[n]);
+    const all = [...el.querySelectorAll(".wiki-col-resizer")];
+    expect(all).toHaveLength(n + 1);
+
+    const addOnly = all.filter(r => r.classList.contains("is-add-only"));
+    expect(addOnly).toHaveLength(2);
+    // 两端的必须挂在组上——挂进栏里就会和该栏的分割线叠在一起
+    for (const r of addOnly) {
+      expect((r.parentElement as HTMLElement).classList.contains("wiki-cols")).toBe(true);
+    }
+    expect(addOnly.filter(r => r.classList.contains("is-right"))).toHaveLength(1);
+
+    // 每一栏至多一个 widget
+    for (const col of el.querySelectorAll(".wiki-col")) {
+      expect(col.querySelectorAll(":scope > .wiki-col-resizer").length).toBeLessThanOrEqual(1);
+    }
+    cleanup();
+  });
+
+  it.each([2, 3, 4])("%i 栏：按 DOM 顺序点每个 ⊕，插入下标依次是 0..n", (n) => {
+    for (let k = 0; k <= n; k++) {
+      const { editor, el, cleanup } = mount(SRC[n]);
+      const adds = [...el.querySelectorAll(".wiki-col-resizer-add")] as HTMLElement[];
+      expect(adds).toHaveLength(n + 1);
+      adds[k].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+      const parts = md(editor).split("\n---\n")
+        .map(s => s.replace(/:::cols|:::/g, "").trim());
+      expect(parts).toHaveLength(n + 1);
+      expect(parts[k]).toBe(""); // 新栏是空的，且落在第 k 个位置
+      cleanup();
+    }
+  });
+
+  it("只有中间那些分割线可拖，两端的不可拖（没有邻栏可对分宽度）", () => {
+    const { el, cleanup } = mount(SRC[3]);
+    const all = [...el.querySelectorAll(".wiki-col-resizer")];
+    const draggable = all.filter(r => !r.classList.contains("is-add-only"));
+    expect(draggable).toHaveLength(2); // 3 栏两条缝
+    // 可拖的才有那条线；两端的只有 ⊕
+    for (const r of draggable) expect(r.querySelector(".wiki-col-resizer-line")).not.toBeNull();
+    for (const r of all.filter(r => r.classList.contains("is-add-only"))) {
+      expect(r.querySelector(".wiki-col-resizer-line")).toBeNull();
+    }
+    cleanup();
+  });
+});
 
 describe("normalizeRatios —— 像素宽度 → 整数百分比", () => {
   it("和恒为 100（要落进正文，99 或 101 都会让下次读回来的布局对不上）", () => {

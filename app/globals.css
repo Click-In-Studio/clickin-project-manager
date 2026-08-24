@@ -194,6 +194,8 @@ body {
   display: flex;
   gap: 16px;
   margin: 8px 0;
+  /* 组两端那两个 ⊕ 是挂在组上的绝对定位 widget，需要这里做定位基准 */
+  position: relative;
 }
 .wiki-col {
   flex: 1 1 0;
@@ -250,16 +252,20 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
-/* 组最外两端的那两个：只有 ⊕、不能拖。往里收一点，因为外侧没有 34px 的
-   栏间隙可占（左边是页边距、右边是正文右沿） */
+/* 组最外两端的那两个：只有 ⊕、不能拖，而且挂在**组**上（不在首/末栏里），
+   所以偏移是相对整个分栏组算的。外侧没有 34px 的栏间隙可占（左边是页边距、
+   右边是正文右沿），因此贴着边缘就好。
+   z-index 要压过块手柄那层（插件给它的 wrapper 是 10）——两者都在组的左外侧，
+   不压过去的话最左那个 ⊕ 会被手柄盖住，鼠标一凑近就换成手柄、⊕ 当场消失。 */
 .wiki-col-resizer.is-add-only {
-  left: -13px;
-  width: 16px;
+  left: -7px;
+  width: 14px;
   cursor: default;
+  z-index: 12;
 }
 .wiki-col-resizer.is-add-only.is-right {
   left: auto;
-  right: -13px;
+  right: -7px;
 }
 .wiki-col-resizer-line {
   position: absolute;

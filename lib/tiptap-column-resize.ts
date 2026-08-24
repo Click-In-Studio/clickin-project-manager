@@ -268,36 +268,31 @@ export const ColumnResize = Extension.create({
           const decos: Decoration[] = [];
           state.doc.descendants((node, pos) => {
             if (node.type.name !== "columnGroup") return true;
-            let childPos = pos + 1;
-            for (let i = 0; i < node.childCount; i++) {
-              // 挂在第 i 栏内容的**起点**：widget 会成为该栏 DOM 的首个子节点，
-              // 再用 absolute 定位挪到栏的左侧或右侧
-              const at = childPos + 1;
-              // getPos 在 widget 已被移除时给 undefined —— 那时算不出组的位置，
-              // 交互直接放弃（返回 -1，调用侧会拒绝执行）
-              const mount = (spec: ResizerSpec, key: string) => decos.push(Decoration.widget(
-                at,
-                (view, getPos) => buildResizer(view, () => {
-                  const p = getPos();
-                  return p == null ? -1 : groupPosOf(view, p);
-                }, spec),
-                { side: -1, key, ignoreSelection: true },
-              ));
+            // getPos 在 widget 已被移除时给 undefined —— 那时算不出组的位置，
+            // 交互直接放弃（返回 -1，调用侧会拒绝执行）
+            const mount = (at: number, spec: ResizerSpec, key: string) => decos.push(Decoration.widget(
+              at,
+              (view, getPos) => buildResizer(view, () => {
+                const p = getPos();
+                return p == null ? -1 : groupPosOf(view, p);
+              }, spec),
+              { side: -1, key, ignoreSelection: true },
+            ));
 
-              // 左侧：第一栏之前只给 ⊕（没有邻栏可对分宽度），其余是完整分割线
-              mount(
-                { index: i, resizable: i > 0, edge: "left" },
-                `wiki-col-resizer-${i}`,
-              );
-              // 末栏之后再补一个 ⊕，否则"在最右边加一栏"没有入口
-              if (i === node.childCount - 1) {
-                mount(
-                  { index: node.childCount, resizable: false, edge: "right" },
-                  "wiki-col-resizer-end",
-                );
-              }
-              childPos += node.child(i).nodeSize;
+            // 栏与栏之间的分割线：挂在**右侧那一栏**内容的起点，widget 于是成为
+            // 该栏 DOM 的首个子节点，再用 absolute 挪进左边的栏间隙
+            let childPos = pos + 1;
+            for (let i = 1; i < node.childCount; i++) {
+              childPos += node.child(i - 1).nodeSize;
+              mount(childPos + 1, { index: i, resizable: true, edge: "left" }, `wiki-col-resizer-${i}`);
             }
+
+            // 组最外两端的两个 ⊕ 挂在**组**上，不挂在首/末栏里。
+            // 挂栏里的话末栏会同时背着「左侧分割线」和「右端 ⊕」两个 widget，
+            // 实测就是那一栏出问题：竖线点不到、⊕ 插错位置、右端的 ⊕ 干脆不
+            // 出现。一栏最多一个 widget，这类叠放问题就不存在了。
+            mount(pos + 1, { index: 0, resizable: false, edge: "left" }, "wiki-col-add-start");
+            mount(pos + node.nodeSize - 1, { index: node.childCount, resizable: false, edge: "right" }, "wiki-col-add-end");
             return false; // 组不嵌套，不必再往下
           });
           return DecorationSet.create(state.doc, decos);
