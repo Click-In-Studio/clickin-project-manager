@@ -512,6 +512,7 @@ export default function WikiDocClient({
               onChange={v => { setBody(v); schedule(); }}
               markdown
               frameless
+              blockTools
               minHeight={360}
               placeholder="开始写作…（[[ 引用文档、@ 提及成员、# 引用剧本内容）"
               memberMention={{

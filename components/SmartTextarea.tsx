@@ -9,7 +9,7 @@ import { Mention } from "@tiptap/extension-mention";
 import { TableKit } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import Suggestion from "@tiptap/suggestion";
-import { PluginKey, Plugin } from "@tiptap/pm/state";
+import { PluginKey, Plugin, NodeSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
@@ -31,6 +31,7 @@ import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "
 import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor-slash-commands";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
+import BlockHandle from "@/components/editor/BlockHandle";
 export { normalizeLegacyMentions };
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -444,6 +445,11 @@ export interface SmartTextareaProps {
   markdown?: boolean;
   /** markdown 模式去外框（Notion 式整页编辑场景） */
   frameless?: boolean;
+  /** 块工具：左侧手柄（＋/⠿）、拖拽排序、块选中与块操作。
+   *  只给 wiki 整页这种**有左侧留白的大编辑面**——活动纪要、公告那类
+   *  180~360px 的小框既没有放手柄的地方，也用不到块级移动/分栏。
+   *  浮动条不受此门控（它贴选区，不占版面），markdown 面一律有。 */
+  blockTools?: boolean;
   /** Extra custom-trigger plugins (escape hatch) */
   plugins?: DropPlugin[];
   /** 图片粘贴上传（wiki 文档场景）。提供即解锁 image 节点：粘贴的图片文件
@@ -476,6 +482,7 @@ export default function SmartTextarea({
   contentMention,
   markdown = false,
   frameless = false,
+  blockTools = false,
   plugins: extraPlugins = [],
   imageUpload,
   placeholder,
@@ -754,8 +761,9 @@ export default function SmartTextarea({
     autofocus: autoFocus,
     editorProps: {
       attributes: {
+        // blockTools 面要给手柄让出左侧沟槽，否则 ＋/⠿ 会压在正文第一个字上
         class: markdown
-          ? "prose prose-zinc max-w-none focus:outline-none px-3 py-2 smart-textarea-content"
+          ? `prose prose-zinc max-w-none focus:outline-none px-3 py-2 smart-textarea-content${blockTools ? " smart-textarea-blocktools" : ""}`
           : "outline-none smart-textarea-content",
         style: readOnly ? "" : `min-height:${editorMinHeight}`,
       },
@@ -860,6 +868,20 @@ export default function SmartTextarea({
       },
       // 从文档树拖文档进编辑器 → 自动成为双向链接 chip（UI 修缮轮）
       handleDrop: (view, event) => {
+        // 块拖拽自环保护（调研 §2.6 ②：必须禁止「拖进自己的子树」）。
+        // 拖住一个 columnGroup 往它自己的某一栏里放，PM 会先删源节点再按旧坐标
+        // 插入，落点已经不存在 → 文档结构损坏。源区间由拖拽起始的 NodeSelection
+        // 给出，落点在区间内即整个吞掉这次 drop（拖拽取消，文档不动）
+        if (view.dragging) {
+          const sel = view.state.selection;
+          if (sel instanceof NodeSelection) {
+            const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+            if (at != null && at > sel.from && at < sel.to) {
+              event.preventDefault();
+              return true;
+            }
+          }
+        }
         const raw = event.dataTransfer?.getData("application/x-clickin-wiki");
         if (!raw) return false;
         try {
@@ -1016,10 +1038,13 @@ export default function SmartTextarea({
 
   const editorEl = (
     <>
-      <EditorContent editor={editor} />
+      {/* 手柄 wrapper 由插件挂到 view.dom 的父元素上并绝对定位，这层必须是
+          定位元素——见 globals.css .smart-textarea-shell */}
+      <EditorContent editor={editor} className="smart-textarea-shell" />
       {/* 浮动条与固定工具栏的作用域严格一致（markdown 面），commit「收工具栏」
           才是 1:1 替换而不是能力平移 */}
       {markdown && !readOnly && <TextBubbleMenu editor={editor} />}
+      {markdown && blockTools && !readOnly && <BlockHandle editor={editor} />}
       {drop && rect && !dropHidden && typeof document !== "undefined" &&
         createPortal(
           <div

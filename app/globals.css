@@ -212,6 +212,57 @@ body {
   .wiki-col { flex: none !important; }
 }
 
+/* 块手柄（components/editor/BlockHandle）—— 单例，由 floating-ui 移到当前
+   hover 的块左侧。手柄本体是 portal 出去的固定定位元素，不占文档流。 */
+.smart-textarea-blocktools {
+  /* 给手柄让出左侧沟槽，否则 ＋/⠿ 压在正文第一个字上 */
+  padding-left: 44px;
+}
+/* 显隐由插件用 style.visibility 直接控制，**这里绝不能设 opacity/display**
+   —— 设了就是永久隐藏，插件那套 visibility 切换永远救不回来 */
+.wiki-block-handle {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  /* 贴块左侧再往外推一点，避免压住首字 */
+  transform: translateX(-6px);
+}
+/* 手柄 wrapper 是 position:absolute 挂到 editor.view.dom.parentElement 上的，
+   那个容器必须是定位元素，否则坐标会算到更外层的祖先上，手柄飞到别处 */
+.smart-textarea-shell {
+  position: relative;
+}
+.wiki-block-handle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: #a1a1aa;
+  font-size: 13px;
+  line-height: 1;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.wiki-block-handle-btn:hover {
+  background: #f4f4f5;
+  color: #3f3f46;
+}
+.wiki-block-handle-grip {
+  cursor: grab;
+}
+.wiki-block-handle-grip:active {
+  cursor: grabbing;
+}
+
+/* 块选中态（NodeSelection）—— 对标 Notion 的 notion-selectable-halo。
+   跨块选择不是文本选择，所以整块选中必须有独立的视觉，不能只靠 ::selection */
+.ProseMirror-selectednode:not(.wiki-image) {
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.35);
+  background: rgba(14, 165, 233, 0.06);
+}
+
 /* wiki 正文图片（![alt](/__cm__asset:<id>)）——编辑器与只读渲染共用 */
 .wiki-image {
   max-width: 100%;
