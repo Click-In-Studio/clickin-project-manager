@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import type { MyTechReqFullEntry } from "@/lib/event-db";
 import { BASE_PATH } from "@/lib/base-path";
-import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
+import SmartText from "@/components/SmartText";
 import styles from "@/components/my-pages.module.css";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -250,7 +250,7 @@ export default function MyTasksClient() {
 
                           {t.description && (
                             <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginBottom: 14 }}>
-                              <SmartText content={t.description} plugins={[scriptRefTextPlugin]} productionId={t.productionId} />
+                              <SmartText content={t.description} productionId={t.productionId} />
                             </div>
                           )}
 
@@ -446,7 +446,7 @@ export default function MyTasksClient() {
 
                     {visibleSelected.description && (
                       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 18, marginBottom: 20 }}>
-                        <SmartText content={visibleSelected.description} plugins={[scriptRefTextPlugin]} productionId={visibleSelected.productionId} />
+                        <SmartText content={visibleSelected.description} productionId={visibleSelected.productionId} />
                       </div>
                     )}
 

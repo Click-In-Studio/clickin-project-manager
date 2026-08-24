@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
+import SmartText from "@/components/SmartText";
 import { fmtDateTime, fmtTime as fmtTimeTz, fmtDate } from "@/lib/tz";
 import type {
   ProductionEvent,
@@ -144,7 +144,7 @@ export default function EventFollowerClient({
           {event.location && <span style={{ fontSize: 12, color: "var(--muted)" }}>{event.location}</span>}
         </div>
         {event.description && (
-          <SmartText content={event.description} plugins={[scriptRefTextPlugin]} className="text-xs text-zinc-500" productionId={productionId} />
+          <SmartText content={event.description} className="text-xs text-zinc-500" productionId={productionId} />
         )}
       </div>
 
@@ -192,7 +192,7 @@ export default function EventFollowerClient({
                     <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{item.location}</p>
                   )}
                   {item.notes && (
-                    <SmartText content={item.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-400 mt-0.5" productionId={productionId} />
+                    <SmartText content={item.notes} className="text-[11px] text-zinc-400 mt-0.5" productionId={productionId} />
                   )}
                 </div>
                 {(item.startTime || item.endTime) && (
@@ -493,7 +493,7 @@ function FollowerScheduleTableView({
                 </span>
               )}
               {!cell.isBreak && cell.item.notes && (
-                <SmartText content={cell.item.notes} plugins={[scriptRefTextPlugin]} className="opacity-60 w-full mt-0.5 italic" />
+                <SmartText content={cell.item.notes} className="opacity-60 w-full mt-0.5 italic" />
               )}
             </div>
           );

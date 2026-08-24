@@ -161,7 +161,9 @@ export function buildReportCard(
   publishedAt: string,
   url: string,
 ): object {
-  const preview = body.length > 120 ? body.slice(0, 120).trimEnd() + "…" : body;
+  // body 已由 notify 经通知管线投影 + AST 层截断（见 lib/notify-doc）。
+  // 这里**不再自己切**：按字符数切裸 markdown 会把 [标签](私有href) 拦腰截断。
+  const preview = body;
   const lines = [
     `📋 **${eventTitle}** — ${reportTitle}`,
     ...(preview ? ["", `> ${preview.replace(/\n/g, "\n> ")}`] : []),
@@ -171,8 +173,7 @@ export function buildReportCard(
   const byDept = new Map<string, string[]>();
   for (const note of notes) {
     if (!byDept.has(note.deptName)) { byDept.set(note.deptName, []); deptOrder.push(note.deptName); }
-    const snippet = note.content.length > 100 ? note.content.slice(0, 100).trimEnd() + "…" : note.content;
-    byDept.get(note.deptName)!.push(snippet);
+    byDept.get(note.deptName)!.push(note.content);
   }
   for (const dept of deptOrder) {
     lines.push("", `**${dept}**`);

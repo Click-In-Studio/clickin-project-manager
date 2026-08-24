@@ -81,6 +81,39 @@ async function main() {
     process.exit(1);
   }
 
+  // ── 其余带方言的列（生产库扫描所得）────────────────────────────────────────
+  // agent_memory_chunk.text 是重点：旧语法随记忆注入模型上下文，会持续教模型
+  // 写已退役的形态。其余两列各只有个位数行，一并收干净。
+  const OTHER: { table: string; idCol: string; col: string }[] = [
+    { table: "agent_memory_chunk", idCol: "id", col: "text" },
+    { table: "comment", idCol: "id", col: "body" },
+    { table: "user_notification", idCol: "id", col: "body" },
+  ];
+  for (const t of OTHER) {
+    const exists = await pool.query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
+      [t.table, t.col],
+    );
+    if (!exists.rowCount) { console.log(`${t.table}.${t.col}: 列不存在，跳过`); continue; }
+    const { rows: r2 } = await pool.query<{ id: string; v: string }>(
+      `SELECT ${t.idCol}::text AS id, ${t.col} AS v FROM ${t.table} WHERE ${t.col} IS NOT NULL`,
+    );
+    let n = 0;
+    for (const row of r2) {
+      const next = normalizeWikiDialect(row.v);
+      if (next === row.v) continue;
+      n++;
+      if (dryRun) continue;
+      await pool.query(
+        `INSERT INTO dialect_v2_text_backup (table_name, row_id, column_name, body)
+         VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+        [t.table, row.id, t.col, row.v],
+      );
+      await pool.query(`UPDATE ${t.table} SET ${t.col} = $1 WHERE ${t.idCol}::text = $2`, [next, row.id]);
+    }
+    console.log(`${t.table}.${t.col}: 改写 ${n} / 共 ${r2.length} 行`);
+  }
+
   await pool.end();
   console.log("✓ 完成");
 }

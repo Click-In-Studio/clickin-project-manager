@@ -45,6 +45,19 @@ INSERT INTO wiki_body_backup_dialect_v2 (wiki_id, body)
 SELECT id, body FROM wiki
 ON CONFLICT (wiki_id) DO NOTHING;
 
+-- 扫描生产库发现方言不止活在 wiki.body：AI 记忆与两条通知/评论也带 v1 形态。
+-- 记忆里的旧语法尤其要清——它会随记忆注入模型上下文，比 AI 说明书更有说服力，
+-- 等于持续教模型写已退役的语法。
+-- 这些列没有各自的备份表，统一记进一张通用备份表（同样是回滚依据）。
+CREATE TABLE IF NOT EXISTS dialect_v2_text_backup (
+  table_name  TEXT        NOT NULL,
+  row_id      TEXT        NOT NULL,
+  column_name TEXT        NOT NULL,
+  body        TEXT        NOT NULL,
+  taken_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (table_name, row_id, column_name)
+);
+
 COMMIT;
 
 -- 迁移后自检（脚本跑完再执行，应当返回 0 行）：

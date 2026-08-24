@@ -34,10 +34,12 @@
     "react-markdown": "^10.1.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
     "resend": "^6.18.1",
     "sharp": "^0.33.5",
     "shiki": "^4.4.3",
     "tiptap-markdown": "^0.9.0",
+    "unified": "^11.0.5",
     "wavesurfer.js": "^7.12.7"
   },
   "devDependencies": {

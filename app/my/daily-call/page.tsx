@@ -15,7 +15,7 @@ import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { verifyCardToken } from "@/lib/card-token";
 import { getPool } from "@/lib/pg";
-import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
+import SmartText from "@/components/SmartText";
 
 function fmtTime(iso: string): string {
   const d = new Date(new Date(iso).getTime() + 8 * 3_600_000);
@@ -202,7 +202,7 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
                         <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, borderRadius: 8, background: "#fffbeb", padding: "6px 10px" }}>
                           <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#d97706", fontSize: 14 }}>{fmtTime(c.call_at)}</span>
                           {c.notes && (
-                            <SmartText content={c.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-amber-400" />
+                            <SmartText content={c.notes} className="text-[11px] text-amber-400" />
                           )}
                         </div>
                       ))}
@@ -260,7 +260,7 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
                           {c.name}
                         </span>
                         {c.notes && (
-                          <SmartText content={c.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-300" />
+                          <SmartText content={c.notes} className="text-[11px] text-zinc-300" />
                         )}
                       </div>
                     ))}

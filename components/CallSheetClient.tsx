@@ -3,7 +3,7 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
+import SmartText from "@/components/SmartText";
 import { fmtDateTime, fmtTime as fmtTimeTz } from "@/lib/tz";
 import type {
   ProductionEvent,
@@ -125,7 +125,7 @@ export default function CallSheetClient({
                       <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{item.location}</p>
                     )}
                     {item.notes && (
-                      <SmartText content={item.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-400 mt-0.5 italic" productionId={productionId} />
+                      <SmartText content={item.notes} className="text-[11px] text-zinc-400 mt-0.5 italic" productionId={productionId} />
                     )}
                     {item.participants.length > 0 && (
                       <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
@@ -169,7 +169,7 @@ export default function CallSheetClient({
                     <span style={{ marginLeft: 8, fontSize: 11, color: "var(--muted)" }}>{deptMap.get(ct.departmentId)}</span>
                   )}
                   {ct.notes && (
-                    <SmartText content={ct.notes} plugins={[scriptRefTextPlugin]} className="text-[11px] text-zinc-400 mt-0.5" productionId={productionId} />
+                    <SmartText content={ct.notes} className="text-[11px] text-zinc-400 mt-0.5" productionId={productionId} />
                   )}
                 </div>
               </div>

@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { ProductionTechReqEntry } from "@/lib/event-db";
 import { BASE_PATH } from "@/lib/base-path";
 import { datetimeLocalToIso, fmtDate, fmtTime, isoToDatetimeLocal } from "@/lib/tz";
-import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
+import SmartText from "@/components/SmartText";
 import type { PickerMember, PickerDept } from "@/components/MemberPickerModal";
 import DropdownPicker, { type DropdownPickerItem } from "@/components/DropdownPicker";
 import styles from "@/components/my-pages.module.css";
@@ -992,7 +992,7 @@ export default function ProductionTasksClient({
                       )}
                       {t.description && (
                         <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginBottom: 14 }}>
-                          <SmartText content={t.description} plugins={[scriptRefTextPlugin]} productionId={productionId} />
+                          <SmartText content={t.description} productionId={productionId} />
                         </div>
                       )}
                       <Link
@@ -1265,7 +1265,7 @@ export default function ProductionTasksClient({
             )}
             {visibleSelected.description && (
               <div style={{ borderTop: "1px solid var(--line)", paddingTop: 14, marginTop: 14, marginBottom: 6 }}>
-                <SmartText content={visibleSelected.description} plugins={[scriptRefTextPlugin]} productionId={productionId} />
+                <SmartText content={visibleSelected.description} productionId={productionId} />
               </div>
             )}
             <div style={{ marginTop: 18 }}>

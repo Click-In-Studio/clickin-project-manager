@@ -5,7 +5,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { ProductionEvent, EventTechReq, EventDepartment } from "@/lib/event-db";
-import SmartText, { scriptRefTextPlugin } from "@/components/SmartText";
+import SmartText from "@/components/SmartText";
 
 const STATUS_OPTIONS = [
   { value: "pending",     label: "待处理" },
@@ -151,7 +151,7 @@ function ReqCard({
       {req.description && (
         <>
           <hr style={{ ...rule, margin: "12px 0 10px" }} />
-          <SmartText content={req.description} plugins={[scriptRefTextPlugin]} className="text-xs text-zinc-500" productionId={productionId} />
+          <SmartText content={req.description} className="text-xs text-zinc-500" productionId={productionId} />
         </>
       )}
 

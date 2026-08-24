@@ -116,6 +116,43 @@ function CmAssetImage({ productionId, assetId, alt }: { productionId: string; as
   return <img src={src} alt={alt ?? ""} className="wiki-image" loading="lazy" />;
 }
 
+// ── @提及 chip（hover 头像卡；原 SmartText 独有，合并时取强者）──────────────
+
+function MemberChip({ name, members }: { name: string; members: MentionMember[] }) {
+  const [hovered, setHovered] = useState(false);
+  const [above, setAbove] = useState(true);
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const member = members.find(m => m.name === name);
+
+  return (
+    <span className="relative inline-block">
+      <span
+        ref={triggerRef}
+        className="font-medium text-blue-500 cursor-default"
+        onMouseEnter={() => {
+          const rect = triggerRef.current?.getBoundingClientRect();
+          if (rect) setAbove(rect.top > window.innerHeight / 2);
+          setHovered(true);
+        }}
+        onMouseLeave={() => setHovered(false)}
+      >
+        @{name}
+      </span>
+      {hovered && member && (
+        <span className={`absolute left-1/2 -translate-x-1/2 z-50 pointer-events-none ${above ? "bottom-full mb-2" : "top-full mt-2"}`}>
+          <span className="flex items-center gap-2 bg-white border border-zinc-200 rounded-xl shadow-lg px-3 py-2 whitespace-nowrap">
+            {member.avatarUrl
+              // eslint-disable-next-line @next/next/no-img-element
+              ? <img src={member.avatarUrl} alt={name} className="w-7 h-7 rounded-full object-cover shrink-0" />
+              : <span className="w-7 h-7 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-xs font-semibold shrink-0">{name.charAt(0)}</span>}
+            <span className="text-sm font-medium text-zinc-800">{member.name}</span>
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 // ── 代码高亮（shiki 懒加载，MindWeave 同款思路；亮色主题贴纸面 UI 与打印）────
 
 const shikiCache = new Map<string, string>();
@@ -139,16 +176,36 @@ function CodeBlock({ code, lang }: { code: string; lang?: string }) {
   return <pre className="rounded-lg bg-zinc-50 p-3 overflow-x-auto text-[13px]"><code>{code}</code></pre>;
 }
 
+export type MentionMember = { userId: string; name: string; avatarUrl?: string | null };
+
+/** 块级语义在 inline 变体里降级成纯内容（不吃字）：`<div>` 落进 `<span>` 是非法
+ *  嵌套，会在表格单元格/`<dd>` 这类宿主里把布局撑坏。 */
+const BLOCK_ELEMENTS = [
+  "h1", "h2", "h3", "h4", "h5", "h6",
+  "ul", "ol", "li", "blockquote", "pre", "hr",
+  "table", "thead", "tbody", "tr", "th", "td",
+];
+
 export default function WikiMarkdown({
   content,
   productionId,
   className = "",
+  inline = false,
+  members = [],
+  versionId,
 }: {
   content: string;
   /** 统一 renderer：production 上下文之外（全站通知/管理公告）可省略——
    *  mention/wiki 链/asset 图片优雅降级（无法解析态/幻影/占位），方言排版照常 */
   productionId?: string;
   className?: string;
+  /** 行内变体：输出 `<span>`，块级语义降级为纯内容。用于表格单元格、`<dd>`、
+   *  卡片副标题这类只能放行内元素的宿主（原 SmartText 的全部用法）。 */
+  inline?: boolean;
+  /** @提及的成员表：命中则 hover 显示头像卡 */
+  members?: MentionMember[];
+  /** 解析上下文版本：正文里没写 ?v= 的剧本域引用按此版本解析 */
+  versionId?: string | null;
 }) {
   // 手写 [[标题]] 预处理（码内保护）+ 标题清单
   const { text: processed, titles: rawTitles } = useMemo(
@@ -202,7 +259,7 @@ export default function WikiMarkdown({
         const res = await fetch(`${BASE_PATH}/api/production/${productionId}/mention-resolve`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mentions: mentionAttrs }),
+          body: JSON.stringify({ mentions: mentionAttrs, versionId }),
         });
         if (!res.ok) { setResolveFailed(true); return; }
         const data = await res.json() as { labels: (string | null)[]; urls: (string | null)[] };
@@ -211,14 +268,21 @@ export default function WikiMarkdown({
         setResolved(next);
       } catch { setResolveFailed(true); }
     })();
-  }, [mentionAttrs, productionId]);
+  }, [mentionAttrs, productionId, versionId]);
+
+  const Wrapper = inline ? "span" : "div";
+  const wrapperClass = inline
+    ? `text-sm break-words ${className}`
+    : `prose prose-zinc max-w-none ${className}`;
 
   return (
-    <div className={`prose prose-zinc max-w-none ${className}`}>
+    <Wrapper className={wrapperClass}>
       <ReactMarkdown
         // breaks：单回车即换行（对齐 MindWeave 与编辑器 tiptap breaks:true——CJK 写作习惯）
         remarkPlugins={[remarkGfm, remarkBreaks, remarkColumns]}
+        {...(inline ? { disallowedElements: BLOCK_ELEMENTS, unwrapDisallowed: true } : {})}
         components={{
+          ...(inline ? { p: ({ children }: { children?: ReactNode }) => <>{children}</> } : {}),
           blockquote: ({ children }) => {
             const callout = splitCalloutChildren(children);
             if (!callout) return <blockquote>{children}</blockquote>;
@@ -258,7 +322,8 @@ export default function WikiMarkdown({
             // 把未知协议剥成空串，href 到不了这儿（这正是它一直渲染不出 chip 的根因）。
             // decodeUserHref 的 uid: 兼容分支服务的是编辑器 parseHTML 路径（无 sanitizer）。
             if (decodeUserHref(h)) {
-              return <span className="font-medium text-blue-600 no-underline">{children}</span>;
+              const name = String(children ?? "").replace(/^@/, "");
+              return <MemberChip name={name} members={members} />;
             }
             // 手写 [[标题]]：按标题解析——命中真链 / 未命中幻影 / 解析中素样式
             if (h.startsWith(WT_HREF_PREFIX)) {
@@ -350,6 +415,6 @@ export default function WikiMarkdown({
       >
         {processed}
       </ReactMarkdown>
-    </div>
+    </Wrapper>
   );
 }
