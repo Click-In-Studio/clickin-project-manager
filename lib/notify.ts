@@ -30,8 +30,9 @@ import {
 import { createCardToken } from "./card-token";
 import { renderNotifyDoc } from "./notify-doc/from-markdown";
 import { createNotifyRefResolver } from "./notify-doc/resolver";
-import { toSummary, toPlainText } from "./notify-doc/platform-text";
+import { toSummary } from "./notify-doc/platform-text";
 import { toLarkMd } from "./notify-doc/platform-feishu";
+import { toEmailHtml } from "./notify-doc/platform-html";
 import { truncateDoc } from "./notify-doc/ast";
 import { signRsvpToken } from "./platform/email/email-tokens";
 import {
@@ -67,25 +68,6 @@ export type DispatchResult = {
 // 管线：markdown → 通知 variant renderer → 通用 AST → 平台 renderer。
 // 站内信这一"通道"的能力是纯文本单行，所以用 toSummary；飞书卡片走
 // notify-doc/platform-feishu，邮件走各自模板。共同点是**都不再碰 markdown 源码**。
-/** 富投影：给能吃富文本的通道（飞书 lark_md / 邮件）。截断在 AST 上做——
- *  在渲染结果上切会把 `[标签](私有href)` 拦腰截断，半截 href 漏进通知。 */
-async function projectRich(
-  md: string | null | undefined,
-  productionId: string,
-  opts: { maxChars?: number; buildUrl?: (p: string) => string; plain?: boolean } = {},
-): Promise<string> {
-  if (!md?.trim()) return "";
-  try {
-    let doc = await renderNotifyDoc(md, createNotifyRefResolver(productionId));
-    if (opts.maxChars) doc = truncateDoc(doc, opts.maxChars);
-    return opts.plain
-      ? toPlainText(doc, { buildUrl: opts.buildUrl })
-      : toLarkMd(doc, { buildUrl: opts.buildUrl });
-  } catch {
-    return md;
-  }
-}
-
 async function projectInline(md: string | null | undefined, productionId: string): Promise<string> {
   if (!md?.trim()) return "";
   try {
@@ -806,13 +788,15 @@ export async function dispatchReportNotification(
   ]);
   const eventTitle = evRes.rows[0]?.title ?? "";
   const rptProductionName = rptProdNameRes.rows[0]?.name ?? "后台";
-  // 正文/备注是完整 wiki markdown（含四类方言与 id 引用）。原先直接把裸 markdown
-  // 交给卡片模板，模板再按字符数切 120 字——正好会把 [#](/__cm__/wiki/<uuid>)
-  // 截断，半截私有 href 漏进通知。现在统一经通知管线投影 + AST 层截断。
-  const reportBody = await projectRich(report.body, productionId, { maxChars: 120 });
-  const notes = await Promise.all(notesRes.rows.map(async (r) => ({
+  // 正文/备注是完整 wiki markdown（含四类方言与 id 引用）。**AST 只渲染一次**，
+  // 各通道自己投影：飞书要 lark_md、邮件要 HTML。原先直接把裸 markdown 交给
+  // 模板、模板再按字符数切——正好会把 [#](/__cm__/wiki/<uuid>) 拦腰截断，
+  // 半截私有 href 漏进通知；截断现在在 AST 层做。
+  const refResolver = createNotifyRefResolver(productionId);
+  const reportDoc = await renderNotifyDoc(report.body ?? "", refResolver);
+  const noteDocs = await Promise.all(notesRes.rows.map(async (r) => ({
     deptName: r.dept_name,
-    content: await projectRich(r.content, productionId, { maxChars: 100 }),
+    doc: await renderNotifyDoc(r.content ?? "", refResolver),
   })));
 
   const recipRes = await pool.query<{ user_id: string }>(
@@ -846,9 +830,19 @@ export async function dispatchReportNotification(
       const actionUrl = target.adapter.buildActionUrl(`${viewHref}/${token}`);
       let richContent: unknown;
       if (target.platformId === "email") {
-        richContent = buildReportEmail({ reportTitle: report.title, eventTitle, reportBody, notes, viewUrl: actionUrl });
+        const html = (d: Parameters<typeof toEmailHtml>[0], max: number) =>
+          toEmailHtml(truncateDoc(d, max), { buildUrl: target.adapter.buildActionUrl, ink: "#182a2a", link: "#2f6670", muted: "#667676" });
+        richContent = buildReportEmail({
+          reportTitle: report.title, eventTitle, viewUrl: actionUrl,
+          reportBodyHtml: html(reportDoc, 200),
+          notes: noteDocs.map(n => ({ deptName: n.deptName, contentHtml: html(n.doc, 120) })),
+        });
       } else {
-        richContent = buildReportCard(report.title, eventTitle, reportBody, notes, report.published_at, actionUrl);
+        richContent = buildReportCard(
+          report.title, eventTitle,
+          toLarkMd(truncateDoc(reportDoc, 120), { buildUrl: target.adapter.buildActionUrl }),
+          noteDocs.map(n => ({ deptName: n.deptName, content: toLarkMd(truncateDoc(n.doc, 100), { buildUrl: target.adapter.buildActionUrl }) })),
+          report.published_at, actionUrl);
       }
       const message: PlatformMessage = {
         text: `新报告：${report.title}（${eventTitle}），查看：${actionUrl}`,

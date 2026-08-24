@@ -4,6 +4,7 @@ import { describe, it, expect } from "vitest";
 import { renderNotifyDoc } from "@/lib/notify-doc/from-markdown";
 import { toFeishuElements, toLarkMd } from "@/lib/notify-doc/platform-feishu";
 import { toPlainText, toSummary } from "@/lib/notify-doc/platform-text";
+import { toEmailHtml } from "@/lib/notify-doc/platform-html";
 import { truncateDoc, type RefResolver } from "@/lib/notify-doc/ast";
 
 const UUID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
@@ -143,5 +144,43 @@ describe("AST 层截断（卡片预览的正确切法）", () => {
   it("截断后追加省略号", async () => {
     const d = await doc("一二三四五六七八九十");
     expect(toPlainText(truncateDoc(d, 3))).toBe("…");
+  });
+});
+
+describe("邮件平台 renderer（HTML）", () => {
+  it("HTML 一律转义——正文里的尖括号/& 不能变成标签或实体注入", async () => {
+    const d = await doc('风险 <script>alert(1)</script> 与 A&B');
+    const html = toEmailHtml(d);
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("A&amp;B");
+  });
+
+  it("引用落成真链接，站内相对路径经 buildUrl 绝对化", async () => {
+    const d = await doc(`见 [#](/__cm__/wiki/${UUID})`);
+    const html = toEmailHtml(d, { buildUrl: p => `https://mail.example.com${p}` });
+    expect(html).toContain('href="https://app.example.com/wiki/x"'); // 解析器给的绝对地址原样用
+  });
+
+  it("绝对化不了的站内路径只留文字，不给死链", async () => {
+    const localResolver: RefResolver = async () => ({ label: "某文档", url: "/production/p1/wiki/w1" });
+    const d = await renderNotifyDoc("[#](/__cm__/wiki/w1)", localResolver);
+    const html = toEmailHtml(d); // 不传 buildUrl
+    expect(html).not.toContain("<a ");
+    expect(html).toContain("某文档");
+  });
+
+  it("富语义真的富起来：粗体/列表/引用块各有其标签", async () => {
+    const html = toEmailHtml(await doc("**重点**\n\n- 甲\n\n> 提示"));
+    expect(html).toContain("<strong>重点</strong>");
+    expect(html).toContain("<li");
+    expect(html).toContain("border-left");
+  });
+
+  it("三个通道拿到的是同一份 AST 的不同投影", async () => {
+    const d = await doc(`**A** [#](/__cm__/wiki/${UUID})`);
+    expect(toLarkMd(d)).toContain("**A**");
+    expect(toEmailHtml(d)).toContain("<strong>A</strong>");
+    expect(toPlainText(d, { keepUrls: false })).toBe("A 世界观报告");
   });
 });
