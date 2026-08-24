@@ -226,6 +226,12 @@ body {
   gap: 1px;
   /* 贴块左侧再往外推一点，避免压住首字 */
   transform: translateX(-6px);
+  /* WebKit 必须显式声明才肯把这个 div 当拖拽源。插件设的 draggable=true
+     在 Chrome 够用，Safari 不够——实测 Safari 独有，Chrome 无此问题 */
+  -webkit-user-drag: element;
+  /* 拖拽起手时别顺带起一段文本选区，两个手势会互相抢 */
+  -webkit-user-select: none;
+  user-select: none;
 }
 /* 手柄 wrapper 是 position:absolute 挂到 editor.view.dom.parentElement 上的，
    那个容器必须是定位元素，否则坐标会算到更外层的祖先上，手柄飞到别处 */
@@ -242,7 +248,10 @@ body {
   color: #a1a1aa;
   font-size: 13px;
   line-height: 1;
+  cursor: pointer;
   transition: background-color 120ms ease, color 120ms ease;
+  /* 子元素同样要放行，否则鼠标压在图标上起手时 WebKit 仍然不认 */
+  -webkit-user-drag: element;
 }
 .wiki-block-handle-btn:hover {
   background: #f4f4f5;
@@ -253,6 +262,26 @@ body {
 }
 .wiki-block-handle-grip:active {
   cursor: grabbing;
+}
+
+/* 拖拽落点指示线（飞书/Notion 同款插入线）。prosemirror-dropcursor 把
+   background-color 写成行内样式，这里只管形状——圆头 + 一圈弱光晕，让 3px 的
+   线在段间距里也能一眼看到落在哪两块之间。
+   不采用「挤开动画」（苹果那套）：PM 拥有 DOM，dragover 期间给兄弟节点持续
+   施加 transform 会和 view 层抢 DOM 所有权——PM 随时可能因为一个 transaction
+   重建那些节点。飞书/Notion 同样用插入线，正是因为它们的 DOM 也是数据投影。 */
+.wiki-dropcursor {
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.25), 0 1px 6px rgba(14, 165, 233, 0.45);
+}
+/* 块间落点：横线撑满块宽，两端收圆 */
+.wiki-dropcursor.prosemirror-dropcursor-block {
+  border-radius: 3px;
+}
+/* 行内落点：竖线细一点，不要光晕（贴在字缝里，光晕会糊成一团） */
+.wiki-dropcursor.prosemirror-dropcursor-inline {
+  border-radius: 2px;
+  box-shadow: none;
 }
 
 /* 块选中态（NodeSelection）—— 对标 Notion 的 notion-selectable-halo。

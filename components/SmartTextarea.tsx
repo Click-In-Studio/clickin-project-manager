@@ -30,6 +30,7 @@ import { WikiImage } from "@/lib/tiptap-wiki-image";
 import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/tiptap-upload-placeholder";
 import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor-slash-commands";
+import { DROP_INDICATOR_OPTIONS } from "@/lib/editor-drop-indicator";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 import BlockHandle from "@/components/editor/BlockHandle";
 import BlockBubbleMenu from "@/components/editor/BlockBubbleMenu";
@@ -597,7 +598,9 @@ export default function SmartTextarea({
     // 的 schema 丢弃，重新序列化时星号就消失了，而 plain 面没有保真锁兜底。
     // 生产库实测：plain 列里带 markdown 语法的一共 3 行（两条有序列表），
     // 所以「统一 schema」的观感代价可忽略，而丢内容的风险是实打实的。
-    const base = StarterKit;
+    // 拖拽落点指示线 —— 理由与选型见 lib/editor-drop-indicator.ts。
+    // 注意 StarterKit 的选项键是小写 dropcursor，扩展自身的名字却是 dropCursor
+    const base = StarterKit.configure({ dropcursor: { ...DROP_INDICATOR_OPTIONS } });
 
     const contentMentionCfg = ContentMentionExt.configure({
       // v3 Mention 退格默认把 chip 还原成 mentionSuggestionChar（未设=@）——

@@ -81,20 +81,27 @@ export default function BlockHandle({ editor }: { editor: Editor | null }) {
       // 都换身份，插件会被反复 unregister/register
       className="wiki-block-handle"
     >
-      <button
-        type="button"
-        onMouseDown={e => { e.preventDefault(); insertBelow(); }}
+      {/* 两个都**不是** <button>：WebKit 里 draggable 祖先内的原生按钮会吃掉
+          mousedown 手势，dragstart 根本不触发（Chrome 无此问题，实测 Safari
+          独有）。用 span + role=button 保住可访问性，同时不挡拖拽。
+          动作一律走 onClick 而不是 onMouseDown —— 浏览器在真的发生拖拽后会
+          抑制 click，于是「点=选中/插入、拖=移动」天然分流；而 mousedown 里
+          做事（尤其 preventDefault 或 editor.focus() 抢焦点）正是掐掉
+          dragstart 的另外两种经典写法。 */}
+      <span
+        role="button"
+        tabIndex={-1}
+        onClick={insertBelow}
         title="在下方插入块"
         className="wiki-block-handle-btn"
-      >＋</button>
-      <button
-        type="button"
-        // mousedown 里选中：点击即整块选中（浮出块浮动条），拖拽由 DragHandle
-        // 自己接管。preventDefault 会掐掉 dragstart，所以这里**不能**拦默认行为
-        onMouseDown={selectBlock}
+      >＋</span>
+      <span
+        role="button"
+        tabIndex={-1}
+        onClick={selectBlock}
         title="拖动排序 / 点击选中整块"
         className="wiki-block-handle-btn wiki-block-handle-grip"
-      >⠿</button>
+      >⠿</span>
     </DragHandle>
   );
 }
