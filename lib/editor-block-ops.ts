@@ -161,12 +161,15 @@ export function equalizeColumns(editor: Editor): boolean {
   const block = getSelectedBlock(editor);
   if (!block || !isColumnGroup(block.node)) return false;
   const group = block.node;
-  if (group.content.content.every((c: PMNode) => c.attrs.ratio == null)) return false; // 本来就均分
   const { schema } = editor.state;
   const columns: PMNode[] = [];
+  let hadRatio = false;
   for (let i = 0; i < group.childCount; i++) {
-    columns.push(schema.nodes.column.create(null, group.child(i).content));
+    const col = group.child(i);
+    if (col.attrs.ratio != null) hadRatio = true;
+    columns.push(schema.nodes.column.create(null, col.content));
   }
+  if (!hadRatio) return false; // 本来就均分，不产生空事务
   const tr = editor.state.tr;
   tr.replaceWith(block.pos, block.end, schema.nodes.columnGroup.create(group.attrs, columns));
   tr.setSelection(NodeSelection.create(tr.doc, block.pos));

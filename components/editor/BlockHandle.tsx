@@ -49,7 +49,12 @@ export default function BlockHandle({ editor }: { editor: Editor | null }) {
   /** 在当前块后插空段并唤起 `/`（§2.6 ④：＋ 号顺势唤起 slash 菜单） */
   function insertBelow() {
     if (!editor || !target.node || target.pos < 0) return;
-    const after = target.pos + target.node.nodeSize;
+    // 按 pos 重新取一次节点，不吃 onNodeChange 存下来的那份快照——协作回灌或
+    // 自己刚跑完一个块操作之后，旧 nodeSize 可能已经不对了，据此算出的落点
+    // 会插到别的块中间
+    const fresh = editor.state.doc.nodeAt(target.pos);
+    if (!fresh) return;
+    const after = target.pos + fresh.nodeSize;
     editor.chain()
       .focus()
       .insertContentAt(after, { type: "paragraph" })
