@@ -514,7 +514,7 @@ export default function WikiDocClient({
               frameless
               blockTools
               minHeight={360}
-              placeholder="开始写作…（[[ 引用文档、@ 提及成员、# 引用剧本内容）"
+              placeholder="开始写作…（/ 插入块、[[ 引用文档、@ 提及成员、# 引用剧本内容）"
               memberMention={{
                 members,
                 onMentionsChange: m => { mentionsRef.current = m.map(x => ({ userId: x.userId, name: x.name })); },

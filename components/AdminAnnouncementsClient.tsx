@@ -143,7 +143,7 @@ function AnnouncementForm({
             value={content}
             onChange={setContent}
             markdown
-            placeholder="公告正文，支持 Markdown 格式…"
+            placeholder="公告正文，支持 Markdown 格式…（输入 / 插入块）"
             minHeight={180}
           />
         </div>

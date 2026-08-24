@@ -191,59 +191,6 @@ export function slashCommandPlugin(): DropPlugin {
   };
 }
 
-// ── Toolbar (markdown mode only) ──────────────────────────────────────────────
-
-type TiptapEditor = ReturnType<typeof useEditor>;
-
-function ToolbarBtn({ onClick, active, title, children }: { onClick: () => void; active?: boolean; title: string; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onMouseDown={e => { e.preventDefault(); onClick(); }}
-      title={title}
-      className={`px-2 py-1 rounded text-sm font-medium transition-colors ${
-        active ? "bg-zinc-800 text-white" : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Toolbar({ editor }: { editor: TiptapEditor | null }) {
-  if (!editor) return null;
-  return (
-    <div className="flex flex-wrap gap-0.5 px-2 py-1.5 border-b border-zinc-100">
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive("bold")} title="粗体 (⌘B)"><strong>B</strong></ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive("italic")} title="斜体 (⌘I)"><em>I</em></ToolbarBtn>
-      <span className="w-px bg-zinc-200 mx-1 self-stretch" />
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive("heading", { level: 2 })} title="二级标题">H2</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} active={editor.isActive("heading", { level: 3 })} title="三级标题">H3</ToolbarBtn>
-      <span className="w-px bg-zinc-200 mx-1 self-stretch" />
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive("bulletList")} title="无序列表">≡</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} title="有序列表">1.</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleTaskList().run()} active={editor.isActive("taskList")} title="任务列表">☑</ToolbarBtn>
-      <span className="w-px bg-zinc-200 mx-1 self-stretch" />
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="引用">&ldquo;</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleWrap("callout").run()} active={editor.isActive("callout")} title="Callout 高亮块">💡</ToolbarBtn>
-      <ToolbarBtn
-        onClick={() => editor.chain().focus().insertContent({
-          type: "columnGroup",
-          content: [
-            { type: "column", content: [{ type: "paragraph" }] },
-            { type: "column", content: [{ type: "paragraph" }] },
-          ],
-        }).run()}
-        active={editor.isActive("columnGroup")}
-        title="两栏分栏"
-      >◫</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} active={editor.isActive("table")} title="插入表格">⊞</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleCode().run()} active={editor.isActive("code")} title="行内代码">{"</>"}</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive("codeBlock")} title="代码块">{"{ }"}</ToolbarBtn>
-    </div>
-  );
-}
-
 // ── TipTap extensions ─────────────────────────────────────────────────────────
 
 // Content mention — plain text mode: serialises as [#kind:id] tokens
@@ -1115,12 +1062,9 @@ export default function SmartTextarea({
       : frameless
         ? `overflow-hidden ${className}`
         : `rounded-lg border border-zinc-200 focus-within:border-zinc-400 overflow-hidden bg-white ${className}`;
-    return (
-      <div className={frame}>
-        {!readOnly && <Toolbar editor={editor} />}
-        {editorEl}
-      </div>
-    );
+    // 固定工具栏已退役：格式走选中浮出的文本浮动条，插入走 `/` 指令源，
+    // 块级操作走左侧手柄。Notion 式整页编辑不该常驻一条工具栏。
+    return <div className={frame}>{editorEl}</div>;
   }
 
   return (
