@@ -8,11 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  DROP_INDICATOR_OPTIONS, DROP_INDICATOR_DEFAULTS, COLUMN_DROP_ACTIVE_CLASS,
-} from "@/lib/editor-drop-indicator";
+import { DROP_INDICATOR_OPTIONS, DROP_INDICATOR_DEFAULTS } from "@/lib/editor-drop-indicator";
 
 /** 取 dropcursor 扩展的实际生效选项。注意大小写：StarterKit 的选项键是
  *  小写 `dropcursor`，扩展自身的 name 却是 `dropCursor` */
@@ -51,19 +47,6 @@ describe("拖拽落点指示线", () => {
     expect(DROP_INDICATOR_OPTIONS.color).not.toBe(DROP_INDICATOR_DEFAULTS.color);
     // class 是 CSS 的挂载点（圆头 + 光晕）；没有它 CSS 里那几条规则全部落空
     expect(DROP_INDICATOR_OPTIONS.class).toBeTruthy();
-  });
-
-  // TS 常量 ↔ CSS 选择器是跨语言硬耦合：改了一边另一边不会报错，只会"横线又
-  // 回来了"。而这条抑制规则本身是必需的——disableDropCursor 只能不画新线，
-  // 删不掉已经画上的那条（dropcursor 的禁用分支什么都不做，scheduleRemoval
-  // 是 5 秒）。
-  it("globals.css 里的抑制规则与两个常量对得上", () => {
-    const css = readFileSync(join(process.cwd(), "app/globals.css"), "utf8");
-    expect(css).toContain(`body.${COLUMN_DROP_ACTIVE_CLASS} .${DROP_INDICATOR_OPTIONS.class}`);
-    // 必须是 display:none 且带 !important —— dropcursor 把定位样式写成行内
-    expect(css).toMatch(
-      new RegExp(`body\\.${COLUMN_DROP_ACTIVE_CLASS}\\s+\\.${DROP_INDICATOR_OPTIONS.class}\\s*\\{[^}]*display:\\s*none\\s*!important`),
-    );
   });
 
   it("dropcursor 插件真的进了 state（没被 StarterKit 的 false 分支关掉）", () => {

@@ -11,7 +11,8 @@ import { Markdown } from "tiptap-markdown";
 import { Callout } from "@/lib/tiptap-callout";
 import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 import {
-  buildColumnDropTransaction, buildColumnUnwrapTransaction, ColumnDrop,
+  buildColumnDropTransaction, buildColumnUnwrapTransaction,
+  columnBoundaries, pickBoundaryIndex, edgeSide,
   type ColumnDropTarget,
 } from "@/lib/tiptap-column-drop";
 import { ColumnEditing } from "@/lib/tiptap-column-editing";
@@ -342,24 +343,89 @@ describe("栏不能嵌套", () => {
   });
 });
 
-describe("与内建 dropcursor 的让位约定", () => {
-  it("disableDropCursor 被挂到每一个节点 spec 上", () => {
-    const e = new Editor({
-      extensions: [StarterKit, Markdown, Callout, Column, ColumnGroup, ColumnDrop],
-      content: "甲",
-    });
-    // prosemirror-dropcursor 读的是**光标所在节点**的 spec，所以挂漏一个节点
-    // 类型，在那种块上就会横线竖线同时出现。这条坏了不报错，只是"看着怪"
-    for (const name of ["paragraph", "heading", "blockquote", "columnGroup", "column"]) {
-      expect(typeof e.schema.nodes[name].spec.disableDropCursor).toBe("function");
-    }
-    e.destroy();
+describe("边缘带判定（决定「贴边＝竖线」还是「中间＝横线」）", () => {
+  const BLOCK = { left: 100, right: 700, width: 600 }; // 带宽 = min(40, 150) = 40
+
+  it("块内贴左/右沿命中，正中不命中", () => {
+    expect(edgeSide(BLOCK, 105)).toBe("left");
+    expect(edgeSide(BLOCK, 695)).toBe("right");
+    expect(edgeSide(BLOCK, 400)).toBeNull();
   });
 
-  it("不装 ColumnDrop 时节点 spec 上没有这个字段（反证：确实是它挂的）", () => {
-    const e = new Editor({ extensions: [StarterKit, Column, ColumnGroup], content: "甲" });
-    expect(e.schema.nodes.paragraph.spec.disableDropCursor).toBeUndefined();
-    e.destroy();
+  // 这条就是「拖到页边距」那个 bug 的核心
+  it("块**外侧**同样算边缘 —— 页边距是造栏最自然的起手区", () => {
+    expect(edgeSide(BLOCK, 60)).toBe("left");   // 左沿之外 40px
+    expect(edgeSide(BLOCK, 0)).toBe("left");    // 更外面
+    expect(edgeSide(BLOCK, -200)).toBe("left"); // 远在天边也不该突然变横线
+    expect(edgeSide(BLOCK, 760)).toBe("right");
+  });
+
+  it("窄块的边缘带按宽度的 1/4 收窄，免得整块都是边缘", () => {
+    const narrow = { left: 0, right: 80, width: 80 }; // 带宽 = min(40, 20) = 20
+    expect(edgeSide(narrow, 15)).toBe("left");
+    expect(edgeSide(narrow, 40)).toBeNull(); // 正中仍是普通落点
+    expect(edgeSide(narrow, 65)).toBe("right");
+  });
+
+  // 带宽封顶在 width*0.25，所以左右两条带**永远不会重叠**（重叠需要
+  // width*0.25 >= width/2）。于是块内任何一点的判定都是唯一的，不存在
+  // "贴哪边取决于先判哪个"的歧义——这条不变量比任何优先级规则都强
+  it("左右边缘带永不重叠 —— 块内每一点的归属都唯一", () => {
+    for (const width of [8, 40, 160, 600, 1200]) {
+      const rect = { left: 0, right: width, width };
+      const band = Math.min(40, width * 0.25);
+      expect(band * 2).toBeLessThanOrEqual(width);
+      // 正中永远不属于任何一侧
+      expect(edgeSide(rect, width / 2)).toBeNull();
+    }
+  });
+});
+
+describe("栏边界的水平判定（组范围内一律按水平位置吸附到最近边界）", () => {
+  // 两栏：[0,100] 与 [120,220]，栏间隙 100~120
+  const TWO = [{ left: 0, right: 100 }, { left: 120, right: 220 }];
+  // 三栏：[0,100] [120,220] [240,340]
+  const THREE = [...TWO, { left: 240, right: 340 }];
+
+  it("n 栏给出 n+1 条边界：左沿、各缝中点、右沿", () => {
+    expect(columnBoundaries(TWO)).toEqual([0, 110, 220]);
+    expect(columnBoundaries(THREE)).toEqual([0, 110, 230, 340]);
+  });
+
+  it("最左之外 → index 0（插到最前）", () => {
+    expect(pickBoundaryIndex(columnBoundaries(TWO), -50)).toBe(0);
+    expect(pickBoundaryIndex(columnBoundaries(TWO), 10)).toBe(0);
+  });
+
+  it("最右之外 → index n（插到最后）", () => {
+    const b = columnBoundaries(TWO);
+    expect(pickBoundaryIndex(b, 400)).toBe(b.length - 1);
+    expect(pickBoundaryIndex(b, 210)).toBe(b.length - 1);
+  });
+
+  it("栏间隙 → 插到那条缝（第一栏和第二栏之间＝index 1）", () => {
+    expect(pickBoundaryIndex(columnBoundaries(TWO), 110)).toBe(1);
+    expect(pickBoundaryIndex(columnBoundaries(THREE), 115)).toBe(1);
+    expect(pickBoundaryIndex(columnBoundaries(THREE), 232)).toBe(2);
+  });
+
+  it("栏正中 → 就近归到它自己的某一侧，不会跳到隔壁的缝", () => {
+    const b = columnBoundaries(THREE);
+    expect(pickBoundaryIndex(b, 50)).toBe(0);   // 第一栏中点偏左沿
+    expect(pickBoundaryIndex(b, 170)).toBe(1);  // 第二栏中点 → 左侧缝
+    expect(pickBoundaryIndex(b, 175)).toBe(2);  // 再右一点 → 右侧缝
+  });
+
+  it("边界数与栏数的关系恒定 —— 索引越界就是插错位置", () => {
+    for (const rects of [TWO, THREE]) {
+      const b = columnBoundaries(rects);
+      expect(b).toHaveLength(rects.length + 1);
+      for (const x of [-999, 0, 55, 110, 200, 999]) {
+        const i = pickBoundaryIndex(b, x);
+        expect(i).toBeGreaterThanOrEqual(0);
+        expect(i).toBeLessThanOrEqual(rects.length);
+      }
+    }
   });
 });
 

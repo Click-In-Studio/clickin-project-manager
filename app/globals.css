@@ -296,23 +296,14 @@ body {
   box-shadow: none;
 }
 
-/* 造栏拖放接管落点期间，藏掉内建的横向插入线。
-   单靠节点 spec 的 disableDropCursor 不够：prosemirror-dropcursor 在禁用分支
-   里什么都不做，既不清除已画上的横线也不重新计时（scheduleRemoval 是 5 秒），
-   于是鼠标扫过普通区域画出的那条会一直挂着——看起来就是"横线永远都在"。
-   disableDropCursor 负责不画新的，这条负责藏掉旧的。 */
-body.wiki-column-drop-active .wiki-dropcursor {
-  display: none !important;
-}
-
-/* 造栏落点竖线（lib/tiptap-column-drop）—— 与横向插入线同一套视觉语言，
-   只是方向不同：横线＝插到块之间，竖线＝分成一栏。
-   fixed 定位吃视口坐标，绕开 offsetParent 与外框 overflow:hidden 的裁剪 */
-.wiki-column-drop-line {
+/* 拖拽落点指示线（lib/tiptap-column-drop）—— 有块工具的面只有**这一个**元素，
+   横线竖线共用它，所以两者天然互斥，不需要任何抑制规则。
+   横线＝插到块之间；竖线＝在这里分出一栏。
+   fixed 定位吃视口坐标，绕开 offsetParent 与外框 overflow:hidden 的裁剪。
+   宽高由 JS 按几何算好写在行内样式上，这里只管观感。 */
+.wiki-drop-line {
   position: fixed;
   z-index: 60;
-  width: 3px;
-  margin-left: -1.5px;
   border-radius: 3px;
   background: #0ea5e9;
   pointer-events: none;

@@ -601,8 +601,15 @@ export default function SmartTextarea({
     // 生产库实测：plain 列里带 markdown 语法的一共 3 行（两条有序列表），
     // 所以「统一 schema」的观感代价可忽略，而丢内容的风险是实打实的。
     // 拖拽落点指示线 —— 理由与选型见 lib/editor-drop-indicator.ts。
-    // 注意 StarterKit 的选项键是小写 dropcursor，扩展自身的名字却是 dropCursor
-    const base = StarterKit.configure({ dropcursor: { ...DROP_INDICATOR_OPTIONS } });
+    // 注意 StarterKit 的选项键是小写 dropcursor，扩展自身的名字却是 dropCursor。
+    //
+    // blockTools 面**整个关掉内建 dropcursor**：那里由 ColumnDrop 统一画横线与
+    // 竖线。两套指示系统并存就得互相抑制，而 dropcursor 的禁用分支不清除已画
+    // 上的线，抑制不干净（详见 tiptap-column-drop.ts）。只留一个元素，互斥由
+    // 「同一时刻只可能有一种形态」天然保证。
+    const base = StarterKit.configure({
+      dropcursor: blockTools ? false : { ...DROP_INDICATOR_OPTIONS },
+    });
 
     const contentMentionCfg = ContentMentionExt.configure({
       // v3 Mention 退格默认把 chip 还原成 mentionSuggestionChar（未设=@）——

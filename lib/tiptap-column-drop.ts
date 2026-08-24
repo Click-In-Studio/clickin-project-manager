@@ -21,8 +21,8 @@ import { Plugin, PluginKey, NodeSelection } from "@tiptap/pm/state";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
+import { dropPoint } from "@tiptap/pm/transform";
 import { removeColumnsAt } from "./tiptap-column-editing";
-import { COLUMN_DROP_ACTIVE_CLASS } from "./editor-drop-indicator";
 
 /** 边缘感应带：固定 40px，但不超过目标自身宽度的 1/4——否则窄栏整个都是
  *  "边缘"，就没有普通落点可言了 */
@@ -145,10 +145,149 @@ function targetInsideSource(target: ColumnDropTarget, source: { from: number; to
 
 // ── 几何判定（吃 DOM 矩形，浏览器侧）────────────────────────────────────────
 
-function edgeSide(rect: DOMRect, x: number): "left" | "right" | null {
+/**
+ * x 是否落在块的左/右「边缘带」里。
+ *
+ * 边缘带对**块外侧**同样成立：x 在左沿之外时 `x - left` 为负，一样命中 left。
+ * 这不是巧合而是刻意的——页边距是造栏最自然的起手区（把块往左一带、越过正文
+ * 左沿），在那里必须仍然是竖线，否则会出现"再往外一点竖线突然变回横线"。
+ */
+export function edgeSide(rect: { left: number; right: number; width: number }, x: number): "left" | "right" | null {
   const band = Math.min(EDGE_MAX_PX, rect.width * EDGE_RATIO);
   if (x - rect.left <= band) return "left";
   if (rect.right - x <= band) return "right";
+  return null;
+}
+
+/** 指示线粗细（px）。内建 dropcursor 默认 1px + currentColor，实测等于看不见 */
+const INDICATOR_PX = 3;
+
+export type IndicatorRect = { left: number; top: number; width: number; height: number };
+
+/** 造栏竖线：贴在栏/块的某一侧，纵向铺满它的高度 */
+export function verticalRect(line: LineRect, width: number): IndicatorRect {
+  return {
+    left: line.x - width / 2,
+    top: line.top,
+    width,
+    height: Math.max(0, line.bottom - line.top),
+  };
+}
+
+/**
+ * 普通块间落点的横线几何 —— 复刻 prosemirror-dropcursor 的 updateOverlay：
+ * 先用 dropPoint 把光标位置吸附到合法的插入点，再取相邻块的 DOM 矩形定横线
+ * 的 y 与宽度；前后都有块时取两者的中缝。落在行内位置（例如往段落中间拖一段
+ * 文字）则退化成一根细竖条，与内建行为一致。
+ */
+export function blockLineRect(view: EditorView, event: DragEvent, width: number): IndicatorRect | null {
+  const at = view.posAtCoords({ left: event.clientX, top: event.clientY });
+  if (!at) return null;
+  let target = at.pos;
+  const slice = view.dragging?.slice;
+  if (slice) {
+    const point = dropPoint(view.state.doc, target, slice);
+    if (point != null) target = point;
+  }
+  const $pos = view.state.doc.resolve(target);
+  if (!$pos.parent.inlineContent) {
+    const before = $pos.nodeBefore;
+    const after = $pos.nodeAfter;
+    if (before || after) {
+      const dom = view.nodeDOM(target - (before ? before.nodeSize : 0));
+      if (dom && (dom as HTMLElement).nodeType === 1) {
+        const r = (dom as HTMLElement).getBoundingClientRect();
+        let y = before ? r.bottom : r.top;
+        if (before && after) {
+          const afterDom = view.nodeDOM(target);
+          if (afterDom && (afterDom as HTMLElement).nodeType === 1) {
+            y = (y + (afterDom as HTMLElement).getBoundingClientRect().top) / 2;
+          }
+        }
+        return { left: r.left, top: y - width / 2, width: r.width, height: width };
+      }
+    }
+  }
+  try {
+    const c = view.coordsAtPos(target);
+    return { left: c.left - width / 2, top: c.top, width, height: Math.max(0, c.bottom - c.top) };
+  } catch {
+    return null; // 坐标算不出来就不画，别抛进拖放流程
+  }
+}
+
+/**
+ * 组内离 x 最近的栏边界。
+ *
+ * n 栏有 n+1 条边界：最左栏的左沿、每两栏之间缝的中点、最右栏的右沿。第 k 条
+ * 边界对应「在 index=k 处插一栏」——这也是为什么「第 i 栏的右边缘」和「第
+ * i、i+1 栏之间的缝」是同一件事。
+ *
+ * 竖线纵向铺满**整个组**的高度而不是某一栏的高度：落点是组级别的，贴着某一栏
+ * 的高度画会让人以为只影响那一栏。
+ */
+function nearestColumnBoundary(
+  view: EditorView, groupPos: number, group: PMNode, x: number,
+): { index: number; line: LineRect } | null {
+  const groupRect = rectOf(view, groupPos);
+  if (!groupRect) return null;
+  const rects: DOMRect[] = [];
+  let pos = groupPos + 1;
+  for (let i = 0; i < group.childCount; i++) {
+    const r = rectOf(view, pos);
+    if (!r) return null;
+    rects.push(r);
+    pos += group.child(i).nodeSize;
+  }
+  if (rects.length === 0) return null;
+
+  const boundaries = columnBoundaries(rects);
+  const index = pickBoundaryIndex(boundaries, x);
+  return {
+    index,
+    line: { x: boundaries[index], top: groupRect.top, bottom: groupRect.bottom },
+  };
+}
+
+/**
+ * n 栏 → n+1 条边界的 x 坐标：最左栏的左沿、每两栏之间缝的中点、最右栏的右沿。
+ * 第 k 条边界对应「在 index=k 处插一栏」。
+ */
+export function columnBoundaries(rects: { left: number; right: number }[]): number[] {
+  const out = [rects[0].left];
+  for (let i = 1; i < rects.length; i++) out.push((rects[i - 1].right + rects[i].left) / 2);
+  out.push(rects[rects.length - 1].right);
+  return out;
+}
+
+/** 离 x 最近的那条边界的下标。并列时取靠左的——插入语义上更符合直觉 */
+export function pickBoundaryIndex(boundaries: number[], x: number): number {
+  let best = 0;
+  for (let i = 1; i < boundaries.length; i++) {
+    if (Math.abs(x - boundaries[i]) < Math.abs(x - boundaries[best])) best = i;
+  }
+  return best;
+}
+
+/**
+ * 纵向落在哪个顶层块的范围内（纯几何，不看 posAtCoords）。
+ *
+ * 为什么需要这条几何回退：光标落在**页边距**里时——编辑器自己的 padding-left
+ * 就是——posAtCoords 给出的是 depth 0 的文档级位置，`$pos.node(1)` 根本不存在，
+ * 拿不到"我正贴着哪个块"。而这恰恰是造栏最自然的起手区：人把块往左边一带，
+ * 越过正文左沿进了页边距，期望的仍然是竖线（在这块左边分一栏）。
+ *
+ * 纵向落在两块之间的空隙里则返回 null —— 那种情形就该是横线（块间插入）。
+ */
+function topLevelBlockUnderPointer(view: EditorView, clientY: number): { pos: number; node: PMNode } | null {
+  const doc = view.state.doc;
+  let pos = 0;
+  for (let i = 0; i < doc.childCount; i++) {
+    const child = doc.child(i);
+    const r = rectOf(view, pos);
+    if (r && clientY >= r.top && clientY <= r.bottom) return { pos, node: child };
+    pos += child.nodeSize;
+  }
   return null;
 }
 
@@ -174,31 +313,64 @@ export function computeColumnDropTarget(view: EditorView, event: DragEvent): Col
   const at = view.posAtCoords({ left: event.clientX, top: event.clientY });
   if (!at) return null;
   const $pos = view.state.doc.resolve(at.pos);
+  const draggedIsColumn = draggedNode?.type === view.state.schema.nodes.column;
 
-  // 落在某一栏里：用**栏**的矩形判边，于是"栏的右边缘"＝"两栏之间的缝"
+  // 光标在某个分栏组的范围内（栏里、栏间隙、组的沟槽都算）。
+  // **组的范围内唯一有意义的落点就是栏边界**，一律由水平位置决定——所以这里
+  // 不再区分"落在栏内"和"落在栏外的空隙里"，统一吸附到最近的边界。
   for (let d = $pos.depth; d >= 1; d--) {
-    if ($pos.node(d).type.name !== "column") continue;
-    const colPos = $pos.before(d);
-    const groupPos = $pos.before(d - 1);
-    const group = $pos.node(d - 1);
-    const rect = rectOf(view, colPos);
-    if (!rect) return { kind: "forbidden" };
-    const side = edgeSide(rect, event.clientX);
-    // 栏里没有块级落点：不在栏边缘就是禁区，不能退回默认的块间插入
-    if (!side) return { kind: "forbidden" };
+    const node = $pos.node(d);
+    if (node.type.name !== "columnGroup") continue;
+    const groupPos = $pos.before(d);
+    const nearest = nearestColumnBoundary(view, groupPos, node, event.clientX);
+    if (!nearest) return { kind: "forbidden" };
+
+    // 拖的是整栏：不存在"放进另一栏里面"这回事，任何位置都吸附到最近边界
+    if (!draggedIsColumn) {
+      // 拖的是普通块：只有栏边缘那条窄带才是落点。栏内其余地方是禁区——
+      // 栏里没有块级落点（否则"分栏的单位是栏"这条就破了）
+      const colDepth = d + 1 <= $pos.depth ? d + 1 : -1;
+      if (colDepth > 0 && $pos.node(colDepth).type.name === "column") {
+        const colRect = rectOf(view, $pos.before(colDepth));
+        if (!colRect || !edgeSide(colRect, event.clientX)) return { kind: "forbidden" };
+      }
+    }
+
     return {
       kind: "insert",
       groupFrom: groupPos,
-      groupTo: groupPos + group.nodeSize,
-      index: $pos.index(d - 1) + (side === "right" ? 1 : 0),
-      line: { x: side === "left" ? rect.left : rect.right, top: rect.top, bottom: rect.bottom },
+      groupTo: groupPos + node.nodeSize,
+      index: nearest.index,
+      line: nearest.line,
     };
   }
 
-  // 顶层块：拖到它左/右边缘 → 就地包成两栏；其余位置交给默认的块间插入
-  if ($pos.depth < 1) return null;
-  const blockPos = $pos.before(1);
-  const block = $pos.node(1);
+  // 定位「贴着哪个顶层块」。posAtCoords 在页边距里只给得出 depth 0 的文档级
+  // 位置（$pos.node(1) 不存在），所以那里必须换几何来找——而页边距正是造栏
+  // 最自然的起手区，丢了它就会出现"往左带一点，竖线突然变回横线"
+  const located = $pos.depth >= 1
+    ? { pos: $pos.before(1), node: $pos.node(1) }
+    : topLevelBlockUnderPointer(view, event.clientY);
+  if (!located) return null; // 纵向落在两块之间 → 该走横线
+  const { pos: blockPos, node: block } = located;
+
+  // 页边距里贴着一个分栏组：仍按栏边界处理（祖先链那条路只在光标真的落进
+  // 栏里时才走得到）
+  if (block.type.name === "columnGroup") {
+    const nearest = nearestColumnBoundary(view, blockPos, block, event.clientX);
+    if (!nearest) return null;
+    return {
+      kind: "insert",
+      groupFrom: blockPos,
+      groupTo: blockPos + block.nodeSize,
+      index: nearest.index,
+      line: nearest.line,
+    };
+  }
+
+  // 普通顶层块：贴左/右边缘 → 就地包成两栏；中间地带交给默认的块间插入。
+  // 注意边缘带对**块外侧**也成立：clientX 在块左沿之外时 x - rect.left 为负，
+  // 一样命中 left。这正是"拖到页边距还应该是竖线"的实现
   const rect = rectOf(view, blockPos);
   if (!rect) return null;
   const side = edgeSide(rect, event.clientX);
@@ -219,84 +391,61 @@ export const columnDropKey = new PluginKey("columnDrop");
 export const ColumnDrop = Extension.create({
   name: "columnDrop",
 
-  // 只要落点属于我们管的三种情形（含禁区），就让内建 dropcursor 退场。
-  // prosemirror-dropcursor 读的是**光标所在节点**的 spec，所以必须挂到所有
-  // 节点上——extendNodeSchema 正是干这个的。
-  //
-  // 但这一条**不足以**让横线消失，必须配合下面的 CSS 抑制。原因在
-  // prosemirror-dropcursor 的 dragover 里：
-  //
-  //     if (pos && !disabled) { this.setCursor(target); this.scheduleRemoval(5000) }
-  //
-  // 禁用分支什么都不做——既不清除也不重新计时。于是只要鼠标在进入栏边缘之前
-  // 有任何一刻停在普通区域，那条横线就已经画上了，之后整个禁用期间它都不会
-  // 被清掉（要等那 5 秒的 scheduleRemoval）。拖动过程中鼠标必然扫过普通区域，
-  // 结果就是「不管有没有竖线，横线永远都在」。
-  extendNodeSchema() {
-    return {
-      disableDropCursor: (view: EditorView, _pos: unknown, event: DragEvent) =>
-        !!computeColumnDropTarget(view, event),
-    };
-  },
-
   addProseMirrorPlugins() {
+    // **唯一一个**指示元素，横线竖线共用。
+    //
+    // 这里刻意不用内建的 prosemirror-dropcursor 画横线（装了本扩展的面会把它
+    // 整个关掉，见 SmartTextarea）。试过靠 disableDropCursor + CSS 去抑制它，
+    // 不可靠——它的 dragover 在禁用分支里什么都不做，既不清除已画上的横线也
+    // 不重新计时（scheduleRemoval 是 5 秒），于是鼠标扫过普通区域画出的那条
+    // 会一直挂着。协调两套指示系统本身就是错的路：只留一个元素，互斥就由
+    // 「同一时刻只可能有一种形态」天然保证，不需要任何抑制。
     let indicator: HTMLElement | null = null;
 
-    // 内建横线的抑制开关。挂 body 而不是编辑器容器——dropcursor 把自己的元素
-    // append 到 view.dom 的 offsetParent 上，那一层是谁由布局决定，从 body
-    // 往下选是唯一稳的写法。选择器命中的是我们自己配的 .wiki-dropcursor 类
-    // （见 lib/editor-drop-indicator.ts），不依赖库的内部命名。
-    const setSuppressed = (on: boolean) => {
-      document.body.classList.toggle(COLUMN_DROP_ACTIVE_CLASS, on);
-    };
+    const hide = () => { if (indicator) indicator.style.display = "none"; };
 
-    const hide = () => {
-      if (indicator) indicator.style.display = "none";
-    };
-
-    /** 拖拽结束 / 离开：竖线收起，横线的抑制也要一并解除 */
-    const reset = () => { hide(); setSuppressed(false); };
-
-    const show = (line: LineRect) => {
+    /** rect 用视口坐标（fixed 定位）：绕开 offsetParent 是谁的问题——
+     *  编辑器外框可能 overflow:hidden，挂在里面会被裁掉 */
+    const show = (rect: IndicatorRect, vertical: boolean) => {
       if (!indicator) {
         indicator = document.createElement("div");
-        indicator.className = "wiki-column-drop-line";
         document.body.appendChild(indicator);
       }
-      // fixed + 视口坐标：绕开 offsetParent 是谁的问题（编辑器外框可能
-      // overflow:hidden，挂在里面会被裁掉）
+      indicator.className = `wiki-drop-line ${vertical ? "is-vertical" : "is-horizontal"}`;
       indicator.style.display = "block";
-      indicator.style.left = `${line.x}px`;
-      indicator.style.top = `${line.top}px`;
-      indicator.style.height = `${Math.max(0, line.bottom - line.top)}px`;
+      indicator.style.left = `${rect.left}px`;
+      indicator.style.top = `${rect.top}px`;
+      indicator.style.width = `${rect.width}px`;
+      indicator.style.height = `${rect.height}px`;
     };
 
     return [new Plugin({
       key: columnDropKey,
       view: () => ({
-        destroy() {
-          indicator?.remove();
-          indicator = null;
-          setSuppressed(false);
-        },
+        destroy() { indicator?.remove(); indicator = null; },
       }),
       props: {
         handleDOMEvents: {
           dragover: (view, event) => {
             const target = computeColumnDropTarget(view, event as DragEvent);
-            // 只要落点归我们管（含禁区），内建横线一律抑制：禁区里画横线等于
-            // 谎称"这里能放"，比没有指示更糟
-            setSuppressed(!!target);
-            if (target && target.kind !== "forbidden") show(target.line);
-            else hide(); // 禁区不画线——没有指示本身就是"这里不能放"的表达
+            if (target?.kind === "forbidden") {
+              // 禁区：什么都不画。画横线等于谎称"这里能放"，比没有指示更糟
+              hide();
+            } else if (target) {
+              show(verticalRect(target.line, INDICATOR_PX), true);
+            } else {
+              // 普通的块间落点，几何复刻自 prosemirror-dropcursor
+              const rect = blockLineRect(view, event as DragEvent, INDICATOR_PX);
+              if (rect) show(rect, false); else hide();
+            }
             return false; // 只画线，不拦事件
           },
-          dragleave: () => { reset(); return false; },
-          dragend: () => { reset(); return false; },
-          drop: () => { reset(); return false; },
+          dragleave: () => { hide(); return false; },
+          dragend: () => { hide(); return false; },
+          drop: () => { hide(); return false; },
         },
         handleDrop: (view, event, slice, moved) => {
-          reset();
+          hide();
           if (slice.content.childCount !== 1) return false;
           const dragged = slice.content.firstChild;
           if (!dragged) return false;
