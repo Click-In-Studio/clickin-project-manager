@@ -150,6 +150,34 @@ describe("insertColumnAt —— 分割线顶端的 ⊕", () => {
     e.destroy();
   });
 
+  // 组最外两端的 ⊕ 就落在这两个下标上（左端 0、右端 childCount）——
+  // 拖动在那里没有意义（没有邻栏可对分宽度），但加栏必须能做
+  it("插到最左端（index 0）", () => {
+    const e = makeEditor(":::cols\n\n一\n\n---\n\n二\n\n:::");
+    const tr = e.state.tr;
+    expect(insertColumnAt(tr, 0, 0)).toBe(true);
+    e.view.dispatch(tr);
+    const parts = md(e).split("\n---\n");
+    expect(parts).toHaveLength(3);
+    expect(parts[0].replace(":::cols", "").trim()).toBe(""); // 新栏是空的
+    expect(parts[1]).toContain("一");
+    expect(parts[2]).toContain("二");
+    e.destroy();
+  });
+
+  it("插到最右端（index = 栏数）", () => {
+    const e = makeEditor(":::cols\n\n一\n\n---\n\n二\n\n:::");
+    const group = e.state.doc.child(0);
+    const tr = e.state.tr;
+    expect(insertColumnAt(tr, 0, group.childCount)).toBe(true);
+    e.view.dispatch(tr);
+    const parts = md(e).split("\n---\n");
+    expect(parts).toHaveLength(3);
+    expect(parts[0]).toContain("一");
+    expect(parts[1]).toContain("二");
+    e.destroy();
+  });
+
   it("下标越界被夹住", () => {
     const e = makeEditor(TWO);
     const tr = e.state.tr;

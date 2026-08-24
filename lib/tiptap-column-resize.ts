@@ -1,22 +1,82 @@
 // 栏宽拖拽 —— 栏与栏之间那条分割线：悬停高亮、左右拖动调宽度比例、顶端 ⊕
 // 直接插一栏。
 //
-// 用 **widget decoration** 而不是 NodeView：分割线是纯编辑期的操作件，不属于
-// 文档内容。decoration 不进正史、不参与序列化、不广播给协作端，天然安全（与
-// 图片上传占位同一套路，见 lib/tiptap-upload-placeholder）。换成 NodeView 就
-// 得改 column 节点本身，把编辑期 UI 混进方言定义里。
+// 两件东西，各有各的理由：
 //
-// 拖动期间只改 DOM 的行内 flex，**不发事务**：调宽度是连续动作，逐帧发事务会
-// 把撤销栈冲垮（拖一次留几十步）。松手时一次性写入 ratio，撤销一步回到原状。
+// ① **分割线本身 = widget decoration**。它是纯编辑期的操作件，不属于文档内容
+//    ——decoration 不进正史、不参与序列化、不广播给协作端（与图片上传占位同
+//    一套路，见 lib/tiptap-upload-placeholder）。
+//
+// ② **column 挂一个 NodeView**，只为让拖动期间的实时预览活得下来。拖动时我们
+//    直接改栏的行内 flex 而不发事务（调宽度是连续动作，逐帧发事务会把撤销栈
+//    冲垮，拖一次留几十步），但 ProseMirror 的 DOMObserver 盯着 attributes，
+//    一看到 style 变了就把该节点按文档状态重画，预览当场被抹平——表现就是
+//    "拖的时候没反应，松手才跳过去"。NodeView 的 ignoreMutation 是官方留的
+//    出口，prosemirror-tables 的列宽拖拽用的也是这套。
+//
+// 这个 NodeView **不碰方言**：它与 column 的 renderHTML 完全等价，序列化、
+// 解析、markdown 形态一概不受影响，纯粹是编辑期的一层。
+//
+// 松手时才一次性写入 ratio，于是撤销一步就回到原状。
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import type { EditorView } from "@tiptap/pm/view";
+import type { EditorView, ViewMutationRecord } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { insertColumnAt, setColumnRatios, normalizeRatios } from "./tiptap-column-editing";
 
 /** 一栏最少占多宽（百分比）。再窄就没法放内容，也点不中它的分割线 */
 const MIN_RATIO = 6;
+
+/** 按节点的 ratio 把宽度写回 DOM（null = 均分，交还给 CSS 的 flex:1 1 0） */
+function applyRatio(dom: HTMLElement, ratio: number | null) {
+  if (ratio) {
+    dom.setAttribute("data-ratio", String(ratio));
+    dom.style.flex = `0 1 ${ratio}%`;
+  } else {
+    dom.removeAttribute("data-ratio");
+    dom.style.flex = "";
+  }
+}
+
+/**
+ * column 的 NodeView —— **只为了一件事：让拖动期间的实时预览活得下来。**
+ *
+ * 拖动时我们直接改栏的行内 flex（不发事务，见 startResize）。但 ProseMirror
+ * 的 DOMObserver 盯着 attributes，一看到 style 变了就把该节点按文档状态重画，
+ * 预览当场被抹平——表现就是"拖的时候没反应，松手才跳过去"。
+ * NodeView 的 ignoreMutation 是官方给的出口，prosemirror-tables 的列宽拖拽
+ * 用的也是这套。
+ *
+ * 除此之外它与 renderHTML 完全等价：同样的 class / data-col / ratio 样式。
+ */
+class ColumnView {
+  dom: HTMLElement;
+  contentDOM: HTMLElement;
+
+  constructor(node: PMNode) {
+    const dom = document.createElement("div");
+    dom.className = "wiki-col";
+    dom.setAttribute("data-col", "");
+    applyRatio(dom, node.attrs.ratio as number | null);
+    this.dom = dom;
+    this.contentDOM = dom; // 与 renderHTML 的 ["div", {...}, 0] 一致：内容直挂
+  }
+
+  update(node: PMNode) {
+    if (node.type.name !== "column") return false;
+    applyRatio(this.dom, node.attrs.ratio as number | null);
+    return true;
+  }
+
+  // ViewMutationRecord 是 MutationRecord 与 {type:"selection"} 的联合，
+  // 后者没有 MutationRecord 的字段，所以类型要按联合写
+  ignoreMutation(m: ViewMutationRecord) {
+    // 只放过**栏自己身上**的属性变更（那就是我们写的预览样式）。
+    // 内容侧的变更、以及选区类变更照常交给 PM，否则真正的编辑会丢
+    return m.type === "attributes" && m.target === this.dom;
+  }
+}
 
 /** 组内各栏的 DOM 元素（顺序与 childCount 一致）；取不全则 null */
 function columnElements(view: EditorView, groupPos: number, group: PMNode): HTMLElement[] | null {
@@ -61,22 +121,40 @@ function startResize(
   document.body.classList.add("wiki-col-resizing");
 
   let dx = 0;
-  const onMove = (e: MouseEvent) => {
-    dx = Math.max(minDx, Math.min(maxDx, e.clientX - startX));
+  let frame: number | null = null;
+
+  const paint = () => {
+    frame = null;
     const next = widths.slice();
     next[index - 1] = leftW + dx;
     next[index] = rightW - dx;
-    // 只改行内样式：拖动期间不发事务
-    els.forEach((el, i) => { el.style.flex = `0 1 ${(next[i] / total) * 100}%`; });
+    // 拖动期间用**像素**而不是百分比：百分比的基准是容器内容宽，而容器宽里
+    // 含着 34px 的栏间隙，按百分比算出来的宽度和指针位置对不齐（越多栏偏得
+    // 越远）。像素是我们量出来的真值，1:1 跟手。
+    // 同时锁死 grow/shrink（`0 0`）——留着 shrink 的话 flex 会二次分配，
+    // 结果又跑偏。总宽守恒所以不会撑破容器。
+    els.forEach((el, i) => { el.style.flex = `0 0 ${next[i]}px`; });
+  };
+
+  const onMove = (e: MouseEvent) => {
+    dx = Math.max(minDx, Math.min(maxDx, e.clientX - startX));
+    // mousemove 比屏幕刷新快得多，合并到下一帧再改样式，免得空跑布局
+    if (frame == null) frame = requestAnimationFrame(paint);
   };
 
   const onUp = () => {
     document.removeEventListener("mousemove", onMove);
     document.removeEventListener("mouseup", onUp);
     document.body.classList.remove("wiki-col-resizing");
-    // 行内样式交还给 renderHTML —— 落库的 ratio 才是真相，行内样式只是拖动
-    // 期间的预览。不清掉的话，下一次 attr 变化重渲染会与它打架
-    els.forEach(el => { el.style.flex = ""; });
+    if (frame != null) cancelAnimationFrame(frame);
+
+    // 把行内样式按**当前文档状态**复原，而不是一律清空。清空的话，原本就带
+    // ratio 的栏会在"拖了又拖回原位"（dx 归零、不发事务）之后丢掉自己的宽度，
+    // 直到下一次 update 才回来
+    const current = view.state.doc.nodeAt(groupPos);
+    els.forEach((el, i) => {
+      applyRatio(el, (current?.child(i)?.attrs.ratio ?? null) as number | null);
+    });
     if (dx === 0) return;
 
     const finalWidths = widths.slice();
@@ -107,15 +185,35 @@ function groupPosOf(view: EditorView, widgetPos: number): number {
   return -1;
 }
 
-/** 造一条分割线的 DOM。index 是它右侧那一栏的下标 */
-function buildResizer(view: EditorView, getGroupPos: () => number, index: number): HTMLElement {
+type ResizerSpec = {
+  /** ⊕ 会往这个下标插栏；也是可拖动时分割线右侧那一栏的下标 */
+  index: number;
+  /** 能不能拖。组的最外两端不能——没有邻栏可以跟它对分宽度 */
+  resizable: boolean;
+  /** 贴在所属栏的哪一侧 */
+  edge: "left" | "right";
+};
+
+/**
+ * 造一条分割线的 DOM。
+ *
+ * 组的最外两端（第一栏之前、最后一栏之后）也要有，但只带 ⊕、不带拖动：
+ * 拖动的语义是"在相邻两栏之间重新分配宽度"，最外侧没有相邻栏，拖它没有意义；
+ * 而"在最左/最右加一栏"是完全正当的需求，缺了就只能绕去手柄菜单。
+ */
+function buildResizer(view: EditorView, getGroupPos: () => number, spec: ResizerSpec): HTMLElement {
+  const { index, resizable, edge } = spec;
   const root = document.createElement("div");
-  root.className = "wiki-col-resizer";
+  root.className = "wiki-col-resizer"
+    + (resizable ? "" : " is-add-only")
+    + (edge === "right" ? " is-right" : "");
   root.contentEditable = "false";
 
-  const line = document.createElement("div");
-  line.className = "wiki-col-resizer-line";
-  root.appendChild(line);
+  if (resizable) {
+    const line = document.createElement("div");
+    line.className = "wiki-col-resizer-line";
+    root.appendChild(line);
+  }
 
   const add = document.createElement("button");
   add.type = "button";
@@ -124,14 +222,19 @@ function buildResizer(view: EditorView, getGroupPos: () => number, index: number
   add.textContent = "＋";
   root.appendChild(add);
 
-  // 拖动：按在线上就接管，preventDefault 掐掉 PM 的选区拖拽
-  line.addEventListener("mousedown", (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const groupPos = getGroupPos();
-    if (groupPos >= 0) startResize(view, groupPos, index, e);
-  });
+  // 拖动绑在**整个命中区**上，不是绑在那条 2px 的线上。绑到线上的话，hover
+  // 高亮（挂在 16px 的命中区）与实际可按下的范围会差出一个数量级——看着能点，
+  // 实际几乎按不中，表现就是"拖拽没反应"。
+  // preventDefault 掐掉 PM 的选区拖拽。
+  if (resizable) {
+    root.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const groupPos = getGroupPos();
+      if (groupPos >= 0) startResize(view, groupPos, index, e);
+    });
+  }
 
   // ⊕：插一栏。用 mousedown 而不是 click —— click 之前编辑器会先失焦，
   // 而且 PM 可能已经把选区挪走了
@@ -157,25 +260,41 @@ export const ColumnResize = Extension.create({
     return [new Plugin({
       key: columnResizeKey,
       props: {
+        // 挂 NodeView 而不是改 column 节点定义：编辑期的预览机制不该渗进方言
+        nodeViews: {
+          column: (node) => new ColumnView(node),
+        },
         decorations(state) {
           const decos: Decoration[] = [];
           state.doc.descendants((node, pos) => {
             if (node.type.name !== "columnGroup") return true;
             let childPos = pos + 1;
             for (let i = 0; i < node.childCount; i++) {
-              if (i > 0) {
-                // 挂在第 i 栏内容的**起点**：widget 会成为该栏 DOM 的首个子节点，
-                // 再用 absolute 定位挪到栏左侧的栏间隙里
-                decos.push(Decoration.widget(
-                  childPos + 1,
-                  // getPos 在 widget 已被移除时给 undefined —— 那时算不出组的
-                  // 位置，交互直接放弃（返回 -1，调用侧会拒绝执行）
-                  (view, getPos) => buildResizer(view, () => {
-                    const at = getPos();
-                    return at == null ? -1 : groupPosOf(view, at);
-                  }, i),
-                  { side: -1, key: `wiki-col-resizer-${i}`, ignoreSelection: true },
-                ));
+              // 挂在第 i 栏内容的**起点**：widget 会成为该栏 DOM 的首个子节点，
+              // 再用 absolute 定位挪到栏的左侧或右侧
+              const at = childPos + 1;
+              // getPos 在 widget 已被移除时给 undefined —— 那时算不出组的位置，
+              // 交互直接放弃（返回 -1，调用侧会拒绝执行）
+              const mount = (spec: ResizerSpec, key: string) => decos.push(Decoration.widget(
+                at,
+                (view, getPos) => buildResizer(view, () => {
+                  const p = getPos();
+                  return p == null ? -1 : groupPosOf(view, p);
+                }, spec),
+                { side: -1, key, ignoreSelection: true },
+              ));
+
+              // 左侧：第一栏之前只给 ⊕（没有邻栏可对分宽度），其余是完整分割线
+              mount(
+                { index: i, resizable: i > 0, edge: "left" },
+                `wiki-col-resizer-${i}`,
+              );
+              // 末栏之后再补一个 ⊕，否则"在最右边加一栏"没有入口
+              if (i === node.childCount - 1) {
+                mount(
+                  { index: node.childCount, resizable: false, edge: "right" },
+                  "wiki-col-resizer-end",
+                );
               }
               childPos += node.child(i).nodeSize;
             }

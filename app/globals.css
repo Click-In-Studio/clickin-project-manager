@@ -250,6 +250,17 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
+/* 组最外两端的那两个：只有 ⊕、不能拖。往里收一点，因为外侧没有 34px 的
+   栏间隙可占（左边是页边距、右边是正文右沿） */
+.wiki-col-resizer.is-add-only {
+  left: -13px;
+  width: 16px;
+  cursor: default;
+}
+.wiki-col-resizer.is-add-only.is-right {
+  left: auto;
+  right: -13px;
+}
 .wiki-col-resizer-line {
   position: absolute;
   left: 7px;
@@ -285,10 +296,13 @@ body.wiki-col-resizing .wiki-col-resizer-line {
 .wiki-col-resizer:hover .wiki-col-resizer-add {
   display: inline-flex;
 }
-/* 拖动期间全局换光标，免得指针滑出那 16px 命中区就变回箭头 */
+/* 拖动期间全局换光标，免得指针滑出那 16px 命中区就变回箭头；
+   同时禁掉选中——指针会扫过正文，不禁的话拖一次刷出一大片蓝 */
 body.wiki-col-resizing,
 body.wiki-col-resizing * {
   cursor: col-resize !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 /* 显隐由插件用 style.visibility 直接控制，**这里绝不能设 opacity/display**
    —— 设了就是永久隐藏，插件那套 visibility 切换永远救不回来 */
