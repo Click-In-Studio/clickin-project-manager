@@ -118,7 +118,9 @@ async function resolveLinkTitles(ids: string[], productionId: string): Promise<M
 }
 
 const WIKI_TOKEN_RE = /\[#wiki:([0-9a-fA-F-]{36})\]/g;
-const WIKI_MD_LINK_RE = /\[[^[\]]*\]\(\/__cm__wiki:([0-9a-fA-F-]{36})(?:[?&][^)]*)?\)/g;
+const WIKI_MD_LINK_RE = /\[[^[\]]*\]\(\/__cm__\/wiki\/([0-9a-fA-F-]{36})(?:[?#][^)]*)?\)/g;
+// 只读兼容：wiki_revision 历史正文不迁移
+const WIKI_MD_LINK_V1_RE = /\[[^[\]]*\]\(\/__cm__wiki:([0-9a-fA-F-]{36})(?:[?&][^)]*)?\)/g;
 
 /** 把正文里的 id 形态链接换成可读的 [[标题]]，仅用于本工具的可读性处理——
  *  不碰 wiki_link 边表。只替换 extractWikiLinkTargets 已识别的真实目标
@@ -132,6 +134,7 @@ function resolveBodyLinksForDisplay(body: string, titleMap: Map<string, string |
   };
   return body
     .replace(WIKI_MD_LINK_RE, (m, id) => sub(m, id))
+    .replace(WIKI_MD_LINK_V1_RE, (m, id) => sub(m, id))
     .replace(WIKI_TOKEN_RE, (m, id) => sub(m, id));
 }
 

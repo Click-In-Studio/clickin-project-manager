@@ -56,11 +56,16 @@ const EDGE_KINDS = new Set(["wiki", "scene", "rehearsal", "block", "cue", "asset
 
 export type MentionEdge = { entityType: string; entityId: string };
 
-// 旧式裸 token（已废弃但存量正文仍在）只存在过 wiki 一种 kind
+// 现行引用 URI：/__cm__/<type>/<id>[?params][#anchor]——id 截到 )?#& 为止，
+// params（v/as/aux）与 anchor 都不属于实体身份，剥除。type=user 不落边
+// （EDGE_KINDS 过滤），@提及的关系走 wiki.mentions 列。
+const CM_HREF_RE = /\(\/__cm__\/([a-z]+)\/([^)?#&\s]+)/g;
+// ── 以下两条是**只读兼容**：wiki.body 已由 migrate-wiki-dialect-v2 全量迁移，
+// 但 wiki_revision 的历史正文不迁移（历史就该是历史），回滚场景亦需兜底。
+// 旧式裸 token（W1 时期废弃）只存在过 wiki 一种 kind
 const WIKI_TOKEN_RE = /\[#wiki:([0-9a-fA-F-]{36})\]/g;
-// 现行私有 href：/__cm__<kind>:<id>[?v=..][:aux]——id 截到 ):?& 为止，
-// 版本参数与 aux（asset 的挂载点定位）不属于实体身份，剥除
-const CM_HREF_RE = /\(\/__cm__([a-z_.]+):([^):?&\s]+)/g;
+// 旧式私有 href：/__cm__<kind>:<id>[?v=..][:aux]
+const CM_HREF_LEGACY_RE = /\(\/__cm__([a-z_.]+):([^):?&\s]+)/g;
 // code fence / 行内码里的链接语法是"关于语法的文档"不是真引用（MindWeave
 // protectCodeSpans 同款教训）——提取前剥除代码上下文
 const CODE_SPAN_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
@@ -76,8 +81,13 @@ export function extractMentionEdges(body: string): MentionEdge[] {
     seen.add(key);
     out.push({ entityType, entityId });
   };
-  for (const m of stripped.matchAll(WIKI_TOKEN_RE)) add("wiki", m[1].toLowerCase());
   for (const m of stripped.matchAll(CM_HREF_RE)) {
+    if (!EDGE_KINDS.has(m[1])) continue;
+    add(m[1], m[1] === "wiki" ? m[2].toLowerCase() : m[2]);
+  }
+  // 只读兼容（历史正文/回滚）
+  for (const m of stripped.matchAll(WIKI_TOKEN_RE)) add("wiki", m[1].toLowerCase());
+  for (const m of stripped.matchAll(CM_HREF_LEGACY_RE)) {
     const kind = m[1].startsWith("block.") ? "block" : m[1];
     if (!EDGE_KINDS.has(kind)) continue;
     add(kind, kind === "wiki" ? m[2].toLowerCase() : m[2]);

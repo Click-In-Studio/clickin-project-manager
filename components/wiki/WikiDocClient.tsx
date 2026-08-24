@@ -9,12 +9,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import { fmtDateTime } from "@/lib/tz";
-import SmartTextarea, { wikiLinkDropPlugin, normalizeLegacyMentions, type MentionMember } from "@/components/SmartTextarea";
+import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/SmartTextarea";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import WikiPrintOverlay from "@/components/wiki/WikiPrintOverlay";
 import AdminModal from "@/components/AdminModal";
 import DropdownPicker from "@/components/DropdownPicker";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
+import { encodeAssetSrc } from "@/lib/mention-types";
+import { collectWikilinkTitles, promoteWikilinks } from "@/lib/wiki-input-normalize";
 import type { WikiDoc, WikiRef, WikiEntityRef } from "@/lib/wiki-db";
 import WikiEntityRefs from "@/components/wiki/WikiEntityRefs";
 import type { WikiPeer } from "@/lib/wiki-collab";
@@ -71,9 +73,11 @@ export default function WikiDocClient({
   // 自动落源码模式（不写入全局偏好）+ 提示；用户仍可手动切回（lossyOverride）。
   const [lossy, setLossy] = useState(false);
   const lossyOverrideRef = useRef(false);
+  // 方言 v2 迁移后正文即 canonical，这里不再挂任何形态归一化——原先要先跑一遍
+  // normalizeLegacyMentions 才能比，等于把「形态分裂」的成本渗进了保真检测本身。
+  // 现在只归一化 tiptap-markdown 的既有排版行为（软换行 "\\\n"、行尾空白）。
   const normalizeForCompare = (s: string) =>
-    normalizeLegacyMentions(s) // 存量/损坏 mention 形态等价（编辑器载入已同步修复）
-      .replace(/\\\n/g, "\n").replace(/[ \t]+$/gm, "").trim();
+    s.replace(/\\\n/g, "\n").replace(/[ \t]+$/gm, "").trim();
   function handleRoundTrip(serialized: string) {
     if (lossyOverrideRef.current) return;
     if (normalizeForCompare(serialized) !== normalizeForCompare(body)) {
@@ -222,7 +226,7 @@ export default function WikiDocClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mountType: "wiki", mountId: wiki.id }),
       }).catch(() => {});
-      return { src: `/__cm__asset:${asset.id}`, alt: fileName };
+      return { src: encodeAssetSrc(asset.id), alt: fileName };
     } catch {
       return null;
     }
@@ -241,19 +245,47 @@ export default function WikiDocClient({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wiki.id]);
 
+  // 源码模式手写的 [[标题]] → 存储态引用（语法大纲 §6.4）。只在保存路径上跑：
+  // 富文本模式的 [[ 走 picker 直接插存储态，根本到不了这里；AI 的写入走 API，
+  // 也不经过本组件——作用域正好等于「没有指令 UI 的人类输入」。
+  // 解析不中就留幻影，绝不猜（同名歧义宁可让人自己点一下）。
+  const titleMapRef = useRef<Map<string, string> | null>(null);
+  async function promoteBody(b: string): Promise<string> {
+    const titles = collectWikilinkTitles(b);
+    if (titles.length === 0) return b;
+    if (!titleMapRef.current) {
+      try {
+        const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`);
+        if (!res.ok) return b; // 取不到清单就不动正文，下次保存再试
+        const data = await res.json() as { wikis?: { id: string; title: string | null }[] };
+        const map = new Map<string, string>();
+        for (const w of data.wikis ?? []) {
+          if (w.title && w.id !== wiki.id && !map.has(w.title)) map.set(w.title, w.id);
+        }
+        titleMapRef.current = map;
+      } catch { return b; }
+    }
+    return promoteWikilinks(b, titleMapRef.current);
+  }
+
   async function saveNow(next?: { title?: string; body?: string; tags?: string }) {
     if (savingRef.current) return;
+    // 占锁必须在任何 await 之前：promoteBody 可能要取一次文档清单，那段 await
+    // 窗口里第二次 saveNow 会整个越过上面的守卫，两笔并发 PATCH。
+    savingRef.current = true;
+    try {
     // 必须经 latestRef 读最新值：schedule 的 setTimeout 捕获的是 arm 时那轮渲染的
     // 闭包，直接读 state 会保存"本次操作之前"的内容——单次操作（[[ 补全选中、
     // 拖放成链）会被整个丢掉（用户实测：刷新后只剩 [[x / 拖入内容消失）
     const cur = latestRef.current;
     const t = (next?.title ?? cur.title).trim();
-    const b = next?.body ?? cur.body;
+    const b0 = next?.body ?? cur.body;
     const tg = next?.tags ?? cur.tags;
     if (!t) return; // 空标题不落库，等用户补
+    const b = await promoteBody(b0);
+    if (b !== b0) setBody(b); // 升格结果回灌，编辑器立刻显示 chip
     const prev = savedRef.current;
     if (t === prev.title && b === prev.body && tg === prev.tags) { setStatus(s => s === "dirty" ? "saved" : s); return; }
-    savingRef.current = true;
     setStatus("saving");
     try {
       const res = await fetch(api, {
@@ -279,8 +311,9 @@ export default function WikiDocClient({
       setStatus("saved");
       // 标题/标签变化会影响侧栏树与搜索，刷新服务端数据；正文变化不刷（不打断输入）
       if (structuralChange) router.refresh();
-    } catch {
-      setStatus("error");
+      } catch {
+        setStatus("error");
+      }
     } finally {
       savingRef.current = false;
     }
@@ -468,7 +501,7 @@ export default function WikiDocClient({
             <textarea
               value={body}
               onChange={e => { setBody(e.target.value); schedule(); }}
-              placeholder="markdown 源码…（[[链接]] 请写 [#](/__cm__wiki:<id>)，方括号内文字不影响显示，或切回富文本插入）"
+              placeholder="markdown 源码…（可直接写 [[文档标题]]，保存时自动解析成正式链接；写不中就留作幻影）"
               spellCheck={false}
               className="w-full flex-1 min-h-[360px] resize-none px-3 py-2 font-mono text-[13px] leading-relaxed text-zinc-800 outline-none bg-zinc-50/60 rounded-lg"
             />

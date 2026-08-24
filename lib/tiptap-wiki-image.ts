@@ -1,4 +1,4 @@
-// wiki 图片节点 —— markdown 正史形态 ![alt](/__cm__asset:<id>)：
+// wiki 图片节点 —— markdown 正史形态 ![alt](/__cm__/asset/<id>)：
 // 正文只存 asset id 不存 URL（账本 §4.1 同款纪律——URL 是会过期的展示态，
 // id 才是引用）。编辑器内展示经 resolveSrc 把私有 href 换成真实端点
 // （thumb 流式带 session 鉴权，img src 直接可用）；attrs.src 恒存原始形态，
@@ -9,7 +9,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 
 export type WikiImageOptions = {
-  /** 把存储形态 src（/__cm__asset:<id> 或普通 URL）换算成展示 URL */
+  /** 把存储形态 src（/__cm__/asset/<id> 或普通 URL）换算成展示 URL */
   resolveSrc: (src: string) => string;
 };
 

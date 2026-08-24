@@ -12,11 +12,45 @@
 // 归一化会改写原文，反而触发保真锁。
 import { Node, mergeAttributes } from "@tiptap/core";
 
-/** marker 正则：行首 [!<emoji>] 或 [!<emoji>|#hex]，emoji 位允许为空 */
-export const CALLOUT_MARKER_RE = /^\[!([^|\]\n]*)(?:\|(#[0-9a-fA-F]{3,8}))?\]/;
+/** marker 外壳：行首 `[!…]`。内部参数由 parseCalloutMarker 解析。 */
+export const CALLOUT_MARKER_RE = /^\[!([^\]\n]*)\]/;
+
+const HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
+
+export type CalloutMarker = {
+  emoji: string;
+  color: string | null;
+  /** marker 在原串里占用的字符数（调用方据此剥掉 marker） */
+  length: number;
+};
+
+/**
+ * 布局类统一参数文法（语法大纲 §5.2）：`[!<主参数> k=v ...]`
+ *   新形态：`[!💡 bg=#fff5eb]`   主参数=emoji，其余一律 k=v
+ *   旧形态：`[!💡|#fff5eb]`      管道分隔的位置参数——**只读兼容**
+ *
+ * 管道分隔符退役的原因：它是位置参数，加第三个参数就没法扩展；且 `|` 在
+ * markdown 表格里有语义，容易踩坑。GitHub alerts 的 `[!note]` 仍被同一
+ * 外壳接住（emoji 位落 "note" 字样），roundtrip 原样保留不做归一化。
+ */
+export function parseCalloutMarker(text: string): CalloutMarker | null {
+  const m = text.match(CALLOUT_MARKER_RE);
+  if (!m) return null;
+  const parts = m[1].trim().split(/\s+/).filter(Boolean);
+  const head = parts[0] ?? "";
+  let color: string | null = null;
+  for (const p of parts.slice(1)) {
+    const kv = /^([a-z]+)=(.*)$/.exec(p);
+    if (kv && kv[1] === "bg" && HEX_RE.test(kv[2])) color = kv[2];
+  }
+  // 旧形态：主参数位里嵌着 `|#hex`
+  const pipe = head.split("|");
+  if (color == null && pipe.length > 1 && HEX_RE.test(pipe[1])) color = pipe[1];
+  return { emoji: pipe[0], color, length: m[0].length };
+}
 
 export function formatCalloutMarker(emoji: string, color: string | null): string {
-  return `[!${emoji}${color ? `|${color}` : ""}]`;
+  return `[!${emoji}${color ? ` bg=${color}` : ""}]`;
 }
 
 /**
@@ -29,11 +63,11 @@ export function promoteCalloutBlockquotes(root: HTMLElement) {
     const p = bq.querySelector(":scope > p");
     const first = p?.firstChild;
     if (!p || !first || first.nodeType !== 3 /* TEXT_NODE */) continue;
-    const m = (first.textContent ?? "").match(CALLOUT_MARKER_RE);
-    if (!m) continue;
+    const marker = parseCalloutMarker(first.textContent ?? "");
+    if (!marker) continue;
     const doc = root.ownerDocument;
     // 剥掉 marker；marker 独占一行时连同其后的 <br> 一起剥
-    first.textContent = (first.textContent ?? "").slice(m[0].length).replace(/^[ \t]*/, "");
+    first.textContent = (first.textContent ?? "").slice(marker.length).replace(/^[ \t]*/, "");
     if (!first.textContent) {
       const next = first.nextSibling;
       first.remove();
@@ -42,8 +76,8 @@ export function promoteCalloutBlockquotes(root: HTMLElement) {
     if (!p.hasChildNodes()) p.remove();
     const div = doc.createElement("div");
     div.setAttribute("data-callout", "");
-    div.setAttribute("data-emoji", m[1] ?? "");
-    if (m[2]) div.setAttribute("data-color", m[2]);
+    div.setAttribute("data-emoji", marker.emoji);
+    if (marker.color) div.setAttribute("data-color", marker.color);
     while (bq.firstChild) div.appendChild(bq.firstChild);
     if (!div.hasChildNodes()) div.appendChild(doc.createElement("p"));
     bq.replaceWith(div);

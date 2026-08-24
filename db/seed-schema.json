@@ -4253,5 +4253,23 @@
       "type": "text",
       "nullable": false
     }
+  ],
+  "wiki_body_backup_dialect_v2": [
+    {
+      "column": "wiki_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "body",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "taken_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
   ]
 }
