@@ -29,6 +29,7 @@ import { Callout } from "@/lib/tiptap-callout";
 import { WikiImage } from "@/lib/tiptap-wiki-image";
 import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/tiptap-upload-placeholder";
 import { Column, ColumnGroup } from "@/lib/tiptap-columns";
+import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 export { normalizeLegacyMentions };
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -945,6 +946,9 @@ export default function SmartTextarea({
   const editorEl = (
     <>
       <EditorContent editor={editor} />
+      {/* 浮动条与固定工具栏的作用域严格一致（markdown 面），commit「收工具栏」
+          才是 1:1 替换而不是能力平移 */}
+      {markdown && !readOnly && <TextBubbleMenu editor={editor} />}
       {drop && rect && typeof document !== "undefined" &&
         createPortal(
           <div
