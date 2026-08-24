@@ -393,11 +393,16 @@ body.wiki-col-resizing * {
 /* 表格外缘（components/editor/TableTools）—— 上沿与左沿的两条操作带。
    整层是 portal 到 body 的 fixed 覆盖层：表格的 DOM 是 <table>，往里塞 <div>
    会被浏览器抬出去，所以不能走 decoration；覆盖层顺带也不碰编辑器的 DOM。 */
+/* 容器**零尺寸**：各操作件自己是 fixed + 视口坐标，容器不需要有面积。
+   给它铺满视口（inset:0）曾经是想当然——即便 pointer-events:none，一层覆盖
+   全屏的东西也会让 z-index / hover 的推理变得没底。零尺寸就没有这些问题。 */
 .wiki-table-tools {
   position: fixed;
-  inset: 0;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
   z-index: 20;
-  /* 容器只是坐标系，不吃事件；各操作件自己开 */
   pointer-events: none;
 }
 .wiki-table-tools > * {
@@ -421,8 +426,13 @@ body.wiki-col-resizing * {
 .wiki-table-corner { border-radius: 3px 0 0 0; }
 
 /* 行/列边界的 ⊕。表格不给拖宽度（拍板），但必须能加行加列 */
+/* ⊕ 常显 —— 只要外缘出现（即鼠标在表上/光标在表里）就在。
+   原先挂 `.wiki-table-tools:hover .wiki-table-add`，而那个容器是
+   pointer-events:none：hover 能否冒到这样的祖先上，各浏览器并不一致，
+   一旦不冒，⊕ 就是永久 display:none —— 和当初块手柄那个 opacity:0 一模一样
+   的坑。显隐这种事不要挂在不可靠的选择器上。 */
 .wiki-table-add {
-  display: none;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 18px;
@@ -436,11 +446,6 @@ body.wiki-col-resizing * {
   line-height: 1;
   cursor: pointer;
 }
-/* 只在鼠标进到外缘那一层时才浮出，免得表格上方长期挂一排加号 */
-.wiki-table-tools:hover .wiki-table-add {
-  display: inline-flex;
-}
-
 .wiki-table-menu {
   min-width: 150px;
   padding: 4px 0;

@@ -17,32 +17,7 @@ import { NodeSelection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import BlockMenu from "@/components/editor/BlockMenu";
-
-/**
- * 每种容器只认**一个**拖拽单位，容器内部的块一律不给手柄。
- *
- *   分栏 → 栏（不是栏里的块，也不是整个组）
- *   表格 → 整张表（不是行、不是单元格、**也不是单元格里的段落**）
- *
- * 不定死的话，命中评分会在「容器里的块」「容器」之间摇摆——同一个位置有时
- * 出手柄有时不出，而且出的那个多半按不到，因为它被容器的边框/内边距挡着。
- * 表格里"时有时无的块"正是这么来的：原先只排除了 tableRow/tableCell，
- * 单元格**里**的段落漏了。
- *
- * 排除分栏组也是刻意的：组本身不给手柄。要整组移动/删除，用手柄菜单里的
- * 「选中整个分栏」把选中提升到组。
- */
-const HANDLE_CONTAINERS = new Set(["column", "table"]);
-
-function scoreDragTarget({ node, $pos }: { node: PMNode; $pos: { depth: number; node: (d: number) => PMNode } }): number {
-  if (node.type.name === "columnGroup") return 1000;
-  // 祖先里有栏或表 → 让位给那个栏/那张表。column 与 table 自身走不到这里被
-  // 排除（$pos 解析在节点之前，node(d) 给的是祖先，不含自己）
-  for (let d = $pos.depth; d >= 1; d--) {
-    if (HANDLE_CONTAINERS.has($pos.node(d).type.name)) return 1000;
-  }
-  return 0;
-}
+import { scoreDragTarget } from "@/lib/editor-drag-unit";
 
 export default function BlockHandle({ editor }: { editor: Editor | null }) {
   const [target, setTarget] = useState<{ node: PMNode | null; pos: number }>({ node: null, pos: -1 });
