@@ -91,6 +91,14 @@ export const CM_HREF_PREFIX = "/__cm__";
 const CM_HREF_RE =
   /^\/__cm__\/([a-z]+)\/([^/?#\s]+)(?:\?([^#\s]*))?(?:#([^\s]*))?$/;
 
+/** decodeURIComponent 对 `%zz` 这类残缺序列会抛。正文是可能损坏的（这个 PR
+ *  的前提就是历史上出过转义损坏），解析器不该因为一段坏正文炸掉整页渲染。 */
+function safeDecode(s: string): string {
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+
+const DISPLAY_MODES: readonly string[] = ["page", "scene", "rehearsal"];
+
 /** 引用 URI 的 type 位。`user` 只走 href 形态（atMention 节点），不入
  *  ContentMentionKind——plain 上下文的 [#kind:id] token 里没有它。 */
 export type ReferenceType = ContentMentionKind | "user";
@@ -102,13 +110,16 @@ export function encodeMentionHref(attrs: ContentMentionAttrs): string {
   if (attrs.versionId) params.set("v", attrs.versionId);
   if (attrs.aux) params.set("aux", attrs.aux);
   const q = params.toString();
-  return `${CM_HREF_PREFIX}/${attrs.kind}/${attrs.id}${q ? `?${q}` : ""}`;
+  // id 必须 encode：decode 侧走 decodeURIComponent，不对称的话 encode(decode(x))
+  // 就不保证等于 x，而本文件的全部价值就建立在「序列化幂等」上（保真锁靠它
+  // 才不会误报）。正常 id（UUID / short id）encode 后原样，属零成本保险。
+  return `${CM_HREF_PREFIX}/${attrs.kind}/${encodeURIComponent(attrs.id)}${q ? `?${q}` : ""}`;
 }
 
 /** @提及的 href（type=user）。姓名解析端点尚不存在，label 仍留在链接文字里
  *  兜底——见 encodeUserHref 调用处的说明。 */
 export function encodeUserHref(userId: string): string {
-  return `${CM_HREF_PREFIX}/user/${userId}`;
+  return `${CM_HREF_PREFIX}/user/${encodeURIComponent(userId)}`;
 }
 
 /** 解析引用 URI。新形态优先；旧形态（`/__cm__<kind>:<id>[?v=][:aux]`）保留
@@ -122,10 +133,15 @@ export function decodeMentionHref(href: string): ContentMentionAttrs | null {
     if (type === "user") return null; // 走 atMention 分支，不是 contentMention
     const p = new URLSearchParams(query ?? "");
     const as = p.get("as");
+    // 白名单校验而非裸断言：来路不明的 ?as= 会静默造出非法 displayMode，
+    // 它随 attrsKey 进 resolve 缓存键、随 encode 写回正文——坏值会自我传播。
+    const displayMode = type === "block" && as && DISPLAY_MODES.includes(as)
+      ? (as as BlockDisplayMode)
+      : null;
     return {
       kind: type as ContentMentionKind,
-      displayMode: type === "block" && as ? (as as BlockDisplayMode) : null,
-      id: decodeURIComponent(id),
+      displayMode,
+      id: safeDecode(id),
       aux: p.get("aux"),
       versionId: p.get("v"),
     };
@@ -138,13 +154,13 @@ export function decodeMentionHref(href: string): ContentMentionAttrs | null {
 /** 图片嵌入的 src（嵌入类 = 引用类 + `!` 前缀，语法大纲 §3）。正文只存 asset
  *  id 不存 URL——URL 是会过期的展示态，id 才是引用。 */
 export function encodeAssetSrc(assetId: string): string {
-  return `${CM_HREF_PREFIX}/asset/${assetId}`;
+  return `${CM_HREF_PREFIX}/asset/${encodeURIComponent(assetId)}`;
 }
 
 /** src → assetId。新旧形态双读（旧：/__cm__asset:<id>）；非 asset 引用返回 null。 */
 export function decodeAssetSrc(src: string): string | null {
   const m = src.match(CM_HREF_RE);
-  if (m) return m[1] === "asset" ? decodeURIComponent(m[2]) : null;
+  if (m) return m[1] === "asset" ? safeDecode(m[2]) : null;
   const legacy = /^\/__cm__asset:([^/?#\s]+)$/.exec(src);
   return legacy ? legacy[1] : null;
 }
@@ -152,7 +168,7 @@ export function decodeAssetSrc(src: string): string | null {
 /** 从引用 URI 取 userId（@提及）。非 user 类型返回 null。 */
 export function decodeUserHref(href: string): string | null {
   const m = href.match(CM_HREF_RE);
-  if (m && m[1] === "user") return decodeURIComponent(m[2]);
+  if (m && m[1] === "user") return safeDecode(m[2]);
   // 旧形态 uid:<userId>（存量正文 + 历史版本）
   if (href.startsWith("uid:")) return href.slice(4) || null;
   return null;

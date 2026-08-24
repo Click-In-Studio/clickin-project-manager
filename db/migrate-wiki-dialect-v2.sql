@@ -11,8 +11,10 @@
 --   废弃  [#wiki:<uuid>] 裸 token                  →  [#](/__cm__/wiki/<uuid>)
 --   布局  > [!💡|#fff5eb]                          →  > [!💡 bg=#fff5eb]
 --
--- ⚠️ 本迁移**没有 DDL**（不改列、不改类型），schema.sql / seed-schema.json 无需
---    更新——正文改写是 DML，而且改写规则复杂（参数重排、转义修复、代码块保护），
+-- ⚠️ 本迁移**不改动任何既有表**（不加列、不删列、不改类型）——只新建两张备份表，
+--    正文改写全是 DML。（措辞更正：新建表本身当然是 DDL，schema.sql 与
+--    seed-schema.json 已同步收录这两张表；这里要说的是"不动存量结构"。）
+--    改写规则复杂（参数重排、转义修复、代码块保护），
 --    用 regexp_replace 在 SQL 里重写一遍等于把同一套规则实现两次，正是本次要
 --    清理的「一个语义多种实现」。所以：
 --
@@ -60,10 +62,18 @@ CREATE TABLE IF NOT EXISTS dialect_v2_text_backup (
 
 COMMIT;
 
--- 迁移后自检（脚本跑完再执行，应当返回 0 行）：
---   SELECT id, title FROM wiki
---   WHERE body ~ '\(/__cm__[a-z_.]+:'      -- 旧引用 href
---      OR body ~ '\(uid:'                   -- 旧 @提及 scheme
---      OR body ~ '\[#wiki:'                 -- 废弃裸 token
---      OR body ~ '^\s*>+\s*\[![^]]*\|#'     -- callout 管道参数
+-- 迁移后自检（脚本跑完再执行，四条都应当返回 0 行）。
+-- 覆盖脚本改写的**全部**列，不只是 wiki.body——漏检等于没检。
+--
+--   WITH v1 AS (SELECT $$(\(/__cm__[a-z_.]+:)|(\(uid:)|(\[#wiki:)$$ AS re)
+--   SELECT 'wiki' AS t, id::text FROM wiki, v1
+--     WHERE body ~ v1.re OR body ~ '^\s*>+\s*\[![^]]*\|#'
+--   UNION ALL
+--   SELECT 'agent_memory_chunk', id::text FROM agent_memory_chunk, v1 WHERE text ~ v1.re
+--   UNION ALL
+--   SELECT 'comment', id::text FROM comment, v1 WHERE body ~ v1.re
+--   UNION ALL
+--   SELECT 'user_notification', id::text FROM user_notification, v1 WHERE body ~ v1.re
 --   ;
+--
+-- 注：wiki_revision / wiki_proposal 是历史台账，**按设计不迁移**，不要纳入自检。
