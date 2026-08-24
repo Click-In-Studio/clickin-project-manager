@@ -2,7 +2,7 @@
 
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { Extension } from "@tiptap/core";
+import { Extension, type Editor } from "@tiptap/core";
 import { Markdown } from "tiptap-markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Mention } from "@tiptap/extension-mention";
@@ -29,6 +29,7 @@ import { Callout } from "@/lib/tiptap-callout";
 import { WikiImage } from "@/lib/tiptap-wiki-image";
 import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/tiptap-upload-placeholder";
 import { Column, ColumnGroup } from "@/lib/tiptap-columns";
+import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor-slash-commands";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 export { normalizeLegacyMentions };
 
@@ -42,6 +43,9 @@ export type DropPlugin = {
   trigger: string;
   allowSpaces?: boolean;
   emptyLabel?: string;
+  /** 无候选时整个弹层不显示（而非显示 emptyLabel）。`/` 专用——正文里
+   *  「and/or」这类普通斜杠不该弹出一个空菜单来碍事 */
+  hideWhenEmpty?: boolean;
   search: (query: string) => Promise<DropItem[]> | DropItem[];
   renderItem: (item: DropItem, active: boolean) => React.ReactNode;
   format: (item: DropItem) => string;
@@ -151,6 +155,37 @@ export function wikiLinkDropPlugin(productionId: string): DropPlugin {
     ),
     format: (item) => `[#](${encodeMentionHref({ kind: "wiki", displayMode: null, id: item.id, aux: null, versionId: null })})`,
     toNode: (item) => ({ id: item.id, label: item.label }),
+  };
+}
+
+// ── Factory: /slash 布局指令 ──────────────────────────────────────────────────
+// 语法大纲 §6.2 的第四个指令源。与前三个的差异**只有两处**：候选从哪来
+// （静态表，不是网络查询）、选中后干什么（跑编辑器命令，不是插引用节点）。
+// 框架本身零改动——这正是「四者是同一个框架的四个注册项」的验证。
+
+export function slashCommandPlugin(): DropPlugin {
+  return {
+    trigger: "/",
+    hideWhenEmpty: true,
+    search: (query) => searchSlashCommands(query).map(c => ({
+      id: c.id, label: c.label, secondary: c.hint,
+    })),
+    renderItem: (item, active) => {
+      const cmd = SLASH_COMMANDS.find(c => c.id === item.id);
+      return (
+        <span className="flex items-center gap-2.5">
+          <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-[13px] shrink-0 ${
+            active ? "bg-zinc-800 text-white" : "bg-zinc-100 text-zinc-600"
+          }`}>{cmd?.icon}</span>
+          <span className="text-sm text-zinc-700">{item.label}</span>
+          <span className="ml-auto text-[11px] font-mono text-zinc-400 pl-3">{item.secondary}</span>
+        </span>
+      );
+    },
+    // 指令不落文本形态：选中即执行命令，查询串被 deleteRange 吃掉（§6.1——
+    // 「查询」与「结果」的关系，不是「简写」与「展开」）
+    format: () => "",
+    toNode: (item) => ({ id: item.id }),
   };
 }
 
@@ -298,16 +333,24 @@ const MarkdownContentMentionExt = Mention.extend({
 // contentMention(kind='wiki') 管线（序列化/重载/chip 渲染全部现成）。
 // 独立 Suggestion 插件而非 Mention 内建：可设 allowedPrefixes=null——
 // 默认只在空格/行首后触发，CJK 文本后直接敲 [[ 原本根本不弹补全（首版 bug 根因）。
-const WikiLinkTrigger = Extension.create<{ suggestion: Record<string, unknown> }>({
-  name: "wikiLinkTrigger",
-  addOptions() {
-    return { suggestion: {} };
-  },
-  addProseMirrorPlugins() {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return [Suggestion({ editor: this.editor, ...(this.options.suggestion as any) })];
-  },
-});
+//
+// `/` 指令源同理（布局指令，语法大纲 §6.2），故抽成工厂——两个触发器除了名字
+// 没有任何差别，真正的差异全在传进来的 suggestion 配置里。
+function makeTriggerExtension(name: string) {
+  return Extension.create<{ suggestion: Record<string, unknown> }>({
+    name,
+    addOptions() {
+      return { suggestion: {} };
+    },
+    addProseMirrorPlugins() {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return [Suggestion({ editor: this.editor, ...(this.options.suggestion as any) })];
+    },
+  });
+}
+
+const WikiLinkTrigger = makeTriggerExtension("wikiLinkTrigger");
+const SlashTrigger = makeTriggerExtension("slashTrigger");
 
 /** 在指定位置插入 wiki 引用 chip（补全选中与拖放共用） */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -482,12 +525,17 @@ export default function SmartTextarea({
   if (contentMention) {
     derivedPlugins.push(contentRefPlugin(contentMention.productionId, contentMention.versionId));
   }
+  // 布局指令源随富文本能力走：markdown 面才有分栏/表格/callout 可插
+  if (markdown && !readOnly) {
+    derivedPlugins.push(slashCommandPlugin());
+  }
   const allPlugins = [...derivedPlugins, ...extraPlugins];
   allPluginsRef.current = allPlugins;
 
   const hasHashPlugin = allPlugins.some(p => p.trigger === "#");
   const hasAtPlugin = allPlugins.some(p => p.trigger === "@");
   const hasWikiPlugin = allPlugins.some(p => p.trigger === "[[");
+  const hasSlashPlugin = allPlugins.some(p => p.trigger === "/");
 
   const suggHandlers = useRef({
     onStart(props: SuggestionProps<DropItem>, trigger: string) {
@@ -502,6 +550,11 @@ export default function SmartTextarea({
     onKeyDown({ event }: SuggestionKeyDownProps): boolean {
       const d = dropRef.current;
       if (!d) return false;
+      // 无候选时把导航/确认键交还编辑器。`/` 尤其需要：正文里写「and/or」之后
+      // 敲回车，若这里照旧 return true，换行就被一个看不见的空菜单吞了。
+      // （`#zzz` 无匹配时按回车没反应也是同一个洞，一并堵上；Escape 仍由这里
+      //  处理——它要负责关掉 # / @ 的「无匹配」提示弹层。）
+      if (d.items.length === 0 && event.key !== "Escape") return false;
       if (event.key === "ArrowDown") { event.preventDefault(); setDrop(p => p ? { ...p, idx: Math.min(p.idx + 1, p.items.length - 1) } : null); return true; }
       if (event.key === "ArrowUp") { event.preventDefault(); setDrop(p => p ? { ...p, idx: Math.max(p.idx - 1, 0) } : null); return true; }
       if (event.key === "Enter" || event.key === "Tab") {
@@ -527,7 +580,11 @@ export default function SmartTextarea({
       // 全都不弹（用户实测）。任意前缀放开，三种触发器统一
       allowedPrefixes: null,
       startOfLine: false,
-      pluginKey: new PluginKey(trigger === "#" ? "contentMention" : trigger === "@" ? "atMention" : "wikiMention"),
+      pluginKey: new PluginKey(
+        trigger === "#" ? "contentMention"
+          : trigger === "@" ? "atMention"
+            : trigger === "/" ? "slashCommand"
+              : "wikiMention"),
       allow: () => enabled,
       items: ({ query }: { query: string }) =>
         allPluginsRef.current.find(p => p.trigger === trigger)?.search(query) ?? [],
@@ -628,6 +685,17 @@ export default function SmartTextarea({
       },
     });
 
+    // 指令面：选中即执行命令，查询串（`/fenlan`）由命令自己的 deleteRange 吃掉，
+    // 正文不留痕迹。这与前三个触发器插入节点是同一个位置的不同动作
+    const slashTriggerCfg = SlashTrigger.configure({
+      suggestion: {
+        ...makeSuggestion("/", hasSlashPlugin),
+        command: ({ editor, range, props }: { editor: Editor; range: { from: number; to: number }; props: { id: string } }) => {
+          SLASH_COMMANDS.find(c => c.id === props.id)?.run(editor, range);
+        },
+      },
+    });
+
     const atMentionCfg = AtMentionExt.configure({
       renderText: ({ node }) => `@${node.attrs.label}`,
       renderHTML: ({ node }) => [
@@ -670,7 +738,7 @@ export default function SmartTextarea({
       TaskList, TaskItem.configure({ nested: true }),
       Callout, Column, ColumnGroup,
       ...(hasImageUpload ? [imageExt, UploadPlaceholder] : []),
-      ...commonExts, wikiTriggerCfg, remoteCursorExt];
+      ...commonExts, wikiTriggerCfg, slashTriggerCfg, remoteCursorExt];
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markdown, remoteCursorExt, hasImageUpload]);
 
@@ -942,6 +1010,9 @@ export default function SmartTextarea({
   }, [markdown, editor, value]);
 
   const rect = drop?.clientRect?.();
+  // `/` 无命中时整个弹层不出现——正文里的 and/or、日期 2026/08 不该弹空菜单
+  const dropPlugin = drop ? allPlugins.find(p => p.trigger === drop.trigger) : undefined;
+  const dropHidden = !!drop && drop.items.length === 0 && !!dropPlugin?.hideWhenEmpty;
 
   const editorEl = (
     <>
@@ -949,7 +1020,7 @@ export default function SmartTextarea({
       {/* 浮动条与固定工具栏的作用域严格一致（markdown 面），commit「收工具栏」
           才是 1:1 替换而不是能力平移 */}
       {markdown && !readOnly && <TextBubbleMenu editor={editor} />}
-      {drop && rect && typeof document !== "undefined" &&
+      {drop && rect && !dropHidden && typeof document !== "undefined" &&
         createPortal(
           <div
             style={{ position: "fixed", left: rect.left, top: rect.bottom + 4, zIndex: 9999 }}
