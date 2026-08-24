@@ -1,0 +1,230 @@
+// @vitest-environment jsdom
+// 块级操作（调研文档 §4.2 步骤 3）行为测试。
+//
+// 重点不是「点了有没有反应」，而是**操作后序列化成什么**。块操作最阴的失败
+// 模式是结构被改坏、但要等用户下次保存才暴露成保真锁告警——所以每个操作都
+// 断言落地的 markdown，而不是断言 doc 的 JSON。
+import { describe, it, expect } from "vitest";
+import { Editor } from "@tiptap/core";
+import StarterKit from "@tiptap/starter-kit";
+import { TableKit } from "@tiptap/extension-table";
+import { TaskList, TaskItem } from "@tiptap/extension-list";
+import { Markdown } from "tiptap-markdown";
+import { NodeSelection } from "@tiptap/pm/state";
+import { Callout } from "@/lib/tiptap-callout";
+import { Column, ColumnGroup } from "@/lib/tiptap-columns";
+import {
+  getSelectedBlock, moveBlock, duplicateBlock, deleteBlock,
+  turnInto, canTurnInto, isColumnGroup, changeColumnCount, equalizeColumns,
+} from "@/lib/editor-block-ops";
+
+function makeEditor(content: string) {
+  return new Editor({
+    extensions: [
+      StarterKit,
+      Markdown.configure({ transformCopiedText: true, breaks: true }),
+      TableKit.configure({ table: { resizable: false } }),
+      TaskList, TaskItem.configure({ nested: true }),
+      Callout, Column, ColumnGroup,
+    ],
+    content,
+  });
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const md = (e: Editor) => (e.storage as any).markdown.getMarkdown() as string;
+
+/** 选中第 index 个顶层块（等价于用户点了那个块的 ⠿ 手柄） */
+function selectTopBlock(editor: Editor, index: number) {
+  let pos = 0;
+  for (let i = 0; i < index; i++) pos += editor.state.doc.child(i).nodeSize;
+  editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, pos)));
+}
+
+describe("getSelectedBlock", () => {
+  it("非整块选中时给 null —— 所有块操作据此拒绝执行", () => {
+    const e = makeEditor("甲\n\n乙");
+    e.commands.setTextSelection(2);
+    expect(getSelectedBlock(e)).toBeNull();
+    expect(moveBlock(e, -1)).toBe(false);
+    expect(duplicateBlock(e)).toBe(false);
+    expect(deleteBlock(e)).toBe(false);
+    e.destroy();
+  });
+});
+
+describe("移动 / 复制 / 删除", () => {
+  it("上移换位，且移完仍保持整块选中（连按两下才不用重新点手柄）", () => {
+    const e = makeEditor("甲\n\n乙\n\n丙");
+    selectTopBlock(e, 1);
+    expect(moveBlock(e, -1)).toBe(true);
+    expect(md(e)).toBe("乙\n\n甲\n\n丙");
+    const still = getSelectedBlock(e);
+    expect(still?.node.textContent).toBe("乙");
+    e.destroy();
+  });
+
+  it("下移换位", () => {
+    const e = makeEditor("甲\n\n乙\n\n丙");
+    selectTopBlock(e, 1);
+    expect(moveBlock(e, 1)).toBe(true);
+    expect(md(e)).toBe("甲\n\n丙\n\n乙");
+    e.destroy();
+  });
+
+  it("连按上移两次走到顶，再按一次拒绝且文档不变", () => {
+    const e = makeEditor("甲\n\n乙\n\n丙");
+    selectTopBlock(e, 2);
+    expect(moveBlock(e, -1)).toBe(true);
+    expect(moveBlock(e, -1)).toBe(true);
+    expect(md(e)).toBe("丙\n\n甲\n\n乙");
+    expect(moveBlock(e, -1)).toBe(false);
+    expect(md(e)).toBe("丙\n\n甲\n\n乙");
+    e.destroy();
+  });
+
+  it("末块下移被拒绝，文档不变", () => {
+    const e = makeEditor("甲\n\n乙");
+    selectTopBlock(e, 1);
+    expect(moveBlock(e, 1)).toBe(false);
+    expect(md(e)).toBe("甲\n\n乙");
+    e.destroy();
+  });
+
+  it("复制落在原块正下方，并选中新的那份", () => {
+    const e = makeEditor("甲\n\n乙");
+    selectTopBlock(e, 0);
+    expect(duplicateBlock(e)).toBe(true);
+    expect(md(e)).toBe("甲\n\n甲\n\n乙");
+    e.destroy();
+  });
+
+  it("删除整块", () => {
+    const e = makeEditor("甲\n\n乙\n\n丙");
+    selectTopBlock(e, 1);
+    expect(deleteBlock(e)).toBe(true);
+    expect(md(e)).toBe("甲\n\n丙");
+    e.destroy();
+  });
+
+  it("带方言的块移动后形态不变（分栏整组上移，fence 完好）", () => {
+    const e = makeEditor("甲\n\n:::cols\n\n左\n\n---\n\n右\n\n:::");
+    const before = md(e);
+    selectTopBlock(e, 1);
+    expect(isColumnGroup(getSelectedBlock(e)!.node)).toBe(true);
+    expect(moveBlock(e, -1)).toBe(true);
+    const after = md(e);
+    expect(after.startsWith(":::cols")).toBe(true);
+    expect(after.trimEnd().endsWith("甲")).toBe(true);
+    // 组内结构逐字保留，只是换了位置
+    expect(after).toContain("左");
+    expect(after).toContain("右");
+    expect(after).toContain("\n---\n");
+    expect(before).toContain("\n---\n");
+    e.destroy();
+  });
+});
+
+describe("转换类型", () => {
+  it("段落转二级标题", () => {
+    const e = makeEditor("甲\n\n乙");
+    selectTopBlock(e, 0);
+    expect(turnInto(e, "h2")).toBe(true);
+    expect(md(e)).toBe("## 甲\n\n乙");
+    e.destroy();
+  });
+
+  it("段落转引用 / 转高亮块都落 canonical 形态", () => {
+    const q = makeEditor("甲");
+    selectTopBlock(q, 0);
+    turnInto(q, "blockquote");
+    expect(md(q)).toBe("> 甲");
+    q.destroy();
+
+    const c = makeEditor("甲");
+    selectTopBlock(c, 0);
+    turnInto(c, "callout");
+    expect(md(c)).toBe("> [!💡]\n> 甲");
+    c.destroy();
+  });
+
+  it("结构型节点不给转换 —— 把分栏组变成标题没有意义", () => {
+    const e = makeEditor(":::cols\n\n左\n\n---\n\n右\n\n:::");
+    selectTopBlock(e, 0);
+    const before = md(e);
+    expect(canTurnInto(getSelectedBlock(e)!.node)).toBe(false);
+    expect(turnInto(e, "h2")).toBe(false);
+    expect(md(e)).toBe(before);
+    e.destroy();
+  });
+
+  it("未知 optionId 拒绝执行", () => {
+    const e = makeEditor("甲");
+    selectTopBlock(e, 0);
+    expect(turnInto(e, "nope")).toBe(false);
+    e.destroy();
+  });
+});
+
+describe("分栏增删栏", () => {
+  it("加一栏 —— 新栏在末尾，原有内容不动", () => {
+    const e = makeEditor(":::cols\n\n左\n\n---\n\n右\n\n:::");
+    selectTopBlock(e, 0);
+    expect(changeColumnCount(e, 1)).toBe(true);
+    const out = md(e);
+    expect(out).toContain("左");
+    expect(out).toContain("右");
+    // 两个分隔符 = 三栏
+    expect(out.match(/\n---\n/g)?.length).toBe(2);
+    e.destroy();
+  });
+
+  it("减一栏", () => {
+    const e = makeEditor(":::cols\n\n左\n\n---\n\n中\n\n---\n\n右\n\n:::");
+    selectTopBlock(e, 0);
+    expect(changeColumnCount(e, -1)).toBe(true);
+    const out = md(e);
+    expect(out.match(/\n---\n/g)?.length).toBe(1);
+    expect(out).toContain("左");
+    expect(out).toContain("中");
+    expect(out).not.toContain("右"); // 从末尾减
+    e.destroy();
+  });
+
+  it("两栏时拒绝再减 —— content 是 `column column+`，一栏组不成立", () => {
+    const e = makeEditor(":::cols\n\n左\n\n---\n\n右\n\n:::");
+    selectTopBlock(e, 0);
+    const before = md(e);
+    expect(changeColumnCount(e, -1)).toBe(false);
+    expect(md(e)).toBe(before);
+    e.destroy();
+  });
+
+  it("栏数变化后清空 ratio，回到不写主参数位的 canonical 形态", () => {
+    const e = makeEditor(":::cols 40,60\n\n左\n\n---\n\n右\n\n:::");
+    selectTopBlock(e, 0);
+    expect(md(e)).toContain(":::cols 40,60"); // 前提：宽度确实被解析进来了
+    expect(changeColumnCount(e, 1)).toBe(true);
+    const out = md(e);
+    expect(out).not.toMatch(/:::cols\s+\d/);
+    expect(out.startsWith(":::cols\n")).toBe(true);
+    e.destroy();
+  });
+
+  it("均分清空 ratio；本来就均分则不产生事务", () => {
+    const e = makeEditor(":::cols 40,60\n\n左\n\n---\n\n右\n\n:::");
+    selectTopBlock(e, 0);
+    expect(equalizeColumns(e)).toBe(true);
+    expect(md(e)).not.toMatch(/:::cols\s+\d/);
+    expect(equalizeColumns(e)).toBe(false);
+    e.destroy();
+  });
+
+  it("非分栏组上调用分栏操作一律拒绝", () => {
+    const e = makeEditor("甲");
+    selectTopBlock(e, 0);
+    expect(changeColumnCount(e, 1)).toBe(false);
+    expect(equalizeColumns(e)).toBe(false);
+    e.destroy();
+  });
+});

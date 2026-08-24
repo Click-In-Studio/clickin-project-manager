@@ -32,6 +32,7 @@ import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor-slash-commands";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 import BlockHandle from "@/components/editor/BlockHandle";
+import BlockBubbleMenu from "@/components/editor/BlockBubbleMenu";
 export { normalizeLegacyMentions };
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -961,9 +962,19 @@ export default function SmartTextarea({
     },
   });
 
+  // 拖拽进行中到达的协作回灌先攒着，dragend 再补上（见下方 effect）
+  const pendingValueRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     if (value === lastEmittedRef.current) return;
+    // 块拖拽中途 setContent 会把整个 doc 换掉，PM 手里的 dragging slice 与落点
+    // 坐标全部失效——轻则拖拽静默失败，重则内容落到错误位置。攒到拖完再灌。
+    // （文本拖选也走这条，同样是对的：拖到一半文档被换掉本来就不该发生）
+    if (editor.view.dragging) {
+      pendingValueRef.current = value;
+      return;
+    }
     lastEmittedRef.current = value;
     const newContent = normalizeWikiDialect(value);
     const { from, to } = editor.state.selection;
@@ -972,6 +983,22 @@ export default function SmartTextarea({
     const max = editor.state.doc.content.size;
     editor.commands.setTextSelection({ from: Math.min(from, max), to: Math.min(to, max) });
   }, [value, editor, markdown]);
+
+  // 拖拽结束补灌被推迟的协作内容。挂 document 而不是编辑器 DOM——拖到编辑器
+  // 外面松手时 dragend 只在 document 上冒泡，挂里面会永远等不到、pending 卡死
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const flush = () => {
+      const pending = pendingValueRef.current;
+      pendingValueRef.current = null;
+      if (pending == null || editor.isDestroyed) return;
+      if (pending === lastEmittedRef.current) return;
+      lastEmittedRef.current = pending;
+      editor.commands.setContent(normalizeWikiDialect(pending), { emitUpdate: false });
+    };
+    document.addEventListener("dragend", flush);
+    return () => document.removeEventListener("dragend", flush);
+  }, [editor]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
@@ -1045,6 +1072,7 @@ export default function SmartTextarea({
           才是 1:1 替换而不是能力平移 */}
       {markdown && !readOnly && <TextBubbleMenu editor={editor} />}
       {markdown && blockTools && !readOnly && <BlockHandle editor={editor} />}
+      {markdown && blockTools && !readOnly && <BlockBubbleMenu editor={editor} />}
       {drop && rect && !dropHidden && typeof document !== "undefined" &&
         createPortal(
           <div
