@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import styles from "@/components/my-pages.module.css";
-import type { ApprovalRequest } from "@/lib/db";
+import type { ApprovalRequest, MemberWithRoles } from "@/lib/db";
 import { TTL_OPTIONS, displayTtlLabel, type TtlOptionValue } from "@/lib/approval-ttl";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -50,6 +50,21 @@ const STATUS_LABELS: Record<ApprovalRequest["status"], string> = {
   rejected:           "已拒绝",
   cancelled:          "已撤回",
 };
+
+const STAGE_LABELS: Record<string, string> = {
+  supervisor: "直属上级",
+  holder: "资源持有人",
+  dept_poc: "资源负责人",
+  ancestor_poc: "上级部门负责人",
+  producer: "制作人",
+  owner: "Owner",
+};
+
+const ACTION_LABELS = {
+  approved: "已批准",
+  rejected: "已拒绝",
+  escalated: "已转交",
+} as const;
 
 type StatusColor = "amber" | "green" | "red" | "muted";
 
@@ -99,6 +114,232 @@ function StatusBadge({ status }: { status: ApprovalRequest["status"] }) {
     >
       {STATUS_LABELS[status]}
     </span>
+  );
+}
+
+// ─── ApprovalFlow ────────────────────────────────────────────────────────────
+
+function stageLabel(stage: string | undefined, phase: "supervisor" | "resource", depth?: number) {
+  const base = stage ? (STAGE_LABELS[stage] ?? stage) : phase === "supervisor" ? "直属上级" : "资源负责人";
+  if ((stage === "supervisor" || stage === "ancestor_poc") && typeof depth === "number") {
+    return `${base} · 第 ${depth + 1} 级`;
+  }
+  return base;
+}
+
+function initials(name: string) {
+  const clean = name.trim();
+  return clean ? clean.slice(-2) : "成员";
+}
+
+function PersonChip({ userId, member, fallbackName }: {
+  userId: string;
+  member?: MemberWithRoles;
+  fallbackName?: string;
+}) {
+  const name = member?.name || fallbackName || "项目成员";
+  const role = member?.roles?.[0];
+  return (
+    <span
+      title={member ? `${name}${member.roles.length ? ` · ${member.roles.join("、")}` : ""}` : userId}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 6, minHeight: 28,
+        padding: "3px 9px 3px 4px", border: "1px solid var(--line)", borderRadius: 999,
+        background: "var(--paper)", color: "var(--ink)", fontSize: 11, fontWeight: 600,
+      }}
+    >
+      <span style={{
+        width: 20, height: 20, borderRadius: "50%", display: "grid", placeItems: "center",
+        background: "var(--surface-2)", color: "var(--muted)", fontSize: 8, flexShrink: 0,
+      }}>
+        {initials(name)}
+      </span>
+      <span>{name}</span>
+      {role && <small style={{ color: "var(--muted)", fontSize: 9, fontWeight: 500 }}>{role}</small>}
+    </span>
+  );
+}
+
+function ApprovalFlow({ req, members, compact = false }: {
+  req: ApprovalRequest;
+  members: MemberWithRoles[];
+  compact?: boolean;
+}) {
+  const memberById = new Map(members.map((member) => [member.userId, member]));
+  const isPending = req.status === "pending_supervisor" || req.status === "pending_resource";
+  const chain = req.escalationChain.length > 0
+    ? req.escalationChain
+    : req.currentStage
+      ? [{
+          phase: req.currentStage === "supervisor" ? "supervisor" as const : "resource" as const,
+          stage: req.currentStage,
+          approverIds: req.currentApproverIds,
+          notifiedAt: req.createdAt,
+        }]
+      : [];
+
+  const terminalLabel = req.status === "approved"
+    ? "流程完成"
+    : req.status === "rejected"
+      ? "流程已拒绝"
+      : req.status === "cancelled"
+        ? "申请已撤回"
+        : null;
+
+  type FlowNode = {
+    key: string;
+    kind: string;
+    title: string;
+    people: string[];
+    time: string;
+    state: "complete" | "current" | "waiting" | "rejected";
+    action?: string;
+    actorId?: string;
+    reason?: string;
+    fallbackName?: string;
+  };
+
+  const nodes: FlowNode[] = [
+    {
+      key: "initiated",
+      kind: "发起",
+      title: "提交申请",
+      people: [req.subjectId],
+      time: req.createdAt,
+      state: "complete" as const,
+      fallbackName: req.subjectName,
+    },
+    ...chain.map((entry, index) => ({
+      key: `approval-${index}`,
+      kind: "审批",
+      title: stageLabel(entry.stage, entry.phase, entry.depth),
+      people: entry.approverIds,
+      time: entry.actedAt ?? entry.notifiedAt,
+      state: entry.action === "rejected"
+        ? "rejected" as const
+        : entry.action
+          ? "complete" as const
+          : isPending && index === chain.length - 1
+            ? "current" as const
+            : "waiting" as const,
+      action: entry.action ? ACTION_LABELS[entry.action] : undefined,
+      actorId: entry.actorId,
+      reason: entry.escalationReason === "timeout" ? "超时自动升级" : entry.escalationReason === "forwarded" ? "审批人转交" : undefined,
+    })),
+    ...(chain.length === 0 && terminalLabel ? [{
+      key: "legacy-approval",
+      kind: "审批",
+      title: "历史审批记录",
+      people: req.resolvedBy ? [req.resolvedBy] : [],
+      time: req.resolvedAt ?? req.createdAt,
+      state: req.status === "rejected" ? "rejected" as const : "complete" as const,
+      action: req.status === "approved" ? "已批准" : req.status === "rejected" ? "已拒绝" : "已结束",
+      actorId: req.resolvedBy ?? undefined,
+    }] : []),
+    ...(terminalLabel ? [{
+      key: "terminal",
+      kind: "结束",
+      title: terminalLabel,
+      people: req.resolvedBy ? [req.resolvedBy] : [],
+      time: req.resolvedAt ?? req.createdAt,
+      state: req.status === "rejected" ? "rejected" as const : "complete" as const,
+    }] : []),
+  ];
+
+  return (
+    <section style={{ borderTop: "1px solid var(--line)", paddingTop: compact ? 14 : 18 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+        <h3 style={{ margin: 0, fontSize: 12, fontWeight: 700, color: "var(--ink)" }}>审批流程</h3>
+        <span style={{ fontSize: 9, fontWeight: 700, color: "var(--stage)", background: "#f2e4d9", borderRadius: 999, padding: "3px 8px" }}>
+          审批
+        </span>
+      </div>
+
+      <div>
+        {nodes.map((node, index) => {
+          const isLast = index === nodes.length - 1;
+          const dotColor = node.state === "current"
+            ? "var(--stage)"
+            : node.state === "rejected"
+              ? "var(--danger, #ef4444)"
+              : node.state === "waiting"
+                ? "var(--line)"
+                : "var(--success, #4b7f65)";
+          return (
+            <div key={node.key} style={{ display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", gap: 11 }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <span style={{
+                  width: 9, height: 9, marginTop: 4, borderRadius: "50%", flexShrink: 0,
+                  background: dotColor, boxShadow: node.state === "current" ? "0 0 0 4px #f2e4d9" : "none",
+                }} />
+                {!isLast && <span style={{ width: 1, flex: 1, minHeight: compact ? 42 : 50, background: "var(--line)", marginTop: 5 }} />}
+              </div>
+              <div style={{ paddingBottom: isLast ? 0 : compact ? 13 : 17, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", letterSpacing: ".08em" }}>{node.kind}</span>
+                  <b style={{ fontSize: 12, color: "var(--ink)" }}>{node.title}</b>
+                  {node.action && <small style={{ fontSize: 10, color: dotColor }}>{node.action}</small>}
+                  {node.state === "current" && <small style={{ fontSize: 10, color: "var(--stage)" }}>当前节点</small>}
+                  <time style={{ marginLeft: "auto", fontSize: 9, color: "var(--muted)" }}>{fmtDate(node.time)}</time>
+                </div>
+                {node.people.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                    {node.people.map((userId) => (
+                      <PersonChip
+                        key={userId}
+                        userId={userId}
+                        member={memberById.get(userId)}
+                        fallbackName={node.fallbackName}
+                      />
+                    ))}
+                  </div>
+                )}
+                {node.actorId && (
+                  <p style={{ margin: "6px 0 0", fontSize: 10, color: "var(--muted)" }}>
+                    由 {memberById.get(node.actorId)?.name || "项目成员"} 操作
+                    {node.reason ? ` · ${node.reason}` : ""}
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {isPending && (
+        <p style={{ margin: "12px 0 0 29px", padding: "9px 11px", borderRadius: 8, background: "var(--paper)", color: "var(--muted)", fontSize: 10, lineHeight: 1.55 }}>
+          后续审批人会依据届时的汇报关系、资源负责人和制作团队配置动态计算。
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ApprovalFlowPreview() {
+  return (
+    <section style={{ borderTop: "1px solid var(--line)", paddingTop: 14 }}>
+      <h3 style={{ margin: "0 0 12px", fontSize: 12, fontWeight: 700, color: "var(--ink)" }}>审批流程</h3>
+      <div style={{ display: "grid", gridTemplateColumns: "18px 1fr", gap: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--success, #4b7f65)", marginTop: 4 }} />
+          <span style={{ width: 1, minHeight: 34, flex: 1, background: "var(--line)", margin: "5px 0" }} />
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--stage)" }} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+          <div>
+            <small style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700 }}>发起</small>
+            <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--ink)", fontWeight: 600 }}>你提交申请</p>
+          </div>
+          <div>
+            <small style={{ fontSize: 9, color: "var(--stage)", fontWeight: 700 }}>审批</small>
+            <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--ink)", fontWeight: 600 }}>系统匹配审批链路</p>
+            <p style={{ margin: "4px 0 0", fontSize: 10, lineHeight: 1.55, color: "var(--muted)" }}>
+              依次匹配直属上级、资源持有人、资源负责人、制作人与 Owner；无对应人员的节点自动跳过。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -227,6 +468,8 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
         />
       </div>
 
+      <ApprovalFlowPreview />
+
       {error && <p style={{ margin: 0, fontSize: 12, color: "var(--danger, #ef4444)" }}>{error}</p>}
 
       <div style={{ display: "flex", gap: 8 }}>
@@ -243,8 +486,9 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
 
 // ─── RequestDetail ────────────────────────────────────────────────────────────
 
-function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel, acting }: {
+function RequestDetail({ req, members, canAct, onApprove, onReject, onEscalate, onCancel, acting }: {
   req: ApprovalRequest;
+  members: MemberWithRoles[];
   canAct?: boolean;
   onApprove?: () => void;
   onReject?: () => void;
@@ -304,6 +548,8 @@ function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel,
         </div>
       )}
 
+      <ApprovalFlow req={req} members={members} />
+
       {/* Actions */}
       {isPending && (
         <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -349,6 +595,7 @@ export default function AccessRequestsClient({ productionId, productionName }: P
   const [tab, setTab]                         = useState<Tab>("mine");
   const [myRequests, setMyRequests]           = useState<ApprovalRequest[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
+  const [members, setMembers]                   = useState<MemberWithRoles[]>([]);
   const [loadingMine, setLoadingMine]         = useState(true);
   const [loadingPending, setLoadingPending]   = useState(true);
   const [acting, setActing]                   = useState<string | null>(null);
@@ -382,7 +629,17 @@ export default function AccessRequestsClient({ productionId, productionName }: P
     }
   }, [productionId]);
 
-  useEffect(() => { void fetchMine(); void fetchPending(); }, [fetchMine, fetchPending]);
+  const fetchMembers = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/production/${productionId}/contacts`);
+      if (!res.ok) return;
+      setMembers((await res.json()) as MemberWithRoles[]);
+    } catch {
+      // The approval chain remains usable with anonymous member chips if the directory is unavailable.
+    }
+  }, [productionId]);
+
+  useEffect(() => { void fetchMine(); void fetchPending(); void fetchMembers(); }, [fetchMine, fetchPending, fetchMembers]);
 
   // Keep right panel in sync when data refreshes
   useEffect(() => {
@@ -527,6 +784,7 @@ export default function AccessRequestsClient({ productionId, productionName }: P
                 你本人尚未持有该权限，只能向上转交。
               </p>
             )}
+            <ApprovalFlow req={req} members={members} compact />
             {actionError && acting !== req.id && (
               <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--danger, #ef4444)" }}>{actionError}</p>
             )}
@@ -704,6 +962,7 @@ export default function AccessRequestsClient({ productionId, productionName }: P
               <>
                 <RequestDetail
                   req={rightPanel.req}
+                  members={members}
                   canAct={rightPanel.canAct}
                   acting={acting === rightPanel.req.id}
                   onApprove={() => void handleApprove(rightPanel.req.id)}
