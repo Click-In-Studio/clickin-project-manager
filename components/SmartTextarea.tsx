@@ -29,6 +29,8 @@ import { Callout } from "@/lib/tiptap-callout";
 import { WikiImage } from "@/lib/tiptap-wiki-image";
 import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/tiptap-upload-placeholder";
 import { Column, ColumnGroup } from "@/lib/tiptap-columns";
+import { ColumnDrop } from "@/lib/tiptap-column-drop";
+import { ColumnEditing } from "@/lib/tiptap-column-editing";
 import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor-slash-commands";
 import { DROP_INDICATOR_OPTIONS } from "@/lib/editor-drop-indicator";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
@@ -694,11 +696,15 @@ export default function SmartTextarea({
     return [base, markdownExt,
       TableKit.configure({ table: { resizable: false } }),
       TaskList, TaskItem.configure({ nested: true }),
-      Callout, Column, ColumnGroup,
+      // ColumnEditing 不随 blockTools 门控：空栏退格、禁止嵌套是分栏方言自身
+      // 的不变量，哪个面都得维护（粘贴、AI 写入都可能造出嵌套组）
+      Callout, Column, ColumnGroup, ColumnEditing,
+      // 拖拽造栏只在有手柄的面才有意义——没有手柄就拖不动块
+      ...(blockTools ? [ColumnDrop] : []),
       ...(hasImageUpload ? [imageExt, UploadPlaceholder] : []),
       ...commonExts, wikiTriggerCfg, slashTriggerCfg, remoteCursorExt];
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markdown, remoteCursorExt, hasImageUpload]);
+  }, [markdown, remoteCursorExt, hasImageUpload, blockTools]);
 
   const editorMinHeight = minHeight != null
     ? `${minHeight}px`

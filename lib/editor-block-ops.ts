@@ -9,6 +9,7 @@
 import { NodeSelection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
+import { removeColumnsAt } from "./tiptap-column-editing";
 
 export type SelectedBlock = { node: PMNode; pos: number; end: number };
 
@@ -71,11 +72,18 @@ export function duplicateBlock(editor: Editor): boolean {
   return true;
 }
 
-/** 删除整块 */
+/** 删除整块。选中的是一整栏时走摘栏路径——直接 delete 会把组留成一栏，
+ *  而 `column column+` 不允许（剩一栏要拆组，内容原地保留） */
 export function deleteBlock(editor: Editor): boolean {
   const block = getSelectedBlock(editor);
   if (!block) return false;
-  editor.view.dispatch(editor.state.tr.delete(block.pos, block.end));
+  const tr = editor.state.tr;
+  if (block.node.type.name === "column") {
+    if (!removeColumnsAt(tr, [block.pos])) return false;
+  } else {
+    tr.delete(block.pos, block.end);
+  }
+  editor.view.dispatch(tr);
   editor.commands.focus();
   return true;
 }
@@ -127,14 +135,51 @@ export function isColumnGroup(node: PMNode | null): boolean {
 }
 
 /**
+ * 找到「当前光标/选中所处的分栏组」——选中的就是组时给它自己，否则沿祖先上溯。
+ *
+ * 需要上溯是因为手柄**刻意不再把分栏组作为目标**（见 BlockHandle 的
+ * UNDRAGGABLE：命中评分在内层块与整组之间摇摆是实测到的不确定行为）。
+ * 于是分栏操作必须能从「栏内的某一块」够到它所属的组，否则组一旦选不中，
+ * ＋栏/－栏/均分 就全都够不着了。
+ */
+export function findColumnGroup(editor: Editor): SelectedBlock | null {
+  const selected = getSelectedBlock(editor);
+  if (selected && isColumnGroup(selected.node)) return selected;
+  const $from = editor.state.selection.$from;
+  for (let d = $from.depth; d >= 1; d--) {
+    const node = $from.node(d);
+    if (node.type.name === "columnGroup") {
+      const pos = $from.before(d);
+      return { node, pos, end: pos + node.nodeSize };
+    }
+  }
+  return null;
+}
+
+/** 选中祖先分栏组 —— 之后上移/下移/复制/删除就作用于整组 */
+export function selectColumnGroup(editor: Editor): boolean {
+  const group = findColumnGroup(editor);
+  if (!group) return false;
+  const tr = editor.state.tr;
+  try {
+    tr.setSelection(NodeSelection.create(tr.doc, group.pos));
+  } catch {
+    return false;
+  }
+  editor.view.dispatch(tr);
+  editor.commands.focus();
+  return true;
+}
+
+/**
  * 增/减一栏。栏数变化后**一律清空所有 ratio**——旧的宽度串是按旧栏数配的，
  * 留着就会让 columnGroup 的 serializer 走进「ratios.length !== childCount」
  * 分支、主参数位整个不写，用户看到的是"我明明设过宽度怎么没了"。清空＝
  * 显式回到均分，与不写主参数位的 canonical 形态一致。
  */
 export function changeColumnCount(editor: Editor, delta: 1 | -1): boolean {
-  const block = getSelectedBlock(editor);
-  if (!block || !isColumnGroup(block.node)) return false;
+  const block = findColumnGroup(editor);
+  if (!block) return false;
   const group = block.node;
   const count = group.childCount;
   const next = count + delta;
@@ -158,8 +203,8 @@ export function changeColumnCount(editor: Editor, delta: 1 | -1): boolean {
 
 /** 均分各栏（清空 ratio，回到 canonical 的"不写主参数位"形态） */
 export function equalizeColumns(editor: Editor): boolean {
-  const block = getSelectedBlock(editor);
-  if (!block || !isColumnGroup(block.node)) return false;
+  const block = findColumnGroup(editor);
+  if (!block) return false;
   const group = block.node;
   const { schema } = editor.state;
   const columns: PMNode[] = [];

@@ -17,13 +17,29 @@ import { NodeSelection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
-/** 这些节点类型不能作为拖拽目标——把它们从父结构里拖出来会直接违反 content 约束 */
-const UNDRAGGABLE = new Set([
-  // column 的父 columnGroup 是 `column column+`：单独拖走一栏 = 组不成立
-  "column",
-  // 表格内部结构只能整表拖
-  "tableRow", "tableCell", "tableHeader",
-]);
+/** 表格内部结构只能整表拖，不能把行/单元格拖出去 */
+const UNDRAGGABLE = new Set(["tableRow", "tableCell", "tableHeader"]);
+
+/**
+ * 分栏里的拖拽单位是**栏**，不是栏里的块（与飞书一致，见
+ * lib/tiptap-column-editing.ts）。所以在分栏组内部只允许一种目标：栏本身。
+ *
+ * 不定死的话，命中评分会在「栏里的块」「栏」「整个分栏组」之间摇摆——同一个
+ * 位置有时拽走一段、有时拽走整组，是实测到的不确定行为。
+ *
+ * 排除整组也是刻意的：组本身不给手柄。要整组移动/删除，用块浮动条上的
+ * 「整组」按钮先把选中提升到组。
+ */
+function scoreForColumns({ node, $pos }: { node: PMNode; $pos: { depth: number; node: (d: number) => PMNode } }): number {
+  const name = node.type.name;
+  if (name === "columnGroup") return 1000;
+  if (name === "column") return 0; // 要的就是它
+  // 其余节点：只要祖先里有栏，就让位给那个栏
+  for (let d = $pos.depth; d >= 1; d--) {
+    if ($pos.node(d).type.name === "column") return 1000;
+  }
+  return 0;
+}
 
 export default function BlockHandle({ editor }: { editor: Editor | null }) {
   const [target, setTarget] = useState<{ node: PMNode | null; pos: number }>({ node: null, pos: -1 });
@@ -54,7 +70,12 @@ export default function BlockHandle({ editor }: { editor: Editor | null }) {
     // 会插到别的块中间
     const fresh = editor.state.doc.nodeAt(target.pos);
     if (!fresh) return;
-    const after = target.pos + fresh.nodeSize;
+    // 目标是一整栏时，「在下方插入」的意思是**在这一栏内追加一块**——
+    // 插到栏后面是插进 columnGroup 里，而组的 content 是 `column column+`，
+    // 放个段落进去直接违反 schema
+    const after = fresh.type.name === "column"
+      ? target.pos + fresh.nodeSize - 1
+      : target.pos + fresh.nodeSize;
     editor.chain()
       .focus()
       .insertContentAt(after, { type: "paragraph" })
@@ -70,10 +91,10 @@ export default function BlockHandle({ editor }: { editor: Editor | null }) {
       editor={editor}
       // 列表项、引用块内部的块也要能拖（Notion 同款），否则列表里每一条都拖不动
       nested={{
-        rules: [{
-          id: "clickin-undraggable",
-          evaluate: ({ node }) => (UNDRAGGABLE.has(node.type.name) ? 1000 : 0),
-        }],
+        rules: [
+          { id: "clickin-undraggable", evaluate: ({ node }) => (UNDRAGGABLE.has(node.type.name) ? 1000 : 0) },
+          { id: "clickin-column-unit", evaluate: scoreForColumns },
+        ],
       }}
       onNodeChange={({ node, pos }) => setTarget({ node, pos })}
       // 刻意**不传** computePositionConfig：官方默认就是 left-start/absolute，

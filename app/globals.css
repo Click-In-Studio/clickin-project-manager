@@ -215,8 +215,20 @@ body {
 /* 块手柄（components/editor/BlockHandle）—— 单例，由 floating-ui 移到当前
    hover 的块左侧。手柄本体是 portal 出去的固定定位元素，不占文档流。 */
 .smart-textarea-blocktools {
-  /* 给手柄让出左侧沟槽，否则 ＋/⠿ 压在正文第一个字上 */
-  padding-left: 44px;
+  /* 给手柄让出左侧沟槽，否则 ＋/⠿ 压在正文第一个字上。
+     手柄本体 45px（22+1+22）再加 6px 外推，52 刚好够 */
+  padding-left: 52px;
+}
+/* 分栏里的块同样需要沟槽（Notion / 飞书都给栏留了左内边距）。
+   不留的话，右栏那些块的手柄会掉进 16px 的栏间隙里——那片地方还同时在跟
+   左栏抢 hover，于是手柄一边极难点中、一边还会跳去指左栏的块。
+   把栏间隙和栏内左padding 都加宽之后，手柄正好落在**属于本栏的死区**里：
+   flex gap 不属于任何一栏，鼠标移过去不会改变命中目标。 */
+.smart-textarea-blocktools .wiki-cols {
+  gap: 34px;
+}
+.smart-textarea-blocktools .wiki-col {
+  padding-left: 34px;
 }
 /* 显隐由插件用 style.visibility 直接控制，**这里绝不能设 opacity/display**
    —— 设了就是永久隐藏，插件那套 visibility 切换永远救不回来 */
@@ -282,6 +294,20 @@ body {
 .wiki-dropcursor.prosemirror-dropcursor-inline {
   border-radius: 2px;
   box-shadow: none;
+}
+
+/* 造栏落点竖线（lib/tiptap-column-drop）—— 与横向插入线同一套视觉语言，
+   只是方向不同：横线＝插到块之间，竖线＝分成一栏。
+   fixed 定位吃视口坐标，绕开 offsetParent 与外框 overflow:hidden 的裁剪 */
+.wiki-column-drop-line {
+  position: fixed;
+  z-index: 60;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 3px;
+  background: #0ea5e9;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.25), 0 1px 6px rgba(14, 165, 233, 0.45);
 }
 
 /* 块选中态（NodeSelection）—— 对标 Notion 的 notion-selectable-halo。

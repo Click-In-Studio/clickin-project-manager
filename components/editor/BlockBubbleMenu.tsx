@@ -17,6 +17,7 @@ import type { Editor } from "@tiptap/core";
 import {
   getSelectedBlock, moveBlock, duplicateBlock, deleteBlock,
   turnInto, canTurnInto, isColumnGroup, changeColumnCount, equalizeColumns,
+  findColumnGroup, selectColumnGroup,
   TURN_INTO,
 } from "@/lib/editor-block-ops";
 
@@ -57,7 +58,10 @@ export default function BlockBubbleMenu({ editor }: { editor: Editor | null }) {
   if (!editor) return null;
 
   const block = getSelectedBlock(editor);
-  const cols = isColumnGroup(block?.node ?? null);
+  // 分栏操作对「栏内的块」也要给——手柄不再把分栏组本身作为目标了，
+  // 组只能靠「整组」按钮选中，所以这里必须沿祖先够得着
+  const group = findColumnGroup(editor);
+  const selectedIsGroup = isColumnGroup(block?.node ?? null);
 
   return (
     <BubbleMenu
@@ -100,8 +104,13 @@ export default function BlockBubbleMenu({ editor }: { editor: Editor | null }) {
         </>
       )}
 
-      {cols && (
+      {group && (
         <>
+          {!selectedIsGroup && (
+            <Btn onClick={() => selectColumnGroup(editor)} title="选中整个分栏组（之后上移/复制/删除作用于整组）">
+              整组
+            </Btn>
+          )}
           <Btn onClick={() => changeColumnCount(editor, 1)} title="增加一栏">＋栏</Btn>
           <Btn onClick={() => changeColumnCount(editor, -1)} title="减少一栏（从末尾）">－栏</Btn>
           <Btn onClick={() => equalizeColumns(editor)} title="各栏均分">均分</Btn>

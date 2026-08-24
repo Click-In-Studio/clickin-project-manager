@@ -16,7 +16,9 @@ import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 import {
   getSelectedBlock, moveBlock, duplicateBlock, deleteBlock,
   turnInto, canTurnInto, isColumnGroup, changeColumnCount, equalizeColumns,
+  findColumnGroup, selectColumnGroup,
 } from "@/lib/editor-block-ops";
+import { ColumnEditing, isEmptyColumn } from "@/lib/tiptap-column-editing";
 
 function makeEditor(content: string) {
   return new Editor({
@@ -25,10 +27,18 @@ function makeEditor(content: string) {
       Markdown.configure({ transformCopiedText: true, breaks: true }),
       TableKit.configure({ table: { resizable: false } }),
       TaskList, TaskItem.configure({ nested: true }),
-      Callout, Column, ColumnGroup,
+      Callout, Column, ColumnGroup, ColumnEditing,
     ],
     content,
   });
+}
+
+/** 选中第 index 栏（等价于用户点了那一栏的 ⠿ 手柄——分栏里的拖拽单位是栏） */
+function selectColumn(editor: Editor, groupPos: number, index: number) {
+  const group = editor.state.doc.nodeAt(groupPos)!;
+  let pos = groupPos + 1;
+  for (let i = 0; i < index; i++) pos += group.child(i).nodeSize;
+  editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, pos)));
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -217,6 +227,115 @@ describe("分栏增删栏", () => {
     expect(equalizeColumns(e)).toBe(true);
     expect(md(e)).not.toMatch(/:::cols\s+\d/);
     expect(equalizeColumns(e)).toBe(false);
+    e.destroy();
+  });
+
+  it("光标在栏内某块时，分栏操作沿祖先够到组（手柄已不再把组作为目标）", () => {
+    const e = makeEditor(":::cols\n\n左\n\n---\n\n右\n\n:::");
+    e.commands.setTextSelection(3); // 落在第一栏的「左」里
+    expect(getSelectedBlock(e)).toBeNull(); // 不是整块选中
+    const g = findColumnGroup(e);
+    expect(g).not.toBeNull();
+    expect(isColumnGroup(g!.node)).toBe(true);
+    expect(changeColumnCount(e, 1)).toBe(true);
+    expect(md(e).match(/\n---\n/g)?.length).toBe(2);
+    e.destroy();
+  });
+
+  it("「整组」把选中提升到祖先分栏组，之后 ↑↓/删除作用于整组", () => {
+    const e = makeEditor("甲\n\n:::cols\n\n左\n\n---\n\n右\n\n:::");
+    // 落到第二个顶层块（分栏组）第一栏的文字里
+    const groupPos = e.state.doc.child(0).nodeSize;
+    e.commands.setTextSelection(groupPos + 3);
+    expect(selectColumnGroup(e)).toBe(true);
+    const sel = getSelectedBlock(e);
+    expect(sel).not.toBeNull();
+    expect(isColumnGroup(sel!.node)).toBe(true);
+    // 整组上移
+    expect(moveBlock(e, -1)).toBe(true);
+    expect(md(e).startsWith(":::cols")).toBe(true);
+    e.destroy();
+  });
+
+  it("不在任何分栏组里时 findColumnGroup 给 null、「整组」拒绝", () => {
+    const e = makeEditor("甲");
+    e.commands.setTextSelection(1);
+    expect(findColumnGroup(e)).toBeNull();
+    expect(selectColumnGroup(e)).toBe(false);
+    e.destroy();
+  });
+
+  it("选中一整栏后删除 → 两栏组被拆掉，剩下那栏的内容原地保留", () => {
+    const e = makeEditor(":::cols\n\n左\n\n---\n\n右\n\n:::");
+    selectColumn(e, 0, 0);
+    expect(getSelectedBlock(e)!.node.type.name).toBe("column");
+    expect(deleteBlock(e)).toBe(true);
+    // 组不足两栏就不成立 → 拆组；内容不能丢
+    expect(md(e)).toBe("右");
+    e.destroy();
+  });
+
+  it("三栏里删一栏 → 还剩两栏，组仍在", () => {
+    const e = makeEditor(":::cols\n\n一\n\n---\n\n二\n\n---\n\n三\n\n:::");
+    selectColumn(e, 0, 1);
+    expect(deleteBlock(e)).toBe(true);
+    const out = md(e);
+    expect(out.startsWith(":::cols")).toBe(true);
+    expect(out.match(/\n---\n/g)?.length).toBe(1);
+    expect(out).toContain("一");
+    expect(out).toContain("三");
+    expect(out).not.toContain("二");
+    e.destroy();
+  });
+
+  it("栏之间可以用 ↑↓ 换位（同一父节点内换位，父节点就是分栏组）", () => {
+    const e = makeEditor(":::cols\n\n左\n\n---\n\n右\n\n:::");
+    selectColumn(e, 0, 1);
+    expect(moveBlock(e, -1)).toBe(true);
+    const [first, second] = md(e).split("\n---\n");
+    expect(first).toContain("右");
+    expect(second).toContain("左");
+    e.destroy();
+  });
+
+  it("空栏不会被自动回收 —— 新建的栏天生就是空的", () => {
+    const e = makeEditor(":::cols\n\n左\n\n---\n\n右\n\n:::");
+    selectColumn(e, 0, 0);
+    // 清空第一栏的内容（模拟用户把里面的字删光）
+    const col = getSelectedBlock(e)!;
+    e.view.dispatch(e.state.tr.delete(col.pos + 2, col.end - 2));
+    expect(isEmptyColumn(e.state.doc.nodeAt(0)!.child(0))).toBe(true);
+    // 组还在、还是两栏
+    expect(md(e).startsWith(":::cols")).toBe(true);
+    expect(e.state.doc.nodeAt(0)!.childCount).toBe(2);
+    e.destroy();
+  });
+
+  it("光标在栏内某块时，分栏操作沿祖先够到组", () => {
+    const e = makeEditor(":::cols\n\n左\n\n---\n\n右\n\n:::");
+    e.commands.setTextSelection(3);
+    const g = findColumnGroup(e);
+    expect(g).not.toBeNull();
+    expect(isColumnGroup(g!.node)).toBe(true);
+    expect(changeColumnCount(e, 1)).toBe(true);
+    expect(md(e).match(/\n---\n/g)?.length).toBe(2);
+    e.destroy();
+  });
+
+  it("选中一栏时也够得到组（手柄的目标就是栏）", () => {
+    const e = makeEditor(":::cols\n\n左\n\n---\n\n右\n\n:::");
+    selectColumn(e, 0, 1);
+    expect(isColumnGroup(findColumnGroup(e)!.node)).toBe(true);
+    expect(selectColumnGroup(e)).toBe(true);
+    expect(isColumnGroup(getSelectedBlock(e)!.node)).toBe(true);
+    e.destroy();
+  });
+
+  it("不在任何分栏组里时 findColumnGroup 给 null、「整组」拒绝", () => {
+    const e = makeEditor("甲");
+    e.commands.setTextSelection(1);
+    expect(findColumnGroup(e)).toBeNull();
+    expect(selectColumnGroup(e)).toBe(false);
     e.destroy();
   });
 
