@@ -35,6 +35,7 @@ import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor-slash-commands
 import { DROP_INDICATOR_OPTIONS } from "@/lib/editor-drop-indicator";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 import BlockHandle from "@/components/editor/BlockHandle";
+import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
 export { normalizeLegacyMentions };
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -178,9 +179,7 @@ export function slashCommandPlugin(): DropPlugin {
       const cmd = SLASH_COMMANDS.find(c => c.id === item.id);
       return (
         <span className="flex items-center gap-2.5">
-          <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-[13px] shrink-0 ${
-            active ? "bg-zinc-800 text-white" : "bg-zinc-100 text-zinc-600"
-          }`}>{cmd?.icon}</span>
+          <BlockTypeIcon icon={cmd?.icon} active={active} />
           <span className="text-sm text-zinc-700">{item.label}</span>
           <span className="ml-auto text-[11px] font-mono text-zinc-400 pl-3">{item.secondary}</span>
         </span>

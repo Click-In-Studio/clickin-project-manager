@@ -10,73 +10,60 @@
 // `/目录`、`/公式` 就是往这张表里加行。
 import type { Editor } from "@tiptap/core";
 import { match as pinyinMatch } from "pinyin-pro";
+import { BLOCK_TYPES, type BlockTypeId } from "./editor-block-types";
 
 export type SlashRange = { from: number; to: number };
 
+/** 图标与名字来自 BLOCK_TYPES —— 与「转换为」菜单共用同一张表，
+ *  免得同一个块类型在两个菜单里长两副样子 */
 export type SlashCommand = {
-  id: string;
-  /** 菜单里显示的名字 */
+  id: BlockTypeId;
   label: string;
-  /** 右侧灰字提示，说明落成什么 */
   hint: string;
-  /** 单字符图标，与固定工具栏原有符号保持一致（老用户认得） */
   icon: string;
   /** 英文/拼音别名。label 的拼音由 pinyin-pro 自动匹配，这里只补它推不出的 */
   keywords: string[];
   run: (editor: Editor, range: SlashRange) => void;
 };
 
+/** 拼装一条指令：展示位取自定式表，这里只补自己那份差异 */
+function cmd(
+  id: BlockTypeId,
+  keywords: string[],
+  run: (editor: Editor, range: SlashRange) => void,
+): SlashCommand {
+  return { id, ...BLOCK_TYPES[id], keywords, run };
+}
+
 export const SLASH_COMMANDS: SlashCommand[] = [
-  {
-    id: "h2", label: "二级标题", hint: "## 标题", icon: "H2", keywords: ["h2", "heading", "title"],
-    run: (e, r) => e.chain().focus().deleteRange(r).toggleHeading({ level: 2 }).run(),
-  },
-  {
-    id: "h3", label: "三级标题", hint: "### 标题", icon: "H3", keywords: ["h3", "heading", "title"],
-    run: (e, r) => e.chain().focus().deleteRange(r).toggleHeading({ level: 3 }).run(),
-  },
-  {
-    id: "bulletList", label: "无序列表", hint: "- 条目", icon: "≡", keywords: ["ul", "list", "bullet"],
-    run: (e, r) => e.chain().focus().deleteRange(r).toggleBulletList().run(),
-  },
-  {
-    id: "orderedList", label: "有序列表", hint: "1. 条目", icon: "1.", keywords: ["ol", "list", "number"],
-    run: (e, r) => e.chain().focus().deleteRange(r).toggleOrderedList().run(),
-  },
-  {
-    id: "taskList", label: "任务列表", hint: "- [ ] 待办", icon: "☑", keywords: ["todo", "task", "check"],
-    run: (e, r) => e.chain().focus().deleteRange(r).toggleTaskList().run(),
-  },
-  {
-    id: "blockquote", label: "引用", hint: "> 引用", icon: "“", keywords: ["quote", "blockquote"],
-    run: (e, r) => e.chain().focus().deleteRange(r).toggleBlockquote().run(),
-  },
-  {
-    id: "callout", label: "高亮块", hint: "> [!💡]", icon: "💡", keywords: ["callout", "tip", "note", "gaoliang"],
-    run: (e, r) => e.chain().focus().deleteRange(r).toggleWrap("callout").run(),
-  },
-  {
-    id: "columns", label: "两栏分栏", hint: ":::cols", icon: "◫", keywords: ["cols", "column", "grid", "fenlan"],
-    run: (e, r) => e.chain().focus().deleteRange(r).insertContent({
+  cmd("h2", ["h2", "heading", "title"],
+    (e, r) => e.chain().focus().deleteRange(r).toggleHeading({ level: 2 }).run()),
+  cmd("h3", ["h3", "heading", "title"],
+    (e, r) => e.chain().focus().deleteRange(r).toggleHeading({ level: 3 }).run()),
+  cmd("bulletList", ["ul", "list", "bullet"],
+    (e, r) => e.chain().focus().deleteRange(r).toggleBulletList().run()),
+  cmd("orderedList", ["ol", "list", "number"],
+    (e, r) => e.chain().focus().deleteRange(r).toggleOrderedList().run()),
+  cmd("taskList", ["todo", "task", "check"],
+    (e, r) => e.chain().focus().deleteRange(r).toggleTaskList().run()),
+  cmd("blockquote", ["quote", "blockquote"],
+    (e, r) => e.chain().focus().deleteRange(r).toggleBlockquote().run()),
+  cmd("callout", ["callout", "tip", "note", "gaoliang"],
+    (e, r) => e.chain().focus().deleteRange(r).toggleWrap("callout").run()),
+  cmd("columns", ["cols", "column", "grid", "fenlan"],
+    (e, r) => e.chain().focus().deleteRange(r).insertContent({
       type: "columnGroup",
       content: [
         { type: "column", content: [{ type: "paragraph" }] },
         { type: "column", content: [{ type: "paragraph" }] },
       ],
-    }).run(),
-  },
-  {
-    id: "table", label: "表格", hint: "3×3 带表头", icon: "⊞", keywords: ["table", "biaoge"],
-    run: (e, r) => e.chain().focus().deleteRange(r).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
-  },
-  {
-    id: "codeBlock", label: "代码块", hint: "```", icon: "{ }", keywords: ["code", "pre", "daima"],
-    run: (e, r) => e.chain().focus().deleteRange(r).toggleCodeBlock().run(),
-  },
-  {
-    id: "horizontalRule", label: "分割线", hint: "---", icon: "—", keywords: ["hr", "divider", "line", "fengexian"],
-    run: (e, r) => e.chain().focus().deleteRange(r).setHorizontalRule().run(),
-  },
+    }).run()),
+  cmd("table", ["table", "biaoge"],
+    (e, r) => e.chain().focus().deleteRange(r).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()),
+  cmd("codeBlock", ["code", "pre", "daima"],
+    (e, r) => e.chain().focus().deleteRange(r).toggleCodeBlock().run()),
+  cmd("horizontalRule", ["hr", "divider", "line", "fengexian"],
+    (e, r) => e.chain().focus().deleteRange(r).setHorizontalRule().run()),
 ];
 
 /**

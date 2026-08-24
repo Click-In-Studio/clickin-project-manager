@@ -19,6 +19,7 @@ import {
   findColumnGroup, selectColumnGroup,
   TURN_INTO,
 } from "@/lib/editor-block-ops";
+import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
 
 function Item({
   onClick, children, hint, danger, disabled,
@@ -107,8 +108,13 @@ export default function BlockMenu({
           <Item onClick={() => setPage("root")}>← 返回</Item>
           <SectionLabel>转换为</SectionLabel>
           {TURN_INTO.map(opt => (
-            <Item key={opt.id} onClick={() => run(() => turnInto(editor, opt.id))}>
-              {opt.label}
+            <Item key={opt.id} onClick={() => run(() => turnInto(editor, opt.id))} hint={opt.hint}>
+              {/* 与 `/` 插入菜单同一个图标片、同一张定式表：同一个块类型在
+                  「新建」和「转换为」里必须长同一副样子 */}
+              <span className="flex items-center gap-2.5">
+                <BlockTypeIcon icon={opt.icon} />
+                {opt.label}
+              </span>
             </Item>
           ))}
         </>

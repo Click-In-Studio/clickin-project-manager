@@ -16,6 +16,8 @@ import { Markdown } from "tiptap-markdown";
 import { Callout } from "@/lib/tiptap-callout";
 import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor-slash-commands";
+import { TURN_INTO } from "@/lib/editor-block-ops";
+import { BLOCK_TYPES } from "@/lib/editor-block-types";
 
 // 与 SmartTextarea 同一套扩展集（「一切文本皆文档」之后全站只有这一套 schema）
 function makeEditor(content: string) {
@@ -62,6 +64,51 @@ describe("searchSlashCommands", () => {
 
   it("id 不重复（菜单按 id 做 key，重了会静默丢项）", () => {
     expect(new Set(SLASH_COMMANDS.map(c => c.id)).size).toBe(SLASH_COMMANDS.length);
+  });
+});
+
+describe("插入菜单与转换菜单共用同一张展示定式表", () => {
+  it("两边都从 BLOCK_TYPES 取图标与名字，没有本地硬写", () => {
+    for (const c of SLASH_COMMANDS) {
+      expect(c.label).toBe(BLOCK_TYPES[c.id].label);
+      expect(c.icon).toBe(BLOCK_TYPES[c.id].icon);
+      expect(c.hint).toBe(BLOCK_TYPES[c.id].hint);
+    }
+    for (const o of TURN_INTO) {
+      expect(o.label).toBe(BLOCK_TYPES[o.id].label);
+      expect(o.icon).toBe(BLOCK_TYPES[o.id].icon);
+    }
+  });
+
+  // 这条才是用户会撞见的症状：「新建 · 高亮块 💡」和「转换为 · 高亮块」
+  // 长得不一样，会让人以为是两个东西
+  it("同一个 id 在两个菜单里字面相同", () => {
+    const turnById = new Map(TURN_INTO.map(o => [o.id, o]));
+    const shared = SLASH_COMMANDS.filter(c => turnById.has(c.id));
+    expect(shared.length).toBeGreaterThan(0);
+    for (const c of shared) {
+      const o = turnById.get(c.id)!;
+      expect({ label: o.label, icon: o.icon }).toEqual({ label: c.label, icon: c.icon });
+    }
+  });
+
+  it("两边的 id 都在定式表里（新增类型不许绕过它）", () => {
+    for (const id of [...SLASH_COMMANDS.map(c => c.id), ...TURN_INTO.map(o => o.id)]) {
+      expect(BLOCK_TYPES[id]).toBeDefined();
+    }
+  });
+
+  it("各自独有的 id 是有理由的，不是漏配", () => {
+    const slashIds = new Set<string>(SLASH_COMMANDS.map(c => c.id));
+    const turnIds = new Set<string>(TURN_INTO.map(o => o.id));
+    // 「插入一个段落」没有意义——你本来就在段落里
+    expect(turnIds.has("paragraph")).toBe(true);
+    expect(slashIds.has("paragraph")).toBe(false);
+    // 结构型节点不给转换（见 editor-block-ops 的 UNCONVERTIBLE）
+    for (const id of ["columns", "table", "horizontalRule"]) {
+      expect(slashIds.has(id)).toBe(true);
+      expect(turnIds.has(id)).toBe(false);
+    }
   });
 });
 

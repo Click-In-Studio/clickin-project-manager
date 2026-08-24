@@ -10,6 +10,7 @@ import { NodeSelection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { removeColumnsAt } from "./tiptap-column-editing";
+import { BLOCK_TYPES, type BlockTypeId } from "./editor-block-types";
 
 export type SelectedBlock = { node: PMNode; pos: number; end: number };
 
@@ -90,22 +91,30 @@ export function deleteBlock(editor: Editor): boolean {
 
 // ── 转换类型 ─────────────────────────────────────────────────────────────────
 
+/** 图标与名字来自 BLOCK_TYPES —— 与 `/` 插入菜单共用同一张表。同一个块类型
+ *  在「新建」和「转换为」里必须长同一副样子，否则用户会以为是两个东西 */
 export type TurnIntoOption = {
-  id: string;
+  id: BlockTypeId;
   label: string;
+  icon: string;
+  hint: string;
   run: (editor: Editor, inside: number) => void;
 };
 
+function option(id: BlockTypeId, run: TurnIntoOption["run"]): TurnIntoOption {
+  return { id, ...BLOCK_TYPES[id], run };
+}
+
 export const TURN_INTO: TurnIntoOption[] = [
-  { id: "paragraph", label: "正文", run: (e, p) => e.chain().focus().setTextSelection(p).setParagraph().run() },
-  { id: "h2", label: "二级标题", run: (e, p) => e.chain().focus().setTextSelection(p).setHeading({ level: 2 }).run() },
-  { id: "h3", label: "三级标题", run: (e, p) => e.chain().focus().setTextSelection(p).setHeading({ level: 3 }).run() },
-  { id: "bulletList", label: "无序列表", run: (e, p) => e.chain().focus().setTextSelection(p).toggleBulletList().run() },
-  { id: "orderedList", label: "有序列表", run: (e, p) => e.chain().focus().setTextSelection(p).toggleOrderedList().run() },
-  { id: "taskList", label: "任务列表", run: (e, p) => e.chain().focus().setTextSelection(p).toggleTaskList().run() },
-  { id: "blockquote", label: "引用", run: (e, p) => e.chain().focus().setTextSelection(p).toggleBlockquote().run() },
-  { id: "callout", label: "高亮块", run: (e, p) => e.chain().focus().setTextSelection(p).toggleWrap("callout").run() },
-  { id: "codeBlock", label: "代码块", run: (e, p) => e.chain().focus().setTextSelection(p).toggleCodeBlock().run() },
+  option("paragraph", (e, p) => e.chain().focus().setTextSelection(p).setParagraph().run()),
+  option("h2", (e, p) => e.chain().focus().setTextSelection(p).setHeading({ level: 2 }).run()),
+  option("h3", (e, p) => e.chain().focus().setTextSelection(p).setHeading({ level: 3 }).run()),
+  option("bulletList", (e, p) => e.chain().focus().setTextSelection(p).toggleBulletList().run()),
+  option("orderedList", (e, p) => e.chain().focus().setTextSelection(p).toggleOrderedList().run()),
+  option("taskList", (e, p) => e.chain().focus().setTextSelection(p).toggleTaskList().run()),
+  option("blockquote", (e, p) => e.chain().focus().setTextSelection(p).toggleBlockquote().run()),
+  option("callout", (e, p) => e.chain().focus().setTextSelection(p).toggleWrap("callout").run()),
+  option("codeBlock", (e, p) => e.chain().focus().setTextSelection(p).toggleCodeBlock().run()),
 ];
 
 /**
