@@ -4,8 +4,7 @@ import {
   listProductionMembers,
   listProductionMembersWithRoles,
   listCueLists,
-  searchUsersByName,
-  updateUserContact,
+  bindPlatformIdentity,
   findUserByName,
 } from "@/lib/db";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
@@ -70,10 +69,8 @@ describe("cue 表 creator 显示名", () => {
 });
 
 describe("用户目录与名字匹配", () => {
-  it("searchUsersByName 能搜到纯邮箱用户", async () => {
-    const hits = await searchUsersByName(userName);
-    expect(hits.map(h => h.userId)).toContain(userId);
-  });
+  // searchUsersByName / listAllUsersWithContact 随 feishu-user-search 端点一并退役
+  // （唯一调用方是 ContactsClient 里从未被渲染的 AddMemberPanel），其用例同批移除。
 
   it("findUserByName 按 user_profile 名匹配", async () => {
     const hit = await findUserByName(userName);
@@ -81,32 +78,11 @@ describe("用户目录与名字匹配", () => {
   });
 });
 
-describe("updateUserContact 写档案层", () => {
-  it("phone 写 user_profile、email 写 identity，成员列表可读回", async () => {
-    const email = `debt-${shortId()}@example.com`;
-    await updateUserContact(userId, email, "13800001234");
-    const members = await listProductionMembersWithRoles(prodId);
-    const me = members.find(m => m.userId === userId)!;
-    expect(me.phone).toBe("13800001234");
-    expect(me.email).toBe(email);
-  });
-
-  it("再次更新 email：旧联系邮箱行退役，读回最新值", async () => {
-    const email2 = `debt2-${shortId()}@example.com`;
-    await updateUserContact(userId, email2, null);
-    const members = await listProductionMembersWithRoles(prodId);
-    const me = members.find(m => m.userId === userId)!;
-    expect(me.email).toBe(email2);
-    const { rows } = await getPool().query<{ platform_user_id: string }>(
-      `SELECT platform_user_id FROM user_platform_identity
-       WHERE user_id = $1 AND platform_id = 'email'`,
-      [userId],
-    );
-    expect(rows).toHaveLength(1);
-    expect(rows[0].platform_user_id).toBe(email2);
-  });
-
-  it("email 已被他人占用时静默跳过，不抢占身份", async () => {
+// updateUserContact（管理侧代填联系方式）已退役：注册与个人信息一律由本人填写，
+// 管理侧只发码。它原来守的「不抢占他人身份」这条不变量，转由现存的唯一邮箱写入
+// 路径 bindPlatformIdentity 承接——该函数此前没有任何测试覆盖。
+describe("身份绑定不抢占他人", () => {
+  it("email 已属他人时返回 conflict，且不改写身份归属", async () => {
     const other = await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id");
     const otherId = other.rows[0].id;
     const email = `taken-${shortId()}@example.com`;
@@ -115,7 +91,11 @@ describe("updateUserContact 写档案层", () => {
        VALUES ($1, 'email', $2, true, true)`,
       [otherId, email],
     );
-    await updateUserContact(userId, email, null);
+
+    const res = await bindPlatformIdentity(userId, "email", email);
+    expect(res.result).toBe("conflict");
+    expect(res.result === "conflict" && res.existingUserId).toBe(otherId);
+
     const { rows } = await getPool().query<{ user_id: string }>(
       "SELECT user_id FROM user_platform_identity WHERE platform_id = 'email' AND platform_user_id = $1",
       [email],
@@ -123,5 +103,16 @@ describe("updateUserContact 写档案层", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].user_id).toBe(otherId);
     await getPool().query("DELETE FROM app_user WHERE id = $1", [otherId]);
+  });
+
+  it("同一账号重复绑定同一邮箱是幂等的 bound", async () => {
+    const email = `rebind-${shortId()}@example.com`;
+    expect((await bindPlatformIdentity(userId, "email", email)).result).toBe("bound");
+    expect((await bindPlatformIdentity(userId, "email", email)).result).toBe("bound");
+    const { rows } = await getPool().query(
+      "SELECT 1 FROM user_platform_identity WHERE platform_id = 'email' AND platform_user_id = $1",
+      [email],
+    );
+    expect(rows).toHaveLength(1);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
-import { upsertFeishuUser, addProductionMember, createMilestone, setMemberRoles, updateUserContact } from "@/lib/db";
+import { upsertFeishuUser, addProductionMember, createMilestone, setMemberRoles } from "@/lib/db";
+import { getPool } from "@/lib/pg";
 import { createUserNotification } from "@/lib/inbox-db";
 import { createProductionDept, setDeptMembers } from "@/lib/dept-db";
 import {
@@ -116,7 +117,18 @@ describe("production.contact_list / production.department_list", () => {
   it("contact_list 绝不返回邮箱/电话（敏感面只走 users.query_sensitive）", async () => {
     const email = `mcp-contact-${shortId()}@example.com`;
     const phone = `1380000${Math.floor(Math.random() * 9000 + 1000)}`;
-    await updateUserContact(memberId, email, phone);
+    // 直接落库造数据：updateUserContact（管理侧代填联系方式）已随注册写入路径收口退役
+    await getPool().query(
+      `INSERT INTO user_profile (user_id, name, phone) VALUES ($1, '', $2)
+       ON CONFLICT (user_id) DO UPDATE SET phone = EXCLUDED.phone`,
+      [memberId, phone],
+    );
+    await getPool().query(
+      `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method, is_primary)
+       VALUES ($1, 'email', $2, false, false)
+       ON CONFLICT (platform_id, platform_user_id) DO NOTHING`,
+      [memberId, email],
+    );
 
     const out = await productionContactList(memberId, prodId);
     expect(out).not.toContain(email);

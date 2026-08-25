@@ -25,13 +25,12 @@ export default async function MigrationPage({ params }: { params: Promise<{ id: 
   const { permCtx } = access;
   const bypass = permCtx.isAdmin || permCtx.isOwner;
 
-  const [canImportContacts, canImportScript, canImportScenes, canInvite] = await Promise.all([
-    bypass || hasGrant(permCtx.userId, id, "member", "*", "imports", "create"),
+  const [canImportScript, canImportScenes, canInvite] = await Promise.all([
     bypass || hasGrant(permCtx.userId, id, "script", "*", "imports", "create"),
     bypass || hasGrant(permCtx.userId, id, "dramaturgy", "*", "imports", "create"),
     bypass || hasGrant(permCtx.userId, id, "member", "*", "*", "create"),
   ]);
-  if (!canImportContacts && !canImportScript && !canImportScenes && !canInvite) redirect(`/production/${id}/admin`);
+  if (!canImportScript && !canImportScenes && !canInvite) redirect(`/production/${id}/admin`);
 
   const [name, roles, depts] = await Promise.all([
     getProductionName(id),
@@ -51,7 +50,6 @@ export default async function MigrationPage({ params }: { params: Promise<{ id: 
       )}
       <AdminMigrationSection
         productionId={id}
-        canImportContacts={canImportContacts}
         canImportScript={canImportScript}
         canImportScenes={canImportScenes}
       />
