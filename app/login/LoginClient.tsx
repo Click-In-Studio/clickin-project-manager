@@ -235,6 +235,27 @@ export default function LoginClient({ inviteOnly }: { inviteOnly?: boolean }) {
         ) : (
           /* Email entry state */
           <>
+            {/* 邀请码是「注册资格」，先于「用哪种方式注册」——放在表单里会让人误以为
+                只有邮箱注册要填，而飞书注册同样要过这道门（码经 initiate 收进
+                oauth_ctx cookie 带过去）。提到两个入口之上，用分隔线统领。 */}
+            {authMode === "register" && inviteOnly && !inviteToken && (
+              <div style={{ marginBottom: 18, paddingBottom: 18, borderBottom: "1px solid var(--line)" }}>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>
+                  邀请码<span style={{ fontWeight: 400 }}>（邮箱已被邀请可留空）</span>
+                </label>
+                <input
+                  type="text"
+                  value={regCode}
+                  onChange={e => setRegCode(e.target.value)}
+                  placeholder="测试期间需受邀注册"
+                  style={{ ...inp, marginBottom: 6 }}
+                />
+                <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
+                  邮箱与飞书两种注册方式都需要
+                </p>
+              </div>
+            )}
+
             <form onSubmit={handleEmailSubmit} style={{ marginBottom: 20 }}>
               <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>邮箱</label>
               <input
@@ -254,20 +275,6 @@ export default function LoginClient({ inviteOnly }: { inviteOnly?: boolean }) {
                     onChange={e => setName(e.target.value)}
                     placeholder="你的名字"
                     required
-                    style={{ ...inp, marginBottom: inviteOnly && !inviteToken ? 10 : 14 }}
-                  />
-                </>
-              )}
-              {authMode === "register" && inviteOnly && !inviteToken && (
-                <>
-                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>
-                    邀请码<span style={{ fontWeight: 400 }}>（邮箱已被邀请可留空）</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={regCode}
-                    onChange={e => setRegCode(e.target.value)}
-                    placeholder="测试期间需受邀注册"
                     style={{ ...inp, marginBottom: 14 }}
                   />
                 </>
