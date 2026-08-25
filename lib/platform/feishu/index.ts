@@ -102,6 +102,40 @@ export class FeishuPlatform implements PersonalChannel, OrgChannel, InboundGatew
     };
   }
 
+  /**
+   * 建号并组装会话——注册门已在调用方（回调路由）通过之后才会走到这里。
+   * 与 performLogin 的分工：那个是「换 code + 建号」一步到位的老路径，
+   * 这个只做后半段，前半段由 handleAuthCallback 完成，门插在两者之间。
+   */
+  async completeLogin(identity: PlatformIdentity): Promise<LoginResult> {
+    const { userId } = await upsertFeishuUser(
+      identity.platformUserId,
+      identity.name,
+      identity.avatarUrl ?? null,
+      false,
+    );
+    const accessToken = identity.auth?.accessToken;
+    const expiresAt = identity.auth?.expiresAt ?? 0;
+    return {
+      userId,
+      name: identity.name,
+      avatarUrl: identity.avatarUrl ?? null,
+      isAdmin: false,
+      extraCookies: accessToken
+        ? [{
+            name: TOKEN_COOKIE,
+            value: accessToken,
+            opts: {
+              httpOnly: true,
+              path: "/",
+              sameSite: "lax",
+              maxAge: Math.max(1, Math.floor((expiresAt - Date.now()) / 1000)),
+            },
+          }]
+        : [],
+    };
+  }
+
   async performLogin(code: string): Promise<LoginResult> {
     const tokenData = await exchangeCode(code);
     const info = await feishuGetUserInfo(tokenData.userAccessToken);
