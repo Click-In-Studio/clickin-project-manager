@@ -25,7 +25,7 @@ import type { Editor } from "@tiptap/core";
 import {
   findTable, tableSize, selectColumn, selectRow, selectTable,
   insertColumnAtBoundary, insertRowAtBoundary,
-  moveRow, moveColumn, hasMergedCells,
+  moveRow, moveColumn, hasMergedCells, selectionSpan,
   type TableLoc,
 } from "@/lib/table-ops";
 
@@ -42,7 +42,6 @@ type Geom = {
   rowEdges: number[];
 };
 
-type Sel = { kind: "col" | "row"; index: number } | null;
 type Near = { kind: "col" | "row"; index: number } | null;
 /** 拖拽重排进行中：from = 被拖的行/列，to = 当前落点边界 */
 type Drag = { kind: "col" | "row"; from: number; to: number } | null;
@@ -142,7 +141,6 @@ function nearestBoundary(geom: Geom, x: number, y: number): Near {
 
 export default function TableTools({ editor }: { editor: Editor | null }) {
   const [geom, setGeom] = useState<Geom | null>(null);
-  const [sel, setSel] = useState<Sel>(null);
   const [near, setNear] = useState<Near>(null);
   const [drag, setDrag] = useState<Drag>(null);
   // 拖拽落点的真相放 ref：mouseup 时要读它执行搬移，而 setState 的 updater
@@ -166,7 +164,7 @@ export default function TableTools({ editor }: { editor: Editor | null }) {
     const pos = activeRef.current;
     const g = pos == null ? null : measure(editor, pos, host);
     setGeom(g);
-    if (!g) { setSel(null); setNear(null); return; }
+    if (!g) { setNear(null); return; }
     const p = pointerRef.current;
     if (!p) return;
     const h = host.getBoundingClientRect();
@@ -209,8 +207,6 @@ export default function TableTools({ editor }: { editor: Editor | null }) {
       const t = findTable(editor);
       if (activeRef.current == null && t) setActive(t.pos);
       else refresh();
-      // 选中被别处改掉了（打字、点进单元格）→ 外缘上的高亮也该撤
-      if (!(editor.state.selection.constructor.name === "CellSelection")) setSel(null);
     };
 
     dom.addEventListener("mousemove", onMove);
@@ -237,6 +233,11 @@ export default function TableTools({ editor }: { editor: Editor | null }) {
   if (!size) return null;
 
   const { colEdges, rowEdges } = geom;
+  // 外缘的高亮**从真实选中推导**，不靠组件自己记一份状态：拖选单元格、
+  // 撤销重做、协作回灌都会改变选中，那些路径不会经过我们的点击处理
+  const span = selectionSpan(editor);
+  const colOn = (i: number) => !!span?.isCol && i >= span.left && i < span.right;
+  const rowOn = (j: number) => !!span?.isRow && j >= span.top && j < span.bottom;
 
   /**
    * 按下外缘一段：先选中，再挂上"可能是拖拽"的监听。
@@ -250,7 +251,6 @@ export default function TableTools({ editor }: { editor: Editor | null }) {
     if (!t) return;
     const ok = kind === "col" ? selectColumn(editor, t, index) : selectRow(editor, t, index);
     if (!ok) return;
-    setSel({ kind, index });
     if (hasMergedCells(t.node)) return; // 合并单元格的表不给重排，见 table-ops
 
     const startX = e.clientX;
@@ -283,7 +283,6 @@ export default function TableTools({ editor }: { editor: Editor | null }) {
         if (cur.kind === "col") moveColumn(editor, tab, cur.from, cur.to);
         else moveRow(editor, tab, cur.from, cur.to);
       }
-      setSel(null); // 结构变了，旧的行列下标不再指向同一份内容
     };
     document.body.classList.add("wiki-table-reordering");
     document.addEventListener("mousemove", onMove);
@@ -297,7 +296,6 @@ export default function TableTools({ editor }: { editor: Editor | null }) {
     if (!t) return;
     if (kind === "col") insertColumnAtBoundary(editor, t, boundary);
     else insertRowAtBoundary(editor, t, boundary);
-    setSel(null);
   };
 
   return createPortal(
@@ -319,13 +317,13 @@ export default function TableTools({ editor }: { editor: Editor | null }) {
         onMouseDown={e => {
           e.preventDefault();
           const t = loc();
-          if (t) { selectTable(editor, t); setSel(null); }
+          if (t) selectTable(editor, t);
         }}
       />
 
       {/* 上沿：一列一段。点=选中该列；选中后那一段上浮出删除 */}
       {Array.from({ length: size.cols }, (_, i) => {
-        const on = sel?.kind === "col" && sel.index === i;
+        const on = colOn(i);
         return (
           <div
             key={`c${i}`}
@@ -342,7 +340,7 @@ export default function TableTools({ editor }: { editor: Editor | null }) {
 
       {/* 左沿：一行一段 */}
       {Array.from({ length: size.rows }, (_, j) => {
-        const on = sel?.kind === "row" && sel.index === j;
+        const on = rowOn(j);
         return (
           <div
             key={`r${j}`}

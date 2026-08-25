@@ -429,6 +429,22 @@ body.wiki-col-resizing * {
 .wiki-table-strip-row { border-radius: 3px 0 0 3px; }
 .wiki-table-corner { border-radius: 3px 0 0 0; }
 
+/* 选中的单元格（prosemirror-tables 给的 .selectedCell）——整行/整列被选中时
+   要看得出来。用 ::after 铺一层而不是改 background：单元格自己的背景色
+   （表头行等）不该被盖掉，选中是叠加上去的一层提示。 */
+.ProseMirror .selectedCell {
+  position: relative;
+}
+.ProseMirror .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(14, 165, 233, 0.16);
+  border: 1px solid #0ea5e9;
+  pointer-events: none;
+  z-index: 2;
+}
+
 /* 拖拽重排的落点线。
    选中后的操作按钮不在这里——它们并进了那条**通用浮动条**
    （components/editor/TextBubbleMenu）：同一个位置、同一种交互，按选中的是

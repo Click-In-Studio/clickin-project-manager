@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { TableKit } from "@tiptap/extension-table";
+import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Markdown } from "tiptap-markdown";
 import { CellSelection } from "@tiptap/pm/tables";
 import {
@@ -16,6 +17,7 @@ import {
   deleteSelectedColumn, deleteSelectedRow, clearSelectedCells,
   moveRow, moveColumn, duplicateRow, duplicateColumn, hasMergedCells,
   isRowSelection, isColSelection, duplicateSelectedRow, duplicateSelectedColumn,
+  applyAcrossCells, selectionSpan,
 } from "@/lib/table-ops";
 import { TableKeymap } from "@/lib/tiptap-table-keymap";
 
@@ -25,6 +27,7 @@ function makeEditor(content: string) {
       StarterKit,
       Markdown.configure({ transformCopiedText: true, breaks: true }),
       TableKit.configure({ table: { resizable: false } }),
+      TaskList, TaskItem.configure({ nested: true }),
     ],
     content,
   });
@@ -515,6 +518,126 @@ describe("存储能表达什么，决定 UI 给什么入口", () => {
     focusInTable(e);
     e.chain().focus().toggleHeaderColumn().run();
     expect(isGfmTable(md(e))).toBe(false);
+    e.destroy();
+  });
+});
+
+describe("整列/整行应用格式", () => {
+  /** 逐行取第 col 列的节点类型 */
+  function colTypes(e: Editor, col: number): string[] {
+    const out: string[] = [];
+    e.state.doc.descendants(n => {
+      if (n.type.name !== "tableRow") return;
+      const cell = n.child(col);
+      out.push(cell.firstChild?.type.name ?? "");
+      return false;
+    });
+    return out;
+  }
+
+  // 这是实测到的症状："整列应用列表/任务只对最后一行生效"。
+  // 根因：setBlockType 会遍历 selection.ranges，而 wrapInList 只取
+  // $from.blockRange($to) 一个范围，CellSelection 的每个单元格是独立 range
+  it("整列转无序列表 —— 每一行都要变，不是只有一行", () => {
+    const e = makeEditor(T3);
+    focusInTable(e);
+    selectColumn(e, findTable(e)!, 1);
+    applyAcrossCells(e, ed => { ed.chain().toggleBulletList().run(); });
+    expect(colTypes(e, 1)).toEqual(["bulletList", "bulletList", "bulletList"]);
+    e.destroy();
+  });
+
+  it("整行转任务列表 —— 该行每个单元格都要变", () => {
+    const e = makeEditor(T3);
+    focusInTable(e);
+    selectRow(e, findTable(e)!, 1);
+    applyAcrossCells(e, ed => { ed.chain().toggleTaskList().run(); });
+    const row: string[] = [];
+    e.state.doc.descendants(n => {
+      if (n.type.name !== "tableRow" || row.length) return;
+      return undefined;
+    });
+    // 第二行三个单元格
+    const rows: string[][] = [];
+    e.state.doc.descendants(n => {
+      if (n.type.name !== "tableRow") return;
+      const cells: string[] = [];
+      n.forEach(c => cells.push(c.firstChild?.type.name ?? ""));
+      rows.push(cells);
+      return false;
+    });
+    expect(rows[1]).toEqual(["taskList", "taskList", "taskList"]);
+    e.destroy();
+  });
+
+  it("标题类命令本来就遍历 ranges，走同一条路也不出错", () => {
+    const e = makeEditor(T3);
+    focusInTable(e);
+    selectColumn(e, findTable(e)!, 0);
+    applyAcrossCells(e, ed => { ed.chain().setHeading({ level: 2 }).run(); });
+    expect(colTypes(e, 0)).toEqual(["heading", "heading", "heading"]);
+    e.destroy();
+  });
+
+  it("跑完之后整列的选中要复原 —— 不能塌成某个单元格里的光标", () => {
+    const e = makeEditor(T3);
+    focusInTable(e);
+    selectColumn(e, findTable(e)!, 1);
+    applyAcrossCells(e, ed => { ed.chain().toggleBulletList().run(); });
+    expect(isColSelection(e)).toBe(true);
+    expect(selectionSpan(e)?.left).toBe(1);
+    e.destroy();
+  });
+
+  // 反证：证明"逐格施加"这件事真的有必要，而且落点必须是**文本块**。
+  // 复刻当初那版写法——按 pos+1 设选区，那个位置停在单元格边界上，不是文本
+  // 位置，块级命令直接返回 false，于是只有恰好被吸进段落的那一格生效。
+  // 没有这条，applyAcrossCells 被改回去也不会有测试报警
+  it("反证 —— 落点停在单元格边界就只有一格生效", () => {
+    const e = makeEditor(T3);
+    focusInTable(e);
+    selectColumn(e, findTable(e)!, 1);
+    const sel = e.state.selection as CellSelection;
+    const positions: number[] = [];
+    sel.forEachCell((_c, p) => positions.push(p));
+    for (const pos of positions.sort((a, b) => b - a)) {
+      e.commands.setTextSelection(pos + 1); // 当初那版：不保证落进文本块
+      e.chain().toggleBulletList().run();
+    }
+    expect(colTypes(e, 1).filter(t => t === "bulletList").length).toBeLessThan(3);
+    e.destroy();
+  });
+
+  it("不是 CellSelection 时原样跑一次", () => {
+    const e = makeEditor("甲");
+    e.commands.setTextSelection(1);
+    applyAcrossCells(e, ed => { ed.chain().setHeading({ level: 2 }).run(); });
+    expect(md(e)).toBe("## 甲");
+    e.destroy();
+  });
+});
+
+describe("selectionSpan（外缘据此维持高亮）", () => {
+  it("整列选中给出列范围与 isCol", () => {
+    const e = makeEditor(T3);
+    focusInTable(e);
+    selectColumn(e, findTable(e)!, 2);
+    expect(selectionSpan(e)).toMatchObject({ left: 2, right: 3, isCol: true, isRow: false });
+    e.destroy();
+  });
+
+  it("整行选中给出行范围与 isRow", () => {
+    const e = makeEditor(T3);
+    focusInTable(e);
+    selectRow(e, findTable(e)!, 2);
+    expect(selectionSpan(e)).toMatchObject({ top: 2, bottom: 3, isRow: true, isCol: false });
+    e.destroy();
+  });
+
+  it("不是 CellSelection 时给 null（外缘于是不高亮任何一段）", () => {
+    const e = makeEditor(T3);
+    focusInTable(e);
+    expect(selectionSpan(e)).toBeNull();
     e.destroy();
   });
 });

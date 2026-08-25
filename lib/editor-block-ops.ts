@@ -243,6 +243,9 @@ export function equalizeColumns(editor: Editor): boolean {
 //
 // 展示位仍取自 BLOCK_TYPES —— 与 `/` 插入菜单、手柄的「转换为」共用同一张表。
 
+// 这些 run 不调 focus()：浮动条的按钮已经 onMouseDown + preventDefault，
+// 编辑器从没失过焦，focus() 是多余的。逐格施加时（applyAcrossCells）选区由
+// 调用方逐格设好，这里只管执行命令。
 export type FormatAction = {
   id: BlockTypeId;
   label: string;
@@ -262,25 +265,25 @@ function format(
 
 export const FORMAT_ACTIONS: FormatAction[] = [
   format("paragraph",
-    e => { e.chain().focus().setParagraph().run(); },
+    e => { e.chain().setParagraph().run(); },
     e => e.isActive("paragraph")),
   format("h2",
-    e => { e.chain().focus().setHeading({ level: 2 }).run(); },
+    e => { e.chain().setHeading({ level: 2 }).run(); },
     e => e.isActive("heading", { level: 2 })),
   format("h3",
-    e => { e.chain().focus().setHeading({ level: 3 }).run(); },
+    e => { e.chain().setHeading({ level: 3 }).run(); },
     e => e.isActive("heading", { level: 3 })),
   format("bulletList",
-    e => { e.chain().focus().toggleBulletList().run(); },
+    e => { e.chain().toggleBulletList().run(); },
     e => e.isActive("bulletList")),
   format("orderedList",
-    e => { e.chain().focus().toggleOrderedList().run(); },
+    e => { e.chain().toggleOrderedList().run(); },
     e => e.isActive("orderedList")),
   format("taskList",
-    e => { e.chain().focus().toggleTaskList().run(); },
+    e => { e.chain().toggleTaskList().run(); },
     e => e.isActive("taskList")),
   format("codeBlock",
-    e => { e.chain().focus().toggleCodeBlock().run(); },
+    e => { e.chain().toggleCodeBlock().run(); },
     e => e.isActive("codeBlock")),
 ];
 

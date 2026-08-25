@@ -17,6 +17,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import { FORMAT_ACTIONS, currentFormat } from "@/lib/editor-block-ops";
+import { applyAcrossCells } from "@/lib/table-ops";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
 
 export function OpsBtn({
@@ -84,7 +85,9 @@ function FormatMenu({ editor }: { editor: Editor }) {
             <button
               key={f.id}
               type="button"
-              onMouseDown={e => { e.preventDefault(); f.run(editor); setOpen(false); }}
+              // 走 applyAcrossCells：选中一整列时，列表/任务这类命令只认一个
+              // blockRange，不逐个单元格跑就只会作用到其中一格
+              onMouseDown={e => { e.preventDefault(); applyAcrossCells(editor, f.run); setOpen(false); }}
               className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left transition-colors ${
                 f.isActive(editor) ? "text-white bg-zinc-700" : "text-zinc-200 hover:bg-zinc-700"
               }`}

@@ -302,3 +302,69 @@ export function duplicateSelectedColumn(editor: Editor): boolean {
   if (!t || !r) return false;
   return duplicateColumn(editor, t, r.left);
 }
+
+/**
+ * 把一个命令**逐个单元格**地作用到当前 CellSelection 上。不是 CellSelection
+ * 就原样执行一次。
+ *
+ * 为什么需要它：prosemirror 的块级命令分两派——`setBlockType`（标题/正文/
+ * 代码块）会遍历 `selection.ranges`，而 `wrapInList`（有序/无序/任务列表）
+ * 只取 `$from.blockRange($to)` **一个**范围。CellSelection 的每个单元格是一个
+ * 独立 range，于是列表类命令只作用到其中一个（实测表现为"只对最后一行生效"）。
+ *
+ * 从后往前逐个跑：命令会改变单元格内容的尺寸，先动前面的会把后面的坐标顶掉。
+ * 分次 dispatch 不会把撤销栈撑爆——history 插件会把同一批同步事务归并成一步。
+ *
+ * 跑完把整行/整列的选中复原：用户的心智是"我选中了这一列"，命令执行完选中不该
+ * 塌成某个单元格里的光标。
+ */
+export function applyAcrossCells(editor: Editor, run: (e: Editor) => void): void {
+  const sel = editor.state.selection;
+  if (!(sel instanceof CellSelection)) { run(editor); return; }
+
+  const rect = rectOfSelection(editor);
+  const wasRow = sel.isRowSelection();
+  const wasCol = sel.isColSelection();
+
+  const positions: number[] = [];
+  sel.forEachCell((_cell, pos) => positions.push(pos));
+  positions.sort((a, b) => b - a);
+
+  for (const pos of positions) {
+    // 必须落进单元格内的**文本块**里。setTextSelection(pos+1) 会停在单元格
+    // 边界上（那不是文本位置），块级命令于是直接返回 false——实测只有恰好被
+    // 吸进段落的那一格生效。TextSelection.near(bias=1) 是为这件事准备的。
+    //
+    // （命令自身不调 focus：选区由这里逐格设好，focus 是多余的一步。）
+    try {
+      const $inside = editor.state.doc.resolve(pos + 1);
+      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.near($inside, 1)));
+    } catch {
+      continue; // 这一格进不去就跳过，别把整批操作带崩
+    }
+    run(editor);
+  }
+
+  if (!rect) return;
+  const t = findTable(editor);
+  if (!t) return;
+  // 整行整列都成立 = 整张表，复原成整表选中
+  if (wasRow && wasCol) selectTable(editor, t);
+  else if (wasCol) selectColumn(editor, t, rect.left);
+  else if (wasRow) selectRow(editor, t, rect.top);
+}
+
+/** 当前选中覆盖的行列范围（外缘据此把对应那几段维持在选中态） */
+export function selectionSpan(editor: Editor): {
+  left: number; right: number; top: number; bottom: number;
+  isRow: boolean; isCol: boolean;
+} | null {
+  const sel = editor.state.selection;
+  if (!(sel instanceof CellSelection)) return null;
+  const r = rectOfSelection(editor);
+  if (!r) return null;
+  return {
+    left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+    isRow: sel.isRowSelection(), isCol: sel.isColSelection(),
+  };
+}
