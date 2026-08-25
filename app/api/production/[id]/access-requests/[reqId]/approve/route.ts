@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { approveAccessRequest, getProductionPermissionContext } from "@/lib/db";
+import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval-stages";
 
 type Ctx = { params: Promise<{ id: string; reqId: string }> };
 
@@ -12,8 +13,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
 
-  const result = await approveAccessRequest(reqId, session.userId);
+  // 意见选填。两种「没有 body」都要接住：空体让 req.json() 抛（catch 兜住），
+  // 而合法的 JSON `null` 会**解析成功**并返回 null——直接解构就是 TypeError → 500。
+  const { comment } = ((await req.json().catch(() => null)) ?? {}) as { comment?: string };
+
+  const result = await approveAccessRequest(reqId, session.userId, comment);
   if (!result.ok) {
+    if (result.reason === "comment_too_long") {
+      return Response.json({ error: `审批意见不能超过 ${MAX_APPROVAL_COMMENT_LENGTH} 字` }, { status: 400 });
+    }
     if (result.reason === "not_found") return Response.json({ error: "申请不存在" }, { status: 404 });
     if (result.reason === "unauthorized") return Response.json({ error: "无权审批" }, { status: 403 });
     // #140：直属上级本人没有这个权限，只能向上转发

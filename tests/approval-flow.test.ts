@@ -27,10 +27,13 @@ import {
   listMyAccessRequests,
   listPendingApprovals,
   escalateExpiredApprovals,
+  previewApprovalLadder,
   formatPgInterval,
   ApprovalRequestError,
+  type ApprovalChainEntry,
 } from "@/lib/db";
 import { buildApprovalLadder, classifyApprovalNode, nextStage } from "@/lib/approval-routing";
+import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval-stages";
 import { TTL_OPTIONS, isValidTtlInterval, displayTtlLabel } from "@/lib/approval-ttl";
 import { addResourceDeptManage, createProductionDept, setDeptMembers } from "@/lib/dept-db";
 import { listUserNotifications } from "@/lib/inbox-db";
@@ -47,6 +50,8 @@ const U_UNRELATED  = "00000000-0000-0000-0001-000000000005";
 const U_HOLDER     = "00000000-0000-0000-0001-000000000006";
 const U_ANC_POC    = "00000000-0000-0000-0001-000000000007";
 const U_PRODUCER   = "00000000-0000-0000-0001-000000000008";
+/** 有账号、有 profile，但**不在本演出成员名单里**——审批链上确实会出现这种人。 */
+const U_OUTSIDER   = "00000000-0000-0000-0001-000000000009";
 
 const ALL_USERS = [
   { id: U_OWNER,      openId: "test-owner",      name: "演出Owner" },
@@ -57,6 +62,7 @@ const ALL_USERS = [
   { id: U_HOLDER,     openId: "test-holder",     name: "资源持有者" },
   { id: U_ANC_POC,    openId: "test-anc-poc",    name: "上级科组POC" },
   { id: U_PRODUCER,   openId: "test-producer",   name: "制作人甲" },
+  { id: U_OUTSIDER,   openId: "test-outsider",   name: "编外审批人" },
 ];
 
 let prodId: string;
@@ -80,6 +86,16 @@ beforeAll(async () => {
       [u.openId, u.id, u.name],
     );
   }
+
+  // user_profile 才是显示名的来源（#234 身份债清偿后）：审批 DTO 的 people、
+  // 通知正文里的申请人名都只认这张表。fixture 只建 feishu_user 的话，
+  // 测出来的是一片「成员」，看不出姓名口径对不对。
+  await pool.query(
+    `INSERT INTO user_profile (user_id, name)
+     SELECT * FROM UNNEST($1::uuid[], $2::text[])
+     ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name`,
+    [ALL_USERS.map((u) => u.id), ALL_USERS.map((u) => u.name)],
+  );
 
   // Create production owned by U_OWNER
   ({ prodId } = await makeProduction(U_OWNER));
@@ -1415,7 +1431,375 @@ describe("add-approval-config-backfill.sql", () => {
   });
 });
 
-// ─── 13. 端到端 ───────────────────────────────────────────────────────────────
+// ─── 13. 终结语义：撤回 / 覆盖 / 超时都要在链上留下落点 ────────────────────────
+//
+// 这一节针对的是「前端画不出来」的那类缺口：时间线上每个节点都要能回答
+// 「这一级发生了什么、谁干的」。缺任何一项，UI 只能把它画成「还在等」。
+
+async function chainOf(requestId: string) {
+  const { rows } = await getPool().query<{ escalation_chain: ApprovalChainEntry[] }>(
+    `SELECT escalation_chain FROM approval_request WHERE id = $1`, [requestId]);
+  return rows[0].escalation_chain;
+}
+
+const lastOf = (chain: ApprovalChainEntry[]) => chain[chain.length - 1];
+
+describe("终结语义 — 撤回", () => {
+  it("撤回写 resolved_by：终结节点上得有人，不然像是系统自己结的", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const res = await cancelAccessRequest(req.id, U_REQUESTER);
+    expect(res.ok).toBe(true);
+
+    const row = await getPool().query<{ status: string; resolved_by: string | null; resolved_at: Date | null }>(
+      `SELECT status, resolved_by, resolved_at FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].status).toBe("cancelled");
+    expect(row.rows[0].resolved_by).toBe(U_REQUESTER);
+    expect(row.rows[0].resolved_at).not.toBeNull();
+  });
+
+  it("链末条标 cancelled/by_subject —— 那一级是「没处理」，不是「还在等」", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "edit",
+    });
+    await cancelAccessRequest(req.id, U_REQUESTER, "  想清楚了，先不申请  ");
+
+    const last = lastOf(await chainOf(req.id));
+    expect(last.action).toBe("cancelled");
+    expect(last.cancelReason).toBe("by_subject");
+    expect(last.actorId).toBe(U_REQUESTER);
+    expect(last.actedAt).toBeTruthy();
+    expect(last.comment).toBe("想清楚了，先不申请");  // 首尾空白已归一化掉
+  });
+
+  it("撤回回带终态申请，前端不必再跑一趟列表", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "scene", permissionLevel: "view",
+    });
+    const res = await cancelAccessRequest(req.id, U_REQUESTER);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.request.status).toBe("cancelled");
+    expect(res.request.resolvedBy).toBe(U_REQUESTER);
+    expect(res.request.people[U_REQUESTER]?.name).toBe("申请人");
+  });
+
+  it("别人撤不了我的申请（状态与链都不动）", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const res = await cancelAccessRequest(req.id, U_UNRELATED);
+    expect(res.ok).toBe(false);
+
+    const last = lastOf(await chainOf(req.id));
+    expect(last.action).toBeUndefined();
+    await cancelRows([req.id]);
+  });
+});
+
+describe("终结语义 — 覆盖式申请", () => {
+  it("被顶掉的旧申请：链末条 cancelled/superseded 且 bySystem（没人点过撤回）", async () => {
+    const first = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "event", permissionLevel: "view",
+    });
+    const second = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "event", permissionLevel: "view",
+    });
+    expect(second.id).not.toBe(first.id);
+
+    const row = await getPool().query<{ status: string; resolved_by: string | null }>(
+      `SELECT status, resolved_by FROM approval_request WHERE id = $1`, [first.id]);
+    expect(row.rows[0].status).toBe("cancelled");
+    expect(row.rows[0].resolved_by).toBe(U_REQUESTER);
+
+    const last = lastOf(await chainOf(first.id));
+    expect(last.action).toBe("cancelled");
+    expect(last.cancelReason).toBe("superseded");
+    expect(last.bySystem).toBe(true);
+    expect(last.actorId).toBeUndefined();  // 系统动作没有操作人
+
+    await cancelRows([second.id]);
+  });
+});
+
+describe("终结语义 — 超时自动升级", () => {
+  async function backdate(requestId: string, hours: number) {
+    await getPool().query(
+      `UPDATE approval_request
+       SET escalation_chain = jsonb_set(
+             escalation_chain,
+             ARRAY[(jsonb_array_length(escalation_chain) - 1)::text, 'notifiedAt'],
+             to_jsonb((now() - ($2 || ' hours')::interval)::text))
+       WHERE id = $1`,
+      [requestId, String(hours)],
+    );
+  }
+
+  // 回归：此前超时升级只写 escalationReason='timeout'，不写 actorId 也不写别的旗。
+  // 消费方无从区分「系统自动升级」与「数据缺了操作人」，于是最该说清楚的
+  // 「没人处理，超时升上去了」在页面上一个字都显示不出来。
+  it("超时升级的链条目带 bySystem，且明确没有 actorId", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await backdate(req.id, 25);
+    await escalateExpiredApprovals();
+
+    const chain = await chainOf(req.id);
+    const timedOut = chain[0];
+    expect(timedOut.action).toBe("escalated");
+    expect(timedOut.escalationReason).toBe("timeout");
+    expect(timedOut.bySystem).toBe(true);
+    expect(timedOut.actorId).toBeUndefined();
+
+    await cancelRows([req.id]);
+  });
+
+  it("人工转交的条目没有 bySystem —— 两种转交在链上分得开", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await escalateAccessRequest(req.id, U_SUPERVISOR);
+
+    const forwarded = (await chainOf(req.id))[0];
+    expect(forwarded.escalationReason).toBe("forwarded");
+    expect(forwarded.actorId).toBe(U_SUPERVISOR);
+    expect(forwarded.bySystem).toBeUndefined();
+
+    await cancelRows([req.id]);
+  });
+});
+
+// ─── 14. 审批意见 ─────────────────────────────────────────────────────────────
+
+describe("审批意见 — 落链条目 + 进通知正文", () => {
+  it("批准意见落在链末条，并出现在申请人的结果通知里", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list", permissionLevel: "edit",
+    });
+    const res = await approveAccessRequest(req.id, U_POC, "本周内先给编辑权，下周复核");
+    expect(res.ok).toBe(true);
+
+    const last = lastOf(await chainOf(req.id));
+    expect(last.action).toBe("approved");
+    expect(last.comment).toBe("本周内先给编辑权，下周复核");
+
+    const notifs = await notifForRequest(U_UNRELATED, req.id);
+    const result = notifs.find((n) => n.kind === "approval_request_result");
+    expect(result?.body).toContain("本周内先给编辑权，下周复核");
+
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("拒绝理由落链并进通知 —— 申请人不再只看到「未获批准」四个字", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const res = await rejectAccessRequest(req.id, U_SUPERVISOR, "该 Cue 表本轮冻结，等首演后再申请");
+    expect(res.ok).toBe(true);
+
+    const last = lastOf(await chainOf(req.id));
+    expect(last.action).toBe("rejected");
+    expect(last.comment).toBe("该 Cue 表本轮冻结，等首演后再申请");
+
+    const notifs = await notifForRequest(U_REQUESTER, req.id);
+    const result = notifs.find((n) => n.kind === "approval_request_result");
+    expect(result?.body).toContain("等首演后再申请");
+  });
+
+  it("转交说明随通知发给下一级 —— 下一级得知道为什么轮到自己", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const res = await escalateAccessRequest(req.id, U_SUPERVISOR, "我这边没有这个权限，转给科组判断");
+    expect(res.ok).toBe(true);
+
+    const forwarded = (await chainOf(req.id))[0];
+    expect(forwarded.comment).toBe("我这边没有这个权限，转给科组判断");
+
+    const pocNotifs = await notifForRequest(U_POC, req.id);
+    expect(pocNotifs.some((n) => n.body?.includes("转给科组判断"))).toBe(true);
+
+    await cancelRows([req.id]);
+  });
+
+  it("超长意见被拒，且申请状态一动不动", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const res = await rejectAccessRequest(req.id, U_SUPERVISOR, "字".repeat(MAX_APPROVAL_COMMENT_LENGTH + 1));
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.reason).toBe("comment_too_long");
+
+    const row = await getPool().query<{ status: string }>(
+      `SELECT status FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].status).toBe("pending_supervisor");  // 校验在动手之前
+
+    await cancelRows([req.id]);
+  });
+
+  it("上限本身是合法的（边界不能差一个字）", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const res = await rejectAccessRequest(req.id, U_SUPERVISOR, "字".repeat(MAX_APPROVAL_COMMENT_LENGTH));
+    expect(res.ok).toBe(true);
+  });
+
+  it("纯空白意见按「没写」处理，不在链上留空字段", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await rejectAccessRequest(req.id, U_SUPERVISOR, "   \n  ");
+
+    const last = lastOf(await chainOf(req.id));
+    expect(last.action).toBe("rejected");
+    expect(last.comment).toBeUndefined();
+  });
+});
+
+// ─── 15. people：审批 DTO 自带姓名与角色 ───────────────────────────────────────
+
+describe("people — 审批 DTO 自带人员信息", () => {
+  it("我的申请：申请人与当前级审批人都带姓名", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const mine = await listMyAccessRequests(prodId, U_REQUESTER);
+    const found = mine.find((r) => r.id === req.id)!;
+
+    expect(found.people[U_REQUESTER]?.name).toBe("申请人");
+    expect(found.people[U_SUPERVISOR]?.name).toBe("直属上级");
+    expect(found.people[U_SUPERVISOR]?.isMember).toBe(true);
+
+    await cancelRows([req.id]);
+  });
+
+  it("待办列表同样带 people", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const pending = await listPendingApprovals(U_SUPERVISOR, prodId);
+    const found = pending.find((r) => r.id === req.id)!;
+    expect(found.people[U_REQUESTER]?.name).toBe("申请人");
+
+    await cancelRows([req.id]);
+  });
+
+  it("display_name 优先于 name —— 与通知、财务、部门冻结同一口径", async () => {
+    await getPool().query(
+      `UPDATE user_profile SET display_name = '老张' WHERE user_id = $1`, [U_SUPERVISOR]);
+    try {
+      const req = await submitAccessRequest(prodId, U_REQUESTER, {
+        resourceType: "cue_list", permissionLevel: "view",
+      });
+      const mine = await listMyAccessRequests(prodId, U_REQUESTER);
+      expect(mine.find((r) => r.id === req.id)!.people[U_SUPERVISOR]?.name).toBe("老张");
+      await cancelRows([req.id]);
+    } finally {
+      await getPool().query(
+        `UPDATE user_profile SET display_name = NULL WHERE user_id = $1`, [U_SUPERVISOR]);
+    }
+  });
+
+  it("带出该人在本演出的角色", async () => {
+    await getPool().query(
+      `UPDATE production_member SET roles = ARRAY['舞台监督'] WHERE production_id = $1 AND user_id = $2`,
+      [prodId, U_SUPERVISOR]);
+    try {
+      const req = await submitAccessRequest(prodId, U_REQUESTER, {
+        resourceType: "cue_list", permissionLevel: "view",
+      });
+      const mine = await listMyAccessRequests(prodId, U_REQUESTER);
+      expect(mine.find((r) => r.id === req.id)!.people[U_SUPERVISOR]?.roles).toEqual(["舞台监督"]);
+      await cancelRows([req.id]);
+    } finally {
+      await getPool().query(
+        `UPDATE production_member SET roles = '{}' WHERE production_id = $1 AND user_id = $2`,
+        [prodId, U_SUPERVISOR]);
+    }
+  });
+
+  // 审批链上的人**不一定是 production_member**（祖先部门 POC、存量演出的 owner）。
+  // 用成员表 INNER JOIN 取名会让这些人整条消失——这条用例就是钉住那个分支。
+  it("不在成员名单里的审批人：仍有姓名，isMember=false", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await getPool().query(
+      `UPDATE approval_request
+       SET escalation_chain = jsonb_set(
+             escalation_chain,
+             ARRAY['0', 'approverIds'],
+             (escalation_chain -> 0 -> 'approverIds') || to_jsonb($2::text))
+       WHERE id = $1`,
+      [req.id, U_OUTSIDER],
+    );
+
+    const mine = await listMyAccessRequests(prodId, U_REQUESTER);
+    const person = mine.find((r) => r.id === req.id)!.people[U_OUTSIDER];
+    expect(person?.name).toBe("编外审批人");
+    expect(person?.isMember).toBe(false);
+    expect(person?.roles).toEqual([]);
+
+    await cancelRows([req.id]);
+  });
+});
+
+// ─── 16. 提交前的审批链预览 ───────────────────────────────────────────────────
+
+describe("previewApprovalLadder", () => {
+  it("预览出的阶梯与真正会走的阶梯一致，并带姓名", async () => {
+    const preview = await previewApprovalLadder(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const ladder = await buildApprovalLadder(target());
+
+    expect(preview.nodeClass).toBe("normal");
+    expect(preview.stages.map((s) => s.stage)).toEqual(ladder.map((s) => s.stage));
+    expect(preview.stages[0].approverIds).toEqual([U_SUPERVISOR]);
+    expect(preview.people[U_SUPERVISOR]?.name).toBe("直属上级");
+  });
+
+  it("ROOT 节点：提交前就说清楚「没有审批通道」，不必等 403", async () => {
+    const preview = await previewApprovalLadder(prodId, U_REQUESTER, {
+      resourceType: "production", resourceSub: "*", permissionLevel: "delete",
+    });
+    expect(preview.nodeClass).toBe("root");
+    expect(preview.stages).toEqual([]);
+
+    // 与提交侧同口径：预览说没通道，提交就真的收不下
+    await expect(
+      submitAccessRequest(prodId, U_REQUESTER, {
+        resourceType: "production", resourceSub: "*", permissionLevel: "delete",
+      }),
+    ).rejects.toThrow(ApprovalRequestError);
+  });
+
+  it("SENSITIVE 节点：跳过整条链直达 owner", async () => {
+    const preview = await previewApprovalLadder(prodId, U_REQUESTER, {
+      resourceType: "production", resourceSub: "integrations", permissionLevel: "view",
+    });
+    expect(preview.nodeClass).toBe("sensitive");
+    expect(preview.stages.map((s) => s.stage)).toEqual(["owner"]);
+    expect(preview.people[U_OWNER]?.name).toBe("演出Owner");
+  });
+
+  it("预览是只读的：不落任何 approval_request 行", async () => {
+    const before = await getPool().query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM approval_request WHERE production_id = $1`, [prodId]);
+    await previewApprovalLadder(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "manage",
+    });
+    const after = await getPool().query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM approval_request WHERE production_id = $1`, [prodId]);
+    expect(after.rows[0].count).toBe(before.rows[0].count);
+  });
+});
+
+// ─── 17. 端到端 ───────────────────────────────────────────────────────────────
 
 describe("full happy path — 上级转交 → POC 批准", () => {
   it("提交 → 上级转交 → POC 批准 → 授权行写入、通知齐备", async () => {

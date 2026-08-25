@@ -126,43 +126,6 @@ export async function checkIsTenantManager(openId: string): Promise<boolean> {
   }
 }
 
-// Fetch a user's email/phone/avatar using the contact API (app token).
-// These fields may be null if the app lacks the relevant contact permissions.
-export type FeishuContactInfo = {
-  email: string | null;
-  phone: string | null;
-  avatarUrl: string | null;
-};
-
-export async function getUserContactInfo(openId: string): Promise<FeishuContactInfo> {
-  try {
-    const appToken = await getAppAccessToken();
-    const res = await fetch(
-      `${BASE}/contact/v3/users/${openId}?user_id_type=open_id`,
-      { headers: { Authorization: `Bearer ${appToken}` } }
-    );
-    const body = (await res.json()) as {
-      code: number;
-      data?: {
-        user?: {
-          email?: string;
-          mobile?: string;
-          avatar?: { avatar_240?: string; avatar_72?: string };
-        };
-      };
-    };
-    if (body.code !== 0 || !body.data?.user) return { email: null, phone: null, avatarUrl: null };
-    const u = body.data.user;
-    return {
-      email: u.email || null,
-      phone: u.mobile || null,
-      avatarUrl: u.avatar?.avatar_240 ?? u.avatar?.avatar_72 ?? null,
-    };
-  } catch {
-    return { email: null, phone: null, avatarUrl: null };
-  }
-}
-
 export type FeishuSearchedUser = {
   openId: string;
   name: string;

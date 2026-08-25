@@ -2,6 +2,20 @@ import { createHmac, randomBytes } from "node:crypto";
 
 export const SESSION_COOKIE = "sid";
 export const OAUTH_STATE_COOKIE = "oauth_state";
+/** OAuth 发起时的上下文：跨越「跳到第三方再跳回来」这一次往返。
+ *  与 state 分开存：state 那个 cookie 还被账号绑定流程按纯字符串比对，格式不能动。
+ *  凭据只走本站 cookie，不编码进 state——否则会经由授权 URL 落进第三方日志。 */
+export const OAUTH_CTX_COOKIE = "oauth_ctx";
+
+export type OAuthContext = {
+  nonce: string;
+  /** 注册邀请码（用户在注册页填的） */
+  registrationCode?: string;
+  /** 邀请链接透传的 token（/invite/<token> 落地时带上） */
+  inviteToken?: string;
+  /** 登录后回跳目标，读出后必须再走一次站内路径校验 */
+  next?: string;
+};
 
 const SESSION_TTL_S = 7 * 24 * 60 * 60;
 

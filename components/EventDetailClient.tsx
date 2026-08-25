@@ -2558,7 +2558,7 @@ function ReportEditor({
             onMentionsChange={setMentions}
             members={members}
             productionId={productionId}
-            placeholder="写报告正文… 输入 @ 可提及成员，# 可引用剧本位置"
+            placeholder="写报告正文… 输入 / 插入块，@ 可提及成员，# 可引用剧本位置"
             minHeight={200}
           />
           <div className="flex gap-2 flex-wrap items-center">

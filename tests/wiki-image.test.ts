@@ -75,3 +75,66 @@ describe("asset src 新旧形态双读", () => {
     expect(decodeAssetSrc("https://example.com/a.png")).toBeNull();
   });
 });
+
+/** 模块级往返（内层 describe 里那个同名函数够不着这里） */
+function rt(md: string): string {
+  const editor = makeEditor(md);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const out = (editor.storage as any).markdown.getMarkdown() as string;
+  editor.destroy();
+  return out;
+}
+
+describe("图片是块级节点：不能把后面的段落并进来", () => {
+  // 内建的 image serializer 是给**行内**图片写的，只 write 不 closeBlock。
+  // 本节点是 block，用内建那个会得到 `![说明](x)乙`——两段并成一段。
+  // 文字一个没少，所以保真锁（比的是内容签名）也发现不了，属于静默改结构
+  it("图片与后一段之间保留段落分隔", () => {
+    const md = "甲\n\n![说明](/__cm__/asset/abc)\n\n乙";
+    expect(rt(md)).toBe(md);
+  });
+
+  it("图片与前一段之间也保留", () => {
+    const md = "甲\n\n![](/__cm__/asset/abc)";
+    expect(rt(md)).toBe(md);
+  });
+
+  it("连续两张图片各自成块", () => {
+    const md = "![一](/__cm__/asset/a)\n\n![二](/__cm__/asset/b)";
+    expect(rt(md)).toBe(md);
+  });
+
+  it("alt 里的方括号被转义，不破坏 markdown 结构", () => {
+    const out = rt("![a [b] c](/__cm__/asset/abc)");
+    // 结构与 URL 必须完好：转义没做对的话 `]` 会提前闭合，整条语法就散了
+    expect(out).toMatch(/^!\[.*\]\(\/__cm__\/asset\/abc\)$/);
+    // 已知局限（既有行为，非本轮引入）：alt 里的方括号在**二次**解析时会丢，
+    // markdown-it 对转义方括号的 alt 处理如此。内容主体（URL）不受影响
+  });
+});
+
+describe("图片节点全站注册（不再按 imageUpload 门控）", () => {
+  // 「一切文本皆文档」之后所有面都存 markdown。不认识 image 节点 = schema
+  // 直接把图片吃掉，而非 wiki 的面还没有保真锁兜底，属于静默丢内容
+  function withoutImageExt(md: string): string {
+    const e = new Editor({
+      extensions: [StarterKit, Markdown.configure({ breaks: true })],
+      content: md,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const out = (e.storage as any).markdown.getMarkdown() as string;
+    e.destroy();
+    return out;
+  }
+
+  // 反证：没有这个扩展，图片连同它那一段整个消失
+  it("反证 —— 缺了 image 扩展，图片整段被吃掉", () => {
+    const md = "甲\n\n![说明](/__cm__/asset/abc)\n\n乙";
+    expect(withoutImageExt(md)).toBe("甲\n\n乙");
+  });
+
+  it("装上之后逐字复原", () => {
+    const md = "甲\n\n![说明](/__cm__/asset/abc)\n\n乙";
+    expect(rt(md)).toBe(md);
+  });
+});

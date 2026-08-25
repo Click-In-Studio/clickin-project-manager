@@ -1,8 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { getPersonalChannel } from "@/lib/platform/registry";
-import { generateOAuthState, OAUTH_STATE_COOKIE } from "@/lib/session";
-import { RegistrationDeniedError, registrationRateLimited } from "@/lib/registration-gate";
+import { generateOAuthState, OAUTH_STATE_COOKIE, OAUTH_CTX_COOKIE, type OAuthContext } from "@/lib/session";
+import { RegistrationDeniedError, AuthIntentMismatchError, registrationRateLimited } from "@/lib/registration-gate";
 
 function requestBaseUrl(req: NextRequest): string {
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
@@ -27,15 +26,24 @@ export async function GET(req: NextRequest, { params }: Params) {
   const redirectUri = `${baseUrl}/api/auth/${platform}/callback`;
   const url = ch.generateAuthUrl(state, redirectUri);
 
-  const cookieStore = await cookies();
-  cookieStore.set(OAUTH_STATE_COOKIE, state, {
-    httpOnly: true,
-    path: "/",
-    sameSite: "lax",
-    maxAge: 600,
-  });
+  // 注册凭据要跨越「跳到飞书再跳回来」这一次往返。放 cookie 而不是编进 state：
+  // state 会出现在授权 URL 里，等于把邀请码交给第三方记进日志。这些 query 参数
+  // 来自我们自己的登录页，本站内传递不构成新的暴露。
+  const { searchParams } = req.nextUrl;
+  const ctx: OAuthContext = {
+    nonce: state,
+    registrationCode: searchParams.get("reg_code")?.trim() || undefined,
+    inviteToken: searchParams.get("invite_token")?.trim() || undefined,
+    next: searchParams.get("next")?.trim() || undefined,
+  };
 
-  return NextResponse.redirect(url);
+  // cookie 直接挂在响应上而不是 next/headers 的 cookies()——后者要求请求作用域，
+  // 路由函数便无法被直接单测；挂响应也更直白：这次跳转带走哪些 cookie 一目了然。
+  const oauthCookie = { httpOnly: true, path: "/", sameSite: "lax", maxAge: 600 } as const;
+  const res = NextResponse.redirect(url);
+  res.cookies.set(OAUTH_STATE_COOKIE, state, oauthCookie);
+  res.cookies.set(OAUTH_CTX_COOKIE, JSON.stringify(ctx), oauthCookie);
+  return res;
 }
 
 // POST — Credential platforms: initiate login (magic link, OTP, etc.)
@@ -77,6 +85,10 @@ export async function POST(req: NextRequest, { params }: Params) {
   } catch (e) {
     if (e instanceof RegistrationDeniedError) {
       return Response.json({ error: e.message }, { status: 403 });
+    }
+    // 意图与账号实际状态不符（如在登录页输了未注册的邮箱）：409 与「注册被拒」区分开
+    if (e instanceof AuthIntentMismatchError) {
+      return Response.json({ error: e.message }, { status: 409 });
     }
     console.error(`[auth/${platform}/initiate]`, e);
     return Response.json({ error: "failed to initiate login" }, { status: 502 });

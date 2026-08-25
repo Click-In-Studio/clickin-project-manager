@@ -6,7 +6,6 @@ import {
   addProductionMember,
   removeProductionMember,
   setMemberRoles,
-  updateUserContact,
   setMemberPhoto,
   setMemberSupervisor,
   setMemberStatus,
@@ -48,12 +47,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { id } = await ctx.params;
   if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
-  const { userId, roles, email, phone, photoUrl, supervisorId, tagIds, status } =
+  const { userId, roles, photoUrl, supervisorId, tagIds, status } =
     (await req.json()) as {
       userId?: string;
       roles?: string[];
-      email?: string | null;
-      phone?: string | null;
       photoUrl?: string | null;
       supervisorId?: string | null;
       tagIds?: string[];
@@ -67,8 +64,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     : await getProductionPermissionContext(session.userId, false, id);
   if (!session.isAdmin && !access) return Response.json({ error: "权限不足" }, { status: 403 });
 
-  // 人事编辑门（角色/tag/上级）与人事处置门（停用/恢复）分离；
-  // 联系方式/照片：本人或人事编辑门。
+  // 人事编辑门（角色/tag/上级）与人事处置门（停用/恢复）分离；照片：本人或人事编辑门。
   const canEditMember =
     session.isAdmin ||
     !!(access && (access.permCtx.isAdmin || access.permCtx.isOwner ||
@@ -96,10 +92,6 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     }
     if (!canRemoveMember) return Response.json({ error: "权限不足" }, { status: 403 });
     await setMemberStatus(id, userId, status);
-  }
-  if (email !== undefined || phone !== undefined) {
-    if (!isSelf && !canEditMember) return Response.json({ error: "权限不足" }, { status: 403 });
-    await updateUserContact(userId, email ?? null, phone ?? null);
   }
   if (photoUrl !== undefined) {
     if (!isSelf && !canEditMember) return Response.json({ error: "权限不足" }, { status: 403 });

@@ -194,6 +194,8 @@ body {
   display: flex;
   gap: 16px;
   margin: 8px 0;
+  /* 组两端那两个 ⊕ 是挂在组上的绝对定位 widget，需要这里做定位基准 */
+  position: relative;
 }
 .wiki-col {
   flex: 1 1 0;
@@ -210,6 +212,293 @@ body {
 @media (max-width: 640px) {
   .wiki-cols { flex-direction: column; }
   .wiki-col { flex: none !important; }
+}
+
+/* 块手柄（components/editor/BlockHandle）—— 单例，由 floating-ui 移到当前
+   hover 的块左侧。手柄本体是 portal 出去的固定定位元素，不占文档流。 */
+.smart-textarea-blocktools {
+  /* 给手柄让出左侧沟槽，否则 ＋/⠿ 压在正文第一个字上。
+     手柄本体 45px（22+1+22）再加 6px 外推，52 刚好够 */
+  padding-left: 52px;
+}
+/* 分栏里的块同样需要沟槽（Notion / 飞书都给栏留了左内边距）。
+   不留的话，右栏那些块的手柄会掉进 16px 的栏间隙里——那片地方还同时在跟
+   左栏抢 hover，于是手柄一边极难点中、一边还会跳去指左栏的块。
+   把栏间隙和栏内左padding 都加宽之后，手柄正好落在**属于本栏的死区**里：
+   flex gap 不属于任何一栏，鼠标移过去不会改变命中目标。 */
+.smart-textarea-blocktools .wiki-cols {
+  gap: 34px;
+}
+.smart-textarea-blocktools .wiki-col {
+  padding-left: 34px;
+}
+
+/* 栏宽拖拽（lib/tiptap-column-resize）—— 栏与栏之间那条分割线。
+   它是 widget decoration，作为该栏 DOM 的首个子节点插入，再绝对定位挪到左侧
+   的栏间隙里。第一栏没有左邻居，自然也就没有这个 widget。 */
+.wiki-col {
+  position: relative;
+}
+.wiki-col-resizer {
+  position: absolute;
+  /* 栏间隙是 34px，占据 [-34, 0]；把 16px 的命中区摆在它正中 */
+  left: -25px;
+  width: 16px;
+  top: 0;
+  bottom: 0;
+  cursor: col-resize;
+  /* 压过块手柄——两者都在栏左侧，重叠处应当归分割线（它更细、更难点） */
+  z-index: 8;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* 组最外两端的那两个：只有 ⊕、不能拖，而且挂在**组**上（不在首/末栏里），
+   所以偏移是相对整个分栏组算的。外侧没有 34px 的栏间隙可占（左边是页边距、
+   右边是正文右沿），因此贴着边缘就好。
+   z-index 要压过块手柄那层（插件给它的 wrapper 是 10）——两者都在组的左外侧，
+   不压过去的话最左那个 ⊕ 会被手柄盖住，鼠标一凑近就换成手柄、⊕ 当场消失。 */
+.wiki-col-resizer.is-add-only {
+  left: -7px;
+  width: 14px;
+  cursor: default;
+  z-index: 12;
+}
+.wiki-col-resizer.is-add-only.is-right {
+  left: auto;
+  right: -7px;
+}
+.wiki-col-resizer-line {
+  position: absolute;
+  left: 7px;
+  width: 2px;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.wiki-col-resizer:hover .wiki-col-resizer-line,
+body.wiki-col-resizing .wiki-col-resizer-line {
+  background: #0ea5e9;
+}
+/* 顶端的 ⊕：点它直接在这个位置插一栏。摆在组的上沿之外，避开块手柄那一带 */
+.wiki-col-resizer-add {
+  position: absolute;
+  left: 50%;
+  top: -11px;
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  background: #0ea5e9;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.wiki-col-resizer:hover .wiki-col-resizer-add {
+  display: inline-flex;
+}
+/* 拖动期间全局换光标，免得指针滑出那 16px 命中区就变回箭头；
+   同时禁掉选中——指针会扫过正文，不禁的话拖一次刷出一大片蓝 */
+body.wiki-col-resizing,
+body.wiki-col-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+/* 显隐由插件用 style.visibility 直接控制，**这里绝不能设 opacity/display**
+   —— 设了就是永久隐藏，插件那套 visibility 切换永远救不回来 */
+.wiki-block-handle {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  /* 贴块左侧再往外推一点，避免压住首字 */
+  transform: translateX(-6px);
+  /* WebKit 必须显式声明才肯把这个 div 当拖拽源。插件设的 draggable=true
+     在 Chrome 够用，Safari 不够——实测 Safari 独有，Chrome 无此问题 */
+  -webkit-user-drag: element;
+  /* 拖拽起手时别顺带起一段文本选区，两个手势会互相抢 */
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* 手柄 wrapper 是 position:absolute 挂到 editor.view.dom.parentElement 上的，
+   那个容器必须是定位元素，否则坐标会算到更外层的祖先上，手柄飞到别处 */
+.smart-textarea-shell {
+  position: relative;
+}
+.wiki-block-handle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: #a1a1aa;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+  /* 子元素同样要放行，否则鼠标压在图标上起手时 WebKit 仍然不认 */
+  -webkit-user-drag: element;
+}
+.wiki-block-handle-btn:hover {
+  background: #f4f4f5;
+  color: #3f3f46;
+}
+.wiki-block-handle-grip {
+  cursor: grab;
+}
+.wiki-block-handle-grip:active {
+  cursor: grabbing;
+}
+
+/* 拖拽落点指示线（飞书/Notion 同款插入线）。prosemirror-dropcursor 把
+   background-color 写成行内样式，这里只管形状——圆头 + 一圈弱光晕，让 3px 的
+   线在段间距里也能一眼看到落在哪两块之间。
+   不采用「挤开动画」（苹果那套）：PM 拥有 DOM，dragover 期间给兄弟节点持续
+   施加 transform 会和 view 层抢 DOM 所有权——PM 随时可能因为一个 transaction
+   重建那些节点。飞书/Notion 同样用插入线，正是因为它们的 DOM 也是数据投影。 */
+.wiki-dropcursor {
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.25), 0 1px 6px rgba(14, 165, 233, 0.45);
+}
+/* 块间落点：横线撑满块宽，两端收圆 */
+.wiki-dropcursor.prosemirror-dropcursor-block {
+  border-radius: 3px;
+}
+/* 行内落点：竖线细一点，不要光晕（贴在字缝里，光晕会糊成一团） */
+.wiki-dropcursor.prosemirror-dropcursor-inline {
+  border-radius: 2px;
+  box-shadow: none;
+}
+
+/* 拖拽落点指示线（lib/tiptap-column-drop）—— 有块工具的面只有**这一个**元素，
+   横线竖线共用它，所以两者天然互斥，不需要任何抑制规则。
+   横线＝插到块之间；竖线＝在这里分出一栏。
+   fixed 定位吃视口坐标，绕开 offsetParent 与外框 overflow:hidden 的裁剪。
+   宽高由 JS 按几何算好写在行内样式上，这里只管观感。 */
+.wiki-drop-line {
+  position: fixed;
+  z-index: 60;
+  border-radius: 3px;
+  background: #0ea5e9;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.25), 0 1px 6px rgba(14, 165, 233, 0.45);
+}
+
+/* 表格外缘（components/editor/TableTools）—— 上沿与左沿的两条操作带。
+   挂在 .smart-textarea-shell 里做**绝对定位**：滚动时浏览器自己搬运，不需要
+   任何 JS 跟随。用 fixed + 视口坐标的话每次滚动都要重算再 setState，注定慢
+   一帧——那正是当初"滚动时明显延迟"的成因。 */
+/* portal 的自有容器（见 TableTools 顶部注释）—— 零尺寸，只做承载 */
+.wiki-table-tools-root {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
+.wiki-table-tools {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 20;
+  /* 容器只是坐标系，不吃事件；各操作件自己开 */
+  pointer-events: none;
+}
+.wiki-table-tools > * {
+  position: absolute;
+  pointer-events: auto;
+}
+.wiki-table-strip,
+.wiki-table-corner {
+  background: #f4f4f5;
+  border: 1px solid #e4e4e7;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.wiki-table-strip:hover,
+.wiki-table-corner:hover {
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+}
+/* 选中态：整行/整列被选中时那一段变实色 */
+.wiki-table-strip.is-on {
+  background: #0ea5e9;
+  border-color: #0ea5e9;
+}
+.wiki-table-strip-col { border-radius: 3px 3px 0 0; }
+.wiki-table-strip-row { border-radius: 3px 0 0 3px; }
+.wiki-table-corner { border-radius: 3px 0 0 0; }
+
+/* 选中的单元格（prosemirror-tables 给的 .selectedCell）——整行/整列被选中时
+   要看得出来。用 ::after 铺一层而不是改 background：单元格自己的背景色
+   （表头行等）不该被盖掉，选中是叠加上去的一层提示。 */
+.ProseMirror .selectedCell {
+  position: relative;
+}
+.ProseMirror .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(14, 165, 233, 0.16);
+  border: 1px solid #0ea5e9;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* 拖拽重排的落点线。
+   选中后的操作按钮不在这里——它们并进了那条**通用浮动条**
+   （components/editor/TextBubbleMenu）：同一个位置、同一种交互，按选中的是
+   文本还是行列换内容，用户没理由要认两个东西。 */
+.wiki-table-dropline {
+  background: #0ea5e9;
+  border-radius: 2px;
+  height: 2px;
+  pointer-events: none;
+}
+.wiki-table-dropline.is-vertical {
+  width: 2px;
+  height: auto;
+}
+/* 重排期间全局换光标，指针滑出外缘也不变回箭头 */
+body.wiki-table-reordering,
+body.wiki-table-reordering * {
+  cursor: grabbing !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* 行/列边界的 ⊕。表格不给拖宽度（拍板），但必须能加行加列。
+   只渲染离指针最近的那一个——全部常显会在表格上方挂满一排 */
+.wiki-table-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  margin-top: -9px;
+  border-radius: 9px;
+  background: #0ea5e9;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* 块选中态（NodeSelection）—— 对标 Notion 的 notion-selectable-halo。
+   跨块选择不是文本选择，所以整块选中必须有独立的视觉，不能只靠 ::selection */
+.ProseMirror-selectednode:not(.wiki-image) {
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.35);
+  background: rgba(14, 165, 233, 0.06);
 }
 
 /* wiki 正文图片（![alt](/__cm__asset:<id>)）——编辑器与只读渲染共用 */

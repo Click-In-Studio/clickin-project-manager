@@ -123,6 +123,11 @@ export interface PersonalChannel {
   initiateLogin?(params: Record<string, string>, context?: { baseUrl: string }): Promise<void>;
   // Exchange code/token for session data; handles DB upsert internally.
   performLogin(code: string): Promise<LoginResult>;
+  // 「先验证身份、再建号」的后半段：注册门插在 handleAuthCallback 与这一步之间。
+  // performLogin 把两件事捆在一起（一调就建号），门无处安放；实现了本方法的通道，
+  // 回调路由改走 handleAuthCallback → 门 → completeLogin 三段式。
+  // 未实现的通道（如 email，其建号发生在 initiateLogin）继续走 performLogin。
+  completeLogin?(identity: PlatformIdentity): Promise<LoginResult>;
 
   // === User lookup ===
   getUserInfo(platformUserId: string): Promise<PlatformUserInfo>;
