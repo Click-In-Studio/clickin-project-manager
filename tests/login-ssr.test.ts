@@ -22,9 +22,11 @@ describe("登录页 SSR 安全", () => {
     expect(() => renderToString(createElement(LoginClient, { inviteOnly: true }))).not.toThrow();
   });
 
-  it("首帧渲染出邀请码输入框（服务端拿不到 next，与客户端首帧一致，不 hydration mismatch）", () => {
+  it("首帧渲染出的是真实表单，不是加载态占位", () => {
+    // 双模式引入后首帧固定为登录态，邀请码属于注册态——这里只钉住「SSR 真的把
+    // 表单渲染出来了」，模式相关的断言见下面的双模式用例。
     const html = renderToString(createElement(LoginClient, { inviteOnly: true }));
-    expect(html).toContain("邀请码");
+    expect(html).toContain("you@example.com");
   });
 });
 
@@ -82,5 +84,31 @@ describe("飞书授权入口带上注册凭据", () => {
   it("首帧是裸链接（SSR 与 hydrate 一致，凭据尚未从 URL 读出）", () => {
     const html = renderToString(createElement(LoginClient, { inviteOnly: true }));
     expect(html).toContain('href="/api/auth/feishu/initiate"');
+  });
+});
+
+describe("登录/注册双模式", () => {
+  // 首帧一律是登录态：localStorage 只能在 effect 里读，SSR 与客户端首帧必须一致。
+  const firstFrame = (inviteOnly = true) =>
+    renderToString(createElement(LoginClient, { inviteOnly }));
+
+  it("首帧渲染出两个 tab", () => {
+    const html = firstFrame();
+    expect(html).toContain('role="tablist"');
+    expect(html).toContain("登录");
+    expect(html).toContain("注册");
+  });
+
+  it("首帧是登录态：不出姓名与邀请码，按钮文案为登录", () => {
+    const html = firstFrame();
+    expect(html).not.toContain("你的名字");
+    expect(html).not.toContain("测试期间需受邀注册");
+    expect(html).toContain("获取登录验证码");
+    expect(html).toContain("使用飞书登录");
+  });
+
+  it("SSR 不读 localStorage（读了就会抛，因为 node 环境没有它）", () => {
+    expect(typeof localStorage).toBe("undefined");
+    expect(() => firstFrame()).not.toThrow();
   });
 });
