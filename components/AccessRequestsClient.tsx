@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import styles from "@/components/my-pages.module.css";
-import type { ApprovalRequest } from "@/lib/db";
+import type { ApprovalPerson, ApprovalRequest } from "@/lib/db";
 import { TTL_OPTIONS, displayTtlLabel, type TtlOptionValue } from "@/lib/approval-ttl";
+import { buildApprovalTimeline, type TimelineNode, type TimelineNodeState } from "@/lib/approval-timeline";
+import { APPROVAL_STAGE_LABELS, STAGE_ORDER } from "@/lib/approval-stages";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -50,6 +52,18 @@ const STATUS_LABELS: Record<ApprovalRequest["status"], string> = {
   rejected:           "已拒绝",
   cancelled:          "已撤回",
 };
+
+// 阶梯级名与动作词不在这里抄第二份：lib/approval-stages.ts 是前后端共用的唯一来源
+// （此前页面上叫「资源持有人」，飞书通知里叫「资源持有者」，就是各抄一份的结果）。
+// 节点文案由 buildApprovalTimeline 组装，见 lib/approval-timeline.ts。
+
+/**
+ * 表单里那句「依次匹配 …」由阶梯序生成，不手写——手写的那版漏了「上级部门负责人」，
+ * 而且后端加一级它也不会跟着变。
+ *
+ * 这仍然只是**规则说明**，不是这条申请的真实链路：真链路要走 preview 接口现算。
+ */
+const LADDER_TEXT = STAGE_ORDER.map((s) => APPROVAL_STAGE_LABELS[s]).join("、");
 
 type StatusColor = "amber" | "green" | "red" | "muted";
 
@@ -99,6 +113,172 @@ function StatusBadge({ status }: { status: ApprovalRequest["status"] }) {
     >
       {STATUS_LABELS[status]}
     </span>
+  );
+}
+
+// ─── ApprovalFlow ────────────────────────────────────────────────────────────
+
+function initials(name: string) {
+  const clean = name.trim();
+  return clean ? clean.slice(-2) : "成员";
+}
+
+function PersonChip({ userId, person, fallbackName }: {
+  userId: string;
+  person?: ApprovalPerson;
+  fallbackName?: string;
+}) {
+  const name = person?.name || fallbackName || "项目成员";
+  const role = person?.roles?.[0];
+  return (
+    <span
+      title={person ? `${name}${person.roles.length ? ` · ${person.roles.join("、")}` : ""}` : userId}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 6, minHeight: 28,
+        padding: "3px 9px 3px 4px", border: "1px solid var(--line)", borderRadius: 999,
+        background: "var(--paper)", color: "var(--ink)", fontSize: 11, fontWeight: 600,
+      }}
+    >
+      <span style={{
+        width: 20, height: 20, borderRadius: "50%", display: "grid", placeItems: "center",
+        background: "var(--surface-2)", color: "var(--muted)", fontSize: 8, flexShrink: 0,
+      }}>
+        {initials(name)}
+      </span>
+      <span>{name}</span>
+      {role && <small style={{ color: "var(--muted)", fontSize: 9, fontWeight: 500 }}>{role}</small>}
+    </span>
+  );
+}
+
+/** 节点状态 → 圆点颜色。terminated 是灰的，但它是「没处理」不是「还在等」——差别写在文案里。 */
+function dotColorOf(state: TimelineNodeState): string {
+  if (state === "current")    return "var(--stage)";
+  if (state === "rejected")   return "var(--danger, #ef4444)";
+  if (state === "terminated") return "var(--line)";
+  return "var(--success, #4b7f65)";
+}
+
+function ApprovalFlow({ req, compact = false }: {
+  req: ApprovalRequest;
+  compact?: boolean;
+}) {
+  const isPending = req.status === "pending_supervisor" || req.status === "pending_resource";
+  // 时间线的组装逻辑（含超时、撤回、被顶掉、存量无链等降级分支）在 lib/approval-timeline.ts，
+  // 由 tests/approval-timeline.test.ts 覆盖——这些状态在页面上极难手工复现。
+  const nodes: TimelineNode[] = useMemo(() => buildApprovalTimeline(req), [req]);
+  // 姓名与角色随审批 DTO 一起下来（people），不再联查通讯录：那条路拉全员邮箱手机号
+  // 只为取个名，还覆盖不到不在成员名单里的审批人（祖先部门 POC、存量演出 owner）。
+  const personOf = (userId: string) => req.people[userId];
+
+  return (
+    <section style={{ borderTop: "1px solid var(--line)", paddingTop: compact ? 14 : 18 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+        <h3 style={{ margin: 0, fontSize: 12, fontWeight: 700, color: "var(--ink)" }}>审批流程</h3>
+        <span style={{ fontSize: 9, fontWeight: 700, color: "var(--stage)", background: "#f2e4d9", borderRadius: 999, padding: "3px 8px" }}>
+          审批
+        </span>
+      </div>
+
+      <div>
+        {nodes.map((node, index) => {
+          const isLast = index === nodes.length - 1;
+          const dotColor = dotColorOf(node.state);
+          return (
+            <div key={node.key} style={{ display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", gap: 11 }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <span style={{
+                  width: 9, height: 9, marginTop: 4, borderRadius: "50%", flexShrink: 0,
+                  background: dotColor, boxShadow: node.state === "current" ? "0 0 0 4px #f2e4d9" : "none",
+                }} />
+                {!isLast && <span style={{ width: 1, flex: 1, minHeight: compact ? 42 : 50, background: "var(--line)", marginTop: 5 }} />}
+              </div>
+              <div style={{ paddingBottom: isLast ? 0 : compact ? 13 : 17, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", letterSpacing: ".08em" }}>{node.kind}</span>
+                  <b style={{ fontSize: 12, color: "var(--ink)" }}>{node.title}</b>
+                  {node.actionLabel && <small style={{ fontSize: 10, color: dotColor }}>{node.actionLabel}</small>}
+                  {node.state === "current" && <small style={{ fontSize: 10, color: "var(--stage)" }}>当前节点</small>}
+                  <time style={{ marginLeft: "auto", fontSize: 9, color: "var(--muted)" }}>{fmtDate(node.time)}</time>
+                </div>
+                {node.expiresAt !== undefined && (
+                  <p style={{ margin: "6px 0 0", fontSize: 10, color: "var(--muted)" }}>
+                    {node.expiresAt ? `有效期至 ${fmtDate(node.expiresAt)}` : "长期有效"}
+                  </p>
+                )}
+                {node.people.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                    {node.people.map((userId) => (
+                      <PersonChip key={userId} userId={userId} person={personOf(userId)} />
+                    ))}
+                  </div>
+                )}
+                {/* 或签：同一级任一人处理即完成，不写清楚会被读成需要全员批准 */}
+                {node.anyOneOf && (
+                  <p style={{ margin: "5px 0 0", fontSize: 10, color: "var(--muted)" }}>
+                    任一人处理即可
+                  </p>
+                )}
+                {/* 「原因」独立于「操作人」渲染：超时自动升级恒无操作人，
+                    挂在操作人下面会让最该说清楚的那句话永远显示不出来。 */}
+                {(node.actorId || node.bySystem || node.reason) && (
+                  <p style={{ margin: "6px 0 0", fontSize: 10, color: "var(--muted)" }}>
+                    {node.actorId
+                      ? `由 ${personOf(node.actorId)?.name || "项目成员"} 操作`
+                      : node.bySystem ? "系统自动处理" : null}
+                    {node.actorId && node.reason ? " · " : ""}
+                    {!node.actorId && node.bySystem && node.reason ? " · " : ""}
+                    {node.reason}
+                  </p>
+                )}
+                {node.comment && (
+                  <p style={{
+                    margin: "6px 0 0", padding: "6px 9px", borderRadius: 6,
+                    background: "var(--paper)", color: "var(--ink)", fontSize: 11, lineHeight: 1.5,
+                  }}>
+                    {node.comment}
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {isPending && (
+        <p style={{ margin: "12px 0 0 29px", padding: "9px 11px", borderRadius: 8, background: "var(--paper)", color: "var(--muted)", fontSize: 10, lineHeight: 1.55 }}>
+          后续审批人会依据届时的汇报关系、资源负责人和制作团队配置动态计算。
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ApprovalFlowPreview() {
+  return (
+    <section style={{ borderTop: "1px solid var(--line)", paddingTop: 14 }}>
+      <h3 style={{ margin: "0 0 12px", fontSize: 12, fontWeight: 700, color: "var(--ink)" }}>审批流程</h3>
+      <div style={{ display: "grid", gridTemplateColumns: "18px 1fr", gap: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--success, #4b7f65)", marginTop: 4 }} />
+          <span style={{ width: 1, minHeight: 34, flex: 1, background: "var(--line)", margin: "5px 0" }} />
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--stage)" }} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+          <div>
+            <small style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700 }}>发起</small>
+            <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--ink)", fontWeight: 600 }}>你提交申请</p>
+          </div>
+          <div>
+            <small style={{ fontSize: 9, color: "var(--stage)", fontWeight: 700 }}>审批</small>
+            <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--ink)", fontWeight: 600 }}>系统匹配审批链路</p>
+            <p style={{ margin: "4px 0 0", fontSize: 10, lineHeight: 1.55, color: "var(--muted)" }}>
+              依次匹配{LADDER_TEXT}；无对应人员的节点自动跳过。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -227,6 +407,8 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
         />
       </div>
 
+      <ApprovalFlowPreview />
+
       {error && <p style={{ margin: 0, fontSize: 12, color: "var(--danger, #ef4444)" }}>{error}</p>}
 
       <div style={{ display: "flex", gap: 8 }}>
@@ -303,6 +485,8 @@ function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel,
           <p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.6 }}>{req.note}</p>
         </div>
       )}
+
+      <ApprovalFlow req={req} />
 
       {/* Actions */}
       {isPending && (
@@ -382,6 +566,7 @@ export default function AccessRequestsClient({ productionId, productionName }: P
     }
   }, [productionId]);
 
+  // 通讯录联查已退役：姓名与角色随审批 DTO 的 people 一起下来（#324）。
   useEffect(() => { void fetchMine(); void fetchPending(); }, [fetchMine, fetchPending]);
 
   // Keep right panel in sync when data refreshes
@@ -527,6 +712,7 @@ export default function AccessRequestsClient({ productionId, productionName }: P
                 你本人尚未持有该权限，只能向上转交。
               </p>
             )}
+            <ApprovalFlow req={req} compact />
             {actionError && acting !== req.id && (
               <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--danger, #ef4444)" }}>{actionError}</p>
             )}
