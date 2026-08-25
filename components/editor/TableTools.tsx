@@ -155,6 +155,24 @@ export default function TableTools({ editor }: { editor: Editor | null }) {
     ? (editor.view.dom.parentElement as HTMLElement | null)
     : null;
 
+  // portal **必须挂进我们自己造的容器**，不能直接挂 host。
+  // tiptap 的 EditorContent 在 componentWillUnmount 里干这件事：
+  //     const newElement = document.createElement("div");
+  //     newElement.append(...editor.view.dom.parentNode.childNodes);
+  // 它把 host 的全部子节点搬进一个游离 div。若 portal 直接挂 host，其内容
+  // 就被搬走了父节点，React 卸载 portal 时 container.removeChild(child) 会报
+  // 「不是它的子节点」——切到源码模式时那个 removeChild 报错正是这么来的。
+  // 换成自己的容器后，容器整体被搬走也无妨：孩子始终还在容器里。
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!host) { setPortalRoot(null); return; }
+    const el = document.createElement("div");
+    el.className = "wiki-table-tools-root";
+    host.appendChild(el);
+    setPortalRoot(el);
+    return () => { el.remove(); setPortalRoot(null); };
+  }, [host]);
+
   // 指针的最后位置（视口坐标）。refresh 要用它重算"最近的那条边界"——否则
   // 刚激活的那一帧 geom 还是空的，⊕ 要等下一次 mousemove 才肯出来
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -223,7 +241,7 @@ export default function TableTools({ editor }: { editor: Editor | null }) {
     };
   }, [editor, host, refresh, setActive]);
 
-  if (!editor || !geom || !host) return null;
+  if (!editor || !geom || !host || !portalRoot) return null;
 
   const loc = (): TableLoc | null => {
     const node = editor.state.doc.nodeAt(geom.pos);
@@ -384,6 +402,6 @@ export default function TableTools({ editor }: { editor: Editor | null }) {
         >＋</button>
       )}
     </div>,
-    host,
+    portalRoot,
   );
 }

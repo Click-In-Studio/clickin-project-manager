@@ -394,6 +394,14 @@ body.wiki-col-resizing * {
    挂在 .smart-textarea-shell 里做**绝对定位**：滚动时浏览器自己搬运，不需要
    任何 JS 跟随。用 fixed + 视口坐标的话每次滚动都要重算再 setState，注定慢
    一帧——那正是当初"滚动时明显延迟"的成因。 */
+/* portal 的自有容器（见 TableTools 顶部注释）—— 零尺寸，只做承载 */
+.wiki-table-tools-root {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
 .wiki-table-tools {
   position: absolute;
   left: 0;
