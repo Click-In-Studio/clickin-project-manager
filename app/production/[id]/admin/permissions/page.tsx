@@ -14,6 +14,10 @@ import {
   getAllPermissionOverrides,
 } from "@/lib/db";
 import { listProductionDepts } from "@/lib/dept-db";
+import { findProducers } from "@/lib/approval-routing";
+import {
+  listResourceApprovers, listDelegableResourceTypes, NON_DELEGABLE_RESOURCE_TYPES,
+} from "@/lib/resource-approver-db";
 import { listDeptPermissionView, getPermissionVocabulary, type DeptPermissionView } from "@/lib/perm-center-db";
 import AdminPermissionCenterClient from "@/components/AdminPermissionCenterClient";
 import { productionFeatureAllowed } from "@/lib/plan";
@@ -34,22 +38,28 @@ export default async function PermissionCenterPage({ params }: { params: Promise
   const { permCtx } = access;
   const bypass = permCtx.isAdmin || permCtx.isOwner;
 
-  // 三 tab 各自 view/edit 双门；无 view 门的 tab 数据不出服务端。
-  const [deptEdit, deptViewOnly, roleEdit, overrideEdit, canViewContact] = await Promise.all([
+  // 四 tab 各自 view/edit 双门；无 view 门的 tab 数据不出服务端。
+  const [deptEdit, deptViewOnly, roleEdit, overrideEdit, canViewContact, isProducer, approverGrantEdit, approverGrantView] = await Promise.all([
     bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "grants", "edit"),
     bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "grants", "view"),
     bypass || hasGrant(permCtx.userId, id, "role", "*", "grants", "edit"),
     bypass || hasGrant(permCtx.userId, id, "member", "*", "overrides", "edit"),
     bypass || hasGrant(permCtx.userId, id, "member", "*", "contact", "view"),
+    findProducers(id).then(ids => ids.includes(permCtx.userId)),
+    bypass || hasGrant(permCtx.userId, id, "production", "*", "grants", "edit"),
+    bypass || hasGrant(permCtx.userId, id, "production", "*", "grants", "view"),
   ]);
   const deptView = deptEdit || deptViewOnly;
   // 角色/override 现无独立 view 节点：读随写门（宁严勿松）。
   const roleView = roleEdit;
   const overrideView = overrideEdit;
+  // 资源审批人（#262）：门与 API 同一份（制作人显式在内——委派本来就是制作人要做的事）。
+  const approverEdit = approverGrantEdit || isProducer;
+  const approverView = approverEdit || approverGrantView;
 
-  if (!deptView && !roleView && !overrideView) redirect(`/production/${id}/admin`);
+  if (!deptView && !roleView && !overrideView && !approverView) redirect(`/production/${id}/admin`);
 
-  const [name, depts, deptRows, roles, membersRaw, overrides, vocabulary] = await Promise.all([
+  const [name, depts, deptRows, roles, membersRaw, overrides, vocabulary, approvers, delegableTypes] = await Promise.all([
     getProductionName(id),
     deptView ? listProductionDepts(id) : Promise.resolve([]),
     // 显式标注类型：Promise.all 对异构数组会把这一格塌成 {}，塌了之后
@@ -59,6 +69,8 @@ export default async function PermissionCenterPage({ params }: { params: Promise
     overrideView ? listProductionMembersWithRoles(id) : Promise.resolve([]),
     overrideView ? getAllPermissionOverrides(id) : Promise.resolve({}),
     getPermissionVocabulary(id),
+    approverView ? listResourceApprovers(id) : Promise.resolve([]),
+    approverView ? listDelegableResourceTypes() : Promise.resolve([]),
   ]);
 
   return (
@@ -76,10 +88,14 @@ export default async function PermissionCenterPage({ params }: { params: Promise
       }))}
       initialOverrides={overrides}
       vocabulary={vocabulary}
+      initialApprovers={approvers}
+      delegableTypes={delegableTypes}
+      nonDelegableTypes={[...NON_DELEGABLE_RESOURCE_TYPES]}
       caps={{
         deptView, deptEdit,
         roleView, roleEdit,
         overrideView, overrideEdit,
+        approverView, approverEdit,
         rootOperation: bypass,
       }}
     />

@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import PageHeader from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import PermissionKeyPicker, { type Vocabulary } from "@/components/PermissionKeyPicker";
-import { TYPE_LABELS } from "@/lib/permission-labels";
+import DropdownPicker, { type DropdownPickerItem } from "@/components/DropdownPicker";
+import { TYPE_LABELS, groupResourceTypes } from "@/lib/permission-labels";
 import type { DeptPermissionView, DeptPermissionGroup } from "@/lib/perm-center-db";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
@@ -17,8 +18,12 @@ type Caps = {
   deptView: boolean; deptEdit: boolean;
   roleView: boolean; roleEdit: boolean;
   overrideView: boolean; overrideEdit: boolean;
+  approverView: boolean; approverEdit: boolean;
   rootOperation: boolean;
 };
+
+/** 类型级审批人（#262）。空数组 = 未配，该级在阶梯里直接被跳过。 */
+type ApproverEntry = { resourceType: string; deptIds: string[]; userIds: string[] };
 
 type Props = {
   productionId: string;
@@ -29,6 +34,9 @@ type Props = {
   members: Member[];
   initialOverrides: Record<string, Record<string, boolean>>;
   vocabulary: Vocabulary;
+  initialApprovers: ApproverEntry[];
+  delegableTypes: string[];
+  nonDelegableTypes: string[];
   caps: Caps;
 };
 
@@ -68,18 +76,26 @@ function KeyRow({ nodeKey, tone, onRemove, extra }: {
 }
 
 export default function AdminPermissionCenterClient({
-  productionId, productionName, depts, initialDeptRows, initialRoles, members, initialOverrides, vocabulary, caps,
+  productionId, productionName, depts, initialDeptRows, initialRoles, members, initialOverrides, vocabulary,
+  initialApprovers, delegableTypes, nonDelegableTypes, caps,
 }: Props) {
   const tabs = [
     ...(caps.deptView ? [["dept", "部门权限"] as const] : []),
     ...(caps.roleView ? [["role", "角色权限"] as const] : []),
     ...(caps.overrideView ? [["override", "人事权限"] as const] : []),
+    ...(caps.approverView ? [["approver", "资源审批人"] as const] : []),
   ];
-  const [tab, setTab] = useState<"dept" | "role" | "override">(tabs[0]?.[0] ?? "dept");
+  const [tab, setTab] = useState<"dept" | "role" | "override" | "approver">(tabs[0]?.[0] ?? "dept");
 
   const [deptRows, setDeptRows] = useState(initialDeptRows);
   const [roles, setRoles] = useState(initialRoles);
   const [overrides, setOverrides] = useState(initialOverrides);
+  const [approvers, setApprovers] = useState<Record<string, { deptIds: string[]; userIds: string[] }>>(
+    () => Object.fromEntries(initialApprovers.map(a => [a.resourceType, { deptIds: a.deptIds, userIds: a.userIds }])),
+  );
+  const [selectedType, setSelectedType] = useState<string | null>(
+    () => groupResourceTypes(delegableTypes)[0]?.types[0] ?? null,
+  );
 
   const [query, setQuery] = useState("");
   const [tagFilter, setTagFilter] = useState("");
@@ -203,6 +219,36 @@ export default function AdminPermissionCenterClient({
     }
   }
 
+  // ── 资源审批人（#262）──
+  /** 覆盖式保存：服务端 PUT 会把该类型的类型级行整批换掉（实例行不动）。 */
+  async function saveApprovers(resourceType: string, next: { deptIds: string[]; userIds: string[] }) {
+    if (await api(`/resource-approvers`, { method: "PUT", body: JSON.stringify({ resourceType, ...next }) })) {
+      setApprovers(prev => ({ ...prev, [resourceType]: next }));
+    }
+  }
+
+  const approverOf = (type: string) => approvers[type] ?? { deptIds: [], userIds: [] };
+
+  const deptPickerItems: DropdownPickerItem[] = useMemo(
+    () => deptTree.map(({ dept }) => ({
+      id: dept.id, value: dept.id, label: dept.name,
+      sublabel: dept.kind === "group" ? "用户组" : undefined,
+      parentId: dept.parentId,
+    })),
+    [deptTree],
+  );
+
+  const memberPickerItems: DropdownPickerItem[] = useMemo(
+    () => members.map(m => ({
+      id: m.userId, value: m.userId, label: m.name || "（未命名）",
+      sublabel: m.roles.join(" · ") || "无角色",
+    })),
+    [members],
+  );
+
+  const deptNameOf = (id: string) => depts.find(d => d.id === id)?.name ?? id;
+  const memberNameOf = (id: string) => members.find(m => m.userId === id)?.name || id;
+
   const selectedDept = depts.find(d => d.id === selectedDeptId) ?? null;
   const selectedRole = roles.find(r => r.id === selectedRoleId) ?? null;
   const selectedMember = members.find(m => m.userId === selectedUserId) ?? null;
@@ -210,6 +256,10 @@ export default function AdminPermissionCenterClient({
   const overrideCount = useMemo(
     () => Object.values(overrides).reduce((n, m) => n + Object.keys(m).length, 0),
     [overrides],
+  );
+  const approverTypeCount = useMemo(
+    () => Object.values(approvers).filter(a => a.deptIds.length + a.userIds.length > 0).length,
+    [approvers],
   );
   const deptKeyCount = useMemo(
     () => Object.values(deptRows).reduce((n, v) => n + v.manual.length, 0),
@@ -242,7 +292,7 @@ export default function AdminPermissionCenterClient({
 
       {/* 摘要 */}
       <div style={{
-        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
+        display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 1,
         overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
         background: "var(--line)", marginBottom: 18,
       }}>
@@ -251,6 +301,7 @@ export default function AdminPermissionCenterClient({
             deptInstanceCount > 0 ? `另有 ${deptInstanceCount} 条实例行由别处在管` : "免审批区间"],
           [String(roles.reduce((n, r) => n + r.permissions.length, 0)), "角色权限键", `${roles.length} 个角色`],
           [String(overrideCount), "人事 override", "个人 allow / deny"],
+          [String(approverTypeCount), "类型配了审批人", "未配则落制作人 → 所有者"],
         ].map(([num, label, hint]) => (
           <div key={label} style={{ minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13, background: "var(--surface)" }}>
             <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
@@ -348,6 +399,35 @@ export default function AdminPermissionCenterClient({
                 {tab === "override" && memberGroups.length === 0 && (
                   <p style={{ fontSize: 12, color: "var(--muted)", paddingTop: 20, textAlign: "center" }}>无匹配成员</p>
                 )}
+                {tab === "approver" && [
+                  ...groupResourceTypes(delegableTypes),
+                  { label: "所有者审批（不可委派）", types: nonDelegableTypes },
+                ].map(group => {
+                  const shown = group.types.filter(t =>
+                    !q || t.toLowerCase().includes(q) || (TYPE_LABELS[t] ?? "").toLowerCase().includes(q));
+                  if (shown.length === 0) return null;
+                  return (
+                    <div key={group.label} style={{ marginBottom: 6 }}>
+                      <p style={{ margin: "0 0 2px", fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: "var(--muted)", textTransform: "uppercase" }}>
+                        {group.label}
+                      </p>
+                      {shown.map(t => {
+                        const n = approverOf(t).deptIds.length + approverOf(t).userIds.length;
+                        return (
+                          <button key={t} onClick={() => setSelectedType(t)} style={listBtn(selectedType === t)}>
+                            <span style={{ flex: 1, minWidth: 0 }}>
+                              <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: selectedType === t ? "#fff" : "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {TYPE_LABELS[t] ?? t}
+                              </span>
+                              <span style={{ display: "block", fontSize: 9.5, color: selectedType === t ? "rgba(255,255,255,.6)" : "var(--muted)" }}>{t}</span>
+                            </span>
+                            {n > 0 && <Badge tone={selectedType === t ? "neutral" : "blue"}>{n}</Badge>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -461,6 +541,121 @@ export default function AdminPermissionCenterClient({
                     )}
                   </div>
                 ) : <p style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>选择左侧成员</p>
+              )}
+
+              {tab === "approver" && (
+                selectedType ? (
+                  nonDelegableTypes.includes(selectedType) ? (
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                        <h2 style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)" }}>
+                          {TYPE_LABELS[selectedType] ?? selectedType}
+                        </h2>
+                        <Badge tone="amber">不可委派</Badge>
+                      </div>
+                      <p style={{ margin: "0 0 10px", fontSize: 11, color: "var(--muted)", lineHeight: 1.7 }}>
+                        演出本身与制作人域没有第二个归属方，审批人不可配置：
+                      </p>
+                      <p style={{ margin: "0 0 8px", fontSize: 11.5, color: "var(--ink)", lineHeight: 1.7 }}>
+                        · <b>敏感面</b>（授权账本、集成配置、资产审查、项目信息修改、归档）——跳过整条阶梯，
+                        恒由<b>演出所有者</b>审批，制作人也代批不了。
+                      </p>
+                      <p style={{ margin: 0, fontSize: 11.5, color: "var(--ink)", lineHeight: 1.7 }}>
+                        · <b>其余面</b>（项目配置、挂载等）——走完整阶梯，最终由<b>制作人</b>兜底、所有者收尾。
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                        <h2 style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)" }}>
+                          {TYPE_LABELS[selectedType] ?? selectedType}
+                        </h2>
+                        <code style={{ fontSize: 11, color: "var(--muted)" }}>{selectedType}</code>
+                      </div>
+                      <p style={{ margin: "0 0 6px", fontSize: 11, color: "var(--muted)", lineHeight: 1.7 }}>
+                        这类资源的权限申请，审批阶梯的「共管方」一级找这里配的人；配部门时进阶梯的是该部门的
+                        <b> POC</b>，不是全体部门成员。未配 = 这一级被跳过，申请照旧升到制作人 → 演出所有者。
+                      </p>
+                      <p style={{ margin: "0 0 14px", fontSize: 11, color: "var(--danger)", lineHeight: 1.7 }}>
+                        配为审批方同时就是<b>共管方</b>：被配的部门 POC / 个人会获得这类资源 manage 档的免审批
+                        区间（可自确认拿权），不只是「帮忙点批准」。
+                      </p>
+
+                      <p style={SECTION_LABEL}>审批部门（{approverOf(selectedType).deptIds.length}）</p>
+                      {approverOf(selectedType).deptIds.map(deptId => (
+                        <KeyRow
+                          key={deptId} nodeKey={deptNameOf(deptId)}
+                          extra={<Badge tone="blue">POC</Badge>}
+                          onRemove={caps.approverEdit ? () => saveApprovers(selectedType, {
+                            ...approverOf(selectedType),
+                            deptIds: approverOf(selectedType).deptIds.filter(x => x !== deptId),
+                          }) : undefined}
+                        />
+                      ))}
+                      {approverOf(selectedType).deptIds.length === 0 && (
+                        <p style={{ fontSize: 12, color: "var(--muted)" }}>未配审批部门</p>
+                      )}
+                      {caps.approverEdit && (
+                        <div style={{ marginTop: 10 }}>
+                          <DropdownPicker
+                            items={deptPickerItems}
+                            values={new Set(approverOf(selectedType).deptIds)}
+                            multi disabled={busy}
+                            placeholder="添加审批部门"
+                            searchPlaceholder="搜索部门"
+                            multiCountLabel={n => `已选 ${n} 个部门`}
+                            onChange={() => {}}
+                            onToggle={deptId => {
+                              const cur = approverOf(selectedType);
+                              saveApprovers(selectedType, {
+                                ...cur,
+                                deptIds: cur.deptIds.includes(deptId)
+                                  ? cur.deptIds.filter(x => x !== deptId)
+                                  : [...cur.deptIds, deptId],
+                              });
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      <p style={{ ...SECTION_LABEL, marginTop: 18 }}>个人审批人（{approverOf(selectedType).userIds.length}）</p>
+                      {approverOf(selectedType).userIds.map(userId => (
+                        <KeyRow
+                          key={userId} nodeKey={memberNameOf(userId)}
+                          onRemove={caps.approverEdit ? () => saveApprovers(selectedType, {
+                            ...approverOf(selectedType),
+                            userIds: approverOf(selectedType).userIds.filter(x => x !== userId),
+                          }) : undefined}
+                        />
+                      ))}
+                      {approverOf(selectedType).userIds.length === 0 && (
+                        <p style={{ fontSize: 12, color: "var(--muted)" }}>未配个人审批人</p>
+                      )}
+                      {caps.approverEdit && (
+                        <div style={{ marginTop: 10 }}>
+                          <DropdownPicker
+                            items={memberPickerItems}
+                            values={new Set(approverOf(selectedType).userIds)}
+                            multi disabled={busy}
+                            placeholder="添加个人审批人"
+                            searchPlaceholder="搜索成员"
+                            multiCountLabel={n => `已选 ${n} 人`}
+                            onChange={() => {}}
+                            onToggle={userId => {
+                              const cur = approverOf(selectedType);
+                              saveApprovers(selectedType, {
+                                ...cur,
+                                userIds: cur.userIds.includes(userId)
+                                  ? cur.userIds.filter(x => x !== userId)
+                                  : [...cur.userIds, userId],
+                              });
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )
+                ) : <p style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>选择左侧资源类型</p>
               )}
             </div>
           </div>
