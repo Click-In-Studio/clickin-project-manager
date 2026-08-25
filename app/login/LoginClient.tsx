@@ -5,7 +5,7 @@ import { useState, useEffect, type FormEvent } from "react";
 // 登录成功后的回跳目标（仅允许站内相对路径，防 open redirect）。
 // 服务端没有 window：这个组件虽标了 "use client"，SSR 阶段仍会在服务端渲染一次，
 // 所以必须守卫——否则渲染期一调用就是 500（页面因降级到客户端渲染而看似正常）。
-function loginDest(): string {
+export function loginDest(): string {
   if (typeof window === "undefined") return "/";
   const next = new URLSearchParams(window.location.search).get("next");
   return next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
@@ -13,7 +13,9 @@ function loginDest(): string {
 
 // 从邀请链接落地（/invite/<token> → /login?next=/invite/<token>）时透传 token 作
 // 注册正当性——受邀者不需要额外要注册码（lib/registration-gate.ts）。
-function inviteTokenFromDest(): string | undefined {
+// 不另设 window 守卫：它不直接碰 window，唯一路径是上面已守卫的 loginDest()，
+// SSR 时拿到 "/" 后 match 失败返回 undefined。这条由 login-ssr 测试钉住。
+export function inviteTokenFromDest(): string | undefined {
   const m = loginDest().match(/^\/invite\/([0-9a-f-]{36})$/i);
   return m?.[1];
 }
