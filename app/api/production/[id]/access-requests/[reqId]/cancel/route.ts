@@ -13,7 +13,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
 
-  const { comment } = (await req.json().catch(() => ({}))) as { comment?: string };
+  const { comment } = ((await req.json().catch(() => null)) ?? {}) as { comment?: string };
 
   const result = await cancelAccessRequest(reqId, session.userId, comment);
   if (!result.ok) {

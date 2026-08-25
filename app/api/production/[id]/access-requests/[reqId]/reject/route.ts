@@ -14,7 +14,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
 
   // 拒绝理由选填但强烈建议：申请人只看到「未获批准」四个字是最招重复申请的
-  const { comment } = (await req.json().catch(() => ({}))) as { comment?: string };
+  const { comment } = ((await req.json().catch(() => null)) ?? {}) as { comment?: string };
 
   const result = await rejectAccessRequest(reqId, session.userId, comment);
   if (!result.ok) {

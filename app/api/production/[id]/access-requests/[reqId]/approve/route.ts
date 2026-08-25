@@ -13,8 +13,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
 
-  // 旧客户端不发 body（POST 空体会让 req.json() 抛），意见是选填的
-  const { comment } = (await req.json().catch(() => ({}))) as { comment?: string };
+  // 意见选填。两种「没有 body」都要接住：空体让 req.json() 抛（catch 兜住），
+  // 而合法的 JSON `null` 会**解析成功**并返回 null——直接解构就是 TypeError → 500。
+  const { comment } = ((await req.json().catch(() => null)) ?? {}) as { comment?: string };
 
   const result = await approveAccessRequest(reqId, session.userId, comment);
   if (!result.ok) {

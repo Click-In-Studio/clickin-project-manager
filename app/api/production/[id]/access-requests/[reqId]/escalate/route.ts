@@ -15,7 +15,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
 
   // 转交说明会随通知发给下一级审批人，让他知道为什么轮到自己
-  const { comment } = (await req.json().catch(() => ({}))) as { comment?: string };
+  const { comment } = ((await req.json().catch(() => null)) ?? {}) as { comment?: string };
 
   const result = await escalateAccessRequest(reqId, session.userId, comment);
   if (!result.ok) {
