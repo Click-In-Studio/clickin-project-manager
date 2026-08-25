@@ -1,8 +1,6 @@
 "use client";
 
-import { useState, useEffect, type FormEvent } from "react";
-
-const AUTO_LOGIN_KEY = "feishu_auto_login_attempted";
+import { useState, type FormEvent } from "react";
 
 // 登录成功后的回跳目标（仅允许站内相对路径，防 open redirect）
 function loginDest(): string {
@@ -17,65 +15,13 @@ function inviteTokenFromDest(): string | undefined {
   return m?.[1];
 }
 
-export default function LoginClient({ feishuAppId, inviteOnly }: { feishuAppId: string; inviteOnly?: boolean }) {
+export default function LoginClient({ inviteOnly }: { inviteOnly?: boolean }) {
   const [mode, setMode] = useState<"idle" | "email_sent" | "loading" | "otp_loading">("idle");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [regCode, setRegCode] = useState("");
   const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
-  const [showForm, setShowForm] = useState(false);
-
-  // Feishu in-app auto-login
-  useEffect(() => {
-    const isFeishu = /Feishu|Lark/i.test(navigator.userAgent);
-    if (!isFeishu) { setShowForm(true); return; }
-
-    if (sessionStorage.getItem(AUTO_LOGIN_KEY)) {
-      sessionStorage.removeItem(AUTO_LOGIN_KEY);
-      setShowForm(true);
-      return;
-    }
-
-    const fallback = setTimeout(() => setShowForm(true), 5000);
-
-    const doRequest = () => {
-      const tt = (window as { tt?: { requestAuthCode: (o: { appId: string; success: (r: { code: string }) => void; fail: () => void }) => void } }).tt;
-      if (!tt) { setShowForm(true); return; }
-
-      tt.requestAuthCode({
-        appId: feishuAppId,
-        success: async ({ code }) => {
-          const controller = new AbortController();
-          const fetchTimeout = setTimeout(() => controller.abort(), 8000);
-          try {
-            const r = await fetch("/api/auth/feishu-code", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ code }),
-              signal: controller.signal,
-            });
-            clearTimeout(fetchTimeout);
-            if (r.ok) {
-              sessionStorage.setItem(AUTO_LOGIN_KEY, "1");
-              window.location.href = loginDest();
-            } else {
-              setShowForm(true);
-            }
-          } catch {
-            clearTimeout(fetchTimeout);
-            setShowForm(true);
-          }
-        },
-        fail: () => setShowForm(true),
-      });
-    };
-
-    const h5sdk = (window as { h5sdk?: { ready: (cb: () => void) => void } }).h5sdk;
-    if (h5sdk) h5sdk.ready(doRequest); else doRequest();
-
-    return () => clearTimeout(fallback);
-  }, [feishuAppId]);
 
   async function handleEmailSubmit(e: FormEvent) {
     e.preventDefault();
@@ -136,14 +82,6 @@ export default function LoginClient({ feishuAppId, inviteOnly }: { feishuAppId: 
       setMode("email_sent");
       setError("网络错误，请重试");
     }
-  }
-
-  if (!showForm) {
-    return (
-      <div className="flex min-h-screen items-center justify-center" style={{ background: "var(--paper)" }}>
-        <p style={{ fontSize: 12, color: "var(--muted)" }}>正在登录…</p>
-      </div>
-    );
   }
 
   const inp: React.CSSProperties = {
