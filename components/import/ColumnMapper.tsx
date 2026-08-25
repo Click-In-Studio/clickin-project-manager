@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import type { SheetData } from "@/lib/import/types";
 
 type ColumnDef = {
@@ -53,7 +55,7 @@ export default function ColumnMapper({ sheetData, columns, mapping, onChange, sh
                   </span>
                 ))}
               </div>
-              <select
+              <OverflowSafeSelect
                 className="border border-gray-300 rounded px-2 py-1.5 text-sm"
                 value=""
                 onChange={e => {
@@ -65,7 +67,7 @@ export default function ColumnMapper({ sheetData, columns, mapping, onChange, sh
                 {options.filter(o => !selected.includes(o.idx)).map(o => (
                   <option key={o.idx} value={o.idx}>{o.label}</option>
                 ))}
-              </select>
+              </OverflowSafeSelect>
               {showPreview && selected.length > 0 && (
                 <p className="mt-0.5 text-xs text-gray-400 truncate">
                   预览: {selected.map(i => previewRow[i] ?? "—").join(" | ")}
@@ -81,7 +83,7 @@ export default function ColumnMapper({ sheetData, columns, mapping, onChange, sh
             <label className="block text-sm font-medium text-gray-700 mb-1">
               {col.label} {col.required && <span className="text-red-500">*</span>}
             </label>
-            <select
+            <OverflowSafeSelect
               className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full max-w-xs"
               value={selectedIdx ?? ""}
               onChange={e => {
@@ -93,7 +95,7 @@ export default function ColumnMapper({ sheetData, columns, mapping, onChange, sh
               {options.map(o => (
                 <option key={o.idx} value={o.idx}>{o.label}</option>
               ))}
-            </select>
+            </OverflowSafeSelect>
             {showPreview && selectedIdx != null && (
               <p className="mt-0.5 text-xs text-gray-400 truncate">
                 预览: {previewRow[selectedIdx] ?? "—"}

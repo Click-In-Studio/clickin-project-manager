@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useMemo, useState } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import Badge from "@/components/Badge";
@@ -43,12 +45,12 @@ function RelKeyAdder({ busy, onAdd }: { busy: boolean; onAdd: (rel: string) => v
   const rel = `${sub}@${verb}`;
   return (
     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-      <select value={sub} onChange={e => setSub(e.target.value)} style={FIELD}>
+      <OverflowSafeSelect value={sub} onChange={e => setSub(e.target.value)} style={FIELD}>
         {REL_SUBS.map(s => <option key={s} value={s}>{s === "" ? "（主面）" : s}</option>)}
-      </select>
-      <select value={verb} onChange={e => setVerb(e.target.value)} style={FIELD}>
+      </OverflowSafeSelect>
+      <OverflowSafeSelect value={verb} onChange={e => setVerb(e.target.value)} style={FIELD}>
         {REL_VERBS.map(v => <option key={v} value={v}>{v}</option>)}
-      </select>
+      </OverflowSafeSelect>
       <button style={{ ...PRIMARY_BTN, padding: "6px 11px" }} disabled={busy} onClick={() => onAdd(rel)}>添加键</button>
       <code style={{ fontSize: 10, color: "var(--muted)", background: "var(--surface-2)", padding: "3px 7px", borderRadius: 6 }}>{rel}</code>
     </div>

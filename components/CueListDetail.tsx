@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import React, { useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import type { CueList, CueListGrant, CueListDeptAccess } from "@/lib/cue-list-types";
@@ -222,13 +224,13 @@ function CollaboratorSection({
         {grants.map(g => (
           <div key={g.userId + g.level} style={rowStyle}>
             <span style={{ fontSize: 12, color: "var(--ink)", flex: 1, minWidth: 0 }}>{g.userName}</span>
-            <select
+            <OverflowSafeSelect
               value={g.level}
               disabled={saving}
               onChange={async (e) => { await postCollaborator({ type: "user", userId: g.userId, level: e.target.value }); }}
               style={{ fontSize: 11, border: "1px solid var(--line)", borderRadius: 5, padding: "2px 4px", background: "var(--surface)", color: "var(--ink)", cursor: saving ? "default" : "pointer" }}>
               {GRANT_LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-            </select>
+            </OverflowSafeSelect>
             <button style={removeBtn} disabled={saving}
               onClick={() => deleteCollaborator({ type: "user", userId: g.userId })}>
               移除

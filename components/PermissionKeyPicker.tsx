@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useEffect, useMemo, useState } from "react";
 import { PRIMARY_BTN } from "@/components/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
@@ -77,7 +79,7 @@ export default function PermissionKeyPicker({
 
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-      <select value={type} onChange={e => setType(e.target.value)} style={{ ...FIELD, minWidth: 130 }}>
+      <OverflowSafeSelect value={type} onChange={e => setType(e.target.value)} style={{ ...FIELD, minWidth: 130 }}>
         <option value="">资源类型…</option>
         <option value="*">＊ 全部类型（通配）</option>
         {typeGroups.map(g => (
@@ -85,31 +87,31 @@ export default function PermissionKeyPicker({
             {g.types.map(t => <option key={t} value={t}>{typeLabel(t)}</option>)}
           </optgroup>
         ))}
-      </select>
+      </OverflowSafeSelect>
 
       {type && (
         <>
-          <select value={resId} onChange={e => setResId(e.target.value)} style={{ ...FIELD, minWidth: 120 }}>
+          <OverflowSafeSelect value={resId} onChange={e => setResId(e.target.value)} style={{ ...FIELD, minWidth: 120 }}>
             <option value="*">全部实例（*）</option>
             {directory.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
             <option value={CUSTOM}>自定义 ID…</option>
-          </select>
+          </OverflowSafeSelect>
           {resId === CUSTOM && (
             <input value={customId} onChange={e => setCustomId(e.target.value)} placeholder="资源 ID" style={{ ...FIELD, width: 110 }} />
           )}
 
-          <select value={sub} onChange={e => setSub(e.target.value)} style={{ ...FIELD, minWidth: 130 }}>
+          <OverflowSafeSelect value={sub} onChange={e => setSub(e.target.value)} style={{ ...FIELD, minWidth: 130 }}>
             {subOptions.map(s => <option key={s} value={s}>{subLabel(s)}</option>)}
             <option value={CUSTOM}>自定义面…</option>
-          </select>
+          </OverflowSafeSelect>
           {sub === CUSTOM && (
             <input value={customSub} onChange={e => setCustomSub(e.target.value)} placeholder="面（如 cues）" style={{ ...FIELD, width: 110 }} />
           )}
 
-          <select value={verb} onChange={e => setVerb(e.target.value)} style={{ ...FIELD, minWidth: 100 }}>
+          <OverflowSafeSelect value={verb} onChange={e => setVerb(e.target.value)} style={{ ...FIELD, minWidth: 100 }}>
             <option value="">动词…</option>
             {verbs.map(v => <option key={v} value={v}>{verbLabel(v)}</option>)}
-          </select>
+          </OverflowSafeSelect>
         </>
       )}
 

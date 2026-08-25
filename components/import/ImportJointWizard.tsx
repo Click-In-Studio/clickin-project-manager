@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import SheetPicker from "./SheetPicker";
@@ -1563,7 +1565,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
             return (
               <div key={val} className="flex items-center gap-2 flex-wrap">
                 <span className="w-28 text-sm font-medium truncate">{val || <span className="text-gray-400 italic">空白</span>}</span>
-                <select className="border border-gray-300 rounded px-2 py-1 text-sm"
+                <OverflowSafeSelect className="border border-gray-300 rounded px-2 py-1 text-sm"
                   value={mapsToTag ? "mapTag" : action.action}
                   onChange={e => {
                     const nextAction = e.target.value as TypeAction["action"];
@@ -1575,8 +1577,8 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                   <option value="mapType">映射到类型</option>
                   <option value="mapTag">映射到 Tag</option>
                   <option value="ignore">忽略该行</option>
-                </select>
-                {action.action === "mapType" && !mapsToTag && <select className="border border-gray-300 rounded px-2 py-1 text-sm" value={action.blockType} onChange={e => setRawPrimaryAction(val, { action: "mapType", blockType: e.target.value as "dialogue" | "stage" | "lyric" | "marker" })}>{Object.entries(BLOCK_TYPE_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
+                </OverflowSafeSelect>
+                {action.action === "mapType" && !mapsToTag && <OverflowSafeSelect className="border border-gray-300 rounded px-2 py-1 text-sm" value={action.blockType} onChange={e => setRawPrimaryAction(val, { action: "mapType", blockType: e.target.value as "dialogue" | "stage" | "lyric" | "marker" })}>{Object.entries(BLOCK_TYPE_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</OverflowSafeSelect>}
                 {activeTags.map(ta => {
                   const grp = tagGroups.find(g => g.id === ta.groupId);
                   const opt = grp?.options.find(o => o.id === ta.optionId);
@@ -1589,7 +1591,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                   );
                 })}
                 {val && (
-                  <select
+                  <OverflowSafeSelect
                     className="rounded border border-dashed border-violet-300 bg-white px-1.5 py-0.5 text-xs text-violet-400"
                     value=""
                     onChange={e => {
@@ -1599,7 +1601,7 @@ export default function ImportJointWizard({ productionId, versionId, onDone }: P
                   >
                     <option value="">+ Tag</option>
                     {availableTagGroups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
-                  </select>
+                  </OverflowSafeSelect>
                 )}
               </div>
             );

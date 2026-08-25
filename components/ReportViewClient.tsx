@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import React, { useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
@@ -494,10 +496,10 @@ export default function ReportViewClient({
             {canWriteNote && !isPublished && departments.length > 0 && (
               <div style={{ marginTop: 16, background: "var(--paper)", borderRadius: 10, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
                 <p style={{ margin: 0, fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>添加 Note</p>
-                <select value={newDeptId} onChange={e => setNewDeptId(e.target.value)}
+                <OverflowSafeSelect value={newDeptId} onChange={e => setNewDeptId(e.target.value)}
                   className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400">
                   {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
+                </OverflowSafeSelect>
                 <SmartTextarea
                   value={newContent}
                   onChange={setNewContent}

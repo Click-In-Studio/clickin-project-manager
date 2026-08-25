@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useMemo, useState } from "react";
 import AdminModal from "@/components/AdminModal";
 import Badge from "@/components/Badge";
@@ -196,11 +198,11 @@ export default function MemberPickerModal({
           placeholder="搜索姓名 / 角色 / 联系方式"
           style={{ ...FIELD, flex: 1 }}
         />
-        <select value={tagFilter} onChange={e => setTagFilter(e.target.value)} style={{ ...FIELD, maxWidth: 140 }}>
+        <OverflowSafeSelect value={tagFilter} onChange={e => setTagFilter(e.target.value)} style={{ ...FIELD, maxWidth: 140 }}>
           <option value="">全部标签</option>
           <option value={NO_TAG}>无标签</option>
           {allTags.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
+        </OverflowSafeSelect>
       </div>
 
       {/* 部门树成员列表 */}

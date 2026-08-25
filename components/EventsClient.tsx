@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useState, useMemo, Fragment, type CSSProperties } from "react";
 import Link from "next/link";
 import type React from "react";
@@ -297,12 +299,12 @@ function CreateEventModal({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
               <label style={labelStyle}>类型</label>
-              <select value={eventType} onChange={e => setEventType(e.target.value)} style={inputStyle}>
+              <OverflowSafeSelect value={eventType} onChange={e => setEventType(e.target.value)} style={inputStyle}>
                 <option value="rehearsal">排练</option>
                 <option value="performance">演出</option>
                 <option value="meeting">会议</option>
                 <option value="custom">其他</option>
-              </select>
+              </OverflowSafeSelect>
             </div>
             <div>
               <label style={labelStyle}>地点</label>

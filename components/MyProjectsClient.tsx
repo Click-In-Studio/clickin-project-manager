@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { MyProductionEntry } from "@/lib/db";
@@ -170,7 +172,7 @@ export default function MyProjectsClient(
 
         {/* Role filter */}
         {allRoles.length > 0 && (
-          <select
+          <OverflowSafeSelect
             value={roleFilter}
             onChange={e => setRoleFilter(e.target.value)}
             style={{
@@ -181,7 +183,7 @@ export default function MyProjectsClient(
           >
             <option value="all">所有角色</option>
             {allRoles.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
+          </OverflowSafeSelect>
         )}
       </div>
 

@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useMemo, useState } from "react";
 import PageHeader from "@/components/PageHeader";
 import Badge from "@/components/Badge";
@@ -341,7 +343,7 @@ export default function AdminPermissionCenterClient({
                     style={{ flex: 1, padding: "8px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)" }}
                   />
                   {tab === "override" && (
-                    <select
+                    <OverflowSafeSelect
                       value={tagFilter}
                       onChange={e => setTagFilter(e.target.value)}
                       style={{ padding: "8px 8px", fontSize: 11, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)", maxWidth: 110 }}
@@ -349,7 +351,7 @@ export default function AdminPermissionCenterClient({
                       <option value="">全部标签</option>
                       <option value={NO_TAG}>无标签</option>
                       {allTags.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
+                    </OverflowSafeSelect>
                   )}
                 </div>
                 {tab === "dept" && deptTree.filter(({ dept }) => visibleDeptIds.has(dept.id)).map(({ dept, depth }) => (

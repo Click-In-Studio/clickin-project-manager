@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import PageHeader from "@/components/PageHeader";
 import AiInstructionsCard from "@/components/AiInstructionsCard";
 
@@ -388,7 +390,7 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
       <Row title="项目类型" hint="未来将绑定模版与导航别称">
         {!perms.canChangeType ? <LockedNotice reason="需要 production:change_type 权限" /> : (
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <select
+            <OverflowSafeSelect
               value={type}
               onChange={e => { setType(e.target.value); typeSave.clearSaved(); if (e.target.value !== "other") setTypeLabel(""); }}
               style={{ ...SELECT_STYLE, minWidth: 130, flex: "none" }}
@@ -396,7 +398,7 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
             >
               <option value="">— 未设置 —</option>
               {PRODUCTION_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
+            </OverflowSafeSelect>
             {type === "other" && (
               <input
                 value={typeLabel}

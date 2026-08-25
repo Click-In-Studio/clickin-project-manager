@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useState, useEffect } from "react";
 import {
   TTL_OPTIONS,
@@ -357,7 +359,7 @@ export default function AccessRequestModal({
                 <>
                   <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                     <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>资源类型</label>
-                    <select
+                    <OverflowSafeSelect
                       value={resourceType}
                       onChange={(e) => handleResourceChange(e.target.value)}
                       style={fieldStyle}
@@ -365,12 +367,12 @@ export default function AccessRequestModal({
                       {RESOURCE_OPTIONS.map((o) => (
                         <option key={o.type} value={o.type}>{o.label}</option>
                       ))}
-                    </select>
+                    </OverflowSafeSelect>
                   </div>
 
                   <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                     <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>权限级别</label>
-                    <select
+                    <OverflowSafeSelect
                       value={permissionLevel}
                       onChange={(e) => setPermissionLevel(e.target.value)}
                       style={fieldStyle}
@@ -378,14 +380,14 @@ export default function AccessRequestModal({
                       {currentOpt.levels.map((l) => (
                         <option key={l.value} value={l.value}>{l.label}</option>
                       ))}
-                    </select>
+                    </OverflowSafeSelect>
                   </div>
                 </>
               )}
 
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                 <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>有效期</label>
-                <select
+                <OverflowSafeSelect
                   value={ttlOption}
                   onChange={(e) => setTtlOption(e.target.value as TtlOptionValue)}
                   style={fieldStyle}
@@ -393,7 +395,7 @@ export default function AccessRequestModal({
                   {TTL_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
-                </select>
+                </OverflowSafeSelect>
                 {ttlOption === "custom" && (
                   <input
                     type="date"
