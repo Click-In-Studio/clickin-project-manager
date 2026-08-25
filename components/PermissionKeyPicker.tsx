@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { PRIMARY_BTN } from "@/components/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
-import { typeLabel, subLabel, verbLabel } from "@/lib/permission-labels";
+import { typeLabel, subLabel, verbLabel, groupResourceTypes } from "@/lib/permission-labels";
 
 export type Vocabulary = {
   verbs: Record<string, string[]>;
@@ -29,7 +29,9 @@ export default function PermissionKeyPicker({
   /** 限制可选动词 */
   verbFilter?: (verb: string) => boolean;
 }) {
-  const types = useMemo(() => Object.keys(vocabulary.verbs).sort(), [vocabulary]);
+  // 按域分组而非按类型键字母序：字母序排的是英文键，中文标签在下拉里就成了乱序
+  // （「部门」在「构作」前还是后，取决于 dept / dramaturgy 的拼写）。
+  const typeGroups = useMemo(() => groupResourceTypes(Object.keys(vocabulary.verbs)), [vocabulary]);
   const [type, setType] = useState("");
   const [resId, setResId] = useState("*");
   const [customId, setCustomId] = useState("");
@@ -78,7 +80,11 @@ export default function PermissionKeyPicker({
       <select value={type} onChange={e => setType(e.target.value)} style={{ ...FIELD, minWidth: 130 }}>
         <option value="">资源类型…</option>
         <option value="*">＊ 全部类型（通配）</option>
-        {types.map(t => <option key={t} value={t}>{typeLabel(t)}</option>)}
+        {typeGroups.map(g => (
+          <optgroup key={g.label} label={g.label}>
+            {g.types.map(t => <option key={t} value={t}>{typeLabel(t)}</option>)}
+          </optgroup>
+        ))}
       </select>
 
       {type && (

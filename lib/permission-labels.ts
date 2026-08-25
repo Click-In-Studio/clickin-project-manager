@@ -96,7 +96,12 @@ export const TYPE_LABELS: Record<string, string> = {
   asset: "数字资产",
   character: "角色（剧本）",
   cue_list: "Cue 表",
-  dept: "部门（提及）",
+  // 部门只有一个实体（production_dept）——event_department 已在
+  // migrate-merge-event-department 并表。这里两个类型是并表前的遗留：
+  //   org_dept = 部门本身的治理（建/删/改、成员、POC、权限行）
+  //   dept     = 同一个部门作为「被提备注的对象」，唯一的面是 dept/<D>/notes@*
+  // 展示名按「面」说人话，不再出现"组织"这个产品里并不存在的概念。
+  dept: "部门备注",
   dramaturgy: "构作",
   dramaturgy_view: "构作视图",
   event: "事件",
@@ -105,7 +110,8 @@ export const TYPE_LABELS: Record<string, string> = {
   member: "成员",
   milestone: "里程碑",
   note: "备注",
-  org_dept: "组织部门",
+  org_dept: "部门",
+  phase: "阶段",
   producer: "制作人域",
   production: "项目",
   report: "报告",
@@ -118,6 +124,44 @@ export const TYPE_LABELS: Record<string, string> = {
   user_group: "用户组",
   wiki: "文档",
 };
+
+/**
+ * 资源类型的分组与展示顺序。
+ *
+ * 字母序对人没有意义——`dept` / `dramaturgy` / `event` / `finance` 挨在一起，
+ * 找「谁批部门的事」得从头扫到尾。这里按「一个人在演出里怎么想事情」分组：
+ * 内容 → 排演 → 计划 → 钱与物 → 人与组织 → 文档通告。
+ *
+ * 未列入的类型（新登记的、或这里忘了补的）由 groupResourceTypes 收进「其他」，
+ * 不会因为漏登记就从界面上消失。
+ */
+export const TYPE_GROUPS: ReadonlyArray<{ label: string; types: readonly string[] }> = [
+  { label: "剧本与内容", types: ["script", "script_view", "scene", "character", "dramaturgy", "dramaturgy_view"] },
+  { label: "排演与执行", types: ["event", "report", "task", "cue_list", "note"] },
+  { label: "计划", types: ["milestone", "phase"] },
+  { label: "资产与财务", types: ["asset", "material", "finance"] },
+  { label: "人与部门", types: ["member", "org_dept", "role", "dept"] },
+  { label: "文档与通告", types: ["wiki", "announcement", "tag_group"] },
+  // 治理域排最后：权限键选择器里它们最少用，且 SENSITIVE/ROOT 面本来就写不进模板。
+  { label: "项目治理", types: ["production", "producer"] },
+];
+
+/** 把一批资源类型按 TYPE_GROUPS 分组排好；组内按 TYPE_GROUPS 的次序，不按字母。 */
+export function groupResourceTypes(
+  types: readonly string[],
+): { label: string; types: string[] }[] {
+  const remaining = new Set(types);
+  const out: { label: string; types: string[] }[] = [];
+  for (const group of TYPE_GROUPS) {
+    const hit = group.types.filter((t) => remaining.has(t));
+    hit.forEach((t) => remaining.delete(t));
+    if (hit.length > 0) out.push({ label: group.label, types: hit });
+  }
+  if (remaining.size > 0) {
+    out.push({ label: "其他", types: [...remaining].sort() });
+  }
+  return out;
+}
 
 export const SUB_LABELS: Record<string, string> = {
   "*": "（主面）",
