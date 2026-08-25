@@ -77,3 +77,10 @@ describe("loginDest / inviteTokenFromDest", () => {
     expect(inviteTokenFromDest()).toBeUndefined();
   });
 });
+
+describe("飞书授权入口带上注册凭据", () => {
+  it("首帧是裸链接（SSR 与 hydrate 一致，凭据尚未从 URL 读出）", () => {
+    const html = renderToString(createElement(LoginClient, { inviteOnly: true }));
+    expect(html).toContain('href="/api/auth/feishu/initiate"');
+  });
+});

@@ -30,7 +30,27 @@ export default function LoginClient({ inviteOnly }: { inviteOnly?: boolean }) {
   // 渲染期不能直接读 window（SSR 与首次 hydrate 都拿不到），改由 effect 落进 state：
   // 服务端与客户端首帧都是 undefined，一致，不会 hydration mismatch。
   const [inviteToken, setInviteToken] = useState<string | undefined>(undefined);
-  useEffect(() => { setInviteToken(inviteTokenFromDest()); }, []);
+  const [nextDest, setNextDest] = useState("/");
+  useEffect(() => {
+    setInviteToken(inviteTokenFromDest());
+    setNextDest(loginDest());
+    // OAuth 通道的注册门在回调里拒绝时，会重定向回来并把文案挂在 ?error= 上
+    // （服务端文案已面向用户）。不接住的话用户只会看到一个干净的登录页。
+    const e = new URLSearchParams(window.location.search).get("error");
+    if (e) setError(e === "auth_failed" ? "登录失败，请重试" : e);
+  }, []);
+
+  // 飞书授权入口要把注册凭据带过去：它们在 initiate 那一步被收进 httpOnly cookie，
+  // 跨越「跳到飞书再跳回来」这一次往返，不会编进 state 落到第三方日志里。
+  // SSR 与客户端首帧都是不带参数的裸链接（state 尚未填充），两边一致，不会 mismatch。
+  const feishuHref = (() => {
+    const q = new URLSearchParams();
+    if (regCode.trim()) q.set("reg_code", regCode.trim());
+    if (inviteToken) q.set("invite_token", inviteToken);
+    if (nextDest !== "/") q.set("next", nextDest);
+    const qs = q.toString();
+    return `/api/auth/feishu/initiate${qs ? `?${qs}` : ""}`;
+  })();
 
   async function handleEmailSubmit(e: FormEvent) {
     e.preventDefault();
@@ -209,7 +229,7 @@ export default function LoginClient({ inviteOnly }: { inviteOnly?: boolean }) {
             </div>
 
             <a
-              href="/api/auth/feishu/initiate"
+              href={feishuHref}
               style={{ display: "block", textAlign: "center", borderRadius: 9, padding: "10px 0", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink)", textDecoration: "none" }}
             >
               使用飞书登录
