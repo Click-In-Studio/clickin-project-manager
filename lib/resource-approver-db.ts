@@ -35,6 +35,24 @@ export function isDelegableResourceType(resourceType: string): boolean {
   return !NON_DELEGABLE_RESOURCE_TYPES.includes(resourceType);
 }
 
+/**
+ * 已登记词汇但判定侧不读的死类型——配了永不生效。
+ *
+ * tech_req：REST 化时任务类型定为 'task'，tech_req 的动词行留在词表里没删，
+ * 判定侧一律只读 'task'（见 resource-grant-db.ts「曾误写 resource_type='tech_req'
+ * 死行」那段）。它今天只作为通知的 entity_type 存活，与权限类型不是一个命名空间。
+ */
+const DEAD_RESOURCE_TYPES: readonly string[] = ["tech_req"];
+
+/**
+ * 能不能配审批人。**清册与写入门共用这一个判据**——两处各写各的，就会出现
+ * 「界面上点不到、API 直接 PUT 能存进去」的死配置（AI review 抓到的正是这个：
+ * 清册滤了死类型、写入门只滤不可委派类型）。
+ */
+export function isConfigurableResourceType(resourceType: string): boolean {
+  return isDelegableResourceType(resourceType) && !DEAD_RESOURCE_TYPES.includes(resourceType);
+}
+
 export type ResourceApproverEntry = {
   resourceType: string;
   /** 审批部门：进阶梯的是该部门的 POC，不是全体部门成员。 */
@@ -45,6 +63,7 @@ export type ResourceApproverEntry = {
 
 export type ResourceApproverErrorCode =
   | "non_delegable"
+  | "dead_type"
   | "unknown_type"
   | "bad_dept"
   | "bad_user";
@@ -58,6 +77,7 @@ export class ResourceApproverError extends Error {
 
 const ERROR_MESSAGES: Record<ResourceApproverErrorCode, string> = {
   non_delegable: "演出本身与制作人域的审批不可委派（敏感面恒由所有者审批，其余落制作人）",
+  dead_type: "该资源类型的权限行判定侧已不读，配了审批人也不会生效",
   unknown_type: "未登记的资源类型",
   bad_dept: "审批部门不属于本演出",
   bad_user: "审批人不是本演出成员",
@@ -67,22 +87,12 @@ export function resourceApproverErrorMessage(code: ResourceApproverErrorCode): s
   return ERROR_MESSAGES[code];
 }
 
-/**
- * 已登记词汇但判定侧不读的死类型——清册里要滤掉，否则配了个永远不生效的审批人。
- * tech_req：REST 化时任务类型定为 'task'，tech_req 的动词行留在词表里没删，
- * 判定侧一律只读 'task'（见 resource-grant-db.ts「曾误写 resource_type='tech_req'
- * 死行」那段）。它今天只作为通知的 entity_type 存活，与权限类型不是一个命名空间。
- */
-const DEAD_RESOURCE_TYPES: readonly string[] = ["tech_req"];
-
 /** 可配审批人的资源类型清册：已登记动词行的类型全集，减去不可委派的与死类型。 */
 export async function listDelegableResourceTypes(): Promise<string[]> {
   const { rows } = await getPool().query<{ resource_type: string }>(
     `SELECT DISTINCT resource_type FROM resource_permission_level ORDER BY resource_type`,
   );
-  return rows
-    .map((r) => r.resource_type)
-    .filter((t) => isDelegableResourceType(t) && !DEAD_RESOURCE_TYPES.includes(t));
+  return rows.map((r) => r.resource_type).filter(isConfigurableResourceType);
 }
 
 /**
@@ -137,6 +147,12 @@ export async function setResourceApprovers(params: {
 
   if (!isDelegableResourceType(resourceType)) {
     throw new ResourceApproverError("non_delegable");
+  }
+  // 死类型与清册同源拦在这里，不是只靠 UI 不展示：API 直接 PUT 一个 tech_req
+  // 也能过 resource_permission_level 的存在性检查，存下来就是一条谁也不读、
+  // 却会在配置面上回显的假配置。
+  if (!isConfigurableResourceType(resourceType)) {
+    throw new ResourceApproverError("dead_type");
   }
 
   const pool = getPool();

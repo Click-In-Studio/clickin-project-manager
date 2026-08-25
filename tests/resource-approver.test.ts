@@ -13,12 +13,13 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
 import { addProductionMember } from "@/lib/db";
 import { createProductionDept, setDeptMembers, addResourceDeptManage } from "@/lib/dept-db";
-import { buildApprovalLadder } from "@/lib/approval-routing";
+import { buildApprovalLadder, findProducers } from "@/lib/approval-routing";
 import {
   listDelegableResourceTypes,
   listResourceApprovers,
   setResourceApprovers,
   isDelegableResourceType,
+  isConfigurableResourceType,
   ResourceApproverError,
 } from "@/lib/resource-approver-db";
 import { groupResourceTypes } from "@/lib/permission-labels";
@@ -137,6 +138,32 @@ describe("写入门", () => {
     expect(rows.length).toBe(0);
   });
 
+  it("死类型 tech_req 拒收——清册滤了不算数，API 直接 PUT 也得拦住", async () => {
+    // tech_req 在 resource_permission_level 里有行，过得了存在性检查；
+    // 拦它的必须是与清册同源的那道门，否则存下来就是一条谁也不读的假配置。
+    await expect(
+      setResourceApprovers({
+        productionId: prodId, resourceType: "tech_req",
+        deptIds: [hrDeptId], userIds: [], establishedBy: U_OWNER,
+      }),
+    ).rejects.toMatchObject({ code: "dead_type" });
+
+    const { rows } = await getPool().query(
+      `SELECT 1 FROM resource_dept_manage WHERE production_id = $1 AND resource_type = 'tech_req'`,
+      [prodId],
+    );
+    expect(rows.length).toBe(0);
+  });
+
+  it("清册与写入门同源：清册里没有的类型，写入门也不收", async () => {
+    const listed = new Set(await listDelegableResourceTypes());
+    for (const t of ["production", "producer", "tech_req"]) {
+      expect(listed.has(t)).toBe(false);
+      expect(isConfigurableResourceType(t)).toBe(false);
+    }
+    for (const t of listed) expect(isConfigurableResourceType(t)).toBe(true);
+  });
+
   it("未登记的资源类型拒收", async () => {
     await expect(
       setResourceApprovers({
@@ -225,6 +252,30 @@ describe("路由命中", () => {
     const stage = (await buildApprovalLadder(memberTarget())).find((s) => s.stage === "dept_poc");
     expect(stage?.approverIds).toEqual([U_HR_PERSON]);
     await clearMemberApprovers();
+  });
+});
+
+describe("共享判据：findProducers", () => {
+  it("配置面的门与阶梯的制作人级读同一份判据（谁改了两边一起变）", async () => {
+    // #326 起 findProducers 从模块私有转出：审批阶梯的制作人级用它，
+    // 「谁能配资源审批人」的门也用它。这条钉住的就是这层耦合——若哪天有人给
+    // 其中一侧另写一份「制作人」判据，两处会悄悄分家，这里先红。
+    const pool = getPool();
+    await pool.query(
+      `UPDATE production_member SET roles = ARRAY['制作人']
+       WHERE production_id = $1 AND user_id = $2`,
+      [prodId, U_HR_PERSON],
+    );
+    try {
+      expect(await findProducers(prodId)).toContain(U_HR_PERSON);
+      const ladder = await buildApprovalLadder(memberTarget());
+      expect(ladder.find((s) => s.stage === "producer")?.approverIds).toContain(U_HR_PERSON);
+    } finally {
+      await pool.query(
+        `UPDATE production_member SET roles = '{}' WHERE production_id = $1 AND user_id = $2`,
+        [prodId, U_HR_PERSON],
+      );
+    }
   });
 });
 
