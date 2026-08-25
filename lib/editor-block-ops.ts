@@ -7,6 +7,7 @@
 // 抽成 lib 而不是写在组件里，是为了能对着真实 Editor 测「操作后序列化成什么」——
 // 块操作最容易出的错不是点了没反应，而是**结构被改坏但要等下次保存才暴露**。
 import { NodeSelection } from "@tiptap/pm/state";
+import type { Transaction } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { removeColumnsAt, insertColumnAt } from "./tiptap-column-editing";
@@ -19,6 +20,20 @@ export function getSelectedBlock(editor: Editor): SelectedBlock | null {
   const sel = editor.state.selection;
   if (!(sel instanceof NodeSelection)) return null;
   return { node: sel.node, pos: sel.from, end: sel.to };
+}
+
+/**
+ * 把 pos 处的节点设为整块选中。**选不中就算了，不抛。**
+ *
+ * NodeSelection.create 在目标不可选中时会抛；而调用它的地方都是"内容已经改好
+ * 了，顺手把选中放回去"——为了一个选区把整次操作抛进点击处理里，是拿一次崩溃
+ * 换一次选中，不划算。别处（selectColumnGroup / changeColumnCount）本来就是
+ * 这么兜的，这里补齐一致性。
+ */
+function selectNodeAt(tr: Transaction, pos: number): void {
+  try {
+    tr.setSelection(NodeSelection.create(tr.doc, pos));
+  } catch { /* 目标不可选中：内容已经搬好，选不中不影响正确性 */ }
 }
 
 /** 把整块选中收敛回块内文本光标位——转换类型这类命令吃的是文本选区 */
@@ -42,22 +57,20 @@ export function moveBlock(editor: Editor, dir: -1 | 1): boolean {
   if (dir < 0 && index === 0) return false;
   if (dir > 0 && index >= parent.childCount - 1) return false;
 
-  const size = block.end - block.pos;
+  // 落点先按**删除前**的坐标取，再用 tr.mapping 映射到删除后。
+  // 原先是分方向手算（下移时减去自身长度），算得没错，但那种位置记账正是
+  // 一改结构就会悄悄失效的写法——本模块存在的理由就是"结构被改坏要等下次
+  // 保存才暴露"，不该在自己身上留这种账。映射之后两个方向合成一条路径。
+  const target = dir < 0
+    ? $pos.posAtIndex(index - 1, depth)   // 前一个兄弟的起点
+    : $pos.posAtIndex(index + 2, depth);  // 后一个兄弟的终点
   const tr = state.tr;
-  let landing: number;
-  if (dir < 0) {
-    // 前一个兄弟的起点。删除发生在它之后，所以这个坐标不受删除影响
-    landing = $pos.posAtIndex(index - 1, depth);
-    tr.delete(block.pos, block.end);
-    tr.insert(landing, block.node);
-  } else {
-    // 后一个兄弟的终点，减去被删掉的自身长度
-    landing = $pos.posAtIndex(index + 2, depth) - size;
-    tr.delete(block.pos, block.end);
-    tr.insert(landing, block.node);
-  }
-  // 移完保持选中——连按两下上移是最自然的用法，每次都要重新点手柄就废了
-  tr.setSelection(NodeSelection.create(tr.doc, landing));
+  tr.delete(block.pos, block.end);
+  const landing = tr.mapping.map(target);
+  tr.insert(landing, block.node);
+  // 移完保持选中——连按两下上移是最自然的用法，每次都要重新点手柄就废了。
+  // 选不中不算失败：内容已经搬好了，为了个选区把整次操作抛出去更糟
+  selectNodeAt(tr, landing);
   editor.view.dispatch(tr.scrollIntoView());
   return true;
 }
@@ -68,7 +81,7 @@ export function duplicateBlock(editor: Editor): boolean {
   if (!block) return false;
   const tr = editor.state.tr;
   tr.insert(block.end, block.node);
-  tr.setSelection(NodeSelection.create(tr.doc, block.end));
+  selectNodeAt(tr, block.end);
   editor.view.dispatch(tr.scrollIntoView());
   return true;
 }
@@ -98,7 +111,8 @@ export type TurnIntoOption = {
   label: string;
   icon: string;
   hint: string;
-  run: (editor: Editor, inside: number) => void;
+  /** 返回底层命令的成败 —— 见 turnInto 的注释，不许吞 */
+  run: (editor: Editor, inside: number) => boolean;
 };
 
 function option(id: BlockTypeId, run: TurnIntoOption["run"]): TurnIntoOption {
@@ -127,13 +141,18 @@ export function canTurnInto(node: PMNode | null): boolean {
   return !!node && !UNCONVERTIBLE.has(node.type.name);
 }
 
+/**
+ * 转换当前选中块的类型。返回的是**底层命令的真实成败**，不是"我调过了"。
+ *
+ * 原先无条件返回 true，把 chain().run() 的结果丢掉了：toggleWrap 拒绝、
+ * setTextSelection 之后选区失效之类的静默失败，调用侧一律看成成功。
+ */
 export function turnInto(editor: Editor, optionId: string): boolean {
   const block = getSelectedBlock(editor);
   if (!block || !canTurnInto(block.node)) return false;
   const opt = TURN_INTO.find(o => o.id === optionId);
   if (!opt) return false;
-  opt.run(editor, insidePos(block));
-  return true;
+  return opt.run(editor, insidePos(block));
 }
 
 // ── 分栏操作 ─────────────────────────────────────────────────────────────────

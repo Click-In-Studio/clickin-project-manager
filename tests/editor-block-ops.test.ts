@@ -117,6 +117,34 @@ describe("移动 / 复制 / 删除", () => {
     e.destroy();
   });
 
+  // review 点名的高风险路径：下移那一支原先是手算落点。现在两个方向都走
+  // tr.mapping，这条盯住"下移之后正文仍能逐字往返"
+  it("下移之后落地形态仍可逐字往返", () => {
+    const e = makeEditor("甲\n\n## 乙\n\n> 丙");
+    selectTopBlock(e, 0);
+    expect(moveBlock(e, 1)).toBe(true);
+    const produced = md(e);
+    expect(produced).toBe("## 乙\n\n甲\n\n> 丙");
+    e.destroy();
+    const again = makeEditor(produced);
+    expect(md(again)).toBe(produced);
+    again.destroy();
+  });
+
+  it("下移带方言的块（分栏整组）后 fence 完好", () => {
+    const e = makeEditor(":::cols\n\n左\n\n---\n\n右\n\n:::\n\n甲");
+    selectTopBlock(e, 0);
+    expect(moveBlock(e, 1)).toBe(true);
+    const out = md(e);
+    expect(out.startsWith("甲")).toBe(true);
+    expect(out).toContain(":::cols");
+    expect(out).toContain("\n---\n");
+    e.destroy();
+    const again = makeEditor(out);
+    expect(md(again)).toBe(out);
+    again.destroy();
+  });
+
   it("带方言的块移动后形态不变（分栏整组上移，fence 完好）", () => {
     const e = makeEditor("甲\n\n:::cols\n\n左\n\n---\n\n右\n\n:::");
     const before = md(e);
@@ -165,6 +193,26 @@ describe("转换类型", () => {
     expect(canTurnInto(getSelectedBlock(e)!.node)).toBe(false);
     expect(turnInto(e, "h2")).toBe(false);
     expect(md(e)).toBe(before);
+    e.destroy();
+  });
+
+  // review 点名：原先无条件返回 true，把 chain().run() 的成败丢掉了。
+  // 顺带记下一个真实行为——turnInto 会把整块选中收敛成块内文本光标（那些
+  // 命令吃的是文本选区），所以**连着调第二次必然失败**，除非重新选中。
+  // UI 上无碍（手柄菜单点完就关），但接口语义得说清楚
+  it("返回底层命令的真实成败；且它会吃掉整块选中", () => {
+    const e = makeEditor("甲");
+    selectTopBlock(e, 0);
+    expect(turnInto(e, "h2")).toBe(true);
+    expect(md(e)).toBe("## 甲");
+    // 选中已经不是 NodeSelection 了，第二次直接被 getSelectedBlock 挡回来
+    expect(getSelectedBlock(e)).toBeNull();
+    expect(turnInto(e, "h3")).toBe(false);
+    expect(md(e)).toBe("## 甲");
+    // 重新选中之后照常可用
+    selectTopBlock(e, 0);
+    expect(turnInto(e, "h3")).toBe(true);
+    expect(md(e)).toBe("### 甲");
     e.destroy();
   });
 
