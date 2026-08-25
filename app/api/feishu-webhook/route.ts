@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTenantAccessToken, getBotOpenId } from "@/lib/platform/feishu/feishu-auth";
 import { getUserName } from "@/lib/platform/feishu/feishu-webhook";
-import { upsertContactUser } from "@/lib/db";
 import { resolveUserId } from "@/agent/db";
 import { processMessage as agentProcessMessage, processButtonClick } from "@/agent/index";
 import type { BotContext, HistoryMessage } from "@/agent/types";
@@ -153,11 +152,9 @@ export async function POST(req: NextRequest) {
           void processMessage(event.raw as Record<string, unknown>).catch((err) =>
             console.error("[feishu-webhook] unhandled error:", err),
           );
-        } else if (event.type === "user_created" || event.type === "user_updated") {
-          void handleContactUserEvent(event.raw as Record<string, unknown>).catch((err) =>
-            console.error("[feishu-webhook] contact user event error:", err),
-          );
         }
+        // user_created / user_updated（飞书通讯录变更）不再建号：飞书组织里有这个人
+        // ≠ 他注册了本产品。注册一律由本人走完，管理侧只发码。事件收到即忽略。
       },
     },
   });
@@ -167,23 +164,6 @@ export async function POST(req: NextRequest) {
   }
 
   return cardActionResponse ?? NextResponse.json({ ok: true });
-}
-
-async function handleContactUserEvent(body: Record<string, unknown>): Promise<void> {
-  const event = body.event as {
-    object?: {
-      open_id?: string;
-      name?: string;
-      email?: string;
-      mobile?: string;
-      avatar?: { avatar_240?: string; avatar_72?: string };
-    };
-  } | undefined;
-  const u = event?.object;
-  if (!u?.open_id || !u?.name) return;
-  const avatarUrl = u.avatar?.avatar_240 ?? u.avatar?.avatar_72 ?? null;
-  await upsertContactUser(u.open_id, u.name, avatarUrl, u.email ?? null, u.mobile ?? null);
-  console.log(`[feishu-webhook] contact user synced: ${u.name} (${u.open_id})`);
 }
 
 async function handleCardAction(body: Record<string, unknown>): Promise<NextResponse> {

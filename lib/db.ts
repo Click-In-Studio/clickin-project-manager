@@ -1,7 +1,7 @@
 import { getPool } from "./pg";
 import { notifyUser, notifyUsers } from "./notify";
 export type { UserInfo } from "./db-feishu";
-export { upsertFeishuUser, getFeishuUser } from "./db-feishu";
+export { upsertFeishuUser, getFeishuUser, attachFeishuToUser } from "./db-feishu";
 import type { UserInfo } from "./db-feishu";
 import { SERVER_URL } from "./server-url";
 import type { Pool, PoolClient } from "pg";
@@ -3171,60 +3171,6 @@ export async function removeProductionMember(productionId: string, userId: strin
   }
 }
 
-type UserSearchRow = {
-  user_id: string; name: string; avatar_url: string | null; email: string | null; phone: string | null;
-};
-
-function rowToUserSearchResult(r: UserSearchRow) {
-  return {
-    userId: r.user_id,
-    name: r.name,
-    avatarUrl: r.avatar_url,
-    email: r.email,
-    phone: r.phone,
-    hint: r.email ?? (r.phone && r.phone.length >= 4
-      ? r.phone.replace(/(\d{3})\d+(\d{4})/, "$1****$2")
-      : r.phone),
-  };
-}
-
-// 全体已知用户目录（含纯邮箱用户）：档案层为正主，email/phone 以
-// identity/档案优先、飞书同步值回落。
-const USER_DIRECTORY_SQL = `
-  SELECT up.user_id, up.name, up.avatar_url,
-         COALESCE(
-           (SELECT upi.platform_user_id FROM user_platform_identity upi
-            WHERE upi.user_id = up.user_id AND upi.platform_id = 'email'
-            ORDER BY upi.is_primary DESC, upi.created_at DESC LIMIT 1),
-           fu.email
-         ) AS email,
-         COALESCE(up.phone, fu.phone) AS phone
-  FROM user_profile up
-  LEFT JOIN feishu_user fu ON fu.user_id = up.user_id`;
-
-export async function searchUsersByName(query: string): Promise<{
-  userId: string; name: string; avatarUrl: string | null;
-  email: string | null; phone: string | null; hint: string | null;
-}[]> {
-  const res = await getPool().query<UserSearchRow>(
-    `${USER_DIRECTORY_SQL}
-     WHERE up.name ILIKE $1
-     ORDER BY up.name LIMIT 20`,
-    [`%${query}%`],
-  );
-  return res.rows.map(rowToUserSearchResult);
-}
-
-export async function listAllUsersWithContact(): Promise<{
-  userId: string; name: string; avatarUrl: string | null;
-  email: string | null; phone: string | null; hint: string | null;
-}[]> {
-  const res = await getPool().query<UserSearchRow>(
-    `${USER_DIRECTORY_SQL} ORDER BY up.name`,
-  );
-  return res.rows.map(rowToUserSearchResult);
-}
-
 export async function setMemberRoles(
   productionId: string,
   userId: string,
@@ -3260,47 +3206,6 @@ export async function setMemberRoles(
     // Cascade-revoke self_confirmed grants no longer covered by new roles or dept zone.
     await recomputeAndRevokeGrants(userId, productionId, "role_change", client);
 
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
-  } finally {
-    client.release();
-  }
-}
-
-export async function updateUserContact(
-  userId: string,
-  email: string | null,
-  phone: string | null,
-): Promise<void> {
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    if (phone) {
-      await client.query(
-        `INSERT INTO user_profile (user_id, name, phone) VALUES ($1, '', $2)
-         ON CONFLICT (user_id) DO UPDATE SET phone = EXCLUDED.phone, updated_at = now()`,
-        [userId, phone],
-      );
-    }
-    if (email) {
-      // 联系邮箱落 identity 层（非登录、非 primary）；先退役旧联系邮箱行，
-      // 避免多行累积导致读取不确定。登录/primary 行不动；已被占用则跳过
-      await client.query(
-        `DELETE FROM user_platform_identity
-         WHERE user_id = $1 AND platform_id = 'email'
-           AND is_login_method = false AND is_primary = false
-           AND platform_user_id <> $2`,
-        [userId, email],
-      );
-      await client.query(
-        `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method, is_primary)
-         VALUES ($1, 'email', $2, false, false)
-         ON CONFLICT (platform_id, platform_user_id) DO NOTHING`,
-        [userId, email],
-      );
-    }
     await client.query("COMMIT");
   } catch (e) {
     await client.query("ROLLBACK");
@@ -3792,59 +3697,6 @@ export async function findUserByName(name: string): Promise<{ userId: string } |
     [name],
   );
   return res.rows[0] ? { userId: res.rows[0].user_id } : null;
-}
-
-/**
- * Upsert a user sourced from the contact sheet or Feishu directory.
- * Creates an app_user row for new users. Returns the internal userId.
- */
-export async function upsertContactUser(
-  openId: string,
-  name: string,
-  avatarUrl: string | null,
-  email: string | null,
-  phone: string | null,
-): Promise<{ userId: string }> {
-  const pool = getPool();
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const existing = await client.query<{ user_id: string }>(
-      "SELECT user_id FROM feishu_user WHERE open_id = $1",
-      [openId],
-    );
-    let userId: string;
-    if (existing.rows.length > 0) {
-      userId = existing.rows[0].user_id;
-      await client.query(
-        `UPDATE feishu_user
-         SET name       = $1,
-             avatar_url = COALESCE($2, avatar_url),
-             email      = COALESCE($3, email),
-             phone      = COALESCE($4, phone),
-             updated_at = now()
-         WHERE open_id = $5`,
-        [name, avatarUrl, email, phone, openId],
-      );
-    } else {
-      const { rows } = await client.query<{ id: string }>(
-        "INSERT INTO app_user DEFAULT VALUES RETURNING id",
-      );
-      userId = rows[0].id;
-      await client.query(
-        `INSERT INTO feishu_user (open_id, name, avatar_url, email, phone, user_id, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now())`,
-        [openId, name, avatarUrl, email, phone, userId],
-      );
-    }
-    await client.query("COMMIT");
-    return { userId };
-  } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
-  } finally {
-    client.release();
-  }
 }
 
 export type CharacterDetail = Character & {

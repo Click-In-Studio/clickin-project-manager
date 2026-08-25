@@ -139,7 +139,6 @@ export type SettingsPerms = {
   canChangeLanguage: boolean;
   canArchive: boolean;
   canDelete: boolean;
-  canImportContacts: boolean;
   canImportScript: boolean;
   canImportScenes: boolean;
   canManageTags: boolean;
@@ -611,76 +610,15 @@ function MemberTagsCard({ productionId, perms }: { productionId: string; perms: 
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function DataCard({ productionId, perms }: { productionId: string; perms: SettingsPerms }) {
-  const [url, setUrl] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
-
-  const handleImport = async () => {
-    const trimmed = url.trim();
-    if (!trimmed) return;
-    setLoading(true);
-    setResult(null);
-    try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/import-contacts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wikiUrl: trimmed }),
-      });
-      const data = await res.json() as { ok?: boolean; stats?: { matched: number; created: number; notFound: string[] }; error?: string };
-      if (res.ok && data.stats) {
-        const { matched, created, notFound } = data.stats;
-        const parts: string[] = [];
-        if (matched) parts.push(`匹配 ${matched} 人`);
-        if (created) parts.push(`新建 ${created} 人`);
-        const notFoundMsg = notFound.length ? `；${notFound.length} 人未找到：${notFound.slice(0, 5).join("、")}${notFound.length > 5 ? "…" : ""}` : "";
-        setResult({ ok: true, message: `导入完成：${parts.join("，") || "无变化"}${notFoundMsg}` });
-        setUrl("");
-      } else {
-        setResult({ ok: false, message: (data as { error?: string }).error ?? "导入失败" });
-      }
-    } catch {
-      setResult({ ok: false, message: "网络错误" });
-    } finally { setLoading(false); }
-  };
-
+  // 通讯录导入（import-contacts）已退役：它替表格里的人直接建号，而注册必须由本人
+  // 走完。拉人一律走「数据迁移」页的批量邀请（发码），输入的同样是飞书表格链接。
   const importLinks = [
     { label: "导入剧本", desc: "从飞书表格导入台词、角色、场景号", href: `/production/${productionId}/import-script`, can: perms.canImportScript, lock: "" },
     { label: "导入构作", desc: "从飞书表格导入场次、梗概、时长", href: `/production/${productionId}/import-scenes`, can: perms.canImportScenes, lock: "" },
   ];
 
-  const inputFocus = (e: React.FocusEvent<HTMLInputElement>) => { e.currentTarget.style.borderColor = "var(--ink)"; };
-  const inputBlur = (e: React.FocusEvent<HTMLInputElement>) => { e.currentTarget.style.borderColor = "var(--line)"; };
-
   return (
     <Card title="数据">
-      {/* 批量导入人员 */}
-      <Row title="批量导入人员" hint="从飞书多维表格同步通讯录">
-        {!perms.canImportContacts ? <LockedNotice reason="需要 contacts:import 权限" /> : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                value={url}
-                onChange={e => { setUrl(e.target.value); setResult(null); }}
-                onKeyDown={e => { if (e.key === "Enter") handleImport(); }}
-                placeholder="粘贴飞书多维表格 Wiki 链接…"
-                style={{ ...INPUT, flex: 1 }}
-                onFocus={inputFocus} onBlur={inputBlur}
-              />
-              <button
-                onClick={handleImport}
-                disabled={!url.trim() || loading}
-                style={{ ...BTN(!!url.trim()), background: url.trim() ? "var(--script)" : "var(--line)", color: url.trim() ? "white" : "var(--muted)" }}
-              >
-                {loading ? "导入中…" : "导入"}
-              </button>
-            </div>
-            {result && (
-              <p style={{ fontSize: 12, color: result.ok ? "#16a34a" : "#dc2626" }}>{result.message}</p>
-            )}
-          </div>
-        )}
-      </Row>
-
       {/* 导入剧本 / 构作 */}
       <Row title="导入数据" hint="跳转至专属导入页面" last>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { exchangeCode, getUserInfo, TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
-import { bindPlatformIdentity, getUserProfile, upsertFeishuUser, getFeishuUser } from "@/lib/db";
+import { bindPlatformIdentity, getUserProfile, attachFeishuToUser, getFeishuUser } from "@/lib/db";
 import { signConflictToken } from "@/lib/platform/email/email-tokens";
 import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS, OAUTH_STATE_COOKIE } from "@/lib/session";
 
@@ -40,11 +40,22 @@ export async function GET(req: NextRequest) {
   const info = await getUserInfo(tokenData.userAccessToken);
   if (!info) return NextResponse.redirect(new URL("/account?bind_error=feishu_failed", base));
 
-  // Ensure feishu_user row exists (needed for FK in notification system, etc.)
+  // 确保 feishu_user 行存在（通知系统等处有 FK 依赖），并挂到**当前登录账号**上。
+  // 这里绝不能用 upsertFeishuUser——那是注册入口，遇到新 open_id 会 INSERT 一个新
+  // app_user，把飞书行绑到那个凭空造出的账号上，与本人账号裂开。绑定 ≠ 注册。
   const existingFeishu = await getFeishuUser(info.openId);
   if (!existingFeishu) {
-    // New Feishu identity — upsert into feishu_user bound to sourceUserId
-    await upsertFeishuUser(info.openId, info.name, info.avatarUrl ?? null, false);
+    const attached = await attachFeishuToUser(sourceUserId, info.openId, info.name, info.avatarUrl ?? null);
+    if (!attached.ok) {
+      switch (attached.reason) {
+        case "user_has_other_feishu":
+          return NextResponse.redirect(new URL("/account?bind_error=feishu_already_bound", base));
+        case "openid_taken":
+          // 该 open_id 已属他人（含并发抢注）：feishu_user 行必然已存在，FK 依赖满足，
+          // 交给下面的 bindPlatformIdentity 走既有的 conflict → merge 流程。
+          break;
+      }
+    }
   }
 
   const bindResult = await bindPlatformIdentity(sourceUserId, "feishu", info.openId);
