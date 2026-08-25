@@ -684,8 +684,10 @@ export default function SmartTextarea({
       atMentionCfg,
     ];
 
-    // image 节点仅在提供 imageUpload 的面（wiki）注册：src 存 /__cm__/asset/<id>，
-    // 展示经 thumb 端点（session 鉴权，img src 直接可流）
+    // image 节点**全站注册**（不再按 imageUpload 门控）：schema 统一之后，不认识
+    // image 就等于把正文里的图片吃掉，而非 wiki 的面还没有保真锁兜底。
+    // 能不能**新增**图片仍由 imageUpload 决定——上传器、粘贴占位都挂在它上面。
+    // src 存 /__cm__/asset/<id>，展示经 thumb 端点（session 鉴权，img src 直接可流）
     const imageExt = WikiImage.configure({
       resolveSrc: (src) => {
         const assetId = decodeAssetSrc(src); // 新旧形态双读
@@ -715,7 +717,8 @@ export default function SmartTextarea({
       Callout, Column, ColumnGroup, ColumnEditing,
       // 拖拽造栏、栏宽拖拽只在有手柄的面才有意义（也才有那条栏间沟槽放操作件）
       ...(hasColumnTools ? [ColumnDrop, ColumnResize] : []),
-      ...(hasImageUpload ? [imageExt, UploadPlaceholder] : []),
+      imageExt,
+      ...(hasImageUpload ? [UploadPlaceholder] : []),
       ...commonExts, wikiTriggerCfg, slashTriggerCfg, remoteCursorExt];
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markdown, remoteCursorExt, hasImageUpload, blockTools, hasColumnTools]);
