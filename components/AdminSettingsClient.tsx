@@ -298,7 +298,7 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
   return (
     <Card title="基本信息">
       {/* 项目名称 */}
-      <Row title="项目名称" hint="显示于项目列表、管理后台标题栏">
+      <Row title="项目名称" hint="显示于项目列表、配置中心标题栏">
         {!perms.canRename ? <LockedNotice reason="需要 production:rename 权限" /> : (
           <div style={{ display: "flex", gap: 8 }}>
             <input
