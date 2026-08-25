@@ -40,8 +40,8 @@ export default async function PermissionCenterPage({ params }: { params: Promise
 
   // 四 tab 各自 view/edit 双门；无 view 门的 tab 数据不出服务端。
   const [deptEdit, deptViewOnly, roleEdit, overrideEdit, canViewContact, isProducer, approverGrantEdit, approverGrantView] = await Promise.all([
-    bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "grants", "edit"),
-    bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "grants", "view"),
+    bypass || hasGrant(permCtx.userId, id, "dept", "*", "grants", "edit"),
+    bypass || hasGrant(permCtx.userId, id, "dept", "*", "grants", "view"),
     bypass || hasGrant(permCtx.userId, id, "role", "*", "grants", "edit"),
     bypass || hasGrant(permCtx.userId, id, "member", "*", "overrides", "edit"),
     bypass || hasGrant(permCtx.userId, id, "member", "*", "contact", "view"),

@@ -17,8 +17,8 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function GET(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
   const { deny } = await requireGrantGate(req, id, [
-    ["org_dept", "grants", "view"],
-    ["org_dept", "grants", "edit"],
+    ["dept", "grants", "view"],
+    ["dept", "grants", "edit"],
   ]);
   if (deny) return deny;
   return Response.json({ templates: await listDeptCueTemplates(id) });
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 /** PUT — upsert 一条声明行。Body: { deptId, template, canCreate, permissions } */
 export async function PUT(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
-  const { deny } = await requireGrantGate(req, id, [["org_dept", "grants", "edit"]], { blockArchived: true });
+  const { deny } = await requireGrantGate(req, id, [["dept", "grants", "edit"]], { blockArchived: true });
   if (deny) return deny;
 
   const body = (await req.json()) as {
@@ -62,7 +62,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
 /** DELETE — 删除一条声明行。Body: { deptId, template } */
 export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
-  const { deny } = await requireGrantGate(req, id, [["org_dept", "grants", "edit"]], { blockArchived: true });
+  const { deny } = await requireGrantGate(req, id, [["dept", "grants", "edit"]], { blockArchived: true });
   if (deny) return deny;
 
   const body = (await req.json()) as { deptId?: string; template?: string };

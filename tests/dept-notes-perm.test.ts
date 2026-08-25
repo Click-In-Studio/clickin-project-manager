@@ -5,7 +5,7 @@ import {
 } from "@/lib/event-db";
 import { setDeptMembers } from "@/lib/dept-db";
 import { canWriteNote, canEditNote } from "@/lib/event-permissions";
-import type { PermissionContext } from "@/lib/permissions";
+import { hasAdminPanelEligibility, type PermissionContext } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 
@@ -94,6 +94,23 @@ describe("canWriteNote channels", () => {
 
   it("director wildcard row → 'wildcard'", async () => {
     expect(await canWriteNote(ctxOf(director), prodId, eventId, deptId, [])).toBe("wildcard");
+  });
+
+  // #327 并类型的语义边界，显式钉住而不是靠注释声明：
+  // 治理面与 notes 面此前靠**类型边界**隔离（dept vs org_dept），并成一个类型后
+  // 只剩 sub 边界，而 notes 不是保留段。所以 dept 的 sub 通配行此后覆盖 notes。
+  // 这条测试写的是**新规则本身**——哪天有人想把隔离改回来（例如把 notes 加进
+  // RESERVED_SUBS），它先红，逼人回来读这段而不是默默改掉一条授权边界。
+  it("dept 的 sub 通配行覆盖 notes 面 → 'wildcard'（#327 并类型的代价）", async () => {
+    const deptAdmin = await newUser();
+    await getPool().query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES ($1, $2, 'dept', '*', '*', 'create', 'direct')`,
+      [prodId, deptAdmin],
+    );
+    // 此人既非 POC、也没有任何 notes 显式行，拿到的只是部门治理面的通配
+    expect(await canWriteNote(ctxOf(deptAdmin), prodId, eventId, deptId, [])).toBe("wildcard");
   });
 
   it("dept participant context → 'dept' (成员通道保留)", async () => {
@@ -186,5 +203,32 @@ describe("dept joins event → POC gets event reports@view", () => {
     await writeTaskDeptEventVisibility(ev3, deptId, prodId, poc);
     expect(await hasReportsView(poc, ev3)).toBe(true);
     await getPool().query("DELETE FROM production_event WHERE id = $1", [ev3]);
+  });
+});
+
+// ── 管理面资格：notes 面不是治理面（#327）────────────────────────────────────
+// dept 与 org_dept 并成一个类型后，ADMIN_PANEL_NODE_PREFIXES 的 "node:dept/"
+// 会扫到 notes 键。导演类模板正持有 node:dept/*/notes@create——不排掉的话
+// 「能替部门提备注」就顺带变成「能进管理后台」，一次没人要求过的放宽。
+describe("管理面资格：dept 的 notes 面被排除（#327）", () => {
+  it("notes 键不给管理面资格（通配形与实例形都不给）", () => {
+    expect(hasAdminPanelEligibility(new Set(["node:dept/*/notes@create"]))).toBe(false);
+    expect(hasAdminPanelEligibility(new Set(["node:dept/9c6528a2-0000-0000-0000-000000000000/notes@edit"]))).toBe(false);
+  });
+
+  it("dept 的治理面照旧给资格", () => {
+    expect(hasAdminPanelEligibility(new Set(["node:dept/*@create"]))).toBe(true);
+    expect(hasAdminPanelEligibility(new Set(["node:dept/*/members@create"]))).toBe(true);
+    expect(hasAdminPanelEligibility(new Set(["node:dept/*/poc@create"]))).toBe(true);
+    expect(hasAdminPanelEligibility(new Set(["node:dept/*/grants@edit"]))).toBe(true);
+  });
+
+  it("制作人主通配与其他治理类型不受影响", () => {
+    expect(hasAdminPanelEligibility(new Set(["node:*"]))).toBe(true);
+    expect(hasAdminPanelEligibility(new Set(["node:member/*/meta@view"]))).toBe(true);
+    expect(hasAdminPanelEligibility(new Set(["node:role/*@edit"]))).toBe(true);
+    // 非成员恒无资格（null 语义，不是空集）
+    expect(hasAdminPanelEligibility(null)).toBe(false);
+    expect(hasAdminPanelEligibility(new Set())).toBe(false);
   });
 });

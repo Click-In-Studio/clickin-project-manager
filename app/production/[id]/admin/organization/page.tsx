@@ -36,9 +36,9 @@ export default async function OrganizationPage({ params }: { params: Promise<{ i
       bypass || hasGrant(permCtx.userId, id, "member", "*", "roles", "edit"),
       bypass || hasGrant(permCtx.userId, id, "member", "*", "*", "create"),
       bypass || hasGrant(permCtx.userId, id, "member", "*", "*", "delete"),
-      bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "*", "create"),
-      bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "members", "create"),
-      bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "poc", "create"),
+      bypass || hasGrant(permCtx.userId, id, "dept", "*", "*", "create"),
+      bypass || hasGrant(permCtx.userId, id, "dept", "*", "members", "create"),
+      bypass || hasGrant(permCtx.userId, id, "dept", "*", "poc", "create"),
     ]);
 
   const [name, membersRaw, depts, tags, roles] = await Promise.all([

@@ -1471,7 +1471,8 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   -- create/delete 在批0 INSERT
   ('asset',       'view',           1),
   ('asset',       'edit',           3),
-  -- dept = production_dept（批C C3，并表后单一 id 空间）：notes 权限面锚点，四动词
+  -- dept = production_dept（批C C3 并表后单一 id 空间）。#327 起它是**部门的唯一
+  -- 权限类型**：治理面（建/删/改、成员、POC、权限行，原 org_dept）与 notes 面同挂于此
   ('dept',        'view',           0),
   ('dept',        'create',         0),
   ('dept',        'edit',           0),
@@ -1499,14 +1500,15 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('dramaturgy_view', 'create',     0),
   ('dramaturgy_view', 'edit',       0),
   ('dramaturgy_view', 'delete',     0),
-  -- 治理域（批F）：production 根实例（id 恒 '*'）；org_dept=production_dept 组织树
-  -- （与批C3 dept=production_dept notes 锚区分）；SENSITIVE 键=owner∨行（无 admin 旁路）、
-  -- ROOT 三键=owner-only 代码判定（节点入树行不发）
+  -- 治理域（批F）：production 根实例（id 恒 '*'）；SENSITIVE 键=owner∨行
+  -- （无 admin 旁路）、ROOT 三键=owner-only 代码判定（节点入树行不发）。
+  -- 部门类型是 dept（下方批C3 段登记四动词）：org_dept 这个名字已随
+  -- migrate-retire-dept-type.sql（#327）退役——它与 dept 本就指同一张
+  -- production_dept，分裂是 event_department 并表前的遗留。
   ('production',   'view', 0), ('production',   'create', 0), ('production',   'edit', 0), ('production',   'delete', 0),
   ('member',       'view', 0), ('member',       'create', 0), ('member',       'edit', 0), ('member',       'delete', 0),
   ('producer',     'view', 0), ('producer',     'create', 0), ('producer',     'edit', 0), ('producer',     'delete', 0),
   ('role',         'view', 0), ('role',         'create', 0), ('role',         'edit', 0), ('role',         'delete', 0),
-  ('org_dept',     'view', 0), ('org_dept',     'create', 0), ('org_dept',     'edit', 0), ('org_dept',     'delete', 0),
   ('milestone',    'view', 0), ('milestone',    'create', 0), ('milestone',    'edit', 0), ('milestone',    'delete', 0),
   ('phase',        'view', 0), ('phase',        'create', 0), ('phase',        'edit', 0), ('phase',        'delete', 0),
   ('announcement', 'view', 0), ('announcement', 'create', 0), ('announcement', 'edit', 0), ('announcement', 'delete', 0)

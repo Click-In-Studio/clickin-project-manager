@@ -175,7 +175,7 @@ describe("持钥人在位", () => {
     // 「授权面写权」本来就是正确的门，不是把授权权当删除权用。
     const GOVERNANCE_DELETE_ROUTES = new Set([
       // dept_cue_list_template 声明行（#227）：删的是「某部门可建某类 cue 表」这条
-      // 声明，本身就是授权面动作，门为 org_dept/*/grants@edit 正确。
+      // 声明，本身就是授权面动作，门为 dept/*/grants@edit 正确。
       "app/api/production/[id]/cue-templates/route.ts",
     ]);
     const { readdirSync, readFileSync } = await import("fs");

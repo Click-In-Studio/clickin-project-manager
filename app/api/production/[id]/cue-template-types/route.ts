@@ -16,8 +16,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const { deny } = await requireGrantGate(req, id, [
     ["production", "config", "view"],
     ["production", "config", "edit"],
-    ["org_dept", "grants", "view"],
-    ["org_dept", "grants", "edit"],
+    ["dept", "grants", "view"],
+    ["dept", "grants", "edit"],
   ]);
   if (deny) return deny;
   return Response.json({ types: await listCueTemplateTypes(id) });

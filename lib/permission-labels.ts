@@ -96,12 +96,10 @@ export const TYPE_LABELS: Record<string, string> = {
   asset: "数字资产",
   character: "角色（剧本）",
   cue_list: "Cue 表",
-  // 部门只有一个实体（production_dept）——event_department 已在
-  // migrate-merge-event-department 并表。这里两个类型是并表前的遗留：
-  //   org_dept = 部门本身的治理（建/删/改、成员、POC、权限行）
-  //   dept     = 同一个部门作为「被提备注的对象」，唯一的面是 dept/<D>/notes@*
-  // 展示名按「面」说人话，不再出现"组织"这个产品里并不存在的概念。
-  dept: "部门备注",
+  // 部门只有一个实体（production_dept），也只有一个权限类型：dept。
+  // org_dept 是 event_department 并表前的遗留名，已于 #327 退役——治理面
+  // （建/删/改、成员、POC、权限行）与 notes 面现在同挂 dept 之下。
+  dept: "部门",
   dramaturgy: "构作",
   dramaturgy_view: "构作视图",
   event: "事件",
@@ -110,7 +108,6 @@ export const TYPE_LABELS: Record<string, string> = {
   member: "成员",
   milestone: "里程碑",
   note: "备注",
-  org_dept: "部门",
   phase: "阶段",
   producer: "制作人域",
   production: "项目",
@@ -140,7 +137,7 @@ export const TYPE_GROUPS: ReadonlyArray<{ label: string; types: readonly string[
   { label: "排演与执行", types: ["event", "report", "task", "cue_list", "note"] },
   { label: "计划", types: ["milestone", "phase"] },
   { label: "资产与财务", types: ["asset", "material", "finance"] },
-  { label: "人与部门", types: ["member", "org_dept", "role", "dept"] },
+  { label: "人与部门", types: ["member", "dept", "role"] },
   { label: "文档与通告", types: ["wiki", "announcement", "tag_group"] },
   // 治理域排最后：权限键选择器里它们最少用，且 SENSITIVE/ROOT 面本来就写不进模板。
   { label: "项目治理", types: ["production", "producer"] },
