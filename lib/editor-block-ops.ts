@@ -230,3 +230,62 @@ export function equalizeColumns(editor: Editor): boolean {
   editor.view.dispatch(tr);
   return true;
 }
+
+// ── 作用于**当前选中**的段落格式 ────────────────────────────────────────────
+//
+// 与 TURN_INTO 的区别只在作用对象：TURN_INTO 服务于手柄菜单（对象是一个被
+// NodeSelection 选中的块，所以要先把选区收进块内）；这里服务于浮动条，对象
+// 就是当前选区本身——可能是一段文字，也可能是一片单元格（CellSelection 的
+// ranges 覆盖每个单元格，setBlockType 会逐个作用过去）。
+//
+// 所以**不能**复用 TURN_INTO：它第一步就 setTextSelection，会把 CellSelection
+// 拍扁成一个光标，整片单元格的选中当场没了。
+//
+// 展示位仍取自 BLOCK_TYPES —— 与 `/` 插入菜单、手柄的「转换为」共用同一张表。
+
+export type FormatAction = {
+  id: BlockTypeId;
+  label: string;
+  icon: string;
+  run: (editor: Editor) => void;
+  isActive: (editor: Editor) => boolean;
+};
+
+function format(
+  id: BlockTypeId,
+  run: (e: Editor) => void,
+  isActive: (e: Editor) => boolean,
+): FormatAction {
+  const meta = BLOCK_TYPES[id];
+  return { id, label: meta.label, icon: meta.icon, run, isActive };
+}
+
+export const FORMAT_ACTIONS: FormatAction[] = [
+  format("paragraph",
+    e => { e.chain().focus().setParagraph().run(); },
+    e => e.isActive("paragraph")),
+  format("h2",
+    e => { e.chain().focus().setHeading({ level: 2 }).run(); },
+    e => e.isActive("heading", { level: 2 })),
+  format("h3",
+    e => { e.chain().focus().setHeading({ level: 3 }).run(); },
+    e => e.isActive("heading", { level: 3 })),
+  format("bulletList",
+    e => { e.chain().focus().toggleBulletList().run(); },
+    e => e.isActive("bulletList")),
+  format("orderedList",
+    e => { e.chain().focus().toggleOrderedList().run(); },
+    e => e.isActive("orderedList")),
+  format("taskList",
+    e => { e.chain().focus().toggleTaskList().run(); },
+    e => e.isActive("taskList")),
+  format("codeBlock",
+    e => { e.chain().focus().toggleCodeBlock().run(); },
+    e => e.isActive("codeBlock")),
+];
+
+/** 当前选中处于哪种段落格式（给浮动条的 T 按钮显示用；都不中则给正文） */
+export function currentFormat(editor: Editor): FormatAction {
+  return FORMAT_ACTIONS.find(f => f.id !== "paragraph" && f.isActive(editor))
+    ?? FORMAT_ACTIONS[0];
+}

@@ -32,6 +32,7 @@ import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 import { ColumnDrop } from "@/lib/tiptap-column-drop";
 import { ColumnEditing } from "@/lib/tiptap-column-editing";
 import { ColumnResize } from "@/lib/tiptap-column-resize";
+import { TableKeymap } from "@/lib/tiptap-table-keymap";
 import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor-slash-commands";
 import { DROP_INDICATOR_OPTIONS } from "@/lib/editor-drop-indicator";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
@@ -706,6 +707,8 @@ export default function SmartTextarea({
     // TableKit: StarterKit 不含表格节点，缺了它 markdown 表格进编辑器会被吞。
     return [base, markdownExt,
       TableKit.configure({ table: { resizable: false } }),
+      // 外缘选中整行/整列后按 Delete 删的是结构，不是清空内容
+      TableKeymap,
       TaskList, TaskItem.configure({ nested: true }),
       // ColumnEditing 不随 blockTools 门控：空栏退格、禁止嵌套是分栏方言自身
       // 的不变量，哪个面都得维护（粘贴、AI 写入都可能造出嵌套组）

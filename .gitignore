@@ -60,3 +60,6 @@ Trace-*.json
 # gateway workspace，见 openclaw-workspace/README.md）——必须入库，对上面
 # 的 AGENTS.md 通配规则开反例。
 !/openclaw-workspace/AGENTS.md
+
+# Claude Code 的临时 worktree（并发验证任务用），不属于仓库内容
+.claude/worktrees/
