@@ -11,6 +11,7 @@ import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { addProductionMember, upsertFeishuUser } from "@/lib/db";
 import { getMemberStatus, restoreMember } from "@/lib/member-status";
 import { getPool } from "@/lib/pg";
+import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval-stages";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 
 import { POST as statusHandler, GET as statusGet } from
@@ -82,6 +83,22 @@ describe("入参", () => {
   });
 });
 
+describe("note 校验", () => {
+  it("非字符串 400", async () => {
+    const res = await post(memberA, memberA, { action: "self_exit", note: { evil: 1 } });
+    expect(res.status).toBe(400);
+  });
+
+  it("超长 400", async () => {
+    const res = await post(memberA, memberA, {
+      action: "self_exit",
+      note: "长".repeat(MAX_APPROVAL_COMMENT_LENGTH + 1),
+    });
+    expect(res.status).toBe(400);
+    expect((await getMemberStatus(prodId, memberA))?.status).toBe("active");
+  });
+});
+
 describe("自助退出门", () => {
   it("不能替别人发起退出", async () => {
     const res = await post(memberA, memberB, { action: "self_exit" });
@@ -111,6 +128,43 @@ describe("自助退出门", () => {
     const data = await res.json();
     expect(data.status.status).toBe("suspended");
     expect(data.audit[0].action).toBe("self_exit");
+  });
+});
+
+describe("轨迹可见范围", () => {
+  it("平级在职成员读不到别人的轨迹——里面有退出说明与处置理由", async () => {
+    const res = await statusGet(
+      req({ session: session(memberB), method: "GET" }),
+      ctx({ id: prodId, userId: memberA }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("持处置门的人读得到", async () => {
+    const res = await statusGet(
+      req({ session: session(ownerId), method: "GET" }),
+      ctx({ id: prodId, userId: memberA }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("处置链上的直属上级读得到（即便他推不动出口）", async () => {
+    await getPool().query(
+      "UPDATE production_member SET supervisor_id = $3 WHERE production_id = $1 AND user_id = $2",
+      [prodId, memberA, memberB],
+    );
+    try {
+      const res = await statusGet(
+        req({ session: session(memberB), method: "GET" }),
+        ctx({ id: prodId, userId: memberA }),
+      );
+      expect(res.status).toBe(200);
+    } finally {
+      await getPool().query(
+        "UPDATE production_member SET supervisor_id = NULL WHERE production_id = $1 AND user_id = $2",
+        [prodId, memberA],
+      );
+    }
   });
 });
 
