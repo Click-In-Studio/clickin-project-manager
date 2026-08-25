@@ -17,6 +17,7 @@ import DropdownPicker from "@/components/DropdownPicker";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import { encodeAssetSrc } from "@/lib/mention-types";
 import { collectWikilinkTitles, promoteWikilinks } from "@/lib/wiki-input-normalize";
+import { checkFidelity, lineDiff, type FidelityDiff, type DiffHunk } from "@/lib/wiki-fidelity";
 import type { WikiDoc, WikiRef, WikiEntityRef } from "@/lib/wiki-db";
 import WikiEntityRefs from "@/components/wiki/WikiEntityRefs";
 import type { WikiPeer } from "@/lib/wiki-collab";
@@ -68,22 +69,24 @@ export default function WikiDocClient({
     const saved = localStorage.getItem("clickin-wiki-editor-mode");
     if (saved === "source" || saved === "wysiwyg") setEditorMode(saved);
   }, []);
-  // 保真检测：富文本挂载时对比"解析→再序列化"与原文——不支持的方言语法会被
-  // prosemirror-markdown 转义/规范化，一旦编辑保存正文即被污染。失真则本篇
-  // 自动落源码模式（不写入全局偏好）+ 提示；用户仍可手动切回（lossyOverride）。
-  const [lossy, setLossy] = useState(false);
+  // 保真检测：富文本挂载时比对「解析 → 再序列化」与原文。失真则本篇自动落
+  // 源码模式（不写入全局偏好）+ 提示；用户仍可手动切回（lossyOverride）。
+  //
+  // **比的是内容签名，不是字面**（lib/wiki-fidelity）。原先按字面比，列表符号
+  // `*`→`-`、加粗 `__`→`**`、表格补空格这类纯书写风格的归一化全都会触发，
+  // 实测有九种之多——误报比漏报更伤：用户被无缘无故踢回源码模式，久了就不再
+  // 相信这个提示，真出事时也当没看见。
+  const [lossy, setLossy] = useState<FidelityDiff | null>(null);
+  const [lossyDiff, setLossyDiff] = useState<DiffHunk[]>([]);
   const lossyOverrideRef = useRef(false);
-  // 方言 v2 迁移后正文即 canonical，这里不再挂任何形态归一化——原先要先跑一遍
-  // normalizeLegacyMentions 才能比，等于把「形态分裂」的成本渗进了保真检测本身。
-  // 现在只归一化 tiptap-markdown 的既有排版行为（软换行 "\\\n"、行尾空白）。
-  const normalizeForCompare = (s: string) =>
-    s.replace(/\\\n/g, "\n").replace(/[ \t]+$/gm, "").trim();
   function handleRoundTrip(serialized: string) {
     if (lossyOverrideRef.current) return;
-    if (normalizeForCompare(serialized) !== normalizeForCompare(body)) {
-      setLossy(true);
-      setEditorMode("source");
-    }
+    const result = checkFidelity(body, serialized);
+    if (!result.lossy) return;
+    setLossy(result);
+    // 触发时必须能看见**差在哪**：只说一句"检测到失真"，我们自己都查不出来
+    setLossyDiff(lineDiff(body, serialized));
+    setEditorMode("source");
   }
   function switchMode(m: "wysiwyg" | "source") {
     if (m === "wysiwyg" && lossy) lossyOverrideRef.current = true;
@@ -240,7 +243,8 @@ export default function WikiDocClient({
     mentionsRef.current = wiki.mentions;
     savedRef.current = { title: wiki.title ?? "", body: wiki.body, tags: wiki.tags.join(" ") };
     setStatus("idle");
-    setLossy(false);
+    setLossy(null);
+    setLossyDiff([]);
     lossyOverrideRef.current = false;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wiki.id]);
@@ -491,10 +495,28 @@ export default function WikiDocClient({
       {/* 正文：有编辑权即整页可写（Notion 式），防抖自动保存；富文本/源码双模 */}
       <div className={`flex-1 flex flex-col ${canEdit ? "px-5 pb-6" : "px-8 pb-6"}`}>
         {lossy && canEdit && (
-          <p className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 print:hidden">
-            检测到富文本模式无法无损保留的语法（其他 markdown 方言等），已用源码模式打开——
-            切回富文本并编辑会转义/规范化这些内容。
-          </p>
+          <div className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 print:hidden">
+            <p>
+              检测到富文本模式<strong>会丢内容</strong>的语法，已用源码模式打开——
+              切回富文本并编辑，下面列出的东西会被改写或丢失。
+            </p>
+            {/* 只说"检测到失真"是查不出问题的：必须把丢了什么、差在哪一并摆出来 */}
+            {(lossy.missing.length > 0 || lossy.added.length > 0) && (
+              <p className="mt-1.5 font-mono text-[11px] leading-relaxed">
+                {lossy.missing.length > 0 && <>丢失：{lossy.missing.slice(0, 6).join(" / ")}{lossy.missing.length > 6 && ` …共 ${lossy.missing.length} 处`}</>}
+                {lossy.added.length > 0 && <><br />多出：{lossy.added.slice(0, 6).join(" / ")}{lossy.added.length > 6 && ` …共 ${lossy.added.length} 处`}</>}
+              </p>
+            )}
+            {lossyDiff.length > 0 && (
+              <pre className="mt-1.5 max-h-40 overflow-auto rounded bg-white/70 p-2 font-mono text-[11px] leading-relaxed">
+                {lossyDiff.map((h, i) => (
+                  <span key={i} className={h.kind === "removed" ? "text-red-700" : "text-emerald-700"}>
+                    {h.kind === "removed" ? "- " : "+ "}{h.text}{"\n"}
+                  </span>
+                ))}
+              </pre>
+            )}
+          </div>
         )}
         {canEdit ? (
           editorMode === "source" ? (
