@@ -21,6 +21,7 @@
  */
 
 import { getPool } from "./pg";
+import { type ApprovalNodeClass, type ApprovalStageName, STAGE_ORDER } from "./approval-stages";
 import { hasGrant } from "./grant-check";
 import { isRootNode, isSensitiveNode } from "./grant-template";
 import { loadDeptTree, collectAncestors } from "./dept-db";
@@ -61,7 +62,8 @@ export function expandLevelRows(
 
 // ─── 治理域分类 ───────────────────────────────────────────────────────────────
 
-export type NodeClass = "root" | "sensitive" | "normal";
+/** 与 ApprovalNodeClass 同一个类型：治理域三态只有一处定义，见 lib/approval-stages.ts。 */
+export type NodeClass = ApprovalNodeClass;
 
 export function classifyApprovalNode(
   resourceType: string,
@@ -75,18 +77,10 @@ export function classifyApprovalNode(
 
 // ─── 阶梯 ─────────────────────────────────────────────────────────────────────
 
-export type ApprovalStageName =
-  | "supervisor"    // 直属上级链
-  | "holder"        // 资源持有者（grants@edit）
-  | "dept_poc"      // 共管部门 POC / 个人负责人
-  | "ancestor_poc"  // 父部门 POC（逐级向上）
-  | "producer"      // 制作人
-  | "owner";        // Production Owner
-
-/** 阶梯顺序：升级只能沿此序前进，永不回退。 */
-export const STAGE_ORDER: readonly ApprovalStageName[] = [
-  "supervisor", "holder", "dept_poc", "ancestor_poc", "producer", "owner",
-];
+// 级名、顺序与展示文案都在 lib/approval-stages.ts —— 那个模块不碰 pg，前端也引得动。
+// 这里只做转出，好让既有 import 路径不用全仓改。
+export type { ApprovalStageName } from "./approval-stages";
+export { STAGE_ORDER } from "./approval-stages";
 
 export type ApprovalStage = {
   stage: ApprovalStageName;

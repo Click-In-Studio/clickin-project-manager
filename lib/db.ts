@@ -22,6 +22,10 @@ import {
   type ApprovalStage, type ApprovalStageName, type ApprovalTarget, type StagePosition,
 } from "./approval-routing";
 import { isValidTtlInterval } from "./approval-ttl";
+import {
+  approvalStageLabel, isApprovalCommentTooLong, normalizeApprovalComment,
+  type ApprovalAction, type ApprovalNodeClass,
+} from "./approval-stages";
 import { normalizeProductionTier, type ProductionTier } from "./plan";
 
 import type { Cue, CueAnchor } from "./cue-types";
@@ -6869,6 +6873,11 @@ export type ApprovalRequest = {
   resolvedBy: string | null;
   grantedAt: string | null;
   expiresAt: string | null;
+  /**
+   * 这条申请里出现过的所有人（申请人、各级审批人候选、操作人、终结者）→ 姓名与角色。
+   * 由 attachApprovalPeople 填充；未经该函数的读取路径为空对象，消费方按 ID 降级。
+   */
+  people: Record<string, ApprovalPerson>;
 };
 
 export type ApprovalChainEntry = {
@@ -6880,11 +6889,50 @@ export type ApprovalChainEntry = {
   canFinalize?: boolean;
   approverIds: string[];
   notifiedAt: string;
-  action?: "approved" | "rejected" | "escalated";
+  /** cancelled = 这一级还没处理，申请就被申请人撤回或被新申请顶掉了。 */
+  action?: ApprovalAction;
+  /**
+   * 动作的操作人。**系统动作没有这个字段**（见 bySystem）——
+   * 消费方不能把「有没有 actorId」当成「有没有发生过动作」来判。
+   */
   actorId?: string;
   actedAt?: string;
+  /**
+   * 该动作由系统发起，没有操作人：超时自动升级、被新申请顶掉的旧申请。
+   * 这个字段是补给前端的：此前超时升级只留下 escalationReason='timeout'
+   * 而没有 actorId，UI 把「原因」挂在「操作人」下面渲染，于是最该说清楚的
+   * 「没人处理，超时自动升上去了」反而一个字都显示不出来。
+   */
+  bySystem?: boolean;
   /** escalated 的原因：超时自动升级 / 审批人手动转发。 */
   escalationReason?: "timeout" | "forwarded";
+  /** cancelled 的原因：申请人主动撤回 / 被同目标的新申请覆盖。 */
+  cancelReason?: "by_subject" | "superseded";
+  /**
+   * 审批意见：批准/拒绝/转交/撤回时写下的理由，随动作落在这一级上。
+   *
+   * 落在链条目而不是单开评论表：这是**审批决定的一部分**，跟着决定走、
+   * 跟着决定不可变。真要做多人讨论区是另一回事（要作者、可见范围、附件），
+   * 那时再单开表，不影响这里。
+   */
+  comment?: string;
+};
+
+/**
+ * 审批链上出现过的人。**由读取路径按当前 user_profile 现算**，不是落库快照——
+ * 姓名快照的收益（离职改名后历史不失真）撑不起每次升级多查一次名字的成本
+ * （2026-08-25 用户定谳）。
+ *
+ * 有它之后前端不必再联查 /contacts 反查姓名：那条路既拉了全员邮箱手机号，
+ * 又覆盖不到不在 production_member 里的审批人。
+ */
+export type ApprovalPerson = {
+  userId: string;
+  name: string;
+  /** 该人在本演出的角色（不在本演出时为空数组）。 */
+  roles: string[];
+  /** false = 此人已不在（或从未在）本演出的成员名单里，但仍是链上的真实审批人。 */
+  isMember: boolean;
 };
 
 type ApprovalRow = {
@@ -6962,7 +7010,93 @@ function rowToApproval(r: ApprovalRow): ApprovalRequest {
     resolvedBy: r.resolved_by,
     grantedAt: r.granted_at ? r.granted_at.toISOString() : null,
     expiresAt: r.expires_at ? r.expires_at.toISOString() : null,
+    people: {},
   };
+}
+
+/** 一条申请里出现过的全部用户 ID：申请人、各级候选审批人、操作人、终结者。 */
+function collectApprovalUserIds(req: ApprovalRequest): string[] {
+  const ids = new Set<string>([req.subjectId]);
+  if (req.resolvedBy) ids.add(req.resolvedBy);
+  req.currentApproverIds.forEach((id) => ids.add(id));
+  for (const entry of req.escalationChain) {
+    (entry.approverIds ?? []).forEach((id) => ids.add(id));
+    if (entry.actorId) ids.add(entry.actorId);
+  }
+  return [...ids];
+}
+
+/**
+ * 批量解析用户 ID → 姓名/角色。一次查完整批申请，不按条 N+1。
+ *
+ * 姓名口径与通知、财务、部门冻结一致：display_name 优先、退回 name。
+ * **不 join feishu_user**（#234 身份债已清偿：显示名只走 user_profile）。
+ * 查无此人（profile 行缺失）不返回条目，消费方按 ID 降级显示。
+ */
+async function loadApprovalPeople(
+  productionId: string,
+  userIds: string[],
+): Promise<Record<string, ApprovalPerson>> {
+  if (userIds.length === 0) return {};
+  const { rows } = await getPool().query<{
+    user_id: string; name: string | null; roles: string[] | null; is_member: boolean;
+  }>(
+    `SELECT up.user_id,
+            COALESCE(NULLIF(up.display_name, ''), NULLIF(up.name, '')) AS name,
+            pm.roles,
+            (pm.user_id IS NOT NULL) AS is_member
+     FROM user_profile up
+     LEFT JOIN production_member pm
+       ON pm.production_id = $2 AND pm.user_id = up.user_id
+     WHERE up.user_id = ANY($1::uuid[])`,
+    [userIds, productionId],
+  );
+  const out: Record<string, ApprovalPerson> = {};
+  for (const r of rows) {
+    if (!r.name) continue;  // 无名可显示时不如让消费方走自己的降级文案
+    out[r.user_id] = {
+      userId: r.user_id,
+      name: r.name,
+      roles: r.roles ?? [],
+      isMember: r.is_member,
+    };
+  }
+  return out;
+}
+
+/**
+ * 给一批申请填 people。审批链上的人**不一定是 production_member**
+ * （祖先部门 POC、存量演出的 owner 都可能不在名单里），所以这里按 user_profile
+ * 取名、按 production_member 取角色，两者分开——用成员表 INNER JOIN 取名会让
+ * 这些人整个消失（feedback_fixture_hides_prod 的同款坑）。
+ */
+async function attachApprovalPeople(requests: ApprovalRequest[]): Promise<ApprovalRequest[]> {
+  if (requests.length === 0) return requests;
+  // 同一次调用里所有申请都属同一个演出（列表接口按演出过滤），按演出分组兜底跨演出调用
+  const byProduction = new Map<string, ApprovalRequest[]>();
+  for (const req of requests) {
+    const bucket = byProduction.get(req.productionId);
+    if (bucket) bucket.push(req);
+    else byProduction.set(req.productionId, [req]);
+  }
+  for (const [productionId, group] of byProduction) {
+    const ids = [...new Set(group.flatMap(collectApprovalUserIds))];
+    const people = await loadApprovalPeople(productionId, ids);
+    for (const req of group) {
+      req.people = Object.fromEntries(
+        collectApprovalUserIds(req)
+          .map((id) => [id, people[id]] as const)
+          .filter((pair): pair is readonly [string, ApprovalPerson] => pair[1] !== undefined),
+      );
+    }
+  }
+  return requests;
+}
+
+/** 单条申请的 people 填充——动作接口回给前端的那条也要带人，否则页面刷新前是空的。 */
+async function withApprovalPeople(request: ApprovalRequest): Promise<ApprovalRequest> {
+  const [filled] = await attachApprovalPeople([request]);
+  return filled;
 }
 
 const RESOURCE_TYPE_LABELS: Record<string, string> = {
@@ -7142,22 +7276,22 @@ async function advanceToStage(
   return rows.length > 0;
 }
 
-const STAGE_LABELS: Record<ApprovalStageName, string> = {
-  supervisor:   "直属上级",
-  holder:       "资源持有者",
-  dept_poc:     "共管部门负责人",
-  ancestor_poc: "上级部门负责人",
-  producer:     "制作人",
-  owner:        "演出所有者",
-};
+// 级名文案已上移到 lib/approval-stages.ts —— 通知标题与页面时间线共用一份，
+// 不然同一级在飞书里叫「资源持有者」、在页面上叫「资源持有人」。
 
 type StageNotifyContext = "new" | "timeout" | "forwarded";
 
-/** 通知某一级的审批人。无权终局的直属上级拿到的是「转发」而非「批准」。 */
+/**
+ * 通知某一级的审批人。无权终局的直属上级拿到的是「转发」而非「批准」。
+ *
+ * handoffComment = 上一级转交时写下的理由。带上它，下一级才知道为什么轮到自己；
+ * 不带的话「由上一级转发」就是一句没有信息量的话。
+ */
 async function notifyStage(
   req: ApprovalRow,
   stage: ApprovalStage,
   context: StageNotifyContext,
+  handoffComment?: string | null,
 ): Promise<void> {
   if (stage.approverIds.length === 0) return;
 
@@ -7183,9 +7317,11 @@ async function notifyStage(
         { id: "reject",   presentation: "secondary_button" as const, label: "拒绝",   effects: [{ type: "reject_access_request" as const, requestId }] },
       ];
 
+  const noteLine = req.note ? `\n\n申请理由：${req.note}` : "";
+  const handoffLine = handoffComment ? `\n\n上一级转交说明：${handoffComment}` : "";
   const body = stage.canFinalize
-    ? `${subjectName} 申请获得${desc}${suffix}，请审批。${req.note ? `\n\n申请理由：${req.note}` : ""}`
-    : `${subjectName} 申请获得${desc}${suffix}。你本人尚未持有该权限，只能向上转交给下一级审批人。${req.note ? `\n\n申请理由：${req.note}` : ""}`;
+    ? `${subjectName} 申请获得${desc}${suffix}，请审批。${noteLine}${handoffLine}`
+    : `${subjectName} 申请获得${desc}${suffix}。你本人尚未持有该权限，只能向上转交给下一级审批人。${noteLine}${handoffLine}`;
 
   await notifyUsers({
     userIds: stage.approverIds,
@@ -7202,7 +7338,7 @@ async function notifyStage(
     actions,
     buildExternalMessage: async () => ({
       text: `${subjectName} 申请 ${desc}${suffix}，请处理`,
-      title: `资源申请待${stage.canFinalize ? "审批" : "转交"}（${STAGE_LABELS[stage.stage]}）`,
+      title: `资源申请待${stage.canFinalize ? "审批" : "转交"}（${approvalStageLabel(stage.stage, stage.depth)}）`,
       primaryUrl: `${SERVER_URL}/production/${req.production_id}/access-requests`,
     }),
   });
@@ -7300,9 +7436,25 @@ export async function submitAccessRequest(
   let request: ApprovalRow;
   try {
     await supersedeClient.query("BEGIN");
+    // 链末条补 cancelled/superseded 必须在**同一条 SQL 同一个事务**里：
+    // 走 markLastChainEntry（另取连接）会撞上本事务尚未提交的行锁，直接把自己卡死。
+    const supersedeMark: Partial<ApprovalChainEntry> = {
+      action: "cancelled",
+      actedAt: new Date().toISOString(),
+      bySystem: true,
+      cancelReason: "superseded",
+    };
     const superseded = await supersedeClient.query<{ id: string }>(
       `UPDATE approval_request
-       SET status = 'cancelled', resolved_at = now(),
+       SET status = 'cancelled', resolved_at = now(), resolved_by = $2,
+           escalation_chain =
+             CASE WHEN jsonb_array_length(escalation_chain) > 0
+                  THEN jsonb_set(
+                         escalation_chain,
+                         ARRAY[(jsonb_array_length(escalation_chain) - 1)::text],
+                         (escalation_chain -> -1) || $8::jsonb)
+                  ELSE escalation_chain
+             END,
            current_stage = NULL, current_approver_ids = '{}'
        WHERE production_id = $1 AND subject_id = $2 AND type = $3
          AND resource_type = $4
@@ -7311,7 +7463,10 @@ export async function submitAccessRequest(
          AND permission_level = $7
          AND status IN ('pending_supervisor', 'pending_resource')
        RETURNING id`,
-      [productionId, userId, requestType, params.resourceType, resourceId, resourceSub, params.permissionLevel],
+      [
+        productionId, userId, requestType, params.resourceType, resourceId, resourceSub,
+        params.permissionLevel, JSON.stringify(supersedeMark),
+      ],
     );
     for (const r of superseded.rows) {
       await supersedeClient.query(
@@ -7358,10 +7513,14 @@ export async function submitAccessRequest(
 export async function approveAccessRequest(
   requestId: string,
   actorId: string,
+  rawComment?: string | null,
 ): Promise<
   | { ok: true; request: ApprovalRequest }
-  | { ok: false; reason: "not_found" | "conflict" | "unauthorized" | "forward_only" }
+  | { ok: false; reason: "not_found" | "conflict" | "unauthorized" | "forward_only" | "comment_too_long" }
 > {
+  const comment = normalizeApprovalComment(rawComment);
+  if (isApprovalCommentTooLong(comment)) return { ok: false, reason: "comment_too_long" };
+
   const req = await loadApproval(requestId);
   if (!req) return { ok: false, reason: "not_found" };
   if (!isPendingStatus(req.status)) return { ok: false, reason: "conflict" };
@@ -7393,6 +7552,7 @@ export async function approveAccessRequest(
 
   await markLastChainEntry(requestId, {
     action: "approved", actorId, actedAt: new Date().toISOString(),
+    ...(comment ? { comment } : {}),
   });
 
   const fresh = await loadApproval(requestId);
@@ -7441,7 +7601,7 @@ export async function approveAccessRequest(
     entityType: "approval_request",
     entityId: requestId,
     title: "资源访问申请已批准",
-    body: `你申请的${approvedDesc}已获批准。`,
+    body: `你申请的${approvedDesc}已获批准。${comment ? `\n\n审批意见：${comment}` : ""}`,
     viewHref: `${SERVER_URL}/production/${req.production_id}/access-requests`,
     category: "info",
     approvalRequestId: requestId,
@@ -7453,7 +7613,7 @@ export async function approveAccessRequest(
   });
 
   const finalRow = fresh ?? (await loadApproval(requestId))!;
-  return { ok: true, request: rowToApproval(finalRow) };
+  return { ok: true, request: await withApprovalPeople(rowToApproval(finalRow)) };
 }
 
 /**
@@ -7464,10 +7624,14 @@ export async function approveAccessRequest(
 export async function escalateAccessRequest(
   requestId: string,
   actorId: string,
+  rawComment?: string | null,
 ): Promise<
   | { ok: true; request: ApprovalRequest }
-  | { ok: false; reason: "not_found" | "conflict" | "unauthorized" | "no_next_stage" }
+  | { ok: false; reason: "not_found" | "conflict" | "unauthorized" | "no_next_stage" | "comment_too_long" }
 > {
+  const comment = normalizeApprovalComment(rawComment);
+  if (isApprovalCommentTooLong(comment)) return { ok: false, reason: "comment_too_long" };
+
   const req = await loadApproval(requestId);
   if (!req) return { ok: false, reason: "not_found" };
   if (!isPendingStatus(req.status)) return { ok: false, reason: "conflict" };
@@ -7481,20 +7645,28 @@ export async function escalateAccessRequest(
 
   const moved = await advanceToStage(req, next, {
     action: "escalated", actorId, actedAt: new Date().toISOString(), escalationReason: "forwarded",
+    ...(comment ? { comment } : {}),
   });
   if (!moved) return { ok: false, reason: "conflict" };
 
   await expireRequestNotifications(requestId);
   const fresh = await loadApproval(requestId);
-  if (fresh) await notifyStage(fresh, next, "forwarded");
+  if (fresh) await notifyStage(fresh, next, "forwarded", comment);
 
-  return { ok: true, request: rowToApproval(fresh ?? req) };
+  return { ok: true, request: await withApprovalPeople(rowToApproval(fresh ?? req)) };
 }
 
 export async function rejectAccessRequest(
   requestId: string,
   actorId: string,
-): Promise<{ ok: true; request: ApprovalRequest } | { ok: false; reason: "not_found" | "conflict" | "unauthorized" }> {
+  rawComment?: string | null,
+): Promise<
+  | { ok: true; request: ApprovalRequest }
+  | { ok: false; reason: "not_found" | "conflict" | "unauthorized" | "comment_too_long" }
+> {
+  const comment = normalizeApprovalComment(rawComment);
+  if (isApprovalCommentTooLong(comment)) return { ok: false, reason: "comment_too_long" };
+
   const req = await loadApproval(requestId);
   if (!req) return { ok: false, reason: "not_found" };
   if (!isPendingStatus(req.status)) return { ok: false, reason: "conflict" };
@@ -7514,6 +7686,7 @@ export async function rejectAccessRequest(
 
   await markLastChainEntry(requestId, {
     action: "rejected", actorId, actedAt: new Date().toISOString(),
+    ...(comment ? { comment } : {}),
   });
   await expireRequestNotifications(requestId);
 
@@ -7525,7 +7698,7 @@ export async function rejectAccessRequest(
     entityType: "approval_request",
     entityId: requestId,
     title: "资源访问申请被拒绝",
-    body: `你申请的${rejectedDesc}未获批准。`,
+    body: `你申请的${rejectedDesc}未获批准。${comment ? `\n\n拒绝理由：${comment}` : ""}`,
     viewHref: `${SERVER_URL}/production/${req.production_id}/access-requests`,
     category: "warning",
     approvalRequestId: requestId,
@@ -7537,16 +7710,31 @@ export async function rejectAccessRequest(
   });
 
   const finalRow = await loadApproval(requestId);
-  return { ok: true, request: rowToApproval(finalRow ?? req) };
+  return { ok: true, request: await withApprovalPeople(rowToApproval(finalRow ?? req)) };
 }
 
+/**
+ * 申请人撤回自己的申请。
+ *
+ * resolved_by 必须写：撤回也是「谁在什么时候结束了这条申请」，不写的话时间线上
+ * 的终结节点没有人，看着像系统自己结的。链末条同时补 action='cancelled' ——
+ * 那一级是**没处理**，不是还在等；不补的话前端只能看到一个没有动作的末条，
+ * 只好按「等待中」画成灰点，读起来像申请还挂在那些人手上。
+ */
 export async function cancelAccessRequest(
   requestId: string,
   userId: string,
-): Promise<{ ok: true } | { ok: false; reason: "not_found" | "conflict" }> {
+  rawComment?: string | null,
+): Promise<
+  | { ok: true; request: ApprovalRequest }
+  | { ok: false; reason: "not_found" | "conflict" | "comment_too_long" }
+> {
+  const comment = normalizeApprovalComment(rawComment);
+  if (isApprovalCommentTooLong(comment)) return { ok: false, reason: "comment_too_long" };
+
   const res = await getPool().query<{ id: string }>(
     `UPDATE approval_request
-     SET status = 'cancelled', resolved_at = now(),
+     SET status = 'cancelled', resolved_at = now(), resolved_by = $2,
          current_stage = NULL, current_approver_ids = '{}'
      WHERE id = $1
        AND subject_id = $2
@@ -7559,8 +7747,15 @@ export async function cancelAccessRequest(
     return exists.rows[0] ? { ok: false, reason: "conflict" } : { ok: false, reason: "not_found" };
   }
 
+  await markLastChainEntry(requestId, {
+    action: "cancelled", actorId: userId, actedAt: new Date().toISOString(),
+    cancelReason: "by_subject",
+    ...(comment ? { comment } : {}),
+  });
   await expireRequestNotifications(requestId);
-  return { ok: true };
+
+  const finalRow = await loadApproval(requestId);
+  return { ok: true, request: await withApprovalPeople(rowToApproval(finalRow!)) };
 }
 
 export async function listMyAccessRequests(
@@ -7575,7 +7770,7 @@ export async function listMyAccessRequests(
      ORDER BY ar.created_at DESC`,
     [productionId, userId],
   );
-  return res.rows.map(rowToApproval);
+  return attachApprovalPeople(res.rows.map(rowToApproval));
 }
 
 /**
@@ -7601,11 +7796,65 @@ export async function listPendingApprovals(
      ORDER BY ar.created_at ASC`,
     params,
   );
-  return res.rows.map((r) => {
+  return attachApprovalPeople(res.rows.map((r) => {
     const approval = rowToApproval(r);
     const last = approval.escalationChain[approval.escalationChain.length - 1];
     return { ...approval, canFinalize: last?.canFinalize ?? true };
-  });
+  }));
+}
+
+// ─── 审批链预览（提交前）────────────────────────────────────────────────────────
+
+export type ApprovalLadderPreviewStage = {
+  stage: ApprovalStageName;
+  depth: number;
+  /** 该级能否直接终局。false = 只能向上转交（直属上级本人没有这个权限）。 */
+  canFinalize: boolean;
+  approverIds: string[];
+};
+
+export type ApprovalLadderPreview = {
+  /** root = 无审批通道（提交也会被拒收）；sensitive = 跳过整条链直达 owner。 */
+  nodeClass: ApprovalNodeClass;
+  stages: ApprovalLadderPreviewStage[];
+  people: Record<string, ApprovalPerson>;
+};
+
+/**
+ * 提交前预览这条申请会走的审批链。
+ *
+ * **这是预测不是快照**：阶梯由 buildApprovalLadder 按**此刻**的汇报关系、资源持有者、
+ * 部门 POC 现算，真正提交后每次升级都会重算一遍。中间任何人事变动都会让实际链路
+ * 与这份预览不同——消费方必须把它呈现为「预计」，不能当成承诺。
+ *
+ * nodeClass 是这个接口的另一半价值：ROOT 节点在提交时会被 no_entry 拒收，
+ * 让人填完整张表才吃 403 是白填；预览一眼就能说清楚"这个权限没有申请通道"。
+ */
+export async function previewApprovalLadder(
+  productionId: string,
+  subjectId: string,
+  params: { resourceType: string; resourceId?: string; resourceSub?: string; permissionLevel: string },
+): Promise<ApprovalLadderPreview> {
+  const target: ApprovalTarget = {
+    productionId,
+    subjectId,
+    resourceType: params.resourceType,
+    resourceId: params.resourceId ?? "*",
+    resourceSub: params.resourceSub ?? "*",
+    permissionLevel: params.permissionLevel,
+  };
+  const nodeClass = classifyApprovalNode(target.resourceType, target.resourceSub, target.permissionLevel);
+  // ROOT 连审批通道都没有——buildApprovalLadder 对它返回空阶梯，不必白跑一趟查询
+  const ladder = nodeClass === "root" ? [] : await buildApprovalLadder(target);
+
+  const stages = ladder.map((s) => ({
+    stage: s.stage, depth: s.depth, canFinalize: s.canFinalize, approverIds: s.approverIds,
+  }));
+  const people = await loadApprovalPeople(
+    productionId,
+    [...new Set(stages.flatMap((s) => s.approverIds))],
+  );
+  return { nodeClass, stages, people };
 }
 
 
@@ -7633,8 +7882,11 @@ export async function escalateExpiredApprovals(): Promise<{ escalated: number }>
     const next = nextStage(ladder, currentPositionOf(row));
     if (!next) continue;  // 已在链顶（owner），只等人处理，不再升级
 
+    // bySystem：超时升级没有操作人。少了这面旗，消费方只能看到一条有 action
+    // 却没有 actorId 的条目，无法区分「系统自动升级」与「数据缺了操作人」。
     const moved = await advanceToStage(row, next, {
-      action: "escalated", actedAt: new Date().toISOString(), escalationReason: "timeout",
+      action: "escalated", actedAt: new Date().toISOString(),
+      escalationReason: "timeout", bySystem: true,
     });
     if (!moved) continue;
     escalated++;
