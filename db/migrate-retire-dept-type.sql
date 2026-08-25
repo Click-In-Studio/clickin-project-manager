@@ -32,6 +32,17 @@
 
 BEGIN;
 
+-- ── 0. 目标词汇齐备（外键前提）──────────────────────────────────────────────
+-- 平移后的授权行要满足 production_member_grant 的
+-- (resource_type, permission_level) → resource_permission_level 复合外键。
+-- 现实中 dept 与 org_dept 登记的都是四动词闭集，这条是空操作；写在这里是让迁移
+-- **自带前提**，而不是依赖「另一张表恰好已经有那四行」——照 org_dept 现有的动词
+-- 集补齐 dept，无论那边登记了什么，平移都不会中途撞外键炸掉整个事务。
+INSERT INTO resource_permission_level (resource_type, permission_level, sort_order)
+SELECT 'dept', permission_level, 0
+FROM resource_permission_level WHERE resource_type = 'org_dept'
+ON CONFLICT DO NOTHING;
+
 -- ── 1. 授权行 ────────────────────────────────────────────────────────────────
 -- 先清掉平移过去会撞活行唯一索引的那些（同人同节点同动词已有 dept 活行）。
 -- 部分唯一索引只管 is_revoked = false，已撤销行随便平移。

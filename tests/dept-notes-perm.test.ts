@@ -96,6 +96,23 @@ describe("canWriteNote channels", () => {
     expect(await canWriteNote(ctxOf(director), prodId, eventId, deptId, [])).toBe("wildcard");
   });
 
+  // #327 并类型的语义边界，显式钉住而不是靠注释声明：
+  // 治理面与 notes 面此前靠**类型边界**隔离（dept vs org_dept），并成一个类型后
+  // 只剩 sub 边界，而 notes 不是保留段。所以 dept 的 sub 通配行此后覆盖 notes。
+  // 这条测试写的是**新规则本身**——哪天有人想把隔离改回来（例如把 notes 加进
+  // RESERVED_SUBS），它先红，逼人回来读这段而不是默默改掉一条授权边界。
+  it("dept 的 sub 通配行覆盖 notes 面 → 'wildcard'（#327 并类型的代价）", async () => {
+    const deptAdmin = await newUser();
+    await getPool().query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES ($1, $2, 'dept', '*', '*', 'create', 'direct')`,
+      [prodId, deptAdmin],
+    );
+    // 此人既非 POC、也没有任何 notes 显式行，拿到的只是部门治理面的通配
+    expect(await canWriteNote(ctxOf(deptAdmin), prodId, eventId, deptId, [])).toBe("wildcard");
+  });
+
   it("dept participant context → 'dept' (成员通道保留)", async () => {
     const member = await newUser();
     expect(await canWriteNote(ctxOf(member), prodId, eventId, deptId, [deptId])).toBe("dept");
