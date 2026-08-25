@@ -341,8 +341,13 @@ async function ancestorPocLevels(
   return out;
 }
 
-/** 制作人：结构性角色，名称不可改不可删（lib/db.ts setMemberRoles 守卫），按名匹配安全。 */
-async function findProducers(productionId: string): Promise<string[]> {
+/**
+ * 制作人：结构性角色，名称不可改不可删（lib/db.ts setMemberRoles 守卫），按名匹配安全。
+ *
+ * 导出是为了让「谁能配资源审批人」（#262，app/api/.../resource-approvers）用同一份判据：
+ * 制作人身份在别处再按名查一次，'制作人' 这个字面量就有了第二处真相。
+ */
+export async function findProducers(productionId: string): Promise<string[]> {
   const { rows } = await getPool().query<{ user_id: string }>(
     `SELECT user_id FROM production_member
      WHERE production_id = $1 AND '制作人' = ANY(roles)`,
