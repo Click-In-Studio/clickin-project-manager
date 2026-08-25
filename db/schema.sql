@@ -1387,11 +1387,63 @@ CREATE INDEX IF NOT EXISTS announcement_read_announcement_idx
 
 -- ── Phase 2 (#137): 成员关系模型 ─────────────────────────────────────────────
 
--- production_member 新增字段（supervisor_id、status）
+-- production_member 新增字段（supervisor_id、status、退出成因三列）
+--
+-- status 三态终局（#141，migrate-member-exit-states.sql）：
+--   active    正常在职
+--   suspended 访问权冻结、授权行原样保留 —— 复职零重配
+--   exited    已离组，授权真撤，成员行与历史保留
+-- #137 埋的 pending_exit / disputed 属于已废弃的退出审批流（方案 A），已退役。
+--
+-- status_source 分开「他自己退的」与「他被停用了」——结算与署名争议里这是两回事。
+-- 它描述当前状态的成因，回到 active 时置回 NULL，故与 status 互为不变式。
 ALTER TABLE production_member
   ADD COLUMN IF NOT EXISTS supervisor_id UUID REFERENCES app_user(id) NULL,
-  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'
-    CHECK (status IN ('active', 'pending_exit', 'disputed', 'exited', 'suspended'));
+  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active',
+  ADD COLUMN IF NOT EXISTS status_source TEXT NULL,
+  ADD COLUMN IF NOT EXISTS status_changed_at TIMESTAMPTZ NULL,
+  ADD COLUMN IF NOT EXISTS status_changed_by UUID NULL REFERENCES app_user(id);
+
+ALTER TABLE production_member
+  DROP CONSTRAINT IF EXISTS production_member_status_check;
+ALTER TABLE production_member
+  ADD CONSTRAINT production_member_status_check
+  CHECK (status IN ('active', 'suspended', 'exited'));
+
+ALTER TABLE production_member
+  DROP CONSTRAINT IF EXISTS production_member_status_source_value_check;
+ALTER TABLE production_member
+  ADD CONSTRAINT production_member_status_source_value_check
+  CHECK (status_source IS NULL OR status_source IN ('self', 'admin'));
+
+ALTER TABLE production_member
+  DROP CONSTRAINT IF EXISTS production_member_status_source_check;
+ALTER TABLE production_member
+  ADD CONSTRAINT production_member_status_source_check
+  CHECK ((status = 'active') = (status_source IS NULL));
+
+-- 成员状态变更审计（#141）。处置行（to_status NOT NULL）真的改了状态；
+-- 表态行（to_status IS NULL）只留态度、不动访问权——「不认可此退出」在方案 A 里
+-- 是状态 disputed，它不该是状态：不改变任何人能看到什么，只在争议时作证据。
+CREATE TABLE IF NOT EXISTS production_member_status_audit (
+  id            BIGSERIAL   PRIMARY KEY,
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  user_id       UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  action        TEXT        NOT NULL CHECK (action IN (
+                              'self_exit', 'suspend', 'restore',
+                              'confirm_exit', 'object', 'endorse'
+                            )),
+  from_status   TEXT        NOT NULL,
+  to_status     TEXT        NULL,
+  actor_id      UUID        NULL REFERENCES app_user(id),
+  note          TEXT        NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT pmsa_stance_has_no_target
+    CHECK ((action IN ('object', 'endorse')) = (to_status IS NULL))
+);
+
+CREATE INDEX IF NOT EXISTS pmsa_member_time_idx
+  ON production_member_status_audit (production_id, user_id, created_at DESC);
 
 -- production_member_role：用 role_id FK 替代 roles TEXT[] 字符串数组
 CREATE TABLE IF NOT EXISTS production_member_role (

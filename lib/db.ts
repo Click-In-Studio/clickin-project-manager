@@ -3046,8 +3046,14 @@ export async function getProductionPermissionContext(
 
   const [memberRow, dbPermsRow, deptRow, productionRow] = await Promise.all([
     // Is user a member? And what are their role strings?
+    //
+    // status = 'active' 是访问闸门（#141）。suspended / exited 的成员行还在——
+    // 名册要显示他们、历史要留痕、复职要零重配——但他们进不来。这一条不加，
+    // 「停用」就只是名册上的一条删除线：人照样拿角色权限、部门权限与 resource grant。
+    // 注意闸门只管 isMember：owner 走下面的 isOwner 分支，不受影响（owner 退出
+    // 必须先转移 owner，见 #141）。
     pool.query<{ roles: string[] }>(
-      "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2",
+      "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2 AND status = 'active'",
       [userId, productionId],
     ),
     // Try FK-backed permissions first (production_member_role populated after migration/setMemberRoles)

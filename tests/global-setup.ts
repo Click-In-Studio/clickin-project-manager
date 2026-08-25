@@ -163,6 +163,12 @@ import {
   RETIRE_DEPT_TYPE_SNAPSHOT_PATH,
   type RetireDeptTypeSnapshot,
 } from "./retire-dept-type-snapshot";
+import {
+  isMemberExitPreMigrationSchema,
+  createMemberExitPreMigrationData,
+  MEMBER_EXIT_SNAPSHOT_PATH,
+  type MemberExitSnapshot,
+} from "./member-exit-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -625,6 +631,20 @@ export async function setup() {
     await pool.query(migrationSql);
   }
 
+  // 成员退出状态机收窄（#141）：工厂造五态时代的 pending_exit / disputed 残留成员
+  // 与各自的未撤销授权行，迁移测试验归一方向是冻结（成员行还在、授权行没撤）。
+  // 依赖 db/add-member-exit-fields.sql 先行建列——CI 的「Apply additive DDL
+  // migrations」步骤已在本函数之前跑过 add-*.sql。
+  if (await isMemberExitPreMigrationSchema(pool)) {
+    const memberExitSnapshot = await createMemberExitPreMigrationData(pool, TEST_USER);
+    await writeFile(MEMBER_EXIT_SNAPSHOT_PATH, JSON.stringify(memberExitSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-member-exit-states.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
   // wiki 正文方言 v1 → v2：必须排在全部结构迁移之后（工厂正文要往已成型的
   // wiki 表里写）。SQL 只建备份表，正文改写由 lib/wiki-dialect-migrate 执行——
   // 与 scripts/migrate-wiki-dialect.ts 同一份实现，CI 跑的就是线上要跑的东西。
@@ -719,6 +739,28 @@ export async function teardown() {
       // production 删除级联部门 / 角色 / 授权行 / 区间键 / 申请 / 审批人配置
       await pool.query("DELETE FROM production WHERE id = $1", [retireDeptTypeSnapshot.prodId]).catch(() => {});
       await unlink(RETIRE_DEPT_TYPE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // 成员退出状态机快照的工厂演出（migration path only）
+  {
+    let memberExitSnapshot: MemberExitSnapshot | null = null;
+    try {
+      memberExitSnapshot = JSON.parse(
+        await readFile(MEMBER_EXIT_SNAPSHOT_PATH, "utf8"),
+      ) as MemberExitSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (memberExitSnapshot) {
+      // production 删除级联成员行 / 授权行 / 状态审计行；工厂 app_user 单独收
+      await pool.query("DELETE FROM production WHERE id = $1", [memberExitSnapshot.prodId]).catch(() => {});
+      await pool
+        .query("DELETE FROM app_user WHERE id = ANY($1::uuid[])", [
+          [memberExitSnapshot.pendingExitUserId, memberExitSnapshot.disputedUserId],
+        ])
+        .catch(() => {});
+      await unlink(MEMBER_EXIT_SNAPSHOT_PATH).catch(() => {});
     }
   }
 
