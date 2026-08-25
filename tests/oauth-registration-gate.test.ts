@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll, afterEach, vi } from "vitest";
+import { describe, it, expect, afterAll, afterEach, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { GET as initiateHandler } from "@/app/api/auth/[platform]/initiate/route";
 import { GET as callbackHandler } from "@/app/api/auth/[platform]/callback/route";
@@ -65,6 +65,9 @@ async function callback(state: string, cookie: string) {
   );
 }
 
+// initiate 会调 generateAuthUrl，飞书的 appId() 直接读环境变量、缺了就抛。
+// 本地有 .env.local 所以看不出来，CI 没有——测试不该依赖真实凭据，给个假的即可。
+beforeEach(() => vi.stubEnv("FEISHU_APP_ID", "cli_test_app_id"));
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 afterAll(async () => {
@@ -91,6 +94,8 @@ describe("initiate 把注册凭据收进上下文 cookie", () => {
     // 凭据不得出现在跳给飞书的授权 URL 里
     const authUrl = res.headers.get("location")!;
     expect(authUrl).toContain(ctx.nonce);
+    // 同时确认走的是 stub 的凭据而非环境里的真值——本地有 .env.local，CI 没有
+    expect(authUrl).toContain("cli_test_app_id");
     expect(authUrl).not.toContain("REG-ABC");
     expect(authUrl).not.toContain("tok-1");
   });
