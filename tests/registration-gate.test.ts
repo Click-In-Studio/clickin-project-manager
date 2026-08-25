@@ -5,6 +5,12 @@
  *   · initiate 路由把 RegistrationDeniedError 映射为 403（文案面向用户）
  */
 import { describe, it, expect, afterAll, afterEach, vi } from "vitest";
+
+// 真正走到发信那一步的用例（未被门拦下的）不该往外发邮件：Resend 也会拒收
+// example.com。只挡住出网这一步，建号与校验逻辑照常执行。
+vi.mock("@/lib/platform/email/email-send", () => ({
+  sendEmail: vi.fn().mockResolvedValue(undefined),
+}));
 import { NextRequest } from "next/server";
 import {
   requireRegistrationJustification,
@@ -289,5 +295,70 @@ describe("initiate 路由", () => {
     const ip = `test-ip-${shortId()}`;
     for (let i = 0; i < 15; i++) expect(registrationRateLimited(ip)).toBe(false);
     expect(registrationRateLimited(ip)).toBe(true);
+  });
+});
+
+describe("authIntent：意图与账号状态不符时说清楚", () => {
+  async function initiate(body: Record<string, unknown>) {
+    return initiateHandler(
+      new NextRequest("http://localhost/api/auth/email/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ platform: "email" }) },
+    );
+  }
+
+  it("登录意图 + 邮箱未注册 → 409「请先注册」，且不建号", async () => {
+    vi.stubEnv("REGISTRATION_INVITE_ONLY", "");
+    const email = freshEmail();
+    const res = await initiate({ email, authIntent: "login" });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toContain("尚未注册");
+
+    const { rows } = await getPool().query(
+      "SELECT 1 FROM user_platform_identity WHERE platform_id='email' AND platform_user_id=$1",
+      [email],
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("注册意图 + 邮箱已注册 → 409「请直接登录」", async () => {
+    vi.stubEnv("REGISTRATION_INVITE_ONLY", "");
+    const email = freshEmail();
+    await upsertEmailUser(email, "已有用户");
+    const res = await initiate({ email, name: "重复注册", authIntent: "register" });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toContain("已注册");
+  });
+
+  it("注册意图缺姓名 → 409，姓名不再回落成邮箱地址", async () => {
+    vi.stubEnv("REGISTRATION_INVITE_ONLY", "");
+    const email = freshEmail();
+    const res = await initiate({ email, authIntent: "register" });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toContain("姓名");
+
+    const { rows } = await getPool().query(
+      "SELECT 1 FROM user_platform_identity WHERE platform_id='email' AND platform_user_id=$1",
+      [email],
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("未声明意图 → 行为完全不变（老客户端兼容）", async () => {
+    vi.stubEnv("REGISTRATION_INVITE_ONLY", "");
+    const email = freshEmail();
+    const res = await initiate({ email, name: "老客户端" });
+    expect(res.status).toBe(200);
+
+    const { rows } = await getPool().query<{ name: string }>(
+      `SELECT up.name FROM user_profile up
+       JOIN user_platform_identity upi ON upi.user_id = up.user_id
+       WHERE upi.platform_id='email' AND upi.platform_user_id=$1`,
+      [email],
+    );
+    expect(rows[0].name).toBe("老客户端");
   });
 });

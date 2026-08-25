@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getPersonalChannel } from "@/lib/platform/registry";
 import { generateOAuthState, OAUTH_STATE_COOKIE, OAUTH_CTX_COOKIE, type OAuthContext } from "@/lib/session";
-import { RegistrationDeniedError, registrationRateLimited } from "@/lib/registration-gate";
+import { RegistrationDeniedError, AuthIntentMismatchError, registrationRateLimited } from "@/lib/registration-gate";
 
 function requestBaseUrl(req: NextRequest): string {
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
@@ -85,6 +85,10 @@ export async function POST(req: NextRequest, { params }: Params) {
   } catch (e) {
     if (e instanceof RegistrationDeniedError) {
       return Response.json({ error: e.message }, { status: 403 });
+    }
+    // 意图与账号实际状态不符（如在登录页输了未注册的邮箱）：409 与「注册被拒」区分开
+    if (e instanceof AuthIntentMismatchError) {
+      return Response.json({ error: e.message }, { status: 409 });
     }
     console.error(`[auth/${platform}/initiate]`, e);
     return Response.json({ error: "failed to initiate login" }, { status: 502 });

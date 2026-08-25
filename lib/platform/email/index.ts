@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { signMagicToken, verifyMagicToken } from "./email-tokens";
 import { sendEmail } from "./email-send";
 import { upsertEmailUser, getUserProfile, createEmailOtp } from "../../db";
-import { requireRegistrationJustification } from "../../registration-gate";
+import { requireRegistrationJustification, identityExists, AuthIntentMismatchError } from "../../registration-gate";
 import { buildNotificationEmail } from "./email-templates";
 import type {
   PersonalChannel,
@@ -45,8 +45,28 @@ class EmailPlatform implements PersonalChannel, InboundGateway {
     context?: { baseUrl: string },
   ): Promise<void> {
     const email = params.email?.trim().toLowerCase();
-    const name = params.name?.trim() || email;
     if (!email) throw new Error("email: missing email param");
+
+    // 意图不参与判定（谁该建号由 identity 表说了算），只用来把报错说准：
+    // 在登录页输了个没注册过的邮箱，该明说「未注册」，而不是默默建个号——
+    // 那正是「登录即注册」时代的老毛病。未声明意图的老客户端行为不变。
+    const authIntent = params.authIntent === "login" || params.authIntent === "register"
+      ? params.authIntent
+      : undefined;
+    if (authIntent) {
+      const exists = await identityExists("email", email);
+      if (authIntent === "login" && !exists) {
+        throw new AuthIntentMismatchError("该邮箱尚未注册，请先注册");
+      }
+      if (authIntent === "register" && exists) {
+        throw new AuthIntentMismatchError("该邮箱已注册，请直接登录");
+      }
+      // 注册必须自报姓名——不再回落成邮箱地址（那会让成员列表里显示一串邮箱）
+      if (authIntent === "register" && !params.name?.trim()) {
+        throw new AuthIntentMismatchError("请填写姓名");
+      }
+    }
+    const name = params.name?.trim() || email;
 
     // 注册邀请制（REGISTRATION_INVITE_ONLY）：这里是新账号的唯一写点——发验证码
     // 即建号，邮箱验证之前就落 app_user 行。开关开启时，新邮箱需正当性

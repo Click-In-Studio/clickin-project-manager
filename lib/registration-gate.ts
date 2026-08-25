@@ -33,6 +33,33 @@ export class RegistrationDeniedError extends Error {
   }
 }
 
+/**
+ * 用户声明的意图与账号实际状态不符（message 面向登录页直接展示）。
+ *
+ * 意图不参与判定——服务端查一次 identity 就知道该登录还是该注册。它的用处是让
+ * 报错说得准：用户在登录页输了个从未注册的邮箱，该说「未注册，请先注册」，
+ * 而不是默默给他建个号（那正是「登录即注册」时代的老毛病）。
+ */
+export class AuthIntentMismatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthIntentMismatchError";
+  }
+}
+
+/** 该平台身份是否已有账号——意图校验与注册门共用同一个口径。 */
+export async function identityExists(
+  platformId: RegistrationPlatform,
+  platformUserId: string,
+): Promise<boolean> {
+  const id = normalizeIdentity(platformId, platformUserId);
+  const { rows } = await getPool().query(
+    "SELECT 1 FROM user_platform_identity WHERE platform_id = $1 AND platform_user_id = $2",
+    [platformId, id],
+  );
+  return rows.length > 0;
+}
+
 export type RegistrationJustification =
   | { type: "existing" | "allowlist" | "directed_invite" | "invite_token" }
   /** 码是赢家时才在建号事务里消耗（有免费正当性就不烧码）。 */
