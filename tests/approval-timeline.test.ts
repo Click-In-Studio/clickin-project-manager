@@ -7,6 +7,8 @@
  * 画成灰点像「还在等」。
  */
 import { describe, it, expect } from "vitest";
+import { readFile } from "fs/promises";
+import path from "path";
 import { buildApprovalTimeline } from "@/lib/approval-timeline";
 import type { ApprovalChainEntry, ApprovalRequest } from "@/lib/db";
 
@@ -178,14 +180,29 @@ describe("终结语义", () => {
     expect(byKey(nodes, "terminal")!.state).toBe("rejected");
   });
 
-  // 存量兜底：已终结却没有动作的条目不能画成 waiting——那读起来像还挂在这些人手上
-  it("已终结但链末条没有动作 → terminated，不是 waiting", () => {
+  // 存量兜底：已终结却没有动作的条目不能画成「等待中」——那读起来像还挂在这些人手上
+  it("已终结但链末条没有动作 → terminated", () => {
     const nodes = buildApprovalTimeline(makeRequest({
       status: "cancelled",
       resolvedAt: "2026-08-21T09:00:00.000Z",
       escalationChain: [entry()],
     }));
     expect(nodes[1].state).toBe("terminated");
+  });
+
+  // 链里只有「已经到达过」的级，所以中段条目没有 action 就是异常（升级时漏补落点）。
+  // 它必须画成「未处理」——画成「等待中」会让人以为申请还挂在这一级，
+  // 而实际上流程早就走到下一级去了。
+  it("待审批申请的中段条目缺动作 → terminated，不是「还在等」", () => {
+    const nodes = buildApprovalTimeline(makeRequest({
+      status: "pending_resource",
+      escalationChain: [
+        entry(),                                          // 漏补落点的中段条目
+        entry({ stage: "dept_poc", approverIds: [U_POC] }),
+      ],
+    }));
+    expect(nodes[1].state).toBe("terminated");
+    expect(nodes[2].state).toBe("current");
   });
 });
 
@@ -231,6 +248,29 @@ describe("或签提示", () => {
     }));
     expect(nodes[1].anyOneOf).toBe(false);
     expect(nodes[2].anyOneOf).toBe(true);
+  });
+});
+
+// client component 直接 import 这两个模块。哪天有人把 `import type { X } from "./db"`
+// 写成 `import { X }`，或图省事引一下 getPool，pg 就会被打进浏览器包——
+// 编译不会报错，跑起来才炸。静态扫一遍，把「客户端安全」从口头约定变成会红的测试。
+describe("客户端安全：不得把数据库拖进浏览器包", () => {
+  const CLIENT_SAFE = ["lib/approval-timeline.ts", "lib/approval-stages.ts"];
+
+  it.each(CLIENT_SAFE)("%s 对 ./db 只有 type-only 引用，且不碰 pg", async (rel) => {
+    const src = await readFile(path.join(process.cwd(), rel), "utf8");
+    const imports = [...src.matchAll(/^import\s+(type\s+)?[\s\S]*?from\s+"([^"]+)";/gm)];
+
+    for (const [, typeOnly, spec] of imports) {
+      if (/(^|\/)pg$/.test(spec) || spec.endsWith("/pg")) {
+        throw new Error(`${rel} 直接 import 了 ${spec}`);
+      }
+      if (spec.endsWith("/db") || spec === "./db") {
+        expect(typeOnly, `${rel} 对 ${spec} 必须是 import type`).toBeTruthy();
+      }
+    }
+    // 值引用形式的 getPool 同样会把驱动带进来
+    expect(src).not.toMatch(/\bgetPool\b/);
   });
 });
 

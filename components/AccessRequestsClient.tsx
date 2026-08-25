@@ -151,11 +151,11 @@ function PersonChip({ userId, person, fallbackName }: {
   );
 }
 
-/** 节点状态 → 圆点颜色。terminated 与 waiting 同为灰：都不是"完成"，但含义不同（见文案）。 */
+/** 节点状态 → 圆点颜色。terminated 是灰的，但它是「没处理」不是「还在等」——差别写在文案里。 */
 function dotColorOf(state: TimelineNodeState): string {
-  if (state === "current")  return "var(--stage)";
-  if (state === "rejected") return "var(--danger, #ef4444)";
-  if (state === "waiting" || state === "terminated") return "var(--line)";
+  if (state === "current")    return "var(--stage)";
+  if (state === "rejected")   return "var(--danger, #ef4444)";
+  if (state === "terminated") return "var(--line)";
   return "var(--success, #4b7f65)";
 }
 

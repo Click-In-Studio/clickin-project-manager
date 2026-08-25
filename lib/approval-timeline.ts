@@ -10,16 +10,19 @@
  */
 
 import type { ApprovalChainEntry, ApprovalRequest } from "./db";
-import { APPROVAL_ACTION_LABELS, approvalStageLabel, type ApprovalStageName } from "./approval-stages";
+import { APPROVAL_ACTION_LABELS, approvalStageLabel } from "./approval-stages";
 
 export type TimelineNodeKind = "发起" | "审批" | "发放" | "结束";
 
+/**
+ * 没有「等待中」这个状态是有意的：链里只有已经到达过的级（见 entryState 注释），
+ * 未来的级不在这份数据里。硬造一个 waiting 只会让「没处理」被误读成「还在等」。
+ */
 export type TimelineNodeState =
   | "complete"    // 已完成（绿）
   | "current"     // 当前节点（高亮）
-  | "waiting"     // 尚未到达（灰）
   | "rejected"    // 被拒（红）
-  | "terminated"; // 未处理就终止了：申请人撤回 / 被新申请顶掉（灰，但**不是**「还在等」）
+  | "terminated"; // 没处理就终止了：撤回 / 被新申请顶掉 / 漏补落点（灰）
 
 export type TimelineNode = {
   key: string;
@@ -75,11 +78,27 @@ function effectiveChain(req: ApprovalRequest): ApprovalChainEntry[] {
 }
 
 function stageTitle(entry: ApprovalChainEntry): string {
-  // 存量条目没有 stage，只有旧的两段式 phase
-  if (entry.stage) return approvalStageLabel(entry.stage as ApprovalStageName, entry.depth);
+  // 存量条目没有 stage，只有旧的两段式 phase。
+  // 不做 as ApprovalStageName 强转：条目来自 JSONB，类型只是声明不是保证，
+  // 强转会把「将来后端加了新级、前端还没跟上」这种情况静默掉。
+  // approvalStageLabel 对认不出的级名回退成原字符串——显示得出，也看得出不对劲。
+  if (entry.stage) return approvalStageLabel(entry.stage, entry.depth);
   return entry.phase === "supervisor" ? "直属上级" : "资源负责人";
 }
 
+/**
+ * 链条目 → 节点状态。
+ *
+ * **关键前提：链里只有「已经到达过」的级。** 后端每次升级才追加一条
+ * （submitAccessRequest 插首级，advanceToStage 追加下一级），未来的级根本不在链上。
+ * 所以这里永远不会出现「尚未到达」的节点——那种预测要走 preview 接口，是另一份数据。
+ *
+ * 由此，没有 action 的条目只有两种：
+ *   - 待审批申请的**末条** = 当前节点
+ *   - 其余 = 异常（升级时漏补落点 / 存量数据）。按「未处理」画，
+ *     **不能画成「等待中」**——那读起来像申请还挂在这些人手上，
+ *     正是这个模块要消灭的那类误导。
+ */
 function entryState(
   entry: ApprovalChainEntry,
   isLast: boolean,
@@ -90,9 +109,7 @@ function entryState(
   if (entry.action === "cancelled") return "terminated";
   if (entry.action) return "complete";
   if (pending && isLast) return "current";
-  // 已终结却没有动作的条目（存量数据，或后端漏标）——按「没处理」画，
-  // 不能画成 waiting，那读起来像申请还挂在这些人手上
-  return pending ? "waiting" : "terminated";
+  return "terminated";
 }
 
 function entryReason(entry: ApprovalChainEntry): string | undefined {
