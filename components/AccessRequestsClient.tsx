@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import styles from "@/components/my-pages.module.css";
-import type { ApprovalRequest, MemberWithRoles } from "@/lib/db";
+import type { ApprovalPerson, ApprovalRequest } from "@/lib/db";
 import { TTL_OPTIONS, displayTtlLabel, type TtlOptionValue } from "@/lib/approval-ttl";
+import { buildApprovalTimeline, type TimelineNode, type TimelineNodeState } from "@/lib/approval-timeline";
+import { APPROVAL_STAGE_LABELS, STAGE_ORDER } from "@/lib/approval-stages";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -51,20 +53,17 @@ const STATUS_LABELS: Record<ApprovalRequest["status"], string> = {
   cancelled:          "已撤回",
 };
 
-const STAGE_LABELS: Record<string, string> = {
-  supervisor: "直属上级",
-  holder: "资源持有人",
-  dept_poc: "资源负责人",
-  ancestor_poc: "上级部门负责人",
-  producer: "制作人",
-  owner: "Owner",
-};
+// 阶梯级名与动作词不在这里抄第二份：lib/approval-stages.ts 是前后端共用的唯一来源
+// （此前页面上叫「资源持有人」，飞书通知里叫「资源持有者」，就是各抄一份的结果）。
+// 节点文案由 buildApprovalTimeline 组装，见 lib/approval-timeline.ts。
 
-const ACTION_LABELS = {
-  approved: "已批准",
-  rejected: "已拒绝",
-  escalated: "已转交",
-} as const;
+/**
+ * 表单里那句「依次匹配 …」由阶梯序生成，不手写——手写的那版漏了「上级部门负责人」，
+ * 而且后端加一级它也不会跟着变。
+ *
+ * 这仍然只是**规则说明**，不是这条申请的真实链路：真链路要走 preview 接口现算。
+ */
+const LADDER_TEXT = STAGE_ORDER.map((s) => APPROVAL_STAGE_LABELS[s]).join("、");
 
 type StatusColor = "amber" | "green" | "red" | "muted";
 
@@ -119,29 +118,21 @@ function StatusBadge({ status }: { status: ApprovalRequest["status"] }) {
 
 // ─── ApprovalFlow ────────────────────────────────────────────────────────────
 
-function stageLabel(stage: string | undefined, phase: "supervisor" | "resource", depth?: number) {
-  const base = stage ? (STAGE_LABELS[stage] ?? stage) : phase === "supervisor" ? "直属上级" : "资源负责人";
-  if ((stage === "supervisor" || stage === "ancestor_poc") && typeof depth === "number") {
-    return `${base} · 第 ${depth + 1} 级`;
-  }
-  return base;
-}
-
 function initials(name: string) {
   const clean = name.trim();
   return clean ? clean.slice(-2) : "成员";
 }
 
-function PersonChip({ userId, member, fallbackName }: {
+function PersonChip({ userId, person, fallbackName }: {
   userId: string;
-  member?: MemberWithRoles;
+  person?: ApprovalPerson;
   fallbackName?: string;
 }) {
-  const name = member?.name || fallbackName || "项目成员";
-  const role = member?.roles?.[0];
+  const name = person?.name || fallbackName || "项目成员";
+  const role = person?.roles?.[0];
   return (
     <span
-      title={member ? `${name}${member.roles.length ? ` · ${member.roles.join("、")}` : ""}` : userId}
+      title={person ? `${name}${person.roles.length ? ` · ${person.roles.join("、")}` : ""}` : userId}
       style={{
         display: "inline-flex", alignItems: "center", gap: 6, minHeight: 28,
         padding: "3px 9px 3px 4px", border: "1px solid var(--line)", borderRadius: 999,
@@ -160,91 +151,25 @@ function PersonChip({ userId, member, fallbackName }: {
   );
 }
 
-function ApprovalFlow({ req, members, compact = false }: {
+/** 节点状态 → 圆点颜色。terminated 与 waiting 同为灰：都不是"完成"，但含义不同（见文案）。 */
+function dotColorOf(state: TimelineNodeState): string {
+  if (state === "current")  return "var(--stage)";
+  if (state === "rejected") return "var(--danger, #ef4444)";
+  if (state === "waiting" || state === "terminated") return "var(--line)";
+  return "var(--success, #4b7f65)";
+}
+
+function ApprovalFlow({ req, compact = false }: {
   req: ApprovalRequest;
-  members: MemberWithRoles[];
   compact?: boolean;
 }) {
-  const memberById = new Map(members.map((member) => [member.userId, member]));
   const isPending = req.status === "pending_supervisor" || req.status === "pending_resource";
-  const chain = req.escalationChain.length > 0
-    ? req.escalationChain
-    : req.currentStage
-      ? [{
-          phase: req.currentStage === "supervisor" ? "supervisor" as const : "resource" as const,
-          stage: req.currentStage,
-          approverIds: req.currentApproverIds,
-          notifiedAt: req.createdAt,
-        }]
-      : [];
-
-  const terminalLabel = req.status === "approved"
-    ? "流程完成"
-    : req.status === "rejected"
-      ? "流程已拒绝"
-      : req.status === "cancelled"
-        ? "申请已撤回"
-        : null;
-
-  type FlowNode = {
-    key: string;
-    kind: string;
-    title: string;
-    people: string[];
-    time: string;
-    state: "complete" | "current" | "waiting" | "rejected";
-    action?: string;
-    actorId?: string;
-    reason?: string;
-    fallbackName?: string;
-  };
-
-  const nodes: FlowNode[] = [
-    {
-      key: "initiated",
-      kind: "发起",
-      title: "提交申请",
-      people: [req.subjectId],
-      time: req.createdAt,
-      state: "complete" as const,
-      fallbackName: req.subjectName,
-    },
-    ...chain.map((entry, index) => ({
-      key: `approval-${index}`,
-      kind: "审批",
-      title: stageLabel(entry.stage, entry.phase, entry.depth),
-      people: entry.approverIds,
-      time: entry.actedAt ?? entry.notifiedAt,
-      state: entry.action === "rejected"
-        ? "rejected" as const
-        : entry.action
-          ? "complete" as const
-          : isPending && index === chain.length - 1
-            ? "current" as const
-            : "waiting" as const,
-      action: entry.action ? ACTION_LABELS[entry.action] : undefined,
-      actorId: entry.actorId,
-      reason: entry.escalationReason === "timeout" ? "超时自动升级" : entry.escalationReason === "forwarded" ? "审批人转交" : undefined,
-    })),
-    ...(chain.length === 0 && terminalLabel ? [{
-      key: "legacy-approval",
-      kind: "审批",
-      title: "历史审批记录",
-      people: req.resolvedBy ? [req.resolvedBy] : [],
-      time: req.resolvedAt ?? req.createdAt,
-      state: req.status === "rejected" ? "rejected" as const : "complete" as const,
-      action: req.status === "approved" ? "已批准" : req.status === "rejected" ? "已拒绝" : "已结束",
-      actorId: req.resolvedBy ?? undefined,
-    }] : []),
-    ...(terminalLabel ? [{
-      key: "terminal",
-      kind: "结束",
-      title: terminalLabel,
-      people: req.resolvedBy ? [req.resolvedBy] : [],
-      time: req.resolvedAt ?? req.createdAt,
-      state: req.status === "rejected" ? "rejected" as const : "complete" as const,
-    }] : []),
-  ];
+  // 时间线的组装逻辑（含超时、撤回、被顶掉、存量无链等降级分支）在 lib/approval-timeline.ts，
+  // 由 tests/approval-timeline.test.ts 覆盖——这些状态在页面上极难手工复现。
+  const nodes: TimelineNode[] = useMemo(() => buildApprovalTimeline(req), [req]);
+  // 姓名与角色随审批 DTO 一起下来（people），不再联查通讯录：那条路拉全员邮箱手机号
+  // 只为取个名，还覆盖不到不在成员名单里的审批人（祖先部门 POC、存量演出 owner）。
+  const personOf = (userId: string) => req.people[userId];
 
   return (
     <section style={{ borderTop: "1px solid var(--line)", paddingTop: compact ? 14 : 18 }}>
@@ -258,13 +183,7 @@ function ApprovalFlow({ req, members, compact = false }: {
       <div>
         {nodes.map((node, index) => {
           const isLast = index === nodes.length - 1;
-          const dotColor = node.state === "current"
-            ? "var(--stage)"
-            : node.state === "rejected"
-              ? "var(--danger, #ef4444)"
-              : node.state === "waiting"
-                ? "var(--line)"
-                : "var(--success, #4b7f65)";
+          const dotColor = dotColorOf(node.state);
           return (
             <div key={node.key} style={{ display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", gap: 11 }}>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -278,26 +197,46 @@ function ApprovalFlow({ req, members, compact = false }: {
                 <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", letterSpacing: ".08em" }}>{node.kind}</span>
                   <b style={{ fontSize: 12, color: "var(--ink)" }}>{node.title}</b>
-                  {node.action && <small style={{ fontSize: 10, color: dotColor }}>{node.action}</small>}
+                  {node.actionLabel && <small style={{ fontSize: 10, color: dotColor }}>{node.actionLabel}</small>}
                   {node.state === "current" && <small style={{ fontSize: 10, color: "var(--stage)" }}>当前节点</small>}
                   <time style={{ marginLeft: "auto", fontSize: 9, color: "var(--muted)" }}>{fmtDate(node.time)}</time>
                 </div>
+                {node.expiresAt !== undefined && (
+                  <p style={{ margin: "6px 0 0", fontSize: 10, color: "var(--muted)" }}>
+                    {node.expiresAt ? `有效期至 ${fmtDate(node.expiresAt)}` : "长期有效"}
+                  </p>
+                )}
                 {node.people.length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                     {node.people.map((userId) => (
-                      <PersonChip
-                        key={userId}
-                        userId={userId}
-                        member={memberById.get(userId)}
-                        fallbackName={node.fallbackName}
-                      />
+                      <PersonChip key={userId} userId={userId} person={personOf(userId)} />
                     ))}
                   </div>
                 )}
-                {node.actorId && (
+                {/* 或签：同一级任一人处理即完成，不写清楚会被读成需要全员批准 */}
+                {node.anyOneOf && (
+                  <p style={{ margin: "5px 0 0", fontSize: 10, color: "var(--muted)" }}>
+                    任一人处理即可
+                  </p>
+                )}
+                {/* 「原因」独立于「操作人」渲染：超时自动升级恒无操作人，
+                    挂在操作人下面会让最该说清楚的那句话永远显示不出来。 */}
+                {(node.actorId || node.bySystem || node.reason) && (
                   <p style={{ margin: "6px 0 0", fontSize: 10, color: "var(--muted)" }}>
-                    由 {memberById.get(node.actorId)?.name || "项目成员"} 操作
-                    {node.reason ? ` · ${node.reason}` : ""}
+                    {node.actorId
+                      ? `由 ${personOf(node.actorId)?.name || "项目成员"} 操作`
+                      : node.bySystem ? "系统自动处理" : null}
+                    {node.actorId && node.reason ? " · " : ""}
+                    {!node.actorId && node.bySystem && node.reason ? " · " : ""}
+                    {node.reason}
+                  </p>
+                )}
+                {node.comment && (
+                  <p style={{
+                    margin: "6px 0 0", padding: "6px 9px", borderRadius: 6,
+                    background: "var(--paper)", color: "var(--ink)", fontSize: 11, lineHeight: 1.5,
+                  }}>
+                    {node.comment}
                   </p>
                 )}
               </div>
@@ -334,7 +273,7 @@ function ApprovalFlowPreview() {
             <small style={{ fontSize: 9, color: "var(--stage)", fontWeight: 700 }}>审批</small>
             <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--ink)", fontWeight: 600 }}>系统匹配审批链路</p>
             <p style={{ margin: "4px 0 0", fontSize: 10, lineHeight: 1.55, color: "var(--muted)" }}>
-              依次匹配直属上级、资源持有人、资源负责人、制作人与 Owner；无对应人员的节点自动跳过。
+              依次匹配{LADDER_TEXT}；无对应人员的节点自动跳过。
             </p>
           </div>
         </div>
@@ -486,9 +425,8 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
 
 // ─── RequestDetail ────────────────────────────────────────────────────────────
 
-function RequestDetail({ req, members, canAct, onApprove, onReject, onEscalate, onCancel, acting }: {
+function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel, acting }: {
   req: ApprovalRequest;
-  members: MemberWithRoles[];
   canAct?: boolean;
   onApprove?: () => void;
   onReject?: () => void;
@@ -548,7 +486,7 @@ function RequestDetail({ req, members, canAct, onApprove, onReject, onEscalate, 
         </div>
       )}
 
-      <ApprovalFlow req={req} members={members} />
+      <ApprovalFlow req={req} />
 
       {/* Actions */}
       {isPending && (
@@ -595,7 +533,6 @@ export default function AccessRequestsClient({ productionId, productionName }: P
   const [tab, setTab]                         = useState<Tab>("mine");
   const [myRequests, setMyRequests]           = useState<ApprovalRequest[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
-  const [members, setMembers]                   = useState<MemberWithRoles[]>([]);
   const [loadingMine, setLoadingMine]         = useState(true);
   const [loadingPending, setLoadingPending]   = useState(true);
   const [acting, setActing]                   = useState<string | null>(null);
@@ -629,17 +566,8 @@ export default function AccessRequestsClient({ productionId, productionName }: P
     }
   }, [productionId]);
 
-  const fetchMembers = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/production/${productionId}/contacts`);
-      if (!res.ok) return;
-      setMembers((await res.json()) as MemberWithRoles[]);
-    } catch {
-      // The approval chain remains usable with anonymous member chips if the directory is unavailable.
-    }
-  }, [productionId]);
-
-  useEffect(() => { void fetchMine(); void fetchPending(); void fetchMembers(); }, [fetchMine, fetchPending, fetchMembers]);
+  // 通讯录联查已退役：姓名与角色随审批 DTO 的 people 一起下来（#324）。
+  useEffect(() => { void fetchMine(); void fetchPending(); }, [fetchMine, fetchPending]);
 
   // Keep right panel in sync when data refreshes
   useEffect(() => {
@@ -784,7 +712,7 @@ export default function AccessRequestsClient({ productionId, productionName }: P
                 你本人尚未持有该权限，只能向上转交。
               </p>
             )}
-            <ApprovalFlow req={req} members={members} compact />
+            <ApprovalFlow req={req} compact />
             {actionError && acting !== req.id && (
               <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--danger, #ef4444)" }}>{actionError}</p>
             )}
@@ -962,7 +890,6 @@ export default function AccessRequestsClient({ productionId, productionName }: P
               <>
                 <RequestDetail
                   req={rightPanel.req}
-                  members={members}
                   canAct={rightPanel.canAct}
                   acting={acting === rightPanel.req.id}
                   onApprove={() => void handleApprove(rightPanel.req.id)}
