@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { upsertFeishuUser } from "@/lib/db-feishu";
+import { upsertFeishuUser, attachFeishuToUser } from "@/lib/db-feishu";
 import { shortId } from "./factories";
 
 // 飞书身份平权（db/add-feishu-identity-parity.sql）：飞书与邮箱是平权的登录通道，
@@ -90,5 +90,68 @@ describe("飞书身份平权", () => {
     createdUserIds.push(a.userId);
 
     expect(b.userId).toBe(a.userId);
+  });
+});
+
+// 绑定 ≠ 注册：账户页绑定飞书原先误用 upsertFeishuUser（注册入口），每绑一个新
+// 飞书号就凭空造一个孤儿账号——feishu_user 指向孤儿、identity 指向本人，两边裂开。
+describe("绑定飞书不建号", () => {
+  async function bareUser(): Promise<string> {
+    const { rows } = await getPool().query<{ id: string }>(
+      "INSERT INTO app_user DEFAULT VALUES RETURNING id",
+    );
+    createdUserIds.push(rows[0].id);
+    return rows[0].id;
+  }
+
+  it("新 open_id 挂到当前账号，feishu_user 与 identity 都指向它", async () => {
+    const userId = await bareUser();
+    const openId = `fip-bind-${shortId()}`;
+
+    const res = await attachFeishuToUser(userId, openId, "绑定测试", null);
+    expect(res.ok).toBe(true);
+
+    // 关键：飞书行归属当前账号，而不是某个新建的账号
+    const { rows } = await getPool().query<{ user_id: string }>(
+      "SELECT user_id FROM feishu_user WHERE open_id = $1",
+      [openId],
+    );
+    expect(rows[0].user_id).toBe(userId);
+
+    const ident = await identityRows(openId);
+    expect(ident).toHaveLength(1);
+    expect(ident[0].user_id).toBe(userId);
+  });
+
+  it("open_id 已属他人 → openid_taken，不改归属", async () => {
+    const owner = await bareUser();
+    const other = await bareUser();
+    const openId = `fip-bind-${shortId()}`;
+    await attachFeishuToUser(owner, openId, "先到者", null);
+
+    const res = await attachFeishuToUser(other, openId, "后到者", null);
+    expect(res).toEqual({ ok: false, reason: "openid_taken" });
+
+    const { rows } = await getPool().query<{ user_id: string }>(
+      "SELECT user_id FROM feishu_user WHERE open_id = $1",
+      [openId],
+    );
+    expect(rows[0].user_id).toBe(owner);
+  });
+
+  it("账号已绑其他飞书号 → user_has_other_feishu（feishu_user.user_id 唯一）", async () => {
+    const userId = await bareUser();
+    await attachFeishuToUser(userId, `fip-bind-${shortId()}`, "第一个", null);
+
+    const res = await attachFeishuToUser(userId, `fip-bind-${shortId()}`, "第二个", null);
+    expect(res).toEqual({ ok: false, reason: "user_has_other_feishu" });
+  });
+
+  it("重复绑定同一 open_id 到同一账号是幂等的", async () => {
+    const userId = await bareUser();
+    const openId = `fip-bind-${shortId()}`;
+    expect((await attachFeishuToUser(userId, openId, "重复绑定", null)).ok).toBe(true);
+    expect((await attachFeishuToUser(userId, openId, "重复绑定", null)).ok).toBe(true);
+    expect(await identityRows(openId)).toHaveLength(1);
   });
 });

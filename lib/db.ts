@@ -1,7 +1,7 @@
 import { getPool } from "./pg";
 import { notifyUser, notifyUsers } from "./notify";
 export type { UserInfo } from "./db-feishu";
-export { upsertFeishuUser, getFeishuUser } from "./db-feishu";
+export { upsertFeishuUser, getFeishuUser, attachFeishuToUser } from "./db-feishu";
 import type { UserInfo } from "./db-feishu";
 import { SERVER_URL } from "./server-url";
 import type { Pool, PoolClient } from "pg";
