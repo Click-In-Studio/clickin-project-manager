@@ -6,6 +6,7 @@ import type { CharacterDetail } from "@/lib/db";
 import ChevronIcon from "@/components/ChevronIcon";
 import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, PRODUCTION_TOOLBAR_STAGE, ProductionTopMenuDivider, useProductionToolbar } from "./ProductionTopMenu";
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
+import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
 
 const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
 
@@ -865,12 +866,11 @@ export default function CharactersManager({ productionId, productionName, initia
           <ListTableViewToggleOverflow value={view} onChange={setView} />
         ) : null}
       >
-        <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
-          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
-            {productionName}
-          </span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>角色</span>
-        </div>
+        <DramaturgyWorkspaceHeading
+          productionId={productionId}
+          productionName={productionName}
+          active="characters"
+        />
         <ProductionTopMenuDivider />
         <ListTableViewToggle value={view} onChange={setView} />
       </ProductionTopMenu>

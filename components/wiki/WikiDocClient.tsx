@@ -45,6 +45,7 @@ export default function WikiDocClient({
   backlinks,
   unlinked,
   entityRefs,
+  navigationBasePath,
 }: {
   productionId: string;
   wiki: WikiDoc & { tags: string[] };
@@ -55,9 +56,11 @@ export default function WikiDocClient({
   backlinks: WikiRef[];
   unlinked: WikiRef[];
   entityRefs: WikiEntityRef[];
+  navigationBasePath?: string;
 }) {
   const router = useRouter();
   const api = `${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}`;
+  const routeBase = navigationBasePath ?? `/production/${productionId}/wiki`;
 
   const [title, setTitle] = useState(wiki.title ?? "");
   const [body, setBody] = useState(wiki.body);
@@ -157,7 +160,7 @@ export default function WikiDocClient({
       try {
         const data = JSON.parse((e as MessageEvent).data) as { kind: string; wikiId: string };
         if (data.kind === "deleted" && data.wikiId === wiki.id) {
-          router.replace(`/production/${productionId}/wiki`);
+          router.replace(routeBase);
           return;
         }
         if (refreshTimerRef.current) return; // 批量结构变更（如 AI 连写几篇）合并成一次
@@ -172,7 +175,7 @@ export default function WikiDocClient({
       setPeers([]);
       if (refreshTimerRef.current) { clearTimeout(refreshTimerRef.current); refreshTimerRef.current = null; }
     };
-  }, [wiki.id, productionId, router]);
+  }, [wiki.id, productionId, routeBase, router]);
 
   // 光标位置上报（trailing 节流 400ms——leading 会发陈旧位置）
   const pendingCursorRef = useRef<{ blockIndex: number; offset: number } | null>(null);

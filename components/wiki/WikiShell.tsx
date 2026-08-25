@@ -22,15 +22,22 @@ export default function WikiShell({
   wikis,
   canCreate,
   selectedId,
+  navigationBasePath,
+  rootParentId,
   children,
 }: {
   productionId: string;
   wikis: WikiListEntry[];
   canCreate: boolean;
   selectedId?: string;
+  /** Optional route namespace for a scoped wiki workspace. API paths stay unchanged. */
+  navigationBasePath?: string;
+  /** Parent used when this shell presents a subtree as its visual root. */
+  rootParentId?: string;
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const routeBase = navigationBasePath ?? `/production/${productionId}/wiki`;
   const [query, setQuery] = useState("");
   const byId = useMemo(() => new Map(wikis.map(w => [w.id, w])), [wikis]);
   const byIdRef = useRef(byId);
@@ -52,7 +59,6 @@ export default function WikiShell({
       return next;
     });
     hydratedRef.current = true;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey, selectedId]);
 
   useEffect(() => {
@@ -125,7 +131,7 @@ export default function WikiShell({
       const children = (byParent.get(targetId) ?? []).filter(w => w.id !== id);
       sortKey = keyBetween(children.at(-1)?.sortKey ?? null, null);
     } else {
-      parentId = target.parentId ?? null;
+      parentId = rootParentId && target.parentId === rootParentId ? null : target.parentId ?? null;
       const siblings = (byParent.get(parentId) ?? []).filter(w => w.id !== id);
       const idx = siblings.findIndex(w => w.id === targetId);
       const prev = zone === "before" ? siblings[idx - 1] : siblings[idx];
@@ -136,7 +142,7 @@ export default function WikiShell({
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ parentId, sortKey }),
+      body: JSON.stringify({ parentId: parentId ?? rootParentId ?? null, sortKey }),
     });
     if (!res.ok) { alert((await res.json()).error ?? "移动失败"); return; }
     if (zone === "inside") setExpanded(prev => new Set([...prev, targetId]));
@@ -180,14 +186,14 @@ export default function WikiShell({
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, parentId: parentId || null }),
+        body: JSON.stringify({ title, parentId: parentId || rootParentId || null }),
       });
       const data = await res.json();
       if (!res.ok) { alert(data.error ?? "创建失败"); return; }
       setCreatingUnder(null);
       setNewTitle("");
       if (parentId) setExpanded(prev => new Set([...prev, parentId]));
-      router.push(`/production/${productionId}/wiki/${data.wiki.id}`);
+      router.push(`${routeBase}/${data.wiki.id}`);
       router.refresh();
     } finally {
       setBusy(false);
@@ -211,7 +217,7 @@ export default function WikiShell({
           const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title, body: text }),
+            body: JSON.stringify({ title, body: text, parentId: rootParentId || null }),
           });
           const data = await res.json();
           if (!res.ok) { errors.push(`${file.name}: ${data.error ?? "失败"}`); continue; }
@@ -221,7 +227,7 @@ export default function WikiShell({
         }
       }
       if (errors.length > 0) alert(`部分导入失败：\n${errors.join("\n")}`);
-      if (firstId) router.push(`/production/${productionId}/wiki/${firstId}`);
+      if (firstId) router.push(`${routeBase}/${firstId}`);
       router.refresh();
     } finally {
       setImporting(false);
@@ -235,7 +241,7 @@ export default function WikiShell({
     setMenu(null);
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${id}`, { method: "DELETE" });
     if (!res.ok) { alert((await res.json()).error ?? "删除失败"); return; }
-    if (id === selectedId) router.push(`/production/${productionId}/wiki`);
+    if (id === selectedId) router.push(routeBase);
     router.refresh();
   }
 
@@ -246,7 +252,7 @@ export default function WikiShell({
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ parentId: target === "__root__" ? null : target }),
+      body: JSON.stringify({ parentId: target === "__root__" ? rootParentId ?? null : target }),
     });
     if (!res.ok) { alert((await res.json()).error ?? "移动失败"); return; }
     router.refresh();
@@ -357,7 +363,7 @@ export default function WikiShell({
                     {expanded.has(entry.id) ? "▾" : "▸"}
                   </button>
                   <Link
-                    href={`/production/${productionId}/wiki/${entry.id}`}
+                    href={`${routeBase}/${entry.id}`}
                     className={`flex-1 min-w-0 truncate py-1.5 text-[13px] ${
                       active ? "font-semibold text-sky-800" : "text-zinc-600"
                     }`}

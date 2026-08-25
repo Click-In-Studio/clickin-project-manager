@@ -40,9 +40,8 @@ interface AppShellProps {
 }
 
 const CREATION_NAV = [
+  { label: "构作", hint: "构作视图 · 角色 · 灵感文档", path: "dramaturgy", symbol: "构" },
   { label: "剧本", hint: "阅读 · 编辑 · 讨论", path: "script", symbol: "剧" },
-  { label: "构作", hint: "章节 · 行动线", path: "dramaturgy", symbol: "构" },
-  { label: "角色", hint: "角色 · 人物关系 · 聚合", path: "characters", symbol: "角" },
   { label: "Cue", hint: "部门执行设计", path: "cues", symbol: "Q" },
 ] as const;
 
@@ -119,7 +118,7 @@ const OVERVIEW_NAV = [
 const PRODUCTION_TOP_MENU_LABELS: Record<string, string> = {
   script: "剧本",
   dramaturgy: "构作",
-  characters: "角色",
+  characters: "构作",
   cues: "Cue",
   cuelists: "Cue 表设置",
 };
@@ -1142,9 +1141,15 @@ export default function AppShell({ session, productions, canCreateProduction = f
     return (paths as string[]).includes(activeModule);
   }
 
-  const isCreationActive = CREATION_NAV.some((item) =>
-    isModuleActive(item.path === "cues" ? ["cues", "cuelists"] : item.path)
-  );
+  const isCreationItemActive = (path: (typeof CREATION_NAV)[number]["path"]) =>
+    isModuleActive(
+      path === "dramaturgy"
+        ? ["dramaturgy", "characters"]
+        : path === "cues"
+          ? ["cues", "cuelists"]
+          : path,
+    );
+  const isCreationActive = CREATION_NAV.some((item) => isCreationItemActive(item.path));
   const isProductionNavActive = PRODUCTION_NAV.some((item) => isModuleActive(item.path));
   const isOverviewActive = OVERVIEW_NAV.some((item) => pathname.startsWith(item.path));
 
@@ -1449,7 +1454,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                       label={item.label}
                       hint={item.hint}
                       side="script"
-                      active={isModuleActive(item.path === "cues" ? ["cues", "cuelists"] : item.path)}
+                      active={isCreationItemActive(item.path)}
                       warningBadge={item.path === "cues" ? cueWarnings : undefined}
                       folded={productionSidebarContentFolded}
                     />
@@ -1606,7 +1611,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
               symbol={item.symbol}
               label={item.label}
               hint={item.hint}
-              active={isModuleActive(item.path === "cues" ? ["cues", "cuelists"] : item.path)}
+              active={isCreationItemActive(item.path)}
               onClick={closeDrawer}
             />
           ))}
