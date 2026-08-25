@@ -1,16 +1,21 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 
-// 登录成功后的回跳目标（仅允许站内相对路径，防 open redirect）
-function loginDest(): string {
+// 登录成功后的回跳目标（仅允许站内相对路径，防 open redirect）。
+// 服务端没有 window：这个组件虽标了 "use client"，SSR 阶段仍会在服务端渲染一次，
+// 所以必须守卫——否则渲染期一调用就是 500（页面因降级到客户端渲染而看似正常）。
+export function loginDest(): string {
+  if (typeof window === "undefined") return "/";
   const next = new URLSearchParams(window.location.search).get("next");
   return next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
 }
 
 // 从邀请链接落地（/invite/<token> → /login?next=/invite/<token>）时透传 token 作
 // 注册正当性——受邀者不需要额外要注册码（lib/registration-gate.ts）。
-function inviteTokenFromDest(): string | undefined {
+// 不另设 window 守卫：它不直接碰 window，唯一路径是上面已守卫的 loginDest()，
+// SSR 时拿到 "/" 后 match 失败返回 undefined。这条由 login-ssr 测试钉住。
+export function inviteTokenFromDest(): string | undefined {
   const m = loginDest().match(/^\/invite\/([0-9a-f-]{36})$/i);
   return m?.[1];
 }
@@ -22,6 +27,10 @@ export default function LoginClient({ inviteOnly }: { inviteOnly?: boolean }) {
   const [regCode, setRegCode] = useState("");
   const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
+  // 渲染期不能直接读 window（SSR 与首次 hydrate 都拿不到），改由 effect 落进 state：
+  // 服务端与客户端首帧都是 undefined，一致，不会 hydration mismatch。
+  const [inviteToken, setInviteToken] = useState<string | undefined>(undefined);
+  useEffect(() => { setInviteToken(inviteTokenFromDest()); }, []);
 
   async function handleEmailSubmit(e: FormEvent) {
     e.preventDefault();
@@ -167,9 +176,9 @@ export default function LoginClient({ inviteOnly }: { inviteOnly?: boolean }) {
                 onChange={e => setName(e.target.value)}
                 placeholder="你的名字"
                 required
-                style={{ ...inp, marginBottom: inviteOnly && !inviteTokenFromDest() ? 10 : 14 }}
+                style={{ ...inp, marginBottom: inviteOnly && !inviteToken ? 10 : 14 }}
               />
-              {inviteOnly && !inviteTokenFromDest() && (
+              {inviteOnly && !inviteToken && (
                 <>
                   <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>
                     邀请码<span style={{ fontWeight: 400 }}>（新用户填写；邮箱已被邀请可留空）</span>
