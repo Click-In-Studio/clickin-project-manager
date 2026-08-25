@@ -26,7 +26,8 @@ export const RESOURCE_DIRECTORY_QUERIES: Record<string, string> = {
   role: "SELECT id, name AS label FROM production_role WHERE production_id = $1 AND NOT is_deprecated ORDER BY name",
   member: `SELECT pm.user_id::text AS id, COALESCE(up.name, pm.user_id::text) AS label
            FROM production_member pm LEFT JOIN user_profile up ON up.user_id = pm.user_id
-           WHERE pm.production_id = $1 ORDER BY up.name NULLS LAST`,
+           WHERE pm.production_id = $1 AND pm.status = 'active'
+           ORDER BY up.name NULLS LAST`,
   scene: `SELECT s.id, COALESCE(sv.name, s.id) AS label
           FROM scene s
           LEFT JOIN scene_version sv ON sv.scene_id = s.id

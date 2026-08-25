@@ -9,10 +9,12 @@ import { TYPE_LABELS, groupResourceTypes } from "@/lib/permission-labels";
 import type { DeptPermissionView, DeptPermissionGroup } from "@/lib/perm-center-db";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
+import type { MemberStatus } from "@/lib/member-status-shared";
+import { MEMBER_STATUS_LABEL } from "@/lib/member-status-shared";
 
 type Dept = { id: string; name: string; parentId: string | null; kind: "dept" | "group"; displayOrder: number; memberUserIds: string[] };
 type Role = { id: string; name: string; permissions: string[] };
-type Member = { userId: string; name: string; roles: string[]; tags: string[]; email: string | null; phone: string | null; status: "active" | "suspended" };
+type Member = { userId: string; name: string; roles: string[]; tags: string[]; email: string | null; phone: string | null; status: MemberStatus };
 
 type Caps = {
   deptView: boolean; deptEdit: boolean;
@@ -514,7 +516,9 @@ export default function AdminPermissionCenterClient({
                       <h2 style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)" }}>
                         {selectedMember.name || "（未命名）"}
                       </h2>
-                      {selectedMember.status === "suspended" && <Badge tone="red">已停用</Badge>}
+                      {selectedMember.status !== "active" && (
+                        <Badge tone="red">{MEMBER_STATUS_LABEL[selectedMember.status]}</Badge>
+                      )}
                     </div>
                     <p style={{ margin: "0 0 14px", fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
                       个人 override 覆盖角色/部门授权：<span style={{ color: "var(--success)", fontWeight: 700 }}>allow</span> 单独放行、

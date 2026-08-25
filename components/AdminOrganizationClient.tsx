@@ -10,6 +10,9 @@ import TreePickerModal from "@/components/TreePickerModal";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberTag } from "@/lib/db";
+import type { MemberStatus, MemberStatusSource } from "@/lib/member-status-shared";
+import { memberStatusLabel } from "@/lib/member-status-shared";
+import { isInactiveMember } from "@/lib/member-status-shared";
 
 type Member = {
   userId: string;
@@ -22,7 +25,8 @@ type Member = {
   photoUrl: string | null;
   supervisorId: string | null;
   supervisorName: string | null;
-  status: "active" | "suspended";
+  status: MemberStatus;
+  statusSource: MemberStatusSource | null;
 };
 
 type Dept = {
@@ -113,6 +117,23 @@ export default function AdminOrganizationClient({
   // ── 成员操作 ──
   async function patchMember(userId: string, body: Record<string, unknown>, apply: (m: Member) => Member) {
     if (await api(`/members`, { method: "PATCH", body: JSON.stringify({ userId, ...body }) })) {
+      setMembers(prev => prev.map(m => (m.userId === userId ? apply(m) : m)));
+    }
+  }
+
+  /**
+   * 成员状态处置（#141）。走动词形端点而不是 PATCH { status }：
+   * active → suspended 既可能是自助退出也可能是人事停用，赋值形反推不出来。
+   */
+  async function memberAction(
+    userId: string,
+    action: "suspend" | "restore" | "confirm_exit",
+    apply: (m: Member) => Member,
+  ) {
+    if (await api(`/members/${userId}/status`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    })) {
       setMembers(prev => prev.map(m => (m.userId === userId ? apply(m) : m)));
     }
   }
@@ -247,7 +268,13 @@ export default function AdminOrganizationClient({
         background: "var(--line)", marginBottom: 18,
       }}>
         {[
-          [String(members.length), "项目成员", members.some(m => m.status === "suspended") ? `含 ${members.filter(m => m.status === "suspended").length} 名停用` : "全部在职"],
+          [
+            String(members.length),
+            "项目成员",
+            members.some(m => m.status !== "active")
+              ? `含 ${members.filter(m => m.status !== "active").length} 名不在职`
+              : "全部在职",
+          ],
           [String(depts.filter(d => d.kind === "dept").length), "部门", "组织架构"],
           [String(depts.filter(d => d.kind === "group").length), "用户组", "仅供选人"],
           [String(pocCount), "POC", "部门联络人次"],
@@ -313,8 +340,8 @@ export default function AdminOrganizationClient({
                             <span style={{ flex: 1, minWidth: 0 }}>
                               <span style={{
                                 display: "block", fontSize: 13, fontWeight: 600,
-                                color: active ? "#fff" : m.status === "suspended" ? "var(--muted)" : "var(--ink)",
-                                textDecoration: m.status === "suspended" ? "line-through" : undefined,
+                                color: active ? "#fff" : isInactiveMember(m.status) ? "var(--muted)" : "var(--ink)",
+                                textDecoration: isInactiveMember(m.status) ? "line-through" : undefined,
                                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                               }}>
                                 {m.name || "（未命名）"}
@@ -385,6 +412,7 @@ export default function AdminOrganizationClient({
                     busy={busy}
                     isSelf={selected.userId === currentUserId}
                     onPatch={patchMember}
+                    onAction={memberAction}
                     onRemove={removeMember}
                     onSaveDeptMembers={saveDeptMembers}
                   />
@@ -429,7 +457,7 @@ export default function AdminOrganizationClient({
 // ─── 成员详情 ─────────────────────────────────────────────────────────────────
 
 function MemberDetail({
-  member: m, depts, allMembers, tags, roleNames, caps, busy, isSelf, onPatch, onRemove, onSaveDeptMembers,
+  member: m, depts, allMembers, tags, roleNames, caps, busy, isSelf, onPatch, onAction, onRemove, onSaveDeptMembers,
 }: {
   member: Member;
   depts: Dept[];
@@ -440,6 +468,11 @@ function MemberDetail({
   busy: boolean;
   isSelf: boolean;
   onPatch: (userId: string, body: Record<string, unknown>, apply: (m: Member) => Member) => Promise<void>;
+  onAction: (
+    userId: string,
+    action: "suspend" | "restore" | "confirm_exit",
+    apply: (m: Member) => Member,
+  ) => Promise<void>;
   onRemove: (userId: string) => Promise<void>;
   onSaveDeptMembers: (dept: Dept, memberUserIds: string[], pocUserIds: string[]) => Promise<void>;
 }) {
@@ -474,7 +507,9 @@ function MemberDetail({
         <div style={{ minWidth: 0 }}>
           <h2 style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)", display: "flex", alignItems: "center", gap: 10 }}>
             {m.name || "（未命名）"}
-            {m.status === "suspended" ? <Badge tone="red">已停用</Badge> : <Badge tone="green">在职</Badge>}
+            {m.status === "active"
+              ? <Badge tone="green">在职</Badge>
+              : <Badge tone="red">{memberStatusLabel(m.status, m.statusSource)}</Badge>}
           </h2>
           <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--muted)" }}>
             {m.roles.join(" · ") || "无角色"}
@@ -630,30 +665,65 @@ function MemberDetail({
         </div>
       )}
 
-      {/* 危险区 */}
-      {caps.remove && !isSelf && (
+      {/* 成员处置（#141）*/}
+      {caps.remove && !isSelf && m.status !== "exited" && (
         <div style={{ marginTop: 24, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
-          <p style={{ ...SECTION_LABEL, color: "var(--danger)" }}>危险区</p>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              disabled={busy}
-              onClick={() => onPatch(
-                m.userId,
-                { status: m.status === "suspended" ? "active" : "suspended" },
-                mm => ({ ...mm, status: mm.status === "suspended" ? "active" : "suspended" }),
-              )}
-              style={{ ...SECONDARY_BTN, borderColor: "var(--danger)", color: "var(--danger)" }}
-            >
-              {m.status === "suspended" ? "恢复在职" : "停用"}
-            </button>
+          <p style={{ ...SECTION_LABEL, color: "var(--danger)" }}>成员处置</p>
+
+          {isInactiveMember(m.status) && (
+            <p style={{ margin: "0 0 10px", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.6 }}>
+              {m.statusSource === "self"
+                ? "该成员已自行退出，访问权已冻结。"
+                : "该成员已被停用，访问权已冻结。"}
+              授权原样保留——复职无需重新配置；确认离组才会撤销授权，届时其署名与操作记录仍保留。
+            </p>
+          )}
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {m.status === "active" ? (
+              <button
+                disabled={busy}
+                onClick={() => onAction(m.userId, "suspend", mm => ({
+                  ...mm, status: "suspended", statusSource: "admin",
+                }))}
+                style={{ ...SECONDARY_BTN, borderColor: "var(--danger)", color: "var(--danger)" }}
+              >
+                停用
+              </button>
+            ) : (
+              <>
+                <button
+                  disabled={busy}
+                  onClick={() => onAction(m.userId, "restore", mm => ({
+                    ...mm, status: "active", statusSource: null,
+                  }))}
+                  style={SECONDARY_BTN}
+                >
+                  复职
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    if (!confirm("确认该成员已离组？其全部授权将被撤销；成员记录与署名保留。")) return;
+                    onAction(m.userId, "confirm_exit", mm => ({ ...mm, status: "exited" }));
+                  }}
+                  style={{ ...PRIMARY_BTN, background: "var(--danger)", borderColor: "var(--danger)" }}
+                >
+                  确认离组
+                </button>
+              </>
+            )}
             <button
               disabled={busy}
               onClick={() => onRemove(m.userId)}
-              style={{ ...PRIMARY_BTN, background: "var(--danger)", borderColor: "var(--danger)" }}
+              style={{ ...SECONDARY_BTN, marginLeft: "auto" }}
             >
-              清退出项目
+              彻底移除
             </button>
           </div>
+          <p style={{ margin: "8px 0 0", fontSize: 11.5, color: "var(--muted)" }}>
+            「彻底移除」用于误加入——连成员记录一并删除，不留历史。真的参与过就用「确认离组」。
+          </p>
         </div>
       )}
     </div>

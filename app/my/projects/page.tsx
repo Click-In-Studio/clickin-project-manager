@@ -12,5 +12,6 @@ export default async function MyProjectsPage() {
   const session = getSession(await cookies());
   const tier = session ? await getUserTier(session.userId) : null;
 
-  return <MyProjectsClient canCreate={tier !== null} />;
+  if (!session) return <MyProjectsClient canCreate={false} currentUserId="" />;
+  return <MyProjectsClient canCreate={tier !== null} currentUserId={session.userId} />;
 }

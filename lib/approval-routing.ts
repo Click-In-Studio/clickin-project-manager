@@ -230,8 +230,13 @@ async function findProductionOwner(productionId: string): Promise<string | null>
   return rows[0]?.owner_id ?? null;
 }
 
-/** 从申请人出发逐级向上取直属上级；成环或超深即停。 */
-async function walkSupervisorChain(
+/**
+ * 从申请人出发逐级向上取直属上级；成环或超深即停。
+ *
+ * 导出给成员退出路由（#141）复用：退出的收件人阶梯与审批阶梯同源，
+ * 「谁是我上级」不能有第二份实现。
+ */
+export async function walkSupervisorChain(
   productionId: string,
   subjectId: string,
 ): Promise<{ userId: string; depth: number }[]> {
@@ -350,7 +355,7 @@ async function ancestorPocLevels(
 export async function findProducers(productionId: string): Promise<string[]> {
   const { rows } = await getPool().query<{ user_id: string }>(
     `SELECT user_id FROM production_member
-     WHERE production_id = $1 AND '制作人' = ANY(roles)`,
+     WHERE production_id = $1 AND '制作人' = ANY(roles) AND status = 'active'`,
     [productionId],
   );
   return rows.map((r) => r.user_id);

@@ -8,7 +8,6 @@ import {
   setMemberRoles,
   setMemberPhoto,
   setMemberSupervisor,
-  setMemberStatus,
   setMemberTags,
   isProductionArchived,
   getProductionPermissionContext,
@@ -47,14 +46,13 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { id } = await ctx.params;
   if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
-  const { userId, roles, photoUrl, supervisorId, tagIds, status } =
+  const { userId, roles, photoUrl, supervisorId, tagIds } =
     (await req.json()) as {
       userId?: string;
       roles?: string[];
       photoUrl?: string | null;
       supervisorId?: string | null;
       tagIds?: string[];
-      status?: "active" | "suspended";
     };
   if (!userId) return Response.json({ error: "缺少 userId" }, { status: 400 });
 
@@ -64,15 +62,14 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     : await getProductionPermissionContext(session.userId, false, id);
   if (!session.isAdmin && !access) return Response.json({ error: "权限不足" }, { status: 403 });
 
-  // 人事编辑门（角色/tag/上级）与人事处置门（停用/恢复）分离；照片：本人或人事编辑门。
+  // 人事编辑门（角色/tag/上级）：照片是本人或人事编辑门。
+  // 人事处置（停用/复职/确认离组/自助退出）不在这里——它是动词形，见
+  // members/[userId]/status/route.ts。赋值形反推不出「谁在干什么」：
+  // active → suspended 既可能是自助退出也可能是人事停用。
   const canEditMember =
     session.isAdmin ||
     !!(access && (access.permCtx.isAdmin || access.permCtx.isOwner ||
       await hasGrant(access.permCtx.userId, id, "member", "*", "roles", "edit")));
-  const canRemoveMember =
-    session.isAdmin ||
-    !!(access && (access.permCtx.isAdmin || access.permCtx.isOwner ||
-      await hasGrant(access.permCtx.userId, id, "member", "*", "*", "delete")));
 
   if (roles !== undefined) {
     if (!canEditMember) return Response.json({ error: "权限不足" }, { status: 403 });
@@ -85,13 +82,6 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if (supervisorId !== undefined) {
     if (!canEditMember) return Response.json({ error: "权限不足" }, { status: 403 });
     await setMemberSupervisor(id, userId, supervisorId);
-  }
-  if (status !== undefined) {
-    if (status !== "active" && status !== "suspended") {
-      return Response.json({ error: "status 非法" }, { status: 400 });
-    }
-    if (!canRemoveMember) return Response.json({ error: "权限不足" }, { status: 403 });
-    await setMemberStatus(id, userId, status);
   }
   if (photoUrl !== undefined) {
     if (!isSelf && !canEditMember) return Response.json({ error: "权限不足" }, { status: 403 });

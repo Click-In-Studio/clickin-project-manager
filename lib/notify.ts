@@ -959,6 +959,119 @@ export async function notifyAnnouncementRemind(params: {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 成员退出（#141）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 退出必须是有声的——不存在「悄悄退出」。
+ *
+ * 收件人是 lib/member-exit-routing 的阶梯（直属上级链 → 制作人 → owner），
+ * 不是只发给 owner：owner 往往不知道某个灯光助理是不是真的走了，知道的是灯光
+ * 设计。但 action_required 只给持 member 门、真能推出口的人——给推不动的人挂
+ * 一条待办，是让收件箱撒谎。
+ */
+export async function notifyMemberExitPending(params: {
+  productionId: string;
+  productionName: string;
+  /** 退出的成员 */
+  subjectUserId: string;
+  subjectName: string;
+  /** 自助退出 vs 人事停用 —— 文案与后续处置都不同 */
+  source: "self" | "admin";
+  handlers: { userId: string; canFinalize: boolean }[];
+  note?: string | null;
+}): Promise<void> {
+  const recipients = params.handlers.filter((h) => h.userId !== params.subjectUserId);
+  if (!recipients.length) return;
+
+  const who = params.subjectName || "一名成员";
+  const title =
+    params.source === "self"
+      ? `${who} 退出了《${params.productionName}》`
+      : `${who} 在《${params.productionName}》被停用`;
+  const href = `${SERVER_URL}/production/${params.productionId}/admin/organization`;
+
+  const finalizers = recipients.filter((h) => h.canFinalize).map((h) => h.userId);
+  const observers = recipients.filter((h) => !h.canFinalize).map((h) => h.userId);
+
+  const body = [
+    "其访问权已冻结，授权原样保留。",
+    "待你处置：复职（原样恢复）或确认离组（撤销授权、保留历史）。",
+    params.note ? `退出说明：${params.note}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const external = async (_userId: string, target: NotificationTarget) =>
+    ({ text: `${title}。${body} 处理：${target.adapter.buildActionUrl(href)}` });
+
+  if (finalizers.length) {
+    await notifyUsers({
+      userIds: finalizers,
+      kind: "member_exit_pending",
+      productionId: params.productionId,
+      entityType: "production_member",
+      entityId: params.subjectUserId,
+      title,
+      body,
+      viewHref: href,
+      category: "action",
+      actionRequired: true,
+      buildExternalMessage: external,
+    });
+  }
+
+  // 推不动出口的上级：知情通知，可以表态（不认可 / 附议），但不挂待办。
+  if (observers.length) {
+    await notifyUsers({
+      userIds: observers,
+      kind: "member_exit_pending",
+      productionId: params.productionId,
+      entityType: "production_member",
+      entityId: params.subjectUserId,
+      title,
+      body: "其访问权已冻结。你可以在成员页表态（不认可 / 附议），处置由持成员管理权限的人落地。",
+      viewHref: href,
+      category: "info",
+      buildExternalMessage: external,
+    });
+  }
+}
+
+/** 通知当事人自己：被停用 / 被确认离组 / 被复职。 */
+export async function notifyMemberStatusChanged(params: {
+  productionId: string;
+  productionName: string;
+  userId: string;
+  action: "suspend" | "restore" | "confirm_exit";
+  note?: string | null;
+}): Promise<void> {
+  const title = {
+    suspend: `你在《${params.productionName}》的成员资格已被停用`,
+    restore: `你已恢复《${params.productionName}》的成员身份`,
+    confirm_exit: `你已正式退出《${params.productionName}》`,
+  }[params.action];
+
+  const body = {
+    suspend: "你暂时无法访问该项目内容。授权原样保留，复职后无需重新配置。",
+    restore: "此前的授权已原样生效。",
+    confirm_exit: "授权已撤销。你已完成的工作记录与署名不受影响。",
+  }[params.action];
+
+  await notifyUser({
+    userId: params.userId,
+    kind: "member_status_changed",
+    productionId: params.productionId,
+    entityType: "production_member",
+    entityId: params.userId,
+    title,
+    body: [body, params.note ? `说明：${params.note}` : ""].filter(Boolean).join(" "),
+    category: params.action === "restore" ? "info" : "warning",
+    buildExternalMessage: async () => ({ text: `${title}。${body}` }),
+  });
+}
+
 // ─── Re-exports ───────────────────────────────────────────────────────────────
 
 export { resolveNotificationTarget } from "./platform/notification-router";

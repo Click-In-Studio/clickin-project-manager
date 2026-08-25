@@ -163,7 +163,7 @@ export async function searchProduction(
               END AS match_hint
        FROM production_member pm
        LEFT JOIN user_profile up ON up.user_id = pm.user_id
-       WHERE pm.production_id = $1
+       WHERE pm.production_id = $1 AND pm.status = 'active'
          AND (
            up.name ILIKE $2
            OR EXISTS (SELECT 1 FROM unnest(pm.roles) AS r WHERE r ILIKE $2)

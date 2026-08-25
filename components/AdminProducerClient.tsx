@@ -8,6 +8,8 @@ import MemberPickerModal, { type PickerMember, type PickerDept } from "@/compone
 import { BASE_PATH } from "@/lib/base-path";
 
 import type { GovernanceGrantRow } from "@/lib/grant-audit-db";
+import { memberStatusLabel } from "@/lib/member-status-shared";
+import type { MemberStatus, MemberStatusSource } from "@/lib/member-status-shared";
 
 type Member = PickerMember;
 
@@ -131,7 +133,9 @@ export default function AdminProducerClient({
           <div key={m.userId} style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
             <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
               {m.name}
-              {m.status === "suspended" && <Badge tone="red">已停用</Badge>}
+              {m.status !== "active" && (
+                <Badge tone="red">{memberStatusLabel(m.status, m.statusSource ?? null)}</Badge>
+              )}
             </span>
             {isRoot && (
               <button

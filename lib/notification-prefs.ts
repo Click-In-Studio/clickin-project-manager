@@ -93,6 +93,22 @@ export const NOTIFICATION_CONFIG = {
     externalChannel: "dm" as const,
     defaultExternalEnabled: true,
   },
+  // ── 成员退出（#141）────────────────────────────────────────────────────────
+  // 退出发起即生效，这条不是「请审批」而是「有人走了，请处置」。收件人由
+  // lib/member-exit-routing 的阶梯算出（直属上级链 → 制作人 → owner）。
+  member_exit_pending: {
+    label: "成员退出待处理",
+    description: "有成员退出项目、等待复职或确认离组时通知",
+    externalChannel: "dm" as const,
+    defaultExternalEnabled: true,
+  },
+  // 通知当事人自己：被停用 / 被确认离组 / 被复职。
+  member_status_changed: {
+    label: "成员状态变更",
+    description: "你在某个项目的成员状态被变更时通知",
+    externalChannel: "dm" as const,
+    defaultExternalEnabled: true,
+  },
   // ── Approval requests ─────────────────────────────────────────────────────
   approval_request_pending: {
     label: "资源申请待审批",

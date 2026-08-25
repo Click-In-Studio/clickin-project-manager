@@ -91,7 +91,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const emailMap = new Map(byEmail.rows.map(r => [r.email, r.user_id]));
 
   const memberRows = await pool.query<{ user_id: string }>(
-    "SELECT user_id FROM production_member WHERE production_id = $1", [id]);
+    "SELECT user_id FROM production_member WHERE production_id = $1 AND status = 'active'", [id]);
   const memberSet = new Set(memberRows.rows.map(r => r.user_id));
 
   const parsed: ParsedInviteRow[] = sheetRows.map(r => {

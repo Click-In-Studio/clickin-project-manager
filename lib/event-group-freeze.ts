@@ -143,7 +143,8 @@ export async function describeFrozenGroups(eventId: string): Promise<(FrozenGrou
             f.poc_dept_id, f.poc_dept_name, f.poc_user_id, f.poc_user_name,
             EXISTS (SELECT 1 FROM production_member pm
                      JOIN production_event pe ON pe.production_id = pm.production_id
-                    WHERE pe.id = f.event_id AND pm.user_id = f.poc_user_id) AS poc_user_still_member,
+                    WHERE pe.id = f.event_id AND pm.user_id = f.poc_user_id
+                      AND pm.status = 'active') AS poc_user_still_member,
             EXISTS (SELECT 1 FROM production_dept d WHERE d.id = f.poc_dept_id) AS poc_dept_still_exists,
             EXISTS (SELECT 1 FROM event_group g WHERE g.id = f.group_id)       AS group_still_exists
        FROM event_group_freeze f

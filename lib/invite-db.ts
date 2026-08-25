@@ -240,8 +240,11 @@ export async function acceptInvite(token: string, userId: string): Promise<Accep
       }
     }
 
+    // 「已是成员」按在职口径（#141）：suspended / exited 的行还留着，但那个人
+    // 现在不在组里——重新邀请他是合法的，addProductionMember 会把行复活。
+    // 用裸 EXISTS 会让退出过的人永远收不到有效邀请（行在、进不来、界面还说成功）。
     const existing = await client.query(
-      "SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2",
+      "SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2 AND status = 'active'",
       [inv.production_id, userId],
     );
     const alreadyMember = existing.rows.length > 0;
@@ -324,8 +327,11 @@ export async function claimInvite(token: string, claimId: string, userId: string
     if (!claim) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
     if (claim.claimed_at) { await client.query("ROLLBACK"); return { ok: false, reason: "claim_taken" }; }
 
+    // 「已是成员」按在职口径（#141）：suspended / exited 的行还留着，但那个人
+    // 现在不在组里——重新邀请他是合法的，addProductionMember 会把行复活。
+    // 用裸 EXISTS 会让退出过的人永远收不到有效邀请（行在、进不来、界面还说成功）。
     const existing = await client.query(
-      "SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2",
+      "SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2 AND status = 'active'",
       [inv.production_id, userId],
     );
     const alreadyMember = existing.rows.length > 0;
