@@ -8,14 +8,17 @@ import type { PoolClient } from "pg";
 // 开关 = 环境变量 REGISTRATION_INVITE_ONLY（"1"/"true" 开启）。关闭时一切照旧，
 // 正式开放注册时只动环境不动代码。
 //
-// 老用户登录永远不受影响（登录 ≠ 注册）。新账号的正当性四选一：
-//   1. 注册邀请码（registration_code，通用机制——将来飞书机器人上架脱离组织
-//      限定后复用）
-//   2. 指定邮箱登记（registration_email）
-//   3. 邮箱命中未失效的定向项目邀请（production_invite.email）
-//   4. 从有效邀请链接落地（/invite/<token> 经 /login?next= 透传 token）
+// 老用户登录永远不受影响（登录 ≠ 注册）。新账号的正当性：
+//   1. 注册邀请码（registration_code）——与通道无关
+//   2. 从有效邀请链接落地（/invite/<token> 透传）——与通道无关
+//   3. 命中未失效的定向项目邀请——email 通道看 production_invite.email，
+//      feishu 通道看 production_invite.feishu_open_id
+//   4. 指定邮箱登记（registration_email）——**仅 email 通道**，因为飞书 OAuth
+//      的 authen/v1/user_info 只返回 open_id/name/avatar，拿不到邮箱
 //
-// 飞书通道暂不设门：租户应用天然限定组织成员。
+// 通道平权：门按 (platform_id, platform_user_id) 判定，不再是 email 专用。
+// 飞书曾以「租户应用天然限定组织成员」为由不设门，但那是单租户时代的假设——
+// 飞书是与邮箱等价的登录通道，有飞书不该成为绕过邀请码的理由。
 
 export function registrationInviteOnly(): boolean {
   const v = process.env.REGISTRATION_INVITE_ONLY;
@@ -35,37 +38,53 @@ export type RegistrationJustification =
   /** 码是赢家时才在建号事务里消耗（有免费正当性就不烧码）。 */
   | { type: "code"; code: string };
 
+/** 受注册门管辖的登录通道。新增通道时在这里扩，判定逻辑按需分支。 */
+export type RegistrationPlatform = "email" | "feishu";
+
+/** email 身份全库约定存小写；open_id 大小写敏感，原样比对。 */
+function normalizeIdentity(platformId: RegistrationPlatform, raw: string): string {
+  return platformId === "email" ? raw.trim().toLowerCase() : raw.trim();
+}
+
 /**
- * 判定邮箱能否注册。开关关闭 → null（无需正当性）；开启 → 返回命中的正当性，
- * 全部落空则抛 RegistrationDeniedError。
+ * 判定某个平台身份能否注册。开关关闭 → null（无需正当性）；开启 → 返回命中的
+ * 正当性，全部落空则抛 RegistrationDeniedError。
+ *
+ * platformUserId 即该通道的身份标识：email 通道是邮箱地址，feishu 通道是 open_id。
  */
-export async function requireEmailRegistrationJustification(args: {
-  email: string;
+export async function requireRegistrationJustification(args: {
+  platformId: RegistrationPlatform;
+  platformUserId: string;
   inviteToken?: string | null;
   registrationCode?: string | null;
 }): Promise<RegistrationJustification | null> {
   if (!registrationInviteOnly()) return null;
   const pool = getPool();
-  const email = args.email.trim().toLowerCase();
+  const { platformId } = args;
+  const platformUserId = normalizeIdentity(platformId, args.platformUserId);
 
-  // 老用户登录不是注册
+  // 老用户登录不是注册——两条通道同一个口径（身份统一登记在 identity 表，PR #321）
   const existing = await pool.query(
-    "SELECT 1 FROM user_platform_identity WHERE platform_id = 'email' AND platform_user_id = $1",
-    [email],
+    "SELECT 1 FROM user_platform_identity WHERE platform_id = $1 AND platform_user_id = $2",
+    [platformId, platformUserId],
   );
   if (existing.rows.length > 0) return { type: "existing" };
 
-  // 指定邮箱登记
-  const listed = await pool.query("SELECT 1 FROM registration_email WHERE email = $1", [email]);
-  if (listed.rows.length > 0) return { type: "allowlist" };
+  // 指定邮箱登记（内部人员预发账号）——仅 email 通道，飞书 OAuth 拿不到邮箱
+  if (platformId === "email") {
+    const listed = await pool.query("SELECT 1 FROM registration_email WHERE email = $1", [platformUserId]);
+    if (listed.rows.length > 0) return { type: "allowlist" };
+  }
 
-  // 定向项目邀请（未撤销、未过期、未用尽）——被邀请进项目的人就是「指定邮箱」
+  // 定向项目邀请（未撤销、未过期、未用尽）——被定向邀请的人本身就是「指定身份」。
+  // 两条通道各看各的定向列：email 看 email，feishu 看 feishu_open_id。
   const invited = await pool.query(
     `SELECT 1 FROM production_invite
-     WHERE LOWER(email) = $1 AND revoked_at IS NULL
+     WHERE (($1 = 'email' AND LOWER(email) = $2) OR ($1 = 'feishu' AND feishu_open_id = $2))
+       AND revoked_at IS NULL
        AND (expires_at IS NULL OR expires_at > now())
        AND (max_uses IS NULL OR used_count < max_uses)`,
-    [email],
+    [platformId, platformUserId],
   );
   if (invited.rows.length > 0) return { type: "directed_invite" };
 
@@ -97,7 +116,11 @@ export async function requireEmailRegistrationJustification(args: {
     return { type: "code", code };
   }
 
-  throw new RegistrationDeniedError("测试期间需受邀注册：请输入邀请码，或使用被邀请的邮箱");
+  throw new RegistrationDeniedError(
+    platformId === "email"
+      ? "测试期间需受邀注册：请输入邀请码，或使用被邀请的邮箱"
+      : "测试期间需受邀注册：请输入邀请码",
+  );
 }
 
 /**

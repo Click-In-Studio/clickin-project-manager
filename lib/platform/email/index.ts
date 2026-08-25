@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { signMagicToken, verifyMagicToken } from "./email-tokens";
 import { sendEmail } from "./email-send";
 import { upsertEmailUser, getUserProfile, createEmailOtp } from "../../db";
-import { requireEmailRegistrationJustification } from "../../registration-gate";
+import { requireRegistrationJustification } from "../../registration-gate";
 import { buildNotificationEmail } from "./email-templates";
 import type {
   PersonalChannel,
@@ -52,8 +52,9 @@ class EmailPlatform implements PersonalChannel, InboundGateway {
     // 即建号，邮箱验证之前就落 app_user 行。开关开启时，新邮箱需正当性
     // （邀请码 / 指定邮箱登记 / 定向邀请 / 邀请链接透传），全落空抛
     // RegistrationDeniedError（路由转 403）。老用户登录不受影响。
-    const justification = await requireEmailRegistrationJustification({
-      email,
+    const justification = await requireRegistrationJustification({
+      platformId: "email",
+      platformUserId: email,
       inviteToken: params.inviteToken,
       registrationCode: params.registrationCode,
     });
