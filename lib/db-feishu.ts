@@ -42,6 +42,14 @@ export async function upsertFeishuUser(
        ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url, updated_at = now()`,
       [userId, name, avatarUrl],
     );
+    // 身份层归一：飞书与邮箱是平权的登录通道，都登记进 user_platform_identity。
+    // 放在两条分支之后而非只在建号分支——存量账号（identity 缺行）下次登录即自动补齐。
+    await client.query(
+      `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method, is_primary)
+       VALUES ($1, 'feishu', $2, true, false)
+       ON CONFLICT (platform_id, platform_user_id) DO NOTHING`,
+      [userId, openId],
+    );
     await client.query("COMMIT");
     return { userId, name, avatarUrl, isAdmin };
   } catch (e) {
