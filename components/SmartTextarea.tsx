@@ -2,14 +2,14 @@
 
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { Extension } from "@tiptap/core";
+import { Extension, type Editor } from "@tiptap/core";
 import { Markdown } from "tiptap-markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Mention } from "@tiptap/extension-mention";
 import { TableKit } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import Suggestion from "@tiptap/suggestion";
-import { PluginKey, Plugin } from "@tiptap/pm/state";
+import { PluginKey, Plugin, NodeSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
@@ -29,6 +29,16 @@ import { Callout } from "@/lib/tiptap-callout";
 import { WikiImage } from "@/lib/tiptap-wiki-image";
 import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/tiptap-upload-placeholder";
 import { Column, ColumnGroup } from "@/lib/tiptap-columns";
+import { ColumnDrop } from "@/lib/tiptap-column-drop";
+import { ColumnEditing } from "@/lib/tiptap-column-editing";
+import { ColumnResize } from "@/lib/tiptap-column-resize";
+import { TableKeymap } from "@/lib/tiptap-table-keymap";
+import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor-slash-commands";
+import { DROP_INDICATOR_OPTIONS } from "@/lib/editor-drop-indicator";
+import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
+import BlockHandle from "@/components/editor/BlockHandle";
+import TableTools from "@/components/editor/TableTools";
+import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
 export { normalizeLegacyMentions };
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -41,6 +51,9 @@ export type DropPlugin = {
   trigger: string;
   allowSpaces?: boolean;
   emptyLabel?: string;
+  /** 无候选时整个弹层不显示（而非显示 emptyLabel）。`/` 专用——正文里
+   *  「and/or」这类普通斜杠不该弹出一个空菜单来碍事 */
+  hideWhenEmpty?: boolean;
   search: (query: string) => Promise<DropItem[]> | DropItem[];
   renderItem: (item: DropItem, active: boolean) => React.ReactNode;
   format: (item: DropItem) => string;
@@ -153,57 +166,33 @@ export function wikiLinkDropPlugin(productionId: string): DropPlugin {
   };
 }
 
-// ── Toolbar (markdown mode only) ──────────────────────────────────────────────
+// ── Factory: /slash 布局指令 ──────────────────────────────────────────────────
+// 语法大纲 §6.2 的第四个指令源。与前三个的差异**只有两处**：候选从哪来
+// （静态表，不是网络查询）、选中后干什么（跑编辑器命令，不是插引用节点）。
+// 框架本身零改动——这正是「四者是同一个框架的四个注册项」的验证。
 
-type TiptapEditor = ReturnType<typeof useEditor>;
-
-function ToolbarBtn({ onClick, active, title, children }: { onClick: () => void; active?: boolean; title: string; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onMouseDown={e => { e.preventDefault(); onClick(); }}
-      title={title}
-      className={`px-2 py-1 rounded text-sm font-medium transition-colors ${
-        active ? "bg-zinc-800 text-white" : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Toolbar({ editor }: { editor: TiptapEditor | null }) {
-  if (!editor) return null;
-  return (
-    <div className="flex flex-wrap gap-0.5 px-2 py-1.5 border-b border-zinc-100">
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive("bold")} title="粗体 (⌘B)"><strong>B</strong></ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive("italic")} title="斜体 (⌘I)"><em>I</em></ToolbarBtn>
-      <span className="w-px bg-zinc-200 mx-1 self-stretch" />
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive("heading", { level: 2 })} title="二级标题">H2</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} active={editor.isActive("heading", { level: 3 })} title="三级标题">H3</ToolbarBtn>
-      <span className="w-px bg-zinc-200 mx-1 self-stretch" />
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive("bulletList")} title="无序列表">≡</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} title="有序列表">1.</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleTaskList().run()} active={editor.isActive("taskList")} title="任务列表">☑</ToolbarBtn>
-      <span className="w-px bg-zinc-200 mx-1 self-stretch" />
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="引用">&ldquo;</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleWrap("callout").run()} active={editor.isActive("callout")} title="Callout 高亮块">💡</ToolbarBtn>
-      <ToolbarBtn
-        onClick={() => editor.chain().focus().insertContent({
-          type: "columnGroup",
-          content: [
-            { type: "column", content: [{ type: "paragraph" }] },
-            { type: "column", content: [{ type: "paragraph" }] },
-          ],
-        }).run()}
-        active={editor.isActive("columnGroup")}
-        title="两栏分栏"
-      >◫</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} active={editor.isActive("table")} title="插入表格">⊞</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleCode().run()} active={editor.isActive("code")} title="行内代码">{"</>"}</ToolbarBtn>
-      <ToolbarBtn onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive("codeBlock")} title="代码块">{"{ }"}</ToolbarBtn>
-    </div>
-  );
+export function slashCommandPlugin(): DropPlugin {
+  return {
+    trigger: "/",
+    hideWhenEmpty: true,
+    search: (query) => searchSlashCommands(query).map(c => ({
+      id: c.id, label: c.label, secondary: c.hint,
+    })),
+    renderItem: (item, active) => {
+      const cmd = SLASH_COMMANDS.find(c => c.id === item.id);
+      return (
+        <span className="flex items-center gap-2.5">
+          <BlockTypeIcon icon={cmd?.icon} active={active} />
+          <span className="text-sm text-zinc-700">{item.label}</span>
+          <span className="ml-auto text-[11px] font-mono text-zinc-400 pl-3">{item.secondary}</span>
+        </span>
+      );
+    },
+    // 指令不落文本形态：选中即执行命令，查询串被 deleteRange 吃掉（§6.1——
+    // 「查询」与「结果」的关系，不是「简写」与「展开」）
+    format: () => "",
+    toNode: (item) => ({ id: item.id }),
+  };
 }
 
 // ── TipTap extensions ─────────────────────────────────────────────────────────
@@ -297,16 +286,24 @@ const MarkdownContentMentionExt = Mention.extend({
 // contentMention(kind='wiki') 管线（序列化/重载/chip 渲染全部现成）。
 // 独立 Suggestion 插件而非 Mention 内建：可设 allowedPrefixes=null——
 // 默认只在空格/行首后触发，CJK 文本后直接敲 [[ 原本根本不弹补全（首版 bug 根因）。
-const WikiLinkTrigger = Extension.create<{ suggestion: Record<string, unknown> }>({
-  name: "wikiLinkTrigger",
-  addOptions() {
-    return { suggestion: {} };
-  },
-  addProseMirrorPlugins() {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return [Suggestion({ editor: this.editor, ...(this.options.suggestion as any) })];
-  },
-});
+//
+// `/` 指令源同理（布局指令，语法大纲 §6.2），故抽成工厂——两个触发器除了名字
+// 没有任何差别，真正的差异全在传进来的 suggestion 配置里。
+function makeTriggerExtension(name: string) {
+  return Extension.create<{ suggestion: Record<string, unknown> }>({
+    name,
+    addOptions() {
+      return { suggestion: {} };
+    },
+    addProseMirrorPlugins() {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return [Suggestion({ editor: this.editor, ...(this.options.suggestion as any) })];
+    },
+  });
+}
+
+const WikiLinkTrigger = makeTriggerExtension("wikiLinkTrigger");
+const SlashTrigger = makeTriggerExtension("slashTrigger");
 
 /** 在指定位置插入 wiki 引用 chip（补全选中与拖放共用） */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -400,6 +397,11 @@ export interface SmartTextareaProps {
   markdown?: boolean;
   /** markdown 模式去外框（Notion 式整页编辑场景） */
   frameless?: boolean;
+  /** 块工具：左侧手柄（＋/⠿）、拖拽排序、块选中与块操作。
+   *  只给 wiki 整页这种**有左侧留白的大编辑面**——活动纪要、公告那类
+   *  180~360px 的小框既没有放手柄的地方，也用不到块级移动/分栏。
+   *  浮动条不受此门控（它贴选区，不占版面），markdown 面一律有。 */
+  blockTools?: boolean;
   /** Extra custom-trigger plugins (escape hatch) */
   plugins?: DropPlugin[];
   /** 图片粘贴上传（wiki 文档场景）。提供即解锁 image 节点：粘贴的图片文件
@@ -432,6 +434,7 @@ export default function SmartTextarea({
   contentMention,
   markdown = false,
   frameless = false,
+  blockTools = false,
   plugins: extraPlugins = [],
   imageUpload,
   placeholder,
@@ -481,12 +484,17 @@ export default function SmartTextarea({
   if (contentMention) {
     derivedPlugins.push(contentRefPlugin(contentMention.productionId, contentMention.versionId));
   }
+  // 布局指令源随富文本能力走：markdown 面才有分栏/表格/callout 可插
+  if (markdown && !readOnly) {
+    derivedPlugins.push(slashCommandPlugin());
+  }
   const allPlugins = [...derivedPlugins, ...extraPlugins];
   allPluginsRef.current = allPlugins;
 
   const hasHashPlugin = allPlugins.some(p => p.trigger === "#");
   const hasAtPlugin = allPlugins.some(p => p.trigger === "@");
   const hasWikiPlugin = allPlugins.some(p => p.trigger === "[[");
+  const hasSlashPlugin = allPlugins.some(p => p.trigger === "/");
 
   const suggHandlers = useRef({
     onStart(props: SuggestionProps<DropItem>, trigger: string) {
@@ -501,6 +509,11 @@ export default function SmartTextarea({
     onKeyDown({ event }: SuggestionKeyDownProps): boolean {
       const d = dropRef.current;
       if (!d) return false;
+      // 无候选时把导航/确认键交还编辑器。`/` 尤其需要：正文里写「and/or」之后
+      // 敲回车，若这里照旧 return true，换行就被一个看不见的空菜单吞了。
+      // （`#zzz` 无匹配时按回车没反应也是同一个洞，一并堵上；Escape 仍由这里
+      //  处理——它要负责关掉 # / @ 的「无匹配」提示弹层。）
+      if (d.items.length === 0 && event.key !== "Escape") return false;
       if (event.key === "ArrowDown") { event.preventDefault(); setDrop(p => p ? { ...p, idx: Math.min(p.idx + 1, p.items.length - 1) } : null); return true; }
       if (event.key === "ArrowUp") { event.preventDefault(); setDrop(p => p ? { ...p, idx: Math.max(p.idx - 1, 0) } : null); return true; }
       if (event.key === "Enter" || event.key === "Tab") {
@@ -526,7 +539,11 @@ export default function SmartTextarea({
       // 全都不弹（用户实测）。任意前缀放开，三种触发器统一
       allowedPrefixes: null,
       startOfLine: false,
-      pluginKey: new PluginKey(trigger === "#" ? "contentMention" : trigger === "@" ? "atMention" : "wikiMention"),
+      pluginKey: new PluginKey(
+        trigger === "#" ? "contentMention"
+          : trigger === "@" ? "atMention"
+            : trigger === "/" ? "slashCommand"
+              : "wikiMention"),
       allow: () => enabled,
       items: ({ query }: { query: string }) =>
         allPluginsRef.current.find(p => p.trigger === trigger)?.search(query) ?? [],
@@ -577,6 +594,10 @@ export default function SmartTextarea({
 
   const ContentMentionExt = markdown ? MarkdownContentMentionExt : PlainContentMentionExt;
 
+  // 栏操作件（造栏落点 + 栏宽拖拽）的开关。dropcursor 的取舍要跟它一致：
+  // 关了内建横线却又没装 ColumnDrop，就会一条落点指示都没有
+  const hasColumnTools = blockTools && !readOnly;
+
   const extensions = useMemo(() => {
     // 全站同一套文档 schema。原先 plain 面阉掉了 bold/heading/list 等节点——
     // 那在「正文按自定义 token 存」的时代无害，但存储统一成 markdown 之后就是
@@ -584,7 +605,16 @@ export default function SmartTextarea({
     // 的 schema 丢弃，重新序列化时星号就消失了，而 plain 面没有保真锁兜底。
     // 生产库实测：plain 列里带 markdown 语法的一共 3 行（两条有序列表），
     // 所以「统一 schema」的观感代价可忽略，而丢内容的风险是实打实的。
-    const base = StarterKit;
+    // 拖拽落点指示线 —— 理由与选型见 lib/editor-drop-indicator.ts。
+    // 注意 StarterKit 的选项键是小写 dropcursor，扩展自身的名字却是 dropCursor。
+    //
+    // blockTools 面**整个关掉内建 dropcursor**：那里由 ColumnDrop 统一画横线与
+    // 竖线。两套指示系统并存就得互相抑制，而 dropcursor 的禁用分支不清除已画
+    // 上的线，抑制不干净（详见 tiptap-column-drop.ts）。只留一个元素，互斥由
+    // 「同一时刻只可能有一种形态」天然保证。
+    const base = StarterKit.configure({
+      dropcursor: hasColumnTools ? false : { ...DROP_INDICATOR_OPTIONS },
+    });
 
     const contentMentionCfg = ContentMentionExt.configure({
       // v3 Mention 退格默认把 chip 还原成 mentionSuggestionChar（未设=@）——
@@ -627,6 +657,17 @@ export default function SmartTextarea({
       },
     });
 
+    // 指令面：选中即执行命令，查询串（`/fenlan`）由命令自己的 deleteRange 吃掉，
+    // 正文不留痕迹。这与前三个触发器插入节点是同一个位置的不同动作
+    const slashTriggerCfg = SlashTrigger.configure({
+      suggestion: {
+        ...makeSuggestion("/", hasSlashPlugin),
+        command: ({ editor, range, props }: { editor: Editor; range: { from: number; to: number }; props: { id: string } }) => {
+          SLASH_COMMANDS.find(c => c.id === props.id)?.run(editor, range);
+        },
+      },
+    });
+
     const atMentionCfg = AtMentionExt.configure({
       renderText: ({ node }) => `@${node.attrs.label}`,
       renderHTML: ({ node }) => [
@@ -643,8 +684,10 @@ export default function SmartTextarea({
       atMentionCfg,
     ];
 
-    // image 节点仅在提供 imageUpload 的面（wiki）注册：src 存 /__cm__/asset/<id>，
-    // 展示经 thumb 端点（session 鉴权，img src 直接可流）
+    // image 节点**全站注册**（不再按 imageUpload 门控）：schema 统一之后，不认识
+    // image 就等于把正文里的图片吃掉，而非 wiki 的面还没有保真锁兜底。
+    // 能不能**新增**图片仍由 imageUpload 决定——上传器、粘贴占位都挂在它上面。
+    // src 存 /__cm__/asset/<id>，展示经 thumb 端点（session 鉴权，img src 直接可流）
     const imageExt = WikiImage.configure({
       resolveSrc: (src) => {
         const assetId = decodeAssetSrc(src); // 新旧形态双读
@@ -666,12 +709,19 @@ export default function SmartTextarea({
     // TableKit: StarterKit 不含表格节点，缺了它 markdown 表格进编辑器会被吞。
     return [base, markdownExt,
       TableKit.configure({ table: { resizable: false } }),
+      // 外缘选中整行/整列后按 Delete 删的是结构，不是清空内容
+      TableKeymap,
       TaskList, TaskItem.configure({ nested: true }),
-      Callout, Column, ColumnGroup,
-      ...(hasImageUpload ? [imageExt, UploadPlaceholder] : []),
-      ...commonExts, wikiTriggerCfg, remoteCursorExt];
+      // ColumnEditing 不随 blockTools 门控：空栏退格、禁止嵌套是分栏方言自身
+      // 的不变量，哪个面都得维护（粘贴、AI 写入都可能造出嵌套组）
+      Callout, Column, ColumnGroup, ColumnEditing,
+      // 拖拽造栏、栏宽拖拽只在有手柄的面才有意义（也才有那条栏间沟槽放操作件）
+      ...(hasColumnTools ? [ColumnDrop, ColumnResize] : []),
+      imageExt,
+      ...(hasImageUpload ? [UploadPlaceholder] : []),
+      ...commonExts, wikiTriggerCfg, slashTriggerCfg, remoteCursorExt];
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markdown, remoteCursorExt, hasImageUpload]);
+  }, [markdown, remoteCursorExt, hasImageUpload, blockTools, hasColumnTools]);
 
   const editorMinHeight = minHeight != null
     ? `${minHeight}px`
@@ -685,8 +735,9 @@ export default function SmartTextarea({
     autofocus: autoFocus,
     editorProps: {
       attributes: {
+        // blockTools 面要给手柄让出左侧沟槽，否则 ＋/⠿ 会压在正文第一个字上
         class: markdown
-          ? "prose prose-zinc max-w-none focus:outline-none px-3 py-2 smart-textarea-content"
+          ? `prose prose-zinc max-w-none focus:outline-none px-3 py-2 smart-textarea-content${blockTools ? " smart-textarea-blocktools" : ""}`
           : "outline-none smart-textarea-content",
         style: readOnly ? "" : `min-height:${editorMinHeight}`,
       },
@@ -791,6 +842,20 @@ export default function SmartTextarea({
       },
       // 从文档树拖文档进编辑器 → 自动成为双向链接 chip（UI 修缮轮）
       handleDrop: (view, event) => {
+        // 块拖拽自环保护（调研 §2.6 ②：必须禁止「拖进自己的子树」）。
+        // 拖住一个 columnGroup 往它自己的某一栏里放，PM 会先删源节点再按旧坐标
+        // 插入，落点已经不存在 → 文档结构损坏。源区间由拖拽起始的 NodeSelection
+        // 给出，落点在区间内即整个吞掉这次 drop（拖拽取消，文档不动）
+        if (view.dragging) {
+          const sel = view.state.selection;
+          if (sel instanceof NodeSelection) {
+            const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+            if (at != null && at > sel.from && at < sel.to) {
+              event.preventDefault();
+              return true;
+            }
+          }
+        }
         const raw = event.dataTransfer?.getData("application/x-clickin-wiki");
         if (!raw) return false;
         try {
@@ -870,9 +935,19 @@ export default function SmartTextarea({
     },
   });
 
+  // 拖拽进行中到达的协作回灌先攒着，dragend 再补上（见下方 effect）
+  const pendingValueRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     if (value === lastEmittedRef.current) return;
+    // 块拖拽中途 setContent 会把整个 doc 换掉，PM 手里的 dragging slice 与落点
+    // 坐标全部失效——轻则拖拽静默失败，重则内容落到错误位置。攒到拖完再灌。
+    // （文本拖选也走这条，同样是对的：拖到一半文档被换掉本来就不该发生）
+    if (editor.view.dragging) {
+      pendingValueRef.current = value;
+      return;
+    }
     lastEmittedRef.current = value;
     const newContent = normalizeWikiDialect(value);
     const { from, to } = editor.state.selection;
@@ -881,6 +956,22 @@ export default function SmartTextarea({
     const max = editor.state.doc.content.size;
     editor.commands.setTextSelection({ from: Math.min(from, max), to: Math.min(to, max) });
   }, [value, editor, markdown]);
+
+  // 拖拽结束补灌被推迟的协作内容。挂 document 而不是编辑器 DOM——拖到编辑器
+  // 外面松手时 dragend 只在 document 上冒泡，挂里面会永远等不到、pending 卡死
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const flush = () => {
+      const pending = pendingValueRef.current;
+      pendingValueRef.current = null;
+      if (pending == null || editor.isDestroyed) return;
+      if (pending === lastEmittedRef.current) return;
+      lastEmittedRef.current = pending;
+      editor.commands.setContent(normalizeWikiDialect(pending), { emitUpdate: false });
+    };
+    document.addEventListener("dragend", flush);
+    return () => document.removeEventListener("dragend", flush);
+  }, [editor]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
@@ -941,11 +1032,21 @@ export default function SmartTextarea({
   }, [markdown, editor, value]);
 
   const rect = drop?.clientRect?.();
+  // `/` 无命中时整个弹层不出现——正文里的 and/or、日期 2026/08 不该弹空菜单
+  const dropPlugin = drop ? allPlugins.find(p => p.trigger === drop.trigger) : undefined;
+  const dropHidden = !!drop && drop.items.length === 0 && !!dropPlugin?.hideWhenEmpty;
 
   const editorEl = (
     <>
-      <EditorContent editor={editor} />
-      {drop && rect && typeof document !== "undefined" &&
+      {/* 手柄 wrapper 由插件挂到 view.dom 的父元素上并绝对定位，这层必须是
+          定位元素——见 globals.css .smart-textarea-shell */}
+      <EditorContent editor={editor} className="smart-textarea-shell" />
+      {/* 浮动条与固定工具栏的作用域严格一致（markdown 面），commit「收工具栏」
+          才是 1:1 替换而不是能力平移 */}
+      {markdown && !readOnly && <TextBubbleMenu editor={editor} />}
+      {markdown && blockTools && !readOnly && <BlockHandle editor={editor} />}
+      {markdown && blockTools && !readOnly && <TableTools editor={editor} />}
+      {drop && rect && !dropHidden && typeof document !== "undefined" &&
         createPortal(
           <div
             style={{ position: "fixed", left: rect.left, top: rect.bottom + 4, zIndex: 9999 }}
@@ -987,12 +1088,9 @@ export default function SmartTextarea({
       : frameless
         ? `overflow-hidden ${className}`
         : `rounded-lg border border-zinc-200 focus-within:border-zinc-400 overflow-hidden bg-white ${className}`;
-    return (
-      <div className={frame}>
-        {!readOnly && <Toolbar editor={editor} />}
-        {editorEl}
-      </div>
-    );
+    // 固定工具栏已退役：格式走选中浮出的文本浮动条，插入走 `/` 指令源，
+    // 块级操作走左侧手柄。Notion 式整页编辑不该常驻一条工具栏。
+    return <div className={frame}>{editorEl}</div>;
   }
 
   return (
