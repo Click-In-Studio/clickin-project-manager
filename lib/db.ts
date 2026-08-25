@@ -3699,59 +3699,6 @@ export async function findUserByName(name: string): Promise<{ userId: string } |
   return res.rows[0] ? { userId: res.rows[0].user_id } : null;
 }
 
-/**
- * Upsert a user sourced from the contact sheet or Feishu directory.
- * Creates an app_user row for new users. Returns the internal userId.
- */
-export async function upsertContactUser(
-  openId: string,
-  name: string,
-  avatarUrl: string | null,
-  email: string | null,
-  phone: string | null,
-): Promise<{ userId: string }> {
-  const pool = getPool();
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const existing = await client.query<{ user_id: string }>(
-      "SELECT user_id FROM feishu_user WHERE open_id = $1",
-      [openId],
-    );
-    let userId: string;
-    if (existing.rows.length > 0) {
-      userId = existing.rows[0].user_id;
-      await client.query(
-        `UPDATE feishu_user
-         SET name       = $1,
-             avatar_url = COALESCE($2, avatar_url),
-             email      = COALESCE($3, email),
-             phone      = COALESCE($4, phone),
-             updated_at = now()
-         WHERE open_id = $5`,
-        [name, avatarUrl, email, phone, openId],
-      );
-    } else {
-      const { rows } = await client.query<{ id: string }>(
-        "INSERT INTO app_user DEFAULT VALUES RETURNING id",
-      );
-      userId = rows[0].id;
-      await client.query(
-        `INSERT INTO feishu_user (open_id, name, avatar_url, email, phone, user_id, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now())`,
-        [openId, name, avatarUrl, email, phone, userId],
-      );
-    }
-    await client.query("COMMIT");
-    return { userId };
-  } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
-  } finally {
-    client.release();
-  }
-}
-
 export type CharacterDetail = Character & {
   gender: string;
   biography: string;
