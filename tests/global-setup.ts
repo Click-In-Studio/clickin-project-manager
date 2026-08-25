@@ -157,6 +157,12 @@ import {
   DROP_TASK_MILESTONE_SNAPSHOT_PATH,
   type DropTaskMilestoneSnapshot,
 } from "./drop-task-milestone-snapshot";
+import {
+  isRetireDeptTypePreMigrationSchema,
+  createRetireDeptTypePreMigrationData,
+  RETIRE_DEPT_TYPE_SNAPSHOT_PATH,
+  type RetireDeptTypeSnapshot,
+} from "./retire-dept-type-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -605,6 +611,20 @@ export async function setup() {
     await pool.query(migrationSql);
   }
 
+  // org_dept 类型退役并入 dept（#327）：工厂造并类型前的 org_dept 侧存量
+  // （授权行 / 三张区间表节点键 / 在途申请 / 审批人配置 + 一对撞行），迁移测试验
+  // 平移与去重。排在 merge-event-department 之后——那条迁移的工厂造的是 dept 侧
+  // 的 notes 行，本迁移不碰它，但顺序反了就会在词汇行已删的库里造 org_dept 行。
+  if (await isRetireDeptTypePreMigrationSchema(pool)) {
+    const retireDeptTypeSnapshot = await createRetireDeptTypePreMigrationData(pool, TEST_USER);
+    await writeFile(RETIRE_DEPT_TYPE_SNAPSHOT_PATH, JSON.stringify(retireDeptTypeSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-retire-dept-type.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
   // wiki 正文方言 v1 → v2：必须排在全部结构迁移之后（工厂正文要往已成型的
   // wiki 表里写）。SQL 只建备份表，正文改写由 lib/wiki-dialect-migrate 执行——
   // 与 scripts/migrate-wiki-dialect.ts 同一份实现，CI 跑的就是线上要跑的东西。
@@ -682,6 +702,23 @@ export async function teardown() {
       // production 删除级联 task / milestone / phase 及其边
       await pool.query("DELETE FROM production WHERE id = $1", [dropTaskMilestoneSnapshot.prodId]).catch(() => {});
       await unlink(DROP_TASK_MILESTONE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // org_dept 类型退役快照的工厂演出（migration path only）
+  {
+    let retireDeptTypeSnapshot: RetireDeptTypeSnapshot | null = null;
+    try {
+      retireDeptTypeSnapshot = JSON.parse(
+        await readFile(RETIRE_DEPT_TYPE_SNAPSHOT_PATH, "utf8"),
+      ) as RetireDeptTypeSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (retireDeptTypeSnapshot) {
+      // production 删除级联部门 / 角色 / 授权行 / 区间键 / 申请 / 审批人配置
+      await pool.query("DELETE FROM production WHERE id = $1", [retireDeptTypeSnapshot.prodId]).catch(() => {});
+      await unlink(RETIRE_DEPT_TYPE_SNAPSHOT_PATH).catch(() => {});
     }
   }
 

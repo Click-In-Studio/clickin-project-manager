@@ -22,7 +22,7 @@ export const RESOURCE_DIRECTORY_QUERIES: Record<string, string> = {
   finance: `SELECT id::text AS id, name AS label FROM production_budget_category
             WHERE production_id = $1 ORDER BY order_index, name`,
   announcement: "SELECT id, COALESCE(title, id) AS label FROM production_announcement WHERE production_id = $1 ORDER BY created_at DESC",
-  org_dept: "SELECT id::text AS id, name AS label FROM production_dept WHERE production_id = $1 ORDER BY display_order, name",
+  dept: "SELECT id::text AS id, name AS label FROM production_dept WHERE production_id = $1 ORDER BY display_order, name",
   role: "SELECT id, name AS label FROM production_role WHERE production_id = $1 AND NOT is_deprecated ORDER BY name",
   member: `SELECT pm.user_id::text AS id, COALESCE(up.name, pm.user_id::text) AS label
            FROM production_member pm LEFT JOIN user_profile up ON up.user_id = pm.user_id

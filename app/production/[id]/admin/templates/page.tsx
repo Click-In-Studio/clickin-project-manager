@@ -24,8 +24,8 @@ export default async function TemplatesPage({ params }: { params: Promise<{ id: 
   const bypass = permCtx.isAdmin || permCtx.isOwner;
 
   const [canEdit, canViewOnly, canManageTypes] = await Promise.all([
-    bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "grants", "edit"),
-    bypass || hasGrant(permCtx.userId, id, "org_dept", "*", "grants", "view"),
+    bypass || hasGrant(permCtx.userId, id, "dept", "*", "grants", "edit"),
+    bypass || hasGrant(permCtx.userId, id, "dept", "*", "grants", "view"),
     bypass || hasGrant(permCtx.userId, id, "production", "*", "config", "edit"),
   ]);
   const canView = canEdit || canViewOnly || canManageTypes;

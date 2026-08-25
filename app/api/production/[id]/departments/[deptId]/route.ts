@@ -19,7 +19,7 @@ async function requireManage(req: NextRequest, productionId: string) {
   );
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx, isArchived } = access;
-  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, productionId, "org_dept", "*", "*", "create")))
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, productionId, "dept", "*", "*", "create")))
     return { session, deny: Response.json({ error: "权限不足" }, { status: 403 }), isArchived };
   return { session, deny: null, isArchived };
 }
