@@ -184,7 +184,12 @@ export function isSensitiveNode(resourceType: string, resourceSub: string, verb:
     if (verb === "view") return false;
     return resourceSub.startsWith("meta") || resourceSub === "archival";
   }
-  if (resourceType === "member" && resourceSub.startsWith("imports")) return true;
+  // member/imports 曾在此判 sensitive，2026-08-25 删除：全仓没有一处门读这个键。
+  // 「成员导入」（表格批量邀请）走的是 member@create（invites/parse-table、
+  // invites/table-send），imports 这个 sub 只在 script / dramaturgy 两个类型下有门。
+  // 留着是死枝且有害——将来真做成员导入时它会突然生效，把人事审批从共管部门
+  // （resource_dept_manage 里配的人事部门 POC）一把打回 owner。人事域要能委派，
+  // 见 #262：member 的在用面（create/delete/roles/overrides/contact/meta）全是 normal。
   return false;
 }
 

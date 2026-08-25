@@ -40,11 +40,16 @@ afterAll(async () => {
 });
 
 describe("节点分类", () => {
-  it("SENSITIVE：production 修改动作、producer 全部、member imports；view 面是基线", () => {
+  it("SENSITIVE：production 修改动作、producer 全部；view 面是基线", () => {
     expect(isSensitiveNode("production", "meta/name", "edit")).toBe(true);
     expect(isSensitiveNode("production", "archival", "create")).toBe(true);
     expect(isSensitiveNode("producer", "*", "create")).toBe(true);
-    expect(isSensitiveNode("member", "imports", "create")).toBe(true);
+    // member 域整个不 sensitive（#262）：在用面 create/delete/roles/overrides/
+    // contact/meta 全走完整审批阶梯，人事部门可作共管方接第一级。
+    // imports 曾判 sensitive，但全仓无门读它（成员导入走 member@create），已删。
+    expect(isSensitiveNode("member", "imports", "create")).toBe(false);
+    expect(isSensitiveNode("member", "*", "create")).toBe(false);
+    expect(isSensitiveNode("member", "roles", "edit")).toBe(false);
     expect(isSensitiveNode("production", "config", "edit")).toBe(false);
     expect(isSensitiveNode("milestone", "*", "create")).toBe(false);
     // 基线原则（2026-08-13）：权限越基线，修改该权限越敏感——view 不 sensitive
