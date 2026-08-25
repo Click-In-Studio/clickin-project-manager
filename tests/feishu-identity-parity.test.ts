@@ -155,3 +155,35 @@ describe("绑定飞书不建号", () => {
     expect(await identityRows(openId)).toHaveLength(1);
   });
 });
+
+describe("绑定并发安全", () => {
+  // 注意：Promise.all 不保证真的制造出交错窗口（连接池可能把两次调用串行掉），
+  // 所以这条用例是回归兜底而非并发语义的证明。真正的保证在 SQL 层——
+  // attachFeishuToUser 的 ON CONFLICT ... WHERE user_id 相同才更新（见 db-feishu.ts）。
+  it("两个账号同时抢同一 open_id：恰好一个成功，另一个 openid_taken", async () => {
+    const openId = `fip-race-${shortId()}`;
+    const a = (await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id")).rows[0].id;
+    const b = (await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id")).rows[0].id;
+    createdUserIds.push(a, b);
+
+    const [ra, rb] = await Promise.all([
+      attachFeishuToUser(a, openId, "抢注甲", null),
+      attachFeishuToUser(b, openId, "抢注乙", null),
+    ]);
+
+    // 恰好一个成功——「都成功」意味着后到者拿到 ok 却没真正绑上
+    const wins = [ra, rb].filter(r => r.ok).length;
+    expect(wins).toBe(1);
+
+    // 且 feishu_user 与 identity 必须指向同一个赢家
+    const owner = (await getPool().query<{ user_id: string }>(
+      "SELECT user_id FROM feishu_user WHERE open_id = $1", [openId],
+    )).rows[0].user_id;
+    const ident = await identityRows(openId);
+    expect(ident).toHaveLength(1);
+    expect(ident[0].user_id).toBe(owner);
+
+    const winner = ra.ok ? a : b;
+    expect(owner).toBe(winner);
+  });
+});

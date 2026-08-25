@@ -97,12 +97,23 @@ export async function attachFeishuToUser(
       return { ok: false, reason: "user_has_other_feishu" };
     }
 
-    await client.query(
+    // 第二道防线：上面的存在性检查与这条 INSERT 之间有并发窗口——两个账号同时抢
+    // 同一 open_id 时都会看到「不存在」。`WHERE feishu_user.user_id = EXCLUDED.user_id`
+    // 让归属不同的冲突既不更新也不返回行，据此把后到者判成 openid_taken。
+    // 少了这个 WHERE，后到者会拿到 ok:true 的假象，还会把先到者的 name 覆盖掉。
+    const attached = await client.query(
       `INSERT INTO feishu_user (open_id, name, avatar_url, user_id, updated_at)
        VALUES ($1, $2, $3, $4, now())
-       ON CONFLICT (open_id) DO UPDATE SET name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url, updated_at = now()`,
+       ON CONFLICT (open_id) DO UPDATE
+         SET name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url, updated_at = now()
+         WHERE feishu_user.user_id = EXCLUDED.user_id
+       RETURNING user_id`,
       [openId, name, avatarUrl, userId],
     );
+    if (attached.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "openid_taken" };
+    }
     await client.query(
       `INSERT INTO user_platform_identity (user_id, platform_id, platform_user_id, is_login_method, is_primary)
        VALUES ($1, 'feishu', $2, true, false)

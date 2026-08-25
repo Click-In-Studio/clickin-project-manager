@@ -46,10 +46,16 @@ export async function GET(req: NextRequest) {
   const existingFeishu = await getFeishuUser(info.openId);
   if (!existingFeishu) {
     const attached = await attachFeishuToUser(sourceUserId, info.openId, info.name, info.avatarUrl ?? null);
-    if (!attached.ok && attached.reason === "user_has_other_feishu") {
-      return NextResponse.redirect(new URL("/account?bind_error=feishu_already_bound", base));
+    if (!attached.ok) {
+      switch (attached.reason) {
+        case "user_has_other_feishu":
+          return NextResponse.redirect(new URL("/account?bind_error=feishu_already_bound", base));
+        case "openid_taken":
+          // 该 open_id 已属他人（含并发抢注）：feishu_user 行必然已存在，FK 依赖满足，
+          // 交给下面的 bindPlatformIdentity 走既有的 conflict → merge 流程。
+          break;
+      }
     }
-    // openid_taken 交给下面的 bindPlatformIdentity 走既有的 conflict → merge 流程
   }
 
   const bindResult = await bindPlatformIdentity(sourceUserId, "feishu", info.openId);
