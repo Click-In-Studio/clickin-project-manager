@@ -11,7 +11,6 @@ import { BASE_PATH } from "@/lib/base-path";
 import { fmtDateTime } from "@/lib/tz";
 import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/SmartTextarea";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
-import WikiPrintOverlay from "@/components/wiki/WikiPrintOverlay";
 import AdminModal from "@/components/AdminModal";
 import DropdownPicker from "@/components/DropdownPicker";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
@@ -96,7 +95,6 @@ export default function WikiDocClient({
   const [share, setShare] = useState<ShareState | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [printing, setPrinting] = useState(false);
   const [shareAddUser, setShareAddUser] = useState("");
   const [shareAddLevel, setShareAddLevel] = useState<ShareLevel>("view");
 
@@ -455,13 +453,17 @@ export default function WikiDocClient({
                   >
                     Markdown（.md）
                   </button>
-                  <button
-                    type="button"
-                    className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
-                    onClick={() => { setExportOpen(false); setPrinting(true); }}
+                  {/* 打印页现在是独立路由（#335）。新标签打开：wiki 是默认即编辑，
+                      同标签跳走会把编辑态一起带走。 */}
+                  <Link
+                    href={`/production/${productionId}/wiki/${wiki.id}/print`}
+                    target="_blank"
+                    rel="noopener"
+                    className="block w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
+                    onClick={() => setExportOpen(false)}
                   >
                     PDF（打印页）
-                  </button>
+                  </Link>
                 </div>
               )}
             </div>
@@ -589,17 +591,6 @@ export default function WikiDocClient({
             </div>
           )}
         </div>
-      )}
-
-      {/* 打印页（导出 PDF） */}
-      {printing && (
-        <WikiPrintOverlay
-          productionId={productionId}
-          title={title.trim() || wiki.title || "文档"}
-          body={body}
-          updatedAt={wiki.updatedAt}
-          onClose={() => setPrinting(false)}
-        />
       )}
 
       {/* 分享 */}

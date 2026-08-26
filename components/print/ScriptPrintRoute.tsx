@@ -19,12 +19,14 @@ export default function ScriptPrintRoute({
   characters,
   scenes,
   config,
+  watermarkText,
 }: {
   productionId: string;
   blocks: Block[];
   characters: Character[];
   scenes: Scene[];
   config: ScriptConfig;
+  watermarkText: string | null;
 }) {
   const router = useRouter();
   // 排版模式在打印页只作用于本次预览，不回写演出配置——改配置是编辑器的事。
@@ -40,6 +42,7 @@ export default function ScriptPrintRoute({
       stageDelimOpen={config.stageDelimOpen}
       stageDelimClose={config.stageDelimClose}
       textLayoutMode={textLayoutMode}
+      watermarkText={watermarkText}
       canEditTextLayout={false}
       onTextLayoutModeChange={setTextLayoutMode}
       onClose={() => router.push(`/production/${productionId}/script`)}

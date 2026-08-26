@@ -6,6 +6,7 @@ import { hasGrant } from "@/lib/grant-check";
 import {
   getProductionPermissionContext,
   getActiveVersionId,
+  getUserPrimaryEmail,
   loadProduction,
 } from "@/lib/db";
 import { buildMarkerContextById, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
@@ -47,6 +48,11 @@ export default async function ScriptPrintPage({
     redirect(`/unauthorized?resource=node%3Ascript%2F*%2Fblocks%40view&id=${id}`);
   }
 
+  // 打印水印文案由服务端解析：客户端 fetch /api/me 有竞态，点得快就会出一份
+  // 无水印的片子，而水印是安全特性，不能取决于一次请求赢没赢。
+  const email = await getUserPrimaryEmail(session.userId);
+  const watermarkText = email ? `${session.name} ${email}` : session.name;
+
   // 版本分叉已退役（PR #300），只有 head——所以 URL 契约里不带版本参数。
   const versionId = await getActiveVersionId(id);
   if (!versionId) notFound();
@@ -66,6 +72,7 @@ export default async function ScriptPrintPage({
       characters={characters}
       scenes={scenes}
       config={config}
+      watermarkText={watermarkText}
     />
   );
 }

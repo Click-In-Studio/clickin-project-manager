@@ -13,7 +13,6 @@ import React from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync, createPortal } from "react-dom";
 import { buildWatermarkTile } from "@/components/watermark-tile";
-import { BASE_PATH } from "@/lib/base-path";
 import ChevronIcon from "@/components/ChevronIcon";
 import type { Block, Character, Scene, ScriptTextLayoutMode, PageLayout } from "@/lib/script-types";
 import { PAGE_CONFIGS, printPageCss } from "@/lib/script-page";
@@ -1055,6 +1054,7 @@ export default function PrintPreview({
   canEditTextLayout,
   onTextLayoutModeChange,
   onClose,
+  watermarkText,
   standalone = false,
 }: {
   blocks: Block[];
@@ -1067,6 +1067,8 @@ export default function PrintPreview({
   canEditTextLayout: boolean;
   onTextLayoutModeChange: (mode: ScriptTextLayoutMode) => void;
   onClose: () => void;
+  /** 访问者水印文案（服务端下发，通常是「用户名 邮箱」）。null = 不打水印。 */
+  watermarkText: string | null;
   /** 打印路由用：本组件就是整个页面，不需要 portal 逃出 app shell，
    *  也不需要 fixed 覆盖层。同时开启 printReady 信号。 */
   standalone?: boolean;
@@ -1091,23 +1093,13 @@ export default function PrintPreview({
   const [headerMode, setHeaderMode] = useState<PrintHeaderMode>("first-right");
   const [printToolbarStage, setPrintToolbarStage] = useState<PrintToolbarStage>(0);
 
-  // 打印强制水印：访问者 [用户名 邮箱]（无视项目屏幕水印开关）
-  const [watermarkTile, setWatermarkTile] = useState<string | null>(null);
-  const [watermarkResolved, setWatermarkResolved] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${BASE_PATH}/api/me`)
-      .then((r) => r.json())
-      .then((me: { name: string | null; email: string | null }) => {
-        if (cancelled) return;
-        if (me.name) setWatermarkTile(buildWatermarkTile(me.email ? `${me.name} ${me.email}` : me.name));
-      })
-      .catch(() => {})
-      // 失败也要落 resolved：否则 /api/me 挂掉时 printReady 永远不来，
-      // 无头浏览器只能一直等到超时。
-      .finally(() => { if (!cancelled) setWatermarkResolved(true); });
-    return () => { cancelled = true; };
-  }, []);
+  // 打印强制水印：访问者 [用户名 邮箱]（无视项目屏幕水印开关）。
+  // 由服务端下发而非客户端 fetch /api/me——那条路有竞态（点得快就会出一份
+  // 无水印的片子），而水印是安全特性，不能取决于一次请求赢没赢。
+  const watermarkTile = useMemo(
+    () => (watermarkText ? buildWatermarkTile(watermarkText) : null),
+    [watermarkText],
+  );
 
   // 打印时隐藏 app shell：portal 到 body，globals.css 以 body:has(.script-print-root)
   // 判定（不能用 JS 挂 body class——body className 由 React 管理会被协调抹掉）
@@ -1167,12 +1159,12 @@ export default function PrintPreview({
     data.measureTick === layoutMeasureTick;
   const showLoadingNotice = forceLoadingNotice || !printPreviewReady;
 
-  // 打印路由的就绪信号：分页测量完成 + 水印解析完成 + 字体加载完成。
-  // 无头浏览器等这个属性，不必 sleep 赌时间。三者缺一都会印出错的东西——
-  // 字体没到位就分页，换行点是回退字体算的；水印没到位就出片，那是一份无水印原件。
+  // 打印路由的就绪信号：分页测量完成 + 字体加载完成。无头浏览器等这个属性，
+  // 不必 sleep 赌时间。字体没到位就分页，换行点是回退字体算的。
+  // （水印不在条件里——它由服务端随首屏下发，不存在"还没到"的状态。）
   useEffect(() => {
     if (!standalone) return;
-    if (!printPreviewReady || !watermarkResolved) return;
+    if (!printPreviewReady) return;
     let cancelled = false;
     const mark = () => { if (!cancelled) document.body.dataset.printReady = "1"; };
     const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
@@ -1182,7 +1174,7 @@ export default function PrintPreview({
       cancelled = true;
       delete document.body.dataset.printReady;
     };
-  }, [standalone, printPreviewReady, watermarkResolved]);
+  }, [standalone, printPreviewReady]);
 
   useLayoutEffect(() => {
     const viewport = previewViewportRef.current;
