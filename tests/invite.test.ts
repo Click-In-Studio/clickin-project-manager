@@ -42,6 +42,55 @@ afterAll(async () => {
   await cleanupProduction(prodId).catch(() => {});
 });
 
+describe("席位与退出过的人（#141）", () => {
+  it("席位满时重新邀请一个 suspended 成员不该被挡——他本来就占着席位", async () => {
+    const { PRODUCTION_TIERS } = await import("@/lib/plan");
+    const { suspendMember } = await import("@/lib/member-status");
+    const { rows: ownerRow } = await getPool().query<{ owner_id: string }>(
+      "SELECT owner_id::text AS owner_id FROM production WHERE id = $1",
+      [prodId],
+    );
+    const owner = ownerRow[0].owner_id;
+
+    // 另起一个演出，把席位精确打满
+    const { prodId: p } = await makeProduction(owner);
+    const joined: string[] = [];
+    try {
+      for (let i = 0; i < PRODUCTION_TIERS.free.seatLimit - 1; i++) {
+        const u = await newUser();
+        joined.push(u);
+        const { token } = await createInvite({ productionId: p, createdBy: owner });
+        expect((await acceptInvite(token, u)).ok).toBe(true);
+      }
+      // 满员：新人进不来
+      const stranger = await newUser();
+      joined.push(stranger);
+      const t1 = (await createInvite({ productionId: p, createdBy: owner })).token;
+      expect(await acceptInvite(t1, stranger)).toEqual({ ok: false, reason: "seats_full" });
+
+      // 停用其中一人——席位不释放（suspended 占席位），但他自己回来不该被自己挡住：
+      // 接受邀请后人数一个没变。判据必须是「已占席位」而不是「已是在职成员」。
+      expect((await suspendMember(p, joined[0], owner)).ok).toBe(true);
+      const t2 = (await createInvite({ productionId: p, createdBy: owner })).token;
+      expect(await acceptInvite(t2, joined[0])).toMatchObject({ ok: true, alreadyMember: false });
+
+      const { rows } = await getPool().query<{ status: string }>(
+        "SELECT status FROM production_member WHERE production_id = $1 AND user_id = $2",
+        [p, joined[0]],
+      );
+      expect(rows[0].status).toBe("active");
+
+      // 而真正的新人依然进不来——席位确实还是满的
+      const t3 = (await createInvite({ productionId: p, createdBy: owner })).token;
+      expect(await acceptInvite(t3, stranger)).toEqual({ ok: false, reason: "seats_full" });
+    } finally {
+      await cleanupProduction(p).catch(() => {});
+      await getPool().query("DELETE FROM app_user WHERE id = ANY($1::uuid[])", [joined])
+        .catch(() => {});
+    }
+  });
+});
+
 describe("开放链接：接受入组+预配+计数", () => {
   it("接受后成为成员并带预配角色/部门；重复接受幂等（计数仍增）", async () => {
     const joiner = await newUser();

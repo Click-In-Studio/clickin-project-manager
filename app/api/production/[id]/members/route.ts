@@ -4,11 +4,9 @@ import { getSession } from "@/lib/session";
 import {
   listProductionMembers,
   addProductionMember,
-  removeProductionMember,
   setMemberRoles,
   setMemberPhoto,
   setMemberSupervisor,
-  setMemberStatus,
   setMemberTags,
   isProductionArchived,
   getProductionPermissionContext,
@@ -47,14 +45,13 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { id } = await ctx.params;
   if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
 
-  const { userId, roles, photoUrl, supervisorId, tagIds, status } =
+  const { userId, roles, photoUrl, supervisorId, tagIds } =
     (await req.json()) as {
       userId?: string;
       roles?: string[];
       photoUrl?: string | null;
       supervisorId?: string | null;
       tagIds?: string[];
-      status?: "active" | "suspended";
     };
   if (!userId) return Response.json({ error: "缺少 userId" }, { status: 400 });
 
@@ -64,15 +61,14 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     : await getProductionPermissionContext(session.userId, false, id);
   if (!session.isAdmin && !access) return Response.json({ error: "权限不足" }, { status: 403 });
 
-  // 人事编辑门（角色/tag/上级）与人事处置门（停用/恢复）分离；照片：本人或人事编辑门。
+  // 人事编辑门（角色/tag/上级）：照片是本人或人事编辑门。
+  // 人事处置（停用/复职/确认离组/自助退出）不在这里——它是动词形，见
+  // members/[userId]/status/route.ts。赋值形反推不出「谁在干什么」：
+  // active → suspended 既可能是自助退出也可能是人事停用。
   const canEditMember =
     session.isAdmin ||
     !!(access && (access.permCtx.isAdmin || access.permCtx.isOwner ||
       await hasGrant(access.permCtx.userId, id, "member", "*", "roles", "edit")));
-  const canRemoveMember =
-    session.isAdmin ||
-    !!(access && (access.permCtx.isAdmin || access.permCtx.isOwner ||
-      await hasGrant(access.permCtx.userId, id, "member", "*", "*", "delete")));
 
   if (roles !== undefined) {
     if (!canEditMember) return Response.json({ error: "权限不足" }, { status: 403 });
@@ -86,13 +82,6 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (!canEditMember) return Response.json({ error: "权限不足" }, { status: 403 });
     await setMemberSupervisor(id, userId, supervisorId);
   }
-  if (status !== undefined) {
-    if (status !== "active" && status !== "suspended") {
-      return Response.json({ error: "status 非法" }, { status: 400 });
-    }
-    if (!canRemoveMember) return Response.json({ error: "权限不足" }, { status: 403 });
-    await setMemberStatus(id, userId, status);
-  }
   if (photoUrl !== undefined) {
     if (!isSelf && !canEditMember) return Response.json({ error: "权限不足" }, { status: 403 });
     await setMemberPhoto(id, userId, photoUrl);
@@ -100,22 +89,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   return Response.json({ ok: true });
 }
 
-export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = getSession(req.cookies);
-  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { id } = await ctx.params;
-  if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-
-  const { userId } = (await req.json()) as { userId?: string };
-  if (!userId) return Response.json({ error: "缺少 userId" }, { status: 400 });
-
-  if (!session.isAdmin) {
-    const access = await getProductionPermissionContext(session.userId, false, id);
-    if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "member", "*", "*", "delete"))) {
-      return Response.json({ error: "权限不足" }, { status: 403 });
-    }
-  }
-
-  await removeProductionMember(id, userId);
-  return Response.json({ ok: true });
-}
+// DELETE 已退役（#141）：成员记录不可删除。
+//
+// 此前它撤权 + 删行，定位是「误加入」——但审计上删行就是抹痕迹，而「谁在什么时候
+// 被谁从剧组里拿掉」正是最该留下的一条。加错人也走 停用 → 确认离组：名册上多一条
+// 离组记录，换的是任何人都无法抹掉痕迹。

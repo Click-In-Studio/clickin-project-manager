@@ -7,6 +7,8 @@ import AdminModal from "@/components/AdminModal";
 import MemberPickerModal, { type PickerDept } from "@/components/MemberPickerModal";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
+import type { MemberStatus } from "@/lib/member-status-shared";
+import { isInactiveMember } from "@/lib/member-status-shared";
 
 type Role = { id: string; name: string };
 
@@ -19,7 +21,7 @@ type Member = {
   tags: string[];
   email: string | null;
   phone: string | null;
-  status: "active" | "suspended";
+  status: MemberStatus;
 };
 
 type Caps = { create: boolean; rename: boolean; remove: boolean; assign: boolean };
@@ -365,7 +367,7 @@ function RoleDetail({
       {roleMembers.map(m => (
         <div key={m.userId} style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
           <Avatar m={m} size={26} />
-          <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: m.status === "suspended" ? "var(--muted)" : "var(--ink)", textDecoration: m.status === "suspended" ? "line-through" : undefined }}>
+          <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: isInactiveMember(m.status) ? "var(--muted)" : "var(--ink)", textDecoration: isInactiveMember(m.status) ? "line-through" : undefined }}>
             {m.name || "（未命名）"}
           </span>
           {!isProducer && caps.assign && (

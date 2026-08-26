@@ -927,6 +927,34 @@
       "default": "now()"
     }
   ],
+  "dialect_v2_text_backup": [
+    {
+      "column": "table_name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "row_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "column_name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "body",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "taken_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "email_otp": [
     {
       "column": "id",
@@ -2593,6 +2621,21 @@
       "type": "text",
       "nullable": false,
       "default": "'active'::text"
+    },
+    {
+      "column": "status_source",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "status_changed_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "status_changed_by",
+      "type": "uuid",
+      "nullable": true
     }
   ],
   "production_member_grant": [
@@ -2709,6 +2752,55 @@
       "column": "role_id",
       "type": "text",
       "nullable": false
+    }
+  ],
+  "production_member_status_audit": [
+    {
+      "column": "id",
+      "type": "bigint",
+      "nullable": false,
+      "default": "nextval('production_member_status_audit_id_seq'::regclass)"
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "action",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "from_status",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "to_status",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "actor_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "note",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
     }
   ],
   "production_member_tag": [
@@ -4001,6 +4093,24 @@
       "default": "now()"
     }
   ],
+  "wiki_body_backup_dialect_v2": [
+    {
+      "column": "wiki_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "body",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "taken_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "wiki_comment": [
     {
       "column": "id",
@@ -4252,52 +4362,6 @@
       "column": "tag",
       "type": "text",
       "nullable": false
-    }
-  ],
-  "wiki_body_backup_dialect_v2": [
-    {
-      "column": "wiki_id",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
-      "column": "body",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "taken_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
-    }
-  ],
-  "dialect_v2_text_backup": [
-    {
-      "column": "table_name",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "row_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "column_name",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "body",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "taken_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
     }
   ]
 }

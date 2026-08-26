@@ -304,7 +304,8 @@ async function assertMembersInProduction(
   }
   if (userIds.length) {
     const res = await client.query(
-      "SELECT user_id FROM production_member WHERE production_id = $1 AND user_id = ANY($2::uuid[])",
+      `SELECT user_id FROM production_member
+        WHERE production_id = $1 AND user_id = ANY($2::uuid[]) AND status = 'active'`,
       [productionId, userIds],
     );
     if (res.rowCount !== userIds.length)

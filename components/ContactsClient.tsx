@@ -4,6 +4,7 @@ import PageHeader from "@/components/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberWithRoles } from "@/lib/db";
 import { ROLE_GROUPS } from "@/lib/roles";
+import { isInactiveMember, memberStatusLabel } from "@/lib/member-status-shared";
 
 const ROLE_ORDER = ROLE_GROUPS.flatMap((g) => g.roles);
 
@@ -69,8 +70,8 @@ function MemberCard({ member }: { member: MemberWithRoles }) {
       <div style={{ minWidth: 0, width: "100%" }}>
         <p style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {member.name}
-          {member.status === "suspended" && (
-            <span style={{ marginLeft: 4, borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 600, background: "var(--danger-soft)", color: "var(--danger)", fontFamily: "system-ui, sans-serif", verticalAlign: 2 }}>停用</span>
+          {isInactiveMember(member.status) && (
+            <span style={{ marginLeft: 4, borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 600, background: "var(--danger-soft)", color: "var(--danger)", fontFamily: "system-ui, sans-serif", verticalAlign: 2 }}>{memberStatusLabel(member.status, member.statusSource ?? null)}</span>
           )}
         </p>
         {member.roles.length > 0 && (

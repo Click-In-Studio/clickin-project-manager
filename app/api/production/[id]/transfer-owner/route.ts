@@ -18,11 +18,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!newOwnerId) return Response.json({ error: "缺少 newOwnerId" }, { status: 400 });
 
   const member = await getPool().query(
-    "SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2",
+    "SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2 AND status = 'active'",
     [id, newOwnerId],
   );
   if (member.rows.length === 0) {
-    return Response.json({ error: "新 Owner 必须是项目成员" }, { status: 400 });
+    return Response.json({ error: "新 Owner 必须是在职成员" }, { status: 400 });
   }
 
   await getPool().query(

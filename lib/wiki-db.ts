@@ -616,7 +616,8 @@ export async function addWikiSharePerson(
   if (!rows) return "invalid_level";
   const pool = getPool();
   const member = await pool.query(
-    `SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2::uuid`,
+    `SELECT 1 FROM production_member
+      WHERE production_id = $1 AND user_id = $2::uuid AND status = 'active'`,
     [productionId, args.userId],
   );
   if (!member.rows[0]) return "not_member";

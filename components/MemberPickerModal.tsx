@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import AdminModal from "@/components/AdminModal";
 import Badge from "@/components/Badge";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
+import type { MemberStatus, MemberStatusSource } from "@/lib/member-status-shared";
+import { isInactiveMember } from "@/lib/member-status-shared";
 
 export type PickerMember = {
   userId: string;
@@ -15,7 +17,9 @@ export type PickerMember = {
   /** 联系方式按 contact@view 裁剪后传入；无权时为 null，搜索自然覆盖不到 */
   email?: string | null;
   phone?: string | null;
-  status: "active" | "suspended";
+  status: MemberStatus;
+  /** 非 active 时的成因；名册徽章按它区分「已退出」与「已停用」 */
+  statusSource?: MemberStatusSource | null;
 };
 
 export type PickerDept = {
@@ -171,7 +175,7 @@ export default function MemberPickerModal({
         )}
         <Avatar m={m} />
         <span style={{ minWidth: 0, flex: 1 }}>
-          <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: m.status === "suspended" ? "var(--muted)" : "var(--ink)", textDecoration: m.status === "suspended" ? "line-through" : undefined, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: isInactiveMember(m.status) ? "var(--muted)" : "var(--ink)", textDecoration: isInactiveMember(m.status) ? "line-through" : undefined, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {m.name || "（未命名）"}
           </span>
           <span style={{ display: "block", fontSize: 9.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

@@ -2425,8 +2425,11 @@ export async function listMyProductionsWithRoles(
                 AND prp.permission_key LIKE ANY($3::text[])
             ) AS has_admin_perm
      FROM production p
-     LEFT JOIN production_member pm ON pm.production_id = p.id AND pm.user_id = $1
+     LEFT JOIN production_member pm
+            ON pm.production_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
      LEFT JOIN production_plan ppl ON ppl.production_id = p.id
+     -- 在职口径（#141）：退出/被停用之后这个项目就不该再出现在「我的项目」里，
+     -- 否则点进去只会撞 403。owner 分支不受影响。
      WHERE ($2 OR pm.user_id IS NOT NULL OR p.owner_id = $1)
      ORDER BY ${orderBy}`,
     [userId, isAdmin, adminPanelPrefixes.map((p) => `${p}%`)],
@@ -2744,7 +2747,9 @@ export async function getAccountSummary(userId: string): Promise<AccountSummary 
       [userId],
     ),
     pool.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM production_member WHERE user_id = $1`,
+      // 「参与 N 个项目」——在职口径。离组/停用的不计。
+      `SELECT COUNT(*)::text AS count FROM production_member
+        WHERE user_id = $1 AND status = 'active'`,
       [userId],
     ),
   ]);
@@ -2769,7 +2774,8 @@ export async function getSharedProductions(
        FROM production_member pm1
        JOIN production_member pm2 ON pm1.production_id = pm2.production_id
        JOIN production p ON p.id = pm1.production_id
-      WHERE pm1.user_id = $1 AND pm2.user_id = $2`,
+      WHERE pm1.user_id = $1 AND pm2.user_id = $2
+        AND pm1.status = 'active' AND pm2.status = 'active'`,
     [userId1, userId2],
   );
   return res.rows;
@@ -2800,15 +2806,33 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
     await client.query(`UPDATE asset SET uploader_user_id = $1 WHERE uploader_user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE asset_mount SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE asset_share_token SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
+    // production_member_status_audit.actor_id 是 NO ACTION 的 FK（#141）：漏了这条，
+    // 任何处置过别人成员状态的账号都无法被合并——DELETE app_user 直接撞 FK 违例。
+    await client.query(
+      `UPDATE production_member_status_audit SET actor_id = $1 WHERE actor_id = $2`,
+      [keepUserId, deleteUserId],
+    );
 
     // 2. Transfer production memberships (safe: no shared productions)
     await client.query(
-      `INSERT INTO production_member (production_id, user_id, roles, photo_url, added_at)
-       SELECT production_id, $1, roles, photo_url, added_at FROM production_member WHERE user_id = $2
+      // status 三列必须一并搬（#141）：漏了的话 DEFAULT 'active' 会把一个 suspended
+      // 或 exited 的成员在合并账号时悄悄复活成在职，而且不留任何审计行。
+      `INSERT INTO production_member
+         (production_id, user_id, roles, photo_url, added_at,
+          status, status_source, status_changed_at, status_changed_by)
+       SELECT production_id, $1, roles, photo_url, added_at,
+              status, status_source, status_changed_at, status_changed_by
+         FROM production_member WHERE user_id = $2
        ON CONFLICT DO NOTHING`,
       [keepUserId, deleteUserId],
     );
     await client.query(`DELETE FROM production_member WHERE user_id = $1`, [deleteUserId]);
+    // 状态轨迹跟着身份走。user_id 是 ON DELETE CASCADE，不改指向的话下面删旧
+    // app_user 时整条轨迹会被静默级联删掉——合并账号成了抹痕迹的第二条路。
+    await client.query(
+      `UPDATE production_member_status_audit SET user_id = $1 WHERE user_id = $2`,
+      [keepUserId, deleteUserId],
+    );
     await client.query(
       `INSERT INTO production_member_permission (production_id, user_id, permission, granted)
        SELECT production_id, $1, permission, granted FROM production_member_permission WHERE user_id = $2
@@ -2982,17 +3006,9 @@ export async function upsertEmailUser(
 }
 
 
-/** Returns the user's roles in the production, or null if they are not a member. */
-export async function getProductionMemberRoles(
-  userId: string,
-  productionId: string,
-): Promise<string[] | null> {
-  const res = await getPool().query<{ roles: string[] }>(
-    "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2",
-    [userId, productionId],
-  );
-  return res.rows.length ? res.rows[0].roles : null;
-}
+// getProductionMemberRoles 已删（#141）：全库零调用，而它返回的是不带 status 闸门
+// 的成员判定——留着迟早有人拿它绕开闸门。成员判定的唯一入口是
+// getProductionPermissionContext。
 
 export async function setPermissionOverride(
   productionId: string,
@@ -3046,8 +3062,14 @@ export async function getProductionPermissionContext(
 
   const [memberRow, dbPermsRow, deptRow, productionRow] = await Promise.all([
     // Is user a member? And what are their role strings?
+    //
+    // status = 'active' 是访问闸门（#141）。suspended / exited 的成员行还在——
+    // 名册要显示他们、历史要留痕、复职要零重配——但他们进不来。这一条不加，
+    // 「停用」就只是名册上的一条删除线：人照样拿角色权限、部门权限与 resource grant。
+    // 注意闸门只管 isMember：owner 走下面的 isOwner 分支，不受影响（owner 退出
+    // 必须先转移 owner，见 #141）。
     pool.query<{ roles: string[] }>(
-      "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2",
+      "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2 AND status = 'active'",
       [userId, productionId],
     ),
     // Try FK-backed permissions first (production_member_role populated after migration/setMemberRoles)
@@ -3143,29 +3165,53 @@ export async function listProductionMembers(
      FROM production_member pm
      LEFT JOIN user_profile up ON up.user_id = pm.user_id
      LEFT JOIN feishu_user fu ON fu.user_id = pm.user_id
-     WHERE pm.production_id = $1 ORDER BY up.name NULLS LAST`,
+     WHERE pm.production_id = $1 AND pm.status <> 'exited'
+     ORDER BY up.name NULLS LAST`,
     [productionId],
   );
   return res.rows.map(r => ({ userId: r.user_id, name: r.name ?? "", avatarUrl: r.avatar_url, isAdmin: r.is_super_admin ?? false }));
 }
 
+/**
+ * 入组写点（邀请接受 / 直接加人都走这里）。
+ *
+ * ON CONFLICT 必须 DO UPDATE 而不是 DO NOTHING（#141）：退出后成员行是**留着**的
+ * （status='exited'/'suspended'，署名与历史要能追溯）。DO NOTHING 会让「重新邀请
+ * 一个退出过的人」变成一条静默空操作——行还在，status 还是 exited，人永远进不来，
+ * 而界面显示邀请已接受。
+ *
+ * 复活即回到 active 并清空成因；旧授权不在这里恢复：exited 的授权在确认离组时已
+ * 真撤（回来是新 membership），suspended 的授权本就冻着、复活即原样生效（复职零
+ * 重配）。两种情形都不需要这里做任何授权动作。
+ */
 export async function addProductionMember(productionId: string, userId: string): Promise<void> {
-  await getPool().query(
-    "INSERT INTO production_member (production_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-    [productionId, userId],
-  );
-}
-
-export async function removeProductionMember(productionId: string, userId: string): Promise<void> {
-  const pool = getPool();
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    await revokeAllGrantsForMember(productionId, userId, client);
-    await client.query(
-      "DELETE FROM production_member WHERE production_id = $1 AND user_id = $2",
+    const { rows: before } = await client.query<{ status: string }>(
+      `SELECT status FROM production_member
+        WHERE production_id = $1 AND user_id = $2 FOR UPDATE`,
       [productionId, userId],
     );
+    const fromStatus = before[0]?.status ?? null;
+
+    await client.query(
+      `INSERT INTO production_member (production_id, user_id) VALUES ($1, $2)
+       ON CONFLICT (production_id, user_id) DO UPDATE
+          SET status = 'active', status_source = NULL,
+              status_changed_at = NOW(), status_changed_by = NULL`,
+      [productionId, userId],
+    );
+
+    // 只有真的复活了才留痕；首次入组与对 active 行的重复调用都不写审计行。
+    if (fromStatus && fromStatus !== "active") {
+      await client.query(
+        `INSERT INTO production_member_status_audit
+           (production_id, user_id, action, from_status, to_status, actor_id, note)
+         VALUES ($1, $2, 'restore', $3, 'active', NULL, '重新入组')`,
+        [productionId, userId, fromStatus],
+      );
+    }
     await client.query("COMMIT");
   } catch (e) {
     await client.query("ROLLBACK");
@@ -3174,6 +3220,13 @@ export async function removeProductionMember(productionId: string, userId: strin
     client.release();
   }
 }
+
+// removeProductionMember 已删（#141）：成员行不可删除。
+//
+// 它此前撤权 + 删行，定位是「误加入」。但审计上删行就是抹痕迹，而「谁在什么时候被
+// 谁从剧组里拿掉」正是最该留下的一条；留着这个函数，就等于留着一把抹痕迹的刀。
+// 唯一的移出路径是 lib/member-status.ts 的 suspend → confirmMemberExit：撤销授权、
+// 保留成员行与完整轨迹。
 
 export async function setMemberRoles(
   productionId: string,
@@ -3411,7 +3464,8 @@ export async function getAdminOverviewStats(productionId: string): Promise<{
     created_at: Date; archived_at: Date | null;
   }>(
     `SELECT
-       (SELECT COUNT(*) FROM production_member pm WHERE pm.production_id = p.id) AS member_count,
+       (SELECT COUNT(*) FROM production_member pm
+         WHERE pm.production_id = p.id AND pm.status <> 'exited') AS member_count,
        (SELECT COUNT(*) FROM production_member pm WHERE pm.production_id = p.id AND pm.status = 'suspended') AS suspended_count,
        (SELECT COUNT(*) FROM production_dept d WHERE d.production_id = p.id AND d.kind = 'dept') AS dept_count,
        (SELECT COUNT(*) FROM production_dept d WHERE d.production_id = p.id AND d.kind = 'group') AS group_count,
@@ -3481,14 +3535,26 @@ export type MemberWithRoles = {
   photoUrl: string | null;
   supervisorId: string | null;
   supervisorName: string | null;
-  status: "active" | "suspended";
+  status: MemberStatus;
+  /** 非 active 时的成因：self=自助退出，admin=人事停用 */
+  statusSource: MemberStatusSource | null;
+  statusChangedAt: Date | null;
 };
 
-export async function listProductionMembersWithRoles(productionId: string): Promise<MemberWithRoles[]> {
+/**
+ * 名册。默认不含已离组的人（exited）——他们不在剧组了，但行留着，历史可查。
+ * includeExited 供组织页的「显示已离组」用。suspended 始终在册并带成因，
+ * 因为「谁停用着、等谁处置」正是名册要回答的问题。
+ */
+export async function listProductionMembersWithRoles(
+  productionId: string,
+  opts: { includeExited?: boolean } = {},
+): Promise<MemberWithRoles[]> {
   const res = await getPool().query<{
     user_id: string; name: string | null; avatar_url: string | null; is_super_admin: boolean | null;
     email: string | null; phone: string | null; roles: string[]; tags: string[]; photo_url: string | null;
     supervisor_id: string | null; supervisor_name: string | null; status: string;
+    status_source: MemberStatusSource | null; status_changed_at: Date | null;
   }>(
     `SELECT pm.user_id, up.name, up.avatar_url, fu.is_super_admin,
             COALESCE(
@@ -3500,6 +3566,7 @@ export async function listProductionMembersWithRoles(productionId: string): Prom
             COALESCE(up.phone, fu.phone) AS phone, pm.roles, pm.photo_url,
             pm.supervisor_id, sup.name AS supervisor_name,
             COALESCE(pm.status, 'active') AS status,
+            pm.status_source, pm.status_changed_at,
             COALESCE(
               ARRAY(
                 SELECT pmt.name
@@ -3514,9 +3581,9 @@ export async function listProductionMembersWithRoles(productionId: string): Prom
      LEFT JOIN user_profile up ON up.user_id = pm.user_id
      LEFT JOIN feishu_user fu ON fu.user_id = pm.user_id
      LEFT JOIN user_profile sup ON sup.user_id = pm.supervisor_id
-     WHERE pm.production_id = $1
+     WHERE pm.production_id = $1 AND ($2 OR pm.status <> 'exited')
      ORDER BY up.name NULLS LAST`,
-    [productionId],
+    [productionId, opts.includeExited ?? false],
   );
   return res.rows.map((r) => ({
     userId: r.user_id,
@@ -3530,7 +3597,9 @@ export async function listProductionMembersWithRoles(productionId: string): Prom
     photoUrl: r.photo_url,
     supervisorId: r.supervisor_id,
     supervisorName: r.supervisor_name,
-    status: (r.status === "suspended" ? "suspended" : "active") as "active" | "suspended",
+    status: r.status as MemberStatus,
+    statusSource: r.status_source,
+    statusChangedAt: r.status_changed_at,
   }));
 }
 
@@ -3658,16 +3727,9 @@ export async function setMemberSupervisor(
   );
 }
 
-export async function setMemberStatus(
-  productionId: string,
-  userId: string,
-  status: "active" | "suspended",
-): Promise<void> {
-  await getPool().query(
-    "UPDATE production_member SET status = $3 WHERE production_id = $1 AND user_id = $2",
-    [productionId, userId, status],
-  );
-}
+// setMemberStatus 已退役（#141）：裸 UPDATE 不写审计、也分不清成因（自助退出还是
+// 人事停用）。状态机的唯一写点是 lib/member-status.ts，端点见
+// app/api/production/[id]/members/[userId]/status/route.ts。
 
 /** Returns Feishu open_ids of 制作人 / 制作助理 — used by Feishu bot to add them to dept chats. */
 export async function getBossOpenIds(productionId: string): Promise<string[]> {
@@ -3675,7 +3737,7 @@ export async function getBossOpenIds(productionId: string): Promise<string[]> {
     `SELECT fu.open_id
      FROM production_member pm
      JOIN feishu_user fu ON fu.user_id = pm.user_id
-     WHERE pm.production_id = $1
+     WHERE pm.production_id = $1 AND pm.status = 'active'
        AND ('制作人' = ANY(pm.roles) OR '制作助理' = ANY(pm.roles))`,
     [productionId],
   );
@@ -3686,7 +3748,7 @@ export async function getBossUserIds(productionId: string): Promise<string[]> {
   const res = await getPool().query<{ user_id: string }>(
     `SELECT pm.user_id
      FROM production_member pm
-     WHERE pm.production_id = $1
+     WHERE pm.production_id = $1 AND pm.status = 'active'
        AND ('制作人' = ANY(pm.roles) OR '制作助理' = ANY(pm.roles))`,
     [productionId],
   );
@@ -4098,6 +4160,7 @@ export async function updateSceneMetadata(
 // ─── Cue lists ────────────────────────────────────────────────────────────────
 
 import type { CueList, CueListPermissionRow } from "./cue-list-types";
+import type { MemberStatus, MemberStatusSource } from "./member-status-shared";
 
 type CueListRow = {
   id: string; production_id: string; name: string; notes: string;
@@ -4657,6 +4720,7 @@ export async function countCueWarningsForProduction(
        AND ($2 OR EXISTS (
          SELECT 1 FROM production_member pm
          WHERE pm.production_id = cl.production_id AND pm.user_id = $3
+           AND pm.status = 'active'
        ))`,
     [productionId, isAdmin, userId]
   );
@@ -6629,6 +6693,7 @@ export async function listAnnouncementsForUser(
        AND ($1 OR EXISTS (
          SELECT 1 FROM production_member pm
          WHERE pm.production_id = pa.production_id AND pm.user_id = $2
+           AND pm.status = 'active'
        ))
      ORDER BY pa.is_pinned DESC, pa.created_at DESC
      LIMIT 50`,
@@ -6678,7 +6743,7 @@ export async function getAnnouncementReadStatus(
      LEFT JOIN user_profile up ON up.user_id = pm.user_id
      LEFT JOIN announcement_read ar
        ON ar.announcement_id = $1 AND ar.user_id = pm.user_id
-     WHERE pm.production_id = $2
+     WHERE pm.production_id = $2 AND pm.status = 'active'
      ORDER BY ar.read_at NULLS LAST, up.name NULLS LAST`,
     [announcementId, productionId],
   );
@@ -6719,7 +6784,7 @@ export async function getUnreadMemberIds(
   const res = await getPool().query<{ user_id: string }>(
     `SELECT pm.user_id
      FROM production_member pm
-     WHERE pm.production_id = $1
+     WHERE pm.production_id = $1 AND pm.status = 'active'
        AND NOT EXISTS (
          SELECT 1 FROM announcement_read ar
          WHERE ar.announcement_id = $2 AND ar.user_id = pm.user_id
@@ -6762,6 +6827,7 @@ export async function listCueWarningsForUser(
        AND ($1 OR EXISTS (
          SELECT 1 FROM production_member pm
          WHERE pm.production_id = cl.production_id AND pm.user_id = $2
+           AND pm.status = 'active'
        ))
      ORDER BY p.name, cl.abbr, c.number`,
     [isAdmin, userId],
@@ -6832,6 +6898,7 @@ export async function countCueWarningsForUser(
        AND ($1 OR EXISTS (
          SELECT 1 FROM production_member pm
          WHERE pm.production_id = cl.production_id AND pm.user_id = $2
+           AND pm.status = 'active'
        ))`,
     [isAdmin, userId],
   );

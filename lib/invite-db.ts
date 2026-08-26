@@ -240,13 +240,22 @@ export async function acceptInvite(token: string, userId: string): Promise<Accep
       }
     }
 
-    const existing = await client.query(
-      "SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2",
+    // 「已是成员」与「已占席位」是两个不同的判据（#141），别用同一个布尔：
+    //
+    //   alreadyMember  status = 'active'   —— 决定要不要跑 joinWithPresets
+    //   occupiesSeat   status <> 'exited'  —— 决定要不要过座位检查
+    //
+    // suspended 的人两者不同：他不在职（该走入组流程复活），但他**一直占着席位**
+    // （授权冻着、随时可复职，见 seatsFullForNewMember）。拿 alreadyMember 去挡座位
+    // 检查，等于把他重复计一次——明明接受后人数不变，却报「席位已满」。
+    const existing = await client.query<{ status: string }>(
+      "SELECT status FROM production_member WHERE production_id = $1 AND user_id = $2",
       [inv.production_id, userId],
     );
-    const alreadyMember = existing.rows.length > 0;
+    const alreadyMember = existing.rows[0]?.status === "active";
+    const occupiesSeat = existing.rows.length > 0 && existing.rows[0].status !== "exited";
     // 档位人数上限（#280）：与 FOR UPDATE 同事务判，并发接受不会超编。
-    if (!alreadyMember && (await seatsFullForNewMember(client, inv.production_id))) {
+    if (!occupiesSeat && (await seatsFullForNewMember(client, inv.production_id))) {
       await client.query("ROLLBACK");
       return { ok: false, reason: "seats_full" };
     }
@@ -324,13 +333,15 @@ export async function claimInvite(token: string, claimId: string, userId: string
     if (!claim) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
     if (claim.claimed_at) { await client.query("ROLLBACK"); return { ok: false, reason: "claim_taken" }; }
 
-    const existing = await client.query(
-      "SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2",
+    // alreadyMember 与 occupiesSeat 是两个判据，理由见 acceptInvite 同处注释（#141）。
+    const existing = await client.query<{ status: string }>(
+      "SELECT status FROM production_member WHERE production_id = $1 AND user_id = $2",
       [inv.production_id, userId],
     );
-    const alreadyMember = existing.rows.length > 0;
+    const alreadyMember = existing.rows[0]?.status === "active";
+    const occupiesSeat = existing.rows.length > 0 && existing.rows[0].status !== "exited";
     // 档位人数上限（#280）：与 FOR UPDATE 同事务判，并发认领不会超编。
-    if (!alreadyMember && (await seatsFullForNewMember(client, inv.production_id))) {
+    if (!occupiesSeat && (await seatsFullForNewMember(client, inv.production_id))) {
       await client.query("ROLLBACK");
       return { ok: false, reason: "seats_full" };
     }

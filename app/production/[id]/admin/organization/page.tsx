@@ -61,6 +61,7 @@ export default async function OrganizationPage({ params }: { params: Promise<{ i
     supervisorId: m.supervisorId,
     supervisorName: m.supervisorName,
     status: m.status,
+    statusSource: m.statusSource,
   }));
 
   return (

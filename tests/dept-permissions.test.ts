@@ -31,11 +31,11 @@ import {
 } from "@/lib/dept-db";
 import {
   setMemberRoles,
-  removeProductionMember,
   createProductionRole,
   setRolePermissions,
   deleteProductionRole,
 } from "@/lib/db";
+import { suspendMember, confirmMemberExit } from "@/lib/member-status";
 import type { PermissionContext } from "@/lib/permissions";
 
 // 批F 后原子键仅剩 org 域 2 枚；本文件测试 zone/recompute 机制本身（键无关），
@@ -402,7 +402,7 @@ describe("production_approval_config", () => {
 
 // ── 7. recomputeAndRevokeGrants (role_change) ─────────────────────────────────
 
-describe("removeProductionMember: revokes all grants regardless of grant_source", () => {
+describe("confirmMemberExit: revokes all grants regardless of grant_source", () => {
   beforeAll(async () => {
     const pool = getPool();
     // Re-add EXTRA_USER_1 as production member (was not removed by describe 7)
@@ -424,8 +424,11 @@ describe("removeProductionMember: revokes all grants regardless of grant_source"
 
   });
 
-  it("removes member and revokes all active grants with reason member_removed", async () => {
-    await removeProductionMember(prodId, EXTRA_USER_1);
+  it("revokes all active grants with reason member_removed —— 但成员行留着", async () => {
+    // 移出剧组的唯一路径（#141）：停用 → 确认离组。删行的 removeProductionMember
+    // 已退役，审计原因见 lib/db.ts 该处注释。
+    expect((await suspendMember(prodId, EXTRA_USER_1, TEST_USER)).ok).toBe(true);
+    expect((await confirmMemberExit(prodId, EXTRA_USER_1, TEST_USER)).ok).toBe(true);
 
     const pool = getPool();
 
@@ -440,11 +443,13 @@ describe("removeProductionMember: revokes all grants regardless of grant_source"
       expect(row.revoked_reason).toBe("member_removed");
     }
 
-    const { rows: memberRows } = await pool.query(
-      "SELECT 1 FROM production_member WHERE production_id = $1 AND user_id = $2",
+    // 审计保证：人走了，痕迹留着。这一条反过来写（期望行消失）就是这次要根除的东西。
+    const { rows: memberRows } = await pool.query<{ status: string }>(
+      "SELECT status FROM production_member WHERE production_id = $1 AND user_id = $2",
       [prodId, EXTRA_USER_1],
     );
-    expect(memberRows).toHaveLength(0);
+    expect(memberRows).toHaveLength(1);
+    expect(memberRows[0].status).toBe("exited");
   });
 });
 

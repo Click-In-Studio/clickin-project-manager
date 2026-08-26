@@ -26,9 +26,12 @@ function ProductionAvatar({ productionId, name }: { productionId: string; name: 
 }
 
 /** canCreate = 用户等级（付费维度）允许建项目。权限维度不参与——见 app/layout.tsx 注释。 */
-export default function MyProjectsClient({ canCreate = false }: { canCreate?: boolean }) {
+export default function MyProjectsClient(
+  { canCreate = false, currentUserId }: { canCreate?: boolean; currentUserId: string },
+) {
   const router = useRouter();
   const [projects, setProjects] = useState<MyProductionEntry[]>([]);
+  const [exiting, setExiting] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
@@ -41,6 +44,39 @@ export default function MyProjectsClient({ canCreate = false }: { canCreate?: bo
       .then((data: MyProductionEntry[]) => { setProjects(data); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
+
+  /**
+   * 自助退出（#141）。退出即生效——访问权当场归零，不等任何人批准。
+   * 只是「撤回我的访问权」，不是解除职务、更不抹掉已完成的工作记录与署名，
+   * 所以确认文案必须把这件事说清楚，别让它读起来像「删除我的贡献」。
+   * owner 不显示此入口：他没有上级也没人能处置他，要走得先转移 owner。
+   */
+  async function exitProject(p: MyProductionEntry) {
+    if (!confirm(
+      `退出《${p.name}》？\n\n` +
+      "你将不再接收该项目的通知，也无法访问其内容。\n" +
+      "已完成的工作记录与署名不受影响。\n\n" +
+      "退出会通知项目负责人；如需回来，请联系他们恢复。",
+    )) return;
+    setExiting(p.id);
+    try {
+      const res = await fetch(
+        `${BASE_PATH}/api/production/${p.id}/members/${currentUserId}/status`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "self_exit" }),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) { alert(data.error ?? "退出失败"); return; }
+      setProjects(prev => prev.filter(x => x.id !== p.id));
+    } catch {
+      alert("网络错误");
+    } finally {
+      setExiting(null);
+    }
+  }
 
   const allRoles = Array.from(new Set(projects.flatMap(p => p.roles))).sort();
 
@@ -219,9 +255,32 @@ export default function MyProjectsClient({ canCreate = false }: { canCreate?: bo
                 </div>
               )}
 
-              <p style={{ margin: 0, fontSize: 10, color: "var(--muted)" }}>
-                创建于 {fmtDate(p.createdAt)}
-              </p>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <p style={{ margin: 0, fontSize: 10, color: "var(--muted)" }}>
+                  创建于 {fmtDate(p.createdAt)}
+                </p>
+                {/* 卡片本身是 <button>，退出入口不能再套一层 button（HTML 不允许嵌套） */}
+                {!p.isOwner && !p.archivedAt && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-disabled={exiting === p.id}
+                    onClick={e => { e.stopPropagation(); if (exiting !== p.id) void exitProject(p); }}
+                    onKeyDown={e => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault(); e.stopPropagation();
+                      if (exiting !== p.id) void exitProject(p);
+                    }}
+                    style={{
+                      marginLeft: "auto", fontSize: 10, color: "var(--muted)",
+                      textDecoration: "underline", cursor: "pointer",
+                      opacity: exiting === p.id ? 0.5 : 1,
+                    }}
+                  >
+                    {exiting === p.id ? "退出中…" : "退出项目"}
+                  </span>
+                )}
+              </div>
             </button>
           ))}
         </div>
