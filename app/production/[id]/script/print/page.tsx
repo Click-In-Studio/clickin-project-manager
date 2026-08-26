@@ -3,6 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { hasGrant } from "@/lib/grant-check";
+import { getSceneFieldPerms } from "@/lib/scene-field-perms";
 import {
   getProductionPermissionContext,
   getActiveVersionId,
@@ -48,6 +49,12 @@ export default async function ScriptPrintPage({
     redirect(`/unauthorized?resource=node%3Ascript%2F*%2Fblocks%40view&id=${id}`);
   }
 
+  // 「紧凑排版」开关的门：与编辑器同源（scene 的 meta/name@edit，不是粗门
+  // baseCanEditMetadata——用粗门会让只有别的字段权限的人也能改排版）。
+  const sceneFieldPerms = await getSceneFieldPerms(
+    session.userId, id, access.permCtx.isAdmin || access.permCtx.isOwner,
+  );
+
   // 打印水印文案由服务端解析：客户端 fetch /api/me 有竞态，点得快就会出一份
   // 无水印的片子，而水印是安全特性，不能取决于一次请求赢没赢。
   const email = await getUserPrimaryEmail(session.userId);
@@ -73,6 +80,7 @@ export default async function ScriptPrintPage({
       scenes={scenes}
       config={config}
       watermarkText={watermarkText}
+      canEditTextLayout={sceneFieldPerms.name}
     />
   );
 }

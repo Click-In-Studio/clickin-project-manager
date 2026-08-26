@@ -8,8 +8,9 @@
  * 这不是可以省掉的一步，服务端算不出与预览一致的分页。
  */
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
+import { BASE_PATH } from "@/lib/base-path";
 import type { Block, Character, Scene, ScriptConfig } from "@/lib/script-types";
 import PrintPreview from "@/components/print/ScriptPrint";
 
@@ -20,6 +21,7 @@ export default function ScriptPrintRoute({
   scenes,
   config,
   watermarkText,
+  canEditTextLayout,
 }: {
   productionId: string;
   blocks: Block[];
@@ -27,10 +29,25 @@ export default function ScriptPrintRoute({
   scenes: Scene[];
   config: ScriptConfig;
   watermarkText: string | null;
+  canEditTextLayout: boolean;
 }) {
   const router = useRouter();
-  // 排版模式在打印页只作用于本次预览，不回写演出配置——改配置是编辑器的事。
   const [textLayoutMode, setTextLayoutMode] = useState(config.textLayoutMode);
+
+  // 紧凑排版是**演出配置**不是本次预览的临时态：编辑器里改它会落库，
+  // 打印页改它也必须落库，否则同一个开关在两处语义不同。
+  // 乐观切换 + 失败回滚，与编辑器 saveScriptConfig 同一套。
+  const changeTextLayoutMode = useCallback((mode: typeof textLayoutMode) => {
+    const previous = textLayoutMode;
+    setTextLayoutMode(mode);
+    fetch(`${BASE_PATH}/api/script/${productionId}/config`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...config, textLayoutMode: mode }),
+    })
+      .then((r) => { if (!r.ok) setTextLayoutMode(previous); })
+      .catch(() => setTextLayoutMode(previous));
+  }, [config, productionId, textLayoutMode]);
 
   return (
     <PrintPreview
@@ -43,8 +60,8 @@ export default function ScriptPrintRoute({
       stageDelimClose={config.stageDelimClose}
       textLayoutMode={textLayoutMode}
       watermarkText={watermarkText}
-      canEditTextLayout={false}
-      onTextLayoutModeChange={setTextLayoutMode}
+      canEditTextLayout={canEditTextLayout}
+      onTextLayoutModeChange={changeTextLayoutMode}
       onClose={() => router.push(`/production/${productionId}/script`)}
     />
   );
