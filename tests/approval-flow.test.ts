@@ -451,7 +451,21 @@ describe("submitAccessRequest", () => {
     const notifs = await notifForRequest(U_SUPERVISOR, req.id);
     expect(notifs.length).toBe(1);
     expect(notifs[0].body).toContain("雾港清晨");
-    // 反证：解析不到名字时会退化成「所有章节/段落」，那是没修好的样子
+    // 反证：名字没真取到就会退化成「某个章节/段落」，那是没修好的样子
+    expect(notifs[0].body).not.toContain("某个章节/段落");
+
+    await cancelRows([req.id]);
+  });
+
+  it("#159: 具体资源解析不出名字时说「某个」而非「所有」，不把申请范围说大", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "scene",
+      resourceId: `${prodId}-no-such-scene`,
+      permissionLevel: "view",
+    });
+
+    const notifs = await notifForRequest(U_SUPERVISOR, req.id);
+    expect(notifs[0].body).toContain("某个章节/段落");
     expect(notifs[0].body).not.toContain("所有章节/段落");
 
     await cancelRows([req.id]);

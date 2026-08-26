@@ -7143,9 +7143,11 @@ async function describeResource(
     }
   }
 
+  // 名字解析不出来 ≠ 申请的是全部资源：具体 id 解析失败（资源已删、或跨演出
+  // 不可见）时说「所有X」是把申请范围说大了，审批人据此判断就是错的。
   const resourceDesc = resourceName
     ? `「${resourceName}」${typeLabel}`
-    : `所有${typeLabel}`;
+    : resourceId !== "*" ? `某个${typeLabel}` : `所有${typeLabel}`;
   return `${resourceDesc}的${levelLabel}权限`;
 }
 
