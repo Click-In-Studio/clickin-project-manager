@@ -127,7 +127,14 @@ export async function requireProductionFeature(
 
 /**
  * 座位判定（事务内用，与 invite 的 FOR UPDATE 同事务保证并发安全）：
- * 再进一人是否会超出档位人数上限。计入所有未退出成员（含 owner）。
+ * 再进一人是否会超出档位人数上限。计入所有未离组成员（含 owner）。
+ *
+ * **suspended 占席位**（#141）。停用/自助退出的人授权还冻着、随时可原样复职，
+ * 席位就是为这份可逆性预留的资源。不占的话会出现一个无解的冲突：满员时停用一人、
+ * 补进新人，原来那人要复职就超编——而复职是「恢复原状」，拒绝他等于把踢人的决定
+ * 强加给 owner。反过来，「停用不省钱」也堵死了淡季全员停用、旺季复职的套利。
+ *
+ * 释放席位的动作是「确认离组」：那才是终态，授权真撤，回来要走邀请（重新过本判定）。
  */
 export async function seatsFullForNewMember(
   client: PoolClient,

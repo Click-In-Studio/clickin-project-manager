@@ -215,6 +215,37 @@ describe("owner 保护", () => {
   });
 });
 
+describe("席位", () => {
+  it("suspended 占席位，exited 不占", async () => {
+    const { seatsFullForNewMember, PRODUCTION_TIERS } = await import("@/lib/plan");
+    const limit = PRODUCTION_TIERS.free.seatLimit;
+    const owner3 = (await upsertFeishuUser(`test-open-${shortId()}`, `席位owner${shortId()}`, null, false)).userId;
+    const { prodId: prod3 } = await makeProduction(owner3);
+    const client = await getPool().connect();
+    try {
+      // 免费档席位打满：owner 已占一席，再补到 limit
+      const extras: string[] = [];
+      for (let i = 0; i < limit - 1; i++) {
+        const u = (await upsertFeishuUser(`test-open-${shortId()}`, `席位${i}${shortId()}`, null, false)).userId;
+        extras.push(u);
+        await addProductionMember(prod3, u);
+      }
+      expect(await seatsFullForNewMember(client, prod3)).toBe(true);
+
+      // 停用不释放席位——授权还冻着、随时可复职，位子得留着
+      expect((await suspendMember(prod3, extras[0], owner3)).ok).toBe(true);
+      expect(await seatsFullForNewMember(client, prod3)).toBe(true);
+
+      // 确认离组才释放
+      expect((await confirmMemberExit(prod3, extras[0], owner3)).ok).toBe(true);
+      expect(await seatsFullForNewMember(client, prod3)).toBe(false);
+    } finally {
+      client.release();
+      await cleanupProduction(prod3).catch(() => {});
+    }
+  });
+});
+
 describe("账号合并", () => {
   it("状态与轨迹跟着身份走，合并不会把已离组的人悄悄复活", async () => {
     // 合并要求两个账号无共同项目，故另起一个演出
