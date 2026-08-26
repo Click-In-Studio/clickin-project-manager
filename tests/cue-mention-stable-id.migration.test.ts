@@ -47,6 +47,13 @@ describe("schema verification", () => {
     expect(rows[0].is_nullable).toBe("NO");
   });
 
+  it("cue(cue_id) is indexed — 解析侧已从主键查改成 cue_id 查", async () => {
+    const { rows } = await getPool().query(
+      `SELECT 1 FROM pg_indexes WHERE tablename = 'cue' AND indexname = 'cue_stable_id_idx'`,
+    );
+    expect(rows).toHaveLength(1);
+  });
+
   it("cue_mention_text_backup exists with the generic four-column shape", async () => {
     const { rows } = await getPool().query<{ column_name: string; is_nullable: string }>(`
       SELECT column_name, is_nullable FROM information_schema.columns
@@ -92,6 +99,44 @@ describe("integrity verification", () => {
   );
 });
 
+// ── 2b. Idempotency ───────────────────────────────────────────────────────────
+// 迁移文件自称可重跑（"remap 为空，三步全是 no-op"）。CD 靠 db-applied.txt 去重，
+// 正常不会重跑——但手工补跑、失败重试都可能跑第二遍，这条把"自称"变成"钉住"。
+// 安全性：vitest 配了 fileParallelism: false，重跑期间没有别的文件在写这张库；
+// 且若重跑**不是** no-op，本测试就是唯一会发现它的地方。
+
+/** 把迁移会碰的全部状态压成一个指纹 */
+async function migrationFingerprint(): Promise<string> {
+  const { rows } = await getPool().query<{ md5: string }>(`
+    SELECT md5(string_agg(x, '|' ORDER BY x)) AS md5 FROM (
+      SELECT 'cue:'  || id || ':' || cue_id                                   AS x FROM cue
+      UNION ALL
+      SELECT 'edge:' || wiki_id::text || ':' || entity_id || ':' || origin     FROM wiki_entity_link WHERE entity_type = 'cue'
+      UNION ALL
+      SELECT 'wiki:' || id::text || ':' || md5(body)                           FROM wiki
+      UNION ALL
+      SELECT 'cmt:'  || id       || ':' || md5(body)                           FROM comment
+      UNION ALL
+      SELECT 'ntf:'  || id       || ':' || md5(body)                           FROM user_notification
+      UNION ALL
+      SELECT 'mem:'  || id::text || ':' || md5(text)                           FROM agent_memory_chunk
+      UNION ALL
+      SELECT 'bak:'  || table_name || ':' || row_id || ':' || column_name      FROM cue_mention_text_backup
+    ) s
+  `);
+  return rows[0].md5 ?? "";
+}
+
+describe("idempotency verification", () => {
+  it("re-running the migration changes nothing", async () => {
+    const sql = readFileSync("db/migrate-cue-mention-stable-id.sql", "utf8");
+    const before = await migrationFingerprint();
+    await getPool().query(sql);
+    const after = await migrationFingerprint();
+    expect(after).toBe(before);
+  });
+});
+
 // ── 3. Invariance verification ────────────────────────────────────────────────
 
 describe("invariance verification", () => {
@@ -110,15 +155,13 @@ describe("invariance verification", () => {
     );
     const body = rows[0].body;
 
-    // v2 形态、带 # 锚、带 ?as= 参数三处都平移
+    // 裸 `)`、带 `#` 锚、带 `?as=` 参数三种尾随分隔符都平移
     expect(body).toContain(`(/__cm__/cue/${s.logicalA})`);
     expect(body).toContain(`(/__cm__/cue/${s.logicalA}#note)`);
     expect(body).toContain(`(/__cm__/cue/${s.logicalA}?as=x)`);
-    // v1 存量形态也收
-    expect(body).toContain(`(/__cm__cue:${s.logicalA}?v=v1)`);
-    // 旧行 id 一个不留
+    // 旧行 id 一个不留（revA2 与 revAshort 是同一逻辑 cue 的两条修订）
     expect(body).not.toContain(`/__cm__/cue/${s.revA2}`);
-    expect(body).not.toContain(`/__cm__cue:${s.revAshort}`);
+    expect(body).not.toContain(`/__cm__/cue/${s.revAshort})`);
   });
 
   it.skipIf(!snapshot)("prefix trap: a longer row id is not truncated by a shorter remap key", async () => {
@@ -151,8 +194,14 @@ describe("invariance verification", () => {
       pool.query<{ body: string }>(`SELECT body FROM user_notification WHERE id = $1`, [s.notificationId]),
       pool.query<{ text: string }>(`SELECT text FROM agent_memory_chunk WHERE id = $1::uuid`, [s.memoryChunkId]),
     ]);
-    for (const text of [c.rows[0].body, n.rows[0].body, m.rows[0].text]) {
+    // comment 是 v1 形态证人（见工厂注释）：迁移只换 id、不换文法，所以它仍是 v1
+    expect(c.rows[0].body).toContain(`(/__cm__cue:${s.logicalA}?v=v1)`);
+    // 另两列是 v2 形态
+    for (const text of [n.rows[0].body, m.rows[0].text]) {
       expect(text).toContain(`/__cm__/cue/${s.logicalA}`);
+    }
+    // 三列都不许留旧行 id
+    for (const text of [c.rows[0].body, n.rows[0].body, m.rows[0].text]) {
       expect(text).not.toContain(s.revA2);
     }
   });

@@ -386,6 +386,10 @@ CREATE TABLE IF NOT EXISTS cue (
 
 CREATE INDEX IF NOT EXISTS cue_list_idx ON cue(cue_list_id);
 
+-- 引用解析按稳定 id 查（mention-resolve / block-search 都是 cue_id 上的
+-- = ANY(...) + DISTINCT ON），没有它就是每次解析全表扫。
+CREATE INDEX IF NOT EXISTS cue_stable_id_idx ON cue(cue_id);
+
 -- cue_version links a cue revision to a script version for version-aware cue sheets.
 -- cue_id here is the logical cue identity (denormalized, no FK).
 CREATE TABLE IF NOT EXISTS cue_version (

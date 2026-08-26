@@ -100,11 +100,16 @@ export async function createCueMentionStableIdPreMigrationData(
     );
   }
 
-  // 正文：v2 形态 + v1 存量形态 + 各种尾随分隔符 + 不该动的干扰项
+  // 正文：v2 形态 + 各种尾随分隔符 + 不该动的干扰项。
+  //
+  // ⚠️ wiki.body 里**只准放 v2 形态**：wiki-dialect-v2.migration.test.ts 有一条
+  // 全库不变量「wiki.body 不再残留任何 v1 形态」，而本迁移只换 id 不换文法
+  // （`/__cm__cue:old` → `/__cm__cue:new` 仍是 v1），种进来就是永久 straggler。
+  // v1 分支的证人放在 comment.body（无此不变量）——见下方。
   const body = [
     `开场 [#SQ.1](/__cm__/cue/${revA2}) 提前两秒。`,
     `追光 [#SQ.2](/__cm__/cue/${revBprefixed}) 同步。`,
-    `旧形态 [#SQ.1](/__cm__cue:${revAshort}?v=v1) 也要收。`,
+    `另一条修订 [#SQ.1](/__cm__/cue/${revAshort}) 也要收。`,
     `带锚 [#SQ.1](/__cm__/cue/${revA2}#note) 与参数 [#SQ.1](/__cm__/cue/${revA2}?as=x)。`,
     `不该动：${revAshort} 裸文本、/__cm__/scene/${revA2} 别的 kind。`,
   ].join("\n");
@@ -134,12 +139,15 @@ export async function createCueMentionStableIdPreMigrationData(
     );
   }
 
-  // wiki.body 之外的三条正文列（与 migrate-wiki-dialect-v2 盘清的列集一致）
+  // wiki.body 之外的三条正文列（与 migrate-wiki-dialect-v2 盘清的列集一致）。
+  // comment.body 兼作 **v1 形态证人**：dialect v2 之后正常库里不该再有 v1，本迁移
+  // 的 v1 分支是防「dialect v2 被回滚」的保险。comment 没有 canonical-v2 不变量，
+  // 是唯一能安全长期承载这个证人的地方。
   const commentId = `cm${tag}`;
   await pool.query(
     `INSERT INTO comment (id, production_id, context_type, context_id, author_name, body, user_id)
-     VALUES ($1, $2, 'cue', $3, '工厂', $4, $5)`,
-    [commentId, prodId, revA2, `见 [#SQ.1](/__cm__/cue/${revA2}) 的处理`, testUserId],
+     VALUES ($1, $2, 'cue', $3, $4, $5, $6)`,
+    [commentId, prodId, revA2, "工厂", `见 [#SQ.1](/__cm__cue:${revA2}?v=v1) 的处理`, testUserId],
   );
 
   const notificationId = `n${tag}`;

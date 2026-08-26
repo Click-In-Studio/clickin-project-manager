@@ -10,6 +10,7 @@ import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { POST as mentionResolvePOST } from "@/app/api/production/[id]/mention-resolve/route";
+import { GET as blockSearchGET } from "@/app/api/production/[id]/script/block-search/route";
 import type { ContentMentionAttrs } from "@/lib/mention-types";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 
@@ -116,6 +117,61 @@ describe("cue mention resolve", () => {
     const revision3 = await cowRevision({ number: "3", name: "暗场" });
     const { label } = await resolveOne(revision3);
     expect(label).toBe("#[已删除]");
+  });
+
+  it("falls back to a live revision when none is attached to the active version", async () => {
+    // 版本已退役、线上一律走 head，所以"该逻辑 cue 在本版本没有修订行"是可能的。
+    // 这时回退到任一存活修订，而不是报"已删除"——报已删除正是本 issue 要消灭的幻影。
+    const orphanId = `tcue${shortId()}`;
+    await getPool().query(
+      `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
+       VALUES ($1, $1, $2, '7', '孤儿修订', 'gap', 'gap')`,
+      [orphanId, cueListId],
+    );
+    // 刻意不写 cue_version：没有任何修订挂在 versionId 上
+    const { label, url } = await resolveOne(orphanId);
+    expect(label).toBe(`${abbr}.7: 孤儿修订`);
+    expect(url).toContain(`cueId=${orphanId}`);
+  });
+
+  it("block-search hands the editor the stable cue_id, not the revision row id", async () => {
+    // 这条钉的是插入侧：编辑器拿到什么，就会把什么写进正文。CoW 之后版本指向的是
+    // **新修订行**，若这里吐 c.id，用户插进正文的引用下一次改 cue 就失效。
+    //
+    // 注：路由里的 DISTINCT ON 是防御性的——正常库里 production.active_version_id
+    // 恒有值，版本过滤后每条逻辑 cue 只剩一条修订，撞不到重复。它防的是无版本
+    // 过滤那条分支。
+    const listId = `t${shortId()}`;
+    const listAbbr = `LX${shortId().slice(0, 3).toUpperCase()}`;
+    await getPool().query(
+      "INSERT INTO cue_list (id, production_id, name, abbr, notes, created_by) VALUES ($1, $2, 'LX表', $3, '', $4)",
+      [listId, prodId, listAbbr, owner],
+    );
+
+    const logical = `tcue${shortId()}`;
+    const revision = `tcue${shortId()}`;
+    await getPool().query(
+      `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
+       VALUES ($1, $1, $3, '1', '初版', 'gap', 'gap'), ($2, $1, $3, '1', '改过', 'gap', 'gap')`,
+      [logical, revision, listId],
+    );
+    // 真实 CoW 的形态：版本挂在新修订行上，初版行不在版本里
+    await getPool().query(
+      "INSERT INTO cue_version (revision_id, version_id, cue_id) VALUES ($1, $2, $3)",
+      [revision, versionId, logical],
+    );
+
+    const req = new NextRequest(
+      `http://localhost/api/production/x/script/block-search?q=${encodeURIComponent(`${listAbbr}.`)}`,
+      { headers: { cookie: `${SESSION_COOKIE}=${createSession({ userId: owner, name: "测试", avatarUrl: null, isAdmin: false })}` } },
+    );
+    const res = await blockSearchGET(req, ctx());
+    expect(res.status).toBe(200);
+    const cueResults = ((await res.json()).results as { kind: string; id: string }[])
+      .filter(r => r.kind === "cue");
+
+    expect(cueResults.map(r => r.id)).toEqual([logical]);
+    expect(cueResults[0].id).not.toBe(revision);
   });
 
   it("does not resolve a cue belonging to another production", async () => {

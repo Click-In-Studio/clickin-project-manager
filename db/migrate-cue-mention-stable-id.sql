@@ -40,13 +40,15 @@ CREATE TABLE IF NOT EXISTS cue_mention_text_backup (
   PRIMARY KEY (table_name, row_id, column_name)
 );
 
--- ── 1. cue_id 回填 + NOT NULL ────────────────────────────────────────────────
+-- ── 1. cue_id 回填 ───────────────────────────────────────────────────────────
 -- createCue 一直是 VALUES ($1,$1,...)（cue_id = id），cowCue 一直是
 -- COALESCE(cur.cue_id, cur.id)——所以 NULL 只可能来自 cue_id 列加上之前的存量行，
 -- 它们的逻辑身份就是自己的行 id。
+--
+-- 收 NOT NULL 与建索引都挪到最后（第 5 步）：ALTER 要 ACCESS EXCLUSIVE 锁，而锁
+-- 一直持到 COMMIT。放在开头等于整场正文扫描期间 cue 表对外全锁；放在收尾则只在
+-- 最后一瞬持有。
 UPDATE cue SET cue_id = id WHERE cue_id IS NULL;
-
-ALTER TABLE cue ALTER COLUMN cue_id SET NOT NULL;
 
 -- ── 2. 正文平移 ──────────────────────────────────────────────────────────────
 -- 只有被 CoW 过的 cue 需要平移（cue_id <> id）；cue_id = id 的行替换是恒等式。
@@ -69,6 +71,7 @@ DECLARE
   target       RECORD;
   v2_pattern   TEXT;
   v1_pattern   TEXT;
+  has_any_cue  BOOLEAN;
 BEGIN
   FOR target IN
     SELECT * FROM (VALUES
@@ -84,6 +87,16 @@ BEGIN
       WHERE table_schema = 'public'
         AND table_name = target.table_name AND column_name = target.col
     );
+
+    -- 先问一次"这张表里到底有没有 cue 引用"。内层循环是「每条 remap × 每张表」的
+    -- 全表正则扫描（无索引可用），而绝大多数库里 comment / agent_memory_chunk 一条
+    -- cue 引用都没有——这一问把那些表从 N 次扫描压成 1 次。
+    -- `/__cm__/?cue[:/]` 同时认 v2 的 `/__cm__/cue/` 与 v1 的 `/__cm__cue:`。
+    EXECUTE format(
+      'SELECT EXISTS (SELECT 1 FROM %I WHERE %I ~ %L)',
+      target.table_name, target.col, '/__cm__/?cue[:/]'
+    ) INTO has_any_cue;
+    CONTINUE WHEN NOT has_any_cue;
 
     FOR r IN SELECT id AS old_id, cue_id AS new_id FROM cue WHERE cue_id <> id
     LOOP
@@ -142,6 +155,17 @@ INSERT INTO wiki_entity_link
   (wiki_id, production_id, entity_type, entity_id, origin, created_by, created_at)
 SELECT wiki_id, production_id, 'cue', entity_id, origin, created_by, created_at
 FROM cue_edge_remap;
+
+-- ── 5. 收尾：NOT NULL + 索引 ─────────────────────────────────────────────────
+-- 排在最后：ALTER 的 ACCESS EXCLUSIVE 锁一直持到 COMMIT，放在开头等于整场正文
+-- 扫描期间 cue 表对外全锁。
+--
+-- 索引是本次换锚的必需品，不是优化：解析侧从 `WHERE c.id = ANY(...)`（走主键）
+-- 改成了 `WHERE c.cue_id = ANY(...)` + `DISTINCT ON (c.cue_id)`，cue_id 上没有
+-- 索引就是每次 mention 解析全表扫。
+ALTER TABLE cue ALTER COLUMN cue_id SET NOT NULL;
+
+CREATE INDEX IF NOT EXISTS cue_stable_id_idx ON cue(cue_id);
 
 COMMIT;
 
