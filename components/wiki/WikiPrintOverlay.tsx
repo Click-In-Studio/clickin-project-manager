@@ -27,6 +27,9 @@ export default function WikiPrintOverlay({
   if (typeof document === "undefined") return null;
   return createPortal(
     <div className="wiki-print-root fixed inset-0 z-[80] overflow-y-auto bg-white">
+      {/* wiki 文档没有版式概念，固定 A4。globals.css 不再兜底 @page size——
+          纸张尺寸由各打印页自己声明（剧本按演出版式算，见 lib/script-page.ts）。 */}
+      <style dangerouslySetInnerHTML={{ __html: "@page { size: A4 portrait; margin: 0; }" }} />
       <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-200 bg-white/95 px-6 py-3 print:hidden">
         <p className="text-sm text-zinc-500">
           打印预览 — 用浏览器「打印」保存为 PDF

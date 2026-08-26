@@ -16,7 +16,7 @@ import { buildWatermarkTile } from "@/components/watermark-tile";
 import { BASE_PATH } from "@/lib/base-path";
 import ChevronIcon from "@/components/ChevronIcon";
 import type { Block, Character, Scene, ScriptTextLayoutMode, PageLayout } from "@/lib/script-types";
-import { PAGE_CONFIGS } from "@/lib/script-page";
+import { PAGE_CONFIGS, printPageCss } from "@/lib/script-page";
 import type { PageConfig } from "@/lib/script-page";
 import ModeSwitch from "@/components/ModeSwitch";
 import { mdToHtml } from "@/lib/script-md";
@@ -1411,6 +1411,9 @@ export default function PrintPreview({
   // 配合 globals.css 的 body:has(.script-print-root) 在 @media print 下隐藏兄弟子树。
   const root = (
     <div className={`script-print-root ${standalone ? "h-full" : "fixed inset-0 z-50"} flex flex-col bg-zinc-300 print:static print:block print:bg-white`}>
+      {/* 纸张尺寸随版式注入：@page size 只能写在 CSS 里，而版式是每个演出自配的。
+          原先 globals.css 硬编码 A4，letter / 双排版式打出来对不上纸。 */}
+      <style dangerouslySetInnerHTML={{ __html: printPageCss(cfg) }} />
       {/* Preview toolbar */}
       <div ref={printToolbarRef} className="flex shrink-0 flex-nowrap items-center overflow-visible border-b border-zinc-200 bg-white px-2 py-3 sm:px-6 print:hidden">
         <span className="shrink-0 whitespace-nowrap text-sm font-semibold text-zinc-700">打印预览</span>

@@ -38,6 +38,22 @@ export const PAGE_CONFIGS: Record<PageLayout, PageConfig> = {
   "tablet-2col": { width: 816, height: 1056, marginX: 75, marginTop: 90, marginBottom: 90, headerHeight: 28, footerHeight: 28, cols: 2 },
 };
 
+/**
+ * 打印页要注入的 `@page` 规则。
+ *
+ * 纸张尺寸必须由页盒尺寸算出来，不能写死：`@page size` 只能在 CSS 里声明，
+ * 而版式是每个演出自配的（四种，将来 #338 会变成可编辑数据）。原先 globals.css
+ * 里硬编码 `size: A4 portrait`，letter / 双排版式打出来纸张对不上，只能靠用户
+ * 在打印对话框里手动改。
+ *
+ * 注意用 cfg.width 而非 cfg.width × cfg.cols：`cols` 目前是死字段，
+ * 没有任何地方消费它，双排版式实际渲染的仍是单栏页盒。等真做了双栏排版
+ * （#338/#343）再连这里一起改。
+ */
+export function printPageCss(cfg: PageConfig): string {
+  return `@page { size: ${cfg.width}px ${cfg.height}px; margin: 0; }`;
+}
+
 // ── Layout metrics derived from PageConfig ────────────────────────────────────
 
 const LINE_HEIGHT    = 28;  // leading-7 (1.75rem)
