@@ -10461,7 +10461,7 @@ export default function ScriptEditor({
                 {/* 打印页现在是独立路由（#335）。新标签打开：印本子的人通常一边继续
                     改本子一边比对，同标签跳走会把编辑态一起带走。 */}
                 <Link
-                  href={`/print/script/${productionId}`}
+                  href={`/production/${productionId}/script/print`}
                   target="_blank"
                   rel="noopener"
                   onClick={() => setOpenMenu(null)}

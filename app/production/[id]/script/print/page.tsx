@@ -14,13 +14,18 @@ import ScriptPrintRoute from "@/components/print/ScriptPrintRoute";
 export const metadata: Metadata = { title: "打印剧本" };
 
 /**
- * 剧本打印路由（#335）。
+ * 剧本打印路由（#335）：/production/[id]/script/print
  *
  * 与编辑器内的打印预览是同一套渲染，但这里有 URL——这是把打印从
  * ScriptEditor 内部 overlay 里搬出来的意义所在：可分享、可直达、
  * 将来可被无头浏览器打开。
  *
+ * 挂在 script 之下而不是另起顶层前缀：打印的是「某个演出的剧本」，
+ * 而且 AppShell / proxy 都按 /production/<id>/ 解析演出上下文，
+ * 另起前缀会让所有按路径判定上下文的东西失效。
+ *
  * 权限门与 /production/[id]/script 完全一致：能读剧本才能打印剧本。
+ * 无 app shell 由 AppShell 对末段 /print 的旁路保证。
  */
 export default async function ScriptPrintPage({
   params,
