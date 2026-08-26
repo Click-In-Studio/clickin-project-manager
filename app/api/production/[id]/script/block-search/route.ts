@@ -569,18 +569,24 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const cueNumMatch = mentionQuery.match(/^([A-Z][A-Z0-9]*)\.(.*)$/);
   if (cueNumMatch) {
     const [, abbr, numPrefix] = cueNumMatch;
-    const cueRes = await pool.query<{ id: string; number: string; name: string; abbr: string }>(
-      `SELECT c.id, c.number, c.name, cl.abbr
-       FROM cue c JOIN cue_list cl ON cl.id = c.cue_list_id
-       WHERE cl.production_id = $1 AND cl.abbr = $2 AND ($3 = '' OR c.number ILIKE $4)
-       ${resolvedVersionId ? "AND EXISTS (SELECT 1 FROM cue_version cv WHERE cv.revision_id = c.id AND cv.version_id = $5)" : ""}
-       ORDER BY length(c.number), c.number LIMIT 8`,
+    // 交给编辑器的是**稳定 cue_id**（#302），不是行 id——行 id 会被 CoW 换掉，
+    // 插进正文就成了改一次即失效的引用。无版本过滤时同一逻辑 cue 可能有多条修订，
+    // DISTINCT ON 先收敛到一条，否则重复行会在 dedup 之前就把 LIMIT 8 吃光。
+    const cueRes = await pool.query<{ cue_id: string; number: string; name: string; abbr: string }>(
+      `SELECT d.cue_id, d.number, d.name, d.abbr FROM (
+         SELECT DISTINCT ON (c.cue_id) c.cue_id, c.number, c.name, cl.abbr
+         FROM cue c JOIN cue_list cl ON cl.id = c.cue_list_id
+         WHERE cl.production_id = $1 AND cl.abbr = $2 AND ($3 = '' OR c.number ILIKE $4)
+         ${resolvedVersionId ? "AND EXISTS (SELECT 1 FROM cue_version cv WHERE cv.revision_id = c.id AND cv.version_id = $5)" : ""}
+         ORDER BY c.cue_id, c.id DESC
+       ) d
+       ORDER BY length(d.number), d.number LIMIT 8`,
       resolvedVersionId
         ? [productionId, abbr, numPrefix, `${numPrefix}%`, resolvedVersionId]
         : [productionId, abbr, numPrefix, `${numPrefix}%`]
     );
     for (const r of cueRes.rows) {
-      results.push(withVer({ kind: "cue", id: r.id, displayLabel: `#${r.abbr}.${r.number}`, description: r.name || undefined }));
+      results.push(withVer({ kind: "cue", id: r.cue_id, displayLabel: `#${r.abbr}.${r.number}`, description: r.name || undefined }));
     }
     return Response.json({ results: dedup(results) });
   }

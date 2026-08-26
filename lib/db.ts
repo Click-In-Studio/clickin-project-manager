@@ -4504,7 +4504,7 @@ export async function setCueListPermission(
 // After migration: start_block_id/end_block_id are renamed to start_snapshot_id/end_snapshot_id.
 // The row also has start_block_id/end_block_id as computed aliases from the JOIN with script table.
 type CueRow = {
-  id: string; cue_list_id: string; number: string; name: string; content: string;
+  id: string; cue_id: string; cue_list_id: string; number: string; name: string; content: string;
   start_kind: string; start_snapshot_id: string | null; start_offset: number | null;
   end_kind: string;   end_snapshot_id: string | null;   end_offset: number | null;
   // Logical block IDs resolved by joining script table (may be null if snapshot deleted)
@@ -4520,7 +4520,7 @@ function rowToCue(r: CueRow): Cue {
   const end: CueAnchor = r.end_kind === "gap"
     ? { kind: "gap", afterBlockId: r.end_block_id ?? null }
     : { kind: "block", blockId: r.end_block_id ?? r.end_snapshot_id ?? '', offset: r.end_offset! };
-  return { id: r.id, cueListId: r.cue_list_id, number: r.number, name: r.name, content: r.content, start, end, warning: r.warning };
+  return { id: r.id, cueId: r.cue_id, cueListId: r.cue_list_id, number: r.number, name: r.name, content: r.content, start, end, warning: r.warning };
 }
 
 // Resolve a CueAnchor to the snapshot_id stored in the DB.
@@ -4548,7 +4548,7 @@ async function anchorToDb(a: CueAnchor, versionId?: string): Promise<{ kind: str
 }
 
 const CUE_SELECT = `
-  SELECT c.id, c.cue_list_id, c.number, c.name, c.content,
+  SELECT c.id, c.cue_id, c.cue_list_id, c.number, c.name, c.content,
          c.start_kind, c.start_snapshot_id, c.start_offset,
          c.end_kind,   c.end_snapshot_id,   c.end_offset, c.warning,
          s_start.block_id AS start_block_id,
@@ -4567,12 +4567,15 @@ export async function getCue(id: string, cueListId: string): Promise<Cue | null>
 }
 
 /** cue → 所属 cue_list（production 归属校验内含）。cue 级权限门都长在 cue_list 上，
- *  拿到宿主 list id 才能过门（wiki-refs 等只有 cueId 的入口用）。 */
+ *  拿到宿主 list id 才能过门（wiki-refs 等只有 cueId 的入口用）。
+ *  入参是**稳定 cue_id**（#302 换锚后引用侧一律持它）；一个逻辑 cue 的多条修订
+ *  同属一张 list（cowCue 逐字继承 cue_list_id），故 LIMIT 1 取哪条都一样。 */
 export async function getCueListIdForCue(cueId: string, productionId: string): Promise<string | null> {
   const res = await getPool().query<{ cue_list_id: string }>(
     `SELECT c.cue_list_id FROM cue c
      JOIN cue_list cl ON cl.id = c.cue_list_id
-     WHERE c.id = $1 AND cl.production_id = $2`,
+     WHERE c.cue_id = $1 AND cl.production_id = $2
+     LIMIT 1`,
     [cueId, productionId],
   );
   return res.rows[0]?.cue_list_id ?? null;

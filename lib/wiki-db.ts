@@ -51,7 +51,9 @@ function rowToWiki(r: WikiRow): WikiDoc {
 // ─── mention 边提取（两种序列化形态：纯 token 与 markdown 私有 href）───────────
 
 // 落边的 kind 全集：ContentMentionKind 去掉 page（页码不是实体）。
-// 锚定语义逐字继承 mention 体系（scene/block 稳定 id、cue 行 id——#302 换锚时同批切）。
+// 锚定语义逐字继承 mention 体系：全 kind 一律锚**稳定 id**，不锚修订行 id。
+// cue 曾是唯一的例外（锚 cue.id 行 id），#302 已随 migrate-cue-mention-stable-id
+// 与 mention 体系同批切到 cue.cue_id——边表与正文不允许锚不同的 id。
 const EDGE_KINDS = new Set(["wiki", "scene", "rehearsal", "block", "cue", "asset"]);
 
 export type MentionEdge = { entityType: string; entityId: string };

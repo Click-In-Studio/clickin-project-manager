@@ -375,7 +375,9 @@ CREATE TABLE IF NOT EXISTS cue (
   end_kind          TEXT NOT NULL CHECK (end_kind IN ('block', 'gap')),
   end_offset        INTEGER,          -- NULL when end_kind = 'gap'
   warning           BOOLEAN NOT NULL DEFAULT false,
-  cue_id            TEXT,             -- logical cue identity (no FK)
+  -- 稳定逻辑身份（no FK）。用户可见的一切 cue 引用锚它，不锚行 id——mention 正文、
+  -- wiki_entity_link 的 cue 边、/cues?cueId= 深链（#302，migrate-cue-mention-stable-id）。
+  cue_id            TEXT NOT NULL,
   start_snapshot_id TEXT,             -- script.id snapshot when anchor was set (no FK)
   end_snapshot_id   TEXT             -- script.id snapshot when anchor was set (no FK)
   -- no UNIQUE (cue_list_id, number): cue is a revision table; the same logical
@@ -766,6 +768,18 @@ CREATE TABLE IF NOT EXISTS wiki_body_backup_dialect_v2 (
 -- 方言 v1→v2 迁移里 wiki.body 之外那几列的正文备份（agent_memory_chunk.text /
 -- comment.body / user_notification.body）。通用形状，行数极少。
 CREATE TABLE IF NOT EXISTS dialect_v2_text_backup (
+  table_name  TEXT        NOT NULL,
+  row_id      TEXT        NOT NULL,
+  column_name TEXT        NOT NULL,
+  body        TEXT        NOT NULL,
+  taken_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (table_name, row_id, column_name)
+);
+
+-- cue 引用换锚（migrate-cue-mention-stable-id.sql，#302）改写过的正文备份：
+-- 把 `/__cm__/cue/<行id>` 平移成 `<稳定 cue_id>` 之前的原文。与 dialect_v2 那张
+-- 同形状但独立成表——两次迁移的回滚依据不能互相覆盖。
+CREATE TABLE IF NOT EXISTS cue_mention_text_backup (
   table_name  TEXT        NOT NULL,
   row_id      TEXT        NOT NULL,
   column_name TEXT        NOT NULL,

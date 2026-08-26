@@ -215,10 +215,12 @@ function relativeTime(iso: string): string {
 // ─── CueCommentsPanel ─────────────────────────────────────────────────────────
 
 function CueCommentsPanel({
-  cueId, productionId, versionId, comments, currentUserId, isAdmin,
+  cueId, logicalCueId, productionId, versionId, comments, currentUserId, isAdmin,
   onAdd, onEdit, onDelete, onClose,
 }: {
-  cueId: string; productionId: string; versionId?: string | null; comments: Comment[];
+  // cueId = 行 id：评论 contextId 与附件挂载都锚修订行，保持不动。
+  // logicalCueId = 稳定 cue_id：wiki 引用边锚它（#302），两者不可混用。
+  cueId: string; logicalCueId: string; productionId: string; versionId?: string | null; comments: Comment[];
   currentUserId: string; isAdmin: boolean;
   onAdd: (c: Comment) => void; onEdit: (c: Comment) => void;
   onDelete: (id: string) => void; onClose: () => void;
@@ -383,7 +385,7 @@ function CueCommentsPanel({
           display="panel"
         />
 
-        <RelatedWikiChips productionId={productionId} entityType="cue" entityId={cueId} />
+        <RelatedWikiChips productionId={productionId} entityType="cue" entityId={logicalCueId} />
 
         {topLevel.length === 0 && <p className="py-4 text-center text-xs text-zinc-300">暂无评论</p>}
         {topLevel.map(topC => (
@@ -1787,12 +1789,14 @@ export default function CuePage({
     setVisibleListIds(prev => prev.has(cueListParam) ? prev : new Set([...prev, cueListParam]));
     setActiveListId(cueListParam);
     if (!cueIdParam) return;
-    const cue = initialCues.find(c => c.id === cueIdParam);
+    // 链接里带的是稳定 cue_id（#302），高亮/滚动用的是本版本那条修订的行 id——
+    // 查得按 cueId、设得按 id，两边不能都用 param。
+    const cue = initialCues.find(c => c.cueId === cueIdParam);
     if (!cue) return;
     const blockId = cue.start.kind === "block" ? cue.start.blockId : cue.start.afterBlockId;
     const idx = blocks.findIndex(b => b.id === blockId);
     if (idx >= 0) scrollToBlockIdx(idx, "center");
-    setHighlightedCueId(cueIdParam);
+    setHighlightedCueId(cue.id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollToBlockIdx]);
 
@@ -2866,6 +2870,7 @@ export default function CuePage({
       {activeCommentCueId && (
         <CueCommentsPanel
           cueId={activeCommentCueId}
+          logicalCueId={effectiveCues.find(c => c.id === activeCommentCueId)?.cueId ?? activeCommentCueId}
           productionId={productionId}
           versionId={versionId}
           comments={comments}

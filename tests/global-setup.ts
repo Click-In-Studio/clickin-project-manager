@@ -175,6 +175,12 @@ import {
   MEMBER_EXIT_SNAPSHOT_PATH,
   type MemberExitSnapshot,
 } from "./member-exit-snapshot";
+import {
+  isCueMentionStableIdPreMigrationSchema,
+  createCueMentionStableIdPreMigrationData,
+  CUE_MENTION_STABLE_ID_SNAPSHOT_PATH,
+  type CueMentionStableIdSnapshot,
+} from "./cue-mention-stable-id-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -684,6 +690,19 @@ export async function setup() {
       }
     }
   }
+
+  // cue 引用换锚（#302）：行 id → 稳定 cue_id。必须排在 dialect v2 **之后**——
+  // 那一步会把全库 wiki.body 归一到 v2 文法，若排在它之前，工厂刻意留的 v1 形态
+  // 引用会先被归一掉，本迁移对 v1 形态的处理分支就永远测不到。
+  if (await isCueMentionStableIdPreMigrationSchema(pool)) {
+    const cueMentionSnapshot = await createCueMentionStableIdPreMigrationData(pool, TEST_USER);
+    await writeFile(CUE_MENTION_STABLE_ID_SNAPSHOT_PATH, JSON.stringify(cueMentionSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-cue-mention-stable-id.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
@@ -779,6 +798,26 @@ export async function teardown() {
         ])
         .catch(() => {});
       await unlink(MEMBER_EXIT_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // cue 引用换锚快照的工厂演出（migration path only）
+  {
+    let cueMentionSnapshot: CueMentionStableIdSnapshot | null = null;
+    try {
+      cueMentionSnapshot = JSON.parse(
+        await readFile(CUE_MENTION_STABLE_ID_SNAPSHOT_PATH, "utf8"),
+      ) as CueMentionStableIdSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (cueMentionSnapshot) {
+      // production 删除级联 cue_list / cue / wiki / 边 / 评论；
+      // user_notification 与 agent_memory_chunk 不挂 production FK，单独收。
+      await pool.query("DELETE FROM production WHERE id = $1", [cueMentionSnapshot.prodId]).catch(() => {});
+      await pool.query("DELETE FROM user_notification WHERE id = $1", [cueMentionSnapshot.notificationId]).catch(() => {});
+      await pool.query("DELETE FROM agent_memory_chunk WHERE id = $1::uuid", [cueMentionSnapshot.memoryChunkId]).catch(() => {});
+      await unlink(CUE_MENTION_STABLE_ID_SNAPSHOT_PATH).catch(() => {});
     }
   }
 
