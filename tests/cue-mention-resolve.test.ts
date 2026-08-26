@@ -1,0 +1,288 @@
+/**
+ * cue mention 解析锚稳定 cue_id（#302）。
+ *
+ * 这条测试钉的是 issue 的正题：cue 是修订表，改一次 cue 就 CoW 出新行 id。
+ * 引用若锚行 id，改一次就变成 "#[已删除]" 幻影。所以核心用例是
+ * 「CoW 之后同一条 mention 仍然解析得出，并且跟到新修订的编号/名字」。
+ */
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { NextRequest } from "next/server";
+import { getPool } from "@/lib/pg";
+import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { POST as mentionResolvePOST } from "@/app/api/production/[id]/mention-resolve/route";
+import { GET as blockSearchGET } from "@/app/api/production/[id]/script/block-search/route";
+import type { ContentMentionAttrs } from "@/lib/mention-types";
+import { makeProduction, cleanupProduction, shortId } from "./factories";
+
+let prodId: string;
+let versionId: string;
+let owner: string;
+let cueListId: string;
+let abbr: string;
+/** 逻辑 cue 身份（= 初版行 id）——正文/边/深链都锚它 */
+let cueId: string;
+/** 初版修订行 id */
+let revision1: string;
+
+const ctx = () => ({ params: Promise.resolve({ id: prodId }) });
+
+function resolveReq(mentions: Partial<ContentMentionAttrs>[], userId = owner) {
+  return new NextRequest("http://localhost/api/production/x/mention-resolve", {
+    method: "POST",
+    headers: {
+      cookie: `${SESSION_COOKIE}=${createSession({ userId, name: "测试", avatarUrl: null, isAdmin: false })}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      mentions: mentions.map(m => ({ kind: "cue", displayMode: null, aux: null, versionId: null, ...m })),
+      versionId,
+    }),
+  });
+}
+
+async function resolveOne(id: string): Promise<{ label: string | null; url: string | null }> {
+  const res = await mentionResolvePOST(resolveReq([{ id }]), ctx());
+  expect(res.status).toBe(200);
+  const data = await res.json() as { labels: (string | null)[]; urls: (string | null)[] };
+  return { label: data.labels[0], url: data.urls[0] };
+}
+
+/** 模拟一次 CoW：同 cue_id 落新行，把版本归属从旧修订挪到新修订。 */
+async function cowRevision(fields: { number: string; name: string }): Promise<string> {
+  const newId = `tcue${shortId()}`;
+  await getPool().query(
+    `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
+     VALUES ($1, $2, $3, $4, $5, 'gap', 'gap')`,
+    [newId, cueId, cueListId, fields.number, fields.name],
+  );
+  await getPool().query("DELETE FROM cue_version WHERE cue_id = $1 AND version_id = $2", [cueId, versionId]);
+  await getPool().query(
+    "INSERT INTO cue_version (revision_id, version_id, cue_id) VALUES ($1, $2, $3)",
+    [newId, versionId, cueId],
+  );
+  return newId;
+}
+
+beforeAll(async () => {
+  const u = await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id");
+  owner = u.rows[0].id;
+  ({ prodId, versionId } = await makeProduction(owner));
+
+  cueListId = `t${shortId()}`;
+  abbr = `SQ${shortId().slice(0, 3).toUpperCase()}`;
+  await getPool().query(
+    "INSERT INTO cue_list (id, production_id, name, abbr, notes, created_by) VALUES ($1, $2, 'Q表', $3, '', $4)",
+    [cueListId, prodId, abbr, owner],
+  );
+
+  cueId = `tcue${shortId()}`;
+  revision1 = cueId; // 初版：行 id 与逻辑 id 同值（createCue 就是 VALUES ($1,$1,...)）
+  await getPool().query(
+    `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
+     VALUES ($1, $1, $2, '1', '开场音', 'gap', 'gap')`,
+    [cueId, cueListId],
+  );
+  await getPool().query(
+    "INSERT INTO cue_version (revision_id, version_id, cue_id) VALUES ($1, $2, $1)",
+    [cueId, versionId],
+  );
+});
+
+afterAll(async () => {
+  await cleanupProduction(prodId).catch(() => {});
+  await getPool().query("DELETE FROM app_user WHERE id = $1", [owner]).catch(() => {});
+});
+
+describe("cue mention resolve", () => {
+  it("resolves a cue mention to 编号 + 名字, linking by stable cue_id", async () => {
+    const { label, url } = await resolveOne(cueId);
+    expect(label).toBe(`${abbr}.1: 开场音`);
+    expect(url).toContain(`cueList=${cueListId}`);
+    expect(url).toContain(`cueId=${cueId}`);
+  });
+
+  it("survives a CoW revision and follows the new revision's fields", async () => {
+    // 这就是 #302 的正题：换过修订之后，同一条 mention 不许变成 "#[已删除]"。
+    const revision2 = await cowRevision({ number: "2", name: "追光" });
+    expect(revision2).not.toBe(revision1);
+
+    const { label, url } = await resolveOne(cueId);
+    expect(label).toBe(`${abbr}.2: 追光`);
+    expect(url).toContain(`cueId=${cueId}`);
+  });
+
+  it("a mention anchored on a revision row id resolves to nothing", async () => {
+    // 反证：锚行 id 的旧式引用查不到。这条钉的是"锚的确实是 cue_id 而不是行 id"——
+    // 若哪天解析退回按 id 查，它会变绿。
+    const revision3 = await cowRevision({ number: "3", name: "暗场" });
+    const { label } = await resolveOne(revision3);
+    expect(label).toBe("#[已删除]");
+  });
+
+  it("falls back to a live revision when none is attached to the active version", async () => {
+    // 版本已退役、线上一律走 head，所以"该逻辑 cue 在本版本没有修订行"是可能的。
+    // 这时回退到任一存活修订，而不是报"已删除"——报已删除正是本 issue 要消灭的幻影。
+    const orphanId = `tcue${shortId()}`;
+    await getPool().query(
+      `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
+       VALUES ($1, $1, $2, '7', '孤儿修订', 'gap', 'gap')`,
+      [orphanId, cueListId],
+    );
+    // 刻意不写 cue_version：没有任何修订挂在 versionId 上
+    const { label, url } = await resolveOne(orphanId);
+    expect(label).toBe(`${abbr}.7: 孤儿修订`);
+    expect(url).toContain(`cueId=${orphanId}`);
+  });
+
+  it("block-search hands the editor the stable cue_id, not the revision row id", async () => {
+    // 这条钉的是插入侧：编辑器拿到什么，就会把什么写进正文。CoW 之后版本指向的是
+    // **新修订行**，若这里吐 c.id，用户插进正文的引用下一次改 cue 就失效。
+    //
+    // 注：路由里的 DISTINCT ON 是防御性的——正常库里 production.active_version_id
+    // 恒有值，版本过滤后每条逻辑 cue 只剩一条修订，撞不到重复。它防的是无版本
+    // 过滤那条分支。
+    const listId = `t${shortId()}`;
+    const listAbbr = `LX${shortId().slice(0, 3).toUpperCase()}`;
+    await getPool().query(
+      "INSERT INTO cue_list (id, production_id, name, abbr, notes, created_by) VALUES ($1, $2, 'LX表', $3, '', $4)",
+      [listId, prodId, listAbbr, owner],
+    );
+
+    const logical = `tcue${shortId()}`;
+    const revision = `tcue${shortId()}`;
+    await getPool().query(
+      `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
+       VALUES ($1, $1, $3, '1', '初版', 'gap', 'gap'), ($2, $1, $3, '1', '改过', 'gap', 'gap')`,
+      [logical, revision, listId],
+    );
+    // 真实 CoW 的形态：版本挂在新修订行上，初版行不在版本里
+    await getPool().query(
+      "INSERT INTO cue_version (revision_id, version_id, cue_id) VALUES ($1, $2, $3)",
+      [revision, versionId, logical],
+    );
+
+    const req = new NextRequest(
+      `http://localhost/api/production/x/script/block-search?q=${encodeURIComponent(`${listAbbr}.`)}`,
+      { headers: { cookie: `${SESSION_COOKIE}=${createSession({ userId: owner, name: "测试", avatarUrl: null, isAdmin: false })}` } },
+    );
+    const res = await blockSearchGET(req, ctx());
+    expect(res.status).toBe(200);
+    const cueResults = ((await res.json()).results as { kind: string; id: string }[])
+      .filter(r => r.kind === "cue");
+
+    expect(cueResults.map(r => r.id)).toEqual([logical]);
+    expect(cueResults[0].id).not.toBe(revision);
+  });
+
+  it("with no active version, revisions do not eat the SQL-side LIMIT 8", async () => {
+    // block-search 的 DISTINCT ON 只在**无版本过滤**那条分支才有活干。正常库
+    // active_version_id 恒有值，撞不到；这里把它置空，把那条分支拽进可测范围。
+    //
+    // 形状必须让测试真的会红：路由里的 JS 侧 dedup() 也按 kind:id 去重，所以
+    // 只造几条重复是测不出东西的——dedup 会替 DISTINCT ON 兜住。只有当重复行
+    // **撑破 SQL 侧的 LIMIT 8** 时，丢失才不可逆（dedup 跑在已截断的结果上）。
+    // 4 条逻辑 cue × 3 修订 = 12 行 > 8：少了 DISTINCT ON，LIMIT 8 会被编号靠前
+    // 的几条 cue 的重复行占满，靠后的 cue 整条消失。
+    const listId = `t${shortId()}`;
+    const listAbbr = `NV${shortId().slice(0, 3).toUpperCase()}`;
+    await getPool().query(
+      "INSERT INTO cue_list (id, production_id, name, abbr, notes, created_by) VALUES ($1, $2, 'NV表', $3, '', $4)",
+      [listId, prodId, listAbbr, owner],
+    );
+    const logicalIds: string[] = [];
+    for (let n = 1; n <= 4; n++) {
+      const logical = `tcue${shortId()}`;
+      logicalIds.push(logical);
+      await getPool().query(
+        `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
+         VALUES ($1, $1, $2, $3, '', 'gap', 'gap')`,
+        [logical, listId, String(n)],
+      );
+      for (let rev = 0; rev < 2; rev++) {
+        await getPool().query(
+          `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
+           VALUES ($1, $2, $3, $4, '', 'gap', 'gap')`,
+          [`tcue${shortId()}`, logical, listId, String(n)],
+        );
+      }
+    }
+
+    const saved = await getPool().query<{ active_version_id: string | null }>(
+      "UPDATE production SET active_version_id = NULL WHERE id = $1 RETURNING active_version_id", [prodId],
+    );
+    expect(saved.rows[0].active_version_id).toBeNull();
+    try {
+      const req = new NextRequest(
+        `http://localhost/api/production/x/script/block-search?q=${encodeURIComponent(`${listAbbr}.`)}`,
+        { headers: { cookie: `${SESSION_COOKIE}=${createSession({ userId: owner, name: "测试", avatarUrl: null, isAdmin: false })}` } },
+      );
+      const res = await blockSearchGET(req, ctx());
+      expect(res.status).toBe(200);
+      const cueResults = ((await res.json()).results as { kind: string; id: string }[])
+        .filter(r => r.kind === "cue");
+      // 4 条逻辑 cue 一条不少，且各只出现一次
+      expect(new Set(cueResults.map(r => r.id))).toEqual(new Set(logicalIds));
+      expect(cueResults).toHaveLength(logicalIds.length);
+    } finally {
+      await getPool().query("UPDATE production SET active_version_id = $2 WHERE id = $1", [prodId, versionId]);
+    }
+  });
+
+  it("an asset mounted on a foreign production's cue leaks no cue_list_id", async () => {
+    // 本轮补的门：asset 挂载分支的反查同样吐用户可见 URL，少了 production 校验，
+    // 拿外剧组的 cue 行 id 构造 aux 就能套出对方的 cue_list_id/cue_id。
+    const other = await makeProduction(owner);
+    try {
+      const foreignListId = `t${shortId()}`;
+      const foreignCueId = `tcue${shortId()}`;
+      await getPool().query(
+        "INSERT INTO cue_list (id, production_id, name, abbr, notes, created_by) VALUES ($1, $2, 'Q表', 'FG', '', $3)",
+        [foreignListId, other.prodId, owner],
+      );
+      await getPool().query(
+        `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
+         VALUES ($1, $1, $2, '9', '外剧组', 'gap', 'gap')`,
+        [foreignCueId, foreignListId],
+      );
+      // 附件是本剧组的（否则在挂载分支之前就被判"已删除"了）
+      const assetId = `as_${shortId()}`;
+      await getPool().query(
+        `INSERT INTO asset (id, production_id, uploader_user_id, file_name, storage_type)
+         VALUES ($1, $2, $3, 'x.png', 'r2')`,
+        [assetId, prodId, owner],
+      );
+
+      const res = await mentionResolvePOST(
+        resolveReq([{ kind: "asset", id: assetId, aux: `cue:${foreignCueId}` }]), ctx(),
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json() as { labels: (string | null)[]; urls: (string | null)[] };
+      expect(data.labels[0]).toBe("x.png");        // 本剧组附件，名字照给
+      expect(data.urls[0]).toBeNull();             // 但外剧组 cue 的宿主信息一个字不吐
+      expect(JSON.stringify(data)).not.toContain(foreignListId);
+    } finally {
+      await cleanupProduction(other.prodId).catch(() => {});
+    }
+  });
+
+  it("does not resolve a cue belonging to another production", async () => {
+    const other = await makeProduction(owner);
+    try {
+      const otherListId = `t${shortId()}`;
+      const otherCueId = `tcue${shortId()}`;
+      await getPool().query(
+        "INSERT INTO cue_list (id, production_id, name, abbr, notes, created_by) VALUES ($1, $2, 'Q表', 'ZZ', '', $3)",
+        [otherListId, other.prodId, owner],
+      );
+      await getPool().query(
+        `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
+         VALUES ($1, $1, $2, '9', '外剧组', 'gap', 'gap')`,
+        [otherCueId, otherListId],
+      );
+      const { label } = await resolveOne(otherCueId);
+      expect(label).toBe("#[已删除]");
+    } finally {
+      await cleanupProduction(other.prodId).catch(() => {});
+    }
+  });
+});

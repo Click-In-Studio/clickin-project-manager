@@ -325,23 +325,32 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
 
   // ── cue ───────────────────────────────────────────────────────────────────
+  // 锚**稳定 cue_id**（#302）。cue 是修订表：改 cue 会 CoW 出新行 id，锚行 id
+  // 的引用会在改一次之后变成"#[已删除]"幻影。一个逻辑 cue 在库里可能留有多条
+  // 修订，DISTINCT ON 优先取当前版本那条；取不到（版本已退役/该逻辑 cue 不在
+  // 本版本）则回退到任一存活修订——编号/名字是逻辑 cue 的属性，拿哪条修订都对，
+  // 回退成"已删除"反而正是本次要消灭的幻影。
   if (byKind.has("cue")) {
     const cueIdxs = byKind.get("cue")!;
     const cueIds = cueIdxs.map(i => mentions[i].id);
-    const r = await pool.query<{ id: string; number: string; name: string | null; abbr: string; cue_list_id: string }>(
-      `SELECT c.id, c.number, c.name, cl.abbr, c.cue_list_id
+    const r = await pool.query<{ cue_id: string; number: string; name: string | null; abbr: string; cue_list_id: string }>(
+      `SELECT DISTINCT ON (c.cue_id) c.cue_id, c.number, c.name, cl.abbr, c.cue_list_id
        FROM cue c JOIN cue_list cl ON cl.id = c.cue_list_id
-       WHERE c.id = ANY($1::text[])`,
-      [cueIds]
+       WHERE c.cue_id = ANY($1::text[]) AND cl.production_id = $2
+       ORDER BY c.cue_id,
+                EXISTS (SELECT 1 FROM cue_version cv
+                        WHERE cv.revision_id = c.id AND cv.version_id = $3) DESC,
+                c.id DESC`,
+      [cueIds, productionId, effectiveVersionId]
     );
-    const cueMap = new Map(r.rows.map(row => [row.id, row]));
+    const cueMap = new Map(r.rows.map(row => [row.cue_id, row]));
     for (const i of cueIdxs) {
       const cue = cueMap.get(mentions[i].id);
       if (!cue) { labels[i] = "#[已删除]"; continue; }
       labels[i] = cue.name
         ? `${cue.abbr}.${cue.number}: ${cue.name}`
         : `${cue.abbr}.${cue.number}`;
-      urls[i] = `${base}/cues?cueList=${cue.cue_list_id}&cueId=${cue.id}${vAmp}`;
+      urls[i] = `${base}/cues?cueList=${cue.cue_list_id}&cueId=${cue.cue_id}${vAmp}`;
     }
   }
 
@@ -398,10 +407,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           break;
         case "cue_revision": {
           // mount_id is a revision_id; reverse-map to cue_id + cue_list_id
+          // 同上：加 production 归属校验，别让外剧组的 revision_id 套出宿主信息
           const crr = await pool.query<{ cue_id: string; cue_list_id: string }>(
-            `SELECT cv.cue_id, c.cue_list_id FROM cue_version cv JOIN cue c ON c.id = cv.cue_id
-             WHERE cv.revision_id = $1 LIMIT 1`,
-            [mountId]
+            `SELECT cv.cue_id, c.cue_list_id
+             FROM cue_version cv
+             JOIN cue c ON c.id = cv.cue_id
+             JOIN cue_list cl ON cl.id = c.cue_list_id
+             WHERE cv.revision_id = $1 AND cl.production_id = $2 LIMIT 1`,
+            [mountId, productionId]
           );
           if (crr.rows[0]) {
             const { cue_id, cue_list_id } = crr.rows[0];
@@ -417,18 +430,24 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       }
     }
 
-    // Batch resolve cue_list_id for cue-mounted assets
+    // Batch resolve cue_list_id for cue-mounted assets.
+    // 挂载点本身仍锚行 id（asset_mount 的锚定不在 #302 范围内），但**链接**必须
+    // 吐稳定 cue_id——/cues 页按 cue_id 认深链参数。所以这里顺带把行 id 翻成 cue_id。
     if (cueMountIdxs.length > 0) {
       const cueIds = cueMountIdxs.map(x => x.cueId);
-      const cr = await pool.query<{ id: string; cue_list_id: string }>(
-        `SELECT id, cue_list_id FROM cue WHERE id = ANY($1::text[])`,
-        [cueIds]
+      // production 归属校验与上面的 cue 分支同门：这条查询的产物是用户可见 URL，
+      // 少了它，拿外剧组的 cue id 构造 aux 就能套出对方的 cue_list_id/cue_id。
+      const cr = await pool.query<{ id: string; cue_id: string; cue_list_id: string }>(
+        `SELECT c.id, c.cue_id, c.cue_list_id
+         FROM cue c JOIN cue_list cl ON cl.id = c.cue_list_id
+         WHERE c.id = ANY($1::text[]) AND cl.production_id = $2`,
+        [cueIds, productionId]
       );
-      const cueListMap = new Map(cr.rows.map(row => [row.id, row.cue_list_id]));
+      const cueRowMap = new Map(cr.rows.map(row => [row.id, row]));
       for (const { i, cueId } of cueMountIdxs) {
-        const cueListId = cueListMap.get(cueId);
-        if (cueListId) {
-          urls[i] = `${base}/cues?cueList=${cueListId}&cueId=${cueId}${vAmp}`;
+        const row = cueRowMap.get(cueId);
+        if (row) {
+          urls[i] = `${base}/cues?cueList=${row.cue_list_id}&cueId=${row.cue_id}${vAmp}`;
         }
       }
     }

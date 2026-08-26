@@ -818,7 +818,7 @@
     {
       "column": "cue_id",
       "type": "text",
-      "nullable": true
+      "nullable": false
     },
     {
       "column": "start_snapshot_id",
@@ -870,6 +870,34 @@
     },
     {
       "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "cue_mention_text_backup": [
+    {
+      "column": "table_name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "row_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "column_name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "body",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "taken_at",
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"

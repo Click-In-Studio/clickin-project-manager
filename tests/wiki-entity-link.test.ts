@@ -172,15 +172,19 @@ describe("GET /wiki-refs", () => {
 
   it("cue refs gated by the hosting cue_list's cues@view", async () => {
     const cueListId = `t${shortId()}`;
+    // cue 是修订表：cueId 是稳定逻辑身份，revisionId 是改一次就会换掉的行 id。
+    // 引用侧（正文/边/本端点）一律锚前者（#302）。
     const cueId = `tcue${shortId()}`;
+    const revisionId = `tcue${shortId()}`;
     await getPool().query(
       "INSERT INTO cue_list (id, production_id, name, notes, created_by) VALUES ($1, $2, 'Q表', '', $3)",
       [cueListId, prodId, creator]);
     await getPool().query(
-      `INSERT INTO cue (id, cue_list_id, number, start_kind, end_kind) VALUES ($1, $2, '1', 'gap', 'gap')`,
-      [cueId, cueListId]);
+      `INSERT INTO cue (id, cue_id, cue_list_id, number, start_kind, end_kind)
+       VALUES ($1, $1, $3, '1', 'gap', 'gap'), ($2, $1, $3, '1', 'gap', 'gap')`,
+      [cueId, revisionId, cueListId]);
     const doc = await createWiki({
-      productionId: prodId, title: "cue 笔记", body: `[Q1](/__cm__cue:${cueId})`, createdBy: creator });
+      productionId: prodId, title: "cue 笔记", body: `[Q1](/__cm__/cue/${cueId})`, createdBy: creator });
 
     // 无 cue 域权限的成员 → 403
     expect((await wikiRefsGET(makeReq(`type=cue&id=${cueId}`, creator), ctx())).status).toBe(403);
@@ -193,6 +197,10 @@ describe("GET /wiki-refs", () => {
     const res = await wikiRefsGET(makeReq(`type=cue&id=${cueId}`, creator), ctx());
     expect(res.status).toBe(200);
     expect(((await res.json()).refs as { id: string }[]).map(r => r.id)).toContain(doc.id);
+
+    // 拿修订行 id 来问 → 查不到宿主 list，过不了门。这条钉的是"引用锚稳定 id"
+    // 这件事本身：若哪天 getCueListIdForCue 退回按行 id 查，它会变绿。
+    expect((await wikiRefsGET(makeReq(`type=cue&id=${revisionId}`, creator), ctx())).status).toBe(403);
   });
 
   it("asset refs: foreign-production asset id → 403 (ownership check)", async () => {
