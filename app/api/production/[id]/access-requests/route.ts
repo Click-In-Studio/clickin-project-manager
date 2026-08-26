@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { ApprovalRequestError, getProductionPermissionContext, listMyAccessRequests, submitAccessRequest } from "@/lib/db";
-import { isValidTtlInterval } from "@/lib/approval-ttl";
+import { isValidCustomExpiry, isValidTtlInterval } from "@/lib/approval-ttl";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -31,6 +31,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     permissionLevel?: string;
     grantType?: "permanent" | "ttl";
     ttlDuration?: string;
+    requestedExpiresAt?: string;
     note?: string;
   };
   if (!body.resourceType || !body.permissionLevel) {
@@ -41,10 +42,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "申请格式已更新，请刷新页面后重试" }, { status: 400 });
   }
 
-  // #256：「临时」必须带时长。前端漏发或被绕过时在这里断，别让 grantType='ttl'
-  // + ttlDuration=null 静默通过——那会发出一条永不过期的授权。
+  // 固定档位传 ttlDuration，自定义日期传 requestedExpiresAt，必须且只能有一个。
   const grantType = body.grantType ?? "permanent";
-  if (grantType === "ttl" && !isValidTtlInterval(body.ttlDuration)) {
+  const validDuration = isValidTtlInterval(body.ttlDuration);
+  const validCustomExpiry = isValidCustomExpiry(body.requestedExpiresAt);
+  if (grantType === "ttl" && validDuration === validCustomExpiry) {
     return Response.json({ error: "临时权限必须选择有效期" }, { status: 400 });
   }
 
@@ -57,6 +59,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       permissionLevel: body.permissionLevel,
       grantType,
       ttlDuration: body.ttlDuration ?? null,
+      requestedExpiresAt: body.requestedExpiresAt ?? null,
       note: body.note ?? null,
     });
     return Response.json({ request }, { status: 201 });

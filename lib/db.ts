@@ -21,7 +21,7 @@ import {
   expandLevelRows, nextStage, stageAt, stageStatus,
   type ApprovalStage, type ApprovalStageName, type ApprovalTarget, type StagePosition,
 } from "./approval-routing";
-import { isValidTtlInterval } from "./approval-ttl";
+import { isValidCustomExpiry, isValidTtlInterval } from "./approval-ttl";
 import {
   approvalStageLabel, isApprovalCommentTooLong, normalizeApprovalComment,
   type ApprovalAction, type ApprovalNodeClass,
@@ -6846,6 +6846,8 @@ export type ApprovalRequest = {
    * （"7 days"），两者不可互相回灌。要算剩余时长请用 expiresAt。
    */
   ttlDurationLabel: string | null;
+  /** 自定义有效期在提交时选定的绝对到期时间；固定档位为 null。 */
+  requestedExpiresAt: string | null;
   note: string | null;
   status: "pending_supervisor" | "pending_resource" | "approved" | "rejected" | "cancelled";
   escalationChain: ApprovalChainEntry[];
@@ -6936,6 +6938,7 @@ type ApprovalRow = {
   permission_level: string | null;
   grant_type: string | null;
   ttl_duration: PgInterval | string | null;
+  requested_expires_at: Date | null;
   note: string | null;
   status: string;
   escalation_chain: ApprovalChainEntry[];
@@ -6988,6 +6991,7 @@ function rowToApproval(r: ApprovalRow): ApprovalRequest {
     permissionLevel: r.permission_level,
     grantType: (r.grant_type as "permanent" | "ttl" | null),
     ttlDurationLabel: formatPgInterval(r.ttl_duration),
+    requestedExpiresAt: r.requested_expires_at ? r.requested_expires_at.toISOString() : null,
     note: r.note,
     status: r.status as ApprovalRequest["status"],
     escalationChain: r.escalation_chain ?? [],
@@ -7391,6 +7395,8 @@ export type SubmitAccessRequestParams = {
   grantType?: "permanent" | "ttl";
   /** Postgres INTERVAL 字面量，且必须来自 TTL_OPTIONS（lib/approval-ttl.ts）。 */
   ttlDuration?: string | null;
+  /** 自定义档位的 ISO 绝对到期时间；与 ttlDuration 二选一。 */
+  requestedExpiresAt?: string | null;
   note?: string | null;
 };
 
@@ -7403,10 +7409,13 @@ export async function submitAccessRequest(
   const resourceSub = params.resourceSub ?? "*";
   const requestType = params.type ?? "resource_access";
   const grantType = params.grantType ?? "permanent";
-  // #256：'ttl' 不带时长会一路 NULL 到 expires_at，而 NULL 等于永久。
-  // 白名单校验放在这里而非只在路由——任何调用方都过这道门。
+  // 固定档位与自定义日期二选一。校验放在这里而非只在路由——任何调用方
+  // 都必须经过同一道门，避免 ttl 落成 expires_at=NULL 的永久权限。
   const ttlDuration = grantType === "ttl" ? params.ttlDuration ?? null : null;
-  if (grantType === "ttl" && !isValidTtlInterval(ttlDuration)) {
+  const requestedExpiresAt = grantType === "ttl" ? params.requestedExpiresAt ?? null : null;
+  const validDuration = isValidTtlInterval(ttlDuration);
+  const validCustomExpiry = isValidCustomExpiry(requestedExpiresAt);
+  if (grantType === "ttl" && validDuration === validCustomExpiry) {
     throw new ApprovalRequestError("invalid_ttl");
   }
 
@@ -7425,7 +7434,7 @@ export async function submitAccessRequest(
   if (!firstStage) throw new ApprovalRequestError("no_approver");
 
   // 覆盖式申请自动完成（2026-08-16 用户反馈）：同人同目标同级别的旧 pending 申请
-  // 被新申请取代（如先申 1 天 TTL 又申 1 月）——自动 cancel 并过期其待办通知，
+  // 被新申请取代（如先申 1 周又改申 30 天）——自动 cancel 并过期其待办通知，
   // 否则旧申请的审批待办永远挂着，审批人收件箱堆积。
   // 与新申请 INSERT 同事务（AI review）：中途失败不能留"旧的已撤、新的没建"半态；
   // IS NOT DISTINCT FROM 兼容存量 NULL resource_id/sub（新写入恒 '*'，老行可能 NULL）
@@ -7476,9 +7485,9 @@ export async function submitAccessRequest(
       `INSERT INTO approval_request
          (production_id, subject_id, type,
           resource_type, resource_id, resource_sub,
-          permission_level, grant_type, ttl_duration, note, status,
+          permission_level, grant_type, ttl_duration, requested_expires_at, note, status,
           current_stage, current_stage_depth, current_approver_ids, escalation_chain)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::INTERVAL,$10,$11,$12,$13,$14::uuid[],$15::jsonb)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::INTERVAL,$10::TIMESTAMPTZ,$11,$12,$13,$14,$15::uuid[],$16::jsonb)
        RETURNING *`,
       [
         productionId, userId, requestType,
@@ -7486,6 +7495,7 @@ export async function submitAccessRequest(
         params.permissionLevel,
         grantType,
         ttlDuration,
+        requestedExpiresAt,
         params.note ?? null,
         stageStatus(firstStage.stage),
         firstStage.stage,
@@ -7528,7 +7538,7 @@ export async function approveAccessRequest(
   if (!auth.canFinalize) return { ok: false, reason: "forward_only" };
 
   // first-action-wins：状态与所在级都要没被别人动过
-  // expires_at 全程由 SQL（now() + ttl_duration）算出，JS 侧不参与
+  // 固定档位从批准时开始计时；自定义日期保持申请人选定的绝对时间。
   const updateRes = await getPool().query<{ id: string }>(
     `UPDATE approval_request
      SET status = 'approved',
@@ -7537,11 +7547,12 @@ export async function approveAccessRequest(
          granted_at = now(),
          current_stage = NULL,
          current_approver_ids = '{}',
-         expires_at = CASE WHEN grant_type = 'ttl' AND ttl_duration IS NOT NULL
-                            THEN now() + ttl_duration
+         expires_at = CASE WHEN grant_type = 'ttl'
+                            THEN COALESCE(requested_expires_at, now() + ttl_duration)
                             ELSE NULL END
      WHERE id = $1 AND status = $3
        AND current_stage IS NOT DISTINCT FROM $4
+       AND (requested_expires_at IS NULL OR requested_expires_at > now())
      RETURNING id`,
     [requestId, actorId, req.status, req.current_stage],
   );

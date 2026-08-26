@@ -4,7 +4,13 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import styles from "@/components/my-pages.module.css";
 import type { ApprovalPerson, ApprovalRequest } from "@/lib/db";
-import { TTL_OPTIONS, displayTtlLabel, type TtlOptionValue } from "@/lib/approval-ttl";
+import {
+  TTL_OPTIONS,
+  displayTtlLabel,
+  localTodayDateInputValue,
+  ttlPayloadForSelection,
+  type TtlOptionValue,
+} from "@/lib/approval-ttl";
 import { buildApprovalTimeline, type TimelineNode, type TimelineNodeState } from "@/lib/approval-timeline";
 import { APPROVAL_STAGE_LABELS, STAGE_ORDER } from "@/lib/approval-stages";
 
@@ -292,6 +298,7 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
   const [resourceType, setResourceType]       = useState(RESOURCE_OPTIONS[0].type);
   const [permissionLevel, setPermissionLevel] = useState(RESOURCE_OPTIONS[0].levels[0].value);
   const [ttlOption, setTtlOption]             = useState<TtlOptionValue>("permanent");
+  const [customExpiryDate, setCustomExpiryDate] = useState("");
   const [note, setNote]                       = useState("");
   const [submitting, setSubmitting]           = useState(false);
   const [error, setError]                     = useState<string | null>(null);
@@ -309,16 +316,17 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
     setSubmitting(true);
     setError(null);
     try {
-      // #256：选「临时」必须连时长一起发。只发 grantType 的话服务端算不出
-      // expires_at，批准后拿到的是永久权限，与页面显示的「临时」正相反。
+      const ttlPayload = ttlPayloadForSelection(ttlOption, customExpiryDate);
+      if (ttlOption === "custom" && !ttlPayload.requestedExpiresAt) {
+        throw new Error("请选择自定义到期日期");
+      }
       const res = await fetch(`/api/production/${productionId}/access-requests`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           resourceType,
           permissionLevel,
-          grantType: ttlOption === "permanent" ? "permanent" : "ttl",
-          ttlDuration: TTL_OPTIONS.find((o) => o.value === ttlOption)?.interval ?? null,
+          ...ttlPayload,
           note: note.trim() || null,
         }),
       });
@@ -389,9 +397,25 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
             );
           })}
         </div>
-        {ttlOption !== "permanent" && (
+        {ttlOption === "custom" && (
+          <input
+            type="date"
+            aria-label="自定义到期日期"
+            min={localTodayDateInputValue()}
+            value={customExpiryDate}
+            onChange={(event) => setCustomExpiryDate(event.target.value)}
+            required
+            style={fieldStyle}
+          />
+        )}
+        {ttlOption !== "permanent" && ttlOption !== "custom" && (
           <small style={{ fontSize: 10, color: "var(--muted)" }}>
             审批通过后开始计时，到期将自动失效。
+          </small>
+        )}
+        {ttlOption === "custom" && customExpiryDate && (
+          <small style={{ fontSize: 10, color: "var(--muted)" }}>
+            权限将在所选日期当天结束时自动失效。
           </small>
         )}
       </div>
@@ -438,7 +462,9 @@ function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel,
   const isPending = req.status === "pending_supervisor" || req.status === "pending_resource";
   // #140：canFinalize === false = 我是直属上级但本人没有这个权限，只能向上转交
   const forwardOnly = canAct && req.canFinalize === false;
-  const ttlLabel = displayTtlLabel(req.ttlDurationLabel);
+  const ttlLabel = req.requestedExpiresAt
+    ? `至 ${fmtDate(req.requestedExpiresAt)}`
+    : displayTtlLabel(req.ttlDurationLabel);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

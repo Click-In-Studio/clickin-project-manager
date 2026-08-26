@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { TTL_OPTIONS, type TtlOptionValue } from "@/lib/approval-ttl";
+import {
+  TTL_OPTIONS,
+  localTodayDateInputValue,
+  ttlPayloadForSelection,
+  type TtlOptionValue,
+} from "@/lib/approval-ttl";
 
 // ─── Labels ───────────────────────────────────────────────────────────────────
 
@@ -130,6 +135,7 @@ export default function AccessRequestModal({
   const [permissionLevel, setPermissionLevel] = useState(RESOURCE_OPTIONS[0].levels[0].value);
 
   const [ttlOption,  setTtlOption]  = useState<TtlOptionValue>("permanent");
+  const [customExpiryDate, setCustomExpiryDate] = useState("");
   const [note,       setNote]       = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
@@ -188,6 +194,10 @@ export default function AccessRequestModal({
     setSubmitting(true);
     setError(null);
     try {
+      const ttlPayload = ttlPayloadForSelection(ttlOption, customExpiryDate);
+      if (ttlOption === "custom" && !ttlPayload.requestedExpiresAt) {
+        throw new Error("请选择自定义到期日期");
+      }
       const res = await fetch(`/api/production/${productionId}/access-requests`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -197,8 +207,7 @@ export default function AccessRequestModal({
           resourceId: postResourceId,
           resourceSub: postResourceSub,
           permissionLevel: postPermissionLevel,
-          grantType: ttlOption === "permanent" ? "permanent" : "ttl",
-          ttlDuration: TTL_OPTIONS.find((o) => o.value === ttlOption)?.interval ?? null,
+          ...ttlPayload,
           note: note.trim() || null,
         }),
       });
@@ -382,6 +391,17 @@ export default function AccessRequestModal({
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
+                {ttlOption === "custom" && (
+                  <input
+                    type="date"
+                    aria-label="自定义到期日期"
+                    min={localTodayDateInputValue()}
+                    value={customExpiryDate}
+                    onChange={(event) => setCustomExpiryDate(event.target.value)}
+                    required
+                    style={fieldStyle}
+                  />
+                )}
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>

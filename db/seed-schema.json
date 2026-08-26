@@ -317,6 +317,11 @@
       "nullable": true
     },
     {
+      "column": "requested_expires_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
       "column": "note",
       "type": "text",
       "nullable": true

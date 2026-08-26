@@ -35,7 +35,14 @@ import {
 } from "@/lib/db";
 import { buildApprovalLadder, classifyApprovalNode, nextStage } from "@/lib/approval-routing";
 import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval-stages";
-import { TTL_OPTIONS, isValidTtlInterval, displayTtlLabel } from "@/lib/approval-ttl";
+import {
+  TTL_OPTIONS,
+  customExpiryDateToIso,
+  displayTtlLabel,
+  isValidCustomExpiry,
+  isValidTtlInterval,
+  ttlPayloadForSelection,
+} from "@/lib/approval-ttl";
 import { addResourceDeptManage, createProductionDept, setDeptMembers } from "@/lib/dept-db";
 import { listUserNotifications } from "@/lib/inbox-db";
 import { makeProduction, makeScene, cleanupProduction } from "./factories";
@@ -538,18 +545,18 @@ describe("submitAccessRequest", () => {
   });
 
   it("覆盖式申请：同目标的旧 pending 被自动 cancel 且待办过期", async () => {
-    // 2026-08-16 用户反馈：先申 1 天 TTL 再申 1 月，旧申请待办堆积审批人收件箱
+    // 先申 1 周再改申 30 天时，旧申请待办不能继续堆在审批人收件箱
     const first = await submitAccessRequest(prodId, U_REQUESTER, {
       resourceType: "cue_list",
       permissionLevel: "view",
       grantType: "ttl",
-      ttlDuration: "1 day",
+      ttlDuration: "7 days",
     });
     const second = await submitAccessRequest(prodId, U_REQUESTER, {
       resourceType: "cue_list",
       permissionLevel: "view",
       grantType: "ttl",
-      ttlDuration: "1 mon",
+      ttlDuration: "30 days",
     });
 
     const firstRow = await getPool().query<{ status: string; resolved_at: Date | null }>(
@@ -849,16 +856,43 @@ describe("#256 临时权限确实会过期", () => {
     await revokeAll(U_UNRELATED);
   });
 
-  it("TTL 档位表：只认 长期 / 1 天 / 1 周 / 1 月", () => {
-    expect(TTL_OPTIONS.map((o) => o.value)).toEqual(["permanent", "1d", "1w", "1mo"]);
-    expect(TTL_OPTIONS.map((o) => o.interval)).toEqual([null, "1 day", "7 days", "1 mon"]);
-    expect(isValidTtlInterval("1 day")).toBe(true);
+  it("自定义日期按绝对时间发放，不因审批等待而顺延", async () => {
+    const requestedExpiresAt = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "mount",
+      grantType: "ttl",
+      requestedExpiresAt,
+    });
+    expect(req.ttlDurationLabel).toBeNull();
+    expect(req.requestedExpiresAt).toBe(requestedExpiresAt);
+
+    const result = await approveAccessRequest(req.id, U_POC);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.request.expiresAt).toBe(requestedExpiresAt);
+
+    const grants = await getPool().query<{ expires_at: Date | null }>(
+      `SELECT expires_at FROM production_member_grant WHERE approval_id = $1`, [req.id]);
+    expect(grants.rows.length).toBeGreaterThan(0);
+    expect(grants.rows.every((row) => row.expires_at?.toISOString() === requestedExpiresAt)).toBe(true);
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("TTL 档位表：只认 1 周 / 30 天 / 180 天，并支持长期与自定义", () => {
+    expect(TTL_OPTIONS.map((o) => o.value)).toEqual(["1w", "30d", "180d", "permanent", "custom"]);
+    expect(TTL_OPTIONS.map((o) => o.interval)).toEqual(["7 days", "30 days", "180 days", null, null]);
+    expect(isValidTtlInterval("30 days")).toBe(true);
     expect(isValidTtlInterval("30 minutes")).toBe(false);
     expect(isValidTtlInterval(null)).toBe(false);
     expect(isValidTtlInterval(undefined)).toBe(false);
+    expect(isValidCustomExpiry(new Date(Date.now() + 60_000).toISOString())).toBe(true);
+    expect(isValidCustomExpiry(new Date(Date.now() - 60_000).toISOString())).toBe(false);
+    expect(customExpiryDateToIso("2026-12-31")).toMatch(/^2026-12-31T/);
+    expect(ttlPayloadForSelection("custom", "").requestedExpiresAt).toBeNull();
     // 回显口径与档位一致（"7天" 是 pg 的规范化输出）
     expect(displayTtlLabel("7天")).toBe("1 周");
-    expect(displayTtlLabel("1个月")).toBe("1 月");
+    expect(displayTtlLabel("180天")).toBe("180 天");
     expect(displayTtlLabel(null)).toBeNull();
   });
 });

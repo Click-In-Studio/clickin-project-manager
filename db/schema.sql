@@ -968,6 +968,7 @@ CREATE TABLE IF NOT EXISTS approval_request (
   permission_level    TEXT NULL,
   grant_type          TEXT NULL CHECK (grant_type IN ('permanent', 'ttl')),
   ttl_duration        INTERVAL NULL,
+  requested_expires_at TIMESTAMPTZ NULL,
   note                TEXT NULL,
 
   CONSTRAINT approval_resource_fields_required
@@ -998,10 +999,11 @@ CREATE TABLE IF NOT EXISTS approval_request (
   granted_at      TIMESTAMPTZ NULL,
   expires_at      TIMESTAMPTZ NULL,
 
-  -- #256（add-approval-ttl-check.sql）：'ttl' 必须带时长，否则 expires_at 落 NULL
-  -- = 永久权限，与申请人/审批人看到的「临时」相反。
+  -- 固定档位写 ttl_duration；自定义日期写 requested_expires_at，二者互斥。
   CONSTRAINT approval_request_ttl_duration_required
-    CHECK (grant_type IS DISTINCT FROM 'ttl' OR ttl_duration IS NOT NULL)
+    CHECK (grant_type IS DISTINCT FROM 'ttl' OR ttl_duration IS NOT NULL OR requested_expires_at IS NOT NULL),
+  CONSTRAINT approval_request_ttl_source_exclusive
+    CHECK (ttl_duration IS NULL OR requested_expires_at IS NULL)
 );
 
 CREATE INDEX IF NOT EXISTS approval_request_production_status_idx
