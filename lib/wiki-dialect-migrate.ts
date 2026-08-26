@@ -5,9 +5,10 @@
 //   2. 编辑器载入兼容（SmartTextarea markdown 模式；读历史版本/回滚场景）
 //   3. 渲染侧兼容（WikiMarkdown 渲染 wiki_revision 历史正文——历史不迁移）
 //
-// 只处理 **markdown 上下文**（wiki.body）。plain 上下文（cue.body / event.description
-// / task.description 等十余列）走的是另一套 [#kind:id] token 形态 + 另一个渲染器
-// （SmartText），本轮不动——见 lib/mention-format.ts 的 normalizeLegacyMentions。
+// 原先只处理 markdown 上下文（wiki.body），plain 上下文另有一套 [#kind:id] token
+// 形态 + 另一个渲染器（SmartText）。「一切文本皆文档」之后两者合一：所有正文都是
+// markdown，都走这一个归一化函数——SmartText 与 lib/mention-format 的
+// normalizeLegacyMentions 已随之退役。
 //
 // 幂等：对已是 v2 的正文施加本函数必须原样返回（迁移可重跑，编辑器每次载入都跑）。
 import { encodeMentionHref, encodeUserHref, encodeAssetSrc, type ContentMentionAttrs } from "./mention-types";
