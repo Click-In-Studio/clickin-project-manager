@@ -5,6 +5,7 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { hasGrant } from "@/lib/grant-check";
+import { canViewScriptBlocks, scriptBlocksUnauthorizedUrl } from "@/lib/script-perm";
 import { getSceneFieldPerms } from "@/lib/scene-field-perms";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import ScriptEditor from "@/components/ScriptEditor";
@@ -28,8 +29,8 @@ export default async function ProductionScriptPage({
     getProductionName(id),
   ]);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!access.permCtx.isAdmin && !access.permCtx.isOwner && !await hasGrant(session.userId, id, "script", "*", "blocks", "view"))
-    redirect(`/unauthorized?resource=node%3Ascript%2F*%2Fblocks%40view&id=${id}`);
+  if (!(await canViewScriptBlocks(access.permCtx, id)))
+    redirect(scriptBlocksUnauthorizedUrl(id));
 
   // scene 已拆到字段级门（lib/scene-field-perms）：canEditMetadata 是「值得显示
   // 编辑态」的粗门，紧凑排版/config PUT 单独看 meta/name@edit。

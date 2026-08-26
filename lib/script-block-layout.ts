@@ -7,10 +7,19 @@ import { isMarkerBlock } from "./script-marker-blocks";
 
 export const isTextBlock = (block: Block) => !isMarkerBlock(block);
 
+/**
+ * 两个角色列表是否是同一组。
+ *
+ * 按**多重集**比而不是集合比：原先用 `new Set(a)` + `b.every(...)`，
+ * `a=[x,y]` 与 `b=[x,x]` 会判成相同（长度相等、b 的元素都在 a 的集合里），
+ * 于是角色名被错误省略。characterIds 上游大概率不会出现重复，但这个前提
+ * 没有任何地方保证，而代价只是排序一次。
+ */
 export function sameCharacters(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
-  const s = new Set(a);
-  return b.every((id) => s.has(id));
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((id, i) => id === sb[i]);
 }
 
 export function shouldHideCharacterLabel(prev: Block | null, block: Block): boolean {

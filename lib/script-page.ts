@@ -6,6 +6,9 @@ import {
   withMarkerOwnership,
 } from "./script-marker-blocks";
 import type { MarkerOwnershipDirty, MarkerOwnershipRange } from "./script-marker-ownership-cache";
+// 与渲染层共用同一份判据：估算器和渲染器对「同一组角色」的判断分歧，
+// 会直接变成编辑器里的分页线和打印结果对不上。
+import { sameCharacters } from "./script-block-layout";
 
 // ── Print page config — single source of truth shared with ScriptEditor ───────
 
@@ -37,22 +40,6 @@ export const PAGE_CONFIGS: Record<PageLayout, PageConfig> = {
   // Tablet landscape: two Letter columns side-by-side
   "tablet-2col": { width: 816, height: 1056, marginX: 75, marginTop: 90, marginBottom: 90, headerHeight: 28, footerHeight: 28, cols: 2 },
 };
-
-/**
- * 打印页要注入的 `@page` 规则。
- *
- * 纸张尺寸必须由页盒尺寸算出来，不能写死：`@page size` 只能在 CSS 里声明，
- * 而版式是每个演出自配的（四种，将来 #338 会变成可编辑数据）。原先 globals.css
- * 里硬编码 `size: A4 portrait`，letter / 双排版式打出来纸张对不上，只能靠用户
- * 在打印对话框里手动改。
- *
- * 注意用 cfg.width 而非 cfg.width × cfg.cols：`cols` 目前是死字段，
- * 没有任何地方消费它，双排版式实际渲染的仍是单栏页盒。等真做了双栏排版
- * （#338/#343）再连这里一起改。
- */
-export function printPageCss(cfg: PageConfig): string {
-  return `@page { size: ${cfg.width}px ${cfg.height}px; margin: 0; }`;
-}
 
 // ── Layout metrics derived from PageConfig ────────────────────────────────────
 
@@ -104,12 +91,6 @@ function estimateLines(text: string, upl: number): number {
     total += lineCount;
   }
   return total || 1;
-}
-
-function sameCharacters(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  const s = new Set(a);
-  return b.every((id) => s.has(id));
 }
 
 function charNameHidden(block: Block, prev: Block | null): boolean {

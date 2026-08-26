@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { PAGE_CONFIGS, printPageCss } from "@/lib/script-page";
+import { PAGE_CONFIGS } from "@/lib/script-page";
+import { printPageCss, PRINT_PAGE_CSS_A4 } from "@/lib/print-css";
 import type { PageLayout } from "@/lib/script-types";
 
 /**
@@ -32,6 +33,17 @@ describe("printPageCss", () => {
     for (const layout of layouts) {
       expect(printPageCss(PAGE_CONFIGS[layout])).toContain("margin: 0");
     }
+  });
+
+  it("无版式的打印页（wiki）用纸张关键字，与剧本的 px 页盒是两种形态、同一张纸", () => {
+    // 两者故意不同：剧本有 px 页盒、纸张必须逐点对齐；wiki 是一条流、没有要对齐的
+    // 像素，用关键字更稳（不依赖 96dpi 假设、无取整误差）。
+    expect(PRINT_PAGE_CSS_A4).toBe("@page { size: A4 portrait; margin: 0; }");
+    expect(PRINT_PAGE_CSS_A4).not.toBe(printPageCss(PAGE_CONFIGS.a4));
+    // 但描述的必须是同一张纸：A4 在 96dpi 下就是 794×1123
+    expect(printPageCss(PAGE_CONFIGS.a4)).toContain("794px 1123px");
+    // 两种形态都必须来自 lib/print-css.ts——纸张字面量散落就一定会漂
+    expect(PRINT_PAGE_CSS_A4).toContain("margin: 0");
   });
 
   it("双排版式暂时与单排同尺寸——cols 还是死字段，实现双栏时这条必须一起改", () => {

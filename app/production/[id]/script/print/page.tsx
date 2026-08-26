@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { hasGrant } from "@/lib/grant-check";
+import { canViewScriptBlocks, scriptBlocksUnauthorizedUrl } from "@/lib/script-perm";
 import { getSceneFieldPerms } from "@/lib/scene-field-perms";
 import {
   getProductionPermissionContext,
@@ -41,12 +41,8 @@ export default async function ScriptPrintPage({
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (
-    !access.permCtx.isAdmin &&
-    !access.permCtx.isOwner &&
-    !(await hasGrant(session.userId, id, "script", "*", "blocks", "view"))
-  ) {
-    redirect(`/unauthorized?resource=node%3Ascript%2F*%2Fblocks%40view&id=${id}`);
+  if (!(await canViewScriptBlocks(access.permCtx, id))) {
+    redirect(scriptBlocksUnauthorizedUrl(id));
   }
 
   // 「紧凑排版」开关的门：与编辑器同源（scene 的 meta/name@edit，不是粗门
