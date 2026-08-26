@@ -5,10 +5,13 @@
  * that must hold as the codebase evolves, so future code changes that violate
  * them are caught at CI time.
  *
- * Three invariants:
+ * Invariants:
  *  1. No runtime DDL in application code  (static file scan)
- *  2. Runtime migrations are idempotent   (run twice → no side effects)
- *  3. Schema fingerprint matches seed     (schema drift detection)
+ *  2. Schema fingerprint matches seed     (schema drift detection)
+ *
+ * 曾经的 2「运行时 migration 幂等性」已随最后一支运行时 migration
+ * (ensureScriptMarkerMigration, commit 2110bb1) 一同退役——现在一条都没有，
+ * 存量数据一律走 db/migrate-*.sql。真要新增，先补回这一节（见 DEV_GUIDE §11.5 ②）。
  */
 import { describe, it, expect } from "vitest";
 import { readdir, readFile } from "fs/promises";
@@ -112,11 +115,7 @@ describe("no runtime DDL in application source", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. Runtime migrations are idempotent
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 3. Schema fingerprint — detect seed vs schema drift
+// 2. Schema fingerprint — detect seed vs schema drift
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ColumnEntry = { column: string; type: string; nullable: boolean; default?: string };

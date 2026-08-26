@@ -699,7 +699,7 @@ const session = createSession({ openId: TEST_USER, name: "测试员", avatarUrl:
 
 ### 11.5 开发规约自动化测试（conventions.test.ts）
 
-`tests/conventions.test.ts` 包含三条自动化规约检查，CI 和本地 `npm test` 都会跑。
+`tests/conventions.test.ts` 包含以下自动化规约检查，CI 和本地 `npm test` 都会跑。
 
 #### ① 运行时 DDL 静态扫描
 
@@ -711,45 +711,15 @@ const session = createSession({ openId: TEST_USER, name: "测试员", avatarUrl:
 
 #### ② 运行时 Migration 幂等性
 
-对每个运行时 migration 函数（目前仅 `ensureScriptMarkerMigration`），验证：
+**当前没有任何运行时 migration 函数——这是刻意的。** 最后一支
+`ensureScriptMarkerMigration` 已于 commit `2110bb1` 连同整套基础设施删除，
+原因是运行时迁移路径天生带四个系统性风险：DB 出错时无退避的重试死循环、
+void promise 让调用方观察不到真实成败、进程重启丢失内存态导致全量重跑、
+以及迁移检查闸死整条写路径。存量数据一律走 `db/migrate-*.sql` 人工迁移。
 
-- 对**空 version**（无任何 blocks）调用后立即返回 `{ status: "ready" }`（无数据可迁移）
-- 调用两次，`script_version` 行数不变
-
-**新增运行时 migration 的规则**：每当在应用代码中新增一个运行时 migration 函数，必须在 `conventions.test.ts` 中同步添加对应的幂等性测试，否则 PR 不应被合并。
-
-典型模式（使用工厂演出）：
-
-```typescript
-import { makeProduction, cleanupProduction } from "./factories";
-
-let versionId: string;
-let prodId: string;
-
-beforeAll(async () => {
-  ({ prodId, versionId } = await makeProduction());
-});
-
-afterAll(async () => {
-  await cleanupProduction(prodId).catch(() => {});
-});
-
-it("ensureNewFeatureMigration: fresh version returns ready immediately", async () => {
-  const result = await ensureNewFeatureMigration(versionId);
-  expect(result.status).toBe("ready");
-});
-
-it("ensureNewFeatureMigration: idempotent — row count unchanged", async () => {
-  const before = await getPool().query<{ count: string }>(
-    "SELECT COUNT(*) AS count FROM relevant_table WHERE version_id = $1", [versionId]
-  );
-  await ensureNewFeatureMigration(versionId);
-  const after = await getPool().query<{ count: string }>(
-    "SELECT COUNT(*) AS count FROM relevant_table WHERE version_id = $1", [versionId]
-  );
-  expect(after.rows[0].count).toBe(before.rows[0].count);
-});
-```
+**若确有不得已要新增运行时 migration**：必须在 `conventions.test.ts` 的本节
+补上对应的幂等性测试（空 version 立即返回 ready + 连调两次行数不变），
+并同时给出上述四个风险各自的规避方案，否则 PR 不应被合并。
 
 #### ③ Schema Fingerprint 检查
 

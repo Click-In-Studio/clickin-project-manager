@@ -3335,12 +3335,6 @@
       "nullable": false
     },
     {
-      "column": "num",
-      "type": "text",
-      "nullable": false,
-      "default": "''::text"
-    },
-    {
       "column": "name",
       "type": "text",
       "nullable": false,

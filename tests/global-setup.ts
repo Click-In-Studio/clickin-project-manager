@@ -140,6 +140,12 @@ import {
   type VersionRetireSnapshot,
 } from "./version-retire-snapshot";
 import {
+  isSceneNumRetirePreMigrationSchema,
+  createSceneNumRetirePreMigrationData,
+  SCENE_NUM_RETIRE_SNAPSHOT_PATH,
+  type SceneNumRetireSnapshot,
+} from "./scene-num-retire-snapshot";
+import {
   isWikiCreateBaselinePreMigrationSchema,
   createWikiCreateBaselinePreMigrationData,
   WIKI_CREATE_BASELINE_SNAPSHOT_PATH,
@@ -593,6 +599,18 @@ export async function setup() {
     await pool.query(migrationSql);
   }
 
+  // scene 过渡态收尾（#159）：走真实写路径造 marker，再把 num 塞成与生成号
+  // 不一致的存量残值快照下来，迁移测试验证「场次号由 marker 生成、删列不丢」。
+  if (await isSceneNumRetirePreMigrationSchema(pool)) {
+    const sceneNumSnapshot = await createSceneNumRetirePreMigrationData(pool, TEST_OWNER);
+    await writeFile(SCENE_NUM_RETIRE_SNAPSHOT_PATH, JSON.stringify(sceneNumSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-scene-num-retire.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
   // wiki 引用边泛化（wiki_link → wiki_entity_link）：先裸 SQL 造存量 wiki→wiki
   // 边（应用代码已改写新表，不能走 createWiki），迁移测试验证平移。
   if (await isWikiEntityLinkPreMigrationSchema(pool)) {
@@ -777,6 +795,31 @@ export async function teardown() {
     if (versionRetireSnapshot) {
       await pool.query("DELETE FROM production WHERE id = $1", [versionRetireSnapshot.prodId]).catch(() => {});
       await unlink(VERSION_RETIRE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // scene 过渡态收尾（#159）的工厂演出（migration path only）。
+  // scene_version / character_version 无 CASCADE FK，删演出前先清。
+  {
+    let sceneNumSnapshot: SceneNumRetireSnapshot | null = null;
+    try {
+      sceneNumSnapshot = JSON.parse(
+        await readFile(SCENE_NUM_RETIRE_SNAPSHOT_PATH, "utf8"),
+      ) as SceneNumRetireSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (sceneNumSnapshot) {
+      await pool.query(
+        "DELETE FROM scene_version WHERE scene_id IN (SELECT id FROM scene WHERE production_id = $1)",
+        [sceneNumSnapshot.prodId],
+      ).catch(() => {});
+      await pool.query(
+        "DELETE FROM character_version WHERE character_id IN (SELECT id FROM character WHERE production_id = $1)",
+        [sceneNumSnapshot.prodId],
+      ).catch(() => {});
+      await pool.query("DELETE FROM production WHERE id = $1", [sceneNumSnapshot.prodId]).catch(() => {});
+      await unlink(SCENE_NUM_RETIRE_SNAPSHOT_PATH).catch(() => {});
     }
   }
 
