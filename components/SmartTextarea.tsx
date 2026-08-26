@@ -22,7 +22,6 @@ import {
   encodeUserHref, decodeUserHref, decodeAssetSrc,
   type ContentMentionAttrs,
 } from "@/lib/mention-types";
-import { normalizeLegacyMentions } from "@/lib/mention-format";
 import { normalizeWikiDialect } from "@/lib/wiki-dialect-migrate";
 import { isFeishuHtml, transformFeishuHtml } from "@/lib/feishu-paste";
 import { Callout } from "@/lib/tiptap-callout";
@@ -39,7 +38,6 @@ import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 import BlockHandle from "@/components/editor/BlockHandle";
 import TableTools from "@/components/editor/TableTools";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
-export { normalizeLegacyMentions };
 
 // ── Public types ──────────────────────────────────────────────────────────────
 

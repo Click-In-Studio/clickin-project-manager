@@ -56,6 +56,17 @@ describe("@提及（线上 bug 的修复面）", () => {
     expect(normalizeWikiDialect("@\\[王五\\]\\(uid:u_5\\)")).toBe("[@王五](/__cm__/user/u_5)");
   });
 
+  // 以下两条自退役的 tests/mention-normalize.test.ts 移植（那套 normalizeLegacyMentions
+  // 已被本函数完全覆盖）：多重转义是 round-trip bug 反复施加的产物，线上见过。
+  it("多重转义（二次 round-trip 损坏）也能救回来", () => {
+    expect(normalizeWikiDialect("@\\\\[王五\\\\](uid:u_5)")).toBe("[@王五](/__cm__/user/u_5)");
+  });
+
+  it("被转义的引用链接先复原再收敛（显示位照例塌成哨兵）", () => {
+    expect(normalizeWikiDialect(`\\[#标题\\](/__cm__wiki:${UUID})`))
+      .toBe(`[#](/__cm__/wiki/${UUID})`);
+  });
+
   it("无 id 的裸 @名字 不动（本来就没有指向）", () => {
     expect(normalizeWikiDialect("@某人 请看")).toBe("@某人 请看");
   });
