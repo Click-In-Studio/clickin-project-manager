@@ -54,7 +54,7 @@ import ProductionTopMenu, {
   useProductionToolbarStage,
 } from "@/components/ProductionTopMenu";
 
-import PrintPreview, { PrintPaginationMeasure, samePageMap } from "@/components/print/ScriptPrint";
+import { PrintPaginationMeasure, samePageMap } from "@/components/print/ScriptPrint";
 import ModeSwitch from "@/components/ModeSwitch";
 import { mdToHtml, stagePairRegex } from "@/lib/script-md";
 import { isTextBlock, sameCharacters, shouldHideCharacterLabel, shouldShowCharacterGap, shouldShowSceneEndGap } from "@/lib/script-block-layout";
@@ -9616,7 +9616,6 @@ export default function ScriptEditor({
     setSceneDetails((prev) => prev.map((scene) => (scene.id === id ? { ...scene, ...fields } : scene)));
   };
 
-  const [printPreview, setPrintPreview] = useState(false);
   const commentPanelNavigationTargets = useMemo(
     () => findSideBlockPanelNavigationTargets(
       blocks,
@@ -9648,23 +9647,6 @@ export default function ScriptEditor({
     openBlockSidePanel,
     scrollToBlockIdx,
   ]);
-
-  if (printPreview) {
-    return (
-      <PrintPreview
-        blocks={legacyProjectedBlocks}
-        characters={characters}
-        scenes={scenes}
-        pageLayout={scriptConfig.pageLayout}
-        stageDelimOpen={scriptConfig.stageDelimOpen}
-        stageDelimClose={scriptConfig.stageDelimClose}
-        textLayoutMode={scriptConfig.textLayoutMode}
-        canEditTextLayout={baseCanEditTextLayout}
-        onTextLayoutModeChange={(mode) => saveScriptConfig({ textLayoutMode: mode })}
-        onClose={() => setPrintPreview(false)}
-      />
-    );
-  }
 
   if (loadState === "loading") {
     return (
@@ -10476,12 +10458,17 @@ export default function ScriptEditor({
                 style={toolbarCompact ? nestedMenuPosition.style : undefined}
                 className={`${rightMenuClass} w-36`}
               >
-                <button
-                  onClick={() => { setPrintPreview(true); setOpenMenu(null); }}
-                  className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                {/* 打印页现在是独立路由（#335）。新标签打开：印本子的人通常一边继续
+                    改本子一边比对，同标签跳走会把编辑态一起带走。 */}
+                <Link
+                  href={`/print/script/${productionId}`}
+                  target="_blank"
+                  rel="noopener"
+                  onClick={() => setOpenMenu(null)}
+                  className="block w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
                 >
                   打印预览
-                </button>
+                </Link>
               </div>
             )}
           </div>

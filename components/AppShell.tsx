@@ -1089,7 +1089,9 @@ export default function AppShell({ session, productions, canCreateProduction = f
     return () => window.clearTimeout(timer);
   }, [isScriptPage, productionSidebarFolded]);
 
-  if (!session || pathname.startsWith("/login")) {
+  // 打印路由不要 app shell：纸上不该有导航，无头浏览器也不该为一张 PDF
+  // 加载整个侧栏。判据与 /login 同一条旁路。
+  if (!session || pathname.startsWith("/login") || pathname.startsWith("/print")) {
     return <>{children}</>;
   }
 

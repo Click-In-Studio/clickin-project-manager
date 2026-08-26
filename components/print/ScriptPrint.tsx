@@ -1055,6 +1055,7 @@ export default function PrintPreview({
   canEditTextLayout,
   onTextLayoutModeChange,
   onClose,
+  standalone = false,
 }: {
   blocks: Block[];
   characters: Character[];
@@ -1066,6 +1067,9 @@ export default function PrintPreview({
   canEditTextLayout: boolean;
   onTextLayoutModeChange: (mode: ScriptTextLayoutMode) => void;
   onClose: () => void;
+  /** 打印路由用：本组件就是整个页面，不需要 portal 逃出 app shell，
+   *  也不需要 fixed 覆盖层。同时开启 printReady 信号。 */
+  standalone?: boolean;
 }) {
   const cfg = PAGE_CONFIGS[pageLayout];
   const contentW = cfg.width - cfg.marginX * 2;
@@ -1089,15 +1093,19 @@ export default function PrintPreview({
 
   // 打印强制水印：访问者 [用户名 邮箱]（无视项目屏幕水印开关）
   const [watermarkTile, setWatermarkTile] = useState<string | null>(null);
+  const [watermarkResolved, setWatermarkResolved] = useState(false);
   useEffect(() => {
     let cancelled = false;
     fetch(`${BASE_PATH}/api/me`)
       .then((r) => r.json())
       .then((me: { name: string | null; email: string | null }) => {
-        if (cancelled || !me.name) return;
-        setWatermarkTile(buildWatermarkTile(me.email ? `${me.name} ${me.email}` : me.name));
+        if (cancelled) return;
+        if (me.name) setWatermarkTile(buildWatermarkTile(me.email ? `${me.name} ${me.email}` : me.name));
       })
-      .catch(() => {});
+      .catch(() => {})
+      // 失败也要落 resolved：否则 /api/me 挂掉时 printReady 永远不来，
+      // 无头浏览器只能一直等到超时。
+      .finally(() => { if (!cancelled) setWatermarkResolved(true); });
     return () => { cancelled = true; };
   }, []);
 
@@ -1158,6 +1166,23 @@ export default function PrintPreview({
     data.layoutMode === textLayoutMode &&
     data.measureTick === layoutMeasureTick;
   const showLoadingNotice = forceLoadingNotice || !printPreviewReady;
+
+  // 打印路由的就绪信号：分页测量完成 + 水印解析完成 + 字体加载完成。
+  // 无头浏览器等这个属性，不必 sleep 赌时间。三者缺一都会印出错的东西——
+  // 字体没到位就分页，换行点是回退字体算的；水印没到位就出片，那是一份无水印原件。
+  useEffect(() => {
+    if (!standalone) return;
+    if (!printPreviewReady || !watermarkResolved) return;
+    let cancelled = false;
+    const mark = () => { if (!cancelled) document.body.dataset.printReady = "1"; };
+    const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
+    if (fonts) fonts.ready.then(mark).catch(mark);
+    else mark();
+    return () => {
+      cancelled = true;
+      delete document.body.dataset.printReady;
+    };
+  }, [standalone, printPreviewReady, watermarkResolved]);
 
   useLayoutEffect(() => {
     const viewport = previewViewportRef.current;
@@ -1381,9 +1406,11 @@ export default function PrintPreview({
     );
   };
 
-  // portal 到 body：@media print 下按 body class 隐藏 shell 兄弟子树（globals.css）
-  return createPortal(
-    <div className="script-print-root fixed inset-0 z-50 flex flex-col bg-zinc-300 print:static print:block print:bg-white">
+  // standalone（打印路由）用 h-full：root layout 的 body 是 h-full overflow-hidden，
+  // 内部 previewViewport 自己滚。fixed inset-0 是嵌在编辑器里时用来盖住 app shell 的，
+  // 配合 globals.css 的 body:has(.script-print-root) 在 @media print 下隐藏兄弟子树。
+  const root = (
+    <div className={`script-print-root ${standalone ? "h-full" : "fixed inset-0 z-50"} flex flex-col bg-zinc-300 print:static print:block print:bg-white`}>
       {/* Preview toolbar */}
       <div ref={printToolbarRef} className="flex shrink-0 flex-nowrap items-center overflow-visible border-b border-zinc-200 bg-white px-2 py-3 sm:px-6 print:hidden">
         <span className="shrink-0 whitespace-nowrap text-sm font-semibold text-zinc-700">打印预览</span>
@@ -1556,7 +1583,11 @@ export default function PrintPreview({
           })}
         </div>
       </div>
-    </div>,
-    document.body,
+    </div>
   );
+
+  // 打印路由里本组件就是整页，没有 app shell 要逃，直接渲染；
+  // 嵌在编辑器里时仍需 portal 到 body，靠 globals.css 的
+  // body:has(.script-print-root) 隐藏其余兄弟子树。
+  return standalone ? root : createPortal(root, document.body);
 }
