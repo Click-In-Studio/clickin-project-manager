@@ -29,6 +29,7 @@ import {
   escalateExpiredApprovals,
   previewApprovalLadder,
   formatPgInterval,
+  getActiveVersionId,
   ApprovalRequestError,
   type ApprovalChainEntry,
 } from "@/lib/db";
@@ -37,7 +38,7 @@ import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval-stages";
 import { TTL_OPTIONS, isValidTtlInterval, displayTtlLabel } from "@/lib/approval-ttl";
 import { addResourceDeptManage, createProductionDept, setDeptMembers } from "@/lib/dept-db";
 import { listUserNotifications } from "@/lib/inbox-db";
-import { makeProduction, cleanupProduction } from "./factories";
+import { makeProduction, makeScene, cleanupProduction } from "./factories";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -430,6 +431,28 @@ describe("submitAccessRequest", () => {
     expect(notifs[0].approvalRequestId).toBe(req.id);
     // 上级无权终局 → 主动作是「转交」而非「批准」
     expect(notifs[0].actions.map((a) => a.id)).toEqual(["escalate", "reject"]);
+
+    await cancelRows([req.id]);
+  });
+
+  // #159：scene marker 化后 scene 表只剩 id/production_id，通知正文里的资源名
+  // 却还在查 scene.name/number——具体到某一场的申请一提交就 42703 炸在
+  // notifyStage 里。名字必须从 scene_version（marker 派生读模型）取。
+  it("#159: 具体场次的申请不炸，通知正文带出场次名", async () => {
+    const versionId = (await getActiveVersionId(prodId))!;
+    const sceneId = await makeScene(prodId, versionId, { name: "雾港清晨" });
+
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "scene",
+      resourceId: sceneId,
+      permissionLevel: "view",
+    });
+
+    const notifs = await notifForRequest(U_SUPERVISOR, req.id);
+    expect(notifs.length).toBe(1);
+    expect(notifs[0].body).toContain("雾港清晨");
+    // 反证：解析不到名字时会退化成「所有章节/段落」，那是没修好的样子
+    expect(notifs[0].body).not.toContain("所有章节/段落");
 
     await cancelRows([req.id]);
   });

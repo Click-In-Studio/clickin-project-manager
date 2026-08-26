@@ -3,8 +3,7 @@
  *   A. importScriptToVersion — DB integration (full replacement, character links, cross-production isolation)
  *   B. flushToDBVersioned scene-only path — add / delete / upsert
  *   C. parseSceneNum — pure function (various formats)
- *   D. buildSceneRows / buildSceneMap — pure function (tabular data → structured entries)
- *   E. version-import hybrid — CoW block/cue isolation, orphan GC, v1 preservation
+ *   D. version-import hybrid — CoW block/cue isolation, orphan GC, v1 preservation
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
@@ -19,7 +18,6 @@ import { getPool } from "@/lib/pg";
 import { TEST_USER, TEST_OWNER } from "./helpers";
 import { initialKeys } from "@/lib/lex-order";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
-import { buildSceneRows, buildSceneMap } from "@/lib/import/scene-builder";
 
 // ── shared DB helpers ─────────────────────────────────────────────────────────
 
@@ -71,12 +69,12 @@ async function snapshotIdForBlock(versionId: string, blockId: string): Promise<s
   return r.rows[0]?.snapshot_id ?? null;
 }
 
-async function sceneNumsForVersion(versionId: string): Promise<string[]> {
-  const r = await getPool().query<{ num: string }>(
-    "SELECT num FROM scene_version WHERE version_id = $1 ORDER BY sort_order",
+async function sceneIdsForVersion(versionId: string): Promise<string[]> {
+  const r = await getPool().query<{ scene_id: string }>(
+    "SELECT scene_id FROM scene_version WHERE version_id = $1 ORDER BY sort_order",
     [versionId],
   );
-  return r.rows.map(row => row.num);
+  return r.rows.map(row => row.scene_id);
 }
 
 async function sceneIdentityExists(sceneId: string): Promise<boolean> {
@@ -435,9 +433,9 @@ describe("B: flushToDBVersioned scene-only path", () => {
       upsertChars: [], deleteCharIds: [],
     });
 
-    const nums = await sceneNumsForVersion(versionId);
-    expect(nums).toContain("1");
-    expect(nums).toContain("1-1");
+    const ids = await sceneIdsForVersion(versionId);
+    expect(ids).toContain("b-sc1");
+    expect(ids).toContain("b-sc2");
   });
 
   it("B2: upsert updates existing scene name", async () => {
@@ -463,8 +461,8 @@ describe("B: flushToDBVersioned scene-only path", () => {
       upsertChars: [], deleteCharIds: [],
     });
 
-    const nums = await sceneNumsForVersion(versionId);
-    expect(nums).not.toContain("1-1");
+    const ids = await sceneIdsForVersion(versionId);
+    expect(ids).not.toContain("b-sc2");
 
     // global identity row must survive — other versions/productions may reference it
     expect(await sceneIdentityExists("b-sc2")).toBe(true);
@@ -479,9 +477,9 @@ describe("B: flushToDBVersioned scene-only path", () => {
       upsertChars: [], deleteCharIds: [],
     });
 
-    const nums = await sceneNumsForVersion(versionId);
-    expect(nums).toContain("1");
-    expect(nums).toContain("2");
+    const ids = await sceneIdsForVersion(versionId);
+    expect(ids).toContain("b-sc1");
+    expect(ids).toContain("b-sc3");
   });
 });
 
@@ -546,128 +544,7 @@ describe("C: parseSceneNum", () => {
   });
 });
 
-// ── Group D: buildSceneRows ───────────────────────────────────────────────────
-
-describe("D: buildSceneRows", () => {
-  it("D1: basic rows → SceneRow array with correct fields", () => {
-    const rows: (string | null)[][] = [
-      ["1", "第一幕"],
-      ["1-1", "第一场"],
-    ];
-    const result = buildSceneRows(rows, { sceneNum: 0, sceneName: 1 });
-    expect(result).toHaveLength(2);
-    expect(result[0].rawNum).toBe("1");
-    expect(result[0].name).toBe("第一幕");
-    expect(result[1].parsed.childNum).toBe("1-1");
-  });
-
-  it("D2: empty sceneNum cell is skipped", () => {
-    const rows: (string | null)[][] = [
-      [null, "无编号"],
-      ["2", "第二幕"],
-    ];
-    expect(buildSceneRows(rows, { sceneNum: 0, sceneName: 1 })).toHaveLength(1);
-  });
-
-  it("D3: headerRowIncluded strips first non-empty row", () => {
-    const rows: (string | null)[][] = [
-      ["场次编号", "场次名称"],
-      ["1", "序幕"],
-    ];
-    const result = buildSceneRows(rows, { sceneNum: 0, sceneName: 1 }, true);
-    expect(result).toHaveLength(1);
-    expect(result[0].rawNum).toBe("1");
-  });
-
-  it("D4: name falls back to parsed name when sceneName col is absent", () => {
-    const rows: (string | null)[][] = [["1选择", null]];
-    const result = buildSceneRows(rows, { sceneNum: 0 });
-    expect(result[0].name).toBe("选择");
-  });
-
-  it("D5: optional metadata columns are mapped", () => {
-    const rows: (string | null)[][] = [
-      ["1", "幕一", "简介文字", "调度", "音乐", "舞台呈现", "45分钟"],
-    ];
-    const colMap = { sceneNum: 0, sceneName: 1, intro: 2, actionLine: 3, music: 4, stagePres: 5, duration: 6 };
-    const [r] = buildSceneRows(rows, colMap);
-    expect(r.intro).toBe("简介文字");
-    expect(r.actionLine).toBe("调度");
-    expect(r.music).toBe("音乐");
-    expect(r.stagePres).toBe("舞台呈现");
-    expect(r.duration).toBe("45分钟");
-  });
-
-  it("D6: impliedParentName is set only for child rows", () => {
-    const rows: (string | null)[][] = [
-      ["1选择-1", null],
-      ["2",       null],
-    ];
-    const result = buildSceneRows(rows, { sceneNum: 0 });
-    expect(result[0].impliedParentName).toBe("选择");
-    expect(result[1].impliedParentName).toBeNull();
-  });
-});
-
-// ── Group D continued: buildSceneMap ─────────────────────────────────────────
-
-describe("D: buildSceneMap", () => {
-  it("D7: top-level acts only — no parentNum", () => {
-    const rows: (string | null)[][] = [["1", "第一幕"], ["2", "第二幕"]];
-    const sceneRows = buildSceneRows(rows, { sceneNum: 0, sceneName: 1 });
-    const map = buildSceneMap(sceneRows, new Map(), 1);
-    expect(map.size).toBe(2);
-    expect(map.get("1")?.parentNum).toBeNull();
-    expect(map.get("2")?.parentNum).toBeNull();
-  });
-
-  it("D8: child row implies parent creation with parentName as name", () => {
-    const rows: (string | null)[][] = [["1选择-1", "第一场"]];
-    const sceneRows = buildSceneRows(rows, { sceneNum: 0, sceneName: 1 });
-    const map = buildSceneMap(sceneRows, new Map(), 1);
-    expect(map.has("1")).toBe(true);
-    expect(map.get("1-1")?.parentNum).toBe("1");
-    expect(map.get("1")?.name).toBe("选择");
-  });
-
-  it("D9: duplicate scene num → deduplicated to one entry", () => {
-    const rows: (string | null)[][] = [["1", "幕一"], ["1", "幕一（重复）"]];
-    const sceneRows = buildSceneRows(rows, { sceneNum: 0, sceneName: 1 });
-    const map = buildSceneMap(sceneRows, new Map(), 1);
-    expect(map.size).toBe(1);
-  });
-
-  it("D10: existingByNum reuses existing id and marks sortOrder -1", () => {
-    const existing = new Map([["1", { id: "existing-id-1", number: "1", name: "幕一" }]]);
-    const rows: (string | null)[][] = [["1", "幕一"]];
-    const sceneRows = buildSceneRows(rows, { sceneNum: 0, sceneName: 1 });
-    const map = buildSceneMap(sceneRows, existing, 1);
-    expect(map.get("1")?.id).toBe("existing-id-1");
-    expect(map.get("1")?.sortOrder).toBe(-1);
-  });
-
-  it("D11: new scenes get incremental sortOrders from initialSortOrder", () => {
-    const rows: (string | null)[][] = [["1", "幕一"], ["2", "幕二"]];
-    const sceneRows = buildSceneRows(rows, { sceneNum: 0, sceneName: 1 });
-    const map = buildSceneMap(sceneRows, new Map(), 10);
-    expect(map.get("1")?.sortOrder).toBe(10);
-    expect(map.get("2")?.sortOrder).toBe(11);
-  });
-
-  it("D12: name upgrade — nameless entry gets name when later row provides it", () => {
-    // First row "1-1" creates implied parent "1" with no explicit name
-    // Second row "1 幕名" provides the name for "1"
-    const rows: (string | null)[][] = [
-      ["1-1", null],
-      ["1",   "幕名"],
-    ];
-    const sceneRows = buildSceneRows(rows, { sceneNum: 0, sceneName: 1 });
-    const map = buildSceneMap(sceneRows, new Map(), 1);
-    expect(map.get("1")?.name).toBe("幕名");
-  });
-});
-
-// ── Group E: version-import hybrid ───────────────────────────────────────────
+// ── Group D: version-import hybrid ───────────────────────────────────────────
 //
 // Scenario:
 //   v1: B1, B2, B3 (imported) + cue CQ_rev1
@@ -687,7 +564,7 @@ const PROD_E    = "test-import-e";
 const CL_E_ID   = "test-imp-cl-e";
 const CUE_E_ID  = "test-imp-cue-e";
 
-describe("E: version-import hybrid — CoW block/cue isolation and GC", () => {
+describe("D: version-import hybrid — CoW block/cue isolation and GC", () => {
   let v1Id: string;
   let v2Id: string;
   let snapB2InV2:  string;

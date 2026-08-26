@@ -186,17 +186,17 @@ async function main() {
   );
 
   const scenes = [
-    { id: "demo-scene-1", num: "1", name: "雾港清晨", synopsis: "林澈在旧码头收到一封没有署名的信。", action: "寻找寄信人", music: "序曲《潮声》", duration: "08:00" },
-    { id: "demo-scene-2", num: "2", name: "灯塔之下", synopsis: "旧友重逢，秘密逐渐浮出水面。", action: "确认彼此的选择", music: "二重唱《灯塔不会说谎》", duration: "12:00" },
-    { id: "demo-scene-3", num: "3", name: "离港之前", synopsis: "全体角色在风暴前作出最终决定。", action: "完成告别并启程", music: "终曲《写给明天》", duration: "15:00" },
+    { id: "demo-scene-1", name: "雾港清晨", synopsis: "林澈在旧码头收到一封没有署名的信。", action: "寻找寄信人", music: "序曲《潮声》", duration: "08:00" },
+    { id: "demo-scene-2", name: "灯塔之下", synopsis: "旧友重逢，秘密逐渐浮出水面。", action: "确认彼此的选择", music: "二重唱《灯塔不会说谎》", duration: "12:00" },
+    { id: "demo-scene-3", name: "离港之前", synopsis: "全体角色在风暴前作出最终决定。", action: "完成告别并启程", music: "终曲《写给明天》", duration: "15:00" },
   ];
   for (const [index, scene] of scenes.entries()) {
     await pool.query("INSERT INTO scene (id, production_id) VALUES ($1, $2)", [scene.id, PRODUCTION_ID]);
     await pool.query(
       `INSERT INTO scene_version
-         (scene_id, version_id, num, name, sort_order, synopsis, action_line, music, stage_notes, expected_duration)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [scene.id, versionId, scene.num, scene.name, index, scene.synopsis, scene.action, scene.music, "雾效由弱至强；注意转台安全线。", scene.duration],
+         (scene_id, version_id, name, sort_order, synopsis, action_line, music, stage_notes, expected_duration)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [scene.id, versionId, scene.name, index, scene.synopsis, scene.action, scene.music, "雾效由弱至强；注意转台安全线。", scene.duration],
     );
   }
 

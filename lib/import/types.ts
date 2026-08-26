@@ -84,19 +84,6 @@ export type TypeTagMapping = Record<string, TypeAction | TypeAction[]>; // rawVa
 
 // ─── Import Preview ────────────────────────────────────────────────────────────
 
-export type SceneConflict =
-  | { kind: "nameMismatch"; sceneNum: string; existing: string; incoming: string }
-  | { kind: "orderConflict"; sceneNum: string; existingOrder: number; incomingOrder: number }
-  | { kind: "parentMissing"; sceneNum: string; parentNum: string }
-  | { kind: "markerMissing"; sceneNum: string; sceneName: string };
-
-export type ImportScenePreview = {
-  scenesToAdd: { num: string; name: string; parentNum: string | null }[];
-  scenesToUpdate: { num: string; oldName: string; newName: string }[];
-  metaToUpdate: number; // existing scenes that will have detail fields written
-  conflicts: SceneConflict[];
-};
-
 export type CharConflict =
   | { kind: "aggregateMismatch"; name: string; existingAggregate: boolean; incomingAggregate: boolean };
 

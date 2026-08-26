@@ -162,10 +162,13 @@ CREATE TABLE IF NOT EXISTS scene (
 
 -- scene_version.parent_id references scene(id), not scene_version — the
 -- parent relationship is defined at the scene identity level, not per snapshot.
+--
+-- 本表是 marker block 的派生读模型（syncSceneVersionsFromMarkersInTx 在同一
+-- 事务内重建），不是可独立写入的真相源。场次号（「第一幕」「1-2」）不落库，
+-- 由 marker 层级实时生成（buildMarkerLabelIndex）——原 num 列已退役（#159）。
 CREATE TABLE IF NOT EXISTS scene_version (
   scene_id          TEXT NOT NULL REFERENCES scene(id),
   version_id        TEXT NOT NULL REFERENCES version(id) ON DELETE CASCADE,
-  num               TEXT NOT NULL DEFAULT '',
   name              TEXT NOT NULL DEFAULT '',
   sort_order        INTEGER NOT NULL DEFAULT 0,
   parent_id         TEXT REFERENCES scene(id) ON DELETE SET NULL,
