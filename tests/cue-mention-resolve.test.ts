@@ -174,6 +174,97 @@ describe("cue mention resolve", () => {
     expect(cueResults[0].id).not.toBe(revision);
   });
 
+  it("with no active version, revisions do not eat the SQL-side LIMIT 8", async () => {
+    // block-search 的 DISTINCT ON 只在**无版本过滤**那条分支才有活干。正常库
+    // active_version_id 恒有值，撞不到；这里把它置空，把那条分支拽进可测范围。
+    //
+    // 形状必须让测试真的会红：路由里的 JS 侧 dedup() 也按 kind:id 去重，所以
+    // 只造几条重复是测不出东西的——dedup 会替 DISTINCT ON 兜住。只有当重复行
+    // **撑破 SQL 侧的 LIMIT 8** 时，丢失才不可逆（dedup 跑在已截断的结果上）。
+    // 4 条逻辑 cue × 3 修订 = 12 行 > 8：少了 DISTINCT ON，LIMIT 8 会被编号靠前
+    // 的几条 cue 的重复行占满，靠后的 cue 整条消失。
+    const listId = `t${shortId()}`;
+    const listAbbr = `NV${shortId().slice(0, 3).toUpperCase()}`;
+    await getPool().query(
+      "INSERT INTO cue_list (id, production_id, name, abbr, notes, created_by) VALUES ($1, $2, 'NV表', $3, '', $4)",
+      [listId, prodId, listAbbr, owner],
+    );
+    const logicalIds: string[] = [];
+    for (let n = 1; n <= 4; n++) {
+      const logical = `tcue${shortId()}`;
+      logicalIds.push(logical);
+      await getPool().query(
+        `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
+         VALUES ($1, $1, $2, $3, '', 'gap', 'gap')`,
+        [logical, listId, String(n)],
+      );
+      for (let rev = 0; rev < 2; rev++) {
+        await getPool().query(
+          `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
+           VALUES ($1, $2, $3, $4, '', 'gap', 'gap')`,
+          [`tcue${shortId()}`, logical, listId, String(n)],
+        );
+      }
+    }
+
+    const saved = await getPool().query<{ active_version_id: string | null }>(
+      "UPDATE production SET active_version_id = NULL WHERE id = $1 RETURNING active_version_id", [prodId],
+    );
+    expect(saved.rows[0].active_version_id).toBeNull();
+    try {
+      const req = new NextRequest(
+        `http://localhost/api/production/x/script/block-search?q=${encodeURIComponent(`${listAbbr}.`)}`,
+        { headers: { cookie: `${SESSION_COOKIE}=${createSession({ userId: owner, name: "测试", avatarUrl: null, isAdmin: false })}` } },
+      );
+      const res = await blockSearchGET(req, ctx());
+      expect(res.status).toBe(200);
+      const cueResults = ((await res.json()).results as { kind: string; id: string }[])
+        .filter(r => r.kind === "cue");
+      // 4 条逻辑 cue 一条不少，且各只出现一次
+      expect(new Set(cueResults.map(r => r.id))).toEqual(new Set(logicalIds));
+      expect(cueResults).toHaveLength(logicalIds.length);
+    } finally {
+      await getPool().query("UPDATE production SET active_version_id = $2 WHERE id = $1", [prodId, versionId]);
+    }
+  });
+
+  it("an asset mounted on a foreign production's cue leaks no cue_list_id", async () => {
+    // 本轮补的门：asset 挂载分支的反查同样吐用户可见 URL，少了 production 校验，
+    // 拿外剧组的 cue 行 id 构造 aux 就能套出对方的 cue_list_id/cue_id。
+    const other = await makeProduction(owner);
+    try {
+      const foreignListId = `t${shortId()}`;
+      const foreignCueId = `tcue${shortId()}`;
+      await getPool().query(
+        "INSERT INTO cue_list (id, production_id, name, abbr, notes, created_by) VALUES ($1, $2, 'Q表', 'FG', '', $3)",
+        [foreignListId, other.prodId, owner],
+      );
+      await getPool().query(
+        `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
+         VALUES ($1, $1, $2, '9', '外剧组', 'gap', 'gap')`,
+        [foreignCueId, foreignListId],
+      );
+      // 附件是本剧组的（否则在挂载分支之前就被判"已删除"了）
+      const assetId = `as_${shortId()}`;
+      await getPool().query(
+        `INSERT INTO asset (id, production_id, uploader_user_id, file_name, storage_type)
+         VALUES ($1, $2, $3, 'x.png', 'r2')`,
+        [assetId, prodId, owner],
+      );
+
+      const res = await mentionResolvePOST(
+        resolveReq([{ kind: "asset", id: assetId, aux: `cue:${foreignCueId}` }]), ctx(),
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json() as { labels: (string | null)[]; urls: (string | null)[] };
+      expect(data.labels[0]).toBe("x.png");        // 本剧组附件，名字照给
+      expect(data.urls[0]).toBeNull();             // 但外剧组 cue 的宿主信息一个字不吐
+      expect(JSON.stringify(data)).not.toContain(foreignListId);
+    } finally {
+      await cleanupProduction(other.prodId).catch(() => {});
+    }
+  });
+
   it("does not resolve a cue belonging to another production", async () => {
     const other = await makeProduction(owner);
     try {
