@@ -87,12 +87,13 @@ describe("integrity verification", () => {
   it.each(TEXT_COLUMNS)(
     "%s.%s carries no cue mention anchored on a revision row id",
     async (table, col) => {
-      // 分隔符集合取自 lib/wiki-db.ts 的 CM_HREF_RE / CM_HREF_LEGACY_RE
+      // 分隔符集合逐字镜像 lib/wiki-db.ts 的 CM_HREF_RE / CM_HREF_LEGACY_RE：
+      // id 取 [^)?#&\s]+ / [^):?&\s]+，故边界含空白与串尾，二者都不能漏
       const { rows } = await getPool().query(`
         WITH bad AS (SELECT id FROM cue WHERE cue_id <> id)
         SELECT 1 FROM ${table} t, bad
-        WHERE t.${col} ~ ('/__cm__/cue/' || bad.id || '[)?#&]')
-           OR t.${col} ~ ('/__cm__cue:'  || bad.id || '[):?&]')
+        WHERE t.${col} ~ ('/__cm__/cue/' || bad.id || '([)?#&\\s]|$)')
+           OR t.${col} ~ ('/__cm__cue:'  || bad.id || '([):?&\\s]|$)')
       `);
       expect(rows).toHaveLength(0);
     },
@@ -162,6 +163,18 @@ describe("invariance verification", () => {
     // 旧行 id 一个不留（revA2 与 revAshort 是同一逻辑 cue 的两条修订）
     expect(body).not.toContain(`/__cm__/cue/${s.revA2}`);
     expect(body).not.toContain(`/__cm__/cue/${s.revAshort})`);
+  });
+
+  it.skipIf(!snapshot)("whitespace and end-of-string boundaries are remapped too", async () => {
+    const s = snapshot!;
+    // 提取侧 id 取 [^)?#&\s]+，空白与串尾都是合法边界。替换侧只认 [)?#&] 的话，
+    // 这两处会静默漏替，成为迁移后仍指向行 id 的死引用。
+    const { rows } = await getPool().query<{ body: string }>(
+      `SELECT body FROM wiki WHERE id = $1::uuid`, [s.wikiId],
+    );
+    const body = rows[0].body;
+    expect(body).toContain(`(/__cm__/cue/${s.logicalA} 后面还有字。`); // 空白边界
+    expect(body.endsWith(`(/__cm__/cue/${s.logicalA}`)).toBe(true);    // 串尾边界
   });
 
   it.skipIf(!snapshot)("prefix trap: a longer row id is not truncated by a shorter remap key", async () => {

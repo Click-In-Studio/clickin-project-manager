@@ -9,14 +9,22 @@
 -- 改写逻辑在 TS 里唯一实现）；本条改的只是同一文法下的 **id 取值**，是一次字面
 -- 替换，用 SQL 表达即可——不需要第二个改写脚本。
 --
--- 四件事（同一事务）：
---   1. cue_id 回填 + 收 NOT NULL（存量若有 NULL，逻辑身份即它自己的行 id）
+-- 五件事（同一事务）：
+--   0. 备份将被改写的正文（回滚依据）
+--   1. cue_id 回填（存量若有 NULL，逻辑身份即它自己的行 id）
 --   2. 正文四列里的 cue 引用平移到 cue_id（v2 与 v1 两种形态都收）
 --   3. wiki_entity_link 的 cue 边平移到 cue_id（带去重——同一 wiki 引了同一逻辑
 --      cue 的两条修订，平移后会撞主键）
---   4. 备份被改写的正文（回滚依据）
+--   4. 收尾：cue_id 收 NOT NULL + 建索引（排最后，见该节注释）
 --
 -- 幂等：跑第二遍时 remap 为空（cue_id <> id 的行都已改完），三步全是 no-op。
+--
+-- 开销（一次性，已知并接受）：第 2 步是「每条被 CoW 过的 cue × 每张有 cue 引用的
+-- 正文表」的全表正则扫描，无索引可用。remap 集合**只含被改过的 cue**（cue_id <> id），
+-- 不是全部 cue——开发库 12 行 cue 里只有 2 行入集。has_any_cue 前置判断又把没有任何
+-- cue 引用的表整张跳过（多数库里 comment / agent_memory_chunk 都属此类）。若某天
+-- 线上 remap 集合涨到几百条，应改成「一次扫描 + 单条 regexp_replace 折叠全部 remap」
+-- 再跑；在那之前，这个形状换来的是可读性与可逐条验证。
 --
 -- 执行：psql -f db/migrate-cue-mention-stable-id.sql
 --       npx vitest run tests/cue-mention-stable-id.migration.test.ts
@@ -45,7 +53,7 @@ CREATE TABLE IF NOT EXISTS cue_mention_text_backup (
 -- COALESCE(cur.cue_id, cur.id)——所以 NULL 只可能来自 cue_id 列加上之前的存量行，
 -- 它们的逻辑身份就是自己的行 id。
 --
--- 收 NOT NULL 与建索引都挪到最后（第 5 步）：ALTER 要 ACCESS EXCLUSIVE 锁，而锁
+-- 收 NOT NULL 与建索引都挪到最后（第 4 步）：ALTER 要 ACCESS EXCLUSIVE 锁，而锁
 -- 一直持到 COMMIT。放在开头等于整场正文扫描期间 cue 表对外全锁；放在收尾则只在
 -- 最后一瞬持有。
 UPDATE cue SET cue_id = id WHERE cue_id IS NULL;
@@ -57,8 +65,15 @@ UPDATE cue SET cue_id = id WHERE cue_id IS NULL;
 -- 顺序替换不会发生二次改写，不需要考虑替换顺序。
 --
 -- 边界：id 是不透明 token，`cueXXX` 有可能是 `cueXXXY` 的前缀，裸 replace() 会
--- 咬断长 id。所以按尾随分隔符锚定并回填捕获组——分隔符集合取自 lib/wiki-db.ts
--- 的 CM_HREF_RE / CM_HREF_LEGACY_RE，两条正则认到哪，这里就替到哪。
+-- 咬断长 id。所以按尾随分隔符锚定并回填捕获组——分隔符集合**逐字镜像**
+-- lib/wiki-db.ts 的 CM_HREF_RE / CM_HREF_LEGACY_RE，两条正则认到哪，这里就替到哪：
+--
+--   CM_HREF_RE        id 取 [^)?#&\s]+  → 边界 = ) ? # & 空白 或 串尾
+--   CM_HREF_LEGACY_RE id 取 [^):?&\s]+  → 边界 = ) : ? & 空白 或 串尾
+--
+-- 空白与串尾这两种边界不能漏（AI review 抓到过一次）：`[x](/__cm__/cue/<id>` 这种
+-- 少了右括号的畸形正文，提取侧照样会落边，替换侧漏了就成了替不掉的死引用。
+-- `$` 在 Postgres 默认（非 newline-sensitive）下只匹配串尾，行尾靠 \s 兜住。
 -- （id 由 newCueId / shortId 生成，全是 [0-9a-z] 字面量，不含正则元字符。）
 --
 -- 刻意不做代码围栏保护（extractMentionEdges 会剥 ``` 与行内码再提边，本迁移不剥）：
@@ -100,8 +115,8 @@ BEGIN
 
     FOR r IN SELECT id AS old_id, cue_id AS new_id FROM cue WHERE cue_id <> id
     LOOP
-      v2_pattern := '/__cm__/cue/' || r.old_id || '([)?#&])';
-      v1_pattern := '/__cm__cue:'  || r.old_id || '([):?&])';
+      v2_pattern := '/__cm__/cue/' || r.old_id || '([)?#&\s]|$)';
+      v1_pattern := '/__cm__cue:'  || r.old_id || '([):?&\s]|$)';
 
       -- 备份：只备份**将被本次改写命中**的行，且 DO NOTHING 保证重跑不会用
       -- 已改写的正文覆盖掉原始备份（dialect v2 同款教训）。
@@ -156,7 +171,7 @@ INSERT INTO wiki_entity_link
 SELECT wiki_id, production_id, 'cue', entity_id, origin, created_by, created_at
 FROM cue_edge_remap;
 
--- ── 5. 收尾：NOT NULL + 索引 ─────────────────────────────────────────────────
+-- ── 4. 收尾：NOT NULL + 索引 ─────────────────────────────────────────────────
 -- 排在最后：ALTER 的 ACCESS EXCLUSIVE 锁一直持到 COMMIT，放在开头等于整场正文
 -- 扫描期间 cue 表对外全锁。
 --
@@ -174,20 +189,20 @@ COMMIT;
 --   -- a) 正文里不再有指向行 id 的 cue 引用
 --   WITH bad AS (SELECT id, cue_id FROM cue WHERE cue_id <> id)
 --   SELECT 'wiki' AS t, w.id::text FROM wiki w, bad
---     WHERE w.body ~ ('/__cm__/cue/' || bad.id || '[)?#&]')
---        OR w.body ~ ('/__cm__cue:'  || bad.id || '[):?&]')
+--     WHERE w.body ~ ('/__cm__/cue/' || bad.id || '([)?#&\s]|$)')
+--        OR w.body ~ ('/__cm__cue:'  || bad.id || '([):?&\s]|$)')
 --   UNION ALL
 --   SELECT 'comment', c.id::text FROM comment c, bad
---     WHERE c.body ~ ('/__cm__/cue/' || bad.id || '[)?#&]')
---        OR c.body ~ ('/__cm__cue:'  || bad.id || '[):?&]')
+--     WHERE c.body ~ ('/__cm__/cue/' || bad.id || '([)?#&\s]|$)')
+--        OR c.body ~ ('/__cm__cue:'  || bad.id || '([):?&\s]|$)')
 --   UNION ALL
 --   SELECT 'user_notification', n.id::text FROM user_notification n, bad
---     WHERE n.body ~ ('/__cm__/cue/' || bad.id || '[)?#&]')
---        OR n.body ~ ('/__cm__cue:'  || bad.id || '[):?&]')
+--     WHERE n.body ~ ('/__cm__/cue/' || bad.id || '([)?#&\s]|$)')
+--        OR n.body ~ ('/__cm__cue:'  || bad.id || '([):?&\s]|$)')
 --   UNION ALL
 --   SELECT 'agent_memory_chunk', m.id::text FROM agent_memory_chunk m, bad
---     WHERE m.text ~ ('/__cm__/cue/' || bad.id || '[)?#&]')
---        OR m.text ~ ('/__cm__cue:'  || bad.id || '[):?&]');
+--     WHERE m.text ~ ('/__cm__/cue/' || bad.id || '([)?#&\s]|$)')
+--        OR m.text ~ ('/__cm__cue:'  || bad.id || '([):?&\s]|$)');
 --
 --   -- b) 边表里不再有指向行 id 的 cue 边
 --   SELECT l.* FROM wiki_entity_link l JOIN cue c ON c.id = l.entity_id

@@ -112,6 +112,11 @@ export async function createCueMentionStableIdPreMigrationData(
     `另一条修订 [#SQ.1](/__cm__/cue/${revAshort}) 也要收。`,
     `带锚 [#SQ.1](/__cm__/cue/${revA2}#note) 与参数 [#SQ.1](/__cm__/cue/${revA2}?as=x)。`,
     `不该动：${revAshort} 裸文本、/__cm__/scene/${revA2} 别的 kind。`,
+    // 畸形正文：少了右括号，边界是**空白**。提取侧的 id 取 [^)?#&\s]+，这种照样
+    // 会落边，所以替换侧漏了它就成了替不掉的死引用（AI review 抓到过一次）。
+    `畸形 [x](/__cm__/cue/${revA2} 后面还有字。`,
+    // 边界是**串尾**（本行是正文最后一行，且行尾无任何分隔符）
+    `串尾 [y](/__cm__/cue/${revA2}`,
   ].join("\n");
 
   const wiki = await pool.query<{ id: string }>(

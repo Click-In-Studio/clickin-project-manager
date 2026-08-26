@@ -407,10 +407,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           break;
         case "cue_revision": {
           // mount_id is a revision_id; reverse-map to cue_id + cue_list_id
+          // 同上：加 production 归属校验，别让外剧组的 revision_id 套出宿主信息
           const crr = await pool.query<{ cue_id: string; cue_list_id: string }>(
-            `SELECT cv.cue_id, c.cue_list_id FROM cue_version cv JOIN cue c ON c.id = cv.cue_id
-             WHERE cv.revision_id = $1 LIMIT 1`,
-            [mountId]
+            `SELECT cv.cue_id, c.cue_list_id
+             FROM cue_version cv
+             JOIN cue c ON c.id = cv.cue_id
+             JOIN cue_list cl ON cl.id = c.cue_list_id
+             WHERE cv.revision_id = $1 AND cl.production_id = $2 LIMIT 1`,
+            [mountId, productionId]
           );
           if (crr.rows[0]) {
             const { cue_id, cue_list_id } = crr.rows[0];
@@ -431,9 +435,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // 吐稳定 cue_id——/cues 页按 cue_id 认深链参数。所以这里顺带把行 id 翻成 cue_id。
     if (cueMountIdxs.length > 0) {
       const cueIds = cueMountIdxs.map(x => x.cueId);
+      // production 归属校验与上面的 cue 分支同门：这条查询的产物是用户可见 URL，
+      // 少了它，拿外剧组的 cue id 构造 aux 就能套出对方的 cue_list_id/cue_id。
       const cr = await pool.query<{ id: string; cue_id: string; cue_list_id: string }>(
-        `SELECT id, cue_id, cue_list_id FROM cue WHERE id = ANY($1::text[])`,
-        [cueIds]
+        `SELECT c.id, c.cue_id, c.cue_list_id
+         FROM cue c JOIN cue_list cl ON cl.id = c.cue_list_id
+         WHERE c.id = ANY($1::text[]) AND cl.production_id = $2`,
+        [cueIds, productionId]
       );
       const cueRowMap = new Map(cr.rows.map(row => [row.id, row]));
       for (const { i, cueId } of cueMountIdxs) {
