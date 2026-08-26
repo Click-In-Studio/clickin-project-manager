@@ -215,6 +215,40 @@ describe("owner 保护", () => {
   });
 });
 
+describe("账号合并", () => {
+  it("状态与轨迹跟着身份走，合并不会把已离组的人悄悄复活", async () => {
+    // 合并要求两个账号无共同项目，故另起一个演出
+    const { mergeAccounts } = await import("@/lib/db");
+    const keep = (await upsertFeishuUser(`test-open-${shortId()}`, `留存${shortId()}`, null, false)).userId;
+    const del = (await upsertFeishuUser(`test-open-${shortId()}`, `待并${shortId()}`, null, false)).userId;
+    const owner2 = (await upsertFeishuUser(`test-open-${shortId()}`, `并owner${shortId()}`, null, false)).userId;
+    const { prodId: prod2 } = await makeProduction(owner2);
+
+    try {
+      await addProductionMember(prod2, del);
+      expect((await selfExitMember(prod2, del, "并账号前退出")).ok).toBe(true);
+      expect((await confirmMemberExit(prod2, del, owner2)).ok).toBe(true);
+
+      await mergeAccounts(keep, del);
+
+      // 漏搬 status 三列的话，DEFAULT 'active' 会让这个人在合并后凭空复活
+      const merged = await getMemberStatus(prod2, keep);
+      expect(merged?.status).toBe("exited");
+      expect(merged?.statusSource).toBe("self");
+
+      // 轨迹改指向而不是被级联删掉——否则合并账号就是抹痕迹的第二条路
+      const audit = await listMemberStatusAudit(prod2, keep);
+      expect(audit.map((a) => a.action)).toEqual(
+        expect.arrayContaining(["self_exit", "confirm_exit"]),
+      );
+    } finally {
+      await cleanupProduction(prod2).catch(() => {});
+      await getPool().query("DELETE FROM app_user WHERE id = ANY($1::uuid[])", [[keep, del, owner2]])
+        .catch(() => {});
+    }
+  });
+});
+
 describe("处置链路由", () => {
   it("owner 兜底在列，退出者本人不在列", async () => {
     const handlers = await resolveExitHandlers(prodId, memberId);

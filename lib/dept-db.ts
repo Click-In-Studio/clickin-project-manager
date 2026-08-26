@@ -584,7 +584,8 @@ export async function recomputeAndRevokeGrants(
 /**
  * Revoke ALL active grants for a member being removed from a production,
  * and clean up their role/dept/tag associations.
- * Called inside a transaction by removeProductionMember before the member row is deleted.
+ * Called inside a transaction by confirmMemberExit（lib/member-status.ts）。成员行
+ * **不删**——撤的是授权，留的是人与轨迹（#141）。
  */
 export async function revokeAllGrantsForMember(
   productionId: string,

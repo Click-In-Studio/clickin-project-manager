@@ -4,7 +4,6 @@ import { getSession } from "@/lib/session";
 import {
   listProductionMembers,
   addProductionMember,
-  removeProductionMember,
   setMemberRoles,
   setMemberPhoto,
   setMemberSupervisor,
@@ -90,22 +89,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   return Response.json({ ok: true });
 }
 
-export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = getSession(req.cookies);
-  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  const { id } = await ctx.params;
-  if (await isProductionArchived(id)) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-
-  const { userId } = (await req.json()) as { userId?: string };
-  if (!userId) return Response.json({ error: "缺少 userId" }, { status: 400 });
-
-  if (!session.isAdmin) {
-    const access = await getProductionPermissionContext(session.userId, false, id);
-    if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "member", "*", "*", "delete"))) {
-      return Response.json({ error: "权限不足" }, { status: 403 });
-    }
-  }
-
-  await removeProductionMember(id, userId);
-  return Response.json({ ok: true });
-}
+// DELETE 已退役（#141）：成员记录不可删除。
+//
+// 此前它撤权 + 删行，定位是「误加入」——但审计上删行就是抹痕迹，而「谁在什么时候
+// 被谁从剧组里拿掉」正是最该留下的一条。加错人也走 停用 → 确认离组：名册上多一条
+// 离组记录，换的是任何人都无法抹掉痕迹。

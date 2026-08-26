@@ -2806,15 +2806,33 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
     await client.query(`UPDATE asset SET uploader_user_id = $1 WHERE uploader_user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE asset_mount SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE asset_share_token SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
+    // production_member_status_audit.actor_id 是 NO ACTION 的 FK（#141）：漏了这条，
+    // 任何处置过别人成员状态的账号都无法被合并——DELETE app_user 直接撞 FK 违例。
+    await client.query(
+      `UPDATE production_member_status_audit SET actor_id = $1 WHERE actor_id = $2`,
+      [keepUserId, deleteUserId],
+    );
 
     // 2. Transfer production memberships (safe: no shared productions)
     await client.query(
-      `INSERT INTO production_member (production_id, user_id, roles, photo_url, added_at)
-       SELECT production_id, $1, roles, photo_url, added_at FROM production_member WHERE user_id = $2
+      // status 三列必须一并搬（#141）：漏了的话 DEFAULT 'active' 会把一个 suspended
+      // 或 exited 的成员在合并账号时悄悄复活成在职，而且不留任何审计行。
+      `INSERT INTO production_member
+         (production_id, user_id, roles, photo_url, added_at,
+          status, status_source, status_changed_at, status_changed_by)
+       SELECT production_id, $1, roles, photo_url, added_at,
+              status, status_source, status_changed_at, status_changed_by
+         FROM production_member WHERE user_id = $2
        ON CONFLICT DO NOTHING`,
       [keepUserId, deleteUserId],
     );
     await client.query(`DELETE FROM production_member WHERE user_id = $1`, [deleteUserId]);
+    // 状态轨迹跟着身份走。user_id 是 ON DELETE CASCADE，不改指向的话下面删旧
+    // app_user 时整条轨迹会被静默级联删掉——合并账号成了抹痕迹的第二条路。
+    await client.query(
+      `UPDATE production_member_status_audit SET user_id = $1 WHERE user_id = $2`,
+      [keepUserId, deleteUserId],
+    );
     await client.query(
       `INSERT INTO production_member_permission (production_id, user_id, permission, granted)
        SELECT production_id, $1, permission, granted FROM production_member_permission WHERE user_id = $2
@@ -3203,24 +3221,12 @@ export async function addProductionMember(productionId: string, userId: string):
   }
 }
 
-export async function removeProductionMember(productionId: string, userId: string): Promise<void> {
-  const pool = getPool();
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await revokeAllGrantsForMember(productionId, userId, client);
-    await client.query(
-      "DELETE FROM production_member WHERE production_id = $1 AND user_id = $2",
-      [productionId, userId],
-    );
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
-  } finally {
-    client.release();
-  }
-}
+// removeProductionMember 已删（#141）：成员行不可删除。
+//
+// 它此前撤权 + 删行，定位是「误加入」。但审计上删行就是抹痕迹，而「谁在什么时候被
+// 谁从剧组里拿掉」正是最该留下的一条；留着这个函数，就等于留着一把抹痕迹的刀。
+// 唯一的移出路径是 lib/member-status.ts 的 suspend → confirmMemberExit：撤销授权、
+// 保留成员行与完整轨迹。
 
 export async function setMemberRoles(
   productionId: string,

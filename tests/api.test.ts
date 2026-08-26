@@ -43,7 +43,6 @@ import {
   GET as listMembersHandler,
   POST as addMemberHandler,
   PATCH as updateMemberHandler,
-  DELETE as removeMemberHandler,
 } from "@/app/api/production/[id]/members/route";
 
 // ── Session helpers ────────────────────────────────────────────────────────────
@@ -642,31 +641,8 @@ describe("PATCH /api/production/[id]/members — auth guard", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DELETE /api/production/[id]/members
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("DELETE /api/production/[id]/members — auth guard", () => {
-  it("no cookie → 401", async () => {
-    const res = await removeMemberHandler(
-      req(`/api/production/${AP_PROD}/members`, {
-        method: "DELETE", body: JSON.stringify({ userId: TEST_USER }),
-      }),
-      ctx({ id: AP_PROD }),
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it("non-admin → 403", async () => {
-    const res = await removeMemberHandler(
-      req(`/api/production/${AP_PROD}/members`, {
-        method: "DELETE", body: JSON.stringify({ userId: TEST_USER }), session: userSession(),
-      }),
-      ctx({ id: AP_PROD }),
-    );
-    expect(res.status).toBe(403);
-  });
-});
+// DELETE /api/production/[id]/members 已退役（#141，审计原因：删行即抹痕迹）。
+// 成员移出剧组的唯一路径是 停用 → 确认离组，门测试见 member-exit-routes.test.ts。
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/production/[id] — script state loader

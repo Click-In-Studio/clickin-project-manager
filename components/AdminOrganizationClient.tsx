@@ -138,19 +138,6 @@ export default function AdminOrganizationClient({
     }
   }
 
-  async function removeMember(userId: string) {
-    if (!confirm("确认将该成员从项目中清退？其全部授权将被级联撤销。")) return;
-    if (await api(`/members`, { method: "DELETE", body: JSON.stringify({ userId }) })) {
-      setMembers(prev => prev.filter(m => m.userId !== userId));
-      setDepts(prev => prev.map(d => ({
-        ...d,
-        memberUserIds: d.memberUserIds.filter(id => id !== userId),
-        pocUserIds: d.pocUserIds.filter(id => id !== userId),
-      })));
-      setSelectedUserId(null);
-    }
-  }
-
   // ── 部门操作 ──
   async function saveDeptMembers(dept: Dept, memberUserIds: string[], pocUserIds: string[]) {
     const body = {
@@ -413,7 +400,6 @@ export default function AdminOrganizationClient({
                     isSelf={selected.userId === currentUserId}
                     onPatch={patchMember}
                     onAction={memberAction}
-                    onRemove={removeMember}
                     onSaveDeptMembers={saveDeptMembers}
                   />
                 ) : (
@@ -457,7 +443,7 @@ export default function AdminOrganizationClient({
 // ─── 成员详情 ─────────────────────────────────────────────────────────────────
 
 function MemberDetail({
-  member: m, depts, allMembers, tags, roleNames, caps, busy, isSelf, onPatch, onAction, onRemove, onSaveDeptMembers,
+  member: m, depts, allMembers, tags, roleNames, caps, busy, isSelf, onPatch, onAction, onSaveDeptMembers,
 }: {
   member: Member;
   depts: Dept[];
@@ -473,7 +459,6 @@ function MemberDetail({
     action: "suspend" | "restore" | "confirm_exit",
     apply: (m: Member) => Member,
   ) => Promise<void>;
-  onRemove: (userId: string) => Promise<void>;
   onSaveDeptMembers: (dept: Dept, memberUserIds: string[], pocUserIds: string[]) => Promise<void>;
 }) {
   const myDepts = depts.filter(d => d.memberUserIds.includes(m.userId));
@@ -713,16 +698,10 @@ function MemberDetail({
                 </button>
               </>
             )}
-            <button
-              disabled={busy}
-              onClick={() => onRemove(m.userId)}
-              style={{ ...SECONDARY_BTN, marginLeft: "auto" }}
-            >
-              彻底移除
-            </button>
           </div>
           <p style={{ margin: "8px 0 0", fontSize: 11.5, color: "var(--muted)" }}>
-            「彻底移除」用于误加入——连成员记录一并删除，不留历史。真的参与过就用「确认离组」。
+            成员记录不可删除。加错人也走「停用 → 确认离组」——名册留一条离组记录，
+            换的是任何人都无法抹掉痕迹。
           </p>
         </div>
       )}
