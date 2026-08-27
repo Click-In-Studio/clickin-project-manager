@@ -44,6 +44,7 @@ export default function WikiDocClient({
   backlinks,
   unlinked,
   entityRefs,
+  navigationBasePath,
 }: {
   productionId: string;
   wiki: WikiDoc & { tags: string[] };
@@ -54,9 +55,11 @@ export default function WikiDocClient({
   backlinks: WikiRef[];
   unlinked: WikiRef[];
   entityRefs: WikiEntityRef[];
+  navigationBasePath?: string;
 }) {
   const router = useRouter();
   const api = `${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}`;
+  const routeBase = navigationBasePath ?? `/production/${productionId}/wiki`;
 
   const [title, setTitle] = useState(wiki.title ?? "");
   const [body, setBody] = useState(wiki.body);
@@ -155,7 +158,7 @@ export default function WikiDocClient({
       try {
         const data = JSON.parse((e as MessageEvent).data) as { kind: string; wikiId: string };
         if (data.kind === "deleted" && data.wikiId === wiki.id) {
-          router.replace(`/production/${productionId}/wiki`);
+          router.replace(routeBase);
           return;
         }
         if (refreshTimerRef.current) return; // 批量结构变更（如 AI 连写几篇）合并成一次
@@ -170,7 +173,7 @@ export default function WikiDocClient({
       setPeers([]);
       if (refreshTimerRef.current) { clearTimeout(refreshTimerRef.current); refreshTimerRef.current = null; }
     };
-  }, [wiki.id, productionId, router]);
+  }, [wiki.id, productionId, routeBase, router]);
 
   // 光标位置上报（trailing 节流 400ms——leading 会发陈旧位置）
   const pendingCursorRef = useRef<{ blockIndex: number; offset: number } | null>(null);
@@ -554,7 +557,7 @@ export default function WikiDocClient({
             />
           )
         ) : wiki.body.trim() ? (
-          <WikiMarkdown content={wiki.body} productionId={productionId} />
+          <WikiMarkdown content={wiki.body} productionId={productionId} wikiRouteBase={navigationBasePath} />
         ) : (
           <p className="text-sm text-zinc-400">（空文档）</p>
         )}
@@ -569,7 +572,7 @@ export default function WikiDocClient({
               <p className="text-[11px] uppercase tracking-wide text-zinc-400 mb-1.5">反向链接 {backlinks.length}</p>
               <div className="flex flex-wrap gap-1.5">
                 {backlinks.map(b => (
-                  <Link key={b.id} href={`/production/${productionId}/wiki/${b.id}`}
+                  <Link key={b.id} href={`${routeBase}/${b.id}`}
                     className="rounded-md bg-sky-50 border border-sky-200 px-2 py-0.5 text-xs text-sky-700 hover:bg-sky-100">
                     [[{b.title ?? "（无标题）"}]]
                   </Link>
@@ -582,7 +585,7 @@ export default function WikiDocClient({
               <p className="text-[11px] uppercase tracking-wide text-zinc-400 mb-1.5">未链接的提及 {unlinked.length}</p>
               <div className="flex flex-wrap gap-1.5">
                 {unlinked.map(b => (
-                  <Link key={b.id} href={`/production/${productionId}/wiki/${b.id}`}
+                  <Link key={b.id} href={`${routeBase}/${b.id}`}
                     className="rounded-md bg-zinc-50 border border-zinc-200 px-2 py-0.5 text-xs text-zinc-500 hover:bg-zinc-100">
                     {b.title ?? "（无标题）"}
                   </Link>

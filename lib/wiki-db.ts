@@ -348,45 +348,70 @@ export async function updateWiki(
 
 /** 被挂载（report/note 边引用）的 wiki 不可删；系统锚点目录（默认树的根/event
  *  目录）不可删——移动无妨（锚认 id），删除会打散归档并触发重建震荡。
- *  子文档提根由 FK SET NULL 承担。 */
+ *  子文档不掉顶层，而是上移一层（见函数内注释）。 */
 export async function deleteWiki(
   id: string, productionId: string,
 ): Promise<{ ok: true } | { ok: false; reason: "mounted" | "anchor" | "not_found" }> {
-  const pool = getPool();
-  const exists = await pool.query(
-    `SELECT 1 FROM wiki WHERE id = $1::uuid AND production_id = $2`, [id, productionId]);
-  if (!exists.rows[0]) return { ok: false, reason: "not_found" };
-  const anchor = await pool.query(
-    `SELECT 1 FROM production_wiki_config
-     WHERE reports_root_wiki_id = $1::uuid OR dramaturgy_root_wiki_id = $1::uuid
-     UNION ALL
-     SELECT 1 FROM production_event WHERE report_doc_wiki_id = $1::uuid LIMIT 1`,
-    [id],
-  );
-  if (anchor.rows.length > 0) return { ok: false, reason: "anchor" };
-  const mounted = await pool.query(
-    `SELECT 1 FROM event_report WHERE wiki_id = $1::uuid
-     UNION ALL
-     SELECT 1 FROM event_report_note WHERE wiki_id = $1::uuid LIMIT 1`,
-    [id],
-  );
-  if (mounted.rows.length > 0) return { ok: false, reason: "mounted" };
-  await pool.query(
-    `DELETE FROM production_member_grant WHERE production_id = $1 AND resource_type = 'wiki' AND resource_id = $2`,
-    [productionId, id],
-  );
-  await pool.query(
-    `DELETE FROM resource_person_manage WHERE production_id = $1 AND resource_type = 'wiki' AND resource_id = $2`,
-    [productionId, id],
-  );
-  // wiki_id 侧的边随 FK CASCADE；entity 侧（别的文档指向本文档）无 FK，
-  // 这里顺手清掉。scene/cue 等非 wiki 实体删除时的悬空边是设计内容忍
-  // （反向查询只从活宿主页发起），但 wiki 目标的删除入口在自己手里，一行清零。
-  await pool.query(
-    `DELETE FROM wiki_entity_link WHERE entity_type = 'wiki' AND entity_id = $1`, [id]);
-  await pool.query(`DELETE FROM wiki WHERE id = $1::uuid AND production_id = $2`, [id, productionId]);
-  // 正开着这篇的人要靠这一帧离场——否则下一次软刷新会撞进 notFound()，
-  // 整个人被弹出工程环境（见 WikiDocClient 的 library 监听）。
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    // 拿住被删行的行锁：这不只是把多条写做成原子，更是关掉「删除中途被挂上新子
+    // 文档」的窗口——PG 的 FK 检查会对被引用行取 FOR KEY SHARE，所以并发的
+    // INSERT/UPDATE ... parent_id = <本行> 会阻塞到本事务提交，然后撞 FK 失败
+    // （createWiki 侧表现为「父文档不存在」）。少了这把锁，那个子文档就会绕过
+    // 下面的重挂、被 ON DELETE SET NULL 弹出子树——正是本函数要防的那件事。
+    const locked = await client.query(
+      `SELECT 1 FROM wiki WHERE id = $1::uuid AND production_id = $2 FOR UPDATE`,
+      [id, productionId],
+    );
+    if (!locked.rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
+
+    const anchor = await client.query(
+      `SELECT 1 FROM production_wiki_config
+       WHERE reports_root_wiki_id = $1::uuid OR dramaturgy_root_wiki_id = $1::uuid
+       UNION ALL
+       SELECT 1 FROM production_event WHERE report_doc_wiki_id = $1::uuid LIMIT 1`,
+      [id],
+    );
+    if (anchor.rows.length > 0) { await client.query("ROLLBACK"); return { ok: false, reason: "anchor" }; }
+
+    const mounted = await client.query(
+      `SELECT 1 FROM event_report WHERE wiki_id = $1::uuid
+       UNION ALL
+       SELECT 1 FROM event_report_note WHERE wiki_id = $1::uuid LIMIT 1`,
+      [id],
+    );
+    if (mounted.rows.length > 0) { await client.query("ROLLBACK"); return { ok: false, reason: "mounted" }; }
+
+    await client.query(
+      `DELETE FROM production_member_grant WHERE production_id = $1 AND resource_type = 'wiki' AND resource_id = $2`,
+      [productionId, id],
+    );
+    await client.query(
+      `DELETE FROM resource_person_manage WHERE production_id = $1 AND resource_type = 'wiki' AND resource_id = $2`,
+      [productionId, id],
+    );
+    // wiki_id 侧的边随 FK CASCADE；entity 侧（别的文档指向本文档）无 FK，
+    // 这里顺手清掉。scene/cue 等非 wiki 实体删除时的悬空边是设计内容忍
+    // （反向查询只从活宿主页发起），但 wiki 目标的删除入口在自己手里，一行清零。
+    await client.query(
+      `DELETE FROM wiki_entity_link WHERE entity_type = 'wiki' AND entity_id = $1`, [id]);
+    // 子文档上移一层，而不是靠 parent_id 的 ON DELETE SET NULL 掉到顶层。SET NULL
+    // 会把它们弹出所在子树——在「构作 · 灵感文档」这种只展示某个根子树的工作区
+    // 里，那等于当场从视野里消失（得回「文档」模块才找得回来）。
+    await client.query(
+      `UPDATE wiki SET parent_id = (SELECT parent_id FROM wiki WHERE id = $1::uuid)
+       WHERE parent_id = $1::uuid AND production_id = $2`,
+      [id, productionId],
+    );
+    await client.query(`DELETE FROM wiki WHERE id = $1::uuid AND production_id = $2`, [id, productionId]);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
   broadcastWikiLibraryChange(productionId, { kind: "deleted", wikiId: id });
   return { ok: true };
 }
@@ -412,6 +437,20 @@ export async function getWikiTreeConfig(productionId: string): Promise<WikiTreeC
   return r
     ? { enabled: r.reports_tree_enabled, rootTitle: r.reports_root_title, rootWikiId: r.reports_root_wiki_id }
     : { enabled: true, rootTitle: "报告", rootWikiId: null };
+}
+
+/** 「戏剧构作」根的**只读**读取。渲染路径只准用这个——ensureDramaturgyRootAnchor
+ *  是带行锁的写事务，且会凭空建一篇 wiki，必须留在过完 wiki@create 门的写路径后面。 */
+export async function getDramaturgyTreeConfig(productionId: string): Promise<WikiTreeConfig> {
+  const res = await getPool().query<{ dramaturgy_tree_enabled: boolean; dramaturgy_root_title: string; dramaturgy_root_wiki_id: string | null }>(
+    `SELECT dramaturgy_tree_enabled, dramaturgy_root_title, dramaturgy_root_wiki_id::text AS dramaturgy_root_wiki_id
+     FROM production_wiki_config WHERE production_id = $1`,
+    [productionId],
+  );
+  const r = res.rows[0];
+  return r
+    ? { enabled: r.dramaturgy_tree_enabled, rootTitle: r.dramaturgy_root_title, rootWikiId: r.dramaturgy_root_wiki_id }
+    : { enabled: true, rootTitle: "戏剧构作", rootWikiId: null };
 }
 
 /**

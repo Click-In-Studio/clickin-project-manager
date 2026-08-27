@@ -19,6 +19,7 @@ import ProductionTopMenu, {
 } from "./ProductionTopMenu";
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
 import type { SceneFieldPerms } from "@/lib/scene-field-perms";
+import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
 
 type SceneViewMode = "list" | "table";
 
@@ -274,12 +275,11 @@ export default function Dramaturgy({
     <div className={PRODUCTION_PAGE_SCROLL_ROOT_CLASS}>
       {/* ── Frozen toolbar ── */}
       <ProductionTopMenu overflow={toolbarOverflow}>
-        <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
-          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
-            {productionName}
-          </span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>构作</span>
-        </div>
+        <DramaturgyWorkspaceHeading
+          productionId={productionId}
+          productionName={productionName}
+          active="overview"
+        />
         <ProductionTopMenuDivider />
         <ListTableViewToggle value={sceneViewMode} onChange={setSceneViewMode} />
 
