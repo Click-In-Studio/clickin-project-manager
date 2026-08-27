@@ -8,6 +8,8 @@ import {
   canPlaceWikiUnder, canWriteWikiContainer,
 } from "@/lib/wiki-perm";
 import { broadcastWikiUpdate } from "@/lib/wiki-collab";
+import { readParentAnchor } from "@/lib/wiki-input";
+import { gateWikiAnchorPlacement, resolveWikiAnchorParent } from "@/lib/wiki-placement";
 import type { Mention } from "@/lib/event-db";
 import { setWikiPublic, setWikiListable, type WikiPlacement } from "@/lib/wiki-db";
 
@@ -51,6 +53,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const body = await req.json() as {
     title?: string; body?: string; mentions?: Mention[];
     parentId?: string | null; sortKey?: string; tags?: string[];
+    /** 显式 parentId 缺席时的落位锚点（#355 移入）。语义与 POST /wiki 同：锚点
+     *  可能尚未懒建，由服务端在**过完门之后**补建。 */
+    parentAnchor?: "dramaturgy";
     /** 相对锚点落位（#357 症状②）：客户端只说"放在谁的前/后"，服务端在完整
      *  兄弟集上算键——可枚举性逐节点后客户端兄弟集可能有空洞。 */
     place?: WikiPlacement;
@@ -65,6 +70,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const wantsContent = body.title !== undefined || body.body !== undefined
     || body.mentions !== undefined || body.parentId !== undefined
+    || body.parentAnchor !== undefined
     || body.sortKey !== undefined || body.place !== undefined || body.tags !== undefined;
   if (wantsContent && !await canEditWiki(actor, productionId, wikiId))
     return Response.json({ error: "权限不足" }, { status: 403 });
@@ -73,6 +79,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       && !await canShareWiki(actor, productionId, wikiId))
     return Response.json({ error: "权限不足（分享面）" }, { status: 403 });
 
+  // 字段校验夹在授权与 ensure 之间，位置是两头顶死的：授权在前（403 优先于 400，
+  // AI review #1），ensureDramaturgyRootAnchor 在后（它是写事务，一个最终 400 的
+  // 请求不该凭空建出一篇根文档）。
+  if (body.title !== undefined && !body.title.trim())
+    return Response.json({ error: "标题不能为空" }, { status: 400 });
+  const anchor = readParentAnchor(body.parentAnchor);
+  if (!anchor.ok) return Response.json({ error: "未知的落位锚点" }, { status: 400 });
+
   // 落位/重排门（#357 症状⑤）。三道：
   //   ① 目标父可枚举（枚举面）——不往自己列不出的容器里塞东西
   //   ② 目标父容器可写（写面）——增删/重排子项是对**容器**的改动
@@ -80,22 +94,42 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   // 重排（place/sortKey）等同对当前父的子项改动，①② 都过——列不出的容器谈不上
   // "重排它的子项"（该容器的子项对你本来就不可枚举），403 是正确答案而非误伤。
   // ③ 只在真的换父时才有意义，故额外要 targetParentId !== existing.parentId。
-  const changingParent = body.parentId !== undefined;
-  const targetParentId = changingParent
-    ? (body.parentId?.trim() ? body.parentId.trim() : null)
-    : existing.parentId;
+  //
+  // 锚点落位（#355 移入）：灵感库根可能尚未懒建，此时客户端给的是 parentAnchor 而
+  // 不是 parentId，目标父 id 要等解析完才知道。①② 因此交给
+  // gateAndResolveWikiAnchor——它在**已存在的根**上照常跑这两道，只在根是它当场
+  // 新建时才用恒真论证（见那边的头注释）。③（源父容器可写）与目标无关，照跑。
+  // parentId 与 parentAnchor 同送时锚点胜（`parentId: null` 与"字段缺席"在这里
+  // collapse 成同一个 falsy）——与 POST /wiki 同语义，两处必须一致，别在一处改成
+  // `"parentId" in body` 的口径（AI review #3）。客户端不同送这两个字段。
+  const explicitParentId = body.parentId?.trim() ? body.parentId.trim() : null;
+  const anchorRequested = !explicitParentId && anchor.anchor === "dramaturgy";
+  const changingParent = body.parentId !== undefined || anchorRequested;
+  let resolvedParentId = changingParent ? explicitParentId : existing.parentId;
   if (changingParent || body.place !== undefined || body.sortKey !== undefined) {
-    if (!await canPlaceWikiUnder(actor, productionId, targetParentId))
-      return Response.json({ error: "无权移动到该父文档下" }, { status: 403 });
-    if (!await canWriteWikiContainer(actor, productionId, targetParentId))
-      return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
-    if (changingParent && targetParentId !== existing.parentId
-        && !await canWriteWikiContainer(actor, productionId, existing.parentId))
-      return Response.json({ error: "无权把文档移出原父文档" }, { status: 403 });
+    // ①② 两支同顺位（三/四轮 AI review）：锚点支的门不写库，没有理由排到 ③ 后面
+    if (anchorRequested) {
+      const gate = await gateWikiAnchorPlacement(actor, productionId, "dramaturgy");
+      if (!gate.ok)
+        return Response.json({
+          error: gate.reason === "place" ? "无权移动到该父文档下" : "无权修改该父文档的子目录",
+        }, { status: 403 });
+    } else {
+      if (!await canPlaceWikiUnder(actor, productionId, resolvedParentId))
+        return Response.json({ error: "无权移动到该父文档下" }, { status: 403 });
+      if (!await canWriteWikiContainer(actor, productionId, resolvedParentId))
+        return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
+    }
+    // ③ 换父时源父也要可写。锚点支刻意**无条件**判：目标 id 要解析完才知道，比不了
+    // "是不是真的换父"。代价是"把一篇已经在灵感库根下的文档再移入一次"这种空操作
+    // 也会被源父门 403，fail-closed，别当 bug"修"掉。
+    if (anchorRequested || (changingParent && resolvedParentId !== existing.parentId)) {
+      if (!await canWriteWikiContainer(actor, productionId, existing.parentId))
+        return Response.json({ error: "无权把文档移出原父文档" }, { status: 403 });
+    }
   }
-
-  if (body.title !== undefined && !body.title.trim())
-    return Response.json({ error: "标题不能为空" }, { status: 400 });
+  // 解析（可能懒建根）排在所有门之后，一处都不许提前
+  if (anchorRequested) resolvedParentId = await resolveWikiAnchorParent(productionId, "dramaturgy");
 
   try {
     if (wantsContent) {
@@ -106,7 +140,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         ...(body.body !== undefined ? { body: body.body } : {}),
         ...(body.body !== undefined && body.baseBody !== undefined ? { mergeBase: body.baseBody } : {}),
         ...(body.mentions !== undefined ? { mentions: body.mentions } : {}),
-        ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
+        ...(changingParent ? { parentId: resolvedParentId } : {}),
         ...(body.sortKey !== undefined ? { sortKey: body.sortKey } : {}),
         ...(body.place !== undefined ? { place: body.place } : {}),
         ...(body.tags !== undefined ? { tags: body.tags } : {}),

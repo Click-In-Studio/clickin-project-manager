@@ -10,8 +10,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import TreePickerModal from "@/components/TreePickerModal";
+import AdminModal from "@/components/AdminModal";
+import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import type { WikiListEntry } from "@/lib/wiki-db";
 import type { WikiAliasEntry } from "@/lib/wiki-alias-db";
+import type { WikiMoveInCandidate } from "@/lib/dramaturgy-wiki";
 
 type DropZone = "before" | "after" | "inside";
 
@@ -32,6 +35,7 @@ export default function WikiShell({
   productionId,
   wikis,
   aliases = [],
+  moveInCandidates = [],
   canCreate,
   selectedId,
   navigationBasePath,
@@ -43,6 +47,11 @@ export default function WikiShell({
   wikis: WikiListEntry[];
   /** 软链接别名（#358）。服务端已过判定式：父可枚举 ∧ 本地可枚举(目标)。 */
   aliases?: WikiAliasEntry[];
+  /**
+   * 「移入」候选（#355）：**作用域工作区专用**——子树外、该用户可枚举的文档。
+   * 不给它就没有移入入口：完整文档库里全库本来就在树上，"移入"无从谈起。
+   */
+  moveInCandidates?: WikiMoveInCandidate[];
   canCreate: boolean;
   selectedId?: string;
   /** Optional route namespace for a scoped wiki workspace. API paths stay unchanged. */
@@ -286,7 +295,7 @@ export default function WikiShell({
   async function remove(id: string) {
     const it = byId.get(id);
     if (it?.kind === "alias") {
-      if (!confirm(`确认移除软链接「${it.title ?? "（无标题）"}」？目标文档不受影响。`)) return;
+      if (!confirm(`确认移除链接「${it.title ?? "（无标题）"}」？目标文档不受影响。`)) return;
       setMenu(null);
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki-alias/${id}`,
         { method: "DELETE" });
@@ -298,13 +307,23 @@ export default function WikiShell({
     // 指向本篇的软链接会随删（服务端在同一事务内清）——只数得出自己看得见的那些，
     // 所以措辞是"至少"，不给一个会撒谎的精确数字
     const linked = aliases.filter(a => a.targetType === "wiki" && a.targetId === id).length;
-    const extra = linked > 0 ? `\n指向它的软链接（至少 ${linked} 处）也会一并移除。` : "";
+    const extra = linked > 0 ? `\n指向它的链接（至少 ${linked} 处）也会一并移除。` : "";
     if (!confirm(`确认删除「${it?.title ?? "该文档"}」？子文档将上移一层。${extra}`)) return;
     setMenu(null);
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${id}`, { method: "DELETE" });
     if (!res.ok) { alert((await res.json()).error ?? "删除失败"); return; }
     if (id === selectedId) router.push(routeBase);
     router.refresh();
+  }
+
+  /**
+   * 落到本工作区**顶层**的落位载荷。作用域工作区的根是懒建的：一篇都还没有时
+   * rootParentId 是空的，此时不能直接送 parentId:null（那是**全库**顶层，文档会
+   * 掉出工作区），而是声明锚点、由服务端过完门后补建根（#355）。
+   */
+  function rootPlacement(): { parentId: string | null; parentAnchor?: "dramaturgy" } {
+    if (rootParentId) return { parentId: rootParentId };
+    return { parentId: null, ...(rootAnchor ? { parentAnchor: rootAnchor } : {}) };
   }
 
   async function move(id: string, targetIds: string[]) {
@@ -318,7 +337,7 @@ export default function WikiShell({
     const res = await fetch(endpoint, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ parentId: target === "__root__" ? rootParentId ?? null : target }),
+      body: JSON.stringify(target === "__root__" ? rootPlacement() : { parentId: target }),
     });
     if (!res.ok) { alert((await res.json()).error ?? "移动失败"); return; }
     router.refresh();
@@ -349,13 +368,47 @@ export default function WikiShell({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        parentId: target === "__root__" ? rootParentId ?? null : target,
+        ...(target === "__root__" ? rootPlacement() : { parentId: target }),
         targetType: "wiki",
         targetId,
       }),
     });
-    if (!res.ok) { alert((await res.json()).error ?? "创建软链接失败"); return; }
+    if (!res.ok) { alert((await res.json()).error ?? "创建链接失败"); return; }
     if (target !== "__root__") setExpanded(prev => new Set([...prev, target]));
+    router.refresh();
+  }
+
+  // ── 移入（#355）：把子树外的一篇文档带进本工作区 ────────────────────────────
+  // 两种形态是**同一个入口**的两个选项，不拆成两个功能：
+  //   本体移入 —— 改 parent_id，它从原位置消失、出现在这里
+  //   建链接   —— 原位置不动，这里多一个指向它的位置（#358 的伪节点）
+  // 两者的门不同档：本体移入要 canEditWiki(本篇) ∧ 源父容器可写，建链接只要
+  // wiki@create ∧ 目标可达——所以"只能建链接、不能移本体"是常态，不是异常。
+  const [movingInPick, setMovingInPick] = useState(false);
+  const [movingIn, setMovingIn] = useState<WikiMoveInCandidate | null>(null);
+
+  async function moveInBody(c: WikiMoveInCandidate) {
+    setMovingIn(null);
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${c.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(rootPlacement()),
+    });
+    if (!res.ok) { alert((await res.json()).error ?? "移入失败"); return; }
+    router.push(`${routeBase}/${c.id}`);
+    router.refresh();
+  }
+
+  async function moveInLink(c: WikiMoveInCandidate) {
+    setMovingIn(null);
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki-alias`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...rootPlacement(), targetType: "wiki", targetId: c.id }),
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error ?? "移入失败"); return; }
+    router.push(`${routeBase}/${data.alias.id}`);
     router.refresh();
   }
 
@@ -507,7 +560,7 @@ export default function WikiShell({
                         active ? "font-semibold text-sky-800" : "text-zinc-600"
                       }`}
                       title={item.kind === "alias"
-                        ? `软链接 → ${item.alias.targetTitle ?? "（无标题）"}`
+                        ? `链接 → ${item.alias.targetTitle ?? "（无标题）"}`
                         : item.title ?? undefined}
                     >
                       {isAlias && <span className="mr-1 text-[10px] text-zinc-400">↗</span>}
@@ -566,6 +619,17 @@ export default function WikiShell({
             >
               ＋ 新建文档
             </button>
+            {/* 移入（#355）：把子树外的文档带进本工作区。只有作用域工作区给候选。 */}
+            {moveInCandidates.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setMovingInPick(true)}
+                title="把「文档」模块里已有的一篇带进本工作区"
+                className="shrink-0 px-3 py-2 text-[13px] text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50 border-l border-zinc-100"
+              >
+                移入
+              </button>
+            )}
             <button
               type="button"
               onClick={() => importInputRef.current?.click()}
@@ -609,7 +673,7 @@ export default function WikiShell({
               className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
               onClick={() => { const id = menu.id; setMenu(null); setLinkingId(id); }}
             >
-              软链接到…
+              链接到…
             </button>
           )}
           {/* 显示名只改这个位置上的标签，目标标题不动（#358 ⑤） */}
@@ -650,7 +714,7 @@ export default function WikiShell({
                 className="w-full text-left px-3 py-1.5 text-[13px] text-red-600 hover:bg-red-50"
                 onClick={() => remove(menu.id)}
               >
-                {it?.kind === "alias" ? "移除软链接" : "删除"}
+                {it?.kind === "alias" ? "移除链接" : "删除"}
               </button>
             );
           })()}
@@ -678,7 +742,7 @@ export default function WikiShell({
       {linkingId && (
         <TreePickerModal
           kicker="Wiki"
-          title={`把「${byId.get(linkingId)?.title ?? ""}」软链接到…`}
+          title={`把「${byId.get(linkingId)?.title ?? ""}」链接到…`}
           items={containerItemsFor(linkingId)}
           preselected={[]}
           single
@@ -686,6 +750,78 @@ export default function WikiShell({
           onClose={() => setLinkingId(null)}
         />
       )}
+
+      {/* 移入第一步：选一篇子树外的文档。候选已在服务端过完枚举面——列不到的
+          文档不会出现在这里，也就不存在"选了个自己看不见的 id"这回事。 */}
+      {movingInPick && (
+        <TreePickerModal
+          kicker="Wiki"
+          title="移入文档"
+          items={moveInCandidates.map(c => ({
+            id: c.id,
+            label: c.title ?? "（无标题）",
+            parentId: c.parentId,
+            ...(c.linked ? { badge: "已有链接" } : {}),
+          }))}
+          preselected={[]}
+          single
+          onConfirm={ids => {
+            setMovingInPick(false);
+            const picked = moveInCandidates.find(c => c.id === ids[0]);
+            if (picked) setMovingIn(picked);
+          }}
+          onClose={() => setMovingInPick(false)}
+        />
+      )}
+
+      {/* 移入第二步：本体还是链接。默认按上下文——游离文档（没有父）默认移本体，
+          已经挂在别处的默认建链接（那个位置多半有人在用，抽走本体是对别人的改动）。
+          「移入本体」在无权时灰掉而不是隐藏：让人看见这条路存在、且为什么走不通。 */}
+      {movingIn && (() => {
+        const c = movingIn;
+        const preferLink = c.parentId !== null;
+        return (
+          <AdminModal
+            kicker="Wiki"
+            title={`移入「${c.title ?? "（无标题）"}」`}
+            onClose={() => setMovingIn(null)}
+            width={420}
+          >
+            <div className="flex flex-col gap-3">
+              <button
+                type="button"
+                disabled={!c.canMoveBody}
+                onClick={() => moveInBody(c)}
+                style={{
+                  ...(preferLink || !c.canMoveBody ? SECONDARY_BTN : PRIMARY_BTN),
+                  // 内联样式压过 tailwind 的 disabled:*，灰化只能也写在这里
+                  ...(c.canMoveBody ? {} : { opacity: 0.4, cursor: "not-allowed" }),
+                }}
+                className="text-left"
+              >
+                移入本体
+              </button>
+              <p className="-mt-2 text-[12px] text-zinc-500">
+                {c.canMoveBody
+                  ? "它从原位置消失，只出现在这里。"
+                  : "你没有这篇文档（或它所在目录）的编辑权，改不了它的位置。"}
+              </p>
+              <button
+                type="button"
+                onClick={() => moveInLink(c)}
+                style={preferLink || !c.canMoveBody ? PRIMARY_BTN : SECONDARY_BTN}
+                className="text-left"
+              >
+                建链接
+              </button>
+              <p className="-mt-2 text-[12px] text-zinc-500">
+                原位置不动，这里多一个指向它的位置。正文只有一份，改哪边都是同一篇。
+                {c.linked && "（这里已经有指向它的链接了）"}
+              </p>
+            </div>
+          </AdminModal>
+        );
+      })()}
     </div>
   );
 }

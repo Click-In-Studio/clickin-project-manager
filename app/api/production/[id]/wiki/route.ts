@@ -1,8 +1,10 @@
 import { type NextRequest } from "next/server";
+import { readParentAnchor } from "@/lib/wiki-input";
+import { gateWikiAnchorPlacement, resolveWikiAnchorParent } from "@/lib/wiki-placement";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { createWiki, searchWiki, ensureDramaturgyRootAnchor } from "@/lib/wiki-db";
+import { createWiki, searchWiki } from "@/lib/wiki-db";
 import {
   listVisibleWikiIds, canPlaceWikiUnder, canWriteWikiContainer,
 } from "@/lib/wiki-perm";
@@ -63,25 +65,32 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     parentAnchor?: "dramaturgy";
   };
   if (!body.title?.trim()) return Response.json({ error: "标题不能为空" }, { status: 400 });
+  const anchor = readParentAnchor(body.parentAnchor);
+  if (!anchor.ok) return Response.json({ error: "未知的落位锚点" }, { status: 400 });
 
   // 落位双门（#357 症状⑤）。与移动同门——否则"无权移入就改为在目标父下新建"
   // 是条后门。
   //
   // 门必须跑在 ensureDramaturgyRootAnchor **之前**：那是个写事务，会凭空建一篇
   // wiki，让它成为一个最终被 403 的请求的副作用是 write-before-authz（AI review
-  // 二轮 #1）。所以只对**显式父**判定；锚点路径不判——不是跳过检查，是两道门在
-  // 锚点上恒真且可静态论证：锚点 is_public + listable 默认真 + 挂顶层 ⇒ ① 恒真；
-  // isWikiAnchor 分支 ⇒ ② 恒真。配置关闭时 ensure 返回 null＝落顶层，同样无门。
+  // 二轮 #1）。锚点路径的目标父 id 又要等 ensure 跑完才知道——这个先有鸡还是先有
+  // 蛋由 gateAndResolveWikiAnchor 拆开：根已存在就照常跑双门，只在根是它当场新建
+  // 时才用恒真论证。配置关闭时它返回 null＝落顶层，根容器上两道门恒真。
   const explicitParentId = body.parentId?.trim() || null;
+  let parentId = explicitParentId;
   if (explicitParentId) {
     if (!await canPlaceWikiUnder(actor, productionId, explicitParentId))
       return Response.json({ error: "无权在该父文档下创建" }, { status: 403 });
     if (!await canWriteWikiContainer(actor, productionId, explicitParentId))
       return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
+  } else if (anchor.anchor === "dramaturgy") {
+    const gate = await gateWikiAnchorPlacement(actor, productionId, "dramaturgy");
+    if (!gate.ok)
+      return Response.json({
+        error: gate.reason === "place" ? "无权在该父文档下创建" : "无权修改该父文档的子目录",
+      }, { status: 403 });
+    parentId = await resolveWikiAnchorParent(productionId, "dramaturgy");
   }
-
-  const parentId = explicitParentId
-    ?? (body.parentAnchor === "dramaturgy" ? await ensureDramaturgyRootAnchor(productionId) : null);
 
   try {
     const wiki = await createWiki({

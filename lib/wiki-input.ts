@@ -1,6 +1,6 @@
 import type { WikiPlacement } from "./wiki-db";
 
-// ─── 软链接路由的入参收口（#358，AI review #3）──────────────────────────────
+// ─── wiki / 链接路由的入参收口（#358 AI review #3；#355 起两族路由共用）─────
 //
 // 路由拿到的是 `await req.json()`，运行时可以是任何东西。`body.parentId?.trim()`
 // 这种写法对着一个数字就是 TypeError → 500：不是安全问题（门在后面），但一个成员
@@ -20,4 +20,20 @@ export function readPlacement(v: unknown): WikiPlacement | null {
   if (typeof anchorId !== "string" || anchorId.trim() === "") return null;
   if (side !== "before" && side !== "after") return null;
   return { anchorId: anchorId.trim(), side };
+}
+
+/**
+ * 落位锚点（#355）：显式 parentId 缺席时"挂到哪棵系统树下"的声明。
+ *
+ * 与上面两个"形状不对当没给"的姿态**相反**——这个字段一旦给错就是静默错落位：
+ * 文档落到全库顶层、掉出目标工作区，而调用方以为成功了。合法值只有一个，认不出来
+ * 就 400，不猜。
+ */
+export type WikiParentAnchor = "dramaturgy";
+export function readParentAnchor(
+  v: unknown,
+): { ok: true; anchor: WikiParentAnchor | null } | { ok: false } {
+  if (v === undefined || v === null) return { ok: true, anchor: null };
+  if (v === "dramaturgy") return { ok: true, anchor: "dramaturgy" };
+  return { ok: false };
 }
