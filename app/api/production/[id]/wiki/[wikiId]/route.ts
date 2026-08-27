@@ -2,13 +2,14 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
-import { getWiki, updateWiki, deleteWiki, ensureDramaturgyRootAnchor } from "@/lib/wiki-db";
+import { getWiki, updateWiki, deleteWiki } from "@/lib/wiki-db";
 import {
   canViewWiki, canEditWiki, canDeleteWiki, canShareWiki,
   canPlaceWikiUnder, canWriteWikiContainer,
 } from "@/lib/wiki-perm";
 import { broadcastWikiUpdate } from "@/lib/wiki-collab";
 import { readParentAnchor } from "@/lib/wiki-input";
+import { gateAndResolveWikiAnchor } from "@/lib/wiki-placement";
 import type { Mention } from "@/lib/event-db";
 import { setWikiPublic, setWikiListable, type WikiPlacement } from "@/lib/wiki-db";
 
@@ -95,38 +96,39 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   // ③ 只在真的换父时才有意义，故额外要 targetParentId !== existing.parentId。
   //
   // 锚点落位（#355 移入）：灵感库根可能尚未懒建，此时客户端给的是 parentAnchor 而
-  // 不是 parentId。ensureDramaturgyRootAnchor 是写事务，必须留在门后面（同 POST
-  // /wiki 的 write-before-authz 论证）——所以目标父的 ①② 只对**显式父**判定，
-  // 锚点路径不判：根 is_public + listable ⇒ ① 恒真，isWikiAnchor ⇒ ② 恒真。
-  // ③（源父容器可写）与目标无关，锚点路径照跑。
+  // 不是 parentId，目标父 id 要等解析完才知道。①② 因此交给
+  // gateAndResolveWikiAnchor——它在**已存在的根**上照常跑这两道，只在根是它当场
+  // 新建时才用恒真论证（见那边的头注释）。③（源父容器可写）与目标无关，照跑。
   // parentId 与 parentAnchor 同送时锚点胜（`parentId: null` 与"字段缺席"在这里
   // collapse 成同一个 falsy）——与 POST /wiki 同语义，两处必须一致，别在一处改成
   // `"parentId" in body` 的口径（AI review #3）。客户端不同送这两个字段。
   const explicitParentId = body.parentId?.trim() ? body.parentId.trim() : null;
   const anchorRequested = !explicitParentId && anchor.anchor === "dramaturgy";
   const changingParent = body.parentId !== undefined || anchorRequested;
+  let resolvedParentId = changingParent ? explicitParentId : existing.parentId;
   if (changingParent || body.place !== undefined || body.sortKey !== undefined) {
     if (!anchorRequested) {
-      const targetParentId = changingParent ? explicitParentId : existing.parentId;
-      if (!await canPlaceWikiUnder(actor, productionId, targetParentId))
+      if (!await canPlaceWikiUnder(actor, productionId, resolvedParentId))
         return Response.json({ error: "无权移动到该父文档下" }, { status: 403 });
-      if (!await canWriteWikiContainer(actor, productionId, targetParentId))
+      if (!await canWriteWikiContainer(actor, productionId, resolvedParentId))
         return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
-      if (changingParent && targetParentId !== existing.parentId
-          && !await canWriteWikiContainer(actor, productionId, existing.parentId))
+    }
+    // ③ 换父时源父也要可写。锚点支刻意**无条件**判：目标 id 要解析完才知道，比不了
+    // "是不是真的换父"。代价是"把一篇已经在灵感库根下的文档再移入一次"这种空操作
+    // 也会被源父门 403，fail-closed，别当 bug"修"掉。
+    if (anchorRequested || (changingParent && resolvedParentId !== existing.parentId)) {
+      if (!await canWriteWikiContainer(actor, productionId, existing.parentId))
         return Response.json({ error: "无权把文档移出原父文档" }, { status: 403 });
-    } else if (!await canWriteWikiContainer(actor, productionId, existing.parentId)) {
-      // 刻意的不对称（AI review #4）：显式父那支只在真的换父时判 ③，锚点这支无条件
-      // 判——锚点 id 要 ensure 之后才知道，而 ensure 不许跑在门前面。代价是"把一篇
-      // 已经在灵感库根下的文档再移入一次"这种空操作也会被源父门 403，fail-closed，
-      // 别当 bug"修"掉。
-      return Response.json({ error: "无权把文档移出原父文档" }, { status: 403 });
+    }
+    if (anchorRequested) {
+      const placed = await gateAndResolveWikiAnchor(actor, productionId, "dramaturgy");
+      if (!placed.ok)
+        return Response.json({
+          error: placed.reason === "place" ? "无权移动到该父文档下" : "无权修改该父文档的子目录",
+        }, { status: 403 });
+      resolvedParentId = placed.parentId;
     }
   }
-
-  const resolvedParentId = changingParent
-    ? (explicitParentId ?? (anchorRequested ? await ensureDramaturgyRootAnchor(productionId) : null))
-    : existing.parentId;
 
   try {
     if (wantsContent) {

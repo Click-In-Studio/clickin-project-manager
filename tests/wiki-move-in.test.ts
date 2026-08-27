@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { createWiki, getDramaturgyTreeConfig, listWikiLibrary } from "@/lib/wiki-db";
+import { createWiki, getDramaturgyTreeConfig, listWikiLibrary, setWikiListable } from "@/lib/wiki-db";
 import {
   listDramaturgyMoveInCandidates, listDramaturgyWikiAliases, listDramaturgyWikiSubtree,
 } from "@/lib/dramaturgy-wiki";
@@ -224,6 +224,44 @@ describe("PATCH /wiki 的 parentAnchor 落位（本体移入）", () => {
       await cleanupProduction(clean).catch(() => {});
     }
   });
+  // 二轮 AI review #2：锚点支原先无条件跳过落位双门，静态论证挂在**新建那一刻**的
+  // 属性上。根建出来之后属性会变——有人把「戏剧构作」根的 listable 关掉，① 就不
+  // 再恒真。现在根已存在就照常判，这一对（关掉→403 / 打开→200）就是那道门还活着
+  // 的证人。
+  it("根已存在且对我不可枚举时，锚点落位照样 403", async () => {
+    const { prodId: clean } = await makeProduction();
+    const owner = await newMember(clean);
+    const mover = await newMember(clean);
+    users.push(owner, mover);
+    try {
+      // 先由 admin 走一次 parentAnchor 把根建出来
+      const seed = await createWiki({ productionId: clean, title: "种子", createdBy: owner });
+      await wikiPATCH(patchReq(clean, seed.id, owner, true, { parentAnchor: "dramaturgy" }),
+        { params: Promise.resolve({ id: clean, wikiId: seed.id }) });
+      const rootId = (await getDramaturgyTreeConfig(clean)).rootWikiId!;
+      expect(rootId).not.toBeNull();
+
+      // 自己建的文档：createWiki 已经落了创建者行集，edit 门自然过
+      const doc = await createWiki({ productionId: clean, title: "我的一篇", createdBy: mover });
+
+      await setWikiListable(rootId, clean, false);
+      const blocked = await wikiPATCH(
+        patchReq(clean, doc.id, mover, false, { parentAnchor: "dramaturgy" }),
+        { params: Promise.resolve({ id: clean, wikiId: doc.id }) });
+      expect(blocked.status).toBe(403);
+      expect((await listWikiLibrary(clean)).find(w => w.id === doc.id)?.parentId).toBeNull();
+
+      await setWikiListable(rootId, clean, true);
+      const ok = await wikiPATCH(
+        patchReq(clean, doc.id, mover, false, { parentAnchor: "dramaturgy" }),
+        { params: Promise.resolve({ id: clean, wikiId: doc.id }) });
+      expect(ok.status).toBe(200);
+      expect((await ok.json()).wiki.parentId).toBe(rootId);
+    } finally {
+      await cleanupProduction(clean).catch(() => {});
+    }
+  });
+
   // 锚点路径跳过的是**目标父**那两道（在锚点上恒真），不是内容门。少了这条，
   // "移入" 就成了一条绕开 canEditWiki 改别人文档位置的路。
   it("无本篇 edit 权时 403，锚点路径不因跳过落位双门而漏掉内容门", async () => {

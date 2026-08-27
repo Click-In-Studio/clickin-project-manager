@@ -4,7 +4,7 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { canReachAliasTarget, createWikiAlias, isWikiAliasTargetType } from "@/lib/wiki-alias-db";
 import { canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki-perm";
-import { ensureDramaturgyRootAnchor } from "@/lib/wiki-db";
+import { gateAndResolveWikiAnchor } from "@/lib/wiki-placement";
 import { readParentAnchor, readPlacement, readTrimmedId } from "@/lib/wiki-input";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -34,22 +34,25 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const targetType = readTrimmedId(body.targetType) ?? "wiki";
   const displayTitle = typeof body.displayTitle === "string" ? body.displayTitle
     : body.displayTitle === null ? null : undefined;
+  // 锚点落位（#355 移入）：灵感库根尚未懒建时客户端给 parentAnchor 而不是 parentId。
+  // 两者同送时锚点胜——与 PATCH /wiki 同语义，见那边的 AI review #3 注释。
+  const anchor = readParentAnchor(body.parentAnchor);
+  const explicitParentId = readTrimmedId(body.parentId);
+  const place = readPlacement(body.place);
+
+  // ① 能力门在**所有**字段校验之前：授权优先于格式，无 create 权的人不该先收到一条
+  // "你的 targetType 写错了"（二轮 AI review #1；PATCH /wiki 那边同一姿态）。
+  if (!await hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"))
+    return Response.json({ error: "权限不足" }, { status: 403 });
+
   if (!targetId) return Response.json({ error: "缺少链接目标" }, { status: 400 });
   if (!isWikiAliasTargetType(targetType))
     return Response.json({ error: "暂不支持这种链接目标" }, { status: 400 });
-  const anchor = readParentAnchor(body.parentAnchor);
   if (!anchor.ok) return Response.json({ error: "未知的落位锚点" }, { status: 400 });
-  // 锚点落位（#355 移入）：灵感库根尚未懒建时客户端给 parentAnchor 而不是 parentId。
-  // ensure 是写事务，留在门后面解析（同 POST /wiki）。两者同送时锚点胜——与
-  // PATCH /wiki 同语义，见那边的 AI review #3 注释。
-  const explicitParentId = readTrimmedId(body.parentId);
   const anchorRequested = !explicitParentId && anchor.anchor === "dramaturgy";
-  const place = readPlacement(body.place);
 
-  if (!await hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"))
-    return Response.json({ error: "权限不足" }, { status: 403 });
-  // 落位双门只对**显式父**判定；锚点路径两道恒真且可静态论证（根 is_public +
-  // listable ⇒ ①，isWikiAnchor ⇒ ②），见 POST /wiki 同段注释。
+  // ② 落位双门。锚点支的目标父 id 要解析完才知道，交给 gateAndResolveWikiAnchor：
+  // 根已存在就照常跑这两道，只在根是它当场新建时才用恒真论证。
   if (!anchorRequested) {
     if (!await canPlaceWikiUnder(actor, productionId, explicitParentId))
       return Response.json({ error: "无权在该父文档下创建" }, { status: 403 });
@@ -59,8 +62,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!await canReachAliasTarget(actor, productionId, targetType, targetId))
     return Response.json({ error: "目标文档不存在或不可见" }, { status: 403 });
 
-  const parentId = explicitParentId
-    ?? (anchorRequested ? await ensureDramaturgyRootAnchor(productionId) : null);
+  let parentId = explicitParentId;
+  if (anchorRequested) {
+    const placed = await gateAndResolveWikiAnchor(actor, productionId, "dramaturgy");
+    if (!placed.ok)
+      return Response.json({
+        error: placed.reason === "place" ? "无权在该父文档下创建" : "无权修改该父文档的子目录",
+      }, { status: 403 });
+    parentId = placed.parentId;
+  }
 
   const res = await createWikiAlias({
     productionId, parentId, targetType, targetId,
