@@ -6,6 +6,7 @@ import {
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasGrant } from "@/lib/grant-check";
+import { canAccessNode } from "@/lib/grant-template";
 import { diffState } from "@/lib/script-ops";
 import { insertHierarchyMarker, projectMarkers } from "@/lib/script-marker-domain";
 import { rejectNonHeadWrite } from "@/lib/head-version";
@@ -53,8 +54,13 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!permCtx.isAdmin && !permCtx.isOwner && !await hasGrant(permCtx.userId, id, "scene", "*", "*", "create")) {
-    return Response.json({ error: "权限不足" }, { status: 403 });
+  // 六步链（行 ∪ 区间，admin/owner 在第 1 步旁路）——与 characters 的 create 同口径。
+  const createAccess = await canAccessNode(permCtx, id, "scene", "*", "*", "create");
+  if (!createAccess.allowed) {
+    return Response.json(
+      { error: createAccess.reason === "needs_self_confirm" ? "请先确认创建权限" : "权限不足" },
+      { status: 403 },
+    );
   }
   const body = await req.json();
   const nonHead = await rejectNonHeadWrite(id, typeof body.versionId === "string" ? body.versionId : null);

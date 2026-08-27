@@ -79,7 +79,19 @@ export async function getSceneFieldPerms(
        AND (expires_at IS NULL OR expires_at > NOW())`,
     [productionId, userId],
   );
+  return sceneFieldPermsFromRows(rows);
+}
 
+/**
+ * 纯函数层：按 hasGrant 的 sub 匹配语义（sub ∈ {具体 sub, '*'}）折行成门。
+ *
+ * `any` 是「值得显示编辑态外壳」的粗门，**不能**当成任何单枚键用——只持
+ * synopsis@edit 的人 any 为真但 create/delete 全假。前端曾经拿 any 去开
+ * 「新建场次」「删除」按钮，点下去必然 403。
+ */
+export function sceneFieldPermsFromRows(
+  rows: readonly { resource_sub: string; permission_level: string }[],
+): SceneFieldPerms {
   const has = (sub: string, verb: string): boolean =>
     rows.some(r => (r.resource_sub === sub || r.resource_sub === "*") && r.permission_level === verb);
 
