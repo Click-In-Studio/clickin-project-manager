@@ -86,6 +86,11 @@ const FORMATTED_TO_LABEL: Record<string, string> = {
   "7天":   "1 周",
   "30天":  "30 天",
   "180天": "180 天",
+  // 已退役的旧档位（2026-08-17 前提交的申请、以及 seed 演示数据）仍在库里，
+  // 回显口径不能跟着档位表一起删——删掉这两条，那些行就从「1 月」变回 pg 的
+  // 原样「1个月」。这张表的职责是「pg 输出 → 人话」，不是「当前档位表」。
+  "1天":   "1 天",
+  "1个月": "1 月",
 };
 
 export function displayTtlLabel(formatted: string | null | undefined): string | null {

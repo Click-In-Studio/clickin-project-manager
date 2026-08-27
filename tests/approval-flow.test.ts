@@ -879,6 +879,125 @@ describe("#256 临时权限确实会过期", () => {
     await revokeAll(U_UNRELATED);
   });
 
+  it("自定义日期在审批完成前被跨过：申请自动结束，不是「已被他人处理」", async () => {
+    // 自定义档存的是绝对时间，审批拖过所选日期是常态。加这条守卫之前，
+    // approve 会落到 first-action-wins 的 0 行分支回一句 conflict 的假错误，
+    // 而申请永远停在 pending，待办永远挂在审批人收件箱里。
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      requestedExpiresAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    });
+    // 模拟审批人在到期日之后才来处理
+    await getPool().query(
+      `UPDATE approval_request SET requested_expires_at = now() - interval '1 hour' WHERE id = $1`,
+      [req.id]);
+
+    const result = await approveAccessRequest(req.id, U_POC);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("expired");
+
+    // 申请被终结，不再是 pending —— 否则待办永远清不掉
+    const row = await getPool().query<{ status: string; resolved_at: Date | null }>(
+      `SELECT status, resolved_at FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].status).toBe("cancelled");
+    expect(row.rows[0].resolved_at).not.toBeNull();
+
+    // 审批人的待办过期，收件箱不堆积
+    const liveTodo = await getPool().query(
+      `SELECT 1 FROM user_notification
+        WHERE approval_request_id = $1 AND user_id <> $2
+          AND expired_at IS NULL AND acted_at IS NULL`, [req.id, U_UNRELATED]);
+    expect(liveTodo.rows).toHaveLength(0);
+
+    // 申请人收到「已过期、需重提」的告知——否则这条申请是悄无声息地死掉的
+    const told = await getPool().query<{ title: string }>(
+      `SELECT title FROM user_notification
+        WHERE approval_request_id = $1 AND user_id = $2 AND expired_at IS NULL`,
+      [req.id, U_UNRELATED]);
+    expect(told.rows.map((r) => r.title)).toContain("资源访问申请已过期");
+
+    // 一条都没发出去
+    const grants = await getPool().query(
+      `SELECT 1 FROM production_member_grant WHERE approval_id = $1`, [req.id]);
+    expect(grants.rows).toHaveLength(0);
+
+    // 链末条记明原因，时间线才能说清「我那条申请怎么自己没了」
+    const fresh = (await listMyAccessRequests(prodId, U_UNRELATED)).find((r) => r.id === req.id);
+    const last = fresh?.escalationChain[fresh.escalationChain.length - 1];
+    expect(last?.cancelReason).toBe("expired");
+    expect(last?.bySystem).toBe(true);
+
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("过期的自定义申请也不能被向上转交（转交只是把它挪进下一位的收件箱）", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      requestedExpiresAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    });
+    await getPool().query(
+      `UPDATE approval_request SET requested_expires_at = now() - interval '1 hour' WHERE id = $1`,
+      [req.id]);
+
+    const result = await escalateAccessRequest(req.id, U_POC);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("expired");
+
+    const row = await getPool().query<{ status: string }>(
+      `SELECT status FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].status).toBe("cancelled");
+
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("两个有效期字段同时传是 400（invalid_ttl），不是撞 DB 约束的 500", async () => {
+    // 互斥必须按**存在性**判：DB 的 approval_request_ttl_source_exclusive 卡的
+    // 就是存在性。按「哪个校验通过」判的话，下面这两种脏输入会一路穿到
+    // Postgres —— 一个撞 check constraint，一个撞 timestamptz 语法。
+    for (const bad of [
+      new Date(Date.now() - 86_400_000).toISOString(),  // 合法格式但已过期
+      "not-a-date",                                     // 根本不是时间
+      new Date(Date.now() + 86_400_000).toISOString(),  // 两个都合法，仍然违反互斥
+    ]) {
+      await expect(
+        submitAccessRequest(prodId, U_UNRELATED, {
+          resourceType: "cue_list",
+          permissionLevel: "view",
+          grantType: "ttl",
+          ttlDuration: "7 days",
+          requestedExpiresAt: bad,
+        }),
+      ).rejects.toMatchObject({ reason: "invalid_ttl" });
+    }
+    // 两个都不传同样是 invalid_ttl（#256 的原始症状）
+    await expect(
+      submitAccessRequest(prodId, U_UNRELATED, {
+        resourceType: "cue_list",
+        permissionLevel: "view",
+        grantType: "ttl",
+      }),
+    ).rejects.toMatchObject({ reason: "invalid_ttl" });
+  });
+
+  it("空串等价于没传，不能变成 ''::TIMESTAMPTZ 的 500", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      ttlDuration: "7 days",
+      requestedExpiresAt: "",
+    });
+    expect(req.requestedExpiresAt).toBeNull();
+    expect(req.ttlDurationLabel).toBe("7天");
+    await revokeAll(U_UNRELATED);
+  });
+
   it("TTL 档位表：只认 1 周 / 30 天 / 180 天，并支持长期与自定义", () => {
     expect(TTL_OPTIONS.map((o) => o.value)).toEqual(["1w", "30d", "180d", "permanent", "custom"]);
     expect(TTL_OPTIONS.map((o) => o.interval)).toEqual(["7 days", "30 days", "180 days", null, null]);
@@ -894,6 +1013,9 @@ describe("#256 临时权限确实会过期", () => {
     expect(displayTtlLabel("7天")).toBe("1 周");
     expect(displayTtlLabel("180天")).toBe("180 天");
     expect(displayTtlLabel(null)).toBeNull();
+    // 已退役的旧档位仍在库里，回显口径不能跟着档位表一起删
+    expect(displayTtlLabel("1天")).toBe("1 天");
+    expect(displayTtlLabel("1个月")).toBe("1 月");
   });
 });
 

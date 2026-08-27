@@ -6898,7 +6898,7 @@ export type ApprovalChainEntry = {
   /** escalated 的原因：超时自动升级 / 审批人手动转发。 */
   escalationReason?: "timeout" | "forwarded";
   /** cancelled 的原因：申请人主动撤回 / 被同目标的新申请覆盖。 */
-  cancelReason?: "by_subject" | "superseded";
+  cancelReason?: "by_subject" | "superseded" | "expired";
   /**
    * 审批意见：批准/拒绝/转交/撤回时写下的理由，随动作落在这一级上。
    *
@@ -7236,6 +7236,65 @@ async function expireRequestNotifications(requestId: string): Promise<void> {
 }
 
 /**
+ * 自定义有效期的申请，在「提交 → 批准」的等待期里被跨过到期日 = 这条申请已经
+ * 没有可发放的东西了。自定义档位存的是**绝对时间**（不像固定档位从批准时起算），
+ * 所以审批拖过所选日期是常态，不是边角。
+ *
+ * 不处理的话它会落到 approve 的 first-action-wins 0 行分支，回一句「已被他人
+ * 处理」的假错误，而申请永远停在 pending —— 审批人点多少次都是同一条谎，待办
+ * 永远挂在收件箱里。按「被新申请取代」的同一套处理：自动 cancel、过期待办、
+ * 链上记明原因，并告诉申请人这条已经作废、需要重提。
+ *
+ * 返回 true 表示这次调用确实把它终结了（或它已被并发的另一路终结）。
+ */
+async function cancelIfCustomExpiryPassed(req: ApprovalRow): Promise<boolean> {
+  if (!req.requested_expires_at || req.requested_expires_at.getTime() > Date.now()) return false;
+
+  // 到期判定以 DB 的 now() 为准，别用上面那次 JS 比较的结果去写库：
+  // JS 侧只是为了不给绝大多数请求平白加一次 UPDATE。
+  const res = await getPool().query<{ id: string }>(
+    `UPDATE approval_request
+     SET status = 'cancelled', resolved_at = now(),
+         current_stage = NULL, current_approver_ids = '{}'
+     WHERE id = $1
+       AND status IN ('pending_supervisor', 'pending_resource')
+       AND requested_expires_at IS NOT NULL
+       AND requested_expires_at <= now()
+     RETURNING id`,
+    [req.id],
+  );
+  if (!res.rows[0]) return false;
+
+  // resolved_by 留 NULL：没有人处理这条申请，是它自己作废的。时间线据此把终结
+  // 节点画成「系统自动处理」而不是安一个并没做事的操作人。
+  await markLastChainEntry(req.id, {
+    action: "cancelled", actedAt: new Date().toISOString(),
+    bySystem: true, cancelReason: "expired",
+  });
+  await expireRequestNotifications(req.id);
+
+  const desc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");
+  await notifyUser({
+    userId: req.subject_id,
+    productionId: req.production_id,
+    kind: "approval_request_result",
+    entityType: "approval_request",
+    entityId: req.id,
+    title: "资源访问申请已过期",
+    body: `你申请的${desc}在审批完成前已过所选的到期日期，申请自动结束。如仍需要，请重新提交并选择更晚的日期。`,
+    viewHref: `${SERVER_URL}/production/${req.production_id}/access-requests`,
+    category: "warning",
+    approvalRequestId: req.id,
+    buildExternalMessage: async () => ({
+      text: `你申请的${desc}已过所选到期日期，需重新提交`,
+      title: `资源申请已过期`,
+      primaryUrl: `${SERVER_URL}/production/${req.production_id}/access-requests`,
+    }),
+  });
+  return true;
+}
+
+/**
  * 把申请推进到指定级：给旧末条补落点、追加新级条目、改写 current_*，
  * 并对「当前级」做乐观锁 —— 手动转交与 cron 超时升级可能撞车，
  * WHERE 里带上原级 → 只有一个能成。
@@ -7411,12 +7470,20 @@ export async function submitAccessRequest(
   const grantType = params.grantType ?? "permanent";
   // 固定档位与自定义日期二选一。校验放在这里而非只在路由——任何调用方
   // 都必须经过同一道门，避免 ttl 落成 expires_at=NULL 的永久权限。
-  const ttlDuration = grantType === "ttl" ? params.ttlDuration ?? null : null;
-  const requestedExpiresAt = grantType === "ttl" ? params.requestedExpiresAt ?? null : null;
-  const validDuration = isValidTtlInterval(ttlDuration);
-  const validCustomExpiry = isValidCustomExpiry(requestedExpiresAt);
-  if (grantType === "ttl" && validDuration === validCustomExpiry) {
-    throw new ApprovalRequestError("invalid_ttl");
+  //
+  // 互斥要按**存在性**判，不能按「哪个校验通过」判：DB 的
+  // approval_request_ttl_source_exclusive 卡的就是存在性，两边口径一错，
+  // 「合法 ttlDuration + 垃圾 requestedExpiresAt」这种脏输入会一路穿到
+  // Postgres，换来一个 500 而不是 400（AI review #353）。
+  // `||` 而非 `??`：空串要归一成 NULL，否则 ''::TIMESTAMPTZ 同样是 500。
+  const ttlDuration = grantType === "ttl" ? params.ttlDuration || null : null;
+  const requestedExpiresAt = grantType === "ttl" ? params.requestedExpiresAt || null : null;
+  if (grantType === "ttl") {
+    const hasDuration = ttlDuration !== null;
+    const hasCustomExpiry = requestedExpiresAt !== null;
+    if (hasDuration === hasCustomExpiry) throw new ApprovalRequestError("invalid_ttl");
+    if (hasDuration && !isValidTtlInterval(ttlDuration)) throw new ApprovalRequestError("invalid_ttl");
+    if (hasCustomExpiry && !isValidCustomExpiry(requestedExpiresAt)) throw new ApprovalRequestError("invalid_ttl");
   }
 
   // ROOT 节点（批F 三态）owner-only、连审批通道都没有——申请不该被收下
@@ -7523,7 +7590,7 @@ export async function approveAccessRequest(
   rawComment?: string | null,
 ): Promise<
   | { ok: true; request: ApprovalRequest }
-  | { ok: false; reason: "not_found" | "conflict" | "unauthorized" | "forward_only" | "comment_too_long" }
+  | { ok: false; reason: "not_found" | "conflict" | "unauthorized" | "forward_only" | "expired" | "comment_too_long" }
 > {
   const comment = normalizeApprovalComment(rawComment);
   if (isApprovalCommentTooLong(comment)) return { ok: false, reason: "comment_too_long" };
@@ -7534,6 +7601,9 @@ export async function approveAccessRequest(
 
   const auth = await authorizeApprovalAction(req, actorId);
   if (!auth.authorized) return { ok: false, reason: "unauthorized" };
+  // 自定义到期日已被跨过：批下去只会发一条出生即失效的授权。放在鉴权之后、
+  // forward_only 之前——本级处理不了的人也该看到「这条已经过期」而不是「去转交」。
+  if (await cancelIfCustomExpiryPassed(req)) return { ok: false, reason: "expired" };
   // 直属上级本人没有该权限 → 只能转发（#140）
   if (!auth.canFinalize) return { ok: false, reason: "forward_only" };
 
@@ -7635,7 +7705,7 @@ export async function escalateAccessRequest(
   rawComment?: string | null,
 ): Promise<
   | { ok: true; request: ApprovalRequest }
-  | { ok: false; reason: "not_found" | "conflict" | "unauthorized" | "no_next_stage" | "comment_too_long" }
+  | { ok: false; reason: "not_found" | "conflict" | "unauthorized" | "no_next_stage" | "expired" | "comment_too_long" }
 > {
   const comment = normalizeApprovalComment(rawComment);
   if (isApprovalCommentTooLong(comment)) return { ok: false, reason: "comment_too_long" };
@@ -7646,6 +7716,8 @@ export async function escalateAccessRequest(
 
   const auth = await authorizeApprovalAction(req, actorId);
   if (!auth.authorized) return { ok: false, reason: "unauthorized" };
+  // 往上转交一条已经作废的申请，只是把它挪到下一位审批人的收件箱里继续烂着
+  if (await cancelIfCustomExpiryPassed(req)) return { ok: false, reason: "expired" };
 
   const ladder = await buildApprovalLadder(approvalTargetOf(req));
   const next = nextStage(ladder, currentPositionOf(req));

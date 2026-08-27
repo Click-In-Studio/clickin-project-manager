@@ -95,7 +95,10 @@ function fmtDate(iso: string) {
   const hhmm = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
   if (d >= todayStart)     return `今天 ${hhmm}`;
   if (d >= yesterdayStart) return `昨天 ${hhmm}`;
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+  // 不同年就必须带上年份：到期时间天然是往后看的（180 天档、自定义日期都轻易
+  // 跨年），只写「12月31日」读者无从判断是哪一年，而这正是有效期最关键的一位。
+  const yearPrefix = d.getFullYear() === now.getFullYear() ? "" : `${d.getFullYear()}年`;
+  return `${yearPrefix}${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
 // ─── StatusBadge ──────────────────────────────────────────────────────────────
@@ -372,7 +375,9 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
         <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>有效期</label>
         {/* 档位只能来自 lib/approval-ttl 的 TTL_OPTIONS——服务端按同一份表白名单校验，
             页面自己硬编码天数会被 400 挡掉（#256 的成因，见该文件顶部注释）。 */}
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${TTL_OPTIONS.length}, minmax(0, 1fr))`, gap: 7 }}>
+        {/* auto-fit 而非等分 N 列：档位从 4 个涨到 5 个后，「180 天」在抽屉宽度下
+            会被挤到折行。窄容器里让它自己换行成两排，比每个按钮都断字好读。 */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(62px, 1fr))", gap: 7 }}>
           {TTL_OPTIONS.map((o) => {
             const active = ttlOption === o.value;
             return (
@@ -631,6 +636,9 @@ export default function AccessRequestsClient({ productionId, productionName }: P
       } else {
         const data = await res.json().catch(() => ({}));
         setActionError((data as { error?: string }).error ?? "转交失败");
+        // 与 handleApprove 一致：失败也要重拉。过期自动结束的申请已经不在待办里，
+        // 不重拉的话它会继续留在列表上，点一次错一次。
+        await fetchPending();
       }
     } finally { setActing(null); }
   }

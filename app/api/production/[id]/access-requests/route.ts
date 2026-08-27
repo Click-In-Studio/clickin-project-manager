@@ -1,7 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { ApprovalRequestError, getProductionPermissionContext, listMyAccessRequests, submitAccessRequest } from "@/lib/db";
-import { isValidCustomExpiry, isValidTtlInterval } from "@/lib/approval-ttl";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -42,13 +41,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "申请格式已更新，请刷新页面后重试" }, { status: 400 });
   }
 
-  // 固定档位传 ttlDuration，自定义日期传 requestedExpiresAt，必须且只能有一个。
+  // #256：「临时」必须带有效期——固定档位传 ttlDuration，自定义日期传
+  // requestedExpiresAt，必须且只能有一个。这道门只在 submitAccessRequest 里有一份
+  // （invalid_ttl 由下面的 catch 翻成 400），路由不再抄第二份：抄两份就会漂，
+  // 上一版路由按「哪个校验通过」判互斥、DB 约束按「存在性」判，脏输入直接穿到
+  // Postgres 变 500。
   const grantType = body.grantType ?? "permanent";
-  const validDuration = isValidTtlInterval(body.ttlDuration);
-  const validCustomExpiry = isValidCustomExpiry(body.requestedExpiresAt);
-  if (grantType === "ttl" && validDuration === validCustomExpiry) {
-    return Response.json({ error: "临时权限必须选择有效期" }, { status: 400 });
-  }
 
   try {
     const request = await submitAccessRequest(id, session.userId, {

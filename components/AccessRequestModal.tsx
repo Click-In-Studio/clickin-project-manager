@@ -146,6 +146,9 @@ export default function AccessRequestModal({
     setResourceType(RESOURCE_OPTIONS[0].type);
     setPermissionLevel(RESOURCE_OPTIONS[0].levels[0].value);
     setTtlOption("permanent");
+    // 一起清掉：不清的话重开表单再选「自定义」会带出上次的日期，而那个日期
+    // 很可能已经是过去时间——min 只挡新选，挡不住残留值。
+    setCustomExpiryDate("");
     setNote(initialNote ?? "");
     setError(null);
     setDone(false);
