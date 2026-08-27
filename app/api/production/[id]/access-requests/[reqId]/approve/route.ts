@@ -24,6 +24,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
     if (result.reason === "not_found") return Response.json({ error: "申请不存在" }, { status: 404 });
     if (result.reason === "unauthorized") return Response.json({ error: "无权审批" }, { status: 403 });
+    // 自定义有效期在审批等待期内被跨过：申请已自动结束，说清楚，别混进
+    // 「已被他人处理」——那句话既不真也没告诉审批人下一步该做什么。
+    if (result.reason === "expired") {
+      return Response.json({ error: "该申请选定的到期日期已过，申请已自动结束，请让申请人重新提交" }, { status: 409 });
+    }
     // #140：直属上级本人没有这个权限，只能向上转发
     if (result.reason === "forward_only") {
       return Response.json({ error: "你尚未持有该权限，只能向上转交给下一级审批人", forwardOnly: true }, { status: 403 });

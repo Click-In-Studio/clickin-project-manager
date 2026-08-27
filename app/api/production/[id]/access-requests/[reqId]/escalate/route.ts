@@ -25,6 +25,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (result.reason === "not_found")      return Response.json({ error: "申请不存在" }, { status: 404 });
     if (result.reason === "unauthorized")   return Response.json({ error: "无权处理此申请" }, { status: 403 });
     if (result.reason === "no_next_stage")  return Response.json({ error: "已到审批链顶端，无法继续转发" }, { status: 409 });
+    // 已过自定义到期日的申请转交上去也没有意义，它已被自动结束
+    if (result.reason === "expired")        return Response.json({ error: "该申请选定的到期日期已过，申请已自动结束，请让申请人重新提交" }, { status: 409 });
     return Response.json({ error: "申请已被他人处理" }, { status: 409 });
   }
   return Response.json({ request: result.request });

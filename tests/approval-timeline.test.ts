@@ -29,6 +29,7 @@ function makeRequest(over: Partial<ApprovalRequest> = {}): ApprovalRequest {
     permissionLevel: "view",
     grantType: "permanent",
     ttlDurationLabel: null,
+    requestedExpiresAt: null,
     note: null,
     status: "pending_supervisor",
     escalationChain: [],

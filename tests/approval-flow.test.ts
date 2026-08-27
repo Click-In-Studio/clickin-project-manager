@@ -35,7 +35,15 @@ import {
 } from "@/lib/db";
 import { buildApprovalLadder, classifyApprovalNode, nextStage } from "@/lib/approval-routing";
 import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval-stages";
-import { TTL_OPTIONS, isValidTtlInterval, displayTtlLabel } from "@/lib/approval-ttl";
+import {
+  TTL_OPTIONS,
+  customExpiryDateToIso,
+  displayTtlLabel,
+  isValidCustomExpiry,
+  isValidTtlInterval,
+  localTodayDateInputValue,
+  ttlPayloadForSelection,
+} from "@/lib/approval-ttl";
 import { addResourceDeptManage, createProductionDept, setDeptMembers } from "@/lib/dept-db";
 import { listUserNotifications } from "@/lib/inbox-db";
 import { makeProduction, makeScene, cleanupProduction } from "./factories";
@@ -538,18 +546,18 @@ describe("submitAccessRequest", () => {
   });
 
   it("覆盖式申请：同目标的旧 pending 被自动 cancel 且待办过期", async () => {
-    // 2026-08-16 用户反馈：先申 1 天 TTL 再申 1 月，旧申请待办堆积审批人收件箱
+    // 先申 1 周再改申 30 天时，旧申请待办不能继续堆在审批人收件箱
     const first = await submitAccessRequest(prodId, U_REQUESTER, {
       resourceType: "cue_list",
       permissionLevel: "view",
       grantType: "ttl",
-      ttlDuration: "1 day",
+      ttlDuration: "7 days",
     });
     const second = await submitAccessRequest(prodId, U_REQUESTER, {
       resourceType: "cue_list",
       permissionLevel: "view",
       grantType: "ttl",
-      ttlDuration: "1 mon",
+      ttlDuration: "30 days",
     });
 
     const firstRow = await getPool().query<{ status: string; resolved_at: Date | null }>(
@@ -849,17 +857,220 @@ describe("#256 临时权限确实会过期", () => {
     await revokeAll(U_UNRELATED);
   });
 
-  it("TTL 档位表：只认 长期 / 1 天 / 1 周 / 1 月", () => {
-    expect(TTL_OPTIONS.map((o) => o.value)).toEqual(["permanent", "1d", "1w", "1mo"]);
-    expect(TTL_OPTIONS.map((o) => o.interval)).toEqual([null, "1 day", "7 days", "1 mon"]);
-    expect(isValidTtlInterval("1 day")).toBe(true);
+  it("自定义日期按绝对时间发放，不因审批等待而顺延", async () => {
+    const requestedExpiresAt = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "mount",
+      grantType: "ttl",
+      requestedExpiresAt,
+    });
+    expect(req.ttlDurationLabel).toBeNull();
+    expect(req.requestedExpiresAt).toBe(requestedExpiresAt);
+
+    const result = await approveAccessRequest(req.id, U_POC);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.request.expiresAt).toBe(requestedExpiresAt);
+
+    const grants = await getPool().query<{ expires_at: Date | null }>(
+      `SELECT expires_at FROM production_member_grant WHERE approval_id = $1`, [req.id]);
+    expect(grants.rows.length).toBeGreaterThan(0);
+    expect(grants.rows.every((row) => row.expires_at?.toISOString() === requestedExpiresAt)).toBe(true);
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("自定义日期在审批完成前被跨过：申请自动结束，不是「已被他人处理」", async () => {
+    // 自定义档存的是绝对时间，审批拖过所选日期是常态。加这条守卫之前，
+    // approve 会落到 first-action-wins 的 0 行分支回一句 conflict 的假错误，
+    // 而申请永远停在 pending，待办永远挂在审批人收件箱里。
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      requestedExpiresAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    });
+    // 模拟审批人在到期日之后才来处理
+    await getPool().query(
+      `UPDATE approval_request SET requested_expires_at = now() - interval '1 hour' WHERE id = $1`,
+      [req.id]);
+
+    const result = await approveAccessRequest(req.id, U_POC);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("expired");
+
+    // 申请被终结，不再是 pending —— 否则待办永远清不掉
+    const row = await getPool().query<{ status: string; resolved_at: Date | null }>(
+      `SELECT status, resolved_at FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].status).toBe("cancelled");
+    expect(row.rows[0].resolved_at).not.toBeNull();
+
+    // 审批人的待办过期，收件箱不堆积
+    const liveTodo = await getPool().query(
+      `SELECT 1 FROM user_notification
+        WHERE approval_request_id = $1 AND user_id <> $2
+          AND expired_at IS NULL AND acted_at IS NULL`, [req.id, U_UNRELATED]);
+    expect(liveTodo.rows).toHaveLength(0);
+
+    // 申请人收到「已过期、需重提」的告知——否则这条申请是悄无声息地死掉的
+    const told = await getPool().query<{ title: string }>(
+      `SELECT title FROM user_notification
+        WHERE approval_request_id = $1 AND user_id = $2 AND expired_at IS NULL`,
+      [req.id, U_UNRELATED]);
+    expect(told.rows.map((r) => r.title)).toContain("资源访问申请已过期");
+
+    // 一条都没发出去
+    const grants = await getPool().query(
+      `SELECT 1 FROM production_member_grant WHERE approval_id = $1`, [req.id]);
+    expect(grants.rows).toHaveLength(0);
+
+    // 链末条记明原因，时间线才能说清「我那条申请怎么自己没了」
+    const fresh = (await listMyAccessRequests(prodId, U_UNRELATED)).find((r) => r.id === req.id);
+    const last = fresh?.escalationChain[fresh.escalationChain.length - 1];
+    expect(last?.cancelReason).toBe("expired");
+    expect(last?.bySystem).toBe(true);
+
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("过期的自定义申请也不能被向上转交（转交只是把它挪进下一位的收件箱）", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      requestedExpiresAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    });
+    await getPool().query(
+      `UPDATE approval_request SET requested_expires_at = now() - interval '1 hour' WHERE id = $1`,
+      [req.id]);
+
+    const result = await escalateAccessRequest(req.id, U_POC);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("expired");
+
+    const row = await getPool().query<{ status: string }>(
+      `SELECT status FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].status).toBe("cancelled");
+
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("两个有效期字段同时传是 400（invalid_ttl），不是撞 DB 约束的 500", async () => {
+    // 互斥必须按**存在性**判：DB 的 approval_request_ttl_source_exclusive 卡的
+    // 就是存在性。按「哪个校验通过」判的话，下面这两种脏输入会一路穿到
+    // Postgres —— 一个撞 check constraint，一个撞 timestamptz 语法。
+    for (const bad of [
+      new Date(Date.now() - 86_400_000).toISOString(),  // 合法格式但已过期
+      "not-a-date",                                     // 根本不是时间
+      new Date(Date.now() + 86_400_000).toISOString(),  // 两个都合法，仍然违反互斥
+    ]) {
+      await expect(
+        submitAccessRequest(prodId, U_UNRELATED, {
+          resourceType: "cue_list",
+          permissionLevel: "view",
+          grantType: "ttl",
+          ttlDuration: "7 days",
+          requestedExpiresAt: bad,
+        }),
+      ).rejects.toMatchObject({ reason: "invalid_ttl" });
+    }
+    // 两个都不传同样是 invalid_ttl（#256 的原始症状）
+    await expect(
+      submitAccessRequest(prodId, U_UNRELATED, {
+        resourceType: "cue_list",
+        permissionLevel: "view",
+        grantType: "ttl",
+      }),
+    ).rejects.toMatchObject({ reason: "invalid_ttl" });
+  });
+
+  it("空串等价于没传，不能变成 ''::TIMESTAMPTZ 的 500", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      ttlDuration: "7 days",
+      requestedExpiresAt: "",
+    });
+    expect(req.requestedExpiresAt).toBeNull();
+    expect(req.ttlDurationLabel).toBe("7天");
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("ttlPayloadForSelection：三类档位各自只填该填的那个字段", () => {
+    // 这个函数就是前后端契约的落点——它拼出的 body 直接对着
+    // submitAccessRequest 的「二选一」那道门，两边错开就是 400 或 500。
+    expect(ttlPayloadForSelection("permanent", "")).toEqual({
+      grantType: "permanent", ttlDuration: null, requestedExpiresAt: null,
+    });
+    // 长期档位就算界面上残留着日期，也不能把它发出去
+    expect(ttlPayloadForSelection("permanent", "2099-01-01")).toEqual({
+      grantType: "permanent", ttlDuration: null, requestedExpiresAt: null,
+    });
+
+    for (const [value, interval] of [["1w", "7 days"], ["30d", "30 days"], ["180d", "180 days"]] as const) {
+      expect(ttlPayloadForSelection(value, "2099-01-01")).toEqual({
+        grantType: "ttl", ttlDuration: interval, requestedExpiresAt: null,
+      });
+      // 固定档位发出去的 interval 必须能过服务端白名单
+      expect(isValidTtlInterval(interval)).toBe(true);
+    }
+
+    const custom = ttlPayloadForSelection("custom", "2099-01-01");
+    expect(custom.grantType).toBe("ttl");
+    expect(custom.ttlDuration).toBeNull();
+    expect(custom.requestedExpiresAt).not.toBeNull();
+    expect(isValidCustomExpiry(custom.requestedExpiresAt)).toBe(true);
+  });
+
+  it("customExpiryDateToIso：非法输入回 null，合法输入落在本地时区当天结束", () => {
+    for (const bad of ["", "2026-13-01", "2026/12/31", "12-31-2026", "not-a-date", "2026-12-3"]) {
+      expect(customExpiryDateToIso(bad)).toBeNull();
+    }
+    // 语义是「所选日期当天结束」——在本地时区还原回去应当仍是同一天的 23:59:59.999
+    const iso = customExpiryDateToIso("2026-12-31");
+    expect(iso).not.toBeNull();
+    const back = new Date(iso!);
+    expect(back.getFullYear()).toBe(2026);
+    expect(back.getMonth()).toBe(11);
+    expect(back.getDate()).toBe(31);
+    expect(back.getHours()).toBe(23);
+    expect(back.getMinutes()).toBe(59);
+  });
+
+  it("localTodayDateInputValue：给 <input type=\"date\"> 的 min，按本地日期而非 UTC", () => {
+    // 用 toISOString().slice(0,10) 写这个函数是常见错法：UTC+8 的凌晨会给出
+    // 「昨天」，于是当天可选的最早日期比实际早一天。
+    expect(localTodayDateInputValue(new Date(2026, 0, 5, 9, 30))).toBe("2026-01-05");
+    // 月/日都要补零
+    expect(localTodayDateInputValue(new Date(2026, 8, 9, 12, 0))).toBe("2026-09-09");
+    // 本地日的边界两端都还算今天
+    expect(localTodayDateInputValue(new Date(2026, 11, 31, 0, 0, 0))).toBe("2026-12-31");
+    expect(localTodayDateInputValue(new Date(2026, 11, 31, 23, 59, 59))).toBe("2026-12-31");
+    // 与 customExpiryDateToIso 对齐：今天当天结束仍在未来，选「今天」必须能提交
+    expect(isValidCustomExpiry(customExpiryDateToIso(localTodayDateInputValue()))).toBe(true);
+  });
+
+  it("TTL 档位表：只认 1 周 / 30 天 / 180 天，并支持长期与自定义", () => {
+    expect(TTL_OPTIONS.map((o) => o.value)).toEqual(["1w", "30d", "180d", "permanent", "custom"]);
+    expect(TTL_OPTIONS.map((o) => o.interval)).toEqual(["7 days", "30 days", "180 days", null, null]);
+    expect(isValidTtlInterval("30 days")).toBe(true);
     expect(isValidTtlInterval("30 minutes")).toBe(false);
     expect(isValidTtlInterval(null)).toBe(false);
     expect(isValidTtlInterval(undefined)).toBe(false);
+    expect(isValidCustomExpiry(new Date(Date.now() + 60_000).toISOString())).toBe(true);
+    expect(isValidCustomExpiry(new Date(Date.now() - 60_000).toISOString())).toBe(false);
+    expect(customExpiryDateToIso("2026-12-31")).toMatch(/^2026-12-31T/);
+    expect(ttlPayloadForSelection("custom", "").requestedExpiresAt).toBeNull();
     // 回显口径与档位一致（"7天" 是 pg 的规范化输出）
     expect(displayTtlLabel("7天")).toBe("1 周");
-    expect(displayTtlLabel("1个月")).toBe("1 月");
+    expect(displayTtlLabel("180天")).toBe("180 天");
     expect(displayTtlLabel(null)).toBeNull();
+    // 已退役的旧档位仍在库里，回显口径不能跟着档位表一起删
+    expect(displayTtlLabel("1天")).toBe("1 天");
+    expect(displayTtlLabel("1个月")).toBe("1 月");
   });
 });
 

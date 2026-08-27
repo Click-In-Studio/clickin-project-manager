@@ -4,7 +4,13 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import styles from "@/components/my-pages.module.css";
 import type { ApprovalPerson, ApprovalRequest } from "@/lib/db";
-import { TTL_OPTIONS, displayTtlLabel, type TtlOptionValue } from "@/lib/approval-ttl";
+import {
+  TTL_OPTIONS,
+  displayTtlLabel,
+  localTodayDateInputValue,
+  ttlPayloadForSelection,
+  type TtlOptionValue,
+} from "@/lib/approval-ttl";
 import { buildApprovalTimeline, type TimelineNode, type TimelineNodeState } from "@/lib/approval-timeline";
 import { APPROVAL_STAGE_LABELS, STAGE_ORDER } from "@/lib/approval-stages";
 
@@ -89,7 +95,10 @@ function fmtDate(iso: string) {
   const hhmm = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
   if (d >= todayStart)     return `今天 ${hhmm}`;
   if (d >= yesterdayStart) return `昨天 ${hhmm}`;
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+  // 不同年就必须带上年份：到期时间天然是往后看的（180 天档、自定义日期都轻易
+  // 跨年），只写「12月31日」读者无从判断是哪一年，而这正是有效期最关键的一位。
+  const yearPrefix = d.getFullYear() === now.getFullYear() ? "" : `${d.getFullYear()}年`;
+  return `${yearPrefix}${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
 // ─── StatusBadge ──────────────────────────────────────────────────────────────
@@ -292,6 +301,7 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
   const [resourceType, setResourceType]       = useState(RESOURCE_OPTIONS[0].type);
   const [permissionLevel, setPermissionLevel] = useState(RESOURCE_OPTIONS[0].levels[0].value);
   const [ttlOption, setTtlOption]             = useState<TtlOptionValue>("permanent");
+  const [customExpiryDate, setCustomExpiryDate] = useState("");
   const [note, setNote]                       = useState("");
   const [submitting, setSubmitting]           = useState(false);
   const [error, setError]                     = useState<string | null>(null);
@@ -309,16 +319,17 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
     setSubmitting(true);
     setError(null);
     try {
-      // #256：选「临时」必须连时长一起发。只发 grantType 的话服务端算不出
-      // expires_at，批准后拿到的是永久权限，与页面显示的「临时」正相反。
+      const ttlPayload = ttlPayloadForSelection(ttlOption, customExpiryDate);
+      if (ttlOption === "custom" && !ttlPayload.requestedExpiresAt) {
+        throw new Error("请选择自定义到期日期");
+      }
       const res = await fetch(`/api/production/${productionId}/access-requests`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           resourceType,
           permissionLevel,
-          grantType: ttlOption === "permanent" ? "permanent" : "ttl",
-          ttlDuration: TTL_OPTIONS.find((o) => o.value === ttlOption)?.interval ?? null,
+          ...ttlPayload,
           note: note.trim() || null,
         }),
       });
@@ -364,7 +375,9 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
         <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>有效期</label>
         {/* 档位只能来自 lib/approval-ttl 的 TTL_OPTIONS——服务端按同一份表白名单校验，
             页面自己硬编码天数会被 400 挡掉（#256 的成因，见该文件顶部注释）。 */}
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${TTL_OPTIONS.length}, minmax(0, 1fr))`, gap: 7 }}>
+        {/* auto-fit 而非等分 N 列：档位从 4 个涨到 5 个后，「180 天」在抽屉宽度下
+            会被挤到折行。窄容器里让它自己换行成两排，比每个按钮都断字好读。 */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(62px, 1fr))", gap: 7 }}>
           {TTL_OPTIONS.map((o) => {
             const active = ttlOption === o.value;
             return (
@@ -389,9 +402,25 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
             );
           })}
         </div>
-        {ttlOption !== "permanent" && (
+        {ttlOption === "custom" && (
+          <input
+            type="date"
+            aria-label="自定义到期日期"
+            min={localTodayDateInputValue()}
+            value={customExpiryDate}
+            onChange={(event) => setCustomExpiryDate(event.target.value)}
+            required
+            style={fieldStyle}
+          />
+        )}
+        {ttlOption !== "permanent" && ttlOption !== "custom" && (
           <small style={{ fontSize: 10, color: "var(--muted)" }}>
             审批通过后开始计时，到期将自动失效。
+          </small>
+        )}
+        {ttlOption === "custom" && customExpiryDate && (
+          <small style={{ fontSize: 10, color: "var(--muted)" }}>
+            权限将在所选日期当天结束时自动失效。
           </small>
         )}
       </div>
@@ -438,7 +467,9 @@ function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel,
   const isPending = req.status === "pending_supervisor" || req.status === "pending_resource";
   // #140：canFinalize === false = 我是直属上级但本人没有这个权限，只能向上转交
   const forwardOnly = canAct && req.canFinalize === false;
-  const ttlLabel = displayTtlLabel(req.ttlDurationLabel);
+  const ttlLabel = req.requestedExpiresAt
+    ? `至 ${fmtDate(req.requestedExpiresAt)}`
+    : displayTtlLabel(req.ttlDurationLabel);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -605,6 +636,9 @@ export default function AccessRequestsClient({ productionId, productionName }: P
       } else {
         const data = await res.json().catch(() => ({}));
         setActionError((data as { error?: string }).error ?? "转交失败");
+        // 与 handleApprove 一致：失败也要重拉。过期自动结束的申请已经不在待办里，
+        // 不重拉的话它会继续留在列表上，点一次错一次。
+        await fetchPending();
       }
     } finally { setActing(null); }
   }

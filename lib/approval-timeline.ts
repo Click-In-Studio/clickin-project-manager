@@ -117,6 +117,7 @@ function entryReason(entry: ApprovalChainEntry): string | undefined {
   if (entry.escalationReason === "forwarded") return "审批人向上转交";
   if (entry.cancelReason === "superseded") return "被同目标的新申请取代";
   if (entry.cancelReason === "by_subject") return "申请人撤回";
+  if (entry.cancelReason === "expired") return "审批完成前已过所选到期日期";
   return undefined;
 }
 
@@ -133,15 +134,22 @@ function terminalNode(req: ApprovalRequest, chain: ApprovalChainEntry[]): Timeli
   }
   if (req.status === "cancelled") {
     // 「我那条申请怎么自己没了」——被新申请顶掉是最需要说清楚的一种终结
+    // 「我那条申请怎么自己没了」有两种：被新申请顶掉，和自定义有效期在审批
+    // 完成前就过了。两种都不是人操作的，终结节点不能安一个操作人。
     const superseded = last?.cancelReason === "superseded";
+    const expired = last?.cancelReason === "expired";
     return {
       key: "terminal",
       kind: "结束",
-      title: superseded ? "已被新申请取代" : "申请已撤回",
-      people: superseded ? [] : people,
+      title: superseded ? "已被新申请取代" : expired ? "已过所选到期日期" : "申请已撤回",
+      people: superseded || expired ? [] : people,
       time,
       state: "terminated",
-      reason: superseded ? "你为同一目标提交了新申请，这条自动结束" : undefined,
+      reason: superseded
+        ? "你为同一目标提交了新申请，这条自动结束"
+        : expired
+          ? "审批完成前已过你选定的到期日期，这条自动结束；如仍需要请重新提交"
+          : undefined,
     };
   }
   return null;
