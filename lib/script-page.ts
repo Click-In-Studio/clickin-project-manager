@@ -6,6 +6,9 @@ import {
   withMarkerOwnership,
 } from "./script-marker-blocks";
 import type { MarkerOwnershipDirty, MarkerOwnershipRange } from "./script-marker-ownership-cache";
+// 与渲染层共用同一份判据：估算器和渲染器对「同一组角色」的判断分歧，
+// 会直接变成编辑器里的分页线和打印结果对不上。
+import { sameCharacters } from "./script-block-layout";
 
 // ── Print page config — single source of truth shared with ScriptEditor ───────
 
@@ -88,12 +91,6 @@ function estimateLines(text: string, upl: number): number {
     total += lineCount;
   }
   return total || 1;
-}
-
-function sameCharacters(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  const s = new Set(a);
-  return b.every((id) => s.has(id));
 }
 
 function charNameHidden(block: Block, prev: Block | null): boolean {

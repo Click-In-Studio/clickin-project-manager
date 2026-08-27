@@ -634,8 +634,11 @@ span[data-stage-inline] {
 }
 
 @media print {
+  /* 纸张尺寸不在这里定：版式是每个演出自配的（lib/script-page.ts 有四种，
+     将来 #338 变成可编辑数据），硬编码 A4 会让 letter / 双排版式打出来对不上纸。
+     各打印页自己注入 @page size（lib/script-page.ts 的 printPageCss）。
+     margin: 0 是全局约定——页边距由页盒自己带。 */
   @page {
-    size: A4 portrait;
     margin: 0;
   }
 

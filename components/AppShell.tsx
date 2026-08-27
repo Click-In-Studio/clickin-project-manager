@@ -1089,7 +1089,12 @@ export default function AppShell({ session, productions, canCreateProduction = f
     return () => window.clearTimeout(timer);
   }, [isScriptPage, productionSidebarFolded]);
 
-  if (!session || pathname.startsWith("/login")) {
+  // 打印路由不要 app shell：纸上不该有导航，无头浏览器也不该为一张 PDF
+  // 加载整个侧栏。打印页挂在各资源自己的路径下（/production/x/script/print），
+  // 所以按末段判定，不另起顶层前缀——那会让 extractProductionId 之类
+  // 按 /production/<id>/ 解析上下文的地方全部失效。
+  const isPrintRoute = pathname.endsWith("/print") || pathname.includes("/print/");
+  if (!session || pathname.startsWith("/login") || isPrintRoute) {
     return <>{children}</>;
   }
 
