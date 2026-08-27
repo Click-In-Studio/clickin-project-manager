@@ -18,7 +18,7 @@ import ProductionTopMenu, {
   useProductionToolbar,
 } from "./ProductionTopMenu";
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
-import type { SceneFieldPerms } from "@/lib/scene-field-perms";
+import type { SceneFieldPerms } from "@/lib/scene-field-perms-shared";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
 
 type SceneViewMode = "list" | "table";

@@ -9,7 +9,7 @@ import type { SceneDetail } from "@/lib/db";
 import DurationInput from "@/components/DurationInput";
 import { parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/scene-duration";
-import type { SceneFieldPerms } from "@/lib/scene-field-perms";
+import { canDeleteScene, type SceneFieldPerms } from "@/lib/scene-field-perms-shared";
 import BoundaryActionMenu from "@/components/BoundaryActionMenu";
 import MarkerDeleteDialog, { type MarkerDeleteDialogState } from "@/components/MarkerDeleteDialog";
 import type { MarkerDeleteOperation, MarkerProjection } from "@/lib/script-marker-domain";
@@ -626,7 +626,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         childScenes={children}
                         canEdit={canEdit}
                         fieldPerms={fieldPerms}
-                        canDelete={fieldPerms.delete}
+                        canDelete={canDeleteScene(fieldPerms, act.id)}
                         productionId={productionId}
                         versionId={currentVersionId}
                         initialExpanded={act.id === initialExpandedId}
@@ -650,7 +650,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                             marks={sub.rehearsalMarks}
                             canEdit={canEdit}
                             fieldPerms={fieldPerms}
-                            canDelete={fieldPerms.delete}
+                            canDelete={canDeleteScene(fieldPerms, sub.id)}
                             productionId={productionId}
                             versionId={currentVersionId}
                             initialExpanded={sub.id === initialExpandedId}

@@ -7,7 +7,7 @@ import ChevronIcon from "@/components/ChevronIcon";
 import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, PRODUCTION_TOOLBAR_STAGE, ProductionTopMenuDivider, useProductionToolbar } from "./ProductionTopMenu";
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
-import type { CharacterPerms } from "@/lib/character-perms";
+import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib/character-perms-shared";
 
 const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
 
@@ -712,7 +712,7 @@ function AddCharacterForm({
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
 export default function CharactersManager({ productionId, productionName, initialCharacters, perms, embedded, versionId, initialExpandedId }: Props) {
-  const { create: canCreate, edit: canEdit, delete: canDelete } = perms;
+  const canCreate = perms.create;
   const { stage: toolbarStage } = useProductionToolbar();
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
   const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId ?? null);
@@ -810,8 +810,8 @@ export default function CharactersManager({ productionId, productionName, initia
                   key={c.id}
                   char={c}
                   allChars={characters}
-                  canEdit={canEdit}
-                  canDelete={canDelete}
+                  canEdit={canEditCharacter(perms, c.id)}
+                  canDelete={canDeleteCharacter(perms, c.id)}
                   onRename={(name) => rename(c.id, name)}
                   onDelete={() => del(c.id)}
                   onPatchMeta={(fields) => patchMeta(c.id, fields)}
@@ -846,8 +846,8 @@ export default function CharactersManager({ productionId, productionName, initia
                 key={c.id}
                 char={c}
                 allChars={characters}
-                canEdit={canEdit}
-                canDelete={canDelete}
+                canEdit={canEditCharacter(perms, c.id)}
+                canDelete={canDeleteCharacter(perms, c.id)}
                 onRename={(name) => rename(c.id, name)}
                 onDelete={() => del(c.id)}
                 onPatchMeta={(fields) => patchMeta(c.id, fields)}

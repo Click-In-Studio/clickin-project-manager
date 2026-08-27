@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import type { MarkerProjection } from "@/lib/script-marker-domain";
-import type { SceneFieldPerms } from "@/lib/scene-field-perms";
+import type { SceneFieldPerms } from "@/lib/scene-field-perms-shared";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import { parseDuration, formatDuration } from "@/lib/duration";
