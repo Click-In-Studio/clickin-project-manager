@@ -7252,25 +7252,41 @@ async function cancelIfCustomExpiryPassed(req: ApprovalRow): Promise<boolean> {
 
   // 到期判定以 DB 的 now() 为准，别用上面那次 JS 比较的结果去写库：
   // JS 侧只是为了不给绝大多数请求平白加一次 UPDATE。
+  //
+  // 改状态与补链末条必须在**同一条 SQL** 里（和 supersede 同理，AI review #353）：
+  // 分两步做的话，进程死在中间会留下一条 status='cancelled' 但链末条没有
+  // cancelReason 的申请，时间线只好把它画成「申请已撤回」—— 一条没人撤过的
+  // 申请显示成被申请人撤回，正是这个模块要消灭的那类误导。
+  //
+  // resolved_by 留 NULL：没有人处理这条申请，是它自己作废的。时间线据此把终结
+  // 节点画成「系统自动处理」而不是安一个并没做事的操作人。
+  const expiredMark: Partial<ApprovalChainEntry> = {
+    action: "cancelled",
+    actedAt: new Date().toISOString(),
+    bySystem: true,
+    cancelReason: "expired",
+  };
   const res = await getPool().query<{ id: string }>(
     `UPDATE approval_request
      SET status = 'cancelled', resolved_at = now(),
+         escalation_chain =
+           CASE WHEN jsonb_array_length(escalation_chain) > 0
+                THEN jsonb_set(
+                       escalation_chain,
+                       ARRAY[(jsonb_array_length(escalation_chain) - 1)::text],
+                       (escalation_chain -> -1) || $2::jsonb)
+                ELSE escalation_chain
+           END,
          current_stage = NULL, current_approver_ids = '{}'
      WHERE id = $1
        AND status IN ('pending_supervisor', 'pending_resource')
        AND requested_expires_at IS NOT NULL
        AND requested_expires_at <= now()
      RETURNING id`,
-    [req.id],
+    [req.id, JSON.stringify(expiredMark)],
   );
   if (!res.rows[0]) return false;
 
-  // resolved_by 留 NULL：没有人处理这条申请，是它自己作废的。时间线据此把终结
-  // 节点画成「系统自动处理」而不是安一个并没做事的操作人。
-  await markLastChainEntry(req.id, {
-    action: "cancelled", actedAt: new Date().toISOString(),
-    bySystem: true, cancelReason: "expired",
-  });
   await expireRequestNotifications(req.id);
 
   const desc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");

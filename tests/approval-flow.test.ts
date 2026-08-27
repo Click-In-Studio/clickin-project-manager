@@ -41,6 +41,7 @@ import {
   displayTtlLabel,
   isValidCustomExpiry,
   isValidTtlInterval,
+  localTodayDateInputValue,
   ttlPayloadForSelection,
 } from "@/lib/approval-ttl";
 import { addResourceDeptManage, createProductionDept, setDeptMembers } from "@/lib/dept-db";
@@ -996,6 +997,60 @@ describe("#256 临时权限确实会过期", () => {
     expect(req.requestedExpiresAt).toBeNull();
     expect(req.ttlDurationLabel).toBe("7天");
     await revokeAll(U_UNRELATED);
+  });
+
+  it("ttlPayloadForSelection：三类档位各自只填该填的那个字段", () => {
+    // 这个函数就是前后端契约的落点——它拼出的 body 直接对着
+    // submitAccessRequest 的「二选一」那道门，两边错开就是 400 或 500。
+    expect(ttlPayloadForSelection("permanent", "")).toEqual({
+      grantType: "permanent", ttlDuration: null, requestedExpiresAt: null,
+    });
+    // 长期档位就算界面上残留着日期，也不能把它发出去
+    expect(ttlPayloadForSelection("permanent", "2099-01-01")).toEqual({
+      grantType: "permanent", ttlDuration: null, requestedExpiresAt: null,
+    });
+
+    for (const [value, interval] of [["1w", "7 days"], ["30d", "30 days"], ["180d", "180 days"]] as const) {
+      expect(ttlPayloadForSelection(value, "2099-01-01")).toEqual({
+        grantType: "ttl", ttlDuration: interval, requestedExpiresAt: null,
+      });
+      // 固定档位发出去的 interval 必须能过服务端白名单
+      expect(isValidTtlInterval(interval)).toBe(true);
+    }
+
+    const custom = ttlPayloadForSelection("custom", "2099-01-01");
+    expect(custom.grantType).toBe("ttl");
+    expect(custom.ttlDuration).toBeNull();
+    expect(custom.requestedExpiresAt).not.toBeNull();
+    expect(isValidCustomExpiry(custom.requestedExpiresAt)).toBe(true);
+  });
+
+  it("customExpiryDateToIso：非法输入回 null，合法输入落在本地时区当天结束", () => {
+    for (const bad of ["", "2026-13-01", "2026/12/31", "12-31-2026", "not-a-date", "2026-12-3"]) {
+      expect(customExpiryDateToIso(bad)).toBeNull();
+    }
+    // 语义是「所选日期当天结束」——在本地时区还原回去应当仍是同一天的 23:59:59.999
+    const iso = customExpiryDateToIso("2026-12-31");
+    expect(iso).not.toBeNull();
+    const back = new Date(iso!);
+    expect(back.getFullYear()).toBe(2026);
+    expect(back.getMonth()).toBe(11);
+    expect(back.getDate()).toBe(31);
+    expect(back.getHours()).toBe(23);
+    expect(back.getMinutes()).toBe(59);
+  });
+
+  it("localTodayDateInputValue：给 <input type=\"date\"> 的 min，按本地日期而非 UTC", () => {
+    // 用 toISOString().slice(0,10) 写这个函数是常见错法：UTC+8 的凌晨会给出
+    // 「昨天」，于是当天可选的最早日期比实际早一天。
+    expect(localTodayDateInputValue(new Date(2026, 0, 5, 9, 30))).toBe("2026-01-05");
+    // 月/日都要补零
+    expect(localTodayDateInputValue(new Date(2026, 8, 9, 12, 0))).toBe("2026-09-09");
+    // 本地日的边界两端都还算今天
+    expect(localTodayDateInputValue(new Date(2026, 11, 31, 0, 0, 0))).toBe("2026-12-31");
+    expect(localTodayDateInputValue(new Date(2026, 11, 31, 23, 59, 59))).toBe("2026-12-31");
+    // 与 customExpiryDateToIso 对齐：今天当天结束仍在未来，选「今天」必须能提交
+    expect(isValidCustomExpiry(customExpiryDateToIso(localTodayDateInputValue()))).toBe(true);
   });
 
   it("TTL 档位表：只认 1 周 / 30 天 / 180 天，并支持长期与自定义", () => {

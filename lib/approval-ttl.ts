@@ -42,7 +42,15 @@ export function isValidCustomExpiry(v: unknown, now = Date.now()): v is string {
   return Number.isFinite(timestamp) && timestamp > now;
 }
 
-/** 把浏览器 date 输入解释为用户本地时区当天结束，返回服务端可校验的 ISO 时间。 */
+/**
+ * 把浏览器 date 输入解释为用户本地时区当天结束，返回服务端可校验的 ISO 时间。
+ *
+ * **只能在浏览器里调**（连同下面的 ttlPayloadForSelection / localTodayDateInputValue）。
+ * 不带时区的 `new Date("YYYY-MM-DDT23:59:59.999")` 按**执行环境**的时区解析——
+ * 在服务端跑就成了服务器时区的当天结束，会把申请人选的日子静默平移几个小时。
+ * 这三个函数当前只有 AccessRequestModal / AccessRequestsClient 两个 "use client"
+ * 组件在用；服务端要的是已经定好的绝对时间（isValidCustomExpiry 那一侧）。
+ */
 export function customExpiryDateToIso(dateValue: string): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) return null;
   const endOfDay = new Date(`${dateValue}T23:59:59.999`);
