@@ -66,16 +66,24 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   };
   if (!body.title?.trim()) return Response.json({ error: "标题不能为空" }, { status: 400 });
 
-  const parentId = body.parentId?.trim()
-    || (body.parentAnchor === "dramaturgy" ? await ensureDramaturgyRootAnchor(productionId) : null);
-
   // 落位双门（#357 症状⑤）。与移动同门——否则"无权移入就改为在目标父下新建"
-  // 是条后门。系统锚点的豁免在 canWriteWikiContainer 内部（isWikiAnchor 分支），
-  // 所以这里对 parentAnchor 解析出的锚点无需特判，默认树/「啪建啪跳」流不受影响。
-  if (!await canPlaceWikiUnder(actor, productionId, parentId))
-    return Response.json({ error: "无权在该父文档下创建" }, { status: 403 });
-  if (!await canWriteWikiContainer(actor, productionId, parentId))
-    return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
+  // 是条后门。
+  //
+  // 门必须跑在 ensureDramaturgyRootAnchor **之前**：那是个写事务，会凭空建一篇
+  // wiki，让它成为一个最终被 403 的请求的副作用是 write-before-authz（AI review
+  // 二轮 #1）。所以只对**显式父**判定；锚点路径不判——不是跳过检查，是两道门在
+  // 锚点上恒真且可静态论证：锚点 is_public + listable 默认真 + 挂顶层 ⇒ ① 恒真；
+  // isWikiAnchor 分支 ⇒ ② 恒真。配置关闭时 ensure 返回 null＝落顶层，同样无门。
+  const explicitParentId = body.parentId?.trim() || null;
+  if (explicitParentId) {
+    if (!await canPlaceWikiUnder(actor, productionId, explicitParentId))
+      return Response.json({ error: "无权在该父文档下创建" }, { status: 403 });
+    if (!await canWriteWikiContainer(actor, productionId, explicitParentId))
+      return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
+  }
+
+  const parentId = explicitParentId
+    ?? (body.parentAnchor === "dramaturgy" ? await ensureDramaturgyRootAnchor(productionId) : null);
 
   try {
     const wiki = await createWiki({

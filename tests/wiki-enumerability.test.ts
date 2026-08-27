@@ -425,6 +425,65 @@ describe("routes", () => {
     expect(ids).not.toContain(hidden.id); // 两面皆无 → 选不到，符合"不能管理你看不见的"
   });
 
+  // AI review 二轮 #2：「啪建啪跳」bootstrap 流——普通成员首次建档、锚点尚未懒建
+  it("parentAnchor 首建流：非 admin 成员建得成，且落在新建的锚点下", async () => {
+    // 干净 production：锚点尚未存在
+    const { prodId: freshProd } = await makeProduction();
+    const plain = await newMember(freshProd);
+    users.push(plain);
+    try {
+      await getPool().query(
+        `INSERT INTO production_member_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
+         VALUES ($1, $2, 'wiki', '*', '*', 'create', 'direct', $2)`,
+        [freshProd, plain]);
+      const before = await getPool().query(
+        `SELECT dramaturgy_root_wiki_id FROM production_wiki_config WHERE production_id = $1`, [freshProd]);
+      expect(before.rows[0]?.dramaturgy_root_wiki_id ?? null).toBeNull();
+
+      const res = await wikiPOST(
+        makeReq("POST", `/api/production/${freshProd}/wiki`, plain, false,
+          { title: "首篇灵感文档", parentAnchor: "dramaturgy" }),
+        { params: Promise.resolve({ id: freshProd }) });
+      expect(res.status).toBe(201);
+
+      const anchorId = await ensureDramaturgyRootAnchor(freshProd);
+      const created = (await res.json()).wiki as { id: string; parentId: string | null };
+      expect(created.parentId).toBe(anchorId);
+      expect(await isWikiAnchor(anchorId!)).toBe(true);
+      // 锚点对这个零权限成员既可枚举、容器又可写（两道门在锚点上恒真）
+      expect(await canPlaceWikiUnder(actorOf(plain), freshProd, anchorId)).toBe(true);
+      expect(await canWriteWikiContainer(actorOf(plain), freshProd, anchorId)).toBe(true);
+    } finally {
+      await cleanupProduction(freshProd).catch(() => {});
+    }
+  });
+
+  // AI review 二轮 #4：同父纯重排（parentId 给了但没变）也走 ①②，钉住别被特判掉
+  it("同父纯重排：对父有 edit 才动得了子项顺序", async () => {
+    const parent = await createWiki({ productionId: prodId, title: "同父重排容器", createdBy: creator });
+    const a = await createWiki({ productionId: prodId, title: "重排A", parentId: parent.id, createdBy: creator });
+    const b = await createWiki({ productionId: prodId, title: "重排B", parentId: parent.id, createdBy: creator });
+    await shareTo(prodId, b.id, member, "edit");   // 只有文档 edit，没有容器 edit
+
+    const denied = await wikiPATCH(
+      makeReq("PATCH", `/api/production/${prodId}/wiki/${b.id}`, member, false,
+        { parentId: parent.id, place: { anchorId: a.id, side: "before" } }),
+      { params: Promise.resolve({ id: prodId, wikiId: b.id }) });
+    expect(denied.status).toBe(403);
+
+    await shareTo(prodId, parent.id, member, "edit");   // 补上容器 edit
+    const ok = await wikiPATCH(
+      makeReq("PATCH", `/api/production/${prodId}/wiki/${b.id}`, member, false,
+        { parentId: parent.id, place: { anchorId: a.id, side: "before" } }),
+      { params: Promise.resolve({ id: prodId, wikiId: b.id }) });
+    expect(ok.status).toBe(200);
+    const sibs = (await listWikiLibrary(prodId))
+      .filter(w => w.parentId === parent.id)
+      .sort((x, y) => (x.sortKey ?? "").localeCompare(y.sortKey ?? ""));
+    expect(sibs.map(w => w.id)).toEqual([b.id, a.id]);
+  });
+
   it("PATCH listable 走分享面（grants@edit），不是编辑面", async () => {
     const w = await createWiki({ productionId: prodId, title: "分享面开关", createdBy: creator });
     // 只发 edit 档（*@edit，无 grants@edit）
