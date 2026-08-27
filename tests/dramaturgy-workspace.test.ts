@@ -146,6 +146,15 @@ describe("POST /wiki 的 parentAnchor 落位", () => {
     expect((await res.json()).wiki.parentId).toBe(other.id);
   });
 
+  // 合法值只有一个，认不出来就 400——静默当没给会让文档落到**全库**顶层、掉出
+  // 工作区，而调用方以为成功了（#355 AI review #2）。
+  it("认不出的 parentAnchor 是 400，不静默落到全库顶层", async () => {
+    const res = await wikiPOST(req({ title: "锚点拼错了", parentAnchor: "dramaturgi" }), ctx());
+    expect(res.status).toBe(400);
+    expect(await listWikiLibrary(prodId)).not.toContainEqual(
+      expect.objectContaining({ title: "锚点拼错了" }));
+  });
+
   it("不带 parentAnchor 时不碰锚点，也不建 config 行", async () => {
     const { prodId: clean } = await makeProduction();
     try {

@@ -5,7 +5,7 @@ import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { canReachAliasTarget, createWikiAlias, isWikiAliasTargetType } from "@/lib/wiki-alias-db";
 import { canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki-perm";
 import { ensureDramaturgyRootAnchor } from "@/lib/wiki-db";
-import { readPlacement, readTrimmedId } from "@/lib/wiki-alias-input";
+import { readParentAnchor, readPlacement, readTrimmedId } from "@/lib/wiki-input";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -37,10 +37,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!targetId) return Response.json({ error: "缺少链接目标" }, { status: 400 });
   if (!isWikiAliasTargetType(targetType))
     return Response.json({ error: "暂不支持这种链接目标" }, { status: 400 });
-  const explicitParentId = readTrimmedId(body.parentId);
+  const anchor = readParentAnchor(body.parentAnchor);
+  if (!anchor.ok) return Response.json({ error: "未知的落位锚点" }, { status: 400 });
   // 锚点落位（#355 移入）：灵感库根尚未懒建时客户端给 parentAnchor 而不是 parentId。
-  // ensure 是写事务，留在门后面解析（同 POST /wiki）。
-  const anchorRequested = !explicitParentId && body.parentAnchor === "dramaturgy";
+  // ensure 是写事务，留在门后面解析（同 POST /wiki）。两者同送时锚点胜——与
+  // PATCH /wiki 同语义，见那边的 AI review #3 注释。
+  const explicitParentId = readTrimmedId(body.parentId);
+  const anchorRequested = !explicitParentId && anchor.anchor === "dramaturgy";
   const place = readPlacement(body.place);
 
   if (!await hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"))

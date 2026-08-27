@@ -1,4 +1,5 @@
 import { type NextRequest } from "next/server";
+import { readParentAnchor } from "@/lib/wiki-input";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
@@ -63,6 +64,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     parentAnchor?: "dramaturgy";
   };
   if (!body.title?.trim()) return Response.json({ error: "标题不能为空" }, { status: 400 });
+  const anchor = readParentAnchor(body.parentAnchor);
+  if (!anchor.ok) return Response.json({ error: "未知的落位锚点" }, { status: 400 });
 
   // 落位双门（#357 症状⑤）。与移动同门——否则"无权移入就改为在目标父下新建"
   // 是条后门。
@@ -81,7 +84,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
 
   const parentId = explicitParentId
-    ?? (body.parentAnchor === "dramaturgy" ? await ensureDramaturgyRootAnchor(productionId) : null);
+    ?? (anchor.anchor === "dramaturgy" ? await ensureDramaturgyRootAnchor(productionId) : null);
 
   try {
     const wiki = await createWiki({

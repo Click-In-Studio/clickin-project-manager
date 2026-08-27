@@ -175,6 +175,30 @@ describe("PATCH /wiki 的 parentAnchor 落位（本体移入）", () => {
     expect((await res.json()).wiki.parentId).toBe(box.id);
   });
 
+  it("锚点已存在时复用同一个根，不重复建", async () => {
+    const before = (await getDramaturgyTreeConfig(prodId)).rootWikiId;
+    expect(before).not.toBeNull();
+    const doc = await createWiki({ productionId: prodId, title: "第二次移入", createdBy: admin });
+    const res = await wikiPATCH(
+      patchReq(prodId, doc.id, admin, true, { parentAnchor: "dramaturgy" }),
+      { params: Promise.resolve({ id: prodId, wikiId: doc.id }) });
+    expect(res.status).toBe(200);
+    expect((await res.json()).wiki.parentId).toBe(before);
+    expect((await getDramaturgyTreeConfig(prodId)).rootWikiId).toBe(before);
+  });
+
+  it("认不出的 parentAnchor 是 400，不静默落到全库顶层", async () => {
+    const box = await createWiki({ productionId: prodId, title: "非法锚点·容器", createdBy: admin });
+    const doc = await createWiki({
+      productionId: prodId, title: "非法锚点·文档", parentId: box.id, createdBy: admin });
+    const res = await wikiPATCH(
+      patchReq(prodId, doc.id, admin, true, { parentAnchor: "dramaturgyy" }),
+      { params: Promise.resolve({ id: prodId, wikiId: doc.id }) });
+    expect(res.status).toBe(400);
+    // 位置没动：静默落位才是这条门要挡的东西
+    expect((await listWikiLibrary(prodId)).find(w => w.id === doc.id)?.parentId).toBe(box.id);
+  });
+
   // write-before-authz 的回归证人（#358 二轮 AI review 同一条纪律）：
   // ensureDramaturgyRootAnchor 会凭空建一篇 wiki，403 的请求不许留下这个副作用。
   it("无权把文档移出原父时 403，且不因此建出锚点", async () => {
@@ -197,6 +221,25 @@ describe("PATCH /wiki 的 parentAnchor 落位（本体移入）", () => {
       expect(await anchorUntouched(clean)).toBeNull();   // ← 门跑在 ensure 之前
     } finally {
       await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [clean]).catch(() => {});
+      await cleanupProduction(clean).catch(() => {});
+    }
+  });
+  // 锚点路径跳过的是**目标父**那两道（在锚点上恒真），不是内容门。少了这条，
+  // "移入" 就成了一条绕开 canEditWiki 改别人文档位置的路。
+  it("无本篇 edit 权时 403，锚点路径不因跳过落位双门而漏掉内容门", async () => {
+    const { prodId: clean } = await makeProduction();
+    const owner = await newMember(clean);
+    const reader = await newMember(clean);
+    users.push(owner, reader);
+    try {
+      const doc = await createWiki({ productionId: clean, title: "只读得到的一篇", createdBy: owner });
+      await shareTo(clean, doc.id, reader, "view");
+      const res = await wikiPATCH(
+        patchReq(clean, doc.id, reader, false, { parentAnchor: "dramaturgy" }),
+        { params: Promise.resolve({ id: clean, wikiId: doc.id }) });
+      expect(res.status).toBe(403);
+      expect(await anchorUntouched(clean)).toBeNull();
+    } finally {
       await cleanupProduction(clean).catch(() => {});
     }
   });
@@ -235,6 +278,25 @@ describe("POST /wiki-alias 的 parentAnchor 落位（以链接移入）", () => 
       const { moveIn } = await listDramaturgyTreeFor(
         { userId: admin, isAdmin: true, isOwner: false }, prodId, rootId);
       expect(moveIn.find(c => c.id === doc.id)?.linked).toBe(true);
+    } finally {
+      await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [prodId]).catch(() => {});
+      await cleanupProduction(prodId).catch(() => {});
+    }
+  });
+
+  it("认不出的 parentAnchor 是 400，不静默把链接建到全库顶层", async () => {
+    const { prodId } = await makeProduction();
+    const admin = await newMember(prodId);
+    users.push(admin);
+    try {
+      const doc = await createWiki({ productionId: prodId, title: "目标", createdBy: admin });
+      const res = await aliasPOST(
+        aliasReq(prodId, admin, true, { parentAnchor: "inspiration", targetType: "wiki", targetId: doc.id }),
+        { params: Promise.resolve({ id: prodId }) });
+      expect(res.status).toBe(400);
+      const { rows } = await getPool().query(
+        "SELECT 1 FROM wiki_alias WHERE production_id = $1", [prodId]);
+      expect(rows.length).toBe(0);
     } finally {
       await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [prodId]).catch(() => {});
       await cleanupProduction(prodId).catch(() => {});

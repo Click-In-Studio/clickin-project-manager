@@ -8,6 +8,7 @@ import {
   canPlaceWikiUnder, canWriteWikiContainer,
 } from "@/lib/wiki-perm";
 import { broadcastWikiUpdate } from "@/lib/wiki-collab";
+import { readParentAnchor } from "@/lib/wiki-input";
 import type { Mention } from "@/lib/event-db";
 import { setWikiPublic, setWikiListable, type WikiPlacement } from "@/lib/wiki-db";
 
@@ -66,9 +67,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     clientId?: string;
   };
 
-  if (body.title !== undefined && !body.title.trim())
-    return Response.json({ error: "标题不能为空" }, { status: 400 });
-
   const wantsContent = body.title !== undefined || body.body !== undefined
     || body.mentions !== undefined || body.parentId !== undefined
     || body.parentAnchor !== undefined
@@ -79,6 +77,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if ((body.isPublic !== undefined || body.listable !== undefined)
       && !await canShareWiki(actor, productionId, wikiId))
     return Response.json({ error: "权限不足（分享面）" }, { status: 403 });
+
+  // 字段校验夹在授权与 ensure 之间，位置是两头顶死的：授权在前（403 优先于 400，
+  // AI review #1），ensureDramaturgyRootAnchor 在后（它是写事务，一个最终 400 的
+  // 请求不该凭空建出一篇根文档）。
+  if (body.title !== undefined && !body.title.trim())
+    return Response.json({ error: "标题不能为空" }, { status: 400 });
+  const anchor = readParentAnchor(body.parentAnchor);
+  if (!anchor.ok) return Response.json({ error: "未知的落位锚点" }, { status: 400 });
 
   // 落位/重排门（#357 症状⑤）。三道：
   //   ① 目标父可枚举（枚举面）——不往自己列不出的容器里塞东西
@@ -93,8 +99,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   // /wiki 的 write-before-authz 论证）——所以目标父的 ①② 只对**显式父**判定，
   // 锚点路径不判：根 is_public + listable ⇒ ① 恒真，isWikiAnchor ⇒ ② 恒真。
   // ③（源父容器可写）与目标无关，锚点路径照跑。
+  // parentId 与 parentAnchor 同送时锚点胜（`parentId: null` 与"字段缺席"在这里
+  // collapse 成同一个 falsy）——与 POST /wiki 同语义，两处必须一致，别在一处改成
+  // `"parentId" in body` 的口径（AI review #3）。客户端不同送这两个字段。
   const explicitParentId = body.parentId?.trim() ? body.parentId.trim() : null;
-  const anchorRequested = !explicitParentId && body.parentAnchor === "dramaturgy";
+  const anchorRequested = !explicitParentId && anchor.anchor === "dramaturgy";
   const changingParent = body.parentId !== undefined || anchorRequested;
   if (changingParent || body.place !== undefined || body.sortKey !== undefined) {
     if (!anchorRequested) {
@@ -107,6 +116,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
           && !await canWriteWikiContainer(actor, productionId, existing.parentId))
         return Response.json({ error: "无权把文档移出原父文档" }, { status: 403 });
     } else if (!await canWriteWikiContainer(actor, productionId, existing.parentId)) {
+      // 刻意的不对称（AI review #4）：显式父那支只在真的换父时判 ③，锚点这支无条件
+      // 判——锚点 id 要 ensure 之后才知道，而 ensure 不许跑在门前面。代价是"把一篇
+      // 已经在灵感库根下的文档再移入一次"这种空操作也会被源父门 403，fail-closed，
+      // 别当 bug"修"掉。
       return Response.json({ error: "无权把文档移出原父文档" }, { status: 403 });
     }
   }
