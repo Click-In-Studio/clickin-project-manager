@@ -7,7 +7,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { listWikiLibrary } from "@/lib/wiki-db";
-import { listVisibleWikiIds } from "@/lib/wiki-perm";
+import { listEnumerableWikiIds } from "@/lib/wiki-perm";
 import PageHeader from "@/components/PageHeader";
 import PageActivationGate from "@/components/PageActivationGate";
 import WikiShell from "@/components/wiki/WikiShell";
@@ -26,12 +26,13 @@ export default async function WikiLibraryPage({ params }: { params: Promise<{ id
   if (!productionName) notFound();
   const actor = toActor(session, access.permCtx);
 
-  const [all, visible, canCreate] = await Promise.all([
+  // 树＝枚举面（#357）。枚举集是含根的连通子树，投影到 parent_id 上不会有断链。
+  const [all, enumerable, canCreate] = await Promise.all([
     listWikiLibrary(productionId),
-    listVisibleWikiIds(actor, productionId),
+    listEnumerableWikiIds(actor, productionId),
     hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"),
   ]);
-  const wikis = visible.wildcard ? all : all.filter(w => visible.ids.has(w.id));
+  const wikis = enumerable.wildcard ? all : all.filter(w => enumerable.ids.has(w.id));
 
   return (
     <>

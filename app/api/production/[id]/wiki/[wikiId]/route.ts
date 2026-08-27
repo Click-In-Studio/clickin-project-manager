@@ -3,10 +3,13 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
 import { getWiki, updateWiki, deleteWiki } from "@/lib/wiki-db";
-import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki } from "@/lib/wiki-perm";
+import {
+  canViewWiki, canEditWiki, canDeleteWiki, canShareWiki,
+  canPlaceWikiUnder, canWriteWikiContainer,
+} from "@/lib/wiki-perm";
 import { broadcastWikiUpdate } from "@/lib/wiki-collab";
 import type { Mention } from "@/lib/event-db";
-import { setWikiPublic } from "@/lib/wiki-db";
+import { setWikiPublic, setWikiListable, type WikiPlacement } from "@/lib/wiki-db";
 
 type Ctx = { params: Promise<{ id: string; wikiId: string }> };
 
@@ -48,7 +51,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const body = await req.json() as {
     title?: string; body?: string; mentions?: Mention[];
     parentId?: string | null; sortKey?: string; tags?: string[];
+    /** 相对锚点落位（#357 症状②）：客户端只说"放在谁的前/后"，服务端在完整
+     *  兄弟集上算键——可枚举性逐节点后客户端兄弟集可能有空洞。 */
+    place?: WikiPlacement;
     isPublic?: boolean;
+    /** 可枚举性开关（#357）——与 isPublic 同属分享面 */
+    listable?: boolean;
     /** 协作：客户端上次确认的服务端正文——与库中现值不同时做行级三路合并 */
     baseBody?: string;
     /** 协作：发起端 SSE clientId（广播自过滤） */
@@ -57,12 +65,34 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const wantsContent = body.title !== undefined || body.body !== undefined
     || body.mentions !== undefined || body.parentId !== undefined
-    || body.sortKey !== undefined || body.tags !== undefined;
+    || body.sortKey !== undefined || body.place !== undefined || body.tags !== undefined;
   if (wantsContent && !await canEditWiki(actor, productionId, wikiId))
     return Response.json({ error: "权限不足" }, { status: 403 });
-  // 公开开关属分享面（grants@edit 保留段）
-  if (body.isPublic !== undefined && !await canShareWiki(actor, productionId, wikiId))
+  // 公开/可枚举开关属分享面（grants@edit 保留段）
+  if ((body.isPublic !== undefined || body.listable !== undefined)
+      && !await canShareWiki(actor, productionId, wikiId))
     return Response.json({ error: "权限不足（分享面）" }, { status: 403 });
+
+  // 落位/重排门（#357 症状⑤）。三道：
+  //   ① 目标父可枚举（枚举面）——不往自己列不出的容器里塞东西
+  //   ② 目标父容器可写（写面）——增删/重排子项是对**容器**的改动
+  //   ③ 换父时源父也要容器可写——否则"把它从别人的子树里挪走"照旧成立
+  // 重排（place/sortKey）等同对当前父的子项改动，①② 都过——列不出的容器谈不上
+  // "重排它的子项"（该容器的子项对你本来就不可枚举），403 是正确答案而非误伤。
+  // ③ 只在真的换父时才有意义，故额外要 targetParentId !== existing.parentId。
+  const changingParent = body.parentId !== undefined;
+  const targetParentId = changingParent
+    ? (body.parentId?.trim() ? body.parentId.trim() : null)
+    : existing.parentId;
+  if (changingParent || body.place !== undefined || body.sortKey !== undefined) {
+    if (!await canPlaceWikiUnder(actor, productionId, targetParentId))
+      return Response.json({ error: "无权移动到该父文档下" }, { status: 403 });
+    if (!await canWriteWikiContainer(actor, productionId, targetParentId))
+      return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
+    if (changingParent && targetParentId !== existing.parentId
+        && !await canWriteWikiContainer(actor, productionId, existing.parentId))
+      return Response.json({ error: "无权把文档移出原父文档" }, { status: 403 });
+  }
 
   if (body.title !== undefined && !body.title.trim())
     return Response.json({ error: "标题不能为空" }, { status: 400 });
@@ -78,10 +108,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         ...(body.mentions !== undefined ? { mentions: body.mentions } : {}),
         ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
         ...(body.sortKey !== undefined ? { sortKey: body.sortKey } : {}),
+        ...(body.place !== undefined ? { place: body.place } : {}),
         ...(body.tags !== undefined ? { tags: body.tags } : {}),
       }, session.userId);
     }
     if (body.isPublic !== undefined) await setWikiPublic(wikiId, productionId, body.isPublic);
+    if (body.listable !== undefined) await setWikiListable(wikiId, productionId, body.listable);
     const fresh = await getWiki(wikiId, productionId);
     // 协作广播（内容/标题/标签变化才推；标签帧缺省=本帧没动标签）
     if (fresh && (body.body !== undefined || body.title !== undefined || body.tags !== undefined)) {

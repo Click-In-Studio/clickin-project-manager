@@ -8,7 +8,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName, listProductionMembers } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getWiki, listWikiLibrary, listBacklinks, listUnlinkedReferences, listEntityRefsForWiki } from "@/lib/wiki-db";
-import { canViewWiki, canEditWiki, canShareWiki, listVisibleWikiIds } from "@/lib/wiki-perm";
+import { canViewWiki, canEditWiki, canShareWiki, listEnumerableWikiIds } from "@/lib/wiki-perm";
 import { listEventDepartments } from "@/lib/event-db";
 import PageHeader from "@/components/PageHeader";
 import PageActivationGate from "@/components/PageActivationGate";
@@ -32,12 +32,15 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
   const wiki = await getWiki(wikiId, productionId);
   if (!wiki) notFound();
 
-  const [all, visible, canCreate] = await Promise.all([
+  // 侧栏树＝枚举面；正文＝内容面（canViewWiki）。当前文档可能不在自己的枚举闭包里
+  // （经 wikilink / 挂载边到达的可读文档），此时树里没有它、无高亮——这是 B 语义
+  // 的正常状态，不是 bug。闭包外可读文档的独立入口是 #357 的 follow-up。
+  const [all, enumerable, canCreate] = await Promise.all([
     listWikiLibrary(productionId),
-    listVisibleWikiIds(actor, productionId),
+    listEnumerableWikiIds(actor, productionId),
     hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"),
   ]);
-  const wikis = visible.wildcard ? all : all.filter(w => visible.ids.has(w.id));
+  const wikis = enumerable.wildcard ? all : all.filter(w => enumerable.ids.has(w.id));
 
   const canView = await canViewWiki(actor, productionId, wikiId);
   if (!canView) {

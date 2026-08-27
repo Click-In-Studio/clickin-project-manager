@@ -7,7 +7,7 @@ import { getSession } from "@/lib/session";
 import { getProductionName, getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getDramaturgyTreeConfig, listWikiLibrary } from "@/lib/wiki-db";
-import { listVisibleWikiIds } from "@/lib/wiki-perm";
+import { listEnumerableWikiIds } from "@/lib/wiki-perm";
 import { listDramaturgyWikiSubtree } from "@/lib/dramaturgy-wiki";
 import { DramaturgyInspirationShell } from "@/components/DramaturgyWorkspaceTabs";
 import WikiShell from "@/components/wiki/WikiShell";
@@ -30,20 +30,21 @@ export default async function DramaturgyInspirationPage({
   if (!productionName) notFound();
 
   const actor = toActor(session, access.permCtx);
-  const [treeConfig, all, visible, canCreate] = await Promise.all([
+  const [treeConfig, all, enumerable, canCreate] = await Promise.all([
     getDramaturgyTreeConfig(productionId),
     listWikiLibrary(productionId),
-    listVisibleWikiIds(actor, productionId),
+    listEnumerableWikiIds(actor, productionId),
     hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"),
   ]);
   // 锚点是懒建的：enabled 但 rootWikiId 仍为 null＝还没人建过第一篇，属正常空态
   // （新建走 parentAnchor，服务端在 create 门后补建根）。
   const rootId = treeConfig.enabled ? treeConfig.rootWikiId : null;
-  // 子树成员必须在**全量**上算——wiki 可见性逐篇判定、不继承（wiki-perm §4.2），
-  // 先过滤再算祖先链会把「父不可见、子可见」的文档整篇丢掉，而它在「文档」模块里
-  // 是照常显示的（那边 byParent 把断链归到根层）。成员算完再过可见性。
+  // 子树成员在**全量**上算，再过枚举面（#357）。枚举集是含根的连通子树，所以
+  // 过滤后的结果照样连通——#352 那次「父不可见、子可见 → 整篇消失」的断链根因
+  // 已在判定层消解，这里的先后顺序不再是正确性前提（保持全量算子树是为了
+  // 越界判定与侧栏同源）。
   const subtree = listDramaturgyWikiSubtree(all, rootId);
-  const wikis = visible.wildcard ? subtree : subtree.filter((wiki) => visible.ids.has(wiki.id));
+  const wikis = enumerable.wildcard ? subtree : subtree.filter((wiki) => enumerable.ids.has(wiki.id));
   const routeBase = `/production/${productionId}/dramaturgy/inspiration`;
 
   return (

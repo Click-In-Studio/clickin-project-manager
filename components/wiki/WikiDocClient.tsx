@@ -26,6 +26,9 @@ import type { Mention } from "@/lib/event-db";
 type ShareLevel = "view" | "edit" | "manage";
 type ShareState = {
   isPublic: boolean;
+  /** 可枚举性（#357 枚举面）：与下面三条内容面正交——它管的是"目录里列不列出"，
+   *  不管"能不能读"。 */
+  listable: boolean;
   deptIds: string[];
   people: { userId: string; level: ShareLevel }[];
 };
@@ -611,6 +614,24 @@ export default function WikiDocClient({
                 />
                 <span>公开给全体成员</span>
               </label>
+
+              {/* 枚举面（#357）：与上面的内容面正交。两个面各管各的——
+                  公开但不可枚举＝靠链接传播；可枚举但不公开＝目录里有名字、点进去申请。 */}
+              <div className="rounded-lg border border-zinc-200 px-3 py-2.5">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={share.listable}
+                    onChange={e => putShare({ listable: e.target.checked })}
+                  />
+                  <span>在目录树中列出</span>
+                </label>
+                <p className="mt-1 text-xs leading-relaxed text-zinc-400">
+                  {share.listable
+                    ? "能列到父目录的人都能在树里看到这篇的标题。"
+                    : "只有下面被显式分享的人能在树里看到它，本篇的整棵子树也随之对他人隐藏；他人仍可经 [[链接]] 到达（能否阅读由上面的设置决定）。"}
+                </p>
+              </div>
 
               <div>
                 <p className="font-medium mb-1.5">分享给部门</p>

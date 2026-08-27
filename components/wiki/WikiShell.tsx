@@ -9,7 +9,6 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
-import { keyBetween } from "@/lib/lex-order";
 import TreePickerModal from "@/components/TreePickerModal";
 import type { WikiListEntry } from "@/lib/wiki-db";
 
@@ -71,6 +70,9 @@ export default function WikiShell({
   // 新建：creatingUnder = null 未在建 / "" 根级 / <id> 子文档
   const [creatingUnder, setCreatingUnder] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
+  // 可枚举性（#357）：默认进目录；取消勾选＝只有被显式分享的人能在树里列到它，
+  // 且它的整棵子树随之对他人隐藏（E(子) ⊆ E(父)）。建完可在分享面板改。
+  const [newListable, setNewListable] = useState(true);
   const [busy, setBusy] = useState(false);
   // ⋯ 菜单经 portal 固定定位（nav 有 overflow-y-auto，绝对定位会被裁剪）
   const [menu, setMenu] = useState<{ id: string; top: number; left: number } | null>(null);
@@ -127,25 +129,21 @@ export default function WikiShell({
     const target = byId.get(targetId);
     if (!target) return;
 
-    let parentId: string | null;
-    let sortKey: string;
-    if (zone === "inside") {
-      parentId = targetId;
-      const children = (byParent.get(targetId) ?? []).filter(w => w.id !== id);
-      sortKey = keyBetween(children.at(-1)?.sortKey ?? null, null);
-    } else {
-      parentId = rootParentId && target.parentId === rootParentId ? null : target.parentId ?? null;
-      const siblings = (byParent.get(parentId) ?? []).filter(w => w.id !== id);
-      const idx = siblings.findIndex(w => w.id === targetId);
-      const prev = zone === "before" ? siblings[idx - 1] : siblings[idx];
-      const next = zone === "before" ? siblings[idx] : siblings[idx + 1];
-      sortKey = keyBetween(prev?.sortKey ?? null, next?.sortKey ?? null);
-    }
+    // 排序键一律由服务端在**完整**兄弟集上算（#357 症状②）：可枚举性逐节点后
+    // 客户端手里的兄弟集可能有空洞，在残缺集上取键会和看不见的兄弟交错。
+    // 这里只声明「挂到谁下面 / 放在谁的前后」，不自己算键。
+    const parentId = zone === "inside"
+      ? targetId
+      : rootParentId && target.parentId === rootParentId ? null : target.parentId ?? null;
+    const place = zone === "inside" ? undefined : { anchorId: targetId, side: zone };
 
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ parentId: parentId ?? rootParentId ?? null, sortKey }),
+      body: JSON.stringify({
+        parentId: parentId ?? rootParentId ?? null,
+        ...(place ? { place } : {}),
+      }),
     });
     if (!res.ok) { alert((await res.json()).error ?? "移动失败"); return; }
     if (zone === "inside") setExpanded(prev => new Set([...prev, targetId]));
@@ -192,6 +190,7 @@ export default function WikiShell({
         body: JSON.stringify({
           title,
           parentId: parentId || rootParentId || null,
+          listable: newListable,
           ...(parentId ? {} : { parentAnchor: rootAnchor }),
         }),
       });
@@ -199,6 +198,7 @@ export default function WikiShell({
       if (!res.ok) { alert(data.error ?? "创建失败"); return; }
       setCreatingUnder(null);
       setNewTitle("");
+      setNewListable(true);
       if (parentId) setExpanded(prev => new Set([...prev, parentId]));
       router.push(`${routeBase}/${data.wiki.id}`);
       router.refresh();
@@ -288,19 +288,36 @@ export default function WikiShell({
   }
 
   const newDocInput = (parentId: string, depth: number) => (
-    <div className="flex gap-1 py-1 pr-2" style={{ paddingLeft: 8 + depth * 14 + 18 }}>
+    <div className="py-1 pr-2" style={{ paddingLeft: 8 + depth * 14 + 18 }}>
+      <div className="flex gap-1">
       <input
         autoFocus
         value={newTitle}
         onChange={e => setNewTitle(e.target.value)}
         onKeyDown={e => {
           if (e.key === "Enter") create(parentId || null);
-          if (e.key === "Escape") { setCreatingUnder(null); setNewTitle(""); }
+          if (e.key === "Escape") { setCreatingUnder(null); setNewTitle(""); setNewListable(true); }
         }}
-        onBlur={() => { if (!newTitle.trim()) { setCreatingUnder(null); setNewTitle(""); } }}
+        onBlur={() => { if (!newTitle.trim()) { setCreatingUnder(null); setNewTitle(""); setNewListable(true); } }}
         placeholder="标题，回车创建"
         className="flex-1 min-w-0 rounded border border-zinc-300 px-1.5 py-0.5 text-[13px] outline-none focus:border-zinc-500"
       />
+      </div>
+      {/* onMouseDown preventDefault：不让点勾选框把标题输入框 blur 掉（空标题会关闭新建） */}
+      <label
+        className="mt-1 flex items-center gap-1 text-[11px] text-zinc-400 select-none"
+        onMouseDown={e => e.preventDefault()}
+      >
+        <input
+          type="checkbox"
+          checked={!newListable}
+          onChange={e => setNewListable(!e.target.checked)}
+          className="h-3 w-3"
+        />
+        <span title="不进目录树：只有被显式分享的人能列到它，其子文档随之隐藏；他人仍可经 [[链接]] 到达（能否读由权限决定）">
+          不在目录中列出
+        </span>
+      </label>
     </div>
   );
 
@@ -380,6 +397,14 @@ export default function WikiShell({
                   >
                     {entry.title ?? "（无标题）"}
                   </Link>
+                  {!entry.listable && (
+                    <span
+                      className="shrink-0 text-[10px] text-amber-500 group-hover:hidden"
+                      title="不可枚举：只有被显式分享的人能在目录里看到它；其子文档随之隐藏"
+                    >
+                      ⌀
+                    </span>
+                  )}
                   {entry.isPublic && (
                     <span className="shrink-0 text-[10px] text-zinc-300 group-hover:hidden" title="已公开给全体成员">◍</span>
                   )}
