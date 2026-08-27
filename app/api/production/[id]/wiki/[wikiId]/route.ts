@@ -3,7 +3,10 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
 import { getWiki, updateWiki, deleteWiki } from "@/lib/wiki-db";
-import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki, canPlaceWikiUnder } from "@/lib/wiki-perm";
+import {
+  canViewWiki, canEditWiki, canDeleteWiki, canShareWiki,
+  canPlaceWikiUnder, canWriteWikiContainer,
+} from "@/lib/wiki-perm";
 import { broadcastWikiUpdate } from "@/lib/wiki-collab";
 import type { Mention } from "@/lib/event-db";
 import { setWikiPublic, setWikiListable, type WikiPlacement } from "@/lib/wiki-db";
@@ -70,11 +73,23 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       && !await canShareWiki(actor, productionId, wikiId))
     return Response.json({ error: "权限不足（分享面）" }, { status: 403 });
 
-  // 落位门（#357 症状⑤）：目标父必须是自己能枚举的。空串=移到顶层，恒允许。
-  if (body.parentId !== undefined) {
-    const target = body.parentId?.trim() ? body.parentId.trim() : null;
-    if (!await canPlaceWikiUnder(actor, productionId, target))
+  // 落位/重排门（#357 症状⑤）。三道：
+  //   ① 目标父可枚举（枚举面）——不往自己列不出的容器里塞东西
+  //   ② 目标父容器可写（写面）——增删/重排子项是对**容器**的改动
+  //   ③ 换父时源父也要容器可写——否则"把它从别人的子树里挪走"照旧成立
+  // 重排（place/sortKey）等同对当前父的子项改动，同样过 ②。
+  const changingParent = body.parentId !== undefined;
+  const targetParentId = changingParent
+    ? (body.parentId?.trim() ? body.parentId.trim() : null)
+    : existing.parentId;
+  if (changingParent || body.place !== undefined || body.sortKey !== undefined) {
+    if (!await canPlaceWikiUnder(actor, productionId, targetParentId))
       return Response.json({ error: "无权移动到该父文档下" }, { status: 403 });
+    if (!await canWriteWikiContainer(actor, productionId, targetParentId))
+      return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
+    if (changingParent && targetParentId !== existing.parentId
+        && !await canWriteWikiContainer(actor, productionId, existing.parentId))
+      return Response.json({ error: "无权把文档移出原父文档" }, { status: 403 });
   }
 
   if (body.title !== undefined && !body.title.trim())

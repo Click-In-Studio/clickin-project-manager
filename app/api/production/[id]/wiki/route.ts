@@ -3,7 +3,9 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { listWikiLibrary, createWiki, searchWiki, ensureDramaturgyRootAnchor } from "@/lib/wiki-db";
-import { listVisibleWikiIds, listEnumerableWikiIds, canPlaceWikiUnder } from "@/lib/wiki-perm";
+import {
+  listVisibleWikiIds, listEnumerableWikiIds, canPlaceWikiUnder, canWriteWikiContainer,
+} from "@/lib/wiki-perm";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -67,9 +69,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const parentId = body.parentId?.trim()
     || (body.parentAnchor === "dramaturgy" ? await ensureDramaturgyRootAnchor(productionId) : null);
 
-  // 落位门（#357 症状⑤）：不能往自己列不出的容器里塞东西
+  // 落位双门（#357 症状⑤）。与移动同门——否则"无权移入就改为在目标父下新建"
+  // 是条后门。系统锚点豁免容器写门，默认树/「啪建啪跳」流不受影响。
   if (!await canPlaceWikiUnder(actor, productionId, parentId))
     return Response.json({ error: "无权在该父文档下创建" }, { status: 403 });
+  if (!await canWriteWikiContainer(actor, productionId, parentId))
+    return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
 
   try {
     const wiki = await createWiki({

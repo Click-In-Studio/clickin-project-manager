@@ -225,6 +225,25 @@ async function tailSortKey(productionId: string, parentId: string | null): Promi
 }
 
 /**
+ * 系统锚点判定（「报告」/「戏剧构作」根、event 目录文档）。与 listWikiLibrary 的
+ * is_anchor、deleteWiki 的 anchor 守卫同一判据。
+ *
+ * 锚点是 INSERT 直建的**无主公共容器**——不走 createWiki，没有 created_by，
+ * 不发创建者行集，所以全库没有任何人持它们的 *@edit（线上核实：12 个锚点 0 条
+ * edit 行）。容器写门必须对它们豁免，否则默认文档树谁都放不进东西（#357 症状⑤）。
+ */
+export async function isWikiAnchor(wikiId: string): Promise<boolean> {
+  const { rows } = await getPool().query(
+    `SELECT 1 FROM production_wiki_config
+     WHERE reports_root_wiki_id = $1::uuid OR dramaturgy_root_wiki_id = $1::uuid
+     UNION ALL
+     SELECT 1 FROM production_event WHERE report_doc_wiki_id = $1::uuid LIMIT 1`,
+    [wikiId],
+  );
+  return rows.length > 0;
+}
+
+/**
  * 服务端在**完整**兄弟集上取排序键（#357 症状②）。
  *
  * 可枚举性逐节点之后，客户端手里的兄弟集可能有空洞——在残缺集上算 keyBetween

@@ -12,7 +12,7 @@ import {
 } from "@/lib/wiki-db";
 import {
   canViewWiki, canEditWiki, canDeleteWiki, canShareWiki,
-  listVisibleWikiIds, listEnumerableWikiIds,
+  listVisibleWikiIds, listEnumerableWikiIds, canPlaceWikiUnder, canWriteWikiContainer,
 } from "@/lib/wiki-perm";
 import { neutralizeInjectionTags } from "@/lib/agent-injection-safety";
 import { listProductionDepts } from "@/lib/dept-db";
@@ -191,6 +191,9 @@ export async function wikiSearch(userId: string, productionId: string, query: st
 // /wiki-proposal 预持久化时算出的 has_permission（那只是给确认卡片/预览
 // modal 用的展示值）。create 门是域级（能不能新建，不看具体哪篇），
 // update/delete/move 门是实例级（对这一篇具体文档有没有编辑/删除权限）。
+// create/move 另有**落位双门**（#357 症状⑤，与 REST 路由逐条同源）：目标父可枚举
+// ∧ 目标父容器可写；换父时源父容器也要可写。少一道，"让 AI 帮我挪进别人的目录"
+// 就是一条绕过 REST 的旁路。
 
 export async function wikiProposeCreate(
   userId: string, productionId: string, toolCallId: string,
@@ -208,9 +211,16 @@ export async function wikiProposeCreate(
     return "权限被拒绝：你没有在该制作新建文档的权限。已记录本次调用，需人工审批通过后才能重试。";
   }
 
+  const parentId = args.parentId ?? null;
+  if (!await canPlaceWikiUnder(resolved.actor, productionId, parentId)
+      || !await canWriteWikiContainer(resolved.actor, productionId, parentId)) {
+    if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_no_permission");
+    return "权限被拒绝：你没有在该父文档下新建子文档的权限。已记录本次调用，需人工审批通过后才能重试。";
+  }
+
   const doc = await createWiki({
     productionId, title: args.title, body: args.body ?? "",
-    parentId: args.parentId ?? null, createdBy: userId, origin: "ai-proposed",
+    parentId, createdBy: userId, origin: "ai-proposed",
   });
   if (proposal) await markWikiProposalApplied(proposal.id, doc.id);
   return `已创建文档《${doc.title}》（id: ${doc.id}）。`;
@@ -294,9 +304,20 @@ export async function wikiProposeMove(
     return "权限被拒绝：你没有编辑这篇文档的权限。已记录本次调用，需人工审批通过后才能重试。";
   }
 
+  const existing = await getWiki(args.wikiId, productionId);
+  if (!existing) return "没有找到该文档。";
+  const newParentId = args.newParentId ?? null;
+  if (!await canPlaceWikiUnder(resolved.actor, productionId, newParentId)
+      || !await canWriteWikiContainer(resolved.actor, productionId, newParentId)
+      || (newParentId !== existing.parentId
+          && !await canWriteWikiContainer(resolved.actor, productionId, existing.parentId))) {
+    if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_no_permission");
+    return "权限被拒绝：你没有改动这些父文档子目录的权限。已记录本次调用，需人工审批通过后才能重试。";
+  }
+
   let doc;
   try {
-    doc = await updateWiki(args.wikiId, productionId, { parentId: args.newParentId ?? null, origin: "ai-proposed" }, userId);
+    doc = await updateWiki(args.wikiId, productionId, { parentId: newParentId, origin: "ai-proposed" }, userId);
   } catch (err) {
     // validateParent 抛错（父不存在/成环）——不是权限问题，proposal 标业务规则状态。
     if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_business_rule");
