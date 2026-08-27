@@ -7,6 +7,7 @@ import ChevronIcon from "@/components/ChevronIcon";
 import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, PRODUCTION_TOOLBAR_STAGE, ProductionTopMenuDivider, useProductionToolbar } from "./ProductionTopMenu";
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
+import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib/character-perms-shared";
 
 const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
 
@@ -14,7 +15,8 @@ type Props = {
   productionId: string;
   productionName: string;
   initialCharacters: CharacterDetail[];
-  canEdit: boolean;
+  /** 逐动作权限（create / edit / delete 是三条不同的路由门，见 lib/character-perms） */
+  perms: CharacterPerms;
   embedded?: boolean;
   versionId?: string | null;
   initialExpandedId?: string;
@@ -156,6 +158,7 @@ function CharacterEditRow({
   char,
   allChars,
   canEdit,
+  canDelete,
   onRename,
   onDelete,
   onPatchMeta,
@@ -167,6 +170,7 @@ function CharacterEditRow({
   char: CharacterDetail;
   allChars: CharacterDetail[];
   canEdit: boolean;
+  canDelete: boolean;
   onRename: (name: string) => Promise<void>;
   onDelete: () => Promise<void>;
   onPatchMeta: (fields: Partial<{ gender: string; biography: string; roleType: string }>) => Promise<void>;
@@ -260,7 +264,7 @@ function CharacterEditRow({
         {/* Actions */}
         <td className="px-4 py-3">
           <div className="flex items-center justify-end gap-3">
-            {canEdit && (
+            {canDelete && (
               confirmDelete ? (
                 <span className="flex items-center gap-2">
                   <button onClick={del} disabled={deleting} className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50">
@@ -436,6 +440,7 @@ function CharacterTableRow({
   char,
   allChars,
   canEdit,
+  canDelete,
   onRename,
   onDelete,
   onPatchMeta,
@@ -444,6 +449,7 @@ function CharacterTableRow({
   char: CharacterDetail;
   allChars: CharacterDetail[];
   canEdit: boolean;
+  canDelete: boolean;
   onRename: (name: string) => Promise<void>;
   onDelete: () => Promise<void>;
   onPatchMeta: (fields: Partial<{ gender: string; biography: string; roleType: string }>) => Promise<void>;
@@ -577,7 +583,7 @@ function CharacterTableRow({
 
       {/* Actions */}
       <td className="px-4 py-3 align-top" style={{ width: 64 }}>
-        {canEdit && (
+        {canDelete && (
           confirmDelete ? (
             <span className="flex items-center gap-2 whitespace-nowrap">
               <button onClick={del} disabled={deleting} className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50">
@@ -705,7 +711,8 @@ function AddCharacterForm({
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
-export default function CharactersManager({ productionId, productionName, initialCharacters, canEdit, embedded, versionId, initialExpandedId }: Props) {
+export default function CharactersManager({ productionId, productionName, initialCharacters, perms, embedded, versionId, initialExpandedId }: Props) {
+  const canCreate = perms.create;
   const { stage: toolbarStage } = useProductionToolbar();
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
   const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId ?? null);
@@ -772,7 +779,7 @@ export default function CharactersManager({ productionId, productionName, initia
     setCharacters((prev) => prev.map((c) => c.id === id ? { ...c, isAggregate: toAggregate, memberIds: [] } : c));
   };
 
-  const addForm = canEdit && (
+  const addForm = canCreate && (
     <AddCharacterForm
       productionId={productionId}
       allChars={characters}
@@ -803,7 +810,8 @@ export default function CharactersManager({ productionId, productionName, initia
                   key={c.id}
                   char={c}
                   allChars={characters}
-                  canEdit={canEdit}
+                  canEdit={canEditCharacter(perms, c.id)}
+                  canDelete={canDeleteCharacter(perms, c.id)}
                   onRename={(name) => rename(c.id, name)}
                   onDelete={() => del(c.id)}
                   onPatchMeta={(fields) => patchMeta(c.id, fields)}
@@ -838,7 +846,8 @@ export default function CharactersManager({ productionId, productionName, initia
                 key={c.id}
                 char={c}
                 allChars={characters}
-                canEdit={canEdit}
+                canEdit={canEditCharacter(perms, c.id)}
+                canDelete={canDeleteCharacter(perms, c.id)}
                 onRename={(name) => rename(c.id, name)}
                 onDelete={() => del(c.id)}
                 onPatchMeta={(fields) => patchMeta(c.id, fields)}

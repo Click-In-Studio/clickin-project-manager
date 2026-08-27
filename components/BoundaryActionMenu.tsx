@@ -9,7 +9,8 @@ export default function BoundaryActionMenu({
   deleting = false,
 }: {
   conversionLabel: "转为章节" | "转为段落";
-  onConvert: () => void;
+  // 省略 = 无 scene 类型改写权（node:scene 的 meta/type@edit），不渲染「转换类型」
+  onConvert?: () => void;
   onDelete?: () => void;
   deleting?: boolean;
 }) {
@@ -39,7 +40,7 @@ export default function BoundaryActionMenu({
     >
       {openGroup === null ? (
         <>
-          <button type="button" onClick={(event) => { event.stopPropagation(); setOpenGroup("convert"); }} className={triggerClassName}>转换类型</button>
+          {onConvert && <button type="button" onClick={(event) => { event.stopPropagation(); setOpenGroup("convert"); }} className={triggerClassName}>转换类型</button>}
           {onDelete && <button type="button" onClick={(event) => { event.stopPropagation(); setOpenGroup("delete"); }} className={triggerClassName}>删除</button>}
         </>
       ) : openGroup === "delete" ? (
@@ -49,7 +50,7 @@ export default function BoundaryActionMenu({
         </>
       ) : (
         <>
-          <button type="button" onClick={(event) => { event.stopPropagation(); setOpenGroup(null); onConvert(); }} className="inline-flex h-5 items-center whitespace-nowrap text-xs text-blue-600/80 transition-colors hover:text-blue-900/80">{conversionLabel}</button>
+          <button type="button" onClick={(event) => { event.stopPropagation(); setOpenGroup(null); onConvert?.(); }} className="inline-flex h-5 items-center whitespace-nowrap text-xs text-blue-600/80 transition-colors hover:text-blue-900/80">{conversionLabel}</button>
           <button type="button" onClick={(event) => { event.stopPropagation(); setOpenGroup(null); }} className="inline-flex h-5 items-center whitespace-nowrap text-xs text-zinc-400 hover:text-zinc-600">取消</button>
         </>
       )}

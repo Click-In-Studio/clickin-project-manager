@@ -9,7 +9,7 @@ import type { SceneDetail } from "@/lib/db";
 import DurationInput from "@/components/DurationInput";
 import { parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/scene-duration";
-import type { SceneFieldPerms } from "@/lib/scene-field-perms";
+import { canDeleteScene, type SceneFieldPerms } from "@/lib/scene-field-perms-shared";
 import BoundaryActionMenu from "@/components/BoundaryActionMenu";
 import MarkerDeleteDialog, { type MarkerDeleteDialogState } from "@/components/MarkerDeleteDialog";
 import type { MarkerDeleteOperation, MarkerProjection } from "@/lib/script-marker-domain";
@@ -216,11 +216,11 @@ function SceneEditRow({
         </td>
         <td className="w-72 px-4 py-3 text-right hidden sm:table-cell">
           <div className="flex h-5 items-center justify-end gap-3">
-            {canEdit && (
+            {(fieldPerms.kind || canDelete) && (
               <span className="inline-flex h-5 items-center">
                 <BoundaryActionMenu
                   conversionLabel={scene.kind === "scene" ? "转为章节" : "转为段落"}
-                  onConvert={() => { void onConvert(); }}
+                  onConvert={fieldPerms.kind ? () => { void onConvert(); } : undefined}
                   onDelete={canDelete ? () => { void del(); } : undefined}
                   deleting={deleting}
                 />
@@ -290,7 +290,7 @@ function SceneEditRow({
                 onSave={(v) => onPatchMeta({ stageNotes: v })}
               />
             </div>
-            {canEdit && (
+            {(fieldPerms.kind || canDelete) && (
               <div className="sm:hidden mt-3 pt-3 border-t border-zinc-100 flex items-center gap-4">
                 {mobileAction === "convert" ? (
                   <>
@@ -308,7 +308,9 @@ function SceneEditRow({
                   </>
                 ) : (
                   <>
-                    <button type="button" onClick={() => setMobileAction("convert")} className="text-xs text-zinc-500 hover:text-zinc-700">转换类型</button>
+                    {fieldPerms.kind && (
+                      <button type="button" onClick={() => setMobileAction("convert")} className="text-xs text-zinc-500 hover:text-zinc-700">转换类型</button>
+                    )}
                     {canDelete && (
                       <button type="button" onClick={() => setMobileAction("delete")} className="text-xs text-zinc-500 hover:text-red-500">删除</button>
                     )}
@@ -580,7 +582,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
           {acts.length === 0 ? (
             <div>
               <p className="px-4 py-8 text-center text-sm text-zinc-300">暂无章节</p>
-              {canEdit && (
+              {fieldPerms.create && (
                 <table className="w-full border-t border-zinc-100">
                   <tbody>
                     <InsertSceneRow
@@ -604,7 +606,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                 </tr>
               </thead>
               <tbody>
-                {canEdit && (
+                {fieldPerms.create && (
                   <InsertSceneRow
                     colSpan={colSpan}
                     onAddChapter={(name) => add(name, null, beforeMarker(acts[0]))}
@@ -624,7 +626,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         childScenes={children}
                         canEdit={canEdit}
                         fieldPerms={fieldPerms}
-                        canDelete
+                        canDelete={canDeleteScene(fieldPerms, act.id)}
                         productionId={productionId}
                         versionId={currentVersionId}
                         initialExpanded={act.id === initialExpandedId}
@@ -633,7 +635,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         onDelete={() => del(act.id)}
                         onPatchMeta={(fields) => patchMeta(act.id, fields)}
                       />
-                      {canEdit && (
+                      {fieldPerms.create && (
                         <InsertSceneRow
                           colSpan={colSpan}
                           onAddChapter={(name) => add(name, null, beforeMarker(children[0] ?? nextAct))}
@@ -648,7 +650,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                             marks={sub.rehearsalMarks}
                             canEdit={canEdit}
                             fieldPerms={fieldPerms}
-                            canDelete
+                            canDelete={canDeleteScene(fieldPerms, sub.id)}
                             productionId={productionId}
                             versionId={currentVersionId}
                             initialExpanded={sub.id === initialExpandedId}
@@ -657,7 +659,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                             onDelete={() => del(sub.id)}
                             onPatchMeta={(fields) => patchMeta(sub.id, fields)}
                           />
-                          {canEdit && (
+                          {fieldPerms.create && (
                             <InsertSceneRow
                               colSpan={colSpan}
                               onAddChapter={(name) => add(name, null, beforeMarker(children[childIndex + 1] ?? nextAct))}
