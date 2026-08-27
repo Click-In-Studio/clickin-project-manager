@@ -4,7 +4,7 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
 import { getWikiAlias, moveWikiAlias, renameWikiAlias, deleteWikiAlias } from "@/lib/wiki-alias-db";
 import { canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki-perm";
-import type { WikiPlacement } from "@/lib/wiki-db";
+import { readPlacement, readTrimmedId } from "@/lib/wiki-alias-input";
 
 type Ctx = { params: Promise<{ id: string; aliasId: string }> };
 
@@ -29,26 +29,23 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const existing = await getWikiAlias(aliasId, productionId);
   if (!existing) return Response.json({ error: "软链接不存在" }, { status: 404 });
 
-  const body = await req.json() as {
-    parentId?: string | null; place?: WikiPlacement;
-    /** 显示名（#358 ⑤）：null/空串＝改回跟随目标实时标题 */
-    displayTitle?: string | null;
-  };
+  const body = await req.json() as Record<string, unknown>;
+  // 显示名（#358 ⑤）：字符串＝改名，null＝改回跟随目标，其余（含缺席）＝本帧不动
+  const displayTitle = typeof body.displayTitle === "string" ? body.displayTitle
+    : body.displayTitle === null ? null : undefined;
   const changingParent = body.parentId !== undefined;
-  const targetParentId = changingParent
-    ? (body.parentId?.trim() ? body.parentId.trim() : null)
-    : existing.parentId;
-
-  const movingPosition = changingParent || body.place !== undefined;
+  const targetParentId = changingParent ? readTrimmedId(body.parentId) : existing.parentId;
+  const place = readPlacement(body.place);
+  const movingPosition = changingParent || place !== null;
 
   // 改显示名单独一档门（容器写门 ∨ 创建者，同 DELETE），**不跑位置面那三道**：
   // 重命名不改变这个别名的位置，让它去过"能不能移到这里"的门是张冠李戴——建别名
   // 的人在别人的容器里放了一个位置，仍应能给自己那个位置改标签。
-  if (body.displayTitle !== undefined) {
+  if (displayTitle !== undefined) {
     if (!await canWriteWikiContainer(actor, productionId, existing.parentId)
         && existing.createdBy !== session.userId)
       return Response.json({ error: "无权重命名该软链接" }, { status: 403 });
-    const renamed = await renameWikiAlias(aliasId, productionId, body.displayTitle);
+    const renamed = await renameWikiAlias(aliasId, productionId, displayTitle);
     if (!renamed) return Response.json({ error: "软链接不存在" }, { status: 404 });
     if (!movingPosition) return Response.json({ alias: renamed });
   }
@@ -63,7 +60,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const res = await moveWikiAlias(aliasId, productionId, {
     ...(changingParent ? { parentId: targetParentId } : {}),
-    ...(body.place ? { place: body.place } : {}),
+    ...(place ? { place } : {}),
   });
   if (!res.ok) {
     if (res.reason === "not_found") return Response.json({ error: "软链接不存在" }, { status: 404 });

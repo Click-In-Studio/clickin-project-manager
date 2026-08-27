@@ -1,7 +1,7 @@
 import { getPool } from "./pg";
 import { broadcastWikiLibraryChange } from "./wiki-collab";
 import { tailSortKey, placementSortKey, type WikiPlacement } from "./wiki-db";
-import { canViewWiki, localEnumerableWikiIds } from "./wiki-perm";
+import { canEnumerateWiki, canViewWiki, localEnumerableWikiIds } from "./wiki-perm";
 import type { GrantActor } from "./grant-check";
 
 // ─── wiki 软链接（#358）：目录树里指向目标的伪节点 ─────────────────────────────
@@ -32,6 +32,13 @@ type AliasTargetResolver = {
   locallyEnumerable(actor: GrantActor, productionId: string, ids: string[]): Promise<Set<string>>;
   /** 内容门：能不能读目标正文。 */
   canReadContent(actor: GrantActor, productionId: string, id: string): Promise<boolean>;
+  /**
+   * 建别名的目标可达门：这个人在自己那份视野里够不够得着这个目标。
+   * 「够得着」= 在目录里列得到（枚举面全式）∨ 读得了（内容面）——两条发现路径。
+   * 放进解析器而不是留在路由里，是为了让「接一种新目标只改解析器」这句话成立
+   * （AI review #1：原先路由里硬编码 targetType === 'wiki'，asset 落地时要改两处）。
+   */
+  canReach(actor: GrantActor, productionId: string, id: string): Promise<boolean>;
 };
 
 const RESOLVERS: Record<string, AliasTargetResolver> = {
@@ -46,8 +53,20 @@ const RESOLVERS: Record<string, AliasTargetResolver> = {
     },
     locallyEnumerable: (actor, productionId, ids) => localEnumerableWikiIds(actor, productionId, ids),
     canReadContent: (actor, productionId, id) => canViewWiki(actor, productionId, id),
+    canReach: async (actor, productionId, id) =>
+      await canEnumerateWiki(actor, productionId, id) || await canViewWiki(actor, productionId, id),
   },
 };
+
+/** 目标可达门（建别名前跑）。未知 target_type 一律不可达——但路由应先用
+ *  isWikiAliasTargetType 分出 400「不支持这种目标」，别把它糊成 403。 */
+export async function canReachAliasTarget(
+  actor: GrantActor, productionId: string, targetType: string, targetId: string,
+): Promise<boolean> {
+  const resolver = RESOLVERS[targetType];
+  if (!resolver) return false;
+  return resolver.canReach(actor, productionId, targetId);
+}
 
 export function isWikiAliasTargetType(t: string): t is WikiAliasTargetType {
   return t in RESOLVERS;

@@ -489,6 +489,31 @@ describe("routes", () => {
     expect((await getWikiAlias(res.alias.id, prodId))?.displayTitle).toBeNull();
   });
 
+  it("不支持的目标类型在路由层就 400（可达门挂解析器，不硬编码 target_type）", async () => {
+    await grantCreate(prodId, member);
+    const res = await aliasPOST(
+      makeReq("POST", `/api/production/${prodId}/wiki-alias`, member,
+        { targetType: "asset", targetId: "ast_whatever" }), ctx());
+    expect(res.status).toBe(400);
+  });
+
+  it("畸形入参不打 500：非字符串 id / 形状不对的 place 一律当没给", async () => {
+    await grantCreate(prodId, member);
+    const doc = await createWiki({ productionId: prodId, title: "畸形入参·目标", createdBy: creator });
+    await setWikiPublic(doc.id, prodId, true);
+    const res = await aliasPOST(
+      makeReq("POST", `/api/production/${prodId}/wiki-alias`, member,
+        { parentId: 12345, targetId: doc.id, place: "随便什么" }), ctx());
+    expect(res.status).toBe(201);   // 落到顶层、尾部，而不是 TypeError → 500
+    const alias = (await res.json()).alias as { id: string; parentId: string | null };
+    expect(alias.parentId).toBeNull();
+
+    const patched = await aliasPATCH(
+      makeReq("PATCH", `/api/production/${prodId}/wiki-alias/${alias.id}`, member,
+        { place: { anchorId: 7, side: "sideways" } }), aliasCtx(alias.id));
+    expect(patched.status).toBe(200);
+  });
+
   it("容器写门管源父：不能把别名从别人的容器里挪走", async () => {
     await grantCreate(prodId, member);
     const theirBox = await createWiki({ productionId: prodId, title: "源父门·别人的容器", createdBy: creator });
