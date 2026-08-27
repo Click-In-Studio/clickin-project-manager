@@ -3,12 +3,18 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { listWikiLibrary, createWiki, searchWiki, ensureDramaturgyRootAnchor } from "@/lib/wiki-db";
-import { listVisibleWikiIds } from "@/lib/wiki-perm";
+import { listVisibleWikiIds, listEnumerableWikiIds, canPlaceWikiUnder } from "@/lib/wiki-perm";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-// GET  /api/production/[id]/wiki[?q=]   文档库列表（树平铺，可见性过滤）/ 搜索
+// GET  /api/production/[id]/wiki[?q=]   文档库列表（树平铺）/ 搜索
 // POST /api/production/[id]/wiki        创建文档（门：node:wiki/*@create）
+//
+// 两个面走两个门（#357）：
+//   树列表 → 枚举面 listEnumerableWikiIds（能不能在目录里列到）
+//   搜索   → 内容面 listVisibleWikiIds（能不能读）——**不得改用枚举面**：按标题搜
+//            闭包外的文档就是枚举面的后门，反复搜即枚举。`[[` 补全走的正是这个
+//            分支（components/SmartTextarea.tsx），候选集永远不得超出内容可读集。
 
 export async function GET(req: NextRequest, ctx: Ctx) {
   const { id: productionId } = await ctx.params;
@@ -18,16 +24,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const actor = toActor(session, access.permCtx);
 
-  const visible = await listVisibleWikiIds(actor, productionId);
   const q = req.nextUrl.searchParams.get("q");
   if (q) {
-    const hits = await searchWiki(productionId, q);
+    const [visible, hits] = await Promise.all([
+      listVisibleWikiIds(actor, productionId),
+      searchWiki(productionId, q),
+    ]);
     return Response.json({
       results: visible.wildcard ? hits : hits.filter(h => visible.ids.has(h.id)),
     });
   }
-  const all = await listWikiLibrary(productionId);
-  const wikis = visible.wildcard ? all : all.filter(w => visible.ids.has(w.id));
+  const [enumerable, all] = await Promise.all([
+    listEnumerableWikiIds(actor, productionId),
+    listWikiLibrary(productionId),
+  ]);
+  const wikis = enumerable.wildcard ? all : all.filter(w => enumerable.ids.has(w.id));
   return Response.json({ wikis });
 }
 
@@ -45,6 +56,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const body = await req.json() as {
     title?: string; body?: string; parentId?: string | null;
+    /** 可枚举性（#357），缺省 true。false＝建在目录里但只有被显式分享的人能列到。 */
+    listable?: boolean;
     /** 显式 parentId 缺席时的落位锚点。锚点可能尚未建（懒建），由服务端在**过完
      *  create 门之后**补建——ensure 是写事务，渲染路径一律不准碰。 */
     parentAnchor?: "dramaturgy";
@@ -54,12 +67,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const parentId = body.parentId?.trim()
     || (body.parentAnchor === "dramaturgy" ? await ensureDramaturgyRootAnchor(productionId) : null);
 
+  // 落位门（#357 症状⑤）：不能往自己列不出的容器里塞东西
+  if (!await canPlaceWikiUnder(actor, productionId, parentId))
+    return Response.json({ error: "无权在该父文档下创建" }, { status: 403 });
+
   try {
     const wiki = await createWiki({
       productionId,
       title: body.title.trim(),
       body: body.body ?? "",
       parentId,
+      listable: body.listable ?? true,
       createdBy: session.userId,
     });
     return Response.json({ wiki }, { status: 201 });

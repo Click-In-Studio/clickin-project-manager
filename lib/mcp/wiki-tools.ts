@@ -10,7 +10,10 @@ import {
   listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson,
   type WikiListEntry, type WikiRef,
 } from "@/lib/wiki-db";
-import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki, listVisibleWikiIds } from "@/lib/wiki-perm";
+import {
+  canViewWiki, canEditWiki, canDeleteWiki, canShareWiki,
+  listVisibleWikiIds, listEnumerableWikiIds,
+} from "@/lib/wiki-perm";
 import { neutralizeInjectionTags } from "@/lib/agent-injection-safety";
 import { listProductionDepts } from "@/lib/dept-db";
 import { listProductionMembers } from "@/lib/db";
@@ -70,11 +73,22 @@ async function filterVisible<T extends { id: string }>(
   return wildcard ? rows : rows.filter((r) => ids.has(r.id));
 }
 
+async function filterEnumerable<T extends { id: string }>(
+  actor: GrantActor,
+  productionId: string,
+  rows: T[],
+): Promise<T[]> {
+  const { wildcard, ids } = await listEnumerableWikiIds(actor, productionId);
+  return wildcard ? rows : rows.filter((r) => ids.has(r.id));
+}
+
+/** 目录树＝枚举面（#357），与人类侧栏同门。AI 能列到 ≠ 能读——正文仍过
+ *  canViewWiki（#333 不变量 2：分层≠权限，工具端实时判定是唯一安全边界）。 */
 export async function wikiTree(userId: string, productionId: string): Promise<string> {
   const resolved = await resolveProductionActor(userId, productionId);
   if (!resolved) return DENIED_NOT_MEMBER;
   const all = await listWikiLibrary(productionId);
-  const visible = await filterVisible(resolved.actor, productionId, all);
+  const visible = await filterEnumerable(resolved.actor, productionId, all);
   // 文档标题/正文是成员可写的自由文本——读回给模型前中和注入分隔符，防有人
   // 在文档里塞 <clickin-instructions> 之类经工具结果做间接注入。
   return neutralizeInjectionTags(buildTreeText(visible));

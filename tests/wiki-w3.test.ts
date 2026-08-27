@@ -249,13 +249,29 @@ describe("routes", () => {
     expect(ok.status).toBe(201);
   });
 
-  it("GET list only returns visible docs", async () => {
-    const secret = await createWiki({ productionId: prodId, title: "看不见我", createdBy: creator });
+  // #357：树列表走**枚举面**，不再是内容面——默认 listable 的文档标题进目录，
+  // 读不读得了由 GET 详情的内容门决定（名字可见 ≠ 内容可见）。
+  it("GET list returns enumerable docs (name), detail still 403s (content)", async () => {
+    const secret = await createWiki({ productionId: prodId, title: "标题可见正文不可见", createdBy: creator });
     const ctx = { params: Promise.resolve({ id: prodId }) };
     const res = await wikiListGET(makeReq("GET", `/api/production/${prodId}/wiki`, stranger), ctx);
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect((data.wikis as { id: string }[]).map(w => w.id)).not.toContain(secret.id);
+    expect((data.wikis as { id: string }[]).map(w => w.id)).toContain(secret.id);
+
+    const detail = await wikiGET(
+      makeReq("GET", `/api/production/${prodId}/wiki/${secret.id}`, stranger),
+      { params: Promise.resolve({ id: prodId, wikiId: secret.id }) });
+    expect(detail.status).toBe(403);
+  });
+
+  it("GET list omits non-listable docs entirely", async () => {
+    const hidden = await createWiki({
+      productionId: prodId, title: "不可枚举", createdBy: creator, listable: false });
+    const ctx = { params: Promise.resolve({ id: prodId }) };
+    const res = await wikiListGET(makeReq("GET", `/api/production/${prodId}/wiki`, stranger), ctx);
+    const data = await res.json();
+    expect((data.wikis as { id: string }[]).map(w => w.id)).not.toContain(hidden.id);
   });
 
   it("GET instance without permission → 403 carrying title (目录级) and apply anchor", async () => {

@@ -4,7 +4,7 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { hasAdminPanelEligibility } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
 import { toActor } from "@/lib/grant-check";
-import { listVisibleWikiIds } from "@/lib/wiki-perm";
+import { listEnumerableWikiIds } from "@/lib/wiki-perm";
 import { RESOURCE_DIRECTORY_QUERIES } from "@/lib/resource-directory";
 
 // GET ?type=<resource_type> — 该类型的资源实例清单 {id,label}，供权限键
@@ -25,10 +25,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const type = req.nextUrl.searchParams.get("type") ?? "";
 
-  // wiki 特例（W3）：默认隐私模型下标题沿可见性流出——按调用者过滤，
-  // 不能像其他类型全量列出（管理面资格 ≠ 单篇文档可见性）
+  // wiki 特例（W3）：标题沿可见性流出——按调用者过滤，不能像其他类型全量列出
+  // （管理面资格 ≠ 单篇文档可见性）。这里是**列举**动作，门＝枚举面（#357）：
+  // 授权选择器里能列到什么，与目录树里能列到什么必须是同一个集合。
   if (type === "wiki") {
-    const visible = await listVisibleWikiIds(toActor(session, permCtx), id);
+    const visible = await listEnumerableWikiIds(toActor(session, permCtx), id);
     const { rows } = await getPool().query<{ id: string; label: string }>(
       `SELECT id::text AS id, COALESCE(title, id::text) AS label
        FROM wiki WHERE production_id = $1 AND title IS NOT NULL ORDER BY created_at DESC`,

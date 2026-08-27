@@ -713,6 +713,9 @@ CREATE TABLE IF NOT EXISTS wiki (
   parent_id     UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
   sort_key      TEXT        NULL,
   is_public     BOOLEAN     NOT NULL DEFAULT false,
+  -- #357 可枚举性（枚举面，与 is_public 的内容面正交）：对能枚举父节点者是否出现
+  -- 在目录树。判定沿祖先链求交（lib/wiki-perm.ts listEnumerableWikiIds），不物化。
+  listable      BOOLEAN     NOT NULL DEFAULT true,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );

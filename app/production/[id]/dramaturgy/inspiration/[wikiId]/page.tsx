@@ -23,7 +23,7 @@ import {
   canEditWiki,
   canShareWiki,
   canViewWiki,
-  listVisibleWikiIds,
+  listEnumerableWikiIds,
 } from "@/lib/wiki-perm";
 import { listEventDepartments } from "@/lib/event-db";
 import { listDramaturgyWikiSubtree } from "@/lib/dramaturgy-wiki";
@@ -49,17 +49,17 @@ export default async function DramaturgyInspirationDocPage({
   if (!productionName) notFound();
 
   const actor = toActor(session, access.permCtx);
-  const [treeConfig, wiki, all, visible, canCreate] = await Promise.all([
+  const [treeConfig, wiki, all, enumerable, canCreate] = await Promise.all([
     getDramaturgyTreeConfig(productionId),
     getWiki(wikiId, productionId),
     listWikiLibrary(productionId),
-    listVisibleWikiIds(actor, productionId),
+    listEnumerableWikiIds(actor, productionId),
     hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"),
   ]);
   if (!wiki) notFound();
 
-  // 成员判定与侧栏渲染同源：都在**全量** all 上算子树，再各自过可见性门。
-  // （先过滤再算祖先链＝「父不可见、子可见」的文档在这里凭空消失，见列表页注释。）
+  // 成员判定与侧栏渲染同源：都在**全量** all 上算子树，再各自过枚举面（#357）。
+  // 侧栏＝枚举面，正文＝内容面（canViewWiki）——两个门，别混。
   const rootId = treeConfig.enabled ? treeConfig.rootWikiId : null;
   const subtree = listDramaturgyWikiSubtree(all, rootId);
   // 越界不是 404：工作区内的内链（[[…]]、反链）会指向子树外的文档，文档也可能
@@ -69,7 +69,7 @@ export default async function DramaturgyInspirationDocPage({
     redirect(`/production/${productionId}/wiki/${wikiId}`);
   }
 
-  const wikis = visible.wildcard ? subtree : subtree.filter((entry) => visible.ids.has(entry.id));
+  const wikis = enumerable.wildcard ? subtree : subtree.filter((entry) => enumerable.ids.has(entry.id));
   const routeBase = `/production/${productionId}/dramaturgy/inspiration`;
   const canView = await canViewWiki(actor, productionId, wikiId);
 

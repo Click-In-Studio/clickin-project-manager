@@ -12,6 +12,11 @@ import { hasEventDomainView } from "./event-permissions";
 //
 // 挂载/分享面永不物化 grant 行（§0.9 负面清单）；解除挂载/分享即收缩。
 // 标题=目录级信息沿引用边流出（§4.1），由 mention-resolve 承担，不经本判定。
+//
+// 【两个面，别混】（#357）——本段是**内容面**：能不能读这篇。
+// 目录树用的是**枚举面**（本文件下半 listEnumerableWikiIds）：能不能在目录里列到它。
+// 名字沿引用边逐点流出 ≠ 名字集合可枚举，两者是不同的披露类，不得互相推导。
+// 不变量：枚举面的任何变化不得改变 canViewWiki 的判定结果。
 
 type WikiVisibilityRow = { id: string; is_public: boolean };
 
@@ -147,6 +152,65 @@ export async function listVisibleWikiIds(
   for (const r of mounted.rows) ids.add(r.id);
 
   return { wildcard: false, ids };
+}
+
+// ─── 枚举面（#357）：目录树可见性，与上面的内容面正交 ───────────────────────
+//
+//   可枚举(u, X) ⟺ 可枚举(u, parent(X)) ∧ (X.listable ∨ u 持 wiki/X meta@view 行)
+//   可枚举(u, 顶层节点) ⟺ X.listable ∨ u 持 meta@view 行
+//
+// 前置合取项即不变量 E(子) ⊆ E(父)：任何人看到的都是**含根的连通子树**，树上不可能
+// 出现断链（#357 症状①），隐一个节点即隐整棵子树，零级联写、不可能漂移。
+// 沿祖先链求交、永不物化（§0.9 姿态：结构面不落 grant 行，收窄即刻生效）。
+//
+// 与内容面的关系：`*@view` 的 sub 通配天然命中 meta（grant-check RESERVED_SUBS 之外
+// 的段 `resource_sub IN ($5,'*')`），所以内容可读者只要祖先链通就在树里，装门零迁移。
+// 反向不成立——能在树里看到标题 ≠ 能读内容，内容仍走 canViewWiki 四通道。
+//
+// **本面只写这一份实现**（集合式），单点判定＝查集合，不重蹈 canViewWiki /
+// listVisibleWikiIds 双写的覆辙（#357 症状③）。
+
+export async function listEnumerableWikiIds(
+  actor: GrantActor,
+  productionId: string,
+): Promise<{ wildcard: boolean; ids: Set<string> }> {
+  if (actor.isAdmin || actor.isOwner) return { wildcard: true, ids: new Set() };
+  // meta@view 通配＝每个节点都过第二合取项 → 自根归纳全树可枚举
+  const granted = await listGrantedResourceIds(actor.userId, productionId, "wiki", "meta", "view");
+  if (granted.wildcard) return { wildcard: true, ids: new Set() };
+  const ids = [...granted.ids];
+  const { rows } = await getPool().query<{ id: string }>(
+    `WITH RECURSIVE enumerable AS (
+       SELECT w.id, 1 AS depth FROM wiki w
+       WHERE w.production_id = $1 AND w.parent_id IS NULL
+         AND (w.listable OR w.id::text = ANY($2::text[]))
+       UNION ALL
+       SELECT c.id, e.depth + 1 FROM wiki c JOIN enumerable e ON c.parent_id = e.id
+       WHERE c.production_id = $1 AND e.depth < 100
+         AND (c.listable OR c.id::text = ANY($2::text[]))
+     )
+     SELECT DISTINCT id::text AS id FROM enumerable`,
+    [productionId, ids],
+  );
+  return { wildcard: false, ids: new Set(rows.map(r => r.id)) };
+}
+
+/** 单点枚举判定＝查集合（刻意不另写一份上溯 SQL，见上方双写教训）。 */
+export async function canEnumerateWiki(
+  actor: GrantActor, productionId: string, wikiId: string,
+): Promise<boolean> {
+  const e = await listEnumerableWikiIds(actor, productionId);
+  return e.wildcard || e.ids.has(wikiId);
+}
+
+/** 落位门（#357 症状⑤）：只能把文档挂到自己能枚举的父下——枚举权挂在节点上，
+ *  往一个自己列不出的容器里塞东西没有语义。null=顶层，恒允许。
+ *  注：这是**枚举门**，不含"能否重排别人的子树"那条写权门（另议）。 */
+export async function canPlaceWikiUnder(
+  actor: GrantActor, productionId: string, parentId: string | null,
+): Promise<boolean> {
+  if (parentId === null) return true;
+  return canEnumerateWiki(actor, productionId, parentId);
 }
 
 // ─── 写面门（行判定，admin/owner 旁路由 hasEffectiveGrant 调用侧承担）──────────

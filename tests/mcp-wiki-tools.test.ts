@@ -15,6 +15,7 @@ let outsiderId: string;
 let rootId: string;
 let childId: string;
 let privateId: string;
+let hiddenId: string;
 
 beforeAll(async () => {
   ownerId = (await upsertFeishuUser(`test-open-${shortId()}`, `所有者${shortId()}`, null, false)).userId;
@@ -33,6 +34,10 @@ beforeAll(async () => {
   childId = child.id;
   const priv = await createWiki({ productionId: prodId, title: "私有文档", body: "只有所有者能看", createdBy: ownerId });
   privateId = priv.id;
+  // #357：内容私密 ∧ 不可枚举——AI 的目录树里连名字都不该有
+  const hidden = await createWiki({
+    productionId: prodId, title: "不可枚举文档", body: "目录里没有我", createdBy: ownerId, listable: false });
+  hiddenId = hidden.id;
 });
 
 afterAll(async () => {
@@ -47,18 +52,24 @@ describe("权限门语义", () => {
     expect(await wikiSearch(outsiderId, prodId, "根")).toBe(DENIED_NOT_MEMBER);
   });
 
-  it("wikiTree/wikiSearch：零权限成员看不到私有文档（AI 视角 = 人类视角）", async () => {
+  // #357：wikiTree 走枚举面、wikiSearch 走内容面，两个门（AI 视角 = 人类视角）
+  it("wikiTree：列到标题 ≠ 能读；不可枚举的连名字都没有", async () => {
     const tree = await wikiTree(plainMemberId, prodId);
-    expect(tree).not.toContain("私有文档");
+    expect(tree).toContain("私有文档");        // 默认 listable：目录里有名字
+    expect(tree).not.toContain("不可枚举文档"); // 枚举面挡住
+  });
 
+  it("wikiSearch：走内容面，读不了就搜不到（反复搜不能变成枚举）", async () => {
     const search = await wikiSearch(plainMemberId, prodId, "私有");
     expect(search).not.toContain(privateId);
     expect(search).toBe("（没有匹配的文档）");
+    expect(await wikiSearch(plainMemberId, prodId, "不可枚举")).toBe("（没有匹配的文档）");
   });
 
-  it("wikiRead/wikiBacklinks：零权限成员读私有文档被拒", async () => {
+  it("wikiRead/wikiBacklinks：零权限成员读私有文档被拒（目录里看得到名字也照拒）", async () => {
     const read = await wikiRead(plainMemberId, prodId, privateId);
     expect(read).toContain("权限被拒绝");
+    expect(await wikiRead(plainMemberId, prodId, hiddenId)).toContain("权限被拒绝");
     const backlinks = await wikiBacklinks(plainMemberId, prodId, privateId);
     expect(backlinks).toContain("权限被拒绝");
   });

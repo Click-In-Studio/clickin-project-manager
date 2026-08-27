@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
 import {
-  getWiki, setWikiPublic, setWikiDeptShares, listWikiDeptShares,
+  getWiki, setWikiPublic, setWikiListable, setWikiDeptShares, listWikiDeptShares,
   listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson,
 } from "@/lib/wiki-db";
 import { canShareWiki } from "@/lib/wiki-perm";
@@ -13,6 +13,8 @@ type Ctx = { params: Promise<{ id: string; wikiId: string }> };
 
 // 分享面（门=grants@edit 保留段）：个人=grant 行集；部门=wiki_dept_share 结构面；
 // 全体=is_public 列。结构面永不物化行（§0.9 负面清单）。
+// 以上三条全是**内容面**（能不能读）。listable 是**枚举面**（能不能在目录里列到），
+// 与它们正交：公开但不可枚举＝靠链接传播；可枚举但不公开＝目录里有名字、点进去申请。
 
 type Guarded =
   | { err: Response }
@@ -46,6 +48,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   return Response.json({
     isPublic: wiki.isPublic,
+    listable: wiki.listable,
     deptIds: await listWikiDeptShares(wikiId),
     people: await listWikiSharePeople(wikiId, productionId),
   });
@@ -59,12 +62,14 @@ export async function PUT(req: NextRequest, ctx: Ctx): Promise<Response> {
 
   const body = await req.json() as {
     isPublic?: boolean;
+    listable?: boolean;
     deptIds?: string[];
     addPerson?: { userId: string; level: WikiLevel };
     removePersonUserId?: string;
   };
 
   if (body.isPublic !== undefined) await setWikiPublic(wikiId, productionId, body.isPublic);
+  if (body.listable !== undefined) await setWikiListable(wikiId, productionId, body.listable);
   if (body.deptIds !== undefined) await setWikiDeptShares(wikiId, productionId, body.deptIds);
 
   if (body.addPerson) {

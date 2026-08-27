@@ -23,6 +23,8 @@ export type WikiDoc = {
   parentId: string | null;
   sortKey: string | null;
   isPublic: boolean;
+  /** 可枚举性（#357 枚举面，与 isPublic 的内容面正交）：是否对能枚举父节点者出现在目录树 */
+  listable: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -36,14 +38,15 @@ export type WikiListEntry = Omit<WikiDoc, "body" | "mentions"> & {
 type WikiRow = {
   id: string; production_id: string; title: string | null; body: string;
   mentions: Mention[]; created_by: string | null; parent_id: string | null;
-  sort_key: string | null; is_public: boolean; created_at: Date; updated_at: Date;
+  sort_key: string | null; is_public: boolean; listable: boolean;
+  created_at: Date; updated_at: Date;
 };
 
 function rowToWiki(r: WikiRow): WikiDoc {
   return {
     id: r.id, productionId: r.production_id, title: r.title, body: r.body,
     mentions: r.mentions ?? [], createdBy: r.created_by, parentId: r.parent_id,
-    sortKey: r.sort_key, isPublic: r.is_public,
+    sortKey: r.sort_key, isPublic: r.is_public, listable: r.listable,
     createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
   };
 }
@@ -154,7 +157,8 @@ async function writeRevision(
 export async function listWikiLibrary(productionId: string): Promise<WikiListEntry[]> {
   const res = await getPool().query<WikiRow & { tags: string[] | null; is_anchor: boolean }>(
     `SELECT w.id::text AS id, w.production_id, w.title, w.created_by, w.parent_id::text AS parent_id,
-            w.sort_key, w.is_public, w.created_at, w.updated_at, '' AS body, '[]'::jsonb AS mentions,
+            w.sort_key, w.is_public, w.listable, w.created_at, w.updated_at,
+            '' AS body, '[]'::jsonb AS mentions,
             array_remove(array_agg(t.tag ORDER BY t.tag), NULL) AS tags,
             (EXISTS (SELECT 1 FROM production_wiki_config c
                      WHERE c.reports_root_wiki_id = w.id OR c.dramaturgy_root_wiki_id = w.id)
@@ -174,7 +178,8 @@ export async function listWikiLibrary(productionId: string): Promise<WikiListEnt
 export async function getWiki(id: string, productionId: string): Promise<(WikiDoc & { tags: string[] }) | null> {
   const res = await getPool().query<WikiRow & { tags: string[] | null }>(
     `SELECT w.id::text AS id, w.production_id, w.title, w.body, w.mentions, w.created_by,
-            w.parent_id::text AS parent_id, w.sort_key, w.is_public, w.created_at, w.updated_at,
+            w.parent_id::text AS parent_id, w.sort_key, w.is_public, w.listable,
+            w.created_at, w.updated_at,
             array_remove(array_agg(t.tag ORDER BY t.tag), NULL) AS tags
      FROM wiki w LEFT JOIN wiki_tag t ON t.wiki_id = w.id
      WHERE w.id = $1::uuid AND w.production_id = $2
@@ -219,6 +224,35 @@ async function tailSortKey(productionId: string, parentId: string | null): Promi
   return keyBetween(res.rows[0]?.sort_key ?? null, null);
 }
 
+/**
+ * 服务端在**完整**兄弟集上取排序键（#357 症状②）。
+ *
+ * 可枚举性逐节点之后，客户端手里的兄弟集可能有空洞——在残缺集上算 keyBetween
+ * 会和看不见的兄弟交错。所以拖拽只传**相对锚点**（"放在 X 的前/后"），键一律
+ * 由服务端在全量兄弟上算。顺带也修了并发拖拽下客户端快照过期的老问题。
+ *
+ * 锚点不在该父下（并发移动/客户端过期）→ 回落到尾部，不报错。
+ */
+export type WikiPlacement = { anchorId: string; side: "before" | "after" };
+
+async function placementSortKey(
+  productionId: string, parentId: string | null,
+  place: WikiPlacement, excludeId: string | null,
+): Promise<string> {
+  const { rows } = await getPool().query<{ id: string; sort_key: string | null }>(
+    `SELECT id::text AS id, sort_key FROM wiki
+     WHERE production_id = $1 AND parent_id IS NOT DISTINCT FROM $2::uuid
+       AND ($3::uuid IS NULL OR id <> $3::uuid)
+     ORDER BY sort_key NULLS LAST, created_at`,
+    [productionId, parentId, excludeId],
+  );
+  const idx = rows.findIndex(r => r.id === place.anchorId);
+  if (idx < 0) return tailSortKey(productionId, parentId);
+  const prev = place.side === "before" ? rows[idx - 1] : rows[idx];
+  const next = place.side === "before" ? rows[idx] : rows[idx + 1];
+  return keyBetween(prev?.sort_key ?? null, next?.sort_key ?? null);
+}
+
 /** 空串 → null（=根目录）。父 id 直接进 $n::uuid，空串会炸成
  *  "invalid input syntax for type uuid"——而"没有父文档"最自然的表达
  *  恰恰是空串，MCP 工具那边模型就这么传（人也一样）。在 db 层收口，
@@ -230,6 +264,9 @@ function normalizeParentId(v: string | null | undefined): string | null {
 export async function createWiki(params: {
   productionId: string; title: string; body?: string;
   parentId?: string | null; createdBy: string;
+  /** 可枚举性（#357）：缺省 true＝名字随位置进目录；false＝只有显式 meta@view
+   *  持有者能在树里列到它，他人须经 wikilink 到达且看不到其子文档。 */
+  listable?: boolean;
   /** revision provenance（如 "ai-proposed"）——默认 writeRevision 自己的 "user"。 */
   origin?: string;
 }): Promise<WikiDoc & { tags: string[] }> {
@@ -240,9 +277,10 @@ export async function createWiki(params: {
   const sortKey = await tailSortKey(params.productionId, parentId);
   const body = params.body ?? "";
   const res = await getPool().query<{ id: string }>(
-    `INSERT INTO wiki (production_id, title, body, created_by, parent_id, sort_key)
-     VALUES ($1, $2, $3, $4, $5::uuid, $6) RETURNING id::text AS id`,
-    [params.productionId, params.title, body, params.createdBy, parentId, sortKey],
+    `INSERT INTO wiki (production_id, title, body, created_by, parent_id, sort_key, listable)
+     VALUES ($1, $2, $3, $4, $5::uuid, $6, $7) RETURNING id::text AS id`,
+    [params.productionId, params.title, body, params.createdBy, parentId, sortKey,
+     params.listable ?? true],
   );
   const id = res.rows[0].id;
   // §0.9 C-6：创建者 manage 行集 + person 归属
@@ -262,6 +300,9 @@ export async function updateWiki(
   patch: {
     title?: string; body?: string; mentions?: Mention[];
     parentId?: string | null; sortKey?: string; tags?: string[];
+    /** 相对锚点落位（#357 症状②）：客户端只说"放在谁的前/后"，键由服务端在
+     *  完整兄弟集上算。与 sortKey 二选一，同时给以 place 为准。 */
+    place?: WikiPlacement;
     /** 协作：客户端 base 正文——与行内现值不同时在行锁事务内做行级三路合并
      *（AI review：读取-合并-写回不加锁会被并发覆盖，合并保障失效） */
     mergeBase?: string;
@@ -279,13 +320,24 @@ export async function updateWiki(
     if (!await validateParent(productionId, id, nextParentId)) throw new Error("非法的父文档（不存在或成环）");
   }
 
+  // 排序键：相对锚点 > 显式 sortKey > 换父时落尾部（换父不重算会留着旧父的键，
+  // 在新兄弟里位置随机——move 菜单的遗留 bug，顺手修）
+  const targetParentId = nextParentId !== undefined ? nextParentId : existing.parentId;
+  const nextSortKey = patch.place !== undefined
+    ? await placementSortKey(productionId, targetParentId, patch.place, id)
+    : patch.sortKey !== undefined
+      ? patch.sortKey
+      : (nextParentId !== undefined && nextParentId !== existing.parentId)
+        ? await tailSortKey(productionId, targetParentId)
+        : undefined;
+
   const sets: string[] = ["updated_at = now()"];
   const vals: unknown[] = [id, productionId];
   const push = (frag: string, v: unknown) => { vals.push(v); sets.push(`${frag}$${vals.length}`); };
   if (patch.title !== undefined) push("title = ", patch.title);
   if (patch.mentions !== undefined) push("mentions = ", JSON.stringify(patch.mentions));
   if (nextParentId !== undefined) push("parent_id = ", nextParentId);
-  if (patch.sortKey !== undefined) push("sort_key = ", patch.sortKey);
+  if (nextSortKey !== undefined) push("sort_key = ", nextSortKey);
 
   if (patch.body !== undefined && patch.mergeBase !== undefined) {
     // 行锁事务内合并写回：SELECT FOR UPDATE 排队并发保存者，各自基于最新现值合并
@@ -600,6 +652,15 @@ export async function placeWikiUnder(
 }
 
 // ─── 分享面 ──────────────────────────────────────────────────────────────────
+
+/** 可枚举性开关（#357）。属分享面（grants@edit），与 setWikiPublic 同档。 */
+export async function setWikiListable(id: string, productionId: string, listable: boolean): Promise<void> {
+  await getPool().query(
+    `UPDATE wiki SET listable = $3, updated_at = now() WHERE id = $1::uuid AND production_id = $2`,
+    [id, productionId, listable],
+  );
+  broadcastWikiLibraryChange(productionId, { kind: "updated", wikiId: id });
+}
 
 export async function setWikiPublic(id: string, productionId: string, isPublic: boolean): Promise<void> {
   await getPool().query(
