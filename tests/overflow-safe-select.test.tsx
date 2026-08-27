@@ -1,0 +1,172 @@
+// @vitest-environment jsdom
+
+import { act, Fragment, type ReactNode } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+import { Z_INDEX } from "@/lib/z-index";
+
+describe("OverflowSafeSelect", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  const scrollIntoView = vi.fn();
+
+  beforeAll(() => {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+  });
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    scrollIntoView.mockClear();
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  async function render(children: ReactNode) {
+    await act(async () => root.render(children));
+  }
+
+  async function openMenu() {
+    const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]');
+    expect(trigger).not.toBeNull();
+    await act(async () => {
+      trigger?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    return trigger!;
+  }
+
+  it("puts caller styles and layout classes on the actual flex/grid item", async () => {
+    await render(
+      <OverflowSafeSelect
+        className="col-span-2 w-full"
+        style={{ border: "2px solid red", padding: "3px 4px", background: "rgb(1, 2, 3)", minHeight: 24 }}
+        value="a"
+        onChange={() => {}}
+      >
+        <option value="a">Alpha</option>
+      </OverflowSafeSelect>,
+    );
+
+    const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!;
+    expect(trigger.parentElement).toBe(container);
+    expect(trigger.className).toBe("col-span-2 w-full");
+    expect(trigger.style.border).toBe("2px solid red");
+    expect(trigger.style.padding).toBe("3px 4px");
+    expect(trigger.style.background).toBe("rgb(1, 2, 3)");
+    expect(trigger.style.minHeight).toBe("24px");
+  });
+
+  it("emits a real select change event and supports keyboard selection", async () => {
+    let received: { value: string; name: string; cancellable: boolean } | undefined;
+    await render(
+      <OverflowSafeSelect
+        aria-label="状态"
+        name="status"
+        value="a"
+        onChange={(event) => {
+          received = {
+            value: event.target.value,
+            name: event.target.name,
+            cancellable: typeof event.preventDefault === "function" && typeof event.stopPropagation === "function",
+          };
+        }}
+      >
+        <option value="a">Alpha</option>
+        <option value="b">Beta</option>
+      </OverflowSafeSelect>,
+    );
+
+    const trigger = await openMenu();
+    await act(async () => {
+      trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    await act(async () => {
+      trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+
+    expect(received).toEqual({ value: "b", name: "status", cancellable: true });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("flattens optgroups and fragment/component-wrapped options", async () => {
+    function OptionWrapper({ children }: { children: ReactNode }) {
+      return <>{children}</>;
+    }
+
+    await render(
+      <OverflowSafeSelect aria-label="资源" defaultValue="plain" onChange={() => {}}>
+        <Fragment>
+          <option value="plain">普通</option>
+          <OptionWrapper>
+            <option value="wrapped">包装项</option>
+          </OptionWrapper>
+        </Fragment>
+        <optgroup label="禁用组" disabled>
+          <option value="disabled">不可选</option>
+        </optgroup>
+      </OverflowSafeSelect>,
+    );
+
+    await openMenu();
+    const options = [...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]')];
+    expect(options.map((option) => option.textContent?.trim())).toEqual(["普通✓", "包装项", "不可选"]);
+    expect(options[2]?.disabled).toBe(true);
+    expect(document.body.textContent).toContain("禁用组");
+  });
+
+  it("keeps the portal above the highest modal and clamps it inside the viewport", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 240 });
+    await render(
+      <div style={{ position: "fixed", inset: 0, zIndex: 9999 }}>
+        <OverflowSafeSelect aria-label="模态框下拉" value="a" onChange={() => {}}>
+          <option value="a">Alpha</option>
+          <option value="b">Beta</option>
+        </OverflowSafeSelect>
+      </div>,
+    );
+
+    const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!;
+    trigger.getBoundingClientRect = () => ({
+      x: 280, y: 180, left: 280, right: 360, top: 180, bottom: 214,
+      width: 80, height: 34, toJSON: () => ({}),
+    });
+    await openMenu();
+
+    const menu = document.body.querySelector<HTMLDivElement>('[role="listbox"]')!;
+    expect(Number(menu.style.zIndex)).toBe(Z_INDEX.selectMenu);
+    expect(Number(menu.style.zIndex)).toBeGreaterThan(9999);
+    expect(menu.style.left).toBe("90px");
+    expect(menu.style.width).toBe("220px");
+    expect(menu.style.bottom).toBe("66px");
+    expect(menu.style.maxHeight).toBe("164px");
+  });
+
+  it("scrolls the keyboard-active option into view and does not mislabel unknown values", async () => {
+    await render(
+      <OverflowSafeSelect aria-label="长列表" value="missing" onChange={() => {}}>
+        {Array.from({ length: 12 }, (_, index) => (
+          <option key={index} value={String(index)}>Option {index}</option>
+        ))}
+      </OverflowSafeSelect>,
+    );
+
+    const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!;
+    expect(trigger.textContent).toContain("请选择");
+    await openMenu();
+    scrollIntoView.mockClear();
+    await act(async () => {
+      trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+  });
+});

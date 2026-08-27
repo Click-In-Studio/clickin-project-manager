@@ -1,8 +1,11 @@
 "use client";
 
+import { Z_INDEX } from "@/lib/z-index";
+
 import {
   Children,
   cloneElement,
+  Fragment,
   isValidElement,
   type ChangeEvent,
   type FocusEvent,
@@ -39,36 +42,57 @@ const VIEWPORT_GUTTER = 10;
 const MENU_GAP = 6;
 const DEFAULT_MAX_HEIGHT = 320;
 
+const DEFAULT_TRIGGER_STYLE = {
+  width: "100%",
+  minWidth: 0,
+  minHeight: 34,
+  border: "1px solid var(--line)",
+  borderRadius: 8,
+  padding: "7px 10px",
+  background: "var(--paper)",
+  color: "var(--ink)",
+  font: "inherit",
+  textAlign: "left",
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+} satisfies React.CSSProperties;
+
 function textOf(node: ReactNode): string {
   return Children.toArray(node).map((child) => {
     if (typeof child === "string" || typeof child === "number") return String(child);
     return isValidElement<{ children?: ReactNode }>(child) ? textOf(child.props.children) : "";
   }).join("");
 }
-
-function optionsFrom(children: ReactNode): Item[] {
+function optionsFrom(children: ReactNode, group?: string, groupDisabled = false): Item[] {
   const items: Item[] = [];
   Children.forEach(children, (child) => {
     if (!isValidElement(child)) return;
     if (child.type === "option") {
       const option = child as ReactElement<{ value?: string | number; disabled?: boolean; children?: ReactNode }>;
       const label = textOf(option.props.children);
-      items.push({ value: String(option.props.value ?? label), label, disabled: !!option.props.disabled });
+      items.push({
+        value: String(option.props.value ?? label),
+        label,
+        disabled: groupDisabled || !!option.props.disabled,
+        group,
+      });
       return;
     }
     if (child.type === "optgroup") {
-      const group = child as ReactElement<{ label?: string; disabled?: boolean; children?: ReactNode }>;
-      Children.forEach(group.props.children, (nested) => {
-        if (!isValidElement(nested) || nested.type !== "option") return;
-        const option = nested as ReactElement<{ value?: string | number; disabled?: boolean; children?: ReactNode }>;
-        const label = textOf(option.props.children);
-        items.push({
-          value: String(option.props.value ?? label),
-          label,
-          disabled: !!group.props.disabled || !!option.props.disabled,
-          group: group.props.label,
-        });
-      });
+      const optionGroup = child as ReactElement<{ label?: string; disabled?: boolean; children?: ReactNode }>;
+      items.push(...optionsFrom(
+        optionGroup.props.children,
+        optionGroup.props.label,
+        groupDisabled || !!optionGroup.props.disabled,
+      ));
+      return;
+    }
+    // Fragments and small option-wrapper components are common in conditional JSX.
+    // Recurse through their children instead of silently dropping valid options.
+    const nested = child as ReactElement<{ children?: ReactNode }>;
+    if (child.type === Fragment || nested.props.children !== undefined) {
+      items.push(...optionsFrom(nested.props.children, group, groupDisabled));
     }
   });
   return items;
@@ -91,13 +115,15 @@ export default function OverflowSafeSelect({
   "aria-label": ariaLabel,
   ...nativeProps
 }: Props) {
-  const items = useMemo(() => optionsFrom(children), [children]);
+  // Stabilize semantic option data even when parents recreate JSX children.
+  const itemsJson = JSON.stringify(optionsFrom(children));
+  const items = useMemo<Item[]>(() => JSON.parse(itemsJson) as Item[], [itemsJson]);
   const generatedMenuId = useId();
   const menuId = `overflow-safe-select-${generatedMenuId.replace(/:/g, "")}`;
   const firstValue = items.find((item) => !item.disabled)?.value ?? "";
   const [uncontrolledValue, setUncontrolledValue] = useState(() => String(defaultValue ?? firstValue));
   const selectedValue = String(value ?? uncontrolledValue);
-  const selected = items.find((item) => item.value === selectedValue) ?? items[0];
+  const selected = items.find((item) => item.value === selectedValue);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -112,6 +138,7 @@ export default function OverflowSafeSelect({
   const nativeRef = useRef<HTMLSelectElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const filteredItems = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -159,8 +186,6 @@ export default function OverflowSafeSelect({
   useEffect(() => {
     if (!open) return;
     place();
-    const selectedIndex = filteredItems.findIndex((item) => item.value === selectedValue && !item.disabled);
-    setActiveIndex(selectedIndex >= 0 ? selectedIndex : filteredItems.findIndex((item) => !item.disabled));
     const pointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
@@ -176,7 +201,18 @@ export default function OverflowSafeSelect({
       window.removeEventListener("resize", reposition);
       window.removeEventListener("scroll", reposition, true);
     };
-  }, [close, filteredItems, open, place, selectedValue]);
+  }, [close, open, place]);
+
+  useEffect(() => {
+    if (!open) return;
+    const selectedIndex = filteredItems.findIndex((item) => item.value === selectedValue && !item.disabled);
+    setActiveIndex(selectedIndex >= 0 ? selectedIndex : filteredItems.findIndex((item) => !item.disabled));
+  }, [filteredItems, open, selectedValue]);
+
+  useEffect(() => {
+    if (!open || activeIndex < 0) return;
+    optionRefs.current[activeIndex]?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, open]);
 
   useEffect(() => {
     if (open && items.length > searchableAfter) searchRef.current?.focus();
@@ -184,9 +220,14 @@ export default function OverflowSafeSelect({
 
   function emitChange(nextValue: string) {
     if (value === undefined) setUncontrolledValue(nextValue);
-    if (nativeRef.current) nativeRef.current.value = nextValue;
-    const target = nativeRef.current ?? ({ value: nextValue } as HTMLSelectElement);
-    onChange?.({ target, currentTarget: target } as ChangeEvent<HTMLSelectElement>);
+    const target = nativeRef.current;
+    if (target) {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+      valueSetter?.call(target, nextValue);
+      target.dispatchEvent(new Event("change", { bubbles: true }));
+    } else {
+      onChange?.({ target: { value: nextValue }, currentTarget: { value: nextValue } } as ChangeEvent<HTMLSelectElement>);
+    }
     close(true);
   }
 
@@ -231,64 +272,50 @@ export default function OverflowSafeSelect({
 
   return (
     <>
-      <span style={{ position: "relative", display: "inline-flex", minWidth: 0, ...style }}>
-        <select
-          {...nativeProps}
-          ref={nativeRef}
-          id={id ? `${id}__native` : undefined}
-          hidden
-          tabIndex={-1}
-          aria-hidden="true"
-          value={selectedValue}
-          onChange={() => {}}
-          disabled={disabled}
-          style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
-        >
-          {Children.map(children, (child) => isValidElement(child) ? cloneElement(child) : child)}
-        </select>
-        <button
-          ref={triggerRef}
-          id={id}
-          type="button"
-          role="combobox"
-          aria-label={ariaLabel}
-          aria-haspopup="listbox"
-          aria-expanded={open}
-          aria-controls={open ? menuId : undefined}
-          disabled={disabled}
-          className={className}
-          onClick={() => setOpen((current) => !current)}
-          onKeyDown={handleKeyDown}
-          onFocus={() => focusEvent(onFocus)}
-          onBlur={(event) => {
-            if (menuRef.current?.contains(event.relatedTarget as Node)) return;
-            focusEvent(onBlur);
-          }}
-          style={{
-            width: "100%",
-            minWidth: 0,
-            minHeight: 34,
-            border: "1px solid var(--line)",
-            borderRadius: 8,
-            padding: "7px 10px",
-            background: "var(--paper)",
-            color: "var(--ink)",
-            font: "inherit",
-            textAlign: "left",
-            cursor: disabled ? "not-allowed" : "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {selected?.label ?? "请选择"}
-          </span>
-          <span aria-hidden="true" style={{ flexShrink: 0, color: "var(--muted)", fontSize: 10 }}>
-            {open ? "▴" : "▾"}
-          </span>
-        </button>
-      </span>
+      <select
+        {...nativeProps}
+        ref={nativeRef}
+        id={id ? `${id}__native` : undefined}
+        hidden
+        tabIndex={-1}
+        aria-hidden="true"
+        value={selectedValue}
+        onChange={onChange}
+        disabled={disabled}
+      >
+        {Children.map(children, (child) => isValidElement(child) ? cloneElement(child) : child)}
+      </select>
+      <button
+        ref={triggerRef}
+        id={id}
+        type="button"
+        role="combobox"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        disabled={disabled}
+        className={className}
+        onClick={() => { if (open) close(); else setOpen(true); }}
+        onKeyDown={handleKeyDown}
+        onFocus={() => focusEvent(onFocus)}
+        onBlur={(event) => {
+          if (menuRef.current?.contains(event.relatedTarget as Node)) return;
+          focusEvent(onBlur);
+        }}
+        style={{
+          ...DEFAULT_TRIGGER_STYLE,
+          ...style,
+          cursor: disabled ? "not-allowed" : (style?.cursor ?? "pointer"),
+        }}
+      >
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {selected?.label ?? "请选择"}
+        </span>
+        <span aria-hidden="true" style={{ flexShrink: 0, color: "var(--muted)", fontSize: 10 }}>
+          {open ? "▴" : "▾"}
+        </span>
+      </button>
 
       {open && position && typeof document !== "undefined" && createPortal(
         <div
@@ -298,7 +325,7 @@ export default function OverflowSafeSelect({
           aria-label={ariaLabel}
           style={{
             position: "fixed",
-            zIndex: 180,
+            zIndex: Z_INDEX.selectMenu,
             left: position.left,
             width: position.width,
             top: position.top,
@@ -343,6 +370,7 @@ export default function OverflowSafeSelect({
                     </div>
                   )}
                   <button
+                    ref={(node) => { optionRefs.current[index] = node; }}
                     type="button"
                     role="option"
                     aria-selected={selectedItem}
