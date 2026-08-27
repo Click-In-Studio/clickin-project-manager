@@ -70,7 +70,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     || (body.parentAnchor === "dramaturgy" ? await ensureDramaturgyRootAnchor(productionId) : null);
 
   // 落位双门（#357 症状⑤）。与移动同门——否则"无权移入就改为在目标父下新建"
-  // 是条后门。系统锚点豁免容器写门，默认树/「啪建啪跳」流不受影响。
+  // 是条后门。系统锚点的豁免在 canWriteWikiContainer 内部（isWikiAnchor 分支），
+  // 所以这里对 parentAnchor 解析出的锚点无需特判，默认树/「啪建啪跳」流不受影响。
   if (!await canPlaceWikiUnder(actor, productionId, parentId))
     return Response.json({ error: "无权在该父文档下创建" }, { status: 403 });
   if (!await canWriteWikiContainer(actor, productionId, parentId))

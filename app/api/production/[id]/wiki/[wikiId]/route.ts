@@ -77,7 +77,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   //   ① 目标父可枚举（枚举面）——不往自己列不出的容器里塞东西
   //   ② 目标父容器可写（写面）——增删/重排子项是对**容器**的改动
   //   ③ 换父时源父也要容器可写——否则"把它从别人的子树里挪走"照旧成立
-  // 重排（place/sortKey）等同对当前父的子项改动，同样过 ②。
+  // 重排（place/sortKey）等同对当前父的子项改动，①② 都过——列不出的容器谈不上
+  // "重排它的子项"（该容器的子项对你本来就不可枚举），403 是正确答案而非误伤。
+  // ③ 只在真的换父时才有意义，故额外要 targetParentId !== existing.parentId。
   const changingParent = body.parentId !== undefined;
   const targetParentId = changingParent
     ? (body.parentId?.trim() ? body.parentId.trim() : null)

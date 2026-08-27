@@ -12,8 +12,10 @@ import {
 import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
 import { GET as wikiListGET, POST as wikiPOST } from "@/app/api/production/[id]/wiki/route";
 import { PATCH as wikiPATCH } from "@/app/api/production/[id]/wiki/[wikiId]/route";
+import { GET as shareGET, PUT as sharePUT } from "@/app/api/production/[id]/wiki/[wikiId]/share/route";
+import { GET as directoryGET } from "@/app/api/production/[id]/resource-directory/route";
 import { wikiProposeCreate, wikiProposeMove } from "@/lib/mcp/wiki-tools";
-import { makeProduction, cleanupProduction } from "./factories";
+import { makeProduction, cleanupProduction, shortId } from "./factories";
 
 // #357 枚举面：目录树可见性，与内容面（canViewWiki）正交。
 //
@@ -367,6 +369,60 @@ describe("routes", () => {
       .filter(w => w.parentId === parent.id)
       .sort((x, y) => (x.sortKey ?? "").localeCompare(y.sortKey ?? ""));
     expect(sibs.map(w => w.id)).toEqual([a.id, hiddenB.id, mover.id, c.id]);
+  });
+
+  // AI review #5：share 路由的 listable 面此前无覆盖
+  it("share GET 回传 listable，PUT 可改；门＝grants@edit", async () => {
+    const w = await createWiki({ productionId: prodId, title: "share 面 listable", createdBy: creator });
+    const wctx = { params: Promise.resolve({ id: prodId, wikiId: w.id }) };
+
+    const got = await shareGET(makeReq("GET", `/api/production/${prodId}/wiki/${w.id}/share`, creator), wctx);
+    expect(got.status).toBe(200);
+    expect((await got.json()).listable).toBe(true);
+
+    // 只有 edit 档（无 grants@edit）→ 连 share 面都进不去
+    await shareTo(prodId, w.id, member, "edit");
+    const denied = await sharePUT(
+      makeReq("PUT", `/api/production/${prodId}/wiki/${w.id}/share`, member, false, { listable: false }), wctx);
+    expect(denied.status).toBe(403);
+    expect((await getWiki(w.id, prodId))!.listable).toBe(true);
+
+    const ok = await sharePUT(
+      makeReq("PUT", `/api/production/${prodId}/wiki/${w.id}/share`, creator, false, { listable: false }), wctx);
+    expect(ok.status).toBe(200);
+    expect((await getWiki(w.id, prodId))!.listable).toBe(false);
+    const after = await shareGET(makeReq("GET", `/api/production/${prodId}/wiki/${w.id}/share`, creator), wctx);
+    expect((await after.json()).listable).toBe(false);
+  });
+
+  // AI review #2：选择器＝可达集 ∪ 闭包，两个面缺一不可
+  it("权限中心 wiki 选择器：可读但不可枚举的文档必须选得到（bootstrap 缺口）", async () => {
+    const linkOnly = await createWiki({
+      productionId: prodId, title: "选择器可读不可枚举", createdBy: creator, listable: false });
+    await setWikiPublic(linkOnly.id, prodId, true);
+    const treeOnly = await createWiki({ productionId: prodId, title: "选择器可枚举不可读", createdBy: creator });
+    const hidden = await createWiki({
+      productionId: prodId, title: "选择器两面皆无", createdBy: creator, listable: false });
+
+    // 管理面资格者但**不是** admin/owner——admin/owner 走 wildcard，测不出并集逻辑
+    const roleId = `role_dir_${shortId()}`;
+    await getPool().query(
+      "INSERT INTO production_role (id, production_id, name) VALUES ($1, $2, $3)",
+      [roleId, prodId, `管理面角色${shortId()}`]);
+    await getPool().query(
+      `INSERT INTO production_role_permission (role_id, permission_key)
+       VALUES ($1, 'node:member/*@view')`, [roleId]);
+    await getPool().query(
+      "INSERT INTO production_member_role (production_id, user_id, role_id) VALUES ($1, $2, $3)",
+      [prodId, member, roleId]);
+
+    const res = await directoryGET(
+      makeReq("GET", `/api/production/${prodId}/resource-directory?type=wiki`, member), ctx());
+    expect(res.status).toBe(200);
+    const ids = ((await res.json()).items as { id: string }[]).map(x => x.id);
+    expect(ids).toContain(linkOnly.id);   // 内容面这一支（此前会漏 → bootstrap 缺口）
+    expect(ids).toContain(treeOnly.id);   // 枚举面这一支
+    expect(ids).not.toContain(hidden.id); // 两面皆无 → 选不到，符合"不能管理你看不见的"
   });
 
   it("PATCH listable 走分享面（grants@edit），不是编辑面", async () => {
