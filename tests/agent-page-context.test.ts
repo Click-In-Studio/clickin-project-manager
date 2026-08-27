@@ -34,6 +34,20 @@ describe("derivePageKey", () => {
       .not.toHaveLength(0);
   });
 
+  it("构作工作区的三个子 tab 各有身份，且标签带主 tab", () => {
+    const label = (p: string) => pageLabelFor(derivePageKey(p, PID));
+    expect(label(`/production/${PID}/dramaturgy`)).toBe("构作 · 构作视图");
+    expect(label(`/production/${PID}/characters`)).toBe("构作 · 角色");
+    expect(label(`/production/${PID}/dramaturgy/inspiration`)).toBe("构作 · 灵感文档");
+    // 三个子 tab 必须是三个不同的 pageKey——合并即无法分辨模型在哪一个里
+    const keys = [
+      derivePageKey(`/production/${PID}/dramaturgy`, PID),
+      derivePageKey(`/production/${PID}/characters`, PID),
+      derivePageKey(`/production/${PID}/dramaturgy/inspiration`, PID),
+    ];
+    expect(new Set(keys).size).toBe(3);
+  });
+
   it("个人页面：/my/* 与首页/账号页", () => {
     expect(derivePageKey("/", null)).toBe("home");
     expect(derivePageKey("/my/tasks", null)).toBe("my:tasks");
