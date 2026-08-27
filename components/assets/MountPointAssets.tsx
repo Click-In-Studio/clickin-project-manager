@@ -94,7 +94,7 @@ export default function MountPointAssets({
         ))}
         {canEdit && (
           <button onClick={() => setShowModal(true)}
-            className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-zinc-300 px-2 py-0.5 text-[10px] text-zinc-400 hover:border-zinc-500 hover:text-zinc-600 transition-colors">
+            className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-600 shadow-sm transition-colors hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300">
             + Asset
           </button>
         )}

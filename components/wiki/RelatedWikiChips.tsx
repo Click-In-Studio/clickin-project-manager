@@ -96,15 +96,15 @@ export default function RelatedWikiChips({
   if (refs.length === 0 && !canEdit) return null;
   return (
     <div>
-      <div className="flex items-center gap-2 mb-1.5">
-        <p className="text-[10px] font-semibold tracking-widest text-zinc-300 uppercase">相关 Wiki</p>
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <p className="mr-1 text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">相关 Wiki</p>
         {canEdit && (
           <>
             <button type="button" disabled={busy} onClick={() => setPicking(p => !p)}
-              className="text-[10px] text-zinc-400 hover:text-zinc-600">+ 链接</button>
+              className="inline-flex min-h-8 items-center rounded-lg border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-600 shadow-sm transition-colors hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-900 disabled:opacity-50">+ 链接</button>
             {createDefaultTitle && (
               <button type="button" disabled={busy} onClick={createAndGo}
-                className="text-[10px] text-zinc-400 hover:text-zinc-600">+ 新建文档</button>
+                className="inline-flex min-h-8 items-center rounded-lg border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-600 shadow-sm transition-colors hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-900 disabled:opacity-50">+ 新建文档</button>
             )}
           </>
         )}

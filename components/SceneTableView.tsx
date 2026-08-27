@@ -575,15 +575,20 @@ export default function SceneTableView({
             {visibleColumns.map((col) => (
               <th
                 key={col.key}
-                className="relative px-3 py-3 text-xs font-medium text-zinc-400 select-none"
+                className="relative px-3 py-3 text-xs font-medium text-zinc-500 select-none"
                 style={{ width: viewConfig.columnWidths[col.key] ?? col.defaultWidth }}
               >
                 <span className="truncate block">{col.label}</span>
                 <div
-                  className="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-[var(--line)] transition-colors"
+                  className="group/resize absolute -right-1.5 top-0 z-20 flex h-full w-3 cursor-col-resize items-center justify-center"
                   onMouseDown={(e) => handleResizeStart(e, col.key)}
-                  title="拖动调整列宽"
-                />
+                  title={`拖动调整「${col.label}」列宽`}
+                  role="separator"
+                  aria-label={`调整${col.label}列宽`}
+                  aria-orientation="vertical"
+                >
+                  <span className="h-6 w-px rounded-full bg-zinc-300 transition-all group-hover/resize:h-8 group-hover/resize:w-0.5 group-hover/resize:bg-zinc-500" />
+                </div>
               </th>
             ))}
             <th />
