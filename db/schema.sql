@@ -696,9 +696,12 @@ CREATE INDEX IF NOT EXISTS task_dependency_blocked_idx ON task_dependency(blocke
 -- ── Wiki（批C PR-C1 内容实体；wiki 文档库 W1 补树/分享/链接/tag/历史）──────────
 -- report/note 的本体拆分产物：wiki=内容内禀（title/body/mentions/作者），
 -- event_report / event_report_note 退化为纯挂载边。
--- W1（add-wiki-library.sql）：文档树=内禀 parent_id（标准树非图）；可见性推导
+-- W1（add-wiki-library.sql）：文档树=内禀 parent_id；可见性推导
 -- （asset 同构）：个人 grant 行 ∨ is_public ∨ dept 分享面 ∨ ∃挂载边:宿主可见，
 -- 挂载/分享面永不物化 grant 行（§0.9 负面清单），新建默认隐私。
+-- #358 改写 W1 那句「标准树非图」：wiki 行之间仍是标准树（每行只有一个 parent_id），
+-- 但**目录树的节点集**从此是「wiki 行 ∪ wiki_alias 行」——同一篇文档出现在多个层级
+-- 由多个指向它的别名叶子表达，见下方 wiki_alias。
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
@@ -726,6 +729,39 @@ CREATE INDEX IF NOT EXISTS wiki_parent_idx     ON wiki (parent_id);
 CREATE INDEX IF NOT EXISTS wiki_mentions_idx   ON wiki USING GIN (mentions);
 CREATE INDEX IF NOT EXISTS wiki_title_trgm_idx ON wiki USING GIN (title gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS wiki_body_trgm_idx  ON wiki USING GIN (body gin_trgm_ops);
+
+-- 软链接别名（add-wiki-alias.sql，#358）：目录树里指向目标的**伪节点**——有自己的
+-- 位置（parent_id/sort_key），内容指向 target。同一篇文档出现在多处 = 多个别名。
+-- 别名是**叶子**：不可有子项，`target_type='wiki'` 只指向 wiki 表 ⇒ 链式别名结构上
+-- 不可表达，环也不可能经别名形成。
+--
+-- 【不可让步】别名不是授权面：本表无 listable/is_public，不接受 grant / 部门分享行。
+--   可枚举(u, 别名) ⟺ 可枚举(u, 别名的父) ∧ **本地**可枚举(u, 目标)
+--   读正文        ⟺ canViewWiki(u, 目标)  ← 永远重判目标，别名一票不投
+-- 第二合取项取目标的**本地**可枚举（自身 listable / meta@view 行 / 部门分享），不含
+-- 目标那条祖先链——别名给的是第二个**位置**，位置维由别名自己的父链承担（#358 拍板）。
+-- 推论：目标被移走，别名不受影响（认 id 不认位置），移进私密子树也不连累别名。
+--
+-- 目标多态无 FK（同 wiki_entity_link 定式），本批只实现 'wiki'，'asset' 等待接入。
+-- 目标删除不靠 FK：deleteWiki 在同一事务内清掉指向它的别名（与「子文档上移一层」
+-- 同批）；读路径一律 join 目标，解析不到的别名不出树（惰性兜底，不做失效占位）。
+CREATE TABLE IF NOT EXISTS wiki_alias (
+  id            TEXT        PRIMARY KEY,
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  parent_id     UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
+  sort_key      TEXT        NULL,
+  target_type   TEXT        NOT NULL DEFAULT 'wiki',
+  target_id     TEXT        NOT NULL,
+  -- 显示名：NULL＝跟随目标实时标题（缺省，不分叉）。纯标签，不参与任何判定。
+  display_title TEXT        NULL,
+  created_by    UUID        NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT wiki_alias_place_target_uniq UNIQUE (parent_id, target_type, target_id)
+);
+
+CREATE INDEX IF NOT EXISTS wiki_alias_production_idx ON wiki_alias (production_id);
+CREATE INDEX IF NOT EXISTS wiki_alias_parent_idx     ON wiki_alias (parent_id);
+CREATE INDEX IF NOT EXISTS wiki_alias_target_idx     ON wiki_alias (target_type, target_id);
 
 -- 交叉引用边（wiki↔任意对象；backlinks/unlinked references/对象侧"相关 wiki"面板的数据基础）。
 -- entity 多态无 FK（scene/cue 等 TEXT short id、wiki UUID 存文本），存在性校验在应用层，

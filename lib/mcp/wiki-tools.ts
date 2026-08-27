@@ -83,7 +83,12 @@ async function filterEnumerable<T extends { id: string }>(
 }
 
 /** 目录树＝枚举面（#357），与人类侧栏同门。AI 能列到 ≠ 能读——正文仍过
- *  canViewWiki（#333 不变量 2：分层≠权限，工具端实时判定是唯一安全边界）。 */
+ *  canViewWiki（#333 不变量 2：分层≠权限，工具端实时判定是唯一安全边界）。
+ *
+ *  软链接别名（#358）**刻意不进 AI 面**：别名是「同一篇文档的另一个位置」，
+ *  对读写文档的工具族没有语义，列出来只会让同一篇出现两次、诱导模型按别名 id
+ *  去 update/move（那些工具只认真实 wiki id）。这不是权限判断，别名本来就不
+ *  持有任何权限——纯粹是工具面的信噪比。 */
 export async function wikiTree(userId: string, productionId: string): Promise<string> {
   const resolved = await resolveProductionActor(userId, productionId);
   if (!resolved) return DENIED_NOT_MEMBER;

@@ -17,16 +17,11 @@ import {
   listBacklinks,
   listEntityRefsForWiki,
   listUnlinkedReferences,
-  listWikiLibrary,
 } from "@/lib/wiki-db";
-import {
-  canEditWiki,
-  canShareWiki,
-  canViewWiki,
-  listEnumerableWikiIds,
-} from "@/lib/wiki-perm";
+import { canEditWiki, canShareWiki, canViewWiki } from "@/lib/wiki-perm";
 import { listEventDepartments } from "@/lib/event-db";
-import { listDramaturgyWikiSubtree } from "@/lib/dramaturgy-wiki";
+import { getWikiAlias, isWikiAliasId } from "@/lib/wiki-alias-db";
+import { listDramaturgyTreeFor } from "@/lib/wiki-tree";
 import { DramaturgyInspirationShell } from "@/components/DramaturgyWorkspaceTabs";
 import WikiShell from "@/components/wiki/WikiShell";
 import WikiDocClient from "@/components/wiki/WikiDocClient";
@@ -49,37 +44,44 @@ export default async function DramaturgyInspirationDocPage({
   if (!productionName) notFound();
 
   const actor = toActor(session, access.permCtx);
-  const [treeConfig, wiki, all, enumerable, canCreate] = await Promise.all([
+  // 路由段可能是软链接别名（#358，`wal_` 短 id）：就地渲染目标正文，权限一律落到
+  // 目标上；别名的「属于本工作区」由它自己的位置决定，与目标在哪无关。
+  const alias = isWikiAliasId(wikiId) ? await getWikiAlias(wikiId, productionId) : null;
+  if (isWikiAliasId(wikiId) && (!alias || alias.targetType !== "wiki")) notFound();
+  const docId = alias ? alias.targetId : wikiId;
+
+  const [treeConfig, wiki, canCreate] = await Promise.all([
     getDramaturgyTreeConfig(productionId),
-    getWiki(wikiId, productionId),
-    listWikiLibrary(productionId),
-    listEnumerableWikiIds(actor, productionId),
+    getWiki(docId, productionId),
     hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"),
   ]);
   if (!wiki) notFound();
 
-  // 成员判定与侧栏渲染同源：都在**全量** all 上算子树，再各自过枚举面（#357）。
+  // 成员判定与侧栏渲染同源：都在**全量**上算子树，再各自过枚举面（#357）。
   // 侧栏＝枚举面，正文＝内容面（canViewWiki）——两个门，别混。
   const rootId = treeConfig.enabled ? treeConfig.rootWikiId : null;
-  const subtree = listDramaturgyWikiSubtree(all, rootId);
+  const { subtree, wikis, aliases } = await listDramaturgyTreeFor(actor, productionId, rootId);
   // 越界不是 404：工作区内的内链（[[…]]、反链）会指向子树外的文档，文档也可能
   // 在「文档」模块里被移出子树、或根锚点压根还没懒建。回落到通用 wiki 路由，
-  // 别把人弹飞。
-  if (!rootId || !subtree.some((entry) => entry.id === wikiId)) {
+  // 别把人弹飞。别名同理——它是否在本工作区看位置，不看目标。
+  const inWorkspace = alias
+    ? aliases.some((a) => a.id === wikiId)
+    : subtree.some((entry) => entry.id === wikiId);
+  if (!rootId || !inWorkspace) {
     redirect(`/production/${productionId}/wiki/${wikiId}`);
   }
 
-  const wikis = enumerable.wildcard ? subtree : subtree.filter((entry) => enumerable.ids.has(entry.id));
   const routeBase = `/production/${productionId}/dramaturgy/inspiration`;
-  const canView = await canViewWiki(actor, productionId, wikiId);
+  const canView = await canViewWiki(actor, productionId, docId);
 
   if (!canView) {
-    const applyResource = `node:wiki/${wikiId}@view`;
+    const applyResource = `node:wiki/${docId}@view`;
     return (
       <DramaturgyInspirationShell productionId={productionId} productionName={productionName}>
         <WikiShell
           productionId={productionId}
           wikis={wikis}
+          aliases={aliases}
           canCreate={canCreate}
           selectedId={wikiId}
           navigationBasePath={routeBase}
@@ -102,11 +104,11 @@ export default async function DramaturgyInspirationDocPage({
   }
 
   const [canEdit, canShare, backlinks, unlinked, entityRefs, members, allDepts] = await Promise.all([
-    canEditWiki(actor, productionId, wikiId),
-    canShareWiki(actor, productionId, wikiId),
-    listBacklinks(wikiId, productionId),
-    listUnlinkedReferences(wikiId, productionId),
-    listEntityRefsForWiki(wikiId, productionId),
+    canEditWiki(actor, productionId, docId),
+    canShareWiki(actor, productionId, docId),
+    listBacklinks(docId, productionId),
+    listUnlinkedReferences(docId, productionId),
+    listEntityRefsForWiki(docId, productionId),
     listProductionMembers(productionId),
     listEventDepartments(productionId),
   ]);
@@ -117,6 +119,7 @@ export default async function DramaturgyInspirationDocPage({
         <WikiShell
           productionId={productionId}
           wikis={wikis}
+          aliases={aliases}
           canCreate={canCreate}
           selectedId={wikiId}
           navigationBasePath={routeBase}

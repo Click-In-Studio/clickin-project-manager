@@ -178,6 +178,21 @@ export async function listVisibleWikiIds(
 // **本面只写这一份实现**（集合式），单点判定＝查集合，不重蹈 canViewWiki /
 // listVisibleWikiIds 双写的覆辙（#357 症状③）。
 
+/**
+ * 本地可枚举谓词（判定式的第二合取项），SQL 片段形式**只写这一份**。
+ *
+ * 两个读者：下面的递归 CTE（沿祖先链求交）与 #358 别名解析器（只要本地这一项，
+ * 不含目标自己的祖先链）。参数位固定：$1=production_id、$2=meta@view 行的 id 数组、
+ * $3=user_id，表别名固定为 `w`。抠成常量是因为这条谓词一旦双写，两个面就会各自
+ * 长出分支——canViewWiki / listVisibleWikiIds 的教训（#357 症状③）不必重演第二遍。
+ */
+const LOCAL_ENUMERABLE_PRED = `(w.listable
+   OR w.id::text = ANY($2::text[])
+   OR EXISTS (SELECT 1 FROM wiki_dept_share ws
+              JOIN production_dept_member pdm ON pdm.dept_id = ws.dept_id
+              WHERE ws.wiki_id = w.id AND pdm.user_id = $3::uuid
+                AND pdm.production_id = $1))`;
+
 export async function listEnumerableWikiIds(
   actor: GrantActor,
   productionId: string,
@@ -191,13 +206,7 @@ export async function listEnumerableWikiIds(
   // 同一判据，判定时查成员、零 sweep——退组即刻收缩）
   const { rows } = await getPool().query<{ id: string }>(
     `WITH RECURSIVE local AS (
-       SELECT w.id, w.parent_id,
-              (w.listable
-               OR w.id::text = ANY($2::text[])
-               OR EXISTS (SELECT 1 FROM wiki_dept_share ws
-                          JOIN production_dept_member pdm ON pdm.dept_id = ws.dept_id
-                          WHERE ws.wiki_id = w.id AND pdm.user_id = $3::uuid
-                            AND pdm.production_id = $1)) AS ok
+       SELECT w.id, w.parent_id, ${LOCAL_ENUMERABLE_PRED} AS ok
        FROM wiki w WHERE w.production_id = $1
      ),
      enumerable AS (
@@ -218,6 +227,30 @@ export async function canEnumerateWiki(
 ): Promise<boolean> {
   const e = await listEnumerableWikiIds(actor, productionId);
   return e.wildcard || e.ids.has(wikiId);
+}
+
+/**
+ * **本地**可枚举筛选（#358 别名判定式的第二合取项）：给定候选 id，返回其中
+ * 「目标自身允许被列出」的那些——只跑本地谓词，**不含**目标自己的祖先链。
+ *
+ * 别名给目标的是第二个**位置**，位置这一维由别名自己的父链承担（listEnumerableWikiIds
+ * 已经算过了）；节点自身属性（listable / meta@view 行 / 部门分享）一分不放。
+ * 若这里改用全可枚举（含目标祖先链），别名对「把埋在私密子树里的一篇提到灵感库」
+ * 这个主用途就永远不可见——功能当场失效（#358 拍板）。
+ */
+export async function localEnumerableWikiIds(
+  actor: GrantActor, productionId: string, candidateIds: string[],
+): Promise<Set<string>> {
+  if (candidateIds.length === 0) return new Set();
+  if (actor.isAdmin || actor.isOwner) return new Set(candidateIds);
+  const granted = await listGrantedResourceIds(actor.userId, productionId, "wiki", "meta", "view");
+  if (granted.wildcard) return new Set(candidateIds);
+  const { rows } = await getPool().query<{ id: string }>(
+    `SELECT w.id::text AS id FROM wiki w
+     WHERE w.production_id = $1 AND w.id::text = ANY($4::text[]) AND ${LOCAL_ENUMERABLE_PRED}`,
+    [productionId, [...granted.ids], actor.userId, candidateIds],
+  );
+  return new Set(rows.map(r => r.id));
 }
 
 /** 落位门之一（#357 症状⑤，枚举面）：只能把文档挂到自己能枚举的父下——枚举权
