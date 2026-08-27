@@ -213,15 +213,37 @@ async function validateParent(
   return !cyc.rows[0].hit;
 }
 
-/** 末尾排序键：同层最后一个之后。 */
-async function tailSortKey(productionId: string, parentId: string | null): Promise<string> {
-  const res = await getPool().query<{ sort_key: string | null }>(
-    `SELECT sort_key FROM wiki
-     WHERE production_id = $1 AND parent_id IS NOT DISTINCT FROM $2::uuid AND sort_key IS NOT NULL
-     ORDER BY sort_key DESC LIMIT 1`,
-    [productionId, parentId],
+/**
+ * 同层兄弟集 = 真实子文档 ∪ 软链接别名（#358）。
+ *
+ * 别名有自己的 parent_id/sort_key，和真实子项挤在同一个父空间、共用同一把尺
+ * （lex-order）。所以任何取键都必须在**并集**上算——只看 wiki 表会让新键和别名
+ * 交错，和 #357 症状② 在残缺兄弟集上取键是同一个 bug 的两种成因。
+ *
+ * id 天然可辨：wiki 是 UUID、别名是 `wal_` 短 id，所以 excludeId 一个字段够用。
+ */
+async function siblingRows(
+  productionId: string, parentId: string | null, excludeId: string | null,
+): Promise<{ id: string; sort_key: string | null }[]> {
+  const { rows } = await getPool().query<{ id: string; sort_key: string | null; created_at: string }>(
+    `SELECT id::text AS id, sort_key, created_at FROM wiki
+      WHERE production_id = $1 AND parent_id IS NOT DISTINCT FROM $2::uuid
+        AND ($3::text IS NULL OR id::text <> $3::text)
+     UNION ALL
+     SELECT id, sort_key, created_at FROM wiki_alias
+      WHERE production_id = $1 AND parent_id IS NOT DISTINCT FROM $2::uuid
+        AND ($3::text IS NULL OR id <> $3::text)
+     ORDER BY sort_key NULLS LAST, created_at`,
+    [productionId, parentId, excludeId],
   );
-  return keyBetween(res.rows[0]?.sort_key ?? null, null);
+  return rows;
+}
+
+/** 末尾排序键：同层最后一个（含别名）之后。 */
+export async function tailSortKey(productionId: string, parentId: string | null): Promise<string> {
+  const rows = await siblingRows(productionId, parentId, null);
+  const last = [...rows].reverse().find(r => r.sort_key !== null);
+  return keyBetween(last?.sort_key ?? null, null);
 }
 
 /**
@@ -254,17 +276,11 @@ export async function isWikiAnchor(wikiId: string): Promise<boolean> {
  */
 export type WikiPlacement = { anchorId: string; side: "before" | "after" };
 
-async function placementSortKey(
+export async function placementSortKey(
   productionId: string, parentId: string | null,
   place: WikiPlacement, excludeId: string | null,
 ): Promise<string> {
-  const { rows } = await getPool().query<{ id: string; sort_key: string | null }>(
-    `SELECT id::text AS id, sort_key FROM wiki
-     WHERE production_id = $1 AND parent_id IS NOT DISTINCT FROM $2::uuid
-       AND ($3::uuid IS NULL OR id <> $3::uuid)
-     ORDER BY sort_key NULLS LAST, created_at`,
-    [productionId, parentId, excludeId],
-  );
+  const rows = await siblingRows(productionId, parentId, excludeId);
   const idx = rows.findIndex(r => r.id === place.anchorId);
   if (idx < 0) return tailSortKey(productionId, parentId);
   const prev = place.side === "before" ? rows[idx - 1] : rows[idx];
@@ -419,7 +435,9 @@ export async function updateWiki(
 
 /** 被挂载（report/note 边引用）的 wiki 不可删；系统锚点目录（默认树的根/event
  *  目录）不可删——移动无妨（锚认 id），删除会打散归档并触发重建震荡。
- *  子文档不掉顶层，而是上移一层（见函数内注释）。 */
+ *  子文档不掉顶层，而是上移一层（见函数内注释）。
+ *  软链接（#358）**不构成删除阻碍**：指向本篇的别名随删（别名没有内容可丢），
+ *  挂在本篇下的别名与子文档同样上移一层——都在同一个事务里。 */
 export async function deleteWiki(
   id: string, productionId: string,
 ): Promise<{ ok: true } | { ok: false; reason: "mounted" | "anchor" | "not_found" }> {
@@ -467,12 +485,34 @@ export async function deleteWiki(
     // （反向查询只从活宿主页发起），但 wiki 目标的删除入口在自己手里，一行清零。
     await client.query(
       `DELETE FROM wiki_entity_link WHERE entity_type = 'wiki' AND entity_id = $1`, [id]);
+    // 指向本篇的软链接一并删（#358）：别名的目标是多态无 FK 的，级联不会自己发生。
+    // 不做「失效占位」——那是又一种要设计的 UI 状态，收益为零；读路径另有惰性兜底
+    // （解析不到目标的别名不出树），这里是主动清，让库里不留垃圾行。
+    await client.query(
+      `DELETE FROM wiki_alias WHERE target_type = 'wiki' AND target_id = $1`, [id]);
     // 子文档上移一层，而不是靠 parent_id 的 ON DELETE SET NULL 掉到顶层。SET NULL
     // 会把它们弹出所在子树——在「构作 · 灵感文档」这种只展示某个根子树的工作区
     // 里，那等于当场从视野里消失（得回「文档」模块才找得回来）。
     await client.query(
       `UPDATE wiki SET parent_id = (SELECT parent_id FROM wiki WHERE id = $1::uuid)
        WHERE parent_id = $1::uuid AND production_id = $2`,
+      [id, productionId],
+    );
+    // 挂在本篇下的别名同样上移一层——同一个容器里的子项，处理不能两样
+    // （否则别名被 FK SET NULL 弹到顶层，正是上面那条注释要防的事）。
+    // 冲突（上一层已有指向同一目标的别名）就地丢弃：唯一约束的语义是「同一容器下
+    // 同一目标只一个」，上移后重复的那个没有存在意义。
+    await client.query(
+      `UPDATE wiki_alias a SET parent_id = (SELECT parent_id FROM wiki WHERE id = $1::uuid)
+       WHERE a.parent_id = $1::uuid AND a.production_id = $2
+         AND NOT EXISTS (
+           SELECT 1 FROM wiki_alias b
+           WHERE b.parent_id IS NOT DISTINCT FROM (SELECT parent_id FROM wiki WHERE id = $1::uuid)
+             AND b.target_type = a.target_type AND b.target_id = a.target_id)`,
+      [id, productionId],
+    );
+    await client.query(
+      `DELETE FROM wiki_alias WHERE parent_id = $1::uuid AND production_id = $2`,
       [id, productionId],
     );
     await client.query(`DELETE FROM wiki WHERE id = $1::uuid AND production_id = $2`, [id, productionId]);

@@ -2,10 +2,11 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { listWikiLibrary, createWiki, searchWiki, ensureDramaturgyRootAnchor } from "@/lib/wiki-db";
+import { createWiki, searchWiki, ensureDramaturgyRootAnchor } from "@/lib/wiki-db";
 import {
-  listVisibleWikiIds, listEnumerableWikiIds, canPlaceWikiUnder, canWriteWikiContainer,
+  listVisibleWikiIds, canPlaceWikiUnder, canWriteWikiContainer,
 } from "@/lib/wiki-perm";
+import { listWikiTreeFor } from "@/lib/wiki-tree";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -13,7 +14,7 @@ type Ctx = { params: Promise<{ id: string }> };
 // POST /api/production/[id]/wiki        创建文档（门：node:wiki/*@create）
 //
 // 两个面走两个门（#357）：
-//   树列表 → 枚举面 listEnumerableWikiIds（能不能在目录里列到）
+//   树列表 → 枚举面 listWikiTreeFor（能不能在目录里列到；含软链接别名 #358）
 //   搜索   → 内容面 listVisibleWikiIds（能不能读）——**不得改用枚举面**：按标题搜
 //            闭包外的文档就是枚举面的后门，反复搜即枚举。`[[` 补全走的正是这个
 //            分支（components/SmartTextarea.tsx），候选集永远不得超出内容可读集。
@@ -36,12 +37,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       results: visible.wildcard ? hits : hits.filter(h => visible.ids.has(h.id)),
     });
   }
-  const [enumerable, all] = await Promise.all([
-    listEnumerableWikiIds(actor, productionId),
-    listWikiLibrary(productionId),
-  ]);
-  const wikis = enumerable.wildcard ? all : all.filter(w => enumerable.ids.has(w.id));
-  return Response.json({ wikis });
+  // 树 = 可枚举文档 ∪ 可枚举软链接（#358），一个取数口，见 lib/wiki-tree.ts
+  const { wikis, aliases } = await listWikiTreeFor(actor, productionId);
+  return Response.json({ wikis, aliases });
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
