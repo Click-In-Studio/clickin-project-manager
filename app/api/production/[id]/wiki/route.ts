@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { readParentAnchor } from "@/lib/wiki-input";
-import { gateAndResolveWikiAnchor } from "@/lib/wiki-placement";
+import { gateWikiAnchorPlacement, resolveWikiAnchorParent } from "@/lib/wiki-placement";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
@@ -84,12 +84,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (!await canWriteWikiContainer(actor, productionId, explicitParentId))
       return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
   } else if (anchor.anchor === "dramaturgy") {
-    const placed = await gateAndResolveWikiAnchor(actor, productionId, "dramaturgy");
-    if (!placed.ok)
+    const gate = await gateWikiAnchorPlacement(actor, productionId, "dramaturgy");
+    if (!gate.ok)
       return Response.json({
-        error: placed.reason === "place" ? "无权在该父文档下创建" : "无权修改该父文档的子目录",
+        error: gate.reason === "place" ? "无权在该父文档下创建" : "无权修改该父文档的子目录",
       }, { status: 403 });
-    parentId = placed.parentId;
+    parentId = await resolveWikiAnchorParent(productionId, "dramaturgy");
   }
 
   try {

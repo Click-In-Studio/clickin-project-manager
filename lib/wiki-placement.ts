@@ -14,7 +14,9 @@ import type { GrantActor } from "./grant-check";
 // 问题是根建出来之后这些属性会变：有人在分享面把「戏剧构作」根的 listable 关掉，
 // ① 就不再恒真，而这条路径照旧跳过它。
 //
-// 这里把两种情形分开，两边都不靠"默认值"：
+// 门（gateWikiAnchorPlacement，不写）与解析（resolveWikiAnchorParent，可能写）因此
+// 拆成两个：门可以和别的落位门排在一起，解析永远排在所有门的后面。两种情形都不靠
+// "默认值"：
 //   根已存在 → id 当场就知道，照常跑双门，一道不省
 //   根不存在 → 门过后才 ensure，而这一刻新建的根双门可证恒真（顶层 + listable
 //              DEFAULT true ⇒ ①；config 指向它 ⇒ isWikiAnchor ⇒ ②）
@@ -26,26 +28,43 @@ import type { GrantActor } from "./grant-check";
 export type AnchorGateFailure = "place" | "container";
 
 /**
- * 解析 parentAnchor 声明的落位，并在解析前把落位双门跑完。
+ * 门（**不写**）。可以和其他落位门排在一起，顺序随便挑——它一个字节都不落库。
  *
- * 返回的 parentId 可能是 null：配置关掉了这棵树（ensure 返回 null）＝落到全库顶层，
- * 而根容器上两道门恒真（见 canWriteWikiContainer 的 parentId=null 豁免）。
+ * 根已存在：id 当场就知道，双门照跑，一道不省。
+ * 根不存在：无门可跑，因为门要判的那个容器还不存在；它会在 resolve 那一刻被建出来，
+ *   而新建的根双门可证恒真（顶层 + listable DEFAULT true ⇒ ①；config 指向它 ⇒
+ *   isWikiAnchor ⇒ ②）。
  */
-export async function gateAndResolveWikiAnchor(
+export async function gateWikiAnchorPlacement(
   actor: GrantActor,
   productionId: string,
   anchor: WikiParentAnchor,
-): Promise<{ ok: true; parentId: string | null } | { ok: false; reason: AnchorGateFailure }> {
-  if (anchor !== "dramaturgy") return { ok: true, parentId: null };
-
-  // 只读口径——渲染路径与门前判定都只准用它，ensure 留到门后（wiki-db 头注释）
+): Promise<{ ok: true } | { ok: false; reason: AnchorGateFailure }> {
+  if (anchor !== "dramaturgy") return { ok: true };
+  // 只读口径——ensure 是写事务，判定前一律用它（wiki-db 头注释）
   const cfg = await getDramaturgyTreeConfig(productionId);
-  if (cfg.enabled && cfg.rootWikiId) {
-    if (!await canPlaceWikiUnder(actor, productionId, cfg.rootWikiId))
-      return { ok: false, reason: "place" };
-    if (!await canWriteWikiContainer(actor, productionId, cfg.rootWikiId))
-      return { ok: false, reason: "container" };
-    return { ok: true, parentId: cfg.rootWikiId };
-  }
-  return { ok: true, parentId: await ensureDramaturgyRootAnchor(productionId) };
+  if (!cfg.enabled || !cfg.rootWikiId) return { ok: true };
+  if (!await canPlaceWikiUnder(actor, productionId, cfg.rootWikiId))
+    return { ok: false, reason: "place" };
+  if (!await canWriteWikiContainer(actor, productionId, cfg.rootWikiId))
+    return { ok: false, reason: "container" };
+  return { ok: true };
+}
+
+/**
+ * 解析（**可能写**：根不存在时懒建）。只准在**所有**门之后调，一处都不许提前。
+ *
+ * 返回 null＝这棵树被配置关掉了，落到全库顶层——根容器上两道门恒真（见
+ * canWriteWikiContainer 的 parentId=null 豁免）。
+ *
+ * 竞态：gate 与 resolve 之间被别人抢先建出根，这次 resolve 会直接返回它而没重跑双门。
+ * 要害是那个根**也是刚建出来的**，双门在它上面同样恒真——除非同一窗口里还有人把它
+ * 的 listable 关掉，量级上不予考虑。
+ */
+export async function resolveWikiAnchorParent(
+  productionId: string,
+  anchor: WikiParentAnchor,
+): Promise<string | null> {
+  if (anchor !== "dramaturgy") return null;
+  return ensureDramaturgyRootAnchor(productionId);
 }

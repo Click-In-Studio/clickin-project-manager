@@ -4,7 +4,7 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { canReachAliasTarget, createWikiAlias, isWikiAliasTargetType } from "@/lib/wiki-alias-db";
 import { canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki-perm";
-import { gateAndResolveWikiAnchor } from "@/lib/wiki-placement";
+import { gateWikiAnchorPlacement, resolveWikiAnchorParent } from "@/lib/wiki-placement";
 import { readParentAnchor, readPlacement, readTrimmedId } from "@/lib/wiki-input";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -51,26 +51,28 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!anchor.ok) return Response.json({ error: "未知的落位锚点" }, { status: 400 });
   const anchorRequested = !explicitParentId && anchor.anchor === "dramaturgy";
 
-  // ② 落位双门。锚点支的目标父 id 要解析完才知道，交给 gateAndResolveWikiAnchor：
-  // 根已存在就照常跑这两道，只在根是它当场新建时才用恒真论证。
-  if (!anchorRequested) {
+  // ② 落位双门。两支同一顺位——锚点支的门不写库（三轮 AI review #2：原先它排在
+  // 目标可达门后面，同一个请求在两支里会收到不同的那一条 403）。
+  if (anchorRequested) {
+    const gate = await gateWikiAnchorPlacement(actor, productionId, "dramaturgy");
+    if (!gate.ok)
+      return Response.json({
+        error: gate.reason === "place" ? "无权在该父文档下创建" : "无权修改该父文档的子目录",
+      }, { status: 403 });
+  } else {
     if (!await canPlaceWikiUnder(actor, productionId, explicitParentId))
       return Response.json({ error: "无权在该父文档下创建" }, { status: 403 });
     if (!await canWriteWikiContainer(actor, productionId, explicitParentId))
       return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
   }
+  // ③ 目标可达
   if (!await canReachAliasTarget(actor, productionId, targetType, targetId))
     return Response.json({ error: "目标文档不存在或不可见" }, { status: 403 });
 
-  let parentId = explicitParentId;
-  if (anchorRequested) {
-    const placed = await gateAndResolveWikiAnchor(actor, productionId, "dramaturgy");
-    if (!placed.ok)
-      return Response.json({
-        error: placed.reason === "place" ? "无权在该父文档下创建" : "无权修改该父文档的子目录",
-      }, { status: 403 });
-    parentId = placed.parentId;
-  }
+  // 解析（可能懒建根）排在所有门之后
+  const parentId = anchorRequested
+    ? await resolveWikiAnchorParent(productionId, "dramaturgy")
+    : explicitParentId;
 
   const res = await createWikiAlias({
     productionId, parentId, targetType, targetId,

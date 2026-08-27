@@ -12,7 +12,7 @@ import { PATCH as wikiPATCH } from "@/app/api/production/[id]/wiki/[wikiId]/rout
 import { POST as aliasPOST } from "@/app/api/production/[id]/wiki-alias/route";
 import { makeProduction, cleanupProduction } from "./factories";
 import type { WikiListEntry } from "@/lib/wiki-db";
-import type { WikiAliasEntry } from "@/lib/wiki-alias-db";
+import { canReachAliasTarget, type WikiAliasEntry } from "@/lib/wiki-alias-db";
 
 // #355 灵感库「移入」。两种形态是同一个入口的两个选项：
 //   本体移入 —— PATCH /wiki/<id> 改 parent_id
@@ -108,6 +108,13 @@ async function shareTo(prodId: string, wikiId: string, userId: string, level: "v
        VALUES ($1, $2, 'wiki', $3, $4, $5, 'direct', $2)`,
       [prodId, userId, wikiId, sub, verb]);
   }
+}
+async function grantCreate(prodId: string, userId: string) {
+  await getPool().query(
+    `INSERT INTO production_member_grant
+       (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
+     VALUES ($1, $2, 'wiki', '*', '*', 'create', 'direct', $2)`,
+    [prodId, userId]);
 }
 const cookieOf = (userId: string, isAdmin: boolean) =>
   `${SESSION_COOKIE}=${createSession({ userId, name: "测试", avatarUrl: null, isAdmin })}`;
@@ -335,6 +342,41 @@ describe("POST /wiki-alias 的 parentAnchor 落位（以链接移入）", () => 
       const { rows } = await getPool().query(
         "SELECT 1 FROM wiki_alias WHERE production_id = $1", [prodId]);
       expect(rows.length).toBe(0);
+    } finally {
+      await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [prodId]).catch(() => {});
+      await cleanupProduction(prodId).catch(() => {});
+    }
+  });
+
+  // 三轮 AI review #2：锚点支的落位门原先排在目标可达门后面，同一个请求在两支里
+  // 会收到不同的那一条 403。现在两支同顺位——落位不过就是落位那条。
+  it("落位与目标都不过时，报的是落位那条（两支同顺位）", async () => {
+    const { prodId } = await makeProduction();
+    const owner = await newMember(prodId);
+    const outsider = await newMember(prodId);
+    users.push(owner, outsider);
+    try {
+      // 根已存在但对 outsider 不可枚举 → 落位门不过
+      const seed = await createWiki({ productionId: prodId, title: "种子", createdBy: owner });
+      await wikiPATCH(patchReq(prodId, seed.id, owner, true, { parentAnchor: "dramaturgy" }),
+        { params: Promise.resolve({ id: prodId, wikiId: seed.id }) });
+      const rootId = (await getDramaturgyTreeConfig(prodId)).rootWikiId!;
+      await setWikiListable(rootId, prodId, false);
+
+      // 目标也够不着（既列不到也读不到）
+      const doc = await createWiki({ productionId: prodId, title: "够不着的目标", createdBy: owner });
+      await setWikiListable(doc.id, prodId, false);
+      await grantCreate(prodId, outsider);
+
+      // 目标确实够不着——否则这条测的就不是"两条门都不过时报哪一条"
+      expect(await canReachAliasTarget(
+        { userId: outsider, isAdmin: false, isOwner: false }, prodId, "wiki", doc.id)).toBe(false);
+
+      const res = await aliasPOST(
+        aliasReq(prodId, outsider, false, { parentAnchor: "dramaturgy", targetType: "wiki", targetId: doc.id }),
+        { params: Promise.resolve({ id: prodId }) });
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toContain("父文档");   // 不是"目标文档不存在或不可见"
     } finally {
       await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [prodId]).catch(() => {});
       await cleanupProduction(prodId).catch(() => {});

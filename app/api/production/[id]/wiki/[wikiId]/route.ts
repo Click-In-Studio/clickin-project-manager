@@ -9,7 +9,7 @@ import {
 } from "@/lib/wiki-perm";
 import { broadcastWikiUpdate } from "@/lib/wiki-collab";
 import { readParentAnchor } from "@/lib/wiki-input";
-import { gateAndResolveWikiAnchor } from "@/lib/wiki-placement";
+import { gateWikiAnchorPlacement, resolveWikiAnchorParent } from "@/lib/wiki-placement";
 import type { Mention } from "@/lib/event-db";
 import { setWikiPublic, setWikiListable, type WikiPlacement } from "@/lib/wiki-db";
 
@@ -121,14 +121,15 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         return Response.json({ error: "无权把文档移出原父文档" }, { status: 403 });
     }
     if (anchorRequested) {
-      const placed = await gateAndResolveWikiAnchor(actor, productionId, "dramaturgy");
-      if (!placed.ok)
+      const gate = await gateWikiAnchorPlacement(actor, productionId, "dramaturgy");
+      if (!gate.ok)
         return Response.json({
-          error: placed.reason === "place" ? "无权移动到该父文档下" : "无权修改该父文档的子目录",
+          error: gate.reason === "place" ? "无权移动到该父文档下" : "无权修改该父文档的子目录",
         }, { status: 403 });
-      resolvedParentId = placed.parentId;
     }
   }
+  // 解析（可能懒建根）排在所有门之后，一处都不许提前
+  if (anchorRequested) resolvedParentId = await resolveWikiAnchorParent(productionId, "dramaturgy");
 
   try {
     if (wantsContent) {
