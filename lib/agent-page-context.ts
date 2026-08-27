@@ -31,7 +31,12 @@ export function derivePageKey(pathname: string, productionId: string | null): st
   if (prefix && (pathname === prefix || pathname.startsWith(`${prefix}/`))) {
     const rest = pathname.slice(prefix.length).replace(/^\//, "");
     if (!rest) return "prod:home";
-    return `prod:${rest.split("/")[0]}`;
+    const seg = rest.split("/");
+    // 「构作 · 灵感文档」挂在 dramaturgy 下，但它是文档库形态而非场景视图——
+    // 按首段归类会让模型以为自己在看场次/行动线，拿到的建议与（#333 T3 落地后的）
+    // 温层工具面也全是构作那套。这里破例认二段。
+    if (seg[0] === "dramaturgy" && seg[1] === "inspiration") return "prod:dramaturgy-inspiration";
+    return `prod:${seg[0]}`;
   }
   if (pathname === "/") return "home";
   if (pathname.startsWith("/my/")) {
@@ -62,8 +67,12 @@ const PAGE_LABELS: Record<string, string> = {
   "prod:script": "剧本",
   "prod:import-script": "剧本导入",
   "prod:import-scenes": "场次导入",
-  "prod:dramaturgy": "戏剧构作",
-  "prod:characters": "角色",
+  // 「构作」是一个工作区，下辖三个子 tab（components/DramaturgyWorkspaceTabs）。
+  // 标签逐字对齐 UI 上的 主tab · 子tab——模型该用用户看得见的说法称呼当前页面，
+  // 而「角色」自 #352 起已不是顶级模块，单说「角色」会把旧 IA 喂给模型。
+  "prod:dramaturgy": "构作 · 构作视图",
+  "prod:dramaturgy-inspiration": "构作 · 灵感文档",
+  "prod:characters": "构作 · 角色",
   "prod:wiki": "文档库",
   "prod:events": "事件",
   "prod:tasks": "任务",
@@ -108,6 +117,11 @@ const PAGE_SUGGESTIONS: Record<string, PageSuggestion[]> = {
   "prod:wiki": [
     { label: "搜索文档", prompt: "帮我在文档库里找关于 …… 的内容。" },
     { label: "文档结构", prompt: "这个项目的文档库大致是怎么组织的？" },
+  ],
+  // 灵感文档就是 wiki 的一个子树，兑现它的是同一族 wiki 工具
+  "prod:dramaturgy-inspiration": [
+    { label: "搜索文档", prompt: "帮我在灵感文档里找关于 …… 的内容。" },
+    { label: "文档结构", prompt: "这个项目的灵感文档大致是怎么组织的？" },
   ],
   "prod:contacts": [
     { label: "查联系方式", prompt: "帮我查一下 …… 的联系方式。" },
