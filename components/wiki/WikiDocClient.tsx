@@ -555,7 +555,7 @@ export default function WikiDocClient({
             />
           )
         ) : wiki.body.trim() ? (
-          <WikiMarkdown content={wiki.body} productionId={productionId} />
+          <WikiMarkdown content={wiki.body} productionId={productionId} wikiRouteBase={navigationBasePath} />
         ) : (
           <p className="text-sm text-zinc-400">（空文档）</p>
         )}
@@ -570,7 +570,7 @@ export default function WikiDocClient({
               <p className="text-[11px] uppercase tracking-wide text-zinc-400 mb-1.5">反向链接 {backlinks.length}</p>
               <div className="flex flex-wrap gap-1.5">
                 {backlinks.map(b => (
-                  <Link key={b.id} href={`/production/${productionId}/wiki/${b.id}`}
+                  <Link key={b.id} href={`${routeBase}/${b.id}`}
                     className="rounded-md bg-sky-50 border border-sky-200 px-2 py-0.5 text-xs text-sky-700 hover:bg-sky-100">
                     [[{b.title ?? "（无标题）"}]]
                   </Link>
@@ -583,7 +583,7 @@ export default function WikiDocClient({
               <p className="text-[11px] uppercase tracking-wide text-zinc-400 mb-1.5">未链接的提及 {unlinked.length}</p>
               <div className="flex flex-wrap gap-1.5">
                 {unlinked.map(b => (
-                  <Link key={b.id} href={`/production/${productionId}/wiki/${b.id}`}
+                  <Link key={b.id} href={`${routeBase}/${b.id}`}
                     className="rounded-md bg-zinc-50 border border-zinc-200 px-2 py-0.5 text-xs text-zinc-500 hover:bg-zinc-100">
                     {b.title ?? "（无标题）"}
                   </Link>

@@ -24,6 +24,7 @@ export default function WikiShell({
   selectedId,
   navigationBasePath,
   rootParentId,
+  rootAnchor,
   children,
 }: {
   productionId: string;
@@ -34,6 +35,8 @@ export default function WikiShell({
   navigationBasePath?: string;
   /** Parent used when this shell presents a subtree as its visual root. */
   rootParentId?: string;
+  /** 根锚点尚未懒建时的落位声明——服务端过完 create 门后解析成真正的 parentId。 */
+  rootAnchor?: "dramaturgy";
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -186,7 +189,11 @@ export default function WikiShell({
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, parentId: parentId || rootParentId || null }),
+        body: JSON.stringify({
+          title,
+          parentId: parentId || rootParentId || null,
+          ...(parentId ? {} : { parentAnchor: rootAnchor }),
+        }),
       });
       const data = await res.json();
       if (!res.ok) { alert(data.error ?? "创建失败"); return; }
@@ -217,7 +224,9 @@ export default function WikiShell({
           const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title, body: text, parentId: rootParentId || null }),
+            body: JSON.stringify({
+              title, body: text, parentId: rootParentId || null, parentAnchor: rootAnchor,
+            }),
           });
           const data = await res.json();
           if (!res.ok) { errors.push(`${file.name}: ${data.error ?? "失败"}`); continue; }
@@ -237,7 +246,7 @@ export default function WikiShell({
 
   async function remove(id: string) {
     const doc = byId.get(id);
-    if (!confirm(`确认删除「${doc?.title ?? "该文档"}」？子文档将提升为顶层。`)) return;
+    if (!confirm(`确认删除「${doc?.title ?? "该文档"}」？子文档将上移一层。`)) return;
     setMenu(null);
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${id}`, { method: "DELETE" });
     if (!res.ok) { alert((await res.json()).error ?? "删除失败"); return; }

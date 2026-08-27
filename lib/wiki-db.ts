@@ -384,6 +384,15 @@ export async function deleteWiki(
   // （反向查询只从活宿主页发起），但 wiki 目标的删除入口在自己手里，一行清零。
   await pool.query(
     `DELETE FROM wiki_entity_link WHERE entity_type = 'wiki' AND entity_id = $1`, [id]);
+  // 子文档上移一层，而不是靠 parent_id 的 ON DELETE SET NULL 掉到顶层。SET NULL 会
+  // 把它们弹出所在子树——在「构作 · 灵感文档」这种只展示某个根子树的工作区里，
+  // 那等于当场从视野里消失（得回「文档」模块才找得回来）。单条语句原子完成：
+  // 先读被删节点的 parent 再写子行，中途崩掉也只是提前落到终态。
+  await pool.query(
+    `UPDATE wiki SET parent_id = (SELECT parent_id FROM wiki WHERE id = $1::uuid)
+     WHERE parent_id = $1::uuid AND production_id = $2`,
+    [id, productionId],
+  );
   await pool.query(`DELETE FROM wiki WHERE id = $1::uuid AND production_id = $2`, [id, productionId]);
   // 正开着这篇的人要靠这一帧离场——否则下一次软刷新会撞进 notFound()，
   // 整个人被弹出工程环境（见 WikiDocClient 的 library 监听）。
@@ -412,6 +421,20 @@ export async function getWikiTreeConfig(productionId: string): Promise<WikiTreeC
   return r
     ? { enabled: r.reports_tree_enabled, rootTitle: r.reports_root_title, rootWikiId: r.reports_root_wiki_id }
     : { enabled: true, rootTitle: "报告", rootWikiId: null };
+}
+
+/** 「戏剧构作」根的**只读**读取。渲染路径只准用这个——ensureDramaturgyRootAnchor
+ *  是带行锁的写事务，且会凭空建一篇 wiki，必须留在过完 wiki@create 门的写路径后面。 */
+export async function getDramaturgyTreeConfig(productionId: string): Promise<WikiTreeConfig> {
+  const res = await getPool().query<{ dramaturgy_tree_enabled: boolean; dramaturgy_root_title: string; dramaturgy_root_wiki_id: string | null }>(
+    `SELECT dramaturgy_tree_enabled, dramaturgy_root_title, dramaturgy_root_wiki_id::text AS dramaturgy_root_wiki_id
+     FROM production_wiki_config WHERE production_id = $1`,
+    [productionId],
+  );
+  const r = res.rows[0];
+  return r
+    ? { enabled: r.dramaturgy_tree_enabled, rootTitle: r.dramaturgy_root_title, rootWikiId: r.dramaturgy_root_wiki_id }
+    : { enabled: true, rootTitle: "戏剧构作", rootWikiId: null };
 }
 
 /**

@@ -276,7 +276,11 @@ function extractProductionId(pathname: string): string | null {
  *  /production/{id}/wiki（那个没有具体文档可附带）。驱动 AI popout 的
  *  「附带当前文档」chip。 */
 function extractCurrentWikiId(pathname: string, productionId: string): string | null {
-  const m = pathname.match(new RegExp(`^/production/${productionId}/wiki/([^/]+)`));
+  // wiki 文档有两个入口路由：「文档」模块与「构作 · 灵感文档」工作区。两边都得认，
+  // 否则在工作区里开着文档时 AI 助手拿不到当前文档上下文。
+  const m = pathname.match(
+    new RegExp(`^/production/${productionId}/(?:wiki|dramaturgy/inspiration)/([^/]+)`),
+  );
   return m ? m[1] : null;
 }
 

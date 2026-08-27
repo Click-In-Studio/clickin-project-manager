@@ -193,6 +193,7 @@ export default function WikiMarkdown({
   inline = false,
   members = [],
   versionId,
+  wikiRouteBase,
 }: {
   content: string;
   /** 统一 renderer：production 上下文之外（全站通知/管理公告）可省略——
@@ -206,6 +207,9 @@ export default function WikiMarkdown({
   members?: MentionMember[];
   /** 解析上下文版本：正文里没写 ?v= 的剧本域引用按此版本解析 */
   versionId?: string | null;
+  /** wiki 目标的路由命名空间（默认 /production/<id>/wiki）。作用域化工作区
+   *  （如构作·灵感文档）传自己的 base，内链才不会把人弹出工作区。 */
+  wikiRouteBase?: string;
 }) {
   // 手写 [[标题]] 预处理（码内保护）+ 标题清单
   const { text: processed, titles: rawTitles } = useMemo(
@@ -270,6 +274,8 @@ export default function WikiMarkdown({
     })();
   }, [mentionAttrs, productionId, versionId]);
 
+  const wikiBase = wikiRouteBase ?? `/production/${productionId}/wiki`;
+
   const Wrapper = inline ? "span" : "div";
   const wrapperClass = inline
     ? `text-sm break-words ${className}`
@@ -332,7 +338,7 @@ export default function WikiMarkdown({
               if (targetId) {
                 return (
                   <Link
-                    href={`/production/${productionId}/wiki/${targetId}`}
+                    href={`${wikiBase}/${targetId}`}
                     className="inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-sky-50 text-sky-700 border border-sky-200 no-underline hover:bg-sky-100"
                   >
                     [[{title}]]
@@ -374,7 +380,11 @@ export default function WikiMarkdown({
                     </span>
                   );
                 }
-                const url = r.url ?? `/production/${productionId}/wiki/${attrs.id}`;
+                // r.url 对 wiki kind 恒为 /production/<id>/wiki/<id>（mention-resolve），
+                // 所以有 base 覆盖时直接自建，不拿它当真相。
+                const url = wikiRouteBase
+                  ? `${wikiRouteBase}/${attrs.id}`
+                  : r.url ?? `${wikiBase}/${attrs.id}`;
                 return (
                   <Link
                     href={url}

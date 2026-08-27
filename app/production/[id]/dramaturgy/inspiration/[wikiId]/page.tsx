@@ -12,7 +12,7 @@ import {
 } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import {
-  ensureDramaturgyRootAnchor,
+  getDramaturgyTreeConfig,
   getWiki,
   listBacklinks,
   listEntityRefsForWiki,
@@ -49,10 +49,8 @@ export default async function DramaturgyInspirationDocPage({
   if (!productionName) notFound();
 
   const actor = toActor(session, access.permCtx);
-  const rootId = await ensureDramaturgyRootAnchor(productionId);
-  if (!rootId) notFound();
-
-  const [wiki, all, visible, canCreate] = await Promise.all([
+  const [treeConfig, wiki, all, visible, canCreate] = await Promise.all([
+    getDramaturgyTreeConfig(productionId),
     getWiki(wikiId, productionId),
     listWikiLibrary(productionId),
     listVisibleWikiIds(actor, productionId),
@@ -60,11 +58,18 @@ export default async function DramaturgyInspirationDocPage({
   ]);
   if (!wiki) notFound();
 
-  const fullSubtree = listDramaturgyWikiSubtree(all, rootId);
-  if (!fullSubtree.some((entry) => entry.id === wikiId)) notFound();
+  // 成员判定与侧栏渲染同源：都在**全量** all 上算子树，再各自过可见性门。
+  // （先过滤再算祖先链＝「父不可见、子可见」的文档在这里凭空消失，见列表页注释。）
+  const rootId = treeConfig.enabled ? treeConfig.rootWikiId : null;
+  const subtree = listDramaturgyWikiSubtree(all, rootId);
+  // 越界不是 404：工作区内的内链（[[…]]、反链）会指向子树外的文档，文档也可能
+  // 在「文档」模块里被移出子树、或根锚点压根还没懒建。回落到通用 wiki 路由，
+  // 别把人弹飞。
+  if (!rootId || !subtree.some((entry) => entry.id === wikiId)) {
+    redirect(`/production/${productionId}/wiki/${wikiId}`);
+  }
 
-  const allowed = visible.wildcard ? all : all.filter((entry) => visible.ids.has(entry.id));
-  const wikis = listDramaturgyWikiSubtree(allowed, rootId);
+  const wikis = visible.wildcard ? subtree : subtree.filter((entry) => visible.ids.has(entry.id));
   const routeBase = `/production/${productionId}/dramaturgy/inspiration`;
   const canView = await canViewWiki(actor, productionId, wikiId);
 
@@ -79,6 +84,7 @@ export default async function DramaturgyInspirationDocPage({
           selectedId={wikiId}
           navigationBasePath={routeBase}
           rootParentId={rootId}
+          rootAnchor="dramaturgy"
         >
           <div className="flex flex-col items-center justify-center rounded-xl border border-[var(--line)] bg-[var(--surface)] px-8 text-center">
             <p className="mb-1 text-lg font-bold text-[var(--ink)]">[[{wiki.title ?? "（无标题）"}]]</p>
@@ -115,6 +121,7 @@ export default async function DramaturgyInspirationDocPage({
           selectedId={wikiId}
           navigationBasePath={routeBase}
           rootParentId={rootId}
+          rootAnchor="dramaturgy"
         >
           <WikiDocClient
             productionId={productionId}

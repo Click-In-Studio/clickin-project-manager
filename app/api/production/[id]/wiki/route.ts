@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { listWikiLibrary, createWiki, searchWiki } from "@/lib/wiki-db";
+import { listWikiLibrary, createWiki, searchWiki, ensureDramaturgyRootAnchor } from "@/lib/wiki-db";
 import { listVisibleWikiIds } from "@/lib/wiki-perm";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -43,15 +43,23 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!await hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const body = await req.json() as { title?: string; body?: string; parentId?: string | null };
+  const body = await req.json() as {
+    title?: string; body?: string; parentId?: string | null;
+    /** 显式 parentId 缺席时的落位锚点。锚点可能尚未建（懒建），由服务端在**过完
+     *  create 门之后**补建——ensure 是写事务，渲染路径一律不准碰。 */
+    parentAnchor?: "dramaturgy";
+  };
   if (!body.title?.trim()) return Response.json({ error: "标题不能为空" }, { status: 400 });
+
+  const parentId = body.parentId?.trim()
+    || (body.parentAnchor === "dramaturgy" ? await ensureDramaturgyRootAnchor(productionId) : null);
 
   try {
     const wiki = await createWiki({
       productionId,
       title: body.title.trim(),
       body: body.body ?? "",
-      parentId: body.parentId ?? null,
+      parentId,
       createdBy: session.userId,
     });
     return Response.json({ wiki }, { status: 201 });
