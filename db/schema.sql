@@ -709,7 +709,8 @@ CREATE TABLE IF NOT EXISTS wiki (
   body          TEXT        NOT NULL DEFAULT '',
   mentions      JSONB       NOT NULL DEFAULT '[]',
   created_by    UUID        NULL REFERENCES app_user(id),
-  -- W1 文档树：删父提根（SET NULL），排序 fractional index（lib/lex-order.ts）
+  -- W1 文档树：排序 fractional index（lib/lex-order.ts）。删父时子文档**上移一层**
+  -- 由 deleteWiki 在事务内重挂（#352）；FK 的 SET NULL 只是绕过应用层时的兜底
   parent_id     UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
   sort_key      TEXT        NULL,
   is_public     BOOLEAN     NOT NULL DEFAULT false,
