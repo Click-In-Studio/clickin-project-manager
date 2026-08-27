@@ -1202,6 +1202,16 @@ export default function AppShell({ session, productions, canCreateProduction = f
           onOpen={() => setDropdownOpen(false)}
         />
 
+        {isAdminMode && productionId && (
+          <Link
+            href={`/production/${productionId}`}
+            className="inline-flex h-9 shrink-0 items-center rounded-[9px] border border-[var(--line)] bg-[var(--surface)] px-3 text-[11px] font-semibold text-[var(--stage)] transition-colors hover:border-[var(--stage)] hover:bg-[var(--paper)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--stage)]/30"
+          >
+            <span aria-hidden="true" className="mr-1.5">←</span>
+            返回项目
+          </Link>
+        )}
+
         {hasProductionTopMenu && (
           <div
             id={PRODUCTION_TOP_MENU_SLOT_ID}
@@ -1283,12 +1293,12 @@ export default function AppShell({ session, productions, canCreateProduction = f
                 <div className="h-px bg-[var(--line)] mx-1 my-1.5" />
                 <DropdownItem href="/account?tab=preferences" onClick={() => setDropdownOpen(false)}>功能与设置</DropdownItem>
 
-                {/* ── 管理后台 ── */}
+                {/* ── 配置中心 ── */}
                 {currentProduction?.canAdmin && productionId && (
                   <>
                     <div className="h-px bg-[var(--line)] mx-1 my-1.5" />
                     <DropdownItem href={`/production/${productionId}/admin`} onClick={() => setDropdownOpen(false)}>
-                      管理后台
+                      配置中心
                       <span className="ml-auto text-[10px] text-[#667676] truncate max-w-[90px]">{currentProduction.name}</span>
                     </DropdownItem>
                   </>
@@ -1383,7 +1393,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             /* ── Admin sidebar ── */
             <nav className="flex flex-col gap-0.5 flex-1">
               <div className="px-2.5 pt-1 pb-4">
-                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-[var(--stage)]">管理后台</p>
+                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-[var(--stage)]">配置中心</p>
                 <p className="text-[11px] text-[#667676] mt-0.5 truncate">{currentProduction?.name}</p>
               </div>
 
@@ -1406,22 +1416,6 @@ export default function AppShell({ session, productions, canCreateProduction = f
                   ))}
                 </div>
               ))}
-
-              <div className="flex-1" />
-              <div className="mx-2.5 mb-2 border-t border-[var(--line)]" />
-
-              <Link
-                href={`/production/${productionId}`}
-                className="flex items-center gap-2.5 rounded-[9px] px-2.5 py-1.5 min-h-[46px] transition-colors hover:bg-white/50"
-              >
-                <span className="w-[27px] h-[27px] rounded-[7px] border border-[#cbd2cf] flex items-center justify-center text-[11px] text-[var(--stage)] shrink-0 leading-none">
-                  ←
-                </span>
-                <span className="flex flex-col min-w-0">
-                  <span className="text-[12px] font-bold text-[var(--stage)] leading-tight">退出管理后台</span>
-                  <span className="text-[9px] text-[#667676] mt-0.5 truncate">{currentProduction?.name}</span>
-                </span>
-              </Link>
             </nav>
           ) : (
             /* ── Regular sidebar ── */
@@ -1507,7 +1501,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                 href={`/production/${productionId}`}
               />
               <MobileTab
-                label="管理菜单"
+                label="配置菜单"
                 symbol="⚙"
                 active={drawerOpen === "admin"}
                 onClick={() => toggleDrawer("admin")}
@@ -1643,7 +1637,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
       <BottomDrawer open={drawerOpen === "admin"} onClose={closeDrawer}>
         <div className="px-3.5 pb-4">
           <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-[var(--stage)] px-2.5 pt-1 pb-2">
-            管理后台
+            配置中心
           </p>
           {adminNavGroups.map((group, gi) => (
             <div key={gi} className="flex flex-col gap-0.5">
@@ -1713,7 +1707,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             />
           </div>
 
-          {/* 管理后台 */}
+          {/* 配置中心 */}
           {currentProduction?.canAdmin && productionId && (
             <>
               <div className="mx-5 my-1.5 border-t border-[var(--line)]" />
@@ -1721,7 +1715,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                 <NavItem
                   href={`/production/${productionId}/admin`}
                   symbol="⚙"
-                  label="管理后台"
+                  label="配置中心"
                   hint={currentProduction.name}
                   active={isAdminMode}
                   onClick={closeDrawer}
