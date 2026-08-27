@@ -74,8 +74,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   // 门必须跑在 ensureDramaturgyRootAnchor **之前**：那是个写事务，会凭空建一篇
   // wiki，让它成为一个最终被 403 的请求的副作用是 write-before-authz（AI review
   // 二轮 #1）。锚点路径的目标父 id 又要等 ensure 跑完才知道——这个先有鸡还是先有
-  // 蛋由 gateAndResolveWikiAnchor 拆开：根已存在就照常跑双门，只在根是它当场新建
-  // 时才用恒真论证。配置关闭时它返回 null＝落顶层，根容器上两道门恒真。
+  // 蛋拆成 gateWikiAnchorPlacement（门，不写）与 resolveWikiAnchorParent（解析，
+  // 可能懒建，排在所有门之后）：根已存在就照常跑双门，只在根是 resolve 当场新建时
+  // 才用恒真论证。配置关闭时 resolve 返回 null＝落顶层，根容器上两道门恒真。
   const explicitParentId = body.parentId?.trim() || null;
   let parentId = explicitParentId;
   if (explicitParentId) {

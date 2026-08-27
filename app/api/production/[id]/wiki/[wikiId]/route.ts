@@ -97,8 +97,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   //
   // 锚点落位（#355 移入）：灵感库根可能尚未懒建，此时客户端给的是 parentAnchor 而
   // 不是 parentId，目标父 id 要等解析完才知道。①② 因此交给
-  // gateAndResolveWikiAnchor——它在**已存在的根**上照常跑这两道，只在根是它当场
-  // 新建时才用恒真论证（见那边的头注释）。③（源父容器可写）与目标无关，照跑。
+  // gateWikiAnchorPlacement（门，不写）——它在**已存在的根**上照常跑这两道，只在
+  // 根尚不存在（将由 resolveWikiAnchorParent 在所有门之后当场懒建）时才用恒真论证
+  // （见 wiki-placement 头注释）。③（源父容器可写）与目标无关，照跑。
   // parentId 与 parentAnchor 同送时锚点胜（`parentId: null` 与"字段缺席"在这里
   // collapse 成同一个 falsy）——与 POST /wiki 同语义，两处必须一致，别在一处改成
   // `"parentId" in body` 的口径（AI review #3）。客户端不同送这两个字段。
