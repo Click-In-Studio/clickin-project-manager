@@ -27,7 +27,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const actor = toActor(session, access.permCtx);
 
   const existing = await getWikiAlias(aliasId, productionId);
-  if (!existing) return Response.json({ error: "软链接不存在" }, { status: 404 });
+  if (!existing) return Response.json({ error: "链接不存在" }, { status: 404 });
 
   const body = await req.json() as Record<string, unknown>;
   // 显示名（#358 ⑤）：字符串＝改名，null＝改回跟随目标，其余（含缺席）＝本帧不动
@@ -44,9 +44,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (displayTitle !== undefined) {
     if (!await canWriteWikiContainer(actor, productionId, existing.parentId)
         && existing.createdBy !== session.userId)
-      return Response.json({ error: "无权重命名该软链接" }, { status: 403 });
+      return Response.json({ error: "无权重命名该链接" }, { status: 403 });
     const renamed = await renameWikiAlias(aliasId, productionId, displayTitle);
-    if (!renamed) return Response.json({ error: "软链接不存在" }, { status: 404 });
+    if (!renamed) return Response.json({ error: "链接不存在" }, { status: 404 });
     if (!movingPosition) return Response.json({ alias: renamed });
   }
 
@@ -56,18 +56,18 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
   if (changingParent && targetParentId !== existing.parentId
       && !await canWriteWikiContainer(actor, productionId, existing.parentId))
-    return Response.json({ error: "无权把软链接移出原父文档" }, { status: 403 });
+    return Response.json({ error: "无权把链接移出原父文档" }, { status: 403 });
 
   const res = await moveWikiAlias(aliasId, productionId, {
     ...(changingParent ? { parentId: targetParentId } : {}),
     ...(place ? { place } : {}),
   });
   if (!res.ok) {
-    if (res.reason === "not_found") return Response.json({ error: "软链接不存在" }, { status: 404 });
+    if (res.reason === "not_found") return Response.json({ error: "链接不存在" }, { status: 404 });
     if (res.reason === "duplicate")
-      return Response.json({ error: "该位置已有指向同一目标的软链接" }, { status: 409 });
+      return Response.json({ error: "该位置已有指向同一目标的链接" }, { status: 409 });
     if (res.reason === "inside_target_subtree")
-      return Response.json({ error: "不能把软链接移进目标自己的子树里" }, { status: 400 });
+      return Response.json({ error: "不能把链接移进目标自己的子树里" }, { status: 400 });
     return Response.json({ error: "移动失败" }, { status: 400 });
   }
   return Response.json({ alias: res.alias });
@@ -83,7 +83,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const actor = toActor(session, access.permCtx);
 
   const existing = await getWikiAlias(aliasId, productionId);
-  if (!existing) return Response.json({ error: "软链接不存在" }, { status: 404 });
+  if (!existing) return Response.json({ error: "链接不存在" }, { status: 404 });
 
   // 删别名＝把一个子项从容器里拿掉，行使的是对**容器**的权限（别名没有自己的
   // delete 权可发——它不是资源）。顶层容器写门恒真是 #357 拍下的根容器本体论
@@ -91,9 +91,9 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   // 人自己删自己的另开一条，免得顶层之外的位置被容器主锁死。
   if (!await canWriteWikiContainer(actor, productionId, existing.parentId)
       && existing.createdBy !== session.userId)
-    return Response.json({ error: "无权删除该软链接" }, { status: 403 });
+    return Response.json({ error: "无权删除该链接" }, { status: 403 });
 
   const ok = await deleteWikiAlias(aliasId, productionId);
-  if (!ok) return Response.json({ error: "软链接不存在" }, { status: 404 });
+  if (!ok) return Response.json({ error: "链接不存在" }, { status: 404 });
   return Response.json({ ok: true });
 }

@@ -303,3 +303,21 @@ export async function canShareWiki(actor: GrantActor, productionId: string, wiki
   if (actor.isAdmin || actor.isOwner) return true;
   return hasGrant(actor.userId, productionId, "wiki", wikiId, "grants", "edit");
 }
+
+/**
+ * 写面的**集合式**实现（#355 移入面板）：一次查出该用户能 edit 哪些 wiki。
+ *
+ * 与 canEditWiki 逐点同键同语义（`wiki/<id>@edit`，resource_id 通配走
+ * listGrantedResourceIds 的 wildcard 分支）——移入候选可能是整个库，逐条调
+ * canEditWiki 就是 N 次查询。判定权威仍在路由的 canEditWiki 上，这里只供前端
+ * 把「移入本体」灰掉。
+ */
+export async function listEditableWikiIds(
+  actor: GrantActor, productionId: string,
+): Promise<{ wildcard: boolean; ids: Set<string> }> {
+  if (actor.isAdmin || actor.isOwner) return { wildcard: true, ids: new Set() };
+  const granted = await listGrantedResourceIds(actor.userId, productionId, "wiki", "*", "edit");
+  return granted.wildcard
+    ? { wildcard: true, ids: new Set() }
+    : { wildcard: false, ids: new Set(granted.ids) };
+}

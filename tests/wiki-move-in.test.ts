@@ -1,0 +1,263 @@
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { NextRequest } from "next/server";
+import { getPool } from "@/lib/pg";
+import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createWiki, getDramaturgyTreeConfig, listWikiLibrary } from "@/lib/wiki-db";
+import {
+  listDramaturgyMoveInCandidates, listDramaturgyWikiAliases, listDramaturgyWikiSubtree,
+} from "@/lib/dramaturgy-wiki";
+import { listDramaturgyTreeFor } from "@/lib/wiki-tree";
+import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
+import { PATCH as wikiPATCH } from "@/app/api/production/[id]/wiki/[wikiId]/route";
+import { POST as aliasPOST } from "@/app/api/production/[id]/wiki-alias/route";
+import { makeProduction, cleanupProduction } from "./factories";
+import type { WikiListEntry } from "@/lib/wiki-db";
+import type { WikiAliasEntry } from "@/lib/wiki-alias-db";
+
+// #355 灵感库「移入」。两种形态是同一个入口的两个选项：
+//   本体移入 —— PATCH /wiki/<id> 改 parent_id
+//   建链接   —— POST /wiki-alias 在灵感库里放一个指向它的伪节点（#358）
+//
+// 本文件测的是这个入口下面的两块地基：
+//   ① 候选表（谁能被移入、能不能移本体）——前端灰化的镜像
+//   ② parentAnchor 落位——灵感库根是懒建的，第一次移入时它还不存在。ensure 是写
+//      事务，必须留在门后面，否则一个最终 403 的请求会凭空建出一篇根文档。
+
+const idSet = (...ids: string[]) => ({ wildcard: false, ids: new Set(ids) });
+const ALL = { wildcard: true, ids: new Set<string>() };
+
+function entry(id: string, parentId: string | null, isAnchor = false): WikiListEntry {
+  return { id, parentId, title: id, tags: [], sortKey: null, isAnchor } as unknown as WikiListEntry;
+}
+function aliasTo(targetId: string, parentId: string): WikiAliasEntry {
+  return { id: `wal_${targetId}`, parentId, targetType: "wiki", targetId } as unknown as WikiAliasEntry;
+}
+
+describe("listDramaturgyMoveInCandidates", () => {
+  const all = [
+    entry("root", null, true), entry("inside", "root"),
+    entry("free", null), entry("boxed", "box"), entry("box", null),
+  ];
+  const subtree = listDramaturgyWikiSubtree(all, "root");
+
+  it("只给子树外的文档，根自身与子树成员都不是候选", () => {
+    const out = listDramaturgyMoveInCandidates(all, subtree, "root",
+      { enumerable: ALL, editable: ALL });
+    expect(out.map(c => c.id).sort()).toEqual(["box", "boxed", "free"]);
+  });
+
+  it("列不到的文档不进候选——选择器里不出现自己看不见的 id", () => {
+    const out = listDramaturgyMoveInCandidates(all, subtree, "root",
+      { enumerable: idSet("free"), editable: ALL });
+    expect(out.map(c => c.id)).toEqual(["free"]);
+  });
+
+  it("canMoveBody 是两道门的合取：本篇可编辑 ∧ 源父容器可写", () => {
+    const out = listDramaturgyMoveInCandidates(all, subtree, "root",
+      { enumerable: ALL, editable: idSet("free", "boxed") });
+    const by = Object.fromEntries(out.map(c => [c.id, c.canMoveBody]));
+    expect(by.free).toBe(true);    // 顶层：源父恒可写（根容器上没有 *@edit 这回事）
+    expect(by.boxed).toBe(false);  // 有本篇的 edit，但没有 box 的 —— 挪不走
+    expect(by.box).toBe(false);    // 连本篇的 edit 都没有
+  });
+
+  it("系统锚点自身不是候选，它的子文档是", () => {
+    const withAnchor = [...all, entry("报告归档", null, true), entry("filed", "报告归档")];
+    const out = listDramaturgyMoveInCandidates(withAnchor, subtree, "root",
+      { enumerable: ALL, editable: ALL });
+    expect(out.map(c => c.id)).not.toContain("报告归档");
+    expect(out.map(c => c.id)).toContain("filed");
+  });
+
+  it("源父是系统锚点时视为可写（锚点无主，与 canWriteWikiContainer 同一条豁免）", () => {
+    const withAnchor = [...all, entry("anchor", null, true), entry("filed", "anchor")];
+    const out = listDramaturgyMoveInCandidates(withAnchor, subtree, "root",
+      { enumerable: ALL, editable: idSet("filed") });
+    expect(out.find(c => c.id === "filed")?.canMoveBody).toBe(true);
+  });
+
+  it("灵感库里已有指向它的链接时打标（选择器里标出来，不拦）", () => {
+    const out = listDramaturgyMoveInCandidates(all, subtree, "root",
+      { enumerable: ALL, editable: ALL }, [aliasTo("free", "root")]);
+    expect(out.find(c => c.id === "free")?.linked).toBe(true);
+    expect(out.find(c => c.id === "box")?.linked).toBe(false);
+  });
+
+  it("rootId 为 null（锚点未懒建）时不抛：没有子树可排除，全库（除锚点）都是候选", () => {
+    const out = listDramaturgyMoveInCandidates(all, [], null, { enumerable: ALL, editable: ALL });
+    expect(out.map(c => c.id).sort()).toEqual(["box", "boxed", "free", "inside"]);
+  });
+});
+
+// ── 路由层：parentAnchor 落位 ────────────────────────────────────────────────
+
+async function newMember(prodId: string): Promise<string> {
+  const { rows } = await getPool().query<{ id: string }>(
+    "INSERT INTO app_user DEFAULT VALUES RETURNING id");
+  const uid = rows[0].id;
+  await getPool().query(
+    `INSERT INTO production_member (production_id, user_id, roles) VALUES ($1, $2, '{}')`,
+    [prodId, uid]);
+  return uid;
+}
+async function shareTo(prodId: string, wikiId: string, userId: string, level: "view" | "edit") {
+  for (const [sub, verb] of WIKI_LEVEL_ROW_SETS[level]) {
+    await getPool().query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
+       VALUES ($1, $2, 'wiki', $3, $4, $5, 'direct', $2)`,
+      [prodId, userId, wikiId, sub, verb]);
+  }
+}
+const cookieOf = (userId: string, isAdmin: boolean) =>
+  `${SESSION_COOKIE}=${createSession({ userId, name: "测试", avatarUrl: null, isAdmin })}`;
+
+function patchReq(prodId: string, wikiId: string, userId: string, isAdmin: boolean, body: unknown) {
+  return new NextRequest(`http://localhost/api/production/${prodId}/wiki/${wikiId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Cookie: cookieOf(userId, isAdmin) },
+    body: JSON.stringify(body),
+  });
+}
+function aliasReq(prodId: string, userId: string, isAdmin: boolean, body: unknown) {
+  return new NextRequest(`http://localhost/api/production/${prodId}/wiki-alias`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookieOf(userId, isAdmin) },
+    body: JSON.stringify(body),
+  });
+}
+async function anchorUntouched(prodId: string) {
+  const cfg = await getPool().query(
+    "SELECT dramaturgy_root_wiki_id FROM production_wiki_config WHERE production_id = $1", [prodId]);
+  return cfg.rows[0]?.dramaturgy_root_wiki_id ?? null;
+}
+
+describe("PATCH /wiki 的 parentAnchor 落位（本体移入）", () => {
+  let prodId: string;
+  let admin: string;
+  const users: string[] = [];
+
+  beforeAll(async () => {
+    ({ prodId } = await makeProduction());
+    admin = await newMember(prodId);
+    users.push(admin);
+  });
+  afterAll(async () => {
+    await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [prodId]).catch(() => {});
+    await cleanupProduction(prodId).catch(() => {});
+    await getPool().query("DELETE FROM app_user WHERE id = ANY($1)", [users]).catch(() => {});
+  });
+
+  it("锚点尚未懒建时，parentAnchor 补建根并把本体挂上去", async () => {
+    expect((await getDramaturgyTreeConfig(prodId)).rootWikiId).toBeNull();
+    const doc = await createWiki({ productionId: prodId, title: "库里的一篇", createdBy: admin });
+
+    const res = await wikiPATCH(
+      patchReq(prodId, doc.id, admin, true, { parentAnchor: "dramaturgy" }),
+      { params: Promise.resolve({ id: prodId, wikiId: doc.id }) });
+    expect(res.status).toBe(200);
+
+    const rootId = (await getDramaturgyTreeConfig(prodId)).rootWikiId;
+    expect(rootId).not.toBeNull();
+    expect((await res.json()).wiki.parentId).toBe(rootId);
+    // 落进子树＝在「灵感文档」工作区里看得见
+    expect(listDramaturgyWikiSubtree(await listWikiLibrary(prodId), rootId).map(w => w.id))
+      .toContain(doc.id);
+  });
+
+  it("显式 parentId 压过 parentAnchor（与 POST /wiki 同语义）", async () => {
+    const box = await createWiki({ productionId: prodId, title: "别处", createdBy: admin });
+    const doc = await createWiki({ productionId: prodId, title: "挂别处的", createdBy: admin });
+    const res = await wikiPATCH(
+      patchReq(prodId, doc.id, admin, true, { parentId: box.id, parentAnchor: "dramaturgy" }),
+      { params: Promise.resolve({ id: prodId, wikiId: doc.id }) });
+    expect(res.status).toBe(200);
+    expect((await res.json()).wiki.parentId).toBe(box.id);
+  });
+
+  // write-before-authz 的回归证人（#358 二轮 AI review 同一条纪律）：
+  // ensureDramaturgyRootAnchor 会凭空建一篇 wiki，403 的请求不许留下这个副作用。
+  it("无权把文档移出原父时 403，且不因此建出锚点", async () => {
+    const { prodId: clean } = await makeProduction();
+    const owner = await newMember(clean);
+    const mover = await newMember(clean);
+    users.push(owner, mover);
+    try {
+      const box = await createWiki({ productionId: clean, title: "别人的目录", createdBy: owner });
+      const doc = await createWiki({
+        productionId: clean, title: "别人目录里的一篇", parentId: box.id, createdBy: owner });
+      await shareTo(clean, doc.id, mover, "edit");   // 有本篇的 edit，没有 box 的
+
+      expect(await anchorUntouched(clean)).toBeNull();
+      const res = await wikiPATCH(
+        patchReq(clean, doc.id, mover, false, { parentAnchor: "dramaturgy" }),
+        { params: Promise.resolve({ id: clean, wikiId: doc.id }) });
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toContain("移出");
+      expect(await anchorUntouched(clean)).toBeNull();   // ← 门跑在 ensure 之前
+    } finally {
+      await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [clean]).catch(() => {});
+      await cleanupProduction(clean).catch(() => {});
+    }
+  });
+});
+
+describe("POST /wiki-alias 的 parentAnchor 落位（以链接移入）", () => {
+  const users: string[] = [];
+  afterAll(async () => {
+    await getPool().query("DELETE FROM app_user WHERE id = ANY($1)", [users]).catch(() => {});
+  });
+
+  it("锚点尚未懒建时，建链接补建根，链接成为灵感库成员而目标一动不动", async () => {
+    const { prodId } = await makeProduction();
+    const admin = await newMember(prodId);
+    users.push(admin);
+    try {
+      const doc = await createWiki({ productionId: prodId, title: "库里的一篇", createdBy: admin });
+      expect((await getDramaturgyTreeConfig(prodId)).rootWikiId).toBeNull();
+
+      const res = await aliasPOST(
+        aliasReq(prodId, admin, true, { parentAnchor: "dramaturgy", targetType: "wiki", targetId: doc.id }),
+        { params: Promise.resolve({ id: prodId }) });
+      expect(res.status).toBe(201);
+      const { alias } = await res.json();
+
+      const rootId = (await getDramaturgyTreeConfig(prodId)).rootWikiId;
+      expect(alias.parentId).toBe(rootId);
+      // 目标本体没动：还在全库顶层，没被拽进子树
+      const all = await listWikiLibrary(prodId);
+      expect(all.find(w => w.id === doc.id)?.parentId).toBeNull();
+      // 链接是工作区成员（成员判据是**位置**，与目标在哪无关）
+      const subtree = listDramaturgyWikiSubtree(all, rootId);
+      expect(listDramaturgyWikiAliases(
+        [alias as WikiAliasEntry], subtree, rootId).map(a => a.id)).toEqual([alias.id]);
+      // 移入后它不再出现在候选表里（那边已经有链接了 → 打标）
+      const { moveIn } = await listDramaturgyTreeFor(
+        { userId: admin, isAdmin: true, isOwner: false }, prodId, rootId);
+      expect(moveIn.find(c => c.id === doc.id)?.linked).toBe(true);
+    } finally {
+      await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [prodId]).catch(() => {});
+      await cleanupProduction(prodId).catch(() => {});
+    }
+  });
+
+  it("无 wiki@create 时 403，且不因此建出锚点", async () => {
+    const { prodId } = await makeProduction();
+    const owner = await newMember(prodId);
+    const outsider = await newMember(prodId);
+    users.push(owner, outsider);
+    try {
+      const doc = await createWiki({ productionId: prodId, title: "目标", createdBy: owner });
+      await shareTo(prodId, doc.id, outsider, "view");
+
+      const res = await aliasPOST(
+        aliasReq(prodId, outsider, false, { parentAnchor: "dramaturgy", targetType: "wiki", targetId: doc.id }),
+        { params: Promise.resolve({ id: prodId }) });
+      expect(res.status).toBe(403);
+      expect(await anchorUntouched(prodId)).toBeNull();
+    } finally {
+      await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [prodId]).catch(() => {});
+      await cleanupProduction(prodId).catch(() => {});
+    }
+  });
+});

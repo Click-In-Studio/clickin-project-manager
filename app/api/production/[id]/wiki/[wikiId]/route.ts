@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
-import { getWiki, updateWiki, deleteWiki } from "@/lib/wiki-db";
+import { getWiki, updateWiki, deleteWiki, ensureDramaturgyRootAnchor } from "@/lib/wiki-db";
 import {
   canViewWiki, canEditWiki, canDeleteWiki, canShareWiki,
   canPlaceWikiUnder, canWriteWikiContainer,
@@ -51,6 +51,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const body = await req.json() as {
     title?: string; body?: string; mentions?: Mention[];
     parentId?: string | null; sortKey?: string; tags?: string[];
+    /** 显式 parentId 缺席时的落位锚点（#355 移入）。语义与 POST /wiki 同：锚点
+     *  可能尚未懒建，由服务端在**过完门之后**补建。 */
+    parentAnchor?: "dramaturgy";
     /** 相对锚点落位（#357 症状②）：客户端只说"放在谁的前/后"，服务端在完整
      *  兄弟集上算键——可枚举性逐节点后客户端兄弟集可能有空洞。 */
     place?: WikiPlacement;
@@ -63,8 +66,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     clientId?: string;
   };
 
+  if (body.title !== undefined && !body.title.trim())
+    return Response.json({ error: "标题不能为空" }, { status: 400 });
+
   const wantsContent = body.title !== undefined || body.body !== undefined
     || body.mentions !== undefined || body.parentId !== undefined
+    || body.parentAnchor !== undefined
     || body.sortKey !== undefined || body.place !== undefined || body.tags !== undefined;
   if (wantsContent && !await canEditWiki(actor, productionId, wikiId))
     return Response.json({ error: "权限不足" }, { status: 403 });
@@ -80,22 +87,33 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   // 重排（place/sortKey）等同对当前父的子项改动，①② 都过——列不出的容器谈不上
   // "重排它的子项"（该容器的子项对你本来就不可枚举），403 是正确答案而非误伤。
   // ③ 只在真的换父时才有意义，故额外要 targetParentId !== existing.parentId。
-  const changingParent = body.parentId !== undefined;
-  const targetParentId = changingParent
-    ? (body.parentId?.trim() ? body.parentId.trim() : null)
-    : existing.parentId;
+  //
+  // 锚点落位（#355 移入）：灵感库根可能尚未懒建，此时客户端给的是 parentAnchor 而
+  // 不是 parentId。ensureDramaturgyRootAnchor 是写事务，必须留在门后面（同 POST
+  // /wiki 的 write-before-authz 论证）——所以目标父的 ①② 只对**显式父**判定，
+  // 锚点路径不判：根 is_public + listable ⇒ ① 恒真，isWikiAnchor ⇒ ② 恒真。
+  // ③（源父容器可写）与目标无关，锚点路径照跑。
+  const explicitParentId = body.parentId?.trim() ? body.parentId.trim() : null;
+  const anchorRequested = !explicitParentId && body.parentAnchor === "dramaturgy";
+  const changingParent = body.parentId !== undefined || anchorRequested;
   if (changingParent || body.place !== undefined || body.sortKey !== undefined) {
-    if (!await canPlaceWikiUnder(actor, productionId, targetParentId))
-      return Response.json({ error: "无权移动到该父文档下" }, { status: 403 });
-    if (!await canWriteWikiContainer(actor, productionId, targetParentId))
-      return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
-    if (changingParent && targetParentId !== existing.parentId
-        && !await canWriteWikiContainer(actor, productionId, existing.parentId))
+    if (!anchorRequested) {
+      const targetParentId = changingParent ? explicitParentId : existing.parentId;
+      if (!await canPlaceWikiUnder(actor, productionId, targetParentId))
+        return Response.json({ error: "无权移动到该父文档下" }, { status: 403 });
+      if (!await canWriteWikiContainer(actor, productionId, targetParentId))
+        return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
+      if (changingParent && targetParentId !== existing.parentId
+          && !await canWriteWikiContainer(actor, productionId, existing.parentId))
+        return Response.json({ error: "无权把文档移出原父文档" }, { status: 403 });
+    } else if (!await canWriteWikiContainer(actor, productionId, existing.parentId)) {
       return Response.json({ error: "无权把文档移出原父文档" }, { status: 403 });
+    }
   }
 
-  if (body.title !== undefined && !body.title.trim())
-    return Response.json({ error: "标题不能为空" }, { status: 400 });
+  const resolvedParentId = changingParent
+    ? (explicitParentId ?? (anchorRequested ? await ensureDramaturgyRootAnchor(productionId) : null))
+    : existing.parentId;
 
   try {
     if (wantsContent) {
@@ -106,7 +124,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         ...(body.body !== undefined ? { body: body.body } : {}),
         ...(body.body !== undefined && body.baseBody !== undefined ? { mergeBase: body.baseBody } : {}),
         ...(body.mentions !== undefined ? { mentions: body.mentions } : {}),
-        ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
+        ...(changingParent ? { parentId: resolvedParentId } : {}),
         ...(body.sortKey !== undefined ? { sortKey: body.sortKey } : {}),
         ...(body.place !== undefined ? { place: body.place } : {}),
         ...(body.tags !== undefined ? { tags: body.tags } : {}),

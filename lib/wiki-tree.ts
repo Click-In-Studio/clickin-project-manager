@@ -1,7 +1,10 @@
 import { listWikiLibrary, type WikiListEntry } from "./wiki-db";
-import { listEnumerableWikiIds } from "./wiki-perm";
+import { listEnumerableWikiIds, listEditableWikiIds } from "./wiki-perm";
 import { listEnumerableWikiAliases, type WikiAliasEntry } from "./wiki-alias-db";
-import { listDramaturgyWikiSubtree, listDramaturgyWikiAliases } from "./dramaturgy-wiki";
+import {
+  listDramaturgyWikiSubtree, listDramaturgyWikiAliases, listDramaturgyMoveInCandidates,
+  type WikiMoveInCandidate,
+} from "./dramaturgy-wiki";
 import type { GrantActor } from "./grant-check";
 
 // ─── 目录树的唯一取数口（#357 枚举面 + #358 别名）────────────────────────────
@@ -31,16 +34,21 @@ export async function listWikiTreeFor(actor: GrantActor, productionId: string): 
  */
 export async function listDramaturgyTreeFor(
   actor: GrantActor, productionId: string, rootId: string | null,
-): Promise<WikiTree & { subtree: WikiListEntry[] }> {
-  const [all, enumerable] = await Promise.all([
+): Promise<WikiTree & { subtree: WikiListEntry[]; moveIn: WikiMoveInCandidate[] }> {
+  const [all, enumerable, editable] = await Promise.all([
     listWikiLibrary(productionId),
     listEnumerableWikiIds(actor, productionId),
+    listEditableWikiIds(actor, productionId),
   ]);
   const subtree = listDramaturgyWikiSubtree(all, rootId);
   const enumerableAliases = await listEnumerableWikiAliases(actor, productionId, enumerable);
+  const aliases = listDramaturgyWikiAliases(enumerableAliases, subtree, rootId);
   return {
     subtree,
     wikis: enumerable.wildcard ? subtree : subtree.filter(w => enumerable.ids.has(w.id)),
-    aliases: listDramaturgyWikiAliases(enumerableAliases, subtree, rootId),
+    aliases,
+    // 移入候选（#355）：子树外的可枚举文档。作用域工作区的侧栏只有子树，选择器
+    // 里没有子树外的东西可选——这个列表就是那个入口的候选来源。
+    moveIn: listDramaturgyMoveInCandidates(all, subtree, rootId, { enumerable, editable }, aliases),
   };
 }
