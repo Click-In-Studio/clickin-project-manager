@@ -238,7 +238,10 @@ export async function canPlaceWikiUnder(
  * 那次的零迁移手法）。
  *
  * 两处豁免：
- *   - parentId=null（顶层）：没有容器可以持有权限，无门。
+ *   - parentId=null（顶层）：**根容器上不存在"edit 权"这个说法**，没有实体可以
+ *     持有它。于是"把 X 提到顶层"只受源父那道门约束——只有移出门，没有移入门。
+ *     这不是妥协，是根容器的本体决定的：deleteWiki 把子文档提根（FK SET NULL）
+ *     同理，行使的是对源容器自身的权限，不需要额外的落位门。
  *   - 系统锚点：无主公共容器，全库无人持其 *@edit，见 isWikiAnchor 头注释。
  */
 export async function canWriteWikiContainer(
