@@ -7,6 +7,8 @@ import {
   listDramaturgyMoveInCandidates, listDramaturgyWikiAliases, listDramaturgyWikiSubtree,
 } from "@/lib/dramaturgy-wiki";
 import { listDramaturgyTreeFor } from "@/lib/wiki-tree";
+import { readParentAnchor } from "@/lib/wiki-input";
+import { resolveWikiAnchorParent } from "@/lib/wiki-placement";
 import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
 import { PATCH as wikiPATCH } from "@/app/api/production/[id]/wiki/[wikiId]/route";
 import { POST as aliasPOST } from "@/app/api/production/[id]/wiki-alias/route";
@@ -180,6 +182,36 @@ describe("PATCH /wiki 的 parentAnchor 落位（本体移入）", () => {
       { params: Promise.resolve({ id: prodId, wikiId: doc.id }) });
     expect(res.status).toBe(200);
     expect((await res.json()).wiki.parentId).toBe(box.id);
+  });
+
+  // 一轮 AI review #1 的回归证人：上一版为了把写事务挡在 400 后面，把标题校验提到了
+  // canEditWiki 前面——无权的人发个空标题会拿到 400。授权必须先答。
+  it("无 edit 权 + 空标题：先答 403，不是 400", async () => {
+    const { prodId: clean } = await makeProduction();
+    const owner = await newMember(clean);
+    const outsider = await newMember(clean);
+    users.push(owner, outsider);
+    try {
+      const doc = await createWiki({ productionId: clean, title: "别人的", createdBy: owner });
+      const res = await wikiPATCH(patchReq(clean, doc.id, outsider, false, { title: "   " }),
+        { params: Promise.resolve({ id: clean, wikiId: doc.id }) });
+      expect(res.status).toBe(403);
+    } finally {
+      await cleanupProduction(clean).catch(() => {});
+    }
+  });
+
+  // parentId 与 parentAnchor 同送不是客户端会做的事，但两者哪个胜必须是确定的：
+  // `parentId: null` 与"字段缺席"在服务端 collapse 成同一个 falsy → 锚点胜。
+  it("parentId: null 与 parentAnchor 同送时锚点胜（与 POST /wiki 同语义）", async () => {
+    const rootId = (await getDramaturgyTreeConfig(prodId)).rootWikiId;
+    expect(rootId).not.toBeNull();
+    const doc = await createWiki({ productionId: prodId, title: "两个字段同送", createdBy: admin });
+    const res = await wikiPATCH(
+      patchReq(prodId, doc.id, admin, true, { parentId: null, parentAnchor: "dramaturgy" }),
+      { params: Promise.resolve({ id: prodId, wikiId: doc.id }) });
+    expect(res.status).toBe(200);
+    expect((await res.json()).wiki.parentId).toBe(rootId);   // 不是全库顶层的 null
   });
 
   it("锚点已存在时复用同一个根，不重复建", async () => {
@@ -399,6 +431,40 @@ describe("POST /wiki-alias 的 parentAnchor 落位（以链接移入）", () => 
       expect(await anchorUntouched(prodId)).toBeNull();
     } finally {
       await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [prodId]).catch(() => {});
+      await cleanupProduction(prodId).catch(() => {});
+    }
+  });
+});
+
+// ── 新增 lib 的直测（四轮 AI review #4）────────────────────────────────────
+
+describe("readParentAnchor", () => {
+  it("缺席 / null ＝没给锚点", () => {
+    expect(readParentAnchor(undefined)).toEqual({ ok: true, anchor: null });
+    expect(readParentAnchor(null)).toEqual({ ok: true, anchor: null });
+  });
+  it("唯一合法值认出来", () => {
+    expect(readParentAnchor("dramaturgy")).toEqual({ ok: true, anchor: "dramaturgy" });
+  });
+  // 与 readTrimmedId / readPlacement 相反：这个字段猜错就是静默错落位，不猜
+  it("其余一律不 ok（拼错、别的类型、非字符串）", () => {
+    for (const v of ["dramaturgi", "reports", "", 1, true, {}, []]) {
+      expect(readParentAnchor(v).ok).toBe(false);
+    }
+  });
+});
+
+describe("resolveWikiAnchorParent", () => {
+  it("首次懒建、其后幂等——三个调用点拿到的是同一个根", async () => {
+    const { prodId } = await makeProduction();
+    try {
+      expect((await getDramaturgyTreeConfig(prodId)).rootWikiId).toBeNull();
+      const first = await resolveWikiAnchorParent(prodId, "dramaturgy");
+      expect(first).not.toBeNull();
+      expect(await resolveWikiAnchorParent(prodId, "dramaturgy")).toBe(first);
+      expect(await resolveWikiAnchorParent(prodId, "dramaturgy")).toBe(first);
+      expect((await listWikiLibrary(prodId)).filter(w => w.id === first).length).toBe(1);
+    } finally {
       await cleanupProduction(prodId).catch(() => {});
     }
   });

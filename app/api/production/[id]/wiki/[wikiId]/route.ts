@@ -107,7 +107,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const changingParent = body.parentId !== undefined || anchorRequested;
   let resolvedParentId = changingParent ? explicitParentId : existing.parentId;
   if (changingParent || body.place !== undefined || body.sortKey !== undefined) {
-    if (!anchorRequested) {
+    // ①② 两支同顺位（三/四轮 AI review）：锚点支的门不写库，没有理由排到 ③ 后面
+    if (anchorRequested) {
+      const gate = await gateWikiAnchorPlacement(actor, productionId, "dramaturgy");
+      if (!gate.ok)
+        return Response.json({
+          error: gate.reason === "place" ? "无权移动到该父文档下" : "无权修改该父文档的子目录",
+        }, { status: 403 });
+    } else {
       if (!await canPlaceWikiUnder(actor, productionId, resolvedParentId))
         return Response.json({ error: "无权移动到该父文档下" }, { status: 403 });
       if (!await canWriteWikiContainer(actor, productionId, resolvedParentId))
@@ -119,13 +126,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (anchorRequested || (changingParent && resolvedParentId !== existing.parentId)) {
       if (!await canWriteWikiContainer(actor, productionId, existing.parentId))
         return Response.json({ error: "无权把文档移出原父文档" }, { status: 403 });
-    }
-    if (anchorRequested) {
-      const gate = await gateWikiAnchorPlacement(actor, productionId, "dramaturgy");
-      if (!gate.ok)
-        return Response.json({
-          error: gate.reason === "place" ? "无权移动到该父文档下" : "无权修改该父文档的子目录",
-        }, { status: 403 });
     }
   }
   // 解析（可能懒建根）排在所有门之后，一处都不许提前
