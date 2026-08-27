@@ -21,6 +21,19 @@ describe("derivePageKey", () => {
     expect(derivePageKey(`/production/${PID}/events/e1/reqs/r1`, PID)).toBe("prod:events");
   });
 
+  it("灵感文档破例认二段——它是文档库形态，不是构作场景视图", () => {
+    expect(derivePageKey(`/production/${PID}/dramaturgy`, PID)).toBe("prod:dramaturgy");
+    expect(derivePageKey(`/production/${PID}/dramaturgy/inspiration`, PID))
+      .toBe("prod:dramaturgy-inspiration");
+    expect(derivePageKey(`/production/${PID}/dramaturgy/inspiration/w1`, PID))
+      .toBe("prod:dramaturgy-inspiration");
+    // 归到构作那套＝模型以为自己在看场次/行动线，建议与温层工具面全错
+    expect(pageLabelFor(derivePageKey(`/production/${PID}/dramaturgy/inspiration`, PID)))
+      .toBe("构作 · 灵感文档");
+    expect(pageSuggestionsFor(derivePageKey(`/production/${PID}/dramaturgy/inspiration`, PID)))
+      .not.toHaveLength(0);
+  });
+
   it("个人页面：/my/* 与首页/账号页", () => {
     expect(derivePageKey("/", null)).toBe("home");
     expect(derivePageKey("/my/tasks", null)).toBe("my:tasks");
