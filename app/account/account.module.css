@@ -296,7 +296,9 @@
 
 .formGrid input,
 .formGrid select,
-.formGrid textarea {
+.formGrid textarea,
+/* OverflowSafeSelect 的触发器是 button，不再匹配 select 选择器 */
+.formGrid [role="combobox"] {
   width: 100%;
   min-height: 40px;
   padding: 9px 12px;
@@ -311,7 +313,8 @@
 
 .formGrid input:focus,
 .formGrid select:focus,
-.formGrid textarea:focus {
+.formGrid textarea:focus,
+.formGrid [role="combobox"]:focus {
   border-color: var(--script);
   box-shadow: 0 0 0 3px rgba(47,102,112,.1);
 }
