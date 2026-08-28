@@ -183,6 +183,42 @@ describe("OverflowSafeSelect", () => {
     expect(menu.style.maxHeight).toBe("164px");
   });
 
+  it("marks portal interactions so a containing drawer does not treat them as outside clicks", async () => {
+    let selectedValue = "a";
+    let drawerClosed = false;
+    const drawer = document.createElement("aside");
+    container.appendChild(drawer);
+    const outside = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || drawer.contains(target)) return;
+      if (target instanceof Element && target.closest("[data-overflow-safe-select-menu]")) return;
+      drawerClosed = true;
+    };
+    document.addEventListener("pointerdown", outside);
+
+    await act(async () => root.render(
+      <OverflowSafeSelect aria-label="抽屉下拉" value={selectedValue} onChange={(event) => { selectedValue = event.target.value; }}>
+        <option value="a">Alpha</option>
+        <option value="b">Beta</option>
+      </OverflowSafeSelect>,
+    ));
+    await openMenu();
+    const menu = document.body.querySelector<HTMLElement>("[data-overflow-safe-select-menu]");
+    const beta = [...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+      .find(option => option.textContent?.includes("Beta"));
+    expect(menu).not.toBeNull();
+
+    await act(async () => {
+      beta?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      beta?.click();
+    });
+
+    expect(drawerClosed).toBe(false);
+    expect(selectedValue).toBe("b");
+    document.removeEventListener("pointerdown", outside);
+    drawer.remove();
+  });
+
   it("scrolls the keyboard-active option into view and does not mislabel unknown values", async () => {
     await render(
       <OverflowSafeSelect aria-label="长列表" value="missing" onChange={() => {}}>

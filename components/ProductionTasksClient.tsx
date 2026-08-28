@@ -562,7 +562,7 @@ export default function ProductionTasksClient({
       const t = e.target;
       if (!(t instanceof Node)) return;
       if (drawerRef.current?.contains(t)) return;
-      if (t instanceof Element && t.closest("[data-task-row]")) return;
+      if (t instanceof Element && t.closest("[data-task-row], [data-overflow-safe-select-menu]")) return;
       setSelected(null);
     };
     document.addEventListener("keydown", esc);

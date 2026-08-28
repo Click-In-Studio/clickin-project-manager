@@ -303,6 +303,7 @@ export default function OverflowSafeSelect({
         <div
           ref={menuRef}
           id={menuId}
+          data-overflow-safe-select-menu
           role="listbox"
           aria-label={ariaLabel}
           style={{
