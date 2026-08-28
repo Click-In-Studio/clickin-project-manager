@@ -58,11 +58,43 @@ describe("OverflowSafeSelect", () => {
 
     const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!;
     expect(trigger.parentElement).toBe(container);
-    expect(trigger.className).toBe("col-span-2 w-full");
+    expect(trigger.className).toBe("ofs-trigger col-span-2 w-full");
     expect(trigger.style.border).toBe("2px solid red");
     expect(trigger.style.padding).toBe("3px 4px");
     expect(trigger.style.background).toBe("rgb(1, 2, 3)");
     expect(trigger.style.minHeight).toBe("24px");
+  });
+
+  // 默认外观必须留在 CSS 的 components 层，一旦回退成内联 style，就会无条件压过
+  // 调用方的 Tailwind 类（内联样式优先级更高），17 个纯 className 调用点会集体变形。
+  it("leaves className-only call sites free of inline appearance defaults", async () => {
+    await render(
+      <OverflowSafeSelect
+        className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+        value="a"
+        onChange={() => {}}
+      >
+        <option value="a">Alpha</option>
+      </OverflowSafeSelect>,
+    );
+
+    const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!;
+    expect(trigger.className).toBe("ofs-trigger rounded-lg border border-zinc-200 px-3 py-2 text-sm");
+    expect(trigger.getAttribute("style")).toBeNull();
+  });
+
+  // 原生 <select> 是 inline-block 收缩到内容；写死 width:100% 会让横排 flex 里的
+  // 下拉撑满整行，flex-wrap 容器里更会独占一行（筛选条会从一行炸成四行）。
+  it("does not force a width on callers that did not ask for one", async () => {
+    await render(
+      <OverflowSafeSelect style={{ padding: "7px 9px", fontSize: 12 }} value="a" onChange={() => {}}>
+        <option value="a">Alpha</option>
+      </OverflowSafeSelect>,
+    );
+
+    const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!;
+    expect(trigger.style.width).toBe("");
+    expect(trigger.style.minHeight).toBe("");
   });
 
   it("emits a real select change event and supports keyboard selection", async () => {

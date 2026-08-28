@@ -338,7 +338,9 @@
 
 .inlineField input,
 .inlineField textarea,
-.inlineField select {
+.inlineField select,
+/* OverflowSafeSelect 的触发器是 button，不再匹配 select 选择器 */
+.inlineField [role="combobox"] {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--line);

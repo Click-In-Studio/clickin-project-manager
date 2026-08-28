@@ -759,3 +759,29 @@ span[data-stage-inline] {
   pointer-events: none;
   z-index: 10;
 }
+
+/* ── OverflowSafeSelect 触发器默认外观 ─────────────────────────────────────
+   刻意放在 components 层而不是写成内联 style：内联样式会无条件压过调用方的
+   Tailwind 类，导致 `text-sm` / `px-3 py-2` / `border-zinc-200` 这类写法全部
+   失效；放这里则 utilities 层（排在 components 之后）与内联 style 都能覆盖它。
+   不设 width / min-height —— 原生 <select> 是 inline-block 收缩到内容，
+   写死宽度会让横排 flex 里的下拉撑满整行甚至独占一行。 */
+@layer components {
+  .ofs-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--paper);
+    color: var(--ink);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .ofs-trigger:disabled {
+    cursor: not-allowed;
+  }
+}

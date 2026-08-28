@@ -41,22 +41,8 @@ type Item = {
 const VIEWPORT_GUTTER = 10;
 const MENU_GAP = 6;
 const DEFAULT_MAX_HEIGHT = 320;
-
-const DEFAULT_TRIGGER_STYLE = {
-  width: "100%",
-  minWidth: 0,
-  minHeight: 34,
-  border: "1px solid var(--line)",
-  borderRadius: 8,
-  padding: "7px 10px",
-  background: "var(--paper)",
-  color: "var(--ink)",
-  font: "inherit",
-  textAlign: "left",
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-} satisfies React.CSSProperties;
+/** 触发器默认外观定义在 app/globals.css 的 components 层，调用方的类与内联 style 均可覆盖。 */
+const TRIGGER_CLASS = "ofs-trigger";
 
 function textOf(node: ReactNode): string {
   return Children.toArray(node).map((child) => {
@@ -295,7 +281,7 @@ export default function OverflowSafeSelect({
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         disabled={disabled}
-        className={className}
+        className={className ? `${TRIGGER_CLASS} ${className}` : TRIGGER_CLASS}
         onClick={() => { if (open) close(); else setOpen(true); }}
         onKeyDown={handleKeyDown}
         onFocus={() => focusEvent(onFocus)}
@@ -303,11 +289,7 @@ export default function OverflowSafeSelect({
           if (menuRef.current?.contains(event.relatedTarget as Node)) return;
           focusEvent(onBlur);
         }}
-        style={{
-          ...DEFAULT_TRIGGER_STYLE,
-          ...style,
-          cursor: disabled ? "not-allowed" : (style?.cursor ?? "pointer"),
-        }}
+        style={style}
       >
         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {selected?.label ?? "请选择"}
