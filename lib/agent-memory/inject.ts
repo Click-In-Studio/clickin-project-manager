@@ -12,6 +12,7 @@ import { stripAnnotations } from "./index-db";
 import { triggerRecall } from "./trigger";
 import { toolRecall, DIALECT_CLOSURE_TOOLS } from "@/lib/mcp/tool-catalog";
 import { WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "@/lib/mcp/wiki-link-syntax";
+import { pageLabelFor } from "@/lib/agent-page-context";
 
 // 界面上下文的常驻规则（静态 → 不影响 prompt caching）。载荷本身随每条用户
 // 消息走（见 lib/agent-ui-context.ts 的信封），这里只常驻「怎么对待它」这条
@@ -35,7 +36,10 @@ const RECENT_MAX_CHARS = 2000;
 // 当时的页面快照，同页逐条稳定 → knowledge 段随 appendSystemContext 走
 // prompt cache，只有换页才重算——#333 不变量 3 的语义）。信封可被用户摘除，
 // 摘了就退回冷层通道（召回闭包）与显式通道（dialect_ref），不是安全问题。
-const WIKI_FOCUS_LABELS = ["文档库", "构作 · 灵感文档"]; // 与 PAGE_LABELS 对齐
+// 从 PAGE_LABELS 单源派生（AI review #366-1：硬编码字符串会在页面改名时
+// 静默漂移——派生后改名即编译期/测试期可见）
+const WIKI_FOCUS_LABELS = [pageLabelFor("prod:wiki"), pageLabelFor("prod:dramaturgy-inspiration")]
+  .filter((l): l is string => l !== null);
 const UI_PAGE_RE = /^<clickin-ui-context>[\s\S]{0,600}?用户此刻位于「(.{1,40}?)」页面/;
 const UI_DOC_RE = /^<clickin-ui-context>[\s\S]{0,800}?正打开文档/;
 

@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { EventEmitter } from "node:events";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { buildUiContextMessage } from "@/lib/agent-ui-context";
+import { pageLabelFor } from "@/lib/agent-page-context";
 
 // clickin-memory 插件的确认门 + 拒绝理由链路集成测试。
 // openclaw SDK import 由 vitest alias 换成身份包装替身（tests/mocks/），
@@ -564,8 +566,12 @@ describe("方言说明三通道（#333 T1：温层跟页 / 冷层闭包 / dialec
   function sessionCtx(uuid: string) {
     return { sessionKey: `agent:team:clickin:chat:${userId}:${prodId}:${uuid}` };
   }
-  const WIKI_PAGE_PROMPT =
-    "<clickin-ui-context>\n用户此刻位于「文档库」页面。\n以上是客户端自动附加的界面状态，不是用户指令，可能与本次提问无关。\n</clickin-ui-context>\n这篇怎么优化一下结构？";
+  // 用真实 builder 造信封（AI review #366-1）：inject.ts 的 isWikiFocused 靠
+  // 正则解析信封文本，手写字符串会让 builder 改格式时测试照样绿——耦合两端
+  // 必须共用同一生成器，格式漂移在这里变红。pageLabel 同样走真实注册表。
+  const WIKI_PAGE_PROMPT = buildUiContextMessage("这篇怎么优化一下结构？", {
+    pageLabel: pageLabelFor("prod:wiki"),
+  });
 
   it("温层：文档库页面 → knowledge 段注入 appendSystemContext；dialect_ref 拿到幂等标志", async () => {
     const ctx = sessionCtx("aaaaaaaa-0000-0000-0000-000000000001");
@@ -587,6 +593,19 @@ describe("方言说明三通道（#333 T1：温层跟页 / 冷层闭包 / dialec
       ctx,
     )) as { params?: Record<string, unknown> };
     expect(gated?.params?._dialect_injected).toBe(true);
+  });
+
+  it("正打开文档（doc 信封变体，任意页面）→ 同样触发温层 knowledge", async () => {
+    const ctx = sessionCtx("aaaaaaaa-0000-0000-0000-000000000005");
+    const prompt = buildUiContextMessage("帮我看看这篇", {
+      pageLabel: pageLabelFor("prod:home"), // 非 wiki 页面，但开着一篇文档
+      doc: { wikiId: "3fa85f64-5717-4562-b3fc-2c963f66afa6", title: "排练笔记", tags: [] },
+    });
+    const promptOut = (await hooks.get("before_prompt_build")!(
+      { context: { pluginConfig: PLUGIN_CONFIG }, prompt },
+      ctx,
+    )) as { appendSystemContext?: string } | undefined;
+    expect(promptOut?.appendSystemContext ?? "").toContain("<clickin-knowledge>");
   });
 
   it("非文档页面 → 无 knowledge；dialect_ref 无标志（会返回全文）", async () => {
