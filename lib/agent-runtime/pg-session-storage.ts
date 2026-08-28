@@ -23,6 +23,14 @@ type SessionRow = { id: string; user_id: string; production_id: string | null; c
 type EntryRow = { payload: SessionTreeEntry };
 
 export class PgSessionStorage extends BaseSessionStorage<PgSessionMetadata> {
+  /** 脱离（§4.4 ② 排水时等待态 run 交给下一个进程）：之后的追加一律丢弃——
+   *  本地 harness 被中止时会想写一条 aborted assistant，落库就把等待态毁了。 */
+  private detached = false;
+
+  detach(): void {
+    this.detached = true;
+  }
+
   private constructor(
     private readonly pool: Pool,
     metadata: PgSessionMetadata,
@@ -83,12 +91,14 @@ export class PgSessionStorage extends BaseSessionStorage<PgSessionMetadata> {
   }
 
   override async setLeafId(leafId: string | null): Promise<void> {
+    if (this.detached) return;
     const entry = this.createLeafEntry(leafId);
     await this.persist(entry);
     this.recordEntry(entry);
   }
 
   override async appendEntry(entry: SessionTreeEntry): Promise<void> {
+    if (this.detached) return;
     // 先落库再入内存：DB 拒绝（唯一约束）时内存树保持与 DB 一致
     await this.persist(entry);
     this.recordEntry(entry);

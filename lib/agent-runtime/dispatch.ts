@@ -9,7 +9,8 @@
 
 import type { NextRequest } from "next/server";
 import { runtimeFor } from "./config";
-import { isRunnerSession, startRun, SessionBusyError } from "./service";
+import { SessionBusyError } from "./service";
+import { isRunnerSession, startRun } from "./client";
 import { readEventsSince, subscribeSessionEvents } from "./events";
 import { pageKeyForLabel } from "@/lib/agent-page-context";
 import { getPool } from "@/lib/pg";

@@ -5,7 +5,7 @@ import { getProductionPermissionContext, listMyProductionsWithRoles, getUserProf
 import { requireProductionFeature } from "@/lib/plan";
 import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
 import { PRODUCTION_ID_RE } from "@/lib/mcp/session-identity";
-import { listSessions as listRunnerSessions } from "@/lib/agent-runtime/service";
+import { listSessions as listRunnerSessions } from "@/lib/agent-runtime/client";
 
 export const runtime = "nodejs";
 

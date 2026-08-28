@@ -32,7 +32,7 @@ export const UNKNOWN_STATE_TOOL_RESULT =
 export type PendingRepair = {
   toolCallId: string;
   toolName: string;
-  action: "re-executed" | "unknown-state" | "tool-missing";
+  action: "re-executed" | "unknown-state" | "tool-missing" | "await-gate";
 };
 
 export type ResumeDecision =
@@ -89,7 +89,12 @@ export function findPendingToolCalls(messages: AgentMessage[]): ToolCall[] {
 export async function repairAndClassify(
   session: Session,
   tools: ReadonlyMap<string, RuntimeTool>,
-  opts: { signal?: AbortSignal } = {},
+  opts: {
+    signal?: AbortSignal;
+    /** 写工具的例外：调用方能证明它还没开始执行（审批待答/已批未执行）→ 允许重跑，
+     *  重跑会经确认门复用同一张审批卡。缺省 = 写工具一律不重跑。 */
+    canReexecuteWrite?: (call: ToolCall) => Promise<boolean>;
+  } = {},
 ): Promise<ResumeDecision> {
   const { messages } = await session.buildContext();
   if (messages.length === 0) return { kind: "idle", reason: "empty" };
@@ -103,6 +108,13 @@ export async function repairAndClassify(
         toolResultMessage(call, { content: [{ type: "text", text: `工具 ${call.name} 已不存在。` }], details: undefined }, true),
       );
       repaired.push({ toolCallId: call.id, toolName: call.name, action: "tool-missing" });
+      continue;
+    }
+    const reexecute = tool.readOnly || (opts.canReexecuteWrite ? await opts.canReexecuteWrite(call) : false);
+    if (reexecute && !tool.readOnly) {
+      // 写工具但可证明未执行：不在这里跑（跑了就绕过确认门），留给 continueTurn
+      // 之前由调用方处理——这里只标记，transcript 保持"toolUse 无结果"形态
+      repaired.push({ toolCallId: call.id, toolName: call.name, action: "await-gate" });
       continue;
     }
     if (tool.readOnly) {
@@ -127,6 +139,9 @@ export async function repairAndClassify(
 
   const after = (await session.buildContext()).messages;
   const last = after[after.length - 1];
-  if (last.role === "assistant") return { kind: "idle", reason: "assistant-finished" };
+  // await-gate 的调用刻意没补结果（要先过门），transcript 仍以 assistant 结尾——由调用方补完再续跑
+  if (last.role === "assistant" && !repaired.some((r) => r.action === "await-gate")) {
+    return { kind: "idle", reason: "assistant-finished" };
+  }
   return { kind: "continue", repaired };
 }

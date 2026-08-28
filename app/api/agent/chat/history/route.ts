@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { getChatHistory } from "@/lib/agent-gateway/client";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
 import { shouldUseRunner } from "@/lib/agent-runtime/dispatch";
-import { getHistory } from "@/lib/agent-runtime/service";
+import { getHistory } from "@/lib/agent-runtime/client";
 
 export const runtime = "nodejs";
 

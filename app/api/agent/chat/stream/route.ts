@@ -5,7 +5,7 @@ import { createChatStreamResponse } from "@/lib/agent-gateway/relay";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
 import { neutralizeInboundMessage } from "@/lib/agent-ui-context";
 import { shouldUseRunner, createRunnerStreamResponse, pageKeyOfMessage } from "@/lib/agent-runtime/dispatch";
-import { startRun, steerRun } from "@/lib/agent-runtime/service";
+import { startRun, steerRun } from "@/lib/agent-runtime/client";
 
 export const runtime = "nodejs";
 

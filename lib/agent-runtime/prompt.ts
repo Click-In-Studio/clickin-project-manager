@@ -56,9 +56,16 @@ export function injectedSystemContext(payload: Pick<InjectContextPayload, "instr
   return parts.join("\n\n");
 }
 
+// 自建运行时相对网关的能力差异备注（TOOLS.md 是两条运行时共用的文件，写"没有提问工具"
+// 在网关会话仍成立；这里只对本运行时追加更正）。
+const RUNTIME_ADDENDUM =
+  "## 本运行时补充\n" +
+  "- 本环境**有** `clickin__ask_user` 工具：确实缺信息且答案会改变做法时，用它向用户提问并等待回答（会弹卡片）；能查工具确定的事不要问。TOOLS.md 里「没有主动提问的工具」一句在本环境不适用。";
+
 export function buildSystemPrompt(payload: Pick<InjectContextPayload, "instructions" | "knowledge" | "memory">): string {
   const injected = injectedSystemContext(payload);
-  return injected ? `${workspacePrompt()}\n\n${injected}` : workspacePrompt();
+  const base = `${workspacePrompt()}\n\n${RUNTIME_ADDENDUM}`;
+  return injected ? `${base}\n\n${injected}` : base;
 }
 
 /** 逐轮召回块（网关时代的 prependContext）——临时插进本轮消息，不落 transcript。 */

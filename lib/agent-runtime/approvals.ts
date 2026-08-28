@@ -15,7 +15,9 @@ export type ApprovalDecision = "allow-once" | "allow-always" | "deny";
 export type ApprovalOutcome =
   | { kind: "allowed"; decision: Exclude<ApprovalDecision, "deny"> }
   | { kind: "denied"; reason: string | null }
-  | { kind: "expired" };
+  | { kind: "expired" }
+  /** 本进程脱离（排水），表状态原封不动，由下一个进程接着等 */
+  | { kind: "detached" };
 
 const POLL_MS = 400;
 
@@ -28,7 +30,23 @@ export interface ApprovalCard {
 export async function createApproval(
   input: { runId: string; sessionId: string; toolCallId: string; tool: string; args: unknown; card: ApprovalCard; preview?: Record<string, unknown> },
   pool: Pool = getPool(),
-): Promise<{ id: string; info: ApprovalInfo; expiresAt: Date }> {
+): Promise<{ id: string; info: ApprovalInfo; expiresAt: Date; reused: boolean }> {
+  // 同一 toolCallId 已有待答（或已批未执行）的审批 → 复用：进程重启后恢复重跑同一个
+  // 工具调用时不再弹第二张卡（§4.4 ①"等待审批：什么都不用做"）
+  const existing = await pool.query<{ id: string; preview: ApprovalCard; expires_at: Date }>(
+    `SELECT id, preview, expires_at FROM agent_approval
+     WHERE session_id = $1 AND tool_call_id = $2 AND expires_at > now()
+       AND (status = 'pending' OR (status = 'allowed' AND executed_at IS NULL))`,
+    [input.sessionId, input.toolCallId],
+  );
+  if (existing.rows[0]) {
+    const row = existing.rows[0];
+    return {
+      id: row.id, expiresAt: row.expires_at, reused: true,
+      info: { id: row.id, title: row.preview.title ?? input.card.title, description: row.preview.description ?? input.card.description,
+        severity: row.preview.severity ?? input.card.severity, allowedDecisions: ["allow-once", "deny"], toolCallId: input.toolCallId },
+    };
+  }
   const id = newApprovalId();
   const expiresAt = new Date(Date.now() + APPROVAL_TTL_MS);
   await pool.query(
@@ -45,13 +63,27 @@ export async function createApproval(
     allowedDecisions: ["allow-once", "deny"],
     toolCallId: input.toolCallId,
   };
-  return { id, info, expiresAt };
+  return { id, info, expiresAt, reused: false };
+}
+
+/** 某个工具调用能否在恢复时重跑：待答审批（还没执行）或已批未执行 → 可以；
+ *  已开始执行（executed_at 有值）→ 副作用未知，不能。 */
+export async function approvalAllowsReexecute(sessionId: string, toolCallId: string, pool: Pool = getPool()): Promise<boolean> {
+  const r = await pool.query(
+    `SELECT 1 FROM agent_approval WHERE session_id = $1 AND tool_call_id = $2 AND expires_at > now()
+       AND (status = 'pending' OR (status = 'allowed' AND executed_at IS NULL))`,
+    [sessionId, toolCallId],
+  );
+  return (r.rowCount ?? 0) > 0;
 }
 
 /** 轮询表状态直到有决议/过期/中止。轮询而非 LISTEN：审批是分钟级人类动作，400ms 足够。 */
-export async function awaitApproval(id: string, signal?: AbortSignal, pool: Pool = getPool()): Promise<ApprovalOutcome> {
+export async function awaitApproval(
+  id: string, signal?: AbortSignal, pool: Pool = getPool(), opts: { isDetached?: () => boolean } = {},
+): Promise<ApprovalOutcome> {
   while (true) {
     if (signal?.aborted) {
+      if (opts.isDetached?.()) return { kind: "detached" }; // 排水脱离：不碰表
       await pool.query(`UPDATE agent_approval SET status = 'cancelled', resolved_at = now() WHERE id = $1 AND status = 'pending'`, [id]);
       return { kind: "denied", reason: "本轮已中止" };
     }

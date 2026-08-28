@@ -17,6 +17,7 @@ import type { AgentToolResult } from "../../vendor/openclaw/packages/agent-core/
 import { INSTRUCTIONS_MAX_LEN } from "@/lib/agent-instructions";
 import { WIKI_DIALECT_POINTER_WRITE, WIKI_DIALECT_POINTER_READ, WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "@/lib/mcp/wiki-link-syntax";
 import { toolLabel } from "@/lib/agent-tool-labels";
+import type { StreamLine, QuestionItem } from "@/lib/agent-gateway/stream-reducer";
 import type { RuntimeTool } from "./resume";
 
 export const TOOL_PREFIX = "clickin__";
@@ -24,6 +25,19 @@ export const TOOL_PREFIX = "clickin__";
 export interface ToolContext {
   userId: string;
   productionId: string | null;
+  /** 本轮 run 的句柄（ask_user 这类要与前端交互的工具用）；离线恢复/单测可缺席 */
+  run?: RunHandle;
+}
+
+export interface RunHandle {
+  runId: string;
+  sessionId: string;
+  signal: AbortSignal;
+  publish: (line: StreamLine) => void;
+  /** run 状态切换（awaiting_answer ↔ running） */
+  setStatus: (status: "running" | "awaiting_answer") => Promise<void>;
+  /** 本进程是否已脱离（排水）：等待中的工具据此不再碰表、不发事件 */
+  isDetached: () => boolean;
 }
 
 /** 注册表条目：RuntimeTool + MCP 原始名（tool-catalog / 显示名 / 卡片文案按它索引）。 */
@@ -54,6 +68,8 @@ type Def = {
   /** production 工具在个人会话里拒绝（与 server.ts 的 NO_PRODUCTION 同款） */
   needsProduction?: boolean;
   execute: (ctx: ToolContext & { productionId: string }, args: Record<string, unknown>, toolCallId: string) => Promise<string>;
+  /** 结果判定为"错误"（isError）而非正常文本——ask_user 取消/过期用 */
+  isErrorResult?: (out: string) => boolean;
 };
 
 const NONE = Type.Object({});
@@ -259,6 +275,52 @@ const DEFS: Def[] = [
       summary: String(args.summary ?? ""),
     }),
   },
+
+  // ── ask_user（#290）：向用户提问并等待回答。只读（无副作用）；恢复/重跑按
+  // toolCallId 复用同一待答问题，不重问。取消/过期以错误结果回模型。
+  {
+    mcpName: "ask_user",
+    description:
+      "向用户提出一个或多个带选项的问题并**等待回答**（用户会看到卡片，可能几分钟后才答）。" +
+      "只在信息确实缺失、且答案会改变你的做法时用；能自己查工具确定的事不要问。" +
+      "每个问题给 2–5 个简短选项；需要自由输入就把 isOther 设为 true。用户可能取消（结果会说明），此时不要重复提问。",
+    parameters: Type.Object({
+      questions: Type.Array(Type.Object({
+        questionId: Type.String({ description: "本次提问内唯一的短 id，如 q1" }),
+        header: Type.String({ description: "问题标题（≤12 字）" }),
+        question: Type.String({ description: "完整问题" }),
+        options: Type.Array(Type.Object({
+          label: Type.String({ description: "选项文字" }),
+          description: Type.Optional(Type.String({ description: "选项补充说明" })),
+        }), { minItems: 1, maxItems: 6 }),
+        multiSelect: Type.Optional(Type.Boolean({ description: "允许多选" })),
+        isOther: Type.Optional(Type.Boolean({ description: "允许用户自由输入" })),
+      }), { minItems: 1, maxItems: 4 }),
+    }),
+    readOnly: true,
+    isErrorResult: (out) => out.startsWith("【"),
+    execute: async (ctx, args, toolCallId) => {
+      const run = ctx.run;
+      if (!run) return "【提问不可用：当前执行环境没有会话交互通道】";
+      const { createOrReuseQuestion, awaitQuestion, formatAnswers } = await import("./questions");
+      const questions = (args.questions as QuestionItem[]).map((q) => ({
+        questionId: String(q.questionId), header: String(q.header), question: String(q.question),
+        options: (q.options ?? []).map((o) => ({ label: String(o.label), ...(o.description ? { description: String(o.description) } : {}) })),
+        ...(q.multiSelect ? { multiSelect: true } : {}), ...(q.isOther ? { isOther: true } : {}),
+      }));
+      const { reused, ...info } = await createOrReuseQuestion({ runId: run.runId, sessionId: run.sessionId, toolCallId, questions });
+      // 复用的待答问题不再重发卡（前端重开会话时经 /questions 恢复；重发只会多一张）
+      if (!reused) run.publish({ type: "question", question: info });
+      await run.setStatus("awaiting_answer");
+      const outcome = await awaitQuestion(info.id, run.signal, undefined, { isDetached: run.isDetached });
+      if (outcome.kind === "detached") return "【本进程已脱离，提问由下一个进程接管】"; // 不会落库：storage 已 detach
+      await run.setStatus("running");
+      run.publish({ type: "question-resolved", id: info.id, status: outcome.kind });
+      if (outcome.kind === "answered") return formatAnswers(questions, outcome.answers);
+      if (outcome.kind === "expired") return "【用户在限时内没有回答，提问已过期。不要重复提问；按现有信息继续，或在回复正文里说明需要哪些信息。】";
+      return "【用户取消了这次提问。不要重复提问；按现有信息继续，或在回复正文里说明需要哪些信息。】";
+    },
+  },
 ];
 
 function optString(v: unknown): string | undefined {
@@ -288,10 +350,11 @@ export function buildTools(ctx: ToolContext): RuntimeToolDef[] {
     execute: async (toolCallId, params) => {
       if (d.needsProduction && !ctx.productionId) return text(NO_PRODUCTION);
       const out = await d.execute(
-        { userId: ctx.userId, productionId: ctx.productionId ?? "" },
+        { userId: ctx.userId, productionId: ctx.productionId ?? "", run: ctx.run },
         (params ?? {}) as Record<string, unknown>,
         toolCallId,
       );
+      if (d.isErrorResult?.(out)) throw new Error(out);
       return text(out);
     },
   }));

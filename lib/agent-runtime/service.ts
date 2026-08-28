@@ -18,18 +18,21 @@ import { appendRunRecord } from "@/lib/agent-memory/store";
 import { stripUiContext } from "@/lib/agent-ui-context";
 import type { ChatSessionSummary, ChatTranscriptEntry } from "@/lib/agent-gateway/types";
 import { TOOL_PAYLOAD_MAX_CHARS } from "@/lib/agent-gateway/types";
+import type { StreamLine } from "@/lib/agent-gateway/stream-reducer";
 import { CoreAgentHarness } from "../../vendor/openclaw/packages/agent-core/src/harness/agent-harness";
 import { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session";
 import { compact, estimateContextTokens, shouldCompact, DEFAULT_COMPACTION_SETTINGS } from "../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
 import type { ExecutionEnv, PromptTemplate, Skill } from "../../vendor/openclaw/packages/agent-core/src/harness/types";
 import type { AgentMessage } from "../../vendor/openclaw/packages/agent-core/src/types";
+import type { ToolCall } from "../../vendor/openclaw/packages/llm-core/src/types";
 import type { StreamFn } from "../../vendor/openclaw/packages/llm-core/src/types";
 import { PgSessionStorage } from "./pg-session-storage";
 import { EventPublisher, pruneDeltas } from "./events";
 import { createStreamLineAdapter } from "./stream-lines";
-import { buildTools, bareName, type RuntimeToolDef } from "./tools";
+import { buildTools, bareName, exposedName, type RuntimeToolDef } from "./tools";
+import { tieredToolNames } from "./tool-tiers";
 import { approvalCard } from "./cards";
-import { createApproval, awaitApproval, markApprovalExecuted } from "./approvals";
+import { createApproval, awaitApproval, markApprovalExecuted, approvalAllowsReexecute } from "./approvals";
 import { buildSystemPrompt, recallBlock } from "./prompt";
 import { repairAndClassify } from "./resume";
 import { newRunId } from "./ids";
@@ -42,7 +45,7 @@ import {
 const NO_ENV = {} as ExecutionEnv;
 
 type Harness = CoreAgentHarness<Skill, PromptTemplate, RuntimeToolDef>;
-type ActiveRun = { runId: string; harness: Harness; abort: AbortController };
+type ActiveRun = { runId: string; harness: Harness; abort: AbortController; detach: () => void };
 const active = new Map<string, ActiveRun>(); // sessionId → 进行中的 run（同会话单执行者）
 
 /** 测试注入点：替换模型流（默认真 DeepSeek）。 */
@@ -91,7 +94,7 @@ export async function startRun(input: StartRunInput): Promise<{ runId: string }>
      VALUES ($1, $2, 'running', $3, now(), $4, $5)`,
     [runId, input.sessionId, RUNNER_OWNER, input.pageKey ?? null, CHAT_MODEL.id],
   );
-  void execute({ storage, runId, userId: input.userId, message: input.message });
+  void execute({ storage, runId, userId: input.userId, message: input.message, pageKey: input.pageKey ?? null });
   return { runId };
 }
 
@@ -117,6 +120,8 @@ interface ExecuteInput {
   userId: string;
   /** undefined = 恢复模式：不追加用户消息，从 transcript 续跑 */
   message?: string;
+  /** 发起本轮时的页面（温层工具面依据）；恢复模式从 agent_run.page_key 读回 */
+  pageKey?: string | null;
 }
 
 async function execute(input: ExecuteInput): Promise<void> {
@@ -125,10 +130,25 @@ async function execute(input: ExecuteInput): Promise<void> {
   const sessionId = meta.id;
   const productionId = meta.productionId;
   const pool = getPool();
-  const publisher = new EventPublisher(sessionId, runId);
+  const rawPublisher = new EventPublisher(sessionId, runId);
   const abort = new AbortController();
+  // 脱离（§4.4 ②）：本地停手但不留痕——不写 transcript、不发 aborted 行、不改 run 终态，
+  // 下一个进程按孤儿接管续跑
+  let detached = false;
+  const publisher = {
+    publish: (line: StreamLine) => { if (!detached) rawPublisher.publish(line); },
+    drain: () => rawPublisher.drain(),
+  };
   const session = new Session(storage);
-  const tools = buildTools({ userId, productionId });
+  const runHandle = {
+    runId, sessionId, signal: abort.signal,
+    publish: (line: StreamLine) => publisher.publish(line),
+    setStatus: async (s: "running" | "awaiting_answer") => {
+      await pool.query(`UPDATE agent_run SET status = $2 WHERE id = $1 AND status IN ('running', 'awaiting_answer')`, [runId, s]);
+    },
+    isDetached: () => detached,
+  };
+  const tools = buildTools({ userId, productionId, run: runHandle });
   const toolByName = new Map(tools.map((t) => [t.name, t]));
   const usage = { input: 0, output: 0, cacheRead: 0 };
   const lastUser: string | null = input.message ?? null;
@@ -147,10 +167,20 @@ async function execute(input: ExecuteInput): Promise<void> {
     const recall = recallBlock(inject.recall);
     const dialectDelivered = inject.dialectDelivered;
 
+    // 工具三层（#333）：热 ∪ 温(页面) ∪ 召回命中 ∪ 闭包。恢复模式没有本轮 prompt，
+    // 用 transcript 最后一条用户消息做召回输入。
+    const recallPrompt = input.message ?? lastUserText(await session.buildContext().then((c) => c.messages));
+    const tiers = tieredToolNames({
+      hasProduction: !!productionId, pageKey: input.pageKey ?? null, prompt: recallPrompt,
+      available: tools.map((t) => t.mcpName),
+    });
+    const activeToolNames = tiers.active.map(exposedName);
+
     const harness = new CoreAgentHarness({
       env: NO_ENV,
       session,
       tools,
+      activeToolNames,
       systemPrompt: buildSystemPrompt(inject),
       model: CHAT_MODEL,
       getApiKeyAndHeaders: async () => ({ apiKey: runtimeOverrides.apiKey ?? deepseekApiKey() }),
@@ -158,7 +188,16 @@ async function execute(input: ExecuteInput): Promise<void> {
         ? { streamSimple: runtimeOverrides.streamFn, completeSimple: llmRuntime().completeSimple }
         : { streamSimple: llmRuntime().streamSimple, completeSimple: llmRuntime().completeSimple },
     });
-    active.set(sessionId, { runId, harness, abort });
+    active.set(sessionId, {
+      runId, harness, abort,
+      detach: () => {
+        if (detached) return;
+        detached = true;
+        storage.detach();
+        abort.abort();
+        void harness.abort().catch(() => {});
+      },
+    });
 
     // 召回临时插入：送模型的消息列表里，最后一条用户消息前插一条 user 消息。
     // 不进 session（下一轮不再带，与 prependContext 语义一致）。
@@ -175,7 +214,7 @@ async function execute(input: ExecuteInput): Promise<void> {
     harness.on("tool_call", async (event) => {
       const tool = toolByName.get(event.toolName);
       if (!tool || tool.readOnly) return undefined;
-      const gate = await approvalGate({ runId, sessionId, userId, productionId, tool, toolCallId: event.toolCallId, args: event.input, publisher, signal: abort.signal });
+      const gate = await approvalGate({ runId, sessionId, userId, productionId, tool, toolCallId: event.toolCallId, args: event.input, publisher, signal: abort.signal, isDetached: () => detached });
       return gate;
     });
 
@@ -203,9 +242,47 @@ async function execute(input: ExecuteInput): Promise<void> {
     if (input.message !== undefined) {
       await harness.prompt(input.message);
     } else {
-      const decision = await repairAndClassify(session, new Map(tools.map((t) => [t.name, t])), { signal: abort.signal });
-      if (decision.kind === "continue") await harness.continueTurn();
-      else publisher.publish({ type: "final", text: "" });
+      const decision = await repairAndClassify(session, toolByName, {
+        signal: abort.signal,
+        canReexecuteWrite: (call) => approvalAllowsReexecute(sessionId, call.id),
+      });
+      if (decision.kind === "continue") {
+        // 审批待答/已批未执行的写工具：重新过确认门（复用同一张卡）后补结果，再续跑
+        const gated = decision.repaired.filter((r) => r.action === "await-gate");
+        if (gated.length > 0) {
+          const ctx = await session.buildContext();
+          const lastAssistant = [...ctx.messages].reverse().find((m) => m.role === "assistant");
+          const calls = lastAssistant?.role === "assistant"
+            ? lastAssistant.content.filter((c): c is ToolCall => c.type === "toolCall" && gated.some((g) => g.toolCallId === c.id))
+            : [];
+          for (const call of calls) {
+            const tool = toolByName.get(call.name)!;
+            publisher.publish({ type: "tool", name: call.name, id: call.id, input: call.arguments });
+            const gate = await approvalGate({ runId, sessionId, userId, productionId, tool, toolCallId: call.id, args: call.arguments, publisher, signal: abort.signal, isDetached: () => detached });
+            let resultText: string;
+            let isError = false;
+            if (gate?.block) {
+              resultText = gate.reason ?? "Tool execution was blocked";
+              isError = true;
+            } else {
+              try {
+                const r = await tool.execute(call.id, call.arguments as never, abort.signal);
+                resultText = r.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("\n");
+              } catch (err) {
+                resultText = err instanceof Error ? err.message : String(err);
+                isError = true;
+              }
+            }
+            if (detached) return;
+            await session.appendMessage({ role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: resultText }], isError, timestamp: Date.now() });
+            publisher.publish({ type: "tool-result", id: call.id, result: resultText, ...(isError ? { isError: true } : {}) });
+            publisher.publish({ type: "tool-end", id: call.id });
+          }
+        }
+        await harness.continueTurn();
+      } else {
+        publisher.publish({ type: "final", text: "" });
+      }
     }
     if (abort.signal.aborted) status = "aborted";
 
@@ -219,6 +296,13 @@ async function execute(input: ExecuteInput): Promise<void> {
   } finally {
     clearInterval(heartbeat);
     await publisher.drain();
+    if (detached) {
+      // 脱离：run 行保持原状态（running/awaiting_*），心跳停更 → 30s 后被下一个进程接管；
+      // 已花的 token 照记
+      await recordUsage(userId, productionId, usage).catch(() => {});
+      active.delete(sessionId);
+      return;
+    }
     await pool.query(
       `UPDATE agent_run SET status = $2, ended_at = now(), error = $3, input_tokens = $4, output_tokens = $5, cache_read_tokens = $6 WHERE id = $1`,
       [runId, status, error, usage.input, usage.output, usage.cacheRead],
@@ -237,6 +321,14 @@ async function execute(input: ExecuteInput): Promise<void> {
     // （waitForIdle / sessionRunState / 下一条消息的 SessionBusy 判定都以此为准）
     active.delete(sessionId);
   }
+}
+
+function lastUserText(messages: AgentMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "user") return textOf(m.content) || null;
+  }
+  return null;
 }
 
 function findLastUserIndex(messages: AgentMessage[]): number {
@@ -261,7 +353,8 @@ async function recordUsage(userId: string, productionId: string | null, usage: {
 interface GateInput {
   runId: string; sessionId: string; userId: string; productionId: string | null;
   tool: RuntimeToolDef; toolCallId: string; args: Record<string, unknown>;
-  publisher: EventPublisher; signal: AbortSignal;
+  publisher: { publish: (line: StreamLine) => void }; signal: AbortSignal;
+  isDetached: () => boolean;
 }
 
 const WIKI_PROPOSE_ACTIONS: Record<string, "create" | "update" | "delete" | "move" | "tag"> = {
@@ -299,13 +392,15 @@ async function approvalGate(g: GateInput): Promise<{ block?: boolean; reason?: s
   }
 
   const card = approvalCard(bare, g.args, { hasPermission });
-  const { id, info } = await createApproval({
+  const { id, info, reused } = await createApproval({
     runId: g.runId, sessionId: g.sessionId, toolCallId: g.toolCallId, tool: g.tool.name, args: g.args, card, preview,
   });
   await getPool().query(`UPDATE agent_run SET status = 'awaiting_approval' WHERE id = $1`, [g.runId]);
-  g.publisher.publish({ type: "approval", approval: info });
+  // 复用的卡不再重发（attach 时 dispatch 会补发待答卡；重发只会在前端多一张）
+  if (!reused) g.publisher.publish({ type: "approval", approval: info });
 
-  const outcome = await awaitApproval(id, g.signal);
+  const outcome = await awaitApproval(id, g.signal, undefined, { isDetached: g.isDetached });
+  if (outcome.kind === "detached") return { block: true, reason: "本进程已脱离，审批由下一个进程接管" }; // 不落库：storage 已 detach
   await getPool().query(`UPDATE agent_run SET status = 'running' WHERE id = $1 AND status = 'awaiting_approval'`, [g.runId]);
   if (outcome.kind === "allowed") {
     g.publisher.publish({ type: "approval-resolved", id, decision: outcome.decision });
@@ -374,8 +469,10 @@ function textOf(content: unknown): string {
 }
 
 export async function listSessions(userId: string): Promise<ChatSessionSummary[]> {
-  const r = await getPool().query<{ id: string; title: string | null; updated_at: Date; first_user: string | null; last_text: string | null }>(
+  const r = await getPool().query<{ id: string; title: string | null; updated_at: Date; first_user: string | null; last_text: string | null; active_run: boolean }>(
     `SELECT s.id, s.title, s.updated_at,
+       EXISTS (SELECT 1 FROM agent_run r WHERE r.session_id = s.id
+                 AND r.status IN ('running', 'awaiting_approval', 'awaiting_answer')) AS active_run,
        (SELECT e.payload->'message'->'content'->0->>'text' FROM agent_session_entry e
          WHERE e.session_id = s.id AND e.type = 'message' AND e.payload->'message'->>'role' = 'user'
          ORDER BY e.seq LIMIT 1) AS first_user,
@@ -391,7 +488,7 @@ export async function listSessions(userId: string): Promise<ChatSessionSummary[]
     title: row.title || stripUiContext(row.first_user ?? "").trim().slice(0, 60) || "新对话",
     lastMessagePreview: row.last_text ? stripUiContext(row.last_text).slice(0, 120) : undefined,
     updatedAt: row.updated_at.getTime(),
-    status: active.has(row.id) ? "running" : "done",
+    status: row.active_run ? "running" : "done",
   }));
 }
 
@@ -401,6 +498,11 @@ export async function renameSession(sessionId: string, title: string): Promise<v
 
 export async function deleteSession(sessionId: string): Promise<void> {
   await abortRun(sessionId);
+  await deleteSessionRows(sessionId);
+}
+
+/** 只删行（级联 transcript/run/审批/事件）；中止进行中 run 由调用方经 client 先做。 */
+export async function deleteSessionRows(sessionId: string): Promise<void> {
   await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [sessionId]);
 }
 
@@ -409,31 +511,52 @@ export async function deleteSession(sessionId: string): Promise<void> {
 /** 启动/巡检：接管心跳过期的 run，按中断点修复后续跑。返回接管数。 */
 export async function resumeOrphans(): Promise<number> {
   const pool = getPool();
-  const r = await pool.query<{ id: string; session_id: string; user_id: string }>(
+  const r = await pool.query<{ id: string; session_id: string; user_id: string; page_key: string | null }>(
     `UPDATE agent_run r SET owner = $1, heartbeat_at = now(), status = 'running'
      FROM agent_session s
      WHERE r.session_id = s.id
        AND r.status IN ('running', 'awaiting_approval', 'awaiting_answer')
        AND (r.heartbeat_at IS NULL OR r.heartbeat_at < now() - ($2::int * interval '1 millisecond'))
        AND (r.owner IS NULL OR r.owner <> $1)
-     RETURNING r.id, r.session_id, s.user_id`,
+     RETURNING r.id, r.session_id, s.user_id, r.page_key`,
     [RUNNER_OWNER, ORPHAN_AFTER_MS],
   );
   for (const row of r.rows) {
     if (active.has(row.session_id)) continue;
     const storage = await PgSessionStorage.load(row.session_id);
     if (!storage) continue;
-    void execute({ storage, runId: row.id, userId: row.user_id });
+    void execute({ storage, runId: row.id, userId: row.user_id, pageKey: row.page_key });
   }
   return r.rows.length;
 }
 
-/** 排水（§4.4 ②）：不再接新 run，等进行中的到自然停点；等待态的 run 立即放手。 */
+/** 排水（§4.4 ②）：不再接新 run，等进行中的到自然停点；等待态（审批/提问）的 run
+ *  立即脱离交给下一个进程；超时仍没停的也脱离（下一个进程按 ① 恢复）。 */
 export async function drain(timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  const pool = getPool();
   while (active.size > 0 && Date.now() < deadline) {
+    const ids = [...active.values()].map((r) => r.runId);
+    const rows = await pool.query<{ id: string; status: string }>(`SELECT id, status FROM agent_run WHERE id = ANY($1::text[])`, [ids]);
+    for (const row of rows.rows) {
+      if (row.status === "awaiting_approval" || row.status === "awaiting_answer") {
+        const run = [...active.values()].find((r) => r.runId === row.id);
+        run?.detach();
+      }
+    }
+    if (active.size === 0) break;
     await new Promise((r) => setTimeout(r, 200));
   }
+  for (const run of active.values()) run.detach();
+  const settle = Date.now() + 5_000;
+  while (active.size > 0 && Date.now() < settle) await new Promise((r) => setTimeout(r, 50));
+}
+
+/** 测试用：脱离全部进行中 run（模拟进程消失但不留痕）。 */
+export async function detachAll(): Promise<void> {
+  for (const run of active.values()) run.detach();
+  const settle = Date.now() + 5_000;
+  while (active.size > 0 && Date.now() < settle) await new Promise((r) => setTimeout(r, 20));
 }
 
 /** 测试用：等待某会话的 run 结束。 */

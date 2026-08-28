@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { abortChatRun } from "@/lib/agent-gateway/client";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
 import { shouldUseRunner } from "@/lib/agent-runtime/dispatch";
-import { abortRun } from "@/lib/agent-runtime/service";
+import { abortRun } from "@/lib/agent-runtime/client";
 
 export const runtime = "nodejs";
 

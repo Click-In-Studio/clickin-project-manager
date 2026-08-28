@@ -112,14 +112,19 @@ describe("agent-runtime service", () => {
     expect(run.rows[0].input_tokens).toBe(7);
     expect(run.rows[0].output_tokens).toBe(3);
 
-    const usage = await getPool().query<{ kind: string; tokens: number }>(`SELECT kind, tokens FROM ai_usage WHERE user_id = $1 AND kind LIKE 'chat_%' ORDER BY kind`, [userId]);
+    // 按本 run 的时间窗口取记账行：工厂 shortId 在并行 worker 间可能撞出同一个用户
+    const usage = await getPool().query<{ kind: string; tokens: number }>(
+      `SELECT kind, tokens FROM ai_usage WHERE user_id = $1 AND kind LIKE 'chat_%'
+         AND created_at >= (SELECT started_at FROM agent_run WHERE id = $2) ORDER BY kind`, [userId, runId]);
     expect(usage.rows).toEqual([{ kind: "chat_input", tokens: 7 }, { kind: "chat_output", tokens: 3 }]);
 
     expect(await getHistory(key)).toEqual([{ role: "user", content: "你好" }, { role: "assistant", content: "你好，我是后台助手" }]);
     // system prompt = 六件套 + 注入包裹（记忆段恒在）；工具面 = 26 个 clickin__ 工具
     expect(seen[0].systemPrompt).toContain("团队 agent 行为规范");
     expect(seen[0].systemPrompt).toContain("<clickin-memory>");
-    expect(seen[0].tools).toContain(exposedName("production.wiki_read"));
+    // 工具三层：制作会话热层在，wiki 族（无页面、无触发词）不在
+    expect(seen[0].tools).toContain(exposedName("production.info"));
+    expect(seen[0].tools).not.toContain(exposedName("production.wiki_read"));
     expect(seen[0].tools.every((t) => t.startsWith("clickin__"))).toBe(true);
 
     const list = await listSessions(userId);
@@ -134,7 +139,7 @@ describe("agent-runtime service", () => {
     const { streamFn, seen } = scripted([{ calls: [readCall] }, { calls: [writeCall] }, { text: "好的，不改了" }]);
     runtimeOverrides.streamFn = streamFn;
     const key = newKey();
-    await startRun({ sessionId: key, userId, message: "查我的制作，然后改指令" });
+    await startRun({ sessionId: key, userId, message: "查我的制作，然后改我的个人指令" });  // 触发词「个人指令」召回冷层写工具
 
     // 等审批卡出现
     let approvalLine: Extract<StreamLine, { type: "approval" }> | undefined;
@@ -172,7 +177,7 @@ describe("agent-runtime service", () => {
     const { streamFn } = scripted([{ calls: [writeCall] }, { text: "已更新" }]);
     runtimeOverrides.streamFn = streamFn;
     const key = newKey(false); // 个人会话
-    await startRun({ sessionId: key, userId, message: "改指令" });
+    await startRun({ sessionId: key, userId, message: "改我的个人指令" });
     let approvalId: string | undefined;
     for (let i = 0; i < 200 && !approvalId; i++) {
       const line = (await readEventsSince(key, 0)).map((r) => r.line).find((l) => l.type === "approval") as Extract<StreamLine, { type: "approval" }> | undefined;
@@ -243,5 +248,157 @@ describe("agent-runtime service", () => {
     expect(lines[lines.length - 1]).toEqual({ type: "final", text: "接管后续上" });
     expect(await getHistory(key)).toEqual([{ role: "user", content: "崩溃前的问题" }, { role: "assistant", content: "接管后续上" }]);
     expect(__internal.active.size).toBe(0);
+  });
+});
+
+describe("ask_user（#290）：提问 → 卡片 → 回答 → 工具结果", () => {
+  let userId: string;
+  const sessions: string[] = [];
+
+  beforeAll(async () => {
+    ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-ask-${shortId()}`, null, false));
+    runtimeOverrides.apiKey = "test-key";
+  });
+  afterAll(async () => {
+    delete runtimeOverrides.streamFn;
+    for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
+  });
+
+  it("模型调 ask_user → question 行（QuestionInfo 形态）→ 用户回答 → 模型看到答案；取消 → 错误结果", async () => {
+    const { questionSession, resolveQuestion, listPendingQuestions } = await import("@/lib/agent-runtime/questions");
+    const ask = (id: string): ToolCall => ({
+      type: "toolCall", id, name: exposedName("ask_user"),
+      arguments: { questions: [{ questionId: "q1", header: "演出日期", question: "首演定在哪天？", options: [{ label: "10月18日" }, { label: "10月25日" }] }] },
+    });
+    const { streamFn, seen } = scripted([{ calls: [ask("c_ask1")] }, { calls: [ask("c_ask2")] }, { text: "记下了" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = createNewSessionKey(userId);
+    sessions.push(key);
+    await startRun({ sessionId: key, userId, message: "帮我记一下首演日期" });
+
+    // 第一张卡
+    let q: Extract<StreamLine, { type: "question" }> | undefined;
+    for (let i = 0; i < 200 && !q; i++) {
+      q = (await readEventsSince(key, 0)).map((r) => r.line).find((l): l is Extract<StreamLine, { type: "question" }> => l.type === "question");
+      if (!q) await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(q?.question?.questions[0]).toMatchObject({ questionId: "q1", header: "演出日期", options: [{ label: "10月18日" }, { label: "10月25日" }] });
+    const qid = q!.question!.id;
+    expect(qid.startsWith("aq_")).toBe(true);
+    expect(await questionSession(qid)).toBe(key);
+    expect((await listPendingQuestions(key)).map((x) => x.id)).toEqual([qid]);
+    expect((await getPool().query(`SELECT status FROM agent_run WHERE session_id = $1`, [key])).rows[0].status).toBe("awaiting_answer");
+    expect(await resolveQuestion(qid, { answers: { q1: ["10月18日"] } })).toBe(true);
+
+    // 第二张卡 → 取消
+    let q2: Extract<StreamLine, { type: "question" }> | undefined;
+    for (let i = 0; i < 200 && !q2; i++) {
+      q2 = (await readEventsSince(key, 0)).map((r) => r.line).filter((l): l is Extract<StreamLine, { type: "question" }> => l.type === "question")[1];
+      if (!q2) await new Promise((r) => setTimeout(r, 25));
+    }
+    await resolveQuestion(q2!.question!.id, { cancel: true });
+
+    const lines = await collectUntilTerminal(key);
+    await waitForIdle(key);
+    expect(lines.filter((l) => l.type === "question-resolved").map((l) => (l as { status?: string }).status)).toEqual(["answered", "cancelled"]);
+    // 模型第二次调用看到答案文本；第三次看到取消的错误结果
+    const second = seen[1].messages[seen[1].messages.length - 1] as { role: string; isError: boolean; content: Array<{ text?: string }> };
+    expect(second.role).toBe("toolResult");
+    expect(second.isError).toBe(false);
+    expect(second.content[0]?.text).toContain("演出日期：10月18日");
+    const third = seen[2].messages[seen[2].messages.length - 1] as { isError: boolean; content: Array<{ text?: string }> };
+    expect(third.isError).toBe(true);
+    expect(third.content[0]?.text).toContain("取消");
+    const bubbles = lines.reduce<Bubble[]>((acc, l) => applyStreamLine(acc, l), []);
+    expect(bubbles.filter((b) => b.kind === "question").map((b) => (b as { status?: string }).status)).toEqual(["answered", "cancelled"]);
+  });
+});
+
+describe("§4.4 排水/脱离：等待态 run 交给下一个进程，不留痕、不重问", () => {
+  let userId: string;
+  const sessions: string[] = [];
+
+  beforeAll(async () => {
+    ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-detach-${shortId()}`, null, false));
+    runtimeOverrides.apiKey = "test-key";
+  });
+  afterAll(async () => {
+    delete runtimeOverrides.streamFn;
+    for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
+  });
+
+  it("等提问时脱离 → transcript 无 aborted、run 仍 awaiting_answer、无 aborted 事件；接管后复用同一问题并续跑", async () => {
+    const { detachAll, resumeOrphans } = await import("@/lib/agent-runtime/service");
+    const { resolveQuestion } = await import("@/lib/agent-runtime/questions");
+    const ask: ToolCall = {
+      type: "toolCall", id: "c_det", name: exposedName("ask_user"),
+      arguments: { questions: [{ questionId: "q1", header: "颜色", question: "主色调？", options: [{ label: "深蓝" }, { label: "酒红" }] }] },
+    };
+    // 进程 A：提问后卡住等答案
+    runtimeOverrides.streamFn = scripted([{ calls: [ask] }]).streamFn;
+    const key = createNewSessionKey(userId);
+    sessions.push(key);
+    await startRun({ sessionId: key, userId, message: "定主色调" });
+    let q: Extract<StreamLine, { type: "question" }> | undefined;
+    for (let i = 0; i < 200 && !q; i++) {
+      q = (await readEventsSince(key, 0)).map((r) => r.line).find((l): l is Extract<StreamLine, { type: "question" }> => l.type === "question");
+      if (!q) await new Promise((r) => setTimeout(r, 25));
+    }
+    const qid = q!.question!.id;
+
+    // 进程 A 排水脱离
+    await detachAll();
+    expect(sessionRunState(key)).toBe("not-running");
+    const run = (await getPool().query<{ status: string }>(`SELECT status FROM agent_run WHERE session_id = $1`, [key])).rows[0];
+    expect(run.status).toBe("awaiting_answer"); // 不改终态
+    const roles = (await getPool().query<{ payload: { message?: { role: string; stopReason?: string } } }>(`SELECT payload FROM agent_session_entry WHERE session_id = $1 ORDER BY seq`, [key]))
+      .rows.map((r) => `${r.payload.message?.role}${r.payload.message?.stopReason ? ":" + r.payload.message.stopReason : ""}`);
+    expect(roles).toEqual(["user", "assistant:toolUse"]); // 没有 aborted assistant 落库
+    expect((await readEventsSince(key, 0)).map((r) => r.line.type)).not.toContain("aborted");
+    expect((await getPool().query(`SELECT status FROM agent_question WHERE id = $1`, [qid])).rows[0].status).toBe("pending"); // 问题没被取消
+
+    // 进程 B：心跳过期后接管 → 复用同一问题（不重发卡）→ 用户回答 → 续跑
+    await getPool().query(`UPDATE agent_run SET heartbeat_at = now() - interval '5 minutes', owner = 'dead:1' WHERE session_id = $1`, [key]);
+    runtimeOverrides.streamFn = scripted([{ text: "主色调深蓝，记下了" }]).streamFn;
+    expect(await resumeOrphans()).toBeGreaterThanOrEqual(1);
+    await new Promise((r) => setTimeout(r, 300));
+    const questionLines = (await readEventsSince(key, 0)).map((r) => r.line).filter((l) => l.type === "question");
+    expect(questionLines).toHaveLength(1); // 复用，没有第二张卡
+    expect((await getPool().query(`SELECT count(*)::int AS n FROM agent_question WHERE session_id = $1`, [key])).rows[0].n).toBe(1);
+    await resolveQuestion(qid, { answers: { q1: ["深蓝"] } });
+    const lines = await collectUntilTerminal(key);
+    await waitForIdle(key);
+    expect(lines[lines.length - 1]).toEqual({ type: "final", text: "主色调深蓝，记下了" });
+    expect((await getPool().query<{ status: string }>(`SELECT status FROM agent_run WHERE session_id = $1`, [key])).rows[0].status).toBe("completed");
+  });
+
+  it("等审批时脱离 → 接管后复用同一张卡，批准后写工具真执行", async () => {
+    const { detachAll, resumeOrphans } = await import("@/lib/agent-runtime/service");
+    const write: ToolCall = { type: "toolCall", id: "c_det_w", name: exposedName("my.update_instructions"), arguments: { content: "叫我导演" } };
+    runtimeOverrides.streamFn = scripted([{ calls: [write] }]).streamFn;
+    const key = createNewSessionKey(userId);
+    sessions.push(key);
+    await startRun({ sessionId: key, userId, message: "改我的个人指令" });
+    let approvalId: string | undefined;
+    for (let i = 0; i < 200 && !approvalId; i++) {
+      const l = (await readEventsSince(key, 0)).map((r) => r.line).find((x) => x.type === "approval") as Extract<StreamLine, { type: "approval" }> | undefined;
+      approvalId = l?.approval?.id;
+      if (!approvalId) await new Promise((r) => setTimeout(r, 25));
+    }
+    await detachAll();
+    expect((await getPool().query(`SELECT status FROM agent_approval WHERE id = $1`, [approvalId])).rows[0].status).toBe("pending");
+
+    await getPool().query(`UPDATE agent_run SET heartbeat_at = now() - interval '5 minutes', owner = 'dead:1' WHERE session_id = $1`, [key]);
+    runtimeOverrides.streamFn = scripted([{ text: "已更新" }]).streamFn;
+    await resumeOrphans();
+    await new Promise((r) => setTimeout(r, 300));
+    expect((await readEventsSince(key, 0)).map((r) => r.line).filter((l) => l.type === "approval")).toHaveLength(1); // 复用同一张卡
+    await resolveApproval(approvalId!, "allow-once", userId);
+    const lines = await collectUntilTerminal(key);
+    await waitForIdle(key);
+    expect(lines[lines.length - 1]).toEqual({ type: "final", text: "已更新" });
+    const instr = await getPool().query<{ content: string }>(`SELECT content FROM agent_instructions WHERE scope_type = 'user' AND scope_id = $1`, [userId]);
+    expect(instr.rows[0]?.content).toBe("叫我导演");
+    await getPool().query(`DELETE FROM agent_instructions WHERE scope_type = 'user' AND scope_id = $1`, [userId]);
   });
 });
