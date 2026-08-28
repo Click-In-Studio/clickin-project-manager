@@ -60,7 +60,7 @@ function MetaField({
 
   return (
     <div className="space-y-1">
-      <label className="text-[10px] font-semibold tracking-widest text-zinc-400 uppercase">{label}</label>
+      <label className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">{label}</label>
       {canEdit ? (
         multiline ? (
           <textarea
@@ -241,9 +241,9 @@ function SceneEditRow({
           <td colSpan={4} className={`pb-4 pt-2${indent ? " pl-8 pr-4" : " px-4"}`}>
             <div className="grid grid-cols-2 gap-x-6 gap-y-3">
               <div className="space-y-1">
-                <label className="text-[10px] font-semibold tracking-widest text-zinc-400 uppercase">预期时长</label>
+                <label className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">预期时长</label>
                 {chapterDurationDisplay ? (
-                  <p className="min-h-[1.25rem] rounded border border-transparent px-2 py-1 text-xs text-zinc-600">
+                  <p className="min-h-8 rounded border border-transparent px-2 py-1.5 text-xs text-zinc-600">
                     {chapterDurationDisplay.hasMissingDuration && !(canEdit && fieldPerms.expectedDuration)
                       ? <span className="italic text-zinc-300">—</span>
                       : chapterDurationDisplay.text || <span className="italic text-zinc-300">—</span>}

@@ -94,7 +94,7 @@ export default function MountPointAssets({
         ))}
         {canEdit && (
           <button onClick={() => setShowModal(true)}
-            className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-zinc-300 px-2 py-0.5 text-[10px] text-zinc-400 hover:border-zinc-500 hover:text-zinc-600 transition-colors">
+            className="inline-flex items-center gap-1 rounded-full border border-zinc-300 bg-white px-2 py-0.5 text-[10px] font-medium text-zinc-600 transition-colors hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300">
             + Asset
           </button>
         )}
@@ -114,19 +114,19 @@ export default function MountPointAssets({
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between mb-1.5">
-        <p className="text-[10px] font-semibold tracking-widest text-zinc-300 uppercase">附件</p>
+        <p className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">附件</p>
         {canEdit && (
           <button onClick={() => setShowModal(true)}
-            className="text-[10px] text-zinc-400 hover:text-zinc-600 transition-colors">
+            className="inline-flex min-h-8 items-center rounded-lg border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-600 shadow-sm transition-colors hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300">
             + 添加
           </button>
         )}
       </div>
 
       {loading ? (
-        <p className="text-[10px] text-zinc-300">加载中…</p>
+        <p className="text-xs text-zinc-400">加载中…</p>
       ) : results.length === 0 ? (
-        <p className="text-[10px] text-zinc-300">暂无附件</p>
+        <p className="text-xs text-zinc-400">暂无附件</p>
       ) : (
         <div className="space-y-1">
           {results.map(({ mount, asset }) => (
@@ -147,7 +147,7 @@ export default function MountPointAssets({
               </div>
               {canEdit && (
                 <button onClick={() => handleRemove(mount)}
-                  className="shrink-0 text-[10px] text-zinc-300 hover:text-red-400 transition-colors">
+                  className="shrink-0 text-xs text-zinc-400 hover:text-red-500 transition-colors">
                   移除
                 </button>
               )}
