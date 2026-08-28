@@ -15,6 +15,9 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // OpenClaw gateway 侧插件：SDK 依赖只在 gateway 运行时可解析，不参与本仓库构建
     "openclaw-plugins/**",
+    // 上游 vendor 源码（#367，纪律见 vendor/openclaw/VENDOR.md）：按上游风格原样保留，
+    // 不套本仓库 lint；本地改动只允许出现在 VENDOR.md 登记的补丁里
+    "vendor/**",
   ]),
   {
     // Disable experimental React Compiler rules that produce false positives
