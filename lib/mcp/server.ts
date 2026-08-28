@@ -8,7 +8,6 @@ import {
   WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE,
   WIKI_DIALECT_POINTER_WRITE, WIKI_DIALECT_POINTER_READ,
 } from "./wiki-link-syntax";
-import { extractDisplayTitles, restoreAndCheckBody } from "./wiki-dialect-check";
 import { INSTRUCTIONS_MAX_LEN } from "@/lib/agent-instructions";
 
 const rawPort = Number(process.env.MCP_PORT ?? 3101);
@@ -585,89 +584,29 @@ export function startMcpServer(): void {
     const docBody = typeof body.body === "string" ? body.body : "";
     const tags = Array.isArray(body.tags) ? body.tags.filter((t): t is string => typeof t === "string") : null;
     const summary = typeof body.summary === "string" ? body.summary : "";
-    const parentWikiId = action === "create" ? (typeof body.parentId === "string" ? body.parentId : null)
-      : action === "move" ? (typeof body.newParentId === "string" ? body.newParentId : null)
-      : null;
 
     try {
-      const { resolveProductionActor } = await import("./production-tools");
-      const { CREATE_PERMISSION_KEY, editPermissionKey, deletePermissionKey } = await import("./wiki-tools");
-      const { hasEffectiveGrant } = await import("../grant-check");
-      const { canEditWiki, canDeleteWiki } = await import("../wiki-perm");
-      const { insertWikiProposal } = await import("../wiki-proposal-db");
-
-      // ── 方言校验 + [[标题]] 反解（#333 T2，真门）────────────────────────
-      // wiki_read 给模型看的是 [[标题]] 显示形态且指引"原样留着"，直接落库
-      // 会打断链接边（extractMentionEdges 只认 id 形态）——无歧义的反解回
-      // id 链接，歧义/未知/旧形态/锚点丢失才拒。422 由插件转成 block 短路
-      // （blockReason 带说明书回模型重写），确认卡片根本不弹。
-      // 校验失败**不落 wiki_proposal 行**：没有卡片就没有预览，落了是孤儿行。
-      let effectiveBody = docBody;
-      let bodyRestored = false;
-      if ((action === "create" || action === "update") && docBody) {
-        const titles = extractDisplayTitles(docBody);
-        const titleIds = new Map<string, string[]>();
-        if (titles.length > 0) {
-          const rows = await (await import("../pg")).getPool().query<{ id: string; title: string }>(
-            `SELECT id::text AS id, title FROM wiki WHERE production_id = $1 AND title = ANY($2::text[])`,
-            [productionId, titles],
-          );
-          for (const r of rows.rows) {
-            const list = titleIds.get(r.title) ?? [];
-            list.push(r.id);
-            titleIds.set(r.title, list);
-          }
-        }
-        let oldBody: string | null = null;
-        if (action === "update") {
-          const { getWiki } = await import("../wiki-db");
-          oldBody = (await getWiki(wikiId, productionId))?.body ?? null;
-        }
-        const checked = restoreAndCheckBody(docBody, titleIds, oldBody);
-        if (!checked.ok) {
-          res.status(422).json({
-            error: "dialect_violation",
-            problems: checked.problems,
-            guide: `${WIKI_LINK_SYNTAX_NOTE}\n\n${WIKI_DIALECT_NOTE}`,
-          });
-          return;
-        }
-        effectiveBody = checked.body;
-        bodyRestored = checked.restoredCount > 0;
-      }
-
-      let hasPermission = false;
-      let reason: "not_member" | "archived" | "no_grant" | null = null;
-      const resolved = await resolveProductionActor(callerUserId, productionId);
-      if (!resolved) {
-        reason = "not_member";
-      } else if (resolved.isArchived) {
-        reason = "archived";
-      } else if (action === "create") {
-        hasPermission = await hasEffectiveGrant(resolved.actor, productionId, "wiki", "*", "*", "create");
-      } else if (action === "delete") {
-        hasPermission = await canDeleteWiki(resolved.actor, productionId, wikiId);
-      } else {
-        // update / move / tag 都是"编辑"这篇文档
-        hasPermission = await canEditWiki(resolved.actor, productionId, wikiId);
-      }
-      if (resolved && !resolved.isArchived && !hasPermission) reason = "no_grant";
-
-      const permissionKey = action === "create" ? CREATE_PERMISSION_KEY
-        : action === "delete" ? deletePermissionKey(wikiId)
-        : editPermissionKey(wikiId);
-
-      const proposal = await insertWikiProposal({
-        productionId, toolCallId, proposedBy: callerUserId, action,
-        targetWikiId: action === "create" ? null : wikiId, parentWikiId,
-        title, body: effectiveBody, tags, summary, hasPermission, permissionKey,
+      // 方言校验 + [[标题]] 反解 + 权限展示值 + 预持久化，全部在
+      // lib/mcp/wiki-proposal-prepare.ts（与 #367 自建运行时的进程内审批门共用，
+      // 口径不许分叉）。422 由插件转成 block 短路（说明书随 blockReason 回模型
+      // 重写），确认卡片根本不弹；校验失败不落 wiki_proposal 行。
+      // restoredBody：反解后的正文（仅在有变化时返回）——插件据此覆写工具调用
+      // 的 params.body，批准后真正执行的必须是反解形态。
+      const { prepareWikiProposal } = await import("./wiki-proposal-prepare");
+      const prepared = await prepareWikiProposal({
+        productionId, toolCallId, callerUserId, action,
+        wikiId: wikiId || undefined,
+        parentId: typeof body.parentId === "string" ? body.parentId : undefined,
+        newParentId: typeof body.newParentId === "string" ? body.newParentId : undefined,
+        title: title ?? undefined, body: docBody, tags: tags ?? undefined, summary,
       });
-      // restoredBody：反解后的正文（仅在有变化时返回）。插件据此覆写工具调用
-      // 的 params.body——批准后真正执行的必须是反解形态，否则预持久化行与
-      // 实际落库内容分叉，[[标题]] 反解也就白做了。
+      if (!prepared.ok) {
+        res.status(422).json({ error: "dialect_violation", problems: prepared.problems, guide: prepared.guide });
+        return;
+      }
       res.json({
-        id: proposal.id, hasPermission, reason,
-        ...(bodyRestored ? { restoredBody: effectiveBody } : {}),
+        id: prepared.id, hasPermission: prepared.hasPermission, reason: prepared.reason,
+        ...(prepared.restoredBody !== undefined ? { restoredBody: prepared.restoredBody } : {}),
       });
     } catch (err) {
       console.error("[mcp] /wiki-proposal error:", err);

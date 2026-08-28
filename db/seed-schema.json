@@ -79,6 +79,34 @@
       "nullable": true
     }
   ],
+  "agent_event": [
+    {
+      "column": "session_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "seq",
+      "type": "bigint",
+      "nullable": false
+    },
+    {
+      "column": "run_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "line",
+      "type": "jsonb",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "agent_instructions": [
     {
       "column": "scope_type",

@@ -2199,3 +2199,16 @@ CREATE TABLE IF NOT EXISTS agent_question (
 CREATE INDEX IF NOT EXISTS agent_question_pending_idx
   ON agent_question (status, expires_at)
   WHERE status = 'pending';
+
+-- ── 事件：前端可见的 StreamLine 逐条落行 + NOTIFY 分发 ──────────────────────
+-- 观看者与执行者解耦（§4.4 ③）：runner 写行 + pg_notify('agent_events')，next 的
+-- SSE 端点 LISTEN 后按 (session_id, seq) 取行；断线重连 since=seq 直接重放。
+-- delta 行在执行侧做时间窗合并（累计值语义，合并无损），run 结束后可清理 delta 只留终态。
+CREATE TABLE IF NOT EXISTS agent_event (
+  session_id TEXT        NOT NULL REFERENCES agent_session(id) ON DELETE CASCADE,
+  seq        BIGINT      NOT NULL,
+  run_id     TEXT        NULL,
+  line       JSONB       NOT NULL,   -- lib/agent-gateway/stream-reducer.ts 的 StreamLine
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (session_id, seq)
+);
