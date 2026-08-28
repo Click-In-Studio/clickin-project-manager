@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Type } from "typebox";
 import { createApiRegistry, createLlmRuntime } from "@openclaw/ai";
 import { registerBuiltInApiProviders } from "@openclaw/ai/providers";
-import type { Model, ThinkingLevel } from "../vendor/openclaw/packages/llm-core/src/types.js";
+import type { Model, ThinkingLevel } from "../vendor/openclaw/packages/llm-core/src/types";
 import {
   CoreAgentHarness,
   InMemorySessionStorage,
@@ -11,8 +11,8 @@ import {
   type AgentMessage,
   type ExecutionEnv,
   type SessionTreeEntry,
-} from "../vendor/openclaw/packages/agent-core/src/index.js";
-import { Session } from "../vendor/openclaw/packages/agent-core/src/harness/session/session.js";
+} from "../vendor/openclaw/packages/agent-core/src/index";
+import { Session } from "../vendor/openclaw/packages/agent-core/src/harness/session/session";
 import type { RuntimeTool } from "@/lib/agent-runtime/resume";
 
 // #367 S1 出口判据①（真流式）与③（compaction 一次可读）——打真实 DeepSeek。

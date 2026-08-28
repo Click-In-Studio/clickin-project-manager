@@ -7,13 +7,13 @@ import {
   type SimpleStreamOptions,
   type StreamFn,
   type Usage,
-} from "../../../../llm-core/src/index.js";
-import { resolveAgentReasoningOption } from "../../reasoning.js";
+} from "../../../../llm-core/src/index";
+import { resolveAgentReasoningOption } from "../../reasoning";
 import {
   type AgentCoreCompletionRuntimeDeps,
   resolveAgentCoreCompleteFn,
-} from "../../runtime-deps.js";
-import type { AgentMessage, ThinkingLevel } from "../../types.js";
+} from "../../runtime-deps";
+import type { AgentMessage, ThinkingLevel } from "../../types";
 import {
   asAgentMessage,
   convertToLlm,
@@ -21,8 +21,8 @@ import {
   createCompactionSummaryMessage,
   createCustomMessage,
   type HarnessMessage,
-} from "../messages.js";
-import { buildSessionContext } from "../session/session.js";
+} from "../messages";
+import { buildSessionContext } from "../session/session";
 import {
   type CompactionEntry,
   CompactionError,
@@ -30,7 +30,7 @@ import {
   ok,
   type Result,
   type SessionTreeEntry,
-} from "../types.js";
+} from "../types";
 import {
   computeFileLists,
   createFileOps,
@@ -39,7 +39,7 @@ import {
   formatFileOperations,
   getCompactionContentBlockText,
   serializeConversation,
-} from "./utils.js";
+} from "./utils";
 
 /** File-operation details stored on generated compaction entries. */
 export interface CompactionDetails {
@@ -766,7 +766,7 @@ Summarize the prefix to provide context for the retained suffix:
 
 Be concise. Focus on what's needed to understand the kept suffix.`;
 
-export { serializeConversation } from "./utils.js";
+export { serializeConversation } from "./utils";
 
 /** Generate compaction summary data from prepared session history. */
 export async function compact(

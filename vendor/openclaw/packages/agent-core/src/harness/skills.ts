@@ -1,5 +1,5 @@
 // Agent Core module implements skill invocation formatting.
-import type { Skill } from "./types.js";
+import type { Skill } from "./types";
 
 /** Format a skill invocation prompt, optionally appending additional user instructions. */
 export function formatSkillInvocation(skill: Skill, additionalInstructions?: string): string {

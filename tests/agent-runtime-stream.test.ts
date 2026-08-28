@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { Type } from "typebox";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
-import type { AssistantMessage, Model, StreamFn, ToolCall } from "../vendor/openclaw/packages/llm-core/src/types.js";
-import { CoreAgentHarness, InMemorySessionStorage, type ExecutionEnv } from "../vendor/openclaw/packages/agent-core/src/index.js";
-import { Session } from "../vendor/openclaw/packages/agent-core/src/harness/session/session.js";
+import type { AssistantMessage, Model, StreamFn, ToolCall } from "../vendor/openclaw/packages/llm-core/src/types";
+import { CoreAgentHarness, InMemorySessionStorage, type ExecutionEnv } from "../vendor/openclaw/packages/agent-core/src/index";
+import { Session } from "../vendor/openclaw/packages/agent-core/src/harness/session/session";
 import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-gateway/stream-reducer";
 import { createStreamLineAdapter } from "@/lib/agent-runtime/stream-lines";
 import type { RuntimeTool } from "@/lib/agent-runtime/resume";

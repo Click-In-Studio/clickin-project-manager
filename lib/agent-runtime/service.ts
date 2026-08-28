@@ -18,12 +18,12 @@ import { appendRunRecord } from "@/lib/agent-memory/store";
 import { stripUiContext } from "@/lib/agent-ui-context";
 import type { ChatSessionSummary, ChatTranscriptEntry } from "@/lib/agent-gateway/types";
 import { TOOL_PAYLOAD_MAX_CHARS } from "@/lib/agent-gateway/types";
-import { CoreAgentHarness } from "../../vendor/openclaw/packages/agent-core/src/harness/agent-harness.js";
-import { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session.js";
-import { compact, estimateContextTokens, shouldCompact, DEFAULT_COMPACTION_SETTINGS } from "../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction.js";
-import type { ExecutionEnv, PromptTemplate, Skill } from "../../vendor/openclaw/packages/agent-core/src/harness/types.js";
-import type { AgentMessage } from "../../vendor/openclaw/packages/agent-core/src/types.js";
-import type { StreamFn } from "../../vendor/openclaw/packages/llm-core/src/types.js";
+import { CoreAgentHarness } from "../../vendor/openclaw/packages/agent-core/src/harness/agent-harness";
+import { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session";
+import { compact, estimateContextTokens, shouldCompact, DEFAULT_COMPACTION_SETTINGS } from "../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
+import type { ExecutionEnv, PromptTemplate, Skill } from "../../vendor/openclaw/packages/agent-core/src/harness/types";
+import type { AgentMessage } from "../../vendor/openclaw/packages/agent-core/src/types";
+import type { StreamFn } from "../../vendor/openclaw/packages/llm-core/src/types";
 import { PgSessionStorage } from "./pg-session-storage";
 import { EventPublisher, pruneDeltas } from "./events";
 import { createStreamLineAdapter } from "./stream-lines";
@@ -218,7 +218,6 @@ async function execute(input: ExecuteInput): Promise<void> {
     console.error(`[agent-runtime] run ${runId} failed:`, err);
   } finally {
     clearInterval(heartbeat);
-    active.delete(sessionId);
     await publisher.drain();
     await pool.query(
       `UPDATE agent_run SET status = $2, ended_at = now(), error = $3, input_tokens = $4, output_tokens = $5, cache_read_tokens = $6 WHERE id = $1`,
@@ -234,6 +233,9 @@ async function execute(input: ExecuteInput): Promise<void> {
         lastUser: lastUser ? stripUiContext(lastUser).slice(0, 2000) : null, lastAssistant,
       });
     } catch { /* 记忆归档失败不影响本轮 */ }
+    // 最后才释放会话：run 行终态/记账/事件清理都落完，"空闲"才是真的空闲
+    // （waitForIdle / sessionRunState / 下一条消息的 SessionBusy 判定都以此为准）
+    active.delete(sessionId);
   }
 }
 

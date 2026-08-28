@@ -1,22 +1,22 @@
 // Public agent-core package surface: agent loop, harness, session storage,
 // compaction, execution envs, and utility helpers.
-export * from "./agent.js";
-export * from "./agent-loop.js";
-export * from "./errors.js";
-export * from "./node.js";
-export * from "./runtime-deps.js";
-export * from "./types.js";
-export * from "./validation.js";
-export * from "./harness/agent-harness.js";
-export * from "./harness/env/kill-tree.js";
-export * from "./harness/messages.js";
-export * from "./harness/prompt-template-arguments.js";
-export * from "./harness/skills.js";
-export * from "./harness/types.js";
-export * from "./harness/session/jsonl-storage.js";
-export * from "./harness/session/memory-storage.js";
-export * from "./harness/session/session.js";
-export { uuidv7 } from "./harness/session/uuid.js";
+export * from "./agent";
+export * from "./agent-loop";
+export * from "./errors";
+export * from "./node";
+export * from "./runtime-deps";
+export * from "./types";
+export * from "./validation";
+export * from "./harness/agent-harness";
+export * from "./harness/env/kill-tree";
+export * from "./harness/messages";
+export * from "./harness/prompt-template-arguments";
+export * from "./harness/skills";
+export * from "./harness/types";
+export * from "./harness/session/jsonl-storage";
+export * from "./harness/session/memory-storage";
+export * from "./harness/session/session";
+export { uuidv7 } from "./harness/session/uuid";
 export {
   type BranchPreparation,
   type BranchPathEntry,
@@ -27,7 +27,7 @@ export {
   collectEntriesForBranchSummaryFromBranches,
   generateBranchSummary,
   prepareBranchEntries,
-} from "./harness/compaction/branch-summarization.js";
+} from "./harness/compaction/branch-summarization";
 export {
   calculateContextTokens,
   compact,
@@ -46,5 +46,5 @@ export {
   type CompactionResult,
   type CompactionSettings,
   type ContextUsageEstimate,
-} from "./harness/compaction/compaction.js";
-export * from "./harness/utils/truncate.js";
+} from "./harness/compaction/compaction";
+export * from "./harness/utils/truncate";

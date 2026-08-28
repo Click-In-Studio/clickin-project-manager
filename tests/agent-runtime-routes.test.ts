@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
-import type { AssistantMessage, StreamFn } from "../vendor/openclaw/packages/llm-core/src/types.js";
+import type { AssistantMessage, StreamFn } from "../vendor/openclaw/packages/llm-core/src/types";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, setProductionTier, shortId } from "./factories";
 import { upsertFeishuUser } from "@/lib/db";
@@ -57,8 +57,12 @@ describe("agent routes under AGENT_RUNTIME=runner", () => {
     await cleanupProduction(prodId).catch(() => {});
   });
 
-  function req(url: string, init?: RequestInit): NextRequest {
-    return new NextRequest(new URL(url, "http://localhost"), { ...init, headers: { cookie, "content-type": "application/json", ...(init?.headers ?? {}) } });
+  function req(url: string, init?: { method?: string; body?: string }): NextRequest {
+    return new NextRequest(new URL(url, "http://localhost"), {
+      method: init?.method ?? "GET",
+      body: init?.body,
+      headers: { cookie, "content-type": "application/json" },
+    });
   }
 
   it("POST /chat/stream：SSE 帧 data: <json>，ping → session → delta… → final；历史与列表随之可查", async () => {

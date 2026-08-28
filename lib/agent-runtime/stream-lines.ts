@@ -10,8 +10,8 @@
 
 import type { StreamLine } from "@/lib/agent-gateway/stream-reducer";
 import { TOOL_PAYLOAD_MAX_CHARS } from "@/lib/agent-gateway/types";
-import type { AgentHarnessEvent } from "../../vendor/openclaw/packages/agent-core/src/harness/types.js";
-import type { AgentMessage } from "../../vendor/openclaw/packages/agent-core/src/types.js";
+import type { AgentHarnessEvent } from "../../vendor/openclaw/packages/agent-core/src/harness/types";
+import type { AgentMessage } from "../../vendor/openclaw/packages/agent-core/src/types";
 
 /** 与 relay.boundToolPayload 同款大小闸（不 import relay：它拖着 gateway client 依赖树）。 */
 export function boundPayload(value: unknown): unknown {

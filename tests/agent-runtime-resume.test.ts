@@ -1,16 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { Type } from "typebox";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
-import type { AssistantMessage, Model, StreamFn, ToolCall } from "../vendor/openclaw/packages/llm-core/src/types.js";
+import type { AssistantMessage, Model, StreamFn, ToolCall } from "../vendor/openclaw/packages/llm-core/src/types";
 import {
   CoreAgentHarness,
   InMemorySessionStorage,
   type AgentMessage,
   type ExecutionEnv,
   type SessionTreeEntry,
-} from "../vendor/openclaw/packages/agent-core/src/index.js";
+} from "../vendor/openclaw/packages/agent-core/src/index";
 // index.ts 同时经 harness/types 以 `export type` 重导出 Session，值导入要走原模块
-import { Session } from "../vendor/openclaw/packages/agent-core/src/harness/session/session.js";
+import { Session } from "../vendor/openclaw/packages/agent-core/src/harness/session/session";
 import { repairAndClassify, findPendingToolCalls, UNKNOWN_STATE_TOOL_RESULT, type RuntimeTool } from "@/lib/agent-runtime/resume";
 
 // #367 S1 出口判据⑤：从持久化 transcript 冷启动一个中途 run（含 tool_use 无

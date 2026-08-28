@@ -7,11 +7,11 @@ import type {
   Context,
   EventStream,
   ToolResultMessage,
-} from "../../llm-core/src/index.js";
-import type { EventStream as SourceEventStream } from "../../llm-core/src/index.js";
-import { TranscriptNotContinuableError } from "./errors.js";
-import { resolveAgentReasoningOption } from "./reasoning.js";
-import { type AgentCoreStreamRuntimeDeps, resolveAgentCoreStreamFn } from "./runtime-deps.js";
+} from "../../llm-core/src/index";
+import type { EventStream as SourceEventStream } from "../../llm-core/src/index";
+import { TranscriptNotContinuableError } from "./errors";
+import { resolveAgentReasoningOption } from "./reasoning";
+import { type AgentCoreStreamRuntimeDeps, resolveAgentCoreStreamFn } from "./runtime-deps";
 import type {
   AgentContext,
   AgentEvent,
@@ -21,8 +21,8 @@ import type {
   AgentToolCall,
   AgentToolResult,
   StreamFn,
-} from "./types.js";
-import { validateToolArguments } from "./validation.js";
+} from "./types";
+import { validateToolArguments } from "./validation";
 
 /** Callback used by synchronous loop runners to publish agent lifecycle events. */
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;

@@ -1,20 +1,20 @@
 // Agent Core module implements branch summarization behavior.
-import type { Model, StreamFn } from "../../../../llm-core/src/index.js";
+import type { Model, StreamFn } from "../../../../llm-core/src/index";
 import {
   type AgentCoreCompletionRuntimeDeps,
   resolveAgentCoreCompleteFn,
-} from "../../runtime-deps.js";
-import type { AgentMessage } from "../../types.js";
+} from "../../runtime-deps";
+import type { AgentMessage } from "../../types";
 import {
   asAgentMessage,
   convertToLlm,
   createBranchSummaryMessage,
   createCompactionSummaryMessage,
   createCustomMessage,
-} from "../messages.js";
-import type { BranchSummaryResult, Session, SessionTreeEntry } from "../types.js";
-import { BranchSummaryError, err, ok, type Result } from "../types.js";
-import { estimateTokens, SUMMARIZATION_SYSTEM_PROMPT } from "./compaction.js";
+} from "../messages";
+import type { BranchSummaryResult, Session, SessionTreeEntry } from "../types";
+import { BranchSummaryError, err, ok, type Result } from "../types";
+import { estimateTokens, SUMMARIZATION_SYSTEM_PROMPT } from "./compaction";
 import {
   computeFileLists,
   createFileOps,
@@ -22,7 +22,7 @@ import {
   type FileOperations,
   formatFileOperations,
   serializeConversation,
-} from "./utils.js";
+} from "./utils";
 
 /** File-operation details stored on generated branch summary entries. */
 export interface BranchSummaryDetails {

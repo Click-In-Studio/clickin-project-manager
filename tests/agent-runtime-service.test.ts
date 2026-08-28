@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
-import type { AssistantMessage, StreamFn, ToolCall } from "../vendor/openclaw/packages/llm-core/src/types.js";
+import type { AssistantMessage, StreamFn, ToolCall } from "../vendor/openclaw/packages/llm-core/src/types";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser } from "@/lib/db";
@@ -229,7 +229,7 @@ describe("agent-runtime service", () => {
     const key = newKey();
     // 手工制造"上一个进程死了"的状态：会话 + 一条用户消息 + running 且心跳过期的 run
     const { PgSessionStorage } = await import("@/lib/agent-runtime/pg-session-storage");
-    const { Session } = await import("../vendor/openclaw/packages/agent-core/src/harness/session/session.js");
+    const { Session } = await import("../vendor/openclaw/packages/agent-core/src/harness/session/session");
     const storage = await PgSessionStorage.create({ id: key, userId, productionId: prodId });
     await new Session(storage).appendMessage({ role: "user", content: [{ type: "text", text: "崩溃前的问题" }], timestamp: Date.now() });
     await getPool().query(

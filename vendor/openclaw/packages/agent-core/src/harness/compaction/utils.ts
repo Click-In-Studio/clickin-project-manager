@@ -1,6 +1,6 @@
 // Agent Core helper module supports utils behavior.
-import type { Message } from "../../../../llm-core/src/index.js";
-import type { AgentMessage } from "../../types.js";
+import type { Message } from "../../../../llm-core/src/index";
+import type { AgentMessage } from "../../types";
 
 /** File paths touched by a session branch or compaction range. */
 export interface FileOperations {

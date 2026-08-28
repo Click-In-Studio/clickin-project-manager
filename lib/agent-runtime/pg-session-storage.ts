@@ -8,11 +8,11 @@
 
 import type { Pool } from "pg";
 import { getPool } from "@/lib/pg";
-import { BaseSessionStorage } from "../../vendor/openclaw/packages/agent-core/src/harness/session/storage-base.js";
+import { BaseSessionStorage } from "../../vendor/openclaw/packages/agent-core/src/harness/session/storage-base";
 import type {
   SessionMetadata,
   SessionTreeEntry,
-} from "../../vendor/openclaw/packages/agent-core/src/harness/types.js";
+} from "../../vendor/openclaw/packages/agent-core/src/harness/types";
 
 export interface PgSessionMetadata extends SessionMetadata {
   userId: string;

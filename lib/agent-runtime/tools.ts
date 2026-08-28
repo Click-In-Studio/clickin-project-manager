@@ -13,7 +13,7 @@
 // 也过确认门，与 server.ts 注释同理）。
 
 import { Type, type TSchema } from "typebox";
-import type { AgentToolResult } from "../../vendor/openclaw/packages/agent-core/src/types.js";
+import type { AgentToolResult } from "../../vendor/openclaw/packages/agent-core/src/types";
 import { INSTRUCTIONS_MAX_LEN } from "@/lib/agent-instructions";
 import { WIKI_DIALECT_POINTER_WRITE, WIKI_DIALECT_POINTER_READ, WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "@/lib/mcp/wiki-link-syntax";
 import { toolLabel } from "@/lib/agent-tool-labels";

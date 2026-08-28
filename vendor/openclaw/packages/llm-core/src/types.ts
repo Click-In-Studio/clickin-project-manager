@@ -1,6 +1,6 @@
 // LLM Core type module defines shared TypeScript contracts.
-export type { AssistantMessageDiagnostic, DiagnosticErrorInfo } from "./utils/diagnostics.js";
-import type { AssistantMessageDiagnostic } from "./utils/diagnostics.js";
+export type { AssistantMessageDiagnostic, DiagnosticErrorInfo } from "./utils/diagnostics";
+import type { AssistantMessageDiagnostic } from "./utils/diagnostics";
 
 /** Provider API families with first-class request/stream adapters in OpenClaw. */
 export type KnownApi =

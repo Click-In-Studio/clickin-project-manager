@@ -27,8 +27,8 @@ import {
   ok,
   type Result,
   toError,
-} from "../types.js";
-import { killProcessTree } from "./kill-tree.js";
+} from "../types";
+import { killProcessTree } from "./kill-tree";
 
 const MAX_TIMER_TIMEOUT_MS = 2_147_000_000;
 

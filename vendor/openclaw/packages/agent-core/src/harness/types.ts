@@ -6,10 +6,10 @@ import type {
   StreamFn,
   TextContent,
   Transport,
-} from "../../../llm-core/src/index.js";
-import type { AgentEvent, AgentMessage, AgentTool, QueueMode, ThinkingLevel } from "../index.js";
-import type { AgentCoreCompletionRuntimeDeps, AgentCoreRuntimeDeps } from "../runtime-deps.js";
-import type { Session } from "./session/session.js";
+} from "../../../llm-core/src/index";
+import type { AgentEvent, AgentMessage, AgentTool, QueueMode, ThinkingLevel } from "../index";
+import type { AgentCoreCompletionRuntimeDeps, AgentCoreRuntimeDeps } from "../runtime-deps";
+import type { Session } from "./session/session";
 
 /** Result of a fallible operation. Expected failures are returned as `ok: false` instead of thrown. */
 export type Result<TValue, TError> = { ok: true; value: TValue } | { ok: false; error: TError };
@@ -486,7 +486,7 @@ export interface SessionStorage<TMetadata extends SessionMetadata = SessionMetad
   getEntries(): Promise<SessionTreeEntry[]>;
 }
 
-export type { Session } from "./session/session.js";
+export type { Session } from "./session/session";
 
 export type AgentHarnessPhase = "idle" | "turn" | "compaction" | "branch_summary" | "retry";
 
@@ -839,4 +839,4 @@ export interface AgentHarnessOptions<
   followUpMode?: QueueMode;
 }
 
-export type { CoreAgentHarness as AgentHarness } from "./agent-harness.js";
+export type { CoreAgentHarness as AgentHarness } from "./agent-harness";

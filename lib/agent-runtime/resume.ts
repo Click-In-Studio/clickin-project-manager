@@ -11,13 +11,13 @@
 //
 // 纯函数化：只依赖 Session（vendor agent-core）与工具表，不碰 DB/HTTP，可离线测。
 
-import type { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session.js";
+import type { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session";
 import type {
   AgentMessage,
   AgentTool,
   AgentToolResult,
-} from "../../vendor/openclaw/packages/agent-core/src/types.js";
-import type { ToolCall, ToolResultMessage } from "../../vendor/openclaw/packages/llm-core/src/types.js";
+} from "../../vendor/openclaw/packages/agent-core/src/types";
+import type { ToolCall, ToolResultMessage } from "../../vendor/openclaw/packages/llm-core/src/types";
 
 /** 运行时工具 = agent-core 工具 + 我们的只读标记（决定中断后能否盲重跑）。 */
 export type RuntimeTool = AgentTool & {

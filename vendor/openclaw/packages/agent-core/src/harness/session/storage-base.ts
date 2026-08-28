@@ -5,8 +5,8 @@ import {
   type SessionMetadata,
   type SessionStorage,
   type SessionTreeEntry,
-} from "../types.js";
-import { uuidv7 } from "./uuid.js";
+} from "../types";
+import { uuidv7 } from "./uuid";
 
 function updateLabelCache(labelsById: Map<string, string>, entry: SessionTreeEntry): void {
   if (entry.type !== "label") {

@@ -11,7 +11,7 @@ import type {
   TextContent,
   Tool,
   ToolResultMessage,
-} from "../../llm-core/src/index.js";
+} from "../../llm-core/src/index";
 
 /**
  * Stream function used by the agent loop.

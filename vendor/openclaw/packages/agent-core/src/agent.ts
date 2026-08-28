@@ -7,11 +7,11 @@ import type {
   TextContent,
   ThinkingBudgets,
   Transport,
-} from "../../llm-core/src/index.js";
-import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.js";
-import { TranscriptNotContinuableError } from "./errors.js";
-import { resolveAgentReasoningOption } from "./reasoning.js";
-import { type AgentCoreStreamRuntimeDeps, resolveAgentCoreStreamFn } from "./runtime-deps.js";
+} from "../../llm-core/src/index";
+import { runAgentLoop, runAgentLoopContinue } from "./agent-loop";
+import { TranscriptNotContinuableError } from "./errors";
+import { resolveAgentReasoningOption } from "./reasoning";
+import { type AgentCoreStreamRuntimeDeps, resolveAgentCoreStreamFn } from "./runtime-deps";
 import type {
   AfterToolCallContext,
   AfterToolCallResult,
@@ -27,9 +27,9 @@ import type {
   QueueMode,
   StreamFn,
   ToolExecutionMode,
-} from "./types.js";
+} from "./types";
 
-export type { QueueMode } from "./types.js";
+export type { QueueMode } from "./types";
 
 function defaultConvertToLlm(messages: AgentMessage[]): Message[] {
   return messages.filter(

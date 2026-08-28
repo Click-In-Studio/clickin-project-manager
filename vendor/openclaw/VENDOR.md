@@ -28,6 +28,8 @@ git clone --filter=blob:none --sparse --depth 1 --branch <tag> https://github.co
 cd /tmp/openclaw-upstream && git sparse-checkout set packages/agent-core packages/llm-core
 rsync -a --delete --exclude='*.test.ts' --exclude='*.test-helpers.ts' packages/agent-core/src/ <repo>/vendor/openclaw/packages/agent-core/src/
 rsync -a --delete --exclude='*.test.ts' packages/llm-core/src/ <repo>/vendor/openclaw/packages/llm-core/src/
+# 补丁 #3：去掉相对 import 的 .js 扩展名（Turbopack 不做 .js→.ts 映射；tsc bundler/vitest 两种写法都认）
+find <repo>/vendor/openclaw/packages -name "*.ts" -exec sed -i '' -E 's#(from "\.{1,2}/[^"]+)\.js"#\1"#g; s#(import\("\.{1,2}/[^"]+)\.js"\)#\1")#g' {} +
 ```
 
 ## 本地补丁
@@ -36,3 +38,4 @@ rsync -a --delete --exclude='*.test.ts' packages/llm-core/src/ <repo>/vendor/ope
 |---|---|---|---|---|
 | 1 | `packages/llm-core/src/utils/event-stream.ts` | 整文件改为从 `@openclaw/ai/event-stream` 重导出三个符号 | vendor 的 llm-core 与 npm 包内打包的 llm-core 各有一份 `EventStream` 类声明；`agent-loop.ts` 刻意取 npm 包的构造器共享身份，与本地声明类型冲突（private 成员分属两份声明）。统一为 npm 包那一份 | 否（上游是同一包，无此问题）——升级时**必须重放** |
 | 2 | `packages/agent-core/src/harness/agent-harness.ts` | 新增 `continueTurn()` + `executeContinuation()`（`// ── 本地补丁 #2` 标记段），import 加 `runAgentLoopContinue` | 进程重启后恢复中途 run 需要"从 transcript 续跑而不追加用户消息"；上游 harness 只有 `prompt(text)`（必追加 user 消息），`runAgentLoopContinue` 只在 loop 层暴露、harness 的接线（hook/持久化/streamFn）全是 private，无法在外部复用 | **可上游**（纯新增方法，与 `executeTurn` 同构） |
+| 3 | 全部 `*.ts` 的相对 import | 去掉 `.js` 扩展名（`./x.js` → `./x`），由同步命令里的 sed 自动完成 | Next/Turbopack 对相对路径不做 `.js → .ts` 映射，`next dev` 报 module-not-found；tsc（bundler）与 vitest 两种写法都认 | 否（上游是 NodeNext 风格）——机械变换，升级时随 sync 命令重放 |

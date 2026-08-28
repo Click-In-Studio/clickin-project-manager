@@ -1,7 +1,7 @@
 // Agent Core module implements memory storage behavior.
-import type { SessionMetadata, SessionTreeEntry } from "../types.js";
-import { BaseSessionStorage } from "./storage-base.js";
-import { uuidv7 } from "./uuid.js";
+import type { SessionMetadata, SessionTreeEntry } from "../types";
+import { BaseSessionStorage } from "./storage-base";
+import { uuidv7 } from "./uuid";
 
 /** Volatile session storage used by tests and in-process harness callers. */
 export class InMemorySessionStorage<

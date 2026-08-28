@@ -1,12 +1,12 @@
 // Agent Core module implements session behavior.
-import type { ImageContent, TextContent } from "../../../../llm-core/src/index.js";
-import type { AgentMessage } from "../../types.js";
+import type { ImageContent, TextContent } from "../../../../llm-core/src/index";
+import type { AgentMessage } from "../../types";
 import {
   asAgentMessage,
   createBranchSummaryMessage,
   createCompactionSummaryMessage,
   createCustomMessage,
-} from "../messages.js";
+} from "../messages";
 import type {
   BranchSummaryEntry,
   CompactionEntry,
@@ -21,8 +21,8 @@ import type {
   SessionStorage,
   SessionTreeEntry,
   ThinkingLevelChangeEntry,
-} from "../types.js";
-import { SessionError } from "../types.js";
+} from "../types";
+import { SessionError } from "../types";
 
 /** Build model context from the active session branch and its latest state markers. */
 export function buildSessionContext(pathEntries: SessionTreeEntry[]): SessionContext {

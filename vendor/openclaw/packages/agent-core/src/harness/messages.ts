@@ -1,20 +1,20 @@
 // Agent Core module implements messages behavior.
-import type { ImageContent, Message, TextContent } from "../../../llm-core/src/index.js";
+import type { ImageContent, Message, TextContent } from "../../../llm-core/src/index";
 import type {
   AgentMessage,
   BashExecutionMessage,
   BranchSummaryMessage,
   CompactionSummaryMessage,
   CustomMessage,
-} from "../types.js";
-import { parseSessionTimestampMs, requireSessionTimestampMs } from "./session/timestamps.js";
+} from "../types";
+import { parseSessionTimestampMs, requireSessionTimestampMs } from "./session/timestamps";
 
 export type {
   BashExecutionMessage,
   BranchSummaryMessage,
   CompactionSummaryMessage,
   CustomMessage,
-} from "../types.js";
+} from "../types";
 
 /** Harness-only transcript entries that can be normalized into LLM messages. */
 export type HarnessMessage =

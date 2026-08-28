@@ -4,10 +4,10 @@ import type {
   ImageContent,
   Model,
   UserMessage,
-} from "../../../llm-core/src/index.js";
-import { runAgentLoop, runAgentLoopContinue } from "../agent-loop.js";
-import { resolveAgentReasoningOption } from "../reasoning.js";
-import { type AgentCoreRuntimeDeps, resolveAgentCoreStreamFn } from "../runtime-deps.js";
+} from "../../../llm-core/src/index";
+import { runAgentLoop, runAgentLoopContinue } from "../agent-loop";
+import { resolveAgentReasoningOption } from "../reasoning";
+import { type AgentCoreRuntimeDeps, resolveAgentCoreStreamFn } from "../runtime-deps";
 import type {
   AgentContext,
   AgentEvent,
@@ -17,19 +17,19 @@ import type {
   QueueMode,
   StreamFn,
   ThinkingLevel,
-} from "../types.js";
+} from "../types";
 import {
   collectEntriesForBranchSummary,
   generateBranchSummary,
-} from "./compaction/branch-summarization.js";
+} from "./compaction/branch-summarization";
 import {
   compact,
   DEFAULT_COMPACTION_SETTINGS,
   prepareCompaction,
-} from "./compaction/compaction.js";
-import { convertToLlm } from "./messages.js";
-import { formatPromptTemplateInvocation } from "./prompt-template-arguments.js";
-import { formatSkillInvocation } from "./skills.js";
+} from "./compaction/compaction";
+import { convertToLlm } from "./messages";
+import { formatPromptTemplateInvocation } from "./prompt-template-arguments";
+import { formatSkillInvocation } from "./skills";
 import type {
   AbortResult,
   AgentHarnessEvent,
@@ -46,14 +46,14 @@ import type {
   PromptTemplate,
   Session,
   Skill,
-} from "./types.js";
+} from "./types";
 import {
   AgentHarnessError,
   BranchSummaryError,
   CompactionError,
   SessionError,
   toError,
-} from "./types.js";
+} from "./types";
 
 // CoreAgentHarness coordinates session state, resources, tools, compaction, and
 // streaming callbacks around the lower-level agent loop.

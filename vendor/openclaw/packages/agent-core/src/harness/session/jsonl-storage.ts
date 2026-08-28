@@ -5,14 +5,14 @@ import type {
   JsonlSessionMetadata,
   Result,
   SessionTreeEntry,
-} from "../types.js";
-import { SessionError, toError } from "../types.js";
+} from "../types";
+import { SessionError, toError } from "../types";
 import {
   appendParentIdAfterEntry,
   BaseSessionStorage,
   leafIdUpdateAfterEntry,
-} from "./storage-base.js";
-import { parseSessionTimestampMs } from "./timestamps.js";
+} from "./storage-base";
+import { parseSessionTimestampMs } from "./timestamps";
 
 type JsonlSessionStorageFileSystem = Pick<
   FileSystem,

@@ -9,7 +9,7 @@
 
 import { createApiRegistry, createLlmRuntime, type LlmRuntime } from "@openclaw/ai";
 import { registerBuiltInApiProviders } from "@openclaw/ai/providers";
-import type { Model } from "../../vendor/openclaw/packages/llm-core/src/types.js";
+import type { Model } from "../../vendor/openclaw/packages/llm-core/src/types";
 import { productionIdOfSessionKey } from "@/lib/agent-gateway/client";
 
 const DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";

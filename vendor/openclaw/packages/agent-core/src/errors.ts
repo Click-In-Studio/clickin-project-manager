@@ -1,4 +1,4 @@
-import type { AgentMessage } from "./types.js";
+import type { AgentMessage } from "./types";
 
 export const TRANSCRIPT_NOT_CONTINUABLE_ERROR_CODE = "openclaw_transcript_not_continuable";
 
