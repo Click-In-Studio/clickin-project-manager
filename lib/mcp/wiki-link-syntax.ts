@@ -21,6 +21,13 @@
 // 与 lib/tiptap-callout.ts / lib/tiptap-columns.ts / lib/tiptap-wiki-image.ts
 // 的 canonical 形态同批维护：方言变，这里必须同批变（方言两侧同落纪律的
 // 第三落点：编辑器 roundtrip、渲染器、AI 说明书）。
+//
+// 送达通道（#333 T1）：本说明书不再内联进工具描述（曾占全量工具面 19%），
+// 改为三通道按需送达——①温层：用户在文档库/灵感文档页面时随 /inject-context
+// 的 knowledge 段注入；②冷层：工具召回命中正文读写工具时随召回闭包携带；
+// ③显式：production.wiki_dialect_ref 工具按需拉取（语境中已有时返回指引而非
+// 全文，幂等标志由插件覆写）。存储位置不变（repo 内 TS 常量，与方言实现同批
+// 提交）——绝不做成 wiki 库文档：进 DB 就脱离版本控制，三落点同批纪律失效。
 export const WIKI_DIALECT_NOTE =
   "本库 Markdown 的私有方言分四类，统一文法如下（渲染器按此解析；写作按此使用，" +
   "编辑他人正文时原样保留不得改写）：" +
@@ -53,3 +60,17 @@ export const WIKI_LINK_SYNTAX_NOTE =
   "读正文时看到的 [[标题]] 是系统为方便阅读把 id 链接换成的显示形态，改写正文时" +
   "把它原样留着即可，不要当成可以自己新写的语法。" +
   "也不要使用旧式形态 [#wiki:<uuid>] 或 [#](/__cm__wiki:<uuid>)（冒号版）——都已退役。";
+
+// ── 指针（#333 T1：工具描述里只留这两行，全文经三通道按需送达）─────────────
+
+/** 写路径指针（propose_create / propose_update 描述用）。硬约束靠模型守
+ *  规矩只是第一道，真门在 /wiki-proposal 的方言校验（T2）。 */
+export const WIKI_DIALECT_POINTER_WRITE =
+  "正文必须遵守本库的私有 Markdown 方言（文档间链接一律 [#](/__cm__/wiki/<uuid>) 形态等）。" +
+  "方言完整说明若不在当前语境中，必须先调用 production.wiki_dialect_ref 获取——未获得说明前不得生成或改写正文；" +
+  "违反方言的提议会被校验拒绝。";
+
+/** 读路径指针（wiki_read 描述用）：读回的正文含私有方言与显示形态。 */
+export const WIKI_DIALECT_POINTER_READ =
+  "返回的正文含本库私有 Markdown 方言（[[标题]] 是 id 链接的显示形态，另有 callout/分栏等）。" +
+  "需要理解或改写正文而语境中没有方言说明时，先调用 production.wiki_dialect_ref。";

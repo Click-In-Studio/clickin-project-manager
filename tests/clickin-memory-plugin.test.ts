@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { EventEmitter } from "node:events";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { buildUiContextMessage } from "@/lib/agent-ui-context";
+import { pageLabelFor } from "@/lib/agent-page-context";
 
 // clickin-memory 插件的确认门 + 拒绝理由链路集成测试。
 // openclaw SDK import 由 vitest alias 换成身份包装替身（tests/mocks/），
@@ -458,5 +460,204 @@ describe("before_prompt_build：触发召回（M2，经真实 POST /inject-conte
     )) as { appendSystemContext?: string; prependContext?: string } | undefined;
     expect(out?.prependContext).toBeUndefined();
     expect(out?.appendSystemContext ?? "").toContain("<clickin-memory>");
+  });
+});
+
+describe("方言校验真门（#333 T2：422 → block 短路，经真实 /wiki-proposal 端到端）", () => {
+  let prodId: string;
+  let ownerId: string;
+
+  beforeAll(async () => {
+    ownerId = (await upsertFeishuUser(`test-open-${shortId()}`, `方言门测试${shortId()}`, null, false)).userId;
+    ({ prodId } = await makeProduction(ownerId));
+  });
+
+  afterAll(async () => {
+    await cleanupProduction(prodId).catch(() => {});
+  });
+
+  function prodCtx(userId: string) {
+    return { sessionKey: `agent:team:clickin:chat:${userId}:${prodId}:11111111-2222-3333-4444-555555555555` };
+  }
+
+  it("退役形态正文 → block 短路（不弹确认卡），blockReason 带说明书", async () => {
+    const handler = hooks.get("before_tool_call")!;
+    const result = (await handler(
+      {
+        toolName: "clickin__production-wiki_propose_create",
+        params: { title: "违规文档", body: "旧形态 [#wiki:3fa85f64-5717-4562-b3fc-2c963f66afa6]", summary: "测试" },
+        toolCallId: `call_${shortId()}`,
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      prodCtx(ownerId),
+    )) as { block?: boolean; blockReason?: string; requireApproval?: unknown };
+    expect(result?.block).toBe(true);
+    expect(result?.requireApproval).toBeUndefined();
+    expect(result?.blockReason).toContain("裸 token");
+    expect(result?.blockReason).toContain("私有方言"); // 说明书随拒绝返回，模型可就地重写
+  });
+
+  it("模型新造的 [[标题]] → block；唯一同名的 [[标题]] → 反解并覆写 params.body", async () => {
+    const { createWiki } = await import("@/lib/wiki-db");
+    const target = await createWiki({ productionId: prodId, title: `反解目标${shortId()}`, createdBy: ownerId });
+    const handler = hooks.get("before_tool_call")!;
+
+    const unknown = (await handler(
+      {
+        toolName: "clickin__production-wiki_propose_create",
+        params: { title: "引用未知", body: "见 [[根本不存在的标题]]", summary: "测试" },
+        toolCallId: `call_${shortId()}`,
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      prodCtx(ownerId),
+    )) as { block?: boolean; blockReason?: string };
+    expect(unknown?.block).toBe(true);
+    expect(unknown?.blockReason).toContain("没有这个标题");
+
+    const restored = (await handler(
+      {
+        toolName: "clickin__production-wiki_propose_create",
+        params: { title: "引用已知", body: `见 [[${target.title}]]`, summary: "测试" },
+        toolCallId: `call_${shortId()}`,
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      prodCtx(ownerId),
+    )) as { block?: boolean; params?: Record<string, unknown>; requireApproval?: unknown };
+    expect(restored?.block).toBeUndefined();
+    expect(restored?.requireApproval).toBeTruthy(); // 校验通过 → 照常确认门
+    // 反解闭环：批准后执行的 body 已是 id 链接形态，与预持久化行一致
+    expect(restored?.params?.body).toBe(`见 [#](/__cm__/wiki/${target.id})`);
+  });
+
+  it("update 丢块锚点 → block 点名丢失的锚点", async () => {
+    const { createWiki } = await import("@/lib/wiki-db");
+    const doc = await createWiki({
+      productionId: prodId, title: `锚点文档${shortId()}`, createdBy: ownerId,
+      body: "第一段 ^ab12\n第二段 ^cd34",
+    });
+    const handler = hooks.get("before_tool_call")!;
+    const result = (await handler(
+      {
+        toolName: "clickin__production-wiki_propose_update",
+        params: { wikiId: doc.id, body: "第一段改写 ^ab12\n第二段被删了", summary: "测试" },
+        toolCallId: `call_${shortId()}`,
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      prodCtx(ownerId),
+    )) as { block?: boolean; blockReason?: string };
+    expect(result?.block).toBe(true);
+    expect(result?.blockReason).toContain("^cd34");
+  });
+});
+
+describe("方言说明三通道（#333 T1：温层跟页 / 冷层闭包 / dialect_ref 幂等）", () => {
+  let userId: string;
+  let prodId: string;
+
+  beforeAll(async () => {
+    ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `方言通道测试${shortId()}`, null, false));
+    ({ prodId } = await makeProduction(userId));
+  });
+
+  afterAll(async () => {
+    await cleanupProduction(prodId).catch(() => {});
+  });
+
+  function sessionCtx(uuid: string) {
+    return { sessionKey: `agent:team:clickin:chat:${userId}:${prodId}:${uuid}` };
+  }
+  // 用真实 builder 造信封（AI review #366-1）：inject.ts 的 isWikiFocused 靠
+  // 正则解析信封文本，手写字符串会让 builder 改格式时测试照样绿——耦合两端
+  // 必须共用同一生成器，格式漂移在这里变红。pageLabel 同样走真实注册表。
+  const WIKI_PAGE_PROMPT = buildUiContextMessage("这篇怎么优化一下结构？", {
+    pageLabel: pageLabelFor("prod:wiki"),
+  });
+
+  it("温层：文档库页面 → knowledge 段注入 appendSystemContext；dialect_ref 拿到幂等标志", async () => {
+    const ctx = sessionCtx("aaaaaaaa-0000-0000-0000-000000000001");
+    const promptOut = (await hooks.get("before_prompt_build")!(
+      { context: { pluginConfig: PLUGIN_CONFIG }, prompt: WIKI_PAGE_PROMPT },
+      ctx,
+    )) as { appendSystemContext?: string } | undefined;
+    const append = promptOut?.appendSystemContext ?? "";
+    expect(append).toContain("<clickin-knowledge>");
+    expect(append).toContain("私有方言");
+
+    const gated = (await hooks.get("before_tool_call")!(
+      {
+        toolName: "clickin__production-wiki_dialect_ref",
+        params: { _dialect_injected: false }, // 模型伪造 false 也会被覆写
+        toolCallId: `call_${shortId()}`,
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      ctx,
+    )) as { params?: Record<string, unknown> };
+    expect(gated?.params?._dialect_injected).toBe(true);
+  });
+
+  it("正打开文档（doc 信封变体，任意页面）→ 同样触发温层 knowledge", async () => {
+    const ctx = sessionCtx("aaaaaaaa-0000-0000-0000-000000000005");
+    const prompt = buildUiContextMessage("帮我看看这篇", {
+      pageLabel: pageLabelFor("prod:home"), // 非 wiki 页面，但开着一篇文档
+      doc: { wikiId: "3fa85f64-5717-4562-b3fc-2c963f66afa6", title: "排练笔记", tags: [] },
+    });
+    const promptOut = (await hooks.get("before_prompt_build")!(
+      { context: { pluginConfig: PLUGIN_CONFIG }, prompt },
+      ctx,
+    )) as { appendSystemContext?: string } | undefined;
+    expect(promptOut?.appendSystemContext ?? "").toContain("<clickin-knowledge>");
+  });
+
+  it("非文档页面 → 无 knowledge；dialect_ref 无标志（会返回全文）", async () => {
+    const ctx = sessionCtx("aaaaaaaa-0000-0000-0000-000000000002");
+    const promptOut = (await hooks.get("before_prompt_build")!(
+      { context: { pluginConfig: PLUGIN_CONFIG }, prompt: "今天排练几点开始？" },
+      ctx,
+    )) as { appendSystemContext?: string } | undefined;
+    expect(promptOut?.appendSystemContext ?? "").not.toContain("<clickin-knowledge>");
+
+    const gated = (await hooks.get("before_tool_call")!(
+      {
+        toolName: "clickin__production-wiki_dialect_ref",
+        params: {},
+        toolCallId: `call_${shortId()}`,
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      ctx,
+    )) as { params?: Record<string, unknown> };
+    expect(gated?.params?._dialect_injected).toBeUndefined();
+  });
+
+  it("冷层闭包：非文档页命中 wiki 写工具 → 召回带工具名+方言说明，dialect_ref 同轮已标已送达", async () => {
+    const ctx = sessionCtx("aaaaaaaa-0000-0000-0000-000000000003");
+    const promptOut = (await hooks.get("before_prompt_build")!(
+      { context: { pluginConfig: PLUGIN_CONFIG }, prompt: "帮我把今天的会议结论整理一下，修改文档补充进去" },
+      ctx,
+    )) as { prependContext?: string } | undefined;
+    const recall = promptOut?.prependContext ?? "";
+    expect(recall).toContain("production.wiki_propose_update"); // P2 中文工具召回
+    expect(recall).toContain("私有方言"); // 冷层闭包：说明书随召回一起出
+
+    const gated = (await hooks.get("before_tool_call")!(
+      {
+        toolName: "clickin__production-wiki_dialect_ref",
+        params: {},
+        toolCallId: `call_${shortId()}`,
+        context: { pluginConfig: PLUGIN_CONFIG },
+      },
+      ctx,
+    )) as { params?: Record<string, unknown> };
+    expect(gated?.params?._dialect_injected).toBe(true);
+  });
+
+  it("工具召回本身：中文消息 → recall 带确切工具名与 tool_describe 指引", async () => {
+    const ctx = sessionCtx("aaaaaaaa-0000-0000-0000-000000000004");
+    const promptOut = (await hooks.get("before_prompt_build")!(
+      { context: { pluginConfig: PLUGIN_CONFIG }, prompt: "帮我在文档库里搜索灯光相关的资料" },
+      ctx,
+    )) as { prependContext?: string } | undefined;
+    const recall = promptOut?.prependContext ?? "";
+    expect(recall).toContain("production.wiki_search");
+    expect(recall).toContain("tool_describe"); // 3b 下工具面被 Tool Search 收编后的取用指引
   });
 });

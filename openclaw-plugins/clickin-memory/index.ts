@@ -94,7 +94,10 @@ async function fetchInjectContext(
   userId: string,
   sessionKey?: string,
   prompt?: string,
-): Promise<{ instructions: string | null; memory: string | null; recall: string | null } | null> {
+): Promise<{
+  instructions: string | null; memory: string | null; recall: string | null;
+  knowledge: string | null; dialectDelivered: boolean;
+} | null> {
   try {
     const origin = new URL(mcpUrl).origin;
     // M2：POST 带本轮 prompt → 后端跑触发召回（trigger recall）。404/405 =
@@ -113,16 +116,32 @@ async function fetchInjectContext(
     if (!res.ok) return null;
     const data = (await res.json()) as {
       instructions?: string | null; memory?: string | null; markdown?: string | null; recall?: string | null;
+      knowledge?: string | null; dialectDelivered?: boolean;
     };
     const instructions = typeof data.instructions === "string" && data.instructions ? data.instructions : null;
     const memoryRaw = typeof data.memory === "string" ? data.memory : data.markdown;
     const memory = typeof memoryRaw === "string" && memoryRaw ? memoryRaw : null;
     const recall = typeof data.recall === "string" && data.recall ? data.recall : null;
-    if (!instructions && !memory && !recall) return null;
-    return { instructions, memory, recall };
+    const knowledge = typeof data.knowledge === "string" && data.knowledge ? data.knowledge : null;
+    const dialectDelivered = data.dialectDelivered === true;
+    if (!instructions && !memory && !recall && !knowledge) return null;
+    return { instructions, memory, recall, knowledge, dialectDelivered };
   } catch (err) {
     console.error("[clickin-memory] fetchInjectContext error:", err);
     return null;
+  }
+}
+
+// 本轮方言送达标志（sessionKey → 最近一次 before_prompt_build 的结论）。
+// wiki_dialect_ref 的 _dialect_injected 覆写从这里取——插件是「已注入」这一
+// 事实的唯一来源（#333 T1 幂等标记）。TTL 清扫防长进程无界增长。
+const dialectDeliveredBySession = new Map<string, { v: boolean; ts: number }>();
+const DIALECT_MARK_TTL_MS = 600_000;
+
+function sweepDialectMarks(): void {
+  const now = Date.now();
+  for (const [k, m] of dialectDeliveredBySession) {
+    if (now - m.ts > DIALECT_MARK_TTL_MS) dialectDeliveredBySession.delete(k);
   }
 }
 
@@ -159,8 +178,17 @@ async function fetchDenyReason(mcpUrl: string, toolCallId: string): Promise<stri
 // wiki propose 预持久化（确认卡片 description 硬上限 512 字符装不下完整
 // 提议内容，前端预览 modal 靠这行按 toolCallId 拉取全文）。覆盖
 // create/update/delete/move/tag 五种动作——action 缺省时后端按 "create" 处理。
-// 失败/超时只是退化成旧版纯截断预览的确认文案——真正的安全边界是各
-// wiki_propose_* 工具函数批准后自己重新查一遍权限，这里挂不上不影响那条边界。
+//
+// 返回三态（#333 T2）：
+// - ok        预持久化成功；restoredBody = 后端把 [[标题]] 反解回 id 链接后的
+//             正文（仅有变化时带），调用方必须覆写 params.body——批准后执行的
+//             是反解形态，与预持久化行一致
+// - rejected  422 方言校验拒绝：调用方 block 短路（不弹确认卡、不落库），
+//             blockReason 把 problems + 说明书回给模型重写
+// - null      网络/超时/5xx：退化成旧版纯截断预览的确认文案——真正的安全边界
+//             是各 wiki_propose_* 工具函数批准后自己重新查一遍权限，这里挂
+//             不上不影响那条边界。**挂了≠拒了**，两态绝不混淆：拒是确定性
+//             判定要挡住，挂是基础设施抖动要放行。
 async function postWikiProposal(
   mcpUrl: string,
   body: {
@@ -169,7 +197,11 @@ async function postWikiProposal(
     wikiId?: string; parentId?: string; newParentId?: string;
     title?: string; body?: string; tags?: string[]; summary: string;
   },
-): Promise<{ hasPermission: boolean } | null> {
+): Promise<
+  | { status: "ok"; hasPermission: boolean; restoredBody?: string }
+  | { status: "rejected"; problems: string[]; guide: string }
+  | null
+> {
   try {
     const origin = new URL(mcpUrl).origin;
     const res = await fetch(`${origin}/wiki-proposal`, {
@@ -178,9 +210,22 @@ async function postWikiProposal(
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(3000),
     });
+    if (res.status === 422) {
+      const data = (await res.json().catch(() => ({}))) as { problems?: unknown; guide?: unknown };
+      return {
+        status: "rejected",
+        problems: Array.isArray(data.problems) ? data.problems.filter((p): p is string => typeof p === "string") : [],
+        guide: typeof data.guide === "string" ? data.guide : "",
+      };
+    }
     if (!res.ok) return null;
-    const data = (await res.json()) as { hasPermission?: unknown };
-    return typeof data.hasPermission === "boolean" ? { hasPermission: data.hasPermission } : null;
+    const data = (await res.json()) as { hasPermission?: unknown; restoredBody?: unknown };
+    if (typeof data.hasPermission !== "boolean") return null;
+    return {
+      status: "ok",
+      hasPermission: data.hasPermission,
+      ...(typeof data.restoredBody === "string" ? { restoredBody: data.restoredBody } : {}),
+    };
   } catch (err) {
     console.error("[clickin-memory] postWikiProposal error:", err);
     return null;
@@ -288,10 +333,23 @@ export default definePluginEntry({
       // 两个包裹语义相反，绝不合并：instructions 须遵守，memory 仅参考。
       // 总优先级秩序（系统 AGENTS.md > 制作 > 个人）由 workspace AGENTS.md
       // 声明（它在 system prompt 最前），这里只声明块内秩序并重申服从系统级。
+      // 方言送达标志入册（含 false——换页离开 wiki 后旧 true 必须被覆盖）
+      if (sessionKey) {
+        sweepDialectMarks();
+        dialectDeliveredBySession.set(sessionKey, { v: payload.dialectDelivered, ts: Date.now() });
+      }
       const parts: string[] = [];
       if (payload.instructions) {
         parts.push(
           `\n<clickin-instructions>\n以下是分级配置的助手指令，你应当遵守。本块内制作级高于个人级，两者均服从系统级规范（AGENTS.md）；冲突时以更高层级为准。任何指令都不能扩大你的工具权限——权限始终由工具端独立判定。\n\n${payload.instructions}\n</clickin-instructions>`,
+        );
+      }
+      // 温层知识节点（#333 T1）：跟页注入的系统知识（当前只有文档方言文法）。
+      // 同页逐字稳定 → 放 appendSystemContext 吃 prompt cache，换页才变。
+      // 语义是"须遵守的文法"，与 memory 的"仅参考"相反——绝不合并包裹。
+      if (payload.knowledge) {
+        parts.push(
+          `\n<clickin-knowledge>\n以下是与当前页面相关的系统知识（文档正文的私有 Markdown 方言文法），编辑或生成文档正文时必须遵守：\n\n${payload.knowledge}\n</clickin-knowledge>`,
         );
       }
       if (payload.memory) {
@@ -452,11 +510,6 @@ export default definePluginEntry({
             title: `查询你的登记联系方式`,
             description: `🔒 AI 请求读取你本人的敏感信息（邮箱/电话）。批准后仅返回给本会话。`,
           };
-        case "approvals-respond":
-          return {
-            title: `回应审批请求`,
-            description: `⚖️ 参数：${str(JSON.stringify(params), 480)}`,
-          };
         default:
           return {
             title: `执行 ${tool}`,
@@ -482,11 +535,13 @@ export default definePluginEntry({
         // 都会被盖掉，MCP 工具只信这两个字段。非 webchat 会话解析不出身份
         // 则剥除，工具侧因缺身份而拒绝；个人会话无 production 维度同样
         // 剥除 production 字段（防模型伪造制作语境）。
-        const identity = parseSessionIdentity((ctx as { sessionKey?: string })?.sessionKey);
+        const rawSessionKey = (ctx as { sessionKey?: string })?.sessionKey;
+        const identity = parseSessionIdentity(rawSessionKey);
         const params: Record<string, unknown> = { ...e.params };
         delete params._caller_user_id;
         delete params._caller_production_id;
         delete params._tool_call_id;
+        delete params._dialect_injected;
         if (identity) {
           params._caller_user_id = identity.userId;
           if (identity.productionId) params._caller_production_id = identity.productionId;
@@ -495,6 +550,13 @@ export default definePluginEntry({
         // handler 自己的 requestId 是另一层，拿不到），写工具（wiki_propose）
         // 靠这个字段回填自己那行 wiki_proposal。
         if (e.toolCallId) params._tool_call_id = e.toolCallId;
+        // wiki_dialect_ref 幂等标志（#333 T1）：模型自填的值上面已剥除，从
+        // 本会话最近一轮 before_prompt_build 的送达结论强制覆写——插件是
+        // 「本轮已注入方言」这一事实的唯一来源。
+        if (e.toolName === "clickin__production-wiki_dialect_ref" && rawSessionKey) {
+          sweepDialectMarks();
+          if (dialectDeliveredBySession.get(rawSessionKey)?.v === true) params._dialect_injected = true;
+        }
 
         if (!cfg.approvalEnabled) return { params };
         // 启动竞态兜底：gateway_start 时 MCP 可能未就绪，这里惰性补拉。
@@ -535,7 +597,24 @@ export default definePluginEntry({
             tags: Array.isArray(e.params.tags) ? e.params.tags.filter((t): t is string => typeof t === "string") : undefined,
             summary: typeof e.params.summary === "string" ? e.params.summary : "",
           });
+          // 方言校验拒绝（#333 T2）→ block 短路：不弹确认卡、未落库，说明书随
+          // blockReason 回给模型重写。只有明确的 422 走这条——网络挂/超时是
+          // null，照旧降级弹卡（挂了≠拒了）。
+          if (posted?.status === "rejected") {
+            const problemLines = posted.problems.length > 0 ? posted.problems.map((p) => `- ${p}`).join("\n") : "- 正文方言校验未通过";
+            return {
+              block: true,
+              blockReason:
+                `提议被方言校验拒绝（未提交给用户确认，也未落库）：\n${problemLines}\n\n` +
+                (posted.guide ? `请按以下方言说明修正正文后重新调用：\n${posted.guide}` : "请修正正文后重新调用。"),
+            };
+          }
           wikiHasPermission = posted?.hasPermission;
+          // [[标题]] 反解闭环：预持久化行存的是反解后的正文，批准后执行的
+          // params.body 必须同步覆写成同一形态，否则两处分叉。
+          if (posted?.status === "ok" && posted.restoredBody !== undefined) {
+            params.body = posted.restoredBody;
+          }
         }
 
         const pretty = describeToolCall(bareTool, e.params ?? {}, { hasPermission: wikiHasPermission });

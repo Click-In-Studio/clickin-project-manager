@@ -4,7 +4,11 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import { z } from "zod";
 import http from "http";
 import type { Request, Response } from "express";
-import { WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "./wiki-link-syntax";
+import {
+  WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE,
+  WIKI_DIALECT_POINTER_WRITE, WIKI_DIALECT_POINTER_READ,
+} from "./wiki-link-syntax";
+import { extractDisplayTitles, restoreAndCheckBody } from "./wiki-dialect-check";
 import { INSTRUCTIONS_MAX_LEN } from "@/lib/agent-instructions";
 
 const rawPort = Number(process.env.MCP_PORT ?? 3101);
@@ -24,16 +28,9 @@ export function buildMcpServer(): McpServer {
     _tool_call_id: z.string().optional().describe("系统注入的调用 id，勿手动填写"),
   };
 
-  s.registerTool("approvals.list", {
-    description: "List pending approval requests for a production",
-    inputSchema: {
-      production_id: z.string().describe("Production ID"),
-      ...callerShape,
-    },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-  }, async ({ production_id }) => ({
-    content: [{ type: "text" as const, text: `[stub] approvals.list → production_id=${production_id}` }],
-  }));
+  // approvals.list（Phase 1 stub）已摘除（#333 T0）：它无权限校验、返回假
+  // 数据、且是唯一一个 production_id 由模型自填的工具（违反身份强制覆写
+  // 规则）——每轮白花 628 字符还可能污染回答。审批查询面将来按需求重建。
 
   // ─── 用户信息工具（Phase 5 首批真实工具）───────────────────────────────
   // _caller_user_id 由 clickin-memory 插件在 before_tool_call 里按
@@ -59,12 +56,12 @@ export function buildMcpServer(): McpServer {
   const myTools: Array<{ name: string; description: string; fn: (userId: string) => Promise<string> }> = [
     {
       name: "my.call_times",
-      description: `查询当前用户自己的近期Call（时间、事件、地点、所属制作）。${MY_SCOPE_NOTE}`,
+      description: `查询当前用户自己的近期Call（时间、事件、地点、所属制作）（EN: my call times schedule）。${MY_SCOPE_NOTE}`,
       fn: async (uid) => (await import("./my-tools")).myCallTimes(uid),
     },
     {
       name: "my.tech_reqs",
-      description: `查询与当前用户相关的技术需求/任务（被指派或作为部门负责人），含状态。${MY_SCOPE_NOTE}`,
+      description: `查询与当前用户相关的技术需求/任务（被指派或作为部门负责人），含状态（EN: my tech requirements tasks）。${MY_SCOPE_NOTE}`,
       fn: async (uid) => (await import("./my-tools")).myTechReqs(uid),
     },
     {
@@ -206,7 +203,7 @@ export function buildMcpServer(): McpServer {
   });
 
   s.registerTool("production.wiki_read", {
-    description: `按 id 读取一篇文档的完整内容（标题/标签/正文）。${WIKI_LINK_SYNTAX_NOTE}${WIKI_DIALECT_NOTE}`,
+    description: `按 id 读取一篇文档的完整内容（标题/标签/正文）（EN: wiki read document content）。${WIKI_DIALECT_POINTER_READ}`,
     inputSchema: { wikiId: z.string().describe("文档 id（来自 wiki_tree/wiki_search 的结果）"), ...callerShape },
     annotations: READ_ONLY,
   }, async ({ wikiId, _caller_user_id, _caller_production_id }) => {
@@ -227,6 +224,27 @@ export function buildMcpServer(): McpServer {
     return { content: [{ type: "text" as const, text: await wikiSearch(_caller_user_id, _caller_production_id, query) }] };
   });
 
+  // 方言说明显式通道（#333 T1）：说明书不再内联进各工具描述，模型需要写/读
+  // 正文而语境里没有说明时按指针来拉。_dialect_injected 由插件按「本轮
+  // /inject-context 是否已送达方言」强制覆写（幂等标志的唯一事实源在插件）——
+  // 已送达则不重复付一遍 1.4k 字符。纯静态文本，无权限面，个人会话也可调。
+  s.registerTool("production.wiki_dialect_ref", {
+    description: "获取文档库正文的私有 Markdown 方言完整说明（链接/嵌入/布局/锚点文法）" +
+      "（EN: wiki markdown dialect syntax reference）。写作或改写文档正文前，语境中没有方言说明时必须先调用本工具。",
+    inputSchema: {
+      ...callerShape,
+      _dialect_injected: z.boolean().optional().describe("系统注入：本轮方言说明是否已在语境中，勿手动填写"),
+    },
+    annotations: READ_ONLY,
+  }, async ({ _dialect_injected }) => ({
+    content: [{
+      type: "text" as const,
+      text: _dialect_injected
+        ? "方言说明已在当前语境中（见 <clickin-knowledge> 块或本轮召回内容），无需重复获取，直接按其文法写作即可。"
+        : `${WIKI_LINK_SYNTAX_NOTE}\n\n${WIKI_DIALECT_NOTE}`,
+    }],
+  }));
+
   // 四个写工具共用的门控原则（project_ai_infra 记忆）：非 readOnly → 插件
   // 门控挂确认门（原则①：有权限键但敏感，聊天栏确认后执行）。工具函数内部
   // 再查一遍权限——没有权限键的调用点（原则②）在这里被直接拦截，不执行，
@@ -236,8 +254,8 @@ export function buildMcpServer(): McpServer {
   };
 
   s.registerTool("production.wiki_propose_create", {
-    description: `在某篇文档下（或在根下）提议新建一篇子文档，需要人工在聊天栏确认；` +
-      `确认后若你没有新建文档的权限，调用会被直接拦截并转入审批流。${WIKI_LINK_SYNTAX_NOTE}${WIKI_DIALECT_NOTE}`,
+    description: `在某篇文档下（或在根下）提议新建一篇子文档（EN: wiki create new document），需要人工在聊天栏确认；` +
+      `确认后若你没有新建文档的权限，调用会被直接拦截并转入审批流。${WIKI_DIALECT_POINTER_WRITE}`,
     inputSchema: {
       parentId: z.string().optional().describe("父文档 id；建在文档库根下就整个省略这个字段，不要传空字符串"),
       title: z.string().describe("新文档标题"),
@@ -256,8 +274,8 @@ export function buildMcpServer(): McpServer {
   });
 
   s.registerTool("production.wiki_propose_update", {
-    description: `提议修改一篇既有文档的标题和/或正文（只传要改的字段，不传的保持不变），` +
-      `需要人工在聊天栏确认；确认后若你没有编辑这篇文档的权限，调用会被直接拦截并转入审批流。${WIKI_LINK_SYNTAX_NOTE}${WIKI_DIALECT_NOTE}`,
+    description: `提议修改一篇既有文档的标题和/或正文（只传要改的字段，不传的保持不变）（EN: wiki update edit document），` +
+      `需要人工在聊天栏确认；确认后若你没有编辑这篇文档的权限，调用会被直接拦截并转入审批流。${WIKI_DIALECT_POINTER_WRITE}`,
     inputSchema: {
       wikiId: z.string().describe("要修改的文档 id（来自 wiki_tree/wiki_search 的结果）"),
       title: z.string().optional().describe("新标题；不改标题就整个省略这个字段"),
@@ -411,7 +429,7 @@ export function buildMcpServer(): McpServer {
     // 刻意不标 readOnlyHint: true —— 插件的 fail-closed 门控会因此把它
     // 当写工具挂确认门（"AI 想查询你的联系方式" → 用户批准/拒绝）。
     // 敏感信息即使目标是自己也要确认；确认语义纯靠 annotations 表达。
-    description: "查询当前用户自己的登记联系方式（邮箱/电话）。敏感信息，需用户确认。",
+    description: "查询当前用户自己的登记联系方式（邮箱/电话）（EN: my contact email phone）。敏感信息，需用户确认。",
     inputSchema: { ...callerShape },
     annotations: { openWorldHint: false, destructiveHint: false },
   }, async ({ _caller_user_id }) => {
@@ -491,7 +509,15 @@ export function startMcpServer(): void {
     try {
       const { buildInjectContext } = await import("../agent-memory/inject");
       const payload = await buildInjectContext(userId, sessionKey, prompt);
-      res.json({ instructions: payload.instructions, memory: payload.memory, recall: payload.recall });
+      res.json({
+        instructions: payload.instructions,
+        memory: payload.memory,
+        recall: payload.recall,
+        // #333 T1：温层知识节点 + 方言送达标志（旧插件读不到这两个字段，
+        // 行为与拆分前一致——渐进安全，同 GET 版 markdown 兼容字段的思路）
+        knowledge: payload.knowledge,
+        dialectDelivered: payload.dialectDelivered,
+      });
     } catch (err) {
       console.error("[mcp] /inject-context POST error:", err);
       res.status(500).json({ error: "internal error" });
@@ -570,6 +596,46 @@ export function startMcpServer(): void {
       const { canEditWiki, canDeleteWiki } = await import("../wiki-perm");
       const { insertWikiProposal } = await import("../wiki-proposal-db");
 
+      // ── 方言校验 + [[标题]] 反解（#333 T2，真门）────────────────────────
+      // wiki_read 给模型看的是 [[标题]] 显示形态且指引"原样留着"，直接落库
+      // 会打断链接边（extractMentionEdges 只认 id 形态）——无歧义的反解回
+      // id 链接，歧义/未知/旧形态/锚点丢失才拒。422 由插件转成 block 短路
+      // （blockReason 带说明书回模型重写），确认卡片根本不弹。
+      // 校验失败**不落 wiki_proposal 行**：没有卡片就没有预览，落了是孤儿行。
+      let effectiveBody = docBody;
+      let bodyRestored = false;
+      if ((action === "create" || action === "update") && docBody) {
+        const titles = extractDisplayTitles(docBody);
+        const titleIds = new Map<string, string[]>();
+        if (titles.length > 0) {
+          const rows = await (await import("../pg")).getPool().query<{ id: string; title: string }>(
+            `SELECT id::text AS id, title FROM wiki WHERE production_id = $1 AND title = ANY($2::text[])`,
+            [productionId, titles],
+          );
+          for (const r of rows.rows) {
+            const list = titleIds.get(r.title) ?? [];
+            list.push(r.id);
+            titleIds.set(r.title, list);
+          }
+        }
+        let oldBody: string | null = null;
+        if (action === "update") {
+          const { getWiki } = await import("../wiki-db");
+          oldBody = (await getWiki(wikiId, productionId))?.body ?? null;
+        }
+        const checked = restoreAndCheckBody(docBody, titleIds, oldBody);
+        if (!checked.ok) {
+          res.status(422).json({
+            error: "dialect_violation",
+            problems: checked.problems,
+            guide: `${WIKI_LINK_SYNTAX_NOTE}\n\n${WIKI_DIALECT_NOTE}`,
+          });
+          return;
+        }
+        effectiveBody = checked.body;
+        bodyRestored = checked.restoredCount > 0;
+      }
+
       let hasPermission = false;
       let reason: "not_member" | "archived" | "no_grant" | null = null;
       const resolved = await resolveProductionActor(callerUserId, productionId);
@@ -594,9 +660,15 @@ export function startMcpServer(): void {
       const proposal = await insertWikiProposal({
         productionId, toolCallId, proposedBy: callerUserId, action,
         targetWikiId: action === "create" ? null : wikiId, parentWikiId,
-        title, body: docBody, tags, summary, hasPermission, permissionKey,
+        title, body: effectiveBody, tags, summary, hasPermission, permissionKey,
       });
-      res.json({ id: proposal.id, hasPermission, reason });
+      // restoredBody：反解后的正文（仅在有变化时返回）。插件据此覆写工具调用
+      // 的 params.body——批准后真正执行的必须是反解形态，否则预持久化行与
+      // 实际落库内容分叉，[[标题]] 反解也就白做了。
+      res.json({
+        id: proposal.id, hasPermission, reason,
+        ...(bodyRestored ? { restoredBody: effectiveBody } : {}),
+      });
     } catch (err) {
       console.error("[mcp] /wiki-proposal error:", err);
       res.status(500).json({ error: "internal error" });
