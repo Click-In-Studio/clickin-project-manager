@@ -150,8 +150,8 @@ export default function DurationInput({
         ref={containerRef}
         className={`min-h-8 rounded border px-2 py-1.5 text-xs transition-colors ${
           canEdit
-            ? "cursor-pointer border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50"
-            : "cursor-default border-transparent text-zinc-600"
+            ? "cursor-pointer border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50"
+            : "cursor-default border-transparent"
         } ${className}`}
         onClick={startEditing}
       >

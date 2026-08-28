@@ -583,9 +583,7 @@ export default function SceneTableView({
                   className="group/resize absolute -right-1.5 top-0 z-20 flex h-full w-3 cursor-col-resize items-center justify-center"
                   onMouseDown={(e) => handleResizeStart(e, col.key)}
                   title={`拖动调整「${col.label}」列宽`}
-                  role="separator"
-                  aria-label={`调整${col.label}列宽`}
-                  aria-orientation="vertical"
+                  aria-hidden="true"
                 >
                   <span className="h-6 w-px rounded-full bg-zinc-300 transition-all group-hover/resize:h-8 group-hover/resize:w-0.5 group-hover/resize:bg-zinc-500" />
                 </div>

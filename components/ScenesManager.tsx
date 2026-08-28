@@ -243,7 +243,7 @@ function SceneEditRow({
               <div className="space-y-1">
                 <label className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">预期时长</label>
                 {chapterDurationDisplay ? (
-                  <p className="min-h-8 rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs text-zinc-700">
+                  <p className="min-h-8 rounded border border-transparent px-2 py-1.5 text-xs text-zinc-600">
                     {chapterDurationDisplay.hasMissingDuration && !(canEdit && fieldPerms.expectedDuration)
                       ? <span className="italic text-zinc-300">—</span>
                       : chapterDurationDisplay.text || <span className="italic text-zinc-300">—</span>}
