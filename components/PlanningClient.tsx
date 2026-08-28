@@ -12,7 +12,7 @@ import OverflowSafeSelect from "@/components/OverflowSafeSelect";
  * 部门 POC（policy 开关，活引用判定），与 API 同门；此处布尔仅控 UI 显隐。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { dateTimeToIso, fmtDate, fmtTime, isoCSTDateStr, todayCSTStr } from "@/lib/tz";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -1059,7 +1059,112 @@ function withTime(iso: string, value: string): string {
   return dateTimeToIso(isoCSTDateStr(iso), value);
 }
 
-function RundownColumnEditor({ column, departments, members, roles, onChange, onRename, onToggleValue, onToggleRole, onDelete, onClose }: {
+type MultiSelectOption = { value: string; label: string; searchText?: string };
+
+export function SearchableMultiSelect({ label, options, selectedValues, onToggle, emptyText = "暂无可选项" }: {
+  label: string;
+  options: MultiSelectOption[];
+  selectedValues: string[];
+  onToggle: (value: string) => void;
+  emptyText?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const listboxId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selectedSet = useMemo(() => new Set(selectedValues), [selectedValues]);
+  const selectedOptions = options.filter(option => selectedSet.has(option.value));
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    if (!needle) return options;
+    return options.filter(option => `${option.label} ${option.searchText ?? ""}`.toLocaleLowerCase().includes(needle));
+  }, [options, query]);
+
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !rootRef.current?.contains(target)) {
+        setOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [open]);
+
+  const summary = selectedOptions.length === 0
+    ? "请选择"
+    : selectedOptions.length <= 2
+      ? selectedOptions.map(option => option.label).join("、")
+      : `已选择 ${selectedOptions.length} 项`;
+
+  return (
+    <div ref={rootRef} className={styles.searchableMultiSelect}>
+      <button
+        type="button"
+        role="combobox"
+        aria-label={`${label}，${summary}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        className={styles.multiSelectTrigger}
+        onClick={() => setOpen(value => !value)}
+        onKeyDown={event => {
+          if (event.key === "Escape") {
+            setOpen(false);
+            setQuery("");
+          }
+        }}
+      >
+        <span>{summary}</span>
+        <small>{selectedOptions.length > 0 ? `${selectedOptions.length} 项` : ""}</small>
+        <i aria-hidden="true">{open ? "▴" : "▾"}</i>
+      </button>
+      {open && (
+        <div id={listboxId} className={styles.multiSelectMenu} role="listbox" aria-label={`${label}选项`} aria-multiselectable="true">
+          <div className={styles.multiSelectSearch}>
+            <span aria-hidden="true">⌕</span>
+            <input
+              autoFocus
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === "Escape") {
+                  setOpen(false);
+                  setQuery("");
+                }
+              }}
+              placeholder={`搜索${label}…`}
+              aria-label={`搜索${label}`}
+            />
+          </div>
+          <div className={styles.multiSelectOptions}>
+            {filtered.map(option => {
+              const selected = selectedSet.has(option.value);
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  className={selected ? styles.multiSelectOptionActive : undefined}
+                  onClick={() => onToggle(option.value)}
+                >
+                  <span aria-hidden="true">{selected ? "✓" : ""}</span>
+                  <b>{option.label}</b>
+                </button>
+              );
+            })}
+            {filtered.length === 0 && <p>{options.length === 0 ? emptyText : "没有匹配项"}</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function RundownColumnEditor({ column, departments, members, roles, onChange, onRename, onToggleValue, onToggleRole, onDelete, onClose }: {
   column: RundownColumn;
   departments: PlanningDept[];
   members: PlanningMember[];
@@ -1075,6 +1180,10 @@ function RundownColumnEditor({ column, departments, members, roles, onChange, on
 }) {
   const [draftName, setDraftName] = useState(column.name);
   useEffect(() => { setDraftName(column.name); }, [column.id, column.name]);
+  const roleSelections = roles.filter(role => {
+    const roleUserIds = members.filter(member => member.roles.includes(role)).map(member => member.userId);
+    return roleUserIds.length > 0 && roleUserIds.every(userId => column.userIds.includes(userId));
+  });
   return (
     <div className={styles.columnEditor} role="dialog" aria-label={`编辑人员组 ${column.name}`} onClick={event => event.stopPropagation()}>
       <div className={styles.inlineEditorHeader}>
@@ -1092,16 +1201,43 @@ function RundownColumnEditor({ column, departments, members, roles, onChange, on
         <span>{column.pinned ? "▣" : "▢"}</span>
         <span><b>{column.pinned ? "取消钉住此列" : "钉住此列"}</b><small>横向滚动时保持在左侧</small></span>
       </button>
-      <div className={styles.optionSection}><b>部门</b><div className={styles.multiPicker}>{departments.map(dept => <button key={dept.id} type="button" className={`${styles.toggleChip} ${column.departmentIds.includes(dept.id) ? styles.toggleChipActive : ""}`} onClick={() => onToggleValue("departmentIds", dept.id)}>{dept.name}</button>)}</div></div>
+      <div className={styles.optionSection}>
+        <b>部门</b>
+        <SearchableMultiSelect
+          label="部门"
+          options={departments.map(department => ({ value: department.id, label: department.name }))}
+          selectedValues={column.departmentIds}
+          onToggle={value => onToggleValue("departmentIds", value)}
+        />
+      </div>
       {/* 角色是「按角色批量勾人」的快捷方式，不落库——role 是项目可配置表，会改名。
-          chip 的高亮由「该角色的人是否都已在名单里」推导。 */}
-      <div className={styles.optionSection}><b>按角色批量选人</b><div className={styles.multiPicker}>{roles.map(role => {
-        const roleUserIds = members.filter(m => m.roles.includes(role)).map(m => m.userId);
-        const allIn = roleUserIds.length > 0 && roleUserIds.every(uid => column.userIds.includes(uid));
-        return <button key={role} type="button" className={`${styles.toggleChip} ${allIn ? styles.toggleChipActive : ""}`} onClick={() => onToggleRole(role)}>{role}</button>;
-      })}</div></div>
-      <div className={styles.optionSection}><b>个人</b><div className={styles.multiPicker}>{members.map(member => <button key={member.userId} type="button" className={`${styles.toggleChip} ${column.userIds.includes(member.userId) ? styles.toggleChipActive : ""}`} onClick={() => onToggleValue("userIds", member.userId)}>{member.name}</button>)}</div></div>
-      <button type="button" className={styles.deleteAction} onClick={onDelete}>删除此人员组</button>
+          选中态由「该角色的人是否都已在名单里」推导。 */}
+      <div className={styles.optionSection}>
+        <b>按角色批量选人</b>
+        <SearchableMultiSelect
+          label="角色"
+          options={roles.map(role => ({ value: role, label: role }))}
+          selectedValues={roleSelections}
+          onToggle={onToggleRole}
+        />
+      </div>
+      <div className={styles.optionSection}>
+        <b>个人</b>
+        <SearchableMultiSelect
+          label="个人"
+          options={members.map(member => ({
+            value: member.userId,
+            label: member.name,
+            searchText: member.roles.join(" "),
+          }))}
+          selectedValues={column.userIds}
+          onToggle={value => onToggleValue("userIds", value)}
+        />
+      </div>
+      <div className={styles.columnEditorFooter}>
+        <button type="button" className={styles.deleteAction} onClick={onDelete}>删除此人员组</button>
+        <button type="button" className={styles.primaryEditorAction} onClick={onClose}>完成</button>
+      </div>
     </div>
   );
 }
