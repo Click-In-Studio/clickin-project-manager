@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { abortChatRun } from "@/lib/agent-gateway/client";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
+import { shouldUseRunner } from "@/lib/agent-runtime/dispatch";
+import { abortRun } from "@/lib/agent-runtime/service";
 
 export const runtime = "nodejs";
 
@@ -23,7 +25,7 @@ export async function POST(req: NextRequest) {
   if (denied) return denied;
 
   try {
-    const aborted = await abortChatRun(sessionKey);
+    const aborted = (await shouldUseRunner(sessionKey)) ? await abortRun(sessionKey) : await abortChatRun(sessionKey);
     return NextResponse.json({ aborted });
   } catch (err) {
     return toErrorResponse(err);

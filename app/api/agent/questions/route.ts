@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getQuestionSessionKey, listSessionQuestions, resolveQuestion, sessionKeyOwnedBy } from "@/lib/agent-gateway/client";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
+import { shouldUseRunner } from "@/lib/agent-runtime/dispatch";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,8 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   try {
-    const questions = await listSessionQuestions(sessionKey);
+    // 自建运行时（#367）：ask_user 工具尚未落地（S2 后续），先按无待答问题处理
+    const questions = (await shouldUseRunner(sessionKey)) ? [] : await listSessionQuestions(sessionKey);
     return NextResponse.json({ questions });
   } catch (err) {
     return toErrorResponse(err);

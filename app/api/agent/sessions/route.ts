@@ -5,6 +5,7 @@ import { getProductionPermissionContext, listMyProductionsWithRoles, getUserProf
 import { requireProductionFeature } from "@/lib/plan";
 import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
 import { PRODUCTION_ID_RE } from "@/lib/mcp/session-identity";
+import { listSessions as listRunnerSessions } from "@/lib/agent-runtime/service";
 
 export const runtime = "nodejs";
 
@@ -13,10 +14,20 @@ export async function GET(req: NextRequest) {
   if (auth instanceof NextResponse) return auth;
 
   try {
-    // listChatSessions self-connects (lazy singleton), so getStatus() right
-    // after reflects the actual connection outcome — including the
-    // unconfigured/pairing_required states the UI banner needs.
-    const sessions = await listChatSessions(auth.userId);
+    // 分流（#367）：自建运行时的会话从 agent_session 列；网关会话照旧。灰度期两边
+    // 并集，按 updatedAt 排序——用户看到的是一张表。AGENT_RUNTIME=runner 时不再连
+    // 网关（也不向 UI 报网关的 unconfigured/pairing 横幅）。
+    const runnerOnly = process.env.AGENT_RUNTIME === "runner";
+    const [runnerSessions, gatewaySessions] = await Promise.all([
+      listRunnerSessions(auth.userId),
+      // listChatSessions self-connects (lazy singleton), so getStatus() right
+      // after reflects the actual connection outcome — including the
+      // unconfigured/pairing_required states the UI banner needs.
+      runnerOnly ? Promise.resolve([]) : listChatSessions(auth.userId),
+    ]);
+    const runnerKeys = new Set(runnerSessions.map((s) => s.key));
+    const sessions = [...runnerSessions, ...gatewaySessions.filter((s) => !runnerKeys.has(s.key))]
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     // 新建对话选择器需要的制作列表（未归档）——与页面同一套查询
     const profile = await getUserProfile(auth.userId);
     const productions = (
@@ -24,7 +35,7 @@ export async function GET(req: NextRequest) {
     )
       .filter((p) => !p.archivedAt)
       .map((p) => ({ id: p.id, name: p.name }));
-    return NextResponse.json({ sessions, productions, gatewayStatus: getStatus() });
+    return NextResponse.json({ sessions, productions, gatewayStatus: runnerOnly ? { state: "connected" } : getStatus() });
   } catch (err) {
     return toErrorResponse(err);
   }
