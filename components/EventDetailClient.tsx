@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import React, { useState, useCallback, useMemo, Fragment } from "react";
 import Link from "next/link";
 import TreePickerModal from "@/components/TreePickerModal";
@@ -152,13 +154,13 @@ function InfoTab({
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs text-zinc-500 mb-1">类型</label>
-            <select value={eventType} onChange={e => setEventType(e.target.value)}
+            <OverflowSafeSelect value={eventType} onChange={e => setEventType(e.target.value)}
               className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400">
               <option value="rehearsal">排练</option>
               <option value="performance">演出</option>
               <option value="meeting">会议</option>
               <option value="custom">其他</option>
-            </select>
+            </OverflowSafeSelect>
           </div>
           <div>
             <label className="block text-xs text-zinc-500 mb-1">地点</label>
@@ -646,10 +648,10 @@ function ScheduleTab({
             <div className="grid grid-cols-2 gap-2">
               <input placeholder="流程标题 *" value={newTitle} onChange={e => setNewTitle(e.target.value)}
                 className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
-              <select value={newType} onChange={e => setNewType(e.target.value)}
+              <OverflowSafeSelect value={newType} onChange={e => setNewType(e.target.value)}
                 className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400">
                 {Object.entries(SCHEDULE_ITEM_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
+              </OverflowSafeSelect>
               <input placeholder="地点" value={newLoc} onChange={e => setNewLoc(e.target.value)}
                 className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
               {singleDay ? (
@@ -830,10 +832,10 @@ function ScheduleItemRow({
         <div className="grid grid-cols-2 gap-2">
           <input value={title} onChange={e => setTitle(e.target.value)}
             className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
-          <select value={itemType} onChange={e => setItemType(e.target.value)}
+          <OverflowSafeSelect value={itemType} onChange={e => setItemType(e.target.value)}
             className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400">
             {Object.entries(SCHEDULE_ITEM_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          </OverflowSafeSelect>
           <input placeholder="地点" value={location} onChange={e => setLocation(e.target.value)}
             className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
           {singleDay ? (
@@ -1123,10 +1125,10 @@ function ScheduleItemModal({
         <div className="grid grid-cols-2 gap-2">
           <input placeholder="流程标题 *" value={title} onChange={e => setTitle(e.target.value)}
             className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
-          <select value={itemType} onChange={e => setItemType(e.target.value)}
+          <OverflowSafeSelect value={itemType} onChange={e => setItemType(e.target.value)}
             className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400">
             {Object.entries(SCHEDULE_ITEM_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          </OverflowSafeSelect>
           <input placeholder="地点" value={location} onChange={e => setLocation(e.target.value)}
             className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
           {singleDay ? (
@@ -2111,7 +2113,7 @@ function TechReqTab({
                 className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
               <SmartTextarea value={newDesc} onChange={setNewDesc} contentMention={{ productionId, versionId }} rows={2} placeholder="描述"
                 className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400 resize-none" />
-              <select value={newDeptId} onChange={e => {
+              <OverflowSafeSelect value={newDeptId} onChange={e => {
                   const next = e.target.value;
                   setNewDeptId(next);
                   if (next) {
@@ -2125,7 +2127,7 @@ function TechReqTab({
                 {departments
                   .filter(d => canEdit || pocDeptIds.includes(d.id))
                   .map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
+              </OverflowSafeSelect>
               <input type="number" placeholder="提前分钟（可选）" value={newPreset} onChange={e => setNewPreset(e.target.value)}
                 className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
             </div>
@@ -2460,13 +2462,13 @@ function ReportsTab({
             <div className="grid grid-cols-2 gap-2">
               <input placeholder="记录标题 *" value={newTitle} onChange={e => setNewTitle(e.target.value)}
                 className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400" />
-              <select value={newType} onChange={e => setNewType(e.target.value)}
+              <OverflowSafeSelect value={newType} onChange={e => setNewType(e.target.value)}
                 className="col-span-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:border-zinc-400">
                 <option value="rehearsal">排练记录</option>
                 <option value="performance">演出记录</option>
                 <option value="meeting">会议纪要</option>
                 <option value="custom">其他</option>
-              </select>
+              </OverflowSafeSelect>
             </div>
             <div className="flex gap-2">
               <button onClick={createReport}
@@ -2741,10 +2743,10 @@ function DeptNotesList({
       {!isPublished && departments.length > 0 && (
         <div className="flex flex-col gap-1.5 mt-1">
           <div className="flex gap-2">
-            <select value={newDeptId} onChange={e => setNewDeptId(e.target.value)}
+            <OverflowSafeSelect value={newDeptId} onChange={e => setNewDeptId(e.target.value)}
               className="rounded-lg border border-zinc-200 px-2 py-1.5 text-xs focus:outline-none shrink-0">
               {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
+            </OverflowSafeSelect>
             <button onClick={addNote}
               className="ml-auto px-3 py-1.5 rounded-lg bg-zinc-800 text-white text-xs font-medium shrink-0">添加</button>
           </div>

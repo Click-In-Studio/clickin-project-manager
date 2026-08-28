@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useEffect, useState } from "react";
 import AdminModal from "@/components/AdminModal";
 import Badge from "@/components/Badge";
@@ -164,11 +166,11 @@ export default function InviteModal({ productionId, roleNames, depts, onClose }:
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <label style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>有效期</label>
-            <select value={expiresInDays} onChange={e => setExpiresInDays(Number(e.target.value))} style={FIELD}>
+            <OverflowSafeSelect value={expiresInDays} onChange={e => setExpiresInDays(Number(e.target.value))} style={FIELD}>
               <option value={1}>1 天</option>
               <option value={7}>7 天</option>
               <option value={30}>30 天</option>
-            </select>
+            </OverflowSafeSelect>
             <label style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>次数上限</label>
             <input
               value={maxUses}

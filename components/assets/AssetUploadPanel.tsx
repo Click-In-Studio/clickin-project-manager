@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { AssetType } from "@/lib/asset-db";
 import { BASE_PATH } from "@/lib/base-path";
@@ -600,14 +602,14 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel }:
       {/* Asset type */}
       <div>
         <label className="block text-xs text-zinc-400 mb-1.5">类型</label>
-        <select
+        <OverflowSafeSelect
           value={assetType}
           onChange={e => setAssetType(e.target.value as AssetType)}
           className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400 bg-white">
           {(Object.entries(ASSET_TYPE_LABELS) as [AssetType, string][]).map(([v, l]) => (
             <option key={v} value={v}>{l}</option>
           ))}
-        </select>
+        </OverflowSafeSelect>
       </div>
 
       {error && <p className="text-xs text-red-500">{error}</p>}

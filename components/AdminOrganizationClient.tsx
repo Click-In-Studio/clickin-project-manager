@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useMemo, useState } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import Badge from "@/components/Badge";
@@ -794,7 +796,7 @@ function DeptDetail({
           </div>
           <div>
             <p style={SECTION_LABEL}>类型</p>
-            <select
+            <OverflowSafeSelect
               value={dept.kind}
               disabled={busy}
               onChange={e => {
@@ -805,7 +807,7 @@ function DeptDetail({
             >
               <option value="dept">部门</option>
               <option value="group">用户组</option>
-            </select>
+            </OverflowSafeSelect>
           </div>
           <div>
             <p style={SECTION_LABEL}>子部门</p>
@@ -844,13 +846,13 @@ function DeptDetail({
               value={childName} onChange={e => setChildName(e.target.value)} placeholder="名称" autoFocus
               style={{ padding: "9px 11px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)" }}
             />
-            <select
+            <OverflowSafeSelect
               value={childKind} onChange={e => setChildKind(e.target.value === "group" ? "group" : "dept")}
               style={{ padding: "9px 11px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)" }}
             >
               <option value="dept">部门</option>
               <option value="group">用户组</option>
-            </select>
+            </OverflowSafeSelect>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button style={SECONDARY_BTN} onClick={() => setChildOpen(false)}>取消</button>
               <button
@@ -972,14 +974,14 @@ function NewDeptForm({ depts, busy, onCreate }: {
         <AdminModal kicker="组织架构" title="新建部门 / 用户组" onClose={() => setOpen(false)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="名称" autoFocus style={FIELD} />
-            <select value={parentId} onChange={e => setParentId(e.target.value)} style={FIELD}>
+            <OverflowSafeSelect value={parentId} onChange={e => setParentId(e.target.value)} style={FIELD}>
               <option value="">（顶级）</option>
               {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-            <select value={kind} onChange={e => setKind(e.target.value === "group" ? "group" : "dept")} style={FIELD}>
+            </OverflowSafeSelect>
+            <OverflowSafeSelect value={kind} onChange={e => setKind(e.target.value === "group" ? "group" : "dept")} style={FIELD}>
               <option value="dept">部门</option>
               <option value="group">用户组</option>
-            </select>
+            </OverflowSafeSelect>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button style={SECONDARY_BTN} onClick={() => setOpen(false)}>取消</button>
               <button style={PRIMARY_BTN} disabled={busy || !name.trim()}

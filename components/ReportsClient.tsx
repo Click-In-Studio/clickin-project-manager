@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import type { MyReportEntry } from "@/lib/event-db";
@@ -81,7 +83,7 @@ export default function ReportsClient() {
           <div className={styles.mobileOnly}>
             <div className={styles.mobileTaskFilterBar}>
               {productions.length > 1 && (
-                <select
+                <OverflowSafeSelect
                   value={selectedProduction}
                   onChange={e => setSelectedProduction(e.target.value)}
                   style={{
@@ -94,7 +96,7 @@ export default function ReportsClient() {
                   {productions.map(([id, name]) => (
                     <option key={id} value={id}>{name} ({reports.filter(r => r.productionId === id).length})</option>
                   ))}
-                </select>
+                </OverflowSafeSelect>
               )}
               {typeOptions.length > 1 && (
                 <div className={styles.mobileTaskStatusScroll}>

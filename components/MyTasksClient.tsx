@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import type { MyTechReqFullEntry } from "@/lib/event-db";
@@ -153,7 +155,7 @@ export default function MyTasksClient() {
           <div className={styles.mobileOnly}>
             <div className={styles.mobileTaskFilterBar}>
               {productions.length > 1 && (
-                <select
+                <OverflowSafeSelect
                   value={selectedProduction}
                   onChange={e => setSelectedProduction(e.target.value)}
                   style={{
@@ -166,7 +168,7 @@ export default function MyTasksClient() {
                   {productions.map(([id, name]) => (
                     <option key={id} value={id}>{name} ({countForProd(id)})</option>
                   ))}
-                </select>
+                </OverflowSafeSelect>
               )}
               <div className={styles.mobileTaskStatusScroll}>
                 {(["active", "awaiting", "pending", "in_progress", "done"] as StatusFilter[]).map(sf => (
@@ -219,7 +221,7 @@ export default function MyTasksClient() {
                         <div className={styles.mobileTaskCardDetail}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
                             <span style={{ fontSize: 11, color: "var(--muted)" }}>更新状态</span>
-                            <select
+                            <OverflowSafeSelect
                               disabled={updating}
                               value={t.status}
                               onChange={e => updateStatus(t, e.target.value)}
@@ -234,7 +236,7 @@ export default function MyTasksClient() {
                               {VALID_STATUSES.map(s => (
                                 <option key={s} value={s}>{STATUS_LABEL[s]}</option>
                               ))}
-                            </select>
+                            </OverflowSafeSelect>
                           </div>
 
                           {t.departmentName && (
@@ -414,7 +416,7 @@ export default function MyTasksClient() {
                         }}>
                           {visibleSelected.title || "待填写需求名称…"}
                         </h2>
-                        <select
+                        <OverflowSafeSelect
                           disabled={updating}
                           value={visibleSelected.status}
                           onChange={e => updateStatus(visibleSelected, e.target.value)}
@@ -429,7 +431,7 @@ export default function MyTasksClient() {
                           {VALID_STATUSES.map(s => (
                             <option key={s} value={s}>{STATUS_LABEL[s]}</option>
                           ))}
-                        </select>
+                        </OverflowSafeSelect>
                       </div>
 
                       {visibleSelected.departmentName && (

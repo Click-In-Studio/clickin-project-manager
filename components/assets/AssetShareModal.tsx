@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 
@@ -109,7 +111,7 @@ export default function AssetShareModal({ productionId, assetId, assetName, user
           {/* Expiry */}
           <div>
             <p className="text-xs font-medium text-zinc-500 mb-2">有效期</p>
-            <select
+            <OverflowSafeSelect
               value={expiresInDays}
               onChange={e => setExpiresInDays(Number(e.target.value))}
               className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 outline-none focus:border-zinc-400"
@@ -117,7 +119,7 @@ export default function AssetShareModal({ productionId, assetId, assetName, user
               {EXPIRY_OPTIONS.map(o => (
                 <option key={o.days} value={o.days}>{o.label}</option>
               ))}
-            </select>
+            </OverflowSafeSelect>
           </div>
 
           {error && <p className="text-xs text-red-500">{error}</p>}

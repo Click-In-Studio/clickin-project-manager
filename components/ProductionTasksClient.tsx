@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -882,7 +884,7 @@ export default function ProductionTasksClient({
       <div className={styles.mobileOnly}>
         <div className={styles.mobileTaskFilterBar}>
           {(events.length + (hasStandalone ? 1 : 0)) > 1 && (
-            <select
+            <OverflowSafeSelect
               value={selectedEvent}
               onChange={e => setSelectedEvent(e.target.value)}
               style={{
@@ -898,10 +900,10 @@ export default function ProductionTasksClient({
               {events.map(([id, title]) => (
                 <option key={id} value={id}>{title} ({countFor(statusFilter, id, selectedDept)})</option>
               ))}
-            </select>
+            </OverflowSafeSelect>
           )}
           {depts.length > 0 && (
-            <select
+            <OverflowSafeSelect
               value={selectedDept}
               onChange={e => setSelectedDept(e.target.value)}
               style={{
@@ -914,7 +916,7 @@ export default function ProductionTasksClient({
               {depts.map(([id, name]) => (
                 <option key={id} value={id}>{name} ({countFor(statusFilter, selectedEvent, id)})</option>
               ))}
-            </select>
+            </OverflowSafeSelect>
           )}
           <div className={styles.mobileTaskStatusScroll}>
             {statusFilters.map(sf => (
@@ -969,7 +971,7 @@ export default function ProductionTasksClient({
                     <div className={styles.mobileTaskCardDetail}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
                         <span style={{ fontSize: 11, color: "var(--muted)" }}>更新状态</span>
-                        <select
+                        <OverflowSafeSelect
                           disabled={updating}
                           value={t.status}
                           onChange={e => updateStatus(t, e.target.value)}
@@ -983,7 +985,7 @@ export default function ProductionTasksClient({
                           {VALID_STATUSES.map(s => (
                             <option key={s} value={s}>{STATUS_LABEL[s]}</option>
                           ))}
-                        </select>
+                        </OverflowSafeSelect>
                       </div>
                       {t.assignees.length > 0 && (
                         <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--muted)" }}>
@@ -1169,7 +1171,7 @@ export default function ProductionTasksClient({
             {/* 状态推进 */}
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
               <span style={{ fontSize: 11, color: "var(--muted)" }}>状态</span>
-              <select
+              <OverflowSafeSelect
                 disabled={updating}
                 value={visibleSelected.status}
                 onChange={e => updateStatus(visibleSelected, e.target.value)}
@@ -1183,7 +1185,7 @@ export default function ProductionTasksClient({
                 {VALID_STATUSES.map(s => (
                   <option key={s} value={s}>{STATUS_LABEL[s]}</option>
                 ))}
-              </select>
+              </OverflowSafeSelect>
               {isBlockedActive(visibleSelected) && <BlockedChip />}
               <button
                 type="button"
@@ -1204,14 +1206,14 @@ export default function ProductionTasksClient({
                 </div>
                 <label>
                   <span style={FIELD_LABEL}>关联事件</span>
-                  <select value={drawerEventId} onChange={e => setDrawerEventId(e.target.value)} style={FIELD_INPUT}>
+                  <OverflowSafeSelect value={drawerEventId} onChange={e => setDrawerEventId(e.target.value)} style={FIELD_INPUT}>
                     <option value="">独立任务</option>
                     {(drawerOptions?.events ?? []).map(event => <option key={event.id} value={event.id}>{event.title}</option>)}
-                  </select>
+                  </OverflowSafeSelect>
                 </label>
                 <label>
                   <span style={FIELD_LABEL}>责任方</span>
-                  <select value={drawerSubject} onChange={e => setDrawerSubject(e.target.value as SubjectValue)} style={FIELD_INPUT}>
+                  <OverflowSafeSelect value={drawerSubject} onChange={e => setDrawerSubject(e.target.value as SubjectValue)} style={FIELD_INPUT}>
                     <option value="">暂不指定</option>
                     <optgroup label="部门">
                       {(drawerOptions?.depts ?? []).map(dept => <option key={dept.id} value={`dept:${dept.id}`}>{dept.name}</option>)}
@@ -1221,7 +1223,7 @@ export default function ProductionTasksClient({
                         {(drawerOptions?.userGroups ?? []).map(g => <option key={g.id} value={`group:${g.id}`}>{g.name}</option>)}
                       </optgroup>
                     )}
-                  </select>
+                  </OverflowSafeSelect>
                 </label>
                 {drawerError && <p style={{ margin: 0, color: "var(--danger)", fontSize: 11 }}>{drawerError}</p>}
                 <button type="button" disabled={updating} onClick={() => saveDrawerEdit(visibleSelected)} style={{ border: "1px solid var(--ink)", borderRadius: 8, background: "var(--ink)", color: "#fff", padding: "9px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", opacity: updating ? .55 : 1 }}>{updating ? "保存中…" : "保存任务信息"}</button>

@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import React, {
   useState, useRef, useCallback, useMemo, useEffect, useLayoutEffect,
 } from "react";
@@ -2451,7 +2453,7 @@ export default function CuePage({
           {jumpTarget === "scene" ? (
             <>
               <span className="shrink-0 text-xs text-zinc-400">段落跳转</span>
-              <select
+              <OverflowSafeSelect
                 autoFocus
                 value={jumpValue}
                 onChange={e => {
@@ -2464,7 +2466,7 @@ export default function CuePage({
                 {scenes.map(s => (
                   <option key={s.id} value={s.id}>{s.number} {s.name}</option>
                 ))}
-              </select>
+              </OverflowSafeSelect>
               <button onClick={() => setJumpTarget(null)} className="text-xs text-zinc-300 hover:text-zinc-500">取消</button>
             </>
           ) : (
@@ -3115,13 +3117,13 @@ function ShareModal({
                 {grants.map(g => (
                   <div key={g.userId + g.level} style={rowStyle}>
                     <span style={{ fontSize: 12, color: "var(--ink)", flex: 1, minWidth: 0 }}>{g.userName}</span>
-                    <select
+                    <OverflowSafeSelect
                       value={g.level}
                       disabled={saving}
                       onChange={async (e) => { await postCollaborator({ type: "user", userId: g.userId, level: e.target.value }); }}
                       style={{ fontSize: 11, border: "1px solid var(--line)", borderRadius: 5, padding: "2px 4px", background: "var(--surface)", color: "var(--ink)", cursor: saving ? "default" : "pointer" }}>
                       {SM_GRANT_LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-                    </select>
+                    </OverflowSafeSelect>
                     <button style={removeBtnStyle} disabled={saving}
                       onClick={() => deleteCollaborator({ type: "user", userId: g.userId })}>
                       移除

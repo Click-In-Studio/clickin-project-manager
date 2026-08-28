@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useMemo, useState } from "react";
 import PageHeader from "@/components/PageHeader";
 import Badge from "@/components/Badge";
@@ -298,7 +300,7 @@ export default function AdminPoliciesClient({
                             <p style={{ margin: "3px 0 0", fontSize: 10, color: "var(--muted)", lineHeight: 1.7 }}>{p.help}</p>
                             <code style={{ fontSize: 9, color: "var(--muted)" }}>{p.key}</code>
                           </div>
-                          <select value={v} disabled={!canEdit}
+                          <OverflowSafeSelect value={v} disabled={!canEdit}
                             onChange={(e) => setKey(p.key, e.target.value)}
                             style={{
                               padding: "6px 8px", fontSize: 11, borderRadius: 8,
@@ -307,7 +309,7 @@ export default function AdminPoliciesClient({
                             {p.values.map((opt) => (
                               <option key={opt} value={opt}>{opt === p.defaultValue ? `${opt}（默认）` : opt}</option>
                             ))}
-                          </select>
+                          </OverflowSafeSelect>
                         </div>
                       );
                     })}

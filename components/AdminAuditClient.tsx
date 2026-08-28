@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useMemo, useState } from "react";
 import PageHeader, { SECONDARY_BTN } from "@/components/PageHeader";
 import Badge from "@/components/Badge";
@@ -169,20 +171,20 @@ export default function AdminAuditClient({
             <span style={{ color: "var(--muted)", fontSize: 9 }}>▾</span>
           )}
         </button>
-        <select value={filters.type} onChange={e => applyFilter({ type: e.target.value })} style={FIELD}>
+        <OverflowSafeSelect value={filters.type} onChange={e => applyFilter({ type: e.target.value })} style={FIELD}>
           <option value="">全部资源类型</option>
           {resourceTypes.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
-        <select value={filters.source} onChange={e => applyFilter({ source: e.target.value })} style={FIELD}>
+        </OverflowSafeSelect>
+        <OverflowSafeSelect value={filters.source} onChange={e => applyFilter({ source: e.target.value })} style={FIELD}>
           <option value="">全部来源</option>
           {Object.entries(SOURCE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select value={filters.status} onChange={e => applyFilter({ status: e.target.value })} style={FIELD}>
+        </OverflowSafeSelect>
+        <OverflowSafeSelect value={filters.status} onChange={e => applyFilter({ status: e.target.value })} style={FIELD}>
           <option value="">全部状态</option>
           <option value="active">有效</option>
           <option value="revoked">已撤销</option>
           <option value="expired">已过期</option>
-        </select>
+        </OverflowSafeSelect>
       </div>
 
       {error && <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--danger)", fontWeight: 700 }}>{error}</p>}

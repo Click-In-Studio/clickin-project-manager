@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 /**
  * 计划与日程（v3 原型 planning 三视图）：
  *   ① 项目日历 —— 月历统一展示事件、任务（未绑定 event 的）、里程碑与阶段
@@ -244,19 +246,19 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
           </div>
           {kind === "event" && (
             <label style={{ fontSize: 11, color: "var(--muted)" }}>事件类型
-              <select value={eventType} onChange={e => setEventType(e.target.value)} style={{ ...fieldStyle, display: "block", marginTop: 5 }}>
+              <OverflowSafeSelect value={eventType} onChange={e => setEventType(e.target.value)} style={{ ...fieldStyle, display: "block", marginTop: 5 }}>
                 <option value="rehearsal">排练</option><option value="meeting">会议</option><option value="performance">演出</option><option value="custom">其他</option>
-              </select>
+              </OverflowSafeSelect>
             </label>
           )}
           {kind === "task" && (
             <label style={{ fontSize: 11, color: "var(--muted)" }}>关联事件（可选）
-              <select value={taskEventId} onChange={e => setTaskEventId(e.target.value)} style={{ ...fieldStyle, display: "block", marginTop: 5 }}>
+              <OverflowSafeSelect value={taskEventId} onChange={e => setTaskEventId(e.target.value)} style={{ ...fieldStyle, display: "block", marginTop: 5 }}>
                 <option value="">不关联，建立独立任务</option>
                 {events.filter(event => event.status !== "cancelled").map(event => (
                   <option key={event.id} value={event.id}>{event.startTime ? `${new Date(event.startTime).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })} · ` : ""}{event.title}</option>
                 ))}
-              </select>
+              </OverflowSafeSelect>
             </label>
           )}
           {kind === "task" && <div>
@@ -1149,9 +1151,9 @@ function RundownEntryEditor({ selection, item, task, lanes, laneIds, color, onSa
       <label className={styles.inlineField}>说明<textarea rows={3} value={description} onChange={event => setDescription(event.target.value)} /></label>
       <div className={styles.twoFields}><BoundedTimePicker label="开始" value={start} onChange={setStart} /><BoundedTimePicker label="结束" value={end} onChange={setEnd} /></div>
       {item ? <>
-        <label className={styles.inlineField}>类型<select value={itemType} onChange={event => setItemType(event.target.value)}><option value="run">执行</option><option value="call">集合</option><option value="task">任务</option><option value="break">休息</option><option value="notes">备注</option><option value="custom">自定义</option></select></label>
+        <label className={styles.inlineField}>类型<OverflowSafeSelect value={itemType} onChange={event => setItemType(event.target.value)}><option value="run">执行</option><option value="call">集合</option><option value="task">任务</option><option value="break">休息</option><option value="notes">备注</option><option value="custom">自定义</option></OverflowSafeSelect></label>
         <label className={styles.inlineField}>地点<input value={location} onChange={event => setLocation(event.target.value)} /></label>
-      </> : <label className={styles.inlineField}>状态<select value={status} onChange={event => setStatus(event.target.value)}><option value="awaiting">待确认</option><option value="pending">待处理</option><option value="in_progress">进行中</option><option value="done">完成</option></select></label>}
+      </> : <label className={styles.inlineField}>状态<OverflowSafeSelect value={status} onChange={event => setStatus(event.target.value)}><option value="awaiting">待确认</option><option value="pending">待处理</option><option value="in_progress">进行中</option><option value="done">完成</option></OverflowSafeSelect></label>}
       <div className={styles.optionSection}><b>显示在人员组（可多选）</b><div className={styles.multiPicker}>{lanes.map(lane => <button key={lane.id} type="button" className={`${styles.toggleChip} ${selectedLaneIds.includes(lane.id) ? styles.toggleChipActive : ""}`} onClick={() => setSelectedLaneIds(current => current.includes(lane.id) ? current.filter(id => id !== lane.id) : [...current, lane.id])}>{lane.name}</button>)}</div></div>
       <div className={styles.optionSection}><b>事项颜色</b><div className={styles.colorPicker}>{RUNDOWN_COLORS.map(option => <button key={option} type="button" aria-label={`颜色 ${option}`} aria-pressed={selectedColor === option} onClick={() => setSelectedColor(option)} style={{ background: option }} />)}</div></div>
       {error && <p className={styles.editorError}>{error}</p>}
@@ -1795,27 +1797,27 @@ function TimetableView({ productionId, events, departments, members }: Props) {
       }}>
         <label style={CONTROL_CARD}>
           <span style={CONTROL_LABEL}>日期 / 事件</span>
-          <select value={eventId} onChange={e => { setEventId(e.target.value); setPersonFilter("all"); }} style={CONTROL_SELECT}>
+          <OverflowSafeSelect value={eventId} onChange={e => { setEventId(e.target.value); setPersonFilter("all"); }} style={CONTROL_SELECT}>
             {timedEvents.map(e => (
               <option key={e.id} value={e.id}>
                 {e.startTime ? `${fmtDate(e.startTime)} · ` : ""}{e.title}
               </option>
             ))}
-          </select>
+          </OverflowSafeSelect>
         </label>
         <label style={CONTROL_CARD}>
           <span style={CONTROL_LABEL}>列视图</span>
-          <select value={viewMode} onChange={e => setViewMode(e.target.value as "all" | "custom")} style={CONTROL_SELECT}>
+          <OverflowSafeSelect value={viewMode} onChange={e => setViewMode(e.target.value as "all" | "custom")} style={CONTROL_SELECT}>
             <option value="all">全员视图</option>
             <option value="custom">自定义关注列</option>
-          </select>
+          </OverflowSafeSelect>
         </label>
         <label style={CONTROL_CARD}>
           <span style={CONTROL_LABEL}>关注成员</span>
-          <select value={personFilter} onChange={e => setPersonFilter(e.target.value)} style={CONTROL_SELECT}>
+          <OverflowSafeSelect value={personFilter} onChange={e => setPersonFilter(e.target.value)} style={CONTROL_SELECT}>
             <option value="all">全部成员</option>
             {people.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-          </select>
+          </OverflowSafeSelect>
         </label>
       </div>
 
@@ -2182,14 +2184,14 @@ function PhaseManageModal({
           style={{ flex: 1, minWidth: 150, fontSize: 12, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", outline: "none" }}
         />
         {editing === "new" && (
-          <select
+          <OverflowSafeSelect
             value={deptId}
             onChange={e => setDeptId(e.target.value)}
             style={{ fontSize: 12, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", outline: "none" }}
           >
             {!pocOnly && <option value="">全项目</option>}
             {createDeptChoices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+          </OverflowSafeSelect>
         )}
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>

@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import Link from "next/link";
 import { useRef, useState, useEffect, type FormEvent, type ChangeEvent } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -519,7 +521,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                     {channelOptions.length > 0 && (
                       <label>
                         <span>主要通道</span>
-                        <select
+                        <OverflowSafeSelect
                           value={preferredPlatform}
                           onChange={e => setPreferredPlatform(e.target.value)}
                         >
@@ -527,7 +529,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                           {channelOptions.map(o => (
                             <option key={o.value} value={o.value}>{o.label}</option>
                           ))}
-                        </select>
+                        </OverflowSafeSelect>
                       </label>
                     )}
                   </div>

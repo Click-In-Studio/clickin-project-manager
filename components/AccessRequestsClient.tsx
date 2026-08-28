@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import styles from "@/components/my-pages.module.css";
@@ -358,16 +360,16 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>资源类型</label>
-        <select value={resourceType} onChange={(e) => handleResourceChange(e.target.value)} style={fieldStyle}>
+        <OverflowSafeSelect value={resourceType} onChange={(e) => handleResourceChange(e.target.value)} style={fieldStyle}>
           {RESOURCE_OPTIONS.map((o) => <option key={o.type} value={o.type}>{o.label}</option>)}
-        </select>
+        </OverflowSafeSelect>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>权限等级</label>
-        <select value={permissionLevel} onChange={(e) => setPermissionLevel(e.target.value)} style={fieldStyle}>
+        <OverflowSafeSelect value={permissionLevel} onChange={(e) => setPermissionLevel(e.target.value)} style={fieldStyle}>
           {currentResource.levels.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-        </select>
+        </OverflowSafeSelect>
       </div>
 
 

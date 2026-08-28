@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 import { useState, useEffect, useRef } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import { PRODUCTION_TYPES } from "@/lib/production-types";
@@ -157,7 +159,7 @@ export default function NewProductionModal({ onClose, onCreated }: Props) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 7 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", letterSpacing: ".04em" }}>项目类型</span>
-              <select
+              <OverflowSafeSelect
                 value={type}
                 onChange={e => { setType(e.target.value); if (e.target.value !== "other") setTypeLabel(""); }}
                 style={selectField}
@@ -166,7 +168,7 @@ export default function NewProductionModal({ onClose, onCreated }: Props) {
                 {PRODUCTION_TYPES.map(t => (
                   <option key={t.value} value={t.value}>{t.label}</option>
                 ))}
-              </select>
+              </OverflowSafeSelect>
             </label>
 
             <label style={{ display: "flex", flexDirection: "column", gap: 7 }}>

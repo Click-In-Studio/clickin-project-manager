@@ -1,5 +1,7 @@
 "use client";
 
+import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+
 // wiki 文档库 W4（Notion 式改版）：有编辑权即默认可编辑（无 编辑/保存 切换），
 // 标题/正文/标签 就地编辑 + 防抖自动保存；文档操作（新建/移动/删除）归左侧栏
 // （WikiShell），本区只留 分享。无编辑权 → 只读渲染（WikiMarkdown）。
@@ -681,14 +683,14 @@ export default function WikiDocClient({
                       onChange={id => setShareAddUser(id ?? "")}
                     />
                   </div>
-                  <select
+                  <OverflowSafeSelect
                     value={shareAddLevel}
                     onChange={e => setShareAddLevel(e.target.value as ShareLevel)}
                     className="rounded-lg border border-zinc-200 px-2 py-[9px] text-xs outline-none"
                   >
                     {(Object.keys(LEVEL_LABELS) as ShareLevel[]).map(l =>
                       <option key={l} value={l}>{LEVEL_LABELS[l]}</option>)}
-                  </select>
+                  </OverflowSafeSelect>
                   <button
                     type="button"
                     style={{ ...PRIMARY_BTN, padding: "8px 10px" }}
