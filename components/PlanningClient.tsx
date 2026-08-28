@@ -412,8 +412,27 @@ function CalendarView({ productionId, events, tasks, milestones, phases, departm
   }, []);
   const [year, setYear] = useState(today.getUTCFullYear());
   const [month, setMonth] = useState(today.getUTCMonth());  // 0-based
+  const [cursorRestored, setCursorRestored] = useState(false);
   const [quickCreateDate, setQuickCreateDate] = useState<string | null>(null);
   const [selection, setSelection] = useState<CalendarSelection | null>(null);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem(`planning-calendar-cursor:${productionId}`);
+    const matched = saved?.match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+    if (matched) {
+      setYear(Number(matched[1]));
+      setMonth(Number(matched[2]) - 1);
+    }
+    setCursorRestored(true);
+  }, [productionId]);
+
+  useEffect(() => {
+    if (!cursorRestored) return;
+    window.localStorage.setItem(
+      `planning-calendar-cursor:${productionId}`,
+      `${year}-${String(month + 1).padStart(2, "0")}`,
+    );
+  }, [cursorRestored, month, productionId, year]);
 
   // 绑定 event 的任务不单独上日历（随事件显示）；未绑定的按有效开始日期上格
   const standaloneTasks = useMemo(
@@ -650,8 +669,20 @@ function addDaysIso(iso: string, days: number): string {
 function TaskGanttView({ productionId, tasks, milestones, phases }: Props) {
   const router = useRouter();
   const [scale, setScale] = useState<GanttScale>("month");
+  const [scaleRestored, setScaleRestored] = useState(false);
   const [localTasks, setLocalTasks] = useState<PlanningTask[]>(tasks);
   useEffect(() => { setLocalTasks(tasks); }, [tasks]);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem(`planning-gantt-scale:${productionId}`);
+    if (saved === "day" || saved === "month" || saved === "quarter" || saved === "year") setScale(saved);
+    setScaleRestored(true);
+  }, [productionId]);
+
+  useEffect(() => {
+    if (!scaleRestored) return;
+    window.localStorage.setItem(`planning-gantt-scale:${productionId}`, scale);
+  }, [productionId, scale, scaleRestored]);
 
   const timedTasks = useMemo(
     () => localTasks
@@ -1248,6 +1279,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [viewMode, setViewMode] = useState<"all" | "custom">("all");
+  const [filtersRestored, setFiltersRestored] = useState(false);
   const [columns, setColumns] = useState<RundownColumn[]>([]);
   const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<RundownEntrySelection | null>(null);
@@ -1263,6 +1295,31 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   const dragColumnId = useRef<string | null>(null);
   const dragEntryRef = useRef<RundownDragEntry | null>(null);
   const resizeRef = useRef<{ selection: RundownEntrySelection; edge: "start" | "end"; startY: number; startIso: string; endIso: string; nextStart: string; nextEnd: string } | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(`planning-timetable-filters:${productionId}`);
+      const saved = raw ? JSON.parse(raw) as { eventId?: unknown; personFilter?: unknown; viewMode?: unknown } : null;
+      if (saved?.eventId && typeof saved.eventId === "string" && timedEvents.some(event => event.id === saved.eventId)) {
+        setEventId(saved.eventId);
+      }
+      if (saved?.personFilter === "all" || (typeof saved?.personFilter === "string" && members.some(member => member.userId === saved.personFilter))) {
+        setPersonFilter(saved.personFilter);
+      }
+      if (saved?.viewMode === "all" || saved?.viewMode === "custom") setViewMode(saved.viewMode);
+    } catch {
+      // 损坏或旧版本的浏览器偏好不应阻断页面，直接回到安全默认值。
+    }
+    setFiltersRestored(true);
+  }, [members, productionId, timedEvents]);
+
+  useEffect(() => {
+    if (!filtersRestored) return;
+    window.localStorage.setItem(
+      `planning-timetable-filters:${productionId}`,
+      JSON.stringify({ eventId, personFilter, viewMode }),
+    );
+  }, [eventId, filtersRestored, personFilter, productionId, viewMode]);
 
   // 版面来自服务端，不再是每人一份的 localStorage——rundown 是 organizer 定好
   // 大家遵守的东西。列 = event_rundown_column ⋈ event_group。
