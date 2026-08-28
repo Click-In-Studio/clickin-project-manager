@@ -1,4 +1,84 @@
 {
+  "agent_approval": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "run_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "session_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "tool_call_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "tool",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "args",
+      "type": "jsonb",
+      "nullable": false
+    },
+    {
+      "column": "preview",
+      "type": "jsonb",
+      "nullable": false,
+      "default": "'{}'::jsonb"
+    },
+    {
+      "column": "status",
+      "type": "text",
+      "nullable": false,
+      "default": "'pending'::text"
+    },
+    {
+      "column": "decision",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "reason",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "resolved_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "executed_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "expires_at",
+      "type": "timestamp with time zone",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "resolved_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    }
+  ],
   "agent_instructions": [
     {
       "column": "scope_type",
@@ -183,6 +263,214 @@
     {
       "column": "query_hash",
       "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "agent_question": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "run_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "session_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "tool_call_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "payload",
+      "type": "jsonb",
+      "nullable": false
+    },
+    {
+      "column": "answer",
+      "type": "jsonb",
+      "nullable": true
+    },
+    {
+      "column": "status",
+      "type": "text",
+      "nullable": false,
+      "default": "'pending'::text"
+    },
+    {
+      "column": "expires_at",
+      "type": "timestamp with time zone",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "resolved_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    }
+  ],
+  "agent_run": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "session_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "status",
+      "type": "text",
+      "nullable": false,
+      "default": "'queued'::text"
+    },
+    {
+      "column": "owner",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "heartbeat_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "page_key",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "model",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "input_tokens",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "output_tokens",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "cache_read_tokens",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "error",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "started_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "ended_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    }
+  ],
+  "agent_session": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "title",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "last_message_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "archived_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    }
+  ],
+  "agent_session_entry": [
+    {
+      "column": "session_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "seq",
+      "type": "integer",
+      "nullable": false
+    },
+    {
+      "column": "entry_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "parent_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "payload",
+      "type": "jsonb",
       "nullable": false
     },
     {
