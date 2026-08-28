@@ -6,7 +6,6 @@
 const MCP_TOOL_PREFIX = "clickin__";
 
 export const TOOL_LABELS: Record<string, string> = {
-  "approvals-list": "查看待审批请求",
   "my-call_times": "查询我的 Call 时间",
   "my-tech_reqs": "查询我的技术需求",
   "my-events": "查询我关注的活动",
@@ -23,6 +22,7 @@ export const TOOL_LABELS: Record<string, string> = {
   "production-wiki_backlinks": "查询文档链接关系",
   "production-wiki_read": "阅读文档",
   "production-wiki_search": "搜索文档",
+  "production-wiki_dialect_ref": "获取文档语法说明",
   "production-wiki_propose_create": "提议新建文档",
   "production-wiki_propose_update": "提议修改文档",
   "production-wiki_propose_delete": "提议删除文档",

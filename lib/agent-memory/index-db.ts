@@ -37,21 +37,10 @@ export function sha256(text: string): string {
 // 改用中文检索标准做法：CJK 逐对 bigram + ASCII/数字整词（小写）。索引侧
 // 与查询侧共用本函数——两侧切法不一致=检索面静默失效。
 
-// 汉字（基本区+扩展A）+ 日文假名 + 谚文音节
-const CJK_RUN = /[一-鿿㐀-䶿぀-ヿ가-힯]+/gu;
-const ASCII_RUN = /[a-z0-9]+/g;
-
-export function bigramTokens(text: string): string[] {
-  const tokens: string[] = [];
-  const lower = text.toLowerCase();
-  for (const m of lower.matchAll(CJK_RUN)) {
-    const run = [...m[0]];
-    if (run.length === 1) tokens.push(run[0]);
-    for (let i = 0; i + 1 < run.length; i++) tokens.push(run[i] + run[i + 1]);
-  }
-  for (const m of lower.matchAll(ASCII_RUN)) tokens.push(m[0]);
-  return tokens;
-}
+// 分词实现抽到 trigger-lexical.ts（零依赖，供 lib/mcp/tool-catalog.ts 复用，
+// #333 P2），这里原地再导出——既有调用方（trigger.ts / 本文件内部）零改动。
+export { bigramTokens } from "./trigger-lexical";
+import { bigramTokens } from "./trigger-lexical";
 
 /** 落库形态：空格分隔（查询侧按 LIKE '%tok%' 命中占比评分）。 */
 export function tokensText(text: string): string {

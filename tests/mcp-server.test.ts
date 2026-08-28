@@ -13,7 +13,6 @@ describe("MCP server skeleton", () => {
     const registry = server["_registeredTools"] as ToolRegistry;
     const names = Object.keys(registry).sort();
     expect(names).toEqual([
-      "approvals.list",
       "my.call_times",
       "my.events",
       "my.memory_search",
@@ -29,6 +28,7 @@ describe("MCP server skeleton", () => {
       "production.notifications",
       "production.update_instructions",
       "production.wiki_backlinks",
+      "production.wiki_dialect_ref",
       "production.wiki_propose_create",
       "production.wiki_propose_delete",
       "production.wiki_propose_move",
@@ -55,10 +55,9 @@ describe("MCP server skeleton", () => {
   it("read-only tools have readOnlyHint: true; gated tools do not", async () => {
     const server = buildMcpServer();
     const registry = server["_registeredTools"] as ToolRegistry;
-    expect(registry["approvals.list"]?.annotations?.readOnlyHint).toBe(true);
     for (const name of [
       "production.wiki_tree", "production.wiki_backlinks", "production.wiki_read", "production.wiki_search",
-      "production.contact_list", "production.department_list",
+      "production.wiki_dialect_ref", "production.contact_list", "production.department_list",
     ]) {
       expect(registry[name]?.annotations?.readOnlyHint, name).toBe(true);
     }
