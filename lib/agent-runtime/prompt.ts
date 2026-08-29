@@ -73,16 +73,12 @@ export function injectedSystemContext(payload: Pick<InjectContextPayload, "instr
   return parts.join("\n\n");
 }
 
-// 自建运行时相对网关的能力差异备注（TOOLS.md 是两条运行时共用的文件，写"没有提问工具"
-// 在网关会话仍成立；这里只对本运行时追加更正）。
-const RUNTIME_ADDENDUM =
-  "## 本运行时补充\n" +
-  "- 本环境**有** `clickin__ask_user` 工具：确实缺信息且答案会改变做法时，用它向用户提问并等待回答（会弹卡片）；能查工具确定的事不要问。TOOLS.md 里「没有主动提问的工具」一句在本环境不适用。\n" +
-  "- 联网：`clickin__web-search`（搜索）与 `clickin__web-fetch`（抓网页正文）。外部资讯、不确定的事实、用户给的链接用它们；制作内部的数据仍以 clickin 工具为准。";
-
+// 曾有一段 RUNTIME_ADDENDUM 在 prompt 里现场更正 TOOLS.md——那时网关与自建运行时共用
+// 这份文件，"没有提问工具"在网关会话仍成立。网关已退役（#377），TOOLS.md 只有本运行时
+// 一个读者，事实直接写进文件，不再靠补充块打补丁（两句自相矛盾的话每轮都在送）。
 export function buildSystemPrompt(payload: Pick<InjectContextPayload, "instructions" | "knowledge" | "memory">): string {
   const injected = injectedSystemContext(payload);
-  const base = `${workspacePrompt()}\n\n${RUNTIME_ADDENDUM}`;
+  const base = workspacePrompt();
   return injected ? `${base}\n\n${injected}` : base;
 }
 

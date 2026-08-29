@@ -4,7 +4,7 @@ import { approvalSession, resolveApproval } from "@/lib/agent-runtime/approvals"
 
 export const runtime = "nodejs";
 
-const DECISIONS = new Set(["allow-once", "allow-always", "deny"]);
+const DECISIONS = new Set(["allow-once", "deny"]);
 
 // Resolves a pending approval (write-tool confirmation gate). The /agent
 // popout is the only approval surface — dashboard is disabled — so this
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "缺少 id" }, { status: 400 });
   }
   if (typeof decision !== "string" || !DECISIONS.has(decision)) {
-    return NextResponse.json({ error: "decision 必须是 allow-once/allow-always/deny" }, { status: 400 });
+    return NextResponse.json({ error: "decision 必须是 allow-once/deny" }, { status: 400 });
   }
   if (reason !== undefined && (typeof reason !== "string" || reason.length > 500)) {
     return NextResponse.json({ error: "reason 必须是 500 字符以内的字符串" }, { status: 400 });
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
   if (denied) return denied;
   try {
     // 理由与决议同一行落库；run 侧 awaitApproval 读到后把理由随工具结果回模型
-    const ok = await resolveApproval(id, decision as "allow-once" | "allow-always" | "deny", auth.userId, trimmedReason);
+    const ok = await resolveApproval(id, decision as "allow-once" | "deny", auth.userId, trimmedReason);
     if (!ok) return NextResponse.json({ error: "无权处理该确认请求" }, { status: 403 });
     return NextResponse.json({ ok: true });
   } catch (err) {

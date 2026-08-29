@@ -2,8 +2,12 @@
 // 等待态从 agent_approval 续（§4.4 ①"等待审批：什么都不用做"）。
 //
 // 语义继承网关时代（project_ai_infra「工具调用权限门原则」）：非只读工具一律先卡，
-// allow-once / allow-always / deny；deny 的理由随工具结果回给模型（同帧，不靠 steer）。
-// allow-always 的持久化仍是挂账（当前按 allow-once 处理，记 decision 供将来读）。
+// allow-once / deny；deny 的理由随工具结果回给模型（同帧，不靠 steer）。
+//
+// 曾经还有一个 allow-always，但它从未被送到前端（allowedDecisions 恒为
+// ["allow-once","deny"]），持久化也一直是挂账——按 allow-once 处理的"始终允许"只会
+// 骗人。整条枝摘掉；真要做，做的是持久化那一半，不是把字面量加回来。
+// `decision` 列仍是字符串列，历史行（若有）读出来一律按 allow-once 处理。
 
 import type { Pool } from "pg";
 import { getPool } from "@/lib/pg";
@@ -11,7 +15,7 @@ import type { ApprovalInfo } from "@/lib/agent-chat/stream-reducer";
 import { newApprovalId } from "./ids";
 import { APPROVAL_TTL_MS } from "./config";
 
-export type ApprovalDecision = "allow-once" | "allow-always" | "deny";
+export type ApprovalDecision = "allow-once" | "deny";
 export type ApprovalOutcome =
   | { kind: "allowed"; decision: Exclude<ApprovalDecision, "deny"> }
   | { kind: "denied"; reason: string | null }
@@ -92,7 +96,7 @@ export async function awaitApproval(
     );
     const row = r.rows[0];
     if (!row) return { kind: "denied", reason: "审批记录不存在" };
-    if (row.status === "allowed") return { kind: "allowed", decision: (row.decision as "allow-once" | "allow-always") ?? "allow-once" };
+    if (row.status === "allowed") return { kind: "allowed", decision: "allow-once" };
     if (row.status === "denied") return { kind: "denied", reason: row.reason };
     if (row.status === "cancelled") return { kind: "denied", reason: row.reason ?? "已取消" };
     if (row.status === "expired" || row.expires_at.getTime() < Date.now()) {
