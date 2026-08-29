@@ -9,7 +9,7 @@ import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 //   2. MCP 端点：POST /memory-run 上报 → GET /inject-context 组装取件
 //   3. 蒸馏：mock LLM，验证输入组装（旧摘要+新增量）与落盘+offset 提交
 
-// mock LLM（distill 经 @/agent/llm 调用）。只替换 chat，保留真的
+// mock LLM（distill 经 @/lib/llm-chat 调用）。只替换 chat，保留真的
 // LlmBudgetError——distill 用 instanceof 分流"预算不够"与其他失败，
 // 换成假类会让分流逻辑在测试里恒假、测了个寂寞。
 const chatMock = vi.fn(async (..._args: unknown[]) => "## 偏好与习惯\n- mock 蒸馏产物");

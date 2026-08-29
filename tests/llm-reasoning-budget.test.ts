@@ -1,5 +1,5 @@
 /**
- * agent/llm.ts 的预算语义（2026-08-17 线上事故）。
+ * lib/llm-chat.ts（原 agent/llm.ts）的预算语义（2026-08-17 线上事故）。
  *
  * DEEPSEEK_MODEL=deepseek-v4-pro 是推理模型，`max_tokens` 是 **CoT + 正文的
  * 总预算**。记忆蒸馏按正文估传了 2000，实测 reasoning_tokens=1874（94%）、
