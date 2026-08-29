@@ -655,9 +655,10 @@ export default function AgentPopout({
                 : b.approval.severity === "info"
                   ? "border-sky-200 bg-sky-50"
                   : "border-amber-300 bg-amber-50";
+            // 按钮由后端的 allowedDecisions 驱动，恒为 allow-once / deny（"始终允许"
+            // 需要持久化那一半，没做就不给按钮，见 lib/agent-runtime/approvals.ts）
             const decisionLabel: Record<string, string> = {
               "allow-once": "允许一次",
-              "allow-always": "始终允许",
               deny: "拒绝",
             };
             return (

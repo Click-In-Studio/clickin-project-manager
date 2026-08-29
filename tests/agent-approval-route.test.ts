@@ -45,6 +45,13 @@ describe("POST /api/agent/approval", () => {
     expect(res.status).toBe(400);
   });
 
+  // allow-always 曾是预留字面量：接口收、按 allow-once 落库、前端从来没有那个按钮。
+  // 摘掉后接口也不再收——半实现的"始终允许"比没有更糟。
+  it("rejects allow-always with 400（未实现的决议不进接口）", async () => {
+    const res = await POST(makeReq({ id: "some-approval", decision: "allow-always" }));
+    expect(res.status).toBe(400);
+  });
+
   it("returns 403 for an unknown approval id (no existence leak)", async () => {
     const res = await POST(makeReq({ id: "never-seen-approval", decision: "deny" }));
     expect(res.status).toBe(403);

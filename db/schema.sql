@@ -2164,7 +2164,7 @@ CREATE TABLE IF NOT EXISTS agent_approval (
   preview      JSONB       NOT NULL DEFAULT '{}', -- 卡片结构（title/description/severity/hasPermission/反解体…）
   status       TEXT        NOT NULL DEFAULT 'pending'
                  CHECK (status IN ('pending', 'allowed', 'denied', 'expired', 'cancelled')),
-  decision     TEXT        NULL,               -- allow-once / allow-always / deny
+  decision     TEXT        NULL,               -- allow-once / deny（曾预留 allow-always，未实现已摘）
   reason       TEXT        NULL,               -- 拒绝理由，回给模型
   resolved_by  UUID        NULL REFERENCES app_user(id) ON DELETE SET NULL,
   -- 批准后工具真正开始执行的时刻：重启恢复时区分"批了没跑"（可跑）与
