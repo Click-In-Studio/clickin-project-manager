@@ -15,9 +15,11 @@ import { embedDocuments, embedQuery, embeddingMode, embeddingModel } from "@/age
 import { TOOL_CATALOG, TOOL_RECALL_THRESHOLD, TOOL_RECALL_MAX, type ToolCatalogEntry } from "@/lib/mcp/tool-catalog";
 import { bigramTokens } from "@/lib/agent-memory/trigger-lexical";
 
-/** 向量车道阈值：用户消息 ↔ 例句是跨域相似度，比文档 ↔ 文档低；先取保守值，
- *  用 AGENT_TOOL_RECALL_DEBUG=1 的分数日志标定后再调。 */
-export const TOOL_VECTOR_THRESHOLD = Number(process.env.AGENT_TOOL_VEC_THRESHOLD ?? 0.5);
+/** 向量车道阈值。text-embedding-v4 实测（2026-08-29 本机探针）：真命中 0.65–0.82，
+ *  无关噪声 0.35–0.60（"今天天气怎么样" → call_times 0.42），分布很压缩，0.62 是噪声上沿之上
+ *  的第一个整数位。召回只是提示（工具面多带 ≤3 个），漏了还有 find_tools 兜底，宁紧勿松。
+ *  AGENT_TOOL_RECALL_DEBUG=1 打分数日志可继续标定。 */
+export const TOOL_VECTOR_THRESHOLD = Number(process.env.AGENT_TOOL_VEC_THRESHOLD ?? 0.62);
 
 export interface ToolHit {
   name: string;
@@ -47,7 +49,9 @@ async function loadDocs(): Promise<Doc[]> {
   if (embeddingMode() === "none") return all;
   try {
     const pool = getPool();
-    const model = embeddingModel();
+    // fake 模式（测试替身）的向量绝不能和真模型的缓存混在一个键下：测试跑过一遍就会把
+    // 本地库里真模型名下的行换成哈希向量，之后真召回全部近似正交（余弦 ~0.05）。
+    const model = embeddingMode() === "fake" ? `fake:${embeddingModel()}` : embeddingModel();
     const cached = await pool.query<{ content_hash: string; embedding: string }>(
       `SELECT content_hash, embedding::text AS embedding FROM agent_memory_embedding_cache WHERE model = $1 AND content_hash = ANY($2::text[])`,
       [model, all.map((d) => d.hash)],

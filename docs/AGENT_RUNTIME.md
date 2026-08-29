@@ -26,7 +26,7 @@
 | `AGENT_CHAT_MODEL` / `AGENT_COMPACTION_MODEL` | 默认 `deepseek-v4-flash` / `deepseek-v4-pro` | 对话 / transcript 压缩摘要 |
 | `DEEPSEEK_API_KEY` | | 与蒸馏共用（`.env.local`） |
 | `AGENT_TOOL_TIERS` | `off` | 关闭工具三层（全量工具），排障用 |
-| `AGENT_TOOL_VEC_THRESHOLD` | `0.5` | 冷层向量召回阈值（用户消息 ↔ 工具例句余弦）；词法阈值固定 0.72 |
+| `AGENT_TOOL_VEC_THRESHOLD` | `0.62` | 冷层向量召回阈值（用户消息 ↔ 工具例句余弦，text-embedding-v4 实测真命中 0.65–0.82、噪声 ≤0.60）；词法阈值固定 0.72 |
 | `AGENT_TOOL_RECALL_DEBUG` | 未设 | `1` 时每轮打印前 5 名工具的词法/向量分数，用于标定阈值 |
 
 ### 冷层：召回 + `find_tools` 兜底

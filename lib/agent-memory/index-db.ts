@@ -224,7 +224,9 @@ async function embedWithCache(
   const out = new Map<string, string>();
   if (texts.length === 0) return out;
   if (embeddingMode() === "none") return out; // 合法的纯关键词模式
-  const model = embeddingModel();
+  // fake 模式（测试替身）的向量单独一个缓存键：否则测试跑过一遍就把真模型名下的缓存行
+  // 换成哈希向量（本地库已实锤发生过——工具索引 92 行全被污染，真召回余弦 ~0.05）。
+  const model = embeddingMode() === "fake" ? `fake:${embeddingModel()}` : embeddingModel();
   const pool = getPool();
 
   const hashes = [...new Set(texts.map((t) => t.contentHash))];
