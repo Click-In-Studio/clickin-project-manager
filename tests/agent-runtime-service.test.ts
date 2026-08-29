@@ -402,3 +402,42 @@ describe("§4.4 排水/脱离：等待态 run 交给下一个进程，不留痕�
     await getPool().query(`DELETE FROM agent_instructions WHERE scope_type = 'user' AND scope_id = $1`, [userId]);
   });
 });
+
+describe("冷层兜底：find_tools 搜到 → 按名直接调（resolveDeferredTool）", () => {
+  let userId: string;
+  let prodId: string;
+  const sessions: string[] = [];
+
+  beforeAll(async () => {
+    ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-deferred-${shortId()}`, null, false));
+    ({ prodId } = await makeProduction(userId));
+    runtimeOverrides.apiKey = "test-key";
+  });
+  afterAll(async () => {
+    delete runtimeOverrides.streamFn;
+    for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
+    await cleanupProduction(prodId).catch(() => {});
+  });
+
+  it("首页闲聊（wiki 族不在工具面）→ 模型调 find_tools → 再按名调 wiki_tree（不在列表里也能解析执行）", async () => {
+    const find: ToolCall = { type: "toolCall", id: "c_find", name: exposedName("find_tools"), arguments: { query: "看看有哪些文档" } };
+    const tree: ToolCall = { type: "toolCall", id: "c_tree", name: exposedName("production.wiki_tree"), arguments: {} };
+    const { streamFn, seen } = scripted([{ calls: [find] }, { calls: [tree] }, { text: "文档列在上面了" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = createNewSessionKey(userId, prodId);
+    sessions.push(key);
+    await startRun({ sessionId: key, userId, message: "你好呀", pageKey: "prod:home" });
+    const lines = await collectUntilTerminal(key);
+    await waitForIdle(key);
+
+    expect(seen[0].tools).toContain(exposedName("find_tools"));
+    expect(seen[0].tools).not.toContain(exposedName("production.wiki_tree")); // 第一轮工具面里确实没有它
+    const findResult = seen[1].messages[seen[1].messages.length - 1] as { content: Array<{ text?: string }> };
+    expect(findResult.content[0]?.text).toContain(exposedName("production.wiki_tree")); // 搜到了名字
+    const bubbles = lines.reduce<Bubble[]>((acc, l) => applyStreamLine(acc, l), []);
+    const treeBubble = bubbles.find((b) => b.kind === "tool" && b.id === "c_tree") as Extract<Bubble, { kind: "tool" }>;
+    expect(treeBubble?.done).toBe(true);
+    expect(treeBubble?.isError).toBeUndefined(); // 真执行了（不是 "Tool not found"）
+    expect(seen[2].tools).toContain(exposedName("production.wiki_tree")); // 加载后本 run 后续可见
+  });
+});

@@ -12,7 +12,7 @@ import { toolRecall } from "@/lib/mcp/tool-catalog";
 
 /** 个人会话热层：my.* 就是它的全部业务面（砍了等于空手）+ 提问 */
 const HOT_PERSONAL = [
-  "my.productions", "my.memory_search", "my.call_times", "my.events", "my.milestones", "my.tech_reqs", "ask_user",
+  "my.productions", "my.memory_search", "my.call_times", "my.events", "my.milestones", "my.tech_reqs", "ask_user", "find_tools",
 ];
 
 /** 制作会话热层：范围锚点 + 语境锚（info/my_role/notifications）+ id 供给入口（成员/部门）+ 提问 */
@@ -20,7 +20,7 @@ const HOT_PRODUCTION = [
   "my.productions", "my.memory_search", "my.call_times",
   "production.info", "production.my_role", "production.notifications",
   "production.contact_list", "production.department_list",
-  "ask_user",
+  "ask_user", "find_tools",
 ];
 
 const WIKI_FAMILY = [
@@ -61,6 +61,8 @@ const CLOSURE: Record<string, string[]> = {
 export interface TierInput {
   hasProduction: boolean;
   pageKey: string | null;
+  /** 冷层召回结果（tool-index：词法+向量）。缺席时退回纯词法 toolRecall(prompt) */
+  recalled?: string[];
   prompt: string | null;
   /** 全部可用工具的 MCP 名（注册表）——结果只会是它的子集 */
   available: readonly string[];
@@ -81,9 +83,9 @@ export function tieredToolNames(input: TierInput): TierResult {
   try {
     const hot = (input.hasProduction ? HOT_PRODUCTION : HOT_PERSONAL).filter((n) => available.has(n));
     const warm = (input.pageKey ? WARM_BY_PAGE[input.pageKey] ?? [] : []).filter((n) => available.has(n));
-    const recalled = input.prompt
-      ? toolRecall(input.prompt, { hasProduction: input.hasProduction }).map((h) => h.name).filter((n) => available.has(n))
-      : [];
+    const recalled = (input.recalled
+      ?? (input.prompt ? toolRecall(input.prompt, { hasProduction: input.hasProduction }).map((h) => h.name) : [])
+    ).filter((n) => available.has(n));
     const active = new Set<string>([...hot, ...warm, ...recalled]);
     // 闭包：迭代到不动点（闭包里的工具也可能有自己的闭包）
     let grew = true;

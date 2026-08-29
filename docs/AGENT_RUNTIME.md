@@ -26,6 +26,17 @@
 | `AGENT_CHAT_MODEL` / `AGENT_COMPACTION_MODEL` | 默认 `deepseek-v4-flash` / `deepseek-v4-pro` | 对话 / transcript 压缩摘要 |
 | `DEEPSEEK_API_KEY` | | 与蒸馏共用（`.env.local`） |
 | `AGENT_TOOL_TIERS` | `off` | 关闭工具三层（全量工具），排障用 |
+| `AGENT_TOOL_VEC_THRESHOLD` | `0.5` | 冷层向量召回阈值（用户消息 ↔ 工具例句余弦）；词法阈值固定 0.72 |
+| `AGENT_TOOL_RECALL_DEBUG` | 未设 | `1` 时每轮打印前 5 名工具的词法/向量分数，用于标定阈值 |
+
+### 冷层：召回 + `find_tools` 兜底
+
+工具面 = 热层（按会话类型）∪ 温层（按页面）∪ 冷层召回（≤3）。冷层索引在 `lib/agent-runtime/tool-index.ts`：
+每个工具的 `oneliner + examples`（`lib/mcp/tool-catalog.ts`）逐条嵌入，复用记忆检索的 embedding 供应商
+（`EMBEDDING_PROVIDER`/`EMBEDDING_API_KEY`，向量缓存在 `agent_memory_embedding_cache`），未配置时退回纯词法。
+没召回到时的兜底是常驻的 `clickin__find_tools`（搜索，不是目录——目录会随工具数线性吃 prompt）：
+模型搜到名字后直接按名调用，harness 通过 `resolveDeferredTool`（vendor 补丁 #4）临时加载并在本会话后续轮次保持可见。
+分层只决定可见性，权限与制作语境仍在工具内部判定。
 | `AGENT_DRAIN_TIMEOUT_MS` | 默认 600000 | 排水上限 |
 | `AGENT_HEARTBEAT_MS` / `AGENT_ORPHAN_AFTER_MS` | 默认 5000 / 30000 | 租约心跳 / 判孤儿 |
 | `AGENT_APPROVAL_TTL_MS` / `AGENT_QUESTION_TTL_MS` | 默认 10min / 15min | 审批 / 提问过期 |

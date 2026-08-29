@@ -837,6 +837,12 @@ export interface AgentHarnessOptions<
   activeToolNames?: string[];
   steeringMode?: QueueMode;
   followUpMode?: QueueMode;
+  /** 本地补丁 #4（vendor/openclaw/VENDOR.md）：模型调用了不在本轮工具面里的名字时，
+   *  由宿主决定要不要临时加载它（透传给 AgentLoopConfig.resolveDeferredTool）。 */
+  resolveDeferredTool?: (
+    context: { toolCall: { id: string; name: string; arguments: Record<string, unknown> } },
+    signal?: AbortSignal,
+  ) => Promise<TTool | undefined> | TTool | undefined;
 }
 
 export type { CoreAgentHarness as AgentHarness } from "./agent-harness";

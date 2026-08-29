@@ -31,6 +31,7 @@ import { EventPublisher, pruneDeltas } from "./events";
 import { createStreamLineAdapter } from "./stream-lines";
 import { buildTools, bareName, exposedName, type RuntimeToolDef } from "./tools";
 import { tieredToolNames } from "./tool-tiers";
+import { recallTools } from "./tool-index";
 import { approvalCard } from "./cards";
 import { createApproval, awaitApproval, markApprovalExecuted, approvalAllowsReexecute } from "./approvals";
 import { buildSystemPrompt, recallBlock } from "./prompt";
@@ -170,8 +171,11 @@ async function execute(input: ExecuteInput): Promise<void> {
     // 工具三层（#333）：热 ∪ 温(页面) ∪ 召回命中 ∪ 闭包。恢复模式没有本轮 prompt，
     // 用 transcript 最后一条用户消息做召回输入。
     const recallPrompt = input.message ?? lastUserText(await session.buildContext().then((c) => c.messages));
+    const recalled = recallPrompt
+      ? (await recallTools(stripUiContext(recallPrompt), { hasProduction: !!productionId, userId })).map((h) => h.name)
+      : [];
     const tiers = tieredToolNames({
-      hasProduction: !!productionId, pageKey: input.pageKey ?? null, prompt: recallPrompt,
+      hasProduction: !!productionId, pageKey: input.pageKey ?? null, prompt: recallPrompt, recalled,
       available: tools.map((t) => t.mcpName),
     });
     const activeToolNames = tiers.active.map(exposedName);
@@ -181,6 +185,9 @@ async function execute(input: ExecuteInput): Promise<void> {
       session,
       tools,
       activeToolNames,
+      // 冷层兜底闭环（补丁 #4）：模型按名调了不在本轮工具面里的工具（find_tools 搜到的，
+      // 或它记得的）→ 从注册表临时加载。权限/制作语境仍在工具内部判定，分层≠权限。
+      resolveDeferredTool: ({ toolCall }) => toolByName.get(toolCall.name),
       systemPrompt: buildSystemPrompt(inject),
       model: CHAT_MODEL,
       getApiKeyAndHeaders: async () => ({ apiKey: runtimeOverrides.apiKey ?? deepseekApiKey() }),

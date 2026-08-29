@@ -276,6 +276,26 @@ const DEFS: Def[] = [
     }),
   },
 
+  // ── find_tools：冷层兜底。工具面按页面/召回分层（#333），模型觉得"应该有个工具能做
+  // 这件事但列表里没有"时用它搜；搜到的名字**直接调用即可**（resolveDeferredTool 会按
+  // 名临时加载，不需要任何中间步骤）。260 个工具时也是这个形态：目录不进 prompt。
+  {
+    mcpName: "find_tools",
+    description:
+      "按需求搜索本环境可用的 clickin 工具（EN: find tools）。当前工具列表只是本轮相关的子集；" +
+      "如果你觉得应该有某个工具能完成用户的请求但列表里没有，用一句话描述需求来搜。" +
+      "返回工具名与说明——**拿到名字后直接调用**，不需要其他步骤。",
+    parameters: Type.Object({ query: Type.String({ description: "用户想做什么（自然语言，中文即可）" }) }),
+    readOnly: true,
+    execute: async (ctx, args) => {
+      const { searchTools } = await import("./tool-index");
+      const hits = await searchTools(String(args.query ?? ""), { hasProduction: !!ctx.productionId, userId: ctx.userId, limit: 5 });
+      if (hits.length === 0) return "没有找到相关工具。请基于现有信息回答，或在回复里说明这件事目前没有工具支持。";
+      const lines = hits.map((h) => `- ${exposedName(h.name)}：${h.oneliner}`);
+      return `找到以下工具（直接按名调用即可，无需其他步骤）：\n${lines.join("\n")}`;
+    },
+  },
+
   // ── ask_user（#290）：向用户提问并等待回答。只读（无副作用）；恢复/重跑按
   // toolCallId 复用同一待答问题，不重问。取消/过期以错误结果回模型。
   {

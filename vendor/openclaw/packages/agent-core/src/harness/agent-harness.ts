@@ -238,6 +238,7 @@ export class CoreAgentHarness<
   private steeringQueueMode: QueueMode;
   private followUpQueue: UserMessage[] = [];
   private followUpQueueMode: QueueMode;
+  private resolveDeferredTool?: AgentHarnessOptions<TSkill, TPromptTemplate, TTool>["resolveDeferredTool"]; // 本地补丁 #4
   private nextTurnQueue: AgentMessage[] = [];
   private handlers = new Map<string, Set<AgentHarnessHandler>>();
 
@@ -258,6 +259,7 @@ export class CoreAgentHarness<
       options.activeToolNames ?? (options.tools ?? []).map((tool) => tool.name);
     this.steeringQueueMode = options.steeringMode ?? "one-at-a-time";
     this.followUpQueueMode = options.followUpMode ?? "one-at-a-time";
+    this.resolveDeferredTool = options.resolveDeferredTool; // 本地补丁 #4
   }
 
   private getHandlers(type: string): Set<AgentHarnessHandler> | undefined {
@@ -539,6 +541,19 @@ export class CoreAgentHarness<
         this.drainQueuedMessages(this.steerQueue, this.steeringQueueMode),
       getFollowUpMessages: async () =>
         this.drainQueuedMessages(this.followUpQueue, this.followUpQueueMode),
+      // 本地补丁 #4：宿主可按名临时加载工具。agent-loop 只把它加进当前 context.tools，
+      // 而 prepareNextTurn 每轮都按 activeToolNames 重建 context——所以这里同时把它登记为
+      // 激活工具，本会话后续轮次一直可见（语义同 setActiveTools 追加一项）。
+      resolveDeferredTool: this.resolveDeferredTool
+        ? async (context, signal) => {
+            const tool = await this.resolveDeferredTool!({ toolCall: context.toolCall }, signal);
+            if (tool) {
+              if (!this.tools.has(tool.name)) this.tools.set(tool.name, tool);
+              if (!this.activeToolNames.includes(tool.name)) this.activeToolNames.push(tool.name);
+            }
+            return tool;
+          }
+        : undefined,
     };
   }
 
