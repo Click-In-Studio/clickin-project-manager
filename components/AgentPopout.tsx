@@ -1047,7 +1047,12 @@ function ToolCallBubble({
 
 /** ask_user 问题卡片：AI 主动向人索取输入，run 阻塞到有人回答或问题过期
  * （默认 15 分钟）。单题单选且不允许自由文本时点选项即提交；其余情况选完
- * 按"提交回答"。isSecret 按凭据对待：password 输入框、不回显。 */
+ * 按"提交回答"。
+ *
+ * 曾有一支 isSecret（password 输入框、不回显）——那是照着网关 question.* 协议
+ * 写的前向兼容代码。自建运行时的 ask_user schema 刻意不带这个字段：回答会原样
+ * 进工具结果与 transcript 落库，"不回显"根本兑现不了；助手也没有任何索取凭据的
+ * 正当理由（TOOLS.md 已明写不要问）。要加回来先解决落库明文问题。 */
 function QuestionCard({
   question,
   status,
@@ -1143,11 +1148,11 @@ function QuestionCard({
           </div>
           {item.isOther && (
             <input
-              type={item.isSecret ? "password" : "text"}
-              autoComplete={item.isSecret ? "new-password" : "off"}
+              type="text"
+              autoComplete="off"
               value={otherText[item.questionId] ?? ""}
               onChange={(e) => setOtherText((prev) => ({ ...prev, [item.questionId]: e.target.value }))}
-              placeholder={item.isSecret ? "输入（不会回显在对话里）" : "其他：自由输入…"}
+              placeholder="其他：自由输入…"
               className="mt-1.5 w-full rounded-md border border-indigo-200 bg-white px-2 py-1.5 text-xs focus:border-indigo-500 focus:outline-none"
             />
           )}

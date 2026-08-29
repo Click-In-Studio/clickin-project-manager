@@ -1,7 +1,8 @@
 // ask_user（#290 在自建运行时里的形态）：模型向用户提问 = 一个 await 表状态的工具。
 // 与审批门同款机制（agent_question 表 + 轮询），重启后从表续；同一 toolCallId 已有待答
 // 问题则接着等它，不重问（恢复路径把 ask_user 当只读工具重跑时天然幂等）。
-// 卡片数据形态对齐 lib/agent-gateway/stream-reducer.ts 的 QuestionInfo——前端零改动。
+// 卡片数据形态 = lib/agent-chat/stream-reducer.ts 的 QuestionInfo（形状当初对齐网关的
+// question.* 协议以求前端零改动；网关已退役，两边加字段要同批动）。
 
 import type { Pool } from "pg";
 import { getPool } from "@/lib/pg";

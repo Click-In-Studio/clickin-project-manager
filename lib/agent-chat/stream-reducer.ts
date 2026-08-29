@@ -13,8 +13,9 @@ export type ApprovalInfo = {
   toolCallId?: string;
 };
 
-// ask_user 问题卡片的数据形状（与 lib/agent-gateway/client.ts 的
-// AgentQuestionRecord 对应，经 relay 原样 JSON 序列化过来）。
+// ask_user 问题卡片的数据形状（源 = lib/agent-runtime/questions.ts 落 agent_question
+// 表的 payload，经 SSE 原样 JSON 序列化过来）。字段与 ask_user 的 schema 逐个对应——
+// 加字段要两处一起动，否则前端渲染一个永远没人送的分支（isSecret 就是这么死的）。
 export type QuestionOption = { label: string; description?: string };
 export type QuestionItem = {
   questionId: string;
@@ -23,7 +24,6 @@ export type QuestionItem = {
   options: QuestionOption[];
   multiSelect?: boolean;
   isOther?: boolean;
-  isSecret?: boolean;
 };
 export type QuestionInfo = {
   id: string;

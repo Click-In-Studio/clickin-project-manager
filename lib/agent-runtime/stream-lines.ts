@@ -1,6 +1,7 @@
 // harness 事件 → 现有前端 SSE 行协议（#367 S1 判据④：前端零改动）。
 //
-// 契约来源 = lib/agent-gateway/stream-reducer.ts 的 StreamLine：
+// 契约来源 = lib/agent-chat/stream-reducer.ts 的 StreamLine（网关时代在
+// lib/agent-gateway/，随 #377 一起退役，行协议原样搬过来）：
 //   delta   = 当前"段"的累计正文（不是增量！reducer 用它整体替换气泡文本）
 //   tool    = 段边界：工具调用开始，其后的正文属于新段
 //   final   = 最后一段的正文；aborted / error 同理收尾
