@@ -7,10 +7,13 @@ import { webFetch, webSearch, htmlToText, isPrivateAddress, formatSearchHits, WE
 describe("web.fetch", () => {
   let server: http.Server;
   let base: string;
+  let port = 0;
+  const hits: string[] = [];
   const prevAllow = process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE;
 
   beforeAll(async () => {
     server = http.createServer((req, res) => {
+      hits.push(`${req.headers.host ?? ""}${req.url ?? ""}`);
       if (req.url === "/page") {
         res.setHeader("content-type", "text/html; charset=utf-8");
         res.end(`<!doctype html><html><head><title> 排练 &amp; 通告 </title><style>p{}</style><script>alert(1)</script></head>
@@ -21,12 +24,17 @@ describe("web.fetch", () => {
       } else if (req.url === "/redirect") {
         res.writeHead(302, { location: `${base}/page` });
         res.end();
+      } else if (req.url === "/redirect-private") {
+        // 同一台服务器换个主机名：白名单只放 127.0.0.1，localhost 不在 → 这一跳必须在建连前被拒
+        res.writeHead(302, { location: `http://localhost:${port}/page` });
+        res.end();
       } else {
         res.writeHead(404); res.end("nope");
       }
     });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-    base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    port = (server.address() as { port: number }).port;
+    base = `http://127.0.0.1:${port}`;
   });
   afterAll(async () => {
     await new Promise<void>((r) => server.close(() => r()));
@@ -51,6 +59,13 @@ describe("web.fetch", () => {
     expect(p.text).toContain("灯光 提示：暗场");
     expect(p.text.split("\n")).toEqual(expect.arrayContaining(["一", "二"]));
     expect(p.truncated).toBe(false);
+  });
+
+  it("重定向到白名单外的内网主机：在发请求之前被拒（不是拿到响应后才拒）", async () => {
+    process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE = "127.0.0.1";
+    hits.length = 0;
+    await expect(webFetch(`${base}/redirect-private`)).rejects.toThrow("不允许抓取内网地址");
+    expect(hits).toEqual([`127.0.0.1:${port}/redirect-private`]); // localhost 那一跳从未到达服务器
   });
 
   it("超长正文截断并标记；重定向跟随；404 报错", async () => {

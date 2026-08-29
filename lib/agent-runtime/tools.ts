@@ -308,7 +308,8 @@ const DEFS: Def[] = [
       } catch (err) {
         if (err instanceof WebToolError) return err.message;
         if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return "抓取超时";
-        if (err instanceof Error) return `抓取失败：${err.message}`;
+        // 其余（TLS/网络栈内部错误）不把细节回给模型
+        if (err instanceof Error) return "抓取失败：无法连接该网址";
         throw err;
       }
     },

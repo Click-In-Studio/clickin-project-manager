@@ -5,6 +5,7 @@
 
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { Agent, fetch as undiciFetch } from "undici";
 
 export const WEB_SEARCH_MAX = 5;
 export const WEB_FETCH_TIMEOUT_MS = 15_000;
@@ -47,15 +48,41 @@ export async function webFetch(rawUrl: string, signal?: AbortSignal): Promise<Fe
   let url: URL;
   try { url = new URL(rawUrl); } catch { throw new WebToolError("URL 不合法"); }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new WebToolError("只支持 http/https");
-  await assertPublicHost(url.hostname);
+  assertHostnameAllowed(url.hostname);
 
-  const res = await fetch(url, {
-    redirect: "follow",
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; ClickInAgent/1.0)", Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5" },
-    signal: withTimeout(signal, WEB_FETCH_TIMEOUT_MS),
-  });
-  // 重定向落点也要过一遍 SSRF 检查（302 到内网是经典绕过）
-  if (res.url && res.url !== url.href) await assertPublicHost(new URL(res.url).hostname);
+  // SSRF 防护落在连接层：dispatcher 的 lookup 就是真正建连用的那次解析，解析结果先过
+  // isPrivateAddress 再连——先查后连两次独立解析的 DNS rebinding 绕过在这里不存在；
+  // 重定向的每一跳同样经这个 lookup 建连，302 到内网在发请求之前就被拒（AI review #373）。
+  // 重定向手动跟：net.connect 对字面 IP 不会调 lookup，所以每一跳的目标都先过一遍
+  // assertHostnameAllowed（字面 IP 的私网判定在这里），域名的私网判定则在建连时的 lookup 里。
+  const dispatcher = guardedDispatcher();
+  const abort = withTimeout(signal, WEB_FETCH_TIMEOUT_MS);
+  let current = url;
+  let res: Awaited<ReturnType<typeof undiciFetch>>;
+  for (let hop = 0; ; hop++) {
+    assertHostnameAllowed(current.hostname);
+    try {
+      res = await undiciFetch(current, {
+        dispatcher,
+        redirect: "manual",
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; ClickInAgent/1.0)", Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5" },
+        signal: abort,
+      });
+    } catch (err) {
+      const cause = (err as { cause?: unknown }).cause;
+      if (cause instanceof WebToolError) throw cause;
+      throw err;
+    }
+    const location = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && location) {
+      await res.body?.cancel().catch(() => {});
+      if (hop >= 5) throw new WebToolError("重定向次数过多");
+      current = new URL(location, current);
+      if (current.protocol !== "http:" && current.protocol !== "https:") throw new WebToolError("只支持 http/https");
+      continue;
+    }
+    break;
+  }
   if (!res.ok) throw new WebToolError(`抓取失败：HTTP ${res.status}`);
 
   const body = await readCapped(res, WEB_FETCH_MAX_BYTES);
@@ -68,7 +95,7 @@ export async function webFetch(rawUrl: string, signal?: AbortSignal): Promise<Fe
     text = body;
   }
   const truncated = text.length > WEB_FETCH_MAX_CHARS;
-  return { url: res.url || url.href, title, text: truncated ? text.slice(0, WEB_FETCH_MAX_CHARS) : text, truncated };
+  return { url: current.href, title, text: truncated ? text.slice(0, WEB_FETCH_MAX_CHARS) : text, truncated };
 }
 
 export function formatFetchedPage(p: FetchedPage): string {
@@ -103,8 +130,9 @@ function decodeEntities(s: string): string {
     .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)));
 }
 
-async function readCapped(res: Response, max: number): Promise<string> {
-  const reader = res.body?.getReader();
+/** 按字节上限读体。截断点落在多字节字符中间时那个字符会解成 �——正文只是给模型看的，best-effort。 */
+async function readCapped(res: { body: unknown }, max: number): Promise<string> {
+  const reader = (res.body as ReadableStream<Uint8Array> | null)?.getReader();
   if (!reader) return "";
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -124,17 +152,57 @@ function withTimeout(signal: AbortSignal | undefined, ms: number): AbortSignal {
 }
 
 // ── SSRF 防护 ───────────────────────────────────────────────────────────────
+//
+// AGENT_WEB_FETCH_ALLOW_PRIVATE：只给测试。"1" = 全放行；也可以是逗号分隔的主机名白名单
+// （如 "127.0.0.1"），这样测试能同时验证"白名单内可抓、重定向到白名单外的内网被拒"。
 
-/** 内网/环回/链路本地/元数据地址一律拒绝；AGENT_WEB_FETCH_ALLOW_PRIVATE=1 只给测试用。 */
-export async function assertPublicHost(hostname: string): Promise<void> {
-  if (process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE === "1") return;
-  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+function privateAllowlist(): "all" | Set<string> {
+  const v = process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE;
+  if (!v) return new Set();
+  if (v === "1") return "all";
+  return new Set(v.split(",").map((h) => h.trim().toLowerCase()).filter(Boolean));
+}
+
+function normalizeHost(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, "").toLowerCase();
+}
+
+/** 主机名层面的拒绝（不用解析就能判的） */
+export function assertHostnameAllowed(hostname: string): void {
+  const host = normalizeHost(hostname);
+  const allow = privateAllowlist();
+  if (allow === "all" || allow.has(host)) return;
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
     throw new WebToolError("不允许抓取内网地址");
   }
-  const addrs = isIP(host) ? [host] : await lookup(host, { all: true }).then((r) => r.map((a) => a.address)).catch(() => []);
-  if (addrs.length === 0) throw new WebToolError("域名无法解析");
-  for (const a of addrs) if (isPrivateAddress(a)) throw new WebToolError("不允许抓取内网地址");
+  // 字面 IP：net.connect 不会为它调 lookup，私网判定只能在这里做
+  if (isIP(host) && isPrivateAddress(host)) throw new WebToolError("不允许抓取内网地址");
+}
+
+type LookupCb = (err: NodeJS.ErrnoException | null, address: string, family: number) => void;
+
+/** 建连用的 lookup：解析 → 逐地址判私网 → 只把通过的地址交给 socket。 */
+function guardedLookup(hostname: string, _opts: unknown, cb: LookupCb): void {
+  const host = normalizeHost(hostname);
+  const allow = privateAllowlist();
+  const allowed = allow === "all" || allow.has(host);
+  try { assertHostnameAllowed(host); } catch (err) { cb(err as Error, "", 0); return; }
+  const resolve = isIP(host) ? Promise.resolve([{ address: host, family: isIP(host) }]) : lookup(host, { all: true });
+  resolve.then((addrs) => {
+    if (addrs.length === 0) { cb(new WebToolError("域名无法解析"), "", 0); return; }
+    const a = addrs[0];
+    if (!allowed && isPrivateAddress(a.address)) { cb(new WebToolError("不允许抓取内网地址"), "", 0); return; }
+    cb(null, a.address, a.family);
+  }, () => cb(new WebToolError("域名无法解析"), "", 0));
+}
+
+function guardedDispatcher(): Agent {
+  return new Agent({ connect: { lookup: guardedLookup as unknown as undefined } });
+}
+
+/** 供测试/其他调用方单独判一个主机名（解析 + 私网判定），与建连用的判据同一份。 */
+export async function assertPublicHost(hostname: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => guardedLookup(hostname, {}, (err) => (err ? reject(err) : resolve())));
 }
 
 export function isPrivateAddress(ip: string): boolean {
