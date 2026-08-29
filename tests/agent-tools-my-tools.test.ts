@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
-import { myCallTimes, myTechReqs, myFollowedEvents, myMilestones, myProductions } from "@/lib/mcp/my-tools";
+import { myCallTimes, myTechReqs, myFollowedEvents, myMilestones, myProductions } from "@/lib/agent-tools/my-tools";
 
 // my.* 只读工具的 self-scope 测试：工厂用户 + 一个 production 成员关系。
 // 通告/需求/活动无工厂（依赖 event 体系），空态消息即验证了 SQL 正确

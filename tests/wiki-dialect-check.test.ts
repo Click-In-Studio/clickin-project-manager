@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   extractDisplayTitles, restoreAndCheckBody, DEAD_LINK_LITERAL,
-} from "@/lib/mcp/wiki-dialect-check";
+} from "@/lib/agent-tools/wiki-dialect-check";
 
 // #333 T2 方言校验/反解的纯单元测试（零 DB——标题映射由调用方查库传入，
 // 这里直接构造）。roundtrip 语境：wiki_read 把 id 链接换成 [[标题]] 显示形态

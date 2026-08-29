@@ -1,13 +1,13 @@
 // 正文方言校验 + [[标题]] 反解（#333 T2 / P1）。
 //
 // 为什么需要反解而不是一律拒绝：wiki_read 给模型看的正文里，id 链接被换成
-// [[标题]] 显示形态（lib/mcp/wiki-tools.ts resolveBodyLinksForDisplay），而
+// [[标题]] 显示形态（lib/agent-tools/wiki-tools.ts resolveBodyLinksForDisplay），而
 // 方言说明教模型改写时「原样留着」——模型手里根本没有原始 id 形态，写回的
 // [[标题]] 若直接落库，链接边（wiki_entity_link 走 extractMentionEdges，只认
 // id 形态）就被打断。所以写回路径必须把**无歧义**的 [[标题]] 反解回
 // [#](/__cm__/wiki/<id>)，只有歧义（同名多篇）或未知（模型新造）才拒绝。
 //
-// 纯函数、零 DB 依赖：标题→id 的映射由调用方（lib/mcp/server.ts 的
+// 纯函数、零 DB 依赖：标题→id 的映射由调用方（lib/agent-tools/wiki-proposal-prepare.ts 的
 // /wiki-proposal 端点）查库后传入，本模块可单测。
 //
 // 代码块安全：code fence / 行内码里的语法示例是"关于语法的文档"不是真引用

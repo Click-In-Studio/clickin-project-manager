@@ -11,7 +11,7 @@ import {
   type QuestionItem,
   type StreamLine,
 } from "@/lib/agent-chat/stream-reducer";
-import { parseSessionIdentity } from "@/lib/mcp/session-identity";
+import { parseSessionIdentity } from "@/lib/agent-tools/session-identity";
 import { buildUiContextMessage } from "@/lib/agent-ui-context";
 import { derivePageKey, pageLabelFor, pageSuggestionsFor } from "@/lib/agent-page-context";
 import { toolLabel } from "@/lib/agent-tool-labels";

@@ -1,12 +1,11 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
-import { EventEmitter } from "node:events";
 import { faker } from "@faker-js/faker";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 
 // 记忆后端所有权 PR 的三层测试：
 //   1. store：追加/尾读/蒸馏增量消费的字节偏移语义
-//   2. MCP 端点：POST /memory-run 上报 → GET /inject-context 组装取件
+//   2. 上报与组装取件：appendRunRecord → buildInjectContext（MCP 端点已退役）
 //   3. 蒸馏：mock LLM，验证输入组装（旧摘要+新增量）与落盘+offset 提交
 
 // mock LLM（distill 经 @/lib/llm-chat 调用）。只替换 chat，保留真的
@@ -18,53 +17,19 @@ vi.mock("@/lib/llm-chat", async (importOriginal) => ({
   chat: (...args: unknown[]) => chatMock(...args),
 }));
 
-process.env.MCP_PORT = "3196";
-const BASE = "http://127.0.0.1:3196";
-
-type FakeStore = {
-  client: unknown;
-  status: { state: string };
-  connecting: null;
-  events: EventEmitter;
-  pendingApprovals: Map<string, unknown>;
-  denyReasons: Map<string, unknown>;
-  steerOwners: Map<string, Set<{ pending: number }>>;
-  questionSessions: Map<string, { sessionKey: string; expiresAtMs: number }>;
-};
-const g = globalThis as unknown as {
-  __mcpHttpServer?: { close: (cb?: () => void) => void };
-  __clickinAgentGateway?: FakeStore;
-};
-
 let userId: string;
 let userName: string;
 let prodId: string;
 
 beforeAll(async () => {
-  g.__clickinAgentGateway = {
-    client: null,
-    status: { state: "connected" },
-    connecting: null,
-    events: new EventEmitter(),
-    pendingApprovals: new Map(),
-    denyReasons: new Map(),
-    steerOwners: new Map(), questionSessions: new Map(),
-  };
   userName = `测试记忆${shortId()}`;
   userId = (await upsertFeishuUser(`test-open-${shortId()}`, userName, null, false)).userId;
   ({ prodId } = await makeProduction(userId));
   await addProductionMember(prodId, userId);
-
-  const { startMcpServer } = await import("@/lib/mcp/server");
-  startMcpServer();
-  await new Promise((r) => setTimeout(r, 150));
   void faker;
 });
 
 afterAll(async () => {
-  const server = g.__mcpHttpServer;
-  if (server) await new Promise<void>((r) => server.close(() => r()));
-  delete g.__mcpHttpServer;
   await cleanupProduction(prodId).catch(() => {});
   // 蒸馏/上报现在会同步写检索索引（agent_memory_chunk），清掉本测试用户的行
   const { getPool } = await import("@/lib/pg");
@@ -124,60 +89,33 @@ describe("store：字节偏移增量语义", () => {
   });
 });
 
-describe("MCP 端点：上报与组装取件", () => {
-  it("POST /memory-run 落盘，GET /inject-context 含用户档案与近期对话", async () => {
-    const res = await fetch(`${BASE}/memory-run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId,
-        record: { ts: new Date().toISOString(), sessionKey: "agent:team:x", lastUser: "端点上报测试", lastAssistant: "收到" },
-      }),
-    });
-    expect(res.status).toBe(200);
-
-    const inject = await fetch(`${BASE}/inject-context?userId=${userId}`);
-    const data = (await inject.json()) as { markdown: string | null };
-    expect(data.markdown).toBeTruthy();
-    expect(data.markdown!).toContain("## 当前用户");
-    expect(data.markdown!).toContain(userName);
-    expect(data.markdown!).toContain("端点上报测试"); // 近期对话段
+describe("上报与组装取件（MCP 端点已退役，直接调 lib）", () => {
+  it("appendRunRecord 落盘 → buildInjectContext 的 memory 含用户档案与近期对话", async () => {
+    const { appendRunRecord } = await import("@/lib/agent-memory/store");
+    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
+    appendRunRecord(userId, { ts: new Date().toISOString(), sessionKey: "agent:team:x", lastUser: "端点上报测试", lastAssistant: "收到" });
+    const data = await buildInjectContext(userId);
+    expect(data.memory).toBeTruthy();
+    expect(data.memory!).toContain("## 当前用户");
+    expect(data.memory!).toContain(userName);
+    expect(data.memory!).toContain("端点上报测试"); // 近期对话段
   });
 
-  // M2：POST 版路由级覆盖（review #298 finding 2——路由与 triggerRecall 单元
-  // 分开测；鉴权模型=loopback 同信任域，与 GET 版一致，见 server.ts 注释）
-  it("POST /inject-context：happy path 带 recall 字段、缺 userId 400", async () => {
+  it("带 prompt 的组装：命中触发词 → recall 字段；无关 prompt → recall 为 null", async () => {
+    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
     const { writeMemory } = await import("@/lib/agent-memory/store");
     const { indexCurated } = await import("@/lib/agent-memory/index-db");
     const md = "- 灯光 cue 表改动要先过舞监确认 <!-- trigger: 灯光cue --> <!-- importance: 8 -->";
     writeMemory(userId, md);
     await indexCurated("user", userId, md);
     try {
-      const hit = await fetch(`${BASE}/inject-context`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, prompt: "灯光cue表今天要改一版" }),
-      });
-      expect(hit.status).toBe(200);
-      const data = (await hit.json()) as { memory: string | null; recall: string | null };
-      expect(data.memory).toContain("## 长期记忆摘要");
-      expect(data.memory).not.toContain("<!--"); // 注释剥离
-      expect(data.recall).toContain("灯光 cue 表改动要先过舞监确认");
+      const hit = await buildInjectContext(userId, undefined, "灯光cue表今天要改一版");
+      expect(hit.memory).toContain("## 长期记忆摘要");
+      expect(hit.memory).not.toContain("<!--"); // 注释剥离
+      expect(hit.recall).toContain("灯光 cue 表改动要先过舞监确认");
 
-      // 无关 prompt → recall 为 null（不触发即不注入）
-      const miss = await fetch(`${BASE}/inject-context`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, prompt: "今天天气如何" }),
-      });
-      expect(((await miss.json()) as { recall: string | null }).recall).toBeNull();
-
-      const bad = await fetch(`${BASE}/inject-context`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: "无 userId" }),
-      });
-      expect(bad.status).toBe(400);
+      const miss = await buildInjectContext(userId, undefined, "今天天气如何");
+      expect(miss.recall).toBeNull();
     } finally {
       const { getPool } = await import("@/lib/pg");
       await getPool().query("DELETE FROM agent_memory_chunk WHERE scope_id = $1", [userId]).catch(() => {});
@@ -188,61 +126,51 @@ describe("MCP 端点：上报与组装取件", () => {
   // 若因"这个用户还没有任何记忆/档案"而整段不注入，就等于没有规则——所以
   // buildInjectContext 恒返回非 null（原先"什么都没有就返回 null"的早退已撤）。
   it("零记忆零档案的用户也拿得到界面上下文规则", async () => {
+    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
     const blank = "00000000-1111-2222-3333-444444444444";
-    const inject = await fetch(`${BASE}/inject-context?userId=${blank}`);
-    const data = (await inject.json()) as { markdown: string | null };
-    expect(data.markdown).toBeTruthy();
-    expect(data.markdown!).toContain("## 界面上下文说明");
-    expect(data.markdown!).toContain("clickin-ui-context");
-    expect(data.markdown!).not.toContain("## 长期记忆摘要"); // 确实没有别的段可注
+    const data = await buildInjectContext(blank);
+    expect(data.memory).toBeTruthy();
+    expect(data.memory!).toContain("## 界面上下文说明");
+    expect(data.memory!).toContain("clickin-ui-context");
+    expect(data.memory!).not.toContain("## 长期记忆摘要"); // 确实没有别的段可注
   });
 
   it("MEMORY.md 内部二级标题注入时降级为三级（不与包裹标题同级）", async () => {
+    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
     const { writeMemory } = await import("@/lib/agent-memory/store");
     writeMemory(userId, "## 偏好与习惯\n- 喜欢先听结论\n# 顶级标题\n- x");
-    const inject = await fetch(`${BASE}/inject-context?userId=${userId}`);
-    const data = (await inject.json()) as { markdown: string };
-    expect(data.markdown).toContain("## 长期记忆摘要\n### 偏好与习惯");
-    expect(data.markdown).toContain("### 顶级标题");
-    expect(data.markdown).not.toMatch(/\n## 偏好与习惯/);
+    const data = await buildInjectContext(userId);
+    expect(data.memory).toContain("## 长期记忆摘要\n### 偏好与习惯");
+    expect(data.memory).toContain("### 顶级标题");
+    expect(data.memory).not.toMatch(/\n## 偏好与习惯/);
   });
 
   it("excludeSessionKey 过滤当前会话自身条目", async () => {
-    const inject = await fetch(`${BASE}/inject-context?userId=${userId}&sessionKey=agent:team:x`);
-    const data = (await inject.json()) as { markdown: string | null };
-    expect(data.markdown ?? "").not.toContain("端点上报测试");
+    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
+    const data = await buildInjectContext(userId, "agent:team:x");
+    expect(data.memory ?? "").not.toContain("端点上报测试");
   });
 
   it("production 会话注入「当前制作」段（成员）", async () => {
+    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
     const sessionKey = `agent:team:clickin:chat:${userId}:${prodId}:11111111-2222-3333-4444-555555555555`;
-    const inject = await fetch(`${BASE}/inject-context?userId=${userId}&sessionKey=${encodeURIComponent(sessionKey)}`);
-    const data = (await inject.json()) as { markdown: string };
-    expect(data.markdown).toContain("## 当前制作");
-    expect(data.markdown).toContain("我的角色");
+    const data = await buildInjectContext(userId, sessionKey);
+    expect(data.memory).toContain("## 当前制作");
+    expect(data.memory).toContain("我的角色");
   });
 
   it("非成员的 production 会话不注入制作段（实时资格校验）", async () => {
+    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
     const { makeProduction: mk } = await import("./factories");
     const { prodId: otherProd } = await mk(); // 无 owner、无成员
     try {
       const sessionKey = `clickin:chat:${userId}:${otherProd}:11111111-2222-3333-4444-555555555555`;
-      const inject = await fetch(`${BASE}/inject-context?userId=${userId}&sessionKey=${encodeURIComponent(sessionKey)}`);
-      const data = (await inject.json()) as { markdown: string | null };
-      expect(data.markdown ?? "").not.toContain("## 当前制作");
+      const data = await buildInjectContext(userId, sessionKey);
+      expect(data.memory ?? "").not.toContain("## 当前制作");
     } finally {
       const { cleanupProduction: cp } = await import("./factories");
       await cp(otherProd).catch(() => {});
     }
-  });
-
-  it("缺 userId → 400；非法 record → 400", async () => {
-    expect((await fetch(`${BASE}/inject-context`)).status).toBe(400);
-    const bad = await fetch(`${BASE}/memory-run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId }),
-    });
-    expect(bad.status).toBe(400);
   });
 });
 

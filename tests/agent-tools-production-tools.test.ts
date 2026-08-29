@@ -12,7 +12,7 @@ import {
   productionContactList,
   productionDepartmentList,
   DENIED_NOT_MEMBER,
-} from "@/lib/mcp/production-tools";
+} from "@/lib/agent-tools/production-tools";
 
 // production.* 与 my.* 的语义分界测试：项目查询的权限门在前——
 // 非成员是明确的"权限被拒绝"，不是空结果；成员查询正常返回。

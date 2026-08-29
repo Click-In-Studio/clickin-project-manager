@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { EventEmitter } from "node:events";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { createEventReport } from "@/lib/event-db";
 import { getPool } from "@/lib/pg";
 import { createWiki, getWiki } from "@/lib/wiki-db";
-import { wikiProposeUpdate, wikiProposeDelete, wikiProposeMove, wikiProposeTag } from "@/lib/mcp/wiki-tools";
+import { wikiProposeUpdate, wikiProposeDelete, wikiProposeMove, wikiProposeTag } from "@/lib/agent-tools/wiki-tools";
 import { getWikiProposalByToolCallId, insertWikiProposal, type WikiProposalAction } from "@/lib/wiki-proposal-db";
-import { DENIED_NOT_MEMBER } from "@/lib/mcp/production-tools";
+import { prepareWikiProposal } from "@/lib/agent-tools/wiki-proposal-prepare";
+import { DENIED_NOT_MEMBER } from "@/lib/agent-tools/production-tools";
 
 // update/delete/move/tag 四个动作各自的门是实例级（canEditWiki/canDeleteWiki 对
 // 具体这一篇文档），不是 create 那种域级门——所以每个用例都要真造一个"对
@@ -18,34 +18,11 @@ import { DENIED_NOT_MEMBER } from "@/lib/mcp/production-tools";
 // if (proposal) 直接被短路跳过，delete 场景硬把已删除的 wikiId 写回
 // created_wiki_id 违反外键约束这个真实 bug 因此没被测出来（用户线上撞到
 // 的）。现在统一用 preInsertProposal 补上这一步，让测试真的跑到写 DB 那行。
-process.env.MCP_PORT = "3200";
-const BASE = "http://127.0.0.1:3200";
-
-type FakeStore = {
-  client: unknown; status: { state: string }; connecting: null; events: EventEmitter;
-  pendingApprovals: Map<string, unknown>; denyReasons: Map<string, unknown>; steerOwners: Map<string, Set<{ pending: number }>>;
-  questionSessions: Map<string, { sessionKey: string; expiresAtMs: number }>;
-};
-const g = globalThis as unknown as {
-  __mcpHttpServer?: { close: (cb?: () => void) => void };
-  __clickinAgentGateway?: FakeStore;
-};
-let savedStore: FakeStore | undefined;
-
 let prodId: string;
 let ownerId: string;
 let plainMemberId: string;
 
 beforeAll(async () => {
-  savedStore = g.__clickinAgentGateway;
-  g.__clickinAgentGateway = {
-    client: null, status: { state: "connected" }, connecting: null, events: new EventEmitter(),
-    pendingApprovals: new Map(), denyReasons: new Map(), steerOwners: new Map(), questionSessions: new Map(),
-  };
-  const { startMcpServer } = await import("@/lib/mcp/server");
-  startMcpServer();
-  await new Promise((r) => setTimeout(r, 150));
-
   ownerId = (await upsertFeishuUser(`test-open-${shortId()}`, `动作测试所有者${shortId()}`, null, false)).userId;
   plainMemberId = (await upsertFeishuUser(`test-open-${shortId()}`, `动作测试零权限成员${shortId()}`, null, false)).userId;
   ({ prodId } = await makeProduction(ownerId));
@@ -54,10 +31,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await cleanupProduction(prodId).catch(() => {});
-  const server = g.__mcpHttpServer;
-  if (server) await new Promise<void>((r) => server.close(() => r()));
-  delete g.__mcpHttpServer;
-  g.__clickinAgentGateway = savedStore;
 });
 
 /** 模拟插件 before_tool_call 的预持久化步骤——真实链路里这一步永远先跑，
@@ -265,17 +238,12 @@ describe("wikiProposeTag", () => {
   });
 });
 
-describe("POST /wiki-proposal：action=update/delete/move/tag 用实例级权限判定", () => {
+describe("prepareWikiProposal：action=update/delete/move/tag 用实例级权限判定（原 /wiki-proposal 端点）", () => {
   it("action=update，owner 对目标文档有 edit → hasPermission true，permissionKey 带具体 wikiId", async () => {
     const doc = await createWiki({ productionId: prodId, title: "预持久化-更新目标", createdBy: ownerId });
     const toolCallId = `call_${shortId()}`;
-    const res = await fetch(`${BASE}/wiki-proposal`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productionId: prodId, toolCallId, callerUserId: ownerId, action: "update", wikiId: doc.id, title: "新标题", summary: "" }),
-    });
-    const data = (await res.json()) as { hasPermission: boolean };
-    expect(data.hasPermission).toBe(true);
+    const r = await prepareWikiProposal({ productionId: prodId, toolCallId, callerUserId: ownerId, action: "update", wikiId: doc.id, title: "新标题", summary: "" });
+    expect(r.ok && r.hasPermission).toBe(true);
     const row = await getWikiProposalByToolCallId(prodId, toolCallId, ownerId);
     expect(row?.action).toBe("update");
     expect(row?.targetWikiId).toBe(doc.id);
@@ -285,38 +253,21 @@ describe("POST /wiki-proposal：action=update/delete/move/tag 用实例级权限
   it("action=delete，零权限成员对目标文档没有 delete → hasPermission false", async () => {
     const doc = await createWiki({ productionId: prodId, title: "预持久化-删除目标", createdBy: ownerId });
     const toolCallId = `call_${shortId()}`;
-    const res = await fetch(`${BASE}/wiki-proposal`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productionId: prodId, toolCallId, callerUserId: plainMemberId, action: "delete", wikiId: doc.id, summary: "" }),
-    });
-    const data = (await res.json()) as { hasPermission: boolean; reason: string | null };
-    expect(data.hasPermission).toBe(false);
-    expect(data.reason).toBe("no_grant");
+    const r = await prepareWikiProposal({ productionId: prodId, toolCallId, callerUserId: plainMemberId, action: "delete", wikiId: doc.id, summary: "" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.hasPermission).toBe(false);
+    expect(r.reason).toBe("no_grant");
   });
 
   it("action=tag，owner 对目标文档有 edit → hasPermission true，tags 落地进 proposal 行", async () => {
     const doc = await createWiki({ productionId: prodId, title: "预持久化-标签目标", createdBy: ownerId });
     const toolCallId = `call_${shortId()}`;
-    const res = await fetch(`${BASE}/wiki-proposal`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productionId: prodId, toolCallId, callerUserId: ownerId, action: "tag", wikiId: doc.id, tags: ["a", "b"], summary: "" }),
-    });
-    const data = (await res.json()) as { hasPermission: boolean };
-    expect(data.hasPermission).toBe(true);
+    const r = await prepareWikiProposal({ productionId: prodId, toolCallId, callerUserId: ownerId, action: "tag", wikiId: doc.id, tags: ["a", "b"], summary: "" });
+    expect(r.ok && r.hasPermission).toBe(true);
     const row = await getWikiProposalByToolCallId(prodId, toolCallId, ownerId);
     expect(row?.action).toBe("tag");
     expect(row?.tags).toEqual(["a", "b"]);
     expect(row?.permissionKey).toBe(`node:wiki/${doc.id}@edit`);
-  });
-
-  it("action=move/update/delete/tag 缺 wikiId → 400", async () => {
-    const res = await fetch(`${BASE}/wiki-proposal`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productionId: prodId, toolCallId: `call_${shortId()}`, callerUserId: ownerId, action: "move" }),
-    });
-    expect(res.status).toBe(400);
   });
 });

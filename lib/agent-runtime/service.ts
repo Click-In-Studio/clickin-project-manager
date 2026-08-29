@@ -12,7 +12,7 @@
 // ——路由的所有权判定、前端持有的 key、localStorage 记忆全部不用改。
 
 import { getPool } from "@/lib/pg";
-import { parseSessionIdentity } from "@/lib/mcp/session-identity";
+import { parseSessionIdentity } from "@/lib/agent-tools/session-identity";
 import { buildInjectContext } from "@/lib/agent-memory/inject";
 import { appendRunRecord } from "@/lib/agent-memory/store";
 import { stripUiContext } from "@/lib/agent-ui-context";
@@ -403,7 +403,7 @@ async function approvalGate(g: GateInput): Promise<{ block?: boolean; reason?: s
   // 校验拒绝 → 直接 block，说明书随理由回模型，卡片根本不弹
   const wikiAction = WIKI_PROPOSE_ACTIONS[bare];
   if (wikiAction && g.productionId) {
-    const { prepareWikiProposal } = await import("@/lib/mcp/wiki-proposal-prepare");
+    const { prepareWikiProposal } = await import("@/lib/agent-tools/wiki-proposal-prepare");
     const a = g.args;
     const prepared = await prepareWikiProposal({
       productionId: g.productionId, toolCallId: g.toolCallId, callerUserId: g.userId, action: wikiAction,

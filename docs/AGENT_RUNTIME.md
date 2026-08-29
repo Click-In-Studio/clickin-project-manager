@@ -35,7 +35,7 @@
 
 工具面 = 热层（按会话类型）∪ 温层（按页面）∪ 冷层召回 ∪ 本会话最近用过的工具（`used-tools.ts`：只看最近 3 个用户轮次、最多 6 个、最近优先——窗口外自然淘汰，避免一个 session 里东问西问把面越滚越大）。**召回的粒度是族**（`tool-catalog.ts` 的 `family`/`TOOL_FAMILIES`）：
 族内任一工具过阈值 → 整族入面（每轮 ≤2 族），由模型在族内挑动作；族太大再拆 sub。冷层索引在 `lib/agent-runtime/tool-index.ts`：
-每个工具的 `oneliner + examples`（`lib/mcp/tool-catalog.ts`）逐条嵌入，复用记忆检索的 embedding 供应商
+每个工具的 `oneliner + examples`（`lib/agent-tools/tool-catalog.ts`）逐条嵌入，复用记忆检索的 embedding 供应商
 （`EMBEDDING_PROVIDER`/`EMBEDDING_API_KEY`，向量缓存在 `agent_memory_embedding_cache`），未配置时退回纯词法。
 没召回到时的兜底是常驻的 `clickin__find_tools`（搜索，不是目录——目录会随工具数线性吃 prompt）：
 模型搜到名字后直接按名调用，harness 通过 `resolveDeferredTool`（vendor 补丁 #4）临时加载并在本会话后续轮次保持可见。
@@ -81,6 +81,13 @@ OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，
 订阅，handler 自己决定刷新粒度——client 页面重拉那一个 API、server component 页面 `router.refresh()`、带 `ids` 的只在命中时动；
 没人接才 `router.refresh()` 兜底。给新页面加自动刷新 = 写工具声明一句 `mutates` + 页面订阅一句，不碰 AgentPopout。
 现有订阅者：`WikiShell`（scope `wiki` → 软刷新左树，300ms 合并）。
+
+## skills 的事实源
+
+`lib/agent-runtime/tools.ts` 的注册表（DEFS）是工具的**唯一事实源**（MCP 服务器已于 2026-08-29 退役）：
+描述、参数 schema、只读/写、`mutates` 声明都在这里；底层实现在 `lib/agent-tools/`；
+中文触发词/例句/族在 `lib/agent-tools/tool-catalog.ts`；显示名在 `lib/agent-tool-labels.ts`。
+三处由 `tests/tool-catalog.test.ts` 与 `tests/agent-tool-labels.test.ts` 双向防漂移——加一个工具要同批改三处。
 
 ## 跨进程的东西
 

@@ -1,16 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { TOOL_CATALOG, TOOL_FAMILIES, toolRecall, TOOL_RECALL_MAX, DIALECT_CLOSURE_TOOLS } from "@/lib/mcp/tool-catalog";
-import { buildMcpServer } from "@/lib/mcp/server";
+import { TOOL_MCP_NAMES, RUNTIME_ONLY_TOOLS } from "@/lib/agent-runtime/tools";
+import { TOOL_CATALOG, TOOL_FAMILIES, toolRecall, TOOL_RECALL_MAX, DIALECT_CLOSURE_TOOLS } from "@/lib/agent-tools/tool-catalog";
 
 // #333 P2 工具目录：中文发现面（CJK bigram 召回）+ 与 MCP 注册清单双向防漂移。
 
 describe("tool-catalog 防漂移", () => {
-  it("目录与 lib/mcp/server.ts 注册清单一一对应（增删工具必须同批改目录）", async () => {
-    const server = buildMcpServer();
-    const registered = Object.keys(server["_registeredTools"] as Record<string, unknown>).sort();
+  it("目录与运行时注册表（lib/agent-runtime/tools.ts）一一对应（增删工具必须同批改目录）", () => {
+    const registered = TOOL_MCP_NAMES.filter((n) => !RUNTIME_ONLY_TOOLS.has(n)).sort();
     const cataloged = TOOL_CATALOG.map((e) => e.name).sort();
     expect(cataloged).toEqual(registered);
-    await server.close();
   });
 
   it("目录内名字唯一", () => {

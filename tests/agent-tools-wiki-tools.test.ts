@@ -2,8 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { createWiki, listOutgoingLinks } from "@/lib/wiki-db";
-import { DENIED_NOT_MEMBER } from "@/lib/mcp/production-tools";
-import { wikiTree, wikiBacklinks, wikiRead, wikiSearch } from "@/lib/mcp/wiki-tools";
+import { DENIED_NOT_MEMBER } from "@/lib/agent-tools/production-tools";
+import { wikiTree, wikiBacklinks, wikiRead, wikiSearch } from "@/lib/agent-tools/wiki-tools";
 
 // AI 视角必须与人类视角完全一致：无授权的成员在 tree/search 里绝不能看到
 // 私有文档——这是本批工具最核心的安全保证，比"功能能跑"更重要。

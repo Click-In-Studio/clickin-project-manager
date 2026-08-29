@@ -6,7 +6,7 @@ import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, setProductionTier, shortId } from "./factories";
 import { upsertFeishuUser } from "@/lib/db";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { createNewSessionKey } from "@/lib/mcp/session-identity";
+import { createNewSessionKey } from "@/lib/agent-tools/session-identity";
 import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-chat/stream-reducer";
 import { runtimeOverrides, waitForIdle } from "@/lib/agent-runtime/service";
 import { CHAT_MODEL } from "@/lib/agent-runtime/config";

@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { requireUser, toErrorResponse } from "@/lib/agent-chat/http";
 import { getWikiProposalByToolCallId } from "@/lib/wiki-proposal-db";
 import { getWiki } from "@/lib/wiki-db";
-import { resolveProductionActor } from "@/lib/mcp/production-tools";
+import { resolveProductionActor } from "@/lib/agent-tools/production-tools";
 import { canViewWiki } from "@/lib/wiki-perm";
 
 // 供 WikiProposalPreviewModal 按 toolCallId 拉取完整提议内容（确认卡片

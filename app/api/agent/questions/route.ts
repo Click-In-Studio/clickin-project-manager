@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { sessionKeyOwnedBy } from "@/lib/mcp/session-identity";
+import { sessionKeyOwnedBy } from "@/lib/agent-tools/session-identity";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-chat/http";
 import { listPendingQuestions, questionSession, resolveQuestion } from "@/lib/agent-runtime/questions";
 
