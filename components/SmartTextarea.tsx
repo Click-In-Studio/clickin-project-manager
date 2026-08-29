@@ -38,6 +38,9 @@ import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 import BlockHandle from "@/components/editor/BlockHandle";
 import TableTools from "@/components/editor/TableTools";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
+import { suggestionMenuLayout } from "@/lib/editor-floating-menu";
+import { RichStyle } from "@/lib/tiptap-rich-style";
+import TaskSyncMenu from "@/components/editor/TaskSyncMenu";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -400,6 +403,8 @@ export interface SmartTextareaProps {
    *  180~360px 的小框既没有放手柄的地方，也用不到块级移动/分栏。
    *  浮动条不受此门控（它贴选区，不占版面），markdown 面一律有。 */
   blockTools?: boolean;
+  /** 文档任务项可同步为 production 任务；仅整页文档编辑面启用。 */
+  taskSync?: { productionId: string };
   /** Extra custom-trigger plugins (escape hatch) */
   plugins?: DropPlugin[];
   /** 图片粘贴上传（wiki 文档场景）。提供即解锁 image 节点：粘贴的图片文件
@@ -433,6 +438,7 @@ export default function SmartTextarea({
   markdown = false,
   frameless = false,
   blockTools = false,
+  taskSync,
   plugins: extraPlugins = [],
   imageUpload,
   placeholder,
@@ -712,7 +718,7 @@ export default function SmartTextarea({
       TaskList, TaskItem.configure({ nested: true }),
       // ColumnEditing 不随 blockTools 门控：空栏退格、禁止嵌套是分栏方言自身
       // 的不变量，哪个面都得维护（粘贴、AI 写入都可能造出嵌套组）
-      Callout, Column, ColumnGroup, ColumnEditing,
+      Callout, RichStyle, Column, ColumnGroup, ColumnEditing,
       // 拖拽造栏、栏宽拖拽只在有手柄的面才有意义（也才有那条栏间沟槽放操作件）
       ...(hasColumnTools ? [ColumnDrop, ColumnResize] : []),
       imageExt,
@@ -1030,6 +1036,9 @@ export default function SmartTextarea({
   }, [markdown, editor, value]);
 
   const rect = drop?.clientRect?.();
+  const menuLayout = rect && typeof window !== "undefined"
+    ? suggestionMenuLayout(rect, { width: window.innerWidth, height: window.innerHeight })
+    : null;
   // `/` 无命中时整个弹层不出现——正文里的 and/or、日期 2026/08 不该弹空菜单
   const dropPlugin = drop ? allPlugins.find(p => p.trigger === drop.trigger) : undefined;
   const dropHidden = !!drop && drop.items.length === 0 && !!dropPlugin?.hideWhenEmpty;
@@ -1044,11 +1053,22 @@ export default function SmartTextarea({
       {markdown && !readOnly && <TextBubbleMenu editor={editor} />}
       {markdown && blockTools && !readOnly && <BlockHandle editor={editor} />}
       {markdown && blockTools && !readOnly && <TableTools editor={editor} />}
-      {drop && rect && !dropHidden && typeof document !== "undefined" &&
+      {markdown && blockTools && !readOnly && taskSync && <TaskSyncMenu editor={editor} productionId={taskSync.productionId} />}
+      {drop && rect && menuLayout && !dropHidden && typeof document !== "undefined" &&
         createPortal(
           <div
-            style={{ position: "fixed", left: rect.left, top: rect.bottom + 4, zIndex: 9999 }}
-            className="bg-white rounded-xl shadow-lg border border-zinc-100 py-1 min-w-[160px] max-w-[360px] max-h-64 overflow-y-auto"
+            data-placement={menuLayout.placement}
+            style={{
+              position: "fixed",
+              left: menuLayout.left,
+              top: menuLayout.top,
+              maxHeight: menuLayout.maxHeight,
+              maxWidth: menuLayout.maxWidth,
+              minWidth: Math.min(160, menuLayout.maxWidth),
+              transform: menuLayout.placement === "top" ? "translateY(-100%)" : undefined,
+              zIndex: 9999,
+            }}
+            className="bg-white rounded-xl shadow-lg border border-zinc-100 py-1 overflow-y-auto"
           >
             {drop.items.length === 0 ? (
               <p className="px-3 py-2 text-sm text-zinc-400">

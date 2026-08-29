@@ -17,6 +17,16 @@ export const CALLOUT_MARKER_RE = /^\[!([^\]\n]*)\]/;
 
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
 
+export const CALLOUT_COLORS = [
+  null,
+  "#fee2e2",
+  "#ffedd5",
+  "#fef9c3",
+  "#dcfce7",
+  "#dbeafe",
+  "#ede9fe",
+] as const;
+
 export type CalloutMarker = {
   emoji: string;
   color: string | null;
