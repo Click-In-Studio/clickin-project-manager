@@ -171,3 +171,11 @@ describe("applyStreamLine", () => {
     expect(b[b.length - 1]).toMatchObject({ kind: "notice" });
   });
 });
+
+describe("mutation 行（#367 写操作后自动刷新）", () => {
+  it("不进气泡：reducer 原样返回", () => {
+    const prev = applyStreamLine([], { type: "final", text: "ok" });
+    const next = applyStreamLine(prev, { type: "mutation", scope: "wiki", action: "created", productionId: "p1" });
+    expect(next).toEqual(prev);
+  });
+});

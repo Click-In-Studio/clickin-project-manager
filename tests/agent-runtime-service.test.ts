@@ -170,6 +170,7 @@ describe("agent-runtime service", () => {
     expect(third.content[0]?.text).toContain("用户拒绝理由：先别改");
     const instr = await getPool().query(`SELECT content FROM agent_instructions WHERE scope_type = 'user' AND scope_id = $1`, [userId]);
     expect(instr.rows).toHaveLength(0);
+    expect(lines.some((l) => l.type === "mutation")).toBe(false); // 被拒的写工具没有变更信号
   });
 
   it("审批 allow → 写工具真执行（个人指令被写入），approval-resolved 行到前端", async () => {
@@ -188,6 +189,9 @@ describe("agent-runtime service", () => {
     const lines = await collectUntilTerminal(key);
     await waitForIdle(key);
     expect(lines.find((l) => l.type === "approval-resolved")).toMatchObject({ decision: "allow-once" });
+    // 写操作后自动刷新：写工具成功 → mutation 行紧跟 tool-end（前端派发给页面订阅者）
+    const endIdx = lines.findIndex((l) => l.type === "tool-end");
+    expect(lines[endIdx + 1]).toEqual({ type: "mutation", scope: "instructions.personal", action: "updated", productionId: null, tool: "my.update_instructions" });
     const instr = await getPool().query<{ content: string }>(`SELECT content FROM agent_instructions WHERE scope_type = 'user' AND scope_id = $1`, [userId]);
     expect(instr.rows[0]?.content).toBe("回复末尾加一个🎭");
     await getPool().query(`DELETE FROM agent_instructions WHERE scope_type = 'user' AND scope_id = $1`, [userId]);

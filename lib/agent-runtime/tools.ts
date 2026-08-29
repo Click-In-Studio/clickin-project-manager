@@ -40,9 +40,18 @@ export interface RunHandle {
   isDetached: () => boolean;
 }
 
+/** 写工具成功后的变更信号（前端 lib/agent-mutations.ts 派发给页面订阅者决定怎么刷） */
+export interface ToolMutation {
+  scope: string;
+  action: "created" | "updated" | "deleted";
+  ids?: string[];
+}
+
 /** 注册表条目：RuntimeTool + MCP 原始名（tool-catalog / 显示名 / 卡片文案按它索引）。 */
 export interface RuntimeToolDef extends RuntimeTool {
   mcpName: string;
+  /** 写工具声明：成功执行后产生了什么变更（读工具不声明） */
+  mutates?: (args: Record<string, unknown>) => ToolMutation | null;
 }
 
 const text = (t: string): AgentToolResult<unknown> => ({ content: [{ type: "text", text: t }], details: undefined });
@@ -70,6 +79,15 @@ type Def = {
   execute: (ctx: ToolContext & { productionId: string }, args: Record<string, unknown>, toolCallId: string) => Promise<string>;
   /** 结果判定为"错误"（isError）而非正常文本——ask_user 取消/过期用 */
   isErrorResult?: (out: string) => boolean;
+  /** 写工具：成功后产生的变更（service 据此往 agent SSE 发 mutation 行） */
+  mutates?: (args: Record<string, unknown>) => ToolMutation | null;
+};
+
+const wikiIdOf = (args: Record<string, unknown>): string[] => (typeof args.wikiId === "string" && args.wikiId ? [args.wikiId] : []);
+const WIKI_MUTATES = {
+  created: (): ToolMutation => ({ scope: "wiki", action: "created" }),
+  updated: (args: Record<string, unknown>): ToolMutation => ({ scope: "wiki", action: "updated", ids: wikiIdOf(args) }),
+  deleted: (args: Record<string, unknown>): ToolMutation => ({ scope: "wiki", action: "deleted", ids: wikiIdOf(args) }),
 };
 
 const NONE = Type.Object({});
@@ -116,6 +134,7 @@ const DEFS: Def[] = [
     description: "【个人设置】全量替换当前用户的个人 AI 指令（即 <clickin-instructions> 里「用户的个人指令」段），需要人工在聊天栏确认。content 是替换后的完整内容——先基于注入块里的现行内容整合修改，不要只传增量；传空字符串表示清空。仅影响该用户自己的会话。",
     parameters: Type.Object({ content: Type.String({ description: `替换后的完整个人指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）` }) }),
     readOnly: false,
+    mutates: () => ({ scope: "instructions.personal", action: "updated" }),
     execute: async (ctx, args) => (await import("@/lib/mcp/instructions-tools")).updateMyInstructions(ctx.userId, String(args.content)),
   },
   {
@@ -145,7 +164,8 @@ const DEFS: Def[] = [
     mcpName: "production.update_instructions",
     description: "全量替换当前对话关联制作的制作级 AI 指令（对全体成员的 AI 会话生效），需要人工在聊天栏确认；确认后若该用户没有编辑权限（默认仅制作人），调用会被直接拦截。content 是替换后的完整内容——先基于注入块里的现行内容整合修改，不要只传增量；传空字符串表示清空。",
     parameters: Type.Object({ content: Type.String({ description: `替换后的完整制作级指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）` }) }),
-    readOnly: false, needsProduction: true,
+    readOnly: false,
+    mutates: () => ({ scope: "instructions.production", action: "updated" }), needsProduction: true,
     execute: async (ctx, args) => (await import("@/lib/mcp/instructions-tools")).updateProductionInstructions(ctx.userId, ctx.productionId, String(args.content)),
   },
 
@@ -186,7 +206,8 @@ const DEFS: Def[] = [
       body: Type.Optional(Type.String({ description: "新文档正文（Markdown）" })),
       summary: Type.String({ description: "一句话说明这次提议改了什么、为什么" }),
     }),
-    readOnly: false, needsProduction: true,
+    readOnly: false,
+    mutates: WIKI_MUTATES.created, needsProduction: true,
     execute: async (ctx, args, toolCallId) => {
       const { wikiProposeCreate } = await import("@/lib/mcp/wiki-tools");
       const body = await proposalBody(ctx.productionId, toolCallId, ctx.userId, args.body);
@@ -204,7 +225,8 @@ const DEFS: Def[] = [
       body: Type.Optional(Type.String({ description: "新正文（Markdown）；不改正文就整个省略这个字段" })),
       summary: Type.String({ description: "一句话说明这次提议改了什么、为什么" }),
     }),
-    readOnly: false, needsProduction: true,
+    readOnly: false,
+    mutates: WIKI_MUTATES.updated, needsProduction: true,
     execute: async (ctx, args, toolCallId) => {
       const { wikiProposeUpdate } = await import("@/lib/mcp/wiki-tools");
       const body = await proposalBody(ctx.productionId, toolCallId, ctx.userId, args.body);
@@ -220,7 +242,8 @@ const DEFS: Def[] = [
       wikiId: Type.String({ description: "要删除的文档 id（来自 wiki_tree/wiki_search 的结果）" }),
       summary: Type.String({ description: "一句话说明为什么要删除" }),
     }),
-    readOnly: false, needsProduction: true,
+    readOnly: false,
+    mutates: WIKI_MUTATES.deleted, needsProduction: true,
     execute: async (ctx, args, toolCallId) => (await import("@/lib/mcp/wiki-tools")).wikiProposeDelete(ctx.userId, ctx.productionId, toolCallId, {
       wikiId: String(args.wikiId), summary: String(args.summary ?? ""),
     }),
@@ -233,7 +256,8 @@ const DEFS: Def[] = [
       newParentId: Type.Optional(Type.String({ description: "移动到的新父文档 id；移到文档库根就整个省略这个字段，不要传空字符串" })),
       summary: Type.String({ description: "一句话说明为什么要移动" }),
     }),
-    readOnly: false, needsProduction: true,
+    readOnly: false,
+    mutates: WIKI_MUTATES.updated, needsProduction: true,
     execute: async (ctx, args, toolCallId) => (await import("@/lib/mcp/wiki-tools")).wikiProposeMove(ctx.userId, ctx.productionId, toolCallId, {
       wikiId: String(args.wikiId), newParentId: optString(args.newParentId), summary: String(args.summary ?? ""),
     }),
@@ -246,7 +270,8 @@ const DEFS: Def[] = [
       tags: Type.Array(Type.String(), { description: "完整的新标签列表（整体替换，不是在现有标签上增量追加）" }),
       summary: Type.String({ description: "一句话说明为什么要这样设置标签" }),
     }),
-    readOnly: false, needsProduction: true,
+    readOnly: false,
+    mutates: WIKI_MUTATES.updated, needsProduction: true,
     execute: async (ctx, args, toolCallId) => (await import("@/lib/mcp/wiki-tools")).wikiProposeTag(ctx.userId, ctx.productionId, toolCallId, {
       wikiId: String(args.wikiId), tags: Array.isArray(args.tags) ? args.tags.map(String) : [], summary: String(args.summary ?? ""),
     }),
@@ -265,7 +290,8 @@ const DEFS: Def[] = [
       removePeopleUserIds: Type.Optional(Type.Array(Type.String(), { description: "要撤销单独分享的用户 id；不撤销就整个省略这个字段" })),
       summary: Type.String({ description: "一句话说明这次为什么要改分享设置" }),
     }),
-    readOnly: false, needsProduction: true,
+    readOnly: false,
+    mutates: WIKI_MUTATES.updated, needsProduction: true,
     execute: async (ctx, args) => (await import("@/lib/mcp/wiki-tools")).wikiSetGrant(ctx.userId, ctx.productionId, {
       wikiId: String(args.wikiId),
       isPublic: typeof args.isPublic === "boolean" ? args.isPublic : undefined,
@@ -406,6 +432,7 @@ export function buildTools(ctx: ToolContext): RuntimeToolDef[] {
     description: d.description,
     parameters: d.parameters,
     readOnly: d.readOnly,
+    mutates: d.mutates,
     execute: async (toolCallId, params) => {
       if (d.needsProduction && !ctx.productionId) return text(NO_PRODUCTION);
       const out = await d.execute(

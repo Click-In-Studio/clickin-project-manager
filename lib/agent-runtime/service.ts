@@ -158,6 +158,7 @@ async function execute(input: ExecuteInput): Promise<void> {
   let status: "completed" | "aborted" | "failed" = "completed";
   let error: string | null = null;
 
+  const toolArgs = new Map<string, Record<string, unknown>>(); // toolCallId → args（mutation 行用）
   const heartbeat = setInterval(() => {
     void pool.query(`UPDATE agent_run SET heartbeat_at = now() WHERE id = $1`, [runId]).catch(() => {});
   }, HEARTBEAT_INTERVAL_MS);
@@ -244,8 +245,19 @@ async function execute(input: ExecuteInput): Promise<void> {
 
     // 事件 → 前端行协议 → agent_event/NOTIFY；顺带记账与 episodic 抽取
     const adapter = createStreamLineAdapter((line) => publisher.publish(line));
+    // 写工具成功 → mutation 行（tools.ts 的 mutates 声明）：跟在 tool-end 后面，同样落 agent_event
     harness.subscribe((event) => {
       adapter(event);
+      if (event.type === "tool_execution_start") toolArgs.set(event.toolCallId, (event.args ?? {}) as Record<string, unknown>);
+      if (event.type === "tool_execution_end") {
+        const args = toolArgs.get(event.toolCallId) ?? {};
+        toolArgs.delete(event.toolCallId);
+        const def = toolByName.get(event.toolName);
+        if (!event.isError && def?.mutates) {
+          const m = def.mutates(args);
+          if (m) publisher.publish({ type: "mutation", ...m, productionId: productionId ?? null, tool: def.mcpName });
+        }
+      }
       if (event.type === "message_end" && event.message.role === "assistant") {
         usage.input += event.message.usage.input;
         usage.output += event.message.usage.output;
@@ -311,6 +323,7 @@ async function execute(input: ExecuteInput): Promise<void> {
     console.error(`[agent-runtime] run ${runId} failed:`, err);
   } finally {
     clearInterval(heartbeat);
+    toolArgs.clear(); // 中止/脱离时可能没有对应的 end 事件
     await publisher.drain();
     if (detached) {
       // 脱离：run 行保持原状态（running/awaiting_*），心跳停更 → 30s 后被下一个进程接管；

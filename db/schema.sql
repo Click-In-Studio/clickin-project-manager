@@ -2212,3 +2212,13 @@ CREATE TABLE IF NOT EXISTS agent_event (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (session_id, seq)
 );
+
+-- ── wiki 协作广播出站箱（db/add-wiki-collab-outbox.sql）──
+CREATE TABLE IF NOT EXISTS wiki_collab_outbox (
+  id         BIGSERIAL   PRIMARY KEY,
+  origin     TEXT        NOT NULL,   -- 发布进程标识 host:pid
+  topic      TEXT        NOT NULL,   -- wikiId 或 library:<productionId>
+  frame      TEXT        NOT NULL,   -- 原样的 SSE 帧文本
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS wiki_collab_outbox_created_idx ON wiki_collab_outbox (created_at);

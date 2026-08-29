@@ -15,6 +15,7 @@ import { parseSessionIdentity } from "@/lib/mcp/session-identity";
 import { buildUiContextMessage } from "@/lib/agent-ui-context";
 import { derivePageKey, pageLabelFor, pageSuggestionsFor } from "@/lib/agent-page-context";
 import { toolLabel } from "@/lib/agent-tool-labels";
+import { dispatchAgentMutation } from "@/lib/agent-mutations";
 import WikiProposalPreviewModal from "@/components/WikiProposalPreviewModal";
 import ChevronIcon from "@/components/ChevronIcon";
 
@@ -200,21 +201,16 @@ export default function AgentPopout({
     }, 5_000);
 
     let streamKey = forKey;
-    // 本轮调过、但还没收到 tool-end 的 wiki_propose 调用 id。刷新挂在每个
-    // 工具**结束**的那一刻（此时写库已提交），而不是整轮流关闭时——否则
-    // AI 还在往下说，页面就一直停在调用前的样子。
-    const pendingWikiWrites = new Set<string>();
-    // tool-end 一个都没来（流被掐断/事件缺 id）时的收尾兜底。
-    let sawWikiWrite = false;
-
-    // 兜底路径，不是主路径：正文/标签/树结构的同步都走 wiki 协作 SSE
-    // （lib/wiki-collab.ts，任何来源的写入都推，不止 AI）。但文档库首页
-    // 没有打开任何文档、也就没有那条 SSE 连接，AI 在那儿建文档只能靠这里
-    // 刷；流被掐断丢帧时同理。刷新幂等，多刷一次不出问题。
-    const refreshWikiPage = () => {
-      if (!pathname || !productionId) return;
-      if (!pathname.startsWith(`/production/${productionId}/wiki`)) return;
-      router.refresh();
+    // 写操作后自动刷新（#367 自建运行时的形态）：runner 在写工具成功后发 `mutation` 行
+    // （落 agent_event，断线重连可补），这里只派发给页面订阅者（lib/agent-mutations.ts），
+    // 由它们决定刷新粒度；没人接才 router.refresh() 兜底。多个变更 300ms 内合并成一次兜底。
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+    const onMutation = (line: Extract<StreamLine, { type: "mutation" }>) => {
+      const handled = dispatchAgentMutation({
+        scope: line.scope, action: line.action, productionId: line.productionId ?? null, ids: line.ids, tool: line.tool,
+      });
+      if (handled || fallbackTimer) return;
+      fallbackTimer = setTimeout(() => { fallbackTimer = null; router.refresh(); }, 300);
     };
 
     const apply = (line: StreamLine) => {
@@ -246,15 +242,9 @@ export default function AgentPopout({
               }
               continue;
             }
-            if (line.type === "tool" && line.name?.includes("wiki_propose")) {
-              sawWikiWrite = true;
-              if (line.id) pendingWikiWrites.add(line.id);
-            }
-            // 被拒/失败的调用同样有 tool-end，会白刷一次——刷新幂等且便宜，
-            // 不值得为此再去后端 join 一次调用结果。
-            if (line.type === "tool-end" && line.id && pendingWikiWrites.delete(line.id)) {
-              sawWikiWrite = false;
-              refreshWikiPage();
+            if (line.type === "mutation") {
+              onMutation(line);
+              continue; // 不进气泡
             }
             apply(line);
           } catch {
@@ -265,15 +255,12 @@ export default function AgentPopout({
     } finally {
       clearInterval(watchdog);
       setStreaming(false);
-      // 兜底：tool-end 没到（流被掐断、事件缺 id）时，收尾再刷一次。正常
-      // 路径上每个 wiki 写工具结束时就刷过了，这里不会重复触发。
-      if (sawWikiWrite || pendingWikiWrites.size > 0) refreshWikiPage();
       setBubbles((prev) =>
         prev.map((b) => (b.kind === "assistant" && b.streaming ? { kind: "assistant", text: b.text } : b))
       );
       refreshSessions();
     }
-  }, [refreshSessions, pathname, productionId, router]);
+  }, [refreshSessions, router]);
 
   const openSession = useCallback(async (key: string, status?: SessionSummary["status"]) => {
     setPickerOpen(false);
