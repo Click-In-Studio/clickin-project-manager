@@ -21,6 +21,10 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         AGENT_RUNNER_PORT: 3102,
+        // base prompt 六件套的目录显式给出，不依赖 cwd：pm2 reload 对已在跑的 app **不更新 cwd**
+        // （首发时 cwd 停在 /home/ubuntu，prompt 六件套全缺——线上跑了一小时的空 base prompt），
+        // env 则随 --update-env 每次发布都生效
+        AGENT_WORKSPACE_DIR: '/var/www/production-manager/current/openclaw-workspace',
       },
       wait_ready: true,        // 进程 listen 后 process.send("ready")
       listen_timeout: 30000,
