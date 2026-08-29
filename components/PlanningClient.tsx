@@ -12,12 +12,13 @@ import OverflowSafeSelect from "@/components/OverflowSafeSelect";
  * 部门 POC（policy 开关，活引用判定），与 API 同门；此处布尔仅控 UI 显隐。
  */
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dateTimeToIso, fmtDate, fmtTime, isoCSTDateStr, todayCSTStr } from "@/lib/tz";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import Badge from "@/components/Badge";
+import DropdownPicker, { type DropdownPickerItem } from "@/components/DropdownPicker";
 import type { ProductionEvent, EventScheduleItemWithParticipants, EventTechReq } from "@/lib/event-db";
 import styles from "@/components/planning.module.css";
 
@@ -1059,109 +1060,36 @@ function withTime(iso: string, value: string): string {
   return dateTimeToIso(isoCSTDateStr(iso), value);
 }
 
-type MultiSelectOption = { value: string; label: string; searchText?: string };
-
-export function SearchableMultiSelect({ label, options, selectedValues, onToggle, emptyText = "暂无可选项" }: {
-  label: string;
-  options: MultiSelectOption[];
-  selectedValues: string[];
-  onToggle: (value: string) => void;
-  emptyText?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const listboxId = useId();
-  const rootRef = useRef<HTMLDivElement>(null);
-  const selectedSet = useMemo(() => new Set(selectedValues), [selectedValues]);
-  const selectedOptions = options.filter(option => selectedSet.has(option.value));
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    if (!needle) return options;
-    return options.filter(option => `${option.label} ${option.searchText ?? ""}`.toLocaleLowerCase().includes(needle));
-  }, [options, query]);
-
-  useEffect(() => {
-    if (!open) return;
-    const outside = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && !rootRef.current?.contains(target)) {
-        setOpen(false);
-        setQuery("");
-      }
-    };
-    document.addEventListener("pointerdown", outside);
-    return () => document.removeEventListener("pointerdown", outside);
-  }, [open]);
-
-  const summary = selectedOptions.length === 0
-    ? "请选择"
-    : selectedOptions.length <= 2
-      ? selectedOptions.map(option => option.label).join("、")
-      : `已选择 ${selectedOptions.length} 项`;
-
-  return (
-    <div ref={rootRef} className={styles.searchableMultiSelect}>
-      <button
-        type="button"
-        role="combobox"
-        aria-label={`${label}，${summary}`}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={listboxId}
-        className={styles.multiSelectTrigger}
-        onClick={() => setOpen(value => !value)}
-        onKeyDown={event => {
-          if (event.key === "Escape") {
-            setOpen(false);
-            setQuery("");
-          }
-        }}
-      >
-        <span>{summary}</span>
-        <small>{selectedOptions.length > 0 ? `${selectedOptions.length} 项` : ""}</small>
-        <i aria-hidden="true">{open ? "▴" : "▾"}</i>
-      </button>
-      {open && (
-        <div id={listboxId} className={styles.multiSelectMenu} role="listbox" aria-label={`${label}选项`} aria-multiselectable="true">
-          <div className={styles.multiSelectSearch}>
-            <span aria-hidden="true">⌕</span>
-            <input
-              autoFocus
-              value={query}
-              onChange={event => setQuery(event.target.value)}
-              onKeyDown={event => {
-                if (event.key === "Escape") {
-                  setOpen(false);
-                  setQuery("");
-                }
-              }}
-              placeholder={`搜索${label}…`}
-              aria-label={`搜索${label}`}
-            />
-          </div>
-          <div className={styles.multiSelectOptions}>
-            {filtered.map(option => {
-              const selected = selectedSet.has(option.value);
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  className={selected ? styles.multiSelectOptionActive : undefined}
-                  onClick={() => onToggle(option.value)}
-                >
-                  <span aria-hidden="true">{selected ? "✓" : ""}</span>
-                  <b>{option.label}</b>
-                </button>
-              );
-            })}
-            {filtered.length === 0 && <p>{options.length === 0 ? emptyText : "没有匹配项"}</p>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+/**
+ * 「个人」下拉行：按部门分组（header 行 + 成员挂组；跨部门成员在各组各出现一行，
+ * 行 id 合成唯一、value=userId 共享勾选态；无部门成员进「未分配部门」组）。
+ * 与 ProductionTasksClient 的参与人下拉同构。
+ */
+function memberPickerItems(members: PlanningMember[], departments: PlanningDept[]): DropdownPickerItem[] {
+  const items: DropdownPickerItem[] = [];
+  const grouped = new Set<string>();
+  const row = (member: PlanningMember, rowId: string, parentId: string): DropdownPickerItem => ({
+    id: rowId,
+    value: member.userId,
+    parentId,
+    label: member.name || "（未命名）",
+    sublabel: member.roles.join(" · ") || undefined,
+  });
+  for (const dept of departments) {
+    const inDept = members.filter(member => member.departmentIds.includes(dept.id));
+    if (inDept.length === 0) continue;
+    items.push({ id: `d:${dept.id}`, label: dept.name, header: true, parentId: null });
+    for (const member of inDept) {
+      items.push(row(member, `d:${dept.id}:${member.userId}`, `d:${dept.id}`));
+      grouped.add(member.userId);
+    }
+  }
+  const rest = members.filter(member => !grouped.has(member.userId));
+  if (rest.length > 0) {
+    items.push({ id: "d:__none", label: "未分配部门", header: true, parentId: null });
+    for (const member of rest) items.push(row(member, `d:__none:${member.userId}`, "d:__none"));
+  }
+  return items;
 }
 
 export function RundownColumnEditor({ column, departments, members, roles, onChange, onRename, onToggleValue, onToggleRole, onDelete, onClose }: {
@@ -1203,35 +1131,45 @@ export function RundownColumnEditor({ column, departments, members, roles, onCha
       </button>
       <div className={styles.optionSection}>
         <b>部门</b>
-        <SearchableMultiSelect
-          label="部门"
-          options={departments.map(department => ({ value: department.id, label: department.name }))}
-          selectedValues={column.departmentIds}
-          onToggle={value => onToggleValue("departmentIds", value)}
+        <DropdownPicker
+          multi
+          items={departments.map(department => ({ id: department.id, label: department.name }))}
+          values={new Set(column.departmentIds)}
+          placeholder={departments.length === 0 ? "暂无部门" : "选择部门"}
+          searchPlaceholder="搜索部门…"
+          disabled={departments.length === 0}
+          multiCountLabel={n => `已选 ${n} 个部门`}
+          onChange={() => {}}
+          onToggle={id => onToggleValue("departmentIds", id)}
         />
       </div>
       {/* 角色是「按角色批量勾人」的快捷方式，不落库——role 是项目可配置表，会改名。
           选中态由「该角色的人是否都已在名单里」推导。 */}
       <div className={styles.optionSection}>
         <b>按角色批量选人</b>
-        <SearchableMultiSelect
-          label="角色"
-          options={roles.map(role => ({ value: role, label: role }))}
-          selectedValues={roleSelections}
+        <DropdownPicker
+          multi
+          items={roles.map(role => ({ id: role, label: role }))}
+          values={new Set(roleSelections)}
+          placeholder={roles.length === 0 ? "暂无角色" : "选择角色"}
+          searchPlaceholder="搜索角色…"
+          disabled={roles.length === 0}
+          multiCountLabel={n => `已选 ${n} 个角色`}
+          onChange={() => {}}
           onToggle={onToggleRole}
         />
       </div>
       <div className={styles.optionSection}>
         <b>个人</b>
-        <SearchableMultiSelect
-          label="个人"
-          options={members.map(member => ({
-            value: member.userId,
-            label: member.name,
-            searchText: member.roles.join(" "),
-          }))}
-          selectedValues={column.userIds}
-          onToggle={value => onToggleValue("userIds", value)}
+        <DropdownPicker
+          multi
+          items={memberPickerItems(members, departments)}
+          values={new Set(column.userIds)}
+          placeholder={members.length === 0 ? "暂无成员" : "选择个人"}
+          searchPlaceholder="搜索姓名 / 角色…"
+          disabled={members.length === 0}
+          onChange={() => {}}
+          onToggle={id => onToggleValue("userIds", id)}
         />
       </div>
       <div className={styles.columnEditorFooter}>
