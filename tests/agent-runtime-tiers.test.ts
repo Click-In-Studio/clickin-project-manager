@@ -71,11 +71,11 @@ describe("tool tiers", () => {
 });
 
 describe("tool tiers：正向闭包与会话内已用工具", () => {
-  it("召回只命中 wiki_search（通讯录页）→ 闭包带出 wiki_read：找到文档的下一步就是读它", () => {
-    const r = tieredToolNames({ hasProduction: true, pageKey: "prod:contacts", prompt: null, recalled: ["production.wiki_search"], available: ALL });
-    expect(r.active).toContain("production.wiki_search");
-    expect(r.active).toContain("production.wiki_read");
-    expect(r.active).not.toContain("production.wiki_propose_create");
+  it("召回是族粒度：调用方传整族名字（通讯录页）→ 整族入面，跨族依赖仍由闭包补（set_grant → contact/department）", () => {
+    const wiki = TOOL_CATALOG.filter((e) => e.family === "production.wiki").map((e) => e.name);
+    const r = tieredToolNames({ hasProduction: true, pageKey: "prod:home", prompt: null, recalled: wiki, available: ALL });
+    for (const n of wiki) expect(r.active, n).toContain(n);
+    expect(r.active).toContain("production.contact_list");
   });
 
   it("本会话早前调过的工具留在面上（used），即使这轮页面/召回都不带它", () => {

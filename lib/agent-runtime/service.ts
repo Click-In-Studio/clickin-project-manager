@@ -31,7 +31,7 @@ import { EventPublisher, pruneDeltas } from "./events";
 import { createStreamLineAdapter } from "./stream-lines";
 import { buildTools, bareName, exposedName, type RuntimeToolDef } from "./tools";
 import { tieredToolNames } from "./tool-tiers";
-import { recallTools } from "./tool-index";
+import { recallFamilies } from "./tool-index";
 import { approvalCard } from "./cards";
 import { createApproval, awaitApproval, markApprovalExecuted, approvalAllowsReexecute } from "./approvals";
 import { buildSystemPrompt, recallBlock } from "./prompt";
@@ -169,12 +169,12 @@ async function execute(input: ExecuteInput): Promise<void> {
     const transcript = await session.buildContext().then((c) => c.messages);
     const recallPrompt = input.message ?? lastUserText(transcript);
     const used = usedToolMcpNames(transcript, toolByName);
-    const toolHits = recallPrompt
-      ? await recallTools(stripUiContext(recallPrompt), { hasProduction: !!productionId, userId })
+    const families = recallPrompt
+      ? await recallFamilies(stripUiContext(recallPrompt), { hasProduction: !!productionId, userId })
       : [];
-    const recalled = toolHits.map((h) => h.name);
+    const recalled = families.flatMap((f) => f.tools.map((t) => t.name));
 
-    const inject = await buildInjectContext(userId, sessionId, input.message, { toolHits });
+    const inject = await buildInjectContext(userId, sessionId, input.message, { toolFamilies: families });
     const recall = recallBlock(inject.recall);
     const dialectDelivered = inject.dialectDelivered;
 

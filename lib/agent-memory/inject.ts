@@ -123,10 +123,10 @@ export async function buildInjectContext(
   excludeSessionKey?: string,
   prompt?: string,
   opts?: {
-    /** 调用方已算好的工具召回（自建运行时用 tool-index 词法+向量）。给了就以它为准——
-     *  提示块点名的工具必须与本轮真实加进工具面的是同一份，否则模型看到的"可能相关"
-     *  与它实际能调的对不上（真人使用校出：提示列了三个、面里却有第四个）。 */
-    toolHits?: Array<{ name: string; oneliner: string }>;
+    /** 调用方已算好的工具召回（自建运行时用 tool-index 词法+向量，族粒度）。给了就以它
+     *  为准——提示块点名的工具必须与本轮真实加进工具面的是同一份，否则模型看到的
+     *  "可能相关"与它实际能调的对不上（真人使用校出：提示列了三个、面里却有第四个）。 */
+    toolFamilies?: Array<{ label: string; tools: Array<{ name: string; oneliner: string }> }>;
   },
 ): Promise<InjectContextPayload> {
   // production 会话：从 sessionKey 解析制作维度，注入"当前制作"段
@@ -199,9 +199,14 @@ export async function buildInjectContext(
     // 工具召回（#333 P2 中文发现面）：CJK bigram 命中后把确切工具名推进语境。
     // 自建运行时（#367）里同一份命中还会把这些工具加进本轮工具面（tool-tiers），
     // 所以提示只需点名，不用教模型怎么取用。纯词法纯函数，无失败面；命中为空就是不注入。
-    const toolHits = opts?.toolHits ?? toolRecall(prompt, { hasProduction: !!productionId });
+    const families = opts?.toolFamilies
+      ?? [{ label: "", tools: toolRecall(prompt, { hasProduction: !!productionId }) }].filter((f) => f.tools.length > 0);
+    const toolHits = families.flatMap((f) => f.tools);
     if (toolHits.length > 0) {
-      const toolLines = toolHits.map((t) => `- \`${t.name}\`：${t.oneliner}`);
+      const toolLines = families.map((f) => {
+        const items = f.tools.map((t) => `\`${t.name}\`（${t.oneliner}）`).join("、");
+        return f.label ? `- ${f.label}工具族：${items}` : `- ${items}`;
+      });
       recallParts.push(
         `以下工具与本条消息可能相关，本轮可直接调用（按需，不必全用）：\n${toolLines.join("\n")}`,
       );

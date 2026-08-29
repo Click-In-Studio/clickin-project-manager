@@ -48,10 +48,6 @@ const WARM_BY_PAGE: Record<string, string[]> = {
 
 /** 依赖闭包：激活某工具时必须连带激活的上游 id 供给工具。 */
 const CLOSURE: Record<string, string[]> = {
-  // 找到文档的下一步必然是读它：发现类工具正向闭包到 wiki_read（真人使用校出：
-  // "读一下几份排练记录"只召回到 wiki_search，模型靠按名兜底才读到正文）
-  "production.wiki_search": ["production.wiki_read"],
-  "production.wiki_tree": ["production.wiki_read"],
   "production.wiki_read": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_backlinks": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_propose_create": ["production.wiki_tree", "production.wiki_search", "production.wiki_read", "production.wiki_dialect_ref"],
@@ -65,7 +61,7 @@ const CLOSURE: Record<string, string[]> = {
 export interface TierInput {
   hasProduction: boolean;
   pageKey: string | null;
-  /** 冷层召回结果（tool-index：词法+向量）。缺席时退回纯词法 toolRecall(prompt) */
+  /** 冷层召回结果（tool-index：词法+向量，族粒度——整族的名字）。缺席时退回纯词法 toolRecall(prompt) */
   recalled?: string[];
   /** 本会话早前轮次已调用过的工具（transcript 里的 toolCall）：话题有连续性，用过的
    *  就留在面上，不让模型下一轮问"刚才那个工具呢" */

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { recallTools, searchTools, scoreTools, resetToolIndex, TOOL_VECTOR_THRESHOLD } from "@/lib/agent-runtime/tool-index";
+import { recallFamilies, searchTools, scoreTools, resetToolIndex, TOOL_VECTOR_THRESHOLD, TOOL_RECALL_MAX_FAMILIES } from "@/lib/agent-runtime/tool-index";
 import { TOOL_CATALOG } from "@/lib/mcp/tool-catalog";
 
 // #367 工具索引：词法 + 向量两条车道。EMBEDDING_PROVIDER=fake 的向量是内容哈希展开的单位
@@ -22,16 +22,28 @@ describe("tool-index（fake embedding）", () => {
     const top = hits[0];
     expect(top.name).toBe("production.contact_list");
     expect(top.vector).toBeCloseTo(1, 5);
-    expect(await recallTools(example, { hasProduction: true })).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: "production.contact_list" })]),
-    );
+    const fams = await recallFamilies(example, { hasProduction: true });
+    expect(fams[0].family).toBe("production.people");
+    expect(fams[0].top.name).toBe("production.contact_list");
+    expect(fams[0].tools.map((t) => t.name)).toEqual(["production.contact_list", "production.department_list"]); // 整族
+  });
+
+  it("族粒度：命中 wiki 族任一工具 → 整族入面（含未直接命中的 wiki_read / propose_*）", async () => {
+    const fams = await recallFamilies("帮我在文档库里搜一下灯光的资料", { hasProduction: true });
+    const wiki = fams.find((f) => f.family === "production.wiki")!;
+    expect(wiki).toBeDefined();
+    const names = wiki.tools.map((t) => t.name);
+    expect(names).toContain("production.wiki_search");
+    expect(names).toContain("production.wiki_read");
+    expect(names).toContain("production.wiki_propose_update");
+    expect(fams.length).toBeLessThanOrEqual(TOOL_RECALL_MAX_FAMILIES);
   });
 
   it("触发词命中走词法车道；无关句子两条车道都不命中", async () => {
-    const hits = await recallTools("我明天的通告时间是几点", { hasProduction: true });
-    expect(hits.map((h) => h.name)).toContain("my.call_times");
-    expect(hits.find((h) => h.name === "my.call_times")!.lexical).toBeGreaterThanOrEqual(0.72);
-    expect(await recallTools("今天天气怎么样", { hasProduction: true })).toEqual([]);
+    const fams = await recallFamilies("我明天的通告时间是几点", { hasProduction: true });
+    expect(fams.map((f) => f.family)).toContain("my.schedule");
+    expect(fams.find((f) => f.family === "my.schedule")!.top.lexical).toBeGreaterThanOrEqual(0.72);
+    expect(await recallFamilies("今天天气怎么样", { hasProduction: true })).toEqual([]);
   });
 
   it("find_tools 搜索：不设阈值取前 N，个人会话不返回 production 工具", async () => {

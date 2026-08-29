@@ -12,21 +12,34 @@
 import { createHash } from "node:crypto";
 import { getPool } from "@/lib/pg";
 import { embedDocuments, embedQuery, embeddingMode, embeddingModel } from "@/agent/embedding";
-import { TOOL_CATALOG, TOOL_RECALL_THRESHOLD, TOOL_RECALL_MAX, type ToolCatalogEntry } from "@/lib/mcp/tool-catalog";
+import { TOOL_CATALOG, TOOL_FAMILIES, TOOL_RECALL_THRESHOLD, type ToolCatalogEntry } from "@/lib/mcp/tool-catalog";
 import { bigramTokens } from "@/lib/agent-memory/trigger-lexical";
 
 /** 向量车道阈值。text-embedding-v4 实测（2026-08-29 本机探针）：真命中 0.65–0.82，
  *  无关噪声 0.35–0.60（"今天天气怎么样" → call_times 0.42），分布很压缩，0.62 是噪声上沿之上
  *  的第一个整数位。召回只是提示（工具面多带 ≤3 个），漏了还有 find_tools 兜底，宁紧勿松。
  *  AGENT_TOOL_RECALL_DEBUG=1 打分数日志可继续标定。 */
-export const TOOL_VECTOR_THRESHOLD = Number(process.env.AGENT_TOOL_VEC_THRESHOLD ?? 0.62);
+export const TOOL_VECTOR_THRESHOLD = Number(process.env.AGENT_TOOL_VEC_THRESHOLD ?? 0.65);
+/** 每轮最多召回的族数。族是整族入面（wiki 族 ~10 个 schema），2 个族已是 20 个工具的上限。 */
+export const TOOL_RECALL_MAX_FAMILIES = 2;
 
 export interface ToolHit {
   name: string;
+  family: string;
   oneliner: string;
   score: number;
   lexical: number;
   vector: number | null;
+}
+
+/** 族级命中：分 = 族内工具最高分；tools 是整族（含未直接命中的兄弟） */
+export interface FamilyHit {
+  family: string;
+  label: string;
+  score: number;
+  /** 族内得分最高的工具（日志/标定用） */
+  top: ToolHit;
+  tools: Array<{ name: string; oneliner: string }>;
 }
 
 type Doc = { name: string; text: string; hash: string; vec: number[] | null };
@@ -135,7 +148,7 @@ export async function scoreTools(prompt: string, opts: { hasProduction: boolean;
       }
     }
     const score = Math.max(lexical, vector ?? 0);
-    hits.push({ name: entry.name, oneliner: entry.oneliner, score, lexical, vector });
+    hits.push({ name: entry.name, family: entry.family, oneliner: entry.oneliner, score, lexical, vector });
   }
   hits.sort((a, b) => b.score - a.score);
   if (process.env.AGENT_TOOL_RECALL_DEBUG === "1") {
@@ -144,13 +157,24 @@ export async function scoreTools(prompt: string, opts: { hasProduction: boolean;
   return hits;
 }
 
-/** 主动召回：词法 ≥ 0.72 或 向量 ≥ 阈值，每轮 ≤3。 */
-export async function recallTools(prompt: string, opts: { hasProduction: boolean; userId?: string | null }): Promise<ToolHit[]> {
+/** 主动召回（族粒度）：族内任一工具 词法 ≥ 0.72 或 向量 ≥ 阈值 → 整族入面；按族分取前 N 族。 */
+export async function recallFamilies(prompt: string, opts: { hasProduction: boolean; userId?: string | null }): Promise<FamilyHit[]> {
   if (!prompt.trim()) return [];
   const hits = await scoreTools(prompt, opts);
-  return hits
-    .filter((h) => h.lexical >= TOOL_RECALL_THRESHOLD || (h.vector !== null && h.vector >= TOOL_VECTOR_THRESHOLD))
-    .slice(0, TOOL_RECALL_MAX);
+  const byFamily = new Map<string, FamilyHit>();
+  for (const h of hits) {
+    const passes = h.lexical >= TOOL_RECALL_THRESHOLD || (h.vector !== null && h.vector >= TOOL_VECTOR_THRESHOLD);
+    if (!passes || byFamily.has(h.family)) continue; // hits 已按分降序，首个即族内最高
+    byFamily.set(h.family, {
+      family: h.family,
+      label: TOOL_FAMILIES[h.family]?.label ?? h.family,
+      score: h.score,
+      top: h,
+      tools: TOOL_CATALOG.filter((e) => e.family === h.family && (opts.hasProduction || e.scope !== "production"))
+        .map((e) => ({ name: e.name, oneliner: e.oneliner })),
+    });
+  }
+  return [...byFamily.values()].sort((a, b) => b.score - a.score).slice(0, TOOL_RECALL_MAX_FAMILIES);
 }
 
 /** find_tools 兜底：不设阈值，按分取前 N（模型自己判断哪个对）。 */
