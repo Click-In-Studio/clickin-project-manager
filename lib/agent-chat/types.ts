@@ -1,11 +1,3 @@
-export type GatewayStatus =
-  | { state: "unconfigured" }
-  | { state: "disconnected" }
-  | { state: "connecting" }
-  | { state: "connected" }
-  | { state: "pairing_required"; requestId?: string }
-  | { state: "error"; error: string };
-
 export interface ChatSessionSummary {
   key: string;
   title: string;

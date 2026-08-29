@@ -1,11 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createNewSessionKey, listChatSessions, getStatus } from "@/lib/agent-gateway/client";
-import { requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
+import { requireUser, toErrorResponse } from "@/lib/agent-chat/http";
 import { getProductionPermissionContext, listMyProductionsWithRoles, getUserProfile } from "@/lib/db";
 import { requireProductionFeature } from "@/lib/plan";
 import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
-import { PRODUCTION_ID_RE } from "@/lib/mcp/session-identity";
-import { listSessions as listRunnerSessions } from "@/lib/agent-runtime/client";
+import { PRODUCTION_ID_RE, createNewSessionKey } from "@/lib/mcp/session-identity";
+import { listSessions } from "@/lib/agent-runtime/client";
 
 export const runtime = "nodejs";
 
@@ -14,20 +13,7 @@ export async function GET(req: NextRequest) {
   if (auth instanceof NextResponse) return auth;
 
   try {
-    // 分流（#367）：自建运行时的会话从 agent_session 列；网关会话照旧。灰度期两边
-    // 并集，按 updatedAt 排序——用户看到的是一张表。AGENT_RUNTIME=runner 时不再连
-    // 网关（也不向 UI 报网关的 unconfigured/pairing 横幅）。
-    const runnerOnly = process.env.AGENT_RUNTIME === "runner";
-    const [runnerSessions, gatewaySessions] = await Promise.all([
-      listRunnerSessions(auth.userId),
-      // listChatSessions self-connects (lazy singleton), so getStatus() right
-      // after reflects the actual connection outcome — including the
-      // unconfigured/pairing_required states the UI banner needs.
-      runnerOnly ? Promise.resolve([]) : listChatSessions(auth.userId),
-    ]);
-    const runnerKeys = new Set(runnerSessions.map((s) => s.key));
-    const sessions = [...runnerSessions, ...gatewaySessions.filter((s) => !runnerKeys.has(s.key))]
-      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    const sessions = (await listSessions(auth.userId)).sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     // 新建对话选择器需要的制作列表（未归档）——与页面同一套查询
     const profile = await getUserProfile(auth.userId);
     const productions = (
@@ -35,14 +21,14 @@ export async function GET(req: NextRequest) {
     )
       .filter((p) => !p.archivedAt)
       .map((p) => ({ id: p.id, name: p.name }));
-    return NextResponse.json({ sessions, productions, gatewayStatus: runnerOnly ? { state: "connected" } : getStatus() });
+    // gatewayStatus：网关已退役，前端横幅逻辑仍认这个字段——恒 connected
+    return NextResponse.json({ sessions, productions, gatewayStatus: { state: "connected" } });
   } catch (err) {
     return toErrorResponse(err);
   }
 }
 
-// Doesn't touch the Gateway — a session only springs into existence there on
-// its first actual message. This just hands back a fresh per-user key.
+// 只签发一把新 key，不落库——会话行在第一条消息时才建（ensureSession）。
 // production 会话（可选 productionId）：签发前实时校验成员资格——
 // sessionKey 由后端签发是 production 隔离的根，用户无法自造。
 export async function POST(req: NextRequest) {

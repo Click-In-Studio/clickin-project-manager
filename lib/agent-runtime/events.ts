@@ -7,7 +7,7 @@
 
 import type { Pool, PoolClient } from "pg";
 import { getPool } from "@/lib/pg";
-import type { StreamLine } from "@/lib/agent-gateway/stream-reducer";
+import type { StreamLine } from "@/lib/agent-chat/stream-reducer";
 
 export const EVENT_CHANNEL = "agent_events";
 const DELTA_COALESCE_MS = 80;

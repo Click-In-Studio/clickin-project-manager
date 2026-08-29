@@ -19,8 +19,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@openclaw/ai": "2026.7.1-2",
-    "@openclaw/gateway-client": "2026.7.2-beta.7",
-    "@openclaw/gateway-protocol": "2026.7.2-beta.7",
     "@tailwindcss/typography": "^0.5.19",
     "@tiptap/core": "3.30.3",
     "@tiptap/extension-drag-handle": "3.30.3",

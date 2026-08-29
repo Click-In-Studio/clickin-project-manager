@@ -8,8 +8,8 @@
 // agent-loop 的 message_update 带的是应用过 delta 之后的完整 assistant 消息，
 // 不存在 gateway 时代"快照与裸增量并存要去重"的问题——赋值即幂等。
 
-import type { StreamLine } from "@/lib/agent-gateway/stream-reducer";
-import { TOOL_PAYLOAD_MAX_CHARS } from "@/lib/agent-gateway/types";
+import type { StreamLine } from "@/lib/agent-chat/stream-reducer";
+import { TOOL_PAYLOAD_MAX_CHARS } from "@/lib/agent-chat/types";
 import type { AgentHarnessEvent } from "../../vendor/openclaw/packages/agent-core/src/harness/types";
 import type { AgentMessage } from "../../vendor/openclaw/packages/agent-core/src/types";
 

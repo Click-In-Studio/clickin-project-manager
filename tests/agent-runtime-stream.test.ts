@@ -4,7 +4,7 @@ import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import type { AssistantMessage, Model, StreamFn, ToolCall } from "../vendor/openclaw/packages/llm-core/src/types";
 import { CoreAgentHarness, InMemorySessionStorage, type ExecutionEnv } from "../vendor/openclaw/packages/agent-core/src/index";
 import { Session } from "../vendor/openclaw/packages/agent-core/src/harness/session/session";
-import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-gateway/stream-reducer";
+import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-chat/stream-reducer";
 import { createStreamLineAdapter } from "@/lib/agent-runtime/stream-lines";
 import type { RuntimeTool } from "@/lib/agent-runtime/resume";
 

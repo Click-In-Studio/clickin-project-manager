@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
+import { requireUser, toErrorResponse } from "@/lib/agent-chat/http";
 import { getWikiProposalByToolCallId } from "@/lib/wiki-proposal-db";
 import { getWiki } from "@/lib/wiki-db";
 import { resolveProductionActor } from "@/lib/mcp/production-tools";

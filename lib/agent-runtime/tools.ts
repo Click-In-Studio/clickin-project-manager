@@ -17,7 +17,7 @@ import type { AgentToolResult } from "../../vendor/openclaw/packages/agent-core/
 import { INSTRUCTIONS_MAX_LEN } from "@/lib/agent-instructions";
 import { WIKI_DIALECT_POINTER_WRITE, WIKI_DIALECT_POINTER_READ, WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "@/lib/mcp/wiki-link-syntax";
 import { toolLabel } from "@/lib/agent-tool-labels";
-import type { StreamLine, QuestionItem } from "@/lib/agent-gateway/stream-reducer";
+import type { StreamLine, QuestionItem } from "@/lib/agent-chat/stream-reducer";
 import type { RuntimeTool } from "./resume";
 
 export const TOOL_PREFIX = "clickin__";
