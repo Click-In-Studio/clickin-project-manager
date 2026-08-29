@@ -557,12 +557,18 @@ export default function ProductionTasksClient({
   // 抽屉：Esc / 点外部关闭（行按钮自身的开/关切换由行 onClick 处理）
   useEffect(() => {
     if (!selected) return;
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setSelected(null); };
+    // 下拉展开时 Esc 归菜单——它先收自己，抽屉留着（与下面 outside 的 portal 豁免同源）。
+    // 菜单的关闭是 React 状态更新，要到本次事件派发结束后的微任务才落到 DOM，所以这里读得到。
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (document.querySelector("[data-overflow-safe-select-menu]")) return;
+      setSelected(null);
+    };
     const outside = (e: PointerEvent) => {
       const t = e.target;
       if (!(t instanceof Node)) return;
       if (drawerRef.current?.contains(t)) return;
-      if (t instanceof Element && t.closest("[data-task-row]")) return;
+      if (t instanceof Element && t.closest("[data-task-row], [data-overflow-safe-select-menu]")) return;
       setSelected(null);
     };
     document.addEventListener("keydown", esc);

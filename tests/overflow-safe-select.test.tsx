@@ -183,6 +183,77 @@ describe("OverflowSafeSelect", () => {
     expect(menu.style.maxHeight).toBe("164px");
   });
 
+  it("marks portal interactions so a containing drawer does not treat them as outside clicks", async () => {
+    let selectedValue = "a";
+    let drawerClosed = false;
+    const drawer = document.createElement("aside");
+    container.appendChild(drawer);
+    const outside = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || drawer.contains(target)) return;
+      if (target instanceof Element && target.closest("[data-overflow-safe-select-menu]")) return;
+      drawerClosed = true;
+    };
+    document.addEventListener("pointerdown", outside);
+
+    await act(async () => root.render(
+      <OverflowSafeSelect aria-label="抽屉下拉" value={selectedValue} onChange={(event) => { selectedValue = event.target.value; }}>
+        <option value="a">Alpha</option>
+        <option value="b">Beta</option>
+      </OverflowSafeSelect>,
+    ));
+    await openMenu();
+    const menu = document.body.querySelector<HTMLElement>("[data-overflow-safe-select-menu]");
+    const beta = [...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+      .find(option => option.textContent?.includes("Beta"));
+    expect(menu).not.toBeNull();
+
+    await act(async () => {
+      beta?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      beta?.click();
+    });
+
+    expect(drawerClosed).toBe(false);
+    expect(selectedValue).toBe("b");
+    document.removeEventListener("pointerdown", outside);
+    drawer.remove();
+  });
+
+  it("leaves the menu marker in the DOM for the Escape that closes it, so a containing drawer can defer", async () => {
+    let drawerClosed = false;
+    // 抽屉的 Esc 监听器（document 上，晚于 React 的根监听器注册 ⇒ 后跑）。
+    const esc = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (document.querySelector("[data-overflow-safe-select-menu]")) return;
+      drawerClosed = true;
+    };
+    document.addEventListener("keydown", esc);
+
+    await render(
+      <OverflowSafeSelect aria-label="抽屉下拉" value="a" onChange={() => {}}>
+        <option value="a">Alpha</option>
+        <option value="b">Beta</option>
+      </OverflowSafeSelect>,
+    );
+    const trigger = await openMenu();
+    expect(document.body.querySelector("[data-overflow-safe-select-menu]")).not.toBeNull();
+
+    // 第一次 Esc：菜单收起，抽屉不动。
+    await act(async () => {
+      trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(document.body.querySelector("[data-overflow-safe-select-menu]")).toBeNull();
+    expect(drawerClosed).toBe(false);
+
+    // 第二次 Esc：没有菜单挡着了，抽屉该关就关（豁免不能变成永久吞键）。
+    await act(async () => {
+      trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(drawerClosed).toBe(true);
+
+    document.removeEventListener("keydown", esc);
+  });
+
   it("scrolls the keyboard-active option into view and does not mislabel unknown values", async () => {
     await render(
       <OverflowSafeSelect aria-label="长列表" value="missing" onChange={() => {}}>
