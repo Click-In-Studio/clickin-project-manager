@@ -59,25 +59,25 @@ curl -sN --noproxy '*' -H "Cookie: $COOKIE" -H 'Content-Type: application/json' 
   -d "{\"sessionKey\":\"$KEY\",\"message\":\"我参与了哪些制作？\"}"
 ```
 
-## 服务器部署（S3 灰度）
+## 服务器部署
 
-1. DDL：`db/add-agent-runtime.sql` 由 CD 自动执行（查 `shared/db-applied.txt`）。
-2. pm2：在 `shared/ecosystem.config.js` 加一个 app（与 `production-manager` 同 env 文件）：
-   ```js
-   {
-     name: "agent-runner",
-     cwd: "/var/www/production-manager/current",
-     script: "node_modules/.bin/tsx",
-     args: "agent-runner/index.ts",
-     env: { AGENT_RUNNER_PORT: "3102" },
-     wait_ready: true,        // 进程 listen 后 process.send("ready")
-     kill_timeout: 660000,    // ≥ AGENT_DRAIN_TIMEOUT_MS + 余量：SIGTERM 后给足排水时间
-     max_memory_restart: "700M",
-   }
-   ```
-   `pm2 reload agent-runner`：新进程 ready 后才向旧进程发 SIGTERM；旧进程排水（§4.4 ②）。
-3. next 侧 env：`AGENT_RUNTIME=canary`、`AGENT_RUNTIME_PRODUCTIONS=<测试制作 id>`、`AGENT_RUNNER_URL=http://127.0.0.1:3102`，`pm2 reload production-manager --update-env`。
-4. 网关保持在线：未列入灰度的会话照旧走网关；灰度会话即使开关回拨也继续走 runner。
+CD（`.github/workflows/deploy.yml`）已经把 runner 纳入发布，**代码侧不需要人工动作**：
+
+1. `npm run build:runner`：esbuild 把 `agent-runner/index.ts` + `lib/` + `vendor/` 打成单文件 `agent-runner.js` 放进 `.next/standalone/`，随 bundle 一起发；node_modules 用 standalone 追踪出来的那份（CD 会逐个核对 runner 的外部依赖都在，缺一个直接失败）。
+2. DDL：`db/add-agent-runtime.sql` 由 CD 自动执行（记账 `shared/db-applied.txt`）。
+3. pm2 进程定义收在仓库 [`deploy/ecosystem.config.js`](../deploy/ecosystem.config.js)（`agent-runner` + `production-manager`），每次发布覆盖到 `shared/ecosystem.config.js` 再 `pm2 reload … --update-env`。runner 用 **cluster 模式单实例**：新进程 `ready` 后才向旧进程发 SIGTERM（fork 模式的 reload 等于 restart，排水期间没人接请求）；`kill_timeout` ≥ 排水上限。
+
+**唯一的人工动作：服务器 `shared/.env.local` 加两行**（合并前加好即可；CD reload 带 `--update-env`，发布时生效）：
+
+```
+AGENT_RUNTIME=runner
+AGENT_RUNNER_URL=http://127.0.0.1:3102
+```
+
+其余 runner 需要的 env（`DEEPSEEK_API_KEY`、`EMBEDDING_*`、`PG*`、`AGENT_MEMORY_PATH`）与 next 共用同一份 `.env.local`，线上已有。
+不做灰度（产品确认功能面本就小），直切；网关进程暂留，未列入 `agent_session` 的旧会话仍可读历史。
+
+**上线后核对**：`pm2 ls` 里 `agent-runner` online；`curl -s --noproxy '*' http://127.0.0.1:3102/health` 返回 `{"ok":true,…}`；发一条会调工具的消息看 SSE 帧序（下方冒烟清单）。
 
 ## 重启不断会话（§4.4）是怎么成立的
 
