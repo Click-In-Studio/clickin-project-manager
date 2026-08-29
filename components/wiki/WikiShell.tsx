@@ -443,18 +443,27 @@ export default function WikiShell({
   const newDocInput = (parentId: string, depth: number) => (
     <div className="py-1 pr-2" style={{ paddingLeft: 8 + depth * 14 + 18 }}>
       <div className="flex gap-1">
-      <input
-        autoFocus
-        value={newTitle}
-        onChange={e => setNewTitle(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === "Enter") create(parentId || null);
-          if (e.key === "Escape") { setCreatingUnder(null); setNewTitle(""); setNewListable(true); }
-        }}
-        onBlur={() => { if (!newTitle.trim()) { setCreatingUnder(null); setNewTitle(""); setNewListable(true); } }}
-        placeholder="标题，回车创建"
-        className="flex-1 min-w-0 rounded border border-zinc-300 px-1.5 py-0.5 text-[13px] outline-none focus:border-zinc-500"
-      />
+        <input
+          autoFocus
+          value={newTitle}
+          onChange={e => setNewTitle(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === "Enter") create(parentId || null);
+            if (e.key === "Escape") { setCreatingUnder(null); setNewTitle(""); setNewListable(true); }
+          }}
+          onBlur={() => { if (!newTitle.trim()) { setCreatingUnder(null); setNewTitle(""); setNewListable(true); } }}
+          placeholder="标题，回车创建"
+          className="flex-1 min-w-0 rounded border border-zinc-300 px-1.5 py-0.5 text-[13px] outline-none focus:border-zinc-500"
+        />
+        <button
+          type="button"
+          disabled={!newTitle.trim() || busy}
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => void create(parentId || null)}
+          className="shrink-0 rounded border border-zinc-300 px-2 py-0.5 text-[12px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {busy ? "创建中" : "创建"}
+        </button>
       </div>
       {/* onMouseDown preventDefault：不让点勾选框把标题输入框 blur 掉（空标题会关闭新建） */}
       <label
@@ -478,7 +487,7 @@ export default function WikiShell({
     // 侧栏 sticky 固定高度自滚，不随主体滚走（UI 修缮轮）；主体保持最小视口高
     <div className="flex gap-6 items-start">
       <aside className="w-[264px] shrink-0 sticky top-4 h-[calc(100vh-120px)] flex flex-col rounded-xl border border-zinc-200 bg-white overflow-hidden">
-        <div className="p-2.5 border-b border-zinc-100">
+        <div className="p-2.5 border-b border-zinc-200">
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
@@ -486,6 +495,45 @@ export default function WikiShell({
             className="w-full rounded-lg border border-zinc-200 px-2.5 py-1.5 text-sm outline-none focus:border-zinc-400"
           />
         </div>
+        {canCreate && (
+          <div className="flex border-b border-zinc-200 bg-zinc-50/40">
+            <button
+              type="button"
+              onClick={() => { setCreatingUnder(""); setNewTitle(""); }}
+              className="flex-1 px-3 py-2 text-left text-[13px] text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100/80"
+            >
+              ＋ 新建文档
+            </button>
+            {/* 移入（#355）：把子树外的文档带进本工作区。只有作用域工作区给候选。 */}
+            {moveInCandidates.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setMovingInPick(true)}
+                title="把「文档」模块里已有的一篇带进本工作区"
+                className="shrink-0 px-3 py-2 text-[13px] text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100/80 border-l border-zinc-200"
+              >
+                移入
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => importInputRef.current?.click()}
+              disabled={importing}
+              title="导入 markdown 文件（暴力导入：不做链接解析/替换）"
+              className="shrink-0 px-3 py-2 text-[13px] text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100/80 border-l border-zinc-200"
+            >
+              {importing ? "导入中…" : "导入"}
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".md,.markdown,.txt"
+              multiple
+              className="hidden"
+              onChange={e => importFiles(e.target.files)}
+            />
+          </div>
+        )}
         <nav className="py-1 flex-1 overflow-y-auto">
           {flat.length === 0 && !creatingUnder && (
             <p className="px-3 py-3 text-sm text-zinc-400">{query ? "无匹配文档" : "还没有可见的文档"}</p>
@@ -618,45 +666,6 @@ export default function WikiShell({
           })}
           {creatingUnder === "" && newDocInput("", 0)}
         </nav>
-        {canCreate && (
-          <div className="flex border-t border-zinc-100">
-            <button
-              type="button"
-              onClick={() => { setCreatingUnder(""); setNewTitle(""); }}
-              className="flex-1 px-3 py-2 text-left text-[13px] text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50"
-            >
-              ＋ 新建文档
-            </button>
-            {/* 移入（#355）：把子树外的文档带进本工作区。只有作用域工作区给候选。 */}
-            {moveInCandidates.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setMovingInPick(true)}
-                title="把「文档」模块里已有的一篇带进本工作区"
-                className="shrink-0 px-3 py-2 text-[13px] text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50 border-l border-zinc-100"
-              >
-                移入
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => importInputRef.current?.click()}
-              disabled={importing}
-              title="导入 markdown 文件（暴力导入：不做链接解析/替换）"
-              className="shrink-0 px-3 py-2 text-[13px] text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50 border-l border-zinc-100"
-            >
-              {importing ? "导入中…" : "导入"}
-            </button>
-            <input
-              ref={importInputRef}
-              type="file"
-              accept=".md,.markdown,.txt"
-              multiple
-              className="hidden"
-              onChange={e => importFiles(e.target.files)}
-            />
-          </div>
-        )}
       </aside>
       <main className="flex-1 min-w-0 flex flex-col min-h-[calc(100vh-120px)] [&>*]:flex-1">{children}</main>
 
