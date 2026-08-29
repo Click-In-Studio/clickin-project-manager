@@ -48,6 +48,10 @@ const WARM_BY_PAGE: Record<string, string[]> = {
 
 /** 依赖闭包：激活某工具时必须连带激活的上游 id 供给工具。 */
 const CLOSURE: Record<string, string[]> = {
+  // 找到文档的下一步必然是读它：发现类工具正向闭包到 wiki_read（真人使用校出：
+  // "读一下几份排练记录"只召回到 wiki_search，模型靠按名兜底才读到正文）
+  "production.wiki_search": ["production.wiki_read"],
+  "production.wiki_tree": ["production.wiki_read"],
   "production.wiki_read": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_backlinks": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_propose_create": ["production.wiki_tree", "production.wiki_search", "production.wiki_read", "production.wiki_dialect_ref"],
@@ -63,6 +67,9 @@ export interface TierInput {
   pageKey: string | null;
   /** 冷层召回结果（tool-index：词法+向量）。缺席时退回纯词法 toolRecall(prompt) */
   recalled?: string[];
+  /** 本会话早前轮次已调用过的工具（transcript 里的 toolCall）：话题有连续性，用过的
+   *  就留在面上，不让模型下一轮问"刚才那个工具呢" */
+  used?: string[];
   prompt: string | null;
   /** 全部可用工具的 MCP 名（注册表）——结果只会是它的子集 */
   available: readonly string[];
@@ -86,6 +93,7 @@ export function tieredToolNames(input: TierInput): TierResult {
     const recalled = (input.recalled
       ?? (input.prompt ? toolRecall(input.prompt, { hasProduction: input.hasProduction }).map((h) => h.name) : [])
     ).filter((n) => available.has(n));
+    for (const n of input.used ?? []) if (available.has(n)) recalled.push(n);
     const active = new Set<string>([...hot, ...warm, ...recalled]);
     // 闭包：迭代到不动点（闭包里的工具也可能有自己的闭包）
     let grew = true;

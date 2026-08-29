@@ -93,7 +93,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     examples: ["帮我在文档里找一下关于灯光的内容", "搜一下排练笔记", "文档库里有没有提到预算"] },
   { name: "production.wiki_read", scope: "production", oneliner: "按 id 读取一篇文档的完整内容",
     triggers: ["wiki", "读文档", "打开文档", "看看这篇", "文档内容", "这篇文档"], en: "wiki read document content",
-    examples: ["把那篇文档读给我看", "打开这篇文档的内容", "这篇 wiki 写了什么"] },
+    examples: ["把那篇文档读给我看", "打开这篇文档的内容", "这篇 wiki 写了什么", "帮我读一下现在有的几份排练记录，里面有内容吗", "看看这几篇文档里写了什么", "打开最新的那篇看看"] },
   { name: "production.wiki_backlinks", scope: "production", oneliner: "查询文档的双向链接关系",
     triggers: ["谁引用", "反向链接", "链接关系", "引用了哪些"], en: "wiki backlinks references",
     examples: ["哪些文档引用了这一篇", "这篇文档链接到了谁"] },

@@ -69,3 +69,19 @@ describe("tool tiers", () => {
     }
   });
 });
+
+describe("tool tiers：正向闭包与会话内已用工具", () => {
+  it("召回只命中 wiki_search（通讯录页）→ 闭包带出 wiki_read：找到文档的下一步就是读它", () => {
+    const r = tieredToolNames({ hasProduction: true, pageKey: "prod:contacts", prompt: null, recalled: ["production.wiki_search"], available: ALL });
+    expect(r.active).toContain("production.wiki_search");
+    expect(r.active).toContain("production.wiki_read");
+    expect(r.active).not.toContain("production.wiki_propose_create");
+  });
+
+  it("本会话早前调过的工具留在面上（used），即使这轮页面/召回都不带它", () => {
+    const without = tieredToolNames({ hasProduction: true, pageKey: "prod:contacts", prompt: "这次你的工具列表里有 read 了吗", recalled: [], available: ALL });
+    expect(without.active).not.toContain("production.wiki_read");
+    const withUsed = tieredToolNames({ hasProduction: true, pageKey: "prod:contacts", prompt: "这次你的工具列表里有 read 了吗", recalled: [], used: ["production.wiki_read"], available: ALL });
+    expect(withUsed.active).toContain("production.wiki_read");
+  });
+});

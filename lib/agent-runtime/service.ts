@@ -166,7 +166,9 @@ async function execute(input: ExecuteInput): Promise<void> {
     // 进 system prompt；recall 逐轮临时插入，不落 transcript）
     // 工具召回（tool-index：词法+向量）先算——提示块与工具面共用同一份命中。
     // 恢复模式没有本轮 prompt，用 transcript 最后一条用户消息做召回输入。
-    const recallPrompt = input.message ?? lastUserText(await session.buildContext().then((c) => c.messages));
+    const transcript = await session.buildContext().then((c) => c.messages);
+    const recallPrompt = input.message ?? lastUserText(transcript);
+    const used = usedToolMcpNames(transcript, toolByName);
     const toolHits = recallPrompt
       ? await recallTools(stripUiContext(recallPrompt), { hasProduction: !!productionId, userId })
       : [];
@@ -178,7 +180,7 @@ async function execute(input: ExecuteInput): Promise<void> {
 
     // 工具三层（#333）：热 ∪ 温(页面) ∪ 召回命中 ∪ 闭包。
     const tiers = tieredToolNames({
-      hasProduction: !!productionId, pageKey: input.pageKey ?? null, prompt: recallPrompt, recalled,
+      hasProduction: !!productionId, pageKey: input.pageKey ?? null, prompt: recallPrompt, recalled, used,
       available: tools.map((t) => t.mcpName),
     });
     const activeToolNames = tiers.active.map(exposedName);
@@ -331,6 +333,20 @@ async function execute(input: ExecuteInput): Promise<void> {
     // （waitForIdle / sessionRunState / 下一条消息的 SessionBusy 判定都以此为准）
     active.delete(sessionId);
   }
+}
+
+/** transcript 里出现过的 toolCall → 注册表 mcpName（不在注册表的忽略） */
+function usedToolMcpNames(messages: AgentMessage[], toolByName: Map<string, RuntimeToolDef>): string[] {
+  const out = new Set<string>();
+  for (const m of messages) {
+    if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+    for (const block of m.content) {
+      if (block.type !== "toolCall") continue;
+      const tool = toolByName.get(block.name);
+      if (tool) out.add(tool.mcpName);
+    }
+  }
+  return [...out];
 }
 
 function lastUserText(messages: AgentMessage[]): string | null {
