@@ -25,6 +25,8 @@
 | `AGENT_RUNNER_PORT` | 默认 `3102` | runner 监听端口（loopback） |
 | `AGENT_CHAT_MODEL` / `AGENT_COMPACTION_MODEL` | 默认 `deepseek-v4-flash` / `deepseek-v4-pro` | 对话 / transcript 压缩摘要 |
 | `DEEPSEEK_API_KEY` | | 与蒸馏共用（`.env.local`） |
+| `BRAVE_API_KEY` | | 联网搜索（`web.search`，与网关时代同一个 Brave key）；不配则该工具回复"未配置"，`web.fetch` 不受影响 |
+| `AGENT_WEB_FETCH_ALLOW_PRIVATE` | 未设 | `1` 时 `web.fetch` 放行内网地址——**只给测试**，线上绝不设 |
 | `AGENT_TOOL_TIERS` | `off` | 关闭工具三层（全量工具），排障用 |
 | `AGENT_TOOL_VEC_THRESHOLD` | `0.65` | 冷层向量召回阈值（用户消息 ↔ 工具例句余弦，text-embedding-v4 实测真命中 0.65–0.82、噪声 ≤0.60；族粒度整族入面，所以比单工具略紧）；词法阈值固定 0.72 |
 | `AGENT_TOOL_RECALL_DEBUG` | 未设 | `1` 时每轮打印前 5 名工具的词法/向量分数，用于标定阈值 |

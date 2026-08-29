@@ -12,6 +12,8 @@ describe("tool tiers", () => {
     const r = tieredToolNames({ hasProduction: false, pageKey: null, prompt: "你好", available: ALL });
     expect(r.active).toContain("my.productions");
     expect(r.active).toContain("ask_user");
+    expect(r.active).toContain("web.search"); // 联网是基础能力，个人/制作会话都常驻
+    expect(r.active).toContain("web.fetch");
     expect(r.active.some((n) => n.startsWith("production."))).toBe(false);
   });
 

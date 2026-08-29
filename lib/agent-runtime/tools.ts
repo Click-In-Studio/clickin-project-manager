@@ -276,6 +276,44 @@ const DEFS: Def[] = [
     }),
   },
 
+  // ── 联网（网关时代 OpenClaw 内置的 web_search / web_fetch 的自建形态，见 web-tools.ts）
+  {
+    mcpName: "web.search",
+    description: "联网搜索（Brave）：查外部资讯、剧目/演出/技术资料、不确定的事实等（EN: web search）。返回标题/链接/摘要，需要正文再用 web.fetch 抓取。",
+    parameters: Type.Object({
+      query: Type.String({ minLength: 1, description: "搜索词（中英文均可）" }),
+      count: Type.Optional(Type.Integer({ minimum: 1, maximum: 10, description: "结果数，默认 5" })),
+    }),
+    readOnly: true,
+    execute: async (ctx, args) => {
+      const { webSearch, formatSearchHits, WebToolError } = await import("./web-tools");
+      const q = String(args.query ?? "").trim();
+      try {
+        return formatSearchHits(q, await webSearch(q, typeof args.count === "number" ? args.count : undefined, ctx.run?.signal));
+      } catch (err) {
+        if (err instanceof WebToolError) return err.message;
+        throw err;
+      }
+    },
+  },
+  {
+    mcpName: "web.fetch",
+    description: "抓取一个公开网页并抽出正文文本（EN: web fetch page）。用于读搜索结果、用户给的链接；内网地址不可抓，正文超长会截断。",
+    parameters: Type.Object({ url: Type.String({ minLength: 1, description: "http/https 地址" }) }),
+    readOnly: true,
+    execute: async (ctx, args) => {
+      const { webFetch, formatFetchedPage, WebToolError } = await import("./web-tools");
+      try {
+        return formatFetchedPage(await webFetch(String(args.url ?? ""), ctx.run?.signal));
+      } catch (err) {
+        if (err instanceof WebToolError) return err.message;
+        if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return "抓取超时";
+        if (err instanceof Error) return `抓取失败：${err.message}`;
+        throw err;
+      }
+    },
+  },
+
   // ── find_tools：冷层兜底。工具面按页面/召回分层（#333），模型觉得"应该有个工具能做
   // 这件事但列表里没有"时用它搜；搜到的名字**直接调用即可**（resolveDeferredTool 会按
   // 名临时加载，不需要任何中间步骤）。260 个工具时也是这个形态：目录不进 prompt。

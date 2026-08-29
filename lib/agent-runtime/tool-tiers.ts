@@ -12,7 +12,7 @@ import { toolRecall } from "@/lib/mcp/tool-catalog";
 
 /** 个人会话热层：my.* 就是它的全部业务面（砍了等于空手）+ 提问 */
 const HOT_PERSONAL = [
-  "my.productions", "my.memory_search", "my.call_times", "my.events", "my.milestones", "my.tech_reqs", "ask_user", "find_tools",
+  "my.productions", "my.memory_search", "my.call_times", "my.events", "my.milestones", "my.tech_reqs", "ask_user", "find_tools", "web.search", "web.fetch",
 ];
 
 /** 制作会话热层：范围锚点 + 语境锚（info/my_role/notifications）+ id 供给入口（成员/部门）+ 提问 */
@@ -20,7 +20,7 @@ const HOT_PRODUCTION = [
   "my.productions", "my.memory_search", "my.call_times",
   "production.info", "production.my_role", "production.notifications",
   "production.contact_list", "production.department_list",
-  "ask_user", "find_tools",
+  "ask_user", "find_tools", "web.search", "web.fetch",
 ];
 
 const WIKI_FAMILY = [
