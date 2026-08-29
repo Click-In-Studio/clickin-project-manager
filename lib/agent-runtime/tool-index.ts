@@ -11,6 +11,7 @@
 
 import { createHash } from "node:crypto";
 import { getPool } from "@/lib/pg";
+import { creditsFromEmbeddingTokens } from "@/lib/plan";
 import { embedDocuments, embedQuery, embeddingMode, embeddingModel } from "@/lib/agent-memory/embedding";
 import { TOOL_CATALOG, TOOL_FAMILIES, TOOL_RECALL_THRESHOLD, type ToolCatalogEntry } from "@/lib/agent-tools/tool-catalog";
 import { bigramTokens } from "@/lib/agent-memory/trigger-lexical";
@@ -120,8 +121,8 @@ async function queryVector(prompt: string, userId: string | null): Promise<numbe
     const q = await embedQuery(prompt);
     if (q.totalTokens > 0 && userId) {
       void getPool().query(
-        "INSERT INTO ai_usage (user_id, kind, model, tokens) VALUES ($1, 'embedding_query', $2, $3)",
-        [userId, embeddingModel(), q.totalTokens],
+        "INSERT INTO ai_usage (user_id, kind, model, tokens, billed_credits) VALUES ($1, 'embedding_query', $2, $3, $4)",
+        [userId, embeddingModel(), q.totalTokens, creditsFromEmbeddingTokens(q.totalTokens)],
       ).catch(() => {});
     }
     return q.embedding;

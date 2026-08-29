@@ -70,6 +70,11 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:phase/*@create",
     "node:phase/*@edit",
     "node:phase/*@delete",
+    // AI 用量可见性（#383）。两枚都不进任何角色模版——owner 显式发给谁谁才有
+    // 区间；有了区间就得能自确认成行，否则这两枚发出去等于没发（批D/E 的教训）。
+    // 收在 base 而非某个页面 scope：卡片在项目设置页，那页没有 PageActivationGate。
+    "node:ai/*/usage@view",
+    "node:ai/*/usage/members@view",
   ]),
 
   // 批E-2：剧本页写面。blocks 写是一把总钥匙（requiredPermissions 对 insert /

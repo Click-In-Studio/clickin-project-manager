@@ -42,6 +42,9 @@ import {
   CHAT_MODEL, COMPACTION_MODEL, deepseekApiKey, llmRuntime,
   RUNNER_OWNER, HEARTBEAT_INTERVAL_MS, ORPHAN_AFTER_MS,
 } from "./config";
+import { creditsFromUsd, RUN_CREDIT_HARD_CAP } from "@/lib/plan";
+import { assertAiQuota, chargeExtraCredits, getQuotaStatus, paidFromOf, quotaOwnerOf, type PaidFrom } from "@/lib/ai-quota";
+import { usdOfUsage } from "./billing";
 
 // 我们的工具不碰文件系统/shell；harness 只把 env 传给 systemPrompt 回调
 const NO_ENV = {} as ExecutionEnv;
@@ -90,13 +93,20 @@ export interface StartRunInput {
 export async function startRun(input: StartRunInput): Promise<{ runId: string }> {
   if (active.has(input.sessionId)) throw new SessionBusyError();
   const storage = await ensureSession(input.sessionId, input.userId);
+  // 额度门（#383）：只挡**新发起**的一轮。孤儿接管/审批后续跑不再判——那是
+  // 已经开始的一次任务，判定的位置是这里，不是循环里。超限抛 429，文案由
+  // assertAiQuota 按「找谁补」分三种人写。
+  const { paidFrom } = await assertAiQuota({
+    userId: input.userId,
+    productionId: (await storage.getMetadata()).productionId,
+  });
   const runId = newRunId();
   await getPool().query(
     `INSERT INTO agent_run (id, session_id, status, owner, heartbeat_at, page_key, model)
      VALUES ($1, $2, 'running', $3, now(), $4, $5)`,
     [runId, input.sessionId, RUNNER_OWNER, input.pageKey ?? null, CHAT_MODEL.id],
   );
-  void execute({ storage, runId, userId: input.userId, message: input.message, pageKey: input.pageKey ?? null });
+  void execute({ storage, runId, userId: input.userId, message: input.message, pageKey: input.pageKey ?? null, paidFrom });
   return { runId };
 }
 
@@ -124,6 +134,8 @@ interface ExecuteInput {
   message?: string;
   /** 发起本轮时的页面（温层工具面依据）；恢复模式从 agent_run.page_key 读回 */
   pageKey?: string | null;
+  /** 本轮由谁买单（run 开始时定死，run 内不切换）；恢复模式无此判定，按 quota 记 */
+  paidFrom?: PaidFrom;
 }
 
 async function execute(input: ExecuteInput): Promise<void> {
@@ -152,7 +164,10 @@ async function execute(input: ExecuteInput): Promise<void> {
   };
   const tools = buildTools({ userId, productionId, run: runHandle });
   const toolByName = new Map(tools.map((t) => [t.name, t]));
-  const usage = { input: 0, output: 0, cacheRead: 0 };
+  // usd 与 token 并行累计：token 是账本原貌，usd 是限流口径（见 billing.ts）。
+  // compaction 单列：它用的是 v4-pro（3 倍单价）、不走 message_end，混进 chat_*
+  // 会让「这轮对话花了多少 token」失真。
+  const usage = { input: 0, output: 0, cacheRead: 0, usd: 0, compactionUsd: 0, compactionTokens: 0 };
   const lastUser: string | null = input.message ?? null;
   let lastAssistant: string | null = null;
   let status: "completed" | "aborted" | "failed" = "completed";
@@ -262,8 +277,19 @@ async function execute(input: ExecuteInput): Promise<void> {
         usage.input += event.message.usage.input;
         usage.output += event.message.usage.output;
         usage.cacheRead += event.message.usage.cacheRead;
+        usage.usd += usdOfUsage(event.message.usage, CHAT_MODEL);
         const t = event.message.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("");
         if (t) lastAssistant = t.slice(0, 2000);
+        // 防失控硬顶（#383）：额度判定在 run 开始处、run 内不打断，所以透支上限
+        // 就是单个 run 能烧的量。工具死循环会把「允许少量负 credit」变成无底洞——
+        // 这道闸不是限流，豁免档同样受它约束。
+        const spent = creditsFromUsd(usage.usd);
+        if (!abort.signal.aborted && spent > RUN_CREDIT_HARD_CAP) {
+          console.error(`[agent-runtime] run ${runId} 触发单轮成本硬顶（${spent} credit > ${RUN_CREDIT_HARD_CAP}），中止`);
+          publisher.publish({ type: "error", error: "本次任务消耗异常偏高，已自动中止。请把问题拆小后重试。" });
+          abort.abort();
+          void active.get(sessionId)?.harness.abort().catch(() => {});
+        }
       }
     });
 
@@ -315,7 +341,9 @@ async function execute(input: ExecuteInput): Promise<void> {
     if (abort.signal.aborted) status = "aborted";
 
     // 自动压缩（agent-core 的 compact() 是手动的；触发由这里驱动，摘要用 pro）
-    await maybeCompact(harness, session, abort.signal);
+    const compaction = await maybeCompact(harness, session, abort.signal);
+    usage.compactionUsd += compaction.usd;
+    usage.compactionTokens += compaction.tokens;
   } catch (err) {
     status = abort.signal.aborted ? "aborted" : "failed";
     error = err instanceof Error ? err.message : String(err);
@@ -328,7 +356,7 @@ async function execute(input: ExecuteInput): Promise<void> {
     if (detached) {
       // 脱离：run 行保持原状态（running/awaiting_*），心跳停更 → 30s 后被下一个进程接管；
       // 已花的 token 照记
-      await recordUsage(userId, productionId, usage).catch(() => {});
+      await recordUsage(userId, productionId, usage, input.paidFrom).catch(() => {});
       active.delete(sessionId);
       return;
     }
@@ -336,7 +364,7 @@ async function execute(input: ExecuteInput): Promise<void> {
       `UPDATE agent_run SET status = $2, ended_at = now(), error = $3, input_tokens = $4, output_tokens = $5, cache_read_tokens = $6 WHERE id = $1`,
       [runId, status, error, usage.input, usage.output, usage.cacheRead],
     );
-    await recordUsage(userId, productionId, usage).catch(() => {});
+    await recordUsage(userId, productionId, usage, input.paidFrom).catch(() => {});
     await pruneDeltas(sessionId, runId).catch(() => {});
     // episodic 上报（与插件 agent_end 同款字段）
     try {
@@ -365,16 +393,68 @@ function findLastUserIndex(messages: AgentMessage[]): number {
   return -1;
 }
 
-async function recordUsage(userId: string, productionId: string | null, usage: { input: number; output: number; cacheRead: number }): Promise<void> {
+/**
+ * 记账（#383 后同时是限流的账本）。
+ *
+ * token 分三行照记（账本原貌不变），credit 按单价折算后**只挂在 chat_input 行上**：
+ * 三行各自折算再相加与整轮成本相等，但那样每行都得知道自己的单价——而
+ * provider 报的是整轮的钱。把钱记在一行、token 记在三行，聚合时 SUM 谁都不会重。
+ *
+ * paidFrom 是 run 开始时定死的：'quota' 进窗口聚合、'extra' 扣余额、'exempt'
+ * 两边都不进（豁免 ≠ 不记账，add-plan.sql 的既有约定）。
+ */
+async function recordUsage(
+  userId: string,
+  productionId: string | null,
+  usage: { input: number; output: number; cacheRead: number; usd: number; compactionUsd: number; compactionTokens: number },
+  paidFrom: PaidFrom | undefined,
+): Promise<void> {
   const pool = getPool();
-  const rows: Array<[string, number]> = [["chat_input", usage.input], ["chat_output", usage.output], ["chat_cache_read", usage.cacheRead]];
-  for (const [kind, tokens] of rows) {
+  const credits = creditsFromUsd(usage.usd);
+  const compactionCredits = creditsFromUsd(usage.compactionUsd);
+  // 恢复模式（孤儿接管/审批后续跑）没有开轮判定，这里补一次——不能把豁免项目
+  // 的续跑记成 quota。
+  const paid = paidFrom ?? (await resolvePaidFrom(userId, productionId));
+  const rows: Array<[string, number, number]> = [
+    ["chat_input", usage.input, credits],
+    ["chat_output", usage.output, 0],
+    ["chat_cache_read", usage.cacheRead, 0],
+  ];
+  let creditsLanded = false;
+  for (const [kind, tokens, c] of rows) {
     if (tokens <= 0) continue;
     await pool.query(
-      `INSERT INTO ai_usage (user_id, production_id, kind, model, tokens) VALUES ($1, $2, $3, $4, $5)`,
-      [userId, productionId, kind, CHAT_MODEL.id, tokens],
+      `INSERT INTO ai_usage (user_id, production_id, kind, model, tokens, billed_credits, paid_from)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [userId, productionId, kind, CHAT_MODEL.id, tokens, c, paid],
+    );
+    if (c > 0) creditsLanded = true;
+  }
+  // input=0 而 output>0 的极端形态（全缓存命中）下，钱不能跟着丢
+  if (credits > 0 && !creditsLanded) {
+    await pool.query(
+      `INSERT INTO ai_usage (user_id, production_id, kind, model, tokens, billed_credits, paid_from)
+       VALUES ($1, $2, 'chat_input', $3, 0, $4, $5)`,
+      [userId, productionId, CHAT_MODEL.id, credits, paid],
     );
   }
+  if (usage.compactionTokens > 0 || compactionCredits > 0) {
+    await pool.query(
+      `INSERT INTO ai_usage (user_id, production_id, kind, model, tokens, billed_credits, paid_from)
+       VALUES ($1, $2, 'chat_compaction', $3, $4, $5, $6)`,
+      [userId, productionId, COMPACTION_MODEL.id, usage.compactionTokens, compactionCredits, paid],
+    );
+  }
+  const total = credits + compactionCredits;
+  if (paid === "extra" && total > 0) {
+    await chargeExtraCredits(await quotaOwnerOf(userId, productionId), total).catch((e) =>
+      console.error("[agent-runtime] 额外额度扣款失败（用量已记）:", e),
+    );
+  }
+}
+
+async function resolvePaidFrom(userId: string, productionId: string | null): Promise<PaidFrom> {
+  return paidFromOf(await getQuotaStatus({ userId, productionId }));
 }
 
 // ── 审批门 ───────────────────────────────────────────────────────────────────
@@ -450,13 +530,33 @@ function str(v: unknown): string | undefined {
 
 // ── 压缩 ─────────────────────────────────────────────────────────────────────
 
-async function maybeCompact(harness: Harness, session: Session, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return;
+/**
+ * 自动压缩。返回本次压缩的花费（美元与 token），由调用方并进本轮账。
+ *
+ * 压缩不走 harness 的 message_end，所以它的用量**此前完全没记**——而它用的是
+ * v4-pro（3 倍单价）、一次就吃掉整个 transcript。这里把 completeSimple 包一层
+ * 取 usage，不必改 vendor（compact 的 runtime 参数是现成的注入点）。
+ */
+async function maybeCompact(harness: Harness, session: Session, signal: AbortSignal): Promise<CompactionCost> {
+  const zero: CompactionCost = { usd: 0, tokens: 0 };
+  if (signal.aborted) return zero;
   const ctx = await session.buildContext();
   const { tokens } = estimateContextTokens(ctx.messages);
-  if (!shouldCompact(tokens, CHAT_MODEL.contextWindow, DEFAULT_COMPACTION_SETTINGS)) return;
+  if (!shouldCompact(tokens, CHAT_MODEL.contextWindow, DEFAULT_COMPACTION_SETTINGS)) return zero;
+  const cost: CompactionCost = { usd: 0, tokens: 0 };
+  const rt = llmRuntime();
+  const tapped = {
+    completeSimple: async (...args: Parameters<typeof rt.completeSimple>) => {
+      const msg = await rt.completeSimple(...args);
+      if (msg.role === "assistant" && msg.usage) {
+        cost.usd += usdOfUsage(msg.usage, COMPACTION_MODEL);
+        cost.tokens += msg.usage.input + msg.usage.output + msg.usage.cacheRead;
+      }
+      return msg;
+    },
+  };
   const off = harness.on("session_before_compact", async ({ preparation, signal: s }) => {
-    const result = await compact(preparation, COMPACTION_MODEL, runtimeOverrides.apiKey ?? deepseekApiKey(), undefined, "用中文写摘要", s, "low", undefined, llmRuntime());
+    const result = await compact(preparation, COMPACTION_MODEL, runtimeOverrides.apiKey ?? deepseekApiKey(), undefined, "用中文写摘要", s, "low", undefined, tapped);
     if (!result.ok) throw result.error;
     return { compaction: result.value };
   });
@@ -467,7 +567,10 @@ async function maybeCompact(harness: Harness, session: Session, signal: AbortSig
   } finally {
     off();
   }
+  return cost;
 }
+
+type CompactionCost = { usd: number; tokens: number };
 
 // ── 历史与列表（前端契约同网关时代）────────────────────────────────────────────
 

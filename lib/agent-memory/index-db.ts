@@ -11,6 +11,7 @@
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { getPool } from "@/lib/pg";
+import { creditsFromEmbeddingTokens } from "@/lib/plan";
 import {
   EMBEDDING_DIM,
   EmbeddingUnavailableError,
@@ -207,8 +208,8 @@ async function logUsage(kind: string, tokens: number, attr: UsageAttribution): P
   if (tokens <= 0) return;
   try {
     await getPool().query(
-      "INSERT INTO ai_usage (user_id, production_id, kind, model, tokens) VALUES ($1, $2, $3, $4, $5)",
-      [attr.userId ?? null, attr.productionId ?? null, kind, embeddingModel(), tokens],
+      "INSERT INTO ai_usage (user_id, production_id, kind, model, tokens, billed_credits) VALUES ($1, $2, $3, $4, $5, $6)",
+      [attr.userId ?? null, attr.productionId ?? null, kind, embeddingModel(), tokens, creditsFromEmbeddingTokens(tokens)],
     );
   } catch (err) {
     console.error("[memory-index] 用量记账失败（忽略）:", err);

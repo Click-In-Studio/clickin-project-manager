@@ -1664,6 +1664,13 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('finance', 'view', 0), ('finance', 'create', 0), ('finance', 'edit', 0), ('finance', 'delete', 0)
 ON CONFLICT DO NOTHING;
 
+-- ai AI 用量可见性（#383，add-ai-quota.sql）：只有 view——用量是只读账本，
+-- 「改额度」不是权限键能表达的东西（那是兑换码/管理员发放）。
+--   node:ai/<prod>/usage@view          项目总览    node:ai/<prod>/usage/members@view  按成员分解
+INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  ('ai', 'view', 0)
+ON CONFLICT DO NOTHING;
+
 -- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────
 -- 所有实际资源权限的单一权威来源。
 
@@ -1992,18 +1999,29 @@ CREATE INDEX IF NOT EXISTS agent_memory_recall_log_chunk_idx
 -- 归属不变量（review #297 finding 2）：每行必须至少归到一个主体——无主行
 -- 对失控告警/分摊核算都是废数据。回填等批处理按块的 scope 分组归账
 -- （index-db.ts embedMissing），不允许"批量所以记不到人"。
+-- billed_credits / paid_from（#383，db/add-ai-quota.sql）：
+--   1 credit = 1 个 deepseek-v4-flash cache-miss input token 的 peak 单价
+--   （$0.44/1M）。裸 token 会被 cache_read 淹没（缓存读只有 1/31 单价），限流
+--   必须按成本折算。单价表在 lib/plan.ts，chat 侧的美元数由 provider 层算好。
+--   paid_from：这一行由谁买单（档位窗口 / 额外额度 / 豁免）。窗口聚合只 SUM
+--   'quota' 行——窗口用量与 extra 余额是两套账，不互相污染。
 CREATE TABLE IF NOT EXISTS ai_usage (
-  id            BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  user_id       UUID        NULL,
-  production_id TEXT        NULL,
-  kind          TEXT        NOT NULL,
-  model         TEXT        NOT NULL,
-  tokens        INTEGER     NOT NULL,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CHECK (user_id IS NOT NULL OR production_id IS NOT NULL)
+  id             BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id        UUID        NULL,
+  production_id  TEXT        NULL,
+  kind           TEXT        NOT NULL,
+  model          TEXT        NOT NULL,
+  tokens         INTEGER     NOT NULL,
+  billed_credits BIGINT      NOT NULL DEFAULT 0,
+  paid_from      TEXT        NOT NULL DEFAULT 'quota',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (user_id IS NOT NULL OR production_id IS NOT NULL),
+  CONSTRAINT ai_usage_paid_from_check CHECK (paid_from IN ('quota', 'extra', 'exempt'))
 );
 
-CREATE INDEX IF NOT EXISTS ai_usage_created_idx ON ai_usage (created_at);
+CREATE INDEX IF NOT EXISTS ai_usage_created_idx            ON ai_usage (created_at);
+CREATE INDEX IF NOT EXISTS ai_usage_user_created_idx       ON ai_usage (user_id, created_at);
+CREATE INDEX IF NOT EXISTS ai_usage_production_created_idx ON ai_usage (production_id, created_at);
 
 -- ── 等级体系（#280，db/add-plan.sql，付费功能地基）─────────────────────────────
 -- user_plan 无行 = 普通用户（不能建项目）；production_plan 无行 = free 档。
@@ -2028,18 +2046,39 @@ CREATE TABLE IF NOT EXISTS production_plan (
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- kind='ai_credits'（#383）：AI 额外额度码，不授档位（grants_tier IS NULL）、
+-- 只加 grants_credits。「想多用就买」复用这张表——兑换流水/次数/过期/暴破限流全现成。
 CREATE TABLE IF NOT EXISTS plan_code (
-  code          TEXT        PRIMARY KEY,
-  kind          TEXT        NOT NULL CHECK (kind IN ('user_upgrade', 'production_upgrade')),
-  grants_tier   TEXT        NOT NULL,
-  grants_exempt BOOLEAN     NOT NULL DEFAULT false,
-  exempt_note   TEXT        NULL,
-  max_uses      INTEGER     NOT NULL DEFAULT 1 CHECK (max_uses > 0),
-  used_count    INTEGER     NOT NULL DEFAULT 0,
-  expires_at    TIMESTAMPTZ NULL,
-  note          TEXT        NULL,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  code           TEXT        PRIMARY KEY,
+  kind           TEXT        NOT NULL,
+  grants_tier    TEXT        NULL,
+  grants_exempt  BOOLEAN     NOT NULL DEFAULT false,
+  grants_credits BIGINT      NOT NULL DEFAULT 0,
+  exempt_note    TEXT        NULL,
+  max_uses       INTEGER     NOT NULL DEFAULT 1 CHECK (max_uses > 0),
+  used_count     INTEGER     NOT NULL DEFAULT 0,
+  expires_at     TIMESTAMPTZ NULL,
+  note           TEXT        NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT plan_code_kind_check   CHECK (kind IN ('user_upgrade', 'production_upgrade', 'ai_credits')),
+  CONSTRAINT plan_code_grants_check CHECK ((kind = 'ai_credits') = (grants_tier IS NULL))
 );
+
+-- 额外额度（#383）：余额型，不随日/周窗口重置；窗口两闸都满之后才动它。
+-- remaining 允许为负——判定在 run 开始处做一次、run 内不打断，所以最后一次
+-- 扣款可能扣穿；透支上限就是单个 run 的量（lib/plan.ts RUN_CREDIT_HARD_CAP）。
+CREATE TABLE IF NOT EXISTS ai_credit_grant (
+  id         TEXT        PRIMARY KEY,
+  user_id    UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  credits    BIGINT      NOT NULL CHECK (credits > 0),
+  remaining  BIGINT      NOT NULL,
+  source     TEXT        NULL,
+  note       TEXT        NULL,
+  expires_at TIMESTAMPTZ NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ai_credit_grant_user_idx ON ai_credit_grant (user_id, expires_at);
 
 CREATE TABLE IF NOT EXISTS plan_code_redemption (
   id            BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

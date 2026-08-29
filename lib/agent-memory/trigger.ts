@@ -14,6 +14,7 @@
 
 import { createHash } from "node:crypto";
 import { getPool } from "@/lib/pg";
+import { creditsFromEmbeddingTokens } from "@/lib/plan";
 import { EmbeddingUnavailableError, embedQuery, embeddingMode, embeddingModel } from "@/lib/agent-memory/embedding";
 import { bigramTokens, ensureIndexIdentity } from "./index-db";
 
@@ -57,8 +58,8 @@ export async function triggerRecall(userId: string, prompt: string): Promise<Tri
         promptVec = `[${q.embedding.join(",")}]`;
         if (q.totalTokens > 0) {
           pool
-            .query("INSERT INTO ai_usage (user_id, kind, model, tokens) VALUES ($1, 'embedding_query', $2, $3)", [
-              userId, embeddingModel(), q.totalTokens,
+            .query("INSERT INTO ai_usage (user_id, kind, model, tokens, billed_credits) VALUES ($1, 'embedding_query', $2, $3, $4)", [
+              userId, embeddingModel(), q.totalTokens, creditsFromEmbeddingTokens(q.totalTokens),
             ])
             .catch((e) => console.error("[trigger-recall] 用量记账失败（忽略）:", e));
         }
