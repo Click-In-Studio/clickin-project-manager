@@ -8,7 +8,7 @@
 //
 // fail-open：任何异常 → 全量工具（宁可贵，不可残废）。AGENT_TOOL_TIERS=off 关闭分层。
 
-import { toolRecall } from "@/lib/mcp/tool-catalog";
+import { toolRecall } from "@/lib/agent-tools/tool-catalog";
 
 /** 个人会话热层：my.* 就是它的全部业务面（砍了等于空手）+ 提问 */
 const HOT_PERSONAL = [

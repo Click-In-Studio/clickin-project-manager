@@ -1,7 +1,6 @@
 // AI 工具调用的中文显示名。key 是去掉 "clickin__" 前缀后的暴露名
-// （MCP 原始名的 "." 在插件暴露时被替换为 "-"，见 openclaw-plugins/
-// clickin-memory 的 MCP_TOOL_PREFIX 注释）；tests/agent-tool-labels.test.ts
-// 对照 lib/mcp/server.ts 的注册清单防漂移——新增工具没配显示名会红。
+// （注册表 mcpName 的 "." 替换为 "-"，见 lib/agent-runtime/tools.ts exposedName）；tests/agent-tool-labels.test.ts
+// 对照 lib/agent-runtime/tools.ts 的注册表防漂移——新增工具没配显示名会红。
 
 const MCP_TOOL_PREFIX = "clickin__";
 
@@ -32,6 +31,11 @@ export const TOOL_LABELS: Record<string, string> = {
   "my-update_instructions": "更新个人 AI 指令",
   "production-update_instructions": "更新制作 AI 指令",
   "users-query_sensitive": "读取本人联系方式",
+  // 运行时专属（不进 tool-catalog）
+  "ask_user": "向用户提问",
+  "find_tools": "搜索可用工具",
+  "web-search": "联网搜索",
+  "web-fetch": "抓取网页",
 };
 
 /** 暴露名/原始名 → 中文显示名；没配的（未来新工具、gateway 内置工具）

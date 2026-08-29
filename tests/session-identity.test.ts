@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSessionIdentity } from "@/lib/mcp/session-identity";
+import { parseSessionIdentity } from "@/lib/agent-tools/session-identity";
 
 const USER = "0b6ab930-e2aa-4020-8334-d749d7be82a5";
 const SESS = "11111111-2222-3333-4444-555555555555";

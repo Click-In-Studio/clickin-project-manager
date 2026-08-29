@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { SessionData } from "@/lib/session";
 import { getSession } from "@/lib/session";
-import { sessionKeyOwnedBy } from "@/lib/mcp/session-identity";
+import { sessionKeyOwnedBy } from "@/lib/agent-tools/session-identity";
 
 /** 抛出的错误 → JSON 响应，尊重错误对象上的 `status`（409 会话忙、403 无权 …）。 */
 export function toErrorResponse(err: unknown): NextResponse {

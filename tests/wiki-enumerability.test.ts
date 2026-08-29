@@ -14,7 +14,7 @@ import { GET as wikiListGET, POST as wikiPOST } from "@/app/api/production/[id]/
 import { PATCH as wikiPATCH } from "@/app/api/production/[id]/wiki/[wikiId]/route";
 import { GET as shareGET, PUT as sharePUT } from "@/app/api/production/[id]/wiki/[wikiId]/share/route";
 import { GET as directoryGET } from "@/app/api/production/[id]/resource-directory/route";
-import { wikiProposeCreate, wikiProposeMove } from "@/lib/mcp/wiki-tools";
+import { wikiProposeCreate, wikiProposeMove } from "@/lib/agent-tools/wiki-tools";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 
 // #357 枚举面：目录树可见性，与内容面（canViewWiki）正交。

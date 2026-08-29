@@ -37,7 +37,7 @@ export function sha256(text: string): string {
 // 改用中文检索标准做法：CJK 逐对 bigram + ASCII/数字整词（小写）。索引侧
 // 与查询侧共用本函数——两侧切法不一致=检索面静默失效。
 
-// 分词实现抽到 trigger-lexical.ts（零依赖，供 lib/mcp/tool-catalog.ts 复用，
+// 分词实现抽到 trigger-lexical.ts（零依赖，供 lib/agent-tools/tool-catalog.ts 复用，
 // #333 P2），这里原地再导出——既有调用方（trigger.ts / 本文件内部）零改动。
 export { bigramTokens } from "./trigger-lexical";
 import { bigramTokens } from "./trigger-lexical";

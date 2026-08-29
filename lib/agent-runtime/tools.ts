@@ -1,7 +1,7 @@
-// 进程内工具注册表（#367 S2）：26 个业务工具从 MCP handler 变成直接调用。
+// 进程内工具注册表（#367 S2）：**skills 的唯一事实源**（MCP 服务器已退役）。
 //
-// 与 lib/mcp/server.ts 的对应关系：同一批底层函数（my-tools / production-tools /
-// wiki-tools / instructions-tools / user-context），同一份描述文案；差别只在包装——
+// 底层函数在 lib/agent-tools/（my-tools / production-tools / wiki-tools /
+// instructions-tools / user-context），这里是描述文案 + 参数 schema + 包装——
 // 身份（userId / productionId）来自构造时的闭包，**模型参数里不存在身份字段**
 // （§5-1 安全不变量，tests/agent-runtime-tools.test.ts 静态扫描钉死）。
 //
@@ -15,7 +15,7 @@
 import { Type, type TSchema } from "typebox";
 import type { AgentToolResult } from "../../vendor/openclaw/packages/agent-core/src/types";
 import { INSTRUCTIONS_MAX_LEN } from "@/lib/agent-instructions";
-import { WIKI_DIALECT_POINTER_WRITE, WIKI_DIALECT_POINTER_READ, WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "@/lib/mcp/wiki-link-syntax";
+import { WIKI_DIALECT_POINTER_WRITE, WIKI_DIALECT_POINTER_READ, WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "@/lib/agent-tools/wiki-link-syntax";
 import { toolLabel } from "@/lib/agent-tool-labels";
 import type { StreamLine, QuestionItem } from "@/lib/agent-chat/stream-reducer";
 import type { RuntimeTool } from "./resume";
@@ -104,15 +104,15 @@ const WIKI_ID = Type.String({ description: "文档 id（来自 wiki_tree/wiki_se
 const DEFS: Def[] = [
   // ── my.* ────────────────────────────────────────────────────────────────
   myTool("my.call_times", "查询当前用户自己的近期Call（时间、事件、地点、所属制作）（EN: my call times schedule）。",
-    async (uid) => (await import("@/lib/mcp/my-tools")).myCallTimes(uid)),
+    async (uid) => (await import("@/lib/agent-tools/my-tools")).myCallTimes(uid)),
   myTool("my.tech_reqs", "查询与当前用户相关的技术需求/任务（被指派或作为部门负责人），含状态（EN: my tech requirements tasks）。",
-    async (uid) => (await import("@/lib/mcp/my-tools")).myTechReqs(uid)),
+    async (uid) => (await import("@/lib/agent-tools/my-tools")).myTechReqs(uid)),
   myTool("my.events", "查询当前用户关注的即将开始的Event事件。",
-    async (uid) => (await import("@/lib/mcp/my-tools")).myFollowedEvents(uid)),
+    async (uid) => (await import("@/lib/agent-tools/my-tools")).myFollowedEvents(uid)),
   myTool("my.milestones", "查询当前用户可见项目的临近里程碑（截止日期）。",
-    async (uid) => (await import("@/lib/mcp/my-tools")).myMilestones(uid)),
+    async (uid) => (await import("@/lib/agent-tools/my-tools")).myMilestones(uid)),
   myTool("my.productions", "查询当前用户参与的全部制作与角色（含已归档）。",
-    async (uid) => (await import("@/lib/mcp/my-tools")).myProductions(uid)),
+    async (uid) => (await import("@/lib/agent-tools/my-tools")).myProductions(uid)),
   {
     mcpName: "my.memory_search",
     description: `检索当前用户的长期记忆与历史对话记录（语义+关键词混合检索）。当用户提到过去讨论过的事、之前的决定、或你需要回忆更早的上下文时使用——注入的记忆摘要只覆盖精粹与最近几天，更早的内容必须靠本工具检索。${MY_SCOPE_NOTE}`,
@@ -135,60 +135,60 @@ const DEFS: Def[] = [
     parameters: Type.Object({ content: Type.String({ description: `替换后的完整个人指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）` }) }),
     readOnly: false,
     mutates: () => ({ scope: "instructions.personal", action: "updated" }),
-    execute: async (ctx, args) => (await import("@/lib/mcp/instructions-tools")).updateMyInstructions(ctx.userId, String(args.content)),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/instructions-tools")).updateMyInstructions(ctx.userId, String(args.content)),
   },
   {
     mcpName: "users.query_sensitive",
     description: "查询当前用户自己的登记联系方式（邮箱/电话）（EN: my contact email phone）。敏感信息，需用户确认。",
     parameters: NONE,
     readOnly: false, // 敏感读取也过确认门
-    execute: async (ctx) => (await import("@/lib/mcp/user-context")).querySelfSensitive(ctx.userId),
+    execute: async (ctx) => (await import("@/lib/agent-tools/user-context")).querySelfSensitive(ctx.userId),
   },
 
   // ── production.* ────────────────────────────────────────────────────────
   prodTool("production.info", "查询当前对话关联制作的项目详情（简介、类型、所有者、制作人）。成员内公开信息。",
-    async (uid, pid) => (await import("@/lib/mcp/production-tools")).productionInfo(uid, pid)),
+    async (uid, pid) => (await import("@/lib/agent-tools/production-tools")).productionInfo(uid, pid)),
   prodTool("production.my_role", "查询当前用户在当前对话关联制作中的职位、标签与部门（含是否部门负责人）。",
-    async (uid, pid) => (await import("@/lib/mcp/production-tools")).productionMyRole(uid, pid)),
+    async (uid, pid) => (await import("@/lib/agent-tools/production-tools")).productionMyRole(uid, pid)),
   prodTool("production.notifications", "查询当前用户在当前对话关联制作中的通知（未读/待办/警告）。",
-    async (uid, pid) => (await import("@/lib/mcp/production-tools")).productionNotifications(uid, pid)),
+    async (uid, pid) => (await import("@/lib/agent-tools/production-tools")).productionNotifications(uid, pid)),
   prodTool("production.milestones", "查询当前对话关联制作的全部里程碑（含已过与未来）。",
-    async (uid, pid) => (await import("@/lib/mcp/production-tools")).productionMilestones(uid, pid)),
+    async (uid, pid) => (await import("@/lib/agent-tools/production-tools")).productionMilestones(uid, pid)),
   prodTool("production.contact_list",
     "列出当前对话关联制作的全部成员：姓名、用户 id、职位、部门（含是否负责人）、标签。需要用户 id 的工具（如 wiki_set_grant 的分享对象）从这里取。不含邮箱/电话——联系方式是敏感信息，只有本人经 users.query_sensitive 确认后才能读取。",
-    async (uid, pid) => (await import("@/lib/mcp/production-tools")).productionContactList(uid, pid)),
+    async (uid, pid) => (await import("@/lib/agent-tools/production-tools")).productionContactList(uid, pid)),
   prodTool("production.department_list",
     "列出当前对话关联制作的部门/用户组树（树状缩进，含部门 id、负责人、成员数）。需要部门 id 的工具（如 wiki_set_grant 的 deptIds）从这里取。",
-    async (uid, pid) => (await import("@/lib/mcp/production-tools")).productionDepartmentList(uid, pid)),
+    async (uid, pid) => (await import("@/lib/agent-tools/production-tools")).productionDepartmentList(uid, pid)),
   {
     mcpName: "production.update_instructions",
     description: "全量替换当前对话关联制作的制作级 AI 指令（对全体成员的 AI 会话生效），需要人工在聊天栏确认；确认后若该用户没有编辑权限（默认仅制作人），调用会被直接拦截。content 是替换后的完整内容——先基于注入块里的现行内容整合修改，不要只传增量；传空字符串表示清空。",
     parameters: Type.Object({ content: Type.String({ description: `替换后的完整制作级指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）` }) }),
     readOnly: false,
     mutates: () => ({ scope: "instructions.production", action: "updated" }), needsProduction: true,
-    execute: async (ctx, args) => (await import("@/lib/mcp/instructions-tools")).updateProductionInstructions(ctx.userId, ctx.productionId, String(args.content)),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/instructions-tools")).updateProductionInstructions(ctx.userId, ctx.productionId, String(args.content)),
   },
 
   // ── production.wiki_* ───────────────────────────────────────────────────
   prodTool("production.wiki_tree", "查询当前对话关联制作的文档树（wiki 库），只列出当前用户有权限看到的文档（id/标题/tag）。",
-    async (uid, pid) => (await import("@/lib/mcp/wiki-tools")).wikiTree(uid, pid)),
+    async (uid, pid) => (await import("@/lib/agent-tools/wiki-tools")).wikiTree(uid, pid)),
   {
     mcpName: "production.wiki_backlinks",
     description: "查询一篇文档的双向链接：谁链接到它（backlinks）、它链接到谁（outgoing）。",
     parameters: Type.Object({ wikiId: WIKI_ID }), readOnly: true, needsProduction: true,
-    execute: async (ctx, args) => (await import("@/lib/mcp/wiki-tools")).wikiBacklinks(ctx.userId, ctx.productionId, String(args.wikiId)),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/wiki-tools")).wikiBacklinks(ctx.userId, ctx.productionId, String(args.wikiId)),
   },
   {
     mcpName: "production.wiki_read",
     description: `按 id 读取一篇文档的完整内容（标题/标签/正文）（EN: wiki read document content）。${WIKI_DIALECT_POINTER_READ}`,
     parameters: Type.Object({ wikiId: WIKI_ID }), readOnly: true, needsProduction: true,
-    execute: async (ctx, args) => (await import("@/lib/mcp/wiki-tools")).wikiRead(ctx.userId, ctx.productionId, String(args.wikiId)),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/wiki-tools")).wikiRead(ctx.userId, ctx.productionId, String(args.wikiId)),
   },
   {
     mcpName: "production.wiki_search",
     description: "全文搜索当前对话关联制作的文档库（标题+正文），只返回当前用户有权限看到的结果。",
     parameters: Type.Object({ query: Type.String({ description: "搜索关键词" }) }), readOnly: true, needsProduction: true,
-    execute: async (ctx, args) => (await import("@/lib/mcp/wiki-tools")).wikiSearch(ctx.userId, ctx.productionId, String(args.query)),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/wiki-tools")).wikiSearch(ctx.userId, ctx.productionId, String(args.query)),
   },
   {
     mcpName: "production.wiki_dialect_ref",
@@ -209,7 +209,7 @@ const DEFS: Def[] = [
     readOnly: false,
     mutates: WIKI_MUTATES.created, needsProduction: true,
     execute: async (ctx, args, toolCallId) => {
-      const { wikiProposeCreate } = await import("@/lib/mcp/wiki-tools");
+      const { wikiProposeCreate } = await import("@/lib/agent-tools/wiki-tools");
       const body = await proposalBody(ctx.productionId, toolCallId, ctx.userId, args.body);
       return wikiProposeCreate(ctx.userId, ctx.productionId, toolCallId, {
         parentId: optString(args.parentId), title: String(args.title), body, summary: String(args.summary ?? ""),
@@ -228,7 +228,7 @@ const DEFS: Def[] = [
     readOnly: false,
     mutates: WIKI_MUTATES.updated, needsProduction: true,
     execute: async (ctx, args, toolCallId) => {
-      const { wikiProposeUpdate } = await import("@/lib/mcp/wiki-tools");
+      const { wikiProposeUpdate } = await import("@/lib/agent-tools/wiki-tools");
       const body = await proposalBody(ctx.productionId, toolCallId, ctx.userId, args.body);
       return wikiProposeUpdate(ctx.userId, ctx.productionId, toolCallId, {
         wikiId: String(args.wikiId), title: optString(args.title), body, summary: String(args.summary ?? ""),
@@ -244,7 +244,7 @@ const DEFS: Def[] = [
     }),
     readOnly: false,
     mutates: WIKI_MUTATES.deleted, needsProduction: true,
-    execute: async (ctx, args, toolCallId) => (await import("@/lib/mcp/wiki-tools")).wikiProposeDelete(ctx.userId, ctx.productionId, toolCallId, {
+    execute: async (ctx, args, toolCallId) => (await import("@/lib/agent-tools/wiki-tools")).wikiProposeDelete(ctx.userId, ctx.productionId, toolCallId, {
       wikiId: String(args.wikiId), summary: String(args.summary ?? ""),
     }),
   },
@@ -258,7 +258,7 @@ const DEFS: Def[] = [
     }),
     readOnly: false,
     mutates: WIKI_MUTATES.updated, needsProduction: true,
-    execute: async (ctx, args, toolCallId) => (await import("@/lib/mcp/wiki-tools")).wikiProposeMove(ctx.userId, ctx.productionId, toolCallId, {
+    execute: async (ctx, args, toolCallId) => (await import("@/lib/agent-tools/wiki-tools")).wikiProposeMove(ctx.userId, ctx.productionId, toolCallId, {
       wikiId: String(args.wikiId), newParentId: optString(args.newParentId), summary: String(args.summary ?? ""),
     }),
   },
@@ -272,7 +272,7 @@ const DEFS: Def[] = [
     }),
     readOnly: false,
     mutates: WIKI_MUTATES.updated, needsProduction: true,
-    execute: async (ctx, args, toolCallId) => (await import("@/lib/mcp/wiki-tools")).wikiProposeTag(ctx.userId, ctx.productionId, toolCallId, {
+    execute: async (ctx, args, toolCallId) => (await import("@/lib/agent-tools/wiki-tools")).wikiProposeTag(ctx.userId, ctx.productionId, toolCallId, {
       wikiId: String(args.wikiId), tags: Array.isArray(args.tags) ? args.tags.map(String) : [], summary: String(args.summary ?? ""),
     }),
   },
@@ -292,7 +292,7 @@ const DEFS: Def[] = [
     }),
     readOnly: false,
     mutates: WIKI_MUTATES.updated, needsProduction: true,
-    execute: async (ctx, args) => (await import("@/lib/mcp/wiki-tools")).wikiSetGrant(ctx.userId, ctx.productionId, {
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/wiki-tools")).wikiSetGrant(ctx.userId, ctx.productionId, {
       wikiId: String(args.wikiId),
       isPublic: typeof args.isPublic === "boolean" ? args.isPublic : undefined,
       deptIds: Array.isArray(args.deptIds) ? args.deptIds.map(String) : undefined,
@@ -422,6 +422,8 @@ async function proposalBody(productionId: string, toolCallId: string, userId: st
 }
 
 export const TOOL_MCP_NAMES: readonly string[] = DEFS.map((d) => d.mcpName);
+/** 只存在于运行时、不进 tool-catalog 的工具（常驻热层，不走召回）：目录 = 注册表 − 这几个 */
+export const RUNTIME_ONLY_TOOLS: ReadonlySet<string> = new Set(["ask_user", "find_tools", "web.search", "web.fetch"]);
 
 /** 按会话身份构造工具集；身份只进闭包，绝不进 schema。 */
 export function buildTools(ctx: ToolContext): RuntimeToolDef[] {

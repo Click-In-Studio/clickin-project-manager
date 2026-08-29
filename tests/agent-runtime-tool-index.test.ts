@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { recallFamilies, searchTools, scoreTools, resetToolIndex, TOOL_VECTOR_THRESHOLD, TOOL_RECALL_MAX_FAMILIES } from "@/lib/agent-runtime/tool-index";
-import { TOOL_CATALOG } from "@/lib/mcp/tool-catalog";
+import { TOOL_CATALOG } from "@/lib/agent-tools/tool-catalog";
 
 // #367 工具索引：词法 + 向量两条车道。EMBEDDING_PROVIDER=fake 的向量是内容哈希展开的单位
 // 向量——同文本恒同向量（余弦 1）、不同文本近似正交，所以"例句原话"能把向量车道单独测出来。

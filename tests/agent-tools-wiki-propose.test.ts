@@ -1,41 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { EventEmitter } from "node:events";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { wikiProposeCreate } from "@/lib/mcp/wiki-tools";
+import { wikiProposeCreate } from "@/lib/agent-tools/wiki-tools";
+import { prepareWikiProposal } from "@/lib/agent-tools/wiki-proposal-prepare";
 import { getWikiProposalByToolCallId, insertWikiProposal } from "@/lib/wiki-proposal-db";
-
-// /wiki-proposal 走真 HTTP（同 tests/mcp-deny-reason.test.ts 的起真服务器套路）——
-// MCP_PORT 必须在模块顶层、import server.ts 之前设好。
-process.env.MCP_PORT = "3199";
-const BASE = "http://127.0.0.1:3199";
-
-type FakeStore = {
-  client: unknown; status: { state: string }; connecting: null; events: EventEmitter;
-  pendingApprovals: Map<string, unknown>; denyReasons: Map<string, unknown>; steerOwners: Map<string, Set<{ pending: number }>>;
-  questionSessions: Map<string, { sessionKey: string; expiresAtMs: number }>;
-};
-const g = globalThis as unknown as {
-  __mcpHttpServer?: { close: (cb?: () => void) => void };
-  __clickinAgentGateway?: FakeStore;
-};
-let savedStore: FakeStore | undefined;
 
 let prodId: string;
 let ownerId: string;
 let plainMemberId: string;
 
 beforeAll(async () => {
-  savedStore = g.__clickinAgentGateway;
-  g.__clickinAgentGateway = {
-    client: null, status: { state: "connected" }, connecting: null, events: new EventEmitter(),
-    pendingApprovals: new Map(), denyReasons: new Map(), steerOwners: new Map(), questionSessions: new Map(),
-  };
-  const { startMcpServer } = await import("@/lib/mcp/server");
-  startMcpServer();
-  await new Promise((r) => setTimeout(r, 150));
-
   ownerId = (await upsertFeishuUser(`test-open-${shortId()}`, `所有者${shortId()}`, null, false)).userId;
   plainMemberId = (await upsertFeishuUser(`test-open-${shortId()}`, `零权限成员${shortId()}`, null, false)).userId;
   ({ prodId } = await makeProduction(ownerId));
@@ -44,10 +19,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await cleanupProduction(prodId).catch(() => {});
-  const server = g.__mcpHttpServer;
-  if (server) await new Promise<void>((r) => server.close(() => r()));
-  delete g.__mcpHttpServer;
-  g.__clickinAgentGateway = savedStore;
 });
 
 describe("wikiPropose：真正的安全边界（不信任预持久化的 has_permission）", () => {
@@ -113,22 +84,17 @@ describe("wikiPropose：真正的安全边界（不信任预持久化的 has_per
   });
 });
 
-describe("POST /wiki-proposal 预持久化端点", () => {
+describe("prepareWikiProposal 预持久化（原 /wiki-proposal 端点，MCP 退役后直接调）", () => {
   it("有权限的调用者 → hasPermission true，写入一行 pending", async () => {
     const toolCallId = `call_${shortId()}`;
-    const res = await fetch(`${BASE}/wiki-proposal`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        productionId: prodId, toolCallId, callerUserId: ownerId,
-        title: "预持久化测试文档", body: "正文", summary: "摘要",
-      }),
+    const r = await prepareWikiProposal({
+      productionId: prodId, toolCallId, callerUserId: ownerId, action: "create",
+      title: "预持久化测试文档", body: "正文", summary: "摘要",
     });
-    expect(res.status).toBe(200);
-    const data = (await res.json()) as { id: string; hasPermission: boolean; reason: string | null };
-    expect(data.hasPermission).toBe(true);
-    expect(data.reason).toBeNull();
-
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.hasPermission).toBe(true);
+    expect(r.reason).toBeNull();
     const row = await getWikiProposalByToolCallId(prodId, toolCallId, ownerId);
     expect(row?.status).toBe("pending");
     expect(row?.title).toBe("预持久化测试文档");
@@ -136,26 +102,14 @@ describe("POST /wiki-proposal 预持久化端点", () => {
 
   it("零权限成员 → hasPermission false，reason=no_grant", async () => {
     const toolCallId = `call_${shortId()}`;
-    const res = await fetch(`${BASE}/wiki-proposal`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        productionId: prodId, toolCallId, callerUserId: plainMemberId,
-        title: "无权限预持久化测试", summary: "摘要",
-      }),
+    const r = await prepareWikiProposal({
+      productionId: prodId, toolCallId, callerUserId: plainMemberId, action: "create",
+      title: "无权限预持久化测试", summary: "摘要",
     });
-    const data = (await res.json()) as { hasPermission: boolean; reason: string | null };
-    expect(data.hasPermission).toBe(false);
-    expect(data.reason).toBe("no_grant");
-  });
-
-  it("缺必填字段 → 400", async () => {
-    const res = await fetch(`${BASE}/wiki-proposal`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productionId: prodId }),
-    });
-    expect(res.status).toBe(400);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.hasPermission).toBe(false);
+    expect(r.reason).toBe("no_grant");
   });
 });
 

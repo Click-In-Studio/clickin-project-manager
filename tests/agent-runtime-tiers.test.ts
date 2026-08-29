@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { tieredToolNames } from "@/lib/agent-runtime/tool-tiers";
 import { TOOL_MCP_NAMES, buildTools } from "@/lib/agent-runtime/tools";
-import { TOOL_CATALOG } from "@/lib/mcp/tool-catalog";
+import { TOOL_CATALOG } from "@/lib/agent-tools/tool-catalog";
 
 // #333 三层在 #367 里的实现：每轮工具列表 = 热 ∪ 温(页面) ∪ 召回 ∪ 闭包。
 

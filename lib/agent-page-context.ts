@@ -7,7 +7,7 @@
 // PAGE_LABELS 是 **allowlist**：不在表里的路由不附带页面信息（宁可不带，也不
 // 把原始 URL 片段送进模型——路径段是自由文本，走 allowlist 就无需净化）。
 //
-// 维护约定：每当某个页面对应的 MCP 工具上线（lib/mcp/server.ts），就回来给
+// 维护约定：每当某个页面对应的工具上线（lib/agent-runtime/tools.ts），就回来给
 // PAGE_SUGGESTIONS 加一行——建议必须诚实（背后真有工具能兑现），没有工具
 // 支撑的页面只留 label 不留建议。
 

@@ -4,8 +4,8 @@ import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { createWiki, addWikiSharePerson, listWikiDeptShares, getWiki } from "@/lib/wiki-db";
 import { createProductionDept, setDeptMembers } from "@/lib/dept-db";
 import { canViewWiki } from "@/lib/wiki-perm";
-import { resolveProductionActor, DENIED_NOT_MEMBER } from "@/lib/mcp/production-tools";
-import { wikiSetGrant, sharePermissionKey } from "@/lib/mcp/wiki-tools";
+import { resolveProductionActor, DENIED_NOT_MEMBER } from "@/lib/agent-tools/production-tools";
+import { wikiSetGrant, sharePermissionKey } from "@/lib/agent-tools/wiki-tools";
 
 // 分享面写工具的核心保证：门是 grants@edit（能改正文 ≠ 能改谁看得见），
 // 且改完之后可见性是真的变了（AI 视角 = 人类视角，判定走同一份 canViewWiki）。

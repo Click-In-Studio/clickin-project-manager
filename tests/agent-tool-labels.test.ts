@@ -1,22 +1,13 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { TOOL_LABELS, toolLabel } from "@/lib/agent-tool-labels";
+import { TOOL_MCP_NAMES } from "@/lib/agent-runtime/tools";
 import { boundPayload } from "@/lib/agent-runtime/stream-lines";
 
-// 翻译表防漂移：对照 lib/mcp/server.ts 的注册清单——新增工具没配中文
-// 显示名、或表里留着已退役工具的残条，这里会红。静态扫源码而非 import
-// server（注册函数有 DB 依赖，单测环境起不动完整 MCP server）。
+// 翻译表防漂移：对照运行时注册表（lib/agent-runtime/tools.ts）——新增工具没配中文
+// 显示名、或表里留着已退役工具的残条，这里会红。
 
 function registeredToolNames(): string[] {
-  const src = readFileSync(join(__dirname, "..", "lib", "mcp", "server.ts"), "utf8");
-  const names = new Set<string>();
-  // 直接注册：s.registerTool("production.wiki_tree", …
-  for (const m of src.matchAll(/registerTool\(\s*"([^"]+)"/g)) names.add(m[1]);
-  // 循环注册的清单项：{ name: "my.call_times", …（限定已知命名空间，避免
-  // 误捞 inputSchema 等处的无关 name 字段）
-  for (const m of src.matchAll(/name:\s*"((?:my|production|approvals|users)\.[a-z_]+)"/g)) names.add(m[1]);
-  return [...names];
+  return [...TOOL_MCP_NAMES];
 }
 
 describe("agent tool labels", () => {

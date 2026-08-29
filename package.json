@@ -17,7 +17,6 @@
     "build:runner": "esbuild agent-runner/index.ts --bundle --platform=node --format=cjs --target=node22 --external:pg --external:@opentelemetry/api --define:import.meta.url=__importMetaUrl --banner:js=\"const __importMetaUrl = require('node:url').pathToFileURL(__filename).href;\" --outfile=.next/standalone/agent-runner.js --log-level=warning"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
     "@openclaw/ai": "2026.7.1-2",
     "@tailwindcss/typography": "^0.5.19",
     "@tiptap/core": "3.30.3",

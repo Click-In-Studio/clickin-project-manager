@@ -2,16 +2,16 @@
 // GET /inject-context，拿到组装好的 markdown 直接注入——预算、分段、缓存
 // 全部在这里，插件是纯传输层。
 
-import { buildUserContextMarkdown } from "@/lib/mcp/user-context";
-import { buildProductionContextMarkdown } from "@/lib/mcp/production-context";
-import { parseSessionIdentity } from "@/lib/mcp/session-identity";
+import { buildUserContextMarkdown } from "@/lib/agent-tools/user-context";
+import { buildProductionContextMarkdown } from "@/lib/agent-tools/production-context";
+import { parseSessionIdentity } from "@/lib/agent-tools/session-identity";
 import { buildInstructionsBlock } from "@/lib/agent-instructions";
 import { neutralizeInjectionTags } from "@/lib/agent-injection-safety";
 import { readMemory, readRecentRuns } from "./store";
 import { stripAnnotations } from "./index-db";
 import { triggerRecall } from "./trigger";
-import { toolRecall, DIALECT_CLOSURE_TOOLS } from "@/lib/mcp/tool-catalog";
-import { WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "@/lib/mcp/wiki-link-syntax";
+import { toolRecall, DIALECT_CLOSURE_TOOLS } from "@/lib/agent-tools/tool-catalog";
+import { WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "@/lib/agent-tools/wiki-link-syntax";
 import { pageLabelFor } from "@/lib/agent-page-context";
 
 // 界面上下文的常驻规则（静态 → 不影响 prompt caching）。载荷本身随每条用户

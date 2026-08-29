@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 import { getPool } from "@/lib/pg";
 import { embedDocuments, embedQuery, embeddingMode, embeddingModel } from "@/lib/agent-memory/embedding";
-import { TOOL_CATALOG, TOOL_FAMILIES, TOOL_RECALL_THRESHOLD, type ToolCatalogEntry } from "@/lib/mcp/tool-catalog";
+import { TOOL_CATALOG, TOOL_FAMILIES, TOOL_RECALL_THRESHOLD, type ToolCatalogEntry } from "@/lib/agent-tools/tool-catalog";
 import { bigramTokens } from "@/lib/agent-memory/trigger-lexical";
 
 /** 向量车道阈值。text-embedding-v4 实测（2026-08-29 本机探针）：真命中 0.65–0.82，
