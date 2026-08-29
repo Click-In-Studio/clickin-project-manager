@@ -33,17 +33,22 @@ jobs:
           SKIP_ENV_VALIDATION: '1'
 
       # agent-runner（#367）不是 next 的一部分：esbuild 把 agent-runner/index.ts + lib/ +
-      # vendor/ 连同大部分 npm 依赖打成单文件放进 standalone 目录，随 bundle 一起发。
-      # 只有 pg 与 @openclaw/ai 留 external（后者会拖进一串 provider SDK 的可选依赖，
-      # 打不进去），这两个 next 的 standalone 追踪一定带上——下面逐个核对，缺了直接失败。
+      # vendor/ + 全部 npm 依赖（含 @openclaw/ai）打成单文件放进 standalone 目录，随 bundle
+      # 一起发。只有 pg 留 external（next 的 standalone 追踪会带上完整的 pg）；
+      # @opentelemetry/api / bufferutil / utf-8-validate 是 provider SDK / ws 的可选依赖，
+      # 不装也能跑（本机在只有 pg 的隔离目录里验证过）。
+      # 教训（PR #371 首发）：不能只看 node_modules/<pkg> 目录存在——standalone 只拷 next
+      # 自己用到的文件，@openclaw/ai 的 package.json / 子路径都没有，runner 起不来。
       - name: Bundle agent-runner
         run: |
           npm run build:runner
-          node -e "require.resolve('/'.concat(process.cwd(),'/.next/standalone/agent-runner.js'))"
-          # 追踪出来的 node_modules 必须包含 runner 的每个外部依赖，缺一个线上起不来
+          test -f .next/standalone/node_modules/pg/package.json || { echo "::error::pg not traced into standalone"; exit 1; }
+          OPTIONAL="@opentelemetry/api bufferutil utf-8-validate"
           MISSING=""
           for p in $(grep -o 'require("[^"./][^"]*")' .next/standalone/agent-runner.js | sed -E 's/require\("([^"]+)"\)/\1/' | grep -v '^node:' | sed -E 's#^(@[^/]+/[^/]+|[^/]+).*#\1#' | sort -u); do
-            [ -e ".next/standalone/node_modules/$p" ] || MISSING="$MISSING $p"
+            node -e "require('node:module').builtinModules.includes('$p') ? process.exit(0) : process.exit(1)" && continue
+            case " $OPTIONAL " in *" $p "*) continue;; esac
+            [ -f ".next/standalone/node_modules/$p/package.json" ] || MISSING="$MISSING $p"
           done
           if [ -n "$MISSING" ]; then echo "::error::agent-runner deps missing from standalone node_modules:$MISSING"; exit 1; fi
 
@@ -56,6 +61,11 @@ jobs:
           mkdir -p .next/standalone/.next/static .next/standalone/public
           cp -r .next/static/. .next/standalone/.next/static/
           cp -r public/.       .next/standalone/public/
+          # agent-runner 的 base prompt 从 <cwd>/openclaw-workspace 读（lib/agent-runtime/prompt.ts 的
+          # WORKSPACE_FILES），不在 next 追踪范围内，只带这五个文件（README/HEARTBEAT 不进 bundle）；
+          # pm2 里 agent-runner 的 cwd 指向 current/
+          mkdir -p .next/standalone/openclaw-workspace
+          cp openclaw-workspace/{AGENTS,SOUL,IDENTITY,USER,TOOLS}.md .next/standalone/openclaw-workspace/
           tar -czf /tmp/deploy_bundle.tar.gz -C .next/standalone .
 
       # ── 5. Setup SSH ─────────────────────────────────────────────────────────

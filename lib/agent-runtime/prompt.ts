@@ -10,31 +10,48 @@ import fs from "node:fs";
 import path from "node:path";
 import type { InjectContextPayload } from "@/lib/agent-memory/inject";
 
-const WORKSPACE_DIR = path.join(process.cwd(), "openclaw-workspace");
+/** 六件套所在目录：默认 <cwd>/openclaw-workspace；AGENT_WORKSPACE_DIR 可覆盖（部署换目录 / 测试指向临时目录） */
+function workspaceDir(): string {
+  return process.env.AGENT_WORKSPACE_DIR || path.join(process.cwd(), "openclaw-workspace");
+}
 // HEARTBEAT.md 刻意不读：心跳机制随网关退役
-const WORKSPACE_FILES = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "TOOLS.md"] as const;
+export const WORKSPACE_FILES = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "TOOLS.md"] as const;
 
-let cached: { text: string; mtimeSum: number } | null = null;
+let cached: { dir: string; text: string; mtimeSum: number } | null = null;
+
+const warnedMissing = new Set<string>();
 
 /** 六件套拼接（按 mtime 变化失效缓存——开发期改文件不用重启）。 */
 export function workspacePrompt(): string {
+  const dir = workspaceDir();
   let mtimeSum = 0;
   const parts: string[] = [];
   for (const name of WORKSPACE_FILES) {
-    const file = path.join(WORKSPACE_DIR, name);
+    const file = path.join(dir, name);
     try {
       const stat = fs.statSync(file);
       mtimeSum += stat.mtimeMs;
-      if (cached && cached.mtimeSum === mtimeSum && name === WORKSPACE_FILES[WORKSPACE_FILES.length - 1]) break;
+      if (cached && cached.dir === dir && cached.mtimeSum === mtimeSum && name === WORKSPACE_FILES[WORKSPACE_FILES.length - 1]) break;
       parts.push(fs.readFileSync(file, "utf8").trim());
     } catch {
-      // 文件缺席不致命：AGENTS.md 缺了只是少一段规范，运行时不该因此拒绝服务
+      // 文件缺席不致命：AGENTS.md 缺了只是少一段规范，运行时不该因此拒绝服务——
+      // 但要喊一声（每个文件一次，不刷屏）：六件套整体缺席 = 部署没带上 openclaw-workspace/（PR #371 首发踩过）
+      if (!warnedMissing.has(file)) {
+        warnedMissing.add(file);
+        console.error(`[agent-runtime] workspace prompt file missing: ${file}（base prompt 会少这一段）`);
+      }
     }
   }
-  if (cached && cached.mtimeSum === mtimeSum) return cached.text;
+  if (cached && cached.dir === dir && cached.mtimeSum === mtimeSum) return cached.text;
   const text = parts.join("\n\n");
-  cached = { text, mtimeSum };
+  cached = { dir, text, mtimeSum };
   return text;
+}
+
+/** 测试用：清掉缓存与"已警告"集合 */
+export function resetWorkspacePromptForTests(): void {
+  cached = null;
+  warnedMissing.clear();
 }
 
 /** 与插件 before_prompt_build 逐字同款的三段包裹（指令 / 知识 / 记忆）。 */
