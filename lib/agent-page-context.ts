@@ -136,6 +136,14 @@ export function pageLabelFor(pageKey: string | null): string | null {
   return pageKey ? PAGE_LABELS[pageKey] ?? null : null;
 }
 
+/** 中文页面名 → pageKey（信封只带页面名；自建运行时按 pageKey 记 agent_run.page_key
+ *  并做温层工具面）。页面名在 allowlist 里唯一，反查无歧义；不在表里 → null。 */
+export function pageKeyForLabel(label: string | null | undefined): string | null {
+  if (!label) return null;
+  for (const [key, value] of Object.entries(PAGE_LABELS)) if (value === label) return key;
+  return null;
+}
+
 export function pageSuggestionsFor(pageKey: string | null): PageSuggestion[] {
   return pageKey ? PAGE_SUGGESTIONS[pageKey] ?? [] : [];
 }

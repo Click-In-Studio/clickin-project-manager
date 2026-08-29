@@ -4,6 +4,8 @@ import { requireProductionFeature } from "@/lib/plan";
 import { createChatStreamResponse } from "@/lib/agent-gateway/relay";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
 import { neutralizeInboundMessage } from "@/lib/agent-ui-context";
+import { shouldUseRunner, createRunnerStreamResponse, pageKeyOfMessage } from "@/lib/agent-runtime/dispatch";
+import { startRun, steerRun } from "@/lib/agent-runtime/client";
 
 export const runtime = "nodejs";
 
@@ -11,6 +13,9 @@ export const runtime = "nodejs";
 // plain fetch + ReadableStream rather than EventSource, since EventSource
 // can't send a POST body. Each line is one
 // { type: "delta" | "final" | "tool" | "tool-end" | "aborted" | "error", ... } event.
+//
+// 分流（#367）：会话走网关还是自建运行时由 shouldUseRunner 决定；两条路径的
+// 请求/响应契约完全一致，前端不感知。
 export async function POST(req: NextRequest) {
   const auth = requireUser(req.cookies);
   if (auth instanceof NextResponse) return auth;
@@ -44,6 +49,21 @@ export async function POST(req: NextRequest) {
   if (prodId) {
     const planDeny = await requireProductionFeature(prodId, "ai");
     if (planDeny) return planDeny;
+  }
+
+  if (await shouldUseRunner(sessionKey)) {
+    if (steer === true) {
+      try {
+        const steered = await steerRun(sessionKey, message);
+        if (!steered) return NextResponse.json({ error: "本轮回复已结束，请重新发送" }, { status: 409 });
+        return NextResponse.json({ ok: true, runId: steered.runId });
+      } catch (err) {
+        return toErrorResponse(err);
+      }
+    }
+    return createRunnerStreamResponse(req, sessionKey, {
+      startRun: () => startRun({ sessionId: sessionKey, userId: auth.userId, message, pageKey: pageKeyOfMessage(message) }),
+    });
   }
 
   // steer: the session already has a run in flight and this message should
@@ -81,6 +101,10 @@ export async function GET(req: NextRequest) {
   }
   const denied = requireOwnership(sessionKey, auth.userId);
   if (denied) return denied;
+
+  if (await shouldUseRunner(sessionKey)) {
+    return createRunnerStreamResponse(req, sessionKey);
+  }
 
   // Shorter quiet window than a fresh send: attach 上来 20s 没动静，多半是
   // run 在 attach 落地前就已结束——尽快触发一次权威状态查询：确实结束就走

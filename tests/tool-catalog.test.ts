@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TOOL_CATALOG, toolRecall, TOOL_RECALL_MAX, DIALECT_CLOSURE_TOOLS } from "@/lib/mcp/tool-catalog";
+import { TOOL_CATALOG, TOOL_FAMILIES, toolRecall, TOOL_RECALL_MAX, DIALECT_CLOSURE_TOOLS } from "@/lib/mcp/tool-catalog";
 import { buildMcpServer } from "@/lib/mcp/server";
 
 // #333 P2 工具目录：中文发现面（CJK bigram 召回）+ 与 MCP 注册清单双向防漂移。
@@ -62,5 +62,16 @@ describe("toolRecall：中文词法召回", () => {
   it("空触发词条目（dialect_ref）永不参与召回", () => {
     const hits = toolRecall("文档的 markdown 方言语法说明", { hasProduction: true });
     expect(hits.map((h) => h.name)).not.toContain("production.wiki_dialect_ref");
+  });
+});
+
+describe("工具族", () => {
+  it("每个工具的 family 都在 TOOL_FAMILIES 里；每个族至少有一个工具", () => {
+    const used = new Set<string>();
+    for (const e of TOOL_CATALOG) {
+      expect(TOOL_FAMILIES[e.family], `${e.name} → ${e.family}`).toBeDefined();
+      used.add(e.family);
+    }
+    for (const f of Object.keys(TOOL_FAMILIES)) expect(used.has(f), f).toBe(true);
   });
 });
