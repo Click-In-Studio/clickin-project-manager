@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useAgentMutation } from "@/lib/agent-mutations";
 import { BASE_PATH } from "@/lib/base-path";
 import TreePickerModal from "@/components/TreePickerModal";
 import AdminModal from "@/components/AdminModal";
@@ -63,6 +64,13 @@ export default function WikiShell({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  // AI 在本制作写了文档（建/改/删/移动/标签/授权）→ 树是 server 端算好的 props，软刷新
+  // 是这里最小的刷新粒度；连写几篇合并成一次。正文的同步不走这里（协作 SSE）。
+  const agentRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useAgentMutation({ scope: "wiki", productionId }, () => {
+    if (agentRefreshTimer.current) return;
+    agentRefreshTimer.current = setTimeout(() => { agentRefreshTimer.current = null; router.refresh(); }, 300);
+  });
   const routeBase = navigationBasePath ?? `/production/${productionId}/wiki`;
   const [query, setQuery] = useState("");
   // 合并两种节点，按同一把尺排序（服务端 sort_key 就是在并集上取的，见 wiki-db.siblingRows）

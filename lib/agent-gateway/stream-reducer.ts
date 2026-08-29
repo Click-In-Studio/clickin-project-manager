@@ -55,7 +55,10 @@ export type StreamLine =
   | { type: "question"; question?: QuestionInfo }
   | { type: "question-resolved"; id?: string; status?: string }
   | { type: "ping" }
-  | { type: "session"; key?: string };
+  | { type: "session"; key?: string }
+  // 写工具成功后的变更信号（自建运行时 #367）：不进气泡，AgentPopout 派发给页面订阅者
+  // 决定怎么刷（lib/agent-mutations.ts）。与 tool-end 一样落 agent_event，断线重连可补。
+  | { type: "mutation"; scope: string; action: "created" | "updated" | "deleted"; productionId?: string | null; ids?: string[]; tool?: string };
 
 function lastAssistantText(bubbles: Bubble[]): string | undefined {
   for (let i = bubbles.length - 1; i >= 0; i--) {
