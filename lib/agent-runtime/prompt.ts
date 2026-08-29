@@ -77,7 +77,8 @@ export function injectedSystemContext(payload: Pick<InjectContextPayload, "instr
 // 在网关会话仍成立；这里只对本运行时追加更正）。
 const RUNTIME_ADDENDUM =
   "## 本运行时补充\n" +
-  "- 本环境**有** `clickin__ask_user` 工具：确实缺信息且答案会改变做法时，用它向用户提问并等待回答（会弹卡片）；能查工具确定的事不要问。TOOLS.md 里「没有主动提问的工具」一句在本环境不适用。";
+  "- 本环境**有** `clickin__ask_user` 工具：确实缺信息且答案会改变做法时，用它向用户提问并等待回答（会弹卡片）；能查工具确定的事不要问。TOOLS.md 里「没有主动提问的工具」一句在本环境不适用。\n" +
+  "- 联网：`clickin__web-search`（搜索）与 `clickin__web-fetch`（抓网页正文）。外部资讯、不确定的事实、用户给的链接用它们；制作内部的数据仍以 clickin 工具为准。";
 
 export function buildSystemPrompt(payload: Pick<InjectContextPayload, "instructions" | "knowledge" | "memory">): string {
   const injected = injectedSystemContext(payload);
