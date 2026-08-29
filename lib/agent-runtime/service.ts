@@ -32,6 +32,7 @@ import { createStreamLineAdapter } from "./stream-lines";
 import { buildTools, bareName, exposedName, type RuntimeToolDef } from "./tools";
 import { tieredToolNames } from "./tool-tiers";
 import { recallFamilies } from "./tool-index";
+import { recentlyUsedToolNames } from "./used-tools";
 import { approvalCard } from "./cards";
 import { createApproval, awaitApproval, markApprovalExecuted, approvalAllowsReexecute } from "./approvals";
 import { buildSystemPrompt, recallBlock } from "./prompt";
@@ -168,7 +169,10 @@ async function execute(input: ExecuteInput): Promise<void> {
     // 恢复模式没有本轮 prompt，用 transcript 最后一条用户消息做召回输入。
     const transcript = await session.buildContext().then((c) => c.messages);
     const recallPrompt = input.message ?? lastUserText(transcript);
-    const used = usedToolMcpNames(transcript, toolByName);
+    // 留存最近几轮用过的工具（有淘汰窗口，见 used-tools.ts）；不认识的名字丢掉
+    const used = recentlyUsedToolNames(transcript)
+      .map((n) => toolByName.get(n)?.mcpName)
+      .filter((n): n is string => !!n);
     const families = recallPrompt
       ? await recallFamilies(stripUiContext(recallPrompt), { hasProduction: !!productionId, userId })
       : [];
@@ -333,20 +337,6 @@ async function execute(input: ExecuteInput): Promise<void> {
     // （waitForIdle / sessionRunState / 下一条消息的 SessionBusy 判定都以此为准）
     active.delete(sessionId);
   }
-}
-
-/** transcript 里出现过的 toolCall → 注册表 mcpName（不在注册表的忽略） */
-function usedToolMcpNames(messages: AgentMessage[], toolByName: Map<string, RuntimeToolDef>): string[] {
-  const out = new Set<string>();
-  for (const m of messages) {
-    if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
-    for (const block of m.content) {
-      if (block.type !== "toolCall") continue;
-      const tool = toolByName.get(block.name);
-      if (tool) out.add(tool.mcpName);
-    }
-  }
-  return [...out];
 }
 
 function lastUserText(messages: AgentMessage[]): string | null {

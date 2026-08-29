@@ -63,7 +63,7 @@ export interface TierInput {
   pageKey: string | null;
   /** 冷层召回结果（tool-index：词法+向量，族粒度——整族的名字）。缺席时退回纯词法 toolRecall(prompt) */
   recalled?: string[];
-  /** 本会话早前轮次已调用过的工具（transcript 里的 toolCall）：话题有连续性，用过的
+  /** 本会话最近几轮调用过的工具（used-tools.ts 有淘汰窗口）：话题有连续性，用过的
    *  就留在面上，不让模型下一轮问"刚才那个工具呢" */
   used?: string[];
   prompt: string | null;

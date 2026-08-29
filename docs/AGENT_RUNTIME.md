@@ -34,7 +34,7 @@
 
 ### 冷层：召回 + `find_tools` 兜底
 
-工具面 = 热层（按会话类型）∪ 温层（按页面）∪ 冷层召回 ∪ 本会话已用过的工具。**召回的粒度是族**（`tool-catalog.ts` 的 `family`/`TOOL_FAMILIES`）：
+工具面 = 热层（按会话类型）∪ 温层（按页面）∪ 冷层召回 ∪ 本会话最近用过的工具（`used-tools.ts`：只看最近 3 个用户轮次、最多 6 个、最近优先——窗口外自然淘汰，避免一个 session 里东问西问把面越滚越大）。**召回的粒度是族**（`tool-catalog.ts` 的 `family`/`TOOL_FAMILIES`）：
 族内任一工具过阈值 → 整族入面（每轮 ≤2 族），由模型在族内挑动作；族太大再拆 sub。冷层索引在 `lib/agent-runtime/tool-index.ts`：
 每个工具的 `oneliner + examples`（`lib/mcp/tool-catalog.ts`）逐条嵌入，复用记忆检索的 embedding 供应商
 （`EMBEDDING_PROVIDER`/`EMBEDDING_API_KEY`，向量缓存在 `agent_memory_embedding_cache`），未配置时退回纯词法。
