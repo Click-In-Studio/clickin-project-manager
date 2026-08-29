@@ -87,7 +87,7 @@ CI 已覆盖的内容（人工无需重复）：
 
 > **用户在飞书里的操作（发消息、触发通知）有可预期的响应，失败时有明确的反馈而不是静默。**
 
-**触发时机**：PR 改动了 `agent/`、`lib/feishu-bot.ts`、`lib/notify.ts`，或 `/api/feishu-webhook`。
+**触发时机**：PR 改动了 `lib/platform/feishu/`、`lib/notify.ts`（飞书群 bot 与 `/api/feishu-webhook` 已随老运行时退役，不再适用）。
 
 ---
 

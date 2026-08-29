@@ -51,10 +51,7 @@ sudo -u postgres psql -f /var/www/production-manager/db/setup-agent-db.sql
    - `contact:user.id:readonly`（获取 open_id）
    - `im:message:send_as_bot`（Bot 主动推送消息）
    - `im:message`（接收群消息，供 Bot 使用）
-4. **事件与回调 → 事件订阅**：
-   - 请求 URL 填：`https://app.<your-domain>/api/feishu-webhook`
-   - 添加事件：`im.message.receive_v1`
-   - 记录 **Verification Token** 和 **Encrypt Key**
+4. **事件与回调**：群消息 bot 已退役（2026-08），不需要再配置事件订阅；`/api/feishu-webhook` 已删除。
 5. 创建新版本并发布，在企业内对全员开放
 
 ### 4. Cloudflare R2 配置
@@ -100,11 +97,6 @@ PGHOST=localhost
 PGDATABASE=script_editor
 PGUSER=script_editor
 PGPASSWORD=xxxxxxxx
-
-AGENT_PGHOST=localhost
-AGENT_PGDATABASE=click_in_agent
-AGENT_PGUSER=agent_user
-AGENT_PGPASSWORD=xxxxxxxx
 
 R2_ACCOUNT_ID=xxxxxxxx
 R2_ACCESS_KEY_ID=xxxxxxxx

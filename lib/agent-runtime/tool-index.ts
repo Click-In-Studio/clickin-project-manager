@@ -3,7 +3,7 @@
 // 两条车道取 max（与 lib/agent-memory/trigger.ts 同款判据）：
 //   词法  = 触发短语的 CJK bigram 命中占比（tool-catalog.triggers）
 //   向量  = 用户消息 ↔ 例句/一句话 的余弦（tool-catalog.examples），每条例句独立嵌入取 max
-// 向量车道复用记忆检索的 embedding 供应商（agent/embedding.ts）；文档侧向量启动后
+// 向量车道复用记忆检索的 embedding 供应商（lib/agent-memory/embedding.ts）；文档侧向量启动后
 // 按 (model, content_hash) 缓存进 agent_memory_embedding_cache，进程内再缓存一份。
 // 供应商未配置/挂了 → 只剩词法（fail-open 到弱一路，不断轮次）。
 //
@@ -11,7 +11,7 @@
 
 import { createHash } from "node:crypto";
 import { getPool } from "@/lib/pg";
-import { embedDocuments, embedQuery, embeddingMode, embeddingModel } from "@/agent/embedding";
+import { embedDocuments, embedQuery, embeddingMode, embeddingModel } from "@/lib/agent-memory/embedding";
 import { TOOL_CATALOG, TOOL_FAMILIES, TOOL_RECALL_THRESHOLD, type ToolCatalogEntry } from "@/lib/mcp/tool-catalog";
 import { bigramTokens } from "@/lib/agent-memory/trigger-lexical";
 

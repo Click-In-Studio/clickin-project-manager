@@ -18,7 +18,7 @@ import {
   embeddingMode,
   embeddingModel,
   type EmbedResult,
-} from "@/agent/embedding";
+} from "@/lib/agent-memory/embedding";
 import type { RunRecord } from "./store";
 
 // 分块参数。OpenClaw 是 400 token/80 重叠的滑窗；我们的 curated 语料是蒸馏

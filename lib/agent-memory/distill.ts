@@ -2,10 +2,10 @@
 // → LLM consolidation → 新 MEMORY.md。
 //
 // 触发：/api/internal/memory-distill（服务器 crontab 定时打，建议每日一次）。
-// LLM 走 agent/llm.ts（OpenAI-compatible，LLM_PROVIDER=deepseek/openai）。
+// LLM 走 lib/llm-chat.ts（OpenAI-compatible，LLM_PROVIDER=deepseek/openai；原 agent/llm.ts 搬家）。
 // 团队记忆（Phase B）将作为本管线的第二个输出目标扩展（内容级安全 gate）。
 
-import { chat, LlmBudgetError } from "@/agent/llm";
+import { chat, LlmBudgetError } from "@/lib/llm-chat";
 import { commitDistill, listUserIds, readMemory, readRunsSinceLastDistill, writeMemory, type RunRecord } from "./store";
 
 const CURRENT_MEMORY_MAX_CHARS = 8_000;

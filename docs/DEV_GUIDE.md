@@ -47,11 +47,8 @@
 │   ├── notify.ts           # 通知触发逻辑
 │   └── ...                 # 其他工具
 │
-├── agent/                  # 飞书群机器人（独立隔离，见第 9 节）
-│   ├── index.ts            # 入口：processMessage(ctx)
-│   ├── db.ts               # Agent 专用数据库查询
-│   ├── types.ts            # BotContext 和共享类型
-│   └── llm.ts              # LLM 接口（OpenAI-compatible）
+├── agent-runner/           # AI 运行时独立进程入口（lib/agent-runtime/ 是主体，见第 9 节与 docs/AGENT_RUNTIME.md）
+├── vendor/openclaw/        # vendor 的 agent-core / llm-core（本地补丁登记在 VENDOR.md）
 │
 ├── db/                     # SQL 迁移文件（schema.sql + migrate-*.sql）
 │
@@ -113,11 +110,7 @@ R2_ACCESS_KEY_ID=xxxxxxxx
 R2_SECRET_ACCESS_KEY=xxxxxxxx
 R2_BUCKET=click-in-test                 # 本地建议用独立测试 bucket
 
-# ── 群机器人 / 定时通知（启用 Bot 功能时必填；无默认值，需显式填写）────────
-# AGENT_PGHOST=localhost
-# AGENT_PGDATABASE=click_in_agent
-# AGENT_PGUSER=your-os-username         # macOS peer auth：填入 OS 用户名，不需要 AGENT_PGPASSWORD
-
+# ── LLM（记忆蒸馏 lib/llm-chat.ts；站内 AI 对话见 docs/AGENT_RUNTIME.md）──────
 LLM_PROVIDER=openai                     # openai（默认）或 deepseek
 OPENAI_API_KEY=sk-xxxxxxxx
 # OPENAI_MODEL=gpt-4o-mini             # 可选，默认 gpt-4o-mini
@@ -416,20 +409,15 @@ Session 存为 HMAC 签名的 Cookie，不需要服务端 session store。内容
 
 ### Bot（飞书群消息）
 
-飞书群消息经 webhook 进入 `/api/feishu-webhook`，由 `agent/index.ts` 的 `processMessage()` 处理。
+已退役（2026-08，随 #367 自建运行时上线）：`agent/` 老运行时与 `/api/feishu-webhook` 已删除，飞书群 bot 不再响应消息。
+飞书侧仍在用的只有 OAuth 登录与通知推送（`lib/platform/feishu/`）。
 
 ---
 
-## 9. Agent Bot
+## 9. AI Agent
 
-Agent 与主业务**完全隔离**，有严格限制：
-
-- `agent/` 只能从 `lib/roles.ts`（ROLE_GROUPS 角色分组数据）引入外部代码，其他 `lib/*` 全部禁止。
-- 数据库访问只能通过 `agent/db.ts`，连接 `click_in_agent` 库（独立配置）。
-- 不得使用 Next.js API（`cookies()`、`NextRequest` 等）。
-- 唯一允许调用 `agent/` 的文件是 `app/api/feishu-webhook/route.ts`。
-
-如需 Agent 读取主业务数据，在 `agent/db.ts` 里单独写查询，连接主库（`PG*` 变量）即可，但保持函数级隔离。
+站内 AI 对话由自建运行时承担（`lib/agent-runtime/` + 独立进程 `agent-runner/`），设计与运维见 `docs/AGENT_RUNTIME.md`。
+老运行时保留下来的两个通用模块：`lib/llm-chat.ts`（OpenAI-compatible 对话调用，记忆蒸馏在用）与 `lib/agent-memory/embedding.ts`（向量嵌入，记忆检索与工具索引在用）。
 
 ---
 
