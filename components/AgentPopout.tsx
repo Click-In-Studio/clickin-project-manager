@@ -10,7 +10,7 @@ import {
   type QuestionInfo,
   type QuestionItem,
   type StreamLine,
-} from "@/lib/agent-gateway/stream-reducer";
+} from "@/lib/agent-chat/stream-reducer";
 import { parseSessionIdentity } from "@/lib/mcp/session-identity";
 import { buildUiContextMessage } from "@/lib/agent-ui-context";
 import { derivePageKey, pageLabelFor, pageSuggestionsFor } from "@/lib/agent-page-context";

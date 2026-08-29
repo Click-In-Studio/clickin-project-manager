@@ -3,9 +3,8 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/agent/chat/stream/route";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 
-// Guard + contract tests for the chat stream endpoint. A real streamed happy
-// path needs a live gateway (Phase 4 live checklist); what IS unit-testable
-// is every rejection path and the steer contract: steer:true must answer
+// Guard + contract tests for the chat stream endpoint. 真流式的 happy path 在
+// tests/agent-runtime-routes.test.ts；这里只测每条拒绝路径与 steer 契约: steer:true must answer
 // with plain JSON — never a stream — even on failure. (Returning an unread
 // stream per steer exhausted the browser connection pool in production.)
 
@@ -59,9 +58,8 @@ describe("POST /api/agent/chat/stream", () => {
   });
 
   it("steer:true answers with JSON, never a stream", async () => {
-    // Gateway is unconfigured in unit tests, so the steer attempt fails —
-    // but the failure must still arrive as a JSON error response (the old
-    // code answered even failed steers with a stream nobody reads).
+    // 该会话没有进行中的 run，steer 必然失败（409）——失败也必须是 JSON 错误响应
+    // （老代码对失败的 steer 也回一条没人读的流）。
     const res = await POST(makeReq({ sessionKey: OWN_KEY, message: "hi", steer: true }));
     expect(res.headers.get("content-type")).toContain("application/json");
     expect(res.status).toBeGreaterThanOrEqual(400);

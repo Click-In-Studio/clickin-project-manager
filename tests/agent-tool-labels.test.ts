@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { TOOL_LABELS, toolLabel } from "@/lib/agent-tool-labels";
-import { boundToolPayload } from "@/lib/agent-gateway/relay";
+import { boundPayload } from "@/lib/agent-runtime/stream-lines";
 
 // 翻译表防漂移：对照 lib/mcp/server.ts 的注册清单——新增工具没配中文
 // 显示名、或表里留着已退役工具的残条，这里会红。静态扫源码而非 import
@@ -48,17 +48,17 @@ describe("agent tool labels", () => {
   });
 });
 
-describe("boundToolPayload（relay 透传大小闸）", () => {
+describe("boundPayload（工具参数/结果透传大小闸）", () => {
   it("小 payload 原样透传，null/undefined 归一为 undefined", () => {
-    expect(boundToolPayload({ wikiId: "w1" })).toEqual({ wikiId: "w1" });
-    expect(boundToolPayload("文本")).toBe("文本");
-    expect(boundToolPayload(null)).toBeUndefined();
-    expect(boundToolPayload(undefined)).toBeUndefined();
+    expect(boundPayload({ wikiId: "w1" })).toEqual({ wikiId: "w1" });
+    expect(boundPayload("文本")).toBe("文本");
+    expect(boundPayload(null)).toBeUndefined();
+    expect(boundPayload(undefined)).toBeUndefined();
   });
 
   it("超限 payload 退化为截断预览包裹", () => {
     const big = { text: "长".repeat(20_000) };
-    const out = boundToolPayload(big) as { truncated: boolean; preview: string };
+    const out = boundPayload(big) as { truncated: boolean; preview: string };
     expect(out.truncated).toBe(true);
     expect(out.preview.length).toBeLessThanOrEqual(16_000);
   });
@@ -66,6 +66,6 @@ describe("boundToolPayload（relay 透传大小闸）", () => {
   it("不可序列化的 payload 丢弃而非抛错", () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
-    expect(boundToolPayload(cyclic)).toBeUndefined();
+    expect(boundPayload(cyclic)).toBeUndefined();
   });
 });

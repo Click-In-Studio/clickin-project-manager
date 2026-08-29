@@ -4,8 +4,8 @@ import type { AssistantMessage, StreamFn, ToolCall } from "../vendor/openclaw/pa
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser } from "@/lib/db";
-import { createNewSessionKey } from "@/lib/agent-gateway/client";
-import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-gateway/stream-reducer";
+import { createNewSessionKey } from "@/lib/mcp/session-identity";
+import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-chat/stream-reducer";
 import {
   startRun, steerRun, abortRun, getHistory, listSessions, resumeOrphans, waitForIdle, runtimeOverrides, sessionRunState, __internal,
 } from "@/lib/agent-runtime/service";

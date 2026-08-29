@@ -11,16 +11,13 @@
 | provider/流式 | `@openclaw/ai@2026.7.1-2`（npm 锁精确版本） | 与 vendor 同一上游版本 |
 | run 服务 | `lib/agent-runtime/service.ts` | 一轮 run 的骨架：注入链 → harness → 事件 → 收尾 |
 | 独立进程 | `agent-runner/index.ts` | loopback HTTP：`POST /runs` `/runs/steer` `/runs/abort`、`GET /health`；心跳、孤儿接管、SIGTERM 排水 |
-| next 侧 | `lib/agent-runtime/{client,dispatch}.ts` + `app/api/agent/*` 路由 | 按会话分流网关/自建；SSE 从 `agent_event` 直出 |
+| next 侧 | `lib/agent-runtime/{client,dispatch}.ts` + `app/api/agent/*` 路由 | 发起/插话/中止交给 runner；SSE 从 `agent_event` 直出；行协议在 `lib/agent-chat/` |
 | 持久化 | `db/add-agent-runtime.sql`（六表） | 会话/transcript/run/审批/提问/事件 |
 
 ## 环境变量
 
 | 变量 | 值 | 说明 |
 |---|---|---|
-| `AGENT_RUNTIME` | `gateway`（默认）/ `runner` / `canary` | 分流总开关。已存在于 `agent_session` 的会话永远走 runner（网关没有它的 transcript） |
-| `AGENT_RUNTIME_PRODUCTIONS` | 逗号分隔 production id，或 `*` | `canary` 时哪些制作走 runner（§4.5 按 production 灰度） |
-| `AGENT_RUNTIME_PERSONAL` | `1` | `canary` 时个人会话也走 runner |
 | `AGENT_RUNNER_URL` | `http://127.0.0.1:3102` | 设了 → next 把 run 交给独立进程；不设 → next 进程内跑（测试/灰度首期） |
 | `AGENT_RUNNER_PORT` | 默认 `3102` | runner 监听端口（loopback） |
 | `AGENT_CHAT_MODEL` / `AGENT_COMPACTION_MODEL` | 默认 `deepseek-v4-flash` / `deepseek-v4-pro` | 对话 / transcript 压缩摘要 |
@@ -48,11 +45,11 @@
 
 ```bash
 # 进程内模式（最简单）
-AGENT_RUNTIME=runner npm run dev
+npm run dev
 
 # 独立进程模式
 npx tsx agent-runner/index.ts                                  # 终端 1
-AGENT_RUNTIME=runner AGENT_RUNNER_URL=http://127.0.0.1:3102 npm run dev   # 终端 2
+AGENT_RUNNER_URL=http://127.0.0.1:3102 npm run dev             # 终端 2
 
 # 不开浏览器的冒烟：造用户/制作/cookie/sessionKey
 npx tsx scripts/agent-runtime-smoke-setup.ts     # 打印 export COOKIE=… KEY=…
@@ -69,15 +66,10 @@ CD（`.github/workflows/deploy.yml`）已经把 runner 纳入发布，**代码�
 2. DDL：`db/add-agent-runtime.sql` 由 CD 自动执行（记账 `shared/db-applied.txt`）。
 3. pm2 进程定义收在仓库 [`deploy/ecosystem.config.js`](../deploy/ecosystem.config.js)（`agent-runner` + `production-manager`），每次发布覆盖到 `shared/ecosystem.config.js` 再 `pm2 reload … --update-env`。**注意 reload 只更新 env，不更新 cwd/exec_mode 这类进程定义**——改了那些字段要在服务器上 `pm2 delete <app> && pm2 start ecosystem.config.js --only <app>` 一次；所以路径类配置一律走 env（如 `AGENT_WORKSPACE_DIR`）。runner 用 **cluster 模式单实例**：新进程 `ready` 后才向旧进程发 SIGTERM（fork 模式的 reload 等于 restart，排水期间没人接请求）；`kill_timeout` ≥ 排水上限。
 
-**唯一的人工动作：服务器 `shared/.env.local` 加两行**（合并前加好即可；CD reload 带 `--update-env`，发布时生效）：
-
-```
-AGENT_RUNTIME=runner
-AGENT_RUNNER_URL=http://127.0.0.1:3102
-```
+**唯一的人工动作：服务器 `shared/.env.local` 有 `AGENT_RUNNER_URL=http://127.0.0.1:3102`**（已配；CD reload 带 `--update-env`）。
 
 其余 runner 需要的 env（`DEEPSEEK_API_KEY`、`EMBEDDING_*`、`PG*`、`AGENT_MEMORY_PATH`）与 next 共用同一份 `.env.local`，线上已有。
-不做灰度（产品确认功能面本就小），直切；网关进程暂留，未列入 `agent_session` 的旧会话仍可读历史。
+OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，网关时代的会话历史不迁移（§10 决断）。
 
 **上线后核对**：`pm2 ls` 里 `agent-runner` online；`curl -s --noproxy '*' http://127.0.0.1:3102/health` 返回 `{"ok":true,…}`；发一条会调工具的消息看 SSE 帧序（下方冒烟清单）。
 
@@ -106,8 +98,8 @@ runner 是独立进程，**任何"进程内内存注册表"在它里面都是空
 
 ## 回滚
 
-- 单会话：无（会话在 `agent_session` 就归 runner）。
-- 全局：`AGENT_RUNTIME=gateway` + `pm2 reload production-manager --update-env`；新会话回网关，已有 runner 会话仍可读历史与继续对话（runner 进程需保留）。
+网关已退役，没有"回网关"这条路。runner 出问题：`pm2 logs agent-runner` 看原因，`pm2 restart agent-runner`；
+代码问题走 revert + CD。runner 完全不可用期间聊天会报错，但会话/审批/提问都在表里，恢复后按 §4.4 接管。
 
 ## 冒烟清单（每次上线 runner 变更）
 

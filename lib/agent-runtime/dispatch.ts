@@ -1,25 +1,15 @@
-// next 侧分流（#367 §4.5 灰度）：同一套路由、同一套前端，按会话决定走网关还是自建运行时。
-//
-// 规则：会话在 agent_session 里已存在 → 永远走 runner（灰度开关回拨也不把它扔回
-// 网关，网关没有它的 transcript）；否则按 runtimeFor(sessionKey)（gateway / runner /
-// canary 按 production）。
+// next 侧的聊天流（#367）。网关已退役（2026-08），所有会话都走自建运行时。
 //
 // SSE 端点从 agent_event 直出：帧格式 `data: <json>\n\n`、ping 15s、行协议与网关时代
 // 完全一致（stream-reducer 原样）。观看者只认 (session, seq) 游标，哪个进程在执行不可见。
 
 import type { NextRequest } from "next/server";
-import { runtimeFor } from "./config";
 import { SessionBusyError } from "./service";
-import { isRunnerSession, startRun } from "./client";
+import { startRun } from "./client";
 import { readEventsSince, subscribeSessionEvents } from "./events";
 import { pageKeyForLabel } from "@/lib/agent-page-context";
 import { getPool } from "@/lib/pg";
-import type { ApprovalInfo, StreamLine } from "@/lib/agent-gateway/stream-reducer";
-
-export async function shouldUseRunner(sessionKey: string): Promise<boolean> {
-  if (await isRunnerSession(sessionKey)) return true;
-  return runtimeFor(sessionKey) === "runner";
-}
+import type { ApprovalInfo, StreamLine } from "@/lib/agent-chat/stream-reducer";
 
 const UI_PAGE_RE = /^<clickin-ui-context>[\s\S]{0,600}?用户此刻位于「(.{1,40}?)」页面/;
 

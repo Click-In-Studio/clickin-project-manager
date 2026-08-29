@@ -10,7 +10,6 @@
 import { createApiRegistry, createLlmRuntime, type LlmRuntime } from "@openclaw/ai";
 import { registerBuiltInApiProviders } from "@openclaw/ai/providers";
 import type { Model } from "../../vendor/openclaw/packages/llm-core/src/types";
-import { productionIdOfSessionKey } from "@/lib/agent-gateway/client";
 
 const DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
 
@@ -47,20 +46,6 @@ export function llmRuntime(): LlmRuntime {
 }
 
 // ── 灰度开关（§4.5：按 production）───────────────────────────────────────────
-// AGENT_RUNTIME = gateway（默认，全走网关）| runner（全走自建）| canary
-// canary 时 AGENT_RUNTIME_PRODUCTIONS = 逗号分隔的 production id；个人会话（无
-// production）在 canary 下按 AGENT_RUNTIME_PERSONAL=1 决定。
-export type RuntimeKind = "gateway" | "runner";
-
-export function runtimeFor(sessionKey: string): RuntimeKind {
-  const mode = process.env.AGENT_RUNTIME ?? "gateway";
-  if (mode === "runner") return "runner";
-  if (mode !== "canary") return "gateway";
-  const productionId = productionIdOfSessionKey(sessionKey);
-  if (!productionId) return process.env.AGENT_RUNTIME_PERSONAL === "1" ? "runner" : "gateway";
-  const allow = (process.env.AGENT_RUNTIME_PRODUCTIONS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  return allow.includes("*") || allow.includes(productionId) ? "runner" : "gateway";
-}
 
 /** 执行者标识（agent_run.owner）：主机 + pid，重启后自然变化。 */
 export const RUNNER_OWNER = `${process.env.HOSTNAME ?? "local"}:${process.pid}`;

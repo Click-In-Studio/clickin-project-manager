@@ -1,16 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { getQuestionSessionKey, listSessionQuestions, resolveQuestion, sessionKeyOwnedBy } from "@/lib/agent-gateway/client";
-import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
-import { shouldUseRunner } from "@/lib/agent-runtime/dispatch";
-import {
-  listPendingQuestions, questionSession as runnerQuestionSession, resolveQuestion as resolveRunnerQuestion,
-} from "@/lib/agent-runtime/questions";
+import { sessionKeyOwnedBy } from "@/lib/mcp/session-identity";
+import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-chat/http";
+import { listPendingQuestions, questionSession, resolveQuestion } from "@/lib/agent-runtime/questions";
 
 export const runtime = "nodejs";
 
 // ask_user 问题卡片的恢复与回答面。GET 用于重开会话时恢复待答卡片——卡片看不见就
 // 等于 agent 在隐形卡死；POST 把回答/取消送回，解除 agent 阻塞的 run。
-// 分流（#367）：自建运行时的问题 id 以 aq_ 开头且在 agent_question 表里；其余走网关。
+// 问题 id 以 aq_ 开头、在 agent_question 表里（前缀契约有测试钉住）。
 
 export async function GET(req: NextRequest) {
   const auth = requireUser(req.cookies);
@@ -24,7 +21,7 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   try {
-    const questions = (await shouldUseRunner(sessionKey)) ? await listPendingQuestions(sessionKey) : await listSessionQuestions(sessionKey);
+    const questions = await listPendingQuestions(sessionKey);
     return NextResponse.json({ questions });
   } catch (err) {
     return toErrorResponse(err);
@@ -68,25 +65,12 @@ export async function POST(req: NextRequest) {
     // （已过期/已回答/伪造 id）和归属他人的会话**统一按 404 收**——403/404
     // 分叉会让调用方用状态码探测某个 question id 是否存在，与 http.ts
     // requireOwnership 的"不泄露存在性"约定相悖。
-    if (id.startsWith("aq_")) {
-      const sessionKey = await runnerQuestionSession(id);
-      if (!sessionKey || !sessionKeyOwnedBy(sessionKey, auth.userId)) {
-        return NextResponse.json({ error: "问题不存在或已过期" }, { status: 404 });
-      }
-      const ok = await resolveRunnerQuestion(id, isCancel ? { cancel: true } : { answers: normalized });
-      if (!ok) return NextResponse.json({ error: "问题不存在或已过期" }, { status: 404 });
-      return NextResponse.json({ ok: true });
-    }
-
-    const sessionKey = await getQuestionSessionKey(id);
+    const sessionKey = await questionSession(id);
     if (!sessionKey || !sessionKeyOwnedBy(sessionKey, auth.userId)) {
       return NextResponse.json({ error: "问题不存在或已过期" }, { status: 404 });
     }
-    if (isCancel) {
-      await resolveQuestion(id, { cancel: true });
-    } else {
-      await resolveQuestion(id, { answers: normalized });
-    }
+    const ok = await resolveQuestion(id, isCancel ? { cancel: true } : { answers: normalized });
+    if (!ok) return NextResponse.json({ error: "问题不存在或已过期" }, { status: 404 });
     return NextResponse.json({ ok: true });
   } catch (err) {
     return toErrorResponse(err);

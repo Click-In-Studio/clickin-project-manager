@@ -1,7 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { getPendingApprovalSession, resolveApproval, storeDenyReason } from "@/lib/agent-gateway/client";
-import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
-import { approvalSession as runnerApprovalSession, resolveApproval as resolveRunnerApproval } from "@/lib/agent-runtime/approvals";
+import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-chat/http";
+import { approvalSession, resolveApproval } from "@/lib/agent-runtime/approvals";
 
 export const runtime = "nodejs";
 
@@ -11,7 +10,7 @@ const DECISIONS = new Set(["allow-once", "allow-always", "deny"]);
 // popout is the only approval surface — dashboard is disabled — so this
 // endpoint is what actually unblocks gated writes.
 //
-// 分流（#367）：自建运行时的审批 id 以 ap_ 开头且在 agent_approval 表里；其余走网关。
+// 审批 id 以 ap_ 开头、在 agent_approval 表里（前缀契约有测试钉住）。
 export async function POST(req: NextRequest) {
   const auth = requireUser(req.cookies);
   if (auth instanceof NextResponse) return auth;
@@ -35,46 +34,16 @@ export async function POST(req: NextRequest) {
   }
   const trimmedReason = typeof reason === "string" && reason.trim() ? reason.trim() : undefined;
 
-  // ── 自建运行时 ──────────────────────────────────────────────────────────
-  if (id.startsWith("ap_")) {
-    const sessionKey = await runnerApprovalSession(id);
-    if (!sessionKey) return NextResponse.json({ error: "无权处理该确认请求" }, { status: 403 });
-    const denied = requireOwnership(sessionKey, auth.userId);
-    if (denied) return denied;
-    try {
-      // 理由与决议同一行落库；run 侧 awaitApproval 读到后把理由随工具结果回模型
-      const ok = await resolveRunnerApproval(id, decision as "allow-once" | "allow-always" | "deny", auth.userId, trimmedReason);
-      if (!ok) return NextResponse.json({ error: "无权处理该确认请求" }, { status: 403 });
-      return NextResponse.json({ ok: true });
-    } catch (err) {
-      return toErrorResponse(err);
-    }
-  }
-
-  // ── 网关 ────────────────────────────────────────────────────────────────
-  // Ownership: an approval belongs to the session that triggered it — only
-  // that session's owner may resolve it. Unknown id (expired, already
-  // resolved, or never routed here) gets the same 403 as a foreign session,
-  // so approval-id existence is never revealed.
-  const sessionKey = getPendingApprovalSession(id);
-  if (!sessionKey) {
-    return NextResponse.json({ error: "无权处理该确认请求" }, { status: 403 });
-  }
+  // 所有权：审批归属触发它的会话，只有会话主人能决议。查不到（过期/已决议/伪造 id）
+  // 与归属他人统一 403，不泄露 id 是否存在。
+  const sessionKey = await approvalSession(id);
+  if (!sessionKey) return NextResponse.json({ error: "无权处理该确认请求" }, { status: 403 });
   const denied = requireOwnership(sessionKey, auth.userId);
   if (denied) return denied;
-
   try {
-    // 拒绝理由在 resolve **之前**暂存（键为 toolCallId）：gateway 的 resolve
-    // 协议不携带理由，插件在 tool_result_persist 里经 MCP 同进程端点取走并
-    // 重写进被拒工具结果——与拒绝同帧到达模型，单次回复（steer 注入会造成
-    // "先答默认拒绝、再答理由"的双回复）。先存后 resolve 保证时序。
-    if (decision === "deny" && trimmedReason) {
-      const stored = storeDenyReason(id, trimmedReason);
-      if (!stored) console.warn(`[agent-approval] approval ${id} 无 toolCallId 关联，拒绝理由无法转交插件`);
-    }
-    // 若下面的 resolve 抛错，已存的理由成为孤儿——有意不回滚：TTL（10min）
-    // 兜底回收，且用户重试拒绝会覆盖写入，不值得为此加清理分支。
-    await resolveApproval(id, decision as "allow-once" | "allow-always" | "deny");
+    // 理由与决议同一行落库；run 侧 awaitApproval 读到后把理由随工具结果回模型
+    const ok = await resolveApproval(id, decision as "allow-once" | "allow-always" | "deny", auth.userId, trimmedReason);
+    if (!ok) return NextResponse.json({ error: "无权处理该确认请求" }, { status: 403 });
     return NextResponse.json({ ok: true });
   } catch (err) {
     return toErrorResponse(err);

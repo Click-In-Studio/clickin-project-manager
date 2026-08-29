@@ -6,8 +6,8 @@ import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, setProductionTier, shortId } from "./factories";
 import { upsertFeishuUser } from "@/lib/db";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { createNewSessionKey } from "@/lib/agent-gateway/client";
-import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-gateway/stream-reducer";
+import { createNewSessionKey } from "@/lib/mcp/session-identity";
+import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-chat/stream-reducer";
 import { runtimeOverrides, waitForIdle } from "@/lib/agent-runtime/service";
 import { CHAT_MODEL } from "@/lib/agent-runtime/config";
 import { createApproval } from "@/lib/agent-runtime/approvals";
@@ -36,15 +36,13 @@ async function readSse(res: Response): Promise<StreamLine[]> {
   return text.split("\n\n").filter((f) => f.startsWith("data:")).map((f) => JSON.parse(f.slice(5)) as StreamLine);
 }
 
-describe("agent routes under AGENT_RUNTIME=runner", () => {
+describe("agent routes（自建运行时）", () => {
   let userId: string;
   let prodId: string;
   let cookie: string;
   const keys: string[] = [];
-  const prevRuntime = process.env.AGENT_RUNTIME;
 
   beforeAll(async () => {
-    process.env.AGENT_RUNTIME = "runner";
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-routes-${shortId()}`, null, false));
     ({ prodId } = await makeProduction(userId));
     await setProductionTier(prodId, "pro"); // 项目档位门（#280）：AI 功能在 pro 档
@@ -53,7 +51,6 @@ describe("agent routes under AGENT_RUNTIME=runner", () => {
   });
 
   afterAll(async () => {
-    process.env.AGENT_RUNTIME = prevRuntime;
     delete runtimeOverrides.streamFn;
     delete runtimeOverrides.apiKey;
     for (const k of keys) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [k]).catch(() => {});
@@ -139,10 +136,8 @@ describe("agent approval/questions routes：runner 分支（ap_/aq_）", () => {
   let strangerCookie: string;
   let key: string;
   let runId: string;
-  const prevRuntime = process.env.AGENT_RUNTIME;
 
   beforeAll(async () => {
-    process.env.AGENT_RUNTIME = "runner";
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-gate-${shortId()}`, null, false));
     ({ userId: strangerId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-stranger-${shortId()}`, null, false));
     ({ prodId } = await makeProduction(userId));
@@ -162,7 +157,6 @@ describe("agent approval/questions routes：runner 分支（ap_/aq_）", () => {
   });
 
   afterAll(async () => {
-    process.env.AGENT_RUNTIME = prevRuntime;
     delete runtimeOverrides.streamFn;
     delete runtimeOverrides.apiKey;
     await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [key]).catch(() => {});

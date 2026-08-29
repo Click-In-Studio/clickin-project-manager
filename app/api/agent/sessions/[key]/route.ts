@@ -1,7 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { deleteChatSession, renameChatSession } from "@/lib/agent-gateway/client";
-import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-gateway/http";
-import { shouldUseRunner } from "@/lib/agent-runtime/dispatch";
+import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-chat/http";
 import { deleteSession, renameSession } from "@/lib/agent-runtime/client";
 
 export const runtime = "nodejs";
@@ -25,8 +23,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ke
   }
 
   try {
-    if (await shouldUseRunner(key)) await renameSession(key, title);
-    else await renameChatSession(key, title);
+    await renameSession(key, title);
     return NextResponse.json({ ok: true });
   } catch (err) {
     return toErrorResponse(err);
@@ -41,8 +38,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ k
   if (denied) return denied;
 
   try {
-    if (await shouldUseRunner(key)) await deleteSession(key);
-    else await deleteChatSession(key);
+    await deleteSession(key);
     return NextResponse.json({ ok: true });
   } catch (err) {
     return toErrorResponse(err);

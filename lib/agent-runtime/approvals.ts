@@ -7,7 +7,7 @@
 
 import type { Pool } from "pg";
 import { getPool } from "@/lib/pg";
-import type { ApprovalInfo } from "@/lib/agent-gateway/stream-reducer";
+import type { ApprovalInfo } from "@/lib/agent-chat/stream-reducer";
 import { newApprovalId } from "./ids";
 import { APPROVAL_TTL_MS } from "./config";
 

@@ -1,3 +1,5 @@
+> **已作废（2026-08-29）**：本文是 OpenClaw 网关时代的 toolSearch 路线，网关与 `scripts/gateway-probe.ts` 均已退役；现行方案见 `docs/AGENT_RUNTIME.md`「冷层：召回 + find_tools 兜底」。留作历史。
+
 # AI 工具面：Tool Search（3b 路线）运维手册
 
 对应 issue #333（热/温/冷三层 → 发现面方案）。本文档覆盖：为什么、开关配置、

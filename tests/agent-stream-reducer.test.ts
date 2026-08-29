@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyStreamLine, type Bubble } from "@/lib/agent-gateway/stream-reducer";
+import { applyStreamLine, type Bubble } from "@/lib/agent-chat/stream-reducer";
 
 // 聊天流 reducer 的渲染语义测试——重点覆盖 #198 的两个修复：
 // fallback final 去重（只吞兜底重复，不吞正常重复回复）与流式段落收尾。

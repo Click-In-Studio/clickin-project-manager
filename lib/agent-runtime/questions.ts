@@ -5,7 +5,7 @@
 
 import type { Pool } from "pg";
 import { getPool } from "@/lib/pg";
-import type { QuestionInfo, QuestionItem } from "@/lib/agent-gateway/stream-reducer";
+import type { QuestionInfo, QuestionItem } from "@/lib/agent-chat/stream-reducer";
 import { newQuestionId } from "./ids";
 
 const POLL_MS = 400;

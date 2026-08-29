@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { requireUser } from "@/lib/agent-gateway/http";
+import { requireUser } from "@/lib/agent-chat/http";
 import {
   INSTRUCTIONS_MAX_LEN,
   canEditProductionInstructions,

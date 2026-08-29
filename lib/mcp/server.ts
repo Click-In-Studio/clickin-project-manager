@@ -449,22 +449,6 @@ export function startMcpServer(): void {
 
   const app = createMcpExpressApp({ host: "127.0.0.1" });
 
-  // 拒绝理由取件端点（供 clickin-memory 插件在 tool_result_persist 里调用，
-  // 把理由重写进被拒工具结果）。仅绑定 loopback，与 MCP 本体同信任域，
-  // 无需额外鉴权；一次性取走（takeDenyReason 取后即删）。
-  app.get("/deny-reason", async (req: Request, res: Response) => {
-    const toolCallId = typeof req.query.toolCallId === "string" ? req.query.toolCallId : "";
-    if (!toolCallId) {
-      res.status(400).json({ error: "missing toolCallId" });
-      return;
-    }
-    // 动态 import：不把 gateway-client 依赖树拉进 MCP 模块的静态依赖图
-    // （本仓库有过 Turbopack 循环依赖 TDZ 前科，静态图保持最小）；
-    // Node 模块缓存保证首次之后零开销。
-    const { takeDenyReason } = await import("../agent-gateway/client");
-    res.json({ reason: takeDenyReason(toolCallId) ?? null });
-  });
-
   // 注入内容组装端点（供 clickin-memory 插件 before_prompt_build 单次
   // fetch）：当前用户档案 + 长期记忆 + 近期对话，预算集中后端。
   // 仅 loopback，与 MCP 同信任域。
