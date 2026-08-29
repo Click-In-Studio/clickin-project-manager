@@ -12,6 +12,7 @@ module.exports = {
       // 处理，先把 runner 拉起/换新，再 reload next——next 拿到 AGENT_RUNNER_URL 时对端已在。
       name: 'agent-runner',
       script: '/var/www/production-manager/current/agent-runner.js',
+      cwd: '/var/www/production-manager/current',   // base prompt 六件套按 process.cwd()/openclaw-workspace 读
       node_args: '--env-file=/var/www/production-manager/shared/.env.local',
       // cluster 模式（单实例）才有真正的零停机 reload：新进程 ready 后才向旧进程发 SIGTERM；
       // fork 模式的 reload 等于 restart——旧进程排水期间（最长 10 分钟）没有人接请求。

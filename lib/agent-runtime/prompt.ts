@@ -16,6 +16,8 @@ const WORKSPACE_FILES = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "TOOL
 
 let cached: { text: string; mtimeSum: number } | null = null;
 
+const warnedMissing = new Set<string>();
+
 /** 六件套拼接（按 mtime 变化失效缓存——开发期改文件不用重启）。 */
 export function workspacePrompt(): string {
   let mtimeSum = 0;
@@ -28,7 +30,12 @@ export function workspacePrompt(): string {
       if (cached && cached.mtimeSum === mtimeSum && name === WORKSPACE_FILES[WORKSPACE_FILES.length - 1]) break;
       parts.push(fs.readFileSync(file, "utf8").trim());
     } catch {
-      // 文件缺席不致命：AGENTS.md 缺了只是少一段规范，运行时不该因此拒绝服务
+      // 文件缺席不致命：AGENTS.md 缺了只是少一段规范，运行时不该因此拒绝服务——
+      // 但要喊一声：六件套整体缺席 = 部署没带上 openclaw-workspace/（PR #371 首发踩过）
+      if (!warnedMissing.has(name)) {
+        warnedMissing.add(name);
+        console.error(`[agent-runtime] workspace prompt file missing: ${file}（base prompt 会少这一段）`);
+      }
     }
   }
   if (cached && cached.mtimeSum === mtimeSum) return cached.text;
