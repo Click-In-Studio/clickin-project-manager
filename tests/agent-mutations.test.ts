@@ -6,16 +6,16 @@ import { dispatchAgentMutation, subscribeAgentMutation, _resetAgentMutationSubsc
 describe("agent-mutations 派发", () => {
   beforeEach(() => _resetAgentMutationSubscribers());
 
-  it("scope 命中才派发；productionId 两边都有且不同 → 不派发；返回值告诉调用方有没有人接", () => {
+  it("scope 命中才派发；订阅带 productionId 时信号必须同制作（缺席也不算）；返回值告诉调用方有没有人接", () => {
     const got: string[] = [];
     subscribeAgentMutation({ scope: "wiki", productionId: "p1" }, (m) => got.push(`wiki:${m.action}`));
     subscribeAgentMutation({ scope: "instructions" }, (m) => got.push(`instr:${m.action}`));
     expect(dispatchAgentMutation({ scope: "wiki", action: "created", productionId: "p1" })).toBe(true);
     expect(dispatchAgentMutation({ scope: "wiki", action: "created", productionId: "p2" })).toBe(false);
-    expect(dispatchAgentMutation({ scope: "wiki", action: "updated", productionId: null })).toBe(true); // 信号不带制作 → 不按制作过滤
+    expect(dispatchAgentMutation({ scope: "wiki", action: "updated", productionId: null })).toBe(false); // 订阅按制作过滤，信号没带制作 → 不算命中
     expect(dispatchAgentMutation({ scope: "instructions", action: "updated" })).toBe(true);
     expect(dispatchAgentMutation({ scope: "tasks", action: "updated" })).toBe(false);
-    expect(got).toEqual(["wiki:created", "wiki:updated", "instr:updated"]);
+    expect(got).toEqual(["wiki:created", "instr:updated"]);
   });
 
   it("退订后不再收到；某个 handler 抛错不影响其他订阅者", () => {

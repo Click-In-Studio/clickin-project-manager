@@ -2221,3 +2221,4 @@ CREATE TABLE IF NOT EXISTS wiki_collab_outbox (
   frame      TEXT        NOT NULL,   -- 原样的 SSE 帧文本
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS wiki_collab_outbox_created_idx ON wiki_collab_outbox (created_at);

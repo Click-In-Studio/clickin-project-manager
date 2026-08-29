@@ -16,7 +16,7 @@ import { useEffect, useRef } from "react";
 export type MutationAction = "created" | "updated" | "deleted";
 
 export interface AgentMutation {
-  /** 领域：wiki / instructions / …（与 runner 侧 mutates 声明同源） */
+  /** 领域：wiki / instructions.personal / instructions.production / …（与 runner 侧 mutates 声明同源） */
   scope: string;
   action: MutationAction;
   productionId?: string | null;
@@ -37,9 +37,11 @@ type Sub = { filter: MutationFilter; handler: Handler };
 
 const subs = new Set<Sub>();
 
+// 订阅方给了 productionId 就必须与信号的一致——信号没带制作（null）也算不一致，
+// 免得个人域的信号刷到所有制作页面（AI review #374）。不按制作过滤的订阅不传 productionId。
 function matches(f: MutationFilter, m: AgentMutation): boolean {
   if (f.scope !== m.scope) return false;
-  if (f.productionId != null && m.productionId != null && f.productionId !== m.productionId) return false;
+  if (f.productionId != null && m.productionId !== f.productionId) return false;
   return true;
 }
 

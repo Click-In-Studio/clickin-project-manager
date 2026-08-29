@@ -134,7 +134,7 @@ const DEFS: Def[] = [
     description: "【个人设置】全量替换当前用户的个人 AI 指令（即 <clickin-instructions> 里「用户的个人指令」段），需要人工在聊天栏确认。content 是替换后的完整内容——先基于注入块里的现行内容整合修改，不要只传增量；传空字符串表示清空。仅影响该用户自己的会话。",
     parameters: Type.Object({ content: Type.String({ description: `替换后的完整个人指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）` }) }),
     readOnly: false,
-    mutates: () => ({ scope: "instructions", action: "updated" }),
+    mutates: () => ({ scope: "instructions.personal", action: "updated" }),
     execute: async (ctx, args) => (await import("@/lib/mcp/instructions-tools")).updateMyInstructions(ctx.userId, String(args.content)),
   },
   {
@@ -165,7 +165,7 @@ const DEFS: Def[] = [
     description: "全量替换当前对话关联制作的制作级 AI 指令（对全体成员的 AI 会话生效），需要人工在聊天栏确认；确认后若该用户没有编辑权限（默认仅制作人），调用会被直接拦截。content 是替换后的完整内容——先基于注入块里的现行内容整合修改，不要只传增量；传空字符串表示清空。",
     parameters: Type.Object({ content: Type.String({ description: `替换后的完整制作级指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）` }) }),
     readOnly: false,
-    mutates: () => ({ scope: "instructions", action: "updated" }), needsProduction: true,
+    mutates: () => ({ scope: "instructions.production", action: "updated" }), needsProduction: true,
     execute: async (ctx, args) => (await import("@/lib/mcp/instructions-tools")).updateProductionInstructions(ctx.userId, ctx.productionId, String(args.content)),
   },
 

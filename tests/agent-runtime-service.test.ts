@@ -191,7 +191,7 @@ describe("agent-runtime service", () => {
     expect(lines.find((l) => l.type === "approval-resolved")).toMatchObject({ decision: "allow-once" });
     // 写操作后自动刷新：写工具成功 → mutation 行紧跟 tool-end（前端派发给页面订阅者）
     const endIdx = lines.findIndex((l) => l.type === "tool-end");
-    expect(lines[endIdx + 1]).toEqual({ type: "mutation", scope: "instructions", action: "updated", productionId: null, tool: "my.update_instructions" });
+    expect(lines[endIdx + 1]).toEqual({ type: "mutation", scope: "instructions.personal", action: "updated", productionId: null, tool: "my.update_instructions" });
     const instr = await getPool().query<{ content: string }>(`SELECT content FROM agent_instructions WHERE scope_type = 'user' AND scope_id = $1`, [userId]);
     expect(instr.rows[0]?.content).toBe("回复末尾加一个🎭");
     await getPool().query(`DELETE FROM agent_instructions WHERE scope_type = 'user' AND scope_id = $1`, [userId]);

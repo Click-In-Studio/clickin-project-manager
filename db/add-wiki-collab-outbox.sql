@@ -16,3 +16,6 @@ CREATE TABLE IF NOT EXISTS wiki_collab_outbox (
   frame      TEXT        NOT NULL,   -- 原样的 SSE 帧文本
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 清理按 created_at 扫（发布路径顺手做，行只活几分钟，但别让它随流量变全表扫）
+CREATE INDEX IF NOT EXISTS wiki_collab_outbox_created_idx ON wiki_collab_outbox (created_at);

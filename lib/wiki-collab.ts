@@ -84,16 +84,24 @@ export const COLLAB_CHANNEL = "wiki_collab";
 /** 本进程标识：回声过滤用 */
 export const COLLAB_ORIGIN = `${hostname()}:${process.pid}`;
 
+let lastGcAt = 0;
+const GC_EVERY_MS = 60_000;
+
 async function publishRemote(topic: string, frame: string, pool: Pool = getPool()): Promise<void> {
   await pool.query(
     `WITH ins AS (
        INSERT INTO wiki_collab_outbox (origin, topic, frame) VALUES ($1, $2, $3) RETURNING id
-     ), gc AS (
-       DELETE FROM wiki_collab_outbox WHERE created_at < now() - interval '5 minutes'
      )
      SELECT pg_notify($4, ins.id::text || ':' || $1) FROM ins`,
     [COLLAB_ORIGIN, topic, frame, COLLAB_CHANNEL],
   );
+  // 清理是独立语句、按时间节流：不和发布绑在同一条 SQL 里，慢了也不拖发布
+  const now = Date.now();
+  if (now - lastGcAt > GC_EVERY_MS) {
+    lastGcAt = now;
+    void pool.query(`DELETE FROM wiki_collab_outbox WHERE created_at < now() - interval '5 minutes'`)
+      .catch((err) => console.error("[wiki-collab] outbox gc failed:", err));
+  }
 }
 
 /**

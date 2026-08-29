@@ -83,7 +83,7 @@ AGENT_RUNNER_URL=http://127.0.0.1:3102
 
 ## 写操作后自动刷新（mutation 行）
 
-写工具在注册表里声明 `mutates`（`lib/agent-runtime/tools.ts`），成功执行后 runner 往 agent SSE 上发一行
+写工具在注册表里声明 `mutates`（`lib/agent-runtime/tools.ts`；scope 现有 `wiki` / `instructions.personal` / `instructions.production`），成功执行后 runner 往 agent SSE 上发一行
 `{ type: "mutation", scope, action, productionId, ids?, tool }`（紧跟 tool-end，同样落 `agent_event`，断线重连可补）。
 前端 `AgentPopout` 收到后**只派发**（`lib/agent-mutations.ts`）：页面/组件用 `useAgentMutation({ scope, productionId }, handler)`
 订阅，handler 自己决定刷新粒度——client 页面重拉那一个 API、server component 页面 `router.refresh()`、带 `ids` 的只在命中时动；
