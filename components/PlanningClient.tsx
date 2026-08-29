@@ -22,6 +22,16 @@ import DropdownPicker, { type DropdownPickerItem } from "@/components/DropdownPi
 import type { ProductionEvent, EventScheduleItemWithParticipants, EventTechReq } from "@/lib/event-db";
 import styles from "@/components/planning.module.css";
 
+// 视图偏好读写：禁用存储的 WKWebView / Safari 无痕下 localStorage 本身就会抛
+// （取 window.localStorage 抛 SecurityError，setItem 抛 QuotaExceededError）。
+// 在 useEffect 里抛出去就是整页白，偏好丢了远不如页面挂了严重——一律吞掉。
+function readPref(key: string): string | null {
+  try { return window.localStorage.getItem(key); } catch { return null; }
+}
+function writePref(key: string, value: string): void {
+  try { window.localStorage.setItem(key, value); } catch { /* 存不下就算了，不影响本次会话 */ }
+}
+
 type PlanningMilestone = { id: string; name: string; endDate: string };
 type PlanningDept = { id: string; name: string };
 type PlanningMember = { userId: string; name: string; roles: string[]; departmentIds: string[] };
@@ -417,7 +427,7 @@ function CalendarView({ productionId, events, tasks, milestones, phases, departm
   const [selection, setSelection] = useState<CalendarSelection | null>(null);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(`planning-calendar-cursor:${productionId}`);
+    const saved = readPref(`planning-calendar-cursor:${productionId}`);
     const matched = saved?.match(/^(\d{4})-(0[1-9]|1[0-2])$/);
     if (matched) {
       setYear(Number(matched[1]));
@@ -428,7 +438,7 @@ function CalendarView({ productionId, events, tasks, milestones, phases, departm
 
   useEffect(() => {
     if (!cursorRestored) return;
-    window.localStorage.setItem(
+    writePref(
       `planning-calendar-cursor:${productionId}`,
       `${year}-${String(month + 1).padStart(2, "0")}`,
     );
@@ -674,14 +684,14 @@ function TaskGanttView({ productionId, tasks, milestones, phases }: Props) {
   useEffect(() => { setLocalTasks(tasks); }, [tasks]);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(`planning-gantt-scale:${productionId}`);
+    const saved = readPref(`planning-gantt-scale:${productionId}`);
     if (saved === "day" || saved === "month" || saved === "quarter" || saved === "year") setScale(saved);
     setScaleRestored(true);
   }, [productionId]);
 
   useEffect(() => {
     if (!scaleRestored) return;
-    window.localStorage.setItem(`planning-gantt-scale:${productionId}`, scale);
+    writePref(`planning-gantt-scale:${productionId}`, scale);
   }, [productionId, scale, scaleRestored]);
 
   const timedTasks = useMemo(
@@ -1298,7 +1308,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(`planning-timetable-filters:${productionId}`);
+      const raw = readPref(`planning-timetable-filters:${productionId}`);
       const saved = raw ? JSON.parse(raw) as { eventId?: unknown; personFilter?: unknown; viewMode?: unknown } : null;
       if (saved?.eventId && typeof saved.eventId === "string" && timedEvents.some(event => event.id === saved.eventId)) {
         setEventId(saved.eventId);
@@ -1315,7 +1325,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
 
   useEffect(() => {
     if (!filtersRestored) return;
-    window.localStorage.setItem(
+    writePref(
       `planning-timetable-filters:${productionId}`,
       JSON.stringify({ eventId, personFilter, viewMode }),
     );
@@ -1324,6 +1334,9 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   // 版面来自服务端，不再是每人一份的 localStorage——rundown 是 organizer 定好
   // 大家遵守的东西。列 = event_rundown_column ⋈ event_group。
   useEffect(() => {
+    // 恢复偏好前不打请求：eventId 的初值是 timedEvents[0]，恢复 effect 的
+    // setEventId 要等本轮 effect 全部跑完才生效，不挡就会为默认事件白打一轮。
+    if (!filtersRestored) return;
     if (!eventId) {
       setColumns([]);
       columnsTagRef.current = "";
@@ -1366,10 +1379,10 @@ function TimetableView({ productionId, events, departments, members }: Props) {
       placementsTagRef.current = typeof layoutRes.placementsTag === "string" ? layoutRes.placementsTag : "";
     });
     return () => { cancelled = true; };
-  }, [productionId, eventId]);
+  }, [productionId, eventId, filtersRestored]);
 
   useEffect(() => {
-    if (!eventId) return;
+    if (!filtersRestored || !eventId) return;
     let cancelled = false;
     setLoading(true);
     Promise.all([
@@ -1386,7 +1399,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [productionId, eventId]);
+  }, [productionId, eventId, filtersRestored]);
 
   const event = timedEvents.find(e => e.id === eventId) ?? null;
 
@@ -2463,14 +2476,14 @@ export default function PlanningClient(props: Props) {
   const [modeRestored, setModeRestored] = useState(false);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(`planning-last-view:${props.productionId}`);
+    const saved = readPref(`planning-last-view:${props.productionId}`);
     if (saved === "calendar" || saved === "gantt" || saved === "timetable") setMode(saved);
     setModeRestored(true);
   }, [props.productionId]);
 
   useEffect(() => {
     if (!modeRestored) return;
-    window.localStorage.setItem(`planning-last-view:${props.productionId}`, mode);
+    writePref(`planning-last-view:${props.productionId}`, mode);
   }, [mode, modeRestored, props.productionId]);
   const [phaseModalOpen, setPhaseModalOpen] = useState(false);
   const { phasePerm } = props;

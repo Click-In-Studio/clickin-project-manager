@@ -25,19 +25,31 @@ const baseProps: Parameters<typeof PlanningClient>[0] = {
   phasePerm: { canCreate: false, canEdit: false, canDelete: false, pocDeptIds: [], deptPocEnabled: false },
 };
 
+const timetableProps: Parameters<typeof PlanningClient>[0] = {
+  ...baseProps,
+  events: [
+    { id: "event-a", title: "首场", startTime: "2031-04-01T01:00:00.000Z" },
+    { id: "event-b", title: "复排", startTime: "2031-04-02T01:00:00.000Z" },
+  ] as Parameters<typeof PlanningClient>[0]["events"],
+  departments: [{ id: "dept-a", name: "舞台部" }],
+  members: [{ userId: "user-b", name: "陈雨", roles: ["编剧"], departmentIds: ["dept-a"] }],
+};
+
 describe("PlanningClient view state", () => {
   let container: HTMLDivElement;
   let root: Root;
+  let fetchSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     window.localStorage.clear();
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    vi.stubGlobal("fetch", vi.fn(async () => ({
+    fetchSpy = vi.fn(async () => ({
       ok: true,
       json: async () => ({ groups: [], columns: [], placements: [], items: [], techReqs: [] }),
-    })));
+    }));
+    vi.stubGlobal("fetch", fetchSpy);
   });
 
   afterEach(async () => {
@@ -80,19 +92,33 @@ describe("PlanningClient view state", () => {
       viewMode: "custom",
     }));
 
-    await render({
-      ...baseProps,
-      events: [
-        { id: "event-a", title: "首场", startTime: "2031-04-01T01:00:00.000Z" },
-        { id: "event-b", title: "复排", startTime: "2031-04-02T01:00:00.000Z" },
-      ] as Parameters<typeof PlanningClient>[0]["events"],
-      departments: [{ id: "dept-a", name: "舞台部" }],
-      members: [{ userId: "user-b", name: "陈雨", roles: ["编剧"], departmentIds: ["dept-a"] }],
-    });
+    await render(timetableProps);
 
     const controls = [...container.querySelectorAll<HTMLButtonElement>('[role="combobox"]')];
     expect(controls[0]?.textContent).toContain("复排");
     expect(controls[1]?.textContent).toContain("自定义关注列");
     expect(controls[2]?.textContent).toContain("陈雨");
+  });
+
+  // 偏好恢复前不该为默认事件白打一轮 rundown / schedule 请求。
+  it("does not fetch the default event before the saved filters are restored", async () => {
+    window.localStorage.setItem("planning-last-view:production-a", "timetable");
+    window.localStorage.setItem("planning-timetable-filters:production-a", JSON.stringify({ eventId: "event-b" }));
+
+    await render(timetableProps);
+
+    const urls = fetchSpy.mock.calls.map(call => String(call[0]));
+    expect(urls.every(url => !url.includes("event-a"))).toBe(true);
+    expect(urls.filter(url => url.includes("event-b"))).toHaveLength(4);
+  });
+
+  // 无偏好时仍要正常拉首个事件——门不能把首屏请求一起挡死。
+  it("still fetches the first event when nothing was saved", async () => {
+    window.localStorage.setItem("planning-last-view:production-a", "timetable");
+
+    await render(timetableProps);
+
+    const urls = fetchSpy.mock.calls.map(call => String(call[0]));
+    expect(urls.filter(url => url.includes("event-a"))).toHaveLength(4);
   });
 });
