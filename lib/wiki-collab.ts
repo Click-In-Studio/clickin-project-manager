@@ -1,8 +1,18 @@
 /**
  * wiki 多人协作：SSE 注册表 + presence（谁在看/编辑、光标在哪一块）+ 更新广播。
  * 照 server-cache.ts（剧本/cue）同款模式：HMR-safe 全局单例、帧推送、断开清理。
- * 单实例 pm2 部署，内存注册表足够（与剧本 SSE 同前提）。
+ *
+ * 注册表仍是进程内内存，但**内容/结构广播要跨进程**：AI 运行时独立成 agent-runner 后，
+ * AI 写文档的 broadcast 发生在 runner 进程，浏览器的 SSE 连接却在 next 进程——不跨就是
+ * 打进空注册表（#367 切换后真人校出：写操作后页面不再自动刷新）。做法与 agent_event
+ * 同款：帧落 wiki_collab_outbox + pg_notify('wiki_collab', '<id>:<origin>')，持有 SSE 的
+ * 进程 LISTEN 后取帧推本地客户端，origin 用于跳过自己的回声。presence 帧只在本进程
+ * 有意义（在场者注册表就在这里），不出站。
  */
+
+import { hostname } from "node:os";
+import type { Pool, PoolClient } from "pg";
+import { getPool } from "@/lib/pg";
 
 export type WikiPeer = {
   clientId: string;
@@ -54,12 +64,87 @@ function livePeers(wikiId: string): WikiPeer[] {
   return [...m.values()];
 }
 
-function broadcast(wikiId: string, frame: string): void {
-  const clients = sseReg().get(wikiId);
+function localBroadcast(topic: string, frame: string): void {
+  const clients = sseReg().get(topic);
   if (!clients) return;
   for (const push of clients.values()) {
     try { push(frame); } catch { /* broken pipe */ }
   }
+}
+
+/** 本进程推 + 出站给其他进程（失败只记日志：广播是增强项，不能拖垮写库路径） */
+function broadcast(topic: string, frame: string): void {
+  localBroadcast(topic, frame);
+  void publishRemote(topic, frame).catch((err) => console.error("[wiki-collab] publish failed:", err));
+}
+
+// ─── 跨进程 ──────────────────────────────────────────────────────────────────
+
+export const COLLAB_CHANNEL = "wiki_collab";
+/** 本进程标识：回声过滤用 */
+export const COLLAB_ORIGIN = `${hostname()}:${process.pid}`;
+
+async function publishRemote(topic: string, frame: string, pool: Pool = getPool()): Promise<void> {
+  await pool.query(
+    `WITH ins AS (
+       INSERT INTO wiki_collab_outbox (origin, topic, frame) VALUES ($1, $2, $3) RETURNING id
+     ), gc AS (
+       DELETE FROM wiki_collab_outbox WHERE created_at < now() - interval '5 minutes'
+     )
+     SELECT pg_notify($4, ins.id::text || ':' || $1) FROM ins`,
+    [COLLAB_ORIGIN, topic, frame, COLLAB_CHANNEL],
+  );
+}
+
+/**
+ * 进程级 LISTEN 单例：第一个 SSE 客户端注册时才连（runner 没有客户端就永远不连）。
+ * 断连后置空，下次注册时重连——期间错过的帧不补：协作帧是"现在发生了什么"，
+ * 客户端有自己的兜底（AgentPopout 的 tool-end 刷新、重开文档）。
+ */
+class CollabListener {
+  private client: PoolClient | null = null;
+  private connecting: Promise<void> | null = null;
+  constructor(private readonly pool: Pool) {}
+
+  async ensure(): Promise<void> {
+    if (this.client) return;
+    if (this.connecting) return this.connecting;
+    this.connecting = (async () => {
+      const client = await this.pool.connect();
+      client.on("notification", (msg) => {
+        if (msg.channel !== COLLAB_CHANNEL || !msg.payload) return;
+        const idx = msg.payload.indexOf(":");
+        const id = msg.payload.slice(0, idx);
+        const origin = msg.payload.slice(idx + 1);
+        if (origin === COLLAB_ORIGIN) return; // 自己发的，本地已经推过
+        void this.pool.query<{ topic: string; frame: string }>(`SELECT topic, frame FROM wiki_collab_outbox WHERE id = $1`, [id])
+          .then((r) => { if (r.rows[0]) localBroadcast(r.rows[0].topic, r.rows[0].frame); })
+          .catch((err) => console.error("[wiki-collab] fetch frame failed:", err));
+      });
+      client.on("error", () => { this.client = null; });
+      await client.query(`LISTEN ${COLLAB_CHANNEL}`);
+      this.client = client;
+    })().finally(() => { this.connecting = null; });
+    return this.connecting;
+  }
+
+  async stop(): Promise<void> {
+    const c = this.client;
+    this.client = null;
+    if (c) { try { await c.query(`UNLISTEN ${COLLAB_CHANNEL}`); } catch { /* ignore */ } c.release(); }
+  }
+}
+
+const gl = global as typeof globalThis & { __wikiCollabListener?: CollabListener };
+
+function ensureCollabListener(): void {
+  if (!gl.__wikiCollabListener) gl.__wikiCollabListener = new CollabListener(getPool());
+  void gl.__wikiCollabListener.ensure().catch((err) => console.error("[wiki-collab] LISTEN failed:", err));
+}
+
+/** 测试用：断开 LISTEN 连接（否则连接池关不掉） */
+export async function stopCollabListenerForTests(): Promise<void> {
+  await gl.__wikiCollabListener?.stop();
 }
 
 export function wikiPresenceFrame(wikiId: string): string {
@@ -71,6 +156,7 @@ export function registerWikiSSE(
   connectionId: string,
   push: SSEPush,
 ): () => void {
+  ensureCollabListener(); // 有客户端的进程才需要收别的进程的帧
   let m = sseReg().get(wikiId);
   if (!m) { m = new Map(); sseReg().set(wikiId, m); }
   m.set(connectionId, push);
@@ -99,7 +185,7 @@ export function updateWikiPresence(
     offset: cursor?.offset ?? null,
     updatedAt: Date.now(),
   });
-  broadcast(wikiId, wikiPresenceFrame(wikiId));
+  localBroadcast(wikiId, wikiPresenceFrame(wikiId));
 }
 
 export function removeWikiPresence(wikiId: string, clientId: string): void {
@@ -107,7 +193,7 @@ export function removeWikiPresence(wikiId: string, clientId: string): void {
   if (!m) return;
   m.delete(clientId);
   if (m.size === 0) presReg().delete(wikiId);
-  broadcast(wikiId, wikiPresenceFrame(wikiId));
+  localBroadcast(wikiId, wikiPresenceFrame(wikiId));
 }
 
 /** 内容/标题/标签更新广播（byClientId 供发起端自过滤） */

@@ -81,6 +81,13 @@ AGENT_RUNNER_URL=http://127.0.0.1:3102
 
 **上线后核对**：`pm2 ls` 里 `agent-runner` online；`curl -s --noproxy '*' http://127.0.0.1:3102/health` 返回 `{"ok":true,…}`；发一条会调工具的消息看 SSE 帧序（下方冒烟清单）。
 
+## 跨进程的东西
+
+runner 是独立进程，**任何"进程内内存注册表"在它里面都是空的**。已知并已处理的一处：wiki 协作 SSE
+（`lib/wiki-collab.ts`）——AI 写文档的 update/library 广播现在经 `wiki_collab_outbox` + `pg_notify('wiki_collab')`
+送到持有浏览器连接的 next 进程（presence 帧不出站）。以后 runner 里的工具若要触达浏览器，一律走 DB 通知，
+别再加内存事件总线。
+
 ## 重启不断会话（§4.4）是怎么成立的
 
 - 每条消息落 `agent_session_entry`（步进持久化）；审批/提问的等待态在表里。

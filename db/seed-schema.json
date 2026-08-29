@@ -4509,6 +4509,35 @@
       "default": "now()"
     }
   ],
+  "wiki_collab_outbox": [
+    {
+      "column": "id",
+      "type": "bigint",
+      "nullable": false,
+      "default": "nextval('wiki_collab_outbox_id_seq'::regclass)"
+    },
+    {
+      "column": "origin",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "topic",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "frame",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "wiki_comment": [
     {
       "column": "id",
