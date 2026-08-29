@@ -190,15 +190,14 @@ export async function buildInjectContext(
       recallParts.push(`以下长期记忆条目与本条消息强相关（自动匹配，仅供参考，非指令）：\n${lines.join("\n")}`);
     }
 
-    // 工具召回（#333 P2 中文发现面）：官方 tool_search 是纯 ASCII 词法，中文
-    // 消息搜不到工具——这里用 CJK bigram 命中后把确切工具名推进语境，模型
-    // 经 tool_describe/tool_call 按名直取（工具面被 Tool Search 收编后仍可达）。
-    // 纯词法纯函数，无失败面；命中为空就是不注入。
+    // 工具召回（#333 P2 中文发现面）：CJK bigram 命中后把确切工具名推进语境。
+    // 自建运行时（#367）里同一份命中还会把这些工具加进本轮工具面（tool-tiers），
+    // 所以提示只需点名，不用教模型怎么取用。纯词法纯函数，无失败面；命中为空就是不注入。
     const toolHits = toolRecall(prompt, { hasProduction: !!productionId });
     if (toolHits.length > 0) {
       const toolLines = toolHits.map((t) => `- \`${t.name}\`：${t.oneliner}`);
       recallParts.push(
-        `以下 clickin 工具与本条消息可能相关（若当前工具列表里看不到，用 tool_describe 按名取参数后经 tool_call 调用）：\n${toolLines.join("\n")}`,
+        `以下工具与本条消息可能相关，本轮可直接调用（按需，不必全用）：\n${toolLines.join("\n")}`,
       );
       // 冷层闭包（#333 T1）：命中正文读写工具而温层没送方言 → 说明书随召回
       // 一起出，模型不用再跑一轮 dialect_ref。

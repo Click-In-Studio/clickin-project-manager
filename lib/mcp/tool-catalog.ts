@@ -62,15 +62,18 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     triggers: ["成员名单", "通讯录", "谁负责", "找个人", "联系人"], en: "members contact list user id" },
   { name: "production.department_list", scope: "production", oneliner: "查询部门/用户组结构（含部门 id）",
     triggers: ["部门结构", "组织架构", "有哪些部门", "哪些组"], en: "departments groups structure" },
+  // "wiki"/"文档" 这类短触发词是真人使用校出来的（2026-08-29）："列举我能看到哪些 wiki 文档"
+  // 对四字短语只中一半，而 wiki 这个最显然的词此前不在任何触发词里。短词误报的代价
+  // 只是工具面多几个工具（闭包会把 read/search/tree 一起带上），可接受。
   { name: "production.wiki_tree", scope: "production", oneliner: "浏览文档库的目录树",
-    triggers: ["文档结构", "文档目录", "有哪些文档", "文档库怎么组织"], en: "wiki documents tree list" },
+    triggers: ["wiki", "文档", "文档结构", "文档目录", "有哪些文档", "文档库怎么组织"], en: "wiki documents tree list" },
   { name: "production.wiki_search", scope: "production", oneliner: "全文搜索当前制作的文档库",
     // "文档库"/"搜索" 这类短触发词是刻意的：bigram 命中占比对 3 字短语苛刻
     // （"文档库里搜索" 不含 "索文"，"搜索文档" 只得 0.67），短词补覆盖，
     // 误报代价只是召回提示里多一行，可接受。
-    triggers: ["搜文档", "找资料", "查资料", "搜索文档", "文档里找", "找一篇", "文档库", "搜索"], en: "wiki search documents fulltext" },
+    triggers: ["wiki", "文档", "搜文档", "找资料", "查资料", "搜索文档", "文档里找", "找一篇", "文档库", "搜索"], en: "wiki search documents fulltext" },
   { name: "production.wiki_read", scope: "production", oneliner: "按 id 读取一篇文档的完整内容",
-    triggers: ["读文档", "打开文档", "看看这篇", "文档内容", "这篇文档"], en: "wiki read document content" },
+    triggers: ["wiki", "读文档", "打开文档", "看看这篇", "文档内容", "这篇文档"], en: "wiki read document content" },
   { name: "production.wiki_backlinks", scope: "production", oneliner: "查询文档的双向链接关系",
     triggers: ["谁引用", "反向链接", "链接关系", "引用了哪些"], en: "wiki backlinks references" },
   { name: "production.wiki_propose_create", scope: "production", oneliner: "提议新建一篇文档（需人工确认）",

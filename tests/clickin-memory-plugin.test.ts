@@ -650,7 +650,7 @@ describe("方言说明三通道（#333 T1：温层跟页 / 冷层闭包 / dialec
     expect(gated?.params?._dialect_injected).toBe(true);
   });
 
-  it("工具召回本身：中文消息 → recall 带确切工具名与 tool_describe 指引", async () => {
+  it("工具召回本身：中文消息 → recall 点名确切工具", async () => {
     const ctx = sessionCtx("aaaaaaaa-0000-0000-0000-000000000004");
     const promptOut = (await hooks.get("before_prompt_build")!(
       { context: { pluginConfig: PLUGIN_CONFIG }, prompt: "帮我在文档库里搜索灯光相关的资料" },
@@ -658,6 +658,6 @@ describe("方言说明三通道（#333 T1：温层跟页 / 冷层闭包 / dialec
     )) as { prependContext?: string } | undefined;
     const recall = promptOut?.prependContext ?? "";
     expect(recall).toContain("production.wiki_search");
-    expect(recall).toContain("tool_describe"); // 3b 下工具面被 Tool Search 收编后的取用指引
+    expect(recall).toContain("本轮可直接调用"); // 自建运行时里召回的工具同时进本轮工具面
   });
 });
