@@ -20,7 +20,7 @@ import {
   sha256,
 } from "@/lib/agent-memory/index-db";
 import { searchMemory, MemoryUnavailableError, MIN_SCORE } from "@/lib/agent-memory/search";
-import { embeddingModel } from "@/agent/embedding";
+import { embeddingModel } from "@/lib/agent-memory/embedding";
 
 const userA = randomUUID();
 const userB = randomUUID();

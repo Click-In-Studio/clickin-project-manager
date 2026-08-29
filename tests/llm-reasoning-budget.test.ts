@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { chat } from "@/agent/llm";
+import { chat } from "@/lib/llm-chat";
 
 type Body = { max_tokens: number };
 

@@ -11,7 +11,7 @@
 
 import { createHash } from "node:crypto";
 import { getPool } from "@/lib/pg";
-import { embedDocuments, embedQuery, embeddingMode, embeddingModel } from "@/agent/embedding";
+import { embedDocuments, embedQuery, embeddingMode, embeddingModel } from "@/lib/agent-memory/embedding";
 import { TOOL_CATALOG, TOOL_FAMILIES, TOOL_RECALL_THRESHOLD, type ToolCatalogEntry } from "@/lib/mcp/tool-catalog";
 import { bigramTokens } from "@/lib/agent-memory/trigger-lexical";
 

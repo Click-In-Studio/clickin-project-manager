@@ -13,8 +13,8 @@ import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 // LlmBudgetError——distill 用 instanceof 分流"预算不够"与其他失败，
 // 换成假类会让分流逻辑在测试里恒假、测了个寂寞。
 const chatMock = vi.fn(async (..._args: unknown[]) => "## 偏好与习惯\n- mock 蒸馏产物");
-vi.mock("@/agent/llm", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/agent/llm")>()),
+vi.mock("@/lib/llm-chat", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/llm-chat")>()),
   chat: (...args: unknown[]) => chatMock(...args),
 }));
 
@@ -276,7 +276,7 @@ describe("蒸馏管线（mock LLM）", () => {
   it("预算不够 → 降档缩小输入重试，成功后照常提交 offset", async () => {
     const { appendRunRecord } = await import("@/lib/agent-memory/store");
     const { distillUser } = await import("@/lib/agent-memory/distill");
-    const { LlmBudgetError } = await import("@/agent/llm");
+    const { LlmBudgetError } = await import("@/lib/llm-chat");
     appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "降档批", lastAssistant: "y" });
 
     // 首档（24000）超预算，降到 12000 成功
@@ -296,7 +296,7 @@ describe("蒸馏管线（mock LLM）", () => {
   it("每档都超预算 → 跳过该条并推进 offset，不把后续蒸馏永久堵死", async () => {
     const { appendRunRecord } = await import("@/lib/agent-memory/store");
     const { distillUser } = await import("@/lib/agent-memory/distill");
-    const { LlmBudgetError } = await import("@/agent/llm");
+    const { LlmBudgetError } = await import("@/lib/llm-chat");
     appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "毒丸批", lastAssistant: "z" });
 
     chatMock.mockRejectedValue(new LlmBudgetError("empty (finish_reason=length)", false));

@@ -14,7 +14,7 @@
 
 import { createHash } from "node:crypto";
 import { getPool } from "@/lib/pg";
-import { EmbeddingUnavailableError, embedQuery, embeddingMode, embeddingModel } from "@/agent/embedding";
+import { EmbeddingUnavailableError, embedQuery, embeddingMode, embeddingModel } from "@/lib/agent-memory/embedding";
 import { bigramTokens, ensureIndexIdentity } from "./index-db";
 
 export const TRIGGER_THRESHOLD = 0.72;
