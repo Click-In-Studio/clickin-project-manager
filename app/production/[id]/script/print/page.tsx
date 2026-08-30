@@ -12,6 +12,7 @@ import {
 } from "@/lib/db";
 import { buildMarkerContextById, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
 import ScriptPrintRoute from "@/components/print/ScriptPrintRoute";
+import PageActivationGate from "@/components/PageActivationGate";
 
 export const metadata: Metadata = { title: "打印剧本" };
 
@@ -69,14 +70,21 @@ export default async function ScriptPrintPage({
   const projected = withLegacyOwnershipProjection(owned, buildMarkerContextById(owned));
 
   return (
-    <ScriptPrintRoute
-      productionId={id}
-      blocks={projected}
-      characters={characters}
-      scenes={scenes}
-      config={config}
-      watermarkText={watermarkText}
-      canEditTextLayout={sceneFieldPerms.name}
-    />
+    <>
+      <ScriptPrintRoute
+        productionId={id}
+        blocks={projected}
+        characters={characters}
+        scenes={scenes}
+        config={config}
+        watermarkText={watermarkText}
+        canEditTextLayout={sceneFieldPerms.name}
+      />
+      {/* 三态模型：制作人这类靠角色区间拿资格的人，权限要一键激活成个人行才生效。
+          剧本页有这个门，打印页绕过了 AppShell 没有——于是制作人到这里只看到灰掉的
+          模版菜单、无处激活。挂同一个 scope（含 scene 的 meta/name@edit），确认后
+          hook 会 router.refresh() 让 SSR 算的门重算。 */}
+      <PageActivationGate productionId={id} scope="script" />
+    </>
   );
 }
