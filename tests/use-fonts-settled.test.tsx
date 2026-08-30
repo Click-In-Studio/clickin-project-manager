@@ -1,3 +1,6 @@
+// @vitest-environment jsdom
+// —— 默认配置（npm test）是 node 环境且同样会捞到 *.test.tsx；本测试要真 DOM，
+//    文件级指定 jsdom，两套配置下都能跑。
 /**
  * useFontsSettled（#336 B3）的行为守卫。
  *
