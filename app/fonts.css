@@ -1,0 +1,1179 @@
+/* 由 scripts/fonts/build-fonts.py 生成——不要手改；改配置后重跑脚本。
+ * 每片一条 @font-face + unicode-range：浏览器只下载页面真正用到的片。
+ * 面与许可说明见脚本头注。 */
+
+/* SourceHanSerif · 思源宋体 CN Medium · 台词正文 */
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/0000.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/0100.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-2E7F;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/2e80.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+2E80-33FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/3400.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+3400-37FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/3800.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+3800-3BFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/3c00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+3C00-3FFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/4000.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4000-43FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/4400.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4400-47FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/4800.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4800-4BFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/4c00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4C00-4DBF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/4e00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4E00-51FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/5200.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5200-55FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/5600.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5600-59FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/5a00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5A00-5DFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/5e00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5E00-61FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/6200.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6200-65FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/6600.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6600-69FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/6a00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6A00-6DFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/6e00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6E00-71FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/7200.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7200-75FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/7600.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7600-79FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/7a00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7A00-7DFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/7e00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7E00-81FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/8200.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8200-85FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/8600.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8600-89FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/8a00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8A00-8DFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/8e00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8E00-91FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/9200.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9200-95FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/9600.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9600-99FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/9a00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9A00-9DFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/9e00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9E00-9FFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/f900.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+F900-FAFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/fb00.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+FB00-FE2F;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/fe30.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+FE30-FFEF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/10000.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+10000-1FFFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/20000.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+20000-2FFFF;
+}
+
+/* SourceHanSerif · 思源宋体 CN Bold · 角色名 / 加粗 */
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/0000.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/0100.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-2E7F;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/2e80.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+2E80-33FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/3400.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+3400-37FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/3800.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+3800-3BFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/3c00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+3C00-3FFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/4000.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4000-43FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/4400.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4400-47FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/4800.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4800-4BFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/4c00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4C00-4DBF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/4e00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4E00-51FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/5200.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5200-55FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/5600.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5600-59FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/5a00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5A00-5DFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/5e00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5E00-61FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/6200.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6200-65FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/6600.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6600-69FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/6a00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6A00-6DFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/6e00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6E00-71FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/7200.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7200-75FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/7600.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7600-79FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/7a00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7A00-7DFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/7e00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7E00-81FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/8200.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8200-85FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/8600.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8600-89FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/8a00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8A00-8DFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/8e00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8E00-91FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/9200.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9200-95FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/9600.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9600-99FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/9a00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9A00-9DFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/9e00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9E00-9FFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/a000.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+A000-F8FF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/f900.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+F900-FAFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/fb00.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+FB00-FE2F;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/fe30.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+FE30-FFEF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/10000.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+10000-1FFFF;
+}
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/20000.woff2') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+20000-2FFFF;
+}
+
+/* LXGWWenKai · 霞鹜文楷 Regular v1.522 · 舞台指示（斜体由浏览器合成） */
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/0000.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/0100.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-2E7F;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/2e80.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+2E80-33FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/3400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+3400-37FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/3800.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+3800-3BFF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/3c00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+3C00-3FFF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/4000.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4000-43FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/4400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4400-47FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/4800.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4800-4BFF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/4c00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4C00-4DBF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/4e00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4E00-51FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/5200.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5200-55FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/5600.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5600-59FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/5a00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5A00-5DFF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/5e00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5E00-61FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/6200.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6200-65FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/6600.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6600-69FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/6a00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6A00-6DFF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/6e00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6E00-71FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/7200.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7200-75FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/7600.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7600-79FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/7a00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7A00-7DFF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/7e00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7E00-81FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/8200.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8200-85FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/8600.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8600-89FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/8a00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8A00-8DFF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/8e00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8E00-91FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/9200.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9200-95FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/9600.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9600-99FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/9a00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9A00-9DFF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/9e00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9E00-9FFF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/a000.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+A000-F8FF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/f900.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+F900-FAFF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/fb00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+FB00-FE2F;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/fe30.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+FE30-FFEF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/10000.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+10000-1FFFF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/20000.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+20000-2FFFF;
+}
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/30000.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+30000-3FFFF;
+}
+
+/* ZhuqueFangsong · 朱雀仿宋 Regular v0.212 · 歌词（加粗由浏览器合成） */
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/0000.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/0100.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-2E7F;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/2e80.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+2E80-33FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/3400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+3400-37FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/3800.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+3800-3BFF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/3c00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+3C00-3FFF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/4000.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4000-43FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/4400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4400-47FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/4800.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4800-4BFF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/4c00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4C00-4DBF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/4e00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4E00-51FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/5200.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5200-55FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/5600.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5600-59FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/5a00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5A00-5DFF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/5e00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+5E00-61FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/6200.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6200-65FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/6600.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6600-69FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/6a00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6A00-6DFF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/6e00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+6E00-71FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/7200.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7200-75FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/7600.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7600-79FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/7a00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7A00-7DFF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/7e00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+7E00-81FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/8200.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8200-85FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/8600.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8600-89FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/8a00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8A00-8DFF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/8e00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+8E00-91FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/9200.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9200-95FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/9600.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9600-99FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/9a00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9A00-9DFF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/9e00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+9E00-9FFF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/a000.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+A000-F8FF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/fb00.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+FB00-FE2F;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/fe30.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+FE30-FFEF;
+}
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/20000.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+20000-2FFFF;
+}

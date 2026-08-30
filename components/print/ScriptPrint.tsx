@@ -21,6 +21,7 @@ import type { PageConfig } from "@/lib/script-page";
 import ModeSwitch from "@/components/ModeSwitch";
 import { mdToHtml } from "@/lib/script-md";
 import { isSceneBoundaryBlock, isTextBlock, shouldHideCharacterLabel, shouldShowCharacterGap } from "@/lib/script-block-layout";
+import { useFontsSettled } from "@/components/print/use-fonts-settled";
 
 // ─── Print ────────────────────────────────────────────────────────────────────
 
@@ -362,6 +363,8 @@ export function PrintPaginationMeasure({
       setLayoutMeasureTick((tick) => tick + 1);
     }, 0);
   }, []);
+  // 字体片到位就重测：用回退字体量出来的分页线是错的（#336 B3）
+  useFontsSettled(requestLayoutRemeasure);
 
   useEffect(() => {
     const generation = ++measurementGenerationRef.current;
@@ -1140,6 +1143,8 @@ export default function PrintPreview({
       setLayoutMeasureTick((tick) => tick + 1);
     }, 0);
   }, []);
+  // 字体片到位就重测，且就绪信号只在字体全部就位后的那次测量之后才发（#336 B3）
+  const fontsSettled = useFontsSettled(requestLayoutRemeasure);
 
   useEffect(() => {
     const el = measureRef.current;
@@ -1160,22 +1165,19 @@ export default function PrintPreview({
     data.measureTick === layoutMeasureTick;
   const showLoadingNotice = forceLoadingNotice || !printPreviewReady;
 
-  // 打印路由的就绪信号：分页测量完成 + 字体加载完成。无头浏览器等这个属性，
-  // 不必 sleep 赌时间。字体没到位就分页，换行点是回退字体算的。
-  // （水印不在条件里——它由服务端随首屏下发，不存在"还没到"的状态。）
+  // 打印路由的就绪信号：字体全部就位 **且** 之后的分页测量已完成。无头浏览器等
+  // 这个属性，不必 sleep 赌时间。以前是「量完再等 fonts.ready」——那个 promise
+  // 往往在测量层挂上去之前就解析过了，量出来的仍是回退字体的换行点；现在字体
+  // 每到位一次就重测（useFontsSettled），fontsSettled 为真时 data 一定是字体
+  // 就位后量的。（水印不在条件里——它由服务端随首屏下发，不存在"还没到"的状态。）
   useEffect(() => {
     if (!standalone) return;
-    if (!printPreviewReady) return;
-    let cancelled = false;
-    const mark = () => { if (!cancelled) document.body.dataset.printReady = "1"; };
-    const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
-    if (fonts) fonts.ready.then(mark).catch(mark);
-    else mark();
+    if (!printPreviewReady || !fontsSettled) return;
+    document.body.dataset.printReady = "1";
     return () => {
-      cancelled = true;
       delete document.body.dataset.printReady;
     };
-  }, [standalone, printPreviewReady]);
+  }, [standalone, printPreviewReady, fontsSettled]);
 
   useLayoutEffect(() => {
     const viewport = previewViewportRef.current;

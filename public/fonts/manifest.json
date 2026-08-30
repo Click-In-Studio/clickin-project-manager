@@ -1,0 +1,929 @@
+{
+  "generator": "scripts/fonts/build-fonts.py",
+  "faces": {
+    "shs-medium": {
+      "css_family": "SourceHanSerif",
+      "css_weight": "400 600",
+      "note": "思源宋体 CN Medium · 台词正文",
+      "source": "SourceHanSerifCN-Medium.woff2",
+      "source_url": null,
+      "source_sha256": "fd5b96e62499848477995b82d926990117c867588fd41ce0f9e8719c564b0e66",
+      "renamed_family": "Backstage Serif CN",
+      "chunks": [
+        {
+          "file": "0000.woff2",
+          "range": "U+0000-00FF",
+          "glyphs": 191,
+          "bytes": 16584
+        },
+        {
+          "file": "0100.woff2",
+          "range": "U+0100-2E7F",
+          "glyphs": 914,
+          "bytes": 55540
+        },
+        {
+          "file": "2e80.woff2",
+          "range": "U+2E80-33FF",
+          "glyphs": 1334,
+          "bytes": 194032
+        },
+        {
+          "file": "3400.woff2",
+          "range": "U+3400-37FF",
+          "glyphs": 1024,
+          "bytes": 224032
+        },
+        {
+          "file": "3800.woff2",
+          "range": "U+3800-3BFF",
+          "glyphs": 1024,
+          "bytes": 234404
+        },
+        {
+          "file": "3c00.woff2",
+          "range": "U+3C00-3FFF",
+          "glyphs": 1024,
+          "bytes": 255928
+        },
+        {
+          "file": "4000.woff2",
+          "range": "U+4000-43FF",
+          "glyphs": 1024,
+          "bytes": 246220
+        },
+        {
+          "file": "4400.woff2",
+          "range": "U+4400-47FF",
+          "glyphs": 1024,
+          "bytes": 248992
+        },
+        {
+          "file": "4800.woff2",
+          "range": "U+4800-4BFF",
+          "glyphs": 1024,
+          "bytes": 264060
+        },
+        {
+          "file": "4c00.woff2",
+          "range": "U+4C00-4DBF",
+          "glyphs": 438,
+          "bytes": 137768
+        },
+        {
+          "file": "4e00.woff2",
+          "range": "U+4E00-51FF",
+          "glyphs": 1024,
+          "bytes": 180916
+        },
+        {
+          "file": "5200.woff2",
+          "range": "U+5200-55FF",
+          "glyphs": 1024,
+          "bytes": 185340
+        },
+        {
+          "file": "5600.woff2",
+          "range": "U+5600-59FF",
+          "glyphs": 1024,
+          "bytes": 220972
+        },
+        {
+          "file": "5a00.woff2",
+          "range": "U+5A00-5DFF",
+          "glyphs": 1024,
+          "bytes": 224620
+        },
+        {
+          "file": "5e00.woff2",
+          "range": "U+5E00-61FF",
+          "glyphs": 1024,
+          "bytes": 216220
+        },
+        {
+          "file": "6200.woff2",
+          "range": "U+6200-65FF",
+          "glyphs": 1024,
+          "bytes": 238368
+        },
+        {
+          "file": "6600.woff2",
+          "range": "U+6600-69FF",
+          "glyphs": 1024,
+          "bytes": 197760
+        },
+        {
+          "file": "6a00.woff2",
+          "range": "U+6A00-6DFF",
+          "glyphs": 1024,
+          "bytes": 238584
+        },
+        {
+          "file": "6e00.woff2",
+          "range": "U+6E00-71FF",
+          "glyphs": 1024,
+          "bytes": 263820
+        },
+        {
+          "file": "7200.woff2",
+          "range": "U+7200-75FF",
+          "glyphs": 1024,
+          "bytes": 229636
+        },
+        {
+          "file": "7600.woff2",
+          "range": "U+7600-79FF",
+          "glyphs": 1024,
+          "bytes": 221880
+        },
+        {
+          "file": "7a00.woff2",
+          "range": "U+7A00-7DFF",
+          "glyphs": 1024,
+          "bytes": 252292
+        },
+        {
+          "file": "7e00.woff2",
+          "range": "U+7E00-81FF",
+          "glyphs": 1024,
+          "bytes": 248232
+        },
+        {
+          "file": "8200.woff2",
+          "range": "U+8200-85FF",
+          "glyphs": 1024,
+          "bytes": 223024
+        },
+        {
+          "file": "8600.woff2",
+          "range": "U+8600-89FF",
+          "glyphs": 1024,
+          "bytes": 261480
+        },
+        {
+          "file": "8a00.woff2",
+          "range": "U+8A00-8DFF",
+          "glyphs": 1024,
+          "bytes": 222164
+        },
+        {
+          "file": "8e00.woff2",
+          "range": "U+8E00-91FF",
+          "glyphs": 1024,
+          "bytes": 235172
+        },
+        {
+          "file": "9200.woff2",
+          "range": "U+9200-95FF",
+          "glyphs": 1024,
+          "bytes": 247632
+        },
+        {
+          "file": "9600.woff2",
+          "range": "U+9600-99FF",
+          "glyphs": 1024,
+          "bytes": 249092
+        },
+        {
+          "file": "9a00.woff2",
+          "range": "U+9A00-9DFF",
+          "glyphs": 1024,
+          "bytes": 272440
+        },
+        {
+          "file": "9e00.woff2",
+          "range": "U+9E00-9FFF",
+          "glyphs": 491,
+          "bytes": 153000
+        },
+        {
+          "file": "f900.woff2",
+          "range": "U+F900-FAFF",
+          "glyphs": 123,
+          "bytes": 30504
+        },
+        {
+          "file": "fb00.woff2",
+          "range": "U+FB00-FE2F",
+          "glyphs": 15,
+          "bytes": 2604
+        },
+        {
+          "file": "fe30.woff2",
+          "range": "U+FE30-FFEF",
+          "glyphs": 283,
+          "bytes": 26264
+        },
+        {
+          "file": "10000.woff2",
+          "range": "U+10000-1FFFF",
+          "glyphs": 222,
+          "bytes": 25396
+        },
+        {
+          "file": "20000.woff2",
+          "range": "U+20000-2FFFF",
+          "glyphs": 212,
+          "bytes": 54064
+        }
+      ],
+      "bytes": 6799036
+    },
+    "shs-bold": {
+      "css_family": "SourceHanSerif",
+      "css_weight": "700 900",
+      "note": "思源宋体 CN Bold · 角色名 / 加粗",
+      "source": "SourceHanSerifCN-Bold.woff2",
+      "source_url": null,
+      "source_sha256": "167d224fe3401e39782bad220a334a45ce08104b0d7d21e4e49888d79710e6c2",
+      "renamed_family": "Backstage Serif CN",
+      "chunks": [
+        {
+          "file": "0000.woff2",
+          "range": "U+0000-00FF",
+          "glyphs": 191,
+          "bytes": 17660
+        },
+        {
+          "file": "0100.woff2",
+          "range": "U+0100-2E7F",
+          "glyphs": 1170,
+          "bytes": 277488
+        },
+        {
+          "file": "2e80.woff2",
+          "range": "U+2E80-33FF",
+          "glyphs": 1334,
+          "bytes": 218480
+        },
+        {
+          "file": "3400.woff2",
+          "range": "U+3400-37FF",
+          "glyphs": 1024,
+          "bytes": 252412
+        },
+        {
+          "file": "3800.woff2",
+          "range": "U+3800-3BFF",
+          "glyphs": 1024,
+          "bytes": 271508
+        },
+        {
+          "file": "3c00.woff2",
+          "range": "U+3C00-3FFF",
+          "glyphs": 1024,
+          "bytes": 283036
+        },
+        {
+          "file": "4000.woff2",
+          "range": "U+4000-43FF",
+          "glyphs": 1024,
+          "bytes": 275760
+        },
+        {
+          "file": "4400.woff2",
+          "range": "U+4400-47FF",
+          "glyphs": 1024,
+          "bytes": 278608
+        },
+        {
+          "file": "4800.woff2",
+          "range": "U+4800-4BFF",
+          "glyphs": 1024,
+          "bytes": 291880
+        },
+        {
+          "file": "4c00.woff2",
+          "range": "U+4C00-4DBF",
+          "glyphs": 438,
+          "bytes": 152020
+        },
+        {
+          "file": "4e00.woff2",
+          "range": "U+4E00-51FF",
+          "glyphs": 1024,
+          "bytes": 306512
+        },
+        {
+          "file": "5200.woff2",
+          "range": "U+5200-55FF",
+          "glyphs": 1024,
+          "bytes": 314380
+        },
+        {
+          "file": "5600.woff2",
+          "range": "U+5600-59FF",
+          "glyphs": 1024,
+          "bytes": 421524
+        },
+        {
+          "file": "5a00.woff2",
+          "range": "U+5A00-5DFF",
+          "glyphs": 1024,
+          "bytes": 524600
+        },
+        {
+          "file": "5e00.woff2",
+          "range": "U+5E00-61FF",
+          "glyphs": 1024,
+          "bytes": 426772
+        },
+        {
+          "file": "6200.woff2",
+          "range": "U+6200-65FF",
+          "glyphs": 1024,
+          "bytes": 441640
+        },
+        {
+          "file": "6600.woff2",
+          "range": "U+6600-69FF",
+          "glyphs": 1024,
+          "bytes": 356048
+        },
+        {
+          "file": "6a00.woff2",
+          "range": "U+6A00-6DFF",
+          "glyphs": 1024,
+          "bytes": 434020
+        },
+        {
+          "file": "6e00.woff2",
+          "range": "U+6E00-71FF",
+          "glyphs": 1024,
+          "bytes": 522812
+        },
+        {
+          "file": "7200.woff2",
+          "range": "U+7200-75FF",
+          "glyphs": 1024,
+          "bytes": 437792
+        },
+        {
+          "file": "7600.woff2",
+          "range": "U+7600-79FF",
+          "glyphs": 1024,
+          "bytes": 419336
+        },
+        {
+          "file": "7a00.woff2",
+          "range": "U+7A00-7DFF",
+          "glyphs": 1024,
+          "bytes": 556492
+        },
+        {
+          "file": "7e00.woff2",
+          "range": "U+7E00-81FF",
+          "glyphs": 1024,
+          "bytes": 516408
+        },
+        {
+          "file": "8200.woff2",
+          "range": "U+8200-85FF",
+          "glyphs": 1024,
+          "bytes": 516520
+        },
+        {
+          "file": "8600.woff2",
+          "range": "U+8600-89FF",
+          "glyphs": 1024,
+          "bytes": 529112
+        },
+        {
+          "file": "8a00.woff2",
+          "range": "U+8A00-8DFF",
+          "glyphs": 1024,
+          "bytes": 421628
+        },
+        {
+          "file": "8e00.woff2",
+          "range": "U+8E00-91FF",
+          "glyphs": 1024,
+          "bytes": 483592
+        },
+        {
+          "file": "9200.woff2",
+          "range": "U+9200-95FF",
+          "glyphs": 1024,
+          "bytes": 406296
+        },
+        {
+          "file": "9600.woff2",
+          "range": "U+9600-99FF",
+          "glyphs": 1024,
+          "bytes": 486940
+        },
+        {
+          "file": "9a00.woff2",
+          "range": "U+9A00-9DFF",
+          "glyphs": 1024,
+          "bytes": 499412
+        },
+        {
+          "file": "9e00.woff2",
+          "range": "U+9E00-9FFF",
+          "glyphs": 491,
+          "bytes": 292728
+        },
+        {
+          "file": "a000.woff2",
+          "range": "U+A000-F8FF",
+          "glyphs": 11273,
+          "bytes": 1048608
+        },
+        {
+          "file": "f900.woff2",
+          "range": "U+F900-FAFF",
+          "glyphs": 366,
+          "bytes": 110660
+        },
+        {
+          "file": "fb00.woff2",
+          "range": "U+FB00-FE2F",
+          "glyphs": 15,
+          "bytes": 2664
+        },
+        {
+          "file": "fe30.woff2",
+          "range": "U+FE30-FFEF",
+          "glyphs": 283,
+          "bytes": 26932
+        },
+        {
+          "file": "10000.woff2",
+          "range": "U+10000-1FFFF",
+          "glyphs": 222,
+          "bytes": 29572
+        },
+        {
+          "file": "20000.woff2",
+          "range": "U+20000-2FFFF",
+          "glyphs": 622,
+          "bytes": 160512
+        }
+      ],
+      "bytes": 13012364
+    },
+    "lxgw-regular": {
+      "css_family": "LXGWWenKai",
+      "css_weight": "400",
+      "note": "霞鹜文楷 Regular v1.522 · 舞台指示（斜体由浏览器合成）",
+      "source": "LXGWWenKai-Regular.ttf",
+      "source_url": "https://github.com/lxgw/LxgwWenKai/releases/download/v1.522/LXGWWenKai-Regular.ttf",
+      "source_sha256": "39ad71264b588165b469e35e6afb162a378dacd1f95348160240ba9038ac3009",
+      "renamed_family": null,
+      "chunks": [
+        {
+          "file": "0000.woff2",
+          "range": "U+0000-00FF",
+          "glyphs": 190,
+          "bytes": 14856
+        },
+        {
+          "file": "0100.woff2",
+          "range": "U+0100-2E7F",
+          "glyphs": 2380,
+          "bytes": 114352
+        },
+        {
+          "file": "2e80.woff2",
+          "range": "U+2E80-33FF",
+          "glyphs": 1345,
+          "bytes": 170132
+        },
+        {
+          "file": "3400.woff2",
+          "range": "U+3400-37FF",
+          "glyphs": 1024,
+          "bytes": 294768
+        },
+        {
+          "file": "3800.woff2",
+          "range": "U+3800-3BFF",
+          "glyphs": 1024,
+          "bytes": 317308
+        },
+        {
+          "file": "3c00.woff2",
+          "range": "U+3C00-3FFF",
+          "glyphs": 1024,
+          "bytes": 332900
+        },
+        {
+          "file": "4000.woff2",
+          "range": "U+4000-43FF",
+          "glyphs": 1024,
+          "bytes": 328448
+        },
+        {
+          "file": "4400.woff2",
+          "range": "U+4400-47FF",
+          "glyphs": 1024,
+          "bytes": 346344
+        },
+        {
+          "file": "4800.woff2",
+          "range": "U+4800-4BFF",
+          "glyphs": 1024,
+          "bytes": 374124
+        },
+        {
+          "file": "4c00.woff2",
+          "range": "U+4C00-4DBF",
+          "glyphs": 448,
+          "bytes": 188516
+        },
+        {
+          "file": "4e00.woff2",
+          "range": "U+4E00-51FF",
+          "glyphs": 1024,
+          "bytes": 226964
+        },
+        {
+          "file": "5200.woff2",
+          "range": "U+5200-55FF",
+          "glyphs": 1024,
+          "bytes": 230908
+        },
+        {
+          "file": "5600.woff2",
+          "range": "U+5600-59FF",
+          "glyphs": 1024,
+          "bytes": 274680
+        },
+        {
+          "file": "5a00.woff2",
+          "range": "U+5A00-5DFF",
+          "glyphs": 1024,
+          "bytes": 283464
+        },
+        {
+          "file": "5e00.woff2",
+          "range": "U+5E00-61FF",
+          "glyphs": 1024,
+          "bytes": 272816
+        },
+        {
+          "file": "6200.woff2",
+          "range": "U+6200-65FF",
+          "glyphs": 1024,
+          "bytes": 292568
+        },
+        {
+          "file": "6600.woff2",
+          "range": "U+6600-69FF",
+          "glyphs": 1024,
+          "bytes": 259744
+        },
+        {
+          "file": "6a00.woff2",
+          "range": "U+6A00-6DFF",
+          "glyphs": 1024,
+          "bytes": 292412
+        },
+        {
+          "file": "6e00.woff2",
+          "range": "U+6E00-71FF",
+          "glyphs": 1024,
+          "bytes": 314176
+        },
+        {
+          "file": "7200.woff2",
+          "range": "U+7200-75FF",
+          "glyphs": 1024,
+          "bytes": 277136
+        },
+        {
+          "file": "7600.woff2",
+          "range": "U+7600-79FF",
+          "glyphs": 1024,
+          "bytes": 274360
+        },
+        {
+          "file": "7a00.woff2",
+          "range": "U+7A00-7DFF",
+          "glyphs": 1024,
+          "bytes": 314400
+        },
+        {
+          "file": "7e00.woff2",
+          "range": "U+7E00-81FF",
+          "glyphs": 1024,
+          "bytes": 297568
+        },
+        {
+          "file": "8200.woff2",
+          "range": "U+8200-85FF",
+          "glyphs": 1024,
+          "bytes": 282836
+        },
+        {
+          "file": "8600.woff2",
+          "range": "U+8600-89FF",
+          "glyphs": 1024,
+          "bytes": 319916
+        },
+        {
+          "file": "8a00.woff2",
+          "range": "U+8A00-8DFF",
+          "glyphs": 1024,
+          "bytes": 279412
+        },
+        {
+          "file": "8e00.woff2",
+          "range": "U+8E00-91FF",
+          "glyphs": 1024,
+          "bytes": 291500
+        },
+        {
+          "file": "9200.woff2",
+          "range": "U+9200-95FF",
+          "glyphs": 1024,
+          "bytes": 297520
+        },
+        {
+          "file": "9600.woff2",
+          "range": "U+9600-99FF",
+          "glyphs": 1024,
+          "bytes": 310624
+        },
+        {
+          "file": "9a00.woff2",
+          "range": "U+9A00-9DFF",
+          "glyphs": 1024,
+          "bytes": 334952
+        },
+        {
+          "file": "9e00.woff2",
+          "range": "U+9E00-9FFF",
+          "glyphs": 512,
+          "bytes": 183348
+        },
+        {
+          "file": "a000.woff2",
+          "range": "U+A000-F8FF",
+          "glyphs": 11247,
+          "bytes": 265764
+        },
+        {
+          "file": "f900.woff2",
+          "range": "U+F900-FAFF",
+          "glyphs": 368,
+          "bytes": 126556
+        },
+        {
+          "file": "fb00.woff2",
+          "range": "U+FB00-FE2F",
+          "glyphs": 15,
+          "bytes": 1828
+        },
+        {
+          "file": "fe30.woff2",
+          "range": "U+FE30-FFEF",
+          "glyphs": 283,
+          "bytes": 25636
+        },
+        {
+          "file": "10000.woff2",
+          "range": "U+10000-1FFFF",
+          "glyphs": 371,
+          "bytes": 39408
+        },
+        {
+          "file": "20000.woff2",
+          "range": "U+20000-2FFFF",
+          "glyphs": 2304,
+          "bytes": 739476
+        },
+        {
+          "file": "30000.woff2",
+          "range": "U+30000-3FFFF",
+          "glyphs": 336,
+          "bytes": 98404
+        }
+      ],
+      "bytes": 9690124
+    },
+    "zhuque-regular": {
+      "css_family": "ZhuqueFangsong",
+      "css_weight": "400",
+      "note": "朱雀仿宋 Regular v0.212 · 歌词（加粗由浏览器合成）",
+      "source": "ZhuqueFangsong-Regular.ttf",
+      "source_url": "https://github.com/TrionesType/zhuque/releases/download/v0.212/ZhuqueFangsong-v0.212.zip",
+      "source_sha256": "558c62730844fe54ba220146ed62f859d4e2880188d92d985f8921c6e3743bc4",
+      "renamed_family": null,
+      "chunks": [
+        {
+          "file": "0000.woff2",
+          "range": "U+0000-00FF",
+          "glyphs": 192,
+          "bytes": 12980
+        },
+        {
+          "file": "0100.woff2",
+          "range": "U+0100-2E7F",
+          "glyphs": 1142,
+          "bytes": 48428
+        },
+        {
+          "file": "2e80.woff2",
+          "range": "U+2E80-33FF",
+          "glyphs": 201,
+          "bytes": 26920
+        },
+        {
+          "file": "3400.woff2",
+          "range": "U+3400-37FF",
+          "glyphs": 12,
+          "bytes": 6384
+        },
+        {
+          "file": "3800.woff2",
+          "range": "U+3800-3BFF",
+          "glyphs": 14,
+          "bytes": 7368
+        },
+        {
+          "file": "3c00.woff2",
+          "range": "U+3C00-3FFF",
+          "glyphs": 13,
+          "bytes": 7528
+        },
+        {
+          "file": "4000.woff2",
+          "range": "U+4000-43FF",
+          "glyphs": 11,
+          "bytes": 6192
+        },
+        {
+          "file": "4400.woff2",
+          "range": "U+4400-47FF",
+          "glyphs": 13,
+          "bytes": 7392
+        },
+        {
+          "file": "4800.woff2",
+          "range": "U+4800-4BFF",
+          "glyphs": 5,
+          "bytes": 3260
+        },
+        {
+          "file": "4c00.woff2",
+          "range": "U+4C00-4DBF",
+          "glyphs": 11,
+          "bytes": 7232
+        },
+        {
+          "file": "4e00.woff2",
+          "range": "U+4E00-51FF",
+          "glyphs": 610,
+          "bytes": 197300
+        },
+        {
+          "file": "5200.woff2",
+          "range": "U+5200-55FF",
+          "glyphs": 631,
+          "bytes": 213292
+        },
+        {
+          "file": "5600.woff2",
+          "range": "U+5600-59FF",
+          "glyphs": 562,
+          "bytes": 222924
+        },
+        {
+          "file": "5a00.woff2",
+          "range": "U+5A00-5DFF",
+          "glyphs": 504,
+          "bytes": 206652
+        },
+        {
+          "file": "5e00.woff2",
+          "range": "U+5E00-61FF",
+          "glyphs": 552,
+          "bytes": 224152
+        },
+        {
+          "file": "6200.woff2",
+          "range": "U+6200-65FF",
+          "glyphs": 567,
+          "bytes": 236648
+        },
+        {
+          "file": "6600.woff2",
+          "range": "U+6600-69FF",
+          "glyphs": 529,
+          "bytes": 203468
+        },
+        {
+          "file": "6a00.woff2",
+          "range": "U+6A00-6DFF",
+          "glyphs": 536,
+          "bytes": 212748
+        },
+        {
+          "file": "6e00.woff2",
+          "range": "U+6E00-71FF",
+          "glyphs": 494,
+          "bytes": 230800
+        },
+        {
+          "file": "7200.woff2",
+          "range": "U+7200-75FF",
+          "glyphs": 545,
+          "bytes": 222100
+        },
+        {
+          "file": "7600.woff2",
+          "range": "U+7600-79FF",
+          "glyphs": 502,
+          "bytes": 214288
+        },
+        {
+          "file": "7a00.woff2",
+          "range": "U+7A00-7DFF",
+          "glyphs": 484,
+          "bytes": 230148
+        },
+        {
+          "file": "7e00.woff2",
+          "range": "U+7E00-81FF",
+          "glyphs": 604,
+          "bytes": 269372
+        },
+        {
+          "file": "8200.woff2",
+          "range": "U+8200-85FF",
+          "glyphs": 541,
+          "bytes": 230016
+        },
+        {
+          "file": "8600.woff2",
+          "range": "U+8600-89FF",
+          "glyphs": 441,
+          "bytes": 206748
+        },
+        {
+          "file": "8a00.woff2",
+          "range": "U+8A00-8DFF",
+          "glyphs": 586,
+          "bytes": 255524
+        },
+        {
+          "file": "8e00.woff2",
+          "range": "U+8E00-91FF",
+          "glyphs": 570,
+          "bytes": 261956
+        },
+        {
+          "file": "9200.woff2",
+          "range": "U+9200-95FF",
+          "glyphs": 561,
+          "bytes": 266988
+        },
+        {
+          "file": "9600.woff2",
+          "range": "U+9600-99FF",
+          "glyphs": 532,
+          "bytes": 251300
+        },
+        {
+          "file": "9a00.woff2",
+          "range": "U+9A00-9DFF",
+          "glyphs": 420,
+          "bytes": 236264
+        },
+        {
+          "file": "9e00.woff2",
+          "range": "U+9E00-9FFF",
+          "glyphs": 238,
+          "bytes": 132008
+        },
+        {
+          "file": "a000.woff2",
+          "range": "U+A000-F8FF",
+          "glyphs": 2,
+          "bytes": 868
+        },
+        {
+          "file": "fb00.woff2",
+          "range": "U+FB00-FE2F",
+          "glyphs": 10,
+          "bytes": 1876
+        },
+        {
+          "file": "fe30.woff2",
+          "range": "U+FE30-FFEF",
+          "glyphs": 43,
+          "bytes": 3608
+        },
+        {
+          "file": "20000.woff2",
+          "range": "U+20000-2FFFF",
+          "glyphs": 204,
+          "bytes": 95888
+        }
+      ],
+      "bytes": 4960620
+    }
+  }
+}

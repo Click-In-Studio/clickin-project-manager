@@ -1,31 +1,24 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
-/* ── Script fonts: self-hosted Source Han Serif CN ───────────────────────── */
-@font-face {
-  font-family: 'SourceHanSerif';
-  src: url('/fonts/SourceHanSerifCN-Medium.woff2') format('woff2');
-  font-weight: 400 600;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'SourceHanSerif';
-  src: url('/fonts/SourceHanSerifCN-Bold.woff2') format('woff2');
-  font-weight: 700 900;
-  font-style: normal;
-  font-display: swap;
-}
+/* ── Script fonts ─────────────────────────────────────────────────────────
+   三个面全部自托管（@font-face 在 app/fonts.css，由 scripts/fonts/build-fonts.py
+   按 unicode-range 切片生成）。栈的次序是分页一致性的一部分：首选自托管面，
+   缺字先落到同样自托管的 SourceHanSerif，最后才是系统字体——这样同一份剧本在
+   Mac / Win / Linux 上换行点相同（#336 B3）。行内舞台指示内嵌在对白块里，
+   字宽不同就是分页不同，不只是「看起来不一样」。 */
 
 :root {
   --background: #ffffff;
   --foreground: #171717;
   --font-script: 'SourceHanSerif', 'Source Han Serif CN', 'STSong', 'SimSun', serif;
-  --font-stage: 'KaiTi', 'STKaiti', 'Kaiti SC', 'SourceHanSerif', 'Source Han Serif CN', serif;
-  /* 歌词：华文中宋是商业字体（随 Office / 旧版 macOS 分发），只能赌本机有，不能自托管。
-     兜底刻意绕开思源宋体——一旦落回它就跟台词同字体（f2cb8d8 埋的坑，20148a3 修好
-     字体 404 后线上显形）。末端兜到系统宋体，保证任何机器上歌词都与台词可区分。 */
-  --font-lyric: 'STZhongsong', '华文中宋', 'Songti SC', 'STSong', 'SimSun', '宋体', serif;
+  /* 舞台指示：霞鹜文楷（OFL，作者明确允许 web 子集化）。以前是 KaiTi / STKaiti
+     这类系统楷体，Linux 没有、三个平台三种字宽。 */
+  --font-stage: 'LXGWWenKai', 'SourceHanSerif', 'KaiTi', 'STKaiti', 'Kaiti SC', serif;
+  /* 歌词：朱雀仿宋（OFL）。华文中宋是商业字体不能自托管，此前只能赌本机有。
+     朱雀是技术预览版、GB2312 全覆盖但生僻字有缺，缺字落到 SourceHanSerif——
+     整行仍是仿宋，与台词可区分；末端系统中宋 / 宋体兜底。 */
+  --font-lyric: 'ZhuqueFangsong', 'SourceHanSerif', 'STZhongsong', '华文中宋', 'Songti SC', 'STSong', 'SimSun', '宋体', serif;
 
   /* ── Design tokens ────────────────────────────────────────────────────────── */
   --ink:          #182a2a;
