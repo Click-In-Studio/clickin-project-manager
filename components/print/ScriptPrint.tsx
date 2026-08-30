@@ -19,22 +19,12 @@ import { PAGE_CONFIGS } from "@/lib/script-page";
 import { printPageCss } from "@/lib/print-css";
 import type { PageConfig } from "@/lib/script-page";
 import ModeSwitch from "@/components/ModeSwitch";
-import { mdToHtml } from "@/lib/script-md";
-import { isSceneBoundaryBlock, isTextBlock, shouldHideCharacterLabel, shouldShowCharacterGap } from "@/lib/script-block-layout";
+import { paginate, planScript, templateForTextLayoutMode, type LayoutItem, type Page, type PaginateResult, type ScriptTemplate } from "@/lib/script-template";
+import { TemplateItemView, TemplateMeasureLayer, heightOfMeasured, readMeasuredHeights, runPaddingOverrides } from "@/components/print/template-render";
 import { useFontsSettled } from "@/components/print/use-fonts-settled";
 
 // ─── Print ────────────────────────────────────────────────────────────────────
 
-type PrintItem =
-  | { kind: "sceneHeader"; scene: Scene }
-  | { kind: "block"; block: Block; hideChar: boolean; leadingCharacterGap: boolean };
-
-const PRINT_CHAR_NAME_HEIGHT = 22;
-const PRINT_CHARACTER_GAP_HEIGHT = 10;
-const PRINT_WRAPPER_PADDING_HEIGHT = 8;
-const PRINT_TEXT_CLASS = "w-full break-words text-sm leading-7";
-const PRINT_STAGE_COMMENT_CLASS = "font-stage text-sm italic leading-7 text-zinc-400 whitespace-pre-wrap";
-const PRINT_COMPACT_CHARACTER_OPTICAL_OFFSET_PX: number = 1;
 const PRINT_TOOLBAR_UNFOLD_BUFFER_PX = 16;
 const PRINT_PREVIEW_MIN_SCALE = 0.1;
 const PRINT_PREVIEW_MAX_SCALE = 2;
@@ -42,23 +32,6 @@ const PRINT_PREVIEW_SIDE_GUTTER_PX = 32;
 const PRINT_PREVIEW_PAGE_GUTTER_PX = 64;
 const PRINT_PAGINATION_MEASURE_BATCH_SIZE = 32;
 
-type PrintPaginationMeasurement = {
-  generation: number;
-  blocks: Block[];
-  characters: Character[];
-  scenes: Scene[];
-  pageLayout: PageLayout;
-  stageDelimOpen: string;
-  stageDelimClose: string;
-  textLayoutMode: ScriptTextLayoutMode;
-  batchStart: number;
-};
-
-type PrintPageData = {
-  items: PrintItem[];
-  sceneLabel: string;
-  pageNum: number;
-};
 type PrintHeaderMode = "all-left" | "all-right" | "first-right" | "first-left";
 type PrintToolbarStage = 0 | 1 | 2 | 3;
 const PRINT_HEADER_MODES: PrintHeaderMode[] = ["all-left", "all-right", "first-right", "first-left"];
@@ -69,93 +42,35 @@ const PRINT_HEADER_MODE_LABELS: Record<PrintHeaderMode, string> = {
   "first-left": "首页页眉靠左",
 };
 
-function computePrintPages(
+/**
+ * 分页的输入：模版 + 规则求值后的 LayoutItem（docs/script-template-engine.md §3）。
+ * 预览与编辑器的分页线测量层都从这里拿项，渲染与分页只有引擎这一份。
+ */
+function usePlannedItems(
   blocks: Block[],
+  characters: Character[],
   scenes: Scene[],
-  heights: Record<string, number>,
-  contentH: number
-): { pages: PrintPageData[]; scenePageNums: Record<string, number> } {
-  const pages: PrintPageData[] = [];
-  const scenePageNums: Record<string, number> = {};
-  let curItems: PrintItem[] = [];
-  let curH = 0;
-  let curLabel = "";
-  let activeSceneLabel = "";
-  let pageNum = 1;
-  let curHasBlock = false;
-  let prevTextBlock: Block | null = null;
-
-  const flush = () => {
-    if (curItems.length === 0) return;
-    pages.push({ items: [...curItems], sceneLabel: curLabel, pageNum });
-    pageNum++;
-    curItems = [];
-    curH = 0;
-    curLabel = "";
-    curHasBlock = false;
-  };
-
-  const addItem = (item: PrintItem, h: number) => {
-    const forcedCharHeight = item.kind === "block" && item.hideChar && item.block.characterIds.length > 0
-      ? PRINT_CHAR_NAME_HEIGHT + PRINT_WRAPPER_PADDING_HEIGHT
-      : 0;
-    let firstBlockOnPage = item.kind === "block" && !curHasBlock;
-    const leadingGapHeight = item.kind === "block" && item.leadingCharacterGap && !firstBlockOnPage
-      ? PRINT_CHARACTER_GAP_HEIGHT
-      : 0;
-    let nextH = h + leadingGapHeight + (firstBlockOnPage ? forcedCharHeight : 0);
-    if (curH + nextH > contentH && curItems.length > 0) {
-      flush();
-      firstBlockOnPage = item.kind === "block";
-      nextH = h + (firstBlockOnPage ? forcedCharHeight : 0);
-    }
-    const nextItem = firstBlockOnPage
-      ? { ...item, hideChar: false, leadingCharacterGap: false }
-      : item;
-    curItems.push(nextItem);
-    curH += nextH;
-    if (item.kind === "block") {
-      if (!curHasBlock) curLabel = activeSceneLabel;
-      curHasBlock = true;
-    }
-  };
-
-  for (let i = 0; i < blocks.length; i++) {
-    const block = blocks[i];
-    if (!isTextBlock(block)) continue;
-    const prev = prevTextBlock;
-    const hideChar = shouldHideCharacterLabel(prev, block);
-    const leadingCharacterGap = shouldShowCharacterGap(prev, block, hideChar);
-
-    if (!block.sceneId) {
-      activeSceneLabel = "";
-    } else if (block.sceneId !== prev?.sceneId) {
-      const scene = scenes.find((s) => s.id === block.sceneId);
-      if (scene) {
-        activeSceneLabel = scene.number;
-        addItem({ kind: "sceneHeader", scene }, heights[`sh-${block.sceneId}`] ?? 52);
-        if (!(scene.id in scenePageNums)) scenePageNums[scene.id] = pageNum;
-      } else {
-        activeSceneLabel = "";
-      }
-    }
-
-    addItem({ kind: "block", block, hideChar, leadingCharacterGap }, heights[`b-${block.id}`] ?? 60);
-    prevTextBlock = block;
-  }
-
-  flush();
-  return { pages, scenePageNums };
+  textLayoutMode: ScriptTextLayoutMode,
+  stageDelimOpen: string,
+  stageDelimClose: string,
+): { template: ScriptTemplate; items: LayoutItem[] } {
+  return useMemo(() => {
+    const template = templateForTextLayoutMode(textLayoutMode);
+    const items = planScript(
+      blocks,
+      { template, characters, scenes, stageDelimOpen, stageDelimClose },
+      { headingOnlyIfSceneKnown: true },
+    );
+    return { template, items };
+  }, [blocks, characters, scenes, textLayoutMode, stageDelimOpen, stageDelimClose]);
 }
 
-function pageMapFromPrintPages(pages: PrintPageData[]): Record<string, number> {
-  const pageMap: Record<string, number> = {};
-  for (const page of pages) {
-    for (const item of page.items) {
-      if (item.kind === "block") pageMap[item.block.id] = page.pageNum;
-    }
-  }
-  return pageMap;
+function paginateMeasured(
+  items: LayoutItem[],
+  heights: Record<string, number>,
+  contentH: number,
+): PaginateResult {
+  return paginate(items, { contentHeight: contentH, heightOf: heightOfMeasured(heights), countGapBefore: true });
 }
 
 export function samePageMap(a: Record<string, number> | null, b: Record<string, number>): boolean {
@@ -164,141 +79,6 @@ export function samePageMap(a: Record<string, number> | null, b: Record<string, 
   const bKeys = Object.keys(b);
   if (aKeys.length !== bKeys.length) return false;
   return bKeys.every((key) => a[key] === b[key]);
-}
-
-function PrintMeasurementLayer({
-  blocks,
-  characters,
-  scenes,
-  contentW,
-  compactLayout,
-  stageDelimOpen,
-  stageDelimClose,
-  measureRef,
-  onLayoutChange,
-  blockRange,
-}: {
-  blocks: Block[];
-  characters: Character[];
-  scenes: Scene[];
-  contentW: number;
-  compactLayout: boolean;
-  stageDelimOpen: string;
-  stageDelimClose: string;
-  measureRef: React.RefObject<HTMLDivElement | null>;
-  onLayoutChange?: () => void;
-  blockRange?: { start: number; end: number };
-}) {
-  const characterById = useMemo(() => new Map(characters.map((c) => [c.id, c])), [characters]);
-  const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
-  const allMeasuredBlocks = useMemo(() => blocks.filter(isTextBlock), [blocks]);
-  const rangeStart = blockRange?.start ?? 0;
-  const rangeEnd = blockRange?.end ?? allMeasuredBlocks.length;
-  const measuredBlocks = allMeasuredBlocks.slice(rangeStart, rangeEnd);
-
-  const renderSceneHeader = (scene: Scene) => (
-    <div className="flex items-center gap-3 py-3">
-      <div className="h-px flex-1 bg-zinc-200" />
-      <div className="flex items-baseline gap-2">
-        <span className="text-xs font-bold tracking-widest text-zinc-400">{scene.number}</span>
-        {scene.name && <span className="text-sm text-zinc-500">{scene.name}</span>}
-      </div>
-      <div className="h-px flex-1 bg-zinc-200" />
-    </div>
-  );
-
-  const renderBlock = (block: Block, hideChar: boolean) => {
-    const isStage = block.type === "stage";
-    const sel = block.characterIds
-      .map((id) => characterById.get(id))
-      .filter((c): c is Character => !!c);
-    const blockPaddingClass = isStage ? "py-0" : hideChar ? "py-0" : "py-1";
-    const characterLabel = sel.map((c) => {
-      const ann = block.characterAnnotations[c.id];
-      return ann ? `${c.name}（${ann}）` : c.name;
-    }).join("、");
-
-    if (compactLayout && !isStage) {
-      const stageCommentText = sel.length > 0 && block.stageComment?.trim()
-        ? block.stageComment.trim()
-            .split(/\r\n|\r|\n/)
-            .map((line) => `${stageDelimOpen}${line}${stageDelimClose}`)
-            .join("\n")
-        : "";
-      return (
-        <CompactPrintBlock
-          block={block}
-          blockPaddingClass={blockPaddingClass}
-          characterLabel={characterLabel}
-          showCharacterLabel={!hideChar && sel.length > 0}
-          stageCommentText={stageCommentText}
-          leadingCharacterGap={false}
-          stageDelimOpen={stageDelimOpen}
-          stageDelimClose={stageDelimClose}
-          onLayoutChange={onLayoutChange}
-        />
-      );
-    }
-
-    const content = !isStage && sel.length > 0 && block.stageComment?.trim()
-      ? `${block.stageComment.trim().split(/\r\n|\r|\n/).map((line) => `${stageDelimOpen}${line}${stageDelimClose}`).join("\n")}\n${block.content}`
-      : block.content;
-
-    return (
-      <div className={`w-full ${blockPaddingClass}`}>
-        {!isStage && !hideChar && sel.length > 0 && (
-          <div className="mb-0.5 w-full text-center text-sm font-bold tracking-[0.12em] text-zinc-800">
-            {characterLabel}
-          </div>
-        )}
-        <div
-          className={`${PRINT_TEXT_CLASS} ${
-            isStage
-              ? "font-stage text-left italic text-zinc-500"
-              : block.lyric
-              ? "font-lyric text-center font-bold uppercase text-zinc-800"
-              : "font-script text-center text-zinc-800"
-          }`}
-          dangerouslySetInnerHTML={{ __html: mdToHtml(content, stageDelimOpen, stageDelimClose) || "　" }}
-        />
-      </div>
-    );
-  };
-
-  return (
-    <div
-      ref={measureRef}
-      aria-hidden="true"
-      style={{
-        position: "fixed",
-        left: -9999,
-        top: 0,
-        width: contentW,
-        visibility: "hidden",
-      }}
-    >
-      {measuredBlocks.map((block, i) => {
-        const prev = allMeasuredBlocks[rangeStart + i - 1] ?? null;
-        const hideChar = shouldHideCharacterLabel(prev, block);
-        const sceneStart = isSceneBoundaryBlock(block, prev);
-        return (
-          <div key={block.id}>
-            {sceneStart && (() => {
-              const sceneId = block.sceneId;
-              if (sceneId === null) return null;
-              const scene = sceneById.get(sceneId);
-              return scene ? (
-                <div data-mid={`sh-${sceneId}`}>
-                  {renderSceneHeader(scene)}
-                </div>
-              ) : null;
-            })()}
-            <div data-mid={`b-${block.id}`}>{renderBlock(block, hideChar)}</div>
-          </div>
-        );
-      })}
-    </div>
-  );
 }
 
 export function PrintPaginationMeasure({
@@ -327,7 +107,8 @@ export function PrintPaginationMeasure({
   const pendingMeasureWorkRef = useRef<{ kind: "idle" | "timer"; id: number } | null>(null);
   const pendingMeasureFrameRef = useRef<number | null>(null);
   const measuredPrintHeightsRef = useRef<Record<string, number>>({});
-  const [measurement, setMeasurement] = useState<PrintPaginationMeasurement | null>(null);
+  const { items } = usePlannedItems(blocks, characters, scenes, textLayoutMode, stageDelimOpen, stageDelimClose);
+  const [measurement, setMeasurement] = useState<{ generation: number; items: LayoutItem[]; batchStart: number } | null>(null);
   const cancelPendingMeasureWork = useCallback(() => {
     const pending = pendingMeasureWorkRef.current;
     if (!pending) return;
@@ -371,17 +152,7 @@ export function PrintPaginationMeasure({
     measuredPrintHeightsRef.current = {};
     cancelPendingMeasureFrame();
     scheduleMeasureWork(() => {
-      setMeasurement({
-        generation,
-        blocks: blocks.filter(isTextBlock),
-        characters,
-        scenes,
-        pageLayout,
-        stageDelimOpen,
-        stageDelimClose,
-        textLayoutMode,
-        batchStart: 0,
-      });
+      setMeasurement({ generation, items, batchStart: 0 });
     });
     return () => {
       if (remeasureTimerRef.current) {
@@ -391,24 +162,18 @@ export function PrintPaginationMeasure({
       cancelPendingMeasureWork();
       cancelPendingMeasureFrame();
     };
-  }, [blocks, characters, scenes, pageLayout, stageDelimOpen, stageDelimClose, textLayoutMode, cancelPendingMeasureFrame, cancelPendingMeasureWork, scheduleMeasureWork]);
+  }, [items, pageLayout, cancelPendingMeasureFrame, cancelPendingMeasureWork, scheduleMeasureWork]);
 
   useEffect(() => {
     if (!measurement) return;
     if (measurement.generation !== measurementGenerationRef.current) return;
-    const textBlockCount = measurement.blocks.length;
-    if (textBlockCount === 0) {
+    const total = measurement.items.length;
+    if (total === 0) {
       onPageMapChange({});
-      setMeasurement((current) => current?.generation === measurementGenerationRef.current
-        ? null
-        : current
-      );
+      setMeasurement((current) => current?.generation === measurementGenerationRef.current ? null : current);
       return;
     }
-    const batchEnd = Math.min(
-      textBlockCount,
-      measurement.batchStart + PRINT_PAGINATION_MEASURE_BATCH_SIZE,
-    );
+    const batchEnd = Math.min(total, measurement.batchStart + PRINT_PAGINATION_MEASURE_BATCH_SIZE);
     cancelPendingMeasureFrame();
     pendingMeasureFrameRef.current = requestAnimationFrame(() => {
       pendingMeasureFrameRef.current = requestAnimationFrame(() => {
@@ -416,10 +181,8 @@ export function PrintPaginationMeasure({
         if (measurement.generation !== measurementGenerationRef.current) return;
         const el = measureRef.current;
         if (!el) return;
-        el.querySelectorAll<HTMLElement>("[data-mid]").forEach((node) => {
-          if (node.dataset.mid) measuredPrintHeightsRef.current[node.dataset.mid] = node.offsetHeight;
-        });
-        if (batchEnd < textBlockCount) {
+        readMeasuredHeights(el, measuredPrintHeightsRef.current);
+        if (batchEnd < total) {
           scheduleMeasureWork(() => {
             setMeasurement((current) => current?.generation === measurementGenerationRef.current
               ? { ...current, batchStart: batchEnd }
@@ -428,46 +191,32 @@ export function PrintPaginationMeasure({
           });
           return;
         }
-        const measurementCfg = PAGE_CONFIGS[measurement.pageLayout];
-        const measurementContentH = measurementCfg.height - measurementCfg.marginTop - measurementCfg.marginBottom;
-        const result = computePrintPages(
-          measurement.blocks,
-          measurement.scenes,
-          measuredPrintHeightsRef.current,
-          measurementContentH,
-        );
-        onPageMapChange(pageMapFromPrintPages(result.pages));
-        setMeasurement((current) => current?.generation === measurementGenerationRef.current
-          ? null
-          : current
-        );
+        const cfg = PAGE_CONFIGS[pageLayout];
+        const result = paginateMeasured(measurement.items, measuredPrintHeightsRef.current, cfg.height - cfg.marginTop - cfg.marginBottom);
+        onPageMapChange(result.pageMap);
+        setMeasurement((current) => current?.generation === measurementGenerationRef.current ? null : current);
       });
     });
     return cancelPendingMeasureFrame;
-  }, [measurement, layoutMeasureTick, cancelPendingMeasureFrame, onPageMapChange, scheduleMeasureWork]);
+  }, [measurement, layoutMeasureTick, pageLayout, cancelPendingMeasureFrame, onPageMapChange, scheduleMeasureWork]);
 
   if (!measurement) return null;
 
-  const batchEnd = Math.min(
-    measurement.blocks.length,
-    measurement.batchStart + PRINT_PAGINATION_MEASURE_BATCH_SIZE,
-  );
+  const batchEnd = Math.min(measurement.items.length, measurement.batchStart + PRINT_PAGINATION_MEASURE_BATCH_SIZE);
+  const cfg = PAGE_CONFIGS[pageLayout];
 
   return (
-    <PrintMeasurementLayer
-      blocks={measurement.blocks}
-      characters={measurement.characters}
-      scenes={measurement.scenes}
-      contentW={PAGE_CONFIGS[measurement.pageLayout].width - PAGE_CONFIGS[measurement.pageLayout].marginX * 2}
-      compactLayout={measurement.textLayoutMode === "compact"}
-      stageDelimOpen={measurement.stageDelimOpen}
-      stageDelimClose={measurement.stageDelimClose}
+    <TemplateMeasureLayer
+      items={measurement.items.slice(measurement.batchStart, batchEnd)}
+      contentWidth={cfg.width - cfg.marginX * 2}
+      stageDelimOpen={stageDelimOpen}
+      stageDelimClose={stageDelimClose}
       measureRef={measureRef}
       onLayoutChange={requestLayoutRemeasure}
-      blockRange={{ start: measurement.batchStart, end: batchEnd }}
     />
   );
 }
+
 
 function PrintPage({
   cfg,
@@ -910,143 +659,6 @@ function PrintPageSettingsMenu({
   );
 }
 
-function getElementLineBounds(el: HTMLElement): DOMRect[] {
-  const range = document.createRange();
-  range.selectNodeContents(el);
-  const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
-  range.detach();
-
-  if (rects.length === 0) {
-    const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0 ? [rect] : [];
-  }
-
-  const lines: DOMRect[] = [];
-  for (const rect of rects) {
-    const last = lines[lines.length - 1];
-    if (last && Math.abs(rect.top - last.top) < 2) {
-      const left = Math.min(last.left, rect.left);
-      const top = Math.min(last.top, rect.top);
-      const right = Math.max(last.right, rect.right);
-      const bottom = Math.max(last.bottom, rect.bottom);
-      lines[lines.length - 1] = new DOMRect(left, top, right - left, bottom - top);
-    } else {
-      lines.push(new DOMRect(rect.left, rect.top, rect.width, rect.height));
-    }
-  }
-  return lines;
-}
-
-function CompactPrintBlock({
-  block,
-  blockPaddingClass,
-  characterLabel,
-  showCharacterLabel,
-  stageCommentText,
-  leadingCharacterGap,
-  stageDelimOpen,
-  stageDelimClose,
-  onLayoutChange,
-}: {
-  block: Block;
-  blockPaddingClass: string;
-  characterLabel: string;
-  showCharacterLabel: boolean;
-  stageCommentText: string;
-  leadingCharacterGap: boolean;
-  stageDelimOpen: string;
-  stageDelimClose: string;
-  onLayoutChange?: () => void;
-}) {
-  const characterColumnRef = useRef<HTMLDivElement | null>(null);
-  const firstLineRef = useRef<HTMLDivElement | null>(null);
-  const lastNotifiedOffsetRef = useRef(0);
-  const [firstLineOffset, setFirstLineOffset] = useState(0);
-
-  useLayoutEffect(() => {
-    const characterEl = characterColumnRef.current;
-    const firstLineEl = firstLineRef.current;
-    if (!characterEl || !firstLineEl || !showCharacterLabel) {
-      setFirstLineOffset((prev) => {
-        if (prev === 0) return prev;
-        return 0;
-      });
-      return;
-    }
-
-    const characterLines = getElementLineBounds(characterEl);
-    const firstLines = getElementLineBounds(firstLineEl);
-    const targetLine = characterLines[characterLines.length - 1];
-    const currentLine = firstLines[0];
-    if (!targetLine || !currentLine) return;
-
-    const targetCenter = targetLine.top + targetLine.height / 2 - PRINT_COMPACT_CHARACTER_OPTICAL_OFFSET_PX;
-    const currentCenter = currentLine.top + currentLine.height / 2;
-    const nextOffset = Math.max(
-      0,
-      Math.round(firstLineOffset + targetCenter - currentCenter)
-    );
-
-    setFirstLineOffset((prev) => {
-      if (Math.abs(prev - nextOffset) < 1) return prev;
-      return nextOffset;
-    });
-  }, [block.id, characterLabel, showCharacterLabel, stageCommentText, firstLineOffset]);
-
-  useEffect(() => {
-    if (!onLayoutChange) return;
-    if (lastNotifiedOffsetRef.current === firstLineOffset) return;
-    lastNotifiedOffsetRef.current = firstLineOffset;
-    onLayoutChange();
-  }, [firstLineOffset, onLayoutChange]);
-
-  const firstLineStyle: React.CSSProperties | undefined = firstLineOffset > 0
-    ? { marginTop: firstLineOffset }
-    : undefined;
-  const characterLabelStyle: React.CSSProperties | undefined =
-    PRINT_COMPACT_CHARACTER_OPTICAL_OFFSET_PX !== 0
-      ? { transform: `translateY(${PRINT_COMPACT_CHARACTER_OPTICAL_OFFSET_PX}px)` }
-      : undefined;
-
-  return (
-    <div key={block.id} className={`w-full ${blockPaddingClass}`}>
-      {leadingCharacterGap && <div className="h-2.5" aria-hidden="true" />}
-      <div className="grid grid-cols-[7.5rem_1rem_minmax(0,1fr)] items-start gap-x-2 text-left">
-        <div className="col-start-1 row-start-1 min-w-0 text-right">
-          {showCharacterLabel && (
-            <div
-              ref={characterColumnRef}
-              style={characterLabelStyle}
-              className="max-w-full break-words text-sm font-bold leading-7 tracking-[0.12em] text-zinc-800"
-            >
-              {characterLabel}
-            </div>
-          )}
-        </div>
-        {stageCommentText && (
-          <div
-            ref={firstLineRef}
-            style={firstLineStyle}
-            className={`col-start-3 row-start-1 self-start ${PRINT_STAGE_COMMENT_CLASS}`}
-          >
-            {stageCommentText}
-          </div>
-        )}
-        <div
-          ref={stageCommentText ? undefined : firstLineRef}
-          style={stageCommentText ? undefined : firstLineStyle}
-          className={`col-start-3 min-w-0 ${stageCommentText ? "row-start-2" : "row-start-1"} ${PRINT_TEXT_CLASS} ${
-            block.lyric
-              ? "font-lyric font-bold uppercase text-zinc-800"
-              : "font-script text-zinc-800"
-          }`}
-          dangerouslySetInnerHTML={{ __html: mdToHtml(block.content, stageDelimOpen, stageDelimClose) || "　" }}
-        />
-      </div>
-    </div>
-  );
-}
-
 export default function PrintPreview({
   blocks,
   characters,
@@ -1083,8 +695,9 @@ export default function PrintPreview({
   const compactLayout = textLayoutMode === "compact";
 
   const measureRef = useRef<HTMLDivElement>(null);
+  const { items } = usePlannedItems(blocks, characters, scenes, textLayoutMode, stageDelimOpen, stageDelimClose);
   const [data, setData] = useState<{
-    pages: PrintPageData[];
+    pages: Page[];
     scenePageNums: Record<string, number>;
     layoutMode: ScriptTextLayoutMode;
     measureTick: number;
@@ -1149,16 +762,15 @@ export default function PrintPreview({
   useEffect(() => {
     const el = measureRef.current;
     if (!el) return;
-    const heights: Record<string, number> = {};
-    el.querySelectorAll<HTMLElement>("[data-mid]").forEach((node) => {
-      if (node.dataset.mid) heights[node.dataset.mid] = node.offsetHeight;
-    });
+    const heights = readMeasuredHeights(el);
+    const result = paginateMeasured(items, heights, contentH);
     setData({
-      ...computePrintPages(blocks, scenes, heights, contentH),
+      pages: result.pages,
+      scenePageNums: result.scenePageNums,
       layoutMode: textLayoutMode,
       measureTick: layoutMeasureTick,
     });
-  }, [blocks, characters, scenes, contentW, contentH, textLayoutMode, stageDelimOpen, stageDelimClose, layoutMeasureTick]);
+  }, [items, contentW, contentH, textLayoutMode, layoutMeasureTick]);
 
   const printPreviewReady = !!data &&
     data.layoutMode === textLayoutMode &&
@@ -1321,86 +933,6 @@ export default function PrintPreview({
     }
   }
 
-  const renderSceneHeader = (scene: Scene, key: string) => (
-    <div key={key} className="flex items-center gap-3 py-3">
-      <div className="h-px flex-1 bg-zinc-200" />
-      <div className="flex items-baseline gap-2">
-        <span className="text-xs font-bold tracking-widest text-zinc-400">{scene.number}</span>
-        {scene.name && <span className="text-sm text-zinc-500">{scene.name}</span>}
-      </div>
-      <div className="h-px flex-1 bg-zinc-200" />
-    </div>
-  );
-
-  const renderBlock = (
-    block: Block,
-    hideChar: boolean,
-    leadingCharacterGap = false,
-    continuesToHiddenCharacter = false,
-    endsHiddenCharacterRun = false,
-    measureLayout = false,
-  ) => {
-    const isStage = block.type === "stage";
-    const sel = characters.filter((c) => block.characterIds.includes(c.id));
-    const blockPaddingClass = isStage
-      ? "py-0"
-      : hideChar
-        ? endsHiddenCharacterRun ? "pt-0 pb-1" : "py-0"
-        : continuesToHiddenCharacter ? "pt-1 pb-0" : "py-1";
-    const characterLabel = sel.map((c) => {
-      const ann = block.characterAnnotations[c.id];
-      return ann ? `${c.name}（${ann}）` : c.name;
-    }).join("、");
-
-    if (compactLayout && !isStage) {
-      const stageCommentText = sel.length > 0 && block.stageComment?.trim()
-        ? block.stageComment.trim()
-            .split(/\r\n|\r|\n/)
-            .map((line) => `${stageDelimOpen}${line}${stageDelimClose}`)
-            .join("\n")
-        : "";
-      return (
-        <CompactPrintBlock
-          key={block.id}
-          block={block}
-          blockPaddingClass={blockPaddingClass}
-          characterLabel={characterLabel}
-          showCharacterLabel={!hideChar && sel.length > 0}
-          stageCommentText={stageCommentText}
-          leadingCharacterGap={leadingCharacterGap}
-          stageDelimOpen={stageDelimOpen}
-          stageDelimClose={stageDelimClose}
-          onLayoutChange={measureLayout ? requestLayoutRemeasure : undefined}
-        />
-      );
-    }
-
-    const content = !isStage && sel.length > 0 && block.stageComment?.trim()
-      ? `${block.stageComment.trim().split(/\r\n|\r|\n/).map((line) => `${stageDelimOpen}${line}${stageDelimClose}`).join("\n")}\n${block.content}`
-      : block.content;
-
-    return (
-      <div key={block.id} className={`w-full ${blockPaddingClass}`}>
-        {leadingCharacterGap && <div className="h-2.5" aria-hidden="true" />}
-        {!isStage && !hideChar && sel.length > 0 && (
-          <div className="mb-0.5 w-full text-center text-sm font-bold tracking-[0.12em] text-zinc-800">
-            {characterLabel}
-          </div>
-        )}
-        <div
-          className={`${PRINT_TEXT_CLASS} ${
-            isStage
-              ? "font-stage text-left italic text-zinc-500"
-              : block.lyric
-              ? "font-lyric text-center font-bold uppercase text-zinc-800"
-              : "font-script text-center text-zinc-800"
-          }`}
-          dangerouslySetInnerHTML={{ __html: mdToHtml(content, stageDelimOpen, stageDelimClose) || "　" }}
-        />
-      </div>
-    );
-  };
-
   // standalone（打印路由）用 h-full：root layout 的 body 是 h-full overflow-hidden，
   // 内部 previewViewport 自己滚。fixed inset-0 是嵌在编辑器里时用来盖住 app shell 的，
   // 配合 globals.css 的 body:has(.script-print-root) 在 @media print 下隐藏兄弟子树。
@@ -1500,12 +1032,9 @@ export default function PrintPreview({
             </span>
           </div>
         )}
-        <PrintMeasurementLayer
-          blocks={blocks}
-          characters={characters}
-          scenes={scenes}
-          contentW={contentW}
-          compactLayout={compactLayout}
+        <TemplateMeasureLayer
+          items={items}
+          contentWidth={contentW}
           stageDelimOpen={stageDelimOpen}
           stageDelimClose={stageDelimClose}
           measureRef={measureRef}
@@ -1543,18 +1072,7 @@ export default function PrintPreview({
 
           {/* Content pages */}
           {data?.pages.map((page, idx) => {
-            const continuesToHiddenCharacter = new Set<string>();
-            const endsHiddenCharacterRun = new Set<string>();
-            let nextBlockHidden = false;
-            let hasNextBlock = false;
-            for (let i = page.items.length - 1; i >= 0; i--) {
-              const item = page.items[i];
-              if (item.kind !== "block") continue;
-              if (!item.hideChar && hasNextBlock && nextBlockHidden) continuesToHiddenCharacter.add(item.block.id);
-              if (item.hideChar && (!hasNextBlock || !nextBlockHidden)) endsHiddenCharacterRun.add(item.block.id);
-              nextBlockHidden = item.hideChar;
-              hasNextBlock = true;
-            }
+            const paddingOverrides = runPaddingOverrides(page.items);
             return (
               <PrintPage
                 key={idx}
@@ -1564,18 +1082,17 @@ export default function PrintPreview({
                 pageNum={page.pageNum}
                 watermarkTile={watermarkTile}
               >
-                {page.items.map((item, iIdx) =>
-                  item.kind === "sceneHeader"
-                    ? renderSceneHeader(item.scene, `sh-${item.scene.id}-${iIdx}`)
-                    : renderBlock(
-                        item.block,
-                        item.hideChar,
-                        item.leadingCharacterGap,
-                        continuesToHiddenCharacter.has(item.block.id),
-                        endsHiddenCharacterRun.has(item.block.id),
-                        false,
-                      )
-                )}
+                {page.items.map((placed) => (
+                  <TemplateItemView
+                    key={placed.item.id}
+                    item={placed.item}
+                    variant={placed.variant}
+                    gapBefore={placed.gapBefore}
+                    paddingOverride={paddingOverrides.get(placed.item.id)}
+                    stageDelimOpen={stageDelimOpen}
+                    stageDelimClose={stageDelimClose}
+                  />
+                ))}
               </PrintPage>
             );
           })}

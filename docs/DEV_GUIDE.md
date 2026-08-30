@@ -176,7 +176,7 @@ npm run dev
 
 - 改字体（换版本、加面、调切片区间）只改 `scripts/fonts/build-fonts.py`，然后跑 `python3 scripts/fonts/build-fonts.py`（需要 `pip install fonttools brotli`）——它会按钉死的 URL + sha256 下载源文件到 `scripts/fonts/src/`（gitignored），重切并重写 `app/fonts.css` 与 `public/fonts/manifest.json`。**不要手改 fonts.css**。
 - 字体栈的次序是分页一致性的一部分：首选自托管面 → 缺字落到同样自托管的 `SourceHanSerif` → 最后才是系统字体。`tests/fonts-self-hosted.test.ts` 守着这条与切片覆盖。
-- 跨平台一致性：`scripts/print-consistency/check.ts` 在无头 Chromium 里打开一份夹具剧本的打印路由，与 `golden.json`（Mac 生成）比对页数与每页边界；CI 在 Linux 上跑。改了分页 / 打印 / 字体相关文件而 golden 该变时，本地起 dev server 后 `BASE_URL=http://localhost:3000 npx tsx scripts/print-consistency/check.ts --update` 重新生成并提交。
+- 跨平台一致性：`scripts/print-consistency/check.ts` 在无头 Chromium 里打开一份夹具剧本的打印路由，与 `golden.json`（Mac 生成）比对页数与每页边界；CI 在 Linux 上跑。两份 golden：`golden.json`（居中角色名）与 `golden-compact.json`（左栏角色名，`FIXTURE_TEXT_LAYOUT=compact GOLDEN_PATH=…`）。改了分页 / 打印 / 字体相关文件而 golden 该变时，本地起 dev server 后 `BASE_URL=http://localhost:3000 npx tsx scripts/print-consistency/check.ts --update` 重新生成并提交（compact 那份带上前述两个环境变量）。这两份 golden 也是**排版模版引擎的验收线**：legacy 模版的输出必须与它们一致（`docs/script-template-engine.md` §4）。
 - 打印就绪信号 `body[data-print-ready="1"]` 只在**字体全部就位之后的那次分页测量**完成时才出现（`components/print/use-fonts-settled.ts`）。无头出片等这个属性，不要 sleep。
 
 ---
