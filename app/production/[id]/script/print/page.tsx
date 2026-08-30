@@ -3,13 +3,14 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { canViewScriptBlocks, scriptBlocksUnauthorizedUrl } from "@/lib/script-perm";
-import { getSceneFieldPerms } from "@/lib/scene-field-perms";
 import {
   getProductionPermissionContext,
   getActiveVersionId,
   getUserPrimaryEmail,
+  getMasterScriptViewId,
   loadProduction,
 } from "@/lib/db";
+import { hasEffectiveGrant } from "@/lib/grant-check";
 import { buildMarkerContextById, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
 import ScriptPrintRoute from "@/components/print/ScriptPrintRoute";
 import PageActivationGate from "@/components/PageActivationGate";
@@ -46,11 +47,10 @@ export default async function ScriptPrintPage({
     redirect(scriptBlocksUnauthorizedUrl(id));
   }
 
-  // 「紧凑排版」开关的门：与编辑器同源（scene 的 meta/name@edit，不是粗门
-  // baseCanEditMetadata——用粗门会让只有别的字段权限的人也能改排版）。
-  const sceneFieldPerms = await getSceneFieldPerms(
-    session.userId, id, access.permCtx.isAdmin || access.permCtx.isOwner,
-  );
+  // 排版模版的门：script_view/<主本>@edit（epic #337 §9「改这个视图的排版」），
+  // 与编辑器「页面类型」菜单、config PUT 的版式字段同一把钥匙。
+  const masterViewId = await getMasterScriptViewId(id);
+  const canEditLayout = await hasEffectiveGrant(access.permCtx, id, "script_view", masterViewId ?? "*", "*", "edit");
 
   // 打印水印文案由服务端解析：客户端 fetch /api/me 有竞态，点得快就会出一份
   // 无水印的片子，而水印是安全特性，不能取决于一次请求赢没赢。
@@ -78,11 +78,11 @@ export default async function ScriptPrintPage({
         scenes={scenes}
         config={config}
         watermarkText={watermarkText}
-        canEditTextLayout={sceneFieldPerms.name}
+        canEditTextLayout={canEditLayout}
       />
       {/* 三态模型：制作人这类靠角色区间拿资格的人，权限要一键激活成个人行才生效。
           剧本页有这个门，打印页绕过了 AppShell 没有——于是制作人到这里只看到灰掉的
-          模版菜单、无处激活。挂同一个 scope（含 scene 的 meta/name@edit），确认后
+          模版菜单、无处激活。挂同一个 scope（含 script_view/*@edit），确认后
           hook 会 router.refresh() 让 SSR 算的门重算。 */}
       <PageActivationGate productionId={id} scope="script" />
     </>

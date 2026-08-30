@@ -13,6 +13,7 @@ import { computePageMap } from "@/lib/script-page";
 import { LEGACY_CENTER, LEGACY_COMPACT } from "@/lib/script-template/presets/legacy";
 import { isKnownTemplateId, listTemplatePresets, resolveTemplate, TEMPLATE_PRESETS } from "@/lib/script-template";
 import { PUT as configPUT } from "@/app/api/script/[id]/config/route";
+import { addProductionMember } from "@/lib/db";
 import { makeProduction, cleanupProduction, makeScene, makeBlocks } from "./factories";
 
 let prodId: string;
@@ -20,15 +21,23 @@ let versionId: string;
 let owner: string;
 
 const ctx = () => ({ params: Promise.resolve({ id: prodId }) }) as never;
-function putConfig(body: Record<string, unknown>) {
+function putConfig(body: Record<string, unknown>, asUser: string = owner) {
   return configPUT(new NextRequest(`http://localhost/api/script/${prodId}/config`, {
     method: "PUT",
     headers: {
-      cookie: `${SESSION_COOKIE}=${createSession({ userId: owner, name: "测试", avatarUrl: null, isAdmin: false })}`,
+      cookie: `${SESSION_COOKIE}=${createSession({ userId: asUser, name: "测试", avatarUrl: null, isAdmin: false })}`,
       "content-type": "application/json",
     },
     body: JSON.stringify({ ...DEFAULT_SCRIPT_CONFIG, ...body }),
   }), ctx());
+}
+async function grant(userId: string, type: string, id: string, sub: string, verb: string) {
+  await getPool().query(
+    `INSERT INTO production_member_grant
+       (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source, confirmed_by)
+     VALUES ($1, $2, $3, $4, $5, $6, 'direct', $2)`,
+    [prodId, userId, type, id, sub, verb],
+  );
 }
 async function storedTemplateId(): Promise<string | null> {
   const masterId = await getMasterScriptViewId(prodId);
@@ -113,5 +122,47 @@ describe("落库与读出", () => {
     await saveScriptConfig(prodId, versionId, { ...DEFAULT_SCRIPT_CONFIG, templateId: "legacy-center@1" });
     const r = await getPool().query<{ o: Record<string, unknown> }>("SELECT template_overrides AS o FROM script_view WHERE id = $1", [masterId]);
     expect(r.rows[0].o).toEqual({ future: { x: 1 }, templateId: "legacy-center@1" });
+  });
+});
+
+describe("门：版式字段走 script_view/<主本>@edit，其余剧本设置走 scene meta/name@edit", () => {
+  let sceneOnly: string;
+  let viewEditor: string;
+
+  beforeAll(async () => {
+    const mk = async () => (await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id")).rows[0].id;
+    sceneOnly = await mk();
+    viewEditor = await mk();
+    await addProductionMember(prodId, sceneOnly);
+    await addProductionMember(prodId, viewEditor);
+    await grant(sceneOnly, "scene", "*", "meta/name", "edit");
+    const masterId = (await getMasterScriptViewId(prodId))!;
+    await grant(viewEditor, "script_view", masterId, "*", "edit");
+    // 基线：owner 把模版置回 null、分隔符置缺省
+    await saveScriptConfig(prodId, versionId, { ...DEFAULT_SCRIPT_CONFIG });
+  });
+
+  // 客户端每次发的是整份 config（含 loadProduction 自动装配的 openingChapterMarkerId），
+  // 测试也按这个形状发：在当前值上打补丁，别让没动的字段被判成「改了」
+  const patch = async (p: Record<string, unknown>) => ({ ...(await loadProduction(prodId, versionId))!.state.config, ...p });
+
+  it("只持 scene meta/name@edit：改分隔符 200，改模版 403（库里不变）", async () => {
+    expect((await putConfig(await patch({ stageDelimOpen: "[", stageDelimClose: "]" }), sceneOnly)).status).toBe(200);
+    expect((await putConfig(await patch({ templateId: "legacy-compact@1" }), sceneOnly)).status).toBe(403);
+    expect(await storedTemplateId()).toBeNull();
+    expect((await putConfig(await patch({ pageLayout: "letter" }), sceneOnly)).status).toBe(403);
+  });
+
+  it("持 script_view/<主本>@edit：改模版 200；顺手改分隔符则 403（那是另一把钥匙）", async () => {
+    expect((await putConfig(await patch({ templateId: "legacy-compact@1" }), viewEditor)).status).toBe(200);
+    expect(await storedTemplateId()).toBe("legacy-compact@1");
+    expect((await putConfig(await patch({ stageDelimOpen: "（", stageDelimClose: "）" }), viewEditor)).status).toBe(403);
+  });
+
+  it("什么都没改的整份回写：两把钥匙都不需要（客户端每次发整份 config）", async () => {
+    const nobody = (await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id")).rows[0].id;
+    await addProductionMember(prodId, nobody);
+    const current = (await loadProduction(prodId, versionId))!.state.config;
+    expect((await putConfig({ ...current }, nobody)).status).toBe(200);
   });
 });
