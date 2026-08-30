@@ -1,8 +1,7 @@
 import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getActiveVersionId, loadProduction, getVersion } from "@/lib/db";
-import { computePageMap } from "@/lib/script-page";
+import { getProductionPermissionContext, getActiveVersionId, getVersion, getEstimatedPageMap } from "@/lib/db";
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]/pages">) {
   const { id } = await ctx.params;
@@ -22,9 +21,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
       return Response.json({ error: "版本不存在" }, { status: 404 });
     }
   }
-  if (versionId) {
-  }
-  const result = await loadProduction(id, versionId);
-  const blocks = result?.state.blocks ?? [];
-  return Response.json({ pageMap: computePageMap(blocks) });
+  if (!versionId) return Response.json({ pageMap: {} });
+  // 页码按演出实际版式取（#336）：此前这里缺省 a4/center
+  return Response.json({ pageMap: await getEstimatedPageMap(id, versionId) });
 }

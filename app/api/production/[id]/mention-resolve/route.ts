@@ -1,13 +1,12 @@
 import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getActiveVersionId, listScenesByVersion, getMarkerLabelIndex, getVersion } from "@/lib/db";
+import { getProductionPermissionContext, getActiveVersionId, getVersion, loadProduction, getEstimatedPageMap } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "@/lib/script-marker-sql";
-import { computePageMap } from "@/lib/script-page";
+import { isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
+import { buildMarkerLabelIndex, type MarkerLabelIndex } from "@/lib/script-generated-labels";
 import type { ContentMentionAttrs, BlockDisplayMode } from "@/lib/mention-types";
-import type { Block, BlockType } from "@/lib/script-types";
-import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
+import type { Block } from "@/lib/script-types";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -16,15 +15,16 @@ type ResolveInput = {
   versionId?: string | null;
 };
 
-type PageMapBlockRow = {
-  id: string;
-  snapshot_id: string;
-  type: string;
-  content: string;
-  scene_id: string | null;
-  rehearsal_mark: string | null;
-  stage_comment: string | null;
-  force_show_character_name: boolean;
+/**
+ * 一次请求内的剧本索引。正文只经 `loadProduction()` 读一次（#336：读取面收敛到
+ * 这一个闸口，#339 的权限门只需加在那里），场内序号 / 记号内序号 / 页码全部
+ * 在内存里算。`textBlocks` 走与分页器同一条投影链（marker 归属 → legacy 投影）。
+ */
+type ScriptIndex = {
+  textBlocks: Block[];
+  sceneNumById: Map<string, string>;
+  labels: MarkerLabelIndex;
+  pageMap: () => Promise<Record<string, number>>;
 };
 
 async function resolveProductionVersion(productionId: string, requestedVersionId?: unknown) {
@@ -73,78 +73,23 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const labels: (string | null)[] = new Array(mentions.length).fill(null);
   const urls: (string | null)[] = new Array(mentions.length).fill(null);
 
-  let generatedSceneNumMapPromise: Promise<Map<string, string>> | null = null;
-  async function loadGeneratedSceneNumMap(): Promise<Map<string, string>> {
-    if (!effectiveVersionId) return new Map();
-    generatedSceneNumMapPromise ??= listScenesByVersion(effectiveVersionId)
-      .then((scenes) => new Map(scenes.map((scene) => [scene.id, scene.number])));
-    return generatedSceneNumMapPromise;
-  }
-  let rehearsalLabelsPromise: ReturnType<typeof getMarkerLabelIndex> | null = null;
-  function loadRehearsalLabels() {
-    return rehearsalLabelsPromise ??= effectiveVersionId
-      ? getMarkerLabelIndex(effectiveVersionId)
-      : Promise.resolve(buildMarkerLabelIndex([]));
-  }
-
-  let pageMapPromise: Promise<Record<string, number>> | null = null;
-  async function loadPageMap(): Promise<Record<string, number>> {
-    if (pageMapPromise) return pageMapPromise;
-
-    pageMapPromise = (async () => {
-      const blocksRes = effectiveVersionId
-        ? await pool.query<PageMapBlockRow>(
-            `${VERSION_OWNED_BLOCKS_CTE},
-             version_snapshots AS (
-               SELECT block_id, snapshot_id
-               FROM script_version
-               WHERE version_id = $1
-             )
-             SELECT ob.id, vs.snapshot_id, ob.type, ob.content, ob.scene_id, ob.rehearsal_mark,
-                    s.stage_comment, s.force_show_character_name
-             FROM owned_blocks ob
-             JOIN version_snapshots vs ON vs.block_id = ob.id
-             JOIN script s ON s.id = vs.snapshot_id
-             ORDER BY ob.sort_key`,
-            [effectiveVersionId]
-          )
-        : await pool.query<PageMapBlockRow>(
-            `SELECT id, id AS snapshot_id, type::text AS type, content, scene_id, rehearsal_mark,
-                    stage_comment, force_show_character_name
-             FROM script
-             WHERE production_id = $1
-             ORDER BY sort_key`,
-            [productionId]
-          );
-
-      const snapshotIds = blocksRes.rows.map((row) => row.snapshot_id);
-      const charRes = snapshotIds.length > 0
-        ? await pool.query<{ script_id: string; character_id: string }>(
-            "SELECT script_id, character_id FROM script_character WHERE script_id = ANY($1::text[]) ORDER BY script_id, position",
-            [snapshotIds]
-          )
-        : { rows: [] as Array<{ script_id: string; character_id: string }> };
-      const charMap = new Map<string, string[]>();
-      for (const row of charRes.rows) {
-        if (!charMap.has(row.script_id)) charMap.set(row.script_id, []);
-        charMap.get(row.script_id)!.push(row.character_id);
-      }
-
-      const blocks: Block[] = blocksRes.rows.map((row) => ({
-        id: row.id,
-        type: (["stage", "chapter_marker", "scene_marker", "rehearsal_marker"].includes(row.type) ? row.type : "dialogue") as BlockType,
-        content: row.content,
-        stageComment: row.stage_comment,
-        characterIds: charMap.get(row.snapshot_id) ?? [],
-        characterAnnotations: {},
-        forceShowCharacterName: row.force_show_character_name,
-        lyric: row.type === "lyric",
-        sceneId: row.scene_id,
-        rehearsalMark: row.rehearsal_mark,
-      }));
-      return computePageMap(blocks, "a4", "center", !!effectiveVersionId);
+  // ── 剧本索引（懒加载：没有剧本域 mention 就不碰正文）────────────────────
+  let scriptPromise: Promise<ScriptIndex | null> | null = null;
+  function loadScript(): Promise<ScriptIndex | null> {
+    return scriptPromise ??= (async () => {
+      if (!effectiveVersionId) return null;
+      const loaded = await loadProduction(productionId, effectiveVersionId);
+      if (!loaded) return null;
+      const owned = withMarkerOwnership(loaded.state.blocks);
+      const textBlocks = withLegacyOwnershipProjection(owned).filter((block) => !isMarkerBlock(block));
+      let pageMapPromise: Promise<Record<string, number>> | null = null;
+      return {
+        textBlocks,
+        sceneNumById: new Map(loaded.state.scenes.map((scene) => [scene.id, scene.number])),
+        labels: buildMarkerLabelIndex(owned),
+        pageMap: () => pageMapPromise ??= getEstimatedPageMap(productionId, effectiveVersionId, loaded.state),
+      };
     })();
-    return pageMapPromise;
   }
 
   // Group by kind for batch queries
@@ -167,7 +112,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   // ── scene + rehearsal ─────────────────────────────────────────────────────
   const sceneIdxs = byKind.get("scene") ?? [];
   if (sceneIdxs.length > 0 && effectiveVersionId) {
-    const numByScene = await loadGeneratedSceneNumMap();
+    const numByScene = (await loadScript())?.sceneNumById ?? new Map<string, string>();
     for (const i of sceneIdxs) {
       const m = mentions[i];
       const num = numByScene.get(m.id);
@@ -183,7 +128,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
   const rehearsalIdxs = byKind.get("rehearsal") ?? [];
   if (rehearsalIdxs.length > 0 && effectiveVersionId) {
-    const rehearsalLabels = await loadRehearsalLabels();
+    const rehearsalLabels = (await loadScript())?.labels ?? buildMarkerLabelIndex([]);
     for (const i of rehearsalIdxs) {
       const mention = mentions[i];
       const label = rehearsalLabels.labelByMarkerId.get(mention.id);
@@ -212,43 +157,41 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // scene mode: find scene num and position within scene
     if (byMode.has("scene") && effectiveVersionId) {
       const idxs = byMode.get("scene")!;
-      const ids = idxs.map(i => mentions[i].id);
-      const r = await pool.query<{ block_id: string; scene_id: string; row_num: string }>(
-        `${VERSION_OWNED_BLOCKS_CTE},
-         numbered_blocks AS (
-           SELECT id AS block_id, scene_id,
-                  ROW_NUMBER() OVER (PARTITION BY scene_id ORDER BY sort_key) AS row_num
-           FROM owned_blocks
-           WHERE type NOT IN (${MARKER_TYPES_SQL})
-         )
-         SELECT block_id, scene_id, row_num
-         FROM numbered_blocks
-         WHERE block_id = ANY($2::text[])`,
-        [effectiveVersionId, ids]
-      );
-      const posMap = new Map(r.rows.map(row => [row.block_id, { sceneId: row.scene_id, pos: parseInt(row.row_num) }]));
-
-      const sceneNumMap = await loadGeneratedSceneNumMap();
+      const script = await loadScript();
+      const posMap = new Map<string, { sceneId: string; pos: number }>();
+      const countByScene = new Map<string, number>();
+      for (const block of script?.textBlocks ?? []) {
+        if (!block.sceneId) continue;
+        const pos = (countByScene.get(block.sceneId) ?? 0) + 1;
+        countByScene.set(block.sceneId, pos);
+        posMap.set(block.id, { sceneId: block.sceneId, pos });
+      }
 
       for (const i of idxs) {
         const blockId = mentions[i].id;
         const info = posMap.get(blockId);
         if (!info) { labels[i] = "#[已删除]"; continue; }
-        const num = sceneNumMap.get(info.sceneId);
+        const num = script?.sceneNumById.get(info.sceneId);
         labels[i] = num ? `#${num}-${info.pos}` : "#[已删除]";
         urls[i] = `${base}/script${vParam}#block-${blockId}`;
       }
     }
 
-    // page mode: compute from the effective version's marker-owned blocks
-    if (byMode.has("page")) {
+    // page mode: 页码按演出实际版式取（#336）——此前这里硬编码 a4/center。
+    // 与 scene / rehearsal 分支同样以版本为前提：无版本落到下面的「#[未知版本]」，
+    // 而不是把全部页引用报成「已删除」。
+    if (byMode.has("page") && effectiveVersionId) {
       const idxs = byMode.get("page")!;
-      const pageMap = await loadPageMap();
-      // Group block ids by page
+      const script = await loadScript();
+      const pageMap = script ? await script.pageMap() : {};
+      // 页内序号按**正文顺序**分组，不能按 pageMap 的键序：它来自 JSONB 存储，
+      // Postgres 会按键长/字节序重排，与正文顺序无关。
       const pageGroups = new Map<number, string[]>();
-      for (const [bid, pg] of Object.entries(pageMap)) {
+      for (const block of script?.textBlocks ?? []) {
+        const pg = pageMap[block.id];
+        if (!pg) continue;
         if (!pageGroups.has(pg)) pageGroups.set(pg, []);
-        pageGroups.get(pg)!.push(bid);
+        pageGroups.get(pg)!.push(block.id);
       }
       for (const i of idxs) {
         const blockId = mentions[i].id;
@@ -264,30 +207,24 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // rehearsal mode: find position within rehearsal mark range
     if (byMode.has("rehearsal") && effectiveVersionId) {
       const idxs = byMode.get("rehearsal")!;
-      const ids = idxs.map(i => mentions[i].id);
-      const r = await pool.query<{ block_id: string; scene_id: string; rehearsal_mark: string | null; row_num: string }>(
-        `${VERSION_OWNED_BLOCKS_CTE},
-         numbered_rehearsal_blocks AS (
-           SELECT id AS block_id, scene_id, rehearsal_mark,
-                  ROW_NUMBER() OVER (PARTITION BY scene_id, rehearsal_mark ORDER BY sort_key) AS row_num
-           FROM owned_blocks
-           WHERE type NOT IN (${MARKER_TYPES_SQL}) AND rehearsal_mark IS NOT NULL
-         )
-         SELECT block_id, scene_id, rehearsal_mark, row_num
-         FROM numbered_rehearsal_blocks
-         WHERE block_id = ANY($2::text[])`,
-        [effectiveVersionId, ids]
-      );
-      const blockInfo = new Map(r.rows.map(row => [row.block_id, row]));
-      const rehearsalLabels = await loadRehearsalLabels();
+      const script = await loadScript();
+      const blockInfo = new Map<string, { rehearsalMark: string; pos: number }>();
+      const countByMark = new Map<string, number>();
+      for (const block of script?.textBlocks ?? []) {
+        if (!block.rehearsalMark) continue;
+        const key = `${block.sceneId ?? ""}\u0000${block.rehearsalMark}`;
+        const pos = (countByMark.get(key) ?? 0) + 1;
+        countByMark.set(key, pos);
+        blockInfo.set(block.id, { rehearsalMark: block.rehearsalMark, pos });
+      }
+      const rehearsalLabels = script?.labels ?? buildMarkerLabelIndex([]);
 
       for (const i of idxs) {
         const blockId = mentions[i].id;
         const info = blockInfo.get(blockId);
-        if (!info || !info.rehearsal_mark) { labels[i] = "#[已删除]"; continue; }
-        const pos = parseInt(info.row_num, 10);
-        const label = rehearsalLabels.labelByMarkerId.get(info.rehearsal_mark);
-        labels[i] = label ? `#${label}-${pos}` : "#[已删除]";
+        if (!info) { labels[i] = "#[已删除]"; continue; }
+        const label = rehearsalLabels.labelByMarkerId.get(info.rehearsalMark);
+        labels[i] = label ? `#${label}-${info.pos}` : "#[已删除]";
         urls[i] = `${base}/script${vParam}#block-${blockId}`;
       }
     }

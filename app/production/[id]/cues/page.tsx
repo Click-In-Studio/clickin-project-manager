@@ -7,9 +7,8 @@ import { getSession } from "@/lib/session";
 import {
   getProductionPermissionContext, getProductionName,
   loadProduction, listCueLists, listCuesByProduction,
-  getActiveVersionId, listCueListsWithAccess,
+  getActiveVersionId, listCueListsWithAccess, getEstimatedPageMap,
 } from "@/lib/db";
-import { computePageMap } from "@/lib/script-page";
 import CuePage from "@/components/CuePage";
 
 export default async function CuesPage({
@@ -42,8 +41,8 @@ export default async function CuesPage({
   const editableListIds = cueListsWithAccess.filter(cl => cl.canEdit).map(cl => cl.id);
   const manageListIds = cueListsWithAccess.filter(cl => cl.canManage).map(cl => cl.id);
 
-  const pageLayout = production.state.config.pageLayout;
-  const pageMap: Record<string, number> = computePageMap(production.state.blocks, pageLayout);
+  // 页码走统一读口（#336）：此前这里只传了版式、漏了 textLayoutMode，compact 剧组的 cue 页码是 center 的
+  const pageMap: Record<string, number> = await getEstimatedPageMap(id, resolvedVersionId!, production.state);
 
   return (
     <CuePage
