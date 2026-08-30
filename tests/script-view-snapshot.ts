@@ -10,8 +10,9 @@
  *       script_config 里 pageLayout / textLayoutMode 两键消失、其余键原样
  *   · 一个 script_config 里**没有**版式键、page_map 为 '{}' 的演出（建项后从没改过版式）
  *     → 迁移后主本 a4/center，page_map 仍为 '{}'
- *   · 一个版式键是**非法值**的演出（防御：JSONB 无约束，谁都能写）
- *     → 落回 a4/center，不能让 CHECK 约束把整支迁移打断
+ *   · 一个版式键是**非法值**的演出（防御：JSONB 无约束，谁都能写），page_map 只有
+ *     别的版式那份 → 落回 a4/center，不能让 CHECK 约束把整支迁移打断；page_map 清空
+ *     （可重算缓存，宁可空也不挂一份错版式的页码）
  *
  * 层 3 要钉的是**版式不丢、页码不丢、其余设置不动**——这三条错了都是静默改变全剧组的页码。
  */
@@ -75,10 +76,11 @@ export async function createScriptViewPreMigrationData(
     { a4: { blkA: 1, blkB: 2, blkC: 3 }, letter: letterPageMap, "a3-2col": { blkA: 1 }, "tablet-2col": { blkA: 9 } },
   );
   const dflt = await rawProduction(pool, ownerUserId, { useRehearsalMarks: true }, {});
+  // 非法版式 + page_map 只有别的键：主本落回 a4，缓存里没 a4 那份 → 有意清空
   const invalid = await rawProduction(
     pool, ownerUserId,
     { pageLayout: "b5-weird", textLayoutMode: "sideways", useRehearsalMarks: true },
-    {},
+    { letter: { blkA: 1 } },
   );
   return {
     letterProdId: letter.prodId,

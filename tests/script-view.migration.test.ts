@@ -11,7 +11,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { getPool } from "@/lib/pg";
-import { getMasterScriptViewId, loadPageMap, loadProduction } from "@/lib/db";
+import { getMasterScriptViewId, loadPageMap, loadProduction, saveScriptConfig } from "@/lib/db";
+import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
 import { makeProduction, cleanupProduction } from "./factories";
 import { SCRIPT_VIEW_SNAPSHOT_PATH, type ScriptViewSnapshot } from "./script-view-snapshot";
 
@@ -48,16 +49,32 @@ describe("schema verification", () => {
       WHERE table_schema = 'public' AND table_name = 'production' AND column_name = 'master_view_id'
     `);
     expect(rows).toHaveLength(1);
-    const fk = await getPool().query<{ foreign_table: string; delete_rule: string }>(`
-      SELECT ccu.table_name AS foreign_table, rc.delete_rule
-      FROM information_schema.table_constraints tc
-      JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
-      JOIN information_schema.referential_constraints rc ON rc.constraint_name = tc.constraint_name
-      WHERE tc.constraint_name = 'production_master_view_id_fkey'
+    const fk = await getPool().query<{ definition: string; delete_rule: string }>(`
+      SELECT pg_get_constraintdef(c.oid) AS definition, rc.delete_rule
+      FROM pg_constraint c
+      JOIN information_schema.referential_constraints rc ON rc.constraint_name = c.conname
+      WHERE c.conname = 'production_master_view_id_fkey'
     `);
-    expect(fk.rows[0]?.foreign_table).toBe("script_view");
+    // 复合 FK：主本在库层只能指向本演出的视图
+    expect(fk.rows[0]?.definition).toBe(
+      "FOREIGN KEY (master_view_id, id) REFERENCES script_view(id, production_id)",
+    );
     // 主本不可单独删除：FK 不带 ON DELETE
     expect(fk.rows[0]?.delete_rule).toBe("NO ACTION");
+  });
+
+  it("主本指向别的演出的视图会被库层拒绝", async () => {
+    const a = await makeProduction();
+    const b = await makeProduction();
+    try {
+      const bMaster = await getMasterScriptViewId(b.prodId);
+      await expect(
+        getPool().query("UPDATE production SET master_view_id = $1 WHERE id = $2", [bMaster, a.prodId]),
+      ).rejects.toThrow(/foreign key|violates/i);
+    } finally {
+      await cleanupProduction(a.prodId).catch(() => {});
+      await cleanupProduction(b.prodId).catch(() => {});
+    }
   });
 
   it("page_layout / text_layout_mode 受 CHECK 约束", async () => {
@@ -123,6 +140,29 @@ describe("integrity verification", () => {
     }
   });
 
+  it("写路径自愈：主本缺席时 saveScriptConfig 补一条并落版式，再次调用不多建", async () => {
+    const { prodId, versionId } = await makeProduction();
+    try {
+      // 造「迁移前建的演出且迁移未跑」的形态：解开指针、删掉视图
+      const orig = await getMasterScriptViewId(prodId);
+      await getPool().query("UPDATE production SET master_view_id = NULL WHERE id = $1", [prodId]);
+      await getPool().query("DELETE FROM script_view WHERE id = $1", [orig]);
+      expect(await getMasterScriptViewId(prodId)).toBeNull();
+
+      await saveScriptConfig(prodId, versionId, { ...DEFAULT_SCRIPT_CONFIG, pageLayout: "letter", textLayoutMode: "compact" });
+      const healed = await getMasterScriptViewId(prodId);
+      expect(healed).toBeTruthy();
+      expect((await loadProduction(prodId, versionId))?.state.config).toMatchObject({ pageLayout: "letter", textLayoutMode: "compact" });
+
+      await saveScriptConfig(prodId, versionId, { ...DEFAULT_SCRIPT_CONFIG, pageLayout: "a4" });
+      expect(await getMasterScriptViewId(prodId)).toBe(healed);
+      const n = await getPool().query<{ n: string }>("SELECT count(*) AS n FROM script_view WHERE production_id = $1", [prodId]);
+      expect(n.rows[0].n).toBe("1");
+    } finally {
+      await cleanupProduction(prodId).catch(() => {});
+    }
+  });
+
   it("主本不可单独删除（FK 挡住），删演出则级联带走", async () => {
     const { prodId } = await makeProduction();
     const masterId = await getMasterScriptViewId(prodId);
@@ -172,7 +212,8 @@ describe("invariance verification", () => {
     expect(await loadPageMap(snapshot!.defaultProdId)).toEqual({});
   });
 
-  it.skipIf(!snapshot)("版式键为非法值的演出：落回 a4/center，旧键被剥掉", async () => {
+  it.skipIf(!snapshot)("版式键为非法值的演出：落回 a4/center，旧键被剥掉，错版式的 page_map 清空", async () => {
+    expect(await loadPageMap(snapshot!.invalidProdId)).toEqual({});
     const sv = await getPool().query<{ page_layout: string; text_layout_mode: string; script_config: Record<string, unknown> }>(
       `SELECT sv.page_layout, sv.text_layout_mode, p.script_config
        FROM production p JOIN script_view sv ON sv.id = p.master_view_id WHERE p.id = $1`,

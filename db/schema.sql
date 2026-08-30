@@ -131,15 +131,17 @@ CREATE TABLE IF NOT EXISTS script_view (
   page_sequence      JSONB NOT NULL DEFAULT '[{"kind":"content"}]',
   template_overrides JSONB NOT NULL DEFAULT '{}',
   sort_order         INTEGER NOT NULL DEFAULT 0,
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT script_view_id_production_key UNIQUE (id, production_id)
 );
 
 CREATE INDEX IF NOT EXISTS script_view_production_idx ON script_view(production_id, sort_order);
 
--- Resolve circular FK: production → script_view（无 ON DELETE：主本不可单独删除）
+-- Resolve circular FK: production → script_view。复合 FK 让主本在库层只能指向本演出
+-- 的视图；无 ON DELETE：主本不可单独删除。
 DO $$ BEGIN
   ALTER TABLE production ADD CONSTRAINT production_master_view_id_fkey
-    FOREIGN KEY (master_view_id) REFERENCES script_view(id);
+    FOREIGN KEY (master_view_id, id) REFERENCES script_view(id, production_id);
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
