@@ -71,9 +71,14 @@ CREATE TABLE IF NOT EXISTS production (
   name              TEXT NOT NULL,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   archived_at       TIMESTAMPTZ,
+  -- 剧本设置（舞台指示括号、是否用排练记号）。版式（pageLayout / textLayoutMode）
+  -- 已迁进 script_view（migrate-script-view.sql），这里不再存这两个键。
   script_config     JSONB NOT NULL DEFAULT '{}',
+  -- 估算页码缓存：{ "<script_view.id>": { "<blockId>": page } }，applyPatchToDB 提交后
+  -- 按现存视图各算一份；唯一读者是 lib/db.ts getEstimatedPageMap。
   page_map          JSONB NOT NULL DEFAULT '{}',
   active_version_id TEXT,   -- FK to version(id) added below
+  master_view_id    TEXT,   -- FK to script_view(id) added below；主本（页码坐标来源）
   sort_order        INTEGER NOT NULL DEFAULT 0,
   description       TEXT NOT NULL DEFAULT '',
   avatar_url        TEXT,
@@ -106,6 +111,35 @@ CREATE INDEX IF NOT EXISTS version_production_idx ON version(production_id, crea
 DO $$ BEGIN
   ALTER TABLE production ADD CONSTRAINT production_active_version_id_fkey
     FOREIGN KEY (active_version_id) REFERENCES version(id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ── Script views（本子）─────────────────────────────────────────────────────────
+-- engrave epic #337 / #336：一个演出 N 个本子（导演本 / 舞监本 / 演员分册…），
+-- 各自一套版式；production.master_view_id 指定主本。本阶段只有主本一条，但表按
+-- 多视图建，免得 D 阶段迁全部存量。page_sequence / template_overrides 是 F / C
+-- 阶段的位置预留，缺省值 = 只有内容流、不覆盖模版，当前无读者。
+
+CREATE TABLE IF NOT EXISTS script_view (
+  id                 TEXT PRIMARY KEY,
+  production_id      TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  name               TEXT NOT NULL DEFAULT '',
+  page_layout        TEXT NOT NULL DEFAULT 'a4'
+                     CHECK (page_layout IN ('a4', 'letter', 'a3-2col', 'tablet-2col')),
+  text_layout_mode   TEXT NOT NULL DEFAULT 'center'
+                     CHECK (text_layout_mode IN ('center', 'compact')),
+  page_sequence      JSONB NOT NULL DEFAULT '[{"kind":"content"}]',
+  template_overrides JSONB NOT NULL DEFAULT '{}',
+  sort_order         INTEGER NOT NULL DEFAULT 0,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS script_view_production_idx ON script_view(production_id, sort_order);
+
+-- Resolve circular FK: production → script_view（无 ON DELETE：主本不可单独删除）
+DO $$ BEGIN
+  ALTER TABLE production ADD CONSTRAINT production_master_view_id_fkey
+    FOREIGN KEY (master_view_id) REFERENCES script_view(id);
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 

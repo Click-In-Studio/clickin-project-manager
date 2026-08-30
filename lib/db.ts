@@ -5,7 +5,7 @@ export { upsertFeishuUser, getFeishuUser, attachFeishuToUser } from "./db-feishu
 import type { UserInfo } from "./db-feishu";
 import { SERVER_URL } from "./server-url";
 import type { Pool, PoolClient } from "pg";
-import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout, MarkerMeta } from "./script-types";
+import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout, ScriptTextLayoutMode, MarkerMeta } from "./script-types";
 import { DEFAULT_SCRIPT_CONFIG, usesRehearsalMarksByDefault } from "./script-types";
 import type { PermissionContext } from "./permissions";
 type AtomicPermission = string;
@@ -825,11 +825,18 @@ export async function loadProduction(productionId: string, versionId: string): P
         [versionId]
       ),
     ]),
-    pool.query<{ production_script_config: Partial<ScriptConfig> | null; version_script_config: Partial<ScriptConfig> | null }>(
+    pool.query<{
+      production_script_config: Partial<ScriptConfig> | null;
+      version_script_config: Partial<ScriptConfig> | null;
+      page_layout: string | null;
+      text_layout_mode: string | null;
+    }>(
       `SELECT p.script_config AS production_script_config,
-              v.script_config AS version_script_config
+              v.script_config AS version_script_config,
+              sv.page_layout, sv.text_layout_mode
        FROM production p
        JOIN version v ON v.production_id = p.id
+       LEFT JOIN script_view sv ON sv.id = p.master_view_id
        WHERE p.id = $1 AND v.id = $2`,
       [productionId, versionId]
     ),
@@ -838,6 +845,9 @@ export async function loadProduction(productionId: string, versionId: string): P
   if (!prodRes.rows.length) return null;
   const rawProductionConfig = prodRes.rows[0]?.production_script_config;
   const rawVersionConfig = prodRes.rows[0]?.version_script_config;
+  // 版式只有 script_view 一处真相（#336 B2）：主本行装配进 ScriptConfig，JSONB 里
+  // 即便残留旧键也不算数。无主本（不应发生）落缺省。
+  const masterLayout = scriptViewLayout(prodRes.rows[0]);
 
   // script_character joins on snapshot_id (script.id)
   const snapshotIds_arr = blocksRes.rows.map(r => r.snapshot_id);
@@ -903,6 +913,7 @@ export async function loadProduction(productionId: string, versionId: string): P
     ...DEFAULT_SCRIPT_CONFIG,
     ...(rawProductionConfig ?? {}),
     ...(rawVersionConfig ?? {}),
+    ...masterLayout,
     openingChapterMarkerId,
   };
 
@@ -925,27 +936,24 @@ export async function loadProduction(productionId: string, versionId: string): P
 
 export async function saveScriptConfig(productionId: string, versionId: string | null, config: ScriptConfig): Promise<void> {
   const pool = getPool();
+  // 版式不进 JSONB（#336 B2）：写主本的 script_view 行。
   const configJson = JSON.stringify({
     stageDelimOpen: config.stageDelimOpen,
     stageDelimClose: config.stageDelimClose,
-    pageLayout: config.pageLayout,
-    textLayoutMode: config.textLayoutMode,
     useRehearsalMarks: config.useRehearsalMarks,
   });
+  await pool.query("UPDATE production SET script_config = $1 WHERE id = $2", [configJson, productionId]);
+  const masterViewId = await ensureMasterScriptView(productionId);
   const configUpdate = await pool.query<{ pagination_changed: boolean }>(
     `WITH previous AS (
-       SELECT COALESCE(script_config->>'pageLayout', $3) AS page_layout,
-              COALESCE(script_config->>'textLayoutMode', $4) AS text_layout_mode
-       FROM production
-       WHERE id = $2
+       SELECT page_layout, text_layout_mode FROM script_view WHERE id = $1
      ), updated AS (
-       UPDATE production SET script_config = $1 WHERE id = $2 RETURNING 1
+       UPDATE script_view SET page_layout = $2, text_layout_mode = $3 WHERE id = $1 RETURNING 1
      )
-     SELECT previous.page_layout IS DISTINCT FROM $5
-         OR previous.text_layout_mode IS DISTINCT FROM $6 AS pagination_changed
+     SELECT previous.page_layout IS DISTINCT FROM $2
+         OR previous.text_layout_mode IS DISTINCT FROM $3 AS pagination_changed
      FROM previous, updated`,
-    [configJson, productionId, DEFAULT_SCRIPT_CONFIG.pageLayout, DEFAULT_SCRIPT_CONFIG.textLayoutMode,
-      config.pageLayout, config.textLayoutMode]
+    [masterViewId, config.pageLayout, config.textLayoutMode]
   );
   if (versionId) {
     await pool.query(
@@ -983,7 +991,55 @@ export async function saveScriptStageDelimiters(productionId: string, stageDelim
   );
 }
 
-/** Load the pre-computed page map for a production (keyed by layout → blockId → page). */
+// ── script_view（本子）───────────────────────────────────────────────────────
+// #336 B2：一个演出 N 个本子 + 一个主本，版式（pageLayout / textLayoutMode）只存在
+// script_view 行上。本阶段只有主本一条；多本、权限门、内容过滤在 #339。
+
+function newScriptViewId(): string {
+  return `sv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isPageLayout(value: unknown): value is PageLayout {
+  return typeof value === "string" && (PAGE_LAYOUTS as string[]).includes(value);
+}
+
+function scriptViewLayout(row: { page_layout: string | null; text_layout_mode: string | null } | undefined): {
+  pageLayout: PageLayout; textLayoutMode: ScriptTextLayoutMode;
+} {
+  return {
+    pageLayout: isPageLayout(row?.page_layout) ? row!.page_layout : DEFAULT_SCRIPT_CONFIG.pageLayout,
+    textLayoutMode: row?.text_layout_mode === "compact" ? "compact" : DEFAULT_SCRIPT_CONFIG.textLayoutMode,
+  };
+}
+
+/**
+ * 给演出建主本（createProduction 事务内调用）。版式取缺省——建项目时还没人选过版式。
+ */
+async function createMasterScriptView(productionId: string, client: PoolClient | Pool): Promise<string> {
+  const id = newScriptViewId();
+  await client.query(
+    "INSERT INTO script_view (id, production_id, name) VALUES ($1, $2, '标准本')",
+    [id, productionId],
+  );
+  await client.query("UPDATE production SET master_view_id = $1 WHERE id = $2", [id, productionId]);
+  return id;
+}
+
+export async function getMasterScriptViewId(productionId: string): Promise<string | null> {
+  const res = await getPool().query<{ master_view_id: string | null }>(
+    "SELECT master_view_id FROM production WHERE id = $1", [productionId],
+  );
+  return res.rows[0]?.master_view_id ?? null;
+}
+
+/** 写路径的自愈：主本缺席（迁移前建的演出且迁移未跑）就补一条，别让版式保存静默丢失。 */
+async function ensureMasterScriptView(productionId: string): Promise<string> {
+  const existing = await getMasterScriptViewId(productionId);
+  if (existing) return existing;
+  return createMasterScriptView(productionId, getPool());
+}
+
+/** Load the pre-computed page map for a production (keyed by script_view id → blockId → page). */
 export async function loadPageMap(productionId: string): Promise<Record<string, Record<string, number>> | null> {
   const res = await getPool().query<{ page_map: Record<string, Record<string, number>> | null }>(
     "SELECT page_map FROM production WHERE id = $1",
@@ -1013,26 +1069,31 @@ export async function getEstimatedPageMap(
   await pageMapUpdates.get(versionId)?.catch(() => {});
   const res = await getPool().query<{
     page_map: Record<string, Record<string, number>> | null;
-    page_layout: string | null;
     active_version_id: string | null;
+    master_view_id: string | null;
+    page_layout: string | null;
+    text_layout_mode: string | null;
   }>(
-    `SELECT page_map, script_config->>'pageLayout' AS page_layout, active_version_id
-     FROM production WHERE id = $1`,
+    `SELECT p.page_map, p.active_version_id, p.master_view_id, sv.page_layout, sv.text_layout_mode
+     FROM production p
+     LEFT JOIN script_view sv ON sv.id = p.master_view_id
+     WHERE p.id = $1`,
     [productionId],
   );
   const row = res.rows[0];
   if (!row) return {};
-  const layout = ALL_PATCH_LAYOUTS.find((l) => l === row.page_layout) ?? DEFAULT_SCRIPT_CONFIG.pageLayout;
-  if (row.active_version_id === versionId) {
-    const stored = row.page_map?.[layout];
+  // 页码 = 主本的页码（epic 决策 1 给 #349 留的位置）；page_map 按 view id 键
+  if (row.active_version_id === versionId && row.master_view_id) {
+    const stored = row.page_map?.[row.master_view_id];
     if (stored) return stored;
   }
   const state = preloaded ?? (await loadProduction(productionId, versionId))?.state;
   if (!state) return {};
-  return computePageMap(state.blocks, layout, state.config.textLayoutMode);
+  const { pageLayout, textLayoutMode } = scriptViewLayout(row);
+  return computePageMap(state.blocks, pageLayout, textLayoutMode);
 }
 
-/** Stores a pre-computed page map keyed by layout name for agent queries. */
+/** Stores a pre-computed page map keyed by script_view id（测试与修复脚本用；线上写入走 saveEstimatedPageMaps）. */
 export async function savePageMap(
   productionId: string,
   pageMap: Record<string, Record<string, number>>,
@@ -2319,6 +2380,8 @@ export async function createProduction(
       );
     }
     await createInitialVersion(id, client);
+    // 主本（#336 B2）：版式住在 script_view 行上，建项即带一条，缺省 a4/center。
+    await createMasterScriptView(id, client);
     // 建项目的全部初始状态——角色名单、部门树、部门静态区间键、cue 模版体系的初始行、
     // 策略档位、审批 TTL——统一由项目模版按类型灌入。
     // 见 lib/production-template.ts（模版是代码常量：改它＝改代码＝走 PR）。
@@ -5617,7 +5680,7 @@ export async function listMemberProductions(userId: string): Promise<{ id: strin
 
 // ─── Atomic patch application ─────────────────────────────────────────────────
 
-const ALL_PATCH_LAYOUTS: PageLayout[] = ["a4", "letter", "a3-2col", "tablet-2col"];
+const PAGE_LAYOUTS: PageLayout[] = ["a4", "letter", "a3-2col", "tablet-2col"];
 const PAGE_MAP_CACHE_LIMIT = 64;
 
 function cacheEstimatedPageMap(key: string, cache: EstimatedPageMapCache): EstimatedPageMapCache {
@@ -5637,24 +5700,32 @@ async function saveEstimatedPageMaps(
   state: ScriptState,
   dirty: "full" | Array<{ start: number; end: number }>,
 ): Promise<void> {
+  // 按现存视图各算一份（#336 B2：page_map 以 script_view id 为键）。本阶段只有主本；
+  // 改版式时 saveScriptConfig 触发全量重算，所以不必再为「万一换版式」预算另外三份。
+  const views = await getPool().query<{ id: string; page_layout: string | null; text_layout_mode: string | null }>(
+    "SELECT id, page_layout, text_layout_mode FROM script_view WHERE production_id = $1 ORDER BY sort_order, created_at",
+    [productionId],
+  );
+  if (views.rows.length === 0) return;
   let changed = false;
-  const computed = ALL_PATCH_LAYOUTS.map((layout) => {
-    const key = `${productionId}:${versionId}:${layout}`;
+  const computed = views.rows.map((view) => {
+    const key = `${productionId}:${versionId}:${view.id}`;
+    const { pageLayout, textLayoutMode } = scriptViewLayout(view);
     const previous = pageMapCache.get(key) ?? null;
     const cache = updateEstimatedPageMap(
       previous,
       state.blocks,
-      layout,
-      state.config.textLayoutMode,
+      pageLayout,
+      textLayoutMode,
       false,
       previous ? dirty : "full",
     );
     if (cache !== previous) changed = true;
-    return { key, layout, cache };
+    return { key, viewId: view.id, cache };
   });
   if (!changed) return;
   await writePageMap(productionId, Object.fromEntries(
-    computed.map(({ layout, cache }) => [layout, cache.pageMap]),
+    computed.map(({ viewId, cache }) => [viewId, cache.pageMap]),
   ));
   for (const { key, cache } of computed) cacheEstimatedPageMap(key, cache);
 }
