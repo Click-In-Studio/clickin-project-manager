@@ -7,6 +7,7 @@ import { useRef, useState, useEffect, type FormEvent, type ChangeEvent } from "r
 import { useSearchParams, useRouter } from "next/navigation";
 import styles from "./account.module.css";
 import type { NotifPref } from "@/lib/notification-prefs";
+import AiUsageCard from "@/components/AiUsageCard";
 
 type Identity = {
   id: string;
@@ -106,6 +107,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
   const [redeemCode, setRedeemCode] = useState("");
   const [redeemBusy, setRedeemBusy] = useState(false);
   const [redeemMsg, setRedeemMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [usageKey, setUsageKey] = useState(0);
 
   // Avatar upload state
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -366,8 +368,14 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
       });
       const data = await res.json();
       if (!res.ok) { setRedeemMsg({ ok: false, text: data.error ?? "兑换失败" }); return; }
-      setPlanInfo({ tier: data.tier, label: data.tierLabel ?? data.tier });
       setRedeemCode("");
+      // 同一个入口两种码（#383）：等级码改档位，AI 额度码只加额度、不动等级。
+      if (data.kind === "credits") {
+        setUsageKey(k => k + 1); // 让用量卡片重新拉一次，立刻看到新余额
+        setRedeemMsg({ ok: true, text: `兑换成功，已补充 AI 额度 ${Number(data.credits).toLocaleString("zh-CN")}` });
+        return;
+      }
+      setPlanInfo({ tier: data.tier, label: data.tierLabel ?? data.tier });
       setRedeemMsg({ ok: true, text: `兑换成功，当前等级：${data.tierLabel ?? data.tier}` });
     } catch {
       setRedeemMsg({ ok: false, text: "网络错误，请重试" });
@@ -857,7 +865,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                     <input
                       value={redeemCode}
                       onChange={e => setRedeemCode(e.target.value)}
-                      placeholder="输入邀请码提升等级"
+                      placeholder="输入等级码或 AI 额度码"
                       disabled={redeemBusy}
                     />
                   </label>
@@ -873,6 +881,9 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                   )}
                 </form>
               </section>
+
+              {/* ── AI 额度（#383）：口径与限流判定同源，看到的就是下一条消息会不会被拦 ── */}
+              <AiUsageCard key={usageKey} scope="account" />
             </>
           )}
         </main>

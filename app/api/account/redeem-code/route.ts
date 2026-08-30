@@ -26,8 +26,11 @@ export async function POST(req: NextRequest) {
         { status },
       );
     }
+    if (result.kind === "credits") {
+      return Response.json({ ok: true, kind: "credits", credits: result.credits });
+    }
     const label = USER_TIERS[result.tier as UserTier]?.label ?? result.tier;
-    return Response.json({ ok: true, tier: result.tier, tierLabel: label });
+    return Response.json({ ok: true, kind: "tier", tier: result.tier, tierLabel: label });
   } catch (err) {
     console.error("[redeem-code] user redeem error:", err);
     return Response.json({ error: "兑换失败，请稍后重试" }, { status: 500 });

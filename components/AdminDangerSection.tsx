@@ -7,6 +7,7 @@ const NO_PERMS: SettingsPerms = {
   canChangeType: false, canChangeLanguage: false, canArchive: false, canDelete: false,
   canImportScript: false, canImportScenes: false,
   canManageTags: false, canToggleWatermark: false, canEditAiInstructions: false,
+  canSeeAiUsage: false, canSeeAiUsageMembers: false,
 };
 
 export default function AdminDangerSection({

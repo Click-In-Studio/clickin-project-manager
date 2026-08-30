@@ -508,6 +508,49 @@
       "default": "now()"
     }
   ],
+  "ai_credit_grant": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "credits",
+      "type": "bigint",
+      "nullable": false
+    },
+    {
+      "column": "remaining",
+      "type": "bigint",
+      "nullable": false
+    },
+    {
+      "column": "source",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "note",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "expires_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "ai_usage": [
     {
       "column": "id",
@@ -544,6 +587,18 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "billed_credits",
+      "type": "bigint",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "paid_from",
+      "type": "text",
+      "nullable": false,
+      "default": "'quota'::text"
     }
   ],
   "announcement_read": [
@@ -2077,7 +2132,7 @@
     {
       "column": "grants_tier",
       "type": "text",
-      "nullable": false
+      "nullable": true
     },
     {
       "column": "grants_exempt",
@@ -2117,6 +2172,12 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "grants_credits",
+      "type": "bigint",
+      "nullable": false,
+      "default": "0"
     }
   ],
   "plan_code_redemption": [

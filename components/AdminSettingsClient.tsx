@@ -4,6 +4,7 @@ import OverflowSafeSelect from "@/components/OverflowSafeSelect";
 
 import PageHeader from "@/components/PageHeader";
 import AiInstructionsCard from "@/components/AiInstructionsCard";
+import AiUsageCard from "@/components/AiUsageCard";
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -146,6 +147,10 @@ export type SettingsPerms = {
   canManageTags: boolean;
   canToggleWatermark: boolean;
   canEditAiInstructions: boolean;
+  /** node:ai/<prod>/usage@view —— 看得到项目 AI 用量总览（默认只有 owner）。 */
+  canSeeAiUsage: boolean;
+  /** node:ai/<prod>/usage/members@view —— 再往下看到按成员的分解。 */
+  canSeeAiUsageMembers: boolean;
 };
 
 export type InitialMeta = {
@@ -201,9 +206,14 @@ export default function AdminSettingsClient({
         {/* ── 成员标签 ── */}
         <MemberTagsCard productionId={productionId} perms={perms} />
 
-        {/* ── AI 助手指令（制作级 agents.md）──
-            两道独立判定：档位没开 AI 则整节不存在（付费维度），有 AI 但无编辑权也不渲染（权限维度）。 */}
+        {/* ── AI ──
+            档位没开 AI 则两张卡都不存在（付费维度）。两张卡的权限维度**互不相干**：
+            指令卡看 ai_instructions 的 edit，用量卡看 ai 类型的 usage@view——
+            能改指令不等于能看账，能看账也不等于能改指令。 */}
         {planAi && perms.canEditAiInstructions && <AiInstructionsCard productionId={productionId} />}
+        {planAi && perms.canSeeAiUsage && (
+          <AiUsageCard scope="production" productionId={productionId} canSeeMembers={perms.canSeeAiUsageMembers} />
+        )}
 
       </div>
     </div>

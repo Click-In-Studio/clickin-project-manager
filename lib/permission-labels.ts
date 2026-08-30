@@ -16,6 +16,9 @@ export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<str
   "node:event/*/call_sheet@view": "查看他人Call Sheet",
   "node:task/*@view": "查看全部任务",
   "node:task/*@delete": "删除任务",
+  // ── 树节点键（AI 用量，#383）──
+  "node:ai/*/usage@view": "查看项目AI用量",
+  "node:ai/*/usage/members@view": "查看成员AI用量明细",
   // ── 树节点键（report 域，批C）──
   "node:event/*/reports@create": "创建报告",
   "node:report/*/replies@create": "回复报告",
@@ -42,6 +45,7 @@ export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<str
 };
 
 export const GROUP_LABELS: Record<string, string> = {
+  ai: "AI 用量",
   production: "项目管理",
   contacts: "通讯录",
   members: "成员管理",
@@ -92,6 +96,10 @@ export function permissionCategories(perms: string[]): string[] {
 // ─── 权限键选择器展示层（管理后台 v3）：type/sub/verb 中文翻译 ───────────────
 
 export const TYPE_LABELS: Record<string, string> = {
+  // AI 用量账本（#383）：只有 view 一个动词——「改额度」不是权限键能表达的东西
+  // （那是兑换码/管理员发放）。默认不进任何角色模版：额度是 owner 的钱，
+  // 要给制作人看由 owner 在权限中心显式发。
+  ai: "AI 用量",
   announcement: "公告",
   asset: "数字资产",
   character: "角色（剧本）",
@@ -139,6 +147,7 @@ export const TYPE_GROUPS: ReadonlyArray<{ label: string; types: readonly string[
   { label: "资产与财务", types: ["asset", "material", "finance"] },
   { label: "人与部门", types: ["member", "dept", "role"] },
   { label: "文档与通告", types: ["wiki", "announcement", "tag_group"] },
+  { label: "AI", types: ["ai"] },
   // 治理域排最后：权限键选择器里它们最少用，且 SENSITIVE/ROOT 面本来就写不进模板。
   { label: "项目治理", types: ["production", "producer"] },
 ];
@@ -168,6 +177,8 @@ export const SUB_LABELS: Record<string, string> = {
   "meta/description": "简介",
   "meta/type": "类型",
   "meta/language": "语言",
+  usage: "AI 用量",
+  "usage/members": "AI 用量（按成员）",
   grants: "授权管理",
   publication: "发布可见",
   assignees: "指派",

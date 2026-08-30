@@ -30,6 +30,7 @@
 | `AGENT_DRAIN_TIMEOUT_MS` | 默认 600000 | 排水上限 |
 | `AGENT_HEARTBEAT_MS` / `AGENT_ORPHAN_AFTER_MS` | 默认 5000 / 30000 | 租约心跳 / 判孤儿 |
 | `AGENT_APPROVAL_TTL_MS` / `AGENT_QUESTION_TTL_MS` | 默认 10min / 15min | 审批 / 提问过期 |
+| `AI_RUN_CREDIT_HARD_CAP` | 默认 200000 | 单个 run 的成本硬顶（credit），防工具死循环——不是限流，豁免档同样受它约束 |
 
 ### 冷层：召回 + `find_tools` 兜底
 
@@ -88,6 +89,27 @@ OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，
 描述、参数 schema、只读/写、`mutates` 声明都在这里；底层实现在 `lib/agent-tools/`；
 中文触发词/例句/族在 `lib/agent-tools/tool-catalog.ts`；显示名在 `lib/agent-tool-labels.ts`。
 三处由 `tests/tool-catalog.test.ts` 与 `tests/agent-tool-labels.test.ts` 双向防漂移——加一个工具要同批改三处。
+
+## 用量与限流（#383）
+
+**计量单位 credit**：1 credit = 1 个 `deepseek-v4-flash` cache-miss input token 的 peak 单价（$0.44/1M）。
+线上实测一次问答 ≈ **1.2 万 credit ≈ $0.005**（input 4.6k + cache_read 16k + output 2.4k）。
+不按裸 token 限流：一次 run 的 token 七成是 cache_read，而它只有 1/31 的单价，按裸 token 限会限错地方。
+
+**钱从哪来**：单价表 = `lib/agent-runtime/config.ts` 的 `Model.cost`（$/1M，peak；off-peak 半价，按 peak 记＝保守）。
+provider 层逐条算出 `usage.cost`，`billing.ts` 折成美元、`lib/plan.ts` 折成 credit。
+**加新模型必须同时登记单价**，否则它的用量记 0 credit。embedding 走另一条常量（DashScope）。
+
+**判定点**：`startRun` 进 harness **之前**判一次（`assertAiQuota`），超限抛 429、不进循环。
+**run 内不打断**——轮内超限打断等于把一次已经花掉的调用扔掉；代价是最后一次会扣穿（负 credit），
+透支上限由 `AI_RUN_CREDIT_HARD_CAP` 封顶。孤儿接管/审批后续跑**不再判**（那是已经开始的任务）。
+
+**账本**：`ai_usage.billed_credits` + `paid_from`。窗口聚合只 SUM `paid_from='quota'`；
+`extra` 走 `ai_credit_grant.remaining` 减法；`exempt` 两边都不进（豁免 ≠ 不记账）。
+compaction 单独记 `kind='chat_compaction'`（v4-pro 三倍单价，此前完全没记）。
+
+**排查**：某人为什么被拦 → `GET /api/account/ai-usage`（他自己）或项目设置页的 AI 用量卡片。
+发额度 → `scripts/admin/gen-ai-credit.sh`（`code` 发码给人自己兑 / `grant` 直接落账）。
 
 ## 跨进程的东西
 

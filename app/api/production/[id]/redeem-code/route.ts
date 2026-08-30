@@ -34,6 +34,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         { status },
       );
     }
+    // 项目侧只可能兑到档位码（wantKinds 只放行 production_upgrade），credits 分支不可达
+    if (result.kind !== "tier") return Response.json({ error: "该兑换码不适用于此处" }, { status: 400 });
     const label = PRODUCTION_TIERS[result.tier as ProductionTier]?.label ?? result.tier;
     return Response.json({ ok: true, tier: result.tier, tierLabel: label, billingExempt: result.billingExempt });
   } catch (err) {
