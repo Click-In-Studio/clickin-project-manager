@@ -69,6 +69,7 @@ export function estimateItemHeight(
 
   const rowHeights = new Map<number, number>();
   let standalone = 0;
+  let sideLabel = 0; // rowSpan "all" 的槽：与各行之和取大
   let inlinePrefixUnits = 0;
   for (const s of item.slots) {
     if (v.hidden.has(s.slot.id)) continue;
@@ -97,10 +98,14 @@ export function estimateItemHeight(
     }
     const lines = item.kind === "sceneHeading" ? 1 : estimateLines(text, upl);
     const h = lines * s.slot.style.lineHeight + (s.slot.marginBottom ?? 0);
+    if (s.slot.box.rowSpan === "all") {
+      sideLabel = Math.max(sideLabel, h);
+      continue;
+    }
     const row = s.slot.box.row;
     rowHeights.set(row, Math.max(rowHeights.get(row) ?? 0, h));
   }
-  let total = standalone + v.paddingTop + v.paddingBottom;
-  for (const h of rowHeights.values()) total += h;
-  return total;
+  let rows = 0;
+  for (const h of rowHeights.values()) rows += h;
+  return standalone + v.paddingTop + v.paddingBottom + Math.max(rows, sideLabel);
 }

@@ -234,10 +234,20 @@ jobs:
           done
           curl -sf http://localhost:3100/login > /dev/null || { cat next-dev.log; exit 1; }
 
-      - name: Compare pagination against golden
+      - name: Compare pagination against golden (center)
         if: steps.relevant.outputs.run == 'true'
         env:
           BASE_URL: http://localhost:3100
+        run: npx tsx scripts/print-consistency/check.ts
+
+      # 第二份 golden：左栏角色名（compact）。两种排版模式的渲染路径不同，只守一种
+      # 会漏掉另一种的回归（模版引擎接入时就靠它抓出了侧栏行折叠的错）。
+      - name: Compare pagination against golden (compact)
+        if: steps.relevant.outputs.run == 'true'
+        env:
+          BASE_URL: http://localhost:3100
+          FIXTURE_TEXT_LAYOUT: compact
+          GOLDEN_PATH: scripts/print-consistency/golden-compact.json
         run: npx tsx scripts/print-consistency/check.ts
 
       - name: Dump dev server log on failure

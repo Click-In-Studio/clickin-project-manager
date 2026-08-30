@@ -25,8 +25,10 @@ import { config as loadEnv } from "dotenv";
 loadEnv({ path: path.resolve(process.cwd(), ".env.local"), quiet: true } as Parameters<typeof loadEnv>[0]);
 
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:3100";
-const GOLDEN_PATH = path.resolve(process.cwd(), "scripts/print-consistency/golden.json");
+const GOLDEN_PATH = path.resolve(process.cwd(), process.env.GOLDEN_PATH ?? "scripts/print-consistency/golden.json");
 const UPDATE = process.argv.includes("--update");
+/** 夹具的排版模式：默认 center；compact 用另一份 golden（GOLDEN_PATH 指过去） */
+const FIXTURE_TEXT_LAYOUT: "center" | "compact" = process.env.FIXTURE_TEXT_LAYOUT === "compact" ? "compact" : "center";
 
 type Golden = {
   pageLayout: string;
@@ -69,7 +71,8 @@ function fixtureBlocks(): Array<{ content: string; lyric: boolean; character: 0 
 
 async function seedFixture(): Promise<{ prodId: string; cookie: string; pageLayout: string; textLayoutMode: string }> {
   const { getPool } = await import("../../lib/pg");
-  const { createProduction, getActiveVersionId, applyPatchToDB, flushToDBVersioned, loadProduction } = await import("../../lib/db");
+  const { createProduction, getActiveVersionId, applyPatchToDB, flushToDBVersioned, loadProduction, saveScriptConfig } = await import("../../lib/db");
+  const { DEFAULT_SCRIPT_CONFIG } = await import("../../lib/script-types");
   const { createSession, SESSION_COOKIE } = await import("../../lib/session");
   const { randomUUID: uuid } = await import("node:crypto");
 
@@ -106,6 +109,9 @@ async function seedFixture(): Promise<{ prodId: string; cookie: string; pageLayo
       characterAnnotations: {}, lyric: line.lyric, sceneId: null, rehearsalMark: null,
     }, afterId);
     afterId = id;
+  }
+  if (FIXTURE_TEXT_LAYOUT === "compact") {
+    await saveScriptConfig(prodId, versionId, { ...DEFAULT_SCRIPT_CONFIG, textLayoutMode: "compact" });
   }
   const loaded = (await loadProduction(prodId, versionId))!;
   const cookie = `${SESSION_COOKIE}=${createSession({ userId: owner, name: "夹具", avatarUrl: null, isAdmin: false })}`;
@@ -161,7 +167,8 @@ async function measure(prodId: string, cookie: string): Promise<Pick<Golden, "pa
         const first = nodes[0];
         return { count: nodes.length, fontFamily: first ? getComputedStyle(first).fontFamily : null, sample: first?.textContent?.slice(0, 20) ?? null };
       };
-      return { byFamily, errors, script: probe(".font-script"), stage: probe(".font-stage"), lyric: probe(".font-lyric"), stageInline: probe(".stage-inline, [data-stage-inline]") };
+      // 渲染器给每个槽标了 data-face（模版引擎起样式是内联的，不再有 .font-* 类）
+      return { byFamily, errors, script: probe('[data-face="script"]'), stage: probe('[data-face="stage"]'), lyric: probe('[data-face="lyric"]'), stageInline: probe(".stage-inline, [data-stage-inline]") };
     });
     if (process.env.PRINT_DIAG || !["SourceHanSerif", "LXGWWenKai", "ZhuqueFangsong"].every((f) => fontFamilies.includes(f))) {
       console.log("诊断：", JSON.stringify(diagnostics, null, 2));

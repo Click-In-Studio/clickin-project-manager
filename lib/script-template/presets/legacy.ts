@@ -13,7 +13,7 @@ const BODY: TextStyle = { face: "script", fontSize: 14, lineHeight: 28, color: "
 const CHARACTER: TextStyle = { face: "script", fontSize: 14, lineHeight: 20, weight: "bold", letterSpacing: "0.12em", color: "#27272a", align: "center" };
 const CHARACTER_COMPACT: TextStyle = { ...CHARACTER, lineHeight: 28, align: "right" };
 const STAGE_COMMENT: TextStyle = { face: "stage", fontSize: 14, lineHeight: 28, italic: true, color: "#a1a1aa", whiteSpace: "pre-wrap" };
-const SCENE_NUMBER: TextStyle = { face: "script", fontSize: 12, lineHeight: 20, weight: "bold", letterSpacing: "0.1em", color: "#a1a1aa" };
+const SCENE_NUMBER: TextStyle = { face: "script", fontSize: 12, lineHeight: 16, weight: "bold", letterSpacing: "0.1em", color: "#a1a1aa" };
 const SCENE_NAME: TextStyle = { face: "script", fontSize: 14, lineHeight: 20, color: "#71717a" };
 
 const SINGLE_COLUMN = { columns: [{ width: "1fr" }], gapX: 0 };
@@ -75,7 +75,7 @@ function legacyCompactDialogue(body: TextStyle): BlockStyle {
     frame: { columns: [{ width: "7.5rem" }, { width: "1rem" }, { width: "1fr" }], gapX: 8 },
     padding: { top: 4, bottom: 4 },
     slots: [
-      { id: "character", field: "character", box: { col: 1, row: 1 }, style: CHARACTER_COMPACT, hideIfEmpty: true },
+      { id: "character", field: "character", box: { col: 1, row: 1, rowSpan: "all" }, style: CHARACTER_COMPACT, hideIfEmpty: true, opticalOffsetY: 1 },
       { id: "stageComment", field: "stageComment", box: { col: 3, row: 1 }, style: STAGE_COMMENT, hideIfEmpty: true, requireCharacters: true },
       { id: "content", field: "content", box: { col: 3, row: 2 }, style: { ...body, align: "left" }, hideIfEmpty: false, alignFirstLineTo: "character" },
     ],
@@ -93,9 +93,10 @@ const LEGACY_STAGE: BlockStyle = {
 const LEGACY_STAGE_COMPACT: BlockStyle = { ...LEGACY_STAGE, estimateWidthInset: 7.5 * 16 + 16 + 16 };
 
 const LEGACY_SCENE_HEADING: BlockStyle = {
-  // flex items-center gap-3 py-3：一行，两侧横线在渲染层画；估算按一行 20 + 24
+  // flex items-center gap-3 py-3：一行，两侧横线（decoration）夹着场号与场名；估算按一行 20 + 24
   frame: { columns: [{ width: "auto" }, { width: "1fr" }], gapX: 8 },
   padding: { top: 12, bottom: 12 },
+  decoration: "rule-lines",
   slots: [
     { id: "scene.number", field: "scene.number", box: { col: 1, row: 1 }, style: SCENE_NUMBER, hideIfEmpty: true },
     { id: "scene.name", field: "scene.name", box: { col: 2, row: 1 }, style: SCENE_NAME, hideIfEmpty: true },

@@ -55,7 +55,8 @@ export type Slot = {
   /** 单字段，或多字段按 joiner 拼成一段（legacy-center 把括号提示与正文放同一个 div） */
   field: SlotField | SlotField[];
   joiner?: string;
-  box: { col: number; row: number; colSpan?: number };
+  /** rowSpan "all" = 侧栏标签，贯穿本块所有行（legacy-compact 的左栏角色名）——不参与行折叠 */
+  box: { col: number; row: number; colSpan?: number; rowSpan?: number | "all" };
   /** 不占格：作为前缀并入 content 首行（「角色：台词」）。T1 只在估算器里实现宽度扣除 */
   inline?: boolean;
   style: TextStyle;
@@ -69,6 +70,8 @@ export type Slot = {
   marginBottom?: number;
   /** 渲染时把本槽首行与另一槽的末行光学对齐（legacy-compact 的角色名 / 正文对齐） */
   alignFirstLineTo?: string;
+  /** px，渲染时整槽下移这么多（legacy-compact 角色名 translateY(1px) 的光学微调） */
+  opticalOffsetY?: number;
 };
 
 export type BlockStyleId = "dialogue" | "lyric" | "stage" | "sceneHeading";
@@ -78,6 +81,8 @@ export type BlockStyle = {
   slots: Slot[];
   /** px，块外沿。规则可改 */
   padding: { top: number; bottom: number };
+  /** 渲染装饰：rule-lines = 两侧横线夹着槽（legacy 场次标题） */
+  decoration?: "rule-lines";
   /**
    * 估算器专用：算列宽前先从内容宽里扣掉这么多。legacy-compact 的估算器给**所有**块
    * （含通栏渲染的舞台指示）都按「减去左栏」的宽度估行数——渲染没这回事，只是估算的
