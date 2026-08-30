@@ -70,31 +70,53 @@ export function estimateItemHeight(
   const rowHeights = new Map<number, number>();
   let standalone = 0;
   let sideLabel = 0; // rowSpan "all" 的槽：与各行之和取大
-  let inlinePrefixUnits = 0;
-  for (const s of item.slots) {
-    if (v.hidden.has(s.slot.id)) continue;
-    if (s.empty && (s.slot.hideIfEmpty ?? true) && !s.parts.some((p) => p.field === "content")) continue;
-    if (s.slot.inline) {
-      inlinePrefixUnits += textUnits(s.text + (v.suffix[s.slot.id] ?? ""));
-      continue;
-    }
-  }
-  for (const s of item.slots) {
-    if (v.hidden.has(s.slot.id) || s.slot.inline) continue;
+
+  const visible = (s: ResolvedSlot) => {
+    if (v.hidden.has(s.slot.id)) return false;
     const isContent = s.parts.some((p) => p.field === "content");
     // 场次标题：估算器拿不到场次表，槽文字是空的，但它仍占一行（legacy SCENE_HEADER_HEIGHT 的口径）
-    if (s.empty && (s.slot.hideIfEmpty ?? true) && !isContent && item.kind !== "sceneHeading") continue;
+    if (s.empty && (s.slot.hideIfEmpty ?? true) && !isContent && item.kind !== "sceneHeading") return false;
+    return true;
+  };
+  const slotText = (s: ResolvedSlot) => s.text + (v.suffix[s.slot.id] ?? "");
+  const hasBlockSlotInRow = (row: number) => item.slots.some((t) => visible(t) && !t.slot.inline && t.slot.box.row === row);
+
+  // inline 槽：同行有占格槽 → 前缀并入该行的 content 首行；同行全是 inline → 连成一条文字流占一行
+  const prefixUnitsByRow = new Map<number, number>();
+  const inlineRows = new Map<number, ResolvedSlot[]>();
+  for (const s of item.slots) {
+    if (!visible(s) || !s.slot.inline) continue;
+    const row = s.slot.box.row;
+    if (hasBlockSlotInRow(row)) prefixUnitsByRow.set(row, (prefixUnitsByRow.get(row) ?? 0) + textUnits(slotText(s)));
+    else inlineRows.set(row, [...(inlineRows.get(row) ?? []), s]);
+  }
+  for (const [row, slots] of inlineRows) {
+    const first = slots[0];
+    const width = slotWidth(frame, widths, first) - (first.slot.indent?.left ?? 0) - (first.slot.indent?.right ?? 0);
+    const fontSize = Math.max(...slots.map((t) => t.slot.style.fontSize));
+    const lineHeight = Math.max(...slots.map((t) => t.slot.style.lineHeight));
+    const upl = Math.max(1, Math.floor(width / fontSize));
+    const text = slots.map(slotText).join(" ");
+    const h = estimateLines(text, upl) * lineHeight + Math.max(0, ...slots.map((t) => t.slot.marginBottom ?? 0));
+    rowHeights.set(row, Math.max(rowHeights.get(row) ?? 0, h));
+  }
+
+  for (const s of item.slots) {
+    if (!visible(s) || s.slot.inline) continue;
+    const isContent = s.parts.some((p) => p.field === "content");
     // legacy quirk：角色名固定按 22px 计，无视它在哪一列
     if (s.slot.id === "character" && options.characterSlotHeight !== undefined) {
       standalone += options.characterSlotHeight;
       continue;
     }
-    const width = slotWidth(frame, widths, s);
+    const width = slotWidth(frame, widths, s) - (s.slot.indent?.left ?? 0) - (s.slot.indent?.right ?? 0);
     const upl = Math.max(1, Math.floor(width / s.slot.style.fontSize));
-    let text = s.text + (v.suffix[s.slot.id] ?? "");
-    if (isContent && inlinePrefixUnits > 0) {
-      // 前缀吃掉首行：用等量全角字占位
-      text = "　".repeat(Math.ceil(inlinePrefixUnits)) + text;
+    let text = slotText(s);
+    const prefixUnits = isContent ? (prefixUnitsByRow.get(s.slot.box.row) ?? 0) : 0;
+    const firstLineUnits = prefixUnits + (s.slot.indent?.firstLine ?? 0) / s.slot.style.fontSize;
+    if (firstLineUnits > 0) {
+      // 前缀 / 首行缩进吃掉首行：用等量全角字占位
+      text = "　".repeat(Math.ceil(firstLineUnits)) + text;
     }
     const lines = item.kind === "sceneHeading" ? 1 : estimateLines(text, upl);
     const h = lines * s.slot.style.lineHeight + (s.slot.marginBottom ?? 0);

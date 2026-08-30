@@ -19,7 +19,8 @@ import { PAGE_CONFIGS } from "@/lib/script-page";
 import { printPageCss } from "@/lib/print-css";
 import type { PageConfig } from "@/lib/script-page";
 import { listTemplatePresets, paginate, planScript, templateById, type LayoutItem, type Page, type PaginateResult, type ScriptTemplate } from "@/lib/script-template";
-import { TemplateItemView, TemplateMeasureLayer, heightOfMeasured, readMeasuredHeights, runPaddingOverrides } from "@/components/print/template-render";
+import { PageBandView, TemplateItemView, TemplateMeasureLayer, heightOfMeasured, pageBandText, readMeasuredHeights, runPaddingOverrides, type PageBandContext } from "@/components/print/template-render";
+import { sceneNumberParts, type PageBand } from "@/lib/script-template";
 import { useFontsSettled } from "@/components/print/use-fonts-settled";
 
 // ─── Print ────────────────────────────────────────────────────────────────────
@@ -217,23 +218,31 @@ export function PrintPaginationMeasure({
 }
 
 
+/** 页眉页脚的字段上下文：本页首块所在的场 */
+function pageBandContext(pageNum: number | null, sceneLabel: string, scene: Scene | null): PageBandContext {
+  const parts = scene ? sceneNumberParts(scene.number) : { actRoman: "", local: "" };
+  return { pageNum, sceneLabel, actRoman: parts.actRoman, sceneLocal: parts.local, sceneNumber: scene?.number ?? "", productionName: "" };
+}
+
 function PrintPage({
   cfg,
   header,
   headerAlign = "left",
-  pageNum,
-  isToc,
+  footer,
+  footerAlign = "center",
   watermarkTile,
   children,
 }: {
   cfg: PageConfig;
-  header: string;
-  headerAlign?: "left" | "right";
-  pageNum: number | null;
-  isToc?: boolean;
+  /** 页眉页脚：模版的页带 + 已解析的文字（空串 = 不显示） */
+  header: { band: PageBand; text: string };
+  headerAlign?: "left" | "center" | "right";
+  footer: { band: PageBand; text: string };
+  footerAlign?: "left" | "center" | "right";
   watermarkTile?: string | null;
   children: React.ReactNode;
 }) {
+  const justify = (align: "left" | "center" | "right") => align === "right" ? "justify-end" : align === "center" ? "justify-center" : "justify-start";
   return (
     <div
       className="print-page relative bg-white shadow-lg print:shadow-none"
@@ -247,11 +256,9 @@ function PrintPage({
           style={{ backgroundImage: watermarkTile, backgroundRepeat: "repeat" }}
         />
       )}
-      {/* Header band */}
+      {/* Header band（内容来自模版 template.page.header） */}
       <div
-        className={`absolute flex items-center border-b border-zinc-100 ${
-          headerAlign === "right" ? "justify-end" : "justify-start"
-        }`}
+        className={`absolute flex items-center border-b border-zinc-100 ${justify(headerAlign)}`}
         style={{
           top: cfg.marginTop - cfg.headerHeight,
           left: cfg.marginX,
@@ -259,11 +266,7 @@ function PrintPage({
           height: cfg.headerHeight,
         }}
       >
-        {!isToc && header && (
-          <span className="text-[10px] font-medium tracking-widest text-zinc-400 uppercase">
-            {header}
-          </span>
-        )}
+        <PageBandView band={header.band} text={header.text} />
       </div>
 
       {/* Content area */}
@@ -279,9 +282,9 @@ function PrintPage({
         {children}
       </div>
 
-      {/* Footer band */}
+      {/* Footer band（内容来自模版 template.page.footer） */}
       <div
-        className="absolute flex items-center justify-center"
+        className={`absolute flex items-center ${justify(footerAlign)}`}
         style={{
           bottom: cfg.marginBottom - cfg.footerHeight,
           left: cfg.marginX,
@@ -289,9 +292,7 @@ function PrintPage({
           height: cfg.footerHeight,
         }}
       >
-        {pageNum !== null && (
-          <span className="text-xs text-zinc-500">— {pageNum} —</span>
-        )}
+        <PageBandView band={footer.band} text={footer.text} />
       </div>
     </div>
   );
@@ -986,12 +987,15 @@ export default function PrintPreview({
     setPendingTemplateId(undefined);
   };
 
-  const getHeaderAlign = (pageNum: number): "left" | "right" => {
+  // 页眉对齐：模版说 alternate 时由「页眉位置」菜单决定（逐页交替 / 统一）；否则按模版固定
+  const bandAlign = (band: PageBand, pageNum: number): "left" | "center" | "right" => {
+    if (band.align !== "alternate") return band.align;
     if (headerMode === "all-left") return "left";
     if (headerMode === "all-right") return "right";
     const firstPageRight = headerMode === "first-right";
     return pageNum % 2 === (firstPageRight ? 1 : 0) ? "right" : "left";
   };
+  const headerAlternates = template.page.header.align === "alternate";
 
   // Scenes in document order for TOC
   const tocScenes: Scene[] = [];
@@ -1016,7 +1020,7 @@ export default function PrintPreview({
         <div className="ml-auto flex shrink-0 flex-nowrap items-center gap-1 sm:gap-3">
           {printToolbarStage < 2 ? (
             <>
-              <PrintHeaderModeMenu headerMode={headerMode} onHeaderModeChange={setHeaderMode} />
+              {headerAlternates && <PrintHeaderModeMenu headerMode={headerMode} onHeaderModeChange={setHeaderMode} />}
               <PrintTemplateMenu
                 templateId={templateId}
                 pendingTemplateId={pendingTemplateId}
@@ -1136,8 +1140,13 @@ export default function PrintPreview({
         >
 
           {/* TOC page */}
-          {tocScenes.length > 0 && (
-            <PrintPage cfg={cfg} header="" pageNum={null} isToc watermarkTile={watermarkTile}>
+          {template.page.toc.enabled && tocScenes.length > 0 && (
+            <PrintPage
+              cfg={cfg}
+              header={{ band: template.page.header, text: "" }}
+              footer={{ band: template.page.footer, text: "" }}
+              watermarkTile={watermarkTile}
+            >
               <div className="pt-6">
                 <h1 className="mb-10 text-center text-base font-bold tracking-[0.25em] text-zinc-700">
                   目录
@@ -1167,9 +1176,10 @@ export default function PrintPreview({
               <PrintPage
                 key={idx}
                 cfg={cfg}
-                header={page.sceneLabel}
-                headerAlign={getHeaderAlign(page.pageNum)}
-                pageNum={page.pageNum}
+                header={{ band: template.page.header, text: pageBandText(template.page.header, pageBandContext(page.pageNum, page.sceneLabel, page.scene)) }}
+                headerAlign={bandAlign(template.page.header, page.pageNum)}
+                footer={{ band: template.page.footer, text: pageBandText(template.page.footer, pageBandContext(page.pageNum, page.sceneLabel, page.scene)) }}
+                footerAlign={bandAlign(template.page.footer, page.pageNum)}
                 watermarkTile={watermarkTile}
               >
                 {page.items.map((placed) => (

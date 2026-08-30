@@ -4,9 +4,10 @@
 import type { ScriptTextLayoutMode } from "../script-types";
 import type { ScriptTemplate } from "./types";
 import { LEGACY_CENTER, LEGACY_COMPACT } from "./presets/legacy";
+import { BROADWAY_MUSICAL } from "./presets/broadway-musical";
 
 export * from "./types";
-export { planBlock, planSceneHeading, planScript, blockStyleIdOf, type PlanContext } from "./plan";
+export { planBlock, planSceneHeading, planScript, blockStyleIdOf, sceneNumberParts, toRoman, type PlanContext } from "./plan";
 export { paginate, type Page, type PlacedItem, type PaginateOptions, type PaginateResult, type HeightOf } from "./paginate";
 export { estimateItemHeight, columnWidths } from "./estimate";
 export { estimateLines, stripHtml, textUnits } from "./text";
@@ -19,6 +20,7 @@ export { estimateLines, stripHtml, textUnits } from "./text";
 export const TEMPLATE_PRESETS: Record<string, ScriptTemplate> = {
   [LEGACY_CENTER.id]: LEGACY_CENTER,
   [LEGACY_COMPACT.id]: LEGACY_COMPACT,
+  [BROADWAY_MUSICAL.id]: BROADWAY_MUSICAL,
 };
 
 /** 给选择界面：每个家族只列最新版本 */

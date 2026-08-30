@@ -97,6 +97,24 @@ function characterLabel(block: Block, characters: Character[]): string {
     .join("、");
 }
 
+export function toRoman(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "";
+  const table: Array<[number, string]> = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
+  let out = "";
+  for (const [v, r] of table) while (n >= v) { out += r; n -= v; }
+  return out;
+}
+
+/**
+ * 生成的场号形如「章-场」（"0-1"）：章节标记从 0 起、场在章内从 1 起（lib/script-generated-labels）。
+ * 只有章没有场时形如 "0"。幕 = 章 + 1 的罗马数字；scene.local = 场在幕内的序号。
+ */
+export function sceneNumberParts(number: string): { actRoman: string; local: string } {
+  const m = /^(\d+)(?:-(.+))?$/.exec(number.trim());
+  if (!m) return { actRoman: "", local: number };
+  return { actRoman: toRoman(Number(m[1]) + 1), local: m[2] ?? "" };
+}
+
 function fieldRaw(field: SlotField, block: Block | null, scene: Scene | null, ctx: PlanContext): string {
   switch (field) {
     case "character": return block ? characterLabel(block, ctx.characters) : "";
@@ -104,6 +122,8 @@ function fieldRaw(field: SlotField, block: Block | null, scene: Scene | null, ct
     case "content": return block?.content ?? "";
     case "scene.number": return scene?.number ?? "";
     case "scene.name": return scene?.name ?? "";
+    case "act.roman": return scene ? sceneNumberParts(scene.number).actRoman : "";
+    case "scene.local": return scene ? sceneNumberParts(scene.number).local : "";
   }
 }
 
@@ -115,6 +135,13 @@ function decorateStageComment(text: string, ctx: PlanContext): string {
 function resolveSlot(slot: Slot, block: Block | null, scene: Scene | null, ctx: PlanContext): ResolvedSlot {
   const fields = Array.isArray(slot.field) ? slot.field : [slot.field];
   const hasCharacters = !!block && block.characterIds.length > 0;
+  // 长度门：按首个字段的原文长度（短提示跟名字同行、长提示另起行）
+  if (slot.when) {
+    const len = fieldRaw(fields[0], block, scene, ctx).length;
+    if ((slot.when.maxChars !== undefined && len > slot.when.maxChars) || (slot.when.minChars !== undefined && len < slot.when.minChars)) {
+      return { slot, text: "", parts: [], empty: true };
+    }
+  }
   const parts: ResolvedSlot["parts"] = [];
   for (const field of fields) {
     if (field === "stageComment" && (slot.requireCharacters ?? true) && !hasCharacters) continue;
@@ -126,7 +153,9 @@ function resolveSlot(slot: Slot, block: Block | null, scene: Scene | null, ctx: 
       continue;
     }
     if (!raw && field !== "content") continue;
-    parts.push({ field, raw, before: slot.decorate?.before ?? "", after: slot.decorate?.after ?? "" });
+    // 正文本身已经带括号（作者自己写了「（……）」）就不再套一层，否则出「((…))」
+    const alreadyWrapped = field === "content" && slot.decorate && /^[(（〔\[]/.test(raw.trim()) && /[)）〕\]]$/.test(raw.trim());
+    parts.push({ field, raw, before: alreadyWrapped ? "" : slot.decorate?.before ?? "", after: alreadyWrapped ? "" : slot.decorate?.after ?? "" });
   }
   const text = parts
     .map((p) => `${p.before}${p.field === "content" ? stripHtml(p.raw) : p.raw}${p.after}`)
@@ -164,7 +193,15 @@ export function planBlock(block: Block, prev: Block | null, ctx: PlanContext): E
 
 export function planSceneHeading(sceneId: string, scene: Scene | null, ctx: PlanContext): Extract<LayoutItem, { kind: "sceneHeading" }> {
   const style = ctx.template.blockStyles.sceneHeading;
-  const variant: Variant = { hidden: new Set(), paddingTop: style.padding.top, paddingBottom: style.padding.bottom, suffix: {} };
+  // 场次标题也过规则（只有 styles 含 sceneHeading 的规则），块相关谓词一律为假；
+  // 用途：每场另起页（breakBefore）
+  const heading = {
+    id: `sh-${sceneId}`, type: "scene_marker" as const, content: "", characterIds: [], characterAnnotations: {},
+    lyric: false, sceneId, rehearsalMark: null,
+  };
+  const applied = applyRules(ctx.template.rules.filter((r) => r.styles?.includes("sceneHeading")), "sceneHeading", style, {
+    block: heading, prev: null, isSceneStart: true, firstOnPage: false,
+  });
   return {
     kind: "sceneHeading",
     id: `sh-${sceneId}`,
@@ -172,8 +209,9 @@ export function planSceneHeading(sceneId: string, scene: Scene | null, ctx: Plan
     sceneId,
     style,
     slots: resolveSlots(style, null, scene, ctx),
-    normal: variant,
-    pageTop: variant,
+    normal: applied.variant,
+    pageTop: applied.variant,
+    breakBefore: applied.breakBefore,
   };
 }
 

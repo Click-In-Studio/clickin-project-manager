@@ -113,8 +113,9 @@ function legacyTemplate(id: string, name: string, compact: boolean): ScriptTempl
     name,
     version: 1,
     page: {
-      paper: "a4",
-      header: { items: [{ field: "scene.label" }], align: "alternate", firstPage: "right", style: { face: "script", fontSize: 10, lineHeight: 28, weight: "bold", letterSpacing: "0.1em", color: "#a1a1aa", case: "upper" } },
+      // 页眉：场次标签（text-[10px] font-medium tracking-widest uppercase zinc-400），首页靠右、逐页交替
+      header: { items: [{ field: "scene.label" }], align: "alternate", firstPage: "right", style: { face: "script", fontSize: 10, lineHeight: 28, weight: "medium", letterSpacing: "0.1em", color: "#a1a1aa", case: "upper" } },
+      // 页脚：— N —（text-xs zinc-500）居中
       footer: { items: [{ text: "— " }, { field: "page.number" }, { text: " —" }], align: "center", style: { face: "script", fontSize: 12, lineHeight: 28, color: "#71717a" } },
       toc: { enabled: true },
     },

@@ -29,10 +29,13 @@ const GOLDEN_PATH = path.resolve(process.cwd(), process.env.GOLDEN_PATH ?? "scri
 const UPDATE = process.argv.includes("--update");
 /** 夹具的排版模式：默认 center；compact 用另一份 golden（GOLDEN_PATH 指过去） */
 const FIXTURE_TEXT_LAYOUT: "center" | "compact" = process.env.FIXTURE_TEXT_LAYOUT === "compact" ? "compact" : "center";
+/** 夹具的排版模版 id（如 broadway-musical@1）；不设 = 按 textLayoutMode 回退到 legacy */
+const FIXTURE_TEMPLATE_ID: string | null = process.env.FIXTURE_TEMPLATE_ID || null;
 
 type Golden = {
   pageLayout: string;
   textLayoutMode: string;
+  templateId?: string | null;
   pages: Array<{ first: string; last: string }>;
   fontFamilies: string[];
 };
@@ -69,7 +72,7 @@ function fixtureBlocks(): Array<{ content: string; lyric: boolean; character: 0 
   return lines;
 }
 
-async function seedFixture(): Promise<{ prodId: string; cookie: string; pageLayout: string; textLayoutMode: string }> {
+async function seedFixture(): Promise<{ prodId: string; cookie: string; pageLayout: string; textLayoutMode: string; templateId: string | null }> {
   const { getPool } = await import("../../lib/pg");
   const { createProduction, getActiveVersionId, applyPatchToDB, flushToDBVersioned, loadProduction, saveScriptConfig } = await import("../../lib/db");
   const { DEFAULT_SCRIPT_CONFIG } = await import("../../lib/script-types");
@@ -110,12 +113,12 @@ async function seedFixture(): Promise<{ prodId: string; cookie: string; pageLayo
     }, afterId);
     afterId = id;
   }
-  if (FIXTURE_TEXT_LAYOUT === "compact") {
-    await saveScriptConfig(prodId, versionId, { ...DEFAULT_SCRIPT_CONFIG, textLayoutMode: "compact" });
+  if (FIXTURE_TEXT_LAYOUT === "compact" || FIXTURE_TEMPLATE_ID) {
+    await saveScriptConfig(prodId, versionId, { ...DEFAULT_SCRIPT_CONFIG, textLayoutMode: FIXTURE_TEXT_LAYOUT, templateId: FIXTURE_TEMPLATE_ID });
   }
   const loaded = (await loadProduction(prodId, versionId))!;
   const cookie = `${SESSION_COOKIE}=${createSession({ userId: owner, name: "夹具", avatarUrl: null, isAdmin: false })}`;
-  return { prodId, cookie, pageLayout: loaded.state.config.pageLayout, textLayoutMode: loaded.state.config.textLayoutMode };
+  return { prodId, cookie, pageLayout: loaded.state.config.pageLayout, textLayoutMode: loaded.state.config.textLayoutMode, templateId: loaded.state.config.templateId };
 }
 
 async function cleanupFixture(prodId: string): Promise<void> {
@@ -141,6 +144,12 @@ async function measure(prodId: string, cookie: string): Promise<Pick<Golden, "pa
     await page.goto(`${BASE_URL}/production/${prodId}/script/print`, { waitUntil: "domcontentloaded" });
     // dev server 首次编译打印路由可能要几十秒
     await page.waitForSelector('body[data-print-ready="1"]', { timeout: 180_000 });
+    // 可选：把第一张内容页截图存下来（看排版长什么样，评审用）
+    if (process.env.SCREENSHOT_PATH) {
+      const index = process.env.SCREENSHOT_PAGE ? Number(process.env.SCREENSHOT_PAGE) : 0;
+      const target = (await page.$$(".print-page"))[index];
+      if (target) await target.screenshot({ path: process.env.SCREENSHOT_PATH });
+    }
     const pages = await page.$$eval(".print-page", (nodes) => nodes.map((node) => {
       const text = (node.textContent ?? "").replace(/\s+/g, " ").trim();
       return { first: text.slice(0, 24), last: text.slice(-24) };
@@ -183,7 +192,7 @@ async function main(): Promise<void> {
   const fixture = await seedFixture();
   try {
     const result = await measure(fixture.prodId, fixture.cookie);
-    const current: Golden = { pageLayout: fixture.pageLayout, textLayoutMode: fixture.textLayoutMode, ...result };
+    const current: Golden = { pageLayout: fixture.pageLayout, textLayoutMode: fixture.textLayoutMode, templateId: fixture.templateId, ...result };
 
     const required = ["SourceHanSerif", "LXGWWenKai", "ZhuqueFangsong"];
     const missing = required.filter((f) => !current.fontFamilies.includes(f));
@@ -201,8 +210,8 @@ async function main(): Promise<void> {
     }
     const golden = JSON.parse(readFileSync(GOLDEN_PATH, "utf8")) as Golden;
     const diffs: string[] = [];
-    if (golden.pageLayout !== current.pageLayout || golden.textLayoutMode !== current.textLayoutMode) {
-      diffs.push(`版式不同：golden ${golden.pageLayout}/${golden.textLayoutMode}，当前 ${current.pageLayout}/${current.textLayoutMode}`);
+    if (golden.pageLayout !== current.pageLayout || golden.textLayoutMode !== current.textLayoutMode || (golden.templateId ?? null) !== (current.templateId ?? null)) {
+      diffs.push(`版式不同：golden ${golden.pageLayout}/${golden.textLayoutMode}/${golden.templateId ?? "-"}，当前 ${current.pageLayout}/${current.textLayoutMode}/${current.templateId ?? "-"}`);
     }
     if (golden.pages.length !== current.pages.length) {
       diffs.push(`页数不同：golden ${golden.pages.length}，当前 ${current.pages.length}`);
