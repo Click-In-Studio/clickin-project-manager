@@ -7,6 +7,7 @@ import TableColumnSettings from "./TableColumnSettings";
 import TableViewSelector, { type SavedView } from "./TableViewSelector";
 import ChevronIcon from "./ChevronIcon";
 import { BASE_PATH } from "@/lib/base-path";
+import { useAgentMutation } from "@/lib/agent-mutations";
 import type { MarkerProjection } from "@/lib/script-marker-domain";
 import ProductionTopMenu, {
   PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
@@ -54,6 +55,15 @@ export default function Dramaturgy({
   useEffect(() => {
     setSceneViewMode(window.innerWidth > 1920 ? "table" : "list");
   }, []);
+
+  // AI 写工具改了场次（lib/agent-runtime/tools.ts 的 scene mutates）→ 重拉一次。列表模式
+  // 的 ScenesManager 自己订阅 markers SSE 会刷，但表格模式用的是这里的 scenes state。
+  useAgentMutation({ scope: "scene", productionId }, () => {
+    const query = versionId ? `?versionId=${encodeURIComponent(versionId)}` : "";
+    void fetch(`${BASE_PATH}/api/production/${productionId}/scenes${query}`)
+      .then(async (res) => { if (res.ok) setScenes(await res.json() as MarkerProjection[]); })
+      .catch(() => {});
+  });
 
   const [tableConfig, setTableConfig] = useState<TableViewConfigData>(getDefaultViewConfig());
   const [showColumnSettings, setShowColumnSettings] = useState(false);

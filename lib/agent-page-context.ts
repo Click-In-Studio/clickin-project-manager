@@ -118,6 +118,16 @@ const PAGE_SUGGESTIONS: Record<string, PageSuggestion[]> = {
     { label: "搜索文档", prompt: "帮我在文档库里找关于 …… 的内容。" },
     { label: "文档结构", prompt: "这个项目的文档库大致是怎么组织的？" },
   ],
+  // 构作族工具（lib/agent-tools/dramaturgy-tools.ts）兑现
+  "prod:dramaturgy": [
+    { label: "场次结构", prompt: "列一下这个项目的章节和场次结构。" },
+    { label: "我能改什么", prompt: "我在构作页能修改哪些内容？" },
+    { label: "补梗概", prompt: "帮我给 …… 这一场写一段梗概。" },
+  ],
+  "prod:characters": [
+    { label: "角色列表", prompt: "列一下这个项目的角色和小传。" },
+    { label: "写小传", prompt: "帮我给 …… 这个角色写一段人物小传。" },
+  ],
   // 灵感文档就是 wiki 的一个子树，兑现它的是同一族 wiki 工具
   "prod:dramaturgy-inspiration": [
     { label: "搜索文档", prompt: "帮我在灵感文档里找关于 …… 的内容。" },

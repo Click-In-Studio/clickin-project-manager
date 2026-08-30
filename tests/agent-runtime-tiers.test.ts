@@ -40,6 +40,23 @@ describe("tool tiers", () => {
     }
   });
 
+  it("构作页：温层带出整个构作族；剧本页只带读面 + 权限查询", () => {
+    const r = tieredToolNames({ hasProduction: true, pageKey: "prod:dramaturgy", prompt: "你好", available: ALL });
+    for (const n of ["production.dramaturgy_permissions", "production.scene_list", "production.scene_propose_update", "production.character_propose_delete"]) {
+      expect(r.warm, n).toContain(n);
+    }
+    const s = tieredToolNames({ hasProduction: true, pageKey: "prod:script", prompt: "你好", available: ALL });
+    expect(s.active).toContain("production.scene_list");
+    expect(s.active).toContain("production.dramaturgy_permissions");
+    expect(s.active).not.toContain("production.scene_propose_update");
+  });
+
+  it("首页说「帮我给第二场改梗概」→ 召回构作族，闭包补上权限查询与 id 供给", () => {
+    const r = tieredToolNames({ hasProduction: true, pageKey: "prod:home", prompt: "帮我把第二场的梗概改一下", available: ALL });
+    expect(r.recalled).toContain("production.scene_propose_update");
+    for (const n of ["production.dramaturgy_permissions", "production.scene_list", "production.scene_read"]) expect(r.active, n).toContain(n);
+  });
+
   it("冷层工具没有页面也没有触发词 → 不出现（set_grant 在首页闲聊时不可见）", () => {
     const r = tieredToolNames({ hasProduction: true, pageKey: "prod:home", prompt: "今天天气怎么样", available: ALL });
     expect(r.active).not.toContain("production.wiki_set_grant");

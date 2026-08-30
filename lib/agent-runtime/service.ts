@@ -500,7 +500,22 @@ async function approvalGate(g: GateInput): Promise<{ block?: boolean; reason?: s
     if (prepared.restoredBody !== undefined) preview.restoredBody = prepared.restoredBody;
   }
 
-  const card = approvalCard(bare, g.args, { hasPermission });
+  // 构作族六个写工具：与执行同一份规划做预览——参数/业务规则错误（如删除方式要用户
+  // 二选一）直接 block 回模型、不弹卡；权限三态写进卡片 notes（一个工具横跨多把钥匙）
+  let notes: string[] | undefined;
+  const { DRAMATURGY_PROPOSE_TOOLS, previewDramaturgyProposal } = await import("@/lib/agent-tools/dramaturgy-tools");
+  if (DRAMATURGY_PROPOSE_TOOLS.has(bare) && g.productionId) {
+    try {
+      const p = await previewDramaturgyProposal(g.userId, g.productionId, bare, g.args);
+      if (p.error) return { block: true, reason: `${p.error}（未提交给用户确认）` };
+      hasPermission = p.hasPermission;
+      notes = p.notes;
+    } catch (err) {
+      console.error("[agent-runtime] dramaturgy preview failed (card without permission info):", err);
+    }
+  }
+
+  const card = approvalCard(bare, g.args, { hasPermission, notes });
   const { id, info, reused } = await createApproval({
     runId: g.runId, sessionId: g.sessionId, toolCallId: g.toolCallId, tool: g.tool.name, args: g.args, card, preview,
   });
