@@ -144,6 +144,8 @@ jobs:
   # 只在打印 / 分页 / 字体相关文件改动时跑——起 dev server + 装 Chromium 要几分钟。
   print-consistency:
     runs-on: ubuntu-latest
+    # 起 dev server + 装 Chromium + 首次编译打印路由，正常 6–8 分钟；卡住就杀
+    timeout-minutes: 20
     env:
       PGHOST: localhost
       PGPORT: 5432
@@ -169,12 +171,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4.2.2
 
-      - name: Fetch base branch
-        run: git fetch --depth=1 origin $GITHUB_BASE_REF
-
+      # 本 workflow 只在 pull_request 上触发（见文件头 on:），GITHUB_BASE_REF 恒有值；
+      # 防御：没有 base（将来加了 push 触发）就直接跑，别让 git fetch "" 报错。
       - name: Decide whether print-affecting files changed
         id: relevant
         run: |
+          if [ -z "$GITHUB_BASE_REF" ]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+            echo "No base ref (not a pull_request); running unconditionally."
+            exit 0
+          fi
+          git fetch --depth=1 origin "$GITHUB_BASE_REF"
           CHANGED=$(git diff origin/$GITHUB_BASE_REF HEAD --name-only -- \
             'public/fonts/**' 'app/fonts.css' 'app/globals.css' \
             'components/print/**' 'lib/script-page.ts' 'lib/print-css.ts' \
@@ -236,4 +243,8 @@ jobs:
       - name: Dump dev server log on failure
         if: failure() && steps.relevant.outputs.run == 'true'
         run: tail -100 next-dev.log
+
+      - name: Stop dev server
+        if: always() && steps.relevant.outputs.run == 'true'
+        run: pkill -f "next dev" || true
 
