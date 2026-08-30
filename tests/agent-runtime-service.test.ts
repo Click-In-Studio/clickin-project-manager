@@ -113,10 +113,18 @@ describe("agent-runtime service", () => {
     expect(run.rows[0].output_tokens).toBe(3);
 
     // 按本 run 的时间窗口取记账行：工厂 shortId 在并行 worker 间可能撞出同一个用户
-    const usage = await getPool().query<{ kind: string; tokens: number }>(
-      `SELECT kind, tokens FROM ai_usage WHERE user_id = $1 AND kind LIKE 'chat_%'
+    const usage = await getPool().query<{ kind: string; tokens: number; billed_credits: string; paid_from: string }>(
+      `SELECT kind, tokens, billed_credits::text, paid_from FROM ai_usage WHERE user_id = $1 AND kind LIKE 'chat_%'
          AND created_at >= (SELECT started_at FROM agent_run WHERE id = $2) ORDER BY kind`, [userId, runId]);
-    expect(usage.rows).toEqual([{ kind: "chat_input", tokens: 7 }, { kind: "chat_output", tokens: 3 }]);
+    expect(usage.rows.map((r) => ({ kind: r.kind, tokens: r.tokens }))).toEqual(
+      [{ kind: "chat_input", tokens: 7 }, { kind: "chat_output", tokens: 3 }]);
+    // 限流的账（#383）：整轮的钱记在 chat_input 一行上，其余行 0（token 记三行、
+    // 钱记一行，聚合才不会重复计）。这一条断言的是**真 run 全链路**——
+    // usage → Model.cost → 美元 → credit → 落库；单价表填 0 或折算断链会红。
+    // 数值 = 7×$0.44/1M + 3×$1.32/1M 折成 credit = 7 + 9 = 16。
+    expect(Number(usage.rows[0].billed_credits)).toBe(16);
+    expect(Number(usage.rows[1].billed_credits)).toBe(0);
+    expect(usage.rows.every((r) => r.paid_from === "quota")).toBe(true);
 
     expect(await getHistory(key)).toEqual([{ role: "user", content: "你好" }, { role: "assistant", content: "你好，我是后台助手" }]);
     // system prompt = 六件套 + 注入包裹（记忆段恒在）；工具面 = 26 个 clickin__ 工具
