@@ -177,8 +177,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       }
     }
 
-    // page mode: 页码按演出实际版式取（#336）——此前这里硬编码 a4/center
-    if (byMode.has("page")) {
+    // page mode: 页码按演出实际版式取（#336）——此前这里硬编码 a4/center。
+    // 与 scene / rehearsal 分支同样以版本为前提：无版本落到下面的「#[未知版本]」，
+    // 而不是把全部页引用报成「已删除」。
+    if (byMode.has("page") && effectiveVersionId) {
       const idxs = byMode.get("page")!;
       const script = await loadScript();
       const pageMap = script ? await script.pageMap() : {};
