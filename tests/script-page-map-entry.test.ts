@@ -17,6 +17,7 @@ import { createSession, SESSION_COOKIE } from "@/lib/session";
 import {
   applyPatchToDB,
   getEstimatedPageMap,
+  getMasterScriptViewId,
   loadPageMap,
   loadProduction,
   savePageMap,
@@ -158,11 +159,14 @@ describe("getEstimatedPageMap", () => {
   });
 
   it("读的是 production.page_map 存储（改存储即改结果），缺失时现算兜底", async () => {
+    // page_map 按主本（script_view）id 键（#336 B2），不再按版式串
+    const masterId = (await getMasterScriptViewId(prodId))!;
     const original = (await loadPageMap(prodId)) ?? {};
-    expect(original.letter).toEqual(expected);
+    expect(Object.keys(original)).toEqual([masterId]);
+    expect(original[masterId]).toEqual(expected);
     try {
       // 篡改存储：证明入口读的是存储而不是每次现算
-      await savePageMap(prodId, { ...original, letter: { [blockIds[0]]: 99 } });
+      await savePageMap(prodId, { ...original, [masterId]: { [blockIds[0]]: 99 } });
       expect(await getEstimatedPageMap(prodId, versionId)).toEqual({ [blockIds[0]]: 99 });
       // 存储里没有该版式 → 现算，结果与算法同源
       await savePageMap(prodId, {});

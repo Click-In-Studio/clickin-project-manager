@@ -181,6 +181,12 @@ import {
   CUE_MENTION_STABLE_ID_SNAPSHOT_PATH,
   type CueMentionStableIdSnapshot,
 } from "./cue-mention-stable-id-snapshot";
+import {
+  SCRIPT_VIEW_SNAPSHOT_PATH,
+  isScriptViewPreMigrationSchema,
+  createScriptViewPreMigrationData,
+  type ScriptViewSnapshot,
+} from "./script-view-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -703,6 +709,20 @@ export async function setup() {
     );
     await pool.query(migrationSql);
   }
+
+  // script_view（#336 B2）：版式从 script_config 搬进独立表、page_map 改按 view id 键。
+  // 工厂在旧 schema 上裸 SQL 造 letter/compact 演出，迁移测试验证版式与页码都不丢。
+  // 必须排在**所有**用 createProduction 的工厂之后：新代码建项目会顺手建 script_view，
+  // 表还没建时会直接报错。
+  if (await isScriptViewPreMigrationSchema(pool)) {
+    const scriptViewSnapshot = await createScriptViewPreMigrationData(pool, TEST_OWNER);
+    await writeFile(SCRIPT_VIEW_SNAPSHOT_PATH, JSON.stringify(scriptViewSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-script-view.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
@@ -710,6 +730,22 @@ export async function teardown() {
 
   // grant_template 退役快照：纯表内容 dump，没有工厂行要清，只删文件。
   await unlink(GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH).catch(() => {});
+
+  // script_view 迁移快照的工厂演出（migration path only）
+  {
+    let scriptViewSnapshot: ScriptViewSnapshot | null = null;
+    try {
+      scriptViewSnapshot = JSON.parse(await readFile(SCRIPT_VIEW_SNAPSHOT_PATH, "utf8")) as ScriptViewSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (scriptViewSnapshot) {
+      for (const id of [scriptViewSnapshot.letterProdId, scriptViewSnapshot.defaultProdId, scriptViewSnapshot.invalidProdId]) {
+        await pool.query("DELETE FROM production WHERE id = $1", [id]).catch(() => {});
+      }
+      await unlink(SCRIPT_VIEW_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
 
   // wiki 引用边泛化快照的工厂演出（migration path only）
   {

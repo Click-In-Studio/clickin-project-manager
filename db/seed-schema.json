@@ -583,12 +583,6 @@
       "nullable": false
     },
     {
-      "column": "created_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
-    },
-    {
       "column": "billed_credits",
       "type": "bigint",
       "nullable": false,
@@ -599,6 +593,12 @@
       "type": "text",
       "nullable": false,
       "default": "'quota'::text"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
     }
   ],
   "announcement_read": [
@@ -2141,6 +2141,12 @@
       "default": "false"
     },
     {
+      "column": "grants_credits",
+      "type": "bigint",
+      "nullable": false,
+      "default": "0"
+    },
+    {
       "column": "exempt_note",
       "type": "text",
       "nullable": true
@@ -2172,12 +2178,6 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
-    },
-    {
-      "column": "grants_credits",
-      "type": "bigint",
-      "nullable": false,
-      "default": "0"
     }
   ],
   "plan_code_redemption": [
@@ -2244,6 +2244,11 @@
     },
     {
       "column": "active_version_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "master_view_id",
       "type": "text",
       "nullable": true
     },
@@ -3945,6 +3950,60 @@
       "nullable": false
     }
   ],
+  "script_view": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "page_layout",
+      "type": "text",
+      "nullable": false,
+      "default": "'a4'::text"
+    },
+    {
+      "column": "text_layout_mode",
+      "type": "text",
+      "nullable": false,
+      "default": "'center'::text"
+    },
+    {
+      "column": "page_sequence",
+      "type": "jsonb",
+      "nullable": false,
+      "default": "'[{\"kind\": \"content\"}]'::jsonb"
+    },
+    {
+      "column": "template_overrides",
+      "type": "jsonb",
+      "nullable": false,
+      "default": "'{}'::jsonb"
+    },
+    {
+      "column": "sort_order",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "tag_group": [
     {
       "column": "id",
@@ -4485,6 +4544,12 @@
       "default": "false"
     },
     {
+      "column": "listable",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true"
+    },
+    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,
@@ -4495,12 +4560,6 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
-    },
-    {
-      "column": "listable",
-      "type": "boolean",
-      "nullable": false,
-      "default": "true"
     }
   ],
   "wiki_alias": [
