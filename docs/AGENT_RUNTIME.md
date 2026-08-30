@@ -12,7 +12,7 @@
 | run 服务 | `lib/agent-runtime/service.ts` | 一轮 run 的骨架：注入链 → harness → 事件 → 收尾 |
 | 独立进程 | `agent-runner/index.ts` | loopback HTTP：`POST /runs` `/runs/steer` `/runs/abort`、`GET /health`；心跳、孤儿接管、SIGTERM 排水 |
 | next 侧 | `lib/agent-runtime/{client,dispatch}.ts` + `app/api/agent/*` 路由 | 发起/插话/中止交给 runner；SSE 从 `agent_event` 直出；行协议在 `lib/agent-chat/` |
-| 持久化 | `db/add-agent-runtime.sql`（六表） | 会话/transcript/run/审批/提问/事件 |
+| 持久化 | `db/add-agent-runtime.sql`（六表）+ `db/add-agent-mutation.sql` | 会话/transcript/run/审批/提问/事件 + 写审计账本 |
 
 ## 环境变量
 
@@ -96,6 +96,21 @@ OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，
 订阅，handler 自己决定刷新粒度——client 页面重拉那一个 API、server component 页面 `router.refresh()`、带 `ids` 的只在命中时动；
 没人接才 `router.refresh()` 兜底。给新页面加自动刷新 = 写工具声明一句 `mutates` + 页面订阅一句，不碰 AgentPopout。
 现有订阅者：`WikiShell`（scope `wiki` → 软刷新左树，300ms 合并）。
+
+## AI 写操作的 diff 审计（agent_mutation）
+
+每一次由 AI 工具落地的写都记一行 `agent_mutation`（`db/add-agent-mutation.sql`，`lib/agent-runtime/mutation-audit.ts`）：
+谁的哪次 run、哪个工具、动了哪个域的哪个实体、写前/写后快照、字段级 `changes`。聊天里的确认卡审的是**意图**（args），
+这里记的是**结果**——它也是无人值守写（定时任务）的合法性来源：先做后审，审得了才能先做。
+
+- **按域注册快照读取器，不按工具**：`mutates` 声明已经回答"动了哪个域的哪些 id"，审计只要每个域一个 `read(ids)`
+  （现有 `wiki` / `scene` / `character` / `instructions.*`）。新写工具声明 `mutates` 即自动进账本；新域加一个读取器，
+  没读取器的域退化为只记事实（`tests/agent-mutation-audit.test.ts` 对照注册表防漂移）。
+- **观察到变化才落行**：created 靠写前后 id 集合之差、updated/deleted 靠快照比对——工具返回"权限被拒绝"之类的非错误文本时不会记成一次写。
+- **正文不进账本**：wiki 快照只存 `revisionId` 引用（历史在 `wiki_revision`），`changes` 里正文只有增删字数。
+- **只读账本，没有撤销**：撤销永远是人的动作（甲的定时任务改了、乙又改了、甲回头撤回 = 冲突，机器不该替人合并）。
+- 落了行的写，`mutation` SSE 行多带 `auditIds` + `summary`（"更新文档《x》：标题、正文 +340/−12 字"），前端渲成 notice；
+  `listRunMutations(runId)` 给定时任务通知出改动清单。
 
 ## skills 的事实源
 

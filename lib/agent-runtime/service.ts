@@ -29,7 +29,8 @@ import type { StreamFn } from "../../vendor/openclaw/packages/llm-core/src/types
 import { PgSessionStorage } from "./pg-session-storage";
 import { EventPublisher, pruneDeltas } from "./events";
 import { createStreamLineAdapter } from "./stream-lines";
-import { buildTools, bareName, exposedName, type RuntimeToolDef } from "./tools";
+import { buildTools, bareName, exposedName, type RuntimeToolDef, type RunHandle } from "./tools";
+import { describeMutation, type MutationRecord } from "./mutation-audit";
 import { tieredToolNames } from "./tool-tiers";
 import { recallFamilies } from "./tool-index";
 import { recentlyUsedToolNames } from "./used-tools";
@@ -154,13 +155,15 @@ async function execute(input: ExecuteInput): Promise<void> {
     drain: () => rawPublisher.drain(),
   };
   const session = new Session(storage);
-  const runHandle = {
+  const audited = new Map<string, MutationRecord[]>(); // toolCallId → 本次调用落下的账本行（挂到 mutation 行上）
+  const runHandle: RunHandle = {
     runId, sessionId, signal: abort.signal,
     publish: (line: StreamLine) => publisher.publish(line),
     setStatus: async (s: "running" | "awaiting_answer") => {
       await pool.query(`UPDATE agent_run SET status = $2 WHERE id = $1 AND status IN ('running', 'awaiting_answer')`, [runId, s]);
     },
     isDetached: () => detached,
+    noteMutations: (toolCallId, records) => { audited.set(toolCallId, records); },
   };
   const tools = buildTools({ userId, productionId, run: runHandle });
   const toolByName = new Map(tools.map((t) => [t.name, t]));
@@ -270,7 +273,7 @@ async function execute(input: ExecuteInput): Promise<void> {
         const def = toolByName.get(event.toolName);
         if (!event.isError && def?.mutates) {
           const m = def.mutates(args);
-          if (m) publisher.publish({ type: "mutation", ...m, productionId: productionId ?? null, tool: def.mcpName });
+          if (m) publisher.publish({ type: "mutation", ...m, productionId: productionId ?? null, tool: def.mcpName, ...mutationAuditFields(audited, event.toolCallId) });
         }
       }
       if (event.type === "message_end" && event.message.role === "assistant") {
@@ -378,6 +381,16 @@ async function execute(input: ExecuteInput): Promise<void> {
     // （waitForIdle / sessionRunState / 下一条消息的 SessionBusy 判定都以此为准）
     active.delete(sessionId);
   }
+}
+
+/** 写审计落了行 → mutation 行带上账本 id 与人话摘要（前端渲成 notice）；没落行（写未真正发生）不带。 */
+function mutationAuditFields(audited: Map<string, MutationRecord[]>, toolCallId: string): { auditIds?: string[]; summary?: string } {
+  const records = audited.get(toolCallId);
+  audited.delete(toolCallId);
+  if (!records || records.length === 0) return {};
+  const shown = records.slice(0, 5).map(describeMutation);
+  const summary = records.length > 5 ? `${shown.join("；")}；…共 ${records.length} 项` : shown.join("；");
+  return { auditIds: records.map((r) => r.id), summary };
 }
 
 function lastUserText(messages: AgentMessage[]): string | null {

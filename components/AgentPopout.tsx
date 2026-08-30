@@ -242,10 +242,7 @@ export default function AgentPopout({
               }
               continue;
             }
-            if (line.type === "mutation") {
-              onMutation(line);
-              continue; // 不进气泡
-            }
+            if (line.type === "mutation") onMutation(line); // 派发刷新；带 summary 的再由 reducer 渲成 notice
             apply(line);
           } catch {
             // skip malformed line

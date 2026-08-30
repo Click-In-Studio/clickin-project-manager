@@ -19,6 +19,7 @@ import { WIKI_DIALECT_POINTER_WRITE, WIKI_DIALECT_POINTER_READ, WIKI_LINK_SYNTAX
 import { toolLabel } from "@/lib/agent-tool-labels";
 import type { StreamLine, QuestionItem } from "@/lib/agent-chat/stream-reducer";
 import type { RuntimeTool } from "./resume";
+import type { MutationRecord } from "./mutation-audit";
 
 export const TOOL_PREFIX = "clickin__";
 
@@ -38,6 +39,10 @@ export interface RunHandle {
   setStatus: (status: "running" | "awaiting_answer") => Promise<void>;
   /** 本进程是否已脱离（排水）：等待中的工具据此不再碰表、不发事件 */
   isDetached: () => boolean;
+  /** 无人值守（定时任务触发的 run）：写审计按此标记；确认门与 ask_user 的行为由 service 另判 */
+  unattended?: boolean;
+  /** 写审计落行后回报给 run（service 把账本 id/摘要挂到 mutation 行上） */
+  noteMutations?: (toolCallId: string, records: MutationRecord[]) => void;
 }
 
 /** 写工具成功后的变更信号（前端 lib/agent-mutations.ts 派发给页面订阅者决定怎么刷） */
@@ -562,12 +567,28 @@ export function buildTools(ctx: ToolContext): RuntimeToolDef[] {
     mutates: d.mutates,
     execute: async (toolCallId, params) => {
       if (d.needsProduction && !ctx.productionId) return text(NO_PRODUCTION);
+      const args = (params ?? {}) as Record<string, unknown>;
+      // 写审计（mutation-audit.ts）：写前取快照、写后比对落行。包在这一层是为了让
+      // 正常执行与重启恢复路径（service 直接调 tool.execute）都经过它；审计失败只
+      // 记日志，绝不影响写本身。
+      const m = d.mutates?.(args) ?? null;
+      const audit = m
+        ? await (await import("./mutation-audit")).beginMutationAudit(m, {
+            userId: ctx.userId, productionId: ctx.productionId, runId: ctx.run?.runId ?? null, sessionId: ctx.run?.sessionId ?? null,
+            tool: d.mcpName, toolCallId, summary: typeof args.summary === "string" ? args.summary.slice(0, 300) : null,
+            unattended: ctx.run?.unattended === true,
+          })
+        : null;
       const out = await d.execute(
         { userId: ctx.userId, productionId: ctx.productionId ?? "", run: ctx.run },
-        (params ?? {}) as Record<string, unknown>,
+        args,
         toolCallId,
       );
       if (d.isErrorResult?.(out)) throw new Error(out);
+      if (audit) {
+        const records = await audit.commit();
+        if (records.length > 0) ctx.run?.noteMutations?.(toolCallId, records);
+      }
       return text(out);
     },
   }));
