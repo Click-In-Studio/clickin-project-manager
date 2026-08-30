@@ -10,7 +10,7 @@
  */
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { mdToHtml } from "@/lib/script-md";
-import type { LayoutItem, ResolvedSlot, TextStyle, Variant } from "@/lib/script-template";
+import type { LayoutItem, PageBand, PageBandField, ResolvedSlot, TextStyle, Variant } from "@/lib/script-template";
 
 const FACE_VAR: Record<TextStyle["face"], string> = {
   script: "var(--font-script)",
@@ -23,8 +23,9 @@ export function textStyleCss(style: TextStyle): React.CSSProperties {
     fontFamily: FACE_VAR[style.face],
     fontSize: style.fontSize,
     lineHeight: `${style.lineHeight}px`,
-    fontWeight: style.weight === "bold" ? 700 : undefined,
+    fontWeight: style.weight === "bold" ? 700 : style.weight === "medium" ? 500 : undefined,
     fontStyle: style.italic ? "italic" : undefined,
+    textDecoration: style.underline ? "underline" : undefined,
     textTransform: style.case === "upper" ? "uppercase" : undefined,
     letterSpacing: style.letterSpacing,
     color: style.color,
@@ -109,10 +110,14 @@ export function TemplateItemView(props: TemplateItemViewProps) {
     );
   }
 
-  const visible = item.slots.filter((s) => isSlotVisible(s, v) && !s.slot.inline);
-  const inlinePrefix = item.slots
-    .filter((s) => isSlotVisible(s, v) && s.slot.inline)
-    .map((s) => s.text + (v.suffix[s.slot.id] ?? ""))
+  const shown = item.slots.filter((s) => isSlotVisible(s, v));
+  const visible = shown.filter((s) => !s.slot.inline);
+  // inline 槽分两种：同行有占格槽 → 前缀并入其 content 首行；同行全是 inline → 自成一行文字流
+  const blockRows = new Set(visible.map((s) => s.slot.box.row));
+  const prefixSlots = shown.filter((s) => s.slot.inline && blockRows.has(s.slot.box.row));
+  const inlineRowSlots = shown.filter((s) => s.slot.inline && !blockRows.has(s.slot.box.row));
+  const inlinePrefix = prefixSlots
+    .map((s) => `<span style="${inlineStyleAttr(s.slot.style)}">${escapeHtml(s.text + (v.suffix[s.slot.id] ?? ""))}</span>`)
     .join("");
   const single = item.style.frame.columns.length === 1;
 
@@ -120,10 +125,57 @@ export function TemplateItemView(props: TemplateItemViewProps) {
     <div className="w-full" style={{ paddingTop, paddingBottom }}>
       {gapBefore > 0 && <div aria-hidden="true" style={{ height: gapBefore }} />}
       {single
-        ? <StackedSlots slots={visible} v={v} inlinePrefix={inlinePrefix} delimOpen={stageDelimOpen} delimClose={stageDelimClose} />
+        ? <StackedSlots slots={visible} inlineRows={inlineRowSlots} v={v} inlinePrefix={inlinePrefix} delimOpen={stageDelimOpen} delimClose={stageDelimClose} />
         : <GridSlots item={item} slots={visible} v={v} inlinePrefix={inlinePrefix} delimOpen={stageDelimOpen} delimClose={stageDelimClose} onLayoutChange={onLayoutChange} />}
     </div>
   );
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** 内联进 dangerouslySetInnerHTML 的 style 属性串（只放字体相关，不放布局） */
+function inlineStyleAttr(style: TextStyle): string {
+  const css = textStyleCss(style);
+  const pairs: string[] = [];
+  const push = (k: string, val: unknown) => { if (val !== undefined && val !== null) pairs.push(`${k}:${String(val)}`); };
+  push("font-family", css.fontFamily);
+  push("font-size", typeof css.fontSize === "number" ? `${css.fontSize}px` : css.fontSize);
+  push("font-weight", css.fontWeight);
+  push("font-style", css.fontStyle);
+  push("text-transform", css.textTransform);
+  push("letter-spacing", css.letterSpacing);
+  push("color", css.color);
+  push("text-decoration", css.textDecoration);
+  return pairs.join(";");
+}
+
+/** 同一行里全是 inline 槽：连成一条文字流，对齐取首槽（`JOHN (laughing)` 居中一行） */
+function InlineRow({ slots, v }: { slots: ResolvedSlot[]; v: Variant }) {
+  const first = slots[0];
+  const lineHeight = Math.max(...slots.map((s) => s.slot.style.lineHeight));
+  const marginBottom = Math.max(0, ...slots.map((s) => s.slot.marginBottom ?? 0));
+  return (
+    <div
+      className="w-full min-w-0 break-words"
+      style={{ textAlign: first.slot.style.align, lineHeight: `${lineHeight}px`, marginBottom: marginBottom || undefined, ...indentCss(first) }}
+      data-slot={slots.map((s) => s.slot.id).join("+")}
+      data-face={first.slot.style.face}
+    >
+      {slots.map((s, i) => (
+        <span key={s.slot.id} style={{ ...textStyleCss(s.slot.style), lineHeight: undefined, textAlign: undefined }}>
+          {i > 0 ? " " : ""}{s.text}{v.suffix[s.slot.id] ?? ""}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function indentCss(slot: ResolvedSlot): React.CSSProperties {
+  const i = slot.slot.indent;
+  if (!i) return {};
+  return { paddingLeft: i.left, paddingRight: i.right, textIndent: i.firstLine };
 }
 
 function SlotText({ slot, v, inlinePrefix, delimOpen, delimClose, style, innerRef }: {
@@ -132,7 +184,7 @@ function SlotText({ slot, v, inlinePrefix, delimOpen, delimClose, style, innerRe
 }) {
   const isContent = slot.parts.some((p) => p.field === "content");
   const rendered = slotHtml(slot, v.suffix[slot.slot.id] ?? "", delimOpen, delimClose);
-  const css: React.CSSProperties = { ...textStyleCss(slot.slot.style), ...style };
+  const css: React.CSSProperties = { ...textStyleCss(slot.slot.style), ...indentCss(slot), ...style };
   // data-slot / data-face 只给诊断与测试用（print-consistency 探针按面统计元素与计算字体）
   if ("html" in rendered) {
     const html = isContent && inlinePrefix ? `${inlinePrefix}${rendered.html}` : rendered.html;
@@ -141,17 +193,31 @@ function SlotText({ slot, v, inlinePrefix, delimOpen, delimClose, style, innerRe
   return <div ref={innerRef} className="max-w-full break-words" style={css} data-slot={slot.slot.id} data-face={slot.slot.style.face}>{rendered.text}</div>;
 }
 
-/** 单列：槽按行序纵向堆叠（legacy-center：角色名一行、正文一段） */
-function StackedSlots({ slots, v, inlinePrefix, delimOpen, delimClose }: {
-  slots: ResolvedSlot[]; v: Variant; inlinePrefix: string; delimOpen: string; delimClose: string;
+/** 单列：槽按行序纵向堆叠（legacy-center：角色名一行、正文一段）；纯 inline 行连成一条文字流 */
+function StackedSlots({ slots, inlineRows, v, inlinePrefix, delimOpen, delimClose }: {
+  slots: ResolvedSlot[]; inlineRows: ResolvedSlot[]; v: Variant; inlinePrefix: string; delimOpen: string; delimClose: string;
 }) {
-  const ordered = [...slots].sort((a, b) => a.slot.box.row - b.slot.box.row);
+  const byRow = new Map<number, { block?: ResolvedSlot; inline: ResolvedSlot[] }>();
+  for (const s of slots) byRow.set(s.slot.box.row, { ...(byRow.get(s.slot.box.row) ?? { inline: [] }), block: s });
+  for (const s of inlineRows) {
+    const entry = byRow.get(s.slot.box.row) ?? { inline: [] };
+    entry.inline.push(s);
+    byRow.set(s.slot.box.row, entry);
+  }
+  const rows = [...byRow.keys()].sort((a, b) => a - b);
   return (
     <>
-      {ordered.map((s) => (
-        <SlotText key={s.slot.id} slot={s} v={v} inlinePrefix={inlinePrefix} delimOpen={delimOpen} delimClose={delimClose}
-          style={s.slot.marginBottom ? { marginBottom: s.slot.marginBottom } : undefined} />
-      ))}
+      {rows.map((row) => {
+        const entry = byRow.get(row)!;
+        if (entry.block) {
+          const s = entry.block;
+          return (
+            <SlotText key={s.slot.id} slot={s} v={v} inlinePrefix={inlinePrefix} delimOpen={delimOpen} delimClose={delimClose}
+              style={s.slot.marginBottom ? { marginBottom: s.slot.marginBottom } : undefined} />
+          );
+        }
+        return <InlineRow key={`inline-${row}`} slots={entry.inline} v={v} />;
+      })}
     </>
   );
 }
@@ -332,4 +398,60 @@ export function runPaddingOverrides(
     hasNext = true;
   }
   return overrides;
+}
+
+// ── 页眉页脚 ─────────────────────────────────────────────────────────────────
+
+export type PageBandContext = {
+  pageNum: number | null;
+  sceneLabel: string;
+  actRoman: string;
+  sceneLocal: string;
+  sceneNumber: string;
+  productionName: string;
+};
+
+export function pageBandText(band: PageBand, ctx: PageBandContext): string {
+  const field = (f: PageBandField): string => {
+    switch (f) {
+      case "scene.label": return ctx.sceneLabel;
+      case "page.number": return ctx.pageNum === null ? "" : String(ctx.pageNum);
+      case "act.roman": return ctx.actRoman;
+      case "scene.local": return ctx.sceneLocal;
+      case "scene.number": return ctx.sceneNumber;
+      case "production.name": return ctx.productionName;
+    }
+  };
+  // 空字段连同它前面的分隔文字一起丢（`I – – 51` → `I – 51`；只有章没有场的本子就这样）；
+  // 字段全空 → 整条不显示（目录页没有页码、无场次时没有页眉）
+  const out: string[] = [];
+  let anyField = false;
+  let pendingText: string | null = null;
+  // 开头的字段被丢掉后，直到下一个非空字段之前的字面文字都是它的分隔，一并丢
+  let suppressText = false;
+  for (const it of band.items) {
+    if ("text" in it) {
+      if (!suppressText) pendingText = (pendingText ?? "") + it.text;
+      continue;
+    }
+    const value = field(it.field);
+    if (!value) {
+      pendingText = null; // 丢字段，也丢它前面攒着的分隔文字
+      suppressText = out.length === 0;
+      continue;
+    }
+    suppressText = false;
+    if (pendingText !== null) out.push(pendingText); // 前导字面文字（legacy 的「— 」）跟着非空字段一起出
+    pendingText = null;
+    out.push(value);
+    anyField = true;
+  }
+  if (!anyField) return "";
+  if (pendingText !== null) out.push(pendingText); // 末尾的字面文字（legacy 的「 —」）
+  return out.join("");
+}
+
+export function PageBandView({ band, text }: { band: PageBand; text: string }) {
+  if (!text) return null;
+  return <span style={{ ...textStyleCss(band.style), lineHeight: undefined }}>{text}</span>;
 }

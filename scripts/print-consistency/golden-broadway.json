@@ -1,0 +1,36 @@
+{
+  "pageLayout": "a4",
+  "textLayoutMode": "center",
+  "templateId": "broadway-musical@1",
+  "pages": [
+    {
+      "first": "I – 1ACT I林晚你来了。（放下手里的杯子",
+      "last": "夜色里没有人回头，路灯把影子拉成一句没说完的话。"
+    },
+    {
+      "first": "I – 2DanielAh——我数着 1、2、3",
+      "last": "ge Manager 刚发的通知。（第 2 遍）"
+    },
+    {
+      "first": "I – 3林晚我知道。Q.12 到 Q.15 全",
+      "last": "个方案，我都看过了，第二个最像你。（第 3 遍）"
+    },
+    {
+      "first": "I – 4林晚\"最像我\"是什么意思？我从来没有觉",
+      "last": "（放下手里的杯子）我以为你不会来。（第 4 遍）"
+    },
+    {
+      "first": "I – 5Daniel路上堵车，从 3 号线换到",
+      "last": "、2、3、4 等你开口，你却只是把杯子放回原处。"
+    },
+    {
+      "first": "I – 6林晚没事，只是……（欲言又止）算了。你",
+      "last": "个人会把「过一遍」变成「改一遍」。（第 4 遍）"
+    }
+  ],
+  "fontFamilies": [
+    "LXGWWenKai",
+    "SourceHanSerif",
+    "ZhuqueFangsong"
+  ]
+}

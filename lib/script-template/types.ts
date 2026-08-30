@@ -6,7 +6,7 @@
  *      + 页模版（页眉页脚页码）。
  * 全是数据：预设是代码常量，演出存「预设 id + 覆盖项」。
  */
-import type { Block, BlockType, PageLayout, Scene } from "../script-types";
+import type { Block, BlockType, Scene } from "../script-types";
 
 // ── 文字样式 ─────────────────────────────────────────────────────────────────
 
@@ -19,8 +19,9 @@ export type TextStyle = {
   fontSize: number;
   /** px。估算器按「行数 × lineHeight」算高 */
   lineHeight: number;
-  weight?: "normal" | "bold";
+  weight?: "normal" | "medium" | "bold";
   italic?: boolean;
+  underline?: boolean;
   case?: "as-is" | "upper";
   /** CSS letter-spacing */
   letterSpacing?: string;
@@ -36,8 +37,10 @@ export type SlotField =
   | "character"      // 角色名（含标注），多角色以「、」连
   | "stageComment"   // 角色名下的括号提示（block.stageComment，逐行加分隔符）
   | "content"        // 正文（markdown-ish，含行内舞台指示）
-  | "scene.number"
-  | "scene.name";
+  | "scene.number"   // 生成的场号（"0-1" 这种章-场）
+  | "scene.name"
+  | "act.roman"      // 幕（章节标记）序号的罗马数字：I、II…
+  | "scene.local";   // 场在本幕内的序号：1、2…
 
 export type ColumnSpec = {
   /** "7.5rem" | "1rem" | "1fr" | "auto"。估算器只认 rem / px / fr；auto 按 max-content 估 */
@@ -57,8 +60,15 @@ export type Slot = {
   joiner?: string;
   /** rowSpan "all" = 侧栏标签，贯穿本块所有行（legacy-compact 的左栏角色名）——不参与行折叠 */
   box: { col: number; row: number; colSpan?: number; rowSpan?: number | "all" };
-  /** 不占格：作为前缀并入 content 首行（「角色：台词」）。T1 只在估算器里实现宽度扣除 */
+  /**
+   * 行内槽。同一行里若有占格的 content 槽，本槽作为前缀并入其首行（「角色：台词」）；
+   * 若同一行全是 inline 槽，它们连成一条文字流（`JOHN (laughing)` 居中一行）。
+   */
   inline?: boolean;
+  /** px：左右缩进与首行缩进（Samuel French 的「三个缩进」「歌词一个缩进」） */
+  indent?: { left?: number; right?: number; firstLine?: number };
+  /** 槽只在字段长度落在区间内才出现（短提示跟在角色名同行、长提示另起一行） */
+  when?: { maxChars?: number; minChars?: number };
   style: TextStyle;
   /** 装饰：前后缀。stageComment 的括号默认取演出配置的舞台指示分隔符 */
   decorate?: { before?: string; after?: string };
@@ -142,7 +152,7 @@ export type Rule = {
 
 // ── 页模版（只放页眉页脚页码；页序列 / 杂页 / 首页归 F+G）──────────────────
 
-export type PageBandField = "scene.label" | "page.number" | "act.roman" | "scene.number" | "production.name";
+export type PageBandField = "scene.label" | "page.number" | "act.roman" | "scene.local" | "scene.number" | "production.name";
 export type PageBandItem = { field: PageBandField } | { text: string };
 export type PageBand = {
   items: PageBandItem[];
@@ -153,7 +163,6 @@ export type PageBand = {
 };
 
 export type PageTemplate = {
-  paper: PageLayout;
   header: PageBand;
   footer: PageBand;
   toc: { enabled: boolean };
@@ -222,4 +231,6 @@ export type LayoutItem =
       slots: ResolvedSlot[];
       normal: Variant;
       pageTop: Variant;
+      /** 每场另起页（规则 breakBefore 作用在场次标题上） */
+      breakBefore: boolean;
     };

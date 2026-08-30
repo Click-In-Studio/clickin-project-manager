@@ -250,6 +250,16 @@ jobs:
           GOLDEN_PATH: scripts/print-consistency/golden-compact.json
         run: npx tsx scripts/print-consistency/check.ts
 
+      # 第三份 golden：百老汇音乐剧模版——第一个非 legacy 模版，守它就是守引擎的新原语
+      # （行内流 / 缩进 / 每场另起页 / 页眉幕–场–页）在 Linux 上与 Mac 一致。
+      - name: Compare pagination against golden (broadway)
+        if: steps.relevant.outputs.run == 'true'
+        env:
+          BASE_URL: http://localhost:3100
+          FIXTURE_TEMPLATE_ID: broadway-musical@1
+          GOLDEN_PATH: scripts/print-consistency/golden-broadway.json
+        run: npx tsx scripts/print-consistency/check.ts
+
       - name: Dump dev server log on failure
         if: failure() && steps.relevant.outputs.run == 'true'
         run: tail -100 next-dev.log

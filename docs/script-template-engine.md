@@ -31,12 +31,14 @@ BlockStyle {                     // 一类块怎么排 = 一个小网格 + 若�
   padding: { top, bottom }       // 块外沿
 }
 Slot {
-  id: "character" | "stageComment" | "content" | "scene.number" | "scene.name" | …   // 内容引用
+  id: "character" | "stageComment" | "content" | "scene.number" | "scene.name" | "act.roman" | "scene.local" | …   // 内容引用
   field: 引用哪个字段
-  box:   { col, row, colSpan }    // 放哪
-  inline?: true                   // 不占格，作为前缀并入 content 首行（「角色：台词」）
-  align, style: { face, size, lineHeight, weight, italic, case, letterSpacing, color }
-  decorate: { before, after }     // 「（」「）」/「：」
+  box:   { col, row, colSpan, rowSpan? }    // 放哪；rowSpan "all" = 侧栏标签贯穿全行
+  inline?: true                   // 同行有占格槽 → 前缀并入其首行（「角色：台词」）；同行全是 inline → 连成一条文字流（`JOHN (laughing)`）
+  indent?: { left, right, firstLine }      // px（Samuel French 的「三个缩进」）
+  when?: { maxChars, minChars }   // 字段长度门（短提示同行、长提示另起行）
+  align, style: { face, size, lineHeight, weight, italic, underline, case, letterSpacing, color }
+  decorate: { before, after }     // 「（」「）」/「：」/「ACT 」
   hideIfEmpty: true               // 字段空 → 连装饰一起隐藏（决策 6 要求保留的能力）
 }
 Rule { when: Predicate, then: Effect }
@@ -93,7 +95,7 @@ pages → render(TemplateBlock, PageChrome)
 | T1 | 引擎核心（类型 / plan / paginate / estimate）+ legacy 模版 + 估算器改吃引擎 | 估算与旧实现逐字节相同 |
 | T2 | 渲染器 `TemplateBlock` / 页眉页脚 `PageChrome`，打印管线改吃引擎 | golden 不变 |
 | T3 | 存储 + config API + 打印页模版选择（预览后保存） | 落库测试；golden 不变 |
-| T4 | 百老汇音乐剧示范模版（Samuel French 规范） | 按规范逐条对照 |
+| T4 | 百老汇音乐剧示范模版（Samuel French 规范）；顺手补原语：行内流（`JOHN (laughing)`）、缩进、`when` 长度门、幕/场字段、场次标题过规则（每场另起页）、页带字段化 | `tests/script-template-broadway.test.ts` 逐条对照；`golden-broadway.json` |
 | T5+ | 中国话剧等模版；模版编辑界面（H 的可视化盒编辑器） | — |
 
 ## 7. 明确不在此处
