@@ -17,10 +17,61 @@ const permLine = (verb: string, hasPermission?: boolean): string | null =>
 
 const lines = (parts: Array<string | null>) => parts.filter((l): l is string => l !== null).join("\n");
 
+/** 构作族：权限三态由 previewDramaturgyProposal 算好放在 notes 里（一个写工具横跨多把钥匙，
+ *  不能像 wiki 那样一句"这篇文档"概括），卡片只负责把它摆出来。 */
+function dramaturgyLines(headline: string, items: string[], extra?: { hasPermission?: boolean; notes?: string[] }): string {
+  const notes = extra?.notes ?? [];
+  const blocked = notes.filter((n) => /^[🔓📝⛔]/u.test(n));
+  const plain = notes.filter((n) => !/^[🔓📝⛔]/u.test(n));
+  return lines([
+    extra?.hasPermission === true ? "✅ 权限齐全，批准后直接生效。" : null,
+    extra?.hasPermission === false ? "⛔ 缺少权限——批准后调用会被拦截、不会生效：" : null,
+    ...blocked.map((n) => `  ${str(n, 140)}`),
+    headline,
+    ...(plain.length > 0 ? plain : items).slice(0, 6).map((n) => `• ${str(n, 100)}`),
+    (plain.length > 0 ? plain : items).length > 6 ? `…共 ${(plain.length > 0 ? plain : items).length} 项` : null,
+  ]);
+}
+
+const summaryLine = (params: Record<string, unknown>) => `📝 摘要：${str(params.summary, 100)}`;
+const count = (v: unknown) => (Array.isArray(v) ? v.length : 0);
+
 /** bareTool = 去掉 clickin__ 前缀的暴露名（production-wiki_propose_create 等）。 */
-export function approvalCard(bareTool: string, params: Record<string, unknown>, extra?: { hasPermission?: boolean }): ApprovalCard {
+export function approvalCard(bareTool: string, params: Record<string, unknown>, extra?: { hasPermission?: boolean; notes?: string[] }): ApprovalCard {
   const severity: ApprovalCard["severity"] = extra?.hasPermission === false ? "critical" : "warning";
   switch (bareTool) {
+    case "production-scene_propose_update":
+      return { severity, title: `提议修改 ${count(params.updates)} 个章节/场次的构作信息`, description: lines([
+        dramaturgyLines("改动：", (Array.isArray(params.updates) ? params.updates : []).map((u: Record<string, unknown>) =>
+          `${str(u.sceneId, 24)}：${Object.keys(u).filter((k) => k !== "sceneId").join("/")}`), extra),
+        summaryLine(params),
+      ]) };
+    case "production-scene_propose_create":
+      return { severity, title: `提议新建 ${count(params.items)} 个章节/场次`, description: lines([
+        dramaturgyLines("新建：", (Array.isArray(params.items) ? params.items : []).map((i: Record<string, unknown>) => str(i.name, 40)), extra),
+        summaryLine(params),
+      ]) };
+    case "production-scene_propose_delete":
+      return { severity, title: `提议删除章节/场次（id: ${str(params.sceneId, 40)}）`, description: lines([
+        dramaturgyLines("删除：", [str(params.sceneId, 40)], extra),
+        summaryLine(params),
+      ]) };
+    case "production-character_propose_create":
+      return { severity, title: `提议新建 ${count(params.items)} 个角色`, description: lines([
+        dramaturgyLines("新建：", (Array.isArray(params.items) ? params.items : []).map((i: Record<string, unknown>) => str(i.name, 40)), extra),
+        summaryLine(params),
+      ]) };
+    case "production-character_propose_update":
+      return { severity, title: `提议修改 ${count(params.updates)} 个角色`, description: lines([
+        dramaturgyLines("改动：", (Array.isArray(params.updates) ? params.updates : []).map((u: Record<string, unknown>) =>
+          `${str(u.charId, 24)}：${Object.keys(u).filter((k) => k !== "charId").join("/")}`), extra),
+        summaryLine(params),
+      ]) };
+    case "production-character_propose_delete":
+      return { severity, title: `提议删除 ${count(params.charIds)} 个角色`, description: lines([
+        dramaturgyLines("删除：", (Array.isArray(params.charIds) ? params.charIds : []).map((id: unknown) => str(id, 40)), extra),
+        summaryLine(params),
+      ]) };
     case "production-wiki_propose_create":
       return { severity, title: `提议新建文档：${str(params.title, 60)}`, description: lines([
         permLine("新建", extra?.hasPermission),

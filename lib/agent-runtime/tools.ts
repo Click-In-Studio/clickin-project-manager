@@ -302,6 +302,131 @@ const DEFS: Def[] = [
     }),
   },
 
+  // ── production.dramaturgy 族（场次 + 角色，lib/agent-tools/dramaturgy-tools.ts）───────
+  // 写工具横跨多把钥匙（scene 逐字段），模型必须先知道自己能改什么——每个写工具的描述
+  // 都指向 dramaturgy_permissions；确认门的卡片由 previewDramaturgyProposal 预算三态。
+  prodTool("production.dramaturgy_permissions",
+    "查询当前用户在构作域（场次/角色）的写权限三态清单：✅已持有 / 🔓有资格未激活（不可写，需用户到页面激活）/ 📝需申请 / ⛔无入口（EN: my dramaturgy scene character write permissions）。场次的每个字段各是一把钥匙，**调用任何 scene_propose_* / character_propose_* 之前先调用本工具**，只提议 ✅ 的字段。",
+    async (uid, pid) => (await import("@/lib/agent-tools/dramaturgy-tools")).dramaturgyPermissions(uid, pid)),
+  {
+    mcpName: "production.scene_list",
+    description: "列出当前制作的章节/场次结构树（id、序号、名称、章/场、时长、排练标记数）（EN: list scenes chapters structure）。withDetails=true 时附带每场的梗概/行动线/音乐/舞台呈现摘要。需要场次 id 的工具从这里取。",
+    parameters: Type.Object({ withDetails: Type.Optional(Type.Boolean({ description: "是否附带构作字段摘要（默认不带，只有结构）" })) }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/dramaturgy-tools")).sceneList(ctx.userId, ctx.productionId, { withDetails: args.withDetails === true }),
+  },
+  {
+    mcpName: "production.scene_read",
+    description: "读取一个章节/场次的完整构作信息：名称、类型、所属章节、梗概、行动线、音乐、舞台呈现、预计时长、排练标记，章节还会列出下辖场次（EN: read scene details synopsis）。",
+    parameters: Type.Object({ sceneId: Type.String({ description: "章节/场次 id（来自 scene_list）" }) }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/dramaturgy-tools")).sceneRead(ctx.userId, ctx.productionId, String(args.sceneId)),
+  },
+  prodTool("production.character_list",
+    "列出当前制作的全部角色：id、名称、单人/聚合（含聚合成员）、角色类型、性别、小传摘要（EN: list characters cast）。需要角色 id 的工具从这里取。",
+    async (uid, pid) => (await import("@/lib/agent-tools/dramaturgy-tools")).characterList(uid, pid)),
+  {
+    mcpName: "production.character_read",
+    description: "读取一个角色的完整信息（名称、聚合成员、类型、性别、完整人物小传）（EN: read character biography）。",
+    parameters: Type.Object({ charId: Type.String({ description: "角色 id（来自 character_list）" }) }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/dramaturgy-tools")).characterRead(ctx.userId, ctx.productionId, String(args.charId)),
+  },
+  {
+    mcpName: "production.scene_propose_update",
+    description: "提议修改一个或多个章节/场次的构作字段（名称、章/场类型、梗概、行动线、音乐、舞台呈现、预计时长），需要人工在聊天栏确认（EN: update scene synopsis fields batch）。每个字段各是一把权限钥匙，**调用前先用 production.dramaturgy_permissions 查看自己能改哪些字段**，只传有权限的字段；一批里任一项无权限则整批不执行。字段值是整体替换，不是追加。",
+    parameters: Type.Object({
+      updates: Type.Array(Type.Object({
+        sceneId: Type.String({ description: "章节/场次 id（来自 scene_list）" }),
+        name: Type.Optional(Type.String({ description: "新名称；不改就整个省略" })),
+        kind: Type.Optional(Type.Union([Type.Literal("chapter"), Type.Literal("scene")], { description: "改为章（chapter）或场（scene）；不改就整个省略" })),
+        synopsis: Type.Optional(Type.String({ description: "梗概（整体替换）" })),
+        actionLine: Type.Optional(Type.String({ description: "行动线（整体替换）" })),
+        music: Type.Optional(Type.String({ description: "音乐（整体替换）" })),
+        stageNotes: Type.Optional(Type.String({ description: "舞台呈现（整体替换）" })),
+        expectedDuration: Type.Optional(Type.String({ description: "预计时长，如 8min" })),
+      }), { minItems: 1, maxItems: 50, description: "要修改的场次列表（批量：一张确认卡、一次落库）" }),
+      summary: Type.String({ description: "一句话说明这次改了什么、为什么" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: (args) => ({ scope: "scene", action: "updated", ids: Array.isArray(args.updates) ? args.updates.map((u: { sceneId?: unknown }) => String(u?.sceneId ?? "")).filter(Boolean) : [] }),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-scene_propose_update", args),
+  },
+  {
+    mcpName: "production.scene_propose_create",
+    description: "提议新建一个或多个章节/场次（可一次拆出整幕的场次），需要人工在聊天栏确认（EN: create scenes chapters batch）。带 parentId 或 kind=scene 即为场，否则为章；不指定位置就追加到末尾。**调用前先用 production.dramaturgy_permissions 确认有新建权限**。新建后要填梗概等字段，另用 scene_propose_update。",
+    parameters: Type.Object({
+      items: Type.Array(Type.Object({
+        name: Type.String({ description: "名称" }),
+        kind: Type.Optional(Type.Union([Type.Literal("chapter"), Type.Literal("scene")], { description: "章或场；省略时按 parentId 推断（有父即为场，否则为章）" })),
+        parentId: Type.Optional(Type.String({ description: "所属章节 id（新建场时给；建章不要传）" })),
+        insertBeforeSceneId: Type.Optional(Type.String({ description: "插在这个章节/场次之前；不指定位置就整个省略" })),
+        insertAfterSceneId: Type.Optional(Type.String({ description: "插在这个章节/场次之后；不指定位置就整个省略" })),
+      }), { minItems: 1, maxItems: 50 }),
+      summary: Type.String({ description: "一句话说明为什么新建" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: () => ({ scope: "scene", action: "created" }),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-scene_propose_create", args),
+  },
+  {
+    mcpName: "production.scene_propose_delete",
+    description: "提议删除一个章节/场次，需要人工在聊天栏确认（EN: delete scene chapter）。带构作详情的章节/场次无法删除（这不是权限问题，先清空详情）；章节下还有内容时系统会要求二选一：marker-only=只删标记、whole=连同其下正文一起删（另需剧本编辑权限）——先用 ask_user 问用户，再带 operation 重调。**调用前先用 production.dramaturgy_permissions 确认有删除权限**。",
+    parameters: Type.Object({
+      sceneId: Type.String({ description: "章节/场次 id（来自 scene_list）" }),
+      operation: Type.Optional(Type.Union([Type.Literal("marker-only"), Type.Literal("whole")], { description: "删除方式；只在工具要求选择后传" })),
+      summary: Type.String({ description: "一句话说明为什么删除" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: (args) => ({ scope: "scene", action: "deleted", ids: typeof args.sceneId === "string" ? [args.sceneId] : [] }),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-scene_propose_delete", args),
+  },
+  {
+    mcpName: "production.character_propose_create",
+    description: "提议新建一个或多个角色（可标记为聚合角色并指定成员），需要人工在聊天栏确认（EN: create characters batch）。角色名不能与现有角色重复。**调用前先用 production.dramaturgy_permissions 确认有新建角色权限**。性别/类型/小传另用 character_propose_update 填写。",
+    parameters: Type.Object({
+      items: Type.Array(Type.Object({
+        name: Type.String({ description: "角色名" }),
+        isAggregate: Type.Optional(Type.Boolean({ description: "是否聚合角色（多个单人角色的合称，如「众人」）" })),
+        memberIds: Type.Optional(Type.Array(Type.String(), { description: "聚合成员的角色 id（只对聚合角色有效，须是单人角色）" })),
+      }), { minItems: 1, maxItems: 50 }),
+      summary: Type.String({ description: "一句话说明为什么新建" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: () => ({ scope: "character", action: "created" }),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-character_propose_create", args),
+  },
+  {
+    mcpName: "production.character_propose_update",
+    description: "提议修改一个或多个角色（名称、聚合/单人、聚合成员、性别、角色类型、人物小传），需要人工在聊天栏确认（EN: update character biography batch）。每个角色一把编辑钥匙，**调用前先用 production.dramaturgy_permissions 确认**；一批里任一角色无权限则整批不执行。字段值整体替换（memberIds 是完整的新成员列表）。",
+    parameters: Type.Object({
+      updates: Type.Array(Type.Object({
+        charId: Type.String({ description: "角色 id（来自 character_list）" }),
+        name: Type.Optional(Type.String({ description: "新名称；不改就整个省略" })),
+        isAggregate: Type.Optional(Type.Boolean({ description: "改为聚合/单人；不改就整个省略（切换会清空成员）" })),
+        memberIds: Type.Optional(Type.Array(Type.String(), { description: "聚合成员的完整新列表（整体替换）；不改就整个省略" })),
+        gender: Type.Optional(Type.String({ description: "性别" })),
+        roleType: Type.Optional(Type.String({ description: "角色类型" })),
+        biography: Type.Optional(Type.String({ description: "人物小传（整体替换）" })),
+      }), { minItems: 1, maxItems: 50 }),
+      summary: Type.String({ description: "一句话说明这次改了什么、为什么" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: (args) => ({ scope: "character", action: "updated", ids: Array.isArray(args.updates) ? args.updates.map((u: { charId?: unknown }) => String(u?.charId ?? "")).filter(Boolean) : [] }),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-character_propose_update", args),
+  },
+  {
+    mcpName: "production.character_propose_delete",
+    description: "提议删除一个或多个角色，需要人工在聊天栏确认（EN: delete characters）。每个角色一把删除钥匙，**调用前先用 production.dramaturgy_permissions 确认**；任一无权限则整批不执行。",
+    parameters: Type.Object({
+      charIds: Type.Array(Type.String(), { minItems: 1, maxItems: 50, description: "要删除的角色 id 列表（来自 character_list）" }),
+      summary: Type.String({ description: "一句话说明为什么删除" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: (args) => ({ scope: "character", action: "deleted", ids: Array.isArray(args.charIds) ? args.charIds.map(String) : [] }),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-character_propose_delete", args),
+  },
+
   // ── 联网（网关时代 OpenClaw 内置的 web_search / web_fetch 的自建形态，见 web-tools.ts）
   {
     mcpName: "web.search",

@@ -42,6 +42,20 @@
 模型搜到名字后直接按名调用，harness 通过 `resolveDeferredTool`（vendor 补丁 #4）临时加载并在本会话后续轮次保持可见。
 分层只决定可见性，权限与制作语境仍在工具内部判定。
 
+### 多钥匙域：写工具先查权限（构作族的先例）
+
+wiki 的每个写工具对应一把钥匙，卡片一句"你有/没有编辑这篇文档的权限"就够。构作族（`lib/agent-tools/dramaturgy-tools.ts`）
+不是：scene 的每个字段各一把钥匙、角色逐实例一把，一个 `scene_propose_update` 横跨七把——不可能逐字段做工具，
+模型必须自己知道能改什么，否则会一直碰壁。约定：
+
+- 族内有显式的权限查询工具 `production.dramaturgy_permissions`（六步链 `canAccessNodesBatch` 的**三态**：✅ 已持有 /
+  🔓 有资格未激活 / 📝 需申请 / ⛔ 无入口），每个写工具的描述都写明"调用前先查"，CLOSURE 把它连带进面。
+  **不做注入**——`production-context` 仍不放权限清单（语境不是权限）。
+- 🔓 不可写：只告诉用户到对应页面激活（AI 触发自确认弹窗是挂账）。📝 给出 `/unauthorized?resource=<键>&id=<制作 id>` 入口。
+- 批量就是数组参数（`updates` / `items` / `charIds`，≤50）：一张卡、一次判定、一次 `applyPatchToDB`；任一项无权整批不做。
+  预览（卡片三态）与执行共用同一份规划表 `PLANNERS`；规划错误（含"删除方式需二选一"）在确认门前 block 回模型、不弹卡。
+- 落库后：场次 `broadcastEvent("markers")`（页面 SSE 自刷新）+ mutation scope `scene`；角色页没有 SSE，靠 mutation scope `character` 重拉。
+
 ## 本地跑
 
 ```bash

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
+import { useAgentMutation } from "@/lib/agent-mutations";
 import type { CharacterDetail } from "@/lib/db";
 import ChevronIcon from "@/components/ChevronIcon";
 import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, PRODUCTION_TOOLBAR_STAGE, ProductionTopMenuDivider, useProductionToolbar } from "./ProductionTopMenu";
@@ -722,6 +723,15 @@ export default function CharactersManager({ productionId, productionName, initia
     setView(window.innerWidth > 1920 ? "table" : "list");
     if (!embedded) window.scrollTo(0, 0);
   }, [embedded]);
+
+  // 角色页没有协作 SSE，characters 是 useState 初值——AI 写工具改完（character mutates）
+  // 若只 router.refresh() 屏幕纹丝不动（wiki 同款坑），这里订阅 mutation 行重拉列表。
+  useAgentMutation({ scope: "character", productionId }, () => {
+    const query = versionId ? `?versionId=${encodeURIComponent(versionId)}` : "";
+    void fetch(`${BASE_PATH}/api/production/${productionId}/characters${query}`)
+      .then(async (res) => { if (res.ok) setCharacters(await res.json() as CharacterDetail[]); })
+      .catch(() => {});
+  });
 
   const rename = async (id: string, name: string) => {
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {

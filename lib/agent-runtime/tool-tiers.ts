@@ -30,10 +30,24 @@ const WIKI_FAMILY = [
   "production.wiki_propose_move", "production.wiki_propose_tag", "production.wiki_set_grant",
 ];
 
+const DRAMATURGY_READ = [
+  "production.dramaturgy_permissions",
+  "production.scene_list", "production.scene_read", "production.character_list", "production.character_read",
+];
+const DRAMATURGY_FAMILY = [
+  ...DRAMATURGY_READ,
+  "production.scene_propose_update", "production.scene_propose_create", "production.scene_propose_delete",
+  "production.character_propose_create", "production.character_propose_update", "production.character_propose_delete",
+];
+
 /** 温层：pageKey → 该页的工作面（与 PAGE_LABELS 的 key 对齐；缺席 = 该页无温层） */
 const WARM_BY_PAGE: Record<string, string[]> = {
   "prod:wiki": WIKI_FAMILY,
   "prod:dramaturgy-inspiration": WIKI_FAMILY,
+  "prod:dramaturgy": DRAMATURGY_FAMILY,
+  "prod:characters": DRAMATURGY_FAMILY,
+  // 剧本页：场次/角色就是剧本里的 marker 与 cast，读面常在手边；写面靠召回
+  "prod:script": DRAMATURGY_READ,
   "prod:planning": ["production.milestones"],
   "prod:home": ["production.milestones"],
   "prod:contacts": ["production.contact_list", "production.department_list", "users.query_sensitive"],
@@ -56,6 +70,15 @@ const CLOSURE: Record<string, string[]> = {
   "production.wiki_propose_move": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_propose_tag": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_set_grant": ["production.wiki_tree", "production.wiki_search", "production.contact_list", "production.department_list"],
+  // 构作族：读要 id 供给入口；写要"先查权限"这一步（写工具横跨多把钥匙）
+  "production.scene_read": ["production.scene_list"],
+  "production.character_read": ["production.character_list"],
+  "production.scene_propose_update": ["production.dramaturgy_permissions", "production.scene_list", "production.scene_read"],
+  "production.scene_propose_create": ["production.dramaturgy_permissions", "production.scene_list"],
+  "production.scene_propose_delete": ["production.dramaturgy_permissions", "production.scene_list", "production.scene_read"],
+  "production.character_propose_create": ["production.dramaturgy_permissions", "production.character_list"],
+  "production.character_propose_update": ["production.dramaturgy_permissions", "production.character_list", "production.character_read"],
+  "production.character_propose_delete": ["production.dramaturgy_permissions", "production.character_list"],
 };
 
 export interface TierInput {
