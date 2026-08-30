@@ -4,10 +4,10 @@ export const metadata: Metadata = { title: "剧本" };
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { hasGrant } from "@/lib/grant-check";
+import { hasEffectiveGrant, hasGrant } from "@/lib/grant-check";
 import { canViewScriptBlocks, scriptBlocksUnauthorizedUrl } from "@/lib/script-perm";
 import { getSceneFieldPerms } from "@/lib/scene-field-perms";
-import { getProductionPermissionContext, getProductionName } from "@/lib/db";
+import { getProductionPermissionContext, getProductionName, getMasterScriptViewId } from "@/lib/db";
 import ScriptEditor from "@/components/ScriptEditor";
 import PageActivationGate from "@/components/PageActivationGate";
 
@@ -45,7 +45,7 @@ export default async function ProductionScriptPage({
         productionName={name ?? undefined}
         canEditText={access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(session.userId, id, "script", "*", "blocks", "edit")}
         canEditMetadata={sceneFieldPerms.any}
-        canEditSceneName={sceneFieldPerms.name}
+        canEditLayout={await hasEffectiveGrant(access.permCtx, id, "script_view", (await getMasterScriptViewId(id)) ?? "*", "*", "edit")}
         canEditRehearsalMark={access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(session.userId, id, "script", "*", "rehearsal_marks", "create")}
         canImport={access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(session.userId, id, "script", "*", "imports", "create")}
         initialSearchQuery={q}

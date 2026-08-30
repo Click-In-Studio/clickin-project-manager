@@ -5790,7 +5790,7 @@ export default function ScriptEditor({
   productionName,
   canEditText: canEditTextProp = true,
   canEditMetadata: canEditMetadataProp = true,
-  canEditSceneName = true,
+  canEditLayout = true,
   canEditRehearsalMark = true,
   canImport = false,
   initialSearchQuery,
@@ -5800,10 +5800,10 @@ export default function ScriptEditor({
   productionName?: string;
   canEditText?: boolean;
   canEditMetadata?: boolean;
-  /** 剧本排版模式（紧凑排版）落在 scene 的 meta/name@edit 门上——与
-   *  app/api/script/[id]/config 的判定同一把钥匙。canEditMetadata 现在是
+  /** 剧本排版（页面类型 / 紧凑排版 / 模版）的门：script_view/<主本>@edit——与
+   *  app/api/script/[id]/config 的版式字段判定同一把钥匙。canEditMetadata 是
    *  「任一 scene 字段可改」的粗门，不能拿来当排版开关的依据。 */
-  canEditSceneName?: boolean;
+  canEditLayout?: boolean;
   canEditRehearsalMark?: boolean;
   canImport?: boolean;
   initialSearchQuery?: string;
@@ -5817,7 +5817,7 @@ export default function ScriptEditor({
 
   const baseCanEditText = canEditTextProp;
   const baseCanEditMetadata = canEditMetadataProp;
-  const baseCanEditTextLayout = canEditSceneName;
+  const baseCanEditTextLayout = canEditLayout;
   const baseCanEdit = baseCanEditText || baseCanEditMetadata || canEditRehearsalMark;
   const [manualLockedMode, setManualLockedMode] = useState(() => readDisplayCookie().rehearsalMode);
   const isLockedMode = !baseCanEdit || manualLockedMode;

@@ -299,6 +299,10 @@ describe("④ 激活面收齐了这些写面键", () => {
     }
   });
 
+  it("剧本排版的门（script_view/*@edit）在 script scope 里：编辑器菜单与打印页靠它，持区间者要能在这两页激活", () => {
+    expect(PAGE_PERMISSION_SCOPES.script.has("node:script_view/*@edit")).toBe(true);
+  });
+
   it("scene 的 create / edit / delete 都在 dramaturgy scope 里", () => {
     for (const verb of ["create", "edit", "delete"]) {
       expect(PAGE_PERMISSION_SCOPES.dramaturgy.has(`node:scene/*@${verb}`)).toBe(true);

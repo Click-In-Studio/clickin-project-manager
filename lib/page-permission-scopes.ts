@@ -86,6 +86,11 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:script/*/rehearsal_marks@create",
     "node:script/*/mounts@create",
     "node:script/*/imports@create",
+    // 剧本排版的门：epic #337 §9 的 script_view/<id>@edit（改这个视图的排版）。编辑器
+    // 「页面类型」菜单、打印页模版菜单、config PUT 的版式字段三处同键。此前借的是
+    // scene meta/name@edit 且只登记在 dramaturgy scope，持角色区间的制作人从剧本页 /
+    // 打印页永远激活不出来（线上「我们的星星」）。写面键必须在它所在页面的激活面里。
+    "node:script_view/*@edit",
     "node:tag_group/*@create",
     "node:tag_group/*@edit",
     "node:tag_group/*@delete",
