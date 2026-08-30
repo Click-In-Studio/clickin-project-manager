@@ -1,29 +1,32 @@
 import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getActiveVersionId, listScenesByVersion, getMarkerLabelIndex, getVersion } from "@/lib/db";
+import { getProductionPermissionContext, getActiveVersionId, getVersion, loadProduction, getEstimatedPageMap } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { computePageMap } from "@/lib/script-page";
-import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "@/lib/script-marker-sql";
-import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
+import { isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
+import { buildMarkerLabelIndex, type MarkerLabelIndex } from "@/lib/script-generated-labels";
 import type { MentionSearchResult } from "@/lib/mention-types";
-import type { Block, BlockType } from "@/lib/script-types";
+import type { Block } from "@/lib/script-types";
 
 export type { MentionSearchResult as ScriptBlockSearchResult };
 
 type Ctx = { params: Promise<{ id: string }> };
-type BlockRow = { id: string; type: string; content: string };
 type SceneRow = { id: string; num: string; name: string };
 const SCENE_REHEARSAL_LABEL_RE = /^(\d(?:[\d.\-]*\d)?)-?([A-Za-z]+)$/;
-type PageMapBlockRow = {
-  id: string;
-  snapshot_id: string;
-  type: string;
-  content: string;
-  scene_id: string | null;
-  rehearsal_mark: string | null;
-  stage_comment: string | null;
-  force_show_character_name: boolean;
+
+/**
+ * 一次请求内的剧本索引。正文只经 `loadProduction()` 读一次（#336：剧本正文的读取面
+ * 收敛到这一个闸口，#339 的权限门只需加在那里），其余全部内存过滤——逐场 / 逐排练
+ * 记号 / 逐页的候选本来就只取前 15 条，不值得各开一条 SQL。
+ *
+ * `textBlocks` 走与分页器、打印页同一条投影链（marker 归属 → legacy 投影），所以
+ * 这里的 sceneId / rehearsalMark 与页码、与屏上的分组判定同源。
+ */
+type ScriptIndex = {
+  textBlocks: Block[];
+  scenes: SceneRow[];
+  labels: MarkerLabelIndex;
+  pageMap: () => Promise<Record<string, number>>;
 };
 
 function likePatternToRegex(pattern: string): RegExp {
@@ -60,18 +63,20 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!q) return Response.json({ results: [] });
 
   const paramVersionId = req.nextUrl.searchParams.get("v") || null;
-  const effectiveVersionId = await resolveProductionVersion(productionId, paramVersionId);
-  if (paramVersionId && !effectiveVersionId) {
+  const versionId = await resolveProductionVersion(productionId, paramVersionId);
+  if (paramVersionId && !versionId) {
     return Response.json({ error: "版本不存在" }, { status: 404 });
   }
+  // 版本退役（PR #300）后每个演出恒有 head。万一没有：剧本域（场 / 块 / 页）一律
+  // 空结果，不再走「无版本按 production_id 直查 script 表」的老路；cue 域不依赖
+  // 版本，照常可搜（无版本过滤时 DISTINCT ON 才有活干，见 cue-mention-resolve 测试）。
+
+  // 「版本名:查询」前缀曾在此解析——version.name 已随版本退役 DROP，那段 SQL 一跑
+  // 就 500（用户搜带冒号的台词即触发），故整段删除；带冒号的查询按原文处理。
+  const mentionQuery = q;
+
   const pool = getPool();
   const results: MentionSearchResult[] = [];
-  let rehearsalLabelsPromise: ReturnType<typeof getMarkerLabelIndex> | null = null;
-  function loadRehearsalLabels() {
-    return rehearsalLabelsPromise ??= resolvedVersionId
-      ? getMarkerLabelIndex(resolvedVersionId)
-      : Promise.resolve(buildMarkerLabelIndex([]));
-  }
   const dedup = (r: MentionSearchResult[]) => {
     const seen = new Set<string>();
     return r.filter(x => {
@@ -80,212 +85,71 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     });
   };
 
-  // ── Version prefix: "版本名:mention" or "版本名：mention" ─────────────────────
-  let resolvedVersionId = effectiveVersionId;
-  let mentionQuery = q;
-  let explicitVersionId: string | null = null;
-
-  const colonIdx = q.search(/[：:]/);
-  if (colonIdx > 0) {
-    const versionName = q.slice(0, colonIdx);
-    const rest = q.slice(colonIdx + 1);
-    if (rest.trim()) {
-      const verRes = await pool.query<{ id: string }>(
-        `SELECT id FROM version WHERE production_id = $1 AND name = $2 LIMIT 1`,
-        [productionId, versionName]
-      );
-      if (verRes.rows[0]) {
-        explicitVersionId = verRes.rows[0].id;
-        resolvedVersionId = explicitVersionId;
-        mentionQuery = rest.trim();
-      }
-    }
-  }
-  // ── Version-aware query helpers ────────────────────────────────────────────
-
-  async function firstBlockInScene(sceneId: string): Promise<{ id: string } | null> {
-    if (resolvedVersionId) {
-      const r = await pool.query<{ id: string }>(
-        `${VERSION_OWNED_BLOCKS_CTE}
-         SELECT id FROM owned_blocks
-         WHERE scene_id = $2 AND type NOT IN (${MARKER_TYPES_SQL})
-         ORDER BY sort_key LIMIT 1`,
-        [resolvedVersionId, sceneId]
-      );
-      return r.rows[0] ?? null;
-    }
-    const r = await pool.query<{ id: string }>(
-      `SELECT id FROM script
-       WHERE production_id = $1 AND scene_id = $2 AND type::text NOT IN (${MARKER_TYPES_SQL})
-       ORDER BY sort_key LIMIT 1`,
-      [productionId, sceneId]
-    );
-    return r.rows[0] ?? null;
+  // ── 剧本索引（懒加载，整个请求只读一次正文）──────────────────────────────
+  let scriptPromise: Promise<ScriptIndex | null> | null = null;
+  function loadScript(): Promise<ScriptIndex | null> {
+    return scriptPromise ??= (async () => {
+      if (!versionId) return null;
+      const loaded = await loadProduction(productionId, versionId);
+      if (!loaded) return null;
+      const owned = withMarkerOwnership(loaded.state.blocks);
+      const textBlocks = withLegacyOwnershipProjection(owned).filter((block) => !isMarkerBlock(block));
+      let pageMapPromise: Promise<Record<string, number>> | null = null;
+      return {
+        textBlocks,
+        scenes: loaded.state.scenes.map((scene) => ({ id: scene.id, num: scene.number, name: scene.name })),
+        labels: buildMarkerLabelIndex(owned),
+        pageMap: () => pageMapPromise ??= getEstimatedPageMap(productionId, versionId, loaded.state),
+      };
+    })();
   }
 
-  async function markFirstBlock(sceneId: string, mark: string): Promise<{ sortKey: string; markerId: string } | null> {
-    if (!resolvedVersionId) return null;
-    const labels = await loadRehearsalLabels();
-    const markerId = labels.markerIdByParentAndLabel.get(`${sceneId}\u0000${mark.toUpperCase()}`);
+  async function firstBlockInScene(sceneId: string): Promise<Block | null> {
+    const script = await loadScript();
+    return script?.textBlocks.find((block) => block.sceneId === sceneId) ?? null;
+  }
+
+  async function blocksInScene(sceneId: string): Promise<Block[]> {
+    const script = await loadScript();
+    return script?.textBlocks.filter((block) => block.sceneId === sceneId).slice(0, 15) ?? [];
+  }
+
+  /**
+   * 某场里挂在某个排练记号下的正文块（按序，前 15 条）。记号下没有块时返回 null——
+   * 与旧行为一致：空记号不进候选。
+   */
+  async function markBlocks(sceneId: string, mark: string): Promise<{ markerId: string; blocks: Block[] } | null> {
+    const script = await loadScript();
+    if (!script) return null;
+    const markerId = script.labels.markerIdByParentAndLabel.get(`${sceneId}\u0000${mark.toUpperCase()}`);
     if (!markerId) return null;
-    const r = await pool.query<{ sort_key: string }>(
-      `${VERSION_OWNED_BLOCKS_CTE}
-       SELECT sort_key FROM owned_blocks
-       WHERE scene_id = $2 AND rehearsal_mark = $3 AND type NOT IN (${MARKER_TYPES_SQL})
-       ORDER BY sort_key LIMIT 1`,
-      [resolvedVersionId, sceneId, markerId]
-    );
-    return r.rows[0] ? { sortKey: r.rows[0].sort_key, markerId } : null;
+    const blocks = script.textBlocks.filter((block) => block.sceneId === sceneId && block.rehearsalMark === markerId);
+    return blocks.length > 0 ? { markerId, blocks: blocks.slice(0, 15) } : null;
   }
 
-  async function nextMarkSortKey(sceneId: string, markerId: string, afterKey: string): Promise<string | null> {
-    if (!resolvedVersionId) return null;
-    const r = await pool.query<{ sort_key: string }>(
-      `${VERSION_OWNED_BLOCKS_CTE}
-       SELECT sort_key FROM owned_blocks
-       WHERE scene_id = $2 AND rehearsal_mark <> $3 AND sort_key > $4
-       ORDER BY sort_key LIMIT 1`,
-      [resolvedVersionId, sceneId, markerId, afterKey]
-    );
-    return r.rows[0]?.sort_key ?? null;
-  }
-
-  async function blocksInScene(sceneId: string): Promise<BlockRow[]> {
-    if (resolvedVersionId) {
-      const r = await pool.query<BlockRow>(
-        `${VERSION_OWNED_BLOCKS_CTE}
-         SELECT id, type, content FROM owned_blocks
-         WHERE scene_id = $2 AND type NOT IN (${MARKER_TYPES_SQL})
-         ORDER BY sort_key LIMIT 15`,
-        [resolvedVersionId, sceneId]
-      );
-      return r.rows;
-    }
-    const r = await pool.query<BlockRow>(
-      `SELECT s.id, s.type, s.content FROM script s
-       WHERE s.production_id = $1 AND s.scene_id = $2 AND s.type::text NOT IN (${MARKER_TYPES_SQL})
-       ORDER BY s.sort_key LIMIT 15`,
-      [productionId, sceneId]
-    );
-    return r.rows;
-  }
-
-  async function blocksInSceneRange(sceneId: string, fromKey: string, toKey: string | null): Promise<BlockRow[]> {
-    if (resolvedVersionId) {
-      const r = toKey
-        ? await pool.query<BlockRow>(
-            `${VERSION_OWNED_BLOCKS_CTE}
-             SELECT id, type, content FROM owned_blocks
-             WHERE scene_id = $2 AND type NOT IN (${MARKER_TYPES_SQL}) AND sort_key >= $3 AND sort_key < $4
-             ORDER BY sort_key LIMIT 15`,
-            [resolvedVersionId, sceneId, fromKey, toKey]
-          )
-        : await pool.query<BlockRow>(
-            `${VERSION_OWNED_BLOCKS_CTE}
-             SELECT id, type, content FROM owned_blocks
-             WHERE scene_id = $2 AND type NOT IN (${MARKER_TYPES_SQL}) AND sort_key >= $3
-             ORDER BY sort_key LIMIT 15`,
-            [resolvedVersionId, sceneId, fromKey]
-          );
-      return r.rows;
-    }
-    const r = toKey
-      ? await pool.query<BlockRow>(
-          `SELECT s.id, s.type, s.content FROM script s
-           WHERE s.production_id = $1 AND s.scene_id = $2 AND s.sort_key >= $3 AND s.sort_key < $4
-             AND s.type::text NOT IN (${MARKER_TYPES_SQL})
-           ORDER BY s.sort_key LIMIT 15`,
-          [productionId, sceneId, fromKey, toKey]
-        )
-      : await pool.query<BlockRow>(
-          `SELECT s.id, s.type, s.content FROM script s
-           WHERE s.production_id = $1 AND s.scene_id = $2 AND s.sort_key >= $3
-             AND s.type::text NOT IN (${MARKER_TYPES_SQL})
-           ORDER BY s.sort_key LIMIT 15`,
-          [productionId, sceneId, fromKey]
-        );
-    return r.rows;
+  async function blocksOnPage(pageNum: number): Promise<Block[]> {
+    const script = await loadScript();
+    if (!script) return [];
+    const pageMap = await script.pageMap();
+    return script.textBlocks.filter((block) => pageMap[block.id] === pageNum).slice(0, 15);
   }
 
   async function queryScenes(numPattern: string, limit: number): Promise<SceneRow[]> {
     const matcher = likePatternToRegex(numPattern);
-    return (await loadGeneratedScenes())
+    return ((await loadScript())?.scenes ?? [])
       .filter(scene => matcher.test(scene.num))
       .slice(0, limit);
   }
 
   async function queryScenesText(textPattern: string, limit: number): Promise<SceneRow[]> {
     const matcher = likePatternToRegex(textPattern);
-    return (await loadGeneratedScenes())
+    return ((await loadScript())?.scenes ?? [])
       .filter(scene => matcher.test(scene.num) || matcher.test(scene.name))
       .slice(0, limit);
   }
 
-  let generatedScenesPromise: Promise<SceneRow[]> | null = null;
-  async function loadGeneratedScenes(): Promise<SceneRow[]> {
-    if (!resolvedVersionId) return [];
-    generatedScenesPromise ??= listScenesByVersion(resolvedVersionId).then((scenes) => scenes.map((scene) => ({
-      id: scene.id,
-      num: scene.number,
-      name: scene.name,
-    })));
-    return generatedScenesPromise;
-  }
-
-  let pageMapPromise: Promise<Record<string, number>> | null = null;
-  async function getPageMap(): Promise<Record<string, number>> {
-    if (pageMapPromise) return pageMapPromise;
-    pageMapPromise = (async () => {
-      const blocksRes = resolvedVersionId
-        ? await pool.query<PageMapBlockRow>(
-            `${VERSION_OWNED_BLOCKS_CTE},
-             version_snapshots AS (
-               SELECT block_id, snapshot_id
-               FROM script_version
-               WHERE version_id = $1
-             )
-             SELECT ob.id, vs.snapshot_id, ob.type, ob.content, ob.scene_id, ob.rehearsal_mark,
-                    s.stage_comment, s.force_show_character_name
-             FROM owned_blocks ob
-             JOIN version_snapshots vs ON vs.block_id = ob.id
-             JOIN script s ON s.id = vs.snapshot_id
-             ORDER BY ob.sort_key`,
-            [resolvedVersionId]
-          )
-        : await pool.query<PageMapBlockRow>(
-            `SELECT id, id AS snapshot_id, type::text AS type, content, scene_id, rehearsal_mark,
-                    stage_comment, force_show_character_name
-             FROM script
-             WHERE production_id = $1
-             ORDER BY sort_key`,
-            [productionId]
-          );
-      const snapshotIds = blocksRes.rows.map(r => r.snapshot_id);
-      const charRes = snapshotIds.length > 0
-        ? await pool.query<{ script_id: string; character_id: string }>(
-            "SELECT script_id, character_id FROM script_character WHERE script_id = ANY($1::text[]) ORDER BY script_id, position",
-            [snapshotIds]
-          )
-        : { rows: [] as Array<{ script_id: string; character_id: string }> };
-      const charMap = new Map<string, string[]>();
-      for (const row of charRes.rows) {
-        if (!charMap.has(row.script_id)) charMap.set(row.script_id, []);
-        charMap.get(row.script_id)!.push(row.character_id);
-      }
-      const blocks: Block[] = blocksRes.rows.map(r => ({
-        id: r.id, type: (["stage", "chapter_marker", "scene_marker", "rehearsal_marker"].includes(r.type) ? r.type : "dialogue") as BlockType,
-        content: r.content, stageComment: r.stage_comment, forceShowCharacterName: r.force_show_character_name,
-        sceneId: r.scene_id,
-        characterIds: charMap.get(r.snapshot_id) ?? [], characterAnnotations: {} as Record<string, string>,
-        lyric: r.type === "lyric", rehearsalMark: r.rehearsal_mark,
-      }));
-      return computePageMap(blocks, "a4", "center", !!resolvedVersionId);
-    })();
-    return pageMapPromise;
-  }
-
-  function withVer(r: Omit<MentionSearchResult, "versionId">): MentionSearchResult {
-    return explicitVersionId ? { ...r, versionId: explicitVersionId } : r;
+  async function loadRehearsalLabels(): Promise<MarkerLabelIndex> {
+    return (await loadScript())?.labels ?? buildMarkerLabelIndex([]);
   }
 
   // ── Asset: asset.{mount_query}-{name_prefix} ──────────────────────────────
@@ -302,7 +166,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
        ORDER BY a.name LIMIT 8`,
       params
     );
-    return r.rows.map(row => withVer({
+    return r.rows.map(row => ({
       kind: "asset", id: row.id,
       aux: `${mountTypes[0]}:${mountId}`,
       displayLabel: `#asset.${mountLabel}-${row.name ?? "?"}`,
@@ -324,7 +188,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
          ORDER BY a.name LIMIT 8`,
         params
       );
-      return r.rows.map(row => withVer({
+      return r.rows.map(row => ({
         kind: "asset", id: row.id,
         aux: `production:${row.folder_path ?? ""}`,
         displayLabel: `#asset.production.${row.folder_path ?? ""}-${row.name ?? "?"}`,
@@ -340,9 +204,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (blockPageM) {
       const pageNum = parseInt(blockPageM[1]);
       const blockIdx = parseInt(blockPageM[2]) - 1;
-      const pageMap = await getPageMap();
-      const pageBlockIds = Object.entries(pageMap).filter(([, p]) => p === pageNum).map(([id]) => id);
-      const blockId = pageBlockIds[blockIdx];
+      const blockId = (await blocksOnPage(pageNum))[blockIdx]?.id;
       if (!blockId) return [];
       return queryAssetsByMount(["block", "block_snapshot"], blockId, namePrefix, mountQuery);
     }
@@ -367,11 +229,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const idx = parseInt(posStr) - 1;
       const scenes = await queryScenes(`${sceneNum}`, 1);
       if (!scenes[0]) return [];
-      const mfb = await markFirstBlock(scenes[0].id, mark);
-      if (!mfb) return [];
-      const endKey = await nextMarkSortKey(scenes[0].id, mfb.markerId, mfb.sortKey);
-      const blocks = await blocksInSceneRange(scenes[0].id, mfb.sortKey, endKey);
-      const blockId = blocks[idx]?.id;
+      const blockId = (await markBlocks(scenes[0].id, mark))?.blocks[idx]?.id;
       if (!blockId) return [];
       return queryAssetsByMount(["block", "block_snapshot"], blockId, namePrefix, mountQuery);
     }
@@ -383,8 +241,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const idx = parseInt(posStr) - 1;
       const scenes = await queryScenes(sceneNum, 1);
       if (!scenes[0]) return [];
-      const blocks = await blocksInScene(scenes[0].id);
-      const blockId = blocks[idx]?.id;
+      const blockId = (await blocksInScene(scenes[0].id))[idx]?.id;
       if (!blockId) return [];
       return queryAssetsByMount(["block", "block_snapshot"], blockId, namePrefix, mountQuery);
     }
@@ -436,34 +293,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const pageDrill = base.match(/^p\.(\d+)$/i);
     if (pageDrill) {
       const pageNum = parseInt(pageDrill[1]);
-      const pageMap = await getPageMap();
-      const blockIds = Object.entries(pageMap).filter(([, p]) => p === pageNum).map(([id]) => id);
-      if (blockIds.length > 0) {
-        let rows: BlockRow[];
-        if (resolvedVersionId) {
-          const r = await pool.query<BlockRow>(
-            `SELECT sv.block_id AS id, s.type, s.content
-             FROM script_version sv JOIN script s ON s.id = sv.snapshot_id
-             WHERE sv.version_id = $1 AND sv.block_id = ANY($2::text[]) AND s.type::text NOT IN (${MARKER_TYPES_SQL})
-             ORDER BY sv.sort_key LIMIT 15`,
-            [resolvedVersionId, blockIds]
-          );
-          rows = r.rows;
-        } else {
-          const r = await pool.query<BlockRow>(
-            `SELECT s.id, s.type, s.content FROM script s
-             WHERE s.id = ANY($1::text[]) AND s.production_id = $2 AND s.type::text NOT IN (${MARKER_TYPES_SQL})
-             ORDER BY s.sort_key LIMIT 15`,
-            [blockIds, productionId]
-          );
-          rows = r.rows;
-        }
-        return Response.json({ results: rows.map((r, i) => withVer({
-          kind: "block", displayMode: "page",
-          id: r.id, displayLabel: `#p.${pageNum}-${i + 1}`, description: blockDesc(r),
-        })) });
-      }
-      return Response.json({ results: [] });
+      const rows = await blocksOnPage(pageNum);
+      return Response.json({ results: rows.map((r, i) => ({
+        kind: "block", displayMode: "page",
+        id: r.id, displayLabel: `#p.${pageNum}-${i + 1}`, description: blockDesc(r),
+      })) });
     }
 
     const spmDrill = base.match(SCENE_REHEARSAL_LABEL_RE);
@@ -471,15 +305,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const [, sceneQuery, mark] = spmDrill;
       const sceneRows = await queryScenes(`${sceneQuery}%`, 1);
       if (sceneRows[0]) {
-        const scene = sceneRows[0];
-        const mfb = await markFirstBlock(scene.id, mark);
-        if (mfb) {
-          const endKey = await nextMarkSortKey(scene.id, mfb.markerId, mfb.sortKey);
-          const rows = await blocksInSceneRange(scene.id, mfb.sortKey, endKey);
+        const found = await markBlocks(sceneRows[0].id, mark);
+        if (found) {
           const labels = await loadRehearsalLabels();
-          const prefix = labels.labelByMarkerId.get(mfb.markerId);
+          const prefix = labels.labelByMarkerId.get(found.markerId);
           if (!prefix) return Response.json({ results: [] });
-          return Response.json({ results: rows.map((r, i) => withVer({
+          return Response.json({ results: found.blocks.map((r, i) => ({
             kind: "block", displayMode: "rehearsal",
             id: r.id, displayLabel: `#${prefix}-${i + 1}`, description: blockDesc(r),
           })) });
@@ -494,7 +325,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (childScenes.length > 0) {
         for (const scene of childScenes) {
           const fb = await firstBlockInScene(scene.id);
-          if (fb) results.push(withVer({ kind: "scene", id: scene.id, displayLabel: `#${scene.num}`, description: scene.name || undefined }));
+          if (fb) results.push({ kind: "scene", id: scene.id, displayLabel: `#${scene.num}`, description: scene.name || undefined });
         }
         return Response.json({ results: dedup(results) });
       }
@@ -502,7 +333,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (exactScenes[0]) {
         const rows = await blocksInScene(exactScenes[0].id);
         const sceneNum = exactScenes[0].num;
-        return Response.json({ results: rows.map((r, i) => withVer({
+        return Response.json({ results: rows.map((r, i) => ({
           kind: "block", displayMode: "scene",
           id: r.id, displayLabel: `#${sceneNum}-${i + 1}`, description: blockDesc(r),
         })) });
@@ -516,7 +347,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const pageMatch = mentionQuery.match(/^p\.(\d+)$/i);
   if (pageMatch) {
     const pageNum = parseInt(pageMatch[1]);
-    results.push(withVer({ kind: "page", id: String(pageNum), displayLabel: `#p.${pageNum}`, description: `第${pageNum}页` }));
+    results.push({ kind: "page", id: String(pageNum), displayLabel: `#p.${pageNum}`, description: `第${pageNum}页` });
     return Response.json({ results });
   }
 
@@ -528,14 +359,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const sceneRows = await queryScenes(`${sceneQuery}%`, 4);
     const labels = await loadRehearsalLabels();
     for (const scene of sceneRows) {
-      const mfb = await markFirstBlock(scene.id, mark);
-      if (mfb) {
-        const displayLabel = labels.labelByMarkerId.get(mfb.markerId);
+      const found = await markBlocks(scene.id, mark);
+      if (found) {
+        const displayLabel = labels.labelByMarkerId.get(found.markerId);
         if (!displayLabel) continue;
-        results.push(withVer({
-          kind: "rehearsal", id: mfb.markerId,
+        results.push({
+          kind: "rehearsal", id: found.markerId,
           displayLabel: `#${displayLabel}`, description: scene.name || undefined,
-        }));
+        });
       }
     }
     return Response.json({ results: dedup(results).slice(0, 8) });
@@ -548,16 +379,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const sceneRows = await queryScenesText(`${mentionQuery}%`, 5);
     const labels = await loadRehearsalLabels();
     for (const scene of sceneRows) {
-      results.push(withVer({ kind: "scene", id: scene.id, displayLabel: `#${scene.num}`, description: scene.name || undefined }));
+      results.push({ kind: "scene", id: scene.id, displayLabel: `#${scene.num}`, description: scene.name || undefined });
 
       for (const markerId of labels.rehearsalLabelByMarkerId.keys()) {
         if (labels.parentIdByMarkerId.get(markerId) !== scene.id) continue;
         const displayLabel = labels.labelByMarkerId.get(markerId);
         if (!displayLabel) continue;
-        results.push(withVer({
+        results.push({
           kind: "rehearsal", id: markerId,
           displayLabel: `#${displayLabel}`, description: scene.name || undefined,
-        }));
+        });
         if (results.length >= 8) break;
       }
     }
@@ -577,16 +408,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
          SELECT DISTINCT ON (c.cue_id) c.cue_id, c.number, c.name, cl.abbr
          FROM cue c JOIN cue_list cl ON cl.id = c.cue_list_id
          WHERE cl.production_id = $1 AND cl.abbr = $2 AND ($3 = '' OR c.number ILIKE $4)
-         ${resolvedVersionId ? "AND EXISTS (SELECT 1 FROM cue_version cv WHERE cv.revision_id = c.id AND cv.version_id = $5)" : ""}
+         ${versionId ? "AND EXISTS (SELECT 1 FROM cue_version cv WHERE cv.revision_id = c.id AND cv.version_id = $5)" : ""}
          ORDER BY c.cue_id, c.id DESC
        ) d
        ORDER BY length(d.number), d.number LIMIT 8`,
-      resolvedVersionId
-        ? [productionId, abbr, numPrefix, `${numPrefix}%`, resolvedVersionId]
+      versionId
+        ? [productionId, abbr, numPrefix, `${numPrefix}%`, versionId]
         : [productionId, abbr, numPrefix, `${numPrefix}%`]
     );
     for (const r of cueRes.rows) {
-      results.push(withVer({ kind: "cue", id: r.cue_id, displayLabel: `#${r.abbr}.${r.number}`, description: r.name || undefined }));
+      results.push({ kind: "cue", id: r.cue_id, displayLabel: `#${r.abbr}.${r.number}`, description: r.name || undefined });
     }
     return Response.json({ results: dedup(results) });
   }
@@ -595,7 +426,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   const sceneTextRes = await queryScenesText(`%${mentionQuery}%`, 6);
   for (const scene of sceneTextRes) {
-    results.push(withVer({ kind: "scene", id: scene.id, displayLabel: `#${scene.num}`, description: scene.name || undefined }));
+    results.push({ kind: "scene", id: scene.id, displayLabel: `#${scene.num}`, description: scene.name || undefined });
   }
   return Response.json({ results: dedup(results).slice(0, 8) });
 }

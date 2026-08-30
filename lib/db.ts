@@ -32,7 +32,7 @@ import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
 import type { ScriptPatch, TagEntry } from "./script-ops";
 import { keyBetween, initialKeys } from "./lex-order";
-import { updateEstimatedPageMap, type EstimatedPageMapCache } from "./script-page";
+import { computePageMap, updateEstimatedPageMap, type EstimatedPageMapCache } from "./script-page";
 import { buildMarkerLabelIndex, generatedRehearsalMarksByScene, type MarkerLabelIndex } from "./script-generated-labels";
 import { VERSION_MARKER_LABEL_ROWS_SQL, VERSION_OWNED_BLOCKS_CTE, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
 import { getMarkerChange, markerCacheUpdateBlockIds, markerHierarchyUpdateBlockIds, normalizeScriptMarkerInvariants, projectMarkers, sameMarkerStructure, type MarkerChange, type MarkerProjection } from "./script-marker-domain";
@@ -990,6 +990,46 @@ export async function loadPageMap(productionId: string): Promise<Record<string, 
     [productionId]
   );
   return res.rows[0]?.page_map ?? null;
+}
+
+/**
+ * 估算页码的统一读口（#336 阶段 B）。
+ *
+ * 页码有且只有这一个读者：读 `production.page_map`——applyPatchToDB 提交后按四种
+ * 版式各预算一份、saveScriptConfig 改版式时全量重算的那份——再按演出**实际**版式取。
+ * 此前四个消费点各自拉全本现算，其中三处硬编码 a4/center、cue 页漏传 textLayoutMode：
+ * 用 letter / compact 的剧组，搜索与 @提及 报的是别的版式的页码。
+ *
+ * 存储缺失（从未写过、非 head 版本、上次 fire-and-forget 失败）时现算兜底；算法与
+ * 存储同源（computePageMap），两边不会分叉。阶段 B2 起 page_map 改按 script_view id
+ * 键，只需改这里。「页码到底该是什么」（实时重算 / 锁页 A 页 / 换坐标）归 #349。
+ */
+export async function getEstimatedPageMap(
+  productionId: string,
+  versionId: string,
+  preloaded?: ScriptState | null,
+): Promise<Record<string, number>> {
+  // 存储由提交后的异步任务写入；等在途的那次写完，别读到上一版的页码
+  await pageMapUpdates.get(versionId)?.catch(() => {});
+  const res = await getPool().query<{
+    page_map: Record<string, Record<string, number>> | null;
+    page_layout: string | null;
+    active_version_id: string | null;
+  }>(
+    `SELECT page_map, script_config->>'pageLayout' AS page_layout, active_version_id
+     FROM production WHERE id = $1`,
+    [productionId],
+  );
+  const row = res.rows[0];
+  if (!row) return {};
+  const layout = ALL_PATCH_LAYOUTS.find((l) => l === row.page_layout) ?? DEFAULT_SCRIPT_CONFIG.pageLayout;
+  if (row.active_version_id === versionId) {
+    const stored = row.page_map?.[layout];
+    if (stored) return stored;
+  }
+  const state = preloaded ?? (await loadProduction(productionId, versionId))?.state;
+  if (!state) return {};
+  return computePageMap(state.blocks, layout, state.config.textLayoutMode);
 }
 
 /** Stores a pre-computed page map keyed by layout name for agent queries. */
