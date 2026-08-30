@@ -23,13 +23,18 @@ function dramaturgyLines(headline: string, items: string[], extra?: { hasPermiss
   const notes = extra?.notes ?? [];
   const blocked = notes.filter((n) => /^[🔓📝⛔]/u.test(n));
   const plain = notes.filter((n) => !/^[🔓📝⛔]/u.test(n));
+  const shown = plain.length > 0 ? plain : items;
+  // 两段都封顶：角色批量是逐实例一把钥匙，50 个角色无权就是 50 行；卡片 512 字符的硬截断
+  // 会把"共 N 项"的收尾吃掉，不如自己截
+  const CAP = 6;
   return lines([
     extra?.hasPermission === true ? "✅ 权限齐全，批准后直接生效。" : null,
     extra?.hasPermission === false ? "⛔ 缺少权限——批准后调用会被拦截、不会生效：" : null,
-    ...blocked.map((n) => `  ${str(n, 140)}`),
+    ...blocked.slice(0, CAP).map((n) => `  ${str(n, 140)}`),
+    blocked.length > CAP ? `  …还有 ${blocked.length - CAP} 项无权限` : null,
     headline,
-    ...(plain.length > 0 ? plain : items).slice(0, 6).map((n) => `• ${str(n, 100)}`),
-    (plain.length > 0 ? plain : items).length > 6 ? `…共 ${(plain.length > 0 ? plain : items).length} 项` : null,
+    ...shown.slice(0, CAP).map((n) => `• ${str(n, 100)}`),
+    shown.length > CAP ? `…共 ${shown.length} 项` : null,
   ]);
 }
 

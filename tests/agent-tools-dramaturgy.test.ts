@@ -260,6 +260,13 @@ describe("注册表与卡片", () => {
     expect(card.description).toContain("📝 修改梗概");
     expect(card.description).toContain("第一章：梗概");
     expect(card.description).toContain("补梗概");
+    // 无权限行封顶：逐实例钥匙的批量不能把卡片撑成几十行
+    const many = approvalCard("production-character_propose_update", { updates: Array.from({ length: 20 }, (_, i) => ({ charId: `c${i}`, biography: "x" })), summary: "批" }, {
+      hasPermission: false,
+      notes: Array.from({ length: 20 }, (_, i) => `📝 编辑角色「${i}」：需要申请（node:character/c${i}@edit）`),
+    });
+    expect(many.description).toContain("…还有 14 项无权限");
+    expect(many.description.split("\n").filter((l) => l.trim().startsWith("📝 编辑角色")).length).toBe(6);
     const ok = approvalCard("production-character_propose_delete", { charIds: ["c1"], summary: "去重" }, { hasPermission: true, notes: ["小李"] });
     expect(ok.severity).toBe("warning");
     expect(ok.description).toContain("权限齐全");
