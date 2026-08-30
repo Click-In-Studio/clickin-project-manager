@@ -4,6 +4,7 @@
 // 与 wiki_proposal 里，预览 modal 按 toolCallId 拉）。
 
 import type { ApprovalCard } from "./approvals";
+import { toolLabel as toolLabelOf } from "@/lib/agent-tool-labels";
 
 const str = (v: unknown, cap: number): string =>
   typeof v === "string" ? (v.length > cap ? `${v.slice(0, cap)}…` : v) : String(v ?? "（无）");
@@ -144,6 +145,36 @@ export function approvalCard(bareTool: string, params: Record<string, unknown>, 
         `新内容${typeof params.content === "string" && !params.content.trim() ? "：（清空）" : "预览："}`,
         str(params.content, 300),
       ]) };
+    case "my-schedule_propose": {
+      // 这张卡就是定时任务的"负责任的人类动作"：人在这里确认写哪里、允许哪几类写、什么时候跑
+      const action = str(params.action, 10);
+      const sched = params.schedule as { kind?: string; at?: string; expr?: string; tz?: string; everyMs?: number } | undefined;
+      const when = sched
+        ? sched.kind === "at" ? `${str(sched.at, 40)} 一次`
+          : sched.kind === "cron" ? `cron ${str(sched.expr, 30)}（${str(sched.tz ?? "Asia/Shanghai", 30)}）`
+          : sched.kind === "every" ? `每 ${Math.round(Number(sched.everyMs ?? 0) / 60_000)} 分钟` : "（未给）"
+        : null;
+      const allowed = Array.isArray(params.allowedTools) ? params.allowedTools.map((t) => toolLabelOf(String(t))) : null;
+      if (action === "create") {
+        return { severity: "warning", title: `创建定时任务：${str(params.name, 40)}`, description: lines([
+          "⏰ 到点后 AI 会以你的身份在一个新对话里自动执行，结果通知你。",
+          when ? `🕒 时间表：${when}${params.maxFires ? `，共 ${str(params.maxFires, 6)} 次` : ""}` : null,
+          allowed && allowed.length > 0
+            ? `✍️ 允许直接执行（不再逐次确认，每次改动有记录并通知）：${str(allowed.join("、"), 120)}`
+            : "🔒 只读任务：不执行任何写操作，需要改动会在结果里给建议。",
+          `📋 指令：${str(params.prompt, 200)}`,
+          summaryLine(params),
+        ]) };
+      }
+      const verb = action === "delete" ? "删除" : action === "pause" ? "暂停" : action === "resume" ? "恢复" : "修改";
+      return { severity: "warning", title: `${verb}定时任务（id: ${str(params.scheduleId, 30)}）`, description: lines([
+        params.name !== undefined ? `📛 新名称：${str(params.name, 40)}` : null,
+        when ? `🕒 新时间表：${when}` : null,
+        allowed ? (allowed.length > 0 ? `✍️ 允许直接执行：${str(allowed.join("、"), 120)}` : "🔒 改为只读") : null,
+        params.prompt !== undefined ? `📋 新指令：${str(params.prompt, 160)}` : null,
+        summaryLine(params),
+      ]) };
+    }
     case "users-query_sensitive":
       return { severity: "warning", title: "查询你的登记联系方式", description: "🔒 AI 请求读取你本人的敏感信息（邮箱/电话）。批准后仅返回给本会话。" };
     default:

@@ -1756,6 +1756,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
       <AgentPopout
         open={aiPopoutOpen}
         onClose={() => setAiPopoutOpen(false)}
+        onRequestOpen={() => setAiPopoutOpen(true)}
         productionId={productionId}
         productionName={currentProduction?.name ?? null}
         currentWikiId={currentWikiId}

@@ -31,6 +31,7 @@ import { EventPublisher, pruneDeltas } from "./events";
 import { createStreamLineAdapter } from "./stream-lines";
 import { buildTools, bareName, exposedName, type RuntimeToolDef, type RunHandle } from "./tools";
 import { describeMutation, type MutationRecord } from "./mutation-audit";
+import { getSchedule, finishScheduledRun, type ScheduleReport } from "./schedules";
 import { tieredToolNames } from "./tool-tiers";
 import { recallFamilies } from "./tool-index";
 import { recentlyUsedToolNames } from "./used-tools";
@@ -88,6 +89,8 @@ export interface StartRunInput {
   userId: string;
   message: string;
   pageKey?: string | null;
+  /** 定时任务触发的 run（无人值守：写不弹卡按 allowed_tools 判、ask_user 不可用、收尾通知创建者） */
+  scheduleId?: string | null;
 }
 
 /** 发起一轮（不等待完成）。同会话已有 run 在跑 → 抛 SessionBusyError（调用方转 steer）。 */
@@ -103,11 +106,11 @@ export async function startRun(input: StartRunInput): Promise<{ runId: string }>
   });
   const runId = newRunId();
   await getPool().query(
-    `INSERT INTO agent_run (id, session_id, status, owner, heartbeat_at, page_key, model)
-     VALUES ($1, $2, 'running', $3, now(), $4, $5)`,
-    [runId, input.sessionId, RUNNER_OWNER, input.pageKey ?? null, CHAT_MODEL.id],
+    `INSERT INTO agent_run (id, session_id, status, owner, heartbeat_at, page_key, model, schedule_id)
+     VALUES ($1, $2, 'running', $3, now(), $4, $5, $6)`,
+    [runId, input.sessionId, RUNNER_OWNER, input.pageKey ?? null, CHAT_MODEL.id, input.scheduleId ?? null],
   );
-  void execute({ storage, runId, userId: input.userId, message: input.message, pageKey: input.pageKey ?? null, paidFrom });
+  void execute({ storage, runId, userId: input.userId, message: input.message, pageKey: input.pageKey ?? null, paidFrom, scheduleId: input.scheduleId ?? null });
   return { runId };
 }
 
@@ -137,6 +140,8 @@ interface ExecuteInput {
   pageKey?: string | null;
   /** 本轮由谁买单（run 开始时定死，run 内不切换）；恢复模式无此判定，按 quota 记 */
   paidFrom?: PaidFrom;
+  /** 定时任务触发的 run；恢复模式从 agent_run.schedule_id 读回 */
+  scheduleId?: string | null;
 }
 
 async function execute(input: ExecuteInput): Promise<void> {
@@ -145,6 +150,9 @@ async function execute(input: ExecuteInput): Promise<void> {
   const sessionId = meta.id;
   const productionId = meta.productionId;
   const pool = getPool();
+  // 无人值守（定时任务）：任务行没了（被删）就按普通只读 run 跑完，不再当无人值守
+  const schedule = input.scheduleId ? await getSchedule(input.scheduleId) : null;
+  let scheduleReport: ScheduleReport | null = null;
   const rawPublisher = new EventPublisher(sessionId, runId);
   const abort = new AbortController();
   // 脱离（§4.4 ②）：本地停手但不留痕——不写 transcript、不发 aborted 行、不改 run 终态，
@@ -164,6 +172,14 @@ async function execute(input: ExecuteInput): Promise<void> {
     },
     isDetached: () => detached,
     noteMutations: (toolCallId, records) => { audited.set(toolCallId, records); },
+    pageKey: input.pageKey ?? null,
+    ...(schedule
+      ? {
+          unattended: true,
+          schedule: { id: schedule.id, name: schedule.name, allowedTools: schedule.allowedTools },
+          setScheduleReport: (r: ScheduleReport) => { scheduleReport = r; },
+        }
+      : {}),
   };
   const tools = buildTools({ userId, productionId, run: runHandle });
   const toolByName = new Map(tools.map((t) => [t.name, t]));
@@ -192,6 +208,8 @@ async function execute(input: ExecuteInput): Promise<void> {
     const used = recentlyUsedToolNames(transcript)
       .map((n) => toolByName.get(n)?.mcpName)
       .filter((n): n is string => !!n);
+    // 无人值守：汇报工具 + 任务授权的写工具必须在面上（闭包会把 id 供给入口一起带来）
+    if (schedule) used.push("schedule.finish", ...schedule.allowedTools);
     const families = recallPrompt
       ? await recallFamilies(stripUiContext(recallPrompt), { hasProduction: !!productionId, userId })
       : [];
@@ -245,12 +263,16 @@ async function execute(input: ExecuteInput): Promise<void> {
       });
     }
 
-    // 审批门（工具调用权限门原则①）：非只读工具先卡；deny 的理由随工具结果回模型
+    // 审批门（工具调用权限门原则①）：非只读工具先卡；deny 的理由随工具结果回模型。
+    // 无人值守（定时任务）没有人在场：写工具按「注册表 unattended=allow ∩ 任务 allowed_tools」
+    // 直接放行（预检仍做，方言校验等业务错误照样 block），其余写工具与 ask_user 一律 block 回模型。
     harness.on("tool_call", async (event) => {
       const tool = toolByName.get(event.toolName);
-      if (!tool || tool.readOnly) return undefined;
-      const gate = await approvalGate({ runId, sessionId, userId, productionId, tool, toolCallId: event.toolCallId, args: event.input, publisher, signal: abort.signal, isDetached: () => detached });
-      return gate;
+      if (!tool) return undefined;
+      const g: GateInput = { runId, sessionId, userId, productionId, tool, toolCallId: event.toolCallId, args: event.input, publisher, signal: abort.signal, isDetached: () => detached };
+      if (schedule) return unattendedGate(g, schedule.allowedTools);
+      if (tool.readOnly) return undefined;
+      return approvalGate(g);
     });
 
     // 方言幂等：本轮已送达方言说明时，dialect_ref 只回指引不重付全文
@@ -369,6 +391,8 @@ async function execute(input: ExecuteInput): Promise<void> {
     );
     await recordUsage(userId, productionId, usage, input.paidFrom).catch(() => {});
     await pruneDeltas(sessionId, runId).catch(() => {});
+    // 定时任务收尾：写回摘要、按汇报调整任务、通知创建者（附本 run 的写审计改动清单）
+    if (schedule) await finishScheduledRun({ scheduleId: schedule.id, runId, sessionId, status, error, lastAssistant, report: scheduleReport });
     // episodic 上报（与插件 agent_end 同款字段）
     try {
       appendRunRecord(userId, {
@@ -487,7 +511,30 @@ const WIKI_PROPOSE_ACTIONS: Record<string, "create" | "update" | "delete" | "mov
   "production-wiki_propose_tag": "tag",
 };
 
-async function approvalGate(g: GateInput): Promise<{ block?: boolean; reason?: string } | undefined> {
+type GateResult = { block?: boolean; reason?: string } | undefined;
+
+/**
+ * 无人值守门（定时任务）：没有人能点确认卡，所以这里没有卡——
+ *   只读工具放行（ask_user 除外：没人答）；
+ *   写工具 = 注册表 unattended:"allow" ∩ 任务 allowed_tools 才放行，且仍过预检（方言校验/预持久化）；
+ *   其余写工具 block，理由告诉模型"写进结果里当建议"。
+ * 边界只在这两处声明（skills 内部 + 任务行），权限仍由工具内 hasEffectiveGrant 实时判。
+ */
+async function unattendedGate(g: GateInput, allowedTools: string[]): Promise<GateResult> {
+  if (g.tool.mcpName === "ask_user") {
+    return { block: true, reason: "【无人值守运行，没有人能回答提问。不要再提问：按最合理的假设继续，并在结果摘要里说明需要用户确认的点。】" };
+  }
+  if (g.tool.readOnly) return undefined;
+  if (g.tool.unattended !== "allow" || !allowedTools.includes(g.tool.mcpName)) {
+    return { block: true, reason: `【定时任务未获授权执行「${g.tool.label}」（无人值守只能执行任务创建时授权的写操作）。不要重试：把想做的改动写进结果摘要里作为建议，用户之后会在这个对话里手动处理。】` };
+  }
+  const pre = await preflight(g);
+  if (pre?.block) return pre;
+  return undefined;
+}
+
+/** 写工具的预检（与执行共用同一份规划/校验）：wiki 方言校验+预持久化、构作规划错误。返回 block 或卡片素材。 */
+async function preflight(g: GateInput): Promise<{ block?: boolean; reason?: string; hasPermission?: boolean; preview: Record<string, unknown>; notes?: string[] }> {
   const bare = bareName(g.tool.name);
   let hasPermission: boolean | undefined;
   const preview: Record<string, unknown> = {};
@@ -505,7 +552,7 @@ async function approvalGate(g: GateInput): Promise<{ block?: boolean; reason?: s
     });
     if (!prepared.ok) {
       const problemLines = prepared.problems.map((p) => `- ${p}`).join("\n");
-      return { block: true, reason: `提议被方言校验拒绝（未提交给用户确认，也未落库）：\n${problemLines}\n\n请按以下方言说明修正正文后重新调用：\n${prepared.guide}` };
+      return { block: true, reason: `提议被方言校验拒绝（未提交给用户确认，也未落库）：\n${problemLines}\n\n请按以下方言说明修正正文后重新调用：\n${prepared.guide}`, preview };
     }
     hasPermission = prepared.hasPermission;
     preview.hasPermission = prepared.hasPermission;
@@ -520,13 +567,21 @@ async function approvalGate(g: GateInput): Promise<{ block?: boolean; reason?: s
   if (DRAMATURGY_PROPOSE_TOOLS.has(bare) && g.productionId) {
     try {
       const p = await previewDramaturgyProposal(g.userId, g.productionId, bare, g.args);
-      if (p.error) return { block: true, reason: `${p.error}（未提交给用户确认）` };
+      if (p.error) return { block: true, reason: `${p.error}（未提交给用户确认）`, preview };
       hasPermission = p.hasPermission;
       notes = p.notes;
     } catch (err) {
       console.error("[agent-runtime] dramaturgy preview failed (card without permission info):", err);
     }
   }
+  return { hasPermission, preview, notes };
+}
+
+async function approvalGate(g: GateInput): Promise<GateResult> {
+  const bare = bareName(g.tool.name);
+  const pre = await preflight(g);
+  if (pre.block) return { block: true, reason: pre.reason };
+  const { hasPermission, preview, notes } = pre;
 
   const card = approvalCard(bare, g.args, { hasPermission, notes });
   const { id, info, reused } = await createApproval({
@@ -671,21 +726,21 @@ export async function deleteSessionRows(sessionId: string): Promise<void> {
 /** 启动/巡检：接管心跳过期的 run，按中断点修复后续跑。返回接管数。 */
 export async function resumeOrphans(): Promise<number> {
   const pool = getPool();
-  const r = await pool.query<{ id: string; session_id: string; user_id: string; page_key: string | null }>(
+  const r = await pool.query<{ id: string; session_id: string; user_id: string; page_key: string | null; schedule_id: string | null }>(
     `UPDATE agent_run r SET owner = $1, heartbeat_at = now(), status = 'running'
      FROM agent_session s
      WHERE r.session_id = s.id
        AND r.status IN ('running', 'awaiting_approval', 'awaiting_answer')
        AND (r.heartbeat_at IS NULL OR r.heartbeat_at < now() - ($2::int * interval '1 millisecond'))
        AND (r.owner IS NULL OR r.owner <> $1)
-     RETURNING r.id, r.session_id, s.user_id, r.page_key`,
+     RETURNING r.id, r.session_id, s.user_id, r.page_key, r.schedule_id`,
     [RUNNER_OWNER, ORPHAN_AFTER_MS],
   );
   for (const row of r.rows) {
     if (active.has(row.session_id)) continue;
     const storage = await PgSessionStorage.load(row.session_id);
     if (!storage) continue;
-    void execute({ storage, runId: row.id, userId: row.user_id, pageKey: row.page_key });
+    void execute({ storage, runId: row.id, userId: row.user_id, pageKey: row.page_key, scheduleId: row.schedule_id });
   }
   return r.rows.length;
 }

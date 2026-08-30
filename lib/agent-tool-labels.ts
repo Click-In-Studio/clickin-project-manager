@@ -42,7 +42,10 @@ export const TOOL_LABELS: Record<string, string> = {
   "production-character_propose_create": "提议新建角色",
   "production-character_propose_update": "提议修改角色",
   "production-character_propose_delete": "提议删除角色",
+  "my-schedules": "查看我的定时任务",
+  "my-schedule_propose": "提议设置定时任务",
   // 运行时专属（不进 tool-catalog）
+  "schedule-finish": "汇报定时任务结果",
   "ask_user": "向用户提问",
   "find_tools": "搜索可用工具",
   "web-search": "联网搜索",

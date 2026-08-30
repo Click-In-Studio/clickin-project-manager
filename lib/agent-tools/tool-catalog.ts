@@ -40,6 +40,7 @@ export type ToolCatalogEntry = {
 export const TOOL_FAMILIES: Record<string, { label: string }> = {
   "my.schedule": { label: "我的日程" },
   "my.account": { label: "我的账号与记忆" },
+  "my.automation": { label: "定时任务" },
   "production.overview": { label: "制作概况" },
   "production.people": { label: "通讯录" },
   "production.wiki": { label: "文档库" },
@@ -72,6 +73,13 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
   { name: "users.query_sensitive", family: "my.account", scope: "personal", oneliner: "查询自己登记的联系方式（需确认）",
     triggers: ["我的邮箱", "我的电话", "我的联系方式"], en: "my registered email phone",
     examples: ["我登记的邮箱是什么", "系统里我的电话是多少"] },
+  // ── 定时任务：到点由 AI 以用户身份自动运行一段指令（lib/agent-runtime/schedules.ts）
+  { name: "my.schedules", family: "my.automation", scope: "personal", oneliner: "列出我创建的 AI 定时任务（含 id、下次运行、上次摘要）",
+    triggers: ["定时任务", "我的定时", "有哪些定时", "自动任务", "定时", "计划任务"], en: "my scheduled tasks automations list",
+    examples: ["我有哪些定时任务", "看看现在设了什么定时", "上次那个自动整理的任务跑了吗"] },
+  { name: "my.schedule_propose", family: "my.automation", scope: "personal", oneliner: "创建/修改/暂停/恢复/删除 AI 定时任务（需人工确认）",
+    triggers: ["定时", "每天晚上", "每天早上", "每周", "到时候提醒", "提醒我", "定时任务", "自动整理", "定期", "固定时间", "每晚", "取消定时", "暂停定时"], en: "create update schedule automation reminder recurring task",
+    examples: ["每天晚上帮我把灵感库的子文档整理进主文档", "明天早上九点提醒我交排练计划", "每周一早上汇总一下上周的排练记录", "把那个定时任务停掉", "以后每晚十一点自动跑一次"] },
 
   // ── production ────────────────────────────────────────────────────────────
   { name: "production.info", family: "production.overview", scope: "production", oneliner: "查询当前制作的项目详情",
