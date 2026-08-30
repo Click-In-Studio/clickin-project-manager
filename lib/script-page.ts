@@ -84,7 +84,7 @@ function estimateContext(cfg: PageConfig, template: ScriptTemplate): EstimateCon
 function paginationHeightFeature(block: Block, prev: Block | null, ctx: EstimateContext): PaginationHeightFeature {
   // 角色名文字估算器拿不到（没有角色表）：legacy 口径是「有角色就按一行算」，
   // 所以给 plan 一个占位角色名，让 character 槽非空
-  const planBlockInput = block.characterIds.length > 0 && ctx.plan.characters.length === 0
+  const planBlockInput = block.characterIds.length > 0
     ? { ...ctx.plan, characters: block.characterIds.map((id) => ({ id, name: "角", isAggregate: false })) }
     : ctx.plan;
   const item = planBlock(block, prev, planBlockInput);
