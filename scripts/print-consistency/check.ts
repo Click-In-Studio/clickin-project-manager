@@ -147,9 +147,9 @@ async function measure(prodId: string, cookie: string): Promise<Pick<Golden, "pa
     page.on("pageerror", (err) => browserLog.push(`[pageerror] ${err.message}`));
     page.on("requestfailed", (req) => browserLog.push(`[requestfailed] ${req.url()} ${req.failure()?.errorText ?? ""}`));
     await page.goto(`${BASE_URL}/production/${prodId}/script/print`, { waitUntil: "domcontentloaded" });
-    // dev server 首次编译打印路由可能要几十秒
+    // dev server 首次编译打印路由可能要几十秒；冷的 CI runner 上撞到过 180s 不够（#395 第一轮）
     try {
-      await page.waitForSelector('body[data-print-ready="1"]', { timeout: 180_000 });
+      await page.waitForSelector('body[data-print-ready="1"]', { timeout: 300_000 });
     } catch (err) {
       const state = await page.evaluate(() => ({
         printReady: document.body.dataset.printReady ?? null,
