@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 
-// AI 用量卡片（#383）。两种语境同一个组件：
-//   scope="production" —— 项目设置页，门是 node:ai/<prod>/usage@view（服务端判，
-//                          没有键这个组件根本不渲染）；?members=1 拿到分解才显示明细。
-//   scope="account"    —— 个人中心，看自己的额度全景。
+// AI 用量卡片（#383）。两种语境同一个组件，样式各随其宿主：
+//   scope="production" —— 项目信息页「AI 助手指令」旁边，走 AdminSettingsClient 的
+//                          Card 惯例（白底圆角 + uppercase 小标题）。门是
+//                          node:ai/<prod>/usage@view（服务端判，没有键根本不渲染）；
+//                          ?members=1 拿到分解才显示明细。
+//   scope="account"    —— 个人中心，走那一页的 section 惯例。
 //
 // 数字都是 credit：1 credit ≈ 一个最便宜的 input token 的钱，一次问答约 1.2 万。
 // 面向用户不解释这个单位，只给「用了多少 / 上限多少 / 什么时候恢复」。
@@ -19,10 +21,37 @@ type Quota = {
 type Member = { userId: string; name: string; today: number; week: number };
 type Payload = Quota & { today?: number; week?: number; members?: Member[] };
 
-const CARD: React.CSSProperties = {
-  background: "var(--surface)", border: "1px solid var(--line)",
-  borderRadius: 8, padding: "17px 19px", marginTop: 18,
-};
+/**
+ * 外壳按宿主页的卡片惯例走。
+ *   production：项目信息页——白底圆角 12 + 顶栏 uppercase 小标题（对齐
+ *               AiInstructionsCard，它俩是并排的两张 AI 卡）。
+ *   account：个人中心——那一页用的是浅色 section。
+ */
+function Shell({ scope, title, badge, children }: {
+  scope: "production" | "account";
+  title: string;
+  badge?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  if (scope === "account") {
+    return (
+      <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 8, padding: "17px 19px", marginTop: 18 }}>
+        <h2 style={{ margin: 0, fontSize: 14, color: "var(--ink)" }}>{title}{badge}</h2>
+        {children}
+      </section>
+    );
+  }
+  return (
+    <div style={{ background: "white", borderRadius: 12, overflow: "hidden", border: "1px solid var(--line)", marginBottom: 20 }}>
+      <div style={{ padding: "14px 24px", borderBottom: "1px solid var(--line)", background: "var(--surface)" }}>
+        <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: "var(--muted)", letterSpacing: ".07em", textTransform: "uppercase" }}>
+          {title}{badge}
+        </p>
+      </div>
+      <div style={{ padding: "16px 24px 20px" }}>{children}</div>
+    </div>
+  );
+}
 
 function fmt(n: number): string {
   if (!Number.isFinite(n)) return "无限";
@@ -87,28 +116,32 @@ export default function AiUsageCard({
     return () => { cancelled = true; };
   }, [scope, productionId, canSeeMembers]);
 
-  if (error) return <section style={CARD}><h2 style={{ margin: 0, fontSize: 14 }}>AI 用量</h2><p style={{ margin: "7px 0 0", fontSize: 12, color: "var(--muted)" }}>{error}</p></section>;
-  if (!data) return <section style={CARD}><h2 style={{ margin: 0, fontSize: 14 }}>AI 用量</h2><p style={{ margin: "7px 0 0", fontSize: 12, color: "var(--muted)" }}>读取中…</p></section>;
+  if (error || !data) {
+    return (
+      <Shell scope={scope} title="AI 用量">
+        <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>{error ?? "读取中…"}</p>
+      </Shell>
+    );
+  }
 
   return (
-    <section style={CARD}>
-      <h2 style={{ margin: 0, fontSize: 14, color: "var(--ink)" }}>
-        AI 用量
-        {data.exempt && (
-          <span style={{ marginLeft: 8, fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "var(--accent-soft, rgba(120,90,40,.12))", color: "var(--accent, #8a6d3b)" }}>
-            不限流
-          </span>
-        )}
-      </h2>
-
+    <Shell
+      scope={scope}
+      title="AI 用量"
+      badge={data.exempt ? (
+        <span style={{ marginLeft: 8, fontSize: 10, padding: "2px 7px", borderRadius: 4, textTransform: "none", letterSpacing: 0, background: "var(--accent-soft, rgba(120,90,40,.12))", color: "var(--accent, #8a6d3b)" }}>
+          不限流
+        </span>
+      ) : undefined}
+    >
       {data.exempt ? (
-        <p style={{ margin: "7px 0 0", fontSize: 12, color: "var(--muted)" }}>
+        <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
           {scope === "production" ? "本项目" : "你"}当前不受额度限制（{data.tierLabel}）。
           {scope === "production" && typeof data.week === "number" && <> 本项目本周已消耗 {fmt(data.week)}。</>}
         </p>
       ) : (
         <>
-          <p style={{ margin: "7px 0 0", fontSize: 12, color: "var(--muted)" }}>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
             {scope === "production"
               ? <>额度按项目所有者的档位（{data.tierLabel}）计，与他名下其他项目、个人会话共用一个池子。</>
               : <>当前档位：<b style={{ color: "var(--ink)" }}>{data.tierLabel}</b>。个人会话与你名下项目共用这份额度。</>}
@@ -148,6 +181,6 @@ export default function AiUsageCard({
           </ul>
         </div>
       )}
-    </section>
+    </Shell>
   );
 }

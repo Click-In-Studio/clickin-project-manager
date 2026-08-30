@@ -8,7 +8,6 @@ import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import AdminSettingsClient from "@/components/AdminSettingsClient";
 import ProductionPlanCard from "@/components/ProductionPlanCard";
-import AiUsageCard from "@/components/AiUsageCard";
 import { getProductionPlan, PRODUCTION_TIERS } from "@/lib/plan";
 
 export default async function SettingsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -44,15 +43,13 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
     // 制作级 agents.md：制作人经模版 node:*/*@* 类型通配持有区间（激活成行
     // 后 hasGrant 命中），POC 部门区间无此键——「默认仅制作人」由此天然成立。
     canEditAiInstructions: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "ai_instructions", "*", "*", "edit")),
+    // AI 用量可见性（#383）：默认只有 owner 命中（第 1 步旁路），其余人要 owner
+    // 在权限中心显式发 node:ai/*/usage@view。两枚键正交——总览与成员分解分开判。
+    canSeeAiUsage: !!permCtx && (permCtx.isOwner || permCtx.isAdmin || await hasGrant(permCtx.userId, id, "ai", "*", "usage", "view")),
+    canSeeAiUsageMembers: !!permCtx && (permCtx.isOwner || permCtx.isAdmin || await hasGrant(permCtx.userId, id, "ai", "*", "usage/members", "view")),
   };
 
   const tierConf = PRODUCTION_TIERS[plan.tier];
-  // AI 用量可见性（#383）：默认只有 owner 命中（第 1 步旁路），其余人要 owner
-  // 在权限中心显式发 node:ai/*/usage@view。两枚键正交——总览与成员分解分开判。
-  const canSeeAiUsage = !!permCtx && (permCtx.isOwner || permCtx.isAdmin
-    || await hasGrant(permCtx.userId, id, "ai", "*", "usage", "view"));
-  const canSeeAiMembers = !!permCtx && (permCtx.isOwner || permCtx.isAdmin
-    || await hasGrant(permCtx.userId, id, "ai", "*", "usage/members", "view"));
   return (
     <>
       <AdminSettingsClient
@@ -76,9 +73,6 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
           advancedPerms: tierConf.advancedPerms,
         }}
       />
-      {tierConf.ai && canSeeAiUsage && (
-        <AiUsageCard scope="production" productionId={id} canSeeMembers={canSeeAiMembers} />
-      )}
     </>
   );
 }
