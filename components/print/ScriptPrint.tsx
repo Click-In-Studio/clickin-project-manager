@@ -396,7 +396,7 @@ function PrintTemplateMenu({
         className={`flex items-center gap-1 whitespace-nowrap rounded-md px-3 py-1.5 text-sm transition-colors ${
           enabled ? "text-zinc-600 hover:bg-zinc-100" : "cursor-not-allowed text-zinc-300"
         }`}
-        title={!canEdit ? "无权修改剧本排版模版" : ready ? "选择排版模版（所有人共用）" : "打印预览加载中"}
+        title={!canEdit ? "无权修改剧本排版模版（需要「场次改名」权限；有资格的成员进入页面时会弹出一键激活）" : ready ? "选择排版模版（所有人共用）" : "打印预览加载中"}
       >
         <span>{compact ? "模版" : `模版：${active?.name ?? "沿用"}`}</span>
         <ChevronIcon size={12} className="opacity-50" />
