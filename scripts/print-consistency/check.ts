@@ -141,9 +141,26 @@ async function measure(prodId: string, cookie: string): Promise<Pick<Golden, "pa
     const page = await context.newPage();
     // tsx（esbuild keepNames）会给 evaluate 回调里的具名函数注入 __name 助手，浏览器里没有它
     await page.addInitScript("globalThis.__name = globalThis.__name || ((fn) => fn);");
+    // 超时时把浏览器侧的报错吐出来——否则只看到「等不到就绪属性」，不知道页面为什么没就绪
+    const browserLog: string[] = [];
+    page.on("console", (msg) => { if (msg.type() === "error" || msg.type() === "warning") browserLog.push(`[${msg.type()}] ${msg.text()}`); });
+    page.on("pageerror", (err) => browserLog.push(`[pageerror] ${err.message}`));
+    page.on("requestfailed", (req) => browserLog.push(`[requestfailed] ${req.url()} ${req.failure()?.errorText ?? ""}`));
     await page.goto(`${BASE_URL}/production/${prodId}/script/print`, { waitUntil: "domcontentloaded" });
     // dev server 首次编译打印路由可能要几十秒
-    await page.waitForSelector('body[data-print-ready="1"]', { timeout: 180_000 });
+    try {
+      await page.waitForSelector('body[data-print-ready="1"]', { timeout: 180_000 });
+    } catch (err) {
+      const state = await page.evaluate(() => ({
+        printReady: document.body.dataset.printReady ?? null,
+        pages: document.querySelectorAll(".print-page").length,
+        fontsStatus: document.fonts.status,
+        title: document.title,
+        bodyText: document.body.innerText.slice(0, 300),
+      })).catch(() => null);
+      console.error("页面未就绪。状态：", JSON.stringify(state), "\n浏览器日志：\n" + browserLog.slice(-30).join("\n"));
+      throw err;
+    }
     // 可选：把第一张内容页截图存下来（看排版长什么样，评审用）
     if (process.env.SCREENSHOT_PATH) {
       const index = process.env.SCREENSHOT_PAGE ? Number(process.env.SCREENSHOT_PAGE) : 0;
