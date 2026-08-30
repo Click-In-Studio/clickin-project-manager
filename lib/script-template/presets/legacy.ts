@@ -124,5 +124,6 @@ function legacyTemplate(id: string, name: string, compact: boolean): ScriptTempl
   };
 }
 
-export const LEGACY_CENTER: ScriptTemplate = legacyTemplate("legacy-center", "居中角色名（沿用）", false);
-export const LEGACY_COMPACT: ScriptTemplate = legacyTemplate("legacy-compact", "左栏角色名（沿用）", true);
+// 预设 id 带版本：改预设 = 发新版本，演出主动升级——页码是剧组坐标，不能被一次样式改动悄悄挪走
+export const LEGACY_CENTER: ScriptTemplate = legacyTemplate("legacy-center@1", "居中角色名", false);
+export const LEGACY_COMPACT: ScriptTemplate = legacyTemplate("legacy-compact@1", "左栏角色名", true);

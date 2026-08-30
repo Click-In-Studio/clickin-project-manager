@@ -10675,6 +10675,7 @@ export default function ScriptEditor({
           stageDelimOpen={scriptConfig.stageDelimOpen}
           stageDelimClose={scriptConfig.stageDelimClose}
           textLayoutMode={scriptConfig.textLayoutMode}
+          templateId={scriptConfig.templateId}
           onPageMapChange={updatePrintDividerPageMap}
         />
       )}

@@ -9,7 +9,7 @@ import type { MarkerOwnershipDirty, MarkerOwnershipRange } from "./script-marker
 // 估算器改吃模版引擎（docs/script-template-engine.md）：块的高度由模版的几何算出，
 // 角色名省略 / 页首补名 / 说话人间距都是模版规则。legacy 模版逐字节复现此前的输出
 // （tests/fixtures/legacy-script-page.ts 是旧实现原文，测试拿它当参照）。
-import { estimateItemHeight, planBlock, planSceneHeading, templateForTextLayoutMode, type PlanContext, type ScriptTemplate } from "./script-template";
+import { estimateItemHeight, planBlock, planSceneHeading, templateById, type PlanContext, type ScriptTemplate } from "./script-template";
 
 // ── Print page config — single source of truth shared with ScriptEditor ───────
 
@@ -113,6 +113,7 @@ type EstimatedPageMapCacheEntry = {
 export type EstimatedPageMapCache = {
   layout: PageLayout;
   textLayoutMode: ScriptTextLayoutMode;
+  templateId: string;
   blocksHaveMarkerOwnership: boolean;
   entries: EstimatedPageMapCacheEntry[];
   pageMap: Record<string, number>;
@@ -187,9 +188,11 @@ export function computePageMap(
   layout: PageLayout = "a4",
   textLayoutMode: ScriptTextLayoutMode = "center",
   blocksHaveMarkerOwnership = false,
+  /** 排版模版 id；缺省按 textLayoutMode 回退到 legacy 模版 */
+  templateId: string | null = null,
 ): Record<string, number> {
   const cfg = PAGE_CONFIGS[layout];
-  const ctx = estimateContext(cfg, templateForTextLayoutMode(textLayoutMode));
+  const ctx = estimateContext(cfg, templateById(templateId, textLayoutMode));
   const maxH = contentHeight(cfg);
 
   const pageMap: Record<string, number> = {};
@@ -238,9 +241,11 @@ export function updateEstimatedPageMap(
   textLayoutMode: ScriptTextLayoutMode = "center",
   blocksHaveMarkerOwnership = false,
   dirty: MarkerOwnershipDirty = "full",
+  templateId: string | null = null,
 ): EstimatedPageMapCache {
   const cfg = PAGE_CONFIGS[layout];
-  const ctx = estimateContext(cfg, templateForTextLayoutMode(textLayoutMode));
+  const template = templateById(templateId, textLayoutMode);
+  const ctx = estimateContext(cfg, template);
   const maxH = contentHeight(cfg);
   const entries = textBlockEntries(blocks, blocksHaveMarkerOwnership);
   const ranges = normalizeDirtyRanges(dirty, blocks.length);
@@ -249,6 +254,7 @@ export function updateEstimatedPageMap(
     ranges &&
     previous.layout === layout &&
     previous.textLayoutMode === textLayoutMode &&
+    previous.templateId === template.id &&
     previous.blocksHaveMarkerOwnership === blocksHaveMarkerOwnership;
 
   let startTextIndex = 0;
@@ -365,6 +371,7 @@ export function updateEstimatedPageMap(
   return {
     layout,
     textLayoutMode,
+    templateId: template.id,
     blocksHaveMarkerOwnership,
     entries: nextEntries,
     pageMap,
