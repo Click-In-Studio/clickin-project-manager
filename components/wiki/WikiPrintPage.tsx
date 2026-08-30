@@ -10,6 +10,7 @@
  */
 
 import { useEffect } from "react";
+import { useFontsSettled } from "@/components/print/use-fonts-settled";
 import { useRouter } from "next/navigation";
 import { fmtDateTime } from "@/lib/tz";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
@@ -38,19 +39,18 @@ export default function WikiPrintPage({
   const router = useRouter();
   const tile = watermarkText ? buildWatermarkTile(watermarkText) : null;
 
-  // 与剧本打印页同一个就绪信号：字体加载完才算好。wiki 没有分页测量，
+  // 与剧本打印页同一个就绪信号：字体全部就位才算好。wiki 没有分页测量，
   // 所以只等字体——但换行点仍然取决于字体，早一步出片就是回退字体的排版。
+  // 用 useFontsSettled 而不是 fonts.ready：后者可能在正文触发字体下载之前就
+  // 解析过了（见 hook 头注）。
+  const fontsSettled = useFontsSettled();
   useEffect(() => {
-    let cancelled = false;
-    const mark = () => { if (!cancelled) document.body.dataset.printReady = "1"; };
-    const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
-    if (fonts) fonts.ready.then(mark).catch(mark);
-    else mark();
+    if (!fontsSettled) return;
+    document.body.dataset.printReady = "1";
     return () => {
-      cancelled = true;
       delete document.body.dataset.printReady;
     };
-  }, []);
+  }, [fontsSettled]);
 
   return (
     <div className="wiki-print-root min-h-full bg-white">

@@ -1,0 +1,35 @@
+{
+  "pageLayout": "a4",
+  "textLayoutMode": "center",
+  "pages": [
+    {
+      "first": "目录0雨停之后1",
+      "last": "目录0雨停之后1"
+    },
+    {
+      "first": "00雨停之后林晚你来了。（放下手里的杯子）我以为",
+      "last": "回去吧，我把第 3 场的台本再过一遍。— 1 —"
+    },
+    {
+      "first": "0Daniel一起过。两个人快些——而且你一个人",
+      "last": " 3 场的台本再过一遍。（第 2 遍）— 2 —"
+    },
+    {
+      "first": "0Daniel一起过。两个人快些——而且你一个人",
+      "last": " 3 场的台本再过一遍。（第 3 遍）— 3 —"
+    },
+    {
+      "first": "0Daniel一起过。两个人快些——而且你一个人",
+      "last": " 3 场的台本再过一遍。（第 4 遍）— 4 —"
+    },
+    {
+      "first": "0Daniel一起过。两个人快些——而且你一个人",
+      "last": "过一遍」变成「改一遍」。（第 4 遍）— 5 —"
+    }
+  ],
+  "fontFamilies": [
+    "LXGWWenKai",
+    "SourceHanSerif",
+    "ZhuqueFangsong"
+  ]
+}

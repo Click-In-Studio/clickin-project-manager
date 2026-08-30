@@ -137,3 +137,103 @@ jobs:
       # ── Unit tests ────────────────────────────────────────────────────────────
       - name: Run unit tests
         run: npm test
+
+  # ── 跨平台分页一致性（#336 B3）─────────────────────────────────────────────
+  # golden.json 在 Mac 上生成，这里在 Linux 的无头 Chromium 里比对：字体自托管
+  # 的目的就是「同一份剧本在不同平台页码相同」，这一步守的是结果而不是配置。
+  # 只在打印 / 分页 / 字体相关文件改动时跑——起 dev server + 装 Chromium 要几分钟。
+  print-consistency:
+    runs-on: ubuntu-latest
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: script_editor_test
+      PGUSER: script_editor
+      PGPASSWORD: testpassword
+
+    services:
+      postgres:
+        image: pgvector/pgvector:0.6.0-pg16
+        env:
+          POSTGRES_USER: script_editor
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: script_editor_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Fetch base branch
+        run: git fetch --depth=1 origin $GITHUB_BASE_REF
+
+      - name: Decide whether print-affecting files changed
+        id: relevant
+        run: |
+          CHANGED=$(git diff origin/$GITHUB_BASE_REF HEAD --name-only -- \
+            'public/fonts/**' 'app/fonts.css' 'app/globals.css' \
+            'components/print/**' 'lib/script-page.ts' 'lib/print-css.ts' \
+            'lib/script-block-layout.ts' 'lib/script-md.ts' \
+            'scripts/print-consistency/**' 'scripts/fonts/**' '.github/workflows/ci.yml')
+          if [ -n "$CHANGED" ]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+            echo "Print-affecting changes:"; echo "$CHANGED"
+          else
+            echo "run=false" >> $GITHUB_OUTPUT
+            echo "No print-affecting changes; skipping."
+          fi
+
+      - name: Apply schema
+        if: steps.relevant.outputs.run == 'true'
+        run: psql -v ON_ERROR_STOP=1 -f db/schema.sql
+
+      - uses: actions/setup-node@v4.4.0
+        if: steps.relevant.outputs.run == 'true'
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.relevant.outputs.run == 'true'
+        run: npm ci
+
+      - name: Install Chromium
+        if: steps.relevant.outputs.run == 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Write test .env.local
+        if: steps.relevant.outputs.run == 'true'
+        run: |
+          cat > .env.local <<'EOF'
+          PGHOST=localhost
+          PGPORT=5432
+          PGDATABASE=script_editor_test
+          PGUSER=script_editor
+          PGPASSWORD=testpassword
+          EOF
+
+      - name: Start dev server
+        if: steps.relevant.outputs.run == 'true'
+        run: |
+          npx next dev -p 3100 > next-dev.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:3100/login > /dev/null && break
+            sleep 2
+          done
+          curl -sf http://localhost:3100/login > /dev/null || { cat next-dev.log; exit 1; }
+
+      - name: Compare pagination against golden
+        if: steps.relevant.outputs.run == 'true'
+        env:
+          BASE_URL: http://localhost:3100
+        run: npx tsx scripts/print-consistency/check.ts
+
+      - name: Dump dev server log on failure
+        if: failure() && steps.relevant.outputs.run == 'true'
+        run: tail -100 next-dev.log
+

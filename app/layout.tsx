@@ -9,6 +9,8 @@ import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
 import { getUserTier, PRODUCTION_TIERS } from "@/lib/plan";
 import ManualSaveNotice from "@/components/ManualSaveNotice";
 import AppShell from "@/components/AppShell";
+// 剧本字体的 @font-face（生成文件，见 scripts/fonts/build-fonts.py）；先于 globals.css 引入
+import "./fonts.css";
 import "./globals.css";
 
 const geistSans = Geist({
