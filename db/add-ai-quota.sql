@@ -22,26 +22,40 @@ BEGIN;
 -- 一次 compaction 就可能六位数。
 -- paid_from：这一行由谁买的单。窗口聚合只 SUM 'quota' 行，于是窗口用量永远
 -- 不会被 extra/豁免污染，两套账互不干扰。
-ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS billed_credits BIGINT NOT NULL DEFAULT 0;
-ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS paid_from      TEXT   NOT NULL DEFAULT 'quota';
+ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS paid_from TEXT NOT NULL DEFAULT 'quota';
 
 ALTER TABLE ai_usage DROP CONSTRAINT IF EXISTS ai_usage_paid_from_check;
 ALTER TABLE ai_usage ADD  CONSTRAINT ai_usage_paid_from_check
   CHECK (paid_from IN ('quota', 'extra', 'exempt'));
 
--- 存量行回填：按各 kind 的单价比折算（比值须与 lib/plan.ts 的单价表一致；
--- 改单价不回改历史行——历史按当时价计价是对的）。
---   chat_input      $0.44/1M → 1
---   chat_cache_read $0.014/1M → 0.0318
---   chat_output     $1.32/1M → 3
---   embedding_*     $0.07/1M → 0.1591（DashScope text-embedding-v4，¥0.0005/千）
-UPDATE ai_usage SET billed_credits = round(tokens * CASE kind
-    WHEN 'chat_input'      THEN 1.0
-    WHEN 'chat_cache_read' THEN 0.0318
-    WHEN 'chat_output'     THEN 3.0
-    ELSE 0.1591
-  END)
-WHERE billed_credits = 0;
+-- 建列 + 回填必须绑在「这一列刚被建出来」这个条件上，**不能用
+-- `WHERE billed_credits = 0` 当幂等判据**：迁移后的写入端刻意把整轮的钱记在
+-- chat_input 一行上，chat_output / chat_cache_read 行的 billed_credits 恒为 0
+-- （token 记三行、钱记一行，聚合才不会重复计）。用「=0」当判据的话，重跑一次
+-- 就会把那些行按单价重算成非零——所有人的用量凭空翻几倍。
+-- 重跑一次的路径是现成的：migration-checklist 机器人就贴着手动补跑的命令。
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'ai_usage' AND column_name = 'billed_credits'
+  ) THEN
+    ALTER TABLE ai_usage ADD COLUMN billed_credits BIGINT NOT NULL DEFAULT 0;
+    -- 存量行回填：按各 kind 的单价比折算（比值须与 lib/plan.ts 的单价表一致；
+    -- 改单价不回改历史行——历史按当时价计价是对的）。迁移前的行是旧写入端
+    -- 落的，三个 kind 各自带着自己那部分 token，所以这里逐行折算是对的。
+    --   chat_input      $0.44/1M → 1
+    --   chat_cache_read $0.014/1M → 0.0318
+    --   chat_output     $1.32/1M → 3
+    --   embedding_*     $0.07/1M → 0.1591（DashScope text-embedding-v4，¥0.0005/千）
+    UPDATE ai_usage SET billed_credits = round(tokens * CASE kind
+        WHEN 'chat_input'      THEN 1.0
+        WHEN 'chat_cache_read' THEN 0.0318
+        WHEN 'chat_output'     THEN 3.0
+        ELSE 0.1591
+      END);
+  END IF;
+END $$;
 
 -- 窗口聚合的两条路径（个人会话按 user_id、项目按 production_id）各一条索引。
 CREATE INDEX IF NOT EXISTS ai_usage_user_created_idx       ON ai_usage (user_id, created_at);
@@ -73,9 +87,16 @@ ALTER TABLE plan_code ADD  CONSTRAINT plan_code_kind_check
   CHECK (kind IN ('user_upgrade', 'production_upgrade', 'ai_credits'));
 ALTER TABLE plan_code ALTER COLUMN grants_tier DROP NOT NULL;
 ALTER TABLE plan_code ADD COLUMN IF NOT EXISTS grants_credits BIGINT NOT NULL DEFAULT 0;
+-- 两列都双向锁死在 kind 上。这张表**没有创建界面、全靠管理员手工 INSERT**，
+-- 所以「插进去不报错但不生效」是最该由约束挡掉的一类错：升档码带着
+-- grants_credits 会被静默忽略，额度码写 grants_credits=0 则是一张兑了等于没兑
+-- 的码（redeemPlanCode 只能在运行时回 unknown_tier，那时码已经发出去了）。
 ALTER TABLE plan_code DROP CONSTRAINT IF EXISTS plan_code_grants_check;
 ALTER TABLE plan_code ADD  CONSTRAINT plan_code_grants_check
-  CHECK ((kind = 'ai_credits') = (grants_tier IS NULL));
+  CHECK (
+    (kind = 'ai_credits') = (grants_tier IS NULL)
+    AND (kind = 'ai_credits') = (grants_credits > 0)
+  );
 
 -- ── 权限键新类型 ai/*（用量可见性）───────────────────────────────────────────
 -- 新 resource_type 必须先注册合法动词行（schema.sql resource_permission_level 规约），

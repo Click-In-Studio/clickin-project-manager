@@ -43,6 +43,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     },
   };
 
+  // `&& session` 是 TS 收窄不是防御：requireGrantGate 只在 deny 非空时才可能
+  // 交出 session=null（未登录那条分支），deny 已经在上面 return 掉了。
   if (req.nextUrl.searchParams.get("members") === "1" && session) {
     const canMembers = isOwner || session.isAdmin
       || (await hasGrant(session.userId, id, "ai", "*", "usage/members", "view"));

@@ -2061,7 +2061,13 @@ CREATE TABLE IF NOT EXISTS plan_code (
   note           TEXT        NULL,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT plan_code_kind_check   CHECK (kind IN ('user_upgrade', 'production_upgrade', 'ai_credits')),
-  CONSTRAINT plan_code_grants_check CHECK ((kind = 'ai_credits') = (grants_tier IS NULL))
+  -- 两列双向锁死在 kind 上：无创建界面、全靠手工 INSERT 的表，最该挡掉的是
+  -- 「插进去不报错但不生效」——升档码带 credits 会被静默忽略，额度码 credits=0
+  -- 是一张兑了等于没兑的码。
+  CONSTRAINT plan_code_grants_check CHECK (
+    (kind = 'ai_credits') = (grants_tier IS NULL)
+    AND (kind = 'ai_credits') = (grants_credits > 0)
+  )
 );
 
 -- 额外额度（#383）：余额型，不随日/周窗口重置；窗口两闸都满之后才动它。
