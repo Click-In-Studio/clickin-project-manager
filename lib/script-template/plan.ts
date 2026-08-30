@@ -137,7 +137,8 @@ function resolveSlot(slot: Slot, block: Block | null, scene: Scene | null, ctx: 
   const hasCharacters = !!block && block.characterIds.length > 0;
   // 长度门：按首个字段的原文长度（短提示跟名字同行、长提示另起行）
   if (slot.when) {
-    const len = fieldRaw(fields[0], block, scene, ctx).length;
+    // 按可见文字量长度，不算标记（content 可能带 <br> 等残留标记）
+    const len = stripHtml(fieldRaw(fields[0], block, scene, ctx)).trim().length;
     if ((slot.when.maxChars !== undefined && len > slot.when.maxChars) || (slot.when.minChars !== undefined && len < slot.when.minChars)) {
       return { slot, text: "", parts: [], empty: true };
     }
@@ -154,7 +155,8 @@ function resolveSlot(slot: Slot, block: Block | null, scene: Scene | null, ctx: 
     }
     if (!raw && field !== "content") continue;
     // 正文本身已经带括号（作者自己写了「（……）」）就不再套一层，否则出「((…))」
-    const alreadyWrapped = field === "content" && slot.decorate && /^[(（〔\[]/.test(raw.trim()) && /[)）〕\]]$/.test(raw.trim());
+    const visible = field === "content" ? stripHtml(raw).trim() : raw.trim();
+    const alreadyWrapped = field === "content" && !!slot.decorate && /^[(（〔\[]/.test(visible) && /[)）〕\]]$/.test(visible);
     parts.push({ field, raw, before: alreadyWrapped ? "" : slot.decorate?.before ?? "", after: alreadyWrapped ? "" : slot.decorate?.after ?? "" });
   }
   const text = parts

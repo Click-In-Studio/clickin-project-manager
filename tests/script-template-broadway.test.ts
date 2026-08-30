@@ -42,6 +42,10 @@ describe("幕 / 场字段", () => {
     expect(sceneNumberParts("0-1")).toEqual({ actRoman: "I", local: "1" });
     expect(sceneNumberParts("1-3")).toEqual({ actRoman: "II", local: "3" });
     expect(sceneNumberParts("0")).toEqual({ actRoman: "I", local: "" });
+    // 边界：非正数无罗马数字；不是「章-场」形状的号原样当场号
+    expect(toRoman(0)).toBe(""); expect(toRoman(-3)).toBe(""); expect(toRoman(Number.NaN)).toBe("");
+    expect(sceneNumberParts("abc")).toEqual({ actRoman: "", local: "abc" });
+    expect(sceneNumberParts("")).toEqual({ actRoman: "", local: "" });
   });
 });
 
@@ -82,9 +86,14 @@ describe("对白块", () => {
     const item = planBlock(block({ id: "s", type: "stage", content: "Enter JENNIFER, left." }), null, ctx);
     const c = slotsOf(item)[0];
     expect(c.text).toBe("(Enter JENNIFER, left.)");
-    // 作者自己写了括号的不再套一层
+    // 作者自己写了括号的不再套一层——按可见文字判断，残留的 <br> 标记不算
     const wrapped = planBlock(block({ id: "sw", type: "stage", content: "（两人对视。）" }), null, ctx);
     expect(slotsOf(wrapped)[0].text).toBe("（两人对视。）");
+    const wrappedHtml = planBlock(block({ id: "sw2", type: "stage", content: "<br>(beat)<br>" }), null, ctx);
+    expect(slotsOf(wrappedHtml)[0].text.trim()).toBe("(beat)");
+    // when 长度门同样按可见文字：标记不计入
+    const brief = planBlock(block({ id: "bw", characterIds: ["john"], stageComment: "laughing", content: "<br>x" }), null, ctx);
+    expect(slotsOf(brief).map((s) => s.slot.id)).toEqual(["character", "briefComment", "content"]);
     expect(c.slot.indent).toEqual({ left: 144, right: 144 });
     const upl = Math.floor((CONTENT_W - 288) / 16); // 22 个全角单位；半角括号各算 0.5
     const long = planBlock(block({ id: "s2", type: "stage", content: "中".repeat(upl - 1) }), null, ctx); // 21 + 括号 1 = 22，正好一行
