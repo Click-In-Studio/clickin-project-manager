@@ -6,9 +6,10 @@ import {
   withMarkerOwnership,
 } from "./script-marker-blocks";
 import type { MarkerOwnershipDirty, MarkerOwnershipRange } from "./script-marker-ownership-cache";
-// 与渲染层共用同一份判据：估算器和渲染器对「同一组角色」的判断分歧，
-// 会直接变成编辑器里的分页线和打印结果对不上。
-import { sameCharacters } from "./script-block-layout";
+// 估算器改吃模版引擎（docs/script-template-engine.md）：块的高度由模版的几何算出，
+// 角色名省略 / 页首补名 / 说话人间距都是模版规则。legacy 模版逐字节复现此前的输出
+// （tests/fixtures/legacy-script-page.ts 是旧实现原文，测试拿它当参照）。
+import { estimateItemHeight, planBlock, planSceneHeading, templateForTextLayoutMode, type PlanContext, type ScriptTemplate } from "./script-template";
 
 // ── Print page config — single source of truth shared with ScriptEditor ───────
 
@@ -43,62 +44,13 @@ export const PAGE_CONFIGS: Record<PageLayout, PageConfig> = {
 
 // ── Layout metrics derived from PageConfig ────────────────────────────────────
 
-const LINE_HEIGHT    = 28;  // leading-7 (1.75rem)
-const FONT_SIZE      = 14;  // text-sm (0.875rem at 16px base)
-const CHAR_NAME_HEIGHT   = 22;  // text-sm (20px) + mb-0.5 (2px)
-const SCENE_HEADER_HEIGHT = 44; // py-3 (24px) + text-sm content (20px)
 export const COMPACT_TEXT_SIDE_WIDTH_REM = 9.5;
-const REM_SIZE = 16;
 
 function contentWidth(cfg: PageConfig): number {
   return cfg.width - 2 * cfg.marginX;
 }
 function contentHeight(cfg: PageConfig): number {
   return cfg.height - cfg.marginTop - cfg.marginBottom;
-}
-function unitsPerLine(cfg: PageConfig, textLayoutMode: ScriptTextLayoutMode = "center"): number {
-  const width = contentWidth(cfg);
-  const compactTextWidth = textLayoutMode === "compact"
-    ? width - COMPACT_TEXT_SIDE_WIDTH_REM * REM_SIZE
-    : width;
-  return Math.max(1, Math.floor(compactTextWidth / FONT_SIZE));
-}
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&");
-}
-
-function estimateLines(text: string, upl: number): number {
-  if (!text.trim()) return 1;
-  let total = 0;
-  for (const paragraph of text.split("\n")) {
-    let units = 0;
-    let lineCount = 1;
-    for (const ch of paragraph) {
-      const isCJK = /[⺀-⿿　-鿿豈-﫿︰-﹏]/.test(ch);
-      units += isCJK ? 1 : 0.5;
-      if (units > upl) {
-        lineCount++;
-        units = isCJK ? 1 : 0.5;
-      }
-    }
-    total += lineCount;
-  }
-  return total || 1;
-}
-
-function charNameHidden(block: Block, prev: Block | null): boolean {
-  if (block.forceShowCharacterName) return false;
-  if (!prev || prev.type !== "dialogue" || block.type !== "dialogue") return false;
-  if (block.sceneId !== prev.sceneId) return false;
-  if (block.rehearsalMark !== prev.rehearsalMark) return false;
-  return sameCharacters(prev.characterIds, block.characterIds);
 }
 
 type PaginationHeightFeature = {
@@ -107,20 +59,38 @@ type PaginationHeightFeature = {
   startsScene: boolean;
 };
 
-function paginationHeightFeature(block: Block, prev: Block | null, upl: number): PaginationHeightFeature {
-  const text = stripHtml(block.content);
-  const stageComment = (block.stageComment ?? "").trim();
-  const stageCommentText = block.type === "dialogue" && block.characterIds.length > 0 && stageComment
-    ? stageComment.split(/\r\n|\r|\n/).map(line => `（${line}）`).join("\n")
-    : "";
-  const lines = estimateLines(stageCommentText ? `${stageCommentText}\n${text}` : text, upl);
-  const hasCharacterName = block.type === "dialogue" && block.characterIds.length > 0;
-  const hideCharName = charNameHidden(block, prev);
-  const normalPadding = block.type === "stage" || hideCharName ? 0 : 8; // 8px = py-1 wrapper
-  const forcedPadding = block.type === "stage" ? 0 : 8;
+type EstimateContext = {
+  plan: PlanContext;
+  template: ScriptTemplate;
+  contentWidth: number;
+  /** 场次标题项的高度：估算器拿不到 scenes，按模版的一行计（legacy 44） */
+  sceneHeadingHeight: number;
+};
+
+function estimateContext(cfg: PageConfig, template: ScriptTemplate): EstimateContext {
+  // 估算器不知道演出的角色表 / 场次表 / 分隔符——今天也不知道：它按「角色名占一行、
+  // 括号提示按 （） 包住」的口径估，legacy 模版把这个口径写成数据。
+  const plan: PlanContext = { template, characters: [], scenes: [], stageDelimOpen: "（", stageDelimClose: "）" };
+  const width = contentWidth(cfg);
+  const heading = planSceneHeading("", null, plan);
   return {
-    normalHeight: lines * LINE_HEIGHT + normalPadding + (hasCharacterName && !hideCharName ? CHAR_NAME_HEIGHT : 0),
-    forcedHeight: lines * LINE_HEIGHT + forcedPadding + (hasCharacterName ? CHAR_NAME_HEIGHT : 0),
+    plan,
+    template,
+    contentWidth: width,
+    sceneHeadingHeight: estimateItemHeight(heading, "normal", width, template.estimate),
+  };
+}
+
+function paginationHeightFeature(block: Block, prev: Block | null, ctx: EstimateContext): PaginationHeightFeature {
+  // 角色名文字估算器拿不到（没有角色表）：legacy 口径是「有角色就按一行算」，
+  // 所以给 plan 一个占位角色名，让 character 槽非空
+  const planBlockInput = block.characterIds.length > 0 && ctx.plan.characters.length === 0
+    ? { ...ctx.plan, characters: block.characterIds.map((id) => ({ id, name: "角", isAggregate: false })) }
+    : ctx.plan;
+  const item = planBlock(block, prev, planBlockInput);
+  return {
+    normalHeight: estimateItemHeight(item, "normal", ctx.contentWidth, ctx.template.estimate),
+    forcedHeight: estimateItemHeight(item, "pageTop", ctx.contentWidth, ctx.template.estimate),
     startsScene: !!block.sceneId && block.sceneId !== prev?.sceneId,
   };
 }
@@ -219,7 +189,7 @@ export function computePageMap(
   blocksHaveMarkerOwnership = false,
 ): Record<string, number> {
   const cfg = PAGE_CONFIGS[layout];
-  const upl = unitsPerLine(cfg, textLayoutMode);
+  const ctx = estimateContext(cfg, templateForTextLayoutMode(textLayoutMode));
   const maxH = contentHeight(cfg);
 
   const pageMap: Record<string, number> = {};
@@ -234,14 +204,14 @@ export function computePageMap(
     const block = textBlocks[i];
     const prev = prevTextBlock;
 
-    const feature = paginationHeightFeature(block, prev, upl);
+    const feature = paginationHeightFeature(block, prev, ctx);
     if (feature.startsScene) {
-      if (used > 0 && used + SCENE_HEADER_HEIGHT > maxH) {
+      if (used > 0 && used + ctx.sceneHeadingHeight > maxH) {
         page++;
         used = 0;
         hasBlockOnPage = false;
       }
-      used += SCENE_HEADER_HEIGHT;
+      used += ctx.sceneHeadingHeight;
     }
 
     let height = hasBlockOnPage ? feature.normalHeight : feature.forcedHeight;
@@ -270,7 +240,7 @@ export function updateEstimatedPageMap(
   dirty: MarkerOwnershipDirty = "full",
 ): EstimatedPageMapCache {
   const cfg = PAGE_CONFIGS[layout];
-  const upl = unitsPerLine(cfg, textLayoutMode);
+  const ctx = estimateContext(cfg, templateForTextLayoutMode(textLayoutMode));
   const maxH = contentHeight(cfg);
   const entries = textBlockEntries(blocks, blocksHaveMarkerOwnership);
   const ranges = normalizeDirtyRanges(dirty, blocks.length);
@@ -296,7 +266,7 @@ export function updateEstimatedPageMap(
         cached.block !== current.block ||
         cached.previousBlock !== current.previousBlock
       ) {
-        const feature = paginationHeightFeature(current.block, current.previousBlock, upl);
+        const feature = paginationHeightFeature(current.block, current.previousBlock, ctx);
         if (!samePaginationHeightFeature(cached.heightFeature, feature)) {
           firstFeatureChange = Math.min(firstFeatureChange, index);
           return true;
@@ -361,14 +331,14 @@ export function updateEstimatedPageMap(
     const cached = canReuse ? previous.entries[i] : null;
     const heightFeature = cached?.block === block && cached.previousBlock === entries[i].previousBlock
       ? cached.heightFeature
-      : paginationHeightFeature(block, entries[i].previousBlock, upl);
+      : paginationHeightFeature(block, entries[i].previousBlock, ctx);
     if (heightFeature.startsScene) {
-      if (used > 0 && used + SCENE_HEADER_HEIGHT > maxH) {
+      if (used > 0 && used + ctx.sceneHeadingHeight > maxH) {
         page++;
         used = 0;
         hasBlockOnPage = false;
       }
-      used += SCENE_HEADER_HEIGHT;
+      used += ctx.sceneHeadingHeight;
     }
 
     let height = hasBlockOnPage ? heightFeature.normalHeight : heightFeature.forcedHeight;
