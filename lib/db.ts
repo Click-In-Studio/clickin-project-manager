@@ -914,6 +914,8 @@ export async function loadProduction(productionId: string, versionId: string): P
       );
     }
   }
+  // 后者覆盖前者：主本的版式与模版 id 压过 JSONB 里的残留键（scriptViewLayout 只产出
+  // pageLayout / textLayoutMode 两个键，templateId 单独装配）
   const config: ScriptConfig = {
     ...DEFAULT_SCRIPT_CONFIG,
     ...(rawProductionConfig ?? {}),
@@ -961,8 +963,8 @@ export async function saveScriptConfig(productionId: string, versionId: string |
           SET page_layout = $2,
               text_layout_mode = $3,
               template_overrides = CASE
-                WHEN $4::text IS NULL THEN template_overrides - 'templateId'
-                ELSE template_overrides || jsonb_build_object('templateId', $4::text)
+                WHEN $4::text IS NULL THEN COALESCE(template_overrides, '{}'::jsonb) - 'templateId'
+                ELSE COALESCE(template_overrides, '{}'::jsonb) || jsonb_build_object('templateId', $4::text)
               END
         WHERE id = $1 RETURNING 1
      )

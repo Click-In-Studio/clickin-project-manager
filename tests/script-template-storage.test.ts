@@ -62,6 +62,11 @@ describe("预设注册表", () => {
     expect(resolveTemplate({ templateId: "nope@9", textLayoutMode: "center" }).id).toBe("legacy-center@1");
     expect(isKnownTemplateId("legacy-center@1")).toBe(true);
     expect(isKnownTemplateId("legacy-center")).toBe(false);
+    // 注册表是普通对象：原型上的键不是模版
+    for (const bad of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
+      expect(isKnownTemplateId(bad), bad).toBe(false);
+      expect(resolveTemplate({ templateId: bad, textLayoutMode: "center" }).id).toBe("legacy-center@1");
+    }
   });
 });
 
@@ -78,12 +83,16 @@ describe("落库与读出", () => {
     expect((await loadProduction(prodId, versionId))!.state.config.templateId).toBe("legacy-compact@1");
   });
 
-  it("未知的模版 id 被 400 拒绝，库里不变", async () => {
-    const res = await putConfig({ templateId: "broadway-musical@99" });
-    expect(res.status).toBe(400);
+  it("未知的模版 id 被 400 拒绝，库里不变（含原型键）", async () => {
+    for (const bad of ["broadway-musical@99", "toString", "__proto__"]) {
+      const res = await putConfig({ templateId: bad });
+      expect(res.status, bad).toBe(400);
+    }
     expect(await storedTemplateId()).toBe("legacy-compact@1");
   });
 
+  // template_overrides 在 schema 里 NOT NULL DEFAULT '{}'（B2），写入 SQL 仍带 COALESCE 防御；
+  // 不在测试里 DROP NOT NULL 去造 NULL 行——测试不做 DDL。
   it("改模版 = 改全局页码：page_map 按新模版重算；置 null 回退到 textLayoutMode 并删掉键", async () => {
     const { state } = (await loadProduction(prodId, versionId))!;
     const masterId = (await getMasterScriptViewId(prodId))!;

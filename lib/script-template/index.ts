@@ -33,7 +33,8 @@ export function listTemplatePresets(): ScriptTemplate[] {
 }
 
 export function isKnownTemplateId(id: unknown): id is string {
-  return typeof id === "string" && id in TEMPLATE_PRESETS;
+  // hasOwn 而不是 in：注册表是普通对象，`"toString" in {}` 为真，会把原型上的东西当模版
+  return typeof id === "string" && Object.hasOwn(TEMPLATE_PRESETS, id);
 }
 
 /** 无 templateId 时的回退映射：text_layout_mode → legacy 模版 */
@@ -42,7 +43,7 @@ export function templateForTextLayoutMode(mode: ScriptTextLayoutMode): ScriptTem
 }
 
 export function templateById(id: string | null | undefined, fallback: ScriptTextLayoutMode = "center"): ScriptTemplate {
-  return (id && TEMPLATE_PRESETS[id]) || templateForTextLayoutMode(fallback);
+  return isKnownTemplateId(id) ? TEMPLATE_PRESETS[id] : templateForTextLayoutMode(fallback);
 }
 
 /** 演出配置 → 模版：有 templateId 用它，否则按 textLayoutMode 回退 */
