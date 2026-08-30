@@ -6,6 +6,7 @@ import { broadcastEvent } from "@/lib/server-cache";
 import { rejectNonHeadWrite } from "@/lib/head-version";
 import type { ScriptConfig } from "@/lib/script-types";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
+import { isKnownTemplateId } from "@/lib/script-template";
 
 export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/config">) {
   const { id } = await ctx.params;
@@ -31,6 +32,10 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
   }
   const body = (await req.json()) as Partial<ScriptConfig>;
   const config: ScriptConfig = { ...DEFAULT_SCRIPT_CONFIG, ...body };
+  // 模版 id 只认注册表里的预设（带版本）；null 合法 = 按 textLayoutMode 回退
+  if (config.templateId !== null && !isKnownTemplateId(config.templateId)) {
+    return Response.json({ error: "未知的排版模版" }, { status: 400 });
+  }
   if (!config.useRehearsalMarks && versionId) {
     const rehearsalMarkerLabel = await getFirstRehearsalMarkerLabel(versionId);
     if (rehearsalMarkerLabel) {

@@ -32,22 +32,22 @@ export default function ScriptPrintRoute({
   canEditTextLayout: boolean;
 }) {
   const router = useRouter();
-  const [textLayoutMode, setTextLayoutMode] = useState(config.textLayoutMode);
+  const [templateId, setTemplateId] = useState<string | null>(config.templateId);
 
-  // 紧凑排版是**演出配置**不是本次预览的临时态：编辑器里改它会落库，
-  // 打印页改它也必须落库，否则同一个开关在两处语义不同。
-  // 乐观切换 + 失败回滚，与编辑器 saveScriptConfig 同一套。
-  const changeTextLayoutMode = useCallback((mode: typeof textLayoutMode) => {
-    const previous = textLayoutMode;
-    setTextLayoutMode(mode);
-    fetch(`${BASE_PATH}/api/script/${productionId}/config`, {
+  // 排版模版是**演出配置**不是本次预览的临时态：打印页里选了要落库（主本的
+  // template_overrides.templateId）。预览阶段的「先看新页数再保存」在 PrintPreview 里做，
+  // 这里只负责真正的保存：乐观 + 失败回滚，与编辑器 saveScriptConfig 同一套。
+  const saveTemplateId = useCallback((next: string | null) => {
+    const previous = templateId;
+    setTemplateId(next);
+    return fetch(`${BASE_PATH}/api/script/${productionId}/config`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...config, textLayoutMode: mode }),
+      body: JSON.stringify({ ...config, templateId: next }),
     })
-      .then((r) => { if (!r.ok) setTextLayoutMode(previous); })
-      .catch(() => setTextLayoutMode(previous));
-  }, [config, productionId, textLayoutMode]);
+      .then((r) => { if (!r.ok) { setTemplateId(previous); return false; } return true; })
+      .catch(() => { setTemplateId(previous); return false; });
+  }, [config, productionId, templateId]);
 
   return (
     <PrintPreview
@@ -58,10 +58,11 @@ export default function ScriptPrintRoute({
       pageLayout={config.pageLayout}
       stageDelimOpen={config.stageDelimOpen}
       stageDelimClose={config.stageDelimClose}
-      textLayoutMode={textLayoutMode}
+      textLayoutMode={config.textLayoutMode}
+      templateId={templateId}
       watermarkText={watermarkText}
-      canEditTextLayout={canEditTextLayout}
-      onTextLayoutModeChange={changeTextLayoutMode}
+      canEditTemplate={canEditTextLayout}
+      onTemplateSave={saveTemplateId}
       onClose={() => router.push(`/production/${productionId}/script`)}
     />
   );

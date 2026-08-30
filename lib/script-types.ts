@@ -34,6 +34,8 @@ export type ScriptConfig = {
   stageDelimClose: string;
   pageLayout: PageLayout;
   textLayoutMode: ScriptTextLayoutMode;
+  /** 排版模版预设 id（带版本，如 legacy-center@1）；null = 按 textLayoutMode 回退到 legacy 模版 */
+  templateId: string | null;
   openingChapterMarkerId: string | null;
   showOpeningChapter: boolean;
   useRehearsalMarks: boolean;
@@ -44,6 +46,7 @@ export const DEFAULT_SCRIPT_CONFIG: ScriptConfig = {
   stageDelimClose: "）",
   pageLayout: "a4",
   textLayoutMode: "center",
+  templateId: null,
   openingChapterMarkerId: null,
   showOpeningChapter: false,
   useRehearsalMarks: true,

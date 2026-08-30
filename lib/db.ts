@@ -33,6 +33,7 @@ import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
 import type { ScriptPatch, TagEntry } from "./script-ops";
 import { keyBetween, initialKeys } from "./lex-order";
 import { computePageMap, updateEstimatedPageMap, type EstimatedPageMapCache } from "./script-page";
+import { isKnownTemplateId } from "./script-template";
 import { buildMarkerLabelIndex, generatedRehearsalMarksByScene, type MarkerLabelIndex } from "./script-generated-labels";
 import { VERSION_MARKER_LABEL_ROWS_SQL, VERSION_OWNED_BLOCKS_CTE, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
 import { getMarkerChange, markerCacheUpdateBlockIds, markerHierarchyUpdateBlockIds, normalizeScriptMarkerInvariants, projectMarkers, sameMarkerStructure, type MarkerChange, type MarkerProjection } from "./script-marker-domain";
@@ -830,10 +831,12 @@ export async function loadProduction(productionId: string, versionId: string): P
       version_script_config: Partial<ScriptConfig> | null;
       page_layout: string | null;
       text_layout_mode: string | null;
+      template_id: string | null;
     }>(
       `SELECT p.script_config AS production_script_config,
               v.script_config AS version_script_config,
-              sv.page_layout, sv.text_layout_mode
+              sv.page_layout, sv.text_layout_mode,
+              sv.template_overrides->>'templateId' AS template_id
        FROM production p
        JOIN version v ON v.production_id = p.id
        LEFT JOIN script_view sv ON sv.id = p.master_view_id
@@ -848,6 +851,8 @@ export async function loadProduction(productionId: string, versionId: string): P
   // 版式只有 script_view 一处真相（#336 B2）：主本行装配进 ScriptConfig，JSONB 里
   // 即便残留旧键也不算数。无主本（不应发生）落缺省。
   const masterLayout = scriptViewLayout(prodRes.rows[0]);
+  // 排版模版 id 也住在主本上（template_overrides.templateId，#338 T3）；不认识的 id 当没有
+  const templateId = isKnownTemplateId(prodRes.rows[0]?.template_id) ? prodRes.rows[0]!.template_id : null;
 
   // script_character joins on snapshot_id (script.id)
   const snapshotIds_arr = blocksRes.rows.map(r => r.snapshot_id);
@@ -909,11 +914,14 @@ export async function loadProduction(productionId: string, versionId: string): P
       );
     }
   }
+  // 后者覆盖前者：主本的版式与模版 id 压过 JSONB 里的残留键（scriptViewLayout 只产出
+  // pageLayout / textLayoutMode 两个键，templateId 单独装配）
   const config: ScriptConfig = {
     ...DEFAULT_SCRIPT_CONFIG,
     ...(rawProductionConfig ?? {}),
     ...(rawVersionConfig ?? {}),
     ...masterLayout,
+    templateId,
     openingChapterMarkerId,
   };
 
@@ -944,16 +952,27 @@ export async function saveScriptConfig(productionId: string, versionId: string |
   });
   await pool.query("UPDATE production SET script_config = $1 WHERE id = $2", [configJson, productionId]);
   const masterViewId = await ensureMasterScriptView(productionId);
+  // 模版 id 进 template_overrides（JSONB，保留将来的覆盖项）；null = 删掉键（按 textLayoutMode 回退）
+  const templateId = isKnownTemplateId(config.templateId) ? config.templateId : null;
   const configUpdate = await pool.query<{ pagination_changed: boolean }>(
     `WITH previous AS (
-       SELECT page_layout, text_layout_mode FROM script_view WHERE id = $1
+       SELECT page_layout, text_layout_mode, template_overrides->>'templateId' AS template_id
+       FROM script_view WHERE id = $1
      ), updated AS (
-       UPDATE script_view SET page_layout = $2, text_layout_mode = $3 WHERE id = $1 RETURNING 1
+       UPDATE script_view
+          SET page_layout = $2,
+              text_layout_mode = $3,
+              template_overrides = CASE
+                WHEN $4::text IS NULL THEN COALESCE(template_overrides, '{}'::jsonb) - 'templateId'
+                ELSE COALESCE(template_overrides, '{}'::jsonb) || jsonb_build_object('templateId', $4::text)
+              END
+        WHERE id = $1 RETURNING 1
      )
      SELECT previous.page_layout IS DISTINCT FROM $2
-         OR previous.text_layout_mode IS DISTINCT FROM $3 AS pagination_changed
+         OR previous.text_layout_mode IS DISTINCT FROM $3
+         OR previous.template_id IS DISTINCT FROM $4::text AS pagination_changed
      FROM previous, updated`,
-    [masterViewId, config.pageLayout, config.textLayoutMode]
+    [masterViewId, config.pageLayout, config.textLayoutMode, templateId]
   );
   if (versionId) {
     await pool.query(
@@ -1073,8 +1092,10 @@ export async function getEstimatedPageMap(
     master_view_id: string | null;
     page_layout: string | null;
     text_layout_mode: string | null;
+    template_id: string | null;
   }>(
-    `SELECT p.page_map, p.active_version_id, p.master_view_id, sv.page_layout, sv.text_layout_mode
+    `SELECT p.page_map, p.active_version_id, p.master_view_id, sv.page_layout, sv.text_layout_mode,
+            sv.template_overrides->>'templateId' AS template_id
      FROM production p
      LEFT JOIN script_view sv ON sv.id = p.master_view_id
      WHERE p.id = $1`,
@@ -1090,7 +1111,7 @@ export async function getEstimatedPageMap(
   const state = preloaded ?? (await loadProduction(productionId, versionId))?.state;
   if (!state) return {};
   const { pageLayout, textLayoutMode } = scriptViewLayout(row);
-  return computePageMap(state.blocks, pageLayout, textLayoutMode);
+  return computePageMap(state.blocks, pageLayout, textLayoutMode, false, isKnownTemplateId(row.template_id) ? row.template_id : null);
 }
 
 /** Stores a pre-computed page map keyed by script_view id（测试与修复脚本用；线上写入走 saveEstimatedPageMaps）. */
@@ -5702,8 +5723,9 @@ async function saveEstimatedPageMaps(
 ): Promise<void> {
   // 按现存视图各算一份（#336 B2：page_map 以 script_view id 为键）。本阶段只有主本；
   // 改版式时 saveScriptConfig 触发全量重算，所以不必再为「万一换版式」预算另外三份。
-  const views = await getPool().query<{ id: string; page_layout: string | null; text_layout_mode: string | null }>(
-    "SELECT id, page_layout, text_layout_mode FROM script_view WHERE production_id = $1 ORDER BY sort_order, created_at",
+  const views = await getPool().query<{ id: string; page_layout: string | null; text_layout_mode: string | null; template_id: string | null }>(
+    `SELECT id, page_layout, text_layout_mode, template_overrides->>'templateId' AS template_id
+     FROM script_view WHERE production_id = $1 ORDER BY sort_order, created_at`,
     [productionId],
   );
   if (views.rows.length === 0) return;
@@ -5719,6 +5741,7 @@ async function saveEstimatedPageMaps(
       textLayoutMode,
       false,
       previous ? dirty : "full",
+      isKnownTemplateId(view.template_id) ? view.template_id : null,
     );
     if (cache !== previous) changed = true;
     return { key, viewId: view.id, cache };

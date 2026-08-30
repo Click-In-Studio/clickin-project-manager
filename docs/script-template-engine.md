@@ -81,7 +81,9 @@ pages → render(TemplateBlock, PageChrome)
 ## 5. 存储与分层
 
 - 预设：`lib/script-template/presets/*.ts`（代码常量，改它 = 改代码 = 走 PR，与 production-template 同一纪律）。
-- 演出侧：`script_view.template_overrides = { templateId, overrides }`（B2 留的列，零 DDL）。`text_layout_mode` 列继续存在，作为无 `templateId` 时的回退映射（center → legacy-center，compact → legacy-compact）。
+- 演出侧：`script_view.template_overrides = { templateId, …将来的覆盖项 }`（B2 留的列，零 DDL）。`text_layout_mode` 列继续存在，作为无 `templateId` 时的回退映射（center → `legacy-center@1`，compact → `legacy-compact@1`）。读写经 `ScriptConfig.templateId`（`loadProduction` / `saveScriptConfig` / config PUT），PUT 只认注册表里的 id。
+- **预设按版本冻结**：id 形如 `broadway-musical@1`。改预设 = 发新版本（`@2`），演出存的是带版本的 id、由人主动升级。页码是剧组的共享坐标，不能因为我们调了一下间距就悄悄漂移（#349）。选择界面只列每个家族的最新版（`listTemplatePresets`）。
+- **改模版 = 改全局页码**（#338 的要求）：打印页里选模版先只是预览，重新分页后把「共 N 页（当前模版 M 页，所有人的页码都会变）」摆在人眼前，再保存或撤销。保存后 `page_map` 按新模版重算。
 - 演出级默认 → 本子级覆盖（决策 8）等 D 有多本时再加一层；现在只有主本。
 
 ## 6. 阶段
@@ -90,7 +92,7 @@ pages → render(TemplateBlock, PageChrome)
 |---|---|---|
 | T1 | 引擎核心（类型 / plan / paginate / estimate）+ legacy 模版 + 估算器改吃引擎 | 估算与旧实现逐字节相同 |
 | T2 | 渲染器 `TemplateBlock` / 页眉页脚 `PageChrome`，打印管线改吃引擎 | golden 不变 |
-| T3 | 存储 + config API + 打印页模版选择 | — |
+| T3 | 存储 + config API + 打印页模版选择（预览后保存） | 落库测试；golden 不变 |
 | T4 | 百老汇音乐剧示范模版（Samuel French 规范） | 按规范逐条对照 |
 | T5+ | 中国话剧等模版；模版编辑界面（H 的可视化盒编辑器） | — |
 

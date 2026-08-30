@@ -18,8 +18,7 @@ import type { Block, Character, Scene, ScriptTextLayoutMode, PageLayout } from "
 import { PAGE_CONFIGS } from "@/lib/script-page";
 import { printPageCss } from "@/lib/print-css";
 import type { PageConfig } from "@/lib/script-page";
-import ModeSwitch from "@/components/ModeSwitch";
-import { paginate, planScript, templateForTextLayoutMode, type LayoutItem, type Page, type PaginateResult, type ScriptTemplate } from "@/lib/script-template";
+import { listTemplatePresets, paginate, planScript, templateById, type LayoutItem, type Page, type PaginateResult, type ScriptTemplate } from "@/lib/script-template";
 import { TemplateItemView, TemplateMeasureLayer, heightOfMeasured, readMeasuredHeights, runPaddingOverrides } from "@/components/print/template-render";
 import { useFontsSettled } from "@/components/print/use-fonts-settled";
 
@@ -50,19 +49,15 @@ function usePlannedItems(
   blocks: Block[],
   characters: Character[],
   scenes: Scene[],
-  textLayoutMode: ScriptTextLayoutMode,
+  template: ScriptTemplate,
   stageDelimOpen: string,
   stageDelimClose: string,
-): { template: ScriptTemplate; items: LayoutItem[] } {
-  return useMemo(() => {
-    const template = templateForTextLayoutMode(textLayoutMode);
-    const items = planScript(
-      blocks,
-      { template, characters, scenes, stageDelimOpen, stageDelimClose },
-      { headingOnlyIfSceneKnown: true },
-    );
-    return { template, items };
-  }, [blocks, characters, scenes, textLayoutMode, stageDelimOpen, stageDelimClose]);
+): LayoutItem[] {
+  return useMemo(() => planScript(
+    blocks,
+    { template, characters, scenes, stageDelimOpen, stageDelimClose },
+    { headingOnlyIfSceneKnown: true },
+  ), [blocks, characters, scenes, template, stageDelimOpen, stageDelimClose]);
 }
 
 function paginateMeasured(
@@ -89,6 +84,7 @@ export function PrintPaginationMeasure({
   stageDelimOpen,
   stageDelimClose,
   textLayoutMode,
+  templateId = null,
   onPageMapChange,
 }: {
   blocks: Block[];
@@ -98,6 +94,8 @@ export function PrintPaginationMeasure({
   stageDelimOpen: string;
   stageDelimClose: string;
   textLayoutMode: ScriptTextLayoutMode;
+  /** 排版模版预设 id；null = 按 textLayoutMode 回退 */
+  templateId?: string | null;
   onPageMapChange: (pageMap: Record<string, number>) => void;
 }) {
   const measureRef = useRef<HTMLDivElement>(null);
@@ -107,7 +105,8 @@ export function PrintPaginationMeasure({
   const pendingMeasureWorkRef = useRef<{ kind: "idle" | "timer"; id: number } | null>(null);
   const pendingMeasureFrameRef = useRef<number | null>(null);
   const measuredPrintHeightsRef = useRef<Record<string, number>>({});
-  const { items } = usePlannedItems(blocks, characters, scenes, textLayoutMode, stageDelimOpen, stageDelimClose);
+  const template = templateById(templateId, textLayoutMode);
+  const items = usePlannedItems(blocks, characters, scenes, template, stageDelimOpen, stageDelimClose);
   const [measurement, setMeasurement] = useState<{ generation: number; items: LayoutItem[]; batchStart: number } | null>(null);
   const cancelPendingMeasureWork = useCallback(() => {
     const pending = pendingMeasureWorkRef.current;
@@ -336,41 +335,77 @@ function PrintHeaderModeMenu({
   );
 }
 
-function PrintCompactLayoutControl({
-  compactLayout,
+/**
+ * 排版模版选择：列出注册表里各家族的最新版本。选中只是**预览**（PrintPreview 里算出新页数
+ * 后再保存）——改模版 = 改全局页码，得先看见后果。
+ */
+function PrintTemplateMenu({
+  templateId,
+  pendingTemplateId,
   canEdit,
   ready,
-  label,
+  compact,
   stored = false,
-  onToggle,
+  onPick,
 }: {
-  compactLayout: boolean;
+  templateId: string | null;
+  pendingTemplateId: string | null | undefined;
   canEdit: boolean;
   ready: boolean;
-  label: string;
+  compact: boolean;
   stored?: boolean;
-  onToggle: () => void;
+  onPick: (id: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const presets = listTemplatePresets();
+  const activeId = pendingTemplateId !== undefined ? pendingTemplateId : templateId;
+  const active = presets.find((t) => t.id === activeId) ?? null;
   const enabled = canEdit && ready;
-  return (
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [open]);
+  const list = presets.map((t) => (
     <button
+      key={t.id}
       type="button"
-      onClick={onToggle}
       disabled={!enabled}
-      className={`flex items-center gap-2 whitespace-nowrap text-sm transition-colors ${
-        stored ? "w-full justify-between px-3 py-2" : "shrink-0 rounded-md px-3 py-1.5"
-      } ${enabled ? "text-zinc-600 hover:bg-zinc-100" : "cursor-not-allowed text-zinc-300"}`}
-      title={
-        !canEdit
-          ? "无权修改剧本排版模式"
-          : ready
-            ? "保存为所有人共用的剧本排版模式"
-            : "打印预览加载中"
-      }
+      onClick={() => { onPick(t.id); setOpen(false); }}
+      className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-zinc-50 ${
+        t.id === activeId ? "font-medium text-zinc-900" : enabled ? "text-zinc-500" : "text-zinc-300"
+      }`}
     >
-      <span>{label}</span>
-      <ModeSwitch active={compactLayout} activeClassName="bg-[#637ca1]" />
+      <span>{t.name}</span>
+      {t.id === activeId && <span className="text-[10px] text-zinc-900">✓</span>}
     </button>
+  ));
+  if (stored) return <>{list}</>;
+  return (
+    <div ref={menuRef} className="relative shrink-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        disabled={!enabled}
+        className={`flex items-center gap-1 whitespace-nowrap rounded-md px-3 py-1.5 text-sm transition-colors ${
+          enabled ? "text-zinc-600 hover:bg-zinc-100" : "cursor-not-allowed text-zinc-300"
+        }`}
+        title={!canEdit ? "无权修改剧本排版模版" : ready ? "选择排版模版（所有人共用）" : "打印预览加载中"}
+      >
+        <span>{compact ? "模版" : `模版：${active?.name ?? "沿用"}`}</span>
+        <ChevronIcon size={12} className="opacity-50" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md">
+          {list}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -555,14 +590,15 @@ function PrintScaleMenu({
 
 function PrintPageSettingsMenu({
   ellipsis = false,
-  compactLayout,
-  canEditTextLayout,
+  templateId,
+  pendingTemplateId,
+  canEditTemplate,
   printPreviewReady,
   headerMode,
   previewScale,
   previewScaleFitWidth,
   previewScaleFitPage,
-  onTextLayoutModeToggle,
+  onTemplatePick,
   onHeaderModeChange,
   onPreviewScaleChange,
   onPreviewZoomIn,
@@ -571,14 +607,15 @@ function PrintPageSettingsMenu({
   onPreviewFitPage,
 }: {
   ellipsis?: boolean;
-  compactLayout: boolean;
-  canEditTextLayout: boolean;
+  templateId: string | null;
+  pendingTemplateId: string | null | undefined;
+  canEditTemplate: boolean;
   printPreviewReady: boolean;
   headerMode: PrintHeaderMode;
   previewScale: number;
   previewScaleFitWidth: boolean;
   previewScaleFitPage: boolean;
-  onTextLayoutModeToggle: () => void;
+  onTemplatePick: (id: string) => void;
   onHeaderModeChange: (mode: PrintHeaderMode) => void;
   onPreviewScaleChange: (scale: number) => void;
   onPreviewZoomIn: () => void;
@@ -619,13 +656,15 @@ function PrintPageSettingsMenu({
       </button>
       {open && (
         <div className="absolute right-0 top-full z-30 mt-1 w-48 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md">
-          <PrintCompactLayoutControl
-            compactLayout={compactLayout}
-            canEdit={canEditTextLayout}
-            ready={printPreviewReady}
-            label="紧凑排版"
+          <p className="px-3 pb-1 pt-1 text-[10px] font-medium tracking-wide text-zinc-400">排版模版</p>
+          <PrintTemplateMenu
             stored
-            onToggle={onTextLayoutModeToggle}
+            compact={false}
+            templateId={templateId}
+            pendingTemplateId={pendingTemplateId}
+            canEdit={canEditTemplate}
+            ready={printPreviewReady}
+            onPick={onTemplatePick}
           />
           <div className="my-1 border-t border-zinc-100" />
           <p className="px-3 pb-1 pt-1 text-[10px] font-medium tracking-wide text-zinc-400">页眉位置</p>
@@ -667,8 +706,9 @@ export default function PrintPreview({
   stageDelimOpen,
   stageDelimClose,
   textLayoutMode,
-  canEditTextLayout,
-  onTextLayoutModeChange,
+  templateId,
+  canEditTemplate,
+  onTemplateSave,
   onClose,
   watermarkText,
   standalone = false,
@@ -679,9 +719,13 @@ export default function PrintPreview({
   pageLayout: PageLayout;
   stageDelimOpen: string;
   stageDelimClose: string;
+  /** 无 templateId 时的回退依据 */
   textLayoutMode: ScriptTextLayoutMode;
-  canEditTextLayout: boolean;
-  onTextLayoutModeChange: (mode: ScriptTextLayoutMode) => void;
+  /** 已保存的排版模版预设 id（null = 按 textLayoutMode 回退） */
+  templateId: string | null;
+  canEditTemplate: boolean;
+  /** 保存模版选择；resolve false = 失败（调用方已回滚） */
+  onTemplateSave: (id: string | null) => Promise<boolean>;
   onClose: () => void;
   /** 访问者水印文案（服务端下发，通常是「用户名 邮箱」）。null = 不打水印。 */
   watermarkText: string | null;
@@ -692,14 +736,18 @@ export default function PrintPreview({
   const cfg = PAGE_CONFIGS[pageLayout];
   const contentW = cfg.width - cfg.marginX * 2;
   const contentH = cfg.height - cfg.marginTop - cfg.marginBottom;
-  const compactLayout = textLayoutMode === "compact";
+  // 改模版 = 改全局页码：选中先只当预览（pendingTemplateId），算出新页数后由人决定保存还是撤销
+  const [pendingTemplateId, setPendingTemplateId] = useState<string | null | undefined>(undefined);
+  const activeTemplateId = pendingTemplateId !== undefined ? pendingTemplateId : templateId;
+  const template = templateById(activeTemplateId, textLayoutMode);
+  const [savedPageCount, setSavedPageCount] = useState<number | null>(null);
 
   const measureRef = useRef<HTMLDivElement>(null);
-  const { items } = usePlannedItems(blocks, characters, scenes, textLayoutMode, stageDelimOpen, stageDelimClose);
+  const items = usePlannedItems(blocks, characters, scenes, template, stageDelimOpen, stageDelimClose);
   const [data, setData] = useState<{
     pages: Page[];
     scenePageNums: Record<string, number>;
-    layoutMode: ScriptTextLayoutMode;
+    templateId: string;
     measureTick: number;
   } | null>(null);
   const [forceLoadingNotice, setForceLoadingNotice] = useState(false);
@@ -767,14 +815,19 @@ export default function PrintPreview({
     setData({
       pages: result.pages,
       scenePageNums: result.scenePageNums,
-      layoutMode: textLayoutMode,
+      templateId: template.id,
       measureTick: layoutMeasureTick,
     });
-  }, [items, contentW, contentH, textLayoutMode, layoutMeasureTick]);
+  }, [items, contentW, contentH, template.id, layoutMeasureTick]);
 
   const printPreviewReady = !!data &&
-    data.layoutMode === textLayoutMode &&
+    data.templateId === template.id &&
     data.measureTick === layoutMeasureTick;
+
+  // 记住已保存模版的页数，预览新模版时对照
+  useEffect(() => {
+    if (printPreviewReady && pendingTemplateId === undefined && data) setSavedPageCount(data.pages.length);
+  }, [printPreviewReady, pendingTemplateId, data]);
   const showLoadingNotice = forceLoadingNotice || !printPreviewReady;
 
   // 打印路由的就绪信号：字体全部就位 **且** 之后的分页测量已完成。无头浏览器等
@@ -862,7 +915,7 @@ export default function PrintPreview({
 
   useLayoutEffect(() => {
     measurePrintToolbar();
-  }, [measurePrintToolbar, headerMode, canEditTextLayout, printPreviewReady, previewScale]);
+  }, [measurePrintToolbar, headerMode, canEditTemplate, printPreviewReady, previewScale, pendingTemplateId]);
 
   useEffect(() => {
     const toolbar = printToolbarRef.current;
@@ -903,9 +956,9 @@ export default function PrintPreview({
     };
   }, []);
 
-  const handleTextLayoutModeToggle = () => {
-    if (!canEditTextLayout || !printPreviewReady) return;
-    const nextLayoutMode = compactLayout ? "center" : "compact";
+  const previewTemplate = (id: string) => {
+    if (!canEditTemplate || !printPreviewReady) return;
+    if (id === activeTemplateId) return;
     flushSync(() => {
       setForceLoadingNotice(true);
       setData(null);
@@ -913,8 +966,24 @@ export default function PrintPreview({
     if (layoutSwitchTimerRef.current) clearTimeout(layoutSwitchTimerRef.current);
     layoutSwitchTimerRef.current = setTimeout(() => {
       layoutSwitchTimerRef.current = null;
-      onTextLayoutModeChange(nextLayoutMode);
+      setPendingTemplateId(id === templateId ? undefined : id);
     }, 0);
+  };
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const commitTemplate = async () => {
+    if (pendingTemplateId === undefined || savingTemplate) return;
+    setSavingTemplate(true);
+    const ok = await onTemplateSave(pendingTemplateId);
+    setSavingTemplate(false);
+    if (ok) setPendingTemplateId(undefined);
+  };
+  const discardTemplate = () => {
+    if (pendingTemplateId === undefined) return;
+    flushSync(() => {
+      setForceLoadingNotice(true);
+      setData(null);
+    });
+    setPendingTemplateId(undefined);
   };
 
   const getHeaderAlign = (pageNum: number): "left" | "right" => {
@@ -948,12 +1017,13 @@ export default function PrintPreview({
           {printToolbarStage < 2 ? (
             <>
               <PrintHeaderModeMenu headerMode={headerMode} onHeaderModeChange={setHeaderMode} />
-              <PrintCompactLayoutControl
-                compactLayout={compactLayout}
-                canEdit={canEditTextLayout}
+              <PrintTemplateMenu
+                templateId={templateId}
+                pendingTemplateId={pendingTemplateId}
+                canEdit={canEditTemplate}
                 ready={printPreviewReady}
-                label={printToolbarStage === 0 ? "紧凑排版" : "紧凑"}
-                onToggle={handleTextLayoutModeToggle}
+                compact={printToolbarStage === 1}
+                onPick={previewTemplate}
               />
               <PrintScaleMenu
                 scale={previewScale}
@@ -969,14 +1039,15 @@ export default function PrintPreview({
             </>
           ) : printToolbarStage === 2 ? (
             <PrintPageSettingsMenu
-              compactLayout={compactLayout}
-              canEditTextLayout={canEditTextLayout}
+              templateId={templateId}
+              pendingTemplateId={pendingTemplateId}
+              canEditTemplate={canEditTemplate}
               printPreviewReady={printPreviewReady}
               headerMode={headerMode}
               previewScale={previewScale}
               previewScaleFitWidth={previewScaleFitWidth}
               previewScaleFitPage={previewScaleFitPage}
-              onTextLayoutModeToggle={handleTextLayoutModeToggle}
+              onTemplatePick={previewTemplate}
               onHeaderModeChange={setHeaderMode}
               onPreviewScaleChange={setPreviewScale}
               onPreviewZoomIn={() => adjustPreviewScale(0.05)}
@@ -1000,14 +1071,15 @@ export default function PrintPreview({
           {printToolbarStage === 3 && (
             <PrintPageSettingsMenu
               ellipsis
-              compactLayout={compactLayout}
-              canEditTextLayout={canEditTextLayout}
+              templateId={templateId}
+              pendingTemplateId={pendingTemplateId}
+              canEditTemplate={canEditTemplate}
               printPreviewReady={printPreviewReady}
               headerMode={headerMode}
               previewScale={previewScale}
               previewScaleFitWidth={previewScaleFitWidth}
               previewScaleFitPage={previewScaleFitPage}
-              onTextLayoutModeToggle={handleTextLayoutModeToggle}
+              onTemplatePick={previewTemplate}
               onHeaderModeChange={setHeaderMode}
               onPreviewScaleChange={setPreviewScale}
               onPreviewZoomIn={() => adjustPreviewScale(0.05)}
@@ -1018,6 +1090,24 @@ export default function PrintPreview({
           )}
         </div>
       </div>
+
+      {/* 模版预览未保存：先把页数变化摆在人眼前，再决定 */}
+      {pendingTemplateId !== undefined && (
+        <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900 print:hidden sm:px-6">
+          <span>
+            预览中：<span className="font-medium">{template.name}</span>
+            {printPreviewReady && data
+              ? <>——共 <span className="font-medium tabular-nums">{data.pages.length}</span> 页{savedPageCount !== null && savedPageCount !== data.pages.length && <>（当前模版 {savedPageCount} 页，<span className="font-medium">所有人的页码都会变</span>）</>}</>
+              : "，正在重新分页…"}
+          </span>
+          <span className="ml-auto flex items-center gap-2">
+            <button type="button" onClick={discardTemplate} className="rounded-md px-2 py-1 text-amber-800 hover:bg-amber-100">撤销</button>
+            <button type="button" onClick={commitTemplate} disabled={!printPreviewReady || savingTemplate} className="rounded-md bg-amber-700 px-3 py-1 font-medium text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50">
+              {savingTemplate ? "保存中…" : "保存为剧本模版"}
+            </button>
+          </span>
+        </div>
+      )}
 
       {/* Scrollable page stack */}
       <div
