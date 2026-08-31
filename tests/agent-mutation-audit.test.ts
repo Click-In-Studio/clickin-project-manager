@@ -4,7 +4,7 @@ import { upsertFeishuUser } from "@/lib/db";
 import { createWiki, getWiki } from "@/lib/wiki-db";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { buildTools, exposedName, type RunHandle } from "@/lib/agent-runtime/tools";
-import { AUDITED_SCOPES, describeMutation, diffSnapshots, textDiffStats, listRunMutations, type MutationRecord } from "@/lib/agent-runtime/mutation-audit";
+import { AUDITED_SCOPES, describeMutation, diffSnapshots, sanitizeChanges, textDiffStats, listRunMutations, type MutationRecord } from "@/lib/agent-runtime/mutation-audit";
 
 // AI 写操作 diff 审计（db/add-agent-mutation.sql）：写工具真改了东西才落行，
 // before/after 由域读取器定形，changes 是给人看的字段级变化。
@@ -29,6 +29,17 @@ describe("纯函数：diff 与人话", () => {
     ]);
     expect(diffSnapshots(before, { ...before })).toEqual([]);
     expect(textDiffStats("", "abc")).toEqual({ added: 3, removed: 0 });
+  });
+
+  it("sanitizeChanges：长文本字段带 from/to（类型层拦不住的形态）落库前折算成增删字数、丢弃原文", () => {
+    const dirty = [
+      { field: "body", from: "很长的原文……", to: "很长的原文……改" },
+      { field: "title", from: "a", to: "b" },
+    ] as Parameters<typeof sanitizeChanges>[0];
+    const clean = sanitizeChanges(dirty);
+    expect(clean[0]).not.toHaveProperty("from");
+    expect(clean[0]).toMatchObject({ field: "body", added: expect.any(Number), removed: expect.any(Number) });
+    expect(clean[1]).toEqual({ field: "title", from: "a", to: "b" });
   });
 
   it("describeMutation：动作 + 域 + 名 + 变化清单", () => {

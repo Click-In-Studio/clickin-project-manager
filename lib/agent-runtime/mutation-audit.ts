@@ -63,15 +63,16 @@ const READERS: Record<string, ScopeReader> = {
       const out = new Map<string, Snapshot>();
       if (!productionId) return out;
       const { getWiki, listWikiDeptShares, listWikiSharePeople } = await import("@/lib/wiki-db");
-      for (const id of ids) {
+      // 批量写（≤50 篇）逐篇串行会放大 N 倍往返，按 id 并行（AI review #398）
+      const snaps = await Promise.all(ids.map(async (id) => {
         const doc = await getWiki(id, productionId).catch(() => null);
-        if (!doc) continue;
+        if (!doc) return null;
         const [rev, depts, people] = await Promise.all([
           latestWikiRevisionId(id),
           listWikiDeptShares(id).catch(() => [] as string[]),
           listWikiSharePeople(id, productionId).catch(() => [] as Array<{ userId: string; level: string }>),
         ]);
-        out.set(id, {
+        const snap: Snapshot = {
           label: doc.title ?? "",
           title: doc.title ?? "",
           parentId: doc.parentId,
@@ -82,8 +83,10 @@ const READERS: Record<string, ScopeReader> = {
           revisionId: rev,
           bodyChars: doc.body.length,
           body: doc.body,
-        });
-      }
+        };
+        return [id, snap] as const;
+      }));
+      for (const s of snaps) if (s) out.set(s[0], s[1]);
       return out;
     },
     listIds: async ({ productionId }) => {
@@ -184,6 +187,9 @@ export const AUDITED_SCOPES: ReadonlySet<string> = new Set(Object.keys(READERS))
 const SHORT = 80;
 const clip = (v: unknown): unknown => (typeof v === "string" && v.length > SHORT ? `${v.slice(0, SHORT)}…` : v);
 
+/** 长文本字段：changes 里只允许增删字数形态，绝不带 from/to 原文（落库前有运行时清洗兜底）。 */
+const TEXT_DIFF_FIELDS: ReadonlySet<string> = new Set(["body", "biography", "synopsis"]);
+
 /** 字段级变化：body 只记增删字数（正文本身不进账本），其余记 from/to（长文本截短）。 */
 export function diffSnapshots(before: Snapshot | null, after: Snapshot | null): MutationChange[] {
   const changes: MutationChange[] = [];
@@ -196,7 +202,7 @@ export function diffSnapshots(before: Snapshot | null, after: Snapshot | null): 
     const a = before[k];
     const b = after[k];
     if (JSON.stringify(a) === JSON.stringify(b)) continue;
-    if (k === "body" || k === "biography" || k === "synopsis") {
+    if (TEXT_DIFF_FIELDS.has(k)) {
       const stats = textDiffStats(String(a ?? ""), String(b ?? ""));
       changes.push({ field: k, ...stats } as MutationChange);
       continue;
@@ -204,6 +210,19 @@ export function diffSnapshots(before: Snapshot | null, after: Snapshot | null): 
     changes.push({ field: k, from: clip(a), to: clip(b) });
   }
   return changes;
+}
+
+/**
+ * 落库前的运行时清洗（AI review #398：MutationChange 的联合在类型层拦不住
+ * `{field:"body", from, to}`——`field: string` 结构上包含 "body"）。唯一产生点
+ * diffSnapshots 不会这么写，但"正文不进账本"是不变量，不能只靠产生点自觉：
+ * 长文本字段带 from/to 一律折算成增删字数后丢弃原文。
+ */
+export function sanitizeChanges(changes: MutationChange[]): MutationChange[] {
+  return changes.map((c) => {
+    if (!TEXT_DIFF_FIELDS.has(c.field) || !("from" in c)) return c;
+    return { field: c.field, ...textDiffStats(String(c.from ?? ""), String(c.to ?? "")) } as MutationChange;
+  });
 }
 
 export function textDiffStats(a: string, b: string): { added: number; removed: number } {
@@ -312,6 +331,7 @@ async function insertRow(
   before: Snapshot | null, after: Snapshot | null, changes: MutationChange[],
 ): Promise<MutationRecord> {
   const id = newMutationId();
+  changes = sanitizeChanges(changes);
   await getPool().query(
     `INSERT INTO agent_mutation (id, run_id, session_id, user_id, production_id, tool, tool_call_id, scope, entity_id, action, label, summary, before, after, changes, unattended)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16)`,
