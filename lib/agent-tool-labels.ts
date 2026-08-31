@@ -47,6 +47,8 @@ export const TOOL_LABELS: Record<string, string> = {
   "production-script_search": "搜索剧本台词",
   "production-script_read_page": "按页码读剧本",
   "production-script_dialect_ref": "获取剧本方言说明",
+  "production-script_propose_rewrite": "提议改写剧本段落",
+  "production-script_propose_edit_blocks": "提议修改剧本块",
   "my-schedules": "查看我的定时任务",
   "my-schedule_propose": "提议设置定时任务",
   // 运行时专属（不进 tool-catalog）

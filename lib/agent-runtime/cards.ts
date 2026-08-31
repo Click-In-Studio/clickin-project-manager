@@ -78,6 +78,18 @@ export function approvalCard(bareTool: string, params: Record<string, unknown>, 
         dramaturgyLines("删除：", (Array.isArray(params.charIds) ? params.charIds : []).map((id: unknown) => str(id, 40)), extra),
         summaryLine(params),
       ]) };
+    case "production-script_propose_rewrite":
+      return { severity, title: `提议改写剧本段落（段 id: ${str(params.sectionId, 30)}）`, description: lines([
+        dramaturgyLines("改动：", [], extra),
+        summaryLine(params),
+      ]) };
+    case "production-script_propose_edit_blocks": {
+      const n = count(params.updates) + count(params.inserts) + count(params.deletes);
+      return { severity, title: `提议修改剧本正文（${n} 处）`, description: lines([
+        dramaturgyLines("改动：", [], extra),
+        summaryLine(params),
+      ]) };
+    }
     case "production-wiki_propose_create":
       return { severity, title: `提议新建文档：${str(params.title, 60)}`, description: lines([
         permLine("新建", extra?.hasPermission),

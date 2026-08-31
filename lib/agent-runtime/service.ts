@@ -574,6 +574,20 @@ async function preflight(g: GateInput): Promise<{ block?: boolean; reason?: stri
       console.error("[agent-runtime] dramaturgy preview failed (card without permission info):", err);
     }
   }
+
+  // 剧本写面两个工具（P2）：同款——方言解析/参数错误直接 block 不弹卡；
+  // 逐块 diff 概要 + 权限三态进卡片 notes
+  const { SCRIPT_PROPOSE_TOOLS, previewScriptProposal } = await import("@/lib/agent-tools/script-write-tools");
+  if (SCRIPT_PROPOSE_TOOLS.has(bare) && g.productionId) {
+    try {
+      const p = await previewScriptProposal(g.userId, g.productionId, bare, g.args);
+      if (p.error) return { block: true, reason: `${p.error}（未提交给用户确认）`, preview };
+      hasPermission = p.hasPermission;
+      notes = p.notes;
+    } catch (err) {
+      console.error("[agent-runtime] script write preview failed (card without permission info):", err);
+    }
+  }
   return { hasPermission, preview, notes };
 }
 

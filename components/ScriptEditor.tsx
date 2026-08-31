@@ -43,6 +43,7 @@ import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, w
 import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
 import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script-selection";
 import { publishScriptFocus } from "@/lib/script-focus";
+import { useAgentMutation } from "@/lib/agent-mutations";
 import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script-insertion-gaps";
 import ProductionTopMenu, {
   ProductionOverflowSubmenuButton,
@@ -6108,6 +6109,12 @@ export default function ScriptEditor({
     setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
     syncedStateRef.current = { ...serverState, blocks: normalized.blocks, scenes: normalized.scenes, config: normalized.config };
   }, [activeVersionId, effectiveScriptId, markOwnershipDirty]);
+  // AI 写剧本（scope "script" 的 mutation 信号）落库后整体重载——最粗但最稳的粒度：
+  // reloadScriptState 会重置 syncedStateRef，编辑器后续 diff 以新服务端状态为基准，
+  // 不会把 AI 的改动当作"本地被删的内容"再冲掉。
+  useAgentMutation({ scope: "script", productionId: productionId ?? undefined }, () => {
+    void reloadScriptState().catch((err) => console.error("[script-editor] AI 写入后重载失败:", err));
+  });
   const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
   const sceneParentIdById = useMemo(() => sceneParentIdMap(scenes), [scenes]);
   const sceneDetailById = useMemo(() => new Map(sceneDetails.map((scene) => [scene.id, scene])), [sceneDetails]);

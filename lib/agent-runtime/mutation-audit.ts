@@ -157,6 +157,43 @@ const READERS: Record<string, ScopeReader> = {
     },
     defaultIds: ({ productionId }) => (productionId ? [productionId] : []),
   },
+  script: {
+    // 剧本正文块（P2 写面）：快照按逻辑 block_id 键。正文走 body 字段——
+    // 只进 diff 统计（增删字数），原文绝不落账本（TEXT_DIFF_FIELDS 纪律）。
+    read: async (ids, { productionId }) => {
+      const out = new Map<string, Snapshot>();
+      if (!productionId) return out;
+      const { getActiveVersionId, loadProduction } = await import("@/lib/db");
+      const versionId = await getActiveVersionId(productionId);
+      if (!versionId) return out;
+      const state = (await loadProduction(productionId, versionId))?.state;
+      if (!state) return out;
+      const { isMarkerBlock } = await import("@/lib/script-marker-blocks");
+      const nameOf = new Map(state.characters.map((c) => [c.id, c.name]));
+      const want = new Set(ids);
+      for (const b of state.blocks) {
+        if (!want.has(b.id) || isMarkerBlock(b)) continue;
+        out.set(b.id, {
+          label: (b.content ?? "").replace(/\s+/g, " ").slice(0, 24),
+          type: b.type === "stage" ? "stage" : b.lyric ? "lyric" : "dialogue",
+          speakers: b.characterIds.map((id) => nameOf.get(id) ?? id).sort(),
+          stageComment: b.stageComment ?? "",
+          body: b.content ?? "",
+        });
+      }
+      return out;
+    },
+    listIds: async ({ productionId }) => {
+      if (!productionId) return [];
+      const { getActiveVersionId, loadProduction } = await import("@/lib/db");
+      const versionId = await getActiveVersionId(productionId);
+      if (!versionId) return [];
+      const state = (await loadProduction(productionId, versionId))?.state;
+      if (!state) return [];
+      const { isMarkerBlock } = await import("@/lib/script-marker-blocks");
+      return state.blocks.filter((b) => !isMarkerBlock(b)).map((b) => b.id);
+    },
+  },
   schedule: {
     read: async (ids, { userId }) => {
       const { getSchedule } = await import("./schedules");
