@@ -12,7 +12,7 @@
 | run 服务 | `lib/agent-runtime/service.ts` | 一轮 run 的骨架：注入链 → harness → 事件 → 收尾 |
 | 独立进程 | `agent-runner/index.ts` | loopback HTTP：`POST /runs` `/runs/steer` `/runs/abort`、`GET /health`；心跳、孤儿接管、SIGTERM 排水 |
 | next 侧 | `lib/agent-runtime/{client,dispatch}.ts` + `app/api/agent/*` 路由 | 发起/插话/中止交给 runner；SSE 从 `agent_event` 直出；行协议在 `lib/agent-chat/` |
-| 持久化 | `db/add-agent-runtime.sql`（六表）+ `db/add-agent-mutation.sql` | 会话/transcript/run/审批/提问/事件 + 写审计账本 |
+| 持久化 | `db/add-agent-runtime.sql`（六表）+ `db/add-agent-mutation.sql` + `db/add-agent-schedule.sql` | 会话/transcript/run/审批/提问/事件 + 写审计账本 + 定时任务 |
 
 ## 环境变量
 
@@ -31,6 +31,7 @@
 | `AGENT_HEARTBEAT_MS` / `AGENT_ORPHAN_AFTER_MS` | 默认 5000 / 30000 | 租约心跳 / 判孤儿 |
 | `AGENT_APPROVAL_TTL_MS` / `AGENT_QUESTION_TTL_MS` | 默认 10min / 15min | 审批 / 提问过期 |
 | `AI_RUN_CREDIT_HARD_CAP` | 默认 200000 | 单个 run 的成本硬顶（credit），防工具死循环——不是限流，豁免档同样受它约束 |
+| `AGENT_SCHEDULE_TICK_MS` | 默认 60000 | 定时任务节拍（认领到期任务）；跟执行者走：runner 或 in-process 的 next |
 
 ### 冷层：召回 + `find_tools` 兜底
 
@@ -111,6 +112,31 @@ OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，
 - **只读账本，没有撤销**：撤销永远是人的动作（甲的定时任务改了、乙又改了、甲回头撤回 = 冲突，机器不该替人合并）。
 - 落了行的写，`mutation` SSE 行多带 `auditIds` + `summary`（"更新文档《x》：标题、正文 +340/−12 字"），前端渲成 notice；
   `listRunMutations(runId)` 给定时任务通知出改动清单。
+
+## 定时任务（agent_schedule）
+
+不是真 cron。一行 `agent_schedule`（`db/add-agent-schedule.sql`，`lib/agent-runtime/schedules.ts`）= 谁在哪个制作（可空 = 个人）
+以什么时间表跑什么指令。**执行者节拍**（runner 每 60s `tickSchedules`，in-process 模式由 `instrumentation.ts` 节拍；
+`AGENT_SCHEDULE_TICK_MS`）用租约式原子 UPDATE 认领到期行，到点**以创建者身份开一个新会话**跑一次 run（标题 `⏰ <名> · <时间>`，
+`agent_session.schedule_id` 挂回任务），结果经站内通知（kind `agent_schedule`，飞书 DM 随偏好）**只投给创建者**，
+链接带 `?agentSession=<key>`，AgentPopout 直接打开那条会话。
+
+- **时间表**（`schedule-cron.ts`，形状照抄 OpenClaw cron 工具）：`{kind:"at",at}` 一次性 / `{kind:"cron",expr,tz}`（expr 是 tz 的
+  **墙钟时间**，默认 `Asia/Shanghai`，绝不换算 UTC）/ `{kind:"every",everyMs}`。成本闸在 `lib/plan.ts` 的 `SCHEDULE_LIMITS`
+  （every ≥ 1h、cron ≤ 24 次/日、at ≤ 1 年）+ 按用户档位的活跃任务数（`maxActiveSchedules`：free 3 / creator 20 / internal 无限）。
+  额度照走 `assertAiQuota`（项目任务记 owner 头上），单 run 仍受 `AI_RUN_CREDIT_HARD_CAP`。
+- **权限实时查、不快照**：触发出的 run 与普通会话同构，工具内 `hasEffectiveGrant` 照判。触发前三道前置门（创建者账号在 /
+  制作成员 active 且未归档 / 制作档位有 AI）——终局性失败置 `paused` + `paused_reason` + 通知；额度用尽等暂时性失败跳过本次并通知。
+  overlap（上次 run 还在跑）= 跳过；停机漏掉的触发只补一次。
+- **无人值守写：允许，边界在 skills 内部**——注册表 `Def.unattended: "allow" | "deny"`（**缺省 deny**，新 skill 忘了写也安全；
+  现在只有 `production.wiki_propose_create/update`）∩ 任务行 `allowed_tools`（创建时人在确认卡上圈定）。
+  运行时 `unattendedGate`：只读放行（`ask_user` 除外）、授权的写直接执行（预检仍做：方言校验/预持久化）、其余写 block 回模型
+  "写进结果里当建议"。每次写进 `agent_mutation`（`unattended=true`、`schedule_id`），通知里列改动清单——**先做后审**。
+  这条边界刻意**不用权限键表达**：权限是全站公共词汇，让它承担 AI 内部策略是外部耦合。
+- **任务内只能汇报/停自己**：触发出的 run 里注入 `schedule.finish`（summary / notify / done / nextIn），`my.schedule_propose`
+  在无人值守里被 deny（防自繁殖）。`notify=false` 且没有任何写、没失败才静默；有写必通知。
+- 工具面：`my.schedules`（列）/ `my.schedule_propose`（create/update/pause/resume/delete，过确认卡——那张卡就是"负责任的人类动作"），
+  族 `my.automation`；触发出的会话 7 天后自动归档（`archived_at`），历史/审计仍在。
 
 ## skills 的事实源
 

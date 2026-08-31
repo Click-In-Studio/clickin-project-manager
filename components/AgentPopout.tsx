@@ -48,12 +48,15 @@ type GatewayStatus =
 export default function AgentPopout({
   open,
   onClose,
+  onRequestOpen,
   productionId,
   productionName,
   currentWikiId,
 }: {
   open: boolean;
   onClose: () => void;
+  /** 深链（?agentSession=<key>，定时任务通知带的）要求把 popout 打开 */
+  onRequestOpen?: () => void;
   productionId: string | null;
   productionName: string | null;
   /** 当前所在的 wiki 文档页 id（非文档页/文档库根页为 null）——驱动"附带当前文档" chip。 */
@@ -303,6 +306,36 @@ export default function AgentPopout({
       consumeStream(res, key);
     }
   }, [consumeStream]);
+
+  // 深链打开指定会话：定时任务的通知带 ?agentSession=<key>（lib/agent-runtime/schedules.ts）。
+  // 只认属于当前语境的 key；用完从 URL 摘掉，免得刷新/返回又触发。状态从会话列表现查
+  // （running 要接流），列表拉不到就按已结束打开。
+  useEffect(() => {
+    let key: string | null = null;
+    try { key = new URLSearchParams(window.location.search).get("agentSession"); } catch { return; }
+    if (!key || !inScope(key)) return;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("agentSession");
+      window.history.replaceState(null, "", url.toString());
+    } catch { /* 忽略 */ }
+    onRequestOpen?.();
+    const wanted = key;
+    (async () => {
+      let status: SessionSummary["status"] | undefined;
+      try {
+        const res = await fetch("/api/agent/sessions");
+        if (res.ok) {
+          const data = (await res.json()) as { sessions: SessionSummary[] };
+          setSessions(data.sessions);
+          status = data.sessions.find((s) => s.key === wanted)?.status;
+        }
+      } catch { /* 列表拉不到不挡打开 */ }
+      openSession(wanted, status);
+    })();
+    // 只在路径变化时看一次 URL 参数（通知链接是整页加载或 push 过来的）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   // 恢复上次活跃会话：session 列表拉到、当前还没有 activeKey 时，若这个
   // 语境存过一个还在（没被删/没过期出 scopedSessions）的会话 id，接回去。

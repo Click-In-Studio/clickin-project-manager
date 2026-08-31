@@ -2328,6 +2328,60 @@ CREATE INDEX IF NOT EXISTS agent_mutation_run_idx
 COMMENT ON TABLE agent_mutation IS
   'AI 写操作的 diff 审计（只读账本，无撤销列）。每次写工具真正改了东西才落行；before/after 由域读取器定形。';
 
+-- ── AI 定时任务（db/add-agent-schedule.sql）：runner 节拍认领 → 以创建者身份开新会话跑 run ──
+CREATE TABLE IF NOT EXISTS agent_schedule (
+  id                    TEXT        PRIMARY KEY,
+  user_id               UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  -- NULL = 个人任务（my.* 语义）；非 NULL = 制作任务，触发前查成员资格与档位
+  production_id         TEXT        NULL REFERENCES production(id) ON DELETE CASCADE,
+  name                  TEXT        NOT NULL,
+  prompt                TEXT        NOT NULL,           -- 每次触发作为用户消息送入的任务指令
+  schedule              JSONB       NOT NULL,           -- {kind:'at',at} | {kind:'cron',expr,tz} | {kind:'every',everyMs}
+  allowed_tools         TEXT[]      NOT NULL DEFAULT '{}', -- 允许无人值守直接写的工具 mcpName（须同时是注册表 unattended=allow）
+  page_key              TEXT        NULL,               -- 创建时所在页面：温层工具面跟着来
+  status                TEXT        NOT NULL DEFAULT 'active'
+                          CHECK (status IN ('active', 'paused', 'done')),
+  paused_reason         TEXT        NULL,               -- 系统暂停的原因（不再是成员 / 档位未开 AI…）；人工暂停为 NULL
+  next_fire_at          TIMESTAMPTZ NULL,               -- active 时非空；done/paused 时保留最后计划值
+  last_fired_at         TIMESTAMPTZ NULL,
+  last_run_id           TEXT        NULL REFERENCES agent_run(id) ON DELETE SET NULL,
+  last_summary          TEXT        NULL,               -- 上次运行的结果摘要（≤1k，下次触发注入）
+  fire_count            INTEGER     NOT NULL DEFAULT 0,
+  max_fires             INTEGER     NULL,               -- 触发满即 done
+  expires_at            TIMESTAMPTZ NULL,               -- 到期即 done
+  -- 认领租约（同 agent_run.owner/heartbeat 的思路）：多实例 / 重启不重复触发
+  lease_owner           TEXT        NULL,
+  lease_until           TIMESTAMPTZ NULL,
+  created_by_session_id TEXT        NULL REFERENCES agent_session(id) ON DELETE SET NULL,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS agent_schedule_due_idx
+  ON agent_schedule (next_fire_at)
+  WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS agent_schedule_user_idx
+  ON agent_schedule (user_id, created_at DESC);
+
+COMMENT ON TABLE agent_schedule IS
+  'AI 定时任务。runner 节拍认领到期行 → 以创建者身份开新会话跑一次 run → 结果通知创建者。权限实时查、不快照。';
+
+-- 触发出的会话 / run / 写审计都挂回任务：会话列表可标 ⏰、通知可列改动清单、审计页可按任务查
+ALTER TABLE agent_session ADD COLUMN IF NOT EXISTS schedule_id TEXT NULL REFERENCES agent_schedule(id) ON DELETE SET NULL;
+ALTER TABLE agent_run ADD COLUMN IF NOT EXISTS schedule_id TEXT NULL REFERENCES agent_schedule(id) ON DELETE SET NULL;
+ALTER TABLE agent_mutation ADD COLUMN IF NOT EXISTS schedule_id TEXT NULL REFERENCES agent_schedule(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS agent_run_schedule_idx
+  ON agent_run (schedule_id, started_at DESC)
+  WHERE schedule_id IS NOT NULL;
+-- 声明的两个访问面都要索引（AI review #399）：会话列表标 ⏰ / 触发会话自动归档扫描；审计页按任务查
+CREATE INDEX IF NOT EXISTS agent_session_schedule_idx
+  ON agent_session (schedule_id)
+  WHERE schedule_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS agent_mutation_schedule_idx
+  ON agent_mutation (schedule_id, created_at DESC)
+  WHERE schedule_id IS NOT NULL;
+
 -- ── wiki 协作广播出站箱（db/add-wiki-collab-outbox.sql）──
 CREATE TABLE IF NOT EXISTS wiki_collab_outbox (
   id         BIGSERIAL   PRIMARY KEY,

@@ -79,6 +79,8 @@ const CLOSURE: Record<string, string[]> = {
   "production.character_propose_create": ["production.dramaturgy_permissions", "production.character_list"],
   "production.character_propose_update": ["production.dramaturgy_permissions", "production.character_list", "production.character_read"],
   "production.character_propose_delete": ["production.dramaturgy_permissions", "production.character_list"],
+  // 定时任务：改/停要先拿 id；建制作任务时模型得知道能授权哪些 wiki 写工具、文档 id 从哪来
+  "my.schedule_propose": ["my.schedules", "production.wiki_tree", "production.wiki_search"],
 };
 
 export interface TierInput {

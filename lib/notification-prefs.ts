@@ -109,6 +109,14 @@ export const NOTIFICATION_CONFIG = {
     externalChannel: "dm" as const,
     defaultExternalEnabled: true,
   },
+  // ── AI 定时任务（lib/agent-runtime/schedules.ts）────────────────────────────
+  // 只投创建者本人：运行结果（含改动清单）/ 被系统暂停 / 本次未运行。
+  agent_schedule: {
+    label: "AI 定时任务结果",
+    description: "你创建的 AI 定时任务运行完成、被暂停或未能运行时通知",
+    externalChannel: "dm" as const,
+    defaultExternalEnabled: true,
+  },
   // ── Approval requests ─────────────────────────────────────────────────────
   approval_request_pending: {
     label: "资源申请待审批",

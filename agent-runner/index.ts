@@ -91,11 +91,26 @@ async function main() {
   await scan();
   const scanTimer = setInterval(scan, ORPHAN_SCAN_MS);
 
+  // 定时任务节拍（lib/agent-runtime/schedules.ts）：认领到期任务 → 以创建者身份开新会话跑 run。
+  // 排水期不认领（认领了没人跑，租约到期前别的进程也接不了）。
+  const { tickSchedules, SCHEDULE_TICK_MS } = await import("../lib/agent-runtime/schedules");
+  const tick = async () => {
+    if (draining) return;
+    try {
+      const n = await tickSchedules(service.startRun);
+      if (n > 0) console.log(`[agent-runner] fired ${n} scheduled task(s)`);
+    } catch (err) {
+      console.error("[agent-runner] schedule tick failed:", err);
+    }
+  };
+  const tickTimer = setInterval(tick, SCHEDULE_TICK_MS);
+
   // §4.4 ②：SIGTERM → 不接新 run、等进行中的到自然停点、超时才退（超时的由下一个进程按 ① 恢复）
   const shutdown = async (signal: string) => {
     if (draining) return;
     draining = true;
     clearInterval(scanTimer);
+    clearInterval(tickTimer);
     console.log(`[agent-runner] ${signal}: draining ${service.__internal.active.size} active run(s), up to ${DRAIN_TIMEOUT_MS}ms`);
     server.close();
     await service.drain(DRAIN_TIMEOUT_MS);

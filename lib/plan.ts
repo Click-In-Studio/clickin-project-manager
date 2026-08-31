@@ -97,11 +97,13 @@ export const USER_TIERS: Record<UserTier, {
   /** AI 日/周额度（credit，见下方单价表）。billingExempt 档不判这两个数。 */
   aiDailyCredits: number;
   aiWeeklyCredits: number;
+  /** 同时活跃的 AI 定时任务数上限（个人 + 他建在各制作里的，按创建者算）。 */
+  maxActiveSchedules: number;
 }> = {
   creator:  { label: "创作者",  maxOwnedProductions: 5,        initialProductionTier: "free", billingExempt: false,
-              aiDailyCredits: AI_CREDITS.creatorDaily, aiWeeklyCredits: AI_CREDITS.creatorWeekly },
+              aiDailyCredits: AI_CREDITS.creatorDaily, aiWeeklyCredits: AI_CREDITS.creatorWeekly, maxActiveSchedules: 20 },
   internal: { label: "内部成员", maxOwnedProductions: Infinity, initialProductionTier: "pro",  billingExempt: true,
-              aiDailyCredits: Infinity, aiWeeklyCredits: Infinity },
+              aiDailyCredits: Infinity, aiWeeklyCredits: Infinity, maxActiveSchedules: Infinity },
 };
 
 /** 无 user_plan 行的普通注册用户（"free 档"）的额度。建不了项目，所以这份额度
@@ -110,7 +112,27 @@ export const FREE_TIER_AI = {
   label: "普通用户",
   aiDailyCredits: AI_CREDITS.freeDaily,
   aiWeeklyCredits: AI_CREDITS.freeWeekly,
+  maxActiveSchedules: 3,
 } as const;
+
+/**
+ * AI 定时任务的成本闸（与额度正交：额度管总量，这里管"一条任务能多勤"）。
+ * 项目会话的额度记 owner 头上，一个成员建 `*\/5 * * * *` 就是在烧 owner 的钱——
+ * 所以最小间隔与每日触发上限是平台常量，不随档位放宽。
+ */
+export const SCHEDULE_LIMITS = {
+  /** every 类任务的最小间隔 */
+  minIntervalMs: 60 * 60_000,
+  /** cron 表达式按未来 7 天采样，日均触发次数上限 */
+  maxFiresPerDay: 24,
+  /** 一次性任务最远只能定到多久之后 */
+  maxAtHorizonMs: 366 * 24 * 60 * 60_000,
+} as const;
+
+/** 档位的定时任务数上限（tier 为 null = 无 user_plan 行）。 */
+export function maxActiveSchedulesForTier(tier: UserTier | null): number {
+  return tier ? USER_TIERS[tier].maxActiveSchedules : FREE_TIER_AI.maxActiveSchedules;
+}
 
 /** 档位的 AI 额度（tier 为 null = 无 user_plan 行）。 */
 export function aiLimitsForTier(tier: UserTier | null): { daily: number; weekly: number; exempt: boolean } {

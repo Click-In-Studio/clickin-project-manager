@@ -44,6 +44,7 @@ interface AuditCtx {
   toolCallId: string;
   summary: string | null;
   unattended: boolean;
+  scheduleId?: string | null;
 }
 
 // ── 域读取器 ──────────────────────────────────────────────────────────────────
@@ -156,6 +157,26 @@ const READERS: Record<string, ScopeReader> = {
     },
     defaultIds: ({ productionId }) => (productionId ? [productionId] : []),
   },
+  schedule: {
+    read: async (ids, { userId }) => {
+      const { getSchedule } = await import("./schedules");
+      const { describeSchedule } = await import("./schedule-cron");
+      const out = new Map<string, Snapshot>();
+      for (const id of ids) {
+        const row = await getSchedule(id);
+        if (!row || row.userId !== userId) continue;
+        out.set(id, {
+          label: row.name, name: row.name, schedule: describeSchedule(row.schedule), status: row.status,
+          allowedTools: [...row.allowedTools].sort(), maxFires: row.maxFires, prompt: row.prompt,
+        });
+      }
+      return out;
+    },
+    listIds: async ({ userId }) => {
+      const { listSchedules } = await import("./schedules");
+      return (await listSchedules(userId)).map((r) => r.id);
+    },
+  },
 };
 
 async function latestWikiRevisionId(wikiId: string): Promise<string | null> {
@@ -188,7 +209,7 @@ const SHORT = 80;
 const clip = (v: unknown): unknown => (typeof v === "string" && v.length > SHORT ? `${v.slice(0, SHORT)}…` : v);
 
 /** 长文本字段：changes 里只允许增删字数形态，绝不带 from/to 原文（落库前有运行时清洗兜底）。 */
-const TEXT_DIFF_FIELDS: ReadonlySet<string> = new Set(["body", "biography", "synopsis"]);
+const TEXT_DIFF_FIELDS: ReadonlySet<string> = new Set(["body", "biography", "synopsis", "prompt"]);
 
 /** 字段级变化：body 只记增删字数（正文本身不进账本），其余记 from/to（长文本截短）。 */
 export function diffSnapshots(before: Snapshot | null, after: Snapshot | null): MutationChange[] {
@@ -333,10 +354,10 @@ async function insertRow(
   const id = newMutationId();
   changes = sanitizeChanges(changes);
   await getPool().query(
-    `INSERT INTO agent_mutation (id, run_id, session_id, user_id, production_id, tool, tool_call_id, scope, entity_id, action, label, summary, before, after, changes, unattended)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16)`,
+    `INSERT INTO agent_mutation (id, run_id, session_id, user_id, production_id, tool, tool_call_id, scope, entity_id, action, label, summary, before, after, changes, unattended, schedule_id)
+     VALUES ($1, (SELECT id FROM agent_run WHERE id = $2), (SELECT id FROM agent_session WHERE id = $3), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16, (SELECT id FROM agent_schedule WHERE id = $17))`,
     [id, ctx.runId, ctx.sessionId, ctx.userId, ctx.productionId, ctx.tool, ctx.toolCallId, scope, entityId, action,
-     label, ctx.summary, JSON.stringify(persistable(before)), JSON.stringify(persistable(after)), JSON.stringify(changes), ctx.unattended],
+     label, ctx.summary, JSON.stringify(persistable(before)), JSON.stringify(persistable(after)), JSON.stringify(changes), ctx.unattended, ctx.scheduleId ?? null],
   );
   return { id, scope, action, entityId, label, changes };
 }
@@ -344,13 +365,14 @@ async function insertRow(
 // ── 渲染 ──────────────────────────────────────────────────────────────────────
 
 const SCOPE_LABELS: Record<string, string> = {
-  wiki: "文档", scene: "场次", character: "角色",
+  wiki: "文档", scene: "场次", character: "角色", schedule: "定时任务",
   "instructions.personal": "个人 AI 指令", "instructions.production": "制作 AI 指令",
 };
 const FIELD_LABELS: Record<string, string> = {
   body: "正文", title: "标题", parentId: "位置", tags: "标签", isPublic: "全员可见", deptShares: "部门分享", people: "分享给个人",
   name: "名称", synopsis: "梗概", actionLine: "行动线", music: "音乐", stageNotes: "舞台呈现", expectedDuration: "时长",
   isAggregate: "聚合/单人", memberIds: "聚合成员", gender: "性别", roleType: "类型", biography: "小传",
+  schedule: "时间表", status: "状态", allowedTools: "允许的写操作", maxFires: "次数上限", prompt: "指令",
 };
 const ACTION_LABELS: Record<ToolMutation["action"], string> = { created: "新建", updated: "更新", deleted: "删除" };
 

@@ -20,6 +20,8 @@ import { toolLabel } from "@/lib/agent-tool-labels";
 import type { StreamLine, QuestionItem } from "@/lib/agent-chat/stream-reducer";
 import type { RuntimeTool } from "./resume";
 import type { MutationRecord } from "./mutation-audit";
+import type { ScheduleReport } from "./schedules";
+import { registerUnattendedAllowed } from "./schedules";
 
 export const TOOL_PREFIX = "clickin__";
 
@@ -41,6 +43,12 @@ export interface RunHandle {
   isDetached: () => boolean;
   /** 无人值守（定时任务触发的 run）：写审计按此标记；确认门与 ask_user 的行为由 service 另判 */
   unattended?: boolean;
+  /** 发起本轮时的页面（定时任务创建时记下，触发时温层工具面跟着来） */
+  pageKey?: string | null;
+  /** 触发本 run 的定时任务（schedule.finish 只在它存在时可用） */
+  schedule?: { id: string; name: string; allowedTools: string[] };
+  /** schedule.finish 的汇报落到这里，run 收尾时 finishScheduledRun 读 */
+  setScheduleReport?: (report: ScheduleReport) => void;
   /** 写审计落行后回报给 run（service 把账本 id/摘要挂到 mutation 行上） */
   noteMutations?: (toolCallId: string, records: MutationRecord[]) => void;
 }
@@ -57,6 +65,8 @@ export interface RuntimeToolDef extends RuntimeTool {
   mcpName: string;
   /** 写工具声明：成功执行后产生了什么变更（读工具不声明） */
   mutates?: (args: Record<string, unknown>) => ToolMutation | null;
+  /** 无人值守（定时任务）能否不经确认卡直接写；缺省 deny */
+  unattended?: "allow" | "deny";
 }
 
 const text = (t: string): AgentToolResult<unknown> => ({ content: [{ type: "text", text: t }], details: undefined });
@@ -86,6 +96,13 @@ type Def = {
   isErrorResult?: (out: string) => boolean;
   /** 写工具：成功后产生的变更（service 据此往 agent SSE 发 mutation 行） */
   mutates?: (args: Record<string, unknown>) => ToolMutation | null;
+  /**
+   * 无人值守（定时任务触发的 run）能否不经确认卡直接写。**缺省 deny**——新 skill 忘了写也安全，
+   * 只有想开的才写 allow（现在只有 wiki 的新建/更新：有 revision 历史、每次写进 agent_mutation 账本）。
+   * 边界表达在 skills 内部（AI 内部耦合），不进权限模型；权限仍由工具内 hasEffectiveGrant 实时判。
+   * 删除类永远不开（不可逆）。
+   */
+  unattended?: "allow" | "deny";
 };
 
 const wikiIdOf = (args: Record<string, unknown>): string[] => (typeof args.wikiId === "string" && args.wikiId ? [args.wikiId] : []);
@@ -211,7 +228,7 @@ const DEFS: Def[] = [
       body: Type.Optional(Type.String({ description: "新文档正文（Markdown）" })),
       summary: Type.String({ description: "一句话说明这次提议改了什么、为什么" }),
     }),
-    readOnly: false,
+    readOnly: false, unattended: "allow",
     mutates: WIKI_MUTATES.created, needsProduction: true,
     execute: async (ctx, args, toolCallId) => {
       const { wikiProposeCreate } = await import("@/lib/agent-tools/wiki-tools");
@@ -230,7 +247,7 @@ const DEFS: Def[] = [
       body: Type.Optional(Type.String({ description: "新正文（Markdown）；不改正文就整个省略这个字段" })),
       summary: Type.String({ description: "一句话说明这次提议改了什么、为什么" }),
     }),
-    readOnly: false,
+    readOnly: false, unattended: "allow",
     mutates: WIKI_MUTATES.updated, needsProduction: true,
     execute: async (ctx, args, toolCallId) => {
       const { wikiProposeUpdate } = await import("@/lib/agent-tools/wiki-tools");
@@ -432,6 +449,110 @@ const DEFS: Def[] = [
     execute: async (ctx, args) => (await import("@/lib/agent-tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-character_propose_delete", args),
   },
 
+  // ── 定时任务（lib/agent-runtime/schedules.ts）：到点由 AI 以用户身份自动运行一段指令。
+  // 创建是写操作（过确认卡——那张卡就是"负责任的人类动作"：人确认写哪里、允许哪几类写）；
+  // 触发出的 run 里只有 schedule.finish 可用（只能汇报/停自己，不能建新任务）。
+  {
+    mcpName: "my.schedules",
+    description: `列出当前用户创建的全部 AI 定时任务（个人的 + 各制作里的）：id、名称、时间表、状态、允许的写操作、下次/上次运行与摘要（EN: my scheduled tasks automations list）。修改/暂停/删除前从这里取 id。${MY_SCOPE_NOTE}`,
+    parameters: NONE, readOnly: true,
+    execute: async (ctx) => {
+      const { listSchedules, formatScheduleList } = await import("./schedules");
+      return formatScheduleList(await listSchedules(ctx.userId));
+    },
+  },
+  {
+    mcpName: "my.schedule_propose",
+    description:
+      "创建 / 修改 / 暂停 / 恢复 / 删除当前用户的 AI 定时任务，需要人工在聊天栏确认（EN: create update schedule automation reminder recurring task）。" +
+      "定时任务 = 到点由 AI 以该用户身份在一个新对话里自动执行 prompt，结果经站内通知发给用户。个人对话里建的是个人任务，关联制作的对话里建的是该制作的任务。" +
+      "schedule 三种：{kind:\"at\", at:\"2026-09-01T09:00:00+08:00\"} 一次性；{kind:\"cron\", expr:\"0 23 * * *\", tz:\"Asia/Shanghai\"} 周期——expr 是 tz 的**墙钟时间**，绝不要换算成 UTC；{kind:\"every\", everyMs} 固定间隔（≥1 小时）。" +
+      "allowedTools = 允许任务无人值守**直接执行**的写工具（不弹确认卡，直接生效，每次改动有记录并通知）；目前只有 production.wiki_propose_create / production.wiki_propose_update 可授权；不给就是只读任务。" +
+      "prompt 要写成给 AI 的完整指令：目标、涉及哪些文档（带 id 或标题）、输出什么；运行时没人在场，写清楚假设与边界。",
+    parameters: Type.Object({
+      action: Type.Union([Type.Literal("create"), Type.Literal("update"), Type.Literal("pause"), Type.Literal("resume"), Type.Literal("delete")]),
+      scheduleId: Type.Optional(Type.String({ description: "update/pause/resume/delete 必填（来自 my.schedules）" })),
+      name: Type.Optional(Type.String({ description: "任务名（≤80 字；create 必填）" })),
+      prompt: Type.Optional(Type.String({ description: "每次运行时送给 AI 的完整指令（≤4000 字；create 必填）" })),
+      schedule: Type.Optional(Type.Object({
+        kind: Type.Union([Type.Literal("at"), Type.Literal("cron"), Type.Literal("every")]),
+        at: Type.Optional(Type.String({ description: "kind=at：ISO-8601 带时区偏移" })),
+        expr: Type.Optional(Type.String({ description: "kind=cron：五段表达式（分 时 日 月 周），tz 的墙钟时间" })),
+        tz: Type.Optional(Type.String({ description: "kind=cron：IANA 时区，默认 Asia/Shanghai" })),
+        everyMs: Type.Optional(Type.Integer({ description: "kind=every：间隔毫秒（≥3600000）" })),
+      }, { description: "时间表（create 必填；update 可选）" })),
+      allowedTools: Type.Optional(Type.Array(Type.String(), { description: "允许无人值守直接执行的写工具 mcpName；空数组 = 只读" })),
+      maxFires: Type.Optional(Type.Integer({ minimum: 1, description: "最多运行次数，满即结束；不限就整个省略" })),
+      summary: Type.String({ description: "一句话说明为什么要这样设置" }),
+    }),
+    readOnly: false,
+    mutates: (args) => ({
+      scope: "schedule",
+      action: args.action === "create" ? "created" : args.action === "delete" ? "deleted" : "updated",
+      ids: typeof args.scheduleId === "string" && args.scheduleId ? [args.scheduleId] : [],
+    }),
+    execute: async (ctx, args) => {
+      const s = await import("./schedules");
+      const { describeScheduleRow } = s;
+      const action = String(args.action);
+      const id = optString(args.scheduleId);
+      if (action === "create") {
+        const r = await s.createSchedule({
+          userId: ctx.userId, productionId: ctx.productionId || null,
+          name: String(args.name ?? ""), prompt: String(args.prompt ?? ""), schedule: args.schedule,
+          allowedTools: Array.isArray(args.allowedTools) ? args.allowedTools.map(String) : [],
+          pageKey: ctx.run?.pageKey ?? null, maxFires: typeof args.maxFires === "number" ? args.maxFires : null,
+          createdBySessionId: ctx.run?.sessionId ?? null,
+        });
+        return r.ok ? `已创建定时任务：\n${describeScheduleRow(r.row)}` : `创建失败：${r.error}`;
+      }
+      if (!id) return "缺少 scheduleId（先用 my.schedules 查）。";
+      if (action === "delete") {
+        const r = await s.deleteSchedule(id, ctx.userId);
+        return r.ok ? "已删除该定时任务。" : `删除失败：${r.error}`;
+      }
+      if (action === "pause" || action === "resume") {
+        const r = await s.setScheduleStatus(id, ctx.userId, action === "pause" ? "paused" : "active");
+        return r.ok ? `已${action === "pause" ? "暂停" : "恢复"}：\n${describeScheduleRow(r.row)}` : `操作失败：${r.error}`;
+      }
+      if (action === "update") {
+        const r = await s.updateSchedule(id, ctx.userId, {
+          name: optString(args.name), prompt: optString(args.prompt), schedule: args.schedule,
+          allowedTools: Array.isArray(args.allowedTools) ? args.allowedTools.map(String) : undefined,
+          maxFires: args.maxFires === undefined ? undefined : typeof args.maxFires === "number" ? args.maxFires : null,
+        });
+        return r.ok ? `已修改：\n${describeScheduleRow(r.row)}` : `修改失败：${r.error}`;
+      }
+      return `未知 action：${action}`;
+    },
+  },
+  {
+    mcpName: "schedule.finish",
+    description:
+      "【仅在定时任务自动运行时可用】汇报本次运行的结果并结束：summary 是给用户看的结果摘要（做了什么、发现了什么、需要用户做什么）；" +
+      "notify=false 表示这次没什么值得打扰用户的（有写操作时仍会通知）；done=true 表示目标已一次性达成、任务可以停止；nextIn 可要求下一次运行的间隔（如 \"2h\"、\"1d\"，不短于 1 小时）。调用后直接结束回复。",
+    parameters: Type.Object({
+      summary: Type.String({ description: "结果摘要（≤1000 字）" }),
+      notify: Type.Optional(Type.Boolean({ description: "是否通知用户，默认 true" })),
+      done: Type.Optional(Type.Boolean({ description: "任务目标已达成，停止后续运行" })),
+      nextIn: Type.Optional(Type.String({ description: "下一次间隔，如 30m / 2h / 1d" })),
+    }),
+    readOnly: true,
+    execute: async (ctx, args) => {
+      const run = ctx.run;
+      if (!run?.schedule || !run.setScheduleReport) return "此工具只在定时任务自动运行时可用，当前对话不是定时任务。";
+      const nextInMs = parseDuration(optString(args.nextIn));
+      if (args.nextIn !== undefined && nextInMs === null) return "nextIn 格式不对：用 30m / 2h / 1d 这样的写法。";
+      run.setScheduleReport({
+        summary: String(args.summary ?? "").slice(0, 1000),
+        notify: args.notify !== false,
+        done: args.done === true,
+        ...(nextInMs ? { nextInMs } : {}),
+      });
+      return `已记录汇报${args.done ? "，任务将结束" : ""}。现在直接结束本次回复即可。`;
+    },
+  },
+
   // ── 联网（网关时代 OpenClaw 内置的 web_search / web_fetch 的自建形态，见 web-tools.ts）
   {
     mcpName: "web.search",
@@ -542,6 +663,16 @@ function optString(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+/** "30m" / "2h" / "1d" → 毫秒；不认识 → null */
+function parseDuration(s: string | undefined): number | null {
+  if (!s) return null;
+  const m = /^(\d+(?:\.\d+)?)\s*(m|h|d)$/i.exec(s.trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  const unit = m[2].toLowerCase();
+  return Math.round(n * (unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : 86_400_000));
+}
+
 /** propose 工具的正文以审批阶段预持久化的 wiki_proposal 行为准（[[标题]] 已反解），
  *  没有行（预持久化失败/超时）才退回模型原参数——与插件 restoredBody 覆写同义。 */
 async function proposalBody(productionId: string, toolCallId: string, userId: string, fallback: unknown): Promise<string | undefined> {
@@ -552,8 +683,11 @@ async function proposalBody(productionId: string, toolCallId: string, userId: st
 }
 
 export const TOOL_MCP_NAMES: readonly string[] = DEFS.map((d) => d.mcpName);
-/** 只存在于运行时、不进 tool-catalog 的工具（常驻热层，不走召回）：目录 = 注册表 − 这几个 */
-export const RUNTIME_ONLY_TOOLS: ReadonlySet<string> = new Set(["ask_user", "find_tools", "web.search", "web.fetch"]);
+/** 只存在于运行时、不进 tool-catalog 的工具（常驻热层，不走召回；schedule.finish 只在定时任务 run 里注入）：目录 = 注册表 − 这几个 */
+export const RUNTIME_ONLY_TOOLS: ReadonlySet<string> = new Set(["ask_user", "find_tools", "web.search", "web.fetch", "schedule.finish"]);
+/** 允许无人值守直接写的工具（注册表 unattended=allow）；定时任务的 allowed_tools 只能从这里选 */
+export const UNATTENDED_ALLOWED_TOOLS: ReadonlySet<string> = new Set(DEFS.filter((d) => d.unattended === "allow").map((d) => d.mcpName));
+registerUnattendedAllowed(UNATTENDED_ALLOWED_TOOLS);
 
 /** 按会话身份构造工具集；身份只进闭包，绝不进 schema。 */
 export function buildTools(ctx: ToolContext): RuntimeToolDef[] {
@@ -565,6 +699,7 @@ export function buildTools(ctx: ToolContext): RuntimeToolDef[] {
     parameters: d.parameters,
     readOnly: d.readOnly,
     mutates: d.mutates,
+    unattended: d.unattended,
     execute: async (toolCallId, params) => {
       if (d.needsProduction && !ctx.productionId) return text(NO_PRODUCTION);
       const args = (params ?? {}) as Record<string, unknown>;
@@ -576,7 +711,7 @@ export function buildTools(ctx: ToolContext): RuntimeToolDef[] {
         ? await (await import("./mutation-audit")).beginMutationAudit(m, {
             userId: ctx.userId, productionId: ctx.productionId, runId: ctx.run?.runId ?? null, sessionId: ctx.run?.sessionId ?? null,
             tool: d.mcpName, toolCallId, summary: typeof args.summary === "string" ? args.summary.slice(0, 300) : null,
-            unattended: ctx.run?.unattended === true,
+            unattended: ctx.run?.unattended === true, scheduleId: ctx.run?.schedule?.id ?? null,
           })
         : null;
       const out = await d.execute(

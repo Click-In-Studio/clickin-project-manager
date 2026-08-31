@@ -388,6 +388,11 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "schedule_id",
+      "type": "text",
+      "nullable": true
     }
   ],
   "agent_question": [
@@ -514,6 +519,128 @@
       "column": "ended_at",
       "type": "timestamp with time zone",
       "nullable": true
+    },
+    {
+      "column": "schedule_id",
+      "type": "text",
+      "nullable": true
+    }
+  ],
+  "agent_schedule": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "prompt",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "schedule",
+      "type": "jsonb",
+      "nullable": false
+    },
+    {
+      "column": "allowed_tools",
+      "type": "ARRAY",
+      "nullable": false,
+      "default": "'{}'::text[]"
+    },
+    {
+      "column": "page_key",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "status",
+      "type": "text",
+      "nullable": false,
+      "default": "'active'::text"
+    },
+    {
+      "column": "paused_reason",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "next_fire_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "last_fired_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "last_run_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "last_summary",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "fire_count",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "max_fires",
+      "type": "integer",
+      "nullable": true
+    },
+    {
+      "column": "expires_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "lease_owner",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "lease_until",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "created_by_session_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
     }
   ],
   "agent_session": [
@@ -557,6 +684,11 @@
     {
       "column": "archived_at",
       "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "schedule_id",
+      "type": "text",
       "nullable": true
     }
   ],
