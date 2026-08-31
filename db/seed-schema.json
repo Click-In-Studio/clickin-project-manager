@@ -300,6 +300,96 @@
       "default": "now()"
     }
   ],
+  "agent_mutation": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "run_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "session_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "tool",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "tool_call_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "scope",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "entity_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "action",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "label",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "summary",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "before",
+      "type": "jsonb",
+      "nullable": true
+    },
+    {
+      "column": "after",
+      "type": "jsonb",
+      "nullable": true
+    },
+    {
+      "column": "changes",
+      "type": "jsonb",
+      "nullable": false,
+      "default": "'[]'::jsonb"
+    },
+    {
+      "column": "unattended",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
   "agent_question": [
     {
       "column": "id",

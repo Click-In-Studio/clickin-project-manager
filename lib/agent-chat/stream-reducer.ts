@@ -58,7 +58,8 @@ export type StreamLine =
   | { type: "session"; key?: string }
   // 写工具成功后的变更信号（自建运行时 #367）：不进气泡，AgentPopout 派发给页面订阅者
   // 决定怎么刷（lib/agent-mutations.ts）。与 tool-end 一样落 agent_event，断线重连可补。
-  | { type: "mutation"; scope: string; action: "created" | "updated" | "deleted"; productionId?: string | null; ids?: string[]; tool?: string };
+  // auditIds/summary：写审计（agent_mutation）真的落了行才带——summary 是人话改动摘要，进气泡当 notice
+  | { type: "mutation"; scope: string; action: "created" | "updated" | "deleted"; productionId?: string | null; ids?: string[]; tool?: string; auditIds?: string[]; summary?: string };
 
 function lastAssistantText(bubbles: Bubble[]): string | undefined {
   for (let i = bubbles.length - 1; i >= 0; i--) {
@@ -196,6 +197,13 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
         next[next.length - 1] = { kind: "assistant", text: last.text };
       }
       next.push({ kind: "notice", text: line.error || "出错了" });
+      return next;
+    }
+    case "mutation": {
+      // 写审计摘要（"更新文档《x》：正文 +340/−12 字"）——审的是结果不是意图，所以是
+      // 系统 notice 而不是模型的话。没摘要（写未真正发生 / 该域无读取器）不进气泡。
+      if (!line.summary) return next;
+      next.push({ kind: "notice", text: `✏️ ${line.summary}` });
       return next;
     }
     default:

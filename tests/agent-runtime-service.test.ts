@@ -199,7 +199,16 @@ describe("agent-runtime service", () => {
     expect(lines.find((l) => l.type === "approval-resolved")).toMatchObject({ decision: "allow-once" });
     // 写操作后自动刷新：写工具成功 → mutation 行紧跟 tool-end（前端派发给页面订阅者）
     const endIdx = lines.findIndex((l) => l.type === "tool-end");
-    expect(lines[endIdx + 1]).toEqual({ type: "mutation", scope: "instructions.personal", action: "updated", productionId: null, tool: "my.update_instructions" });
+    expect(lines[endIdx + 1]).toMatchObject({ type: "mutation", scope: "instructions.personal", action: "updated", productionId: null, tool: "my.update_instructions" });
+    // 写审计（agent_mutation）真落了行 → mutation 行带账本 id 与人话摘要（前端渲成 notice）
+    const mutation = lines[endIdx + 1] as Extract<StreamLine, { type: "mutation" }>;
+    expect(mutation.auditIds?.[0]?.startsWith("am_")).toBe(true);
+    expect(mutation.summary).toContain("更新个人 AI 指令");
+    const bubbles = lines.reduce<Bubble[]>((acc, l) => applyStreamLine(acc, l), []);
+    expect(bubbles.some((b) => b.kind === "notice" && b.text.startsWith("✏️ 更新个人 AI 指令"))).toBe(true);
+    const audit = await getPool().query<{ run_id: string | null; tool_call_id: string }>(`SELECT run_id, tool_call_id FROM agent_mutation WHERE id = $1`, [mutation.auditIds![0]]);
+    expect(audit.rows[0]).toMatchObject({ tool_call_id: "c_w2" });
+    expect(audit.rows[0].run_id).not.toBeNull();
     const instr = await getPool().query<{ content: string }>(`SELECT content FROM agent_instructions WHERE scope_type = 'user' AND scope_id = $1`, [userId]);
     expect(instr.rows[0]?.content).toBe("回复末尾加一个🎭");
     await getPool().query(`DELETE FROM agent_instructions WHERE scope_type = 'user' AND scope_id = $1`, [userId]);

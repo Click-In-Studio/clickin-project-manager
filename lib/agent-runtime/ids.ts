@@ -11,3 +11,4 @@ export const newSessionId = () => shortId("as");
 export const newRunId = () => shortId("ar");
 export const newApprovalId = () => shortId("ap");
 export const newQuestionId = () => shortId("aq");
+export const newMutationId = () => shortId("am");
