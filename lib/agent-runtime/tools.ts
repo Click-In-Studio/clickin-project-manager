@@ -449,6 +449,60 @@ const DEFS: Def[] = [
     execute: async (ctx, args) => (await import("@/lib/agent-tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-character_propose_delete", args),
   },
 
+  // ── production.script_* 读面（剧本正文，lib/agent-tools/script-tools.ts）─────────
+  // 正文以「剧本方言」文本形态输出（[b:<id>] 行头携带块 id，lib/script-dialect.ts）；
+  // 页码是估算值——定位组合拳是「页码粗着陆 + 相对窗口微调」。写面（P2）另批上线。
+  {
+    mcpName: "production.script_dialect_ref",
+    description: "获取剧本正文方言的完整说明：[b:]/[new]/[m:] 头标、[台]/[白]/[歌]/[显名]/[提示] 标记、续行与转义规则（EN: script dialect syntax reference）。需要理解或改写剧本正文而语境中没有方言说明时，先调用本工具。",
+    parameters: NONE, readOnly: true,
+    execute: async () => (await import("@/lib/script-dialect")).SCRIPT_DIALECT_NOTE,
+  },
+  {
+    mcpName: "production.script_read_section",
+    description: "按章节/场次/排练标记整段读取剧本正文，以剧本方言形态输出（[b:<id>] 行携带块 id）（EN: read script section blocks dialogue lines）。sectionId 用 production.scene_list 里的场次 id（正文里的 [m:<id>] 锚点同义）。整段过长时会返回子段清单或截断并给续读锚点。",
+    parameters: Type.Object({ sectionId: Type.String({ description: "章节/场次/排练标记 id（来自 production.scene_list）" }) }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/script-tools")).scriptReadSection(ctx.userId, ctx.productionId, String(args.sectionId)),
+  },
+  {
+    mcpName: "production.script_read_window",
+    description: "以某个块为锚点读取剧本正文的相对窗口（前 N 块 + 锚点 + 后 M 块）（EN: script block context window neighbors）。blockId 来自读取/搜索结果里的 [b:]/[m:] 标注；页码查询有偏差、或用户指着某句台词说话时，用它沿上下文行走。",
+    parameters: Type.Object({
+      blockId: Type.String({ description: "锚点块 id（读取/搜索结果里 [b:] 或 [m:] 标注的 id）" }),
+      before: Type.Optional(Type.Integer({ minimum: 0, maximum: 50, description: "锚点之前取几块（默认 6）" })),
+      after: Type.Optional(Type.Integer({ minimum: 0, maximum: 50, description: "锚点之后取几块（默认 12）" })),
+    }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/script-tools")).scriptReadWindow(
+      ctx.userId, ctx.productionId, String(args.blockId),
+      typeof args.before === "number" ? args.before : undefined,
+      typeof args.after === "number" ? args.after : undefined,
+    ),
+  },
+  {
+    mcpName: "production.script_search",
+    description: "在剧本正文与舞台提示里搜索文字（包含匹配），可按说话人过滤（EN: search script lines dialogue text）。结果带块 id、估算页码与所在场次；要看上下文再用 production.script_read_window。",
+    parameters: Type.Object({
+      query: Type.String({ minLength: 1, description: "要找的文字（在正文与舞台提示里做包含匹配）" }),
+      speaker: Type.Optional(Type.String({ description: "只搜这个角色的台词（角色名，来自 production.character_list）；不过滤就整个省略" })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 30, description: "最多返回几条（默认 10）" })),
+    }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/script-tools")).scriptSearch(ctx.userId, ctx.productionId, {
+      query: String(args.query ?? ""),
+      speaker: typeof args.speaker === "string" ? args.speaker : undefined,
+      limit: typeof args.limit === "number" ? args.limit : undefined,
+    }),
+  },
+  {
+    mcpName: "production.script_read_page",
+    description: "按页码读取剧本正文（估算页码，按主本版式，与打印稿可能有小幅偏差）（EN: read script page number blocks）。用户说「第 N 页」时用它粗定位；找不到目标时不要放弃，用 production.script_read_window 沿 [b:] 锚点前后微调。",
+    parameters: Type.Object({ page: Type.Integer({ minimum: 1, description: "页码（从 1 开始）" }) }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/script-tools")).scriptReadPage(ctx.userId, ctx.productionId, Number(args.page)),
+  },
+
   // ── 定时任务（lib/agent-runtime/schedules.ts）：到点由 AI 以用户身份自动运行一段指令。
   // 创建是写操作（过确认卡——那张卡就是"负责任的人类动作"：人确认写哪里、允许哪几类写）；
   // 触发出的 run 里只有 schedule.finish 可用（只能汇报/停自己，不能建新任务）。

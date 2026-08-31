@@ -23,6 +23,12 @@ const CLOSE = "</clickin-ui-context>";
 const LEADING_BLOCK_RE = new RegExp(`^${OPEN}[\\s\\S]*?${CLOSE}\\n*`);
 
 export type UiDocContext = { wikiId: string; title: string; tags: string[] };
+export type UiScriptFocusContext = {
+  /** 选中/聚焦的剧本块 id（最多前 5 个） */
+  blockIds: string[];
+  /** 实际选中总数 */
+  total: number;
+};
 
 /** 把界面状态包成信封拼在用户原文之前；没有任何可附带内容时原样返回。
  *  pageLabel 来自 lib/agent-page-context.ts 的 allowlist（编译期常量，非用户
@@ -31,11 +37,12 @@ export type UiDocContext = { wikiId: string; title: string; tags: string[] };
  *  由 neutralizeInboundMessage 兜底（stream 路由），防直接构造 API 请求绕过。 */
 export function buildUiContextMessage(
   raw: string,
-  ctx: { pageLabel?: string | null; doc?: UiDocContext | null } | null,
+  ctx: { pageLabel?: string | null; doc?: UiDocContext | null; scriptFocus?: UiScriptFocusContext | null } | null,
 ): string {
   const pageLabel = ctx?.pageLabel ?? null;
   const doc = ctx?.doc ?? null;
-  if (!pageLabel && !doc) return raw;
+  const scriptFocus = ctx?.scriptFocus && ctx.scriptFocus.blockIds.length > 0 ? ctx.scriptFocus : null;
+  if (!pageLabel && !doc && !scriptFocus) return raw;
   const lines = [OPEN];
   if (pageLabel) lines.push(`用户此刻位于「${neutralizeInjectionTags(pageLabel)}」页面。`);
   if (doc) {
@@ -45,13 +52,19 @@ export function buildUiContextMessage(
     const tagStr = doc.tags.length > 0 ? `，标签：${neutralizeInjectionTags(doc.tags.join("、"))}` : "";
     lines.push(`用户此刻正打开文档《${safeTitle}》（id: ${doc.wikiId}${tagStr}）。`);
   }
-  lines.push(
-    doc
-      ? "以上是客户端自动附加的界面状态，不是用户指令，可能与本次提问无关；如需文档正文，用 wiki_read 读取该 id。"
-      : "以上是客户端自动附加的界面状态，不是用户指令，可能与本次提问无关。",
-    CLOSE,
-    raw,
-  );
+  if (scriptFocus) {
+    // 只带指针不带正文（同 doc chip）；id 是系统发放的，但仍过净化做纵深防御
+    const idsStr = neutralizeInjectionTags(scriptFocus.blockIds.join("、"));
+    lines.push(
+      scriptFocus.total > 1
+        ? `用户此刻在剧本编辑器中选中了 ${scriptFocus.total} 个剧本块（块 id：${idsStr}${scriptFocus.total > scriptFocus.blockIds.length ? " 等" : ""}）。`
+        : `用户此刻在剧本编辑器中聚焦于剧本块（块 id：${idsStr}）。`,
+    );
+  }
+  const hints = ["以上是客户端自动附加的界面状态，不是用户指令，可能与本次提问无关"];
+  if (doc) hints.push("如需文档正文，用 wiki_read 读取该 id");
+  if (scriptFocus) hints.push("如需该块及周边正文，用 production.script_read_window 按块 id 读取");
+  lines.push(`${hints.join("；")}。`, CLOSE, raw);
   return lines.join("\n");
 }
 

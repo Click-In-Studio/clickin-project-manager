@@ -42,6 +42,7 @@ import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
 import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
 import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script-selection";
+import { publishScriptFocus } from "@/lib/script-focus";
 import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script-insertion-gaps";
 import ProductionTopMenu, {
   ProductionOverflowSubmenuButton,
@@ -5877,6 +5878,18 @@ export default function ScriptEditor({
   const selectedDetailBlockId = selectedBlockIds.size === 1
     ? selectedBlockIds.values().next().value as string | undefined
     : undefined;
+  // AI 信封的剧本 focus 上下文（lib/script-focus.ts → AgentPopout chip）：
+  // 多选优先，其次光标所在块；只发指针（块 id），正文由 AI 用读工具自取。
+  useEffect(() => {
+    if (selectedBlockIds.size > 0) {
+      publishScriptFocus({ blockIds: Array.from(selectedBlockIds).slice(0, 5), total: selectedBlockIds.size });
+    } else if (focusedId) {
+      publishScriptFocus({ blockIds: [focusedId], total: 1 });
+    } else {
+      publishScriptFocus(null);
+    }
+  }, [selectedBlockIds, focusedId]);
+  useEffect(() => () => publishScriptFocus(null), []);
   const selectionAnchorBlockIdRef = useRef<string | null>(null);
   const selectionDetachedRef = useRef(false);
   const markerEndedScopeIdsRef = useRef<Set<string>>(new Set());

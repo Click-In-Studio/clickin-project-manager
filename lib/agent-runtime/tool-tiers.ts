@@ -40,14 +40,21 @@ const DRAMATURGY_FAMILY = [
   "production.character_propose_create", "production.character_propose_update", "production.character_propose_delete",
 ];
 
+/** 剧本正文读面（P1）：页码粗着陆 + 相对窗口微调 + 搜索 + 整段读 */
+const SCRIPT_READ = [
+  "production.script_read_section", "production.script_read_window",
+  "production.script_search", "production.script_read_page",
+  "production.script_dialect_ref",
+];
+
 /** 温层：pageKey → 该页的工作面（与 PAGE_LABELS 的 key 对齐；缺席 = 该页无温层） */
 const WARM_BY_PAGE: Record<string, string[]> = {
   "prod:wiki": WIKI_FAMILY,
   "prod:dramaturgy-inspiration": WIKI_FAMILY,
   "prod:dramaturgy": DRAMATURGY_FAMILY,
   "prod:characters": DRAMATURGY_FAMILY,
-  // 剧本页：场次/角色就是剧本里的 marker 与 cast，读面常在手边；写面靠召回
-  "prod:script": DRAMATURGY_READ,
+  // 剧本页：正文读面 + 场次/角色读面（场次/角色就是剧本里的 marker 与 cast）；写面靠召回
+  "prod:script": [...DRAMATURGY_READ, ...SCRIPT_READ],
   "prod:planning": ["production.milestones"],
   "prod:home": ["production.milestones"],
   "prod:contacts": ["production.contact_list", "production.department_list", "users.query_sensitive"],
@@ -79,6 +86,11 @@ const CLOSURE: Record<string, string[]> = {
   "production.character_propose_create": ["production.dramaturgy_permissions", "production.character_list"],
   "production.character_propose_update": ["production.dramaturgy_permissions", "production.character_list", "production.character_read"],
   "production.character_propose_delete": ["production.dramaturgy_permissions", "production.character_list"],
+  // 剧本正文族：段 id 来自 scene_list；页码/搜索着陆后靠相对窗口微调；方言说明随读面闭包携带
+  "production.script_read_section": ["production.scene_list", "production.script_dialect_ref"],
+  "production.script_read_window": ["production.script_dialect_ref"],
+  "production.script_search": ["production.script_read_window", "production.script_dialect_ref"],
+  "production.script_read_page": ["production.script_read_window", "production.script_dialect_ref"],
   // 定时任务：改/停要先拿 id；建制作任务时模型得知道能授权哪些 wiki 写工具、文档 id 从哪来
   "my.schedule_propose": ["my.schedules", "production.wiki_tree", "production.wiki_search"],
 };

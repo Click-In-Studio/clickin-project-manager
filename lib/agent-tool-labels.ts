@@ -42,6 +42,11 @@ export const TOOL_LABELS: Record<string, string> = {
   "production-character_propose_create": "提议新建角色",
   "production-character_propose_update": "提议修改角色",
   "production-character_propose_delete": "提议删除角色",
+  "production-script_read_section": "阅读剧本段落",
+  "production-script_read_window": "查看剧本上下文",
+  "production-script_search": "搜索剧本台词",
+  "production-script_read_page": "按页码读剧本",
+  "production-script_dialect_ref": "获取剧本方言说明",
   "my-schedules": "查看我的定时任务",
   "my-schedule_propose": "提议设置定时任务",
   // 运行时专属（不进 tool-catalog）

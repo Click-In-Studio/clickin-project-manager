@@ -45,6 +45,7 @@ export const TOOL_FAMILIES: Record<string, { label: string }> = {
   "production.people": { label: "通讯录" },
   "production.wiki": { label: "文档库" },
   "production.dramaturgy": { label: "构作（场次与角色）" },
+  "production.script": { label: "剧本正文" },
 };
 
 export const TOOL_CATALOG: ToolCatalogEntry[] = [
@@ -173,6 +174,21 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
   { name: "production.character_propose_delete", family: "production.dramaturgy", scope: "production", oneliner: "提议删除角色（可批量，需人工确认）",
     triggers: ["删角色", "删掉这个角色", "删除人物"], en: "delete characters",
     examples: ["把这个角色删掉", "删除多余的人物"] },
+  // ── 剧本正文族（读面 P1）：页码粗着陆 + 相对窗口微调是刻意的组合拳
+  { name: "production.script_read_section", family: "production.script", scope: "production", oneliner: "整段读取一场/一章的剧本正文（含台词块 id）",
+    triggers: ["读剧本", "剧本内容", "这一场的台词", "整场台词", "剧本正文", "台词内容", "看剧本", "读一场"], en: "read script section blocks dialogue lines",
+    examples: ["把第二场的剧本读出来", "看看这一场都有什么台词", "读一下第一幕开头那场的正文"] },
+  { name: "production.script_read_window", family: "production.script", scope: "production", oneliner: "以某个块为锚点读取前后的剧本上下文",
+    triggers: ["上下文", "前后几句", "这句台词前后", "台词附近", "周边台词", "前面几句", "后面几句"], en: "script block context window neighbors around",
+    examples: ["看看这句台词前后的内容", "这个块附近还有什么", "从这里往后再读十句"] },
+  { name: "production.script_search", family: "production.script", scope: "production", oneliner: "在剧本正文里搜台词/舞台提示（可按说话人过滤）",
+    triggers: ["搜台词", "找台词", "台词里", "剧本里搜", "剧本里找", "哪句台词", "搜剧本", "台词是谁说的"], en: "search script lines dialogue text find",
+    examples: ["剧本里搜一下「月亮」出现在哪", "找找那句「你来了」是谁说的", "老王的台词里有没有提到钱"] },
+  { name: "production.script_read_page", family: "production.script", scope: "production", oneliner: "按页码读取剧本正文（估算页码）",
+    triggers: ["第几页", "这一页", "页的内容", "剧本第", "翻到第"], en: "read script page number blocks",
+    examples: ["把剧本第 37 页读出来", "第 12 页讲到哪了", "翻到第五页看看"] },
+  { name: "production.script_dialect_ref", family: "production.script", scope: "production", oneliner: "获取剧本正文方言的完整说明",
+    triggers: [], en: "script dialect syntax reference" },
   { name: "production.update_instructions", family: "production.overview", scope: "production", oneliner: "修改本制作的 AI 指令（全量替换，需人工确认）",
     triggers: ["制作指令", "项目指令", "团队的 AI"], en: "update production AI instructions",
     examples: ["给整个项目的 AI 加一条规则", "修改本制作的 AI 指令"] },

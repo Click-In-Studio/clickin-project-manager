@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
 import Markdown from "@/components/Markdown";
@@ -13,6 +13,7 @@ import {
 } from "@/lib/agent-chat/stream-reducer";
 import { parseSessionIdentity } from "@/lib/agent-tools/session-identity";
 import { buildUiContextMessage } from "@/lib/agent-ui-context";
+import { getScriptFocus, getServerScriptFocus, subscribeScriptFocus } from "@/lib/script-focus";
 import { derivePageKey, pageLabelFor, pageSuggestionsFor } from "@/lib/agent-page-context";
 import { toolLabel } from "@/lib/agent-tool-labels";
 import { dispatchAgentMutation } from "@/lib/agent-mutations";
@@ -75,6 +76,7 @@ export default function AgentPopout({
   const [currentDocTags, setCurrentDocTags] = useState<string[]>([]);
   const [docAttached, setDocAttached] = useState(true);
   const [pageAttached, setPageAttached] = useState(true);
+  const [focusAttached, setFocusAttached] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -93,7 +95,13 @@ export default function AgentPopout({
   // 换页面后默认重新勾选附带（与文档 chip 同款语义）。
   useEffect(() => {
     setPageAttached(true);
+    setFocusAttached(true);
   }, [pageKey]);
+
+  // 剧本编辑器的 focus 上下文（lib/script-focus.ts）：只在剧本页展示/附带；
+  // 编辑器卸载时会自动清空发布，chip 随之消失。
+  const scriptFocus = useSyncExternalStore(subscribeScriptFocus, getScriptFocus, getServerScriptFocus);
+  const scriptFocusActive = pageKey === "prod:script" && scriptFocus && scriptFocus.blockIds.length > 0 ? scriptFocus : null;
 
   const inScope = useCallback(
     (key: string) => {
@@ -388,6 +396,8 @@ export default function AgentPopout({
         docAttached && currentWikiId && currentDocTitle
           ? { wikiId: currentWikiId, title: currentDocTitle, tags: currentDocTags }
           : null,
+      // 剧本 focus 同款"只带指针"：块 id 让 AI 用 script_read_window 自取正文
+      scriptFocus: focusAttached ? scriptFocusActive : null,
     });
 
     const res = await fetch("/api/agent/chat/stream", {
@@ -403,7 +413,7 @@ export default function AgentPopout({
     } else {
       consumeStream(res, key);
     }
-  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId, currentDocTitle, currentDocTags, pageAttached, pageLabel]);
+  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId, currentDocTitle, currentDocTags, pageAttached, pageLabel, focusAttached, scriptFocusActive]);
 
   const abort = useCallback(async () => {
     if (!activeKey) return;
@@ -810,7 +820,7 @@ export default function AgentPopout({
 
       {/* 页面感知栏：本页建议（点击填入输入框，不发送）+ 附带 chip（页面/文档，
           默认勾选、可点掉——附带的内容对用户始终可见、可摘除）。 */}
-      {(pageLabel || (currentWikiId && currentDocTitle) || pageSuggestions.length > 0) && (
+      {(pageLabel || (currentWikiId && currentDocTitle) || scriptFocusActive || pageSuggestions.length > 0) && (
         <div className="shrink-0 space-y-1.5 border-t border-[var(--line)] bg-[var(--paper)] px-3 py-1.5">
           {pageSuggestions.length > 0 && input.trim() === "" && (
             <div className="flex flex-wrap gap-1.5">
@@ -830,7 +840,7 @@ export default function AgentPopout({
               ))}
             </div>
           )}
-          {(pageLabel || (currentWikiId && currentDocTitle)) && (
+          {(pageLabel || (currentWikiId && currentDocTitle) || scriptFocusActive) && (
             <div className="flex flex-wrap items-center gap-1.5">
               {pageLabel && (
                 <button
@@ -858,6 +868,20 @@ export default function AgentPopout({
                   }`}
                 >
                   📎 附带《{currentDocTitle}》
+                </button>
+              )}
+              {scriptFocusActive && (
+                <button
+                  type="button"
+                  onClick={() => setFocusAttached((v) => !v)}
+                  title={focusAttached ? "点击取消附带选中的剧本块" : "点击重新附带选中的剧本块"}
+                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                    focusAttached
+                      ? "border-[var(--ink)] bg-[var(--surface)] text-[var(--ink)]"
+                      : "border-[var(--line)] text-[var(--muted)] line-through"
+                  }`}
+                >
+                  🎯 {scriptFocusActive.total > 1 ? `附带选中的 ${scriptFocusActive.total} 个剧本块` : "附带当前剧本块"}
                 </button>
               )}
             </div>
