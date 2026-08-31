@@ -78,15 +78,24 @@ export function approvalCard(bareTool: string, params: Record<string, unknown>, 
         dramaturgyLines("删除：", (Array.isArray(params.charIds) ? params.charIds : []).map((id: unknown) => str(id, 40)), extra),
         summaryLine(params),
       ]) };
+    // 剧本写面两张卡：逐块 diff 概要（计数 + 每块首行预览）由 previewScriptProposal
+    // 经 preflight 放进 extra.notes（dramaturgyLines 的 plain notes 优先于 items）；
+    // items 只是 preview 异常时的兜底素材（AI review #402-1：不能是空数组，
+    // 否则预览挂掉时卡片只剩一句摘要）。
     case "production-script_propose_rewrite":
       return { severity, title: `提议改写剧本段落（段 id: ${str(params.sectionId, 30)}）`, description: lines([
-        dramaturgyLines("改动：", [], extra),
+        dramaturgyLines("改动：", [`整段改写（段 id: ${str(params.sectionId, 30)}），方言全文见预览`], extra),
         summaryLine(params),
       ]) };
     case "production-script_propose_edit_blocks": {
+      const fallback = [
+        count(params.updates) > 0 ? `修改 ${count(params.updates)} 块` : null,
+        count(params.inserts) > 0 ? `插入 ${count(params.inserts)} 块` : null,
+        count(params.deletes) > 0 ? `删除 ${count(params.deletes)} 块` : null,
+      ].filter((l): l is string => l !== null);
       const n = count(params.updates) + count(params.inserts) + count(params.deletes);
       return { severity, title: `提议修改剧本正文（${n} 处）`, description: lines([
-        dramaturgyLines("改动：", [], extra),
+        dramaturgyLines("改动：", fallback, extra),
         summaryLine(params),
       ]) };
     }

@@ -509,6 +509,8 @@ const DEFS: Def[] = [
       summary: Type.String({ description: "一句话说明这次改了什么、为什么" }),
     }),
     readOnly: false, needsProduction: true,
+    // ids 从模型给的方言文本里提取，仅供 mutation-audit 取快照与前端刷新提示——
+    // 截断/漏提最多让账本少记几块，patch 本身在 script-write-tools 里按解析结果全量计算
     mutates: (args) => ({
       scope: "script", action: "updated",
       ids: [...String(args.dialect ?? "").matchAll(/\[b:([^\]\s]+)\]/g)].map((m) => m[1]).slice(0, 60),

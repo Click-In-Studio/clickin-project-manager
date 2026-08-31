@@ -5,6 +5,7 @@ import { upsertFeishuUser, addProductionMember, applyPatchToDB, loadProduction }
 import { getPool } from "@/lib/pg";
 import { DENIED_NOT_MEMBER } from "@/lib/agent-tools/production-tools";
 import { runScriptProposal, previewScriptProposal, SCRIPT_PROPOSE_TOOLS } from "@/lib/agent-tools/script-write-tools";
+import { sectionEndIndex } from "@/lib/agent-tools/script-tools";
 import { UNATTENDED_ALLOWED_TOOLS } from "@/lib/agent-runtime/tools";
 import type { Block } from "@/lib/script-types";
 import type { ScriptPatch } from "@/lib/script-ops";
@@ -213,5 +214,31 @@ describe("script_propose_edit_blocks：精修与守卫", () => {
     expect(await runScriptProposal(writerId, prodId, EDIT, {
       deletes: Array.from({ length: 61 }, () => randomUUID()),
     })).toContain("最多");
+  });
+});
+
+describe("sectionEndIndex：读写共用的段边界（纯函数，AI review #402-2）", () => {
+  const mk = (id: string, type: Block["type"]): Block => ({
+    id, type, content: "", characterIds: [], characterAnnotations: {}, lyric: false,
+    sceneId: null, rehearsalMark: null,
+    ...(type !== "dialogue" ? { markerMeta: { parentMarkerId: null } } : {}),
+  });
+
+  it("场段到下一个同级/更高级标记为止，吞掉内部排练标记；末段到文末", () => {
+    //          0        1        2   3        4        5   6        7
+    const blocks = [
+      mk("ch1", "chapter_marker"),
+      mk("sc1", "scene_marker"),
+      mk("a", "dialogue"),
+      mk("rh1", "rehearsal_marker"), // 低级标记：属于 sc1 段内部
+      mk("b", "dialogue"),
+      mk("sc2", "scene_marker"),     // 同级：sc1 段到此为止
+      mk("c", "dialogue"),
+      mk("ch2", "chapter_marker"),   // 更高级：sc2 段到此为止
+    ];
+    expect(sectionEndIndex(blocks, 1)).toBe(5);            // sc1 段 = [sc1, a, rh1, b]
+    expect(sectionEndIndex(blocks, 3)).toBe(5);            // rh1 段 = [rh1, b]（到同级或更高级）
+    expect(sectionEndIndex(blocks, 0)).toBe(7);            // ch1 段吞掉两场，到 ch2 为止
+    expect(sectionEndIndex(blocks, 7)).toBe(blocks.length); // 末段到文末
   });
 });
