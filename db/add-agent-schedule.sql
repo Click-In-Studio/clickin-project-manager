@@ -57,3 +57,10 @@ ALTER TABLE agent_mutation ADD COLUMN IF NOT EXISTS schedule_id TEXT NULL REFERE
 CREATE INDEX IF NOT EXISTS agent_run_schedule_idx
   ON agent_run (schedule_id, started_at DESC)
   WHERE schedule_id IS NOT NULL;
+-- 声明的两个访问面都要索引（AI review #399）：会话列表标 ⏰ / 触发会话自动归档扫描；审计页按任务查
+CREATE INDEX IF NOT EXISTS agent_session_schedule_idx
+  ON agent_session (schedule_id)
+  WHERE schedule_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS agent_mutation_schedule_idx
+  ON agent_mutation (schedule_id, created_at DESC)
+  WHERE schedule_id IS NOT NULL;

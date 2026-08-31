@@ -132,6 +132,13 @@ describe("定时任务", () => {
     expect(card.description).toContain("cron 0 23 * * *（Asia/Shanghai）");
     expect(card.description).toContain("允许直接执行");
     expect(card.description).toContain("提议修改文档");
+    // 非 create 分支（AI review #399 要求确认四个动作都能出卡）
+    expect(approvalCard("my-schedule_propose", { action: "delete", scheduleId: "asch_x", summary: "不要了" }).title).toBe("删除定时任务（id: asch_x）");
+    expect(approvalCard("my-schedule_propose", { action: "pause", scheduleId: "asch_x", summary: "s" }).title).toContain("暂停定时任务");
+    expect(approvalCard("my-schedule_propose", { action: "resume", scheduleId: "asch_x", summary: "s" }).title).toContain("恢复定时任务");
+    const upd = approvalCard("my-schedule_propose", { action: "update", scheduleId: "asch_x", allowedTools: [], summary: "s" });
+    expect(upd.title).toContain("修改定时任务");
+    expect(upd.description).toContain("改为只读");
   });
 
   it("触发：认领 → 新会话 → 无人值守门（授权的写直接生效并进账本；ask_user / 未授权写被 block）→ 汇报 → 通知附改动清单 → 推进", async () => {
