@@ -46,6 +46,10 @@ const SCRIPT_READ = [
   "production.script_search", "production.script_read_page",
   "production.script_dialect_ref",
 ];
+/** 剧本正文写面（P2）：段级方言改写 + 单/多块精修 */
+const SCRIPT_WRITE = [
+  "production.script_propose_rewrite", "production.script_propose_edit_blocks",
+];
 
 /** 温层：pageKey → 该页的工作面（与 PAGE_LABELS 的 key 对齐；缺席 = 该页无温层） */
 const WARM_BY_PAGE: Record<string, string[]> = {
@@ -53,8 +57,8 @@ const WARM_BY_PAGE: Record<string, string[]> = {
   "prod:dramaturgy-inspiration": WIKI_FAMILY,
   "prod:dramaturgy": DRAMATURGY_FAMILY,
   "prod:characters": DRAMATURGY_FAMILY,
-  // 剧本页：正文读面 + 场次/角色读面（场次/角色就是剧本里的 marker 与 cast）；写面靠召回
-  "prod:script": [...DRAMATURGY_READ, ...SCRIPT_READ],
+  // 剧本页：正文读写面 + 场次/角色读面（场次/角色就是剧本里的 marker 与 cast）；构作写面靠召回
+  "prod:script": [...DRAMATURGY_READ, ...SCRIPT_READ, ...SCRIPT_WRITE],
   "prod:planning": ["production.milestones"],
   "prod:home": ["production.milestones"],
   "prod:contacts": ["production.contact_list", "production.department_list", "users.query_sensitive"],
@@ -87,6 +91,9 @@ const CLOSURE: Record<string, string[]> = {
   "production.character_propose_update": ["production.dramaturgy_permissions", "production.character_list", "production.character_read"],
   "production.character_propose_delete": ["production.dramaturgy_permissions", "production.character_list"],
   // 剧本正文族：段 id 来自 scene_list；页码/搜索着陆后靠相对窗口微调；方言说明随读面闭包携带
+  // 写面闭包：改写前必须能读出该段（id 往返协议的物料来源）
+  "production.script_propose_rewrite": ["production.script_read_section", "production.scene_list", "production.script_dialect_ref"],
+  "production.script_propose_edit_blocks": ["production.script_read_window", "production.script_search", "production.script_dialect_ref"],
   "production.script_read_section": ["production.scene_list", "production.script_dialect_ref"],
   "production.script_read_window": ["production.script_dialect_ref"],
   "production.script_search": ["production.script_read_window", "production.script_dialect_ref"],

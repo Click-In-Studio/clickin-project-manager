@@ -85,7 +85,7 @@ export type ApplyDialectResult =
   | { ok: true; blocks: Block[]; summary: ApplyDialectSummary }
   | { ok: false; errors: DialectError[] };
 
-type ParsedSpeaker = { charId: string; annotation: string };
+export type ParsedSpeaker = { charId: string; annotation: string };
 
 type ParsedTextItem = {
   kind: "text";
@@ -274,6 +274,44 @@ function parseSpeakerToken(raw: string): { ref: string; annotation: string } | n
     ref: unescapeSpeakerText(token.slice(0, open).trim()),
     annotation: unescapeSpeakerText(token.slice(open + 1, token.length - 1)).trim(),
   };
+}
+
+/** 结构化写接口（script_propose_edit_blocks）共用的说话人解析：
+ *  元素形如「张三」「张三（低声）」「#<角色id>」「#<id>（低声）」——与方言的
+ *  说话人段同一套 token 文法与错误措辞（含 \ 转义、#id 指代、同名歧义）。 */
+export type ResolvedSpeakers =
+  | { ok: true; speakers: ParsedSpeaker[] }
+  | { ok: false; error: string };
+
+export function resolveSpeakerRefs(refs: string[], characters: Character[]): ResolvedSpeakers {
+  const charByName = new Map<string, { id: string; dup: boolean }>();
+  const charById = new Map(characters.map((c) => [c.id, c]));
+  for (const c of characters) {
+    const existing = charByName.get(c.name);
+    if (existing) existing.dup = true;
+    else charByName.set(c.name, { id: c.id, dup: false });
+  }
+  const speakers: ParsedSpeaker[] = [];
+  const seen = new Set<string>();
+  for (const raw of refs) {
+    const t = parseSpeakerToken(String(raw ?? ""));
+    if (!t) return { ok: false, error: "说话人不能为空字符串。" };
+    let charId: string;
+    if (t.ref.startsWith("#")) {
+      const id = t.ref.slice(1);
+      if (!charById.has(id)) return { ok: false, error: `#${id} 不是已存在的角色 id——# 后必须接 character_list 或读取结果里的角色 id。` };
+      charId = id;
+    } else {
+      const found = charByName.get(t.ref);
+      if (!found) return { ok: false, error: `说话人「${t.ref}」不是已存在的角色——请核对角色名（含特殊字符或同名的角色用 #<角色id> 指代），新角色先用 character_propose_create 创建。` };
+      if (found.dup) return { ok: false, error: `角色名「${t.ref}」在本剧中不唯一——请改用 #<角色id> 指代（id 来自 character_list 或读取结果）。` };
+      charId = found.id;
+    }
+    if (seen.has(charId)) return { ok: false, error: `说话人「${t.ref}」重复。` };
+    seen.add(charId);
+    speakers.push({ charId, annotation: t.annotation });
+  }
+  return { ok: true, speakers };
 }
 
 function parseDialect(

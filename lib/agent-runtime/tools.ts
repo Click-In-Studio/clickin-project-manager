@@ -496,6 +496,65 @@ const DEFS: Def[] = [
     }),
   },
   {
+    mcpName: "production.script_propose_rewrite",
+    description:
+      "以剧本方言整段改写一个章节/场次/排练标记段的正文，需要人工在聊天栏确认（EN: rewrite script section dialogue batch）。" +
+      "先用 production.script_read_section 读出该段（输出即方言形态），在其文本上改写后**整段提交**：" +
+      "保留的块必须带原 [b:<id>]（评论/cue/标签锚定在 id 上，重写内容也要带原 id，不要删了用 [new] 重建）；" +
+      "新块用 [new]；输出中省略某个 [b:<id>] 即删除该块；[m:] 锚点行原样保留。系统会计算最小 diff，只落真正变化的块。" +
+      "改写剧本正文必须按剧本方言输出；方言完整说明若不在语境中，先调用 production.script_dialect_ref——违反方言的提议会被解析器拒绝。",
+    parameters: Type.Object({
+      sectionId: Type.String({ description: "要改写的章节/场次/排练标记 id（来自 production.scene_list 或 [m:] 锚点）" }),
+      dialect: Type.String({ minLength: 1, description: "改写后的整段方言文本（含 [m:] 锚点行与全部要保留的 [b:<id>] 块）" }),
+      summary: Type.String({ description: "一句话说明这次改了什么、为什么" }),
+    }),
+    readOnly: false, needsProduction: true,
+    // ids 从模型给的方言文本里提取，仅供 mutation-audit 取快照与前端刷新提示——
+    // 截断/漏提最多让账本少记几块，patch 本身在 script-write-tools 里按解析结果全量计算
+    mutates: (args) => ({
+      scope: "script", action: "updated",
+      ids: [...String(args.dialect ?? "").matchAll(/\[b:([^\]\s]+)\]/g)].map((m) => m[1]).slice(0, 60),
+    }),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/script-write-tools")).runScriptProposal(ctx.userId, ctx.productionId, "production-script_propose_rewrite", args),
+  },
+  {
+    mcpName: "production.script_propose_edit_blocks",
+    description:
+      "对剧本正文做单/多块精修（改内容/说话人/舞台提示、插入新块、删除块），需要人工在聊天栏确认（EN: edit script blocks update insert delete）。" +
+      "blockId 来自剧本读取/搜索结果的 [b:] 标注；speakers 是完整新列表（整体替换），元素形如「张三」「张三（低声）」「#<角色id>」。" +
+      "章节/场次标记不能用本工具改（用 scene_propose_*）；整段大改用 production.script_propose_rewrite。一批里任一项有问题则整批不执行。",
+    parameters: Type.Object({
+      updates: Type.Optional(Type.Array(Type.Object({
+        blockId: Type.String({ description: "要修改的块 id" }),
+        content: Type.Optional(Type.String({ description: "新正文（整体替换）；不改就整个省略" })),
+        stageComment: Type.Optional(Type.String({ description: "舞台提示（整体替换）；空字符串 = 清除；不改就整个省略" })),
+        speakers: Type.Optional(Type.Array(Type.String(), { description: "说话人完整新列表（整体替换；空数组 = 无说话人）；不改就整个省略" })),
+        type: Type.Optional(Type.Union([Type.Literal("dialogue"), Type.Literal("stage")], { description: "块类型；不改就整个省略" })),
+        lyric: Type.Optional(Type.Boolean({ description: "是否歌词；不改就整个省略" })),
+        forceShowCharacterName: Type.Optional(Type.Boolean({ description: "强制显示角色名；不改就整个省略" })),
+      }), { maxItems: 60 })),
+      inserts: Type.Optional(Type.Array(Type.Object({
+        afterBlockId: Type.String({ description: "插在这个块之后（[b:] 或 [m:] 标注的 id；给标记 id = 插在该段最前）" }),
+        content: Type.String({ description: "新块正文" }),
+        type: Type.Optional(Type.Union([Type.Literal("dialogue"), Type.Literal("stage")], { description: "块类型，默认 dialogue" })),
+        speakers: Type.Optional(Type.Array(Type.String(), { description: "说话人列表；无说话人就整个省略" })),
+        stageComment: Type.Optional(Type.String({ description: "舞台提示；没有就整个省略" })),
+        lyric: Type.Optional(Type.Boolean({ description: "是否歌词" })),
+      }), { maxItems: 60 })),
+      deletes: Type.Optional(Type.Array(Type.String(), { maxItems: 60, description: "要删除的块 id 列表" })),
+      summary: Type.String({ description: "一句话说明这次改了什么、为什么" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: (args) => ({
+      scope: "script", action: "updated",
+      ids: [
+        ...(Array.isArray(args.updates) ? args.updates.map((u: { blockId?: unknown }) => String(u?.blockId ?? "")) : []),
+        ...(Array.isArray(args.deletes) ? args.deletes.map(String) : []),
+      ].filter(Boolean).slice(0, 60),
+    }),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/script-write-tools")).runScriptProposal(ctx.userId, ctx.productionId, "production-script_propose_edit_blocks", args),
+  },
+  {
     mcpName: "production.script_read_page",
     description: "按页码读取剧本正文（估算页码，按主本版式，与打印稿可能有小幅偏差）（EN: read script page number blocks）。用户说「第 N 页」时用它粗定位；找不到目标时不要放弃，用 production.script_read_window 沿 [b:] 锚点前后微调。",
     parameters: Type.Object({ page: Type.Integer({ minimum: 1, description: "页码（从 1 开始）" }) }),

@@ -119,8 +119,10 @@ async function pageSpanOf(index: ScriptIndex, range: Block[]): Promise<string | 
   return lo === hi ? `估算页码 ${lo}` : `估算页码 ${lo}–${hi}`;
 }
 
-/** 段落边界：从 marker 起，到下一个同级或更高级 marker 为止（含内部低级 marker）。 */
-function sectionEndIndex(blocks: Block[], startIdx: number): number {
+/** 段落边界：从 marker 起，到下一个同级或更高级 marker 为止（含内部低级 marker）。
+ *  读（script_read_section）与写（script_propose_rewrite）共用——两边对「一段」的
+ *  定义必须逐块一致，否则改写区间对不上读出的区间。 */
+export function sectionEndIndex(blocks: Block[], startIdx: number): number {
   const rank = markerBlockRank(blocks[startIdx]) ?? 0;
   for (let i = startIdx + 1; i < blocks.length; i++) {
     const r = markerBlockRank(blocks[i]);
