@@ -61,7 +61,9 @@ async function loadScriptIndex(productionId: string): Promise<ScriptIndex | stri
   return {
     blocks,
     characters: loaded.state.characters,
-    labels: buildMarkerLabelIndex(owned),
+    // labels 与 markerById 同源自 blocks：legacy 投影不动 id/type/markerMeta，
+    // owned 与 blocks 对标签索引等价，但同源派生免去"两张图对不上"的疑虑（AI review #400-2）
+    labels: buildMarkerLabelIndex(blocks),
     markerById: new Map(blocks.filter(isMarkerBlock).map((b) => [b.id, b])),
     pageMap: () => pageMapPromise ??= getEstimatedPageMap(productionId, versionId, loaded.state),
   };
@@ -100,8 +102,16 @@ function serializeRange(index: ScriptIndex, range: Block[]): string {
   return serializeBlocksToDialect(range, index.characters, { labelByMarkerId: index.labels.labelByMarkerId });
 }
 
+/** 页码失败降级为"无页码"，但必须留痕——静默吞错会让 page_map 回归在线上隐形（AI review #400-1）。 */
+function pageMapSafe(index: ScriptIndex): Promise<Record<string, number>> {
+  return index.pageMap().catch((err) => {
+    console.error("[script-tools] 估算页码读取失败（本次输出降级为无页码）:", err);
+    return {};
+  });
+}
+
 async function pageSpanOf(index: ScriptIndex, range: Block[]): Promise<string | null> {
-  const pm = await index.pageMap().catch(() => ({} as Record<string, number>));
+  const pm = await pageMapSafe(index);
   const pages = range.filter((b) => !isMarkerBlock(b)).map((b) => pm[b.id]).filter((p): p is number => typeof p === "number");
   if (pages.length === 0) return null;
   const lo = Math.min(...pages);
@@ -212,7 +222,7 @@ export async function scriptReadWindow(
   const range = index.blocks.slice(start, end);
 
   const anchor = index.blocks[idx];
-  const pm = await index.pageMap().catch(() => ({} as Record<string, number>));
+  const pm = await pageMapSafe(index);
   const page = pm[anchor.id];
   const where = isMarkerBlock(anchor) ? markerDesc(index, anchor) : blockLocation(index, anchor);
   const prevHint = start > 0 ? `继续向前：以 [b:${index.blocks[start - 1].id}] 为锚点再调一次` : "已到剧本开头";
@@ -273,7 +283,7 @@ export async function scriptSearch(
   }
   if (hits.length === 0) return neutralizeInjectionTags(`没有找到包含「${q}」的正文块${opts.speaker ? `（说话人过滤：${opts.speaker}）` : ""}。`);
 
-  const pm = await index.pageMap().catch(() => ({} as Record<string, number>));
+  const pm = await pageMapSafe(index);
   const shown = hits.slice(0, limit).map(({ block, from }) => {
     const page = pm[block.id];
     const who = block.type === "stage" ? "〔舞台提示〕" : (speakerNames(index, block) || "〔无说话人〕");
@@ -297,7 +307,7 @@ export async function scriptReadPage(userId: string, productionId: string, page:
   if (typeof index === "string") return index;
   if (index.blocks.length === 0) return NO_BLOCKS;
 
-  const pm = await index.pageMap().catch(() => ({} as Record<string, number>));
+  const pm = await pageMapSafe(index);
   const pages = Object.values(pm);
   const maxPage = pages.length > 0 ? Math.max(...pages) : 0;
   const idxs = index.blocks
