@@ -5879,16 +5879,21 @@ export default function ScriptEditor({
     ? selectedBlockIds.values().next().value as string | undefined
     : undefined;
   // AI 信封的剧本 focus 上下文（lib/script-focus.ts → AgentPopout chip）：
-  // 多选优先，其次光标所在块；只发指针（块 id），正文由 AI 用读工具自取。
+  // 多选 > 光标 > 视野顶部块（纯浏览兜底——用户没点任何块时也要能感知"正在看哪"）。
+  // 只发指针（块 id），正文由 AI 用读工具自取。
+  const [viewportBlockId, setViewportBlockId] = useState<string | null>(null);
+  const viewportBlockIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (selectedBlockIds.size > 0) {
-      publishScriptFocus({ blockIds: Array.from(selectedBlockIds).slice(0, 5), total: selectedBlockIds.size });
+      publishScriptFocus({ kind: "selection", blockIds: Array.from(selectedBlockIds).slice(0, 5), total: selectedBlockIds.size });
     } else if (focusedId) {
-      publishScriptFocus({ blockIds: [focusedId], total: 1 });
+      publishScriptFocus({ kind: "caret", blockIds: [focusedId], total: 1 });
+    } else if (viewportBlockId) {
+      publishScriptFocus({ kind: "viewport", blockIds: [viewportBlockId], total: 1 });
     } else {
       publishScriptFocus(null);
     }
-  }, [selectedBlockIds, focusedId]);
+  }, [selectedBlockIds, focusedId, viewportBlockId]);
   useEffect(() => () => publishScriptFocus(null), []);
   const selectionAnchorBlockIdRef = useRef<string | null>(null);
   const selectionDetachedRef = useRef(false);
@@ -6081,11 +6086,15 @@ export default function ScriptEditor({
       scriptConfig.textLayoutMode,
       true,
       pageMapDirtyRef.current,
+      // 模版必须传：服务端 page_map（saveEstimatedPageMaps/getEstimatedPageMap）
+      // 按主本模版几何算页，这里漏传就退回 legacy 模版——配了模版的演出会出现
+      // 屏上页码与 AI/搜索页码整页级分叉（52 vs 57 事故）
+      scriptConfig.templateId ?? null,
     );
     pageMapCacheRef.current = cache;
     pageMapDirtyRef.current = null;
     return cache.pageMap;
-  }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode]);
+  }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode, scriptConfig.templateId]);
   const [printDividerPageMap, setPrintDividerPageMap] = useState<Record<string, number> | null>(null);
   const printDividerPageMapRef = useRef<Record<string, number> | null>(null);
   const reloadScriptState = useCallback(async () => {
@@ -6988,6 +6997,13 @@ export default function ScriptEditor({
 
     if (idx < 0) {
       idx = blockAtOffset(Math.max(0, anchorY - container.getBoundingClientRect().top));
+    }
+
+    // 视野顶部块顺手发布给 AI focus 通道（滚动已有 rAF 节流；ref 比对免于每帧 setState）
+    const viewportId = idx >= 0 ? bl[idx]?.id ?? null : null;
+    if (viewportBlockIdRef.current !== viewportId) {
+      viewportBlockIdRef.current = viewportId;
+      setViewportBlockId(viewportId);
     }
 
     const nextSceneId = resolveActiveSceneIdForBlockIndex(idx) ?? activeSceneIdRef.current;

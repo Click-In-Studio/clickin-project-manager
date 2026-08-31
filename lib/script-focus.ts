@@ -10,7 +10,16 @@
 // 信封可被用户摘除、可被伪造——伪造只能谎报「聚焦了哪个块」，读写权限门
 // 都在工具内部，无提权（与 agent-ui-context.ts 既有威胁模型同构）。
 
+export type ScriptFocusKind =
+  /** 显式多选/单选 */
+  | "selection"
+  /** 光标（编辑焦点）所在块 */
+  | "caret"
+  /** 纯浏览：视野顶部的块（无选区无光标时的兜底——「正在看哪」也要能感知） */
+  | "viewport";
+
 export type ScriptFocusInfo = {
+  kind: ScriptFocusKind;
   /** 选中/聚焦的块 id（最多前 5 个） */
   blockIds: string[];
   /** 实际选中总数（多选可能超过 blockIds 携带数） */
@@ -23,7 +32,7 @@ const listeners = new Set<() => void>();
 function same(a: ScriptFocusInfo | null, b: ScriptFocusInfo | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  return a.total === b.total && a.blockIds.length === b.blockIds.length && a.blockIds.every((id, i) => id === b.blockIds[i]);
+  return a.kind === b.kind && a.total === b.total && a.blockIds.length === b.blockIds.length && a.blockIds.every((id, i) => id === b.blockIds[i]);
 }
 
 export function publishScriptFocus(info: ScriptFocusInfo | null): void {

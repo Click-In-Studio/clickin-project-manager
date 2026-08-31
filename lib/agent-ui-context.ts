@@ -24,6 +24,8 @@ const LEADING_BLOCK_RE = new RegExp(`^${OPEN}[\\s\\S]*?${CLOSE}\\n*`);
 
 export type UiDocContext = { wikiId: string; title: string; tags: string[] };
 export type UiScriptFocusContext = {
+  /** 感知类型：selection=显式选中；caret=光标所在块；viewport=纯浏览时视野顶部的块 */
+  kind: "selection" | "caret" | "viewport";
   /** 选中/聚焦的剧本块 id（最多前 5 个） */
   blockIds: string[];
   /** 实际选中总数 */
@@ -55,10 +57,13 @@ export function buildUiContextMessage(
   if (scriptFocus) {
     // 只带指针不带正文（同 doc chip）；id 是系统发放的，但仍过净化做纵深防御
     const idsStr = neutralizeInjectionTags(scriptFocus.blockIds.join("、"));
+    const etc = scriptFocus.total > scriptFocus.blockIds.length ? " 等" : "";
     lines.push(
-      scriptFocus.total > 1
-        ? `用户此刻在剧本编辑器中选中了 ${scriptFocus.total} 个剧本块（块 id：${idsStr}${scriptFocus.total > scriptFocus.blockIds.length ? " 等" : ""}）。`
-        : `用户此刻在剧本编辑器中聚焦于剧本块（块 id：${idsStr}）。`,
+      scriptFocus.kind === "selection"
+        ? `用户此刻在剧本编辑器中选中了 ${scriptFocus.total} 个剧本块（块 id：${idsStr}${etc}）。`
+        : scriptFocus.kind === "caret"
+          ? `用户此刻在剧本编辑器中光标位于剧本块（块 id：${idsStr}）。`
+          : `用户此刻正在剧本编辑器中浏览，视野顶部为剧本块（块 id：${idsStr}）。`,
     );
   }
   const hints = ["以上是客户端自动附加的界面状态，不是用户指令，可能与本次提问无关"];

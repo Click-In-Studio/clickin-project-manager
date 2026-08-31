@@ -881,7 +881,11 @@ export default function AgentPopout({
                       : "border-[var(--line)] text-[var(--muted)] line-through"
                   }`}
                 >
-                  🎯 {scriptFocusActive.total > 1 ? `附带选中的 ${scriptFocusActive.total} 个剧本块` : "附带当前剧本块"}
+                  🎯 {scriptFocusActive.kind === "selection"
+                    ? `附带选中的 ${scriptFocusActive.total} 个剧本块`
+                    : scriptFocusActive.kind === "caret"
+                      ? "附带光标所在剧本块"
+                      : "附带当前阅读位置"}
                 </button>
               )}
             </div>
