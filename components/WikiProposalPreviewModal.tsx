@@ -34,6 +34,25 @@ const ACTION_PERMISSION_VERB: Record<ProposalAction, string> = {
   move: "编辑这篇文档（移动也算编辑）", tag: "编辑这篇文档（设置标签也算编辑）",
 };
 
+// 剧本写提议（/api/agent/script-proposal）：逐块 diff 概要在 notes 里，
+// 方言全文/精修参数原样展示——权限三态行（🔓📝⛔）自带申请入口说明。
+type ScriptProposalPreview = {
+  kind: "rewrite" | "edit_blocks";
+  summary: string;
+  sectionId: string | null;
+  dialect: string | null;
+  updates: Array<Record<string, unknown>>;
+  inserts: Array<Record<string, unknown>>;
+  deletes: string[];
+  hasPermission: boolean;
+  notes: string[];
+  error: string | null;
+};
+
+const SCRIPT_KIND_LABEL: Record<ScriptProposalPreview["kind"], string> = {
+  rewrite: "改写剧本段落", edit_blocks: "修改剧本正文",
+};
+
 // AI propose 的完整预览——聊天栏确认卡片 description 硬上限 512 字符装不下
 // 全文，点「查看详情」弹这个 modal 按 toolCallId 拉取全量内容。不是所有
 // approval 气泡都对应一个 wiki proposal（未来会有别的写工具），找不到就
@@ -50,6 +69,7 @@ export default function WikiProposalPreviewModal({
   toolCallId: string;
 }) {
   const [data, setData] = useState<ProposalPreview | null>(null);
+  const [scriptData, setScriptData] = useState<ScriptProposalPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [accessModalOpen, setAccessModalOpen] = useState(false);
@@ -60,12 +80,19 @@ export default function WikiProposalPreviewModal({
     setLoading(true);
     setNotFound(false);
     setData(null);
-    fetch(`/api/agent/wiki-proposal?toolCallId=${encodeURIComponent(toolCallId)}&productionId=${encodeURIComponent(productionId)}`)
-      .then(async (res) => {
-        if (!alive) return;
-        if (!res.ok) { setNotFound(true); return; }
-        setData(await res.json());
-      })
+    setScriptData(null);
+    // 按钮对所有 approval 常显（省一次预探测），modal 自己按提议类型路由：
+    // 先试 wiki 提议（有预持久化行），404 再试剧本写提议（agent_approval.args 现算），
+    // 都没有才是真空态。
+    (async () => {
+      const wiki = await fetch(`/api/agent/wiki-proposal?toolCallId=${encodeURIComponent(toolCallId)}&productionId=${encodeURIComponent(productionId)}`);
+      if (!alive) return;
+      if (wiki.ok) { setData(await wiki.json()); return; }
+      const script = await fetch(`/api/agent/script-proposal?toolCallId=${encodeURIComponent(toolCallId)}&productionId=${encodeURIComponent(productionId)}`);
+      if (!alive) return;
+      if (script.ok) { setScriptData(await script.json()); return; }
+      setNotFound(true);
+    })()
       .catch(() => { if (alive) setNotFound(true); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
@@ -116,7 +143,7 @@ export default function WikiProposalPreviewModal({
                 AI 提议预览
               </p>
               <h2 id="wiki-proposal-title" style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--ink)" }}>
-                {data ? ACTION_LABEL[data.action] : "文档操作"}
+                {data ? ACTION_LABEL[data.action] : scriptData ? SCRIPT_KIND_LABEL[scriptData.kind] : "提议详情"}
               </h2>
             </div>
             <button
@@ -131,7 +158,58 @@ export default function WikiProposalPreviewModal({
           <div style={{ padding: "18px 24px", overflowY: "auto", flex: 1 }}>
             {loading && <p style={{ fontSize: 13, color: "var(--muted)" }}>加载中…</p>}
             {!loading && notFound && (
-              <p style={{ fontSize: 13, color: "var(--muted)" }}>没有找到对应的提议详情（可能不是文档相关的确认请求，或已过期）。</p>
+              <p style={{ fontSize: 13, color: "var(--muted)" }}>没有找到对应的提议详情（可能已过期，或该类操作暂不支持详情预览）。</p>
+            )}
+            {!loading && scriptData && (
+              <>
+                {scriptData.summary && <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 12px" }}>{scriptData.summary}</p>}
+                {scriptData.error && (
+                  <div style={{ margin: "0 0 14px", padding: "10px 14px", background: "var(--warn-soft)", border: "1px solid var(--warn)", borderRadius: 10 }}>
+                    <p style={{ margin: 0, fontSize: 12, color: "var(--warn)" }}>
+                      按当前剧本状态重新规划失败（卡片弹出后剧本可能已被修改）：{scriptData.error}
+                    </p>
+                  </div>
+                )}
+                {!scriptData.error && !scriptData.hasPermission && (
+                  <div style={{ margin: "0 0 14px", padding: "10px 14px", background: "var(--warn-soft)", border: "1px solid var(--warn)", borderRadius: 10 }}>
+                    <p style={{ margin: 0, fontSize: 12, color: "var(--warn)" }}>
+                      你目前缺少部分权限——批准后调用会被拦截、不会真的生效。缺哪几把钥匙见下方清单（📝 行含申请入口）。
+                    </p>
+                  </div>
+                )}
+                {scriptData.notes.length > 0 && (
+                  <ul style={{ margin: "0 0 14px", paddingLeft: 18, fontSize: 13, color: "var(--ink)", display: "grid", gap: 4 }}>
+                    {scriptData.notes.map((n, i) => <li key={i} style={{ overflowWrap: "anywhere" }}>{n}</li>)}
+                  </ul>
+                )}
+                {scriptData.kind === "rewrite" && scriptData.dialect && (
+                  <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "12px 14px" }}>
+                    <p style={{ margin: "0 0 6px", fontSize: 11, color: "var(--muted)" }}>
+                      提交的整段方言文本（[b:…] 为保留块、[new] 为新增、省略即删除）：
+                    </p>
+                    <pre style={{ margin: 0, fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontFamily: "var(--font-mono, monospace)", maxHeight: 360, overflowY: "auto" }}>
+                      {scriptData.dialect}
+                    </pre>
+                  </div>
+                )}
+                {scriptData.kind === "edit_blocks" && (
+                  <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "12px 14px", fontSize: 12, color: "var(--ink)", display: "grid", gap: 6 }}>
+                    {scriptData.updates.map((u, i) => (
+                      <div key={`u${i}`} style={{ overflowWrap: "anywhere" }}>
+                        改 [{String(u.blockId ?? "")}]：{Object.entries(u).filter(([k]) => k !== "blockId").map(([k, v]) => `${k}=${JSON.stringify(v)}`).join("；")}
+                      </div>
+                    ))}
+                    {scriptData.inserts.map((it, i) => (
+                      <div key={`i${i}`} style={{ overflowWrap: "anywhere" }}>
+                        增（在 [{String(it.afterBlockId ?? "")}] 之后）：{String(it.content ?? "")}
+                      </div>
+                    ))}
+                    {scriptData.deletes.map((id, i) => (
+                      <div key={`d${i}`} style={{ overflowWrap: "anywhere" }}>删 [{id}]</div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
             {!loading && data && (
               <>
