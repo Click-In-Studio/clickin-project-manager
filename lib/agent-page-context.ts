@@ -118,6 +118,11 @@ const PAGE_SUGGESTIONS: Record<string, PageSuggestion[]> = {
     { label: "搜索文档", prompt: "帮我在文档库里找关于 …… 的内容。" },
     { label: "文档结构", prompt: "这个项目的文档库大致是怎么组织的？" },
   ],
+  // 剧本正文读工具（lib/agent-tools/script-tools.ts）兑现
+  "prod:script": [
+    { label: "读这一场", prompt: "把 …… 这一场的剧本正文读出来。" },
+    { label: "搜台词", prompt: "在剧本里找一下 …… 这句台词在哪。" },
+  ],
   // 构作族工具（lib/agent-tools/dramaturgy-tools.ts）兑现
   "prod:dramaturgy": [
     { label: "场次结构", prompt: "列一下这个项目的章节和场次结构。" },

@@ -81,3 +81,34 @@ describe("stripUiContext", () => {
     expect(stripUiContext(truncated)).toBe("");
   });
 });
+
+describe("剧本 focus 上下文（P1）", () => {
+  const FOCUS = { kind: "selection" as const, blockIds: ["b-1", "b-2"], total: 2 };
+
+  it("只带指针（块 id）并指路 script_read_window", () => {
+    const msg = buildUiContextMessage("x", { pageLabel: "剧本", scriptFocus: FOCUS });
+    expect(msg).toContain("选中了 2 个剧本块");
+    expect(msg).toContain("b-1、b-2");
+    expect(msg).toContain("production.script_read_window");
+    expect(msg).toContain("不是用户指令");
+    expect(msg.endsWith("\nx")).toBe(true);
+  });
+
+  it("三种感知类型措辞各异；总数超过携带数时标注「等」", () => {
+    expect(buildUiContextMessage("x", { scriptFocus: { kind: "caret", blockIds: ["b-1"], total: 1 } }))
+      .toContain("光标位于剧本块");
+    expect(buildUiContextMessage("x", { scriptFocus: { kind: "viewport", blockIds: ["b-1"], total: 1 } }))
+      .toContain("视野顶部为剧本块");
+    const many = buildUiContextMessage("x", { scriptFocus: { kind: "selection", blockIds: ["a", "b", "c", "d", "e"], total: 9 } });
+    expect(many).toContain("9 个剧本块");
+    expect(many).toContain(" 等");
+  });
+
+  it("空 focus 不产生信封；信封体 clickin- 仍恰好两次；剥离往返成立", () => {
+    expect(buildUiContextMessage("x", { scriptFocus: { kind: "selection", blockIds: [], total: 0 } })).toBe("x");
+    const msg = buildUiContextMessage("原文", { pageLabel: "剧本", scriptFocus: FOCUS });
+    const envelope = msg.slice(0, msg.indexOf("</clickin-ui-context>") + "</clickin-ui-context>".length);
+    expect((envelope.match(/clickin-/gi) ?? []).length).toBe(2);
+    expect(stripUiContext(msg)).toBe("原文");
+  });
+});

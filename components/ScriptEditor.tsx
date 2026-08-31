@@ -42,6 +42,7 @@ import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
 import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
 import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
 import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script-selection";
+import { publishScriptFocus } from "@/lib/script-focus";
 import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script-insertion-gaps";
 import ProductionTopMenu, {
   ProductionOverflowSubmenuButton,
@@ -54,7 +55,6 @@ import ProductionTopMenu, {
   useProductionToolbarStage,
 } from "@/components/ProductionTopMenu";
 
-import { PrintPaginationMeasure, samePageMap } from "@/components/print/ScriptPrint";
 import ModeSwitch from "@/components/ModeSwitch";
 import { mdToHtml, stagePairRegex } from "@/lib/script-md";
 import { isTextBlock, sameCharacters, shouldHideCharacterLabel, shouldShowCharacterGap, shouldShowSceneEndGap } from "@/lib/script-block-layout";
@@ -5877,6 +5877,23 @@ export default function ScriptEditor({
   const selectedDetailBlockId = selectedBlockIds.size === 1
     ? selectedBlockIds.values().next().value as string | undefined
     : undefined;
+  // AI 信封的剧本 focus 上下文（lib/script-focus.ts → AgentPopout chip）：
+  // 多选 > 光标 > 视野顶部块（纯浏览兜底——用户没点任何块时也要能感知"正在看哪"）。
+  // 只发指针（块 id），正文由 AI 用读工具自取。
+  const [viewportBlockId, setViewportBlockId] = useState<string | null>(null);
+  const viewportBlockIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedBlockIds.size > 0) {
+      publishScriptFocus({ kind: "selection", blockIds: Array.from(selectedBlockIds).slice(0, 5), total: selectedBlockIds.size });
+    } else if (focusedId) {
+      publishScriptFocus({ kind: "caret", blockIds: [focusedId], total: 1 });
+    } else if (viewportBlockId) {
+      publishScriptFocus({ kind: "viewport", blockIds: [viewportBlockId], total: 1 });
+    } else {
+      publishScriptFocus(null);
+    }
+  }, [selectedBlockIds, focusedId, viewportBlockId]);
+  useEffect(() => () => publishScriptFocus(null), []);
   const selectionAnchorBlockIdRef = useRef<string | null>(null);
   const selectionDetachedRef = useRef(false);
   const markerEndedScopeIdsRef = useRef<Set<string>>(new Set());
@@ -5939,8 +5956,6 @@ export default function ScriptEditor({
   const [aboutOpen, setAboutOpen] = useState(false);
   const [pendingLockedMode, setPendingLockedMode] = useState<boolean | null>(null);
   const pendingModeScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
-  const pendingPageMapScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
-  const pendingTextLayoutPageMapRef = useRef(false);
   const [pendingStageDelimiterChange, setPendingStageDelimiterChange] =
     useState<PendingStageDelimiterChange | null>(null);
   const toolbarOpenMenuRef = useRef<ScriptToolbarOpenMenu>(null);
@@ -6068,13 +6083,15 @@ export default function ScriptEditor({
       scriptConfig.textLayoutMode,
       true,
       pageMapDirtyRef.current,
+      // 模版必须传：服务端 page_map（saveEstimatedPageMaps/getEstimatedPageMap）
+      // 按主本模版几何算页，这里漏传就退回 legacy 模版——配了模版的演出会出现
+      // 屏上页码与 AI/搜索页码整页级分叉（52 vs 57 事故）
+      scriptConfig.templateId ?? null,
     );
     pageMapCacheRef.current = cache;
     pageMapDirtyRef.current = null;
     return cache.pageMap;
-  }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode]);
-  const [printDividerPageMap, setPrintDividerPageMap] = useState<Record<string, number> | null>(null);
-  const printDividerPageMapRef = useRef<Record<string, number> | null>(null);
+  }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode, scriptConfig.templateId]);
   const reloadScriptState = useCallback(async () => {
     const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
     const response = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
@@ -6761,55 +6778,12 @@ export default function ScriptEditor({
     scrollContainerBy({ top: delta, behavior: "instant" });
   }, []);
 
-  const updatePrintDividerPageMap = useCallback((nextPageMap: Record<string, number> | null) => {
-    const previousPageMap = printDividerPageMapRef.current;
-    if (previousPageMap === nextPageMap || (nextPageMap && samePageMap(previousPageMap, nextPageMap))) {
-      if (nextPageMap) pendingTextLayoutPageMapRef.current = false;
-      return;
-    }
-    if (pendingTextLayoutPageMapRef.current && nextPageMap) {
-      pendingPageMapScrollAnchorRef.current = captureVirtualScrollAnchor();
-      pendingTextLayoutPageMapRef.current = false;
-    }
-    printDividerPageMapRef.current = nextPageMap;
-    setPrintDividerPageMap(nextPageMap);
-  }, [captureVirtualScrollAnchor]);
-
-  useLayoutEffect(() => {
-    if (display.pageBreaks && printDividerPageMapRef.current) {
-      pendingTextLayoutPageMapRef.current = true;
-    }
-  }, [display.pageBreaks, scriptConfig.textLayoutMode]);
-
-  useEffect(() => {
-    if (pendingTextLayoutPageMapRef.current && display.pageBreaks) return;
-    pendingTextLayoutPageMapRef.current = false;
-    updatePrintDividerPageMap(null);
-  }, [
-    display.pageBreaks,
-    blocks,
-    characters,
-    scenes,
-    scriptConfig.pageLayout,
-    scriptConfig.textLayoutMode,
-    scriptConfig.stageDelimOpen,
-    scriptConfig.stageDelimClose,
-    updatePrintDividerPageMap,
-  ]);
-
   useLayoutEffect(() => {
     const anchor = pendingModeScrollAnchorRef.current;
     if (!anchor) return;
     pendingModeScrollAnchorRef.current = null;
     restoreVirtualScrollAnchor(anchor);
   }, [isLockedMode, scriptConfig.textLayoutMode, restoreVirtualScrollAnchor]);
-
-  useLayoutEffect(() => {
-    const anchor = pendingPageMapScrollAnchorRef.current;
-    if (!anchor) return;
-    pendingPageMapScrollAnchorRef.current = null;
-    restoreVirtualScrollAnchor(anchor);
-  }, [printDividerPageMap, restoreVirtualScrollAnchor]);
 
   const requestVirtualWindowRefresh = useCallback(() => {
     pendingVirtualScrollAnchorRef.current = captureVirtualScrollAnchor();
@@ -6975,6 +6949,13 @@ export default function ScriptEditor({
 
     if (idx < 0) {
       idx = blockAtOffset(Math.max(0, anchorY - container.getBoundingClientRect().top));
+    }
+
+    // 视野顶部块顺手发布给 AI focus 通道（滚动已有 rAF 节流；ref 比对免于每帧 setState）
+    const viewportId = idx >= 0 ? bl[idx]?.id ?? null : null;
+    if (viewportBlockIdRef.current !== viewportId) {
+      viewportBlockIdRef.current = viewportId;
+      setViewportBlockId(viewportId);
     }
 
     const nextSceneId = resolveActiveSceneIdForBlockIndex(idx) ?? activeSceneIdRef.current;
@@ -10666,20 +10647,6 @@ export default function ScriptEditor({
 
       `}</style>
 
-      {display.pageBreaks && (
-        <PrintPaginationMeasure
-          blocks={legacyProjectedBlocks}
-          characters={characters}
-          scenes={scenes}
-          pageLayout={scriptConfig.pageLayout}
-          stageDelimOpen={scriptConfig.stageDelimOpen}
-          stageDelimClose={scriptConfig.stageDelimClose}
-          textLayoutMode={scriptConfig.textLayoutMode}
-          templateId={scriptConfig.templateId}
-          onPageMapChange={updatePrintDividerPageMap}
-        />
-      )}
-
       {/* Document: 3-column flex — left gutter | script content | right gutter */}
       <div className="flex items-start">
         {/* Offset the script only while the scene detail panel is actually visible. */}
@@ -11027,8 +10994,11 @@ export default function ScriptEditor({
 
             const sceneStart = ownedSceneId !== null && ownedSceneId !== projectedOwnedPrev?.sceneId;
             const isMarkStart = !!ownedRehearsalId && ownedRehearsalId !== (projectedOwnedPrev?.rehearsalMark ?? null);
-            const dividerPage = printDividerPageMap?.[block.id];
-            const prevDividerPage = prev ? printDividerPageMap?.[prev.id] : undefined;
+            // 分页线改吃估算 pageMap（与服务端 page_map 同源同参、逐块同值）——
+            // 全组页码单一口径（AI/搜索/@提及/分页线同数）。它与打印实测有偏差是
+            // 已接受的事实；「定稿排版时刻回传实测数据覆盖 page_map」挂 issue 另批。
+            const dividerPage = pageMap[block.id];
+            const prevDividerPage = prev ? pageMap[prev.id] : undefined;
             const pageBreak = !!(
               display.pageBreaks &&
               bIdx > 0 &&
