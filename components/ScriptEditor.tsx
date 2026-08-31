@@ -55,7 +55,6 @@ import ProductionTopMenu, {
   useProductionToolbarStage,
 } from "@/components/ProductionTopMenu";
 
-import { PrintPaginationMeasure, samePageMap } from "@/components/print/ScriptPrint";
 import ModeSwitch from "@/components/ModeSwitch";
 import { mdToHtml, stagePairRegex } from "@/lib/script-md";
 import { isTextBlock, sameCharacters, shouldHideCharacterLabel, shouldShowCharacterGap, shouldShowSceneEndGap } from "@/lib/script-block-layout";
@@ -5957,8 +5956,6 @@ export default function ScriptEditor({
   const [aboutOpen, setAboutOpen] = useState(false);
   const [pendingLockedMode, setPendingLockedMode] = useState<boolean | null>(null);
   const pendingModeScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
-  const pendingPageMapScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
-  const pendingTextLayoutPageMapRef = useRef(false);
   const [pendingStageDelimiterChange, setPendingStageDelimiterChange] =
     useState<PendingStageDelimiterChange | null>(null);
   const toolbarOpenMenuRef = useRef<ScriptToolbarOpenMenu>(null);
@@ -6095,8 +6092,6 @@ export default function ScriptEditor({
     pageMapDirtyRef.current = null;
     return cache.pageMap;
   }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode, scriptConfig.templateId]);
-  const [printDividerPageMap, setPrintDividerPageMap] = useState<Record<string, number> | null>(null);
-  const printDividerPageMapRef = useRef<Record<string, number> | null>(null);
   const reloadScriptState = useCallback(async () => {
     const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
     const response = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
@@ -6783,55 +6778,12 @@ export default function ScriptEditor({
     scrollContainerBy({ top: delta, behavior: "instant" });
   }, []);
 
-  const updatePrintDividerPageMap = useCallback((nextPageMap: Record<string, number> | null) => {
-    const previousPageMap = printDividerPageMapRef.current;
-    if (previousPageMap === nextPageMap || (nextPageMap && samePageMap(previousPageMap, nextPageMap))) {
-      if (nextPageMap) pendingTextLayoutPageMapRef.current = false;
-      return;
-    }
-    if (pendingTextLayoutPageMapRef.current && nextPageMap) {
-      pendingPageMapScrollAnchorRef.current = captureVirtualScrollAnchor();
-      pendingTextLayoutPageMapRef.current = false;
-    }
-    printDividerPageMapRef.current = nextPageMap;
-    setPrintDividerPageMap(nextPageMap);
-  }, [captureVirtualScrollAnchor]);
-
-  useLayoutEffect(() => {
-    if (display.pageBreaks && printDividerPageMapRef.current) {
-      pendingTextLayoutPageMapRef.current = true;
-    }
-  }, [display.pageBreaks, scriptConfig.textLayoutMode]);
-
-  useEffect(() => {
-    if (pendingTextLayoutPageMapRef.current && display.pageBreaks) return;
-    pendingTextLayoutPageMapRef.current = false;
-    updatePrintDividerPageMap(null);
-  }, [
-    display.pageBreaks,
-    blocks,
-    characters,
-    scenes,
-    scriptConfig.pageLayout,
-    scriptConfig.textLayoutMode,
-    scriptConfig.stageDelimOpen,
-    scriptConfig.stageDelimClose,
-    updatePrintDividerPageMap,
-  ]);
-
   useLayoutEffect(() => {
     const anchor = pendingModeScrollAnchorRef.current;
     if (!anchor) return;
     pendingModeScrollAnchorRef.current = null;
     restoreVirtualScrollAnchor(anchor);
   }, [isLockedMode, scriptConfig.textLayoutMode, restoreVirtualScrollAnchor]);
-
-  useLayoutEffect(() => {
-    const anchor = pendingPageMapScrollAnchorRef.current;
-    if (!anchor) return;
-    pendingPageMapScrollAnchorRef.current = null;
-    restoreVirtualScrollAnchor(anchor);
-  }, [printDividerPageMap, restoreVirtualScrollAnchor]);
 
   const requestVirtualWindowRefresh = useCallback(() => {
     pendingVirtualScrollAnchorRef.current = captureVirtualScrollAnchor();
@@ -10695,20 +10647,6 @@ export default function ScriptEditor({
 
       `}</style>
 
-      {display.pageBreaks && (
-        <PrintPaginationMeasure
-          blocks={legacyProjectedBlocks}
-          characters={characters}
-          scenes={scenes}
-          pageLayout={scriptConfig.pageLayout}
-          stageDelimOpen={scriptConfig.stageDelimOpen}
-          stageDelimClose={scriptConfig.stageDelimClose}
-          textLayoutMode={scriptConfig.textLayoutMode}
-          templateId={scriptConfig.templateId}
-          onPageMapChange={updatePrintDividerPageMap}
-        />
-      )}
-
       {/* Document: 3-column flex — left gutter | script content | right gutter */}
       <div className="flex items-start">
         {/* Offset the script only while the scene detail panel is actually visible. */}
@@ -11056,8 +10994,11 @@ export default function ScriptEditor({
 
             const sceneStart = ownedSceneId !== null && ownedSceneId !== projectedOwnedPrev?.sceneId;
             const isMarkStart = !!ownedRehearsalId && ownedRehearsalId !== (projectedOwnedPrev?.rehearsalMark ?? null);
-            const dividerPage = printDividerPageMap?.[block.id];
-            const prevDividerPage = prev ? printDividerPageMap?.[prev.id] : undefined;
+            // 分页线改吃估算 pageMap（与服务端 page_map 同源同参、逐块同值）——
+            // 全组页码单一口径（AI/搜索/@提及/分页线同数）。它与打印实测有偏差是
+            // 已接受的事实；「定稿排版时刻回传实测数据覆盖 page_map」挂 issue 另批。
+            const dividerPage = pageMap[block.id];
+            const prevDividerPage = prev ? pageMap[prev.id] : undefined;
             const pageBreak = !!(
               display.pageBreaks &&
               bIdx > 0 &&
