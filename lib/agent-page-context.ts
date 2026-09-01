@@ -84,8 +84,8 @@ const PAGE_LABELS: Record<string, string> = {
   "prod:contacts": "人员通讯录",
   "prod:access-requests": "加入申请",
   "prod:reports": "报告",
-  "prod:announcements": "项目公告",
-  "prod:notifications": "项目通知",
+  "prod:announcements": "我的通知",
+  "prod:notifications": "我的通知",
   "prod:finance": "财务",
   "prod:admin": "管理后台",
 };

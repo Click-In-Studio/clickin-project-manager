@@ -52,7 +52,6 @@ const PRODUCTION_NAV = [
   { label: "任务", hint: "技术需求 · 跟进", path: "tasks", symbol: "任" },
   { label: "报告", hint: "演出报告 · 归档", path: "reports", symbol: "报" },
   { label: "文档", hint: "wiki · 团队知识库", path: "wiki", symbol: "文" },
-  { label: "通知", hint: "告知 · 确认 · 处理", path: "notifications", symbol: "通" },
   { label: "财务", hint: "预算 · 支出 · 关联", path: "finance", symbol: "财" },
   { label: "物料", hint: "道具 · 服装 · 设备", path: "materials", symbol: "物" },
   { label: "数字资产", hint: "文件 · 图纸 · 音视频", path: "assets", symbol: "数" },
@@ -1445,7 +1444,15 @@ export default function AppShell({ session, productions, canCreateProduction = f
                 <>
                   <NavGroup label="项目总览" color="overview" folded={productionSidebarContentFolded} first />
                   <NavItem href={`/production/${productionId}`} symbol="⌂" label="我的工作" hint="今天与我有关" active={activeModule === ""} folded={productionSidebarContentFolded} />
-                  <NavItem href={navHref("announcements")} symbol="⊟" label="项目公告" hint="公告 · 置顶 · 全览" active={isModuleActive("announcements")} folded={productionSidebarContentFolded} />
+                  <NavItem
+                    href={navHref("notifications")}
+                    symbol="◉"
+                    label="我的通知"
+                    hint="项目公告 · 个人通知"
+                    active={isModuleActive("notifications") || isModuleActive("announcements")}
+                    badge={unreadCount}
+                    folded={productionSidebarContentFolded}
+                  />
                   <NavItem href={navHref("access-requests")} symbol="◑" label="资源申请" hint="权限申请 · 待审批" active={isModuleActive("access-requests")} folded={productionSidebarContentFolded} />
 
                   <NavGroup label="创作侧" color="script" folded={productionSidebarContentFolded} />
@@ -1474,7 +1481,6 @@ export default function AppShell({ session, productions, canCreateProduction = f
                       side="stage"
                       active={isModuleActive(item.path)}
                       badge={
-                        item.path === "notifications" ? unreadCount :
                         item.path === "tasks" ? pendingTasks :
                         item.path === "reports" ? unreadReports :
                         undefined
