@@ -152,7 +152,6 @@ import {
   type WikiCreateBaselineSnapshot,
 } from "./wiki-create-baseline-snapshot";
 import {
-  isAssetUploadZonePreMigrationSchema,
   createAssetUploadZonePreMigrationData,
   ASSET_UPLOAD_ZONE_SNAPSHOT_PATH,
   type AssetUploadZoneSnapshot,
@@ -732,14 +731,24 @@ export async function setup() {
 
   // 素材上传资格区间回填（批D 收紧补偿）：工厂裸 SQL 造三形态项目（区间全空 /
   // role 已持键 / dept 已持键），只碰 production_role_permission，放最后即可。
-  if (await isAssetUploadZonePreMigrationSchema(pool)) {
+  // 无谓词——数据回填在空库（CI）测不出"未迁移形态"，数据谓词恒 false 会让
+  // invariance 整段跳过；本迁移按项目 scoped 且幂等，无条件重放安全。
+  {
     const uploadZoneSnapshot = await createAssetUploadZonePreMigrationData(pool, TEST_USER);
-    await writeFile(ASSET_UPLOAD_ZONE_SNAPSHOT_PATH, JSON.stringify(uploadZoneSnapshot));
     const migrationSql = await readFile(
       path.resolve(process.cwd(), "db/migrate-asset-upload-zone-backfill.sql"),
       "utf8",
     );
     await pool.query(migrationSql);
+    // 幂等二跑（AI review #404）：紧接着重放一次，各语句插入行数记进快照，
+    // 迁移测试断言总数为 0。放 setup 里而非测试里——测试期并发工厂会裸造
+    // 无键 role，届时重放会污染别家夹具。
+    const secondRun = await pool.query(migrationSql);
+    const secondResults = Array.isArray(secondRun) ? secondRun : [secondRun];
+    uploadZoneSnapshot.secondRunInsertedRows = secondResults.reduce(
+      (sum, r) => sum + (r.rowCount ?? 0), 0,
+    );
+    await writeFile(ASSET_UPLOAD_ZONE_SNAPSHOT_PATH, JSON.stringify(uploadZoneSnapshot));
   }
 }
 

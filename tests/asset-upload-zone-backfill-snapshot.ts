@@ -1,8 +1,9 @@
 /**
  * Pre-migration snapshot for migrate-asset-upload-zone-backfill invariance tests.
  *
- * isMigrationNeeded: 存在「所属项目的 dept/role 区间均不含 node:asset/*@create」
- *   的非弃用 role（批D 收紧后存量项目的形态；模版项目区间至少一处持键）。
+ * 无谓词，setup 无条件建厂+迁移：数据回填在空库（CI）测不出"未迁移形态"，
+ * 数据谓词恒 false 会让 invariance 在最需要它的 PR CI 里整段跳过；本迁移
+ * 按项目 scoped 且幂等，重放对已迁移库无副作用，无条件重放是安全的。
  * createPreMigrationData: 造三个项目——
  *   legacy   区间全空（回填目标：普通 role 得键、弃用 role 不得）
  *   roleCtl  某 role 区间已持键（对照：同项目无键 role 不得被补）
@@ -28,26 +29,9 @@ export type AssetUploadZoneSnapshot = {
   roleCtlKeylessRoleId: string;
   deptCtlProdId: string;
   deptCtlKeylessRoleId: string;
+  /** 幂等验证：global-setup 里第二次执行迁移 SQL 的总插入行数（应为 0）。 */
+  secondRunInsertedRows?: number;
 };
-
-export async function isAssetUploadZonePreMigrationSchema(pool: Pool): Promise<boolean> {
-  const { rows } = await pool.query(
-    `SELECT 1 FROM production_role r
-     WHERE NOT r.is_deprecated
-       AND NOT EXISTS (
-         SELECT 1 FROM production_role_permission prp
-         JOIN production_role r2 ON r2.id = prp.role_id
-         WHERE r2.production_id = r.production_id AND prp.permission_key = $1
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM production_dept_permission pdp
-         WHERE pdp.production_id = r.production_id AND pdp.permission_key = $1
-       )
-     LIMIT 1`,
-    [ASSET_UPLOAD_ZONE_KEY],
-  );
-  return rows.length > 0;
-}
 
 export async function createAssetUploadZonePreMigrationData(
   pool: Pool,
@@ -58,6 +42,14 @@ export async function createAssetUploadZonePreMigrationData(
     await pool.query("INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)", [
       prodId, faker.company.name(), testUserId,
     ]);
+    // 主本随建（script-view 迁移的整体性断言要求每个演出都有主本；
+    // 本块排在 script-view 迁移之后，裸 production 不会再被它回填）
+    const viewId = `sv_${faker.string.alphanumeric(10).toLowerCase()}`;
+    await pool.query(
+      "INSERT INTO script_view (id, production_id, name) VALUES ($1, $2, '标准本')",
+      [viewId, prodId],
+    );
+    await pool.query("UPDATE production SET master_view_id = $1 WHERE id = $2", [viewId, prodId]);
     return prodId;
   };
   const makeRole = async (prodId: string, deprecated = false): Promise<string> => {

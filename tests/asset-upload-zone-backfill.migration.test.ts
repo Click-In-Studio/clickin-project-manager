@@ -67,6 +67,19 @@ describe("invariance verification", () => {
     expect(await roleHasKey(snapshot!.legacyRoleId)).toBe(true);
   });
 
+  it.skipIf(!snapshot)("legacy role holds exactly one zone row for the key", async () => {
+    const { rows } = await getPool().query<{ n: string }>(
+      "SELECT count(*) AS n FROM production_role_permission WHERE role_id = $1 AND permission_key = $2",
+      [snapshot!.legacyRoleId, ASSET_UPLOAD_ZONE_KEY],
+    );
+    expect(Number(rows[0].n)).toBe(1);
+  });
+
+  it.skipIf(!snapshot)("re-running the migration inserts zero rows (idempotent)", () => {
+    // global-setup 紧接首跑重放了一次迁移 SQL，各语句插入行数之和记进快照。
+    expect(snapshot!.secondRunInsertedRows).toBe(0);
+  });
+
   it.skipIf(!snapshot)("legacy production: deprecated role is NOT backfilled", async () => {
     expect(await roleHasKey(snapshot!.legacyDeprecatedRoleId)).toBe(false);
   });
