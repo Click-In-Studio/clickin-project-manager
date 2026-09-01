@@ -1,6 +1,7 @@
 "use client";
 
 import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+import ApprovalFlowDesigner from "@/components/ApprovalFlowDesigner";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
@@ -178,6 +179,8 @@ function ApprovalFlow({ req, compact = false }: {
   // 时间线的组装逻辑（含超时、撤回、被顶掉、存量无链等降级分支）在 lib/approval-timeline.ts，
   // 由 tests/approval-timeline.test.ts 覆盖——这些状态在页面上极难手工复现。
   const nodes: TimelineNode[] = useMemo(() => buildApprovalTimeline(req), [req]);
+  const currentStageIndex = req.currentStage ? STAGE_ORDER.indexOf(req.currentStage) : -1;
+  const remainingStages = currentStageIndex >= 0 ? STAGE_ORDER.slice(currentStageIndex + 1) : [];
   // 姓名与角色随审批 DTO 一起下来（people），不再联查通讯录：那条路拉全员邮箱手机号
   // 只为取个名，还覆盖不到不在成员名单里的审批人（祖先部门 POC、存量演出 owner）。
   const personOf = (userId: string) => req.people[userId];
@@ -257,9 +260,22 @@ function ApprovalFlow({ req, compact = false }: {
       </div>
 
       {isPending && (
-        <p style={{ margin: "12px 0 0 29px", padding: "9px 11px", borderRadius: 8, background: "var(--paper)", color: "var(--muted)", fontSize: 10, lineHeight: 1.55 }}>
-          后续审批人会依据届时的汇报关系、资源负责人和制作团队配置动态计算。
-        </p>
+        <div className={styles.approvalRouteForecast}>
+          <div>
+            <b>{remainingStages.length > 0 ? "可能的后续升级路径" : "当前节点可终局处理"}</b>
+            <span>动态升级链 · 非强制逐级审批</span>
+          </div>
+          {remainingStages.length > 0 && (
+            <div className={styles.approvalRouteForecastStages}>
+              {remainingStages.map((stage) => <span key={stage}>{APPROVAL_STAGE_LABELS[stage]}</span>)}
+            </div>
+          )}
+          <p>
+            {remainingStages.length > 0
+              ? "仅在当前处理人向上转交或超时升级时进入后续节点；具体人员会按届时的组织关系与资源治理配置重新匹配。"
+              : "当前处理人批准后流程会直接结束，不会继续经过模板中的 PM、抄送或资源处理节点。"}
+          </p>
+        </div>
       )}
     </section>
   );
@@ -554,7 +570,7 @@ function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel,
 
 // ─── Main ──────────────────────────────────────────────────────────────────────
 
-type Tab = "mine" | "pending";
+type Tab = "mine" | "pending" | "flows";
 type RightPanel = { type: "form" } | { type: "detail"; req: ApprovalRequest; canAct: boolean } | null;
 
 interface Props {
@@ -663,8 +679,8 @@ export default function AccessRequestsClient({ productionId, productionName }: P
   }
 
   const pendingCount = pendingApprovals.length;
-  const currentList = tab === "mine" ? myRequests : pendingApprovals;
-  const isLoading   = tab === "mine" ? loadingMine : loadingPending;
+  const currentList = tab === "mine" ? myRequests : tab === "pending" ? pendingApprovals : [];
+  const isLoading   = tab === "mine" ? loadingMine : tab === "pending" ? loadingPending : false;
 
   function selectRequest(req: ApprovalRequest, canAct: boolean) {
     setRightPanel({ type: "detail", req, canAct });
@@ -820,12 +836,18 @@ export default function AccessRequestsClient({ productionId, productionName }: P
       </div>
 
       {/* ── Panel（通知页同款）：tab + 分栏 ── */}
-      <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column" }}>
+      <section style={{
+        background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22,
+        height: tab === "flows" ? "auto" : "calc(100vh - 320px)",
+        minHeight: tab === "flows" ? 980 : 460,
+        display: "flex", flexDirection: "column",
+      }}>
       {/* Tab strip */}
       <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--line)", marginBottom: 20 }}>
         {([
           ["mine",    "我的申请"] as const,
           ["pending", `待审批${pendingCount > 0 ? ` (${pendingCount})` : ""}`] as const,
+          ["flows",   "流程设置"] as const,
         ]).map(([t, label]) => (
           <button
             key={t}
@@ -843,6 +865,11 @@ export default function AccessRequestsClient({ productionId, productionName }: P
           </button>
         ))}
       </div>
+
+      {tab === "flows" ? (
+        <ApprovalFlowDesigner />
+      ) : (
+      <>
 
       {/* ── Mobile ── */}
       <div className={styles.mobileOnly}>
@@ -945,6 +972,8 @@ export default function AccessRequestsClient({ productionId, productionName }: P
           </div>
         </div>
       </div>
+      </>
+      )}
       </section>
     </div>
   );

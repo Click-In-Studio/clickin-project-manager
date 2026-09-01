@@ -55,12 +55,14 @@ function at(start: Date, dayOffset: number, hour: number, minute = 0) {
 
 async function main() {
   const userResult = await pool.query<{ id: string; name: string }>(
-    // 显示名走 user_profile（identity 层），不再 join feishu_user——PR #234 之后
-    // feishu_user 只是同步源，不是取名的路径。
+    // 只从真实登录身份中选本地开发者。按 app_user.created_at 取“最新用户”会在
+    // seed 第一次插入虚拟成员后污染下一次运行，把虚拟资源负责人误当成项目 Owner。
+    // 显示名仍走 user_profile；user_platform_identity 只负责证明它是登录身份。
     `SELECT au.id, COALESCE(NULLIF(up.display_name, ''), up.name, '本地用户') AS name
      FROM app_user au
+     JOIN user_platform_identity upi ON upi.user_id = au.id AND upi.is_login_method = true
      LEFT JOIN user_profile up ON up.user_id = au.id
-     ORDER BY au.created_at DESC
+     ORDER BY upi.created_at DESC
      LIMIT 1`,
   );
   const user = userResult.rows[0];
@@ -120,6 +122,15 @@ async function main() {
     { id: "30000000-0000-4000-8000-000000000003", name: "苏禾", deptIndex: 4 },
     { id: "30000000-0000-4000-8000-000000000004", name: "林默", deptIndex: 6 },
   ].map((member, index) => ({ ...member, roles: [projectRoles[index % projectRoles.length]] }));
+  // 审批演示不能只有「申请人 + 当前登录 owner」两个人，否则界面看起来像审批流
+  // 根本没做。下面四位只服务于 demo 的历史节点：分别代表直属上级、PM、制作人、
+  // 资源负责人。真实产品仍由组织关系和资源治理配置动态匹配。
+  const demoApprovers = [
+    { id: "31000000-0000-4000-8000-000000000001", name: "周衡", roles: ["灯光主管"] },
+    { id: "31000000-0000-4000-8000-000000000002", name: "姜予安", roles: ["项目经理"] },
+    { id: "31000000-0000-4000-8000-000000000003", name: "唐澄", roles: ["制作人"] },
+    { id: "31000000-0000-4000-8000-000000000004", name: "周岑", roles: ["资源负责人"] },
+  ];
 
   // owner 的 role 只是显示（权限走 isOwner 旁路），取项目名单的前几个即可。
   // upsert 而不是 INSERT/UPDATE 二选一：createProduction 现在自己会落 owner 的
@@ -168,6 +179,22 @@ async function main() {
       [PRODUCTION_ID, member.id, member.roles],
     );
   }
+  for (const approver of demoApprovers) {
+    await pool.query("INSERT INTO app_user (id) VALUES ($1) ON CONFLICT (id) DO NOTHING", [approver.id]);
+    await pool.query(
+      `INSERT INTO user_profile (user_id, name, display_name, bio)
+       VALUES ($1,$2,$2,'《雾港来信》虚拟审批演示成员')
+       ON CONFLICT (user_id) DO UPDATE SET name=EXCLUDED.name, display_name=EXCLUDED.display_name, bio=EXCLUDED.bio`,
+      [approver.id, approver.name],
+    );
+    await pool.query(
+      `INSERT INTO production_member (production_id, user_id, roles, status, supervisor_id)
+       VALUES ($1,$2,$3::text[],'active',$4)
+       ON CONFLICT (production_id, user_id) DO UPDATE
+       SET roles=EXCLUDED.roles, status=EXCLUDED.status, supervisor_id=EXCLUDED.supervisor_id`,
+      [PRODUCTION_ID, approver.id, approver.roles, user.id],
+    );
+  }
   await pool.query(
     `INSERT INTO production_member_tag_assignment (production_id, user_id, tag_id)
      SELECT $1, $2, id FROM production_member_tag WHERE production_id IS NULL AND name = '正式'
@@ -180,9 +207,14 @@ async function main() {
     [PRODUCTION_ID],
   );
   const versionId = versionResult.rows[0].active_version_id;
+  // version 的 name / description / tags 已在 migrate-version-retire.sql 退役；
+  // 用户看到的“本子”名称现在属于 script_view。seed 继续写旧列会在重建 demo
+  // 中途失败，留下只有项目壳、没有演示内容的半成品。
   await pool.query(
-    "UPDATE version SET name = '排练稿 V1', description = '演示剧本：含章节、场次、角色、舞台提示与对白', tags = ARRAY['演示','排练稿'] WHERE id = $1",
-    [versionId],
+    `UPDATE script_view
+     SET name = '排练稿 V1'
+     WHERE id = (SELECT master_view_id FROM production WHERE id = $1)`,
+    [PRODUCTION_ID],
   );
 
   const scenes = [
@@ -452,13 +484,51 @@ async function main() {
   );
 
   // 时长只能取 lib/approval-ttl 的档位（服务端白名单同一份表），别写 "30 days"
+  const approvalTime = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
   const pendingApprovals = [
-    ["20000000-0000-4000-8000-000000000002", demoMembers[0].id, "cue_list", "demo-cuelist-lx", "edit", "ttl", "7 days", "灯光联排期间需要编辑 Cue 表并记录现场调整。"],
-    ["20000000-0000-4000-8000-000000000003", demoMembers[1].id, "event", "*", "publish", "ttl", "1 mon", "音响组需要发布技术测试事件并同步 Call。"],
-    ["20000000-0000-4000-8000-000000000004", demoMembers[2].id, "scene", "demo-scene-2", "view", "ttl", "1 day", "服装设计需要查看第二场文本以核对快速换装点。"],
-    ["20000000-0000-4000-8000-000000000005", demoMembers[3].id, "scene", "*", "view", "permanent", null, "演员申请长期查看排练文本。"],
+    {
+      id: "20000000-0000-4000-8000-000000000002", subjectId: demoMembers[0].id,
+      resourceType: "cue_list", resourceId: "demo-cuelist-lx", permissionLevel: "edit",
+      grantType: "ttl", ttlDuration: "7 days", note: "灯光联排期间需要编辑 Cue 表并记录现场调整。",
+      currentStage: "dept_poc", currentDepth: 0,
+      chain: [
+        { phase: "supervisor", stage: "supervisor", depth: 0, approverIds: [demoApprovers[0].id], notifiedAt: approvalTime(5), canFinalize: false, action: "escalated", actorId: demoApprovers[0].id, actedAt: approvalTime(4), escalationReason: "forwarded", comment: "现场需求属实，转项目管理确认权限范围。" },
+        { phase: "resource", stage: "dept_poc", depth: 0, approverIds: [user.id], notifiedAt: approvalTime(4), canFinalize: true },
+      ],
+    },
+    {
+      id: "20000000-0000-4000-8000-000000000003", subjectId: demoMembers[1].id,
+      resourceType: "event", resourceId: "*", permissionLevel: "publish",
+      grantType: "ttl", ttlDuration: "1 mon", note: "音响组需要发布技术测试事件并同步 Call。",
+      currentStage: "holder", currentDepth: 0,
+      chain: [
+        { phase: "supervisor", stage: "supervisor", depth: 0, approverIds: [demoApprovers[1].id], notifiedAt: approvalTime(6), canFinalize: false, action: "escalated", actorId: demoApprovers[1].id, actedAt: approvalTime(5), escalationReason: "forwarded" },
+        { phase: "resource", stage: "holder", depth: 0, approverIds: [user.id], notifiedAt: approvalTime(5), canFinalize: true },
+      ],
+    },
+    {
+      id: "20000000-0000-4000-8000-000000000004", subjectId: demoMembers[2].id,
+      resourceType: "scene", resourceId: "demo-scene-2", permissionLevel: "view",
+      grantType: "ttl", ttlDuration: "1 day", note: "服装设计需要查看第二场文本以核对快速换装点。",
+      currentStage: "owner", currentDepth: 0,
+      chain: [
+        { phase: "supervisor", stage: "supervisor", depth: 0, approverIds: [demoApprovers[0].id], notifiedAt: approvalTime(8), canFinalize: false, action: "escalated", actorId: demoApprovers[0].id, actedAt: approvalTime(7), escalationReason: "forwarded" },
+        { phase: "resource", stage: "dept_poc", depth: 0, approverIds: [demoApprovers[1].id], notifiedAt: approvalTime(7), canFinalize: true, action: "escalated", actorId: demoApprovers[1].id, actedAt: approvalTime(6), escalationReason: "forwarded", comment: "涉及未公开文本，提交 Owner 终审。" },
+        { phase: "resource", stage: "owner", depth: 0, approverIds: [user.id], notifiedAt: approvalTime(6), canFinalize: true },
+      ],
+    },
+    {
+      id: "20000000-0000-4000-8000-000000000005", subjectId: demoMembers[3].id,
+      resourceType: "scene", resourceId: "*", permissionLevel: "view",
+      grantType: "permanent", ttlDuration: null, note: "演员申请长期查看排练文本。",
+      currentStage: "producer", currentDepth: 0,
+      chain: [
+        { phase: "supervisor", stage: "supervisor", depth: 0, approverIds: [demoApprovers[0].id], notifiedAt: approvalTime(9), canFinalize: false, action: "escalated", actorId: demoApprovers[0].id, actedAt: approvalTime(8), escalationReason: "forwarded" },
+        { phase: "resource", stage: "producer", depth: 0, approverIds: [user.id], notifiedAt: approvalTime(8), canFinalize: true },
+      ],
+    },
   ] as const;
-  for (const [id, subjectId, resourceType, resourceId, permissionLevel, grantType, ttlDuration, note] of pendingApprovals) {
+  for (const approval of pendingApprovals) {
     // 收件箱（listPendingApprovals）与鉴权只读 current_approver_ids / current_stage，
     // 不再解析 escalation_chain——只写链的话这几条待办一条都不会出现在待办列表里。
     await pool.query(
@@ -466,11 +536,13 @@ async function main() {
          (id, production_id, subject_id, type, resource_type, resource_id, resource_sub,
           permission_level, grant_type, ttl_duration, note, status,
           current_stage, current_stage_depth, current_approver_ids, escalation_chain, created_at)
-       VALUES ($1,$2,$3,'resource_access',$4,$5,'*',$6,$7,$8::interval,$9,'pending_supervisor',
-               'supervisor',0,ARRAY[$11]::uuid[],$10::jsonb,now() - interval '2 hours')`,
-      [id, PRODUCTION_ID, subjectId, resourceType, resourceId, permissionLevel, grantType, ttlDuration, note,
-       JSON.stringify([{ phase: "supervisor", approverIds: [user.id], notifiedAt: new Date().toISOString() }]),
-       user.id],
+       VALUES ($1,$2,$3,'resource_access',$4,$5,'*',$6,$7,$8::interval,$9,'pending_resource',
+               $10,$11,ARRAY[$12]::uuid[],$13::jsonb,now() - interval '10 hours')`,
+      [
+        approval.id, PRODUCTION_ID, approval.subjectId, approval.resourceType, approval.resourceId,
+        approval.permissionLevel, approval.grantType, approval.ttlDuration, approval.note,
+        approval.currentStage, approval.currentDepth, user.id, JSON.stringify(approval.chain),
+      ],
     );
   }
 
