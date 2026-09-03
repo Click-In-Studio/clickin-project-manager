@@ -221,8 +221,10 @@ export function stageStatus(stage: ApprovalStageName): "pending_supervisor" | "p
 }
 
 // ─── 各级人选查询 ─────────────────────────────────────────────────────────────
+// 导出给模版流引擎（lib/approval-flow-engine.ts）复用：模版节点的处理人来源
+// 与阶梯级同源解析，「谁是资源持有者/POC/制作人」不能有第二份实现。
 
-async function findProductionOwner(productionId: string): Promise<string | null> {
+export async function findProductionOwner(productionId: string): Promise<string | null> {
   const { rows } = await getPool().query<{ owner_id: string }>(
     `SELECT owner_id FROM production WHERE id = $1`,
     [productionId],
@@ -275,7 +277,7 @@ async function holdsRequestedRows(userId: string, t: ApprovalTarget): Promise<bo
  * 资源持有者：该实例 grants@edit 行的持有人（总表 §0.10）。
  * 结构性资源（scene/character/script 等）无 grants 段，这级自然为空、被跳过。
  */
-async function findResourceHolders(t: ApprovalTarget): Promise<string[]> {
+export async function findResourceHolders(t: ApprovalTarget): Promise<string[]> {
   const { rows } = await getPool().query<{ user_id: string }>(
     `SELECT DISTINCT user_id FROM production_member_grant
      WHERE production_id = $1
@@ -290,7 +292,7 @@ async function findResourceHolders(t: ApprovalTarget): Promise<string[]> {
   return rows.map((r) => r.user_id);
 }
 
-async function findManagingDeptIds(t: ApprovalTarget): Promise<string[]> {
+export async function findManagingDeptIds(t: ApprovalTarget): Promise<string[]> {
   const { rows } = await getPool().query<{ dept_id: string }>(
     `SELECT DISTINCT dept_id FROM resource_dept_manage
      WHERE production_id = $1
@@ -302,7 +304,7 @@ async function findManagingDeptIds(t: ApprovalTarget): Promise<string[]> {
   return rows.map((r) => r.dept_id);
 }
 
-async function findPocUserIds(productionId: string, deptIds: string[]): Promise<string[]> {
+export async function findPocUserIds(productionId: string, deptIds: string[]): Promise<string[]> {
   if (deptIds.length === 0) return [];
   const { rows } = await getPool().query<{ user_id: string }>(
     `SELECT DISTINCT user_id FROM production_dept_member
@@ -312,7 +314,7 @@ async function findPocUserIds(productionId: string, deptIds: string[]): Promise<
   return rows.map((r) => r.user_id);
 }
 
-async function findPersonManagers(t: ApprovalTarget): Promise<string[]> {
+export async function findPersonManagers(t: ApprovalTarget): Promise<string[]> {
   const { rows } = await getPool().query<{ user_id: string }>(
     `SELECT DISTINCT user_id FROM resource_person_manage
      WHERE production_id = $1

@@ -1027,6 +1027,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS ppc_prod_org_uniq
 
 -- ── Approval Request（Phase 7）────────────────────────────────────────────────
 
+-- ── 审批流程模版（prA，db/add-approval-flow-template.sql）─────────────────────
+-- 只存不驱动改为引擎消费（prB）：published 模版是提交时编译快照的来源。
+-- 节点结构校验在 lib/approval-flow-template.ts（服务端 create/update 必经）。
+-- 定义在 approval_request 之前：flow_template_id 前向引用。
+CREATE TABLE IF NOT EXISTS approval_flow_template (
+  id             TEXT        PRIMARY KEY,          -- aft_ 前缀 short id（仓库 id 规约）
+  production_id  TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  name           TEXT        NOT NULL CHECK (char_length(name) BETWEEN 1 AND 60),
+  description    TEXT        NOT NULL DEFAULT '',
+  resource_scope TEXT        NOT NULL DEFAULT '',  -- v1 展示字符串；范围匹配语义待扩展
+  status         TEXT        NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
+  nodes          JSONB       NOT NULL DEFAULT '[]'::jsonb,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by     UUID        NULL REFERENCES app_user(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_approval_flow_template_production
+  ON approval_flow_template (production_id);
+
+-- 单一使用中：编译器语义「该项目有已发布模版？」是单数。
+CREATE UNIQUE INDEX IF NOT EXISTS uq_approval_flow_template_published
+  ON approval_flow_template (production_id) WHERE status = 'published';
+
 CREATE TABLE IF NOT EXISTS approval_request (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id   TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
@@ -1068,6 +1092,11 @@ CREATE TABLE IF NOT EXISTS approval_request (
                        )),
   current_stage_depth  INTEGER NOT NULL DEFAULT 0,
   current_approver_ids UUID[]  NOT NULL DEFAULT '{}',
+
+  -- 模版流实例快照（prB，db/add-approval-flow-snapshot.sql）：
+  -- NULL = 阶梯流（存量行与无模版项目），引擎走既有阶梯路径（懒编译不回填）。
+  flow_snapshot    JSONB NULL,
+  flow_template_id TEXT  NULL REFERENCES approval_flow_template(id) ON DELETE SET NULL,
 
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   resolved_at     TIMESTAMPTZ NULL,
@@ -1822,28 +1851,8 @@ CREATE TABLE IF NOT EXISTS production_approval_config (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ── 审批流程模版（prA，db/add-approval-flow-template.sql）─────────────────────
--- 只存不驱动：执行引擎（prB）落地前 published 仅是「使用中」声明标记。
--- 节点结构校验在 lib/approval-flow-template.ts（服务端 create/update 必经）。
-CREATE TABLE IF NOT EXISTS approval_flow_template (
-  id             TEXT        PRIMARY KEY,          -- aft_ 前缀 short id（仓库 id 规约）
-  production_id  TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  name           TEXT        NOT NULL CHECK (char_length(name) BETWEEN 1 AND 60),
-  description    TEXT        NOT NULL DEFAULT '',
-  resource_scope TEXT        NOT NULL DEFAULT '',  -- v1 展示字符串；范围匹配语义归 prB
-  status         TEXT        NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
-  nodes          JSONB       NOT NULL DEFAULT '[]'::jsonb,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_by     UUID        NULL REFERENCES app_user(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_approval_flow_template_production
-  ON approval_flow_template (production_id);
-
--- 单一使用中：编译器语义「该项目有已发布模版？」是单数。
-CREATE UNIQUE INDEX IF NOT EXISTS uq_approval_flow_template_published
-  ON approval_flow_template (production_id) WHERE status = 'published';
+-- （approval_flow_template 表定义已上移到 approval_request 之前——
+--   approval_request.flow_template_id 前向引用它，干净库按序重建时必须先建。）
 
 -- ── Grant Template：已退役（#163，migrate-retire-grant-template.sql）──────────
 -- 全局角色权限模板（production_type × role_name → permission_key）此前在这张表里。

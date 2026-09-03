@@ -33,6 +33,7 @@ function makeRequest(over: Partial<ApprovalRequest> = {}): ApprovalRequest {
     note: null,
     status: "pending_supervisor",
     escalationChain: [],
+    flowSnapshot: null,
     currentStage: null,
     currentApproverIds: [],
     canFinalize: null,
