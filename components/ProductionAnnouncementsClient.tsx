@@ -19,6 +19,7 @@ type Props = {
   productionName: string;
   initialAnnouncements: Announcement[];
   initialReadIds: string[];
+  compact?: boolean;
 };
 
 function fmtDate(iso: string) {
@@ -32,10 +33,10 @@ function fmtDate(iso: string) {
   return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-export default function ProductionAnnouncementsClient({ productionId, productionName, initialAnnouncements, initialReadIds }: Props) {
+export default function ProductionAnnouncementsClient({ productionId, productionName, initialAnnouncements, initialReadIds, compact = false }: Props) {
   const [readIds, setReadIds] = useState<Set<string>>(new Set(initialReadIds));
   const [selected, setSelected] = useState<Announcement | null>(
-    initialAnnouncements[0] ?? null
+    compact ? null : (initialAnnouncements[0] ?? null)
   );
   const markingRef = useRef<Set<string>>(new Set());
 
@@ -50,6 +51,7 @@ export default function ProductionAnnouncementsClient({ productionId, production
 
   // Auto-mark the initially selected announcement on mount
   useEffect(() => {
+    if (compact) return;
     const first = initialAnnouncements[0];
     if (first && !readIds.has(first.id)) doMarkRead(first.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -172,13 +174,74 @@ export default function ProductionAnnouncementsClient({ productionId, production
 
   // Mobile: accordion
   const [mobileExpanded, setMobileExpanded] = useState<string | null>(
-    initialAnnouncements[0]?.id ?? null
+    compact ? null : (initialAnnouncements[0]?.id ?? null)
   );
 
   function handleMobileToggle(a: Announcement) {
     const next = mobileExpanded === a.id ? null : a.id;
     setMobileExpanded(next);
     if (next === a.id && !readIds.has(a.id)) doMarkRead(a.id);
+  }
+
+  if (compact) {
+    return (
+      <section className={styles.notificationColumn} aria-labelledby="project-announcements-heading">
+        <header className={styles.notificationColumnHeader}>
+          <div>
+            <p className={styles.notificationColumnKicker}>PROJECT</p>
+            <h2 id="project-announcements-heading">项目公告</h2>
+            <p>{unreadCount > 0 ? `${unreadCount} 条未读` : "公告均已阅读"}</p>
+          </div>
+          <span className={styles.notificationColumnCount}>{initialAnnouncements.length}</span>
+        </header>
+
+        <div className={styles.notificationColumnScroll}>
+          {initialAnnouncements.length === 0 ? (
+            <div className={styles.emptyState}>
+              暂无项目公告
+              <small>管理员发布的公告将在这里显示</small>
+            </div>
+          ) : (
+            initialAnnouncements.map((a) => {
+              const isExpanded = mobileExpanded === a.id;
+              const isUnread = !readIds.has(a.id);
+              const preview = a.content
+                .replace(/^#+\s+/gm, "")
+                .replace(/\*\*(.+?)\*\*/g, "$1")
+                .replace(/\n+/g, " ")
+                .trim();
+
+              return (
+                <article
+                  key={a.id}
+                  className={`${styles.compactFeedItem} ${isExpanded ? styles.compactFeedItemExpanded : ""}`}
+                >
+                  <button className={styles.compactFeedButton} onClick={() => handleMobileToggle(a)}>
+                    <div className={styles.compactFeedMeta}>
+                      <span className={isUnread ? styles.compactUnreadDot : styles.compactReadDot} />
+                      {a.isPinned && <span className={styles.compactTagDark}>置顶</span>}
+                      {isUnread && <span className={styles.compactTag}>未读</span>}
+                      <time>{fmtDate(a.createdAt)}</time>
+                    </div>
+                    <h3>{a.title}</h3>
+                    {!isExpanded && preview && <p>{preview}</p>}
+                  </button>
+                  {isExpanded && (
+                    <div className={styles.compactFeedDetail}>
+                      {a.content ? (
+                        <WikiMarkdown content={a.content} productionId={productionId} className={styles.bodyText} />
+                      ) : (
+                        <p style={{ color: "var(--muted)", fontSize: 13 }}>（无内容）</p>
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            })
+          )}
+        </div>
+      </section>
+    );
   }
 
   return (

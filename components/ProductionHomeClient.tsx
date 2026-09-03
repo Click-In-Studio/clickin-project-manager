@@ -109,10 +109,10 @@ function ProjectProgressHero({
           </h2>
         )}
         <Link
-          href={`/production/${productionId}/announcements`}
+          href={`/production/${productionId}/notifications`}
           className={styles.progressHeroLink}
         >
-          查看项目公告 →
+          查看我的通知 →
         </Link>
       </div>
 

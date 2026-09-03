@@ -24,6 +24,376 @@
   padding: 0 0 0 28px;
 }
 
+/* Production notification hub: two dense, independently scrolling feeds. */
+.notificationHubWorkspace {
+  min-height: 100vh;
+  padding: 24px clamp(18px, 3vw, 52px) 40px;
+  background: var(--paper);
+}
+
+.notificationHubTitle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.notificationHubTitle em {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--script);
+  color: #fff;
+  font-family: system-ui, sans-serif;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.notificationHub {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  height: calc(100vh - 174px);
+  min-height: 520px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.notificationColumn {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.notificationColumn + .notificationColumn {
+  border-left: 1px solid var(--line);
+}
+
+.notificationColumnHeader {
+  display: flex;
+  min-height: 108px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 24px 26px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.notificationColumn:first-child .notificationColumnHeader {
+  background: var(--ink);
+}
+
+.notificationColumn:last-child .notificationColumnHeader {
+  background: #4b3025;
+}
+
+.notificationColumnHeader > div {
+  min-width: 0;
+}
+
+.notificationColumnHeader h2 {
+  margin: 3px 0 4px;
+  color: var(--ink);
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: clamp(22px, 2vw, 28px);
+  font-weight: 500;
+  letter-spacing: -.03em;
+}
+
+.notificationColumn .notificationColumnHeader h2,
+.notificationColumn .notificationColumnHeader p,
+.notificationColumn .notificationColumnHeader .notificationColumnKicker,
+.notificationColumn .notificationColumnHeader .notificationColumnCount {
+  color: #fff;
+}
+
+.notificationColumnHeader p:not(.notificationColumnKicker) {
+  margin: 0;
+  color: rgba(255, 255, 255, .68);
+  font-size: 10px;
+}
+
+.notificationColumnKicker {
+  margin: 0;
+  color: rgba(255, 255, 255, .65);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .16em;
+}
+
+.notificationColumnCount {
+  color: var(--ink);
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: 26px;
+  line-height: 1;
+}
+
+.markAllReadButton {
+  min-height: 34px;
+  flex-shrink: 0;
+  padding: 8px 13px;
+  border: 1px solid rgba(255, 255, 255, .58);
+  border-radius: 8px;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  transition: background .12s, color .12s, opacity .12s;
+}
+
+.markAllReadButton:hover:not(:disabled) {
+  background: #fff;
+  color: #4b3025;
+}
+
+.markAllReadButton:disabled {
+  border-color: rgba(255, 255, 255, .24);
+  background: rgba(255, 255, 255, .08);
+  color: rgba(255, 255, 255, .58);
+  cursor: default;
+  opacity: 1;
+}
+
+.compactTabBar {
+  display: flex;
+  gap: 4px;
+  padding: 10px 18px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: none;
+}
+
+.compactTabBar::-webkit-scrollbar {
+  display: none;
+}
+
+.compactTabBar button {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.compactTabBar button:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.compactTabBar button[aria-selected="true"] {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.compactTabBar button span {
+  display: inline-grid;
+  min-width: 16px;
+  height: 16px;
+  place-items: center;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--stage);
+  color: #fff;
+  font-size: 8px;
+}
+
+.notificationColumnScroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 20px 22px;
+  scrollbar-color: #9ba8a5 transparent;
+  scrollbar-width: thin;
+}
+
+.compactFeedItem {
+  border-bottom: 1px solid var(--line);
+  transition: background .12s;
+}
+
+.compactFeedItem:hover,
+.compactFeedItemExpanded {
+  background: var(--paper);
+}
+
+.compactFeedButton {
+  display: block;
+  width: 100%;
+  padding: 15px 8px 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.compactFeedButton h3 {
+  margin: 0;
+  color: var(--ink);
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.compactFeedButton > p {
+  display: -webkit-box;
+  margin: 7px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.compactFeedSource {
+  margin-top: 4px !important;
+  font-size: 9px !important;
+  font-weight: 700;
+  letter-spacing: .06em;
+  -webkit-line-clamp: 1 !important;
+}
+
+.compactFeedMeta {
+  display: flex;
+  min-height: 18px;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.compactFeedMeta time {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.compactUnreadDot,
+.compactUnreadDotStage,
+.compactReadDot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.compactUnreadDot { background: var(--script); }
+.compactUnreadDotStage { background: var(--stage); }
+.compactReadDot { background: var(--line); }
+
+.compactTag,
+.compactTagDark,
+.compactTagWarm,
+.compactTagSuccess {
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.compactTag {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.compactTagDark {
+  background: var(--ink);
+  color: #fff;
+}
+
+.compactTagWarm {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.compactTagSuccess {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.compactFeedDetail {
+  margin: 0 8px 16px;
+  padding: 14px 0 2px;
+  border-top: 1px solid var(--line);
+}
+
+.compactFeedActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.compactFeedActions > a {
+  color: var(--script);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.compactFeedActions > a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 960px) {
+  .notificationHub {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .notificationColumn {
+    min-height: 480px;
+    max-height: 68vh;
+  }
+
+  .notificationColumn + .notificationColumn {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  .notificationHubWorkspace {
+    padding: 20px 14px 80px;
+  }
+
+  .notificationHubTitle {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .notificationColumnHeader {
+    min-height: 96px;
+    padding: 20px 18px 15px;
+  }
+
+  .notificationColumnScroll {
+    padding-inline: 14px;
+  }
+}
+
 /* Wide content (no max-width, for reports/schedule tables) */
 .wideContent {
   display: grid;

@@ -12,6 +12,7 @@ import type { UserNotification, NotificationAction } from "@/lib/inbox-db";
 interface Props {
   productions?: { id: string; name: string }[];
   productionId?: string;
+  compact?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -191,7 +192,7 @@ function ActionButtons({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function MyNotificationsClient({ productions = [], productionId }: Props) {
+export default function MyNotificationsClient({ productions = [], productionId, compact = false }: Props) {
   const [tab, setTab] = useState<Tab>("all");
   const [items, setItems] = useState<UserNotification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -217,6 +218,11 @@ export default function MyNotificationsClient({ productions = [], productionId }
       notifications?: UserNotification[];
     };
     const notifs = res.notifications ?? [];
+    if (compact) {
+      setItems(notifs);
+      setSelected(null);
+      return;
+    }
     // Only auto-select and auto-read the first item visible in the initial "all" tab.
     const first = filterByTab(notifs, "all")[0] ?? null;
     const autoRead = first && !first.readAt;
@@ -239,7 +245,7 @@ export default function MyNotificationsClient({ productions = [], productionId }
       }).catch(() => {});
       window.dispatchEvent(new CustomEvent("notif-read", { detail: { delta: 1 } }));
     }
-  }, [productionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [productionId, compact]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setLoading(true);
@@ -432,6 +438,118 @@ export default function MyNotificationsClient({ productions = [], productionId }
     );
   }
 
+  if (compact) {
+    // Keep the expanded item rendered even after markRead moves it out of the
+    // current tab — an info notification is done the moment it's read, and the
+    // inline detail would otherwise unmount mid-read.
+    const filteredIds = new Set(filtered.map((n) => n.id));
+    const visible = items.filter((n) => filteredIds.has(n.id) || n.id === selected?.id);
+    return (
+      <section className={styles.notificationColumn} aria-labelledby="personal-notifications-heading">
+        <header className={styles.notificationColumnHeader}>
+          <div>
+            <p className={styles.notificationColumnKicker}>PERSONAL</p>
+            <h2 id="personal-notifications-heading">个人通知</h2>
+            <p>{unreadUndoneCount > 0 ? `${unreadUndoneCount} 条未读` : "通知均已阅读"}</p>
+          </div>
+          <button
+            type="button"
+            className={styles.markAllReadButton}
+            onClick={handleMarkAllRead}
+            disabled={markingAllRead || unreadUndoneCount === 0}
+          >
+            {markingAllRead ? "处理中…" : "一键已读"}
+          </button>
+        </header>
+
+        <div className={styles.compactTabBar} role="tablist" aria-label="个人通知筛选">
+          {(["all", "action", "info", "done"] as Tab[]).map((t) => (
+            <button key={t} role="tab" aria-selected={tab === t} onClick={() => handleTabChange(t)}>
+              {TAB_LABELS[t]}
+              {t === "action" && pendingActionCount > 0 && <span>{pendingActionCount}</span>}
+            </button>
+          ))}
+        </div>
+
+        <div className={styles.notificationColumnScroll}>
+          {loading ? (
+            <div className={styles.emptyState}>加载中…</div>
+          ) : visible.length === 0 ? (
+            <div className={styles.emptyState}>
+              暂无{tab !== "all" ? TAB_LABELS[tab] : ""}通知
+              <small>新的个人通知将在这里显示</small>
+            </div>
+          ) : (
+            visible.map((n) => {
+              const isExpanded = selected?.id === n.id;
+              const status = getStatus(n);
+              const mode = actMode(n);
+              const prodName = n.productionId ? (prodMap[n.productionId] ?? null) : null;
+              const preview = n.body
+                ?.replace(/^#+\s+/gm, "")
+                .replace(/\*\*(.+?)\*\*/g, "$1")
+                .replace(/\n+/g, " ")
+                .trim();
+
+              return (
+                <article
+                  key={n.id}
+                  className={`${styles.compactFeedItem} ${isExpanded ? styles.compactFeedItemExpanded : ""}`}
+                >
+                  <button
+                    className={styles.compactFeedButton}
+                    onClick={() => {
+                      setSelected(isExpanded ? null : n);
+                      if (!n.readAt && !isExpanded) markRead(n.id);
+                    }}
+                  >
+                    <div className={styles.compactFeedMeta}>
+                      <span className={!n.readAt ? styles.compactUnreadDotStage : styles.compactReadDot} />
+                      {status === "pending" && (mode === "button" || mode === "external") && (
+                        <span className={styles.compactTagWarm}>{mode === "button" ? "待确认" : "待处理"}</span>
+                      )}
+                      {status === "expired" && <span className={styles.compactTag}>已失效</span>}
+                      {isDone(n) && <span className={styles.compactTagSuccess}>{n.actedAt ? "已处理" : "已读"}</span>}
+                      <time>{formatTime(n.createdAt)}</time>
+                    </div>
+                    <h3>{n.title}</h3>
+                    <p className={styles.compactFeedSource}>{prodName ?? n.kind}</p>
+                    {!isExpanded && preview && <p>{preview}</p>}
+                  </button>
+
+                  {isExpanded && (
+                    <div className={styles.compactFeedDetail}>
+                      {n.body && (
+                        <WikiMarkdown
+                          content={n.body}
+                          productionId={n.productionId ?? undefined}
+                          className={styles.bodyText}
+                        />
+                      )}
+                      <div className={styles.compactFeedActions}>
+                        {n.viewHref && (
+                          <Link href={withNotifParam(n.viewHref, n.id)}>查看详情 →</Link>
+                        )}
+                        {n.actionRequired && !n.actedAt && n.actions.length > 0 && (
+                          <ActionButtons
+                            notifId={n.id}
+                            actions={n.actions}
+                            expired={!!n.expiredAt}
+                            onActed={handleActed}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </article>
+              );
+            })
+          )}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <div className={productionId ? undefined : styles.workspace} style={productionId ? { padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" } : undefined}>
       {productionId ? (
@@ -469,9 +587,9 @@ export default function MyNotificationsClient({ productions = [], productionId }
 
       {/* ── Panel（原型排版）：内部维持现有 tab + 分栏 ── */}
       <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column" }}>
-      <div className={styles.tabBar} style={{ display: "flex", alignItems: "center", gap: 0 }}>
+      <div className={styles.tabBar} role="tablist" aria-label="通知筛选" style={{ display: "flex", alignItems: "center", gap: 0 }}>
         {(["all", "action", "info", "done"] as Tab[]).map((t) => (
-          <button key={t} aria-selected={tab === t} onClick={() => handleTabChange(t)}>
+          <button key={t} role="tab" aria-selected={tab === t} onClick={() => handleTabChange(t)}>
             {TAB_LABELS[t]}
             {t === "action" && pendingActionCount > 0 && (
               <span style={{
