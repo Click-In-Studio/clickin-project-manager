@@ -4,6 +4,7 @@ import OverflowSafeSelect from "@/components/OverflowSafeSelect";
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { AssetType } from "@/lib/asset-db";
+import { ASSET_TYPE_LABELS } from "@/lib/asset-types";
 import { BASE_PATH } from "@/lib/base-path";
 
 // R2 single PUT max is 5 GiB; use multipart for anything above 50 MB
@@ -95,12 +96,6 @@ const RELAY_LEVELS: readonly { concurrency: number }[] = [
 const PROMOTE_AFTER     = 2;     // consecutive fully-successful batches to level up
 const RETRY_DELAY_MS    = 1500;  // pause before retry after a direct failure
 const RELAY_BUSY_MS     = 3000;  // pause on relay 503
-
-const ASSET_TYPE_LABELS: Record<AssetType, string> = {
-  drafting: "图纸", planogram: "平面图", demo: "Demo",
-  rehearsal_video: "排练视频", reference: "Reference", material: "素材",
-  clip: "片段", qlab: "QLab", score: "乐谱", recording: "录音",
-};
 
 type UploadMode = "file" | "feishu";
 

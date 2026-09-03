@@ -6,9 +6,8 @@ function uid(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}${(++_seq).toString(36)}`;
 }
 
-export type AssetType =
-  | "drafting" | "planogram" | "demo" | "rehearsal_video" | "reference"
-  | "material" | "clip" | "qlab" | "score" | "recording";
+export type { AssetType } from "./asset-types";
+import type { AssetType } from "./asset-types";
 
 export type StorageType = "r2" | "feishu_link";
 

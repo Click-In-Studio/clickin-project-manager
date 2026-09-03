@@ -1,14 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { Asset, AssetType, MountType, MountMode } from "@/lib/asset-db";
+import type { Asset, MountType } from "@/lib/asset-db";
+import { ASSET_TYPE_LABELS } from "@/lib/asset-types";
 import { BASE_PATH } from "@/lib/base-path";
-
-const ASSET_TYPE_LABELS: Record<AssetType, string> = {
-  drafting: "图纸", planogram: "平面图", demo: "Demo",
-  rehearsal_video: "排练视频", reference: "Reference", material: "素材",
-  clip: "片段", qlab: "QLab", score: "乐谱", recording: "录音",
-};
 
 export type MountContext = {
   mountType: MountType;

@@ -4,6 +4,7 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { filterVisibleAssets } from "@/lib/asset-perm";
 import { hasGrant } from "@/lib/grant-check";
 import { createAsset, listAssets, type AssetType } from "@/lib/asset-db";
+import { isAssetType } from "@/lib/asset-types";
 import { putR2Object, getR2Object, thumbnailR2Key, completeMultipartUpload, listMultipartParts } from "@/lib/r2";
 import sharp from "sharp";
 
@@ -52,6 +53,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       name?: string | null;
       fileName: string;
     };
+
+    // asset_type 列无 CHECK 约束，白名单只在 TS 层——运行时校验防任意串入库
+    if (body.assetType !== undefined && !isAssetType(body.assetType))
+      return Response.json({ error: "无效的资产类型" }, { status: 400 });
 
     if (body.storageType === "r2-multipart") {
       if (!body.r2Key || !body.fileId || !body.fileName || !body.uploadId || !Array.isArray(body.parts))
