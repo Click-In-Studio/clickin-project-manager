@@ -1,7 +1,8 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getAsset, updateAsset, deleteAsset, type AssetType } from "@/lib/asset-db";
+import { getAsset, updateAsset, deleteAsset } from "@/lib/asset-db";
+import { isAssetType } from "@/lib/asset-types";
 import { canViewAsset } from "@/lib/asset-perm";
 import { hasGrant } from "@/lib/grant-check";
 import { deleteR2Object } from "@/lib/r2";
@@ -40,8 +41,21 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!session.isAdmin && !permCtx?.isOwner && !await hasGrant(session.userId, id, "asset", assetId, "meta", "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const body = (await req.json()) as { assetType?: AssetType; name?: string | null; fileName?: string };
-  const updated = await updateAsset(assetId, body);
+  const body = (await req.json()) as { assetType?: unknown; name?: unknown; fileName?: unknown };
+  // asset_type 列无 CHECK 约束，白名单只在 TS 层——这里必须运行时校验，否则任意串入库
+  if (body.assetType !== undefined && !isAssetType(body.assetType))
+    return Response.json({ error: "无效的资产类型" }, { status: 400 });
+  if (body.name !== undefined && body.name !== null && typeof body.name !== "string")
+    return Response.json({ error: "无效的显示名称" }, { status: 400 });
+  if (body.fileName !== undefined && (typeof body.fileName !== "string" || !body.fileName.trim()))
+    return Response.json({ error: "文件名不能为空" }, { status: 400 });
+
+  const updated = await updateAsset(assetId, {
+    assetType: body.assetType,
+    // 显示名去空白，空串视同清除（回落 file_name）
+    name: typeof body.name === "string" ? (body.name.trim() || null) : body.name,
+    fileName: typeof body.fileName === "string" ? body.fileName.trim() : undefined,
+  });
   return Response.json({ asset: updated });
 }
 

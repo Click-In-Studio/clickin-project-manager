@@ -9,14 +9,9 @@ import MountPointAssets from "./MountPointAssets";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import AssetShareModal from "./AssetShareModal";
 import { BASE_PATH } from "@/lib/base-path";
-import type { Asset, AssetMount, AssetType } from "@/lib/asset-db";
+import type { Asset, AssetMount } from "@/lib/asset-db";
+import { ASSET_TYPE_LABELS, type AssetType } from "@/lib/asset-types";
 import ChevronIcon from "@/components/ChevronIcon";
-
-const ASSET_TYPE_LABELS: Record<AssetType, string> = {
-  drafting: "图纸", planogram: "平面图", demo: "Demo",
-  rehearsal_video: "排练视频", reference: "Reference", material: "素材",
-  clip: "片段", qlab: "QLab", score: "乐谱", recording: "录音",
-};
 
 type AssetWithMounts = Asset & { mounts: AssetMount[] };
 
@@ -42,6 +37,11 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
   const [uploadTarget, setUploadTarget] = useState<Asset | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [shareTarget, setShareTarget] = useState<Asset | null>(null);
+  const [editTarget, setEditTarget] = useState<Asset | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editType, setEditType] = useState<AssetType>("reference");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "mine">("all");
   const [search, setSearch] = useState("");
 
@@ -72,6 +72,35 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
     if (expanded === assetId) { setExpanded(null); return; }
     setExpanded(assetId);
     loadMounts(assetId);
+  }
+
+  function openEdit(a: Asset) {
+    setEditTarget(a);
+    setEditName(a.name ?? "");
+    setEditType(a.assetType);
+    setEditError(null);
+  }
+
+  async function handleSaveEdit() {
+    if (!editTarget) return;
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const r = await fetch(`${BASE_PATH}/api/production/${productionId}/assets/${editTarget.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editName.trim() || null, assetType: editType }),
+      });
+      const j = await r.json() as { asset?: Asset; error?: string };
+      if (!r.ok || !j.asset) { setEditError(j.error ?? "保存失败"); return; }
+      const updated = j.asset;
+      setAssets(p => p.map(a => a.id === updated.id ? updated : a));
+      setEditTarget(null);
+    } catch (e) {
+      setEditError(String(e));
+    } finally {
+      setEditSaving(false);
+    }
   }
 
   async function handleDeleteAsset(assetId: string) {
@@ -243,6 +272,13 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
                     ))}
                     {canEdit && (
                       <button
+                        onClick={() => openEdit(a)}
+                        style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "var(--muted)", background: "none", border: 0, cursor: "pointer" }}>
+                        编辑
+                      </button>
+                    )}
+                    {canEdit && (
+                      <button
                         onClick={() => { setUploadTarget(a); setView("upload-new-version"); }}
                         style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "var(--muted)", background: "none", border: 0, cursor: "pointer" }}>
                         新版本
@@ -318,6 +354,56 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
       )}
 
       {uploadModal}
+
+      {editTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(24,42,42,.3)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => !editSaving && setEditTarget(null)}>
+          <div style={{ background: "var(--surface)", borderRadius: 16, padding: 24, width: 360, boxShadow: "0 8px 32px rgba(0,0,0,.15)" }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <p style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>编辑 Asset</p>
+              <button onClick={() => setEditTarget(null)} disabled={editSaving}
+                style={{ fontSize: 18, color: "var(--muted)", background: "none", border: 0, cursor: "pointer", lineHeight: 1 }}>✕</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>显示名称（留空则使用文件名）</label>
+                <input
+                  type="text"
+                  placeholder={editTarget.fileName}
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") handleSaveEdit(); }}
+                  autoFocus
+                  style={{ width: "100%", borderRadius: 8, border: "1px solid var(--line)", background: "white", padding: "7px 12px", fontSize: 13, outline: "none", color: "var(--ink)" }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>类型</label>
+                <select
+                  value={editType}
+                  onChange={e => setEditType(e.target.value as AssetType)}
+                  style={{ width: "100%", borderRadius: 8, border: "1px solid var(--line)", background: "white", padding: "7px 12px", fontSize: 13, outline: "none", color: "var(--ink)" }}>
+                  {(Object.entries(ASSET_TYPE_LABELS) as [AssetType, string][]).map(([v, l]) => (
+                    <option key={v} value={v}>{l}</option>
+                  ))}
+                </select>
+              </div>
+              {editError && <p style={{ fontSize: 11, color: "#dc2626" }}>{editError}</p>}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button onClick={() => setEditTarget(null)} disabled={editSaving}
+                  style={{ borderRadius: 8, padding: "7px 16px", fontSize: 12, fontWeight: 600, color: "var(--muted)", background: "none", border: "1px solid var(--line)", cursor: "pointer" }}>
+                  取消
+                </button>
+                <button onClick={handleSaveEdit} disabled={editSaving}
+                  style={{ borderRadius: 8, padding: "7px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: "var(--ink)", border: 0, cursor: "pointer", opacity: editSaving ? 0.5 : 1 }}>
+                  {editSaving ? "保存中…" : "保存"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {shareTarget && (
         <AssetShareModal

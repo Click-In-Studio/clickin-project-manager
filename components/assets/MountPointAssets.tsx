@@ -4,14 +4,9 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { Asset, AssetMount, MountType } from "@/lib/asset-db";
+import { ASSET_TYPE_LABELS } from "@/lib/asset-types";
 import AssetMountModal from "./AssetMountModal";
 import type { MountContext } from "./AssetSelectPanel";
-
-const ASSET_TYPE_LABELS: Record<string, string> = {
-  drafting: "图纸", planogram: "平面图", demo: "Demo",
-  rehearsal_video: "排练视频", reference: "Reference", material: "素材",
-  clip: "片段", qlab: "QLab", score: "乐谱", recording: "录音",
-};
 
 type MountResult = { mount: AssetMount; asset: Asset };
 
