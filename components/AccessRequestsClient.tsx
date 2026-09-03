@@ -6,7 +6,7 @@ import ApprovalFlowDesigner from "@/components/ApprovalFlowDesigner";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import styles from "@/components/my-pages.module.css";
-import type { ApprovalPerson, ApprovalRequest } from "@/lib/db";
+import type { AccessRequestFlowView, ApprovalPerson, ApprovalRequest } from "@/lib/db";
 import {
   TTL_OPTIONS,
   displayTtlLabel,
@@ -263,13 +263,8 @@ function ApprovalFlow({ req, compact = false }: {
 }
 
 // ─── 后续路径预测 ──────────────────────────────────────────────────────────────
-
-type FlowViewResponse = {
-  request: ApprovalRequest;
-  flow:
-    | { mode: "template"; prediction: { nodeId: string; approverIds: string[] }[] }
-    | { mode: "ladder"; remaining: { stage: keyof typeof APPROVAL_STAGE_LABELS; depth: number; approverIds: string[] }[] };
-};
+// 响应形状直接用服务端导出的 AccessRequestFlowView（import type 编译期擦除，
+// 不会把 pg 拖进浏览器包）——手抄一份会在服务端加字段时静默漂移（AI review #412）。
 
 const FLOW_NODE_STATE_LABELS: Record<string, string> = {
   done: "已完成", skipped: "已跳过", active: "进行中", pending: "待进行",
@@ -283,7 +278,7 @@ const FLOW_NODE_STATE_LABELS: Record<string, string> = {
  */
 function FlowForecast({ req, compact = false }: { req: ApprovalRequest; compact?: boolean }) {
   const snapshot = req.flowSnapshot;
-  const [view, setView] = useState<FlowViewResponse | null>(null);
+  const [view, setView] = useState<AccessRequestFlowView | null>(null);
   const wantFetch = !compact;
 
   useEffect(() => {
@@ -293,7 +288,7 @@ function FlowForecast({ req, compact = false }: { req: ApprovalRequest; compact?
       try {
         const res = await fetch(`/api/production/${req.productionId}/access-requests/${req.id}/flow`);
         if (!res.ok) return;
-        const data = (await res.json()) as FlowViewResponse;
+        const data = (await res.json()) as AccessRequestFlowView;
         if (!cancelled) setView(data);
       } catch { /* 预测取不到就退回定性说明，不打扰主流程 */ }
     })();

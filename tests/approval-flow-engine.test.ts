@@ -250,6 +250,9 @@ describe("模版流端到端", () => {
     expect(view.view.flow.mode).toBe("template");
     if (view.view.flow.mode !== "template") return;
     expect(view.view.flow.prediction).toEqual([{ nodeId: "n-proc", approverIds: [U_PROC] }]);
+    // 预测里的人不在审计链上，withApprovalPeople 收不到——people 映射必须补齐，
+    // 否则前端只能显示裸 ID（AI review #412）
+    expect(view.view.request.people[U_PROC]?.name).toBe("引擎处理人");
     expect(view.view.viewerActions).toMatchObject({ canApprove: true, canReject: true, canEscalate: true });
 
     // 申请人可见但无动作
@@ -310,16 +313,38 @@ describe("编译源选择与兜底", () => {
     await rejectAccessRequest(req.id, U_OWNER);
   });
 
-  it("退回草稿后无使用中模版 → 新申请走阶梯（存量模版行为不受影响）", async () => {
+  it("退回草稿后无使用中模版 → 新申请走阶梯；实例视图给真实剩余阶梯与人员", async () => {
     const { rows } = await getPool().query<{ id: string }>(
       `SELECT id FROM approval_flow_template WHERE production_id = $1 AND status = 'published'`,
       [prodId],
     );
     for (const r of rows) await updateFlowTemplate(prodId, r.id, U_OWNER, { status: "draft" });
 
-    const req = await submit();
-    expect(req.flowSnapshot).toBeNull();
-    expect(req.currentStage).not.toBeNull();
-    await rejectAccessRequest(req.id, U_OWNER);
+    // 给申请人挂个直属上级，让阶梯有「当前级之后」可言（否则一级直达 owner，remaining 恒空）
+    await getPool().query(
+      `UPDATE production_member SET supervisor_id = $1 WHERE production_id = $2 AND user_id = $3`,
+      [U_APPROVER, prodId, U_SUBJECT],
+    );
+    try {
+      const req = await submit();
+      expect(req.flowSnapshot).toBeNull();
+      expect(req.currentStage).toBe("supervisor");
+
+      const view = await getAccessRequestFlow(req.id, U_SUBJECT, false);
+      expect(view.ok).toBe(true);
+      if (!view.ok) return;
+      expect(view.view.flow.mode).toBe("ladder");
+      if (view.view.flow.mode !== "ladder") return;
+      // 真实剩余阶梯：空级已剔除（无 holder/POC/producer），只剩 owner
+      expect(view.view.flow.remaining).toEqual([{ stage: "owner", depth: 0, approverIds: [U_OWNER] }]);
+      // 剩余级的人不在链上——people 必须补齐（AI review #412）
+      expect(view.view.request.people[U_OWNER]?.name).toBe("引擎Owner");
+      await rejectAccessRequest(req.id, U_OWNER);
+    } finally {
+      await getPool().query(
+        `UPDATE production_member SET supervisor_id = NULL WHERE production_id = $1 AND user_id = $2`,
+        [prodId, U_SUBJECT],
+      );
+    }
   });
 });
