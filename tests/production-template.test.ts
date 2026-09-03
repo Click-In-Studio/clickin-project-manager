@@ -18,7 +18,7 @@ import { MUSIC_TEMPLATE } from "@/lib/templates/music";
 import { FILM_TEMPLATE } from "@/lib/templates/film";
 import { SOLO_TEMPLATE } from "@/lib/templates/solo";
 import { PERFORMANCE_TEMPLATE } from "@/lib/templates/performance";
-import { policiesFromAnswers } from "@/lib/templates/shared";
+import { policiesFromAnswers, MOUNT_ATTACH, ASSET_UPLOAD } from "@/lib/templates/shared";
 import { PRODUCTION_TYPES } from "@/lib/production-types";
 import { POLICY_KEYS } from "@/lib/policy-keys";
 
@@ -144,6 +144,29 @@ describe("① 棘轮：仓库内的模版常量", () => {
     // 两者都有的那枚：曲目/场次的音乐面
     expect(music).toContain("node:scene/*/music@edit");
     expect(theatre).toContain("node:scene/*/music@edit");
+  });
+
+  it("音乐创作岗持挂载与上传键：谱子/demo 挂得到场次与唱段上", () => {
+    // 构作页的挂载入口是 fieldPerms.any 粗门（持 music@edit 即亮），后端却查
+    // scene/script 的 mounts@create——模版不发这两枚就是「界面亮着、点下去 403」。
+    // 上传那枚是双保险：它本该走创作组部门区间，但剧组未必把作曲编进音乐部门。
+    const MUSIC_CREATOR_ROLES = ["作曲", "编曲"];
+    const required = [...MOUNT_ATTACH, ASSET_UPLOAD];
+    let checked = 0;
+    for (const tpl of Object.values(PRODUCTION_TEMPLATES)) {
+      for (const role of MUSIC_CREATOR_ROLES) {
+        if (!tpl.roles.names.includes(role)) continue;
+        const keys = new Set(tpl.roles.permissions[role] ?? []);
+        for (const key of required) {
+          expect(keys, `${tpl.key} 的「${role}」缺 ${key}`).toContain(key);
+        }
+        checked++;
+      }
+    }
+    // 断言真的跑过——角色名若被改掉，上面的循环会空转成假绿
+    // theatre / music / music_video（复用 music 的角色键）/ radio_drama 各两个岗
+    // + performance 的编曲（那套模版没有作曲）
+    expect(checked).toBe(9);
   });
 
   it("策略按题作答：题 id / 答案 id 写错当场抛", () => {

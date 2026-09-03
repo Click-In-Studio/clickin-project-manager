@@ -22,7 +22,7 @@
 import type { ProductionTemplate } from "../production-template";
 import {
   OPEN_BASELINE, PRODUCER_KEYS, STRUCTURE_EDIT, SCRIPT_EDIT, SCHEDULE_ADMIN,
-  ASSET_UPLOAD, ASSET_NEW_VERSION, ASSET_META_EDIT,
+  ASSET_UPLOAD, ASSET_NEW_VERSION, ASSET_META_EDIT, MOUNT_ATTACH,
   policiesFromAnswers,
 } from "./shared";
 
@@ -75,8 +75,8 @@ export const MUSIC_ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   ],
 
   // 曲目表的结构就是作曲排的（剧场里这活归戏剧构作）
-  作曲: [...STRUCTURE_EDIT, "node:scene/*/music@edit"],
-  编曲: ["node:scene/*/music@edit"],
+  作曲: [...STRUCTURE_EDIT, "node:scene/*/music@edit", ASSET_UPLOAD, ...MOUNT_ATTACH],
+  编曲: ["node:scene/*/music@edit", ASSET_UPLOAD, ...MOUNT_ATTACH],
   // 歌词 = script 正文
   作词: SCRIPT_EDIT,
 
