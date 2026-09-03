@@ -855,6 +855,64 @@
       "default": "now()"
     }
   ],
+  "approval_flow_template": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "description",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "resource_scope",
+      "type": "text",
+      "nullable": false,
+      "default": "''::text"
+    },
+    {
+      "column": "status",
+      "type": "text",
+      "nullable": false,
+      "default": "'draft'::text"
+    },
+    {
+      "column": "nodes",
+      "type": "jsonb",
+      "nullable": false,
+      "default": "'[]'::jsonb"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "updated_by",
+      "type": "uuid",
+      "nullable": true
+    }
+  ],
   "approval_request": [
     {
       "column": "id",
