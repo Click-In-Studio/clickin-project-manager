@@ -78,6 +78,10 @@ function effectiveChain(req: ApprovalRequest): ApprovalChainEntry[] {
 }
 
 function stageTitle(entry: ApprovalChainEntry): string {
+  // 模版流条目带节点名（prB）——「指定审批」比映射不出的级名准确：
+  // project_role / specific_members 来源没有对应阶梯级，落到 phase 兜底会把
+  // 「指定成员审批」显示成「资源负责人」。
+  if (entry.nodeTitle) return entry.nodeTitle;
   // 存量条目没有 stage，只有旧的两段式 phase。
   // 不做 as ApprovalStageName 强转：条目来自 JSONB，类型只是声明不是保证，
   // 强转会把「将来后端加了新级、前端还没跟上」这种情况静默掉。

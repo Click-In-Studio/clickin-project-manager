@@ -1,11 +1,12 @@
 "use client";
 
 import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+import ApprovalFlowDesigner from "@/components/ApprovalFlowDesigner";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import styles from "@/components/my-pages.module.css";
-import type { ApprovalPerson, ApprovalRequest } from "@/lib/db";
+import type { AccessRequestFlowView, ApprovalPerson, ApprovalRequest } from "@/lib/db";
 import {
   TTL_OPTIONS,
   displayTtlLabel,
@@ -256,12 +257,101 @@ function ApprovalFlow({ req, compact = false }: {
         })}
       </div>
 
-      {isPending && (
-        <p style={{ margin: "12px 0 0 29px", padding: "9px 11px", borderRadius: 8, background: "var(--paper)", color: "var(--muted)", fontSize: 10, lineHeight: 1.55 }}>
-          后续审批人会依据届时的汇报关系、资源负责人和制作团队配置动态计算。
-        </p>
-      )}
+      {isPending && <FlowForecast req={req} compact={compact} />}
     </section>
+  );
+}
+
+// ─── 后续路径预测 ──────────────────────────────────────────────────────────────
+// 响应形状直接用服务端导出的 AccessRequestFlowView（import type 编译期擦除，
+// 不会把 pg 拖进浏览器包）——手抄一份会在服务端加字段时静默漂移（AI review #412）。
+
+const FLOW_NODE_STATE_LABELS: Record<string, string> = {
+  done: "已完成", skipped: "已跳过", active: "进行中", pending: "待进行",
+};
+
+/**
+ * 模版流：直接用 DTO 里的快照渲染节点进度（结构在提交时定格，不用请求）。
+ * 阶梯流：紧凑视图给定性说明；详情视图请求 requestId 实例接口（P1-6）拿
+ * **真实**剩余阶梯——空级已剔除、敏感项已分流。此前用 STAGE_ORDER 裸切片
+ * 会列出引擎永远不会走的节点（#405 review），实例接口就是那条的正解数据源。
+ */
+function FlowForecast({ req, compact = false }: { req: ApprovalRequest; compact?: boolean }) {
+  const snapshot = req.flowSnapshot;
+  const [view, setView] = useState<AccessRequestFlowView | null>(null);
+  const wantFetch = !compact;
+
+  useEffect(() => {
+    if (!wantFetch) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/production/${req.productionId}/access-requests/${req.id}/flow`);
+        if (!res.ok) return;
+        const data = (await res.json()) as AccessRequestFlowView;
+        if (!cancelled) setView(data);
+      } catch { /* 预测取不到就退回定性说明，不打扰主流程 */ }
+    })();
+    return () => { cancelled = true; };
+  }, [req.id, req.productionId, wantFetch]);
+
+  const nameOf = (userId: string) =>
+    view?.request.people[userId]?.name ?? req.people[userId]?.name ?? "成员";
+
+  if (snapshot) {
+    const prediction = view?.flow.mode === "template"
+      ? new Map(view.flow.prediction.map((p) => [p.nodeId, p.approverIds]))
+      : null;
+    return (
+      <div className={styles.approvalRouteForecast}>
+        <div>
+          <b>模版流程进度</b>
+          <span>{snapshot.templateName}</span>
+        </div>
+        <div className={styles.approvalRouteForecastStages}>
+          {snapshot.nodes.map((node) => {
+            const predicted = node.state === "pending" ? prediction?.get(node.id) : null;
+            const people = node.state === "pending"
+              ? (predicted?.map(nameOf) ?? [])
+              : (node.resolvedApproverIds ?? []).map(nameOf);
+            return (
+              <span key={node.id} data-state={node.state}>
+                {node.title} · {FLOW_NODE_STATE_LABELS[node.state] ?? node.state}
+                {people.length > 0 ? `（${people.join("、")}）` : ""}
+              </span>
+            );
+          })}
+        </div>
+        <p>流程结构在提交时定格；未到节点的处理人在流程走到时按届时组织关系解析，此处仅为按当前关系的预测。</p>
+      </div>
+    );
+  }
+
+  const remaining = view?.flow.mode === "ladder" ? view.flow.remaining : null;
+  return (
+    <div className={styles.approvalRouteForecast}>
+      <div>
+        <b>{remaining ? (remaining.length > 0 ? "可能的后续升级路径" : "已在升级链最后一级") : "后续升级路径"}</b>
+        <span>动态升级链 · 非强制逐级审批</span>
+      </div>
+      {remaining && remaining.length > 0 && (
+        <div className={styles.approvalRouteForecastStages}>
+          {remaining.map((s) => (
+            <span key={`${s.stage}-${s.depth}`}>
+              {APPROVAL_STAGE_LABELS[s.stage]}
+              {s.approverIds.length > 0 ? `（${s.approverIds.map(nameOf).join("、")}）` : ""}
+            </span>
+          ))}
+        </div>
+      )}
+      <p>
+        {remaining
+          ? remaining.length > 0
+            ? "仅在当前处理人向上转交或超时升级时进入后续级；人员按当前组织关系预测，届时会重新匹配。"
+            : "当前处理人批准或拒绝后流程即结束。"
+          : "后续审批人会依据届时的汇报关系、资源负责人和制作团队配置动态计算。"}
+      </p>
+    </div>
   );
 }
 
@@ -554,15 +644,17 @@ function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel,
 
 // ─── Main ──────────────────────────────────────────────────────────────────────
 
-type Tab = "mine" | "pending";
+type Tab = "mine" | "pending" | "flows";
 type RightPanel = { type: "form" } | { type: "detail"; req: ApprovalRequest; canAct: boolean } | null;
 
 interface Props {
   productionId: string;
   productionName: string;
+  /** 流程设置是 owner 面（模版决定谁能批准权限）；SSR 算好传入，与 API 门同源。 */
+  canManageFlows: boolean;
 }
 
-export default function AccessRequestsClient({ productionId, productionName }: Props) {
+export default function AccessRequestsClient({ productionId, productionName, canManageFlows }: Props) {
   const [tab, setTab]                         = useState<Tab>("mine");
   const [myRequests, setMyRequests]           = useState<ApprovalRequest[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
@@ -663,8 +755,8 @@ export default function AccessRequestsClient({ productionId, productionName }: P
   }
 
   const pendingCount = pendingApprovals.length;
-  const currentList = tab === "mine" ? myRequests : pendingApprovals;
-  const isLoading   = tab === "mine" ? loadingMine : loadingPending;
+  const currentList = tab === "mine" ? myRequests : tab === "pending" ? pendingApprovals : [];
+  const isLoading   = tab === "mine" ? loadingMine : tab === "pending" ? loadingPending : false;
 
   function selectRequest(req: ApprovalRequest, canAct: boolean) {
     setRightPanel({ type: "detail", req, canAct });
@@ -820,12 +912,19 @@ export default function AccessRequestsClient({ productionId, productionName }: P
       </div>
 
       {/* ── Panel（通知页同款）：tab + 分栏 ── */}
-      <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column" }}>
+      <section style={{
+        background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22,
+        height: tab === "flows" ? "auto" : "calc(100vh - 320px)",
+        minHeight: tab === "flows" ? 980 : 460,
+        display: "flex", flexDirection: "column",
+      }}>
       {/* Tab strip */}
       <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--line)", marginBottom: 20 }}>
         {([
           ["mine",    "我的申请"] as const,
           ["pending", `待审批${pendingCount > 0 ? ` (${pendingCount})` : ""}`] as const,
+          // 流程设置仅 owner 可见（模版决定谁能批准权限，缺口文档 P0-10）
+          ...(canManageFlows ? [["flows", "流程设置"] as const] : []),
         ]).map(([t, label]) => (
           <button
             key={t}
@@ -843,6 +942,11 @@ export default function AccessRequestsClient({ productionId, productionName }: P
           </button>
         ))}
       </div>
+
+      {tab === "flows" && canManageFlows ? (
+        <ApprovalFlowDesigner productionId={productionId} />
+      ) : (
+      <>
 
       {/* ── Mobile ── */}
       <div className={styles.mobileOnly}>
@@ -945,6 +1049,8 @@ export default function AccessRequestsClient({ productionId, productionName }: P
           </div>
         </div>
       </div>
+      </>
+      )}
       </section>
     </div>
   );

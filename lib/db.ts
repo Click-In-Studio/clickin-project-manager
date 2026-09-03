@@ -7040,6 +7040,9 @@ export type ApprovalChainEntry = {
   escalationReason?: "timeout" | "forwarded";
   /** cancelled 的原因：申请人主动撤回 / 被同目标的新申请覆盖。 */
   cancelReason?: "by_subject" | "superseded" | "expired";
+  /** 模版流（prB）扩展：该级对应的模版节点。时间线优先显示 nodeTitle 而非级名。 */
+  nodeId?: string;
+  nodeTitle?: string;
   /**
    * 审批意见：批准/拒绝/转交/撤回时写下的理由，随动作落在这一级上。
    *
@@ -8396,12 +8399,19 @@ export async function getAccessRequestFlow(
     }
   }
 
+  // 预测/剩余阶梯里的人不在链上，withApprovalPeople 收不到——补齐 people
+  // 映射，前端才能显示姓名而不是裸 ID（预测展示也要人话）。
+  const request = await withApprovalPeople(rowToApproval(row));
+  const forecastIds = flow.mode === "template"
+    ? flow.prediction.flatMap((p) => p.approverIds)
+    : flow.remaining.flatMap((s) => s.approverIds);
+  const missing = [...new Set(forecastIds)].filter((uid) => !request.people[uid]);
+  if (missing.length > 0) {
+    Object.assign(request.people, await loadApprovalPeople(row.production_id, missing));
+  }
+
   return {
     ok: true,
-    view: {
-      request: await withApprovalPeople(rowToApproval(row)),
-      flow,
-      viewerActions,
-    },
+    view: { request, flow, viewerActions },
   };
 }
