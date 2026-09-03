@@ -439,6 +439,11 @@ export default function MyNotificationsClient({ productions = [], productionId, 
   }
 
   if (compact) {
+    // Keep the expanded item rendered even after markRead moves it out of the
+    // current tab — an info notification is done the moment it's read, and the
+    // inline detail would otherwise unmount mid-read.
+    const filteredIds = new Set(filtered.map((n) => n.id));
+    const visible = items.filter((n) => filteredIds.has(n.id) || n.id === selected?.id);
     return (
       <section className={styles.notificationColumn} aria-labelledby="personal-notifications-heading">
         <header className={styles.notificationColumnHeader}>
@@ -469,13 +474,13 @@ export default function MyNotificationsClient({ productions = [], productionId, 
         <div className={styles.notificationColumnScroll}>
           {loading ? (
             <div className={styles.emptyState}>加载中…</div>
-          ) : filtered.length === 0 ? (
+          ) : visible.length === 0 ? (
             <div className={styles.emptyState}>
               暂无{tab !== "all" ? TAB_LABELS[tab] : ""}通知
               <small>新的个人通知将在这里显示</small>
             </div>
           ) : (
-            filtered.map((n) => {
+            visible.map((n) => {
               const isExpanded = selected?.id === n.id;
               const status = getStatus(n);
               const mode = actMode(n);
