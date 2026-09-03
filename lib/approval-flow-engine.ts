@@ -81,6 +81,13 @@ export type FlowSnapshot = {
   nodes: FlowSnapshotNode[];
   /** 当前活动节点下标；全部走完 = nodes.length。 */
   cursor: number;
+  /**
+   * 单调写序号：每次落库 +1，所有写 WHERE 都押它。cursor 押不住「节点内转交」
+   * （转交不改 cursor）——手动转交撞上 cron 超时会双双成功：链上重复条目、
+   * owner 的新条目被第二次 markPrev 误标成已转交。阶梯没有这个问题是因为
+   * 升级必改 current_stage；模版流的等价物就是 rev。
+   */
+  rev: number;
 };
 
 /** 引擎要求的行子集（结构兼容 lib/db.ts 的 ApprovalRow，避免反向 import 成环）。 */
@@ -114,6 +121,8 @@ export function parseFlowSnapshot(raw: unknown): FlowSnapshot | null {
   if (!raw || typeof raw !== "object") return null;
   const s = raw as FlowSnapshot;
   if (s.v !== 1 || !Array.isArray(s.nodes) || typeof s.cursor !== "number") return null;
+  // rev 后加（并发守卫）：无 rev 的早期快照按 0 读——写路径恒写新值，守卫不受影响。
+  if (typeof s.rev !== "number") s.rev = 0;
   return s;
 }
 
@@ -329,6 +338,7 @@ export async function prepareTemplateFlow(t: ApprovalTarget): Promise<PreparedFl
     templateId: template.id,
     templateName: template.name,
     cursor: 0,
+    rev: 0,
     nodes: template.nodes.map((n) => ({
       id: n.id,
       type: n.type,
@@ -369,17 +379,18 @@ function targetOfRow(req: FlowRequestRow): ApprovalTarget {
 
 /**
  * 落库一次推进：补旧链末条、追加新链条目、换 current_approver_ids、写新快照。
- * 乐观锁押 status + 旧 cursor —— 同一节点上的并发动作只有一个能成
- * （first-action-wins，与阶梯的 advanceToStage 同纪律）。
+ * 乐观锁押 status + 旧 rev —— 同一节点上的并发动作（含不改 cursor 的节点内
+ * 转交）只有一个能成（first-action-wins，与阶梯的 advanceToStage 同纪律）。
  */
 async function persistAdvance(
   req: FlowRequestRow,
-  prevCursor: number,
+  prevRev: number,
   walked: WalkResult,
   markPrev: Record<string, unknown>,
   nextStatus: string,
   nextApproverIds: string[],
 ): Promise<boolean> {
+  const next: FlowSnapshot = { ...walked.snapshot, rev: prevRev + 1 };
   const { rows } = await getPool().query<{ id: string }>(
     `UPDATE approval_request
      SET status = $2,
@@ -397,14 +408,14 @@ async function persistAdvance(
            END || $6::jsonb
      WHERE id = $1
        AND status IN ('pending_supervisor', 'pending_resource')
-       AND (flow_snapshot ->> 'cursor')::int = $7
+       AND COALESCE((flow_snapshot ->> 'rev')::int, 0) = $7
      RETURNING id`,
     [
       req.id, nextStatus, nextApproverIds,
-      JSON.stringify(walked.snapshot),
+      JSON.stringify(next),
       JSON.stringify(markPrev),
       JSON.stringify(walked.chainEntries),
-      prevCursor,
+      prevRev,
     ],
   );
   return rows.length > 0;
@@ -412,7 +423,8 @@ async function persistAdvance(
 
 export type FlowAdvanceResult =
   | { outcome: "advanced"; notifies: FlowNotifyPlan[] }
-  | { outcome: "complete"; finalSnapshot: FlowSnapshot }
+  /** finalSnapshot 已带 rev+1；prevRev 供终局 UPDATE 押守卫（复用同一套 first-action-wins）。 */
+  | { outcome: "complete"; finalSnapshot: FlowSnapshot; prevRev: number }
   | { outcome: "conflict" };
 
 /**
@@ -447,7 +459,13 @@ export async function advanceFlowOnApprove(
   ];
 
   const walked = await walkToNextActionable(done, cursor + 1, targetOfRow(req));
-  if (!walked.active) return { outcome: "complete", finalSnapshot: walked.snapshot };
+  if (!walked.active) {
+    return {
+      outcome: "complete",
+      finalSnapshot: { ...walked.snapshot, rev: snapshot.rev + 1 },
+      prevRev: snapshot.rev,
+    };
+  }
 
   const markPrev = {
     action: "approved",
@@ -456,7 +474,7 @@ export async function advanceFlowOnApprove(
     ...(comment ? { comment } : {}),
   };
   const moved = await persistAdvance(
-    req, cursor, walked, markPrev, "pending_resource", walked.active.approverIds,
+    req, snapshot.rev, walked, markPrev, "pending_resource", walked.active.approverIds,
   );
   if (!moved) return { outcome: "conflict" };
   return { outcome: "advanced", notifies: walked.notifies };
@@ -512,7 +530,7 @@ export async function forwardFlowNodeToOwner(
       handoffComment: opts.comment ?? null,
     }],
   };
-  const moved = await persistAdvance(req, cursor, walked, markPrev, "pending_resource", [ownerId]);
+  const moved = await persistAdvance(req, snapshot.rev, walked, markPrev, "pending_resource", [ownerId]);
   if (!moved) return { outcome: "conflict" };
   return { outcome: "forwarded", notifies: walked.notifies };
 }
@@ -553,7 +571,7 @@ export async function timeoutFlowNode(req: FlowRequestRow): Promise<FlowTimeoutR
     bySystem: true,
   };
   const moved = await persistAdvance(
-    req, cursor, walked, markPrev, "pending_resource", walked.active.approverIds,
+    req, snapshot.rev, walked, markPrev, "pending_resource", walked.active.approverIds,
   );
   if (!moved) return { outcome: "conflict" };
   return { outcome: "advanced", notifies: walked.notifies };

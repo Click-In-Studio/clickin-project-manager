@@ -10,6 +10,7 @@ import {
   submitAccessRequest,
 } from "@/lib/db";
 import { createFlowTemplate, publishFlowTemplate, updateFlowTemplate } from "@/lib/approval-flow-template-db";
+import { forwardFlowNodeToOwner, type FlowRequestRow } from "@/lib/approval-flow-engine";
 import type { ApprovalTemplateNode } from "@/lib/approval-flow-template";
 import { makeProduction, cleanupProduction } from "./factories";
 
@@ -105,6 +106,7 @@ describe("模版流端到端", () => {
     expect(req.currentApproverIds).toEqual([U_APPROVER]);
     expect(req.status).toBe("pending_resource");
     expect(req.currentStage).toBeNull();
+    expect(req.flowSnapshot!.rev).toBe(0);
   });
 
   it("审批节点完成 → cc 到达即投递 → 停在处理节点，不终局", async () => {
@@ -117,6 +119,7 @@ describe("模版流端到端", () => {
     expect(after.status).toBe("pending_resource");
     const snap = after.flowSnapshot!;
     expect(snap.cursor).toBe(2);
+    expect(snap.rev).toBe(1);
     expect(snap.nodes[0].state).toBe("done");
     expect(snap.nodes[0].responses?.[0]).toMatchObject({ userId: U_APPROVER, action: "approved", comment: "同意" });
     expect(snap.nodes[1].state).toBe("done");
@@ -147,6 +150,37 @@ describe("模版流端到端", () => {
       [prodId, U_SUBJECT, req.id],
     );
     expect(grants.rows.length).toBeGreaterThan(0);
+
+    // 终局快照带 rev+1；抄送记录不被后续推进/终局标失效（知会没有可失效的动作）
+    expect(r2.request.flowSnapshot!.rev).toBe(2);
+    const ccAfter = await getPool().query<{ expired_at: Date | null }>(
+      `SELECT expired_at FROM user_notification
+       WHERE user_id = $1 AND approval_request_id = $2 AND kind = 'approval_request_cc'`,
+      [U_CC, req.id],
+    );
+    expect(ccAfter.rows[0].expired_at).toBeNull();
+  });
+
+  it("并发守卫：同一 rev 的两次节点内转交只有一次能成（转交不改 cursor，押 rev）", async () => {
+    const req = await submit();
+    const { rows } = await getPool().query<FlowRequestRow>(
+      `SELECT * FROM approval_request WHERE id = $1`, [req.id],
+    );
+    const stale = rows[0];
+
+    const first = await forwardFlowNodeToOwner(stale, { actorId: U_APPROVER, reason: "forwarded" });
+    expect(first.outcome).toBe("forwarded");
+    // 模拟 cron 超时撞上手动转交：拿着同一份旧行再转一次 → rev 已走，必须冲突
+    const second = await forwardFlowNodeToOwner(stale, { reason: "timeout" });
+    expect(second.outcome).toBe("conflict");
+
+    // 链上只有一条转交后的 owner 条目，没有重复
+    const after = await getPool().query<{ n: number }>(
+      `SELECT jsonb_array_length(escalation_chain)::int AS n FROM approval_request WHERE id = $1`,
+      [req.id],
+    );
+    expect(after.rows[0].n).toBe(2);
+    await rejectAccessRequest(req.id, U_OWNER);
   });
 
   it("非当前处理人不能推进节点；拒绝即整体终局", async () => {

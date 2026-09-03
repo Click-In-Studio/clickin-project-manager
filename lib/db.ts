@@ -7373,9 +7373,12 @@ async function markLastChainEntry(requestId: string, patch: Partial<ApprovalChai
 }
 
 async function expireRequestNotifications(requestId: string): Promise<void> {
+  // 排除抄送：cc 是知会不是待办，没有可失效的动作——每次节点推进都把抄送
+  // 记录标成 expired 会让抄送人的收件箱历史显示「已失效」（prB review）。
   await getPool().query(
     `UPDATE user_notification SET expired_at = now()
-     WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL`,
+     WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL
+       AND kind <> 'approval_request_cc'`,
     [requestId],
   );
 }
@@ -7788,7 +7791,8 @@ export async function submitAccessRequest(
     for (const r of superseded.rows) {
       await supersedeClient.query(
         `UPDATE user_notification SET expired_at = now()
-         WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL`,
+         WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL
+           AND kind <> 'approval_request_cc'`,
         [r.id],
       );
     }
@@ -7866,6 +7870,7 @@ export async function approveAccessRequest(
   // 模版流（prB）：先完成当前节点。还有后续节点 → 推进并返回，**不终局**；
   // 全部走完 → 带着终态快照落进下面的终局 UPDATE（原子）。
   let finalFlowSnapshot: FlowSnapshot | null = null;
+  let flowPrevRev: number | null = null;
   if (req.flow_snapshot) {
     const advanced = await advanceFlowOnApprove(req, actorId, comment);
     if (advanced.outcome === "conflict") return { ok: false, reason: "conflict" };
@@ -7876,9 +7881,11 @@ export async function approveAccessRequest(
       return { ok: true, request: await withApprovalPeople(rowToApproval(freshRow ?? req)) };
     }
     finalFlowSnapshot = advanced.finalSnapshot;
+    flowPrevRev = advanced.prevRev;
   }
 
-  // first-action-wins：状态与所在级都要没被别人动过
+  // first-action-wins：状态与所在级都要没被别人动过。模版流的所在级恒 NULL，
+  // 改押快照 rev（$6）——不押的话同一瞬间的节点内转交会被终局静默覆盖。
   // 固定档位从批准时开始计时；自定义日期保持申请人选定的绝对时间。
   const updateRes = await getPool().query<{ id: string }>(
     `UPDATE approval_request
@@ -7894,10 +7901,12 @@ export async function approveAccessRequest(
                             ELSE NULL END
      WHERE id = $1 AND status = $3
        AND current_stage IS NOT DISTINCT FROM $4
+       AND ($6::int IS NULL OR COALESCE((flow_snapshot ->> 'rev')::int, 0) = $6)
        AND (requested_expires_at IS NULL OR requested_expires_at > now())
      RETURNING id`,
     [requestId, actorId, req.status, req.current_stage,
-     finalFlowSnapshot ? JSON.stringify(finalFlowSnapshot) : null],
+     finalFlowSnapshot ? JSON.stringify(finalFlowSnapshot) : null,
+     flowPrevRev],
   );
   if (!updateRes.rows[0]) return { ok: false, reason: "conflict" };
 
