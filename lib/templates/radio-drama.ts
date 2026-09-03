@@ -20,7 +20,7 @@
 import type { ProductionTemplate } from "../production-template";
 import {
   OPEN_BASELINE, PRODUCER_KEYS, STRUCTURE_EDIT, SCRIPT_EDIT, REHEARSAL_MARKS,
-  SCHEDULE_ADMIN, ASSET_UPLOAD, ASSET_NEW_VERSION, policiesFromAnswers,
+  SCHEDULE_ADMIN, ASSET_UPLOAD, ASSET_NEW_VERSION, MOUNT_ATTACH, policiesFromAnswers,
 } from "./shared";
 
 const DEPT_TREE = [
@@ -104,8 +104,8 @@ const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   ],
 
   // 音效设计：零行——主创职能全在音效表的声明行上（与剧场的设计族同理）
-  作曲: ["node:scene/*/music@edit"],
-  编曲: ["node:scene/*/music@edit"],
+  作曲: ["node:scene/*/music@edit", ASSET_UPLOAD, ...MOUNT_ATTACH],
+  编曲: ["node:scene/*/music@edit", ASSET_UPLOAD, ...MOUNT_ATTACH],
 
   // 录音 / 混音 / 母带：零行，走声音组部门区间
   // 配音演员：零行（基线即全部）

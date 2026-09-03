@@ -11,7 +11,9 @@
  * 策略全取代码默认：#236 那批默认值本来就是照剧场调的（账本 §5.7）。
  */
 import type { ProductionTemplate } from "../production-template";
-import { OPEN_BASELINE, PRODUCER_KEYS, REHEARSAL_MARKS, own, see } from "./shared";
+import {
+  OPEN_BASELINE, PRODUCER_KEYS, REHEARSAL_MARKS, ASSET_UPLOAD, MOUNT_ATTACH, own, see,
+} from "./shared";
 
 /** 五大组（组织树，区间宿主 + cue 类型归属）。 */
 const DEPT_TREE = [
@@ -44,8 +46,8 @@ export const THEATRE_DEPT_PERMISSIONS: Record<string, readonly string[]> = {
   创作组: ["node:asset/*@create", "node:script/*/rehearsal_marks@view"],
   // 设计稿 / 图纸 / 模型上传
   设计组: ["node:asset/*@create"],
-  舞美设计: ["node:scene/*/mounts@create", "node:script/*/mounts@create"],
-  道具设计: ["node:scene/*/mounts@create", "node:script/*/mounts@create"],
+  舞美设计: MOUNT_ATTACH,
+  道具设计: MOUNT_ATTACH,
   执行组: ["node:asset/*@create"],
   // 角色分配已含基线 character 五面；这里只补排练标记只读
   卡司组: ["node:script/*/rehearsal_marks@view"],
@@ -246,13 +248,20 @@ export const THEATRE_TEMPLATE: ProductionTemplate = {
         "node:script/*/rehearsal_marks/position@edit",
         "node:task/*@view",
       ],
+      // 谱子与 demo 的宿主是场次与唱段，故这两位除了「改音乐栏」还要能把素材
+      // 挂上去（MOUNT_ATTACH）。上传本该走创作组的部门区间，但剧组未必把作曲
+      // 编进音乐部门——角色轨也带一枚 ASSET_UPLOAD 做双保险（用户 2026-09-03 定）。
       "作曲": [
         "node:cue_list/*@create",
         "node:scene/*/music@edit",
+        ASSET_UPLOAD,
+        ...MOUNT_ATTACH,
       ],
       "编曲": [
         "node:cue_list/*@create",
         "node:scene/*/music@edit",
+        ASSET_UPLOAD,
+        ...MOUNT_ATTACH,
       ],
       "音响设计": [
         "node:cue_list/*@create",

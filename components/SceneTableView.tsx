@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import type { MarkerProjection } from "@/lib/script-marker-domain";
-import type { SceneFieldPerms } from "@/lib/scene-field-perms-shared";
+import { canMountScene, type SceneFieldPerms } from "@/lib/scene-field-perms-shared";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import { parseDuration, formatDuration } from "@/lib/duration";
@@ -539,7 +539,8 @@ export default function SceneTableView({
                 mountType="scene"
                 mountId={scene.id}
                 label={`${scene.number}${scene.name ? ` ${scene.name}` : ""}`}
-                canEdit={canEdit}
+                /* 与 ScenesManager 同源：挂载查的是 mounts@create，不是字段写权限 */
+                canEdit={canMountScene(fieldPerms, scene.id)}
                 versionId={versionId ?? undefined}
                 display="compact"
               />

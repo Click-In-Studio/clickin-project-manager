@@ -25,7 +25,7 @@
 import type { ProductionTemplate } from "../production-template";
 import {
   OPEN_BASELINE, PRODUCER_KEYS, SCRIPT_EDIT, STRUCTURE_EDIT, REHEARSAL_MARKS,
-  ASSET_UPLOAD, own, see,
+  ASSET_UPLOAD, MOUNT_ATTACH, own, see,
 } from "./shared";
 import { THEATRE_CUE_TYPES, THEATRE_DEPT_PERMISSIONS } from "./theatre";
 
@@ -119,7 +119,7 @@ const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "node:scene/*/music@edit",
     "node:task/*@view",
   ],
-  编曲: ["node:scene/*/music@edit"],
+  编曲: ["node:scene/*/music@edit", ASSET_UPLOAD, ...MOUNT_ATTACH],
   编舞: [...REHEARSAL_MARKS, "node:scene/*/action_line@edit", "node:task/*@view"],
 
   // 设计族 / 执行族 / 直播族 / 卡司族：零行——职能走部门声明行与部门区间

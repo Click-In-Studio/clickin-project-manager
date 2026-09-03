@@ -157,6 +157,11 @@ import {
   type AssetUploadZoneSnapshot,
 } from "./asset-upload-zone-backfill-snapshot";
 import {
+  createRoleDriftPreMigrationData,
+  ROLE_DRIFT_SNAPSHOT_PATH,
+  type RoleDriftSnapshot,
+} from "./role-template-drift-backfill-snapshot";
+import {
   isWikiEntityLinkPreMigrationSchema,
   createWikiEntityLinkPreMigrationData,
   WIKI_ENTITY_LINK_SNAPSHOT_PATH,
@@ -750,6 +755,26 @@ export async function setup() {
     );
     await writeFile(ASSET_UPLOAD_ZONE_SNAPSHOT_PATH, JSON.stringify(uploadZoneSnapshot));
   }
+
+  // 角色模版漂移回填：工厂裸 SQL 造三个演出（type 空 / film / album），覆盖三段
+  // 与两条排除，只碰 production_role_permission。同样无谓词、幂等二跑。
+  // **必须排在上面那支之后**——上传零区间回填会给「区间全空」项目的全部 role 补
+  // node:asset/*@create，若本厂的项目先于它存在，作曲的那一枚就分不清是谁补的
+  // （film / 弃用 / 通配三个对照更会被它污染成假绿）。
+  {
+    const roleDriftSnapshot = await createRoleDriftPreMigrationData(pool, TEST_USER);
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-role-template-drift-backfill.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+    const secondRun = await pool.query(migrationSql);
+    const secondResults = Array.isArray(secondRun) ? secondRun : [secondRun];
+    roleDriftSnapshot.secondRunInsertedRows = secondResults.reduce(
+      (sum, r) => sum + (r.rowCount ?? 0), 0,
+    );
+    await writeFile(ROLE_DRIFT_SNAPSHOT_PATH, JSON.stringify(roleDriftSnapshot));
+  }
 }
 
 export async function teardown() {
@@ -960,6 +985,28 @@ export async function teardown() {
         await pool.query("DELETE FROM production WHERE id = $1", [prodId]).catch(() => {});
       }
       await unlink(ASSET_UPLOAD_ZONE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // Clean up role-template-drift-backfill migration factory data (migration path only).
+  {
+    let roleDriftSnapshot: RoleDriftSnapshot | null = null;
+    try {
+      roleDriftSnapshot = JSON.parse(
+        await readFile(ROLE_DRIFT_SNAPSHOT_PATH, "utf8"),
+      ) as RoleDriftSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (roleDriftSnapshot) {
+      for (const prodId of [
+        roleDriftSnapshot.legacyProdId,
+        roleDriftSnapshot.filmProdId,
+        roleDriftSnapshot.albumProdId,
+      ]) {
+        await pool.query("DELETE FROM production WHERE id = $1", [prodId]).catch(() => {});
+      }
+      await unlink(ROLE_DRIFT_SNAPSHOT_PATH).catch(() => {});
     }
   }
 

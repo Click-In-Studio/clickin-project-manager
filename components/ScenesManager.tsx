@@ -9,7 +9,7 @@ import type { SceneDetail } from "@/lib/db";
 import DurationInput from "@/components/DurationInput";
 import { parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/scene-duration";
-import { canDeleteScene, type SceneFieldPerms } from "@/lib/scene-field-perms-shared";
+import { canDeleteScene, canMountScene, type SceneFieldPerms } from "@/lib/scene-field-perms-shared";
 import BoundaryActionMenu from "@/components/BoundaryActionMenu";
 import MarkerDeleteDialog, { type MarkerDeleteDialogState } from "@/components/MarkerDeleteDialog";
 import type { MarkerDeleteOperation, MarkerProjection } from "@/lib/script-marker-domain";
@@ -324,7 +324,9 @@ function SceneEditRow({
                 mountType="scene"
                 mountId={scene.id}
                 label={`${scene.number}${scene.name ? ` ${scene.name}` : ""}`}
-                canEdit={canEdit}
+                /* 挂载有自己的钥匙（scene/<id>/mounts@create），不随字段写权限
+                   下发——用 canEdit 这个粗门开合等于「入口亮着、点下去 403」 */
+                canEdit={canMountScene(fieldPerms, scene.id)}
                 versionId={versionId}
                 display="compact"
               />
