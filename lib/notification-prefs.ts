@@ -130,6 +130,14 @@ export const NOTIFICATION_CONFIG = {
     externalChannel: "dm" as const,
     defaultExternalEnabled: true,
   },
+  // 模版流 cc 节点（prB）：知会不索动作，与待审批分开订阅——抄送量大且无需处理，
+  // 混进 pending 类型会让人把真待办也关掉。
+  approval_request_cc: {
+    label: "资源申请抄送",
+    description: "审批流程模版中的抄送节点到达时知会你",
+    externalChannel: "dm" as const,
+    defaultExternalEnabled: true,
+  },
 } as const;
 
 export type NotificationType = keyof typeof NOTIFICATION_CONFIG;

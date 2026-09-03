@@ -18,12 +18,17 @@ export type ProductionAccess = {
 import { recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
 import {
   buildApprovalLadder, classifyApprovalNode, DEFAULT_APPROVAL_TTL_HOURS,
-  expandLevelRows, nextStage, stageAt, stageStatus,
+  expandLevelRows, findProductionOwner, nextStage, stageAt, stageStatus,
   type ApprovalStage, type ApprovalStageName, type ApprovalTarget, type StagePosition,
 } from "./approval-routing";
 import { isValidCustomExpiry, isValidTtlInterval } from "./approval-ttl";
 import {
-  approvalStageLabel, isApprovalCommentTooLong, normalizeApprovalComment,
+  advanceFlowOnApprove, forwardFlowNodeToOwner, parseFlowSnapshot,
+  prepareTemplateFlow, resolveNodeAssignees, timeoutFlowNode,
+  type FlowNotifyPlan, type FlowSnapshot,
+} from "./approval-flow-engine";
+import {
+  approvalStageLabel, isApprovalCommentTooLong, normalizeApprovalComment, STAGE_ORDER,
   type ApprovalAction, type ApprovalNodeClass,
 } from "./approval-stages";
 import { normalizeProductionTier, type ProductionTier } from "./plan";
@@ -6985,6 +6990,8 @@ export type ApprovalRequest = {
   note: string | null;
   status: "pending_supervisor" | "pending_resource" | "approved" | "rejected" | "cancelled";
   escalationChain: ApprovalChainEntry[];
+  /** 模版流实例快照（prB）；null = 阶梯流。前端时间线/流程视图据此渲染节点。 */
+  flowSnapshot: FlowSnapshot | null;
   /** 当前审批阶梯级（#140）；已 resolve 的申请为 null。 */
   currentStage: ApprovalStageName | null;
   currentApproverIds: string[];
@@ -7079,6 +7086,9 @@ type ApprovalRow = {
   current_stage: string | null;
   current_stage_depth: number | null;
   current_approver_ids: string[] | null;
+  /** 模版流实例快照（prB）；NULL = 阶梯流（存量与无模版项目）。 */
+  flow_snapshot: FlowSnapshot | null;
+  flow_template_id: string | null;
   created_at: Date;
   resolved_at: Date | null;
   resolved_by: string | null;
@@ -7129,6 +7139,7 @@ function rowToApproval(r: ApprovalRow): ApprovalRequest {
     note: r.note,
     status: r.status as ApprovalRequest["status"],
     escalationChain: r.escalation_chain ?? [],
+    flowSnapshot: parseFlowSnapshot(r.flow_snapshot),
     currentStage: (r.current_stage as ApprovalStageName | null) ?? null,
     currentApproverIds: r.current_approver_ids ?? [],
     canFinalize: null,
@@ -7555,6 +7566,83 @@ async function notifyStage(
 }
 
 /**
+ * 执行模版流引擎返回的通知计划（分层纪律：引擎只算状态与计划，文案、
+ * user_notification 与外部消息投递都在这边——与 notifyStage 同一屋檐）。
+ */
+async function runFlowNotifies(req: ApprovalRow, notifies: FlowNotifyPlan[]): Promise<void> {
+  if (notifies.length === 0) return;
+  const nameRes = await getPool().query<{ name: string }>(
+    `SELECT name FROM user_profile WHERE user_id = $1`,
+    [req.subject_id],
+  );
+  const subjectName = nameRes.rows[0]?.name ?? "成员";
+  const desc = await describeResource(req.resource_type ?? "", req.resource_id ?? "*", req.permission_level ?? "");
+  const href = `${SERVER_URL}/production/${req.production_id}/access-requests`;
+
+  for (const plan of notifies) {
+    if (plan.kind === "cc") {
+      // 抄送：知会不索动作——actionRequired=false，无按钮，不进待办计数
+      await notifyUsers({
+        userIds: plan.recipientIds,
+        productionId: req.production_id,
+        kind: "approval_request_cc",
+        entityType: "approval_request",
+        entityId: req.id,
+        title: `[抄送] ${subjectName} 的资源申请到达「${plan.nodeTitle}」`,
+        body: `${subjectName} 申请获得${desc}，流程已到达「${plan.nodeTitle}」节点，此消息仅为知会。`,
+        viewHref: href,
+        category: "info",
+        approvalRequestId: req.id,
+        buildExternalMessage: async () => ({
+          text: `[抄送] ${subjectName} 申请 ${desc}`,
+          title: `资源申请抄送（${plan.nodeTitle}）`,
+          primaryUrl: href,
+        }),
+      });
+      continue;
+    }
+
+    const isProcessing = plan.nodeType === "processing";
+    const suffix = plan.context === "timeout"   ? "（上一处理人超时，已自动转交）"
+                 : plan.context === "forwarded" ? "（由上一处理人转交）"
+                 : "";
+    const handoffLine = plan.handoffComment ? `\n\n转交说明：${plan.handoffComment}` : "";
+    const noteLine = req.note ? `\n\n申请理由：${req.note}` : "";
+    await notifyUsers({
+      userIds: plan.approverIds,
+      productionId: req.production_id,
+      kind: "approval_request_pending",
+      entityType: "approval_request",
+      entityId: req.id,
+      title: `${subjectName} 申请 ${desc}${suffix}`,
+      body: isProcessing
+        ? `${subjectName} 的${desc}申请已完成审批，进入「${plan.nodeTitle}」节点，请完成实际开通后确认。${noteLine}${handoffLine}`
+        : `${subjectName} 申请获得${desc}${suffix}，当前节点「${plan.nodeTitle}」，请审批。${noteLine}${handoffLine}`,
+      viewHref: href,
+      category: "action",
+      actionRequired: true,
+      approvalRequestId: req.id,
+      actions: [
+        {
+          id: "approve", presentation: "primary_button" as const,
+          label: isProcessing ? "确认完成" : "批准",
+          effects: [{ type: "approve_access_request" as const, requestId: req.id }],
+        },
+        {
+          id: "reject", presentation: "secondary_button" as const, label: "拒绝",
+          effects: [{ type: "reject_access_request" as const, requestId: req.id }],
+        },
+      ],
+      buildExternalMessage: async () => ({
+        text: `${subjectName} 申请 ${desc}${suffix}，请处理`,
+        title: `资源申请待${isProcessing ? "开通" : "审批"}（${plan.nodeTitle}）`,
+        primaryUrl: href,
+      }),
+    });
+  }
+}
+
+/**
  * 审批动作鉴权。返回 canFinalize=false 表示「在场但只能转发」。
  *
  * owner 恒可介入；制作人可介入非敏感申请（PRD：制作人可随时介入本演出待处理
@@ -7641,14 +7729,20 @@ export async function submitAccessRequest(
     throw new ApprovalRequestError("no_entry");
   }
 
-  const ladder = await buildApprovalLadder({
+  const target: ApprovalTarget = {
     productionId, subjectId: userId,
     resourceType: params.resourceType,
     resourceId, resourceSub,
     permissionLevel: params.permissionLevel,
-  });
-  const firstStage = ladder[0];
-  if (!firstStage) throw new ApprovalRequestError("no_approver");
+  };
+
+  // 编译源选择（引擎 §3）：有已发布模版且非敏感 → 模版流；否则阶梯流原路。
+  // 敏感项直达 owner 是治理语义，prepareTemplateFlow 内部已拒绝接手。
+  const flow = await prepareTemplateFlow(target);
+
+  const ladder = flow ? null : await buildApprovalLadder(target);
+  const firstStage = ladder?.[0] ?? null;
+  if (!flow && !firstStage) throw new ApprovalRequestError("no_approver");
 
   // 覆盖式申请自动完成（2026-08-16 用户反馈）：同人同目标同级别的旧 pending 申请
   // 被新申请取代（如先申 1 周又改申 30 天）——自动 cancel 并过期其待办通知，
@@ -7703,23 +7797,33 @@ export async function submitAccessRequest(
          (production_id, subject_id, type,
           resource_type, resource_id, resource_sub,
           permission_level, grant_type, ttl_duration, requested_expires_at, note, status,
-          current_stage, current_stage_depth, current_approver_ids, escalation_chain)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::INTERVAL,$10::TIMESTAMPTZ,$11,$12,$13,$14,$15::uuid[],$16::jsonb)
+          current_stage, current_stage_depth, current_approver_ids, escalation_chain,
+          flow_snapshot, flow_template_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::INTERVAL,$10::TIMESTAMPTZ,$11,$12,$13,$14,$15::uuid[],$16::jsonb,
+               $17::jsonb,$18)
        RETURNING *`,
-      [
-        productionId, userId, requestType,
-        params.resourceType, resourceId, resourceSub,
-        params.permissionLevel,
-        grantType,
-        ttlDuration,
-        requestedExpiresAt,
-        params.note ?? null,
-        stageStatus(firstStage.stage),
-        firstStage.stage,
-        firstStage.depth,
-        firstStage.approverIds,
-        JSON.stringify([chainEntryFor(firstStage)]),
-      ],
+      flow
+        ? [
+            productionId, userId, requestType,
+            params.resourceType, resourceId, resourceSub,
+            params.permissionLevel, grantType, ttlDuration, requestedExpiresAt,
+            params.note ?? null,
+            // 模版流恒 pending_resource + current_stage NULL（引擎文件头「行形态」）
+            "pending_resource", null, 0,
+            flow.currentApproverIds,
+            JSON.stringify(flow.chainEntries),
+            JSON.stringify(flow.snapshot), flow.templateId,
+          ]
+        : [
+            productionId, userId, requestType,
+            params.resourceType, resourceId, resourceSub,
+            params.permissionLevel, grantType, ttlDuration, requestedExpiresAt,
+            params.note ?? null,
+            stageStatus(firstStage!.stage),
+            firstStage!.stage, firstStage!.depth, firstStage!.approverIds,
+            JSON.stringify([chainEntryFor(firstStage!)]),
+            null, null,
+          ],
     );
     request = insertRes.rows[0];
     await supersedeClient.query("COMMIT");
@@ -7730,7 +7834,8 @@ export async function submitAccessRequest(
     supersedeClient.release();
   }
 
-  await notifyStage(request, firstStage, "new");
+  if (flow) await runFlowNotifies(request, flow.notifies);
+  else await notifyStage(request, firstStage!, "new");
   return rowToApproval(request);
 }
 
@@ -7754,8 +7859,24 @@ export async function approveAccessRequest(
   // 自定义到期日已被跨过：批下去只会发一条出生即失效的授权。放在鉴权之后、
   // forward_only 之前——本级处理不了的人也该看到「这条已经过期」而不是「去转交」。
   if (await cancelIfCustomExpiryPassed(req)) return { ok: false, reason: "expired" };
-  // 直属上级本人没有该权限 → 只能转发（#140）
+  // 直属上级本人没有该权限 → 只能转发（#140；模版流 current_stage 恒 NULL，
+  // 不触发该规则——模版里的直属上级节点语义是「完成本节点推进下一节点」）
   if (!auth.canFinalize) return { ok: false, reason: "forward_only" };
+
+  // 模版流（prB）：先完成当前节点。还有后续节点 → 推进并返回，**不终局**；
+  // 全部走完 → 带着终态快照落进下面的终局 UPDATE（原子）。
+  let finalFlowSnapshot: FlowSnapshot | null = null;
+  if (req.flow_snapshot) {
+    const advanced = await advanceFlowOnApprove(req, actorId, comment);
+    if (advanced.outcome === "conflict") return { ok: false, reason: "conflict" };
+    if (advanced.outcome === "advanced") {
+      await expireRequestNotifications(requestId);
+      const freshRow = await loadApproval(requestId);
+      if (freshRow) await runFlowNotifies(freshRow, advanced.notifies);
+      return { ok: true, request: await withApprovalPeople(rowToApproval(freshRow ?? req)) };
+    }
+    finalFlowSnapshot = advanced.finalSnapshot;
+  }
 
   // first-action-wins：状态与所在级都要没被别人动过
   // 固定档位从批准时开始计时；自定义日期保持申请人选定的绝对时间。
@@ -7767,6 +7888,7 @@ export async function approveAccessRequest(
          granted_at = now(),
          current_stage = NULL,
          current_approver_ids = '{}',
+         flow_snapshot = COALESCE($5::jsonb, flow_snapshot),
          expires_at = CASE WHEN grant_type = 'ttl'
                             THEN COALESCE(requested_expires_at, now() + ttl_duration)
                             ELSE NULL END
@@ -7774,7 +7896,8 @@ export async function approveAccessRequest(
        AND current_stage IS NOT DISTINCT FROM $4
        AND (requested_expires_at IS NULL OR requested_expires_at > now())
      RETURNING id`,
-    [requestId, actorId, req.status, req.current_stage],
+    [requestId, actorId, req.status, req.current_stage,
+     finalFlowSnapshot ? JSON.stringify(finalFlowSnapshot) : null],
   );
   if (!updateRes.rows[0]) return { ok: false, reason: "conflict" };
 
@@ -7868,6 +7991,17 @@ export async function escalateAccessRequest(
   if (!auth.authorized) return { ok: false, reason: "unauthorized" };
   // 往上转交一条已经作废的申请，只是把它挪到下一位审批人的收件箱里继续烂着
   if (await cancelIfCustomExpiryPassed(req)) return { ok: false, reason: "expired" };
+
+  // 模版流（prB）：转交是节点内事件——处理人换成 owner 兜底，节点不换。
+  if (req.flow_snapshot) {
+    const fwd = await forwardFlowNodeToOwner(req, { actorId, reason: "forwarded", comment });
+    if (fwd.outcome === "already_owner") return { ok: false, reason: "no_next_stage" };
+    if (fwd.outcome === "conflict") return { ok: false, reason: "conflict" };
+    await expireRequestNotifications(requestId);
+    const freshRow = await loadApproval(requestId);
+    if (freshRow) await runFlowNotifies(freshRow, fwd.notifies);
+    return { ok: true, request: await withApprovalPeople(rowToApproval(freshRow ?? req)) };
+  }
 
   const ladder = await buildApprovalLadder(approvalTargetOf(req));
   const next = nextStage(ladder, currentPositionOf(req));
@@ -8097,17 +8231,34 @@ export async function escalateExpiredApprovals(): Promise<{ escalated: number }>
   // 才加的表，建表 SQL 没有回填，早于它的演出一行都没有。INNER JOIN 会让这些
   // 演出的申请**永远**匹配不上、一次也升不了级（线上 8 个演出全部缺行，整条
   // 升级链自 Phase 7 起就是死的）。缺配置=按列默认值计时，不是"不升级"。
+
+  // 模版流（prB）的超时口径：节点自带 timeoutHours 优先，缺省回项目配置。
+  // 选行 SQL 与 nodeTimeoutHours() 同一优先级序——两处漂移会让「4h 节点」
+  // 要等满项目的 24h 才被选中。
   const { rows } = await getPool().query<ApprovalRow>(
     `SELECT ar.* FROM approval_request ar
      LEFT JOIN production_approval_config pac ON pac.production_id = ar.production_id
      WHERE ar.status IN ('pending_supervisor', 'pending_resource')
        AND COALESCE((ar.escalation_chain -> -1 ->> 'notifiedAt')::timestamptz, ar.created_at)
-           < now() - (COALESCE(pac.ttl_hours, $1) || ' hours')::INTERVAL`,
+           < now() - (COALESCE(
+               (ar.flow_snapshot -> 'nodes' -> ((ar.flow_snapshot ->> 'cursor')::int) ->> 'timeoutHours')::numeric,
+               pac.ttl_hours, $1) || ' hours')::INTERVAL`,
     [DEFAULT_APPROVAL_TTL_HOURS],
   );
 
   let escalated = 0;
   for (const row of rows) {
+    // 模版流：超时是节点内事件（可跳过节点跳过继续；否则转交 owner 兜底）
+    if (row.flow_snapshot) {
+      const timedOut = await timeoutFlowNode(row);
+      if (timedOut.outcome !== "advanced" && timedOut.outcome !== "forwarded") continue;
+      escalated++;
+      await expireRequestNotifications(row.id);
+      const freshRow = await loadApproval(row.id);
+      if (freshRow) await runFlowNotifies(freshRow, timedOut.notifies);
+      continue;
+    }
+
     const ladder = await buildApprovalLadder(approvalTargetOf(row));
     const next = nextStage(ladder, currentPositionOf(row));
     if (!next) continue;  // 已在链顶（owner），只等人处理，不再升级
@@ -8127,4 +8278,121 @@ export async function escalateExpiredApprovals(): Promise<{ escalated: number }>
   }
 
   return { escalated };
+}
+
+// ─── 实例流程视图（prB，缺口文档 P1-6）────────────────────────────────────────
+
+export type AccessRequestFlowView = {
+  request: ApprovalRequest;
+  flow:
+    | {
+        mode: "template";
+        /**
+         * 未来节点的处理人**实时预测**（按当前组织关系现算，标注给前端展示用；
+         * 引擎执行时仍按跳晚绑定重新解析——预测不是承诺，§4）。
+         */
+        prediction: { nodeId: string; approverIds: string[] }[];
+      }
+    | {
+        mode: "ladder";
+        /**
+         * 当前级之后的真实剩余阶梯（空级已剔除、敏感项已分流）。#405 预测框用
+         * STAGE_ORDER 裸切片显示引擎永远不会走的节点——这里是它的正解数据源。
+         */
+        remaining: { stage: ApprovalStageName; depth: number; approverIds: string[] }[];
+      };
+  viewerActions: { canApprove: boolean; canReject: boolean; canEscalate: boolean };
+};
+
+/**
+ * 按 requestId 读取实例流程。preview 接口按 session 用户算组织链，审批人查看
+ * 他人申请会得到错误的链（缺口文档 P1-6）——本接口按**申请主体**算，且经过
+ * 实例可见性校验：申请人、链上出现过的人、当前处理人、owner、制作人、平台
+ * 管理员可见；其余成员 403（流程配置与人员安排不是全员可见的数据）。
+ */
+export async function getAccessRequestFlow(
+  requestId: string,
+  viewerId: string,
+  isPlatformAdmin: boolean,
+): Promise<
+  | { ok: true; view: AccessRequestFlowView }
+  | { ok: false; reason: "not_found" | "forbidden" }
+> {
+  const row = await loadApproval(requestId);
+  if (!row) return { ok: false, reason: "not_found" };
+
+  const participants = new Set<string>([row.subject_id, ...(row.current_approver_ids ?? [])]);
+  for (const entry of row.escalation_chain ?? []) {
+    (entry.approverIds ?? []).forEach((id) => participants.add(id));
+    if (entry.actorId) participants.add(entry.actorId);
+  }
+  if (row.resolved_by) participants.add(row.resolved_by);
+
+  let visible = isPlatformAdmin || participants.has(viewerId);
+  if (!visible) {
+    const { rows } = await getPool().query<{ ok: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM production
+         WHERE id = $1 AND owner_id = $2
+         UNION
+         SELECT 1 FROM production_member
+         WHERE production_id = $1 AND user_id = $2 AND '制作人' = ANY(roles) AND status = 'active'
+       ) AS ok`,
+      [row.production_id, viewerId],
+    );
+    visible = rows[0]?.ok ?? false;
+  }
+  if (!visible) return { ok: false, reason: "forbidden" };
+
+  const pending = isPendingStatus(row.status);
+  const snapshot = parseFlowSnapshot(row.flow_snapshot);
+  const target = approvalTargetOf(row);
+
+  let flow: AccessRequestFlowView["flow"];
+  if (snapshot) {
+    const prediction: { nodeId: string; approverIds: string[] }[] = [];
+    if (pending) {
+      for (const node of snapshot.nodes) {
+        if (node.state !== "pending" || node.type === "cc") continue;
+        prediction.push({
+          nodeId: node.id,
+          approverIds: await resolveNodeAssignees(node, target),
+        });
+      }
+    }
+    flow = { mode: "template", prediction };
+  } else {
+    let remaining: { stage: ApprovalStageName; depth: number; approverIds: string[] }[] = [];
+    if (pending) {
+      const ladder = await buildApprovalLadder(target);
+      const current = currentPositionOf(row);
+      const currentRank = current
+        ? STAGE_ORDER.indexOf(current.stage) * 1000 + current.depth
+        : -1;
+      remaining = ladder
+        .filter((s) => STAGE_ORDER.indexOf(s.stage) * 1000 + s.depth > currentRank)
+        .map((s) => ({ stage: s.stage, depth: s.depth, approverIds: s.approverIds }));
+    }
+    flow = { mode: "ladder", remaining };
+  }
+
+  let viewerActions = { canApprove: false, canReject: false, canEscalate: false };
+  if (pending) {
+    const auth = await authorizeApprovalAction(row, viewerId);
+    if (auth.authorized) {
+      const canEscalate = snapshot
+        ? !(row.current_approver_ids ?? []).includes((await findProductionOwner(row.production_id)) ?? "")
+        : nextStage(await buildApprovalLadder(target), currentPositionOf(row)) !== null;
+      viewerActions = { canApprove: auth.canFinalize, canReject: true, canEscalate };
+    }
+  }
+
+  return {
+    ok: true,
+    view: {
+      request: await withApprovalPeople(rowToApproval(row)),
+      flow,
+      viewerActions,
+    },
+  };
 }

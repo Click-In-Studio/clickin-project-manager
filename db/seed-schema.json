@@ -1007,6 +1007,16 @@
       "default": "'{}'::uuid[]"
     },
     {
+      "column": "flow_snapshot",
+      "type": "jsonb",
+      "nullable": true
+    },
+    {
+      "column": "flow_template_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,
