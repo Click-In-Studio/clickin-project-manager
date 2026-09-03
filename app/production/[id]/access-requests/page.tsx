@@ -19,5 +19,13 @@ export default async function AccessRequestsPage({ params }: { params: Promise<{
   ]);
   if (!access) notFound();
 
-  return <AccessRequestsClient productionId={id} productionName={productionName ?? ""} />;
+  // 流程设置是 owner 面（模版决定「谁能批准权限」，属权限的权限——缺口文档 P0-10）；
+  // 门在 SSR 算，与 API 侧 requireGrantGate 空 OR 链同源。
+  return (
+    <AccessRequestsClient
+      productionId={id}
+      productionName={productionName ?? ""}
+      canManageFlows={access.permCtx.isOwner || access.permCtx.isAdmin}
+    />
+  );
 }

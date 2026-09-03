@@ -1696,6 +1696,9 @@
 .approvalRouteForecast p { margin: 7px 0 0; color: var(--muted); font-size: 9px; line-height: 1.55; }
 .approvalRouteForecastStages { display: flex; gap: 5px; margin-top: 8px; flex-wrap: wrap; }
 .approvalRouteForecastStages span { padding: 3px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 8px; font-weight: 700; }
+.approvalRouteForecastStages span[data-state="done"],
+.approvalRouteForecastStages span[data-state="skipped"] { opacity: .55; }
+.approvalRouteForecastStages span[data-state="active"] { border: 1px solid var(--ink); color: var(--ink); background: var(--surface); }
 
 .approvalDesigner {
   min-height: 0;
@@ -1740,8 +1743,33 @@
   cursor: pointer;
 }
 .approvalPrimaryButton { border-color: var(--ink) !important; background: var(--ink) !important; color: #fff !important; }
+.approvalPrimaryButton:disabled { cursor: not-allowed; opacity: .42; }
+/* #405 review：这两个类此前被引用但从未定义，按钮渲染成 class="undefined" */
+.approvalSecondaryButton { background: var(--surface); }
+.approvalInlineEditorClose { color: var(--muted) !important; }
+.approvalPublishButton { border-color: #386955 !important; background: #e5efec !important; color: #386955 !important; }
 .approvalPublishButton:disabled { cursor: not-allowed; opacity: .42; }
 .approvalDraftSaved { color: var(--success, #4b7f65); font-size: 10px; font-weight: 700; }
+.approvalDesignerError { color: var(--danger, #b5453c); font-size: 10px; font-weight: 700; }
+.approvalDesignerHint { margin: 24px auto; color: var(--muted); font-size: 11px; text-align: center; }
+.approvalPickerGroup { margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--line); }
+.approvalPickerGroup > small { color: var(--muted); font-size: 9px; font-weight: 700; }
+.approvalPickerChips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.approvalPickerChips > span { color: var(--muted); font-size: 9px; }
+.approvalPickerChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 10px;
+  cursor: pointer;
+}
+.approvalPickerChip input { accent-color: var(--ink); }
+.approvalPickerChip:has(input:checked) { border-color: var(--ink); background: var(--surface); font-weight: 700; }
 .approvalDesignerGrid {
   display: grid;
   grid-template-columns: minmax(210px, .48fr) minmax(560px, 1.52fr);

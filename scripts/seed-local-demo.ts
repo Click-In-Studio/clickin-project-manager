@@ -121,14 +121,24 @@ async function main() {
     { id: "30000000-0000-4000-8000-000000000002", name: "王澜", deptIndex: 3 },
     { id: "30000000-0000-4000-8000-000000000003", name: "苏禾", deptIndex: 4 },
     { id: "30000000-0000-4000-8000-000000000004", name: "林默", deptIndex: 6 },
+    // 注意：轮转会给苏禾挂上「制作人」，findProducers 按该角色串字面匹配，这个
+    // 无登录身份的虚拟成员会进真实 producer 审批级。这是 demo 的**有意妥协**：
+    // owner 提交的支出（下方 demoExpenses）把 owner 从阶梯里剔除，必须有一位
+    // 非 owner 制作人接住，否则财务 seed 直接 no_approver。副作用（转交到
+    // producer 级的申请会落在无人能登录的苏禾手上）由 owner 介入权兜底。
+    // 因此 demoApprovers 里的唐澄用「制作统筹」——一个幻影制作人是结构必需，
+    // 两个就纯属放大滞留面了（#405 review）。
   ].map((member, index) => ({ ...member, roles: [projectRoles[index % projectRoles.length]] }));
   // 审批演示不能只有「申请人 + 当前登录 owner」两个人，否则界面看起来像审批流
   // 根本没做。下面四位只服务于 demo 的历史节点：分别代表直属上级、PM、制作人、
   // 资源负责人。真实产品仍由组织关系和资源治理配置动态匹配。
+  // 唐澄不能挂「制作人」：findProducers 按字面匹配该角色串，会把这个无登录
+  // 身份的幻影账号注入真实 producer 审批级——转交后申请永久滞留在无人能
+  // 处理的账号上（#405 review）。demo 里的「制作」人设用非结构性角色名表达。
   const demoApprovers = [
     { id: "31000000-0000-4000-8000-000000000001", name: "周衡", roles: ["灯光主管"] },
     { id: "31000000-0000-4000-8000-000000000002", name: "姜予安", roles: ["项目经理"] },
-    { id: "31000000-0000-4000-8000-000000000003", name: "唐澄", roles: ["制作人"] },
+    { id: "31000000-0000-4000-8000-000000000003", name: "唐澄", roles: ["制作统筹"] },
     { id: "31000000-0000-4000-8000-000000000004", name: "周岑", roles: ["资源负责人"] },
   ];
 
@@ -195,6 +205,15 @@ async function main() {
       [PRODUCTION_ID, approver.id, approver.roles, user.id],
     );
   }
+  // 虚拟申请人的直属上级指向周衡（demoApprovers[0]）而非 owner：审批链历史
+  // 写的是「周衡转交」，supervisor_id 指 owner 的话实时路由会与链矛盾——demo
+  // 里新发申请算出的上级和历史里的必须是同一个人（#405 review）。两遍式落：
+  // 周衡的 app_user 行在上面 approvers 循环里才建，插 demoMembers 时还引用不了。
+  await pool.query(
+    `UPDATE production_member SET supervisor_id = $1
+     WHERE production_id = $2 AND user_id = ANY($3::uuid[])`,
+    [demoApprovers[0].id, PRODUCTION_ID, demoMembers.map((m) => m.id)],
+  );
   await pool.query(
     `INSERT INTO production_member_tag_assignment (production_id, user_id, tag_id)
      SELECT $1, $2, id FROM production_member_tag WHERE production_id IS NULL AND name = '正式'
