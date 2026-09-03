@@ -30,6 +30,7 @@ import {
 import {
   sceneFieldPermsFromRows,
   canDeleteScene,
+  canMountScene,
   getSceneFieldPerms,
 } from "@/lib/scene-field-perms";
 import { PAGE_PERMISSION_SCOPES } from "@/lib/page-permission-scopes";
@@ -114,6 +115,31 @@ describe("scene：any 是粗门，不蕴含 create / delete / kind", () => {
     expect(canDeleteScene(p, "s1")).toBe(true);
     expect(canDeleteScene(p, "s2")).toBe(false);
     expect(p.any).toBe(true);
+  });
+
+  it("挂载有自己的钥匙：只持 music@edit 挂不了，持 mounts@create 才挂得了", () => {
+    const musicOnly = sceneFieldPermsFromRows([row("music", "edit")]);
+    expect(musicOnly.any).toBe(true);          // 粗门为真（构作页会显示编辑态）
+    expect(musicOnly.mounts).toBe(false);      // 但挂载入口必须是暗的
+    expect(canMountScene(musicOnly, "s1")).toBe(false);
+
+    const mounter = sceneFieldPermsFromRows([row("mounts", "create")]);
+    expect(mounter.mounts).toBe(true);
+    expect(canMountScene(mounter, "任意场次")).toBe(true);
+    // 挂载不反向蕴含字段写
+    expect([mounter.music, mounter.name, mounter.structure]).toEqual([false, false, false]);
+  });
+
+  it("实例级挂载只覆盖它自己那一场（判定端查 resource_id IN (sceneId, '*')）", () => {
+    const p = sceneFieldPermsFromRows([row("mounts", "create", "s1")]);
+    expect(p.mounts).toBe(false);
+    expect(canMountScene(p, "s1")).toBe(true);
+    expect(canMountScene(p, "s2")).toBe(false);
+  });
+
+  it("sub 通配的 create 行同时给出挂载（mounts 不是保留段）", () => {
+    const p = sceneFieldPermsFromRows([row("*", "create")]);
+    expect(p.mounts).toBe(true);
   });
 
   it("实例级行不点亮字段门——判定端字段 PATCH 查的是 resource_id='*'", () => {
