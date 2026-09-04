@@ -3,12 +3,15 @@
 // 语法方言声明见 ./wiki-link-syntax（教会模型别瞎发明 [[标题]] 语法）。
 
 import { resolveProductionActor, DENIED_NOT_MEMBER } from "./production-tools";
-import { listWikiLibrary, setWikiDeptShares, listWikiDeptShares } from "@/lib/wiki/tree";
-import { getWiki, createWiki, updateWiki, deleteWiki, setWikiPublic, listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson } from "@/lib/wiki/content";
+import {
+  listNodeLibrary, getNodeByWikiId, moveNode,
+  setNodePublic, setNodeListable, setNodeDeptShares, listNodeDeptShares,
+  type NodeEntry,
+} from "@/lib/node/db";
+import { getWiki, createWiki, updateWiki, deleteWiki, listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson } from "@/lib/wiki/content";
 import { listBacklinks, listOutgoingLinks, searchWiki, extractWikiLinkTargets, type WikiRef } from "@/lib/wiki/links";
-import { type WikiListEntry } from "@/lib/wiki/types";
 import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki, listVisibleWikiIds } from "@/lib/wiki/perm";
-import { listEnumerableWikiIds, canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki/enum-perm";
+import { listEnumerableNodeIds, canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
 import { neutralizeInjectionTags } from "@/lib/agent-injection-safety";
 import { listProductionDepts } from "@/lib/dept-db";
 import { listProductionMembers } from "@/lib/db";
@@ -35,10 +38,10 @@ export function sharePermissionKey(wikiId: string): string { return `node:wiki/$
 
 /** 嵌套缩进文本；孤儿节点（父文档因权限被过滤掉）落到根层，镜像
  *  components/wiki/WikiShell.tsx 的 byParent 邻接表兜底逻辑（不静默丢弃）。 */
-function buildTreeText(entries: WikiListEntry[]): string {
+function buildTreeText(entries: NodeEntry[]): string {
   if (entries.length === 0) return "（该项目还没有文档，或你还看不到任何文档）";
   const ids = new Set(entries.map((e) => e.id));
-  const byParent = new Map<string | null, WikiListEntry[]>();
+  const byParent = new Map<string | null, NodeEntry[]>();
   for (const e of entries) {
     const key = e.parentId && ids.has(e.parentId) ? e.parentId : null;
     if (!byParent.has(key)) byParent.set(key, []);
@@ -51,7 +54,8 @@ function buildTreeText(entries: WikiListEntry[]): string {
   const walk = (parentId: string | null, depth: number) => {
     for (const e of byParent.get(parentId) ?? []) {
       const tagStr = e.tags.length > 0 ? `［${e.tags.join("、")}］` : "";
-      lines.push(`${"  ".repeat(depth)}- ${e.title ?? "（无标题）"}（id: ${e.id}）${tagStr}`);
+      // AI 工具族只认 **wiki id**（方言 id 往返协议 #400）——树里打印内容 id
+      lines.push(`${"  ".repeat(depth)}- ${e.displayTitle ?? "（无标题）"}（id: ${e.wikiId ?? e.id}）${tagStr}`);
       walk(e.id, depth + 1);
     }
   };
@@ -68,12 +72,12 @@ async function filterVisible<T extends { id: string }>(
   return wildcard ? rows : rows.filter((r) => ids.has(r.id));
 }
 
-async function filterEnumerable<T extends { id: string }>(
+async function filterEnumerable(
   actor: GrantActor,
   productionId: string,
-  rows: T[],
-): Promise<T[]> {
-  const { wildcard, ids } = await listEnumerableWikiIds(actor, productionId);
+  rows: NodeEntry[],
+): Promise<NodeEntry[]> {
+  const { wildcard, ids } = await listEnumerableNodeIds(actor, productionId);
   return wildcard ? rows : rows.filter((r) => ids.has(r.id));
 }
 
@@ -87,7 +91,9 @@ async function filterEnumerable<T extends { id: string }>(
 export async function wikiTree(userId: string, productionId: string): Promise<string> {
   const resolved = await resolveProductionActor(userId, productionId);
   if (!resolved) return DENIED_NOT_MEMBER;
-  const all = await listWikiLibrary(productionId);
+  // AI 面只收 wiki-kind 节点（软链接/资产/文件夹不进：对读写文档的工具族没有
+  // 语义，列出来只会诱导模型拿非 wiki id 去 update/move——#358 信噪比论证的延伸）
+  const all = (await listNodeLibrary(productionId)).filter((n) => n.kind === "wiki");
   const visible = await filterEnumerable(resolved.actor, productionId, all);
   // 文档标题/正文是成员可写的自由文本——读回给模型前中和注入分隔符，防有人
   // 在文档里塞 <clickin-instructions> 之类经工具结果做间接注入。
@@ -163,9 +169,10 @@ export async function wikiRead(userId: string, productionId: string, wikiId: str
   const targets = extractWikiLinkTargets(doc.body);
   const titleMap = await resolveLinkTitles(targets, productionId);
   const body = resolveBodyLinksForDisplay(doc.body, titleMap, new Set(targets));
+  const shell = await getNodeByWikiId(wikiId);
 
   const lines = [
-    `《${doc.title ?? "（无标题）"}》${doc.isPublic ? "（公开）" : ""}`,
+    `《${doc.title ?? "（无标题）"}》${shell?.isPublic ? "（公开）" : ""}`,
     doc.tags.length > 0 ? `标签：${doc.tags.join("、")}` : null,
     "",
     body,
@@ -211,16 +218,25 @@ export async function wikiProposeCreate(
     return "权限被拒绝：你没有在该制作新建文档的权限。已记录本次调用，需人工审批通过后才能重试。";
   }
 
-  const parentId = args.parentId ?? null;
-  if (!await canPlaceWikiUnder(resolved.actor, productionId, parentId)
-      || !await canWriteWikiContainer(resolved.actor, productionId, parentId)) {
+  // AI 传的是父文档的 wiki id（方言协议），此处翻译为壳节点 id
+  let parentNodeId: string | null = null;
+  if (args.parentId) {
+    const parentShell = await getNodeByWikiId(args.parentId);
+    if (!parentShell || parentShell.productionId !== productionId) {
+      if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_business_rule");
+      return "父文档不存在。";
+    }
+    parentNodeId = parentShell.id;
+  }
+  if (!await canPlaceNodeUnder(resolved.actor, productionId, parentNodeId)
+      || !await canWriteNodeContainer(resolved.actor, productionId, parentNodeId)) {
     if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_no_permission");
     return "权限被拒绝：你没有在该父文档下新建子文档的权限。已记录本次调用，需人工审批通过后才能重试。";
   }
 
   const doc = await createWiki({
     productionId, title: args.title, body: args.body ?? "",
-    parentId, createdBy: userId, origin: "ai-proposed",
+    parentNodeId, createdBy: userId, origin: "ai-proposed",
   });
   if (proposal) await markWikiProposalApplied(proposal.id, doc.id);
   return `已创建文档《${doc.title}》（id: ${doc.id}）。`;
@@ -305,25 +321,34 @@ export async function wikiProposeMove(
   }
 
   const existing = await getWiki(args.wikiId, productionId);
-  if (!existing) return "没有找到该文档。";
-  const newParentId = args.newParentId ?? null;
-  if (!await canPlaceWikiUnder(resolved.actor, productionId, newParentId)
-      || !await canWriteWikiContainer(resolved.actor, productionId, newParentId)
-      || (newParentId !== existing.parentId
-          && !await canWriteWikiContainer(resolved.actor, productionId, existing.parentId))) {
+  const shell = existing ? await getNodeByWikiId(args.wikiId) : null;
+  if (!existing || !shell) return "没有找到该文档。";
+  // AI 传 wiki id，位置面在 node 域——目标父翻译为壳节点
+  let newParentNodeId: string | null = null;
+  if (args.newParentId) {
+    const parentShell = await getNodeByWikiId(args.newParentId);
+    if (!parentShell || parentShell.productionId !== productionId) {
+      if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_business_rule");
+      return "目标父文档不存在。";
+    }
+    newParentNodeId = parentShell.id;
+  }
+  if (!await canPlaceNodeUnder(resolved.actor, productionId, newParentNodeId)
+      || !await canWriteNodeContainer(resolved.actor, productionId, newParentNodeId)
+      || (newParentNodeId !== shell.parentId
+          && !await canWriteNodeContainer(resolved.actor, productionId, shell.parentId))) {
     if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_no_permission");
     return "权限被拒绝：你没有改动这些父文档子目录的权限。已记录本次调用，需人工审批通过后才能重试。";
   }
 
-  let doc;
+  let doc = existing;
   try {
-    doc = await updateWiki(args.wikiId, productionId, { parentId: newParentId, origin: "ai-proposed" }, userId);
+    await moveNode(shell.id, productionId, { parentId: newParentNodeId });
   } catch (err) {
     // validateParent 抛错（父不存在/成环）——不是权限问题，proposal 标业务规则状态。
     if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_business_rule");
     return err instanceof Error ? err.message : "移动失败：目标父文档不合法。";
   }
-  if (!doc) return "没有找到该文档。";
   if (proposal) await markWikiProposalApplied(proposal.id, doc.id);
   return args.newParentId
     ? `已把文档《${doc.title}》移动到新的父文档下。`
@@ -384,9 +409,10 @@ const LEVEL_LABEL: Record<WikiLevel, string> = { view: "可阅读", edit: "可�
 
 /** 改完之后把三个面回读成一段人类可读的现状，供模型复述给用户。 */
 async function shareStateText(wikiId: string, productionId: string): Promise<string> {
+  const shell = await getNodeByWikiId(wikiId);
   const [doc, deptIds, people, depts, members] = await Promise.all([
     getWiki(wikiId, productionId),
-    listWikiDeptShares(wikiId),
+    shell ? listNodeDeptShares(shell.id) : Promise.resolve([]),
     listWikiSharePeople(wikiId, productionId),
     listProductionDepts(productionId).catch(() => []),
     listProductionMembers(productionId),
@@ -395,7 +421,7 @@ async function shareStateText(wikiId: string, productionId: string): Promise<str
   const memberName = new Map(members.map((m) => [m.userId, m.name || "（未命名）"]));
   return [
     `当前分享设置（文档《${doc?.title ?? "（无标题）"}》）：`,
-    `- 全体成员可见：${doc?.isPublic ? "是" : "否"}`,
+    `- 全体成员可见：${shell?.isPublic ? "是" : "否"}`,
     `- 分享给部门：${deptIds.length > 0 ? deptIds.map((id) => deptName.get(id) ?? id).join("、") : "（无）"}`,
     `- 单独分享给：${people.length > 0
       ? people.map((p) => `${memberName.get(p.userId) ?? p.userId}（${LEVEL_LABEL[p.level]}）`).join("、")
@@ -441,14 +467,16 @@ export async function wikiSetGrant(
     }
   }
 
+  const targetShell = await getNodeByWikiId(args.wikiId);
+  if (!targetShell) return "没有找到该文档。";
   const changes: string[] = [];
   if (args.isPublic !== undefined) {
-    await setWikiPublic(args.wikiId, productionId, args.isPublic);
+    await setNodePublic(targetShell.id, productionId, args.isPublic);
     changes.push(args.isPublic ? "已设为全体成员可见" : "已取消全体成员可见");
   }
   if (args.deptIds !== undefined) {
     // 整体替换（不是增量追加）——工具描述里也写明了这点。
-    await setWikiDeptShares(args.wikiId, productionId, args.deptIds);
+    await setNodeDeptShares(targetShell.id, productionId, args.deptIds);
     changes.push(args.deptIds.length > 0 ? `部门分享已设为 ${args.deptIds.length} 个部门` : "已清空部门分享");
   }
   for (const p of addPeople) {

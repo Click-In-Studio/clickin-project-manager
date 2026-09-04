@@ -4,7 +4,7 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { hasAdminPanelEligibility } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
 import { toActor } from "@/lib/grant-check";
-import { listEnumerableWikiIds } from "@/lib/wiki/enum-perm";
+import { listEnumerableNodeIds } from "@/lib/node/perm";
 import { listVisibleWikiIds } from "@/lib/wiki/perm";
 import { RESOURCE_DIRECTORY_QUERIES } from "@/lib/resource-directory";
 
@@ -40,18 +40,19 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (type === "wiki") {
     const actor = toActor(session, permCtx);
     const [enumerable, visible] = await Promise.all([
-      listEnumerableWikiIds(actor, id),
+      listEnumerableNodeIds(actor, id),   // 枚举面键在 node（#420），经壳节点对撞
       listVisibleWikiIds(actor, id),
     ]);
-    const { rows } = await getPool().query<{ id: string; label: string }>(
-      `SELECT id::text AS id, COALESCE(title, id::text) AS label
-       FROM wiki WHERE production_id = $1 AND title IS NOT NULL ORDER BY created_at DESC`,
+    const { rows } = await getPool().query<{ id: string; label: string; node_id: string | null }>(
+      `SELECT w.id::text AS id, COALESCE(w.title, w.id::text) AS label, n.id AS node_id
+       FROM wiki w LEFT JOIN node n ON n.wiki_id = w.id
+       WHERE w.production_id = $1 AND w.title IS NOT NULL ORDER BY w.created_at DESC`,
       [id],
     );
     const items = (enumerable.wildcard || visible.wildcard)
       ? rows
-      : rows.filter(r => enumerable.ids.has(r.id) || visible.ids.has(r.id));
-    return Response.json({ items: items.slice(0, 500) });
+      : rows.filter(r => (r.node_id !== null && enumerable.ids.has(r.node_id)) || visible.ids.has(r.id));
+    return Response.json({ items: items.map(({ id: wid, label }) => ({ id: wid, label })).slice(0, 500) });
   }
 
   const sql = RESOURCE_DIRECTORY_QUERIES[type];

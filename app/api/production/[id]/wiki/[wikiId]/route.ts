@@ -4,13 +4,12 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
 import { getWiki, updateWiki, deleteWiki } from "@/lib/wiki/content";
 import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki } from "@/lib/wiki/perm";
-import { canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki/enum-perm";
+import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
 import { broadcastWikiUpdate } from "@/lib/wiki/collab";
 import { readParentAnchor } from "@/lib/wiki/input";
-import { gateWikiAnchorPlacement, resolveWikiAnchorParent } from "@/lib/wiki/placement";
+import { gateNodeAnchorPlacement, resolveNodeAnchorParent } from "@/lib/node/placement";
 import type { Mention } from "@/lib/event-db";
-import { setWikiPublic } from "@/lib/wiki/content";
-import { setWikiListable, type WikiPlacement } from "@/lib/wiki/tree";
+import { getNodeByWikiId, moveNode, setNodePublic, setNodeListable, type NodePlacement } from "@/lib/node/db";
 
 type Ctx = { params: Promise<{ id: string; wikiId: string }> };
 
@@ -48,6 +47,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const existing = await getWiki(wikiId, productionId);
   if (!existing) return Response.json({ error: "文档不存在" }, { status: 404 });
+  // 位置面的真身是壳节点（#420）；1:1 不变量下必在，缺失即数据破损按 404 处理
+  const shell = await getNodeByWikiId(wikiId);
+  if (!shell || shell.productionId !== productionId)
+    return Response.json({ error: "文档不存在" }, { status: 404 });
 
   const body = await req.json() as {
     title?: string; body?: string; mentions?: Mention[];
@@ -57,7 +60,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     parentAnchor?: "dramaturgy";
     /** 相对锚点落位（#357 症状②）：客户端只说"放在谁的前/后"，服务端在完整
      *  兄弟集上算键——可枚举性逐节点后客户端兄弟集可能有空洞。 */
-    place?: WikiPlacement;
+    place?: NodePlacement;
     isPublic?: boolean;
     /** 可枚举性开关（#357）——与 isPublic 同属分享面 */
     listable?: boolean;
@@ -105,31 +108,31 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const explicitParentId = body.parentId?.trim() ? body.parentId.trim() : null;
   const anchorRequested = !explicitParentId && anchor.anchor === "dramaturgy";
   const changingParent = body.parentId !== undefined || anchorRequested;
-  let resolvedParentId = changingParent ? explicitParentId : existing.parentId;
+  let resolvedParentId = changingParent ? explicitParentId : shell.parentId;
   if (changingParent || body.place !== undefined || body.sortKey !== undefined) {
     // ①② 两支同顺位（三/四轮 AI review）：锚点支的门不写库，没有理由排到 ③ 后面
     if (anchorRequested) {
-      const gate = await gateWikiAnchorPlacement(actor, productionId, "dramaturgy");
+      const gate = await gateNodeAnchorPlacement(actor, productionId, "dramaturgy");
       if (!gate.ok)
         return Response.json({
           error: gate.reason === "place" ? "无权移动到该父文档下" : "无权修改该父文档的子目录",
         }, { status: 403 });
     } else {
-      if (!await canPlaceWikiUnder(actor, productionId, resolvedParentId))
+      if (!await canPlaceNodeUnder(actor, productionId, resolvedParentId))
         return Response.json({ error: "无权移动到该父文档下" }, { status: 403 });
-      if (!await canWriteWikiContainer(actor, productionId, resolvedParentId))
+      if (!await canWriteNodeContainer(actor, productionId, resolvedParentId))
         return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
     }
     // ③ 换父时源父也要可写。锚点支刻意**无条件**判：目标 id 要解析完才知道，比不了
     // "是不是真的换父"。代价是"把一篇已经在灵感库根下的文档再移入一次"这种空操作
     // 也会被源父门 403，fail-closed，别当 bug"修"掉。
-    if (anchorRequested || (changingParent && resolvedParentId !== existing.parentId)) {
-      if (!await canWriteWikiContainer(actor, productionId, existing.parentId))
+    if (anchorRequested || (changingParent && resolvedParentId !== shell.parentId)) {
+      if (!await canWriteNodeContainer(actor, productionId, shell.parentId))
         return Response.json({ error: "无权把文档移出原父文档" }, { status: 403 });
     }
   }
   // 解析（可能懒建根）排在所有门之后，一处都不许提前
-  if (anchorRequested) resolvedParentId = await resolveWikiAnchorParent(productionId, "dramaturgy");
+  if (anchorRequested) resolvedParentId = await resolveNodeAnchorParent(productionId, "dramaturgy");
 
   try {
     if (wantsContent) {
@@ -140,14 +143,19 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         ...(body.body !== undefined ? { body: body.body } : {}),
         ...(body.body !== undefined && body.baseBody !== undefined ? { mergeBase: body.baseBody } : {}),
         ...(body.mentions !== undefined ? { mentions: body.mentions } : {}),
-        ...(changingParent ? { parentId: resolvedParentId } : {}),
-        ...(body.sortKey !== undefined ? { sortKey: body.sortKey } : {}),
-        ...(body.place !== undefined ? { place: body.place } : {}),
         ...(body.tags !== undefined ? { tags: body.tags } : {}),
       }, session.userId);
+      // 位置面走 node 域（#420）：parent/sort/place 是壳节点的属性
+      if (changingParent || body.sortKey !== undefined || body.place !== undefined) {
+        await moveNode(shell.id, productionId, {
+          ...(changingParent ? { parentId: resolvedParentId } : {}),
+          ...(body.sortKey !== undefined ? { sortKey: body.sortKey } : {}),
+          ...(body.place !== undefined ? { place: body.place } : {}),
+        });
+      }
     }
-    if (body.isPublic !== undefined) await setWikiPublic(wikiId, productionId, body.isPublic);
-    if (body.listable !== undefined) await setWikiListable(wikiId, productionId, body.listable);
+    if (body.isPublic !== undefined) await setNodePublic(shell.id, productionId, body.isPublic);
+    if (body.listable !== undefined) await setNodeListable(shell.id, productionId, body.listable);
     const fresh = await getWiki(wikiId, productionId);
     // 协作广播（内容/标题/标签变化才推；标签帧缺省=本帧没动标签）
     if (fresh && (body.body !== undefined || body.title !== undefined || body.tags !== undefined)) {

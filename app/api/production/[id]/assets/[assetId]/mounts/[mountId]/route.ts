@@ -2,7 +2,8 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset } from "@/lib/asset/db";
-import { removeAssetMount, listAssetMounts } from "@/lib/asset/mount";
+import { getNodeMount, removeNodeMount } from "@/lib/node/mount";
+import { getNodeByAssetId } from "@/lib/node/db";
 import { canPublishAsset } from "@/lib/asset/perm";
 
 type Ctx = { params: Promise<{ id: string; assetId: string; mountId: string }> };
@@ -17,9 +18,10 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });
 
-  const mounts = await listAssetMounts(assetId);
-  const mount = mounts.find(m => m.id === mountId);
-  if (!mount) return Response.json({ error: "挂载点不存在" }, { status: 404 });
+  const shell = await getNodeByAssetId(assetId);
+  const mount = await getNodeMount(mountId);
+  if (!mount || !shell || mount.nodeId !== shell.id || mount.productionId !== id)
+    return Response.json({ error: "挂载点不存在" }, { status: 404 });
 
   // 批D：解除 = publication@delete（收回让渡）∨ 挂载者收回自己挂的（上下文）
   const permitted = session.isAdmin
@@ -27,6 +29,6 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     || await canPublishAsset(access.permCtx, id, assetId, "delete");
   if (!permitted) return Response.json({ error: "权限不足" }, { status: 403 });
 
-  await removeAssetMount(mountId);
+  await removeNodeMount(mountId);
   return Response.json({ ok: true });
 }

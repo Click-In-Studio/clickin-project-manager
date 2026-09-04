@@ -4,7 +4,7 @@ import { canViewWiki } from "../wiki/perm";
 import { canViewAssetById } from "../asset/perm";
 import type { GrantActor } from "../grant-check";
 import {
-  getNode, insertNode, tailSortKey, placementSortKey,
+  getNode, insertNode, moveNode, tailSortKey, placementSortKey,
   type NodeEntry, type NodePlacement, type NodeRecord,
 } from "./db";
 import { canEnumerateNode, localEnumerableNodeIds } from "./perm";
@@ -143,6 +143,34 @@ export async function createNodeLink(params: {
   }
   broadcastWikiLibraryChange(productionId, { kind: "created", wikiId: id });
   return { ok: true, link: (await getNode(id, productionId))! };
+}
+
+/** 移动/重排 link（位置面）。比通用 moveNode 多一道目标子树校验。门由调用方跑。 */
+export async function moveNodeLink(
+  id: string, productionId: string,
+  patch: { parentId?: string | null; place?: NodePlacement },
+): Promise<{ ok: true; link: NodeRecord } | { ok: false; reason: NodeLinkError | "not_found" }> {
+  const existing = await getNode(id, productionId);
+  if (!existing || existing.kind !== "link") return { ok: false, reason: "not_found" };
+  const nextParentId = patch.parentId !== undefined ? patch.parentId : existing.parentId;
+  if (nextParentId !== null && nextParentId !== existing.parentId) {
+    const p = await getNode(nextParentId, productionId);
+    if (!p || (p.kind !== "folder" && p.kind !== "wiki")) return { ok: false, reason: "parent_not_found" };
+  }
+  if (existing.linkTargetId
+      && await placeInsideTargetSubtree(productionId, nextParentId, existing.linkTargetId)) {
+    return { ok: false, reason: "inside_target_subtree" };
+  }
+  try {
+    const moved = await moveNode(id, productionId, patch);
+    if (!moved) return { ok: false, reason: "not_found" };
+    return { ok: true, link: moved };
+  } catch (e) {
+    if (e instanceof Error && e.message === "duplicate_link_in_container") {
+      return { ok: false, reason: "duplicate" };
+    }
+    throw e;
+  }
 }
 
 /** 空白显示名收敛成 null＝跟随目标——「改回自动」和「没设过」必须是同一状态。 */

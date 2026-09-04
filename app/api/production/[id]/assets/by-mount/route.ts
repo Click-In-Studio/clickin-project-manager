@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getAssetsByMountPoint, type MountType } from "@/lib/asset/mount";
+import { getAssetsByMountPoint, type MountType } from "@/lib/node/mount";
 import { filterVisibleAssets } from "@/lib/asset/perm";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

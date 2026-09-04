@@ -1,14 +1,14 @@
 import { type NextRequest } from "next/server";
 import { readParentAnchor } from "@/lib/wiki/input";
-import { gateWikiAnchorPlacement, resolveWikiAnchorParent } from "@/lib/wiki/placement";
+import { gateNodeAnchorPlacement, resolveNodeAnchorParent } from "@/lib/node/placement";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { createWiki } from "@/lib/wiki/content";
 import { searchWiki } from "@/lib/wiki/links";
 import { listVisibleWikiIds } from "@/lib/wiki/perm";
-import { canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki/enum-perm";
-import { listWikiTreeFor } from "@/lib/wiki/tree-view";
+import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
+import { listNodeTreeFor } from "@/lib/node/tree-view";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -39,9 +39,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       results: visible.wildcard ? hits : hits.filter(h => visible.ids.has(h.id)),
     });
   }
-  // 树 = 可枚举文档 ∪ 可枚举软链接（#358），一个取数口，见 lib/wiki/tree-view.ts
-  const { wikis, aliases } = await listWikiTreeFor(actor, productionId);
-  return Response.json({ wikis, aliases });
+  // 树 = 可枚举节点 ∪ 可枚举软链接（#358/#420 单数组四 kind），唯一取数口
+  const { nodes } = await listNodeTreeFor(actor, productionId);
+  return Response.json({ nodes });
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
@@ -57,7 +57,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = await req.json() as {
-    title?: string; body?: string; parentId?: string | null;
+    title?: string; body?: string;
+    /** 父**节点** id（#420：树位置在 node 上）。 */
+    parentId?: string | null;
     /** 可枚举性（#357），缺省 true。false＝建在目录里但只有被显式分享的人能列到。 */
     listable?: boolean;
     /** 显式 parentId 缺席时的落位锚点。锚点可能尚未建（懒建），由服务端在**过完
@@ -80,17 +82,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const explicitParentId = body.parentId?.trim() || null;
   let parentId = explicitParentId;
   if (explicitParentId) {
-    if (!await canPlaceWikiUnder(actor, productionId, explicitParentId))
+    if (!await canPlaceNodeUnder(actor, productionId, explicitParentId))
       return Response.json({ error: "无权在该父文档下创建" }, { status: 403 });
-    if (!await canWriteWikiContainer(actor, productionId, explicitParentId))
+    if (!await canWriteNodeContainer(actor, productionId, explicitParentId))
       return Response.json({ error: "无权修改该父文档的子目录" }, { status: 403 });
   } else if (anchor.anchor === "dramaturgy") {
-    const gate = await gateWikiAnchorPlacement(actor, productionId, "dramaturgy");
+    const gate = await gateNodeAnchorPlacement(actor, productionId, "dramaturgy");
     if (!gate.ok)
       return Response.json({
         error: gate.reason === "place" ? "无权在该父文档下创建" : "无权修改该父文档的子目录",
       }, { status: 403 });
-    parentId = await resolveWikiAnchorParent(productionId, "dramaturgy");
+    parentId = await resolveNodeAnchorParent(productionId, "dramaturgy");
   }
 
   try {
@@ -98,7 +100,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       productionId,
       title: body.title.trim(),
       body: body.body ?? "",
-      parentId,
+      parentNodeId: parentId,
       listable: body.listable ?? true,
       createdBy: session.userId,
     });

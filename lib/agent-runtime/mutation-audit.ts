@@ -64,22 +64,23 @@ const READERS: Record<string, ScopeReader> = {
       const out = new Map<string, Snapshot>();
       if (!productionId) return out;
       const { getWiki, listWikiSharePeople } = await import("@/lib/wiki/content");
-      const { listWikiDeptShares } = await import("@/lib/wiki/tree");
+      const { getNodeByWikiId, listNodeDeptShares } = await import("@/lib/node/db");
       // 批量写（≤50 篇）逐篇串行会放大 N 倍往返，按 id 并行（AI review #398）
       const snaps = await Promise.all(ids.map(async (id) => {
         const doc = await getWiki(id, productionId).catch(() => null);
         if (!doc) return null;
+        const shell = await getNodeByWikiId(id).catch(() => null);
         const [rev, depts, people] = await Promise.all([
           latestWikiRevisionId(id),
-          listWikiDeptShares(id).catch(() => [] as string[]),
+          shell ? listNodeDeptShares(shell.id).catch(() => [] as string[]) : Promise.resolve([] as string[]),
           listWikiSharePeople(id, productionId).catch(() => [] as Array<{ userId: string; level: string }>),
         ]);
         const snap: Snapshot = {
           label: doc.title ?? "",
           title: doc.title ?? "",
-          parentId: doc.parentId,
+          parentId: shell?.parentId ?? null,
           tags: [...doc.tags].sort(),
-          isPublic: doc.isPublic,
+          isPublic: shell?.isPublic ?? false,
           deptShares: [...depts].sort(),
           people: people.map((p) => `${p.userId}:${p.level}`).sort(),
           revisionId: rev,
@@ -93,8 +94,10 @@ const READERS: Record<string, ScopeReader> = {
     },
     listIds: async ({ productionId }) => {
       if (!productionId) return [];
-      const { listWikiLibrary } = await import("@/lib/wiki/tree");
-      return (await listWikiLibrary(productionId)).map((w) => w.id);
+      const { listNodeLibrary } = await import("@/lib/node/db");
+      return (await listNodeLibrary(productionId))
+        .filter((n) => n.kind === "wiki" && n.wikiId !== null)
+        .map((n) => n.wikiId!);
     },
   },
   scene: {
