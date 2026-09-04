@@ -14,7 +14,8 @@ import { uid, rowToAsset, type Asset, type AssetRow } from "../asset/db";
 //      宿主删除的悬空行由「反向查询只从活宿主页发起」遮蔽；node 侧真 FK CASCADE）。
 //   3. 【硬不变量】**边不投枚举票**：任何边种不得让节点在目录树里出现。内容面的
 //      挂载让渡＝分享语义（资产挂到可见 scene ⇒ 内容可见，如同 wiki 被分享后
-//      父链不可枚举也看不到位置但能读）——由各内容域判定自持（asset/perm 四通道），
+//      父链不可枚举也看不到位置但能读）——宿主可见性判定收敛在
+//      lib/node/host-visibility.ts 共享核，wiki/asset 内容面同源消费；
 //      不进 node/perm 的任何谓词。
 //
 // mount_type='embed'：wiki 正文嵌入的图片资产，宿主 mount_id=wiki uuid（内容面
@@ -84,32 +85,67 @@ export async function listNodeMounts(nodeId: string): Promise<NodeMount[]> {
   return res.rows.map(rowToMount);
 }
 
-/** 某挂载点上的全部资产（含边行）。node 侧 join asset——非 asset 节点的挂载
- *  （wiki 节点挂到 event 等）由 kind 分派，本函数只回 asset 面板要的形状。 */
+/** 挂载点读面的泛化形状（#420 第二批）：一条边 + 目标 node 的 kind 分派载荷。
+ *  asset 节点带 asset 全行；wiki 节点带 {id, title}；folder/link 不可挂载
+ *  （但读路径不假设，遇到即只回 node 骨架）。 */
+export type MountedNodeEntry = {
+  mount: NodeMount;
+  nodeId: string;
+  kind: string;
+  asset: Asset | null;
+  wiki: { id: string; title: string | null } | null;
+};
+
+/** 某挂载点上的全部节点（含边行），按 kind 分派载荷。**不带权限过滤**——
+ *  调用方按 kind 走各自内容面（asset→filterVisibleAssets，wiki→canViewWiki/
+ *  listVisibleWikiIds），别在这里加门。 */
+export async function listNodesByMountPoint(
+  productionId: string,
+  mountType: MountType,
+  mountId: string,
+  mountAuxId?: string | null
+): Promise<MountedNodeEntry[]> {
+  const params: (string | null)[] = [productionId, mountType, mountId];
+  const auxClause = mountAuxId !== undefined ? " AND nm.mount_aux_id = $4" : "";
+  if (mountAuxId !== undefined) params.push(mountAuxId ?? null);
+
+  const res = await getPool().query<NodeMountRow & {
+    target_node_id: string; kind: string;
+    asset: AssetRow | null;
+    wiki_id: string | null; wiki_title: string | null;
+  }>(
+    `SELECT nm.*, n.id AS target_node_id, n.kind,
+            row_to_json(a.*) AS asset,
+            w.id::text AS wiki_id, w.title AS wiki_title
+     FROM node_mount nm
+     JOIN node n ON n.id = nm.node_id
+     LEFT JOIN asset a ON a.id = n.asset_id
+     LEFT JOIN wiki w ON w.id = n.wiki_id
+     WHERE nm.production_id = $1 AND nm.mount_type = $2 AND nm.mount_id = $3${auxClause}
+     ORDER BY nm.created_at DESC`,
+    params
+  );
+  return res.rows.map(r => ({
+    mount: rowToMount(r),
+    nodeId: r.target_node_id,
+    kind: r.kind,
+    asset: r.asset
+      ? rowToAsset({ ...r.asset, created_at: new Date(r.asset.created_at as unknown as string) })
+      : null,
+    wiki: r.wiki_id ? { id: r.wiki_id, title: r.wiki_title } : null,
+  }));
+}
+
+/** 某挂载点上的全部资产（含边行）——listNodesByMountPoint 的 asset 面投影，
+ *  现有资产面板消费此形状。 */
 export async function getAssetsByMountPoint(
   productionId: string,
   mountType: MountType,
   mountId: string,
   mountAuxId?: string | null
 ): Promise<Array<{ mount: NodeMount; asset: Asset }>> {
-  const params: (string | null)[] = [productionId, mountType, mountId];
-  const auxClause = mountAuxId !== undefined ? " AND nm.mount_aux_id = $4" : "";
-  if (mountAuxId !== undefined) params.push(mountAuxId ?? null);
-
-  const res = await getPool().query<NodeMountRow & { asset: AssetRow | null }>(
-    `SELECT nm.*, row_to_json(a.*) AS asset
-     FROM node_mount nm
-     JOIN node n ON n.id = nm.node_id
-     LEFT JOIN asset a ON a.id = n.asset_id
-     WHERE nm.production_id = $1 AND nm.mount_type = $2 AND nm.mount_id = $3${auxClause}
-     ORDER BY nm.created_at DESC`,
-    params
-  );
-  return res.rows.flatMap(r => {
-    if (!r.asset) return [];
-    const a = { ...r.asset, created_at: new Date(r.asset.created_at as unknown as string) };
-    return [{ mount: rowToMount(r), asset: rowToAsset(a) }];
-  });
+  const entries = await listNodesByMountPoint(productionId, mountType, mountId, mountAuxId);
+  return entries.flatMap(e => (e.asset ? [{ mount: e.mount, asset: e.asset }] : []));
 }
 
 // ─── 跨边种反查 resolver 注册表 ─────────────────────────────────────────────

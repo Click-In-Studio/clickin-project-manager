@@ -2,13 +2,16 @@ import { getPool } from "../pg";
 import { isPolicyOn } from "../policy-db";
 import { hasGrant, listGrantedResourceIds, type GrantActor } from "../grant-check";
 import { hasEventDomainView } from "../event-permissions";
+import { mountConcededNodeIds } from "../node/host-visibility";
 
 // ─── wiki 文档库 W3：可见性判定（账本 §4.2，asset 隐私模型同构）─────────────────
 //
 // 可见(user, wiki) = 个人 grant 行（创建者行集 / grants@edit 持有者分享）
 //                  ∨ is_public（全体，结构面）
 //                  ∨ dept 分享面（wiki_dept_share ∩ 用户部门，判定时查成员零 sweep）
-//                  ∨ ∃挂载边: 宿主可见（report 边→报告可见性；note 边→其 report 可见性）
+//                  ∨ ∃挂载边: 宿主可见（report 边→报告可见性；note 边→其 report 可见性；
+//                    scene/block/cue/event 挂载边→lib/node/host-visibility 共享核，
+//                    与 asset 挂载让渡同源——#420 第二批拍板）
 //
 // 挂载/分享面永不物化 grant 行（§0.9 负面清单）；解除挂载/分享即收缩。
 // 标题=目录级信息沿引用边流出（§4.1），由 mention-resolve 承担，不经本判定。
@@ -18,7 +21,7 @@ import { hasEventDomainView } from "../event-permissions";
 // 名字沿引用边逐点流出 ≠ 名字集合可枚举，两者是不同的披露类，不得互相推导。
 // 不变量：枚举面的任何变化不得改变 canViewWiki 的判定结果。
 
-type WikiVisibilityRow = { id: string; is_public: boolean };
+type WikiVisibilityRow = { id: string; is_public: boolean; node_id: string | null };
 
 /** report 边的宿主可见判据（对齐 reports/[reportId]/page.tsx 的门）：
  *  已发布 ∧ 事件域 view；或 draft 四通道（report 实例行 / publication@view /
@@ -50,7 +53,7 @@ export async function canViewWiki(
   const pool = getPool();
   // is_public 活在 node 壳上（#420）；无壳的 wiki 行（不变量破损）按不公开处理
   const w = await pool.query<WikiVisibilityRow>(
-    `SELECT w.id::text AS id, COALESCE(n.is_public, false) AS is_public
+    `SELECT w.id::text AS id, COALESCE(n.is_public, false) AS is_public, n.id AS node_id
      FROM wiki w LEFT JOIN node n ON n.wiki_id = w.id
      WHERE w.id = $1::uuid AND w.production_id = $2`,
     [wikiId, productionId],
@@ -69,6 +72,13 @@ export async function canViewWiki(
     [wikiId, actor.userId, productionId],
   );
   if (deptShare.rows.length > 0) return true;
+  // 挂载让渡（#420 第二批拍板）：文档的 node 被挂到 scene/block/cue/event 上，
+  // 宿主可见 ⇒ 文档可读。与 asset 挂载让渡同一判定核（lib/node/host-visibility），
+  // 与 report/note 边先例同语义。枚举面照旧不投票。
+  if (w.rows[0].node_id) {
+    const conceded = await mountConcededNodeIds(actor, productionId, { nodeIds: [w.rows[0].node_id] });
+    if (conceded.has(w.rows[0].node_id)) return true;
+  }
   // 挂载边（直接 report 边 ∪ 经 note 边到其 report）——#420 后边键在 node 上
   const edges = await pool.query<{ report_id: string; event_id: string; published: boolean }>(
     `SELECT er.id AS report_id, er.event_id, (er.published_at IS NOT NULL) AS published
@@ -162,6 +172,17 @@ export async function listVisibleWikiIds(
      actor.userId],
   );
   for (const r of mounted.rows) ids.add(r.id);
+
+  // 挂载让渡（集合式，与 canViewWiki 的单点分支同读共享核——不得分叉）
+  const conceded = await mountConcededNodeIds(actor, productionId, { kind: "wiki" });
+  if (conceded.size > 0) {
+    const concededWikis = await pool.query<{ id: string }>(
+      `SELECT wiki_id::text AS id FROM node
+       WHERE id = ANY($1::text[]) AND wiki_id IS NOT NULL`,
+      [[...conceded]],
+    );
+    for (const r of concededWikis.rows) ids.add(r.id);
+  }
 
   return { wildcard: false, ids };
 }
