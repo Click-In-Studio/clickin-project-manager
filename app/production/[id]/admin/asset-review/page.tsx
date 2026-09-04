@@ -7,7 +7,7 @@ import { requireAdminAccess } from "@/lib/admin-guard";
 import { getSession } from "@/lib/session";
 import { hasGrant } from "@/lib/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import { listPrivateAssets } from "@/lib/asset-review-db";
+import { listPrivateAssets } from "@/lib/asset/review-db";
 import AdminAssetReviewClient from "@/components/AdminAssetReviewClient";
 
 export default async function AssetReviewPage({ params }: { params: Promise<{ id: string }> }) {

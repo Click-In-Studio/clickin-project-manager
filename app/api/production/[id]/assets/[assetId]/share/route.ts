@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getAsset } from "@/lib/asset-db";
-import { canCreateShareToken } from "@/lib/asset-perm";
-import { signShareToken } from "@/lib/asset-share-token";
+import { getAsset } from "@/lib/asset/db";
+import { canCreateShareToken } from "@/lib/asset/perm";
+import { signShareToken } from "@/lib/asset/share-token";
 
 type Ctx = { params: Promise<{ id: string; assetId: string }> };
 

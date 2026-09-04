@@ -2,7 +2,7 @@ import { getPool } from "./pg";
 import { policyFilteredRows } from "./policy-db";
 import { writeEventGrants, writeReportGrants, writeTechReqGrants, writeWikiGrants } from "./resource-grant-db";
 import { taskSubjectOf } from "./task-poc";
-import { ensureReportTreeAnchors, placeWikiUnder } from "./wiki-db";
+import { ensureReportTreeAnchors, placeWikiUnder } from "./wiki/tree";
 import { keyBetween } from "./lex-order";
 
 // ─── Types ────────────────────────────────────────────────────────────────────

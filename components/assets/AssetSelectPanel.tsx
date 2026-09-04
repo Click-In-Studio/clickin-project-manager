@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { Asset, MountType } from "@/lib/asset-db";
-import { ASSET_TYPE_LABELS } from "@/lib/asset-types";
+import type { Asset } from "@/lib/asset/db";
+import type { MountType } from "@/lib/asset/mount";
+import { ASSET_TYPE_LABELS } from "@/lib/asset/types";
 import { BASE_PATH } from "@/lib/base-path";
 
 export type MountContext = {

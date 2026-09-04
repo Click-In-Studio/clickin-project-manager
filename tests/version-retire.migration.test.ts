@@ -12,7 +12,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { getPool } from "@/lib/pg";
-import { resolveAssetFile } from "@/lib/asset-db";
+import { resolveAssetFile } from "@/lib/asset/db";
 import { getVersion, getActiveVersionId } from "@/lib/db";
 import { makeProduction, cleanupProduction, makeLegacyVersion } from "./factories";
 import {

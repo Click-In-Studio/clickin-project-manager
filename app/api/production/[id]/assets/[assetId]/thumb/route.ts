@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getAsset, resolveAssetFile } from "@/lib/asset-db";
-import { canViewAsset } from "@/lib/asset-perm";
+import { getAsset, resolveAssetFile } from "@/lib/asset/db";
+import { canViewAsset } from "@/lib/asset/perm";
 import { getR2Stream } from "@/lib/r2";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string; assetId: string }> }) {

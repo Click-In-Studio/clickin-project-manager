@@ -4,7 +4,7 @@ import {
   canWriteReport, canPublishReport, canEditTechReq, canAssignTechReq,
   canViewTechReq, canWriteNote, canEditNote, canModerateNotes, isReportViewer,
 } from "@/lib/event-permissions";
-import { canViewAsset, filterVisibleAssets, canPublishAsset, canCreateShareToken } from "@/lib/asset-perm";
+import { canViewAsset, filterVisibleAssets, canPublishAsset, canCreateShareToken } from "@/lib/asset/perm";
 
 // owner 代码级旁路回归（PR #246，#228 二次漏网教训）：
 // owner 非 member（memberPermissions=null，fails-closed 判空不得先于 owner 短路）、
@@ -42,7 +42,7 @@ describe("owner bypass — event/report domain (lib/event-permissions.ts)", () =
   });
 });
 
-describe("owner bypass — asset domain (lib/asset-perm.ts)", () => {
+describe("owner bypass — asset domain (lib/asset/perm.ts)", () => {
   it("view/list/publish/share gates short-circuit for owner", async () => {
     const ctx = ownerCtx();
     const asset = { id: "as_x", isPublic: false };

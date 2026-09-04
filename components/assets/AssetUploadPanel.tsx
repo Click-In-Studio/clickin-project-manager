@@ -3,8 +3,8 @@
 import OverflowSafeSelect from "@/components/OverflowSafeSelect";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { AssetType } from "@/lib/asset-db";
-import { ASSET_TYPE_LABELS } from "@/lib/asset-types";
+import type { AssetType } from "@/lib/asset/db";
+import { ASSET_TYPE_LABELS } from "@/lib/asset/types";
 import { BASE_PATH } from "@/lib/base-path";
 
 // R2 single PUT max is 5 GiB; use multipart for anything above 50 MB

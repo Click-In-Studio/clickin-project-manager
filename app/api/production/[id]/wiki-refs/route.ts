@@ -3,13 +3,12 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getCueListIdForCue } from "@/lib/db";
 import { hasGrant, hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { canAccessNode } from "@/lib/grant-template";
-import {
-  listWikiRefsForEntity, addManualWikiEntityLink, removeManualWikiEntityLink,
-  createWiki, deleteWiki, ensureDramaturgyRootAnchor,
-} from "@/lib/wiki-db";
-import { canViewWiki } from "@/lib/wiki-perm";
-import { canViewAsset } from "@/lib/asset-perm";
-import { getAsset } from "@/lib/asset-db";
+import { listWikiRefsForEntity, addManualWikiEntityLink, removeManualWikiEntityLink } from "@/lib/wiki/links";
+import { createWiki, deleteWiki } from "@/lib/wiki/content";
+import { ensureDramaturgyRootAnchor } from "@/lib/wiki/tree";
+import { canViewWiki } from "@/lib/wiki/perm";
+import { canViewAsset } from "@/lib/asset/perm";
+import { getAsset } from "@/lib/asset/db";
 import type { PermissionContext } from "@/lib/permissions";
 
 // 对象侧"相关 wiki"面板：引用了该实体的 wiki 列表 + manual 边读写（Phase 2）。

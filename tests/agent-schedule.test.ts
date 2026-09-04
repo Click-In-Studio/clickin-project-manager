@@ -3,7 +3,7 @@ import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import type { AssistantMessage, StreamFn, ToolCall } from "../vendor/openclaw/packages/llm-core/src/types";
 import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/db";
-import { createWiki, getWiki } from "@/lib/wiki-db";
+import { createWiki, getWiki } from "@/lib/wiki/content";
 import { makeProduction, cleanupProduction, setProductionTier, shortId } from "./factories";
 import { startRun, waitForIdle, runtimeOverrides } from "@/lib/agent-runtime/service";
 import { readEventsSince } from "@/lib/agent-runtime/events";

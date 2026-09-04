@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
-import { WikiImage } from "@/lib/tiptap-wiki-image";
+import { WikiImage } from "@/lib/wiki/tiptap-image";
 import { decodeAssetSrc } from "@/lib/mention-types";
 
 function makeEditor(md: string) {

@@ -18,11 +18,12 @@ import AdminModal from "@/components/AdminModal";
 import DropdownPicker from "@/components/DropdownPicker";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import { encodeAssetSrc } from "@/lib/mention-types";
-import { collectWikilinkTitles, promoteWikilinks } from "@/lib/wiki-input-normalize";
-import { checkFidelity, lineDiff, type FidelityDiff, type DiffHunk } from "@/lib/wiki-fidelity";
-import type { WikiDoc, WikiRef, WikiEntityRef } from "@/lib/wiki-db";
+import { collectWikilinkTitles, promoteWikilinks } from "@/lib/wiki/input-normalize";
+import { checkFidelity, lineDiff, type FidelityDiff, type DiffHunk } from "@/lib/wiki/fidelity";
+import type { WikiDoc } from "@/lib/wiki/types";
+import type { WikiRef, WikiEntityRef } from "@/lib/wiki/links";
 import WikiEntityRefs from "@/components/wiki/WikiEntityRefs";
-import type { WikiPeer } from "@/lib/wiki-collab";
+import type { WikiPeer } from "@/lib/wiki/collab";
 import { mergeLines } from "@/lib/line-merge";
 import type { Mention } from "@/lib/event-db";
 

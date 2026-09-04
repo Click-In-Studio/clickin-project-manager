@@ -2,15 +2,14 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import {
-  createWiki, deleteWiki, getWiki, setWikiPublic, updateWiki,
-} from "@/lib/wiki-db";
+import { createWiki, deleteWiki, getWiki, setWikiPublic, updateWiki } from "@/lib/wiki/content";
 import {
   createWikiAlias, deleteWikiAlias, getWikiAlias, isWikiAliasId,
   listEnumerableWikiAliases, moveWikiAlias, renameWikiAlias,
-} from "@/lib/wiki-alias-db";
-import { canViewWiki, listEnumerableWikiIds } from "@/lib/wiki-perm";
-import { listWikiTreeFor } from "@/lib/wiki-tree";
+} from "@/lib/wiki/alias";
+import { canViewWiki } from "@/lib/wiki/perm";
+import { listEnumerableWikiIds } from "@/lib/wiki/enum-perm";
+import { listWikiTreeFor } from "@/lib/wiki/tree-view";
 import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
 import { POST as aliasPOST } from "@/app/api/production/[id]/wiki-alias/route";
 import { PATCH as aliasPATCH, DELETE as aliasDELETE } from "@/app/api/production/[id]/wiki-alias/[aliasId]/route";

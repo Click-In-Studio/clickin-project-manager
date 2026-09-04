@@ -272,7 +272,7 @@ describe("棘轮：硬删本体的路由不得接受宿主子集合键", () => {
 describe("M-15(c)：有挂载边时本体不可删", () => {
   it("wiki 被 report 边引用 ⇒ deleteWiki 拒绝（reason=mounted），不是靠门拦而是靠数据层", async () => {
     const { createEventReport } = await import("@/lib/event-db");
-    const { deleteWiki } = await import("@/lib/wiki-db");
+    const { deleteWiki } = await import("@/lib/wiki/content");
     const report = await createEventReport({
       id: `rpt_${shortId()}`, eventId, reportType: "show",
       title: `M15c${shortId()}`, body: "", createdBy: organizerId,
@@ -289,7 +289,7 @@ describe("M-15(c)：有挂载边时本体不可删", () => {
 
   it("棘轮：deleteWiki 必须保留挂载边检查（拿掉它 M-15(c) 的绕行就成真）", async () => {
     const { readFileSync } = await import("fs");
-    const src = readFileSync("lib/wiki-db.ts", "utf8");
+    const src = readFileSync("lib/wiki/content.ts", "utf8");
     const i = src.indexOf("export async function deleteWiki");
     const body = src.slice(i, i + 2000);
     expect(body).toMatch(/event_report\b/);

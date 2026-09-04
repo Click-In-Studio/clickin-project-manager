@@ -13,9 +13,9 @@ import { BASE_PATH } from "@/lib/base-path";
 import TreePickerModal from "@/components/TreePickerModal";
 import AdminModal from "@/components/AdminModal";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
-import type { WikiListEntry } from "@/lib/wiki-db";
-import type { WikiAliasEntry } from "@/lib/wiki-alias-db";
-import type { WikiMoveInCandidate } from "@/lib/dramaturgy-wiki";
+import type { WikiListEntry } from "@/lib/wiki/types";
+import type { WikiAliasEntry } from "@/lib/wiki/alias";
+import type { WikiMoveInCandidate } from "@/lib/wiki/dramaturgy";
 
 type DropZone = "before" | "after" | "inside";
 

@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
-import { verifyShareToken } from "@/lib/asset-share-token";
-import { getAsset, getLatestAssetFile } from "@/lib/asset-db";
+import { verifyShareToken } from "@/lib/asset/share-token";
+import { getAsset, getLatestAssetFile } from "@/lib/asset/db";
 import { getR2Stream } from "@/lib/r2";
 import { isPolicyOn } from "@/lib/policy-db";
 

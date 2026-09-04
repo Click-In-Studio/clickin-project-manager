@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireUser, toErrorResponse } from "@/lib/agent-chat/http";
-import { getWikiProposalByToolCallId } from "@/lib/wiki-proposal-db";
-import { getWiki } from "@/lib/wiki-db";
+import { getWikiProposalByToolCallId } from "@/lib/wiki/proposal-db";
+import { getWiki } from "@/lib/wiki/content";
 import { resolveProductionActor } from "@/lib/agent-tools/production-tools";
-import { canViewWiki } from "@/lib/wiki-perm";
+import { canViewWiki } from "@/lib/wiki/perm";
 
 // 供 WikiProposalPreviewModal 按 toolCallId 拉取完整提议内容（确认卡片
 // description 硬上限 512 字符装不下）。自范围：只认自己发起的那一行——

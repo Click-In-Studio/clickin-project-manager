@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
-import { createWiki, addWikiSharePerson, listWikiDeptShares, getWiki } from "@/lib/wiki-db";
+import { createWiki, addWikiSharePerson, getWiki } from "@/lib/wiki/content";
+import { listWikiDeptShares } from "@/lib/wiki/tree";
 import { createProductionDept, setDeptMembers } from "@/lib/dept-db";
-import { canViewWiki } from "@/lib/wiki-perm";
+import { canViewWiki } from "@/lib/wiki/perm";
 import { resolveProductionActor, DENIED_NOT_MEMBER } from "@/lib/agent-tools/production-tools";
 import { wikiSetGrant, sharePermissionKey } from "@/lib/agent-tools/wiki-tools";
 

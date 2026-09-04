@@ -2,8 +2,8 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
-import { listBacklinks, listUnlinkedReferences } from "@/lib/wiki-db";
-import { canViewWiki } from "@/lib/wiki-perm";
+import { listBacklinks, listUnlinkedReferences } from "@/lib/wiki/links";
+import { canViewWiki } from "@/lib/wiki/perm";
 
 type Ctx = { params: Promise<{ id: string; wikiId: string }> };
 

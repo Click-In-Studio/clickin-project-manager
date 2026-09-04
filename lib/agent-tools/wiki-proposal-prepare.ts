@@ -45,8 +45,8 @@ export async function prepareWikiProposal(input: PrepareWikiProposalInput): Prom
   const { resolveProductionActor } = await import("./production-tools");
   const { CREATE_PERMISSION_KEY, editPermissionKey, deletePermissionKey } = await import("./wiki-tools");
   const { hasEffectiveGrant } = await import("../grant-check");
-  const { canEditWiki, canDeleteWiki } = await import("../wiki-perm");
-  const { insertWikiProposal } = await import("../wiki-proposal-db");
+  const { canEditWiki, canDeleteWiki } = await import("../wiki/perm");
+  const { insertWikiProposal } = await import("../wiki/proposal-db");
 
   // ── 方言校验 + [[标题]] 反解（真门）：失败不落 wiki_proposal 行 ─────────────
   let effectiveBody = docBody;
@@ -67,7 +67,7 @@ export async function prepareWikiProposal(input: PrepareWikiProposalInput): Prom
     }
     let oldBody: string | null = null;
     if (action === "update") {
-      const { getWiki } = await import("../wiki-db");
+      const { getWiki } = await import("../wiki/content");
       oldBody = (await getWiki(wikiId, productionId))?.body ?? null;
     }
     const checked = restoreAndCheckBody(docBody, titleIds, oldBody);

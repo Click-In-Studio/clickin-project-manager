@@ -2,12 +2,10 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import {
-  createWiki, updateWiki, deleteWiki, getWiki,
-  extractWikiLinkTargets, listBacklinks, listUnlinkedReferences,
-  setWikiDeptShares, setWikiPublic,
-} from "@/lib/wiki-db";
-import { canViewWiki, listVisibleWikiIds } from "@/lib/wiki-perm";
+import { createWiki, updateWiki, deleteWiki, getWiki, setWikiPublic } from "@/lib/wiki/content";
+import { extractWikiLinkTargets, listBacklinks, listUnlinkedReferences } from "@/lib/wiki/links";
+import { setWikiDeptShares } from "@/lib/wiki/tree";
+import { canViewWiki, listVisibleWikiIds } from "@/lib/wiki/perm";
 import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
 import { createEventReport } from "@/lib/event-db";
 import { GET as wikiListGET, POST as wikiPOST } from "@/app/api/production/[id]/wiki/route";
