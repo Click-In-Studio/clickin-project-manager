@@ -1,9 +1,10 @@
 import { getPool } from "../pg";
-import { hasGrant, hasAnyGrant, listGrantedResourceIds } from "../grant-check";
+import { hasGrant, listGrantedResourceIds } from "../grant-check";
 import { type GrantActor } from "../grant-check";
 import { isPolicyOn } from "../policy-db";
 import { canEditWiki, listVisibleWikiIds } from "../wiki/perm";
 import { listEnumerableNodeIds } from "../node/perm";
+import { mountConcededNodeIds, SCENE_MOUNT_TYPES } from "../node/host-visibility";
 import type { Asset } from "./db";
 
 // ─── asset 可见性判定（批D 隐私/公开模型，#420 node 化）─────────────────────
@@ -24,57 +25,29 @@ import type { Asset } from "./db";
 
 export type AssetFace = "meta" | "file";
 
-/** 宿主可见锚：每种挂载点「能看到宿主的哪个面」才算接收让渡。
- *  block_snapshot/cue_revision/version/scene_snapshot 已随版本纪律退役——
- *  挂载即对最新状态（稳定 id）的挂载。 */
-const SCRIPT_MOUNT_TYPES = ["block", "comment"];
-const SCENE_MOUNT_TYPES = ["scene"];
-const CUE_MOUNT_TYPES = ["cue"];
-
-async function cueMountHostVisible(
-  userId: string,
-  productionId: string,
-  mounts: { mount_type: string; mount_id: string }[],
-): Promise<boolean> {
-  const cueMounts = mounts.filter(m => CUE_MOUNT_TYPES.includes(m.mount_type));
-  if (cueMounts.length === 0) return false;
-  const pool = getPool();
-  const listRes = await pool.query<{ cue_list_id: string }>(
-    `SELECT DISTINCT c.cue_list_id
-     FROM cue c JOIN cue_list cl ON cl.id = c.cue_list_id
-     WHERE cl.production_id = $1 AND c.cue_id = ANY($2::text[])`,
-    [productionId, cueMounts.map(m => m.mount_id)],
-  );
-  for (const row of listRes.rows) {
-    if (await hasGrant(userId, productionId, "cue_list", row.cue_list_id, "cues", "view")) return true;
-  }
-  return false;
-}
+// 宿主可见锚已收敛到 lib/node/host-visibility.ts（PR-A：wiki/asset 两域同源消费，
+// 顺带补上 event 通道——即批一 mountHostSidePermitted 注释挂账的 event 系修正之一）。
+// embed 通道是 asset 特有（文档可见 ⇒ 正文里的图可见），留在本域。
 
 async function anyMountHostVisible(
   permCtx: GrantActor,
   productionId: string,
-  assetId: string,
+  nodeId: string,
 ): Promise<boolean> {
-  const mounts = (await getPool().query<{ mount_type: string; mount_id: string }>(
-    `SELECT nm.mount_type, nm.mount_id
-     FROM node_mount nm JOIN node n ON n.id = nm.node_id
-     WHERE n.asset_id = $1 AND nm.production_id = $2`,
-    [assetId, productionId],
+  const conceded = await mountConcededNodeIds(permCtx, productionId, { nodeIds: [nodeId] });
+  if (conceded.has(nodeId)) return true;
+  // embed 边：批量走 listVisibleWikiIds（与 structurallyVisibleAssetIds 同一实现，
+  // 天然不分叉）
+  const embedMounts = (await getPool().query<{ mount_id: string }>(
+    `SELECT mount_id FROM node_mount
+     WHERE production_id = $1 AND node_id = $2 AND mount_type = 'embed'`,
+    [productionId, nodeId],
   )).rows;
-  if (mounts.length === 0) return false;
-  if (mounts.some(m => SCRIPT_MOUNT_TYPES.includes(m.mount_type))
-      && await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view")) return true;
-  if (mounts.some(m => SCENE_MOUNT_TYPES.includes(m.mount_type))
-      && await hasAnyGrant(permCtx.userId, productionId, "scene", ["meta"], "view")) return true;
-  // embed 边：文档可见 ⇒ 正文里的图可见。批量走 listVisibleWikiIds（与
-  // structurallyVisibleAssetIds 同一实现，天然不分叉）
-  const embedMounts = mounts.filter(m => m.mount_type === "embed");
   if (embedMounts.length > 0) {
     const vis = await listVisibleWikiIds(permCtx, productionId);
     if (embedMounts.some(m => vis.wildcard || vis.ids.has(m.mount_id))) return true;
   }
-  return cueMountHostVisible(permCtx.userId, productionId, mounts);
+  return false;
 }
 
 type AssetNodeBits = { nodeId: string; isPublic: boolean };
@@ -105,8 +78,10 @@ export async function canViewAsset(
   if (bits) {
     const e = await listEnumerableNodeIds(permCtx, productionId);
     if (e.wildcard || e.ids.has(bits.nodeId)) return true;
+    return anyMountHostVisible(permCtx, productionId, bits.nodeId);
   }
-  return anyMountHostVisible(permCtx, productionId, asset.id);
+  // 无壳（1:1 不变量破损）⇒ 挂载边无处可挂，结构面不成立
+  return false;
 }
 
 /** id 版单点判定（node/link 等只持 asset id 的调用方用）。 */
@@ -125,32 +100,9 @@ async function structurallyVisibleAssetIds(
   permCtx: GrantActor,
   productionId: string,
 ): Promise<Set<string>> {
-  const hasScriptView = await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view");
-  const hasSceneView = await hasAnyGrant(permCtx.userId, productionId, "scene", ["meta"], "view");
-  const { rows } = await getPool().query<{ asset_id: string }>(
-    `SELECT DISTINCT n.asset_id
-     FROM node_mount nm JOIN node n ON n.id = nm.node_id
-     WHERE nm.production_id = $1 AND n.asset_id IS NOT NULL
-       AND ((nm.mount_type = ANY($2::text[]) AND $4)
-         OR (nm.mount_type = ANY($3::text[]) AND $5)
-         OR (nm.mount_type = ANY($6::text[]) AND EXISTS (
-               SELECT 1
-               FROM cue c
-               JOIN production_member_grant rg
-                 ON rg.resource_type = 'cue_list'
-                AND rg.resource_id IN (c.cue_list_id, '*')
-                AND rg.resource_sub IN ('cues', '*')
-                AND rg.permission_level = 'view'
-                AND rg.production_id = $1
-                AND rg.user_id = $7::uuid
-                AND NOT rg.is_revoked
-                AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
-               WHERE c.cue_id = nm.mount_id
-             )))`,
-    [productionId, SCRIPT_MOUNT_TYPES, SCENE_MOUNT_TYPES, hasScriptView, hasSceneView,
-     CUE_MOUNT_TYPES, permCtx.userId],
-  );
-  const visible = new Set(rows.map(r => r.asset_id));
+  // 挂载让渡：共享核集合式（与单点 anyMountHostVisible 同一实现，不分叉）
+  const conceded = await mountConcededNodeIds(permCtx, productionId, { kind: "asset" });
+  const visible = new Set<string>();
   // 可枚举通道（原 production 根共享区）：一次集合式对撞 asset 节点
   const e = await listEnumerableNodeIds(permCtx, productionId);
   const assetNodes = (await getPool().query<{ asset_id: string; id: string }>(
@@ -158,7 +110,7 @@ async function structurallyVisibleAssetIds(
     [productionId],
   )).rows;
   for (const n of assetNodes) {
-    if (e.wildcard || e.ids.has(n.id)) visible.add(n.asset_id);
+    if (conceded.has(n.id) || e.wildcard || e.ids.has(n.id)) visible.add(n.asset_id);
   }
   // embed 边（与 canViewAsset 的 embed 分支同源——列表与单实例不得分叉，批D 教训）
   const embedMounts = (await getPool().query<{ asset_id: string; mount_id: string }>(

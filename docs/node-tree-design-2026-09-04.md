@@ -119,3 +119,21 @@
   对外接口维持 AI 方言协议的 wiki id（proposal-db 读写各翻译一次）。
 - **grant 行一行未迁**（验证成立）：`*@view`⇒`meta` 蕴含、WIKI_LEVEL_ROW_SETS、
   `node:wiki/<id>@…` 键字符串全程零改动，invariance 测试逐字节断言。
+
+## 12. 第二批 PR-A：wiki 挂载让渡 + 判定核收敛（2026-09-04 拍板并实施）
+
+- **wiki 挂载让渡（拍板）**：文档的 node 被挂到 scene/block/cue/event 上，宿主
+  可见 ⇒ 文档可读。与 asset 挂载让渡、report/note 边先例同语义（挂载=向宿主
+  受众分享）；枚举面照旧不投票（硬不变量不动）。
+- **判定核收敛 `lib/node/host-visibility.ts`**：宿主可见性只算一份，wiki/asset
+  两个内容域、单点/集合式四个消费点同源。通道锚：block/comment→`script
+  */blocks@view`；scene→`scene meta@view`；cue→所在 cue_list 的 `cues@view`
+  （mount_id 是稳定 cue_id）；event→canEnterEvent 同判据（域 view ∨ 组参与，
+  组参与带冻结语义走应用层逐 event 判，不在 SQL 里复刻）。embed 通道留在
+  asset 域（wiki 嵌 wiki 不支持，进核会让 wiki 可见性自递归）。
+- **asset 侧 event 通道随核补上**（原 asset_mount 时代 event 挂载不产生让渡，
+  属批一注释里挂账的 event 系错配之一；本批为对称性收编，行为放宽需 review 知情）。
+- **挂载点读面泛化**：`listNodesByMountPoint` 按 kind 分派载荷（asset 全行 /
+  wiki {id,title}），不带权限过滤（调用方按 kind 走各自内容面）；
+  `getAssetsByMountPoint` 降为它的 asset 投影，现有面板形状不变。
+- event_schedule/task/event_report 挂载类型暂无让渡通道（与迁移前一致，挂账）。
