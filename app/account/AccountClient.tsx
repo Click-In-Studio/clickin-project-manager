@@ -88,6 +88,12 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tabParam = searchParams.get("tab");
+  const fromParam = searchParams.get("from");
+  // 只接受 AppShell 生成的项目首页路径，既满足“回到进入前项目”，也避免
+  // 把查询参数变成可跳往任意地址的开放式重定向。
+  const returnHref = fromParam && /^\/production\/[^/?#]+\/?$/.test(fromParam)
+    ? fromParam.replace(/\/$/, "")
+    : "/";
   const [page, setPage] = useState<Page>(
     tabParam === "security" || tabParam === "preferences" ? tabParam : "profile"
   );
@@ -425,7 +431,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
   return (
     <div className={styles.shell}>
       <header className={styles.topbar}>
-        <Link href="/" className={styles.backButton}>
+        <Link href={returnHref} className={styles.backButton}>
           <span>←</span> 返回工作区
         </Link>
         <div className={styles.brand}>

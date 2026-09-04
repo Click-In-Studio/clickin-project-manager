@@ -1138,6 +1138,11 @@ export default function AppShell({ session, productions, canCreateProduction = f
     return productionId ? `/production/${productionId}/${path}` : "#";
   }
 
+  function accountHref(tab: "profile" | "security" | "preferences") {
+    const from = productionId ? `/production/${productionId}` : "/";
+    return `/account?tab=${tab}&from=${encodeURIComponent(from)}`;
+  }
+
   function adminHref(path: string) {
     if (!productionId) return "#";
     return path ? `/production/${productionId}/admin/${path}` : `/production/${productionId}/admin`;
@@ -1294,12 +1299,12 @@ export default function AppShell({ session, productions, canCreateProduction = f
                 </div>
 
                 {/* ── 账户 ── */}
-                <DropdownItem href="/account?tab=profile" onClick={() => setDropdownOpen(false)}>个人信息</DropdownItem>
-                <DropdownItem href="/account?tab=security" onClick={() => setDropdownOpen(false)}>账号安全中心</DropdownItem>
+                <DropdownItem href={accountHref("profile")} onClick={() => setDropdownOpen(false)}>个人信息</DropdownItem>
+                <DropdownItem href={accountHref("security")} onClick={() => setDropdownOpen(false)}>账号安全中心</DropdownItem>
 
                 {/* ── 偏好 ── */}
                 <div className="h-px bg-[var(--line)] mx-1 my-1.5" />
-                <DropdownItem href="/account?tab=preferences" onClick={() => setDropdownOpen(false)}>功能与设置</DropdownItem>
+                <DropdownItem href={accountHref("preferences")} onClick={() => setDropdownOpen(false)}>功能与设置</DropdownItem>
 
                 {/* ── 配置中心 ── */}
                 {currentProduction?.canAdmin && productionId && (
@@ -1692,7 +1697,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
           {/* 账户 */}
           <div className="px-3.5 pt-1 flex flex-col gap-0.5">
             <NavItem
-              href="/account?tab=profile"
+              href={accountHref("profile")}
               symbol="人"
               label="个人信息"
               hint="头像 · 姓名 · 简介"
@@ -1700,7 +1705,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
               onClick={closeDrawer}
             />
             <NavItem
-              href="/account?tab=security"
+              href={accountHref("security")}
               symbol="盾"
               label="账号安全中心"
               hint="登录方式 · 绑定身份"
@@ -1713,7 +1718,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
           <div className="mx-5 my-1.5 border-t border-[var(--line)]" />
           <div className="px-3.5 flex flex-col gap-0.5">
             <NavItem
-              href="/account?tab=preferences"
+              href={accountHref("preferences")}
               symbol="调"
               label="功能与设置"
               hint="通知 · 消息提醒"

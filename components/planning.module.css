@@ -91,9 +91,15 @@
   box-shadow: 0 12px 34px rgba(24, 42, 42, .18);
 }
 
+.timePopover[data-side="up"] {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
 .timeList {
-  max-height: 190px;
+  max-height: var(--time-list-max-height, 190px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 2px;

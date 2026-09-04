@@ -3085,42 +3085,43 @@ function EventRelationsTab({
   const linkedElsewhere = tasks.filter(task => task.eventId && task.eventId !== eventId);
   const chip = (active: boolean): React.CSSProperties => ({
     border: `1px solid ${active ? "var(--ink)" : "var(--line)"}`,
-    borderRadius: 9, padding: "9px 12px", textAlign: "left", cursor: canEdit ? "pointer" : "default",
+    borderRadius: 8, padding: "7px 10px", textAlign: "left", cursor: canEdit ? "pointer" : "default",
     background: active ? "var(--ink)" : "var(--paper)", color: active ? "#fff" : "var(--ink)",
+    fontSize: 12, lineHeight: 1.35,
   });
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(360px, 100%), 1fr))", gap: 16 }}>
-      <section style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 18, background: "var(--surface)" }}>
-        <p style={{ margin: 0, color: "var(--stage)", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" }}>Tasks</p>
-        <h2 style={{ margin: "5px 0 4px", fontSize: 17 }}>该事件需要关注的任务</h2>
-        <p style={{ margin: "0 0 14px", color: "var(--muted)", fontSize: 11, lineHeight: 1.6 }}>可关联独立任务；已属于其他事件的任务需先在任务详情中解绑。</p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(320px, 100%), 1fr))", gap: 12, alignItems: "start" }}>
+      <section style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 14, background: "var(--surface)" }}>
+        <p style={{ margin: 0, color: "var(--stage)", fontSize: 9, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" }}>Tasks</p>
+        <h2 style={{ margin: "3px 0", fontSize: 15, lineHeight: 1.35 }}>该事件需要关注的任务</h2>
+        <p style={{ margin: "0 0 10px", color: "var(--muted)", fontSize: 10, lineHeight: 1.45 }}>可关联独立任务；已属于其他事件的任务需先在任务详情中解绑。</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           {selectableTasks.map(task => {
             const active = selectedTasks.has(task.id);
             return (
               <button key={task.id} type="button" disabled={!canEdit} aria-pressed={active} onClick={() => toggle(setSelectedTasks, task.id)} style={chip(active)}>
-                <span style={{ display: "flex", alignItems: "center", gap: 8 }}><b>{active ? "✓" : "○"}</b><span>{task.title || "（未命名任务）"}</span></span>
-                <small style={{ display: "block", margin: "4px 0 0 22px", opacity: .68 }}>{TECH_STATUS_LABELS[task.status] ?? task.status}{task.eventId === eventId ? " · 已关联本事件" : " · 独立任务"}</small>
+                <span style={{ display: "flex", alignItems: "center", gap: 7 }}><b>{active ? "✓" : "○"}</b><span>{task.title || "（未命名任务）"}</span></span>
+                <small style={{ display: "block", margin: "2px 0 0 19px", fontSize: 10, lineHeight: 1.35, opacity: .68 }}>{TECH_STATUS_LABELS[task.status] ?? task.status}{task.eventId === eventId ? " · 已关联本事件" : " · 独立任务"}</small>
               </button>
             );
           })}
           {selectableTasks.length === 0 && <p style={{ color: "var(--muted)", fontSize: 12 }}>暂无可关联任务</p>}
         </div>
-        {linkedElsewhere.length > 0 && <p style={{ margin: "12px 0 0", color: "var(--muted)", fontSize: 10 }}>另有 {linkedElsewhere.length} 个任务已属于其他事件。</p>}
+        {linkedElsewhere.length > 0 && <p style={{ margin: "9px 0 0", color: "var(--muted)", fontSize: 9 }}>另有 {linkedElsewhere.length} 个任务已属于其他事件。</p>}
       </section>
 
-      <section style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 18, background: "var(--surface)" }}>
-        <p style={{ margin: 0, color: "var(--stage)", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" }}>Milestones</p>
-        <h2 style={{ margin: "5px 0 4px", fontSize: 17 }}>关联里程碑</h2>
-        <p style={{ margin: "0 0 14px", color: "var(--muted)", fontSize: 11, lineHeight: 1.6 }}>事件可同时关联多个里程碑，用于计划页汇总追踪。</p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+      <section style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 14, background: "var(--surface)" }}>
+        <p style={{ margin: 0, color: "var(--stage)", fontSize: 9, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" }}>Milestones</p>
+        <h2 style={{ margin: "3px 0", fontSize: 15, lineHeight: 1.35 }}>关联里程碑</h2>
+        <p style={{ margin: "0 0 10px", color: "var(--muted)", fontSize: 10, lineHeight: 1.45 }}>事件可同时关联多个里程碑，用于计划页汇总追踪。</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           {milestoneOptions.map(milestone => {
             const active = selectedMilestones.has(milestone.id);
             return (
               <button key={milestone.id} type="button" disabled={!canEdit} aria-pressed={active} onClick={() => toggle(setSelectedMilestones, milestone.id)} style={chip(active)}>
-                <span style={{ display: "flex", alignItems: "center", gap: 8 }}><b>{active ? "◆" : "◇"}</b><span>{milestone.name}</span></span>
-                <small style={{ display: "block", margin: "4px 0 0 22px", opacity: .68 }}>目标日期 {milestone.endDate.slice(0, 10)}</small>
+                <span style={{ display: "flex", alignItems: "center", gap: 7 }}><b>{active ? "◆" : "◇"}</b><span>{milestone.name}</span></span>
+                <small style={{ display: "block", margin: "2px 0 0 19px", fontSize: 10, lineHeight: 1.35, opacity: .68 }}>目标日期 {milestone.endDate.slice(0, 10)}</small>
               </button>
             );
           })}

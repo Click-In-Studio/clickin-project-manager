@@ -12,7 +12,7 @@ import OverflowSafeSelect from "@/components/OverflowSafeSelect";
  * 部门 POC（policy 开关，活引用判定），与 API 同门；此处布尔仅控 UI 显隐。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { dateTimeToIso, fmtDate, fmtTime, isoCSTDateStr, todayCSTStr } from "@/lib/tz";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -320,7 +320,10 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
 
 function BoundedTimePicker({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   const [open, setOpen] = useState(false);
+  const [popoverSide, setPopoverSide] = useState<"up" | "down">("down");
+  const [listMaxHeight, setListMaxHeight] = useState(190);
   const rootRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const [hour = "00", minute = "00"] = value.split(":");
 
   useEffect(() => {
@@ -332,6 +335,33 @@ function BoundedTimePicker({ label, value, onChange }: { label: string; value: s
     return () => document.removeEventListener("pointerdown", close);
   }, [open]);
 
+  useLayoutEffect(() => {
+    if (!open || !rootRef.current || !popoverRef.current) return;
+
+    const triggerRect = rootRef.current.getBoundingClientRect();
+    let boundaryTop = 8;
+    let boundaryBottom = window.innerHeight - 8;
+
+    // 时间选择器常出现在可滚动弹窗内。以最近的裁切/滚动祖先为边界，
+    // 不能只看 viewport，否则绝对定位弹层仍会被弹窗底部截断。
+    for (let parent = rootRef.current.parentElement; parent; parent = parent.parentElement) {
+      const style = window.getComputedStyle(parent);
+      if (/(auto|scroll|hidden|clip)/.test(`${style.overflow} ${style.overflowY}`)) {
+        const rect = parent.getBoundingClientRect();
+        boundaryTop = Math.max(boundaryTop, rect.top + 8);
+        boundaryBottom = Math.min(boundaryBottom, rect.bottom - 8);
+        break;
+      }
+    }
+
+    const below = Math.max(0, boundaryBottom - triggerRect.bottom - 6);
+    const above = Math.max(0, triggerRect.top - boundaryTop - 6);
+    const side = below < 206 && above > below ? "up" : "down";
+    const available = side === "up" ? above : below;
+    setPopoverSide(side);
+    setListMaxHeight(Math.max(96, Math.min(190, available - 18)));
+  }, [open]);
+
   return (
     <div ref={rootRef} className={styles.timeField}>
       <span style={{ display: "block", marginBottom: 5, fontSize: 11, color: "var(--muted)" }}>{label}</span>
@@ -339,7 +369,14 @@ function BoundedTimePicker({ label, value, onChange }: { label: string; value: s
         <span>{hour}:{minute}</span><span aria-hidden>⌄</span>
       </button>
       {open && (
-        <div className={styles.timePopover} role="group" aria-label={`${label}选择`}>
+        <div
+          ref={popoverRef}
+          className={styles.timePopover}
+          data-side={popoverSide}
+          style={{ "--time-list-max-height": `${listMaxHeight}px` } as React.CSSProperties}
+          role="group"
+          aria-label={`${label}选择`}
+        >
           <div className={styles.timeList} aria-label="小时 0 到 23">
             {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0")).map(option => (
               <button key={option} type="button" className={`${styles.timeOption} ${option === hour ? styles.timeOptionActive : ""}`} onClick={() => onChange(`${option}:${minute}`)}>{option} 时</button>
