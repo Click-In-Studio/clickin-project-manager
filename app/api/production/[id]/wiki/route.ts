@@ -39,7 +39,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       results: visible.wildcard ? hits : hits.filter(h => visible.ids.has(h.id)),
     });
   }
-  // 树 = 可枚举文档 ∪ 可枚举软链接（#358），一个取数口，见 lib/wiki-tree.ts
+  // 树 = 可枚举文档 ∪ 可枚举软链接（#358），一个取数口，见 lib/wiki/tree-view.ts
   const { wikis, aliases } = await listWikiTreeFor(actor, productionId);
   return Response.json({ wikis, aliases });
 }

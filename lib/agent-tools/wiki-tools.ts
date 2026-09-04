@@ -362,7 +362,7 @@ export async function wikiProposeTag(
 
 // ─── wiki.set_grant（分享面写工具）───────────────────────────────────────────
 // 门 = canShareWiki（保留段 grants@edit，'*' 不覆盖）——**不是** edit 门：能改
-// 正文的人未必能改谁看得见。三个面与 share 路由同一份实现（lib/wiki-db 的
+// 正文的人未必能改谁看得见。三个面与 share 路由同一份实现（lib/wiki/content.ts 的
 // setWikiPublic / setWikiDeptShares / addWikiSharePerson…），口径不许分叉。
 //
 // 与 propose 五兄弟的差别：这里不预持久化 wiki_proposal——参数都很短，确认
