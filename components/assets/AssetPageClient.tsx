@@ -5,16 +5,16 @@ import PageHeader, { PRIMARY_BTN } from "@/components/PageHeader";
 import Link from "next/link";
 import AssetUploadPanel from "./AssetUploadPanel";
 import type { UploadResult } from "./AssetUploadPanel";
-import MountPointAssets from "./MountPointAssets";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import AssetShareModal from "./AssetShareModal";
 import { BASE_PATH } from "@/lib/base-path";
 import type { Asset } from "@/lib/asset/db";
-import type { AssetMount } from "@/lib/asset/mount";
+import type { NodeMount } from "@/lib/node/mount";
 import { ASSET_TYPE_LABELS, type AssetType } from "@/lib/asset/types";
 import ChevronIcon from "@/components/ChevronIcon";
 
-type AssetWithMounts = Asset & { mounts: AssetMount[] };
+/** 列表项：Asset + 壳节点树面（#420：listable=原「项目全局」共享语义） */
+type AssetListItem = Asset & { nodeId: string | null; listable: boolean };
 
 type View = "all" | "upload-new-version";
 
@@ -27,11 +27,11 @@ interface Props {
 }
 
 export default function AssetPageClient({ productionId, versionId, myUserId, isAdmin, userName }: Props) {
-  const [assets, setAssets] = useState<Asset[]>([]);
+  const [assets, setAssets] = useState<AssetListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [mounts, setMounts] = useState<Record<string, AssetMount[]>>({});
+  const [mounts, setMounts] = useState<Record<string, NodeMount[]>>({});
   const [loadingMounts, setLoadingMounts] = useState<Record<string, boolean>>({});
   const [view, setView] = useState<View>("all");
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -45,12 +45,24 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
   const [editError, setEditError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "mine">("all");
   const [search, setSearch] = useState("");
+  const [sharePickOpen, setSharePickOpen] = useState(false);
+
+  async function setAssetListable(a: AssetListItem, listable: boolean) {
+    if (!a.nodeId) return;
+    const r = await fetch(`${BASE_PATH}/api/production/${productionId}/node/${a.nodeId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ listable }),
+    });
+    if (!r.ok) { alert((await r.json()).error ?? "操作失败"); return; }
+    setAssets(p => p.map(x => x.id === a.id ? { ...x, listable } : x));
+  }
 
   const load = useCallback(() => {
     setLoading(true);
     fetch(`${BASE_PATH}/api/production/${productionId}/assets`)
       .then(r => r.json())
-      .then((j: { assets?: Asset[] }) => setAssets(j.assets ?? []))
+      .then((j: { assets?: AssetListItem[] }) => setAssets(j.assets ?? []))
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
   }, [productionId]);
@@ -62,7 +74,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
     setLoadingMounts(p => ({ ...p, [assetId]: true }));
     try {
       const r = await fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}/mounts`);
-      const j = await r.json() as { mounts?: AssetMount[] };
+      const j = await r.json() as { mounts?: NodeMount[] };
       setMounts(p => ({ ...p, [assetId]: j.mounts ?? [] }));
     } finally {
       setLoadingMounts(p => ({ ...p, [assetId]: false }));
@@ -95,7 +107,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
       const j = await r.json() as { asset?: Asset; error?: string };
       if (!r.ok || !j.asset) { setEditError(j.error ?? "保存失败"); return; }
       const updated = j.asset;
-      setAssets(p => p.map(a => a.id === updated.id ? updated : a));
+      setAssets(p => p.map(a => a.id === updated.id ? { ...a, ...updated } : a));
       setEditTarget(null);
     } catch (e) {
       setEditError(String(e));
@@ -136,9 +148,8 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
     return true;
   });
 
-  function mountLabel(m: AssetMount) {
-    const mode = m.mountMode ? ` (${m.mountMode === "tracking" ? "跟踪" : m.mountMode === "version_only" ? "当前版本" : "继承"})` : "";
-    return `${m.mountType}:${m.mountId.slice(-6)}${mode}${m.folderPath ? ` — ${m.folderPath}` : ""}`;
+  function mountLabel(m: NodeMount) {
+    return `${m.mountType}:${m.mountId.slice(-6)}`;
   }
 
   // "新版本" 上传以模态框形式展示，不再整页切换
@@ -178,16 +189,46 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
         }
       />
 
-      {/* Production global mount */}
+      {/* 共享资产（#420：原「项目全局」挂载 ≡ 节点可枚举/listable，树面开关） */}
       <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "16px 20px", marginBottom: 16 }}>
-        <MountPointAssets
-          productionId={productionId}
-          mountType="production"
-          mountId={productionId}
-          label="项目全局"
-          canEdit={isAdmin}
-          display="panel"
-        />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <p className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">共享资产</p>
+          {isAdmin && (
+            <button onClick={() => setSharePickOpen(v => !v)}
+              className="inline-flex min-h-8 items-center rounded-lg border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-600 shadow-sm transition-colors hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-900">
+              {sharePickOpen ? "完成" : "+ 添加"}
+            </button>
+          )}
+        </div>
+        {assets.filter(a => a.listable).length === 0 ? (
+          <p className="text-xs text-zinc-400">暂无共享资产（共享后全体成员可在文档树与此处看到）</p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-1">
+            {assets.filter(a => a.listable).map(a => (
+              <span key={a.id}
+                className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-600">
+                <Link href={`/production/${productionId}/assets/${a.id}/preview`} className="hover:text-zinc-900 truncate max-w-[160px]">
+                  {a.name ?? a.fileName}
+                </Link>
+                {isAdmin && (
+                  <button onClick={() => setAssetListable(a, false)} className="text-zinc-300 hover:text-red-400 leading-none">×</button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+        {sharePickOpen && (
+          <div className="mt-2 max-h-40 overflow-y-auto rounded-lg border border-zinc-100">
+            {assets.filter(a => !a.listable && a.nodeId).length === 0 ? (
+              <p className="px-3 py-2 text-xs text-zinc-400">没有可添加的资产</p>
+            ) : assets.filter(a => !a.listable && a.nodeId).map(a => (
+              <button key={a.id} onClick={() => setAssetListable(a, true)}
+                className="block w-full px-3 py-1.5 text-left text-xs text-zinc-600 hover:bg-zinc-50 truncate">
+                {a.name ?? a.fileName}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Filter + Search */}
@@ -346,7 +387,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
             </div>
             <AssetUploadPanel
               productionId={productionId}
-              onUploaded={(result: UploadResult) => { setShowUploadModal(false); setAssets(prev => [...prev, result as unknown as Asset]); load(); }}
+              onUploaded={(result: UploadResult) => { setShowUploadModal(false); setAssets(prev => [...prev, { ...(result as unknown as Asset), nodeId: null, listable: false }]); load(); }}
               onCancel={() => setShowUploadModal(false)}
             />
           </div>

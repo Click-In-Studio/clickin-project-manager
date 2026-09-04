@@ -1,8 +1,9 @@
 "use client";
 
-// wiki 文档库 W4（Notion 式改版）：文档树侧栏承载全部文档操作——
-// 新建（根/子文档，行悬停 ＋）、移动、删除（行悬停 ⋯ 菜单）、树导航。
-// 树逻辑：邻接表→DFS 展开 + 搜索保留祖先链 + 展开/折叠态。
+// 文档树侧栏（W4 Notion 式 → #420 node 树）：树承载全部节点操作——新建（根/子）、
+// 移动、删除、软链接、树导航。节点四 kind：folder / wiki / asset / link，单数组
+// 单邻接表；写路径按 kind 分派到三套 API（wiki 内容路由 / wiki-alias / 通用 node
+// 位置路由），漏一处是编译错误而不是静默错写（#358 判别联合的同一个理由）。
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -13,29 +14,18 @@ import { BASE_PATH } from "@/lib/base-path";
 import TreePickerModal from "@/components/TreePickerModal";
 import AdminModal from "@/components/AdminModal";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
-import type { WikiListEntry } from "@/lib/wiki/types";
-import type { WikiAliasEntry } from "@/lib/wiki/alias";
-import type { WikiMoveInCandidate } from "@/lib/wiki/dramaturgy";
+import type { NodeEntry } from "@/lib/node/db";
+import type { NodeMoveInCandidate } from "@/lib/node/dramaturgy";
 
 type DropZone = "before" | "after" | "inside";
 
-// 树的节点集 = 可枚举的文档 ∪ 可枚举的软链接别名（#358）。别名是**叶子**：只链
-// 那一篇，不展开目标的子文档，也不能在它下面新建——所以 hasChildren 恒 false、
-// 没有 ＋ 按钮、不能作为 "inside" 落点。
-// 判别联合而不是往 WikiListEntry 上加可空字段：写路径按 kind 分派到两套 API，
-// 漏一处是编译错误而不是静默把别名当文档写（#358 选独立表的同一个理由）。
-type TreeItem =
-  | { kind: "wiki"; id: string; parentId: string | null; sortKey: string | null;
-      createdAt: string; title: string | null; entry: WikiListEntry }
-  | { kind: "alias"; id: string; parentId: string | null; sortKey: string | null;
-      createdAt: string; title: string | null; alias: WikiAliasEntry };
+type FlatNode = { item: NodeEntry; depth: number; hasChildren: boolean };
 
-type Node = { item: TreeItem; depth: number; hasChildren: boolean };
+const isContainer = (n: NodeEntry) => n.kind === "wiki" || n.kind === "folder";
 
 export default function WikiShell({
   productionId,
-  wikis,
-  aliases = [],
+  nodes,
   moveInCandidates = [],
   canCreate,
   selectedId,
@@ -45,27 +35,23 @@ export default function WikiShell({
   children,
 }: {
   productionId: string;
-  wikis: WikiListEntry[];
-  /** 软链接别名（#358）。服务端已过判定式：父可枚举 ∧ 本地可枚举(目标)。 */
-  aliases?: WikiAliasEntry[];
-  /**
-   * 「移入」候选（#355）：**作用域工作区专用**——子树外、该用户可枚举的文档。
-   * 不给它就没有移入入口：完整文档库里全库本来就在树上，"移入"无从谈起。
-   */
-  moveInCandidates?: WikiMoveInCandidate[];
+  /** 树节点（#420 单数组四 kind）。服务端已过枚举面 + link 判定式。 */
+  nodes: NodeEntry[];
+  /** 「移入」候选（#355）：作用域工作区专用。 */
+  moveInCandidates?: NodeMoveInCandidate[];
   canCreate: boolean;
+  /** 当前路由段：wiki 内容 id 或 link 节点 id（nd_ 前缀）。 */
   selectedId?: string;
   /** Optional route namespace for a scoped wiki workspace. API paths stay unchanged. */
   navigationBasePath?: string;
-  /** Parent used when this shell presents a subtree as its visual root. */
+  /** Parent（node id）used when this shell presents a subtree as its visual root. */
   rootParentId?: string;
   /** 根锚点尚未懒建时的落位声明——服务端过完 create 门后解析成真正的 parentId。 */
   rootAnchor?: "dramaturgy";
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  // AI 在本制作写了文档（建/改/删/移动/标签/授权）→ 树是 server 端算好的 props，软刷新
-  // 是这里最小的刷新粒度；连写几篇合并成一次。正文的同步不走这里（协作 SSE）。
+  // AI 在本制作写了文档 → 树是 server 端算好的 props，软刷新是最小刷新粒度
   const agentRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useAgentMutation({ scope: "wiki", productionId }, () => {
     if (agentRefreshTimer.current) return;
@@ -73,38 +59,30 @@ export default function WikiShell({
   });
   const routeBase = navigationBasePath ?? `/production/${productionId}/wiki`;
   const [query, setQuery] = useState("");
-  // 合并两种节点，按同一把尺排序（服务端 sort_key 就是在并集上取的，见 wiki-db.siblingRows）
-  const items = useMemo<TreeItem[]>(() => {
-    const merged: TreeItem[] = [
-      ...wikis.map((w): TreeItem => ({
-        kind: "wiki", id: w.id, parentId: w.parentId, sortKey: w.sortKey,
-        createdAt: w.createdAt, title: w.title, entry: w,
-      })),
-      ...aliases.map((a): TreeItem => ({
-        kind: "alias", id: a.id, parentId: a.parentId, sortKey: a.sortKey,
-        createdAt: a.createdAt, title: a.title, alias: a,
-      })),
-    ];
-    return merged.sort((x, y) =>
-      (x.sortKey ?? "\uffff").localeCompare(y.sortKey ?? "\uffff")
-      || x.createdAt.localeCompare(y.createdAt));
-  }, [wikis, aliases]);
+  const items = nodes;
   const byId = useMemo(() => new Map(items.map(i => [i.id, i])), [items]);
   const byIdRef = useRef(byId);
   byIdRef.current = byId;
+  /** 路由段（wiki 内容 id / link 节点 id）→ 树节点 */
+  const selectedItem = useMemo(() => {
+    if (!selectedId) return undefined;
+    return items.find(i => i.id === selectedId || i.wikiId === selectedId);
+  }, [items, selectedId]);
 
   // 默认全收起；展开状态按 production 持久化 localStorage
   const storageKey = `clickin-wiki-tree-expanded:${productionId}`;
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const hydratedRef = useRef(false);
 
-  // 挂载后读回持久化状态（避免 SSR 水合不一致），并展开选中文档的祖先链
+  // 挂载后读回持久化状态（避免 SSR 水合不一致），并展开选中节点的祖先链
   useEffect(() => {
     let saved: string[] = [];
     try { saved = JSON.parse(localStorage.getItem(storageKey) ?? "[]") as string[]; } catch { /* 忽略坏数据 */ }
     setExpanded(prev => {
       const next = new Set([...prev, ...saved]);
-      let cur = selectedId ? byIdRef.current.get(selectedId) : undefined;
+      let cur = selectedId
+        ? [...byIdRef.current.values()].find(i => i.id === selectedId || i.wikiId === selectedId)
+        : undefined;
       while (cur?.parentId) { next.add(cur.parentId); cur = byIdRef.current.get(cur.parentId); }
       return next;
     });
@@ -115,14 +93,11 @@ export default function WikiShell({
     if (!hydratedRef.current) return;
     try { localStorage.setItem(storageKey, JSON.stringify([...expanded])); } catch { /* 配额满等，忽略 */ }
   }, [expanded, storageKey]);
-  // 新建：creatingUnder = null 未在建 / "" 根级 / <id> 子文档
+  // 新建：creatingUnder = null 未在建 / "" 根级 / <node id> 子文档
   const [creatingUnder, setCreatingUnder] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
-  // 可枚举性（#357）：默认进目录；取消勾选＝只有被显式分享的人能在树里列到它，
-  // 且它的整棵子树随之对他人隐藏（E(子) ⊆ E(父)）。建完可在分享面板改。
   const [newListable, setNewListable] = useState(true);
   const [busy, setBusy] = useState(false);
-  // ⋯ 菜单经 portal 固定定位（nav 有 overflow-y-auto，绝对定位会被裁剪）
   const [menu, setMenu] = useState<{ id: string; top: number; left: number } | null>(null);
   const [movingId, setMovingId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -141,19 +116,36 @@ export default function WikiShell({
     };
   }, [menu]);
 
-  // 同层有序邻接表（items 已按 sort_key NULLS LAST, createdAt 排序，分组后保持相对序）。
-  // 别名的父只能是真实文档，所以归组时只认 wiki 侧的 id 集。
+  // 同层有序邻接表（服务端已按 sort_key 排序，分组后保持相对序）。
+  // 只有容器 kind（folder/wiki）能收子项。
   const byParent = useMemo(() => {
-    const wikiIds = new Set(wikis.map(w => w.id));
-    const m = new Map<string | null, TreeItem[]>();
+    const containerIds = new Set(items.filter(isContainer).map(n => n.id));
+    const m = new Map<string | null, NodeEntry[]>();
     for (const it of items) {
-      const key = it.parentId && wikiIds.has(it.parentId) ? it.parentId : null;
+      const key = it.parentId && containerIds.has(it.parentId) ? it.parentId : null;
       m.set(key, [...(m.get(key) ?? []), it]);
     }
     return m;
-  }, [items, wikis]);
+  }, [items]);
 
-  // ── 拖拽调层级（Notion 式：行上/下缘=同级排序，行中部=成为子文档）──────────
+  /** 位置面 PATCH 的端点按 kind 分派（内容路由 / alias 路由 / 通用 node 路由） */
+  function patchEndpoint(item: NodeEntry): string {
+    if (item.kind === "link") return `${BASE_PATH}/api/production/${productionId}/wiki-alias/${item.id}`;
+    if (item.kind === "wiki" && item.wikiId) return `${BASE_PATH}/api/production/${productionId}/wiki/${item.wikiId}`;
+    return `${BASE_PATH}/api/production/${productionId}/node/${item.id}`;
+  }
+
+  /** 树内导航目标：wiki=内容 id 路由段；link=节点 id（页面就地渲染目标）；
+   *  asset=资产预览页；folder=无导航（点击展开）。 */
+  function hrefFor(item: NodeEntry): string | null {
+    if (item.kind === "wiki" && item.wikiId) return `${routeBase}/${item.wikiId}`;
+    if (item.kind === "link") return `${routeBase}/${item.id}`;
+    if (item.kind === "asset" && item.assetId)
+      return `/production/${productionId}/assets/${item.assetId}/preview`;
+    return null;
+  }
+
+  // ── 拖拽调层级（Notion 式）──────────────────────────────────────────────────
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropHint, setDropHint] = useState<{ id: string; zone: DropZone } | null>(null);
 
@@ -176,23 +168,18 @@ export default function WikiShell({
     setDropHint(null);
     if (!id || id === targetId || dragDescendants.has(targetId)) return;
     const target = byId.get(targetId);
-    if (!target) return;
-    // 别名是叶子：不能往它"里面"放东西（#358）
-    if (zone === "inside" && target.kind === "alias") return;
     const dragged = byId.get(id);
+    if (!target || !dragged) return;
+    // 叶子 kind（link/asset）不能收子项
+    if (zone === "inside" && !isContainer(target)) return;
 
-    // 排序键一律由服务端在**完整**兄弟集上算（#357 症状②）：可枚举性逐节点后
-    // 客户端手里的兄弟集可能有空洞，在残缺集上取键会和看不见的兄弟交错。
-    // 这里只声明「挂到谁下面 / 放在谁的前后」，不自己算键。
+    // 排序键一律由服务端在**完整**兄弟集上算（#357 症状②），这里只声明锚点
     const parentId = zone === "inside"
       ? targetId
       : rootParentId && target.parentId === rootParentId ? null : target.parentId ?? null;
     const place = zone === "inside" ? undefined : { anchorId: targetId, side: zone };
 
-    const endpoint = dragged?.kind === "alias"
-      ? `${BASE_PATH}/api/production/${productionId}/wiki-alias/${id}`
-      : `${BASE_PATH}/api/production/${productionId}/wiki/${id}`;
-    const res = await fetch(endpoint, {
+    const res = await fetch(patchEndpoint(dragged), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -211,24 +198,23 @@ export default function WikiShell({
     if (q) {
       visible = new Set();
       for (const it of items) {
-        const hit = (it.title ?? "").toLowerCase().includes(q)
-          || (it.kind === "wiki" && it.entry.tags.some(t => t.toLowerCase().includes(q)));
+        const hit = (it.displayTitle ?? "").toLowerCase().includes(q)
+          || it.tags.some(t => t.toLowerCase().includes(q));
         if (!hit) continue;
-        let cur: TreeItem | undefined = it;
+        let cur: NodeEntry | undefined = it;
         while (cur && !visible.has(cur.id)) {
           visible.add(cur.id);
           cur = cur.parentId ? byId.get(cur.parentId) : undefined;
         }
       }
     }
-    const out: Node[] = [];
+    const out: FlatNode[] = [];
     const walk = (parent: string | null, depth: number) => {
       for (const it of byParent.get(parent) ?? []) {
         if (visible && !visible.has(it.id)) continue;
-        // 别名恒为叶子（#358）：它下面永远不展开东西
-        const hasChildren = it.kind === "wiki" && (byParent.get(it.id) ?? []).length > 0;
+        const hasChildren = isContainer(it) && (byParent.get(it.id) ?? []).length > 0;
         out.push({ item: it, depth, hasChildren });
-        if (it.kind === "wiki" && (expanded.has(it.id) || q)) walk(it.id, depth + 1);
+        if (isContainer(it) && (expanded.has(it.id) || q)) walk(it.id, depth + 1);
       }
     };
     walk(null, 0);
@@ -302,8 +288,9 @@ export default function WikiShell({
 
   async function remove(id: string) {
     const it = byId.get(id);
-    if (it?.kind === "alias") {
-      if (!confirm(`确认移除链接「${it.title ?? "（无标题）"}」？目标文档不受影响。`)) return;
+    if (!it) return;
+    if (it.kind === "link") {
+      if (!confirm(`确认移除链接「${it.displayTitle ?? "（无标题）"}」？目标不受影响。`)) return;
       setMenu(null);
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki-alias/${id}`,
         { method: "DELETE" });
@@ -312,23 +299,19 @@ export default function WikiShell({
       router.refresh();
       return;
     }
-    // 指向本篇的软链接会随删（服务端在同一事务内清）——只数得出自己看得见的那些，
-    // 所以措辞是"至少"，不给一个会撒谎的精确数字
-    const linked = aliases.filter(a => a.targetType === "wiki" && a.targetId === id).length;
+    if (it.kind !== "wiki" || !it.wikiId) return; // asset/folder 的删除入口不在树上（批1）
+    // 指向本节点的软链接会随删（FK 级联）——只数得出自己看得见的那些
+    const linked = items.filter(n => n.kind === "link" && n.linkTargetId === id).length;
     const extra = linked > 0 ? `\n指向它的链接（至少 ${linked} 处）也会一并移除。` : "";
-    if (!confirm(`确认删除「${it?.title ?? "该文档"}」？子文档将上移一层。${extra}`)) return;
+    if (!confirm(`确认删除「${it.displayTitle ?? "该文档"}」？子节点将上移一层。${extra}`)) return;
     setMenu(null);
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${id}`, { method: "DELETE" });
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${it.wikiId}`, { method: "DELETE" });
     if (!res.ok) { alert((await res.json()).error ?? "删除失败"); return; }
-    if (id === selectedId) router.push(routeBase);
+    if (selectedItem?.id === id) router.push(routeBase);
     router.refresh();
   }
 
-  /**
-   * 落到本工作区**顶层**的落位载荷。作用域工作区的根是懒建的：一篇都还没有时
-   * rootParentId 是空的，此时不能直接送 parentId:null（那是**全库**顶层，文档会
-   * 掉出工作区），而是声明锚点、由服务端过完门后补建根（#355）。
-   */
+  /** 落到本工作区**顶层**的落位载荷（根懒建时声明锚点，#355）。 */
   function rootPlacement(): { parentId: string | null; parentAnchor?: "dramaturgy" } {
     if (rootParentId) return { parentId: rootParentId };
     return { parentId: null, ...(rootAnchor ? { parentAnchor: rootAnchor } : {}) };
@@ -338,11 +321,9 @@ export default function WikiShell({
     setMovingId(null);
     const target = targetIds[0];
     if (target === undefined) return;
-    const kind = byId.get(id)?.kind;
-    const endpoint = kind === "alias"
-      ? `${BASE_PATH}/api/production/${productionId}/wiki-alias/${id}`
-      : `${BASE_PATH}/api/production/${productionId}/wiki/${id}`;
-    const res = await fetch(endpoint, {
+    const it = byId.get(id);
+    if (!it) return;
+    const res = await fetch(patchEndpoint(it), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(target === "__root__" ? rootPlacement() : { parentId: target }),
@@ -351,9 +332,8 @@ export default function WikiShell({
     router.refresh();
   }
 
-  // 软链接（#358）：在另一个位置放一个指向本篇的伪节点，本篇一动不动。
+  // 软链接（#358 → #420）：在另一个位置放一个指向本节点的 link，本体一动不动。
   const [linkingId, setLinkingId] = useState<string | null>(null);
-  // 别名显示名（#358 ⑤）：只改这个位置上的标签，目标标题不动；清空＝改回跟随目标
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
@@ -368,7 +348,7 @@ export default function WikiShell({
     router.refresh();
   }
 
-  async function createAlias(targetId: string, targetIds: string[]) {
+  async function createAlias(targetNodeId: string, targetIds: string[]) {
     setLinkingId(null);
     const target = targetIds[0];
     if (target === undefined) return;
@@ -377,8 +357,7 @@ export default function WikiShell({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...(target === "__root__" ? rootPlacement() : { parentId: target }),
-        targetType: "wiki",
-        targetId,
+        targetNodeId,
       }),
     });
     if (!res.ok) { alert((await res.json()).error ?? "创建链接失败"); return; }
@@ -386,33 +365,30 @@ export default function WikiShell({
     router.refresh();
   }
 
-  // ── 移入（#355）：把子树外的一篇文档带进本工作区 ────────────────────────────
-  // 两种形态是**同一个入口**的两个选项，不拆成两个功能：
-  //   本体移入 —— 改 parent_id，它从原位置消失、出现在这里
-  //   建链接   —— 原位置不动，这里多一个指向它的位置（#358 的伪节点）
-  // 两者的门不同档：本体移入要 canEditWiki(本篇) ∧ 源父容器可写，建链接只要
-  // wiki@create ∧ 目标可达——所以"只能建链接、不能移本体"是常态，不是异常。
+  // ── 移入（#355）────────────────────────────────────────────────────────────
   const [movingInPick, setMovingInPick] = useState(false);
-  const [movingIn, setMovingIn] = useState<WikiMoveInCandidate | null>(null);
+  const [movingIn, setMovingIn] = useState<NodeMoveInCandidate | null>(null);
 
-  async function moveInBody(c: WikiMoveInCandidate) {
+  async function moveInBody(c: NodeMoveInCandidate) {
     setMovingIn(null);
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${c.id}`, {
+    // canMoveBody 只对 wiki 节点为真（灰化镜像），本体移入走内容路由
+    if (c.kind !== "wiki" || !c.wikiId) return;
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${c.wikiId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(rootPlacement()),
     });
     if (!res.ok) { alert((await res.json()).error ?? "移入失败"); return; }
-    router.push(`${routeBase}/${c.id}`);
+    router.push(`${routeBase}/${c.wikiId}`);
     router.refresh();
   }
 
-  async function moveInLink(c: WikiMoveInCandidate) {
+  async function moveInLink(c: NodeMoveInCandidate) {
     setMovingIn(null);
     const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki-alias`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...rootPlacement(), targetType: "wiki", targetId: c.id }),
+      body: JSON.stringify({ ...rootPlacement(), targetNodeId: c.id }),
     });
     const data = await res.json();
     if (!res.ok) { alert(data.error ?? "移入失败"); return; }
@@ -420,22 +396,22 @@ export default function WikiShell({
     router.refresh();
   }
 
-  /** 容器候选（只有真实文档能当容器——别名是叶子）。排除自身与后代。 */
-  function containerItemsFor(id: string | null) {
-    const descendants = new Set(id ? [id] : []);
+  /** 容器候选（folder/wiki 才能当容器）。排除自身与后代。 */
+  function containerItemsFor(excludeRootId: string | null) {
+    const descendants = new Set(excludeRootId ? [excludeRootId] : []);
     let grew = true;
     while (grew) {
       grew = false;
-      for (const w of wikis) {
-        if (w.parentId && descendants.has(w.parentId) && !descendants.has(w.id)) {
-          descendants.add(w.id); grew = true;
+      for (const n of items) {
+        if (n.parentId && descendants.has(n.parentId) && !descendants.has(n.id)) {
+          descendants.add(n.id); grew = true;
         }
       }
     }
     return [
       { id: "__root__", label: "（移到顶层）" },
-      ...wikis.filter(w => !descendants.has(w.id)).map(w => ({
-        id: w.id, label: w.title ?? "（无标题）", parentId: w.parentId,
+      ...items.filter(n => isContainer(n) && !descendants.has(n.id)).map(n => ({
+        id: n.id, label: n.displayTitle ?? "（无标题）", parentId: n.parentId,
       })),
     ];
   }
@@ -484,7 +460,6 @@ export default function WikiShell({
   );
 
   return (
-    // 侧栏 sticky 固定高度自滚，不随主体滚走（UI 修缮轮）；主体保持最小视口高
     <div className="flex gap-6 items-start">
       <aside className="w-[264px] shrink-0 sticky top-4 h-[calc(100vh-120px)] flex flex-col rounded-xl border border-zinc-200 bg-white overflow-hidden">
         <div className="p-2.5 border-b border-zinc-200">
@@ -504,7 +479,6 @@ export default function WikiShell({
             >
               ＋ 新建文档
             </button>
-            {/* 移入（#355）：把子树外的文档带进本工作区。只有作用域工作区给候选。 */}
             {moveInCandidates.length > 0 && (
               <button
                 type="button"
@@ -536,14 +510,22 @@ export default function WikiShell({
         )}
         <nav className="py-1 flex-1 overflow-y-auto">
           {flat.length === 0 && !creatingUnder && (
-            <p className="px-3 py-3 text-sm text-zinc-400">{query ? "无匹配文档" : "还没有可见的文档"}</p>
+            <p className="px-3 py-3 text-sm text-zinc-400">{query ? "无匹配节点" : "还没有可见的文档"}</p>
           )}
           {flat.map(({ item, depth, hasChildren }) => {
-            const entry = item.kind === "wiki" ? item.entry : null;
-            const isAlias = item.kind === "alias";
-            const active = item.id === selectedId;
+            const isLink = item.kind === "link";
+            const active = selectedItem?.id === item.id;
             const hint = dropHint?.id === item.id ? dropHint.zone : null;
             const droppable = dragId && dragId !== item.id && !dragDescendants.has(item.id);
+            const href = hrefFor(item);
+            const rowTitleNode = (
+              <>
+                {isLink && <span className="mr-1 text-[10px] text-zinc-400">↗</span>}
+                {item.kind === "asset" && <span className="mr-1 text-[10px] text-zinc-400">▤</span>}
+                {item.kind === "folder" && <span className="mr-1 text-[10px] text-zinc-400">▣</span>}
+                {item.displayTitle ?? "（无标题）"}
+              </>
+            );
             return (
               <div key={item.id}>
                 <div
@@ -551,14 +533,14 @@ export default function WikiShell({
                   onDragStart={e => {
                     setDragId(item.id);
                     e.dataTransfer.effectAllowed = "copyMove";
-                    // 拖进编辑器成为双向链接：富文本读 x-clickin-wiki（TipTap handleDrop），
-                    // 源码 textarea 靠 text/plain 走浏览器原生插入。
-                    // 别名一律给**真实目标 id**——引用边绝不锚别名（#358 ⑦），
-                    // 否则别名一挪，引用就断（#302 为 cue 解决过的同构问题）。
-                    const label = item.title ?? "（无标题）";
-                    const refId = item.kind === "alias" ? item.alias.targetId : item.id;
-                    e.dataTransfer.setData("application/x-clickin-wiki", JSON.stringify({ id: refId, label }));
-                    e.dataTransfer.setData("text/plain", `[#](/__cm__/wiki/${refId})`);
+                    // 拖进编辑器成为双向链接：引用永远锚**真实 wiki 目标**（#358 ⑦）。
+                    const refWikiId = item.kind === "wiki" ? item.wikiId
+                      : item.kind === "link" ? item.targetWikiId : null;
+                    if (refWikiId) {
+                      const label = item.displayTitle ?? "（无标题）";
+                      e.dataTransfer.setData("application/x-clickin-wiki", JSON.stringify({ id: refWikiId, label }));
+                      e.dataTransfer.setData("text/plain", `[#](/__cm__/wiki/${refWikiId})`);
+                    }
                   }}
                   onDragEnd={() => { setDragId(null); setDropHint(null); }}
                   onDragOver={e => {
@@ -567,9 +549,9 @@ export default function WikiShell({
                     e.dataTransfer.dropEffect = "move";
                     const r = e.currentTarget.getBoundingClientRect();
                     const y = (e.clientY - r.top) / r.height;
-                    // 别名不能当容器（叶子），中部落点退化为"放在它后面"
+                    // 叶子（link/asset）不能当容器，中部落点退化为"放在它后面"
                     const raw: DropZone = y < 0.25 ? "before" : y > 0.75 ? "after" : "inside";
-                    const zone: DropZone = isAlias && raw === "inside" ? "after" : raw;
+                    const zone: DropZone = !isContainer(item) && raw === "inside" ? "after" : raw;
                     setDropHint(prev => prev?.id === item.id && prev.zone === zone ? prev : { id: item.id, zone });
                   }}
                   onDragLeave={() => setDropHint(prev => (prev?.id === item.id ? null : prev))}
@@ -609,34 +591,46 @@ export default function WikiShell({
                       placeholder="留空＝跟随目标标题"
                       className="flex-1 min-w-0 my-1 rounded border border-zinc-300 px-1.5 py-0.5 text-[13px] outline-none focus:border-zinc-500"
                     />
-                  ) : (
+                  ) : href ? (
                     <Link
-                      href={`${routeBase}/${item.id}`}
+                      href={href}
                       className={`flex-1 min-w-0 truncate py-1.5 text-[13px] ${
                         active ? "font-semibold text-sky-800" : "text-zinc-600"
                       }`}
-                      title={item.kind === "alias"
-                        ? `链接 → ${item.alias.targetTitle ?? "（无标题）"}`
-                        : item.title ?? undefined}
+                      title={isLink
+                        ? `链接 → ${item.targetTitle ?? "（无标题）"}`
+                        : item.displayTitle ?? undefined}
                     >
-                      {isAlias && <span className="mr-1 text-[10px] text-zinc-400">↗</span>}
-                      {item.title ?? "（无标题）"}
+                      {rowTitleNode}
                     </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setExpanded(prev => {
+                        const next = new Set(prev);
+                        if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                        return next;
+                      })}
+                      className="flex-1 min-w-0 truncate py-1.5 text-left text-[13px] text-zinc-600"
+                      title={item.displayTitle ?? undefined}
+                    >
+                      {rowTitleNode}
+                    </button>
                   )}
-                  {entry && !entry.listable && (
+                  {item.kind !== "link" && !item.listable && (
                     <span
                       className="shrink-0 text-[10px] text-amber-500 group-hover:hidden"
-                      title="不可枚举：只有被显式分享的人能在目录里看到它；其子文档随之隐藏"
+                      title="不可枚举：只有被显式分享的人能在目录里看到它；其子节点随之隐藏"
                     >
                       ⌀
                     </span>
                   )}
-                  {entry?.isPublic && (
+                  {item.kind !== "link" && item.isPublic && (
                     <span className="shrink-0 text-[10px] text-zinc-300 group-hover:hidden" title="已公开给全体成员">◍</span>
                   )}
-                  {/* 悬停操作区：＋ 新建子文档（别名是叶子，没有）/ ⋯ 菜单 */}
+                  {/* 悬停操作区：＋ 新建子文档（容器 kind 才有）/ ⋯ 菜单 */}
                   <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
-                    {canCreate && !isAlias && (
+                    {canCreate && isContainer(item) && (
                       <button
                         type="button"
                         title="新建子文档"
@@ -682,19 +676,20 @@ export default function WikiShell({
           >
             移动到…
           </button>
-          {/* 软链接：在别处放一个指向本篇的伪节点，本篇不动（#358）。别名不能再被
-              软链接——链式别名结构上不存在，建的时候就解析到最终目标。 */}
-          {byId.get(menu.id)?.kind === "wiki" && canCreate && (
-            <button
-              type="button"
-              className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
-              onClick={() => { const id = menu.id; setMenu(null); setLinkingId(id); }}
-            >
-              链接到…
-            </button>
-          )}
-          {/* 显示名只改这个位置上的标签，目标标题不动（#358 ⑤） */}
-          {byId.get(menu.id)?.kind === "alias" && (
+          {/* 软链接：wiki/asset 节点可被链接；link 不能再被链接（链式结构上不存在） */}
+          {(() => {
+            const it = byId.get(menu.id);
+            return it && (it.kind === "wiki" || it.kind === "asset") && canCreate ? (
+              <button
+                type="button"
+                className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
+                onClick={() => { const id = menu.id; setMenu(null); setLinkingId(id); }}
+              >
+                链接到…
+              </button>
+            ) : null;
+          })()}
+          {byId.get(menu.id)?.kind === "link" && (
             <>
               <button
                 type="button"
@@ -702,14 +697,13 @@ export default function WikiShell({
                 onClick={() => {
                   const it = byId.get(menu.id);
                   setMenu(null);
-                  setRenameValue(it?.kind === "alias" ? it.alias.displayTitle ?? "" : "");
+                  setRenameValue(it?.kind === "link" ? it.title ?? "" : "");
                   setRenamingId(menu.id);
                 }}
               >
                 重命名
               </button>
-              {byId.get(menu.id)?.kind === "alias"
-                && (byId.get(menu.id) as { alias: WikiAliasEntry }).alias.displayTitle !== null && (
+              {byId.get(menu.id)?.title !== null && (
                 <button
                   type="button"
                   className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
@@ -720,18 +714,22 @@ export default function WikiShell({
               )}
             </>
           )}
-          {/* 系统锚点目录（报告归档）不可删除——服务端亦有 409 拦截 */}
           {(() => {
             const it = byId.get(menu.id);
-            if (it?.kind === "wiki" && it.entry.isAnchor)
+            if (!it) return null;
+            if (it.isAnchor)
               return <p className="px-3 py-1.5 text-[12px] text-zinc-400">系统目录，不可删除</p>;
+            if (it.kind === "asset")
+              return <p className="px-3 py-1.5 text-[12px] text-zinc-400">资产请在资产页删除</p>;
+            if (it.kind === "folder")
+              return null; // 批1 folder 全是系统产物，无删除入口
             return (
               <button
                 type="button"
                 className="w-full text-left px-3 py-1.5 text-[13px] text-red-600 hover:bg-red-50"
                 onClick={() => remove(menu.id)}
               >
-                {it?.kind === "alias" ? "移除链接" : "删除"}
+                {it.kind === "link" ? "移除链接" : "删除"}
               </button>
             );
           })()}
@@ -741,12 +739,12 @@ export default function WikiShell({
 
       {movingId && (() => {
         const it = byId.get(movingId);
-        // 别名不得落进目标自己的子树（服务端亦拦）——候选里就不给
-        const excludeRoot = it?.kind === "alias" ? it.alias.targetId : movingId;
+        // link 不得落进目标自己的子树（服务端亦拦）——候选里就不给
+        const excludeRoot = it?.kind === "link" ? it.linkTargetId : movingId;
         return (
           <TreePickerModal
             kicker="Wiki"
-            title={`移动「${it?.title ?? ""}」到…`}
+            title={`移动「${it?.displayTitle ?? ""}」到…`}
             items={containerItemsFor(excludeRoot)}
             preselected={[]}
             single
@@ -759,7 +757,7 @@ export default function WikiShell({
       {linkingId && (
         <TreePickerModal
           kicker="Wiki"
-          title={`把「${byId.get(linkingId)?.title ?? ""}」链接到…`}
+          title={`把「${byId.get(linkingId)?.displayTitle ?? ""}」链接到…`}
           items={containerItemsFor(linkingId)}
           preselected={[]}
           single
@@ -768,8 +766,6 @@ export default function WikiShell({
         />
       )}
 
-      {/* 移入第一步：选一篇子树外的文档。候选已在服务端过完枚举面——列不到的
-          文档不会出现在这里，也就不存在"选了个自己看不见的 id"这回事。 */}
       {movingInPick && (
         <TreePickerModal
           kicker="Wiki"
@@ -791,9 +787,6 @@ export default function WikiShell({
         />
       )}
 
-      {/* 移入第二步：本体还是链接。默认按上下文——游离文档（没有父）默认移本体，
-          已经挂在别处的默认建链接（那个位置多半有人在用，抽走本体是对别人的改动）。
-          「移入本体」在无权时灰掉而不是隐藏：让人看见这条路存在、且为什么走不通。 */}
       {movingIn && (() => {
         const c = movingIn;
         const preferLink = c.parentId !== null;
@@ -811,7 +804,6 @@ export default function WikiShell({
                 onClick={() => moveInBody(c)}
                 style={{
                   ...(preferLink || !c.canMoveBody ? SECONDARY_BTN : PRIMARY_BTN),
-                  // 内联样式压过 tailwind 的 disabled:*，灰化只能也写在这里
                   ...(c.canMoveBody ? {} : { opacity: 0.4, cursor: "not-allowed" }),
                 }}
                 className="text-left"
@@ -821,7 +813,7 @@ export default function WikiShell({
               <p className="-mt-2 text-[12px] text-zinc-500">
                 {c.canMoveBody
                   ? "它从原位置消失，只出现在这里。"
-                  : "你没有这篇文档（或它所在目录）的编辑权，改不了它的位置。"}
+                  : "你没有这个节点（或它所在目录）的编辑权，改不了它的位置。"}
               </p>
               <button
                 type="button"
@@ -832,7 +824,7 @@ export default function WikiShell({
                 建链接
               </button>
               <p className="-mt-2 text-[12px] text-zinc-500">
-                原位置不动，这里多一个指向它的位置。正文只有一份，改哪边都是同一篇。
+                原位置不动，这里多一个指向它的位置。内容只有一份，改哪边都是同一份。
                 {c.linked && "（这里已经有指向它的链接了）"}
               </p>
             </div>

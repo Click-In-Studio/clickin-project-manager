@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import type { Asset } from "@/lib/asset/db";
-import type { MountType } from "@/lib/asset/mount";
+import type { MountType } from "@/lib/node/mount";
 import { ASSET_TYPE_LABELS } from "@/lib/asset/types";
 import { BASE_PATH } from "@/lib/base-path";
 
@@ -10,17 +10,8 @@ export type MountContext = {
   mountType: MountType;
   mountId: string;
   mountAuxId?: string | null;
-  versionId?: string | null;
-  stableId?: string | null; // blockId or cueId for inherit mode
   label: string;
 };
-
-type VersionRelMode = "version_only" | "tracking" | "inherit";
-
-// Whether a mount type supports version-controlled splitting
-function isSplittable(mt: MountType): mt is "block_snapshot" | "cue_revision" {
-  return mt === "block_snapshot" || mt === "cue_revision";
-}
 
 
 interface Props {
@@ -37,13 +28,6 @@ export default function AssetSelectPanel({ productionId, mountCtx, preSelectedId
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(preSelectedId ?? null);
-  // Only block/cue snapshot types support CoW-based tracking across versions
-  const supportsCow = (["block", "block_snapshot", "cue", "cue_revision"] as MountType[]).includes(mountCtx.mountType);
-  const hasVersion = !!mountCtx.versionId;
-  const [mountMode, setMountMode] = useState<VersionRelMode>(
-    !hasVersion ? "inherit" : supportsCow ? "tracking" : "version_only"
-  );
-  const [folderPath, setFolderPath] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -75,21 +59,11 @@ export default function AssetSelectPanel({ productionId, mountCtx, preSelectedId
     setSubmitting(true);
     setError(null);
     try {
-      const effectiveMountType = mountMode === "inherit" && isSplittable(mountCtx.mountType)
-        ? (mountCtx.mountType === "block_snapshot" ? "block" : "cue")
-        : mountCtx.mountType;
-
-      const effectiveMountId = mountMode === "inherit" && isSplittable(mountCtx.mountType)
-        ? (mountCtx.stableId ?? mountCtx.mountId)
-        : mountCtx.mountId;
-
+      // #420：挂载一律锚稳定 id（版本纪律），模式/目录/版本参数全部退役
       const body: Record<string, unknown> = {
-        mountType: effectiveMountType,
-        mountId: effectiveMountId,
+        mountType: mountCtx.mountType,
+        mountId: mountCtx.mountId,
         mountAuxId: mountCtx.mountAuxId ?? null,
-        folderPath: folderPath.trim() || null,
-        mountMode: mountMode !== "inherit" ? mountMode : null,
-        versionId: mountCtx.versionId ?? null,
       };
 
       const res = await fetch(
@@ -145,58 +119,6 @@ export default function AssetSelectPanel({ productionId, mountCtx, preSelectedId
               </div>
             </button>
           ))}
-        </div>
-      )}
-
-      {/* Mount mode selector */}
-      {selected && !selectOnly && (
-        <div>
-          <label className="block text-xs text-zinc-400 mb-1.5">挂载模式</label>
-          <div className="flex rounded-lg overflow-hidden border border-zinc-200 text-xs">
-            {(["tracking", "version_only", "inherit"] as VersionRelMode[]).map(m => {
-              const disabled =
-                (m === "tracking" && (!hasVersion || !supportsCow)) ||
-                (m === "version_only" && !hasVersion);
-              return (
-                <button key={m} onClick={() => !disabled && setMountMode(m)}
-                  disabled={disabled}
-                  className={`flex-1 py-2 font-medium transition-colors ${
-                    mountMode === m
-                      ? "bg-zinc-800 text-white"
-                      : disabled
-                        ? "bg-zinc-50 text-zinc-300 cursor-not-allowed"
-                        : "bg-white text-zinc-500 hover:bg-zinc-50"
-                  }`}>
-                  {m === "tracking" ? "跟踪" : m === "version_only" ? "当前版本" : "继承"}
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-1 text-[10px] text-zinc-400">
-            {mountMode === "tracking" && "当前版本及以后都可见，CoW 分裂时自动跟踪"}
-            {mountMode === "version_only" && "仅当前版本可见"}
-            {mountMode === "inherit" && "所有版本共享"}
-          </p>
-          {!hasVersion && (
-            <p className="mt-1 text-[10px] text-amber-500">无版本上下文，当前版本/跟踪模式不可用</p>
-          )}
-          {hasVersion && !supportsCow && (
-            <p className="mt-1 text-[10px] text-zinc-400">此挂载点不支持跟踪模式（无 CoW 机制）</p>
-          )}
-        </div>
-      )}
-
-      {/* Folder path — only for production mount */}
-      {!selectOnly && (mountCtx.mountType === "production" || mountCtx.mountType === "version") && (
-        <div>
-          <label className="block text-xs text-zinc-400 mb-1.5">文件夹路径（可选）</label>
-          <input
-            type="text"
-            placeholder="如：设计/平面图"
-            value={folderPath}
-            onChange={e => setFolderPath(e.target.value)}
-            className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400"
-          />
         </div>
       )}
 

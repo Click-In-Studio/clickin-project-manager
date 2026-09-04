@@ -4,21 +4,18 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { Asset } from "@/lib/asset/db";
-import type { AssetMount, MountType } from "@/lib/asset/mount";
+import type { NodeMount, MountType } from "@/lib/node/mount";
 import { ASSET_TYPE_LABELS } from "@/lib/asset/types";
 import AssetMountModal from "./AssetMountModal";
 import type { MountContext } from "./AssetSelectPanel";
 
-type MountResult = { mount: AssetMount; asset: Asset };
+type MountResult = { mount: NodeMount; asset: Asset };
 
 interface Props {
   productionId: string;
   mountType: MountType;
   mountId: string;
   mountAuxId?: string | null;
-  versionId?: string | null;
-  // For block_snapshot / cue_revision: the stable ID (blockId / cueId) needed for mount CoW
-  stableId?: string | null;
   label: string;
   canEdit?: boolean;
   // compact: single-line chip list (for inline use in lists)
@@ -29,16 +26,14 @@ interface Props {
 }
 
 export default function MountPointAssets({
-  productionId, mountType, mountId, mountAuxId, versionId, stableId,
+  productionId, mountType, mountId, mountAuxId,
   label, canEdit = false, display = "panel", onNavigate, onChange,
 }: Props) {
   const [results, setResults] = useState<MountResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
 
-  const mountCtx: MountContext = {
-    mountType, mountId, mountAuxId, versionId, stableId, label,
-  };
+  const mountCtx: MountContext = { mountType, mountId, mountAuxId, label };
 
   const load = useCallback(() => {
     const qs = new URLSearchParams({ type: mountType, id: mountId });
@@ -54,14 +49,13 @@ export default function MountPointAssets({
 
   function assetHref(asset: Asset): string {
     if (asset.storageType === "feishu_link" && asset.feishuUrl) return asset.feishuUrl;
-    const qs = versionId ? `?v=${versionId}` : "";
     // Link already prepends basePath — don't add BASE_PATH here
-    return `/production/${productionId}/assets/${asset.id}/preview${qs}`;
+    return `/production/${productionId}/assets/${asset.id}/preview`;
   }
 
-  async function handleRemove(mount: AssetMount) {
+  async function handleRemove(mount: NodeMount, assetId: string) {
     await fetch(
-      `${BASE_PATH}/api/production/${productionId}/assets/${mount.assetId}/mounts/${mount.id}`,
+      `${BASE_PATH}/api/production/${productionId}/assets/${assetId}/mounts/${mount.id}`,
       { method: "DELETE" }
     );
     setResults(p => p.filter(r => r.mount.id !== mount.id));
@@ -84,7 +78,7 @@ export default function MountPointAssets({
               {asset.name ?? asset.fileName}
             </Link>
             {canEdit && (
-              <button onClick={() => handleRemove(mount)} className="text-zinc-300 hover:text-red-400 leading-none">×</button>
+              <button onClick={() => handleRemove(mount, asset.id)} className="text-zinc-300 hover:text-red-400 leading-none">×</button>
             )}
           </span>
         ))}
@@ -142,7 +136,7 @@ export default function MountPointAssets({
                 </p>
               </div>
               {canEdit && (
-                <button onClick={() => handleRemove(mount)}
+                <button onClick={() => handleRemove(mount, asset.id)}
                   className="shrink-0 text-xs text-zinc-400 hover:text-red-500 transition-colors">
                   移除
                 </button>

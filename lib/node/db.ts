@@ -62,6 +62,8 @@ export type NodeEntry = NodeRecord & {
   targetTitle: string | null;
   /** link 专用：目标节点 kind（前端按它分派点击行为）。 */
   targetKind: NodeKind | null;
+  /** link 专用：目标为 wiki 时的内容 id（拖拽建引用等场景锚真实目标，#358 ⑦）。 */
+  targetWikiId: string | null;
   tags: string[];
   /** 系统锚点（报告根/事件目录/灵感库根/资产根）：可移动可改名，不可删除。 */
   isAnchor: boolean;
@@ -115,7 +117,7 @@ export async function getNodeByAssetId(assetId: string): Promise<NodeRecord | nu
 type EntryRow = NodeRow & {
   wiki_title: string | null; wiki_body_absent: boolean | null;
   asset_name: string | null; asset_file_name: string | null;
-  target_kind: NodeKind | null; target_wiki_title: string | null;
+  target_kind: NodeKind | null; target_wiki_id: string | null; target_wiki_title: string | null;
   target_asset_name: string | null; target_asset_file_name: string | null;
   target_folder_title: string | null;
   tags: string[] | null; is_anchor: boolean;
@@ -136,6 +138,7 @@ function rowToEntry(r: EntryRow): NodeEntry {
   return {
     ...rowToNode(r), displayTitle, targetTitle,
     targetKind: r.kind === "link" ? r.target_kind : null,
+    targetWikiId: r.kind === "link" ? r.target_wiki_id : null,
     tags: r.tags ?? [], isAnchor: r.is_anchor,
   };
 }
@@ -146,7 +149,7 @@ const ENTRY_SELECT = `
          n.created_by::text AS created_by, n.created_at, n.updated_at,
          w.title AS wiki_title, NULL::boolean AS wiki_body_absent,
          a.name AS asset_name, a.file_name AS asset_file_name,
-         t.kind AS target_kind, tw.title AS target_wiki_title,
+         t.kind AS target_kind, tw.id::text AS target_wiki_id, tw.title AS target_wiki_title,
          ta.name AS target_asset_name, ta.file_name AS target_asset_file_name,
          t.title AS target_folder_title,
          (SELECT array_remove(array_agg(wt.tag ORDER BY wt.tag), NULL)

@@ -41,7 +41,11 @@ const inSet = (s: IdSet, id: string) => s.wildcard || s.ids.has(id);
 
 /** 移入面板候选（#355）。canMoveBody 是前端灰化镜像，判定权威在路由。 */
 export type NodeMoveInCandidate = {
+  /** node id */
   id: string;
+  kind: NodeEntry["kind"];
+  /** wiki 节点的内容 id（本体移入走 wiki PATCH 路由用） */
+  wikiId: string | null;
   title: string | null;
   parentId: string | null;
   canMoveBody: boolean;
@@ -80,6 +84,8 @@ export function listDramaturgyMoveInCandidates(
       const bodyEditable = n.kind === "wiki" && n.wikiId !== null && inSet(perms.editable, n.wikiId);
       return {
         id: n.id,
+        kind: n.kind,
+        wikiId: n.wikiId,
         title: n.displayTitle,
         parentId: n.parentId,
         canMoveBody: bodyEditable && sourceWritable,
