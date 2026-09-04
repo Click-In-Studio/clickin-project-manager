@@ -6,6 +6,7 @@ import Badge from "@/components/Badge";
 import AdminModal from "@/components/AdminModal";
 import MemberPickerModal, { type PickerDept } from "@/components/MemberPickerModal";
 import styles from "@/components/my-pages.module.css";
+import { userAvatarSrc } from "@/lib/avatar-url";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberStatus } from "@/lib/member-status-shared";
 import { isInactiveMember } from "@/lib/member-status-shared";
@@ -44,9 +45,8 @@ const SECTION_LABEL: React.CSSProperties = {
 const PRODUCER = "制作人";
 
 function Avatar({ m, size }: { m: Member; size: number }) {
-  const url = m.photoUrl || m.avatarUrl;
+  const url = m.photoUrl || userAvatarSrc(m.userId, m.avatarUrl);
   return url ? (
-    // eslint-disable-next-line @next/next/no-img-element
     <img src={url} alt="" style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
   ) : (
     <span style={{

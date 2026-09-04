@@ -233,7 +233,6 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
                     {a.storageType === "feishu_link" ? (
                       <span>飞</span>
                     ) : a.mimeType?.startsWith("image/") ? (
-                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={`${BASE_PATH}/api/production/${productionId}/assets/${a.id}/thumb${versionId ? `?v=${versionId}` : ""}`}
                         alt=""

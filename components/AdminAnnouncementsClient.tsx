@@ -6,6 +6,7 @@ import { useState, useCallback, useEffect } from "react";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import SmartTextarea from "@/components/SmartTextarea";
 import { BASE_PATH } from "@/lib/base-path";
+import { userAvatarSrc } from "@/lib/avatar-url";
 
 type Announcement = {
   id: string;
@@ -67,8 +68,8 @@ function MemberChip({ member }: { member: ReadMember }) {
         fontSize: 10, fontWeight: 700, color: "var(--ink)",
         overflow: "hidden",
       }}>
-        {member.avatarUrl
-          ? <img src={member.avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        {userAvatarSrc(member.userId, member.avatarUrl)
+          ? <img src={userAvatarSrc(member.userId, member.avatarUrl) ?? undefined} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           : initial}
       </div>
       {member.name}

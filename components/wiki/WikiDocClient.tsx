@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
+import { userAvatarSrc } from "@/lib/avatar-url";
 import { fmtDateTime } from "@/lib/tz";
 import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/SmartTextarea";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
@@ -436,9 +437,8 @@ export default function WikiDocClient({
                     className="inline-flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-[11px] font-bold text-white overflow-hidden"
                     style={{ background: p.color }}
                   >
-                    {p.avatarUrl
-                      ? // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.avatarUrl} alt={p.userName} className="h-full w-full object-cover" />
+                    {userAvatarSrc(p.userId, p.avatarUrl)
+                      ? <img src={userAvatarSrc(p.userId, p.avatarUrl) ?? undefined} alt={p.userName} className="h-full w-full object-cover" />
                       : (p.userName || "?").slice(0, 1)}
                   </span>
                 ))}

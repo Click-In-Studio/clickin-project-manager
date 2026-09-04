@@ -2,6 +2,7 @@
 
 import PageHeader from "@/components/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
+import { userAvatarSrc } from "@/lib/avatar-url";
 import type { MemberWithRoles } from "@/lib/db";
 import { ROLE_GROUPS } from "@/lib/roles";
 import { isInactiveMember, memberStatusLabel } from "@/lib/member-status-shared";
@@ -46,7 +47,7 @@ function roleTone(role: string): React.CSSProperties {
 }
 
 function MemberCard({ member }: { member: MemberWithRoles }) {
-  const photo = resolvePhoto(member.photoUrl) ?? member.avatarUrl;
+  const photo = resolvePhoto(member.photoUrl) ?? userAvatarSrc(member.userId, member.avatarUrl);
 
   // v3 纯展示卡：小圆头像 + 名字 + 角色/标签徽章（无编辑入口）
   return (
@@ -60,7 +61,6 @@ function MemberCard({ member }: { member: MemberWithRoles }) {
         background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center",
       }}>
         {photo ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={photo} alt={member.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         ) : (
           <span style={{ fontSize: 18, fontWeight: 500, color: "var(--muted)" }}>{member.name[0]}</span>

@@ -26,7 +26,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "不支持的文件类型" }, { status: 400 });
   }
 
-  const r2Key = `avatars/production/${id}/avatar`;
+  // key 每次上传换新：见 app/api/account/avatar/presign 同款注释
+  const r2Key = `avatars/production/${id}/avatar-${Date.now().toString(36)}`;
   const { url } = presignedPut(r2Key, mimeType, 900);
 
   return Response.json({ uploadUrl: url, r2Key });
