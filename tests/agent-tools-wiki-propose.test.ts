@@ -4,7 +4,7 @@ import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 import { wikiProposeCreate } from "@/lib/agent-tools/wiki-tools";
 import { prepareWikiProposal } from "@/lib/agent-tools/wiki-proposal-prepare";
-import { getWikiProposalByToolCallId, insertWikiProposal } from "@/lib/wiki-proposal-db";
+import { getWikiProposalByToolCallId, insertWikiProposal } from "@/lib/wiki/proposal-db";
 
 let prodId: string;
 let ownerId: string;

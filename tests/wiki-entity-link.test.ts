@@ -2,11 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import {
-  createWiki, updateWiki, deleteWiki,
-  extractMentionEdges, listBacklinks, listWikiRefsForEntity, listEntityRefsForWiki,
-  ensureDramaturgyRootAnchor,
-} from "@/lib/wiki-db";
+import { createWiki, updateWiki, deleteWiki } from "@/lib/wiki/content";
+import { extractMentionEdges, listBacklinks, listWikiRefsForEntity, listEntityRefsForWiki } from "@/lib/wiki/links";
+import { ensureDramaturgyRootAnchor } from "@/lib/wiki/tree";
 import { GET as wikiRefsGET, POST as wikiRefsPOST, DELETE as wikiRefsDELETE } from "@/app/api/production/[id]/wiki-refs/route";
 import { makeProduction, makeScene, cleanupProduction, shortId } from "./factories";
 

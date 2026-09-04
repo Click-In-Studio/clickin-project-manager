@@ -16,8 +16,7 @@ function sha256hex(data: string): string {
   return crypto.createHash("sha256").update(data, "utf8").digest("hex");
 }
 
-function dateParts(): { dateStr: string; amzDate: string } {
-  const now = new Date();
+function dateParts(now = new Date()): { dateStr: string; amzDate: string } {
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, "");
   const amzDate = now.toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
   return { dateStr, amzDate };
@@ -47,13 +46,24 @@ export function thumbnailR2Key(assetFileId: string): string {
 /** Presigned GET URL.
  *  opts.inline=true  → adds response-content-disposition=inline (browser displays, doesn't download)
  *  opts.contentType  → overrides Content-Type in the response (useful for inline PDF/video preview)
+ *  opts.cacheWindow  → 签名时间戳向下取整到该秒数窗口，同一窗口内对同一 key 生成的
+ *                      URL 字节级相同（浏览器缓存才能命中）；有效期自动放宽为 2×窗口，
+ *                      保证窗口末尾拿到的 URL 仍有一整个窗口可用，expiresIn 被忽略
+ *  opts.cacheControl → 透传 response-cache-control（R2 默认不带缓存头，浏览器会走
+ *                      启发式回源验证；显式给 max-age 才能真正把重复请求挡在本地）
  */
 export function presignedGet(
   key: string,
   expiresIn = 3600,
-  opts?: { inline?: boolean; contentType?: string },
+  opts?: { inline?: boolean; contentType?: string; cacheWindow?: number; cacheControl?: string },
 ): string {
-  const { dateStr, amzDate } = dateParts();
+  let signTime = new Date();
+  if (opts?.cacheWindow) {
+    const winMs = opts.cacheWindow * 1000;
+    signTime = new Date(Math.floor(Date.now() / winMs) * winMs);
+    expiresIn = opts.cacheWindow * 2;
+  }
+  const { dateStr, amzDate } = dateParts(signTime);
   const scope = `${dateStr}/${region}/s3/aws4_request`;
   const baseParams: Record<string, string> = {
     "X-Amz-Algorithm":    "AWS4-HMAC-SHA256",
@@ -62,8 +72,9 @@ export function presignedGet(
     "X-Amz-Expires":      String(expiresIn),
     "X-Amz-SignedHeaders": "host",
   };
-  if (opts?.inline)      baseParams["response-content-disposition"] = "inline";
-  if (opts?.contentType) baseParams["response-content-type"] = opts.contentType;
+  if (opts?.inline)       baseParams["response-content-disposition"] = "inline";
+  if (opts?.contentType)  baseParams["response-content-type"] = opts.contentType;
+  if (opts?.cacheControl) baseParams["response-cache-control"] = opts.cacheControl;
 
   const params = sortedParams(baseParams);
   const canonical = [
@@ -330,6 +341,15 @@ export async function getR2Object(key: string): Promise<{ body: Buffer; contentT
   if (!res.ok) throw new Error(`R2 GET failed: ${res.status}`);
   const body = Buffer.from(await res.arrayBuffer());
   return { body, contentType: res.headers.get("content-type") };
+}
+
+/**
+ * Whether R2 credentials are present in the environment. Local dev commonly
+ * runs without them; callers use this to tell "expected fallback" apart from
+ * "R2 is actually failing in production".
+ */
+export function isR2Configured(): boolean {
+  return Boolean(accountId && accessKeyId && secretAccessKey);
 }
 
 /**

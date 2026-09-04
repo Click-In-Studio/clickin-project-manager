@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
 import { createEventReport, createReportNote, deleteEventReport, mountWikiAsReport } from "@/lib/event-db";
-import { createWiki } from "@/lib/wiki-db";
-import { getWikiTreeConfig, ensureReportTreeAnchors, deleteWiki, listWikiLibrary } from "@/lib/wiki-db";
+import { createWiki } from "@/lib/wiki/content";
+import { getWikiTreeConfig, ensureReportTreeAnchors, listWikiLibrary } from "@/lib/wiki/tree";
+import { deleteWiki } from "@/lib/wiki/content";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 
 // 默认文档树（拍板 §4-9）：报告默认挂「报告」/「<event>」之下、note 挂报告文档下、

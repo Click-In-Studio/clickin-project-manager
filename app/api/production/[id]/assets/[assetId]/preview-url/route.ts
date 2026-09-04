@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getAsset, resolveAssetFile } from "@/lib/asset-db";
+import { getAsset, resolveAssetFile } from "@/lib/asset/db";
 import { presignedGet } from "@/lib/r2";
 
 function getPreviewType(mimeType: string | null): "image" | "video" | "audio" | "pdf" | null {
@@ -34,9 +34,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
     const file = await resolveAssetFile(assetId);
     if (!file?.r2Key) return Response.json({ error: "文件不存在" }, { status: 404 });
 
+    // cacheWindow：签名时间戳按小时对齐，同一小时内 URL 字节级相同，浏览器
+    // 才能命中缓存（否则每次预览都是一次新的 R2 GET + 全量下载）；
+    // cacheControl：R2 响应默认无缓存头，显式给 max-age 免掉重复回源验证
     const url = presignedGet(file.r2Key, 3600, {
       inline: true,
       contentType: asset.mimeType ?? undefined,
+      cacheWindow: 3600,
+      cacheControl: "private, max-age=3600",
     });
 
     return Response.json({ previewType, url, mimeType: asset.mimeType });

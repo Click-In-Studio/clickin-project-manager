@@ -4,7 +4,7 @@ import { useState } from "react";
 import PageHeader, { SECONDARY_BTN } from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import { BASE_PATH } from "@/lib/base-path";
-import type { PrivateAssetRow } from "@/lib/asset-review-db";
+import type { PrivateAssetRow } from "@/lib/asset/review-db";
 
 type Props = {
   productionId: string;

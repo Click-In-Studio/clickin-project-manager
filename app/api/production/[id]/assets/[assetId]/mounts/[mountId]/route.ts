@@ -1,8 +1,9 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getAsset, removeAssetMount, listAssetMounts } from "@/lib/asset-db";
-import { canPublishAsset } from "@/lib/asset-perm";
+import { getAsset } from "@/lib/asset/db";
+import { removeAssetMount, listAssetMounts } from "@/lib/asset/mount";
+import { canPublishAsset } from "@/lib/asset/perm";
 
 type Ctx = { params: Promise<{ id: string; assetId: string; mountId: string }> };
 

@@ -77,7 +77,7 @@ const GUARD_LOOKUP_BLIND_SPOTS: readonly string[] = [
   // 经 [reqSub, reqVerb] 解构后传入 hasEffectiveGrant
   "node:event/*/publication@create",
   "node:event/*/publication@delete",
-  // lib/asset-perm.ts canViewAsset(face)：face 变量 = "meta" | "file"
+  // lib/asset/perm.ts canViewAsset(face)：face 变量 = "meta" | "file"
   "node:asset/*/file@view",
 ];
 

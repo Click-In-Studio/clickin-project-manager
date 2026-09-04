@@ -2,10 +2,10 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { canReachAliasTarget, createWikiAlias, isWikiAliasTargetType } from "@/lib/wiki-alias-db";
-import { canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki-perm";
-import { gateWikiAnchorPlacement, resolveWikiAnchorParent } from "@/lib/wiki-placement";
-import { readParentAnchor, readPlacement, readTrimmedId } from "@/lib/wiki-input";
+import { canReachAliasTarget, createWikiAlias, isWikiAliasTargetType } from "@/lib/wiki/alias";
+import { canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki/enum-perm";
+import { gateWikiAnchorPlacement, resolveWikiAnchorParent } from "@/lib/wiki/placement";
+import { readParentAnchor, readPlacement, readTrimmedId } from "@/lib/wiki/input";
 
 type Ctx = { params: Promise<{ id: string }> };
 

@@ -160,7 +160,6 @@ export default function AssetPreviewClient({
         )}
 
         {!loading && url && previewType === "image" && (
-          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={url}
             alt={fileName}

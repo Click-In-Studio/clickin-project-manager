@@ -4,8 +4,8 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName, getUserPrimaryEmail } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
-import { getWiki } from "@/lib/wiki-db";
-import { canViewWiki } from "@/lib/wiki-perm";
+import { getWiki } from "@/lib/wiki/content";
+import { canViewWiki } from "@/lib/wiki/perm";
 import WikiPrintPage from "@/components/wiki/WikiPrintPage";
 
 export const metadata: Metadata = { title: "打印文档" };

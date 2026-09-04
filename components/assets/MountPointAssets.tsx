@@ -3,8 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import type { Asset, AssetMount, MountType } from "@/lib/asset-db";
-import { ASSET_TYPE_LABELS } from "@/lib/asset-types";
+import type { Asset } from "@/lib/asset/db";
+import type { AssetMount, MountType } from "@/lib/asset/mount";
+import { ASSET_TYPE_LABELS } from "@/lib/asset/types";
 import AssetMountModal from "./AssetMountModal";
 import type { MountContext } from "./AssetSelectPanel";
 

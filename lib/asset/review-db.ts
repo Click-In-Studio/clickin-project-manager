@@ -1,4 +1,4 @@
-import { getPool } from "./pg";
+import { getPool } from "../pg";
 
 // 管理后台·数字资产审查（合规）：越过个人隐私列出全部未公开资产及其
 // 授权面，供管理员审查与处置。读写均走治理域显式门（route 层）。

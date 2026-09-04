@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/db";
-import { createWiki, getWiki } from "@/lib/wiki-db";
+import { createWiki, getWiki } from "@/lib/wiki/content";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { buildTools, exposedName, type RunHandle } from "@/lib/agent-runtime/tools";
 import { AUDITED_SCOPES, describeMutation, diffSnapshots, sanitizeChanges, textDiffStats, listRunMutations, type MutationRecord } from "@/lib/agent-runtime/mutation-audit";

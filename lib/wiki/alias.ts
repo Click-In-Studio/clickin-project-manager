@@ -1,8 +1,9 @@
-import { getPool } from "./pg";
-import { broadcastWikiLibraryChange } from "./wiki-collab";
-import { tailSortKey, placementSortKey, type WikiPlacement } from "./wiki-db";
-import { canEnumerateWiki, canViewWiki, localEnumerableWikiIds } from "./wiki-perm";
-import type { GrantActor } from "./grant-check";
+import { getPool } from "../pg";
+import { broadcastWikiLibraryChange } from "./collab";
+import { tailSortKey, placementSortKey, type WikiPlacement } from "./tree";
+import { canEnumerateWiki, localEnumerableWikiIds } from "./enum-perm";
+import { canViewWiki } from "./perm";
+import type { GrantActor } from "../grant-check";
 
 // ─── wiki 软链接（#358）：目录树里指向目标的伪节点 ─────────────────────────────
 //

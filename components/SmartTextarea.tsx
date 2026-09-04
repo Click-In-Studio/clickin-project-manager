@@ -22,10 +22,10 @@ import {
   encodeUserHref, decodeUserHref, decodeAssetSrc,
   type ContentMentionAttrs,
 } from "@/lib/mention-types";
-import { normalizeWikiDialect } from "@/lib/wiki-dialect-migrate";
+import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
 import { isFeishuHtml, transformFeishuHtml } from "@/lib/feishu-paste";
 import { Callout } from "@/lib/tiptap-callout";
-import { WikiImage } from "@/lib/tiptap-wiki-image";
+import { WikiImage } from "@/lib/wiki/tiptap-image";
 import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/tiptap-upload-placeholder";
 import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 import { ColumnDrop } from "@/lib/tiptap-column-drop";

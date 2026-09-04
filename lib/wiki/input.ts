@@ -1,4 +1,4 @@
-import type { WikiPlacement } from "./wiki-db";
+import type { WikiPlacement } from "./tree";
 
 // ─── wiki / 链接路由的入参收口（#358 AI review #3；#355 起两族路由共用）─────
 //

@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { requireGrantGate } from "@/lib/api-guard";
-import { listPrivateAssets, setAssetPublic, revokeAssetGrant } from "@/lib/asset-review-db";
+import { listPrivateAssets, setAssetPublic, revokeAssetGrant } from "@/lib/asset/review-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 

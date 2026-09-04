@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { listWikiTreeFor } from "@/lib/wiki-tree";
+import { listWikiTreeFor } from "@/lib/wiki/tree-view";
 import PageHeader from "@/components/PageHeader";
 import PageActivationGate from "@/components/PageActivationGate";
 import WikiShell from "@/components/wiki/WikiShell";

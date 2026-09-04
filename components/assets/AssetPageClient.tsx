@@ -9,8 +9,9 @@ import MountPointAssets from "./MountPointAssets";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import AssetShareModal from "./AssetShareModal";
 import { BASE_PATH } from "@/lib/base-path";
-import type { Asset, AssetMount } from "@/lib/asset-db";
-import { ASSET_TYPE_LABELS, type AssetType } from "@/lib/asset-types";
+import type { Asset } from "@/lib/asset/db";
+import type { AssetMount } from "@/lib/asset/mount";
+import { ASSET_TYPE_LABELS, type AssetType } from "@/lib/asset/types";
 import ChevronIcon from "@/components/ChevronIcon";
 
 type AssetWithMounts = Asset & { mounts: AssetMount[] };
@@ -233,7 +234,6 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
                     {a.storageType === "feishu_link" ? (
                       <span>飞</span>
                     ) : a.mimeType?.startsWith("image/") ? (
-                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={`${BASE_PATH}/api/production/${productionId}/assets/${a.id}/thumb${versionId ? `?v=${versionId}` : ""}`}
                         alt=""

@@ -4,7 +4,8 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { hasAdminPanelEligibility } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
 import { toActor } from "@/lib/grant-check";
-import { listEnumerableWikiIds, listVisibleWikiIds } from "@/lib/wiki-perm";
+import { listEnumerableWikiIds } from "@/lib/wiki/enum-perm";
+import { listVisibleWikiIds } from "@/lib/wiki/perm";
 import { RESOURCE_DIRECTORY_QUERIES } from "@/lib/resource-directory";
 
 // GET ?type=<resource_type> — 该类型的资源实例清单 {id,label}，供权限键

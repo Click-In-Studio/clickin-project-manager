@@ -3,11 +3,12 @@ import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { POST as wikiPOST } from "@/app/api/production/[id]/wiki/route";
-import { createWiki, deleteWiki, listWikiLibrary, getDramaturgyTreeConfig } from "@/lib/wiki-db";
-import { listDramaturgyWikiSubtree } from "@/lib/dramaturgy-wiki";
+import { createWiki, deleteWiki } from "@/lib/wiki/content";
+import { listWikiLibrary, getDramaturgyTreeConfig } from "@/lib/wiki/tree";
+import { listDramaturgyWikiSubtree } from "@/lib/wiki/dramaturgy";
 import { makeProduction, cleanupProduction } from "./factories";
 import { TEST_USER } from "./helpers";
-import type { WikiListEntry } from "@/lib/wiki-db";
+import type { WikiListEntry } from "@/lib/wiki/types";
 
 // 「构作 · 灵感文档」工作区（#352）：子树成员判定与删除时的父级归位。
 // 两条都不是 UI 细节——判错就是文档在这个标签页里凭空消失（去「文档」模块才找得回）。

@@ -11,9 +11,9 @@
 // /wiki-proposal 端点）查库后传入，本模块可单测。
 //
 // 代码块安全：code fence / 行内码里的语法示例是"关于语法的文档"不是真引用
-// （与 lib/wiki-db.ts extractMentionEdges 同款纪律），反解与校验都跳过。
+// （与 lib/wiki/links.ts extractMentionEdges 同款纪律），反解与校验都跳过。
 
-// 与 lib/wiki-db.ts CODE_SPAN_RE 同构（单捕获组 → split 后奇数下标是代码段）
+// 与 lib/wiki/links.ts CODE_SPAN_RE 同构（单捕获组 → split 后奇数下标是代码段）
 const CODE_SPAN_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
 
 /** 显示形态 [[标题]]。标题里不含方括号与换行（显示转换生成的形态即如此）。 */

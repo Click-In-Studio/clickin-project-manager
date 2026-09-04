@@ -1,14 +1,14 @@
 import { type NextRequest } from "next/server";
-import { readParentAnchor } from "@/lib/wiki-input";
-import { gateWikiAnchorPlacement, resolveWikiAnchorParent } from "@/lib/wiki-placement";
+import { readParentAnchor } from "@/lib/wiki/input";
+import { gateWikiAnchorPlacement, resolveWikiAnchorParent } from "@/lib/wiki/placement";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { createWiki, searchWiki } from "@/lib/wiki-db";
-import {
-  listVisibleWikiIds, canPlaceWikiUnder, canWriteWikiContainer,
-} from "@/lib/wiki-perm";
-import { listWikiTreeFor } from "@/lib/wiki-tree";
+import { createWiki } from "@/lib/wiki/content";
+import { searchWiki } from "@/lib/wiki/links";
+import { listVisibleWikiIds } from "@/lib/wiki/perm";
+import { canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki/enum-perm";
+import { listWikiTreeFor } from "@/lib/wiki/tree-view";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       results: visible.wildcard ? hits : hits.filter(h => visible.ids.has(h.id)),
     });
   }
-  // 树 = 可枚举文档 ∪ 可枚举软链接（#358），一个取数口，见 lib/wiki-tree.ts
+  // 树 = 可枚举文档 ∪ 可枚举软链接（#358），一个取数口，见 lib/wiki/tree-view.ts
   const { wikis, aliases } = await listWikiTreeFor(actor, productionId);
   return Response.json({ wikis, aliases });
 }

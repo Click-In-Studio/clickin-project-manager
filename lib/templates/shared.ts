@@ -107,7 +107,7 @@ export const ASSET_NEW_VERSION = "node:asset/*/file@create";
 export const ASSET_META_EDIT = "node:asset/*/meta@edit";
 
 // 把素材挂到内容上的两枚门：场次侧（构作页的挂载区）与剧本侧——版本 / 块 /
-// 快照 / 评论四种挂载点在 lib/asset-perm.ts 的宿主侧门里全部落到 script 那枚。
+// 快照 / 评论四种挂载点在 lib/asset/perm.ts 的宿主侧门里全部落到 script 那枚。
 //
 // **上传与挂载是两回事**：ASSET_UPLOAD 只让人把文件传进素材库，挂不挂得上去是
 // 宿主域的一等动作。产出物贴着内容走的岗位（谱子/demo 贴唱段、图纸贴场次）两枚

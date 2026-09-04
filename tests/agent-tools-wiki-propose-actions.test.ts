@@ -3,9 +3,9 @@ import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { createEventReport } from "@/lib/event-db";
 import { getPool } from "@/lib/pg";
-import { createWiki, getWiki } from "@/lib/wiki-db";
+import { createWiki, getWiki } from "@/lib/wiki/content";
 import { wikiProposeUpdate, wikiProposeDelete, wikiProposeMove, wikiProposeTag } from "@/lib/agent-tools/wiki-tools";
-import { getWikiProposalByToolCallId, insertWikiProposal, type WikiProposalAction } from "@/lib/wiki-proposal-db";
+import { getWikiProposalByToolCallId, insertWikiProposal, type WikiProposalAction } from "@/lib/wiki/proposal-db";
 import { prepareWikiProposal } from "@/lib/agent-tools/wiki-proposal-prepare";
 import { DENIED_NOT_MEMBER } from "@/lib/agent-tools/production-tools";
 

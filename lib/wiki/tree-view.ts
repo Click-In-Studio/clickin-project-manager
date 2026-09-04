@@ -1,11 +1,13 @@
-import { listWikiLibrary, type WikiListEntry } from "./wiki-db";
-import { listEnumerableWikiIds, listEditableWikiIds } from "./wiki-perm";
-import { listEnumerableWikiAliases, type WikiAliasEntry } from "./wiki-alias-db";
+import { listWikiLibrary } from "./tree";
+import { type WikiListEntry } from "./types";
+import { listEnumerableWikiIds } from "./enum-perm";
+import { listEditableWikiIds } from "./perm";
+import { listEnumerableWikiAliases, type WikiAliasEntry } from "./alias";
 import {
   listDramaturgyWikiSubtree, listDramaturgyWikiAliases, listDramaturgyMoveInCandidates,
   type WikiMoveInCandidate,
-} from "./dramaturgy-wiki";
-import type { GrantActor } from "./grant-check";
+} from "./dramaturgy";
+import type { GrantActor } from "../grant-check";
 
 // ─── 目录树的唯一取数口（#357 枚举面 + #358 别名）────────────────────────────
 //

@@ -15,11 +15,12 @@ import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkColumns from "@/lib/remark-columns";
 import { BASE_PATH } from "@/lib/base-path";
+import { userAvatarSrc } from "@/lib/avatar-url";
 import {
   decodeMentionHref, decodeUserHref, decodeAssetSrc, CM_HREF_PREFIX,
   type ContentMentionAttrs,
 } from "@/lib/mention-types";
-import { normalizeWikiDialect } from "@/lib/wiki-dialect-migrate";
+import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
 import { parseCalloutMarker } from "@/lib/tiptap-callout";
 
 type Resolved = { label: string | null; url: string | null };
@@ -112,7 +113,6 @@ function CmAssetImage({ productionId, assetId, alt }: { productionId: string; as
     })();
     return () => { alive = false; };
   }, [productionId, assetId]);
-  // eslint-disable-next-line @next/next/no-img-element
   return <img src={src} alt={alt ?? ""} className="wiki-image" loading="lazy" />;
 }
 
@@ -141,9 +141,8 @@ function MemberChip({ name, members }: { name: string; members: MentionMember[] 
       {hovered && member && (
         <span className={`absolute left-1/2 -translate-x-1/2 z-50 pointer-events-none ${above ? "bottom-full mb-2" : "top-full mt-2"}`}>
           <span className="flex items-center gap-2 bg-white border border-zinc-200 rounded-xl shadow-lg px-3 py-2 whitespace-nowrap">
-            {member.avatarUrl
-              // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={member.avatarUrl} alt={name} className="w-7 h-7 rounded-full object-cover shrink-0" />
+            {userAvatarSrc(member.userId, member.avatarUrl)
+              ? <img src={userAvatarSrc(member.userId, member.avatarUrl) ?? undefined} alt={name} className="w-7 h-7 rounded-full object-cover shrink-0" />
               : <span className="w-7 h-7 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-xs font-semibold shrink-0">{name.charAt(0)}</span>}
             <span className="text-sm font-medium text-zinc-800">{member.name}</span>
           </span>
@@ -309,7 +308,6 @@ export default function WikiMarkdown({
               return <span className="inline-flex items-center px-1 py-0.5 rounded text-[12px] bg-zinc-50 text-zinc-400 border border-dashed border-zinc-300">[图片{alt ? `：${alt}` : ""}]</span>;
             }
             if (assetId && productionId) return <CmAssetImage productionId={productionId} assetId={assetId} alt={alt} />;
-            // eslint-disable-next-line @next/next/no-img-element
             return <img src={s} alt={alt ?? ""} className="wiki-image" loading="lazy" />;
           },
           pre: ({ children }) => {

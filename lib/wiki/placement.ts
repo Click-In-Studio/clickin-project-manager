@@ -1,7 +1,7 @@
-import { ensureDramaturgyRootAnchor, getDramaturgyTreeConfig } from "./wiki-db";
-import { canPlaceWikiUnder, canWriteWikiContainer } from "./wiki-perm";
-import type { WikiParentAnchor } from "./wiki-input";
-import type { GrantActor } from "./grant-check";
+import { ensureDramaturgyRootAnchor, getDramaturgyTreeConfig } from "./tree";
+import { canPlaceWikiUnder, canWriteWikiContainer } from "./enum-perm";
+import type { WikiParentAnchor } from "./input";
+import type { GrantActor } from "../grant-check";
 
 // ─── 锚点落位的门 + 解析（#355；二轮 AI review #2）──────────────────────────
 //

@@ -10,6 +10,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
+import { productionAvatarSrc } from "@/lib/avatar-url";
 import { PRODUCTION_TYPES } from "@/lib/production-types";
 
 // ── Primitives ────────────────────────────────────────────────────────────────
@@ -235,11 +236,10 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
   const [typeLabel, setTypeLabel] = useState(initialMeta.typeLabel ?? "");
   const [language, setLanguage] = useState(initialMeta.language ?? "");
 
-  // Avatar upload state
-  const [hasAvatar, setHasAvatar] = useState(initialMeta.avatarUrl !== null);
+  // Avatar upload state（存量 avatar_url 值；key 每次上传换新，URL 的 ?v= 随之变）
+  const [avatarUrl, setAvatarUrl] = useState(initialMeta.avatarUrl);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarMsg, setAvatarMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [avatarCacheBust, setAvatarCacheBust] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const nameSave = useSave(productionId);
@@ -292,8 +292,7 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
       });
       if (!patchRes.ok) throw new Error("patch failed");
 
-      setHasAvatar(true);
-      setAvatarCacheBust(v => v + 1);
+      setAvatarUrl(r2Key);
       setAvatarMsg({ ok: true, text: "头像已更新" });
     } catch {
       setAvatarMsg({ ok: false, text: "上传失败，请重试" });
@@ -303,9 +302,7 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
     }
   };
 
-  const avatarSrc = hasAvatar
-    ? `${BASE_PATH}/api/production/${productionId}/avatar?t=${avatarCacheBust}`
-    : null;
+  const avatarSrc = productionAvatarSrc(productionId, avatarUrl, 512);
 
   return (
     <Card title="基本信息">
@@ -338,11 +335,10 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
             }}>
               {avatarSrc ? (
                 <img
-                  key={avatarCacheBust}
                   src={avatarSrc}
                   alt=""
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  onError={() => setHasAvatar(false)}
+                  onError={() => setAvatarUrl(null)}
                 />
               ) : (
                 <span style={{ fontSize: 22, opacity: 0.25 }}>🎭</span>
@@ -365,7 +361,7 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
                 onMouseEnter={e => { if (!avatarUploading) { e.currentTarget.style.background = "var(--ink)"; e.currentTarget.style.color = "white"; e.currentTarget.style.borderColor = "var(--ink)"; } }}
                 onMouseLeave={e => { e.currentTarget.style.background = "white"; e.currentTarget.style.color = "var(--ink)"; e.currentTarget.style.borderColor = "var(--line)"; }}
               >
-                {avatarUploading ? "上传中…" : hasAvatar ? "更换头像" : "上传头像"}
+                {avatarUploading ? "上传中…" : avatarUrl ? "更换头像" : "上传头像"}
               </button>
               {avatarMsg && (
                 <p style={{ fontSize: 11, color: avatarMsg.ok ? "#16a34a" : "#dc2626", margin: 0 }}>

@@ -1,7 +1,7 @@
 // 输入态 → 存储态：源码模式手写的 [[标题]] 升格（语法大纲 §6.4/§6.5）。
 // 富文本模式的 [[ 走 picker 直接插存储态，到不了这条路径；AI 恒写存储态。
 import { describe, it, expect } from "vitest";
-import { collectWikilinkTitles, promoteWikilinks } from "@/lib/wiki-input-normalize";
+import { collectWikilinkTitles, promoteWikilinks } from "@/lib/wiki/input-normalize";
 
 const map = new Map([["世界观报告", "3fa85f64-5717-4562-b3fc-2c963f66afa6"]]);
 

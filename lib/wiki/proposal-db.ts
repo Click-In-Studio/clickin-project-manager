@@ -1,4 +1,4 @@
-import { getPool } from "./pg";
+import { getPool } from "../pg";
 
 // wiki_proposal staging 表的薄 CRUD——不是域模型，只是 production.wiki_propose_*
 // 工具调用的落地凭证（供前端预览 modal 按 tool_call_id 拉取、审批 modal

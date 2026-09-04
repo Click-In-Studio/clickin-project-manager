@@ -1,9 +1,9 @@
-import { getPool } from "./pg";
-import { hasGrant, hasAnyGrant, listGrantedResourceIds } from "./grant-check";
-import { type PermissionContext } from "./permissions";
-import { isPolicyOn } from "./policy-db";
-import { canEditWiki, listVisibleWikiIds } from "./wiki-perm";
-import type { Asset } from "./asset-db";
+import { getPool } from "../pg";
+import { hasGrant, hasAnyGrant, listGrantedResourceIds } from "../grant-check";
+import { type PermissionContext } from "../permissions";
+import { isPolicyOn } from "../policy-db";
+import { canEditWiki, listVisibleWikiIds } from "../wiki/perm";
+import type { Asset } from "./db";
 
 // ─── 批D：asset 可见性判定（隐私/公开模型）──────────────────────────────────
 //

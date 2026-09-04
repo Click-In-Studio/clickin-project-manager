@@ -87,7 +87,7 @@ describe("integrity verification", () => {
   it.each(TEXT_COLUMNS)(
     "%s.%s carries no cue mention anchored on a revision row id",
     async (table, col) => {
-      // 分隔符集合逐字镜像 lib/wiki-db.ts 的 CM_HREF_RE / CM_HREF_LEGACY_RE：
+      // 分隔符集合逐字镜像 lib/wiki/links.ts 的 CM_HREF_RE / CM_HREF_LEGACY_RE：
       // id 取 [^)?#&\s]+ / [^):?&\s]+，故边界含空白与串尾，二者都不能漏
       const { rows } = await getPool().query(`
         WITH bad AS (SELECT id FROM cue WHERE cue_id <> id)

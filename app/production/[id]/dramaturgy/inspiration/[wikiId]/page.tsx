@@ -11,17 +11,13 @@ import {
   listProductionMembers,
 } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import {
-  getDramaturgyTreeConfig,
-  getWiki,
-  listBacklinks,
-  listEntityRefsForWiki,
-  listUnlinkedReferences,
-} from "@/lib/wiki-db";
-import { canEditWiki, canShareWiki, canViewWiki } from "@/lib/wiki-perm";
+import { getDramaturgyTreeConfig } from "@/lib/wiki/tree";
+import { getWiki } from "@/lib/wiki/content";
+import { listBacklinks, listEntityRefsForWiki, listUnlinkedReferences } from "@/lib/wiki/links";
+import { canEditWiki, canShareWiki, canViewWiki } from "@/lib/wiki/perm";
 import { listEventDepartments } from "@/lib/event-db";
-import { getWikiAlias, isWikiAliasId } from "@/lib/wiki-alias-db";
-import { listDramaturgyTreeFor } from "@/lib/wiki-tree";
+import { getWikiAlias, isWikiAliasId } from "@/lib/wiki/alias";
+import { listDramaturgyTreeFor } from "@/lib/wiki/tree-view";
 import { DramaturgyInspirationShell } from "@/components/DramaturgyWorkspaceTabs";
 import WikiShell from "@/components/wiki/WikiShell";
 import WikiDocClient from "@/components/wiki/WikiDocClient";

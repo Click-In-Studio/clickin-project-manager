@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
-import { createWiki, listOutgoingLinks } from "@/lib/wiki-db";
+import { createWiki } from "@/lib/wiki/content";
+import { listOutgoingLinks } from "@/lib/wiki/links";
 import { DENIED_NOT_MEMBER } from "@/lib/agent-tools/production-tools";
 import { wikiTree, wikiBacklinks, wikiRead, wikiSearch } from "@/lib/agent-tools/wiki-tools";
 
@@ -119,7 +120,7 @@ describe("功能正确性（owner 视角）", () => {
   });
 });
 
-describe("lib/wiki-db.ts listOutgoingLinks", () => {
+describe("lib/wiki/links.ts listOutgoingLinks", () => {
   it("互链：A 链 B、B 链 A 各自的 outgoing 只含对方", async () => {
     const a = await createWiki({ productionId: prodId, title: "互链甲", createdBy: ownerId });
     const b = await createWiki({ productionId: prodId, title: "互链乙", body: `[#wiki:${a.id}]`, createdBy: ownerId });

@@ -2,8 +2,9 @@
 // 文档可见 ⇒ 挂其上的图可见；单实例判定（canViewAsset）与列表过滤
 // （filterVisibleAssets）必须同语义（批D 教训：分叉即「列表看得见、点进去 403」）。
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { createAsset, addAssetMount } from "@/lib/asset-db";
-import { canViewAsset, filterVisibleAssets, mountHostSidePermitted } from "@/lib/asset-perm";
+import { createAsset } from "@/lib/asset/db";
+import { addAssetMount } from "@/lib/asset/mount";
+import { canViewAsset, filterVisibleAssets, mountHostSidePermitted } from "@/lib/asset/perm";
 import type { PermissionContext } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction } from "./factories";

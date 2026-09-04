@@ -1,8 +1,9 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext, cowBlockSnapshotForMount, cowCueRevisionForMount, getVersion } from "@/lib/db";
-import { getAsset, addAssetMount, listAssetMounts, type MountType, type MountMode } from "@/lib/asset-db";
-import { canViewAsset, canPublishAsset, mountHostSidePermitted } from "@/lib/asset-perm";
+import { getAsset } from "@/lib/asset/db";
+import { addAssetMount, listAssetMounts, type MountType, type MountMode } from "@/lib/asset/mount";
+import { canViewAsset, canPublishAsset, mountHostSidePermitted } from "@/lib/asset/perm";
 import { rejectNonHeadWrite } from "@/lib/head-version";
 import { getPool } from "@/lib/pg";
 

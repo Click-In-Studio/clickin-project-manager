@@ -16,8 +16,8 @@
 import path from "node:path";
 import dotenv from "dotenv";
 import { getPool } from "../lib/pg";
-import { normalizeWikiDialect } from "../lib/wiki-dialect-migrate";
-import { extractMentionEdges } from "../lib/wiki-db";
+import { normalizeWikiDialect } from "../lib/wiki/dialect-migrate";
+import { extractMentionEdges } from "../lib/wiki/links";
 
 dotenv.config({ path: path.join(process.cwd(), ".env.local") });
 

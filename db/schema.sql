@@ -2423,3 +2423,21 @@ CREATE TABLE IF NOT EXISTS wiki_collab_outbox (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS wiki_collab_outbox_created_idx ON wiki_collab_outbox (created_at);
+
+-- ── 头像上传审计账本（db/add-avatar-upload-audit.sql，PR #419 孤儿对象对策）──
+-- presign 即记账、提交标记 committed、清旧标记 deleted；孤儿 = 两者皆空的过期行，手动清理。
+CREATE TABLE IF NOT EXISTS avatar_upload_audit (
+  id           TEXT        PRIMARY KEY,   -- ava_ 前缀 short id（仓库 id 规约）
+  r2_key       TEXT        NOT NULL,
+  kind         TEXT        NOT NULL CHECK (kind IN ('user', 'production')),
+  subject_id   TEXT        NOT NULL,      -- kind=user 时为 app_user.id，production 时为 production.id
+  uploader_id  UUID        NOT NULL REFERENCES app_user(id),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  committed_at TIMESTAMPTZ,
+  deleted_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_avatar_upload_audit_r2_key
+  ON avatar_upload_audit (r2_key);
+CREATE INDEX IF NOT EXISTS idx_avatar_upload_audit_orphan
+  ON avatar_upload_audit (created_at)
+  WHERE committed_at IS NULL AND deleted_at IS NULL;

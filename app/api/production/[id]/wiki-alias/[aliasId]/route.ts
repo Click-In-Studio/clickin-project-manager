@@ -2,9 +2,9 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
-import { getWikiAlias, moveWikiAlias, renameWikiAlias, deleteWikiAlias } from "@/lib/wiki-alias-db";
-import { canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki-perm";
-import { readPlacement, readTrimmedId } from "@/lib/wiki-input";
+import { getWikiAlias, moveWikiAlias, renameWikiAlias, deleteWikiAlias } from "@/lib/wiki/alias";
+import { canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki/enum-perm";
+import { readPlacement, readTrimmedId } from "@/lib/wiki/input";
 
 type Ctx = { params: Promise<{ id: string; aliasId: string }> };
 
