@@ -1249,6 +1249,49 @@
       "nullable": true
     }
   ],
+  "avatar_upload_audit": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "r2_key",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "kind",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "subject_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "uploader_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "committed_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "deleted_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    }
+  ],
   "block_tag": [
     {
       "column": "block_id",
