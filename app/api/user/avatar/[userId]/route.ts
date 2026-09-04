@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getR2Stream } from "@/lib/r2";
+import { getR2Stream, isR2Configured } from "@/lib/r2";
 import { getPool } from "@/lib/pg";
 
 type Ctx = { params: Promise<{ userId: string }> };
@@ -23,9 +23,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       });
     }
   } catch (error) {
-    // Local environments commonly have no R2 credentials. The provider avatar
-    // below is still a valid fallback, so an R2 failure must not turn into 500.
-    console.warn("User avatar R2 lookup failed; using provider avatar", error);
+    // The provider avatar below is still a valid fallback, so an R2 failure
+    // must not turn into 500. But credentials being present means this is a
+    // real production degradation, not the expected credential-less local dev.
+    if (isR2Configured()) {
+      console.error(`[avatar-r2] lookup failed (user=${userId}); falling back to provider avatar:`, error);
+    } else {
+      console.warn("[avatar-r2] R2 not configured; using provider avatar");
+    }
   }
 
   // Fallback: redirect to the profile avatar URL (feishu sync value as last resort)

@@ -333,6 +333,15 @@ export async function getR2Object(key: string): Promise<{ body: Buffer; contentT
 }
 
 /**
+ * Whether R2 credentials are present in the environment. Local dev commonly
+ * runs without them; callers use this to tell "expected fallback" apart from
+ * "R2 is actually failing in production".
+ */
+export function isR2Configured(): boolean {
+  return Boolean(accountId && accessKeyId && secretAccessKey);
+}
+
+/**
  * Stream an R2 object, optionally with a Range header for partial content.
  * Returns the raw Response for piping — caller must not buffer the body.
  * Returns null if the object does not exist (404).
