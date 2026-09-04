@@ -7,6 +7,7 @@ import { useRef, useState, useEffect, type FormEvent, type ChangeEvent } from "r
 import { useSearchParams, useRouter } from "next/navigation";
 import styles from "./account.module.css";
 import type { NotifPref } from "@/lib/notification-prefs";
+import { ACCOUNT_RETURN_KEY, WORKSPACE_HOME, normalizeAccountReturnHref } from "@/lib/account-return";
 import { userAvatarSrc } from "@/lib/avatar-url";
 import AiUsageCard from "@/components/AiUsageCard";
 
@@ -81,6 +82,31 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tabParam = searchParams.get("tab");
+  const fromParam = searchParams.get("from");
+  // 首帧只看 URL：sessionStorage 要等 effect 里读（服务端没有它，写进初值会水合不一致）。
+  const [returnHref, setReturnHref] = useState(
+    () => normalizeAccountReturnHref(fromParam) ?? WORKSPACE_HOME
+  );
+  // URL 上有 from 就以它为准（含 from=/ 这种「从工作区首页进来」，要覆盖掉旧值，
+  // 否则会把人送回上一次待过的项目）；没有才回落到本标签页存的那份——绑定飞书跳出去
+  // 再回来、以及绑定/合并回调后的 router.replace("/account")，都会把 from 从 URL 上抹掉。
+  useEffect(() => {
+    if (fromParam !== null) {
+      const fromUrl = normalizeAccountReturnHref(fromParam) ?? WORKSPACE_HOME;
+      setReturnHref(fromUrl);
+      try {
+        if (fromUrl === WORKSPACE_HOME) sessionStorage.removeItem(ACCOUNT_RETURN_KEY);
+        else sessionStorage.setItem(ACCOUNT_RETURN_KEY, fromUrl);
+      } catch { /* 无痕模式等禁用存储的环境：退回首页即可，不该因此炸掉整页 */ }
+      return;
+    }
+    try {
+      // 存进去时已校验过，读回来再验一次——sessionStorage 不是可信来源。
+      const stored = normalizeAccountReturnHref(sessionStorage.getItem(ACCOUNT_RETURN_KEY));
+      if (stored) setReturnHref(stored);
+    } catch { /* 同上 */ }
+  }, [fromParam]);
+
   const [page, setPage] = useState<Page>(
     tabParam === "security" || tabParam === "preferences" ? tabParam : "profile"
   );
@@ -416,7 +442,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
   return (
     <div className={styles.shell}>
       <header className={styles.topbar}>
-        <Link href="/" className={styles.backButton}>
+        <Link href={returnHref} className={styles.backButton}>
           <span>←</span> 返回工作区
         </Link>
         <div className={styles.brand}>
