@@ -1,5 +1,5 @@
 import { faker } from "@faker-js/faker";
-import { beforeAll, expect } from "vitest";
+import { expect } from "vitest";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -26,25 +26,25 @@ const seed = process.env.TEST_SEED
 // 身份，让另一个文件的数据泄进本文件的聚合断言（ai-quota 5048≠5000 事故）。
 // 种子混入测试文件路径后：同一 TEST_SEED 下单文件序列照旧可复现
 // （TEST_SEED=xxx npm test 不受影响），但任意两个文件的序列不再重叠。
-function perFileSeed(testPath: string): number {
+// 播种必须在**模块加载时**完成，不能推迟到 beforeAll：有六个测试文件在模块顶层
+// 抽 shortId()（cue/event/production/security/agent-instructions/avatar-audit），
+// import 时即执行、早于任何钩子——只在钩子里播种会让这些抽取失去确定性。
+// vitest 4.1.10 实测 setupFiles 加载时 testPath 已就位；这一假设由
+// tests/test-seed.test.ts 守护，vitest 升级后语义漂移会在那里红掉，而不是
+// 静默退回全文件同序列。
+export function perFileSeed(testPath: string): number {
   return createHash("md5").update(`${seed}:${testPath}`).digest().readUInt32BE(0);
 }
 
-let seededForFile = false;
 const testPathAtLoad = expect.getState().testPath;
+export const fakerSeededPerFile = Boolean(testPathAtLoad);
 if (testPathAtLoad) {
   faker.seed(perFileSeed(testPathAtLoad));
-  seededForFile = true;
 } else {
+  // loud 降级：退回 run 级共享种子即跨文件序列重叠（本 PR 要修的事故形态），
+  // 绝不静默——日志可 grep，且 test-seed.test.ts 的守护断言会红。
+  console.error(
+    "[tests/setup] testPath 在 setup 加载时不可用：faker 退化为 run 级共享种子，跨文件 id 序列将重叠",
+  );
   faker.seed(seed);
 }
-// 兜底：个别 vitest 版本在 setupFiles 加载时还没挂 testPath，等 beforeAll 再定。
-// 只在加载时没定成的情况下补播，避免同文件内重播造成序列自重叠。
-beforeAll(() => {
-  if (seededForFile) return;
-  const tp = expect.getState().testPath;
-  if (tp) {
-    faker.seed(perFileSeed(tp));
-    seededForFile = true;
-  }
-});
