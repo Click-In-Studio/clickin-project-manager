@@ -767,7 +767,9 @@ export async function dispatchReportNotification(
 
   const rptRes = await pool.query<{ title: string; body: string; published_at: string }>(
     `SELECT w.title, w.body, er.published_at
-     FROM event_report er JOIN wiki w ON w.id = er.wiki_id
+     FROM event_report er
+     JOIN node nd ON nd.id = er.node_id
+     JOIN wiki w ON w.id = nd.wiki_id
      WHERE er.id = $1`,
     [reportId],
   );
@@ -880,7 +882,7 @@ export async function dispatchMentionNotifications(
   const pool = getPool();
   const [rptRes, evRes, mentionProdNameRes] = await Promise.all([
     pool.query<{ title: string }>(
-      "SELECT w.title FROM event_report er JOIN wiki w ON w.id = er.wiki_id WHERE er.id = $1",
+      "SELECT w.title FROM event_report er JOIN node nd ON nd.id = er.node_id JOIN wiki w ON w.id = nd.wiki_id WHERE er.id = $1",
       [reportId],
     ),
     pool.query<{ title: string }>("SELECT title FROM production_event WHERE id = $1", [eventId]),

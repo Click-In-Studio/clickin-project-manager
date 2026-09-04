@@ -256,7 +256,7 @@ describe("routes", () => {
     const res = await wikiListGET(makeReq("GET", `/api/production/${prodId}/wiki`, stranger), ctx);
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect((data.wikis as { id: string }[]).map(w => w.id)).toContain(secret.id);
+    expect((data.nodes as { wikiId: string | null }[]).map(n => n.wikiId)).toContain(secret.id);
 
     const detail = await wikiGET(
       makeReq("GET", `/api/production/${prodId}/wiki/${secret.id}`, stranger),
@@ -270,7 +270,7 @@ describe("routes", () => {
     const ctx = { params: Promise.resolve({ id: prodId }) };
     const res = await wikiListGET(makeReq("GET", `/api/production/${prodId}/wiki`, stranger), ctx);
     const data = await res.json();
-    expect((data.wikis as { id: string }[]).map(w => w.id)).not.toContain(hidden.id);
+    expect((data.nodes as { wikiId: string | null }[]).map(n => n.wikiId)).not.toContain(hidden.id);
   });
 
   it("GET instance without permission → 403 carrying title (目录级) and apply anchor", async () => {

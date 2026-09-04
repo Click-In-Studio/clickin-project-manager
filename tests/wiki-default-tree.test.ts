@@ -267,7 +267,7 @@ describe("default report tree", () => {
     const eventDocId = await ensureReportTreeAnchors(prodId, eventA);
     const { updateProductionEvent } = await import("@/lib/event-db");
     await updateProductionEvent(eventA, prodId, { title: "八一四联排（改）" });
-    expect((await wikiRow(eventDocId!))?.title).toBe("八一四联排（改）");
+    expect((await nodeRow(eventDocId!))?.title).toBe("八一四联排（改）");
     await updateProductionEvent(eventA, prodId, { title: "八一四联排" });
   });
 });

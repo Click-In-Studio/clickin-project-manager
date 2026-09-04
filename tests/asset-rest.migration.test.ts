@@ -14,10 +14,15 @@ try {
 }
 
 describe("schema verification", () => {
-  it("asset.is_public exists, NOT NULL, default false", async () => {
+  it("is_public 活在壳节点上（#420 后终态：asset 列已迁 node）", async () => {
+    const gone = await getPool().query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_name = 'asset' AND column_name = 'is_public'`,
+    );
+    expect(gone.rows).toHaveLength(0);
     const { rows } = await getPool().query(
       `SELECT is_nullable, column_default FROM information_schema.columns
-       WHERE table_name = 'asset' AND column_name = 'is_public'`,
+       WHERE table_name = 'node' AND column_name = 'is_public'`,
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].is_nullable).toBe("NO");
@@ -82,8 +87,9 @@ describe("integrity verification", () => {
 
 describe("invariance verification", () => {
   it.skipIf(!snapshot)("存量 asset 迁移后 is_public = true（保真：老世界全员可见）", async () => {
+    // #420 后 is_public 在壳节点上（迁移链保真传递）
     const { rows } = await getPool().query<{ is_public: boolean }>(
-      "SELECT is_public FROM asset WHERE id = $1", [snapshot!.assetId],
+      "SELECT is_public FROM node WHERE asset_id = $1", [snapshot!.assetId],
     );
     expect(rows[0].is_public).toBe(true);
   });

@@ -5,6 +5,7 @@ import { TYPE_LABELS } from "@/lib/permission-labels";
 import { PAGE_PERMISSION_SCOPES } from "@/lib/page-permission-scopes";
 import { mergeAccounts } from "@/lib/db";
 import { makeProduction, cleanupProduction } from "./factories";
+import { insertNode, newNodeId } from "@/lib/node/db";
 
 // wiki 文档库 W1+W2：schema 与权限面（设计账本：MindWeave《wiki文档库-现状调研与实施路线》§4/§5）
 
@@ -27,6 +28,9 @@ beforeAll(async () => {
     [prodId, creator],
   );
   wikiId = res.rows[0].id;
+  // 裸建 wiki 补壳节点（#420 1:1 不变量）
+  await insertNode({ productionId: prodId, kind: "wiki", parentId: null, sortKey: null,
+    wikiId, listable: true, createdBy: creator });
 });
 
 afterAll(async () => {
@@ -35,40 +39,48 @@ afterAll(async () => {
 });
 
 describe("W1 schema", () => {
-  it("wiki has tree/visibility columns (parent_id, sort_key, is_public)", async () => {
-    const res = await getPool().query<{ column_name: string }>(
+  it("tree/visibility columns live on node（#420 后 wiki 回归纯内容）", async () => {
+    const wikiCols = (await getPool().query<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns WHERE table_name = 'wiki'`,
-    );
-    const cols = res.rows.map(r => r.column_name);
-    expect(cols).toEqual(expect.arrayContaining(["parent_id", "sort_key", "is_public"]));
+    )).rows.map(r => r.column_name);
+    for (const gone of ["parent_id", "sort_key", "is_public", "listable"]) {
+      expect(wikiCols).not.toContain(gone);
+    }
+    const nodeCols = (await getPool().query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'node'`,
+    )).rows.map(r => r.column_name);
+    expect(nodeCols).toEqual(expect.arrayContaining(["parent_id", "sort_key", "is_public", "listable"]));
   });
 
-  it("wiki_entity_link / wiki_tag / wiki_dept_share / wiki_revision tables exist", async () => {
+  it("wiki_entity_link / wiki_tag / node_dept_share / wiki_revision tables exist", async () => {
     const res = await getPool().query<{ table_name: string }>(
       `SELECT table_name FROM information_schema.tables
-       WHERE table_name IN ('wiki_entity_link', 'wiki_tag', 'wiki_dept_share', 'wiki_revision')`,
+       WHERE table_name IN ('wiki_entity_link', 'wiki_tag', 'node_dept_share', 'wiki_revision')`,
     );
     expect(res.rows.map(r => r.table_name).sort()).toEqual(
-      ["wiki_dept_share", "wiki_entity_link", "wiki_revision", "wiki_tag"],
+      ["node_dept_share", "wiki_entity_link", "wiki_revision", "wiki_tag"],
     );
   });
 
-  it("new wiki defaults to private (is_public = false)", async () => {
+  it("new node defaults to private (is_public = false)", async () => {
     const res = await getPool().query<{ is_public: boolean }>(
-      `SELECT is_public FROM wiki WHERE id = $1`, [wikiId],
+      `SELECT is_public FROM node WHERE wiki_id = $1::uuid`, [wikiId],
     );
     expect(res.rows[0].is_public).toBe(false);
   });
 
-  it("deleting a parent promotes children to root (ON DELETE SET NULL)", async () => {
-    const parent = await getPool().query<{ id: string }>(
-      `INSERT INTO wiki (production_id, title) VALUES ($1, '父') RETURNING id`, [prodId]);
-    const child = await getPool().query<{ id: string }>(
-      `INSERT INTO wiki (production_id, title, parent_id) VALUES ($1, '子', $2) RETURNING id`,
-      [prodId, parent.rows[0].id]);
-    await getPool().query(`DELETE FROM wiki WHERE id = $1`, [parent.rows[0].id]);
+  it("deleting a parent node promotes children to root (ON DELETE SET NULL 兜底)", async () => {
+    const parentId = newNodeId();
+    await getPool().query(
+      `INSERT INTO node (id, production_id, kind, title) VALUES ($1, $2, 'folder', '父')`,
+      [parentId, prodId]);
+    const childId = newNodeId();
+    await getPool().query(
+      `INSERT INTO node (id, production_id, kind, title, parent_id) VALUES ($1, $2, 'folder', '子', $3)`,
+      [childId, prodId, parentId]);
+    await getPool().query(`DELETE FROM node WHERE id = $1`, [parentId]);
     const res = await getPool().query<{ parent_id: string | null }>(
-      `SELECT parent_id FROM wiki WHERE id = $1`, [child.rows[0].id]);
+      `SELECT parent_id FROM node WHERE id = $1`, [childId]);
     expect(res.rows[0].parent_id).toBeNull();
   });
 });

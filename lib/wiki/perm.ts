@@ -69,14 +69,17 @@ export async function canViewWiki(
     [wikiId, actor.userId, productionId],
   );
   if (deptShare.rows.length > 0) return true;
-  // 挂载边（直接 report 边 ∪ 经 note 边到其 report）
+  // 挂载边（直接 report 边 ∪ 经 note 边到其 report）——#420 后边键在 node 上
   const edges = await pool.query<{ report_id: string; event_id: string; published: boolean }>(
     `SELECT er.id AS report_id, er.event_id, (er.published_at IS NOT NULL) AS published
-     FROM event_report er WHERE er.wiki_id = $1::uuid
+     FROM event_report er JOIN node nd ON nd.id = er.node_id
+     WHERE nd.wiki_id = $1::uuid
      UNION
      SELECT er.id, er.event_id, (er.published_at IS NOT NULL)
-     FROM event_report_note n JOIN event_report er ON er.id = n.report_id
-     WHERE n.wiki_id = $1::uuid`,
+     FROM event_report_note n
+     JOIN node nn ON nn.id = n.node_id
+     JOIN event_report er ON er.id = n.report_id
+     WHERE nn.wiki_id = $1::uuid`,
     [wikiId],
   );
   for (const e of edges.rows) {
@@ -131,12 +134,15 @@ export async function listVisibleWikiIds(
   ]);
   const mounted = await pool.query<{ id: string }>(
     `WITH edges AS (
-       SELECT er.wiki_id, er.id AS report_id, er.event_id, er.published_at
-       FROM event_report er JOIN production_event pe ON pe.id = er.event_id
+       SELECT nd.wiki_id, er.id AS report_id, er.event_id, er.published_at
+       FROM event_report er
+       JOIN node nd ON nd.id = er.node_id
+       JOIN production_event pe ON pe.id = er.event_id
        WHERE pe.production_id = $1
        UNION ALL
-       SELECT n.wiki_id, er.id, er.event_id, er.published_at
+       SELECT nn.wiki_id, er.id, er.event_id, er.published_at
        FROM event_report_note n
+       JOIN node nn ON nn.id = n.node_id
        JOIN event_report er ON er.id = n.report_id
        JOIN production_event pe ON pe.id = er.event_id
        WHERE pe.production_id = $1

@@ -1912,11 +1912,11 @@ export async function listAllReportMentionedUserIds(reportId: string): Promise<s
   const pool = getPool();
   const [rptRes, noteRes] = await Promise.all([
     pool.query<{ user_id: string }>(
-      `SELECT jsonb_array_elements(w.mentions)->>'userId' AS user_id FROM event_report er JOIN wiki w ON w.id = er.wiki_id WHERE er.id = $1`,
+      `SELECT jsonb_array_elements(w.mentions)->>'userId' AS user_id FROM event_report er JOIN node nd ON nd.id = er.node_id JOIN wiki w ON w.id = nd.wiki_id WHERE er.id = $1`,
       [reportId],
     ),
     pool.query<{ user_id: string }>(
-      `SELECT jsonb_array_elements(w.mentions)->>'userId' AS user_id FROM event_report_note n JOIN wiki w ON w.id = n.wiki_id WHERE n.report_id = $1`,
+      `SELECT jsonb_array_elements(w.mentions)->>'userId' AS user_id FROM event_report_note n JOIN node nn ON nn.id = n.node_id JOIN wiki w ON w.id = nn.wiki_id WHERE n.report_id = $1`,
       [reportId],
     ),
   ]);
@@ -1948,7 +1948,8 @@ export async function listUnreadFollowedReports(userId: string, productionId?: s
             pe.id AS event_id, pe.title AS event_title,
             pe.production_id, p.name AS production_name
      FROM event_report er
-     JOIN wiki w ON w.id = er.wiki_id
+     JOIN node nd ON nd.id = er.node_id
+     JOIN wiki w ON w.id = nd.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      JOIN production p ON p.id = pe.production_id
      WHERE (
@@ -2015,7 +2016,8 @@ export async function listMyReports(userId: string): Promise<MyReportEntry[]> {
               WHERE err.report_id = er.id AND err.user_id = $1
             ) AS is_read
      FROM event_report er
-     JOIN wiki w ON w.id = er.wiki_id
+     JOIN node nd ON nd.id = er.node_id
+     JOIN wiki w ON w.id = nd.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      JOIN production p ON p.id = pe.production_id
      WHERE (
@@ -2663,7 +2665,7 @@ export async function listProductionReports(
     event_title: string; event_start_time: string | null; event_status: string;
     is_mentioned: boolean; is_follower: boolean; is_participant: boolean;
   }>(
-    `SELECT er.id, er.event_id, er.report_type, er.wiki_id::text AS wiki_id, w.title, w.body, w.created_by,
+    `SELECT er.id, er.event_id, er.report_type, er.node_id, nd.wiki_id::text AS wiki_id, w.title, w.body, w.created_by,
             er.created_at, er.updated_at, er.published_at, w.mentions,
             pe.title AS event_title, pe.start_time AS event_start_time, pe.status AS event_status,
             (w.mentions @> jsonb_build_array(jsonb_build_object('userId', $2::text))) AS is_mentioned,
@@ -2676,7 +2678,8 @@ export async function listProductionReports(
               WHERE ep.event_id = pe.id AND ep.user_id = $2::uuid AND ep.role = 'participant'
             ) AS is_participant
      FROM event_report er
-     JOIN wiki w ON w.id = er.wiki_id
+     JOIN node nd ON nd.id = er.node_id
+     JOIN wiki w ON w.id = nd.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      WHERE pe.production_id = $1
        AND ($3 OR er.published_at IS NOT NULL
@@ -2941,8 +2944,9 @@ export async function listReportReplies(reportId: string): Promise<ReportReply[]
             COALESCE(wc.parent_comment_id::text, n.id, $1) AS parent_id,
             wc.user_id, wc.author_name, wc.content, wc.mentions, wc.created_at
      FROM wiki_comment wc
-     LEFT JOIN event_report er ON er.wiki_id = wc.wiki_id AND er.id = $1
-     LEFT JOIN event_report_note n ON n.wiki_id = wc.wiki_id AND n.report_id = $1
+     LEFT JOIN node nd ON nd.wiki_id = wc.wiki_id
+     LEFT JOIN event_report er ON er.node_id = nd.id AND er.id = $1
+     LEFT JOIN event_report_note n ON n.node_id = nd.id AND n.report_id = $1
      WHERE er.id IS NOT NULL OR n.id IS NOT NULL
      ORDER BY wc.created_at ASC`,
     [reportId]
@@ -2961,7 +2965,8 @@ export async function createReportReply(params: {
   let parentCommentId: string | null = null;
   if (params.parentType === "note") {
     const r = await pool.query<{ wiki_id: string }>(
-      "SELECT wiki_id FROM event_report_note WHERE id = $1 AND report_id = $2",
+      `SELECT nd.wiki_id::text AS wiki_id FROM event_report_note n
+       JOIN node nd ON nd.id = n.node_id WHERE n.id = $1 AND n.report_id = $2`,
       [params.parentId, params.reportId]);
     wikiId = r.rows[0]?.wiki_id ?? null;
   } else if (params.parentType === "reply") {
@@ -2971,7 +2976,8 @@ export async function createReportReply(params: {
     parentCommentId = params.parentId;
   } else {
     const r = await pool.query<{ wiki_id: string }>(
-      "SELECT wiki_id FROM event_report WHERE id = $1", [params.reportId]);
+      `SELECT nd.wiki_id::text AS wiki_id FROM event_report er
+       JOIN node nd ON nd.id = er.node_id WHERE er.id = $1`, [params.reportId]);
     wikiId = r.rows[0]?.wiki_id ?? null;
   }
   if (!wikiId) throw new Error(`reply target not found: ${params.parentType}/${params.parentId}`);
@@ -2998,8 +3004,9 @@ export async function getReportReply(id: string, reportId: string): Promise<Repo
             COALESCE(wc.parent_comment_id::text, n.id, $2) AS parent_id,
             wc.user_id, wc.author_name, wc.content, wc.mentions, wc.created_at
      FROM wiki_comment wc
-     LEFT JOIN event_report er ON er.wiki_id = wc.wiki_id AND er.id = $2
-     LEFT JOIN event_report_note n ON n.wiki_id = wc.wiki_id AND n.report_id = $2
+     LEFT JOIN node nd ON nd.wiki_id = wc.wiki_id
+     LEFT JOIN event_report er ON er.node_id = nd.id AND er.id = $2
+     LEFT JOIN event_report_note n ON n.node_id = nd.id AND n.report_id = $2
      WHERE wc.id = $1::uuid AND (er.id IS NOT NULL OR n.id IS NOT NULL)`,
     [id, reportId]
   );
@@ -3010,8 +3017,10 @@ export async function deleteReportReply(id: string, reportId: string): Promise<v
   await getPool().query(
     `DELETE FROM wiki_comment wc
      WHERE wc.id = $1::uuid
-       AND (EXISTS (SELECT 1 FROM event_report er WHERE er.wiki_id = wc.wiki_id AND er.id = $2)
-         OR EXISTS (SELECT 1 FROM event_report_note n WHERE n.wiki_id = wc.wiki_id AND n.report_id = $2))`,
+       AND (EXISTS (SELECT 1 FROM event_report er JOIN node nd ON nd.id = er.node_id
+                    WHERE nd.wiki_id = wc.wiki_id AND er.id = $2)
+         OR EXISTS (SELECT 1 FROM event_report_note n JOIN node nn ON nn.id = n.node_id
+                    WHERE nn.wiki_id = wc.wiki_id AND n.report_id = $2))`,
     [id, reportId]
   );
 }
@@ -3126,7 +3135,8 @@ export async function countUnreadReportsForUser(userId: string, productionId?: s
   const res = await getPool().query<{ count: string }>(
     `SELECT COUNT(DISTINCT er.id) AS count
      FROM event_report er
-     JOIN wiki w ON w.id = er.wiki_id
+     JOIN node nd ON nd.id = er.node_id
+     JOIN wiki w ON w.id = nd.wiki_id
      JOIN production_event pe ON pe.id = er.event_id
      WHERE (
        er.published_at IS NOT NULL
