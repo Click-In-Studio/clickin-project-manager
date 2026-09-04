@@ -1,5 +1,7 @@
 import { getPool } from "../pg";
 import { policyFilteredRows } from "../policy-db";
+import { insertNode } from "../node/db";
+import { ensureAssetsRootAnchor } from "../node/anchors";
 
 let _seq = 0;
 export function uid(prefix: string): string {
@@ -10,6 +12,8 @@ export type { AssetType } from "./types";
 import type { AssetType } from "./types";
 export type StorageType = "r2" | "feishu_link";
 
+// is_public 已随 #420 迁到 node 壳上（asset 列已删）——语义不变：只免除结构面
+// 要求、仍需能力票（lib/asset/perm.ts）。
 export type Asset = {
   id: string;
   productionId: string;
@@ -18,7 +22,6 @@ export type Asset = {
   name: string | null;
   fileName: string;
   mimeType: string | null;
-  isPublic: boolean;
   storageType: StorageType;
   feishuUrl: string | null;
   createdAt: string;
@@ -38,14 +41,14 @@ export type AssetFile = {
 export type AssetRow = {
   id: string; production_id: string; uploader_user_id: string;
   asset_type: string; name: string | null; file_name: string; mime_type: string | null;
-  is_public: boolean; storage_type: string; feishu_url: string | null;
+  storage_type: string; feishu_url: string | null;
   created_at: Date;
 };
 export function rowToAsset(r: AssetRow): Asset {
   return {
     id: r.id, productionId: r.production_id, uploaderUserId: r.uploader_user_id,
     assetType: r.asset_type as AssetType, name: r.name, fileName: r.file_name, mimeType: r.mime_type,
-    isPublic: r.is_public, storageType: r.storage_type as StorageType,
+    storageType: r.storage_type as StorageType,
     feishuUrl: r.feishu_url, createdAt: r.created_at.toISOString(),
   };
 }
@@ -77,20 +80,35 @@ export async function createAsset(params: {
   r2Key?: string | null;
   thumbnailR2Key?: string | null;
   fileSize?: number | null;
-}): Promise<{ asset: Asset; file: AssetFile }> {
+  /** 壳节点落点（node id）。缺省＝「资产」根（懒建）。第二批的缺省落点机制
+   *  （业务上下文自动归档）在此参数之上生长。 */
+  nodeParentId?: string | null;
+  /** 树可枚举性。缺省 false＝私有（原「无 production mount」语义）；true＝
+   *  全员可枚举（原「项目全局」共享区语义）。 */
+  listable?: boolean;
+}): Promise<{ asset: Asset; file: AssetFile; nodeId: string }> {
   const assetId = uid("ast");
   const fileId = uid("af");
   const client = await getPool().connect();
+  let nodeId: string;
   try {
     await client.query("BEGIN");
     await client.query(
       `INSERT INTO asset (id, production_id, uploader_user_id, asset_type, name, file_name, mime_type,
-         is_public, storage_type, feishu_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+         storage_type, feishu_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [assetId, params.productionId, params.uploaderUserId, params.assetType, params.name ?? null,
-       params.fileName, params.mimeType, params.isPublic ?? false,
+       params.fileName, params.mimeType,
        params.storageType, params.feishuUrl ?? null]
     );
+    // 壳节点与内容行同事务（1:1 不变量不许有窗口）；父缺省=「资产」根懒建
+    const parentId = params.nodeParentId ?? await ensureAssetsRootAnchor(params.productionId, client);
+    nodeId = await insertNode({
+      productionId: params.productionId, kind: "asset",
+      parentId, sortKey: null, assetId,
+      listable: params.listable ?? false, isPublic: params.isPublic ?? false,
+      createdBy: params.uploaderUserId,
+    }, client);
     // 创建者行集（批D，定式 C-5/§0.9）：uploader 十行 + person 归属。
     // own 键（rename/overwrite/mount/…）已退役，由此行集承担；存续按 §0.6 person 覆盖。
     // #236：uploader 行集先过策略开关。asset 无外部归属信号，其 grants@edit 由 M-14
@@ -129,7 +147,7 @@ export async function createAsset(params: {
     );
     await client.query("COMMIT");
     const assetRes = await getPool().query<AssetRow>(`SELECT * FROM asset WHERE id = $1`, [assetId]);
-    return { asset: rowToAsset(assetRes.rows[0]), file: rowToAssetFile(fileRes.rows[0]) };
+    return { asset: rowToAsset(assetRes.rows[0]), file: rowToAssetFile(fileRes.rows[0]), nodeId };
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;

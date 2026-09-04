@@ -2,10 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { createWiki, updateWiki, getWiki, setWikiPublic } from "@/lib/wiki/content";
-import { setWikiListable, setWikiDeptShares, listWikiLibrary, isWikiAnchor, ensureDramaturgyRootAnchor } from "@/lib/wiki/tree";
+import { createWiki, getWiki } from "@/lib/wiki/content";
+import { setNodePublic, setNodeListable, setNodeDeptShares, listNodeLibrary, getNodeByWikiId, moveNode } from "@/lib/node/db";
+import { isNodeAnchor, ensureDramaturgyRootAnchor } from "@/lib/node/anchors";
 import { canViewWiki } from "@/lib/wiki/perm";
-import { listEnumerableWikiIds, canEnumerateWiki, canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki/enum-perm";
+import { listEnumerableNodeIds, canEnumerateNode, canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
 import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
 import { GET as wikiListGET, POST as wikiPOST } from "@/app/api/production/[id]/wiki/route";
 import { PATCH as wikiPATCH } from "@/app/api/production/[id]/wiki/[wikiId]/route";
@@ -67,10 +68,10 @@ afterAll(async () => {
 });
 
 describe("schema", () => {
-  it("wiki.listable exists and defaults to true", async () => {
+  it("node.listable exists and defaults to true（#420 枚举面在壳节点上）", async () => {
     const { rows } = await getPool().query<{ column_default: string | null; is_nullable: string }>(
       `SELECT column_default, is_nullable FROM information_schema.columns
-       WHERE table_name = 'wiki' AND column_name = 'listable'`,
+       WHERE table_name = 'node' AND column_name = 'listable'`,
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].is_nullable).toBe("NO");
@@ -79,7 +80,7 @@ describe("schema", () => {
 
   it("createWiki defaults listable = true", async () => {
     const w = await createWiki({ productionId: prodId, title: "默认进目录", createdBy: creator });
-    expect(w.listable).toBe(true);
+    expect((await getNodeByWikiId(w.id))?.listable).toBe(true);
   });
 });
 
@@ -87,21 +88,21 @@ describe("不变量 E(子) ⊆ E(父)", () => {
   it("隐一个节点即隐整棵子树，且零级联写（子节点 listable 仍为 true）", async () => {
     // 「与某某工作室的演出合作」（公开可枚举）→「法律文件」（不可枚举）→「合同v3」
     const collab = await createWiki({ productionId: prodId, title: "与某某工作室的演出合作", createdBy: creator });
-    await setWikiPublic(collab.id, prodId, true);
+    await setNodePublic(collab.nodeId, prodId, true);
     const legal = await createWiki({
-      productionId: prodId, title: "法律文件", parentId: collab.id, createdBy: creator, listable: false });
+      productionId: prodId, title: "法律文件", parentNodeId: collab.nodeId, createdBy: creator, listable: false });
     const contract = await createWiki({
-      productionId: prodId, title: "合同v3", parentId: legal.id, createdBy: creator });
+      productionId: prodId, title: "合同v3", parentNodeId: legal.nodeId, createdBy: creator });
 
-    expect(contract.listable).toBe(true);           // 子节点自己没被改过
-    expect(await canEnumerateWiki(actorOf(member), prodId, collab.id)).toBe(true);
-    expect(await canEnumerateWiki(actorOf(member), prodId, legal.id)).toBe(false);
-    expect(await canEnumerateWiki(actorOf(member), prodId, contract.id)).toBe(false);
+    expect((await getNodeByWikiId(contract.id))?.listable).toBe(true); // 子节点自己没被改过
+    expect(await canEnumerateNode(actorOf(member), prodId, collab.nodeId)).toBe(true);
+    expect(await canEnumerateNode(actorOf(member), prodId, legal.nodeId)).toBe(false);
+    expect(await canEnumerateNode(actorOf(member), prodId, contract.nodeId)).toBe(false);
 
     // 被显式分享的人：法律文件及其子树都回来了（祖先链在公开合作页上，通）
     await shareTo(prodId, legal.id, lawyer);
-    expect(await canEnumerateWiki(actorOf(lawyer), prodId, legal.id)).toBe(true);
-    expect(await canEnumerateWiki(actorOf(lawyer), prodId, contract.id)).toBe(true);
+    expect(await canEnumerateNode(actorOf(lawyer), prodId, legal.nodeId)).toBe(true);
+    expect(await canEnumerateNode(actorOf(lawyer), prodId, contract.nodeId)).toBe(true);
   });
 
   it("枚举集在 parent_id 上恒为含根的连通子树（不可能出现断链）", async () => {
@@ -110,47 +111,47 @@ describe("不变量 E(子) ⊆ E(父)", () => {
       createWiki({ productionId: prodId, title: `连通根${i}`, createdBy: creator })));
     const mid = await Promise.all(roots.map((r, i) =>
       createWiki({
-        productionId: prodId, title: `连通中${i}`, parentId: r.id,
+        productionId: prodId, title: `连通中${i}`, parentNodeId: r.nodeId,
         createdBy: creator, listable: i % 2 === 1 })));   // 中0 隐、中1 显
     const leaves = await Promise.all(mid.map((m, i) =>
-      createWiki({ productionId: prodId, title: `连通叶${i}`, parentId: m.id, createdBy: creator })));
+      createWiki({ productionId: prodId, title: `连通叶${i}`, parentNodeId: m.nodeId, createdBy: creator })));
     await shareTo(prodId, leaves[0].id, member);   // 只分享叶子，祖先链不给
 
-    const e = await listEnumerableWikiIds(actorOf(member), prodId);
+    const e = await listEnumerableNodeIds(actorOf(member), prodId);
     expect(e.wildcard).toBe(false);
-    const all = await listWikiLibrary(prodId);
-    const parentOf = new Map(all.map(w => [w.id, w.parentId]));
+    const all = await listNodeLibrary(prodId);
+    const parentOf = new Map(all.map(n => [n.id, n.parentId]));
     for (const id of e.ids) {
       const parent = parentOf.get(id);
       if (parent) expect(e.ids.has(parent)).toBe(true);   // ← 不变量
     }
     // 单给叶子发行不足以让它进树——祖先链被中间那层挡着
-    expect(e.ids.has(leaves[0].id)).toBe(false);
+    expect(e.ids.has(leaves[0].nodeId)).toBe(false);
   });
 });
 
 describe("两个面正交", () => {
   it("可枚举 ≠ 可读：默认私密文档在树里有名字，内容仍 403", async () => {
     const w = await createWiki({ productionId: prodId, title: "名字可见正文不可见", createdBy: creator });
-    expect(await canEnumerateWiki(actorOf(member), prodId, w.id)).toBe(true);
+    expect(await canEnumerateNode(actorOf(member), prodId, w.nodeId)).toBe(true);
     expect(await canViewWiki(actorOf(member), prodId, w.id)).toBe(false);
   });
 
   it("可读 ≠ 可枚举：公开但不可枚举＝靠链接传播", async () => {
     const w = await createWiki({
       productionId: prodId, title: "公开但不在目录", createdBy: creator, listable: false });
-    await setWikiPublic(w.id, prodId, true);
+    await setNodePublic(w.nodeId, prodId, true);
     expect(await canViewWiki(actorOf(member), prodId, w.id)).toBe(true);
-    expect(await canEnumerateWiki(actorOf(member), prodId, w.id)).toBe(false);
+    expect(await canEnumerateNode(actorOf(member), prodId, w.nodeId)).toBe(false);
   });
 
   it("不变量：翻转 listable 不改变 canViewWiki 的判定", async () => {
     const pub = await createWiki({ productionId: prodId, title: "内容面不受枚举面影响", createdBy: creator });
-    await setWikiPublic(pub.id, prodId, true);
+    await setNodePublic(pub.nodeId, prodId, true);
     const before = await canViewWiki(actorOf(member), prodId, pub.id);
-    await setWikiListable(pub.id, prodId, false);
+    await setNodeListable(pub.nodeId, prodId, false);
     expect(await canViewWiki(actorOf(member), prodId, pub.id)).toBe(before);
-    await setWikiListable(pub.id, prodId, true);
+    await setNodeListable(pub.nodeId, prodId, true);
     expect(await canViewWiki(actorOf(member), prodId, pub.id)).toBe(before);
   });
 
@@ -159,50 +160,50 @@ describe("两个面正交", () => {
       productionId: prodId, title: "部门定向分享", createdBy: creator, listable: false });
     const { rows: [{ id: deptId }] } = await getPool().query<{ id: string }>(
       `INSERT INTO production_dept (production_id, name) VALUES ($1, '枚举面道具组') RETURNING id`, [prodId]);
-    await setWikiDeptShares(w.id, prodId, [deptId]);
-    expect(await canEnumerateWiki(actorOf(member), prodId, w.id)).toBe(false);
+    await setNodeDeptShares(w.nodeId, prodId, [deptId]);
+    expect(await canEnumerateNode(actorOf(member), prodId, w.nodeId)).toBe(false);
 
     await getPool().query(
       `INSERT INTO production_dept_member (production_id, dept_id, user_id) VALUES ($1, $2, $3)`,
       [prodId, deptId, member]);
-    expect(await canEnumerateWiki(actorOf(member), prodId, w.id)).toBe(true);
+    expect(await canEnumerateNode(actorOf(member), prodId, w.nodeId)).toBe(true);
     expect(await canViewWiki(actorOf(member), prodId, w.id)).toBe(true);
 
     await getPool().query(
       `DELETE FROM production_dept_member WHERE dept_id = $1 AND user_id = $2`, [deptId, member]);
-    expect(await canEnumerateWiki(actorOf(member), prodId, w.id)).toBe(false);
+    expect(await canEnumerateNode(actorOf(member), prodId, w.nodeId)).toBe(false);
   });
 
   it("部门分享同样受祖先链约束（不能凭分享穿透隐藏的父）", async () => {
     const hiddenParent = await createWiki({
       productionId: prodId, title: "部门面隐藏父", createdBy: creator, listable: false });
     const child = await createWiki({
-      productionId: prodId, title: "部门面子文档", parentId: hiddenParent.id, createdBy: creator });
+      productionId: prodId, title: "部门面子文档", parentNodeId: hiddenParent.nodeId, createdBy: creator });
     const { rows: [{ id: deptId }] } = await getPool().query<{ id: string }>(
       `INSERT INTO production_dept (production_id, name) VALUES ($1, '枚举面服装组') RETURNING id`, [prodId]);
-    await setWikiDeptShares(child.id, prodId, [deptId]);
+    await setNodeDeptShares(child.nodeId, prodId, [deptId]);
     await getPool().query(
       `INSERT INTO production_dept_member (production_id, dept_id, user_id) VALUES ($1, $2, $3)`,
       [prodId, deptId, member]);
     expect(await canViewWiki(actorOf(member), prodId, child.id)).toBe(true);
-    expect(await canEnumerateWiki(actorOf(member), prodId, child.id)).toBe(false);
+    expect(await canEnumerateNode(actorOf(member), prodId, child.nodeId)).toBe(false);
   });
 
   it("is_public 刻意不蕴含可枚举（泛在开关各管各的面）", async () => {
     const w = await createWiki({
       productionId: prodId, title: "泛在开关正交", createdBy: creator, listable: false });
-    await setWikiPublic(w.id, prodId, true);
+    await setNodePublic(w.nodeId, prodId, true);
     expect(await canViewWiki(actorOf(member), prodId, w.id)).toBe(true);
-    expect(await canEnumerateWiki(actorOf(member), prodId, w.id)).toBe(false);
+    expect(await canEnumerateNode(actorOf(member), prodId, w.nodeId)).toBe(false);
   });
 
   it("内容可读者只要祖先链通就在树里（*@view 的 sub 通配天然命中 meta，装门零迁移）", async () => {
     const w = await createWiki({
       productionId: prodId, title: "分享即可枚举", createdBy: creator, listable: false });
-    expect(await canEnumerateWiki(actorOf(member), prodId, w.id)).toBe(false);
+    expect(await canEnumerateNode(actorOf(member), prodId, w.nodeId)).toBe(false);
     await shareTo(prodId, w.id, member);
     expect(await canViewWiki(actorOf(member), prodId, w.id)).toBe(true);
-    expect(await canEnumerateWiki(actorOf(member), prodId, w.id)).toBe(true);
+    expect(await canEnumerateNode(actorOf(member), prodId, w.nodeId)).toBe(true);
   });
 });
 
@@ -221,10 +222,10 @@ describe("routes", () => {
   it("搜索走内容面，不是枚举面（否则反复搜即枚举）", async () => {
     const w = await createWiki({
       productionId: prodId, title: "搜索面判据文档", createdBy: creator, listable: false });
-    await setWikiPublic(w.id, prodId, true);   // 可读、不可枚举
+    await setNodePublic(w.nodeId, prodId, true);   // 可读、不可枚举
 
     const tree = await wikiListGET(makeReq("GET", `/api/production/${prodId}/wiki`, member), ctx());
-    const treeIds = ((await tree.json()).wikis as { id: string }[]).map(x => x.id);
+    const treeIds = ((await tree.json()).nodes as { wikiId: string | null }[]).map(x => x.wikiId);
     expect(treeIds).not.toContain(w.id);
 
     const hit = await wikiListGET(
@@ -246,43 +247,43 @@ describe("routes", () => {
       productionId: prodId, title: "落位门隐藏父", createdBy: creator, listable: false });
     const own = await createWiki({ productionId: prodId, title: "落位门自有文档", createdBy: member });
 
-    expect(await canPlaceWikiUnder(actorOf(member), prodId, null)).toBe(true);
-    expect(await canPlaceWikiUnder(actorOf(member), prodId, hidden.id)).toBe(false);
+    expect(await canPlaceNodeUnder(actorOf(member), prodId, null)).toBe(true);
+    expect(await canPlaceNodeUnder(actorOf(member), prodId, hidden.nodeId)).toBe(false);
 
     const created = await wikiPOST(
       makeReq("POST", `/api/production/${prodId}/wiki`, member, false,
-        { title: "不该落进去", parentId: hidden.id }), ctx());
+        { title: "不该落进去", parentId: hidden.nodeId }), ctx());
     expect(created.status).toBe(403);
 
     const moved = await wikiPATCH(
       makeReq("PATCH", `/api/production/${prodId}/wiki/${own.id}`, member, false,
-        { parentId: hidden.id }),
+        { parentId: hidden.nodeId }),
       { params: Promise.resolve({ id: prodId, wikiId: own.id }) });
     expect(moved.status).toBe(403);
-    expect((await getWiki(own.id, prodId))!.parentId).toBeNull();
+    expect((await getNodeByWikiId(own.id))!.parentId).toBeNull();
   });
 
   it("容器写门：父的 *@edit 才能动它的子目录；只认直接父，不沿祖先链", async () => {
     // grandparent(member 有 edit) → parent(member 无 edit) → 目标位置
     const grand = await createWiki({ productionId: prodId, title: "容器门祖父", createdBy: creator });
     const parent = await createWiki({
-      productionId: prodId, title: "容器门父", parentId: grand.id, createdBy: creator });
+      productionId: prodId, title: "容器门父", parentNodeId: grand.nodeId, createdBy: creator });
     await shareTo(prodId, grand.id, member, "edit");   // 只给祖父，不给父
     const own = await createWiki({ productionId: prodId, title: "容器门自有", createdBy: member });
 
-    expect(await canWriteWikiContainer(actorOf(member), prodId, grand.id)).toBe(true);
-    expect(await canWriteWikiContainer(actorOf(member), prodId, parent.id)).toBe(false);  // 不继承
-    expect(await canWriteWikiContainer(actorOf(member), prodId, null)).toBe(true);        // 顶层无门
+    expect(await canWriteNodeContainer(actorOf(member), prodId, grand.nodeId)).toBe(true);
+    expect(await canWriteNodeContainer(actorOf(member), prodId, parent.nodeId)).toBe(false);  // 不继承
+    expect(await canWriteNodeContainer(actorOf(member), prodId, null)).toBe(true);        // 顶层无门
 
     const denied = await wikiPATCH(
       makeReq("PATCH", `/api/production/${prodId}/wiki/${own.id}`, member, false,
-        { parentId: parent.id }),
+        { parentId: parent.nodeId }),
       { params: Promise.resolve({ id: prodId, wikiId: own.id }) });
     expect(denied.status).toBe(403);
 
     const ok = await wikiPATCH(
       makeReq("PATCH", `/api/production/${prodId}/wiki/${own.id}`, member, false,
-        { parentId: grand.id }),
+        { parentId: grand.nodeId }),
       { params: Promise.resolve({ id: prodId, wikiId: own.id }) });
     expect(ok.status).toBe(200);
   });
@@ -290,27 +291,29 @@ describe("routes", () => {
   it("容器写门管源父：不能把文档从别人的子树里挪走", async () => {
     const theirFolder = await createWiki({ productionId: prodId, title: "别人的目录", createdBy: creator });
     const inside = await createWiki({
-      productionId: prodId, title: "别人目录里的文档", parentId: theirFolder.id, createdBy: creator });
+      productionId: prodId, title: "别人目录里的文档", parentNodeId: theirFolder.nodeId, createdBy: creator });
     await shareTo(prodId, inside.id, member, "edit");   // 对文档本身有 edit，对容器没有
 
     const yanked = await wikiPATCH(
       makeReq("PATCH", `/api/production/${prodId}/wiki/${inside.id}`, member, false, { parentId: "" }),
       { params: Promise.resolve({ id: prodId, wikiId: inside.id }) });
     expect(yanked.status).toBe(403);
-    expect((await getWiki(inside.id, prodId))!.parentId).toBe(theirFolder.id);
+    expect((await getNodeByWikiId(inside.id))!.parentId).toBe(theirFolder.nodeId);
   });
 
   it("系统锚点豁免容器写门（否则默认树谁都放不进东西）", async () => {
     const anchorId = await ensureDramaturgyRootAnchor(prodId);
     expect(anchorId).toBeTruthy();
-    // 锚点是 INSERT 直建的：无 created_by、无任何 edit 行
+    // 锚点是 INSERT 直建的：无 created_by、无任何 edit 行（grant 键在内容域=wiki id）
+    const anchorWikiId = (await getPool().query<{ wiki_id: string }>(
+      `SELECT wiki_id::text AS wiki_id FROM node WHERE id = $1`, [anchorId])).rows[0].wiki_id;
     const { rows } = await getPool().query<{ n: string }>(
       `SELECT count(*) AS n FROM production_member_grant
        WHERE resource_type = 'wiki' AND resource_id = $1 AND permission_level = 'edit' AND NOT is_revoked`,
-      [anchorId]);
+      [anchorWikiId]);
     expect(Number(rows[0].n)).toBe(0);
-    expect(await isWikiAnchor(anchorId!)).toBe(true);
-    expect(await canWriteWikiContainer(actorOf(member), prodId, anchorId)).toBe(true);
+    expect(await isNodeAnchor(anchorId!)).toBe(true);
+    expect(await canWriteNodeContainer(actorOf(member), prodId, anchorId)).toBe(true);
   });
 
   it("创建与移动同门：无权移入时不能改为在目标父下新建", async () => {
@@ -322,7 +325,7 @@ describe("routes", () => {
       [prodId, member]);
     const res = await wikiPOST(
       makeReq("POST", `/api/production/${prodId}/wiki`, member, false,
-        { title: "后门文档", parentId: theirFolder.id }), ctx());
+        { title: "后门文档", parentId: theirFolder.nodeId }), ctx());
     expect(res.status).toBe(403);
   });
 
@@ -331,7 +334,7 @@ describe("routes", () => {
   it("AI 工具面与 REST 逐条同源：propose_create / propose_move 同样过落位双门", async () => {
     const theirFolder = await createWiki({ productionId: prodId, title: "AI 通道目录", createdBy: creator });
     const inside = await createWiki({
-      productionId: prodId, title: "AI 通道目录里的文档", parentId: theirFolder.id, createdBy: creator });
+      productionId: prodId, title: "AI 通道目录里的文档", parentNodeId: theirFolder.nodeId, createdBy: creator });
     await shareTo(prodId, inside.id, member, "edit");
     await getPool().query(
       `INSERT INTO production_member_grant
@@ -346,26 +349,26 @@ describe("routes", () => {
     const moved = await wikiProposeMove(member, prodId, `tc-${Date.now()}-b`,
       { wikiId: inside.id, newParentId: null, summary: "" });
     expect(moved).toContain("权限被拒绝");
-    expect((await getWiki(inside.id, prodId))!.parentId).toBe(theirFolder.id);
+    expect((await getNodeByWikiId(inside.id))!.parentId).toBe(theirFolder.nodeId);
   });
 
   it("排序键由服务端在完整兄弟集上算（残缺兄弟集不再影响落位）", async () => {
     const parent = await createWiki({ productionId: prodId, title: "排序父", createdBy: creator });
-    const a = await createWiki({ productionId: prodId, title: "兄A", parentId: parent.id, createdBy: creator });
+    const a = await createWiki({ productionId: prodId, title: "兄A", parentNodeId: parent.nodeId, createdBy: creator });
     const hiddenB = await createWiki({
-      productionId: prodId, title: "兄B隐", parentId: parent.id, createdBy: creator, listable: false });
-    const c = await createWiki({ productionId: prodId, title: "兄C", parentId: parent.id, createdBy: creator });
+      productionId: prodId, title: "兄B隐", parentNodeId: parent.nodeId, createdBy: creator, listable: false });
+    const c = await createWiki({ productionId: prodId, title: "兄C", parentNodeId: parent.nodeId, createdBy: creator });
     const mover = await createWiki({ productionId: prodId, title: "被拖的", createdBy: creator });
 
     // member 眼里兄弟集是 [A, C]（B 隐身）。他拖到「C 之前」——服务端必须把键
     // 落在 B 与 C 之间，而不是 A 与 C 之间（后者会与看不见的 B 交错）。
-    await updateWiki(mover.id, prodId,
-      { parentId: parent.id, place: { anchorId: c.id, side: "before" } }, creator);
+    await moveNode(mover.nodeId, prodId,
+      { parentId: parent.nodeId, place: { anchorId: c.nodeId, side: "before" } });
 
-    const sibs = (await listWikiLibrary(prodId))
-      .filter(w => w.parentId === parent.id)
+    const sibs = (await listNodeLibrary(prodId))
+      .filter(n => n.parentId === parent.nodeId)
       .sort((x, y) => (x.sortKey ?? "").localeCompare(y.sortKey ?? ""));
-    expect(sibs.map(w => w.id)).toEqual([a.id, hiddenB.id, mover.id, c.id]);
+    expect(sibs.map(n => n.id)).toEqual([a.nodeId, hiddenB.nodeId, mover.nodeId, c.nodeId]);
   });
 
   // AI review #5：share 路由的 listable 面此前无覆盖
@@ -382,12 +385,12 @@ describe("routes", () => {
     const denied = await sharePUT(
       makeReq("PUT", `/api/production/${prodId}/wiki/${w.id}/share`, member, false, { listable: false }), wctx);
     expect(denied.status).toBe(403);
-    expect((await getWiki(w.id, prodId))!.listable).toBe(true);
+    expect((await getNodeByWikiId(w.id))!.listable).toBe(true);
 
     const ok = await sharePUT(
       makeReq("PUT", `/api/production/${prodId}/wiki/${w.id}/share`, creator, false, { listable: false }), wctx);
     expect(ok.status).toBe(200);
-    expect((await getWiki(w.id, prodId))!.listable).toBe(false);
+    expect((await getNodeByWikiId(w.id))!.listable).toBe(false);
     const after = await shareGET(makeReq("GET", `/api/production/${prodId}/wiki/${w.id}/share`, creator), wctx);
     expect((await after.json()).listable).toBe(false);
   });
@@ -396,7 +399,7 @@ describe("routes", () => {
   it("权限中心 wiki 选择器：可读但不可枚举的文档必须选得到（bootstrap 缺口）", async () => {
     const linkOnly = await createWiki({
       productionId: prodId, title: "选择器可读不可枚举", createdBy: creator, listable: false });
-    await setWikiPublic(linkOnly.id, prodId, true);
+    await setNodePublic(linkOnly.nodeId, prodId, true);
     const treeOnly = await createWiki({ productionId: prodId, title: "选择器可枚举不可读", createdBy: creator });
     const hidden = await createWiki({
       productionId: prodId, title: "选择器两面皆无", createdBy: creator, listable: false });
@@ -435,8 +438,8 @@ describe("routes", () => {
          VALUES ($1, $2, 'wiki', '*', '*', 'create', 'direct', $2)`,
         [freshProd, plain]);
       const before = await getPool().query(
-        `SELECT dramaturgy_root_wiki_id FROM production_wiki_config WHERE production_id = $1`, [freshProd]);
-      expect(before.rows[0]?.dramaturgy_root_wiki_id ?? null).toBeNull();
+        `SELECT dramaturgy_root_node_id FROM production_node_config WHERE production_id = $1`, [freshProd]);
+      expect(before.rows[0]?.dramaturgy_root_node_id ?? null).toBeNull();
 
       const res = await wikiPOST(
         makeReq("POST", `/api/production/${freshProd}/wiki`, plain, false,
@@ -445,12 +448,12 @@ describe("routes", () => {
       expect(res.status).toBe(201);
 
       const anchorId = await ensureDramaturgyRootAnchor(freshProd);
-      const created = (await res.json()).wiki as { id: string; parentId: string | null };
-      expect(created.parentId).toBe(anchorId);
-      expect(await isWikiAnchor(anchorId!)).toBe(true);
+      const created = (await res.json()).wiki as { id: string };
+      expect((await getNodeByWikiId(created.id))?.parentId).toBe(anchorId);
+      expect(await isNodeAnchor(anchorId!)).toBe(true);
       // 锚点对这个零权限成员既可枚举、容器又可写（两道门在锚点上恒真）
-      expect(await canPlaceWikiUnder(actorOf(plain), freshProd, anchorId)).toBe(true);
-      expect(await canWriteWikiContainer(actorOf(plain), freshProd, anchorId)).toBe(true);
+      expect(await canPlaceNodeUnder(actorOf(plain), freshProd, anchorId)).toBe(true);
+      expect(await canWriteNodeContainer(actorOf(plain), freshProd, anchorId)).toBe(true);
     } finally {
       await cleanupProduction(freshProd).catch(() => {});
     }
@@ -459,26 +462,26 @@ describe("routes", () => {
   // AI review 二轮 #4：同父纯重排（parentId 给了但没变）也走 ①②，钉住别被特判掉
   it("同父纯重排：对父有 edit 才动得了子项顺序", async () => {
     const parent = await createWiki({ productionId: prodId, title: "同父重排容器", createdBy: creator });
-    const a = await createWiki({ productionId: prodId, title: "重排A", parentId: parent.id, createdBy: creator });
-    const b = await createWiki({ productionId: prodId, title: "重排B", parentId: parent.id, createdBy: creator });
+    const a = await createWiki({ productionId: prodId, title: "重排A", parentNodeId: parent.nodeId, createdBy: creator });
+    const b = await createWiki({ productionId: prodId, title: "重排B", parentNodeId: parent.nodeId, createdBy: creator });
     await shareTo(prodId, b.id, member, "edit");   // 只有文档 edit，没有容器 edit
 
     const denied = await wikiPATCH(
       makeReq("PATCH", `/api/production/${prodId}/wiki/${b.id}`, member, false,
-        { parentId: parent.id, place: { anchorId: a.id, side: "before" } }),
+        { parentId: parent.nodeId, place: { anchorId: a.nodeId, side: "before" } }),
       { params: Promise.resolve({ id: prodId, wikiId: b.id }) });
     expect(denied.status).toBe(403);
 
     await shareTo(prodId, parent.id, member, "edit");   // 补上容器 edit
     const ok = await wikiPATCH(
       makeReq("PATCH", `/api/production/${prodId}/wiki/${b.id}`, member, false,
-        { parentId: parent.id, place: { anchorId: a.id, side: "before" } }),
+        { parentId: parent.nodeId, place: { anchorId: a.nodeId, side: "before" } }),
       { params: Promise.resolve({ id: prodId, wikiId: b.id }) });
     expect(ok.status).toBe(200);
-    const sibs = (await listWikiLibrary(prodId))
-      .filter(w => w.parentId === parent.id)
+    const sibs = (await listNodeLibrary(prodId))
+      .filter(n => n.parentId === parent.nodeId)
       .sort((x, y) => (x.sortKey ?? "").localeCompare(y.sortKey ?? ""));
-    expect(sibs.map(w => w.id)).toEqual([b.id, a.id]);
+    expect(sibs.map(n => n.id)).toEqual([b.nodeId, a.nodeId]);
   });
 
   it("PATCH listable 走分享面（grants@edit），不是编辑面", async () => {
@@ -489,13 +492,13 @@ describe("routes", () => {
       makeReq("PATCH", `/api/production/${prodId}/wiki/${w.id}`, member, false, { listable: false }),
       { params: Promise.resolve({ id: prodId, wikiId: w.id }) });
     expect(denied.status).toBe(403);
-    expect((await getWiki(w.id, prodId))!.listable).toBe(true);
+    expect((await getNodeByWikiId(w.id))!.listable).toBe(true);
 
     // 创建者持 manage 档（含 grants@edit）
     const ok = await wikiPATCH(
       makeReq("PATCH", `/api/production/${prodId}/wiki/${w.id}`, creator, false, { listable: false }),
       { params: Promise.resolve({ id: prodId, wikiId: w.id }) });
     expect(ok.status).toBe(200);
-    expect((await getWiki(w.id, prodId))!.listable).toBe(false);
+    expect((await getNodeByWikiId(w.id))!.listable).toBe(false);
   });
 });

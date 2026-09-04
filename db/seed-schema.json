@@ -1076,12 +1076,6 @@
       "nullable": true
     },
     {
-      "column": "is_public",
-      "type": "boolean",
-      "nullable": false,
-      "default": "false"
-    },
-    {
       "column": "storage_type",
       "type": "text",
       "nullable": false,
@@ -1135,118 +1129,6 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
-    }
-  ],
-  "asset_mount": [
-    {
-      "column": "id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "asset_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "production_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "mount_type",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "mount_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "mount_aux_id",
-      "type": "text",
-      "nullable": true
-    },
-    {
-      "column": "folder_path",
-      "type": "text",
-      "nullable": true
-    },
-    {
-      "column": "mount_mode",
-      "type": "text",
-      "nullable": true
-    },
-    {
-      "column": "version_resolved",
-      "type": "boolean",
-      "nullable": true
-    },
-    {
-      "column": "created_by",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
-      "column": "created_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
-    }
-  ],
-  "asset_share_token": [
-    {
-      "column": "token",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "asset_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "production_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "created_by",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
-      "column": "created_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
-    },
-    {
-      "column": "label",
-      "type": "text",
-      "nullable": true
-    },
-    {
-      "column": "expires_at",
-      "type": "timestamp with time zone",
-      "nullable": true
-    },
-    {
-      "column": "one_time",
-      "type": "boolean",
-      "nullable": false,
-      "default": "false"
-    },
-    {
-      "column": "used_at",
-      "type": "timestamp with time zone",
-      "nullable": true
-    },
-    {
-      "column": "revoked_at",
-      "type": "timestamp with time zone",
-      "nullable": true
     }
   ],
   "avatar_upload_audit": [
@@ -2026,8 +1908,8 @@
       "default": "'rehearsal'::text"
     },
     {
-      "column": "wiki_id",
-      "type": "uuid",
+      "column": "node_id",
+      "type": "text",
       "nullable": false
     },
     {
@@ -2065,8 +1947,8 @@
       "nullable": false
     },
     {
-      "column": "wiki_id",
-      "type": "uuid",
+      "column": "node_id",
+      "type": "text",
       "nullable": false
     },
     {
@@ -2341,6 +2223,143 @@
       "type": "integer",
       "nullable": false,
       "default": "0"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "node": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "kind",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "parent_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "sort_key",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "is_public",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
+    },
+    {
+      "column": "listable",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true"
+    },
+    {
+      "column": "wiki_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "asset_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "link_target_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "title",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_by",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "node_dept_share": [
+    {
+      "column": "node_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "dept_id",
+      "type": "uuid",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "node_mount": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "node_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "mount_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "mount_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "mount_aux_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_by",
+      "type": "uuid",
+      "nullable": false
     },
     {
       "column": "created_at",
@@ -2998,8 +3017,8 @@
       "nullable": true
     },
     {
-      "column": "report_doc_wiki_id",
-      "type": "uuid",
+      "column": "report_doc_node_id",
+      "type": "text",
       "nullable": true
     }
   ],
@@ -3592,6 +3611,64 @@
       "nullable": false
     }
   ],
+  "production_node_config": [
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "reports_tree_enabled",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true"
+    },
+    {
+      "column": "reports_root_title",
+      "type": "text",
+      "nullable": false,
+      "default": "'报告'::text"
+    },
+    {
+      "column": "dramaturgy_tree_enabled",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true"
+    },
+    {
+      "column": "dramaturgy_root_title",
+      "type": "text",
+      "nullable": false,
+      "default": "'戏剧构作'::text"
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "reports_root_node_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "dramaturgy_root_node_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "assets_root_node_id",
+      "type": "text",
+      "nullable": true
+    }
+  ],
   "production_plan": [
     {
       "column": "production_id",
@@ -3766,59 +3843,6 @@
       "column": "permission_key",
       "type": "text",
       "nullable": false
-    }
-  ],
-  "production_wiki_config": [
-    {
-      "column": "production_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "reports_tree_enabled",
-      "type": "boolean",
-      "nullable": false,
-      "default": "true"
-    },
-    {
-      "column": "reports_root_title",
-      "type": "text",
-      "nullable": false,
-      "default": "'报告'::text"
-    },
-    {
-      "column": "reports_root_wiki_id",
-      "type": "uuid",
-      "nullable": true
-    },
-    {
-      "column": "dramaturgy_tree_enabled",
-      "type": "boolean",
-      "nullable": false,
-      "default": "true"
-    },
-    {
-      "column": "dramaturgy_root_title",
-      "type": "text",
-      "nullable": false,
-      "default": "'戏剧构作'::text"
-    },
-    {
-      "column": "dramaturgy_root_wiki_id",
-      "type": "uuid",
-      "nullable": true
-    },
-    {
-      "column": "created_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
-    },
-    {
-      "column": "updated_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
     }
   ],
   "registration_code": [
@@ -4861,28 +4885,6 @@
       "nullable": true
     },
     {
-      "column": "parent_id",
-      "type": "uuid",
-      "nullable": true
-    },
-    {
-      "column": "sort_key",
-      "type": "text",
-      "nullable": true
-    },
-    {
-      "column": "is_public",
-      "type": "boolean",
-      "nullable": false,
-      "default": "false"
-    },
-    {
-      "column": "listable",
-      "type": "boolean",
-      "nullable": false,
-      "default": "true"
-    },
-    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,
@@ -4895,7 +4897,7 @@
       "default": "now()"
     }
   ],
-  "wiki_alias": [
+  "wiki_alias_backup_node_tree": [
     {
       "column": "id",
       "type": "text",
@@ -5036,24 +5038,6 @@
       "default": "now()"
     }
   ],
-  "wiki_dept_share": [
-    {
-      "column": "wiki_id",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
-      "column": "dept_id",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
-      "column": "created_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
-    }
-  ],
   "wiki_entity_link": [
     {
       "column": "wiki_id",
@@ -5127,11 +5111,6 @@
       "nullable": true
     },
     {
-      "column": "parent_wiki_id",
-      "type": "uuid",
-      "nullable": true
-    },
-    {
       "column": "title",
       "type": "text",
       "nullable": true
@@ -5183,6 +5162,11 @@
     {
       "column": "resolved_at",
       "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "parent_node_id",
+      "type": "text",
       "nullable": true
     }
   ],
@@ -5242,6 +5226,33 @@
       "column": "tag",
       "type": "text",
       "nullable": false
+    }
+  ],
+  "wiki_tree_backup_node_tree": [
+    {
+      "column": "wiki_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "parent_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "sort_key",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "is_public",
+      "type": "boolean",
+      "nullable": true
+    },
+    {
+      "column": "listable",
+      "type": "boolean",
+      "nullable": true
     }
   ]
 }

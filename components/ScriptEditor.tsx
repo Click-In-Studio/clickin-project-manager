@@ -18,7 +18,6 @@ import ChevronIcon from "@/components/ChevronIcon";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, ScriptTextLayoutMode } from "@/lib/script-types";
 import type { TagGroup, BlockTagValue, SceneDetail } from "@/lib/db";
 import TagGroupEditor from "@/components/TagGroupEditor";
-import BlockMountAssets from "@/components/assets/BlockMountAssets";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import DurationInput from "@/components/DurationInput";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
@@ -1360,7 +1359,6 @@ function ScriptSceneDetailRail({
               mountId={scene.id}
               label={`${scene.number}${scene.name ? ` ${scene.name}` : ""}`}
               canEdit={sectionCanEdit}
-              versionId={versionId}
               display="compact"
             />
           </div>
@@ -8037,8 +8035,8 @@ export default function ScriptEditor({
       setBlockAssetsByBlockId(new Map());
       return;
     }
-    const qs = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-    fetch(`${BASE_PATH}/api/production/${productionId}/assets/block-summary${qs}`)
+    // #420：挂载锚稳定 block_id，服务端无版本分辨路径，不再传 ?v=
+    fetch(`${BASE_PATH}/api/production/${productionId}/assets/block-summary`)
       .then(r => r.ok ? r.json() : null)
       .then((data: { blocks?: Array<{ blockId: string; asset: BlockAssetBubbleItem }> } | null) => {
         const grouped = new Map<string, BlockAssetBubbleItem[]>();
@@ -8052,7 +8050,7 @@ export default function ScriptEditor({
         setBlockAssetsByBlockId(grouped);
       })
       .catch(() => setBlockAssetsByBlockId(new Map()));
-  }, [productionId, activeVersionId]);
+  }, [productionId]);
 
   useEffect(() => {
     loadBlockAssetBubbles();
@@ -11421,10 +11419,11 @@ export default function ScriptEditor({
           onClose={() => setActiveAssetBlockId(null)}
         >
           <div className="relative z-10 flex-1 overflow-y-auto bg-white px-4 py-3">
-            <BlockMountAssets
+            {/* #420：挂载锚稳定 block_id，快照分辨路径退役 */}
+            <MountPointAssets
               productionId={productionId}
-              blockId={activeAssetBlockId}
-              versionId={activeVersionId ?? null}
+              mountType="block"
+              mountId={activeAssetBlockId}
               label="Block 附件"
               canEdit={true}
               display="panel"

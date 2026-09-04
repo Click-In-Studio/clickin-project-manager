@@ -142,7 +142,7 @@ describe("integrity verification", () => {
       ["production_member_grant", "resource_type"],
       ["resource_dept_manage", "resource_type"],
       ["resource_person_manage", "resource_type"],
-      ["asset_mount", "mount_type"],
+      ["node_mount", "mount_type"],  // #420 后表名终态
     ] as const) {
       const { rows } = await getPool().query(
         `SELECT 1 FROM ${table} WHERE ${column} IN ('tech_req', 'event_tech_req') LIMIT 1`,
@@ -224,7 +224,7 @@ describe("invariance verification", () => {
   it.skipIf(!snapshot)("asset mount_type rewritten event_tech_req → task", async () => {
     const s = snapshot!;
     const { rows } = await getPool().query<{ mount_type: string; mount_id: string }>(
-      `SELECT mount_type, mount_id FROM asset_mount WHERE id = $1`,
+      `SELECT mount_type, mount_id FROM node_mount WHERE id = $1`, // #420 后表名终态
       [s.assetMountId],
     );
     expect(rows).toHaveLength(1);

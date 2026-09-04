@@ -154,37 +154,52 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   // ── Asset: asset.{mount_query}-{name_prefix} ──────────────────────────────
 
+  // #420：挂载边在 node_mount（锚稳定 id），经壳节点 join asset
   async function queryAssetsByMount(
-    mountTypes: string[], mountId: string, namePrefix: string, mountLabel: string
+    mountType: string, mountId: string, namePrefix: string, mountLabel: string
   ): Promise<MentionSearchResult[]> {
-    const params: unknown[] = [productionId, mountTypes, mountId];
+    const params: unknown[] = [productionId, mountType, mountId];
     const nameCond = namePrefix ? `AND a.name ILIKE $${params.push(`${namePrefix}%`)}` : "";
     const r = await pool.query<{ id: string; name: string | null; asset_type: string }>(
       `SELECT a.id, a.name, a.asset_type FROM asset a
-       JOIN asset_mount am ON am.asset_id = a.id
-       WHERE am.production_id = $1 AND am.mount_type = ANY($2::text[]) AND am.mount_id = $3 ${nameCond}
+       JOIN node n ON n.asset_id = a.id
+       JOIN node_mount nm ON nm.node_id = n.id
+       WHERE nm.production_id = $1 AND nm.mount_type = $2 AND nm.mount_id = $3 ${nameCond}
        ORDER BY a.name LIMIT 8`,
       params
     );
     return r.rows.map(row => ({
       kind: "asset", id: row.id,
-      aux: `${mountTypes[0]}:${mountId}`,
+      aux: `${mountType}:${mountId}`,
       displayLabel: `#asset.${mountLabel}-${row.name ?? "?"}`,
       description: row.asset_type,
     }));
   }
 
   async function searchAssets(mountQuery: string, namePrefix: string): Promise<MentionSearchResult[]> {
-    // Production: "production.folder/path"
+    // Production: "production.folder/path"（#420：production mount ≡ 树可枚举——
+    // 「共享资产」= listable 的 asset 节点，folder 路径由祖先 folder 链实时拼出）
     if (mountQuery.startsWith("production.") || mountQuery === "production") {
       const folderPath = mountQuery.startsWith("production.") ? mountQuery.slice("production.".length) : "";
       const params: unknown[] = [productionId];
-      const folderCond = folderPath ? `AND am.folder_path ILIKE $${params.push(`${folderPath}%`)}` : "";
+      const folderCond = folderPath ? `AND array_to_string(t.segs, '/') ILIKE $${params.push(`${folderPath}%`)}` : "";
       const nameCond = namePrefix ? `AND a.name ILIKE $${params.push(`${namePrefix}%`)}` : "";
       const r = await pool.query<{ id: string; name: string | null; folder_path: string | null; asset_type: string }>(
-        `SELECT a.id, a.name, am.folder_path, a.asset_type FROM asset a
-         JOIN asset_mount am ON am.asset_id = a.id
-         WHERE am.production_id = $1 AND am.mount_type = 'production' ${folderCond} ${nameCond}
+        `WITH RECURSIVE anc AS (
+           SELECT n.id AS asset_node, n.asset_id, n.parent_id, ARRAY[]::text[] AS segs
+           FROM node n
+           WHERE n.production_id = $1 AND n.kind = 'asset' AND n.listable
+           UNION ALL
+           SELECT anc.asset_node, anc.asset_id, p.parent_id,
+                  -- 顶层的「资产」根不进路径（它的 parent 是 NULL）
+                  CASE WHEN p.kind = 'folder' AND p.parent_id IS NOT NULL
+                       THEN p.title || anc.segs ELSE anc.segs END
+           FROM anc JOIN node p ON p.id = anc.parent_id
+         )
+         SELECT a.id, a.name, NULLIF(array_to_string(t.segs, '/'), '') AS folder_path, a.asset_type
+         FROM anc t
+         JOIN asset a ON a.id = t.asset_id
+         WHERE t.parent_id IS NULL ${folderCond} ${nameCond}
          ORDER BY a.name LIMIT 8`,
         params
       );
@@ -206,7 +221,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const blockIdx = parseInt(blockPageM[2]) - 1;
       const blockId = (await blocksOnPage(pageNum))[blockIdx]?.id;
       if (!blockId) return [];
-      return queryAssetsByMount(["block", "block_snapshot"], blockId, namePrefix, mountQuery);
+      return queryAssetsByMount("block", blockId, namePrefix, mountQuery);
     }
 
     // Cue: ABBR.num (uppercase abbrev)
@@ -219,7 +234,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         [productionId, abbr, cueNum]
       );
       if (!r.rows[0]) return [];
-      return queryAssetsByMount(["cue", "cue_revision"], r.rows[0].id, namePrefix, `${abbr}.${cueNum}`);
+      // #420：cue 挂载锚稳定 cue_id
+      const stable = await pool.query<{ cue_id: string }>(
+        `SELECT cue_id FROM cue WHERE id = $1`, [r.rows[0].id]);
+      return queryAssetsByMount("cue", stable.rows[0]?.cue_id ?? r.rows[0].id, namePrefix, `${abbr}.${cueNum}`);
     }
 
     // Scene+mark+block: 1-1A-3
@@ -231,7 +249,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (!scenes[0]) return [];
       const blockId = (await markBlocks(scenes[0].id, mark))?.blocks[idx]?.id;
       if (!blockId) return [];
-      return queryAssetsByMount(["block", "block_snapshot"], blockId, namePrefix, mountQuery);
+      return queryAssetsByMount("block", blockId, namePrefix, mountQuery);
     }
 
     // Scene+block: 1-1-3
@@ -243,7 +261,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (!scenes[0]) return [];
       const blockId = (await blocksInScene(scenes[0].id))[idx]?.id;
       if (!blockId) return [];
-      return queryAssetsByMount(["block", "block_snapshot"], blockId, namePrefix, mountQuery);
+      return queryAssetsByMount("block", blockId, namePrefix, mountQuery);
     }
 
     // Scene+mark: 1-1A (mounts on the scene itself, no separate rehearsal mount type)
@@ -252,7 +270,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const [, sceneNum, mark] = markM;
       const scenes = await queryScenes(`${sceneNum}`, 1);
       if (!scenes[0]) return [];
-      return queryAssetsByMount(["scene", "scene_snapshot"], scenes[0].id, namePrefix,
+      return queryAssetsByMount("scene", scenes[0].id, namePrefix,
         `${scenes[0].num}-${mark.toUpperCase()}`);
     }
 
@@ -260,7 +278,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (/^\d[\d.\-]*$/.test(mountQuery)) {
       const scenes = await queryScenesText(`${mountQuery}%`, 1);
       if (!scenes[0]) return [];
-      return queryAssetsByMount(["scene", "scene_snapshot"], scenes[0].id, namePrefix, scenes[0].num);
+      return queryAssetsByMount("scene", scenes[0].id, namePrefix, scenes[0].num);
     }
 
     return [];

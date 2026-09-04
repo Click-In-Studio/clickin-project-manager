@@ -327,7 +327,6 @@ function InfoTab({
           mountId={event.id}
           label={event.title}
           canEdit={canEdit}
-          versionId={event.versionId ?? null}
           display="panel"
         />
       </div>
@@ -903,7 +902,6 @@ function ScheduleItemRow({
             mountId={item.id}
             label={item.title}
             canEdit={true}
-            versionId={versionId}
             display="panel"
           />
         </div>
@@ -957,7 +955,6 @@ function ScheduleItemRow({
         mountType="event_schedule"
         mountId={item.id}
         label={item.title}
-        versionId={versionId}
         display="compact"
       />
     </div>
@@ -1964,7 +1961,6 @@ function TechReqCard({
             mountId={req.id}
             label={req.title}
             canEdit={canEditThisReq && !isEventClosed}
-            versionId={versionId}
             display="panel"
           />
           {canDelete && (
@@ -2611,7 +2607,6 @@ function ReportEditor({
         mountId={report.id}
         label={report.title}
         canEdit={canWrite && !isPublished}
-        versionId={versionId}
         display="panel"
       />
 

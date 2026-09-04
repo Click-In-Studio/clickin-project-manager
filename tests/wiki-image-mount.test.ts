@@ -1,9 +1,10 @@
-// wiki 图片工程（commit 3）后端面：mount_type='wiki' 的可见性让渡 ——
+// wiki 图片工程后端面（#420 后 mount_type='embed'）：嵌入边的可见性让渡 ——
 // 文档可见 ⇒ 挂其上的图可见；单实例判定（canViewAsset）与列表过滤
 // （filterVisibleAssets）必须同语义（批D 教训：分叉即「列表看得见、点进去 403」）。
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createAsset } from "@/lib/asset/db";
-import { addAssetMount } from "@/lib/asset/mount";
+import { addNodeMount } from "@/lib/node/mount";
+import { insertNode } from "@/lib/node/db";
 import { canViewAsset, filterVisibleAssets, mountHostSidePermitted } from "@/lib/asset/perm";
 import type { PermissionContext } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
@@ -46,18 +47,23 @@ beforeAll(async () => {
   [uploader, reader, ticketOnly] = await Promise.all([newUser(), newUser(), newUser()]);
 
   const pool = getPool();
+  // 裸建 wiki（刻意不走 createWiki：不发创建者行集）+ 手补壳节点（1:1 不变量）
   const w = await pool.query<{ id: string }>(
-    `INSERT INTO wiki (production_id, title, body, created_by, is_public)
-     VALUES ($1, '图床测试文档', '', $2, false) RETURNING id::text AS id`,
+    `INSERT INTO wiki (production_id, title, body, created_by)
+     VALUES ($1, '图床测试文档', '', $2) RETURNING id::text AS id`,
     [prodId, uploader],
   );
   wikiId = w.rows[0].id;
+  await insertNode({ productionId: prodId, kind: "wiki", parentId: null, sortKey: null,
+    wikiId, listable: true, createdBy: uploader });
   const hw = await pool.query<{ id: string }>(
-    `INSERT INTO wiki (production_id, title, body, created_by, is_public)
-     VALUES ($1, '无人可见文档', '', $2, false) RETURNING id::text AS id`,
+    `INSERT INTO wiki (production_id, title, body, created_by)
+     VALUES ($1, '无人可见文档', '', $2) RETURNING id::text AS id`,
     [prodId, uploader],
   );
   hiddenWikiId = hw.rows[0].id;
+  await insertNode({ productionId: prodId, kind: "wiki", parentId: null, sortKey: null,
+    wikiId: hiddenWikiId, listable: false, createdBy: uploader });
 
   const a = await createAsset({
     productionId: prodId, uploaderUserId: uploader, assetType: "reference",
@@ -65,9 +71,9 @@ beforeAll(async () => {
     storageType: "r2", isPublic: false,
   });
   mountedAssetId = a.asset.id;
-  await addAssetMount({
-    assetId: mountedAssetId, productionId: prodId,
-    mountType: "wiki", mountId: wikiId, createdBy: uploader,
+  await addNodeMount({
+    nodeId: a.nodeId, productionId: prodId,
+    mountType: "embed", mountId: wikiId, createdBy: uploader,
   });
 
   // 两人都有 asset 能力票；只有 reader 拿到 wiki 的个人可见行
@@ -94,15 +100,15 @@ afterAll(async () => {
 
 describe("wiki 挂载边可见性让渡", () => {
   it("文档可见 + 能力票 → 图可见（canViewAsset）", async () => {
-    expect(await canViewAsset(ctxOf(reader), prodId, { id: mountedAssetId, isPublic: false }, "meta")).toBe(true);
+    expect(await canViewAsset(ctxOf(reader), prodId, { id: mountedAssetId }, "meta")).toBe(true);
   });
 
   it("文档不可见 → 挂载不让渡（能力票单独不够）", async () => {
-    expect(await canViewAsset(ctxOf(ticketOnly), prodId, { id: mountedAssetId, isPublic: false }, "meta")).toBe(false);
+    expect(await canViewAsset(ctxOf(ticketOnly), prodId, { id: mountedAssetId }, "meta")).toBe(false);
   });
 
   it("列表过滤与单实例判定同语义", async () => {
-    const assets = [{ id: mountedAssetId, isPublic: false }];
+    const assets = [{ id: mountedAssetId }];
     const forReader = await filterVisibleAssets(ctxOf(reader), prodId, assets);
     const forTicketOnly = await filterVisibleAssets(ctxOf(ticketOnly), prodId, assets);
     expect(forReader.map(a => a.id)).toEqual([mountedAssetId]);
@@ -111,23 +117,24 @@ describe("wiki 挂载边可见性让渡", () => {
 
   it("宿主侧门：挂载进文档 = 编辑该文档（无编辑权者被拒）", async () => {
     // reader 只有 view 行，没有 wiki 编辑权 → 不允许把图挂进文档
-    expect(await mountHostSidePermitted(ctxOf(reader), prodId, "wiki", wikiId)).toBe(false);
+    expect(await mountHostSidePermitted(ctxOf(reader), prodId, "embed", wikiId)).toBe(false);
     // uploader 持该文档 *@edit 行 → 允许
-    expect(await mountHostSidePermitted(ctxOf(uploader), prodId, "wiki", wikiId)).toBe(true);
+    expect(await mountHostSidePermitted(ctxOf(uploader), prodId, "embed", wikiId)).toBe(true);
   });
 
   it("挂在别的（不可见）文档上不产生越权让渡", async () => {
-    const b = await createAsset({
+    const { asset: bAsset, nodeId: bNodeId } = await createAsset({
       productionId: prodId, uploaderUserId: uploader, assetType: "reference",
       fileName: "hidden.png", mimeType: "image/png",
       storageType: "r2", isPublic: false,
     });
-    await addAssetMount({
-      assetId: b.asset.id, productionId: prodId,
-      mountType: "wiki", mountId: hiddenWikiId, createdBy: uploader,
+    const b = { asset: bAsset, nodeId: bNodeId };
+    await addNodeMount({
+      nodeId: bNodeId, productionId: prodId,
+      mountType: "embed", mountId: hiddenWikiId, createdBy: uploader,
     });
-    expect(await canViewAsset(ctxOf(reader), prodId, { id: b.asset.id, isPublic: false }, "meta")).toBe(false);
-    const filtered = await filterVisibleAssets(ctxOf(reader), prodId, [{ id: b.asset.id, isPublic: false }]);
+    expect(await canViewAsset(ctxOf(reader), prodId, { id: b.asset.id }, "meta")).toBe(false);
+    const filtered = await filterVisibleAssets(ctxOf(reader), prodId, [{ id: b.asset.id }]);
     expect(filtered).toEqual([]);
   });
 });

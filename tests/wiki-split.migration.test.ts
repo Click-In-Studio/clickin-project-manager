@@ -30,12 +30,12 @@ describe("schema verification", () => {
 });
 
 describe("integrity verification", () => {
-  it("all edges reference a wiki; no orphan wikis from the split", async () => {
+  it("all edges reference a node（#420 后边键在 node 上）", async () => {
     const { rows: r1 } = await getPool().query(
-      `SELECT 1 FROM event_report WHERE wiki_id IS NULL LIMIT 1`);
+      `SELECT 1 FROM event_report WHERE node_id IS NULL LIMIT 1`);
     expect(r1).toHaveLength(0);
     const { rows: r2 } = await getPool().query(
-      `SELECT 1 FROM event_report_note WHERE wiki_id IS NULL LIMIT 1`);
+      `SELECT 1 FROM event_report_note WHERE node_id IS NULL LIMIT 1`);
     expect(r2).toHaveLength(0);
   });
 });
@@ -44,7 +44,8 @@ describe("invariance verification", () => {
   it.skipIf(!snapshot)("report content moved to wiki intact (title/body/author)", async () => {
     const { rows } = await getPool().query<{ title: string; body: string; created_by: string; production_id: string }>(
       `SELECT w.title, w.body, w.created_by, w.production_id
-       FROM event_report er JOIN wiki w ON w.id = er.wiki_id WHERE er.id = $1`,
+       FROM event_report er JOIN node nd ON nd.id = er.node_id
+       JOIN wiki w ON w.id = nd.wiki_id WHERE er.id = $1`,
       [snapshot!.reportId]);
     expect(rows).toHaveLength(1);
     expect(rows[0].title).toBe(snapshot!.reportTitle);
@@ -56,7 +57,8 @@ describe("invariance verification", () => {
   it.skipIf(!snapshot)("note content moved to wiki; dept relation stays on the edge", async () => {
     const { rows } = await getPool().query<{ body: string; created_by: string; department_id: string }>(
       `SELECT w.body, w.created_by, n.department_id
-       FROM event_report_note n JOIN wiki w ON w.id = n.wiki_id WHERE n.id = $1`,
+       FROM event_report_note n JOIN node nn ON nn.id = n.node_id
+       JOIN wiki w ON w.id = nn.wiki_id WHERE n.id = $1`,
       [snapshot!.noteId]);
     expect(rows).toHaveLength(1);
     expect(rows[0].body).toBe(snapshot!.noteContent);
@@ -67,7 +69,8 @@ describe("invariance verification", () => {
     const { rows } = await getPool().query<{ content: string }>(
       `SELECT wc.content
        FROM wiki_comment wc
-       JOIN event_report_note n ON n.wiki_id = wc.wiki_id
+       JOIN node nn ON nn.wiki_id = wc.wiki_id
+       JOIN event_report_note n ON n.node_id = nn.id
        WHERE n.id = $1`,
       [snapshot!.noteId]);
     expect(rows.map((r) => r.content)).toContain(snapshot!.replyContent);

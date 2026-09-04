@@ -316,6 +316,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const mountType = colonIdx >= 0 ? auxStr.slice(0, colonIdx) : auxStr;
       const mountId = colonIdx >= 0 ? auxStr.slice(colonIdx + 1) : "";
 
+      // 【#420 读路径兼容，故意保留】version/scene_snapshot/block_snapshot/
+      // cue_revision 作为 mount_type 已随迁移退役（node_mount CHECK 白名单挡死），
+      // 但这里的 mountType 来自 wiki 正文里持久化的 mention aux——文档体不随迁移
+      // 改写，旧文档的化石 aux 永远存在。删这些 case = 旧深链退化到 /assets。
+      // 映射表 script_version/cue_version 仍在库里，反查照常成立。
       switch (mountType) {
         case "production":
         case "version":

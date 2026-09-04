@@ -2,8 +2,8 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
-import { getWiki, setWikiPublic, listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson } from "@/lib/wiki/content";
-import { setWikiListable, setWikiDeptShares, listWikiDeptShares } from "@/lib/wiki/tree";
+import { getWiki, listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson } from "@/lib/wiki/content";
+import { getNodeByWikiId, setNodePublic, setNodeListable, setNodeDeptShares, listNodeDeptShares, type NodeRecord } from "@/lib/node/db";
 import { canShareWiki } from "@/lib/wiki/perm";
 import { type WikiLevel } from "@/lib/resource-grant-db";
 
@@ -22,6 +22,7 @@ type Guarded =
       wikiId: string;
       session: NonNullable<ReturnType<typeof getSession>>;
       wiki: NonNullable<Awaited<ReturnType<typeof getWiki>>>;
+      shell: NodeRecord;
       isArchived: boolean;
     };
 
@@ -34,20 +35,24 @@ async function guard(req: NextRequest, ctx: Ctx): Promise<Guarded> {
   const actor = toActor(session, access.permCtx);
   const wiki = await getWiki(wikiId, productionId);
   if (!wiki) return { err: Response.json({ error: "文档不存在" }, { status: 404 }) };
+  // 分享的结构面（is_public/listable/dept）活在壳节点上（#420）
+  const shell = await getNodeByWikiId(wikiId);
+  if (!shell || shell.productionId !== productionId)
+    return { err: Response.json({ error: "文档不存在" }, { status: 404 }) };
   if (!await canShareWiki(actor, productionId, wikiId))
     return { err: Response.json({ error: "权限不足（分享面）" }, { status: 403 }) };
-  return { productionId, wikiId, session, wiki, isArchived: access.isArchived };
+  return { productionId, wikiId, session, wiki, shell, isArchived: access.isArchived };
 }
 
 export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await guard(req, ctx);
   if (g.err !== undefined) return g.err;
-  const { productionId, wikiId, wiki } = g;
+  const { productionId, wikiId, shell } = g;
 
   return Response.json({
-    isPublic: wiki.isPublic,
-    listable: wiki.listable,
-    deptIds: await listWikiDeptShares(wikiId),
+    isPublic: shell.isPublic,
+    listable: shell.listable,
+    deptIds: await listNodeDeptShares(shell.id),
     people: await listWikiSharePeople(wikiId, productionId),
   });
 }
@@ -56,7 +61,7 @@ export async function PUT(req: NextRequest, ctx: Ctx): Promise<Response> {
   const g = await guard(req, ctx);
   if (g.err !== undefined) return g.err;
   if (g.isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  const { productionId, wikiId, session } = g;
+  const { productionId, wikiId, session, shell } = g;
 
   const body = await req.json() as {
     isPublic?: boolean;
@@ -66,9 +71,9 @@ export async function PUT(req: NextRequest, ctx: Ctx): Promise<Response> {
     removePersonUserId?: string;
   };
 
-  if (body.isPublic !== undefined) await setWikiPublic(wikiId, productionId, body.isPublic);
-  if (body.listable !== undefined) await setWikiListable(wikiId, productionId, body.listable);
-  if (body.deptIds !== undefined) await setWikiDeptShares(wikiId, productionId, body.deptIds);
+  if (body.isPublic !== undefined) await setNodePublic(shell.id, productionId, body.isPublic);
+  if (body.listable !== undefined) await setNodeListable(shell.id, productionId, body.listable);
+  if (body.deptIds !== undefined) await setNodeDeptShares(shell.id, productionId, body.deptIds);
 
   if (body.addPerson) {
     const { userId, level } = body.addPerson;

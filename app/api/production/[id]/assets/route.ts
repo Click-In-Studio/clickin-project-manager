@@ -7,6 +7,7 @@ import { createAsset, listAssets, type AssetType } from "@/lib/asset/db";
 import { isAssetType } from "@/lib/asset/types";
 import { putR2Object, getR2Object, thumbnailR2Key, completeMultipartUpload, listMultipartParts } from "@/lib/r2";
 import sharp from "sharp";
+import { getPool } from "@/lib/pg";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -18,7 +19,20 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const assets = await listAssets(id);
   // 批D：可见性过滤（能力票∧结构 ∨ publication@view）
   const visible = await filterVisibleAssets(access.permCtx, id, assets);
-  return Response.json({ assets: visible });
+  // #420：附带壳节点树面（nodeId + listable=「共享资产」面板数据源，原 production
+  // mount 语义）。一次集合查询，避免 N+1。
+  const { rows } = await getPool().query<{ asset_id: string; id: string; listable: boolean }>(
+    `SELECT asset_id, id, listable FROM node WHERE production_id = $1 AND asset_id IS NOT NULL`,
+    [id],
+  );
+  const nodeByAsset = new Map(rows.map(r => [r.asset_id, r]));
+  return Response.json({
+    assets: visible.map(a => ({
+      ...a,
+      nodeId: nodeByAsset.get(a.id)?.id ?? null,
+      listable: nodeByAsset.get(a.id)?.listable ?? false,
+    })),
+  });
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

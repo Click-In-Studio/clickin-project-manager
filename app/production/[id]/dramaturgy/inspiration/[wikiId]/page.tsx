@@ -11,13 +11,13 @@ import {
   listProductionMembers,
 } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { getDramaturgyTreeConfig } from "@/lib/wiki/tree";
+import { getDramaturgyTreeConfig } from "@/lib/node/anchors";
 import { getWiki } from "@/lib/wiki/content";
 import { listBacklinks, listEntityRefsForWiki, listUnlinkedReferences } from "@/lib/wiki/links";
 import { canEditWiki, canShareWiki, canViewWiki } from "@/lib/wiki/perm";
 import { listEventDepartments } from "@/lib/event-db";
-import { getWikiAlias, isWikiAliasId } from "@/lib/wiki/alias";
-import { listDramaturgyTreeFor } from "@/lib/wiki/tree-view";
+import { getNode } from "@/lib/node/db";
+import { listDramaturgyTreeFor } from "@/lib/node/tree-view";
 import { DramaturgyInspirationShell } from "@/components/DramaturgyWorkspaceTabs";
 import WikiShell from "@/components/wiki/WikiShell";
 import WikiDocClient from "@/components/wiki/WikiDocClient";
@@ -40,11 +40,17 @@ export default async function DramaturgyInspirationDocPage({
   if (!productionName) notFound();
 
   const actor = toActor(session, access.permCtx);
-  // 路由段可能是软链接别名（#358，`wal_` 短 id）：就地渲染目标正文，权限一律落到
-  // 目标上；别名的「属于本工作区」由它自己的位置决定，与目标在哪无关。
-  const alias = isWikiAliasId(wikiId) ? await getWikiAlias(wikiId, productionId) : null;
-  if (isWikiAliasId(wikiId) && (!alias || alias.targetType !== "wiki")) notFound();
-  const docId = alias ? alias.targetId : wikiId;
+  // 路由段可能是软链接节点（#358 → #420，`nd_` 短 id）：就地渲染目标正文，权限
+  // 一律落到目标上；link 的「属于本工作区」由它自己的位置决定，与目标在哪无关。
+  const isLinkSegment = wikiId.startsWith("nd_");
+  const linkNode = isLinkSegment ? await getNode(wikiId, productionId) : null;
+  if (isLinkSegment && (!linkNode || linkNode.kind !== "link" || !linkNode.linkTargetId)) notFound();
+  const linkTarget = linkNode?.linkTargetId ? await getNode(linkNode.linkTargetId, productionId) : null;
+  if (isLinkSegment && !linkTarget) notFound();
+  if (linkTarget && linkTarget.kind === "asset" && linkTarget.assetId) {
+    redirect(`/production/${productionId}/assets/${linkTarget.assetId}/preview`);
+  }
+  const docId = linkTarget?.wikiId ?? wikiId;
 
   const [treeConfig, wiki, canCreate] = await Promise.all([
     getDramaturgyTreeConfig(productionId),
@@ -55,14 +61,14 @@ export default async function DramaturgyInspirationDocPage({
 
   // 成员判定与侧栏渲染同源：都在**全量**上算子树，再各自过枚举面（#357）。
   // 侧栏＝枚举面，正文＝内容面（canViewWiki）——两个门，别混。
-  const rootId = treeConfig.enabled ? treeConfig.rootWikiId : null;
-  const { subtree, wikis, aliases, moveIn } = await listDramaturgyTreeFor(actor, productionId, rootId);
+  const rootId = treeConfig.enabled ? treeConfig.rootNodeId : null;
+  const { subtree, nodes, moveIn } = await listDramaturgyTreeFor(actor, productionId, rootId);
   // 越界不是 404：工作区内的内链（[[…]]、反链）会指向子树外的文档，文档也可能
   // 在「文档」模块里被移出子树、或根锚点压根还没懒建。回落到通用 wiki 路由，
   // 别把人弹飞。别名同理——它是否在本工作区看位置，不看目标。
-  const inWorkspace = alias
-    ? aliases.some((a) => a.id === wikiId)
-    : subtree.some((entry) => entry.id === wikiId);
+  const inWorkspace = linkNode
+    ? nodes.some((n) => n.id === wikiId && n.kind === "link")
+    : subtree.some((entry) => entry.wikiId === wikiId);
   if (!rootId || !inWorkspace) {
     redirect(`/production/${productionId}/wiki/${wikiId}`);
   }
@@ -76,8 +82,7 @@ export default async function DramaturgyInspirationDocPage({
       <DramaturgyInspirationShell productionId={productionId} productionName={productionName}>
         <WikiShell
           productionId={productionId}
-          wikis={wikis}
-          aliases={aliases}
+          nodes={nodes}
           moveInCandidates={moveIn}
           canCreate={canCreate}
           selectedId={wikiId}
@@ -115,8 +120,7 @@ export default async function DramaturgyInspirationDocPage({
       <DramaturgyInspirationShell productionId={productionId} productionName={productionName}>
         <WikiShell
           productionId={productionId}
-          wikis={wikis}
-          aliases={aliases}
+          nodes={nodes}
           moveInCandidates={moveIn}
           canCreate={canCreate}
           selectedId={wikiId}

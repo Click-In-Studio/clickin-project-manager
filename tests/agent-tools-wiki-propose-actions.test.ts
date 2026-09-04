@@ -5,6 +5,7 @@ import { createEventReport } from "@/lib/event-db";
 import { getPool } from "@/lib/pg";
 import { createWiki, getWiki } from "@/lib/wiki/content";
 import { wikiProposeUpdate, wikiProposeDelete, wikiProposeMove, wikiProposeTag } from "@/lib/agent-tools/wiki-tools";
+import { getNodeByWikiId } from "@/lib/node/db";
 import { getWikiProposalByToolCallId, insertWikiProposal, type WikiProposalAction } from "@/lib/wiki/proposal-db";
 import { prepareWikiProposal } from "@/lib/agent-tools/wiki-proposal-prepare";
 import { DENIED_NOT_MEMBER } from "@/lib/agent-tools/production-tools";
@@ -128,7 +129,8 @@ describe("wikiProposeDelete", () => {
     const reportId = `rp${shortId()}`;
     await createEventReport({ id: reportId, eventId, reportType: "rehearsal", title: "挂载中", body: "x", createdBy: ownerId });
     const mountedWikiId = (await getPool().query<{ wiki_id: string }>(
-      `SELECT wiki_id::text AS wiki_id FROM event_report WHERE id = $1`, [reportId],
+      `SELECT nd.wiki_id::text AS wiki_id FROM event_report er
+       JOIN node nd ON nd.id = er.node_id WHERE er.id = $1`, [reportId],
     )).rows[0].wiki_id;
 
     const toolCallId = `call_${shortId()}`;
@@ -148,13 +150,13 @@ describe("wikiProposeMove", () => {
   it("owner 移动到新父 → parent_id 真的变了，proposal applied 且 created_wiki_id=doc.id", async () => {
     const oldParent = await createWiki({ productionId: prodId, title: "旧父", createdBy: ownerId });
     const newParent = await createWiki({ productionId: prodId, title: "新父", createdBy: ownerId });
-    const doc = await createWiki({ productionId: prodId, title: "被移动的文档", parentId: oldParent.id, createdBy: ownerId });
+    const doc = await createWiki({ productionId: prodId, title: "被移动的文档", parentNodeId: oldParent.nodeId, createdBy: ownerId });
     const toolCallId = `call_${shortId()}`;
     await preInsertProposal({ toolCallId, proposedBy: ownerId, action: "move", wikiId: doc.id });
 
     const result = await wikiProposeMove(ownerId, prodId, toolCallId, { wikiId: doc.id, newParentId: newParent.id, summary: "重新归档" });
     expect(result).toContain("已把文档");
-    expect((await getWiki(doc.id, prodId))?.parentId).toBe(newParent.id);
+    expect((await getNodeByWikiId(doc.id))?.parentId).toBe(newParent.nodeId);
 
     const row = await getWikiProposalByToolCallId(prodId, toolCallId, ownerId);
     expect(row?.status).toBe("applied");
@@ -163,20 +165,20 @@ describe("wikiProposeMove", () => {
 
   it("移动到文档库根（newParentId 留空）→ parent_id 变 null", async () => {
     const parent = await createWiki({ productionId: prodId, title: "父", createdBy: ownerId });
-    const doc = await createWiki({ productionId: prodId, title: "移到根", parentId: parent.id, createdBy: ownerId });
+    const doc = await createWiki({ productionId: prodId, title: "移到根", parentNodeId: parent.nodeId, createdBy: ownerId });
     await wikiProposeMove(ownerId, prodId, `call_${shortId()}`, { wikiId: doc.id, summary: "" });
-    expect((await getWiki(doc.id, prodId))?.parentId).toBeNull();
+    expect((await getNodeByWikiId(doc.id))?.parentId).toBeNull();
   });
 
   it("成环 → 拒绝且不落地，proposal 标 blocked_business_rule", async () => {
     const a = await createWiki({ productionId: prodId, title: "环A", createdBy: ownerId });
-    const b = await createWiki({ productionId: prodId, title: "环B", parentId: a.id, createdBy: ownerId });
+    const b = await createWiki({ productionId: prodId, title: "环B", parentNodeId: a.nodeId, createdBy: ownerId });
     const toolCallId = `call_${shortId()}`;
     await preInsertProposal({ toolCallId, proposedBy: ownerId, action: "move", wikiId: a.id });
 
     const result = await wikiProposeMove(ownerId, prodId, toolCallId, { wikiId: a.id, newParentId: b.id, summary: "" });
     expect(result).not.toContain("已把文档");
-    expect((await getWiki(a.id, prodId))?.parentId).toBeNull(); // 没被改动
+    expect((await getNodeByWikiId(a.id))?.parentId).toBeNull(); // 没被改动
 
     const row = await getWikiProposalByToolCallId(prodId, toolCallId, ownerId);
     expect(row?.status).toBe("blocked_business_rule");
@@ -187,7 +189,7 @@ describe("wikiProposeMove", () => {
     const target = await createWiki({ productionId: prodId, title: "目标父", createdBy: ownerId });
     const result = await wikiProposeMove(plainMemberId, prodId, `call_${shortId()}`, { wikiId: doc.id, newParentId: target.id, summary: "" });
     expect(result).toContain("权限被拒绝");
-    expect((await getWiki(doc.id, prodId))?.parentId).toBeNull();
+    expect((await getNodeByWikiId(doc.id))?.parentId).toBeNull();
   });
 });
 

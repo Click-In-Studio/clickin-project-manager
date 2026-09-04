@@ -6,8 +6,8 @@ import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { getProductionName, getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { getDramaturgyTreeConfig } from "@/lib/wiki/tree";
-import { listDramaturgyTreeFor } from "@/lib/wiki/tree-view";
+import { getDramaturgyTreeConfig } from "@/lib/node/anchors";
+import { listDramaturgyTreeFor } from "@/lib/node/tree-view";
 import { DramaturgyInspirationShell } from "@/components/DramaturgyWorkspaceTabs";
 import WikiShell from "@/components/wiki/WikiShell";
 import PageActivationGate from "@/components/PageActivationGate";
@@ -35,11 +35,11 @@ export default async function DramaturgyInspirationPage({
   ]);
   // 锚点是懒建的：enabled 但 rootWikiId 仍为 null＝还没人建过第一篇，属正常空态
   // （新建走 parentAnchor，服务端在 create 门后补建根）。
-  const rootId = treeConfig.enabled ? treeConfig.rootWikiId : null;
+  const rootId = treeConfig.enabled ? treeConfig.rootNodeId : null;
   // 子树成员在**全量**上算，再过枚举面（#357）；软链接别名按位置算成员（#358）。
   // 枚举集是含根的连通子树，所以过滤后的结果照样连通——#352 那次「父不可见、
   // 子可见 → 整篇消失」的断链根因已在判定层消解。
-  const { wikis, aliases, moveIn } = await listDramaturgyTreeFor(actor, productionId, rootId);
+  const { nodes, moveIn } = await listDramaturgyTreeFor(actor, productionId, rootId);
   const routeBase = `/production/${productionId}/dramaturgy/inspiration`;
 
   return (
@@ -47,8 +47,7 @@ export default async function DramaturgyInspirationPage({
       <DramaturgyInspirationShell productionId={productionId} productionName={productionName}>
         <WikiShell
           productionId={productionId}
-          wikis={wikis}
-          aliases={aliases}
+          nodes={nodes}
           moveInCandidates={moveIn}
           canCreate={canCreate && treeConfig.enabled}
           navigationBasePath={routeBase}
@@ -59,7 +58,7 @@ export default async function DramaturgyInspirationPage({
             <p className="text-sm text-[var(--muted)]">
               {!treeConfig.enabled
                 ? "当前项目未启用构作灵感文档"
-                : wikis.length > 0
+                : nodes.length > 0
                   ? "从左侧选择一篇灵感文档"
                   : canCreate
                     ? "还没有灵感文档，从左侧新建一篇"

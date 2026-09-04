@@ -235,7 +235,7 @@ export default function WikiDocClient({
       await fetch(`${base}/${asset.id}/mounts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mountType: "wiki", mountId: wiki.id }),
+        body: JSON.stringify({ mountType: "embed", mountId: wiki.id }),
       }).catch(() => {});
       return { src: encodeAssetSrc(asset.id), alt: fileName };
     } catch {
@@ -409,7 +409,6 @@ export default function WikiDocClient({
             <p className="mt-1.5 text-xs text-zinc-400">
               {statusLabel}
               {status === "error" && null}
-              {wiki.isPublic && <span className="ml-2 text-emerald-600">· 全体可见</span>}
               {!canEdit && <span className="ml-2">· 只读</span>}
             </p>
             {canEdit ? (

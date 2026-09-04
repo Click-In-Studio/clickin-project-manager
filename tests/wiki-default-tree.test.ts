@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
 import { createEventReport, createReportNote, deleteEventReport, mountWikiAsReport } from "@/lib/event-db";
 import { createWiki } from "@/lib/wiki/content";
-import { getWikiTreeConfig, ensureReportTreeAnchors, listWikiLibrary } from "@/lib/wiki/tree";
+import { getReportsTreeConfig, ensureReportTreeAnchors } from "@/lib/node/anchors";
+import { listNodeLibrary } from "@/lib/node/db";
 import { deleteWiki } from "@/lib/wiki/content";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 
@@ -23,9 +24,21 @@ async function newEvent(prodId: string, title: string, creator: string): Promise
   return id;
 }
 
+// #420：树位置/权限位在壳节点上。parent_id 是 **node id** 空间；沿链上溯用 nodeRow。
+type Row = { node_id: string; wiki_id: string | null; title: string | null; parent_id: string | null; is_public: boolean; sort_key: string | null };
+async function nodeRow(nodeId: string): Promise<Row | null> {
+  const res = await getPool().query<Row>(
+    `SELECT n.id AS node_id, n.wiki_id::text AS wiki_id, COALESCE(w.title, n.title) AS title,
+            n.parent_id, n.is_public, n.sort_key
+     FROM node n LEFT JOIN wiki w ON w.id = n.wiki_id WHERE n.id = $1`,
+    [nodeId],
+  );
+  return res.rows[0] ?? null;
+}
 async function wikiRow(wikiId: string) {
-  const res = await getPool().query<{ title: string | null; parent_id: string | null; is_public: boolean; sort_key: string | null }>(
-    `SELECT title, parent_id::text AS parent_id, is_public, sort_key FROM wiki WHERE id = $1::uuid`,
+  const res = await getPool().query<Row>(
+    `SELECT n.id AS node_id, n.wiki_id::text AS wiki_id, w.title, n.parent_id, n.is_public, n.sort_key
+     FROM node n JOIN wiki w ON w.id = n.wiki_id WHERE n.wiki_id = $1::uuid`,
     [wikiId],
   );
   return res.rows[0] ?? null;
@@ -33,8 +46,14 @@ async function wikiRow(wikiId: string) {
 
 async function reportWikiId(reportId: string): Promise<string> {
   const res = await getPool().query<{ wiki_id: string }>(
-    `SELECT wiki_id::text AS wiki_id FROM event_report WHERE id = $1`, [reportId]);
+    `SELECT nd.wiki_id::text AS wiki_id FROM event_report er JOIN node nd ON nd.id = er.node_id
+     WHERE er.id = $1`, [reportId]);
   return res.rows[0].wiki_id;
+}
+async function reportNodeId(reportId: string): Promise<string> {
+  const res = await getPool().query<{ node_id: string }>(
+    `SELECT node_id FROM event_report WHERE id = $1`, [reportId]);
+  return res.rows[0].node_id;
 }
 
 let prodId: string;
@@ -68,18 +87,18 @@ describe("default report tree", () => {
     const w = await wikiRow(await reportWikiId(reportId));
     expect(w?.parent_id).toBeTruthy();
 
-    const eventDoc = await wikiRow(w!.parent_id!);
+    const eventDoc = await nodeRow(w!.parent_id!);
     expect(eventDoc?.title).toBe("八一四联排");
     expect(eventDoc?.is_public).toBe(true);
     expect(eventDoc?.parent_id).toBeTruthy();
 
-    const root = await wikiRow(eventDoc!.parent_id!);
+    const root = await nodeRow(eventDoc!.parent_id!);
     expect(root?.title).toBe("报告");
     expect(root?.is_public).toBe(true);
     expect(root?.parent_id).toBeNull();
 
-    const cfg = await getWikiTreeConfig(prodId);
-    expect(cfg.rootWikiId).toBe(eventDoc!.parent_id);
+    const cfg = await getReportsTreeConfig(prodId);
+    expect(cfg.rootNodeId).toBe(eventDoc!.parent_id);
   });
 
   it("anchors are reused (no duplicates) across reports and events", async () => {
@@ -89,25 +108,27 @@ describe("default report tree", () => {
     await createEventReport({ id: r3, eventId: eventB, reportType: "rehearsal", title: "走台报告", body: "x", createdBy: creator });
 
     const roots = await getPool().query(
-      `SELECT 1 FROM wiki WHERE production_id = $1 AND title = '报告' AND parent_id IS NULL`, [prodId]);
+      `SELECT 1 FROM node n JOIN wiki w ON w.id = n.wiki_id
+       WHERE n.production_id = $1 AND w.title = '报告' AND n.parent_id IS NULL`, [prodId]);
     expect(roots.rows.length).toBe(1);
 
     const w2 = await wikiRow(await reportWikiId(r2));
     const w3 = await wikiRow(await reportWikiId(r3));
-    const doc2 = await wikiRow(w2!.parent_id!);
-    const doc3 = await wikiRow(w3!.parent_id!);
+    const doc2 = await nodeRow(w2!.parent_id!);
+    const doc3 = await nodeRow(w3!.parent_id!);
     expect(doc2?.title).toBe("八一四联排");
     expect(doc3?.title).toBe("八一五走台");
     expect(doc2?.parent_id).toBe(doc3?.parent_id);
   });
 
   it("anchor is tracked by id, not title/position (rename survives)", async () => {
-    const cfg = await getWikiTreeConfig(prodId);
-    await getPool().query(`UPDATE wiki SET title = '演出档案' WHERE id = $1::uuid`, [cfg.rootWikiId]);
+    const cfg = await getReportsTreeConfig(prodId);
+    const rootWikiId = (await nodeRow(cfg.rootNodeId!))!.wiki_id!;
+    await getPool().query(`UPDATE wiki SET title = '演出档案' WHERE id = $1::uuid`, [rootWikiId]);
     const again = await ensureReportTreeAnchors(prodId, eventA);
-    const doc = await wikiRow(again!);
-    expect(doc?.parent_id).toBe(cfg.rootWikiId);
-    await getPool().query(`UPDATE wiki SET title = '报告' WHERE id = $1::uuid`, [cfg.rootWikiId]);
+    const doc = await nodeRow(again!);
+    expect(doc?.parent_id).toBe(cfg.rootNodeId);
+    await getPool().query(`UPDATE wiki SET title = '报告' WHERE id = $1::uuid`, [rootWikiId]);
   });
 
   it("note wiki gets title '<部门> · 备注' and parents under the report wiki", async () => {
@@ -119,28 +140,27 @@ describe("default report tree", () => {
       content: "灯位需要调整", authorUserId: creator, authorName: "作者", createdVia: "dept",
     });
     const noteWiki = await getPool().query<{ wiki_id: string }>(
-      `SELECT wiki_id::text AS wiki_id FROM event_report_note WHERE id = $1`, [noteId]);
+      `SELECT nd.wiki_id::text AS wiki_id FROM event_report_note n JOIN node nd ON nd.id = n.node_id
+       WHERE n.id = $1`, [noteId]);
     const w = await wikiRow(noteWiki.rows[0].wiki_id);
     expect(w?.title).toBe("灯光 · 备注");
-    expect(w?.parent_id).toBe(await reportWikiId(reportId));
+    expect(w?.parent_id).toBe(await reportNodeId(reportId));
     expect(w?.sort_key).toBeTruthy();
   });
 
   it("custom parent overrides; explicit null skips placement", async () => {
-    const customParent = await getPool().query<{ id: string }>(
-      `INSERT INTO wiki (production_id, title, sort_key) VALUES ($1, '自定义容器', 'zzzz000000') RETURNING id::text AS id`,
-      [prodId]);
+    const customParent = await createWiki({ productionId: prodId, title: "自定义容器", createdBy: creator });
     const rCustom = `rp${shortId()}`;
     await createEventReport({
       id: rCustom, eventId: eventA, reportType: "rehearsal", title: "自定义挂载",
-      body: "x", createdBy: creator, parentWikiId: customParent.rows[0].id,
+      body: "x", createdBy: creator, parentNodeId: customParent.nodeId,
     });
-    expect((await wikiRow(await reportWikiId(rCustom)))?.parent_id).toBe(customParent.rows[0].id);
+    expect((await wikiRow(await reportWikiId(rCustom)))?.parent_id).toBe(customParent.nodeId);
 
     const rNone = `rp${shortId()}`;
     await createEventReport({
       id: rNone, eventId: eventA, reportType: "rehearsal", title: "不挂树",
-      body: "x", createdBy: creator, parentWikiId: null,
+      body: "x", createdBy: creator, parentNodeId: null,
     });
     expect((await wikiRow(await reportWikiId(rNone)))?.parent_id).toBeNull();
   });
@@ -149,7 +169,7 @@ describe("default report tree", () => {
     const { prodId: prod2 } = await makeProduction();
     try {
       await getPool().query(
-        `INSERT INTO production_wiki_config (production_id, reports_tree_enabled) VALUES ($1, false)
+        `INSERT INTO production_node_config (production_id, reports_tree_enabled) VALUES ($1, false)
          ON CONFLICT (production_id) DO UPDATE SET reports_tree_enabled = false`,
         [prod2]);
       const ev = await newEvent(prod2, "关树事件", creator);
@@ -164,16 +184,19 @@ describe("default report tree", () => {
 
   it("anchor docs (root/event dir) cannot be deleted and are flagged in library list", async () => {
     const eventDocId = await ensureReportTreeAnchors(prodId, eventA);
-    const cfg = await getWikiTreeConfig(prodId);
-    expect(await deleteWiki(cfg.rootWikiId!, prodId)).toEqual({ ok: false, reason: "anchor" });
-    expect(await deleteWiki(eventDocId!, prodId)).toEqual({ ok: false, reason: "anchor" });
+    const cfg = await getReportsTreeConfig(prodId);
+    // deleteWiki 吃内容 id：经 nodeRow 反查
+    const rootWikiId = (await nodeRow(cfg.rootNodeId!))!.wiki_id!;
+    const eventDocWikiId = (await nodeRow(eventDocId!))!.wiki_id!;
+    expect(await deleteWiki(rootWikiId, prodId)).toEqual({ ok: false, reason: "anchor" });
+    expect(await deleteWiki(eventDocWikiId, prodId)).toEqual({ ok: false, reason: "anchor" });
 
-    const list = await listWikiLibrary(prodId);
-    const byId = new Map(list.map(w => [w.id, w]));
-    expect(byId.get(cfg.rootWikiId!)?.isAnchor).toBe(true);
+    const list = await listNodeLibrary(prodId);
+    const byId = new Map(list.map(n => [n.id, n]));
+    expect(byId.get(cfg.rootNodeId!)?.isAnchor).toBe(true);
     expect(byId.get(eventDocId!)?.isAnchor).toBe(true);
     // 普通文档不带锚点标记
-    expect(list.some(w => !w.isAnchor)).toBe(true);
+    expect(list.some(n => !n.isAnchor)).toBe(true);
   });
 
   it("deleting a report unmounts (edge dies, docs survive; author takes over via wiki rows)", async () => {
@@ -186,8 +209,10 @@ describe("default report tree", () => {
       content: "note 内容", authorUserId: creator, authorName: "作者", createdVia: "dept",
     });
     const noteWikiId = (await getPool().query<{ wiki_id: string }>(
-      `SELECT wiki_id::text AS wiki_id FROM event_report_note WHERE id = $1`, [noteId])).rows[0].wiki_id;
+      `SELECT nd.wiki_id::text AS wiki_id FROM event_report_note n JOIN node nd ON nd.id = n.node_id
+       WHERE n.id = $1`, [noteId])).rows[0].wiki_id;
     const rWikiId = await reportWikiId(reportId);
+    const rNodeId = await reportNodeId(reportId);
 
     await deleteEventReport(reportId, eventB);
 
@@ -199,7 +224,7 @@ describe("default report tree", () => {
     // 文档存（树位置保留：note wiki 仍是报告文档的子文档）
     const noteRow = await wikiRow(noteWikiId);
     expect((await wikiRow(rWikiId))).not.toBeNull();
-    expect(noteRow?.parent_id).toBe(rWikiId);
+    expect(noteRow?.parent_id).toBe(rNodeId);
     // 作者行集接管：creator 获 wiki manage 行（含 grants@edit 保留段）
     const grants = await getPool().query(
       `SELECT 1 FROM production_member_grant
@@ -242,7 +267,7 @@ describe("default report tree", () => {
     const eventDocId = await ensureReportTreeAnchors(prodId, eventA);
     const { updateProductionEvent } = await import("@/lib/event-db");
     await updateProductionEvent(eventA, prodId, { title: "八一四联排（改）" });
-    expect((await wikiRow(eventDocId!))?.title).toBe("八一四联排（改）");
+    expect((await nodeRow(eventDocId!))?.title).toBe("八一四联排（改）");
     await updateProductionEvent(eventA, prodId, { title: "八一四联排" });
   });
 });

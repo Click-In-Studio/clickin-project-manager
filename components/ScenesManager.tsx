@@ -327,7 +327,6 @@ function SceneEditRow({
                 /* 挂载有自己的钥匙（scene/<id>/mounts@create），不随字段写权限
                    下发——用 canEdit 这个粗门开合等于「入口亮着、点下去 403」 */
                 canEdit={canMountScene(fieldPerms, scene.id)}
-                versionId={versionId}
                 display="compact"
               />
             </div>

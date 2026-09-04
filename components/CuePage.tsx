@@ -11,7 +11,6 @@ import { BASE_PATH } from "@/lib/base-path";
 import type { Block, Character, Scene } from "@/lib/script-types";
 import type { CueList } from "@/lib/cue-list-types";
 import type { Cue, CueAnchor } from "@/lib/cue-types";
-import CueMountAssets from "@/components/assets/CueMountAssets";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/SmartTextarea";
@@ -378,10 +377,11 @@ function CueCommentsPanel({
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
         {/* Cue-level assets */}
-        <CueMountAssets
+        {/* #420：挂载锚稳定 cue_id，修订分辨路径退役 */}
+        <MountPointAssets
           productionId={productionId}
-          cueId={cueId}
-          versionId={versionId ?? null}
+          mountType="cue"
+          mountId={logicalCueId}
           label="Cue 附件"
           canEdit={true}
           display="panel"

@@ -3,19 +3,20 @@ import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { createWiki } from "@/lib/wiki/content";
-import { getDramaturgyTreeConfig, listWikiLibrary, setWikiListable } from "@/lib/wiki/tree";
+import { getDramaturgyTreeConfig } from "@/lib/node/anchors";
+import { listNodeLibrary, setNodeListable, getNodeByWikiId, type NodeEntry } from "@/lib/node/db";
 import {
-  listDramaturgyMoveInCandidates, listDramaturgyWikiAliases, listDramaturgyWikiSubtree,
-} from "@/lib/wiki/dramaturgy";
-import { listDramaturgyTreeFor } from "@/lib/wiki/tree-view";
+  listDramaturgyMoveInCandidates, listDramaturgySubtree,
+} from "@/lib/node/dramaturgy";
+import { listDramaturgyTreeFor } from "@/lib/node/tree-view";
 import { readParentAnchor } from "@/lib/wiki/input";
-import { resolveWikiAnchorParent } from "@/lib/wiki/placement";
+import { resolveNodeAnchorParent } from "@/lib/node/placement";
 import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
 import { PATCH as wikiPATCH } from "@/app/api/production/[id]/wiki/[wikiId]/route";
 import { POST as aliasPOST } from "@/app/api/production/[id]/wiki-alias/route";
 import { makeProduction, cleanupProduction } from "./factories";
-import type { WikiListEntry } from "@/lib/wiki/types";
-import { canReachAliasTarget, type WikiAliasEntry } from "@/lib/wiki/alias";
+import { canReachLinkTarget } from "@/lib/node/link";
+import { getNode } from "@/lib/node/db";
 
 // #355 灵感库「移入」。两种形态是同一个入口的两个选项：
 //   本体移入 —— PATCH /wiki/<id> 改 parent_id
@@ -29,11 +30,18 @@ import { canReachAliasTarget, type WikiAliasEntry } from "@/lib/wiki/alias";
 const idSet = (...ids: string[]) => ({ wildcard: false, ids: new Set(ids) });
 const ALL = { wildcard: true, ids: new Set<string>() };
 
-function entry(id: string, parentId: string | null, isAnchor = false): WikiListEntry {
-  return { id, parentId, title: id, tags: [], sortKey: null, isAnchor } as unknown as WikiListEntry;
+function entry(id: string, parentId: string | null, isAnchor = false): NodeEntry {
+  // 桩：wiki 节点，wikiId=id（editable 集合按内容 id 对撞）
+  return {
+    id, parentId, kind: "wiki", wikiId: id, displayTitle: id, title: null,
+    tags: [], sortKey: null, isAnchor, listable: true, isPublic: false,
+    assetId: null, linkTargetId: null, targetKind: null, targetWikiId: null, targetTitle: null,
+    productionId: "p", createdBy: null, createdAt: "", updatedAt: "",
+  } as NodeEntry;
 }
-function aliasTo(targetId: string, parentId: string): WikiAliasEntry {
-  return { id: `wal_${targetId}`, parentId, targetType: "wiki", targetId } as unknown as WikiAliasEntry;
+function linkTo(targetNodeId: string, parentId: string): NodeEntry {
+  return { ...entry(`nd_${targetNodeId}`, parentId), kind: "link", wikiId: null,
+    linkTargetId: targetNodeId } as NodeEntry;
 }
 
 describe("listDramaturgyMoveInCandidates", () => {
@@ -41,7 +49,7 @@ describe("listDramaturgyMoveInCandidates", () => {
     entry("root", null, true), entry("inside", "root"),
     entry("free", null), entry("boxed", "box"), entry("box", null),
   ];
-  const subtree = listDramaturgyWikiSubtree(all, "root");
+  const subtree = listDramaturgySubtree(all, "root");
 
   it("只给子树外的文档，根自身与子树成员都不是候选", () => {
     const out = listDramaturgyMoveInCandidates(all, subtree, "root",
@@ -81,7 +89,7 @@ describe("listDramaturgyMoveInCandidates", () => {
 
   it("灵感库里已有指向它的链接时打标（选择器里标出来，不拦）", () => {
     const out = listDramaturgyMoveInCandidates(all, subtree, "root",
-      { enumerable: ALL, editable: ALL }, [aliasTo("free", "root")]);
+      { enumerable: ALL, editable: ALL }, [linkTo("free", "root")]);
     expect(out.find(c => c.id === "free")?.linked).toBe(true);
     expect(out.find(c => c.id === "box")?.linked).toBe(false);
   });
@@ -138,8 +146,8 @@ function aliasReq(prodId: string, userId: string, isAdmin: boolean, body: unknow
 }
 async function anchorUntouched(prodId: string) {
   const cfg = await getPool().query(
-    "SELECT dramaturgy_root_wiki_id FROM production_wiki_config WHERE production_id = $1", [prodId]);
-  return cfg.rows[0]?.dramaturgy_root_wiki_id ?? null;
+    "SELECT dramaturgy_root_node_id FROM production_node_config WHERE production_id = $1", [prodId]);
+  return cfg.rows[0]?.dramaturgy_root_node_id ?? null;
 }
 
 describe("PATCH /wiki 的 parentAnchor 落位（本体移入）", () => {
@@ -153,13 +161,12 @@ describe("PATCH /wiki 的 parentAnchor 落位（本体移入）", () => {
     users.push(admin);
   });
   afterAll(async () => {
-    await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [prodId]).catch(() => {});
     await cleanupProduction(prodId).catch(() => {});
     await getPool().query("DELETE FROM app_user WHERE id = ANY($1)", [users]).catch(() => {});
   });
 
   it("锚点尚未懒建时，parentAnchor 补建根并把本体挂上去", async () => {
-    expect((await getDramaturgyTreeConfig(prodId)).rootWikiId).toBeNull();
+    expect((await getDramaturgyTreeConfig(prodId)).rootNodeId).toBeNull();
     const doc = await createWiki({ productionId: prodId, title: "库里的一篇", createdBy: admin });
 
     const res = await wikiPATCH(
@@ -167,11 +174,11 @@ describe("PATCH /wiki 的 parentAnchor 落位（本体移入）", () => {
       { params: Promise.resolve({ id: prodId, wikiId: doc.id }) });
     expect(res.status).toBe(200);
 
-    const rootId = (await getDramaturgyTreeConfig(prodId)).rootWikiId;
+    const rootId = (await getDramaturgyTreeConfig(prodId)).rootNodeId;
     expect(rootId).not.toBeNull();
-    expect((await res.json()).wiki.parentId).toBe(rootId);
+    expect((await getNodeByWikiId(doc.id))?.parentId).toBe(rootId);
     // 落进子树＝在「灵感文档」工作区里看得见
-    expect(listDramaturgyWikiSubtree(await listWikiLibrary(prodId), rootId).map(w => w.id))
+    expect(listDramaturgySubtree(await listNodeLibrary(prodId), rootId).map(n => n.wikiId))
       .toContain(doc.id);
   });
 
@@ -179,10 +186,10 @@ describe("PATCH /wiki 的 parentAnchor 落位（本体移入）", () => {
     const box = await createWiki({ productionId: prodId, title: "别处", createdBy: admin });
     const doc = await createWiki({ productionId: prodId, title: "挂别处的", createdBy: admin });
     const res = await wikiPATCH(
-      patchReq(prodId, doc.id, admin, true, { parentId: box.id, parentAnchor: "dramaturgy" }),
+      patchReq(prodId, doc.id, admin, true, { parentId: box.nodeId, parentAnchor: "dramaturgy" }),
       { params: Promise.resolve({ id: prodId, wikiId: doc.id }) });
     expect(res.status).toBe(200);
-    expect((await res.json()).wiki.parentId).toBe(box.id);
+    expect((await getNodeByWikiId(doc.id))?.parentId).toBe(box.nodeId);
   });
 
   // 一轮 AI review #1 的回归证人：上一版为了把写事务挡在 400 后面，把标题校验提到了
@@ -205,38 +212,38 @@ describe("PATCH /wiki 的 parentAnchor 落位（本体移入）", () => {
   // parentId 与 parentAnchor 同送不是客户端会做的事，但两者哪个胜必须是确定的：
   // `parentId: null` 与"字段缺席"在服务端 collapse 成同一个 falsy → 锚点胜。
   it("parentId: null 与 parentAnchor 同送时锚点胜（与 POST /wiki 同语义）", async () => {
-    const rootId = (await getDramaturgyTreeConfig(prodId)).rootWikiId;
+    const rootId = (await getDramaturgyTreeConfig(prodId)).rootNodeId;
     expect(rootId).not.toBeNull();
     const doc = await createWiki({ productionId: prodId, title: "两个字段同送", createdBy: admin });
     const res = await wikiPATCH(
       patchReq(prodId, doc.id, admin, true, { parentId: null, parentAnchor: "dramaturgy" }),
       { params: Promise.resolve({ id: prodId, wikiId: doc.id }) });
     expect(res.status).toBe(200);
-    expect((await res.json()).wiki.parentId).toBe(rootId);   // 不是全库顶层的 null
+    expect((await getNodeByWikiId(doc.id))?.parentId).toBe(rootId);   // 不是全库顶层的 null
   });
 
   it("锚点已存在时复用同一个根，不重复建", async () => {
-    const before = (await getDramaturgyTreeConfig(prodId)).rootWikiId;
+    const before = (await getDramaturgyTreeConfig(prodId)).rootNodeId;
     expect(before).not.toBeNull();
     const doc = await createWiki({ productionId: prodId, title: "第二次移入", createdBy: admin });
     const res = await wikiPATCH(
       patchReq(prodId, doc.id, admin, true, { parentAnchor: "dramaturgy" }),
       { params: Promise.resolve({ id: prodId, wikiId: doc.id }) });
     expect(res.status).toBe(200);
-    expect((await res.json()).wiki.parentId).toBe(before);
-    expect((await getDramaturgyTreeConfig(prodId)).rootWikiId).toBe(before);
+    expect((await getNodeByWikiId(doc.id))?.parentId).toBe(before);
+    expect((await getDramaturgyTreeConfig(prodId)).rootNodeId).toBe(before);
   });
 
   it("认不出的 parentAnchor 是 400，不静默落到全库顶层", async () => {
     const box = await createWiki({ productionId: prodId, title: "非法锚点·容器", createdBy: admin });
     const doc = await createWiki({
-      productionId: prodId, title: "非法锚点·文档", parentId: box.id, createdBy: admin });
+      productionId: prodId, title: "非法锚点·文档", parentNodeId: box.nodeId, createdBy: admin });
     const res = await wikiPATCH(
       patchReq(prodId, doc.id, admin, true, { parentAnchor: "dramaturgyy" }),
       { params: Promise.resolve({ id: prodId, wikiId: doc.id }) });
     expect(res.status).toBe(400);
     // 位置没动：静默落位才是这条门要挡的东西
-    expect((await listWikiLibrary(prodId)).find(w => w.id === doc.id)?.parentId).toBe(box.id);
+    expect((await getNodeByWikiId(doc.id))?.parentId).toBe(box.nodeId);
   });
 
   // write-before-authz 的回归证人（#358 二轮 AI review 同一条纪律）：
@@ -249,7 +256,7 @@ describe("PATCH /wiki 的 parentAnchor 落位（本体移入）", () => {
     try {
       const box = await createWiki({ productionId: clean, title: "别人的目录", createdBy: owner });
       const doc = await createWiki({
-        productionId: clean, title: "别人目录里的一篇", parentId: box.id, createdBy: owner });
+        productionId: clean, title: "别人目录里的一篇", parentNodeId: box.nodeId, createdBy: owner });
       await shareTo(clean, doc.id, mover, "edit");   // 有本篇的 edit，没有 box 的
 
       expect(await anchorUntouched(clean)).toBeNull();
@@ -260,7 +267,6 @@ describe("PATCH /wiki 的 parentAnchor 落位（本体移入）", () => {
       expect((await res.json()).error).toContain("移出");
       expect(await anchorUntouched(clean)).toBeNull();   // ← 门跑在 ensure 之前
     } finally {
-      await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [clean]).catch(() => {});
       await cleanupProduction(clean).catch(() => {});
     }
   });
@@ -278,25 +284,25 @@ describe("PATCH /wiki 的 parentAnchor 落位（本体移入）", () => {
       const seed = await createWiki({ productionId: clean, title: "种子", createdBy: owner });
       await wikiPATCH(patchReq(clean, seed.id, owner, true, { parentAnchor: "dramaturgy" }),
         { params: Promise.resolve({ id: clean, wikiId: seed.id }) });
-      const rootId = (await getDramaturgyTreeConfig(clean)).rootWikiId!;
+      const rootId = (await getDramaturgyTreeConfig(clean)).rootNodeId!;
       expect(rootId).not.toBeNull();
 
       // 自己建的文档：createWiki 已经落了创建者行集，edit 门自然过
       const doc = await createWiki({ productionId: clean, title: "我的一篇", createdBy: mover });
 
-      await setWikiListable(rootId, clean, false);
+      await setNodeListable(rootId, clean, false);
       const blocked = await wikiPATCH(
         patchReq(clean, doc.id, mover, false, { parentAnchor: "dramaturgy" }),
         { params: Promise.resolve({ id: clean, wikiId: doc.id }) });
       expect(blocked.status).toBe(403);
-      expect((await listWikiLibrary(clean)).find(w => w.id === doc.id)?.parentId).toBeNull();
+      expect((await getNodeByWikiId(doc.id))?.parentId).toBeNull();
 
-      await setWikiListable(rootId, clean, true);
+      await setNodeListable(rootId, clean, true);
       const ok = await wikiPATCH(
         patchReq(clean, doc.id, mover, false, { parentAnchor: "dramaturgy" }),
         { params: Promise.resolve({ id: clean, wikiId: doc.id }) });
       expect(ok.status).toBe(200);
-      expect((await ok.json()).wiki.parentId).toBe(rootId);
+      expect((await getNodeByWikiId(doc.id))?.parentId).toBe(rootId);
     } finally {
       await cleanupProduction(clean).catch(() => {});
     }
@@ -335,29 +341,23 @@ describe("POST /wiki-alias 的 parentAnchor 落位（以链接移入）", () => 
     users.push(admin);
     try {
       const doc = await createWiki({ productionId: prodId, title: "库里的一篇", createdBy: admin });
-      expect((await getDramaturgyTreeConfig(prodId)).rootWikiId).toBeNull();
+      expect((await getDramaturgyTreeConfig(prodId)).rootNodeId).toBeNull();
 
       const res = await aliasPOST(
-        aliasReq(prodId, admin, true, { parentAnchor: "dramaturgy", targetType: "wiki", targetId: doc.id }),
+        aliasReq(prodId, admin, true, { parentAnchor: "dramaturgy", targetNodeId: doc.nodeId }),
         { params: Promise.resolve({ id: prodId }) });
       expect(res.status).toBe(201);
       const { alias } = await res.json();
 
-      const rootId = (await getDramaturgyTreeConfig(prodId)).rootWikiId;
+      const rootId = (await getDramaturgyTreeConfig(prodId)).rootNodeId;
       expect(alias.parentId).toBe(rootId);
       // 目标本体没动：还在全库顶层，没被拽进子树
-      const all = await listWikiLibrary(prodId);
-      expect(all.find(w => w.id === doc.id)?.parentId).toBeNull();
-      // 链接是工作区成员（成员判据是**位置**，与目标在哪无关）
-      const subtree = listDramaturgyWikiSubtree(all, rootId);
-      expect(listDramaturgyWikiAliases(
-        [alias as WikiAliasEntry], subtree, rootId).map(a => a.id)).toEqual([alias.id]);
+      expect((await getNodeByWikiId(doc.id))?.parentId).toBeNull();
       // 移入后它不再出现在候选表里（那边已经有链接了 → 打标）
       const { moveIn } = await listDramaturgyTreeFor(
         { userId: admin, isAdmin: true, isOwner: false }, prodId, rootId);
-      expect(moveIn.find(c => c.id === doc.id)?.linked).toBe(true);
+      expect(moveIn.find(c => c.id === doc.nodeId)?.linked).toBe(true);
     } finally {
-      await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [prodId]).catch(() => {});
       await cleanupProduction(prodId).catch(() => {});
     }
   });
@@ -369,14 +369,13 @@ describe("POST /wiki-alias 的 parentAnchor 落位（以链接移入）", () => 
     try {
       const doc = await createWiki({ productionId: prodId, title: "目标", createdBy: admin });
       const res = await aliasPOST(
-        aliasReq(prodId, admin, true, { parentAnchor: "inspiration", targetType: "wiki", targetId: doc.id }),
+        aliasReq(prodId, admin, true, { parentAnchor: "inspiration", targetNodeId: doc.nodeId }),
         { params: Promise.resolve({ id: prodId }) });
       expect(res.status).toBe(400);
       const { rows } = await getPool().query(
-        "SELECT 1 FROM wiki_alias WHERE production_id = $1", [prodId]);
+        "SELECT 1 FROM node WHERE production_id = $1 AND kind = 'link'", [prodId]);
       expect(rows.length).toBe(0);
     } finally {
-      await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [prodId]).catch(() => {});
       await cleanupProduction(prodId).catch(() => {});
     }
   });
@@ -393,25 +392,25 @@ describe("POST /wiki-alias 的 parentAnchor 落位（以链接移入）", () => 
       const seed = await createWiki({ productionId: prodId, title: "种子", createdBy: owner });
       await wikiPATCH(patchReq(prodId, seed.id, owner, true, { parentAnchor: "dramaturgy" }),
         { params: Promise.resolve({ id: prodId, wikiId: seed.id }) });
-      const rootId = (await getDramaturgyTreeConfig(prodId)).rootWikiId!;
-      await setWikiListable(rootId, prodId, false);
+      const rootId = (await getDramaturgyTreeConfig(prodId)).rootNodeId!;
+      await setNodeListable(rootId, prodId, false);
 
       // 目标也够不着（既列不到也读不到）
       const doc = await createWiki({ productionId: prodId, title: "够不着的目标", createdBy: owner });
-      await setWikiListable(doc.id, prodId, false);
+      await setNodeListable(doc.nodeId, prodId, false);
       await grantCreate(prodId, outsider);
 
       // 目标确实够不着——否则这条测的就不是"两条门都不过时报哪一条"
-      expect(await canReachAliasTarget(
-        { userId: outsider, isAdmin: false, isOwner: false }, prodId, "wiki", doc.id)).toBe(false);
+      const targetNode = (await getNode(doc.nodeId, prodId))!;
+      expect(await canReachLinkTarget(
+        { userId: outsider, isAdmin: false, isOwner: false }, prodId, targetNode)).toBe(false);
 
       const res = await aliasPOST(
-        aliasReq(prodId, outsider, false, { parentAnchor: "dramaturgy", targetType: "wiki", targetId: doc.id }),
+        aliasReq(prodId, outsider, false, { parentAnchor: "dramaturgy", targetNodeId: doc.nodeId }),
         { params: Promise.resolve({ id: prodId }) });
       expect(res.status).toBe(403);
-      expect((await res.json()).error).toContain("父文档");   // 不是"目标文档不存在或不可见"
+      expect((await res.json()).error).toContain("父节点");   // 不是"目标不存在或不可见"
     } finally {
-      await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [prodId]).catch(() => {});
       await cleanupProduction(prodId).catch(() => {});
     }
   });
@@ -426,12 +425,11 @@ describe("POST /wiki-alias 的 parentAnchor 落位（以链接移入）", () => 
       await shareTo(prodId, doc.id, outsider, "view");
 
       const res = await aliasPOST(
-        aliasReq(prodId, outsider, false, { parentAnchor: "dramaturgy", targetType: "wiki", targetId: doc.id }),
+        aliasReq(prodId, outsider, false, { parentAnchor: "dramaturgy", targetNodeId: doc.nodeId }),
         { params: Promise.resolve({ id: prodId }) });
       expect(res.status).toBe(403);
       expect(await anchorUntouched(prodId)).toBeNull();
     } finally {
-      await getPool().query("DELETE FROM wiki_alias WHERE production_id = $1", [prodId]).catch(() => {});
       await cleanupProduction(prodId).catch(() => {});
     }
   });
@@ -455,16 +453,16 @@ describe("readParentAnchor", () => {
   });
 });
 
-describe("resolveWikiAnchorParent", () => {
+describe("resolveNodeAnchorParent", () => {
   it("首次懒建、其后幂等——三个调用点拿到的是同一个根", async () => {
     const { prodId } = await makeProduction();
     try {
-      expect((await getDramaturgyTreeConfig(prodId)).rootWikiId).toBeNull();
-      const first = await resolveWikiAnchorParent(prodId, "dramaturgy");
+      expect((await getDramaturgyTreeConfig(prodId)).rootNodeId).toBeNull();
+      const first = await resolveNodeAnchorParent(prodId, "dramaturgy");
       expect(first).not.toBeNull();
-      expect(await resolveWikiAnchorParent(prodId, "dramaturgy")).toBe(first);
-      expect(await resolveWikiAnchorParent(prodId, "dramaturgy")).toBe(first);
-      expect((await listWikiLibrary(prodId)).filter(w => w.id === first).length).toBe(1);
+      expect(await resolveNodeAnchorParent(prodId, "dramaturgy")).toBe(first);
+      expect(await resolveNodeAnchorParent(prodId, "dramaturgy")).toBe(first);
+      expect((await listNodeLibrary(prodId)).filter(n => n.id === first).length).toBe(1);
     } finally {
       await cleanupProduction(prodId).catch(() => {});
     }

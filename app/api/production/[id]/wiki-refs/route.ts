@@ -5,7 +5,7 @@ import { hasGrant, hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { canAccessNode } from "@/lib/grant-template";
 import { listWikiRefsForEntity, addManualWikiEntityLink, removeManualWikiEntityLink } from "@/lib/wiki/links";
 import { createWiki, deleteWiki } from "@/lib/wiki/content";
-import { ensureDramaturgyRootAnchor } from "@/lib/wiki/tree";
+import { ensureDramaturgyRootAnchor } from "@/lib/node/anchors";
 import { canViewWiki } from "@/lib/wiki/perm";
 import { canViewAsset } from "@/lib/asset/perm";
 import { getAsset } from "@/lib/asset/db";
@@ -133,7 +133,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   }
   const rootId = await ensureDramaturgyRootAnchor(productionId);
   const wiki = await createWiki({
-    productionId, title, parentId: rootId, createdBy: userId,
+    productionId, title, parentNodeId: rootId, createdBy: userId,
   });
   // 建档与建边不在同一事务（createWiki 本身是多语句+广播副作用，不接受外部
   // client）——以补偿删除保证"啪建啪跳"流的原子观感：边落不下就不留孤儿文档

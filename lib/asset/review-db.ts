@@ -34,7 +34,7 @@ export async function listPrivateAssets(productionId: string): Promise<PrivateAs
     }>(
       `SELECT a.id, a.name, a.file_name, a.asset_type, a.mime_type,
               a.uploader_user_id, up.name AS uploader_name, a.created_at,
-              (SELECT COUNT(*) FROM asset_mount m WHERE m.asset_id = a.id)::text AS mount_count
+              (SELECT COUNT(*) FROM node_mount m JOIN node nn ON nn.id = m.node_id WHERE nn.asset_id = a.id)::text AS mount_count
        FROM asset a
        LEFT JOIN user_profile up ON up.user_id = a.uploader_user_id
        WHERE a.production_id = $1 AND NOT a.is_public

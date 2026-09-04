@@ -30,7 +30,7 @@ beforeAll(async () => {
   rootId = root.id;
   const child = await createWiki({
     productionId: prodId, title: "子文档", body: `链接回根：[#wiki:${rootId}]`,
-    parentId: rootId, createdBy: ownerId,
+    parentNodeId: root.nodeId, createdBy: ownerId,
   });
   childId = child.id;
   const priv = await createWiki({ productionId: prodId, title: "私有文档", body: "只有所有者能看", createdBy: ownerId });

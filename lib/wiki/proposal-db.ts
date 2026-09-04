@@ -46,8 +46,11 @@ type WikiProposalRow = {
   created_wiki_id: string | null; created_at: Date;
 };
 
+// #420：存储列是 parent_node_id（node id），对外接口维持 AI 协议的 wiki id——
+// 读时经壳节点翻译回来，写时反向翻译。协议与存储解耦在此一处。
 const SELECT_COLUMNS = `id::text AS id, production_id, tool_call_id, proposed_by::text AS proposed_by,
-            action, target_wiki_id::text AS target_wiki_id, parent_wiki_id::text AS parent_wiki_id,
+            action, target_wiki_id::text AS target_wiki_id,
+            (SELECT n.wiki_id::text FROM node n WHERE n.id = wiki_proposal.parent_node_id) AS parent_wiki_id,
             title, body, tags, summary, has_permission, permission_key, status,
             created_wiki_id::text AS created_wiki_id, created_at`;
 
@@ -73,12 +76,13 @@ export async function insertWikiProposal(params: {
 }): Promise<WikiProposal> {
   const res = await getPool().query<WikiProposalRow>(
     `INSERT INTO wiki_proposal
-       (production_id, tool_call_id, proposed_by, action, target_wiki_id, parent_wiki_id,
+       (production_id, tool_call_id, proposed_by, action, target_wiki_id, parent_node_id,
         title, body, tags, summary, has_permission, permission_key)
-     VALUES ($1, $2, $3, $4, $5::uuid, $6::uuid, $7, $8, $9, $10, $11, $12)
+     VALUES ($1, $2, $3, $4, $5::uuid,
+             (SELECT n.id FROM node n WHERE n.wiki_id = $6::uuid), $7, $8, $9, $10, $11, $12)
      ON CONFLICT (production_id, tool_call_id) DO UPDATE SET
        action = EXCLUDED.action, target_wiki_id = EXCLUDED.target_wiki_id,
-       parent_wiki_id = EXCLUDED.parent_wiki_id, title = EXCLUDED.title, body = EXCLUDED.body,
+       parent_node_id = EXCLUDED.parent_node_id, title = EXCLUDED.title, body = EXCLUDED.body,
        tags = EXCLUDED.tags, summary = EXCLUDED.summary, has_permission = EXCLUDED.has_permission,
        permission_key = EXCLUDED.permission_key
        WHERE wiki_proposal.status = 'pending'

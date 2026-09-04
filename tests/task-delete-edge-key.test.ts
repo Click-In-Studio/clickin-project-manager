@@ -278,7 +278,8 @@ describe("M-15(c)：有挂载边时本体不可删", () => {
       title: `M15c${shortId()}`, body: "", createdBy: organizerId,
     });
     const { rows } = await getPool().query<{ wiki_id: string }>(
-      `SELECT wiki_id::text AS wiki_id FROM event_report WHERE id = $1`, [report.id],
+      `SELECT nd.wiki_id::text AS wiki_id FROM event_report er
+       JOIN node nd ON nd.id = er.node_id WHERE er.id = $1`, [report.id],
     );
     expect(rows[0]?.wiki_id).toBeTruthy();
 
@@ -287,13 +288,15 @@ describe("M-15(c)：有挂载边时本体不可删", () => {
     if (!res.ok) expect(res.reason).toBe("mounted");
   });
 
-  it("棘轮：deleteWiki 必须保留挂载边检查（拿掉它 M-15(c) 的绕行就成真）", async () => {
+  it("棘轮：deleteNode 必须保留挂载边检查（拿掉它 M-15(c) 的绕行就成真）", async () => {
+    // #420 后删除入口在 node 域：deleteWiki 只是薄转发，mounted 守卫在 deleteNode
     const { readFileSync } = await import("fs");
-    const src = readFileSync("lib/wiki/content.ts", "utf8");
-    const i = src.indexOf("export async function deleteWiki");
-    const body = src.slice(i, i + 2000);
+    const src = readFileSync("lib/node/db.ts", "utf8");
+    const i = src.indexOf("export async function deleteNode");
+    const body = src.slice(i, i + 2500);
     expect(body).toMatch(/event_report\b/);
     expect(body).toMatch(/event_report_note\b/);
+    expect(body).toMatch(/node_mount\b/);
     expect(body).toMatch(/reason:\s*"mounted"/);
   });
 });

@@ -1,31 +1,21 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, cowBlockSnapshotForMount, cowCueRevisionForMount, getVersion } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset } from "@/lib/asset/db";
-import { addAssetMount, listAssetMounts, type MountType, type MountMode } from "@/lib/asset/mount";
+import { getNodeByAssetId } from "@/lib/node/db";
+import { addNodeMount, listNodeMounts, type MountType } from "@/lib/node/mount";
 import { canViewAsset, canPublishAsset, mountHostSidePermitted } from "@/lib/asset/perm";
-import { rejectNonHeadWrite } from "@/lib/head-version";
 import { getPool } from "@/lib/pg";
 
 type Ctx = { params: Promise<{ id: string; assetId: string }> };
 
-async function validateVersion(productionId: string, versionId?: string | null) {
-  if (!versionId) return true;
-  const version = await getVersion(versionId);
-  return version?.productionId === productionId;
-}
-
+// 挂载目标存在性校验（多态 mount_id 无 FK，归属校验在应用层——node 契约）。
+// #420 退役词汇不再受理：production（≡树可枚举）、wiki（→embed）、version/
+// scene_snapshot/block_snapshot/cue_revision（版本纪律：挂载锚稳定 id）。
 async function validateMountTarget(productionId: string, mountType: MountType, mountId: string) {
   const pool = getPool();
   switch (mountType) {
-    case "production":
-      return mountId === productionId;
-    case "version": {
-      const res = await pool.query("SELECT 1 FROM version WHERE id = $1 AND production_id = $2", [mountId, productionId]);
-      return res.rows.length > 0;
-    }
-    case "scene":
-    case "scene_snapshot": {
+    case "scene": {
       const res = await pool.query("SELECT 1 FROM scene WHERE id = $1 AND production_id = $2", [mountId, productionId]);
       return res.rows.length > 0;
     }
@@ -33,18 +23,12 @@ async function validateMountTarget(productionId: string, mountType: MountType, m
       const res = await pool.query("SELECT 1 FROM script WHERE block_id = $1 AND production_id = $2 LIMIT 1", [mountId, productionId]);
       return res.rows.length > 0;
     }
-    case "block_snapshot": {
-      const res = await pool.query("SELECT 1 FROM script WHERE id = $1 AND production_id = $2", [mountId, productionId]);
-      return res.rows.length > 0;
-    }
-    case "cue":
-    case "cue_revision": {
-      const idColumn = mountType === "cue" ? "c.cue_id" : "c.id";
+    case "cue": {
       const res = await pool.query(
         `SELECT 1
          FROM cue c
          JOIN cue_list cl ON cl.id = c.cue_list_id
-         WHERE ${idColumn} = $1 AND cl.production_id = $2
+         WHERE c.cue_id = $1 AND cl.production_id = $2
          LIMIT 1`,
         [mountId, productionId]
       );
@@ -85,33 +69,14 @@ async function validateMountTarget(productionId: string, mountType: MountType, m
       );
       return res.rows.length > 0;
     }
-    case "wiki": {
-      // wiki PK 是 uuid——用 id::text 对比，坏 id 不炸 cast
+    case "embed": {
+      // 嵌入边宿主是 wiki 正文（uuid）——id::text 对比，坏 id 不炸 cast
       const res = await pool.query("SELECT 1 FROM wiki WHERE id::text = $1 AND production_id = $2", [mountId, productionId]);
       return res.rows.length > 0;
     }
     default:
       return false;
   }
-}
-
-async function validateVersionedMountTarget(versionId: string, mountType: MountType, mountId: string) {
-  const pool = getPool();
-  if (mountType === "block_snapshot") {
-    const res = await pool.query(
-      "SELECT 1 FROM script_version WHERE version_id = $1 AND snapshot_id = $2",
-      [versionId, mountId]
-    );
-    return res.rows.length > 0;
-  }
-  if (mountType === "cue_revision") {
-    const res = await pool.query(
-      "SELECT 1 FROM cue_version WHERE version_id = $1 AND revision_id = $2",
-      [versionId, mountId]
-    );
-    return res.rows.length > 0;
-  }
-  return false;
 }
 
 export async function GET(req: NextRequest, ctx: Ctx) {
@@ -126,7 +91,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!await canViewAsset(access.permCtx, id, asset, "meta"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const mounts = await listAssetMounts(assetId);
+  const shell = await getNodeByAssetId(assetId);
+  const mounts = shell ? await listNodeMounts(shell.id) : [];
   return Response.json({ mounts });
 }
 
@@ -144,51 +110,28 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     mountType: MountType;
     mountId: string;
     mountAuxId?: string | null;
-    folderPath?: string | null;
-    mountMode?: MountMode | null;
-    versionResolved?: boolean | null;
-    versionId?: string | null; // required for block_snapshot/cue_revision CoW
   };
 
   if (!body.mountType || !body.mountId)
     return Response.json({ error: "缺少 mountType 或 mountId" }, { status: 400 });
 
-  // 批D 双门：挂载 = asset publication@create（主人侧让渡）∧ 宿主侧 attach（批E/F 前沿用其域现有键）
+  // 批D 双门：挂载 = asset publication@create（主人侧让渡）∧ 宿主侧 attach
   if (!await canPublishAsset(access.permCtx, id, assetId, "create")
       || !await mountHostSidePermitted(access.permCtx, id, body.mountType, body.mountId))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  let mountId = body.mountId;
-  const mode = body.mountMode;
-  if (!(await validateMountTarget(id, body.mountType, mountId))) {
+  if (!(await validateMountTarget(id, body.mountType, body.mountId))) {
     return Response.json({ error: "挂载目标不存在" }, { status: 404 });
   }
 
-  // Perform CoW split before inserting mount, when required by mount mode
-  if (mode === "tracking" || mode === "version_only") {
-    if (!body.versionId)
-      return Response.json({ error: "tracking/version_only 模式需要提供 versionId" }, { status: 400 });
-    const nonHead = await rejectNonHeadWrite(id, body.versionId);
-    if (nonHead) return nonHead;
-    if (!(await validateVersion(id, body.versionId))) {
-      return Response.json({ error: "版本不存在" }, { status: 404 });
-    }
-    if (!(await validateVersionedMountTarget(body.versionId, body.mountType, mountId))) {
-      return Response.json({ error: "挂载目标不属于该版本" }, { status: 404 });
-    }
+  const shell = await getNodeByAssetId(assetId);
+  if (!shell || shell.productionId !== id)
+    return Response.json({ error: "不存在" }, { status: 404 });
 
-    if (body.mountType === "block_snapshot") {
-      mountId = await cowBlockSnapshotForMount(body.versionId, mountId);
-    } else if (body.mountType === "cue_revision") {
-      mountId = await cowCueRevisionForMount(body.versionId, mountId);
-    }
-  }
-
-  const mount = await addAssetMount({
-    assetId, productionId: id,
-    mountType: body.mountType, mountId,
-    mountAuxId: body.mountAuxId, folderPath: body.folderPath,
-    mountMode: mode ?? null, versionResolved: body.versionResolved,
+  const mount = await addNodeMount({
+    nodeId: shell.id, productionId: id,
+    mountType: body.mountType, mountId: body.mountId,
+    mountAuxId: body.mountAuxId,
     createdBy: session.userId,
   });
   return Response.json({ mount }, { status: 201 });

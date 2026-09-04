@@ -2,9 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { createWiki, updateWiki, deleteWiki, getWiki, setWikiPublic } from "@/lib/wiki/content";
+import { createWiki, updateWiki, deleteWiki, getWiki } from "@/lib/wiki/content";
 import { extractWikiLinkTargets, listBacklinks, listUnlinkedReferences } from "@/lib/wiki/links";
-import { setWikiDeptShares } from "@/lib/wiki/tree";
+import { setNodePublic, setNodeDeptShares, moveNode, getNodeByWikiId } from "@/lib/node/db";
 import { canViewWiki, listVisibleWikiIds } from "@/lib/wiki/perm";
 import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
 import { createEventReport } from "@/lib/event-db";
@@ -61,7 +61,7 @@ describe("visibility matrix (§4.2)", () => {
 
   it("is_public makes it visible to any member", async () => {
     const w = await createWiki({ productionId: prodId, title: "公开文档", createdBy: creator });
-    await setWikiPublic(w.id, prodId, true);
+    await setNodePublic(w.nodeId, prodId, true);
     expect(await canViewWiki(actorOf(stranger), prodId, w.id)).toBe(true);
     const visible = await listVisibleWikiIds(actorOf(stranger), prodId);
     expect(visible.ids.has(w.id)).toBe(true);
@@ -71,7 +71,7 @@ describe("visibility matrix (§4.2)", () => {
     const w = await createWiki({ productionId: prodId, title: "部门文档", createdBy: creator });
     const { rows: [{ id: deptId }] } = await getPool().query<{ id: string }>(
       `INSERT INTO production_dept (production_id, name) VALUES ($1, '道具') RETURNING id`, [prodId]);
-    await setWikiDeptShares(w.id, prodId, [deptId]);
+    await setNodeDeptShares(w.nodeId, prodId, [deptId]);
     expect(await canViewWiki(actorOf(stranger), prodId, w.id)).toBe(false);
     await getPool().query(
       `INSERT INTO production_dept_member (production_id, dept_id, user_id) VALUES ($1, $2, $3)`,
@@ -112,7 +112,8 @@ describe("visibility matrix (§4.2)", () => {
     await createEventReport({
       id: reportId, eventId, reportType: "rehearsal", title: "draft 报告", body: "x", createdBy: creator });
     const wikiId = (await getPool().query<{ wiki_id: string }>(
-      `SELECT wiki_id::text AS wiki_id FROM event_report WHERE id = $1`, [reportId])).rows[0].wiki_id;
+      `SELECT nd.wiki_id::text AS wiki_id FROM event_report er
+       JOIN node nd ON nd.id = er.node_id WHERE er.id = $1`, [reportId])).rows[0].wiki_id;
 
     expect(await canViewWiki(actorOf(viewer), prodId, wikiId)).toBe(false);
     await getPool().query(
@@ -138,7 +139,8 @@ describe("visibility matrix (§4.2)", () => {
     await createEventReport({
       id: reportId, eventId, reportType: "rehearsal", title: "未发布", body: "x", createdBy: creator });
     const wikiId = (await getPool().query<{ wiki_id: string }>(
-      `SELECT wiki_id::text AS wiki_id FROM event_report WHERE id = $1`, [reportId])).rows[0].wiki_id;
+      `SELECT nd.wiki_id::text AS wiki_id FROM event_report er
+       JOIN node nd ON nd.id = er.node_id WHERE er.id = $1`, [reportId])).rows[0].wiki_id;
     expect(await canViewWiki(actorOf(participant), prodId, wikiId)).toBe(true);
   });
 });
@@ -180,21 +182,21 @@ describe("link graph", () => {
 describe("tree constraints & delete", () => {
   it("rejects cycle (re-parenting under own descendant)", async () => {
     const a = await createWiki({ productionId: prodId, title: "环A", createdBy: creator });
-    const b = await createWiki({ productionId: prodId, title: "环B", parentId: a.id, createdBy: creator });
-    await expect(updateWiki(a.id, prodId, { parentId: b.id }, creator)).rejects.toThrow();
+    const b = await createWiki({ productionId: prodId, title: "环B", parentNodeId: a.nodeId, createdBy: creator });
+    await expect(moveNode(a.nodeId, prodId, { parentId: b.nodeId })).rejects.toThrow();
   });
 
   // 父 id 直接进 $n::uuid，空串会炸成 invalid input syntax for type uuid——
   // 而"没有父文档"最自然的写法恰恰是空串（MCP 工具那边模型真这么传）。
-  it("空串父 id 当作根目录，不炸 uuid 语法", async () => {
-    const root = await createWiki({ productionId: prodId, title: "空串父", parentId: "", createdBy: creator });
-    expect(root.parentId).toBeNull();
+  it("空串父 id 当作根目录，不炸语法（#420 位置面在 node 域）", async () => {
+    const root = await createWiki({ productionId: prodId, title: "空串父", parentNodeId: "", createdBy: creator });
+    expect((await getNodeByWikiId(root.id))?.parentId).toBeNull();
 
     const parent = await createWiki({ productionId: prodId, title: "真父", createdBy: creator });
-    const child = await createWiki({ productionId: prodId, title: "子", parentId: parent.id, createdBy: creator });
-    expect(child.parentId).toBe(parent.id);
+    const child = await createWiki({ productionId: prodId, title: "子", parentNodeId: parent.nodeId, createdBy: creator });
+    expect((await getNodeByWikiId(child.id))?.parentId).toBe(parent.nodeId);
     // 空串移动 = 移回根
-    const moved = await updateWiki(child.id, prodId, { parentId: "" }, creator);
+    const moved = await moveNode(child.nodeId, prodId, { parentId: "" });
     expect(moved?.parentId).toBeNull();
   });
 
@@ -207,7 +209,8 @@ describe("tree constraints & delete", () => {
     await createEventReport({
       id: reportId, eventId, reportType: "rehearsal", title: "挂载中", body: "x", createdBy: creator });
     const mountedWikiId = (await getPool().query<{ wiki_id: string }>(
-      `SELECT wiki_id::text AS wiki_id FROM event_report WHERE id = $1`, [reportId])).rows[0].wiki_id;
+      `SELECT nd.wiki_id::text AS wiki_id FROM event_report er JOIN node nd ON nd.id = er.node_id
+       WHERE er.id = $1`, [reportId])).rows[0].wiki_id;
     expect(await deleteWiki(mountedWikiId, prodId)).toEqual({ ok: false, reason: "mounted" });
 
     const standalone = await createWiki({ productionId: prodId, title: "待删", createdBy: creator });
@@ -255,7 +258,7 @@ describe("routes", () => {
     const res = await wikiListGET(makeReq("GET", `/api/production/${prodId}/wiki`, stranger), ctx);
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect((data.wikis as { id: string }[]).map(w => w.id)).toContain(secret.id);
+    expect((data.nodes as { wikiId: string | null }[]).map(n => n.wikiId)).toContain(secret.id);
 
     const detail = await wikiGET(
       makeReq("GET", `/api/production/${prodId}/wiki/${secret.id}`, stranger),
@@ -269,7 +272,7 @@ describe("routes", () => {
     const ctx = { params: Promise.resolve({ id: prodId }) };
     const res = await wikiListGET(makeReq("GET", `/api/production/${prodId}/wiki`, stranger), ctx);
     const data = await res.json();
-    expect((data.wikis as { id: string }[]).map(w => w.id)).not.toContain(hidden.id);
+    expect((data.nodes as { wikiId: string | null }[]).map(n => n.wikiId)).not.toContain(hidden.id);
   });
 
   it("GET instance without permission → 403 carrying title (目录级) and apply anchor", async () => {

@@ -120,7 +120,7 @@ beforeAll(async () => {
   reportId = shortId();
   await createEventReport({
     id: reportId, eventId, reportType: "rehearsal",
-    title: "排练报告", body: "", createdBy: creatorId, parentWikiId: null,
+    title: "排练报告", body: "", createdBy: creatorId, parentNodeId: null,
   });
 
   const zoneDept = await createProductionDept({ productionId: prodId, name: `zone-${shortId()}` });

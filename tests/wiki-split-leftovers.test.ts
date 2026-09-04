@@ -182,7 +182,7 @@ describe("mergeAccounts after wiki split", () => {
     await mergeAccounts(keep, del);
 
     const wikiRes = await getPool().query<{ created_by: string }>(
-      `SELECT w.created_by FROM event_report er JOIN wiki w ON w.id = er.wiki_id WHERE er.id = $1`,
+      `SELECT w.created_by FROM event_report er JOIN node nd ON nd.id = er.node_id JOIN wiki w ON w.id = nd.wiki_id WHERE er.id = $1`,
       [mergedReport],
     );
     expect(wikiRes.rows[0].created_by).toBe(keep);
