@@ -103,3 +103,19 @@
 - **Epic 内，第二批（可以慢慢来）**：资产页 UI 去向、缺省落点。缺省落点过渡期无压力：现有缺省行为继续用，没有落点的暂放 root 慢慢补。
 - **Epic 外（依赖本 epic）**：批量上传、交付配对 QC。#85 正交可并行。
 - **复杂度**：逻辑本身简单——树/alias/边零权限/悬空容忍的基建 wiki 侧全部已有，asset 是接入方不是新造方；工作量集中在迁移细节（化石清理、存量 backfill、mount 语义转译）。
+
+## 11. 第一批实现修正记录（2026-09-04 实施时定谳）
+
+- **`block_snapshot`/`cue_revision` 非化石**（设计误判修正）：它们是当时的默认
+  写路径，迁移做了数据转译（→ 稳定 `block_id` / `cue.cue_id`），随之删除
+  lib/db.ts 的 11 处 CoW/GC 挂载复制与 `cow*ForMount` 两函数。真化石只有
+  `version`/`scene_snapshot`（零写入者）。
+- **漂移一不接受**（拍板 6）：枚举面谓词对 asset 节点只认 `listable ∨ dept_share`，
+  不析取 asset 实例 grant——定向分享的私有资产不因此进树，行为与迁移前全等。
+  漂移二接受（缺能力票的成员在树里见共享资产标题，内容面拦截）。
+- **download-url/preview-url 补 `canViewAsset(file)` 门**（原先任何成员可下载任意
+  资产的洞，随本批修复，属收紧）。
+- **proposal 面协议与存储解耦**：`wiki_proposal.parent_node_id` 存 node id，
+  对外接口维持 AI 方言协议的 wiki id（proposal-db 读写各翻译一次）。
+- **grant 行一行未迁**（验证成立）：`*@view`⇒`meta` 蕴含、WIKI_LEVEL_ROW_SETS、
+  `node:wiki/<id>@…` 键字符串全程零改动，invariance 测试逐字节断言。

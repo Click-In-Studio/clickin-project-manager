@@ -468,14 +468,14 @@ describe("routes", () => {
 
     const denied = await wikiPATCH(
       makeReq("PATCH", `/api/production/${prodId}/wiki/${b.id}`, member, false,
-        { parentNodeId: parent.nodeId, place: { anchorId: a.id, side: "before" } }),
+        { parentId: parent.nodeId, place: { anchorId: a.nodeId, side: "before" } }),
       { params: Promise.resolve({ id: prodId, wikiId: b.id }) });
     expect(denied.status).toBe(403);
 
     await shareTo(prodId, parent.id, member, "edit");   // 补上容器 edit
     const ok = await wikiPATCH(
       makeReq("PATCH", `/api/production/${prodId}/wiki/${b.id}`, member, false,
-        { parentNodeId: parent.nodeId, place: { anchorId: a.id, side: "before" } }),
+        { parentId: parent.nodeId, place: { anchorId: a.nodeId, side: "before" } }),
       { params: Promise.resolve({ id: prodId, wikiId: b.id }) });
     expect(ok.status).toBe(200);
     const sibs = (await listNodeLibrary(prodId))

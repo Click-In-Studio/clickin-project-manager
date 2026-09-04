@@ -129,7 +129,8 @@ describe("wikiProposeDelete", () => {
     const reportId = `rp${shortId()}`;
     await createEventReport({ id: reportId, eventId, reportType: "rehearsal", title: "挂载中", body: "x", createdBy: ownerId });
     const mountedWikiId = (await getPool().query<{ wiki_id: string }>(
-      `SELECT wiki_id::text AS wiki_id FROM event_report WHERE id = $1`, [reportId],
+      `SELECT nd.wiki_id::text AS wiki_id FROM event_report er
+       JOIN node nd ON nd.id = er.node_id WHERE er.id = $1`, [reportId],
     )).rows[0].wiki_id;
 
     const toolCallId = `call_${shortId()}`;

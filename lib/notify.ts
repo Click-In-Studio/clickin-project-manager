@@ -782,7 +782,8 @@ export async function dispatchReportNotification(
       `SELECT ed.name AS dept_name, w.body AS content
        FROM event_report_note ern
        JOIN production_dept ed ON ed.id = ern.department_id
-       JOIN wiki w ON w.id = ern.wiki_id
+       JOIN node nn ON nn.id = ern.node_id
+       JOIN wiki w ON w.id = nn.wiki_id
        WHERE ern.report_id = $1 ORDER BY ed.display_order, ern.created_at`,
       [reportId],
     ),

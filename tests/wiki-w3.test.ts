@@ -112,7 +112,8 @@ describe("visibility matrix (§4.2)", () => {
     await createEventReport({
       id: reportId, eventId, reportType: "rehearsal", title: "draft 报告", body: "x", createdBy: creator });
     const wikiId = (await getPool().query<{ wiki_id: string }>(
-      `SELECT wiki_id::text AS wiki_id FROM event_report WHERE id = $1`, [reportId])).rows[0].wiki_id;
+      `SELECT nd.wiki_id::text AS wiki_id FROM event_report er
+       JOIN node nd ON nd.id = er.node_id WHERE er.id = $1`, [reportId])).rows[0].wiki_id;
 
     expect(await canViewWiki(actorOf(viewer), prodId, wikiId)).toBe(false);
     await getPool().query(
@@ -138,7 +139,8 @@ describe("visibility matrix (§4.2)", () => {
     await createEventReport({
       id: reportId, eventId, reportType: "rehearsal", title: "未发布", body: "x", createdBy: creator });
     const wikiId = (await getPool().query<{ wiki_id: string }>(
-      `SELECT wiki_id::text AS wiki_id FROM event_report WHERE id = $1`, [reportId])).rows[0].wiki_id;
+      `SELECT nd.wiki_id::text AS wiki_id FROM event_report er
+       JOIN node nd ON nd.id = er.node_id WHERE er.id = $1`, [reportId])).rows[0].wiki_id;
     expect(await canViewWiki(actorOf(participant), prodId, wikiId)).toBe(true);
   });
 });

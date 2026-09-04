@@ -58,16 +58,20 @@ async function makeReport(eventId: string, createdBy: string, opts?: { published
   const id = `rp${shortId()}`;
   const publishedSql = opts?.published !== false ? "now()" : "NULL";
   const mentionsJson = JSON.stringify((opts?.mentions ?? []).map(uid => ({ userId: uid })));
-  // 拆分模型：内容进 wiki 实体，边表挂 wiki_id
+  // 拆分模型（#420）：内容进 wiki，壳节点承树位，边表挂 node_id
   await getPool().query(
     `WITH w AS (
        INSERT INTO wiki (production_id, title, mentions, created_by)
        SELECT pe.production_id, '测试报告', $4::jsonb, $3
        FROM production_event pe WHERE pe.id = $2
-       RETURNING id
+       RETURNING id, production_id
+     ), nd AS (
+       INSERT INTO node (id, production_id, kind, wiki_id)
+       SELECT 'nd_t' || substr(md5($1 || w.id::text), 1, 12), w.production_id, 'wiki', w.id
+       FROM w RETURNING id
      )
-     INSERT INTO event_report (id, event_id, wiki_id, published_at)
-     SELECT $1, $2, w.id, ${publishedSql} FROM w`,
+     INSERT INTO event_report (id, event_id, node_id, published_at)
+     SELECT $1, $2, nd.id, ${publishedSql} FROM nd`,
     [id, eventId, createdBy, mentionsJson],
   );
   return id;
