@@ -1,4 +1,6 @@
 import { faker } from "@faker-js/faker";
+import { beforeAll, expect } from "vitest";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -18,4 +20,31 @@ const seed = process.env.TEST_SEED
   ? parseInt(process.env.TEST_SEED, 10)
   : Math.floor(Math.random() * 0xffff_ffff);
 
-faker.seed(seed);
+// 逐文件错开 faker 序列：本 setup 每个测试文件都会重新执行，若所有文件都用同一个
+// run 种子，每个文件抽出的 id 序列**完全相同**——insert 型工厂（makeProduction）
+// 跨文件撞 id 时报 duplicate key，而 upsert 型工厂（upsertFeishuUser）会静默合并
+// 身份，让另一个文件的数据泄进本文件的聚合断言（ai-quota 5048≠5000 事故）。
+// 种子混入测试文件路径后：同一 TEST_SEED 下单文件序列照旧可复现
+// （TEST_SEED=xxx npm test 不受影响），但任意两个文件的序列不再重叠。
+function perFileSeed(testPath: string): number {
+  return createHash("md5").update(`${seed}:${testPath}`).digest().readUInt32BE(0);
+}
+
+let seededForFile = false;
+const testPathAtLoad = expect.getState().testPath;
+if (testPathAtLoad) {
+  faker.seed(perFileSeed(testPathAtLoad));
+  seededForFile = true;
+} else {
+  faker.seed(seed);
+}
+// 兜底：个别 vitest 版本在 setupFiles 加载时还没挂 testPath，等 beforeAll 再定。
+// 只在加载时没定成的情况下补播，避免同文件内重播造成序列自重叠。
+beforeAll(() => {
+  if (seededForFile) return;
+  const tp = expect.getState().testPath;
+  if (tp) {
+    faker.seed(perFileSeed(tp));
+    seededForFile = true;
+  }
+});
