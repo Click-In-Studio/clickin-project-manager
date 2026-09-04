@@ -1,25 +1,45 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getR2Stream, isR2Configured } from "@/lib/r2";
+import { isR2Configured } from "@/lib/r2";
+import { getAvatarVariant, parseAvatarSize } from "@/lib/avatar-serve";
 import { getPool } from "@/lib/pg";
 
 type Ctx = { params: Promise<{ userId: string }> };
+
+// 强缓存的前提：R2 key 每次上传换新，前端 URL 从存量值派生 ?v=（lib/avatar-url.ts），
+// 换头像即换 URL。302 外链兜底给短缓存——飞书同步可能悄悄换 URL，不配 immutable。
+const IMMUTABLE = "private, max-age=31536000, immutable";
+
+function redirect(url: string): Response {
+  return new Response(null, {
+    status: 302,
+    headers: { Location: url, "Cache-Control": "private, max-age=86400" },
+  });
+}
 
 export async function GET(req: NextRequest, ctx: Ctx) {
   const session = getSession(req.cookies);
   if (!session) return new Response(null, { status: 401 });
 
   const { userId } = await ctx.params;
-  const r2Key = `avatars/${userId}/avatar`;
+  const size = parseAvatarSize(req.nextUrl.searchParams.get("s"));
+
+  const res = await getPool().query<{ avatar_url: string | null }>(
+    `SELECT COALESCE(
+       (SELECT avatar_url FROM user_profile WHERE user_id = $1),
+       (SELECT avatar_url FROM feishu_user WHERE user_id = $1)
+     ) AS avatar_url`,
+    [userId],
+  );
+  const stored = res.rows[0]?.avatar_url ?? null;
+  if (!stored) return new Response(null, { status: 404 });
+  if (stored.startsWith("http")) return redirect(stored);
+
   try {
-    const stream = await getR2Stream(r2Key);
-    if (stream) {
-      const contentType = stream.headers.get("content-type") ?? "image/jpeg";
-      return new Response(stream.body, {
-        headers: {
-          "Content-Type": contentType,
-          "Cache-Control": "private, max-age=0, must-revalidate",
-        },
+    const variant = await getAvatarVariant(stored, size);
+    if (variant) {
+      return new Response(new Uint8Array(variant.body), {
+        headers: { "Content-Type": variant.contentType, "Cache-Control": IMMUTABLE },
       });
     }
   } catch (error) {
@@ -33,16 +53,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
   }
 
-  // Fallback: redirect to the profile avatar URL (feishu sync value as last resort)
-  const res = await getPool().query<{ avatar_url: string | null }>(
-    `SELECT COALESCE(
-       (SELECT avatar_url FROM user_profile WHERE user_id = $1),
-       (SELECT avatar_url FROM feishu_user WHERE user_id = $1)
-     ) AS avatar_url`,
+  // R2 无对象或取失败：回落飞书同步的外链头像
+  const fb = await getPool().query<{ avatar_url: string | null }>(
+    `SELECT avatar_url FROM feishu_user WHERE user_id = $1`,
     [userId],
   );
-  const fallbackUrl = res.rows[0]?.avatar_url;
-  if (fallbackUrl) return Response.redirect(fallbackUrl, 302);
+  const fallbackUrl = fb.rows[0]?.avatar_url;
+  if (fallbackUrl?.startsWith("http")) return redirect(fallbackUrl);
 
   return new Response(null, { status: 404 });
 }

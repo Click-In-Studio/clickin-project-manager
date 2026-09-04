@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { MyProductionEntry } from "@/lib/db";
 import { BASE_PATH } from "@/lib/base-path";
+import { productionAvatarSrc } from "@/lib/avatar-url";
 import styles from "@/components/my-pages.module.css";
 import NewProductionModal from "@/components/NewProductionModal";
 
@@ -14,12 +15,13 @@ function fmtDate(iso: string) {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function ProductionAvatar({ productionId, name }: { productionId: string; name: string }) {
+function ProductionAvatar({ productionId, avatarUrl, name }: { productionId: string; avatarUrl: string | null; name: string }) {
   const [failed, setFailed] = useState(false);
-  if (failed) return <>{name.charAt(0)}</>;
+  const src = productionAvatarSrc(productionId, avatarUrl);
+  if (failed || !src) return <>{name.charAt(0)}</>;
   return (
     <img
-      src={`${BASE_PATH}/api/production/${productionId}/avatar`}
+      src={src}
       alt={name}
       style={{ width: "100%", height: "100%", objectFit: "cover" }}
       onError={() => setFailed(true)}
@@ -224,7 +226,7 @@ export default function MyProjectsClient(
                   flexShrink: 0, letterSpacing: "-.02em", overflow: "hidden",
                 }}>
                   {p.avatarUrl ? (
-                    <ProductionAvatar productionId={p.id} name={p.name} />
+                    <ProductionAvatar productionId={p.id} avatarUrl={p.avatarUrl} name={p.name} />
                   ) : (
                     p.name.charAt(0)
                   )}

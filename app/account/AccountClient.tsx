@@ -7,6 +7,7 @@ import { useRef, useState, useEffect, type FormEvent, type ChangeEvent } from "r
 import { useSearchParams, useRouter } from "next/navigation";
 import styles from "./account.module.css";
 import type { NotifPref } from "@/lib/notification-prefs";
+import { userAvatarSrc } from "@/lib/avatar-url";
 import AiUsageCard from "@/components/AiUsageCard";
 
 type Identity = {
@@ -73,14 +74,6 @@ function initial(name: string) {
   return name.trim().charAt(0) || "?";
 }
 
-/** Returns the URL to use in <img src> for a given avatarUrl value from the DB. */
-function resolveAvatarSrc(userId: string, avatarUrl: string | null): string | null {
-  if (!avatarUrl) return null;
-  // Feishu and other HTTP URLs — use directly
-  if (avatarUrl.startsWith("http")) return avatarUrl;
-  // R2 key stored as a relative path — route through our proxy
-  return `/api/user/avatar/${userId}`;
-}
 
 export default function AccountClient({ userId, initialProfile, initialIdentities, initialNotifPrefs, initialPlan }: Props) {
   const searchParams = useSearchParams();
@@ -111,7 +104,6 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
 
   // Avatar upload state
   const [avatarUploading, setAvatarUploading] = useState(false);
-  const [avatarCacheBust, setAvatarCacheBust] = useState(0);
 
   // Security state
   const [identities, setIdentities] = useState<Identity[]>(initialIdentities);
@@ -229,9 +221,8 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
       // 4. Refresh session cookie so AppShell picks up the new avatarUrl
       await fetch("/api/account/session/refresh", { method: "POST" });
 
-      // 5. Update local display via the proxy URL (cache-busted)
+      // 5. Update local display——key 每次上传都换新，URL 的 ?v= 随之变化，无需手动 bust
       setAvatarUrl(r2Key);
-      setAvatarCacheBust(v => v + 1);
       setSaveMsg("✓ 头像已更新");
       setSaveMsgOk(true);
       router.refresh();
@@ -420,7 +411,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
   const dmPrefs = notifPrefs.filter(p => p.externalChannel === "dm");
   const groupPrefs = notifPrefs.filter(p => p.externalChannel === "group");
 
-  const avatarSrc = resolveAvatarSrc(userId, avatarUrl);
+  const avatarSrc = userAvatarSrc(userId, avatarUrl);
 
   return (
     <div className={styles.shell}>
@@ -543,7 +534,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                   </div>
                   <div className={styles.avatarEditor}>
                     {avatarSrc
-                      ? <img src={`${avatarSrc}?t=${avatarCacheBust}`} alt={name} className={styles.avatarImg} key={avatarCacheBust} />
+                      ? <img src={userAvatarSrc(userId, avatarUrl, 512) ?? undefined} alt={name} className={styles.avatarImg} />
                       : <span>{initial(name)}</span>}
                     <input
                       ref={fileInputRef}

@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import AdminModal from "@/components/AdminModal";
 import Badge from "@/components/Badge";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
+import { userAvatarSrc } from "@/lib/avatar-url";
 import type { MemberStatus, MemberStatusSource } from "@/lib/member-status-shared";
 import { isInactiveMember } from "@/lib/member-status-shared";
 
@@ -52,9 +53,8 @@ type Props = {
 const NO_TAG = "__none__";
 
 function Avatar({ m }: { m: PickerMember }) {
-  const url = m.photoUrl || m.avatarUrl;
+  const url = m.photoUrl || userAvatarSrc(m.userId, m.avatarUrl);
   return url ? (
-    // eslint-disable-next-line @next/next/no-img-element
     <img src={url} alt="" style={{ width: 24, height: 24, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
   ) : (
     <span style={{

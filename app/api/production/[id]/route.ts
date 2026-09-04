@@ -2,6 +2,8 @@ import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { loadProduction, getProductionPermissionContext, getActiveVersionId, updateProductionName, updateProductionMeta, updateProductionType, getVersion, deleteProduction } from "@/lib/db";
 import { getSession } from "@/lib/session";
+import { getPool } from "@/lib/pg";
+import { markAvatarCommitted, cleanupAvatarObjects } from "@/lib/avatar-db";
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]">) {
   const session = getSession(req.cookies);
@@ -81,7 +83,18 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
     if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/avatar", "edit"))) {
       return Response.json({ error: "无权修改项目头像" }, { status: 403 });
     }
-    jobs.push(updateProductionMeta(id, { avatarUrl: body.avatarUrl }));
+    // 头像 key 每次上传换新（presign 路由）；提交平账 + 换掉后清旧对象。
+    // 清理尽力而为，读旧值→写新值非事务：并发换头像的误删后果只是头像回落兜底，可接受
+    const old = await getPool().query<{ avatar_url: string | null }>(
+      "SELECT avatar_url FROM production WHERE id = $1", [id],
+    );
+    const oldAvatar = old.rows[0]?.avatar_url ?? null;
+    jobs.push(updateProductionMeta(id, { avatarUrl: body.avatarUrl }).then(async () => {
+      if (oldAvatar !== (body.avatarUrl ?? null)) {
+        await markAvatarCommitted(body.avatarUrl);
+        void cleanupAvatarObjects(oldAvatar);
+      }
+    }));
   }
 
   if ("language" in body) {

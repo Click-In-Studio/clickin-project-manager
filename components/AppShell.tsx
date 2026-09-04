@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, createContext, useContext } from "react";
 import Link, { useLinkStatus } from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
+import { userAvatarSrc, productionAvatarSrc } from "@/lib/avatar-url";
 import { nextNavPendingHref } from "@/lib/nav-pending";
 import ChevronIcon from "@/components/ChevronIcon";
 import SearchBar from "./SearchBar";
@@ -216,11 +217,6 @@ function firstContentChar(str: string): string {
   return (stripped.charAt(0) || str.charAt(0)).toUpperCase();
 }
 
-function resolveAvatarSrc(userId: string, avatarUrl: string | null): string | null {
-  if (!avatarUrl) return null;
-  return `/api/user/avatar/${userId}`;
-}
-
 function UserAvatarContent({
   src,
   initial,
@@ -251,14 +247,15 @@ function UserAvatarContent({
   );
 }
 
-function ProdAvatarIcon({ productionId, name }: { productionId: string; name: string }) {
+function ProdAvatarIcon({ productionId, avatarUrl, name }: { productionId: string; avatarUrl: string | null; name: string }) {
   const [failed, setFailed] = useState(false);
-  if (failed) {
+  const src = productionAvatarSrc(productionId, avatarUrl);
+  if (failed || !src) {
     return <span className="text-white text-[11px] font-bold select-none">{firstContentChar(name)}</span>;
   }
   return (
     <img
-      src={`${BASE_PATH}/api/production/${productionId}/avatar`}
+      src={src}
       alt={name}
       className="w-full h-full object-cover"
       onError={() => setFailed(true)}
@@ -509,12 +506,13 @@ function MobileTab({
   return <button onClick={onClick} className={cls}>{inner}</button>;
 }
 
-function MenuProdAvatar({ productionId, name }: { productionId: string; name: string }) {
+function MenuProdAvatar({ productionId, avatarUrl, name }: { productionId: string; avatarUrl: string | null; name: string }) {
   const [failed, setFailed] = useState(false);
-  if (failed) return <>{firstContentChar(name)}</>;
+  const src = productionAvatarSrc(productionId, avatarUrl);
+  if (failed || !src) return <>{firstContentChar(name)}</>;
   return (
     <img
-      src={`${BASE_PATH}/api/production/${productionId}/avatar`}
+      src={src}
       alt=""
       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
       onError={() => setFailed(true)}
@@ -703,7 +701,7 @@ function ProjectSwitcher({
                 background: "var(--script-soft)", color: "var(--script)",
                 fontFamily: "Georgia, serif", fontSize: 14, fontWeight: 700,
               }}>
-                <MenuProdAvatar productionId={p.id} name={p.name} />
+                <MenuProdAvatar productionId={p.id} avatarUrl={p.avatarUrl} name={p.name} />
               </span>
               <span style={{ display: "flex", flex: 1, flexDirection: "column", minWidth: 0 }}>
                 <b style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1166,7 +1164,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
     setDrawerOpen((d) => (d === type ? null : type));
 
   const userInitial = firstContentChar(session.name);
-  const avatarSrc = resolveAvatarSrc(session.userId, session.avatarUrl);
+  const avatarSrc = userAvatarSrc(session.userId, session.avatarUrl);
   const avatarSymbol = (
     <span className="relative">
       <UserAvatarContent src={avatarSrc} initial={userInitial} compact />
@@ -1188,7 +1186,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
           <span className="w-8 h-8 rounded-full bg-[#182a2a] overflow-hidden flex items-center justify-center select-none shrink-0">
             {productionId && currentProduction ? (
               currentProduction.avatarUrl ? (
-                <ProdAvatarIcon productionId={productionId} name={currentProduction.name} />
+                <ProdAvatarIcon productionId={productionId} avatarUrl={currentProduction.avatarUrl} name={currentProduction.name} />
               ) : (
                 <span className="text-white text-[11px] font-bold select-none">{firstContentChar(currentProduction.name)}</span>
               )
