@@ -104,18 +104,24 @@ export async function mountConcededNodeIds(
 
   const eventMounts = mounts.filter(m => EVENT_MOUNT_TYPES.includes(m.mount_type));
   if (eventMounts.length > 0) {
-    // production 归属校验后按 event 去重逐个判（个位数量级；组参与冻结语义在
-    // isEventGroupParticipant 里，判定时查、零 sweep 定式）
     const evRes = await getPool().query<{ id: string }>(
       `SELECT id FROM production_event WHERE production_id = $1 AND id = ANY($2::text[])`,
       [productionId, [...new Set(eventMounts.map(m => m.mount_id))]],
     );
-    const inProd = new Set(evRes.rows.map(r => r.id));
+    const inProd = [...new Set(evRes.rows.map(r => r.id))];
     const domainView = await hasEventDomainView(actor, productionId);
     const visibleEventIds = new Set<string>();
-    for (const eventId of inProd) {
-      if (domainView || await isEventGroupParticipant(eventId, actor.userId)) {
-        visibleEventIds.add(eventId);
+    if (domainView) {
+      for (const id of inProd) visibleEventIds.add(id);
+    } else if (inProd.length > 0 && await mightBeGroupParticipant(actor.userId)) {
+      // 组参与冻结语义在 isEventGroupParticipant 里单份持有，不在 SQL 里复刻——
+      // 代价是按 event 逐个判。集合式路径（kind 过滤）的扇出由两道闸兜住：
+      // domainView 早退（列表重度用户的常态）+ 上面的超集预筛；余下并行判。
+      const results = await Promise.all(
+        inProd.map(async id => [id, await isEventGroupParticipant(id, actor.userId)] as const),
+      );
+      for (const [id, ok] of results) {
+        if (ok) visibleEventIds.add(id);
       }
     }
     for (const m of eventMounts) {
@@ -124,4 +130,22 @@ export async function mountConcededNodeIds(
   }
 
   return conceded;
+}
+
+/** 组参与的**超集预筛**（只用于否定早退，不承担判定语义）：用户在全库连一行
+ *  组成员（本人或经部门）/冻结快照记录都没有 ⇒ 不可能是任何 event 的组参与者，
+ *  逐 event 循环整个跳过。正向判定仍归 isEventGroupParticipant（两通道 + 冻结
+ *  语义单份持有）。 */
+async function mightBeGroupParticipant(userId: string): Promise<boolean> {
+  const { rows } = await getPool().query(
+    `SELECT 1 FROM event_group_member egm
+     LEFT JOIN production_dept_member pdm
+            ON pdm.dept_id = egm.dept_id AND pdm.user_id = $1
+     WHERE egm.user_id = $1 OR pdm.user_id IS NOT NULL
+     UNION ALL
+     SELECT 1 FROM event_group_freeze_member WHERE user_id = $1
+     LIMIT 1`,
+    [userId],
+  );
+  return rows.length > 0;
 }

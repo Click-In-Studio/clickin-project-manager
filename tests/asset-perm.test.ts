@@ -187,3 +187,19 @@ describe("挂载让渡（script 通道）与 node_mount CRUD", () => {
     expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId }, "meta")).toBe(false);
   });
 });
+
+describe("无壳资产（1:1 不变量破损的缺行分支）", () => {
+  it("壳节点缺失 ⇒ 结构面全不成立，判定不抛错", async () => {
+    // is_public 位活在壳上，壳没了 ⇒ 连「公开」也无从谈起；挂载边挂在 node 上
+    // ⇒ 无壳即无边。判定应安静返回 false，而不是崩或误放行。
+    const orphan = await createAsset({
+      productionId: prodId, uploaderUserId: uploader, assetType: "reference",
+      fileName: "orphan.pdf", mimeType: "application/pdf",
+      storageType: "r2", isPublic: true,
+    });
+    await getPool().query(`DELETE FROM node WHERE asset_id = $1`, [orphan.asset.id]);
+    expect(await canViewAsset(ctxOf(member), prodId, { id: orphan.asset.id }, "meta")).toBe(false);
+    const set = await filterVisibleAssets(ctxOf(member), prodId, [{ id: orphan.asset.id }]);
+    expect(set).toHaveLength(0);
+  });
+});
