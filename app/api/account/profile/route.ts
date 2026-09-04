@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getUserProfile, upsertUserProfile, syncGlobalNotificationPreference } from "@/lib/db";
-import { deleteAvatarObjects } from "@/lib/avatar-serve";
+import { markAvatarCommitted, cleanupAvatarObjects } from "@/lib/avatar-db";
 
 export async function GET() {
   const cookieStore = await cookies();
@@ -40,11 +40,12 @@ export async function PATCH(req: NextRequest) {
     preferredPlatform: body.preferredPlatform,
   });
 
-  // 头像 key 每次上传换新（presign 路由）；换掉后清旧对象。尽力而为，且
-  // 读旧值→写新值非事务：并发换头像可能误删刚上任的对象，后果只是头像
-  // 回落外链/404，可接受，不为清理引入事务。
-  if (oldAvatar && oldAvatar !== nextAvatar) {
-    void deleteAvatarObjects(oldAvatar);
+  // 头像 key 每次上传换新（presign 路由）；提交平账 + 换掉后清旧对象。
+  // 清理尽力而为，且读旧值→写新值非事务：并发换头像可能误删刚上任的对象，
+  // 后果只是头像回落外链/404，可接受，不为清理引入事务。
+  if (oldAvatar !== nextAvatar) {
+    await markAvatarCommitted(nextAvatar);
+    void cleanupAvatarObjects(oldAvatar);
   }
 
   // Sync global notification_preference when preferred platform changes

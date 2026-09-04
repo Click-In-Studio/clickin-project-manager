@@ -92,8 +92,8 @@ describe("getAvatarVariant", () => {
 });
 
 describe("deleteAvatarObjects", () => {
-  it("R2 key：原图 + 两档变体全删", async () => {
-    await deleteAvatarObjects("avatars/u1/avatar-old");
+  it("R2 key：原图 + 两档变体全删，全成返回 true", async () => {
+    await expect(deleteAvatarObjects("avatars/u1/avatar-old")).resolves.toBe(true);
     const keys = mockDelete.mock.calls.map(c => c[0]).sort();
     expect(keys).toEqual([
       "avatars/u1/avatar-old",
@@ -108,8 +108,8 @@ describe("deleteAvatarObjects", () => {
     expect(mockDelete).not.toHaveBeenCalled();
   });
 
-  it("删失败被吞掉，不向外抛（调用方 void 它是安全的）", async () => {
+  it("删失败被吞掉不向外抛，返回 false（审计不平账，留作孤儿）", async () => {
     mockDelete.mockRejectedValue(new Error("boom"));
-    await expect(deleteAvatarObjects("avatars/u1/avatar-old")).resolves.toBeUndefined();
+    await expect(deleteAvatarObjects("avatars/u1/avatar-old")).resolves.toBe(false);
   });
 });

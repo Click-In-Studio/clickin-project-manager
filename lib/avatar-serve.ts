@@ -47,12 +47,18 @@ export async function getAvatarVariant(
 
 /**
  * 换头像后清理旧 R2 对象（原图 + 两档变体）。key 版本化后不清会积垃圾。
- * 尽力而为：失败只留日志，不影响主流程。
+ * 尽力而为：失败只留日志，不影响主流程；返回是否全部删除成功——审计账本
+ * （lib/avatar-db.ts cleanupAvatarObjects）只在全删净时标记 deleted_at，
+ * 删不净的留在账上继续算孤儿。
  */
-export async function deleteAvatarObjects(oldValue: string | null | undefined): Promise<void> {
-  if (!oldValue || oldValue.startsWith("http")) return;
+export async function deleteAvatarObjects(oldValue: string | null | undefined): Promise<boolean> {
+  if (!oldValue || oldValue.startsWith("http")) return true;
   const keys = [oldValue, variantKey(oldValue, 128), variantKey(oldValue, 512)];
-  await Promise.all(keys.map((k) =>
-    deleteR2Object(k).catch((e) => console.warn(`[avatar-cleanup] delete failed (${k}):`, e)),
+  const results = await Promise.all(keys.map((k) =>
+    deleteR2Object(k).then(() => true).catch((e) => {
+      console.warn(`[avatar-cleanup] delete failed (${k}):`, e);
+      return false;
+    }),
   ));
+  return results.every(Boolean);
 }

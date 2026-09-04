@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { presignedPut } from "@/lib/r2";
+import { recordAvatarUpload } from "@/lib/avatar-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -26,8 +27,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "不支持的文件类型" }, { status: 400 });
   }
 
-  // key 每次上传换新：见 app/api/account/avatar/presign 同款注释
+  // key 每次上传换新 + presign 即记账：见 app/api/account/avatar/presign 同款注释
   const r2Key = `avatars/production/${id}/avatar-${Date.now().toString(36)}`;
+  await recordAvatarUpload("production", id, r2Key, session.userId);
   const { url } = presignedPut(r2Key, mimeType, 900);
 
   return Response.json({ uploadUrl: url, r2Key });
