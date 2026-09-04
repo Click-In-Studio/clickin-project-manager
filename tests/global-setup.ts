@@ -197,6 +197,12 @@ import {
   createScriptViewPreMigrationData,
   type ScriptViewSnapshot,
 } from "./script-view-snapshot";
+import {
+  NODE_TREE_SNAPSHOT_PATH,
+  isNodeTreePreMigrationSchema,
+  createNodeTreePreMigrationData,
+  type NodeTreeSnapshot,
+} from "./node-tree-snapshot";
 
 // Fixed UUID for the test system user — must match TEST_USER in helpers.ts
 const TEST_USER = "00000000-0000-0000-0000-000000000001";
@@ -775,10 +781,42 @@ export async function setup() {
     );
     await writeFile(ROLE_DRIFT_SNAPSHOT_PATH, JSON.stringify(roleDriftSnapshot));
   }
+
+  // node 树统一（#420 第一批，migrate-node-tree.sql）。**必须排在所有迁移块
+  // 之后**——它把此前各厂造出的 wiki/asset 全量生成壳节点（integrity 层的 1:1
+  // 断言是全库的），排前面会漏掉后建的工厂行。migrate 文件自镜像 add-node-tree
+  // 的 DDL，无需单独应用 add 文件。
+  if (await isNodeTreePreMigrationSchema(pool)) {
+    const nodeTreeSnapshot = await createNodeTreePreMigrationData(pool, TEST_USER);
+    await writeFile(NODE_TREE_SNAPSHOT_PATH, JSON.stringify(nodeTreeSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-node-tree.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
 }
 
 export async function teardown() {
   const pool = getPool();
+
+  // node 树迁移快照的工厂演出（migration path only）。production CASCADE 清掉
+  // node/node_mount/report 等全部子行；额外的 U2 用户单独删。
+  {
+    let nodeTreeSnapshot: NodeTreeSnapshot | null = null;
+    try {
+      nodeTreeSnapshot = JSON.parse(await readFile(NODE_TREE_SNAPSHOT_PATH, "utf8")) as NodeTreeSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (nodeTreeSnapshot) {
+      await pool.query("DELETE FROM production WHERE id = $1", [nodeTreeSnapshot.prodId])
+        .catch((e) => console.error("[node-tree teardown] production:", e.message));
+      await pool.query("DELETE FROM app_user WHERE id = $1::uuid", [nodeTreeSnapshot.u2Id])
+        .catch((e) => console.error("[node-tree teardown] u2:", e.message));
+      await unlink(NODE_TREE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
 
   // grant_template 退役快照：纯表内容 dump，没有工厂行要清，只删文件。
   await unlink(GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH).catch(() => {});

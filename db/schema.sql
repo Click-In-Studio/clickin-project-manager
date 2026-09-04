@@ -741,6 +741,9 @@ CREATE INDEX IF NOT EXISTS task_dependency_blocked_idx ON task_dependency(blocke
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
+-- node 树统一（#420）后 wiki 回归**纯文档内容对象**：树位置（parent/sort）与
+-- 权限位（is_public/listable）全部活在 node 表的 kind='wiki' 壳节点上
+-- （migrate-node-tree.sql；树列备份见 wiki_tree_backup_node_tree）。
 CREATE TABLE IF NOT EXISTS wiki (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
@@ -748,56 +751,19 @@ CREATE TABLE IF NOT EXISTS wiki (
   body          TEXT        NOT NULL DEFAULT '',
   mentions      JSONB       NOT NULL DEFAULT '[]',
   created_by    UUID        NULL REFERENCES app_user(id),
-  -- W1 文档树：排序 fractional index（lib/lex-order.ts）。删父时子文档**上移一层**
-  -- 由 deleteWiki 在事务内重挂（#352）；FK 的 SET NULL 只是绕过应用层时的兜底
-  parent_id     UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
-  sort_key      TEXT        NULL,
-  is_public     BOOLEAN     NOT NULL DEFAULT false,
-  -- #357 可枚举性（枚举面，与 is_public 的内容面正交）：对能枚举父节点者是否出现
-  -- 在目录树。判定沿祖先链求交（lib/wiki-perm.ts listEnumerableWikiIds），不物化。
-  listable      BOOLEAN     NOT NULL DEFAULT true,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS wiki_production_idx ON wiki (production_id);
-CREATE INDEX IF NOT EXISTS wiki_parent_idx     ON wiki (parent_id);
 CREATE INDEX IF NOT EXISTS wiki_mentions_idx   ON wiki USING GIN (mentions);
 CREATE INDEX IF NOT EXISTS wiki_title_trgm_idx ON wiki USING GIN (title gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS wiki_body_trgm_idx  ON wiki USING GIN (body gin_trgm_ops);
 
--- 软链接别名（add-wiki-alias.sql，#358）：目录树里指向目标的**伪节点**——有自己的
--- 位置（parent_id/sort_key），内容指向 target。同一篇文档出现在多处 = 多个别名。
--- 别名是**叶子**：不可有子项，`target_type='wiki'` 只指向 wiki 表 ⇒ 链式别名结构上
--- 不可表达，环也不可能经别名形成。
---
--- 【不可让步】别名不是授权面：本表无 listable/is_public，不接受 grant / 部门分享行。
---   可枚举(u, 别名) ⟺ 可枚举(u, 别名的父) ∧ **本地**可枚举(u, 目标)
---   读正文        ⟺ canViewWiki(u, 目标)  ← 永远重判目标，别名一票不投
--- 第二合取项取目标的**本地**可枚举（自身 listable / meta@view 行 / 部门分享），不含
--- 目标那条祖先链——别名给的是第二个**位置**，位置维由别名自己的父链承担（#358 拍板）。
--- 推论：目标被移走，别名不受影响（认 id 不认位置），移进私密子树也不连累别名。
---
--- 目标多态无 FK（同 wiki_entity_link 定式），本批只实现 'wiki'，'asset' 等待接入。
--- 目标删除不靠 FK：deleteWiki 在同一事务内清掉指向它的别名（与「子文档上移一层」
--- 同批）；读路径一律 join 目标，解析不到的别名不出树（惰性兜底，不做失效占位）。
-CREATE TABLE IF NOT EXISTS wiki_alias (
-  id            TEXT        PRIMARY KEY,
-  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  parent_id     UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
-  sort_key      TEXT        NULL,
-  target_type   TEXT        NOT NULL DEFAULT 'wiki',
-  target_id     TEXT        NOT NULL,
-  -- 显示名：NULL＝跟随目标实时标题（缺省，不分叉）。纯标签，不参与任何判定。
-  display_title TEXT        NULL,
-  created_by    UUID        NULL REFERENCES app_user(id),
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT wiki_alias_place_target_uniq UNIQUE (parent_id, target_type, target_id)
-);
-
-CREATE INDEX IF NOT EXISTS wiki_alias_production_idx ON wiki_alias (production_id);
-CREATE INDEX IF NOT EXISTS wiki_alias_parent_idx     ON wiki_alias (parent_id);
-CREATE INDEX IF NOT EXISTS wiki_alias_target_idx     ON wiki_alias (target_type, target_id);
+-- 软链接（原 wiki_alias，#358）已随 node 树统一（#420）合入 node 表的
+-- kind='link' 节点；#358 的全部不变量（叶子性、无权限列的物理保证、本地可枚举
+-- 判据、惰性兜底）以 node 表 CHECK 与 lib/node 判定的形态延续，见 node 表注释。
+-- 原表保留为 wiki_alias_backup_node_tree（回滚依据，落稳后单独 DROP）。
 
 -- 交叉引用边（wiki↔任意对象；backlinks/unlinked references/对象侧"相关 wiki"面板的数据基础）。
 -- entity 多态无 FK（scene/cue 等 TEXT short id、wiki UUID 存文本），存在性校验在应用层，
@@ -827,14 +793,8 @@ CREATE TABLE IF NOT EXISTS wiki_tag (
 
 CREATE INDEX IF NOT EXISTS wiki_tag_tag_idx ON wiki_tag (tag);
 
--- 部门分享面（结构面：判定时查部门成员，部门变动零 sweep；不走区间不落行）
-CREATE TABLE IF NOT EXISTS wiki_dept_share (
-  wiki_id    UUID        NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
-  dept_id    UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (wiki_id, dept_id)
-);
-
+-- 部门分享面已随 node 树统一（#420）迁为 node_dept_share（树/分享面归 node 域），
+-- 见 node 表区段。结构面定式不变：判定时查部门成员，零 sweep，不物化。
 -- 方言 v1→v2 迁移的正文备份（migrate-wiki-dialect-v2.sql）。既是回滚依据，也是
 -- 「本库是否已迁移」的判据——本迁移是纯 DML 正文改写，没有可供判定的列变化。
 -- 迁移落稳后可单独 DROP，但在那之前它是唯一能还原迁移前正文的地方
@@ -896,7 +856,8 @@ CREATE TABLE IF NOT EXISTS wiki_proposal (
   action          TEXT        NOT NULL DEFAULT 'create'
                     CHECK (action IN ('create', 'update', 'delete', 'move', 'tag')),
   target_wiki_id  UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
-  parent_wiki_id  UUID        NULL REFERENCES wiki(id) ON DELETE SET NULL,
+  -- parent 列（create/move 的「新父」）已随 #420 换键为 parent_node_id，
+  -- 在 node 表区段以 ALTER 补列（node 定义在本表之后）
   title           TEXT        NULL,
   body            TEXT        NOT NULL DEFAULT '',
   tags            TEXT[]      NULL,
@@ -911,26 +872,21 @@ CREATE TABLE IF NOT EXISTS wiki_proposal (
   CONSTRAINT wiki_proposal_production_tool_call_uniq UNIQUE (production_id, tool_call_id)
 );
 
--- 默认文档树（add-wiki-default-tree.sql）：production 级 wiki 配置
---（未来扩展：改配置=改根目录名/开关默认目录）；锚点是普通 wiki，锚认 id 不认位置
-CREATE TABLE IF NOT EXISTS production_wiki_config (
+-- node 树系统配置（原 production_wiki_config，随 #420 改名——锚点泛化为 node 根，
+-- 三根列（reports/dramaturgy/assets）在 node 表区段以 ALTER 补列（node 定义在后）。
+-- 锚点是普通 node，锚认 id 不认位置，可改名/移动不可删。
+CREATE TABLE IF NOT EXISTS production_node_config (
   production_id        TEXT    PRIMARY KEY REFERENCES production(id) ON DELETE CASCADE,
   reports_tree_enabled BOOLEAN NOT NULL DEFAULT true,
   reports_root_title   TEXT    NOT NULL DEFAULT '报告',
-  reports_root_wiki_id UUID    NULL REFERENCES wiki(id) ON DELETE SET NULL,
-  -- 「戏剧构作」系统根（Phase 2）：场景侧新建文档的默认落位，也是「构作 · 灵感
+  -- 「戏剧构作」（灵感库）系统根：场景侧新建文档的默认落位，也是「构作 · 灵感
   -- 文档」工作区展示的子树。根下可自由建层级/拖拽（#352 拍板）。不做 per-scene
   -- 子目录——scene 易变且 wiki↔scene 是 m:n，归属由 wiki_entity_link manual 边表达
   dramaturgy_tree_enabled BOOLEAN NOT NULL DEFAULT true,
   dramaturgy_root_title   TEXT    NOT NULL DEFAULT '戏剧构作',
-  dramaturgy_root_wiki_id UUID    NULL REFERENCES wiki(id) ON DELETE SET NULL,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
--- event 目录文档锚点（production_event 定义在 wiki 之前，此处 ALTER 补 FK 列）
-ALTER TABLE production_event
-  ADD COLUMN IF NOT EXISTS report_doc_wiki_id UUID NULL REFERENCES wiki(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS wiki_comment (
   id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -945,43 +901,9 @@ CREATE TABLE IF NOT EXISTS wiki_comment (
 
 CREATE INDEX IF NOT EXISTS wiki_comment_wiki_idx ON wiki_comment (wiki_id, created_at);
 
--- event_report = event↔wiki 挂载边（id 即边 id；发布是这次挂载的生命周期）
-CREATE TABLE IF NOT EXISTS event_report (
-  id           TEXT PRIMARY KEY,
-  event_id     TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
-  report_type  TEXT NOT NULL DEFAULT 'rehearsal',
-  wiki_id      UUID NOT NULL REFERENCES wiki(id),
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  published_at TIMESTAMPTZ
-);
-
-CREATE INDEX IF NOT EXISTS event_report_event_idx ON event_report(event_id);
-CREATE INDEX IF NOT EXISTS event_report_wiki_idx  ON event_report(wiki_id);
-
--- event_report_note = report边↔wiki×dept 挂载边（per-dept 联合关系）
-CREATE TABLE IF NOT EXISTS event_report_note (
-  id             TEXT PRIMARY KEY,
-  report_id      TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
-  department_id  UUID NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
-  wiki_id        UUID NOT NULL REFERENCES wiki(id),
-  -- 创建通道（批C C3）：dept=本部门 / wildcard=通配权 / moderator=event 编辑者；
-  -- POC 的 ud 门 = dept/<D>/notes@edit|delete 行 ∧ created_via='dept'（导演提的不可被 POC 删）
-  created_via    TEXT NOT NULL DEFAULT 'dept' CHECK (created_via IN ('dept', 'wildcard', 'moderator')),
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS event_report_note_report_idx ON event_report_note(report_id);
-CREATE INDEX IF NOT EXISTS event_report_note_wiki_idx   ON event_report_note(wiki_id);
-
-CREATE TABLE IF NOT EXISTS event_report_read (
-  report_id TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
-  user_id   UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  read_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (report_id, user_id)
-);
-
+-- event_report / event_report_note / event_report_read 定义已随 node 树统一
+-- （#420）移入 node 表区段——边换键 wiki_id → node_id（「任意 node 可挂载为
+-- report」），node 定义在本位置之后。
 -- event_report_reply 已拆入 wiki_comment（migrate-report-note-wiki-split.sql）
 
 -- ── Platform identities ───────────────────────────────────────────────────────
@@ -1185,9 +1107,8 @@ CREATE TABLE IF NOT EXISTS asset (
   asset_type        TEXT NOT NULL DEFAULT 'reference',
   file_name         TEXT NOT NULL,
   mime_type         TEXT,
-  -- 批D 隐私/公开：可见 = 能力票 ∧ (is_public ∨ ∃挂载边:宿主可见) ∨ publication@view。
-  -- 存量迁移置 true（保真）；新建默认隐私
-  is_public         BOOLEAN NOT NULL DEFAULT false,
+  -- is_public 已随 #420 迁入 node.is_public（两个 public 位并存必漂移）。语义差
+  -- 留在内容面判定：asset 的 public 只免除结构面要求、仍需能力票（lib/asset/perm）
   storage_type      TEXT NOT NULL DEFAULT 'r2',
   feishu_url        TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1208,44 +1129,173 @@ CREATE TABLE IF NOT EXISTS asset_file (
 
 CREATE INDEX IF NOT EXISTS asset_file_asset_idx ON asset_file(asset_id);
 
-CREATE TABLE IF NOT EXISTS asset_mount (
-  id               TEXT PRIMARY KEY,
-  asset_id         TEXT NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
-  production_id    TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  mount_type       TEXT NOT NULL,
-  mount_id         TEXT NOT NULL,
-  mount_aux_id     TEXT,
-  folder_path      TEXT,
-  mount_mode       TEXT,
-  version_resolved BOOLEAN,
-  created_by       UUID NOT NULL REFERENCES app_user(id),
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS asset_mount_production_idx ON asset_mount(production_id);
-CREATE INDEX IF NOT EXISTS asset_mount_point_idx ON asset_mount(mount_type, mount_id);
-CREATE INDEX IF NOT EXISTS asset_mount_asset_idx ON asset_mount(asset_id);
-
+-- asset_mount 已随 node 树统一（#420）演化为 node_mount（asset_id → node_id、
+-- 化石列清理、六个 mount_type 值退役），定义见 node 表区段。
 -- asset_version_rel（资产文件按版本 pin）已随版本退役删除
 -- （migrate-version-retire.sql）：文件解析一律 latest-wins。
+-- asset_share_token 化石表已删（migrate-node-tree.sql）：分享 token 实现早已
+-- 换成无状态 HMAC（lib/asset/share-token.ts），该表全代码零读写。
 
--- Share tokens for public (unauthenticated) asset preview.
--- one_time=true: token is consumed on first access, but streaming continues for 4h (grace period).
--- expires_at=null + one_time=false: permanent token (discouraged; prefer long-expiry time_limited).
-CREATE TABLE IF NOT EXISTS asset_share_token (
-  token         TEXT        PRIMARY KEY,
-  asset_id      TEXT        NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
-  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  created_by    UUID        NOT NULL REFERENCES app_user(id),
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  label         TEXT,
-  expires_at    TIMESTAMPTZ,
-  one_time      BOOLEAN     NOT NULL DEFAULT FALSE,
-  used_at       TIMESTAMPTZ,
-  revoked_at    TIMESTAMPTZ
+-- ═══════════════════════════════════════════════════════════════════════════
+-- node 树（epic #420）：一棵树承载组织与权限，异构边承载消费关系
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- 壳节点模型（飞书式）：树节点是壳（位置+权限），内容对象另存——wiki 表管正文、
+-- asset 表管文件与版本。四种 kind：folder / wiki / asset / link。
+--
+-- 本体规约：
+--   · 一个 wiki/asset 只对应一个 node（partial unique 钉死）。
+--   · 权限双面：枚举面沿祖先链求交（listable / node_dept_share / 内容域
+--     meta@view 预取对撞目标列），实现只有 lib/node/perm.ts 一份；内容面
+--     由各内容域判定（canViewWiki / canViewAsset）自持，读 node 的 is_public。
+--     grant 行永久键在内容域（'wiki'/uuid、'asset'/id）**不迁**——`*@view`
+--     sub 通配天然命中 meta 的零迁移蕴含不能断。
+--   · 【硬不变量】边不投枚举票：任何边种不得让节点在树里出现。内容面的
+--     挂载让渡＝分享语义（资产挂到可见 scene ⇒ 内容可见，正如 wiki 被分享后
+--     父链不可枚举也看不到它在树里的位置，但能读）。
+--   · 悬空即删：目标指针全部真 FK CASCADE（asset 删 → node 级联 → node_mount
+--     级联；node 删 → link 级联）；读路径仍 join 目标做惰性兜底。
+--   · kind='link'（接替 wiki_alias，#358 全部不变量延续）：叶子、无权限语义
+--     （CHECK 钉死 listable=true ∧ is_public=false——原「表上无权限列」的物理
+--     保证换此形态）、显示名 NULL=跟随目标实时标题、本地可枚举判据不含目标
+--     祖先链（别名给的是第二个位置，位置维由自己的父链承担）。
+--   · parent_id 的 SET NULL 只是兜底：删除路径由 deleteNode 事务内「子项上移
+--     一层」（#352）。锚点（reports/dramaturgy/assets 三根 + event 目录）是
+--     无主公共容器：不发 grant 行、is_public=true 防漂根、容器写门豁免。
+CREATE TABLE IF NOT EXISTS node (
+  id             TEXT        PRIMARY KEY,
+  production_id  TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  kind           TEXT        NOT NULL CHECK (kind IN ('folder', 'wiki', 'asset', 'link')),
+  parent_id      TEXT        NULL REFERENCES node(id) ON DELETE SET NULL,
+  sort_key       TEXT        NULL,
+  is_public      BOOLEAN     NOT NULL DEFAULT false,
+  listable       BOOLEAN     NOT NULL DEFAULT true,
+  wiki_id        UUID        NULL REFERENCES wiki(id)  ON DELETE CASCADE,
+  asset_id       TEXT        NULL REFERENCES asset(id) ON DELETE CASCADE,
+  link_target_id TEXT        NULL REFERENCES node(id)  ON DELETE CASCADE,
+  title          TEXT        NULL,
+  created_by     UUID        NULL REFERENCES app_user(id),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT node_kind_target_check CHECK (
+       (kind = 'folder' AND wiki_id IS NULL     AND asset_id IS NULL     AND link_target_id IS NULL     AND title IS NOT NULL)
+    OR (kind = 'wiki'   AND wiki_id IS NOT NULL AND asset_id IS NULL     AND link_target_id IS NULL     AND title IS NULL)
+    OR (kind = 'asset'  AND wiki_id IS NULL     AND asset_id IS NOT NULL AND link_target_id IS NULL     AND title IS NULL)
+    OR (kind = 'link'   AND wiki_id IS NULL     AND asset_id IS NULL     AND link_target_id IS NOT NULL)
+  ),
+  CONSTRAINT node_link_no_perm_check CHECK (
+    kind <> 'link' OR (listable = true AND is_public = false)
+  )
 );
 
-CREATE INDEX IF NOT EXISTS asset_share_token_asset_idx ON asset_share_token(asset_id);
+CREATE UNIQUE INDEX IF NOT EXISTS node_wiki_uidx  ON node (wiki_id)  WHERE wiki_id  IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS node_asset_uidx ON node (asset_id) WHERE asset_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS node_link_place_uidx ON node (parent_id, link_target_id) WHERE kind = 'link';
+CREATE INDEX IF NOT EXISTS node_production_idx  ON node (production_id);
+CREATE INDEX IF NOT EXISTS node_parent_idx      ON node (parent_id);
+CREATE INDEX IF NOT EXISTS node_link_target_idx ON node (link_target_id) WHERE link_target_id IS NOT NULL;
+
+-- 部门分享面（接替 wiki_dept_share）。结构面定式：判定时查部门成员，零 sweep。
+CREATE TABLE IF NOT EXISTS node_dept_share (
+  node_id    TEXT        NOT NULL REFERENCES node(id) ON DELETE CASCADE,
+  dept_id    UUID        NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (node_id, dept_id)
+);
+
+-- 简单通用挂载边（原 asset_mount，#420 演化）：业务点 ↔ node 的缺省边种。
+-- 挂载边是**关系概念不是一张表**——业务复杂度到了就从本表毕业成专表（如
+-- event_report 的三元关系），本表只服务「还没长出个性」的简单挂载。
+-- mount_id 多态无 FK（scene/block/cue/comment/event/…的稳定 id），归属校验在
+-- 应用层；宿主删除的悬空行由读路径 join 兜底（反向查询只从活宿主页发起）。
+-- mount_type='embed'：wiki 正文嵌入的图片资产（宿主 mount_id=wiki uuid，内容面
+-- 寻址）——「文档可见⇒图可见」的让渡通道，原 mount_type='wiki' 改名而来。
+-- CHECK 白名单是物理保险丝：退役词汇（production/wiki/version/*_snapshot/
+-- cue_revision）的漏网写入者当场失败，不静默造半迁移数据。
+CREATE TABLE IF NOT EXISTS node_mount (
+  id            TEXT PRIMARY KEY,
+  node_id       TEXT NOT NULL REFERENCES node(id) ON DELETE CASCADE,
+  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  mount_type    TEXT NOT NULL,
+  mount_id      TEXT NOT NULL,
+  mount_aux_id  TEXT,
+  created_by    UUID NOT NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT node_mount_type_check CHECK (mount_type IN
+    ('scene', 'block', 'cue', 'comment', 'event', 'event_schedule', 'task', 'event_report', 'embed'))
+);
+
+CREATE INDEX IF NOT EXISTS node_mount_production_idx ON node_mount (production_id);
+CREATE INDEX IF NOT EXISTS node_mount_point_idx      ON node_mount (mount_type, mount_id);
+CREATE INDEX IF NOT EXISTS node_mount_node_idx       ON node_mount (node_id);
+
+-- 前文表的 node 列（定义序在 node 之前，此处 ALTER 补列——同 report_doc 旧例）
+ALTER TABLE production_node_config ADD COLUMN IF NOT EXISTS reports_root_node_id    TEXT NULL REFERENCES node(id) ON DELETE SET NULL;
+ALTER TABLE production_node_config ADD COLUMN IF NOT EXISTS dramaturgy_root_node_id TEXT NULL REFERENCES node(id) ON DELETE SET NULL;
+ALTER TABLE production_node_config ADD COLUMN IF NOT EXISTS assets_root_node_id     TEXT NULL REFERENCES node(id) ON DELETE SET NULL;
+ALTER TABLE production_event ADD COLUMN IF NOT EXISTS report_doc_node_id TEXT NULL REFERENCES node(id) ON DELETE SET NULL;
+ALTER TABLE wiki_proposal    ADD COLUMN IF NOT EXISTS parent_node_id     TEXT NULL REFERENCES node(id) ON DELETE SET NULL;
+
+-- event_report = event↔node 挂载边（id 即边 id；发布是这次挂载的生命周期）。
+-- 「任意 node 可挂载为 report」（#420）；node_id 无 ON DELETE=被挂载的节点不可删
+-- （deleteNode 的 mounted 守卫 + FK 双保险，与原 wiki_id 语义一致）。
+CREATE TABLE IF NOT EXISTS event_report (
+  id           TEXT PRIMARY KEY,
+  event_id     TEXT NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
+  report_type  TEXT NOT NULL DEFAULT 'rehearsal',
+  node_id      TEXT NOT NULL REFERENCES node(id),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  published_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS event_report_event_idx ON event_report(event_id);
+CREATE INDEX IF NOT EXISTS event_report_node_idx  ON event_report(node_id);
+
+-- event_report_note = report边↔node×dept 挂载边（per-dept 三元关系——
+-- 「异构边各自建表」的现成样本）
+CREATE TABLE IF NOT EXISTS event_report_note (
+  id             TEXT PRIMARY KEY,
+  report_id      TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
+  department_id  UUID NOT NULL REFERENCES production_dept(id) ON DELETE CASCADE,
+  node_id        TEXT NOT NULL REFERENCES node(id),
+  -- 创建通道（批C C3）：dept=本部门 / wildcard=通配权 / moderator=event 编辑者；
+  -- POC 的 ud 门 = dept/<D>/notes@edit|delete 行 ∧ created_via='dept'（导演提的不可被 POC 删）
+  created_via    TEXT NOT NULL DEFAULT 'dept' CHECK (created_via IN ('dept', 'wildcard', 'moderator')),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS event_report_note_report_idx ON event_report_note(report_id);
+CREATE INDEX IF NOT EXISTS event_report_note_node_idx   ON event_report_note(node_id);
+
+CREATE TABLE IF NOT EXISTS event_report_read (
+  report_id TEXT NOT NULL REFERENCES event_report(id) ON DELETE CASCADE,
+  user_id   UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  read_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (report_id, user_id)
+);
+
+-- 迁移备份（migrate-node-tree.sql；回滚依据，落稳后单独 DROP——同
+-- wiki_body_backup_dialect_v2 定式）
+CREATE TABLE IF NOT EXISTS wiki_tree_backup_node_tree (
+  wiki_id   UUID,
+  parent_id UUID,
+  sort_key  TEXT,
+  is_public BOOLEAN,
+  listable  BOOLEAN
+);
+CREATE TABLE IF NOT EXISTS wiki_alias_backup_node_tree (
+  id            TEXT        PRIMARY KEY,
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  parent_id     UUID        NULL,
+  sort_key      TEXT        NULL,
+  target_type   TEXT        NOT NULL DEFAULT 'wiki',
+  target_id     TEXT        NOT NULL,
+  display_title TEXT        NULL,
+  created_by    UUID        NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- ── Scene table view configs ──────────────────────────────────────────────────
 
