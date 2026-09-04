@@ -5,7 +5,7 @@
 import { resolveProductionActor, DENIED_NOT_MEMBER } from "./production-tools";
 import {
   listNodeLibrary, getNodeByWikiId, moveNode,
-  setNodePublic, setNodeListable, setNodeDeptShares, listNodeDeptShares,
+  setNodePublic, setNodeDeptShares, listNodeDeptShares,
   type NodeEntry,
 } from "@/lib/node/db";
 import { getWiki, createWiki, updateWiki, deleteWiki, listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson } from "@/lib/wiki/content";
@@ -341,7 +341,7 @@ export async function wikiProposeMove(
     return "权限被拒绝：你没有改动这些父文档子目录的权限。已记录本次调用，需人工审批通过后才能重试。";
   }
 
-  let doc = existing;
+  const doc = existing;
   try {
     await moveNode(shell.id, productionId, { parentId: newParentNodeId });
   } catch (err) {

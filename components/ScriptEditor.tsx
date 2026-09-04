@@ -8035,8 +8035,8 @@ export default function ScriptEditor({
       setBlockAssetsByBlockId(new Map());
       return;
     }
-    const qs = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-    fetch(`${BASE_PATH}/api/production/${productionId}/assets/block-summary${qs}`)
+    // #420：挂载锚稳定 block_id，服务端无版本分辨路径，不再传 ?v=
+    fetch(`${BASE_PATH}/api/production/${productionId}/assets/block-summary`)
       .then(r => r.ok ? r.json() : null)
       .then((data: { blocks?: Array<{ blockId: string; asset: BlockAssetBubbleItem }> } | null) => {
         const grouped = new Map<string, BlockAssetBubbleItem[]>();
@@ -8050,7 +8050,7 @@ export default function ScriptEditor({
         setBlockAssetsByBlockId(grouped);
       })
       .catch(() => setBlockAssetsByBlockId(new Map()));
-  }, [productionId, activeVersionId]);
+  }, [productionId]);
 
   useEffect(() => {
     loadBlockAssetBubbles();

@@ -3,6 +3,8 @@ import { setPolicies } from "@/lib/policy-db";
 import { POLICY_ON, POLICY_OFF } from "@/lib/policy-keys";
 import { createAsset } from "@/lib/asset/db";
 import { canViewAsset, filterVisibleAssets, canPublishAsset, canCreateShareToken } from "@/lib/asset/perm";
+import { addNodeMount, removeNodeMount, getNodeMount, listNodeMounts } from "@/lib/node/mount";
+import { getNodeByAssetId } from "@/lib/node/db";
 import type { PermissionContext } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
@@ -147,5 +149,41 @@ describe("双门与分享规则", () => {
     const closed = await canCreateShareToken(ctxOf(uploader), prodId, { id: publicAssetId });
     expect(closed.allowed).toBe(false);
     expect(closed.downloadable).toBe(false);
+  });
+});
+
+// 本块放文件末尾：给 member 发 script 票会改变后续挂载判定，不得污染前面的用例。
+describe("挂载让渡（script 通道）与 node_mount CRUD", () => {
+  it("block 挂载：宿主域票 ∧ 能力票才让渡；撤挂即收缩", async () => {
+    const node = await getNodeByAssetId(privateAssetId);
+    expect(node).not.toBeNull();
+    const mount = await addNodeMount({
+      nodeId: node!.id, productionId: prodId,
+      mountType: "block", mountId: shortId(), createdBy: uploader,
+    });
+
+    // 挂上了，但 member 只有 asset 能力票、无 script blocks@view → 让渡不成立
+    expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId }, "meta")).toBe(false);
+
+    await getPool().query(
+      `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES ($1, $2, 'script', '*', 'blocks', 'view', 'auto')`,
+      [prodId, member],
+    );
+    expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId }, "meta")).toBe(true);
+    // 集合式同源不分叉
+    const set = await filterVisibleAssets(ctxOf(member), prodId, [{ id: privateAssetId }]);
+    expect(set.map(a => a.id)).toContain(privateAssetId);
+    // 宿主域票不豁免能力票（outsider 无 asset 票）
+    expect(await canViewAsset(ctxOf(outsider), prodId, { id: privateAssetId }, "meta")).toBe(false);
+
+    // CRUD 读面
+    expect((await getNodeMount(mount.id))?.mountType).toBe("block");
+    expect((await listNodeMounts(node!.id)).map(m => m.id)).toContain(mount.id);
+
+    // 撤挂 → 让渡收缩（解除挂载即收缩，不物化 grant 行）
+    await removeNodeMount(mount.id);
+    expect(await getNodeMount(mount.id)).toBeNull();
+    expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId }, "meta")).toBe(false);
   });
 });

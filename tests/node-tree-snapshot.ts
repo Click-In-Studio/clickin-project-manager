@@ -68,6 +68,17 @@ export async function createNodeTreePreMigrationData(
      ON CONFLICT DO NOTHING`,
     [prodId, userId],
   );
+  // 主本随建（script-view 迁移的 integrity 断言要求每个演出都有主本；本块排在
+  // 那支迁移之后，裸 production 不会再被它回填——role-drift 工厂同款）
+  await pool.query(
+    `INSERT INTO script_view (id, production_id, name) VALUES ('svndtrmig1', $1, '标准本')
+     ON CONFLICT DO NOTHING`,
+    [prodId],
+  );
+  await pool.query(
+    `UPDATE production SET master_view_id = 'svndtrmig1' WHERE id = $1 AND master_view_id IS NULL`,
+    [prodId],
+  );
   const { rows: [{ id: u2Id }] } = await pool.query<{ id: string }>(
     `INSERT INTO app_user DEFAULT VALUES RETURNING id::text AS id`,
   );
