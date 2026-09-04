@@ -4,7 +4,8 @@ import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { createWiki, updateWiki, deleteWiki } from "@/lib/wiki/content";
 import { extractMentionEdges, listBacklinks, listWikiRefsForEntity, listEntityRefsForWiki } from "@/lib/wiki/links";
-import { ensureDramaturgyRootAnchor } from "@/lib/wiki/tree";
+import { ensureDramaturgyRootAnchor } from "@/lib/node/anchors";
+import { getNodeByWikiId } from "@/lib/node/db";
 import { GET as wikiRefsGET, POST as wikiRefsPOST, DELETE as wikiRefsDELETE } from "@/app/api/production/[id]/wiki-refs/route";
 import { makeProduction, makeScene, cleanupProduction, shortId } from "./factories";
 
@@ -301,18 +302,23 @@ describe("manual edges & dramaturgy root (Phase 2)", () => {
     expect(res.status).toBe(201);
     const { wiki } = await res.json();
 
-    const root = await getPool().query<{ id: string; title: string; is_public: boolean }>(
-      `SELECT w.id::text AS id, w.title, w.is_public FROM production_wiki_config c
-       JOIN wiki w ON w.id = c.dramaturgy_root_wiki_id WHERE c.production_id = $1`,
+    // #420：锚点是 wiki-kind node，config 存 node id、is_public 在壳节点上
+    const root = await getPool().query<{ node_id: string; wiki_id: string; title: string; is_public: boolean }>(
+      `SELECT n.id AS node_id, w.id::text AS wiki_id, w.title, n.is_public
+       FROM production_node_config c
+       JOIN node n ON n.id = c.dramaturgy_root_node_id
+       JOIN wiki w ON w.id = n.wiki_id
+       WHERE c.production_id = $1`,
       [prodId]);
     expect(root.rows[0].title).toBe("戏剧构作");
     expect(root.rows[0].is_public).toBe(true);
-    expect(wiki.parentId).toBe(root.rows[0].id);
+    const createdShell = await getNodeByWikiId(wiki.id);
+    expect(createdShell?.parentId).toBe(root.rows[0].node_id);
     expect((await listWikiRefsForEntity(prodId, "scene", sceneId)).find(r => r.id === wiki.id)?.manual).toBe(true);
 
     // 懒建幂等 + 锚点删除保护
-    expect(await ensureDramaturgyRootAnchor(prodId)).toBe(root.rows[0].id);
-    expect(await deleteWiki(root.rows[0].id, prodId)).toEqual({ ok: false, reason: "anchor" });
+    expect(await ensureDramaturgyRootAnchor(prodId)).toBe(root.rows[0].node_id);
+    expect(await deleteWiki(root.rows[0].wiki_id, prodId)).toEqual({ ok: false, reason: "anchor" });
   });
 
   it("listEntityRefsForWiki: non-wiki out-edges with manual flag, wiki kind excluded", async () => {

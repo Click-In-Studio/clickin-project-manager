@@ -8,6 +8,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser } from "@/lib/db";
 import { registerWikiLibrarySSE, type WikiLibraryChange } from "@/lib/wiki/collab";
+import { moveNode } from "@/lib/node/db";
 import { createWiki, updateWiki, deleteWiki } from "@/lib/wiki/content";
 
 let prodId: string;
@@ -38,25 +39,25 @@ afterAll(async () => {
 
 describe("wiki 库级广播", () => {
   it("createWiki 推 created 帧", async () => {
-    const doc = await createWiki({ productionId: prodId, title: "灯光", body: "", parentId: null, createdBy: ownerId });
-    expect(takeFrames()).toEqual([{ kind: "created", wikiId: doc.id }]);
+    const doc = await createWiki({ productionId: prodId, title: "灯光", body: "", createdBy: ownerId });
+    expect(takeFrames()).toEqual([{ kind: "created", wikiId: doc.nodeId }]);
     await deleteWiki(doc.id, prodId);
     takeFrames();
   });
 
   it("改标题 / 换标签 / 移动都推 updated 帧", async () => {
-    const doc = await createWiki({ productionId: prodId, title: "音响", body: "", parentId: null, createdBy: ownerId });
-    const parent = await createWiki({ productionId: prodId, title: "技术", body: "", parentId: null, createdBy: ownerId });
+    const doc = await createWiki({ productionId: prodId, title: "音响", body: "", createdBy: ownerId });
+    const parent = await createWiki({ productionId: prodId, title: "技术", body: "", createdBy: ownerId });
     takeFrames();
 
     await updateWiki(doc.id, prodId, { title: "音响设计" }, ownerId);
-    expect(takeFrames()).toEqual([{ kind: "updated", wikiId: doc.id }]);
+    expect(takeFrames()).toEqual([{ kind: "updated", wikiId: doc.nodeId }]);
 
     await updateWiki(doc.id, prodId, { tags: ["v2"] }, ownerId);
-    expect(takeFrames()).toEqual([{ kind: "updated", wikiId: doc.id }]);
+    expect(takeFrames()).toEqual([{ kind: "updated", wikiId: doc.nodeId }]);
 
-    await updateWiki(doc.id, prodId, { parentId: parent.id }, ownerId);
-    expect(takeFrames()).toEqual([{ kind: "updated", wikiId: doc.id }]);
+    await moveNode(doc.nodeId, prodId, { parentId: parent.nodeId });
+    expect(takeFrames()).toEqual([{ kind: "updated", wikiId: doc.nodeId }]);
 
     await deleteWiki(doc.id, prodId);
     await deleteWiki(parent.id, prodId);
@@ -64,7 +65,7 @@ describe("wiki 库级广播", () => {
   });
 
   it("只改正文（autosave 的常态）不推库级帧", async () => {
-    const doc = await createWiki({ productionId: prodId, title: "服装", body: "", parentId: null, createdBy: ownerId });
+    const doc = await createWiki({ productionId: prodId, title: "服装", body: "", createdBy: ownerId });
     takeFrames();
     await updateWiki(doc.id, prodId, { body: "第一稿" }, ownerId);
     await updateWiki(doc.id, prodId, { body: "第二稿" }, ownerId);
@@ -74,10 +75,10 @@ describe("wiki 库级广播", () => {
   });
 
   it("deleteWiki 推 deleted 帧（正开着这篇的人靠它离场）", async () => {
-    const doc = await createWiki({ productionId: prodId, title: "道具", body: "", parentId: null, createdBy: ownerId });
+    const doc = await createWiki({ productionId: prodId, title: "道具", body: "", createdBy: ownerId });
     takeFrames();
     expect(await deleteWiki(doc.id, prodId)).toEqual({ ok: true });
-    expect(takeFrames()).toEqual([{ kind: "deleted", wikiId: doc.id }]);
+    expect(takeFrames()).toEqual([{ kind: "deleted", wikiId: doc.nodeId }]);
   });
 
   it("删除被拒（锚点/挂载/不存在）不推帧", async () => {

@@ -71,48 +71,45 @@ afterAll(async () => {
 
 describe("能力票∧结构合取", () => {
   it("能力票 + is_public → 可见", async () => {
-    expect(await canViewAsset(ctxOf(member), prodId, { id: publicAssetId, isPublic: true }, "meta")).toBe(true);
+    expect(await canViewAsset(ctxOf(member), prodId, { id: publicAssetId }, "meta")).toBe(true);
   });
 
   it("能力票单独不越隐私（未挂载私有 → 不可见）", async () => {
-    expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId, isPublic: false }, "meta")).toBe(false);
+    expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId }, "meta")).toBe(false);
   });
 
   it("无能力票即使公开也不可见", async () => {
-    expect(await canViewAsset(ctxOf(outsider), prodId, { id: publicAssetId, isPublic: true }, "meta")).toBe(false);
+    expect(await canViewAsset(ctxOf(outsider), prodId, { id: publicAssetId }, "meta")).toBe(false);
   });
 
   it("publication@view 显式通配越隐私（无需能力票的 file 面也可）", async () => {
-    expect(await canViewAsset(ctxOf(librarian), prodId, { id: privateAssetId, isPublic: false }, "file")).toBe(true);
+    expect(await canViewAsset(ctxOf(librarian), prodId, { id: privateAssetId }, "file")).toBe(true);
   });
 
   it("创建者行集：uploader 自见隐私资产（实例 publication@view）", async () => {
-    expect(await canViewAsset(ctxOf(uploader), prodId, { id: privateAssetId, isPublic: false }, "meta")).toBe(true);
+    expect(await canViewAsset(ctxOf(uploader), prodId, { id: privateAssetId }, "meta")).toBe(true);
   });
 });
 
-describe("挂载让渡（production 根共享区）", () => {
-  it("挂载后能力票持有者可见；解除后回到隐私", async () => {
-    const mid = `am${shortId()}`;
+describe("结构让渡（#420：node 可枚举 ≡ 原 production 根共享区）", () => {
+  it("置 listable 后能力票持有者可见；关掉回到隐私", async () => {
     await getPool().query(
-      `INSERT INTO asset_mount (id, asset_id, production_id, mount_type, mount_id, created_by)
-       VALUES ($1, $2, $3, 'production', $3, $4)`,
-      [mid, privateAssetId, prodId, uploader],
-    );
-    expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId, isPublic: false }, "meta")).toBe(true);
+      `UPDATE node SET listable = true WHERE asset_id = $1`, [privateAssetId]);
+    expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId }, "meta")).toBe(true);
     // 无能力票者依然不可见（让渡不豁免能力票）
-    expect(await canViewAsset(ctxOf(outsider), prodId, { id: privateAssetId, isPublic: false }, "meta")).toBe(false);
+    expect(await canViewAsset(ctxOf(outsider), prodId, { id: privateAssetId }, "meta")).toBe(false);
 
-    await getPool().query("DELETE FROM asset_mount WHERE id = $1", [mid]);
-    expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId, isPublic: false }, "meta")).toBe(false);
+    await getPool().query(
+      `UPDATE node SET listable = false WHERE asset_id = $1`, [privateAssetId]);
+    expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId }, "meta")).toBe(false);
   });
 });
 
 describe("filterVisibleAssets 集合式一致性", () => {
   it("member 看到公开不看到隐私；librarian 全见", async () => {
     const assets = [
-      { id: privateAssetId, isPublic: false },
-      { id: publicAssetId, isPublic: true },
+      { id: privateAssetId },
+      { id: publicAssetId },
     ];
     const forMember = await filterVisibleAssets(ctxOf(member), prodId, assets);
     expect(forMember.map(a => a.id)).toEqual([publicAssetId]);
@@ -131,23 +128,23 @@ describe("双门与分享规则", () => {
     // #236：policy.share_token_enabled **默认关**（出口是全系统唯一把访问权发到权限
     // 系统之外的动作）。本例测的是**能力票规则**，与项目开关串联，故先把出口打开。
     await setPolicies(prodId, { "policy.share_token_enabled": POLICY_ON }, uploader);
-    const noShare = await canCreateShareToken(ctxOf(member), prodId, { id: publicAssetId, isPublic: true });
+    const noShare = await canCreateShareToken(ctxOf(member), prodId, { id: publicAssetId });
     expect(noShare.allowed).toBe(false);  // member 没有 shares@create
 
     const metaOnly = await newUser();
     await giveTicket(metaOnly, prodId, "meta", "view");
     await giveTicket(metaOnly, prodId, "shares", "create");
-    const cap = await canCreateShareToken(ctxOf(metaOnly), prodId, { id: publicAssetId, isPublic: true });
+    const cap = await canCreateShareToken(ctxOf(metaOnly), prodId, { id: publicAssetId });
     expect(cap.allowed).toBe(true);
     expect(cap.downloadable).toBe(false);  // 不能分享自己没有的 file@view
 
-    const full = await canCreateShareToken(ctxOf(uploader), prodId, { id: publicAssetId, isPublic: true });
+    const full = await canCreateShareToken(ctxOf(uploader), prodId, { id: publicAssetId });
     expect(full.allowed).toBe(true);
     expect(full.downloadable).toBe(true);
 
     // 关掉出口 ⇒ 持全票的人也发不了（能力票 ∧ 项目开关，两者串联）
     await setPolicies(prodId, { "policy.share_token_enabled": POLICY_OFF }, uploader);
-    const closed = await canCreateShareToken(ctxOf(uploader), prodId, { id: publicAssetId, isPublic: true });
+    const closed = await canCreateShareToken(ctxOf(uploader), prodId, { id: publicAssetId });
     expect(closed.allowed).toBe(false);
     expect(closed.downloadable).toBe(false);
   });

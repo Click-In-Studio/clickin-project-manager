@@ -13,7 +13,6 @@ import {
   createProduction, deleteProduction,
   getActiveVersionId, getVersion,
   applyPatchToDB,
-  cowBlockSnapshotForMount,
   createCueList, createCue, updateCue, deleteCue,
 } from "@/lib/db";
 import { getPool } from "@/lib/pg";
@@ -400,47 +399,8 @@ describe("cue GC — deleteCue 引用计数守护", () => {
   });
 });
 
-// ─── G6: cowBlockSnapshotForMount ─────────────────────────────────────────────
-
-describe("cowBlockSnapshotForMount — 本版本分裂", () => {
-  const PROD = "test-vcs-cow-mount";
-  let v1Id: string;
-  let v2Id: string;
-  let v3Id: string;
-  let snapNoop: string;    // exclusively in v3 (refCount=1)
-  let snapVo: string;      // shared by v1/v2/v3
-
-  beforeAll(async () => {
-    await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "cowBlockSnapshotForMount 测试", TEST_OWNER);
-    v1Id = (await getActiveVersionId(PROD))!;
-    await applyPatchToDB(PROD, v1Id, ins(mkBlock("cm-vo", "共享测试块")));
-    snapVo = (await snapshotId(v1Id, "cm-vo"))!;
-    v2Id = await makeLegacyVersion(PROD, v1Id);
-    v3Id = await makeLegacyVersion(PROD, v2Id);
-    // An exclusive block only in v3 (refCount=1) for the noop test
-    await applyPatchToDB(PROD, v3Id, ins(mkBlock("cm-noop", "仅 V3 的块")));
-    snapNoop = (await snapshotId(v3Id, "cm-noop"))!;
-  });
-
-  afterAll(async () => { await deleteProduction(PROD).catch(() => {}); });
-
-  it("refCount=1：返回原 snapshotId，不创建新行", async () => {
-    expect(await snapshotRefCount(snapNoop)).toBe(1);
-    const result = await cowBlockSnapshotForMount(v3Id, snapNoop);
-    expect(result).toBe(snapNoop);
-    expect(await snapshotRefCount(snapNoop)).toBe(1);    // unchanged
-  });
-
-  it("refCount>1：只有本 version 的 script_version 行被 remap", async () => {
-    expect(await snapshotRefCount(snapVo)).toBe(3);      // v1/v2/v3
-    const newSnap = await cowBlockSnapshotForMount(v2Id, snapVo);
-    expect(newSnap).not.toBe(snapVo);
-    expect(await snapshotId(v1Id, "cm-vo")).toBe(snapVo);   // v1 unchanged
-    expect(await snapshotId(v2Id, "cm-vo")).toBe(newSnap);  // v2 remapped
-    expect(await snapshotId(v3Id, "cm-vo")).toBe(snapVo);   // v3 unchanged
-  });
-});
+// ─── G6（cowBlockSnapshotForMount）已随 #420 退役：挂载锚稳定 block_id，
+// 快照 CoW 与挂载无关（版本纪律），函数与测试一并删除。
 
 // ─── G7: 并发安全 — advisory lock 串行化 ─────────────────────────────────────
 
