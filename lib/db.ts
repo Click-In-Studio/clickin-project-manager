@@ -526,16 +526,8 @@ async function normalizeRehearsalMarkOwnershipInTx(
        SELECT $1, character_id, position, annotation FROM script_character WHERE script_id = $2`,
       [newSnapshotId, row.snapshot_id],
     );
-    await client.query(
-      `INSERT INTO asset_mount
-         (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
-          folder_path, mount_mode, version_resolved, created_by)
-       SELECT 'am_' || substr(md5(id || $1), 1, 16), asset_id, production_id,
-              'block_snapshot', $1, mount_aux_id, folder_path, mount_mode,
-              version_resolved, created_by
-       FROM asset_mount WHERE mount_type = 'block_snapshot' AND mount_id = $2`,
-      [newSnapshotId, row.snapshot_id],
-    );
+    // 挂载边 CoW 复制已随 #420 退役：node_mount 一律锚稳定 block_id，快照更替
+    // 与挂载无关（版本纪律：挂载即对最新状态的挂载）
     await client.query(
       "UPDATE script_version SET snapshot_id = $1 WHERE version_id = $2 AND snapshot_id = $3",
       [newSnapshotId, versionId, row.snapshot_id],
@@ -1338,17 +1330,7 @@ export async function flushToDBVersioned(
           }
           // block_tag rows are keyed by logical block_id (block.id), not by
           // snapshot_id, so they do not need to be copied during CoW.
-          // Duplicate asset_mount entries pointing at the old snapshot
-          await client.query(
-            `INSERT INTO asset_mount
-               (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
-                folder_path, mount_mode, version_resolved, created_by)
-             SELECT 'am_' || substr(md5(id || $1), 1, 16),
-               asset_id, production_id, 'block_snapshot', $1, mount_aux_id,
-               folder_path, mount_mode, version_resolved, created_by
-             FROM asset_mount WHERE mount_type = 'block_snapshot' AND mount_id = $2`,
-            [newSnapshotId, block.snapshotId]
-          );
+          // （挂载边 CoW 复制已随 #420 退役：node_mount 锚稳定 block_id）
           newSnapshotIds.set(block.id, newSnapshotId);
         }
       }
@@ -1366,14 +1348,6 @@ export async function flushToDBVersioned(
         `DELETE FROM script s
          WHERE s.id = ANY($1::text[])
            AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.snapshot_id = s.id)`,
-        [deleteSnapshotIds]
-      );
-      // Clean up asset_mounts for snapshots that were actually GC'd
-      await client.query(
-        `DELETE FROM asset_mount
-         WHERE mount_type = 'block_snapshot'
-           AND mount_id = ANY($1::text[])
-           AND NOT EXISTS (SELECT 1 FROM script WHERE id = asset_mount.mount_id)`,
         [deleteSnapshotIds]
       );
     }
@@ -2916,7 +2890,8 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
     await client.query(`UPDATE wiki SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE wiki_revision SET author_user_id = $1 WHERE author_user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE asset SET uploader_user_id = $1 WHERE uploader_user_id = $2`, [keepUserId, deleteUserId]);
-    await client.query(`UPDATE asset_mount SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE node_mount SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
+    await client.query(`UPDATE node SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE asset_share_token SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
     // production_member_status_audit.actor_id 是 NO ACTION 的 FK（#141）：漏了这条，
     // 任何处置过别人成员状态的账号都无法被合并——DELETE app_user 直接撞 FK 违例。
@@ -4891,17 +4866,7 @@ export async function updateCue(
         "UPDATE cue_version SET revision_id = $1 WHERE revision_id = $2 AND version_id = $3",
         [newId, id, versionId]
       );
-      // Copy cue_revision asset mounts to the new revision (mirrors cowCue behaviour)
-      await client.query(
-        `INSERT INTO asset_mount
-           (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
-            folder_path, mount_mode, version_resolved, created_by)
-         SELECT 'am_' || substr(md5(id || $1), 1, 16),
-           asset_id, production_id, 'cue_revision', $1, mount_aux_id,
-           folder_path, mount_mode, version_resolved, created_by
-         FROM asset_mount WHERE mount_type = 'cue_revision' AND mount_id = $2`,
-        [newId, id]
-      );
+      // （挂载边 CoW 复制已随 #420 退役：node_mount 锚稳定 cue_id）
     }
     await client.query("COMMIT");
   } catch (e) {
@@ -4931,9 +4896,6 @@ export async function deleteCue(id: string, cueListId: string, versionId?: strin
     );
     if (parseInt(refRes.rows[0].count, 10) === 0) {
       await client.query("DELETE FROM cue WHERE id = $1 AND cue_list_id = $2", [id, cueListId]);
-      await client.query(
-        "DELETE FROM asset_mount WHERE mount_type = 'cue_revision' AND mount_id = $1", [id]
-      );
     }
     await client.query("COMMIT");
   } catch (e) {
@@ -4984,17 +4946,7 @@ async function cowCue(
     "UPDATE cue_version SET revision_id = $1 WHERE revision_id = $2 AND version_id = $3",
     [newId, cur.id, versionId]
   );
-  // Duplicate asset_mount entries pointing at the old revision
-  await client.query(
-    `INSERT INTO asset_mount
-       (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
-        folder_path, mount_mode, version_resolved, created_by)
-     SELECT 'am_' || substr(md5(id || $1), 1, 16),
-       asset_id, production_id, 'cue_revision', $1, mount_aux_id,
-       folder_path, mount_mode, version_resolved, created_by
-     FROM asset_mount WHERE mount_type = 'cue_revision' AND mount_id = $2`,
-    [newId, cur.id]
-  );
+  // （挂载边 CoW 复制已随 #420 退役：node_mount 锚稳定 cue_id）
   return newId;
 }
 
@@ -5041,9 +4993,6 @@ async function removeCueFromVersion(
   );
   if (parseInt(refRes.rows[0].count, 10) <= 1) {
     await client.query("DELETE FROM cue WHERE id = $1", [revisionId]);
-    await client.query(
-      "DELETE FROM asset_mount WHERE mount_type = 'cue_revision' AND mount_id = $1", [revisionId]
-    );
   } else {
     await client.query(
       "DELETE FROM cue_version WHERE revision_id = $1 AND version_id = $2",
@@ -5533,158 +5482,6 @@ export async function deleteBlockTag(blockId: string, groupId: string): Promise<
 }
 
 // ─── Asset mount CoW helpers ──────────────────────────────────────────────────
-
-/**
- * Copy-on-write a block snapshot for an asset mount operation.
- * 快照被遗留多版本共享时，为当前版本分裂出独立快照（保护历史版本只读）。
- * Returns the snapshot ID the mount should be created against.
- */
-export async function cowBlockSnapshotForMount(
-  versionId: string,
-  snapshotId: string,
-): Promise<string> {
-  const client = await getPool().connect();
-  try {
-    await client.query('BEGIN');
-
-    const refRes = await client.query<{ cnt: string }>(
-      'SELECT COUNT(*) AS cnt FROM script_version WHERE version_id = $1 AND snapshot_id = $2',
-      [versionId, snapshotId]
-    );
-    if (parseInt(refRes.rows[0].cnt, 10) !== 1) {
-      throw new Error("Block snapshot does not belong to version");
-    }
-
-    const allRefRes = await client.query<{ cnt: string }>(
-      'SELECT COUNT(*) AS cnt FROM script_version WHERE snapshot_id = $1',
-      [snapshotId]
-    );
-    if (parseInt(allRefRes.rows[0].cnt, 10) <= 1) {
-      await client.query('COMMIT');
-      return snapshotId;
-    }
-
-    const newSnapshotId = genSnapshotId();
-
-    await client.query(
-      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
-       SELECT $1, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name
-       FROM script WHERE id = $2`,
-      [newSnapshotId, snapshotId]
-    );
-    await client.query(
-      `INSERT INTO script_character (script_id, character_id, position, annotation)
-       SELECT $1, character_id, position, annotation FROM script_character WHERE script_id = $2`,
-      [newSnapshotId, snapshotId]
-    );
-    // block_tag rows are keyed by logical block_id, not snapshot_id — no copy needed.
-
-    await client.query(
-      'UPDATE script_version SET snapshot_id = $1 WHERE snapshot_id = $2 AND version_id = $3',
-      [newSnapshotId, snapshotId, versionId]
-    );
-
-    // Carry existing asset_mount entries to the new snapshot
-    await client.query(
-      `INSERT INTO asset_mount
-         (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
-          folder_path, mount_mode, version_resolved, created_by)
-       SELECT 'am_' || substr(md5(id || $1), 1, 16),
-         asset_id, production_id, 'block_snapshot', $1, mount_aux_id,
-         folder_path, mount_mode, version_resolved, created_by
-       FROM asset_mount WHERE mount_type = 'block_snapshot' AND mount_id = $2`,
-      [newSnapshotId, snapshotId]
-    );
-
-    await client.query('COMMIT');
-    return newSnapshotId;
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-/**
- * Copy-on-write a cue revision for an asset mount operation.
- * 修订被遗留多版本共享时，为当前版本分裂出独立修订（保护历史版本只读）。
- * Returns the revision ID the mount should be created against.
- */
-export async function cowCueRevisionForMount(
-  versionId: string,
-  revisionId: string,
-): Promise<string> {
-  const client = await getPool().connect();
-  try {
-    await client.query('BEGIN');
-
-    const refRes = await client.query<{ cnt: string }>(
-      'SELECT COUNT(*) AS cnt FROM cue_version WHERE version_id = $1 AND revision_id = $2',
-      [versionId, revisionId]
-    );
-    if (parseInt(refRes.rows[0].cnt, 10) !== 1) {
-      throw new Error("Cue revision does not belong to version");
-    }
-
-    const allRefRes = await client.query<{ cnt: string }>(
-      'SELECT COUNT(*) AS cnt FROM cue_version WHERE revision_id = $1',
-      [revisionId]
-    );
-    if (parseInt(allRefRes.rows[0].cnt, 10) <= 1) {
-      await client.query('COMMIT');
-      return revisionId;
-    }
-
-    const curRes = await client.query<CueFullRow>(
-      `SELECT id, cue_id, cue_list_id, number, name, content, warning,
-         start_kind, start_snapshot_id, start_offset,
-         end_kind,   end_snapshot_id,   end_offset
-       FROM cue WHERE id = $1`,
-      [revisionId]
-    );
-    const cur = curRes.rows[0];
-    if (!cur) { await client.query('COMMIT'); return revisionId; }
-
-    const newId = newCueId();
-
-    await client.query(
-      `INSERT INTO cue (id, cue_id, cue_list_id, number, name, content,
-         start_kind, start_snapshot_id, start_offset,
-         end_kind,   end_snapshot_id,   end_offset, warning)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-      [newId, cur.cue_id ?? cur.id, cur.cue_list_id,
-       cur.number, cur.name, cur.content,
-       cur.start_kind, cur.start_snapshot_id, cur.start_offset,
-       cur.end_kind, cur.end_snapshot_id, cur.end_offset, cur.warning]
-    );
-
-    await client.query(
-      'UPDATE cue_version SET revision_id = $1 WHERE revision_id = $2 AND version_id = $3',
-      [newId, revisionId, versionId]
-    );
-
-    // Carry existing asset_mount entries to the new revision
-    await client.query(
-      `INSERT INTO asset_mount
-         (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
-          folder_path, mount_mode, version_resolved, created_by)
-       SELECT 'am_' || substr(md5(id || $1), 1, 16),
-         asset_id, production_id, 'cue_revision', $1, mount_aux_id,
-         folder_path, mount_mode, version_resolved, created_by
-       FROM asset_mount WHERE mount_type = 'cue_revision' AND mount_id = $2`,
-      [newId, revisionId]
-    );
-
-    await client.query('COMMIT');
-    return newId;
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-}
 
 /** All productions where the user has a membership role (regardless of SA status). */
 export async function listMemberProductions(userId: string): Promise<{ id: string; name: string; archivedAt: string | null; roles: string[] }[]> {
@@ -6256,16 +6053,7 @@ export async function applyPatchToDB(
             }
             // block_tag rows are keyed by logical block_id (op.id), not by
             // snapshot_id — no copy needed during CoW.
-            await client.query(
-              `INSERT INTO asset_mount
-                 (id, asset_id, production_id, mount_type, mount_id, mount_aux_id,
-                  folder_path, mount_mode, version_resolved, created_by)
-               SELECT 'am_' || substr(md5(id || $1), 1, 16),
-                 asset_id, production_id, 'block_snapshot', $1, mount_aux_id,
-                 folder_path, mount_mode, version_resolved, created_by
-               FROM asset_mount WHERE mount_type = 'block_snapshot' AND mount_id = $2`,
-              [newSnapshotId, oldSnapshotId]
-            );
+            // （挂载边 CoW 复制已随 #420 退役：node_mount 锚稳定 block_id）
             // Update working state so subsequent ops in this patch see the new snapshotId
             cur.snapshotId = newSnapshotId;
             const oldContent = oldContentMap.get(oldSnapshotId);
@@ -6316,14 +6104,6 @@ export async function applyPatchToDB(
                AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.snapshot_id = $1)`,
             [cur.snapshotId]
           );
-          // Clean up asset_mount for the GC'd block_snapshot if it was actually deleted
-          await client.query(
-            `DELETE FROM asset_mount
-             WHERE mount_type = 'block_snapshot' AND mount_id = $1
-               AND NOT EXISTS (SELECT 1 FROM script WHERE id = $1)`,
-            [cur.snapshotId]
-          );
-
           // Clean up block_tag rows keyed by logical block_id.
           // Only delete when the block no longer appears in any version (i.e. the
           // script snapshot was fully GC'd above). Check by logical block_id.

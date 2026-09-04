@@ -48,8 +48,11 @@ export async function canViewWiki(
 ): Promise<boolean> {
   if (actor.isAdmin || actor.isOwner) return true;
   const pool = getPool();
+  // is_public 活在 node 壳上（#420）；无壳的 wiki 行（不变量破损）按不公开处理
   const w = await pool.query<WikiVisibilityRow>(
-    `SELECT id::text AS id, is_public FROM wiki WHERE id = $1::uuid AND production_id = $2`,
+    `SELECT w.id::text AS id, COALESCE(n.is_public, false) AS is_public
+     FROM wiki w LEFT JOIN node n ON n.wiki_id = w.id
+     WHERE w.id = $1::uuid AND w.production_id = $2`,
     [wikiId, productionId],
   );
   if (!w.rows[0]) return false;
@@ -59,9 +62,10 @@ export async function canViewWiki(
   if (w.rows[0].is_public && await isPolicyOn(productionId, "policy.wiki_public_enabled")) return true;
   if (await hasGrant(actor.userId, productionId, "wiki", wikiId, "*", "view")) return true;
   const deptShare = await pool.query(
-    `SELECT 1 FROM wiki_dept_share ws
-     JOIN production_dept_member pdm ON pdm.dept_id = ws.dept_id
-     WHERE ws.wiki_id = $1::uuid AND pdm.user_id = $2 AND pdm.production_id = $3 LIMIT 1`,
+    `SELECT 1 FROM node_dept_share ns
+     JOIN node n ON n.id = ns.node_id
+     JOIN production_dept_member pdm ON pdm.dept_id = ns.dept_id
+     WHERE n.wiki_id = $1::uuid AND pdm.user_id = $2 AND pdm.production_id = $3 LIMIT 1`,
     [wikiId, actor.userId, productionId],
   );
   if (deptShare.rows.length > 0) return true;
@@ -102,13 +106,15 @@ export async function listVisibleWikiIds(
   // 与 canViewWiki 同源：is_public 这条让渡受 policy.wiki_public_enabled 管。
   // 单实例判定与列表判定**必须同读**——分叉即「列表看得见、点进去 403」（批D 教训）。
   const wikiPublicOn = await isPolicyOn(productionId, "policy.wiki_public_enabled");
+  // is_public / 部门分享都活在 node 壳上（#420），按 wiki_id 目标列对撞
   const structural = await pool.query<{ id: string }>(
     `SELECT w.id::text AS id FROM wiki w
+     LEFT JOIN node n ON n.wiki_id = w.id
      WHERE w.production_id = $1 AND (
-       ($3 AND w.is_public)
-       OR EXISTS (SELECT 1 FROM wiki_dept_share ws
-                  JOIN production_dept_member pdm ON pdm.dept_id = ws.dept_id
-                  WHERE ws.wiki_id = w.id AND pdm.user_id = $2::uuid AND pdm.production_id = $1)
+       ($3 AND n.is_public)
+       OR EXISTS (SELECT 1 FROM node_dept_share ns
+                  JOIN production_dept_member pdm ON pdm.dept_id = ns.dept_id
+                  WHERE ns.node_id = n.id AND pdm.user_id = $2::uuid AND pdm.production_id = $1)
      )`,
     [productionId, actor.userId, wikiPublicOn],
   );
