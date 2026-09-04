@@ -2892,7 +2892,7 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
     await client.query(`UPDATE asset SET uploader_user_id = $1 WHERE uploader_user_id = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE node_mount SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
     await client.query(`UPDATE node SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
-    await client.query(`UPDATE asset_share_token SET created_by = $1 WHERE created_by = $2`, [keepUserId, deleteUserId]);
+    // asset_share_token 化石表已删（#420）：分享 token 是无状态 HMAC，无行可搬
     // production_member_status_audit.actor_id 是 NO ACTION 的 FK（#141）：漏了这条，
     // 任何处置过别人成员状态的账号都无法被合并——DELETE app_user 直接撞 FK 违例。
     await client.query(
