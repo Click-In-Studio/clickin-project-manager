@@ -17,6 +17,8 @@ export async function POST(req: NextRequest) {
 
   // key 每次上传换新（时间戳后缀）：avatar GET 路由靠「换头像即换 key」才能对
   // 200 响应给 immutable 强缓存。旧对象在 profile PATCH 提交新 key 时清理。
+  // 已知取舍：上传后未提交（放弃/崩溃）的对象成为孤儿，无人触发清理——
+  // 量级受限于「presign 过但没保存」的次数 × 头像体积，先不做 GC。
   const r2Key = `avatars/${session.userId}/avatar-${Date.now().toString(36)}`;
   const { url } = presignedPut(r2Key, mimeType, 900);
 

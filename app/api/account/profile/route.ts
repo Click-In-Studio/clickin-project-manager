@@ -30,14 +30,20 @@ export async function PATCH(req: NextRequest) {
 
   const oldAvatar = (await getUserProfile(session.userId))?.avatarUrl ?? null;
 
-  await upsertUserProfile(session.userId, name, body.avatarUrl ?? null, {
+  // PATCH 语义：avatarUrl 字段缺省 = 不动头像（沿用旧值），显式 null 才是清除。
+  // 头像 GET 路由以 DB 值为准，这里把缺省坍缩成 null 会直接杀掉在用头像。
+  const nextAvatar = "avatarUrl" in body ? body.avatarUrl ?? null : oldAvatar;
+
+  await upsertUserProfile(session.userId, name, nextAvatar, {
     displayName: body.displayName,
     bio: body.bio,
     preferredPlatform: body.preferredPlatform,
   });
 
-  // 头像 key 每次上传换新（presign 路由）；换掉后清旧对象，尽力而为
-  if (oldAvatar && oldAvatar !== (body.avatarUrl ?? null)) {
+  // 头像 key 每次上传换新（presign 路由）；换掉后清旧对象。尽力而为，且
+  // 读旧值→写新值非事务：并发换头像可能误删刚上任的对象，后果只是头像
+  // 回落外链/404，可接受，不为清理引入事务。
+  if (oldAvatar && oldAvatar !== nextAvatar) {
     void deleteAvatarObjects(oldAvatar);
   }
 

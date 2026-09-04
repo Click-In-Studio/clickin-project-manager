@@ -83,7 +83,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
     if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/avatar", "edit"))) {
       return Response.json({ error: "无权修改项目头像" }, { status: 403 });
     }
-    // 头像 key 每次上传换新（presign 路由）；换掉后清旧对象，尽力而为
+    // 头像 key 每次上传换新（presign 路由）；换掉后清旧对象。尽力而为，
+    // 读旧值→写新值非事务：并发换头像的误删后果只是头像回落兜底，可接受
     const old = await getPool().query<{ avatar_url: string | null }>(
       "SELECT avatar_url FROM production WHERE id = $1", [id],
     );
