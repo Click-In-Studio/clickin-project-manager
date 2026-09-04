@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import type { WikiEntityRef } from "@/lib/wiki-db";
+import type { WikiEntityRef } from "@/lib/wiki/links";
 
 // wiki 侧"关联对象"面板：本文的非 wiki 出边（body mention + manual 建链合并）。
 // manual 边不在正文里，没有这个面板它们在 wiki 侧不可见。标签经 mention-resolve

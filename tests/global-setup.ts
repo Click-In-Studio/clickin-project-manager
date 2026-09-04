@@ -132,7 +132,7 @@ import {
   WIKI_DIALECT_V2_SNAPSHOT_PATH,
   type WikiDialectV2Snapshot,
 } from "./wiki-dialect-v2-snapshot";
-import { normalizeWikiDialect } from "@/lib/wiki-dialect-migrate";
+import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
 import {
   isVersionRetirePreMigrationSchema,
   createVersionRetirePreMigrationData,

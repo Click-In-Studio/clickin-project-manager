@@ -1,7 +1,7 @@
 // 方言 v1 → v2 归一化：迁移脚本、编辑器载入兼容、历史版本渲染三处共用同一实现，
 // 所以这层测试直接就是 migration 的正确性护栏。
 import { describe, it, expect } from "vitest";
-import { normalizeWikiDialect, hasLegacyDialect } from "@/lib/wiki-dialect-migrate";
+import { normalizeWikiDialect, hasLegacyDialect } from "@/lib/wiki/dialect-migrate";
 
 const UUID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 

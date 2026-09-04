@@ -5,8 +5,8 @@ import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { createWiki } from "@/lib/wiki-db";
-import { insertWikiProposal } from "@/lib/wiki-proposal-db";
+import { createWiki } from "@/lib/wiki/content";
+import { insertWikiProposal } from "@/lib/wiki/proposal-db";
 
 // AI review #249 finding 1 回归锁定：/api/agent/wiki-proposal 不能无脑
 // getWiki(parentWikiId) 暴露父文档标题——proposeId 关联的 parentWikiId

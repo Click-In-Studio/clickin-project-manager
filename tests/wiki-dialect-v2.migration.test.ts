@@ -8,8 +8,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { getPool } from "@/lib/pg";
-import { normalizeWikiDialect, hasLegacyDialect } from "@/lib/wiki-dialect-migrate";
-import { extractMentionEdges } from "@/lib/wiki-db";
+import { normalizeWikiDialect, hasLegacyDialect } from "@/lib/wiki/dialect-migrate";
+import { extractMentionEdges } from "@/lib/wiki/links";
 import {
   WIKI_DIALECT_V2_SNAPSHOT_PATH,
   type WikiDialectV2Snapshot,

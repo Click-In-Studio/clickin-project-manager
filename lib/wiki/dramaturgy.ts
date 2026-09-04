@@ -1,5 +1,5 @@
-import type { WikiListEntry } from "./wiki-db";
-import type { WikiAliasEntry } from "./wiki-alias-db";
+import type { WikiListEntry } from "./types";
+import type { WikiAliasEntry } from "./alias";
 
 /** Return the descendants of the system dramaturgy root, preserving library order. */
 export function listDramaturgyWikiSubtree(

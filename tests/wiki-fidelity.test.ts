@@ -9,7 +9,7 @@
 //
 // 下面这些 (原文 → 往返结果) 全是拿真实扩展集实测出来的，不是编的。
 import { describe, it, expect } from "vitest";
-import { contentSignature, checkFidelity, lineDiff } from "@/lib/wiki-fidelity";
+import { contentSignature, checkFidelity, lineDiff } from "@/lib/wiki/fidelity";
 
 /** 实测的书写风格归一化：内容零丢失，保真锁必须安静 */
 const STYLE_ONLY: [string, string, string][] = [

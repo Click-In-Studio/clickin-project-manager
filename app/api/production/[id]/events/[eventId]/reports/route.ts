@@ -4,7 +4,7 @@ import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getProductionEvent, listEventReports, createEventReport, mountWikiAsReport } from "@/lib/event-db";
-import { canShareWiki } from "@/lib/wiki-perm";
+import { canShareWiki } from "@/lib/wiki/perm";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 

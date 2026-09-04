@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { setPolicies } from "@/lib/policy-db";
 import { POLICY_ON, POLICY_OFF } from "@/lib/policy-keys";
-import { createAsset } from "@/lib/asset-db";
-import { canViewAsset, filterVisibleAssets, canPublishAsset, canCreateShareToken } from "@/lib/asset-perm";
+import { createAsset } from "@/lib/asset/db";
+import { canViewAsset, filterVisibleAssets, canPublishAsset, canCreateShareToken } from "@/lib/asset/perm";
 import type { PermissionContext } from "@/lib/permissions";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "./factories";

@@ -2,13 +2,10 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import {
-  createWiki, updateWiki, getWiki, setWikiPublic, setWikiListable, setWikiDeptShares,
-  listWikiLibrary, isWikiAnchor, ensureDramaturgyRootAnchor,
-} from "@/lib/wiki-db";
-import {
-  canViewWiki, listEnumerableWikiIds, canEnumerateWiki, canPlaceWikiUnder, canWriteWikiContainer,
-} from "@/lib/wiki-perm";
+import { createWiki, updateWiki, getWiki, setWikiPublic } from "@/lib/wiki/content";
+import { setWikiListable, setWikiDeptShares, listWikiLibrary, isWikiAnchor, ensureDramaturgyRootAnchor } from "@/lib/wiki/tree";
+import { canViewWiki } from "@/lib/wiki/perm";
+import { listEnumerableWikiIds, canEnumerateWiki, canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki/enum-perm";
 import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
 import { GET as wikiListGET, POST as wikiPOST } from "@/app/api/production/[id]/wiki/route";
 import { PATCH as wikiPATCH } from "@/app/api/production/[id]/wiki/[wikiId]/route";

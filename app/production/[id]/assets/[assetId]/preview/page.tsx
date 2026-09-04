@@ -3,9 +3,9 @@ import { cookies } from "next/headers";
 import type { Metadata } from "next";
 import { getSession } from "@/lib/session";
 import { hasAnyGrant } from "@/lib/grant-check";
-import { canViewAsset } from "@/lib/asset-perm";
+import { canViewAsset } from "@/lib/asset/perm";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getAsset } from "@/lib/asset-db";
+import { getAsset } from "@/lib/asset/db";
 import AssetPreviewClient from "@/components/assets/AssetPreviewClient";
 
 export async function generateMetadata({

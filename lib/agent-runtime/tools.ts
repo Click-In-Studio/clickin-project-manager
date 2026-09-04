@@ -789,7 +789,7 @@ function parseDuration(s: string | undefined): number | null {
 /** propose 工具的正文以审批阶段预持久化的 wiki_proposal 行为准（[[标题]] 已反解），
  *  没有行（预持久化失败/超时）才退回模型原参数——与插件 restoredBody 覆写同义。 */
 async function proposalBody(productionId: string, toolCallId: string, userId: string, fallback: unknown): Promise<string | undefined> {
-  const { getWikiProposalByToolCallId } = await import("@/lib/wiki-proposal-db");
+  const { getWikiProposalByToolCallId } = await import("@/lib/wiki/proposal-db");
   const proposal = await getWikiProposalByToolCallId(productionId, toolCallId, userId);
   if (proposal && typeof proposal.body === "string" && proposal.body) return proposal.body;
   return optString(fallback);

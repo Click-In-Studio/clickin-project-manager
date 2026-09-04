@@ -3,28 +3,23 @@
 // 语法方言声明见 ./wiki-link-syntax（教会模型别瞎发明 [[标题]] 语法）。
 
 import { resolveProductionActor, DENIED_NOT_MEMBER } from "./production-tools";
-import {
-  listWikiLibrary, getWiki, listBacklinks, listOutgoingLinks, searchWiki,
-  extractWikiLinkTargets, createWiki, updateWiki, deleteWiki,
-  setWikiPublic, setWikiDeptShares, listWikiDeptShares,
-  listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson,
-  type WikiListEntry, type WikiRef,
-} from "@/lib/wiki-db";
-import {
-  canViewWiki, canEditWiki, canDeleteWiki, canShareWiki,
-  listVisibleWikiIds, listEnumerableWikiIds, canPlaceWikiUnder, canWriteWikiContainer,
-} from "@/lib/wiki-perm";
+import { listWikiLibrary, setWikiDeptShares, listWikiDeptShares } from "@/lib/wiki/tree";
+import { getWiki, createWiki, updateWiki, deleteWiki, setWikiPublic, listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson } from "@/lib/wiki/content";
+import { listBacklinks, listOutgoingLinks, searchWiki, extractWikiLinkTargets, type WikiRef } from "@/lib/wiki/links";
+import { type WikiListEntry } from "@/lib/wiki/types";
+import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki, listVisibleWikiIds } from "@/lib/wiki/perm";
+import { listEnumerableWikiIds, canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki/enum-perm";
 import { neutralizeInjectionTags } from "@/lib/agent-injection-safety";
 import { listProductionDepts } from "@/lib/dept-db";
 import { listProductionMembers } from "@/lib/db";
 import type { WikiLevel } from "@/lib/resource-grant-db";
-import { broadcastWikiUpdate } from "@/lib/wiki-collab";
+import { broadcastWikiUpdate } from "@/lib/wiki/collab";
 import { hasEffectiveGrant, type GrantActor } from "@/lib/grant-check";
 import { getPool } from "@/lib/pg";
 import {
   getWikiProposalByToolCallId,
   markWikiProposalApplied, markWikiProposalBlocked,
-} from "@/lib/wiki-proposal-db";
+} from "@/lib/wiki/proposal-db";
 
 const DENIED_NOT_VISIBLE = "权限被拒绝：你看不到这篇文档。";
 /** wiki 创建门的 node 权限键（域级，不带具体 id）——AccessRequestModal 的
@@ -367,7 +362,7 @@ export async function wikiProposeTag(
 
 // ─── wiki.set_grant（分享面写工具）───────────────────────────────────────────
 // 门 = canShareWiki（保留段 grants@edit，'*' 不覆盖）——**不是** edit 门：能改
-// 正文的人未必能改谁看得见。三个面与 share 路由同一份实现（lib/wiki-db 的
+// 正文的人未必能改谁看得见。三个面与 share 路由同一份实现（lib/wiki/content.ts 的
 // setWikiPublic / setWikiDeptShares / addWikiSharePerson…），口径不许分叉。
 //
 // 与 propose 五兄弟的差别：这里不预持久化 wiki_proposal——参数都很短，确认

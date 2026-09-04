@@ -7,8 +7,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "./factories";
 import { upsertFeishuUser } from "@/lib/db";
-import { registerWikiLibrarySSE, type WikiLibraryChange } from "@/lib/wiki-collab";
-import { createWiki, updateWiki, deleteWiki } from "@/lib/wiki-db";
+import { registerWikiLibrarySSE, type WikiLibraryChange } from "@/lib/wiki/collab";
+import { createWiki, updateWiki, deleteWiki } from "@/lib/wiki/content";
 
 let prodId: string;
 let ownerId: string;

@@ -11,7 +11,7 @@
 // normalizeLegacyMentions 已随之退役。
 //
 // 幂等：对已是 v2 的正文施加本函数必须原样返回（迁移可重跑，编辑器每次载入都跑）。
-import { encodeMentionHref, encodeUserHref, encodeAssetSrc, type ContentMentionAttrs } from "./mention-types";
+import { encodeMentionHref, encodeUserHref, encodeAssetSrc, type ContentMentionAttrs } from "../mention-types";
 
 // 码内的方言是「关于语法的文档」不是真引用——先换占位保护再改写
 // （MindWeave protectCodeSpans 同款教训，wiki-db 的边提取也吃过这个亏）

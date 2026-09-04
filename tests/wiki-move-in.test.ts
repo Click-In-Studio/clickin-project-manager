@@ -2,19 +2,20 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { createWiki, getDramaturgyTreeConfig, listWikiLibrary, setWikiListable } from "@/lib/wiki-db";
+import { createWiki } from "@/lib/wiki/content";
+import { getDramaturgyTreeConfig, listWikiLibrary, setWikiListable } from "@/lib/wiki/tree";
 import {
   listDramaturgyMoveInCandidates, listDramaturgyWikiAliases, listDramaturgyWikiSubtree,
-} from "@/lib/dramaturgy-wiki";
-import { listDramaturgyTreeFor } from "@/lib/wiki-tree";
-import { readParentAnchor } from "@/lib/wiki-input";
-import { resolveWikiAnchorParent } from "@/lib/wiki-placement";
+} from "@/lib/wiki/dramaturgy";
+import { listDramaturgyTreeFor } from "@/lib/wiki/tree-view";
+import { readParentAnchor } from "@/lib/wiki/input";
+import { resolveWikiAnchorParent } from "@/lib/wiki/placement";
 import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
 import { PATCH as wikiPATCH } from "@/app/api/production/[id]/wiki/[wikiId]/route";
 import { POST as aliasPOST } from "@/app/api/production/[id]/wiki-alias/route";
 import { makeProduction, cleanupProduction } from "./factories";
-import type { WikiListEntry } from "@/lib/wiki-db";
-import { canReachAliasTarget, type WikiAliasEntry } from "@/lib/wiki-alias-db";
+import type { WikiListEntry } from "@/lib/wiki/types";
+import { canReachAliasTarget, type WikiAliasEntry } from "@/lib/wiki/alias";
 
 // #355 灵感库「移入」。两种形态是同一个入口的两个选项：
 //   本体移入 —— PATCH /wiki/<id> 改 parent_id

@@ -22,8 +22,8 @@ import {
   createProductionEvent,
   createScheduleItem,
 } from "../lib/event-db";
-import { createWiki } from "../lib/wiki-db";
-import { createAsset } from "../lib/asset-db";
+import { createWiki } from "../lib/wiki/content";
+import { createAsset } from "../lib/asset/db";
 import { createUserNotification } from "../lib/inbox-db";
 import { createMaterial, listMaterialStatuses } from "../lib/material-db";
 import { approveExpense, createBudgetCategory, submitExpense } from "../lib/finance-db";

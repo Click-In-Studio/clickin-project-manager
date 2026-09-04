@@ -3,7 +3,7 @@ import { getPool } from "@/lib/pg";
 import {
   registerWikiSSE, registerWikiLibrarySSE, broadcastWikiUpdate, broadcastWikiLibraryChange,
   stopCollabListenerForTests, COLLAB_CHANNEL, COLLAB_ORIGIN,
-} from "@/lib/wiki-collab";
+} from "@/lib/wiki/collab";
 import { shortId } from "./factories";
 
 // #367 切换后真人校出：AI 在 agent-runner 进程写文档，浏览器 SSE 挂在 next 进程，

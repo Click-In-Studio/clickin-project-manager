@@ -2,10 +2,10 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
-import { canViewWiki } from "@/lib/wiki-perm";
+import { canViewWiki } from "@/lib/wiki/perm";
 import {
   registerWikiSSE, registerWikiLibrarySSE, updateWikiPresence, removeWikiPresence, wikiPresenceFrame,
-} from "@/lib/wiki-collab";
+} from "@/lib/wiki/collab";
 
 // wiki 文档 SSE（多人协作）：presence（在场者+光标块索引）与 update（内容广播），
 // 外加所属制作的 library 帧（结构变化：增/删/移动/改名/换标签）——后者影响的是

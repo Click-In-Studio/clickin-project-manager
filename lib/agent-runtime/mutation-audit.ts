@@ -63,7 +63,8 @@ const READERS: Record<string, ScopeReader> = {
     read: async (ids, { productionId }) => {
       const out = new Map<string, Snapshot>();
       if (!productionId) return out;
-      const { getWiki, listWikiDeptShares, listWikiSharePeople } = await import("@/lib/wiki-db");
+      const { getWiki, listWikiSharePeople } = await import("@/lib/wiki/content");
+      const { listWikiDeptShares } = await import("@/lib/wiki/tree");
       // 批量写（≤50 篇）逐篇串行会放大 N 倍往返，按 id 并行（AI review #398）
       const snaps = await Promise.all(ids.map(async (id) => {
         const doc = await getWiki(id, productionId).catch(() => null);
@@ -92,7 +93,7 @@ const READERS: Record<string, ScopeReader> = {
     },
     listIds: async ({ productionId }) => {
       if (!productionId) return [];
-      const { listWikiLibrary } = await import("@/lib/wiki-db");
+      const { listWikiLibrary } = await import("@/lib/wiki/tree");
       return (await listWikiLibrary(productionId)).map((w) => w.id);
     },
   },

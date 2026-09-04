@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { filterVisibleAssets } from "@/lib/asset-perm";
+import { filterVisibleAssets } from "@/lib/asset/perm";
 import { hasGrant } from "@/lib/grant-check";
-import { createAsset, listAssets, type AssetType } from "@/lib/asset-db";
-import { isAssetType } from "@/lib/asset-types";
+import { createAsset, listAssets, type AssetType } from "@/lib/asset/db";
+import { isAssetType } from "@/lib/asset/types";
 import { putR2Object, getR2Object, thumbnailR2Key, completeMultipartUpload, listMultipartParts } from "@/lib/r2";
 import sharp from "sharp";
 

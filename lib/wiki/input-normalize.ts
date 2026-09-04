@@ -10,7 +10,7 @@
 // **不在服务端做**：服务端归一化会顺带让 AI 的 `[[标题]]` 也生效，而 AI 恒写存储态
 // 是拍板项（AI 手里本来就有 uuid，按标题指向是把精确降级成模糊再猜回来）。
 // 放在源码模式的保存路径上，作用域正好等于"没有指令 UI 的人类输入"。
-import { encodeMentionHref } from "./mention-types";
+import { encodeMentionHref } from "../mention-types";
 
 const CODE_SPAN_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
 // 与 WikiMarkdown 的渲染侧同一形态：不含 [ ] | # 换行

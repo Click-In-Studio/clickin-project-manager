@@ -2,8 +2,8 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
-import { canViewWiki } from "@/lib/wiki-perm";
-import { updateWikiPresence } from "@/lib/wiki-collab";
+import { canViewWiki } from "@/lib/wiki/perm";
+import { updateWikiPresence } from "@/lib/wiki/collab";
 
 // 光标位置上报（富文本顶层块索引=协作"行"）；经 SSE presence 帧扇出
 

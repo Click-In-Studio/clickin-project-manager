@@ -2,16 +2,15 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { toActor } from "@/lib/grant-check";
-import { getWiki, updateWiki, deleteWiki } from "@/lib/wiki-db";
-import {
-  canViewWiki, canEditWiki, canDeleteWiki, canShareWiki,
-  canPlaceWikiUnder, canWriteWikiContainer,
-} from "@/lib/wiki-perm";
-import { broadcastWikiUpdate } from "@/lib/wiki-collab";
-import { readParentAnchor } from "@/lib/wiki-input";
-import { gateWikiAnchorPlacement, resolveWikiAnchorParent } from "@/lib/wiki-placement";
+import { getWiki, updateWiki, deleteWiki } from "@/lib/wiki/content";
+import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki } from "@/lib/wiki/perm";
+import { canPlaceWikiUnder, canWriteWikiContainer } from "@/lib/wiki/enum-perm";
+import { broadcastWikiUpdate } from "@/lib/wiki/collab";
+import { readParentAnchor } from "@/lib/wiki/input";
+import { gateWikiAnchorPlacement, resolveWikiAnchorParent } from "@/lib/wiki/placement";
 import type { Mention } from "@/lib/event-db";
-import { setWikiPublic, setWikiListable, type WikiPlacement } from "@/lib/wiki-db";
+import { setWikiPublic } from "@/lib/wiki/content";
+import { setWikiListable, type WikiPlacement } from "@/lib/wiki/tree";
 
 type Ctx = { params: Promise<{ id: string; wikiId: string }> };
 

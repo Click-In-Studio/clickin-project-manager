@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { createWiki, updateWiki, getWiki } from "@/lib/wiki-db";
+import { createWiki, updateWiki, getWiki } from "@/lib/wiki/content";
 import { POST as presencePOST } from "@/app/api/production/[id]/wiki/[wikiId]/presence/route";
 import { GET as streamGET } from "@/app/api/production/[id]/wiki/[wikiId]/stream/route";
 import { makeProduction, cleanupProduction } from "./factories";

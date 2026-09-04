@@ -20,7 +20,7 @@ import {
   decodeMentionHref, decodeUserHref, decodeAssetSrc, CM_HREF_PREFIX,
   type ContentMentionAttrs,
 } from "@/lib/mention-types";
-import { normalizeWikiDialect } from "@/lib/wiki-dialect-migrate";
+import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
 import { parseCalloutMarker } from "@/lib/tiptap-callout";
 
 type Resolved = { label: string | null; url: string | null };
