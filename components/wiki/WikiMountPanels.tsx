@@ -3,9 +3,9 @@
 // 挂载点四动作的文档侧两面板（#420 第二批 PR-B）：
 //   WikiSelectPanel —— 从树里挑现有文档挂到宿主上。候选=枚举面（能在树里列到
 //     什么就能挑什么，与树页同源）；挂载门在服务端（canShareWiki ∧ 宿主侧）。
-//   WikiCreatePanel —— 就地新建文档并挂载。无缺省落点前一律落 root（拍板：
-//     有了缺省落点再接管）。建档与挂边是两次调用，挂边失败留下的是一篇只有
-//     创建者可见的 root 文档，无越权面。
+//   WikiCreatePanel —— 就地新建文档并挂载。落点走缺省落点解析（lib/node/
+//     landing.ts：event 系归事件目录链，其余暂落顶层待拍板）。建档与挂边是
+//     两次调用，挂边失败留下的是一篇只有创建者可见的文档，无越权面。
 import { useState, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import type { NodeEntry } from "@/lib/node/db";
@@ -123,7 +123,10 @@ export function WikiCreatePanel({ productionId, mountCtx, onMounted, onCancel }:
       const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: t }),
+        body: JSON.stringify({
+          title: t,
+          landing: { kind: "mount", mountType: mountCtx.mountType, mountId: mountCtx.mountId },
+        }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -149,7 +152,7 @@ export function WikiCreatePanel({ productionId, mountCtx, onMounted, onCancel }:
         placeholder="新文档标题…" autoFocus
         className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-zinc-300"
       />
-      <p className="text-[10px] text-zinc-400 mb-3">文档将创建在文档库顶层并挂载到此处</p>
+      <p className="text-[10px] text-zinc-400 mb-3">文档将挂载到此处；事件类上下文自动归档进事件目录，其余暂落知识库顶层</p>
       {error && <p className="text-xs text-red-500 mb-2">{error}</p>}
       <div className="flex justify-end gap-2">
         {onCancel && (

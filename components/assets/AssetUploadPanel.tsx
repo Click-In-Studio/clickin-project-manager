@@ -123,6 +123,9 @@ interface Props {
    *  两者都传才启用开关。 */
   allowMarkdownAsWiki?: boolean;
   onUploadedWiki?: (r: { wikiId: string; nodeId: string; title: string }) => void;
+  /** 缺省落点上下文（#420 收官）：挂载面板上传带宿主，服务端解析事件目录等
+   *  现成缺省；与 placement/choosePlacement 互斥（显式落点优先）。 */
+  landing?: { kind: "mount"; mountType: string; mountId: string };
   /** 资产页模式（#420 第二批）：显示「位置」行让用户挑树落点（缺省「资产」根），
    *  上传一律 listable——工作台上传的东西要在树里看得见。与 placement 互斥，
    *  placement 是调用方钉死落点的形态（树内加号）。 */
@@ -135,7 +138,7 @@ function formatSize(bytes: number): string {
 }
 
 export default function AssetUploadPanel({
-  productionId, onUploaded, onCancel, placement, choosePlacement,
+  productionId, onUploaded, onCancel, placement, choosePlacement, landing,
   allowMarkdownAsWiki, onUploadedWiki,
 }: Props) {
   // id null＝服务端缺省（「资产」根锚点懒建）——与列表里挑真「资产」行等价，
@@ -149,7 +152,7 @@ export default function AssetUploadPanel({
   const placementFields = effectivePlacement
     ? { ...(effectivePlacement.parentNodeId ? { parentNodeId: effectivePlacement.parentNodeId } : {}),
         listable: effectivePlacement.listable ?? true }
-    : {};
+    : landing ? { landing } : {};
 
   async function openPlacePicker() {
     if (!containers) {
@@ -243,6 +246,7 @@ export default function AssetUploadPanel({
           body: JSON.stringify({
             title, body: text,
             parentId: effectivePlacement?.parentNodeId ?? null,
+            ...(effectivePlacement ? {} : landing ? { landing } : {}),
           }),
         });
         const j = await res.json().catch(() => ({}));

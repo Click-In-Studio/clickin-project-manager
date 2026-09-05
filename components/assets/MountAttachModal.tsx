@@ -61,6 +61,7 @@ export default function MountAttachModal({ productionId, mountCtx, onDone, onClo
         {tab === "asset-upload" ? (
           <AssetUploadPanel
             productionId={productionId}
+            landing={{ kind: "mount", mountType: mountCtx.mountType, mountId: mountCtx.mountId }}
             onUploaded={handleUploadDone}
             onCancel={() => setTab("asset-select")}
           />
