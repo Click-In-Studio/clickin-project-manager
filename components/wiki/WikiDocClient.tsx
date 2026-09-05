@@ -546,6 +546,7 @@ export default function WikiDocClient({
               markdown
               frameless
               blockTools
+              taskSync={{ productionId }}
               minHeight={360}
               placeholder="开始写作…（/ 插入块、[[ 引用文档、@ 提及成员、# 引用剧本内容）"
               memberMention={{

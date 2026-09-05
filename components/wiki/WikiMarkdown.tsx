@@ -22,6 +22,7 @@ import {
 } from "@/lib/mention-types";
 import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
 import { parseCalloutMarker } from "@/lib/tiptap-callout";
+import { decodeRichStyleHref } from "@/lib/tiptap-rich-style";
 
 type Resolved = { label: string | null; url: string | null };
 
@@ -321,6 +322,21 @@ export default function WikiMarkdown({
           },
           a: ({ href, children }) => {
             const h = href ?? "";
+            const richStyle = decodeRichStyleHref(h);
+            if (richStyle) {
+              return (
+                <span style={{
+                  textDecoration: richStyle.underline ? "underline" : undefined,
+                  textUnderlineOffset: richStyle.underline ? "2px" : undefined,
+                  color: richStyle.color ?? undefined,
+                  backgroundColor: richStyle.backgroundColor ?? undefined,
+                  borderRadius: richStyle.backgroundColor ? 3 : undefined,
+                  paddingInline: richStyle.backgroundColor ? 2 : undefined,
+                }}>
+                  {children}
+                </span>
+              );
+            }
             // @成员提及：[@名](/__cm__/user/<id>)
             // 旧 uid: 形态在这里**恒不可达**——react-markdown 的 defaultUrlTransform
             // 把未知协议剥成空串，href 到不了这儿（这正是它一直渲染不出 chip 的根因）。

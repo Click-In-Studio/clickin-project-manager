@@ -7,18 +7,19 @@
 // 什么"），差异只有一个按钮。各写一遍的下场早有先例——同一个块类型在插入菜单
 // 和转换菜单里长出两副样子（见 lib/editor-block-types 的由来）。
 //
-// 顺序按飞书：段落格式 → 加粗 → 删除线 → 斜体 → 行内代码 →（删除）。
-//
-// **没有下划线**：markdown 没有下划线这个构造，tiptap 会把它序列化成裸
-// `<u>` HTML，而只读渲染端（WikiMarkdown）不挂 rehype-raw，react-markdown 会
-// 把 raw 节点转成纯文本——读者看到的是字面的 `<u>甲</u>`。飞书能有是因为它不
-// 存 markdown，我们存。
+// 顺序按飞书：段落格式 → 加粗 → 删除线 → 斜体 → 下划线 → 行内代码 → 颜色。
+// 下划线/颜色走内部 markdown link 方言（lib/tiptap-rich-style），富文本与只读
+// 渲染两端都认识，不落不安全的 raw HTML。
 
 import { useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import { FORMAT_ACTIONS, currentFormat } from "@/lib/editor-block-ops";
 import { applyAcrossCells } from "@/lib/table-ops";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
+import {
+  BACKGROUND_COLORS, TEXT_COLORS, updateRichStyle,
+  type RichStyleAttrs,
+} from "@/lib/tiptap-rich-style";
 
 export function OpsBtn({
   onClick, active, title, danger, children,
@@ -102,6 +103,64 @@ function FormatMenu({ editor }: { editor: Editor }) {
   );
 }
 
+function ColorMenu({ editor }: { editor: Editor }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const attrs = editor.getAttributes("richStyle") as Partial<RichStyleAttrs>;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close, true);
+    return () => document.removeEventListener("mousedown", close, true);
+  }, [open]);
+
+  const swatch = (color: string, kind: "color" | "backgroundColor") => (
+    <button
+      key={color}
+      type="button"
+      title={color}
+      onMouseDown={event => {
+        event.preventDefault();
+        applyAcrossCells(editor, ed => { updateRichStyle(ed, { [kind]: color }); });
+      }}
+      className={`h-6 w-6 rounded border-2 ${attrs[kind] === color ? "border-sky-500" : "border-white ring-1 ring-zinc-300"}`}
+      style={kind === "color" ? { color, background: "white" } : { background: color }}
+    >
+      {kind === "color" ? "A" : ""}
+    </button>
+  );
+
+  return (
+    <div ref={ref} className="relative flex items-stretch">
+      <OpsBtn onClick={() => setOpen(value => !value)} active={open} title="字体和背景颜色">
+        <span className="font-semibold" style={{ color: attrs.color ?? undefined, background: attrs.backgroundColor ?? undefined }}>A</span>
+      </OpsBtn>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-[230px] rounded-lg border border-zinc-200 bg-white p-3 text-zinc-800 shadow-xl">
+          <p className="mb-2 text-xs font-medium text-zinc-500">字体颜色</p>
+          <div className="mb-3 flex gap-1.5">{TEXT_COLORS.map(color => swatch(color, "color"))}</div>
+          <p className="mb-2 text-xs font-medium text-zinc-500">背景颜色</p>
+          <div className="mb-3 flex gap-1.5">{BACKGROUND_COLORS.map(color => swatch(color, "backgroundColor"))}</div>
+          <button
+            type="button"
+            onMouseDown={event => {
+              event.preventDefault();
+              applyAcrossCells(editor, ed => { updateRichStyle(ed, { color: null, backgroundColor: null }); });
+              setOpen(false);
+            }}
+            className="w-full rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-50"
+          >
+            清除颜色
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * 浮动条的操作组。
  *
@@ -125,8 +184,17 @@ export default function EditorOps({
         active={editor.isActive("strike")} title="删除线"><s>S</s></OpsBtn>
       <OpsBtn onClick={() => editor.chain().focus().toggleItalic().run()}
         active={editor.isActive("italic")} title="斜体 (⌘I)"><em>I</em></OpsBtn>
+      <OpsBtn
+        onClick={() => applyAcrossCells(editor, ed => {
+          const attrs = ed.getAttributes("richStyle") as Partial<RichStyleAttrs>;
+          updateRichStyle(ed, { underline: !attrs.underline });
+        })}
+        active={editor.isActive("richStyle", { underline: true })}
+        title="下划线"
+      ><span className="underline underline-offset-2">U</span></OpsBtn>
       <OpsBtn onClick={() => editor.chain().focus().toggleCode().run()}
         active={editor.isActive("code")} title="行内代码">{"</>"}</OpsBtn>
+      <ColorMenu editor={editor} />
       {onDelete && (
         <>
           <OpsSep />
