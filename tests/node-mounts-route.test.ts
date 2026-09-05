@@ -181,7 +181,8 @@ describe("by-mount 泛化读面 + DELETE", () => {
     const pj = await forPlain.json() as { results: Array<{ kind: string }> };
     expect(pj.results.find(r => r.kind === "wiki")).toBeUndefined();
 
-    // DELETE：plain 无分享面 → 403；author → 收回；错配 nodeId → 404
+    // DELETE 双侧任一可终止：两侧都无票的 stranger → 403；错配 nodeId → 404；
+    // plain 持宿主票（scene mounts@create）→ 宿主侧摘除成立
     const { rows: [m] } = await getPool().query<{ id: string }>(
       `SELECT id FROM node_mount WHERE node_id = $1 AND mount_type = 'scene'`, [docNodeId]);
     const delUrl = `/api/production/${prodId}/node/${docNodeId}/mounts/${m.id}`;
@@ -191,13 +192,14 @@ describe("by-mount 泛化读面 + DELETE", () => {
       { params: Promise.resolve({ id: prodId, nodeId: `${docNodeId}x`, mountId: m.id }) });
     expect(mismatch.status).toBe(404);
 
-    const denied = await mountDELETE(makeReq("DELETE", delUrl, plain),
+    const stranger = await newMember(prodId);
+    const denied = await mountDELETE(makeReq("DELETE", delUrl, stranger),
       { params: Promise.resolve({ id: prodId, nodeId: docNodeId, mountId: m.id }) });
     expect(denied.status).toBe(403);
 
-    const ok = await mountDELETE(makeReq("DELETE", delUrl, author),
+    const viaHost = await mountDELETE(makeReq("DELETE", delUrl, plain),
       { params: Promise.resolve({ id: prodId, nodeId: docNodeId, mountId: m.id }) });
-    expect(ok.status).toBe(200);
+    expect(viaHost.status).toBe(200);
     expect(await getNodeMount(m.id)).toBeNull();
   });
 });
