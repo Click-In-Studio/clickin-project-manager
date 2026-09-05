@@ -31,6 +31,8 @@ import { hasGrant, hasAnyGrant, type GrantActor } from "../grant-check";
 // 解析时**惰性跟随**（每次 get-or-create 顺手对齐，改名写点零改动）。
 // production_node_config 行锁做全程互斥（ensureAssetsRootAnchor 同款）。
 
+// 不变量（无 DB 级守卫，靠调用面纪律）：指针行与其 node 必须同 production——
+// 本函数在同一事务里以同一 productionId 建两者；未来任何直插此表的代码同样负责。
 async function ensureEntityDir(
   client: PoolClient, productionId: string,
   entityType: string, entityId: string,
@@ -49,12 +51,13 @@ async function ensureEntityDir(
     );
     return ptr.rows[0].node_id;
   }
-  const last = await client.query<{ sort_key: string | null }>(
-    parentId
-      ? `SELECT sort_key FROM node WHERE parent_id = $1 AND sort_key IS NOT NULL ORDER BY sort_key DESC LIMIT 1`
-      : `SELECT sort_key FROM node WHERE production_id = $1 AND parent_id IS NULL AND sort_key IS NOT NULL ORDER BY sort_key DESC LIMIT 1`,
-    [parentId ?? productionId],
-  );
+  const last = parentId
+    ? await client.query<{ sort_key: string | null }>(
+        `SELECT sort_key FROM node WHERE parent_id = $1 AND sort_key IS NOT NULL ORDER BY sort_key DESC LIMIT 1`,
+        [parentId])
+    : await client.query<{ sort_key: string | null }>(
+        `SELECT sort_key FROM node WHERE production_id = $1 AND parent_id IS NULL AND sort_key IS NOT NULL ORDER BY sort_key DESC LIMIT 1`,
+        [productionId]);
   const id = newNodeId();
   await client.query(
     `INSERT INTO node (id, production_id, kind, parent_id, sort_key, is_public, listable, title)

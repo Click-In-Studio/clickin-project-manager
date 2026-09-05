@@ -88,9 +88,14 @@ describe("resolveDefaultLanding", () => {
     const { rows: [sd] } = await getPool().query<{ title: string; kind: string; parent_id: string | null }>(
       `SELECT title, kind, parent_id FROM node WHERE id = $1`, [scriptDir]);
     expect(sd).toMatchObject({ title: "剧本", kind: "folder", parent_id: null });
-    // 幂等：再次解析同一目录
+    // 幂等：再次解析同一目录，且同名重放不触碰 updated_at（IS DISTINCT FROM 守卫）
+    const { rows: [before] } = await getPool().query<{ updated_at: Date }>(
+      `SELECT updated_at FROM node WHERE id = $1`, [scriptDir]);
     expect(await resolveDefaultLanding(actorOf(userId), prodId,
       { kind: "mount", mountType: "block", mountId: blockId })).toBe(scriptDir);
+    const { rows: [after] } = await getPool().query<{ updated_at: Date }>(
+      `SELECT updated_at FROM node WHERE id = $1`, [scriptDir]);
+    expect(after.updated_at.getTime()).toBe(before.updated_at.getTime());
 
     // cue：建表+稳定 id
     const listId = shortId(); const cueStable = shortId();
