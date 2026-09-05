@@ -33,6 +33,8 @@ export default function WikiShell({
   navigationBasePath,
   rootParentId,
   rootAnchor,
+  myUserId,
+  canManageAssets = false,
   children,
 }: {
   productionId: string;
@@ -49,6 +51,11 @@ export default function WikiShell({
   rootParentId?: string;
   /** 根锚点尚未懒建时的落位声明——服务端过完 create 门后解析成真正的 parentId。 */
   rootAnchor?: "dramaturgy";
+  /** 当前用户 id：树内资产删除的灰化判据（本人上传 ∨ canManageAssets 才亮）。
+   *  只是 UI 灰化，权限权威在服务端 DELETE 门。 */
+  myUserId?: string;
+  /** admin/owner 旁路（资产删除不灰）。 */
+  canManageAssets?: boolean;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -303,6 +310,19 @@ export default function WikiShell({
       setImporting(false);
       if (importInputRef.current) importInputRef.current.value = "";
     }
+  }
+
+  /** 树内删资产（#420 第二批：对本体操作就地可达，不再踢去资产页）。 */
+  async function removeAsset(id: string) {
+    const it = byId.get(id);
+    if (!it?.assetId) return;
+    if (!confirm(`确认删除资产「${it.displayTitle ?? it.assetId}」？相关挂载与链接会一并删除。`)) return;
+    setMenu(null);
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/assets/${it.assetId}`,
+      { method: "DELETE" });
+    if (!res.ok) { alert((await res.json().catch(() => ({}))).error ?? "删除失败"); return; }
+    if (id === selectedId) router.push(routeBase);
+    router.refresh();
   }
 
   async function remove(id: string) {
@@ -766,8 +786,22 @@ export default function WikiShell({
             if (!it) return null;
             if (it.isAnchor)
               return <p className="px-3 py-1.5 text-[12px] text-zinc-400">系统目录，不可删除</p>;
-            if (it.kind === "asset")
-              return <p className="px-3 py-1.5 text-[12px] text-zinc-400">资产请在资产页删除</p>;
+            if (it.kind === "asset") {
+              const mayDelete = canManageAssets || (myUserId != null && it.createdBy === myUserId);
+              return (
+                <button
+                  type="button"
+                  disabled={!mayDelete}
+                  title={mayDelete ? undefined : "仅上传者或管理员可删除"}
+                  className={`w-full text-left px-3 py-1.5 text-[13px] ${
+                    mayDelete ? "text-red-600 hover:bg-red-50" : "text-zinc-300 cursor-not-allowed"
+                  }`}
+                  onClick={() => { if (mayDelete) removeAsset(menu.id); }}
+                >
+                  删除
+                </button>
+              );
+            }
             if (it.kind === "folder")
               return null; // 批1 folder 全是系统产物，无删除入口
             return (
