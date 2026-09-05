@@ -531,8 +531,10 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel }:
         ))}
       </div>
 
+      {/* key 强制两分支各自重挂：否则 React 按位置把非受控的 file input 复用成
+          受控的 text input（uncontrolled→controlled 警告） */}
       {mode === "file" ? (
-        <div>
+        <div key="file">
           <div
             onClick={() => fileRef.current?.click()}
             onDragEnter={onDragEnter}
@@ -564,7 +566,7 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel }:
             onChange={e => pickFile(e.target.files)} />
         </div>
       ) : (
-        <div className="space-y-2">
+        <div key="feishu" className="space-y-2">
           <input
             type="text"
             placeholder="飞书 Wiki 节点链接"
