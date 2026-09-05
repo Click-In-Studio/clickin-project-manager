@@ -25,6 +25,9 @@ export default function AssetUploadPageClient({ productionId }: Props) {
         <div className="rounded-2xl bg-white shadow-sm p-5">
           <AssetUploadPanel
             productionId={productionId}
+            choosePlacement
+            allowMarkdownAsWiki
+            onUploadedWiki={({ wikiId }) => router.push(`/production/${productionId}/wiki/${wikiId}`)}
             onUploaded={() => router.push(`/production/${productionId}/assets`)}
             onCancel={() => router.push(`/production/${productionId}/assets`)}
           />

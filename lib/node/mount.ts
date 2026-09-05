@@ -69,6 +69,69 @@ export async function addNodeMount(params: {
   return rowToMount(res.rows[0]);
 }
 
+/** 挂载目标存在性校验（多态 mount_id 无 FK，归属校验在应用层——node 契约）。
+ *  #420 退役词汇不再受理：production（≡树可枚举）、wiki（→embed）、version/
+ *  scene_snapshot/block_snapshot/cue_revision（版本纪律：挂载锚稳定 id）。
+ *  asset 与通用 node 两条挂载路由同源消费，别在路由层各抄一份。 */
+export async function validateMountTarget(
+  productionId: string, mountType: MountType, mountId: string,
+): Promise<boolean> {
+  const pool = getPool();
+  switch (mountType) {
+    case "scene": {
+      const res = await pool.query("SELECT 1 FROM scene WHERE id = $1 AND production_id = $2", [mountId, productionId]);
+      return res.rows.length > 0;
+    }
+    case "block": {
+      const res = await pool.query("SELECT 1 FROM script WHERE block_id = $1 AND production_id = $2 LIMIT 1", [mountId, productionId]);
+      return res.rows.length > 0;
+    }
+    case "cue": {
+      const res = await pool.query(
+        `SELECT 1 FROM cue c JOIN cue_list cl ON cl.id = c.cue_list_id
+         WHERE c.cue_id = $1 AND cl.production_id = $2 LIMIT 1`,
+        [mountId, productionId]
+      );
+      return res.rows.length > 0;
+    }
+    case "comment": {
+      const res = await pool.query("SELECT 1 FROM comment WHERE id = $1 AND production_id = $2", [mountId, productionId]);
+      return res.rows.length > 0;
+    }
+    case "event": {
+      const res = await pool.query("SELECT 1 FROM production_event WHERE id = $1 AND production_id = $2", [mountId, productionId]);
+      return res.rows.length > 0;
+    }
+    case "event_schedule": {
+      const res = await pool.query(
+        `SELECT 1 FROM event_schedule_item esi JOIN production_event pe ON pe.id = esi.event_id
+         WHERE esi.id = $1 AND pe.production_id = $2`,
+        [mountId, productionId]
+      );
+      return res.rows.length > 0;
+    }
+    case "task": {
+      const res = await pool.query("SELECT 1 FROM task WHERE id = $1 AND production_id = $2", [mountId, productionId]);
+      return res.rows.length > 0;
+    }
+    case "event_report": {
+      const res = await pool.query(
+        `SELECT 1 FROM event_report er JOIN production_event pe ON pe.id = er.event_id
+         WHERE er.id = $1 AND pe.production_id = $2`,
+        [mountId, productionId]
+      );
+      return res.rows.length > 0;
+    }
+    case "embed": {
+      // 嵌入边宿主是 wiki 正文（uuid）——id::text 对比，坏 id 不炸 cast
+      const res = await pool.query("SELECT 1 FROM wiki WHERE id::text = $1 AND production_id = $2", [mountId, productionId]);
+      return res.rows.length > 0;
+    }
+    default:
+      return false;
+  }
+}
+
 export async function removeNodeMount(mountId: string): Promise<void> {
   await getPool().query(`DELETE FROM node_mount WHERE id = $1`, [mountId]);
 }

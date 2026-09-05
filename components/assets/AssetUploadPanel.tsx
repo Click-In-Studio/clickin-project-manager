@@ -6,6 +6,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import type { AssetType } from "@/lib/asset/db";
 import { ASSET_TYPE_LABELS } from "@/lib/asset/types";
 import { BASE_PATH } from "@/lib/base-path";
+import TreePickerModal from "@/components/TreePickerModal";
+import type { NodeEntry } from "@/lib/node/db";
 
 // R2 single PUT max is 5 GiB; use multipart for anything above 50 MB
 const MULTIPART_THRESHOLD = 50 * 1024 * 1024;
@@ -107,10 +109,24 @@ export type UploadResult = {
   storageType: "r2" | "feishu_link";
 };
 
+/** parentNodeId null＝资产根（树顶层入口的上传落这里，别落成树根散件）。 */
+export type UploadPlacement = { parentNodeId: string | null; listable?: boolean };
+
 interface Props {
   productionId: string;
   onUploaded: (result: UploadResult) => void;
   onCancel?: () => void;
+  /** 壳节点落点（#420 第二批：树内上传）。缺省＝资产根，行为不变。 */
+  placement?: UploadPlacement;
+  /** md 文件感知（side feature）：勾选「作为 wiki 文档」时前端直读文本
+   *  POST /wiki（走文档管道，不占 R2），结果经 onUploadedWiki 回调。
+   *  两者都传才启用开关。 */
+  allowMarkdownAsWiki?: boolean;
+  onUploadedWiki?: (r: { wikiId: string; nodeId: string; title: string }) => void;
+  /** 资产页模式（#420 第二批）：显示「位置」行让用户挑树落点（缺省「资产」根），
+   *  上传一律 listable——工作台上传的东西要在树里看得见。与 placement 互斥，
+   *  placement 是调用方钉死落点的形态（树内加号）。 */
+  choosePlacement?: boolean;
 }
 
 function formatSize(bytes: number): string {
@@ -118,8 +134,37 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-export default function AssetUploadPanel({ productionId, onUploaded, onCancel }: Props) {
+export default function AssetUploadPanel({
+  productionId, onUploaded, onCancel, placement, choosePlacement,
+  allowMarkdownAsWiki, onUploadedWiki,
+}: Props) {
+  // id null＝服务端缺省（「资产」根锚点懒建）——与列表里挑真「资产」行等价，
+  // 名字必须与树里锚点同名，别造第二个称谓
+  const [placeTarget, setPlaceTarget] = useState<{ id: string | null; label: string }>({ id: null, label: "资产" });
+  const [placePicking, setPlacePicking] = useState(false);
+  const [containers, setContainers] = useState<{ id: string; label: string; parentId?: string | null }[] | null>(null);
+  const effectivePlacement: UploadPlacement | undefined = choosePlacement
+    ? { parentNodeId: placeTarget.id, listable: true }
+    : placement;
+  const placementFields = effectivePlacement
+    ? { ...(effectivePlacement.parentNodeId ? { parentNodeId: effectivePlacement.parentNodeId } : {}),
+        listable: effectivePlacement.listable ?? true }
+    : {};
+
+  async function openPlacePicker() {
+    if (!containers) {
+      try {
+        const r = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`);
+        const j = await r.json() as { nodes?: NodeEntry[] };
+        setContainers((j.nodes ?? [])
+          .filter(n => n.kind === "folder" || n.kind === "wiki")
+          .map(n => ({ id: n.id, label: n.displayTitle ?? "（无标题）", parentId: n.parentId })));
+      } catch { setContainers([]); }
+    }
+    setPlacePicking(true);
+  }
   const [mode, setMode] = useState<UploadMode>("file");
+  const [asWiki, setAsWiki] = useState(true);
   const [assetType, setAssetType] = useState<AssetType>("reference");
   const [name, setName] = useState("");
   const [feishuUrl, setFeishuUrl] = useState("");
@@ -187,6 +232,29 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel }:
     try {
       const base = `${BASE_PATH}/api/production/${productionId}/assets`;
 
+      // md → wiki 文档：读文本走文档管道（与树栏「导入」同一约定），不碰 R2
+      if (mode === "file" && file && allowMarkdownAsWiki && onUploadedWiki && asWiki
+          && /\.(md|markdown)$/i.test(file.name)) {
+        const text = await file.text();
+        const title = name.trim() || file.name.replace(/\.(md|markdown)$/i, "").trim() || "导入文档";
+        const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title, body: text,
+            parentId: effectivePlacement?.parentNodeId ?? null,
+          }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError((j as { error?: string }).error ?? `导入失败 (${res.status})`);
+          return;
+        }
+        const w = (j as { wiki: { id: string; nodeId: string } }).wiki;
+        onUploadedWiki({ wikiId: w.id, nodeId: w.nodeId, title });
+        return;
+      }
+
       if (mode === "feishu") {
         if (!feishuUrl.trim() || !feishuName.trim()) {
           setError("请填写飞书链接和文件名");
@@ -201,6 +269,7 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel }:
             fileName: feishuName.trim(),
             name: name.trim() || null,
             assetType,
+            ...placementFields,
           }),
         });
         if (!res.ok) {
@@ -224,6 +293,7 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel }:
       const assetMeta = {
         fileName: file.name, mimeType, fileSize: file.size,
         name: name.trim() || null, assetType,
+        ...placementFields,
       };
 
       let r2Key: string, fileId: string;
@@ -531,8 +601,10 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel }:
         ))}
       </div>
 
+      {/* key 强制两分支各自重挂：否则 React 按位置把非受控的 file input 复用成
+          受控的 text input（uncontrolled→controlled 警告） */}
       {mode === "file" ? (
-        <div>
+        <div key="file">
           <div
             onClick={() => fileRef.current?.click()}
             onDragEnter={onDragEnter}
@@ -562,9 +634,15 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel }:
           </div>
           <input ref={fileRef} type="file" className="hidden"
             onChange={e => pickFile(e.target.files)} />
+          {allowMarkdownAsWiki && onUploadedWiki && file && /\.(md|markdown)$/i.test(file.name) && (
+            <label className="mt-2 flex items-center gap-2 text-xs text-zinc-600 cursor-pointer">
+              <input type="checkbox" checked={asWiki} onChange={e => setAsWiki(e.target.checked)} />
+              作为 wiki 文档导入（可编辑正文，不占用文件存储）
+            </label>
+          )}
         </div>
       ) : (
-        <div className="space-y-2">
+        <div key="feishu" className="space-y-2">
           <input
             type="text"
             placeholder="飞书 Wiki 节点链接"
@@ -579,6 +657,20 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel }:
             onChange={e => setFeishuName(e.target.value)}
             className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400"
           />
+        </div>
+      )}
+
+      {choosePlacement && (
+        <div>
+          <label className="block text-xs text-zinc-400 mb-1.5">位置</label>
+          <button
+            type="button"
+            onClick={openPlacePicker}
+            className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-left text-zinc-700 hover:border-zinc-400 flex items-center justify-between"
+          >
+            <span className="truncate">{placeTarget.label}</span>
+            <span className="text-xs text-zinc-400 shrink-0 ml-2">更改</span>
+          </button>
         </div>
       )}
 
@@ -608,6 +700,24 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel }:
       </div>
 
       {error && <p className="text-xs text-red-500">{error}</p>}
+
+      {placePicking && containers && (
+        <TreePickerModal
+          kicker="Assets"
+          title="上传到…"
+          items={containers}
+          preselected={[]}
+          single
+          onConfirm={ids => {
+            setPlacePicking(false);
+            const id = ids[0];
+            if (!id) return;
+            const c = containers.find(x => x.id === id);
+            setPlaceTarget({ id, label: c?.label ?? "已选位置" });
+          }}
+          onClose={() => setPlacePicking(false)}
+        />
+      )}
 
       {/* Upload progress bar */}
       {progress !== null && (

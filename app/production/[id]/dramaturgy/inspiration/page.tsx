@@ -46,6 +46,8 @@ export default async function DramaturgyInspirationPage({
     <>
       <DramaturgyInspirationShell productionId={productionId} productionName={productionName}>
         <WikiShell
+          myUserId={session.userId}
+          canManageAssets={access.permCtx.isAdmin || access.permCtx.isOwner}
           productionId={productionId}
           nodes={nodes}
           moveInCandidates={moveIn}

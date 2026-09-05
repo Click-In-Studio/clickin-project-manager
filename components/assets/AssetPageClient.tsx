@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from "react";
 import PageHeader, { PRIMARY_BTN } from "@/components/PageHeader";
 import Link from "next/link";
 import AssetUploadPanel from "./AssetUploadPanel";
-import type { UploadResult } from "./AssetUploadPanel";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import AssetShareModal from "./AssetShareModal";
 import { BASE_PATH } from "@/lib/base-path";
@@ -192,7 +191,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
       {/* 共享资产（#420：原「项目全局」挂载 ≡ 节点可枚举/listable，树面开关） */}
       <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "16px 20px", marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-          <p className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">共享资产</p>
+          <p className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">对全员列出</p>
           {isAdmin && (
             <button onClick={() => setSharePickOpen(v => !v)}
               className="inline-flex min-h-8 items-center rounded-lg border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-600 shadow-sm transition-colors hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-900">
@@ -201,7 +200,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
           )}
         </div>
         {assets.filter(a => a.listable).length === 0 ? (
-          <p className="text-xs text-zinc-400">暂无共享资产（共享后全体成员可在文档树与此处看到）</p>
+          <p className="text-xs text-zinc-400">暂无对全员列出的资产（列出后全体成员能在知识库树看到条目；内容访问仍按权限）</p>
         ) : (
           <div className="flex flex-wrap items-center gap-1">
             {assets.filter(a => a.listable).map(a => (
@@ -387,7 +386,13 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
             </div>
             <AssetUploadPanel
               productionId={productionId}
-              onUploaded={(result: UploadResult) => { setShowUploadModal(false); setAssets(prev => [...prev, { ...(result as unknown as Asset), nodeId: null, listable: false }]); load(); }}
+              choosePlacement
+              allowMarkdownAsWiki
+              onUploadedWiki={({ wikiId }) => {
+                setShowUploadModal(false);
+                window.location.href = `${BASE_PATH}/production/${productionId}/wiki/${wikiId}`;
+              }}
+              onUploaded={() => { setShowUploadModal(false); load(); }}
               onCancel={() => setShowUploadModal(false)}
             />
           </div>

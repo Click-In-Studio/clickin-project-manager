@@ -544,12 +544,11 @@ export default function SceneTableView({
                 display="compact"
               />
               <div className="mt-2">
+                {/* 只读反链展示（引用边）：手动关联入口已并入挂载面板（#420 去重） */}
                 <RelatedWikiChips
                   productionId={productionId}
                   entityType="scene"
                   entityId={scene.id}
-                  canEdit={canEdit}
-                  createDefaultTitle={`${scene.number}${scene.name ? ` ${scene.name}` : ""} · 大纲`}
                 />
               </div>
             </td>

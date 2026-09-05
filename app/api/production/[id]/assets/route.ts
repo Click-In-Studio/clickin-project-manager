@@ -2,8 +2,9 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { filterVisibleAssets } from "@/lib/asset/perm";
-import { hasGrant } from "@/lib/grant-check";
+import { hasGrant, toActor } from "@/lib/grant-check";
 import { createAsset, listAssets, type AssetType } from "@/lib/asset/db";
+import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
 import { isAssetType } from "@/lib/asset/types";
 import { putR2Object, getR2Object, thumbnailR2Key, completeMultipartUpload, listMultipartParts } from "@/lib/r2";
 import sharp from "sharp";
@@ -66,7 +67,24 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       assetType: AssetType;
       name?: string | null;
       fileName: string;
+      /** 壳节点落点（node id，#420 第二批）。缺省＝「资产」根（懒建，行为不变）。 */
+      parentNodeId?: string | null;
+      /** 树可枚举性。缺省 false（私有）。上传即共享是「新建自己的资产」，门按
+       *  wiki 先例走 create + 落位双门；共享**已有**资产仍走 node 路由的
+       *  publication∧mounts 门，此处不构成旁路（只能共享自己刚建的）。 */
+      listable?: boolean;
     };
+
+    // 指定落点 → 落位双门（与 wiki POST 同门：无权移入就不许在此新建）
+    const parentNodeId = body.parentNodeId?.trim() || null;
+    if (parentNodeId) {
+      const actor = toActor(session, access.permCtx);
+      if (!await canPlaceNodeUnder(actor, id, parentNodeId))
+        return Response.json({ error: "无权在该位置创建" }, { status: 403 });
+      if (!await canWriteNodeContainer(actor, id, parentNodeId))
+        return Response.json({ error: "无权修改该容器的子目录" }, { status: 403 });
+    }
+    const listable = body.listable === true;
 
     // asset_type 列无 CHECK 约束，白名单只在 TS 层——运行时校验防任意串入库
     if (body.assetType !== undefined && !isAssetType(body.assetType))
@@ -101,6 +119,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         fileName: body.fileName, mimeType,
         storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: thumbKey,
         fileSize: body.fileSize ?? null,
+        nodeParentId: parentNodeId, listable,
       });
       return Response.json({ asset, file }, { status: 201 });
     }
@@ -129,6 +148,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         fileName: body.fileName, mimeType,
         storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: thumbKey,
         fileSize: body.fileSize ?? null,
+        nodeParentId: parentNodeId, listable,
       });
       return Response.json({ asset, file }, { status: 201 });
     }
@@ -142,6 +162,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       assetType: body.assetType ?? "reference", name: body.name ?? null,
       fileName: body.fileName, mimeType: null,
       storageType: "feishu_link", feishuUrl: body.feishuUrl,
+      nodeParentId: parentNodeId, listable,
     });
     return Response.json({ asset, file }, { status: 201 });
   }

@@ -13,8 +13,12 @@ import { isNodeAnchor } from "./anchors";
 // 拍板记录（#420）：
 //   · asset 节点**无 grant 析取项**（2026-09-04 拍板 6「漂移一不接受」）：持某资产
 //     实例 meta@view 票不使它进树——定向分享的私有资产靠链接/publication 直达，
-//     行为与迁移前全等。资产进树的唯一途径是 listable（原 production mount 语义）
-//     或部门分享。
+//     行为与迁移前全等。资产进树的途径：listable（原 production mount 语义）、
+//     部门分享，或**自己是创建者**（下条）。
+//   · **创建者析取项**（2026-09-05 拍板，拍板 6 的精化）：asset 节点对其
+//     created_by 本人可枚举——自己看不到自己刚上传的私有资产是反直觉的，且与
+//     wiki 侧不对称（wiki 创建者行集的 meta@view 经 grant 析取天然进树）。按
+//     created_by 判而非发 grant 行：不碰授权语义，「定向分享不进树」原样成立。
 //   · grant 行键在**内容域**（'wiki'/uuid）不迁：$2 数组是应用侧预取的 wiki
 //     meta@view 内容 id，谓词里对撞 node.wiki_id 目标列。`*@view` sub 通配天然
 //     命中 meta 的零迁移蕴含（grant-check `resource_sub IN ($5,'*')`）原样成立。
@@ -38,6 +42,7 @@ import { isNodeAnchor } from "./anchors";
 const LOCAL_ENUMERABLE_PRED = `(
      (n.kind <> 'link' AND n.listable)
   OR (n.kind = 'wiki' AND ($4 OR n.wiki_id::text = ANY($2::text[])))
+  OR (n.kind = 'asset' AND n.created_by = $3::uuid)
   OR (n.kind <> 'link' AND EXISTS (
         SELECT 1 FROM node_dept_share ns
         JOIN production_dept_member pdm ON pdm.dept_id = ns.dept_id

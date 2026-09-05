@@ -52,7 +52,7 @@ const PRODUCTION_NAV = [
   { label: "事件", hint: "围读 · 排练 · 演出", path: "events", symbol: "事" },
   { label: "任务", hint: "技术需求 · 跟进", path: "tasks", symbol: "任" },
   { label: "报告", hint: "演出报告 · 归档", path: "reports", symbol: "报" },
-  { label: "文档", hint: "wiki · 团队知识库", path: "wiki", symbol: "文" },
+  { label: "知识库", hint: "wiki · 文档与资产一棵树", path: "wiki", symbol: "知" },
   { label: "财务", hint: "预算 · 支出 · 关联", path: "finance", symbol: "财" },
   { label: "物料", hint: "道具 · 服装 · 设备", path: "materials", symbol: "物" },
   { label: "数字资产", hint: "文件 · 图纸 · 音视频", path: "assets", symbol: "数" },

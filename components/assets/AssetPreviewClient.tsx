@@ -19,6 +19,9 @@ interface Props {
   storageType: string;
   feishuUrl: string | null;
   userName: string;
+  /** embedded：内嵌在知识库 shell 主区（#420 第二批）——卡片外壳、去掉整页
+   *  导航（返回/Asset 列表），其余（下载/分享/预览体）同一份。 */
+  variant?: "page" | "embedded";
 }
 
 function getPreviewType(mimeType: string | null): PreviewType | null {
@@ -32,7 +35,23 @@ function getPreviewType(mimeType: string | null): PreviewType | null {
 
 export default function AssetPreviewClient({
   productionId, assetId, versionId, fileName, mimeType, storageType, feishuUrl, userName,
+  variant = "page",
 }: Props) {
+  const embedded = variant === "embedded";
+  // 色调：整页=暗房（看片场景）；内嵌=白底（融进知识库 shell）
+  const t = embedded ? {
+    bar: "border-zinc-200",
+    dim: "text-zinc-400 hover:text-zinc-700",
+    faint: "text-zinc-400",
+    fainter: "text-zinc-300",
+    btn: "bg-zinc-800 hover:bg-zinc-700 text-white",
+  } : {
+    bar: "border-white/5",
+    dim: "text-white/40 hover:text-white/70",
+    faint: "text-white/30",
+    fainter: "text-white/20",
+    btn: "bg-white/10 hover:bg-white/20 text-white",
+  };
   const router = useRouter();
   const [url, setUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
@@ -77,22 +96,28 @@ export default function AssetPreviewClient({
   const backHref = `${BASE_PATH}/production/${productionId}/assets`;
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col">
+    <div className={embedded
+      ? "rounded-xl overflow-hidden border border-zinc-200 bg-white flex flex-col min-h-[calc(100vh-160px)]"
+      : "min-h-screen bg-zinc-950 flex flex-col"}>
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 shrink-0">
-        <button
-          onClick={() => router.back()}
-          className="text-xs text-white/40 hover:text-white/70 transition-colors"
-        >
-          ← 返回
-        </button>
-        <p className="text-xs text-white/50 truncate max-w-[50vw] text-center">{fileName}</p>
+      <div className={`flex items-center justify-between px-4 py-3 border-b shrink-0 ${t.bar}`}>
+        {embedded ? (
+          <span className="text-xs text-zinc-300">资产预览</span>
+        ) : (
+          <button
+            onClick={() => router.back()}
+            className={`text-xs transition-colors ${t.dim}`}
+          >
+            ← 返回
+          </button>
+        )}
+        <p className={`text-xs truncate max-w-[50vw] text-center ${embedded ? "text-zinc-600" : "text-white/50"}`}>{fileName}</p>
         <div className="flex items-center gap-3">
           {url && (
             <a
               href={url}
               download={fileName}
-              className="text-xs text-white/40 hover:text-white/70 transition-colors"
+              className={`text-xs transition-colors ${t.dim}`}
             >
               下载
             </a>
@@ -101,23 +126,25 @@ export default function AssetPreviewClient({
             <a
               href={downloadUrl}
               download={fileName}
-              className="text-xs text-white/40 hover:text-white/70 transition-colors"
+              className={`text-xs transition-colors ${t.dim}`}
             >
               下载
             </a>
           )}
           <button
             onClick={() => setShareOpen(true)}
-            className="text-xs text-white/40 hover:text-white/70 transition-colors"
+            className={`text-xs transition-colors ${t.dim}`}
           >
             分享
           </button>
-          <a
-            href={backHref}
-            className="text-xs text-white/40 hover:text-white/70 transition-colors"
-          >
-            Asset 列表
-          </a>
+          {!embedded && (
+            <a
+              href={backHref}
+              className={`text-xs transition-colors ${t.dim}`}
+            >
+              Asset 列表
+            </a>
+          )}
         </div>
       </div>
 
@@ -134,25 +161,25 @@ export default function AssetPreviewClient({
       {/* Content */}
       <div className="flex-1 flex items-center justify-center p-4 min-h-0 overflow-auto">
         {loading && (
-          <p className="text-sm text-white/30">加载中…</p>
+          <p className={`text-sm ${t.faint}`}>加载中…</p>
         )}
 
         {!loading && error && (
           <div className="text-center">
-            <p className="text-sm text-white/40 mb-2">{error}</p>
-            <p className="text-xs text-white/20">该格式暂不支持预览</p>
+            <p className={`text-sm mb-2 ${t.faint}`}>{error}</p>
+            <p className={`text-xs ${t.fainter}`}>该格式暂不支持预览</p>
           </div>
         )}
 
         {!loading && !previewType && downloadUrl && (
           <div className="text-center">
             <p className="text-4xl mb-4">📄</p>
-            <p className="text-sm text-white/50 mb-1 truncate max-w-xs">{fileName}</p>
-            <p className="text-xs text-white/30 mb-6">该格式不支持预览</p>
+            <p className={`text-sm mb-1 truncate max-w-xs ${embedded ? "text-zinc-600" : "text-white/50"}`}>{fileName}</p>
+            <p className={`text-xs mb-6 ${t.faint}`}>该格式不支持预览</p>
             <a
               href={downloadUrl}
               download={fileName}
-              className="inline-block rounded-lg bg-white/10 hover:bg-white/20 px-5 py-2.5 text-sm text-white transition-colors"
+              className={`inline-block rounded-lg px-5 py-2.5 text-sm transition-colors ${t.btn}`}
             >
               下载文件
             </a>
