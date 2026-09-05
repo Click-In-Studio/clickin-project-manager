@@ -118,6 +118,11 @@ interface Props {
   onCancel?: () => void;
   /** 壳节点落点（#420 第二批：树内上传）。缺省＝资产根，行为不变。 */
   placement?: UploadPlacement;
+  /** md 文件感知（side feature）：勾选「作为 wiki 文档」时前端直读文本
+   *  POST /wiki（走文档管道，不占 R2），结果经 onUploadedWiki 回调。
+   *  两者都传才启用开关。 */
+  allowMarkdownAsWiki?: boolean;
+  onUploadedWiki?: (r: { wikiId: string; nodeId: string; title: string }) => void;
   /** 资产页模式（#420 第二批）：显示「位置」行让用户挑树落点（缺省「资产」根），
    *  上传一律 listable——工作台上传的东西要在树里看得见。与 placement 互斥，
    *  placement 是调用方钉死落点的形态（树内加号）。 */
@@ -129,7 +134,10 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-export default function AssetUploadPanel({ productionId, onUploaded, onCancel, placement, choosePlacement }: Props) {
+export default function AssetUploadPanel({
+  productionId, onUploaded, onCancel, placement, choosePlacement,
+  allowMarkdownAsWiki, onUploadedWiki,
+}: Props) {
   // id null＝服务端缺省（「资产」根锚点懒建）——与列表里挑真「资产」行等价，
   // 名字必须与树里锚点同名，别造第二个称谓
   const [placeTarget, setPlaceTarget] = useState<{ id: string | null; label: string }>({ id: null, label: "资产" });
@@ -156,6 +164,7 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel, p
     setPlacePicking(true);
   }
   const [mode, setMode] = useState<UploadMode>("file");
+  const [asWiki, setAsWiki] = useState(true);
   const [assetType, setAssetType] = useState<AssetType>("reference");
   const [name, setName] = useState("");
   const [feishuUrl, setFeishuUrl] = useState("");
@@ -222,6 +231,29 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel, p
     setTransferMode("direct");
     try {
       const base = `${BASE_PATH}/api/production/${productionId}/assets`;
+
+      // md → wiki 文档：读文本走文档管道（与树栏「导入」同一约定），不碰 R2
+      if (mode === "file" && file && allowMarkdownAsWiki && onUploadedWiki && asWiki
+          && /\.(md|markdown)$/i.test(file.name)) {
+        const text = await file.text();
+        const title = name.trim() || file.name.replace(/\.(md|markdown)$/i, "").trim() || "导入文档";
+        const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title, body: text,
+            parentId: effectivePlacement?.parentNodeId ?? null,
+          }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError((j as { error?: string }).error ?? `导入失败 (${res.status})`);
+          return;
+        }
+        const w = (j as { wiki: { id: string; nodeId: string } }).wiki;
+        onUploadedWiki({ wikiId: w.id, nodeId: w.nodeId, title });
+        return;
+      }
 
       if (mode === "feishu") {
         if (!feishuUrl.trim() || !feishuName.trim()) {
@@ -602,6 +634,12 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel, p
           </div>
           <input ref={fileRef} type="file" className="hidden"
             onChange={e => pickFile(e.target.files)} />
+          {allowMarkdownAsWiki && onUploadedWiki && file && /\.(md|markdown)$/i.test(file.name) && (
+            <label className="mt-2 flex items-center gap-2 text-xs text-zinc-600 cursor-pointer">
+              <input type="checkbox" checked={asWiki} onChange={e => setAsWiki(e.target.checked)} />
+              作为 wiki 文档导入（可编辑正文，不占用文件存储）
+            </label>
+          )}
         </div>
       ) : (
         <div key="feishu" className="space-y-2">

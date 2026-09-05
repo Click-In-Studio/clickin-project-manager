@@ -387,6 +387,11 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
             <AssetUploadPanel
               productionId={productionId}
               choosePlacement
+              allowMarkdownAsWiki
+              onUploadedWiki={({ wikiId }) => {
+                setShowUploadModal(false);
+                window.location.href = `${BASE_PATH}/production/${productionId}/wiki/${wikiId}`;
+              }}
               onUploaded={() => { setShowUploadModal(false); load(); }}
               onCancel={() => setShowUploadModal(false)}
             />

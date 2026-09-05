@@ -888,6 +888,14 @@ export default function WikiShell({
             <AssetUploadPanel
               productionId={productionId}
               placement={{ parentNodeId: uploadUnder === "" ? null : uploadUnder }}
+              allowMarkdownAsWiki
+              onUploadedWiki={({ wikiId }) => {
+                const u = uploadUnder;
+                setUploadUnder(null);
+                if (u) setExpanded(prev => new Set([...prev, u]));
+                router.push(`${routeBase}/${wikiId}`);
+                router.refresh();
+              }}
               onUploaded={() => {
                 const u = uploadUnder;
                 setUploadUnder(null);
