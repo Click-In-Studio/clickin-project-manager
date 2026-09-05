@@ -72,6 +72,26 @@ afterAll(async () => {
 });
 
 describe("POST /node/[nodeId]/mounts", () => {
+  it("未登录 → 401；归档项目 → 403", async () => {
+    const url = `/api/production/${prodId}/node/${docNodeId}/mounts`;
+    const ctx = { params: Promise.resolve({ id: prodId, nodeId: docNodeId }) };
+    const body = { mountType: "scene", mountId: sceneId };
+
+    const anon = await mountsPOST(new NextRequest(`http://localhost${url}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }), ctx);
+    expect(anon.status).toBe(401);
+
+    await getPool().query(`UPDATE production SET archived_at = now() WHERE id = $1`, [prodId]);
+    try {
+      const archived = await mountsPOST(makeReq("POST", url, author, body), ctx);
+      expect(archived.status).toBe(403);
+    } finally {
+      await getPool().query(`UPDATE production SET archived_at = NULL WHERE id = $1`, [prodId]);
+    }
+  });
+
   it("文档创建者（分享面 ∧ 宿主票）→ 201；普通成员缺分享面 → 403", async () => {
     const url = `/api/production/${prodId}/node/${docNodeId}/mounts`;
     const ctx = { params: Promise.resolve({ id: prodId, nodeId: docNodeId }) };
