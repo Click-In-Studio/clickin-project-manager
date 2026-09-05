@@ -118,7 +118,7 @@ interface Props {
   onCancel?: () => void;
   /** 壳节点落点（#420 第二批：树内上传）。缺省＝资产根，行为不变。 */
   placement?: UploadPlacement;
-  /** 资产页模式（#420 第二批）：显示「位置」行让用户挑树落点（缺省资产库根），
+  /** 资产页模式（#420 第二批）：显示「位置」行让用户挑树落点（缺省「资产」根），
    *  上传一律 listable——工作台上传的东西要在树里看得见。与 placement 互斥，
    *  placement 是调用方钉死落点的形态（树内加号）。 */
   choosePlacement?: boolean;
@@ -130,7 +130,9 @@ function formatSize(bytes: number): string {
 }
 
 export default function AssetUploadPanel({ productionId, onUploaded, onCancel, placement, choosePlacement }: Props) {
-  const [placeTarget, setPlaceTarget] = useState<{ id: string | null; label: string }>({ id: null, label: "资产库" });
+  // id null＝服务端缺省（「资产」根锚点懒建）——与列表里挑真「资产」行等价，
+  // 名字必须与树里锚点同名，别造第二个称谓
+  const [placeTarget, setPlaceTarget] = useState<{ id: string | null; label: string }>({ id: null, label: "资产" });
   const [placePicking, setPlacePicking] = useState(false);
   const [containers, setContainers] = useState<{ id: string; label: string; parentId?: string | null }[] | null>(null);
   const effectivePlacement: UploadPlacement | undefined = choosePlacement
@@ -665,13 +667,13 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel, p
         <TreePickerModal
           kicker="Assets"
           title="上传到…"
-          items={[{ id: "__assets_root__", label: "资产库（默认）" }, ...containers]}
+          items={containers}
           preselected={[]}
           single
           onConfirm={ids => {
             setPlacePicking(false);
             const id = ids[0];
-            if (!id || id === "__assets_root__") { setPlaceTarget({ id: null, label: "资产库" }); return; }
+            if (!id) return;
             const c = containers.find(x => x.id === id);
             setPlaceTarget({ id, label: c?.label ?? "已选位置" });
           }}
