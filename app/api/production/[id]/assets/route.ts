@@ -5,6 +5,7 @@ import { filterVisibleAssets } from "@/lib/asset/perm";
 import { hasGrant, toActor } from "@/lib/grant-check";
 import { createAsset, listAssets, type AssetType } from "@/lib/asset/db";
 import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
+import { listNodeLibrary } from "@/lib/node/db";
 import { isAssetType } from "@/lib/asset/types";
 import { putR2Object, getR2Object, thumbnailR2Key, completeMultipartUpload, listMultipartParts } from "@/lib/r2";
 import sharp from "sharp";
@@ -20,19 +21,62 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const assets = await listAssets(id);
   // 批D：可见性过滤（能力票∧结构 ∨ publication@view）
   const visible = await filterVisibleAssets(access.permCtx, id, assets);
-  // #420：附带壳节点树面（nodeId + listable=「共享资产」面板数据源，原 production
+  // #420：附带壳节点树面（nodeId + listable=「对全员列出」面板数据源，原 production
   // mount 语义）。一次集合查询，避免 N+1。
   const { rows } = await getPool().query<{ asset_id: string; id: string; listable: boolean }>(
     `SELECT asset_id, id, listable FROM node WHERE production_id = $1 AND asset_id IS NOT NULL`,
     [id],
   );
   const nodeByAsset = new Map(rows.map(r => [r.asset_id, r]));
+
+  // 工作台（#420 第二批 PR-C）：
+  //   · treePath＝壳节点祖先链标题（找得到「在树里哪儿」），listNodeLibrary 已解析
+  //     displayTitle，应用层走链零额外查询
+  //   · sizeBytes＝该资产全部 asset_file 行合计（含暂不可达的历史版本，见 #428）
+  //   · stats＝整个 production 的客观占用（#429：现查不物化；file_size 为 NULL 的
+  //     存量行计入 unknownFiles，回填另行处理）
+  const [library, sizeRes] = await Promise.all([
+    listNodeLibrary(id),
+    getPool().query<{ asset_id: string | null; bytes: string | null; unknown: string }>(
+      `SELECT af.asset_id, sum(af.file_size)::bigint::text AS bytes,
+              count(*) FILTER (WHERE af.file_size IS NULL)::text AS unknown
+       FROM asset_file af JOIN asset a ON a.id = af.asset_id
+       WHERE a.production_id = $1 GROUP BY af.asset_id`,
+      [id],
+    ),
+  ]);
+  const nodeById = new Map(library.map(n => [n.id, n]));
+  const pathFor = (nodeId: string | null): string[] => {
+    const path: string[] = [];
+    let cur = nodeId ? nodeById.get(nodeId) : undefined;
+    for (let i = 0; cur?.parentId && i < 20; i++) {
+      const parent = nodeById.get(cur.parentId);
+      if (!parent) break;
+      path.unshift(parent.displayTitle ?? "（无标题）");
+      cur = parent;
+    }
+    return path;
+  };
+  const sizeByAsset = new Map(sizeRes.rows.map(r => [r.asset_id, r]));
+  let totalBytes = 0, unknownFiles = 0;
+  for (const r of sizeRes.rows) {
+    totalBytes += Number(r.bytes ?? 0);
+    unknownFiles += Number(r.unknown);
+  }
+
   return Response.json({
-    assets: visible.map(a => ({
-      ...a,
-      nodeId: nodeByAsset.get(a.id)?.id ?? null,
-      listable: nodeByAsset.get(a.id)?.listable ?? false,
-    })),
+    assets: visible.map(a => {
+      const node = nodeByAsset.get(a.id);
+      const size = sizeByAsset.get(a.id);
+      return {
+        ...a,
+        nodeId: node?.id ?? null,
+        listable: node?.listable ?? false,
+        treePath: pathFor(node?.id ?? null),
+        sizeBytes: size?.bytes != null ? Number(size.bytes) : null,
+      };
+    }),
+    stats: { totalBytes, unknownFiles },
   });
 }
 

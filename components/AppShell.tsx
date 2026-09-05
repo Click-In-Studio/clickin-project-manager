@@ -55,7 +55,7 @@ const PRODUCTION_NAV = [
   { label: "知识库", hint: "wiki · 文档与资产一棵树", path: "wiki", symbol: "知" },
   { label: "财务", hint: "预算 · 支出 · 关联", path: "finance", symbol: "财" },
   { label: "物料", hint: "道具 · 服装 · 设备", path: "materials", symbol: "物" },
-  { label: "数字资产", hint: "文件 · 图纸 · 音视频", path: "assets", symbol: "数" },
+  { label: "资产工作台", hint: "上传 · 清单 · 文件治理", path: "assets", symbol: "资" },
 ] as const;
 
 // feature 标的是**付费档位**依赖（#280），不是权限：带 feature 的项在档位没开通该功能
