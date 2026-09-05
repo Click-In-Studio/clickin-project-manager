@@ -1,6 +1,8 @@
 import { getPool } from "../pg";
 import { ensureReportTreeAnchors } from "./anchors";
 import { getNodeByWikiId } from "./db";
+import { canEnterEvent } from "../event-permissions";
+import type { GrantActor } from "../grant-check";
 
 // ─── 缺省落点（#420 第二批收官，2026-09-05 拍板）─────────────────────────────
 //
@@ -13,7 +15,10 @@ import { getNodeByWikiId } from "./db";
 //   · 解析是尽力而为：调用方对解析结果照跑落位双门，**门不过就回退 null**
 //     （=今天的缺省），不 403 打断创建流——落点是便利不是权限面。
 //   · ensure 是写事务：只在「实际创建内容」的写路径里调用（过完 create 门之后），
-//     渲染路径禁碰（write-before-authz，与 parentAnchor 定式同款）。
+//     渲染路径禁碰。与 parentAnchor 定式的差异（AI review 指正）：这里的 ensure
+//     目标由客户端传入（任意 event id），不是固定锚点——所以 ensure 前先过
+//     canEnterEvent（「与这个 event 有无干系」），无干系直接 null，不留副作用。
+//     event_report / doc-sibling 分支是纯读，无此问题。
 
 export type LandingContext =
   | { kind: "mount"; mountType: string; mountId: string }
@@ -21,6 +26,7 @@ export type LandingContext =
 
 /** 解析缺省落点 → 父 node id；null＝无缺省。 */
 export async function resolveDefaultLanding(
+  actor: GrantActor,
   productionId: string,
   ctx: LandingContext,
 ): Promise<string | null> {
@@ -33,9 +39,20 @@ export async function resolveDefaultLanding(
   }
 
   const pool = getPool();
+  // 事件目录懒建统一走这里：写前先判「与该 event 有无干系」
+  const ensureEventDirFor = async (eventId: string): Promise<string | null> => {
+    if (!actor.isAdmin && !actor.isOwner
+        && !await canEnterEvent(actor, productionId, eventId)) return null;
+    return ensureReportTreeAnchors(productionId, eventId);
+  };
   switch (ctx.mountType) {
-    case "event":
-      return ensureReportTreeAnchors(productionId, ctx.mountId);
+    case "event": {
+      const { rows } = await pool.query(
+        `SELECT 1 FROM production_event WHERE id = $1 AND production_id = $2`,
+        [ctx.mountId, productionId],
+      );
+      return rows[0] ? ensureEventDirFor(ctx.mountId) : null;
+    }
     case "event_schedule": {
       const { rows } = await pool.query<{ event_id: string }>(
         `SELECT esi.event_id FROM event_schedule_item esi
@@ -43,7 +60,7 @@ export async function resolveDefaultLanding(
          WHERE esi.id = $1 AND pe.production_id = $2`,
         [ctx.mountId, productionId],
       );
-      return rows[0] ? ensureReportTreeAnchors(productionId, rows[0].event_id) : null;
+      return rows[0] ? ensureEventDirFor(rows[0].event_id) : null;
     }
     case "event_report": {
       // report 内容嵌套在 report 文档节点下（events/<event>/<report>/…）
@@ -61,7 +78,7 @@ export async function resolveDefaultLanding(
         `SELECT event_id FROM task WHERE id = $1 AND production_id = $2`,
         [ctx.mountId, productionId],
       );
-      return rows[0]?.event_id ? ensureReportTreeAnchors(productionId, rows[0].event_id) : null;
+      return rows[0]?.event_id ? ensureEventDirFor(rows[0].event_id) : null;
     }
     default:
       // scene / block / cue / comment：暂无缺省（scene 等的实体文件夹布局待拍板；

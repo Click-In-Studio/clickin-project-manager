@@ -108,7 +108,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       const landing = readLandingContext(body.landing);
       if (landing) {
         const actor = toActor(session, access.permCtx);
-        const cand = await resolveDefaultLanding(id, landing);
+        const cand = await resolveDefaultLanding(actor, id, landing);
         if (cand
             && await canPlaceNodeUnder(actor, id, cand)
             && await canWriteNodeContainer(actor, id, cand)) {

@@ -101,7 +101,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   } else {
     const landing = readLandingContext(body.landing);
     if (landing) {
-      const cand = await resolveDefaultLanding(productionId, landing);
+      const cand = await resolveDefaultLanding(actor, productionId, landing);
       if (cand
           && await canPlaceNodeUnder(actor, productionId, cand)
           && await canWriteNodeContainer(actor, productionId, cand)) {
