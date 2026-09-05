@@ -137,3 +137,7 @@
   wiki {id,title}），不带权限过滤（调用方按 kind 走各自内容面）；
   `getAssetsByMountPoint` 降为它的 asset 投影，现有面板形状不变。
 - event_schedule/task/event_report 挂载类型暂无让渡通道（与迁移前一致，挂账）。
+- **创建者析取项（2026-09-05 拍板，拍板 6 的精化）**：asset 节点对其 created_by
+  本人可枚举（按 created_by 判、不发 grant 行）。动机：自己看不到自己刚上传的
+  私有资产反直觉，且与 wiki 不对称（wiki 创建者行集经 grant 析取天然进树）。
+  「定向分享不进树」（拍板 6 本体）原样成立——实例票仍不投枚举票。

@@ -502,3 +502,25 @@ describe("routes", () => {
     expect((await getNodeByWikiId(w.id))!.listable).toBe(false);
   });
 });
+
+describe("asset 节点创建者析取（2026-09-05 拍板：拍板 6 的精化）", () => {
+  it("私有资产：上传者本人可枚举，别人不可（定向分享不进树原样成立）", async () => {
+    const { createAsset } = await import("@/lib/asset/db");
+    const a = await createAsset({
+      productionId: prodId, uploaderUserId: creator, assetType: "reference",
+      fileName: "creator-only.bak", mimeType: null,
+      storageType: "r2", isPublic: false,
+    });
+    // 上传者本人：进树
+    expect(await canEnumerateNode(actorOf(creator), prodId, a.nodeId)).toBe(true);
+    // 其他成员：不进树（listable=false，无部门分享）
+    expect(await canEnumerateNode(actorOf(member), prodId, a.nodeId)).toBe(false);
+    // 拍板 6 保留：给 member 发实例 meta@view 票也不进树
+    await getPool().query(
+      `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES ($1, $2, 'asset', $3, 'meta', 'view', 'auto')`,
+      [prodId, member, a.asset.id],
+    );
+    expect(await canEnumerateNode(actorOf(member), prodId, a.nodeId)).toBe(false);
+  });
+});
