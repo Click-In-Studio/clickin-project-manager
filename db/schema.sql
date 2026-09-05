@@ -1203,6 +1203,19 @@ CREATE TABLE IF NOT EXISTS node_dept_share (
   PRIMARY KEY (node_id, dept_id)
 );
 
+-- 实体目录指针（#420 缺省落点，add-node-entity-dir.sql）：业务实体缺省目录的
+-- 惰性 get-or-create 指针。folder title 是实体名副本，解析时惰性跟随。
+-- 使用者：script '*'（「剧本」）、cue_root '*'（「Cue」）、cue_list <id>；
+-- event 系走 production_event.report_doc_node_id 先例列。
+CREATE TABLE IF NOT EXISTS node_entity_dir (
+  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  entity_type   TEXT NOT NULL,
+  entity_id     TEXT NOT NULL,
+  node_id       TEXT NOT NULL REFERENCES node(id) ON DELETE CASCADE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (production_id, entity_type, entity_id)
+);
+
 -- 简单通用挂载边（原 asset_mount，#420 演化）：业务点 ↔ node 的缺省边种。
 -- 挂载边是**关系概念不是一张表**——业务复杂度到了就从本表毕业成专表（如
 -- event_report 的三元关系），本表只服务「还没长出个性」的简单挂载。
