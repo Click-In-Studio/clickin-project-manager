@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from "react";
 import PageHeader, { PRIMARY_BTN } from "@/components/PageHeader";
 import Link from "next/link";
 import AssetUploadPanel from "./AssetUploadPanel";
-import type { UploadResult } from "./AssetUploadPanel";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import AssetShareModal from "./AssetShareModal";
 import { BASE_PATH } from "@/lib/base-path";
@@ -388,7 +387,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
             <AssetUploadPanel
               productionId={productionId}
               choosePlacement
-              onUploaded={(result: UploadResult) => { setShowUploadModal(false); setAssets(prev => [...prev, { ...(result as unknown as Asset), nodeId: null, listable: true }]); load(); }}
+              onUploaded={() => { setShowUploadModal(false); load(); }}
               onCancel={() => setShowUploadModal(false)}
             />
           </div>
