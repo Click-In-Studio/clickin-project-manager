@@ -107,10 +107,15 @@ export type UploadResult = {
   storageType: "r2" | "feishu_link";
 };
 
+/** parentNodeId null＝资产根（树顶层入口的上传落这里，别落成树根散件）。 */
+export type UploadPlacement = { parentNodeId: string | null; listable?: boolean };
+
 interface Props {
   productionId: string;
   onUploaded: (result: UploadResult) => void;
   onCancel?: () => void;
+  /** 壳节点落点（#420 第二批：树内上传）。缺省＝资产根，行为不变。 */
+  placement?: UploadPlacement;
 }
 
 function formatSize(bytes: number): string {
@@ -118,7 +123,11 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-export default function AssetUploadPanel({ productionId, onUploaded, onCancel }: Props) {
+export default function AssetUploadPanel({ productionId, onUploaded, onCancel, placement }: Props) {
+  const placementFields = placement
+    ? { ...(placement.parentNodeId ? { parentNodeId: placement.parentNodeId } : {}),
+        listable: placement.listable ?? true }
+    : {};
   const [mode, setMode] = useState<UploadMode>("file");
   const [assetType, setAssetType] = useState<AssetType>("reference");
   const [name, setName] = useState("");
@@ -201,6 +210,7 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel }:
             fileName: feishuName.trim(),
             name: name.trim() || null,
             assetType,
+            ...placementFields,
           }),
         });
         if (!res.ok) {
@@ -224,6 +234,7 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel }:
       const assetMeta = {
         fileName: file.name, mimeType, fileSize: file.size,
         name: name.trim() || null, assetType,
+        ...placementFields,
       };
 
       let r2Key: string, fileId: string;

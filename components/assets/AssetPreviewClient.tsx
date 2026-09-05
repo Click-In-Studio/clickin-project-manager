@@ -19,6 +19,9 @@ interface Props {
   storageType: string;
   feishuUrl: string | null;
   userName: string;
+  /** embedded：内嵌在知识库 shell 主区（#420 第二批）——卡片外壳、去掉整页
+   *  导航（返回/Asset 列表），其余（下载/分享/预览体）同一份。 */
+  variant?: "page" | "embedded";
 }
 
 function getPreviewType(mimeType: string | null): PreviewType | null {
@@ -32,7 +35,9 @@ function getPreviewType(mimeType: string | null): PreviewType | null {
 
 export default function AssetPreviewClient({
   productionId, assetId, versionId, fileName, mimeType, storageType, feishuUrl, userName,
+  variant = "page",
 }: Props) {
+  const embedded = variant === "embedded";
   const router = useRouter();
   const [url, setUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
@@ -77,15 +82,21 @@ export default function AssetPreviewClient({
   const backHref = `${BASE_PATH}/production/${productionId}/assets`;
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col">
+    <div className={embedded
+      ? "rounded-xl overflow-hidden bg-zinc-950 flex flex-col min-h-[calc(100vh-160px)]"
+      : "min-h-screen bg-zinc-950 flex flex-col"}>
       {/* Top bar */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 shrink-0">
-        <button
-          onClick={() => router.back()}
-          className="text-xs text-white/40 hover:text-white/70 transition-colors"
-        >
-          ← 返回
-        </button>
+        {embedded ? (
+          <span className="text-xs text-white/25">资产预览</span>
+        ) : (
+          <button
+            onClick={() => router.back()}
+            className="text-xs text-white/40 hover:text-white/70 transition-colors"
+          >
+            ← 返回
+          </button>
+        )}
         <p className="text-xs text-white/50 truncate max-w-[50vw] text-center">{fileName}</p>
         <div className="flex items-center gap-3">
           {url && (
@@ -112,12 +123,14 @@ export default function AssetPreviewClient({
           >
             分享
           </button>
-          <a
-            href={backHref}
-            className="text-xs text-white/40 hover:text-white/70 transition-colors"
-          >
-            Asset 列表
-          </a>
+          {!embedded && (
+            <a
+              href={backHref}
+              className="text-xs text-white/40 hover:text-white/70 transition-colors"
+            >
+              Asset 列表
+            </a>
+          )}
         </div>
       </div>
 

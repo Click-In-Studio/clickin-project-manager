@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { useAgentMutation } from "@/lib/agent-mutations";
 import { BASE_PATH } from "@/lib/base-path";
 import TreePickerModal from "@/components/TreePickerModal";
+import AssetUploadPanel from "@/components/assets/AssetUploadPanel";
 import AdminModal from "@/components/AdminModal";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import type { NodeEntry } from "@/lib/node/db";
@@ -99,6 +100,12 @@ export default function WikiShell({
   const [newListable, setNewListable] = useState(true);
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState<{ id: string; top: number; left: number } | null>(null);
+  // ＋ 下拉（飞书式）：under = "" 根级 / <node id> 某容器下；三动作：新建文档 /
+  // 上传文件 / 创建链接（#420 第二批）
+  const [plusMenu, setPlusMenu] = useState<{ under: string; top: number; left: number } | null>(null);
+  const [uploadUnder, setUploadUnder] = useState<string | null>(null);
+  const [linkUnder, setLinkUnder] = useState<string | null>(null);
+  const plusMenuRef = useRef<HTMLDivElement | null>(null);
   const [movingId, setMovingId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -115,6 +122,20 @@ export default function WikiShell({
       document.removeEventListener("scroll", closeOnScroll, true);
     };
   }, [menu]);
+
+  useEffect(() => {
+    if (!plusMenu) return;
+    const close = (e: MouseEvent) => {
+      if (plusMenuRef.current && !plusMenuRef.current.contains(e.target as globalThis.Node)) setPlusMenu(null);
+    };
+    const closeOnScroll = () => setPlusMenu(null);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("scroll", closeOnScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("scroll", closeOnScroll, true);
+    };
+  }, [plusMenu]);
 
   // 同层有序邻接表（服务端已按 sort_key 排序，分组后保持相对序）。
   // 只有容器 kind（folder/wiki）能收子项。
@@ -135,13 +156,11 @@ export default function WikiShell({
     return `${BASE_PATH}/api/production/${productionId}/node/${item.id}`;
   }
 
-  /** 树内导航目标：wiki=内容 id 路由段；link=节点 id（页面就地渲染目标）；
-   *  asset=资产预览页；folder=无导航（点击展开）。 */
+  /** 树内导航目标：wiki=内容 id 路由段；link/asset=节点 id（页面就地渲染，
+   *  asset 内嵌预览不出工作区——#420 第二批）；folder=无导航（点击展开）。 */
   function hrefFor(item: NodeEntry): string | null {
     if (item.kind === "wiki" && item.wikiId) return `${routeBase}/${item.wikiId}`;
-    if (item.kind === "link") return `${routeBase}/${item.id}`;
-    if (item.kind === "asset" && item.assetId)
-      return `/production/${productionId}/assets/${item.assetId}/preview`;
+    if (item.kind === "link" || item.kind === "asset") return `${routeBase}/${item.id}`;
     return null;
   }
 
@@ -365,6 +384,25 @@ export default function WikiShell({
     router.refresh();
   }
 
+  /** ＋ 下拉的「创建链接」：位置定死（under），挑**目标**——与 ⋯ 菜单的
+   *  「链接到…」互为反向，落的都是同一条 wiki-alias POST。 */
+  async function createAliasUnder(under: string, targetIds: string[]) {
+    setLinkUnder(null);
+    const target = targetIds[0];
+    if (target === undefined) return;
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki-alias`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(under === "" ? rootPlacement() : { parentId: under }),
+        targetNodeId: target,
+      }),
+    });
+    if (!res.ok) { alert((await res.json()).error ?? "创建链接失败"); return; }
+    if (under !== "") setExpanded(prev => new Set([...prev, under]));
+    router.refresh();
+  }
+
   // ── 移入（#355）────────────────────────────────────────────────────────────
   const [movingInPick, setMovingInPick] = useState(false);
   const [movingIn, setMovingIn] = useState<NodeMoveInCandidate | null>(null);
@@ -474,10 +512,14 @@ export default function WikiShell({
           <div className="flex border-b border-zinc-200 bg-zinc-50/40">
             <button
               type="button"
-              onClick={() => { setCreatingUnder(""); setNewTitle(""); }}
+              onClick={e => {
+                if (plusMenu?.under === "") { setPlusMenu(null); return; }
+                const r = e.currentTarget.getBoundingClientRect();
+                setPlusMenu({ under: "", top: r.bottom + 2, left: r.left });
+              }}
               className="flex-1 px-3 py-2 text-left text-[13px] text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100/80"
             >
-              ＋ 新建文档
+              ＋ 新建
             </button>
             {moveInCandidates.length > 0 && (
               <button
@@ -633,8 +675,13 @@ export default function WikiShell({
                     {canCreate && isContainer(item) && (
                       <button
                         type="button"
-                        title="新建子文档"
-                        onClick={() => { setCreatingUnder(item.id); setNewTitle(""); setMenu(null); }}
+                        title="在此新建…"
+                        onClick={e => {
+                          setMenu(null);
+                          if (plusMenu?.under === item.id) { setPlusMenu(null); return; }
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setPlusMenu({ under: item.id, top: r.bottom + 2, left: Math.max(8, r.right - 128) });
+                        }}
                         className="w-5 h-5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/60 text-sm leading-none"
                       >
                         ＋
@@ -763,6 +810,72 @@ export default function WikiShell({
           single
           onConfirm={ids => createAlias(linkingId, ids)}
           onClose={() => setLinkingId(null)}
+        />
+      )}
+
+      {plusMenu && (
+        <div
+          ref={plusMenuRef}
+          style={{ position: "fixed", top: plusMenu.top, left: plusMenu.left, zIndex: 60 }}
+          className="w-32 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg text-[13px]"
+        >
+          <button type="button"
+            onClick={() => { const u = plusMenu.under; setPlusMenu(null); setCreatingUnder(u); setNewTitle(""); }}
+            className="block w-full px-3 py-1.5 text-left text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900">
+            新建文档
+          </button>
+          <button type="button"
+            onClick={() => { const u = plusMenu.under; setPlusMenu(null); setUploadUnder(u); }}
+            className="block w-full px-3 py-1.5 text-left text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900">
+            上传文件
+          </button>
+          <button type="button"
+            onClick={() => { const u = plusMenu.under; setPlusMenu(null); setLinkUnder(u); }}
+            className="block w-full px-3 py-1.5 text-left text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900">
+            创建链接
+          </button>
+        </div>
+      )}
+
+      {uploadUnder !== null && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setUploadUnder(null)} />
+          <div className="relative z-10 w-full max-w-sm rounded-t-2xl sm:rounded-2xl bg-white shadow-xl p-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-[10px] font-semibold tracking-widest text-zinc-300 uppercase">上传文件</p>
+                <p className="text-sm font-medium text-zinc-700">
+                  {uploadUnder === "" ? "资产库" : (byId.get(uploadUnder)?.displayTitle ?? "")}
+                </p>
+              </div>
+              <button onClick={() => setUploadUnder(null)} className="text-zinc-400 hover:text-zinc-600 text-lg leading-none">✕</button>
+            </div>
+            <AssetUploadPanel
+              productionId={productionId}
+              placement={{ parentNodeId: uploadUnder === "" ? null : uploadUnder }}
+              onUploaded={() => {
+                const u = uploadUnder;
+                setUploadUnder(null);
+                if (u) setExpanded(prev => new Set([...prev, u]));
+                router.refresh();
+              }}
+              onCancel={() => setUploadUnder(null)}
+            />
+          </div>
+        </div>
+      )}
+
+      {linkUnder !== null && (
+        <TreePickerModal
+          kicker="Wiki"
+          title="创建链接指向…"
+          items={items
+            .filter(n => n.kind === "wiki" || n.kind === "asset")
+            .map(n => ({ id: n.id, label: n.displayTitle ?? "（无标题）", parentId: n.parentId }))}
+          preselected={[]}
+          single
+          onConfirm={ids => createAliasUnder(linkUnder, ids)}
+          onClose={() => setLinkUnder(null)}
         />
       )}
 

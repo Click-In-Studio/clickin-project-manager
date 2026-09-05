@@ -10,6 +10,7 @@ import { getNodeMount } from "@/lib/node/mount";
 import { POST as mountsPOST } from "@/app/api/production/[id]/node/[nodeId]/mounts/route";
 import { DELETE as mountDELETE } from "@/app/api/production/[id]/node/[nodeId]/mounts/[mountId]/route";
 import { GET as byMountGET } from "@/app/api/production/[id]/assets/by-mount/route";
+import { POST as assetsPOST } from "@/app/api/production/[id]/assets/route";
 import { makeProduction, cleanupProduction, makeScene } from "./factories";
 
 async function newMember(prodId: string): Promise<string> {
@@ -130,6 +131,37 @@ describe("POST /node/[nodeId]/mounts", () => {
         { mountType: "scene", mountId: "sc_ghost" }),
       { params: Promise.resolve({ id: prodId, nodeId: docNodeId }) });
     expect(gRes.status).toBe(404);
+  });
+});
+
+describe("上传指定树位置（assets POST parentNodeId）", () => {
+  it("指定 folder 落点 → 壳节点落位且 listable；幽灵父 → 403（落位双门）", async () => {
+    await grant(author, prodId, "asset", "*", "*", "create");
+    const folderId = await insertNode({
+      productionId: prodId, kind: "folder", parentId: null, sortKey: null,
+      title: "上传落点夹", listable: true, createdBy: author,
+    });
+    const url = `/api/production/${prodId}/assets`;
+    const ctx = { params: Promise.resolve({ id: prodId }) };
+
+    const ok = await assetsPOST(makeReq("POST", url, author, {
+      storageType: "feishu_link", feishuUrl: "https://feishu.example/x",
+      fileName: "落位.txt", assetType: "reference",
+      parentNodeId: folderId, listable: true,
+    }), ctx);
+    expect(ok.status).toBe(201);
+    const j = await ok.json() as { asset: { id: string } };
+    const { rows: [n] } = await getPool().query<{ parent_id: string; listable: boolean }>(
+      `SELECT parent_id, listable FROM node WHERE asset_id = $1`, [j.asset.id]);
+    expect(n.parent_id).toBe(folderId);
+    expect(n.listable).toBe(true);
+
+    const ghost = await assetsPOST(makeReq("POST", url, author, {
+      storageType: "feishu_link", feishuUrl: "https://feishu.example/y",
+      fileName: "幽灵父.txt", assetType: "reference",
+      parentNodeId: "nd_ghost",
+    }), ctx);
+    expect(ghost.status).toBe(403);
   });
 });
 
