@@ -6,6 +6,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import type { AssetType } from "@/lib/asset/db";
 import { ASSET_TYPE_LABELS } from "@/lib/asset/types";
 import { BASE_PATH } from "@/lib/base-path";
+import TreePickerModal from "@/components/TreePickerModal";
+import type { NodeEntry } from "@/lib/node/db";
 
 // R2 single PUT max is 5 GiB; use multipart for anything above 50 MB
 const MULTIPART_THRESHOLD = 50 * 1024 * 1024;
@@ -116,6 +118,10 @@ interface Props {
   onCancel?: () => void;
   /** 壳节点落点（#420 第二批：树内上传）。缺省＝资产根，行为不变。 */
   placement?: UploadPlacement;
+  /** 资产页模式（#420 第二批）：显示「位置」行让用户挑树落点（缺省资产库根），
+   *  上传一律 listable——工作台上传的东西要在树里看得见。与 placement 互斥，
+   *  placement 是调用方钉死落点的形态（树内加号）。 */
+  choosePlacement?: boolean;
 }
 
 function formatSize(bytes: number): string {
@@ -123,11 +129,30 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-export default function AssetUploadPanel({ productionId, onUploaded, onCancel, placement }: Props) {
-  const placementFields = placement
-    ? { ...(placement.parentNodeId ? { parentNodeId: placement.parentNodeId } : {}),
-        listable: placement.listable ?? true }
+export default function AssetUploadPanel({ productionId, onUploaded, onCancel, placement, choosePlacement }: Props) {
+  const [placeTarget, setPlaceTarget] = useState<{ id: string | null; label: string }>({ id: null, label: "资产库" });
+  const [placePicking, setPlacePicking] = useState(false);
+  const [containers, setContainers] = useState<{ id: string; label: string; parentId?: string | null }[] | null>(null);
+  const effectivePlacement: UploadPlacement | undefined = choosePlacement
+    ? { parentNodeId: placeTarget.id, listable: true }
+    : placement;
+  const placementFields = effectivePlacement
+    ? { ...(effectivePlacement.parentNodeId ? { parentNodeId: effectivePlacement.parentNodeId } : {}),
+        listable: effectivePlacement.listable ?? true }
     : {};
+
+  async function openPlacePicker() {
+    if (!containers) {
+      try {
+        const r = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki`);
+        const j = await r.json() as { nodes?: NodeEntry[] };
+        setContainers((j.nodes ?? [])
+          .filter(n => n.kind === "folder" || n.kind === "wiki")
+          .map(n => ({ id: n.id, label: n.displayTitle ?? "（无标题）", parentId: n.parentId })));
+      } catch { setContainers([]); }
+    }
+    setPlacePicking(true);
+  }
   const [mode, setMode] = useState<UploadMode>("file");
   const [assetType, setAssetType] = useState<AssetType>("reference");
   const [name, setName] = useState("");
@@ -595,6 +620,20 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel, p
         </div>
       )}
 
+      {choosePlacement && (
+        <div>
+          <label className="block text-xs text-zinc-400 mb-1.5">位置</label>
+          <button
+            type="button"
+            onClick={openPlacePicker}
+            className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-left text-zinc-700 hover:border-zinc-400 flex items-center justify-between"
+          >
+            <span className="truncate">{placeTarget.label}</span>
+            <span className="text-xs text-zinc-400 shrink-0 ml-2">更改</span>
+          </button>
+        </div>
+      )}
+
       {/* Display name */}
       <div>
         <label className="block text-xs text-zinc-400 mb-1.5">显示名称（可选，留空则使用文件名）</label>
@@ -621,6 +660,24 @@ export default function AssetUploadPanel({ productionId, onUploaded, onCancel, p
       </div>
 
       {error && <p className="text-xs text-red-500">{error}</p>}
+
+      {placePicking && containers && (
+        <TreePickerModal
+          kicker="Assets"
+          title="上传到…"
+          items={[{ id: "__assets_root__", label: "资产库（默认）" }, ...containers]}
+          preselected={[]}
+          single
+          onConfirm={ids => {
+            setPlacePicking(false);
+            const id = ids[0];
+            if (!id || id === "__assets_root__") { setPlaceTarget({ id: null, label: "资产库" }); return; }
+            const c = containers.find(x => x.id === id);
+            setPlaceTarget({ id, label: c?.label ?? "已选位置" });
+          }}
+          onClose={() => setPlacePicking(false)}
+        />
+      )}
 
       {/* Upload progress bar */}
       {progress !== null && (

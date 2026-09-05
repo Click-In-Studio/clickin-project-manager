@@ -331,12 +331,12 @@ function SceneEditRow({
               />
             </div>
             <div className="mt-3">
+              {/* 只读反链展示（引用边）：手动关联文档已并入上方挂载面板的
+                  「挂载/新建文档」（#420 第二批，入口去重）——建边动作不再双轨 */}
               <RelatedWikiChips
                 productionId={productionId}
                 entityType="scene"
                 entityId={scene.id}
-                canEdit={canEdit}
-                createDefaultTitle={`${scene.number}${scene.name ? ` ${scene.name}` : ""} · 大纲`}
               />
             </div>
           </td>

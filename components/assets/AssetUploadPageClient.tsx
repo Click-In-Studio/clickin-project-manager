@@ -25,6 +25,7 @@ export default function AssetUploadPageClient({ productionId }: Props) {
         <div className="rounded-2xl bg-white shadow-sm p-5">
           <AssetUploadPanel
             productionId={productionId}
+            choosePlacement
             onUploaded={() => router.push(`/production/${productionId}/assets`)}
             onCancel={() => router.push(`/production/${productionId}/assets`)}
           />
