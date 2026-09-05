@@ -1,15 +1,24 @@
 "use client";
 
+// 挂载点附件面板（#420 第二批 PR-B：泛化到 asset+wiki 两 kind）。
+// 读 by-mount（服务端按 kind 各走内容面过滤）；添加走 MountAttachModal 四动作；
+// 移除统一走通用 node 挂载路由（服务端按 kind 分派双门）。
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { Asset } from "@/lib/asset/db";
 import type { NodeMount, MountType } from "@/lib/node/mount";
 import { ASSET_TYPE_LABELS } from "@/lib/asset/types";
-import AssetMountModal from "./AssetMountModal";
+import MountAttachModal from "./MountAttachModal";
 import type { MountContext } from "./AssetSelectPanel";
 
-type MountResult = { mount: NodeMount; asset: Asset };
+type MountEntry = {
+  mount: NodeMount;
+  nodeId: string;
+  kind: string;
+  asset: Asset | null;
+  wiki: { id: string; title: string | null } | null;
+};
 
 interface Props {
   productionId: string;
@@ -29,7 +38,7 @@ export default function MountPointAssets({
   productionId, mountType, mountId, mountAuxId,
   label, canEdit = false, display = "panel", onNavigate, onChange,
 }: Props) {
-  const [results, setResults] = useState<MountResult[]>([]);
+  const [entries, setEntries] = useState<MountEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
 
@@ -40,25 +49,41 @@ export default function MountPointAssets({
     if (mountAuxId != null) qs.set("auxId", mountAuxId);
     fetch(`${BASE_PATH}/api/production/${productionId}/assets/by-mount?${qs}`)
       .then(r => r.json())
-      .then((j: { results?: MountResult[] }) => setResults(j.results ?? []))
-      .catch(() => setResults([]))
+      .then((j: { results?: MountEntry[] }) => setEntries(j.results ?? []))
+      .catch(() => setEntries([]))
       .finally(() => setLoading(false));
   }, [productionId, mountType, mountId, mountAuxId]);
 
   useEffect(() => { load(); }, [load]);
 
-  function assetHref(asset: Asset): string {
-    if (asset.storageType === "feishu_link" && asset.feishuUrl) return asset.feishuUrl;
-    // Link already prepends basePath — don't add BASE_PATH here
-    return `/production/${productionId}/assets/${asset.id}/preview`;
+  function entryHref(e: MountEntry): string {
+    if (e.asset) {
+      if (e.asset.storageType === "feishu_link" && e.asset.feishuUrl) return e.asset.feishuUrl;
+      // Link already prepends basePath — don't add BASE_PATH here
+      return `/production/${productionId}/assets/${e.asset.id}/preview`;
+    }
+    return `/production/${productionId}/wiki/${e.wiki!.id}`;
   }
 
-  async function handleRemove(mount: NodeMount, assetId: string) {
+  function entryTitle(e: MountEntry): string {
+    if (e.asset) return e.asset.name ?? e.asset.fileName;
+    return e.wiki!.title ?? "无标题";
+  }
+
+  function entrySubtitle(e: MountEntry): string {
+    if (e.asset) {
+      return (ASSET_TYPE_LABELS[e.asset.assetType] ?? e.asset.assetType)
+        + (e.asset.storageType === "feishu_link" ? " · 飞书" : "");
+    }
+    return "文档";
+  }
+
+  async function handleRemove(e: MountEntry) {
     await fetch(
-      `${BASE_PATH}/api/production/${productionId}/assets/${assetId}/mounts/${mount.id}`,
+      `${BASE_PATH}/api/production/${productionId}/node/${e.nodeId}/mounts/${e.mount.id}`,
       { method: "DELETE" }
     );
-    setResults(p => p.filter(r => r.mount.id !== mount.id));
+    setEntries(p => p.filter(r => r.mount.id !== e.mount.id));
     onChange?.();
   }
 
@@ -66,30 +91,31 @@ export default function MountPointAssets({
     if (loading) return null;
     return (
       <div className="flex flex-wrap items-center gap-1 mt-1">
-        {results.map(({ mount, asset }) => (
-          <span key={mount.id}
+        {entries.map(e => (
+          <span key={e.mount.id}
             className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-600">
+            {e.wiki && <span className="text-zinc-400">📄</span>}
             <Link
-              href={assetHref(asset)}
+              href={entryHref(e)}
               onNavigate={onNavigate}
-              target={asset.storageType === "feishu_link" ? "_blank" : undefined}
+              target={e.asset?.storageType === "feishu_link" ? "_blank" : undefined}
               className="hover:text-zinc-900 truncate max-w-[120px]"
             >
-              {asset.name ?? asset.fileName}
+              {entryTitle(e)}
             </Link>
             {canEdit && (
-              <button onClick={() => handleRemove(mount, asset.id)} className="text-zinc-300 hover:text-red-400 leading-none">×</button>
+              <button onClick={() => handleRemove(e)} className="text-zinc-300 hover:text-red-400 leading-none">×</button>
             )}
           </span>
         ))}
         {canEdit && (
           <button onClick={() => setShowModal(true)}
             className="inline-flex items-center gap-1 rounded-full border border-zinc-300 bg-white px-2 py-0.5 text-[10px] font-medium text-zinc-600 transition-colors hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300">
-            + Asset
+            + 添加
           </button>
         )}
         {showModal && (
-          <AssetMountModal
+          <MountAttachModal
             productionId={productionId}
             mountCtx={mountCtx}
             onDone={() => { setShowModal(false); load(); onChange?.(); }}
@@ -115,28 +141,25 @@ export default function MountPointAssets({
 
       {loading ? (
         <p className="text-xs text-zinc-400">加载中…</p>
-      ) : results.length === 0 ? (
+      ) : entries.length === 0 ? (
         <p className="text-xs text-zinc-400">暂无附件</p>
       ) : (
         <div className="space-y-1">
-          {results.map(({ mount, asset }) => (
-            <div key={mount.id} className="flex items-center gap-2 rounded-lg bg-zinc-50 px-2.5 py-1.5">
+          {entries.map(e => (
+            <div key={e.mount.id} className="flex items-center gap-2 rounded-lg bg-zinc-50 px-2.5 py-1.5">
               <div className="min-w-0 flex-1">
                 <Link
-                  href={assetHref(asset)}
+                  href={entryHref(e)}
                   onNavigate={onNavigate}
-                  target={asset.storageType === "feishu_link" ? "_blank" : undefined}
+                  target={e.asset?.storageType === "feishu_link" ? "_blank" : undefined}
                   className="block text-xs font-medium text-zinc-700 hover:text-zinc-900 truncate"
                 >
-                  {asset.name ?? asset.fileName}
+                  {e.wiki ? "📄 " : ""}{entryTitle(e)}
                 </Link>
-                <p className="text-[10px] text-zinc-400">
-                  {ASSET_TYPE_LABELS[asset.assetType] ?? asset.assetType}
-                  {asset.storageType === "feishu_link" ? " · 飞书" : ""}
-                </p>
+                <p className="text-[10px] text-zinc-400">{entrySubtitle(e)}</p>
               </div>
               {canEdit && (
-                <button onClick={() => handleRemove(mount, asset.id)}
+                <button onClick={() => handleRemove(e)}
                   className="shrink-0 text-xs text-zinc-400 hover:text-red-500 transition-colors">
                   移除
                 </button>
@@ -147,7 +170,7 @@ export default function MountPointAssets({
       )}
 
       {showModal && (
-        <AssetMountModal
+        <MountAttachModal
           productionId={productionId}
           mountCtx={mountCtx}
           onDone={() => { setShowModal(false); load(); onChange?.(); }}
