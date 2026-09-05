@@ -12,8 +12,18 @@ import type { NodeMount } from "@/lib/node/mount";
 import { ASSET_TYPE_LABELS, type AssetType } from "@/lib/asset/types";
 import ChevronIcon from "@/components/ChevronIcon";
 
-/** 列表项：Asset + 壳节点树面（#420：listable=原「项目全局」共享语义） */
-type AssetListItem = Asset & { nodeId: string | null; listable: boolean };
+/** 列表项：Asset + 壳节点树面（#420：listable=原「项目全局」共享语义）
+ *  + 工作台字段（PR-C：treePath=祖先链标题、sizeBytes=全部文件行合计） */
+type AssetListItem = Asset & {
+  nodeId: string | null; listable: boolean;
+  treePath: string[]; sizeBytes: number | null;
+};
+
+function formatBytes(n: number): string {
+  if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(2)} GB`;
+  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(n / 1024))} KB`;
+}
 
 type View = "all" | "upload-new-version";
 
@@ -27,6 +37,7 @@ interface Props {
 
 export default function AssetPageClient({ productionId, versionId, myUserId, isAdmin, userName }: Props) {
   const [assets, setAssets] = useState<AssetListItem[]>([]);
+  const [stats, setStats] = useState<{ totalBytes: number; unknownFiles: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -61,7 +72,10 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
     setLoading(true);
     fetch(`${BASE_PATH}/api/production/${productionId}/assets`)
       .then(r => r.json())
-      .then((j: { assets?: AssetListItem[] }) => setAssets(j.assets ?? []))
+      .then((j: { assets?: AssetListItem[]; stats?: { totalBytes: number; unknownFiles: number } }) => {
+        setAssets(j.assets ?? []);
+        setStats(j.stats ?? null);
+      })
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
   }, [productionId]);
@@ -179,7 +193,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
       {/* Page header（v3 统一页头） */}
       <PageHeader
         eyebrow="Assets"
-        title="数字资产"
+        title="资产工作台"
         side="script"
         actions={
           <button onClick={() => setShowUploadModal(true)} style={PRIMARY_BTN}>
@@ -188,7 +202,15 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
         }
       />
 
-      {/* 共享资产（#420：原「项目全局」挂载 ≡ 节点可枚举/listable，树面开关） */}
+      {/* 存储占用（#429：现查不物化；含历史版本文件，口径见 #428） */}
+      {stats && stats.totalBytes > 0 && (
+        <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 10px 2px" }}>
+          存储占用 {formatBytes(stats.totalBytes)}（含历史版本
+          {stats.unknownFiles > 0 ? `；${stats.unknownFiles} 个文件大小未知` : ""}）
+        </p>
+      )}
+
+      {/* 对全员列出（#420：原「项目全局」挂载 ≡ 节点可枚举/listable，树面开关） */}
       <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "16px 20px", marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
           <p className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">对全员列出</p>
@@ -295,6 +317,16 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" }}>
                       {a.name && <span style={{ fontSize: 10, color: "var(--muted)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.fileName}</span>}
                       <span style={{ fontSize: 10, color: "var(--muted)" }}>{ASSET_TYPE_LABELS[a.assetType]}</span>
+                      {a.sizeBytes != null && a.sizeBytes > 0 && (
+                        <span style={{ fontSize: 10, color: "var(--muted)" }}>{formatBytes(a.sizeBytes)}</span>
+                      )}
+                      {a.nodeId && (
+                        <Link href={`/production/${productionId}/wiki/${a.nodeId}`}
+                          title="在知识库中查看"
+                          style={{ fontSize: 10, color: "var(--muted)", textDecoration: "none", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          📁 {[...a.treePath, ""].join(" / ")}{a.name ?? a.fileName}
+                        </Link>
+                      )}
                       {a.storageType === "feishu_link" && (
                         <span style={{ borderRadius: 4, padding: "1px 5px", fontSize: 9, background: "#eff6ff", color: "#3b82f6", fontWeight: 600 }}>飞书</span>
                       )}

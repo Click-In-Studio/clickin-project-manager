@@ -3,8 +3,9 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { filterVisibleAssets } from "@/lib/asset/perm";
 import { hasGrant, toActor } from "@/lib/grant-check";
-import { createAsset, listAssets, type AssetType } from "@/lib/asset/db";
+import { createAsset, listAssets, assetTreePaths, assetSizeStats, type AssetType } from "@/lib/asset/db";
 import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
+import { listNodeLibrary } from "@/lib/node/db";
 import { isAssetType } from "@/lib/asset/types";
 import { putR2Object, getR2Object, thumbnailR2Key, completeMultipartUpload, listMultipartParts } from "@/lib/r2";
 import sharp from "sharp";
@@ -20,19 +21,34 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const assets = await listAssets(id);
   // 批D：可见性过滤（能力票∧结构 ∨ publication@view）
   const visible = await filterVisibleAssets(access.permCtx, id, assets);
-  // #420：附带壳节点树面（nodeId + listable=「共享资产」面板数据源，原 production
+  // #420：附带壳节点树面（nodeId + listable=「对全员列出」面板数据源，原 production
   // mount 语义）。一次集合查询，避免 N+1。
   const { rows } = await getPool().query<{ asset_id: string; id: string; listable: boolean }>(
     `SELECT asset_id, id, listable FROM node WHERE production_id = $1 AND asset_id IS NOT NULL`,
     [id],
   );
   const nodeByAsset = new Map(rows.map(r => [r.asset_id, r]));
+
+  // 工作台读面（#420 第二批 PR-C）：树内位置 + 占用统计。逻辑在 lib/asset/db.ts
+  //（assetTreePaths 纯函数 / assetSizeStats 聚合），路由只做拼装。
+  const [library, sizes] = await Promise.all([
+    listNodeLibrary(id),
+    assetSizeStats(id),
+  ]);
+  const treePaths = assetTreePaths(library);
+
   return Response.json({
-    assets: visible.map(a => ({
-      ...a,
-      nodeId: nodeByAsset.get(a.id)?.id ?? null,
-      listable: nodeByAsset.get(a.id)?.listable ?? false,
-    })),
+    assets: visible.map(a => {
+      const node = nodeByAsset.get(a.id);
+      return {
+        ...a,
+        nodeId: node?.id ?? null,
+        listable: node?.listable ?? false,
+        treePath: treePaths.get(a.id) ?? [],
+        sizeBytes: sizes.sizeByAsset.get(a.id) ?? null,
+      };
+    }),
+    stats: { totalBytes: sizes.totalBytes, unknownFiles: sizes.unknownFiles },
   });
 }
 
