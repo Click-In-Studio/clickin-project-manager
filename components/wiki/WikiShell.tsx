@@ -679,16 +679,17 @@ export default function WikiShell({
                       {rowTitleNode}
                     </button>
                   )}
+                  {/* 状态点悬停不让位（原 group-hover:hidden 让 tooltip 永远读不到） */}
                   {item.kind !== "link" && !item.listable && (
                     <span
-                      className="shrink-0 text-[10px] text-amber-500 group-hover:hidden"
+                      className="shrink-0 text-[10px] text-amber-500"
                       title="不可枚举：只有被显式分享的人能在目录里看到它；其子节点随之隐藏"
                     >
                       ⌀
                     </span>
                   )}
                   {item.kind !== "link" && item.isPublic && (
-                    <span className="shrink-0 text-[10px] text-zinc-300 group-hover:hidden" title="已公开给全体成员">◍</span>
+                    <span className="shrink-0 text-[10px] text-zinc-300" title="已公开给全体成员">◍</span>
                   )}
                   {/* 悬停操作区：＋ 新建子文档（容器 kind 才有）/ ⋯ 菜单 */}
                   <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
