@@ -6,6 +6,7 @@ import { hasGrant, toActor } from "@/lib/grant-check";
 import { createAsset, listAssets, assetTreePaths, assetSizeStats, type AssetType } from "@/lib/asset/db";
 import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
 import { listNodeLibrary } from "@/lib/node/db";
+import { resolveDefaultLanding, readLandingContext } from "@/lib/node/landing";
 import { isAssetType } from "@/lib/asset/types";
 import { putR2Object, getR2Object, thumbnailR2Key, completeMultipartUpload, listMultipartParts } from "@/lib/r2";
 import sharp from "sharp";
@@ -89,16 +90,31 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
        *  wiki 先例走 create + 落位双门；共享**已有**资产仍走 node 路由的
        *  publication∧mounts 门，此处不构成旁路（只能共享自己刚建的）。 */
       listable?: boolean;
+      /** 缺省落点上下文（#420 收官）：挂载面板上传带宿主、正文嵌图带 doc-sibling。
+       *  显式 parentNodeId 优先；解析结果门不过回退资产根。 */
+      landing?: unknown;
     };
 
     // 指定落点 → 落位双门（与 wiki POST 同门：无权移入就不许在此新建）
-    const parentNodeId = body.parentNodeId?.trim() || null;
+    let parentNodeId = body.parentNodeId?.trim() || null;
     if (parentNodeId) {
       const actor = toActor(session, access.permCtx);
       if (!await canPlaceNodeUnder(actor, id, parentNodeId))
         return Response.json({ error: "无权在该位置创建" }, { status: 403 });
       if (!await canWriteNodeContainer(actor, id, parentNodeId))
         return Response.json({ error: "无权修改该容器的子目录" }, { status: 403 });
+    } else {
+      // 缺省落点（#420 收官）：解析尽力而为，门不过回退资产根（非权限面）
+      const landing = readLandingContext(body.landing);
+      if (landing) {
+        const actor = toActor(session, access.permCtx);
+        const cand = await resolveDefaultLanding(id, landing);
+        if (cand
+            && await canPlaceNodeUnder(actor, id, cand)
+            && await canWriteNodeContainer(actor, id, cand)) {
+          parentNodeId = cand;
+        }
+      }
     }
     const listable = body.listable === true;
 

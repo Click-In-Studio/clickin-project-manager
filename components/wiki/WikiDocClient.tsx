@@ -225,6 +225,7 @@ export default function WikiDocClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           storageType: "r2", r2Key: presign.r2Key, fileId: presign.fileId,
+          landing: { kind: "doc-sibling", wikiId: wiki.id },
           mimeType: file.type, fileSize: file.size,
           assetType: "reference", fileName,
         }),

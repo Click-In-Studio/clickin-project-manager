@@ -8,6 +8,7 @@ import { createWiki } from "@/lib/wiki/content";
 import { searchWiki } from "@/lib/wiki/links";
 import { listVisibleWikiIds } from "@/lib/wiki/perm";
 import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
+import { resolveDefaultLanding, readLandingContext } from "@/lib/node/landing";
 import { listNodeTreeFor } from "@/lib/node/tree-view";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -65,6 +66,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     /** 显式 parentId 缺席时的落位锚点。锚点可能尚未建（懒建），由服务端在**过完
      *  create 门之后**补建——ensure 是写事务，渲染路径一律不准碰。 */
     parentAnchor?: "dramaturgy";
+    /** 缺省落点上下文（#420 收官）：挂载面板「新建文档」带上宿主，服务端解析
+     *  事件目录链等现成缺省；解析结果照跑落位双门，门不过回退顶层（落点是
+     *  便利不是权限面）。显式 parentId / parentAnchor 优先。 */
+    landing?: unknown;
   };
   if (!body.title?.trim()) return Response.json({ error: "标题不能为空" }, { status: 400 });
   const anchor = readParentAnchor(body.parentAnchor);
@@ -93,6 +98,16 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         error: gate.reason === "place" ? "无权在该父文档下创建" : "无权修改该父文档的子目录",
       }, { status: 403 });
     parentId = await resolveNodeAnchorParent(productionId, "dramaturgy");
+  } else {
+    const landing = readLandingContext(body.landing);
+    if (landing) {
+      const cand = await resolveDefaultLanding(productionId, landing);
+      if (cand
+          && await canPlaceNodeUnder(actor, productionId, cand)
+          && await canWriteNodeContainer(actor, productionId, cand)) {
+        parentId = cand;
+      }
+    }
   }
 
   try {
