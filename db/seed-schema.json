@@ -805,6 +805,12 @@
       "nullable": false
     },
     {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
       "column": "billed_credits",
       "type": "bigint",
       "nullable": false,
@@ -815,12 +821,6 @@
       "type": "text",
       "nullable": false,
       "default": "'quota'::text"
-    },
-    {
-      "column": "created_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
     }
   ],
   "announcement_read": [
@@ -968,11 +968,6 @@
       "nullable": true
     },
     {
-      "column": "requested_expires_at",
-      "type": "timestamp with time zone",
-      "nullable": true
-    },
-    {
       "column": "note",
       "type": "text",
       "nullable": true
@@ -988,33 +983,6 @@
       "type": "jsonb",
       "nullable": false,
       "default": "'[]'::jsonb"
-    },
-    {
-      "column": "current_stage",
-      "type": "text",
-      "nullable": true
-    },
-    {
-      "column": "current_stage_depth",
-      "type": "integer",
-      "nullable": false,
-      "default": "0"
-    },
-    {
-      "column": "current_approver_ids",
-      "type": "ARRAY",
-      "nullable": false,
-      "default": "'{}'::uuid[]"
-    },
-    {
-      "column": "flow_snapshot",
-      "type": "jsonb",
-      "nullable": true
-    },
-    {
-      "column": "flow_template_id",
-      "type": "text",
-      "nullable": true
     },
     {
       "column": "created_at",
@@ -1041,6 +1009,38 @@
       "column": "expires_at",
       "type": "timestamp with time zone",
       "nullable": true
+    },
+    {
+      "column": "current_stage",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "current_stage_depth",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "current_approver_ids",
+      "type": "ARRAY",
+      "nullable": false,
+      "default": "'{}'::uuid[]"
+    },
+    {
+      "column": "requested_expires_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "flow_snapshot",
+      "type": "jsonb",
+      "nullable": true
+    },
+    {
+      "column": "flow_template_id",
+      "type": "text",
+      "nullable": true
     }
   ],
   "asset": [
@@ -1052,11 +1052,6 @@
     {
       "column": "production_id",
       "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "uploader_user_id",
-      "type": "uuid",
       "nullable": false
     },
     {
@@ -1096,6 +1091,11 @@
       "column": "name",
       "type": "text",
       "nullable": true
+    },
+    {
+      "column": "uploader_user_id",
+      "type": "uuid",
+      "nullable": false
     }
   ],
   "asset_file": [
@@ -1319,11 +1319,6 @@
       "nullable": true
     },
     {
-      "column": "user_id",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
       "column": "author_name",
       "type": "text",
       "nullable": false
@@ -1350,6 +1345,11 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
     }
   ],
   "cue": [
@@ -1455,15 +1455,15 @@
       "nullable": true
     },
     {
-      "column": "created_by",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "created_by",
+      "type": "uuid",
+      "nullable": false
     }
   ],
   "cue_mention_text_backup": [
@@ -1619,11 +1619,6 @@
       "nullable": false
     },
     {
-      "column": "user_id",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
       "column": "name",
       "type": "text",
       "nullable": false
@@ -1648,6 +1643,11 @@
       "type": "text",
       "nullable": false,
       "default": "''::text"
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
     },
     {
       "column": "rsvp",
@@ -1869,11 +1869,6 @@
       "nullable": false
     },
     {
-      "column": "user_id",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
       "column": "name",
       "type": "text",
       "nullable": false
@@ -1888,6 +1883,11 @@
       "type": "text",
       "nullable": false,
       "default": "'participant'::text"
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
     }
   ],
   "event_report": [
@@ -1908,11 +1908,6 @@
       "default": "'rehearsal'::text"
     },
     {
-      "column": "node_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,
@@ -1928,6 +1923,11 @@
       "column": "published_at",
       "type": "timestamp with time zone",
       "nullable": true
+    },
+    {
+      "column": "node_id",
+      "type": "text",
+      "nullable": false
     }
   ],
   "event_report_note": [
@@ -1947,17 +1947,6 @@
       "nullable": false
     },
     {
-      "column": "node_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
-      "column": "created_via",
-      "type": "text",
-      "nullable": false,
-      "default": "'dept'::text"
-    },
-    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,
@@ -1968,6 +1957,17 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "created_via",
+      "type": "text",
+      "nullable": false,
+      "default": "'dept'::text"
+    },
+    {
+      "column": "node_id",
+      "type": "text",
+      "nullable": false
     }
   ],
   "event_report_read": [
@@ -1977,15 +1977,15 @@
       "nullable": false
     },
     {
-      "column": "user_id",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
       "column": "read_at",
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
     }
   ],
   "event_rundown_column": [
@@ -2137,13 +2137,13 @@
       "nullable": false
     },
     {
-      "column": "user_id",
-      "type": "uuid",
+      "column": "name",
+      "type": "text",
       "nullable": false
     },
     {
-      "column": "name",
-      "type": "text",
+      "column": "user_id",
+      "type": "uuid",
       "nullable": false
     }
   ],
@@ -2325,14 +2325,37 @@
       "default": "now()"
     }
   ],
-  "node_mount": [
+  "node_entity_dir": [
     {
-      "column": "id",
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "entity_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "entity_id",
       "type": "text",
       "nullable": false
     },
     {
       "column": "node_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    }
+  ],
+  "node_mount": [
+    {
+      "column": "id",
       "type": "text",
       "nullable": false
     },
@@ -2357,15 +2380,20 @@
       "nullable": true
     },
     {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
       "column": "created_by",
       "type": "uuid",
       "nullable": false
     },
     {
-      "column": "created_at",
-      "type": "timestamp with time zone",
-      "nullable": false,
-      "default": "now()"
+      "column": "node_id",
+      "type": "text",
+      "nullable": false
     }
   ],
   "notification_preference": [
@@ -2393,11 +2421,6 @@
   ],
   "notification_subscription": [
     {
-      "column": "user_id",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
       "column": "notification_type",
       "type": "text",
       "nullable": false
@@ -2412,6 +2435,11 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
     }
   ],
   "phase": [
@@ -2493,12 +2521,6 @@
       "default": "false"
     },
     {
-      "column": "grants_credits",
-      "type": "bigint",
-      "nullable": false,
-      "default": "0"
-    },
-    {
       "column": "exempt_note",
       "type": "text",
       "nullable": true
@@ -2530,6 +2552,12 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "grants_credits",
+      "type": "bigint",
+      "nullable": false,
+      "default": "0"
     }
   ],
   "plan_code_redemption": [
@@ -2600,11 +2628,6 @@
       "nullable": true
     },
     {
-      "column": "master_view_id",
-      "type": "text",
-      "nullable": true
-    },
-    {
       "column": "sort_order",
       "type": "integer",
       "nullable": false,
@@ -2646,6 +2669,11 @@
       "type": "boolean",
       "nullable": false,
       "default": "false"
+    },
+    {
+      "column": "master_view_id",
+      "type": "text",
+      "nullable": true
     }
   ],
   "production_announcement": [
@@ -2846,12 +2874,6 @@
       "nullable": true
     },
     {
-      "column": "kind",
-      "type": "text",
-      "nullable": false,
-      "default": "'dept'::text"
-    },
-    {
       "column": "display_order",
       "type": "integer",
       "nullable": false,
@@ -2867,6 +2889,12 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "kind",
+      "type": "text",
+      "nullable": false,
+      "default": "'dept'::text"
     }
   ],
   "production_dept_member": [
@@ -2927,16 +2955,16 @@
       "nullable": false
     },
     {
-      "column": "source",
-      "type": "text",
-      "nullable": false,
-      "default": "'manual'::text"
-    },
-    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "source",
+      "type": "text",
+      "nullable": false,
+      "default": "'manual'::text"
     }
   ],
   "production_event": [
@@ -2990,11 +3018,6 @@
       "default": "''::text"
     },
     {
-      "column": "created_by",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,
@@ -3015,6 +3038,11 @@
       "column": "version_id",
       "type": "text",
       "nullable": true
+    },
+    {
+      "column": "created_by",
+      "type": "uuid",
+      "nullable": false
     },
     {
       "column": "report_doc_node_id",
@@ -3131,23 +3159,7 @@
       "nullable": false
     },
     {
-      "column": "kind",
-      "type": "text",
-      "nullable": false,
-      "default": "'standard'::text"
-    },
-    {
       "column": "email",
-      "type": "text",
-      "nullable": true
-    },
-    {
-      "column": "target_user_id",
-      "type": "uuid",
-      "nullable": true
-    },
-    {
-      "column": "feishu_open_id",
       "type": "text",
       "nullable": true
     },
@@ -3194,6 +3206,22 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "kind",
+      "type": "text",
+      "nullable": false,
+      "default": "'standard'::text"
+    },
+    {
+      "column": "target_user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "feishu_open_id",
+      "type": "text",
+      "nullable": true
     }
   ],
   "production_invite_claim": [
@@ -3357,11 +3385,6 @@
       "nullable": false
     },
     {
-      "column": "user_id",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
       "column": "roles",
       "type": "ARRAY",
       "nullable": false,
@@ -3377,6 +3400,11 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": false
     },
     {
       "column": "supervisor_id",
@@ -3489,11 +3517,6 @@
       "nullable": false
     },
     {
-      "column": "user_id",
-      "type": "uuid",
-      "nullable": false
-    },
-    {
       "column": "permission",
       "type": "text",
       "nullable": false
@@ -3501,6 +3524,11 @@
     {
       "column": "granted",
       "type": "boolean",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
       "nullable": false
     }
   ],
@@ -3630,18 +3658,6 @@
       "default": "'报告'::text"
     },
     {
-      "column": "dramaturgy_tree_enabled",
-      "type": "boolean",
-      "nullable": false,
-      "default": "true"
-    },
-    {
-      "column": "dramaturgy_root_title",
-      "type": "text",
-      "nullable": false,
-      "default": "'戏剧构作'::text"
-    },
-    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,
@@ -3652,6 +3668,18 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "dramaturgy_tree_enabled",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true"
+    },
+    {
+      "column": "dramaturgy_root_title",
+      "type": "text",
+      "nullable": false,
+      "default": "'戏剧构作'::text"
     },
     {
       "column": "reports_root_node_id",
@@ -4180,13 +4208,13 @@
       "nullable": false
     },
     {
-      "column": "user_id",
-      "type": "uuid",
+      "column": "name",
+      "type": "text",
       "nullable": false
     },
     {
-      "column": "name",
-      "type": "text",
+      "column": "user_id",
+      "type": "uuid",
       "nullable": false
     }
   ],
@@ -4213,11 +4241,6 @@
     },
     {
       "column": "rehearsal_mark",
-      "type": "text",
-      "nullable": true
-    },
-    {
-      "column": "owner_marker_id",
       "type": "text",
       "nullable": true
     },
@@ -4260,6 +4283,11 @@
       "column": "block_id",
       "type": "text",
       "nullable": false
+    },
+    {
+      "column": "owner_marker_id",
+      "type": "text",
+      "nullable": true
     }
   ],
   "script_character": [
@@ -4462,11 +4490,6 @@
       "nullable": false
     },
     {
-      "column": "production_id",
-      "type": "text",
-      "nullable": false
-    },
-    {
       "column": "event_id",
       "type": "text",
       "nullable": true
@@ -4493,25 +4516,10 @@
       "nullable": true
     },
     {
-      "column": "group_id",
-      "type": "uuid",
-      "nullable": true
-    },
-    {
       "column": "status",
       "type": "text",
       "nullable": false,
       "default": "'pending'::text"
-    },
-    {
-      "column": "start_time",
-      "type": "timestamp with time zone",
-      "nullable": true
-    },
-    {
-      "column": "end_time",
-      "type": "timestamp with time zone",
-      "nullable": true
     },
     {
       "column": "created_at",
@@ -4531,8 +4539,28 @@
       "default": "'explicit'::text"
     },
     {
+      "column": "production_id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "start_time",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "end_time",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
       "column": "orphaned_at",
       "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "group_id",
+      "type": "uuid",
       "nullable": true
     }
   ],
@@ -4543,13 +4571,13 @@
       "nullable": false
     },
     {
-      "column": "user_id",
-      "type": "uuid",
+      "column": "name",
+      "type": "text",
       "nullable": false
     },
     {
-      "column": "name",
-      "type": "text",
+      "column": "user_id",
+      "type": "uuid",
       "nullable": false
     }
   ],
@@ -4648,12 +4676,6 @@
       "nullable": true
     },
     {
-      "column": "category",
-      "type": "text",
-      "nullable": false,
-      "default": "'info'::text"
-    },
-    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,
@@ -4690,6 +4712,12 @@
       "column": "expired_at",
       "type": "timestamp with time zone",
       "nullable": true
+    },
+    {
+      "column": "category",
+      "type": "text",
+      "nullable": false,
+      "default": "'info'::text"
     },
     {
       "column": "approval_request_id",
@@ -4754,16 +4782,16 @@
       "default": "false"
     },
     {
-      "column": "is_primary",
-      "type": "boolean",
-      "nullable": false,
-      "default": "false"
-    },
-    {
       "column": "created_at",
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "is_primary",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false"
     }
   ],
   "user_profile": [
@@ -4930,11 +4958,6 @@
       "nullable": false
     },
     {
-      "column": "display_title",
-      "type": "text",
-      "nullable": true
-    },
-    {
       "column": "created_by",
       "type": "uuid",
       "nullable": true
@@ -4944,6 +4967,11 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "display_title",
+      "type": "text",
+      "nullable": true
     }
   ],
   "wiki_body_backup_dialect_v2": [
@@ -5100,17 +5128,6 @@
       "nullable": false
     },
     {
-      "column": "action",
-      "type": "text",
-      "nullable": false,
-      "default": "'create'::text"
-    },
-    {
-      "column": "target_wiki_id",
-      "type": "uuid",
-      "nullable": true
-    },
-    {
       "column": "title",
       "type": "text",
       "nullable": true
@@ -5120,11 +5137,6 @@
       "type": "text",
       "nullable": false,
       "default": "''::text"
-    },
-    {
-      "column": "tags",
-      "type": "ARRAY",
-      "nullable": true
     },
     {
       "column": "summary",
@@ -5162,6 +5174,22 @@
     {
       "column": "resolved_at",
       "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "action",
+      "type": "text",
+      "nullable": false,
+      "default": "'create'::text"
+    },
+    {
+      "column": "target_wiki_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "tags",
+      "type": "ARRAY",
       "nullable": true
     },
     {

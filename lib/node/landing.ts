@@ -1,8 +1,10 @@
+import type { PoolClient } from "pg";
 import { getPool } from "../pg";
+import { keyBetween } from "../lex-order";
 import { ensureReportTreeAnchors } from "./anchors";
-import { getNodeByWikiId } from "./db";
+import { getNodeByWikiId, newNodeId } from "./db";
 import { canEnterEvent } from "../event-permissions";
-import type { GrantActor } from "../grant-check";
+import { hasGrant, hasAnyGrant, type GrantActor } from "../grant-check";
 
 // ─── 缺省落点（#420 第二批收官，2026-09-05 拍板）─────────────────────────────
 //
@@ -19,6 +21,80 @@ import type { GrantActor } from "../grant-check";
 //     目标由客户端传入（任意 event id），不是固定锚点——所以 ensure 前先过
 //     canEnterEvent（「与这个 event 有无干系」），无干系直接 null，不留副作用。
 //     event_report / doc-sibling 分支是纯读，无此问题。
+
+// ─── 实体目录（node_entity_dir 指针表）─────────────────────────────────────────
+//
+// 域目录拍板（2026-09-05）：block → 单个「剧本」目录（不做 per-block，过度设计）；
+// cue → 「Cue/<cue 表名>」（per 表，不做 per-cue）；scene → 「场景/<场名>」
+// per-scene（拍板：场基本不删；hierarchy 收进域根，几十场平铺会淹树顶）。
+// folder title 是实体名副本，
+// 解析时**惰性跟随**（每次 get-or-create 顺手对齐，改名写点零改动）。
+// production_node_config 行锁做全程互斥（ensureAssetsRootAnchor 同款）。
+
+async function ensureEntityDir(
+  client: PoolClient, productionId: string,
+  entityType: string, entityId: string,
+  title: string, parentId: string | null,
+): Promise<string> {
+  const ptr = await client.query<{ node_id: string }>(
+    `SELECT node_id FROM node_entity_dir
+     WHERE production_id = $1 AND entity_type = $2 AND entity_id = $3`,
+    [productionId, entityType, entityId],
+  );
+  if (ptr.rows[0]) {
+    await client.query(
+      `UPDATE node SET title = $2, updated_at = now()
+       WHERE id = $1 AND title IS DISTINCT FROM $2`,
+      [ptr.rows[0].node_id, title],
+    );
+    return ptr.rows[0].node_id;
+  }
+  const last = await client.query<{ sort_key: string | null }>(
+    parentId
+      ? `SELECT sort_key FROM node WHERE parent_id = $1 AND sort_key IS NOT NULL ORDER BY sort_key DESC LIMIT 1`
+      : `SELECT sort_key FROM node WHERE production_id = $1 AND parent_id IS NULL AND sort_key IS NOT NULL ORDER BY sort_key DESC LIMIT 1`,
+    [parentId ?? productionId],
+  );
+  const id = newNodeId();
+  await client.query(
+    `INSERT INTO node (id, production_id, kind, parent_id, sort_key, is_public, listable, title)
+     VALUES ($1, $2, 'folder', $3, $4, true, true, $5)`,
+    [id, productionId, parentId, keyBetween(last.rows[0]?.sort_key ?? null, null), title],
+  );
+  await client.query(
+    `INSERT INTO node_entity_dir (production_id, entity_type, entity_id, node_id)
+     VALUES ($1, $2, $3, $4)`,
+    [productionId, entityType, entityId, id],
+  );
+  return id;
+}
+
+/** 域目录懒建事务（config 行锁互斥）。dirs 依序建（后项可用前项作父）。 */
+async function withEntityDirTxn<T>(
+  productionId: string,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO production_node_config (production_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+      [productionId],
+    );
+    await client.query(
+      `SELECT 1 FROM production_node_config WHERE production_id = $1 FOR UPDATE`,
+      [productionId],
+    );
+    const out = await fn(client);
+    await client.query("COMMIT");
+    return out;
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
 
 export type LandingContext =
   | { kind: "mount"; mountType: string; mountId: string }
@@ -80,9 +156,58 @@ export async function resolveDefaultLanding(
       );
       return rows[0]?.event_id ? ensureEventDirFor(rows[0].event_id) : null;
     }
+    case "block": {
+      // 拍板：单个「剧本」目录收全部剧本上下文内容，不做 per-block（过度设计）。
+      // 干系＝剧本读者（与挂载让渡的 script 通道同锚）
+      if (!actor.isAdmin && !actor.isOwner
+          && !await hasGrant(actor.userId, productionId, "script", "*", "blocks", "view")) return null;
+      const { rows } = await pool.query(
+        `SELECT 1 FROM script WHERE block_id = $1 AND production_id = $2 LIMIT 1`,
+        [ctx.mountId, productionId],
+      );
+      if (!rows[0]) return null;
+      return withEntityDirTxn(productionId, c =>
+        ensureEntityDir(c, productionId, "script", "*", "剧本", null));
+    }
+    case "cue": {
+      // 拍板：「Cue/<cue 表名>」per 表目录，不做 per-cue。mount_id 是稳定 cue_id
+      const { rows } = await pool.query<{ cue_list_id: string; name: string }>(
+        `SELECT c.cue_list_id, cl.name FROM cue c
+         JOIN cue_list cl ON cl.id = c.cue_list_id
+         WHERE c.cue_id = $1 AND cl.production_id = $2 LIMIT 1`,
+        [ctx.mountId, productionId],
+      );
+      if (!rows[0]) return null;
+      if (!actor.isAdmin && !actor.isOwner
+          && !await hasGrant(actor.userId, productionId, "cue_list", rows[0].cue_list_id, "cues", "view")) return null;
+      const { cue_list_id, name } = rows[0];
+      return withEntityDirTxn(productionId, async c => {
+        const root = await ensureEntityDir(c, productionId, "cue_root", "*", "Cue", null);
+        return ensureEntityDir(c, productionId, "cue_list", cue_list_id, name, root);
+      });
+    }
+    case "scene": {
+      // 拍板：「场景/<场名>」per-scene。场名取 head 版（scene 表裸 id，名字在
+      // scene_version；场次号是 marker 运行时派生不落库，标题只用名字）。
+      // 干系＝scene meta@view（与让渡通道同锚）
+      if (!actor.isAdmin && !actor.isOwner
+          && !await hasAnyGrant(actor.userId, productionId, "scene", ["meta"], "view")) return null;
+      const { rows } = await pool.query<{ name: string }>(
+        `SELECT sv.name FROM scene s
+         JOIN production p ON p.id = s.production_id
+         JOIN scene_version sv ON sv.scene_id = s.id AND sv.version_id = p.active_version_id
+         WHERE s.id = $1 AND s.production_id = $2`,
+        [ctx.mountId, productionId],
+      );
+      if (!rows[0]) return null;
+      const title = rows[0].name.trim() || "（未命名场景）";
+      return withEntityDirTxn(productionId, async c => {
+        const root = await ensureEntityDir(c, productionId, "scene_root", "*", "场景", null);
+        return ensureEntityDir(c, productionId, "scene", ctx.mountId, title, root);
+      });
+    }
     default:
-      // scene / block / cue / comment：暂无缺省（scene 等的实体文件夹布局待拍板；
-      // comment 拍板落资产根）
+      // comment：拍板落资产根，无缺省
       return null;
   }
 }
