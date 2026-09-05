@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-export const metadata: Metadata = { title: "文档" };
+export const metadata: Metadata = { title: "知识库" };
 
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
@@ -60,7 +60,7 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
     const canView = await canViewAsset(access.permCtx, productionId, asset, "meta");
     return (
       <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-        <PageHeader eyebrow="Wiki" title="文档" side="stage" />
+        <PageHeader eyebrow="Wiki" title="知识库" side="stage" />
         <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} selectedId={wikiId} myUserId={session.userId} canManageAssets={access.permCtx.isAdmin || access.permCtx.isOwner}>
           {canView ? (
             <AssetPreviewClient
@@ -109,7 +109,7 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
     const applyResource = `node:wiki/${docId}@view`;
     return (
       <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-        <PageHeader eyebrow="Wiki" title="文档" side="stage" />
+        <PageHeader eyebrow="Wiki" title="知识库" side="stage" />
         <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} selectedId={wikiId} myUserId={session.userId} canManageAssets={access.permCtx.isAdmin || access.permCtx.isOwner}>
           <div className="rounded-xl border border-zinc-200 bg-white px-8 flex flex-col items-center justify-center text-center">
             <p className="text-lg font-bold text-zinc-800 mb-1">[[{wiki.title ?? "（无标题）"}]]</p>
@@ -139,7 +139,7 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
   return (
     <>
       <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-        <PageHeader eyebrow="Wiki" title="文档" side="stage" />
+        <PageHeader eyebrow="Wiki" title="知识库" side="stage" />
         <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} selectedId={wikiId} myUserId={session.userId} canManageAssets={access.permCtx.isAdmin || access.permCtx.isOwner}>
           <WikiDocClient
             productionId={productionId}

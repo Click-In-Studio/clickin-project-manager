@@ -191,7 +191,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
       {/* 共享资产（#420：原「项目全局」挂载 ≡ 节点可枚举/listable，树面开关） */}
       <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "16px 20px", marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-          <p className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">共享资产</p>
+          <p className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">知识库可见</p>
           {isAdmin && (
             <button onClick={() => setSharePickOpen(v => !v)}
               className="inline-flex min-h-8 items-center rounded-lg border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-600 shadow-sm transition-colors hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-900">
@@ -200,7 +200,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
           )}
         </div>
         {assets.filter(a => a.listable).length === 0 ? (
-          <p className="text-xs text-zinc-400">暂无共享资产（共享后全体成员可在文档树与此处看到）</p>
+          <p className="text-xs text-zinc-400">暂无知识库可见的资产（添加后全体成员可在知识库树与此处看到）</p>
         ) : (
           <div className="flex flex-wrap items-center gap-1">
             {assets.filter(a => a.listable).map(a => (
