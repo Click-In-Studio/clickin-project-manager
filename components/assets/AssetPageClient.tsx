@@ -387,7 +387,8 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
             </div>
             <AssetUploadPanel
               productionId={productionId}
-              onUploaded={(result: UploadResult) => { setShowUploadModal(false); setAssets(prev => [...prev, { ...(result as unknown as Asset), nodeId: null, listable: false }]); load(); }}
+              choosePlacement
+              onUploaded={(result: UploadResult) => { setShowUploadModal(false); setAssets(prev => [...prev, { ...(result as unknown as Asset), nodeId: null, listable: true }]); load(); }}
               onCancel={() => setShowUploadModal(false)}
             />
           </div>
