@@ -10,6 +10,7 @@ describe("isSystemJunkPath", () => {
     expect(isSystemJunkPath("Proj/.DS_Store")).toBe(true);
     expect(isSystemJunkPath("Proj/._主题曲.wav")).toBe(true);
     expect(isSystemJunkPath("Thumbs.db")).toBe(true);
+    expect(isSystemJunkPath("供养 program/Icon\r")).toBe(true); // Mac 图标幽灵文件（线上实测）
   });
 
   it("正常文件不误伤（含点开头的非垃圾与 _ 开头目录）", () => {

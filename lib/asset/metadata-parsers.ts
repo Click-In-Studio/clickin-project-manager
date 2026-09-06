@@ -357,12 +357,21 @@ function dosDateTime(mdate: number, mtime: number): string | null {
 }
 
 let gbkDecoder: TextDecoder | null | undefined;
+let utf8Strict: TextDecoder | null | undefined;
 
-/** zip 文件名解码：UTF-8 flag（bit 11）可信；没置位官方是 cp437，但国内
- *  Windows 压的 zip 实际是 GBK ⇒ 非 ASCII 时按 GBK 猜并标 encodingGuessed。 */
+/** zip 文件名解码。UTF-8 flag（bit 11）可信；没置位时的现实是两拨人：
+ *  **macOS 归档工具写 UTF-8 但不置 flag**（线上「供养→渚涘吇」事故根因），
+ *  国内 Windows 写 GBK。判序：严格 UTF-8 校验先行（GBK 双字节几乎不可能凑成
+ *  合法 UTF-8 多字节序列，两边不互伤），不合法再按 GBK 猜；均标 encodingGuessed。 */
 function decodeZipName(raw: Buffer, utf8Flag: boolean): { path: string; guessed: boolean } {
   if (utf8Flag) return { path: raw.toString("utf8"), guessed: false };
   if (raw.every((b) => b < 0x80)) return { path: raw.toString("latin1"), guessed: false };
+  if (utf8Strict === undefined) {
+    try { utf8Strict = new TextDecoder("utf-8", { fatal: true }); } catch { utf8Strict = null; }
+  }
+  if (utf8Strict) {
+    try { return { path: utf8Strict.decode(raw), guessed: true }; } catch { /* 非法 UTF-8 → GBK */ }
+  }
   if (gbkDecoder === undefined) {
     try { gbkDecoder = new TextDecoder("gbk"); } catch { gbkDecoder = null; }
   }
@@ -617,7 +626,10 @@ const EOCD_SIG = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
  */
 export const zipParser: MetadataParser = {
   key: "application/zip",
-  version: 4, // v2：+CD 清单；v3：+包内工程递归；v4：projects 携带工程元数据本体
+  version: 5, // v2：+CD 清单；v3：+包内工程递归；v4：projects 携带工程元数据本体；
+              // v5：hotfix——无 flag 文件名严格 UTF-8 先行（Mac zip 乱码事故），
+              // bump 让全部存量 zip 信封/清单懒重算
+
   budget: { maxBytes: 48 * 1024 * 1024, maxReads: 24 },
   async parse(src) {
     // EOCD 只能从尾部定位；存量 file_size NULL 行定位不了 ⇒ 确定性 failed

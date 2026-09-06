@@ -361,10 +361,18 @@ describe("zipParser v2：central directory 清单", () => {
   });
 
   it("无 UTF-8 flag 的非 ASCII 名按 GBK 猜并标 encodingGuessed（国内 Windows zip 现实）", async () => {
-    const gbkName = Buffer.concat([Buffer.from([0xd6, 0xd0]), Buffer.from(".txt", "latin1")]); // GBK「中」
+    const gbkName = Buffer.concat([Buffer.from([0xd6, 0xd0]), Buffer.from(".txt", "latin1")]); // GBK「中」（非法 UTF-8）
     const env = await extractEnvelope(bufferByteSource(zipFile([cdEntry({ name: gbkName })])), "win.zip");
     const entries = env.data?.entries as Record<string, unknown>[];
     expect(entries[0]).toMatchObject({ path: "中.txt", encodingGuessed: true });
+  });
+
+  it("无 flag 但字节是合法 UTF-8 → 按 UTF-8 解（Mac 归档工具现实；线上「供养→渚涘吇」事故回归）", async () => {
+    const macName = Buffer.from("供养 program/audio/开场.wav", "utf8"); // Finder 打包不置 bit 11
+    const env = await extractEnvelope(bufferByteSource(zipFile([cdEntry({ name: macName })])), "mac.zip");
+    const entries = env.data?.entries as Record<string, unknown>[];
+    expect(entries[0]).toMatchObject({ path: "供养 program/audio/开场.wav", encodingGuessed: true });
+    expect(String(entries[0].path)).not.toContain("渚"); // 不再 GBK 乱码
   });
 
   it("超 ARCHIVE_ENTRY_CAP 截断并标 truncated，entryCount 保留声明总数", async () => {
