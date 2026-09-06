@@ -130,6 +130,17 @@ describe("wavParser", () => {
     expect(env.status).toBe("ok");
     expect(env.data?.durationSeconds).toBe(10000);
   });
+
+  it("破损 RF64（哨兵尺寸但无 ds64）→ 时长诚实置 null，不把 0xffffffff 当字节数", async () => {
+    const wav = wavFile("RF64", [
+      riffChunk("fmt ", wavFmt(2, 48000, 24)),
+      riffChunk("data", Buffer.alloc(0), 0xffffffff), // 无 ds64 chunk
+    ]);
+    const env = await extractEnvelope(bufferByteSource(wav), "corrupt-rf64.wav");
+    expect(env.status).toBe("ok");
+    expect(env.data?.durationSeconds).toBeNull();
+    expect(env.data).toMatchObject({ sampleRate: 48000, channels: 2 });
+  });
 });
 
 // ─── FLAC ────────────────────────────────────────────────────────────────────

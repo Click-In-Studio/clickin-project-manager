@@ -68,11 +68,13 @@ export const wavParser: MetadataParser = {
           bitDepth = c.readUInt16LE(14);
         }
       } else if (id === "data") {
-        dataSize = size;
+        // 哨兵未被 ds64 解开（破损/截断的 RF64）＝尺寸未知，诚实置 null，
+        // 不许把 0xffffffff 当真字节数算出假时长
+        dataSize = size < 0xffffffff ? size : null;
       } else if (id === "bext") {
         isBwf = true;
       } else if (id === "axml") {
-        admXmlBytes = size;
+        admXmlBytes = size < 0xffffffff ? size : 0;
       }
       if (size >= 0xffffffff) break; // 尺寸仍未知（无 ds64 的破损 RF64），不盲走
       off += 8 + size + (size % 2); // RIFF chunk 按偶数对齐
