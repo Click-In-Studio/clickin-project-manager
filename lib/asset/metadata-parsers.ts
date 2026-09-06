@@ -3,6 +3,7 @@ import { ByteBudgetExceededError, bufferByteSource, type ByteSource } from "./by
 import type { MetadataParser } from "./metadata-broker";
 import { parseBplist, mget, BplistUID, type BplistValue } from "./bplist";
 import { matchRefs, dirOf } from "./path-match";
+import { isSystemJunkPath } from "./archive-view";
 
 /**
  * PR1 分析器集合（#85 路线图）：媒体标量 + 压缩标量。全部只产出「文件自己的
@@ -776,6 +777,9 @@ async function analyzeZipProjects(
     if (out.length >= ZIP_PROJECT_CAP) break;
     if (e.isDirectory === true || e.encrypted === true) continue;
     const path = String(e.path);
+    // __MACOSX/._x.qlab5 这类 AppleDouble 垃圾同样带工程扩展名，会被当工程分析
+    // 然后必然「解析失败」占坑（线上实测）；垃圾路径不进工程扫描
+    if (isSystemJunkPath(path)) continue;
     const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
     const parser = PROJECT_PARSER_BY_EXT[ext];
     if (!parser) continue;
