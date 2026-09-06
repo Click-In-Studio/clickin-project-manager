@@ -1,4 +1,7 @@
 import { getPool } from "../pg";
+import { canPublishAsset } from "../asset/perm";
+import { uid } from "../asset/db";
+import type { GrantActor } from "../grant-check";
 
 // ─── mention 边提取（两种序列化形态：纯 token 与 markdown 私有 href）───────────
 
@@ -49,6 +52,22 @@ export function extractMentionEdges(body: string): MentionEdge[] {
   return out;
 }
 
+// 嵌入形态（引用类加 `!` 前缀，语法大纲 §3）：![alt](/__cm__/asset/<id>)。
+// 与 CM_HREF_RE 的差别只在 `!\[…\]` 前缀——嵌入除了落引用边，还要派生 embed
+// 挂载边（「文档可见 ⇒ 正文里的图可见」的让渡通道），所以要单独认出来。
+const EMBED_ASSET_RE = /!\[[^\]\n]*\]\(\/__cm__\/asset\/([^)?#&\s]+)/g;
+// v1 冒号形态只读兼容（wiki_revision 历史正文不迁移，回滚场景兜底）
+const EMBED_ASSET_LEGACY_RE = /!\[[^\]\n]*\]\(\/__cm__asset:([^):?&\s]+)/g;
+
+/** 正文 → 嵌入的 asset id 集合（代码上下文剥除，与 extractMentionEdges 同规）。 */
+export function extractEmbedAssetIds(body: string): string[] {
+  const stripped = body.replace(CODE_SPAN_RE, "");
+  const seen = new Set<string>();
+  for (const m of stripped.matchAll(EMBED_ASSET_RE)) seen.add(m[1]);
+  for (const m of stripped.matchAll(EMBED_ASSET_LEGACY_RE)) seen.add(m[1]);
+  return [...seen];
+}
+
 /** 兼容旧签名：正文中的 wiki 目标 id 列表（MCP 侧幻影目标替换仍在用）。 */
 export function extractWikiLinkTargets(body: string): string[] {
   return extractMentionEdges(body)
@@ -60,12 +79,50 @@ export function extractWikiLinkTargets(body: string): string[] {
  *  不属于正文，重建不得触碰。派生边不做存在性校验直接落行：幻影/跨 production
  *  的边永远不会被渲染（反向查询按 production_id 过滤且只从活宿主页发起，
  *  wiki 侧读取处 join wiki 表过滤），正文里的死引用由 mention-resolve
- *  呈现"#[已删除]"。 */
-export async function syncWikiLinks(sourceId: string, productionId: string, body: string): Promise<void> {
+ *  呈现"#[已删除]"。
+ *
+ *  embed 挂载边（「文档可见 ⇒ 正文里的图可见」的让渡通道）同批派生：正文是
+ *  唯一真相，嵌入了就有边、删掉了就回收——原先由编辑器插图时"尽力而为"补打
+ *  mounts API，插入路径一多（粘贴/拖拽/AI 写入）就是乘法增长的漏挂面。
+ *  新增边过 asset 侧 publication@create 门（与 mounts API 双门同源）：把别人
+ *  asset 的嵌入 URI 抄进正文不构成让渡，图对无票观看者保持不可见；host 侧门
+ *  （编辑本文档）由写路径本身已过。回收不设门——嵌入即让渡、移除即收回。 */
+export async function syncWikiLinks(
+  sourceId: string, productionId: string, body: string, authorUserId: string,
+): Promise<void> {
   const edges = extractMentionEdges(body)
     .filter(e => !(e.entityType === "wiki" && e.entityId === sourceId));
+
+  // ── embed 挂载边 reconcile 的读侧（门检查有网络往返，放事务外）─────────────
+  const embedIds = new Set(extractEmbedAssetIds(body));
+  const pool = getPool();
+  const current = (await pool.query<{ id: string; asset_id: string }>(
+    `SELECT nm.id, n.asset_id FROM node_mount nm
+     JOIN node n ON n.id = nm.node_id
+     WHERE nm.production_id = $1 AND nm.mount_type = 'embed' AND nm.mount_id = $2
+       AND n.asset_id IS NOT NULL`,
+    [productionId, sourceId],
+  )).rows;
+  const currentAssets = new Set(current.map(r => r.asset_id));
+  const staleMountIds = current.filter(r => !embedIds.has(r.asset_id)).map(r => r.id);
+  const candidateIds = [...embedIds].filter(a => !currentAssets.has(a));
+
+  let grantedAdds: string[] = [];
+  if (candidateIds.length > 0) {
+    // owner 旁路要真 owner 位（isAdmin 是死字段恒 false，见 PR #281 事故）
+    const owner = await pool.query<{ owner_id: string | null }>(
+      `SELECT owner_id FROM production WHERE id = $1`, [productionId]);
+    const actor: GrantActor = {
+      userId: authorUserId, isAdmin: false,
+      isOwner: owner.rows[0]?.owner_id === authorUserId,
+    };
+    const results = await Promise.all(candidateIds.map(a =>
+      canPublishAsset(actor, productionId, a, "create")));
+    grantedAdds = candidateIds.filter((_, i) => results[i]);
+  }
+
   // 删+插同事务：中途崩溃不留"边被清但没重建"的空窗（review #303-r2-1）
-  const client = await getPool().connect();
+  const client = await pool.connect();
   try {
     await client.query("BEGIN");
     await client.query(
@@ -78,6 +135,22 @@ export async function syncWikiLinks(sourceId: string, productionId: string, body
          SELECT $1::uuid, $2, t, i, 'wiki_body' FROM unnest($3::text[], $4::text[]) AS u(t, i)
          ON CONFLICT DO NOTHING`,
         [sourceId, productionId, edges.map(e => e.entityType), edges.map(e => e.entityId)],
+      );
+    }
+    if (staleMountIds.length > 0) {
+      await client.query(`DELETE FROM node_mount WHERE id = ANY($1::text[])`, [staleMountIds]);
+    }
+    for (const assetId of grantedAdds) {
+      // NOT EXISTS 兜并发保存：node_mount 无唯一约束，两笔并发各算出同一个
+      // toAdd 时只落一行。壳节点缺失（1:1 不变量破损）则静默不落——与
+      // canViewAsset 的无壳分支同口径。
+      await client.query(
+        `INSERT INTO node_mount (id, node_id, production_id, mount_type, mount_id, created_by)
+         SELECT $1, n.id, $2, 'embed', $3, $4::uuid FROM node n
+         WHERE n.asset_id = $5 AND n.production_id = $2
+           AND NOT EXISTS (SELECT 1 FROM node_mount x
+                           WHERE x.node_id = n.id AND x.mount_type = 'embed' AND x.mount_id = $3)`,
+        [uid("am"), productionId, sourceId, authorUserId, assetId],
       );
     }
     await client.query("COMMIT");

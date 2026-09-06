@@ -43,6 +43,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   if (!body.mountType || !body.mountId)
     return Response.json({ error: "缺少 mountType 或 mountId" }, { status: 400 });
+  // embed 边由保存路径从正文派生（syncWikiLinks），是派生数据不受理直写——
+  // 手工写入的行下次正文保存就会被 reconcile 掉，徒留困惑（node 路由同禁）
+  if (body.mountType === "embed")
+    return Response.json({ error: "嵌入边请走文档正文管道" }, { status: 400 });
 
   // 批D 双门：挂载 = asset publication@create（主人侧让渡）∧ 宿主侧 attach
   if (!await canPublishAsset(access.permCtx, id, assetId, "create")

@@ -10,7 +10,7 @@ import { TableKit } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import Suggestion from "@tiptap/suggestion";
 import { PluginKey, Plugin, NodeSelection } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { match as pinyinMatch } from "pinyin-pro";
@@ -24,8 +24,10 @@ import {
 } from "@/lib/mention-types";
 import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
 import { isFeishuHtml, transformFeishuHtml } from "@/lib/feishu-paste";
+import { stripExternalPastedImages } from "@/lib/external-img-paste";
+import { isEmbeddableUpload, embedMediaKind } from "@/lib/asset/embed-media";
 import { Callout } from "@/lib/tiptap-callout";
-import { WikiImage } from "@/lib/wiki/tiptap-image";
+import { WikiImage, type WikiEmbedMeta } from "@/lib/wiki/tiptap-image";
 import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/tiptap-upload-placeholder";
 import { Column, ColumnGroup } from "@/lib/tiptap-columns";
 import { ColumnDrop } from "@/lib/tiptap-column-drop";
@@ -371,6 +373,53 @@ function failPlaceholder(view: any, id: object) {
   }, 4000);
 }
 
+/** 粘贴/文件拖入共用的媒体上传管线：占位 decoration → 上传 → 换真节点。
+ *  at 缺省＝当前选区（粘贴）；给定＝指针落点（拖入）。逐个 await：占位在
+ *  decoration 层随文档 mapping，先后插入互不踩位。 */
+function uploadMediaFiles(
+  view: EditorView,
+  upload: (file: File) => Promise<{ src: string; alt: string } | null>,
+  files: File[],
+  at?: number,
+): void {
+  void (async () => {
+    for (const f of files) {
+      const id = {}; // 对象身份即占位句柄
+      const name = f.name || "粘贴文件";
+      {
+        const tr = view.state.tr;
+        let pos: number;
+        if (at != null) { pos = at; }
+        else {
+          if (!tr.selection.empty) tr.deleteSelection();
+          pos = tr.selection.from;
+        }
+        tr.setMeta(uploadPlaceholderKey, { add: { id, pos, name } });
+        view.dispatch(tr);
+      }
+      try {
+        const res = await upload(f);
+        // 占位已被用户删掉 = 取消，不再插入
+        const pos = findUploadPlaceholder(view.state, id);
+        if (pos == null) continue;
+        const imgType = view.state.schema.nodes.image;
+        if (res && imgType) {
+          view.dispatch(
+            view.state.tr
+              .insert(pos, imgType.create({ src: res.src, alt: res.alt }))
+              .setMeta(uploadPlaceholderKey, { remove: { id } })
+              .scrollIntoView(),
+          );
+        } else {
+          failPlaceholder(view, id);
+        }
+      } catch {
+        failPlaceholder(view, id); // 单个失败不影响其余
+      }
+    }
+  })();
+}
+
 // ── Drop state ────────────────────────────────────────────────────────────────
 
 type DropState = {
@@ -693,6 +742,22 @@ export default function SmartTextarea({
         if (assetId && pid) return `${BASE_PATH}/api/production/${pid}/assets/${assetId}/thumb`;
         return src;
       },
+      // 嵌入形态（embed-media broker 的编辑器侧）：video/audio 在编辑态也出
+      // 播放器，长尾类型出文件卡片；图片维持 thumb（renderHTML 同源，省流量）
+      resolveMeta: async (src): Promise<WikiEmbedMeta> => {
+        const assetId = decodeAssetSrc(src);
+        const pid = contentMentionRef.current?.productionId;
+        if (!assetId || !pid) return null;
+        try {
+          const res = await fetch(`${BASE_PATH}/api/production/${pid}/assets/${assetId}/preview-url`);
+          if (!res.ok) return { kind: "card" };
+          const data = await res.json() as { url?: string | null; mimeType?: string | null };
+          const kind = embedMediaKind(data.mimeType);
+          if (!data.url || !kind) return { kind: "card" };
+          if (kind === "image") return null;
+          return { kind, url: data.url };
+        } catch { return null; } // 网络抖动停在 thumb，不降卡片
+      },
     });
 
     // breaks: 单回车=换行（CJK 写作习惯，与 WikiMarkdown remark-breaks 对齐）
@@ -753,16 +818,25 @@ export default function SmartTextarea({
         },
       },
       transformPastedHTML: (html) => {
-        if (!isFeishuHtml(html)) return html;
+        let out = html;
+        if (isFeishuHtml(out)) {
+          try {
+            const record = pasteRecordRef.current;
+            pasteRecordRef.current = null;
+            out = transformFeishuHtml(out, { members: memberMentionRef.current?.members, record });
+          } catch { /* 归一化失败放行原文 */ }
+        }
+        // 外链/内嵌 img 收口（lib/external-img-paste）：飞书之外的来源也不许
+        // 把会过期的 URL 冒充成嵌入
         try {
-          const record = pasteRecordRef.current;
-          pasteRecordRef.current = null;
-          return transformFeishuHtml(html, { members: memberMentionRef.current?.members, record });
+          return stripExternalPastedImages(out);
         } catch {
-          return html;
+          return out;
         }
       },
-      // 图片文件粘贴（wiki 场景）：拦 file items 上传转存后插节点。
+      // 媒体文件粘贴（wiki 场景）：拦 file items 上传转存后插节点。收哪些类型
+      // 由 embed-media 支持列表定（图/视频/音频）——收进来的都有嵌入形态，
+      // 渲染端不会「贴得进去渲染不出」。
       // 飞书「复制图片」实测剪贴板携带真文件走此路径；整篇文档粘贴无 file，
       // 不会被此分支劫持（照走 transformPastedHTML）。
       // 粘贴瞬间挂 decoration 占位（lib/tiptap-upload-placeholder）——没有即时
@@ -770,40 +844,10 @@ export default function SmartTextarea({
       handlePaste: (view, event) => {
         const upload = imageUploadRef.current;
         if (!upload) return false;
-        const files = Array.from(event.clipboardData?.files ?? []).filter(f => f.type.startsWith("image/"));
+        const files = Array.from(event.clipboardData?.files ?? []).filter(f => isEmbeddableUpload(f.type));
         if (files.length === 0) return false;
         event.preventDefault();
-        void (async () => {
-          for (const f of files) {
-            const id = {}; // 对象身份即占位句柄
-            const name = f.name || "粘贴图片";
-            {
-              const tr = view.state.tr;
-              if (!tr.selection.empty) tr.deleteSelection();
-              tr.setMeta(uploadPlaceholderKey, { add: { id, pos: tr.selection.from, name } });
-              view.dispatch(tr);
-            }
-            try {
-              const res = await upload(f);
-              // 占位已被用户删掉 = 取消，不再插入
-              const pos = findUploadPlaceholder(view.state, id);
-              if (pos == null) continue;
-              const imgType = view.state.schema.nodes.image;
-              if (res && imgType) {
-                view.dispatch(
-                  view.state.tr
-                    .insert(pos, imgType.create({ src: res.src, alt: res.alt }))
-                    .setMeta(uploadPlaceholderKey, { remove: { id } })
-                    .scrollIntoView(),
-                );
-              } else {
-                failPlaceholder(view, id);
-              }
-            } catch {
-              failPlaceholder(view, id); // 单张失败不影响其余
-            }
-          }
-        })();
+        uploadMediaFiles(view, upload, files);
         return true;
       },
       handleKeyDown: (_view, event) => {
@@ -853,6 +897,20 @@ export default function SmartTextarea({
               return true;
             }
           }
+        }
+        // 文件拖入（Finder/桌面）→ 与粘贴同一条上传管线，落点=指针位置。
+        // 有 file 一律吞掉 drop（不 preventDefault 浏览器会直接导航到该文件），
+        // 不在支持列表/无上传器的就静默不插——大文件/工程文件走资产面板管道
+        const dropFiles = Array.from(event.dataTransfer?.files ?? []);
+        if (dropFiles.length > 0) {
+          event.preventDefault();
+          const upload = imageUploadRef.current;
+          const media = dropFiles.filter(f => isEmbeddableUpload(f.type));
+          if (upload && media.length > 0) {
+            const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+            uploadMediaFiles(view, upload, media, at);
+          }
+          return true;
         }
         const raw = event.dataTransfer?.getData("application/x-clickin-wiki");
         if (!raw) return false;

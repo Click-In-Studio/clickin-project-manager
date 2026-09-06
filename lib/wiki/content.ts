@@ -96,7 +96,7 @@ export async function createWiki(params: {
   // §0.9 C-6：创建者 manage 行集 + person 归属
   await writeWikiGrants(created.id, params.productionId, params.createdBy);
   await writeRevision(created.id, params.title, body, [], params.createdBy, params.origin ?? "user");
-  await syncWikiLinks(created.id, params.productionId, body);
+  await syncWikiLinks(created.id, params.productionId, body, params.createdBy);
   // 结构变化推给同制作在线页面——放 db 层让所有写入来源自动同步
   broadcastWikiLibraryChange(params.productionId, { kind: "created", wikiId: created.nodeId });
   return { ...(await getWiki(created.id, params.productionId))!, nodeId: created.nodeId };
@@ -174,7 +174,7 @@ export async function updateWiki(
     const next = await getWiki(id, productionId);
     if (next) {
       await writeRevision(id, next.title, next.body, next.mentions, authorUserId, patch.origin ?? "user");
-      if (patch.body !== undefined) await syncWikiLinks(id, productionId, next.body);
+      if (patch.body !== undefined) await syncWikiLinks(id, productionId, next.body, authorUserId);
     }
   }
   return getWiki(id, productionId);

@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset, resolveAssetFile } from "@/lib/asset/db";
+import { canViewAsset } from "@/lib/asset/perm";
 import { presignedGet } from "@/lib/r2";
 
 function getPreviewType(mimeType: string | null): "image" | "video" | "audio" | "pdf" | null {
@@ -23,6 +24,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
 
     const asset = await getAsset(assetId);
     if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });
+    // 预览面=meta（与 thumb 同口径）：全尺寸预签名 URL 不能比缩略图松——此前只查
+    // 成员身份，无票成员可绕过 canViewAsset 拿原件 URL
+    if (!await canViewAsset(access.permCtx, id, asset, "meta"))
+      return Response.json({ error: "权限不足" }, { status: 403 });
 
     const previewType = getPreviewType(asset.mimeType);
     if (!previewType) return Response.json({ error: "不支持预览" }, { status: 400 });
