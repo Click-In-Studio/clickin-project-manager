@@ -494,10 +494,16 @@ body.wiki-table-reordering * {
   background: rgba(14, 165, 233, 0.06);
 }
 
-/* wiki 正文图片（![alt](/__cm__asset:<id>)）——编辑器与只读渲染共用 */
+/* wiki 正文媒体嵌入（![alt](/__cm__/asset/<id>)）——编辑器与只读渲染共用 */
 .wiki-image {
   max-width: 100%;
   border-radius: 8px;
+  margin: 8px 0;
+}
+.wiki-audio {
+  display: block;
+  width: 100%;
+  max-width: 480px;
   margin: 8px 0;
 }
 .ProseMirror-selectednode.wiki-image,

@@ -201,8 +201,9 @@ export default function WikiDocClient({
 
   const memberName = (userId: string) => members.find(m => m.userId === userId)?.name ?? userId.slice(0, 8);
 
-  // 图片粘贴上传：presign → PUT R2 → 登记 asset → 挂载到本文档（mount_type=wiki，
-  // 文档可见 ⇒ 图可见的让渡边）。返回存储形态 src——正文只存 asset id 不存 URL
+  // 媒体粘贴/拖拽上传：presign → PUT R2 → 登记 asset。返回存储形态 src——正文
+  // 只存 asset id 不存 URL。embed 挂载边（文档可见 ⇒ 图可见）不在这里打：保存
+  // 时服务端从正文派生（syncWikiLinks），所有插入路径自动获得让渡边。
   async function uploadWikiImage(file: File): Promise<{ src: string; alt: string } | null> {
     const base = `${BASE_PATH}/api/production/${productionId}/assets`;
     const fileName = file.name || "粘贴图片.png";
@@ -232,12 +233,6 @@ export default function WikiDocClient({
       });
       if (!regRes.ok) return null;
       const { asset } = await regRes.json() as { asset: { id: string } };
-      // 挂载失败不拦插入：上传者自己的行集仍可见，其余观看者等下次挂载补
-      await fetch(`${base}/${asset.id}/mounts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mountType: "embed", mountId: wiki.id }),
-      }).catch(() => {});
       return { src: encodeAssetSrc(asset.id), alt: fileName };
     } catch {
       return null;

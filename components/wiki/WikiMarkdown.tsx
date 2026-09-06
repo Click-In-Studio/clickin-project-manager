@@ -21,6 +21,7 @@ import {
   type ContentMentionAttrs,
 } from "@/lib/mention-types";
 import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
+import { embedMediaKind } from "@/lib/asset/embed-media";
 import { parseCalloutMarker } from "@/lib/tiptap-callout";
 
 type Resolved = { label: string | null; url: string | null };
@@ -94,26 +95,62 @@ function splitCalloutChildren(children: ReactNode): { emoji: string; color: stri
   return { emoji: marker.emoji, color: marker.color, rest };
 }
 
-// ── 图片（![alt](/__cm__/asset/<id>)，正文只存 id）─────────────────────────────
-// 初始 src 用 thumb（session 鉴权可直接流，秒出）；随后取 preview-url 换全尺寸
-// 预签名 URL。取不到就停在缩略图，不空窗。
+// ── 媒体嵌入（![alt](/__cm__/asset/<id>)，正文只存 id）─────────────────────────
+// 形态按 embed-media broker 分发：image/video/audio 各出原生元素，长尾类型降级
+// 文件卡片（逐类型立项，不硬渲染）。图片初始 src 用 thumb（session 鉴权可直接
+// 流，秒出），preview-url 到位后换全尺寸预签名 URL；取不到就停在缩略图，不空窗。
 
-function CmAssetImage({ productionId, assetId, alt }: { productionId: string; assetId: string; alt?: string }) {
+type EmbedView =
+  | { kind: "boot" }                       // preview-url 未返回：先赌 thumb（图片主流场景秒出）
+  | { kind: "image"; src: string }
+  | { kind: "video"; url: string }
+  | { kind: "audio"; url: string }
+  | { kind: "card" };                      // 无嵌入形态/无权限/已删除
+
+function CmAssetEmbed({ productionId, assetId, alt }: { productionId: string; assetId: string; alt?: string }) {
   const thumb = `${BASE_PATH}/api/production/${productionId}/assets/${assetId}/thumb`;
-  const [src, setSrc] = useState(thumb);
+  const [view, setView] = useState<EmbedView>({ kind: "boot" });
   useEffect(() => {
     let alive = true;
+    setView({ kind: "boot" });
     (async () => {
       try {
         const res = await fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}/preview-url`);
-        if (!res.ok) return;
-        const data = await res.json() as { url?: string | null };
-        if (alive && data.url) setSrc(data.url);
-      } catch { /* 缩略图兜底 */ }
+        if (!res.ok) { if (alive) setView(v => (v.kind === "boot" ? { kind: "card" } : v)); return; }
+        const data = await res.json() as { url?: string | null; mimeType?: string | null };
+        if (!alive || !data.url) return;
+        const kind = embedMediaKind(data.mimeType);
+        if (kind === "video") setView({ kind: "video", url: data.url });
+        else if (kind === "audio") setView({ kind: "audio", url: data.url });
+        else if (kind === "image") setView({ kind: "image", src: data.url });
+        else setView({ kind: "card" });   // 长尾（pdf 等）：有预览类型也不硬嵌
+      } catch { /* boot 停在缩略图，onError 兜底降卡片 */ }
     })();
     return () => { alive = false; };
   }, [productionId, assetId]);
-  return <img src={src} alt={alt ?? ""} className="wiki-image" loading="lazy" />;
+
+  if (view.kind === "video") {
+    return <video controls preload="metadata" src={view.url} poster={thumb} className="wiki-image" />;
+  }
+  if (view.kind === "audio") {
+    return <audio controls preload="metadata" src={view.url} className="wiki-audio" />;
+  }
+  if (view.kind === "card") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 bg-zinc-50 text-[12px] text-zinc-600">
+        <span className="text-zinc-400">▤</span>{alt || "附件"}
+      </span>
+    );
+  }
+  // boot（thumb 先行）与 image（全尺寸）共用 img；thumb 流不出来（音频无缩略图/
+  // 无权限）就降卡片，不给读者看裂图标
+  return (
+    <img
+      src={view.kind === "image" ? view.src : thumb}
+      alt={alt ?? ""} className="wiki-image" loading="lazy"
+      onError={() => setView(v => (v.kind === "boot" ? { kind: "card" } : v))}
+    />
+  );
 }
 
 // ── @提及 chip（hover 头像卡；原 SmartText 独有，合并时取强者）──────────────
@@ -307,7 +344,7 @@ export default function WikiMarkdown({
             if (assetId && !productionId) {
               return <span className="inline-flex items-center px-1 py-0.5 rounded text-[12px] bg-zinc-50 text-zinc-400 border border-dashed border-zinc-300">[图片{alt ? `：${alt}` : ""}]</span>;
             }
-            if (assetId && productionId) return <CmAssetImage productionId={productionId} assetId={assetId} alt={alt} />;
+            if (assetId && productionId) return <CmAssetEmbed productionId={productionId} assetId={assetId} alt={alt} />;
             return <img src={s} alt={alt ?? ""} className="wiki-image" loading="lazy" />;
           },
           pre: ({ children }) => {
