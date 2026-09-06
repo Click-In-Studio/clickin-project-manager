@@ -107,6 +107,8 @@ function metaInfoLine(meta: MetaEnvelope | null, fileSize: number | null): strin
   if (typeof d?.durationSeconds === "number")
     parts.push(`${d.estimated === true ? "≈" : ""}${formatDuration(d.durationSeconds)}`);
   if (typeof d?.entryCount === "number") parts.push(`${d.entryCount} 项`);
+  const adm = d?.adm as { objectCount?: number } | undefined;
+  if (typeof adm?.objectCount === "number") parts.push(`ADM ${adm.objectCount} 对象`);
   if (typeof d?.trackCount === "number") parts.push(`${d.trackCount} 轨`);
   if (typeof d?.cueCount === "number") parts.push(`${d.cueCount} cue`);
   if (typeof d?.projectRefCount === "number" && (d.projectRefCount as number) > 0)

@@ -131,6 +131,56 @@ describe("wavParser", () => {
     expect(env.data?.durationSeconds).toBe(10000);
   });
 
+  it("ADM：data 后的 axml 拉回解析结构面 + chna 计数 + dbmd 旁证（wav v2）", async () => {
+    const admXml = `<?xml version="1.0"?><frame><audioFormatExtended>
+<audioProgramme audioProgrammeID="APR_1001" audioProgrammeName="Atmos_Master" start="00:00:00.00000" end="00:01:34.12500"></audioProgramme>
+<audioContent audioContentID="ACO_1001"></audioContent>
+<audioObject audioObjectID="AO_1001" audioObjectName="Standard Bed 7.1.2" start="00:00:00.00000" duration="00:01:34.12500"></audioObject>
+<audioObject audioObjectID="AO_1002" audioObjectName="harp &amp; strings (L)"></audioObject>
+<audioPackFormat audioPackFormatID="AP_1001"></audioPackFormat>
+<audioChannelFormat audioChannelFormatID="AC_1001"></audioChannelFormat>
+<audioChannelFormat audioChannelFormatID="AC_1002"></audioChannelFormat>
+<audioTrackUID UID="ATU_00000001"></audioTrackUID>
+</audioFormatExtended></frame>`;
+    const chna = Buffer.alloc(4 + 40);
+    chna.writeUInt16LE(70, 0); // numTracks
+    chna.writeUInt16LE(70, 2); // numUIDs
+    const wav = wavFile("RIFF", [
+      riffChunk("fmt ", wavFmt(2, 48000, 24)),
+      riffChunk("data", Buffer.alloc(6)),
+      riffChunk("axml", Buffer.from(admXml, "utf8")),
+      riffChunk("chna", chna),
+      riffChunk("dbmd", Buffer.alloc(8)),
+    ]);
+    const env = await extractEnvelope(bufferByteSource(wav), "atmos.wav");
+    expect(env.status).toBe("ok");
+    expect(env.data).toMatchObject({
+      hasDbmd: true, chnaTracks: 70, chnaUids: 70,
+      adm: {
+        programmeCount: 1, contentCount: 1, objectCount: 2,
+        packFormatCount: 1, channelFormatCount: 2, trackUidCount: 1,
+        programmes: [{ name: "Atmos_Master", start: "00:00:00.00000", end: "00:01:34.12500" }],
+      },
+    });
+    const objs = env.data?.admObjects as Record<string, unknown>[];
+    expect(objs).toHaveLength(2);
+    expect(objs[0]).toMatchObject({ name: "Standard Bed 7.1.2", duration: "00:01:34.12500" });
+    expect(objs[1].name).toBe("harp & strings (L)"); // 实体解码
+  });
+
+  it("axml 超上限：只标 xmlOversized，不硬啃 keyframe 大户", async () => {
+    const wav = wavFile("RIFF", [
+      riffChunk("fmt ", wavFmt(2, 48000, 24)),
+      riffChunk("data", Buffer.alloc(6)),
+      riffChunk("axml", Buffer.alloc(0), 20 * 1024 * 1024), // 声明 20MB 不附体
+    ]);
+    const env = await extractEnvelope(bufferByteSource(wav), "huge-adm.wav");
+    expect(env.status).toBe("ok");
+    expect(env.data?.adm).toMatchObject({ xmlOversized: true });
+    expect(env.data?.admXmlBytes).toBe(20 * 1024 * 1024);
+    expect(env.data?.admObjects).toBeUndefined();
+  });
+
   it("破损 RF64（哨兵尺寸但无 ds64）→ 时长诚实置 null，不把 0xffffffff 当字节数", async () => {
     const wav = wavFile("RF64", [
       riffChunk("fmt ", wavFmt(2, 48000, 24)),
