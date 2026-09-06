@@ -38,7 +38,20 @@ interface MetaEnvelope {
   status: string;
   detectedType: string | null;
   data: Record<string, unknown> | null;
+  sidecarKey: string | null;
 }
+
+// 打包类公约 entry 形状（lib/asset/metadata-parsers.ts）
+interface ArchiveEntry {
+  path: string;
+  uncompressedBytes: number | null;
+  isDirectory: boolean;
+  mtime?: string;
+  encrypted?: boolean;
+}
+
+/** 清单前端渲染上限（5000 行 DOM 太重；数据层另有 ARCHIVE_ENTRY_CAP）。 */
+const ARCHIVE_RENDER_CAP = 1000;
 
 /** 探测类型 → 展示标签。认不出的直接显示 detectedType 原文。 */
 const TYPE_LABELS: Record<string, string> = {
@@ -112,16 +125,32 @@ export default function AssetPreviewClient({
   const [loading, setLoading] = useState(true);
   const [shareOpen, setShareOpen] = useState(false);
   const [infoLine, setInfoLine] = useState<string | null>(null);
+  const [archive, setArchive] = useState<{ entries: ArchiveEntry[]; truncated: boolean } | null>(null);
 
   const previewType = getPreviewType(mimeType);
 
-  // #85 元数据：独立于预览链路拉取（失败静默——信息行是锦上添花不许挡预览）
+  // #85 元数据：独立于预览链路拉取（失败静默——信息行是锦上添花不许挡预览）。
+  // 压缩包清单：小档案 entries 就在信封里；大档案落了 sidecar，二次 ?full=1 拉回
   useEffect(() => {
     if (storageType !== "r2") return;
-    fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}/metadata`)
+    const metaUrl = `${BASE_PATH}/api/production/${productionId}/assets/${assetId}/metadata`;
+    const pickArchive = (m: MetaEnvelope | null | undefined) => {
+      const entries = m?.data?.entries;
+      if (Array.isArray(entries) && entries.length > 0)
+        setArchive({ entries: entries as ArchiveEntry[], truncated: m?.data?.truncated === true });
+    };
+    fetch(metaUrl)
       .then(r => (r.ok ? r.json() : null))
       .then((j: { fileSize?: number | null; metadata?: MetaEnvelope | null } | null) => {
-        if (j) setInfoLine(metaInfoLine(j.metadata ?? null, j.fileSize ?? null));
+        if (!j) return;
+        setInfoLine(metaInfoLine(j.metadata ?? null, j.fileSize ?? null));
+        if (Array.isArray(j.metadata?.data?.entries)) pickArchive(j.metadata);
+        else if (j.metadata?.sidecarKey) {
+          fetch(`${metaUrl}?full=1`)
+            .then(r => (r.ok ? r.json() : null))
+            .then((f: { metadata?: MetaEnvelope | null } | null) => pickArchive(f?.metadata))
+            .catch(() => {});
+        }
       })
       .catch(() => {});
   }, [productionId, assetId, storageType]);
@@ -239,7 +268,7 @@ export default function AssetPreviewClient({
           </div>
         )}
 
-        {!loading && !previewType && downloadUrl && (
+        {!loading && !previewType && downloadUrl && !archive && (
           <div className="text-center">
             <p className="text-4xl mb-4">📄</p>
             <p className={`text-sm mb-1 truncate max-w-xs ${embedded ? "text-zinc-600" : "text-white/50"}`}>{fileName}</p>
@@ -251,6 +280,40 @@ export default function AssetPreviewClient({
             >
               下载文件
             </a>
+          </div>
+        )}
+
+        {/* #85 PR2：压缩包扁平清单（不嵌套、不解压——只是能看见里面有什么） */}
+        {!loading && !previewType && archive && (
+          <div className={`w-full max-w-3xl self-start rounded-xl border overflow-hidden ${
+            embedded ? "border-zinc-200 bg-white" : "border-white/10 bg-zinc-900"}`}>
+            <div className={`flex items-center justify-between px-4 py-2.5 border-b text-xs ${t.bar} ${t.faint}`}>
+              <span>
+                📦 {archive.entries.length} 项
+                {archive.truncated && `（仅列出前 ${archive.entries.length} 项）`}
+              </span>
+              {downloadUrl && (
+                <a href={downloadUrl} download={fileName} className={`transition-colors ${t.dim}`}>下载压缩包</a>
+              )}
+            </div>
+            <ul className="max-h-[calc(100vh-240px)] overflow-y-auto text-xs font-mono">
+              {archive.entries.slice(0, ARCHIVE_RENDER_CAP).map((e, i) => (
+                <li key={i} className={`flex items-center gap-2 px-4 py-1.5 ${
+                  embedded ? "odd:bg-zinc-50 text-zinc-700" : "odd:bg-white/[0.03] text-white/60"}`}>
+                  <span className="shrink-0">{e.isDirectory ? "📁" : "📄"}</span>
+                  <span className="truncate flex-1" title={e.path}>{e.path}</span>
+                  {e.encrypted && <span className={`shrink-0 ${t.fainter}`}>🔒</span>}
+                  {!e.isDirectory && e.uncompressedBytes != null && (
+                    <span className={`shrink-0 tabular-nums ${t.faint}`}>{formatBytes(e.uncompressedBytes)}</span>
+                  )}
+                </li>
+              ))}
+              {archive.entries.length > ARCHIVE_RENDER_CAP && (
+                <li className={`px-4 py-2 text-center ${t.fainter}`}>
+                  …其余 {archive.entries.length - ARCHIVE_RENDER_CAP} 项未渲染
+                </li>
+              )}
+            </ul>
           </div>
         )}
 

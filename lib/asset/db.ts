@@ -199,11 +199,12 @@ export async function updateAsset(
 
 /** Delete asset and return R2 keys that should be cleaned up. */
 export async function deleteAsset(assetId: string): Promise<{ r2Keys: string[] }> {
-  const filesRes = await getPool().query<{ r2_key: string | null; thumbnail_r2_key: string | null }>(
-    `SELECT r2_key, thumbnail_r2_key FROM asset_file WHERE asset_id = $1`, [assetId]
+  const filesRes = await getPool().query<{ r2_key: string | null; thumbnail_r2_key: string | null; sidecar_key: string | null }>(
+    `SELECT r2_key, thumbnail_r2_key, metadata->>'sidecarKey' AS sidecar_key
+     FROM asset_file WHERE asset_id = $1`, [assetId]
   );
   const r2Keys = filesRes.rows.flatMap(r =>
-    [r.r2_key, r.thumbnail_r2_key].filter((k): k is string => k != null)
+    [r.r2_key, r.thumbnail_r2_key, r.sidecar_key].filter((k): k is string => k != null)
   );
   await getPool().query(`DELETE FROM asset WHERE id = $1`, [assetId]);
   return { r2Keys };

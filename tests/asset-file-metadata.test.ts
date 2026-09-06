@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createAsset, getAssetFile, getLatestAssetFile } from "@/lib/asset/db";
 import {
   extractEnvelope, isEnvelopeStale, setAssetFileMetadata, getOrExtractFileMetadata,
+  splitEnvelopeForStorage, hydrateMetadata, metadataSidecarKey, SIDECAR_THRESHOLD_BYTES,
   type MetadataEnvelope,
 } from "@/lib/asset/metadata";
 import { BROKER_VERSION, sniffDetectedType } from "@/lib/asset/metadata-broker";
@@ -127,6 +128,38 @@ describe("版本失效", () => {
     expect(isEnvelopeStale({ ...hit, parserVersion: 999 })).toBe(false);
     // 已退役分析器的信封不算 stale（没有新版本可比）
     expect(isEnvelopeStale({ ...hit, parserKey: "audio/dead-format" })).toBe(false);
+  });
+});
+
+describe("sidecar 分离与水合（PR2）", () => {
+  const baseEnv: MetadataEnvelope = {
+    status: "ok", brokerVersion: 99, parserKey: "application/zip", parserVersion: 2,
+    detectedType: "application/zip", extractedAt: new Date().toISOString(),
+    data: null, sidecarKey: null, error: null,
+  };
+
+  it("小清单不分离：entries 留在信封内", () => {
+    const env = { ...baseEnv, data: { entryCount: 2, entries: [{ path: "a" }, { path: "b" }] } };
+    const { envelope, sidecar } = splitEnvelopeForStorage(env, "af_x");
+    expect(sidecar).toBeNull();
+    expect(envelope).toBe(env);
+  });
+
+  it("超阈值分离：entries 入 sidecar，信封留标量 + 指针", () => {
+    const entries = Array.from({ length: 2000 }, (_, i) => ({ path: `dir/file-${i}.wav`, uncompressedBytes: i }));
+    const env = { ...baseEnv, data: { entryCount: 2000, totalUncompressedBytes: 1, entries } };
+    expect(Buffer.byteLength(JSON.stringify(env.data))).toBeGreaterThan(SIDECAR_THRESHOLD_BYTES);
+    const { envelope, sidecar } = splitEnvelopeForStorage(env, "af_x");
+    expect(envelope.sidecarKey).toBe(metadataSidecarKey("af_x"));
+    expect(envelope.data).toEqual({ entryCount: 2000, totalUncompressedBytes: 1 });
+    expect(sidecar).toMatchObject({ fileId: "af_x", parserKey: "application/zip" });
+    expect((sidecar?.entries as unknown[]).length).toBe(2000);
+  });
+
+  it("水合短路：无 sidecarKey 或 entries 已内联时原样返回（不碰 R2）", async () => {
+    const inline = { ...baseEnv, sidecarKey: "meta/af_x.json", data: { entries: [{ path: "a" }] } };
+    expect(await hydrateMetadata(baseEnv)).toBe(baseEnv);
+    expect(await hydrateMetadata(inline)).toBe(inline);
   });
 });
 

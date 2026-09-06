@@ -1,4 +1,4 @@
-import type { ByteSource } from "./byte-source";
+import { ByteBudgetExceededError, type ByteSource } from "./byte-source";
 import type { MetadataParser } from "./metadata-broker";
 
 /**
@@ -245,13 +245,52 @@ export const isobmffParser: MetadataParser = {
   },
 };
 
-// ─── ZIP（EOCD 标量；central directory 清单归 PR2）──────────────────────────
+// ─── 打包类公约 entry 形状（zip/rar 共用，PR3 包内取文件与 QC 比对的消费面）──
+// { path, uncompressedBytes, compressedBytes, mtime?, isDirectory, crc32?,
+//   method?, offset, encrypted?, encodingGuessed? }
+// offset+method 是刻意为 PR3 埋的：按 offset Range 取 entry 不用重读目录。
+
+/** 清单条数上限（超大档案截断并标 truncated: true，诚实标注定式）。 */
+export const ARCHIVE_ENTRY_CAP = 5000;
+
+/** DOS 日期时间 → 无时区裸字符串（DOS 时间本就没有时区，不硬编 Z 假装 UTC）。 */
+function dosDateTime(mdate: number, mtime: number): string | null {
+  if (mdate === 0) return null;
+  const y = 1980 + (mdate >> 9), mo = (mdate >> 5) & 0xf, d = mdate & 0x1f;
+  if (mo < 1 || mo > 12 || d < 1) return null;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${y}-${p(mo)}-${p(d)}T${p(mtime >> 11)}:${p((mtime >> 5) & 0x3f)}:${p((mtime & 0x1f) * 2)}`;
+}
+
+let gbkDecoder: TextDecoder | null | undefined;
+
+/** zip 文件名解码：UTF-8 flag（bit 11）可信；没置位官方是 cp437，但国内
+ *  Windows 压的 zip 实际是 GBK ⇒ 非 ASCII 时按 GBK 猜并标 encodingGuessed。 */
+function decodeZipName(raw: Buffer, utf8Flag: boolean): { path: string; guessed: boolean } {
+  if (utf8Flag) return { path: raw.toString("utf8"), guessed: false };
+  if (raw.every((b) => b < 0x80)) return { path: raw.toString("latin1"), guessed: false };
+  if (gbkDecoder === undefined) {
+    try { gbkDecoder = new TextDecoder("gbk"); } catch { gbkDecoder = null; }
+  }
+  if (gbkDecoder) {
+    try { return { path: gbkDecoder.decode(raw), guessed: true }; } catch { /* fallthrough */ }
+  }
+  return { path: raw.toString("latin1"), guessed: true };
+}
+
+// ─── ZIP（EOCD 标量 + central directory 清单）───────────────────────────────
 
 const EOCD_SIG = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
 
+/**
+ * central directory 连续存放（EOCD 给 offset+size），1-2 个 Range 整块拿下
+ * ——这是 zip 与 rar 的本质区别（rar 无中央目录只能逐块走）。CD 超 4MB 只读
+ * 前段并截断。
+ */
 export const zipParser: MetadataParser = {
   key: "application/zip",
-  version: 1,
+  version: 2, // v2：EOCD 标量 → +central directory 清单（#85 PR2）
+  budget: { maxBytes: 5 * 1024 * 1024, maxReads: 8 },
   async parse(src) {
     // EOCD 只能从尾部定位；存量 file_size NULL 行定位不了 ⇒ 确定性 failed
     if (src.size == null) throw new Error("file size unknown; cannot locate EOCD");
@@ -267,19 +306,175 @@ export const zipParser: MetadataParser = {
     if (idx < 0 || idx + 22 > tail.length) throw new Error("EOCD not found");
 
     let entryCount: number = tail.readUInt16LE(idx + 10);
+    let cdSize = tail.readUInt32LE(idx + 12);
+    let cdOffset = tail.readUInt32LE(idx + 16);
     let zip64 = false;
-    if (entryCount === 0xffff) {
-      // zip64：EOCD 前是 20 字节 locator，指向 zip64 EOCD（总 entry 数在 +32）
+    if (entryCount === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) {
+      // zip64：EOCD 前是 20 字节 locator，指向 zip64 EOCD
       const loc = idx - 20;
       if (loc >= 0 && tail.readUInt32LE(loc) === 0x07064b50) {
         const z64Off = Number(tail.readBigUInt64LE(loc + 8));
         const z64 = await src.read(z64Off, 56);
-        if (z64.length >= 40 && z64.readUInt32LE(0) === 0x06064b50) {
+        if (z64.length >= 56 && z64.readUInt32LE(0) === 0x06064b50) {
           entryCount = Number(z64.readBigUInt64LE(32));
+          cdSize = Number(z64.readBigUInt64LE(40));
+          cdOffset = Number(z64.readBigUInt64LE(48));
           zip64 = true;
         }
       }
     }
-    return { entryCount, ...(zip64 && { zip64: true }) };
+
+    const cdCap = Math.min(cdSize, 4 * 1024 * 1024);
+    const cd = await src.read(cdOffset, cdCap);
+    const entries: Record<string, unknown>[] = [];
+    let truncated = cdCap < cdSize;
+    let totalUncompressedBytes = 0;
+    let off = 0;
+    while (off + 46 <= cd.length && entries.length < ARCHIVE_ENTRY_CAP) {
+      if (cd.readUInt32LE(off) !== 0x02014b50) break; // CD entry 签名
+      const flags = cd.readUInt16LE(off + 8);
+      const method = cd.readUInt16LE(off + 10);
+      const mtime = dosDateTime(cd.readUInt16LE(off + 14), cd.readUInt16LE(off + 12));
+      const crc32 = cd.readUInt32LE(off + 16);
+      let compressedBytes = cd.readUInt32LE(off + 20);
+      let uncompressedBytes = cd.readUInt32LE(off + 24);
+      const nameLen = cd.readUInt16LE(off + 28);
+      const extraLen = cd.readUInt16LE(off + 30);
+      const commentLen = cd.readUInt16LE(off + 32);
+      let offset = cd.readUInt32LE(off + 42);
+      if (off + 46 + nameLen + extraLen > cd.length) { truncated = true; break; }
+      const { path, guessed } = decodeZipName(cd.subarray(off + 46, off + 46 + nameLen), (flags & 0x800) !== 0);
+      // zip64 extra（id 0x0001）：仅替换打了 0xffffffff 哨兵的字段，按序排列
+      if (uncompressedBytes === 0xffffffff || compressedBytes === 0xffffffff || offset === 0xffffffff) {
+        let eo = off + 46 + nameLen;
+        const eEnd = eo + extraLen;
+        while (eo + 4 <= eEnd) {
+          const id = cd.readUInt16LE(eo), sz = cd.readUInt16LE(eo + 2);
+          if (id === 0x0001) {
+            let q = eo + 4;
+            if (uncompressedBytes === 0xffffffff && q + 8 <= eEnd) { uncompressedBytes = Number(cd.readBigUInt64LE(q)); q += 8; }
+            if (compressedBytes === 0xffffffff && q + 8 <= eEnd) { compressedBytes = Number(cd.readBigUInt64LE(q)); q += 8; }
+            if (offset === 0xffffffff && q + 8 <= eEnd) { offset = Number(cd.readBigUInt64LE(q)); }
+            break;
+          }
+          eo += 4 + sz;
+        }
+      }
+      totalUncompressedBytes += uncompressedBytes;
+      entries.push({
+        path, uncompressedBytes, compressedBytes, isDirectory: path.endsWith("/"),
+        crc32, method, offset,
+        ...(mtime && { mtime }),
+        ...((flags & 0x1) !== 0 && { encrypted: true }),
+        ...(guessed && { encodingGuessed: true }),
+      });
+      off += 46 + nameLen + extraLen + commentLen;
+    }
+    if (entries.length >= ARCHIVE_ENTRY_CAP && entryCount > entries.length) truncated = true;
+    return {
+      entryCount, totalUncompressedBytes, entries,
+      ...(truncated && { truncated: true }),
+      ...(zip64 && { zip64: true }),
+    };
+  },
+};
+
+// ─── RAR5（无中央目录：逐块走位，接受截断）──────────────────────────────────
+
+/** RAR5 vint：小端 base-128，高位是续位。 */
+function readVint(buf: Buffer, off: number): { value: number; next: number } | null {
+  let v = 0, shift = 0;
+  for (let i = 0; i < 10; i++) {
+    if (off + i >= buf.length) return null;
+    const b = buf[off + i];
+    v += (b & 0x7f) * 2 ** shift;
+    if ((b & 0x80) === 0) return { value: v, next: off + i + 1 };
+    shift += 7;
+  }
+  return null;
+}
+
+const RAR5_SIG = Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x01, 0x00]);
+const RAR4_SIG = Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]);
+
+/**
+ * 文件头与数据交错、下一跳偏移在上一个头里 ⇒ 串行 Range 不可并行，每跳读
+ * 64KB 窗口（小文件密集时一窗多头）。maxReads 64 封顶，超预算收已走到的
+ * 部分清单 + truncated——一次性成本，信封永久缓存。文件名 RAR5 规范强制
+ * UTF-8，无 zip 的编码赌博。
+ *
+ * rar4 缓议（2026-09-06 拍板）：明确 throw → failed 终态，将来支持时 bump
+ * version 自动重算存量。
+ */
+export const rarParser: MetadataParser = {
+  key: "application/vnd.rar",
+  version: 1,
+  budget: { maxBytes: 8 * 1024 * 1024, maxReads: 64 },
+  async parse(src, head) {
+    if (head.subarray(0, 7).equals(RAR4_SIG)) throw new Error("RAR4 archive not supported yet");
+    if (!head.subarray(0, 8).equals(RAR5_SIG)) throw new Error("not a RAR5 archive");
+
+    const entries: Record<string, unknown>[] = [];
+    let truncated = false;
+    let totalUncompressedBytes = 0;
+    let pos = 8;
+    const WINDOW = 64 * 1024;
+    try {
+      for (let i = 0; i < ARCHIVE_ENTRY_CAP * 2; i++) {
+        if (entries.length >= ARCHIVE_ENTRY_CAP) { truncated = true; break; }
+        // head 覆盖到的块头白拿（零 Range）；不够放一个块头才发窗口读
+        let win = pos + 64 <= head.length ? head.subarray(pos) : await src.read(pos, WINDOW);
+        if (win.length < 7) break; // EOF
+        // 块：crc32(4) + headerSize(vint) + header 本体
+        const hs = readVint(win, 4);
+        if (!hs) break;
+        const headerEnd = hs.next + hs.value;
+        if (headerEnd > win.length) {
+          win = await src.read(pos, headerEnd); // 超窗巨头（如超长文件名）单独补拉
+          if (win.length < headerEnd) break;
+        }
+        let p = hs.next;
+        const type = readVint(win, p); if (!type) break; p = type.next;
+        const hflags = readVint(win, p); if (!hflags) break; p = hflags.next;
+        let dataSize = 0;
+        if (hflags.value & 0x1) { const e = readVint(win, p); if (!e) break; p = e.next; } // extra area size
+        if (hflags.value & 0x2) { const d = readVint(win, p); if (!d) break; dataSize = d.value; p = d.next; }
+        if (type.value === 5) break; // end of archive
+        if (type.value === 4) throw new Error("encrypted RAR archive (headers unreadable)");
+        if (type.value === 2 || type.value === 3) { // file / service 头同构，只收 file
+          const ff = readVint(win, p); if (!ff) break; p = ff.next;
+          const us = readVint(win, p); if (!us) break; p = us.next;
+          const attr = readVint(win, p); if (!attr) break; p = attr.next;
+          let mtime: string | undefined, crc32: number | undefined;
+          if (ff.value & 0x2) { if (p + 4 > win.length) break; mtime = new Date(win.readUInt32LE(p) * 1000).toISOString(); p += 4; }
+          if (ff.value & 0x4) { if (p + 4 > win.length) break; crc32 = win.readUInt32LE(p); p += 4; }
+          const comp = readVint(win, p); if (!comp) break; p = comp.next;
+          const hostOs = readVint(win, p); if (!hostOs) break; p = hostOs.next;
+          const nl = readVint(win, p); if (!nl) break; p = nl.next;
+          if (p + nl.value > win.length) break;
+          const path = win.toString("utf8", p, p + nl.value);
+          if (type.value === 2) {
+            const unpacked = (ff.value & 0x8) !== 0 ? null : us.value; // bit 3=尺寸未知
+            if (unpacked != null) totalUncompressedBytes += unpacked;
+            entries.push({
+              path, uncompressedBytes: unpacked, compressedBytes: dataSize,
+              isDirectory: (ff.value & 0x1) !== 0,
+              method: (comp.value >> 7) & 0x7, offset: pos + headerEnd,
+              ...(mtime && { mtime }),
+              ...(crc32 !== undefined && { crc32 }),
+            });
+          }
+        }
+        pos += headerEnd + dataSize;
+      }
+    } catch (e) {
+      // 预算走完但已有部分清单：收部分 + truncated（比 oversized 终态有用得多）
+      if (e instanceof ByteBudgetExceededError && entries.length > 0) truncated = true;
+      else throw e;
+    }
+    return {
+      entryCount: entries.length, totalUncompressedBytes, entries,
+      ...(truncated && { truncated: true }),
+    };
   },
 };

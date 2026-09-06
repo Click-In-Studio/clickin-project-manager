@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { extractEnvelope } from "@/lib/asset/metadata";
 import { sniffDetectedType, BROKER_VERSION } from "@/lib/asset/metadata-broker";
-import { zipParser } from "@/lib/asset/metadata-parsers";
-import { bufferByteSource } from "@/lib/asset/byte-source";
+import { zipParser, rarParser, ARCHIVE_ENTRY_CAP } from "@/lib/asset/metadata-parsers";
+import { bufferByteSource, withBudget } from "@/lib/asset/byte-source";
 
 // PR1 分析器批：媒体标量（wav/flac/mp3/bmff）+ 压缩标量（zip EOCD）。
 // fixture 全部手工构造最小合法字节，锚定各格式的偏移算术。
@@ -248,8 +248,164 @@ describe("zipParser", () => {
   });
 });
 
+// ─── ZIP central directory 清单（PR2，zipParser v2）─────────────────────────
+
+function cdEntry(o: {
+  name: Buffer; utf8?: boolean; size?: number; csize?: number; method?: number;
+  offset?: number; encrypted?: boolean; mdate?: number; mtimeDos?: number;
+}): Buffer {
+  const b = Buffer.alloc(46);
+  b.writeUInt32LE(0x02014b50, 0);
+  b.writeUInt16LE((o.utf8 ? 0x800 : 0) | (o.encrypted ? 1 : 0), 8);
+  b.writeUInt16LE(o.method ?? 8, 10);
+  b.writeUInt16LE(o.mtimeDos ?? 0, 12);
+  b.writeUInt16LE(o.mdate ?? (((2026 - 1980) << 9) | (9 << 5) | 6), 14); // 2026-09-06
+  b.writeUInt32LE(0x1234abcd, 16);
+  b.writeUInt32LE(o.csize ?? 100, 20);
+  b.writeUInt32LE(o.size ?? 300, 24);
+  b.writeUInt16LE(o.name.length, 28);
+  b.writeUInt32LE(o.offset ?? 0, 42);
+  return Buffer.concat([b, o.name]);
+}
+
+function zipFile(cdEntries: Buffer[]): Buffer {
+  const prefix = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(60)]); // 本体占位
+  const cd = Buffer.concat(cdEntries);
+  const eocd = zipEocd(cdEntries.length);
+  eocd.writeUInt32LE(cd.length, 12);   // cdSize
+  eocd.writeUInt32LE(prefix.length, 16); // cdOffset
+  return Buffer.concat([prefix, cd, eocd]);
+}
+
+describe("zipParser v2：central directory 清单", () => {
+  it("公约 entry 形状：路径/尺寸/目录/加密/method/offset/mtime", async () => {
+    const zip = zipFile([
+      cdEntry({ name: Buffer.from("audio/", "utf8"), utf8: true, size: 0, csize: 0 }),
+      cdEntry({ name: Buffer.from("audio/主题曲.wav", "utf8"), utf8: true, size: 48000, csize: 40000, method: 8, offset: 64, mtimeDos: (12 << 11) | (30 << 5) | 5 }),
+      cdEntry({ name: Buffer.from("readme.txt", "utf8"), utf8: true, size: 10, encrypted: true }),
+    ]);
+    const env = await extractEnvelope(bufferByteSource(zip), "交付.zip");
+    expect(env.status).toBe("ok");
+    expect(env.data).toMatchObject({ entryCount: 3, totalUncompressedBytes: 48010 });
+    const entries = env.data?.entries as Record<string, unknown>[];
+    expect(entries[0]).toMatchObject({ path: "audio/", isDirectory: true });
+    expect(entries[1]).toMatchObject({
+      path: "audio/主题曲.wav", uncompressedBytes: 48000, compressedBytes: 40000,
+      isDirectory: false, method: 8, offset: 64, mtime: "2026-09-06T12:30:10",
+    });
+    expect(entries[1].encodingGuessed).toBeUndefined();
+    expect(entries[2]).toMatchObject({ encrypted: true });
+  });
+
+  it("无 UTF-8 flag 的非 ASCII 名按 GBK 猜并标 encodingGuessed（国内 Windows zip 现实）", async () => {
+    const gbkName = Buffer.concat([Buffer.from([0xd6, 0xd0]), Buffer.from(".txt", "latin1")]); // GBK「中」
+    const env = await extractEnvelope(bufferByteSource(zipFile([cdEntry({ name: gbkName })])), "win.zip");
+    const entries = env.data?.entries as Record<string, unknown>[];
+    expect(entries[0]).toMatchObject({ path: "中.txt", encodingGuessed: true });
+  });
+
+  it("超 ARCHIVE_ENTRY_CAP 截断并标 truncated，entryCount 保留声明总数", async () => {
+    const many = Array.from({ length: ARCHIVE_ENTRY_CAP + 1 }, (_, i) =>
+      cdEntry({ name: Buffer.from(`f${i}.txt`, "latin1"), size: 1 }));
+    const env = await extractEnvelope(bufferByteSource(zipFile(many)), "huge.zip");
+    expect(env.status).toBe("ok");
+    expect((env.data?.entries as unknown[]).length).toBe(ARCHIVE_ENTRY_CAP);
+    expect(env.data).toMatchObject({ entryCount: ARCHIVE_ENTRY_CAP + 1, truncated: true });
+  });
+});
+
+// ─── RAR5（PR2）──────────────────────────────────────────────────────────────
+
+const RAR5_SIG_T = Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x01, 0x00]);
+
+function vint(n: number): Buffer {
+  const out: number[] = [];
+  do {
+    let b = n & 0x7f;
+    n = Math.floor(n / 128);
+    if (n > 0) b |= 0x80;
+    out.push(b);
+  } while (n > 0);
+  return Buffer.from(out);
+}
+
+function rarBlock(type: number, fields: Buffer, dataSize = 0): Buffer {
+  const flags = dataSize > 0 ? 0x2 : 0;
+  const hdr = Buffer.concat([vint(type), vint(flags), ...(dataSize > 0 ? [vint(dataSize)] : []), fields]);
+  return Buffer.concat([Buffer.alloc(4), vint(hdr.length), hdr, Buffer.alloc(dataSize)]);
+}
+
+function rarFileHeader(name: string, unpacked: number, dataSize: number, o?: { dir?: boolean; mtime?: number }): Buffer {
+  const ff = (o?.dir ? 1 : 0) | (o?.mtime ? 2 : 0);
+  const nameB = Buffer.from(name, "utf8");
+  const mtimeB = o?.mtime ? (() => { const b = Buffer.alloc(4); b.writeUInt32LE(o.mtime, 0); return b; })() : Buffer.alloc(0);
+  const fields = Buffer.concat([
+    vint(ff), vint(unpacked), vint(0), mtimeB,
+    vint(1 << 7), // compression info：method=1
+    vint(2), vint(nameB.length), nameB,
+  ]);
+  return rarBlock(2, fields, dataSize);
+}
+
+function rar5File(blocks: Buffer[]): Buffer {
+  return Buffer.concat([
+    RAR5_SIG_T,
+    rarBlock(1, vint(0)),      // main archive header
+    ...blocks,
+    rarBlock(5, vint(0)),      // end of archive
+  ]);
+}
+
+describe("rarParser", () => {
+  it("逐块走位收 file 头：路径/尺寸/目录/method/offset", async () => {
+    const rar = rar5File([
+      rarFileHeader("素材/", 0, 0, { dir: true }),
+      rarFileHeader("素材/cue表.xlsx", 12000, 8000, { mtime: 1757000000 }),
+      rarFileHeader("notes.txt", 50, 30),
+    ]);
+    const env = await extractEnvelope(bufferByteSource(rar), "交付.rar");
+    expect(env.status).toBe("ok");
+    expect(env.parserKey).toBe("application/vnd.rar");
+    expect(env.data).toMatchObject({ entryCount: 3, totalUncompressedBytes: 12050 });
+    const entries = env.data?.entries as Record<string, unknown>[];
+    expect(entries[0]).toMatchObject({ path: "素材/", isDirectory: true });
+    expect(entries[1]).toMatchObject({
+      path: "素材/cue表.xlsx", uncompressedBytes: 12000, compressedBytes: 8000, method: 1,
+      mtime: new Date(1757000000 * 1000).toISOString(),
+    });
+    expect(entries[1].offset).toBeGreaterThan(8); // data 区起点（PR3 包内取文件用）
+  });
+
+  it("rar4 缓议：明确 failed 终态（将来 bump version 自动重算存量）", async () => {
+    const rar4 = Buffer.concat([Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]), Buffer.alloc(64)]);
+    const env = await extractEnvelope(bufferByteSource(rar4), "old.rar");
+    expect(env.status).toBe("failed");
+    expect(env.error).toContain("RAR4");
+  });
+
+  it("加密档案（头加密块）→ failed 终态", async () => {
+    const rar = Buffer.concat([RAR5_SIG_T, rarBlock(4, vint(0))]);
+    const env = await extractEnvelope(bufferByteSource(rar), "locked.rar");
+    expect(env.status).toBe("failed");
+    expect(env.error).toContain("encrypted");
+  });
+
+  it("预算走完收部分清单 + truncated（不落 oversized 丢掉已走到的）", async () => {
+    // 三个文件各隔 70KB 数据区（超 64KB 窗口 ⇒ 每个头一次 Range），maxReads=2
+    const rar = rar5File([
+      rarFileHeader("a.bin", 1, 70000),
+      rarFileHeader("b.bin", 1, 70000),
+      rarFileHeader("c.bin", 1, 70000),
+    ]);
+    const head = rar.subarray(0, 4096);
+    const data = await rarParser.parse(withBudget(bufferByteSource(rar), { maxBytes: 10 * 1024 * 1024, maxReads: 2 }), head);
+    expect((data.entries as unknown[]).length).toBeGreaterThanOrEqual(2);
+    expect(data.truncated).toBe(true);
+  });
+});
+
 // ─── 批次版本 ─────────────────────────────────────────────────────────────────
 
-it("PR1 批 bump 到 BROKER_VERSION 2（存量 unsupported 信封重 broker 的通道）", () => {
-  expect(BROKER_VERSION).toBe(2);
+it("PR2 批 bump 到 BROKER_VERSION 3（rar 上线重 broker 存量 unsupported）", () => {
+  expect(BROKER_VERSION).toBe(3);
 });

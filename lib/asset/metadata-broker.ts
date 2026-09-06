@@ -1,5 +1,5 @@
 import type { ByteSource } from "./byte-source";
-import { pngParser, wavParser, flacParser, mp3Parser, isobmffParser, zipParser } from "./metadata-parsers";
+import { pngParser, wavParser, flacParser, mp3Parser, isobmffParser, zipParser, rarParser } from "./metadata-parsers";
 
 /**
  * 类型 broker（#85）：决定一个文件「是什么」并分发给对应的元数据分析器。
@@ -12,9 +12,9 @@ import { pngParser, wavParser, flacParser, mp3Parser, isobmffParser, zipParser }
  * 它命中过的信封重算）。忘 bump = 存量永不重算，这是唯一的失效通道。
  *
  * 版本史：1=#433 基建+PNG 样板；2=PR1 媒体/压缩标量批（wav/flac/mp3/bmff/zip）
- * + RF64 magic。
+ * + RF64 magic；3=PR2 rar5 分析器上线（重 broker 存量 rar 的 unsupported）。
  */
-export const BROKER_VERSION = 2;
+export const BROKER_VERSION = 3;
 
 /** 分析器读满 head（含 magic 判型所需前缀）之外的字节自己按需 Range。 */
 export const SNIFF_HEAD_LENGTH = 4096;
@@ -114,6 +114,7 @@ const PARSERS: ReadonlyMap<string, MetadataParser> = new Map([
   ["video/mp4", isobmffParser],
   ["video/quicktime", isobmffParser],
   ["application/zip", zipParser],
+  ["application/vnd.rar", rarParser],
 ]);
 
 export function resolveParser(detectedType: string | null): MetadataParser | null {
