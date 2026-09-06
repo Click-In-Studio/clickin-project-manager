@@ -64,10 +64,10 @@ describe("extractEnvelope 状态机", () => {
   });
 
   it("判型成功但无分析器 → unsupported，detectedType 仍保留（UI 徽标价值）", async () => {
-    const zip = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
-    const env = await extractEnvelope(bufferByteSource(zip), "素材.zip");
+    const gz = Buffer.from([0x1f, 0x8b, 0x08, 0x00]);
+    const env = await extractEnvelope(bufferByteSource(gz), "素材.tar.gz");
     expect(env.status).toBe("unsupported");
-    expect(env.detectedType).toBe("application/zip");
+    expect(env.detectedType).toBe("application/gzip");
     expect(env.parserKey).toBeNull();
   });
 

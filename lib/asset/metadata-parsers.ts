@@ -1,0 +1,285 @@
+import type { ByteSource } from "./byte-source";
+import type { MetadataParser } from "./metadata-broker";
+
+/**
+ * PR1 分析器集合（#85 路线图）：媒体标量 + 压缩标量。全部只产出「文件自己的
+ * 确定性属性」标量进信封；清单/ADM XML 等大块头是 PR2 sidecar 的活，这里不碰。
+ * 主要消费方是 AI（agent 面读元数据做判断），字段求机器可读与诚实标注
+ * （estimated: true）胜过展示美观；人看媒体有在线预览兜着。
+ */
+
+/** head 覆盖不到的偏移再发 Range，覆盖得到的白拿（省预算里的 read 次数）。 */
+async function readAt(src: ByteSource, head: Buffer, offset: number, length: number): Promise<Buffer> {
+  if (offset >= 0 && offset + length <= head.length) return head.subarray(offset, offset + length);
+  return src.read(offset, length);
+}
+
+// ─── PNG（#433 的管线样板，从 broker 移入）──────────────────────────────────
+
+export const pngParser: MetadataParser = {
+  key: "image/png",
+  version: 1,
+  async parse(_src, head) {
+    // 8 字节签名 + IHDR chunk（4 长度 + 4 "IHDR" + 13 数据）
+    if (head.length < 33 || head.toString("latin1", 12, 16) !== "IHDR") throw new Error("PNG IHDR missing");
+    return {
+      width: head.readUInt32BE(16),
+      height: head.readUInt32BE(20),
+      bitDepth: head[24],
+    };
+  },
+};
+
+// ─── WAV / BWF / RF64 ────────────────────────────────────────────────────────
+
+/**
+ * RIFF chunk 走位。BWF 的 bext/axml 常在 data 之后（按声明尺寸跳过 data，
+ * 不读音频本体）；RF64（>4GB 的 ADM 交付常见）真实尺寸在 ds64 chunk。
+ * 本期只报 axml 的存在与体量，完整 ADM XML 归 PR2 sidecar。
+ */
+export const wavParser: MetadataParser = {
+  key: "audio/wav",
+  version: 1,
+  budget: { maxBytes: 256 * 1024, maxReads: 16 },
+  async parse(src, head) {
+    let byteRate = 0, sampleRate = 0, channels = 0, bitDepth = 0;
+    let dataSize: number | null = null;
+    let ds64DataSize: number | null = null;
+    let isBwf = false, admXmlBytes = 0;
+
+    let off = 12;
+    for (let i = 0; i < 40; i++) {
+      const hdr = await readAt(src, head, off, 8);
+      if (hdr.length < 8) break;
+      const id = hdr.toString("latin1", 0, 4);
+      const rawSize = hdr.readUInt32LE(4);
+      // RF64：本 chunk 真实尺寸被投到 ds64（约定只有 data 会溢出）
+      const size = rawSize === 0xffffffff && ds64DataSize != null ? ds64DataSize : rawSize;
+
+      if (id === "ds64") {
+        const c = await readAt(src, head, off + 8, 16);
+        if (c.length >= 16) ds64DataSize = Number(c.readBigUInt64LE(8));
+      } else if (id === "fmt ") {
+        const c = await readAt(src, head, off + 8, 16);
+        if (c.length >= 16) {
+          channels = c.readUInt16LE(2);
+          sampleRate = c.readUInt32LE(4);
+          byteRate = c.readUInt32LE(8);
+          bitDepth = c.readUInt16LE(14);
+        }
+      } else if (id === "data") {
+        // 哨兵未被 ds64 解开（破损/截断的 RF64）＝尺寸未知，诚实置 null，
+        // 不许把 0xffffffff 当真字节数算出假时长
+        dataSize = size < 0xffffffff ? size : null;
+      } else if (id === "bext") {
+        isBwf = true;
+      } else if (id === "axml") {
+        admXmlBytes = size < 0xffffffff ? size : 0;
+      }
+      if (size >= 0xffffffff) break; // 尺寸仍未知（无 ds64 的破损 RF64），不盲走
+      off += 8 + size + (size % 2); // RIFF chunk 按偶数对齐
+    }
+
+    if (sampleRate === 0) throw new Error("WAV fmt chunk missing");
+    return {
+      durationSeconds: dataSize != null && byteRate > 0 ? dataSize / byteRate : null,
+      sampleRate, channels, bitDepth, isBwf,
+      ...(admXmlBytes > 0 && { admXmlBytes }),
+    };
+  },
+};
+
+// ─── FLAC ────────────────────────────────────────────────────────────────────
+
+/** STREAMINFO 是首个 metadata block、定长 34 字节，纯 head 解析。 */
+export const flacParser: MetadataParser = {
+  key: "audio/flac",
+  version: 1,
+  async parse(_src, head) {
+    // 4 签名 + block 头 4（type 低 7 位 =0 即 STREAMINFO）+ 34 数据
+    if (head.length < 42 || (head[4] & 0x7f) !== 0) throw new Error("FLAC STREAMINFO missing");
+    const s = head.subarray(8);
+    const sampleRate = (s[10] << 12) | (s[11] << 4) | (s[12] >> 4);
+    const channels = ((s[12] >> 1) & 0x07) + 1;
+    const bitDepth = (((s[12] & 0x01) << 4) | (s[13] >> 4)) + 1;
+    // 36 位总样本数；0 = 编码器未写（时长未知）
+    const totalSamples = (s[13] & 0x0f) * 2 ** 32 + s.readUInt32BE(14);
+    if (sampleRate === 0) throw new Error("FLAC invalid sample rate");
+    return {
+      durationSeconds: totalSamples > 0 ? totalSamples / sampleRate : null,
+      sampleRate, channels, bitDepth,
+    };
+  },
+};
+
+// ─── MP3 ─────────────────────────────────────────────────────────────────────
+
+const MP3_BITRATES_V1 = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+const MP3_BITRATES_V2 = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+const MP3_SAMPLERATES: Record<number, number[]> = {
+  3: [44100, 48000, 32000], // MPEG1
+  2: [22050, 24000, 16000], // MPEG2
+  0: [11025, 12000, 8000],  // MPEG2.5
+};
+
+/**
+ * 时长策略（诚实标注定谳）：VBR 靠首帧 Xing/VBRI 帧计数精确；CBR 用
+ * (文件大小-标签)/码率估算并标 estimated: true——ID3 尾部标签、封面等会让
+ * 估值偏大几秒，AI 消费方自行斟酌，别当精确值用。
+ */
+export const mp3Parser: MetadataParser = {
+  key: "audio/mpeg",
+  version: 1,
+  async parse(src, head) {
+    // 跳 ID3v2（大封面常把首帧顶出 head 之外）
+    let audioStart = 0;
+    if (head.toString("latin1", 0, 3) === "ID3" && head.length >= 10) {
+      const size = ((head[6] & 0x7f) << 21) | ((head[7] & 0x7f) << 14) | ((head[8] & 0x7f) << 7) | (head[9] & 0x7f);
+      audioStart = 10 + size + ((head[5] & 0x10) ? 10 : 0);
+    }
+    const win = await readAt(src, head, audioStart, 4096);
+
+    // 找帧同步（容忍标签后的少量填充）
+    let f = -1;
+    for (let i = 0; i + 4 <= win.length && i < 2048; i++) {
+      if (win[i] === 0xff && (win[i + 1] & 0xe0) === 0xe0 && ((win[i + 1] >> 1) & 0x03) === 0x01) { f = i; break; }
+    }
+    if (f < 0) throw new Error("MP3 frame sync not found");
+
+    const versionBits = (win[f + 1] >> 3) & 0x03; // 3=MPEG1 2=MPEG2 0=MPEG2.5
+    const bitrateIdx = win[f + 2] >> 4;
+    const srIdx = (win[f + 2] >> 2) & 0x03;
+    const channelMode = win[f + 3] >> 6;
+    const sampleRate = MP3_SAMPLERATES[versionBits]?.[srIdx];
+    const bitrateKbps = (versionBits === 3 ? MP3_BITRATES_V1 : MP3_BITRATES_V2)[bitrateIdx];
+    if (!sampleRate || !bitrateKbps) throw new Error("MP3 invalid frame header");
+    const mono = channelMode === 3;
+    const samplesPerFrame = versionBits === 3 ? 1152 : 576;
+
+    // Xing/Info 紧跟 side info（帧内定偏移）
+    const sideInfo = versionBits === 3 ? (mono ? 17 : 32) : (mono ? 9 : 17);
+    const x = f + 4 + sideInfo;
+    const tag = win.toString("latin1", x, x + 4);
+    if ((tag === "Xing" || tag === "Info") && win.length >= x + 12 && (win.readUInt32BE(x + 4) & 0x1)) {
+      const frames = win.readUInt32BE(x + 8);
+      return {
+        durationSeconds: (frames * samplesPerFrame) / sampleRate,
+        estimated: false, vbr: tag === "Xing",
+        sampleRate, channels: mono ? 1 : 2,
+        ...(tag === "Info" && { bitrateKbps }),
+      };
+    }
+    return {
+      durationSeconds: src.size != null ? ((src.size - audioStart) * 8) / (bitrateKbps * 1000) : null,
+      estimated: true, vbr: false, bitrateKbps, sampleRate, channels: mono ? 1 : 2,
+    };
+  },
+};
+
+// ─── ISO BMFF（mp4/m4a/mov 一族共用）────────────────────────────────────────
+
+/** moov 里按需解析的两块：mvhd（时长）与各 trak 的 tkhd（视频轨尺寸）。 */
+function parseMoov(win: Buffer, moovSize: number): { durationSeconds: number | null; width?: number; height?: number } {
+  let duration: number | null = null;
+  let width = 0, height = 0;
+
+  const walk = (start: number, end: number, depth: number) => {
+    let off = start;
+    for (let i = 0; i < 64 && off + 8 <= end; i++) {
+      const size = win.readUInt32BE(off);
+      const type = win.toString("latin1", off + 4, off + 8);
+      if (size < 8) break;
+      const body = off + 8;
+      if (type === "mvhd" && body + 4 <= end) {
+        const v = win[body];
+        if (v === 0 && body + 20 <= end) duration = win.readUInt32BE(body + 16) / win.readUInt32BE(body + 12);
+        else if (v === 1 && body + 32 <= end) duration = Number(win.readBigUInt64BE(body + 24)) / win.readUInt32BE(body + 20);
+      } else if (type === "trak") {
+        walk(body, Math.min(off + size, end), depth + 1);
+      } else if (type === "tkhd" && body + 4 <= end) {
+        const v = win[body];
+        const dim = body + (v === 1 ? 88 : 76); // 16.16 定点 width/height
+        if (dim + 8 <= end) {
+          width = Math.max(width, win.readUInt32BE(dim) >> 16);
+          height = Math.max(height, win.readUInt32BE(dim + 4) >> 16);
+        }
+      }
+      off += size;
+    }
+  };
+  walk(8, Math.min(moovSize, win.length), 0);
+  return { durationSeconds: duration, ...(width > 0 && height > 0 && { width, height }) };
+}
+
+/**
+ * 顶层 box 走位找 moov（非 faststart 文件在尾部，靠 Range 跳 mdat 不下载本体），
+ * 命中后拉一个窗口本地解析。moov 超窗（超长视频的 stco 表）时 mvhd/tkhd
+ * 通常仍在窗口前部，解析到多少算多少。
+ */
+export const isobmffParser: MetadataParser = {
+  key: "isobmff",
+  version: 1,
+  budget: { maxBytes: 512 * 1024, maxReads: 16 },
+  async parse(src, head) {
+    const brand = head.toString("latin1", 8, 12).trim();
+    let off = 0;
+    for (let i = 0; i < 32; i++) {
+      const hdr = await readAt(src, head, off, 16);
+      if (hdr.length < 8) break;
+      let size = hdr.readUInt32BE(0);
+      const type = hdr.toString("latin1", 4, 8);
+      if (size === 1) {
+        if (hdr.length < 16) break;
+        size = Number(hdr.readBigUInt64BE(8)); // largesize（>4GB 的 mdat）
+      } else if (size === 0) {
+        size = src.size != null ? src.size - off : 0; // box 到文件尾
+      }
+      if (type === "moov") {
+        const win = await readAt(src, head, off, Math.min(size, 128 * 1024));
+        return { brand, ...parseMoov(win, size) };
+      }
+      if (size < 8) break;
+      off += size;
+    }
+    throw new Error("moov box not found");
+  },
+};
+
+// ─── ZIP（EOCD 标量；central directory 清单归 PR2）──────────────────────────
+
+const EOCD_SIG = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
+
+export const zipParser: MetadataParser = {
+  key: "application/zip",
+  version: 1,
+  async parse(src) {
+    // EOCD 只能从尾部定位；存量 file_size NULL 行定位不了 ⇒ 确定性 failed
+    if (src.size == null) throw new Error("file size unknown; cannot locate EOCD");
+    // EOCD 定长 22 + 最长 64KB 注释：先试 4KB，不中再扩
+    let tailLen = Math.min(src.size, 4096);
+    let tail = await src.read(src.size - tailLen, tailLen);
+    let idx = tail.lastIndexOf(EOCD_SIG);
+    if (idx < 0 && src.size > tailLen) {
+      tailLen = Math.min(src.size, 22 + 65535);
+      tail = await src.read(src.size - tailLen, tailLen);
+      idx = tail.lastIndexOf(EOCD_SIG);
+    }
+    if (idx < 0 || idx + 22 > tail.length) throw new Error("EOCD not found");
+
+    let entryCount: number = tail.readUInt16LE(idx + 10);
+    let zip64 = false;
+    if (entryCount === 0xffff) {
+      // zip64：EOCD 前是 20 字节 locator，指向 zip64 EOCD（总 entry 数在 +32）
+      const loc = idx - 20;
+      if (loc >= 0 && tail.readUInt32LE(loc) === 0x07064b50) {
+        const z64Off = Number(tail.readBigUInt64LE(loc + 8));
+        const z64 = await src.read(z64Off, 56);
+        if (z64.length >= 40 && z64.readUInt32LE(0) === 0x06064b50) {
+          entryCount = Number(z64.readBigUInt64LE(32));
+          zip64 = true;
+        }
+      }
+    }
+    return { entryCount, ...(zip64 && { zip64: true }) };
+  },
+};

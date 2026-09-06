@@ -1,4 +1,5 @@
 import type { ByteSource } from "./byte-source";
+import { pngParser, wavParser, flacParser, mp3Parser, isobmffParser, zipParser } from "./metadata-parsers";
 
 /**
  * 类型 broker（#85）：决定一个文件「是什么」并分发给对应的元数据分析器。
@@ -9,8 +10,11 @@ import type { ByteSource } from "./byte-source";
  * 【版本契约】改 magic 表/扩展名表/新增分析器 ⇒ bump BROKER_VERSION（让存量
  * unsupported 信封重走 broker）；升级某个分析器 ⇒ bump 它自己的 version（只有
  * 它命中过的信封重算）。忘 bump = 存量永不重算，这是唯一的失效通道。
+ *
+ * 版本史：1=#433 基建+PNG 样板；2=PR1 媒体/压缩标量批（wav/flac/mp3/bmff/zip）
+ * + RF64 magic。
  */
-export const BROKER_VERSION = 1;
+export const BROKER_VERSION = 2;
 
 /** 分析器读满 head（含 magic 判型所需前缀）之外的字节自己按需 Range。 */
 export const SNIFF_HEAD_LENGTH = 4096;
@@ -18,6 +22,8 @@ export const SNIFF_HEAD_LENGTH = 4096;
 export interface MetadataParser {
   key: string;
   version: number;
+  /** 预算覆盖（如 mp4 的 box 走位要更多 Range 次数）；缺省用 DEFAULT_BUDGET。 */
+  budget?: { maxBytes: number; maxReads: number };
   /** head 是文件前 SNIFF_HEAD_LENGTH 字节（短文件更短），够用就别再发请求。 */
   parse(src: ByteSource, head: Buffer): Promise<Record<string, unknown>>;
 }
@@ -61,6 +67,8 @@ export function sniffDetectedType(head: Buffer, fileName: string): string | null
     if (has(head, 8, "AVI ")) return "video/x-msvideo";
     return null;
   }
+  // RF64（EBU 3306，>4GB 的 BWF/ADM 交付常见形态）：布局同 RIFF、真实尺寸在 ds64
+  if (has(head, 0, "RF64") && has(head, 8, "WAVE")) return "audio/wav";
 
   if (has(head, 0, "%PDF-")) return "application/pdf";
 
@@ -92,32 +100,28 @@ export function sniffDetectedType(head: Buffer, fileName: string): string | null
 }
 
 // ─── 分析器注册表 ─────────────────────────────────────────────────────────────
-// 按 detectedType 精确分发。各分析器的 data shape 归自己私有，基建不定词表；
-// 新格式（wav/mp3/pdf 页数/工程文件…）按格式单开 PR 往这里挂，互不阻塞。
-
-/** PNG 尺寸：IHDR 定长在文件头 33 字节内，纯 head 解析，管线参考样板。 */
-const pngParser: MetadataParser = {
-  key: "image/png",
-  version: 1,
-  async parse(_src, head) {
-    // 8 字节签名 + IHDR chunk（4 长度 + 4 "IHDR" + 13 数据）
-    if (head.length < 33 || !has(head, 12, "IHDR")) throw new Error("PNG IHDR missing");
-    return {
-      width: head.readUInt32BE(16),
-      height: head.readUInt32BE(20),
-      bitDepth: head[24],
-    };
-  },
-};
+// 按 detectedType 精确分发（一个 parser 可挂多个类型键，如 isobmff 通吃
+// mp4/m4a/mov）。各分析器的 data shape 归自己私有，基建不定词表；新格式
+// （pdf 页数/工程文件…）按格式单开 PR 往这里挂，互不阻塞。分析器本体在
+// lib/asset/metadata-parsers.ts。
 
 const PARSERS: ReadonlyMap<string, MetadataParser> = new Map([
-  [pngParser.key, pngParser],
+  ["image/png", pngParser],
+  ["audio/wav", wavParser],
+  ["audio/flac", flacParser],
+  ["audio/mpeg", mp3Parser],
+  ["audio/mp4", isobmffParser],
+  ["video/mp4", isobmffParser],
+  ["video/quicktime", isobmffParser],
+  ["application/zip", zipParser],
 ]);
 
 export function resolveParser(detectedType: string | null): MetadataParser | null {
   return detectedType ? (PARSERS.get(detectedType) ?? null) : null;
 }
 
+/** 按 parser 自己的 key 查（信封里存的是 parser.key，不是注册表的类型键）。 */
 export function parserByKey(key: string): MetadataParser | null {
-  return PARSERS.get(key) ?? null;
+  for (const p of PARSERS.values()) if (p.key === key) return p;
+  return null;
 }

@@ -63,12 +63,25 @@ function formatBytes(n: number): string {
   return `${n} B`;
 }
 
-/** 信封 → 顶栏信息行「PNG 图片 · 1920×1080 · 2.4 MB」；无可展示项返回 null。 */
+function formatDuration(s: number): string {
+  const total = Math.round(s);
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+    : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+/** 信封 → 顶栏信息行「WAV 音频 · 48 kHz/24 bit · 3:45 · 24.1 MB」；无可展示项返回 null。 */
 function metaInfoLine(meta: MetaEnvelope | null, fileSize: number | null): string | null {
   const parts: string[] = [];
   if (meta?.detectedType) parts.push(TYPE_LABELS[meta.detectedType] ?? meta.detectedType);
   const d = meta?.data;
   if (typeof d?.width === "number" && typeof d?.height === "number") parts.push(`${d.width}×${d.height}`);
+  if (typeof d?.sampleRate === "number" && typeof d?.bitDepth === "number" && d.bitDepth > 0)
+    parts.push(`${d.sampleRate / 1000} kHz/${d.bitDepth} bit`);
+  if (typeof d?.durationSeconds === "number")
+    parts.push(`${d.estimated === true ? "≈" : ""}${formatDuration(d.durationSeconds)}`);
+  if (typeof d?.entryCount === "number") parts.push(`${d.entryCount} 项`);
   if (fileSize != null) parts.push(formatBytes(fileSize));
   return parts.length > 0 ? parts.join(" · ") : null;
 }
