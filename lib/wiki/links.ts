@@ -92,39 +92,45 @@ export async function syncWikiLinks(
 ): Promise<void> {
   const edges = extractMentionEdges(body)
     .filter(e => !(e.entityType === "wiki" && e.entityId === sourceId));
-
-  // ── embed 挂载边 reconcile 的读侧（门检查有网络往返，放事务外）─────────────
   const embedIds = new Set(extractEmbedAssetIds(body));
   const pool = getPool();
-  const current = (await pool.query<{ id: string; asset_id: string }>(
-    `SELECT nm.id, n.asset_id FROM node_mount nm
-     JOIN node n ON n.id = nm.node_id
-     WHERE nm.production_id = $1 AND nm.mount_type = 'embed' AND nm.mount_id = $2
-       AND n.asset_id IS NOT NULL`,
-    [productionId, sourceId],
-  )).rows;
-  const currentAssets = new Set(current.map(r => r.asset_id));
-  const staleMountIds = current.filter(r => !embedIds.has(r.asset_id)).map(r => r.id);
-  const candidateIds = [...embedIds].filter(a => !currentAssets.has(a));
-
-  let grantedAdds: string[] = [];
-  if (candidateIds.length > 0) {
-    // owner 旁路要真 owner 位（isAdmin 是死字段恒 false，见 PR #281 事故）
-    const owner = await pool.query<{ owner_id: string | null }>(
-      `SELECT owner_id FROM production WHERE id = $1`, [productionId]);
-    const actor: GrantActor = {
-      userId: authorUserId, isAdmin: false,
-      isOwner: owner.rows[0]?.owner_id === authorUserId,
-    };
-    const results = await Promise.all(candidateIds.map(a =>
-      canPublishAsset(actor, productionId, a, "create")));
-    grantedAdds = candidateIds.filter((_, i) => results[i]);
-  }
 
   // 删+插同事务：中途崩溃不留"边被清但没重建"的空窗（review #303-r2-1）
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // 宿主行锁串行化同一篇的并发 reconcile（AI review #448-1：READ COMMITTED
+    // 下裸 NOT EXISTS 挡不住双事务同过存在性检查——node_mount 无唯一约束，
+    // 双插会真落两行）。embed 边唯一写入方就是本函数（两条 mounts 路由拒收
+    // 直写），锁住 wiki 行即锁住全部写入序；读侧快照也因此不再陈旧。
+    await client.query(`SELECT 1 FROM wiki WHERE id = $1::uuid FOR UPDATE`, [sourceId]);
+
+    const current = (await client.query<{ id: string; asset_id: string }>(
+      `SELECT nm.id, n.asset_id FROM node_mount nm
+       JOIN node n ON n.id = nm.node_id
+       WHERE nm.production_id = $1 AND nm.mount_type = 'embed' AND nm.mount_id = $2
+         AND n.asset_id IS NOT NULL`,
+      [productionId, sourceId],
+    )).rows;
+    const currentAssets = new Set(current.map(r => r.asset_id));
+    const staleMountIds = current.filter(r => !embedIds.has(r.asset_id)).map(r => r.id);
+    const candidateIds = [...embedIds].filter(a => !currentAssets.has(a));
+
+    // 门检查走各自的连接读已提交数据，持锁窗口内的几次点查，代价可接受
+    let grantedAdds: string[] = [];
+    if (candidateIds.length > 0) {
+      // owner 旁路要真 owner 位（isAdmin 是死字段恒 false，见 PR #281 事故）
+      const owner = await client.query<{ owner_id: string | null }>(
+        `SELECT owner_id FROM production WHERE id = $1`, [productionId]);
+      const actor: GrantActor = {
+        userId: authorUserId, isAdmin: false,
+        isOwner: owner.rows[0]?.owner_id === authorUserId,
+      };
+      const results = await Promise.all(candidateIds.map(a =>
+        canPublishAsset(actor, productionId, a, "create")));
+      grantedAdds = candidateIds.filter((_, i) => results[i]);
+    }
+
     await client.query(
       `DELETE FROM wiki_entity_link WHERE wiki_id = $1::uuid AND origin = 'wiki_body'`,
       [sourceId],
@@ -141,9 +147,9 @@ export async function syncWikiLinks(
       await client.query(`DELETE FROM node_mount WHERE id = ANY($1::text[])`, [staleMountIds]);
     }
     for (const assetId of grantedAdds) {
-      // NOT EXISTS 兜并发保存：node_mount 无唯一约束，两笔并发各算出同一个
-      // toAdd 时只落一行。壳节点缺失（1:1 不变量破损）则静默不落——与
-      // canViewAsset 的无壳分支同口径。
+      // NOT EXISTS 不是并发防线（那是上面行锁的职责），只兜历史存量：老前端
+      // 管道可能留下的重复 embed 行别再叠一层。壳节点缺失（1:1 不变量破损）
+      // 则静默不落——与 canViewAsset 的无壳分支同口径。
       await client.query(
         `INSERT INTO node_mount (id, node_id, production_id, mount_type, mount_id, created_by)
          SELECT $1, n.id, $2, 'embed', $3, $4::uuid FROM node n
