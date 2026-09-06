@@ -617,7 +617,7 @@ const EOCD_SIG = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
  */
 export const zipParser: MetadataParser = {
   key: "application/zip",
-  version: 3, // v2：+CD 清单（PR2）；v3：+包内工程递归（PR3）
+  version: 4, // v2：+CD 清单；v3：+包内工程递归；v4：projects 携带工程元数据本体
   budget: { maxBytes: 48 * 1024 * 1024, maxReads: 24 },
   async parse(src) {
     // EOCD 只能从尾部定位；存量 file_size NULL 行定位不了 ⇒ 确定性 failed
@@ -716,8 +716,40 @@ export const zipParser: MetadataParser = {
 };
 
 const ZIP_PROJECT_CAP = 3;              // 每档案最多分析的工程数
-const ZIP_PROJECT_ENTRY_MAX = 8 * 1024 * 1024; // 压缩后超此的工程 entry 跳过
 const ZIP_PROJECT_MISSING_CAP = 50;
+
+/** deflate entry 的解压上限（压缩后）。zip 内支持格式≠独立支持格式（2026-09-06
+ *  用户定谳）：store 的 entry 可当独立文件 Range 分析任何格式；deflate 无随机
+ *  访问、必须从头解压——小文件（工程/图片）整解压无妨，媒体类动辄巨大不解。 */
+export const ZIP_ENTRY_INFLATE_CAP = 8 * 1024 * 1024;
+
+/** zip entry → ByteSource。store=偏移直通（不物化，GB 级媒体照样 Range 读头）；
+ *  deflate≤cap=整解压进内存；其余抛确定性错误（加密/超限/未知 method）。 */
+export async function openZipEntrySource(
+  fileSrc: ByteSource,
+  entry: { offset: number; method: number; compressedBytes: number; uncompressedBytes: number | null; encrypted?: boolean },
+): Promise<ByteSource> {
+  if (entry.encrypted) throw new Error("encrypted entry");
+  // CD 的 offset 指 local header；其 name/extra 长度可与 CD 不同，必须现读
+  const lh = await fileSrc.read(entry.offset, 30);
+  if (lh.length < 30 || lh.readUInt32LE(0) !== 0x04034b50) throw new Error("bad local header");
+  const dataStart = entry.offset + 30 + lh.readUInt16LE(26) + lh.readUInt16LE(28);
+  if (entry.method === 0) {
+    const size = entry.uncompressedBytes ?? entry.compressedBytes;
+    return {
+      size,
+      async read(o, l) {
+        const cl = Math.min(l, Math.max(0, size - o));
+        return cl <= 0 ? Buffer.alloc(0) : fileSrc.read(dataStart + o, cl);
+      },
+    };
+  }
+  if (entry.method !== 8) throw new Error(`unsupported compression method ${entry.method}`);
+  if (entry.compressedBytes > ZIP_ENTRY_INFLATE_CAP)
+    throw new Error("entry too large to decompress for metadata");
+  const comp = await fileSrc.read(dataStart, entry.compressedBytes);
+  return bufferByteSource(inflateRawSync(comp, { maxOutputLength: 64 * 1024 * 1024 }));
+}
 
 const PROJECT_PARSER_BY_EXT: Record<string, MetadataParser> = {
   als: alsParser, qlab4: qlabParser, qlab5: qlabParser,
@@ -737,22 +769,26 @@ async function analyzeZipProjects(
     const parser = PROJECT_PARSER_BY_EXT[ext];
     if (!parser) continue;
     const method = Number(e.method), csize = Number(e.compressedBytes), off = Number(e.offset);
-    if (!Number.isFinite(csize) || csize <= 0 || csize > ZIP_PROJECT_ENTRY_MAX) continue;
+    if (!Number.isFinite(csize) || csize <= 0 || csize > ZIP_ENTRY_INFLATE_CAP) continue;
     if (method !== 0 && method !== 8) continue;
     try {
-      // CD 的 offset 指 local header；其 name/extra 长度可与 CD 不同，必须现读
-      const lh = await src.read(off, 30);
-      if (lh.length < 30 || lh.readUInt32LE(0) !== 0x04034b50) throw new Error("bad local header");
-      const dataStart = off + 30 + lh.readUInt16LE(26) + lh.readUInt16LE(28);
-      const comp = await src.read(dataStart, csize);
-      const bytes = method === 8 ? inflateRawSync(comp, { maxOutputLength: 64 * 1024 * 1024 }) : comp;
-      const data = await parser.parse(bufferByteSource(bytes), bytes.subarray(0, 4096));
+      const es = await openZipEntrySource(src, {
+        offset: off, method, compressedBytes: csize,
+        uncompressedBytes: typeof e.uncompressedBytes === "number" ? e.uncompressedBytes : null,
+        encrypted: e.encrypted === true,
+      });
+      const head = await es.read(0, 4096);
+      const data = await parser.parse(es, head);
       const refs = ((data.refs as ProjectRef[] | undefined) ?? []).filter((r) => r.scope === "project");
       const matched = matchRefs(refs, names, dirOf(path));
       const missing = matched.filter((m) => !m.resolved).map((m) => m.path);
       out.push({
         path, kind: parser.key, refCount: refs.length, missingCount: missing.length,
         ...(missing.length > 0 && { missing: missing.slice(0, ZIP_PROJECT_MISSING_CAP) }),
+        // 工程元数据本体（cue 树/track 结构…）随体检一起带出——只有引用 join
+        // 没有结构，包内解析就成了半截子（2026-09-06 用户点破）。projects 在
+        // sidecar 可卸载表里，体量大自动落 R2
+        meta: data,
       });
     } catch (err) {
       if (err instanceof ByteBudgetExceededError) throw err; // 预算全局，向上收 oversized/truncated
