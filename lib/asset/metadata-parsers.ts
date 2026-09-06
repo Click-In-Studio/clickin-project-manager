@@ -35,20 +35,82 @@ export const pngParser: MetadataParser = {
 
 // ─── WAV / BWF / RF64 ────────────────────────────────────────────────────────
 
+/** axml 读取上限：超过按 admXmlOversized 标注、不读（真 ADM 实测 2-3MB 级）。 */
+const ADM_XML_MAX = 16 * 1024 * 1024;
+const ADM_OBJECT_CAP = 500;
+const ADM_PROGRAMME_CAP = 8;
+
 /**
- * RIFF chunk 走位。BWF 的 bext/axml 常在 data 之后（按声明尺寸跳过 data，
+ * ADM XML（BS.2076）轻量解析：只取结构面——programme/object 名与时间、各实体
+ * 计数。audioBlockFormat 关键帧（axml 体量的大头）刻意不碰，那是渲染/转换
+ * 工具（如 adm_parser 管线）的事，不是元数据。
+ */
+export function parseAdmXml(xml: string): Record<string, unknown> {
+  const attr = (tag: string, name: string): string | null => {
+    const m = new RegExp(`\\b${name}="([^"]*)"`).exec(tag);
+    return m ? decodeXmlEntities(m[1]) : null;
+  };
+  // 判据是 `<tag␣`（带尾空格）：ADM 实体规范上必带 ID 属性，无属性自闭合标签
+  // （<audioObject/>）不在统计面——遇到这种畸形文件计数会偏低，属已知假设
+  const count = (tag: string): number => xml.split(`<${tag} `).length - 1;
+
+  const programmes: Record<string, unknown>[] = [];
+  let programmesTruncated = false;
+  const progRe = /<audioProgramme [^>]*>/g;
+  for (let m = progRe.exec(xml); m; m = progRe.exec(xml)) {
+    if (programmes.length >= ADM_PROGRAMME_CAP) { programmesTruncated = true; break; }
+    programmes.push({
+      name: attr(m[0], "audioProgrammeName") ?? attr(m[0], "audioProgrammeID") ?? "",
+      ...(attr(m[0], "start") != null && { start: attr(m[0], "start") }),
+      ...(attr(m[0], "end") != null && { end: attr(m[0], "end") }),
+    });
+  }
+
+  const objects: Record<string, unknown>[] = [];
+  let objectsTruncated = false;
+  const objRe = /<audioObject [^>]*>/g;
+  for (let m = objRe.exec(xml); m; m = objRe.exec(xml)) {
+    if (objects.length >= ADM_OBJECT_CAP) { objectsTruncated = true; break; }
+    objects.push({
+      name: attr(m[0], "audioObjectName") ?? attr(m[0], "audioObjectID") ?? "",
+      ...(attr(m[0], "start") != null && { start: attr(m[0], "start") }),
+      ...(attr(m[0], "duration") != null && { duration: attr(m[0], "duration") }),
+    });
+  }
+
+  return {
+    adm: {
+      programmes,
+      programmeCount: count("audioProgramme"),
+      contentCount: count("audioContent"),
+      objectCount: count("audioObject"),
+      packFormatCount: count("audioPackFormat"),
+      channelFormatCount: count("audioChannelFormat"),
+      trackUidCount: count("audioTrackUID"),
+      ...(objectsTruncated && { objectsTruncated: true }),
+      ...(programmesTruncated && { programmesTruncated: true }),
+    },
+    admObjects: objects, // 大列表独立成顶层字段，走 sidecar 卸载
+  };
+}
+
+/**
+ * RIFF chunk 走位。BWF 的 bext/axml/chna 常在 data 之后（按声明尺寸跳过 data，
  * 不读音频本体）；RF64（>4GB 的 ADM 交付常见）真实尺寸在 ds64 chunk。
- * 本期只报 axml 的存在与体量，完整 ADM XML 归 PR2 sidecar。
+ * v2：axml（ADM XML）拉回解析结构面 + chna 轨映射计数（QC 驱动，#85 长尾）。
  */
 export const wavParser: MetadataParser = {
   key: "audio/wav",
-  version: 1,
-  budget: { maxBytes: 256 * 1024, maxReads: 16 },
+  version: 2, // v2：+ADM 结构解析（axml）+chna 计数
+  budget: { maxBytes: 24 * 1024 * 1024, maxReads: 16 },
   async parse(src, head) {
     let byteRate = 0, sampleRate = 0, channels = 0, bitDepth = 0;
     let dataSize: number | null = null;
     let ds64DataSize: number | null = null;
     let isBwf = false, admXmlBytes = 0;
+    let axmlOffset: number | null = null;
+    let chnaOffset: number | null = null;
+    let hasDbmd = false;
 
     let off = 12;
     for (let i = 0; i < 40; i++) {
@@ -78,16 +140,45 @@ export const wavParser: MetadataParser = {
         isBwf = true;
       } else if (id === "axml") {
         admXmlBytes = size < 0xffffffff ? size : 0;
+        if (admXmlBytes > 0) axmlOffset = off + 8;
+      } else if (id === "chna") {
+        // 声明尺寸不足以放两个计数的畸形 chunk 不读——越界读到下个 chunk 头
+        // 会得到看似合法的假 QC 数字，宁缺毋假
+        if (size >= 4 && size < 0xffffffff) chnaOffset = off + 8;
+      } else if (id === "dbmd") {
+        hasDbmd = true; // Dolby 元数据（Atmos 交付链路的旁证）
       }
       if (size >= 0xffffffff) break; // 尺寸仍未知（无 ds64 的破损 RF64），不盲走
       off += 8 + size + (size % 2); // RIFF chunk 按偶数对齐
     }
 
     if (sampleRate === 0) throw new Error("WAV fmt chunk missing");
+
+    // chna（BS.2088 轨→ADM trackUID 映射）：只取头两个计数
+    let chnaTracks: number | null = null, chnaUids: number | null = null;
+    if (chnaOffset != null) {
+      const c = await readAt(src, head, chnaOffset, 4);
+      if (c.length >= 4) { chnaTracks = c.readUInt16LE(0); chnaUids = c.readUInt16LE(2); }
+    }
+
+    // axml：上限内整块拉回解析结构面；超限只标 oversized（keyframe 大户不硬啃）
+    let admData: Record<string, unknown> = {};
+    if (axmlOffset != null) {
+      if (admXmlBytes <= ADM_XML_MAX) {
+        const xml = (await src.read(axmlOffset, admXmlBytes)).toString("utf8");
+        admData = parseAdmXml(xml);
+      } else {
+        admData = { adm: { xmlOversized: true } };
+      }
+    }
+
     return {
       durationSeconds: dataSize != null && byteRate > 0 ? dataSize / byteRate : null,
       sampleRate, channels, bitDepth, isBwf,
       ...(admXmlBytes > 0 && { admXmlBytes }),
+      ...(hasDbmd && { hasDbmd: true }),
+      ...(chnaTracks != null && { chnaTracks, chnaUids }),
+      ...admData,
     };
   },
 };
