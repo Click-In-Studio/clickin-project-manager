@@ -197,17 +197,32 @@ export async function updateAsset(
   return res.rows[0] ? rowToAsset(res.rows[0]) : null;
 }
 
-/** Delete asset and return R2 keys that should be cleaned up. */
+/** Delete asset and return R2 keys that should be cleaned up.
+ *  读键+删除同事务，FOR UPDATE 锁行挡住并发的懒元数据 UPDATE（防止 SELECT 与
+ *  DELETE 之间 sidecarKey 变动漏收）。窗口外的残余孤儿（如 sidecar 已 PUT 到
+ *  R2、信封还没落库时资产被删）归 #428 回收补漏——sidecar key 按 fileId 确定
+ *  性，扫库可清。 */
 export async function deleteAsset(assetId: string): Promise<{ r2Keys: string[] }> {
-  const filesRes = await getPool().query<{ r2_key: string | null; thumbnail_r2_key: string | null; sidecar_key: string | null }>(
-    `SELECT r2_key, thumbnail_r2_key, metadata->>'sidecarKey' AS sidecar_key
-     FROM asset_file WHERE asset_id = $1`, [assetId]
-  );
-  const r2Keys = filesRes.rows.flatMap(r =>
-    [r.r2_key, r.thumbnail_r2_key, r.sidecar_key].filter((k): k is string => k != null)
-  );
-  await getPool().query(`DELETE FROM asset WHERE id = $1`, [assetId]);
-  return { r2Keys };
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const filesRes = await client.query<{ r2_key: string | null; thumbnail_r2_key: string | null; sidecar_key: string | null }>(
+      `SELECT r2_key, thumbnail_r2_key, metadata->>'sidecarKey' AS sidecar_key
+       FROM asset_file WHERE asset_id = $1 FOR UPDATE`, [assetId]
+    );
+    await client.query(`DELETE FROM asset WHERE id = $1`, [assetId]);
+    await client.query("COMMIT");
+    return {
+      r2Keys: filesRes.rows.flatMap(r =>
+        [r.r2_key, r.thumbnail_r2_key, r.sidecar_key].filter((k): k is string => k != null)
+      ),
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── Asset file resolution ────────────────────────────────────────────────────
