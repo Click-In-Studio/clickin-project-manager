@@ -90,7 +90,7 @@ export async function setAssetFileMetadata(fileId: string, env: MetadataEnvelope
 export const SIDECAR_THRESHOLD_BYTES = 32 * 1024;
 
 /** 可卸载到 sidecar 的大数组字段（清单/cue 树/track 表/引用表）。标量永远留信封。 */
-const SIDECAR_LIST_FIELDS = ["entries", "cueLists", "tracks", "refs", "projects"] as const;
+const SIDECAR_LIST_FIELDS = ["entries", "cueLists", "tracks", "refs", "projects", "admObjects"] as const;
 
 export function metadataSidecarKey(fileId: string): string {
   return `meta/${fileId}.json`;
