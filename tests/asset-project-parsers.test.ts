@@ -348,6 +348,19 @@ describe("zipParser v3：包内工程递归", () => {
     expect(projects[0].missing).toEqual(["Samples/Recorded/take1.aif"]);
   });
 
+  it("AppleDouble 垃圾（__MACOSX/._x.qlab5）不进工程扫描（线上「解析失败」占坑实测）", async () => {
+    const als = gzipSync(Buffer.from(ALS_XML));
+    const zip = realZip([
+      { name: "__MACOSX/Proj/._show.als", content: Buffer.from("AppleDouble junk") },
+      { name: "Proj/._backup.qlab5", content: Buffer.from("junk") },
+      { name: "Proj/show.als", content: als, deflate: true },
+    ]);
+    const env = await extractEnvelope(bufferByteSource(zip), "mac交付.zip");
+    const projects = env.data?.projects as Record<string, unknown>[];
+    expect(projects).toHaveLength(1); // 只有真工程
+    expect(projects[0].path).toBe("Proj/show.als");
+  });
+
   it("损坏的工程 entry 只记错误行，不拖垮 zip 信封", async () => {
     const zip = realZip([{ name: "bad.als", content: Buffer.from("not gzip") }]);
     const env = await extractEnvelope(bufferByteSource(zip), "坏工程.zip");

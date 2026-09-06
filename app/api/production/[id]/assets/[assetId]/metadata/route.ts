@@ -50,7 +50,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
       const offset = Number(e.offset), method = Number(e.method), compressedBytes = Number(e.compressedBytes);
       if (!Number.isFinite(offset) || !Number.isFinite(method) || !Number.isFinite(compressedBytes))
         return Response.json({ entryPath, metadata: null, reason: "条目索引不完整（旧版本清单）" },
-          { headers: { "Cache-Control": "private, max-age=3600" } });
+          { headers: { "Cache-Control": "private, max-age=300" } });
       try {
         const es = await openZipEntrySource(r2ByteSource(file.r2Key, file.fileSize), {
           offset, method, compressedBytes,
@@ -60,7 +60,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
         const entryMeta = await extractEnvelope(es, entryPath.slice(entryPath.lastIndexOf("/") + 1));
         return Response.json(
           { entryPath, metadata: entryMeta },
-          { headers: { "Cache-Control": "private, max-age=3600" } },
+          { headers: { "Cache-Control": "private, max-age=300" } },
         );
       } catch (err) {
         if (err instanceof TransientReadError) throw err; // 交给外层降级/瞬态语义
@@ -75,7 +75,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
         if (reason === "无法解析该条目") console.warn(`[asset-metadata] entry parse failed (${file.id} ${entryPath}):`, err);
         return Response.json(
           { entryPath, metadata: null, reason },
-          { headers: { "Cache-Control": "private, max-age=3600" } },
+          { headers: { "Cache-Control": "private, max-age=300" } },
         );
       }
     }
@@ -91,7 +91,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
     // ⇒ private 短缓存挡重复打开；鉴权响应必须 private
     return Response.json(
       { fileId: file.id, fileSize: file.fileSize, metadata },
-      { headers: { "Cache-Control": "private, max-age=3600" } },
+      // no-cache：URL 不携带 parserVersion，长缓存会在版本 bump/热修后让客户端端着
+      // 陈旧数据最长一小时（2026-09-06 乱码热修后线上实锤，Tauri/WKWebView 硬刷新也不回源）
+      { headers: { "Cache-Control": "private, no-cache" } },
     );
   } catch (e) {
     // 只降级瞬态读失败（R2 网络类）：回旧信封/空，不落盘，下次请求重试
