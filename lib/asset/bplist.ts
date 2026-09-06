@@ -20,9 +20,15 @@ export type BplistValue =
 
 const MAX_OBJECTS = 500_000; // 护栏：对象数轰炸
 
+/** 大端无符号整数，size 1-8 逐字节累加（trailer 的 size 不要求是 2 的幂，
+ *  size=7 也合法；>8 或超安全整数一律抛错，不静默截断）。 */
 function readUIntBE(buf: Buffer, off: number, size: number): number {
-  if (size <= 6) return buf.readUIntBE(off, size);
-  return Number(buf.readBigUInt64BE(off + size - 8));
+  if (size < 1 || size > 8) throw new Error(`bplist unsupported int width ${size}`);
+  if (off < 0 || off + size > buf.length) throw new Error("bplist int out of range");
+  let v = 0;
+  for (let i = 0; i < size; i++) v = v * 256 + buf[off + i];
+  if (v > Number.MAX_SAFE_INTEGER) throw new Error("bplist int exceeds safe integer");
+  return v;
 }
 
 export function parseBplist(buf: Buffer): { objects: BplistValue[]; top: BplistValue } {
@@ -69,24 +75,41 @@ export function parseBplist(buf: Buffer): { objects: BplistValue[]; top: BplistV
     const pos = start + 1;
     let v: BplistValue;
 
+    // 声明长度先对剩余字节验界再用——不给「单对象声明天文长度」绕过
+    // MAX_OBJECTS 护栏直接触发大分配的机会
+    const checkLen = (p: number, bytes: number) => {
+      if (bytes < 0 || p + bytes > buf.length - 32) throw new Error("bplist declared length out of range");
+    };
+
     if (marker === 0x00) v = null;
     else if (marker === 0x08) v = false;
     else if (marker === 0x09) v = true;
-    else if (high === 0x10) { const size = 1 << (marker & 0x0f); v = readUIntBE(buf, pos, size); }
+    // int 对象的宽容语义（严格护栏只留给结构性整数：长度/偏移/引用走 readUIntBE）：
+    // 8 字节按规范有符号（-1 存 0xFF…）、16 字节（UUID/哈希类，真 qlab 文件实测
+    // 存在）取值有损转 Number——值我们不消费，拒绝会让整个工程解析失败
+    else if (high === 0x10) {
+      const size = 1 << (marker & 0x0f);
+      if (pos + size > buf.length) throw new Error("bplist int out of range");
+      if (size === 8) v = Number(buf.readBigInt64BE(pos));
+      else if (size === 16) v = Number((buf.readBigUInt64BE(pos) << BigInt(64)) | buf.readBigUInt64BE(pos + 8));
+      else v = readUIntBE(buf, pos, size);
+    }
     else if (high === 0x20) { const size = 1 << (marker & 0x0f); v = size === 4 ? buf.readFloatBE(pos) : buf.readDoubleBE(pos); }
     else if (marker === 0x33) v = buf.readDoubleBE(pos); // date：2001 纪元秒
-    else if (high === 0x40) { const { len, pos: p } = readLength(marker, pos); v = buf.subarray(p, p + len); }
-    else if (high === 0x50) { const { len, pos: p } = readLength(marker, pos); v = buf.toString("latin1", p, p + len); }
+    else if (high === 0x40) { const { len, pos: p } = readLength(marker, pos); checkLen(p, len); v = buf.subarray(p, p + len); }
+    else if (high === 0x50) { const { len, pos: p } = readLength(marker, pos); checkLen(p, len); v = buf.toString("latin1", p, p + len); }
     // utf16-BE：局部复制再 swap，不原地改调用方的字节
-    else if (high === 0x60) { const { len, pos: p } = readLength(marker, pos); v = Buffer.from(buf.subarray(p, p + len * 2)).swap16().toString("utf16le"); }
+    else if (high === 0x60) { const { len, pos: p } = readLength(marker, pos); checkLen(p, len * 2); v = Buffer.from(buf.subarray(p, p + len * 2)).swap16().toString("utf16le"); }
     else if (high === 0x80) { const size = (marker & 0x0f) + 1; v = new BplistUID(readUIntBE(buf, pos, size)); }
     else if (high === 0xa0 || high === 0xc0) { // array / set
       const { len, pos: p } = readLength(marker, pos);
+      checkLen(p, len * refSize);
       const arr: BplistValue[] = new Array(len);
       for (let i = 0; i < len; i++) arr[i] = obj(readUIntBE(buf, p + i * refSize, refSize));
       v = arr;
     } else if (high === 0xd0) { // dict：keys 引用连排 + values 引用连排
       const { len, pos: p } = readLength(marker, pos);
+      checkLen(p, len * 2 * refSize);
       const m = new Map<BplistValue, BplistValue>();
       for (let i = 0; i < len; i++) {
         m.set(

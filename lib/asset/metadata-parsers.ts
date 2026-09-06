@@ -290,12 +290,15 @@ async function readWhole(src: ByteSource, head: Buffer): Promise<Buffer> {
   return Buffer.concat([head, await src.read(head.length, src.size - head.length)]);
 }
 
+/** 单趟解码：串行多趟 replace 会把数值实体产出的 & 与后续文本拼成新实体二次
+ *  解码（&#38;amp; 应得 "&amp;" 而非 "&"）——每个实体恰好解一次。 */
+const XML_ENTITY: Record<string, string> = { quot: '"', apos: "'", lt: "<", gt: ">", amp: "&" };
 function decodeXmlEntities(s: string): string {
-  return s
-    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
-    .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
-    .replace(/&amp;/g, "&");
+  return s.replace(/&(quot|apos|lt|gt|amp|#x[0-9a-fA-F]+|#\d+);/g, (whole, e: string) => {
+    if (e[0] !== "#") return XML_ENTITY[e];
+    const code = e[1] === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1));
+    try { return String.fromCodePoint(code); } catch { return whole; }
+  });
 }
 
 /** 工程引用公约形状：{ path, absolutePath?, scope }。scope="project"=随工程走的
@@ -336,9 +339,10 @@ export function parseAlsXml(xml: string): Record<string, unknown> {
   const tracks: Track[] = [];
   const trackRe = /<(MidiTrack|AudioTrack|ReturnTrack|GroupTrack) Id="(-?\d+)"/g;
   const opens: { type: string; id: number; at: number }[] = [];
+  let truncated = false;
   for (let m = trackRe.exec(xml); m; m = trackRe.exec(xml)) {
+    if (opens.length >= PROJECT_TRACK_CAP) { truncated = true; break; } // 诚实标注：超帽即截断
     opens.push({ type: m[1], id: Number(m[2]), at: m.index });
-    if (opens.length > PROJECT_TRACK_CAP) break;
   }
   for (let i = 0; i < opens.length; i++) {
     const seg = xml.slice(opens[i].at, opens[i + 1]?.at ?? Math.min(xml.length, opens[i].at + 200_000));
@@ -356,7 +360,8 @@ export function parseAlsXml(xml: string): Record<string, unknown> {
   const refs: ProjectRef[] = [];
   const seen = new Set<string>();
   const refRe = /<FileRef>([\s\S]{0,4000}?)<\/FileRef>/g;
-  for (let m = refRe.exec(xml); m && refs.length < PROJECT_REF_CAP; m = refRe.exec(xml)) {
+  for (let m = refRe.exec(xml); m; m = refRe.exec(xml)) {
+    if (refs.length >= PROJECT_REF_CAP) { truncated = true; break; }
     const block = m[1];
     const rel = /<RelativePath Value="([^"]*)"/.exec(block)?.[1];
     const abs = /<Path Value="([^"]*)"/.exec(block)?.[1];
@@ -376,6 +381,7 @@ export function parseAlsXml(xml: string): Record<string, unknown> {
     trackCount: tracks.length,
     refCount: refs.length,
     projectRefCount: refs.filter((r) => r.scope === "project").length,
+    ...(truncated ? { truncated: true } : {}),
     tracks,
     refs,
   };
@@ -470,14 +476,15 @@ export function parseQlabWorkspace(raw: Buffer): Record<string, unknown> {
   // 扫 F53Alias（qlab5 的 relativePath 在这，qlab4 只有 lastKnownPath）
   const refs: ProjectRef[] = [];
   const seen = new Set<string>();
+  let refsTruncated = false;
   for (const rel of cueRelPaths) {
-    if (refs.length >= PROJECT_REF_CAP) break;
+    if (refs.length >= PROJECT_REF_CAP) { refsTruncated = true; break; }
     if (seen.has(rel)) continue;
     seen.add(rel);
     refs.push({ path: rel, scope: "project" });
   }
   for (const o of archive) {
-    if (refs.length >= PROJECT_REF_CAP) break;
+    if (refs.length >= PROJECT_REF_CAP) { refsTruncated = true; break; }
     if (classOf(o) !== "F53Alias") continue;
     const rel = str(o, "relativePath");
     const abs = str(o, "lastKnownPath");
@@ -502,7 +509,7 @@ export function parseQlabWorkspace(raw: Buffer): Record<string, unknown> {
     cueCount: cueTotal,
     refCount: refs.length,
     projectRefCount: refs.filter((r) => r.scope === "project").length,
-    ...(cueTruncated ? { truncated: true } : {}),
+    ...(cueTruncated || refsTruncated ? { truncated: true } : {}),
     cueLists,
     refs,
   };

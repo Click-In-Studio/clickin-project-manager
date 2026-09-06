@@ -76,6 +76,21 @@ describe("alsParser", () => {
     expect(refs[1].scope).toBe("external"); // RelativePathType=5（库）
   });
 
+  it("实体单趟解码：&#38;amp; 得 '&amp;' 不二次解码", () => {
+    const xml = ALS_XML.replace('Value="Keys"', 'Value="A &#38;amp; B &#x26;lt;"');
+    const d = parseAlsXml(xml);
+    const keys = (d.tracks as { name: string }[])[2];
+    expect(keys.name).toBe("A &amp; B &lt;");
+  });
+
+  it("track 超帽截断如实标 truncated", () => {
+    const many = Array.from({ length: 501 }, (_, i) =>
+      `<AudioTrack Id="${i}"><Name><EffectiveName Value="T${i}" /></Name><TrackGroupId Value="-1" /></AudioTrack>`).join("");
+    const d = parseAlsXml(`<Ableton Creator="Live"><Tracks>${many}</Tracks></Ableton>`);
+    expect(d.trackCount).toBe(500);
+    expect(d.truncated).toBe(true);
+  });
+
   it("端到端：gzip 字节 + .als 扩展名 → 破同门命中 als 分析器", async () => {
     const gz = gzipSync(Buffer.from(ALS_XML));
     expect(sniffDetectedType(gz, "show.als")).toBe("application/vnd.ableton.live-set");
@@ -236,6 +251,31 @@ describe("bplist 读取器", () => {
     const b = writeBplist(M({ a: "b" }));
     b.writeBigUInt64BE(BigInt(999999999), b.length - 24); // numObjects 轰炸
     expect(() => parseBplist(b)).toThrow();
+  });
+
+  it("单对象声明天文长度：先验界再分配，不给大分配 DoS 机会", () => {
+    // 手搓：一个数组对象声明 0xffffff 个元素但字节根本不够
+    const body = Buffer.from([0xaf, 0x12, 0x00, 0xff, 0xff, 0xff]);
+    const table = Buffer.from([8]);
+    const trailer = Buffer.alloc(32);
+    trailer[6] = 1; trailer[7] = 1;
+    trailer.writeBigUInt64BE(BigInt(1), 8);
+    trailer.writeBigUInt64BE(BigInt(0), 16);
+    trailer.writeBigUInt64BE(BigInt(14), 24);
+    const buf = Buffer.concat([Buffer.from("bplist00", "latin1"), body, table, trailer]);
+    expect(() => parseBplist(buf)).toThrow(/length out of range/);
+  });
+
+  it("16 字节整数（真 qlab 文件实测存在，UUID/哈希类）宽容解析不抛错", () => {
+    const body = Buffer.concat([Buffer.from([0x14]), Buffer.alloc(16, 0xff)]);
+    const table = Buffer.from([8]);
+    const trailer = Buffer.alloc(32);
+    trailer[6] = 1; trailer[7] = 1;
+    trailer.writeBigUInt64BE(BigInt(1), 8);
+    trailer.writeBigUInt64BE(BigInt(0), 16);
+    trailer.writeBigUInt64BE(BigInt(25), 24);
+    const buf = Buffer.concat([Buffer.from("bplist00", "latin1"), body, table, trailer]);
+    expect(typeof parseBplist(buf).top).toBe("number"); // 值有损但解析继续
   });
 });
 
