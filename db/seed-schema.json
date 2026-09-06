@@ -1129,6 +1129,11 @@
       "type": "timestamp with time zone",
       "nullable": false,
       "default": "now()"
+    },
+    {
+      "column": "metadata",
+      "type": "jsonb",
+      "nullable": true
     }
   ],
   "avatar_upload_audit": [

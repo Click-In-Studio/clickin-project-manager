@@ -33,6 +33,46 @@ function getPreviewType(mimeType: string | null): PreviewType | null {
   return null;
 }
 
+// #85 元数据信封（展示所需的最小面；完整定义 lib/asset/metadata.ts）
+interface MetaEnvelope {
+  status: string;
+  detectedType: string | null;
+  data: Record<string, unknown> | null;
+}
+
+/** 探测类型 → 展示标签。认不出的直接显示 detectedType 原文。 */
+const TYPE_LABELS: Record<string, string> = {
+  "image/png": "PNG 图片", "image/jpeg": "JPEG 图片", "image/gif": "GIF 图片",
+  "image/webp": "WebP 图片", "image/tiff": "TIFF 图片",
+  "audio/wav": "WAV 音频", "audio/mpeg": "MP3 音频", "audio/flac": "FLAC 音频",
+  "audio/ogg": "OGG 音频", "audio/aiff": "AIFF 音频", "audio/mp4": "M4A 音频", "audio/midi": "MIDI",
+  "video/mp4": "MP4 视频", "video/quicktime": "QuickTime 视频", "video/webm": "WebM 视频",
+  "video/x-matroska": "MKV 视频", "video/x-msvideo": "AVI 视频",
+  "application/pdf": "PDF 文档", "application/zip": "ZIP 压缩包",
+  "application/vnd.rar": "RAR 压缩包", "application/x-7z-compressed": "7z 压缩包",
+  "application/gzip": "GZIP 压缩包",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "Word 文档",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "Excel 表格",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PPT 演示",
+};
+
+function formatBytes(n: number): string {
+  if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(1)} GB`;
+  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${n} B`;
+}
+
+/** 信封 → 顶栏信息行「PNG 图片 · 1920×1080 · 2.4 MB」；无可展示项返回 null。 */
+function metaInfoLine(meta: MetaEnvelope | null, fileSize: number | null): string | null {
+  const parts: string[] = [];
+  if (meta?.detectedType) parts.push(TYPE_LABELS[meta.detectedType] ?? meta.detectedType);
+  const d = meta?.data;
+  if (typeof d?.width === "number" && typeof d?.height === "number") parts.push(`${d.width}×${d.height}`);
+  if (fileSize != null) parts.push(formatBytes(fileSize));
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 export default function AssetPreviewClient({
   productionId, assetId, versionId, fileName, mimeType, storageType, feishuUrl, userName,
   variant = "page",
@@ -58,8 +98,20 @@ export default function AssetPreviewClient({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [shareOpen, setShareOpen] = useState(false);
+  const [infoLine, setInfoLine] = useState<string | null>(null);
 
   const previewType = getPreviewType(mimeType);
+
+  // #85 元数据：独立于预览链路拉取（失败静默——信息行是锦上添花不许挡预览）
+  useEffect(() => {
+    if (storageType !== "r2") return;
+    fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}/metadata`)
+      .then(r => (r.ok ? r.json() : null))
+      .then((j: { fileSize?: number | null; metadata?: MetaEnvelope | null } | null) => {
+        if (j) setInfoLine(metaInfoLine(j.metadata ?? null, j.fileSize ?? null));
+      })
+      .catch(() => {});
+  }, [productionId, assetId, storageType]);
 
   useEffect(() => {
     // Feishu links: open directly
@@ -111,7 +163,10 @@ export default function AssetPreviewClient({
             ← 返回
           </button>
         )}
-        <p className={`text-xs truncate max-w-[50vw] text-center ${embedded ? "text-zinc-600" : "text-white/50"}`}>{fileName}</p>
+        <div className="min-w-0 text-center">
+          <p className={`text-xs truncate max-w-[50vw] ${embedded ? "text-zinc-600" : "text-white/50"}`}>{fileName}</p>
+          {infoLine && <p className={`text-[10px] truncate max-w-[50vw] ${t.faint}`}>{infoLine}</p>}
+        </div>
         <div className="flex items-center gap-3">
           {url && (
             <a

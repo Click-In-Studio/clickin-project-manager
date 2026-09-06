@@ -2,6 +2,7 @@ import { getPool } from "../pg";
 import { policyFilteredRows } from "../policy-db";
 import { insertNode } from "../node/db";
 import { ensureAssetsRootAnchor } from "../node/anchors";
+import type { MetadataEnvelope } from "./metadata";
 
 let _seq = 0;
 export function uid(prefix: string): string {
@@ -33,6 +34,8 @@ export type AssetFile = {
   r2Key: string | null;
   thumbnailR2Key: string | null;
   fileSize: number | null;
+  /** #85 元数据信封，懒生成（lib/asset/metadata.ts）；未分析过为 null。 */
+  metadata: MetadataEnvelope | null;
   createdAt: string;
 };
 
@@ -55,12 +58,14 @@ export function rowToAsset(r: AssetRow): Asset {
 
 type AssetFileRow = {
   id: string; asset_id: string; r2_key: string | null;
-  thumbnail_r2_key: string | null; file_size: string | null; created_at: Date;
+  thumbnail_r2_key: string | null; file_size: string | null;
+  metadata: MetadataEnvelope | null; created_at: Date;
 };
 function rowToAssetFile(r: AssetFileRow): AssetFile {
   return {
     id: r.id, assetId: r.asset_id, r2Key: r.r2_key, thumbnailR2Key: r.thumbnail_r2_key,
     fileSize: r.file_size != null ? Number(r.file_size) : null,
+    metadata: r.metadata ?? null,
     createdAt: r.created_at.toISOString(),
   };
 }

@@ -1124,6 +1124,10 @@ CREATE TABLE IF NOT EXISTS asset_file (
   r2_key           TEXT,
   thumbnail_r2_key TEXT,
   file_size        BIGINT,
+  -- #85 元数据信封（MetadataEnvelope，lib/asset/metadata.ts）。行不可变 ⇒ 元数据
+  -- 以 (id, parserVersion) 为键永不失效；懒生成（首次详情请求触发），failed/
+  -- unsupported 也落盘，只在版本号落后于代码时重算。裸数据 shape 归分析器私有。
+  metadata         JSONB,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
