@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, lazy, Suspense } from "react";
+import { buildArchiveTree, flattenTree, allDirPaths } from "@/lib/asset/archive-view";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import AssetShareModal from "./AssetShareModal";
@@ -53,12 +54,22 @@ interface ArchiveEntry {
 /** 清单前端渲染上限（5000 行 DOM 太重；数据层另有 ARCHIVE_ENTRY_CAP）。 */
 const ARCHIVE_RENDER_CAP = 1000;
 
-// zip 包内工程分析结果（#85 PR3）
+// zip 包内工程分析结果（#85 PR3；v4 起 meta 携带工程元数据本体）
 interface ArchiveProject {
   path: string;
   refCount?: number;
   missingCount?: number;
   error?: string;
+  meta?: Record<string, unknown>;
+}
+
+/** 工程行的结构摘要「199 cue」「6 轨」。 */
+function projectMetaSummary(meta: Record<string, unknown> | undefined): string | null {
+  if (!meta) return null;
+  const parts: string[] = [];
+  if (typeof meta.cueCount === "number") parts.push(`${meta.cueCount} cue`);
+  if (typeof meta.trackCount === "number") parts.push(`${meta.trackCount} 轨`);
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 /** 探测类型 → 展示标签。认不出的直接显示 detectedType 原文。 */
@@ -142,8 +153,47 @@ export default function AssetPreviewClient({
   const [shareOpen, setShareOpen] = useState(false);
   const [infoLine, setInfoLine] = useState<string | null>(null);
   const [archive, setArchive] = useState<{ entries: ArchiveEntry[]; truncated: boolean; projects: ArchiveProject[] } | null>(null);
+  const [showJunk, setShowJunk] = useState(false);
+  const [expandedOverride, setExpandedOverride] = useState<Set<string> | null>(null);
+  // 包内单 entry 元数据（?entry= 懒算）：path → 摘要/拒绝原因；再点收起
+  const [entryMeta, setEntryMeta] = useState<Map<string, { line?: string | null; reason?: string; loading: boolean }>>(new Map());
 
   const previewType = getPreviewType(mimeType);
+
+  // 树形清单（#85：平铺不符合用户习惯；Mac zip 的 __MACOSX/.DS_Store/._* 默认隐藏，
+  // 只是展示层隐藏——数据层清单与 entryCount 保持完整诚实）
+  const tree = useMemo(
+    () => (archive ? buildArchiveTree(archive.entries, { hideJunk: !showJunk }) : null),
+    [archive, showJunk],
+  );
+  const expanded = useMemo(() => {
+    if (expandedOverride) return expandedOverride;
+    if (!tree) return new Set<string>();
+    // 默认展开态：全展不超过 300 行就全展，否则只见顶层
+    const dirs = allDirPaths(tree.roots);
+    return flattenTree(tree.roots, new Set(dirs)).length <= 300 ? new Set(dirs) : new Set<string>();
+  }, [tree, expandedOverride]);
+  const rows = useMemo(() => (tree ? flattenTree(tree.roots, expanded) : []), [tree, expanded]);
+  const toggleDir = (path: string) => {
+    const next = new Set(expanded);
+    if (next.has(path)) next.delete(path); else next.add(path);
+    setExpandedOverride(next);
+  };
+  const toggleEntryMeta = (path: string, sizeBytes: number | null) => {
+    if (entryMeta.has(path)) {
+      setEntryMeta((prev) => { const next = new Map(prev); next.delete(path); return next; });
+      return;
+    }
+    setEntryMeta((prev) => new Map(prev).set(path, { loading: true }));
+    fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}/metadata?entry=${encodeURIComponent(path)}`)
+      .then((r) => r.json())
+      .then((j: { metadata?: MetaEnvelope | null; reason?: string }) => {
+        setEntryMeta((prev) => new Map(prev).set(path, j.metadata
+          ? { line: metaInfoLine(j.metadata, sizeBytes), loading: false }
+          : { reason: j.reason ?? "无法解析", loading: false }));
+      })
+      .catch(() => setEntryMeta((prev) => new Map(prev).set(path, { reason: "加载失败", loading: false })));
+  };
 
   // #85 元数据：独立于预览链路拉取（失败静默——信息行是锦上添花不许挡预览）。
   // 压缩包清单：小档案 entries 就在信封里；大档案落了 sidecar，二次 ?full=1 拉回
@@ -303,20 +353,32 @@ export default function AssetPreviewClient({
           </div>
         )}
 
-        {/* #85 PR2：压缩包扁平清单（不嵌套、不解压——只是能看见里面有什么） */}
-        {!loading && !previewType && archive && (
+        {/* #85：压缩包树形清单（折叠目录 + 系统垃圾默认隐藏；不解压） */}
+        {!loading && !previewType && archive && tree && (
           <div className={`w-full max-w-3xl self-start rounded-xl border overflow-hidden ${
             embedded ? "border-zinc-200 bg-white" : "border-white/10 bg-zinc-900"}`}>
             <div className={`flex items-center justify-between px-4 py-2.5 border-b text-xs ${t.bar} ${t.faint}`}>
               <span>
-                📦 {archive.entries.length} 项
-                {archive.truncated && `（仅列出前 ${archive.entries.length} 项）`}
+                📦 {tree.visibleFileCount} 个文件
+                {archive.truncated && "（清单有截断）"}
               </span>
-              {downloadUrl && (
-                <a href={downloadUrl} download={fileName} className={`transition-colors ${t.dim}`}>下载压缩包</a>
-              )}
+              <span className="flex items-center gap-3">
+                {tree.hiddenCount > 0 && !showJunk && (
+                  <button onClick={() => setShowJunk(true)} className={`transition-colors ${t.dim}`}>
+                    已隐藏 {tree.hiddenCount} 个系统文件
+                  </button>
+                )}
+                {showJunk && (
+                  <button onClick={() => setShowJunk(false)} className={`transition-colors ${t.dim}`}>
+                    隐藏系统文件
+                  </button>
+                )}
+                {downloadUrl && (
+                  <a href={downloadUrl} download={fileName} className={`transition-colors ${t.dim}`}>下载压缩包</a>
+                )}
+              </span>
             </div>
-            {/* 包内工程引用体检（zip 内命名空间确定性 join 的结果） */}
+            {/* 包内工程：引用体检 + 结构摘要（v4 起 meta 带工程元数据本体） */}
             {archive.projects.length > 0 && (
               <div className={`px-4 py-2 border-b text-xs space-y-1 ${t.bar}`}>
                 {archive.projects.map((p, i) => (
@@ -324,28 +386,55 @@ export default function AssetPreviewClient({
                     🎛 <span className="font-mono">{p.path}</span>{" "}
                     {p.error
                       ? <span className={t.faint}>解析失败</span>
-                      : (p.missingCount ?? 0) > 0
-                        ? <span className="text-amber-500">{p.refCount} 引用 · 缺 {p.missingCount}</span>
-                        : <span className={t.faint}>{p.refCount} 引用齐</span>}
+                      : <>
+                          {projectMetaSummary(p.meta) && <span>{projectMetaSummary(p.meta)} · </span>}
+                          {(p.missingCount ?? 0) > 0
+                            ? <span className="text-amber-500">{p.refCount} 引用 · 缺 {p.missingCount}</span>
+                            : <span className={t.faint}>{p.refCount} 引用齐</span>}
+                        </>}
                   </p>
                 ))}
               </div>
             )}
             <ul className="max-h-[calc(100vh-240px)] overflow-y-auto text-xs font-mono">
-              {archive.entries.slice(0, ARCHIVE_RENDER_CAP).map((e, i) => (
-                <li key={i} className={`flex items-center gap-2 px-4 py-1.5 ${
-                  embedded ? "odd:bg-zinc-50 text-zinc-700" : "odd:bg-white/[0.03] text-white/60"}`}>
-                  <span className="shrink-0">{e.isDirectory ? "📁" : "📄"}</span>
-                  <span className="truncate flex-1" title={e.path}>{e.path}</span>
-                  {e.encrypted && <span className={`shrink-0 ${t.fainter}`}>🔒</span>}
-                  {!e.isDirectory && e.uncompressedBytes != null && (
-                    <span className={`shrink-0 tabular-nums ${t.faint}`}>{formatBytes(e.uncompressedBytes)}</span>
-                  )}
-                </li>
-              ))}
-              {archive.entries.length > ARCHIVE_RENDER_CAP && (
+              {rows.slice(0, ARCHIVE_RENDER_CAP).map(({ node, depth }) => {
+                const em = !node.isDir ? entryMeta.get(node.path) : undefined;
+                return (
+                  <li key={node.path}
+                    className={embedded ? "odd:bg-zinc-50 text-zinc-700" : "odd:bg-white/[0.03] text-white/60"}>
+                    <div className="flex items-center gap-2 py-1.5 pr-4" style={{ paddingLeft: 16 + depth * 18 }}>
+                      {node.isDir ? (
+                        <button onClick={() => toggleDir(node.path)}
+                          className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer">
+                          <span className={`shrink-0 w-3 ${t.faint}`}>{expanded.has(node.path) ? "▾" : "▸"}</span>
+                          <span className="shrink-0">📁</span>
+                          <span className="truncate" title={node.path}>{node.name}</span>
+                        </button>
+                      ) : (
+                        <button onClick={() => toggleEntryMeta(node.path, node.entry?.uncompressedBytes ?? null)}
+                          className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer"
+                          title="查看元数据">
+                          <span className="shrink-0 w-3" />
+                          <span className="shrink-0">📄</span>
+                          <span className="truncate" title={node.path}>{node.name}</span>
+                        </button>
+                      )}
+                      {node.entry?.encrypted && <span className={`shrink-0 ${t.fainter}`}>🔒</span>}
+                      {node.sizeBytes > 0 && (
+                        <span className={`shrink-0 tabular-nums ${t.faint}`}>{formatBytes(node.sizeBytes)}</span>
+                      )}
+                    </div>
+                    {em && (
+                      <div className={`py-1 pr-4 text-[11px] ${t.faint}`} style={{ paddingLeft: 16 + (depth + 1) * 18 + 12 }}>
+                        {em.loading ? "解析中…" : em.line ?? `⚠ ${em.reason}`}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+              {rows.length > ARCHIVE_RENDER_CAP && (
                 <li className={`px-4 py-2 text-center ${t.fainter}`}>
-                  …其余 {archive.entries.length - ARCHIVE_RENDER_CAP} 项未渲染
+                  …其余 {rows.length - ARCHIVE_RENDER_CAP} 行未渲染（可折叠目录减量）
                 </li>
               )}
             </ul>

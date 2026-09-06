@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { gzipSync, deflateRawSync } from "zlib";
 import { extractEnvelope } from "@/lib/asset/metadata";
 import { sniffDetectedType, BROKER_VERSION } from "@/lib/asset/metadata-broker";
-import { parseAlsXml, parseQlabWorkspace } from "@/lib/asset/metadata-parsers";
+import { parseAlsXml, parseQlabWorkspace, openZipEntrySource, ZIP_ENTRY_INFLATE_CAP } from "@/lib/asset/metadata-parsers";
 import { parseBplist, mget, BplistUID } from "@/lib/asset/bplist";
 import { normalizePath, pathMatchKey, resolveRef, dirOf, matchRefs } from "@/lib/asset/path-match";
 import { bufferByteSource } from "@/lib/asset/byte-source";
@@ -334,6 +334,9 @@ describe("zipParser v3：包内工程递归", () => {
       path: "Proj/show.als", kind: "application/vnd.ableton.live-set",
       refCount: 1, missingCount: 0,
     });
+    // v4：工程元数据本体随体检带出（只有 join 没有结构=半截子）
+    expect(projects[0].meta).toMatchObject({ trackCount: 3, creator: "Ableton Live 12.3.5" });
+    expect((projects[0].meta as Record<string, unknown>).tracks).toHaveLength(3);
   });
 
   it("缺引用如实上报 missing", async () => {
@@ -351,6 +354,49 @@ describe("zipParser v3：包内工程递归", () => {
     expect(env.status).toBe("ok");
     const projects = env.data?.projects as Record<string, unknown>[];
     expect(projects[0].error).toBeTruthy();
+  });
+});
+
+describe("openZipEntrySource：包内单 entry 元数据（支持面≠独立支持面）", () => {
+  const als = gzipSync(Buffer.from(ALS_XML));
+
+  it("store entry 偏移直通：当独立文件走完整分析管线", async () => {
+    const zip = realZip([{ name: "Proj/show.als", content: als }]); // method 0
+    const zipSrc = bufferByteSource(zip);
+    const listing = await extractEnvelope(zipSrc, "交付.zip");
+    const e = (listing.data?.entries as Record<string, unknown>[])[0];
+    const es = await openZipEntrySource(zipSrc, {
+      offset: Number(e.offset), method: Number(e.method), compressedBytes: Number(e.compressedBytes),
+      uncompressedBytes: e.uncompressedBytes as number,
+    });
+    const env = await extractEnvelope(es, "show.als");
+    expect(env.status).toBe("ok");
+    expect(env.detectedType).toBe("application/vnd.ableton.live-set");
+    expect(env.data).toMatchObject({ trackCount: 3 });
+  });
+
+  it("deflate entry ≤上限整解压后照常分析", async () => {
+    const zip = realZip([{ name: "show.als", content: als, deflate: true }]);
+    const zipSrc = bufferByteSource(zip);
+    const listing = await extractEnvelope(zipSrc, "交付.zip");
+    const e = (listing.data?.entries as Record<string, unknown>[])[0];
+    const es = await openZipEntrySource(zipSrc, {
+      offset: Number(e.offset), method: Number(e.method), compressedBytes: Number(e.compressedBytes),
+      uncompressedBytes: e.uncompressedBytes as number,
+    });
+    const env = await extractEnvelope(es, "show.als");
+    expect(env.data).toMatchObject({ creator: "Ableton Live 12.3.5" });
+  });
+
+  it("deflate 超上限 / 加密 entry 确定性拒绝（媒体类巨物不解压）", async () => {
+    const zip = realZip([{ name: "big.wav", content: als, deflate: true }]);
+    const src = bufferByteSource(zip);
+    await expect(openZipEntrySource(src, {
+      offset: 0, method: 8, compressedBytes: ZIP_ENTRY_INFLATE_CAP + 1, uncompressedBytes: null,
+    })).rejects.toThrow(/too large/);
+    await expect(openZipEntrySource(src, {
+      offset: 0, method: 8, compressedBytes: 10, uncompressedBytes: null, encrypted: true,
+    })).rejects.toThrow(/encrypted/);
   });
 });
 

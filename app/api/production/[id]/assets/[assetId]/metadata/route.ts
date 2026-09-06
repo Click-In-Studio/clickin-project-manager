@@ -3,8 +3,9 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset, resolveAssetFile } from "@/lib/asset/db";
 import { canViewAsset } from "@/lib/asset/perm";
-import { getOrExtractFileMetadata, hydrateMetadata } from "@/lib/asset/metadata";
-import { TransientReadError } from "@/lib/asset/byte-source";
+import { getOrExtractFileMetadata, hydrateMetadata, extractEnvelope } from "@/lib/asset/metadata";
+import { openZipEntrySource } from "@/lib/asset/metadata-parsers";
+import { TransientReadError, r2ByteSource } from "@/lib/asset/byte-source";
 
 /**
  * #85 元数据读面：latest file（latest-wins，与 preview/download 同口径）的信封。
@@ -29,6 +30,40 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
 
   try {
     let metadata = await getOrExtractFileMetadata(file, asset.fileName);
+
+    // ?entry=<包内路径>：对 zip 内单个 entry 就地跑 broker/分析器（懒算不落盘，
+    // 结果按 (fileId, entry, 版本) 不可变靠 HTTP 缓存）。zip 内支持面≠独立支持
+    // 面：store 直通 Range、deflate≤8MB 整解压、其余 reason 明确拒绝
+    const entryPath = req.nextUrl.searchParams.get("entry");
+    if (entryPath != null) {
+      if (metadata?.parserKey !== "application/zip" || !file.r2Key)
+        return Response.json({ entryPath, metadata: null, reason: "仅支持 zip 包内条目" }, { status: 400 });
+      const hydrated = await hydrateMetadata(metadata);
+      const entries = hydrated.data?.entries as Record<string, unknown>[] | undefined;
+      const e = entries?.find((x) => x.path === entryPath);
+      if (!e) return Response.json({ error: "条目不存在" }, { status: 404 });
+      try {
+        const es = await openZipEntrySource(r2ByteSource(file.r2Key, file.fileSize), {
+          offset: Number(e.offset), method: Number(e.method),
+          compressedBytes: Number(e.compressedBytes),
+          uncompressedBytes: typeof e.uncompressedBytes === "number" ? e.uncompressedBytes : null,
+          encrypted: e.encrypted === true,
+        });
+        const entryMeta = await extractEnvelope(es, entryPath.slice(entryPath.lastIndexOf("/") + 1));
+        return Response.json(
+          { entryPath, metadata: entryMeta },
+          { headers: { "Cache-Control": "private, max-age=3600" } },
+        );
+      } catch (err) {
+        if (err instanceof TransientReadError) throw err; // 交给外层降级/瞬态语义
+        // 确定性拒绝（加密/超解压上限/坏头）：200 + reason，UI 如实展示
+        const reason = err instanceof Error ? err.message : String(err);
+        return Response.json(
+          { entryPath, metadata: null, reason },
+          { headers: { "Cache-Control": "private, max-age=3600" } },
+        );
+      }
+    }
     // ?full=1：清单落了 sidecar 的（大档案）拉回 entries 拼进响应
     if (metadata && req.nextUrl.searchParams.get("full") === "1") {
       try {
