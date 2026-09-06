@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset, resolveAssetFile } from "@/lib/asset/db";
 import { canViewAsset } from "@/lib/asset/perm";
-import { getOrExtractFileMetadata } from "@/lib/asset/metadata";
+import { getOrExtractFileMetadata, hydrateMetadata } from "@/lib/asset/metadata";
 import { TransientReadError } from "@/lib/asset/byte-source";
 
 /**
@@ -28,8 +28,21 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
   if (!file) return Response.json({ fileId: null, fileSize: null, metadata: null });
 
   try {
-    const metadata = await getOrExtractFileMetadata(file, asset.fileName);
-    return Response.json({ fileId: file.id, fileSize: file.fileSize, metadata });
+    let metadata = await getOrExtractFileMetadata(file, asset.fileName);
+    // ?full=1：清单落了 sidecar 的（大档案）拉回 entries 拼进响应
+    if (metadata && req.nextUrl.searchParams.get("full") === "1") {
+      try {
+        metadata = await hydrateMetadata(metadata);
+      } catch (e) {
+        console.warn(`[asset-metadata] sidecar hydrate failed (${file.id}):`, e);
+      }
+    }
+    // 内容按 (fileId, parserVersion) 基本不可变，唯一变化通道是版本 bump 重算
+    // ⇒ private 短缓存挡重复打开；鉴权响应必须 private
+    return Response.json(
+      { fileId: file.id, fileSize: file.fileSize, metadata },
+      { headers: { "Cache-Control": "private, max-age=3600" } },
+    );
   } catch (e) {
     // 只降级瞬态读失败（R2 网络类）：回旧信封/空，不落盘，下次请求重试
     // （avatar-serve 同款「显示不空窗」）。其余异常是管线 bug——确定性失败

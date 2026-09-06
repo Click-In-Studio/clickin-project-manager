@@ -1,5 +1,5 @@
 import { getPool } from "../pg";
-import { isR2Configured } from "../r2";
+import { isR2Configured, putR2Object, getR2Object } from "../r2";
 import type { AssetFile } from "./db";
 import {
   type ByteSource, ByteBudgetExceededError, TransientReadError,
@@ -82,6 +82,57 @@ export async function setAssetFileMetadata(fileId: string, env: MetadataEnvelope
   await getPool().query(`UPDATE asset_file SET metadata = $2 WHERE id = $1`, [fileId, env]);
 }
 
+// ─── Sidecar（#85 PR2）───────────────────────────────────────────────────────
+// 信封必须保持可控大小：asset_file 是 SELECT *，preview/thumb 每个请求都拖着
+// metadata 列走，大清单塞 JSONB 等于给所有文件读路径加税。超阈值的 entries
+// 落 R2，信封留指针 + 标量聚合。
+
+export const SIDECAR_THRESHOLD_BYTES = 32 * 1024;
+
+export function metadataSidecarKey(fileId: string): string {
+  return `meta/${fileId}.json`;
+}
+
+/**
+ * 落库前分离：data.entries 序列化超阈值 ⇒ 移入 sidecar payload、信封 data 只
+ * 留标量并置 sidecarKey。key 按 fileId 确定性，版本 bump 重算就地覆盖，幂等。
+ */
+export function splitEnvelopeForStorage(
+  env: MetadataEnvelope,
+  fileId: string,
+): { envelope: MetadataEnvelope; sidecar: Record<string, unknown> | null } {
+  const entries = env.data?.entries;
+  if (!Array.isArray(entries)) return { envelope: env, sidecar: null };
+  if (Buffer.byteLength(JSON.stringify(env.data)) <= SIDECAR_THRESHOLD_BYTES)
+    return { envelope: env, sidecar: null };
+  const scalars = { ...env.data };
+  delete scalars.entries;
+  return {
+    envelope: { ...env, data: scalars, sidecarKey: metadataSidecarKey(fileId) },
+    sidecar: { fileId, parserKey: env.parserKey, parserVersion: env.parserVersion, entries },
+  };
+}
+
+/** 读面水合：信封带 sidecarKey 时拉回 entries 拼进 data（?full=1 用）。
+ *  sidecar 拉取失败按瞬态处理（调用方降级返回未水合信封）。 */
+export async function hydrateMetadata(env: MetadataEnvelope): Promise<MetadataEnvelope> {
+  if (!env.sidecarKey || Array.isArray(env.data?.entries)) return env;
+  let obj: Awaited<ReturnType<typeof getR2Object>>;
+  try {
+    obj = await getR2Object(env.sidecarKey);
+  } catch (e) {
+    throw new TransientReadError(`sidecar read failed (${env.sidecarKey})`, e);
+  }
+  if (!obj) return env; // 悬空指针（#428 回收类异常态）：降级回标量，不 500
+  try {
+    const sc = JSON.parse(obj.body.toString("utf8")) as { entries?: unknown };
+    if (Array.isArray(sc.entries)) return { ...env, data: { ...env.data, entries: sc.entries } };
+  } catch {
+    // 损坏的 sidecar JSON：降级回标量
+  }
+  return env;
+}
+
 /**
  * 懒轨主入口（照 avatar-serve 定式）：有新鲜信封直接回，否则就地分析写回。
  * 存量文件第一次被看时自动补齐，无需回填脚本；并发重复分析是幂等覆盖，无害。
@@ -95,7 +146,17 @@ export async function getOrExtractFileMetadata(
   if (file.metadata && !isEnvelopeStale(file.metadata)) return file.metadata;
   // 本地无 R2 凭据（常见开发态）：不产生假 failed 落盘，回旧信封/空
   if (!isR2Configured()) return file.metadata;
-  const env = await extractEnvelope(r2ByteSource(file.r2Key, file.fileSize), fileName);
-  await setAssetFileMetadata(file.id, env);
-  return env;
+  const raw = await extractEnvelope(r2ByteSource(file.r2Key, file.fileSize), fileName);
+  const { envelope, sidecar } = splitEnvelopeForStorage(raw, file.id);
+  if (sidecar) {
+    // 顺序钉死：先 sidecar 后信封。孤儿 sidecar 无害（#428 回收类垃圾），
+    // 信封指向不存在的 sidecar 才是 bug；写失败按瞬态不落盘，下次重试
+    try {
+      await putR2Object(metadataSidecarKey(file.id), Buffer.from(JSON.stringify(sidecar)), "application/json");
+    } catch (e) {
+      throw new TransientReadError(`sidecar write failed (${file.id})`, e);
+    }
+  }
+  await setAssetFileMetadata(file.id, envelope);
+  return envelope;
 }
