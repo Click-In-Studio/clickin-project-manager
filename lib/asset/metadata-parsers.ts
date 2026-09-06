@@ -1,5 +1,8 @@
-import { ByteBudgetExceededError, type ByteSource } from "./byte-source";
+import { gunzipSync, inflateRawSync } from "zlib";
+import { ByteBudgetExceededError, bufferByteSource, type ByteSource } from "./byte-source";
 import type { MetadataParser } from "./metadata-broker";
+import { parseBplist, mget, BplistUID, type BplistValue } from "./bplist";
+import { matchRefs, dirOf } from "./path-match";
 
 /**
  * PR1 分析器集合（#85 路线图）：媒体标量 + 压缩标量。全部只产出「文件自己的
@@ -278,6 +281,240 @@ function decodeZipName(raw: Buffer, utf8Flag: boolean): { path: string; guessed:
   return { path: raw.toString("latin1"), guessed: true };
 }
 
+// ─── 工程类公共 ──────────────────────────────────────────────────────────────
+
+/** 整文件读入（工程类无随机访问结构可省，预算兜上限）。 */
+async function readWhole(src: ByteSource, head: Buffer): Promise<Buffer> {
+  if (src.size == null) throw new Error("file size unknown");
+  if (src.size <= head.length) return head.subarray(0, src.size);
+  return Buffer.concat([head, await src.read(head.length, src.size - head.length)]);
+}
+
+/** 单趟解码：串行多趟 replace 会把数值实体产出的 & 与后续文本拼成新实体二次
+ *  解码（&#38;amp; 应得 "&amp;" 而非 "&"）——每个实体恰好解一次。 */
+const XML_ENTITY: Record<string, string> = { quot: '"', apos: "'", lt: "<", gt: ">", amp: "&" };
+function decodeXmlEntities(s: string): string {
+  return s.replace(/&(quot|apos|lt|gt|amp|#x[0-9a-fA-F]+|#\d+);/g, (whole, e: string) => {
+    if (e[0] !== "#") return XML_ENTITY[e];
+    const code = e[1] === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1));
+    try { return String.fromCodePoint(code); } catch { return whole; }
+  });
+}
+
+/** 工程引用公约形状：{ path, absolutePath?, scope }。scope="project"=随工程走的
+ *  相对引用（QC/包内链接的判定对象）；"external"=库/预设/机器绝对路径（不算交付依赖）。 */
+export interface ProjectRef {
+  path: string;
+  absolutePath?: string;
+  scope: "project" | "external";
+}
+
+const PROJECT_TRACK_CAP = 500;
+const PROJECT_REF_CAP = 2000;
+export const PROJECT_CUE_CAP = 5000;
+
+// ─── Ableton Live Set（.als = gzip + XML）────────────────────────────────────
+
+/**
+ * track 结构（type/name/分组，不进 track 细节）+ 引用。RelativePathType=3 是
+ * 工程相对（Samples/...），其余（库/预设/绝对）归 external。
+ */
+export const alsParser: MetadataParser = {
+  key: "application/vnd.ableton.live-set",
+  version: 1,
+  budget: { maxBytes: 32 * 1024 * 1024, maxReads: 8 },
+  async parse(src, head) {
+    const raw = await readWhole(src, head);
+    // 解压护栏：夸张工程的 XML 可到百 MB，超 64MB 按确定性失败收
+    const xml = gunzipSync(raw, { maxOutputLength: 64 * 1024 * 1024 }).toString("utf8");
+    return parseAlsXml(xml);
+  },
+};
+
+export function parseAlsXml(xml: string): Record<string, unknown> {
+  const creator = /<Ableton[^>]*\bCreator="([^"]*)"/.exec(xml)?.[1] ?? null;
+
+  // track 是 <Tracks> 下的顺序兄弟节点：按开标签切段，段内取名与分组
+  type Track = { id: number; type: string; name: string; groupId: number | null };
+  const tracks: Track[] = [];
+  const trackRe = /<(MidiTrack|AudioTrack|ReturnTrack|GroupTrack) Id="(-?\d+)"/g;
+  const opens: { type: string; id: number; at: number }[] = [];
+  let truncated = false;
+  for (let m = trackRe.exec(xml); m; m = trackRe.exec(xml)) {
+    if (opens.length >= PROJECT_TRACK_CAP) { truncated = true; break; } // 诚实标注：超帽即截断
+    opens.push({ type: m[1], id: Number(m[2]), at: m.index });
+  }
+  for (let i = 0; i < opens.length; i++) {
+    const seg = xml.slice(opens[i].at, opens[i + 1]?.at ?? Math.min(xml.length, opens[i].at + 200_000));
+    const name = /<EffectiveName Value="([^"]*)"/.exec(seg)?.[1];
+    const groupRaw = /<TrackGroupId Value="(-?\d+)"/.exec(seg)?.[1];
+    const groupId = groupRaw != null ? Number(groupRaw) : null;
+    tracks.push({
+      id: opens[i].id, type: opens[i].type,
+      name: name != null ? decodeXmlEntities(name) : "",
+      groupId: groupId === -1 ? null : groupId,
+    });
+  }
+
+  // 引用：FileRef 块内 RelativePathType/RelativePath/Path 三件套
+  const refs: ProjectRef[] = [];
+  const seen = new Set<string>();
+  const refRe = /<FileRef>([\s\S]{0,4000}?)<\/FileRef>/g;
+  for (let m = refRe.exec(xml); m; m = refRe.exec(xml)) {
+    if (refs.length >= PROJECT_REF_CAP) { truncated = true; break; }
+    const block = m[1];
+    const rel = /<RelativePath Value="([^"]*)"/.exec(block)?.[1];
+    const abs = /<Path Value="([^"]*)"/.exec(block)?.[1];
+    const type = /<RelativePathType Value="(-?\d+)"/.exec(block)?.[1];
+    const path = rel != null && rel !== "" ? decodeXmlEntities(rel) : abs != null ? decodeXmlEntities(abs) : null;
+    if (path == null || seen.has(path)) continue;
+    seen.add(path);
+    refs.push({
+      path,
+      ...(abs != null && abs !== "" && { absolutePath: decodeXmlEntities(abs) }),
+      scope: type === "3" ? "project" : "external",
+    });
+  }
+
+  return {
+    creator,
+    trackCount: tracks.length,
+    refCount: refs.length,
+    projectRefCount: refs.filter((r) => r.scope === "project").length,
+    ...(truncated ? { truncated: true } : {}),
+    tracks,
+    refs,
+  };
+}
+
+// ─── QLab workspace（.qlab4/.qlab5 = 双层 bplist + NSKeyedArchiver）─────────
+
+/**
+ * 实测（2026-09-06，qlab4/5 同构）：外层 bplist 薄壳 → 最大的 NS.data blob 是
+ * 内层 bplist（真正的 workspace 归档）→ $top.root 是 GroupCue，root.cues =
+ * cue list 们（各自也是 GroupCue），逐层 cues 嵌套；文件引用是 F53Alias
+ * { lastKnownPath（绝对）, relativePath（工作区相对）}——连 bookmark 都不用解。
+ */
+export const qlabParser: MetadataParser = {
+  key: "qlab-workspace",
+  version: 1,
+  budget: { maxBytes: 32 * 1024 * 1024, maxReads: 8 },
+  async parse(src, head) {
+    const raw = await readWhole(src, head);
+    return parseQlabWorkspace(raw);
+  },
+};
+
+export function parseQlabWorkspace(raw: Buffer): Record<string, unknown> {
+  const outer = parseBplist(raw);
+  // 内层归档 = 外层里最大的 bplist00 data blob
+  let innerBuf: Buffer | null = null;
+  const scan = (v: BplistValue) => {
+    if (Buffer.isBuffer(v) && v.length >= 40 && v.toString("latin1", 0, 8) === "bplist00") {
+      if (innerBuf == null || v.length > innerBuf.length) innerBuf = v;
+    } else if (Array.isArray(v)) v.forEach(scan);
+    else if (v instanceof Map) { for (const [, vv] of v) scan(vv); }
+  };
+  scan(outer.top);
+  if (innerBuf == null) throw new Error("QLab inner archive not found");
+
+  const inner = parseBplist(innerBuf);
+  const archive = mget(inner.top, "$objects");
+  if (!Array.isArray(archive)) throw new Error("QLab archive missing $objects");
+  const deref = (v: BplistValue | undefined): BplistValue | undefined =>
+    v instanceof BplistUID ? archive[v.id] : v;
+  const classOf = (o: BplistValue | undefined): string | null => {
+    if (!(o instanceof Map)) return null;
+    const c = deref(mget(o, "$class"));
+    const n = c instanceof Map ? mget(c, "$classname") : undefined;
+    return typeof n === "string" ? n : null;
+  };
+  const str = (o: BplistValue | undefined, key: string): string | null => {
+    let v = o instanceof Map ? deref(mget(o, key)) : undefined;
+    // NSMutableString 归档形态 {NS.string: <str>}（qlab4 的 relativePath 是这种）
+    if (v instanceof Map) v = deref(mget(v, "NS.string"));
+    // "$null" 是 NSKeyedArchiver 的空值哨兵（$objects[0]），不是真值
+    return typeof v === "string" && v !== "$null" ? v : null;
+  };
+  /** NSArray 归档形态 {NS.objects: [UID...]} → 成员对象。 */
+  const nsArray = (o: BplistValue | undefined): BplistValue[] => {
+    const d = deref(o);
+    const arr = d instanceof Map ? mget(d, "NS.objects") : undefined;
+    return Array.isArray(arr) ? arr.map((u) => deref(u)).filter((x): x is BplistValue => x !== undefined) : [];
+  };
+
+  // cue 树：type = $classname；总量/深度双护栏。qlab4 的文件引用挂在 cue 的
+  // relativePath 上（qlab5 挂 F53Alias），树走位时顺路收
+  type CueNode = { type: string; number?: string; name?: string; cues?: CueNode[] };
+  let cueTotal = 0;
+  let cueTruncated = false;
+  const cueRelPaths: string[] = [];
+  const walkCue = (o: BplistValue | undefined, depth: number): CueNode | null => {
+    if (!(o instanceof Map) || depth > 10) return null;
+    if (cueTotal >= PROJECT_CUE_CAP) { cueTruncated = true; return null; }
+    cueTotal += 1;
+    const node: CueNode = { type: classOf(o) ?? "Cue" };
+    const num = str(o, "number");
+    const name = str(o, "name");
+    if (num) node.number = num;
+    if (name) node.name = name;
+    const rel = str(o, "relativePath");
+    if (rel && rel !== "") cueRelPaths.push(rel);
+    const kids = nsArray(mget(o, "cues")).map((c) => walkCue(c, depth + 1)).filter((c): c is CueNode => c != null);
+    if (kids.length > 0) node.cues = kids;
+    return node;
+  };
+
+  const topDict = mget(inner.top, "$top");
+  const root = deref(topDict instanceof Map ? mget(topDict, "root") : undefined);
+  const lists = nsArray(root instanceof Map ? mget(root, "cues") : undefined);
+  const cueLists = lists
+    .map((l) => walkCue(l, 0))
+    .filter((c): c is CueNode => c != null);
+
+  // 引用两路合并：cue 上的 relativePath（qlab4 主路/qlab5 也可能有）+ 全归档
+  // 扫 F53Alias（qlab5 的 relativePath 在这，qlab4 只有 lastKnownPath）
+  const refs: ProjectRef[] = [];
+  const seen = new Set<string>();
+  let refsTruncated = false;
+  for (const rel of cueRelPaths) {
+    if (refs.length >= PROJECT_REF_CAP) { refsTruncated = true; break; }
+    if (seen.has(rel)) continue;
+    seen.add(rel);
+    refs.push({ path: rel, scope: "project" });
+  }
+  for (const o of archive) {
+    if (refs.length >= PROJECT_REF_CAP) { refsTruncated = true; break; }
+    if (classOf(o) !== "F53Alias") continue;
+    const rel = str(o, "relativePath");
+    const abs = str(o, "lastKnownPath");
+    const path = rel && rel !== "" ? rel : abs;
+    if (!path || seen.has(path)) continue;
+    // 绝对路径若与已收的相对引用同名（同一文件的 alias 面），不重复计
+    if ((!rel || rel === "") && abs) {
+      const low = abs.toLowerCase();
+      if (refs.some((r) => r.scope === "project" && low.endsWith("/" + r.path.toLowerCase()))) continue;
+    }
+    seen.add(path);
+    refs.push({
+      path,
+      ...(abs && abs !== "" && { absolutePath: abs }),
+      // 有工作区相对路径的算随工程走；只剩绝对路径的按 external（机器路径）
+      scope: rel && rel !== "" ? "project" : "external",
+    });
+  }
+
+  return {
+    cueListCount: cueLists.length,
+    cueCount: cueTotal,
+    refCount: refs.length,
+    projectRefCount: refs.filter((r) => r.scope === "project").length,
+    ...(cueTruncated || refsTruncated ? { truncated: true } : {}),
+    cueLists,
+    refs,
+  };
+}
+
 // ─── ZIP（EOCD 标量 + central directory 清单）───────────────────────────────
 
 const EOCD_SIG = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
@@ -289,8 +526,8 @@ const EOCD_SIG = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
  */
 export const zipParser: MetadataParser = {
   key: "application/zip",
-  version: 2, // v2：EOCD 标量 → +central directory 清单（#85 PR2）
-  budget: { maxBytes: 5 * 1024 * 1024, maxReads: 8 },
+  version: 3, // v2：+CD 清单（PR2）；v3：+包内工程递归（PR3）
+  budget: { maxBytes: 48 * 1024 * 1024, maxReads: 24 },
   async parse(src) {
     // EOCD 只能从尾部定位；存量 file_size NULL 行定位不了 ⇒ 确定性 failed
     if (src.size == null) throw new Error("file size unknown; cannot locate EOCD");
@@ -371,13 +608,69 @@ export const zipParser: MetadataParser = {
       off += 46 + nameLen + extraLen + commentLen;
     }
     if (entries.length >= ARCHIVE_ENTRY_CAP && entryCount > entries.length) truncated = true;
+
+    // v3：包内工程递归——发现 als/qlab entry 就单 entry 解压（逐 entry 压缩故
+    // 取单文件廉价，#420 期定谳），对字节再跑对应工程分析器，把工程相对引用
+    // 对着 zip 自己的 entry 表 join。命名空间与引用同处不可变文件 ⇒ 结果确定
+    // 性、可进信封（引用分层原则，2026-09-06 定谳）。
+    const projects = await analyzeZipProjects(src, entries);
+
     return {
       entryCount, totalUncompressedBytes, entries,
+      ...(projects.length > 0 && { projects }),
       ...(truncated && { truncated: true }),
       ...(zip64 && { zip64: true }),
     };
   },
 };
+
+const ZIP_PROJECT_CAP = 3;              // 每档案最多分析的工程数
+const ZIP_PROJECT_ENTRY_MAX = 8 * 1024 * 1024; // 压缩后超此的工程 entry 跳过
+const ZIP_PROJECT_MISSING_CAP = 50;
+
+const PROJECT_PARSER_BY_EXT: Record<string, MetadataParser> = {
+  als: alsParser, qlab4: qlabParser, qlab5: qlabParser,
+};
+
+async function analyzeZipProjects(
+  src: ByteSource,
+  entries: Record<string, unknown>[],
+): Promise<Record<string, unknown>[]> {
+  const names = entries.map((e) => String(e.path));
+  const out: Record<string, unknown>[] = [];
+  for (const e of entries) {
+    if (out.length >= ZIP_PROJECT_CAP) break;
+    if (e.isDirectory === true || e.encrypted === true) continue;
+    const path = String(e.path);
+    const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+    const parser = PROJECT_PARSER_BY_EXT[ext];
+    if (!parser) continue;
+    const method = Number(e.method), csize = Number(e.compressedBytes), off = Number(e.offset);
+    if (!Number.isFinite(csize) || csize <= 0 || csize > ZIP_PROJECT_ENTRY_MAX) continue;
+    if (method !== 0 && method !== 8) continue;
+    try {
+      // CD 的 offset 指 local header；其 name/extra 长度可与 CD 不同，必须现读
+      const lh = await src.read(off, 30);
+      if (lh.length < 30 || lh.readUInt32LE(0) !== 0x04034b50) throw new Error("bad local header");
+      const dataStart = off + 30 + lh.readUInt16LE(26) + lh.readUInt16LE(28);
+      const comp = await src.read(dataStart, csize);
+      const bytes = method === 8 ? inflateRawSync(comp, { maxOutputLength: 64 * 1024 * 1024 }) : comp;
+      const data = await parser.parse(bufferByteSource(bytes), bytes.subarray(0, 4096));
+      const refs = ((data.refs as ProjectRef[] | undefined) ?? []).filter((r) => r.scope === "project");
+      const matched = matchRefs(refs, names, dirOf(path));
+      const missing = matched.filter((m) => !m.resolved).map((m) => m.path);
+      out.push({
+        path, kind: parser.key, refCount: refs.length, missingCount: missing.length,
+        ...(missing.length > 0 && { missing: missing.slice(0, ZIP_PROJECT_MISSING_CAP) }),
+      });
+    } catch (err) {
+      if (err instanceof ByteBudgetExceededError) throw err; // 预算全局，向上收 oversized/truncated
+      // 单个工程解析失败不拖垮整个 zip 信封：记错误行继续
+      out.push({ path, kind: parser.key, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return out;
+}
 
 // ─── RAR5（无中央目录：逐块走位，接受截断）──────────────────────────────────
 
