@@ -63,6 +63,36 @@ interface ArchiveProject {
   meta?: Record<string, unknown>;
 }
 
+// ADM 母版展示面（#85：多声道对象音频不能喂给 WaveformPlayer 假装能放）
+interface AdmView {
+  programmes: { name: string; start?: string; end?: string }[];
+  objectCount: number;
+  trackUidCount?: number;
+  objects: { name: string; start?: string; duration?: string }[];
+  objectsTruncated: boolean;
+  channels?: number;
+  sampleRate?: number;
+  bitDepth?: number;
+  durationSeconds?: number | null;
+}
+
+export function pickAdmView(m: MetaEnvelope | null | undefined): AdmView | null {
+  const d = m?.data;
+  const admD = d?.adm as Record<string, unknown> | undefined;
+  if (!d || !admD || typeof admD !== "object") return null;
+  return {
+    programmes: Array.isArray(admD.programmes) ? (admD.programmes as AdmView["programmes"]) : [],
+    objectCount: typeof admD.objectCount === "number" ? admD.objectCount : 0,
+    trackUidCount: typeof admD.trackUidCount === "number" ? admD.trackUidCount : undefined,
+    objects: Array.isArray(d.admObjects) ? (d.admObjects as AdmView["objects"]) : [],
+    objectsTruncated: admD.objectsTruncated === true,
+    channels: typeof d.channels === "number" ? d.channels : undefined,
+    sampleRate: typeof d.sampleRate === "number" ? d.sampleRate : undefined,
+    bitDepth: typeof d.bitDepth === "number" ? d.bitDepth : undefined,
+    durationSeconds: typeof d.durationSeconds === "number" ? d.durationSeconds : null,
+  };
+}
+
 /** 工程行的结构摘要「199 cue」「6 轨」。 */
 function projectMetaSummary(meta: Record<string, unknown> | undefined): string | null {
   if (!meta) return null;
@@ -108,10 +138,12 @@ function formatDuration(s: number): string {
 }
 
 /** 信封 → 顶栏信息行「WAV 音频 · 48 kHz/24 bit · 3:45 · 24.1 MB」；无可展示项返回 null。 */
-function metaInfoLine(meta: MetaEnvelope | null, fileSize: number | null): string | null {
+export function metaInfoLine(meta: MetaEnvelope | null, fileSize: number | null): string | null {
   const parts: string[] = [];
-  if (meta?.detectedType) parts.push(TYPE_LABELS[meta.detectedType] ?? meta.detectedType);
   const d = meta?.data;
+  // 身份优先：ADM 母版不是「一个 wav」，第一眼就要说清（2026-09-06 校准）
+  if (d?.adm) parts.push("ADM 母版");
+  else if (meta?.detectedType) parts.push(TYPE_LABELS[meta.detectedType] ?? meta.detectedType);
   if (typeof d?.width === "number" && typeof d?.height === "number") parts.push(`${d.width}×${d.height}`);
   if (typeof d?.sampleRate === "number" && typeof d?.bitDepth === "number" && d.bitDepth > 0)
     parts.push(`${d.sampleRate / 1000} kHz/${d.bitDepth} bit`);
@@ -159,6 +191,10 @@ export default function AssetPreviewClient({
   const [expandedOverride, setExpandedOverride] = useState<Set<string> | null>(null);
   // 包内单 entry 元数据（?entry= 懒算）：path → 摘要/拒绝原因；再点收起
   const [entryMeta, setEntryMeta] = useState<Map<string, { line?: string | null; reason?: string; loading: boolean }>>(new Map());
+  // ADM 门（#85）：音频要等元数据判完再挂播放器——ADM 母版（几十声道/GB 级）
+  // 喂给 WaveformPlayer 是全量下载+解码失败双输；等待窗口只有一个缓存请求
+  const [adm, setAdm] = useState<AdmView | null>(null);
+  const [audioMetaReady, setAudioMetaReady] = useState(false);
 
   const previewType = getPreviewType(mimeType);
 
@@ -200,7 +236,7 @@ export default function AssetPreviewClient({
   // #85 元数据：独立于预览链路拉取（失败静默——信息行是锦上添花不许挡预览）。
   // 压缩包清单：小档案 entries 就在信封里；大档案落了 sidecar，二次 ?full=1 拉回
   useEffect(() => {
-    if (storageType !== "r2") return;
+    if (storageType !== "r2") { setAudioMetaReady(true); return; } // 无元数据轨的存储：不拦播放器
     const metaUrl = `${BASE_PATH}/api/production/${productionId}/assets/${assetId}/metadata`;
     const pickArchive = (m: MetaEnvelope | null | undefined) => {
       const entries = m?.data?.entries;
@@ -216,15 +252,25 @@ export default function AssetPreviewClient({
       .then((j: { fileSize?: number | null; metadata?: MetaEnvelope | null } | null) => {
         if (!j) return;
         setInfoLine(metaInfoLine(j.metadata ?? null, j.fileSize ?? null));
+        setAdm(pickAdmView(j.metadata));
+        // 两条独立的「大列表落了 sidecar」触发（显式分开，别用一个布尔搅在一起）
+        const hasSidecar = j.metadata?.sidecarKey != null;
+        const needFullEntries = hasSidecar && !Array.isArray(j.metadata?.data?.entries);
+        const needFullAdmObjects = hasSidecar && j.metadata?.data?.adm != null && !Array.isArray(j.metadata?.data?.admObjects);
         if (Array.isArray(j.metadata?.data?.entries)) pickArchive(j.metadata);
-        else if (j.metadata?.sidecarKey) {
+        if (needFullEntries || needFullAdmObjects) {
           fetch(`${metaUrl}?full=1`)
             .then(r => (r.ok ? r.json() : null))
-            .then((f: { metadata?: MetaEnvelope | null } | null) => pickArchive(f?.metadata))
+            .then((f: { metadata?: MetaEnvelope | null } | null) => {
+              pickArchive(f?.metadata);
+              const fullAdm = pickAdmView(f?.metadata);
+              if (fullAdm) setAdm(fullAdm);
+            })
             .catch(() => {});
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setAudioMetaReady(true));
   }, [productionId, assetId, storageType]);
 
   useEffect(() => {
@@ -458,7 +504,12 @@ export default function AssetPreviewClient({
           </Suspense>
         )}
 
-        {!loading && url && previewType === "audio" && (
+        {/* 音频先过 ADM 门：ADM 母版（多声道对象音频）不许喂波形播放器——身份与
+            内容清单才是要交付的（播放留给未来的空间音频前沿），普通音频照旧 */}
+        {!loading && url && previewType === "audio" && !audioMetaReady && (
+          <p className={`text-sm ${t.faint}`}>读取元数据…</p>
+        )}
+        {!loading && url && previewType === "audio" && audioMetaReady && !adm && (
           <Suspense fallback={
             <div className="w-full max-w-2xl rounded-2xl bg-zinc-900 px-6 py-8 shadow-2xl flex items-center justify-center h-48">
               <p className="text-sm text-white/30">加载中…</p>
@@ -466,6 +517,49 @@ export default function AssetPreviewClient({
           }>
             <WaveformPlayer url={url} fileName={fileName} />
           </Suspense>
+        )}
+
+        {/* ADM 面板：①这是个 ADM ②里面有啥（programme / 规格 / 对象清单） */}
+        {!loading && previewType === "audio" && adm && (
+          <div className={`w-full max-w-3xl self-start rounded-xl border overflow-hidden ${
+            embedded ? "border-zinc-200 bg-white" : "border-white/10 bg-zinc-900"}`}>
+            <div className={`flex items-center justify-between px-4 py-2.5 border-b text-xs ${t.bar}`}>
+              <span className={embedded ? "text-zinc-700" : "text-white/70"}>
+                🎚 ADM 母版{adm.programmes[0]?.name ? ` · ${adm.programmes[0].name}` : ""}
+              </span>
+              {url && (
+                <a href={url} download={fileName} className={`transition-colors ${t.dim}`}>下载</a>
+              )}
+            </div>
+            <div className={`px-4 py-2 border-b text-xs ${t.bar} ${t.faint}`}>
+              {[
+                adm.channels != null && `${adm.channels} 声道`,
+                adm.sampleRate != null && adm.bitDepth != null && `${adm.sampleRate / 1000} kHz/${adm.bitDepth} bit`,
+                typeof adm.durationSeconds === "number" && formatDuration(adm.durationSeconds),
+                `${adm.objectCount} 对象`,
+                adm.trackUidCount != null && `${adm.trackUidCount} trackUID`,
+              ].filter(Boolean).join(" · ")}
+              <span className="ml-2">（对象音频母版，暂不支持在线播放）</span>
+            </div>
+            {adm.objects.length > 0 && (
+              <ul className="max-h-[calc(100vh-280px)] overflow-y-auto text-xs font-mono">
+                {adm.objects.map((o, i) => (
+                  <li key={i} className={`flex items-center gap-3 px-4 py-1.5 ${
+                    embedded ? "odd:bg-zinc-50 text-zinc-700" : "odd:bg-white/[0.03] text-white/60"}`}>
+                    <span className="truncate flex-1" title={o.name}>{o.name}</span>
+                    {(o.start || o.duration) && (
+                      <span className={`shrink-0 tabular-nums ${t.faint}`}>
+                        {o.start ?? ""}{o.duration ? ` +${o.duration}` : ""}
+                      </span>
+                    )}
+                  </li>
+                ))}
+                {adm.objectsTruncated && (
+                  <li className={`px-4 py-2 text-center ${t.fainter}`}>…对象清单有截断</li>
+                )}
+              </ul>
+            )}
+          </div>
         )}
 
         {!loading && url && previewType === "pdf" && (
