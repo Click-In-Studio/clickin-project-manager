@@ -42,6 +42,16 @@ describe("buildArchiveTree", () => {
     expect(proj.children[0].sizeBytes).toBe(300);
   });
 
+  it("同名目录/文件双面（畸形 zip）不许文件覆盖目录节点丢子树", () => {
+    const { roots } = buildArchiveTree([
+      { path: "x/a.wav", uncompressedBytes: 10 },
+      { path: "x", uncompressedBytes: 5 }, // 与目录 x 同名的文件
+    ]);
+    const names = roots.map((n) => `${n.isDir ? "D" : "F"}:${n.name}`);
+    expect(names).toEqual(["D:x", "F:x"]); // 两面并存，子树不丢
+    expect(roots[0].children).toHaveLength(1);
+  });
+
   it("showJunk 时垃圾回到树里", () => {
     const { roots, hiddenCount } = buildArchiveTree(entries, { hideJunk: false });
     expect(hiddenCount).toBe(0);
