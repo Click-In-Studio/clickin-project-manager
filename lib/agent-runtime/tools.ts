@@ -562,6 +562,57 @@ const DEFS: Def[] = [
     execute: async (ctx, args) => (await import("@/lib/agent-tools/script-tools")).scriptReadPage(ctx.userId, ctx.productionId, Number(args.page)),
   },
 
+  // ── #47 文档理解（lib/agent-tools/doc-tools.ts）：读上传的剧本类文档的结构化信号，
+  // 配合导入类工作流。assetId 来自正文引用 /__cm__/asset/<id>、资产页链接或用户提供；
+  // 权限=asset meta face（与预览同口径）。目前只支持 docx；pdf 挂下一弹。
+  {
+    mcpName: "production.doc_outline",
+    description:
+      "读取一个 docx 资产的结构概览：段落/表格/脚注/非文本对象总量、样式直方图、对齐直方图、缩进聚类、字体分布、开头预览（EN: docx document outline structure histogram script import）。" +
+      "这是理解上传文档的第一步——先据此提出该文档的排版映射假设（哪种排版=角色名/对白/舞台指示），不预设任何惯例（英文本常用全大写、中文本常用居中或换字体），再用 production.doc_read 分段精读验证。" +
+      "assetId 从正文里的 /__cm__/asset/<id> 引用或用户给的资产链接取。",
+    parameters: Type.Object({ assetId: Type.String({ description: "资产 id" }) }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-tools")).docOutline(ctx.userId, ctx.productionId, String(args.assetId)),
+  },
+  {
+    mcpName: "production.doc_read",
+    description:
+      "按块号区间批量读取 docx 资产内容，行式输出 `[¶N 样式/对齐/缩进/粗斜体/字体信号] 文本`——信号只报不判，怎么解读（角色名？唱词？cue 标注？）由你结合映射假设判断（EN: read docx paragraphs ranges signals）。" +
+      "表格整块出、脚注/尾注随段附出、图片与内嵌对象以 ⟦图⟧/⟦对象⟧ 占位（它们不可读，但你必须知道它们存在）。单次上限 150 块，长文档分批读。",
+    parameters: Type.Object({
+      assetId: Type.String({ description: "资产 id" }),
+      ranges: Type.Array(
+        Type.Object({
+          from: Type.Integer({ minimum: 0, description: "起始块号（含）" }),
+          to: Type.Integer({ minimum: 0, description: "结束块号（含）" }),
+        }),
+        { minItems: 1, description: "块号区间数组（块号见 doc_outline / doc_search）" },
+      ),
+    }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-tools")).docRead(
+      ctx.userId, ctx.productionId, String(args.assetId),
+      (args.ranges as Array<{ from: number; to: number }>).map((r) => ({ from: Number(r.from), to: Number(r.to) })),
+    ),
+  },
+  {
+    mcpName: "production.doc_search",
+    description:
+      "在 docx 资产全文（含表格与脚注）里检索文字，返回命中块号与上下文（EN: search docx document text find locate）。" +
+      "长文档定位用它先找块号再 production.doc_read 精读（比线性通读省得多）——如找所有「第X场」、核对某句台词在不在。",
+    parameters: Type.Object({
+      assetId: Type.String({ description: "资产 id" }),
+      query: Type.String({ description: "检索词（字面匹配，不分大小写）" }),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "最多返回条数，默认 20" })),
+    }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-tools")).docSearch(
+      ctx.userId, ctx.productionId, String(args.assetId),
+      { query: String(args.query), limit: args.limit == null ? undefined : Number(args.limit) },
+    ),
+  },
+
   // ── 定时任务（lib/agent-runtime/schedules.ts）：到点由 AI 以用户身份自动运行一段指令。
   // 创建是写操作（过确认卡——那张卡就是"负责任的人类动作"：人确认写哪里、允许哪几类写）；
   // 触发出的 run 里只有 schedule.finish 可用（只能汇报/停自己，不能建新任务）。
