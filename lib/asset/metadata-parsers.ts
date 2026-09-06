@@ -50,11 +50,15 @@ export function parseAdmXml(xml: string): Record<string, unknown> {
     const m = new RegExp(`\\b${name}="([^"]*)"`).exec(tag);
     return m ? decodeXmlEntities(m[1]) : null;
   };
+  // 判据是 `<tag␣`（带尾空格）：ADM 实体规范上必带 ID 属性，无属性自闭合标签
+  // （<audioObject/>）不在统计面——遇到这种畸形文件计数会偏低，属已知假设
   const count = (tag: string): number => xml.split(`<${tag} `).length - 1;
 
   const programmes: Record<string, unknown>[] = [];
+  let programmesTruncated = false;
   const progRe = /<audioProgramme [^>]*>/g;
-  for (let m = progRe.exec(xml); m && programmes.length < ADM_PROGRAMME_CAP; m = progRe.exec(xml)) {
+  for (let m = progRe.exec(xml); m; m = progRe.exec(xml)) {
+    if (programmes.length >= ADM_PROGRAMME_CAP) { programmesTruncated = true; break; }
     programmes.push({
       name: attr(m[0], "audioProgrammeName") ?? attr(m[0], "audioProgrammeID") ?? "",
       ...(attr(m[0], "start") != null && { start: attr(m[0], "start") }),
@@ -84,6 +88,7 @@ export function parseAdmXml(xml: string): Record<string, unknown> {
       channelFormatCount: count("audioChannelFormat"),
       trackUidCount: count("audioTrackUID"),
       ...(objectsTruncated && { objectsTruncated: true }),
+      ...(programmesTruncated && { programmesTruncated: true }),
     },
     admObjects: objects, // 大列表独立成顶层字段，走 sidecar 卸载
   };
@@ -137,7 +142,9 @@ export const wavParser: MetadataParser = {
         admXmlBytes = size < 0xffffffff ? size : 0;
         if (admXmlBytes > 0) axmlOffset = off + 8;
       } else if (id === "chna") {
-        chnaOffset = off + 8;
+        // 声明尺寸不足以放两个计数的畸形 chunk 不读——越界读到下个 chunk 头
+        // 会得到看似合法的假 QC 数字，宁缺毋假
+        if (size >= 4 && size < 0xffffffff) chnaOffset = off + 8;
       } else if (id === "dbmd") {
         hasDbmd = true; // Dolby 元数据（Atmos 交付链路的旁证）
       }

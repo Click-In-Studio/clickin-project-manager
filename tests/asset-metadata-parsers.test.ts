@@ -168,6 +168,19 @@ describe("wavParser", () => {
     expect(objs[1].name).toBe("harp & strings (L)"); // 实体解码
   });
 
+  it("畸形 chna（声明尺寸 <4）不读——宁缺毋假，不把下个 chunk 头当计数", async () => {
+    const wav = wavFile("RIFF", [
+      riffChunk("fmt ", wavFmt(2, 48000, 24)),
+      riffChunk("data", Buffer.alloc(6)),
+      riffChunk("chna", Buffer.alloc(2)), // 只有 2 字节
+      riffChunk("dbmd", Buffer.alloc(8)),
+    ]);
+    const env = await extractEnvelope(bufferByteSource(wav), "broken-chna.wav");
+    expect(env.status).toBe("ok");
+    expect(env.data?.chnaTracks).toBeUndefined();
+    expect(env.data?.hasDbmd).toBe(true);
+  });
+
   it("axml 超上限：只标 xmlOversized，不硬啃 keyframe 大户", async () => {
     const wav = wavFile("RIFF", [
       riffChunk("fmt ", wavFmt(2, 48000, 24)),
