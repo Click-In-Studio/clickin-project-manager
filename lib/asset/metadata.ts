@@ -50,19 +50,21 @@ export function isEnvelopeStale(env: MetadataEnvelope): boolean {
  *   下次请求重试——把瞬态错误固化成 failed 会让好文件永远显示解析失败。
  */
 export async function extractEnvelope(rawSrc: ByteSource, fileName: string): Promise<MetadataEnvelope> {
-  const src = withBudget(rawSrc);
   const base = {
     brokerVersion: BROKER_VERSION,
     extractedAt: new Date().toISOString(),
     sidecarKey: null,
     error: null,
   };
-  const head = await src.read(0, SNIFF_HEAD_LENGTH); // 瞬态错误从这里直接上抛
+  // sniff 头读定长（SNIFF_HEAD_LENGTH）自安全，不占预算；预算按命中的
+  // 分析器配（per-parser 覆盖，如 bmff 的 box 走位要更多 Range 次数）
+  const head = await rawSrc.read(0, SNIFF_HEAD_LENGTH); // 瞬态错误从这里直接上抛
   const detectedType = sniffDetectedType(head, fileName);
   const parser = resolveParser(detectedType);
   if (!parser) {
     return { ...base, status: "unsupported", parserKey: null, parserVersion: null, detectedType, data: null };
   }
+  const src = withBudget(rawSrc, parser.budget);
   try {
     const data = await parser.parse(src, head);
     return { ...base, status: "ok", parserKey: parser.key, parserVersion: parser.version, detectedType, data };
