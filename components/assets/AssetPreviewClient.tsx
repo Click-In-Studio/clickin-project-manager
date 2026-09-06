@@ -76,10 +76,10 @@ interface AdmView {
   durationSeconds?: number | null;
 }
 
-function pickAdmView(m: MetaEnvelope | null | undefined): AdmView | null {
-  const admD = m?.data?.adm as Record<string, unknown> | undefined;
-  if (!admD || typeof admD !== "object") return null;
-  const d = m!.data!;
+export function pickAdmView(m: MetaEnvelope | null | undefined): AdmView | null {
+  const d = m?.data;
+  const admD = d?.adm as Record<string, unknown> | undefined;
+  if (!d || !admD || typeof admD !== "object") return null;
   return {
     programmes: Array.isArray(admD.programmes) ? (admD.programmes as AdmView["programmes"]) : [],
     objectCount: typeof admD.objectCount === "number" ? admD.objectCount : 0,
@@ -138,7 +138,7 @@ function formatDuration(s: number): string {
 }
 
 /** 信封 → 顶栏信息行「WAV 音频 · 48 kHz/24 bit · 3:45 · 24.1 MB」；无可展示项返回 null。 */
-function metaInfoLine(meta: MetaEnvelope | null, fileSize: number | null): string | null {
+export function metaInfoLine(meta: MetaEnvelope | null, fileSize: number | null): string | null {
   const parts: string[] = [];
   const d = meta?.data;
   // 身份优先：ADM 母版不是「一个 wav」，第一眼就要说清（2026-09-06 校准）
@@ -253,10 +253,12 @@ export default function AssetPreviewClient({
         if (!j) return;
         setInfoLine(metaInfoLine(j.metadata ?? null, j.fileSize ?? null));
         setAdm(pickAdmView(j.metadata));
-        const needFull = j.metadata?.sidecarKey
-          && (!Array.isArray(j.metadata?.data?.entries) || (j.metadata?.data?.adm && !Array.isArray(j.metadata?.data?.admObjects)));
+        // 两条独立的「大列表落了 sidecar」触发（显式分开，别用一个布尔搅在一起）
+        const hasSidecar = j.metadata?.sidecarKey != null;
+        const needFullEntries = hasSidecar && !Array.isArray(j.metadata?.data?.entries);
+        const needFullAdmObjects = hasSidecar && j.metadata?.data?.adm != null && !Array.isArray(j.metadata?.data?.admObjects);
         if (Array.isArray(j.metadata?.data?.entries)) pickArchive(j.metadata);
-        if (needFull) {
+        if (needFullEntries || needFullAdmObjects) {
           fetch(`${metaUrl}?full=1`)
             .then(r => (r.ok ? r.json() : null))
             .then((f: { metadata?: MetaEnvelope | null } | null) => {
