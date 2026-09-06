@@ -629,7 +629,6 @@ export const zipParser: MetadataParser = {
   version: 5, // v2：+CD 清单；v3：+包内工程递归；v4：projects 携带工程元数据本体；
               // v5：hotfix——无 flag 文件名严格 UTF-8 先行（Mac zip 乱码事故），
               // bump 让全部存量 zip 信封/清单懒重算
-
   budget: { maxBytes: 48 * 1024 * 1024, maxReads: 24 },
   async parse(src) {
     // EOCD 只能从尾部定位；存量 file_size NULL 行定位不了 ⇒ 确定性 failed

@@ -367,6 +367,16 @@ describe("zipParser v2：central directory 清单", () => {
     expect(entries[0]).toMatchObject({ path: "中.txt", encodingGuessed: true });
   });
 
+  it("已接受的取舍：恰好构成合法 UTF-8 的 GBK 字节对会被判成 UTF-8（锁定行为）", async () => {
+    // 字节对 C4 A7 在 GBK 里是一个合法汉字（lead C4 + trail A7），同时也是合法 UTF-8（U+0127 ħ）。
+    // 判序 UTF-8 先行 ⇒ 解出 ħ。接受依据：这类同时合法的短序列在真实中文文件名
+    // 里几乎不成词，而反向排序会复现全量 Mac zip 乱码事故——两害取轻，测试钉死
+    const ambiguous = Buffer.concat([Buffer.from([0xc4, 0xa7]), Buffer.from(".txt", "latin1")]);
+    const env = await extractEnvelope(bufferByteSource(zipFile([cdEntry({ name: ambiguous })])), "amb.zip");
+    const entries = env.data?.entries as Record<string, unknown>[];
+    expect(entries[0]).toMatchObject({ path: "ħ.txt", encodingGuessed: true });
+  });
+
   it("无 flag 但字节是合法 UTF-8 → 按 UTF-8 解（Mac 归档工具现实；线上「供养→渚涘吇」事故回归）", async () => {
     const macName = Buffer.from("供养 program/audio/开场.wav", "utf8"); // Finder 打包不置 bit 11
     const env = await extractEnvelope(bufferByteSource(zipFile([cdEntry({ name: macName })])), "mac.zip");

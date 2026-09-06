@@ -274,7 +274,7 @@ function GridSlots({ item, slots, v, inlinePrefix, delimOpen, delimClose, onLayo
       return prev;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item.id, v, slots.map((s) => s.text).join(" "), offsets]);
+  }, [item.id, v, slots.map((s) => s.text).join("\u0000"), offsets]);
 
   useEffect(() => {
     if (!onLayoutChange) return;
