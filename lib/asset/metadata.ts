@@ -89,34 +89,44 @@ export async function setAssetFileMetadata(fileId: string, env: MetadataEnvelope
 
 export const SIDECAR_THRESHOLD_BYTES = 32 * 1024;
 
+/** 可卸载到 sidecar 的大数组字段（清单/cue 树/track 表/引用表）。标量永远留信封。 */
+const SIDECAR_LIST_FIELDS = ["entries", "cueLists", "tracks", "refs", "projects"] as const;
+
 export function metadataSidecarKey(fileId: string): string {
   return `meta/${fileId}.json`;
 }
 
 /**
- * 落库前分离：data.entries 序列化超阈值 ⇒ 移入 sidecar payload、信封 data 只
- * 留标量并置 sidecarKey。key 按 fileId 确定性，版本 bump 重算就地覆盖，幂等。
+ * 落库前分离：data 序列化超阈值 ⇒ 大数组字段整组移入 sidecar payload、信封
+ * data 只留标量并置 sidecarKey。key 按 fileId 确定性，版本 bump 重算就地覆盖，
+ * 幂等。
  */
 export function splitEnvelopeForStorage(
   env: MetadataEnvelope,
   fileId: string,
 ): { envelope: MetadataEnvelope; sidecar: Record<string, unknown> | null } {
-  const entries = env.data?.entries;
-  if (!Array.isArray(entries)) return { envelope: env, sidecar: null };
+  if (env.data == null) return { envelope: env, sidecar: null };
+  const bigFields = SIDECAR_LIST_FIELDS.filter((f) => Array.isArray(env.data![f]));
+  if (bigFields.length === 0) return { envelope: env, sidecar: null };
   if (Buffer.byteLength(JSON.stringify(env.data)) <= SIDECAR_THRESHOLD_BYTES)
     return { envelope: env, sidecar: null };
   const scalars = { ...env.data };
-  delete scalars.entries;
+  const lists: Record<string, unknown> = {};
+  for (const f of bigFields) {
+    lists[f] = scalars[f];
+    delete scalars[f];
+  }
   return {
     envelope: { ...env, data: scalars, sidecarKey: metadataSidecarKey(fileId) },
-    sidecar: { fileId, parserKey: env.parserKey, parserVersion: env.parserVersion, entries },
+    sidecar: { fileId, parserKey: env.parserKey, parserVersion: env.parserVersion, ...lists },
   };
 }
 
-/** 读面水合：信封带 sidecarKey 时拉回 entries 拼进 data（?full=1 用）。
+/** 读面水合：信封带 sidecarKey 时拉回大数组字段拼进 data（?full=1 用）。
  *  sidecar 拉取失败按瞬态处理（调用方降级返回未水合信封）。 */
 export async function hydrateMetadata(env: MetadataEnvelope): Promise<MetadataEnvelope> {
-  if (!env.sidecarKey || Array.isArray(env.data?.entries)) return env;
+  if (!env.sidecarKey) return env;
+  if (SIDECAR_LIST_FIELDS.some((f) => Array.isArray(env.data?.[f]))) return env; // 已内联
   let obj: Awaited<ReturnType<typeof getR2Object>>;
   try {
     obj = await getR2Object(env.sidecarKey);
@@ -125,8 +135,13 @@ export async function hydrateMetadata(env: MetadataEnvelope): Promise<MetadataEn
   }
   if (!obj) return env; // 悬空指针（#428 回收类异常态）：降级回标量，不 500
   try {
-    const sc = JSON.parse(obj.body.toString("utf8")) as { entries?: unknown };
-    if (Array.isArray(sc.entries)) return { ...env, data: { ...env.data, entries: sc.entries } };
+    const sc = JSON.parse(obj.body.toString("utf8")) as Record<string, unknown>;
+    const merged = { ...env.data };
+    let any = false;
+    for (const f of SIDECAR_LIST_FIELDS) {
+      if (Array.isArray(sc[f])) { merged[f] = sc[f]; any = true; }
+    }
+    if (any) return { ...env, data: merged };
   } catch {
     // 损坏的 sidecar JSON：降级回标量
   }

@@ -1,5 +1,5 @@
 import type { ByteSource } from "./byte-source";
-import { pngParser, wavParser, flacParser, mp3Parser, isobmffParser, zipParser, rarParser } from "./metadata-parsers";
+import { pngParser, wavParser, flacParser, mp3Parser, isobmffParser, zipParser, rarParser, alsParser, qlabParser } from "./metadata-parsers";
 
 /**
  * 类型 broker（#85）：决定一个文件「是什么」并分发给对应的元数据分析器。
@@ -12,9 +12,10 @@ import { pngParser, wavParser, flacParser, mp3Parser, isobmffParser, zipParser, 
  * 它命中过的信封重算）。忘 bump = 存量永不重算，这是唯一的失效通道。
  *
  * 版本史：1=#433 基建+PNG 样板；2=PR1 媒体/压缩标量批（wav/flac/mp3/bmff/zip）
- * + RF64 magic；3=PR2 rar5 分析器上线（重 broker 存量 rar 的 unsupported）。
+ * + RF64 magic；3=PR2 rar5 分析器上线（重 broker 存量 rar 的 unsupported）；
+ * 4=PR3 工程类（als/qlab）上线 + gzip/bplist 扩展名破同门。
  */
-export const BROKER_VERSION = 3;
+export const BROKER_VERSION = 4;
 
 /** 分析器读满 head（含 magic 判型所需前缀）之外的字节自己按需 Range。 */
 export const SNIFF_HEAD_LENGTH = 4096;
@@ -77,7 +78,14 @@ export function sniffDetectedType(head: Buffer, fileName: string): string | null
     return ZIP_BY_EXT[e] ?? "application/zip";
   if (has(head, 0, "Rar!")) return "application/vnd.rar";
   if (has(head, 0, [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c])) return "application/x-7z-compressed";
-  if (has(head, 0, [0x1f, 0x8b])) return "application/gzip";
+  // gzip 同门：.als（Ableton Live Set = gzip+XML）靠扩展名从通用 gzip 里分出来
+  if (has(head, 0, [0x1f, 0x8b])) return e === "als" ? "application/vnd.ableton.live-set" : "application/gzip";
+  // bplist 同门：通用 Apple plist magic，.qlab4/.qlab5 靠扩展名分出 workspace
+  if (has(head, 0, "bplist00")) {
+    if (e === "qlab4") return "application/x-qlab4-workspace";
+    if (e === "qlab5") return "application/x-qlab5-workspace";
+    return "application/x-apple-bplist";
+  }
 
   if (has(head, 0, "fLaC")) return "audio/flac";
   if (has(head, 0, "OggS")) return "audio/ogg";
@@ -115,6 +123,9 @@ const PARSERS: ReadonlyMap<string, MetadataParser> = new Map([
   ["video/quicktime", isobmffParser],
   ["application/zip", zipParser],
   ["application/vnd.rar", rarParser],
+  ["application/vnd.ableton.live-set", alsParser],
+  ["application/x-qlab4-workspace", qlabParser],
+  ["application/x-qlab5-workspace", qlabParser],
 ]);
 
 export function resolveParser(detectedType: string | null): MetadataParser | null {

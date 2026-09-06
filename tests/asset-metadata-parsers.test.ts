@@ -406,6 +406,6 @@ describe("rarParser", () => {
 
 // ─── 批次版本 ─────────────────────────────────────────────────────────────────
 
-it("PR2 批 bump 到 BROKER_VERSION 3（rar 上线重 broker 存量 unsupported）", () => {
-  expect(BROKER_VERSION).toBe(3);
+it("broker 版本单调不回退（精确断言在最新批的测试文件里）", () => {
+  expect(BROKER_VERSION).toBeGreaterThanOrEqual(3);
 });

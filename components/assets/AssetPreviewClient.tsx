@@ -53,6 +53,14 @@ interface ArchiveEntry {
 /** 清单前端渲染上限（5000 行 DOM 太重；数据层另有 ARCHIVE_ENTRY_CAP）。 */
 const ARCHIVE_RENDER_CAP = 1000;
 
+// zip 包内工程分析结果（#85 PR3）
+interface ArchiveProject {
+  path: string;
+  refCount?: number;
+  missingCount?: number;
+  error?: string;
+}
+
 /** 探测类型 → 展示标签。认不出的直接显示 detectedType 原文。 */
 const TYPE_LABELS: Record<string, string> = {
   "image/png": "PNG 图片", "image/jpeg": "JPEG 图片", "image/gif": "GIF 图片",
@@ -67,6 +75,10 @@ const TYPE_LABELS: Record<string, string> = {
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "Word 文档",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "Excel 表格",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PPT 演示",
+  "application/vnd.ableton.live-set": "Ableton 工程",
+  "application/x-qlab4-workspace": "QLab 4 工作区",
+  "application/x-qlab5-workspace": "QLab 5 工作区",
+  "application/x-apple-bplist": "属性列表",
 };
 
 function formatBytes(n: number): string {
@@ -95,6 +107,10 @@ function metaInfoLine(meta: MetaEnvelope | null, fileSize: number | null): strin
   if (typeof d?.durationSeconds === "number")
     parts.push(`${d.estimated === true ? "≈" : ""}${formatDuration(d.durationSeconds)}`);
   if (typeof d?.entryCount === "number") parts.push(`${d.entryCount} 项`);
+  if (typeof d?.trackCount === "number") parts.push(`${d.trackCount} 轨`);
+  if (typeof d?.cueCount === "number") parts.push(`${d.cueCount} cue`);
+  if (typeof d?.projectRefCount === "number" && (d.projectRefCount as number) > 0)
+    parts.push(`${d.projectRefCount} 引用`);
   if (fileSize != null) parts.push(formatBytes(fileSize));
   return parts.length > 0 ? parts.join(" · ") : null;
 }
@@ -125,7 +141,7 @@ export default function AssetPreviewClient({
   const [loading, setLoading] = useState(true);
   const [shareOpen, setShareOpen] = useState(false);
   const [infoLine, setInfoLine] = useState<string | null>(null);
-  const [archive, setArchive] = useState<{ entries: ArchiveEntry[]; truncated: boolean } | null>(null);
+  const [archive, setArchive] = useState<{ entries: ArchiveEntry[]; truncated: boolean; projects: ArchiveProject[] } | null>(null);
 
   const previewType = getPreviewType(mimeType);
 
@@ -137,7 +153,11 @@ export default function AssetPreviewClient({
     const pickArchive = (m: MetaEnvelope | null | undefined) => {
       const entries = m?.data?.entries;
       if (Array.isArray(entries) && entries.length > 0)
-        setArchive({ entries: entries as ArchiveEntry[], truncated: m?.data?.truncated === true });
+        setArchive({
+          entries: entries as ArchiveEntry[],
+          truncated: m?.data?.truncated === true,
+          projects: Array.isArray(m?.data?.projects) ? (m.data.projects as ArchiveProject[]) : [],
+        });
     };
     fetch(metaUrl)
       .then(r => (r.ok ? r.json() : null))
@@ -296,6 +316,21 @@ export default function AssetPreviewClient({
                 <a href={downloadUrl} download={fileName} className={`transition-colors ${t.dim}`}>下载压缩包</a>
               )}
             </div>
+            {/* 包内工程引用体检（zip 内命名空间确定性 join 的结果） */}
+            {archive.projects.length > 0 && (
+              <div className={`px-4 py-2 border-b text-xs space-y-1 ${t.bar}`}>
+                {archive.projects.map((p, i) => (
+                  <p key={i} className={embedded ? "text-zinc-600" : "text-white/60"}>
+                    🎛 <span className="font-mono">{p.path}</span>{" "}
+                    {p.error
+                      ? <span className={t.faint}>解析失败</span>
+                      : (p.missingCount ?? 0) > 0
+                        ? <span className="text-amber-500">{p.refCount} 引用 · 缺 {p.missingCount}</span>
+                        : <span className={t.faint}>{p.refCount} 引用齐</span>}
+                  </p>
+                ))}
+              </div>
+            )}
             <ul className="max-h-[calc(100vh-240px)] overflow-y-auto text-xs font-mono">
               {archive.entries.slice(0, ARCHIVE_RENDER_CAP).map((e, i) => (
                 <li key={i} className={`flex items-center gap-2 px-4 py-1.5 ${
