@@ -77,6 +77,12 @@ describe("extractEnvelope 状态机", () => {
     expect(env.detectedType).toBeNull();
   });
 
+  it("0 字节文件（对应 R2 416→空读）落 unsupported 终态，不许永远重试", async () => {
+    const env = await extractEnvelope(bufferByteSource(Buffer.alloc(0)), "empty.png");
+    expect(env.status).toBe("unsupported");
+    expect(env.detectedType).toBeNull();
+  });
+
   it("分析器确定性抛错 → failed 落信封（不上抛）", async () => {
     const truncated = minimalPng().subarray(0, 20); // magic 完整、IHDR 残缺
     const env = await extractEnvelope(bufferByteSource(truncated), "broken.png");

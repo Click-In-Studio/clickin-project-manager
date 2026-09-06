@@ -1,4 +1,4 @@
-import { getR2Stream } from "../r2";
+import { presignedGet } from "../r2";
 
 /**
  * 字节源抽象（#85 元数据基建）：分析器按 (offset, length) 拉字节，不感知底下是
@@ -46,23 +46,35 @@ export function withBudget(
   };
 }
 
-/** R2 Range 实现。length=0 直接短路（Range 头不能表达空区间）。 */
+/**
+ * R2 Range 实现。不走 getR2Stream（它把非 2xx 一律抛成异常，区分不了确定性
+ * 与瞬态）——字节源必须自持状态语义：
+ * - 416（整段越过文件末尾，如 0 字节文件读 head、存量 size NULL 行的尾读）
+ *   ＝确定性「读到 0 字节」，与截断语义一致，让信封能落成终态而不是永远重试；
+ * - 404（对象没了）＝异常态但**刻意不落终态**：对象缺失多半是 #428 回收漏洞
+ *   类问题，不该把 failed 固化到文件行上（下载/预览同样是坏的，修复后元数据
+ *   应立即可算）。代价是每次详情多一个 404 的 Range 请求，可忽略；
+ * - 网络错误 / 5xx ＝瞬态，上抛 TransientReadError，调用方不落盘。
+ */
 export function r2ByteSource(r2Key: string, size: number | null): ByteSource {
   return {
     size,
     async read(offset, length) {
-      // 越界截断在本地做：R2 对整段越界回 416，而 getR2Stream 会把非 2xx 抛成
-      // 异常，到不了这层。size 未知（存量 NULL 行）时钳不了，靠分析器只读头部
-      // 的习惯兜着。
+      // size 已知时本地钳制省一次注定 416 的请求；未知时靠下面的 416 分支兜底
       if (size != null) length = Math.min(length, Math.max(0, size - offset));
       if (length <= 0) return Buffer.alloc(0);
-      let res: Response | null;
+      let res: Response;
       try {
-        res = await getR2Stream(r2Key, `bytes=${offset}-${offset + length - 1}`);
+        res = await fetch(presignedGet(r2Key), {
+          headers: { Range: `bytes=${offset}-${offset + length - 1}` },
+        });
       } catch (e) {
         throw new TransientReadError(`R2 range read failed (${r2Key})`, e);
       }
-      if (!res) throw new TransientReadError(`R2 object missing (${r2Key})`);
+      if (res.status === 416) return Buffer.alloc(0);
+      if (res.status === 404) throw new TransientReadError(`R2 object missing (${r2Key})`);
+      if (!res.ok && res.status !== 206)
+        throw new TransientReadError(`R2 range read got ${res.status} (${r2Key})`);
       const buf = Buffer.from(await res.arrayBuffer());
       // 万一服务端忽略 Range 回了 200 全量，本地切片兜底，不让全文件漏进分析器
       if (res.status === 200 && buf.length > length) return buf.subarray(offset, offset + length);

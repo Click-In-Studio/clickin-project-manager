@@ -4,6 +4,7 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset, resolveAssetFile } from "@/lib/asset/db";
 import { canViewAsset } from "@/lib/asset/perm";
 import { getOrExtractFileMetadata } from "@/lib/asset/metadata";
+import { TransientReadError } from "@/lib/asset/byte-source";
 
 /**
  * #85 元数据读面：latest file（latest-wins，与 preview/download 同口径）的信封。
@@ -30,9 +31,15 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
     const metadata = await getOrExtractFileMetadata(file, asset.fileName);
     return Response.json({ fileId: file.id, fileSize: file.fileSize, metadata });
   } catch (e) {
-    // 瞬态读失败（TransientReadError 等）：降级回已有信封/空，不落盘不 500，
-    // 下次请求重试（avatar-serve 同款「显示不空窗」姿势）
-    console.warn(`[asset-metadata] extract failed (${file.id}):`, e);
-    return Response.json({ fileId: file.id, fileSize: file.fileSize, metadata: file.metadata });
+    // 只降级瞬态读失败（R2 网络类）：回旧信封/空，不落盘，下次请求重试
+    // （avatar-serve 同款「显示不空窗」）。其余异常是管线 bug——确定性失败
+    // 本应在 getOrExtractFileMetadata 内落成 failed 信封返回，到得了这里的
+    // 一律 500 暴露出来，不许静默降级把 bug 埋掉（UI 对非 2xx 自会不显示）。
+    if (e instanceof TransientReadError) {
+      console.warn(`[asset-metadata] transient read failed (${file.id}):`, e);
+      return Response.json({ fileId: file.id, fileSize: file.fileSize, metadata: file.metadata });
+    }
+    console.error(`[asset-metadata] pipeline error (${file.id}):`, e);
+    return Response.json({ error: "元数据分析失败" }, { status: 500 });
   }
 }
