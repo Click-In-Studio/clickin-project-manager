@@ -25,7 +25,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { type ByteSource, TransientReadError } from "@/lib/asset/byte-source";
 
-export const PDF_EXTRACTOR_VERSION = 1;
+export const PDF_EXTRACTOR_VERSION = 2; // v2：+跨页续写标注 contNext/contPrev
 
 const FILE_BYTES_CAP = 50 * 1024 * 1024;
 const PAGES_CAP = 400;
@@ -52,6 +52,11 @@ export interface PdfLine {
   font?: string;
   /** 跨页重复行（水印/页眉脚）。 */
   boilerplate?: boolean;
+  /** 本行是页末行且疑似句子未完（括号未闭合/无句末标点且下页小写续起）——
+   *  与下页标 contPrev 的行很可能是同一段被分页截断（导入实测反馈②）。 */
+  contNext?: boolean;
+  /** 本行是页首行且疑似上一页末行（标 contNext）的继续。 */
+  contPrev?: boolean;
 }
 
 export type PdfPageStatus = "ok" | "blank" | "rasterized" | "extract-incomplete";
@@ -306,6 +311,35 @@ export async function parsePdf(buf: Buffer): Promise<PdfDoc> {
       }
     }
     const boilerplate = [...boilerplateTexts];
+
+    // 跨页段落截断启发式（导入实测反馈②：同段被分页截断没有任何提示，导入
+    // 会产生人为断块）。只出信号不下结论：
+    // - 强判据：页末行括号未闭合（(（「『“[{ 多于对应闭合）；
+    // - 弱判据：页末行无句末标点、够长（≥30 字符，排除角色名短行）、且下页
+    //   首行以小写拉丁字母续起（CJK 无大小写，弱判据不触发——宁缺毋假）。
+    const TERMINAL_RE = /[.。!?！？…”"』」)）\]}]$/;
+    const unbalancedOpen = (t: string): boolean => {
+      let n = 0;
+      for (const ch of t) {
+        if ("(（「『“[{".includes(ch)) n++;
+        else if (")）」』”]}".includes(ch)) n = Math.max(0, n - 1);
+      }
+      return n > 0;
+    };
+    for (let i = 0; i + 1 < pages.length; i++) {
+      const a = pages[i], b = pages[i + 1];
+      if (a.vertical || b.vertical || a.lines.length === 0 || b.lines.length === 0) continue;
+      const lastLn = [...a.lines].reverse().find((l) => !l.boilerplate);
+      const firstLn = b.lines.find((l) => !l.boilerplate);
+      if (!lastLn || !firstLn) continue;
+      const txt = lastLn.text.trim(), nxt = firstLn.text.trim();
+      const strong = unbalancedOpen(txt);
+      const weak = !TERMINAL_RE.test(txt) && txt.length >= 30 && /^[a-z]/.test(nxt);
+      if (strong || weak) {
+        lastLn.contNext = true;
+        firstLn.contPrev = true;
+      }
+    }
 
     return {
       pages,

@@ -45,6 +45,15 @@ import {
   RUNNER_OWNER, HEARTBEAT_INTERVAL_MS, ORPHAN_AFTER_MS,
 } from "./config";
 import { creditsFromUsd, RUN_CREDIT_HARD_CAP } from "@/lib/plan";
+
+/** 成本硬顶中止的落库前缀（机器可判）与下一回合的注入说明（导入实测反馈①：
+ *  裸 abort 让 agent 只能瞎猜中止原因）。 */
+const COST_CAP_ERROR_PREFIX = "cost-hard-cap";
+const COST_CAP_ERROR = `${COST_CAP_ERROR_PREFIX}: 单回合成本硬顶触发（消耗异常偏高，已自动中止）`;
+const COST_CAP_RESUME_NOTE =
+  "【系统提示】上一回合因单回合成本硬顶被自动中止（不是工具参数错误，也不是数量超限）。" +
+  "中止发生在半途：确认卡已批准的写入通常已生效，悬空的调用状态未知——先用只读工具（或导入日志）核对实际进度，" +
+  "再以更小的批次继续，不要重做已完成的部分。";
 import { assertAiQuota, chargeExtraCredits, getQuotaStatus, paidFromOf, quotaOwnerOf, type PaidFrom } from "@/lib/ai-quota";
 import { usdOfUsage } from "./billing";
 
@@ -191,6 +200,9 @@ async function execute(input: ExecuteInput): Promise<void> {
   let lastAssistant: string | null = null;
   let status: "completed" | "aborted" | "failed" = "completed";
   let error: string | null = null;
+  // 成本硬顶触发标记：中止发生在工具/流式中途，异常本身只是裸 AbortError——
+  // 不记原因的话 agent 下回合只能瞎猜"是超数量还是超长度"（导入实测反馈①）
+  let costCapAborted = false;
 
   const toolArgs = new Map<string, Record<string, unknown>>(); // toolCallId → args（mutation 行用）
   const heartbeat = setInterval(() => {
@@ -218,6 +230,17 @@ async function execute(input: ExecuteInput): Promise<void> {
     const inject = await buildInjectContext(userId, sessionId, input.message, { toolFamilies: families });
     const recall = recallBlock(inject.recall);
     const dialectDelivered = inject.dialectDelivered;
+
+    // 上一回合若因成本硬顶被掐（错误带机器可判前缀），本回合开头注入说明——
+    // 否则 agent 只看到悬空工具调用的"状态未知"，不知道该缩小批次续作
+    const priorCapNote = await (async () => {
+      const { rows } = await pool.query<{ error: string | null }>(
+        `SELECT error FROM agent_run WHERE session_id = $1 AND id <> $2 AND ended_at IS NOT NULL
+         ORDER BY started_at DESC LIMIT 1`,
+        [sessionId, runId],
+      );
+      return rows[0]?.error?.startsWith(COST_CAP_ERROR_PREFIX) ? COST_CAP_RESUME_NOTE : null;
+    })();
 
     // 工具三层（#333）：热 ∪ 温(页面) ∪ 召回命中 ∪ 闭包。
     const tiers = tieredToolNames({
@@ -254,11 +277,12 @@ async function execute(input: ExecuteInput): Promise<void> {
 
     // 召回临时插入：送模型的消息列表里，最后一条用户消息前插一条 user 消息。
     // 不进 session（下一轮不再带，与 prependContext 语义一致）。
-    if (recall) {
+    const injectedNote = [priorCapNote, recall].filter(Boolean).join("\n\n");
+    if (injectedNote) {
       harness.on("context", ({ messages }) => {
         const idx = findLastUserIndex(messages);
         if (idx < 0) return undefined;
-        const injected: AgentMessage = { role: "user", content: [{ type: "text", text: recall }], timestamp: Date.now() };
+        const injected: AgentMessage = { role: "user", content: [{ type: "text", text: injectedNote }], timestamp: Date.now() };
         return { messages: [...messages.slice(0, idx), injected, ...messages.slice(idx)] };
       });
     }
@@ -315,6 +339,7 @@ async function execute(input: ExecuteInput): Promise<void> {
         if (!abort.signal.aborted && spent > RUN_CREDIT_HARD_CAP) {
           console.error(`[agent-runtime] run ${runId} 触发单轮成本硬顶（${spent} credit > ${RUN_CREDIT_HARD_CAP}），中止`);
           publisher.publish({ type: "error", error: "本次任务消耗异常偏高，已自动中止。请把问题拆小后重试。" });
+          costCapAborted = true;
           abort.abort();
           void active.get(sessionId)?.harness.abort().catch(() => {});
         }
@@ -380,6 +405,11 @@ async function execute(input: ExecuteInput): Promise<void> {
   } finally {
     clearInterval(heartbeat);
     toolArgs.clear(); // 中止/脱离时可能没有对应的 end 事件
+    if (costCapAborted) {
+      // 覆盖裸 AbortError：error 落库带机器可判前缀，下一个 run 开头据此注入提示
+      if (status === "completed") status = "aborted";
+      error = COST_CAP_ERROR;
+    }
     await publisher.drain();
     if (detached) {
       // 脱离：run 行保持原状态（running/awaiting_*），心跳停更 → 30s 后被下一个进程接管；

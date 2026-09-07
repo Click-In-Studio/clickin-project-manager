@@ -195,6 +195,16 @@ describe("script_propose_edit_blocks：同锚点批量插入顺序（2026-09-07 
     const del = await runScriptProposal(writerId, prodId, EDIT, { deletes: [a.id, b.id, c.id] });
     expect(del).toContain("删除 3 块");
   });
+
+  it("确认卡预览带插入位置上下文（「前块」与「后块」之间），锚点选错当场可见", async () => {
+    const preview = await previewScriptProposal(writerId, prodId, EDIT, {
+      inserts: [{ afterBlockId: d1, content: "位置上下文验证" }],
+    });
+    expect(preview.error).toBeUndefined();
+    const notes = preview.notes.join("\n");
+    // 上下文双侧都要在卡上（邻块内容被前序用例改过，只断言格式与双侧存在）
+    expect(notes).toMatch(/增（「.+」与「.+」之间）：位置上下文验证/);
+  });
 });
 
 describe("script_propose_edit_blocks：精修与守卫", () => {
