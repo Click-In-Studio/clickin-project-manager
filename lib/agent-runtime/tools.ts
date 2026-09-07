@@ -204,7 +204,7 @@ export const DEFS: Def[] = [
   },
 
   // ── production.wiki_* ───────────────────────────────────────────────────
-  prodTool("production.wiki_tree", "查询当前对话关联制作的文档树（wiki 库），只列出当前用户有权限看到的文档（id/标题/tag）。",
+  prodTool("production.wiki_tree", "查询当前对话关联制作的文档与文件树（与用户看到的目录一致），只列当前用户可见的节点。行首标类型：[文档]（wiki，用 wiki_read 按 id 读）、[文件]（资产，docx/pdf 用 production.doc_outline 按资产 id 解析）、[目录]。",
     async (uid, pid) => (await import("@/lib/agent-tools/wiki-tools")).wikiTree(uid, pid)),
   {
     mcpName: "production.wiki_backlinks",
@@ -624,6 +624,20 @@ export const DEFS: Def[] = [
     execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-tools")).docSearch(
       ctx.userId, ctx.productionId, String(args.assetId),
       { query: String(args.query), limit: args.limit == null ? undefined : Number(args.limit) },
+    ),
+  },
+  {
+    mcpName: "production.asset_list",
+    description:
+      "列出该制作里当前用户可见的资产文件：文件名、id、类型，docx/pdf 会标注可解析（EN: list assets files documents pdf docx enumerate）。" +
+      "用户提到某个文件而你没有资产 id 时先用它找（可加 query 按文件名过滤）；production.wiki_tree 的 [文件] 行也能看到资产（树给结构、这里给平铺过滤）。",
+    parameters: Type.Object({
+      query: Type.Optional(Type.String({ description: "按文件名/显示名过滤（子串匹配，不分大小写）" })),
+    }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-tools")).assetList(
+      ctx.userId, ctx.productionId,
+      { query: args.query == null ? undefined : String(args.query) },
     ),
   },
   {

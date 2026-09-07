@@ -51,8 +51,9 @@ const SCRIPT_WRITE = [
   "production.script_propose_rewrite", "production.script_propose_edit_blocks",
 ];
 
-/** #47 文档解读族：docx/pdf 结构信号读面 + 导入指引与日志 */
+/** #47 文档解读族：资产枚举（id 供给）+ docx/pdf 结构信号读面 + 导入指引与日志 */
 const DOC_FAMILY = [
+  "production.asset_list",
   "production.doc_outline", "production.doc_read", "production.doc_search",
   "production.doc_import_guide", "production.doc_import_log_create", "production.doc_import_log_append",
 ];
@@ -98,9 +99,10 @@ const CLOSURE: Record<string, string[]> = {
   "production.character_propose_create": ["production.dramaturgy_permissions", "production.character_list"],
   "production.character_propose_update": ["production.dramaturgy_permissions", "production.character_list", "production.character_read"],
   "production.character_propose_delete": ["production.dramaturgy_permissions", "production.character_list"],
-  // #47 文档解读族：read/search 的锚点来自 outline；任何 doc 工具上桌都带导入指引
+  // #47 文档解读族：asset_list 是 id 供给入口（同 scene_list 之于剧本族）；
+  // read/search 的锚点来自 outline；任何 doc 工具上桌都带导入指引
   // （guide 是这族的"先查权限"同位语——纪律先行）；日志追加依赖创建（授权卡在创建那次）
-  "production.doc_outline": ["production.doc_import_guide"],
+  "production.doc_outline": ["production.asset_list", "production.doc_import_guide"],
   "production.doc_read": ["production.doc_outline", "production.doc_import_guide"],
   "production.doc_search": ["production.doc_outline", "production.doc_import_guide"],
   "production.doc_import_log_create": ["production.doc_import_guide"],

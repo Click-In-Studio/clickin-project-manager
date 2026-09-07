@@ -9,6 +9,7 @@ import {
   type NodeEntry,
 } from "@/lib/node/db";
 import { getWiki, createWiki, updateWiki, deleteWiki, listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson } from "@/lib/wiki/content";
+import { getAsset } from "@/lib/asset/db";
 import { listBacklinks, listOutgoingLinks, searchWiki, extractWikiLinkTargets, type WikiRef } from "@/lib/wiki/links";
 import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki, listVisibleWikiIds } from "@/lib/wiki/perm";
 import { listEnumerableNodeIds, canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
@@ -39,7 +40,7 @@ export function sharePermissionKey(wikiId: string): string { return `node:wiki/$
 /** 嵌套缩进文本；孤儿节点（父文档因权限被过滤掉）落到根层，镜像
  *  components/wiki/WikiShell.tsx 的 byParent 邻接表兜底逻辑（不静默丢弃）。 */
 function buildTreeText(entries: NodeEntry[]): string {
-  if (entries.length === 0) return "（该项目还没有文档，或你还看不到任何文档）";
+  if (entries.length === 0) return "（该项目还没有文档或文件，或你还看不到任何内容）";
   const ids = new Set(entries.map((e) => e.id));
   const byParent = new Map<string | null, NodeEntry[]>();
   for (const e of entries) {
@@ -53,9 +54,20 @@ function buildTreeText(entries: NodeEntry[]): string {
   const lines: string[] = [];
   const walk = (parentId: string | null, depth: number) => {
     for (const e of byParent.get(parentId) ?? []) {
-      const tagStr = e.tags.length > 0 ? `［${e.tags.join("、")}］` : "";
-      // AI 工具族只认 **wiki id**（方言 id 往返协议 #400）——树里打印内容 id
-      lines.push(`${"  ".repeat(depth)}- ${e.displayTitle ?? "（无标题）"}（id: ${e.wikiId ?? e.id}）${tagStr}`);
+      const pad = "  ".repeat(depth);
+      const title = e.displayTitle ?? "（无标题）";
+      if (e.kind === "asset") {
+        // 文件行打印**资产 id**（doc_outline/doc_read 的锚），并标注可解析格式
+        const fn = (e.assetFileName ?? "").toLowerCase();
+        const parseable = fn.endsWith(".docx") || fn.endsWith(".pdf") ? "，可解析" : "";
+        lines.push(`${pad}- [文件] ${title}（资产 id: ${e.assetId}${parseable}）`);
+      } else if (e.kind === "folder") {
+        lines.push(`${pad}- [目录] ${title}（节点 id: ${e.id}）`);
+      } else {
+        const tagStr = e.tags.length > 0 ? `［${e.tags.join("、")}］` : "";
+        // 文档行打印**wiki id**（方言 id 往返协议 #400 的锚）
+        lines.push(`${pad}- [文档] ${title}（id: ${e.wikiId ?? e.id}）${tagStr}`);
+      }
       walk(e.id, depth + 1);
     }
   };
@@ -93,11 +105,17 @@ export async function wikiTree(userId: string, productionId: string): Promise<st
   if (!resolved) return DENIED_NOT_MEMBER;
   // AI 面只收 wiki-kind 节点（软链接/资产/文件夹不进：对读写文档的工具族没有
   // 语义，列出来只会诱导模型拿非 wiki id 去 update/move——#358 信噪比论证的延伸）
-  const all = (await listNodeLibrary(productionId)).filter((n) => n.kind === "wiki");
+  // 全树＝用户视角（2026-09-07 定谳：AI 看到的树该和人类侧栏一致，误用靠明确
+  // 反馈解决而不是靠隐藏）：wiki/asset/folder 都列，行首标类型 + 各打各的 id。
+  // 软链接仍不进（#358 的理由对 link 依旧成立：别名会让同一篇出现两次、其 id
+  // 没有任何 AI 工具消费）。枚举面对所有 kind 同一口径（listEnumerableNodeIds，
+  // 与人类侧栏同门）；列到 ≠ 能读，读面各族工具实时判。
+  const all = (await listNodeLibrary(productionId)).filter((n) => n.kind !== "link");
   const visible = await filterEnumerable(resolved.actor, productionId, all);
   // 文档标题/正文是成员可写的自由文本——读回给模型前中和注入分隔符，防有人
   // 在文档里塞 <clickin-instructions> 之类经工具结果做间接注入。
-  return neutralizeInjectionTags(buildTreeText(visible));
+  return neutralizeInjectionTags(buildTreeText(visible))
+    + "\n\n（[文档] 用 wiki_read 按 id 读取；[文件] 用 production.doc_outline/doc_read 按资产 id 读取（docx/pdf），其余格式看 production.asset_list；[目录] 的节点 id 可作 wiki_propose_create 的 parentId。）";
 }
 
 // ─── wiki.backlinks ─────────────────────────────────────────────────────────
@@ -158,9 +176,23 @@ function resolveBodyLinksForDisplay(body: string, titleMap: Map<string, string |
     .replace(WIKI_TOKEN_RE, (m, id) => sub(m, id));
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function wikiRead(userId: string, productionId: string, wikiId: string): Promise<string> {
   const resolved = await resolveProductionActor(userId, productionId);
   if (!resolved) return DENIED_NOT_MEMBER;
+  // 误用反馈（2026-09-07 定谳：树里文档/文件同列，用错工具要明确指路）：
+  // 资产 id 是短 text、wiki id 是 uuid——非 uuid 形态先查是不是资产文件，
+  // 也顺带挡住 uuid cast 报错
+  if (!UUID_RE.test(wikiId)) {
+    const asset = await getAsset(wikiId);
+    if (asset && asset.productionId === productionId) {
+      return neutralizeInjectionTags(
+        `该 id 是资产文件《${asset.fileName}》——docx/pdf 用 production.doc_outline 解析，全部文件看 production.asset_list；wiki_read 只读 [文档]。`,
+      );
+    }
+    return "没有找到该文档（wiki id 来自树里的 [文档] 行）。";
+  }
   if (!await canViewWiki(resolved.actor, productionId, wikiId)) return DENIED_NOT_VISIBLE;
 
   const doc = await getWiki(wikiId, productionId);

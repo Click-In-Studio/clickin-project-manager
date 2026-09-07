@@ -52,6 +52,7 @@ export const TOOL_LABELS: Record<string, string> = {
   "production-doc_outline": "读文档结构概览",
   "production-doc_read": "读文档内容",
   "production-doc_search": "搜索文档内容",
+  "production-asset_list": "列出资产文件",
   "production-doc_import_guide": "获取导入作业指引",
   "production-doc_import_log_create": "创建导入日志",
   "production-doc_import_log_append": "记录导入日志",

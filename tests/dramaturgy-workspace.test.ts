@@ -17,7 +17,7 @@ function entry(id: string, parentId: string | null): NodeEntry {
   return {
     id, parentId, kind: "wiki", wikiId: id, displayTitle: id, title: null,
     tags: [], sortKey: null, isAnchor: false, listable: true, isPublic: false,
-    assetId: null, linkTargetId: null, targetKind: null, targetWikiId: null, targetTitle: null,
+    assetId: null, linkTargetId: null, targetKind: null, targetWikiId: null, targetTitle: null, assetFileName: null,
     productionId: "p", createdBy: null, createdAt: "", updatedAt: "",
   } as NodeEntry;
 }

@@ -119,6 +119,46 @@ describe("selfScribe 旁路不扩散", () => {
   });
 });
 
+describe("全树与误用反馈（2026-09-07 定谳：AI 树=用户视角、用错工具明确指路）", () => {
+  let assetId: string;
+  let wikiId: string;
+
+  beforeAll(async () => {
+    const { createAsset } = await import("@/lib/asset/db");
+    const created = await createAsset({
+      productionId: prodId, uploaderUserId: ownerId, assetType: "reference",
+      fileName: "测试剧本.pdf", mimeType: "application/pdf", storageType: "r2",
+      r2Key: `assets/test/${shortId()}.pdf`, fileSize: 1000,
+    });
+    assetId = created.asset.id;
+    const wiki = await createWiki({ productionId: prodId, title: `树里的文档-${shortId()}`, body: "x", createdBy: ownerId });
+    wikiId = wiki.id;
+  });
+
+  it("wiki_tree 同时列出 [文档] 与 [文件]，各打各的 id 并标注可解析", async () => {
+    const { wikiTree } = await import("@/lib/agent-tools/wiki-tools");
+    const tree = await wikiTree(ownerId, prodId);
+    expect(tree).toContain(`[文件] 测试剧本.pdf（资产 id: ${assetId}，可解析）`);
+    expect(tree).toContain(`（id: ${wikiId}）`);
+    expect(tree).toContain("[文档]");
+    expect(tree).toContain("doc_outline"); // 尾注的类型→工具指路
+  });
+
+  it("wiki_read 收到资产 id：指路 doc_outline 而不是干巴巴没找到", async () => {
+    const { wikiRead } = await import("@/lib/agent-tools/wiki-tools");
+    const out = await wikiRead(ownerId, prodId, assetId);
+    expect(out).toContain("资产文件");
+    expect(out).toContain("doc_outline");
+  });
+
+  it("doc_outline 收到 wiki id：指路 wiki_read", async () => {
+    const { docOutline } = await import("@/lib/agent-tools/doc-tools");
+    const out = await docOutline(ownerId, prodId, wikiId);
+    expect(out).toContain("wiki 文档");
+    expect(out).toContain("wiki_read");
+  });
+});
+
 describe("导入指引", () => {
   it("升级协议关键纪律齐备（防瘦身回退成案例大全）", () => {
     for (const kw of [

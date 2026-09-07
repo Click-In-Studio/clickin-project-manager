@@ -12,8 +12,11 @@
 
 import { resolveProductionActor, DENIED_NOT_MEMBER } from "./production-tools";
 import { neutralizeInjectionTags } from "@/lib/agent-injection-safety";
-import { getAsset, resolveAssetFile } from "@/lib/asset/db";
-import { canViewAsset } from "@/lib/asset/perm";
+import { getAsset, resolveAssetFile, listAssets } from "@/lib/asset/db";
+import { canViewAsset, filterVisibleAssets } from "@/lib/asset/perm";
+import { getWiki } from "@/lib/wiki/content";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 import { r2ByteSource, TransientReadError } from "@/lib/asset/byte-source";
 import {
   getDocxCached, DocxParseError,
@@ -26,6 +29,7 @@ import {
 
 export const DENIED_ASSET_VIEW = "权限被拒绝：你没有查看该资产的权限。";
 const TRANSIENT_MSG = "文件读取暂时失败（存储层瞬态错误），请稍后重试。";
+const LIST_CAP = 100;
 
 /** doc_read 单次调用最多返回的 docx 块数 / pdf 行数（超出让模型分批）。 */
 const READ_ITEM_CAP = 150;
@@ -41,6 +45,45 @@ const OUTLINE_PREVIEW_COUNT = 12;
 const INDENT_BUCKET = 120;
 const PDF_X_BUCKET = 10;
 
+// ─── asset_list：资产枚举（id 供给入口）─────────────────────────────────────
+// 实测催生（2026-09-07 用户本地测试）：没有它，用户不在资产预览页时 AI 对
+// "帮我读那个 pdf"是死路——文件明明在库里，AI 却没有任何入口找到它。
+// 与 wiki_tree（全树含 [文件] 行）互补：树给结构、这里给平铺+按名过滤。
+// 可见性口径＝filterVisibleAssets（能力票∧结构面∧is_public 合取，与资产
+// 列表页同源）。
+
+export async function assetList(
+  userId: string, productionId: string,
+  opts: { query?: string } = {},
+): Promise<string> {
+  const resolved = await resolveProductionActor(userId, productionId);
+  if (!resolved) return DENIED_NOT_MEMBER;
+  const all = await listAssets(productionId);
+  const visible = await filterVisibleAssets(resolved.actor, productionId, all);
+  const q = opts.query?.trim().toLowerCase();
+  const matched = q
+    ? visible.filter((a) => a.fileName.toLowerCase().includes(q) || (a.name ?? "").toLowerCase().includes(q))
+    : visible;
+  if (matched.length === 0) {
+    return q ? `没有找到匹配「${neutralizeInjectionTags(q)}」的资产。` : "该制作还没有（你可见的）资产文件。";
+  }
+  const lines = matched.slice(0, LIST_CAP).map((a) => {
+    const lower = a.fileName.toLowerCase();
+    const parseable = lower.endsWith(".docx") || lower.endsWith(".pdf");
+    const label = a.name && a.name !== a.fileName ? `${a.name}（${a.fileName}）` : a.fileName;
+    const extra = [
+      a.assetType,
+      a.storageType !== "r2" ? "外部链接" : null,
+      parseable ? "可解析→doc_outline" : null,
+    ].filter(Boolean).join("，");
+    return `- 《${label}》 id: ${a.id}（${extra}）`;
+  });
+  const head = matched.length > LIST_CAP
+    ? `共 ${matched.length} 个资产（显示前 ${LIST_CAP}，用 query 过滤）：`
+    : `共 ${matched.length} 个资产：`;
+  return neutralizeInjectionTags([head, ...lines].join("\n"));
+}
+
 // ─── 装载（权限门 + 格式分派）───────────────────────────────────────────────
 
 type Loaded =
@@ -53,7 +96,15 @@ async function loadDoc(
   const resolved = await resolveProductionActor(userId, productionId);
   if (!resolved) return DENIED_NOT_MEMBER;
   const asset = await getAsset(assetId);
-  if (!asset || asset.productionId !== productionId) return "没有找到该资产。";
+  if (!asset || asset.productionId !== productionId) {
+    // 误用反馈（2026-09-07 定谳：用错工具要明确指路，不是干巴巴"没找到"）：
+    // wiki id 是 uuid、资产 id 是短 text——uuid 形态的先查是不是文档
+    if (UUID_RE.test(assetId)) {
+      const wiki = await getWiki(assetId, productionId).catch(() => null);
+      if (wiki) return `该 id 是 wiki 文档《${wiki.title ?? "（无标题）"}》——用 production.wiki_read 读取；doc_* 工具只读资产文件（树里的 [文件] 行）。`;
+    }
+    return "没有找到该资产（资产 id 来自树里的 [文件] 行或 production.asset_list）。";
+  }
   if (!await canViewAsset(resolved.actor, productionId, asset, "meta")) return DENIED_ASSET_VIEW;
 
   const name = asset.fileName ?? "";
@@ -150,7 +201,7 @@ function renderPdfPage(p: PdfPage, lineBudget: { left: number }): string[] {
 
 export async function docOutline(userId: string, productionId: string, assetId: string): Promise<string> {
   const loaded = await loadDoc(userId, productionId, assetId);
-  if (typeof loaded === "string") return loaded;
+  if (typeof loaded === "string") return neutralizeInjectionTags(loaded); // 错误消息可含用户可控文件名/标题
   if (loaded.kind === "docx") return docxOutline(loaded.doc, loaded.fileName);
   return pdfOutline(loaded.doc, loaded.fileName);
 }
@@ -268,7 +319,7 @@ export async function docRead(
   ranges: Array<{ from: number; to: number }>,
 ): Promise<string> {
   const loaded = await loadDoc(userId, productionId, assetId);
-  if (typeof loaded === "string") return loaded;
+  if (typeof loaded === "string") return neutralizeInjectionTags(loaded); // 错误消息可含用户可控文件名/标题
   if (!ranges.length) return "ranges 不能为空（docx 例：[{from:0,to:40}]（块号）；pdf 例：[{from:1,to:5}]（页序））。";
   if (loaded.kind === "docx") return docxRead(loaded.doc, ranges);
   return pdfRead(loaded.doc, ranges);
@@ -334,7 +385,7 @@ export async function docSearch(
   opts: { query: string; limit?: number },
 ): Promise<string> {
   const loaded = await loadDoc(userId, productionId, assetId);
-  if (typeof loaded === "string") return loaded;
+  if (typeof loaded === "string") return neutralizeInjectionTags(loaded); // 错误消息可含用户可控文件名/标题
   const q = opts.query.trim();
   if (!q) return "搜索词不能为空。";
   const limit = Math.max(1, Math.min(SEARCH_MAX_LIMIT, opts.limit ?? SEARCH_DEFAULT_LIMIT));
