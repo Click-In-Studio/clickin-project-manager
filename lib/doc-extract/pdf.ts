@@ -318,6 +318,8 @@ export async function parsePdf(buf: Buffer): Promise<PdfDoc> {
     // - 弱判据：页末行无句末标点、够长（≥30 字符，排除角色名短行）、且下页
     //   首行以小写拉丁字母续起（CJK 无大小写，弱判据不触发——宁缺毋假）。
     const TERMINAL_RE = /[.。!?！？…”"』」)）\]}]$/;
+    // 括号平衡刻意跨类型合并计数（「 开 ) 收也算配对）：启发式只要"有没有
+    // 悬开的括号"这一位信号，分类型精确配对对乱嵌套的真实排版反而更脆
     const unbalancedOpen = (t: string): boolean => {
       let n = 0;
       for (const ch of t) {
@@ -328,6 +330,10 @@ export async function parsePdf(buf: Buffer): Promise<PdfDoc> {
     };
     for (let i = 0; i + 1 < pages.length; i++) {
       const a = pages[i], b = pages[i + 1];
+      // 非 ok 页（栅格化/抽取不完整）明确排除——那类页的文本本身就是残缺的，
+      // 边界启发式只会放大假阳性（宁缺毋假；当前实现非 ok 页 lines 恒空，
+      // 此判是显式化+防将来部分抽取改动）
+      if (a.status !== "ok" || b.status !== "ok") continue;
       if (a.vertical || b.vertical || a.lines.length === 0 || b.lines.length === 0) continue;
       const lastLn = [...a.lines].reverse().find((l) => !l.boilerplate);
       const firstLn = b.lines.find((l) => !l.boilerplate);

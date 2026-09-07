@@ -234,8 +234,11 @@ async function execute(input: ExecuteInput): Promise<void> {
     // 上一回合若因成本硬顶被掐（错误带机器可判前缀），本回合开头注入说明——
     // 否则 agent 只看到悬空工具调用的"状态未知"，不知道该缩小批次续作
     const priorCapNote = await (async () => {
+      // 「上一回合」＝最近开始且已结束的 run。孤儿 run 被晚回收时可能短暂顶到
+      // 最前（AI review 适配）：时效护栏兜底——过时的续作提示没有价值，宁缺。
       const { rows } = await pool.query<{ error: string | null }>(
         `SELECT error FROM agent_run WHERE session_id = $1 AND id <> $2 AND ended_at IS NOT NULL
+           AND ended_at > now() - interval '2 hours'
          ORDER BY started_at DESC LIMIT 1`,
         [sessionId, runId],
       );
@@ -405,9 +408,12 @@ async function execute(input: ExecuteInput): Promise<void> {
   } finally {
     clearInterval(heartbeat);
     toolArgs.clear(); // 中止/脱离时可能没有对应的 end 事件
-    if (costCapAborted) {
-      // 覆盖裸 AbortError：error 落库带机器可判前缀，下一个 run 开头据此注入提示
-      if (status === "completed") status = "aborted";
+    if (costCapAborted && status !== "failed") {
+      // 覆盖裸 AbortError：error 落库带机器可判前缀，下一个 run 开头据此注入提示。
+      // status=failed 时不覆盖——那是与硬顶并发的无关失败，真实原因不能丢
+      //（AI review 适配；实际上 costCap 先置 abort、后续异常都会判成 aborted，
+      // 这里是纵深防御）
+      status = "aborted";
       error = COST_CAP_ERROR;
     }
     await publisher.drain();

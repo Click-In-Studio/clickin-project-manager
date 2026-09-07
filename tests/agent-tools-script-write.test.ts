@@ -170,13 +170,23 @@ describe("script_propose_rewrite：落库与锚点保持", () => {
 
 describe("script_propose_edit_blocks：同锚点批量插入顺序（2026-09-07 导入实测修复）", () => {
   it("同一 afterBlockId 传 N 块：数组顺序=文档顺序（此前逆序落库）；成功消息按序返回新块 id", async () => {
-    const out = await runScriptProposal(writerId, prodId, EDIT, {
+    const chainArgs = {
       inserts: [
         { afterBlockId: d2, content: "顺序甲" },
         { afterBlockId: d2, content: "顺序乙" },
         { afterBlockId: d2, content: "顺序丙" },
       ],
-    });
+    };
+    // 卡片位置上下文在链式同锚场景下也可读：首块接在锚点后、后续接在前一新块后
+    //（这正是 SCENE 1 错位要当场看见的场景——AI review 适配补的覆盖）
+    const preview = await previewScriptProposal(writerId, prodId, EDIT, chainArgs);
+    expect(preview.error).toBeUndefined();
+    const notes = preview.notes.join("\n");
+    expect(notes).toMatch(/增（「.*灯光渐暗.*」与「.+」之间）：顺序甲/);
+    expect(notes).toMatch(/增（「顺序甲」与「.+」之间）：顺序乙/);
+    expect(notes).toMatch(/增（「顺序乙」与「.+」之间）：顺序丙/);
+
+    const out = await runScriptProposal(writerId, prodId, EDIT, chainArgs);
     expect(out).toContain("新增 3 块");
     expect(out).toContain("本次新增块 id（按文档顺序");
 
