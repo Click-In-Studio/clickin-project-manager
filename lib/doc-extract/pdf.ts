@@ -112,6 +112,16 @@ type TextStyle = { fontFamily?: string; vertical?: boolean };
 export async function parsePdf(buf: Buffer): Promise<PdfDoc> {
   if (buf.length > FILE_BYTES_CAP) throw new PdfParseError(`pdf 过大（${buf.length} 字节，上限 ${FILE_BYTES_CAP}）`);
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  // 无 worker 环境下 pdfjs 会走 fake-worker：运行时动态 import worker 模块。
+  // Next dev（Turbopack）会把那个动态导入改写成不存在的 chunk 路径
+  // （"Cannot find module …/chunks/pdf.worker.mjs"，本地实测）。修法＝这里
+  // 用**静态说明符**引入 worker 并挂 globalThis.pdfjsWorker——pdfjs 的
+  // _setupFakeWorkerGlobal 检查到它就不再动态 import。
+  if (!(globalThis as { pdfjsWorker?: unknown }).pdfjsWorker) {
+    // @ts-expect-error worker 构建无 .d.ts——只为副作用/句柄引入，不消费其类型
+    const worker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+    (globalThis as { pdfjsWorker?: unknown }).pdfjsWorker = worker;
+  }
   const assetDir = pdfjsAssetDir();
 
   const loading = pdfjs.getDocument({
