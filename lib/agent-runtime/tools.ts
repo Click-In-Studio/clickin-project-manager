@@ -587,7 +587,7 @@ export const DEFS: Def[] = [
       "assetId 从正文里的 /__cm__/asset/<id> 引用或用户给的资产链接取。",
     parameters: Type.Object({ assetId: Type.String({ description: "资产 id" }) }),
     readOnly: true, needsProduction: true,
-    execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-tools")).docOutline(ctx.userId, ctx.productionId, String(args.assetId)),
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-tools")).docOutline(ctx.userId, ctx.productionId, String(args.assetId), { sessionId: ctx.run?.sessionId ?? null }),
   },
   {
     mcpName: "production.doc_read",
@@ -609,6 +609,7 @@ export const DEFS: Def[] = [
     execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-tools")).docRead(
       ctx.userId, ctx.productionId, String(args.assetId),
       (args.ranges as Array<{ from: number; to: number }>).map((r) => ({ from: Number(r.from), to: Number(r.to) })),
+      { sessionId: ctx.run?.sessionId ?? null },
     ),
   },
   {
@@ -624,7 +625,7 @@ export const DEFS: Def[] = [
     readOnly: true, needsProduction: true,
     execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-tools")).docSearch(
       ctx.userId, ctx.productionId, String(args.assetId),
-      { query: String(args.query), limit: args.limit == null ? undefined : Number(args.limit) },
+      { query: String(args.query), limit: args.limit == null ? undefined : Number(args.limit), sessionId: ctx.run?.sessionId ?? null },
     ),
   },
   {

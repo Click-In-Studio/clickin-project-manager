@@ -52,6 +52,14 @@ jobs:
           done
           if [ -n "$MISSING" ]; then echo "::error::agent-runner deps missing from standalone node_modules:$MISSING"; exit 1; fi
 
+      # heavy-worker（后台重活进程）：打包方式与 agent-runner 同款；sharp 是原生模块
+      # 不能进 bundle，留 external——next 自己用 sharp，standalone 追踪必然带上它。
+      - name: Bundle heavy-worker
+        run: |
+          npm run build:worker
+          test -f .next/standalone/node_modules/pg/package.json || { echo "::error::pg not traced into standalone"; exit 1; }
+          test -f .next/standalone/node_modules/sharp/package.json || { echo "::error::sharp not traced into standalone"; exit 1; }
+
       # ── 4. Bundle ────────────────────────────────────────────────────────────
       - name: Bundle standalone output
         run: |

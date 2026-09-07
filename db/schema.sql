@@ -2508,3 +2508,39 @@ CREATE INDEX IF NOT EXISTS idx_avatar_upload_audit_r2_key
 CREATE INDEX IF NOT EXISTS idx_avatar_upload_audit_orphan
   ON avatar_upload_audit (created_at)
   WHERE committed_at IS NULL AND deleted_at IS NULL;
+
+-- ── 后台重活任务队列（db/add-job-queue.sql）─────────────────────────────────
+-- heavy-worker 进程租约认领执行（pdf/docx 解析、缩略图等重活挪出主进程/runner）；
+-- 完成经 pg_notify('job_done') 通知等待方，新任务经 pg_notify('job_new') 叫醒 worker。
+
+CREATE TABLE IF NOT EXISTS job (
+  id           TEXT        PRIMARY KEY,            -- jb_ 前缀短 id（lib/job/queue.ts）
+  kind         TEXT        NOT NULL,               -- doc_parse | image_thumbnail | ...
+  payload      JSONB       NOT NULL DEFAULT '{}'::jsonb,
+  dedupe_key   TEXT        NULL,                   -- 相同工作合流（如 doc_parse:pdf:<fileId>:v2）
+  priority     INT         NOT NULL DEFAULT 0,     -- 大者先跑（预热类用负值让行）
+  status       TEXT        NOT NULL DEFAULT 'queued',  -- queued | running | done | failed
+  attempts     INT         NOT NULL DEFAULT 0,
+  max_attempts INT         NOT NULL DEFAULT 3,
+  run_after    TIMESTAMPTZ NOT NULL DEFAULT now(), -- 重试退避用
+  lease_owner  TEXT        NULL,
+  lease_until  TIMESTAMPTZ NULL,
+  result       JSONB       NULL,                   -- 小结果直接放这（大产物放 R2，这里放键）
+  error        TEXT        NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at   TIMESTAMPTZ NULL,
+  finished_at  TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS job_dedupe_active_idx
+  ON job (dedupe_key)
+  WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'running');
+CREATE INDEX IF NOT EXISTS job_claim_idx
+  ON job (priority DESC, created_at)
+  WHERE status = 'queued';
+CREATE INDEX IF NOT EXISTS job_lease_idx
+  ON job (lease_until)
+  WHERE status = 'running';
+
+COMMENT ON TABLE job IS
+  '后台重活任务队列：heavy-worker 租约认领执行（pdf/docx 解析、缩略图等）；完成经 pg_notify(job_done) 通知等待方';

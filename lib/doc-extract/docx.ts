@@ -467,22 +467,5 @@ export async function parseDocx(src: ByteSource): Promise<DocxDoc> {
   };
 }
 
-// ─── 进程内缓存（文件行不可变 ⇒ fileId 即键；LRU 防大文档挤内存）────────────
-
-const CACHE_CAP = 4;
-const cache = new Map<string, { version: number; doc: DocxDoc }>();
-
-export async function getDocxCached(fileId: string, open: () => ByteSource): Promise<DocxDoc> {
-  const hit = cache.get(fileId);
-  if (hit && hit.version === DOCX_EXTRACTOR_VERSION) {
-    // LRU touch
-    cache.delete(fileId);
-    cache.set(fileId, hit);
-    return hit.doc;
-  }
-  const doc = await parseDocx(open());
-  cache.delete(fileId);
-  cache.set(fileId, { version: DOCX_EXTRACTOR_VERSION, doc });
-  while (cache.size > CACHE_CAP) cache.delete(cache.keys().next().value!);
-  return doc;
-}
+// 进程内缓存已移到 lib/doc-extract/load.ts（解析本体在 heavy-worker 进程做，
+// 调用方经任务队列 + R2 IR 取产物；文件行不可变 ⇒ fileId 即键的纪律不变）。

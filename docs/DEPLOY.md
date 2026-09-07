@@ -108,6 +108,11 @@ INTERNAL_NOTIFY_SECRET=xxxxxxxx   # 随机字符串，用于保护 cron 接口
 
 OPENAI_API_KEY=sk-xxxxxxxx
 OPENAI_MODEL=gpt-4o-mini
+
+# 后台重活队列（lib/job/queue.ts）：设 1 表示由 heavy-worker 进程消费任务
+# （pdf/docx 解析、缩略图等）。不设则 enqueue 方原地执行——dev/未部署 worker 的
+# 环境用；生产必设，否则重活又回到 next / agent-runner 进程里跑。
+JOB_WORKER=1
 ```
 
 ### 6. 触发首次部署
