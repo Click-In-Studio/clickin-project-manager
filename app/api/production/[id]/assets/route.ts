@@ -8,8 +8,8 @@ import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
 import { listNodeLibrary } from "@/lib/node/db";
 import { resolveDefaultLanding, readLandingContext } from "@/lib/node/landing";
 import { isAssetType } from "@/lib/asset/types";
-import { putR2Object, getR2Object, thumbnailR2Key, completeMultipartUpload, listMultipartParts } from "@/lib/r2";
-import sharp from "sharp";
+import { completeMultipartUpload, listMultipartParts } from "@/lib/r2";
+import { enqueueAssetPostProcess } from "@/lib/job/asset-jobs";
 import { getPool } from "@/lib/pg";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -132,27 +132,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       await completeMultipartUpload(body.r2Key, body.uploadId, parts);
 
       const mimeType = body.mimeType ?? "application/octet-stream";
-      let thumbKey: string | null = null;
-      if (mimeType.startsWith("image/")) {
-        const obj = await getR2Object(body.r2Key);
-        if (obj) {
-          const thumb = await sharp(obj.body)
-            .resize(400, 400, { fit: "inside", withoutEnlargement: true })
-            .webp({ quality: 80 })
-            .toBuffer();
-          thumbKey = thumbnailR2Key(body.fileId);
-          await putR2Object(thumbKey, thumb, "image/webp");
-        }
-      }
-
       const { asset, file } = await createAsset({
         productionId: id, uploaderUserId: session.userId,
         assetType: body.assetType ?? "reference", name: body.name ?? null,
         fileName: body.fileName, mimeType,
-        storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: thumbKey,
+        storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: null,
         fileSize: body.fileSize ?? null,
         nodeParentId: parentNodeId, listable,
       });
+      // 缩略图/文档解析预热是异步任务（heavy-worker）——上传路径不再同步跑 sharp
+      await enqueueAssetPostProcess({ assetFileId: file.id, r2Key: body.r2Key, mimeType, fileName: body.fileName, fileSize: body.fileSize ?? null });
       return Response.json({ asset, file }, { status: 201 });
     }
 
@@ -161,27 +150,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         return Response.json({ error: "缺少 r2Key / fileId / fileName" }, { status: 400 });
 
       const mimeType = body.mimeType ?? "application/octet-stream";
-      let thumbKey: string | null = null;
-      if (mimeType.startsWith("image/")) {
-        const obj = await getR2Object(body.r2Key);
-        if (obj) {
-          const thumb = await sharp(obj.body)
-            .resize(400, 400, { fit: "inside", withoutEnlargement: true })
-            .webp({ quality: 80 })
-            .toBuffer();
-          thumbKey = thumbnailR2Key(body.fileId);
-          await putR2Object(thumbKey, thumb, "image/webp");
-        }
-      }
-
       const { asset, file } = await createAsset({
         productionId: id, uploaderUserId: session.userId,
         assetType: body.assetType ?? "reference", name: body.name ?? null,
         fileName: body.fileName, mimeType,
-        storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: thumbKey,
+        storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: null,
         fileSize: body.fileSize ?? null,
         nodeParentId: parentNodeId, listable,
       });
+      // 同上：后置处理异步化
+      await enqueueAssetPostProcess({ assetFileId: file.id, r2Key: body.r2Key, mimeType, fileName: body.fileName, fileSize: body.fileSize ?? null });
       return Response.json({ asset, file }, { status: 201 });
     }
 

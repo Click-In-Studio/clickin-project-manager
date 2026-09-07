@@ -243,6 +243,11 @@ export async function resolveAssetFile(assetId: string): Promise<AssetFile | nul
   return getLatestAssetFile(assetId);
 }
 
+/** 缩略图异步生成（heavy-worker image_thumbnail 任务）完成后的回写。 */
+export async function setAssetFileThumbnail(assetFileId: string, thumbnailKey: string): Promise<void> {
+  await getPool().query(`UPDATE asset_file SET thumbnail_r2_key = $2 WHERE id = $1`, [assetFileId, thumbnailKey]);
+}
+
 /** Add a new file row for a universal asset (latest-wins on read). */
 export async function addUniversalAssetFile(
   assetId: string,

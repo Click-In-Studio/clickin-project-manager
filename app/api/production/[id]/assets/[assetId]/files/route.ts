@@ -3,8 +3,8 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset, addUniversalAssetFile } from "@/lib/asset/db";
 import { hasGrant } from "@/lib/grant-check";
-import { putR2Object, assetR2Key, thumbnailR2Key } from "@/lib/r2";
-import sharp from "sharp";
+import { putR2Object, assetR2Key } from "@/lib/r2";
+import { enqueueAssetPostProcess } from "@/lib/job/asset-jobs";
 
 type Ctx = { params: Promise<{ id: string; assetId: string }> };
 
@@ -32,18 +32,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const fileId = `af_${Date.now().toString(36)}`;
   const r2Key = assetR2Key(fileId, file.name);
 
-  let thumbKey: string | null = null;
-  if (mimeType.startsWith("image/")) {
-    const thumb = await sharp(buffer)
-      .resize(400, 400, { fit: "inside", withoutEnlargement: true })
-      .webp({ quality: 80 })
-      .toBuffer();
-    thumbKey = thumbnailR2Key(fileId);
-    await putR2Object(thumbKey, thumb, "image/webp");
-  }
   await putR2Object(r2Key, buffer, mimeType);
 
-  const assetFile = await addUniversalAssetFile(assetId, r2Key, thumbKey, buffer.length);
+  const assetFile = await addUniversalAssetFile(assetId, r2Key, null, buffer.length);
+  // 缩略图/文档解析预热是异步任务（heavy-worker）——上传路径不再同步跑 sharp
+  await enqueueAssetPostProcess({ assetFileId: assetFile.id, r2Key, mimeType, fileName: file.name, fileSize: buffer.length });
 
   return Response.json({ file: assetFile }, { status: 201 });
 }

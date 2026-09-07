@@ -35,6 +35,28 @@ module.exports = {
       merge_logs: true,
     },
     {
+      // 后台重活进程（2026-09 负载盘点）：pdf/docx 解析、sharp 缩略图等经 job 表
+      // （lib/job/queue.ts）派发到这里跑，OOM/崩溃只影响自己（租约过期后任务重排）。
+      // 内存上限独立给足——50MB pdf + pdfjs IR 的峰值远超 runner 的 600M 预算。
+      name: 'heavy-worker',
+      script: '/var/www/production-manager/current/heavy-worker.js',
+      cwd: '/var/www/production-manager/current',   // pdfjs 的 cmaps 资产目录按 cwd 候选解析
+      node_args: '--env-file=/var/www/production-manager/shared/.env.local',
+      exec_mode: 'cluster',
+      instances: 1,
+      env: {
+        NODE_ENV: 'production',
+        HEAVY_WORKER_PORT: 3103,
+      },
+      wait_ready: true,
+      listen_timeout: 30000,
+      kill_timeout: 330000,    // ≥ HEAVY_WORKER_DRAIN_MS(300000) + 余量
+      max_memory_restart: '1G',
+      out_file: '/var/log/pm2/heavy-worker.log',
+      error_file: '/var/log/pm2/heavy-worker-error.log',
+      merge_logs: true,
+    },
+    {
       name: 'production-manager',
       script: '/var/www/production-manager/current/server.js',
       node_args: '--env-file=/var/www/production-manager/shared/.env.local',

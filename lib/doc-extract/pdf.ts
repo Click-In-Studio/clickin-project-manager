@@ -442,24 +442,8 @@ function buildVerticalColumns(items: TextItem[]): RawLine[] {
   return cols;
 }
 
-// ─── 装载 + 缓存（IR 比 docx 大，LRU 容量收紧）──────────────────────────────
-
-const CACHE_CAP = 2;
-const cache = new Map<string, { version: number; doc: PdfDoc }>();
-
-export async function getPdfCached(fileId: string, read: () => Promise<Buffer>): Promise<PdfDoc> {
-  const hit = cache.get(fileId);
-  if (hit && hit.version === PDF_EXTRACTOR_VERSION) {
-    cache.delete(fileId);
-    cache.set(fileId, hit);
-    return hit.doc;
-  }
-  const doc = await parsePdf(await read());
-  cache.delete(fileId);
-  cache.set(fileId, { version: PDF_EXTRACTOR_VERSION, doc });
-  while (cache.size > CACHE_CAP) cache.delete(cache.keys().next().value!);
-  return doc;
-}
+// 进程内缓存已移到 lib/doc-extract/load.ts（解析本体在 heavy-worker 进程做，
+// 调用方经任务队列 + R2 IR 取产物；文件行不可变 ⇒ fileId 即键的纪律不变）。
 
 /** 整文件读入（pdfjs 需要完整 buffer；ByteSource 统一走这里保 TransientReadError 语义）。 */
 export async function readAll(src: ByteSource): Promise<Buffer> {

@@ -17,15 +17,10 @@ import { canViewAsset, filterVisibleAssets } from "@/lib/asset/perm";
 import { getWiki } from "@/lib/wiki/content";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-import { r2ByteSource, TransientReadError } from "@/lib/asset/byte-source";
-import {
-  getDocxCached, DocxParseError,
-  type DocxDoc, type DocxItem, type DocxParagraph,
-} from "@/lib/doc-extract/docx";
-import {
-  getPdfCached, readAll, PdfParseError,
-  type PdfDoc, type PdfPage,
-} from "@/lib/doc-extract/pdf";
+import { TransientReadError } from "@/lib/asset/byte-source";
+import { loadParsedDocx, loadParsedPdf } from "@/lib/doc-extract/load";
+import type { DocxDoc, DocxItem, DocxParagraph } from "@/lib/doc-extract/docx";
+import type { PdfDoc, PdfPage } from "@/lib/doc-extract/pdf";
 
 export const DENIED_ASSET_VIEW = "权限被拒绝：你没有查看该资产的权限。";
 const TRANSIENT_MSG = "文件读取暂时失败（存储层瞬态错误），请稍后重试。";
@@ -93,8 +88,14 @@ type Loaded =
   | { kind: "docx"; doc: DocxDoc; fileName: string }
   | { kind: "pdf"; doc: PdfDoc; fileName: string };
 
+/** 工具透传的会话上下文：解析超时转后台时，worker 终局后按它插话唤醒本会话。 */
+export interface DocToolOpts {
+  sessionId?: string | null;
+}
+
 async function loadDoc(
   userId: string, productionId: string, assetId: string,
+  opts: DocToolOpts = {},
 ): Promise<Loaded | string> {
   const resolved = await resolveProductionActor(userId, productionId);
   if (!resolved) return DENIED_NOT_MEMBER;
@@ -122,20 +123,30 @@ async function loadDoc(
 
   const file = await resolveAssetFile(assetId);
   if (!file?.r2Key) return "该资产没有可读的文件内容。";
-  const r2Key = file.r2Key;
+  // 解析在 heavy-worker 进程做（lib/doc-extract/load.ts 双模式装载）：
+  // 快路径命中缓存/IR 或短等内完成；慢路径转后台，worker 终局后插话唤醒本会话。
+  const ref = { fileId: file.id, r2Key: file.r2Key, fileSize: file.fileSize, fileName: name };
+  const loadOpts = { notifySessionId: opts.sessionId ?? null };
   try {
     if (kind === "docx") {
-      const doc = await getDocxCached(file.id, () => r2ByteSource(r2Key, file.fileSize));
-      return { kind, doc, fileName: name };
+      const r = await loadParsedDocx(ref, loadOpts);
+      if (r.status === "ok") return { kind, doc: r.doc, fileName: name };
+      if (r.status === "failed") return `docx 解析失败：${r.error}`;
+      return pendingMsg(name);
     }
-    const doc = await getPdfCached(file.id, () => readAll(r2ByteSource(r2Key, file.fileSize)));
-    return { kind, doc, fileName: name };
+    const r = await loadParsedPdf(ref, loadOpts);
+    if (r.status === "ok") return { kind, doc: r.doc, fileName: name };
+    if (r.status === "failed") return `pdf 解析失败：${r.error}`;
+    return pendingMsg(name);
   } catch (e) {
     if (e instanceof TransientReadError) return TRANSIENT_MSG;
-    if (e instanceof DocxParseError) return `docx 解析失败：${e.message}`;
-    if (e instanceof PdfParseError) return `pdf 解析失败：${e.message}`;
     throw e;
   }
+}
+
+function pendingMsg(fileName: string): string {
+  return `《${fileName}》正在后台解析（大文档首次读取需要一些时间）。解析完成后系统会自动发消息提醒你继续——` +
+    "在那之前不要反复重试本工具；可以先做其他事，或直接告知用户正在解析中。";
 }
 
 // ─── docx 行式渲染（信号只报不判——块级解读是模型的事）───────────────────────
@@ -209,8 +220,8 @@ function renderPdfPage(p: PdfPage, budget: { left: number; chars: number }): str
 
 // ─── doc_outline ─────────────────────────────────────────────────────────────
 
-export async function docOutline(userId: string, productionId: string, assetId: string): Promise<string> {
-  const loaded = await loadDoc(userId, productionId, assetId);
+export async function docOutline(userId: string, productionId: string, assetId: string, opts: DocToolOpts = {}): Promise<string> {
+  const loaded = await loadDoc(userId, productionId, assetId, opts);
   if (typeof loaded === "string") return neutralizeInjectionTags(loaded); // 错误消息可含用户可控文件名/标题
   if (loaded.kind === "docx") return docxOutline(loaded.doc, loaded.fileName);
   return pdfOutline(loaded.doc, loaded.fileName);
@@ -327,8 +338,9 @@ function pdfOutline(doc: PdfDoc, fileName: string): string {
 export async function docRead(
   userId: string, productionId: string, assetId: string,
   ranges: Array<{ from: number; to: number }>,
+  opts: DocToolOpts = {},
 ): Promise<string> {
-  const loaded = await loadDoc(userId, productionId, assetId);
+  const loaded = await loadDoc(userId, productionId, assetId, opts);
   if (typeof loaded === "string") return neutralizeInjectionTags(loaded); // 错误消息可含用户可控文件名/标题
   if (!ranges.length) return "ranges 不能为空（docx 例：[{from:0,to:40}]（块号）；pdf 例：[{from:1,to:5}]（页序））。";
   if (loaded.kind === "docx") return docxRead(loaded.doc, ranges);
@@ -409,9 +421,9 @@ function pdfRead(doc: PdfDoc, ranges: Array<{ from: number; to: number }>): stri
 
 export async function docSearch(
   userId: string, productionId: string, assetId: string,
-  opts: { query: string; limit?: number },
+  opts: { query: string; limit?: number } & DocToolOpts,
 ): Promise<string> {
-  const loaded = await loadDoc(userId, productionId, assetId);
+  const loaded = await loadDoc(userId, productionId, assetId, opts);
   if (typeof loaded === "string") return neutralizeInjectionTags(loaded); // 错误消息可含用户可控文件名/标题
   const q = opts.query.trim();
   if (!q) return "搜索词不能为空。";

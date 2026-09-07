@@ -2202,6 +2202,95 @@
       "nullable": false
     }
   ],
+  "job": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "kind",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "payload",
+      "type": "jsonb",
+      "nullable": false,
+      "default": "'{}'::jsonb"
+    },
+    {
+      "column": "dedupe_key",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "priority",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "status",
+      "type": "text",
+      "nullable": false,
+      "default": "'queued'::text"
+    },
+    {
+      "column": "attempts",
+      "type": "integer",
+      "nullable": false,
+      "default": "0"
+    },
+    {
+      "column": "max_attempts",
+      "type": "integer",
+      "nullable": false,
+      "default": "3"
+    },
+    {
+      "column": "run_after",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "lease_owner",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "lease_until",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "result",
+      "type": "jsonb",
+      "nullable": true
+    },
+    {
+      "column": "error",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now()"
+    },
+    {
+      "column": "started_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    },
+    {
+      "column": "finished_at",
+      "type": "timestamp with time zone",
+      "nullable": true
+    }
+  ],
   "milestone": [
     {
       "column": "id",

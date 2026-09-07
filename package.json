@@ -14,7 +14,8 @@
     "test:markers": "tsc -p tsconfig.marker-tests.json && node .marker-test-dist/tests/marker-transitions.js",
     "test:markers:db": "tsc -p tsconfig.marker-tests.json && node .marker-test-dist/tests/marker-db-integration.js",
     "test:selection": "tsc -p tsconfig.marker-tests.json && node .marker-test-dist/tests/script-selection.js",
-    "build:runner": "esbuild agent-runner/index.ts --bundle --platform=node --format=cjs --target=node22 --external:pg --external:@opentelemetry/api --define:import.meta.url=__importMetaUrl --banner:js=\"const __importMetaUrl = require('node:url').pathToFileURL(__filename).href;\" --outfile=.next/standalone/agent-runner.js --log-level=warning"
+    "build:runner": "esbuild agent-runner/index.ts --bundle --platform=node --format=cjs --target=node22 --external:pg --external:@opentelemetry/api --define:import.meta.url=__importMetaUrl --banner:js=\"const __importMetaUrl = require('node:url').pathToFileURL(__filename).href;\" --outfile=.next/standalone/agent-runner.js --log-level=warning",
+    "build:worker": "esbuild heavy-worker/index.ts --bundle --platform=node --format=cjs --target=node22 --external:pg --external:sharp --external:@opentelemetry/api --define:import.meta.url=__importMetaUrl --banner:js=\"const __importMetaUrl = require('node:url').pathToFileURL(__filename).href;\" --outfile=.next/standalone/heavy-worker.js --log-level=warning"
   },
   "dependencies": {
     "@openclaw/ai": "2026.7.1-2",
