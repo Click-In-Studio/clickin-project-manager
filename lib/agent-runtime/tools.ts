@@ -67,6 +67,8 @@ export interface RuntimeToolDef extends RuntimeTool {
   mutates?: (args: Record<string, unknown>) => ToolMutation | null;
   /** 无人值守（定时任务）能否不经确认卡直接写；缺省 deny */
   unattended?: "allow" | "deny";
+  /** 自写域（#47 导入日志）：交互会话免确认卡；约束见 Def.selfScribe 注释 */
+  selfScribe?: true;
 }
 
 const text = (t: string): AgentToolResult<unknown> => ({ content: [{ type: "text", text: t }], details: undefined });
@@ -103,6 +105,15 @@ type Def = {
    * 删除类永远不开（不可逆）。
    */
   unattended?: "allow" | "deny";
+  /**
+   * 自写域（#47 导入日志）：交互会话里跳过确认卡的**唯一**旁路。适用条件
+   * 收得死紧——只给「AI 自己的工作记录」类工具：①写入目标必须由工具内
+   * 自证（如只认首个 revision origin 钉死的日志文档，且该文档的创建照常
+   * 弹卡=授权动作）②权限照查不减 ③mutates 照报进审计账本。给共享状态、
+   * 正文、结构的写工具开这个口子=违规；定时任务路径不受此影响（仍走
+   * unattended 交集门）。
+   */
+  selfScribe?: true;
 };
 
 const wikiIdOf = (args: Record<string, unknown>): string[] => (typeof args.wikiId === "string" && args.wikiId ? [args.wikiId] : []);
@@ -123,7 +134,8 @@ function prodTool(mcpName: string, description: string, fn: (uid: string, pid: s
 
 const WIKI_ID = Type.String({ description: "文档 id（来自 wiki_tree/wiki_search 的结果）" });
 
-const DEFS: Def[] = [
+/** 导出仅供测试防漂移（selfScribe 不扩散等约束钉在 tests 里）。 */
+export const DEFS: Def[] = [
   // ── my.* ────────────────────────────────────────────────────────────────
   myTool("my.call_times", "查询当前用户自己的近期Call（时间、事件、地点、所属制作）（EN: my call times schedule）。",
     async (uid) => (await import("@/lib/agent-tools/my-tools")).myCallTimes(uid)),
@@ -614,6 +626,47 @@ const DEFS: Def[] = [
       { query: String(args.query), limit: args.limit == null ? undefined : Number(args.limit) },
     ),
   },
+  {
+    mcpName: "production.doc_import_guide",
+    description:
+      "获取剧本文档导入的完整作业指引（EN: script document import guide methodology）。**做任何导入类工作（把 docx/pdf 剧本转写进本站剧本结构）之前必须先读它**：" +
+      "三步法流程、开工申报、剧本非空时的对账纪律、分诊协议（何时直接干/何时给选项问/何时必须问用户）、导入日志的用法。",
+    parameters: NONE, readOnly: true, needsProduction: true,
+    execute: async () => (await import("@/lib/agent-tools/doc-import-tools")).docImportGuide(),
+  },
+  {
+    mcpName: "production.doc_import_log_create",
+    description:
+      "创建一份导入日志（wiki 文档，默认仅创建者可见、不进目录树）——长导入作业的跨批次真相源：映射假设、判例集、例外台账、进度游标都记这里（EN: create import log journal document）。" +
+      "骨架模板见 production.doc_import_guide。创建需确认；创建后用 production.doc_import_log_append 追加（不再逐次确认）。",
+    parameters: Type.Object({
+      title: Type.String({ description: "日志标题（建议含源文档名，如「导入日志：Mr. Burns 剧本」）" }),
+      body: Type.Optional(Type.String({ description: "初始内容（建议用 guide 里的日志骨架模板起卷）" })),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: WIKI_MUTATES.created,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-import-tools")).docImportLogCreate(
+      ctx.userId, ctx.productionId,
+      { title: String(args.title), body: args.body == null ? undefined : String(args.body) },
+    ),
+  },
+  {
+    mcpName: "production.doc_import_log_append",
+    description:
+      "向导入日志追加一段记录（EN: append import log journal checkpoint）。只接受 doc_import_log_create 创建的日志文档（其他文档会拒绝——改走 wiki_propose_update）。" +
+      "checkpoint 纪律：每批写入成功后立即追加游标与新判例；每批开工前先 wiki_read 日志（上下文可能已压缩，日志才是真相源）。",
+    parameters: Type.Object({
+      wikiId: Type.String({ description: "导入日志的 wiki id（来自 doc_import_log_create）" }),
+      text: Type.String({ description: "追加的内容（markdown，追加到文档末尾）" }),
+    }),
+    readOnly: false, needsProduction: true,
+    selfScribe: true,
+    mutates: WIKI_MUTATES.updated,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-import-tools")).docImportLogAppend(
+      ctx.userId, ctx.productionId,
+      { wikiId: String(args.wikiId), text: String(args.text) },
+    ),
+  },
 
   // ── 定时任务（lib/agent-runtime/schedules.ts）：到点由 AI 以用户身份自动运行一段指令。
   // 创建是写操作（过确认卡——那张卡就是"负责任的人类动作"：人确认写哪里、允许哪几类写）；
@@ -866,6 +919,7 @@ export function buildTools(ctx: ToolContext): RuntimeToolDef[] {
     readOnly: d.readOnly,
     mutates: d.mutates,
     unattended: d.unattended,
+    selfScribe: d.selfScribe,
     execute: async (toolCallId, params) => {
       if (d.needsProduction && !ctx.productionId) return text(NO_PRODUCTION);
       const args = (params ?? {}) as Record<string, unknown>;

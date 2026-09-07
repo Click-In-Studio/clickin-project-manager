@@ -272,6 +272,9 @@ async function execute(input: ExecuteInput): Promise<void> {
       const g: GateInput = { runId, sessionId, userId, productionId, tool, toolCallId: event.toolCallId, args: event.input, publisher, signal: abort.signal, isDetached: () => detached };
       if (schedule) return unattendedGate(g, schedule.allowedTools);
       if (tool.readOnly) return undefined;
+      // 自写域（Def.selfScribe）：AI 工作记录类工具免卡直行——目标自证/权限
+      // 照查/审计照报都在工具内，见 tools.ts 的 selfScribe 注释
+      if (tool.selfScribe) return undefined;
       return approvalGate(g);
     });
 
