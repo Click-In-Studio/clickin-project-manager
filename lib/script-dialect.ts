@@ -23,6 +23,7 @@
  *   [b:<id>] 张三（低声）、李四：台词   既有对白块；说话人「、」分隔，括注在名后（）内
  *   [b:<id>] [台] 灯光渐暗。       舞台提示块
  *   [b:<id>] [白] 画外音内容        无说话人台词
+ *   [b:<id>] [空]                空白占位块（新建空场景自带；不能带正文）
  *   [b:<id>] [歌] 李四：歌词        歌词（可与说话人组合，或与 [白] 组合）
  *   [b:<id>] [显名] 张三：台词      强制显示角色名
  *   [new] 李四：新增的台词          新块（id 由系统发放）
@@ -45,7 +46,8 @@ export const SCRIPT_DIALECT_NOTE =
   "剧本方言规则（读到的剧本正文即此形态，改写时必须按此形态输出）：" +
   "①每个正文块首行以头标开始：既有块 [b:<id>]（id 系统发放，必须原样保留，不得改动或伪造），新块 [new]。" +
   "②头标后可跟类型标记：[台]=舞台提示块；[白]=无说话人台词；[歌]=歌词（可与说话人或 [白] 组合）；" +
-  "[显名]=强制显示角色名。无类型标记的行必须有「说话人：」前缀——说话人须是已存在的角色名，" +
+  "[显名]=强制显示角色名；[空]=空白占位块（新建空场景自带，无任何内容）——给它写正文时把 [空] 换成「说话人：」或 [白]，[空] 不能带正文或与其他标记组合。" +
+  "无类型标记的行必须有「说话人：」前缀——说话人须是已存在的角色名，" +
   "多人用「、」分隔，角色括注写在名字后的（）内，如「张三（哭）、李四：台词」；" +
   "同名或名字含特殊字符（、：（）[]# 等）的角色用 #<角色id> 指代（id 来自 character_list 或读取结果）；" +
   "说话人段里以 \\ 转义的字符只作字面理解（读到的括注内 \\（ \\） 即字面括号，改写时原样保留）。" +
@@ -186,9 +188,17 @@ export function serializeBlocksToDialect(
       // 说话人里的悬空角色 id（角色已删但块上残留）序列化时静默跳过；
       // 解析侧的 merge 会把「可解析集合相等」视为未变，保住往返一致性。
       speakers = speakerTokens(block, byId, dupNames);
-      if (block.lyric) flags.push("[歌]");
-      if (!speakers) flags.push("[白]");
-      if (block.forceShowCharacterName) flags.push("[显名]");
+      // 纯空块（无说话人/正文/歌词/提示——新建空场景的自带占位）序列化为 [空]
+      // 而不是裸 [白]：裸 [白] 让模型迷惑"这是什么"（2026-09-07 导入实测）。
+      const emptyPlaceholder = !speakers && !block.lyric && !block.forceShowCharacterName
+        && !(block.content ?? "").trim() && !(block.stageComment ?? "").trim();
+      if (emptyPlaceholder) {
+        flags.push("[空]");
+      } else {
+        if (block.lyric) flags.push("[歌]");
+        if (!speakers) flags.push("[白]");
+        if (block.forceShowCharacterName) flags.push("[显名]");
+      }
     }
 
     const head = [`[b:${block.id}]`, ...flags].join(" ");
@@ -383,21 +393,38 @@ function parseDialect(
     }
 
     let rest = line.slice((existingHead ?? newHead)![0].length);
-    const flags = { stage: false, bai: false, lyric: false, forceShow: false };
+    const flags = { stage: false, bai: false, lyric: false, forceShow: false, empty: false };
     for (;;) {
-      const m = /^\[(台|白|歌|显名)\] ?/.exec(rest);
+      const m = /^\[(台|白|歌|显名|空)\] ?/.exec(rest);
       if (!m) break;
       if (m[1] === "台") flags.stage = true;
       else if (m[1] === "白") flags.bai = true;
       else if (m[1] === "歌") flags.lyric = true;
+      else if (m[1] === "空") flags.empty = true;
       else flags.forceShow = true;
       rest = rest.slice(m[0].length);
     }
 
-    if (flags.stage && (flags.bai || flags.lyric || flags.forceShow)) {
-      errors.push({ line: lineNo, message: "[台]（舞台提示块）不能与 [白]/[歌]/[显名] 组合" });
+    if (flags.stage && (flags.bai || flags.lyric || flags.forceShow || flags.empty)) {
+      errors.push({ line: lineNo, message: "[台]（舞台提示块）不能与 [白]/[歌]/[显名]/[空] 组合" });
       current = null;
       continue;
+    }
+    if (flags.empty) {
+      // [空]=空白占位块：不能带正文或其他标记——要写正文就把 [空] 换成
+      // 说话人前缀或 [白]（往返：serialize 的纯空块即此形态）
+      if (flags.bai || flags.lyric || flags.forceShow) {
+        errors.push({ line: lineNo, message: "[空]（空白占位块）不能与其他标记组合——要写正文请去掉 [空]" });
+        current = null;
+        continue;
+      }
+      if (rest.trim()) {
+        errors.push({ line: lineNo, message: "[空] 是空白占位标记，不能带正文——要写正文请把 [空] 换成「说话人：」或 [白]" });
+        current = null;
+        continue;
+      }
+      flags.bai = true; // 语义上=无说话人空内容块
+      rest = "";
     }
 
     const item: ParsedTextItem = {

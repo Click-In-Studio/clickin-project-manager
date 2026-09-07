@@ -168,6 +168,35 @@ describe("script_propose_rewrite：落库与锚点保持", () => {
   });
 });
 
+describe("script_propose_edit_blocks：同锚点批量插入顺序（2026-09-07 导入实测修复）", () => {
+  it("同一 afterBlockId 传 N 块：数组顺序=文档顺序（此前逆序落库）；成功消息按序返回新块 id", async () => {
+    const out = await runScriptProposal(writerId, prodId, EDIT, {
+      inserts: [
+        { afterBlockId: d2, content: "顺序甲" },
+        { afterBlockId: d2, content: "顺序乙" },
+        { afterBlockId: d2, content: "顺序丙" },
+      ],
+    });
+    expect(out).toContain("新增 3 块");
+    expect(out).toContain("本次新增块 id（按文档顺序");
+
+    const blocks = await currentBlocks();
+    const order = blocks.map((b) => b.id);
+    const byContent = (c: string) => blocks.find((b) => b.content === c)!;
+    const [a, b, c] = [byContent("顺序甲"), byContent("顺序乙"), byContent("顺序丙")];
+    expect(order.indexOf(a.id)).toBe(order.indexOf(d2) + 1);
+    expect(order.indexOf(b.id)).toBe(order.indexOf(a.id) + 1);
+    expect(order.indexOf(c.id)).toBe(order.indexOf(b.id) + 1);
+    // 消息里的 id 序 = 文档落位序（可直接作下一批锚点）
+    const idsInMsg = out.match(/按文档顺序[^：]*：([^\n]+)/)?.[1].split("、") ?? [];
+    expect(idsInMsg).toEqual([a.id, b.id, c.id]);
+
+    // 清理：删掉这三块，别影响后续用例的顺序断言
+    const del = await runScriptProposal(writerId, prodId, EDIT, { deletes: [a.id, b.id, c.id] });
+    expect(del).toContain("删除 3 块");
+  });
+});
+
 describe("script_propose_edit_blocks：精修与守卫", () => {
   it("改说话人（#id 括注）/ 加舞台提示 / 段首插入，一批落库", async () => {
     const out = await runScriptProposal(writerId, prodId, EDIT, {

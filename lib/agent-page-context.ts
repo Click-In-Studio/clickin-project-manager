@@ -138,6 +138,12 @@ const PAGE_SUGGESTIONS: Record<string, PageSuggestion[]> = {
     { label: "搜索文档", prompt: "帮我在灵感文档里找关于 …… 的内容。" },
     { label: "文档结构", prompt: "这个项目的灵感文档大致是怎么组织的？" },
   ],
+  // 文档解读族（lib/agent-tools/doc-tools.ts）兑现；正开着 docx/pdf 预览时
+  // 「当前文档」chip 会带 assetId，这两条建议才有的放矢
+  "prod:assets": [
+    { label: "解析这个文档", prompt: "帮我解析当前打开的这个文档，先看结构概览。" },
+    { label: "导入为剧本", prompt: "我想把这个文档导入成剧本正文，先给我导入方案。" },
+  ],
   "prod:contacts": [
     { label: "查联系方式", prompt: "帮我查一下 …… 的联系方式。" },
     { label: "部门构成", prompt: "这个项目有哪些部门？各自负责人是谁？" },

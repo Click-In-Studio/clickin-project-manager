@@ -67,6 +67,8 @@ export type NodeEntry = NodeRecord & {
   tags: string[];
   /** 系统锚点（报告根/事件目录/灵感库根/资产根）：可移动可改名，不可删除。 */
   isAnchor: boolean;
+  /** asset 节点的原始文件名（displayTitle 可能是显示名，判扩展名要用它）。 */
+  assetFileName: string | null;
 };
 
 export type NodeRow = {
@@ -140,6 +142,7 @@ function rowToEntry(r: EntryRow): NodeEntry {
     targetKind: r.kind === "link" ? r.target_kind : null,
     targetWikiId: r.kind === "link" ? r.target_wiki_id : null,
     tags: r.tags ?? [], isAnchor: r.is_anchor,
+    assetFileName: r.kind === "asset" ? r.asset_file_name : null,
   };
 }
 

@@ -51,6 +51,13 @@ const SCRIPT_WRITE = [
   "production.script_propose_rewrite", "production.script_propose_edit_blocks",
 ];
 
+/** #47 文档解读族：资产枚举（id 供给）+ docx/pdf 结构信号读面 + 导入指引与日志 */
+const DOC_FAMILY = [
+  "production.asset_list",
+  "production.doc_outline", "production.doc_read", "production.doc_search",
+  "production.doc_import_guide", "production.doc_import_log_create", "production.doc_import_log_append",
+];
+
 /** 温层：pageKey → 该页的工作面（与 PAGE_LABELS 的 key 对齐；缺席 = 该页无温层） */
 const WARM_BY_PAGE: Record<string, string[]> = {
   "prod:wiki": WIKI_FAMILY,
@@ -59,6 +66,8 @@ const WARM_BY_PAGE: Record<string, string[]> = {
   "prod:characters": DRAMATURGY_FAMILY,
   // 剧本页：正文读写面 + 场次/角色读面（场次/角色就是剧本里的 marker 与 cast）；构作写面靠召回
   "prod:script": [...DRAMATURGY_READ, ...SCRIPT_READ, ...SCRIPT_WRITE],
+  // 资产页（列表与预览同 pageKey）：文档解读族——用户正看着 docx/pdf 时"帮我读读这个"
+  "prod:assets": DOC_FAMILY,
   "prod:planning": ["production.milestones"],
   "prod:home": ["production.milestones"],
   "prod:contacts": ["production.contact_list", "production.department_list", "users.query_sensitive"],
@@ -90,6 +99,14 @@ const CLOSURE: Record<string, string[]> = {
   "production.character_propose_create": ["production.dramaturgy_permissions", "production.character_list"],
   "production.character_propose_update": ["production.dramaturgy_permissions", "production.character_list", "production.character_read"],
   "production.character_propose_delete": ["production.dramaturgy_permissions", "production.character_list"],
+  // #47 文档解读族：asset_list 是 id 供给入口（同 scene_list 之于剧本族）；
+  // read/search 的锚点来自 outline；任何 doc 工具上桌都带导入指引
+  // （guide 是这族的"先查权限"同位语——纪律先行）；日志追加依赖创建（授权卡在创建那次）
+  "production.doc_outline": ["production.asset_list", "production.doc_import_guide"],
+  "production.doc_read": ["production.doc_outline", "production.doc_import_guide"],
+  "production.doc_search": ["production.doc_outline", "production.doc_import_guide"],
+  "production.doc_import_log_create": ["production.doc_import_guide"],
+  "production.doc_import_log_append": ["production.doc_import_log_create", "production.doc_import_guide", "production.wiki_read"],
   // 剧本正文族：段 id 来自 scene_list；页码/搜索着陆后靠相对窗口微调；方言说明随读面闭包携带
   // 写面闭包：改写前必须能读出该段（id 往返协议的物料来源）
   "production.script_propose_rewrite": ["production.script_read_section", "production.scene_list", "production.script_dialect_ref"],

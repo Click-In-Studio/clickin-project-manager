@@ -280,6 +280,13 @@ function extractCurrentWikiId(pathname: string, productionId: string): string | 
   return m ? m[1] : null;
 }
 
+/** 仅匹配资产详情/预览页 /production/{id}/assets/{assetId}[/preview]——不匹配
+ *  资产列表根页。驱动 AI popout 的「附带当前文件」chip（#47 文档解读入口）。 */
+function extractCurrentAssetId(pathname: string, productionId: string): string | null {
+  const m = pathname.match(new RegExp(`^/production/${productionId}/assets/([^/]+)`));
+  return m ? m[1] : null;
+}
+
 function extractModule(pathname: string, productionId: string): string {
   const base = `/production/${productionId}`;
   if (pathname === base || pathname === base + "/") return "";
@@ -1104,6 +1111,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
     ? extractModule(pathname, productionId)
     : null;
   const currentWikiId = productionId ? extractCurrentWikiId(pathname, productionId) : null;
+  const currentAssetId = productionId ? extractCurrentAssetId(pathname, productionId) : null;
   const hasProductionTopMenu = !!activeModule && ["script", "dramaturgy", "characters", "cues", "cuelists"].includes(activeModule);
   const isHome = pathname === "/";
   const currentProduction = productionId
@@ -1769,6 +1777,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
         productionId={productionId}
         productionName={currentProduction?.name ?? null}
         currentWikiId={currentWikiId}
+        currentAssetId={currentAssetId}
       />
       )}
     </div>

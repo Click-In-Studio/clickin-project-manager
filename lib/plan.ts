@@ -75,9 +75,14 @@ const AI_CREDITS = {
  *
  * 额度判定在 run 开始处做一次、run 内不打断（轮内打断等于把一次已经花掉的调用
  * 扔掉），所以透支上限 = 单个 run 能烧的量。没有这道闸，一个工具死循环就能把
- * 「少量负 credit」变成无底洞。200k ≈ 正常 run 的 16 倍、约 35 次模型调用。
+ * 「少量负 credit」变成无底洞。
+ *
+ * 500k 的标定（2026-09-07 上调，原 200k≈35 次普通调用）：导入类单批（读一场
+ * +propose 写整场）实测合法成本 15-26 万 credit——output 是 5 倍权重、写一个
+ * 场景就要上万 output token，200k 会把正经工作误杀（cache 命中正常时也超）。
+ * 500k 仍是失控闸：死循环几分钟内就会穿过它，而合法重批次留出 ~2× 余量。
  */
-export const RUN_CREDIT_HARD_CAP = Number(process.env.AI_RUN_CREDIT_HARD_CAP ?? 200_000);
+export const RUN_CREDIT_HARD_CAP = Number(process.env.AI_RUN_CREDIT_HARD_CAP ?? 500_000);
 
 export type UserTier = "creator" | "internal";
 export type ProductionTier = "free" | "pro";

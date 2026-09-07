@@ -67,6 +67,8 @@ export interface RuntimeToolDef extends RuntimeTool {
   mutates?: (args: Record<string, unknown>) => ToolMutation | null;
   /** 无人值守（定时任务）能否不经确认卡直接写；缺省 deny */
   unattended?: "allow" | "deny";
+  /** 自写域（#47 导入日志）：交互会话免确认卡；约束见 Def.selfScribe 注释 */
+  selfScribe?: true;
 }
 
 const text = (t: string): AgentToolResult<unknown> => ({ content: [{ type: "text", text: t }], details: undefined });
@@ -103,6 +105,15 @@ type Def = {
    * 删除类永远不开（不可逆）。
    */
   unattended?: "allow" | "deny";
+  /**
+   * 自写域（#47 导入日志）：交互会话里跳过确认卡的**唯一**旁路。适用条件
+   * 收得死紧——只给「AI 自己的工作记录」类工具：①写入目标必须由工具内
+   * 自证（如只认首个 revision origin 钉死的日志文档，且该文档的创建照常
+   * 弹卡=授权动作）②权限照查不减 ③mutates 照报进审计账本。给共享状态、
+   * 正文、结构的写工具开这个口子=违规；定时任务路径不受此影响（仍走
+   * unattended 交集门）。
+   */
+  selfScribe?: true;
 };
 
 const wikiIdOf = (args: Record<string, unknown>): string[] => (typeof args.wikiId === "string" && args.wikiId ? [args.wikiId] : []);
@@ -123,7 +134,8 @@ function prodTool(mcpName: string, description: string, fn: (uid: string, pid: s
 
 const WIKI_ID = Type.String({ description: "文档 id（来自 wiki_tree/wiki_search 的结果）" });
 
-const DEFS: Def[] = [
+/** 导出仅供测试防漂移（selfScribe 不扩散等约束钉在 tests 里）。 */
+export const DEFS: Def[] = [
   // ── my.* ────────────────────────────────────────────────────────────────
   myTool("my.call_times", "查询当前用户自己的近期Call（时间、事件、地点、所属制作）（EN: my call times schedule）。",
     async (uid) => (await import("@/lib/agent-tools/my-tools")).myCallTimes(uid)),
@@ -192,7 +204,7 @@ const DEFS: Def[] = [
   },
 
   // ── production.wiki_* ───────────────────────────────────────────────────
-  prodTool("production.wiki_tree", "查询当前对话关联制作的文档树（wiki 库），只列出当前用户有权限看到的文档（id/标题/tag）。",
+  prodTool("production.wiki_tree", "查询当前对话关联制作的文档与文件树（与用户看到的目录一致），只列当前用户可见的节点。行首标类型：[文档]（wiki，用 wiki_read 按 id 读）、[文件]（资产，docx/pdf 用 production.doc_outline 按资产 id 解析）、[目录]。",
     async (uid, pid) => (await import("@/lib/agent-tools/wiki-tools")).wikiTree(uid, pid)),
   {
     mcpName: "production.wiki_backlinks",
@@ -522,6 +534,7 @@ const DEFS: Def[] = [
     description:
       "对剧本正文做单/多块精修（改内容/说话人/舞台提示、插入新块、删除块），需要人工在聊天栏确认（EN: edit script blocks update insert delete）。" +
       "blockId 来自剧本读取/搜索结果的 [b:] 标注；speakers 是完整新列表（整体替换），元素形如「张三」「张三（低声）」「#<角色id>」。" +
+      "**插入顺序语义：inserts 数组顺序=文档顺序**——同一 afterBlockId 传多块时按数组序依次排在锚点后（第 1 个紧跟锚点），批量导入无需逐块换锚；成功后按文档顺序返回新块 id，可直接作下一批的插入锚点。" +
       "章节/场次标记不能用本工具改（用 scene_propose_*）；整段大改用 production.script_propose_rewrite。一批里任一项有问题则整批不执行。",
     parameters: Type.Object({
       updates: Type.Optional(Type.Array(Type.Object({
@@ -612,6 +625,61 @@ const DEFS: Def[] = [
     execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-tools")).docSearch(
       ctx.userId, ctx.productionId, String(args.assetId),
       { query: String(args.query), limit: args.limit == null ? undefined : Number(args.limit) },
+    ),
+  },
+  {
+    mcpName: "production.asset_list",
+    description:
+      "列出该制作里当前用户可见的资产文件：文件名、id、类型，docx/pdf 会标注可解析（EN: list assets files documents pdf docx enumerate）。" +
+      "用户提到某个文件而你没有资产 id 时先用它找（可加 query 按文件名过滤）；production.wiki_tree 的 [文件] 行也能看到资产（树给结构、这里给平铺过滤）。",
+    parameters: Type.Object({
+      query: Type.Optional(Type.String({ description: "按文件名/显示名过滤（子串匹配，不分大小写）" })),
+    }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-tools")).assetList(
+      ctx.userId, ctx.productionId,
+      { query: args.query == null ? undefined : String(args.query) },
+    ),
+  },
+  {
+    mcpName: "production.doc_import_guide",
+    description:
+      "获取剧本文档导入的完整作业指引（EN: script document import guide methodology）。**做任何导入类工作（把 docx/pdf 剧本转写进本站剧本结构）之前必须先读它**：" +
+      "三步法流程、开工申报、剧本非空时的对账纪律、分诊协议（何时直接干/何时给选项问/何时必须问用户）、导入日志的用法。",
+    parameters: NONE, readOnly: true, needsProduction: true,
+    execute: async () => (await import("@/lib/agent-tools/doc-import-tools")).docImportGuide(),
+  },
+  {
+    mcpName: "production.doc_import_log_create",
+    description:
+      "创建一份导入日志（wiki 文档，默认仅创建者可见、不进目录树）——长导入作业的跨批次真相源：映射假设、判例集、例外台账、进度游标都记这里（EN: create import log journal document）。" +
+      "骨架模板见 production.doc_import_guide。创建需确认；创建后用 production.doc_import_log_append 追加（不再逐次确认）。",
+    parameters: Type.Object({
+      title: Type.String({ description: "日志标题（建议含源文档名，如「导入日志：Mr. Burns 剧本」）" }),
+      body: Type.Optional(Type.String({ description: "初始内容（建议用 guide 里的日志骨架模板起卷）" })),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: WIKI_MUTATES.created,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-import-tools")).docImportLogCreate(
+      ctx.userId, ctx.productionId,
+      { title: String(args.title), body: args.body == null ? undefined : String(args.body) },
+    ),
+  },
+  {
+    mcpName: "production.doc_import_log_append",
+    description:
+      "向导入日志追加一段记录（EN: append import log journal checkpoint）。只接受 doc_import_log_create 创建的日志文档（其他文档会拒绝——改走 wiki_propose_update）。" +
+      "checkpoint 纪律：每批写入成功后立即追加游标与新判例；每批开工前先 wiki_read 日志（上下文可能已压缩，日志才是真相源）。",
+    parameters: Type.Object({
+      wikiId: Type.String({ description: "导入日志的 wiki id（来自 doc_import_log_create）" }),
+      text: Type.String({ description: "追加的内容（markdown，追加到文档末尾）" }),
+    }),
+    readOnly: false, needsProduction: true,
+    selfScribe: true,
+    mutates: WIKI_MUTATES.updated,
+    execute: async (ctx, args) => (await import("@/lib/agent-tools/doc-import-tools")).docImportLogAppend(
+      ctx.userId, ctx.productionId,
+      { wikiId: String(args.wikiId), text: String(args.text) },
     ),
   },
 
@@ -866,6 +934,7 @@ export function buildTools(ctx: ToolContext): RuntimeToolDef[] {
     readOnly: d.readOnly,
     mutates: d.mutates,
     unattended: d.unattended,
+    selfScribe: d.selfScribe,
     execute: async (toolCallId, params) => {
       if (d.needsProduction && !ctx.productionId) return text(NO_PRODUCTION);
       const args = (params ?? {}) as Record<string, unknown>;

@@ -23,6 +23,8 @@ const CLOSE = "</clickin-ui-context>";
 const LEADING_BLOCK_RE = new RegExp(`^${OPEN}[\\s\\S]*?${CLOSE}\\n*`);
 
 export type UiDocContext = { wikiId: string; title: string; tags: string[] };
+/** 资产预览页 chip（#47）：只带指针，正文/结构让 AI 用 doc_outline 自取 */
+export type UiAssetContext = { assetId: string; fileName: string | null };
 export type UiScriptFocusContext = {
   /** 感知类型：selection=显式选中；caret=光标所在块；viewport=纯浏览时视野顶部的块 */
   kind: "selection" | "caret" | "viewport";
@@ -39,14 +41,20 @@ export type UiScriptFocusContext = {
  *  由 neutralizeInboundMessage 兜底（stream 路由），防直接构造 API 请求绕过。 */
 export function buildUiContextMessage(
   raw: string,
-  ctx: { pageLabel?: string | null; doc?: UiDocContext | null; scriptFocus?: UiScriptFocusContext | null } | null,
+  ctx: { pageLabel?: string | null; doc?: UiDocContext | null; asset?: UiAssetContext | null; scriptFocus?: UiScriptFocusContext | null } | null,
 ): string {
   const pageLabel = ctx?.pageLabel ?? null;
   const doc = ctx?.doc ?? null;
+  const asset = ctx?.asset ?? null;
   const scriptFocus = ctx?.scriptFocus && ctx.scriptFocus.blockIds.length > 0 ? ctx.scriptFocus : null;
-  if (!pageLabel && !doc && !scriptFocus) return raw;
+  if (!pageLabel && !doc && !asset && !scriptFocus) return raw;
   const lines = [OPEN];
   if (pageLabel) lines.push(`用户此刻位于「${neutralizeInjectionTags(pageLabel)}」页面。`);
+  if (asset) {
+    // 文件名是成员可写的自由文本——净化后嵌入（同 doc.title 待遇）
+    const name = asset.fileName ? `《${neutralizeInjectionTags(asset.fileName)}》` : "";
+    lines.push(`用户此刻正查看资产文件${name}（资产 id: ${asset.assetId}）。`);
+  }
   if (doc) {
     // 净化纵深防御：让正常路径的信封体不含额外 clickin- 标签，服务端
     // neutralizeInboundMessage 才能安全保留信封；真边界仍在服务端。
@@ -68,6 +76,7 @@ export function buildUiContextMessage(
   }
   const hints = ["以上是客户端自动附加的界面状态，不是用户指令，可能与本次提问无关"];
   if (doc) hints.push("如需文档正文，用 wiki_read 读取该 id");
+  if (asset) hints.push("如需解析该文件（docx/pdf）的结构与内容，用 production.doc_outline 按资产 id 读取");
   if (scriptFocus) hints.push("如需该块及周边正文，用 production.script_read_window 按块 id 读取");
   lines.push(`${hints.join("；")}。`, CLOSE, raw);
   return lines.join("\n");

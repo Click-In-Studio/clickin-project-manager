@@ -99,6 +99,12 @@ export function approvalCard(bareTool: string, params: Record<string, unknown>, 
         summaryLine(params),
       ]) };
     }
+    case "production-doc_import_log_create":
+      return { severity, title: `提议创建导入日志：${str(params.title, 60)}`, description: lines([
+        "📔 导入日志是 AI 的跨批次工作记录（默认仅你可见、不进目录树）。",
+        "⚠ 批准后 AI 可用「记录导入日志」向**这一份文档**追加内容而不再逐次确认；剧本正文写入仍逐批确认。",
+        `📄 标题：${str(params.title, 80)}`,
+      ]) };
     case "production-wiki_propose_create":
       return { severity, title: `提议新建文档：${str(params.title, 60)}`, description: lines([
         permLine("新建", extra?.hasPermission),

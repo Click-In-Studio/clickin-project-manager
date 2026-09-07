@@ -53,6 +53,7 @@ export default function AgentPopout({
   productionId,
   productionName,
   currentWikiId,
+  currentAssetId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -62,6 +63,8 @@ export default function AgentPopout({
   productionName: string | null;
   /** 当前所在的 wiki 文档页 id（非文档页/文档库根页为 null）——驱动"附带当前文档" chip。 */
   currentWikiId: string | null;
+  /** 当前所在的资产详情/预览页 id（非资产详情页为 null）——驱动"附带当前文件" chip（#47）。 */
+  currentAssetId: string | null;
 }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
@@ -75,6 +78,8 @@ export default function AgentPopout({
   const [currentDocTitle, setCurrentDocTitle] = useState<string | null>(null);
   const [currentDocTags, setCurrentDocTags] = useState<string[]>([]);
   const [docAttached, setDocAttached] = useState(true);
+  const [currentAssetName, setCurrentAssetName] = useState<string | null>(null);
+  const [assetAttached, setAssetAttached] = useState(true);
   const [pageAttached, setPageAttached] = useState(true);
   const [focusAttached, setFocusAttached] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -163,6 +168,22 @@ export default function AgentPopout({
       .catch(() => { if (alive) { setCurrentDocTitle(null); setCurrentDocTags([]); } });
     return () => { alive = false; };
   }, [currentWikiId, productionId]);
+
+  // 附带当前文件 chip（#47）：与文档 chip 同款——换资产/离开资产页时重取
+  // 文件名、默认重新勾选附带；只取名字不拉内容（AI 用 doc_outline 自取）。
+  useEffect(() => {
+    if (!currentAssetId || !productionId) { setCurrentAssetName(null); return; }
+    setAssetAttached(true);
+    let alive = true;
+    fetch(`/api/production/${productionId}/assets/${currentAssetId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { asset?: { fileName?: string | null } } | null) => {
+        if (!alive) return;
+        setCurrentAssetName(data?.asset?.fileName ?? null);
+      })
+      .catch(() => { if (alive) setCurrentAssetName(null); });
+    return () => { alive = false; };
+  }, [currentAssetId, productionId]);
 
   // 点击 popout 外部不自动收起——和左侧剧本页折叠导航的浮出面板同一套交互
   // 惯例，只能靠 ✕ 按钮或再点一次 AI 按钮关掉。Escape 仍保留（标准可访问性
@@ -396,6 +417,8 @@ export default function AgentPopout({
         docAttached && currentWikiId && currentDocTitle
           ? { wikiId: currentWikiId, title: currentDocTitle, tags: currentDocTags }
           : null,
+      // 资产同款"只带指针"：AI 用 doc_outline 按资产 id 自取结构与内容
+      asset: assetAttached && currentAssetId ? { assetId: currentAssetId, fileName: currentAssetName } : null,
       // 剧本 focus 同款"只带指针"：块 id 让 AI 用 script_read_window 自取正文
       scriptFocus: focusAttached ? scriptFocusActive : null,
     });
@@ -413,7 +436,7 @@ export default function AgentPopout({
     } else {
       consumeStream(res, key);
     }
-  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId, currentDocTitle, currentDocTags, pageAttached, pageLabel, focusAttached, scriptFocusActive]);
+  }, [input, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId, currentDocTitle, currentDocTags, assetAttached, currentAssetId, currentAssetName, pageAttached, pageLabel, focusAttached, scriptFocusActive]);
 
   const abort = useCallback(async () => {
     if (!activeKey) return;
@@ -820,7 +843,7 @@ export default function AgentPopout({
 
       {/* 页面感知栏：本页建议（点击填入输入框，不发送）+ 附带 chip（页面/文档，
           默认勾选、可点掉——附带的内容对用户始终可见、可摘除）。 */}
-      {(pageLabel || (currentWikiId && currentDocTitle) || scriptFocusActive || pageSuggestions.length > 0) && (
+      {(pageLabel || (currentWikiId && currentDocTitle) || currentAssetId || scriptFocusActive || pageSuggestions.length > 0) && (
         <div className="shrink-0 space-y-1.5 border-t border-[var(--line)] bg-[var(--paper)] px-3 py-1.5">
           {pageSuggestions.length > 0 && input.trim() === "" && (
             <div className="flex flex-wrap gap-1.5">
@@ -840,7 +863,7 @@ export default function AgentPopout({
               ))}
             </div>
           )}
-          {(pageLabel || (currentWikiId && currentDocTitle) || scriptFocusActive) && (
+          {(pageLabel || (currentWikiId && currentDocTitle) || currentAssetId || scriptFocusActive) && (
             <div className="flex flex-wrap items-center gap-1.5">
               {pageLabel && (
                 <button
@@ -868,6 +891,20 @@ export default function AgentPopout({
                   }`}
                 >
                   📎 附带《{currentDocTitle}》
+                </button>
+              )}
+              {currentAssetId && (
+                <button
+                  type="button"
+                  onClick={() => setAssetAttached((v) => !v)}
+                  title={assetAttached ? "点击取消附带当前文件" : "点击重新附带当前文件"}
+                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                    assetAttached
+                      ? "border-[var(--ink)] bg-[var(--surface)] text-[var(--ink)]"
+                      : "border-[var(--line)] text-[var(--muted)] line-through"
+                  }`}
+                >
+                  📄 附带{currentAssetName ? `《${currentAssetName}》` : "当前文件"}
                 </button>
               )}
               {scriptFocusActive && (
