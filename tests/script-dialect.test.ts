@@ -106,6 +106,26 @@ describe("往返一致性", () => {
     expect(res.summary).toEqual({ inserted: [], updated: [], deleted: [], retained: 5 });
   });
 
+  it("[空] 占位块：序列化为 [空]（不是裸 [白]）、往返未变、带正文时教学报错", () => {
+    // 2026-09-07 导入实测：新建空场景的自带空块序列化成裸 [白] 让模型迷惑
+    const all = canon([
+      mkMarker("m-ch", "chapter_marker", "一", null),
+      mkText("d-empty", "", {}),
+    ]);
+    const text = serializeBlocksToDialect(all, chars);
+    expect(text).toContain("[b:d-empty] [空]");
+    expect(text).not.toContain("[b:d-empty] [白]");
+    const res = roundTrip(all);
+    if (!res.ok) throw new Error(JSON.stringify(res.errors));
+    expect(res.blocks[1]).toBe(all[1]); // 往返未变，保持原引用
+
+    // [空] 带正文 → 教学报错指路
+    const bad = roundTrip(all, (lines) =>
+      lines.map((l) => (l.startsWith("[b:d-empty]") ? "[b:d-empty] [空] 有正文" : l)));
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(JSON.stringify(bad.errors)).toContain("空白占位");
+  });
+
   it("未动的块保持原对象引用（含悬空角色 id 的块）", () => {
     const all = canon([
       mkMarker("m-ch", "chapter_marker", "一", null),
