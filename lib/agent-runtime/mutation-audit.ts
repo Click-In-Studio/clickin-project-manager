@@ -166,17 +166,19 @@ const READERS: Record<string, ScopeReader> = {
     // 只进 diff 统计（增删字数），原文绝不落账本（TEXT_DIFF_FIELDS 纪律）。
     read: async (ids, { productionId }) => {
       const out = new Map<string, Snapshot>();
-      if (!productionId) return out;
-      const { getActiveVersionId, loadProduction } = await import("@/lib/db");
+      if (!productionId || ids.length === 0) return out;
+      // 定点装被写的那几行 + 角色名，别为审计快照扛整本（#461）
+      const { getActiveVersionId, loadVersionBlocksByIds, listCharactersByVersion } = await import("@/lib/db");
       const versionId = await getActiveVersionId(productionId);
       if (!versionId) return out;
-      const state = (await loadProduction(productionId, versionId))?.state;
-      if (!state) return out;
+      const [blocks, characters] = await Promise.all([
+        loadVersionBlocksByIds(versionId, ids),
+        listCharactersByVersion(versionId),
+      ]);
       const { isMarkerBlock } = await import("@/lib/script-marker-blocks");
-      const nameOf = new Map(state.characters.map((c) => [c.id, c.name]));
-      const want = new Set(ids);
-      for (const b of state.blocks) {
-        if (!want.has(b.id) || isMarkerBlock(b)) continue;
+      const nameOf = new Map(characters.map((c) => [c.id, c.name]));
+      for (const b of blocks) {
+        if (isMarkerBlock(b)) continue;
         out.set(b.id, {
           label: (b.content ?? "").replace(/\s+/g, " ").slice(0, 24),
           type: b.type === "stage" ? "stage" : b.lyric ? "lyric" : "dialogue",
@@ -189,13 +191,10 @@ const READERS: Record<string, ScopeReader> = {
     },
     listIds: async ({ productionId }) => {
       if (!productionId) return [];
-      const { getActiveVersionId, loadProduction } = await import("@/lib/db");
+      const { getActiveVersionId, listTextBlockIdsByVersion } = await import("@/lib/db");
       const versionId = await getActiveVersionId(productionId);
       if (!versionId) return [];
-      const state = (await loadProduction(productionId, versionId))?.state;
-      if (!state) return [];
-      const { isMarkerBlock } = await import("@/lib/script-marker-blocks");
-      return state.blocks.filter((b) => !isMarkerBlock(b)).map((b) => b.id);
+      return listTextBlockIdsByVersion(versionId);
     },
   },
   schedule: {

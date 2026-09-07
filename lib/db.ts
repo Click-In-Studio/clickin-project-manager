@@ -40,7 +40,7 @@ import { keyBetween, initialKeys } from "./lex-order";
 import { computePageMap, updateEstimatedPageMap, type EstimatedPageMapCache } from "./script-page";
 import { isKnownTemplateId } from "./script-template";
 import { buildMarkerLabelIndex, generatedRehearsalMarksByScene, type MarkerLabelIndex } from "./script-generated-labels";
-import { VERSION_MARKER_LABEL_ROWS_SQL, VERSION_OWNED_BLOCKS_CTE, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
+import { MARKER_TYPES_SQL, VERSION_MARKER_LABEL_ROWS_SQL, VERSION_OWNED_BLOCKS_CTE, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
 import { getMarkerChange, markerCacheUpdateBlockIds, markerHierarchyUpdateBlockIds, normalizeScriptMarkerInvariants, projectMarkers, sameMarkerStructure, type MarkerChange, type MarkerProjection } from "./script-marker-domain";
 import { withLegacyOwnershipProjection, withMarkerOwnership } from "./script-marker-blocks";
 import { randomUUID } from "node:crypto";
@@ -779,80 +779,32 @@ export type ProductionState = {
  * Load all data for a specific version of a production.
  * Returns null if the production doesn't exist.
  */
-export async function loadProduction(productionId: string, versionId: string): Promise<ProductionState | null> {
+const VERSION_BLOCK_ROWS_SQL = `SELECT
+   s.id AS snapshot_id,
+   sv.block_id,
+   sv.sort_key,
+   s.scene_id,
+   s.rehearsal_mark,
+   s.owner_marker_id,
+   s.marker_meta,
+   s.type,
+   s.content,
+   s.stage_comment,
+   s.force_show_character_name
+ FROM script_version sv
+ JOIN script s ON s.id = sv.snapshot_id
+ WHERE sv.version_id = $1`;
+
+type LoadedVersionBlocks = {
+  blocks: Block[];
+  sortKeys: Map<string, string>;
+  snapshotIds: Map<string, string>;
+};
+
+async function assembleVersionBlocks(rows: BlockRow[]): Promise<LoadedVersionBlocks> {
   const pool = getPool();
-
-  const [[blocksRes, scenesRes, charsRes], prodRes] = await Promise.all([
-	    Promise.all([
-	      pool.query<BlockRow>(
-	        `SELECT
-	           s.id AS snapshot_id,
-	           sv.block_id,
-	           sv.sort_key,
-	           s.scene_id,
-	           s.rehearsal_mark,
-	           s.owner_marker_id,
-	           s.marker_meta,
-	           s.type,
-	           s.content,
-	           s.stage_comment,
-	           s.force_show_character_name
-	         FROM script_version sv
-	         JOIN script s ON s.id = sv.snapshot_id
-	         WHERE sv.version_id = $1
-	         ORDER BY sv.sort_key`,
-	        [versionId]
-	      ),
-      pool.query<SceneRow>(
-        `${VERSION_SCENES_FROM_MARKERS_CTE}
-         SELECT ms.id,
-                COALESCE(ms.marker_meta->>'name', '') AS name,
-                ms.sort_order, ms.parent_id
-         FROM marker_scenes ms
-         ORDER BY ms.sort_order`,
-        [versionId]
-      ),
-      pool.query<CharRow>(
-        `SELECT cv.character_id AS id, cv.name, cv.sort_order, cv.is_aggregate,
-                COALESCE(array_remove(array_agg(ca.member_id ORDER BY ca.member_id), NULL), ARRAY[]::text[]) AS member_ids
-         FROM character_version cv
-         LEFT JOIN character_aggregate ca ON ca.aggregate_id = cv.character_id
-         WHERE cv.version_id = $1
-         GROUP BY cv.character_id, cv.name, cv.sort_order, cv.is_aggregate
-         ORDER BY cv.sort_order`,
-        [versionId]
-      ),
-    ]),
-    pool.query<{
-      production_script_config: Partial<ScriptConfig> | null;
-      version_script_config: Partial<ScriptConfig> | null;
-      page_layout: string | null;
-      text_layout_mode: string | null;
-      template_id: string | null;
-    }>(
-      `SELECT p.script_config AS production_script_config,
-              v.script_config AS version_script_config,
-              sv.page_layout, sv.text_layout_mode,
-              sv.template_overrides->>'templateId' AS template_id
-       FROM production p
-       JOIN version v ON v.production_id = p.id
-       LEFT JOIN script_view sv ON sv.id = p.master_view_id
-       WHERE p.id = $1 AND v.id = $2`,
-      [productionId, versionId]
-    ),
-  ]);
-
-  if (!prodRes.rows.length) return null;
-  const rawProductionConfig = prodRes.rows[0]?.production_script_config;
-  const rawVersionConfig = prodRes.rows[0]?.version_script_config;
-  // 版式只有 script_view 一处真相（#336 B2）：主本行装配进 ScriptConfig，JSONB 里
-  // 即便残留旧键也不算数。无主本（不应发生）落缺省。
-  const masterLayout = scriptViewLayout(prodRes.rows[0]);
-  // 排版模版 id 也住在主本上（template_overrides.templateId，#338 T3）；不认识的 id 当没有
-  const templateId = isKnownTemplateId(prodRes.rows[0]?.template_id) ? prodRes.rows[0]!.template_id : null;
-
   // script_character joins on snapshot_id (script.id)
-  const snapshotIds_arr = blocksRes.rows.map(r => r.snapshot_id);
+  const snapshotIds_arr = rows.map(r => r.snapshot_id);
   const scCharRes = snapshotIds_arr.length > 0
     ? await pool.query<ScCharRow>(
         "SELECT script_id, character_id, annotation FROM script_character WHERE script_id = ANY($1::text[]) ORDER BY script_id, position",
@@ -874,7 +826,7 @@ export async function loadProduction(productionId: string, versionId: string): P
   const sortKeys   = new Map<string, string>();
   const snapshotIds = new Map<string, string>();
 
-  const blocks: Block[] = blocksRes.rows.map(row => {
+  const blocks: Block[] = rows.map(row => {
     sortKeys.set(row.block_id, row.sort_key);
     snapshotIds.set(row.block_id, row.snapshot_id);
     const { type, lyric } = fromDbType(row.type);
@@ -884,43 +836,168 @@ export async function loadProduction(productionId: string, versionId: string): P
       lyric,
       content: row.content,
       stageComment: row.stage_comment,
-          forceShowCharacterName: row.force_show_character_name,
-          sceneId: isChapterSceneMarkerType(row.type) ? row.block_id : row.scene_id,
-          rehearsalMark: row.rehearsal_mark,
-          ownerMarkerId: isMarkerBlockType(row.type) ? undefined : row.owner_marker_id,
-          markerMeta: cleanMarkerMeta(row.marker_meta),
-          characterIds: charsBySnapshot.get(row.snapshot_id) ?? [],
-          characterAnnotations: annotationsBySnapshot.get(row.snapshot_id) ?? {},
-        };
+      forceShowCharacterName: row.force_show_character_name,
+      sceneId: isChapterSceneMarkerType(row.type) ? row.block_id : row.scene_id,
+      rehearsalMark: row.rehearsal_mark,
+      ownerMarkerId: isMarkerBlockType(row.type) ? undefined : row.owner_marker_id,
+      markerMeta: cleanMarkerMeta(row.marker_meta),
+      characterIds: charsBySnapshot.get(row.snapshot_id) ?? [],
+      characterAnnotations: annotationsBySnapshot.get(row.snapshot_id) ?? {},
+    };
   });
-  const markerLabels = buildMarkerLabelIndex(blocks);
+  return { blocks, sortKeys, snapshotIds };
+}
 
-  const firstChapterMarkerId = blocks.find((block) => block.type === "chapter_marker")?.id ?? null;
+/** 只装正文块序列（含 marker 行）。分页测算等只消费 blocks 的读者用这个，
+ *  别为它扛整本（scenes/characters/config 三路查询与 loadProduction 的
+ *  openingChapter 写回都省掉，#461）。 */
+export async function loadVersionBlocks(versionId: string): Promise<LoadedVersionBlocks> {
+  const res = await getPool().query<BlockRow>(
+    `${VERSION_BLOCK_ROWS_SQL} ORDER BY sv.sort_key`,
+    [versionId]
+  );
+  return assembleVersionBlocks(res.rows);
+}
+
+/** 按 block id 定点装块（含正文与角色挂载）。审计快照等只看少数行的读者用（#461）。 */
+export async function loadVersionBlocksByIds(versionId: string, blockIds: string[]): Promise<Block[]> {
+  if (blockIds.length === 0) return [];
+  const res = await getPool().query<BlockRow>(
+    `${VERSION_BLOCK_ROWS_SQL} AND sv.block_id = ANY($2::text[]) ORDER BY sv.sort_key`,
+    [versionId, blockIds]
+  );
+  return (await assembleVersionBlocks(res.rows)).blocks;
+}
+
+/** 非 marker 块的 id 序列（正文顺序），不拖内容。 */
+export async function listTextBlockIdsByVersion(versionId: string): Promise<string[]> {
+  const res = await getPool().query<{ block_id: string }>(
+    `SELECT sv.block_id
+     FROM script_version sv
+     JOIN script s ON s.id = sv.snapshot_id
+     WHERE sv.version_id = $1 AND s.type NOT IN (${MARKER_TYPES_SQL})
+     ORDER BY sv.sort_key`,
+    [versionId]
+  );
+  return res.rows.map(r => r.block_id);
+}
+
+const PRODUCTION_CONFIG_SQL = `SELECT p.script_config AS production_script_config,
+        v.script_config AS version_script_config,
+        sv.page_layout, sv.text_layout_mode,
+        sv.template_overrides->>'templateId' AS template_id
+ FROM production p
+ JOIN version v ON v.production_id = p.id
+ LEFT JOIN script_view sv ON sv.id = p.master_view_id
+ WHERE p.id = $1 AND v.id = $2`;
+
+type ProductionConfigRow = {
+  production_script_config: Partial<ScriptConfig> | null;
+  version_script_config: Partial<ScriptConfig> | null;
+  page_layout: string | null;
+  text_layout_mode: string | null;
+  template_id: string | null;
+};
+
+/** ScriptConfig 的唯一装配口（loadProduction 与 getScriptConfig 共用）。
+ *  openingChapterMarkerId 配置无效（缺失/指向已不存在的章 marker）时兜底到第一章；
+ *  兜底值经 backfillOpeningChapterMarkerId 返回，由 loadProduction 决定是否写回。 */
+function assembleScriptConfig(
+  row: ProductionConfigRow,
+  chapterMarkerIds: string[],
+): { config: ScriptConfig; backfillOpeningChapterMarkerId: string | null } {
+  // 版式只有 script_view 一处真相（#336 B2）：主本行装配进 ScriptConfig，JSONB 里
+  // 即便残留旧键也不算数。无主本（不应发生）落缺省。
+  const masterLayout = scriptViewLayout(row);
+  // 排版模版 id 也住在主本上（template_overrides.templateId，#338 T3）；不认识的 id 当没有
+  const templateId = isKnownTemplateId(row.template_id) ? row.template_id : null;
+  const rawVersionConfig = row.version_script_config;
   let openingChapterMarkerId =
     typeof rawVersionConfig?.openingChapterMarkerId === "string"
       ? rawVersionConfig.openingChapterMarkerId
       : null;
-  const hasConfiguredOpeningChapter = !!openingChapterMarkerId &&
-    blocks.some((block) => block.id === openingChapterMarkerId && block.type === "chapter_marker");
-  if (!hasConfiguredOpeningChapter) {
-    openingChapterMarkerId = firstChapterMarkerId;
-    if (openingChapterMarkerId) {
-      await pool.query(
-        "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2",
-        [JSON.stringify({ openingChapterMarkerId }), versionId]
-      );
-    }
+  let backfillOpeningChapterMarkerId: string | null = null;
+  if (!openingChapterMarkerId || !chapterMarkerIds.includes(openingChapterMarkerId)) {
+    openingChapterMarkerId = chapterMarkerIds[0] ?? null;
+    backfillOpeningChapterMarkerId = openingChapterMarkerId;
   }
   // 后者覆盖前者：主本的版式与模版 id 压过 JSONB 里的残留键（scriptViewLayout 只产出
   // pageLayout / textLayoutMode 两个键，templateId 单独装配）
-  const config: ScriptConfig = {
-    ...DEFAULT_SCRIPT_CONFIG,
-    ...(rawProductionConfig ?? {}),
-    ...(rawVersionConfig ?? {}),
-    ...masterLayout,
-    templateId,
-    openingChapterMarkerId,
+  return {
+    config: {
+      ...DEFAULT_SCRIPT_CONFIG,
+      ...(row.production_script_config ?? {}),
+      ...(rawVersionConfig ?? {}),
+      ...masterLayout,
+      templateId,
+      openingChapterMarkerId,
+    },
+    backfillOpeningChapterMarkerId,
   };
+}
+
+/** 只装配 ScriptConfig，不拖 blocks/scenes/characters（#461）。与 loadProduction
+ *  同一套装配，但纯读——不做 openingChapterMarkerId 的写回。 */
+export async function getScriptConfig(productionId: string, versionId: string): Promise<ScriptConfig | null> {
+  const pool = getPool();
+  const [prodRes, chapterRes] = await Promise.all([
+    pool.query<ProductionConfigRow>(PRODUCTION_CONFIG_SQL, [productionId, versionId]),
+    pool.query<{ block_id: string }>(
+      `SELECT sv.block_id
+       FROM script_version sv
+       JOIN script s ON s.id = sv.snapshot_id
+       WHERE sv.version_id = $1 AND s.type = 'chapter_marker'
+       ORDER BY sv.sort_key`,
+      [versionId]
+    ),
+  ]);
+  if (!prodRes.rows.length) return null;
+  return assembleScriptConfig(prodRes.rows[0], chapterRes.rows.map(r => r.block_id)).config;
+}
+
+export async function loadProduction(productionId: string, versionId: string): Promise<ProductionState | null> {
+  const pool = getPool();
+
+  const [[loadedBlocks, scenesRes, charsRes], prodRes] = await Promise.all([
+	    Promise.all([
+	      loadVersionBlocks(versionId),
+      pool.query<SceneRow>(
+        `${VERSION_SCENES_FROM_MARKERS_CTE}
+         SELECT ms.id,
+                COALESCE(ms.marker_meta->>'name', '') AS name,
+                ms.sort_order, ms.parent_id
+         FROM marker_scenes ms
+         ORDER BY ms.sort_order`,
+        [versionId]
+      ),
+      pool.query<CharRow>(
+        `SELECT cv.character_id AS id, cv.name, cv.sort_order, cv.is_aggregate,
+                COALESCE(array_remove(array_agg(ca.member_id ORDER BY ca.member_id), NULL), ARRAY[]::text[]) AS member_ids
+         FROM character_version cv
+         LEFT JOIN character_aggregate ca ON ca.aggregate_id = cv.character_id
+         WHERE cv.version_id = $1
+         GROUP BY cv.character_id, cv.name, cv.sort_order, cv.is_aggregate
+         ORDER BY cv.sort_order`,
+        [versionId]
+      ),
+    ]),
+    pool.query<ProductionConfigRow>(PRODUCTION_CONFIG_SQL, [productionId, versionId]),
+  ]);
+
+  if (!prodRes.rows.length) return null;
+  const { blocks, sortKeys, snapshotIds } = loadedBlocks;
+  const markerLabels = buildMarkerLabelIndex(blocks);
+
+  const { config, backfillOpeningChapterMarkerId } = assembleScriptConfig(
+    prodRes.rows[0],
+    blocks.filter((block) => block.type === "chapter_marker").map((block) => block.id),
+  );
+  if (backfillOpeningChapterMarkerId) {
+    await pool.query(
+      "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2",
+      [JSON.stringify({ openingChapterMarkerId: backfillOpeningChapterMarkerId }), versionId]
+    );
+  }
 
   return {
     state: {
@@ -1105,10 +1182,10 @@ export async function getEstimatedPageMap(
     const stored = row.page_map?.[row.master_view_id];
     if (stored) return stored;
   }
-  const state = preloaded ?? (await loadProduction(productionId, versionId))?.state;
-  if (!state) return {};
+  // 兜底重算只吃 blocks——别为它扛整本（#461）
+  const blocks = preloaded?.blocks ?? (await loadVersionBlocks(versionId)).blocks;
   const { pageLayout, textLayoutMode } = scriptViewLayout(row);
-  return computePageMap(state.blocks, pageLayout, textLayoutMode, false, isKnownTemplateId(row.template_id) ? row.template_id : null);
+  return computePageMap(blocks, pageLayout, textLayoutMode, false, isKnownTemplateId(row.template_id) ? row.template_id : null);
 }
 
 /** Stores a pre-computed page map keyed by script_view id（测试与修复脚本用；线上写入走 saveEstimatedPageMaps）. */
@@ -5520,7 +5597,7 @@ function cacheEstimatedPageMap(key: string, cache: EstimatedPageMapCache): Estim
 async function saveEstimatedPageMaps(
   productionId: string,
   versionId: string,
-  state: ScriptState,
+  blocks: Block[],
   dirty: "full" | Array<{ start: number; end: number }>,
 ): Promise<void> {
   // 按现存视图各算一份（#336 B2：page_map 以 script_view id 为键）。本阶段只有主本；
@@ -5538,7 +5615,7 @@ async function saveEstimatedPageMaps(
     const previous = pageMapCache.get(key) ?? null;
     const cache = updateEstimatedPageMap(
       previous,
-      state.blocks,
+      blocks,
       pageLayout,
       textLayoutMode,
       false,
@@ -5563,8 +5640,14 @@ function scheduleEstimatedPageMapSave(
   const previous = pageMapUpdates.get(versionId) ?? Promise.resolve();
   const current = previous.catch(() => {}).then(async () => {
     try {
-      const result = await loadProduction(productionId, versionId);
-      if (result) await saveEstimatedPageMaps(productionId, versionId, result.state, dirty);
+      // 只装 blocks（#461）：分页测算不吃 scenes/characters/config。事务内读的
+      // 结构列没有 content，没法复用——高度估算要正文，这次读省不掉，但省成一路。
+      // 版本存在性单独验：loadVersionBlocks 对已删版本返回空数组，不能拿它当哨兵。
+      const [versionExists, loaded] = await Promise.all([
+        getPool().query("SELECT 1 FROM version WHERE id = $1 AND production_id = $2", [versionId, productionId]),
+        loadVersionBlocks(versionId),
+      ]);
+      if (versionExists.rows.length > 0) await saveEstimatedPageMaps(productionId, versionId, loaded.blocks, dirty);
     } catch (error) {
       deletePageMapCacheEntries(`${productionId}:${versionId}:`);
       throw error;

@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getActiveVersionId, getFirstRehearsalMarkerLabel, getMasterScriptViewId, getVersion, loadProduction, saveScriptConfig } from "@/lib/db";
+import { getProductionPermissionContext, getActiveVersionId, getFirstRehearsalMarkerLabel, getMasterScriptViewId, getScriptConfig, getVersion, saveScriptConfig } from "@/lib/db";
 import { hasEffectiveGrant } from "@/lib/grant-check";
 import { broadcastEvent } from "@/lib/server-cache";
 import { rejectNonHeadWrite } from "@/lib/head-version";
@@ -38,7 +38,8 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
   //   · 版式字段（pageLayout / textLayoutMode / templateId）= 改主本的排版
   //     → script_view/<主本>@edit（epic #337 §9），与编辑器「页面类型」菜单、打印页模版菜单同键
   //   · 其余剧本设置（舞台指示分隔符、排练记号开关、开篇章节）→ 沿用 scene meta/name@edit
-  const current = versionId ? (await loadProduction(id, versionId))?.state.config ?? null : null;
+  // 只取 config 做变更分门，别为它扛整本剧本（#461）
+  const current = versionId ? await getScriptConfig(id, versionId) : null;
   const layoutChanged = !current
     || current.pageLayout !== config.pageLayout
     || current.textLayoutMode !== config.textLayoutMode
