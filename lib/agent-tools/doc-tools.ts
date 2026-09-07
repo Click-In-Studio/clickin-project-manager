@@ -194,6 +194,8 @@ function renderPdfPage(p: PdfPage, budget: { left: number; chars: number }): str
       p.vertical ? `y=${ln.y}` : null,
       ln.font ? `字体:${ln.font}` : null,
       ln.boilerplate ? "≡重复" : null,
+      ln.contNext ? "⤵续下页?" : null,
+      ln.contPrev ? "⤴接上页?" : null,
     ].filter(Boolean).join(" ");
     let text = ln.text;
     if (text.length > READ_TEXT_CAP) text = text.slice(0, READ_TEXT_CAP) + "…";
@@ -368,10 +370,24 @@ function docxRead(doc: DocxDoc, ranges: Array<{ from: number; to: number }>): st
   return neutralizeInjectionTags(lines.join("\n"));
 }
 
+/** ⤵/⤴ 的无歧义说明——出现该标记的输出必附此行（用户点名要求说清）。 */
+const CONT_LEGEND =
+  "标记说明：⤵续下页? = 该行是本页末行且疑似句子未完（括号未闭合，或无句末标点且下页以小写续起）；" +
+  "⤴接上页? = 该行疑似上一页 ⤵ 行的继续。两行很可能是**同一段被分页截断**——导入时应拼合为一块，" +
+  "不要拆成两块（启发式判定，最终由你结合内容确认）。";
+
 function pdfRead(doc: PdfDoc, ranges: Array<{ from: number; to: number }>): string {
   const lines: string[] = [];
   const rendered = new Set<number>();
   const lineBudget = { left: READ_PDF_LINE_CAP, chars: 0 };
+  const hasCont = ranges.some((r) => {
+    const from = Math.max(1, Math.floor(r.from)), to = Math.min(doc.stats.pageCount, Math.floor(r.to));
+    for (let n = from; n <= to; n++) {
+      if (doc.pages[n - 1]?.lines.some((l) => l.contNext || l.contPrev)) return true;
+    }
+    return false;
+  });
+  if (hasCont) lines.push(CONT_LEGEND);
   for (const r of ranges) {
     const from = Math.max(1, Math.floor(r.from));
     const to = Math.min(doc.stats.pageCount, Math.floor(r.to));

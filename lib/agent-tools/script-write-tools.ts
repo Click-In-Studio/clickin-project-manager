@@ -119,13 +119,23 @@ type Plan =
   | { error: string }
   | { wants: Want[]; notes: string[]; run: () => Promise<string> };
 
-function diffNotes(prevById: Map<string, Block>, nextBlocks: Block[], summary: ApplyDialectSummary): string[] {
+function diffNotes(
+  prevById: Map<string, Block>,
+  nextBlocks: Block[],
+  summary: ApplyDialectSummary,
+  insertCtx?: Map<string, { prev: string; next: string | null }>,
+): string[] {
   const nextById = new Map(nextBlocks.map((b) => [b.id, b]));
   const lines: string[] = [
     `新增 ${summary.inserted.length} 块 / 修改 ${summary.updated.length} 块 / 删除 ${summary.deleted.length} 块 / 保留 ${summary.retained} 块`,
   ];
   for (const id of summary.updated) lines.push(`改：${clip(nextById.get(id)?.content ?? "", 40)}`);
-  for (const id of summary.inserted) lines.push(`增：${clip(nextById.get(id)?.content ?? "", 40)}`);
+  for (const id of summary.inserted) {
+    const c = insertCtx?.get(id);
+    // 位置上下文（导入实测反馈④）：锚点选错时在卡上当场可见，不用等落库后肉眼发现
+    const where = c ? (c.next != null ? `（「${c.prev}」与「${c.next}」之间）` : `（接在「${c.prev}」后，段尾）`) : "";
+    lines.push(`增${where}：${clip(nextById.get(id)?.content ?? "", 40)}`);
+  }
   for (const id of summary.deleted) lines.push(`删：${clip(prevById.get(id)?.content ?? "", 40)}`);
   return lines;
 }
@@ -137,6 +147,7 @@ function finishPlan(
   nextBlocks: Block[],
   summary: ApplyDialectSummary,
   headline: string,
+  insertCtx?: Map<string, { prev: string; next: string | null }>,
 ): Plan {
   const nextState: ScriptState = { ...prevState, blocks: nextBlocks };
   const patch: ScriptPatch = { ...diffState(prevState, nextState, 0), clientSeq: 0 };
@@ -144,7 +155,7 @@ function finishPlan(
     return { error: "内容与现状相同，未做任何变更。" };
   }
   const prevById = new Map(prevState.blocks.map((b) => [b.id, b]));
-  const notes = [headline, ...diffNotes(prevById, nextBlocks, summary)];
+  const notes = [headline, ...diffNotes(prevById, nextBlocks, summary, insertCtx)];
   return {
     wants: wantsFromPatch(patch, prevState),
     notes,
@@ -338,6 +349,7 @@ async function planEditBlocks(ctx: WriteCtx, productionId: string, args: EditBlo
   // 到前面）——链式锚点跟随：某锚点插过块后，该锚点的后续 insert 挂到刚插的
   // 块之后。
   const effectiveAnchor = new Map<string, string>();
+  const insertCtx = new Map<string, { prev: string; next: string | null }>();
   for (const it of inserts) {
     if (!it || typeof it.afterBlockId !== "string" || !it.afterBlockId) return { error: "每个 insert 都必须带 afterBlockId（未做任何变更）。" };
     if (typeof it.content !== "string") return { error: "每个 insert 都必须带 content（未做任何变更）。" };
@@ -370,13 +382,18 @@ async function planEditBlocks(ctx: WriteCtx, productionId: string, args: EditBlo
       rehearsalMark: null,
     };
     summary.inserted.push(block.id);
+    const after = nextBlocks[anchorIdx + 1];
+    insertCtx.set(block.id, {
+      prev: clip(nextBlocks[anchorIdx].content ?? "", 16),
+      next: after ? clip(after.content ?? "", 16) : null,
+    });
     nextBlocks = [...nextBlocks.slice(0, anchorIdx + 1), block, ...nextBlocks.slice(anchorIdx + 1)];
     effectiveAnchor.set(it.afterBlockId, block.id);
   }
 
   // 归属重算跑全量（插入/删除会改变后续块的 marker 归属投影）
   const projected = withLegacyOwnershipProjection(withMarkerOwnership(nextBlocks));
-  return finishPlan(ctx, productionId, state, projected, summary, `精修 ${total} 处`);
+  return finishPlan(ctx, productionId, state, projected, summary, `精修 ${total} 处`, insertCtx);
 }
 
 // ─── 统一执行 / 预览（与构作族同形，service preflight 与确认后执行共用） ────────

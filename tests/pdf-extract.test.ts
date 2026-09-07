@@ -47,7 +47,9 @@ function makePdf(pages: PageSpec[]): Buffer {
   return Buffer.from(out, "latin1");
 }
 
-const text = (x: number, y: number, s: string, size = 12) => `BT /F1 ${size} Tf ${x} ${y} Td (${s}) Tj ET\n`;
+// PDF 字符串字面量里的 ( ) \ 必须转义——未配对括号会破坏内容流本身
+const text = (x: number, y: number, s: string, size = 12) =>
+  `BT /F1 ${size} Tf ${x} ${y} Td (${s.replace(/([()\\])/g, "\\$1")}) Tj ET\n`;
 
 // ─── 测试 ────────────────────────────────────────────────────────────────────
 
@@ -109,6 +111,23 @@ describe("pdf 文本层信号抽取", () => {
     expect(flagged.every((t) => t === "Watermark Footer Text")).toBe(true);
     const matt = doc.pages[0].lines.find((l) => l.text === "MATTHEW");
     expect(matt?.boilerplate).toBeUndefined();
+  });
+
+  it("跨页续写标注：页末括号未闭合/无句末标点+下页小写续起 → contNext/contPrev；正常收尾不标", async () => {
+    const doc = await parsePdf(makePdf([
+      // p1 末行：长舞台指示括号未闭合（强判据）
+      { content: text(90, 700, "SOME DIALOGUE LINE HERE OK.") + text(90, 100, "(UPSTAGE of this a long stage direction that keeps going") },
+      // p2 首行小写续起并闭合括号；末行正常句号收尾
+      { content: text(90, 700, "and finishes the thought here.)") + text(90, 100, "Another normal ending line.") },
+      { content: text(90, 700, "Fresh page starts properly.") },
+    ]));
+    const p1last = doc.pages[0].lines[doc.pages[0].lines.length - 1];
+    const p2first = doc.pages[1].lines[0];
+    expect(p1last.contNext).toBe(true);
+    expect(p2first.contPrev).toBe(true);
+    // p2 末行句号收尾 → 不标；p3 首行不标
+    expect(doc.pages[1].lines[doc.pages[1].lines.length - 1].contNext).toBeUndefined();
+    expect(doc.pages[2].lines[0].contPrev).toBeUndefined();
   });
 
   it("字体图例：短名去重、行仅在偏离主字体时标注", async () => {
