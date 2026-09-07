@@ -32,6 +32,7 @@
     "@tiptap/suggestion": "3.30.3",
     "@types/pg": "^8.20.0",
     "diff": "^9.0.0",
+    "fast-xml-parser": "^5.11.1",
     "next": "16.2.4",
     "pg": "^8.20.0",
     "pinyin-pro": "^3.28.1",

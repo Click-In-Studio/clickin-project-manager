@@ -46,6 +46,7 @@ export const TOOL_FAMILIES: Record<string, { label: string }> = {
   "production.wiki": { label: "文档库" },
   "production.dramaturgy": { label: "构作（场次与角色）" },
   "production.script": { label: "剧本正文" },
+  "production.doc": { label: "上传文档解读" },
 };
 
 export const TOOL_CATALOG: ToolCatalogEntry[] = [
@@ -195,6 +196,16 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     examples: ["把这句台词改成……", "在这句后面加一句李四的回应", "删掉画外音那句", "这句的说话人改成老王"] },
   { name: "production.script_dialect_ref", family: "production.script", scope: "production", oneliner: "获取剧本正文方言的完整说明",
     triggers: [], en: "script dialect syntax reference" },
+  // ── #47 上传文档解读：读 docx 资产的结构信号，供 AI 辅助导入/核对 ─────────
+  { name: "production.doc_outline", family: "production.doc", scope: "production", oneliner: "读 docx 资产的结构概览（直方图+开头预览，导入第一步）",
+    triggers: ["导入剧本", "解析文档", "读这个文档", "读docx", "word文档", "文档结构", "上传的剧本"], en: "docx document outline structure import",
+    examples: ["帮我把这个 Word 剧本导入进来", "看看这个 docx 里是什么结构", "解析一下我上传的剧本文档"] },
+  { name: "production.doc_read", family: "production.doc", scope: "production", oneliner: "按块号区间读 docx 内容（带排版信号标注）",
+    triggers: ["文档内容", "读文档第", "文档里的"], en: "read docx paragraphs ranges signals",
+    examples: ["把文档 40 到 80 段读出来", "看看这个文档开头写了什么"] },
+  { name: "production.doc_search", family: "production.doc", scope: "production", oneliner: "在 docx 全文里检索文字（先定位再精读）",
+    triggers: ["文档里搜", "文档里找", "在文档中搜索"], en: "search docx document text locate",
+    examples: ["在上传的剧本里找出所有场次标题", "文档里有没有提到这句台词"] },
   { name: "production.update_instructions", family: "production.overview", scope: "production", oneliner: "修改本制作的 AI 指令（全量替换，需人工确认）",
     triggers: ["制作指令", "项目指令", "团队的 AI"], en: "update production AI instructions",
     examples: ["给整个项目的 AI 加一条规则", "修改本制作的 AI 指令"] },
