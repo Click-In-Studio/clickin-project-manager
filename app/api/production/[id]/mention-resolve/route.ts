@@ -91,6 +91,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         getMarkerLabelIndex(effectiveVersionId),
       ]);
       let pageMapPromise: Promise<Record<string, number>> | null = null;
+      // 不传 preloaded：常态命中 production.page_map 存储读口；miss 时的兜底重算
+      // 需要正文 content 估高度，而上面的 CTE 行故意不带 content——那条罕见路径
+      // 让 getEstimatedPageMap 自己按需装 blocks，不为它把常态读面加重。
       return {
         textBlocks: blocksRes.rows.map((row) => ({ id: row.id, sceneId: row.scene_id, rehearsalMark: row.rehearsal_mark })),
         labels,
