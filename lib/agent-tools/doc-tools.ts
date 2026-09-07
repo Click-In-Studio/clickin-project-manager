@@ -34,6 +34,9 @@ const LIST_CAP = 100;
 /** doc_read 单次调用最多返回的 docx 块数 / pdf 行数（超出让模型分批）。 */
 const READ_ITEM_CAP = 150;
 const READ_PDF_LINE_CAP = 400;
+/** doc_read 单次输出总字符预算——块数上限挡不住长段（150×1200 最坏 18 万字
+ *  符=一次工具结果几万 token，是单回合成本硬顶的直接推手，2026-09-07 实测）。 */
+const READ_CHAR_BUDGET = 24_000;
 /** pdf 单次最多读的页数。 */
 const READ_PDF_PAGE_CAP = 10;
 /** 单段文本上限（保上下文预算；超长段截断并标注，模型可按锚点用更小范围重读）。 */
@@ -177,11 +180,14 @@ const PAGE_STATUS_LABEL: Record<PdfPage["status"], string> = {
   "extract-incomplete": "抽取不完整（页内有文本绘制但未能提取——多为字体编码问题，不要当作空白页）",
 };
 
-function renderPdfPage(p: PdfPage, lineBudget: { left: number }): string[] {
+function renderPdfPage(p: PdfPage, budget: { left: number; chars: number }): string[] {
   const head = `── p${p.n}${p.vertical ? "（竖排，行=列右→左，y=列顶/段差信号，⟨N⟩=间隙pt）" : ""}${p.status !== "ok" ? `：${PAGE_STATUS_LABEL[p.status]}` : ""} ──`;
   const out = [head];
   for (let i = 0; i < p.lines.length; i++) {
-    if (lineBudget.left <= 0) { out.push(`…（行数上限已满，从 p${p.n}.${i} 起分批续读）`); break; }
+    if (budget.left <= 0 || budget.chars >= READ_CHAR_BUDGET) {
+      out.push(`…（单次上限已满（行数/字符），从 p${p.n}.${i} 起分批续读）`);
+      break;
+    }
     const ln = p.lines[i];
     const tags = [
       `x=${ln.x}`,
@@ -191,8 +197,10 @@ function renderPdfPage(p: PdfPage, lineBudget: { left: number }): string[] {
     ].filter(Boolean).join(" ");
     let text = ln.text;
     if (text.length > READ_TEXT_CAP) text = text.slice(0, READ_TEXT_CAP) + "…";
-    out.push(`[p${p.n}.${i} ${tags}] ${text}`);
-    lineBudget.left--;
+    const line = `[p${p.n}.${i} ${tags}] ${text}`;
+    out.push(line);
+    budget.left--;
+    budget.chars += line.length;
   }
   return out;
 }
@@ -305,7 +313,7 @@ function pdfOutline(doc: PdfDoc, fileName: string): string {
   if (firstContent) {
     lines.push("");
     lines.push(`首个有文本的页（p${firstContent.n}）预览：`);
-    lines.push(...renderPdfPage(firstContent, { left: 25 }));
+    lines.push(...renderPdfPage(firstContent, { left: 25, chars: 0 }));
   } else {
     lines.push("全文档没有可抽取的文本行。");
   }
@@ -328,6 +336,7 @@ export async function docRead(
 function docxRead(doc: DocxDoc, ranges: Array<{ from: number; to: number }>): string {
   const last = doc.items.length - 1;
   const lines: string[] = [];
+  let chars = 0;
   const notesWanted = new Set<string>();
   const rendered = new Set<number>(); // 重叠区间去重：同一块只渲染一次、只计一次 cap
   for (const r of ranges) {
@@ -336,12 +345,14 @@ function docxRead(doc: DocxDoc, ranges: Array<{ from: number; to: number }>): st
     if (from > to) { lines.push(`（范围 ${r.from}-${r.to} 无效或越界，文档块号 0-${last}）`); continue; }
     for (let i = from; i <= to; i++) {
       if (rendered.has(i)) continue;
-      if (rendered.size >= READ_ITEM_CAP) {
-        lines.push(`…（单次上限 ${READ_ITEM_CAP} 块已满，从 ¶${i} 起分批续读）`);
+      if (rendered.size >= READ_ITEM_CAP || chars >= READ_CHAR_BUDGET) {
+        lines.push(`…（单次上限已满：${READ_ITEM_CAP} 块 / ${READ_CHAR_BUDGET} 字符，从 ¶${i} 起分批续读）`);
         return neutralizeInjectionTags(lines.join("\n"));
       }
       const it = doc.items[i];
-      lines.push(renderDocxItem(i, it, READ_TEXT_CAP));
+      const line = renderDocxItem(i, it, READ_TEXT_CAP);
+      lines.push(line);
+      chars += line.length;
       if (it.kind === "p") for (const id of it.footnotes ?? []) notesWanted.add(id);
       rendered.add(i);
     }
@@ -360,14 +371,14 @@ function docxRead(doc: DocxDoc, ranges: Array<{ from: number; to: number }>): st
 function pdfRead(doc: PdfDoc, ranges: Array<{ from: number; to: number }>): string {
   const lines: string[] = [];
   const rendered = new Set<number>();
-  const lineBudget = { left: READ_PDF_LINE_CAP };
+  const lineBudget = { left: READ_PDF_LINE_CAP, chars: 0 };
   for (const r of ranges) {
     const from = Math.max(1, Math.floor(r.from));
     const to = Math.min(doc.stats.pageCount, Math.floor(r.to));
     if (from > to) { lines.push(`（范围 ${r.from}-${r.to} 无效或越界，页序 1-${doc.stats.pageCount}）`); continue; }
     for (let n = from; n <= to; n++) {
       if (rendered.has(n)) continue;
-      if (rendered.size >= READ_PDF_PAGE_CAP || lineBudget.left <= 0) {
+      if (rendered.size >= READ_PDF_PAGE_CAP || lineBudget.left <= 0 || lineBudget.chars >= READ_CHAR_BUDGET) {
         lines.push(`…（单次上限已满：${READ_PDF_PAGE_CAP} 页 / ${READ_PDF_LINE_CAP} 行，从 p${n} 起分批续读）`);
         return neutralizeInjectionTags(lines.join("\n"));
       }
