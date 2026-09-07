@@ -12,7 +12,8 @@ import {
   DOC_IMPORT_GUIDE, IMPORT_LOG_ORIGIN,
   docImportLogCreate, docImportLogAppend,
 } from "@/lib/agent-tools/doc-import-tools";
-import { DEFS } from "@/lib/agent-runtime/tools";
+import { DEFS, buildTools } from "@/lib/agent-runtime/tools";
+import { updateWiki } from "@/lib/wiki/content";
 import { getPool } from "@/lib/pg";
 
 let prodId: string;
@@ -64,6 +65,35 @@ describe("导入日志：自写域边界", () => {
     expect(out).toContain("不是导入日志");
     const { rows } = await getPool().query<{ body: string }>(`SELECT body FROM wiki WHERE id = $1`, [normal.id]);
     expect(rows[0].body).toBe("正文"); // 未被写入
+  });
+
+  it("后期 revision 带 log origin 也冒充不了（标记只认**首个** revision）", async () => {
+    // AI review 适配：对抗面——普通文档先正常改一版，再用 log origin 改一版，
+    // 首 revision 仍是 "user" ⇒ 必须拒。判据是创建时刻钉死的，后天洗不白。
+    const normal = await createWiki({ productionId: prodId, title: `洗白尝试-${shortId()}`, body: "v1", createdBy: ownerId });
+    await updateWiki(normal.id, prodId, { body: "v2", mergeBase: "v1", origin: IMPORT_LOG_ORIGIN }, ownerId);
+    const out = await docImportLogAppend(ownerId, prodId, { wikiId: normal.id, text: "洗白后混入" });
+    expect(out).toContain("不是导入日志");
+  });
+
+  it("selfScribe 经 buildTools 执行仍落 agent_mutation 审计行（审计独立于审批门）", async () => {
+    // AI review 适配：钉死「免卡≠免审计」——审计包在 buildTools 的 execute
+    // 包装层，与 approvalGate 正交；这条测试守住该不变量（谁把审计挪进
+    // 审批门内，这里会红）。
+    const created = await docImportLogCreate(ownerId, prodId, { title: `审计验证-${shortId()}` });
+    const wikiId = extractWikiId(created);
+    const tools = buildTools({ userId: ownerId, productionId: prodId });
+    const appendTool = tools.find((t) => t.mcpName === "production.doc_import_log_append")!;
+    expect(appendTool.selfScribe).toBe(true);
+    const toolCallId = `test-scribe-${shortId()}`;
+    const result = await appendTool.execute(toolCallId, { wikiId, text: "经完整包装层写入" });
+    expect(JSON.stringify(result.content)).toContain("已追加");
+    const { rows } = await getPool().query(
+      `SELECT scope, action, unattended FROM agent_mutation WHERE tool_call_id = $1 AND tool = 'production.doc_import_log_append'`,
+      [toolCallId],
+    );
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toMatchObject({ scope: "wiki", action: "updated", unattended: false });
   });
 
   it("非成员拒绝；超长追加拒绝", async () => {
