@@ -1,12 +1,11 @@
 import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
-import { getProductionPermissionContext, getActiveVersionId, getVersion, loadProduction, getEstimatedPageMap } from "@/lib/db";
+import { getProductionPermissionContext, getActiveVersionId, getMarkerLabelIndex, getVersion, getEstimatedPageMap } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
+import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "@/lib/script-marker-sql";
 import { buildMarkerLabelIndex, type MarkerLabelIndex } from "@/lib/script-generated-labels";
 import type { ContentMentionAttrs, BlockDisplayMode } from "@/lib/mention-types";
-import type { Block } from "@/lib/script-types";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -16,13 +15,15 @@ type ResolveInput = {
 };
 
 /**
- * 一次请求内的剧本索引。正文只经 `loadProduction()` 读一次（#336：读取面收敛到
- * 这一个闸口，#339 的权限门只需加在那里），场内序号 / 记号内序号 / 页码全部
- * 在内存里算。`textBlocks` 走与分页器同一条投影链（marker 归属 → legacy 投影）。
+ * 一次请求内的剧本索引（#461：不再整本 loadProduction）。提及解析只吃结构——
+ * 正文块的 id/归属场/归属记号序列（VERSION_OWNED_BLOCKS_CTE，投影链的 SQL 孪生，
+ * 与 listRehearsalMarksByVersion 同源）、marker 标签（getMarkerLabelIndex，按
+ * marker_structure_revision 缓存）、页码（production.page_map 存储读口）。
+ * 正文内容一列都不装。
  */
+type TextBlockRef = { id: string; sceneId: string | null; rehearsalMark: string | null };
 type ScriptIndex = {
-  textBlocks: Block[];
-  sceneNumById: Map<string, string>;
+  textBlocks: TextBlockRef[];
   labels: MarkerLabelIndex;
   pageMap: () => Promise<Record<string, number>>;
 };
@@ -78,18 +79,34 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   function loadScript(): Promise<ScriptIndex | null> {
     return scriptPromise ??= (async () => {
       if (!effectiveVersionId) return null;
-      const loaded = await loadProduction(productionId, effectiveVersionId);
-      if (!loaded) return null;
-      const owned = withMarkerOwnership(loaded.state.blocks);
-      const textBlocks = withLegacyOwnershipProjection(owned).filter((block) => !isMarkerBlock(block));
+      const [blocksRes, labels] = await Promise.all([
+        pool.query<{ id: string; scene_id: string | null; rehearsal_mark: string | null }>(
+          `${VERSION_OWNED_BLOCKS_CTE}
+           SELECT id, scene_id, rehearsal_mark
+           FROM owned_blocks
+           WHERE type NOT IN (${MARKER_TYPES_SQL})
+           ORDER BY sort_key`,
+          [effectiveVersionId],
+        ),
+        getMarkerLabelIndex(effectiveVersionId),
+      ]);
       let pageMapPromise: Promise<Record<string, number>> | null = null;
+      // 不传 preloaded：常态命中 production.page_map 存储读口；miss 时的兜底重算
+      // 需要正文 content 估高度，而上面的 CTE 行故意不带 content——那条罕见路径
+      // 让 getEstimatedPageMap 自己按需装 blocks，不为它把常态读面加重。
       return {
-        textBlocks,
-        sceneNumById: new Map(loaded.state.scenes.map((scene) => [scene.id, scene.number])),
-        labels: buildMarkerLabelIndex(owned),
-        pageMap: () => pageMapPromise ??= getEstimatedPageMap(productionId, effectiveVersionId, loaded.state),
+        textBlocks: blocksRes.rows.map((row) => ({ id: row.id, sceneId: row.scene_id, rehearsalMark: row.rehearsal_mark })),
+        labels,
+        pageMap: () => pageMapPromise ??= getEstimatedPageMap(productionId, effectiveVersionId),
       };
     })();
+  }
+
+  /** 场号查询限定在章/场域：labelByMarkerId 混装三类 marker 的标签，
+   *  scene 提及拿着排练记号 id 不该解析成记号标签（旧 sceneNumById 语义）。 */
+  function sceneNum(labels: MarkerLabelIndex, sceneId: string): string | undefined {
+    if (labels.rehearsalLabelByMarkerId.has(sceneId)) return undefined;
+    return labels.labelByMarkerId.get(sceneId) || undefined;
   }
 
   // Group by kind for batch queries
@@ -112,10 +129,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   // ── scene + rehearsal ─────────────────────────────────────────────────────
   const sceneIdxs = byKind.get("scene") ?? [];
   if (sceneIdxs.length > 0 && effectiveVersionId) {
-    const numByScene = (await loadScript())?.sceneNumById ?? new Map<string, string>();
+    const sceneLabels = (await loadScript())?.labels ?? buildMarkerLabelIndex([]);
     for (const i of sceneIdxs) {
       const m = mentions[i];
-      const num = numByScene.get(m.id);
+      const num = sceneNum(sceneLabels, m.id);
       if (!num) { labels[i] = "#[已删除]"; continue; }
       labels[i] = `#${num}`;
       urls[i] = `${base}/script${vParam}`;
@@ -171,7 +188,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         const blockId = mentions[i].id;
         const info = posMap.get(blockId);
         if (!info) { labels[i] = "#[已删除]"; continue; }
-        const num = script?.sceneNumById.get(info.sceneId);
+        const num = script ? sceneNum(script.labels, info.sceneId) : undefined;
         labels[i] = num ? `#${num}-${info.pos}` : "#[已删除]";
         urls[i] = `${base}/script${vParam}#block-${blockId}`;
       }
