@@ -534,6 +534,7 @@ export const DEFS: Def[] = [
     description:
       "对剧本正文做单/多块精修（改内容/说话人/舞台提示、插入新块、删除块），需要人工在聊天栏确认（EN: edit script blocks update insert delete）。" +
       "blockId 来自剧本读取/搜索结果的 [b:] 标注；speakers 是完整新列表（整体替换），元素形如「张三」「张三（低声）」「#<角色id>」。" +
+      "**插入顺序语义：inserts 数组顺序=文档顺序**——同一 afterBlockId 传多块时按数组序依次排在锚点后（第 1 个紧跟锚点），批量导入无需逐块换锚；成功后按文档顺序返回新块 id，可直接作下一批的插入锚点。" +
       "章节/场次标记不能用本工具改（用 scene_propose_*）；整段大改用 production.script_propose_rewrite。一批里任一项有问题则整批不执行。",
     parameters: Type.Object({
       updates: Type.Optional(Type.Array(Type.Object({

@@ -151,8 +151,17 @@ function finishPlan(
     run: async () => {
       await applyPatchToDB(productionId, ctx.versionId, patch);
       tickAndBroadcastSeq(productionId, ctx.versionId);
+      // 新块 id 按文档落位顺序返回（2026-09-07 导入实测：不返回 id 逼模型每批
+      // 多读一次 section 找末尾锚点，110 页导入=几十次多余往返+锚点选错面）。
+      // 按 nextBlocks 里的最终位置排序——多锚点混用时传参顺序≠文档顺序
+      const insertedSet = new Set(summary.inserted);
+      const insertedInDocOrder = nextBlocks.filter((b) => insertedSet.has(b.id)).map((b) => b.id);
+      const insertedLine = insertedInDocOrder.length > 0
+        ? `本次新增块 id（按文档顺序，可直接作下一批的插入锚点）：${insertedInDocOrder.join("、")}`
+        : null;
       return [
         `已完成剧本改动：新增 ${summary.inserted.length} 块、修改 ${summary.updated.length} 块、删除 ${summary.deleted.length} 块（保留 ${summary.retained} 块未动）。`,
+        ...(insertedLine ? [insertedLine] : []),
         "保留的块 id 未变，其上的评论/cue/标签锚点不受影响。",
       ].join("\n");
     },
@@ -324,10 +333,16 @@ async function planEditBlocks(ctx: WriteCtx, productionId: string, args: EditBlo
     nextBlocks = nextBlocks.filter((b) => b.id !== id);
   }
 
+  // 同锚点批量插入的顺序语义（2026-09-07 导入实测修复）：**数组顺序=文档顺序**。
+  // 此前每条都落 anchorIdx+1，同一 afterBlockId 传 6 块会逆序落库（后传的插队
+  // 到前面）——链式锚点跟随：某锚点插过块后，该锚点的后续 insert 挂到刚插的
+  // 块之后。
+  const effectiveAnchor = new Map<string, string>();
   for (const it of inserts) {
     if (!it || typeof it.afterBlockId !== "string" || !it.afterBlockId) return { error: "每个 insert 都必须带 afterBlockId（未做任何变更）。" };
     if (typeof it.content !== "string") return { error: "每个 insert 都必须带 content（未做任何变更）。" };
-    const anchorIdx = nextBlocks.findIndex((b) => b.id === it.afterBlockId);
+    const anchorId = effectiveAnchor.get(it.afterBlockId) ?? it.afterBlockId;
+    const anchorIdx = nextBlocks.findIndex((b) => b.id === anchorId);
     if (anchorIdx < 0) {
       return { error: byId.has(it.afterBlockId)
         ? `插入锚点 ${it.afterBlockId} 在同一批里被删除了——换一个锚点（未做任何变更）。`
@@ -356,6 +371,7 @@ async function planEditBlocks(ctx: WriteCtx, productionId: string, args: EditBlo
     };
     summary.inserted.push(block.id);
     nextBlocks = [...nextBlocks.slice(0, anchorIdx + 1), block, ...nextBlocks.slice(anchorIdx + 1)];
+    effectiveAnchor.set(it.afterBlockId, block.id);
   }
 
   // 归属重算跑全量（插入/删除会改变后续块的 marker 归属投影）
