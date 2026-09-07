@@ -564,11 +564,12 @@ const DEFS: Def[] = [
 
   // ── #47 文档理解（lib/agent-tools/doc-tools.ts）：读上传的剧本类文档的结构化信号，
   // 配合导入类工作流。assetId 来自正文引用 /__cm__/asset/<id>、资产页链接或用户提供；
-  // 权限=asset meta face（与预览同口径）。目前只支持 docx；pdf 挂下一弹。
+  // 权限=asset meta face（与预览同口径）。支持 docx + pdf 文本层（栅格化页诚实标注）。
   {
     mcpName: "production.doc_outline",
     description:
-      "读取一个 docx 资产的结构概览：段落/表格/脚注/非文本对象总量、样式直方图、对齐直方图、缩进聚类、字体分布、开头预览（EN: docx document outline structure histogram script import）。" +
+      "读取一个 docx/pdf 资产的结构概览（EN: docx pdf document outline structure histogram script import）。docx：段落/表格/脚注/非文本对象总量、样式直方图、对齐直方图、缩进聚类、字体分布、开头预览；" +
+      "pdf：逐页密度带（宏观分界如「前半剧本后半乐谱」一眼可见）、行首 x 聚类、字体图例、竖排/空白/栅格化/抽取不完整页清单、跨页重复行（水印页眉脚）、首个内容页预览。" +
       "这是理解上传文档的第一步——先据此提出该文档的排版映射假设（哪种排版=角色名/对白/舞台指示），不预设任何惯例（英文本常用全大写、中文本常用居中或换字体），再用 production.doc_read 分段精读验证。" +
       "assetId 从正文里的 /__cm__/asset/<id> 引用或用户给的资产链接取。",
     parameters: Type.Object({ assetId: Type.String({ description: "资产 id" }) }),
@@ -578,16 +579,17 @@ const DEFS: Def[] = [
   {
     mcpName: "production.doc_read",
     description:
-      "按块号区间批量读取 docx 资产内容，行式输出 `[¶N 样式/对齐/缩进/粗斜体/字体信号] 文本`——信号只报不判，怎么解读（角色名？唱词？cue 标注？）由你结合映射假设判断（EN: read docx paragraphs ranges signals）。" +
-      "表格整块出、脚注/尾注随段附出、图片与内嵌对象以 ⟦图⟧/⟦对象⟧ 占位（它们不可读，但你必须知道它们存在）。单次上限 150 块，长文档分批读。",
+      "按区间批量读取 docx/pdf 资产内容，行式输出信号标注——信号只报不判，怎么解读（角色名？唱词？cue 标注？）由你结合映射假设判断（EN: read docx pdf paragraphs pages ranges signals）。" +
+      "docx：区间=块号，`[¶N 样式/对齐/缩进/粗斜体/字体]`，表格整块出、脚注随段附出、图片与内嵌对象以 ⟦图⟧/⟦对象⟧ 占位（它们不可读，但你必须知道它们存在），单次 150 块。" +
+      "pdf：区间=页序（1 起，印刷页码可能不同），行锚 `[pN.i x=行首坐标]`，词距已按坐标还原、大间隙显式标 ⟨N⟩pt（竖排文档中间隙常是发话时序等记号，别丢），跨页重复行标 ≡，单次 10 页/400 行。",
     parameters: Type.Object({
       assetId: Type.String({ description: "资产 id" }),
       ranges: Type.Array(
         Type.Object({
-          from: Type.Integer({ minimum: 0, description: "起始块号（含）" }),
-          to: Type.Integer({ minimum: 0, description: "结束块号（含）" }),
+          from: Type.Integer({ minimum: 0, description: "起始（docx=块号 0 起；pdf=页序 1 起，含）" }),
+          to: Type.Integer({ minimum: 0, description: "结束（含）" }),
         }),
-        { minItems: 1, description: "块号区间数组（块号见 doc_outline / doc_search）" },
+        { minItems: 1, description: "区间数组（锚点见 doc_outline / doc_search）" },
       ),
     }),
     readOnly: true, needsProduction: true,
@@ -599,8 +601,8 @@ const DEFS: Def[] = [
   {
     mcpName: "production.doc_search",
     description:
-      "在 docx 资产全文（含表格与脚注）里检索文字，返回命中块号与上下文（EN: search docx document text find locate）。" +
-      "长文档定位用它先找块号再 production.doc_read 精读（比线性通读省得多）——如找所有「第X场」、核对某句台词在不在。",
+      "在 docx/pdf 资产全文（docx 含表格与脚注）里检索文字，返回命中锚点（docx=¶块号；pdf=pN.行号）与上下文（EN: search docx pdf document text find locate）。" +
+      "长文档定位用它先找锚点再 production.doc_read 精读（比线性通读省得多）——如找所有「第X场」、核对某句台词在不在。",
     parameters: Type.Object({
       assetId: Type.String({ description: "资产 id" }),
       query: Type.String({ description: "检索词（字面匹配，不分大小写）" }),

@@ -1,11 +1,11 @@
 // #47 文档理解查询通道——agent 三工具（production.doc_outline / doc_read / doc_search）。
 //
-// 定位：让 agent 能"读懂"上传的剧本类文档（先 docx；pdf 挂下一弹），配合指示
+// 定位：让 agent 能"读懂"上传的剧本类文档（docx + pdf 文本层），配合指示
 // skill 的分诊协议做 AI 辅助导入。设计定谳（四标本实测，见 #47 / 记忆）：
-// - outline=建地图不灌正文：直方图（样式/对齐/缩进聚类/字体）+ 开头抽样，
+// - outline=建地图不灌正文：直方图（样式/对齐/缩进聚类/字体）+ 抽样预览，
 //   AI 据此提"三大块映射假设"（角色名/对白/舞台指示），不预设任何排版惯例
 //   ——all caps 是英文惯例，中文本常用居中或换字体（信号词表通用、映射每文档）；
-// - read=紧凑行式标注 `[¶N 信号] 文本`，段落号是引用锚点；批量数组参数；
+// - read=紧凑行式标注，锚点可引用（docx=块号 ¶N；pdf=页序 pN.行号）；批量区间；
 // - search=先定位再精读（search-then-read 比线性扫便宜一个量级）；
 // - 文档内容是不可信文本：输出统一过 neutralizeInjectionTags；
 // - 权限口径＝asset meta face（与 preview-url 同门：能预览即能读内容）。
@@ -19,25 +19,37 @@ import {
   getDocxCached, DocxParseError,
   type DocxDoc, type DocxItem, type DocxParagraph,
 } from "@/lib/doc-extract/docx";
+import {
+  getPdfCached, readAll, PdfParseError,
+  type PdfDoc, type PdfPage,
+} from "@/lib/doc-extract/pdf";
 
 export const DENIED_ASSET_VIEW = "权限被拒绝：你没有查看该资产的权限。";
 const TRANSIENT_MSG = "文件读取暂时失败（存储层瞬态错误），请稍后重试。";
 
-/** doc_read 单次调用最多返回的块数（超出让模型分批——长文档本来就该分段精读）。 */
+/** doc_read 单次调用最多返回的 docx 块数 / pdf 行数（超出让模型分批）。 */
 const READ_ITEM_CAP = 150;
-/** 单段文本上限（保上下文预算；超长段截断并标注，模型可按 ¶ 号用更小范围重读）。 */
+const READ_PDF_LINE_CAP = 400;
+/** pdf 单次最多读的页数。 */
+const READ_PDF_PAGE_CAP = 10;
+/** 单段文本上限（保上下文预算；超长段截断并标注，模型可按锚点用更小范围重读）。 */
 const READ_TEXT_CAP = 1200;
 const SEARCH_DEFAULT_LIMIT = 20;
 const SEARCH_MAX_LIMIT = 50;
 const OUTLINE_PREVIEW_COUNT = 12;
-/** 缩进聚类桶宽（twips）。缩进值常带浮点碎片（Google Docs 导出），聚类后才可读。 */
+/** 缩进聚类桶宽：docx twips / pdf pt。缩进值常带浮点碎片，聚类后才可读。 */
 const INDENT_BUCKET = 120;
+const PDF_X_BUCKET = 10;
 
 // ─── 装载（权限门 + 格式分派）───────────────────────────────────────────────
 
+type Loaded =
+  | { kind: "docx"; doc: DocxDoc; fileName: string }
+  | { kind: "pdf"; doc: PdfDoc; fileName: string };
+
 async function loadDoc(
   userId: string, productionId: string, assetId: string,
-): Promise<{ doc: DocxDoc; fileName: string } | string> {
+): Promise<Loaded | string> {
   const resolved = await resolveProductionActor(userId, productionId);
   if (!resolved) return DENIED_NOT_MEMBER;
   const asset = await getAsset(assetId);
@@ -46,30 +58,35 @@ async function loadDoc(
 
   const name = asset.fileName ?? "";
   const lower = name.toLowerCase();
-  if (lower.endsWith(".doc"))
-    return "老式 .doc（二进制格式）不支持解析——请把文件另存为 .docx 后重新上传。";
-  if (lower.endsWith(".pdf"))
-    return "pdf 解析通道尚未上线（在计划中）。目前只支持 .docx。";
-  if (!lower.endsWith(".docx"))
-    return `该资产（${name || "无文件名"}）不是 .docx 文档，暂不支持解析。`;
+  const kind = lower.endsWith(".docx") ? "docx" : lower.endsWith(".pdf") ? "pdf" : null;
+  if (!kind) {
+    if (lower.endsWith(".doc"))
+      return "老式 .doc（二进制格式）不支持解析——请把文件另存为 .docx 后重新上传。";
+    return `该资产（${name || "无文件名"}）不是 .docx / .pdf 文档，暂不支持解析。`;
+  }
   if (asset.storageType !== "r2") return "该资产不是本站存储的文件（如飞书链接），无法解析。";
 
   const file = await resolveAssetFile(assetId);
   if (!file?.r2Key) return "该资产没有可读的文件内容。";
   const r2Key = file.r2Key;
   try {
-    const doc = await getDocxCached(file.id, () => r2ByteSource(r2Key, file.fileSize));
-    return { doc, fileName: name };
+    if (kind === "docx") {
+      const doc = await getDocxCached(file.id, () => r2ByteSource(r2Key, file.fileSize));
+      return { kind, doc, fileName: name };
+    }
+    const doc = await getPdfCached(file.id, () => readAll(r2ByteSource(r2Key, file.fileSize)));
+    return { kind, doc, fileName: name };
   } catch (e) {
     if (e instanceof TransientReadError) return TRANSIENT_MSG;
     if (e instanceof DocxParseError) return `docx 解析失败：${e.message}`;
+    if (e instanceof PdfParseError) return `pdf 解析失败：${e.message}`;
     throw e;
   }
 }
 
-// ─── 行式渲染（信号只报不判——块级解读是模型的事）────────────────────────────
+// ─── docx 行式渲染（信号只报不判——块级解读是模型的事）───────────────────────
 
-function signalTags(p: DocxParagraph): string {
+function docxSignalTags(p: DocxParagraph): string {
   const tags: string[] = [];
   if (p.style) tags.push(`样式:${p.style}`);
   if (p.align) tags.push(p.align);
@@ -86,7 +103,7 @@ function signalTags(p: DocxParagraph): string {
   return tags.join(" ");
 }
 
-function renderItem(idx: number, item: DocxItem, textCap: number): string {
+function renderDocxItem(idx: number, item: DocxItem, textCap: number): string {
   if (item.kind === "table") {
     const cols = item.rows[0]?.length ?? 0;
     const head = `[¶${idx} 表格 ${item.rows.length}×${cols}${item.truncated ? " 截断" : ""}]`;
@@ -94,10 +111,39 @@ function renderItem(idx: number, item: DocxItem, textCap: number): string {
     if (item.rows.length > 20) rows.push(`  …（共 ${item.rows.length} 行，用更小范围或按需另读）`);
     return [head, ...rows].join("\n");
   }
-  const tags = signalTags(item);
+  const tags = docxSignalTags(item);
   let text = item.text.replace(/\n/g, "⏎");
   if (text.length > textCap) text = text.slice(0, textCap) + `…（段过长截断，全段 ${item.text.length} 字符）`;
   return `[¶${idx}${tags ? " " + tags : ""}] ${text}`;
+}
+
+// ─── pdf 行式渲染 ────────────────────────────────────────────────────────────
+
+const PAGE_STATUS_LABEL: Record<PdfPage["status"], string> = {
+  ok: "",
+  blank: "空白页",
+  rasterized: "栅格化页（无文本层，内容是图像——需 OCR/人工，不要当作没有内容）",
+  "extract-incomplete": "抽取不完整（页内有文本绘制但未能提取——多为字体编码问题，不要当作空白页）",
+};
+
+function renderPdfPage(p: PdfPage, lineBudget: { left: number }): string[] {
+  const head = `── p${p.n}${p.vertical ? "（竖排，行=列右→左，y=列顶/段差信号，⟨N⟩=间隙pt）" : ""}${p.status !== "ok" ? `：${PAGE_STATUS_LABEL[p.status]}` : ""} ──`;
+  const out = [head];
+  for (let i = 0; i < p.lines.length; i++) {
+    if (lineBudget.left <= 0) { out.push(`…（行数上限已满，从 p${p.n}.${i} 起分批续读）`); break; }
+    const ln = p.lines[i];
+    const tags = [
+      `x=${ln.x}`,
+      p.vertical ? `y=${ln.y}` : null,
+      ln.font ? `字体:${ln.font}` : null,
+      ln.boilerplate ? "≡重复" : null,
+    ].filter(Boolean).join(" ");
+    let text = ln.text;
+    if (text.length > READ_TEXT_CAP) text = text.slice(0, READ_TEXT_CAP) + "…";
+    out.push(`[p${p.n}.${i} ${tags}] ${text}`);
+    lineBudget.left--;
+  }
+  return out;
 }
 
 // ─── doc_outline ─────────────────────────────────────────────────────────────
@@ -105,7 +151,16 @@ function renderItem(idx: number, item: DocxItem, textCap: number): string {
 export async function docOutline(userId: string, productionId: string, assetId: string): Promise<string> {
   const loaded = await loadDoc(userId, productionId, assetId);
   if (typeof loaded === "string") return loaded;
-  const { doc, fileName } = loaded;
+  if (loaded.kind === "docx") return docxOutline(loaded.doc, loaded.fileName);
+  return pdfOutline(loaded.doc, loaded.fileName);
+}
+
+function fmtHist<K>(m: Map<K, number>, cap = 12): string {
+  return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, cap)
+    .map(([k, c]) => `${String(k)}×${c}`).join("、") || "（无）";
+}
+
+function docxOutline(doc: DocxDoc, fileName: string): string {
   if (doc.items.length === 0)
     return neutralizeInjectionTags(`《${fileName}》解析成功但没有任何内容块（空文档或纯图形文档）。`);
 
@@ -127,23 +182,81 @@ export async function docOutline(userId: string, productionId: string, assetId: 
     if (it.flags?.includes("i")) iFull++;
     if (it.flags?.includes("u")) uFull++;
   }
-  const fmt = <K,>(m: Map<K, number>, cap = 12) =>
-    [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, cap)
-      .map(([k, c]) => `${String(k)}×${c}`).join("、") || "（无）";
 
   const lines: string[] = [];
   lines.push(`《${fileName}》docx 结构概览（块号 ¶0-¶${doc.items.length - 1}，供 doc_read/doc_search 引用）`);
   lines.push(`总量：段落 ${doc.stats.paragraphs}、表格 ${doc.stats.tables}、非文本对象 ${doc.stats.objects}、脚注/尾注 ${doc.stats.footnotes}`);
   lines.push(`主字体：${doc.stats.majorityFont ?? "（未声明）"}；主字号：${doc.stats.majoritySz ?? "（未声明）"}（各段仅在偏离主流时标注 字体:/sz=）`);
-  lines.push(`样式直方图：${fmt(styleHist)}`);
-  lines.push(`对齐直方图：${fmt(alignHist)}`);
-  lines.push(`缩进聚类（桶宽 ${INDENT_BUCKET} twips）：${fmt(indentHist)}`);
-  if (fontHist.size) lines.push(`非主流字体段：${fmt(fontHist)}`);
+  lines.push(`样式直方图：${fmtHist(styleHist)}`);
+  lines.push(`对齐直方图：${fmtHist(alignHist)}`);
+  lines.push(`缩进聚类（桶宽 ${INDENT_BUCKET} twips）：${fmtHist(indentHist)}`);
+  if (fontHist.size) lines.push(`非主流字体段：${fmtHist(fontHist)}`);
   lines.push(`整段格式计数：粗体 ${bFull}、斜体 ${iFull}、下划线 ${uFull}`);
   lines.push("");
   lines.push(`开头 ${Math.min(OUTLINE_PREVIEW_COUNT, doc.items.length)} 块预览：`);
   for (let i = 0; i < Math.min(OUTLINE_PREVIEW_COUNT, doc.items.length); i++) {
-    lines.push(renderItem(i, doc.items[i], 80));
+    lines.push(renderDocxItem(i, doc.items[i], 80));
+  }
+  return neutralizeInjectionTags(lines.join("\n"));
+}
+
+/** 逐页行数分带 + run-length 压缩（Curtains 类"一个文件两本书"的宏观分界一眼可见）。 */
+function densityBands(pages: PdfPage[]): string {
+  const band = (p: PdfPage): string => {
+    if (p.status !== "ok") return p.status === "blank" ? "空白" : p.status === "rasterized" ? "栅格" : "抽取不完整";
+    const n = p.lines.length;
+    return n <= 8 ? "稀(≤8行)" : n <= 60 ? "常规" : "密(>60行，可能是谱面音节/表格)";
+  };
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 1; i <= pages.length; i++) {
+    if (i === pages.length || band(pages[i]) !== band(pages[start])) {
+      const label = band(pages[start]);
+      parts.push(start === i - 1 ? `p${pages[start].n}:${label}` : `p${pages[start].n}-${pages[i - 1].n}:${label}`);
+      start = i;
+    }
+  }
+  return parts.join("、");
+}
+
+function pdfOutline(doc: PdfDoc, fileName: string): string {
+  const lines: string[] = [];
+  const s = doc.stats;
+  lines.push(`《${fileName}》pdf 结构概览（页序 p1-p${s.pageCount}，行锚 pN.i，供 doc_read/doc_search 引用；印刷页码可能≠页序）`);
+  lines.push(`页数 ${s.pageCount}（竖排 ${s.verticalPages}、空白 ${s.blankPages}、栅格化 ${s.rasterizedPages}、抽取不完整 ${s.incompletePages}）`);
+  if (!s.assetsAvailable)
+    lines.push("⚠ 服务端 cMaps 字体资源缺失——CJK 文档会整页抽取不完整，这是环境问题不是文档问题。");
+  if (s.rasterizedPages > 0)
+    lines.push("⚠ 存在栅格化页：那些页的内容是图像，文本工具读不到（≠没有内容），处置需问用户。");
+  lines.push(`逐页密度带：${densityBands(doc.pages)}`);
+
+  // 横排页的 x 聚类（缩进 lane 直方图）
+  const xHist = new Map<number, number>();
+  let iCount = 0;
+  for (const p of doc.pages) {
+    if (p.vertical || p.status !== "ok") continue;
+    for (const ln of p.lines) {
+      if (ln.boilerplate) continue;
+      xHist.set(Math.round(ln.x / PDF_X_BUCKET) * PDF_X_BUCKET, (xHist.get(Math.round(ln.x / PDF_X_BUCKET) * PDF_X_BUCKET) ?? 0) + 1);
+      iCount++;
+    }
+  }
+  if (iCount) lines.push(`横排行首 x 聚类（桶宽 ${PDF_X_BUCKET}pt，共 ${iCount} 行）：${fmtHist(xHist)}`);
+  if (Object.keys(doc.fontLegend).length) {
+    const legend = Object.entries(doc.fontLegend).map(([k, v]) => `${k}=${v}${k === doc.majorityFont ? "（主）" : ""}`).join("、");
+    lines.push(`字体图例：${legend}（各行仅在偏离主字体时标注）`);
+  }
+  if (doc.boilerplate.length) {
+    lines.push(`跨页重复行（水印/页眉脚，行上已标 ≡）：${doc.boilerplate.slice(0, 6).map((t) => JSON.stringify(t.slice(0, 40))).join("、")}${doc.boilerplate.length > 6 ? ` 等 ${doc.boilerplate.length} 条` : ""}`);
+  }
+
+  const firstContent = doc.pages.find((p) => p.lines.length > 0);
+  if (firstContent) {
+    lines.push("");
+    lines.push(`首个有文本的页（p${firstContent.n}）预览：`);
+    lines.push(...renderPdfPage(firstContent, { left: 25 }));
+  } else {
+    lines.push("全文档没有可抽取的文本行。");
   }
   return neutralizeInjectionTags(lines.join("\n"));
 }
@@ -156,9 +269,12 @@ export async function docRead(
 ): Promise<string> {
   const loaded = await loadDoc(userId, productionId, assetId);
   if (typeof loaded === "string") return loaded;
-  const { doc } = loaded;
-  if (!ranges.length) return "ranges 不能为空（例：[{from: 0, to: 40}]）。";
+  if (!ranges.length) return "ranges 不能为空（docx 例：[{from:0,to:40}]（块号）；pdf 例：[{from:1,to:5}]（页序））。";
+  if (loaded.kind === "docx") return docxRead(loaded.doc, ranges);
+  return pdfRead(loaded.doc, ranges);
+}
 
+function docxRead(doc: DocxDoc, ranges: Array<{ from: number; to: number }>): string {
   const last = doc.items.length - 1;
   const lines: string[] = [];
   const notesWanted = new Set<string>();
@@ -174,7 +290,7 @@ export async function docRead(
         return neutralizeInjectionTags(lines.join("\n"));
       }
       const it = doc.items[i];
-      lines.push(renderItem(i, it, READ_TEXT_CAP));
+      lines.push(renderDocxItem(i, it, READ_TEXT_CAP));
       if (it.kind === "p") for (const id of it.footnotes ?? []) notesWanted.add(id);
       rendered.add(i);
     }
@@ -190,6 +306,27 @@ export async function docRead(
   return neutralizeInjectionTags(lines.join("\n"));
 }
 
+function pdfRead(doc: PdfDoc, ranges: Array<{ from: number; to: number }>): string {
+  const lines: string[] = [];
+  const rendered = new Set<number>();
+  const lineBudget = { left: READ_PDF_LINE_CAP };
+  for (const r of ranges) {
+    const from = Math.max(1, Math.floor(r.from));
+    const to = Math.min(doc.stats.pageCount, Math.floor(r.to));
+    if (from > to) { lines.push(`（范围 ${r.from}-${r.to} 无效或越界，页序 1-${doc.stats.pageCount}）`); continue; }
+    for (let n = from; n <= to; n++) {
+      if (rendered.has(n)) continue;
+      if (rendered.size >= READ_PDF_PAGE_CAP || lineBudget.left <= 0) {
+        lines.push(`…（单次上限已满：${READ_PDF_PAGE_CAP} 页 / ${READ_PDF_LINE_CAP} 行，从 p${n} 起分批续读）`);
+        return neutralizeInjectionTags(lines.join("\n"));
+      }
+      lines.push(...renderPdfPage(doc.pages[n - 1], lineBudget));
+      rendered.add(n);
+    }
+  }
+  return neutralizeInjectionTags(lines.join("\n"));
+}
+
 // ─── doc_search ──────────────────────────────────────────────────────────────
 
 export async function docSearch(
@@ -198,7 +335,6 @@ export async function docSearch(
 ): Promise<string> {
   const loaded = await loadDoc(userId, productionId, assetId);
   if (typeof loaded === "string") return loaded;
-  const { doc } = loaded;
   const q = opts.query.trim();
   if (!q) return "搜索词不能为空。";
   const limit = Math.max(1, Math.min(SEARCH_MAX_LIMIT, opts.limit ?? SEARCH_DEFAULT_LIMIT));
@@ -213,17 +349,27 @@ export async function docSearch(
     const ctx = text.slice(Math.max(0, at - 40), at + q.length + 60).replace(/\n/g, "⏎");
     hits.push(`${label} …${ctx}…`);
   };
-  for (let i = 0; i < doc.items.length; i++) {
-    const it = doc.items[i];
-    if (it.kind === "p") {
-      if (it.text.toLowerCase().includes(qLower)) push(`[¶${i}]`, it.text);
-    } else {
-      const flat = it.rows.map((r) => r.join(" | ")).join("\n");
-      if (flat.toLowerCase().includes(qLower)) push(`[¶${i} 表格]`, flat);
+
+  if (loaded.kind === "docx") {
+    const doc = loaded.doc;
+    for (let i = 0; i < doc.items.length; i++) {
+      const it = doc.items[i];
+      if (it.kind === "p") {
+        if (it.text.toLowerCase().includes(qLower)) push(`[¶${i}]`, it.text);
+      } else {
+        const flat = it.rows.map((r) => r.join(" | ")).join("\n");
+        if (flat.toLowerCase().includes(qLower)) push(`[¶${i} 表格]`, flat);
+      }
     }
-  }
-  for (const [id, t] of Object.entries(doc.footnotes)) {
-    if (t.toLowerCase().includes(qLower)) push(`[脚注${id}]`, t);
+    for (const [id, t] of Object.entries(doc.footnotes)) {
+      if (t.toLowerCase().includes(qLower)) push(`[脚注${id}]`, t);
+    }
+  } else {
+    for (const p of loaded.doc.pages) {
+      for (let i = 0; i < p.lines.length; i++) {
+        if (p.lines[i].text.toLowerCase().includes(qLower)) push(`[p${p.n}.${i}]`, p.lines[i].text);
+      }
+    }
   }
   if (total === 0) return `没有找到「${neutralizeInjectionTags(q)}」。`;
   const head = total > limit ? `命中 ${total} 处（显示前 ${limit} 处，可加 limit 或缩小词）：` : `命中 ${total} 处：`;
