@@ -106,6 +106,8 @@ export async function docOutline(userId: string, productionId: string, assetId: 
   const loaded = await loadDoc(userId, productionId, assetId);
   if (typeof loaded === "string") return loaded;
   const { doc, fileName } = loaded;
+  if (doc.items.length === 0)
+    return neutralizeInjectionTags(`《${fileName}》解析成功但没有任何内容块（空文档或纯图形文档）。`);
 
   const styleHist = new Map<string, number>();
   const alignHist = new Map<string, number>();
@@ -160,20 +162,21 @@ export async function docRead(
   const last = doc.items.length - 1;
   const lines: string[] = [];
   const notesWanted = new Set<string>();
-  let count = 0;
+  const rendered = new Set<number>(); // 重叠区间去重：同一块只渲染一次、只计一次 cap
   for (const r of ranges) {
     const from = Math.max(0, Math.floor(r.from));
     const to = Math.min(last, Math.floor(r.to));
     if (from > to) { lines.push(`（范围 ${r.from}-${r.to} 无效或越界，文档块号 0-${last}）`); continue; }
     for (let i = from; i <= to; i++) {
-      if (count >= READ_ITEM_CAP) {
+      if (rendered.has(i)) continue;
+      if (rendered.size >= READ_ITEM_CAP) {
         lines.push(`…（单次上限 ${READ_ITEM_CAP} 块已满，从 ¶${i} 起分批续读）`);
         return neutralizeInjectionTags(lines.join("\n"));
       }
       const it = doc.items[i];
       lines.push(renderItem(i, it, READ_TEXT_CAP));
       if (it.kind === "p") for (const id of it.footnotes ?? []) notesWanted.add(id);
-      count++;
+      rendered.add(i);
     }
   }
   if (notesWanted.size) {
