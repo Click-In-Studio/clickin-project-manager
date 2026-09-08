@@ -149,6 +149,11 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_cache_bypass $http_upgrade;
+        # SSE 长连接（#465）：默认 proxy_read_timeout 60s 会掐断空闲流。
+        # 应用侧已有 25s keepalive 注释帧治本，这里放宽是防降级场景；
+        # 反代 buffering 由各 SSE 响应的 X-Accel-Buffering: no 逐响应关闭，
+        # 不需要全局 proxy_buffering off。
+        proxy_read_timeout 3600s;
     }
 }
 server {
@@ -176,6 +181,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 3600s;   # 同 app：SSE 空闲不掐断（#465）
     }
 }
 server {
