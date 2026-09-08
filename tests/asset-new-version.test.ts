@@ -8,14 +8,33 @@
 //   · 路由只收 JSON（改造前的 FormData 整文件形态不再受理）
 //   · presign 带 assetId 时的门＝file@create（只有创建者行集、无通配 create 的
 //     上传者也能签出 URL——接线前这条路是死的）
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+//   · 注册前 HEAD 确认字节真在，大小以 R2 的 Content-Length 为准
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { createAsset, getAsset, listAssets, resolveAssetFile } from "@/lib/asset/db";
+import { canUploadAssetBytes } from "@/lib/asset/perm";
 import { POST as filesPOST } from "@/app/api/production/[id]/assets/[assetId]/files/route";
 import { POST as presignPOST } from "@/app/api/production/[id]/assets/presign/route";
 import { makeProduction, cleanupProduction } from "./factories";
+
+// R2 只替换本 PR 用到的三个出入口，其余导出（签名等纯函数）保持真身
+const { headMock, listPartsMock, completeMock } = vi.hoisted(() => ({
+  headMock: vi.fn(), listPartsMock: vi.fn(), completeMock: vi.fn(),
+}));
+vi.mock("@/lib/r2", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/r2")>(),
+  headR2Object: headMock,
+  listMultipartParts: listPartsMock,
+  completeMultipartUpload: completeMock,
+}));
+
+beforeEach(() => {
+  headMock.mockReset().mockResolvedValue({ size: 2048, contentType: null });
+  listPartsMock.mockReset().mockResolvedValue([{ partNumber: 1, eTag: "e1" }]);
+  completeMock.mockReset().mockResolvedValue(undefined);
+});
 
 let prodId: string;
 let otherProdId: string;
@@ -67,7 +86,7 @@ beforeAll(async () => {
   const created = await createAsset({
     productionId: prodId, uploaderUserId: uploader, assetType: "reference",
     fileName: "设计图.pdf", mimeType: "application/pdf",
-    storageType: "r2", r2Key: "assets/af_v1/design.pdf", fileSize: 1000,
+    storageType: "r2", r2Key: "assets/t456_v1/design.pdf", fileSize: 1000,
   });
   assetId = created.asset.id;
 
@@ -81,12 +100,16 @@ beforeAll(async () => {
   const foreign = await createAsset({
     productionId: otherProdId, uploaderUserId: uploader, assetType: "reference",
     fileName: "别家.pdf", mimeType: "application/pdf",
-    storageType: "r2", r2Key: "assets/af_other/x.pdf", fileSize: 10,
+    storageType: "r2", r2Key: "assets/t456_other/x.pdf", fileSize: 10,
   });
   foreignAssetId = foreign.asset.id;
 });
 
 afterAll(async () => {
+  // 注册成功会投缩略图/解析预热作业（asset-jobs），job 表不随演出级联删除。
+  // 不回收的话这些 queued 行跨 run 累积，把 job-queue 测试的 claimJobs(limit)
+  // 挤爆——本文件的 r2Key 统一带 t456_ 前缀就是为了能精确认领自己的残留。
+  await getPool().query(`DELETE FROM job WHERE payload->>'r2Key' LIKE 'assets/t456_%'`).catch(() => {});
   await cleanupProduction(prodId).catch(() => {});
   await cleanupProduction(otherProdId).catch(() => {});
 });
@@ -99,11 +122,11 @@ describe("追加版本注册", () => {
     const res = await filesPOST(
       jsonReq(uploader, {
         storageType: "r2",
-        r2Key: "assets/af_v2/设计图_v2.dwg",
+        r2Key: "assets/t456_v2/设计图_v2.dwg",
         fileId: "af_v2",
         fileName: "设计图 v2.dwg",
         mimeType: "image/vnd.dwg",
-        fileSize: 2048,
+        fileSize: 999999,   // 客户端自报的不作数，落库应是 HEAD 的 2048
       }),
       ctxFor(prodId, assetId),
     );
@@ -117,8 +140,8 @@ describe("追加版本注册", () => {
 
     // latest-wins：读侧指向新文件，asset 行的名字/类型同步
     const latest = await resolveAssetFile(assetId);
-    expect(latest?.r2Key).toBe("assets/af_v2/设计图_v2.dwg");
-    expect(latest?.fileSize).toBe(2048);
+    expect(latest?.r2Key).toBe("assets/t456_v2/设计图_v2.dwg");
+    expect(latest?.fileSize).toBe(2048);   // 取 HEAD 的 Content-Length，不是客户端报的 999999
     expect(j.asset.fileName).toBe("设计图 v2.dwg");
     const reread = await getAsset(assetId);
     expect(reread?.fileName).toBe("设计图 v2.dwg");
@@ -153,24 +176,124 @@ describe("追加版本注册", () => {
 
   it("飞书外链资产不能追加 R2 版本 → 400", async () => {
     const res = await filesPOST(
-      jsonReq(uploader, { storageType: "r2", r2Key: "assets/af_x/a.pdf", fileName: "a.pdf" }),
+      jsonReq(uploader, { storageType: "r2", r2Key: "assets/t456_x/a.pdf", fileName: "a.pdf" }),
       ctxFor(prodId, feishuAssetId));
     expect(res.status).toBe(400);
   });
 });
 
+describe("注册前的对象存在性探测", () => {
+  it("R2 明确答不存在 → 409，且一行不写（latest-wins 下这会砸掉已有资产的读面）", async () => {
+    headMock.mockResolvedValue(null);
+    const before = await fileCount(assetId);
+    const nameBefore = (await getAsset(assetId))?.fileName;
+
+    const res = await filesPOST(
+      jsonReq(uploader, {
+        storageType: "r2", r2Key: "assets/t456_ghost/never-uploaded.pdf",
+        fileName: "幽灵.pdf", mimeType: "application/pdf", fileSize: 10,
+      }),
+      ctxFor(prodId, assetId));
+    expect(res.status).toBe(409);
+    expect(await fileCount(assetId)).toBe(before);
+    expect((await getAsset(assetId))?.fileName).toBe(nameBefore);
+  });
+
+  it("探测问不出来（5xx / 无凭据）→ 放行，大小回落到客户端自报值", async () => {
+    headMock.mockRejectedValue(new Error("R2 HEAD failed: 503"));
+    const res = await filesPOST(
+      jsonReq(uploader, {
+        storageType: "r2", r2Key: "assets/t456_flaky/v3.pdf",
+        fileName: "抖动.pdf", mimeType: "application/pdf", fileSize: 4096,
+      }),
+      ctxFor(prodId, assetId));
+    expect(res.status).toBe(201);
+    const latest = await resolveAssetFile(assetId);
+    expect(latest?.r2Key).toBe("assets/t456_flaky/v3.pdf");
+    expect(latest?.fileSize).toBe(4096);
+  });
+
+  it("分段上传分支：先 complete 再探测，成功后注册", async () => {
+    headMock.mockResolvedValue({ size: 88, contentType: null });
+    const res = await filesPOST(
+      jsonReq(uploader, {
+        storageType: "r2-multipart", r2Key: "assets/t456_mp/big.mov",
+        uploadId: "up_1", fileName: "大文件.mov", mimeType: "video/quicktime", fileSize: 1,
+      }),
+      ctxFor(prodId, assetId));
+    expect(res.status).toBe(201);
+    expect(listPartsMock).toHaveBeenCalledWith("assets/t456_mp/big.mov", "up_1");
+    expect(completeMock).toHaveBeenCalled();
+    expect((await resolveAssetFile(assetId))?.fileSize).toBe(88);
+  });
+
+  it("分段上传缺 uploadId → 400，不碰 R2", async () => {
+    const res = await filesPOST(
+      jsonReq(uploader, {
+        storageType: "r2-multipart", r2Key: "assets/t456_mp/big.mov", fileName: "大文件.mov",
+      }),
+      ctxFor(prodId, assetId));
+    expect(res.status).toBe(400);
+    expect(completeMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("追加版本的门", () => {
   it("成员但无 file@create → 403；非成员 → 403", async () => {
-    const body = { storageType: "r2", r2Key: "assets/af_v9/x.pdf", fileName: "x.pdf" };
+    const body = { storageType: "r2", r2Key: "assets/t456_v9/x.pdf", fileName: "x.pdf" };
     expect((await filesPOST(jsonReq(stranger, body), ctxFor(prodId, assetId))).status).toBe(403);
     expect((await filesPOST(jsonReq(outsider, body), ctxFor(prodId, assetId))).status).toBe(403);
   });
 
   it("assetId 属于别的演出 → 404（不因 uploader 在那边有票而放行）", async () => {
     const res = await filesPOST(
-      jsonReq(uploader, { storageType: "r2", r2Key: "assets/af_v9/x.pdf", fileName: "x.pdf" }),
+      jsonReq(uploader, { storageType: "r2", r2Key: "assets/t456_v9/x.pdf", fileName: "x.pdf" }),
       ctxFor(prodId, foreignAssetId));
     expect(res.status).toBe(404);
+  });
+});
+
+// 三条 presign 路由共用这一把门，值得直接钉矩阵，不只靠路由测间接覆盖
+describe("canUploadAssetBytes 矩阵", () => {
+  const actor = (userId: string, bits: { isAdmin?: boolean; isOwner?: boolean } = {}) =>
+    ({ userId, isAdmin: bits.isAdmin ?? false, isOwner: bits.isOwner ?? false });
+
+  let wildcard: string;   // 持资产域通配 create（角色型上传者）
+
+  beforeAll(async () => {
+    wildcard = await newMember(prodId);
+    await getPool().query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES ($1, $2, 'asset', '*', '*', 'create', 'auto')
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false DO NOTHING`,
+      [prodId, wildcard],
+    );
+  });
+
+  it("admin / owner 两种目标都放行", async () => {
+    for (const bits of [{ isAdmin: true }, { isOwner: true }]) {
+      expect(await canUploadAssetBytes(actor("nobody", bits), prodId, null)).toBe(true);
+      expect(await canUploadAssetBytes(actor("nobody", bits), prodId, assetId)).toBe(true);
+    }
+  });
+
+  it("只有创建者行集（file@create）：带目标放行，不带目标不放行", async () => {
+    // 后者正是接线前新版本上传的死点——面板打的是新建的门，他没有
+    expect(await canUploadAssetBytes(actor(uploader), prodId, assetId)).toBe(true);
+    expect(await canUploadAssetBytes(actor(uploader), prodId, null)).toBe(false);
+  });
+
+  it("持通配 create：两种目标都放行（分叉是放宽不是收紧）", async () => {
+    // hasGrant 的 resource_id IN (id, '*') 语义下，通配本来就满足 file@create
+    expect(await canUploadAssetBytes(actor(wildcard), prodId, null)).toBe(true);
+    expect(await canUploadAssetBytes(actor(wildcard), prodId, assetId)).toBe(true);
+  });
+
+  it("无票成员：两种目标都不放行", async () => {
+    expect(await canUploadAssetBytes(actor(stranger), prodId, null)).toBe(false);
+    expect(await canUploadAssetBytes(actor(stranger), prodId, assetId)).toBe(false);
   });
 });
 

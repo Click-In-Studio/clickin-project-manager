@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset, addUniversalAssetFile } from "@/lib/asset/db";
 import { hasGrant } from "@/lib/grant-check";
-import { completeMultipartUpload, listMultipartParts } from "@/lib/r2";
+import { completeMultipartUpload, listMultipartParts, headR2Object } from "@/lib/r2";
 import { enqueueAssetPostProcess } from "@/lib/job/asset-jobs";
 
 type Ctx = { params: Promise<{ id: string; assetId: string }> };
@@ -54,7 +54,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "非法的 r2Key" }, { status: 400 });
 
   const mimeType = body.mimeType ?? "application/octet-stream";
-  const fileSize = body.fileSize ?? null;
 
   // 分段上传：ETag 一律服务端取——R2 的 CORS 不把 ETag 暴露给浏览器，
   // 客户端报上来的不可信（与 assets 路由同一处理）。
@@ -63,6 +62,22 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const parts = await listMultipartParts(body.r2Key, body.uploadId);
     await completeMultipartUpload(body.r2Key, body.uploadId, parts);
   }
+
+  // 注册前确认字节真的在。**追加版本比新建更需要这一步**：读侧 latest-wins，
+  // 一次凭空注册会把已有资产的读面指向不存在的 key——创建路径上顶多多出一个废
+  // 资产，这里砸的是真东西，且界面上没有回退版本的入口。
+  // 只有 R2 明确答 404 才拒；问不出来（5xx / 网络抖 / 本地无凭据）放行——字节
+  // 已经传完的上传不该因为一次探测失败被打回去重传。
+  let verifiedSize: number | null = null;
+  try {
+    const head = await headR2Object(body.r2Key);
+    if (!head) return Response.json({ error: "对象不存在，请重新上传" }, { status: 409 });
+    verifiedSize = head.size;
+  } catch (err) {
+    console.error(`[assets/files] HEAD 探测失败，按放行处理 ${body.r2Key}:`, err);
+  }
+  // 大小以 R2 的 Content-Length 为准，客户端自报的只在探测不出时兜底
+  const fileSize = verifiedSize ?? body.fileSize ?? null;
 
   // 元数据跟着最新文件走（latest-wins 也作用于 asset 行），与文件行同事务
   const assetFile = await addUniversalAssetFile(assetId, body.r2Key, null, fileSize,
