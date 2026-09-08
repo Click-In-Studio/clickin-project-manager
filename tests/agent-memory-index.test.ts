@@ -127,7 +127,10 @@ describe("episodicText", () => {
 
 describe("index writes", () => {
   it("episodic 同内容幂等（UNIQUE + DO NOTHING）", async () => {
-    const rec = { ts: "2026-08-19T09:00:00Z", lastUser: "明天排练几点开始", lastAssistant: "下午三点在排练厅" };
+    // ts 必须相对当前时间：searchMemory 对 episodic 按 observed_at 做 30 天半衰
+    // 期衰减，硬编码日期会随真实时间流逝跌破 MIN_SCORE（2026-09-08 CI 红过一次：
+    // 硬编码 08-19 在 20 天龄时衰减 ×0.63，向量分临界的查询刚好过不了线）。
+    const rec = { ts: new Date(Date.now() - 86_400_000).toISOString(), lastUser: "明天排练几点开始", lastAssistant: "下午三点在排练厅" };
     await indexEpisodicRun(userA, rec);
     await indexEpisodicRun(userA, rec);
     const { rows } = await getPool().query(
