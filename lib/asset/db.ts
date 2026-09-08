@@ -248,20 +248,41 @@ export async function setAssetFileThumbnail(assetFileId: string, thumbnailKey: s
   await getPool().query(`UPDATE asset_file SET thumbnail_r2_key = $2 WHERE id = $1`, [assetFileId, thumbnailKey]);
 }
 
-/** Add a new file row for a universal asset (latest-wins on read). */
+/** Add a new file row for a universal asset (latest-wins on read).
+ *  #456：读侧既然 latest-wins（resolveAssetFile），asset 行上的 file_name /
+ *  mime_type 也必须跟着最新文件走——否则换个扩展名传新版本，列表和图标还认旧
+ *  文件名。两条写同事务：元数据与文件行之间不留不一致窗口。
+ *  meta 省略＝只加文件行（旧行为，供不改名的调用方用）。 */
 export async function addUniversalAssetFile(
   assetId: string,
   r2Key: string,
   thumbnailR2Key: string | null,
   fileSize: number | null,
+  meta?: { fileName: string; mimeType: string | null },
 ): Promise<AssetFile> {
   const fileId = uid("af");
-  const res = await getPool().query<AssetFileRow>(
-    `INSERT INTO asset_file (id, asset_id, r2_key, thumbnail_r2_key, file_size)
-     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-    [fileId, assetId, r2Key, thumbnailR2Key, fileSize]
-  );
-  return rowToAssetFile(res.rows[0]);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const res = await client.query<AssetFileRow>(
+      `INSERT INTO asset_file (id, asset_id, r2_key, thumbnail_r2_key, file_size)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [fileId, assetId, r2Key, thumbnailR2Key, fileSize]
+    );
+    if (meta) {
+      await client.query(
+        `UPDATE asset SET file_name = $2, mime_type = $3 WHERE id = $1`,
+        [assetId, meta.fileName, meta.mimeType],
+      );
+    }
+    await client.query("COMMIT");
+    return rowToAssetFile(res.rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── 工作台读面（#420 第二批 PR-C）────────────────────────────────────────────

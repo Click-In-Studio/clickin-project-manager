@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasGrant } from "@/lib/grant-check";
+import { canUploadAssetBytes } from "@/lib/asset/perm";
 import { presignedUploadPart } from "@/lib/r2";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -23,8 +23,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   );
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!permCtx.isAdmin && !permCtx.isOwner && !await hasGrant(permCtx.userId, id, "asset", "*", "*", "create"))
-    return Response.json({ error: "权限不足" }, { status: 403 });
 
   const sp = new URL(req.url).searchParams;
   const r2Key      = sp.get("r2Key");
@@ -33,6 +31,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   if (!r2Key || !uploadId || !partNumber || partNumber < 1 || partNumber > 10_000)
     return Response.json({ error: "缺少或非法参数 (r2Key / uploadId / partNumber)" }, { status: 400 });
+
+  // #456：assetId 非空＝为该资产传新版本，门是它身上的 file@create（与注册端点
+  // 同门）；缺省＝新建资产，门不变。
+  if (!await canUploadAssetBytes(permCtx, id, sp.get("assetId")))
+    return Response.json({ error: "权限不足" }, { status: 403 });
 
   // 1-hour expiry — enough for a single 64 MB chunk at 1 MB/s worst-case
   const uploadUrl = presignedUploadPart(r2Key, uploadId, partNumber, 3600);
