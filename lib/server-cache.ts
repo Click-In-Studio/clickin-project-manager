@@ -13,6 +13,8 @@
  *  • A lightweight per-version seq counter (notification only)
  */
 
+import { registerSSEKeepalive } from "@/lib/sse-keepalive";
+
 // ─── Presence types ───────────────────────────────────────────────────────────
 
 export type PresenceClient = {
@@ -132,7 +134,9 @@ export function registerSSE(
   const reg = sseRegistry();
   if (!reg.has(key)) reg.set(key, new Map());
   reg.get(key)!.set(connectionId, { clientId, push });
+  const releaseKeepalive = registerSSEKeepalive(push);
   return () => {
+    releaseKeepalive();
     const clients = reg.get(key);
     clients?.delete(connectionId);
     if (!clients) return false;
@@ -211,7 +215,11 @@ export function registerCueSSE(productionId: string, clientId: string, push: SSE
   const reg = cueSSEReg();
   if (!reg.has(productionId)) reg.set(productionId, new Map());
   reg.get(productionId)!.set(clientId, push);
-  return () => reg.get(productionId)?.delete(clientId);
+  const releaseKeepalive = registerSSEKeepalive(push);
+  return () => {
+    releaseKeepalive();
+    reg.get(productionId)?.delete(clientId);
+  };
 }
 
 /** cue 版的 hasActiveSSEClient（#460）：cue-stream 建连门与 cue-presence 心跳门逐字相同。 */

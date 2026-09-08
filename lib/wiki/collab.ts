@@ -13,6 +13,7 @@
 import { hostname } from "node:os";
 import type { Pool, PoolClient } from "pg";
 import { getPool } from "@/lib/pg";
+import { registerSSEKeepalive } from "@/lib/sse-keepalive";
 
 export type WikiPeer = {
   clientId: string;
@@ -168,7 +169,10 @@ export function registerWikiSSE(
   let m = sseReg().get(wikiId);
   if (!m) { m = new Map(); sseReg().set(wikiId, m); }
   m.set(connectionId, push);
+  // 同一条连接 doc/library 双注册共用同一个 push——keepalive 侧引用计数去重
+  const releaseKeepalive = registerSSEKeepalive(push);
   return () => {
+    releaseKeepalive();
     const reg = sseReg().get(wikiId);
     reg?.delete(connectionId);
     if (reg && reg.size === 0) sseReg().delete(wikiId);
