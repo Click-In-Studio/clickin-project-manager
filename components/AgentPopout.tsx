@@ -19,6 +19,7 @@ import { toolLabel } from "@/lib/agent-tool-labels";
 import { dispatchAgentMutation } from "@/lib/agent-mutations";
 import WikiProposalPreviewModal from "@/components/WikiProposalPreviewModal";
 import ChevronIcon from "@/components/ChevronIcon";
+import { writeFetch } from "@/lib/write-refresh";
 
 /** 按语境（个人 / 某个制作）分桶持久化最后一次活跃会话，重开 popout 时恢复。 */
 function lastSessionStorageKey(productionId: string | null): string {
@@ -475,7 +476,7 @@ export default function AgentPopout({
   const savePrefs = useCallback(async () => {
     setPrefsBusy(true);
     setPrefsError(null);
-    const res = await fetch("/api/agent/instructions", {
+    const res = await writeFetch("/api/agent/instructions", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scope: "user", content: prefsText }),

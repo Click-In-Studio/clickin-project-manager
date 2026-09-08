@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
+import { writeFetch, refreshNow } from "@/lib/write-refresh";
 
 type PermEntry = { granted: boolean; selfConfirmable: boolean };
 
@@ -14,7 +14,7 @@ type PermEntry = { granted: boolean; selfConfirmable: boolean };
  *   confirming — true while POST is in-flight
  *   confirm(perms) — writes grants for the given permission keys
  *
- * confirm 成功后必须 router.refresh()：各页面的写面开关（characters 的
+ * confirm 成功后必须失效 router cache（refreshNow）：各页面的写面开关（characters 的
  * CharacterPerms、dramaturgy 的 SceneFieldPerms、script 的 canEditText 等）都是
  * **服务端组件渲染时**查库算出来的。只更新 pending 不刷新，用户会看到「弹窗一键
  * 激活 → 弹窗消失 → 页面仍然只读」，必须手动刷新才生效。
@@ -23,7 +23,6 @@ export function usePendingPermissions(
   productionId: string,
   scope: ReadonlySet<string>,
 ) {
-  const router = useRouter();
   const [pending, setPending] = useState<string[] | null>(null);
   const [confirming, setConfirming] = useState(false);
 
@@ -51,7 +50,7 @@ export function usePendingPermissions(
       if (perms.length === 0) return;
       setConfirming(true);
       try {
-        const res = await fetch(`${BASE_PATH}/api/production/${productionId}/my-permissions`, {
+        const res = await writeFetch(`${BASE_PATH}/api/production/${productionId}/my-permissions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -59,13 +58,15 @@ export function usePendingPermissions(
         });
         if (!res.ok) return;
         setPending(prev => prev?.filter(p => !perms.includes(p)) ?? []);
-        // 让服务端组件用新落的 grant 行重算写面开关
-        router.refresh();
+        // 让服务端组件用新落的 grant 行重算写面开关。
+        // 用 refreshNow 而非 router.refresh：writeFetch 已排了一次去抖刷新，
+        // 这里既要立即生效、又不能刷两趟（#416）。
+        refreshNow();
       } finally {
         setConfirming(false);
       }
     },
-    [productionId, router],
+    [productionId],
   );
 
   return { pending, confirming, confirm };

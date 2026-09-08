@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { writeFetch } from "@/lib/write-refresh";
 import PageHeader from "@/components/PageHeader";
 import Link from "next/link";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
@@ -133,7 +132,7 @@ function ActionButtons({
     setLoading(action.id);
     setError(null);
     try {
-      const res = await writeFetch(`/api/my/notifications/${notifId}/act`, {
+      const res = await fetch(`/api/my/notifications/${notifId}/act`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ actionId: action.id }),
@@ -239,7 +238,7 @@ export default function MyNotificationsClient({ productions = [], productionId, 
     }
 
     if (autoRead) {
-      writeFetch("/api/my/notifications", {
+      fetch("/api/my/notifications", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: [first.id] }),
@@ -254,7 +253,7 @@ export default function MyNotificationsClient({ productions = [], productionId, 
   }, [load]);
 
   const markRead = useCallback(async (id: string) => {
-    await writeFetch("/api/my/notifications", {
+    await fetch("/api/my/notifications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids: [id] }),
@@ -288,7 +287,7 @@ export default function MyNotificationsClient({ productions = [], productionId, 
   const handleMarkAllRead = async () => {
     setMarkingAllRead(true);
     const wasUnread = unreadUndoneCount;
-    await writeFetch("/api/my/notifications", {
+    await fetch("/api/my/notifications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(productionId ? { productionId } : {}),

@@ -3,6 +3,7 @@
 import OverflowSafeSelect from "@/components/OverflowSafeSelect";
 
 import { useState, useEffect } from "react";
+import { writeFetch } from "@/lib/write-refresh";
 import {
   TTL_OPTIONS,
   localTodayDateInputValue,
@@ -203,7 +204,7 @@ export default function AccessRequestModal({
       if (ttlOption === "custom" && !ttlPayload.requestedExpiresAt) {
         throw new Error("请选择自定义到期日期");
       }
-      const res = await fetch(`/api/production/${productionId}/access-requests`, {
+      const res = await writeFetch(`/api/production/${productionId}/access-requests`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

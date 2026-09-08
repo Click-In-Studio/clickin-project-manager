@@ -551,8 +551,25 @@ const res = await writeFetch(url, { method: "PATCH", body: ... });
 | 心跳 / presence | `cue-presence` | 定时打，会变成每几秒 refresh 整页 |
 | 预签名 / 导出流 | `avatar/presign`、`export-cues` | 不改数据；预签名后真正的写自己会刷 |
 | 跨源直传 | R2 presigned PUT | 不是本站 API |
+| agent 会话控制面 | `/api/agent/sessions`、`/chat/stream`、`/chat/abort`、`/approval`、`/questions` | 不写页面数据；agent 真正改到的数据由 AgentPopout 的 `useAgentMutation` 订阅兜底刷新。给 `/chat/stream` 接上会每条消息刷一次整页 |
 
-这四类同时也写在把关测试的 `NON_MUTATING` 里，新增例外要两边一起加。
+这些例外同时写在把关测试的 `NON_MUTATING` 里，新增例外要两边一起加。
+
+### 别把「加载时就写」的页面放进白名单
+
+`/my/notifications` 一进页面就自动把首条标记已读。那次写会 `invalidateBfCache()`
+**清掉全站** bfcache——每进一次通知页，就把其它白名单页的缓存全部打穿。这类页面
+（mount 即写）放进白名单是自相矛盾的，已排除。
+
+### 接线：`registerWriteRefreshRouter` 不能丢
+
+`lib/write-refresh` 是模块级的，靠 `components/AppShell.tsx` 里那一行 effect 把 router
+交给它。**少了那行，`writeFetch` / `refreshNow` 全部静默变成空操作**，白名单页面的写
+会被打回，换掉了显式 `router.refresh()` 的调用点连界面都不再更新。
+
+这个失效模式 tsc / eslint / next build / write-refresh 单元测试**全都发现不了**
+（单测自己调 `registerWriteRefreshRouter`，正好把要验的那层 mock 掉）。
+`tests/write-refresh-wiring.test.tsx` 专门盯它。
 
 ### 绝对禁止
 

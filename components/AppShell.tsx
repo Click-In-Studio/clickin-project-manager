@@ -6,6 +6,7 @@ import Link, { useLinkStatus } from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { userAvatarSrc, productionAvatarSrc } from "@/lib/avatar-url";
 import { nextNavPendingHref } from "@/lib/nav-pending";
+import { registerWriteRefreshRouter } from "@/lib/write-refresh";
 import ChevronIcon from "@/components/ChevronIcon";
 import SearchBar from "./SearchBar";
 import NewProductionModal from "./NewProductionModal";
@@ -775,6 +776,14 @@ function ProjectSwitcher({
 
 export default function AppShell({ session, productions, canCreateProduction = false, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0 }: AppShellProps) {
   const pathname = usePathname();
+  // #416 lib/write-refresh 是模块级的（写点散落在模块级 helper 和同文件子组件里，
+  // 用 hook 会逼着逐个组件插桩），需要有人把 router 交给它。AppShell 在 root layout
+  // 里、每个页面都挂着，是唯一稳定的注册点。
+  // 少了这一句，writeFetch / refreshNow 全部静默变成空操作——白名单页面的写会被打回，
+  // 而且 tsc / build / 单元测试全都发现不了（测试自己注册 router）。
+  // tests/write-refresh-wiring.test.tsx 专门盯着这句还在不在。
+  const writeRefreshRouter = useRouter();
+  useEffect(() => registerWriteRefreshRouter(writeRefreshRouter), [writeRefreshRouter]);
   const searchParams = useSearchParams();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [aiPopoutOpen, setAiPopoutOpen] = useState(false);

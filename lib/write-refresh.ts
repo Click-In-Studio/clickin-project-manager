@@ -4,22 +4,28 @@ import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.
 /**
  * #416 写后失效 client router cache。
  *
- * 背景：next.config 把 `experimental.staleTimes.dynamic` 从 0 调成了 30s，短时间内
- * 的回头页直接命中 bfcache、零往返。代价是**服务端投喂的 payload 会被缓存 30s**，
- * 而本仓大量组件是 `useState(initialX)` 从服务端 props 播种的——写完切走再切回来，
- * 组件重挂载时会从**写之前**的 payload 重新播种，用户自己的写被打回。
+ * 背景：本仓**按页白名单**开 client router cache——页面导出
+ * `unstable_dynamicStaleTime = 30` 后，30 秒内切回该页直接命中 bfcache、零往返
+ * （没导出的页面维持默认 0）。**不在 next.config 里全局开**：全仓 45 个客户端文件、
+ * 约 140 个写点没有失效通道，全局开等于让用户自己的写被静默打回；而按键级自动保存
+ * 的编辑页又补不起这个代价。详见 docs/DEV_GUIDE.md §10.5。
  *
- * `router.refresh()` 会调 `invalidateBfCache()`，清的是**整个 bfcache 而非当前路由**，
- * 所以任何一处 refresh 都能兜住全站。这个模块把「写成功 → 安排一次 refresh」收成一个
- * 与 `fetch` 同签名的薄封装，调用点只需把 `fetch(` 换成 `writeFetch(`，返回值语义不变。
+ * 白名单页面的组件是 `useState(initialX)` 从服务端 props 播种的：写完切走再切回来，
+ * 组件重挂载时会从**写之前**的 payload 重新播种，用户自己的写被打回。本地 setState
+ * 救不了——它恰恰是会犯的那个模式，因为服务端 payload 是那份数据的唯一来源。
+ *
+ * `router.refresh()` 会调 `invalidateBfCache()`，清的是**整个 bfcache 而非当前
+ * 路由**，所以任何一处刷新都能兜住全站。这个模块把「写成功 → 安排一次 refresh」收成
+ * 一个与 `fetch` 同签名的薄封装，调用点只需把 `fetch(` 换成 `writeFetch(`，返回值
+ * 语义不变。
  *
  * 为什么不是 hook：写操作散落在模块级 helper、事件回调、同文件的子组件里，hook 的
  * 调用位置约束会逼着逐个组件插桩。这里改成模块级函数 + 在 AppShell 注册一次 router，
- * 任何作用域都能直接调。
+ * 任何作用域都能直接调。少了 AppShell 那次注册，本模块全部静默变成空操作——
+ * tests/write-refresh-wiring.test.tsx 专门盯这件事。
  *
  * 为什么不猴补丁 window.fetch：剧本编辑器和 wiki 文档是按键级自动保存，全局拦截会
- * 变成打字时每隔几百毫秒 refresh 一次整页，正好把本次改动想省的往返又赔回去。显式
- * 替换的代价是新增写点可能漏接——这是明知的取舍，见 PR #474。
+ * 变成打字时每隔几百毫秒 refresh 一次整页，正好把想省的往返赔回去。
  */
 
 let router: AppRouterInstance | null = null;
