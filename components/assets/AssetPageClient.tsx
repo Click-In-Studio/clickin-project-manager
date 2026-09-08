@@ -179,8 +179,11 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
         <p style={{ fontSize: 11, color: "var(--muted)", marginBottom: 16 }}>
           为 <span style={{ fontWeight: 600, color: "var(--ink)" }}>{uploadTarget.fileName}</span> 上传新版本
         </p>
+        {/* #456：把目标资产传下去——否则面板走的是「创建新资产」端点，
+            界面上点「新版本」实际会多出一个全新 asset */}
         <AssetUploadPanel
           productionId={productionId}
+          targetAssetId={uploadTarget.id}
           onUploaded={() => { setView("all"); setUploadTarget(null); load(); }}
           onCancel={() => { setView("all"); setUploadTarget(null); }}
         />

@@ -333,6 +333,45 @@ export async function completeMultipartUpload(
   if (!res.ok) throw new Error(`CompleteMultipartUpload failed: ${res.status} ${await res.text()}`);
 }
 
+/**
+ * HEAD 一个对象：存在 → { size, contentType }；R2 **明确**答 404 → null；
+ * 其余情况（5xx、网络抖动、凭据缺失）抛。
+ *
+ * 调用方必须把「确证不存在」和「问不出来」分开处理：前者才是拒绝的理由，后者
+ * 不该把字节已经传完的上传打回去重来。
+ */
+export async function headR2Object(key: string): Promise<{ size: number | null; contentType: string | null } | null> {
+  const { dateStr, amzDate } = dateParts();
+  const scope = `${dateStr}/${region}/s3/aws4_request`;
+  const signedHeaders = "host;x-amz-date";
+  const canonical = [
+    "HEAD",
+    `/${r2Bucket}/${key}`,
+    "",
+    `host:${host}\nx-amz-date:${amzDate}\n`,
+    signedHeaders,
+    sha256hex(""),
+  ].join("\n");
+  const sig = crypto
+    .createHmac("sha256", getSigningKey(dateStr))
+    .update(`AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${sha256hex(canonical)}`)
+    .digest("hex");
+  const res = await fetch(`${endpoint}/${r2Bucket}/${key}`, {
+    method: "HEAD",
+    headers: {
+      Authorization: `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${sig}`,
+      "X-Amz-Date": amzDate,
+    },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`R2 HEAD failed: ${res.status}`);
+  const len = res.headers.get("content-length");
+  return {
+    size: len != null && len !== "" ? Number(len) : null,
+    contentType: res.headers.get("content-type"),
+  };
+}
+
 /** Fetch R2 object as Buffer (for proxying). */
 export async function getR2Object(key: string): Promise<{ body: Buffer; contentType: string | null } | null> {
   const url = presignedGet(key);

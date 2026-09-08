@@ -163,6 +163,26 @@ export async function canPublishAsset(
   return hasGrant(permCtx.userId, productionId, "asset", assetId, "publication", verb);
 }
 
+/** 上传字节的门（presign 家族共用），按目标分叉成两把钥匙：
+ *  新建资产＝资产域通配 create（"asset"/"*"/"*"/"create"）；追加版本
+ *  （targetAssetId 非空）＝那个资产上的 file@create，与注册端点
+ *  assets/<id>/files 同门，由创建者行集承担 own 语义。
+ *
+ *  #456 接线前 presign 只认前者：上传者靠创建者行集拿到的是 file@create，一旦
+ *  角色上的通配 create 被回收，他给**自己的**资产传新版本会卡在签名这一步。
+ *  注意这是放宽不是收紧——hasGrant 的 resource_id IN (id, '*') 语义下，持通配
+ *  create 的人本来就满足 file@create，分叉后照旧过。 */
+export async function canUploadAssetBytes(
+  permCtx: GrantActor,
+  productionId: string,
+  targetAssetId?: string | null,
+): Promise<boolean> {
+  if (permCtx.isAdmin || permCtx.isOwner) return true;
+  if (targetAssetId)
+    return hasGrant(permCtx.userId, productionId, "asset", targetAssetId, "file", "create");
+  return hasGrant(permCtx.userId, productionId, "asset", "*", "*", "create");
+}
+
 /** 宿主侧门。'production'/'wiki' 挂载类型已退役（#420）：全局共享走 node 树
  *  listable、文档嵌图走 'embed'（门=编辑该文档）。 */
 export async function mountHostSidePermitted(

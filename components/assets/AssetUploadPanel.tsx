@@ -130,6 +130,12 @@ interface Props {
    *  上传一律 listable——工作台上传的东西要在树里看得见。与 placement 互斥，
    *  placement 是调用方钉死落点的形态（树内加号）。 */
   choosePlacement?: boolean;
+  /** 追加版本模式（#456）：非空＝为**这个已有资产**传新版本文件，注册打
+   *  assets/<id>/files（latest-wins 追加一行 asset_file），而不是创建新资产。
+   *  字节通道（presign 直传 / relay 中转）与新建完全一致，只有注册那一步分叉；
+   *  面板同时收敛成「只选文件」——类型/落点/显示名都是资产级属性，不该在传第二
+   *  个版本时被顺手改掉。 */
+  targetAssetId?: string;
 }
 
 function formatSize(bytes: number): string {
@@ -139,8 +145,10 @@ function formatSize(bytes: number): string {
 
 export default function AssetUploadPanel({
   productionId, onUploaded, onCancel, placement, choosePlacement, landing,
-  allowMarkdownAsWiki, onUploadedWiki,
+  allowMarkdownAsWiki, onUploadedWiki, targetAssetId,
 }: Props) {
+  // 追加版本模式：注册端点分叉 + 面板收敛（见 Props.targetAssetId）
+  const versionMode = !!targetAssetId;
   // id null＝服务端缺省（「资产」根锚点懒建）——与列表里挑真「资产」行等价，
   // 名字必须与树里锚点同名，别造第二个称谓
   const [placeTarget, setPlaceTarget] = useState<{ id: string | null; label: string }>({ id: null, label: "资产" });
@@ -236,7 +244,7 @@ export default function AssetUploadPanel({
       const base = `${BASE_PATH}/api/production/${productionId}/assets`;
 
       // md → wiki 文档：读文本走文档管道（与树栏「导入」同一约定），不碰 R2
-      if (mode === "file" && file && allowMarkdownAsWiki && onUploadedWiki && asWiki
+      if (!versionMode && mode === "file" && file && allowMarkdownAsWiki && onUploadedWiki && asWiki
           && /\.(md|markdown)$/i.test(file.name)) {
         const text = await file.text();
         const title = name.trim() || file.name.replace(/\.(md|markdown)$/i, "").trim() || "导入文档";
@@ -259,7 +267,7 @@ export default function AssetUploadPanel({
         return;
       }
 
-      if (mode === "feishu") {
+      if (mode === "feishu" && !versionMode) {
         if (!feishuUrl.trim() || !feishuName.trim()) {
           setError("请填写飞书链接和文件名");
           return;
@@ -294,11 +302,18 @@ export default function AssetUploadPanel({
       }
 
       const mimeType = file.type || "application/octet-stream";
-      const assetMeta = {
-        fileName: file.name, mimeType, fileSize: file.size,
-        name: name.trim() || null, assetType,
-        ...placementFields,
-      };
+      // 追加版本：注册打该资产的 files 端点，且只带文件级字段——name/assetType/
+      // 落点是资产级属性，传新版本不动它们（服务端也不认这些字段）
+      const registerUrl = versionMode ? `${base}/${targetAssetId}/files` : base;
+      const assetMeta = versionMode
+        ? { fileName: file.name, mimeType, fileSize: file.size }
+        : {
+            fileName: file.name, mimeType, fileSize: file.size,
+            name: name.trim() || null, assetType,
+            ...placementFields,
+          };
+      // presign 家族的门按目标分叉（file@create vs 通配 create），带上目标资产
+      const presignScope = versionMode ? { assetId: targetAssetId } : {};
 
       let r2Key: string, fileId: string;
 
@@ -307,7 +322,7 @@ export default function AssetUploadPanel({
         const presignRes = await fetch(`${base}/presign`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileName: file.name, mimeType }),
+          body: JSON.stringify({ fileName: file.name, mimeType, ...presignScope }),
         });
         if (!presignRes.ok) {
           const j = await presignRes.json().catch(() => ({}));
@@ -332,7 +347,7 @@ export default function AssetUploadPanel({
         });
         setProgress(100);
 
-        const regRes = await fetch(base, {
+        const regRes = await fetch(registerUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ storageType: "r2", r2Key, fileId, ...assetMeta }),
@@ -359,7 +374,7 @@ export default function AssetUploadPanel({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           // No partCount — adaptive caller fetches per-part URLs on demand
-          body: JSON.stringify({ fileName: file.name, mimeType, fileSize: file.size }),
+          body: JSON.stringify({ fileName: file.name, mimeType, fileSize: file.size, ...presignScope }),
         });
         if (!mpRes.ok) {
           const j = await mpRes.json().catch(() => ({}));
@@ -403,6 +418,7 @@ export default function AssetUploadPanel({
           const res = await fetch(
             `${base}/presign-part?r2Key=${encodeURIComponent(mp.r2Key)}`
             + `&uploadId=${encodeURIComponent(mp.uploadId)}&partNumber=${partNumber}`
+            + (versionMode ? `&assetId=${encodeURIComponent(targetAssetId)}` : "")
           );
           if (!res.ok) throw new Error(`presign-part ${partNumber} 失败 (${res.status})`);
           return ((await res.json()) as { uploadUrl: string }).uploadUrl;
@@ -559,7 +575,7 @@ export default function AssetUploadPanel({
         // Save chunk size learning: zero retries → try upgrading next time
         saveChunkBytes(totalRetries === 0 ? chunkBytesUp(chunkBytes) : chunkBytes);
 
-        const regRes = await fetch(base, {
+        const regRes = await fetch(registerUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -593,7 +609,8 @@ export default function AssetUploadPanel({
 
   return (
     <div className="space-y-4">
-      {/* Mode toggle */}
+      {/* Mode toggle（追加版本模式无飞书分支：版本文件必须是 R2 字节） */}
+      {!versionMode && (
       <div className="flex rounded-lg overflow-hidden border border-zinc-200 text-xs">
         {(["file", "feishu"] as UploadMode[]).map(m => (
           <button key={m} onClick={() => setMode(m)}
@@ -604,6 +621,7 @@ export default function AssetUploadPanel({
           </button>
         ))}
       </div>
+      )}
 
       {/* key 强制两分支各自重挂：否则 React 按位置把非受控的 file input 复用成
           受控的 text input（uncontrolled→controlled 警告） */}
@@ -664,7 +682,7 @@ export default function AssetUploadPanel({
         </div>
       )}
 
-      {choosePlacement && (
+      {choosePlacement && !versionMode && (
         <div>
           <label className="block text-xs text-zinc-400 mb-1.5">位置</label>
           <button
@@ -678,7 +696,8 @@ export default function AssetUploadPanel({
         </div>
       )}
 
-      {/* Display name */}
+      {/* Display name（资产级，追加版本不改） */}
+      {!versionMode && (
       <div>
         <label className="block text-xs text-zinc-400 mb-1.5">显示名称（可选，留空则使用文件名）</label>
         <input
@@ -689,8 +708,10 @@ export default function AssetUploadPanel({
           className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400"
         />
       </div>
+      )}
 
-      {/* Asset type */}
+      {/* Asset type（同上：资产级） */}
+      {!versionMode && (
       <div>
         <label className="block text-xs text-zinc-400 mb-1.5">类型</label>
         <OverflowSafeSelect
@@ -702,6 +723,7 @@ export default function AssetUploadPanel({
           ))}
         </OverflowSafeSelect>
       </div>
+      )}
 
       {error && <p className="text-xs text-red-500">{error}</p>}
 
@@ -751,7 +773,7 @@ export default function AssetUploadPanel({
             ? progress !== null && progress < 100
               ? `上传中 ${progress}%`
               : "处理中…"
-            : "确认上传"}
+            : versionMode ? "上传新版本" : "确认上传"}
         </button>
       </div>
     </div>
