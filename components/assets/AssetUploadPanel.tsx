@@ -31,6 +31,8 @@ const CHUNK_LS_TTL  = 60 * 60 * 1000; // 1 hour
 // Failure thresholds — either triggers an abort + chunk-size downgrade
 const MAX_CONSECUTIVE_PART_FAILURES = 5;
 const MAX_TOTAL_RETRIES             = 20;
+// 单 PUT（<50MB）连续失败这么多次后降级到 multipart+relay（#457）
+const SINGLE_PUT_ATTEMPTS           = 3;
 
 function loadStoredChunkBytes(): number {
   try {
@@ -317,22 +319,33 @@ export default function AssetUploadPanel({
 
       let r2Key: string, fileId: string;
 
-      if (file.size < MULTIPART_THRESHOLD) {
+      // #457：单 PUT 打的是 R2 直连。直连不通的网络（relay 当初就是为这类环境做的）
+      // 下它必败，而 multipart 分支反倒能靠自适应降级走中继传上去——「大文件传得上、
+      // 小文件传不上」。这里让单 PUT 重试若干次后落到 multipart+relay：小文件整个
+      // 是一个 part（S3/R2 的「非尾部 part ≥5MB」对唯一那个 part 不适用），
+      // relay-part 的 60MB 帽正好盖住 50MB 阈值以下的文件。
+      //
+      // 保留单 PUT 作首选而不是无条件走 multipart：后者要给**每个**小文件多付
+      // create + complete 两次往返，为少数不通的网络给所有人加常态开销不划算。
+      let goMultipart = file.size >= MULTIPART_THRESHOLD;
+
+      if (!goMultipart) {
         // ── Single presigned PUT ────────────────────────────────────────────
         const presignRes = await fetch(`${base}/presign`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fileName: file.name, mimeType, ...presignScope }),
         });
+        // presign 走的是同源的 next，不是 R2 直连——它失败不是「直连不通」，
+        // 降级救不了，照旧直接报错
         if (!presignRes.ok) {
           const j = await presignRes.json().catch(() => ({}));
           setError((j as { error?: string }).error ?? `预签名失败 (${presignRes.status})`);
           return;
         }
         const presign = await presignRes.json() as { uploadUrl: string; r2Key: string; fileId: string; contentType: string };
-        r2Key = presign.r2Key; fileId = presign.fileId;
 
-        await new Promise<void>((resolve, reject) => {
+        const putOnce = () => new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.upload.addEventListener("progress", e => {
             if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
@@ -345,21 +358,45 @@ export default function AssetUploadPanel({
           xhr.setRequestHeader("Content-Type", presign.contentType);
           xhr.send(file);
         });
-        setProgress(100);
 
-        const regRes = await fetch(registerUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ storageType: "r2", r2Key, fileId, ...assetMeta }),
-        });
-        if (!regRes.ok) {
-          const j = await regRes.json().catch(() => ({}));
-          setError((j as { error?: string }).error ?? `注册失败 (${regRes.status})`);
+        let putOk = false;
+        for (let attempt = 0; attempt < SINGLE_PUT_ATTEMPTS && !putOk; attempt++) {
+          try {
+            await putOnce();
+            putOk = true;
+          } catch {
+            setProgress(0);   // 重试从头传，进度条别停在半截
+            if (attempt < SINGLE_PUT_ATTEMPTS - 1)
+              await new Promise<void>(r => setTimeout(r, RETRY_DELAY_MS));
+          }
+        }
+
+        if (putOk) {
+          setProgress(100);
+          r2Key = presign.r2Key; fileId = presign.fileId;
+
+          const regRes = await fetch(registerUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ storageType: "r2", r2Key, fileId, ...assetMeta }),
+          });
+          if (!regRes.ok) {
+            const j = await regRes.json().catch(() => ({}));
+            setError((j as { error?: string }).error ?? `注册失败 (${regRes.status})`);
+            return;
+          }
+          const regJ = await regRes.json() as { asset: { id: string; name: string | null; fileName: string; assetType: AssetType; storageType: "r2" | "feishu_link" } };
+          onUploaded({ assetId: regJ.asset.id, name: regJ.asset.name, fileName: regJ.asset.fileName, assetType: regJ.asset.assetType, storageType: regJ.asset.storageType });
           return;
         }
-        const regJ = await regRes.json() as { asset: { id: string; name: string | null; fileName: string; assetType: AssetType; storageType: "r2" | "feishu_link" } };
-        onUploaded({ assetId: regJ.asset.id, name: regJ.asset.name, fileName: regJ.asset.fileName, assetType: regJ.asset.assetType, storageType: regJ.asset.storageType });
-      } else {
+
+        // 直连打不通 → 降级。presign 出来的 r2Key 从未被写入，也没有任何 DB 行
+        // 引用它，弃置无害；multipart 会另发一个 fileId。
+        goMultipart = true;
+        setProgress(0);
+      }
+
+      if (goMultipart) {
         // ── Adaptive multipart upload ────────────────────────────────────────
         // Chunk size and concurrency are co-scheduled via DIRECT_LEVELS /
         // RELAY_LEVELS. Each iteration:
@@ -450,7 +487,8 @@ export default function AssetUploadPanel({
             const relayUrl = `${base}/relay-part`
               + `?r2Key=${encodeURIComponent(mp.r2Key)}`
               + `&uploadId=${encodeURIComponent(mp.uploadId)}`
-              + `&partNumber=${partNumber}`;
+              + `&partNumber=${partNumber}`
+              + (versionMode ? `&assetId=${encodeURIComponent(targetAssetId)}` : "");
             return new Promise<void>((resolve, reject) => {
               const xhr = new XMLHttpRequest();
               xhr.upload.addEventListener("progress", e => { if (e.lengthComputable) onProgress(e.loaded); });
