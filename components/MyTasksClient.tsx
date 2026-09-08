@@ -2,7 +2,7 @@
 
 import OverflowSafeSelect from "@/components/OverflowSafeSelect";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import type { MyTechReqFullEntry } from "@/lib/event-db";
 import { BASE_PATH } from "@/lib/base-path";
@@ -36,25 +36,14 @@ const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
 
 const VALID_STATUSES = ["awaiting", "pending", "in_progress", "done"] as const;
 
-export default function MyTasksClient() {
-  const [tasks, setTasks] = useState<MyTechReqFullEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function MyTasksClient({ initialTasks }: { initialTasks: MyTechReqFullEntry[] }) {
+  const [tasks, setTasks] = useState<MyTechReqFullEntry[]>(initialTasks);
   const [updating, setUpdating] = useState(false);
   const [selectedProduction, setSelectedProduction] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
-  const [selected, setSelected] = useState<MyTechReqFullEntry | null>(null);
-
-  useEffect(() => {
-    fetch(`${BASE_PATH}/api/my/tasks`)
-      .then(r => r.json())
-      .then((data: MyTechReqFullEntry[]) => {
-        setTasks(data);
-        setLoading(false);
-        const first = data.find(t => t.status !== "done");
-        setSelected(first ?? data[0] ?? null);
-      })
-      .catch(() => setLoading(false));
-  }, []);
+  const [selected, setSelected] = useState<MyTechReqFullEntry | null>(
+    () => initialTasks.find(t => t.status !== "done") ?? initialTasks[0] ?? null
+  );
 
   async function updateStatus(task: MyTechReqFullEntry, newStatus: string) {
     setUpdating(true);
@@ -98,18 +87,6 @@ export default function MyTasksClient() {
     if (sf === "active") return t.status !== "done";
     return t.status === sf;
   }).length;
-
-  if (loading) {
-    return (
-      <div className={styles.workspace}>
-        <div className={styles.pageHeader}>
-          <p className={styles.eyebrow}>Platform · 任务</p>
-          <h1 className={styles.pageTitle}>我的任务</h1>
-        </div>
-        <div className={styles.emptyState}>加载中…</div>
-      </div>
-    );
-  }
 
   return (
     <div className={styles.workspace}>
