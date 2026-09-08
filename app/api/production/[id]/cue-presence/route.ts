@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { updateCuePresence } from "@/lib/server-cache";
+import { hasActiveCueSSEClient, updateCuePresence } from "@/lib/server-cache";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasAnyEffectiveGrant, toActor } from "@/lib/grant-check";
@@ -8,6 +8,18 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { id } = await ctx.params;
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+
+  const { clientId, userName, listId, cueId } = await req.json() as {
+    clientId: string; userName: string; listId: string | null; cueId: string | null;
+  };
+  if (!clientId || !userName) return Response.json({ error: "missing fields" }, { status: 400 });
+
+  // 快路径（#460）：cue-stream 建连时已过与下面逐字相同的权限门，活跃连接在即免重查。
+  if (hasActiveCueSSEClient(id, clientId)) {
+    updateCuePresence(id, clientId, userName, listId ?? null, cueId ?? null);
+    return Response.json({ ok: true });
+  }
+
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   // 批A：全项目级通道——任一 cue 表可见即可接入（admin/owner 旁路）
@@ -16,11 +28,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     id, "cue_list", ["meta", "cues"], "view",
   );
   if (!canSee) return Response.json({ error: "无权访问" }, { status: 403 });
-
-  const { clientId, userName, listId, cueId } = await req.json() as {
-    clientId: string; userName: string; listId: string | null; cueId: string | null;
-  };
-  if (!clientId || !userName) return Response.json({ error: "missing fields" }, { status: 400 });
   updateCuePresence(id, clientId, userName, listId ?? null, cueId ?? null);
   return Response.json({ ok: true });
 }
