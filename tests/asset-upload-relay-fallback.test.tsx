@@ -22,6 +22,9 @@ let calls: Call[];
 let xhrCalls: XhrCall[];
 /** 直连（R2）是否通——false 模拟「路由器对 R2 直连完全不通」 */
 let directWorks: boolean;
+/** 单 PUT 打不通、但 multipart 的 part 直传通——模拟重试那几秒里网络恢复。
+ *  这是 totalRetries===0 的唯一入口，也是分片学习值被污染的那条路径。 */
+let directPartWorks: boolean;
 
 function jsonRes(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -41,9 +44,11 @@ class FakeXHR {
   setRequestHeader() {}
   send() {
     xhrCalls.push({ method: this.method, url: this.url });
-    const isRelay = this.url.includes("/relay-part");
+    const ok = this.url.includes("/relay-part") ? true
+      : this.url.includes("/part")               ? directWorks || directPartWorks
+      :                                            directWorks;
     queueMicrotask(() => {
-      if (isRelay || directWorks) { this.status = 200; this.handlers.load?.(); }
+      if (ok) { this.status = 200; this.handlers.load?.(); }
       else { this.status = 0; this.handlers.error?.(); }   // 直连不通＝连不上，不是 4xx
     });
   }
@@ -54,7 +59,7 @@ describe("AssetUploadPanel 小文件直传降级（#457）", () => {
   let root: Root;
 
   beforeEach(() => {
-    calls = []; xhrCalls = []; directWorks = false;
+    calls = []; xhrCalls = []; directWorks = false; directPartWorks = false;
     localStorage.clear();          // chunk size 学习值不跨用例串味
     vi.useFakeTimers();
     container = document.createElement("div");
@@ -141,6 +146,22 @@ describe("AssetUploadPanel 小文件直传降级（#457）", () => {
     expect(calls.find(c => c.url.includes("/presign-part"))!.url).toContain("assetId=ast_1");
     expect(calls.find(c => c.url.includes("/presign-multipart"))!.body?.assetId).toBe("ast_1");
     expect(onUploaded).toHaveBeenCalledWith(expect.objectContaining({ assetId: "ast_1" }));
+  });
+
+  it("降级不污染分片大小的学习值（小文件只有一个 part，成败与分片无关）", async () => {
+    // 单 PUT 失败、但降级后第一个 part 直传就成——totalRetries===0，正是
+    // saveChunkBytes(chunkBytesUp(...)) 那一支。用一个几字节文件的「零重试成功」
+    // 去把学习值从 16MB 顶到 32MB 是纯噪声，下一次大文件要为它买单。
+    directPartWorks = true;
+    localStorage.setItem("upload_chunk_bytes_v1",
+      JSON.stringify({ bytes: 16 << 20, updatedAt: Date.now() }));
+
+    const { onUploaded } = await uploadOnce();
+
+    expect(onUploaded).toHaveBeenCalledTimes(1);                       // 确实走完了降级链路
+    expect(calls.some(c => c.url.includes("/presign-multipart"))).toBe(true);
+    expect(xhrCalls.some(c => c.url.includes("/relay-part"))).toBe(false);  // 这条路没用上中继
+    expect(JSON.parse(localStorage.getItem("upload_chunk_bytes_v1")!).bytes).toBe(16 << 20);
   });
 
   it("直连正常：一次 PUT 就走完单传路径，不碰 multipart / relay", async () => {

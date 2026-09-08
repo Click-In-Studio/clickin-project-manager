@@ -141,7 +141,10 @@ describe("relay-part 的门（#457）", () => {
     expect((buf as ArrayBuffer).byteLength).toBe(16);
   });
 
-  it("参数缺失 → 400（在门之前，不泄露权限信息）", async () => {
+  // 门在形状校验之后——与 presign / presign-part / presign-multipart 同序（三者
+  // 都是先验参数再查门）。代价是「无权 + 参数畸形」的调用方从 403 变 400，只泄露
+  // 「参数不对」这一位；非成员在更早的 getProductionPermissionContext 就被 403 挡住了。
+  it("参数缺失 → 400（形状校验在门之前，与 presign 家族同序）", async () => {
     const bad = new NextRequest("http://localhost/api/relay-part?r2Key=a&uploadId=b", {
       method: "POST", headers: { Cookie: cookieFor(wildcard) },
     });

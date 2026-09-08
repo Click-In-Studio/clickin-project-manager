@@ -426,6 +426,12 @@ export default function AssetUploadPanel({
         // all non-trailing parts to be exactly the same size.
         const storedChunk = loadStoredChunkBytes();
         let chunkBytes = storedChunk;
+        // #457：分片大小的学习值只该由「真的分了片」的上传来动。降级进来的小文件
+        // 整个是一个 part，传成传败都和分片大小无关——让它写学习值，等于用一个
+        // 200KB 文件的成败去调下一次大文件的分片，是纯噪声。
+        const persistChunkLearning = (bytes: number) => {
+          if (file.size >= MULTIPART_THRESHOLD) saveChunkBytes(bytes);
+        };
         if (file.size >= PROBE_FILE_MIN && storedChunk < PROBE_STORED_MAX) {
           const probePresignRes = await fetch(`${base}/presign-probe`);
           if (probePresignRes.ok) {
@@ -579,7 +585,7 @@ export default function AssetUploadPanel({
 
             // Abort if failures suggest the chunk size itself is the problem
             if (consecutivePartFailures >= MAX_CONSECUTIVE_PART_FAILURES || totalRetries >= MAX_TOTAL_RETRIES) {
-              saveChunkBytes(chunkBytesDown(chunkBytes));
+              persistChunkLearning(chunkBytesDown(chunkBytes));
               throw new ChunkSizeAbortError();
             }
 
@@ -611,7 +617,7 @@ export default function AssetUploadPanel({
 
         setProgress(100);
         // Save chunk size learning: zero retries → try upgrading next time
-        saveChunkBytes(totalRetries === 0 ? chunkBytesUp(chunkBytes) : chunkBytes);
+        persistChunkLearning(totalRetries === 0 ? chunkBytesUp(chunkBytes) : chunkBytes);
 
         const regRes = await fetch(registerUrl, {
           method: "POST",
