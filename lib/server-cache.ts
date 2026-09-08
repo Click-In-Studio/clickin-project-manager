@@ -143,6 +143,22 @@ export function registerSSE(
   };
 }
 
+/**
+ * 该 clientId 在此 (production, version) 上是否有活跃 SSE 连接。
+ *
+ * #460 心跳快路径的依据：SSE 建连时已过与 presence POST 完全相同的权限门
+ * （getProductionPermissionContext + hasGrant + 版本归属校验），注册表里查得到
+ * 就等于校验过——心跳无需重跑那 7 条 DB 查询。连接断开即失效，无 TTL 缓存。
+ */
+export function hasActiveSSEClient(productionId: string, versionId: string, clientId: string): boolean {
+  const clients = sseRegistry().get(cacheKey(productionId, versionId));
+  if (!clients) return false;
+  for (const client of clients.values()) {
+    if (client.clientId === clientId) return true;
+  }
+  return false;
+}
+
 // ─── Presence ─────────────────────────────────────────────────────────────────
 
 export function getPresence(productionId: string, versionId: string): PresenceClient[] {
@@ -196,6 +212,11 @@ export function registerCueSSE(productionId: string, clientId: string, push: SSE
   if (!reg.has(productionId)) reg.set(productionId, new Map());
   reg.get(productionId)!.set(clientId, push);
   return () => reg.get(productionId)?.delete(clientId);
+}
+
+/** cue 版的 hasActiveSSEClient（#460）：cue-stream 建连门与 cue-presence 心跳门逐字相同。 */
+export function hasActiveCueSSEClient(productionId: string, clientId: string): boolean {
+  return cueSSEReg().get(productionId)?.has(clientId) ?? false;
 }
 
 export function broadcastCueUpdate(productionId: string): void {
