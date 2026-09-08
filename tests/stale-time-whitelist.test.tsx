@@ -44,8 +44,8 @@ function fetchCalls(src: string): { args: string; line: number }[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(src)) !== null) {
     let depth = 0;
-    let j = m.end ? m.end : re.lastIndex - 1;
-    j = re.lastIndex - 1;
+    // re.lastIndex 停在 "(" 之后，回退一格就是那个左括号
+    let j = re.lastIndex - 1;
     while (j < src.length) {
       if (src[j] === "(") depth++;
       else if (src[j] === ")") {
