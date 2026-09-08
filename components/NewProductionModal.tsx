@@ -4,6 +4,7 @@ import OverflowSafeSelect from "@/components/OverflowSafeSelect";
 
 import { useState, useEffect, useRef } from "react";
 import { BASE_PATH } from "@/lib/base-path";
+import { writeFetch } from "@/lib/write-refresh";
 import { PRODUCTION_TYPES } from "@/lib/production-types";
 
 
@@ -61,7 +62,7 @@ export default function NewProductionModal({ onClose, onCreated }: Props) {
     setCreating(true);
     setError("");
     try {
-      const res = await fetch(`${BASE_PATH}/api/productions`, {
+      const res = await writeFetch(`${BASE_PATH}/api/productions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({

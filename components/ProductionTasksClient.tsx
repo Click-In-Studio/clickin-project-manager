@@ -4,9 +4,10 @@ import OverflowSafeSelect from "@/components/OverflowSafeSelect";
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import type { ProductionTechReqEntry } from "@/lib/event-db";
 import { BASE_PATH } from "@/lib/base-path";
+import { writeFetch, refreshNow } from "@/lib/write-refresh";
 import { datetimeLocalToIso, fmtDate, fmtTime, isoToDatetimeLocal } from "@/lib/tz";
 import SmartText from "@/components/SmartText";
 import type { PickerMember, PickerDept } from "@/components/MemberPickerModal";
@@ -229,7 +230,7 @@ function CreateTaskModal({ productionId, onClose, onCreated }: {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks`, {
+      const res = await writeFetch(`${BASE_PATH}/api/production/${productionId}/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -493,10 +494,9 @@ export default function ProductionTasksClient({
   /** "我的"scope 判定（assignee 含本人） */
   currentUserId?: string;
 }) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [tasks, setTasks] = useState(initialTasks);
-  // router.refresh() 后服务端重投喂（新建任务落库）→ 本地列表跟进
+  // refreshNow() 后服务端重投喂（新建任务落库）→ 本地列表跟进
   useEffect(() => { setTasks(initialTasks); }, [initialTasks]);
   const [createOpen, setCreateOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -582,7 +582,7 @@ export default function ProductionTasksClient({
   async function updateStatus(task: ProductionTechReqEntry, newStatus: string) {
     setUpdating(true);
     try {
-      const res = await fetch(
+      const res = await writeFetch(
         `${BASE_PATH}/api/production/${productionId}/tasks/${task.id}/status`,
         { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: newStatus }) }
       );
@@ -640,7 +640,7 @@ export default function ProductionTasksClient({
     setUpdating(true);
     setDrawerError(null);
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks/${task.id}`, {
+      const res = await writeFetch(`${BASE_PATH}/api/production/${productionId}/tasks/${task.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -679,7 +679,7 @@ export default function ProductionTasksClient({
       setTasks(current => current.map(item => item.id === task.id ? patch : item));
       setSelected(patch);
       setDrawerEditing(false);
-      router.refresh();
+      refreshNow();
     } finally {
       setUpdating(false);
     }
@@ -746,7 +746,7 @@ export default function ProductionTasksClient({
     <CreateTaskModal
       productionId={productionId}
       onClose={() => setCreateOpen(false)}
-      onCreated={() => { setCreateOpen(false); router.refresh(); }}
+      onCreated={() => { setCreateOpen(false); refreshNow(); }}
     />
   );
 

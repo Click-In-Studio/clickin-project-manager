@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { MyProductionEntry } from "@/lib/db";
 import { BASE_PATH } from "@/lib/base-path";
+import { writeFetch } from "@/lib/write-refresh";
 import { productionAvatarSrc } from "@/lib/avatar-url";
 import styles from "@/components/my-pages.module.css";
 import NewProductionModal from "@/components/NewProductionModal";
@@ -64,7 +65,7 @@ export default function MyProjectsClient(
     )) return;
     setExiting(p.id);
     try {
-      const res = await fetch(
+      const res = await writeFetch(
         `${BASE_PATH}/api/production/${p.id}/members/${currentUserId}/status`,
         {
           method: "POST",

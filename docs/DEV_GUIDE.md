@@ -510,6 +510,58 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
 ---
 
+## 10.5 前端缓存与写操作（#416）
+
+### client router cache 是**按页白名单**开的，不是全局
+
+页面导出 `unstable_dynamicStaleTime = 30`（#416）后，30 秒内切回本页直接命中 client
+router cache、零往返。**没有导出的页面维持默认 0**（每次导航必打服务端）。
+
+开这个导出的前提，是**本页自己能触发的写操作全部会失效缓存**。否则用户在本页写完切走
+再切回来，组件会从写之前的 RSC payload 重新播种（本仓 `useState(initialX)` 的播种模式
+遍地都是），自己的写被静默打回。
+
+`tests/stale-time-whitelist.test.tsx` 持续把关：它自己扫出白名单页面、算组件闭包、断言
+闭包里没有裸的写 fetch。往白名单页面的组件树里塞裸写点，或给新页面加导出而组件没收拾
+干净，那条测试都会红。
+
+### 白名单页面的组件，写请求必须走 `writeFetch`
+
+```typescript
+import { writeFetch, refreshNow } from "@/lib/write-refresh";
+
+const res = await writeFetch(url, { method: "PATCH", body: ... });
+```
+
+`writeFetch` 与 `fetch` 同签名、原样透传 Response，成功时安排一次 300ms 去抖的
+`router.refresh()`——它会 `invalidateBfCache()`，清的是**整个 bfcache 而非当前路由**，
+所以一处刷新即全站失效。
+
+调用点若本来就依赖 `router.refresh()` 重投喂界面（例如删除后没有本地 setState，全靠
+服务端重发列表），把那次显式刷新换成 `refreshNow()`：它立即刷新并吃掉待发的去抖，
+避免同一个操作刷两趟。
+
+组件内若有统一的 `api()` helper，在它的成功分支上调 `markWritten()`，不必逐个改写点。
+
+### 例外（不要走 writeFetch）
+
+| 形态 | 例子 | 原因 |
+|------|------|------|
+| 把 POST 当查询用 | `mention-resolve` | 常在 useEffect 里，refresh→props 变→refresh 自激 |
+| 心跳 / presence | `cue-presence` | 定时打，会变成每几秒 refresh 整页 |
+| 预签名 / 导出流 | `avatar/presign`、`export-cues` | 不改数据；预签名后真正的写自己会刷 |
+| 跨源直传 | R2 presigned PUT | 不是本站 API |
+
+这四类同时也写在把关测试的 `NON_MUTATING` 里，新增例外要两边一起加。
+
+### 绝对禁止
+
+- ❌ 在 `next.config.ts` 里全局开 `experimental.staleTimes.dynamic`——全仓 45 个客户端
+  文件、约 140 个写点没有失效缓存，全局开等于让它们静默回滚（#416 评审结论）
+- ❌ 猴补丁 `window.fetch` 做全局拦截——剧本编辑器和 wiki 是按键级自动保存，会变成打字
+  时不停 refresh 整页，把省下的往返成倍赔回去
+- ❌ 给页面加 `unstable_dynamicStaleTime` 却不看组件闭包——把关测试会拦，别改测试绕过
+
 ## 11. 单元测试
 
 ### 11.1 定位与目标

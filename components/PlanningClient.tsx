@@ -17,6 +17,7 @@ import { dateTimeToIso, fmtDate, fmtTime, isoCSTDateStr, todayCSTStr } from "@/l
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
+import { writeFetch, refreshNow } from "@/lib/write-refresh";
 import Badge from "@/components/Badge";
 import DropdownPicker, { type DropdownPickerItem } from "@/components/DropdownPicker";
 import type { ProductionEvent, EventScheduleItemWithParticipants, EventTechReq } from "@/lib/event-db";
@@ -145,7 +146,6 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
   events: ProductionEvent[];
   onClose: () => void;
 }) {
-  const router = useRouter();
   const [kind, setKind] = useState<QuickCreateKind>("event");
   const [title, setTitle] = useState("");
   const [startTime, setStartTime] = useState("09:00");
@@ -179,7 +179,7 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
     }
     try {
       if (kind === "event") {
-        const eventRes = await fetch(`${BASE_PATH}/api/production/${productionId}/events`, {
+        const eventRes = await writeFetch(`${BASE_PATH}/api/production/${productionId}/events`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title: title.trim(), eventType, startTime: start, endTime: end }),
@@ -188,7 +188,7 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
         if (!eventRes.ok) throw new Error(eventData.error ?? "事件创建失败");
 
       } else {
-        const taskRes = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks`, {
+        const taskRes = await writeFetch(`${BASE_PATH}/api/production/${productionId}/tasks`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -205,7 +205,7 @@ function QuickCreateModal({ productionId, date, departments, events, onClose }: 
         if (!taskRes.ok) throw new Error(taskData.error ?? "任务创建失败");
       }
       onClose();
-      router.refresh();
+      refreshNow();
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建失败");
     } finally {
@@ -853,7 +853,7 @@ function TaskGanttView({ productionId, tasks, milestones, phases }: Props) {
     if (ns === drag.origStart && ne === drag.origEnd) return;
     setSaving(drag.id);
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks/${drag.id}`, {
+      const res = await writeFetch(`${BASE_PATH}/api/production/${productionId}/tasks/${drag.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ startTime: ns, endTime: ne }),
@@ -1560,7 +1560,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
     if (!eventId) return;
     const applyResult = opts?.applyResult ?? true;
     if (applyResult) setLayoutError(null);
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/rundown`, {
+    const res = await writeFetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/rundown`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         expectedColumnsTag: (opts?.expectedTag ?? columnsTagRef.current) || undefined,
@@ -1633,7 +1633,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   ) => {
     if (!eventId) return;
     const keys = [...new Set([...Object.keys(colors), ...Object.keys(lanes)])];
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/rundown`, {
+    const res = await writeFetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/rundown`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         expectedPlacementsTag: placementsTagRef.current || undefined,
@@ -1694,7 +1694,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
 
     if (!column.groupId) {
       // 新列：先建 A 型组（绑本 event），再把它排进版面
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/user-groups`, {
+      const res = await writeFetch(`${BASE_PATH}/api/production/${productionId}/user-groups`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ eventId, name, members, poc: null }),
       });
@@ -1707,7 +1707,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
       return;
     }
 
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/user-groups/${column.groupId}`, {
+    const res = await writeFetch(`${BASE_PATH}/api/production/${productionId}/user-groups/${column.groupId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, members }),
     });
@@ -1853,7 +1853,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
   }
 
   async function saveItemTime(item: EventScheduleItemWithParticipants, startTime: string, endTime: string) {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/schedule/${item.id}`, {
+    const res = await writeFetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/schedule/${item.id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ startTime, endTime }),
     });
     const data = await res.json().catch(() => ({}));
@@ -1863,7 +1863,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
 
   /** 只改时间。责任方（department_id / group_id）不在这里动——见 dropEntryAt 的注释。 */
   async function saveTaskTime(task: EventTechReq, startTime: string, endTime: string) {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks/${task.id}`, {
+    const res = await writeFetch(`${BASE_PATH}/api/production/${productionId}/tasks/${task.id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ startTime, endTime }),
     });
     const data = await res.json().catch(() => ({}));
@@ -1892,14 +1892,14 @@ function TimetableView({ productionId, events, departments, members }: Props) {
       // 没有任何纯部门列被选中时不动 departmentIds——避免"选了两个组"把事项原有的
       // 部门关联清空
       const deptPatch = chosenDeptIds.length ? { departmentIds: chosenDeptIds } : {};
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/schedule/${item.id}`, {
+      const res = await writeFetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/schedule/${item.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: draft.title, notes: draft.description, startTime: draft.start, endTime: draft.end, location: draft.location, itemType: draft.itemType, ...deptPatch }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "日程保存失败");
 
-      const groupRes = await fetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/schedule/${item.id}/groups`, {
+      const groupRes = await writeFetch(`${BASE_PATH}/api/production/${productionId}/events/${eventId}/schedule/${item.id}/groups`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ groupIds: chosenGroupIds }),
       });
@@ -1916,7 +1916,7 @@ function TimetableView({ productionId, events, departments, members }: Props) {
         chosenGroupIds.length === 1 && chosenDeptIds.length === 0 ? { groupId: chosenGroupIds[0] }
         : chosenGroupIds.length === 0 && chosenDeptIds.length === 1 ? { departmentId: chosenDeptIds[0] }
         : {};
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks/${task.id}`, {
+      const res = await writeFetch(`${BASE_PATH}/api/production/${productionId}/tasks/${task.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: draft.title, description: draft.description, startTime: draft.start, endTime: draft.end, status: draft.status, ...subject }),
       });
@@ -2267,7 +2267,6 @@ function PhaseManageModal({
   perm: PhasePerm;
   onClose: () => void;
 }) {
-  const router = useRouter();
   const today = ymd(new Date());
 
   // null = 未在编辑；"new" = 创建表单；否则为 phase id
@@ -2328,7 +2327,7 @@ function PhaseManageModal({
         milestoneIds: [...milestoneIds],
       };
       if (isNew) payload.deptId = deptId || null;  // 归属只在创建时定（编辑面不换轨）
-      const res = await fetch(url, {
+      const res = await writeFetch(url, {
         method: isNew ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -2336,7 +2335,7 @@ function PhaseManageModal({
       const data = await res.json().catch(() => null);
       if (!res.ok) { setError(data?.error ?? "保存失败"); return; }
       setEditing(null);
-      router.refresh();
+      refreshNow();
     } catch {
       setError("网络错误，保存失败");
     } finally {
@@ -2346,8 +2345,8 @@ function PhaseManageModal({
 
   async function remove(p: PlanningPhase) {
     if (!confirm(`删除阶段「${p.name}」？绑定的任务与里程碑不受影响。`)) return;
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/phases/${p.id}`, { method: "DELETE" });
-    if (res.ok) router.refresh();
+    const res = await writeFetch(`${BASE_PATH}/api/production/${productionId}/phases/${p.id}`, { method: "DELETE" });
+    if (res.ok) refreshNow();
     else {
       const data = await res.json().catch(() => null);
       alert(data?.error ?? "删除失败");

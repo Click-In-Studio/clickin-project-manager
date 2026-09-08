@@ -6,6 +6,7 @@ import { useState } from "react";
 import Link from "next/link";
 import type { MyTechReqFullEntry } from "@/lib/event-db";
 import { BASE_PATH } from "@/lib/base-path";
+import { writeFetch } from "@/lib/write-refresh";
 import SmartText from "@/components/SmartText";
 import styles from "@/components/my-pages.module.css";
 
@@ -48,7 +49,7 @@ export default function MyTasksClient({ initialTasks }: { initialTasks: MyTechRe
   async function updateStatus(task: MyTechReqFullEntry, newStatus: string) {
     setUpdating(true);
     try {
-      const res = await fetch(
+      const res = await writeFetch(
         `${BASE_PATH}/api/production/${task.productionId}/events/${task.eventId}/tech-reqs/${task.id}/status`,
         { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: newStatus }) }
       );
