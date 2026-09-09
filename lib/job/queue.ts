@@ -275,6 +275,11 @@ class DoneListener {
   }
 
   async stop(): Promise<void> {
+    // 建连途中被 stop：先等 ensure 落地（AI review #477-①）。否则 drop() 会 release
+    // 一条 LISTEN 还在飞的连接——查询本身不会串包（pg 每条连接有自己的查询队列，
+    // 新主人的查询排在后面），但那条连接会**带着我们的 notification 监听器和 LISTEN
+    // 注册**回到池里给别人用，且这次 stop 没发出 UNLISTEN。等一下即可两者都不发生。
+    await this.connecting?.catch(() => { /* 建连失败：drop 已在 ensure 里做过 */ });
     const c = this.client;
     const drop = this.drop;
     this.client = null;

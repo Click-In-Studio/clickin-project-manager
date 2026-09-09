@@ -141,4 +141,21 @@ describe("LISTEN 长连接：断连要还池", () => {
     await waitFor(async () => (await listenBackendPid()) !== null);
     cancel2();
   });
+
+  it("建连途中被 stop：连接不带着 LISTEN 回池（AI review #477-①）", async () => {
+    const pool = getPool();
+    await stopCollabListenerForTests();
+    await waitFor(async () => (await listenBackendPid()) === null);
+    const baseline = pool.totalCount;
+
+    // 不等 ensure 落地就 stop——stop 若不等 this.connecting，drop() 会把一条
+    // LISTEN 还在飞的连接还回池：它带着我们的 notification 监听器和 LISTEN 注册
+    // 去给下一个主人用，且这次 stop 没机会发 UNLISTEN。
+    const cancel3 = registerWikiSSE(`${wikiId}-race`, "c3", () => {});
+    await stopCollabListenerForTests();
+    cancel3();
+
+    expect(await listenBackendPid()).toBeNull();
+    await waitFor(() => pool.totalCount <= baseline);
+  });
 });

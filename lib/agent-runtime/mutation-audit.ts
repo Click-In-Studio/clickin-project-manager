@@ -24,9 +24,11 @@ import type { ToolMutation } from "./tools";
  * 有闸的并行 map（#459）：快照读取按 id 并行，但**不能无闸**——一次批写最多 50 个
  * id，每个 id 又要 4~5 条查询，裸 Promise.all 就是几百条查询同时砸进只有 max 条
  * 连接的池（agent-runner 那一池只有 10），把全站其他请求挤到后面排队。
- * 闸开在 id 这一层，每个 id 内部最多再并发 3 条，峰值约 limit×3。
+ * 闸开在 id 这一层，每个 id 内部最多再并发 3 条——所以 limit 要按 **limit×3 塞得进
+ * 最小的那只池** 来定（agent-runner 是 10）：3×3=9，一条批写的快照读不会自己就把
+ * 池占满（AI review #477-②）。审计是后台路径，这点串行化换来的延迟无所谓。
  */
-const SNAPSHOT_CONCURRENCY = 6;
+const SNAPSHOT_CONCURRENCY = 3;
 
 async function mapWithLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const out = new Array<R>(items.length);
