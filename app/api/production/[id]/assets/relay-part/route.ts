@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
 import { getSession } from "@/lib/session";
 import { getProductionPermissionContext } from "@/lib/db";
+import { canUploadAssetBytes } from "@/lib/asset/perm";
 import { uploadPartRelay } from "@/lib/r2";
 
 // Max part size the relay will accept (matches client PART_SIZE + headroom)
@@ -27,8 +27,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   );
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view")))
-    return Response.json({ error: "权限不足" }, { status: 403 });
 
   // ── Params ─────────────────────────────────────────────────────────────────
   const sp = new URL(req.url).searchParams;
@@ -38,6 +36,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   if (!r2Key || !uploadId || !partNumber || partNumber < 1 || partNumber > 10_000)
     return Response.json({ error: "缺少或非法参数 (r2Key / uploadId / partNumber)" }, { status: 400 });
+
+  // ── Gate ───────────────────────────────────────────────────────────────────
+  // #457：此前查的是 script/*/blocks@view（剧本台词的**查看**权）——与 presign
+  // 家族三条路由完全不同源，且不认 assetId，#456 的「传新版本」门在中继路径上是
+  // 漏的。中继写的是和 presign-part 同一批字节，门必须同一把。
+  if (!await canUploadAssetBytes(permCtx, id, sp.get("assetId")))
+    return Response.json({ error: "权限不足" }, { status: 403 });
 
   // ── Size guard (before reading body) ──────────────────────────────────────
   const clHeader = req.headers.get("content-length");
