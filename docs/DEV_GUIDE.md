@@ -103,6 +103,12 @@ SESSION_SECRET=any-random-string        # 生产环境必须设置；本地开�
 # PGDATABASE=script_editor
 # PGUSER=your-os-username
 # PGPASSWORD=your-password
+#
+# 连接池四道闸（#459，缺省值见 lib/pg.ts，一般不用动；0 = 关闭该闸）：
+# PG_POOL_MAX=20                 # 单进程池上限。线上三个进程各一池，和不能超 max_connections
+# PG_STATEMENT_TIMEOUT_MS=15000  # 单条语句（含等锁）封顶
+# PG_IDLE_IN_TX_TIMEOUT_MS=30000 # 事务开着不动的连接封顶
+# PG_CONNECTION_TIMEOUT_MS=10000 # 池满时取连接的等待封顶
 
 # ── 文件上传（使用资产/文件功能时必填）──────────────────────────────────────
 R2_ACCOUNT_ID=xxxxxxxx

@@ -20,6 +20,26 @@ import { getPool } from "@/lib/pg";
 import { newMutationId } from "./ids";
 import type { ToolMutation } from "./tools";
 
+/**
+ * 有闸的并行 map（#459）：快照读取按 id 并行，但**不能无闸**——一次批写最多 50 个
+ * id，每个 id 又要 4~5 条查询，裸 Promise.all 就是几百条查询同时砸进只有 max 条
+ * 连接的池（agent-runner 那一池只有 10），把全站其他请求挤到后面排队。
+ * 闸开在 id 这一层，每个 id 内部最多再并发 3 条——所以 limit 要按 **limit×3 塞得进
+ * 最小的那只池** 来定（agent-runner 是 10）：3×3=9，一条批写的快照读不会自己就把
+ * 池占满（AI review #477-②）。审计是后台路径，这点串行化换来的延迟无所谓。
+ */
+const SNAPSHOT_CONCURRENCY = 3;
+
+async function mapWithLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < items.length; i = next++) out[i] = await fn(items[i]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
 export type Snapshot = Record<string, unknown> & { label?: string; body?: string };
 
 export type MutationChange =
@@ -65,8 +85,8 @@ const READERS: Record<string, ScopeReader> = {
       if (!productionId) return out;
       const { getWiki, listWikiSharePeople } = await import("@/lib/wiki/content");
       const { getNodeByWikiId, listNodeDeptShares } = await import("@/lib/node/db");
-      // 批量写（≤50 篇）逐篇串行会放大 N 倍往返，按 id 并行（AI review #398）
-      const snaps = await Promise.all(ids.map(async (id) => {
+      // 批量写（≤50 篇）逐篇串行会放大 N 倍往返，按 id 并行——但要有闸（#459）
+      const snaps = await mapWithLimit(ids, SNAPSHOT_CONCURRENCY, async (id) => {
         const doc = await getWiki(id, productionId).catch(() => null);
         if (!doc) return null;
         const shell = await getNodeByWikiId(id).catch(() => null);
@@ -88,7 +108,7 @@ const READERS: Record<string, ScopeReader> = {
           body: doc.body,
         };
         return [id, snap] as const;
-      }));
+      });
       for (const s of snaps) if (s) out.set(s[0], s[1]);
       return out;
     },
