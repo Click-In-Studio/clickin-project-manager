@@ -113,6 +113,8 @@ async function publishRemote(topic: string, frame: string, pool: Pool = getPool(
 class CollabListener {
   private client: PoolClient | null = null;
   private connecting: Promise<void> | null = null;
+  /** 连接还给池的幂等入口（error 与 stop 共用）——见 ensure 里的注释。 */
+  private drop: ((err?: Error) => void) | null = null;
   constructor(private readonly pool: Pool) {}
 
   async ensure(): Promise<void> {
@@ -120,6 +122,19 @@ class CollabListener {
     if (this.connecting) return this.connecting;
     this.connecting = (async () => {
       const client = await this.pool.connect();
+      // 断连即把连接还给池（#459）：签出中的连接报错时 pg-pool 不会自己回收——它在
+      // 签出那一刻就摘掉了自己的 error 监听器，只有 release() 才会把连接移出池。
+      // 光置空引用＝这个槽位永久损失；线上 PG 约每周随 unattended-upgrades 重启一次，
+      // 每次重启每个进程漏一个，攒够 max 就是全池死锁。
+      let released = false;
+      const drop = (err?: Error) => {
+        if (released) return;
+        released = true;
+        if (this.client === client) this.client = null;
+        if (this.drop === drop) this.drop = null;
+        try { client.release(err); } catch { /* 已经还过了 */ }
+      };
+      this.drop = drop;
       client.on("notification", (msg) => {
         if (msg.channel !== COLLAB_CHANNEL || !msg.payload) return;
         const idx = msg.payload.indexOf(":");
@@ -130,8 +145,14 @@ class CollabListener {
           .then((r) => { if (r.rows[0]) localBroadcast(r.rows[0].topic, r.rows[0].frame); })
           .catch((err) => console.error("[wiki-collab] fetch frame failed:", err));
       });
-      client.on("error", () => { this.client = null; });
-      await client.query(`LISTEN ${COLLAB_CHANNEL}`);
+      client.on("error", drop);
+      try {
+        await client.query(`LISTEN ${COLLAB_CHANNEL}`);
+      } catch (err) {
+        drop(err as Error);
+        throw err;
+      }
+      if (released) return; // 建连途中就被 stop()/断连还回去了，别再挂上来
       this.client = client;
     })().finally(() => { this.connecting = null; });
     return this.connecting;
@@ -139,8 +160,10 @@ class CollabListener {
 
   async stop(): Promise<void> {
     const c = this.client;
+    const drop = this.drop;
     this.client = null;
-    if (c) { try { await c.query(`UNLISTEN ${COLLAB_CHANNEL}`); } catch { /* ignore */ } c.release(); }
+    if (c) { try { await c.query(`UNLISTEN ${COLLAB_CHANNEL}`); } catch { /* ignore */ } }
+    drop?.(); // 与 error 分支共用同一个幂等入口，不会重复 release
   }
 }
 

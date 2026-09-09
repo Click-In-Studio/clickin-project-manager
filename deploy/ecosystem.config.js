@@ -5,6 +5,12 @@
 // 开关类 env（AGENT_RUNTIME / AGENT_RUNNER_URL / 各类 key）一律放 shared/.env.local，
 // 这里只放端口这类"进程定义"的东西——node --env-file 不覆盖已存在的进程 env，
 // 写在这里的值 .env.local 就改不动，回滚会多一次发布。
+// 三池分配（#459）：三个进程各持一个 pg 连接池，max 之和不能超过 PG 的
+// max_connections（线上 100，其中 superuser_reserved_connections=3）余量：
+//   next 20 + agent-runner 10 + heavy-worker 8 = 38，留足 psql/迁移/同机住户的份。
+// 池大小是**每进程**的量，只能写在这里——shared/.env.local 三个进程共用，区分不了；
+// 代价同端口：写进 ecosystem 的值 .env.local 就覆盖不动了（node --env-file 不覆盖
+// 已存在的进程 env），要调得走 PR + 发布。其余四道闸的缺省值在 lib/pg.ts。
 module.exports = {
   apps: [
     {
@@ -21,6 +27,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         AGENT_RUNNER_PORT: 3102,
+        PG_POOL_MAX: 10,          // 见文件头「三池分配」
         // base prompt 六件套的目录显式给出，不依赖 cwd：pm2 reload 对已在跑的 app **不更新 cwd**
         // （首发时 cwd 停在 /home/ubuntu，prompt 六件套全缺——线上跑了一小时的空 base prompt），
         // env 则随 --update-env 每次发布都生效
@@ -47,6 +54,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         HEAVY_WORKER_PORT: 3103,
+        PG_POOL_MAX: 8,           // 见文件头「三池分配」
       },
       wait_ready: true,
       listen_timeout: 30000,
@@ -64,6 +72,7 @@ module.exports = {
         NODE_ENV: 'production',
         PORT: 3001,
         HOSTNAME: '0.0.0.0',
+        PG_POOL_MAX: 20,          // 见文件头「三池分配」
       },
       max_memory_restart: '1G',
       // Keep stdout/stderr logs

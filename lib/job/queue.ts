@@ -231,6 +231,8 @@ type Waiter = (row: JobRow) => void;
 class DoneListener {
   private client: PoolClient | null = null;
   private connecting: Promise<void> | null = null;
+  /** 连接还给池的幂等入口（error 与 stop 共用）——见 ensure 里的注释。 */
+  private drop: ((err?: Error) => void) | null = null;
   readonly waiters = new Map<string, Set<Waiter>>();
 
   async ensure(): Promise<void> {
@@ -238,6 +240,19 @@ class DoneListener {
     if (this.connecting) return this.connecting;
     this.connecting = (async () => {
       const client = await getPool().connect();
+      // 断连即把连接还给池（#459）：签出中的连接报错时 pg-pool 不会自己回收——它在
+      // 签出那一刻就摘掉了自己的 error 监听器，只有 release() 才会把连接移出池。
+      // 光置空引用＝这个槽位永久损失；线上 PG 约每周随 unattended-upgrades 重启一次，
+      // 每次重启每个进程漏一个，攒够 max 就是全池死锁。
+      let released = false;
+      const drop = (err?: Error) => {
+        if (released) return;
+        released = true;
+        if (this.client === client) this.client = null;
+        if (this.drop === drop) this.drop = null;
+        try { client.release(err); } catch { /* 已经还过了 */ }
+      };
+      this.drop = drop;
       client.on("notification", (msg) => {
         if (msg.channel !== JOB_DONE_CHANNEL || !msg.payload) return;
         const set = this.waiters.get(msg.payload);
@@ -246,8 +261,14 @@ class DoneListener {
           .then((row) => { if (row && (row.status === "done" || row.status === "failed")) for (const w of [...set]) w(row); })
           .catch(() => {});
       });
-      client.on("error", () => { this.client = null; });
-      await client.query(`LISTEN ${JOB_DONE_CHANNEL}`);
+      client.on("error", drop);
+      try {
+        await client.query(`LISTEN ${JOB_DONE_CHANNEL}`);
+      } catch (err) {
+        drop(err as Error);
+        throw err;
+      }
+      if (released) return; // 建连途中就被 stop()/断连还回去了，别再挂上来
       this.client = client;
     })().finally(() => { this.connecting = null; });
     return this.connecting;
@@ -255,8 +276,10 @@ class DoneListener {
 
   async stop(): Promise<void> {
     const c = this.client;
+    const drop = this.drop;
     this.client = null;
-    if (c) { try { await c.query(`UNLISTEN ${JOB_DONE_CHANNEL}`); } catch { /* ignore */ } c.release(); }
+    if (c) { try { await c.query(`UNLISTEN ${JOB_DONE_CHANNEL}`); } catch { /* ignore */ } }
+    drop?.(); // 与 error 分支共用同一个幂等入口，不会重复 release
   }
 }
 

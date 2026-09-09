@@ -75,10 +75,23 @@ async function main() {
   const { getPool } = await import("../lib/pg");
   let listenClient: import("pg").PoolClient | null = null;
   try {
-    listenClient = await getPool().connect();
-    listenClient.on("notification", (msg) => { if (msg.channel === queue.JOB_NEW_CHANNEL) void tick(); });
-    listenClient.on("error", () => { listenClient = null; });
-    await listenClient.query(`LISTEN ${queue.JOB_NEW_CHANNEL}`);
+    const client = await getPool().connect();
+    listenClient = client;
+    client.on("notification", (msg) => { if (msg.channel === queue.JOB_NEW_CHANNEL) void tick(); });
+    // 断连要把连接**还给池**（#459）：只置空引用的话这个槽位就永久没了
+    // （pg-pool 在签出时摘掉了自己的 error 监听器，只有 release 才移出池）。
+    client.on("error", () => {
+      if (listenClient !== client) return;
+      listenClient = null;
+      try { client.release(new Error("listen connection lost")); } catch { /* 已经还过了 */ }
+    });
+    try {
+      await client.query(`LISTEN ${queue.JOB_NEW_CHANNEL}`);
+    } catch (err) {
+      listenClient = null;
+      try { client.release(err as Error); } catch { /* 已经还过了 */ }
+      throw err;
+    }
   } catch (err) {
     console.error("[heavy-worker] LISTEN job_new failed (falling back to polling):", err);
   }

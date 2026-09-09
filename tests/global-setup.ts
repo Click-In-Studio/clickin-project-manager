@@ -1,6 +1,11 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
+// globalSetup 跑在主进程（拿不到 vitest 的 test.env），而这里要把整个 migration
+// 文件当一条 query 执行——生产的 statement_timeout 是按单条业务语句定的，对不上。
+// 与 vitest.config.ts 的 test.env 同值，两处覆盖的是两个进程。
+process.env.PG_STATEMENT_TIMEOUT_MS ??= "60000";
+
 import { readFile, writeFile, unlink } from "fs/promises";
 import path from "path";
 import { getPool } from "@/lib/pg";

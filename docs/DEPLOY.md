@@ -97,6 +97,8 @@ PGHOST=localhost
 PGDATABASE=script_editor
 PGUSER=script_editor
 PGPASSWORD=xxxxxxxx
+# 连接池四道闸的缺省值在 lib/pg.ts；**池大小按进程分配**，写在
+# deploy/ecosystem.config.js 的进程 env 里（这份 .env.local 三个进程共用，区分不了）
 
 R2_ACCOUNT_ID=xxxxxxxx
 R2_ACCESS_KEY_ID=xxxxxxxx

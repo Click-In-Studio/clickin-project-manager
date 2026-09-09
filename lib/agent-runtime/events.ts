@@ -103,6 +103,8 @@ type Listener = (seq: number) => void;
 class EventListener {
   private client: PoolClient | null = null;
   private connecting: Promise<void> | null = null;
+  /** 连接还给池的幂等入口（error 与 stop 共用）——见 ensure 里的注释。 */
+  private drop: ((err?: Error) => void) | null = null;
   private readonly listeners = new Map<string, Set<Listener>>();
 
   constructor(private readonly pool: Pool) {}
@@ -112,6 +114,19 @@ class EventListener {
     if (this.connecting) return this.connecting;
     this.connecting = (async () => {
       const client = await this.pool.connect();
+      // 断连即把连接还给池（#459）：签出中的连接报错时 pg-pool 不会自己回收——它在
+      // 签出那一刻就摘掉了自己的 error 监听器，只有 release() 才会把连接移出池。
+      // 光置空引用＝这个槽位永久损失；线上 PG 约每周随 unattended-upgrades 重启一次，
+      // 每次重启每个进程漏一个，攒够 max 就是全池死锁。
+      let released = false;
+      const drop = (err?: Error) => {
+        if (released) return;
+        released = true;
+        if (this.client === client) this.client = null;
+        if (this.drop === drop) this.drop = null;
+        try { client.release(err); } catch { /* 已经还过了 */ }
+      };
+      this.drop = drop;
       client.on("notification", (msg) => {
         if (msg.channel !== EVENT_CHANNEL || !msg.payload) return;
         const idx = msg.payload.lastIndexOf(":");
@@ -119,10 +134,14 @@ class EventListener {
         const seq = Number(msg.payload.slice(idx + 1));
         for (const fn of this.listeners.get(sessionId) ?? []) fn(seq);
       });
-      client.on("error", () => {
-        this.client = null; // 下次 subscribe 重连
-      });
-      await client.query(`LISTEN ${EVENT_CHANNEL}`);
+      client.on("error", drop);
+      try {
+        await client.query(`LISTEN ${EVENT_CHANNEL}`);
+      } catch (err) {
+        drop(err as Error);
+        throw err;
+      }
+      if (released) return; // 建连途中就被 stop()/断连还回去了，别再挂上来
       this.client = client;
     })().finally(() => {
       this.connecting = null;
