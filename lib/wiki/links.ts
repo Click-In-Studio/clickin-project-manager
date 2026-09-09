@@ -2,6 +2,7 @@ import { getPool } from "../pg";
 import { canPublishAsset } from "../asset/perm";
 import { uid } from "../asset/db";
 import type { GrantActor } from "../grant-check";
+import { isWikiId } from "./id";
 
 // ─── mention 边提取（两种序列化形态：纯 token 与 markdown 私有 href）───────────
 
@@ -187,6 +188,7 @@ export async function listBacklinks(wikiId: string, productionId: string): Promi
 /** 出链（该文档链接到谁）——与 listBacklinks 对称，同一张已同步好的边表。
  *  join 用 w.id::text（entity_id 无类型，uuid cast 遇脏行会整查询炸掉）。 */
 export async function listOutgoingLinks(wikiId: string, productionId: string): Promise<WikiRef[]> {
+  if (!isWikiId(wikiId)) return [];
   const res = await getPool().query<{ id: string; title: string | null }>(
     `SELECT DISTINCT w.id::text AS id, w.title, w.updated_at FROM wiki_entity_link l
      JOIN wiki w ON w.id::text = l.entity_id
@@ -226,6 +228,7 @@ export type WikiEntityRef = { entityType: string; entityId: string; manual: bool
 export async function listEntityRefsForWiki(
   wikiId: string, productionId: string,
 ): Promise<WikiEntityRef[]> {
+  if (!isWikiId(wikiId)) return [];
   const res = await getPool().query<{ entity_type: string; entity_id: string; manual: boolean }>(
     `SELECT entity_type, entity_id, bool_or(origin = 'manual') AS manual
      FROM wiki_entity_link
@@ -271,6 +274,7 @@ export async function removeManualWikiEntityLink(
 
 /** unlinked references：正文含目标标题但无链接边的文档（pg_trgm 加速的 ILIKE）。 */
 export async function listUnlinkedReferences(wikiId: string, productionId: string): Promise<WikiRef[]> {
+  if (!isWikiId(wikiId)) return [];
   const target = await getPool().query<{ title: string | null }>(
     `SELECT title FROM wiki WHERE id = $1::uuid AND production_id = $2`, [wikiId, productionId]);
   const title = target.rows[0]?.title?.trim();

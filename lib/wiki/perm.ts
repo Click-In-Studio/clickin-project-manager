@@ -3,6 +3,7 @@ import { isPolicyOn } from "../policy-db";
 import { hasGrant, listGrantedResourceIds, type GrantActor } from "../grant-check";
 import { hasEventDomainView } from "../event-permissions";
 import { mountConcededNodeIds } from "../node/host-visibility";
+import { isWikiId } from "./id";
 
 // ─── wiki 文档库 W3：可见性判定（账本 §4.2，asset 隐私模型同构）─────────────────
 //
@@ -49,6 +50,10 @@ export async function canViewWiki(
   productionId: string,
   wikiId: string,
 ): Promise<boolean> {
+  // 形状闸在旁路之**前**（#476）：`nd_` 壳节点 id 不是文档 id，admin 也不该拿到
+  // 一张空头通行证——放行会把 `nd_…` 送进下游 uuid 查询（listUnlinkedReferences
+  // 等）再炸一次。不是文档＝不可见。
+  if (!isWikiId(wikiId)) return false;
   if (actor.isAdmin || actor.isOwner) return true;
   const pool = getPool();
   // is_public 活在 node 壳上（#420）；无壳的 wiki 行（不变量破损）按不公开处理

@@ -6,6 +6,7 @@ import Link, { useLinkStatus } from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { userAvatarSrc, productionAvatarSrc } from "@/lib/avatar-url";
 import { nextNavPendingHref } from "@/lib/nav-pending";
+import { isWikiId } from "@/lib/wiki/id";
 import ChevronIcon from "@/components/ChevronIcon";
 import SearchBar from "./SearchBar";
 import NewProductionModal from "./NewProductionModal";
@@ -277,7 +278,9 @@ function extractCurrentWikiId(pathname: string, productionId: string): string | 
   const m = pathname.match(
     new RegExp(`^/production/${productionId}/(?:wiki|dramaturgy/inspiration)/([^/]+)`),
   );
-  return m ? m[1] : null;
+  // 这个段还会是 `nd_` 壳节点 id（软链接 / 资产节点就地渲染，#358 → #420）：
+  // 那不是文档，chip 无从附带，拿去 fetch 只会给后端送一发 uuid 非法输入（#476）。
+  return m && isWikiId(m[1]) ? m[1] : null;
 }
 
 /** 仅匹配资产详情/预览页 /production/{id}/assets/{assetId}[/preview]——不匹配
