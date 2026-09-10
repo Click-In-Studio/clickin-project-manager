@@ -9,6 +9,7 @@ import { listOutgoingLinks, listEntityRefsForWiki, listUnlinkedReferences } from
 import { newNodeId } from "@/lib/node/db";
 import { GET as wikiGET } from "@/app/api/production/[id]/wiki/[wikiId]/route";
 import { GET as backlinksGET } from "@/app/api/production/[id]/wiki/[wikiId]/backlinks/route";
+import { GET as streamGET } from "@/app/api/production/[id]/wiki/[wikiId]/stream/route";
 import { POST as presencePOST } from "@/app/api/production/[id]/wiki/[wikiId]/presence/route";
 import { PUT as sharePUT } from "@/app/api/production/[id]/wiki/[wikiId]/share/route";
 import { makeProduction, cleanupProduction } from "./factories";
@@ -116,6 +117,14 @@ describe("路由：`nd_` 段不再 500", () => {
       makeReq("GET", `/api/production/${prodId}/wiki/${nodeId}/backlinks`, member, true),
       { params: Promise.resolve({ id: prodId, wikiId: nodeId }) });
     expect(res.status).toBe(403);
+  });
+
+  it("GET stream → 403（门在建流之前，不会挂出一条永远等不到帧的 SSE）", async () => {
+    const res = await streamGET(
+      makeReq("GET", `/api/production/${prodId}/wiki/${nodeId}/stream`, member, true),
+      { params: Promise.resolve({ id: prodId, wikiId: nodeId }) });
+    expect(res.status).toBe(403);
+    expect(res.headers.get("content-type")).toContain("application/json");
   });
 
   it("POST presence → 403", async () => {
