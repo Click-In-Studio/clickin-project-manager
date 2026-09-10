@@ -17,6 +17,8 @@ import AdminModal from "@/components/AdminModal";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import type { NodeEntry } from "@/lib/node/db";
 import type { NodeMoveInCandidate } from "@/lib/node/dramaturgy";
+import { useReportAiTarget } from "@/components/ai-target";
+import { aiTargetForNode } from "@/lib/node/ai-target";
 
 type DropZone = "before" | "after" | "inside";
 
@@ -76,6 +78,16 @@ export default function WikiShell({
     if (!selectedId) return undefined;
     return items.find(i => i.id === selectedId || i.wikiId === selectedId);
   }, [items, selectedId]);
+
+  // 当前节点 → AI 助手的「附带」上下文（#476 follow-up）。分派与页面同源：
+  // wiki 节点带文档、asset 壳节点带文件、link 解到目标再按目标 kind 分——页面
+  // 渲染的本来就是目标，link 自己不是内容。外壳只认 pathname，`nd_` 段在那儿
+  // 辨不出是哪一种，所以由持有树的这里上报。
+  //
+  // 认不出来（枚举闭包外经 wikilink 到达的文档，树里没有它）就不报，AppShell
+  // 回落 pathname 正则——那种情况下段本来就是 uuid，正则认得。
+  const aiTarget = useMemo(() => aiTargetForNode(selectedItem, byId), [selectedItem, byId]);
+  useReportAiTarget(aiTarget?.kind ?? null, aiTarget?.id ?? null);
 
   // 默认全收起；展开状态按 production 持久化 localStorage
   const storageKey = `clickin-wiki-tree-expanded:${productionId}`;
