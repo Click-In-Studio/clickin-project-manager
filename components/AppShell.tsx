@@ -6,6 +6,8 @@ import Link, { useLinkStatus } from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { userAvatarSrc, productionAvatarSrc } from "@/lib/avatar-url";
 import { nextNavPendingHref } from "@/lib/nav-pending";
+import { isWikiId } from "@/lib/wiki/id";
+import { AiTargetContext, nextAiTargetState, type AiTargetState, type ReportAiTarget } from "./ai-target";
 import ChevronIcon from "@/components/ChevronIcon";
 import SearchBar from "./SearchBar";
 import NewProductionModal from "./NewProductionModal";
@@ -277,7 +279,9 @@ function extractCurrentWikiId(pathname: string, productionId: string): string | 
   const m = pathname.match(
     new RegExp(`^/production/${productionId}/(?:wiki|dramaturgy/inspiration)/([^/]+)`),
   );
-  return m ? m[1] : null;
+  // 这个段还会是 `nd_` 壳节点 id（软链接 / 资产节点就地渲染，#358 → #420）：
+  // 那不是文档，chip 无从附带，拿去 fetch 只会给后端送一发 uuid 非法输入（#476）。
+  return m && isWikiId(m[1]) ? m[1] : null;
 }
 
 /** 仅匹配资产详情/预览页 /production/{id}/assets/{assetId}[/preview]——不匹配
@@ -777,6 +781,11 @@ export default function AppShell({ session, productions, canCreateProduction = f
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  // 页面显式上报的「当前对象」（#476 follow-up）——见 components/ai-target.tsx
+  const [aiTarget, setAiTarget] = useState<AiTargetState>(null);
+  const reportAiTarget = useCallback<ReportAiTarget>((path, kind, id) => {
+    setAiTarget((prev) => nextAiTargetState(prev, path, kind, id));
+  }, []);
   const [aiPopoutOpen, setAiPopoutOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState<DrawerType | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -1110,8 +1119,16 @@ export default function AppShell({ session, productions, canCreateProduction = f
   const activeModule = productionId && pathname.startsWith(`/production/${productionId}`)
     ? extractModule(pathname, productionId)
     : null;
-  const currentWikiId = productionId ? extractCurrentWikiId(pathname, productionId) : null;
-  const currentAssetId = productionId ? extractCurrentAssetId(pathname, productionId) : null;
+  // 「附带当前对象」的主语：页面上报的优先（它查过树，知道 `nd_` 段是什么），
+  // 没上报才回落 pathname 正则。上报带路由是防串台的凭据——换页那一瞬旧值仍在
+  // state 里，路由对不上就当没有。
+  const activeAiTarget = aiTarget && aiTarget.path === pathname ? aiTarget : null;
+  const currentWikiId = activeAiTarget
+    ? (activeAiTarget.kind === "wiki" ? activeAiTarget.id : null)
+    : productionId ? extractCurrentWikiId(pathname, productionId) : null;
+  const currentAssetId = activeAiTarget
+    ? (activeAiTarget.kind === "asset" ? activeAiTarget.id : null)
+    : productionId ? extractCurrentAssetId(pathname, productionId) : null;
   const hasProductionTopMenu = !!activeModule && ["script", "dramaturgy", "characters", "cues", "cuelists"].includes(activeModule);
   const isHome = pathname === "/";
   const currentProduction = productionId
@@ -1508,7 +1525,9 @@ export default function AppShell({ session, productions, canCreateProduction = f
         {/* 剧本页原浮动折叠按钮已移除——统一走侧栏顶部 sidebarControls（v3） */}
 
         {/* Workspace */}
-        <main id="workspace-scroll" className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">{children}</main>
+        <main id="workspace-scroll" className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
+          <AiTargetContext.Provider value={reportAiTarget}>{children}</AiTargetContext.Provider>
+        </main>
       </div>
 
       {/* Level 1: base view-grant activation — resets on production switch */}

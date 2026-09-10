@@ -4,6 +4,7 @@ import { writeWikiGrants, WIKI_LEVEL_ROW_SETS, type WikiLevel } from "../resourc
 import { broadcastWikiLibraryChange } from "./collab";
 import type { Mention } from "../event-db";
 import { rowToWiki, type WikiDoc, type WikiRow } from "./types";
+import { isWikiId } from "./id";
 import { syncWikiLinks } from "./links";
 import {
   insertNode, deleteNode, getNodeByWikiId, normalizeParentId, validateParent,
@@ -16,6 +17,9 @@ import {
 // （1:1 不变量不许有窗口）；删除入口在 node 域（deleteNode），此处只留转发。
 
 export async function getWiki(id: string, productionId: string): Promise<(WikiDoc & { tags: string[] }) | null> {
+  // 路由段可能是 `nd_` 壳节点 id（#476）：不是文档 id，按「不存在」答，
+  // 别把非 uuid 丢给下面的 `$1::uuid` 让 PG 抛 22P02 变成 500。
+  if (!isWikiId(id)) return null;
   const res = await getPool().query<WikiRow & { tags: string[] | null }>(
     `SELECT w.id::text AS id, w.production_id, w.title, w.body, w.mentions, w.created_by,
             w.created_at, w.updated_at,
