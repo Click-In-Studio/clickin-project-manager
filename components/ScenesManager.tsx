@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
+import { useVisibleEventSource } from "@/hooks/useVisibleEventSource";
 import MountPointAssets from "./assets/MountPointAssets";
 import RelatedWikiChips from "./wiki/RelatedWikiChips";
 import type { SceneDetail } from "@/lib/db";
@@ -472,21 +473,31 @@ export default function ScenesManager({ productionId, productionName, initialSce
     setScenes(data);
   }, [currentVersionId, productionId]);
 
-  useEffect(() => {
-    if (!currentVersionId) return;
-    const stream = new EventSource(`${BASE_PATH}/api/script/${productionId}/stream?v=${encodeURIComponent(currentVersionId)}`);
-    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-    const handleMarkers = () => {
-      if (refreshTimer) clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(() => { void refreshCanonicalState(); }, 50);
-    };
-    stream.addEventListener("markers", handleMarkers);
-    return () => {
-      if (refreshTimer) clearTimeout(refreshTimer);
-      stream.removeEventListener("markers", handleMarkers);
-      stream.close();
-    };
-  }, [currentVersionId, productionId, refreshCanonicalState]);
+  // markers 流（#467：后台标签不建连）。debounce timer 挂 ref——连接会随可见性
+  // 反复开合，timer 的生命周期比单次连接长。
+  const markerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (markerRefreshTimerRef.current) clearTimeout(markerRefreshTimerRef.current);
+  }, []);
+
+  useVisibleEventSource(
+    currentVersionId
+      ? `${BASE_PATH}/api/script/${productionId}/stream?v=${encodeURIComponent(currentVersionId)}`
+      : null,
+    {
+      // 隐藏/断线期间的 markers 帧不补发，重连先无条件对一次账
+      onReopen: () => { void refreshCanonicalState(); },
+      listeners: {
+        markers: () => {
+          if (markerRefreshTimerRef.current) clearTimeout(markerRefreshTimerRef.current);
+          markerRefreshTimerRef.current = setTimeout(() => {
+            markerRefreshTimerRef.current = null;
+            void refreshCanonicalState();
+          }, 50);
+        },
+      },
+    },
+  );
 
   const mutate = async (url: string, init: RequestInit) => {
     let res = await fetch(url, init);

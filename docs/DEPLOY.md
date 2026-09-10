@@ -135,6 +135,12 @@ ssh <server> "pm2 save"   # 持久化进程列表，开机自启
 # app.<your-domain> → production-manager (port 3001)
 server {
     listen 443 ssl;
+    # HTTP/2（#467）：不开的话浏览器对同源只给 6 条并发 HTTP/1.1 连接，而协作 SSE
+    # 是常驻长连接——剧本 + Cue + 几篇 wiki + AI 侧栏同开就顶满，此后所有同源请求
+    # 排队、整页静默卡死。HTTP/2 单连接多路复用，并发上限抬到
+    # http2_max_concurrent_streams（默认 128）。nginx < 1.25.1 没有这条指令，
+    # 改写成 `listen 443 ssl http2;`。
+    http2 on;
     server_name app.<your-domain>;
     ssl_certificate /etc/letsencrypt/live/app.<your-domain>/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/app.<your-domain>/privkey.pem;
@@ -167,6 +173,7 @@ server {
 # backstage.<your-domain> → production-manager (port 3001，与 app 共用同一服务)
 server {
     listen 443 ssl;
+    http2 on;                       # 同 app：SSE 撑不爆同源连接池（#467）
     server_name backstage.<your-domain>;
     ssl_certificate /etc/letsencrypt/live/app.<your-domain>/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/app.<your-domain>/privkey.pem;

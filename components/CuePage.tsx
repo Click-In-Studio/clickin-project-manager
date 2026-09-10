@@ -8,6 +8,7 @@ import React, {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
+import { useVisibleEventSource } from "@/hooks/useVisibleEventSource";
 import type { Block, Character, Scene } from "@/lib/script-types";
 import type { CueList } from "@/lib/cue-list-types";
 import type { Cue, CueAnchor } from "@/lib/cue-types";
@@ -1340,36 +1341,57 @@ export default function CuePage({
   }, [anchorFromPoint]);
 
   // ── Cue SSE: refetch visible lists when any client mutates cues ───────────
-  useEffect(() => {
-    const es = new EventSource(
-      `${BASE_PATH}/api/production/${productionId}/cue-stream${clientId ? `?cid=${encodeURIComponent(clientId)}` : ""}`
-    );
-    let debounce: ReturnType<typeof setTimeout> | null = null;
-    es.addEventListener("presence", (e: MessageEvent) => {
-      const list = JSON.parse(e.data as string) as CuePresence[];
-      setPresenceMap(new Map(list.map(p => [p.clientId, p])));
-    });
-    es.onmessage = () => {
-      if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(async () => {
-        const ids = new Set(visibleListIdsRef.current);
-        if (activeListIdRef.current) ids.add(activeListIdRef.current);
-        const listIds = [...ids];
-        const vid = versionIdRef.current;
-        const vParam = vid ? `?v=${encodeURIComponent(vid)}` : "";
-        const results = await Promise.all(
-          listIds.map(listId =>
-            fetch(`${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/cues${vParam}`)
-              .then(r => r.ok ? (r.json() as Promise<Cue[]>) : [])
-              .catch(() => [] as Cue[])
-          )
-        );
-        const fresh = results.flat();
-        setCues(prev => [...prev.filter(c => !ids.has(c.cueListId)), ...fresh]);
-      }, 300);
-    };
-    return () => { es.close(); if (debounce) clearTimeout(debounce); };
-  }, [productionId, clientId]);
+  // 连接受可见性门控（#467）：后台标签不占同源连接名额。
+  const cueRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleCueRefetch = useCallback(() => {
+    if (cueRefetchTimerRef.current) clearTimeout(cueRefetchTimerRef.current);
+    cueRefetchTimerRef.current = setTimeout(async () => {
+      cueRefetchTimerRef.current = null;
+      const ids = new Set(visibleListIdsRef.current);
+      if (activeListIdRef.current) ids.add(activeListIdRef.current);
+      const listIds = [...ids];
+      const vid = versionIdRef.current;
+      const vParam = vid ? `?v=${encodeURIComponent(vid)}` : "";
+      const results = await Promise.all(
+        listIds.map(listId =>
+          fetch(`${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/cues${vParam}`)
+            .then(r => r.ok ? (r.json() as Promise<Cue[]>) : [])
+            .catch(() => [] as Cue[])
+        )
+      );
+      const fresh = results.flat();
+      setCues(prev => [...prev.filter(c => !ids.has(c.cueListId)), ...fresh]);
+    }, 300);
+  }, [productionId]);
+
+  // debounce timer 的生命周期比单次连接长（连接随可见性开合），挂 ref 由卸载统一清
+  useEffect(() => () => {
+    if (cueRefetchTimerRef.current) clearTimeout(cueRefetchTimerRef.current);
+  }, []);
+
+  useVisibleEventSource(
+    `${BASE_PATH}/api/production/${productionId}/cue-stream${clientId ? `?cid=${encodeURIComponent(clientId)}` : ""}`,
+    {
+      onReopen: () => {
+        // ① 隐藏/断线期间的变更帧不补发，先对一次账；
+        scheduleCueRefetch();
+        // ② 断连时服务端已把本端移出在场表（cancel → removeCuePresence），不重报的话
+        //    切回标签页后别人看不见我，直到我下次动选区。去重键要先清——「值没变」
+        //    的短路会把这次重报吞掉。
+        lastSentPresRef.current = "";
+        sendCuePresence(activeListId, selection.kind === "cue" ? selection.cueId : null);
+      },
+      // 连接一断本端就已出场，本地这份名单同时作废
+      onClose: () => setPresenceMap(new Map()),
+      listeners: {
+        presence: (e: MessageEvent) => {
+          const list = JSON.parse(e.data as string) as CuePresence[];
+          setPresenceMap(new Map(list.map(p => [p.clientId, p])));
+        },
+        message: () => scheduleCueRefetch(),
+      },
+    },
+  );
 
   // Cue ordering and gap anchors use the complete script sequence, including markers.
   const blockIndexMap = useMemo(() => {
