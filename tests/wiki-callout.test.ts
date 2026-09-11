@@ -7,6 +7,8 @@ import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
 import { Callout, CALLOUT_MARKER_RE, parseCalloutMarker, formatCalloutMarker, promoteCalloutBlockquotes } from "@/lib/tiptap-callout";
 import { transformFeishuHtml } from "@/lib/feishu-paste";
+import { NodeSelection } from "@tiptap/pm/state";
+import { setCalloutColor } from "@/lib/editor-block-ops";
 
 describe("callout marker", () => {
   it("新形态 k=v / 仅 emoji / 空 emoji / GitHub alerts 形态全部命中", () => {
@@ -108,6 +110,18 @@ describe("editor roundtrip（保真锁纪律）", () => {
   it("普通引用块不受影响", () => {
     const md = "> 只是引用";
     expect(roundtrip(md)).toBe(md);
+  });
+
+  it("块菜单改色后写回 marker，正文内容不变", () => {
+    const editor = new Editor({
+      extensions: [StarterKit, Markdown.configure({ breaks: true }), Callout],
+      content: "> [!💡]\n> 需要强调",
+    });
+    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, 0)));
+    expect(setCalloutColor(editor, "#dbeafe")).toBe(true);
+    const out = (editor.storage as unknown as { markdown: { getMarkdown: () => string } }).markdown.getMarkdown();
+    expect(out).toBe("> [!💡 bg=#dbeafe]\n> 需要强调");
+    editor.destroy();
   });
 });
 

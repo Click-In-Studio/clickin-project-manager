@@ -184,6 +184,31 @@ export function findColumnGroup(editor: Editor): SelectedBlock | null {
   return null;
 }
 
+/** 找到当前选中块或其祖先高亮块。手柄可能命中 callout 自身，也可能命中里面的段落。 */
+export function findCallout(editor: Editor): SelectedBlock | null {
+  const selected = getSelectedBlock(editor);
+  if (selected?.node.type.name === "callout") return selected;
+  const $from = editor.state.selection.$from;
+  for (let depth = $from.depth; depth >= 1; depth--) {
+    const node = $from.node(depth);
+    if (node.type.name === "callout") {
+      const pos = $from.before(depth);
+      return { node, pos, end: pos + node.nodeSize };
+    }
+  }
+  return null;
+}
+
+export function setCalloutColor(editor: Editor, color: string | null): boolean {
+  const block = findCallout(editor);
+  if (!block) return false;
+  const tr = editor.state.tr.setNodeMarkup(block.pos, undefined, { ...block.node.attrs, color });
+  selectNodeAt(tr, block.pos);
+  editor.view.dispatch(tr);
+  editor.commands.focus();
+  return true;
+}
+
 /** 选中祖先分栏组 —— 之后上移/下移/复制/删除就作用于整组 */
 export function selectColumnGroup(editor: Editor): boolean {
   const group = findColumnGroup(editor);

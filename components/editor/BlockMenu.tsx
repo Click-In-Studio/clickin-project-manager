@@ -17,9 +17,11 @@ import {
   getSelectedBlock, moveBlock, duplicateBlock, deleteBlock,
   turnInto, canTurnInto, isColumnGroup, changeColumnCount, equalizeColumns,
   findColumnGroup, selectColumnGroup,
+  findCallout, setCalloutColor,
   TURN_INTO,
 } from "@/lib/editor-block-ops";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
+import { CALLOUT_COLORS } from "@/lib/tiptap-callout";
 
 function Item({
   onClick, children, hint, danger, disabled,
@@ -84,6 +86,7 @@ export default function BlockMenu({
 
   const block = getSelectedBlock(editor);
   const group = findColumnGroup(editor);
+  const callout = findCallout(editor);
   const selectedIsGroup = isColumnGroup(block?.node ?? null);
   const selectedIsColumn = block?.node.type.name === "column";
 
@@ -127,6 +130,28 @@ export default function BlockMenu({
           <Item onClick={() => run(() => moveBlock(editor, -1))}>上移</Item>
           <Item onClick={() => run(() => moveBlock(editor, 1))}>下移</Item>
           <Item onClick={() => run(() => duplicateBlock(editor))}>复制</Item>
+
+          {callout && (
+            <>
+              <SectionLabel>高亮块颜色</SectionLabel>
+              <div className="flex gap-1.5 px-3 pb-2">
+                {CALLOUT_COLORS.map((color, index) => (
+                  <button
+                    key={color ?? "default"}
+                    type="button"
+                    title={color ?? "默认"}
+                    onMouseDown={event => {
+                      event.preventDefault();
+                      setCalloutColor(editor, color);
+                      onClose();
+                    }}
+                    className={`h-6 w-6 rounded border-2 ${callout.node.attrs.color === color || (!callout.node.attrs.color && index === 0) ? "border-sky-500" : "border-white ring-1 ring-zinc-300"}`}
+                    style={{ background: color ?? "#f5f6f7" }}
+                  />
+                ))}
+              </div>
+            </>
+          )}
 
           {group && (
             <>
