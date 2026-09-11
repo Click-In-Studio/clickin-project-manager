@@ -14,6 +14,7 @@ import {
 import { flushSync } from "react-dom";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
+import { useDocumentVisible } from "@/hooks/useVisibleEventSource";
 import ChevronIcon from "@/components/ChevronIcon";
 import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, ScriptTextLayoutMode } from "@/lib/script-types";
 import type { TagGroup, BlockTagValue, SceneDetail } from "@/lib/db";
@@ -7701,17 +7702,9 @@ export default function ScriptEditor({
   const presenceLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const streamDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [streamVisible, setStreamVisible] = useState(() =>
-    typeof document === "undefined" || document.visibilityState === "visible"
-  );
-
-  useEffect(() => {
-    const updateStreamVisibility = () => {
-      setStreamVisible(document.visibilityState === "visible");
-    };
-    document.addEventListener("visibilitychange", updateStreamVisibility);
-    return () => document.removeEventListener("visibilitychange", updateStreamVisibility);
-  }, []);
+  // 后台标签不占同源连接名额（#467）——门控抽成了共享 hook，cue / wiki / 场景表
+  // 同款接入；本组件的建连被下面的 leader 选举包着，所以只用可见性这一层。
+  const streamVisible = useDocumentVisible();
 
   // ── Hash-based deep link + position restore ──────────────────────────────────
   useEffect(() => {

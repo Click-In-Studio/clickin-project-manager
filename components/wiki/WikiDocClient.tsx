@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
+import { useVisibleEventSource } from "@/hooks/useVisibleEventSource";
 import { userAvatarSrc } from "@/lib/avatar-url";
 import { fmtDateTime } from "@/lib/tz";
 import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/SmartTextarea";
@@ -117,70 +118,99 @@ export default function WikiDocClient({
   latestRef.current = { title, body, tags: tagsInput };
 
   // ── 多人协作（SSE）：presence 头像/远端光标/内容广播合并 ────────────────────
-  const collabClientIdRef = useRef("");
+  // clientId 惰性生成一次（渲染期直接调 Math.random 违反 purity lint；
+  // 这个值只进 URL 不进渲染输出，SSR/CSR 取值不同也不会导致水合不一致）
+  const [collabClientId] = useState(() => Math.random().toString(36).slice(2));
   const [peers, setPeers] = useState<WikiPeer[]>([]);
   const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    // clientId 惰性生成（渲染期调 Math.random 违反 purity lint）
-    if (!collabClientIdRef.current) collabClientIdRef.current = Math.random().toString(36).slice(2);
-    const cid = collabClientIdRef.current;
-    const es = new EventSource(
-      `${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}/stream?cid=${cid}`);
-    es.addEventListener("presence", e => {
-      try {
-        const list = JSON.parse((e as MessageEvent).data) as WikiPeer[];
-        setPeers(list.filter(p => p.clientId !== cid));
-      } catch { /* 忽略坏帧 */ }
-    });
-    es.addEventListener("update", e => {
-      try {
-        const data = JSON.parse((e as MessageEvent).data) as
-          { byClientId: string | null; title: string | null; body: string; updatedAt: string; tags?: string[] };
-        if (data.byClientId === cid) return; // 本端 PATCH 响应已处理
-        const base = savedRef.current.body;
-        const local = latestRef.current.body;
-        // 本地干净 → 直接采纳；本地有未存改动 → 行级三路合并（本地为 mine）
-        const nextBody = local === base ? data.body : mergeLines(base, local, data.body);
-        savedRef.current.body = data.body;
-        if (nextBody !== local) setBody(nextBody);
-        // 标题：本地干净才跟随
-        if (latestRef.current.title === savedRef.current.title) {
-          savedRef.current.title = data.title ?? "";
-          setTitle(data.title ?? "");
-        }
-        // 标签：同上，本地干净才跟随（省略字段=本帧没动标签）
-        if (data.tags !== undefined && latestRef.current.tags === savedRef.current.tags) {
-          savedRef.current.tags = data.tags.join(" ");
-          setTagsInput(savedRef.current.tags);
-        }
-      } catch { /* 忽略坏帧 */ }
-    });
-    // 库级结构变化（同一条流，见 lib/wiki-collab.ts 的 library topic）。
-    // 本篇被删 → 立刻退到文档库首页：软刷新会撞进服务端的 notFound()，
-    // 把人从工程环境里弹到 404 页，比"文档没了"本身更难受。
-    // 其余结构变化（别人新建/改名/移动/换标签）软刷新一下，左树跟着变。
-    es.addEventListener("library", e => {
-      try {
-        const data = JSON.parse((e as MessageEvent).data) as { kind: string; wikiId: string };
-        if (data.kind === "deleted" && data.wikiId === wiki.id) {
-          router.replace(routeBase);
-          return;
-        }
-        if (refreshTimerRef.current) return; // 批量结构变更（如 AI 连写几篇）合并成一次
-        refreshTimerRef.current = setTimeout(() => {
-          refreshTimerRef.current = null;
-          router.refresh();
-        }, 300);
-      } catch { /* 忽略坏帧 */ }
-    });
-    return () => {
-      es.close();
-      setPeers([]);
-      if (refreshTimerRef.current) { clearTimeout(refreshTimerRef.current); refreshTimerRef.current = null; }
-    };
-  }, [wiki.id, productionId, routeBase, router]);
+  type WikiUpdateFrame =
+    { byClientId: string | null; title: string | null; body: string; updatedAt: string; tags?: string[] };
+
+  /** 远端内容落地：SSE update 帧与重连补齐共用这一条路径。 */
+  function applyRemoteUpdate(data: WikiUpdateFrame) {
+    if (data.byClientId === collabClientId) return; // 本端 PATCH 响应已处理
+    const base = savedRef.current.body;
+    const local = latestRef.current.body;
+    // 本地干净 → 直接采纳；本地有未存改动 → 行级三路合并（本地为 mine）
+    const nextBody = local === base ? data.body : mergeLines(base, local, data.body);
+    savedRef.current.body = data.body;
+    if (nextBody !== local) setBody(nextBody);
+    // 标题：本地干净才跟随
+    if (latestRef.current.title === savedRef.current.title) {
+      savedRef.current.title = data.title ?? "";
+      setTitle(data.title ?? "");
+    }
+    // 标签：同上，本地干净才跟随（省略字段=本帧没动标签）
+    if (data.tags !== undefined && latestRef.current.tags === savedRef.current.tags) {
+      savedRef.current.tags = data.tags.join(" ");
+      setTagsInput(savedRef.current.tags);
+    }
+  }
+
+  /** 结构变化软刷新；批量结构变更（如 AI 连写几篇）合并成一次。 */
+  function scheduleLibraryRefresh() {
+    if (refreshTimerRef.current) return;
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      router.refresh();
+    }, 300);
+  }
+
+  useEffect(() => () => {
+    if (refreshTimerRef.current) { clearTimeout(refreshTimerRef.current); refreshTimerRef.current = null; }
+  }, []);
+
+  useVisibleEventSource(
+    `${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}/stream?cid=${collabClientId}`,
+    {
+      onReopen: () => {
+        // update 帧不补发：隐藏/断线期间别人的改动全丢。不补齐的话 savedRef.body
+        // ——三路合并的 base——停在陈旧版本，下一次保存就是拿过期 base 去合并，
+        // 等于用旧内容盖掉别人写的东西。这比"看到的内容旧"严重得多。
+        fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}`)
+          .then(r => r.ok ? r.json() : null)
+          .then((d: { wiki?: { title: string | null; body: string; updatedAt: string; tags: string[] } } | null) => {
+            if (!d?.wiki) return;
+            applyRemoteUpdate({
+              byClientId: null, title: d.wiki.title, body: d.wiki.body,
+              updatedAt: d.wiki.updatedAt, tags: d.wiki.tags,
+            });
+          })
+          .catch(() => {});
+        scheduleLibraryRefresh(); // 左树同理：隐藏期间的结构变化也没收到
+      },
+      // 连接一断服务端就把本端移出在场表，本地这份名单同时作废
+      onClose: () => setPeers([]),
+      listeners: {
+        presence: (e: MessageEvent) => {
+          try {
+            const list = JSON.parse(e.data as string) as WikiPeer[];
+            setPeers(list.filter(p => p.clientId !== collabClientId));
+          } catch { /* 忽略坏帧 */ }
+        },
+        update: (e: MessageEvent) => {
+          try { applyRemoteUpdate(JSON.parse(e.data as string) as WikiUpdateFrame); }
+          catch { /* 忽略坏帧 */ }
+        },
+        // 库级结构变化（同一条流，见 lib/wiki/collab.ts 的 library topic）。
+        // 本篇被删 → 立刻退到文档库首页：软刷新会撞进服务端的 notFound()，
+        // 把人从工程环境里弹到 404 页，比"文档没了"本身更难受。
+        // 其余结构变化（别人新建/改名/移动/换标签）软刷新一下，左树跟着变。
+        library: (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data as string) as { kind: string; wikiId: string };
+            if (data.kind === "deleted" && data.wikiId === wiki.id) {
+              router.replace(routeBase);
+              return;
+            }
+            scheduleLibraryRefresh();
+          } catch { /* 忽略坏帧 */ }
+        },
+      },
+    },
+  );
 
   // 光标位置上报（trailing 节流 400ms——leading 会发陈旧位置）
   const pendingCursorRef = useRef<{ blockIndex: number; offset: number } | null>(null);
@@ -194,7 +224,7 @@ export default function WikiDocClient({
       void fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}/presence`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: collabClientIdRef.current, ...latest }),
+        body: JSON.stringify({ clientId: collabClientId, ...latest }),
       }).catch(() => {});
     }, 400);
   }
@@ -306,7 +336,7 @@ export default function WikiDocClient({
           tags: tg.split(/[\s,，]+/).filter(Boolean),
           // 协作：带上本端 base，服务端被他人推进时做行级三路合并
           baseBody: prev.body,
-          clientId: collabClientIdRef.current,
+          clientId: collabClientId,
         }),
       });
       if (!res.ok) { setStatus("error"); return; }
