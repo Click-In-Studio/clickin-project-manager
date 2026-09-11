@@ -27,7 +27,7 @@
 -- 再跑；在那之前，这个形状换来的是可读性与可逐条验证。
 --
 -- 执行：psql -f db/migrate-cue-mention-stable-id.sql
---       npx vitest run tests/cue-mention-stable-id.migration.test.ts
+--       npx vitest run tests/migrations/cue-mention-stable-id.migration.test.ts
 --
 -- 回滚：UPDATE <表> SET <列> = b.body FROM cue_mention_text_backup b
 --       WHERE b.table_name = '<表>' AND b.column_name = '<列>' AND <表>.id::text = b.row_id;

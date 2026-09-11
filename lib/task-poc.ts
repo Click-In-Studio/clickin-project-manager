@@ -13,7 +13,7 @@
  *   - {@link isSubjectPoc} —— 判一个**候选责任主体**（task 尚未创建时，如 POST 的 body.departmentId）
  *
  * 扩展责任主体类型时只改 {@link TaskSubject} 与 {@link isSubjectPoc}，调用点不动。
- * `tests/task-poc-converge.test.ts` 的静态棘轮会挡住绕过本文件直接调
+ * `tests/ops/task-poc-converge.test.ts` 的静态棘轮会挡住绕过本文件直接调
  * `isUserDeptPoc` 的新代码。
  *
  * ## 判定性质

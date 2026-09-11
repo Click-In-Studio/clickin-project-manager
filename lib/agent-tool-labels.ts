@@ -1,5 +1,5 @@
 // AI 工具调用的中文显示名。key 是去掉 "clickin__" 前缀后的暴露名
-// （注册表 mcpName 的 "." 替换为 "-"，见 lib/agent-runtime/tools.ts exposedName）；tests/agent-tool-labels.test.ts
+// （注册表 mcpName 的 "." 替换为 "-"，见 lib/agent-runtime/tools.ts exposedName）；tests/agent/agent-tool-labels.test.ts
 // 对照 lib/agent-runtime/tools.ts 的注册表防漂移——新增工具没配显示名会红。
 
 const MCP_TOOL_PREFIX = "clickin__";

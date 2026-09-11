@@ -6,7 +6,7 @@
  *
  *   - 账本里的键 = 待迁移（含目标批次）
  *   - 一批完成 = 该批键从 Permission type 删除 + 从本账本删行 + 加入 RETIRED_PERMISSION_KEYS
- *   - tests/permission-migration-ledger.test.ts 强制三条不变量：
+ *   - tests/perm/permission-migration-ledger.test.ts 强制三条不变量：
  *       1. 账本键集合 === ALL_PERMISSIONS 集合（谁忘了删/漏了记 → 红）
  *       2. RETIRED 键在 app/ lib/ components/ 源码中 grep 不到（遗留消费点 → 红）
  *       3. RETIRED 与账本无交集

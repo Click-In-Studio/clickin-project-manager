@@ -1,5 +1,5 @@
 // #47 pdf 解析器真文件冒烟（本地手跑：npx tsx scripts/smoke-pdf.ts <file.pdf> [页...]）。
-// 真实剧本含用户内容不入库，冒烟不进 CI——单测用合成 fixture（tests/doc-extract.test.ts）。
+// 真实剧本含用户内容不入库，冒烟不进 CI——单测用合成 fixture（tests/script/doc-extract.test.ts）。
 import fs from "node:fs";
 import { parsePdf } from "@/lib/doc-extract/pdf";
 

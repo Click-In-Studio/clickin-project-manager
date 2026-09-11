@@ -181,7 +181,7 @@ npm run dev
 为什么必须自托管：行内舞台指示内嵌在对白块里，字体不同 → 拉丁 / 标点进宽不同 → 换行点不同 → **分页不同**。系统楷体三个平台三种字宽，Linux 上干脆没有。
 
 - 改字体（换版本、加面、调切片区间）只改 `scripts/fonts/build-fonts.py`，然后跑 `python3 scripts/fonts/build-fonts.py`（需要 `pip install fonttools brotli`）——它会按钉死的 URL + sha256 下载源文件到 `scripts/fonts/src/`（gitignored），重切并重写 `app/fonts.css` 与 `public/fonts/manifest.json`。**不要手改 fonts.css**。
-- 字体栈的次序是分页一致性的一部分：首选自托管面 → 缺字落到同样自托管的 `SourceHanSerif` → 最后才是系统字体。`tests/fonts-self-hosted.test.ts` 守着这条与切片覆盖。
+- 字体栈的次序是分页一致性的一部分：首选自托管面 → 缺字落到同样自托管的 `SourceHanSerif` → 最后才是系统字体。`tests/script/fonts-self-hosted.test.ts` 守着这条与切片覆盖。
 - 跨平台一致性：`scripts/print-consistency/check.ts` 在无头 Chromium 里打开一份夹具剧本的打印路由，与 `golden.json`（Mac 生成）比对页数与每页边界；CI 在 Linux 上跑。三份 golden：`golden.json`（居中角色名）、`golden-compact.json`（左栏角色名，`FIXTURE_TEXT_LAYOUT=compact GOLDEN_PATH=…`）、`golden-broadway.json`（百老汇模版，`FIXTURE_TEMPLATE_ID=broadway-musical@1 GOLDEN_PATH=…`）。改了分页 / 打印 / 字体相关文件而 golden 该变时，本地起 dev server 后 `BASE_URL=http://localhost:3000 npx tsx scripts/print-consistency/check.ts --update` 重新生成并提交（compact 那份带上前述两个环境变量）。这两份 golden 也是**排版模版引擎的验收线**：legacy 模版的输出必须与它们一致（`docs/script-template-engine.md` §4）。
 - 打印就绪信号 `body[data-print-ready="1"]` 只在**字体全部就位之后的那次分页测量**完成时才出现（`components/print/use-fonts-settled.ts`）。无头出片等这个属性，不要 sleep。
 
@@ -556,25 +556,39 @@ TEST_SEED=1234567890 npm test        # 用固定 seed 复现 CI 失败
 
 ### 11.2 测试文件结构
 
+`tests/` 按**业务域**分目录，migration 测试单独成域（#472）。域目录只有一层，不再嵌套：
+
 ```
 tests/
-├── global-setup.ts      # DB 生命周期（setup / teardown）+ TEST_SEED 初始化
-├── setup.ts             # 每个 worker 的 faker 种子初始化
-├── factories.ts         # 工厂函数：makeProduction / makeScene / makeBlocks 等
-├── helpers.ts           # 常量：TEST_USER
-├── production.test.ts   # DB 层：production CRUD
-├── dramaturgy.test.ts   # DB 层：场景、角色
-├── script.test.ts       # DB 层：版本、脚本加载
-├── cue.test.ts          # DB 层：cue list / cue CRUD
-├── event.test.ts        # DB 层：排练事件、日程
-├── security.test.ts     # 跨 production 数据隔离
-├── resilience.test.ts   # 幂等性、并发、边界输入、级联删除
-├── api.test.ts          # API 层：route handler 认证 / 鉴权 / 输入校验
-├── api-race.test.ts     # API 层：竞态条件、网络波动模拟
-└── conventions.test.ts  # 开发规约自动化（见 11.5 节）
+├── _support/          # 支撑件，不含测试
+│   ├── global-setup.ts    # DB 生命周期（setup / teardown）+ TEST_SEED 初始化
+│   ├── setup.ts           # 每个 worker 的 faker 种子初始化
+│   ├── factories.ts       # 工厂函数：makeProduction / makeScene / makeBlocks 等
+│   ├── helpers.ts         # 常量：TEST_USER
+│   ├── fixtures/          # 参照样本（如 legacy-script-page.ts）
+│   └── mocks/             # 模块替身（vitest.config.ts 的 alias 指过来）
+├── migrations/        # *.migration.test.ts + 配套 *-snapshot.ts（见 §11.7）
+├── agent/             # AI runtime / 工具 / 记忆 / 配额
+├── wiki/              # 文档库、方言、协作、文档编辑器原语
+├── script/            # 剧本、场次、导入管线、打印与分页
+├── asset/             # 素材、版本、元数据、头像与图片服务
+├── perm/              # 权限判定、角色 / 部门 / 成员、越权棘轮
+├── ops/               # 演出运营：事件、cue、任务、审批、计划、财务
+├── account/           # 账号、身份、登录与注册门、等级
+├── notify/            # 通知、公告、邮件入站
+└── platform/          # 基建：API 层、连接池、SSE、任务队列、仓库级规约棘轮
 ```
 
-`tests/helpers.ts` 中只有一个常量：
+新增测试放进对应域目录；**归属不明**时按「这条测试红了，先去看哪个模块」来定。
+
+域内的相对 import 一律走 `../_support/`：
+
+```typescript
+import { makeProduction, cleanupProduction } from "../_support/factories";
+import { TEST_USER } from "../_support/helpers";
+```
+
+`tests/_support/helpers.ts` 中只有一个常量：
 
 ```typescript
 export const TEST_USER = "test-sys-user";
@@ -591,7 +605,7 @@ DB 层测试直接调用 `lib/db.ts` / `lib/event-db.ts` 中的函数，不经�
 每个测试文件在 `beforeAll` 中创建自己需要的数据，在 `afterAll` 中清理，不依赖任何预存的演出数据：
 
 ```typescript
-import { makeProduction, makeScene, makeCharacter, cleanupProduction } from "./factories";
+import { makeProduction, makeScene, makeCharacter, cleanupProduction } from "../_support/factories";
 
 let prodId: string;
 let versionId: string;
@@ -710,7 +724,7 @@ const session = createSession({ openId: TEST_USER, name: "测试员", avatarUrl:
 
 ### 11.5 开发规约自动化测试（conventions.test.ts）
 
-`tests/conventions.test.ts` 包含以下自动化规约检查，CI 和本地 `npm test` 都会跑。
+`tests/platform/conventions.test.ts` 包含以下自动化规约检查，CI 和本地 `npm test` 都会跑。
 
 #### ① 运行时 DDL 静态扫描
 
@@ -787,7 +801,7 @@ Run "npm run seed:schema" and commit db/seed-schema.json.
 | — | 新增读操作 DB 函数 | 建议加 happy path + 不存在时返回 null 的测试 |
 | — | 新增运行时 migration | **必须**在 `conventions.test.ts` 中加幂等性测试 |
 | — | Schema 变更（`db/add-*.sql`） | **必须**在干净 DB 上重新生成 `db/seed-schema.json`（schema 指纹文件，`npm run seed:schema`）并提交，conventions 测试用此文件做 schema drift 检测 |
-| — | 破坏性 Schema Migration | **必须**提供 `tests/<name>.migration.test.ts`，含 invariance 测试（见 §11.7）|
+| — | 破坏性 Schema Migration | **必须**提供 `tests/migrations/<name>.migration.test.ts`，含 invariance 测试（见 §11.7）|
 | — | 流式路由（SSE）、R2、飞书 Bot | 暂不强制（依赖外部服务，需独立策略） |
 
 > **合并阻断条件**：`npm test` 全部通过，且上表标注"**必须**"的覆盖项不能留白。
@@ -882,7 +896,7 @@ Migration 测试与常规单元测试在**同一个 `unit-test` job** 中完成�
 - [ ] `db/migrate-<name>.sql`：完整的 migration SQL
 - [ ] `db/schema.sql`：更新为迁移后的最终状态（完整快照）
 - [ ] `db/seed-schema.json`：在干净 DB 上重新生成（`npm run seed:schema`）
-- [ ] `tests/<name>.migration.test.ts`：包含三层测试（schema / integrity / invariance）
+- [ ] `tests/migrations/<name>.migration.test.ts`：包含三层测试（schema / integrity / invariance）
 
 #### 测试层面
 

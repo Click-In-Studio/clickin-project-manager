@@ -8,7 +8,7 @@
 //
 // ⚠ compat.maxTokensField 必须显式 "max_tokens"：@openclaw/ai 2026.7.1-2 对 deepseek
 // 自动选 max_completion_tokens，DeepSeek API 忽略它 → 输出永不封顶（S1 实测：上限 16
-// 照样产出 600 字）。见 tests/agent-runtime-live.test.ts。
+// 照样产出 600 字）。见 tests/agent/agent-runtime-live.test.ts。
 
 import { createApiRegistry, createLlmRuntime, type LlmRuntime } from "@openclaw/ai";
 import { registerBuiltInApiProviders } from "@openclaw/ai/providers";

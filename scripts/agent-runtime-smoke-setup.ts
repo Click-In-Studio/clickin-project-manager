@@ -22,7 +22,7 @@ async function main() {
   const { createSession, SESSION_COOKIE } = await import("../lib/session");
   const { createNewSessionKey } = await import("../lib/agent-tools/session-identity");
   const { getPool } = await import("../lib/pg");
-  const { makeProduction, setProductionTier } = await import("../tests/factories");
+  const { makeProduction, setProductionTier } = await import("../tests/_support/factories");
 
   const tag = Date.now().toString(36);
   const { userId } = await upsertFeishuUser(`smoke-open-${tag}`, `冒烟用户-${tag}`, null, false);
