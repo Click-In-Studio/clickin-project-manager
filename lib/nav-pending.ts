@@ -3,7 +3,7 @@
  *
  * 单独放在 lib 下而不是内联在 AppShell 里：这是本机制唯一非平凡的逻辑，
  * 连点时几个 report 的到达顺序不确定，值得有测试兜住（见
- * tests/ops/nav-pending.test.ts）。
+ * tests/platform/nav-pending.test.ts）。
  *
  * 各 NavItem 通过 useLinkStatus 上报自己的在途状态，汇聚成「当前正在去哪」
  * 这一个值。约束：
