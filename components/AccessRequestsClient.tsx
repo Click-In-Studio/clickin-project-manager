@@ -177,7 +177,7 @@ function ApprovalFlow({ req, compact = false }: {
 }) {
   const isPending = req.status === "pending_supervisor" || req.status === "pending_resource";
   // 时间线的组装逻辑（含超时、撤回、被顶掉、存量无链等降级分支）在 lib/approval-timeline.ts，
-  // 由 tests/approval-timeline.test.ts 覆盖——这些状态在页面上极难手工复现。
+  // 由 tests/ops/approval-timeline.test.ts 覆盖——这些状态在页面上极难手工复现。
   const nodes: TimelineNode[] = useMemo(() => buildApprovalTimeline(req), [req]);
   // 姓名与角色随审批 DTO 一起下来（people），不再联查通讯录：那条路拉全员邮箱手机号
   // 只为取个名，还覆盖不到不在成员名单里的审批人（祖先部门 POC、存量演出 owner）。

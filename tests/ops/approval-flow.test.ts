@@ -1,0 +1,2101 @@
+/**
+ * 审批流集成测试（#140 阶梯升级 + #256 TTL 修复后）
+ *
+ * 验证点：
+ *  - 阶梯路由（lib/approval-routing）：supervisor 链 → 持有者 → 共管部门 POC
+ *    → 父部门 POC → 制作人 → owner，申请人本人恒被排除，跨级去重
+ *  - 敏感度分流：SENSITIVE 直达 owner（制作人代批不了）、ROOT 拒收申请
+ *  - supervisor 语义：本人持有该权限 → 批准即终局；不持有 → 只能向上转交
+ *  - 转交（escalate）与 TTL 超时升级都沿阶梯单调前进，链路记在 escalation_chain
+ *  - first-action-wins（并发 approve 只有一个成功）
+ *  - 权限门控（非授权用户无法 approve/reject/escalate）
+ *  - #256：grantType='ttl' 必须带白名单内的时长，批准后 expires_at 非 NULL
+ *  - 通知路径：各级审批人拿到的动作（批准 / 转交）与其 canFinalize 一致
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { readFile } from "fs/promises";
+import path from "path";
+import { getPool } from "@/lib/pg";
+import {
+  addProductionMember,
+  submitAccessRequest,
+  approveAccessRequest,
+  escalateAccessRequest,
+  rejectAccessRequest,
+  cancelAccessRequest,
+  listMyAccessRequests,
+  listPendingApprovals,
+  escalateExpiredApprovals,
+  previewApprovalLadder,
+  formatPgInterval,
+  getActiveVersionId,
+  ApprovalRequestError,
+  type ApprovalChainEntry,
+} from "@/lib/db";
+import { buildApprovalLadder, classifyApprovalNode, nextStage } from "@/lib/approval-routing";
+import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval-stages";
+import {
+  TTL_OPTIONS,
+  customExpiryDateToIso,
+  displayTtlLabel,
+  isValidCustomExpiry,
+  isValidTtlInterval,
+  localTodayDateInputValue,
+  ttlPayloadForSelection,
+} from "@/lib/approval-ttl";
+import { addResourceDeptManage, createProductionDept, setDeptMembers } from "@/lib/dept-db";
+import { listUserNotifications } from "@/lib/inbox-db";
+import { makeProduction, makeScene, cleanupProduction } from "../_support/factories";
+
+// ─── Fixtures ─────────────────────────────────────────────────────────────────
+
+// Fixed UUIDs — high range to avoid collision with TEST_USER and EXTRA_USER_*
+const U_OWNER      = "00000000-0000-0000-0001-000000000001";
+const U_REQUESTER  = "00000000-0000-0000-0001-000000000002";
+const U_SUPERVISOR = "00000000-0000-0000-0001-000000000003";
+const U_POC        = "00000000-0000-0000-0001-000000000004";
+const U_UNRELATED  = "00000000-0000-0000-0001-000000000005";
+const U_HOLDER     = "00000000-0000-0000-0001-000000000006";
+const U_ANC_POC    = "00000000-0000-0000-0001-000000000007";
+const U_PRODUCER   = "00000000-0000-0000-0001-000000000008";
+/** 有账号、有 profile，但**不在本演出成员名单里**——审批链上确实会出现这种人。 */
+const U_OUTSIDER   = "00000000-0000-0000-0001-000000000009";
+
+const ALL_USERS = [
+  { id: U_OWNER,      openId: "test-owner",      name: "演出Owner" },
+  { id: U_REQUESTER,  openId: "test-requester",  name: "申请人" },
+  { id: U_SUPERVISOR, openId: "test-supervisor", name: "直属上级" },
+  { id: U_POC,        openId: "test-poc",        name: "科组POC" },
+  { id: U_UNRELATED,  openId: "test-unrelated",  name: "无关用户" },
+  { id: U_HOLDER,     openId: "test-holder",     name: "资源持有者" },
+  { id: U_ANC_POC,    openId: "test-anc-poc",    name: "上级科组POC" },
+  { id: U_PRODUCER,   openId: "test-producer",   name: "制作人甲" },
+  { id: U_OUTSIDER,   openId: "test-outsider",   name: "编外审批人" },
+];
+
+let prodId: string;
+let deptId: string;
+
+// ─── Setup ────────────────────────────────────────────────────────────────────
+
+beforeAll(async () => {
+  const pool = getPool();
+
+  await pool.query(
+    `INSERT INTO app_user (id, created_at)
+     SELECT * FROM UNNEST($1::uuid[], $2::timestamptz[])
+     ON CONFLICT DO NOTHING`,
+    [ALL_USERS.map((u) => u.id), ALL_USERS.map(() => new Date())],
+  );
+  for (const u of ALL_USERS) {
+    await pool.query(
+      `INSERT INTO feishu_user (open_id, user_id, name, is_super_admin, created_at, updated_at)
+       VALUES ($1, $2, $3, FALSE, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [u.openId, u.id, u.name],
+    );
+  }
+
+  // user_profile 才是显示名的来源（#234 身份债清偿后）：审批 DTO 的 people、
+  // 通知正文里的申请人名都只认这张表。fixture 只建 feishu_user 的话，
+  // 测出来的是一片「成员」，看不出姓名口径对不对。
+  await pool.query(
+    `INSERT INTO user_profile (user_id, name)
+     SELECT * FROM UNNEST($1::uuid[], $2::text[])
+     ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name`,
+    [ALL_USERS.map((u) => u.id), ALL_USERS.map((u) => u.name)],
+  );
+
+  // Create production owned by U_OWNER
+  ({ prodId } = await makeProduction(U_OWNER));
+
+  for (const userId of [U_REQUESTER, U_SUPERVISOR, U_POC, U_UNRELATED]) {
+    await addProductionMember(prodId, userId);
+  }
+
+  // Set U_SUPERVISOR as the supervisor of U_REQUESTER
+  await pool.query(
+    `UPDATE production_member SET supervisor_id = $1
+     WHERE production_id = $2 AND user_id = $3`,
+    [U_SUPERVISOR, prodId, U_REQUESTER],
+  );
+
+  // Create a dept, make U_POC a POC member, link to resource_type='cue_list'
+  const dept = await createProductionDept({ productionId: prodId, name: "走位科组" });
+  deptId = dept.id;
+  await setDeptMembers(deptId, prodId, [{ userId: U_POC, isPoc: true }]);
+  await addResourceDeptManage({
+    productionId: prodId,
+    deptId,
+    resourceType: "cue_list",
+    establishedBy: U_OWNER,
+  });
+
+  await pool.query(
+    `INSERT INTO production_approval_config (production_id, ttl_hours, updated_by)
+     VALUES ($1, 24, $2) ON CONFLICT DO NOTHING`,
+    [prodId, U_OWNER],
+  );
+});
+
+afterAll(async () => {
+  const pool = getPool();
+  // approval_request rows are CASCADE-deleted by production delete
+  await cleanupProduction(prodId).catch(() => {});
+  await pool
+    .query("DELETE FROM app_user WHERE id = ANY($1)", [ALL_USERS.map((u) => u.id)])
+    .catch(() => {});
+});
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async function latestNotifs(userId: string) {
+  return listUserNotifications(userId, { limit: 30 });
+}
+
+async function notifForRequest(userId: string, requestId: string) {
+  const all = await latestNotifs(userId);
+  return all.filter((n) => n.approvalRequestId === requestId);
+}
+
+async function cancelRows(ids: string[]) {
+  await getPool().query(
+    `UPDATE approval_request SET status='cancelled', current_stage=NULL, current_approver_ids='{}'
+     WHERE id = ANY($1::uuid[]) AND status IN ('pending_supervisor','pending_resource')`,
+    [ids],
+  );
+}
+
+/** 给某人发一条真授权行（用于制造「上级已持有该权限」的局面）。 */
+async function grantRows(
+  userId: string,
+  rows: ReadonlyArray<readonly [string, string]>,
+  resourceType = "cue_list",
+) {
+  for (const [sub, verb] of rows) {
+    await getPool().query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES ($1,$2,$3,'*',$4,$5,'direct')
+       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+         WHERE is_revoked = false
+       DO NOTHING`,
+      [prodId, userId, resourceType, sub, verb],
+    );
+  }
+}
+
+async function revokeAll(userId: string) {
+  await getPool().query(
+    `DELETE FROM production_member_grant WHERE production_id = $1 AND user_id = $2`,
+    [prodId, userId],
+  );
+}
+
+function target(over: Partial<Parameters<typeof buildApprovalLadder>[0]> = {}) {
+  return {
+    productionId: prodId,
+    subjectId: U_REQUESTER,
+    resourceType: "cue_list",
+    resourceId: "*",
+    resourceSub: "*",
+    permissionLevel: "view",
+    ...over,
+  };
+}
+
+// ─── 1. 阶梯路由 ──────────────────────────────────────────────────────────────
+
+describe("buildApprovalLadder — 阶梯顺序与成员", () => {
+  it("默认阶梯：直属上级 → 共管部门 POC → owner 兜底", async () => {
+    const ladder = await buildApprovalLadder(target());
+    expect(ladder.map((s) => s.stage)).toEqual(["supervisor", "dept_poc", "owner"]);
+    expect(ladder[0].approverIds).toEqual([U_SUPERVISOR]);
+    expect(ladder[1].approverIds).toEqual([U_POC]);
+    expect(ladder[2].approverIds).toEqual([U_OWNER]);
+  });
+
+  it("上级本人未持有该权限 → canFinalize=false（只能转交）", async () => {
+    const ladder = await buildApprovalLadder(target());
+    expect(ladder[0].canFinalize).toBe(false);
+    // 资源侧各级恒可终局
+    expect(ladder.slice(1).every((s) => s.canFinalize)).toBe(true);
+  });
+
+  it("上级持有申请的全部动词行 → canFinalize=true", async () => {
+    await grantRows(U_SUPERVISOR, [["*", "view"]]);
+    try {
+      const ladder = await buildApprovalLadder(target());
+      expect(ladder[0].canFinalize).toBe(true);
+      // 伪级别 mount 展开成两行，上级只有 view → 仍算无权
+      const mountLadder = await buildApprovalLadder(target({ permissionLevel: "mount" }));
+      expect(mountLadder[0].canFinalize).toBe(false);
+    } finally {
+      await revokeAll(U_SUPERVISOR);
+    }
+  });
+
+  it("申请人本人不出现在任何一级（POC 申请自己管的资源）", async () => {
+    const ladder = await buildApprovalLadder(target({ subjectId: U_POC }));
+    expect(ladder.flatMap((s) => s.approverIds)).not.toContain(U_POC);
+    expect(ladder.map((s) => s.stage)).toEqual(["owner"]);
+  });
+
+  it("资源持有者（grants@edit 行）排在部门 POC 之前", async () => {
+    await grantRows(U_HOLDER, [["grants", "edit"]]);
+    try {
+      const ladder = await buildApprovalLadder(target());
+      expect(ladder.map((s) => s.stage)).toEqual(["supervisor", "holder", "dept_poc", "owner"]);
+      expect(ladder[1].approverIds).toEqual([U_HOLDER]);
+    } finally {
+      await revokeAll(U_HOLDER);
+    }
+  });
+
+  it("上级链成环时不会无限展开（申请人 → A → 申请人）", async () => {
+    // U_REQUESTER 的上级是 U_SUPERVISOR，再把 U_SUPERVISOR 的上级设回申请人
+    await getPool().query(
+      `UPDATE production_member SET supervisor_id = $1 WHERE production_id = $2 AND user_id = $3`,
+      [U_REQUESTER, prodId, U_SUPERVISOR],
+    );
+    try {
+      const ladder = await buildApprovalLadder(target());
+      const supervisorStages = ladder.filter((s) => s.stage === "supervisor");
+      expect(supervisorStages).toHaveLength(1);
+      expect(supervisorStages[0].approverIds).toEqual([U_SUPERVISOR]);
+      // 环没有把申请人本人拉进审批人集合
+      expect(ladder.flatMap((s) => s.approverIds)).not.toContain(U_REQUESTER);
+    } finally {
+      await getPool().query(
+        `UPDATE production_member SET supervisor_id = NULL WHERE production_id = $1 AND user_id = $2`,
+        [prodId, U_SUPERVISOR],
+      );
+    }
+  });
+
+  it("多级上级链逐跳展开，每跳一级", async () => {
+    // U_REQUESTER → U_SUPERVISOR → U_HOLDER
+    await addProductionMember(prodId, U_HOLDER);
+    await getPool().query(
+      `UPDATE production_member SET supervisor_id = $1 WHERE production_id = $2 AND user_id = $3`,
+      [U_HOLDER, prodId, U_SUPERVISOR],
+    );
+    try {
+      const ladder = await buildApprovalLadder(target());
+      const sup = ladder.filter((s) => s.stage === "supervisor");
+      expect(sup.map((s) => [s.depth, s.approverIds])).toEqual([
+        [0, [U_SUPERVISOR]], [1, [U_HOLDER]],
+      ]);
+    } finally {
+      await getPool().query(
+        `UPDATE production_member SET supervisor_id = NULL WHERE production_id = $1 AND user_id = $2`,
+        [prodId, U_SUPERVISOR],
+      );
+    }
+  });
+
+  it("SENSITIVE 节点跳过整条链，直达 owner", async () => {
+    expect(classifyApprovalNode("production", "meta", "edit")).toBe("sensitive");
+    const ladder = await buildApprovalLadder(
+      target({ resourceType: "production", resourceSub: "meta", permissionLevel: "edit" }),
+    );
+    expect(ladder.map((s) => s.stage)).toEqual(["owner"]);
+    expect(ladder[0].approverIds).toEqual([U_OWNER]);
+  });
+
+  it("ROOT 节点无审批通道 → 阶梯为空", async () => {
+    expect(classifyApprovalNode("production", "owner", "edit")).toBe("root");
+    const ladder = await buildApprovalLadder(
+      target({ resourceType: "production", resourceSub: "owner", permissionLevel: "edit" }),
+    );
+    expect(ladder).toEqual([]);
+  });
+
+  it("nextStage 按阶梯序单调前进，链顶返回 null", async () => {
+    const ladder = await buildApprovalLadder(target());
+    expect(nextStage(ladder, null)?.stage).toBe("supervisor");
+    expect(nextStage(ladder, { stage: "supervisor", depth: 0 })?.stage).toBe("dept_poc");
+    expect(nextStage(ladder, { stage: "dept_poc", depth: 0 })?.stage).toBe("owner");
+    expect(nextStage(ladder, { stage: "owner", depth: 0 })).toBeNull();
+    // 阶梯形状变了也不回退：holder 级晚于 supervisor，早于 dept_poc
+    expect(nextStage(ladder, { stage: "holder", depth: 0 })?.stage).toBe("dept_poc");
+  });
+});
+
+describe("buildApprovalLadder — 完整五级（独立演出）", () => {
+  let p2: string;
+  let childDept: string;
+
+  beforeAll(async () => {
+    ({ prodId: p2 } = await makeProduction(U_OWNER));
+    for (const u of [U_REQUESTER, U_SUPERVISOR, U_POC, U_ANC_POC, U_PRODUCER, U_HOLDER]) {
+      await addProductionMember(p2, u);
+    }
+    await getPool().query(
+      `UPDATE production_member SET supervisor_id = $1 WHERE production_id = $2 AND user_id = $3`,
+      [U_SUPERVISOR, p2, U_REQUESTER],
+    );
+    // 制作人：结构性角色，按名匹配
+    await getPool().query(
+      `UPDATE production_member SET roles = ARRAY['制作人'] WHERE production_id = $1 AND user_id = $2`,
+      [p2, U_PRODUCER],
+    );
+    const parent = await createProductionDept({ productionId: p2, name: "技术部" });
+    const child = await createProductionDept({ productionId: p2, name: "灯光组", parentId: parent.id });
+    childDept = child.id;
+    await setDeptMembers(parent.id, p2, [{ userId: U_ANC_POC, isPoc: true }]);
+    await setDeptMembers(childDept, p2, [{ userId: U_POC, isPoc: true }]);
+    await addResourceDeptManage({
+      productionId: p2, deptId: childDept, resourceType: "cue_list", establishedBy: U_OWNER,
+    });
+    await getPool().query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES ($1,$2,'cue_list','*','grants','edit','direct') ON CONFLICT DO NOTHING`,
+      [p2, U_HOLDER],
+    );
+  });
+
+  afterAll(async () => {
+    await cleanupProduction(p2).catch(() => {});
+  });
+
+  it("PRD 五级顺序：上级 → 持有者 → 共管部门 POC → 父部门 POC → 制作人 → owner", async () => {
+    const ladder = await buildApprovalLadder({
+      productionId: p2, subjectId: U_REQUESTER,
+      resourceType: "cue_list", resourceId: "*", resourceSub: "*", permissionLevel: "view",
+    });
+    expect(ladder.map((s) => s.stage)).toEqual([
+      "supervisor", "holder", "dept_poc", "ancestor_poc", "producer", "owner",
+    ]);
+    expect(ladder.map((s) => s.approverIds)).toEqual([
+      [U_SUPERVISOR], [U_HOLDER], [U_POC], [U_ANC_POC], [U_PRODUCER], [U_OWNER],
+    ]);
+  });
+
+  it("跨级去重：同一人只在最早的一级出现", async () => {
+    // 让父部门 POC 也成为制作人 —— 制作人级应因为已通知过而被跳过
+    await getPool().query(
+      `UPDATE production_member SET roles = ARRAY['制作人'] WHERE production_id = $1 AND user_id = $2`,
+      [p2, U_ANC_POC],
+    );
+    try {
+      const ladder = await buildApprovalLadder({
+        productionId: p2, subjectId: U_REQUESTER,
+        resourceType: "cue_list", resourceId: "*", resourceSub: "*", permissionLevel: "view",
+      });
+      const producerStage = ladder.find((s) => s.stage === "producer");
+      expect(producerStage?.approverIds).not.toContain(U_ANC_POC);
+      expect(ladder.filter((s) => s.approverIds.includes(U_ANC_POC))).toHaveLength(1);
+    } finally {
+      await getPool().query(
+        `UPDATE production_member SET roles = '{}' WHERE production_id = $1 AND user_id = $2`,
+        [p2, U_ANC_POC],
+      );
+    }
+  });
+});
+
+// ─── 2. submitAccessRequest ───────────────────────────────────────────────────
+
+describe("submitAccessRequest", () => {
+  it("有直属上级 → 首级 supervisor，current_approver_ids 写入上级", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+    });
+    expect(req.status).toBe("pending_supervisor");
+    expect(req.currentStage).toBe("supervisor");
+    expect(req.currentApproverIds).toEqual([U_SUPERVISOR]);
+    expect(req.subjectId).toBe(U_REQUESTER);
+    expect(req.productionId).toBe(prodId);
+
+    await cancelRows([req.id]);
+  });
+
+  it("无直属上级 → 首级直接落到资源侧", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+    });
+    expect(req.status).toBe("pending_resource");
+    expect(req.currentStage).toBe("dept_poc");
+    expect(req.currentApproverIds).toEqual([U_POC]);
+
+    await cancelRows([req.id]);
+  });
+
+  it("notify: 首级审批人拿到 action_required 通知", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      note: "测试通知路径",
+    });
+
+    const notifs = await notifForRequest(U_SUPERVISOR, req.id);
+    expect(notifs.length).toBe(1);
+    expect(notifs[0].kind).toBe("approval_request_pending");
+    expect(notifs[0].actionRequired).toBe(true);
+    expect(notifs[0].approvalRequestId).toBe(req.id);
+    // 上级无权终局 → 主动作是「转交」而非「批准」
+    expect(notifs[0].actions.map((a) => a.id)).toEqual(["escalate", "reject"]);
+
+    await cancelRows([req.id]);
+  });
+
+  // #159：scene marker 化后 scene 表只剩 id/production_id，通知正文里的资源名
+  // 却还在查 scene.name/number——具体到某一场的申请一提交就 42703 炸在
+  // notifyStage 里。名字必须从 scene_version（marker 派生读模型）取。
+  it("#159: 具体场次的申请不炸，通知正文带出场次名", async () => {
+    const versionId = (await getActiveVersionId(prodId))!;
+    const sceneId = await makeScene(prodId, versionId, { name: "雾港清晨" });
+
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "scene",
+      resourceId: sceneId,
+      permissionLevel: "view",
+    });
+
+    const notifs = await notifForRequest(U_SUPERVISOR, req.id);
+    expect(notifs.length).toBe(1);
+    expect(notifs[0].body).toContain("雾港清晨");
+    // 反证：名字没真取到就会退化成「某个章节/段落」，那是没修好的样子
+    expect(notifs[0].body).not.toContain("某个章节/段落");
+
+    await cancelRows([req.id]);
+  });
+
+  it("#159: 具体资源解析不出名字时说「某个」而非「所有」，不把申请范围说大", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "scene",
+      resourceId: `${prodId}-no-such-scene`,
+      permissionLevel: "view",
+    });
+
+    const notifs = await notifForRequest(U_SUPERVISOR, req.id);
+    expect(notifs[0].body).toContain("某个章节/段落");
+    expect(notifs[0].body).not.toContain("所有章节/段落");
+
+    await cancelRows([req.id]);
+  });
+
+  it("notify: 上级持有该权限时主动作是「批准」", async () => {
+    await grantRows(U_SUPERVISOR, [["*", "view"]]);
+    try {
+      const req = await submitAccessRequest(prodId, U_REQUESTER, {
+        resourceType: "cue_list",
+        permissionLevel: "view",
+      });
+      const notifs = await notifForRequest(U_SUPERVISOR, req.id);
+      expect(notifs[0].actions.map((a) => a.id)).toEqual(["approve", "reject"]);
+      await cancelRows([req.id]);
+    } finally {
+      await revokeAll(U_SUPERVISOR);
+    }
+  });
+
+  // #256：'ttl' 不带时长会一路 NULL 到 expires_at，而 NULL 在每一处检查里都等于永久
+  it("#256: grantType='ttl' 缺时长 → invalid_ttl，不落库", async () => {
+    await expect(
+      submitAccessRequest(prodId, U_REQUESTER, {
+        resourceType: "cue_list",
+        permissionLevel: "view",
+        grantType: "ttl",
+      }),
+    ).rejects.toThrow(ApprovalRequestError);
+
+    const rows = await getPool().query(
+      `SELECT 1 FROM approval_request
+       WHERE production_id = $1 AND subject_id = $2 AND grant_type = 'ttl' AND ttl_duration IS NULL`,
+      [prodId, U_REQUESTER],
+    );
+    expect(rows.rows).toHaveLength(0);
+  });
+
+  it("#256: 白名单外的时长同样被拒（只认 TTL_OPTIONS）", async () => {
+    await expect(
+      submitAccessRequest(prodId, U_REQUESTER, {
+        resourceType: "cue_list",
+        permissionLevel: "view",
+        grantType: "ttl",
+        ttlDuration: "99 years",
+      }),
+    ).rejects.toThrow(ApprovalRequestError);
+  });
+
+  it("#256: DB 约束是最后一道 —— 绕过应用层也写不进 ttl+NULL", async () => {
+    await expect(
+      getPool().query(
+        `INSERT INTO approval_request
+           (production_id, subject_id, type, resource_type, resource_id, resource_sub,
+            permission_level, grant_type, ttl_duration, status)
+         VALUES ($1,$2,'resource_access','cue_list','*','*','view','ttl',NULL,'pending_resource')`,
+        [prodId, U_REQUESTER],
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("ROOT 节点拒收申请（owner-only，连审批通道都没有）", async () => {
+    await expect(
+      submitAccessRequest(prodId, U_REQUESTER, {
+        resourceType: "production",
+        resourceSub: "owner",
+        permissionLevel: "edit",
+      }),
+    ).rejects.toMatchObject({ reason: "no_entry" });
+  });
+
+  it("覆盖式申请：同目标的旧 pending 被自动 cancel 且待办过期", async () => {
+    // 先申 1 周再改申 30 天时，旧申请待办不能继续堆在审批人收件箱
+    const first = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      ttlDuration: "7 days",
+    });
+    const second = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      ttlDuration: "30 days",
+    });
+
+    const firstRow = await getPool().query<{ status: string; resolved_at: Date | null }>(
+      `SELECT status, resolved_at FROM approval_request WHERE id = $1`, [first.id]);
+    expect(firstRow.rows[0].status).toBe("cancelled");
+    expect(firstRow.rows[0].resolved_at).not.toBeNull();
+
+    const firstNotifs = await getPool().query(
+      `SELECT 1 FROM user_notification
+       WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL`,
+      [first.id]);
+    expect(firstNotifs.rows.length).toBe(0);
+    const secondNotifs = await getPool().query(
+      `SELECT 1 FROM user_notification
+       WHERE approval_request_id = $1 AND expired_at IS NULL AND acted_at IS NULL`,
+      [second.id]);
+    expect(secondNotifs.rows.length).toBeGreaterThan(0);
+
+    // 不同 level 的 pending 不被覆盖
+    const editReq = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "edit",
+    });
+    const secondRow = await getPool().query<{ status: string }>(
+      `SELECT status FROM approval_request WHERE id = $1`, [second.id]);
+    expect(secondRow.rows[0].status).toBe("pending_supervisor");
+
+    await cancelRows([second.id, editReq.id]);
+  });
+
+  it("escalation_chain 首条记录级名、层深与 canFinalize", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+    });
+    expect(req.escalationChain).toHaveLength(1);
+    expect(req.escalationChain[0].phase).toBe("supervisor");
+    expect(req.escalationChain[0].stage).toBe("supervisor");
+    expect(req.escalationChain[0].depth).toBe(0);
+    expect(req.escalationChain[0].canFinalize).toBe(false);
+    expect(req.escalationChain[0].approverIds).toContain(U_SUPERVISOR);
+
+    await cancelRows([req.id]);
+  });
+});
+
+// ─── 3. approveAccessRequest ──────────────────────────────────────────────────
+
+describe("approveAccessRequest — supervisor 级按敏感度/持权分流", () => {
+  it("unauthorized: 非当前级审批人不能批", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const result = await approveAccessRequest(req.id, U_UNRELATED);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("unauthorized");
+    await cancelRows([req.id]);
+  });
+
+  it("forward_only: 上级本人无该权限 → 批不了，只能转交", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const result = await approveAccessRequest(req.id, U_SUPERVISOR);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("forward_only");
+
+    // 申请没被动过
+    const row = await getPool().query<{ status: string }>(
+      `SELECT status FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].status).toBe("pending_supervisor");
+    await cancelRows([req.id]);
+  });
+
+  it("上级持有该权限 → 批准即终局，直接发授权", async () => {
+    await grantRows(U_SUPERVISOR, [["*", "view"]]);
+    try {
+      const req = await submitAccessRequest(prodId, U_REQUESTER, {
+        resourceType: "cue_list", permissionLevel: "view",
+      });
+      const result = await approveAccessRequest(req.id, U_SUPERVISOR);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.request.status).toBe("approved");
+
+      const grants = await getPool().query(
+        `SELECT * FROM production_member_grant WHERE approval_id = $1`, [req.id]);
+      expect(grants.rows).toHaveLength(1);
+      expect(grants.rows[0].user_id).toBe(U_REQUESTER);
+      expect(grants.rows[0].grant_source).toBe("approval");
+    } finally {
+      await revokeAll(U_SUPERVISOR);
+      await revokeAll(U_REQUESTER);
+    }
+  });
+
+  it("owner 可随时介入批准（越级）", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const result = await approveAccessRequest(req.id, U_OWNER);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.request.status).toBe("approved");
+    await revokeAll(U_REQUESTER);
+  });
+
+  it("SENSITIVE 申请：制作人代批不了，owner 才能批", async () => {
+    await addProductionMember(prodId, U_PRODUCER);
+    await getPool().query(
+      `UPDATE production_member SET roles = ARRAY['制作人'] WHERE production_id = $1 AND user_id = $2`,
+      [prodId, U_PRODUCER],
+    );
+    try {
+      const req = await submitAccessRequest(prodId, U_REQUESTER, {
+        resourceType: "production", resourceSub: "meta", permissionLevel: "edit",
+      });
+      expect(req.currentStage).toBe("owner");
+      expect(req.currentApproverIds).toEqual([U_OWNER]);
+
+      const denied = await approveAccessRequest(req.id, U_PRODUCER);
+      expect(denied.ok).toBe(false);
+      if (!denied.ok) expect(denied.reason).toBe("unauthorized");
+
+      const ok = await approveAccessRequest(req.id, U_OWNER);
+      expect(ok.ok).toBe(true);
+    } finally {
+      await getPool().query(
+        `DELETE FROM production_member_grant WHERE production_id = $1 AND user_id = $2`,
+        [prodId, U_REQUESTER],
+      );
+      await getPool().query(
+        `UPDATE production_member SET roles = '{}' WHERE production_id = $1 AND user_id = $2`,
+        [prodId, U_PRODUCER],
+      );
+    }
+  });
+
+  it("非敏感申请：制作人可主动介入批准", async () => {
+    await addProductionMember(prodId, U_PRODUCER);
+    await getPool().query(
+      `UPDATE production_member SET roles = ARRAY['制作人'] WHERE production_id = $1 AND user_id = $2`,
+      [prodId, U_PRODUCER],
+    );
+    try {
+      const req = await submitAccessRequest(prodId, U_REQUESTER, {
+        resourceType: "cue_list", permissionLevel: "view",
+      });
+      const result = await approveAccessRequest(req.id, U_PRODUCER);
+      expect(result.ok).toBe(true);
+    } finally {
+      await revokeAll(U_REQUESTER);
+      await getPool().query(
+        `UPDATE production_member SET roles = '{}' WHERE production_id = $1 AND user_id = $2`,
+        [prodId, U_PRODUCER],
+      );
+    }
+  });
+});
+
+describe("approveAccessRequest — 资源侧终局", () => {
+  let reqId: string;
+
+  beforeAll(async () => {
+    // U_UNRELATED 无上级 → 首级即 dept_poc（U_POC）
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+    });
+    reqId = req.id;
+  });
+
+  afterAll(async () => {
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("unauthorized: 无关用户不能批", async () => {
+    const result = await approveAccessRequest(reqId, U_REQUESTER);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("unauthorized");
+  });
+
+  it("POC 批准 → approved", async () => {
+    const result = await approveAccessRequest(reqId, U_POC);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.request.status).toBe("approved");
+    expect(result.request.grantedAt).not.toBeNull();
+    expect(result.request.currentApproverIds).toEqual([]);
+  });
+
+  it("production_member_grant 写入 grant_source='approval' 与 approval_id", async () => {
+    const row = await getPool().query(
+      `SELECT * FROM production_member_grant WHERE approval_id = $1`, [reqId]);
+    expect(row.rows).toHaveLength(1);
+    const grant = row.rows[0];
+    expect(grant.grant_source).toBe("approval");
+    expect(grant.user_id).toBe(U_UNRELATED);
+    expect(grant.resource_type).toBe("cue_list");
+    expect(grant.permission_level).toBe("view");
+    expect(grant.is_revoked).toBe(false);
+  });
+
+  it("notify: 申请人收到批准通知", async () => {
+    const notifs = await notifForRequest(U_UNRELATED, reqId);
+    const approvedNotif = notifs.find((n) => n.kind === "approval_request_result");
+    expect(approvedNotif).toBeDefined();
+    expect(approvedNotif?.approvalRequestId).toBe(reqId);
+  });
+
+  it("notify: 待办通知在批准后全部过期", async () => {
+    const notifs = [
+      ...(await notifForRequest(U_POC, reqId)),
+      ...(await notifForRequest(U_UNRELATED, reqId)),
+    ];
+    const unexpiredActions = notifs.filter((n) => n.actionRequired && !n.actedAt && !n.expiredAt);
+    expect(unexpiredActions).toHaveLength(0);
+  });
+
+  it("conflict: 同一申请不能批两次", async () => {
+    const result = await approveAccessRequest(reqId, U_POC);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("conflict");
+  });
+});
+
+describe("授权发行的行集展开", () => {
+  it("伪级别申请（sub='*'）展开为整套动词行集", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list", permissionLevel: "mount",
+    });
+    await approveAccessRequest(req.id, U_POC);
+    const rows = await getPool().query<{ resource_sub: string; permission_level: string }>(
+      `SELECT resource_sub, permission_level FROM production_member_grant WHERE approval_id = $1`,
+      [req.id]);
+    expect(rows.rows.map((r) => `${r.resource_sub}@${r.permission_level}`).sort())
+      .toEqual(["*@view", "mounts@create"]);
+    await revokeAll(U_UNRELATED);
+  });
+
+  // 动词 'edit' 与伪级别 'edit' 同名：节点键申请若也去查伪级别表，一条
+  // cues@edit 会被发成整套 edit 行集（含 *@edit 和 cues@delete）——超发。
+  it("节点键申请（sub 具体）只发所申请的那一行，不越权展开", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list", resourceSub: "cues", permissionLevel: "edit",
+    });
+    await approveAccessRequest(req.id, U_POC);
+    const rows = await getPool().query<{ resource_sub: string; permission_level: string }>(
+      `SELECT resource_sub, permission_level FROM production_member_grant WHERE approval_id = $1`,
+      [req.id]);
+    expect(rows.rows.map((r) => `${r.resource_sub}@${r.permission_level}`)).toEqual(["cues@edit"]);
+    await revokeAll(U_UNRELATED);
+  });
+});
+
+// ─── 4. #256 TTL 回归 ─────────────────────────────────────────────────────────
+
+describe("#256 临时权限确实会过期", () => {
+  it("ttl 申请批准后 expires_at 非 NULL，且授权行带同一到期时间", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      ttlDuration: "7 days",
+    });
+    const result = await approveAccessRequest(req.id, U_POC);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.request.expiresAt).not.toBeNull();
+
+    const grants = await getPool().query<{ expires_at: Date | null }>(
+      `SELECT expires_at FROM production_member_grant WHERE approval_id = $1`, [req.id]);
+    expect(grants.rows).toHaveLength(1);
+    expect(grants.rows[0].expires_at).not.toBeNull();
+    // 到期时间落在 7 天后附近（宽松窗口，避免时钟抖动）
+    const days = (grants.rows[0].expires_at!.getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(6.9);
+    expect(days).toBeLessThan(7.1);
+
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("permanent 申请批准后 expires_at 为 NULL", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "permanent",
+    });
+    const result = await approveAccessRequest(req.id, U_POC);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.request.expiresAt).toBeNull();
+
+    const grants = await getPool().query<{ expires_at: Date | null }>(
+      `SELECT expires_at FROM production_member_grant WHERE approval_id = $1`, [req.id]);
+    expect(grants.rows[0].expires_at).toBeNull();
+
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("自定义日期按绝对时间发放，不因审批等待而顺延", async () => {
+    const requestedExpiresAt = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "mount",
+      grantType: "ttl",
+      requestedExpiresAt,
+    });
+    expect(req.ttlDurationLabel).toBeNull();
+    expect(req.requestedExpiresAt).toBe(requestedExpiresAt);
+
+    const result = await approveAccessRequest(req.id, U_POC);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.request.expiresAt).toBe(requestedExpiresAt);
+
+    const grants = await getPool().query<{ expires_at: Date | null }>(
+      `SELECT expires_at FROM production_member_grant WHERE approval_id = $1`, [req.id]);
+    expect(grants.rows.length).toBeGreaterThan(0);
+    expect(grants.rows.every((row) => row.expires_at?.toISOString() === requestedExpiresAt)).toBe(true);
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("自定义日期在审批完成前被跨过：申请自动结束，不是「已被他人处理」", async () => {
+    // 自定义档存的是绝对时间，审批拖过所选日期是常态。加这条守卫之前，
+    // approve 会落到 first-action-wins 的 0 行分支回一句 conflict 的假错误，
+    // 而申请永远停在 pending，待办永远挂在审批人收件箱里。
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      requestedExpiresAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    });
+    // 模拟审批人在到期日之后才来处理
+    await getPool().query(
+      `UPDATE approval_request SET requested_expires_at = now() - interval '1 hour' WHERE id = $1`,
+      [req.id]);
+
+    const result = await approveAccessRequest(req.id, U_POC);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("expired");
+
+    // 申请被终结，不再是 pending —— 否则待办永远清不掉
+    const row = await getPool().query<{ status: string; resolved_at: Date | null }>(
+      `SELECT status, resolved_at FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].status).toBe("cancelled");
+    expect(row.rows[0].resolved_at).not.toBeNull();
+
+    // 审批人的待办过期，收件箱不堆积
+    const liveTodo = await getPool().query(
+      `SELECT 1 FROM user_notification
+        WHERE approval_request_id = $1 AND user_id <> $2
+          AND expired_at IS NULL AND acted_at IS NULL`, [req.id, U_UNRELATED]);
+    expect(liveTodo.rows).toHaveLength(0);
+
+    // 申请人收到「已过期、需重提」的告知——否则这条申请是悄无声息地死掉的
+    const told = await getPool().query<{ title: string }>(
+      `SELECT title FROM user_notification
+        WHERE approval_request_id = $1 AND user_id = $2 AND expired_at IS NULL`,
+      [req.id, U_UNRELATED]);
+    expect(told.rows.map((r) => r.title)).toContain("资源访问申请已过期");
+
+    // 一条都没发出去
+    const grants = await getPool().query(
+      `SELECT 1 FROM production_member_grant WHERE approval_id = $1`, [req.id]);
+    expect(grants.rows).toHaveLength(0);
+
+    // 链末条记明原因，时间线才能说清「我那条申请怎么自己没了」
+    const fresh = (await listMyAccessRequests(prodId, U_UNRELATED)).find((r) => r.id === req.id);
+    const last = fresh?.escalationChain[fresh.escalationChain.length - 1];
+    expect(last?.cancelReason).toBe("expired");
+    expect(last?.bySystem).toBe(true);
+
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("过期的自定义申请也不能被向上转交（转交只是把它挪进下一位的收件箱）", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      requestedExpiresAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    });
+    await getPool().query(
+      `UPDATE approval_request SET requested_expires_at = now() - interval '1 hour' WHERE id = $1`,
+      [req.id]);
+
+    const result = await escalateAccessRequest(req.id, U_POC);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("expired");
+
+    const row = await getPool().query<{ status: string }>(
+      `SELECT status FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].status).toBe("cancelled");
+
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("两个有效期字段同时传是 400（invalid_ttl），不是撞 DB 约束的 500", async () => {
+    // 互斥必须按**存在性**判：DB 的 approval_request_ttl_source_exclusive 卡的
+    // 就是存在性。按「哪个校验通过」判的话，下面这两种脏输入会一路穿到
+    // Postgres —— 一个撞 check constraint，一个撞 timestamptz 语法。
+    for (const bad of [
+      new Date(Date.now() - 86_400_000).toISOString(),  // 合法格式但已过期
+      "not-a-date",                                     // 根本不是时间
+      new Date(Date.now() + 86_400_000).toISOString(),  // 两个都合法，仍然违反互斥
+    ]) {
+      await expect(
+        submitAccessRequest(prodId, U_UNRELATED, {
+          resourceType: "cue_list",
+          permissionLevel: "view",
+          grantType: "ttl",
+          ttlDuration: "7 days",
+          requestedExpiresAt: bad,
+        }),
+      ).rejects.toMatchObject({ reason: "invalid_ttl" });
+    }
+    // 两个都不传同样是 invalid_ttl（#256 的原始症状）
+    await expect(
+      submitAccessRequest(prodId, U_UNRELATED, {
+        resourceType: "cue_list",
+        permissionLevel: "view",
+        grantType: "ttl",
+      }),
+    ).rejects.toMatchObject({ reason: "invalid_ttl" });
+  });
+
+  it("空串等价于没传，不能变成 ''::TIMESTAMPTZ 的 500", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      ttlDuration: "7 days",
+      requestedExpiresAt: "",
+    });
+    expect(req.requestedExpiresAt).toBeNull();
+    expect(req.ttlDurationLabel).toBe("7天");
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("ttlPayloadForSelection：三类档位各自只填该填的那个字段", () => {
+    // 这个函数就是前后端契约的落点——它拼出的 body 直接对着
+    // submitAccessRequest 的「二选一」那道门，两边错开就是 400 或 500。
+    expect(ttlPayloadForSelection("permanent", "")).toEqual({
+      grantType: "permanent", ttlDuration: null, requestedExpiresAt: null,
+    });
+    // 长期档位就算界面上残留着日期，也不能把它发出去
+    expect(ttlPayloadForSelection("permanent", "2099-01-01")).toEqual({
+      grantType: "permanent", ttlDuration: null, requestedExpiresAt: null,
+    });
+
+    for (const [value, interval] of [["1w", "7 days"], ["30d", "30 days"], ["180d", "180 days"]] as const) {
+      expect(ttlPayloadForSelection(value, "2099-01-01")).toEqual({
+        grantType: "ttl", ttlDuration: interval, requestedExpiresAt: null,
+      });
+      // 固定档位发出去的 interval 必须能过服务端白名单
+      expect(isValidTtlInterval(interval)).toBe(true);
+    }
+
+    const custom = ttlPayloadForSelection("custom", "2099-01-01");
+    expect(custom.grantType).toBe("ttl");
+    expect(custom.ttlDuration).toBeNull();
+    expect(custom.requestedExpiresAt).not.toBeNull();
+    expect(isValidCustomExpiry(custom.requestedExpiresAt)).toBe(true);
+  });
+
+  it("customExpiryDateToIso：非法输入回 null，合法输入落在本地时区当天结束", () => {
+    for (const bad of ["", "2026-13-01", "2026/12/31", "12-31-2026", "not-a-date", "2026-12-3"]) {
+      expect(customExpiryDateToIso(bad)).toBeNull();
+    }
+    // 语义是「所选日期当天结束」——在本地时区还原回去应当仍是同一天的 23:59:59.999
+    const iso = customExpiryDateToIso("2026-12-31");
+    expect(iso).not.toBeNull();
+    const back = new Date(iso!);
+    expect(back.getFullYear()).toBe(2026);
+    expect(back.getMonth()).toBe(11);
+    expect(back.getDate()).toBe(31);
+    expect(back.getHours()).toBe(23);
+    expect(back.getMinutes()).toBe(59);
+  });
+
+  it("localTodayDateInputValue：给 <input type=\"date\"> 的 min，按本地日期而非 UTC", () => {
+    // 用 toISOString().slice(0,10) 写这个函数是常见错法：UTC+8 的凌晨会给出
+    // 「昨天」，于是当天可选的最早日期比实际早一天。
+    expect(localTodayDateInputValue(new Date(2026, 0, 5, 9, 30))).toBe("2026-01-05");
+    // 月/日都要补零
+    expect(localTodayDateInputValue(new Date(2026, 8, 9, 12, 0))).toBe("2026-09-09");
+    // 本地日的边界两端都还算今天
+    expect(localTodayDateInputValue(new Date(2026, 11, 31, 0, 0, 0))).toBe("2026-12-31");
+    expect(localTodayDateInputValue(new Date(2026, 11, 31, 23, 59, 59))).toBe("2026-12-31");
+    // 与 customExpiryDateToIso 对齐：今天当天结束仍在未来，选「今天」必须能提交
+    expect(isValidCustomExpiry(customExpiryDateToIso(localTodayDateInputValue()))).toBe(true);
+  });
+
+  it("TTL 档位表：只认 1 周 / 30 天 / 180 天，并支持长期与自定义", () => {
+    expect(TTL_OPTIONS.map((o) => o.value)).toEqual(["1w", "30d", "180d", "permanent", "custom"]);
+    expect(TTL_OPTIONS.map((o) => o.interval)).toEqual(["7 days", "30 days", "180 days", null, null]);
+    expect(isValidTtlInterval("30 days")).toBe(true);
+    expect(isValidTtlInterval("30 minutes")).toBe(false);
+    expect(isValidTtlInterval(null)).toBe(false);
+    expect(isValidTtlInterval(undefined)).toBe(false);
+    expect(isValidCustomExpiry(new Date(Date.now() + 60_000).toISOString())).toBe(true);
+    expect(isValidCustomExpiry(new Date(Date.now() - 60_000).toISOString())).toBe(false);
+    expect(customExpiryDateToIso("2026-12-31")).toMatch(/^2026-12-31T/);
+    expect(ttlPayloadForSelection("custom", "").requestedExpiresAt).toBeNull();
+    // 回显口径与档位一致（"7天" 是 pg 的规范化输出）
+    expect(displayTtlLabel("7天")).toBe("1 周");
+    expect(displayTtlLabel("180天")).toBe("180 天");
+    expect(displayTtlLabel(null)).toBeNull();
+    // 已退役的旧档位仍在库里，回显口径不能跟着档位表一起删
+    expect(displayTtlLabel("1天")).toBe("1 天");
+    expect(displayTtlLabel("1个月")).toBe("1 月");
+  });
+});
+
+// ─── 5. escalateAccessRequest（转交）──────────────────────────────────────────
+
+describe("escalateAccessRequest — 向上转交", () => {
+  it("上级转交 → 推进到下一级并通知，链条目记 escalated/forwarded", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const result = await escalateAccessRequest(req.id, U_SUPERVISOR);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.request.status).toBe("pending_resource");
+    expect(result.request.currentStage).toBe("dept_poc");
+    expect(result.request.currentApproverIds).toEqual([U_POC]);
+
+    const chain = result.request.escalationChain;
+    expect(chain).toHaveLength(2);
+    expect(chain[0].action).toBe("escalated");
+    expect(chain[0].actorId).toBe(U_SUPERVISOR);
+    expect(chain[0].escalationReason).toBe("forwarded");
+    expect(chain[1].stage).toBe("dept_poc");
+
+    // 新一级收到待办，上级的旧待办已过期
+    const pocNotifs = await notifForRequest(U_POC, req.id);
+    expect(pocNotifs.some((n) => n.kind === "approval_request_pending" && !n.expiredAt)).toBe(true);
+    const supNotifs = await notifForRequest(U_SUPERVISOR, req.id);
+    expect(supNotifs.filter((n) => n.actionRequired && !n.actedAt && !n.expiredAt)).toHaveLength(0);
+
+    // 转交后 POC 可以终局
+    const approved = await approveAccessRequest(req.id, U_POC);
+    expect(approved.ok).toBe(true);
+    await revokeAll(U_REQUESTER);
+  });
+
+  it("unauthorized: 不在当前级的人不能转交", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const result = await escalateAccessRequest(req.id, U_UNRELATED);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("unauthorized");
+    await cancelRows([req.id]);
+  });
+
+  it("no_next_stage: 已在链顶（owner）无法继续转交", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await escalateAccessRequest(req.id, U_SUPERVISOR);   // → dept_poc
+    await escalateAccessRequest(req.id, U_POC);          // → owner
+    const atTop = await getPool().query<{ current_stage: string }>(
+      `SELECT current_stage FROM approval_request WHERE id = $1`, [req.id]);
+    expect(atTop.rows[0].current_stage).toBe("owner");
+
+    const result = await escalateAccessRequest(req.id, U_OWNER);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("no_next_stage");
+
+    await cancelRows([req.id]);
+  });
+
+  it("not_found: 转交不存在的申请", async () => {
+    const result = await escalateAccessRequest("00000000-0000-0000-0000-deadbeef0002", U_SUPERVISOR);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("not_found");
+  });
+
+  it("conflict: 已 resolve 的申请不能转交", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await rejectAccessRequest(req.id, U_SUPERVISOR);
+    const result = await escalateAccessRequest(req.id, U_SUPERVISOR);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("conflict");
+  });
+});
+
+// ─── 6. first-action-wins ─────────────────────────────────────────────────────
+
+describe("first-action-wins", () => {
+  it("并发批准只有一个成功，授权行只写一次", async () => {
+    // U_UNRELATED 无上级，scene 类型无共管部门 → 首级即 owner
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "scene",
+      permissionLevel: "view",
+    });
+    expect(req.currentStage).toBe("owner");
+
+    const [r1, r2] = await Promise.all([
+      approveAccessRequest(req.id, U_OWNER),
+      approveAccessRequest(req.id, U_OWNER),
+    ]);
+
+    const okCount = [r1, r2].filter((r) => r.ok).length;
+    const conflictCount = [r1, r2].filter((r) => !r.ok && r.reason === "conflict").length;
+    expect(okCount).toBe(1);
+    expect(conflictCount).toBe(1);
+
+    const grants = await getPool().query(
+      `SELECT COUNT(*) AS c FROM production_member_grant WHERE approval_id = $1`, [req.id]);
+    expect(parseInt(grants.rows[0].c, 10)).toBe(1);
+
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("并发转交只有一个成功（阶梯不会跳两级）", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const [r1, r2] = await Promise.all([
+      escalateAccessRequest(req.id, U_SUPERVISOR),
+      escalateAccessRequest(req.id, U_SUPERVISOR),
+    ]);
+    expect([r1, r2].filter((r) => r.ok).length).toBe(1);
+
+    const row = await getPool().query<{ current_stage: string }>(
+      `SELECT current_stage FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].current_stage).toBe("dept_poc");
+
+    await cancelRows([req.id]);
+  });
+});
+
+// ─── 7. rejectAccessRequest ───────────────────────────────────────────────────
+
+describe("rejectAccessRequest", () => {
+  it("上级在 supervisor 级拒绝 → rejected（无权终局也能拒）", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "edit",
+    });
+    expect(req.status).toBe("pending_supervisor");
+
+    const result = await rejectAccessRequest(req.id, U_SUPERVISOR);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.request.status).toBe("rejected");
+    expect(result.request.resolvedBy).toBe(U_SUPERVISOR);
+    expect(result.request.currentApproverIds).toEqual([]);
+  });
+
+  it("notify: 申请人收到拒绝通知", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "manage",
+    });
+    await rejectAccessRequest(req.id, U_SUPERVISOR);
+
+    const notifs = await notifForRequest(U_REQUESTER, req.id);
+    const rejectedNotif = notifs.find((n) => n.kind === "approval_request_result");
+    expect(rejectedNotif).toBeDefined();
+    expect(rejectedNotif?.approvalRequestId).toBe(req.id);
+    expect(rejectedNotif?.category).toBe("warning");
+  });
+
+  it("notify: 拒绝后审批人的待办过期", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "mount", // 批A：发行时展开为动词行集（view + mounts/create）
+    });
+    await rejectAccessRequest(req.id, U_SUPERVISOR);
+
+    const notifs = await notifForRequest(U_SUPERVISOR, req.id);
+    expect(notifs.filter((n) => n.actionRequired && !n.actedAt && !n.expiredAt)).toHaveLength(0);
+  });
+
+  it("unauthorized: 无关用户不能拒绝", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+    });
+    const result = await rejectAccessRequest(req.id, U_UNRELATED);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("unauthorized");
+
+    await cancelRows([req.id]);
+  });
+
+  it("POC 在资源级拒绝 → rejected", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+    });
+    expect(req.currentStage).toBe("dept_poc");
+
+    const result = await rejectAccessRequest(req.id, U_POC);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.request.status).toBe("rejected");
+  });
+
+  it("conflict: 不能重复拒绝", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+    });
+    await rejectAccessRequest(req.id, U_SUPERVISOR);
+    const result = await rejectAccessRequest(req.id, U_SUPERVISOR);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("conflict");
+  });
+
+  it("not_found: 拒绝不存在的申请", async () => {
+    const result = await rejectAccessRequest("00000000-0000-0000-0000-deadbeef0000", U_SUPERVISOR);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("not_found");
+  });
+});
+
+// ─── 8. cancelAccessRequest ───────────────────────────────────────────────────
+
+describe("cancelAccessRequest", () => {
+  it("申请人撤回 pending 申请 → cancelled，且清空当前级", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+    });
+    const result = await cancelAccessRequest(req.id, U_REQUESTER);
+    expect(result.ok).toBe(true);
+
+    const row = await getPool().query<{ status: string; current_approver_ids: string[] }>(
+      `SELECT status, current_approver_ids FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].status).toBe("cancelled");
+    expect(row.rows[0].current_approver_ids).toEqual([]);
+  });
+
+  it("notify: 撤回后审批人的待办过期", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+    });
+    await cancelAccessRequest(req.id, U_REQUESTER);
+
+    const notifs = await notifForRequest(U_SUPERVISOR, req.id);
+    expect(notifs.filter((n) => n.actionRequired && !n.actedAt && !n.expiredAt)).toHaveLength(0);
+  });
+
+  it("conflict: 非申请人不能撤回别人的申请", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+    });
+    const result = await cancelAccessRequest(req.id, U_UNRELATED);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("conflict");
+
+    await cancelRows([req.id]);
+  });
+
+  it("conflict: 已批准的申请不能撤回", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+    });
+    await approveAccessRequest(req.id, U_POC);
+    const result = await cancelAccessRequest(req.id, U_UNRELATED);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("conflict");
+
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("not_found: 撤回不存在的申请", async () => {
+    const result = await cancelAccessRequest("00000000-0000-0000-0000-deadbeef0001", U_REQUESTER);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("not_found");
+  });
+});
+
+// ─── 9. listMyAccessRequests ──────────────────────────────────────────────────
+
+describe("listMyAccessRequests", () => {
+  it("只返回本人提交的申请", async () => {
+    const r1 = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+    });
+    const r2 = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "mount", // 批A：发行时展开为动词行集（view + mounts/create）
+    });
+
+    const mine = await listMyAccessRequests(prodId, U_REQUESTER);
+    const ids = mine.map((r) => r.id);
+    expect(ids).toContain(r1.id);
+    expect(ids).toContain(r2.id);
+    expect(mine.filter((r) => r.subjectId === U_POC)).toHaveLength(0);
+
+    await cancelRows([r1.id, r2.id]);
+  });
+
+  it("按时间倒序", async () => {
+    const r1 = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+    });
+    await new Promise((res) => setTimeout(res, 10));
+    const r2 = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "edit",
+    });
+
+    const mine = await listMyAccessRequests(prodId, U_REQUESTER);
+    const ids = mine.map((r) => r.id);
+    expect(ids.indexOf(r2.id)).toBeLessThan(ids.indexOf(r1.id));
+
+    await cancelRows([r1.id, r2.id]);
+  });
+
+  // 2026-08-17：ttl_duration 是 INTERVAL 列，node-postgres 会解析成
+  // postgres-interval 对象（'7 days' → { days: 7 }）。裸传到前端会让 React 抛
+  // "Objects are not valid as a React child (found: object with keys {days})"。
+  it("ttlDurationLabel 恒是字符串，不是 postgres-interval 对象", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "view",
+      grantType: "ttl",
+      ttlDuration: "7 days",
+    });
+    expect(typeof req.ttlDurationLabel).toBe("string");
+    expect(req.ttlDurationLabel).toBe("7天");
+
+    const mine = await listMyAccessRequests(prodId, U_REQUESTER);
+    const found = mine.find((r) => r.id === req.id);
+    expect(typeof found?.ttlDurationLabel).toBe("string");
+
+    await cancelRows([req.id]);
+  });
+});
+
+describe("formatPgInterval", () => {
+  it("renders each supported unit and composes multi-unit intervals", () => {
+    expect(formatPgInterval({ days: 7 })).toBe("7天");
+    expect(formatPgInterval({ minutes: 30 })).toBe("30分钟");
+    expect(formatPgInterval({ hours: 1 })).toBe("1小时");
+    expect(formatPgInterval({ years: 1, months: 2, days: 3 })).toBe("1年2个月3天");
+    expect(formatPgInterval({ days: 1, hours: 12, minutes: 30 })).toBe("1天12小时30分钟");
+  });
+
+  // 每个 PgInterval 字段都必须有对应单位，否则就是静默丢数据
+  it("covers sub-second fields instead of silently dropping them", () => {
+    expect(formatPgInterval({ milliseconds: 500 })).toBe("500毫秒");
+    expect(formatPgInterval({ seconds: 1, milliseconds: 500 })).toBe("1秒500毫秒");
+  });
+
+  it("passes strings through and collapses empty/null to null", () => {
+    expect(formatPgInterval("7 days")).toBe("7 days");
+    expect(formatPgInterval(null)).toBeNull();
+    expect(formatPgInterval(undefined)).toBeNull();
+    expect(formatPgInterval("  ")).toBeNull();
+    expect(formatPgInterval({})).toBeNull();
+    expect(formatPgInterval({ days: 0 })).toBeNull();
+  });
+});
+
+// ─── 10. listPendingApprovals ─────────────────────────────────────────────────
+
+describe("listPendingApprovals", () => {
+  let supervisorPendingId: string;
+  let resourcePendingId: string;
+  let ownerPendingId: string;
+
+  beforeAll(async () => {
+    const r1 = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    supervisorPendingId = r1.id;
+
+    const r2 = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    resourcePendingId = r2.id;
+
+    // scene 无共管部门 → 首级即 owner
+    const r3 = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "scene", permissionLevel: "view",
+    });
+    ownerPendingId = r3.id;
+  });
+
+  afterAll(async () => {
+    await cancelRows([supervisorPendingId, resourcePendingId, ownerPendingId]);
+  });
+
+  it("只看得到「当前轮到我」的申请", async () => {
+    const supervisorIds = (await listPendingApprovals(U_SUPERVISOR, prodId)).map((r) => r.id);
+    expect(supervisorIds).toContain(supervisorPendingId);
+    expect(supervisorIds).not.toContain(resourcePendingId);
+    expect(supervisorIds).not.toContain(ownerPendingId);
+
+    const pocIds = (await listPendingApprovals(U_POC, prodId)).map((r) => r.id);
+    expect(pocIds).toContain(resourcePendingId);
+    expect(pocIds).not.toContain(supervisorPendingId);
+
+    const ownerIds = (await listPendingApprovals(U_OWNER, prodId)).map((r) => r.id);
+    expect(ownerIds).toContain(ownerPendingId);
+  });
+
+  it("canFinalize 随级填充：上级无权时为 false", async () => {
+    const mine = await listPendingApprovals(U_SUPERVISOR, prodId);
+    const row = mine.find((r) => r.id === supervisorPendingId);
+    expect(row?.canFinalize).toBe(false);
+
+    const pocRow = (await listPendingApprovals(U_POC, prodId)).find((r) => r.id === resourcePendingId);
+    expect(pocRow?.canFinalize).toBe(true);
+  });
+
+  it("无关用户什么都看不到", async () => {
+    const pending = await listPendingApprovals(U_HOLDER, prodId);
+    const relevant = [supervisorPendingId, resourcePendingId, ownerPendingId];
+    expect(pending.filter((r) => relevant.includes(r.id))).toHaveLength(0);
+  });
+
+  it("已 resolve 的申请不出现在待办里", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list", permissionLevel: "edit",
+    });
+    await approveAccessRequest(req.id, U_POC);
+
+    const ids = (await listPendingApprovals(U_POC, prodId)).map((r) => r.id);
+    expect(ids).not.toContain(req.id);
+
+    await revokeAll(U_UNRELATED);
+  });
+});
+
+// ─── 11. escalateExpiredApprovals ─────────────────────────────────────────────
+
+describe("escalateExpiredApprovals", () => {
+  /** 把当前级的通知时刻往前拨，模拟该级超时。 */
+  async function backdateCurrentStage(requestId: string, hours: number) {
+    await getPool().query(
+      `UPDATE approval_request
+       SET created_at = now() - ($2 || ' hours')::interval,
+           escalation_chain = jsonb_set(
+             escalation_chain,
+             ARRAY[(jsonb_array_length(escalation_chain) - 1)::text, 'notifiedAt'],
+             to_jsonb((now() - ($2 || ' hours')::interval)::text))
+       WHERE id = $1`,
+      [requestId, String(hours)],
+    );
+  }
+
+  it("当前级超时 → 推进到下一级并通知", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    expect(req.currentStage).toBe("supervisor");
+    await backdateCurrentStage(req.id, 25);
+
+    const result = await escalateExpiredApprovals();
+    expect(result.escalated).toBeGreaterThanOrEqual(1);
+
+    const row = await getPool().query<{ status: string; current_stage: string }>(
+      `SELECT status, current_stage FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].status).toBe("pending_resource");
+    expect(row.rows[0].current_stage).toBe("dept_poc");
+
+    const notifs = await notifForRequest(U_POC, req.id);
+    expect(notifs.some((n) => n.kind === "approval_request_pending")).toBe(true);
+
+    await cancelRows([req.id]);
+  });
+
+  it("每级各自计时：一次 cron 只跳一级", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await backdateCurrentStage(req.id, 25);
+    await escalateExpiredApprovals();
+    // 新一级的 notifiedAt 是刚才写的 → 不该再被同一次超时窗口带走
+    await escalateExpiredApprovals();
+
+    const row = await getPool().query<{ current_stage: string }>(
+      `SELECT current_stage FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].current_stage).toBe("dept_poc");
+
+    await cancelRows([req.id]);
+  });
+
+  it("链顶（owner）超时不再升级", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "scene", permissionLevel: "view",
+    });
+    expect(req.currentStage).toBe("owner");
+    await backdateCurrentStage(req.id, 25);
+
+    await escalateExpiredApprovals();
+    const row = await getPool().query<{ current_stage: string; status: string }>(
+      `SELECT current_stage, status FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].current_stage).toBe("owner");
+    expect(row.rows[0].status).toBe("pending_resource");
+
+    await cancelRows([req.id]);
+  });
+
+  // 线上教训（2026-08-17）：production_approval_config 是 Phase 3 才加的表，
+  // 建表 SQL 没回填，早于它的演出一行都没有——线上 8 个演出全部缺行。原先的
+  // INNER JOIN 让这些演出的申请永远匹配不上，整条升级链从未生效过。
+  //
+  // 这条用例必须**显式删掉配置行**才测得到：工厂造的演出恒有配置行
+  // （createProduction 会插），fixture 再插一遍，两层都把线上的真实前提盖住了。
+  it("演出没有审批配置行时，按列默认值 24h 计时而非永不升级", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await getPool().query(
+      `DELETE FROM production_approval_config WHERE production_id = $1`, [prodId]);
+    try {
+      await backdateCurrentStage(req.id, 25);
+      await escalateExpiredApprovals();
+
+      const row = await getPool().query<{ current_stage: string }>(
+        `SELECT current_stage FROM approval_request WHERE id = $1`, [req.id]);
+      expect(row.rows[0].current_stage).toBe("dept_poc");
+    } finally {
+      await getPool().query(
+        `INSERT INTO production_approval_config (production_id, ttl_hours, updated_by)
+         VALUES ($1, 24, $2) ON CONFLICT DO NOTHING`, [prodId, U_OWNER]);
+      await cancelRows([req.id]);
+    }
+  });
+
+  it("缺配置行且未超过默认 24h 的申请不动", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await getPool().query(
+      `DELETE FROM production_approval_config WHERE production_id = $1`, [prodId]);
+    try {
+      await backdateCurrentStage(req.id, 2);
+      await escalateExpiredApprovals();
+      const row = await getPool().query<{ current_stage: string }>(
+        `SELECT current_stage FROM approval_request WHERE id = $1`, [req.id]);
+      expect(row.rows[0].current_stage).toBe("supervisor");
+    } finally {
+      await getPool().query(
+        `INSERT INTO production_approval_config (production_id, ttl_hours, updated_by)
+         VALUES ($1, 24, $2) ON CONFLICT DO NOTHING`, [prodId, U_OWNER]);
+      await cancelRows([req.id]);
+    }
+  });
+
+  it("未超时的申请不动", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const before = await getPool().query<{ current_stage: string }>(
+      `SELECT current_stage FROM approval_request WHERE id = $1`, [req.id]);
+    await escalateExpiredApprovals();
+    const after = await getPool().query<{ current_stage: string }>(
+      `SELECT current_stage FROM approval_request WHERE id = $1`, [req.id]);
+    expect(after.rows[0].current_stage).toBe(before.rows[0].current_stage);
+
+    await cancelRows([req.id]);
+  });
+});
+
+// ─── 12. 回填脚本 ─────────────────────────────────────────────────────────────
+
+describe("add-approval-config-backfill.sql", () => {
+  /** 直接跑仓库里的那份 SQL——测的是要部署的文件本身，不是它的副本。 */
+  async function runBackfill() {
+    const sql = await readFile(path.join(process.cwd(), "db/add-approval-config-backfill.sql"), "utf8");
+    await getPool().query(sql);
+  }
+
+  it("补齐缺行的演出，重复执行不产生重复行", async () => {
+    await getPool().query(
+      `DELETE FROM production_approval_config WHERE production_id = $1`, [prodId]);
+
+    await runBackfill();
+    await runBackfill();  // 幂等：第二次不该炸也不该多插
+
+    const rows = await getPool().query<{ ttl_hours: number; updated_by: string | null }>(
+      `SELECT ttl_hours, updated_by FROM production_approval_config WHERE production_id = $1`,
+      [prodId]);
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0].ttl_hours).toBe(24);
+    // updated_by 留 NULL = 从未被人工修改
+    expect(rows.rows[0].updated_by).toBeNull();
+  });
+
+  it("不覆盖已有配置：制作人调过的 TTL 必须原样保留", async () => {
+    await getPool().query(
+      `INSERT INTO production_approval_config (production_id, ttl_hours, updated_by)
+       VALUES ($1, 72, $2)
+       ON CONFLICT (production_id) DO UPDATE SET ttl_hours = 72, updated_by = EXCLUDED.updated_by`,
+      [prodId, U_OWNER]);
+
+    await runBackfill();
+
+    const rows = await getPool().query<{ ttl_hours: number; updated_by: string | null }>(
+      `SELECT ttl_hours, updated_by FROM production_approval_config WHERE production_id = $1`,
+      [prodId]);
+    expect(rows.rows[0].ttl_hours).toBe(72);
+    expect(rows.rows[0].updated_by).toBe(U_OWNER);
+
+    // 复原，免得影响后面按 24h 计时的用例
+    await getPool().query(
+      `UPDATE production_approval_config SET ttl_hours = 24, updated_by = $2 WHERE production_id = $1`,
+      [prodId, U_OWNER]);
+  });
+});
+
+// ─── 13. 终结语义：撤回 / 覆盖 / 超时都要在链上留下落点 ────────────────────────
+//
+// 这一节针对的是「前端画不出来」的那类缺口：时间线上每个节点都要能回答
+// 「这一级发生了什么、谁干的」。缺任何一项，UI 只能把它画成「还在等」。
+
+async function chainOf(requestId: string) {
+  const { rows } = await getPool().query<{ escalation_chain: ApprovalChainEntry[] }>(
+    `SELECT escalation_chain FROM approval_request WHERE id = $1`, [requestId]);
+  return rows[0].escalation_chain;
+}
+
+const lastOf = (chain: ApprovalChainEntry[]) => chain[chain.length - 1];
+
+describe("终结语义 — 撤回", () => {
+  it("撤回写 resolved_by：终结节点上得有人，不然像是系统自己结的", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const res = await cancelAccessRequest(req.id, U_REQUESTER);
+    expect(res.ok).toBe(true);
+
+    const row = await getPool().query<{ status: string; resolved_by: string | null; resolved_at: Date | null }>(
+      `SELECT status, resolved_by, resolved_at FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].status).toBe("cancelled");
+    expect(row.rows[0].resolved_by).toBe(U_REQUESTER);
+    expect(row.rows[0].resolved_at).not.toBeNull();
+  });
+
+  it("链末条标 cancelled/by_subject —— 那一级是「没处理」，不是「还在等」", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "edit",
+    });
+    await cancelAccessRequest(req.id, U_REQUESTER, "  想清楚了，先不申请  ");
+
+    const last = lastOf(await chainOf(req.id));
+    expect(last.action).toBe("cancelled");
+    expect(last.cancelReason).toBe("by_subject");
+    expect(last.actorId).toBe(U_REQUESTER);
+    expect(last.actedAt).toBeTruthy();
+    expect(last.comment).toBe("想清楚了，先不申请");  // 首尾空白已归一化掉
+  });
+
+  it("撤回回带终态申请，前端不必再跑一趟列表", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "scene", permissionLevel: "view",
+    });
+    const res = await cancelAccessRequest(req.id, U_REQUESTER);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.request.status).toBe("cancelled");
+    expect(res.request.resolvedBy).toBe(U_REQUESTER);
+    expect(res.request.people[U_REQUESTER]?.name).toBe("申请人");
+  });
+
+  it("别人撤不了我的申请（状态与链都不动）", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const res = await cancelAccessRequest(req.id, U_UNRELATED);
+    expect(res.ok).toBe(false);
+
+    const last = lastOf(await chainOf(req.id));
+    expect(last.action).toBeUndefined();
+    await cancelRows([req.id]);
+  });
+});
+
+describe("终结语义 — 覆盖式申请", () => {
+  it("被顶掉的旧申请：链末条 cancelled/superseded 且 bySystem（没人点过撤回）", async () => {
+    const first = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "event", permissionLevel: "view",
+    });
+    const second = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "event", permissionLevel: "view",
+    });
+    expect(second.id).not.toBe(first.id);
+
+    const row = await getPool().query<{ status: string; resolved_by: string | null }>(
+      `SELECT status, resolved_by FROM approval_request WHERE id = $1`, [first.id]);
+    expect(row.rows[0].status).toBe("cancelled");
+    expect(row.rows[0].resolved_by).toBe(U_REQUESTER);
+
+    const last = lastOf(await chainOf(first.id));
+    expect(last.action).toBe("cancelled");
+    expect(last.cancelReason).toBe("superseded");
+    expect(last.bySystem).toBe(true);
+    expect(last.actorId).toBeUndefined();  // 系统动作没有操作人
+
+    await cancelRows([second.id]);
+  });
+});
+
+describe("终结语义 — 超时自动升级", () => {
+  async function backdate(requestId: string, hours: number) {
+    await getPool().query(
+      `UPDATE approval_request
+       SET escalation_chain = jsonb_set(
+             escalation_chain,
+             ARRAY[(jsonb_array_length(escalation_chain) - 1)::text, 'notifiedAt'],
+             to_jsonb((now() - ($2 || ' hours')::interval)::text))
+       WHERE id = $1`,
+      [requestId, String(hours)],
+    );
+  }
+
+  // 回归：此前超时升级只写 escalationReason='timeout'，不写 actorId 也不写别的旗。
+  // 消费方无从区分「系统自动升级」与「数据缺了操作人」，于是最该说清楚的
+  // 「没人处理，超时升上去了」在页面上一个字都显示不出来。
+  it("超时升级的链条目带 bySystem，且明确没有 actorId", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await backdate(req.id, 25);
+    await escalateExpiredApprovals();
+
+    const chain = await chainOf(req.id);
+    const timedOut = chain[0];
+    expect(timedOut.action).toBe("escalated");
+    expect(timedOut.escalationReason).toBe("timeout");
+    expect(timedOut.bySystem).toBe(true);
+    expect(timedOut.actorId).toBeUndefined();
+
+    await cancelRows([req.id]);
+  });
+
+  it("人工转交的条目没有 bySystem —— 两种转交在链上分得开", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await escalateAccessRequest(req.id, U_SUPERVISOR);
+
+    const forwarded = (await chainOf(req.id))[0];
+    expect(forwarded.escalationReason).toBe("forwarded");
+    expect(forwarded.actorId).toBe(U_SUPERVISOR);
+    expect(forwarded.bySystem).toBeUndefined();
+
+    await cancelRows([req.id]);
+  });
+});
+
+// ─── 14. 审批意见 ─────────────────────────────────────────────────────────────
+
+describe("审批意见 — 落链条目 + 进通知正文", () => {
+  it("批准意见落在链末条，并出现在申请人的结果通知里", async () => {
+    const req = await submitAccessRequest(prodId, U_UNRELATED, {
+      resourceType: "cue_list", permissionLevel: "edit",
+    });
+    const res = await approveAccessRequest(req.id, U_POC, "本周内先给编辑权，下周复核");
+    expect(res.ok).toBe(true);
+
+    const last = lastOf(await chainOf(req.id));
+    expect(last.action).toBe("approved");
+    expect(last.comment).toBe("本周内先给编辑权，下周复核");
+
+    const notifs = await notifForRequest(U_UNRELATED, req.id);
+    const result = notifs.find((n) => n.kind === "approval_request_result");
+    expect(result?.body).toContain("本周内先给编辑权，下周复核");
+
+    await revokeAll(U_UNRELATED);
+  });
+
+  it("拒绝理由落链并进通知 —— 申请人不再只看到「未获批准」四个字", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const res = await rejectAccessRequest(req.id, U_SUPERVISOR, "该 Cue 表本轮冻结，等首演后再申请");
+    expect(res.ok).toBe(true);
+
+    const last = lastOf(await chainOf(req.id));
+    expect(last.action).toBe("rejected");
+    expect(last.comment).toBe("该 Cue 表本轮冻结，等首演后再申请");
+
+    const notifs = await notifForRequest(U_REQUESTER, req.id);
+    const result = notifs.find((n) => n.kind === "approval_request_result");
+    expect(result?.body).toContain("等首演后再申请");
+  });
+
+  it("转交说明随通知发给下一级 —— 下一级得知道为什么轮到自己", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const res = await escalateAccessRequest(req.id, U_SUPERVISOR, "我这边没有这个权限，转给科组判断");
+    expect(res.ok).toBe(true);
+
+    const forwarded = (await chainOf(req.id))[0];
+    expect(forwarded.comment).toBe("我这边没有这个权限，转给科组判断");
+
+    const pocNotifs = await notifForRequest(U_POC, req.id);
+    expect(pocNotifs.some((n) => n.body?.includes("转给科组判断"))).toBe(true);
+
+    await cancelRows([req.id]);
+  });
+
+  it("超长意见被拒，且申请状态一动不动", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const res = await rejectAccessRequest(req.id, U_SUPERVISOR, "字".repeat(MAX_APPROVAL_COMMENT_LENGTH + 1));
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.reason).toBe("comment_too_long");
+
+    const row = await getPool().query<{ status: string }>(
+      `SELECT status FROM approval_request WHERE id = $1`, [req.id]);
+    expect(row.rows[0].status).toBe("pending_supervisor");  // 校验在动手之前
+
+    await cancelRows([req.id]);
+  });
+
+  it("上限本身是合法的（边界不能差一个字）", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const res = await rejectAccessRequest(req.id, U_SUPERVISOR, "字".repeat(MAX_APPROVAL_COMMENT_LENGTH));
+    expect(res.ok).toBe(true);
+  });
+
+  it("纯空白意见按「没写」处理，不在链上留空字段", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await rejectAccessRequest(req.id, U_SUPERVISOR, "   \n  ");
+
+    const last = lastOf(await chainOf(req.id));
+    expect(last.action).toBe("rejected");
+    expect(last.comment).toBeUndefined();
+  });
+});
+
+// ─── 15. people：审批 DTO 自带姓名与角色 ───────────────────────────────────────
+
+describe("people — 审批 DTO 自带人员信息", () => {
+  it("我的申请：申请人与当前级审批人都带姓名", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const mine = await listMyAccessRequests(prodId, U_REQUESTER);
+    const found = mine.find((r) => r.id === req.id)!;
+
+    expect(found.people[U_REQUESTER]?.name).toBe("申请人");
+    expect(found.people[U_SUPERVISOR]?.name).toBe("直属上级");
+    expect(found.people[U_SUPERVISOR]?.isMember).toBe(true);
+
+    await cancelRows([req.id]);
+  });
+
+  it("待办列表同样带 people", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const pending = await listPendingApprovals(U_SUPERVISOR, prodId);
+    const found = pending.find((r) => r.id === req.id)!;
+    expect(found.people[U_REQUESTER]?.name).toBe("申请人");
+
+    await cancelRows([req.id]);
+  });
+
+  it("display_name 优先于 name —— 与通知、财务、部门冻结同一口径", async () => {
+    await getPool().query(
+      `UPDATE user_profile SET display_name = '老张' WHERE user_id = $1`, [U_SUPERVISOR]);
+    try {
+      const req = await submitAccessRequest(prodId, U_REQUESTER, {
+        resourceType: "cue_list", permissionLevel: "view",
+      });
+      const mine = await listMyAccessRequests(prodId, U_REQUESTER);
+      expect(mine.find((r) => r.id === req.id)!.people[U_SUPERVISOR]?.name).toBe("老张");
+      await cancelRows([req.id]);
+    } finally {
+      await getPool().query(
+        `UPDATE user_profile SET display_name = NULL WHERE user_id = $1`, [U_SUPERVISOR]);
+    }
+  });
+
+  it("带出该人在本演出的角色", async () => {
+    await getPool().query(
+      `UPDATE production_member SET roles = ARRAY['舞台监督'] WHERE production_id = $1 AND user_id = $2`,
+      [prodId, U_SUPERVISOR]);
+    try {
+      const req = await submitAccessRequest(prodId, U_REQUESTER, {
+        resourceType: "cue_list", permissionLevel: "view",
+      });
+      const mine = await listMyAccessRequests(prodId, U_REQUESTER);
+      expect(mine.find((r) => r.id === req.id)!.people[U_SUPERVISOR]?.roles).toEqual(["舞台监督"]);
+      await cancelRows([req.id]);
+    } finally {
+      await getPool().query(
+        `UPDATE production_member SET roles = '{}' WHERE production_id = $1 AND user_id = $2`,
+        [prodId, U_SUPERVISOR]);
+    }
+  });
+
+  // 审批链上的人**不一定是 production_member**（祖先部门 POC、存量演出的 owner）。
+  // 用成员表 INNER JOIN 取名会让这些人整条消失——这条用例就是钉住那个分支。
+  it("不在成员名单里的审批人：仍有姓名，isMember=false", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    await getPool().query(
+      `UPDATE approval_request
+       SET escalation_chain = jsonb_set(
+             escalation_chain,
+             ARRAY['0', 'approverIds'],
+             (escalation_chain -> 0 -> 'approverIds') || to_jsonb($2::text))
+       WHERE id = $1`,
+      [req.id, U_OUTSIDER],
+    );
+
+    const mine = await listMyAccessRequests(prodId, U_REQUESTER);
+    const person = mine.find((r) => r.id === req.id)!.people[U_OUTSIDER];
+    expect(person?.name).toBe("编外审批人");
+    expect(person?.isMember).toBe(false);
+    expect(person?.roles).toEqual([]);
+
+    await cancelRows([req.id]);
+  });
+});
+
+// ─── 16. 提交前的审批链预览 ───────────────────────────────────────────────────
+
+describe("previewApprovalLadder", () => {
+  it("预览出的阶梯与真正会走的阶梯一致，并带姓名", async () => {
+    const preview = await previewApprovalLadder(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "view",
+    });
+    const ladder = await buildApprovalLadder(target());
+
+    expect(preview.nodeClass).toBe("normal");
+    expect(preview.stages.map((s) => s.stage)).toEqual(ladder.map((s) => s.stage));
+    expect(preview.stages[0].approverIds).toEqual([U_SUPERVISOR]);
+    expect(preview.people[U_SUPERVISOR]?.name).toBe("直属上级");
+  });
+
+  it("ROOT 节点：提交前就说清楚「没有审批通道」，不必等 403", async () => {
+    const preview = await previewApprovalLadder(prodId, U_REQUESTER, {
+      resourceType: "production", resourceSub: "*", permissionLevel: "delete",
+    });
+    expect(preview.nodeClass).toBe("root");
+    expect(preview.stages).toEqual([]);
+
+    // 与提交侧同口径：预览说没通道，提交就真的收不下
+    await expect(
+      submitAccessRequest(prodId, U_REQUESTER, {
+        resourceType: "production", resourceSub: "*", permissionLevel: "delete",
+      }),
+    ).rejects.toThrow(ApprovalRequestError);
+  });
+
+  it("SENSITIVE 节点：跳过整条链直达 owner", async () => {
+    const preview = await previewApprovalLadder(prodId, U_REQUESTER, {
+      resourceType: "production", resourceSub: "integrations", permissionLevel: "view",
+    });
+    expect(preview.nodeClass).toBe("sensitive");
+    expect(preview.stages.map((s) => s.stage)).toEqual(["owner"]);
+    expect(preview.people[U_OWNER]?.name).toBe("演出Owner");
+  });
+
+  it("预览是只读的：不落任何 approval_request 行", async () => {
+    const before = await getPool().query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM approval_request WHERE production_id = $1`, [prodId]);
+    await previewApprovalLadder(prodId, U_REQUESTER, {
+      resourceType: "cue_list", permissionLevel: "manage",
+    });
+    const after = await getPool().query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM approval_request WHERE production_id = $1`, [prodId]);
+    expect(after.rows[0].count).toBe(before.rows[0].count);
+  });
+});
+
+// ─── 17. 端到端 ───────────────────────────────────────────────────────────────
+
+describe("full happy path — 上级转交 → POC 批准", () => {
+  it("提交 → 上级转交 → POC 批准 → 授权行写入、通知齐备", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "cue_list",
+      permissionLevel: "mount", // 批A：发行时展开为动词行集（view + mounts/create）
+      grantType: "permanent",
+      note: "端到端测试",
+    });
+    expect(req.status).toBe("pending_supervisor");
+
+    // Step 1：上级没有这个权限，只能转交
+    const denied = await approveAccessRequest(req.id, U_SUPERVISOR);
+    expect(denied.ok).toBe(false);
+    const step1 = await escalateAccessRequest(req.id, U_SUPERVISOR);
+    expect(step1.ok).toBe(true);
+    if (!step1.ok) return;
+    expect(step1.request.status).toBe("pending_resource");
+
+    const pocNotifs1 = await notifForRequest(U_POC, req.id);
+    expect(pocNotifs1.some((n) => n.kind === "approval_request_pending")).toBe(true);
+
+    // Step 2：POC 批准
+    const step2 = await approveAccessRequest(req.id, U_POC);
+    expect(step2.ok).toBe(true);
+    if (!step2.ok) return;
+    expect(step2.request.status).toBe("approved");
+
+    // 批A：mount 伪级别展开为 2 行动词行集（'*'@view + mounts@create）
+    const grant = await getPool().query(
+      `SELECT * FROM production_member_grant WHERE approval_id = $1`, [req.id]);
+    expect(grant.rows).toHaveLength(2);
+    const subs = grant.rows
+      .map((r: { resource_sub: string; permission_level: string }) => `${r.resource_sub}@${r.permission_level}`)
+      .sort();
+    expect(subs).toEqual(["*@view", "mounts@create"]);
+    expect(grant.rows[0].user_id).toBe(U_REQUESTER);
+    expect(grant.rows.every((r: { is_revoked: boolean }) => !r.is_revoked)).toBe(true);
+
+    const requesterNotifs = await notifForRequest(U_REQUESTER, req.id);
+    expect(requesterNotifs.some((n) => n.kind === "approval_request_result")).toBe(true);
+
+    const allRelated = [
+      ...(await notifForRequest(U_SUPERVISOR, req.id)),
+      ...(await notifForRequest(U_POC, req.id)),
+    ];
+    expect(allRelated.filter((n) => n.actionRequired && !n.actedAt && !n.expiredAt)).toHaveLength(0);
+
+    await revokeAll(U_REQUESTER);
+  });
+});

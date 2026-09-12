@@ -22,12 +22,12 @@
 --      规则唯一实现在 lib/wiki-dialect-migrate.ts（有 21 项单测护栏）。
 --
 --    本文件负责迁移的**不可回滚性兜底**与**迁移标记**：备份表既是回滚依据，
---    也是「是否已迁移」的判据（tests/wiki-dialect-v2-snapshot.ts 的 PRE 判据）。
+--    也是「是否已迁移」的判据（tests/migrations/wiki-dialect-v2-snapshot.ts 的 PRE 判据）。
 --
 -- 执行顺序：
 --   1) psql -f db/migrate-wiki-dialect-v2.sql   （建备份表 + 全量快照）
 --   2) npx tsx scripts/migrate-wiki-dialect.ts  （改写 wiki.body）
---   3) npx vitest run tests/wiki-dialect-v2.migration.test.ts
+--   3) npx vitest run tests/migrations/wiki-dialect-v2.migration.test.ts
 --
 -- 回滚：UPDATE wiki w SET body = b.body FROM wiki_body_backup_dialect_v2 b
 --       WHERE b.wiki_id = w.id;

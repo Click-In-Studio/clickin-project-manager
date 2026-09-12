@@ -4,7 +4,7 @@
  * 为什么单开一个模块而不是写在组件里：时间线上最容易错的恰恰是那些平时看不见的
  * 分支——超时自动升级、申请被新申请顶掉、存量无链记录。这些状态在页面上极难手工
  * 复现（要等 24 小时、要造存量行），埋在 TSX 里就等于没人验证过。抽出来之后
- * tests/approval-timeline.test.ts 可以直接喂构造好的申请对象。
+ * tests/ops/approval-timeline.test.ts 可以直接喂构造好的申请对象。
  *
  * 此模块只做 type-only 的 lib/db 引用（编译期擦除），不碰 pg，client component 可直接引。
  */

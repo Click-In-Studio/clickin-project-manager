@@ -96,7 +96,7 @@ pages → render(TemplateBlock, PageChrome)
 | T1 | 引擎核心（类型 / plan / paginate / estimate）+ legacy 模版 + 估算器改吃引擎 | 估算与旧实现逐字节相同 |
 | T2 | 渲染器 `TemplateBlock` / 页眉页脚 `PageChrome`，打印管线改吃引擎 | golden 不变 |
 | T3 | 存储 + config API + 打印页模版选择（预览后保存） | 落库测试；golden 不变 |
-| T4 | 百老汇音乐剧示范模版（Samuel French 规范）；顺手补原语：行内流（`JOHN (laughing)`）、缩进、`when` 长度门、幕/场字段、场次标题过规则（每场另起页）、页带字段化 | `tests/script-template-broadway.test.ts` 逐条对照；`golden-broadway.json` |
+| T4 | 百老汇音乐剧示范模版（Samuel French 规范）；顺手补原语：行内流（`JOHN (laughing)`）、缩进、`when` 长度门、幕/场字段、场次标题过规则（每场另起页）、页带字段化 | `tests/script/script-template-broadway.test.ts` 逐条对照；`golden-broadway.json` |
 | T5+ | 中国话剧等模版；模版编辑界面（H 的可视化盒编辑器） | — |
 
 ## 7. 明确不在此处

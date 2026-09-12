@@ -54,7 +54,7 @@ async function main(): Promise<void> {
     touched++;
   }
 
-  // 核对：全库不得出现词汇表以外的键（同 tests/production-policy.test.ts 的幽灵键棘轮）
+  // 核对：全库不得出现词汇表以外的键（同 tests/ops/production-policy.test.ts 的幽灵键棘轮）
   const { rows: ghosts } = await pool.query<{ policy_key: string }>(
     `SELECT DISTINCT policy_key FROM production_policy`,
   );

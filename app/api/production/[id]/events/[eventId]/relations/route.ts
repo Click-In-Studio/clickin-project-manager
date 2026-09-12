@@ -99,7 +99,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     }
     // 门 2（挂载资格）：与 PATCH /tasks/[taskId] 换绑事件同口径。
     // POC 判定走 isTaskPoc 而非直调 isUserDeptPoc——责任主体已泛化成
-    // 「部门 | 用户组」，直调只认部门（tests/task-poc-converge.test.ts 的棘轮挡这个）。
+    // 「部门 | 用户组」，直调只认部门（tests/ops/task-poc-converge.test.ts 的棘轮挡这个）。
     const canAttach =
       await hasEffectiveGrant(actor, productionId, "event", eventId, "tasks", "create")
       || (await isTaskPoc(productionId, task, session.userId)

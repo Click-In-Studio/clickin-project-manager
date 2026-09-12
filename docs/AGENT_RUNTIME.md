@@ -106,7 +106,7 @@ OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，
 
 - **按域注册快照读取器，不按工具**：`mutates` 声明已经回答"动了哪个域的哪些 id"，审计只要每个域一个 `read(ids)`
   （现有 `wiki` / `scene` / `character` / `instructions.*`）。新写工具声明 `mutates` 即自动进账本；新域加一个读取器，
-  没读取器的域退化为只记事实（`tests/agent-mutation-audit.test.ts` 对照注册表防漂移）。
+  没读取器的域退化为只记事实（`tests/agent/agent-mutation-audit.test.ts` 对照注册表防漂移）。
 - **观察到变化才落行**：created 靠写前后 id 集合之差、updated/deleted 靠快照比对——工具返回"权限被拒绝"之类的非错误文本时不会记成一次写。
 - **正文不进账本**：wiki 快照只存 `revisionId` 引用（历史在 `wiki_revision`），`changes` 里正文只有增删字数。
 - **只读账本，没有撤销**：撤销永远是人的动作（甲的定时任务改了、乙又改了、甲回头撤回 = 冲突，机器不该替人合并）。
@@ -143,7 +143,7 @@ OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，
 `lib/agent-runtime/tools.ts` 的注册表（DEFS）是工具的**唯一事实源**（MCP 服务器已于 2026-08-29 退役）：
 描述、参数 schema、只读/写、`mutates` 声明都在这里；底层实现在 `lib/agent-tools/`；
 中文触发词/例句/族在 `lib/agent-tools/tool-catalog.ts`；显示名在 `lib/agent-tool-labels.ts`。
-三处由 `tests/tool-catalog.test.ts` 与 `tests/agent-tool-labels.test.ts` 双向防漂移——加一个工具要同批改三处。
+三处由 `tests/agent/tool-catalog.test.ts` 与 `tests/agent/agent-tool-labels.test.ts` 双向防漂移——加一个工具要同批改三处。
 
 ## 用量与限流（#383）
 

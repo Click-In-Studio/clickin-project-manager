@@ -9,7 +9,7 @@
 //
 // 维护约定（与 lib/agent-page-context.ts PAGE_SUGGESTIONS 同族）：
 // - 每上线/下线一个工具（lib/agent-runtime/tools.ts 注册表），本目录同批增删——
-//   tests/tool-catalog.test.ts 与注册清单双向防漂移。
+//   tests/agent/tool-catalog.test.ts 与注册清单双向防漂移。
 // - trigger 用用户会说出口的中文短语；en 是英文关键词（补进工具描述，
 //   供官方 tool_search 的英文兜底命中），两者都是发现面信号，不是权限。
 // - 分层≠权限（#333 不变量 2）：命中与否只影响提示，不影响工具端判定。

@@ -19,7 +19,7 @@
  * ## 收敛
  *
  * 三个写点（POST / PATCH / DELETE）一律走这里，不再各写各的 hasEffectiveGrant。
- * tests/material-ledger.test.ts 有棘轮盯着——绕过去的写法会红。
+ * tests/ops/material-ledger.test.ts 有棘轮盯着——绕过去的写法会红。
  */
 
 import { hasEffectiveGrant } from "./grant-check";

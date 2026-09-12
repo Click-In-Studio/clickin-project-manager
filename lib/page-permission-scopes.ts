@@ -23,7 +23,7 @@ type Permission = string;
  *
  * 批D/E 把 script/dramaturgy/characters/assets 清空后只删不填，整条自确认管道
  * 里没有这些域的键 → 弹窗永不出现、区间永远变不成行，全库 33 人被冻结在迁移
- * 那一刻。tests/activation-scope-coverage.test.ts 是防止复发的棘轮。
+ * 那一刻。tests/perm/activation-scope-coverage.test.ts 是防止复发的棘轮。
  */
 export const PAGE_PERMISSION_SCOPES = {
   base: new Set<string>([

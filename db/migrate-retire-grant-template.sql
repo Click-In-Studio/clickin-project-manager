@@ -8,7 +8,7 @@
 --   · 基线本身要分叉——影视类要求 script / cue 非必要不授予，得**削**基线
 --
 -- 两件事都是减法，表结构表达不了。内容已逐键搬进 lib/templates/theatre.ts，
--- 等价性由 tests/grant-template-retire.migration.test.ts 的 invariance 层机器验证。
+-- 等价性由 tests/migrations/grant-template-retire.migration.test.ts 的 invariance 层机器验证。
 --
 -- 两条有意不搬的行：副导演 / 助理舞台监督——migrate-assistant-roles.sql 已把复合
 -- 职位拆成 base role + tag，这两个名字不在任何模版的角色名单里，其模板行是死键。

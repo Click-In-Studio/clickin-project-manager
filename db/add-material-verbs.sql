@@ -7,7 +7,7 @@
 -- production_member_grant_level_fk，整个授权操作失败。
 --
 -- 正是 §0.9 定式账本纪律要防的坑：动自动授权写点必须同批登记词汇表。
--- 防复发：tests/conventions.test.ts 新增「模版键 resource_type ⊆ 词汇表」审计。
+-- 防复发：tests/platform/conventions.test.ts 新增「模版键 resource_type ⊆ 词汇表」审计。
 --
 -- 受影响操作（当时整体回滚失败）在本文件应用后重试即可，无需数据回填。
 

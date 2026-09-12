@@ -1,0 +1,1350 @@
+import { config } from "dotenv";
+config({ path: ".env.local" });
+
+// globalSetup 跑在主进程（拿不到 vitest 的 test.env），而这里要把整个 migration
+// 文件当一条 query 执行——生产的 statement_timeout 是按单条业务语句定的，对不上。
+// 与 vitest.config.ts 的 test.env 同值，两处覆盖的是两个进程。
+process.env.PG_STATEMENT_TIMEOUT_MS ??= "60000";
+
+import { readFile, writeFile, unlink } from "fs/promises";
+import path from "path";
+import { getPool } from "@/lib/pg";
+import { faker } from "@faker-js/faker";
+import {
+  isPreMigrationSchema,
+  createPreMigrationData,
+  SNAPSHOT_PATH,
+  type PreMigrationSnapshot,
+} from "../migrations/migration-snapshot";
+import {
+  isCueListRolePreMigrationSchema,
+  createCueListRolePreMigrationData,
+  CUE_LIST_ROLE_SNAPSHOT_PATH,
+  type CueListRoleSnapshot,
+} from "../migrations/cue-list-role-snapshot";
+import {
+  isMemberRolesPreMigrationSchema,
+  createMemberRolesPreMigrationData,
+  MEMBER_ROLES_SNAPSHOT_PATH,
+  type MemberRolesSnapshot,
+} from "../migrations/member-roles-snapshot";
+import {
+  isDeptPocCleanupPreMigrationSchema,
+  createDeptPocCleanupPreMigrationData,
+  DEPT_POC_CLEANUP_SNAPSHOT_PATH,
+  type DeptPocCleanupSnapshot,
+} from "../migrations/dept-poc-cleanup-snapshot";
+import {
+  isEventDeptPreMigrationSchema,
+  createEventDeptPreMigrationData,
+  EVENT_DEPT_SNAPSHOT_PATH,
+  type EventDeptSnapshot,
+} from "../migrations/event-department-snapshot";
+import {
+  isRoleCueTypePreMigrationSchema,
+  createRoleCueTypePreMigrationData,
+  ROLE_CUE_TYPE_SNAPSHOT_PATH,
+  type RoleCueTypeSnapshot,
+} from "../migrations/role-cue-type-snapshot";
+import {
+  isCueListGrantPreMigrationSchema,
+  createCueListGrantPreMigrationData,
+  CUE_LIST_GRANT_SNAPSHOT_PATH,
+  type CueListGrantSnapshot,
+} from "../migrations/cue-list-grant-snapshot";
+import {
+  isScriptRestPreMigrationSchema,
+  createScriptRestPreMigrationData,
+  SCRIPT_REST_SNAPSHOT_PATH,
+} from "../migrations/script-rest-snapshot";
+import {
+  isSceneCharTagRestPreMigrationSchema,
+  createSceneCharTagRestPreMigrationData,
+  SCENE_CHAR_TAG_REST_SNAPSHOT_PATH,
+} from "../migrations/scene-char-tag-rest-snapshot";
+import {
+  isAssetRestPreMigrationSchema,
+  createAssetRestPreMigrationData,
+  ASSET_REST_SNAPSHOT_PATH,
+} from "../migrations/asset-rest-snapshot";
+import {
+  isReportNoteRestPreMigrationSchema,
+  createReportNoteRestPreMigrationData,
+  REPORT_NOTE_REST_SNAPSHOT_PATH,
+  type ReportNoteRestSnapshot,
+} from "../migrations/report-note-rest-snapshot";
+import {
+  isWikiSplitPreMigrationSchema,
+  createWikiSplitPreMigrationData,
+  WIKI_SPLIT_SNAPSHOT_PATH,
+  type WikiSplitSnapshot,
+} from "../migrations/wiki-split-snapshot";
+import {
+  isEventTaskRestPreMigrationSchema,
+  createEventTaskRestPreMigrationData,
+  EVENT_TASK_REST_SNAPSHOT_PATH,
+  type EventTaskRestSnapshot,
+} from "../migrations/event-task-rest-snapshot";
+import {
+  isCueDomainRestPreMigrationSchema,
+  createCueDomainRestPreMigrationData,
+  CUE_DOMAIN_REST_SNAPSHOT_PATH,
+  type CueDomainRestSnapshot,
+} from "../migrations/cue-domain-rest-snapshot";
+import {
+  isSceneFieldGatesPreMigrationSchema,
+  createSceneFieldGatesPreMigrationData,
+  SCENE_FIELD_GATES_SNAPSHOT_PATH,
+} from "../migrations/scene-field-gates-snapshot";
+
+import {
+  isLocalScriptDataPreMigrationSchema,
+  createLocalScriptDataPreMigrationData,
+  LOCAL_SCRIPT_DATA_SNAPSHOT_PATH,
+  type LocalScriptDataSnapshot,
+} from "../migrations/local-script-data-snapshot";
+import {
+  isMergeEventDeptPreMigrationSchema,
+  createMergeEventDeptPreMigrationData,
+  MERGE_EVENT_DEPT_SNAPSHOT_PATH,
+} from "../migrations/merge-event-department-snapshot";
+import {
+  isTaskStandalonePreMigrationSchema,
+  createTaskStandalonePreMigrationData,
+  TASK_STANDALONE_SNAPSHOT_PATH,
+  type TaskStandaloneSnapshot,
+} from "../migrations/task-standalone-snapshot";
+import {
+  isWikiDefaultTreePreMigrationSchema,
+  createWikiDefaultTreePreMigrationData,
+  WIKI_DEFAULT_TREE_SNAPSHOT_PATH,
+  type WikiDefaultTreeSnapshot,
+} from "../migrations/wiki-default-tree-snapshot";
+import {
+  isDeptPermissionSourcePreMigrationSchema,
+  createDeptPermissionSourcePreMigrationData,
+  DEPT_PERMISSION_SOURCE_SNAPSHOT_PATH,
+  type DeptPermissionSourceSnapshot,
+} from "../migrations/dept-permission-source-snapshot";
+import {
+  isGrantTemplateRetirePreMigrationSchema,
+  createGrantTemplateRetirePreMigrationData,
+  GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH,
+} from "../migrations/grant-template-retire-snapshot";
+import {
+  isWikiDialectV2PreMigration,
+  createWikiDialectV2PreMigrationData,
+  WIKI_DIALECT_V2_SNAPSHOT_PATH,
+  type WikiDialectV2Snapshot,
+} from "../migrations/wiki-dialect-v2-snapshot";
+import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
+import {
+  isVersionRetirePreMigrationSchema,
+  createVersionRetirePreMigrationData,
+  VERSION_RETIRE_SNAPSHOT_PATH,
+  type VersionRetireSnapshot,
+} from "../migrations/version-retire-snapshot";
+import {
+  isSceneNumRetirePreMigrationSchema,
+  createSceneNumRetirePreMigrationData,
+  SCENE_NUM_RETIRE_SNAPSHOT_PATH,
+  type SceneNumRetireSnapshot,
+} from "../migrations/scene-num-retire-snapshot";
+import {
+  isWikiCreateBaselinePreMigrationSchema,
+  createWikiCreateBaselinePreMigrationData,
+  WIKI_CREATE_BASELINE_SNAPSHOT_PATH,
+  type WikiCreateBaselineSnapshot,
+} from "../migrations/wiki-create-baseline-snapshot";
+import {
+  createAssetUploadZonePreMigrationData,
+  ASSET_UPLOAD_ZONE_SNAPSHOT_PATH,
+  type AssetUploadZoneSnapshot,
+} from "../migrations/asset-upload-zone-backfill-snapshot";
+import {
+  createRoleDriftPreMigrationData,
+  ROLE_DRIFT_SNAPSHOT_PATH,
+  type RoleDriftSnapshot,
+} from "../migrations/role-template-drift-backfill-snapshot";
+import {
+  isWikiEntityLinkPreMigrationSchema,
+  createWikiEntityLinkPreMigrationData,
+  WIKI_ENTITY_LINK_SNAPSHOT_PATH,
+  type WikiEntityLinkSnapshot,
+} from "../migrations/wiki-entity-link-snapshot";
+import {
+  isDropTaskMilestonePreMigrationSchema,
+  createDropTaskMilestonePreMigrationData,
+  DROP_TASK_MILESTONE_SNAPSHOT_PATH,
+  type DropTaskMilestoneSnapshot,
+} from "../migrations/drop-task-milestone-snapshot";
+import {
+  isRetireDeptTypePreMigrationSchema,
+  createRetireDeptTypePreMigrationData,
+  RETIRE_DEPT_TYPE_SNAPSHOT_PATH,
+  type RetireDeptTypeSnapshot,
+} from "../migrations/retire-dept-type-snapshot";
+import {
+  isMemberExitPreMigrationSchema,
+  createMemberExitPreMigrationData,
+  MEMBER_EXIT_SNAPSHOT_PATH,
+  type MemberExitSnapshot,
+} from "../migrations/member-exit-snapshot";
+import {
+  isCueMentionStableIdPreMigrationSchema,
+  createCueMentionStableIdPreMigrationData,
+  CUE_MENTION_STABLE_ID_SNAPSHOT_PATH,
+  type CueMentionStableIdSnapshot,
+} from "../migrations/cue-mention-stable-id-snapshot";
+import {
+  SCRIPT_VIEW_SNAPSHOT_PATH,
+  isScriptViewPreMigrationSchema,
+  createScriptViewPreMigrationData,
+  type ScriptViewSnapshot,
+} from "../migrations/script-view-snapshot";
+import {
+  NODE_TREE_SNAPSHOT_PATH,
+  isNodeTreePreMigrationSchema,
+  createNodeTreePreMigrationData,
+  type NodeTreeSnapshot,
+} from "../migrations/node-tree-snapshot";
+
+// Fixed UUID for the test system user — must match TEST_USER in helpers.ts
+const TEST_USER = "00000000-0000-0000-0000-000000000001";
+const TEST_OWNER = "00000000-0000-0000-0000-0000000000ff";
+
+export async function setup() {
+  // Generate deterministic TEST_SEED for faker (workers inherit process.env).
+  if (!process.env.TEST_SEED) {
+    process.env.TEST_SEED = String(Math.floor(Math.random() * 0xffff_ffff));
+  }
+  console.log(
+    `\nTest seed: ${process.env.TEST_SEED}  (reproduce: TEST_SEED=${process.env.TEST_SEED} npm test)\n`,
+  );
+
+  const pool = getPool();
+
+  // grant_template 已退役（#163）。下面三支历史迁移的 PRE 判据都查这张表——表没了
+  // 它们的重放也就无从谈起（源表是它自己），统一用这个开关跳过。
+  const hasGrantTemplate = (await pool.query(
+    `SELECT 1 FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_name = 'grant_template'`,
+  )).rows.length > 0;
+
+  if (await isPreMigrationSchema(pool)) {
+    // Migration path: DB is on the old schema (pre-internal-user-id).
+    const snapshot = await createPreMigrationData(pool, faker);
+    await writeFile(SNAPSHOT_PATH, JSON.stringify(snapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-internal-user-id.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // Insert the test system user (always runs on post-internal-user-id schema).
+  // app_user must exist before feishu_user (FK: feishu_user.user_id → app_user.id).
+  await pool.query(
+    `INSERT INTO app_user (id, created_at) VALUES ($1, NOW()) ON CONFLICT DO NOTHING`,
+    [TEST_USER],
+  );
+  // 建演出用的专用 owner（与 TEST_USER 分开，见 helpers.ts TEST_OWNER 注释）
+  await pool.query(
+    `INSERT INTO app_user (id, created_at) VALUES ($1, NOW()) ON CONFLICT DO NOTHING`,
+    [TEST_OWNER],
+  );
+  await pool.query(
+    `INSERT INTO feishu_user (open_id, user_id, name, is_super_admin, created_at, updated_at)
+     VALUES ('test-sys-feishu', $1, '测试系统用户', FALSE, NOW(), NOW())
+     ON CONFLICT DO NOTHING`,
+    [TEST_USER],
+  );
+  // #280 建项目门：既有路由测试全部用 TEST_USER 会话建项目，给 internal 档
+  // （无数量上限——测试 DB 状态共享，creator 的配额会被历史残骸挤爆产生 flake）。
+  // 「无档 → 403」「creator 配额」分支由 tests/plan.test.ts 用新造用户专测。
+  await pool.query(
+    `INSERT INTO user_plan (user_id, tier, source) VALUES ($1, 'internal', 'test-setup')
+     ON CONFLICT (user_id) DO NOTHING`,
+    [TEST_USER],
+  );
+
+  if (await isCueListRolePreMigrationSchema(pool)) {
+    // Migration path: DB has default_edit_roles column (pre-cue-list-role).
+    // TEST_USER already inserted above; use it as creator for factory rows.
+    const cueListRoleSnapshot = await createCueListRolePreMigrationData(pool, TEST_USER);
+    await writeFile(CUE_LIST_ROLE_SNAPSHOT_PATH, JSON.stringify(cueListRoleSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-cue-list-role.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  if (await isMemberRolesPreMigrationSchema(pool)) {
+    // Migration path: production_member_role table doesn't exist yet.
+    // TEST_USER already inserted above; use it as the factory member.
+    const memberRolesSnapshot = await createMemberRolesPreMigrationData(pool, TEST_USER);
+    await writeFile(MEMBER_ROLES_SNAPSHOT_PATH, JSON.stringify(memberRolesSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-member-roles.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  if (await isDeptPocCleanupPreMigrationSchema(pool)) {
+    // Migration path: poc_block_write_from_children column still exists.
+    // TEST_USER already inserted above; use it as the factory dept member.
+    const deptPocSnapshot = await createDeptPocCleanupPreMigrationData(pool, TEST_USER);
+    await writeFile(DEPT_POC_CLEANUP_SNAPSHOT_PATH, JSON.stringify(deptPocSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-dept-member-poc-cleanup.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  if (await isEventDeptPreMigrationSchema(pool)) {
+    // Migration path: event_department data not yet in production_dept.
+    // TEST_USER already inserted above.
+    const eventDeptSnapshot = await createEventDeptPreMigrationData(pool, TEST_USER);
+    await writeFile(EVENT_DEPT_SNAPSHOT_PATH, JSON.stringify(eventDeptSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-event-department.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  if (await isRoleCueTypePreMigrationSchema(pool)) {
+    // Migration path: production_role_cue_type table still exists.
+    const roleCueTypeSnapshot = await createRoleCueTypePreMigrationData(pool, TEST_USER);
+    await writeFile(ROLE_CUE_TYPE_SNAPSHOT_PATH, JSON.stringify(roleCueTypeSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-role-cue-type-to-dept.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  if (await isCueListGrantPreMigrationSchema(pool)) {
+    // Migration path: cue_list_permission table still exists.
+    const cueListGrantSnapshot = await createCueListGrantPreMigrationData(pool, TEST_USER);
+    await writeFile(CUE_LIST_GRANT_SNAPSHOT_PATH, JSON.stringify(cueListGrantSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-cue-list-to-resource-grant.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  if (await isCueDomainRestPreMigrationSchema(pool)) {
+    // 批A migration path: legacy cue_list manage level still in vocabulary.
+    const cueDomainRestSnapshot = await createCueDomainRestPreMigrationData(pool, TEST_USER);
+    await writeFile(CUE_DOMAIN_REST_SNAPSHOT_PATH, JSON.stringify(cueDomainRestSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-cue-domain-rest.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  if (await isEventTaskRestPreMigrationSchema(pool)) {
+    // 批B migration path: legacy event manage level still in vocabulary.
+    const etrSnapshot = await createEventTaskRestPreMigrationData(pool, TEST_USER);
+    await writeFile(EVENT_TASK_REST_SNAPSHOT_PATH, JSON.stringify(etrSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-event-task-rest.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  if (await isWikiSplitPreMigrationSchema(pool)) {
+    // 批C PR-C1 migration path: event_report still carries content columns.
+    const wikiSplitSnapshot = await createWikiSplitPreMigrationData(pool, TEST_USER);
+    await writeFile(WIKI_SPLIT_SNAPSHOT_PATH, JSON.stringify(wikiSplitSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-report-note-wiki-split.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  if (await isReportNoteRestPreMigrationSchema(pool)) {
+    // 批C PR-C2 migration path: legacy report manage level still in vocabulary.
+    const rnrSnapshot = await createReportNoteRestPreMigrationData(pool, TEST_USER);
+    await writeFile(REPORT_NOTE_REST_SNAPSHOT_PATH, JSON.stringify(rnrSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-report-note-rest.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  if (await isAssetRestPreMigrationSchema(pool)) {
+    // Migration path（批D）: asset manage 词汇行仍在。
+    const assetRestSnapshot = await createAssetRestPreMigrationData(pool, TEST_USER);
+    await writeFile(ASSET_REST_SNAPSHOT_PATH, JSON.stringify(assetRestSnapshot));
+    for (const file of ["db/add-asset-visibility.sql", "db/migrate-asset-rest.sql"]) {
+      const migrationSql = await readFile(path.resolve(process.cwd(), file), "utf8");
+      await pool.query(migrationSql);
+    }
+  }
+
+  if (await isSceneCharTagRestPreMigrationSchema(pool)) {
+    // Migration path（批E PR-E1）: scene manage 词汇行仍在。
+    const sctSnapshot = await createSceneCharTagRestPreMigrationData(pool, TEST_USER);
+    await writeFile(SCENE_CHAR_TAG_REST_SNAPSHOT_PATH, JSON.stringify(sctSnapshot));
+    for (const file of ["db/add-scene-char-tag-verbs.sql", "db/migrate-scene-char-tag-rest.sql"]) {
+      const migrationSql = await readFile(path.resolve(process.cwd(), file), "utf8");
+      await pool.query(migrationSql);
+    }
+  }
+
+  if (await isScriptRestPreMigrationSchema(pool)) {
+    // Migration path（批E PR-E2）: script 词汇行尚不存在。
+    const srSnapshot = await createScriptRestPreMigrationData(pool, TEST_USER);
+    await writeFile(SCRIPT_REST_SNAPSHOT_PATH, JSON.stringify(srSnapshot));
+    for (const file of ["db/add-script-dramaturgy-verbs.sql", "db/migrate-script-rest.sql"]) {
+      const migrationSql = await readFile(path.resolve(process.cwd(), file), "utf8");
+      await pool.query(migrationSql);
+    }
+  }
+
+  {
+    // 批E PR-E3（个人视图）：零消费键无 invariance，但 CI 迁移路径仍须重放迁移
+    // （否则词汇断言对 pre 态失败）。PRE 判据：script_view manage 词汇行仍在。
+    const e3Pre = await pool.query(
+      `SELECT 1 FROM resource_permission_level
+       WHERE resource_type = 'script_view' AND permission_level = 'manage'`,
+    );
+    if (e3Pre.rows.length > 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-personal-view-rest.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
+
+  {
+    // 批F（治理域）：CI 迁移路径重放。PRE 判据：production 词汇行尚不存在。
+    const fPre = await pool.query(
+      `SELECT 1 FROM resource_permission_level
+       WHERE resource_type = 'production' AND permission_level = 'view'`,
+    );
+    if (fPre.rows.length === 0) {
+      for (const file of ["db/add-governance-verbs.sql", "db/migrate-governance-rest.sql"]) {
+        const migrationSql = await readFile(path.resolve(process.cwd(), file), "utf8");
+        await pool.query(migrationSql);
+      }
+    }
+  }
+
+  {
+    // 批G G-1（制作人通配区间）：CI 迁移路径重放。PRE 判据：模板尚无通配主行。
+    const g1Pre = hasGrantTemplate ? await pool.query(
+      `SELECT 1 FROM grant_template WHERE role_name = '制作人' AND permission_key = 'node:*/*@*'`,
+    ) : { rows: [1] };
+    if (g1Pre.rows.length === 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-producer-wildcard.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
+
+  {
+    // 批G G-2（终局清理）：CI 迁移路径重放。PRE 判据：atomic 表仍存在。
+    const g2Pre = await pool.query(
+      `SELECT 1 FROM information_schema.tables WHERE table_name = 'atomic_permission_grant'`,
+    );
+    if (g2Pre.rows.length > 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-terminal-cleanup.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
+
+  {
+    // 两个指派面（2026-08-13）：CI 迁移路径重放。PRE 判据：舞监模板尚无 event 通配 view。
+    const acPre = hasGrantTemplate ? await pool.query(
+      `SELECT 1 FROM grant_template WHERE role_name = '舞台监督' AND permission_key = 'node:event/*@view'`,
+    ) : { rows: [1] };
+    if (acPre.rows.length === 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-event-assignee-callsheet.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
+
+  {
+    // Cue 模版声明表（§3.5）：CI 迁移路径重放。PRE 判据：表不存在。
+    const ctPre = await pool.query(
+      `SELECT 1 FROM information_schema.tables WHERE table_name = 'dept_cue_list_template'`,
+    );
+    if (ctPre.rows.length === 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-dept-cue-template.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
+
+  {
+    // 角色模板对齐 + 退役键清理（2026-08-17）：PRE 判据=编剧模板尚无 blocks@edit。
+    // 必须在字段门迁移之前跑——它清 grant_template 的退役键残留，字段门那支
+    // 随后往同一张表补字段级键。
+    const pre = hasGrantTemplate ? await pool.query(
+      `SELECT 1 FROM grant_template
+       WHERE role_name = '编剧' AND permission_key = 'node:script/*/blocks@edit'`,
+    ) : { rows: [1] };
+    if (pre.rows.length === 0) {
+      const migrationSql = await readFile(
+        path.resolve(process.cwd(), "db/migrate-role-template-seed.sql"),
+        "utf8",
+      );
+      await pool.query(migrationSql);
+    }
+  }
+
+  if (await isSceneFieldGatesPreMigrationSchema(pool)) {
+    // scene 字段门对齐（2026-08-17）：PRE 判据=编剧模板尚无 meta/name@edit。
+    const sfgSnapshot = await createSceneFieldGatesPreMigrationData(pool, TEST_USER);
+    await writeFile(SCENE_FIELD_GATES_SNAPSHOT_PATH, JSON.stringify(sfgSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-scene-field-gates.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  if (await isLocalScriptDataPreMigrationSchema(pool)) {
+    const snapshot = await createLocalScriptDataPreMigrationData(pool, TEST_USER);
+    await writeFile(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH, JSON.stringify(snapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-script-comment-rehearsal-defaults.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  const legacyCueNumberConstraint = await pool.query(
+    `SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'cue'::regclass
+       AND conname = 'cue_cue_list_id_number_key'`,
+  );
+  if (legacyCueNumberConstraint.rows.length > 0) {
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-cue-revision-number-uniqueness.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // 并表迁移（event_department → production_dept）：必须最后跑——
+  // 前序旧迁移的工厂/重放仍然向 event_department 写行。
+  if (await isMergeEventDeptPreMigrationSchema(pool)) {
+    const mergeSnapshot = await createMergeEventDeptPreMigrationData(pool, TEST_USER);
+    await writeFile(MERGE_EVENT_DEPT_SNAPSHOT_PATH, JSON.stringify(mergeSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-merge-event-department.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // Task 独立化（event_tech_req → task）：必须在并表迁移之后——
+  // 并表迁移与前序工厂仍按旧表名 event_tech_req 读写。
+  if (await isTaskStandalonePreMigrationSchema(pool)) {
+    const taskSnapshot = await createTaskStandalonePreMigrationData(pool, TEST_USER);
+    await writeFile(TASK_STANDALONE_SNAPSHOT_PATH, JSON.stringify(taskSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-task-standalone.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // wiki 默认文档树存量归位：依赖并表后 production_dept（note 赋题 join）与
+  // add-wiki-library 的树列，放全部老迁移之后
+  if (await isWikiDefaultTreePreMigrationSchema(pool)) {
+    const wikiTreeSnapshot = await createWikiDefaultTreePreMigrationData(pool, TEST_USER);
+    await writeFile(WIKI_DEFAULT_TREE_SNAPSHOT_PATH, JSON.stringify(wikiTreeSnapshot));
+    for (const file of ["db/add-wiki-default-tree.sql", "db/migrate-wiki-default-tree.sql"]) {
+      const sql = await readFile(path.resolve(process.cwd(), file), "utf8");
+      await pool.query(sql);
+    }
+  }
+
+  // wiki 创建资格基线回填（W3 部署缺口：grant_template 零读取，存量 role 无键）
+  if (await isWikiCreateBaselinePreMigrationSchema(pool)) {
+    const baselineSnapshot = await createWikiCreateBaselinePreMigrationData(pool, TEST_USER);
+    await writeFile(WIKI_CREATE_BASELINE_SNAPSHOT_PATH, JSON.stringify(baselineSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-wiki-create-baseline.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // 部门权限行来源分道（#274）：先造四种待回填的行（含「无声明无归属的实例键」那种，
+  // 它是回填判据的考点），再应用迁移，迁移测试比对回填结果。
+  if (await isDeptPermissionSourcePreMigrationSchema(pool)) {
+    const sourceSnapshot = await createDeptPermissionSourcePreMigrationData(pool, TEST_USER);
+    await writeFile(DEPT_PERMISSION_SOURCE_SNAPSHOT_PATH, JSON.stringify(sourceSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-dept-permission-source.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // grant_template 退役（#163）：先把表内容整份快照下来，迁移测试拿它验证
+  // 项目模版常量一键不差地重现了这份模板，然后才 DROP。
+  if (await isGrantTemplateRetirePreMigrationSchema(pool)) {
+    const retireSnapshot = await createGrantTemplateRetirePreMigrationData(pool);
+    await writeFile(GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH, JSON.stringify(retireSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-retire-grant-template.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // 版本退役收尾（PR #300）：造一个「旧文件被版本 pin」的资产快照下来，
+  // 迁移测试验证 latest-wins 解析不丢文件，然后删 asset_version_rel /
+  // is_universal / version 化石列。
+  if (await isVersionRetirePreMigrationSchema(pool)) {
+    const versionRetireSnapshot = await createVersionRetirePreMigrationData(pool, TEST_OWNER);
+    await writeFile(VERSION_RETIRE_SNAPSHOT_PATH, JSON.stringify(versionRetireSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-version-retire.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // scene 过渡态收尾（#159）：走真实写路径造 marker，再把 num 塞成与生成号
+  // 不一致的存量残值快照下来，迁移测试验证「场次号由 marker 生成、删列不丢」。
+  if (await isSceneNumRetirePreMigrationSchema(pool)) {
+    const sceneNumSnapshot = await createSceneNumRetirePreMigrationData(pool, TEST_OWNER);
+    await writeFile(SCENE_NUM_RETIRE_SNAPSHOT_PATH, JSON.stringify(sceneNumSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-scene-num-retire.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // wiki 引用边泛化（wiki_link → wiki_entity_link）：先裸 SQL 造存量 wiki→wiki
+  // 边（应用代码已改写新表，不能走 createWiki），迁移测试验证平移。
+  if (await isWikiEntityLinkPreMigrationSchema(pool)) {
+    const wikiEntityLinkSnapshot = await createWikiEntityLinkPreMigrationData(pool, TEST_USER);
+    await writeFile(WIKI_ENTITY_LINK_SNAPSHOT_PATH, JSON.stringify(wikiEntityLinkSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-wiki-entity-link.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // task 换轨挂 phase：task_milestone 边表退役。工厂造 task+milestone+旧边与
+  // phase 家族新边（add-phase.sql 已由 CI 先行应用），迁移测试验证 DROP 只带走边表。
+  if (await isDropTaskMilestonePreMigrationSchema(pool)) {
+    const dropTaskMilestoneSnapshot = await createDropTaskMilestonePreMigrationData(pool, TEST_USER);
+    await writeFile(DROP_TASK_MILESTONE_SNAPSHOT_PATH, JSON.stringify(dropTaskMilestoneSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-drop-task-milestone.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // org_dept 类型退役并入 dept（#327）：工厂造并类型前的 org_dept 侧存量
+  // （授权行 / 三张区间表节点键 / 在途申请 / 审批人配置 + 一对撞行），迁移测试验
+  // 平移与去重。排在 merge-event-department 之后——那条迁移的工厂造的是 dept 侧
+  // 的 notes 行，本迁移不碰它，但顺序反了就会在词汇行已删的库里造 org_dept 行。
+  if (await isRetireDeptTypePreMigrationSchema(pool)) {
+    const retireDeptTypeSnapshot = await createRetireDeptTypePreMigrationData(pool, TEST_USER);
+    await writeFile(RETIRE_DEPT_TYPE_SNAPSHOT_PATH, JSON.stringify(retireDeptTypeSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-retire-dept-type.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // 成员退出状态机收窄（#141）：工厂造五态时代的 pending_exit / disputed 残留成员
+  // 与各自的未撤销授权行，迁移测试验归一方向是冻结（成员行还在、授权行没撤）。
+  // 依赖 db/add-member-exit-fields.sql 先行建列——CI 的「Apply additive DDL
+  // migrations」步骤已在本函数之前跑过 add-*.sql。
+  if (await isMemberExitPreMigrationSchema(pool)) {
+    const memberExitSnapshot = await createMemberExitPreMigrationData(pool, TEST_USER);
+    await writeFile(MEMBER_EXIT_SNAPSHOT_PATH, JSON.stringify(memberExitSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-member-exit-states.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // wiki 正文方言 v1 → v2：必须排在全部结构迁移之后（工厂正文要往已成型的
+  // wiki 表里写）。SQL 只建备份表，正文改写由 lib/wiki-dialect-migrate 执行——
+  // 与 scripts/migrate-wiki-dialect.ts 同一份实现，CI 跑的就是线上要跑的东西。
+  if (await isWikiDialectV2PreMigration(pool)) {
+    const dialectSnapshot = await createWikiDialectV2PreMigrationData(pool, TEST_USER);
+    await writeFile(WIKI_DIALECT_V2_SNAPSHOT_PATH, JSON.stringify(dialectSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-wiki-dialect-v2.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+    const { rows } = await pool.query<{ id: string; body: string }>(
+      "SELECT id::text AS id, body FROM wiki",
+    );
+    for (const row of rows) {
+      const next = normalizeWikiDialect(row.body);
+      if (next !== row.body) {
+        await pool.query("UPDATE wiki SET body = $1 WHERE id = $2::uuid", [next, row.id]);
+      }
+    }
+  }
+
+  // cue 引用换锚（#302）：行 id → 稳定 cue_id。必须排在 dialect v2 **之后**——
+  // 那一步会把全库 wiki.body 归一到 v2 文法，若排在它之前，工厂刻意留的 v1 形态
+  // 引用会先被归一掉，本迁移对 v1 形态的处理分支就永远测不到。
+  if (await isCueMentionStableIdPreMigrationSchema(pool)) {
+    const cueMentionSnapshot = await createCueMentionStableIdPreMigrationData(pool, TEST_USER);
+    await writeFile(CUE_MENTION_STABLE_ID_SNAPSHOT_PATH, JSON.stringify(cueMentionSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-cue-mention-stable-id.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // script_view（#336 B2）：版式从 script_config 搬进独立表、page_map 改按 view id 键。
+  // 工厂在旧 schema 上裸 SQL 造 letter/compact 演出，迁移测试验证版式与页码都不丢。
+  // 必须排在**所有**用 createProduction 的工厂之后：新代码建项目会顺手建 script_view，
+  // 表还没建时会直接报错。
+  if (await isScriptViewPreMigrationSchema(pool)) {
+    const scriptViewSnapshot = await createScriptViewPreMigrationData(pool, TEST_OWNER);
+    await writeFile(SCRIPT_VIEW_SNAPSHOT_PATH, JSON.stringify(scriptViewSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-script-view.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+
+  // 素材上传资格区间回填（批D 收紧补偿）：工厂裸 SQL 造三形态项目（区间全空 /
+  // role 已持键 / dept 已持键），只碰 production_role_permission，放最后即可。
+  // 无谓词——数据回填在空库（CI）测不出"未迁移形态"，数据谓词恒 false 会让
+  // invariance 整段跳过；本迁移按项目 scoped 且幂等，无条件重放安全。
+  {
+    const uploadZoneSnapshot = await createAssetUploadZonePreMigrationData(pool, TEST_USER);
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-asset-upload-zone-backfill.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+    // 幂等二跑（AI review #404）：紧接着重放一次，各语句插入行数记进快照，
+    // 迁移测试断言总数为 0。放 setup 里而非测试里——测试期并发工厂会裸造
+    // 无键 role，届时重放会污染别家夹具。
+    const secondRun = await pool.query(migrationSql);
+    const secondResults = Array.isArray(secondRun) ? secondRun : [secondRun];
+    uploadZoneSnapshot.secondRunInsertedRows = secondResults.reduce(
+      (sum, r) => sum + (r.rowCount ?? 0), 0,
+    );
+    await writeFile(ASSET_UPLOAD_ZONE_SNAPSHOT_PATH, JSON.stringify(uploadZoneSnapshot));
+  }
+
+  // 角色模版漂移回填：工厂裸 SQL 造三个演出（type 空 / film / album），覆盖三段
+  // 与两条排除，只碰 production_role_permission。同样无谓词、幂等二跑。
+  // **必须排在上面那支之后**——上传零区间回填会给「区间全空」项目的全部 role 补
+  // node:asset/*@create，若本厂的项目先于它存在，作曲的那一枚就分不清是谁补的
+  // （film / 弃用 / 通配三个对照更会被它污染成假绿）。
+  {
+    const roleDriftSnapshot = await createRoleDriftPreMigrationData(pool, TEST_USER);
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-role-template-drift-backfill.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+    const secondRun = await pool.query(migrationSql);
+    const secondResults = Array.isArray(secondRun) ? secondRun : [secondRun];
+    roleDriftSnapshot.secondRunInsertedRows = secondResults.reduce(
+      (sum, r) => sum + (r.rowCount ?? 0), 0,
+    );
+    await writeFile(ROLE_DRIFT_SNAPSHOT_PATH, JSON.stringify(roleDriftSnapshot));
+  }
+
+  // node 树统一（#420 第一批，migrate-node-tree.sql）。**必须排在所有迁移块
+  // 之后**——它把此前各厂造出的 wiki/asset 全量生成壳节点（integrity 层的 1:1
+  // 断言是全库的），排前面会漏掉后建的工厂行。migrate 文件自镜像 add-node-tree
+  // 的 DDL，无需单独应用 add 文件。
+  if (await isNodeTreePreMigrationSchema(pool)) {
+    const nodeTreeSnapshot = await createNodeTreePreMigrationData(pool, TEST_USER);
+    await writeFile(NODE_TREE_SNAPSHOT_PATH, JSON.stringify(nodeTreeSnapshot));
+    const migrationSql = await readFile(
+      path.resolve(process.cwd(), "db/migrate-node-tree.sql"),
+      "utf8",
+    );
+    await pool.query(migrationSql);
+  }
+}
+
+export async function teardown() {
+  const pool = getPool();
+
+  // node 树迁移快照的工厂演出（migration path only）。production CASCADE 清掉
+  // node/node_mount/report 等全部子行；额外的 U2 用户单独删。
+  {
+    let nodeTreeSnapshot: NodeTreeSnapshot | null = null;
+    try {
+      nodeTreeSnapshot = JSON.parse(await readFile(NODE_TREE_SNAPSHOT_PATH, "utf8")) as NodeTreeSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (nodeTreeSnapshot) {
+      await pool.query("DELETE FROM production WHERE id = $1", [nodeTreeSnapshot.prodId])
+        .catch((e) => console.error("[node-tree teardown] production:", e.message));
+      await pool.query("DELETE FROM app_user WHERE id = $1::uuid", [nodeTreeSnapshot.u2Id])
+        .catch((e) => console.error("[node-tree teardown] u2:", e.message));
+      await unlink(NODE_TREE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // grant_template 退役快照：纯表内容 dump，没有工厂行要清，只删文件。
+  await unlink(GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH).catch(() => {});
+
+  // script_view 迁移快照的工厂演出（migration path only）
+  {
+    let scriptViewSnapshot: ScriptViewSnapshot | null = null;
+    try {
+      scriptViewSnapshot = JSON.parse(await readFile(SCRIPT_VIEW_SNAPSHOT_PATH, "utf8")) as ScriptViewSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (scriptViewSnapshot) {
+      for (const id of [scriptViewSnapshot.letterProdId, scriptViewSnapshot.defaultProdId, scriptViewSnapshot.invalidProdId]) {
+        await pool.query("DELETE FROM production WHERE id = $1", [id]).catch(() => {});
+      }
+      await unlink(SCRIPT_VIEW_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // wiki 引用边泛化快照的工厂演出（migration path only）
+  {
+    let wikiEntityLinkSnapshot: WikiEntityLinkSnapshot | null = null;
+    try {
+      wikiEntityLinkSnapshot = JSON.parse(
+        await readFile(WIKI_ENTITY_LINK_SNAPSHOT_PATH, "utf8"),
+      ) as WikiEntityLinkSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (wikiEntityLinkSnapshot) {
+      // production 删除级联 wiki / wiki_entity_link
+      await pool.query("DELETE FROM production WHERE id = $1", [wikiEntityLinkSnapshot.prodId]).catch(() => {});
+      await unlink(WIKI_ENTITY_LINK_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // wiki 方言 v2 迁移快照的工厂演出（migration path only）
+  {
+    let dialectSnapshot: WikiDialectV2Snapshot | null = null;
+    try {
+      dialectSnapshot = JSON.parse(
+        await readFile(WIKI_DIALECT_V2_SNAPSHOT_PATH, "utf8"),
+      ) as WikiDialectV2Snapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (dialectSnapshot) {
+      // production 删除级联 wiki，wiki 删除级联备份表行
+      await pool.query("DELETE FROM production WHERE id = $1", [dialectSnapshot.productionId]).catch(() => {});
+      await unlink(WIKI_DIALECT_V2_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // task_milestone 退役快照的工厂演出（migration path only）
+  {
+    let dropTaskMilestoneSnapshot: DropTaskMilestoneSnapshot | null = null;
+    try {
+      dropTaskMilestoneSnapshot = JSON.parse(
+        await readFile(DROP_TASK_MILESTONE_SNAPSHOT_PATH, "utf8"),
+      ) as DropTaskMilestoneSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (dropTaskMilestoneSnapshot) {
+      // production 删除级联 task / milestone / phase 及其边
+      await pool.query("DELETE FROM production WHERE id = $1", [dropTaskMilestoneSnapshot.prodId]).catch(() => {});
+      await unlink(DROP_TASK_MILESTONE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // org_dept 类型退役快照的工厂演出（migration path only）
+  {
+    let retireDeptTypeSnapshot: RetireDeptTypeSnapshot | null = null;
+    try {
+      retireDeptTypeSnapshot = JSON.parse(
+        await readFile(RETIRE_DEPT_TYPE_SNAPSHOT_PATH, "utf8"),
+      ) as RetireDeptTypeSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (retireDeptTypeSnapshot) {
+      // production 删除级联部门 / 角色 / 授权行 / 区间键 / 申请 / 审批人配置
+      await pool.query("DELETE FROM production WHERE id = $1", [retireDeptTypeSnapshot.prodId]).catch(() => {});
+      await unlink(RETIRE_DEPT_TYPE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // 成员退出状态机快照的工厂演出（migration path only）
+  {
+    let memberExitSnapshot: MemberExitSnapshot | null = null;
+    try {
+      memberExitSnapshot = JSON.parse(
+        await readFile(MEMBER_EXIT_SNAPSHOT_PATH, "utf8"),
+      ) as MemberExitSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (memberExitSnapshot) {
+      // production 删除级联成员行 / 授权行 / 状态审计行；工厂 app_user 单独收
+      await pool.query("DELETE FROM production WHERE id = $1", [memberExitSnapshot.prodId]).catch(() => {});
+      await pool
+        .query("DELETE FROM app_user WHERE id = ANY($1::uuid[])", [
+          [memberExitSnapshot.pendingExitUserId, memberExitSnapshot.disputedUserId],
+        ])
+        .catch(() => {});
+      await unlink(MEMBER_EXIT_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // cue 引用换锚快照的工厂演出（migration path only）
+  {
+    let cueMentionSnapshot: CueMentionStableIdSnapshot | null = null;
+    try {
+      cueMentionSnapshot = JSON.parse(
+        await readFile(CUE_MENTION_STABLE_ID_SNAPSHOT_PATH, "utf8"),
+      ) as CueMentionStableIdSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (cueMentionSnapshot) {
+      // production 删除级联 cue_list / cue / wiki / 边 / 评论；
+      // user_notification 与 agent_memory_chunk 不挂 production FK，单独收。
+      await pool.query("DELETE FROM production WHERE id = $1", [cueMentionSnapshot.prodId]).catch(() => {});
+      await pool.query("DELETE FROM user_notification WHERE id = $1", [cueMentionSnapshot.notificationId]).catch(() => {});
+      await pool.query("DELETE FROM agent_memory_chunk WHERE id = $1::uuid", [cueMentionSnapshot.memoryChunkId]).catch(() => {});
+      await unlink(CUE_MENTION_STABLE_ID_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // 版本退役收尾快照的工厂演出（migration path only）
+  {
+    let versionRetireSnapshot: VersionRetireSnapshot | null = null;
+    try {
+      versionRetireSnapshot = JSON.parse(
+        await readFile(VERSION_RETIRE_SNAPSHOT_PATH, "utf8"),
+      ) as VersionRetireSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (versionRetireSnapshot) {
+      await pool.query("DELETE FROM production WHERE id = $1", [versionRetireSnapshot.prodId]).catch(() => {});
+      await unlink(VERSION_RETIRE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // scene 过渡态收尾（#159）的工厂演出（migration path only）。
+  // scene_version / character_version 无 CASCADE FK，删演出前先清。
+  {
+    let sceneNumSnapshot: SceneNumRetireSnapshot | null = null;
+    try {
+      sceneNumSnapshot = JSON.parse(
+        await readFile(SCENE_NUM_RETIRE_SNAPSHOT_PATH, "utf8"),
+      ) as SceneNumRetireSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (sceneNumSnapshot) {
+      await pool.query(
+        "DELETE FROM scene_version WHERE scene_id IN (SELECT id FROM scene WHERE production_id = $1)",
+        [sceneNumSnapshot.prodId],
+      ).catch(() => {});
+      await pool.query(
+        "DELETE FROM character_version WHERE character_id IN (SELECT id FROM character WHERE production_id = $1)",
+        [sceneNumSnapshot.prodId],
+      ).catch(() => {});
+      await pool.query("DELETE FROM production WHERE id = $1", [sceneNumSnapshot.prodId]).catch(() => {});
+      await unlink(SCENE_NUM_RETIRE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // 部门权限来源分道（#274）的工厂演出（migration path only）
+  {
+    let sourceSnapshot: DeptPermissionSourceSnapshot | null = null;
+    try {
+      sourceSnapshot = JSON.parse(
+        await readFile(DEPT_PERMISSION_SOURCE_SNAPSHOT_PATH, "utf8"),
+      ) as DeptPermissionSourceSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (sourceSnapshot) {
+      await pool.query("DELETE FROM production WHERE id = $1", [sourceSnapshot.prodId]).catch(() => {});
+      await unlink(DEPT_PERMISSION_SOURCE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // Clean up asset-upload-zone-backfill migration factory data (migration path only).
+  {
+    let uploadZoneSnapshot: AssetUploadZoneSnapshot | null = null;
+    try {
+      uploadZoneSnapshot = JSON.parse(
+        await readFile(ASSET_UPLOAD_ZONE_SNAPSHOT_PATH, "utf8"),
+      ) as AssetUploadZoneSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (uploadZoneSnapshot) {
+      for (const prodId of [
+        uploadZoneSnapshot.legacyProdId,
+        uploadZoneSnapshot.roleCtlProdId,
+        uploadZoneSnapshot.deptCtlProdId,
+      ]) {
+        await pool.query("DELETE FROM production WHERE id = $1", [prodId]).catch(() => {});
+      }
+      await unlink(ASSET_UPLOAD_ZONE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // Clean up role-template-drift-backfill migration factory data (migration path only).
+  {
+    let roleDriftSnapshot: RoleDriftSnapshot | null = null;
+    try {
+      roleDriftSnapshot = JSON.parse(
+        await readFile(ROLE_DRIFT_SNAPSHOT_PATH, "utf8"),
+      ) as RoleDriftSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (roleDriftSnapshot) {
+      for (const prodId of [
+        roleDriftSnapshot.legacyProdId,
+        roleDriftSnapshot.filmProdId,
+        roleDriftSnapshot.albumProdId,
+      ]) {
+        await pool.query("DELETE FROM production WHERE id = $1", [prodId]).catch(() => {});
+      }
+      await unlink(ROLE_DRIFT_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // Clean up wiki-create-baseline migration factory data (migration path only).
+  {
+    let baselineSnapshot: WikiCreateBaselineSnapshot | null = null;
+    try {
+      baselineSnapshot = JSON.parse(
+        await readFile(WIKI_CREATE_BASELINE_SNAPSHOT_PATH, "utf8"),
+      ) as WikiCreateBaselineSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (baselineSnapshot) {
+      await pool.query("DELETE FROM production WHERE id = $1", [baselineSnapshot.prodId]).catch(() => {});
+      await unlink(WIKI_CREATE_BASELINE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // Clean up wiki-default-tree migration factory data (migration path only).
+  {
+    let wikiTreeSnapshot: WikiDefaultTreeSnapshot | null = null;
+    try {
+      wikiTreeSnapshot = JSON.parse(
+        await readFile(WIKI_DEFAULT_TREE_SNAPSHOT_PATH, "utf8"),
+      ) as WikiDefaultTreeSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (wikiTreeSnapshot) {
+      // production 删除级联 wiki/config/event 全家族
+      await pool.query("DELETE FROM production WHERE id = $1", [wikiTreeSnapshot.prodId]).catch(() => {});
+      await unlink(WIKI_DEFAULT_TREE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // Clean up task-standalone migration factory data (migration path only).
+  {
+    let taskSnapshot: TaskStandaloneSnapshot | null = null;
+    try {
+      taskSnapshot = JSON.parse(
+        await readFile(TASK_STANDALONE_SNAPSHOT_PATH, "utf8"),
+      ) as TaskStandaloneSnapshot;
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (taskSnapshot) {
+      // production 删除经 task.production_id CASCADE 清 task/asset/event 全家族
+      await pool.query("DELETE FROM production WHERE id = $1", [taskSnapshot.prodId]).catch(() => {});
+      await unlink(TASK_STANDALONE_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  // Clean up merge-event-department migration factory data (migration path only).
+  {
+    let mergeSnapshot: { prodId: string } | null = null;
+    try {
+      mergeSnapshot = JSON.parse(
+        await readFile(MERGE_EVENT_DEPT_SNAPSHOT_PATH, "utf8"),
+      ) as { prodId: string };
+    } catch {
+      // Normal path: no snapshot file.
+    }
+    if (mergeSnapshot) {
+      await pool.query("DELETE FROM production WHERE id = $1", [mergeSnapshot.prodId]).catch(() => {});
+      await unlink(MERGE_EVENT_DEPT_SNAPSHOT_PATH).catch(() => {});
+    }
+  }
+
+  let localScriptDataSnapshot: LocalScriptDataSnapshot | null = null;
+  try {
+    localScriptDataSnapshot = JSON.parse(
+      await readFile(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH, "utf8"),
+    ) as LocalScriptDataSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (localScriptDataSnapshot) {
+    await pool.query(
+      "DELETE FROM production WHERE id = ANY($1::text[])",
+      [Object.values(localScriptDataSnapshot.productionIds)],
+    ).catch(() => {});
+    await unlink(LOCAL_SCRIPT_DATA_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Tables with no ON DELETE CASCADE from app_user need explicit cleanup first.
+  await pool.query("DELETE FROM cue_list WHERE created_by = $1", [TEST_USER]);
+  await pool.query("DELETE FROM production_event WHERE created_by = $1", [TEST_USER]);
+  await pool.query("DELETE FROM wiki WHERE created_by = $1", [TEST_USER]);
+
+  // Clean up cue-list-grant migration factory data (migration path only; no-op otherwise).
+  let cueListGrantSnapshot: CueListGrantSnapshot | null = null;
+  try {
+    cueListGrantSnapshot = JSON.parse(
+      await readFile(CUE_LIST_GRANT_SNAPSHOT_PATH, "utf8"),
+    ) as CueListGrantSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (cueListGrantSnapshot) {
+    await pool.query(
+      "DELETE FROM production WHERE id = $1",
+      [cueListGrantSnapshot.production.id],
+    ).catch(() => {});
+    // Clean up extra test users created for this migration
+    await pool.query(
+      "DELETE FROM app_user WHERE id IN ($1, $2)",
+      [cueListGrantSnapshot.personalGrantUserId, cueListGrantSnapshot.roleGrantUserId],
+    ).catch(() => {});
+    await unlink(CUE_LIST_GRANT_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up 批C report-note-rest migration factory data (migration path only; no-op otherwise).
+  let rnrSnapshot: ReportNoteRestSnapshot | null = null;
+  try {
+    rnrSnapshot = JSON.parse(
+      await readFile(REPORT_NOTE_REST_SNAPSHOT_PATH, "utf8"),
+    ) as ReportNoteRestSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (rnrSnapshot) {
+    await pool.query("DELETE FROM production_event WHERE id = $1", [rnrSnapshot.eventId]).catch(() => {});
+    await pool.query("DELETE FROM production WHERE id = $1", [rnrSnapshot.productionId]).catch(() => {});
+    await pool.query(
+      "DELETE FROM app_user WHERE id IN ($1, $2)",
+      [rnrSnapshot.manageUserId, rnrSnapshot.atomicUserId],
+    ).catch(() => {});
+    await unlink(REPORT_NOTE_REST_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up 批C wiki-split migration factory data (migration path only; no-op otherwise).
+  let wikiSplitSnapshot: WikiSplitSnapshot | null = null;
+  try {
+    wikiSplitSnapshot = JSON.parse(
+      await readFile(WIKI_SPLIT_SNAPSHOT_PATH, "utf8"),
+    ) as WikiSplitSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (wikiSplitSnapshot) {
+    await pool.query("DELETE FROM production_event WHERE id = $1", [wikiSplitSnapshot.eventId]).catch(() => {});
+    await pool.query("DELETE FROM production WHERE id = $1", [wikiSplitSnapshot.productionId]).catch(() => {});
+    await unlink(WIKI_SPLIT_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up 批B event-task-rest migration factory data (migration path only; no-op otherwise).
+  let etrSnapshot: EventTaskRestSnapshot | null = null;
+  try {
+    etrSnapshot = JSON.parse(
+      await readFile(EVENT_TASK_REST_SNAPSHOT_PATH, "utf8"),
+    ) as EventTaskRestSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (etrSnapshot) {
+    await pool.query("DELETE FROM production_event WHERE id = $1", [etrSnapshot.eventId]).catch(() => {});
+    await pool.query("DELETE FROM production WHERE id = $1", [etrSnapshot.productionId]).catch(() => {});
+    await pool.query(
+      "DELETE FROM app_user WHERE id IN ($1, $2, $3)",
+      [etrSnapshot.manageUserId, etrSnapshot.assignUserId, etrSnapshot.atomicUserId],
+    ).catch(() => {});
+    await unlink(EVENT_TASK_REST_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up 批A cue-domain-rest migration factory data (migration path only; no-op otherwise).
+  let cueDomainRestSnapshot: CueDomainRestSnapshot | null = null;
+  try {
+    cueDomainRestSnapshot = JSON.parse(
+      await readFile(CUE_DOMAIN_REST_SNAPSHOT_PATH, "utf8"),
+    ) as CueDomainRestSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (cueDomainRestSnapshot) {
+    await pool.query(
+      "DELETE FROM cue_list WHERE id = $1",
+      [cueDomainRestSnapshot.cueListId],
+    ).catch(() => {});
+    await pool.query(
+      "DELETE FROM production WHERE id = $1",
+      [cueDomainRestSnapshot.productionId],
+    ).catch(() => {});
+    await pool.query(
+      "DELETE FROM app_user WHERE id IN ($1, $2, $3)",
+      [cueDomainRestSnapshot.manageUserId, cueDomainRestSnapshot.editUserId, cueDomainRestSnapshot.atomicUserId],
+    ).catch(() => {});
+    await unlink(CUE_DOMAIN_REST_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up role-cue-type migration factory data (migration path only; no-op otherwise).
+  let roleCueTypeSnapshot: RoleCueTypeSnapshot | null = null;
+  try {
+    roleCueTypeSnapshot = JSON.parse(
+      await readFile(ROLE_CUE_TYPE_SNAPSHOT_PATH, "utf8"),
+    ) as RoleCueTypeSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (roleCueTypeSnapshot) {
+    await pool.query(
+      "DELETE FROM production WHERE id = $1",
+      [roleCueTypeSnapshot.production.id],
+    ).catch(() => {});
+    await unlink(ROLE_CUE_TYPE_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up event-department migration factory data (migration path only; no-op otherwise).
+  let eventDeptSnapshot: EventDeptSnapshot | null = null;
+  try {
+    eventDeptSnapshot = JSON.parse(
+      await readFile(EVENT_DEPT_SNAPSHOT_PATH, "utf8"),
+    ) as EventDeptSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (eventDeptSnapshot) {
+    await pool.query(
+      "DELETE FROM production WHERE id = $1",
+      [eventDeptSnapshot.production.id],
+    ).catch(() => {});
+    await unlink(EVENT_DEPT_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up dept-poc-cleanup migration factory data (migration path only; no-op otherwise).
+  let deptPocCleanupSnapshot: DeptPocCleanupSnapshot | null = null;
+  try {
+    deptPocCleanupSnapshot = JSON.parse(
+      await readFile(DEPT_POC_CLEANUP_SNAPSHOT_PATH, "utf8"),
+    ) as DeptPocCleanupSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (deptPocCleanupSnapshot) {
+    await pool.query(
+      "DELETE FROM production WHERE id = $1",
+      [deptPocCleanupSnapshot.production.id],
+    ).catch(() => {});
+    await unlink(DEPT_POC_CLEANUP_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up member-roles migration factory data (migration path only; no-op otherwise).
+  let memberRolesSnapshot: MemberRolesSnapshot | null = null;
+  try {
+    memberRolesSnapshot = JSON.parse(
+      await readFile(MEMBER_ROLES_SNAPSHOT_PATH, "utf8"),
+    ) as MemberRolesSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (memberRolesSnapshot) {
+    await pool.query(
+      "DELETE FROM production WHERE id = $1",
+      [memberRolesSnapshot.production.id],
+    ).catch(() => {});
+    await unlink(MEMBER_ROLES_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up cue-list-role migration factory data (migration path only; no-op otherwise).
+  let cueListRoleSnapshot: CueListRoleSnapshot | null = null;
+  try {
+    cueListRoleSnapshot = JSON.parse(
+      await readFile(CUE_LIST_ROLE_SNAPSHOT_PATH, "utf8"),
+    ) as CueListRoleSnapshot;
+  } catch {
+    // Normal path: no snapshot file.
+  }
+  if (cueListRoleSnapshot) {
+    await pool.query(
+      "DELETE FROM production WHERE id = $1",
+      [cueListRoleSnapshot.production.id],
+    ).catch(() => {});
+    await unlink(CUE_LIST_ROLE_SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Clean up internal-user-id migration factory data (migration path only; no-ops otherwise).
+  let snapshot: PreMigrationSnapshot | null = null;
+  try {
+    snapshot = JSON.parse(await readFile(SNAPSHOT_PATH, "utf8")) as PreMigrationSnapshot;
+  } catch {
+    // Normal path: no snapshot file, nothing to clean up.
+  }
+  if (snapshot) {
+    // DELETE FROM production cascades to production_member, cue_list, production_event, comment.
+    await pool.query("DELETE FROM production WHERE id = $1", [snapshot.production.id]).catch(() => {});
+    // Delete app_user records created by migration for the factory users; cascades to feishu_user.
+    const openIds = snapshot.users.map((u) => u.openId);
+    await pool.query(
+      "DELETE FROM app_user WHERE id IN (SELECT user_id FROM feishu_user WHERE open_id = ANY($1))",
+      [openIds],
+    ).catch(() => {});
+    await unlink(SNAPSHOT_PATH).catch(() => {});
+  }
+
+  // Deleting app_user cascades to feishu_user, production_member, comment, etc.
+  await pool.query("DELETE FROM app_user WHERE id = $1", [TEST_USER]);
+  await pool.end();
+}
