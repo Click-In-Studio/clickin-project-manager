@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { validateTemplateNodes, type ApprovalTemplateNode } from "@/lib/approval-flow-template";
+import { validateTemplateNodes, type ApprovalTemplateNode } from "@/lib/approval/approval-flow-template";
 import {
   createFlowTemplate,
   deleteFlowTemplate,
@@ -10,7 +10,7 @@ import {
   listFlowTemplates,
   publishFlowTemplate,
   updateFlowTemplate,
-} from "@/lib/approval-flow-template-db";
+} from "@/lib/approval/approval-flow-template-db";
 
 // 审批流程模版存储层（prA，db/add-approval-flow-template.sql）：
 // 词表白名单校验、CRUD、发布切换（单一 published 不变量）、仅草稿可删。

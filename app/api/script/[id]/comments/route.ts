@@ -1,11 +1,11 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
 import type { Mention } from "@/lib/db";
 import { buildScriptCommentMentionCard } from "@/lib/platform/feishu/feishu-bot";
 import { SERVER_URL } from "@/lib/server-url";
-import { notifyUsers } from "@/lib/notify";
+import { notifyUsers } from "@/lib/notify/notify";
 
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);

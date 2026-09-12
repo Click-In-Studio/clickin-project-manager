@@ -5,7 +5,7 @@
 //   2) 有 session → server 端取数直接播种给客户端组件（不再存在可吞错的二次 fetch）
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 
 const cookieJar = new Map<string, string>();
 vi.mock("next/headers", () => ({

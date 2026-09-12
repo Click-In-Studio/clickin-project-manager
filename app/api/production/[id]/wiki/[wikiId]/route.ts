@@ -1,14 +1,14 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { toActor } from "@/lib/grant-check";
+import { toActor } from "@/lib/perm/grant-check";
 import { getWiki, updateWiki, deleteWiki } from "@/lib/wiki/content";
 import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki } from "@/lib/wiki/perm";
 import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
 import { broadcastWikiUpdate } from "@/lib/wiki/collab";
 import { readParentAnchor } from "@/lib/wiki/input";
 import { gateNodeAnchorPlacement, resolveNodeAnchorParent } from "@/lib/node/placement";
-import type { Mention } from "@/lib/event-db";
+import type { Mention } from "@/lib/ops/event-db";
 import { getNodeByWikiId, moveNode, setNodePublic, setNodeListable, type NodePlacement } from "@/lib/node/db";
 
 type Ctx = { params: Promise<{ id: string; wikiId: string }> };

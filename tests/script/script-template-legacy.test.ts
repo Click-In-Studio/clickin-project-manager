@@ -13,14 +13,14 @@
  */
 import { describe, it, expect } from "vitest";
 import { faker } from "@faker-js/faker";
-import type { Block, PageLayout, ScriptTextLayoutMode } from "@/lib/script-types";
-import { computePageMap, updateEstimatedPageMap, PAGE_CONFIGS } from "@/lib/script-page";
+import type { Block, PageLayout, ScriptTextLayoutMode } from "@/lib/script/script-types";
+import { computePageMap, updateEstimatedPageMap, PAGE_CONFIGS } from "@/lib/script/script-page";
 import {
   computePageMap as legacyComputePageMap,
   updateEstimatedPageMap as legacyUpdateEstimatedPageMap,
 } from "../_support/fixtures/legacy-script-page";
-import { estimateItemHeight, paginate, planScript, templateForTextLayoutMode } from "@/lib/script-template";
-import { withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
+import { estimateItemHeight, paginate, planScript, templateForTextLayoutMode } from "@/lib/script/template";
+import { withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script/script-marker-blocks";
 
 const LAYOUTS: PageLayout[] = ["a4", "letter", "a3-2col", "tablet-2col"];
 const MODES: ScriptTextLayoutMode[] = ["center", "compact"];

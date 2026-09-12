@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
 import { getUserName as fetchFeishuName } from "@/lib/platform/feishu/feishu-webhook";
 

@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
 import { registerCueSSE, removeCuePresence, cuePresenceFrame } from "@/lib/server-cache";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasAnyEffectiveGrant, toActor } from "@/lib/grant-check";
+import { hasAnyEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;

@@ -5,14 +5,14 @@ import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/db";
 import { createWiki, getWiki } from "@/lib/wiki/content";
 import { makeProduction, cleanupProduction, setProductionTier, shortId } from "../_support/factories";
-import { startRun, waitForIdle, runtimeOverrides } from "@/lib/agent-runtime/service";
-import { readEventsSince } from "@/lib/agent-runtime/events";
-import { CHAT_MODEL } from "@/lib/agent-runtime/config";
-import { buildTools, exposedName, UNATTENDED_ALLOWED_TOOLS, type RunHandle } from "@/lib/agent-runtime/tools";
-import { createSchedule, getSchedule, tickSchedules, listSchedules, setScheduleStatus, buildScheduledMessage } from "@/lib/agent-runtime/schedules";
-import { approvalCard } from "@/lib/agent-runtime/cards";
+import { startRun, waitForIdle, runtimeOverrides } from "@/lib/agent/runtime/service";
+import { readEventsSince } from "@/lib/agent/runtime/events";
+import { CHAT_MODEL } from "@/lib/agent/runtime/config";
+import { buildTools, exposedName, UNATTENDED_ALLOWED_TOOLS, type RunHandle } from "@/lib/agent/runtime/tools";
+import { createSchedule, getSchedule, tickSchedules, listSchedules, setScheduleStatus, buildScheduledMessage } from "@/lib/agent/runtime/schedules";
+import { approvalCard } from "@/lib/agent/runtime/cards";
 
-// AI 定时任务（db/add-agent-schedule.sql, lib/agent-runtime/schedules.ts）端到端：
+// AI 定时任务（db/add-agent-schedule.sql, lib/agent/runtime/schedules.ts）端到端：
 // 建任务（工具 + 确认卡 + 审计）→ 节拍认领 → 以创建者身份开新会话跑 run（无人值守门）→
 // 收尾通知（附改动清单）→ 推进时间表；前置门把任务转 paused；finish done 结束任务。
 
@@ -239,8 +239,8 @@ describe("定时任务", () => {
     const c2 = await createSchedule({ userId, productionId: null, name: "重叠", prompt: "p", schedule: { kind: "every", everyMs: 3_600_000 } });
     if (!c2.ok) throw new Error(c2.error);
     const s2 = c2.row;
-    const { createNewSessionKey } = await import("@/lib/agent-tools/session-identity");
-    const { PgSessionStorage } = await import("@/lib/agent-runtime/pg-session-storage");
+    const { createNewSessionKey } = await import("@/lib/agent/tools/session-identity");
+    const { PgSessionStorage } = await import("@/lib/agent/runtime/pg-session-storage");
     const busyKey = createNewSessionKey(userId);
     await PgSessionStorage.create({ id: busyKey, userId, productionId: null });
     const busyRun = `ar_busy_${shortId()}`;

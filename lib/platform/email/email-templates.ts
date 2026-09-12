@@ -249,7 +249,7 @@ export function buildDailyCallEmail(params: {
 
 // ── Report notification ───────────────────────────────────────────────────────
 
-// 正文/备注由 lib/notify-doc/platform-html 预渲染成 HTML（已转义、已在 AST 层
+// 正文/备注由 lib/notify/doc/platform-html 预渲染成 HTML（已转义、已在 AST 层
 // 截断）。本模板**不再自己剥标签也不再自己切字**：
 //   · `.replace(/<[^>]*>/g,"")` 是"看起来像消毒"的写法——剥不掉实体、挡不住 &，
 //     而且会吃掉正文里以 < 开头的合法文本

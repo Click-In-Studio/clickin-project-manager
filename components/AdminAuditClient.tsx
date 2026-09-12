@@ -7,7 +7,7 @@ import PageHeader, { SECONDARY_BTN } from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import MemberPickerModal, { type PickerMember, type PickerDept } from "@/components/MemberPickerModal";
 import { BASE_PATH } from "@/lib/base-path";
-import type { GrantLedgerRow } from "@/lib/grant-audit-db";
+import type { GrantLedgerRow } from "@/lib/perm/grant-audit-db";
 
 type Props = {
   productionId: string;

@@ -14,13 +14,13 @@
  *   { ok: true }
  */
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getCueList } from "@/lib/db";
 import {
   getCueListAccess,
   selfConfirmCueListGrant,
   checkCueListFreeApprovalZone,
-} from "@/lib/resource-grant-db";
+} from "@/lib/perm/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; cueListId: string }> };
 

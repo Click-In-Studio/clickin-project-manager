@@ -4,7 +4,7 @@ import type { CSSProperties } from "react";
 import { useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import type { ProductionEvent, EventTechReq, EventDepartment } from "@/lib/event-db";
+import type { ProductionEvent, EventTechReq, EventDepartment } from "@/lib/ops/event-db";
 import SmartText from "@/components/SmartText";
 
 const STATUS_OPTIONS = [

@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
 import { readParentAnchor } from "@/lib/wiki/input";
 import { gateNodeAnchorPlacement, resolveNodeAnchorParent } from "@/lib/node/placement";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { createWiki } from "@/lib/wiki/content";
 import { searchWiki } from "@/lib/wiki/links";
 import { listVisibleWikiIds } from "@/lib/wiki/perm";

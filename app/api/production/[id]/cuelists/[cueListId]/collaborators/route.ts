@@ -1,12 +1,12 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getCueList, listProductionDepts } from "@/lib/db";
 import {
   listCueListGrants, listCueListDeptAccess,
   addCueListDeptAccess, removeCueListDeptAccess,
   setCueListGrant, type CueListLevel,
-} from "@/lib/resource-grant-db";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+} from "@/lib/perm/resource-grant-db";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 
 async function getManageCtx(req: NextRequest, productionId: string, cueListId: string) {
   const session = getSession(req.cookies);

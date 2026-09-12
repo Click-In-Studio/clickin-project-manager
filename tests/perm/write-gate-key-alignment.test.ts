@@ -26,17 +26,17 @@ import {
   getCharacterPerms,
   ALL_CHARACTER_PERMS,
   NO_CHARACTER_PERMS,
-} from "@/lib/character-perms";
+} from "@/lib/script/character-perms";
 import {
   sceneFieldPermsFromRows,
   canDeleteScene,
   canMountScene,
   getSceneFieldPerms,
-} from "@/lib/scene-field-perms";
-import { PAGE_PERMISSION_SCOPES } from "@/lib/page-permission-scopes";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+} from "@/lib/script/scene-field-perms";
+import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
-import { createProductionDept, setDeptMembers } from "@/lib/dept-db";
+import { createProductionDept, setDeptMembers } from "@/lib/perm/dept-db";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 

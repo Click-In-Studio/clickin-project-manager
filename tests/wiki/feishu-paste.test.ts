@@ -2,7 +2,7 @@
 // 飞书粘贴归一化单测。HTML 样本取自本地 probe 实测采样（人名已替换），
 // 形态记录见 MindWeave《飞书复制粘贴调研》§6。
 import { describe, it, expect } from "vitest";
-import { isFeishuHtml, transformFeishuHtml, type FeishuMember } from "@/lib/feishu-paste";
+import { isFeishuHtml, transformFeishuHtml, type FeishuMember } from "@/lib/editor/feishu-paste";
 
 const MEMBERS: FeishuMember[] = [
   { userId: "u-zhang", name: "张三" },

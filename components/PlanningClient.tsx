@@ -19,7 +19,7 @@ import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import Badge from "@/components/Badge";
 import DropdownPicker, { type DropdownPickerItem } from "@/components/DropdownPicker";
-import type { ProductionEvent, EventScheduleItemWithParticipants, EventTechReq } from "@/lib/event-db";
+import type { ProductionEvent, EventScheduleItemWithParticipants, EventTechReq } from "@/lib/ops/event-db";
 import styles from "@/components/planning.module.css";
 
 // 视图偏好读写：禁用存储的 WKWebView / Safari 无痕下 localStorage 本身就会抛

@@ -1,13 +1,13 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import {
   getProductionPermissionContext,
   getUserAllowedCueTypes,
   listCueListsWithAccess, createCueList,
 } from "@/lib/db";
-import { canAccessNode } from "@/lib/grant-template";
-import { type PermissionContext } from "@/lib/permissions";
-import { listCueTemplateTypes } from "@/lib/cue-template-db";
+import { canAccessNode } from "@/lib/perm/grant-template";
+import { type PermissionContext } from "@/lib/perm/permissions";
+import { listCueTemplateTypes } from "@/lib/ops/cue-template-db";
 
 let _seq = 0;
 const uid = () => `cl${Date.now().toString(36)}${(++_seq).toString(36)}`;

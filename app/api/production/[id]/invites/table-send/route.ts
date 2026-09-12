@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
-import { requireGrantGate } from "@/lib/api-guard";
-import { createInvite, createClaimInvite } from "@/lib/invite-db";
+import { requireGrantGate } from "@/lib/perm/api-guard";
+import { createInvite, createClaimInvite } from "@/lib/account/invite-db";
 import { getProductionName } from "@/lib/db";
-import { notifyUsers } from "@/lib/notify";
+import { notifyUsers } from "@/lib/notify/notify";
 import { sendBotDm } from "@/lib/platform/feishu/feishu-bot";
 import { sendEmail } from "@/lib/platform/email/email-send";
 import { SERVER_URL } from "@/lib/server-url";

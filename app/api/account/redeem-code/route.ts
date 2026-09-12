@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
-import { redeemPlanCode, redeemRateLimited, REDEEM_ERROR_MESSAGES, USER_TIERS, type UserTier } from "@/lib/plan";
+import { getSession } from "@/lib/account/session";
+import { redeemPlanCode, redeemRateLimited, REDEEM_ERROR_MESSAGES, USER_TIERS, type UserTier } from "@/lib/account/plan";
 
 // 用户等级兑换码（#280）：管理员手工 INSERT 的 plan_code（kind=user_upgrade）在这里
 // 消费。兑换只升不降；结果实时落库（等级不进 session payload，下次判定即生效）。

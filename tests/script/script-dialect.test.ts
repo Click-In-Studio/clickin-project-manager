@@ -3,11 +3,11 @@ import {
   applyDialectToBlocks,
   serializeBlocksToDialect,
   SCRIPT_DIALECT_NOTE,
-} from "@/lib/script-dialect";
-import { diffState } from "@/lib/script-ops";
-import { withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
-import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
-import type { Block, Character, ScriptState } from "@/lib/script-types";
+} from "@/lib/script/script-dialect";
+import { diffState } from "@/lib/script/script-ops";
+import { withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script/script-marker-blocks";
+import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script/script-types";
+import type { Block, Character, ScriptState } from "@/lib/script/script-types";
 
 /**
  * 剧本方言 P0 护栏：序列化 → 解析回填的往返必须产出空 patch（id 往返协议的

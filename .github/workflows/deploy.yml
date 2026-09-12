@@ -69,7 +69,7 @@ jobs:
           mkdir -p .next/standalone/.next/static .next/standalone/public
           cp -r .next/static/. .next/standalone/.next/static/
           cp -r public/.       .next/standalone/public/
-          # agent-runner 的 base prompt 从 <cwd>/openclaw-workspace 读（lib/agent-runtime/prompt.ts 的
+          # agent-runner 的 base prompt 从 <cwd>/openclaw-workspace 读（lib/agent/runtime/prompt.ts 的
           # WORKSPACE_FILES），不在 next 追踪范围内，只带这五个文件（README/HEARTBEAT 不进 bundle）；
           # pm2 里 agent-runner 的 cwd 指向 current/
           mkdir -p .next/standalone/openclaw-workspace

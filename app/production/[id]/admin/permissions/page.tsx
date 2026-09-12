@@ -3,9 +3,9 @@ export const metadata: Metadata = { title: "权限中心" };
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { requireAdminAccess } from "@/lib/admin-guard";
-import { getSession } from "@/lib/session";
-import { hasGrant } from "@/lib/grant-check";
+import { requireAdminAccess } from "@/lib/perm/admin-guard";
+import { getSession } from "@/lib/account/session";
+import { hasGrant } from "@/lib/perm/grant-check";
 import {
   getProductionPermissionContext,
   getProductionName,
@@ -13,14 +13,14 @@ import {
   listProductionMembersWithRoles,
   getAllPermissionOverrides,
 } from "@/lib/db";
-import { listProductionDepts } from "@/lib/dept-db";
-import { findProducers } from "@/lib/approval-routing";
+import { listProductionDepts } from "@/lib/perm/dept-db";
+import { findProducers } from "@/lib/approval/approval-routing";
 import {
   listResourceApprovers, listDelegableResourceTypes, NON_DELEGABLE_RESOURCE_TYPES,
-} from "@/lib/resource-approver-db";
-import { listDeptPermissionView, getPermissionVocabulary, type DeptPermissionView } from "@/lib/perm-center-db";
+} from "@/lib/perm/resource-approver-db";
+import { listDeptPermissionView, getPermissionVocabulary, type DeptPermissionView } from "@/lib/perm/perm-center-db";
 import AdminPermissionCenterClient from "@/components/AdminPermissionCenterClient";
-import { productionFeatureAllowed } from "@/lib/plan";
+import { productionFeatureAllowed } from "@/lib/account/plan";
 
 export default async function PermissionCenterPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

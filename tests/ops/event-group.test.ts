@@ -16,17 +16,17 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember, getProductionPermissionContext } from "@/lib/db";
-import { createProductionEvent, createScheduleItem } from "@/lib/event-db";
-import { toActor } from "@/lib/grant-check";
-import { canEnterEvent, isEventGroupParticipant } from "@/lib/event-permissions";
+import { createProductionEvent, createScheduleItem } from "@/lib/ops/event-db";
+import { toActor } from "@/lib/perm/grant-check";
+import { canEnterEvent, isEventGroupParticipant } from "@/lib/ops/event-permissions";
 import {
   createEventGroup, deleteEventGroup, EventGroupError, getEventGroup, isGroupPoc,
   listEventGroups, resolveGroupPocUserIds, resolveGroupUserIds, setScheduleItemGroups,
   updateEventGroup, userGroupIdsInEvent, groupScope,
-} from "@/lib/event-group-db";
+} from "@/lib/ops/event-group-db";
 import {
   canBindGroupToSchedule, canCreateEventGroup, canEditEventGroup, canSetEventGroupPoc,
-} from "@/lib/event-group-perm";
+} from "@/lib/ops/event-group-perm";
 
 let prodId: string;
 let ownerId: string;

@@ -7,10 +7,10 @@
  * 新模版（百老汇等）靠的是这些几何，而不是 legacy 的 quirk。
  */
 import { describe, it, expect } from "vitest";
-import type { Block } from "@/lib/script-types";
-import { columnWidths, estimateItemHeight, planBlock, planSceneHeading } from "@/lib/script-template";
-import type { BlockStyle, ScriptTemplate, TextStyle, EstimateOptions } from "@/lib/script-template";
-import { LEGACY_CENTER } from "@/lib/script-template/presets/legacy";
+import type { Block } from "@/lib/script/script-types";
+import { columnWidths, estimateItemHeight, planBlock, planSceneHeading } from "@/lib/script/template";
+import type { BlockStyle, ScriptTemplate, TextStyle, EstimateOptions } from "@/lib/script/template";
+import { LEGACY_CENTER } from "@/lib/script/template/presets/legacy";
 
 const BODY: TextStyle = { face: "script", fontSize: 14, lineHeight: 28 };
 const NAME: TextStyle = { face: "script", fontSize: 14, lineHeight: 20, weight: "bold" };

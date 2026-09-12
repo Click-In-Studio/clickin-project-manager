@@ -2,13 +2,13 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { randomUUID } from "node:crypto";
 import { GET } from "@/app/api/agent/script-proposal/route";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { makeProduction, cleanupProduction, makeScene, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember, applyPatchToDB } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { createNewSessionKey } from "@/lib/agent-tools/session-identity";
-import { PgSessionStorage } from "@/lib/agent-runtime/pg-session-storage";
-import type { Block } from "@/lib/script-types";
+import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
+import { PgSessionStorage } from "@/lib/agent/runtime/pg-session-storage";
+import type { Block } from "@/lib/script/script-types";
 
 // /api/agent/script-proposal：确认卡「查看详情」的剧本写提议预览通道。
 // 核心保证：①所有权 = 审批行归属会话的主人（requireOwnership），别人拿着

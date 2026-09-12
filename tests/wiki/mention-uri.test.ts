@@ -11,7 +11,7 @@ import {
   encodeUserHref, decodeUserHref,
   encodeAssetSrc, decodeAssetSrc,
   type ContentMentionAttrs,
-} from "@/lib/mention-types";
+} from "@/lib/editor/mention-types";
 
 const UUID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 const attrs = (o: Partial<ContentMentionAttrs>): ContentMentionAttrs => ({

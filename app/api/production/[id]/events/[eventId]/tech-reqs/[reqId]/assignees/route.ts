@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
-import { getProductionEvent, getEventTechReq, setTechReqAssignees } from "@/lib/event-db";
+import { getProductionEvent, getEventTechReq, setTechReqAssignees } from "@/lib/ops/event-db";
 import { feishuPlatform } from "@/lib/platform/feishu";
-import { canAssignTechReq } from "@/lib/event-permissions";
-import { notifyTaskAssigned } from "@/lib/notify";
+import { canAssignTechReq } from "@/lib/ops/event-permissions";
+import { notifyTaskAssigned } from "@/lib/notify/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
 

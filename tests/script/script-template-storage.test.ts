@@ -6,12 +6,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { getEstimatedPageMap, getMasterScriptViewId, loadPageMap, loadProduction, saveScriptConfig } from "@/lib/db";
-import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
-import { computePageMap } from "@/lib/script-page";
-import { LEGACY_CENTER, LEGACY_COMPACT } from "@/lib/script-template/presets/legacy";
-import { isKnownTemplateId, listTemplatePresets, resolveTemplate, TEMPLATE_PRESETS } from "@/lib/script-template";
+import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script/script-types";
+import { computePageMap } from "@/lib/script/script-page";
+import { LEGACY_CENTER, LEGACY_COMPACT } from "@/lib/script/template/presets/legacy";
+import { isKnownTemplateId, listTemplatePresets, resolveTemplate, TEMPLATE_PRESETS } from "@/lib/script/template";
 import { PUT as configPUT } from "@/app/api/script/[id]/config/route";
 import { addProductionMember } from "@/lib/db";
 import { makeProduction, cleanupProduction, makeScene, makeBlocks } from "../_support/factories";

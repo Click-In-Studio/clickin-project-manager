@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
+import { hasGrant } from "@/lib/perm/grant-check";
 import { loadProduction, getProductionPermissionContext, getActiveVersionId, updateProductionName, updateProductionMeta, updateProductionType, getVersion, deleteProduction } from "@/lib/db";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
-import { markAvatarCommitted, cleanupAvatarObjects } from "@/lib/avatar-db";
+import { markAvatarCommitted, cleanupAvatarObjects } from "@/lib/asset/avatar-db";
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[id]">) {
   const session = getSession(req.cookies);

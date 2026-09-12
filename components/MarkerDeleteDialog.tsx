@@ -1,6 +1,6 @@
 "use client";
 
-import type { MarkerDeleteOperation, MarkerDeletePlan } from "@/lib/script-marker-domain";
+import type { MarkerDeleteOperation, MarkerDeletePlan } from "@/lib/script/script-marker-domain";
 import ScriptDialog, {
   SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS,
   SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS,

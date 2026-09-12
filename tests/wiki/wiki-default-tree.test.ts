@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { createEventReport, createReportNote, deleteEventReport, mountWikiAsReport } from "@/lib/event-db";
+import { createEventReport, createReportNote, deleteEventReport, mountWikiAsReport } from "@/lib/ops/event-db";
 import { createWiki } from "@/lib/wiki/content";
 import { getReportsTreeConfig, ensureReportTreeAnchors } from "@/lib/node/anchors";
 import { listNodeLibrary } from "@/lib/node/db";
@@ -265,7 +265,7 @@ describe("default report tree", () => {
 
   it("event rename propagates to its report-tree directory doc title", async () => {
     const eventDocId = await ensureReportTreeAnchors(prodId, eventA);
-    const { updateProductionEvent } = await import("@/lib/event-db");
+    const { updateProductionEvent } = await import("@/lib/ops/event-db");
     await updateProductionEvent(eventA, prodId, { title: "八一四联排（改）" });
     expect((await nodeRow(eventDocId!))?.title).toBe("八一四联排（改）");
     await updateProductionEvent(eventA, prodId, { title: "八一四联排" });

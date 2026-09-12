@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { parseNodeKey } from "@/lib/grant-template";
-import { listGovernanceGrants, createDirectGrant, revokeGrantById } from "@/lib/grant-audit-db";
+import { parseNodeKey } from "@/lib/perm/grant-template";
+import { listGovernanceGrants, createDirectGrant, revokeGrantById } from "@/lib/perm/grant-audit-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 

@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { searchProduction } from "@/lib/search-db";
 

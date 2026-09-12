@@ -3,12 +3,12 @@ import { getPersonalChannel } from "@/lib/platform/registry";
 import {
   createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS,
   OAUTH_STATE_COOKIE, OAUTH_CTX_COOKIE, type OAuthContext,
-} from "@/lib/session";
+} from "@/lib/account/session";
 import {
   requireRegistrationJustification,
   RegistrationDeniedError,
   type RegistrationPlatform,
-} from "@/lib/registration-gate";
+} from "@/lib/account/registration-gate";
 
 type Params = { params: Promise<{ platform: string }> };
 

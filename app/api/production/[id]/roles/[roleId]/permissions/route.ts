@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { isGovernanceNodeKey } from "@/lib/grant-template";
-import { hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { isGovernanceNodeKey } from "@/lib/perm/grant-template";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { requireProductionFeature } from "@/lib/plan";
+import { requireProductionFeature } from "@/lib/account/plan";
 
 import { setRolePermissions } from "@/lib/db";
 

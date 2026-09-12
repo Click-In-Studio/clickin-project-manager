@@ -7,11 +7,11 @@ import { describe, it, expect } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
-import { Column, ColumnGroup } from "@/lib/tiptap-columns";
+import { Column, ColumnGroup } from "@/lib/editor/tiptap-columns";
 import {
   ColumnEditing, insertColumnAt, setColumnRatios, normalizeRatios,
-} from "@/lib/tiptap-column-editing";
-import { ColumnResize } from "@/lib/tiptap-column-resize";
+} from "@/lib/editor/tiptap-column-editing";
+import { ColumnResize } from "@/lib/editor/tiptap-column-resize";
 
 function makeEditor(content: string) {
   return new Editor({

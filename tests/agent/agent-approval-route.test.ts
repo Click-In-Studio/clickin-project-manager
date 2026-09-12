@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/agent/approval/route";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 
 // Guard-layer tests for the plugin-approval resolve endpoint. The happy path
 // (an actual approval.resolve RPC) needs a live gateway + a pending approval

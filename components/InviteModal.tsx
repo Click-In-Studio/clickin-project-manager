@@ -8,7 +8,7 @@ import Badge from "@/components/Badge";
 import TreePickerModal from "@/components/TreePickerModal";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
-import type { InviteRow } from "@/lib/invite-db";
+import type { InviteRow } from "@/lib/account/invite-db";
 
 type Dept = { id: string; name: string; parentId: string | null; kind: "dept" | "group" };
 

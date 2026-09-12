@@ -6,7 +6,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { MyProductionEntry } from "@/lib/db";
 import { BASE_PATH } from "@/lib/base-path";
-import { productionAvatarSrc } from "@/lib/avatar-url";
+import { productionAvatarSrc } from "@/lib/asset/avatar-url";
 import styles from "@/components/my-pages.module.css";
 import NewProductionModal from "@/components/NewProductionModal";
 

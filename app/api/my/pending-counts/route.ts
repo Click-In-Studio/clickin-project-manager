@@ -6,9 +6,9 @@
  */
 
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
-import { countUnreadNotifications } from "@/lib/inbox-db";
-import { countPendingTasksForUser, countUnreadReportsForUser } from "@/lib/event-db";
+import { getSession } from "@/lib/account/session";
+import { countUnreadNotifications } from "@/lib/notify/inbox-db";
+import { countPendingTasksForUser, countUnreadReportsForUser } from "@/lib/ops/event-db";
 import { countCueWarningsForProduction } from "@/lib/db";
 
 export async function GET(req: NextRequest) {

@@ -1,5 +1,5 @@
 import { getPool } from "../pg";
-import { policyFilteredRows } from "../policy-db";
+import { policyFilteredRows } from "../perm/policy-db";
 import { insertNode } from "../node/db";
 import { ensureAssetsRootAnchor } from "../node/anchors";
 import type { MetadataEnvelope } from "./metadata";

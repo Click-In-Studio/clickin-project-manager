@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { toActor } from "@/lib/grant-check";
-import { getProductionEvent, getScheduleItem } from "@/lib/event-db";
-import { canBindGroupToSchedule } from "@/lib/event-group-perm";
-import { EventGroupError, listScheduleItemGroupIds, setScheduleItemGroups } from "@/lib/event-group-db";
+import { toActor } from "@/lib/perm/grant-check";
+import { getProductionEvent, getScheduleItem } from "@/lib/ops/event-db";
+import { canBindGroupToSchedule } from "@/lib/ops/event-group-perm";
+import { EventGroupError, listScheduleItemGroupIds, setScheduleItemGroups } from "@/lib/ops/event-group-db";
 import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; itemId: string }> };

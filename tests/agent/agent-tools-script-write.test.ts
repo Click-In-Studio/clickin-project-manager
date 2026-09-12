@@ -3,12 +3,12 @@ import { randomUUID } from "node:crypto";
 import { makeProduction, cleanupProduction, makeScene, makeCharacter, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember, applyPatchToDB, loadProduction } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { DENIED_NOT_MEMBER } from "@/lib/agent-tools/production-tools";
-import { runScriptProposal, previewScriptProposal, SCRIPT_PROPOSE_TOOLS } from "@/lib/agent-tools/script-write-tools";
-import { sectionEndIndex } from "@/lib/agent-tools/script-tools";
-import { UNATTENDED_ALLOWED_TOOLS } from "@/lib/agent-runtime/tools";
-import type { Block } from "@/lib/script-types";
-import type { ScriptPatch } from "@/lib/script-ops";
+import { DENIED_NOT_MEMBER } from "@/lib/agent/tools/production-tools";
+import { runScriptProposal, previewScriptProposal, SCRIPT_PROPOSE_TOOLS } from "@/lib/agent/tools/script-write-tools";
+import { sectionEndIndex } from "@/lib/agent/tools/script-tools";
+import { UNATTENDED_ALLOWED_TOOLS } from "@/lib/agent/runtime/tools";
+import type { Block } from "@/lib/script/script-types";
+import type { ScriptPatch } from "@/lib/script/script-ops";
 
 // 剧本写面（P2）核心保证：①规划错误（方言/参数/业务）block 回模型、不落库；
 // ②权限 = requiredPermissions(patch) 反推的钥匙经六步链判定，任一缺失整批不做；

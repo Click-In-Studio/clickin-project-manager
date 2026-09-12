@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { updateComment, deleteComment, getProductionPermissionContext } from "@/lib/db";
 
 export async function PATCH(

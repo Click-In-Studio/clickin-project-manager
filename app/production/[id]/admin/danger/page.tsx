@@ -3,9 +3,9 @@ export const metadata: Metadata = { title: "危险操作" };
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { requireAdminAccess } from "@/lib/admin-guard";
-import { getSession } from "@/lib/session";
-import { hasGrant } from "@/lib/grant-check";
+import { requireAdminAccess } from "@/lib/perm/admin-guard";
+import { getSession } from "@/lib/account/session";
+import { hasGrant } from "@/lib/perm/grant-check";
 import { getPool } from "@/lib/pg";
 import {
   getProductionPermissionContext,
@@ -13,7 +13,7 @@ import {
   listProductionMembersWithRoles,
 } from "@/lib/db";
 import PageHeader from "@/components/PageHeader";
-import { listProductionDepts } from "@/lib/dept-db";
+import { listProductionDepts } from "@/lib/perm/dept-db";
 import TransferOwnerCard from "@/components/TransferOwnerCard";
 import AdminDangerSection from "@/components/AdminDangerSection";
 

@@ -6,8 +6,8 @@ import {
   revokeInvite,
   getInviteInfo,
   acceptInvite,
-} from "@/lib/invite-db";
-import { createProductionDept } from "@/lib/dept-db";
+} from "@/lib/account/invite-db";
+import { createProductionDept } from "@/lib/perm/dept-db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
 // #156 邀请制：开放链接/定向邮件、状态派生、接受事务（入组+预配+计数）、防护
@@ -44,8 +44,8 @@ afterAll(async () => {
 
 describe("席位与退出过的人（#141）", () => {
   it("席位满时重新邀请一个 suspended 成员不该被挡——他本来就占着席位", async () => {
-    const { PRODUCTION_TIERS } = await import("@/lib/plan");
-    const { suspendMember } = await import("@/lib/member-status");
+    const { PRODUCTION_TIERS } = await import("@/lib/account/plan");
+    const { suspendMember } = await import("@/lib/perm/member-status");
     const { rows: ownerRow } = await getPool().query<{ owner_id: string }>(
       "SELECT owner_id::text AS owner_id FROM production WHERE id = $1",
       [prodId],
@@ -176,7 +176,7 @@ describe("定向三态与认领链接（表格分发批）", () => {
   });
 
   it("claim 链接：普通接受被拒（needs_claim）；按名认领入组+行预配；名额不可重复认领", async () => {
-    const { createClaimInvite, claimInvite } = await import("@/lib/invite-db");
+    const { createClaimInvite, claimInvite } = await import("@/lib/account/invite-db");
     const { token } = await createClaimInvite({
       productionId: prodId, createdBy: inviterId,
       entries: [

@@ -14,7 +14,7 @@
 #   ./gen-ai-credit.sh grant <user_uuid> 1000000 "事故补偿"    # 直接发放
 #
 # 额度换算：一次问答 ≈ 1.2 万 credit（线上实测），所以 5M ≈ 400 次问答。
-# 单价与档位额度见 lib/plan.ts——改那里的单价会改变这些数字的实际购买力。
+# 单价与档位额度见 lib/account/plan.ts——改那里的单价会改变这些数字的实际购买力。
 #
 # 环境:
 #   PGDATABASE  目标库（默认 script_editor）

@@ -3,7 +3,7 @@ export const metadata: Metadata = { title: "上传 Asset" };
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import AssetUploadPageClient from "@/components/assets/AssetUploadPageClient";
 

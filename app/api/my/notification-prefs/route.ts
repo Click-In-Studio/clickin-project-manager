@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
-import { getUserPrefs, setUserPref, NOTIFICATION_CONFIG } from "@/lib/notification-prefs";
-import type { NotificationType } from "@/lib/notification-prefs";
+import { getSession } from "@/lib/account/session";
+import { getUserPrefs, setUserPref, NOTIFICATION_CONFIG } from "@/lib/notify/notification-prefs";
+import type { NotificationType } from "@/lib/notify/notification-prefs";
 
 export async function GET(req: NextRequest) {
   const session = getSession(req.cookies);

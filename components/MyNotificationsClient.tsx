@@ -5,7 +5,7 @@ import PageHeader from "@/components/PageHeader";
 import Link from "next/link";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import styles from "@/components/my-pages.module.css";
-import type { UserNotification, NotificationAction } from "@/lib/inbox-db";
+import type { UserNotification, NotificationAction } from "@/lib/notify/inbox-db";
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 

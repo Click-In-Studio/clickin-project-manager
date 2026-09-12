@@ -5,8 +5,8 @@ import { describe, it, expect } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
-import { Callout, CALLOUT_MARKER_RE, parseCalloutMarker, formatCalloutMarker, promoteCalloutBlockquotes } from "@/lib/tiptap-callout";
-import { transformFeishuHtml } from "@/lib/feishu-paste";
+import { Callout, CALLOUT_MARKER_RE, parseCalloutMarker, formatCalloutMarker, promoteCalloutBlockquotes } from "@/lib/editor/tiptap-callout";
+import { transformFeishuHtml } from "@/lib/editor/feishu-paste";
 
 describe("callout marker", () => {
   it("新形态 k=v / 仅 emoji / 空 emoji / GitHub alerts 形态全部命中", () => {

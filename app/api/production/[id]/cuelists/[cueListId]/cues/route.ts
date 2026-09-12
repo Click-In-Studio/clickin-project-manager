@@ -1,11 +1,11 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getCueList, listCues, createCue, getVersion, hasListAccess } from "@/lib/db";
-import { canAccessNode } from "@/lib/grant-template";
-import type { PermissionContext } from "@/lib/permissions";
-import type { CueAnchor } from "@/lib/cue-types";
+import { canAccessNode } from "@/lib/perm/grant-template";
+import type { PermissionContext } from "@/lib/perm/permissions";
+import type { CueAnchor } from "@/lib/ops/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
-import { rejectNonHeadWrite } from "@/lib/head-version";
+import { rejectNonHeadWrite } from "@/lib/script/head-version";
 
 let _seq = 0;
 const uid = () => `cue${Date.now().toString(36)}${(++_seq).toString(36)}`;

@@ -3,14 +3,14 @@ export const metadata: Metadata = { title: "策略中心" };
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { requireAdminAccess } from "@/lib/admin-guard";
-import { getSession } from "@/lib/session";
-import { hasGrant } from "@/lib/grant-check";
+import { requireAdminAccess } from "@/lib/perm/admin-guard";
+import { getSession } from "@/lib/account/session";
+import { hasGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import { listPolicies, listPolicyAudit } from "@/lib/policy-db";
-import { POLICY_QUESTIONS, matchAnswer, QUESTION_COVERED_KEYS } from "@/lib/policy-questions";
+import { listPolicies, listPolicyAudit } from "@/lib/perm/policy-db";
+import { POLICY_QUESTIONS, matchAnswer, QUESTION_COVERED_KEYS } from "@/lib/perm/policy-questions";
 import AdminPoliciesClient from "@/components/AdminPoliciesClient";
-import { productionFeatureAllowed } from "@/lib/plan";
+import { productionFeatureAllowed } from "@/lib/account/plan";
 
 export default async function PoliciesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

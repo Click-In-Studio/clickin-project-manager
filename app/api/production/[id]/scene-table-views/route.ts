@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { hasGrant } from "@/lib/grant-check";
+import { hasGrant } from "@/lib/perm/grant-check";
 import { type NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { getCtx } from "./ctx";

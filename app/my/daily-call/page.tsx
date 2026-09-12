@@ -12,8 +12,8 @@ export const metadata: Metadata = { title: "当日 Call Sheet" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { getSession } from "@/lib/session";
-import { verifyCardToken } from "@/lib/card-token";
+import { getSession } from "@/lib/account/session";
+import { verifyCardToken } from "@/lib/notify/card-token";
 import { getPool } from "@/lib/pg";
 import SmartText from "@/components/SmartText";
 

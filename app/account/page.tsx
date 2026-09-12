@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getUserProfile, getUserIdentities } from "@/lib/db";
-import { getUserPrefs } from "@/lib/notification-prefs";
-import { getUserTier, USER_TIERS } from "@/lib/plan";
+import { getUserPrefs } from "@/lib/notify/notification-prefs";
+import { getUserTier, USER_TIERS } from "@/lib/account/plan";
 import AccountClient from "./AccountClient";
 
 export const metadata: Metadata = { title: "个人中心" };

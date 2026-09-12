@@ -2,13 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
-import { useAgentMutation } from "@/lib/agent-mutations";
+import { useAgentMutation } from "@/lib/agent/agent-mutations";
 import type { CharacterDetail } from "@/lib/db";
 import ChevronIcon from "@/components/ChevronIcon";
 import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, PRODUCTION_TOOLBAR_STAGE, ProductionTopMenuDivider, useProductionToolbar } from "./ProductionTopMenu";
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
-import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib/character-perms-shared";
+import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib/script/character-perms-shared";
 
 const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
 
@@ -16,7 +16,7 @@ type Props = {
   productionId: string;
   productionName: string;
   initialCharacters: CharacterDetail[];
-  /** 逐动作权限（create / edit / delete 是三条不同的路由门，见 lib/character-perms） */
+  /** 逐动作权限（create / edit / delete 是三条不同的路由门，见 lib/script/character-perms） */
   perms: CharacterPerms;
   embedded?: boolean;
   versionId?: string | null;

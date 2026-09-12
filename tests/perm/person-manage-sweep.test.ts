@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember, createCueList } from "@/lib/db";
-import { recomputeAndRevokeGrants } from "@/lib/dept-db";
+import { recomputeAndRevokeGrants } from "@/lib/perm/dept-db";
 import { getPool } from "@/lib/pg";
 
 // 创建者行集的归属二分（用户模型）：

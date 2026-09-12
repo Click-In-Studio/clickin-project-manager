@@ -7,8 +7,8 @@ import TableColumnSettings from "./TableColumnSettings";
 import TableViewSelector, { type SavedView } from "./TableViewSelector";
 import ChevronIcon from "./ChevronIcon";
 import { BASE_PATH } from "@/lib/base-path";
-import { useAgentMutation } from "@/lib/agent-mutations";
-import type { MarkerProjection } from "@/lib/script-marker-domain";
+import { useAgentMutation } from "@/lib/agent/agent-mutations";
+import type { MarkerProjection } from "@/lib/script/script-marker-domain";
 import ProductionTopMenu, {
   PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
   PRODUCTION_TOOLBAR_STAGE,
@@ -19,7 +19,7 @@ import ProductionTopMenu, {
   useProductionToolbar,
 } from "./ProductionTopMenu";
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
-import type { SceneFieldPerms } from "@/lib/scene-field-perms-shared";
+import type { SceneFieldPerms } from "@/lib/script/scene-field-perms-shared";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
 
 type SceneViewMode = "list" | "table";
@@ -30,7 +30,7 @@ type Props = {
   versionId: string | null;
   initialScenes: MarkerProjection[];
   canEdit: boolean;
-  /** 逐字段编辑权限（scene 的每个字段各有一把钥匙，见 lib/scene-field-perms） */
+  /** 逐字段编辑权限（scene 的每个字段各有一把钥匙，见 lib/script/scene-field-perms） */
   fieldPerms: SceneFieldPerms;
   initialSceneId?: string;
 };
@@ -56,7 +56,7 @@ export default function Dramaturgy({
     setSceneViewMode(window.innerWidth > 1920 ? "table" : "list");
   }, []);
 
-  // AI 写工具改了场次（lib/agent-runtime/tools.ts 的 scene mutates）→ 重拉一次。列表模式
+  // AI 写工具改了场次（lib/agent/runtime/tools.ts 的 scene mutates）→ 重拉一次。列表模式
   // 的 ScenesManager 自己订阅 markers SSE 会刷，但表格模式用的是这里的 scenes state。
   useAgentMutation({ scope: "scene", productionId }, () => {
     const query = versionId ? `?versionId=${encodeURIComponent(versionId)}` : "";

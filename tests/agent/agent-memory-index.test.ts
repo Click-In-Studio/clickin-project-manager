@@ -18,9 +18,9 @@ import {
   indexEpisodicRun,
   parseAnnotations,
   sha256,
-} from "@/lib/agent-memory/index-db";
-import { searchMemory, MemoryUnavailableError, MIN_SCORE } from "@/lib/agent-memory/search";
-import { embeddingModel } from "@/lib/agent-memory/embedding";
+} from "@/lib/agent/memory/index-db";
+import { searchMemory, MemoryUnavailableError, MIN_SCORE } from "@/lib/agent/memory/search";
+import { embeddingModel } from "@/lib/agent/memory/embedding";
 
 const userA = randomUUID();
 const userB = randomUUID();
@@ -241,7 +241,7 @@ describe("triggerRecall", () => {
       "- 条目丙 <!-- trigger: 共用短语 -->",
       "- 条目丁 <!-- trigger: 共用短语 -->",
     ].join("\n\n");
-    const { indexCurated } = await import("@/lib/agent-memory/index-db");
+    const { indexCurated } = await import("@/lib/agent/memory/index-db");
     await indexCurated("user", userC, md);
   });
 
@@ -250,7 +250,7 @@ describe("triggerRecall", () => {
   });
 
   it("词法命中：trigger 短语出现在消息里 → 过 0.72 阈值", async () => {
-    const { triggerRecall } = await import("@/lib/agent-memory/trigger");
+    const { triggerRecall } = await import("@/lib/agent/memory/trigger");
     const hits = await triggerRecall(userC, "帮我看下排练通告的安排");
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0].text).toContain("排练通告默认下午 2 点");
@@ -258,25 +258,25 @@ describe("triggerRecall", () => {
   });
 
   it("向量命中：消息与条目全文一致（fake 同文本恒同向量）", async () => {
-    const { triggerRecall } = await import("@/lib/agent-memory/trigger");
+    const { triggerRecall } = await import("@/lib/agent/memory/trigger");
     // 词法上「网关配置」不在消息里凑不满 0.72，命中只能来自向量路
     const hits = await triggerRecall(userC, EXACT);
     expect(hits.some((h) => h.text.includes("loopback"))).toBe(true);
   });
 
   it("无关消息 → 空（不触发即不注入）", async () => {
-    const { triggerRecall } = await import("@/lib/agent-memory/trigger");
+    const { triggerRecall } = await import("@/lib/agent/memory/trigger");
     expect(await triggerRecall(userC, "今天午饭吃什么好呢")).toHaveLength(0);
   });
 
   it("每轮上限 3 条（四条同 trigger 只出三条）", async () => {
-    const { triggerRecall, TRIGGER_MAX_PER_TURN } = await import("@/lib/agent-memory/trigger");
+    const { triggerRecall, TRIGGER_MAX_PER_TURN } = await import("@/lib/agent/memory/trigger");
     const hits = await triggerRecall(userC, "关于共用短语的问题");
     expect(hits.length).toBe(TRIGGER_MAX_PER_TURN);
   });
 
   it("无 trigger 的条目与他人 scope 永不出现", async () => {
-    const { triggerRecall } = await import("@/lib/agent-memory/trigger");
+    const { triggerRecall } = await import("@/lib/agent/memory/trigger");
     const hits = await triggerRecall(userC, "没有触发短语的普通条目");
     // 该条目无 triggers 列，即便全文匹配也不是触发候选（向量分再高也不进）——
     // 等等：全文一致时向量分=1，但它 triggers IS NULL 被 SQL 排除
@@ -288,12 +288,12 @@ describe("triggerRecall", () => {
 
 describe("stripAnnotations", () => {
   it("剥掉行尾注释、保留正文", async () => {
-    const { stripAnnotations } = await import("@/lib/agent-memory/index-db");
+    const { stripAnnotations } = await import("@/lib/agent/memory/index-db");
     const s = stripAnnotations("- 条目 <!-- trigger: a, b --> <!-- importance: 9 -->\n- 无注释条目");
     expect(s).toBe("- 条目\n- 无注释条目");
   });
   it("只剥 importance/trigger 注释；其他 HTML 注释与畸形注释原样保留", async () => {
-    const { stripAnnotations } = await import("@/lib/agent-memory/index-db");
+    const { stripAnnotations } = await import("@/lib/agent/memory/index-db");
     expect(stripAnnotations("- 条目 <!-- 普通备注 -->")).toBe("- 条目 <!-- 普通备注 -->");
     expect(stripAnnotations("- 条目 <!-- importance: 9")).toBe("- 条目 <!-- importance: 9"); // 未闭合不剥
   });

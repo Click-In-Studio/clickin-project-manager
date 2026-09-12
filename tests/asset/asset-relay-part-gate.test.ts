@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createAsset } from "@/lib/asset/db";
 import { POST as relayPOST } from "@/app/api/production/[id]/assets/relay-part/route";
 import { makeProduction, cleanupProduction } from "../_support/factories";

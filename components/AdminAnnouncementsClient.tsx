@@ -6,7 +6,7 @@ import { useState, useCallback, useEffect } from "react";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import SmartTextarea from "@/components/SmartTextarea";
 import { BASE_PATH } from "@/lib/base-path";
-import { userAvatarSrc } from "@/lib/avatar-url";
+import { userAvatarSrc } from "@/lib/asset/avatar-url";
 
 type Announcement = {
   id: string;

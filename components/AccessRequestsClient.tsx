@@ -13,9 +13,9 @@ import {
   localTodayDateInputValue,
   ttlPayloadForSelection,
   type TtlOptionValue,
-} from "@/lib/approval-ttl";
-import { buildApprovalTimeline, type TimelineNode, type TimelineNodeState } from "@/lib/approval-timeline";
-import { APPROVAL_STAGE_LABELS, STAGE_ORDER } from "@/lib/approval-stages";
+} from "@/lib/approval/approval-ttl";
+import { buildApprovalTimeline, type TimelineNode, type TimelineNodeState } from "@/lib/approval/approval-timeline";
+import { APPROVAL_STAGE_LABELS, STAGE_ORDER } from "@/lib/approval/approval-stages";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -62,9 +62,9 @@ const STATUS_LABELS: Record<ApprovalRequest["status"], string> = {
   cancelled:          "已撤回",
 };
 
-// 阶梯级名与动作词不在这里抄第二份：lib/approval-stages.ts 是前后端共用的唯一来源
+// 阶梯级名与动作词不在这里抄第二份：lib/approval/approval-stages.ts 是前后端共用的唯一来源
 // （此前页面上叫「资源持有人」，飞书通知里叫「资源持有者」，就是各抄一份的结果）。
-// 节点文案由 buildApprovalTimeline 组装，见 lib/approval-timeline.ts。
+// 节点文案由 buildApprovalTimeline 组装，见 lib/approval/approval-timeline.ts。
 
 /**
  * 表单里那句「依次匹配 …」由阶梯序生成，不手写——手写的那版漏了「上级部门负责人」，
@@ -176,7 +176,7 @@ function ApprovalFlow({ req, compact = false }: {
   compact?: boolean;
 }) {
   const isPending = req.status === "pending_supervisor" || req.status === "pending_resource";
-  // 时间线的组装逻辑（含超时、撤回、被顶掉、存量无链等降级分支）在 lib/approval-timeline.ts，
+  // 时间线的组装逻辑（含超时、撤回、被顶掉、存量无链等降级分支）在 lib/approval/approval-timeline.ts，
   // 由 tests/ops/approval-timeline.test.ts 覆盖——这些状态在页面上极难手工复现。
   const nodes: TimelineNode[] = useMemo(() => buildApprovalTimeline(req), [req]);
   // 姓名与角色随审批 DTO 一起下来（people），不再联查通讯录：那条路拉全员邮箱手机号
@@ -465,7 +465,7 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
         <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>有效期</label>
-        {/* 档位只能来自 lib/approval-ttl 的 TTL_OPTIONS——服务端按同一份表白名单校验，
+        {/* 档位只能来自 lib/approval/approval-ttl 的 TTL_OPTIONS——服务端按同一份表白名单校验，
             页面自己硬编码天数会被 400 挡掉（#256 的成因，见该文件顶部注释）。 */}
         {/* auto-fit 而非等分 N 列：档位从 4 个涨到 5 个后，「180 天」在抽屉宽度下
             会被挤到折行。窄容器里让它自己换行成两排，比每个按钮都断字好读。 */}

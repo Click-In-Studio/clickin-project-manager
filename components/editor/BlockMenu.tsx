@@ -18,7 +18,7 @@ import {
   turnInto, canTurnInto, isColumnGroup, changeColumnCount, equalizeColumns,
   findColumnGroup, selectColumnGroup,
   TURN_INTO,
-} from "@/lib/editor-block-ops";
+} from "@/lib/editor/editor-block-ops";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
 
 function Item({

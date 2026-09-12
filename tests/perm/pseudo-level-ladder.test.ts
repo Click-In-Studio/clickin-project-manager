@@ -10,8 +10,8 @@
  *
  * 两条性质：
  *
- *   ① **单一事实源**：六张表只在 lib/resource-grant-db.ts 定义一次；
- *      lib/approval-routing.ts 的 LEVEL_ROW_SETS_BY_TYPE 直接引用它们，
+ *   ① **单一事实源**：六张表只在 lib/perm/resource-grant-db.ts 定义一次；
+ *      lib/approval/approval-routing.ts 的 LEVEL_ROW_SETS_BY_TYPE 直接引用它们，
  *      不得自建映射。授权发行与「上级有没有这个权限」共用同一份（M-12）。
  *
  *   ② **阶梯自洽**：`view ⊆ edit ⊆ manage`（按行集包含），且 manage 含 grants@edit。
@@ -31,7 +31,7 @@ import { join } from "path";
 import {
   CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS,
   REPORT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS, WIKI_LEVEL_ROW_SETS,
-} from "@/lib/resource-grant-db";
+} from "@/lib/perm/resource-grant-db";
 
 type RowSet = ReadonlyArray<readonly [string, string]>;
 type Sets = Record<string, RowSet>;
@@ -88,7 +88,7 @@ describe("伪级别阶梯自洽（张力 2）", () => {
 });
 
 describe("单一事实源（张力 2 的真正危险：翻译表分叉）", () => {
-  it("六张 *_LEVEL_ROW_SETS 只在 lib/resource-grant-db.ts 定义", () => {
+  it("六张 *_LEVEL_ROW_SETS 只在 lib/perm/resource-grant-db.ts 定义", () => {
     const offenders: string[] = [];
     const walk = (dir: string): void => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -96,7 +96,7 @@ describe("单一事实源（张力 2 的真正危险：翻译表分叉）", () =
         if (e.isDirectory()) { walk(full); continue; }
         if (!/\.tsx?$/.test(e.name)) continue;
         const rel = full.replace(process.cwd() + "/", "");
-        if (rel === "lib/resource-grant-db.ts") continue;
+        if (rel === "lib/perm/resource-grant-db.ts") continue;
         const text = readFileSync(full, "utf8");
         // 定义（export const X_LEVEL_ROW_SETS = ...）而非引用
         if (/(export\s+)?const\s+\w*LEVEL_ROW_SETS\s*[:=]/.test(text)) offenders.push(rel);
@@ -107,9 +107,10 @@ describe("单一事实源（张力 2 的真正危险：翻译表分叉）", () =
   });
 
   it("approval-routing 的类型映射引用那六张表，不自建", () => {
-    const src = readFileSync("lib/approval-routing.ts", "utf8");
+    const src = readFileSync("lib/approval/approval-routing.ts", "utf8");
     // import 自 resource-grant-db
-    expect(src).toMatch(/from\s+"\.\/resource-grant-db"/);
+    // #482 后两者不再同目录：approval/ → ../perm/（或走 @/lib/perm 别名）
+    expect(src).toMatch(/from\s+"(?:\.\.\/perm|@\/lib\/perm)\/resource-grant-db"/);
     for (const name of [
       "CUE_LIST_LEVEL_ROW_SETS", "EVENT_LEVEL_ROW_SETS", "TASK_LEVEL_ROW_SETS",
       "REPORT_LEVEL_ROW_SETS", "NOTE_LEVEL_ROW_SETS", "WIKI_LEVEL_ROW_SETS",
@@ -119,7 +120,7 @@ describe("单一事实源（张力 2 的真正危险：翻译表分叉）", () =
   });
 
   it("策略层裁的是写点，没有把开关裁到翻译表上（M-12）", () => {
-    const src = readFileSync("lib/resource-grant-db.ts", "utf8");
+    const src = readFileSync("lib/perm/resource-grant-db.ts", "utf8");
     const i = src.indexOf("export const EVENT_LEVEL_ROW_SETS");
     const decl = src.slice(i, src.indexOf("};", i));
     // 表的声明体里不得出现任何策略读取——一旦出现，审批发行面就被连带裁掉了

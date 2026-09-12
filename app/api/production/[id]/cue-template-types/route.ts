@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
-import { requireGrantGate } from "@/lib/api-guard";
+import { requireGrantGate } from "@/lib/perm/api-guard";
 import {
   listCueTemplateTypes,
   createCueTemplateType,
   deleteCueTemplateType,
-} from "@/lib/cue-template-db";
+} from "@/lib/ops/cue-template-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 

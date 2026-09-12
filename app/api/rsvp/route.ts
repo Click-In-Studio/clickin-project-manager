@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { verifyRsvpToken } from "@/lib/platform/email/email-tokens";
-import { rsvpCallTime } from "@/lib/inbox-db";
+import { rsvpCallTime } from "@/lib/notify/inbox-db";
 import { getPool } from "@/lib/pg";
 
 export async function GET(req: NextRequest) {

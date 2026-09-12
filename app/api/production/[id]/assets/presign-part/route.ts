@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { canUploadAssetBytes } from "@/lib/asset/perm";
 import { presignedUploadPart } from "@/lib/r2";

@@ -16,8 +16,8 @@ import { shortId } from "../_support/factories";
 
 const templateFails = vi.hoisted(() => ({ value: false }));
 
-vi.mock("@/lib/production-template", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/production-template")>();
+vi.mock("@/lib/production/production-template", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/production/production-template")>();
   return {
     ...actual,
     applyProductionTemplate: async (...args: Parameters<typeof actual.applyProductionTemplate>) => {

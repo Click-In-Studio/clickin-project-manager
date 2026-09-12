@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
+import { hasGrant } from "@/lib/perm/grant-check";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { presignedPut } from "@/lib/r2";
-import { recordAvatarUpload } from "@/lib/avatar-db";
+import { recordAvatarUpload } from "@/lib/asset/avatar-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 

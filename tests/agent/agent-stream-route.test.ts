@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/agent/chat/stream/route";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 
 // Guard + contract tests for the chat stream endpoint. 真流式的 happy path 在
 // tests/agent-runtime-routes.test.ts；这里只测每条拒绝路径与 steer 契约: steer:true must answer

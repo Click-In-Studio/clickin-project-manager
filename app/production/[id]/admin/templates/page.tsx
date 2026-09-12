@@ -3,12 +3,12 @@ export const metadata: Metadata = { title: "权限模版" };
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { requireAdminAccess } from "@/lib/admin-guard";
-import { getSession } from "@/lib/session";
-import { hasGrant } from "@/lib/grant-check";
+import { requireAdminAccess } from "@/lib/perm/admin-guard";
+import { getSession } from "@/lib/account/session";
+import { hasGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import { listProductionDepts } from "@/lib/dept-db";
-import { listDeptCueTemplates, listCueTemplateTypes } from "@/lib/cue-template-db";
+import { listProductionDepts } from "@/lib/perm/dept-db";
+import { listDeptCueTemplates, listCueTemplateTypes } from "@/lib/ops/cue-template-db";
 import AdminTemplatesClient from "@/components/AdminTemplatesClient";
 
 export default async function TemplatesPage({ params }: { params: Promise<{ id: string }> }) {

@@ -16,15 +16,15 @@ import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { useDocumentVisible } from "@/hooks/useVisibleEventSource";
 import ChevronIcon from "@/components/ChevronIcon";
-import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, ScriptTextLayoutMode } from "@/lib/script-types";
+import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, ScriptTextLayoutMode } from "@/lib/script/script-types";
 import type { TagGroup, BlockTagValue, SceneDetail } from "@/lib/db";
 import TagGroupEditor from "@/components/TagGroupEditor";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import DurationInput from "@/components/DurationInput";
-import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
-import { getChapterDurationDisplay } from "@/lib/scene-duration";
-import { diffState, type TagEntry } from "@/lib/script-ops";
-import { convertMarker, executeMarkerDeletion, getMarkerChange, insertMarker, markerCacheUpdateBlockIds, normalizeScriptMarkerInvariants as normalizeSharedMarkerInvariants, planMarkerDeletion, type BlockChange, type MarkerChange, type MarkerDeleteOperation } from "@/lib/script-marker-domain";
+import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script/script-types";
+import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
+import { diffState, type TagEntry } from "@/lib/script/script-ops";
+import { convertMarker, executeMarkerDeletion, getMarkerChange, insertMarker, markerCacheUpdateBlockIds, normalizeScriptMarkerInvariants as normalizeSharedMarkerInvariants, planMarkerDeletion, type BlockChange, type MarkerChange, type MarkerDeleteOperation } from "@/lib/script/script-marker-domain";
 import MarkerDeleteDialog, {
   type MarkerDeleteDialogState,
 } from "@/components/MarkerDeleteDialog";
@@ -32,19 +32,19 @@ import ScriptDialog, {
   SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS,
   SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS,
 } from "@/components/ScriptDialog";
-import { updateEstimatedPageMap } from "@/lib/script-page";
-import type { EstimatedPageMapCache } from "@/lib/script-page";
+import { updateEstimatedPageMap } from "@/lib/script/script-page";
+import type { EstimatedPageMapCache } from "@/lib/script/script-page";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
 import { formatDuration, parseDuration } from "@/lib/duration";
-import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
-import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
-import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
-import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script-selection";
-import { publishScriptFocus } from "@/lib/script-focus";
-import { useAgentMutation } from "@/lib/agent-mutations";
-import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script-insertion-gaps";
+import { buildMarkerLabelIndex } from "@/lib/script/script-generated-labels";
+import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script/script-marker-blocks";
+import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script/script-marker-ownership-cache";
+import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script/script-selection";
+import { publishScriptFocus } from "@/lib/script/script-focus";
+import { useAgentMutation } from "@/lib/agent/agent-mutations";
+import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script/script-insertion-gaps";
 import ProductionTopMenu, {
   ProductionOverflowSubmenuButton,
   ProductionTopMenuDivider,
@@ -57,8 +57,8 @@ import ProductionTopMenu, {
 } from "@/components/ProductionTopMenu";
 
 import ModeSwitch from "@/components/ModeSwitch";
-import { mdToHtml, stagePairRegex } from "@/lib/script-md";
-import { isTextBlock, sameCharacters, shouldHideCharacterLabel, shouldShowCharacterGap, shouldShowSceneEndGap } from "@/lib/script-block-layout";
+import { mdToHtml, stagePairRegex } from "@/lib/script/script-md";
+import { isTextBlock, sameCharacters, shouldHideCharacterLabel, shouldShowCharacterGap, shouldShowSceneEndGap } from "@/lib/script/script-block-layout";
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
 const LARGE_SELECTION_BLOCK_THRESHOLD = 500;
@@ -5877,7 +5877,7 @@ export default function ScriptEditor({
   const selectedDetailBlockId = selectedBlockIds.size === 1
     ? selectedBlockIds.values().next().value as string | undefined
     : undefined;
-  // AI 信封的剧本 focus 上下文（lib/script-focus.ts → AgentPopout chip）：
+  // AI 信封的剧本 focus 上下文（lib/script/script-focus.ts → AgentPopout chip）：
   // 多选 > 光标 > 视野顶部块（纯浏览兜底——用户没点任何块时也要能感知"正在看哪"）。
   // 只发指针（块 id），正文由 AI 用读工具自取。
   const [viewportBlockId, setViewportBlockId] = useState<string | null>(null);
@@ -10076,7 +10076,7 @@ export default function ScriptEditor({
                         ["letter",     "Letter"],
                         ["a3-2col",    "A3 横排双排"],
                         ["tablet-2col","Tablet 横排双排"],
-                      ] as [import("@/lib/script-types").PageLayout, string][]
+                      ] as [import("@/lib/script/script-types").PageLayout, string][]
                     ).map(([layout, label]) => (
                       <button
                         key={layout}

@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { signBindingToken } from "@/lib/platform/email/email-tokens";
 import { sendEmail } from "@/lib/platform/email/email-send";
 

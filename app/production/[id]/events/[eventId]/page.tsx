@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/perm/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName, listMilestones, listProductionMembersWithRoles } from "@/lib/db";
 import {
   getProductionEvent,
@@ -17,9 +17,9 @@ import {
 
   listEventDepartments,
   getSelfParticipantRole,
-} from "@/lib/event-db";
-import { canEnterEvent, isReportViewer, loadEventPermContext } from "@/lib/event-permissions";
-import { getEventAccess } from "@/lib/resource-grant-db";
+} from "@/lib/ops/event-db";
+import { canEnterEvent, isReportViewer, loadEventPermContext } from "@/lib/ops/event-permissions";
+import { getEventAccess } from "@/lib/perm/resource-grant-db";
 import EventDetailClient from "@/components/EventDetailClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; eventId: string }> }): Promise<Metadata> {

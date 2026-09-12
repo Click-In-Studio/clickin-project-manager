@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
-import { hasEventDomainView } from "@/lib/event-permissions";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasEventDomainView } from "@/lib/ops/event-permissions";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getVersion } from "@/lib/db";
-import { getProductionEvent, updateProductionEvent, deleteProductionEvent, setEventStageManagers, completeAllEventTechReqs } from "@/lib/event-db";
-import { maybeSendLatePublishDailyCall, dispatchEventPublishNotifications } from "@/lib/notify";
+import { getProductionEvent, updateProductionEvent, deleteProductionEvent, setEventStageManagers, completeAllEventTechReqs } from "@/lib/ops/event-db";
+import { maybeSendLatePublishDailyCall, dispatchEventPublishNotifications } from "@/lib/notify/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 

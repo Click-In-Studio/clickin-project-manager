@@ -29,7 +29,7 @@ const SECTION_LABEL: React.CSSProperties = {
   textTransform: "uppercase", color: "var(--stage)",
 };
 
-import { CUE_REL_SUBS, CUE_REL_VERBS } from "@/lib/cue-list-types";
+import { CUE_REL_SUBS, CUE_REL_VERBS } from "@/lib/ops/cue-list-types";
 
 // cue_list 相对键面/动词（与服务端白名单同源）
 const REL_SUBS = CUE_REL_SUBS;

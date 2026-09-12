@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
-import { toActor } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { toActor } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getPhase, updatePhase, deletePhase } from "@/lib/phase-db";
-import { canManagePhaseScope } from "@/lib/phase-perm";
+import { getPhase, updatePhase, deletePhase } from "@/lib/ops/phase-db";
+import { canManagePhaseScope } from "@/lib/ops/phase-perm";
 
 type Ctx = { params: Promise<{ id: string; phaseId: string }> };
 

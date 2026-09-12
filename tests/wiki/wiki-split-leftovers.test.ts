@@ -3,11 +3,11 @@ import { NextRequest } from "next/server";
 import {
   createEventReport, updateEventReport, createReportNote,
   createReportReply, deleteReportReply, getReportReply,
-} from "@/lib/event-db";
-import { dispatchReportNotification, dispatchMentionNotifications } from "@/lib/notify";
+} from "@/lib/ops/event-db";
+import { dispatchReportNotification, dispatchMentionNotifications } from "@/lib/notify/notify";
 import { mergeAccounts } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import {
   GET as repliesGET, POST as repliesPOST,
 } from "@/app/api/production/[id]/events/[eventId]/reports/[reportId]/replies/route";

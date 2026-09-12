@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { usesRehearsalMarksByDefault } from "@/lib/script-types";
+import { usesRehearsalMarksByDefault } from "@/lib/script/script-types";
 
 describe("usesRehearsalMarksByDefault", () => {
   it.each(["stage_play", "short_film", "film", "tv_drama"])(

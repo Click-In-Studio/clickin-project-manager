@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getProductionEvent, selfFollowEvent, selfUnfollowEvent, getSelfParticipantRole } from "@/lib/event-db";
+import { getProductionEvent, selfFollowEvent, selfUnfollowEvent, getSelfParticipantRole } from "@/lib/ops/event-db";
 import { addChatMembers } from "@/lib/platform/feishu/feishu-chat";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };

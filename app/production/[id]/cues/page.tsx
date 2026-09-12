@@ -3,7 +3,7 @@ export const metadata: Metadata = { title: "CUE" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import {
   getProductionPermissionContext, getProductionName,
   loadProduction, listCueLists, listCuesByProduction,

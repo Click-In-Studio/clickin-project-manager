@@ -11,7 +11,7 @@
  * https://open.feishu.cn/tool/cardbuilder to preview the layout.
  */
 import { type NextRequest } from "next/server";
-import { dispatchWeeklyCall, dispatchDailyCallForEvent, dispatchReportNotification } from "@/lib/notify";
+import { dispatchWeeklyCall, dispatchDailyCallForEvent, dispatchReportNotification } from "@/lib/notify/notify";
 
 export async function GET(req: NextRequest) {
   if (process.env.NODE_ENV === "production") {

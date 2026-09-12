@@ -7,7 +7,7 @@
 --   · 同名岗位不同等级——「作曲」在音乐剧与在音乐专辑是两套权限，不是包含关系
 --   · 基线本身要分叉——影视类要求 script / cue 非必要不授予，得**削**基线
 --
--- 两件事都是减法，表结构表达不了。内容已逐键搬进 lib/templates/theatre.ts，
+-- 两件事都是减法，表结构表达不了。内容已逐键搬进 lib/production/templates/theatre.ts，
 -- 等价性由 tests/migrations/grant-template-retire.migration.test.ts 的 invariance 层机器验证。
 --
 -- 两条有意不搬的行：副导演 / 助理舞台监督——migrate-assistant-roles.sql 已把复合

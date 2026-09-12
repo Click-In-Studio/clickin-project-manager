@@ -28,11 +28,11 @@ import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import {
   createProductionEvent, createEventTechReq, upsertAwaitingTechReqs,
   getTechReqByProduction,
-} from "@/lib/event-db";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { hasGrant } from "@/lib/grant-check";
-import { setPolicies } from "@/lib/policy-db";
-import { POLICY_ON, POLICY_OFF } from "@/lib/policy-keys";
+} from "@/lib/ops/event-db";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { setPolicies } from "@/lib/perm/policy-db";
+import { POLICY_ON, POLICY_OFF } from "@/lib/perm/policy-keys";
 import { getPool } from "@/lib/pg";
 import { DELETE as deleteTaskStandalone, PATCH as patchTask } from "@/app/api/production/[id]/tasks/[taskId]/route";
 import { DELETE as deleteTaskUnderEvent } from "@/app/api/production/[id]/events/[eventId]/tech-reqs/[reqId]/route";
@@ -271,7 +271,7 @@ describe("棘轮：硬删本体的路由不得接受宿主子集合键", () => {
 
 describe("M-15(c)：有挂载边时本体不可删", () => {
   it("wiki 被 report 边引用 ⇒ deleteWiki 拒绝（reason=mounted），不是靠门拦而是靠数据层", async () => {
-    const { createEventReport } = await import("@/lib/event-db");
+    const { createEventReport } = await import("@/lib/ops/event-db");
     const { deleteWiki } = await import("@/lib/wiki/content");
     const report = await createEventReport({
       id: `rpt_${shortId()}`, eventId, reportType: "show",

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { GET, PUT } from "@/app/api/agent/instructions/route";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { upsertFeishuUser } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
@@ -94,7 +94,7 @@ describe("PUT /api/agent/instructions", () => {
       makeReq("PUT", { userId: outsiderId, body: { scope: "production", productionId: prodId, content: "越权写入" } }),
     );
     expect(res.status).toBe(403);
-    expect(await import("@/lib/agent-instructions").then((m) => m.getAgentInstructions("production", prodId))).not.toBe(
+    expect(await import("@/lib/agent/agent-instructions").then((m) => m.getAgentInstructions("production", prodId))).not.toBe(
       "越权写入",
     );
   });
@@ -104,7 +104,7 @@ describe("PUT /api/agent/instructions", () => {
       makeReq("PUT", { userId: ownerId, body: { scope: "production", productionId: prodId, content: "新口径" } }),
     );
     expect(res.status).toBe(200);
-    expect(await import("@/lib/agent-instructions").then((m) => m.getAgentInstructions("production", prodId))).toBe(
+    expect(await import("@/lib/agent/agent-instructions").then((m) => m.getAgentInstructions("production", prodId))).toBe(
       "新口径",
     );
   });

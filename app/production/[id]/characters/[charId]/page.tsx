@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
-import { hasGrant, hasAnyGrant } from "@/lib/grant-check";
+import { getSession } from "@/lib/account/session";
+import { hasGrant, hasAnyGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getCharacterById, getProductionName, listCharactersByVersion, getActiveVersionId } from "@/lib/db";
 import CharacterDetailView from "@/components/CharacterDetail";
 

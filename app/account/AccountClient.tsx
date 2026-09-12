@@ -6,9 +6,9 @@ import Link from "next/link";
 import { useRef, useState, useEffect, type FormEvent, type ChangeEvent } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import styles from "./account.module.css";
-import type { NotifPref } from "@/lib/notification-prefs";
-import { ACCOUNT_RETURN_KEY, WORKSPACE_HOME, normalizeAccountReturnHref } from "@/lib/account-return";
-import { userAvatarSrc } from "@/lib/avatar-url";
+import type { NotifPref } from "@/lib/notify/notification-prefs";
+import { ACCOUNT_RETURN_KEY, WORKSPACE_HOME, normalizeAccountReturnHref } from "@/lib/account/account-return";
+import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import AiUsageCard from "@/components/AiUsageCard";
 
 type Identity = {
@@ -49,7 +49,7 @@ type Props = {
   };
   initialIdentities: Identity[];
   initialNotifPrefs: NotifPref[];
-  /** 用户等级（#280）：null = 普通注册用户。label 在服务端解析（lib/plan.ts 不可入客户端包）。 */
+  /** 用户等级（#280）：null = 普通注册用户。label 在服务端解析（lib/account/plan.ts 不可入客户端包）。 */
   initialPlan: { tier: string; label: string } | null;
 };
 

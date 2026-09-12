@@ -1,4 +1,4 @@
-import type { TextSegment } from "../../cue-export";
+import type { TextSegment } from "../../ops/cue-export";
 
 const BASE = "https://open.feishu.cn/open-apis";
 

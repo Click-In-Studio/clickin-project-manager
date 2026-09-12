@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createAsset } from "@/lib/asset/db";
 import { createWiki, updateWiki } from "@/lib/wiki/content";
 import { extractEmbedAssetIds } from "@/lib/wiki/links";

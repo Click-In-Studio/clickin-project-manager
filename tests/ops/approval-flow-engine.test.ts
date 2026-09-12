@@ -9,12 +9,12 @@ import {
   rejectAccessRequest,
   submitAccessRequest,
 } from "@/lib/db";
-import { createFlowTemplate, publishFlowTemplate, updateFlowTemplate } from "@/lib/approval-flow-template-db";
-import { forwardFlowNodeToOwner, type FlowRequestRow } from "@/lib/approval-flow-engine";
-import type { ApprovalTemplateNode } from "@/lib/approval-flow-template";
+import { createFlowTemplate, publishFlowTemplate, updateFlowTemplate } from "@/lib/approval/approval-flow-template-db";
+import { forwardFlowNodeToOwner, type FlowRequestRow } from "@/lib/approval/approval-flow-engine";
+import type { ApprovalTemplateNode } from "@/lib/approval/approval-flow-template";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 
-// 模版流引擎（prB，lib/approval-flow-engine.ts）端到端：
+// 模版流引擎（prB，lib/approval/approval-flow-engine.ts）端到端：
 // 提交编译快照 → 逐节点推进（cc 到达即投递、跳过/owner 兜底）→ 终局发行；
 // 节点内转交/超时、拒绝、实例流程视图（P1-6）、无模版回退阶梯。
 // 阶梯路径的零回归由 tests/approval-flow.test.ts 的既有套件把守——本文件不重测。

@@ -1,12 +1,12 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { isR2Configured } from "@/lib/r2";
-import { getAvatarVariant, parseAvatarSize } from "@/lib/avatar-serve";
+import { getAvatarVariant, parseAvatarSize } from "@/lib/asset/avatar-serve";
 import { getPool } from "@/lib/pg";
 
 type Ctx = { params: Promise<{ userId: string }> };
 
-// 强缓存的前提：R2 key 每次上传换新，前端 URL 从存量值派生 ?v=（lib/avatar-url.ts），
+// 强缓存的前提：R2 key 每次上传换新，前端 URL 从存量值派生 ?v=（lib/asset/avatar-url.ts），
 // 换头像即换 URL。302 外链兜底给短缓存——飞书同步可能悄悄换 URL，不配 immutable。
 const IMMUTABLE = "private, max-age=31536000, immutable";
 

@@ -1,48 +1,48 @@
 import { getPool } from "./pg";
-import { notifyUser, notifyUsers } from "./notify";
-export type { UserInfo } from "./db-feishu";
-export { upsertFeishuUser, getFeishuUser, attachFeishuToUser } from "./db-feishu";
-import type { UserInfo } from "./db-feishu";
+import { notifyUser, notifyUsers } from "./notify/notify";
+export type { UserInfo } from "./account/db-feishu";
+export { upsertFeishuUser, getFeishuUser, attachFeishuToUser } from "./account/db-feishu";
+import type { UserInfo } from "./account/db-feishu";
 import { SERVER_URL } from "./server-url";
 import type { Pool, PoolClient } from "pg";
-import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout, ScriptTextLayoutMode, MarkerMeta } from "./script-types";
-import { DEFAULT_SCRIPT_CONFIG, usesRehearsalMarksByDefault } from "./script-types";
-import type { PermissionContext } from "./permissions";
+import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, PageLayout, ScriptTextLayoutMode, MarkerMeta } from "./script/script-types";
+import { DEFAULT_SCRIPT_CONFIG, usesRehearsalMarksByDefault } from "./script/script-types";
+import type { PermissionContext } from "./perm/permissions";
 type AtomicPermission = string;
 
 export type ProductionAccess = {
   permCtx: PermissionContext;
   isArchived: boolean;
 };
-// 角色名单（ROLE_NAMES）已上移为项目模版的一个 slot，见 lib/production-template.ts
-import { recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./dept-db";
+// 角色名单（ROLE_NAMES）已上移为项目模版的一个 slot，见 lib/production/production-template.ts
+import { recomputeAndRevokeGrants, revokeAllGrantsForMember } from "./perm/dept-db";
 import {
   buildApprovalLadder, classifyApprovalNode, DEFAULT_APPROVAL_TTL_HOURS,
   expandLevelRows, findProductionOwner, nextStage, stageAt, stageStatus,
   type ApprovalStage, type ApprovalStageName, type ApprovalTarget, type StagePosition,
-} from "./approval-routing";
-import { isValidCustomExpiry, isValidTtlInterval } from "./approval-ttl";
+} from "./approval/approval-routing";
+import { isValidCustomExpiry, isValidTtlInterval } from "./approval/approval-ttl";
 import {
   advanceFlowOnApprove, forwardFlowNodeToOwner, parseFlowSnapshot,
   prepareTemplateFlow, resolveNodeAssignees, timeoutFlowNode,
   type FlowNotifyPlan, type FlowSnapshot,
-} from "./approval-flow-engine";
+} from "./approval/approval-flow-engine";
 import {
   approvalStageLabel, isApprovalCommentTooLong, normalizeApprovalComment, STAGE_ORDER,
   type ApprovalAction, type ApprovalNodeClass,
-} from "./approval-stages";
-import { normalizeProductionTier, type ProductionTier } from "./plan";
+} from "./approval/approval-stages";
+import { normalizeProductionTier, type ProductionTier } from "./account/plan";
 
-import type { Cue, CueAnchor } from "./cue-types";
-import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
-import type { ScriptPatch, TagEntry } from "./script-ops";
+import type { Cue, CueAnchor } from "./ops/cue-types";
+import { adjustBlockAnchor, lcsAdjust } from "./ops/cue-types";
+import type { ScriptPatch, TagEntry } from "./script/script-ops";
 import { keyBetween, initialKeys } from "./lex-order";
-import { computePageMap, updateEstimatedPageMap, type EstimatedPageMapCache } from "./script-page";
-import { isKnownTemplateId } from "./script-template";
-import { buildMarkerLabelIndex, generatedRehearsalMarksByScene, type MarkerLabelIndex } from "./script-generated-labels";
-import { MARKER_TYPES_SQL, VERSION_MARKER_LABEL_ROWS_SQL, VERSION_OWNED_BLOCKS_CTE, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
-import { getMarkerChange, markerCacheUpdateBlockIds, markerHierarchyUpdateBlockIds, normalizeScriptMarkerInvariants, projectMarkers, sameMarkerStructure, type MarkerChange, type MarkerProjection } from "./script-marker-domain";
-import { withLegacyOwnershipProjection, withMarkerOwnership } from "./script-marker-blocks";
+import { computePageMap, updateEstimatedPageMap, type EstimatedPageMapCache } from "./script/script-page";
+import { isKnownTemplateId } from "./script/template";
+import { buildMarkerLabelIndex, generatedRehearsalMarksByScene, type MarkerLabelIndex } from "./script/script-generated-labels";
+import { MARKER_TYPES_SQL, VERSION_MARKER_LABEL_ROWS_SQL, VERSION_OWNED_BLOCKS_CTE, VERSION_SCENES_FROM_MARKERS_CTE } from "./script/script-marker-sql";
+import { getMarkerChange, markerCacheUpdateBlockIds, markerHierarchyUpdateBlockIds, normalizeScriptMarkerInvariants, projectMarkers, sameMarkerStructure, type MarkerChange, type MarkerProjection } from "./script/script-marker-domain";
+import { withLegacyOwnershipProjection, withMarkerOwnership } from "./script/script-marker-blocks";
 import { randomUUID } from "node:crypto";
 import type { ImportTagChanges } from "./import/types";
 
@@ -1681,7 +1681,7 @@ async function seedCueListCreatorAccessInTx(
 ): Promise<void> {
   // #236：创建者行集先过策略开关。注意 grant_source 虽写 self_confirmed，这是**创建
   // 定式**发的、不是用户点「自我确认」，故属形状 A 的论域（真正的自确认写点不接开关）。
-  const { policyFilteredRows } = await import("./policy-db");
+  const { policyFilteredRows } = await import("./perm/policy-db");
   const cueRows = await policyFilteredRows(
     data.productionId, "cue_list", "creator",
     [["*", "view"], ["*", "edit"], ["*", "delete"],
@@ -1773,7 +1773,7 @@ async function importCueColumnsInTx(
       );
       await seedCueListCreatorAccessInTx(client, { id, productionId, template, createdBy });
       if (template) {
-        const { applyCueTemplateGrants } = await import("./cue-template-db");
+        const { applyCueTemplateGrants } = await import("./ops/cue-template-db");
         await applyCueTemplateGrants(client, productionId, id, template);
       }
       list = { id, name: column.name, template };
@@ -2404,7 +2404,7 @@ export async function createProduction(
   productionType?: string,
   productionTypeLabel?: string | null,
   /** 初始项目档位（#280）：free 时不落行（production_plan 无行 = free），高于 free
-   *  （internal owner 建项即最高档）与本体同事务落行。档位决策在路由层（lib/plan.ts）。 */
+   *  （internal owner 建项即最高档）与本体同事务落行。档位决策在路由层（lib/account/plan.ts）。 */
   initialPlan?: { tier: string; source: string },
   /** 配额硬上限（#307 review finding 1）：路由层的 count 预检是 TOCTOU 软门，这里在
    *  事务内锁 owner 的 user_plan 行串行化同 owner 并发建项，锁内重数超限抛
@@ -2417,7 +2417,7 @@ export async function createProduction(
   // 项目——路由 catch 后回 500，用户以为没建成，项目却还在。以前这种残骸只有 admin
   // 的全量列表看得见，创建放开（#281）+ owner 可见（#282）之后它会直接出现在建项目
   // 的人自己的列表里，必须一次做干净。
-  const { applyProductionTemplate } = await import("./production-template");
+  const { applyProductionTemplate } = await import("./production/production-template");
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -2461,7 +2461,7 @@ export async function createProduction(
     await createMasterScriptView(id, client);
     // 建项目的全部初始状态——角色名单、部门树、部门静态区间键、cue 模版体系的初始行、
     // 策略档位、审批 TTL——统一由项目模版按类型灌入。
-    // 见 lib/production-template.ts（模版是代码常量：改它＝改代码＝走 PR）。
+    // 见 lib/production/production-template.ts（模版是代码常量：改它＝改代码＝走 PR）。
     await applyProductionTemplate(id, productionType ?? null, client);
     await client.query("COMMIT");
   } catch (e) {
@@ -2475,7 +2475,7 @@ export async function createProduction(
 /** Returns cue_type keys the user is allowed to create in a production, via dept membership. */
 export async function getUserAllowedCueTypes(userId: string, productionId: string): Promise<string[]> {
   // §3.5：改读声明表 can_create 路径（原 production_dept.allowed_cue_types 数组已迁移）
-  const { listCreatableTemplates } = await import("./cue-template-db");
+  const { listCreatableTemplates } = await import("./ops/cue-template-db");
   return listCreatableTemplates(userId, productionId);
 }
 
@@ -3121,7 +3121,7 @@ export async function consumeEmailOtp(email: string, code: string): Promise<stri
 export async function upsertEmailUser(
   email: string,
   name: string,
-  /** 注册邀请制（lib/registration-gate.ts）：正当性是邀请码时传入，在建号事务内
+  /** 注册邀请制（lib/account/registration-gate.ts）：正当性是邀请码时传入，在建号事务内
    *  锁行消耗 + 落流水；并发用尽则整个事务回滚，不产生账号。老用户路径不触码。 */
   registrationCode?: string,
 ): Promise<{ userId: string }> {
@@ -3129,7 +3129,7 @@ export async function upsertEmailUser(
   // 路由各自 lower 过），在唯一的账号创建入口把不变量收为本地——大小写变体
   // 不可能绕过注册门检查或裂出重复账号。
   email = email.trim().toLowerCase();
-  const { consumeRegistrationCode } = await import("./registration-gate");
+  const { consumeRegistrationCode } = await import("./account/registration-gate");
   const pool = getPool();
   const client = await pool.connect();
   try {
@@ -3214,7 +3214,7 @@ export async function getAllPermissionOverrides(
 /**
  * New permission context for the atomic permission system.
  * Queries production_role_permission via role name JOIN; falls back to static
- * templates from lib/permissions.ts when the production has no role records yet.
+ * templates from lib/perm/permissions.ts when the production has no role records yet.
  * Also returns department membership for hasScopedPermission dept checks.
  */
 export async function getProductionPermissionContext(
@@ -3389,7 +3389,7 @@ export async function addProductionMember(productionId: string, userId: string):
 //
 // 它此前撤权 + 删行，定位是「误加入」。但审计上删行就是抹痕迹，而「谁在什么时候被
 // 谁从剧组里拿掉」正是最该留下的一条；留着这个函数，就等于留着一把抹痕迹的刀。
-// 唯一的移出路径是 lib/member-status.ts 的 suspend → confirmMemberExit：撤销授权、
+// 唯一的移出路径是 lib/perm/member-status.ts 的 suspend → confirmMemberExit：撤销授权、
 // 保留成员行与完整轨迹。
 
 export async function setMemberRoles(
@@ -3892,7 +3892,7 @@ export async function setMemberSupervisor(
 }
 
 // setMemberStatus 已退役（#141）：裸 UPDATE 不写审计、也分不清成因（自助退出还是
-// 人事停用）。状态机的唯一写点是 lib/member-status.ts，端点见
+// 人事停用）。状态机的唯一写点是 lib/perm/member-status.ts，端点见
 // app/api/production/[id]/members/[userId]/status/route.ts。
 
 /** Returns Feishu open_ids of 制作人 / 制作助理 — used by Feishu bot to add them to dept chats. */
@@ -4259,8 +4259,8 @@ export async function updateSceneMetadata(
 
 // ─── Cue lists ────────────────────────────────────────────────────────────────
 
-import type { CueList, CueListPermissionRow } from "./cue-list-types";
-import type { MemberStatus, MemberStatusSource } from "./member-status-shared";
+import type { CueList, CueListPermissionRow } from "./ops/cue-list-types";
+import type { MemberStatus, MemberStatusSource } from "./perm/member-status-shared";
 
 type CueListRow = {
   id: string; production_id: string; name: string; notes: string;
@@ -4371,7 +4371,7 @@ export async function createCueList(data: {
     await seedCueListCreatorAccessInTx(client, data);
     // §3.5 受益发键定式：∀ (dept, template) 声明行 → 实例区间键
     if (data.template) {
-      const { applyCueTemplateGrants } = await import("./cue-template-db");
+      const { applyCueTemplateGrants } = await import("./ops/cue-template-db");
       await applyCueTemplateGrants(client, data.productionId, data.id, data.template);
     }
     await client.query("COMMIT");
@@ -4469,8 +4469,8 @@ export async function createProductionRole(productionId: string, name: string): 
   const prodType = (await getPool().query<{ type: string | null }>(
     "SELECT type FROM production WHERE id = $1", [productionId],
   )).rows[0]?.type ?? null;
-  const { resolveTemplate } = await import("./production-template");
-  const { roleKeys } = await import("./template-seeders/roles");
+  const { resolveTemplate } = await import("./production/production-template");
+  const { roleKeys } = await import("./production/template-seeders/roles");
   const keys = roleKeys(resolveTemplate(prodType).roles, name);
   if (keys.length > 0) {
     await getPool().query(
@@ -7170,7 +7170,7 @@ async function describeResource(
 }
 
 // ─── 审批路由接入（#140）──────────────────────────────────────────────────────
-// 「谁来批」全部由 lib/approval-routing.ts 的阶梯算出，此处只负责落库、通知、状态机。
+// 「谁来批」全部由 lib/approval/approval-routing.ts 的阶梯算出，此处只负责落库、通知、状态机。
 // 收件箱（listPendingApprovals）与鉴权（authorizeApprovalAction）只读
 // current_approver_ids，不再各自重算路由——三处漂移的老账在此了结。
 
@@ -7366,7 +7366,7 @@ async function advanceToStage(
   return rows.length > 0;
 }
 
-// 级名文案已上移到 lib/approval-stages.ts —— 通知标题与页面时间线共用一份，
+// 级名文案已上移到 lib/approval/approval-stages.ts —— 通知标题与页面时间线共用一份，
 // 不然同一级在飞书里叫「资源持有者」、在页面上叫「资源持有人」。
 
 type StageNotifyContext = "new" | "timeout" | "forwarded";
@@ -7559,7 +7559,7 @@ export type SubmitAccessRequestParams = {
   resourceSub?: string;
   permissionLevel: string;
   grantType?: "permanent" | "ttl";
-  /** Postgres INTERVAL 字面量，且必须来自 TTL_OPTIONS（lib/approval-ttl.ts）。 */
+  /** Postgres INTERVAL 字面量，且必须来自 TTL_OPTIONS（lib/approval/approval-ttl.ts）。 */
   ttlDuration?: string | null;
   /** 自定义档位的 ISO 绝对到期时间；与 ttlDuration 二选一。 */
   requestedExpiresAt?: string | null;

@@ -12,15 +12,15 @@ import {
   PRODUCTION_TEMPLATES, TEMPLATE_BY_TYPE, DEFAULT_TEMPLATE_KEY,
   resolveTemplate, validateTemplate, validateAllTemplates, applyTemplate,
   type ProductionTemplate,
-} from "@/lib/production-template";
-import { THEATRE_TEMPLATE } from "@/lib/templates/theatre";
-import { MUSIC_TEMPLATE } from "@/lib/templates/music";
-import { FILM_TEMPLATE } from "@/lib/templates/film";
-import { SOLO_TEMPLATE } from "@/lib/templates/solo";
-import { PERFORMANCE_TEMPLATE } from "@/lib/templates/performance";
-import { policiesFromAnswers, MOUNT_ATTACH, ASSET_UPLOAD } from "@/lib/templates/shared";
-import { PRODUCTION_TYPES } from "@/lib/production-types";
-import { POLICY_KEYS } from "@/lib/policy-keys";
+} from "@/lib/production/production-template";
+import { THEATRE_TEMPLATE } from "@/lib/production/templates/theatre";
+import { MUSIC_TEMPLATE } from "@/lib/production/templates/music";
+import { FILM_TEMPLATE } from "@/lib/production/templates/film";
+import { SOLO_TEMPLATE } from "@/lib/production/templates/solo";
+import { PERFORMANCE_TEMPLATE } from "@/lib/production/templates/performance";
+import { policiesFromAnswers, MOUNT_ATTACH, ASSET_UPLOAD } from "@/lib/production/templates/shared";
+import { PRODUCTION_TYPES } from "@/lib/production/production-types";
+import { POLICY_KEYS } from "@/lib/perm/policy-keys";
 
 /** 未套过任何模版的空演出——建项目路径本身会套模版，测自定义模版必须从空的开始。 */
 async function makeBareProduction(): Promise<string> {

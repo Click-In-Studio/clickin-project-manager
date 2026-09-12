@@ -3,8 +3,8 @@ export const metadata: Metadata = { title: "我的需求" };
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
-import { listMyTechReqsFull } from "@/lib/event-db";
+import { getSession } from "@/lib/account/session";
+import { listMyTechReqsFull } from "@/lib/ops/event-db";
 import MyReqsClient from "@/components/MyReqsClient";
 
 export default async function MyReqsPage() {

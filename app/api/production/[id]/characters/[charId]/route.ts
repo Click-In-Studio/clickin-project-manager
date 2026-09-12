@@ -1,12 +1,12 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import {
   getProductionPermissionContext, patchCharacterMeta, setCharacterMembers,
   getActiveVersionId, listCharactersByVersion, applyPatchToDB, getVersion,
 } from "@/lib/db";
 import { tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasGrant } from "@/lib/grant-check";
-import { rejectNonHeadWrite } from "@/lib/head-version";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { rejectNonHeadWrite } from "@/lib/script/head-version";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);

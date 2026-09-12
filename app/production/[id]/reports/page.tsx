@@ -3,10 +3,10 @@ export const metadata: Metadata = { title: "报告" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import { listProductionReports } from "@/lib/event-db";
-import { isReportViewer } from "@/lib/event-permissions";
+import { listProductionReports } from "@/lib/ops/event-db";
+import { isReportViewer } from "@/lib/ops/event-permissions";
 import PageHeader from "@/components/PageHeader";
 import ProductionReportsClient from "@/components/ProductionReportsClient";
 import PageActivationGate from "@/components/PageActivationGate";

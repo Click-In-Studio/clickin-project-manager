@@ -4,8 +4,8 @@ import { upsertFeishuUser, addProductionMember, createCueList } from "@/lib/db";
 import {
   addCueListDeptAccess, removeCueListDeptAccess,
   checkCueListFreeApprovalZone, selfConfirmCueListGrant,
-} from "@/lib/resource-grant-db";
-import { recomputeAndRevokeGrants } from "@/lib/dept-db";
+} from "@/lib/perm/resource-grant-db";
+import { recomputeAndRevokeGrants } from "@/lib/perm/dept-db";
 import { getPool } from "@/lib/pg";
 
 // dept 分享 = 归属（rdm）+ zone 资格（dept_permission 实例行集）：

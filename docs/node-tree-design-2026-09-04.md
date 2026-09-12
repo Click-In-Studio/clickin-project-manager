@@ -82,7 +82,7 @@
 #85（元数据基建 + zip parser）挂在 `asset_file` 上，与组织结构正交，**可并行/先行**。要点（另见 #85 讨论）：
 
 - `asset_file.metadata JSONB` 存摘要 + R2 sidecar `meta/<fileId>.json` 存大结构；envelope `{parser, parserVersion, parsedAt, summary}`；immutable key ⇒ 缓存永不失效，parserVersion 是唯一重算触发器。
-- 懒生成（照 `lib/avatar-serve.ts` 模式）+ 上传后 fire-and-forget 踢一脚；存量免 backfill。
+- 懒生成（照 `lib/asset/avatar-serve.ts` 模式）+ 上传后 fire-and-forget 踢一脚；存量免 backfill。
 - parser 输入是**可 range 读的字节源**抽象（顶层文件 = R2 range；zip 内 entry = range + inflate 单 entry——zip 逐 entry 独立压缩，取包内单文件不用碰整包）。
 - mime 不可信（客户端上报），按扩展名 + magic bytes 分发。
 - zip 递归 v1 只解一层，嵌套包显示为"未展开"节点。

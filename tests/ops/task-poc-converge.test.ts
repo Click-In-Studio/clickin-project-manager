@@ -6,7 +6,7 @@
  * 各改一遍必然漏，而漏掉的点不会报错——只会静默地少认（或多认）一类 POC。
  *
  * 两层：
- *  1. 静态棘轮 —— 除 lib/task-poc.ts 与定义处外，lib/ 与 app/api/ 不得直调 isUserDeptPoc
+ *  1. 静态棘轮 —— 除 lib/ops/task-poc.ts 与定义处外，lib/ 与 app/api/ 不得直调 isUserDeptPoc
  *  2. 行为验证 —— 收敛入口的判定口径，含收敛时新加的 production 作用域
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -15,7 +15,7 @@ import path from "path";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
-import { isTaskPoc, isSubjectPoc, isDeptSubjectPoc, taskSubjectOf } from "@/lib/task-poc";
+import { isTaskPoc, isSubjectPoc, isDeptSubjectPoc, taskSubjectOf } from "@/lib/ops/task-poc";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. 静态棘轮：不许绕过收敛入口
@@ -28,11 +28,11 @@ const SCAN_DIRS = ["lib", "app/api"];
  * 允许直调 isUserDeptPoc 的文件。
  *
  * 往这里加条目前先问一句：这个判定真的与 task 责任主体无关吗？若有关，要走
- * lib/task-poc.ts，否则用户组落地后它会成为唯一一个只认部门不认组的门。
+ * lib/ops/task-poc.ts，否则用户组落地后它会成为唯一一个只认部门不认组的门。
  */
 const ALLOWED = new Set([
-  "lib/event-db.ts",   // 定义处（部门 POC 这个原语本身）
-  "lib/task-poc.ts",   // 唯一消费者
+  "lib/ops/event-db.ts",   // 定义处（部门 POC 这个原语本身）
+  "lib/ops/task-poc.ts",   // 唯一消费者
 ]);
 
 async function listTs(dir: string): Promise<string[]> {
@@ -50,7 +50,7 @@ async function listTs(dir: string): Promise<string[]> {
 }
 
 describe("task POC 判定收敛棘轮", () => {
-  it("lib/ 与 app/api/ 不得绕过 lib/task-poc.ts 直调 isUserDeptPoc", async () => {
+  it("lib/ 与 app/api/ 不得绕过 lib/ops/task-poc.ts 直调 isUserDeptPoc", async () => {
     const files: string[] = [];
     for (const dir of SCAN_DIRS) files.push(...await listTs(path.join(ROOT, dir)));
 
@@ -68,7 +68,7 @@ describe("task POC 判定收敛棘轮", () => {
 
     expect(
       violations,
-      `以下位置绕过了 lib/task-poc.ts 直接判部门 POC。\n` +
+      `以下位置绕过了 lib/ops/task-poc.ts 直接判部门 POC。\n` +
       `task 责任主体的 POC 判定必须走 isTaskPoc / isSubjectPoc / isDeptSubjectPoc，\n` +
       `否则用户组落地后这些点只认部门不认组：\n  ${violations.join("\n  ")}`,
     ).toEqual([]);

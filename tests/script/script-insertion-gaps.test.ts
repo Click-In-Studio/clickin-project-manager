@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script-insertion-gaps";
-import type { Block, Scene } from "@/lib/script-types";
+import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script/script-insertion-gaps";
+import type { Block, Scene } from "@/lib/script/script-types";
 
 function block(id: string, type: Block["type"], sceneId: string | null = null): Block {
   return {

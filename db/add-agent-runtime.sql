@@ -9,7 +9,7 @@
 -- 步进级持久化与重启恢复（§4.4 ①）直接建立在它之上；模型上下文由
 -- agent-core 按 leaf → root 路径重建，不在 DB 侧解释语义。
 --
--- id 规约：新表 TEXT PK + 带随机尾的 short id（lib/agent-runtime/ids.ts）。
+-- id 规约：新表 TEXT PK + 带随机尾的 short id（lib/agent/runtime/ids.ts）。
 
 -- ── 会话 ────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS agent_session (

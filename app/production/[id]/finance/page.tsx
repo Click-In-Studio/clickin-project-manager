@@ -2,12 +2,12 @@ import type { Metadata } from "next";
 import PageHeader from "@/components/PageHeader";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionName, getProductionPermissionContext } from "@/lib/db";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import {
   listBudgetCategories, listBudgetCategoryOptions, listExpenses, type ExpenseStatus,
-} from "@/lib/finance-db";
+} from "@/lib/ops/finance-db";
 import { fmtCny, pctCents, pctUsed, sumCents, toCents } from "@/lib/money";
 
 export const metadata: Metadata = { title: "财务" };

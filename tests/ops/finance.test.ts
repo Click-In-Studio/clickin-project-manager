@@ -12,18 +12,18 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { PATCH as patchCategory } from "@/app/api/production/[id]/finance/categories/[categoryId]/route";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
-import { classifyApprovalNode, buildApprovalLadder } from "@/lib/approval-routing";
+import { classifyApprovalNode, buildApprovalLadder } from "@/lib/approval/approval-routing";
 import {
   approveExpense, cancelExpense, createBudgetCategory, deleteBudgetCategory,
   escalateExpiredExpenses, FinanceError, getExpense, listBudgetCategories, listExpenses,
   listPendingExpenses, rejectExpense, submitExpense, updateBudgetCategory,
   listBudgetCategoryOptions,
-} from "@/lib/finance-db";
+} from "@/lib/ops/finance-db";
 import { GET as getExpenses } from "@/app/api/production/[id]/finance/expenses/route";
 
 let prodId: string;

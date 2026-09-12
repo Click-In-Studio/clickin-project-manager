@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "任务" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import { listProductionTechReqs, listMyTechReqsFull } from "@/lib/event-db";
+import { listProductionTechReqs, listMyTechReqsFull } from "@/lib/ops/event-db";
 import ProductionTasksClient from "@/components/ProductionTasksClient";
 import PageHeader from "@/components/PageHeader";
 

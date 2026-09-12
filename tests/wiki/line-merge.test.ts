@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeLines } from "@/lib/line-merge";
+import { mergeLines } from "@/lib/editor/line-merge";
 
 // wiki 协作行级三路合并：不相交改动都保留；重叠区间 mine（保存者）胜
 

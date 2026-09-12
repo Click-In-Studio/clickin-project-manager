@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getUserProfile, upsertUserProfile, syncGlobalNotificationPreference } from "@/lib/db";
-import { markAvatarCommitted, cleanupAvatarObjects } from "@/lib/avatar-db";
+import { markAvatarCommitted, cleanupAvatarObjects } from "@/lib/asset/avatar-db";
 
 export async function GET() {
   const cookieStore = await cookies();

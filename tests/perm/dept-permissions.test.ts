@@ -28,15 +28,15 @@ import {
   getOrCreateApprovalConfig,
   recomputeAndRevokeGrants,
   revokeAllGrantsForMember,
-} from "@/lib/dept-db";
+} from "@/lib/perm/dept-db";
 import {
   setMemberRoles,
   createProductionRole,
   setRolePermissions,
   deleteProductionRole,
 } from "@/lib/db";
-import { suspendMember, confirmMemberExit } from "@/lib/member-status";
-import type { PermissionContext } from "@/lib/permissions";
+import { suspendMember, confirmMemberExit } from "@/lib/perm/member-status";
+import type { PermissionContext } from "@/lib/perm/permissions";
 
 // 批F 后原子键仅剩 org 域 2 枚；本文件测试 zone/recompute 机制本身（键无关），
 // 用已退役键作为载荷（RETIRED 棘轮 grep 仅扫 app/lib/components，tests 不在其列）。

@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { resolveDefaultLanding, readLandingContext } from "@/lib/node/landing";
 import { createWiki } from "@/lib/wiki/content";
 import { getNodeByWikiId } from "@/lib/node/db";

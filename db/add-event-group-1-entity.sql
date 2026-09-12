@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS event_group (
   color         TEXT,
   order_index   INTEGER     NOT NULL DEFAULT 0,
   -- POC 二选一。应用层还要求它必须是本组成员（「以其中的一个部门/人为 POC」），
-  -- 那条约束跨表，留在 lib/event-group-db.ts 的事务里保证。
+  -- 那条约束跨表，留在 lib/ops/event-group-db.ts 的事务里保证。
   poc_dept_id   UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
   poc_user_id   UUID        REFERENCES app_user(id)        ON DELETE SET NULL,
   created_by    UUID        NOT NULL REFERENCES app_user(id),

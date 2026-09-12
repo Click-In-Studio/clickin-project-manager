@@ -12,7 +12,7 @@ import { listEnumerableNodeIds } from "@/lib/node/perm";
 import {
   addNodeMount, removeNodeMount, listNodesByMountPoint, getAssetsByMountPoint,
 } from "@/lib/node/mount";
-import type { PermissionContext } from "@/lib/permissions";
+import type { PermissionContext } from "@/lib/perm/permissions";
 import { makeProduction, cleanupProduction, makeScene, makeBlocks, shortId } from "../_support/factories";
 
 async function newUser(): Promise<string> {

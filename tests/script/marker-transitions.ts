@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import type { Pool } from "pg";
 import {
   convertMarker, executeMarkerDeletion, getMarkerChange, insertHierarchyMarker, insertMarker, markerCacheUpdateBlockIds, normalizeMarkerState, normalizeMarkerStateAfterEdit, normalizeScriptMarkerInvariants, planMarkerDeletion, projectMarkers, resolveMarkerId, updateMarkerMeta,
-} from "../../lib/script-marker-domain";
-import { DEFAULT_SCRIPT_CONFIG, type Block, type ScriptState } from "../../lib/script-types";
-import { diffState, patchAffectsMarkerProjection, type ScriptPatch } from "../../lib/script-ops";
-import { buildMarkerContextById, withLegacyOwnershipProjection, withMarkerOwnership } from "../../lib/script-marker-blocks";
-import { buildMarkerLabelIndex } from "../../lib/script-generated-labels";
-import { updateMarkerOwnership } from "../../lib/script-marker-ownership-cache";
+} from "../../lib/script/script-marker-domain";
+import { DEFAULT_SCRIPT_CONFIG, type Block, type ScriptState } from "../../lib/script/script-types";
+import { diffState, patchAffectsMarkerProjection, type ScriptPatch } from "../../lib/script/script-ops";
+import { buildMarkerContextById, withLegacyOwnershipProjection, withMarkerOwnership } from "../../lib/script/script-marker-blocks";
+import { buildMarkerLabelIndex } from "../../lib/script/script-generated-labels";
+import { updateMarkerOwnership } from "../../lib/script/script-marker-ownership-cache";
 import { getMarkerLabelIndex } from "../../lib/db";
-import { computePageMap, updateEstimatedPageMap } from "../../lib/script-page";
+import { computePageMap, updateEstimatedPageMap } from "../../lib/script/script-page";
 
 let id = 0;
 const createId = () => `generated-${++id}`;

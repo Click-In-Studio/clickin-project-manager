@@ -6,9 +6,9 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { deleteProduction, createProduction, archiveProduction, addProductionMember, getActiveVersionId, upsertFeishuUser } from "@/lib/db";
-import { deleteProductionEvent } from "@/lib/event-db";
+import { deleteProductionEvent } from "@/lib/ops/event-db";
 import { TEST_USER, TEST_OWNER } from "../_support/helpers";
 import { makeProduction, makeBlocks, cleanupProduction, makeLegacyVersion } from "../_support/factories";
 import { getPool } from "@/lib/pg";

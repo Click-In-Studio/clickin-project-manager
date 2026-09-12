@@ -1,14 +1,14 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import {
   getProductionPermissionContext,
   getCueList, updateCueList, deleteCueList,
   hasListAccess, listProductionDepts,
 } from "@/lib/db";
-import { listCueListGrants, listCueListDeptAccess } from "@/lib/resource-grant-db";
-import { canAccessNode } from "@/lib/grant-template";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { type PermissionContext } from "@/lib/permissions";
+import { listCueListGrants, listCueListDeptAccess } from "@/lib/perm/resource-grant-db";
+import { canAccessNode } from "@/lib/perm/grant-template";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { type PermissionContext } from "@/lib/perm/permissions";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);

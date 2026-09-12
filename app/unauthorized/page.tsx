@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { getProductionName } from "@/lib/db";
-import { getTechReqByProduction } from "@/lib/event-db";
+import { getTechReqByProduction } from "@/lib/ops/event-db";
 import UnauthorizedActions from "@/components/UnauthorizedActions";
 
 export const metadata: Metadata = { title: "无访问权限" };

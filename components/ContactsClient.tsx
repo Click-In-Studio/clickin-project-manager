@@ -2,10 +2,10 @@
 
 import PageHeader from "@/components/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
-import { userAvatarSrc } from "@/lib/avatar-url";
+import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import type { MemberWithRoles } from "@/lib/db";
-import { ROLE_GROUPS } from "@/lib/roles";
-import { isInactiveMember, memberStatusLabel } from "@/lib/member-status-shared";
+import { ROLE_GROUPS } from "@/lib/perm/roles";
+import { isInactiveMember, memberStatusLabel } from "@/lib/perm/member-status-shared";
 
 const ROLE_ORDER = ROLE_GROUPS.flatMap((g) => g.roles);
 

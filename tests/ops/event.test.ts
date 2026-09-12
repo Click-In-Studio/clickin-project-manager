@@ -5,7 +5,7 @@ import {
   createScheduleItem, listScheduleItems, updateScheduleItem, deleteScheduleItem,
   countPendingTasksForUser, countUnreadReportsForUser,
   listMyReports, listUnreadFollowedReports,
-} from "@/lib/event-db";
+} from "@/lib/ops/event-db";
 import { getPool } from "@/lib/pg";
 import { TEST_USER } from "../_support/helpers";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";

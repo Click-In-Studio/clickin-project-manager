@@ -1,7 +1,7 @@
 // 个人中心「返回工作区」目标的纯函数测试。这个值来自用户可控的 ?from=，
 // 校验一旦松掉就是开放式重定向，所以逃逸形状要逐个钉死。
 import { describe, it, expect } from "vitest";
-import { normalizeAccountReturnHref, WORKSPACE_HOME } from "@/lib/account-return";
+import { normalizeAccountReturnHref, WORKSPACE_HOME } from "@/lib/account/account-return";
 
 describe("normalizeAccountReturnHref", () => {
   it("接受 AppShell 生成的项目首页，并去掉尾斜杠", () => {

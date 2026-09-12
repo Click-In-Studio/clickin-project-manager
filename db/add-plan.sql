@@ -5,7 +5,7 @@
 --     有行（creator/internal）才可建项目。用户等级全站只在「建项目」一处被消费——
 --     功能跟项目走，人的等级不影响项目内功能。
 --   · production_plan 无行 = free 档。tier → 具体 limit（人数上限 / AI / 高级权限配置）
---     的映射是代码常量（lib/plan.ts），库里只存档名——改上限不动库。
+--     的映射是代码常量（lib/account/plan.ts），库里只存档名——改上限不动库。
 --   · internal（即「level99」内部档）：建项目直接落最高档 production_plan 行；
 --     own 的项目计费豁免——豁免在计费时查**当前 owner** 的档位推导，不物化到项目
 --     （owner 转移后账单责任随人走）。

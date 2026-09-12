@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { canAccessNode, nodeKeyCandidates, selfConfirmTemplateNodes, RESERVED_TYPES } from "@/lib/grant-template";
-import { recomputeAndRevokeGrants } from "@/lib/dept-db";
+import { canAccessNode, nodeKeyCandidates, selfConfirmTemplateNodes, RESERVED_TYPES } from "@/lib/perm/grant-template";
+import { recomputeAndRevokeGrants } from "@/lib/perm/dept-db";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
@@ -135,7 +135,7 @@ describe("制作人 role 结构保护（批G，用户定谳）", () => {
 
 describe("两个指派面（2026-08-13 用户定稿）", () => {
   it("EVENT manage 行集：含 assignees c/d + call_sheet@edit，不含 publication@create", async () => {
-    const { EVENT_LEVEL_ROW_SETS } = await import("@/lib/resource-grant-db");
+    const { EVENT_LEVEL_ROW_SETS } = await import("@/lib/perm/resource-grant-db");
     const pairs = EVENT_LEVEL_ROW_SETS.manage.map(([s, v]) => `${s}@${v}`);
     expect(pairs).toContain("assignees@create");
     expect(pairs).toContain("assignees@delete");
@@ -154,7 +154,7 @@ describe("两个指派面（2026-08-13 用户定稿）", () => {
   //
   // 这是个通用模式：**很多写死的定谳，本质是当时无法表达的策略**。
   it("跟组舞监行集：含 call_sheet@edit 与 assignees c/d（默认档），关掉开关即回到旧定谳", async () => {
-    const { setEventStageManagers } = await import("@/lib/event-db");
+    const { setEventStageManagers } = await import("@/lib/ops/event-db");
     const { getPool } = await import("@/lib/pg");
     const u = (await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id")).rows[0].id;
     const ev = `ev_sm_${Date.now().toString(36)}`;
@@ -174,8 +174,8 @@ describe("两个指派面（2026-08-13 用户定稿）", () => {
     await getPool().query("DELETE FROM production_event WHERE id = $1", [ev]);
 
     // 严格剧组关掉两键 ⇒ 回到 2026-08-13 的形态（排 call 不动名单）
-    const { setPolicies } = await import("@/lib/policy-db");
-    const { POLICY_OFF, POLICY_ON } = await import("@/lib/policy-keys");
+    const { setPolicies } = await import("@/lib/perm/policy-db");
+    const { POLICY_OFF, POLICY_ON } = await import("@/lib/perm/policy-keys");
     await setPolicies(prodId, {
       "event.stage_manager:assignees@create": POLICY_OFF,
       "event.stage_manager:assignees@delete": POLICY_OFF,

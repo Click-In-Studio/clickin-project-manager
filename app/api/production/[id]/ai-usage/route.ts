@@ -8,9 +8,9 @@
  * 两枚正交：只有总览键的人拿不到 members 分解，请求了也只是没有这一段。
  */
 import { type NextRequest } from "next/server";
-import { requireGrantGate } from "@/lib/api-guard";
-import { hasGrant } from "@/lib/grant-check";
-import { getProductionAiUsage, getProductionMemberUsage } from "@/lib/ai-quota";
+import { requireGrantGate } from "@/lib/perm/api-guard";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { getProductionAiUsage, getProductionMemberUsage } from "@/lib/agent/ai-quota";
 import { getPool } from "@/lib/pg";
 
 type Ctx = { params: Promise<{ id: string }> };

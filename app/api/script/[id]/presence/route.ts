@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
+import { hasGrant } from "@/lib/perm/grant-check";
 import { hasActiveSSEClient, updatePresence } from "@/lib/server-cache";
 import { getActiveVersionId, getVersion, getProductionPermissionContext } from "@/lib/db";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 
 type PresenceBody = {
   clientId: string;

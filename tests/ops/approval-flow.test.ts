@@ -2,7 +2,7 @@
  * 审批流集成测试（#140 阶梯升级 + #256 TTL 修复后）
  *
  * 验证点：
- *  - 阶梯路由（lib/approval-routing）：supervisor 链 → 持有者 → 共管部门 POC
+ *  - 阶梯路由（lib/approval/approval-routing）：supervisor 链 → 持有者 → 共管部门 POC
  *    → 父部门 POC → 制作人 → owner，申请人本人恒被排除，跨级去重
  *  - 敏感度分流：SENSITIVE 直达 owner（制作人代批不了）、ROOT 拒收申请
  *  - supervisor 语义：本人持有该权限 → 批准即终局；不持有 → 只能向上转交
@@ -33,8 +33,8 @@ import {
   ApprovalRequestError,
   type ApprovalChainEntry,
 } from "@/lib/db";
-import { buildApprovalLadder, classifyApprovalNode, nextStage } from "@/lib/approval-routing";
-import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval-stages";
+import { buildApprovalLadder, classifyApprovalNode, nextStage } from "@/lib/approval/approval-routing";
+import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval/approval-stages";
 import {
   TTL_OPTIONS,
   customExpiryDateToIso,
@@ -43,9 +43,9 @@ import {
   isValidTtlInterval,
   localTodayDateInputValue,
   ttlPayloadForSelection,
-} from "@/lib/approval-ttl";
-import { addResourceDeptManage, createProductionDept, setDeptMembers } from "@/lib/dept-db";
-import { listUserNotifications } from "@/lib/inbox-db";
+} from "@/lib/approval/approval-ttl";
+import { addResourceDeptManage, createProductionDept, setDeptMembers } from "@/lib/perm/dept-db";
+import { listUserNotifications } from "@/lib/notify/inbox-db";
 import { makeProduction, makeScene, cleanupProduction } from "../_support/factories";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────

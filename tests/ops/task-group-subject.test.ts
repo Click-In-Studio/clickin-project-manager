@@ -21,13 +21,13 @@ import { upsertFeishuUser, addProductionMember, getProductionPermissionContext }
 import {
   createProductionEvent, createEventTechReq, getTechReqByProduction,
   listMyTechReqsFull, updateTaskByProduction,
-} from "@/lib/event-db";
-import { canAssignTechReq, canEditTechReq, canViewTechReq, canEnterEvent } from "@/lib/event-permissions";
-import { createEventGroup, deleteEventGroup, EventGroupError } from "@/lib/event-group-db";
-import { freezeEventGroups, unfreezeEventGroups } from "@/lib/event-group-freeze";
-import { isTaskPoc, taskSubjectOf, parseTaskSubject, resolveSubjectPatch } from "@/lib/task-poc";
-import { toActor } from "@/lib/grant-check";
-import type { PermissionContext } from "@/lib/permissions";
+} from "@/lib/ops/event-db";
+import { canAssignTechReq, canEditTechReq, canViewTechReq, canEnterEvent } from "@/lib/ops/event-permissions";
+import { createEventGroup, deleteEventGroup, EventGroupError } from "@/lib/ops/event-group-db";
+import { freezeEventGroups, unfreezeEventGroups } from "@/lib/ops/event-group-freeze";
+import { isTaskPoc, taskSubjectOf, parseTaskSubject, resolveSubjectPatch } from "@/lib/ops/task-poc";
+import { toActor } from "@/lib/perm/grant-check";
+import type { PermissionContext } from "@/lib/perm/permissions";
 
 let prodId: string;
 let ownerId: string;

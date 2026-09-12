@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { toActor } from "@/lib/grant-check";
-import { canEnterEvent, hasEventContentEdit } from "@/lib/event-permissions";
-import { getProductionEvent } from "@/lib/event-db";
-import { describeFrozenGroups, freezeEventGroups, unfreezeEventGroups } from "@/lib/event-group-freeze";
+import { toActor } from "@/lib/perm/grant-check";
+import { canEnterEvent, hasEventContentEdit } from "@/lib/ops/event-permissions";
+import { getProductionEvent } from "@/lib/ops/event-db";
+import { describeFrozenGroups, freezeEventGroups, unfreezeEventGroups } from "@/lib/ops/event-group-freeze";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 

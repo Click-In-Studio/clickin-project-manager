@@ -11,7 +11,7 @@ import {
   listProductionCharacters, getCharacterById,
   listCueLists,
 } from "@/lib/db";
-import { createProductionEvent, getProductionEvent, deleteProductionEvent } from "@/lib/event-db";
+import { createProductionEvent, getProductionEvent, deleteProductionEvent } from "@/lib/ops/event-db";
 import { TEST_USER } from "../_support/helpers";
 import { makeProduction, makeScene, makeCharacter, cleanupProduction, shortId } from "../_support/factories";
 

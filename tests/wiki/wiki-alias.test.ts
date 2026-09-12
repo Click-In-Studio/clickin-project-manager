@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createWiki, deleteWiki, getWiki, updateWiki } from "@/lib/wiki/content";
 import {
   createNodeLink, moveNodeLink, renameNodeLink, filterEnumerableLinkEntries,
@@ -12,7 +12,7 @@ import {
 import { canViewWiki } from "@/lib/wiki/perm";
 import { listEnumerableNodeIds } from "@/lib/node/perm";
 import { listNodeTreeFor } from "@/lib/node/tree-view";
-import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
+import { WIKI_LEVEL_ROW_SETS } from "@/lib/perm/resource-grant-db";
 import { POST as aliasPOST } from "@/app/api/production/[id]/wiki-alias/route";
 import { PATCH as aliasPATCH, DELETE as aliasDELETE } from "@/app/api/production/[id]/wiki-alias/[aliasId]/route";
 import { makeProduction, cleanupProduction } from "../_support/factories";

@@ -1,7 +1,7 @@
 # 自建 AI 运行时（agent-runtime）运维手册
 
 对应 issue #367 与 MindWeave《AI运行时自建-薄harness设计》。本文只写**怎么跑、怎么切、怎么回滚**；
-设计意图看提案，代码地图看 `lib/agent-runtime/`。`docs/TOOL_SURFACE.md`（toolSearch 路线）已被本方案取代，留作历史。
+设计意图看提案，代码地图看 `lib/agent/runtime/`。`docs/TOOL_SURFACE.md`（toolSearch 路线）已被本方案取代，留作历史。
 
 ## 组成
 
@@ -9,9 +9,9 @@
 |---|---|---|
 | vendor 核心 | `vendor/openclaw/packages/{agent-core,llm-core}` | 上游 v2026.7.1-2，三处本地补丁见 `vendor/openclaw/VENDOR.md` |
 | provider/流式 | `@openclaw/ai@2026.7.1-2`（npm 锁精确版本） | 与 vendor 同一上游版本 |
-| run 服务 | `lib/agent-runtime/service.ts` | 一轮 run 的骨架：注入链 → harness → 事件 → 收尾 |
+| run 服务 | `lib/agent/runtime/service.ts` | 一轮 run 的骨架：注入链 → harness → 事件 → 收尾 |
 | 独立进程 | `agent-runner/index.ts` | loopback HTTP：`POST /runs` `/runs/steer` `/runs/abort`、`GET /health`；心跳、孤儿接管、SIGTERM 排水 |
-| next 侧 | `lib/agent-runtime/{client,dispatch}.ts` + `app/api/agent/*` 路由 | 发起/插话/中止交给 runner；SSE 从 `agent_event` 直出；行协议在 `lib/agent-chat/` |
+| next 侧 | `lib/agent/runtime/{client,dispatch}.ts` + `app/api/agent/*` 路由 | 发起/插话/中止交给 runner；SSE 从 `agent_event` 直出；行协议在 `lib/agent/chat/` |
 | 持久化 | `db/add-agent-runtime.sql`（六表）+ `db/add-agent-mutation.sql` + `db/add-agent-schedule.sql` | 会话/transcript/run/审批/提问/事件 + 写审计账本 + 定时任务 |
 
 ## 环境变量
@@ -36,8 +36,8 @@
 ### 冷层：召回 + `find_tools` 兜底
 
 工具面 = 热层（按会话类型）∪ 温层（按页面）∪ 冷层召回 ∪ 本会话最近用过的工具（`used-tools.ts`：只看最近 3 个用户轮次、最多 6 个、最近优先——窗口外自然淘汰，避免一个 session 里东问西问把面越滚越大）。**召回的粒度是族**（`tool-catalog.ts` 的 `family`/`TOOL_FAMILIES`）：
-族内任一工具过阈值 → 整族入面（每轮 ≤2 族），由模型在族内挑动作；族太大再拆 sub。冷层索引在 `lib/agent-runtime/tool-index.ts`：
-每个工具的 `oneliner + examples`（`lib/agent-tools/tool-catalog.ts`）逐条嵌入，复用记忆检索的 embedding 供应商
+族内任一工具过阈值 → 整族入面（每轮 ≤2 族），由模型在族内挑动作；族太大再拆 sub。冷层索引在 `lib/agent/runtime/tool-index.ts`：
+每个工具的 `oneliner + examples`（`lib/agent/tools/tool-catalog.ts`）逐条嵌入，复用记忆检索的 embedding 供应商
 （`EMBEDDING_PROVIDER`/`EMBEDDING_API_KEY`，向量缓存在 `agent_memory_embedding_cache`），未配置时退回纯词法。
 没召回到时的兜底是常驻的 `clickin__find_tools`（搜索，不是目录——目录会随工具数线性吃 prompt）：
 模型搜到名字后直接按名调用，harness 通过 `resolveDeferredTool`（vendor 补丁 #4）临时加载并在本会话后续轮次保持可见。
@@ -45,7 +45,7 @@
 
 ### 多钥匙域：写工具先查权限（构作族的先例）
 
-wiki 的每个写工具对应一把钥匙，卡片一句"你有/没有编辑这篇文档的权限"就够。构作族（`lib/agent-tools/dramaturgy-tools.ts`）
+wiki 的每个写工具对应一把钥匙，卡片一句"你有/没有编辑这篇文档的权限"就够。构作族（`lib/agent/tools/dramaturgy-tools.ts`）
 不是：scene 的每个字段各一把钥匙、角色逐实例一把，一个 `scene_propose_update` 横跨七把——不可能逐字段做工具，
 模型必须自己知道能改什么，否则会一直碰壁。约定：
 
@@ -91,16 +91,16 @@ OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，
 
 ## 写操作后自动刷新（mutation 行）
 
-写工具在注册表里声明 `mutates`（`lib/agent-runtime/tools.ts`；scope 现有 `wiki` / `instructions.personal` / `instructions.production`），成功执行后 runner 往 agent SSE 上发一行
+写工具在注册表里声明 `mutates`（`lib/agent/runtime/tools.ts`；scope 现有 `wiki` / `instructions.personal` / `instructions.production`），成功执行后 runner 往 agent SSE 上发一行
 `{ type: "mutation", scope, action, productionId, ids?, tool }`（紧跟 tool-end，同样落 `agent_event`，断线重连可补）。
-前端 `AgentPopout` 收到后**只派发**（`lib/agent-mutations.ts`）：页面/组件用 `useAgentMutation({ scope, productionId }, handler)`
+前端 `AgentPopout` 收到后**只派发**（`lib/agent/agent-mutations.ts`）：页面/组件用 `useAgentMutation({ scope, productionId }, handler)`
 订阅，handler 自己决定刷新粒度——client 页面重拉那一个 API、server component 页面 `router.refresh()`、带 `ids` 的只在命中时动；
 没人接才 `router.refresh()` 兜底。给新页面加自动刷新 = 写工具声明一句 `mutates` + 页面订阅一句，不碰 AgentPopout。
 现有订阅者：`WikiShell`（scope `wiki` → 软刷新左树，300ms 合并）。
 
 ## AI 写操作的 diff 审计（agent_mutation）
 
-每一次由 AI 工具落地的写都记一行 `agent_mutation`（`db/add-agent-mutation.sql`，`lib/agent-runtime/mutation-audit.ts`）：
+每一次由 AI 工具落地的写都记一行 `agent_mutation`（`db/add-agent-mutation.sql`，`lib/agent/runtime/mutation-audit.ts`）：
 谁的哪次 run、哪个工具、动了哪个域的哪个实体、写前/写后快照、字段级 `changes`。聊天里的确认卡审的是**意图**（args），
 这里记的是**结果**——它也是无人值守写（定时任务）的合法性来源：先做后审，审得了才能先做。
 
@@ -115,14 +115,14 @@ OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，
 
 ## 定时任务（agent_schedule）
 
-不是真 cron。一行 `agent_schedule`（`db/add-agent-schedule.sql`，`lib/agent-runtime/schedules.ts`）= 谁在哪个制作（可空 = 个人）
+不是真 cron。一行 `agent_schedule`（`db/add-agent-schedule.sql`，`lib/agent/runtime/schedules.ts`）= 谁在哪个制作（可空 = 个人）
 以什么时间表跑什么指令。**执行者节拍**（runner 每 60s `tickSchedules`，in-process 模式由 `instrumentation.ts` 节拍；
 `AGENT_SCHEDULE_TICK_MS`）用租约式原子 UPDATE 认领到期行，到点**以创建者身份开一个新会话**跑一次 run（标题 `⏰ <名> · <时间>`，
 `agent_session.schedule_id` 挂回任务），结果经站内通知（kind `agent_schedule`，飞书 DM 随偏好）**只投给创建者**，
 链接带 `?agentSession=<key>`，AgentPopout 直接打开那条会话。
 
 - **时间表**（`schedule-cron.ts`，形状照抄 OpenClaw cron 工具）：`{kind:"at",at}` 一次性 / `{kind:"cron",expr,tz}`（expr 是 tz 的
-  **墙钟时间**，默认 `Asia/Shanghai`，绝不换算 UTC）/ `{kind:"every",everyMs}`。成本闸在 `lib/plan.ts` 的 `SCHEDULE_LIMITS`
+  **墙钟时间**，默认 `Asia/Shanghai`，绝不换算 UTC）/ `{kind:"every",everyMs}`。成本闸在 `lib/account/plan.ts` 的 `SCHEDULE_LIMITS`
   （every ≥ 1h、cron ≤ 24 次/日、at ≤ 1 年）+ 按用户档位的活跃任务数（`maxActiveSchedules`：free 3 / creator 20 / internal 无限）。
   额度照走 `assertAiQuota`（项目任务记 owner 头上），单 run 仍受 `AI_RUN_CREDIT_HARD_CAP`。
 - **权限实时查、不快照**：触发出的 run 与普通会话同构，工具内 `hasEffectiveGrant` 照判。触发前三道前置门（创建者账号在 /
@@ -140,9 +140,9 @@ OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，
 
 ## skills 的事实源
 
-`lib/agent-runtime/tools.ts` 的注册表（DEFS）是工具的**唯一事实源**（MCP 服务器已于 2026-08-29 退役）：
-描述、参数 schema、只读/写、`mutates` 声明都在这里；底层实现在 `lib/agent-tools/`；
-中文触发词/例句/族在 `lib/agent-tools/tool-catalog.ts`；显示名在 `lib/agent-tool-labels.ts`。
+`lib/agent/runtime/tools.ts` 的注册表（DEFS）是工具的**唯一事实源**（MCP 服务器已于 2026-08-29 退役）：
+描述、参数 schema、只读/写、`mutates` 声明都在这里；底层实现在 `lib/agent/tools/`；
+中文触发词/例句/族在 `lib/agent/tools/tool-catalog.ts`；显示名在 `lib/agent/agent-tool-labels.ts`。
 三处由 `tests/agent/tool-catalog.test.ts` 与 `tests/agent/agent-tool-labels.test.ts` 双向防漂移——加一个工具要同批改三处。
 
 ## 用量与限流（#383）
@@ -151,8 +151,8 @@ OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，
 线上实测一次问答 ≈ **1.2 万 credit ≈ $0.005**（input 4.6k + cache_read 16k + output 2.4k）。
 不按裸 token 限流：一次 run 的 token 七成是 cache_read，而它只有 1/31 的单价，按裸 token 限会限错地方。
 
-**钱从哪来**：单价表 = `lib/agent-runtime/config.ts` 的 `Model.cost`（$/1M，peak；off-peak 半价，按 peak 记＝保守）。
-provider 层逐条算出 `usage.cost`，`billing.ts` 折成美元、`lib/plan.ts` 折成 credit。
+**钱从哪来**：单价表 = `lib/agent/runtime/config.ts` 的 `Model.cost`（$/1M，peak；off-peak 半价，按 peak 记＝保守）。
+provider 层逐条算出 `usage.cost`，`billing.ts` 折成美元、`lib/account/plan.ts` 折成 credit。
 **加新模型必须同时登记单价**，否则它的用量记 0 credit。embedding 走另一条常量（DashScope）。
 
 **判定点**：`startRun` 进 harness **之前**判一次（`assertAiQuota`），超限抛 429、不进循环。

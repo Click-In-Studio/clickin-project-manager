@@ -3,12 +3,12 @@ import { randomUUID } from "node:crypto";
 import { makeProduction, cleanupProduction, makeScene, makeCharacter, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember, applyPatchToDB } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { DENIED_NOT_MEMBER } from "@/lib/agent-tools/production-tools";
+import { DENIED_NOT_MEMBER } from "@/lib/agent/tools/production-tools";
 import {
   scriptReadSection, scriptReadWindow, scriptSearch, scriptReadPage, DENIED_SCRIPT_VIEW,
-} from "@/lib/agent-tools/script-tools";
-import type { Block } from "@/lib/script-types";
-import type { ScriptPatch } from "@/lib/script-ops";
+} from "@/lib/agent/tools/script-tools";
+import type { Block } from "@/lib/script/script-types";
+import type { ScriptPatch } from "@/lib/script/script-ops";
 
 // 剧本正文读面（P1）核心保证：①读门 = 剧本页门票（script/*/blocks@view，工具内实时判）；
 // ②正文以剧本方言输出，[b:<id>] 携带块 id（后续引用/改写的锚点）；③页码是估算值，

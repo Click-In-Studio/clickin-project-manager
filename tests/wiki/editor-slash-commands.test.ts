@@ -13,11 +13,11 @@ import StarterKit from "@tiptap/starter-kit";
 import { TableKit } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Markdown } from "tiptap-markdown";
-import { Callout } from "@/lib/tiptap-callout";
-import { Column, ColumnGroup } from "@/lib/tiptap-columns";
-import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor-slash-commands";
-import { TURN_INTO } from "@/lib/editor-block-ops";
-import { BLOCK_TYPES } from "@/lib/editor-block-types";
+import { Callout } from "@/lib/editor/tiptap-callout";
+import { Column, ColumnGroup } from "@/lib/editor/tiptap-columns";
+import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor/editor-slash-commands";
+import { TURN_INTO } from "@/lib/editor/editor-block-ops";
+import { BLOCK_TYPES } from "@/lib/editor/editor-block-types";
 
 // 与 SmartTextarea 同一套扩展集（「一切文本皆文档」之后全站只有这一套 schema）
 function makeEditor(content: string) {

@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { escalateAccessRequest, getProductionPermissionContext } from "@/lib/db";
-import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval-stages";
+import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval/approval-stages";
 
 type Ctx = { params: Promise<{ id: string; reqId: string }> };
 

@@ -7,11 +7,11 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { addProductionMember, upsertFeishuUser } from "@/lib/db";
-import { getMemberStatus, restoreMember } from "@/lib/member-status";
+import { getMemberStatus, restoreMember } from "@/lib/perm/member-status";
 import { getPool } from "@/lib/pg";
-import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval-stages";
+import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval/approval-stages";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
 import { POST as statusHandler, GET as statusGet } from

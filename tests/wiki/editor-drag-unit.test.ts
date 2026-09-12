@@ -12,8 +12,8 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { TableKit } from "@tiptap/extension-table";
 import { Markdown } from "tiptap-markdown";
-import { Column, ColumnGroup } from "@/lib/tiptap-columns";
-import { scoreDragTarget } from "@/lib/editor-drag-unit";
+import { Column, ColumnGroup } from "@/lib/editor/tiptap-columns";
+import { scoreDragTarget } from "@/lib/editor/editor-drag-unit";
 
 function makeEditor(content: string) {
   return new Editor({

@@ -1,12 +1,12 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getActiveVersionId, getVersion, loadProduction, getEstimatedPageMap } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
-import { buildMarkerLabelIndex, type MarkerLabelIndex } from "@/lib/script-generated-labels";
-import type { MentionSearchResult } from "@/lib/mention-types";
-import type { Block } from "@/lib/script-types";
+import { isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script/script-marker-blocks";
+import { buildMarkerLabelIndex, type MarkerLabelIndex } from "@/lib/script/script-generated-labels";
+import type { MentionSearchResult } from "@/lib/editor/mention-types";
+import type { Block } from "@/lib/script/script-types";
 
 export type { MentionSearchResult as ScriptBlockSearchResult };
 

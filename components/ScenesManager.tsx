@@ -9,11 +9,11 @@ import RelatedWikiChips from "./wiki/RelatedWikiChips";
 import type { SceneDetail } from "@/lib/db";
 import DurationInput from "@/components/DurationInput";
 import { parseDuration } from "@/lib/duration";
-import { getChapterDurationDisplay } from "@/lib/scene-duration";
-import { canDeleteScene, canMountScene, type SceneFieldPerms } from "@/lib/scene-field-perms-shared";
+import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
+import { canDeleteScene, canMountScene, type SceneFieldPerms } from "@/lib/script/scene-field-perms-shared";
 import BoundaryActionMenu from "@/components/BoundaryActionMenu";
 import MarkerDeleteDialog, { type MarkerDeleteDialogState } from "@/components/MarkerDeleteDialog";
-import type { MarkerDeleteOperation, MarkerProjection } from "@/lib/script-marker-domain";
+import type { MarkerDeleteOperation, MarkerProjection } from "@/lib/script/script-marker-domain";
 import ChevronIcon from "@/components/ChevronIcon";
 
 type MetaFields = Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">;

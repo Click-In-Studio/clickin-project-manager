@@ -6,7 +6,7 @@ import { createAsset } from "@/lib/asset/db";
 import { addNodeMount } from "@/lib/node/mount";
 import { insertNode } from "@/lib/node/db";
 import { canViewAsset, filterVisibleAssets, mountHostSidePermitted } from "@/lib/asset/perm";
-import type { PermissionContext } from "@/lib/permissions";
+import type { PermissionContext } from "@/lib/perm/permissions";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 

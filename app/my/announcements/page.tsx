@@ -3,7 +3,7 @@ export const metadata: Metadata = { title: "公告与风险提醒" };
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { listAnnouncementsForUser, listCueWarningsForUser, getUserAllReadAnnouncementIds } from "@/lib/db";
 import AnnouncementsClient from "@/components/AnnouncementsClient";
 

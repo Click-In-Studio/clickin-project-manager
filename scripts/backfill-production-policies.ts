@@ -15,8 +15,8 @@
  */
 
 import { getPool } from "../lib/pg";
-import { ensureProductionPolicies } from "../lib/policy-db";
-import { POLICY_KEYS } from "../lib/policy-keys";
+import { ensureProductionPolicies } from "../lib/perm/policy-db";
+import { POLICY_KEYS } from "../lib/perm/policy-keys";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   console.log(`\n${DRY_RUN ? "[dry-run] 需回填" : "已回填"} ${touched} 个演出。`);
   if (unknown.length > 0) {
     console.error(`⚠ 发现词汇表以外的幽灵键 ${unknown.length} 个：${unknown.join(", ")}`);
-    console.error("  （词汇表改名/删键后没清理存量行——查 lib/policy-keys.ts）");
+    console.error("  （词汇表改名/删键后没清理存量行——查 lib/perm/policy-keys.ts）");
     process.exitCode = 1;
   } else {
     console.log("幽灵键检查：通过。");

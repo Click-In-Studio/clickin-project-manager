@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasGrant } from "@/lib/grant-check";
-import { findProducers } from "@/lib/approval-routing";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { findProducers } from "@/lib/approval/approval-routing";
 import {
   listResourceApprovers,
   listDelegableResourceTypes,
@@ -10,7 +10,7 @@ import {
   NON_DELEGABLE_RESOURCE_TYPES,
   ResourceApproverError,
   resourceApproverErrorMessage,
-} from "@/lib/resource-approver-db";
+} from "@/lib/perm/resource-approver-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -21,7 +21,7 @@ type Ctx = { params: Promise<{ id: string }> };
  * 制作人显式在门内是本 issue 的题眼——issue 说的正是「制作人/owner 无法把这类审批委派
  * 出去」。只认 grants@edit 的话，制作人还得先去要一行治理授权才能委派，等于没修。
  *
- * 写入的语义（含「配审批方 = 给共管权」这一层）见 lib/resource-approver-db.ts 文件头。
+ * 写入的语义（含「配审批方 = 给共管权」这一层）见 lib/perm/resource-approver-db.ts 文件头。
  */
 async function gate(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);

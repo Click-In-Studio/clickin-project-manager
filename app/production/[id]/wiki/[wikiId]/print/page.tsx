@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName, getUserPrimaryEmail } from "@/lib/db";
-import { toActor } from "@/lib/grant-check";
+import { toActor } from "@/lib/perm/grant-check";
 import { getWiki } from "@/lib/wiki/content";
 import { canViewWiki } from "@/lib/wiki/perm";
 import WikiPrintPage from "@/components/wiki/WikiPrintPage";

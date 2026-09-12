@@ -1,7 +1,7 @@
 // 界面上下文信封的纯函数测试（无 DB/网络）：拼装 → 剥离 往返，以及展示侧
 // 绝不能把用户原文吃掉这条不变量。
 import { describe, it, expect } from "vitest";
-import { buildUiContextMessage, stripUiContext } from "@/lib/agent-ui-context";
+import { buildUiContextMessage, stripUiContext } from "@/lib/agent/agent-ui-context";
 
 const DOC = { wikiId: "w123", title: "灯光设计说明", tags: ["灯光", "v2"] };
 

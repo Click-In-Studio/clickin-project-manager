@@ -1,5 +1,5 @@
 /**
- * 注册邀请制（db/add-registration-gate.sql + lib/registration-gate.ts）：
+ * 注册邀请制（db/add-registration-gate.sql + lib/account/registration-gate.ts）：
  *   · 开关关闭 → 一切照旧；开启 → 新邮箱需正当性四选一，老用户登录不受影响
  *   · 码在建号事务内锁行消耗 + 落流水；并发用尽整体回滚不产生账号
  *   · initiate 路由把 RegistrationDeniedError 映射为 403（文案面向用户）
@@ -16,9 +16,9 @@ import {
   requireRegistrationJustification,
   RegistrationDeniedError,
   registrationRateLimited,
-} from "@/lib/registration-gate";
+} from "@/lib/account/registration-gate";
 import { upsertEmailUser, upsertFeishuUser } from "@/lib/db";
-import { createInvite } from "@/lib/invite-db";
+import { createInvite } from "@/lib/account/invite-db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { getPool } from "@/lib/pg";
 import { POST as initiateHandler } from "@/app/api/auth/[platform]/initiate/route";

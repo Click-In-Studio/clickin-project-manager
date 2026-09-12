@@ -1,20 +1,20 @@
 import { type NextRequest } from "next/server";
-import { toActor } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { toActor } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import {
   getEventReport, getReportNote, getProductionEvent,
   listReportReplies, createReportReply,
   type Mention,
-} from "@/lib/event-db";
+} from "@/lib/ops/event-db";
 import {
   loadEventPermContext,
   canReplyToReport, canReplyToReportNote, canReplyToReply,
   hasEventDomainView,
-} from "@/lib/event-permissions";
+} from "@/lib/ops/event-permissions";
 import { buildReplyMentionCard } from "@/lib/platform/feishu/feishu-bot";
 import { SERVER_URL } from "@/lib/server-url";
-import { notifyUsers } from "@/lib/notify";
+import { notifyUsers } from "@/lib/notify/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string }> };
 

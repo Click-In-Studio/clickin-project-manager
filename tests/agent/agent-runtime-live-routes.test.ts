@@ -3,10 +3,10 @@ import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, setProductionTier, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/db";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { createNewSessionKey } from "@/lib/agent-tools/session-identity";
-import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-chat/stream-reducer";
-import { runtimeOverrides, waitForIdle } from "@/lib/agent-runtime/service";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
+import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
+import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent/chat/stream-reducer";
+import { runtimeOverrides, waitForIdle } from "@/lib/agent/runtime/service";
 
 // #367 S2 真机冒烟（路由 + 真 DeepSeek + 真工具）：无 DEEPSEEK_API_KEY 时跳过。
 // 验证的是整条链：POST /chat/stream → 注入链 → harness → 真模型决定调 my.productions

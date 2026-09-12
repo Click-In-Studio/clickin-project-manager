@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, listTagGroups, createTagGroup } from "@/lib/db";
-import { hasGrant } from "@/lib/grant-check";
+import { hasGrant } from "@/lib/perm/grant-check";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);

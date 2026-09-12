@@ -5,7 +5,7 @@ import {
   LOCAL_SCRIPT_DATA_SNAPSHOT_PATH,
   type LocalScriptDataSnapshot,
 } from "./local-script-data-snapshot";
-import { resolveTemplate } from "@/lib/production-template";
+import { resolveTemplate } from "@/lib/production/production-template";
 
 let snapshot: LocalScriptDataSnapshot | null = null;
 try {

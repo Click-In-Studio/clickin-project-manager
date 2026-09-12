@@ -18,10 +18,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { TEST_USER } from "../_support/helpers";
 import { makeProduction, cleanupProduction } from "../_support/factories";
-import { notifyTaskAssigned } from "@/lib/notify";
+import { notifyTaskAssigned } from "@/lib/notify/notify";
 import {
   createUserNotification,
   batchCreateUserNotifications,
@@ -33,7 +33,7 @@ import {
   markNotificationActed,
   expireNotificationsByEntity,
   rsvpCallTime,
-} from "@/lib/inbox-db";
+} from "@/lib/notify/inbox-db";
 
 // ── Route handlers ────────────────────────────────────────────────────────────
 

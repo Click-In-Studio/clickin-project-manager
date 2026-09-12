@@ -30,7 +30,7 @@ async function maybeSteer(jobId: string): Promise<void> {
     if (!sessionId) return;
     const def = getJobHandlerDef(fresh.kind);
     if (!def?.steerMessage) return;
-    const { steerRun } = await import("@/lib/agent-runtime/client");
+    const { steerRun } = await import("@/lib/agent/runtime/client");
     await steerRun(sessionId, def.steerMessage(fresh, fresh.status === "done"));
   } catch (err) {
     console.error(`[job] steer for ${jobId} failed:`, err);

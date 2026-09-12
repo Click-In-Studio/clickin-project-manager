@@ -11,14 +11,14 @@ import { NextRequest } from "next/server";
 import { makeProduction, cleanupProduction, setProductionTier, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import {
   POLICY_KEYS, ACTION_ROLES, POLICY_ON, POLICY_OFF, policyDef, configurableRows,
-} from "@/lib/policy-keys";
+} from "@/lib/perm/policy-keys";
 import {
   ensureProductionPolicies, getPolicyMap, getPolicyValue, isPolicyOn,
   setPolicies, listPolicies, listPolicyAudit, policyFilteredRows,
-} from "@/lib/policy-db";
+} from "@/lib/perm/policy-db";
 import { GET as getPolicies, PUT as putPolicies } from "@/app/api/production/[id]/policies/route";
 
 let prodId: string;
@@ -334,8 +334,8 @@ describe("棘轮：production_policy 不得出现词汇表以外的键", () => {
 
 describe("R 系定式接开关（端到端）", () => {
   it("R-1 参与者行集：关掉 event.participant:details@view ⇒ 只发 meta@view", async () => {
-    const { createProductionEvent, setEventParticipants } = await import("@/lib/event-db");
-    const { hasGrant } = await import("@/lib/grant-check");
+    const { createProductionEvent, setEventParticipants } = await import("@/lib/ops/event-db");
+    const { hasGrant } = await import("@/lib/perm/grant-check");
     const guest = await makeUser("r1-guest");
     await addProductionMember(prodId, guest);
     await setPolicies(prodId, { "event.participant:details@view": POLICY_OFF }, editorId);
@@ -356,8 +356,8 @@ describe("R 系定式接开关（端到端）", () => {
   });
 
   it("R-6 POC notes 三行：关掉 delete ⇒ 上任只发 create/edit，但卸任撤销不受影响", async () => {
-    const { createProductionDept, setDeptMembers } = await import("@/lib/dept-db");
-    const { hasGrant } = await import("@/lib/grant-check");
+    const { createProductionDept, setDeptMembers } = await import("@/lib/perm/dept-db");
+    const { hasGrant } = await import("@/lib/perm/grant-check");
     const poc = await makeUser("r6-poc");
     await addProductionMember(prodId, poc);
     const dept = await createProductionDept({ productionId: prodId, name: `R6部门${shortId()}` });
@@ -392,7 +392,7 @@ describe("棘轮：每个策略键都有消费点", () => {
         const full = join(dir, e.name);
         if (e.isDirectory()) { walk(full); continue; }
         if (!/\.tsx?$/.test(e.name)) continue;
-        if (full.endsWith("lib/policy-keys.ts")) continue;
+        if (full.endsWith("lib/perm/policy-keys.ts")) continue;
         sources.push(readFileSync(full, "utf8"));
       }
     };
@@ -400,7 +400,7 @@ describe("棘轮：每个策略键都有消费点", () => {
     const blob = sources.join("\n");
 
     // 欠账清单：形状 L 的孤儿处置曾挂在这里（它不是「接线」而是「实现一个不存在的
-    // 功能」）。同批已实装（lib/task-orphan.ts），故清空——反向守卫会盯着它不再回来。
+    // 功能」）。同批已实装（lib/ops/task-orphan.ts），故清空——反向守卫会盯着它不再回来。
     const PENDING_IMPLEMENTATION = new Set<string>();
 
     const orphans = POLICY_KEYS
@@ -466,7 +466,7 @@ describe("GET /policies 的语义层视图", () => {
   });
 
   it("选中某答案 = 覆盖该题全部键（不做 merge）", async () => {
-    const { POLICY_QUESTIONS } = await import("@/lib/policy-questions");
+    const { POLICY_QUESTIONS } = await import("@/lib/perm/policy-questions");
     const q = POLICY_QUESTIONS.find((x) => x.id === "participant_list")!;
     const smOnly = q.answers.find((a) => a.id === "sm_only")!;
     const res = await putPolicies(makeReq(editorId, { changes: smOnly.values }), ctx());

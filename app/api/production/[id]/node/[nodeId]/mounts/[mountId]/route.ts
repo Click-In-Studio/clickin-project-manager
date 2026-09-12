@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { toActor } from "@/lib/grant-check";
+import { toActor } from "@/lib/perm/grant-check";
 import { getNode } from "@/lib/node/db";
 import { getNodeMount, removeNodeMount } from "@/lib/node/mount";
 import { canPublishAsset, mountHostSidePermitted } from "@/lib/asset/perm";

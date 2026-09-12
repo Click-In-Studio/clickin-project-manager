@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
 
 // DELETE /api/admin/bot-testers/[openId] — remove a tester

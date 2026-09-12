@@ -9,14 +9,14 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import {
   createProduction, deleteProduction, getActiveVersionId,
   addProductionMember, setMemberRoles,
 } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 import { TEST_USER, TEST_OWNER } from "../_support/helpers";
-import type { Block, ScriptState } from "@/lib/script-types";
+import type { Block, ScriptState } from "@/lib/script/script-types";
 
 // ── Route handlers ────────────────────────────────────────────────────────────
 import { POST as createCueListHandler } from "@/app/api/production/[id]/cuelists/route";

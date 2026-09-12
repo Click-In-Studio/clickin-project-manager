@@ -6,8 +6,8 @@ import {
   shouldHideCharacterLabel,
   shouldShowCharacterGap,
   shouldShowSceneEndGap,
-} from "@/lib/script-block-layout";
-import type { Block, BlockType } from "@/lib/script-types";
+} from "@/lib/script/script-block-layout";
+import type { Block, BlockType } from "@/lib/script/script-types";
 
 /**
  * 块级排版判据的护栏（#335 抽出为共用件时补）。

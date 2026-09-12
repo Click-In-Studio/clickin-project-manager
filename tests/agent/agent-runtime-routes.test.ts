@@ -5,14 +5,14 @@ import type { AssistantMessage, StreamFn } from "../../vendor/openclaw/packages/
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, setProductionTier, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/db";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { createNewSessionKey } from "@/lib/agent-tools/session-identity";
-import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-chat/stream-reducer";
-import { runtimeOverrides, waitForIdle } from "@/lib/agent-runtime/service";
-import { CHAT_MODEL } from "@/lib/agent-runtime/config";
-import { createApproval } from "@/lib/agent-runtime/approvals";
-import { createOrReuseQuestion } from "@/lib/agent-runtime/questions";
-import { newApprovalId, newQuestionId, newRunId, newSessionId } from "@/lib/agent-runtime/ids";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
+import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
+import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent/chat/stream-reducer";
+import { runtimeOverrides, waitForIdle } from "@/lib/agent/runtime/service";
+import { CHAT_MODEL } from "@/lib/agent/runtime/config";
+import { createApproval } from "@/lib/agent/runtime/approvals";
+import { createOrReuseQuestion } from "@/lib/agent/runtime/questions";
+import { newApprovalId, newQuestionId, newRunId, newSessionId } from "@/lib/agent/runtime/ids";
 
 // #367 S2：路由分流的端到端——AGENT_RUNTIME=runner 时，同一套路由（stream/history/
 // sessions/abort/[key]）走自建运行时；SSE 帧格式与行协议与网关时代一致，前端零改动。

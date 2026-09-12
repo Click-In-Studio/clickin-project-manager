@@ -2,10 +2,10 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { getPool } from "@/lib/pg";
-import { SCENE_FIELD_SUBS } from "@/lib/scene-field-perms";
-import { PAGE_PERMISSION_SCOPES } from "@/lib/page-permission-scopes";
-import { parseNodeKey, isSensitiveNode, isRootNode } from "@/lib/grant-template";
-import { PRODUCTION_TEMPLATES } from "@/lib/production-template";
+import { SCENE_FIELD_SUBS } from "@/lib/script/scene-field-perms";
+import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
+import { parseNodeKey, isSensitiveNode, isRootNode } from "@/lib/perm/grant-template";
+import { PRODUCTION_TEMPLATES } from "@/lib/production/production-template";
 
 /**
  * 激活面覆盖棘轮。
@@ -37,7 +37,7 @@ const KNOWN_UNCONSUMED: readonly string[] = [
   // ── 剧本域：模板已表达字段级意图，判定端尚未拆门 ────────────────────────
   // requiredPermissions 对 blocks 的插入 / 更新 / 删除一律给 blocks@edit，
   // 排练标记的四个动词也一律给 rehearsal_marks@create。模板发得比判定端细，
-  // 与 scene 拆门前是同一种欠账（见 lib/scene-field-perms.ts 的由来）。
+  // 与 scene 拆门前是同一种欠账（见 lib/script/scene-field-perms.ts 的由来）。
   // 哪天照 scene 的样子把 script 也拆到字段级，这些就该从豁免表移进
   // PAGE_PERMISSION_SCOPES.script。
   "node:script/*/blocks@create",
@@ -114,11 +114,11 @@ function collectGuardedKeys(): Set<string> {
   for (const m of src.matchAll(/"([a-z_]+)",\s*\[([^\]]*)\],\s*"(view|create|edit|delete)"/g)) {
     for (const s of m[2].matchAll(/"([^"]+)"/g)) add(m[1], s[1], m[3]);
   }
-  // 源码里直接写死的节点串（lib/script-ops.ts 的 requiredPermissions 等）
+  // 源码里直接写死的节点串（lib/script/script-ops.ts 的 requiredPermissions 等）
   for (const m of src.matchAll(/"(node:[a-z_*]+\/[^"@]*@(?:view|create|edit|delete))"/g)) {
     keys.add(m[1]);
   }
-  // scene 字段门经 SCENE_FIELD_SUBS 间接消费（lib/scene-field-perms.ts）
+  // scene 字段门经 SCENE_FIELD_SUBS 间接消费（lib/script/scene-field-perms.ts）
   for (const sub of Object.values(SCENE_FIELD_SUBS)) add("scene", sub, "edit");
   return keys;
 }

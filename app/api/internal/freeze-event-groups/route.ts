@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { freezeExpiredEventGroups } from "@/lib/event-group-freeze";
+import { freezeExpiredEventGroups } from "@/lib/ops/event-group-freeze";
 
 function authorized(req: NextRequest): boolean {
   const secret = process.env.INTERNAL_NOTIFY_SECRET;

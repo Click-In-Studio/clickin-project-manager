@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getSession, generateOAuthState, OAUTH_STATE_COOKIE } from "@/lib/session";
+import { getSession, generateOAuthState, OAUTH_STATE_COOKIE } from "@/lib/account/session";
 import { feishuPlatform } from "@/lib/platform/feishu";
 
 const BIND_SOURCE_COOKIE = "bind_source_user_id";

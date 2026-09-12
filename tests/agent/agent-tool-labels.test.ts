@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { TOOL_LABELS, toolLabel } from "@/lib/agent-tool-labels";
-import { TOOL_MCP_NAMES } from "@/lib/agent-runtime/tools";
-import { boundPayload } from "@/lib/agent-runtime/stream-lines";
+import { TOOL_LABELS, toolLabel } from "@/lib/agent/agent-tool-labels";
+import { TOOL_MCP_NAMES } from "@/lib/agent/runtime/tools";
+import { boundPayload } from "@/lib/agent/runtime/stream-lines";
 
-// 翻译表防漂移：对照运行时注册表（lib/agent-runtime/tools.ts）——新增工具没配中文
+// 翻译表防漂移：对照运行时注册表（lib/agent/runtime/tools.ts）——新增工具没配中文
 // 显示名、或表里留着已退役工具的残条，这里会红。
 
 function registeredToolNames(): string[] {

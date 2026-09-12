@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { escalateExpiredApprovals } from "@/lib/db";
-import { escalateExpiredExpenses } from "@/lib/finance-db";
+import { escalateExpiredExpenses } from "@/lib/ops/finance-db";
 
 function authorized(req: NextRequest): boolean {
   const secret = process.env.INTERNAL_NOTIFY_SECRET;

@@ -16,26 +16,26 @@ import { createPortal } from "react-dom";
 import { match as pinyinMatch } from "pinyin-pro";
 import { BASE_PATH } from "@/lib/base-path";
 import type { SuggestionProps, SuggestionKeyDownProps } from "@tiptap/suggestion";
-import type { MentionSearchResult } from "@/lib/mention-types";
+import type { MentionSearchResult } from "@/lib/editor/mention-types";
 import {
   encodeMentionHref, decodeMentionHref, CM_HREF_PREFIX,
   encodeUserHref, decodeUserHref, decodeAssetSrc,
   type ContentMentionAttrs,
-} from "@/lib/mention-types";
+} from "@/lib/editor/mention-types";
 import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
-import { isFeishuHtml, transformFeishuHtml } from "@/lib/feishu-paste";
-import { stripExternalPastedImages } from "@/lib/external-img-paste";
+import { isFeishuHtml, transformFeishuHtml } from "@/lib/editor/feishu-paste";
+import { stripExternalPastedImages } from "@/lib/editor/external-img-paste";
 import { isEmbeddableUpload, embedMediaKind } from "@/lib/asset/embed-media";
-import { Callout } from "@/lib/tiptap-callout";
+import { Callout } from "@/lib/editor/tiptap-callout";
 import { WikiImage, type WikiEmbedMeta } from "@/lib/wiki/tiptap-image";
-import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/tiptap-upload-placeholder";
-import { Column, ColumnGroup } from "@/lib/tiptap-columns";
-import { ColumnDrop } from "@/lib/tiptap-column-drop";
-import { ColumnEditing } from "@/lib/tiptap-column-editing";
-import { ColumnResize } from "@/lib/tiptap-column-resize";
-import { TableKeymap } from "@/lib/tiptap-table-keymap";
-import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor-slash-commands";
-import { DROP_INDICATOR_OPTIONS } from "@/lib/editor-drop-indicator";
+import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/editor/tiptap-upload-placeholder";
+import { Column, ColumnGroup } from "@/lib/editor/tiptap-columns";
+import { ColumnDrop } from "@/lib/editor/tiptap-column-drop";
+import { ColumnEditing } from "@/lib/editor/tiptap-column-editing";
+import { ColumnResize } from "@/lib/editor/tiptap-column-resize";
+import { TableKeymap } from "@/lib/editor/tiptap-table-keymap";
+import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor/editor-slash-commands";
+import { DROP_INDICATOR_OPTIONS } from "@/lib/editor/editor-drop-indicator";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 import BlockHandle from "@/components/editor/BlockHandle";
 import TableTools from "@/components/editor/TableTools";
@@ -652,7 +652,7 @@ export default function SmartTextarea({
     // 的 schema 丢弃，重新序列化时星号就消失了，而 plain 面没有保真锁兜底。
     // 生产库实测：plain 列里带 markdown 语法的一共 3 行（两条有序列表），
     // 所以「统一 schema」的观感代价可忽略，而丢内容的风险是实打实的。
-    // 拖拽落点指示线 —— 理由与选型见 lib/editor-drop-indicator.ts。
+    // 拖拽落点指示线 —— 理由与选型见 lib/editor/editor-drop-indicator.ts。
     // 注意 StarterKit 的选项键是小写 dropcursor，扩展自身的名字却是 dropCursor。
     //
     // blockTools 面**整个关掉内建 dropcursor**：那里由 ColumnDrop 统一画横线与
@@ -804,7 +804,7 @@ export default function SmartTextarea({
           : "outline-none smart-textarea-content",
         style: readOnly ? "" : `min-height:${editorMinHeight}`,
       },
-      // 飞书粘贴归一化（junk 清理/代码块/checklist/@提及映射，lib/feishu-paste）。
+      // 飞书粘贴归一化（junk 清理/代码块/checklist/@提及映射，lib/editor/feishu-paste）。
       // 只认飞书来源标记，其他粘贴源原样放行；失败也放行——宁可少归一化不拦粘贴
       handleDOMEvents: {
         // 在 PM 处理 paste 之前截获飞书私有格式（返回 false 不拦默认流程）
@@ -826,7 +826,7 @@ export default function SmartTextarea({
             out = transformFeishuHtml(out, { members: memberMentionRef.current?.members, record });
           } catch { /* 归一化失败放行原文 */ }
         }
-        // 外链/内嵌 img 收口（lib/external-img-paste）：飞书之外的来源也不许
+        // 外链/内嵌 img 收口（lib/editor/external-img-paste）：飞书之外的来源也不许
         // 把会过期的 URL 冒充成嵌入
         try {
           return stripExternalPastedImages(out);
@@ -839,7 +839,7 @@ export default function SmartTextarea({
       // 渲染端不会「贴得进去渲染不出」。
       // 飞书「复制图片」实测剪贴板携带真文件走此路径；整篇文档粘贴无 file，
       // 不会被此分支劫持（照走 transformPastedHTML）。
-      // 粘贴瞬间挂 decoration 占位（lib/tiptap-upload-placeholder）——没有即时
+      // 粘贴瞬间挂 decoration 占位（lib/editor/tiptap-upload-placeholder）——没有即时
       // 反馈用户会以为粘贴无效而反复贴；decoration 不进正史不广播，天然安全
       handlePaste: (view, event) => {
         const upload = imageUploadRef.current;

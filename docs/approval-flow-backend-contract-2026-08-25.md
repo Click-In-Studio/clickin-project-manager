@@ -42,7 +42,7 @@
 
 `approve` / `reject` / `escalate` / `cancel` 四个接口都接受可选 body `{ comment?: string }`：
 
-- 上限 `MAX_APPROVAL_COMMENT_LENGTH = 500`（`lib/approval-stages.ts`，前后端共用同一个常量）。
+- 上限 `MAX_APPROVAL_COMMENT_LENGTH = 500`（`lib/approval/approval-stages.ts`，前后端共用同一个常量）。
 - 超长 → **400**，且申请状态一动不动（校验在动手之前）。
 - 纯空白按「没写」处理，不在链上留空字段。
 - 落在链条目而非独立评论表：这是**审批决定的一部分**，跟着决定走、跟着决定不可变。
@@ -69,10 +69,10 @@
 - `nodeClass` 是这个接口的另一半价值：ROOT 节点提交时会被 `no_entry` 拒收，
   让人填完整张表才吃 403 是白填；预览一眼就能说清「这个权限没有申请通道」。
 
-## 6. 阶梯文案单一来源：`lib/approval-stages.ts`
+## 6. 阶梯文案单一来源：`lib/approval/approval-stages.ts`
 
 级名、阶梯序、动作词、治理域提示、意见长度上限都在这里，**该模块不 import pg，
-client component 可以直接引**。此前这些常量埋在 `lib/db.ts` 与 `lib/approval-routing.ts`，
+client component 可以直接引**。此前这些常量埋在 `lib/db.ts` 与 `lib/approval/approval-routing.ts`，
 两个文件都碰数据库，前端只能自己抄一份，抄完就漂——同一级在飞书通知里叫「资源持有者」，
 在页面上叫「资源持有人」。
 

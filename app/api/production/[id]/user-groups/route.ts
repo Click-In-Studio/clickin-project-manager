@@ -1,14 +1,14 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { toActor } from "@/lib/grant-check";
-import { hasEventDomainView } from "@/lib/event-permissions";
-import { getProductionEvent } from "@/lib/event-db";
-import { canCreateEventGroup } from "@/lib/event-group-perm";
+import { toActor } from "@/lib/perm/grant-check";
+import { hasEventDomainView } from "@/lib/ops/event-permissions";
+import { getProductionEvent } from "@/lib/ops/event-db";
+import { canCreateEventGroup } from "@/lib/ops/event-group-perm";
 import {
   createEventGroup, EventGroupError, listEventGroups,
   type EventGroupMember, type EventGroupPoc,
-} from "@/lib/event-group-db";
+} from "@/lib/ops/event-group-db";
 import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string }> };

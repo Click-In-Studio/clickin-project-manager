@@ -10,18 +10,18 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { PATCH as patchMaterial } from "@/app/api/production/[id]/materials/[materialId]/route";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
-import { createEventGroup } from "@/lib/event-group-db";
-import { resolveSubjectPatch } from "@/lib/task-poc";
-import { canCreateMaterial, canWriteMaterial } from "@/lib/material-perm";
+import { createEventGroup } from "@/lib/ops/event-group-db";
+import { resolveSubjectPatch } from "@/lib/ops/task-poc";
+import { canCreateMaterial, canWriteMaterial } from "@/lib/ops/material-perm";
 import {
   createMaterial, createMaterialStatus, deleteMaterial, deleteMaterialStatus,
   getMaterial, listMaterials, listMaterialStatuses, MaterialError, updateMaterial,
-} from "@/lib/material-db";
+} from "@/lib/ops/material-db";
 
 let prodId: string, otherProdId: string;
 let ownerId: string, deptId: string, groupId: string;
@@ -331,7 +331,7 @@ describe("8. 责任方的 POC 管自己那一摊", () => {
 });
 
 /**
- * 收敛棘轮：物料本身的三个写点（建 / 改 / 删）一律走 lib/material-perm，
+ * 收敛棘轮：物料本身的三个写点（建 / 改 / 删）一律走 lib/ops/material-perm，
  * 不许各写各的 hasEffectiveGrant。
  *
  * 状态表的 CRUD 不在此列——状态没有「责任方」，它是剧组级的一张小字典，

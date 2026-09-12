@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import {
   getProductionPermissionContext,
   getAllPermissionOverrides,
@@ -8,8 +8,8 @@ import {
   listProductionMembersWithRoles,
 } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { isGovernanceNodeKey } from "@/lib/grant-template";
-import { requireProductionFeature } from "@/lib/plan";
+import { isGovernanceNodeKey } from "@/lib/perm/grant-template";
+import { requireProductionFeature } from "@/lib/account/plan";
 
 type Ctx = { params: Promise<{ id: string }> };
 

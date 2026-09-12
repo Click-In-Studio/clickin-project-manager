@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
-import { requireGrantGate } from "@/lib/api-guard";
-import { getProductionDept } from "@/lib/dept-db";
-import { listDeptPermissionView, setDeptPermissionRows } from "@/lib/perm-center-db";
-import { isGovernanceNodeKey } from "@/lib/grant-template";
-import { requireProductionFeature } from "@/lib/plan";
+import { requireGrantGate } from "@/lib/perm/api-guard";
+import { getProductionDept } from "@/lib/perm/dept-db";
+import { listDeptPermissionView, setDeptPermissionRows } from "@/lib/perm/perm-center-db";
+import { isGovernanceNodeKey } from "@/lib/perm/grant-template";
+import { requireProductionFeature } from "@/lib/account/plan";
 
 type Ctx = { params: Promise<{ id: string; deptId: string }> };
 

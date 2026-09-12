@@ -10,8 +10,8 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import { productionAvatarSrc } from "@/lib/avatar-url";
-import { PRODUCTION_TYPES } from "@/lib/production-types";
+import { productionAvatarSrc } from "@/lib/asset/avatar-url";
+import { PRODUCTION_TYPES } from "@/lib/production/production-types";
 
 // ── Primitives ────────────────────────────────────────────────────────────────
 

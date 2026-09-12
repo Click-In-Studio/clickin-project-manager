@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { type NextRequest } from "next/server";
-import { distillAllUsers } from "@/lib/agent-memory/distill";
+import { distillAllUsers } from "@/lib/agent/memory/distill";
 
 // 记忆蒸馏触发端点——服务器 crontab 定时打（建议每日一次）：
 //   0 4 * * * curl -s -X POST -H "Authorization: Bearer $INTERNAL_NOTIFY_SECRET" \

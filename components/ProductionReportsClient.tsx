@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import type { ProductionReportEntry } from "@/lib/event-db";
+import type { ProductionReportEntry } from "@/lib/ops/event-db";
 import { fmtDate } from "@/lib/tz";
 // 正文渲染必须与报告详情页（ReportViewClient）走同一管线——SmartText 的手写正则
 // 解析器不认手写 [[标题]]、无表格/代码块/嵌套列表、单回车换行会被吞，同一段正文

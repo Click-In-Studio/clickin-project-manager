@@ -19,8 +19,8 @@ for (const line of fs.readFileSync(path.join(process.cwd(), ".env.local"), "utf8
 
 async function main() {
   const { upsertFeishuUser } = await import("../lib/db");
-  const { createSession, SESSION_COOKIE } = await import("../lib/session");
-  const { createNewSessionKey } = await import("../lib/agent-tools/session-identity");
+  const { createSession, SESSION_COOKIE } = await import("../lib/account/session");
+  const { createNewSessionKey } = await import("../lib/agent/tools/session-identity");
   const { getPool } = await import("../lib/pg");
   const { makeProduction, setProductionTier } = await import("../tests/_support/factories");
 

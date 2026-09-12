@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
-import { patchAffectsMarkerProjection, type ScriptPatch, requiredPermissions } from "@/lib/script-ops";
-import { hasGrant } from "@/lib/grant-check";
+import { patchAffectsMarkerProjection, type ScriptPatch, requiredPermissions } from "@/lib/script/script-ops";
+import { hasGrant } from "@/lib/perm/grant-check";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
-import { getSession } from "@/lib/session";
-import { rejectNonHeadWrite } from "@/lib/head-version";
+import { getSession } from "@/lib/account/session";
+import { rejectNonHeadWrite } from "@/lib/script/head-version";
 import {
   getProductionPermissionContext, getActiveVersionId, getVersion,
   loadProduction, applyPatchToDB,

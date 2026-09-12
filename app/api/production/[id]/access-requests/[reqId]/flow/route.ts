@@ -7,7 +7,7 @@
  * 参与者/当前处理人/owner/制作人/平台管理员）。
  */
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getAccessRequestFlow, getProductionPermissionContext } from "@/lib/db";
 
 type Ctx = { params: Promise<{ id: string; reqId: string }> };

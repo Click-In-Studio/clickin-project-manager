@@ -1,6 +1,6 @@
 -- material（物料台账）四动词入词汇表。
 --
--- 线上事故（2026-08-20 错误日志）：项目模版 lib/templates/shared.ts 自
+-- 线上事故（2026-08-20 错误日志）：项目模版 lib/production/templates/shared.ts 自
 -- material 域接入起就发 node:material/* 键（基线 @view + 角色 @create/edit/delete），
 -- 但 resource_permission_level 从未登记 material 行。模版键落进
 -- production_role_permission（无 FK）不炸；角色实化成员 grant 行时撞

@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { filterVisibleAssets } from "@/lib/asset/perm";
-import { hasGrant, toActor } from "@/lib/grant-check";
+import { hasGrant, toActor } from "@/lib/perm/grant-check";
 import { createAsset, listAssets, assetTreePaths, assetSizeStats, type AssetType } from "@/lib/asset/db";
 import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
 import { listNodeLibrary } from "@/lib/node/db";

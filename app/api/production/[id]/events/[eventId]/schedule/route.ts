@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
-import { hasEventContentEdit, hasEventDomainView } from "@/lib/event-permissions";
-import { toActor } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasEventContentEdit, hasEventDomainView } from "@/lib/ops/event-permissions";
+import { toActor } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getProductionEvent,
-  listScheduleItemsWithParticipants, createScheduleItem, setScheduleItemDepartments } from "@/lib/event-db";
+  listScheduleItemsWithParticipants, createScheduleItem, setScheduleItemDepartments } from "@/lib/ops/event-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 

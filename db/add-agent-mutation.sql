@@ -1,4 +1,4 @@
--- AI 写操作的 diff 审计（2026-08-30 定谳，见 lib/agent-runtime/mutation-audit.ts）。
+-- AI 写操作的 diff 审计（2026-08-30 定谳，见 lib/agent/runtime/mutation-audit.ts）。
 --
 -- 每一次由 AI 工具落地的写都记一行：谁的哪次 run、哪个工具、动了哪个域的哪个实体、
 -- 写前 / 写后快照与字段级变化。它是**纯只读账本**——没有 reverted_* 列，撤销永远是
@@ -13,7 +13,7 @@
 -- wiki_revision），其余域存精简字段。changes 是给人看的字段级变化列表，通知 / 会话卡 /
 -- 审计页都从它渲染。
 --
--- id 规约：新表 TEXT PK + 带随机尾的 short id（lib/agent-runtime/ids.ts）。
+-- id 规约：新表 TEXT PK + 带随机尾的 short id（lib/agent/runtime/ids.ts）。
 
 CREATE TABLE IF NOT EXISTS agent_mutation (
   id            TEXT        PRIMARY KEY,

@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
-import { requireGrantGate } from "@/lib/api-guard";
-import { createInvite, listInvites, revokeInvite } from "@/lib/invite-db";
+import { requireGrantGate } from "@/lib/perm/api-guard";
+import { createInvite, listInvites, revokeInvite } from "@/lib/account/invite-db";
 import { getProductionName } from "@/lib/db";
 import { sendEmail } from "@/lib/platform/email/email-send";
 import { SERVER_URL } from "@/lib/server-url";

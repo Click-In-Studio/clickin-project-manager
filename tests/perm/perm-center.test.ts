@@ -5,8 +5,8 @@ import {
   listDeptPermissionView,
   setDeptPermissionRows,
   getPermissionVocabulary,
-} from "@/lib/perm-center-db";
-import { createProductionDept } from "@/lib/dept-db";
+} from "@/lib/perm/perm-center-db";
+import { createProductionDept } from "@/lib/perm/dept-db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
 // 管理后台·权限中心数据层：部门权限行全量替换（多退少补）+ 词汇聚合
@@ -145,7 +145,7 @@ describe("getPermissionVocabulary", () => {
 
 describe("isGovernanceNodeKey（治理键=SENSITIVE/ROOT 手写清单，非 type 前缀）", () => {
   it("production 基线面不是治理键；grants/asset_review/integrations 整面是", async () => {
-    const { isGovernanceNodeKey } = await import("@/lib/grant-template");
+    const { isGovernanceNodeKey } = await import("@/lib/perm/grant-template");
     expect(isGovernanceNodeKey("node:production/*/meta@view")).toBe(false);
     expect(isGovernanceNodeKey("node:production/*/mounts@view")).toBe(false);
     expect(isGovernanceNodeKey("node:production/*/config@edit")).toBe(false);
@@ -158,7 +158,7 @@ describe("isGovernanceNodeKey（治理键=SENSITIVE/ROOT 手写清单，非 type
   });
 
   it("通配键不误杀（RESERVED_TYPES 不被通配覆盖）；非法键=null", async () => {
-    const { isGovernanceNodeKey } = await import("@/lib/grant-template");
+    const { isGovernanceNodeKey } = await import("@/lib/perm/grant-template");
     expect(isGovernanceNodeKey("node:*/*@*")).toBe(false);
     // 资源级 grants 段（如 cue 表协作者管理）非治理清单——治理性只看手写三态
     expect(isGovernanceNodeKey("node:event/*/grants@*")).toBe(false);

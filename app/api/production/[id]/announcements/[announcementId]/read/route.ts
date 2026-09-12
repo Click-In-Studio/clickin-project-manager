@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getAnnouncement, markAnnouncementRead } from "@/lib/db";
 
 type Ctx = { params: Promise<{ id: string; announcementId: string }> };

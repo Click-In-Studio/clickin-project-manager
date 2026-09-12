@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { hasGrant } from "@/lib/grant-check";
+import { hasGrant } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "通知公告" };
 
-import { requireAdminAccess } from "@/lib/admin-guard";
+import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getProductionPermissionContext, getProductionName, listAnnouncements } from "@/lib/db";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { cookies } from "next/headers";
 import AdminAnnouncementsClient from "@/components/AdminAnnouncementsClient";
 

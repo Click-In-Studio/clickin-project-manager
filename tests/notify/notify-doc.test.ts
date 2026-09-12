@@ -1,11 +1,11 @@
 // 通知富文本管线：markdown → 通知 variant renderer → 通用 AST → 平台 renderer。
 // 贯穿断言：**形态可以降级，字不能丢**（方言 G5 在通知侧的对应）。
 import { describe, it, expect } from "vitest";
-import { renderNotifyDoc } from "@/lib/notify-doc/from-markdown";
-import { toFeishuElements, toLarkMd } from "@/lib/notify-doc/platform-feishu";
-import { toPlainText, toSummary } from "@/lib/notify-doc/platform-text";
-import { toEmailHtml } from "@/lib/notify-doc/platform-html";
-import { truncateDoc, type RefResolver } from "@/lib/notify-doc/ast";
+import { renderNotifyDoc } from "@/lib/notify/doc/from-markdown";
+import { toFeishuElements, toLarkMd } from "@/lib/notify/doc/platform-feishu";
+import { toPlainText, toSummary } from "@/lib/notify/doc/platform-text";
+import { toEmailHtml } from "@/lib/notify/doc/platform-html";
+import { truncateDoc, type RefResolver } from "@/lib/notify/doc/ast";
 
 const UUID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 

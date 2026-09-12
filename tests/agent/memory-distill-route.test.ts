@@ -4,7 +4,7 @@ import { NextRequest } from "next/server";
 // /api/internal/memory-distill 的守卫与 happy path（distill 逻辑 mock，
 // 管线本体的测试在 agent-memory.test.ts）。
 
-vi.mock("@/lib/agent-memory/distill", () => ({
+vi.mock("@/lib/agent/memory/distill", () => ({
   distillAllUsers: vi.fn(async () => [
     { userId: "u1", status: "distilled", entries: 3 },
     { userId: "u2", status: "no-new-data" },

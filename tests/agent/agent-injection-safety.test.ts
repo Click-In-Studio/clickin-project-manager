@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { neutralizeInjectionTags } from "@/lib/agent-injection-safety";
-import { neutralizeInboundMessage } from "@/lib/agent-ui-context";
+import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
+import { neutralizeInboundMessage } from "@/lib/agent/agent-ui-context";
 
 // 注入分隔符净化：防用户可控内容伪造/提前闭合我们的 <clickin-…> 包裹块。
 

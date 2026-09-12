@@ -5,7 +5,7 @@ import OverflowSafeSelect from "@/components/OverflowSafeSelect";
 import { useEffect, useMemo, useState } from "react";
 import { PRIMARY_BTN } from "@/components/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
-import { typeLabel, subLabel, verbLabel, groupResourceTypes } from "@/lib/permission-labels";
+import { typeLabel, subLabel, verbLabel, groupResourceTypes } from "@/lib/perm/permission-labels";
 
 export type Vocabulary = {
   verbs: Record<string, string[]>;

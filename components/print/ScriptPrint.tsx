@@ -14,13 +14,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { flushSync, createPortal } from "react-dom";
 import { buildWatermarkTile } from "@/components/watermark-tile";
 import ChevronIcon from "@/components/ChevronIcon";
-import type { Block, Character, Scene, ScriptTextLayoutMode, PageLayout } from "@/lib/script-types";
-import { PAGE_CONFIGS } from "@/lib/script-page";
-import { printPageCss } from "@/lib/print-css";
-import type { PageConfig } from "@/lib/script-page";
-import { listTemplatePresets, paginate, planScript, templateById, type LayoutItem, type Page, type PaginateResult, type ScriptTemplate } from "@/lib/script-template";
+import type { Block, Character, Scene, ScriptTextLayoutMode, PageLayout } from "@/lib/script/script-types";
+import { PAGE_CONFIGS } from "@/lib/script/script-page";
+import { printPageCss } from "@/lib/script/print-css";
+import type { PageConfig } from "@/lib/script/script-page";
+import { listTemplatePresets, paginate, planScript, templateById, type LayoutItem, type Page, type PaginateResult, type ScriptTemplate } from "@/lib/script/template";
 import { PageBandView, TemplateItemView, TemplateMeasureLayer, heightOfMeasured, pageBandText, readMeasuredHeights, runPaddingOverrides, type PageBandContext } from "@/components/print/template-render";
-import { sceneNumberParts, type PageBand } from "@/lib/script-template";
+import { sceneNumberParts, type PageBand } from "@/lib/script/template";
 import { useFontsSettled } from "@/components/print/use-fonts-settled";
 
 // ─── Print ────────────────────────────────────────────────────────────────────

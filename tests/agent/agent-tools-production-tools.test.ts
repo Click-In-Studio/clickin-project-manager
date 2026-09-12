@@ -2,8 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember, createMilestone, setMemberRoles } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { createUserNotification } from "@/lib/inbox-db";
-import { createProductionDept, setDeptMembers } from "@/lib/dept-db";
+import { createUserNotification } from "@/lib/notify/inbox-db";
+import { createProductionDept, setDeptMembers } from "@/lib/perm/dept-db";
 import {
   productionInfo,
   productionMyRole,
@@ -12,7 +12,7 @@ import {
   productionContactList,
   productionDepartmentList,
   DENIED_NOT_MEMBER,
-} from "@/lib/agent-tools/production-tools";
+} from "@/lib/agent/tools/production-tools";
 
 // production.* 与 my.* 的语义分界测试：项目查询的权限门在前——
 // 非成员是明确的"权限被拒绝"，不是空结果；成员查询正常返回。

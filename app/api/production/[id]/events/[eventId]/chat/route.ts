@@ -11,12 +11,12 @@
  */
 
 import { type NextRequest } from "next/server";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import {
   getProductionEvent, setEventChatId, clearEventChatId, getEventChatTargets, getProductionDeptChatIds,
-} from "@/lib/event-db";
+} from "@/lib/ops/event-db";
 import { createChat, addChatMembers, isUserInChat } from "@/lib/platform/feishu/feishu-chat";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };

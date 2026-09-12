@@ -1,13 +1,13 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getCueList, updateCue, deleteCue,
          getCue, listCueListRoleMembers, getProductionName, getVersion, hasListAccess } from "@/lib/db";
-import type { CueAnchor } from "@/lib/cue-types";
+import type { CueAnchor } from "@/lib/ops/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
 import { buildCueWarningCard } from "@/lib/platform/feishu/feishu-bot";
 import { SERVER_URL } from "@/lib/server-url";
-import { notifyUsers } from "@/lib/notify";
-import { rejectNonHeadWrite } from "@/lib/head-version";
+import { notifyUsers } from "@/lib/notify/notify";
+import { rejectNonHeadWrite } from "@/lib/script/head-version";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);

@@ -7,12 +7,12 @@ import PageHeader from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import PermissionKeyPicker, { type Vocabulary } from "@/components/PermissionKeyPicker";
 import DropdownPicker, { type DropdownPickerItem } from "@/components/DropdownPicker";
-import { TYPE_LABELS, groupResourceTypes } from "@/lib/permission-labels";
-import type { DeptPermissionView, DeptPermissionGroup } from "@/lib/perm-center-db";
+import { TYPE_LABELS, groupResourceTypes } from "@/lib/perm/permission-labels";
+import type { DeptPermissionView, DeptPermissionGroup } from "@/lib/perm/perm-center-db";
 import styles from "@/components/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
-import type { MemberStatus } from "@/lib/member-status-shared";
-import { MEMBER_STATUS_LABEL } from "@/lib/member-status-shared";
+import type { MemberStatus } from "@/lib/perm/member-status-shared";
+import { MEMBER_STATUS_LABEL } from "@/lib/perm/member-status-shared";
 
 type Dept = { id: string; name: string; parentId: string | null; kind: "dept" | "group"; displayOrder: number; memberUserIds: string[] };
 type Role = { id: string; name: string; permissions: string[] };

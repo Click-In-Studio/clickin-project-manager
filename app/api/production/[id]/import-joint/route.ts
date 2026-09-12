@@ -1,11 +1,11 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { getProductionPermissionContext, getVersion, getActiveVersionId } from "@/lib/db";
-import { rejectNonHeadWrite } from "@/lib/head-version";
+import { rejectNonHeadWrite } from "@/lib/script/head-version";
 import type { JointImportMarker, JointImportMappingRow, JointImportPreview, SceneColMap, ScriptColMap } from "@/lib/import/types";
 
 const SCENE_MARKER_COLLATOR = new Intl.Collator("zh-Hans-CN", { numeric: true, sensitivity: "base" });

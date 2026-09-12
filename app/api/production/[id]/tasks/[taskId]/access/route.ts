@@ -1,12 +1,12 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getTechReqByProduction } from "@/lib/event-db";
+import { getTechReqByProduction } from "@/lib/ops/event-db";
 import {
   getTechReqAccess,
   selfConfirmResourceGrant,
   checkNodeFreeApprovalZone,
-} from "@/lib/resource-grant-db";
+} from "@/lib/perm/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; taskId: string }> };
 

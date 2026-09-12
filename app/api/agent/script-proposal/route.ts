@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { requireUser, requireOwnership, toErrorResponse } from "@/lib/agent-chat/http";
+import { requireUser, requireOwnership, toErrorResponse } from "@/lib/agent/chat/http";
 import { getPool } from "@/lib/pg";
-import { parseSessionIdentity } from "@/lib/agent-tools/session-identity";
+import { parseSessionIdentity } from "@/lib/agent/tools/session-identity";
 
 // 供确认卡「查看详情」modal 按 toolCallId 拉取剧本写提议的全量预览（卡片
 // description 硬上限 512 字符装不下逐块 diff 与方言全文）。
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 
     const kind = SCRIPT_TOOLS[row.tool];
     const bare = row.tool.replace(/^clickin__/, "");
-    const { previewScriptProposal } = await import("@/lib/agent-tools/script-write-tools");
+    const { previewScriptProposal } = await import("@/lib/agent/tools/script-write-tools");
     // 与 preflight/执行同一份规划：状态在卡片弹出后可能已变（别人编辑了剧本），
     // 现算的预览就是"此刻批准会发生什么"；规划错误不代表 404，原样给 modal 展示
     const preview = await previewScriptProposal(auth.userId, productionId, bare, row.args ?? {});

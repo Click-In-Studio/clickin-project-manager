@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { requiredPermissions, type ScriptPatch } from "@/lib/script-ops";
-import { DEFAULT_SCRIPT_CONFIG, type Block, type Scene, type ScriptState } from "@/lib/script-types";
+import { requiredPermissions, type ScriptPatch } from "@/lib/script/script-ops";
+import { DEFAULT_SCRIPT_CONFIG, type Block, type Scene, type ScriptState } from "@/lib/script/script-types";
 import {
   SCENE_FIELD_SUBS,
   touchedSceneFields,
-} from "@/lib/scene-field-perms";
-import { PAGE_PERMISSION_SCOPES } from "@/lib/page-permission-scopes";
+} from "@/lib/script/scene-field-perms";
+import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
 
 // scene 字段门（2026-08-17）：模板发字段级键、判定端就要查字段级键。
 // 两条写入路径——构作页 REST（SCENE_FIELD_SUBS）与剧本页 patch

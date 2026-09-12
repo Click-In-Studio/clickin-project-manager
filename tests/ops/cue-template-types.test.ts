@@ -6,9 +6,9 @@ import {
   deleteCueTemplateType,
   upsertDeptCueTemplate,
   deleteDeptCueTemplate,
-} from "@/lib/cue-template-db";
-import { resolveTemplate } from "@/lib/production-template";
-import { createProductionDept } from "@/lib/dept-db";
+} from "@/lib/ops/cue-template-db";
+import { resolveTemplate } from "@/lib/production/production-template";
+import { createProductionDept } from "@/lib/perm/dept-db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
 // #227 Cue 模版类型注册表：新项目按模版 seed 内置类型、自定义类型 CRUD、删除保护

@@ -5,12 +5,12 @@
  * DELETE 仅草稿：published 必须先回草稿，挡「误删使用中配置」。
  */
 import { type NextRequest } from "next/server";
-import { requireGrantGate } from "@/lib/api-guard";
+import { requireGrantGate } from "@/lib/perm/api-guard";
 import {
   deleteFlowTemplate,
   getFlowTemplate,
   updateFlowTemplate,
-} from "@/lib/approval-flow-template-db";
+} from "@/lib/approval/approval-flow-template-db";
 
 type Ctx = { params: Promise<{ id: string; templateId: string }> };
 

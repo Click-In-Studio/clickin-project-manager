@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { MyScheduleEntry, WeeklyCallEvent } from "@/lib/event-db";
+import type { MyScheduleEntry, WeeklyCallEvent } from "@/lib/ops/event-db";
 import { BASE_PATH } from "@/lib/base-path";
 import styles from "@/components/my-pages.module.css";
 

@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
 
 // GET  /api/user/platform-identities          — list current user's identities

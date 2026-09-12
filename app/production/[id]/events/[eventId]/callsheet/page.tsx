@@ -1,18 +1,18 @@
 import type { Metadata } from "next";
-import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "Call Sheet" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { loadEventPermContext } from "@/lib/event-permissions";
+import { loadEventPermContext } from "@/lib/ops/event-permissions";
 import {
   getProductionEvent,
   listScheduleItemsWithParticipants,
   listEventCallTimes,
   listEventDepartments,
-} from "@/lib/event-db";
+} from "@/lib/ops/event-db";
 import CallSheetClient from "@/components/CallSheetClient";
 
 export default async function CallSheetPage({

@@ -1,7 +1,7 @@
 -- #140 审批流升级：把「当前该谁批」持久化到 approval_request 上。
 --
 -- 此前路由逻辑三处各写一遍（通知分发 / 收件箱 SQL / 鉴权），阶梯扩到五级后
--- 不可能再在 SQL 里重算。现在由 lib/approval-routing.ts 单点算出，写入下列三列：
+-- 不可能再在 SQL 里重算。现在由 lib/approval/approval-routing.ts 单点算出，写入下列三列：
 --   current_stage        当前阶梯级（supervisor/holder/dept_poc/ancestor_poc/producer/owner）
 --   current_stage_depth  同级内层深（supervisor 第几跳 / 祖先部门第几层）
 --   current_approver_ids 当前级审批人集合（收件箱与鉴权只读这一列）

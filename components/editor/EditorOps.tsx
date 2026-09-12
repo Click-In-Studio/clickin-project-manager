@@ -5,7 +5,7 @@
 //
 // 抽成一个组件而不是在两处各写一遍：它们本来就是同一件事（"对当前选中做点
 // 什么"），差异只有一个按钮。各写一遍的下场早有先例——同一个块类型在插入菜单
-// 和转换菜单里长出两副样子（见 lib/editor-block-types 的由来）。
+// 和转换菜单里长出两副样子（见 lib/editor/editor-block-types 的由来）。
 //
 // 顺序按飞书：段落格式 → 加粗 → 删除线 → 斜体 → 行内代码 →（删除）。
 //
@@ -16,8 +16,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
-import { FORMAT_ACTIONS, currentFormat } from "@/lib/editor-block-ops";
-import { applyAcrossCells } from "@/lib/table-ops";
+import { FORMAT_ACTIONS, currentFormat } from "@/lib/editor/editor-block-ops";
+import { applyAcrossCells } from "@/lib/editor/table-ops";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
 
 export function OpsBtn({

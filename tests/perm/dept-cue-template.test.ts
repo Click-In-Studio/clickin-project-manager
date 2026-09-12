@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createCueList, getUserAllowedCueTypes } from "@/lib/db";
 import { canCreateViaTemplate, applyCueTemplateGrants, propagateTemplateToExisting,
-         removeCueTemplateGrants, instantiateRelKey } from "@/lib/cue-template-db";
+         removeCueTemplateGrants, instantiateRelKey } from "@/lib/ops/cue-template-db";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 

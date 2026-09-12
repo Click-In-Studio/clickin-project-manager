@@ -22,7 +22,7 @@
 --   * 没走「把 notes 设成保留段」那条路：RESERVED_SUBS 是全局的，而 report 的
 --     notes@edit 今天正是靠 *@edit 覆盖（REPORT_LEVEL_ROW_SETS 只显式发
 --     notes@create/delete），设成保留段会静默收窄 report 侧。
---   * 管理面资格另行收口：lib/permissions.ts 把 notes 面排除在
+--   * 管理面资格另行收口：lib/perm/permissions.ts 把 notes 面排除在
 --     ADMIN_PANEL_NODE_PREFIXES 的命中之外，否则「能替部门提备注」会顺带变成
 --     「能进管理后台」（导演类模板持 node:dept/<D>/notes@create 的通配形）。
 --

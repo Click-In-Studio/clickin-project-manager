@@ -9,10 +9,10 @@
  * 保护手段是治理面门 ＋ 改动审计 ＋ 出口类开关的显式确认文案，不是审批流。
  */
 import { type NextRequest } from "next/server";
-import { requireGrantGate } from "@/lib/api-guard";
-import { listPolicies, setPolicies, listPolicyAudit } from "@/lib/policy-db";
-import { POLICY_QUESTIONS, matchAnswer, QUESTION_COVERED_KEYS } from "@/lib/policy-questions";
-import { requireProductionFeature } from "@/lib/plan";
+import { requireGrantGate } from "@/lib/perm/api-guard";
+import { listPolicies, setPolicies, listPolicyAudit } from "@/lib/perm/policy-db";
+import { POLICY_QUESTIONS, matchAnswer, QUESTION_COVERED_KEYS } from "@/lib/perm/policy-questions";
+import { requireProductionFeature } from "@/lib/account/plan";
 
 type Ctx = { params: Promise<{ id: string }> };
 

@@ -6,8 +6,8 @@
  * 前端发布按钮的提示文案要如实说明（prC 接线时处理）。
  */
 import { type NextRequest } from "next/server";
-import { requireGrantGate } from "@/lib/api-guard";
-import { publishFlowTemplate } from "@/lib/approval-flow-template-db";
+import { requireGrantGate } from "@/lib/perm/api-guard";
+import { publishFlowTemplate } from "@/lib/approval/approval-flow-template-db";
 
 type Ctx = { params: Promise<{ id: string; templateId: string }> };
 

@@ -5,14 +5,14 @@ import {
   PERMISSION_MIGRATION_LEDGER,
   RETIRED_PERMISSION_KEYS,
   RESOURCE_LEVEL_MIGRATION_LEDGER,
-} from "@/lib/permission-migration-ledger";
+} from "@/lib/perm/permission-migration-ledger";
 
 // 权限REST化棘轮：迁移遗漏必须变成测试红，而不是留在人的记忆里。
 // 权威映射表在 MindWeave《权限REST化-Migration总表》，本测试强制其 CI 形态的不变量。
 
 const ROOT = path.resolve(__dirname, "../..");
 const SCAN_DIRS = ["app", "lib", "components"];
-const SELF = path.join("lib", "permission-migration-ledger.ts");
+const SELF = path.join("lib", "perm", "permission-migration-ledger.ts");
 
 function* walkSources(dir: string): Generator<string> {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

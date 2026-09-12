@@ -4,7 +4,7 @@ import { useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 
 // 项目档位卡片（#280）：展示当前档位/特邀豁免，owner 可兑换项目升级码。
-// 档位 limit 文案由服务端传入（lib/plan.ts 不可入客户端包）。
+// 档位 limit 文案由服务端传入（lib/account/plan.ts 不可入客户端包）。
 
 type Props = {
   productionId: string;

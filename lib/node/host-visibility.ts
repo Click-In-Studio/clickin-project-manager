@@ -1,6 +1,6 @@
 import { getPool } from "../pg";
-import { hasGrant, hasAnyGrant, listGrantedResourceIds, type GrantActor } from "../grant-check";
-import { hasEventDomainView, isEventGroupParticipant } from "../event-permissions";
+import { hasGrant, hasAnyGrant, listGrantedResourceIds, type GrantActor } from "../perm/grant-check";
+import { hasEventDomainView, isEventGroupParticipant } from "../ops/event-permissions";
 
 // ─── 挂载让渡判定核（内容面，#420 第二批 PR-A）────────────────────────────────
 //

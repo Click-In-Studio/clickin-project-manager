@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { createAsset, getAsset, updateAsset, type Asset } from "@/lib/asset/db";
 import { isAssetType, ASSET_TYPES, ASSET_TYPE_LABELS } from "@/lib/asset/types";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { PATCH as patchAsset } from "@/app/api/production/[id]/assets/[assetId]/route";
 import { POST as postAssets } from "@/app/api/production/[id]/assets/route";

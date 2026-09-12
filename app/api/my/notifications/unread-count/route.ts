@@ -6,8 +6,8 @@
  */
 
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
-import { countUnreadNotifications } from "@/lib/inbox-db";
+import { getSession } from "@/lib/account/session";
+import { countUnreadNotifications } from "@/lib/notify/inbox-db";
 
 export async function GET(req: NextRequest) {
   const session = getSession(req.cookies);

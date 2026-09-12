@@ -13,7 +13,7 @@ import {
   type SessionTreeEntry,
 } from "../../vendor/openclaw/packages/agent-core/src/index";
 import { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session";
-import type { RuntimeTool } from "@/lib/agent-runtime/resume";
+import type { RuntimeTool } from "@/lib/agent/runtime/resume";
 
 // #367 S1 出口判据①（真流式）与③（compaction 一次可读）——打真实 DeepSeek。
 // 没有 DEEPSEEK_API_KEY 时整文件跳过（CI 无 key）；有 key 时每次跑会花少量 token。

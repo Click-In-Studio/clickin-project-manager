@@ -13,8 +13,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { getPool } from "@/lib/pg";
-import { parseNodeKey } from "@/lib/grant-template";
-import { PAGE_PERMISSION_SCOPES } from "@/lib/page-permission-scopes";
+import { parseNodeKey } from "@/lib/perm/grant-template";
+import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
 import {
   ROLE_DRIFT_SNAPSHOT_PATH,
   MOUNT_UPLOAD_KEYS,

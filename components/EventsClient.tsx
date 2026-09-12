@@ -8,7 +8,7 @@ import type React from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import PageHeader, { PRIMARY_BTN } from "@/components/PageHeader";
 import Badge, { type BadgeTone } from "@/components/Badge";
-import type { ProductionEvent, EventDepartment } from "@/lib/event-db";
+import type { ProductionEvent, EventDepartment } from "@/lib/ops/event-db";
 import { fmtDateTimeSmart, datetimeLocalToIso, dateTimeToIso } from "@/lib/tz";
 
 // ─── Shared constants ────────────────────────────────────────────────────────

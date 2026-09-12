@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createAsset, getAsset, listAssets, resolveAssetFile } from "@/lib/asset/db";
 import { canUploadAssetBytes } from "@/lib/asset/perm";
 import { POST as filesPOST } from "@/app/api/production/[id]/assets/[assetId]/files/route";

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
-import { toActor } from "@/lib/grant-check";
-import { hasEventDomainView, hasEventContentEdit } from "@/lib/event-permissions";
+import { toActor } from "@/lib/perm/grant-check";
+import { hasEventDomainView, hasEventContentEdit } from "@/lib/ops/event-permissions";
 import { getPool } from "@/lib/pg";
 
 // review 采纳配套：新导出 helper 的专项测试。

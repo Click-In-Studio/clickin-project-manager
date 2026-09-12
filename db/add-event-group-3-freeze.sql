@@ -45,7 +45,7 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS event_group_freeze (
   event_id      TEXT        NOT NULL REFERENCES production_event(id) ON DELETE CASCADE,
   -- **刻意不设 FK。** 快照自带 group_name / poc_*_name，组行删掉之后依然解析得出；
-  -- 解散守卫只挡**未冻结**的引用（见 lib/event-group-db.ts 的 deleteEventGroup），
+  -- 解散守卫只挡**未冻结**的引用（见 lib/ops/event-group-db.ts 的 deleteEventGroup），
   -- 也就是说全部引用都冻结之后组是可以删的。若挂 FK：CASCADE 会把审计一起删掉，
   -- SET NULL 与 PK 的 NOT NULL 冲突——两条都不可接受，所以这里存的是「当时那个组的
   -- id」这一事实，不是一条活引用。

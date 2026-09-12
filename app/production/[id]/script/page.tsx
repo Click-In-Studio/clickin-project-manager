@@ -3,10 +3,10 @@ export const metadata: Metadata = { title: "剧本" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
-import { hasEffectiveGrant, hasGrant } from "@/lib/grant-check";
-import { canViewScriptBlocks, scriptBlocksUnauthorizedUrl } from "@/lib/script-perm";
-import { getSceneFieldPerms } from "@/lib/scene-field-perms";
+import { getSession } from "@/lib/account/session";
+import { hasEffectiveGrant, hasGrant } from "@/lib/perm/grant-check";
+import { canViewScriptBlocks, scriptBlocksUnauthorizedUrl } from "@/lib/script/script-perm";
+import { getSceneFieldPerms } from "@/lib/script/scene-field-perms";
 import { getProductionPermissionContext, getProductionName, getMasterScriptViewId } from "@/lib/db";
 import ScriptEditor from "@/components/ScriptEditor";
 import PageActivationGate from "@/components/PageActivationGate";
@@ -32,7 +32,7 @@ export default async function ProductionScriptPage({
   if (!(await canViewScriptBlocks(access.permCtx, id)))
     redirect(scriptBlocksUnauthorizedUrl(id));
 
-  // scene 已拆到字段级门（lib/scene-field-perms）：canEditMetadata 是「值得显示
+  // scene 已拆到字段级门（lib/script/scene-field-perms）：canEditMetadata 是「值得显示
   // 编辑态」的粗门，紧凑排版/config PUT 单独看 meta/name@edit。
   const sceneFieldPerms = await getSceneFieldPerms(
     session.userId, id, access.permCtx.isAdmin || access.permCtx.isOwner,

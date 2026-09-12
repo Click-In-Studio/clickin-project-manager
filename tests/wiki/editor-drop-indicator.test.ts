@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
-import { DROP_INDICATOR_OPTIONS, DROP_INDICATOR_DEFAULTS } from "@/lib/editor-drop-indicator";
+import { DROP_INDICATOR_OPTIONS, DROP_INDICATOR_DEFAULTS } from "@/lib/editor/editor-drop-indicator";
 
 /** 取 dropcursor 扩展的实际生效选项。注意大小写：StarterKit 的选项键是
  *  小写 `dropcursor`，扩展自身的 name 却是 `dropCursor` */

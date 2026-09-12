@@ -9,8 +9,8 @@
  * 模版是数据，渲染器不能认识「center」「compact」这些名字。
  */
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { mdToHtml } from "@/lib/script-md";
-import type { LayoutItem, PageBand, PageBandField, ResolvedSlot, TextStyle, Variant } from "@/lib/script-template";
+import { mdToHtml } from "@/lib/script/script-md";
+import type { LayoutItem, PageBand, PageBandField, ResolvedSlot, TextStyle, Variant } from "@/lib/script/template";
 
 const FACE_VAR: Record<TextStyle["face"], string> = {
   script: "var(--font-script)",

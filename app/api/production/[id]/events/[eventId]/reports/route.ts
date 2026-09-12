@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
-import { hasEventDomainView } from "@/lib/event-permissions";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasEventDomainView } from "@/lib/ops/event-permissions";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getProductionEvent, listEventReports, createEventReport, mountWikiAsReport } from "@/lib/event-db";
+import { getProductionEvent, listEventReports, createEventReport, mountWikiAsReport } from "@/lib/ops/event-db";
 import { canShareWiki } from "@/lib/wiki/perm";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };

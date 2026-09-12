@@ -1,19 +1,19 @@
 /**
- * 旧估算器（lib/script-page.ts 在模版引擎接入前的原文），只做测试参照：
+ * 旧估算器（lib/script/script-page.ts 在模版引擎接入前的原文），只做测试参照：
  * 引擎用 legacy 模版算出的页码必须与它**逐字节相同**（docs/script-template-engine.md §4）。
  * 不要修改；引擎的行为变更若有意为之，应在对应测试里写明差异而不是改这里。
  */
-import type { Block } from "@/lib/script-types";
-import type { PageLayout, ScriptTextLayoutMode } from "@/lib/script-types";
+import type { Block } from "@/lib/script/script-types";
+import type { PageLayout, ScriptTextLayoutMode } from "@/lib/script/script-types";
 import {
   isMarkerBlock,
   withLegacyOwnershipProjection,
   withMarkerOwnership,
-} from "@/lib/script-marker-blocks";
-import type { MarkerOwnershipDirty, MarkerOwnershipRange } from "@/lib/script-marker-ownership-cache";
+} from "@/lib/script/script-marker-blocks";
+import type { MarkerOwnershipDirty, MarkerOwnershipRange } from "@/lib/script/script-marker-ownership-cache";
 // 与渲染层共用同一份判据：估算器和渲染器对「同一组角色」的判断分歧，
 // 会直接变成编辑器里的分页线和打印结果对不上。
-import { sameCharacters } from "@/lib/script-block-layout";
+import { sameCharacters } from "@/lib/script/script-block-layout";
 
 // ── Print page config — single source of truth shared with ScriptEditor ───────
 

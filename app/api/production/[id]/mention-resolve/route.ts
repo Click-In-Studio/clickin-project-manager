@@ -1,11 +1,11 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getActiveVersionId, getMarkerLabelIndex, getVersion, getEstimatedPageMap } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "@/lib/script-marker-sql";
-import { buildMarkerLabelIndex, type MarkerLabelIndex } from "@/lib/script-generated-labels";
-import type { ContentMentionAttrs, BlockDisplayMode } from "@/lib/mention-types";
+import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "@/lib/script/script-marker-sql";
+import { buildMarkerLabelIndex, type MarkerLabelIndex } from "@/lib/script/script-generated-labels";
+import type { ContentMentionAttrs, BlockDisplayMode } from "@/lib/editor/mention-types";
 
 type Ctx = { params: Promise<{ id: string }> };
 

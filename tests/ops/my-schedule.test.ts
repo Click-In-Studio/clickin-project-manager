@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addProductionMember, upsertFeishuUser } from "@/lib/db";
-import { createProductionEvent, createScheduleItem, listMyScheduleRange } from "@/lib/event-db";
-import { createEventGroup, setScheduleItemGroups } from "@/lib/event-group-db";
+import { createProductionEvent, createScheduleItem, listMyScheduleRange } from "@/lib/ops/event-db";
+import { createEventGroup, setScheduleItemGroups } from "@/lib/ops/event-group-db";
 import { getPool } from "@/lib/pg";
 import { cleanupProduction, makeProduction, shortId } from "../_support/factories";
 

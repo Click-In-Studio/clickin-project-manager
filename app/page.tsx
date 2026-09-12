@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 
 export const metadata: Metadata = { title: "首页" };
 import { listProductions, listUpcomingMilestonesForUser, countCueWarningsForUser } from "@/lib/db";
-import { listMyUpcomingCallTimes, listMyPendingTechReqs, listMyPocAwaitingReqs, listMyFollowedUpcomingEvents, listUnreadFollowedReports } from "@/lib/event-db";
+import { listMyUpcomingCallTimes, listMyPendingTechReqs, listMyPocAwaitingReqs, listMyFollowedUpcomingEvents, listUnreadFollowedReports } from "@/lib/ops/event-db";
 import HomeClient from "@/components/HomeClient";
 
 export default async function Home() {
