@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { listAnnouncementsForUser, listCueWarningsForUser, getUserAllReadAnnouncementIds } from "@/lib/db";
-import AnnouncementsClient from "@/components/AnnouncementsClient";
+import AnnouncementsClient from "@/components/notify/AnnouncementsClient";
 
 export default async function AnnouncementsPage() {
   const cookieStore = await cookies();

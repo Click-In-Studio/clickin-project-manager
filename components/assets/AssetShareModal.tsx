@@ -1,6 +1,6 @@
 "use client";
 
-import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";

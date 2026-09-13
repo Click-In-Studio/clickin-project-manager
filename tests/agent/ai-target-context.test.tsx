@@ -20,7 +20,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
 import {
   AiTargetContext, nextAiTargetState, useReportAiTarget, type AiTargetState,
-} from "@/components/ai-target";
+} from "@/components/agent/ai-target";
 import { aiTargetForNode } from "@/lib/node/ai-target";
 import type { NodeEntry } from "@/lib/node/db";
 
@@ -148,7 +148,7 @@ describe("③ 接线：hook + Provider 真跑一遍", () => {
 
 describe("④ 接线棘轮", () => {
   it("AppShell 的 currentWikiId/currentAssetId 以上报为先、正则为后", () => {
-    const src = readFileSync("components/AppShell.tsx", "utf8");
+    const src = readFileSync("components/shell/AppShell.tsx", "utf8");
     expect(src).toContain("nextAiTargetState");
     expect(src).toContain("<AiTargetContext.Provider value={reportAiTarget}>");
     // 裸 `= productionId ? extractCurrentXxx(...)` 就是回到 #476 之前的形状

@@ -5,7 +5,7 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getProductionMeta, getAdminOverviewStats } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 import { notFound } from "next/navigation";
-import PageHeader from "@/components/PageHeader";
+import PageHeader from "@/components/ui/PageHeader";
 
 const CARD: React.CSSProperties = {
   minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13,

@@ -13,7 +13,7 @@ import {
   listEventDepartments,
   isUserEventTechAssignee,
 } from "@/lib/ops/event-db";
-import ReqsClient from "@/components/ReqsClient";
+import ReqsClient from "@/components/ops/ReqsClient";
 
 export default async function ReqsPage({
   params,

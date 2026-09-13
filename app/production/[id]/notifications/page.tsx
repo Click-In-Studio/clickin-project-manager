@@ -8,7 +8,7 @@ import {
   getUserAnnouncementReadIds,
   listAnnouncements,
 } from "@/lib/db";
-import ProductionNotificationsHub from "@/components/ProductionNotificationsHub";
+import ProductionNotificationsHub from "@/components/notify/ProductionNotificationsHub";
 
 export const metadata: Metadata = { title: "我的通知" };
 

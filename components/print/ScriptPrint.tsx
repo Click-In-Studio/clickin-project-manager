@@ -12,8 +12,8 @@
 import React from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync, createPortal } from "react-dom";
-import { buildWatermarkTile } from "@/components/watermark-tile";
-import ChevronIcon from "@/components/ChevronIcon";
+import { buildWatermarkTile } from "@/components/shell/watermark-tile";
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import type { Block, Character, Scene, ScriptTextLayoutMode, PageLayout } from "@/lib/script/script-types";
 import { PAGE_CONFIGS } from "@/lib/script/script-page";
 import { printPageCss } from "@/lib/script/print-css";

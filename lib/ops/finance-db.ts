@@ -356,7 +356,7 @@ export async function getExpense(id: string, productionId: string): Promise<Expe
  * 两处走同一个判据（current_approver_ids 含我），只是这支不限项目，供将来的全局
  * 收件箱用。判据写两遍会漂移，故这里只多一个 WHERE，其余共用 EXPENSE_QUERY。
  *
- * 尚无消费者：审批收件箱目前只渲染权限申请（components/AccessRequestsClient.tsx），
+ * 尚无消费者：审批收件箱目前只渲染权限申请（components/approval/AccessRequestsClient.tsx），
  * 支出待办要不要并进同一个列表是 UX 决定。在那之前，POC 在财务页看得到要他批的东西。
  */
 export async function listPendingExpenses(actorId: string, productionId?: string): Promise<Expense[]> {

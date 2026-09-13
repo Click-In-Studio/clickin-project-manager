@@ -9,7 +9,7 @@ import { hasGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listPolicies, listPolicyAudit } from "@/lib/perm/policy-db";
 import { POLICY_QUESTIONS, matchAnswer, QUESTION_COVERED_KEYS } from "@/lib/perm/policy-questions";
-import AdminPoliciesClient from "@/components/AdminPoliciesClient";
+import AdminPoliciesClient from "@/components/admin/AdminPoliciesClient";
 import { productionFeatureAllowed } from "@/lib/account/plan";
 
 export default async function PoliciesPage({ params }: { params: Promise<{ id: string }> }) {

@@ -1,6 +1,6 @@
 "use client";
 
-import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import Link from "next/link";
 import { useRef, useState, useEffect, type FormEvent, type ChangeEvent } from "react";
@@ -9,7 +9,7 @@ import styles from "./account.module.css";
 import type { NotifPref } from "@/lib/notify/notification-prefs";
 import { ACCOUNT_RETURN_KEY, WORKSPACE_HOME, normalizeAccountReturnHref } from "@/lib/account/account-return";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
-import AiUsageCard from "@/components/AiUsageCard";
+import AiUsageCard from "@/components/agent/AiUsageCard";
 
 type Identity = {
   id: string;

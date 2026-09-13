@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/account/session";
 import { listMyProductionsWithRoles } from "@/lib/db";
-import MyNotificationsClient from "@/components/MyNotificationsClient";
+import MyNotificationsClient from "@/components/notify/MyNotificationsClient";
 
 export const metadata: Metadata = { title: "通知提醒" };
 

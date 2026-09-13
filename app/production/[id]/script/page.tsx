@@ -8,8 +8,8 @@ import { hasEffectiveGrant, hasGrant } from "@/lib/perm/grant-check";
 import { canViewScriptBlocks, scriptBlocksUnauthorizedUrl } from "@/lib/script/script-perm";
 import { getSceneFieldPerms } from "@/lib/script/scene-field-perms";
 import { getProductionPermissionContext, getProductionName, getMasterScriptViewId } from "@/lib/db";
-import ScriptEditor from "@/components/ScriptEditor";
-import PageActivationGate from "@/components/PageActivationGate";
+import ScriptEditor from "@/components/script/ScriptEditor";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export default async function ProductionScriptPage({
   params,

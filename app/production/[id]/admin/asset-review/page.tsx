@@ -8,7 +8,7 @@ import { getSession } from "@/lib/account/session";
 import { hasGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listPrivateAssets } from "@/lib/asset/review-db";
-import AdminAssetReviewClient from "@/components/AdminAssetReviewClient";
+import AdminAssetReviewClient from "@/components/admin/AdminAssetReviewClient";
 
 export default async function AssetReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

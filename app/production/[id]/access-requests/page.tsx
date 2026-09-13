@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import AccessRequestsClient from "@/components/AccessRequestsClient";
+import AccessRequestsClient from "@/components/approval/AccessRequestsClient";
 
 export const metadata: Metadata = { title: "资源申请" };
 

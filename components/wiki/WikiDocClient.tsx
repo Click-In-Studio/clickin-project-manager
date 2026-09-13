@@ -1,6 +1,6 @@
 "use client";
 
-import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 // wiki 文档库 W4（Notion 式改版）：有编辑权即默认可编辑（无 编辑/保存 切换），
 // 标题/正文/标签 就地编辑 + 防抖自动保存；文档操作（新建/移动/删除）归左侧栏
@@ -13,11 +13,11 @@ import { BASE_PATH } from "@/lib/base-path";
 import { useVisibleEventSource } from "@/hooks/useVisibleEventSource";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import { fmtDateTime } from "@/lib/tz";
-import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/SmartTextarea";
+import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/editor/SmartTextarea";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
-import AdminModal from "@/components/AdminModal";
-import DropdownPicker from "@/components/DropdownPicker";
-import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
+import AdminModal from "@/components/ui/AdminModal";
+import DropdownPicker from "@/components/ui/DropdownPicker";
+import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
 import { encodeAssetSrc } from "@/lib/editor/mention-types";
 import { collectWikilinkTitles, promoteWikilinks } from "@/lib/wiki/input-normalize";
 import { checkFidelity, lineDiff, type FidelityDiff, type DiffHunk } from "@/lib/wiki/fidelity";

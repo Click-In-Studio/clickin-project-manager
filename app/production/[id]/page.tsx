@@ -2,7 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { getProductionName, getProductionPermissionContext } from "@/lib/db";
-import ProductionHomeClient from "@/components/ProductionHomeClient";
+import ProductionHomeClient from "@/components/ops/ProductionHomeClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

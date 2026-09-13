@@ -8,9 +8,9 @@ import { getProductionName, getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getDramaturgyTreeConfig } from "@/lib/node/anchors";
 import { listDramaturgyTreeFor } from "@/lib/node/tree-view";
-import { DramaturgyInspirationShell } from "@/components/DramaturgyWorkspaceTabs";
+import { DramaturgyInspirationShell } from "@/components/script/DramaturgyWorkspaceTabs";
 import WikiShell from "@/components/wiki/WikiShell";
-import PageActivationGate from "@/components/PageActivationGate";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export default async function DramaturgyInspirationPage({
   params,

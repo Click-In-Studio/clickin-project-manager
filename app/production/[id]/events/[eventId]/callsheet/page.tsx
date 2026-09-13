@@ -13,7 +13,7 @@ import {
   listEventCallTimes,
   listEventDepartments,
 } from "@/lib/ops/event-db";
-import CallSheetClient from "@/components/CallSheetClient";
+import CallSheetClient from "@/components/ops/CallSheetClient";
 
 export default async function CallSheetPage({
   params,

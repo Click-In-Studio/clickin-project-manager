@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/account/session";
 import { getInviteInfo } from "@/lib/account/invite-db";
-import InviteAcceptClient from "@/components/InviteAcceptClient";
+import InviteAcceptClient from "@/components/account/InviteAcceptClient";
 
 export default async function InvitePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;

@@ -9,8 +9,8 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listProductionEvents, listUserEventParticipations, listEventDepartments, listEventTaskCounts } from "@/lib/ops/event-db";
-import EventsClient from "@/components/EventsClient";
-import PageActivationGate from "@/components/PageActivationGate";
+import EventsClient from "@/components/ops/EventsClient";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export default async function EventsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

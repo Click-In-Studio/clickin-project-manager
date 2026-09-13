@@ -6,7 +6,7 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getProductionPermissionContext, getProductionName, listAnnouncements } from "@/lib/db";
 import { getSession } from "@/lib/account/session";
 import { cookies } from "next/headers";
-import AdminAnnouncementsClient from "@/components/AdminAnnouncementsClient";
+import AdminAnnouncementsClient from "@/components/admin/AdminAnnouncementsClient";
 
 function countRecent(createdAts: string[]): number {
   const cutoff = Date.now() - 30 * 86400_000;

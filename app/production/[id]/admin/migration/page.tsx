@@ -7,9 +7,9 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
 import { hasGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import PageHeader from "@/components/PageHeader";
-import AdminMigrationSection from "@/components/AdminMigrationSection";
-import BulkInviteCard from "@/components/BulkInviteCard";
+import PageHeader from "@/components/ui/PageHeader";
+import AdminMigrationSection from "@/components/admin/AdminMigrationSection";
+import BulkInviteCard from "@/components/admin/BulkInviteCard";
 import { listProductionRolesWithPermissions } from "@/lib/db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 

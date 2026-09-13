@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import PageHeader, { PRIMARY_BTN } from "@/components/PageHeader";
+import PageHeader, { PRIMARY_BTN } from "@/components/ui/PageHeader";
 import Link from "next/link";
 import AssetUploadPanel from "./AssetUploadPanel";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
@@ -10,7 +10,7 @@ import { BASE_PATH } from "@/lib/base-path";
 import type { Asset } from "@/lib/asset/db";
 import type { NodeMount } from "@/lib/node/mount";
 import { ASSET_TYPE_LABELS, type AssetType } from "@/lib/asset/types";
-import ChevronIcon from "@/components/ChevronIcon";
+import ChevronIcon from "@/components/ui/ChevronIcon";
 
 /** 列表项：Asset + 壳节点树面（#420：listable=原「项目全局」共享语义）
  *  + 工作台字段（PR-C：treePath=祖先链标题、sizeBytes=全部文件行合计） */

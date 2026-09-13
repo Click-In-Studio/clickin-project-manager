@@ -19,7 +19,7 @@ import {
   canReplyToReport,
   hasEventDomainView,
 } from "@/lib/ops/event-permissions";
-import ReportViewClient from "@/components/ReportViewClient";
+import ReportViewClient from "@/components/ops/ReportViewClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; reportId: string }> }): Promise<Metadata> {
   const { id: productionId, reportId } = await params;

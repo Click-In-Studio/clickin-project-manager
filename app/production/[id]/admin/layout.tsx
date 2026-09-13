@@ -1,4 +1,4 @@
-import AdminActivationGate from "@/components/AdminActivationGate";
+import AdminActivationGate from "@/components/admin/AdminActivationGate";
 
 export default async function AdminLayout({
   children,

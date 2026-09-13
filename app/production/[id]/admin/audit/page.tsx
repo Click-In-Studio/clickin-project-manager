@@ -9,7 +9,7 @@ import { hasGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName, listProductionMembersWithRoles } from "@/lib/db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import { listGrantLedger } from "@/lib/perm/grant-audit-db";
-import AdminAuditClient from "@/components/AdminAuditClient";
+import AdminAuditClient from "@/components/admin/AdminAuditClient";
 
 export default async function AuditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

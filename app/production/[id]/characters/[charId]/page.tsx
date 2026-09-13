@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { hasGrant, hasAnyGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getCharacterById, getProductionName, listCharactersByVersion, getActiveVersionId } from "@/lib/db";
-import CharacterDetailView from "@/components/CharacterDetail";
+import CharacterDetailView from "@/components/script/CharacterDetail";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; charId: string }> }): Promise<Metadata> {
   const { id, charId } = await params;

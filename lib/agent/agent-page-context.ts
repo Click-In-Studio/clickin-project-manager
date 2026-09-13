@@ -67,7 +67,7 @@ const PAGE_LABELS: Record<string, string> = {
   "prod:script": "剧本",
   "prod:import-script": "剧本导入",
   "prod:import-scenes": "场次导入",
-  // 「构作」是一个工作区，下辖三个子 tab（components/DramaturgyWorkspaceTabs）。
+  // 「构作」是一个工作区，下辖三个子 tab（components/script/DramaturgyWorkspaceTabs）。
   // 标签逐字对齐 UI 上的 主tab · 子tab——模型该用用户看得见的说法称呼当前页面，
   // 而「角色」自 #352 起已不是顶级模块，单说「角色」会把旧 IA 喂给模型。
   "prod:dramaturgy": "构作 · 构作视图",
