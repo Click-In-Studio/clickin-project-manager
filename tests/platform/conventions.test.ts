@@ -357,11 +357,16 @@ describe("lib/ 按域分目录，根只留基建", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// components/ 目录形态棘轮（#482）
+// components/ 目录形态棘轮（#482 / #487）
 // ─────────────────────────────────────────────────────────────────────────────
 // 104 个文件平铺过一次，三分（ui 原语 / 页面容器按域 / admin）之后不许回退。
-// 只钉形态不钉名单：根目录不放文件、域下不套层、文件名两种形态之一。
+// 只钉形态不钉名单：根目录不放文件、文件名两种形态之一。
+// 域下允许**一层**「组件族」目录（#487）：巨石组件拆出来的子件 / hook / 纯函数收进
+// components/<domain>/<family>/，族目录名 kebab-case = 主组件名，族内不再套目录。
 // 域目录清单与归属原则见 DEV_GUIDE §11.2。
+
+const FILE_NAME_OK = /^(?:[A-Z][A-Za-z0-9]*|[a-z0-9]+(?:-[a-z0-9]+)*)(?:\.module)?\.(?:tsx?|css)$/;
+const FAMILY_DIR_OK = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 describe("components/ 按域分目录，不回退成平铺", () => {
   const COMPONENTS_ROOT = path.join(ROOT, "components");
@@ -372,28 +377,97 @@ describe("components/ 按域分目录，不回退成平铺", () => {
     expect(strays, "components/ 根目录出现了文件，请移到对应域目录（DEV_GUIDE §11.2）").toEqual([]);
   });
 
-  it("域目录只有一层：components/<domain>/ 之下没有子目录", async () => {
+  it("域下最多一层组件族目录：族目录名 kebab-case，族目录下没有子目录", async () => {
+    const badFamilyName: string[] = [];
     const deep: string[] = [];
     for (const d of await readdir(COMPONENTS_ROOT, { withFileTypes: true })) {
       if (!d.isDirectory()) continue;
       for (const e of await readdir(path.join(COMPONENTS_ROOT, d.name), { withFileTypes: true })) {
-        if (e.isDirectory()) deep.push(`${d.name}/${e.name}`);
+        if (!e.isDirectory()) continue;
+        if (!FAMILY_DIR_OK.test(e.name)) badFamilyName.push(`${d.name}/${e.name}`);
+        for (const f of await readdir(path.join(COMPONENTS_ROOT, d.name, e.name), { withFileTypes: true })) {
+          if (f.isDirectory()) deep.push(`${d.name}/${e.name}/${f.name}`);
+        }
       }
     }
-    expect(deep).toEqual([]);
+    expect(badFamilyName, "组件族目录名必须 kebab-case（= 主组件名）").toEqual([]);
+    expect(deep, "组件族目录下不再套目录").toEqual([]);
   });
 
   it("文件名两种形态：组件 PascalCase.tsx；hook / context / util 与样式 kebab-case", async () => {
     // PascalCase 给默认导出一个组件的文件（含其 .module.css）；kebab-case 给
     // 非组件模块（use-fonts-settled.ts、ai-target.tsx、watermark-tile.ts）与共享样式。
-    const ok = /^(?:[A-Z][A-Za-z0-9]*|[a-z0-9]+(?:-[a-z0-9]+)*)(?:\.module)?\.(?:tsx?|css)$/;
     const bad: string[] = [];
     for (const d of await readdir(COMPONENTS_ROOT, { withFileTypes: true })) {
       if (!d.isDirectory()) continue;
-      for (const f of await readdir(path.join(COMPONENTS_ROOT, d.name))) {
-        if (!ok.test(f)) bad.push(`${d.name}/${f}`);
+      for (const e of await readdir(path.join(COMPONENTS_ROOT, d.name), { withFileTypes: true })) {
+        if (e.isDirectory()) {
+          for (const f of await readdir(path.join(COMPONENTS_ROOT, d.name, e.name))) {
+            if (!FILE_NAME_OK.test(f)) bad.push(`${d.name}/${e.name}/${f}`);
+          }
+        } else if (!FILE_NAME_OK.test(e.name)) {
+          bad.push(`${d.name}/${e.name}`);
+        }
       }
     }
     expect(bad).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 巨石组件行数棘轮（#487）
+// ─────────────────────────────────────────────────────────────────────────────
+// 五个巨石文件只降不升：每次拆分 PR 把这里的数字改小。
+// 拆出来的文件（组件族目录内）有上限：组件 ≤ 800、hook ≤ 400；两个整块搬出来时就超标
+// 的子件按当前行数记账，同样只降不升——它们自己的瘦身不在 #487 范围。
+
+const MONOLITH_LINE_CEILING: Record<string, number> = {
+  "components/script/ScriptEditor.tsx": 12316,
+  "components/ops/EventDetailClient.tsx": 3538,
+  "components/ops/CuePage.tsx": 3210,
+  "components/ops/PlanningClient.tsx": 2586,
+  "components/shell/AppShell.tsx": 1090,
+};
+
+const FAMILY_FILE_CEILING = { component: 800, hook: 400 } as const;
+
+/** 整块搬出即超标的子件：按搬出时的行数记账，只降不升。 */
+const FAMILY_FILE_GRANDFATHERED: Record<string, number> = {
+  "components/script/script-editor/ScriptBlock.tsx": 1096,
+  "components/ops/planning/TimetableView.tsx": 943,
+};
+
+/** 与 `wc -l` 同口径（数换行符），表里的数字可以直接对着终端核。 */
+async function countLines(rel: string): Promise<number> {
+  const text = await readFile(path.join(ROOT, rel), "utf-8");
+  return (text.match(/\n/g) ?? []).length;
+}
+
+describe("巨石组件行数只降不升", () => {
+  for (const [rel, ceiling] of Object.entries(MONOLITH_LINE_CEILING)) {
+    it(`${rel} ≤ ${ceiling} 行`, async () => {
+      const lines = await countLines(rel);
+      expect(lines, `${rel} 长了。拆分 PR 请同时把 MONOLITH_LINE_CEILING 改小；功能 PR 不该让它增长`).toBeLessThanOrEqual(ceiling);
+    });
+  }
+
+  it("组件族目录内的文件：组件 ≤ 800 行、hook ≤ 400 行（记账豁免见 FAMILY_FILE_GRANDFATHERED）", async () => {
+    const COMPONENTS_ROOT = path.join(ROOT, "components");
+    const over: string[] = [];
+    for (const d of await readdir(COMPONENTS_ROOT, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      for (const e of await readdir(path.join(COMPONENTS_ROOT, d.name), { withFileTypes: true })) {
+        if (!e.isDirectory()) continue;
+        for (const f of await readdir(path.join(COMPONENTS_ROOT, d.name, e.name))) {
+          if (!/\.tsx?$/.test(f)) continue;
+          const rel = `components/${d.name}/${e.name}/${f}`;
+          const lines = await countLines(rel);
+          const ceiling = FAMILY_FILE_GRANDFATHERED[rel]
+            ?? (f.startsWith("use-") ? FAMILY_FILE_CEILING.hook : FAMILY_FILE_CEILING.component);
+          if (lines > ceiling) over.push(`${rel}: ${lines} > ${ceiling}`);
+        }
+      }
+    }
+    expect(over).toEqual([]);
   });
 });
