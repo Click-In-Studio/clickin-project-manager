@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { NotifPref } from "@/lib/notification-prefs";
+import type { NotifPref } from "@/lib/notify/notification-prefs";
 import { BASE_PATH } from "@/lib/base-path";
 
 function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {

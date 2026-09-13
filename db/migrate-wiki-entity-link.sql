@@ -1,7 +1,7 @@
 -- wiki 双向链接泛化（wiki↔任意对象）：wiki_link → wiki_entity_link。
 --
 -- 旧 wiki_link 两列都是 UUID FK，只装得下 wiki→wiki 边。mention 体系
--- （lib/mention-types.ts）早已支持 scene/cue/asset/block 等 kind，wiki 正文里
+-- （lib/editor/mention-types.ts）早已支持 scene/cue/asset/block 等 kind，wiki 正文里
 -- 的跨对象引用一直存在，只是没有落边——对象侧因此看不到"被哪些 wiki 提过"。
 --
 -- 新表 wiki_entity_link：

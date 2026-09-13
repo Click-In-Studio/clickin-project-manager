@@ -1,12 +1,12 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getActiveVersionId, getFirstRehearsalMarkerLabel, getMasterScriptViewId, getScriptConfig, getVersion, saveScriptConfig } from "@/lib/db";
-import { hasEffectiveGrant } from "@/lib/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { broadcastEvent } from "@/lib/server-cache";
-import { rejectNonHeadWrite } from "@/lib/head-version";
-import type { ScriptConfig } from "@/lib/script-types";
-import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script-types";
-import { isKnownTemplateId } from "@/lib/script-template";
+import { rejectNonHeadWrite } from "@/lib/script/head-version";
+import type { ScriptConfig } from "@/lib/script/script-types";
+import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script/script-types";
+import { isKnownTemplateId } from "@/lib/script/template";
 
 export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/config">) {
   const { id } = await ctx.params;

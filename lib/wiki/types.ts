@@ -1,4 +1,4 @@
-import type { Mention } from "../event-db";
+import type { Mention } from "../ops/event-db";
 
 // ─── wiki 文档域共享类型（#420 后 wiki 回归纯内容对象）───────────────────────
 // 树位置（parent/sort）与权限位（is_public/listable）活在 node 壳上

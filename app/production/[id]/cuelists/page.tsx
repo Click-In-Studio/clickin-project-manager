@@ -3,10 +3,10 @@ export const metadata: Metadata = { title: "CUE表" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName, listCueListsWithAccess, getUserAllowedCueTypes, listProductionMembersWithRoles } from "@/lib/db";
-import { canAccessNode } from "@/lib/grant-template";
-import { listCueTemplateTypes } from "@/lib/cue-template-db";
+import { canAccessNode } from "@/lib/perm/grant-template";
+import { listCueTemplateTypes } from "@/lib/ops/cue-template-db";
 import CueListsManager from "@/components/CueListsManager";
 import PageActivationGate from "@/components/PageActivationGate";
 

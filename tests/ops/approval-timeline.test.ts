@@ -1,5 +1,5 @@
 /**
- * 审批时间线组装（lib/approval-timeline）—— 纯函数，喂构造好的申请对象。
+ * 审批时间线组装（lib/approval/approval-timeline）—— 纯函数，喂构造好的申请对象。
  *
  * 这里钉的全是「页面上极难手工复现」的分支：要等 24 小时才看得到超时升级、
  * 要造存量行才看得到无链降级、要连提两条申请才看得到覆盖终结。这些恰恰是
@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest";
 import { readFile } from "fs/promises";
 import path from "path";
-import { buildApprovalTimeline } from "@/lib/approval-timeline";
+import { buildApprovalTimeline } from "@/lib/approval/approval-timeline";
 import type { ApprovalChainEntry, ApprovalRequest } from "@/lib/db";
 
 const U_SUBJECT = "u-subject";
@@ -257,7 +257,7 @@ describe("或签提示", () => {
 // 写成 `import { X }`，或图省事引一下 getPool，pg 就会被打进浏览器包——
 // 编译不会报错，跑起来才炸。静态扫一遍，把「客户端安全」从口头约定变成会红的测试。
 describe("客户端安全：不得把数据库拖进浏览器包", () => {
-  const CLIENT_SAFE = ["lib/approval-timeline.ts", "lib/approval-stages.ts"];
+  const CLIENT_SAFE = ["lib/approval/approval-timeline.ts", "lib/approval/approval-stages.ts"];
 
   it.each(CLIENT_SAFE)("%s 对 ./db 只有 type-only 引用，且不碰 pg", async (rel) => {
     const src = await readFile(path.join(process.cwd(), rel), "utf8");

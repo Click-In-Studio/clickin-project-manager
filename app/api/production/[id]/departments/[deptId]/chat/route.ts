@@ -9,8 +9,8 @@
  */
 
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import {
   getProductionPermissionContext,
   getProductionName,
@@ -18,7 +18,7 @@ import {
   batchGetFeishuOpenIds,
   getFeishuOpenId,
 } from "@/lib/db";
-import { getProductionDept, setDeptChatId } from "@/lib/dept-db";
+import { getProductionDept, setDeptChatId } from "@/lib/perm/dept-db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 
 type Ctx = { params: Promise<{ id: string; deptId: string }> };

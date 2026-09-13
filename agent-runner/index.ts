@@ -1,6 +1,6 @@
 // agent-runner：自建 AI 运行时的独立进程（#367 §3 / §4.2 / §4.4）。
 //
-// 只做三件事：接 run（loopback HTTP）、跑 run（lib/agent-runtime/service）、活着（心跳、
+// 只做三件事：接 run（loopback HTTP）、跑 run（lib/agent/runtime/service）、活着（心跳、
 // 孤儿接管、排水）。事件经 agent_event + pg_notify 分发，浏览器的 SSE 由 next 端点服务，
 // 本进程不直接面对任何客户端——所以它可以随时重启（§4.4：先排水，超时才断）。
 //
@@ -24,8 +24,8 @@ const DRAIN_TIMEOUT_MS = Number(process.env.AGENT_DRAIN_TIMEOUT_MS ?? 600_000);
 const ORPHAN_SCAN_MS = Number(process.env.AGENT_ORPHAN_SCAN_MS ?? 30_000);
 
 async function main() {
-  const service = await import("../lib/agent-runtime/service");
-  const { RUNNER_OWNER } = await import("../lib/agent-runtime/config");
+  const service = await import("../lib/agent/runtime/service");
+  const { RUNNER_OWNER } = await import("../lib/agent/runtime/config");
 
   let draining = false;
 
@@ -91,9 +91,9 @@ async function main() {
   await scan();
   const scanTimer = setInterval(scan, ORPHAN_SCAN_MS);
 
-  // 定时任务节拍（lib/agent-runtime/schedules.ts）：认领到期任务 → 以创建者身份开新会话跑 run。
+  // 定时任务节拍（lib/agent/runtime/schedules.ts）：认领到期任务 → 以创建者身份开新会话跑 run。
   // 排水期不认领（认领了没人跑，租约到期前别的进程也接不了）。
-  const { tickSchedules, SCHEDULE_TICK_MS } = await import("../lib/agent-runtime/schedules");
+  const { tickSchedules, SCHEDULE_TICK_MS } = await import("../lib/agent/runtime/schedules");
   const tick = async () => {
     if (draining) return;
     try {

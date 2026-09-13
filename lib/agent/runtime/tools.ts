@@ -1,0 +1,966 @@
+// 进程内工具注册表（#367 S2）：**skills 的唯一事实源**（MCP 服务器已退役）。
+//
+// 底层函数在 lib/agent/tools/（my-tools / production-tools / wiki-tools /
+// instructions-tools / user-context），这里是描述文案 + 参数 schema + 包装——
+// 身份（userId / productionId）来自构造时的闭包，**模型参数里不存在身份字段**
+// （§5-1 安全不变量，tests/agent-runtime-tools.test.ts 静态扫描钉死）。
+//
+// 工具名沿用网关暴露名 clickin__<族>-<名>（"." → "-"）：lib/agent/agent-tool-labels.ts 的
+// 显示名、TOOLS.md 的措辞、前端气泡全部原样可用——前端零改动的一部分。
+//
+// readOnly = 网关时代的 readOnlyHint：决定要不要过确认门，以及中断后能否盲重跑
+// （lib/agent/runtime/resume.ts）。users.query_sensitive 刻意 readOnly=false（敏感读取
+// 也过确认门，与 server.ts 注释同理）。
+
+import { Type, type TSchema } from "typebox";
+import type { AgentToolResult } from "../../../vendor/openclaw/packages/agent-core/src/types";
+import { INSTRUCTIONS_MAX_LEN } from "@/lib/agent/agent-instructions";
+import { WIKI_DIALECT_POINTER_WRITE, WIKI_DIALECT_POINTER_READ, WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "@/lib/agent/tools/wiki-link-syntax";
+import { toolLabel } from "@/lib/agent/agent-tool-labels";
+import type { StreamLine, QuestionItem } from "@/lib/agent/chat/stream-reducer";
+import type { RuntimeTool } from "./resume";
+import type { MutationRecord } from "./mutation-audit";
+import type { ScheduleReport } from "./schedules";
+import { registerUnattendedAllowed } from "./schedules";
+
+export const TOOL_PREFIX = "clickin__";
+
+export interface ToolContext {
+  userId: string;
+  productionId: string | null;
+  /** 本轮 run 的句柄（ask_user 这类要与前端交互的工具用）；离线恢复/单测可缺席 */
+  run?: RunHandle;
+}
+
+export interface RunHandle {
+  runId: string;
+  sessionId: string;
+  signal: AbortSignal;
+  publish: (line: StreamLine) => void;
+  /** run 状态切换（awaiting_answer ↔ running） */
+  setStatus: (status: "running" | "awaiting_answer") => Promise<void>;
+  /** 本进程是否已脱离（排水）：等待中的工具据此不再碰表、不发事件 */
+  isDetached: () => boolean;
+  /** 无人值守（定时任务触发的 run）：写审计按此标记；确认门与 ask_user 的行为由 service 另判 */
+  unattended?: boolean;
+  /** 发起本轮时的页面（定时任务创建时记下，触发时温层工具面跟着来） */
+  pageKey?: string | null;
+  /** 触发本 run 的定时任务（schedule.finish 只在它存在时可用） */
+  schedule?: { id: string; name: string; allowedTools: string[] };
+  /** schedule.finish 的汇报落到这里，run 收尾时 finishScheduledRun 读 */
+  setScheduleReport?: (report: ScheduleReport) => void;
+  /** 写审计落行后回报给 run（service 把账本 id/摘要挂到 mutation 行上） */
+  noteMutations?: (toolCallId: string, records: MutationRecord[]) => void;
+}
+
+/** 写工具成功后的变更信号（前端 lib/agent/agent-mutations.ts 派发给页面订阅者决定怎么刷） */
+export interface ToolMutation {
+  scope: string;
+  action: "created" | "updated" | "deleted";
+  ids?: string[];
+}
+
+/** 注册表条目：RuntimeTool + MCP 原始名（tool-catalog / 显示名 / 卡片文案按它索引）。 */
+export interface RuntimeToolDef extends RuntimeTool {
+  mcpName: string;
+  /** 写工具声明：成功执行后产生了什么变更（读工具不声明） */
+  mutates?: (args: Record<string, unknown>) => ToolMutation | null;
+  /** 无人值守（定时任务）能否不经确认卡直接写；缺省 deny */
+  unattended?: "allow" | "deny";
+  /** 自写域（#47 导入日志）：交互会话免确认卡；约束见 Def.selfScribe 注释 */
+  selfScribe?: true;
+}
+
+const text = (t: string): AgentToolResult<unknown> => ({ content: [{ type: "text", text: t }], details: undefined });
+
+const NO_PRODUCTION =
+  "该工具仅在关联制作的对话中可用。请让用户新建对话并选择关联制作，或改用 my.* 个人查询（跨全部制作）。";
+
+const MY_SCOPE_NOTE =
+  "【个人查询：范围是该用户参与的全部制作，不局限于当前对话关联的项目；结果已按其参与范围过滤，无权限时返回空结果而非拒绝】";
+
+export function exposedName(mcpName: string): string {
+  return TOOL_PREFIX + mcpName.replace(/[^A-Za-z0-9_-]/g, "-");
+}
+export function bareName(exposed: string): string {
+  return exposed.startsWith(TOOL_PREFIX) ? exposed.slice(TOOL_PREFIX.length) : exposed;
+}
+
+type Def = {
+  mcpName: string;
+  description: string;
+  parameters: TSchema;
+  readOnly: boolean;
+  /** production 工具在个人会话里拒绝（与 server.ts 的 NO_PRODUCTION 同款） */
+  needsProduction?: boolean;
+  execute: (ctx: ToolContext & { productionId: string }, args: Record<string, unknown>, toolCallId: string) => Promise<string>;
+  /** 结果判定为"错误"（isError）而非正常文本——ask_user 取消/过期用 */
+  isErrorResult?: (out: string) => boolean;
+  /** 写工具：成功后产生的变更（service 据此往 agent SSE 发 mutation 行） */
+  mutates?: (args: Record<string, unknown>) => ToolMutation | null;
+  /**
+   * 无人值守（定时任务触发的 run）能否不经确认卡直接写。**缺省 deny**——新 skill 忘了写也安全，
+   * 只有想开的才写 allow（现在只有 wiki 的新建/更新：有 revision 历史、每次写进 agent_mutation 账本）。
+   * 边界表达在 skills 内部（AI 内部耦合），不进权限模型；权限仍由工具内 hasEffectiveGrant 实时判。
+   * 删除类永远不开（不可逆）。
+   */
+  unattended?: "allow" | "deny";
+  /**
+   * 自写域（#47 导入日志）：交互会话里跳过确认卡的**唯一**旁路。适用条件
+   * 收得死紧——只给「AI 自己的工作记录」类工具：①写入目标必须由工具内
+   * 自证（如只认首个 revision origin 钉死的日志文档，且该文档的创建照常
+   * 弹卡=授权动作）②权限照查不减 ③mutates 照报进审计账本。给共享状态、
+   * 正文、结构的写工具开这个口子=违规；定时任务路径不受此影响（仍走
+   * unattended 交集门）。
+   */
+  selfScribe?: true;
+};
+
+const wikiIdOf = (args: Record<string, unknown>): string[] => (typeof args.wikiId === "string" && args.wikiId ? [args.wikiId] : []);
+const WIKI_MUTATES = {
+  created: (): ToolMutation => ({ scope: "wiki", action: "created" }),
+  updated: (args: Record<string, unknown>): ToolMutation => ({ scope: "wiki", action: "updated", ids: wikiIdOf(args) }),
+  deleted: (args: Record<string, unknown>): ToolMutation => ({ scope: "wiki", action: "deleted", ids: wikiIdOf(args) }),
+};
+
+const NONE = Type.Object({});
+
+function myTool(mcpName: string, description: string, fn: (uid: string) => Promise<string>): Def {
+  return { mcpName, description: `${description}${MY_SCOPE_NOTE}`, parameters: NONE, readOnly: true, execute: (ctx) => fn(ctx.userId) };
+}
+function prodTool(mcpName: string, description: string, fn: (uid: string, pid: string) => Promise<string>): Def {
+  return { mcpName, description, parameters: NONE, readOnly: true, needsProduction: true, execute: (ctx) => fn(ctx.userId, ctx.productionId) };
+}
+
+const WIKI_ID = Type.String({ description: "文档 id（来自 wiki_tree/wiki_search 的结果）" });
+
+/** 导出仅供测试防漂移（selfScribe 不扩散等约束钉在 tests 里）。 */
+export const DEFS: Def[] = [
+  // ── my.* ────────────────────────────────────────────────────────────────
+  myTool("my.call_times", "查询当前用户自己的近期Call（时间、事件、地点、所属制作）（EN: my call times schedule）。",
+    async (uid) => (await import("@/lib/agent/tools/my-tools")).myCallTimes(uid)),
+  myTool("my.tech_reqs", "查询与当前用户相关的技术需求/任务（被指派或作为部门负责人），含状态（EN: my tech requirements tasks）。",
+    async (uid) => (await import("@/lib/agent/tools/my-tools")).myTechReqs(uid)),
+  myTool("my.events", "查询当前用户关注的即将开始的Event事件。",
+    async (uid) => (await import("@/lib/agent/tools/my-tools")).myFollowedEvents(uid)),
+  myTool("my.milestones", "查询当前用户可见项目的临近里程碑（截止日期）。",
+    async (uid) => (await import("@/lib/agent/tools/my-tools")).myMilestones(uid)),
+  myTool("my.productions", "查询当前用户参与的全部制作与角色（含已归档）。",
+    async (uid) => (await import("@/lib/agent/tools/my-tools")).myProductions(uid)),
+  {
+    mcpName: "my.memory_search",
+    description: `检索当前用户的长期记忆与历史对话记录（语义+关键词混合检索）。当用户提到过去讨论过的事、之前的决定、或你需要回忆更早的上下文时使用——注入的记忆摘要只覆盖精粹与最近几天，更早的内容必须靠本工具检索。${MY_SCOPE_NOTE}`,
+    parameters: Type.Object({ query: Type.String({ minLength: 1, description: "检索词（自然语言即可，支持语义匹配；也可用人名/项目名/关键词精确检索）" }) }),
+    readOnly: true,
+    execute: async (ctx, args) => {
+      const { searchMemory, formatSearchResult, MemoryUnavailableError } = await import("@/lib/agent/memory/search");
+      try {
+        const query = String(args.query);
+        return formatSearchResult(await searchMemory(ctx.userId, query), query);
+      } catch (err) {
+        if (err instanceof MemoryUnavailableError) return err.message;
+        throw err;
+      }
+    },
+  },
+  {
+    mcpName: "my.update_instructions",
+    description: "【个人设置】全量替换当前用户的个人 AI 指令（即 <clickin-instructions> 里「用户的个人指令」段），需要人工在聊天栏确认。content 是替换后的完整内容——先基于注入块里的现行内容整合修改，不要只传增量；传空字符串表示清空。仅影响该用户自己的会话。",
+    parameters: Type.Object({ content: Type.String({ description: `替换后的完整个人指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）` }) }),
+    readOnly: false,
+    mutates: () => ({ scope: "instructions.personal", action: "updated" }),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/instructions-tools")).updateMyInstructions(ctx.userId, String(args.content)),
+  },
+  {
+    mcpName: "users.query_sensitive",
+    description: "查询当前用户自己的登记联系方式（邮箱/电话）（EN: my contact email phone）。敏感信息，需用户确认。",
+    parameters: NONE,
+    readOnly: false, // 敏感读取也过确认门
+    execute: async (ctx) => (await import("@/lib/agent/tools/user-context")).querySelfSensitive(ctx.userId),
+  },
+
+  // ── production.* ────────────────────────────────────────────────────────
+  prodTool("production.info", "查询当前对话关联制作的项目详情（简介、类型、所有者、制作人）。成员内公开信息。",
+    async (uid, pid) => (await import("@/lib/agent/tools/production-tools")).productionInfo(uid, pid)),
+  prodTool("production.my_role", "查询当前用户在当前对话关联制作中的职位、标签与部门（含是否部门负责人）。",
+    async (uid, pid) => (await import("@/lib/agent/tools/production-tools")).productionMyRole(uid, pid)),
+  prodTool("production.notifications", "查询当前用户在当前对话关联制作中的通知（未读/待办/警告）。",
+    async (uid, pid) => (await import("@/lib/agent/tools/production-tools")).productionNotifications(uid, pid)),
+  prodTool("production.milestones", "查询当前对话关联制作的全部里程碑（含已过与未来）。",
+    async (uid, pid) => (await import("@/lib/agent/tools/production-tools")).productionMilestones(uid, pid)),
+  prodTool("production.contact_list",
+    "列出当前对话关联制作的全部成员：姓名、用户 id、职位、部门（含是否负责人）、标签。需要用户 id 的工具（如 wiki_set_grant 的分享对象）从这里取。不含邮箱/电话——联系方式是敏感信息，只有本人经 users.query_sensitive 确认后才能读取。",
+    async (uid, pid) => (await import("@/lib/agent/tools/production-tools")).productionContactList(uid, pid)),
+  prodTool("production.department_list",
+    "列出当前对话关联制作的部门/用户组树（树状缩进，含部门 id、负责人、成员数）。需要部门 id 的工具（如 wiki_set_grant 的 deptIds）从这里取。",
+    async (uid, pid) => (await import("@/lib/agent/tools/production-tools")).productionDepartmentList(uid, pid)),
+  {
+    mcpName: "production.update_instructions",
+    description: "全量替换当前对话关联制作的制作级 AI 指令（对全体成员的 AI 会话生效），需要人工在聊天栏确认；确认后若该用户没有编辑权限（默认仅制作人），调用会被直接拦截。content 是替换后的完整内容——先基于注入块里的现行内容整合修改，不要只传增量；传空字符串表示清空。",
+    parameters: Type.Object({ content: Type.String({ description: `替换后的完整制作级指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）` }) }),
+    readOnly: false,
+    mutates: () => ({ scope: "instructions.production", action: "updated" }), needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/instructions-tools")).updateProductionInstructions(ctx.userId, ctx.productionId, String(args.content)),
+  },
+
+  // ── production.wiki_* ───────────────────────────────────────────────────
+  prodTool("production.wiki_tree", "查询当前对话关联制作的文档与文件树（与用户看到的目录一致），只列当前用户可见的节点。行首标类型：[文档]（wiki，用 wiki_read 按 id 读）、[文件]（资产，docx/pdf 用 production.doc_outline 按资产 id 解析）、[目录]。",
+    async (uid, pid) => (await import("@/lib/agent/tools/wiki-tools")).wikiTree(uid, pid)),
+  {
+    mcpName: "production.wiki_backlinks",
+    description: "查询一篇文档的双向链接：谁链接到它（backlinks）、它链接到谁（outgoing）。",
+    parameters: Type.Object({ wikiId: WIKI_ID }), readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/wiki-tools")).wikiBacklinks(ctx.userId, ctx.productionId, String(args.wikiId)),
+  },
+  {
+    mcpName: "production.wiki_read",
+    description: `按 id 读取一篇文档的完整内容（标题/标签/正文）（EN: wiki read document content）。${WIKI_DIALECT_POINTER_READ}`,
+    parameters: Type.Object({ wikiId: WIKI_ID }), readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/wiki-tools")).wikiRead(ctx.userId, ctx.productionId, String(args.wikiId)),
+  },
+  {
+    mcpName: "production.wiki_search",
+    description: "全文搜索当前对话关联制作的文档库（标题+正文），只返回当前用户有权限看到的结果。",
+    parameters: Type.Object({ query: Type.String({ description: "搜索关键词" }) }), readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/wiki-tools")).wikiSearch(ctx.userId, ctx.productionId, String(args.query)),
+  },
+  {
+    mcpName: "production.wiki_dialect_ref",
+    description: "获取文档库正文的私有 Markdown 方言完整说明（链接/嵌入/布局/锚点文法）（EN: wiki markdown dialect syntax reference）。写作或改写文档正文前，语境中没有方言说明时必须先调用本工具。",
+    parameters: NONE, readOnly: true,
+    // 幂等标志（方言已在语境中）由 service 的 tool_result 钩子按本轮送达结论改写结果
+    execute: async () => `${WIKI_LINK_SYNTAX_NOTE}\n\n${WIKI_DIALECT_NOTE}`,
+  },
+  {
+    mcpName: "production.wiki_propose_create",
+    description: `在某篇文档下（或在根下）提议新建一篇子文档（EN: wiki create new document），需要人工在聊天栏确认；确认后若你没有新建文档的权限，调用会被直接拦截并转入审批流。${WIKI_DIALECT_POINTER_WRITE}`,
+    parameters: Type.Object({
+      parentId: Type.Optional(Type.String({ description: "父文档 id；建在文档库根下就整个省略这个字段，不要传空字符串" })),
+      title: Type.String({ description: "新文档标题" }),
+      body: Type.Optional(Type.String({ description: "新文档正文（Markdown）" })),
+      summary: Type.String({ description: "一句话说明这次提议改了什么、为什么" }),
+    }),
+    readOnly: false, unattended: "allow",
+    mutates: WIKI_MUTATES.created, needsProduction: true,
+    execute: async (ctx, args, toolCallId) => {
+      const { wikiProposeCreate } = await import("@/lib/agent/tools/wiki-tools");
+      const body = await proposalBody(ctx.productionId, toolCallId, ctx.userId, args.body);
+      return wikiProposeCreate(ctx.userId, ctx.productionId, toolCallId, {
+        parentId: optString(args.parentId), title: String(args.title), body, summary: String(args.summary ?? ""),
+      });
+    },
+  },
+  {
+    mcpName: "production.wiki_propose_update",
+    description: `提议修改一篇既有文档的标题和/或正文（只传要改的字段，不传的保持不变）（EN: wiki update edit document），需要人工在聊天栏确认；确认后若你没有编辑这篇文档的权限，调用会被直接拦截并转入审批流。${WIKI_DIALECT_POINTER_WRITE}`,
+    parameters: Type.Object({
+      wikiId: Type.String({ description: "要修改的文档 id（来自 wiki_tree/wiki_search 的结果）" }),
+      title: Type.Optional(Type.String({ description: "新标题；不改标题就整个省略这个字段" })),
+      body: Type.Optional(Type.String({ description: "新正文（Markdown）；不改正文就整个省略这个字段" })),
+      summary: Type.String({ description: "一句话说明这次提议改了什么、为什么" }),
+    }),
+    readOnly: false, unattended: "allow",
+    mutates: WIKI_MUTATES.updated, needsProduction: true,
+    execute: async (ctx, args, toolCallId) => {
+      const { wikiProposeUpdate } = await import("@/lib/agent/tools/wiki-tools");
+      const body = await proposalBody(ctx.productionId, toolCallId, ctx.userId, args.body);
+      return wikiProposeUpdate(ctx.userId, ctx.productionId, toolCallId, {
+        wikiId: String(args.wikiId), title: optString(args.title), body, summary: String(args.summary ?? ""),
+      });
+    },
+  },
+  {
+    mcpName: "production.wiki_propose_delete",
+    description: "提议删除一篇既有文档，需要人工在聊天栏确认；确认后若你没有删除这篇文档的权限，调用会被直接拦截并转入审批流；被报告/备注引用（挂载）或系统锚点目录的文档无法删除（这不是权限问题）。",
+    parameters: Type.Object({
+      wikiId: Type.String({ description: "要删除的文档 id（来自 wiki_tree/wiki_search 的结果）" }),
+      summary: Type.String({ description: "一句话说明为什么要删除" }),
+    }),
+    readOnly: false,
+    mutates: WIKI_MUTATES.deleted, needsProduction: true,
+    execute: async (ctx, args, toolCallId) => (await import("@/lib/agent/tools/wiki-tools")).wikiProposeDelete(ctx.userId, ctx.productionId, toolCallId, {
+      wikiId: String(args.wikiId), summary: String(args.summary ?? ""),
+    }),
+  },
+  {
+    mcpName: "production.wiki_propose_move",
+    description: "提议把一篇既有文档移动到另一篇文档下（或移到文档库根），需要人工在聊天栏确认；确认后若你没有编辑这篇文档的权限，调用会被直接拦截并转入审批流。",
+    parameters: Type.Object({
+      wikiId: Type.String({ description: "要移动的文档 id" }),
+      newParentId: Type.Optional(Type.String({ description: "移动到的新父文档 id；移到文档库根就整个省略这个字段，不要传空字符串" })),
+      summary: Type.String({ description: "一句话说明为什么要移动" }),
+    }),
+    readOnly: false,
+    mutates: WIKI_MUTATES.updated, needsProduction: true,
+    execute: async (ctx, args, toolCallId) => (await import("@/lib/agent/tools/wiki-tools")).wikiProposeMove(ctx.userId, ctx.productionId, toolCallId, {
+      wikiId: String(args.wikiId), newParentId: optString(args.newParentId), summary: String(args.summary ?? ""),
+    }),
+  },
+  {
+    mcpName: "production.wiki_propose_tag",
+    description: "提议设置一篇既有文档的标签（整体替换现有标签，不是增量追加——传空数组等于清空所有标签），需要人工在聊天栏确认；确认后若你没有编辑这篇文档的权限，调用会被直接拦截并转入审批流。",
+    parameters: Type.Object({
+      wikiId: Type.String({ description: "要设置标签的文档 id" }),
+      tags: Type.Array(Type.String(), { description: "完整的新标签列表（整体替换，不是在现有标签上增量追加）" }),
+      summary: Type.String({ description: "一句话说明为什么要这样设置标签" }),
+    }),
+    readOnly: false,
+    mutates: WIKI_MUTATES.updated, needsProduction: true,
+    execute: async (ctx, args, toolCallId) => (await import("@/lib/agent/tools/wiki-tools")).wikiProposeTag(ctx.userId, ctx.productionId, toolCallId, {
+      wikiId: String(args.wikiId), tags: Array.isArray(args.tags) ? args.tags.map(String) : [], summary: String(args.summary ?? ""),
+    }),
+  },
+  {
+    mcpName: "production.wiki_set_grant",
+    description: "修改一篇文档的分享设置：全体成员可见开关、分享给哪些部门（整体替换）、单独分享/撤销给某些人（view=可阅读 / edit=可编辑 / manage=可管理）。需要人工在聊天栏确认；确认后若你没有这篇文档的分享权限（grants@edit，与编辑权限是两回事），调用会被拒绝。用户 id 从 production.contact_list 取，部门 id 从 production.department_list 取。",
+    parameters: Type.Object({
+      wikiId: WIKI_ID,
+      isPublic: Type.Optional(Type.Boolean({ description: "是否对制作全体成员可见；不改就整个省略这个字段" })),
+      deptIds: Type.Optional(Type.Array(Type.String(), { description: "完整的部门分享列表（整体替换，不是增量追加——传空数组等于清空部门分享）；不改就整个省略这个字段" })),
+      addPeople: Type.Optional(Type.Array(Type.Object({
+        userId: Type.String({ description: "被分享人的用户 id（来自 production.contact_list）" }),
+        level: Type.Union([Type.Literal("view"), Type.Literal("edit"), Type.Literal("manage")], { description: "分享级别：view=可阅读，edit=可编辑，manage=可管理（含再分享）" }),
+      }), { description: "要新增分享的人；不加人就整个省略这个字段" })),
+      removePeopleUserIds: Type.Optional(Type.Array(Type.String(), { description: "要撤销单独分享的用户 id；不撤销就整个省略这个字段" })),
+      summary: Type.String({ description: "一句话说明这次为什么要改分享设置" }),
+    }),
+    readOnly: false,
+    mutates: WIKI_MUTATES.updated, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/wiki-tools")).wikiSetGrant(ctx.userId, ctx.productionId, {
+      wikiId: String(args.wikiId),
+      isPublic: typeof args.isPublic === "boolean" ? args.isPublic : undefined,
+      deptIds: Array.isArray(args.deptIds) ? args.deptIds.map(String) : undefined,
+      addPeople: Array.isArray(args.addPeople) ? (args.addPeople as Array<{ userId: string; level: "view" | "edit" | "manage" }>) : undefined,
+      removePeopleUserIds: Array.isArray(args.removePeopleUserIds) ? args.removePeopleUserIds.map(String) : undefined,
+      summary: String(args.summary ?? ""),
+    }),
+  },
+
+  // ── production.dramaturgy 族（场次 + 角色，lib/agent/tools/dramaturgy-tools.ts）───────
+  // 写工具横跨多把钥匙（scene 逐字段），模型必须先知道自己能改什么——每个写工具的描述
+  // 都指向 dramaturgy_permissions；确认门的卡片由 previewDramaturgyProposal 预算三态。
+  prodTool("production.dramaturgy_permissions",
+    "查询当前用户在构作域（场次/角色）的写权限三态清单：✅已持有 / 🔓有资格未激活（不可写，需用户到页面激活）/ 📝需申请 / ⛔无入口（EN: my dramaturgy scene character write permissions）。场次的每个字段各是一把钥匙，**调用任何 scene_propose_* / character_propose_* 之前先调用本工具**，只提议 ✅ 的字段。",
+    async (uid, pid) => (await import("@/lib/agent/tools/dramaturgy-tools")).dramaturgyPermissions(uid, pid)),
+  {
+    mcpName: "production.scene_list",
+    description: "列出当前制作的章节/场次结构树（id、序号、名称、章/场、时长、排练标记数）（EN: list scenes chapters structure）。withDetails=true 时附带每场的梗概/行动线/音乐/舞台呈现摘要。需要场次 id 的工具从这里取。",
+    parameters: Type.Object({ withDetails: Type.Optional(Type.Boolean({ description: "是否附带构作字段摘要（默认不带，只有结构）" })) }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/dramaturgy-tools")).sceneList(ctx.userId, ctx.productionId, { withDetails: args.withDetails === true }),
+  },
+  {
+    mcpName: "production.scene_read",
+    description: "读取一个章节/场次的完整构作信息：名称、类型、所属章节、梗概、行动线、音乐、舞台呈现、预计时长、排练标记，章节还会列出下辖场次（EN: read scene details synopsis）。",
+    parameters: Type.Object({ sceneId: Type.String({ description: "章节/场次 id（来自 scene_list）" }) }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/dramaturgy-tools")).sceneRead(ctx.userId, ctx.productionId, String(args.sceneId)),
+  },
+  prodTool("production.character_list",
+    "列出当前制作的全部角色：id、名称、单人/聚合（含聚合成员）、角色类型、性别、小传摘要（EN: list characters cast）。需要角色 id 的工具从这里取。",
+    async (uid, pid) => (await import("@/lib/agent/tools/dramaturgy-tools")).characterList(uid, pid)),
+  {
+    mcpName: "production.character_read",
+    description: "读取一个角色的完整信息（名称、聚合成员、类型、性别、完整人物小传）（EN: read character biography）。",
+    parameters: Type.Object({ charId: Type.String({ description: "角色 id（来自 character_list）" }) }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/dramaturgy-tools")).characterRead(ctx.userId, ctx.productionId, String(args.charId)),
+  },
+  {
+    mcpName: "production.scene_propose_update",
+    description: "提议修改一个或多个章节/场次的构作字段（名称、章/场类型、梗概、行动线、音乐、舞台呈现、预计时长），需要人工在聊天栏确认（EN: update scene synopsis fields batch）。每个字段各是一把权限钥匙，**调用前先用 production.dramaturgy_permissions 查看自己能改哪些字段**，只传有权限的字段；一批里任一项无权限则整批不执行。字段值是整体替换，不是追加。",
+    parameters: Type.Object({
+      updates: Type.Array(Type.Object({
+        sceneId: Type.String({ description: "章节/场次 id（来自 scene_list）" }),
+        name: Type.Optional(Type.String({ description: "新名称；不改就整个省略" })),
+        kind: Type.Optional(Type.Union([Type.Literal("chapter"), Type.Literal("scene")], { description: "改为章（chapter）或场（scene）；不改就整个省略" })),
+        synopsis: Type.Optional(Type.String({ description: "梗概（整体替换）" })),
+        actionLine: Type.Optional(Type.String({ description: "行动线（整体替换）" })),
+        music: Type.Optional(Type.String({ description: "音乐（整体替换）" })),
+        stageNotes: Type.Optional(Type.String({ description: "舞台呈现（整体替换）" })),
+        expectedDuration: Type.Optional(Type.String({ description: "预计时长，如 8min" })),
+      }), { minItems: 1, maxItems: 50, description: "要修改的场次列表（批量：一张确认卡、一次落库）" }),
+      summary: Type.String({ description: "一句话说明这次改了什么、为什么" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: (args) => ({ scope: "scene", action: "updated", ids: Array.isArray(args.updates) ? args.updates.map((u: { sceneId?: unknown }) => String(u?.sceneId ?? "")).filter(Boolean) : [] }),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-scene_propose_update", args),
+  },
+  {
+    mcpName: "production.scene_propose_create",
+    description: "提议新建一个或多个章节/场次（可一次拆出整幕的场次），需要人工在聊天栏确认（EN: create scenes chapters batch）。带 parentId 或 kind=scene 即为场，否则为章；不指定位置就追加到末尾。**调用前先用 production.dramaturgy_permissions 确认有新建权限**。新建后要填梗概等字段，另用 scene_propose_update。",
+    parameters: Type.Object({
+      items: Type.Array(Type.Object({
+        name: Type.String({ description: "名称" }),
+        kind: Type.Optional(Type.Union([Type.Literal("chapter"), Type.Literal("scene")], { description: "章或场；省略时按 parentId 推断（有父即为场，否则为章）" })),
+        parentId: Type.Optional(Type.String({ description: "所属章节 id（新建场时给；建章不要传）" })),
+        insertBeforeSceneId: Type.Optional(Type.String({ description: "插在这个章节/场次之前；不指定位置就整个省略" })),
+        insertAfterSceneId: Type.Optional(Type.String({ description: "插在这个章节/场次之后；不指定位置就整个省略" })),
+      }), { minItems: 1, maxItems: 50 }),
+      summary: Type.String({ description: "一句话说明为什么新建" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: () => ({ scope: "scene", action: "created" }),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-scene_propose_create", args),
+  },
+  {
+    mcpName: "production.scene_propose_delete",
+    description: "提议删除一个章节/场次，需要人工在聊天栏确认（EN: delete scene chapter）。带构作详情的章节/场次无法删除（这不是权限问题，先清空详情）；章节下还有内容时系统会要求二选一：marker-only=只删标记、whole=连同其下正文一起删（另需剧本编辑权限）——先用 ask_user 问用户，再带 operation 重调。**调用前先用 production.dramaturgy_permissions 确认有删除权限**。",
+    parameters: Type.Object({
+      sceneId: Type.String({ description: "章节/场次 id（来自 scene_list）" }),
+      operation: Type.Optional(Type.Union([Type.Literal("marker-only"), Type.Literal("whole")], { description: "删除方式；只在工具要求选择后传" })),
+      summary: Type.String({ description: "一句话说明为什么删除" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: (args) => ({ scope: "scene", action: "deleted", ids: typeof args.sceneId === "string" ? [args.sceneId] : [] }),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-scene_propose_delete", args),
+  },
+  {
+    mcpName: "production.character_propose_create",
+    description: "提议新建一个或多个角色（可标记为聚合角色并指定成员），需要人工在聊天栏确认（EN: create characters batch）。角色名不能与现有角色重复。**调用前先用 production.dramaturgy_permissions 确认有新建角色权限**。性别/类型/小传另用 character_propose_update 填写。",
+    parameters: Type.Object({
+      items: Type.Array(Type.Object({
+        name: Type.String({ description: "角色名" }),
+        isAggregate: Type.Optional(Type.Boolean({ description: "是否聚合角色（多个单人角色的合称，如「众人」）" })),
+        memberIds: Type.Optional(Type.Array(Type.String(), { description: "聚合成员的角色 id（只对聚合角色有效，须是单人角色）" })),
+      }), { minItems: 1, maxItems: 50 }),
+      summary: Type.String({ description: "一句话说明为什么新建" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: () => ({ scope: "character", action: "created" }),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-character_propose_create", args),
+  },
+  {
+    mcpName: "production.character_propose_update",
+    description: "提议修改一个或多个角色（名称、聚合/单人、聚合成员、性别、角色类型、人物小传），需要人工在聊天栏确认（EN: update character biography batch）。每个角色一把编辑钥匙，**调用前先用 production.dramaturgy_permissions 确认**；一批里任一角色无权限则整批不执行。字段值整体替换（memberIds 是完整的新成员列表）。",
+    parameters: Type.Object({
+      updates: Type.Array(Type.Object({
+        charId: Type.String({ description: "角色 id（来自 character_list）" }),
+        name: Type.Optional(Type.String({ description: "新名称；不改就整个省略" })),
+        isAggregate: Type.Optional(Type.Boolean({ description: "改为聚合/单人；不改就整个省略（切换会清空成员）" })),
+        memberIds: Type.Optional(Type.Array(Type.String(), { description: "聚合成员的完整新列表（整体替换）；不改就整个省略" })),
+        gender: Type.Optional(Type.String({ description: "性别" })),
+        roleType: Type.Optional(Type.String({ description: "角色类型" })),
+        biography: Type.Optional(Type.String({ description: "人物小传（整体替换）" })),
+      }), { minItems: 1, maxItems: 50 }),
+      summary: Type.String({ description: "一句话说明这次改了什么、为什么" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: (args) => ({ scope: "character", action: "updated", ids: Array.isArray(args.updates) ? args.updates.map((u: { charId?: unknown }) => String(u?.charId ?? "")).filter(Boolean) : [] }),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-character_propose_update", args),
+  },
+  {
+    mcpName: "production.character_propose_delete",
+    description: "提议删除一个或多个角色，需要人工在聊天栏确认（EN: delete characters）。每个角色一把删除钥匙，**调用前先用 production.dramaturgy_permissions 确认**；任一无权限则整批不执行。",
+    parameters: Type.Object({
+      charIds: Type.Array(Type.String(), { minItems: 1, maxItems: 50, description: "要删除的角色 id 列表（来自 character_list）" }),
+      summary: Type.String({ description: "一句话说明为什么删除" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: (args) => ({ scope: "character", action: "deleted", ids: Array.isArray(args.charIds) ? args.charIds.map(String) : [] }),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/dramaturgy-tools")).runDramaturgyProposal(ctx.userId, ctx.productionId, "production-character_propose_delete", args),
+  },
+
+  // ── production.script_* 读面（剧本正文，lib/agent/tools/script-tools.ts）─────────
+  // 正文以「剧本方言」文本形态输出（[b:<id>] 行头携带块 id，lib/script/script-dialect.ts）；
+  // 页码是估算值——定位组合拳是「页码粗着陆 + 相对窗口微调」。写面（P2）另批上线。
+  {
+    mcpName: "production.script_dialect_ref",
+    description: "获取剧本正文方言的完整说明：[b:]/[new]/[m:] 头标、[台]/[白]/[歌]/[显名]/[提示] 标记、续行与转义规则（EN: script dialect syntax reference）。需要理解或改写剧本正文而语境中没有方言说明时，先调用本工具。",
+    parameters: NONE, readOnly: true,
+    execute: async () => (await import("@/lib/script/script-dialect")).SCRIPT_DIALECT_NOTE,
+  },
+  {
+    mcpName: "production.script_read_section",
+    description: "按章节/场次/排练标记整段读取剧本正文，以剧本方言形态输出（[b:<id>] 行携带块 id）（EN: read script section blocks dialogue lines）。sectionId 用 production.scene_list 里的场次 id（正文里的 [m:<id>] 锚点同义）。整段过长时会返回子段清单或截断并给续读锚点。",
+    parameters: Type.Object({ sectionId: Type.String({ description: "章节/场次/排练标记 id（来自 production.scene_list）" }) }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/script-tools")).scriptReadSection(ctx.userId, ctx.productionId, String(args.sectionId)),
+  },
+  {
+    mcpName: "production.script_read_window",
+    description: "以某个块为锚点读取剧本正文的相对窗口（前 N 块 + 锚点 + 后 M 块）（EN: script block context window neighbors）。blockId 来自读取/搜索结果里的 [b:]/[m:] 标注；页码查询有偏差、或用户指着某句台词说话时，用它沿上下文行走。",
+    parameters: Type.Object({
+      blockId: Type.String({ description: "锚点块 id（读取/搜索结果里 [b:] 或 [m:] 标注的 id）" }),
+      before: Type.Optional(Type.Integer({ minimum: 0, maximum: 50, description: "锚点之前取几块（默认 6）" })),
+      after: Type.Optional(Type.Integer({ minimum: 0, maximum: 50, description: "锚点之后取几块（默认 12）" })),
+    }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/script-tools")).scriptReadWindow(
+      ctx.userId, ctx.productionId, String(args.blockId),
+      typeof args.before === "number" ? args.before : undefined,
+      typeof args.after === "number" ? args.after : undefined,
+    ),
+  },
+  {
+    mcpName: "production.script_search",
+    description: "在剧本正文与舞台提示里搜索文字（包含匹配），可按说话人过滤（EN: search script lines dialogue text）。结果带块 id、估算页码与所在场次；要看上下文再用 production.script_read_window。",
+    parameters: Type.Object({
+      query: Type.String({ minLength: 1, description: "要找的文字（在正文与舞台提示里做包含匹配）" }),
+      speaker: Type.Optional(Type.String({ description: "只搜这个角色的台词（角色名，来自 production.character_list）；不过滤就整个省略" })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 30, description: "最多返回几条（默认 10）" })),
+    }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/script-tools")).scriptSearch(ctx.userId, ctx.productionId, {
+      query: String(args.query ?? ""),
+      speaker: typeof args.speaker === "string" ? args.speaker : undefined,
+      limit: typeof args.limit === "number" ? args.limit : undefined,
+    }),
+  },
+  {
+    mcpName: "production.script_propose_rewrite",
+    description:
+      "以剧本方言整段改写一个章节/场次/排练标记段的正文，需要人工在聊天栏确认（EN: rewrite script section dialogue batch）。" +
+      "先用 production.script_read_section 读出该段（输出即方言形态），在其文本上改写后**整段提交**：" +
+      "保留的块必须带原 [b:<id>]（评论/cue/标签锚定在 id 上，重写内容也要带原 id，不要删了用 [new] 重建）；" +
+      "新块用 [new]；输出中省略某个 [b:<id>] 即删除该块；[m:] 锚点行原样保留。系统会计算最小 diff，只落真正变化的块。" +
+      "改写剧本正文必须按剧本方言输出；方言完整说明若不在语境中，先调用 production.script_dialect_ref——违反方言的提议会被解析器拒绝。",
+    parameters: Type.Object({
+      sectionId: Type.String({ description: "要改写的章节/场次/排练标记 id（来自 production.scene_list 或 [m:] 锚点）" }),
+      dialect: Type.String({ minLength: 1, description: "改写后的整段方言文本（含 [m:] 锚点行与全部要保留的 [b:<id>] 块）" }),
+      summary: Type.String({ description: "一句话说明这次改了什么、为什么" }),
+    }),
+    readOnly: false, needsProduction: true,
+    // ids 从模型给的方言文本里提取，仅供 mutation-audit 取快照与前端刷新提示——
+    // 截断/漏提最多让账本少记几块，patch 本身在 script-write-tools 里按解析结果全量计算
+    mutates: (args) => ({
+      scope: "script", action: "updated",
+      ids: [...String(args.dialect ?? "").matchAll(/\[b:([^\]\s]+)\]/g)].map((m) => m[1]).slice(0, 60),
+    }),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/script-write-tools")).runScriptProposal(ctx.userId, ctx.productionId, "production-script_propose_rewrite", args),
+  },
+  {
+    mcpName: "production.script_propose_edit_blocks",
+    description:
+      "对剧本正文做单/多块精修（改内容/说话人/舞台提示、插入新块、删除块），需要人工在聊天栏确认（EN: edit script blocks update insert delete）。" +
+      "blockId 来自剧本读取/搜索结果的 [b:] 标注；speakers 是完整新列表（整体替换），元素形如「张三」「张三（低声）」「#<角色id>」。" +
+      "**插入顺序语义：inserts 数组顺序=文档顺序**——同一 afterBlockId 传多块时按数组序依次排在锚点后（第 1 个紧跟锚点），批量导入无需逐块换锚；成功后按文档顺序返回新块 id，可直接作下一批的插入锚点。" +
+      "章节/场次标记不能用本工具改（用 scene_propose_*）；整段大改用 production.script_propose_rewrite。一批里任一项有问题则整批不执行。",
+    parameters: Type.Object({
+      updates: Type.Optional(Type.Array(Type.Object({
+        blockId: Type.String({ description: "要修改的块 id" }),
+        content: Type.Optional(Type.String({ description: "新正文（整体替换）；不改就整个省略" })),
+        stageComment: Type.Optional(Type.String({ description: "舞台提示（整体替换）；空字符串 = 清除；不改就整个省略" })),
+        speakers: Type.Optional(Type.Array(Type.String(), { description: "说话人完整新列表（整体替换；空数组 = 无说话人）；不改就整个省略" })),
+        type: Type.Optional(Type.Union([Type.Literal("dialogue"), Type.Literal("stage")], { description: "块类型；不改就整个省略" })),
+        lyric: Type.Optional(Type.Boolean({ description: "是否歌词；不改就整个省略" })),
+        forceShowCharacterName: Type.Optional(Type.Boolean({ description: "强制显示角色名；不改就整个省略" })),
+      }), { maxItems: 60 })),
+      inserts: Type.Optional(Type.Array(Type.Object({
+        afterBlockId: Type.String({ description: "插在这个块之后（[b:] 或 [m:] 标注的 id；给标记 id = 插在该段最前）" }),
+        content: Type.String({ description: "新块正文" }),
+        type: Type.Optional(Type.Union([Type.Literal("dialogue"), Type.Literal("stage")], { description: "块类型，默认 dialogue" })),
+        speakers: Type.Optional(Type.Array(Type.String(), { description: "说话人列表；无说话人就整个省略" })),
+        stageComment: Type.Optional(Type.String({ description: "舞台提示；没有就整个省略" })),
+        lyric: Type.Optional(Type.Boolean({ description: "是否歌词" })),
+      }), { maxItems: 60 })),
+      deletes: Type.Optional(Type.Array(Type.String(), { maxItems: 60, description: "要删除的块 id 列表" })),
+      summary: Type.String({ description: "一句话说明这次改了什么、为什么" }),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: (args) => ({
+      scope: "script", action: "updated",
+      ids: [
+        ...(Array.isArray(args.updates) ? args.updates.map((u: { blockId?: unknown }) => String(u?.blockId ?? "")) : []),
+        ...(Array.isArray(args.deletes) ? args.deletes.map(String) : []),
+      ].filter(Boolean).slice(0, 60),
+    }),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/script-write-tools")).runScriptProposal(ctx.userId, ctx.productionId, "production-script_propose_edit_blocks", args),
+  },
+  {
+    mcpName: "production.script_read_page",
+    description: "按页码读取剧本正文（估算页码，按主本版式，与打印稿可能有小幅偏差）（EN: read script page number blocks）。用户说「第 N 页」时用它粗定位；找不到目标时不要放弃，用 production.script_read_window 沿 [b:] 锚点前后微调。",
+    parameters: Type.Object({ page: Type.Integer({ minimum: 1, description: "页码（从 1 开始）" }) }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/script-tools")).scriptReadPage(ctx.userId, ctx.productionId, Number(args.page)),
+  },
+
+  // ── #47 文档理解（lib/agent/tools/doc-tools.ts）：读上传的剧本类文档的结构化信号，
+  // 配合导入类工作流。assetId 来自正文引用 /__cm__/asset/<id>、资产页链接或用户提供；
+  // 权限=asset meta face（与预览同口径）。支持 docx + pdf 文本层（栅格化页诚实标注）。
+  {
+    mcpName: "production.doc_outline",
+    description:
+      "读取一个 docx/pdf 资产的结构概览（EN: docx pdf document outline structure histogram script import）。docx：段落/表格/脚注/非文本对象总量、样式直方图、对齐直方图、缩进聚类、字体分布、开头预览；" +
+      "pdf：逐页密度带（宏观分界如「前半剧本后半乐谱」一眼可见）、行首 x 聚类、字体图例、竖排/空白/栅格化/抽取不完整页清单、跨页重复行（水印页眉脚）、首个内容页预览。" +
+      "这是理解上传文档的第一步——先据此提出该文档的排版映射假设（哪种排版=角色名/对白/舞台指示），不预设任何惯例（英文本常用全大写、中文本常用居中或换字体），再用 production.doc_read 分段精读验证。" +
+      "assetId 从正文里的 /__cm__/asset/<id> 引用或用户给的资产链接取。",
+    parameters: Type.Object({ assetId: Type.String({ description: "资产 id" }) }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/doc-tools")).docOutline(ctx.userId, ctx.productionId, String(args.assetId), { sessionId: ctx.run?.sessionId ?? null }),
+  },
+  {
+    mcpName: "production.doc_read",
+    description:
+      "按区间批量读取 docx/pdf 资产内容，行式输出信号标注——信号只报不判，怎么解读（角色名？唱词？cue 标注？）由你结合映射假设判断（EN: read docx pdf paragraphs pages ranges signals）。" +
+      "docx：区间=块号，`[¶N 样式/对齐/缩进/粗斜体/字体]`，表格整块出、脚注随段附出、图片与内嵌对象以 ⟦图⟧/⟦对象⟧ 占位（它们不可读，但你必须知道它们存在），单次 150 块。" +
+      "pdf：区间=页序（1 起，印刷页码可能不同），行锚 `[pN.i x=行首坐标]`，词距已按坐标还原、大间隙显式标 ⟨N⟩pt（竖排文档中间隙常是发话时序等记号，别丢），跨页重复行标 ≡，单次 10 页/400 行。",
+    parameters: Type.Object({
+      assetId: Type.String({ description: "资产 id" }),
+      ranges: Type.Array(
+        Type.Object({
+          from: Type.Integer({ minimum: 0, description: "起始（docx=块号 0 起；pdf=页序 1 起，含）" }),
+          to: Type.Integer({ minimum: 0, description: "结束（含）" }),
+        }),
+        { minItems: 1, description: "区间数组（锚点见 doc_outline / doc_search）" },
+      ),
+    }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/doc-tools")).docRead(
+      ctx.userId, ctx.productionId, String(args.assetId),
+      (args.ranges as Array<{ from: number; to: number }>).map((r) => ({ from: Number(r.from), to: Number(r.to) })),
+      { sessionId: ctx.run?.sessionId ?? null },
+    ),
+  },
+  {
+    mcpName: "production.doc_search",
+    description:
+      "在 docx/pdf 资产全文（docx 含表格与脚注）里检索文字，返回命中锚点（docx=¶块号；pdf=pN.行号）与上下文（EN: search docx pdf document text find locate）。" +
+      "长文档定位用它先找锚点再 production.doc_read 精读（比线性通读省得多）——如找所有「第X场」、核对某句台词在不在。",
+    parameters: Type.Object({
+      assetId: Type.String({ description: "资产 id" }),
+      query: Type.String({ description: "检索词（字面匹配，不分大小写）" }),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "最多返回条数，默认 20" })),
+    }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/doc-tools")).docSearch(
+      ctx.userId, ctx.productionId, String(args.assetId),
+      { query: String(args.query), limit: args.limit == null ? undefined : Number(args.limit), sessionId: ctx.run?.sessionId ?? null },
+    ),
+  },
+  {
+    mcpName: "production.asset_list",
+    description:
+      "列出该制作里当前用户可见的资产文件：文件名、id、类型，docx/pdf 会标注可解析（EN: list assets files documents pdf docx enumerate）。" +
+      "用户提到某个文件而你没有资产 id 时先用它找（可加 query 按文件名过滤）；production.wiki_tree 的 [文件] 行也能看到资产（树给结构、这里给平铺过滤）。",
+    parameters: Type.Object({
+      query: Type.Optional(Type.String({ description: "按文件名/显示名过滤（子串匹配，不分大小写）" })),
+    }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/doc-tools")).assetList(
+      ctx.userId, ctx.productionId,
+      { query: args.query == null ? undefined : String(args.query) },
+    ),
+  },
+  {
+    mcpName: "production.doc_import_guide",
+    description:
+      "获取剧本文档导入的完整作业指引（EN: script document import guide methodology）。**做任何导入类工作（把 docx/pdf 剧本转写进本站剧本结构）之前必须先读它**：" +
+      "三步法流程、开工申报、剧本非空时的对账纪律、分诊协议（何时直接干/何时给选项问/何时必须问用户）、导入日志的用法。",
+    parameters: NONE, readOnly: true, needsProduction: true,
+    execute: async () => (await import("@/lib/agent/tools/doc-import-tools")).docImportGuide(),
+  },
+  {
+    mcpName: "production.doc_import_log_create",
+    description:
+      "创建一份导入日志（wiki 文档，默认仅创建者可见、不进目录树）——长导入作业的跨批次真相源：映射假设、判例集、例外台账、进度游标都记这里（EN: create import log journal document）。" +
+      "骨架模板见 production.doc_import_guide。创建需确认；创建后用 production.doc_import_log_append 追加（不再逐次确认）。",
+    parameters: Type.Object({
+      title: Type.String({ description: "日志标题（建议含源文档名，如「导入日志：Mr. Burns 剧本」）" }),
+      body: Type.Optional(Type.String({ description: "初始内容（建议用 guide 里的日志骨架模板起卷）" })),
+    }),
+    readOnly: false, needsProduction: true,
+    mutates: WIKI_MUTATES.created,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/doc-import-tools")).docImportLogCreate(
+      ctx.userId, ctx.productionId,
+      { title: String(args.title), body: args.body == null ? undefined : String(args.body) },
+    ),
+  },
+  {
+    mcpName: "production.doc_import_log_append",
+    description:
+      "向导入日志追加一段记录（EN: append import log journal checkpoint）。只接受 doc_import_log_create 创建的日志文档（其他文档会拒绝——改走 wiki_propose_update）。" +
+      "checkpoint 纪律：每批写入成功后立即追加游标与新判例；每批开工前先 wiki_read 日志（上下文可能已压缩，日志才是真相源）。",
+    parameters: Type.Object({
+      wikiId: Type.String({ description: "导入日志的 wiki id（来自 doc_import_log_create）" }),
+      text: Type.String({ description: "追加的内容（markdown，追加到文档末尾）" }),
+    }),
+    readOnly: false, needsProduction: true,
+    selfScribe: true,
+    mutates: WIKI_MUTATES.updated,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/doc-import-tools")).docImportLogAppend(
+      ctx.userId, ctx.productionId,
+      { wikiId: String(args.wikiId), text: String(args.text) },
+    ),
+  },
+
+  // ── 定时任务（lib/agent/runtime/schedules.ts）：到点由 AI 以用户身份自动运行一段指令。
+  // 创建是写操作（过确认卡——那张卡就是"负责任的人类动作"：人确认写哪里、允许哪几类写）；
+  // 触发出的 run 里只有 schedule.finish 可用（只能汇报/停自己，不能建新任务）。
+  {
+    mcpName: "my.schedules",
+    description: `列出当前用户创建的全部 AI 定时任务（个人的 + 各制作里的）：id、名称、时间表、状态、允许的写操作、下次/上次运行与摘要（EN: my scheduled tasks automations list）。修改/暂停/删除前从这里取 id。${MY_SCOPE_NOTE}`,
+    parameters: NONE, readOnly: true,
+    execute: async (ctx) => {
+      const { listSchedules, formatScheduleList } = await import("./schedules");
+      return formatScheduleList(await listSchedules(ctx.userId));
+    },
+  },
+  {
+    mcpName: "my.schedule_propose",
+    description:
+      "创建 / 修改 / 暂停 / 恢复 / 删除当前用户的 AI 定时任务，需要人工在聊天栏确认（EN: create update schedule automation reminder recurring task）。" +
+      "定时任务 = 到点由 AI 以该用户身份在一个新对话里自动执行 prompt，结果经站内通知发给用户。个人对话里建的是个人任务，关联制作的对话里建的是该制作的任务。" +
+      "schedule 三种：{kind:\"at\", at:\"2026-09-01T09:00:00+08:00\"} 一次性；{kind:\"cron\", expr:\"0 23 * * *\", tz:\"Asia/Shanghai\"} 周期——expr 是 tz 的**墙钟时间**，绝不要换算成 UTC；{kind:\"every\", everyMs} 固定间隔（≥1 小时）。" +
+      "allowedTools = 允许任务无人值守**直接执行**的写工具（不弹确认卡，直接生效，每次改动有记录并通知）；目前只有 production.wiki_propose_create / production.wiki_propose_update 可授权；不给就是只读任务。" +
+      "prompt 要写成给 AI 的完整指令：目标、涉及哪些文档（带 id 或标题）、输出什么；运行时没人在场，写清楚假设与边界。",
+    parameters: Type.Object({
+      action: Type.Union([Type.Literal("create"), Type.Literal("update"), Type.Literal("pause"), Type.Literal("resume"), Type.Literal("delete")]),
+      scheduleId: Type.Optional(Type.String({ description: "update/pause/resume/delete 必填（来自 my.schedules）" })),
+      name: Type.Optional(Type.String({ description: "任务名（≤80 字；create 必填）" })),
+      prompt: Type.Optional(Type.String({ description: "每次运行时送给 AI 的完整指令（≤4000 字；create 必填）" })),
+      schedule: Type.Optional(Type.Object({
+        kind: Type.Union([Type.Literal("at"), Type.Literal("cron"), Type.Literal("every")]),
+        at: Type.Optional(Type.String({ description: "kind=at：ISO-8601 带时区偏移" })),
+        expr: Type.Optional(Type.String({ description: "kind=cron：五段表达式（分 时 日 月 周），tz 的墙钟时间" })),
+        tz: Type.Optional(Type.String({ description: "kind=cron：IANA 时区，默认 Asia/Shanghai" })),
+        everyMs: Type.Optional(Type.Integer({ description: "kind=every：间隔毫秒（≥3600000）" })),
+      }, { description: "时间表（create 必填；update 可选）" })),
+      allowedTools: Type.Optional(Type.Array(Type.String(), { description: "允许无人值守直接执行的写工具 mcpName；空数组 = 只读" })),
+      maxFires: Type.Optional(Type.Integer({ minimum: 1, description: "最多运行次数，满即结束；不限就整个省略" })),
+      summary: Type.String({ description: "一句话说明为什么要这样设置" }),
+    }),
+    readOnly: false,
+    mutates: (args) => ({
+      scope: "schedule",
+      action: args.action === "create" ? "created" : args.action === "delete" ? "deleted" : "updated",
+      ids: typeof args.scheduleId === "string" && args.scheduleId ? [args.scheduleId] : [],
+    }),
+    execute: async (ctx, args) => {
+      const s = await import("./schedules");
+      const { describeScheduleRow } = s;
+      const action = String(args.action);
+      const id = optString(args.scheduleId);
+      if (action === "create") {
+        const r = await s.createSchedule({
+          userId: ctx.userId, productionId: ctx.productionId || null,
+          name: String(args.name ?? ""), prompt: String(args.prompt ?? ""), schedule: args.schedule,
+          allowedTools: Array.isArray(args.allowedTools) ? args.allowedTools.map(String) : [],
+          pageKey: ctx.run?.pageKey ?? null, maxFires: typeof args.maxFires === "number" ? args.maxFires : null,
+          createdBySessionId: ctx.run?.sessionId ?? null,
+        });
+        return r.ok ? `已创建定时任务：\n${describeScheduleRow(r.row)}` : `创建失败：${r.error}`;
+      }
+      if (!id) return "缺少 scheduleId（先用 my.schedules 查）。";
+      if (action === "delete") {
+        const r = await s.deleteSchedule(id, ctx.userId);
+        return r.ok ? "已删除该定时任务。" : `删除失败：${r.error}`;
+      }
+      if (action === "pause" || action === "resume") {
+        const r = await s.setScheduleStatus(id, ctx.userId, action === "pause" ? "paused" : "active");
+        return r.ok ? `已${action === "pause" ? "暂停" : "恢复"}：\n${describeScheduleRow(r.row)}` : `操作失败：${r.error}`;
+      }
+      if (action === "update") {
+        const r = await s.updateSchedule(id, ctx.userId, {
+          name: optString(args.name), prompt: optString(args.prompt), schedule: args.schedule,
+          allowedTools: Array.isArray(args.allowedTools) ? args.allowedTools.map(String) : undefined,
+          maxFires: args.maxFires === undefined ? undefined : typeof args.maxFires === "number" ? args.maxFires : null,
+        });
+        return r.ok ? `已修改：\n${describeScheduleRow(r.row)}` : `修改失败：${r.error}`;
+      }
+      return `未知 action：${action}`;
+    },
+  },
+  {
+    mcpName: "schedule.finish",
+    description:
+      "【仅在定时任务自动运行时可用】汇报本次运行的结果并结束：summary 是给用户看的结果摘要（做了什么、发现了什么、需要用户做什么）；" +
+      "notify=false 表示这次没什么值得打扰用户的（有写操作时仍会通知）；done=true 表示目标已一次性达成、任务可以停止；nextIn 可要求下一次运行的间隔（如 \"2h\"、\"1d\"，不短于 1 小时）。调用后直接结束回复。",
+    parameters: Type.Object({
+      summary: Type.String({ description: "结果摘要（≤1000 字）" }),
+      notify: Type.Optional(Type.Boolean({ description: "是否通知用户，默认 true" })),
+      done: Type.Optional(Type.Boolean({ description: "任务目标已达成，停止后续运行" })),
+      nextIn: Type.Optional(Type.String({ description: "下一次间隔，如 30m / 2h / 1d" })),
+    }),
+    readOnly: true,
+    execute: async (ctx, args) => {
+      const run = ctx.run;
+      if (!run?.schedule || !run.setScheduleReport) return "此工具只在定时任务自动运行时可用，当前对话不是定时任务。";
+      const nextInMs = parseDuration(optString(args.nextIn));
+      if (args.nextIn !== undefined && nextInMs === null) return "nextIn 格式不对：用 30m / 2h / 1d 这样的写法。";
+      run.setScheduleReport({
+        summary: String(args.summary ?? "").slice(0, 1000),
+        notify: args.notify !== false,
+        done: args.done === true,
+        ...(nextInMs ? { nextInMs } : {}),
+      });
+      return `已记录汇报${args.done ? "，任务将结束" : ""}。现在直接结束本次回复即可。`;
+    },
+  },
+
+  // ── 联网（网关时代 OpenClaw 内置的 web_search / web_fetch 的自建形态，见 web-tools.ts）
+  {
+    mcpName: "web.search",
+    description: "联网搜索（Brave）：查外部资讯、剧目/演出/技术资料、不确定的事实等（EN: web search）。返回标题/链接/摘要，需要正文再用 web.fetch 抓取。",
+    parameters: Type.Object({
+      query: Type.String({ minLength: 1, description: "搜索词（中英文均可）" }),
+      count: Type.Optional(Type.Integer({ minimum: 1, maximum: 10, description: "结果数，默认 5" })),
+    }),
+    readOnly: true,
+    execute: async (ctx, args) => {
+      const { webSearch, formatSearchHits, WebToolError } = await import("./web-tools");
+      const q = String(args.query ?? "").trim();
+      try {
+        return formatSearchHits(q, await webSearch(q, typeof args.count === "number" ? args.count : undefined, ctx.run?.signal));
+      } catch (err) {
+        if (err instanceof WebToolError) return err.message;
+        throw err;
+      }
+    },
+  },
+  {
+    mcpName: "web.fetch",
+    description: "抓取一个公开网页并抽出正文文本（EN: web fetch page）。用于读搜索结果、用户给的链接；内网地址不可抓，正文超长会截断。",
+    parameters: Type.Object({ url: Type.String({ minLength: 1, description: "http/https 地址" }) }),
+    readOnly: true,
+    execute: async (ctx, args) => {
+      const { webFetch, formatFetchedPage, WebToolError } = await import("./web-tools");
+      try {
+        return formatFetchedPage(await webFetch(String(args.url ?? ""), ctx.run?.signal));
+      } catch (err) {
+        if (err instanceof WebToolError) return err.message;
+        if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return "抓取超时";
+        // 其余（TLS/网络栈内部错误）不把细节回给模型
+        if (err instanceof Error) return "抓取失败：无法连接该网址";
+        throw err;
+      }
+    },
+  },
+
+  // ── find_tools：冷层兜底。工具面按页面/召回分层（#333），模型觉得"应该有个工具能做
+  // 这件事但列表里没有"时用它搜；搜到的名字**直接调用即可**（resolveDeferredTool 会按
+  // 名临时加载，不需要任何中间步骤）。260 个工具时也是这个形态：目录不进 prompt。
+  {
+    mcpName: "find_tools",
+    description:
+      "按需求搜索本环境可用的 clickin 工具（EN: find tools）。当前工具列表只是本轮相关的子集；" +
+      "如果你觉得应该有某个工具能完成用户的请求但列表里没有，用一句话描述需求来搜。" +
+      "返回工具名与说明——**拿到名字后直接调用**，不需要其他步骤。",
+    parameters: Type.Object({ query: Type.String({ description: "用户想做什么（自然语言，中文即可）" }) }),
+    readOnly: true,
+    execute: async (ctx, args) => {
+      const { searchTools } = await import("./tool-index");
+      const hits = await searchTools(String(args.query ?? ""), { hasProduction: !!ctx.productionId, userId: ctx.userId, limit: 5 });
+      if (hits.length === 0) return "没有找到相关工具。请基于现有信息回答，或在回复里说明这件事目前没有工具支持。";
+      const lines = hits.map((h) => `- ${exposedName(h.name)}：${h.oneliner}`);
+      return `找到以下工具（直接按名调用即可，无需其他步骤）：\n${lines.join("\n")}`;
+    },
+  },
+
+  // ── ask_user（#290）：向用户提问并等待回答。只读（无副作用）；恢复/重跑按
+  // toolCallId 复用同一待答问题，不重问。取消/过期以错误结果回模型。
+  {
+    mcpName: "ask_user",
+    description:
+      "向用户提出一个或多个带选项的问题并**等待回答**（用户会看到卡片，可能几分钟后才答）。" +
+      "只在信息确实缺失、且答案会改变你的做法时用；能自己查工具确定的事不要问。" +
+      "每个问题给 2–5 个简短选项；需要自由输入就把 isOther 设为 true。用户可能取消（结果会说明），此时不要重复提问。",
+    parameters: Type.Object({
+      questions: Type.Array(Type.Object({
+        questionId: Type.String({ description: "本次提问内唯一的短 id，如 q1" }),
+        header: Type.String({ description: "问题标题（≤12 字）" }),
+        question: Type.String({ description: "完整问题" }),
+        options: Type.Array(Type.Object({
+          label: Type.String({ description: "选项文字" }),
+          description: Type.Optional(Type.String({ description: "选项补充说明" })),
+        }), { minItems: 1, maxItems: 6 }),
+        multiSelect: Type.Optional(Type.Boolean({ description: "允许多选" })),
+        isOther: Type.Optional(Type.Boolean({ description: "允许用户自由输入" })),
+      }), { minItems: 1, maxItems: 4 }),
+    }),
+    readOnly: true,
+    isErrorResult: (out) => out.startsWith("【"),
+    execute: async (ctx, args, toolCallId) => {
+      const run = ctx.run;
+      if (!run) return "【提问不可用：当前执行环境没有会话交互通道】";
+      const { createOrReuseQuestion, awaitQuestion, formatAnswers } = await import("./questions");
+      const questions = (args.questions as QuestionItem[]).map((q) => ({
+        questionId: String(q.questionId), header: String(q.header), question: String(q.question),
+        options: (q.options ?? []).map((o) => ({ label: String(o.label), ...(o.description ? { description: String(o.description) } : {}) })),
+        ...(q.multiSelect ? { multiSelect: true } : {}), ...(q.isOther ? { isOther: true } : {}),
+      }));
+      const { reused, ...info } = await createOrReuseQuestion({ runId: run.runId, sessionId: run.sessionId, toolCallId, questions });
+      // 复用的待答问题不再重发卡（前端重开会话时经 /questions 恢复；重发只会多一张）
+      if (!reused) run.publish({ type: "question", question: info });
+      await run.setStatus("awaiting_answer");
+      const outcome = await awaitQuestion(info.id, run.signal, undefined, { isDetached: run.isDetached });
+      if (outcome.kind === "detached") return "【本进程已脱离，提问由下一个进程接管】"; // 不会落库：storage 已 detach
+      await run.setStatus("running");
+      run.publish({ type: "question-resolved", id: info.id, status: outcome.kind });
+      if (outcome.kind === "answered") return formatAnswers(questions, outcome.answers);
+      if (outcome.kind === "expired") return "【用户在限时内没有回答，提问已过期。不要重复提问；按现有信息继续，或在回复正文里说明需要哪些信息。】";
+      return "【用户取消了这次提问。不要重复提问；按现有信息继续，或在回复正文里说明需要哪些信息。】";
+    },
+  },
+];
+
+function optString(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+
+/** "30m" / "2h" / "1d" → 毫秒；不认识 → null */
+function parseDuration(s: string | undefined): number | null {
+  if (!s) return null;
+  const m = /^(\d+(?:\.\d+)?)\s*(m|h|d)$/i.exec(s.trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  const unit = m[2].toLowerCase();
+  return Math.round(n * (unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : 86_400_000));
+}
+
+/** propose 工具的正文以审批阶段预持久化的 wiki_proposal 行为准（[[标题]] 已反解），
+ *  没有行（预持久化失败/超时）才退回模型原参数——与插件 restoredBody 覆写同义。 */
+async function proposalBody(productionId: string, toolCallId: string, userId: string, fallback: unknown): Promise<string | undefined> {
+  const { getWikiProposalByToolCallId } = await import("@/lib/wiki/proposal-db");
+  const proposal = await getWikiProposalByToolCallId(productionId, toolCallId, userId);
+  if (proposal && typeof proposal.body === "string" && proposal.body) return proposal.body;
+  return optString(fallback);
+}
+
+export const TOOL_MCP_NAMES: readonly string[] = DEFS.map((d) => d.mcpName);
+/** 只存在于运行时、不进 tool-catalog 的工具（常驻热层，不走召回；schedule.finish 只在定时任务 run 里注入）：目录 = 注册表 − 这几个 */
+export const RUNTIME_ONLY_TOOLS: ReadonlySet<string> = new Set(["ask_user", "find_tools", "web.search", "web.fetch", "schedule.finish"]);
+/** 允许无人值守直接写的工具（注册表 unattended=allow）；定时任务的 allowed_tools 只能从这里选 */
+export const UNATTENDED_ALLOWED_TOOLS: ReadonlySet<string> = new Set(DEFS.filter((d) => d.unattended === "allow").map((d) => d.mcpName));
+registerUnattendedAllowed(UNATTENDED_ALLOWED_TOOLS);
+
+/** 按会话身份构造工具集；身份只进闭包，绝不进 schema。 */
+export function buildTools(ctx: ToolContext): RuntimeToolDef[] {
+  return DEFS.map((d) => ({
+    mcpName: d.mcpName,
+    name: exposedName(d.mcpName),
+    label: toolLabel(d.mcpName),
+    description: d.description,
+    parameters: d.parameters,
+    readOnly: d.readOnly,
+    mutates: d.mutates,
+    unattended: d.unattended,
+    selfScribe: d.selfScribe,
+    execute: async (toolCallId, params) => {
+      if (d.needsProduction && !ctx.productionId) return text(NO_PRODUCTION);
+      const args = (params ?? {}) as Record<string, unknown>;
+      // 写审计（mutation-audit.ts）：写前取快照、写后比对落行。包在这一层是为了让
+      // 正常执行与重启恢复路径（service 直接调 tool.execute）都经过它；审计失败只
+      // 记日志，绝不影响写本身。
+      const m = d.mutates?.(args) ?? null;
+      const audit = m
+        ? await (await import("./mutation-audit")).beginMutationAudit(m, {
+            userId: ctx.userId, productionId: ctx.productionId, runId: ctx.run?.runId ?? null, sessionId: ctx.run?.sessionId ?? null,
+            tool: d.mcpName, toolCallId, summary: typeof args.summary === "string" ? args.summary.slice(0, 300) : null,
+            unattended: ctx.run?.unattended === true, scheduleId: ctx.run?.schedule?.id ?? null,
+          })
+        : null;
+      const out = await d.execute(
+        { userId: ctx.userId, productionId: ctx.productionId ?? "", run: ctx.run },
+        args,
+        toolCallId,
+      );
+      if (d.isErrorResult?.(out)) throw new Error(out);
+      if (audit) {
+        const records = await audit.commit();
+        if (records.length > 0) ctx.run?.noteMutations?.(toolCallId, records);
+      }
+      return text(out);
+    },
+  }));
+}

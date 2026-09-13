@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { createProduction, listProductions, updateProductionSortOrders, ProductionQuotaError } from "@/lib/db";
-import { getSession } from "@/lib/session";
-import { getUserTier, countOwnedActiveProductions, USER_TIERS } from "@/lib/plan";
+import { getSession } from "@/lib/account/session";
+import { getUserTier, countOwnedActiveProductions, USER_TIERS } from "@/lib/account/plan";
 
 let _seq = 0;
 function uid(): string {
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
 // 建项目的门是用户等级（#280，本文件曾无门放开）：user_plan 无行的普通注册用户
 // 不能建（可正常使用被邀请进入的项目），有行（creator/internal）才可建、按档位限
 // 「能建几个」。这是用户等级全站唯一的消费点——功能跟项目走，人的等级不影响项目内
-// 功能（那些看 production_plan，见 lib/plan.ts）。
+// 功能（那些看 production_plan，见 lib/account/plan.ts）。
 //
 // 历史：这里原本的门是 session.isAdmin。isAdmin 唯一来源是 feishu_user.is_super_admin，
 // 65e1a78 起飞书登录写死 false、db/add-strip-super-admin.sql 又把存量清零，于是那条门

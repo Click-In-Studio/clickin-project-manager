@@ -1,4 +1,4 @@
-import { FIXED_INITIAL_CHAPTER_NAME } from "@/lib/script-fixed-markers";
+import { FIXED_INITIAL_CHAPTER_NAME } from "@/lib/script/script-fixed-markers";
 
 export function shouldImportFirstChapterAsOpening(chapterNumber: string, chapterName: string): boolean {
   const normalizedNumber = chapterNumber.trim();

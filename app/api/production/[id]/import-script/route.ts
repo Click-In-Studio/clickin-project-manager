@@ -1,19 +1,19 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
 import { getProductionPermissionContext, listCharactersByVersion, importScriptToVersion, getVersion, getActiveVersionId, listTagGroups, getVersionOpeningChapterId, listScenesByVersion } from "@/lib/db";
-import { rejectNonHeadWrite } from "@/lib/head-version";
+import { rejectNonHeadWrite } from "@/lib/script/head-version";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
 import { parseCharacter, guessIsAggregate } from "@/lib/import/parse-character";
 import { buildImportTagFormatLookup } from "@/lib/import/tag-format";
 import { shouldImportFirstChapterAsOpening } from "@/lib/import/opening-chapter";
 import type { ScriptColMap, TypeAction, TypeTagMapping, ImportScriptPreview, AggregateMembers, StageDelimiterPattern, ScriptConfigStageDelimiterPattern, JointImportMarker, ImportTagChanges, ImportTypeConflict } from "@/lib/import/types";
 import { initialKeys } from "@/lib/lex-order";
-import { FIXED_INITIAL_CHAPTER_NAME } from "@/lib/script-fixed-markers";
-import type { BlockType } from "@/lib/script-types";
-import type { MarkerMeta } from "@/lib/script-types";
+import { FIXED_INITIAL_CHAPTER_NAME } from "@/lib/script/script-fixed-markers";
+import type { BlockType } from "@/lib/script/script-types";
+import type { MarkerMeta } from "@/lib/script/script-types";
 import { randomUUID } from "node:crypto";
 
 async function guard(req: NextRequest, productionId: string) {

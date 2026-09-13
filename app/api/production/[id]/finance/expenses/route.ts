@@ -1,11 +1,11 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import {
   AMOUNT_RE,
   FinanceError, getBudgetCategory, listExpenses, submitExpense,
-} from "@/lib/finance-db";
+} from "@/lib/ops/finance-db";
 import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 /**
  * POST — 提一笔支出，立刻进审批。
  *
- * 审批人由 lib/approval-routing 的阶梯算出（与权限申请同一个函数），这里不自己挑人。
+ * 审批人由 lib/approval/approval-routing 的阶梯算出（与权限申请同一个函数），这里不自己挑人。
  */
 export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: productionId } = await ctx.params;

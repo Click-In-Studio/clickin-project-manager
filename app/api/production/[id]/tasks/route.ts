@@ -1,16 +1,16 @@
 import { type NextRequest } from "next/server";
-import { canAccessNode } from "@/lib/grant-template";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { canAccessNode } from "@/lib/perm/grant-template";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { notifyTaskAssigned } from "@/lib/notify";
-import { isSubjectPoc, parseTaskSubject, subjectColumns } from "@/lib/task-poc";
+import { notifyTaskAssigned } from "@/lib/notify/notify";
+import { isSubjectPoc, parseTaskSubject, subjectColumns } from "@/lib/ops/task-poc";
 import {
   createEventTechReq,
   getProductionEvent,
   listMyTechReqsFull,
   listProductionTechReqs,
-} from "@/lib/event-db";
+} from "@/lib/ops/event-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 

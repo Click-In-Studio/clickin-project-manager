@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
-import { verifyCardToken } from "@/lib/card-token";
-import { listMyScheduleRange, listWeeklyCallSchedule } from "@/lib/event-db";
+import { getSession } from "@/lib/account/session";
+import { verifyCardToken } from "@/lib/notify/card-token";
+import { listMyScheduleRange, listWeeklyCallSchedule } from "@/lib/ops/event-db";
 
 type CalendarView = "week" | "month" | "agenda";
 

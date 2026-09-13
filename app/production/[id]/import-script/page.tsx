@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { hasGrant } from "@/lib/grant-check";
+import { hasGrant } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "导入剧本内容" };
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getActiveVersionId } from "@/lib/db";
 import ImportJointWizardPage from "@/components/import/ImportJointWizardPage";
 

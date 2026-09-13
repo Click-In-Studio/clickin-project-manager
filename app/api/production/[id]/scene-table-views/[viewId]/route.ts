@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
+import { hasGrant } from "@/lib/perm/grant-check";
 import { getPool } from "@/lib/pg";
 import { getCtx } from "../ctx";
 

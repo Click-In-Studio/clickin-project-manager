@@ -5,7 +5,7 @@ import {
   CUE_DOMAIN_REST_SNAPSHOT_PATH,
   type CueDomainRestSnapshot,
 } from "./cue-domain-rest-snapshot";
-import { resolveTemplate } from "@/lib/production-template";
+import { resolveTemplate } from "@/lib/production/production-template";
 
 // 批A cue 域 REST 化迁移三层测试（migrate-cue-domain-rest.sql）。
 // invariance 层依赖 global-setup 在 PRE 库上创建的工厂快照（本地已迁移环境跳过）。

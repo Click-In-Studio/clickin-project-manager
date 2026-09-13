@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getProductionEvent, getEventReport, getReportNote, updateReportNote, deleteReportNote, type Mention } from "@/lib/event-db";
-import { loadEventPermContext, canEditNote } from "@/lib/event-permissions";
+import { getProductionEvent, getEventReport, getReportNote, updateReportNote, deleteReportNote, type Mention } from "@/lib/ops/event-db";
+import { loadEventPermContext, canEditNote } from "@/lib/ops/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string; noteId: string }> };
 

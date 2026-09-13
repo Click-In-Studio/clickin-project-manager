@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { listMyProductionsWithRoles } from "@/lib/db";
 import MyNotificationsClient from "@/components/MyNotificationsClient";
 

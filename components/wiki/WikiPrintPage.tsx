@@ -16,7 +16,7 @@ import { fmtDateTime } from "@/lib/tz";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import { buildWatermarkTile } from "@/components/watermark-tile";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
-import { PRINT_PAGE_CSS_A4 } from "@/lib/print-css";
+import { PRINT_PAGE_CSS_A4 } from "@/lib/script/print-css";
 
 export default function WikiPrintPage({
   productionId,
@@ -55,7 +55,7 @@ export default function WikiPrintPage({
   return (
     <div className="wiki-print-root min-h-full bg-white">
       {/* wiki 没有页盒（一条流，浏览器自己断页），所以用纸张关键字而不是剧本那种
-          px 页盒尺寸。两种形态都在 lib/print-css.ts 里，分工写在那儿。 */}
+          px 页盒尺寸。两种形态都在 lib/script/print-css.ts 里，分工写在那儿。 */}
       <style dangerouslySetInnerHTML={{ __html: PRINT_PAGE_CSS_A4 }} />
 
       <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-200 bg-white/95 px-6 py-3 print:hidden">

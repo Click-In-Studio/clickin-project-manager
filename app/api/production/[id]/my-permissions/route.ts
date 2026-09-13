@@ -14,17 +14,17 @@
  * POST 响应:  { ok: true, confirmed: number }
  */
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 
-import { PAGE_PERMISSION_SCOPES } from "@/lib/page-permission-scopes";
+import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
 import {
   parseNodeKey,
   canAccessNodesBatch,
   selfConfirmTemplateNodes,
   type NodeKeyParts,
-} from "@/lib/grant-template";
+} from "@/lib/perm/grant-template";
 
 // 激活面节点目录：各页面 scope 中声明的全部树节点键（去重）
 const NODE_KEYS: readonly string[] = [

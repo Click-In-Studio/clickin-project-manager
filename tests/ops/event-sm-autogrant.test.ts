@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
-import { createProductionEvent, setEventStageManagers, setEventParticipants } from "@/lib/event-db";
+import { createProductionEvent, setEventStageManagers, setEventParticipants } from "@/lib/ops/event-db";
 import { getPool } from "@/lib/pg";
 
 // 批B 自动授权规范（用户定义）：
@@ -95,8 +95,8 @@ describe("跟组舞监自动行集", () => {
 
 describe("跟组舞监的报告持钥", () => {
   it("先设舞监、后建报告 → C-3 发行", async () => {
-    const { createEventReport } = await import("@/lib/event-db");
-    const { hasGrant } = await import("@/lib/grant-check");
+    const { createEventReport } = await import("@/lib/ops/event-db");
+    const { hasGrant } = await import("@/lib/perm/grant-check");
     await setEventStageManagers(eventId, [{ userId: smId, name: "跟组舞监" }], prodId, ownerId);
     const r = await createEventReport({
       id: `rpt_${Date.now().toString(36)}`, eventId, reportType: "show",
@@ -110,8 +110,8 @@ describe("跟组舞监的报告持钥", () => {
   });
 
   it("先建报告、后设舞监 → R-3 补发", async () => {
-    const { createEventReport } = await import("@/lib/event-db");
-    const { hasGrant } = await import("@/lib/grant-check");
+    const { createEventReport } = await import("@/lib/ops/event-db");
+    const { hasGrant } = await import("@/lib/perm/grant-check");
     const { getPool } = await import("@/lib/pg");
     const late = (await getPool().query<{ id: string }>(
       "INSERT INTO app_user DEFAULT VALUES RETURNING id")).rows[0].id;

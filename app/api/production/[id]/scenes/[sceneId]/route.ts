@@ -1,17 +1,17 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import {
   getProductionPermissionContext, getActiveVersionId, loadProduction, applyPatchToDB, getVersion, listScenesByVersion,
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasGrant } from "@/lib/grant-check";
-import { SCENE_FIELD_SUBS, touchedSceneFields } from "@/lib/scene-field-perms";
-import { diffState } from "@/lib/script-ops";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { SCENE_FIELD_SUBS, touchedSceneFields } from "@/lib/script/scene-field-perms";
+import { diffState } from "@/lib/script/script-ops";
 import {
   convertMarker, executeMarkerDeletion, planMarkerDeletion, projectMarkers, resolveMarkerId,
   updateMarkerMeta, type MarkerDeleteOperation, type MarkerKind,
-} from "@/lib/script-marker-domain";
-import { rejectNonHeadWrite } from "@/lib/head-version";
+} from "@/lib/script/script-marker-domain";
+import { rejectNonHeadWrite } from "@/lib/script/head-version";
 
 const createId = () => crypto.randomUUID();
 const META_KEYS = ["synopsis", "actionLine", "music", "stageNotes", "expectedDuration"] as const;

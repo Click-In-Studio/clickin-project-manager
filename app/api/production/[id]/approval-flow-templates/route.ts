@@ -7,8 +7,8 @@
  * 面数据都不该对申请人可见）。
  */
 import { type NextRequest } from "next/server";
-import { requireGrantGate } from "@/lib/api-guard";
-import { createFlowTemplate, listFlowTemplates } from "@/lib/approval-flow-template-db";
+import { requireGrantGate } from "@/lib/perm/api-guard";
+import { createFlowTemplate, listFlowTemplates } from "@/lib/approval/approval-flow-template-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 

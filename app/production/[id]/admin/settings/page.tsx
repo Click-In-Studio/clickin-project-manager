@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
-import { hasGrant } from "@/lib/grant-check";
+import { hasGrant } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "项目信息" };
 
-import { requireAdminAccess } from "@/lib/admin-guard";
+import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getProductionPermissionContext, getProductionMeta } from "@/lib/db";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { cookies } from "next/headers";
 import AdminSettingsClient from "@/components/AdminSettingsClient";
 import ProductionPlanCard from "@/components/ProductionPlanCard";
-import { getProductionPlan, PRODUCTION_TIERS } from "@/lib/plan";
+import { getProductionPlan, PRODUCTION_TIERS } from "@/lib/account/plan";
 
 export default async function SettingsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

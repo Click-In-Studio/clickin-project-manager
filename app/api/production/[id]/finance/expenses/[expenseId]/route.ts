@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import {
   approveExpense, cancelExpense, getExpense, isExpenseApprover, rejectExpense,
-} from "@/lib/finance-db";
+} from "@/lib/ops/finance-db";
 import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string; expenseId: string }> };
@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ id: string; expenseId: string }> };
  * POST — 对一笔支出动作：approve / reject / cancel。
  *
  * **审批资格不看权限键，看当前级的审批人名单**——那一列在提交/转发时由
- * lib/approval-routing 的阶梯算好写死（同权限申请的口径，#140：路由只算一次，
+ * lib/approval/approval-routing 的阶梯算好写死（同权限申请的口径，#140：路由只算一次，
  * 收件箱与鉴权都只读它，不各自重算）。
  *
  * 当前级不能终局时，approve 会**转发到下一级**而不是直接通过——你的上级如果本身

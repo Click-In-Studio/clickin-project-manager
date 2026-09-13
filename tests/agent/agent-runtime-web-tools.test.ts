@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import http from "node:http";
-import { webFetch, webSearch, htmlToText, isPrivateAddress, formatSearchHits, WEB_FETCH_MAX_CHARS } from "@/lib/agent-runtime/web-tools";
+import { webFetch, webSearch, htmlToText, isPrivateAddress, formatSearchHits, WEB_FETCH_MAX_CHARS } from "@/lib/agent/runtime/web-tools";
 
 // 网关退役后模型的联网能力由这两个工具承接：抓页要能抽正文、挡内网、截长文；搜索走 Brave。
 

@@ -1,12 +1,12 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { getEventDepartment } from "@/lib/event-db";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { getEventDepartment } from "@/lib/ops/event-db";
 import {
   AMOUNT_RE,
   deleteBudgetCategory, FinanceError, getBudgetCategory, updateBudgetCategory,
-} from "@/lib/finance-db";
+} from "@/lib/ops/finance-db";
 import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string; categoryId: string }> };

@@ -3,8 +3,8 @@ export const metadata: Metadata = { title: "项目邀请" };
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/session";
-import { getInviteInfo } from "@/lib/invite-db";
+import { getSession } from "@/lib/account/session";
+import { getInviteInfo } from "@/lib/account/invite-db";
 import InviteAcceptClient from "@/components/InviteAcceptClient";
 
 export default async function InvitePage({ params }: { params: Promise<{ token: string }> }) {

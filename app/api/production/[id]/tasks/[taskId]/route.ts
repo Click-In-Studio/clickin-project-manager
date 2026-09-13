@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import {
   deleteTaskByProduction,
@@ -8,9 +8,9 @@ import {
   getTaskDependencies,
   getTechReqByProduction,
   updateTaskByProduction,
-} from "@/lib/event-db";
-import { canEditTechReq, canViewTechReq } from "@/lib/event-permissions";
-import { isTaskPoc, resolveSubjectPatch } from "@/lib/task-poc";
+} from "@/lib/ops/event-db";
+import { canEditTechReq, canViewTechReq } from "@/lib/ops/event-permissions";
+import { isTaskPoc, resolveSubjectPatch } from "@/lib/ops/task-poc";
 
 type Ctx = { params: Promise<{ id: string; taskId: string }> };
 

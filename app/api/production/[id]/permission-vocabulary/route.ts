@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasAdminPanelEligibility } from "@/lib/permissions";
-import { getPermissionVocabulary } from "@/lib/perm-center-db";
+import { hasAdminPanelEligibility } from "@/lib/perm/permissions";
+import { getPermissionVocabulary } from "@/lib/perm/perm-center-db";
 
 // GET — 权限键词汇（type→verbs 闭集 + type→在用 sub 面）。
 // 词汇是 schema 性数据（不含任何人的授权），门=管理面资格。

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/agent/sessions/route";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { makeProduction, cleanupProduction, setProductionTier, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 

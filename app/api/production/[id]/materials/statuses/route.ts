@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { createMaterialStatus, deleteMaterialStatus, listMaterialStatuses } from "@/lib/material-db";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { createMaterialStatus, deleteMaterialStatus, listMaterialStatuses } from "@/lib/ops/material-db";
 import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string }> };

@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createWiki, updateWiki, deleteWiki, getWiki } from "@/lib/wiki/content";
 import { extractWikiLinkTargets, listBacklinks, listUnlinkedReferences } from "@/lib/wiki/links";
 import { setNodePublic, setNodeDeptShares, moveNode, getNodeByWikiId } from "@/lib/node/db";
 import { canViewWiki, listVisibleWikiIds } from "@/lib/wiki/perm";
-import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
-import { createEventReport } from "@/lib/event-db";
+import { WIKI_LEVEL_ROW_SETS } from "@/lib/perm/resource-grant-db";
+import { createEventReport } from "@/lib/ops/event-db";
 import { GET as wikiListGET, POST as wikiPOST } from "@/app/api/production/[id]/wiki/route";
 import { GET as wikiGET } from "@/app/api/production/[id]/wiki/[wikiId]/route";
 import { PUT as sharePUT } from "@/app/api/production/[id]/wiki/[wikiId]/share/route";

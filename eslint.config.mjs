@@ -27,8 +27,8 @@ const eslintConfig = defineConfig([
     rules: {
       // 裸 <img> 是本仓库的架构决定，不是债务：standalone 部署在 VPS 上，
       // next/image 的优化器等于 sharp 在自己服务器上实时缩放（加重计算负担），
-      // 图片走「上传时预生成变体 + immutable 强缓存」（lib/avatar-url.ts /
-      // lib/avatar-serve.ts），显示端直接 <img> 即是正确形态。
+      // 图片走「上传时预生成变体 + immutable 强缓存」（lib/asset/avatar-url.ts /
+      // lib/asset/avatar-serve.ts），显示端直接 <img> 即是正确形态。
       "@next/next/no-img-element": "off",
       "react-hooks/refs": "off",
       "react-hooks/set-state-in-effect": "off",

@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
-import { requireGrantGate } from "@/lib/api-guard";
-import { listGrantLedger, revokeGrantById, type GrantLedgerFilters } from "@/lib/grant-audit-db";
+import { requireGrantGate } from "@/lib/perm/api-guard";
+import { listGrantLedger, revokeGrantById, type GrantLedgerFilters } from "@/lib/perm/grant-audit-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 

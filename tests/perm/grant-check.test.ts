@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { hasGrant, listGrantedResourceIds, isReservedSub } from "@/lib/grant-check";
+import { hasGrant, listGrantedResourceIds, isReservedSub } from "@/lib/perm/grant-check";
 
 // 权限REST化核心 checker：通配 × 保留段 × 过期 × 非线性。
 // grant 行 = (production根/type/<id>/sub @ verb)，命中全部精确、无等级比较。

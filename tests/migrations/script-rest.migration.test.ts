@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { getPool } from "@/lib/pg";
-import { isReservedSub } from "@/lib/grant-check";
+import { isReservedSub } from "@/lib/perm/grant-check";
 import { SCRIPT_REST_SNAPSHOT_PATH, type ScriptRestSnapshot } from "./script-rest-snapshot";
 
 // 批E PR-E2 三层迁移测试（schema / integrity / invariance）

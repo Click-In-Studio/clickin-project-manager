@@ -1,6 +1,6 @@
 "use client";
 import { useEffect } from "react";
-import { PERMISSION_LABELS, GROUP_LABELS } from "@/lib/permission-labels";
+import { PERMISSION_LABELS, GROUP_LABELS } from "@/lib/perm/permission-labels";
 
 type Props = {
   pending: string[];

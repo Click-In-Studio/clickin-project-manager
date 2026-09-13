@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
-import { getSession, createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/session";
+import { getSession, createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/account/session";
 import { verifyConflictToken } from "@/lib/platform/email/email-tokens";
 import { mergeAccounts, getUserProfile } from "@/lib/db";
 

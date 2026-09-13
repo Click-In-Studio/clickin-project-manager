@@ -82,7 +82,7 @@ pages → render(TemplateBlock, PageChrome)
 
 ## 5. 存储与分层
 
-- 预设：`lib/script-template/presets/*.ts`（代码常量，改它 = 改代码 = 走 PR，与 production-template 同一纪律）。
+- 预设：`lib/script/template/presets/*.ts`（代码常量，改它 = 改代码 = 走 PR，与 production-template 同一纪律）。
 - 演出侧：`script_view.template_overrides = { templateId, …将来的覆盖项 }`（B2 留的列，零 DDL）。`text_layout_mode` 列继续存在，作为无 `templateId` 时的回退映射（center → `legacy-center@1`，compact → `legacy-compact@1`）。读写经 `ScriptConfig.templateId`（`loadProduction` / `saveScriptConfig` / config PUT），PUT 只认注册表里的 id。
 - **预设按版本冻结**：id 形如 `broadway-musical@1`。改预设 = 发新版本（`@2`），演出存的是带版本的 id、由人主动升级。页码是剧组的共享坐标，不能因为我们调了一下间距就悄悄漂移（#349）。选择界面只列每个家族的最新版（`listTemplatePresets`）。
 - **门**：版式字段（pageLayout / textLayoutMode / templateId）= `script_view/<主本>@edit`（epic §9「改这个视图的排版」），编辑器「页面类型」菜单、打印页模版菜单、config PUT 三处同键，登记在 `script` 激活面；其余剧本设置沿用 `scene meta/name@edit`。制作人靠角色区间的 `node:*/*@*` 拿资格、在剧本页 / 打印页一键激活。

@@ -1,5 +1,5 @@
 import { getPool } from "../pg";
-import { hasGrant, listGrantedResourceIds, type GrantActor } from "../grant-check";
+import { hasGrant, listGrantedResourceIds, type GrantActor } from "../perm/grant-check";
 import { isNodeAnchor } from "./anchors";
 
 // ─── 枚举面（#357 → #420 node 化）：目录树可见性，与各内容面正交 ──────────────

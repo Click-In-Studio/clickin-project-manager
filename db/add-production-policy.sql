@@ -7,7 +7,7 @@
 --
 --  1. **value TEXT，不是 enabled BOOLEAN**。形状 C/L 有多档键（orphan_task_disposition
 --     三档），布尔装不下；拆成多个布尔会配出非法组合。合法取值由 TS 词汇常量
---     （lib/policy-keys.ts）声明并在服务端白名单校验——SQL 侧不设 CHECK，否则
+--     （lib/perm/policy-keys.ts）声明并在服务端白名单校验——SQL 侧不设 CHECK，否则
 --     每加一个键都要一次 migration，与「新增权限键零 policy 代码」的目标冲突。
 --
 --  2. **落全量键，不稀疏**。建演出时把词汇表里每个键都落一行（ensureProductionPolicies）。

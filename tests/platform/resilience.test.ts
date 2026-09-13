@@ -16,8 +16,8 @@ import {
   createCue, getCue, deleteCue, updateCue, listCues,
   archiveProduction, unarchiveProduction, isProductionArchived,
 } from "@/lib/db";
-import { listProductionEvents } from "@/lib/event-db";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { listProductionEvents } from "@/lib/ops/event-db";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { TEST_USER, TEST_OWNER } from "../_support/helpers";
 
 const BASE_PROD = "test-res-prod";

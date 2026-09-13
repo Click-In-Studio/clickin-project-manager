@@ -7,7 +7,7 @@ import {
   type NodeMoveInCandidate,
 } from "./dramaturgy";
 import { getDramaturgyTreeConfig } from "./anchors";
-import type { GrantActor } from "../grant-check";
+import type { GrantActor } from "../perm/grant-check";
 
 // ─── 目录树的唯一取数口（#357 枚举面 + #358 link，node 化后单数组四 kind）─────
 //

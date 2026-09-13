@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { escapeRegex, mdToHtml, stagePairRegex } from "@/lib/script-md";
+import { escapeRegex, mdToHtml, stagePairRegex } from "@/lib/script/script-md";
 
 /**
  * 行内 markdown → HTML 的护栏（#335 抽出为共用件时补）。

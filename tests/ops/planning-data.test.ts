@@ -4,9 +4,9 @@ import {
   listEventTaskCounts,
   listScheduleItemsWithParticipants,
   createProductionEvent,
-} from "@/lib/event-db";
-import { filterDraftVisibleEvents } from "@/lib/event-permissions";
-import { createProductionDept } from "@/lib/dept-db";
+} from "@/lib/ops/event-db";
+import { filterDraftVisibleEvents } from "@/lib/ops/event-permissions";
+import { createProductionDept } from "@/lib/perm/dept-db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
 // UI v3 计划面板数据层（PR #233 review 1/2/4）：

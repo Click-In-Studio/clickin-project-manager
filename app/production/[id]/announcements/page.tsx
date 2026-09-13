@@ -3,7 +3,7 @@ export const metadata: Metadata = { title: "项目公告" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 
 export default async function ProductionAnnouncementsPage({ params }: { params: Promise<{ id: string }> }) {

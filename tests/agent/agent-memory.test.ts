@@ -8,12 +8,12 @@ import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 //   2. 上报与组装取件：appendRunRecord → buildInjectContext（MCP 端点已退役）
 //   3. 蒸馏：mock LLM，验证输入组装（旧摘要+新增量）与落盘+offset 提交
 
-// mock LLM（distill 经 @/lib/llm-chat 调用）。只替换 chat，保留真的
+// mock LLM（distill 经 @/lib/agent/llm-chat 调用）。只替换 chat，保留真的
 // LlmBudgetError——distill 用 instanceof 分流"预算不够"与其他失败，
 // 换成假类会让分流逻辑在测试里恒假、测了个寂寞。
 const chatMock = vi.fn(async (..._args: unknown[]) => "## 偏好与习惯\n- mock 蒸馏产物");
-vi.mock("@/lib/llm-chat", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/llm-chat")>()),
+vi.mock("@/lib/agent/llm-chat", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/agent/llm-chat")>()),
   chat: (...args: unknown[]) => chatMock(...args),
 }));
 
@@ -38,7 +38,7 @@ afterAll(async () => {
 
 describe("store：字节偏移增量语义", () => {
   it("append → readRunsSinceLastDistill → commit → 再读为空", async () => {
-    const { appendRunRecord, readRunsSinceLastDistill, commitDistill } = await import("@/lib/agent-memory/store");
+    const { appendRunRecord, readRunsSinceLastDistill, commitDistill } = await import("@/lib/agent/memory/store");
     appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "第一条", lastAssistant: "回复一" });
     appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "第二条", lastAssistant: "回复二" });
 
@@ -56,12 +56,12 @@ describe("store：字节偏移增量语义", () => {
   });
 
   it("非法 userId 拒绝进入路径拼接", async () => {
-    const { appendRunRecord } = await import("@/lib/agent-memory/store");
+    const { appendRunRecord } = await import("@/lib/agent/memory/store");
     expect(() => appendRunRecord("../evil", { ts: new Date().toISOString() })).toThrow();
   });
 
   it("截断批次：nextOffset 停在最后已消费行，剩余数据下次继续（#205 critical 回归）", async () => {
-    const { appendRunRecord, readRunsSinceLastDistill, commitDistill } = await import("@/lib/agent-memory/store");
+    const { appendRunRecord, readRunsSinceLastDistill, commitDistill } = await import("@/lib/agent/memory/store");
     // 独立用户目录，避免与其他用例的 offset 状态耦合
     const uid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee01";
     appendRunRecord(uid, { ts: new Date().toISOString(), lastUser: "批次甲".repeat(20), lastAssistant: "x" });
@@ -91,8 +91,8 @@ describe("store：字节偏移增量语义", () => {
 
 describe("上报与组装取件（MCP 端点已退役，直接调 lib）", () => {
   it("appendRunRecord 落盘 → buildInjectContext 的 memory 含用户档案与近期对话", async () => {
-    const { appendRunRecord } = await import("@/lib/agent-memory/store");
-    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
+    const { appendRunRecord } = await import("@/lib/agent/memory/store");
+    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
     appendRunRecord(userId, { ts: new Date().toISOString(), sessionKey: "agent:team:x", lastUser: "端点上报测试", lastAssistant: "收到" });
     const data = await buildInjectContext(userId);
     expect(data.memory).toBeTruthy();
@@ -102,9 +102,9 @@ describe("上报与组装取件（MCP 端点已退役，直接调 lib）", () =>
   });
 
   it("带 prompt 的组装：命中触发词 → recall 字段；无关 prompt → recall 为 null", async () => {
-    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
-    const { writeMemory } = await import("@/lib/agent-memory/store");
-    const { indexCurated } = await import("@/lib/agent-memory/index-db");
+    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
+    const { writeMemory } = await import("@/lib/agent/memory/store");
+    const { indexCurated } = await import("@/lib/agent/memory/index-db");
     const md = "- 灯光 cue 表改动要先过舞监确认 <!-- trigger: 灯光cue --> <!-- importance: 8 -->";
     writeMemory(userId, md);
     await indexCurated("user", userId, md);
@@ -126,7 +126,7 @@ describe("上报与组装取件（MCP 端点已退役，直接调 lib）", () =>
   // 若因"这个用户还没有任何记忆/档案"而整段不注入，就等于没有规则——所以
   // buildInjectContext 恒返回非 null（原先"什么都没有就返回 null"的早退已撤）。
   it("零记忆零档案的用户也拿得到界面上下文规则", async () => {
-    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
+    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
     const blank = "00000000-1111-2222-3333-444444444444";
     const data = await buildInjectContext(blank);
     expect(data.memory).toBeTruthy();
@@ -136,8 +136,8 @@ describe("上报与组装取件（MCP 端点已退役，直接调 lib）", () =>
   });
 
   it("MEMORY.md 内部二级标题注入时降级为三级（不与包裹标题同级）", async () => {
-    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
-    const { writeMemory } = await import("@/lib/agent-memory/store");
+    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
+    const { writeMemory } = await import("@/lib/agent/memory/store");
     writeMemory(userId, "## 偏好与习惯\n- 喜欢先听结论\n# 顶级标题\n- x");
     const data = await buildInjectContext(userId);
     expect(data.memory).toContain("## 长期记忆摘要\n### 偏好与习惯");
@@ -146,13 +146,13 @@ describe("上报与组装取件（MCP 端点已退役，直接调 lib）", () =>
   });
 
   it("excludeSessionKey 过滤当前会话自身条目", async () => {
-    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
+    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
     const data = await buildInjectContext(userId, "agent:team:x");
     expect(data.memory ?? "").not.toContain("端点上报测试");
   });
 
   it("production 会话注入「当前制作」段（成员）", async () => {
-    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
+    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
     const sessionKey = `agent:team:clickin:chat:${userId}:${prodId}:11111111-2222-3333-4444-555555555555`;
     const data = await buildInjectContext(userId, sessionKey);
     expect(data.memory).toContain("## 当前制作");
@@ -160,7 +160,7 @@ describe("上报与组装取件（MCP 端点已退役，直接调 lib）", () =>
   });
 
   it("非成员的 production 会话不注入制作段（实时资格校验）", async () => {
-    const { buildInjectContext } = await import("@/lib/agent-memory/inject");
+    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
     const { makeProduction: mk } = await import("../_support/factories");
     const { prodId: otherProd } = await mk(); // 无 owner、无成员
     try {
@@ -176,8 +176,8 @@ describe("上报与组装取件（MCP 端点已退役，直接调 lib）", () =>
 
 describe("蒸馏管线（mock LLM）", () => {
   it("消费增量 → LLM 输入含旧摘要与新对话 → 写 MEMORY.md + 提交 offset", async () => {
-    const { writeMemory, readMemory } = await import("@/lib/agent-memory/store");
-    const { distillUser } = await import("@/lib/agent-memory/distill");
+    const { writeMemory, readMemory } = await import("@/lib/agent/memory/store");
+    const { distillUser } = await import("@/lib/agent/memory/distill");
     writeMemory(userId, "- 旧记忆条目：喜欢先听结论");
 
     const result = await distillUser(userId);
@@ -202,9 +202,9 @@ describe("蒸馏管线（mock LLM）", () => {
   // 会天天以同样方式失败、offset 永不推进 —— 该用户记忆永久停更。所以撞预算
   // 时要缩**输入**。
   it("预算不够 → 降档缩小输入重试，成功后照常提交 offset", async () => {
-    const { appendRunRecord } = await import("@/lib/agent-memory/store");
-    const { distillUser } = await import("@/lib/agent-memory/distill");
-    const { LlmBudgetError } = await import("@/lib/llm-chat");
+    const { appendRunRecord } = await import("@/lib/agent/memory/store");
+    const { distillUser } = await import("@/lib/agent/memory/distill");
+    const { LlmBudgetError } = await import("@/lib/agent/llm-chat");
     appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "降档批", lastAssistant: "y" });
 
     // 首档（24000）超预算，降到 12000 成功
@@ -222,9 +222,9 @@ describe("蒸馏管线（mock LLM）", () => {
   });
 
   it("每档都超预算 → 跳过该条并推进 offset，不把后续蒸馏永久堵死", async () => {
-    const { appendRunRecord } = await import("@/lib/agent-memory/store");
-    const { distillUser } = await import("@/lib/agent-memory/distill");
-    const { LlmBudgetError } = await import("@/lib/llm-chat");
+    const { appendRunRecord } = await import("@/lib/agent/memory/store");
+    const { distillUser } = await import("@/lib/agent/memory/distill");
+    const { LlmBudgetError } = await import("@/lib/agent/llm-chat");
     appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "毒丸批", lastAssistant: "z" });
 
     chatMock.mockRejectedValue(new LlmBudgetError("empty (finish_reason=length)", false));
@@ -240,8 +240,8 @@ describe("蒸馏管线（mock LLM）", () => {
   });
 
   it("非预算失败不缩输入、不跳过：只打一次且不提交 offset", async () => {
-    const { appendRunRecord } = await import("@/lib/agent-memory/store");
-    const { distillUser } = await import("@/lib/agent-memory/distill");
+    const { appendRunRecord } = await import("@/lib/agent/memory/store");
+    const { distillUser } = await import("@/lib/agent/memory/distill");
     appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "网络抖动批", lastAssistant: "w" });
 
     chatMock.mockReset();
@@ -257,8 +257,8 @@ describe("蒸馏管线（mock LLM）", () => {
   });
 
   it("LLM 失败 → error 状态且不提交 offset（下次重试同批数据）", async () => {
-    const { appendRunRecord } = await import("@/lib/agent-memory/store");
-    const { distillUser } = await import("@/lib/agent-memory/distill");
+    const { appendRunRecord } = await import("@/lib/agent/memory/store");
+    const { distillUser } = await import("@/lib/agent/memory/distill");
     appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "失败重试批", lastAssistant: "x" });
 
     chatMock.mockRejectedValueOnce(new Error("provider down"));

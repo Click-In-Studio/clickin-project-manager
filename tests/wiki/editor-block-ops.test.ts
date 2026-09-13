@@ -11,14 +11,14 @@ import { TableKit } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Markdown } from "tiptap-markdown";
 import { NodeSelection } from "@tiptap/pm/state";
-import { Callout } from "@/lib/tiptap-callout";
-import { Column, ColumnGroup } from "@/lib/tiptap-columns";
+import { Callout } from "@/lib/editor/tiptap-callout";
+import { Column, ColumnGroup } from "@/lib/editor/tiptap-columns";
 import {
   getSelectedBlock, moveBlock, duplicateBlock, deleteBlock,
   turnInto, canTurnInto, isColumnGroup, changeColumnCount, equalizeColumns,
   findColumnGroup, selectColumnGroup,
-} from "@/lib/editor-block-ops";
-import { ColumnEditing, isEmptyColumn } from "@/lib/tiptap-column-editing";
+} from "@/lib/editor/editor-block-ops";
+import { ColumnEditing, isEmptyColumn } from "@/lib/editor/tiptap-column-editing";
 
 function makeEditor(content: string) {
   return new Editor({

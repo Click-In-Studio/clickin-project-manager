@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// 粘贴 HTML 的 img 收口（lib/external-img-paste）：外链图不许冒充嵌入——落库成
+// 粘贴 HTML 的 img 收口（lib/editor/external-img-paste）：外链图不许冒充嵌入——落库成
 // ![](https://…) 会绕过边表/权限/URL 过期三重纪律。此前只堵了飞书一家。
 import { describe, it, expect } from "vitest";
-import { stripExternalPastedImages } from "@/lib/external-img-paste";
+import { stripExternalPastedImages } from "@/lib/editor/external-img-paste";
 import { embedMediaKind, isEmbeddableUpload } from "@/lib/asset/embed-media";
 
 describe("stripExternalPastedImages", () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createWiki, updateWiki, deleteWiki } from "@/lib/wiki/content";
 import { extractMentionEdges, listBacklinks, listWikiRefsForEntity, listEntityRefsForWiki } from "@/lib/wiki/links";
 import { ensureDramaturgyRootAnchor } from "@/lib/node/anchors";

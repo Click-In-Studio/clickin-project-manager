@@ -9,11 +9,11 @@
  * 也是第一个**非 legacy** 模版：它证明引擎的原语（行内流 / 缩进 / when / 幕场字段）够用。
  */
 import { describe, it, expect } from "vitest";
-import type { Block, Scene } from "@/lib/script-types";
+import type { Block, Scene } from "@/lib/script/script-types";
 import {
   estimateItemHeight, paginate, planBlock, planScript, sceneNumberParts, toRoman, templateById,
   type LayoutItem, type PlanContext,
-} from "@/lib/script-template";
+} from "@/lib/script/template";
 import { pageBandText } from "@/components/print/template-render";
 
 const T = templateById("broadway-musical@1");

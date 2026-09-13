@@ -12,7 +12,7 @@ export function loginDest(): string {
 }
 
 // 从邀请链接落地（/invite/<token> → /login?next=/invite/<token>）时透传 token 作
-// 注册正当性——受邀者不需要额外要注册码（lib/registration-gate.ts）。
+// 注册正当性——受邀者不需要额外要注册码（lib/account/registration-gate.ts）。
 // 不另设 window 守卫：它不直接碰 window，唯一路径是上面已守卫的 loginDest()，
 // SSR 时拿到 "/" 后 match 失败返回 undefined。这条由 login-ssr 测试钉住。
 export function inviteTokenFromDest(): string | undefined {

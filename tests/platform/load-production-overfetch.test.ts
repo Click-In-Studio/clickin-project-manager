@@ -14,7 +14,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { POST as mentionResolvePOST } from "@/app/api/production/[id]/mention-resolve/route";
 import {
   applyPatchToDB,
@@ -25,8 +25,8 @@ import {
   loadVersionBlocks,
   loadVersionBlocksByIds,
 } from "@/lib/db";
-import type { Block } from "@/lib/script-types";
-import type { ContentMentionAttrs } from "@/lib/mention-types";
+import type { Block } from "@/lib/script/script-types";
+import type { ContentMentionAttrs } from "@/lib/editor/mention-types";
 import { makeProduction, makeScene, makeCharacter, cleanupProduction } from "../_support/factories";
 
 let owner: string;

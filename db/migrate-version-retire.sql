@@ -1,7 +1,7 @@
 -- 版本退役 Phase B 收尾（PR #300）：清掉 version 概念的数据层化石。
 --
 -- 前情：版本分叉与「修改过去的版本」两个假设已死——createVersion / rollback /
--- 分支级联 / 版本 UI 全部退役，写路径锁 head（lib/head-version.ts）。本迁移
+-- 分支级联 / 版本 UI 全部退役，写路径锁 head（lib/script/head-version.ts）。本迁移
 -- 删除自那以后零读零写的存储残骸：
 --
 --   · asset_version_rel — 资产文件按版本 pin。resolveAssetFile 已改为一律

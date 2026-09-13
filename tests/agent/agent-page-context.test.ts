@@ -6,7 +6,7 @@ import {
   pageLabelFor,
   pageSuggestionsFor,
   __registry,
-} from "@/lib/agent-page-context";
+} from "@/lib/agent/agent-page-context";
 
 const PID = "abc123xy";
 

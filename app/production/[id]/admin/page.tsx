@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "项目概览" };
 
-import { requireAdminAccess } from "@/lib/admin-guard";
+import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getProductionMeta, getAdminOverviewStats } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 import { notFound } from "next/navigation";

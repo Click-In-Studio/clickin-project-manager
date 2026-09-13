@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
-import { toActor } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { toActor } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getReportReply, deleteReportReply } from "@/lib/event-db";
-import { canModerateNotes, hasEventDomainView } from "@/lib/event-permissions";
+import { getReportReply, deleteReportReply } from "@/lib/ops/event-db";
+import { canModerateNotes, hasEventDomainView } from "@/lib/ops/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string; replyId: string }> };
 

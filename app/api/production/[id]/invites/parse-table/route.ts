@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { requireGrantGate } from "@/lib/api-guard";
+import { requireGrantGate } from "@/lib/perm/api-guard";
 import { getAppAccessToken } from "@/lib/platform/feishu/feishu-auth";
 import {
   parseWikiUrl,
@@ -11,7 +11,7 @@ import {
   toInviteRows,
 } from "@/lib/platform/feishu/feishu-bitable";
 import { getProductionRoleNames } from "@/lib/db";
-import { listProductionDepts } from "@/lib/dept-db";
+import { listProductionDepts } from "@/lib/perm/dept-db";
 import { getPool } from "@/lib/pg";
 
 type Ctx = { params: Promise<{ id: string }> };

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { canAccessNode, selfConfirmTemplateNodes, isSensitiveNode, isRootNode } from "@/lib/grant-template";
+import { canAccessNode, selfConfirmTemplateNodes, isSensitiveNode, isRootNode } from "@/lib/perm/grant-template";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 

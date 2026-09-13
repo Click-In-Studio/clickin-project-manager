@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { verifyBindingToken, signConflictToken } from "@/lib/platform/email/email-tokens";
 import { bindPlatformIdentity, getUserProfile } from "@/lib/db";
-import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/session";
+import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/account/session";
 
 function redirectBase(req: NextRequest): string {
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";

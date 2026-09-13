@@ -1,10 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { productionIdOfSessionKey } from "@/lib/agent-tools/session-identity";
-import { requireProductionFeature } from "@/lib/plan";
-import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-chat/http";
-import { neutralizeInboundMessage } from "@/lib/agent-ui-context";
-import { createRunnerStreamResponse, pageKeyOfMessage } from "@/lib/agent-runtime/dispatch";
-import { startRun, steerRun } from "@/lib/agent-runtime/client";
+import { productionIdOfSessionKey } from "@/lib/agent/tools/session-identity";
+import { requireProductionFeature } from "@/lib/account/plan";
+import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent/chat/http";
+import { neutralizeInboundMessage } from "@/lib/agent/agent-ui-context";
+import { createRunnerStreamResponse, pageKeyOfMessage } from "@/lib/agent/runtime/dispatch";
+import { startRun, steerRun } from "@/lib/agent/runtime/client";
 
 export const runtime = "nodejs";
 

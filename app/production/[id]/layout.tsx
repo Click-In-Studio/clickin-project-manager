@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getWatermarkInfo } from "@/lib/db";
 import WatermarkOverlay from "@/components/WatermarkOverlay";
 

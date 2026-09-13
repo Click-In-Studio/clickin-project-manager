@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { dispatchAgentMutation, subscribeAgentMutation, _resetAgentMutationSubscribers } from "@/lib/agent-mutations";
+import { dispatchAgentMutation, subscribeAgentMutation, _resetAgentMutationSubscribers } from "@/lib/agent/agent-mutations";
 
 // 前端派发表：按 scope（可选 productionId）匹配；没人接返回 false（AgentPopout 据此兜底 router.refresh）。
 

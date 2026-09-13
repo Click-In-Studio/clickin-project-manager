@@ -1,13 +1,13 @@
 import { type NextRequest } from "next/server";
-import { hasEventDomainView } from "@/lib/event-permissions";
-import { toActor, hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasEventDomainView } from "@/lib/ops/event-permissions";
+import { toActor, hasGrant } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import {
   getProductionDept,
   updateProductionDept,
   deleteProductionDept,
-} from "@/lib/dept-db";
+} from "@/lib/perm/dept-db";
 
 type Ctx = { params: Promise<{ id: string; deptId: string }> };
 

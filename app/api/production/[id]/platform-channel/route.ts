@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
 import { getProductionPermissionContext } from "@/lib/db";
 

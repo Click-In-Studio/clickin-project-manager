@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { toActor } from "@/lib/grant-check";
-import { canWriteMaterial } from "@/lib/material-perm";
-import { resolveSubjectPatch } from "@/lib/task-poc";
-import { deleteMaterial, getMaterial, MaterialError, updateMaterial } from "@/lib/material-db";
+import { toActor } from "@/lib/perm/grant-check";
+import { canWriteMaterial } from "@/lib/ops/material-perm";
+import { resolveSubjectPatch } from "@/lib/ops/task-poc";
+import { deleteMaterial, getMaterial, MaterialError, updateMaterial } from "@/lib/ops/material-db";
 import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string; materialId: string }> };
@@ -31,7 +31,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "数量必须是不小于 0 的数字" }, { status: 400 });
 
   // 每个字段只清它自己那一支——旧客户端只知道部门时发一个 departmentId: null，
-  // 不该顺手把用户组绑定也清掉（task 那边踩过这个坑，见 lib/task-poc.ts）
+  // 不该顺手把用户组绑定也清掉（task 那边踩过这个坑，见 lib/ops/task-poc.ts）
   const patch = await resolveSubjectPatch(productionId, body, existing);
   if (!patch.ok) return Response.json({ error: patch.error }, { status: patch.status });
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { upsertFeishuUser, attachFeishuToUser } from "@/lib/db-feishu";
+import { upsertFeishuUser, attachFeishuToUser } from "@/lib/account/db-feishu";
 import { shortId } from "../_support/factories";
 
 // 飞书身份平权（db/add-feishu-identity-parity.sql）：飞书与邮箱是平权的登录通道，

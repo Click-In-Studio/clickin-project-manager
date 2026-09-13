@@ -6,7 +6,7 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
 import { WikiImage } from "@/lib/wiki/tiptap-image";
-import { decodeAssetSrc } from "@/lib/mention-types";
+import { decodeAssetSrc } from "@/lib/editor/mention-types";
 
 function makeEditor(md: string) {
   return new Editor({

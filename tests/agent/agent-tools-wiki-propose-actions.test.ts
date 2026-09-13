@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
-import { createEventReport } from "@/lib/event-db";
+import { createEventReport } from "@/lib/ops/event-db";
 import { getPool } from "@/lib/pg";
 import { createWiki, getWiki } from "@/lib/wiki/content";
-import { wikiProposeUpdate, wikiProposeDelete, wikiProposeMove, wikiProposeTag } from "@/lib/agent-tools/wiki-tools";
+import { wikiProposeUpdate, wikiProposeDelete, wikiProposeMove, wikiProposeTag } from "@/lib/agent/tools/wiki-tools";
 import { getNodeByWikiId } from "@/lib/node/db";
 import { getWikiProposalByToolCallId, insertWikiProposal, type WikiProposalAction } from "@/lib/wiki/proposal-db";
-import { prepareWikiProposal } from "@/lib/agent-tools/wiki-proposal-prepare";
-import { DENIED_NOT_MEMBER } from "@/lib/agent-tools/production-tools";
+import { prepareWikiProposal } from "@/lib/agent/tools/wiki-proposal-prepare";
+import { DENIED_NOT_MEMBER } from "@/lib/agent/tools/production-tools";
 
 // update/delete/move/tag 四个动作各自的门是实例级（canEditWiki/canDeleteWiki 对
 // 具体这一篇文档），不是 create 那种域级门——所以每个用例都要真造一个"对

@@ -1,11 +1,11 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { toActor } from "@/lib/grant-check";
+import { toActor } from "@/lib/perm/grant-check";
 import { getWiki, listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson } from "@/lib/wiki/content";
 import { getNodeByWikiId, setNodePublic, setNodeListable, setNodeDeptShares, listNodeDeptShares, type NodeRecord } from "@/lib/node/db";
 import { canShareWiki } from "@/lib/wiki/perm";
-import { type WikiLevel } from "@/lib/resource-grant-db";
+import { type WikiLevel } from "@/lib/perm/resource-grant-db";
 
 type Ctx = { params: Promise<{ id: string; wikiId: string }> };
 

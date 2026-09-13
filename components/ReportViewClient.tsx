@@ -10,7 +10,7 @@ import type { MentionMember } from "./SmartTextarea";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import SmartTextarea from "./SmartTextarea";
 import SmartText from "./SmartText";
-import type { ProductionEvent, EventReport, EventReportNote, EventDepartment, ReportReply } from "@/lib/event-db";
+import type { ProductionEvent, EventReport, EventReportNote, EventDepartment, ReportReply } from "@/lib/ops/event-db";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 
 const REPORT_TYPE_LABELS: Record<string, string> = {

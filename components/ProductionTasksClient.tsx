@@ -5,7 +5,7 @@ import OverflowSafeSelect from "@/components/OverflowSafeSelect";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { ProductionTechReqEntry } from "@/lib/event-db";
+import type { ProductionTechReqEntry } from "@/lib/ops/event-db";
 import { BASE_PATH } from "@/lib/base-path";
 import { datetimeLocalToIso, fmtDate, fmtTime, isoToDatetimeLocal } from "@/lib/tz";
 import SmartText from "@/components/SmartText";

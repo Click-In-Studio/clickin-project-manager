@@ -28,7 +28,7 @@ import type { Editor } from "@tiptap/core";
 import {
   isRowSelection, isColSelection,
   deleteSelectedColumn, deleteSelectedRow,
-} from "@/lib/table-ops";
+} from "@/lib/editor/table-ops";
 import EditorOps from "@/components/editor/EditorOps";
 
 export default function TextBubbleMenu({ editor }: { editor: Editor | null }) {

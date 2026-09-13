@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
-import { listMyReports } from "@/lib/event-db";
+import { getSession } from "@/lib/account/session";
+import { listMyReports } from "@/lib/ops/event-db";
 
 export async function GET() {
   const cookieStore = await cookies();

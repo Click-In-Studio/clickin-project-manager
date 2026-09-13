@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
-import { acceptInvite, claimInvite } from "@/lib/invite-db";
+import { getSession } from "@/lib/account/session";
+import { acceptInvite, claimInvite } from "@/lib/account/invite-db";
 
 const REASON_MSG: Record<string, string> = {
   not_found: "邀请不存在",
@@ -11,7 +11,7 @@ const REASON_MSG: Record<string, string> = {
   target_mismatch: "该邀请为定向邀请，与当前登录身份不符",
   needs_claim: "该邀请为名单认领链接，请选择你的名字",
   claim_taken: "该名额已被认领",
-  // 停用的人一直占席位（见 lib/plan.ts seatsFullForNewMember），而这是 owner 点一下
+  // 停用的人一直占席位（见 lib/account/plan.ts seatsFullForNewMember），而这是 owner 点一下
   // 「确认离组」就能自解的——报错必须说出这条路，否则他只会以为唯一出路是掏钱升档。
   seats_full: "该项目成员人数已达当前档位上限。若有已停用成员，项目所有者可将其确认离组以释放席位，或升级项目档位",
 };

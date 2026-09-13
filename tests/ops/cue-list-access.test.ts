@@ -25,7 +25,7 @@ import {
   getCueListGrantLevel, getCueListAccess,
   selfConfirmCueListGrant, checkCueListFreeApprovalZone,
   setCueListGrant, listCueListGrants,
-} from "@/lib/resource-grant-db";
+} from "@/lib/perm/resource-grant-db";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 
 // ── Test helpers ──────────────────────────────────────────────────────────────

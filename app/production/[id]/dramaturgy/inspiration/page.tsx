@@ -3,9 +3,9 @@ export const metadata: Metadata = { title: "构作 · 灵感文档" };
 
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionName, getProductionPermissionContext } from "@/lib/db";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getDramaturgyTreeConfig } from "@/lib/node/anchors";
 import { listDramaturgyTreeFor } from "@/lib/node/tree-view";
 import { DramaturgyInspirationShell } from "@/components/DramaturgyWorkspaceTabs";

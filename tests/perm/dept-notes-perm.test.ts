@@ -2,10 +2,10 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   setEventParticipants, writeTaskDeptEventVisibility,
   createEventReport, createReportNote,
-} from "@/lib/event-db";
-import { setDeptMembers } from "@/lib/dept-db";
-import { canWriteNote, canEditNote } from "@/lib/event-permissions";
-import { hasAdminPanelEligibility, type PermissionContext } from "@/lib/permissions";
+} from "@/lib/ops/event-db";
+import { setDeptMembers } from "@/lib/perm/dept-db";
+import { canWriteNote, canEditNote } from "@/lib/ops/event-permissions";
+import { hasAdminPanelEligibility, type PermissionContext } from "@/lib/perm/permissions";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
@@ -49,7 +49,7 @@ beforeAll(async () => {
   ({ prodId } = await makeProduction());
   [poc, director, outsider] = await Promise.all([newUser(), newUser(), newUser()]);
 
-  const { createProductionDept } = await import("@/lib/dept-db");
+  const { createProductionDept } = await import("@/lib/perm/dept-db");
   deptId = (await createProductionDept({ productionId: prodId, name: "测试部门" })).id;
 
   eventId = `ev${shortId()}`;

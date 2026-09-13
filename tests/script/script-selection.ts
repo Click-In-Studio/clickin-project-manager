@@ -4,7 +4,7 @@ import {
   replaceSelectionRange,
   toggleSelectionItem,
   type SelectionState,
-} from "../../lib/script-selection";
+} from "../../lib/script/script-selection";
 
 type Item = { id: string; isMarker: boolean };
 

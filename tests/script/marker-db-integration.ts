@@ -14,7 +14,7 @@ import {
   saveScriptConfig,
 } from "../../lib/db";
 import { getPool } from "../../lib/pg";
-import { DEFAULT_SCRIPT_CONFIG, type Block } from "../../lib/script-types";
+import { DEFAULT_SCRIPT_CONFIG, type Block } from "../../lib/script/script-types";
 
 const productionId = `marker_test_${randomUUID()}`;
 const chapterId = `chapter_${randomUUID()}`;

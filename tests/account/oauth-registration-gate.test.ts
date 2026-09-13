@@ -4,11 +4,11 @@ import { GET as initiateHandler } from "@/app/api/auth/[platform]/initiate/route
 import { GET as callbackHandler } from "@/app/api/auth/[platform]/callback/route";
 import { feishuPlatform } from "@/lib/platform/feishu";
 import { upsertFeishuUser } from "@/lib/db";
-import { createInvite } from "@/lib/invite-db";
+import { createInvite } from "@/lib/account/invite-db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { getPool } from "@/lib/pg";
 
-// OAuth 通道的注册门（lib/registration-gate.ts + [platform]/callback）：
+// OAuth 通道的注册门（lib/account/registration-gate.ts + [platform]/callback）：
 //   · 凭据（邀请码 / 邀请 token）经 initiate 收进 httpOnly cookie，跨越「跳到飞书
 //     再跳回来」这一次往返——不编进 state，否则会随授权 URL 落进第三方日志。
 //   · 回调三段式：handleAuthCallback 换身份 → 过门 → completeLogin 建号。

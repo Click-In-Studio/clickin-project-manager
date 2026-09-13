@@ -1,15 +1,15 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getCueListIdForCue } from "@/lib/db";
-import { hasGrant, hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { canAccessNode } from "@/lib/grant-template";
+import { hasGrant, hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { canAccessNode } from "@/lib/perm/grant-template";
 import { listWikiRefsForEntity, addManualWikiEntityLink, removeManualWikiEntityLink } from "@/lib/wiki/links";
 import { createWiki, deleteWiki } from "@/lib/wiki/content";
 import { ensureDramaturgyRootAnchor } from "@/lib/node/anchors";
 import { canViewWiki } from "@/lib/wiki/perm";
 import { canViewAsset } from "@/lib/asset/perm";
 import { getAsset } from "@/lib/asset/db";
-import type { PermissionContext } from "@/lib/permissions";
+import type { PermissionContext } from "@/lib/perm/permissions";
 
 // 对象侧"相关 wiki"面板：引用了该实体的 wiki 列表 + manual 边读写（Phase 2）。
 // GET 门 = 宿主对象的可见性（面板长在宿主页上，per-type 沿用各域现有读取门）；

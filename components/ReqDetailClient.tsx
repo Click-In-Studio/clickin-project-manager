@@ -17,7 +17,7 @@ import PageHeader, { PAGE_TITLE_FONT, PRIMARY_BTN, SECONDARY_BTN } from "@/compo
 import AccessRequestModal from "@/components/AccessRequestModal";
 import DropdownPicker from "@/components/DropdownPicker";
 import styles from "@/components/my-pages.module.css";
-import type { EventTechReq, EventScheduleItem, ProductionEvent, TaskDependencyRef } from "@/lib/event-db";
+import type { EventTechReq, EventScheduleItem, ProductionEvent, TaskDependencyRef } from "@/lib/ops/event-db";
 import { fmtTime, fmtDateTime } from "@/lib/tz";
 
 const SCHEDULE_ITEM_TYPE_LABELS: Record<string, string> = {

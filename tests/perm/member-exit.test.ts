@@ -25,9 +25,9 @@ import {
   getMemberStatus,
   listMemberStatusAudit,
   listSuspendedMembers,
-} from "@/lib/member-status";
-import { resolveExitHandlers } from "@/lib/member-exit-routing";
-import { hasGrant } from "@/lib/grant-check";
+} from "@/lib/perm/member-status";
+import { resolveExitHandlers } from "@/lib/perm/member-exit-routing";
+import { hasGrant } from "@/lib/perm/grant-check";
 import { getPool } from "@/lib/pg";
 
 let prodId: string;
@@ -217,7 +217,7 @@ describe("owner 保护", () => {
 
 describe("席位", () => {
   it("suspended 占席位，exited 不占", async () => {
-    const { seatsFullForNewMember, PRODUCTION_TIERS } = await import("@/lib/plan");
+    const { seatsFullForNewMember, PRODUCTION_TIERS } = await import("@/lib/account/plan");
     const limit = PRODUCTION_TIERS.free.seatLimit;
     const owner3 = (await upsertFeishuUser(`test-open-${shortId()}`, `席位owner${shortId()}`, null, false)).userId;
     const { prodId: prod3 } = await makeProduction(owner3);

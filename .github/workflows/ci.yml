@@ -184,8 +184,8 @@ jobs:
           git fetch --depth=1 origin "$GITHUB_BASE_REF"
           CHANGED=$(git diff origin/$GITHUB_BASE_REF HEAD --name-only -- \
             'public/fonts/**' 'app/fonts.css' 'app/globals.css' \
-            'components/print/**' 'lib/script-page.ts' 'lib/print-css.ts' \
-            'lib/script-block-layout.ts' 'lib/script-md.ts' \
+            'components/print/**' 'lib/script/script-page.ts' 'lib/script/print-css.ts' \
+            'lib/script/script-block-layout.ts' 'lib/script/script-md.ts' \
             'scripts/print-consistency/**' 'scripts/fonts/**' '.github/workflows/ci.yml')
           if [ -n "$CHANGED" ]; then
             echo "run=true" >> $GITHUB_OUTPUT

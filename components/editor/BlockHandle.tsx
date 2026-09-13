@@ -17,7 +17,7 @@ import { NodeSelection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import BlockMenu from "@/components/editor/BlockMenu";
-import { scoreDragTarget } from "@/lib/editor-drag-unit";
+import { scoreDragTarget } from "@/lib/editor/editor-drag-unit";
 
 export default function BlockHandle({ editor }: { editor: Editor | null }) {
   const [target, setTarget] = useState<{ node: PMNode | null; pos: number }>({ node: null, pos: -1 });

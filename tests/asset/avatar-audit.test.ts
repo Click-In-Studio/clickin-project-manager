@@ -11,7 +11,7 @@ vi.mock("@/lib/r2", () => ({
 }));
 
 import { deleteR2Object } from "@/lib/r2";
-import { recordAvatarUpload, markAvatarCommitted, cleanupAvatarObjects } from "@/lib/avatar-db";
+import { recordAvatarUpload, markAvatarCommitted, cleanupAvatarObjects } from "@/lib/asset/avatar-db";
 import { getPool } from "@/lib/pg";
 import { TEST_USER } from "../_support/helpers";
 import { shortId } from "../_support/factories";

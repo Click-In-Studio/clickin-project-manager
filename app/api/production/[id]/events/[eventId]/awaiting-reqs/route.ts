@@ -1,14 +1,14 @@
 import { type NextRequest } from "next/server";
-import { hasEventContentEdit } from "@/lib/event-permissions";
-import { toActor } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasEventContentEdit } from "@/lib/ops/event-permissions";
+import { toActor } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
-import { getProductionEvent, upsertAwaitingTechReqs, getEventDepartment } from "@/lib/event-db";
+import { getProductionEvent, upsertAwaitingTechReqs, getEventDepartment } from "@/lib/ops/event-db";
 import { buildAwaitingReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { SERVER_URL } from "@/lib/server-url";
 import { getPool } from "@/lib/pg";
 import { feishuPlatform } from "@/lib/platform/feishu";
-import { notifyUsers } from "@/lib/notify";
+import { notifyUsers } from "@/lib/notify/notify";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 

@@ -2,7 +2,7 @@ import { getPool } from "../pg";
 import { broadcastWikiLibraryChange } from "../wiki/collab";
 import { canViewWiki } from "../wiki/perm";
 import { canViewAssetById } from "../asset/perm";
-import type { GrantActor } from "../grant-check";
+import type { GrantActor } from "../perm/grant-check";
 import {
   getNode, insertNode, moveNode, tailSortKey, placementSortKey,
   type NodeEntry, type NodePlacement, type NodeRecord,

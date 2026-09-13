@@ -672,7 +672,7 @@ CREATE TABLE IF NOT EXISTS task (
   preset_minutes INTEGER,
   department_id  UUID REFERENCES production_dept(id) ON DELETE SET NULL,
   -- 责任主体的另一支（add-event-group-2-task-subject.sql）：绑用户组而非部门。与 department_id
-  -- 互斥（task_subject_single），POC 从组的当前定义解析，见 lib/task-poc.ts。
+  -- 互斥（task_subject_single），POC 从组的当前定义解析，见 lib/ops/task-poc.ts。
   group_id       UUID REFERENCES event_group(id) ON DELETE SET NULL,
   status         TEXT NOT NULL DEFAULT 'pending',
   start_time     TIMESTAMPTZ,
@@ -951,7 +951,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ppc_prod_org_uniq
 
 -- ── 审批流程模版（prA，db/add-approval-flow-template.sql）─────────────────────
 -- 只存不驱动改为引擎消费（prB）：published 模版是提交时编译快照的来源。
--- 节点结构校验在 lib/approval-flow-template.ts（服务端 create/update 必经）。
+-- 节点结构校验在 lib/approval/approval-flow-template.ts（服务端 create/update 必经）。
 -- 定义在 approval_request 之前：flow_template_id 前向引用。
 CREATE TABLE IF NOT EXISTS approval_flow_template (
   id             TEXT        PRIMARY KEY,          -- aft_ 前缀 short id（仓库 id 规约）
@@ -1007,7 +1007,7 @@ CREATE TABLE IF NOT EXISTS approval_request (
 
   escalation_chain  JSONB NOT NULL DEFAULT '[]',
 
-  -- #140 审批阶梯位置（add-approval-ladder.sql）：路由由 lib/approval-routing.ts
+  -- #140 审批阶梯位置（add-approval-ladder.sql）：路由由 lib/approval/approval-routing.ts
   -- 单点算出后写在这里，收件箱与鉴权只读 current_approver_ids，不再各自重算。
   current_stage        TEXT    NULL CHECK (current_stage IS NULL OR current_stage IN (
                          'supervisor', 'holder', 'dept_poc', 'ancestor_poc', 'producer', 'owner'
@@ -1443,7 +1443,7 @@ CREATE TABLE IF NOT EXISTS event_rundown_placement_column (
 -- 有的剧组 PSM/SM 甚至设计人员能看预算。可见性按面配置（budget / expenses 两个 sub
 -- 分开发），不一刀切。这条直接决定审批链——sensitive 会跳过整条链直达 owner。
 --
--- 审批**复用路由不复用表**：审批人由 lib/approval-routing 的 buildApprovalLadder 算
+-- 审批**复用路由不复用表**：审批人由 lib/approval/approval-routing 的 buildApprovalLadder 算
 -- （与权限申请同一函数），支出的 target 是 `finance/<科目id>/expenses`，于是「共管
 -- 部门 POC」那一级自动变成「这个预算科目归哪个部门管」（建科目时写 resource_dept_manage）。
 -- 状态字段名与 approval_request 一致好让收件箱同构，但表分开——approval_request 的
@@ -1842,7 +1842,7 @@ CREATE INDEX IF NOT EXISTS production_member_grant_lookup_idx
   WHERE is_revoked = false;
 
 -- atomic_permission_grant：批G G-2 终局 DROP（168 原子键六批退役完毕，
--- 见 lib/permission-migration-ledger.ts RETIRED 清单）
+-- 见 lib/perm/permission-migration-ledger.ts RETIRED 清单）
 
 -- ── Resource Dept Manage（Phase 3）────────────────────────────────────────────
 -- 部门-资源结构性管理权（信号表，非 grant 表）。
@@ -1885,7 +1885,7 @@ CREATE INDEX IF NOT EXISTS rpm_production_resource_idx
 -- 演出级审批 TTL 配置，演出创建时自动写入默认行。
 -- ── 策略配置中心（#236）────────────────────────────────────────────────────────
 -- 【政策】类定式的 production 级开关。value 是 TEXT 不是 BOOLEAN（形状 C/L 有多档键）；
--- 合法取值由 lib/policy-keys.ts 白名单校验，SQL 侧不设 CHECK（新增键零 migration）。
+-- 合法取值由 lib/perm/policy-keys.ts 白名单校验，SQL 侧不设 CHECK（新增键零 migration）。
 -- 落全量键、不稀疏：缺行回落代码默认会让改默认值静默改变存量演出行为。
 CREATE TABLE IF NOT EXISTS production_policy (
   production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
@@ -1925,7 +1925,7 @@ CREATE TABLE IF NOT EXISTS production_approval_config (
 -- 全局角色权限模板（production_type × role_name → permission_key）此前在这张表里。
 -- 它是 bootstrap（运行时零读取、只在建演出/建角色时 seed），但放 DB 且无界面会漂
 -- ——线上 108 行里 69 行仓库从没记录过。职责已由项目模版接手：
---   lib/production-template.ts（机制）+ lib/templates/*.ts（内容）
+--   lib/production/production-template.ts（机制）+ lib/production/templates/*.ts（内容）
 -- 且必须接手：那张表的取数是并集，per-type 只能加不能减，而多套模版要削基线。
 
 -- ── Production Dept Permission（批A，六步链第 3 步资格源）──────────────────────
@@ -2137,7 +2137,7 @@ CREATE INDEX IF NOT EXISTS agent_memory_recall_log_chunk_idx
 -- billed_credits / paid_from（#383，db/add-ai-quota.sql）：
 --   1 credit = 1 个 deepseek-v4-flash cache-miss input token 的 peak 单价
 --   （$0.44/1M）。裸 token 会被 cache_read 淹没（缓存读只有 1/31 单价），限流
---   必须按成本折算。单价表在 lib/plan.ts，chat 侧的美元数由 provider 层算好。
+--   必须按成本折算。单价表在 lib/account/plan.ts，chat 侧的美元数由 provider 层算好。
 --   paid_from：这一行由谁买单（档位窗口 / 额外额度 / 豁免）。窗口聚合只 SUM
 --   'quota' 行——窗口用量与 extra 余额是两套账，不互相污染。
 CREATE TABLE IF NOT EXISTS ai_usage (
@@ -2160,7 +2160,7 @@ CREATE INDEX IF NOT EXISTS ai_usage_production_created_idx ON ai_usage (producti
 
 -- ── 等级体系（#280，db/add-plan.sql，付费功能地基）─────────────────────────────
 -- user_plan 无行 = 普通用户（不能建项目）；production_plan 无行 = free 档。
--- tier → limit 映射是代码常量（lib/plan.ts），库里只存档名。
+-- tier → limit 映射是代码常量（lib/account/plan.ts），库里只存档名。
 -- billing_exempt = 项目级豁免（「特邀项目」），写点仅管理员改库 + grants_exempt 码；
 -- internal 档 owner 的豁免则在计费时按当前 owner 推导，不物化到这里。豁免 ≠ 不记账。
 -- plan_code 无创建界面：管理员手工 INSERT。
@@ -2207,7 +2207,7 @@ CREATE TABLE IF NOT EXISTS plan_code (
 
 -- 额外额度（#383）：余额型，不随日/周窗口重置；窗口两闸都满之后才动它。
 -- remaining 允许为负——判定在 run 开始处做一次、run 内不打断，所以最后一次
--- 扣款可能扣穿；透支上限就是单个 run 的量（lib/plan.ts RUN_CREDIT_HARD_CAP）。
+-- 扣款可能扣穿；透支上限就是单个 run 的量（lib/account/plan.ts RUN_CREDIT_HARD_CAP）。
 CREATE TABLE IF NOT EXISTS ai_credit_grant (
   id         TEXT        PRIMARY KEY,
   user_id    UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
@@ -2232,7 +2232,7 @@ CREATE TABLE IF NOT EXISTS plan_code_redemption (
 CREATE INDEX IF NOT EXISTS plan_code_redemption_code_idx ON plan_code_redemption (code);
 
 -- ── 注册邀请制（db/add-registration-gate.sql，测试期收口「登录即注册」）────────
--- 开关 = 环境变量 REGISTRATION_INVITE_ONLY；正当性判定见 lib/registration-gate.ts。
+-- 开关 = 环境变量 REGISTRATION_INVITE_ONLY；正当性判定见 lib/account/registration-gate.ts。
 -- 两张登记表均无创建界面：管理员手工 INSERT。
 
 CREATE TABLE IF NOT EXISTS registration_code (

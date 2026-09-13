@@ -1,13 +1,13 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { toActor } from "@/lib/grant-check";
-import { canEnterEvent, hasEventContentEdit } from "@/lib/event-permissions";
-import { getProductionEvent } from "@/lib/event-db";
+import { toActor } from "@/lib/perm/grant-check";
+import { canEnterEvent, hasEventContentEdit } from "@/lib/ops/event-permissions";
+import { getProductionEvent } from "@/lib/ops/event-db";
 import {
   getRundownTags, listRundownColumns, listRundownPlacements, RundownConflictError, RundownError,
   setRundownColumns, setRundownPlacements,
-} from "@/lib/event-rundown-db";
+} from "@/lib/ops/event-rundown-db";
 import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };

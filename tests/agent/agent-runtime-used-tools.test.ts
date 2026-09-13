@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { recentlyUsedToolNames, USED_TOOL_TURNS, USED_TOOL_MAX } from "@/lib/agent-runtime/used-tools";
+import { recentlyUsedToolNames, USED_TOOL_TURNS, USED_TOOL_MAX } from "@/lib/agent/runtime/used-tools";
 import type { AgentMessage } from "../../vendor/openclaw/packages/agent-core/src/types";
 
 // 会话内已用工具的留存有淘汰窗口：只看最近 N 个用户轮次、最多 M 个、最近优先。

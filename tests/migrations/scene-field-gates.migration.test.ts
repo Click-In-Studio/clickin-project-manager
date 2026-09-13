@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { getPool } from "@/lib/pg";
-import { PAGE_PERMISSION_SCOPES } from "@/lib/page-permission-scopes";
+import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
 import {
   SCENE_FIELD_GATES_SNAPSHOT_PATH,
   type SceneFieldGatesSnapshot,
 } from "./scene-field-gates-snapshot";
-import { PRODUCTION_TEMPLATES, resolveTemplate } from "@/lib/production-template";
+import { PRODUCTION_TEMPLATES, resolveTemplate } from "@/lib/production/production-template";
 
 // scene 字段门对齐 三层迁移测试（schema / integrity / invariance）
 

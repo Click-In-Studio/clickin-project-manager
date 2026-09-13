@@ -11,7 +11,7 @@ import {
 } from "../../vendor/openclaw/packages/agent-core/src/index";
 // index.ts 同时经 harness/types 以 `export type` 重导出 Session，值导入要走原模块
 import { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session";
-import { repairAndClassify, findPendingToolCalls, UNKNOWN_STATE_TOOL_RESULT, type RuntimeTool } from "@/lib/agent-runtime/resume";
+import { repairAndClassify, findPendingToolCalls, UNKNOWN_STATE_TOOL_RESULT, type RuntimeTool } from "@/lib/agent/runtime/resume";
 
 // #367 S1 出口判据⑤：从持久化 transcript 冷启动一个中途 run（含 tool_use 无
 // tool_result 的配对修复）能续跑。用脚本化假模型驱动 vendor 的真 harness，

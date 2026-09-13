@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
-import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/tiptap-upload-placeholder";
+import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/editor/tiptap-upload-placeholder";
 
 function makeEditor(content = "<p>你好</p>") {
   return new Editor({

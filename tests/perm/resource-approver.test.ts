@@ -12,8 +12,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
 import { addProductionMember } from "@/lib/db";
-import { createProductionDept, setDeptMembers, addResourceDeptManage } from "@/lib/dept-db";
-import { buildApprovalLadder, findProducers } from "@/lib/approval-routing";
+import { createProductionDept, setDeptMembers, addResourceDeptManage } from "@/lib/perm/dept-db";
+import { buildApprovalLadder, findProducers } from "@/lib/approval/approval-routing";
 import {
   listDelegableResourceTypes,
   listResourceApprovers,
@@ -21,8 +21,8 @@ import {
   isDelegableResourceType,
   isConfigurableResourceType,
   ResourceApproverError,
-} from "@/lib/resource-approver-db";
-import { groupResourceTypes } from "@/lib/permission-labels";
+} from "@/lib/perm/resource-approver-db";
+import { groupResourceTypes } from "@/lib/perm/permission-labels";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 
 const U_OWNER     = "00000000-0000-0000-0002-000000000001";

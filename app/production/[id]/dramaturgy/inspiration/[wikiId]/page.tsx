@@ -4,18 +4,18 @@ export const metadata: Metadata = { title: "构作 · 灵感文档" };
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import {
   getProductionName,
   getProductionPermissionContext,
   listProductionMembers,
 } from "@/lib/db";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getDramaturgyTreeConfig } from "@/lib/node/anchors";
 import { getWiki } from "@/lib/wiki/content";
 import { listBacklinks, listEntityRefsForWiki, listUnlinkedReferences } from "@/lib/wiki/links";
 import { canEditWiki, canShareWiki, canViewWiki } from "@/lib/wiki/perm";
-import { listEventDepartments } from "@/lib/event-db";
+import { listEventDepartments } from "@/lib/ops/event-db";
 import { getNode } from "@/lib/node/db";
 import { listDramaturgyTreeFor } from "@/lib/node/tree-view";
 import { DramaturgyInspirationShell } from "@/components/DramaturgyWorkspaceTabs";

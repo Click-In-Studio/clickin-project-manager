@@ -10,13 +10,13 @@ import {
   type QuestionInfo,
   type QuestionItem,
   type StreamLine,
-} from "@/lib/agent-chat/stream-reducer";
-import { parseSessionIdentity } from "@/lib/agent-tools/session-identity";
-import { buildUiContextMessage } from "@/lib/agent-ui-context";
-import { getScriptFocus, getServerScriptFocus, subscribeScriptFocus } from "@/lib/script-focus";
-import { derivePageKey, pageLabelFor, pageSuggestionsFor } from "@/lib/agent-page-context";
-import { toolLabel } from "@/lib/agent-tool-labels";
-import { dispatchAgentMutation } from "@/lib/agent-mutations";
+} from "@/lib/agent/chat/stream-reducer";
+import { parseSessionIdentity } from "@/lib/agent/tools/session-identity";
+import { buildUiContextMessage } from "@/lib/agent/agent-ui-context";
+import { getScriptFocus, getServerScriptFocus, subscribeScriptFocus } from "@/lib/script/script-focus";
+import { derivePageKey, pageLabelFor, pageSuggestionsFor } from "@/lib/agent/agent-page-context";
+import { toolLabel } from "@/lib/agent/agent-tool-labels";
+import { dispatchAgentMutation } from "@/lib/agent/agent-mutations";
 import WikiProposalPreviewModal from "@/components/WikiProposalPreviewModal";
 import ChevronIcon from "@/components/ChevronIcon";
 
@@ -91,7 +91,7 @@ export default function AgentPopout({
   const router = useRouter();
 
   // 页面感知（「主动就位、被动发言」）：pageKey/label 来自 allowlist 注册表
-  // （lib/agent-page-context.ts），不在表里的页面什么都不附带。建议 chip 点击
+  // （lib/agent/agent-page-context.ts），不在表里的页面什么都不附带。建议 chip 点击
   // 只填入输入框、绝不自动发送；页面信息只随用户下一条真实消息的信封附带。
   const pageKey = derivePageKey(pathname ?? "", productionId);
   const pageLabel = pageLabelFor(pageKey);
@@ -103,7 +103,7 @@ export default function AgentPopout({
     setFocusAttached(true);
   }, [pageKey]);
 
-  // 剧本编辑器的 focus 上下文（lib/script-focus.ts）：只在剧本页展示/附带；
+  // 剧本编辑器的 focus 上下文（lib/script/script-focus.ts）：只在剧本页展示/附带；
   // 编辑器卸载时会自动清空发布，chip 随之消失。
   const scriptFocus = useSyncExternalStore(subscribeScriptFocus, getScriptFocus, getServerScriptFocus);
   const scriptFocusActive = pageKey === "prod:script" && scriptFocus && scriptFocus.blockIds.length > 0 ? scriptFocus : null;
@@ -234,7 +234,7 @@ export default function AgentPopout({
 
     let streamKey = forKey;
     // 写操作后自动刷新（#367 自建运行时的形态）：runner 在写工具成功后发 `mutation` 行
-    // （落 agent_event，断线重连可补），这里只派发给页面订阅者（lib/agent-mutations.ts），
+    // （落 agent_event，断线重连可补），这里只派发给页面订阅者（lib/agent/agent-mutations.ts），
     // 由它们决定刷新粒度；没人接才 router.refresh() 兜底。多个变更 300ms 内合并成一次兜底。
     let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
     const onMutation = (line: Extract<StreamLine, { type: "mutation" }>) => {
@@ -336,7 +336,7 @@ export default function AgentPopout({
     }
   }, [consumeStream]);
 
-  // 深链打开指定会话：定时任务的通知带 ?agentSession=<key>（lib/agent-runtime/schedules.ts）。
+  // 深链打开指定会话：定时任务的通知带 ?agentSession=<key>（lib/agent/runtime/schedules.ts）。
   // 只认属于当前语境的 key；用完从 URL 摘掉，免得刷新/返回又触发。状态从会话列表现查
   // （running 要接流），列表拉不到就按已结束打开。
   useEffect(() => {
@@ -410,7 +410,7 @@ export default function AgentPopout({
     // 附带界面状态：页面只带一个中文页面名；文档只带标题/tag/id 这几个指针
     // 字段，不塞正文——AI 已经有 wiki_read(id) 工具，需要正文自己按 id 取；
     // 把整篇文章暴力拼进每条消息既浪费 token，文档一大还可能顶爆上下文。
-    // 信封形态与"为什么挂在用户消息上而不是 system prompt"见 lib/agent-ui-context.ts。
+    // 信封形态与"为什么挂在用户消息上而不是 system prompt"见 lib/agent/agent-ui-context.ts。
     const message = buildUiContextMessage(raw, {
       pageLabel: pageAttached ? pageLabel : null,
       doc:
@@ -719,7 +719,7 @@ export default function AgentPopout({
                   ? "border-sky-200 bg-sky-50"
                   : "border-amber-300 bg-amber-50";
             // 按钮由后端的 allowedDecisions 驱动，恒为 allow-once / deny（"始终允许"
-            // 需要持久化那一半，没做就不给按钮，见 lib/agent-runtime/approvals.ts）
+            // 需要持久化那一半，没做就不给按钮，见 lib/agent/runtime/approvals.ts）
             const decisionLabel: Record<string, string> = {
               "allow-once": "允许一次",
               deny: "拒绝",

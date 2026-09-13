@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { usePendingPermissions } from "@/hooks/usePendingPermissions";
 import PermissionActivationModal from "@/components/PermissionActivationModal";
-import { PAGE_PERMISSION_SCOPES, type PageScope } from "@/lib/page-permission-scopes";
+import { PAGE_PERMISSION_SCOPES, type PageScope } from "@/lib/perm/page-permission-scopes";
 
 const PAGE_TITLES: Record<PageScope, string> = {
   base:        "开通查看权限",

@@ -1,8 +1,8 @@
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import type { Metadata } from "next";
-import { getSession } from "@/lib/session";
-import { hasAnyGrant } from "@/lib/grant-check";
+import { getSession } from "@/lib/account/session";
+import { hasAnyGrant } from "@/lib/perm/grant-check";
 import { canViewAsset } from "@/lib/asset/perm";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset } from "@/lib/asset/db";

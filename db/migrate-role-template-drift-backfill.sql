@@ -105,7 +105,7 @@ ON CONFLICT DO NOTHING;
 
 -- ── ③ 戏剧模版的逐角色附加键（基线之外的那部分）─────────────────────────────
 -- 仅限解析到戏剧模版的演出（type 为空时 resolveTemplate 回落戏剧）——音乐类 /
--- 广播剧类的同名岗位是另一套等级（同名不同级，见 lib/templates/music.ts 文件头），
+-- 广播剧类的同名岗位是另一套等级（同名不同级，见 lib/production/templates/music.ts 文件头），
 -- 拿戏剧那份去对齐会越权。
 INSERT INTO production_role_permission (role_id, permission_key)
 SELECT r.id, k.permission_key

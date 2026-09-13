@@ -3,9 +3,9 @@ export const metadata: Metadata = { title: "知识库" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { listNodeTreeFor } from "@/lib/node/tree-view";
 import PageHeader from "@/components/PageHeader";
 import PageActivationGate from "@/components/PageActivationGate";

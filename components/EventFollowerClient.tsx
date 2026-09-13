@@ -10,7 +10,7 @@ import type {
   EventScheduleItemWithParticipants,
   EventReport,
   EventDepartment,
-} from "@/lib/event-db";
+} from "@/lib/ops/event-db";
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   rehearsal: "排练", performance: "演出", meeting: "会议", custom: "其他",

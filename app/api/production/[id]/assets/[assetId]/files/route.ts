@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset, addUniversalAssetFile } from "@/lib/asset/db";
-import { hasGrant } from "@/lib/grant-check";
+import { hasGrant } from "@/lib/perm/grant-check";
 import { completeMultipartUpload, listMultipartParts, headR2Object } from "@/lib/r2";
 import { enqueueAssetPostProcess } from "@/lib/job/asset-jobs";
 

@@ -9,17 +9,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import { useVisibleEventSource } from "@/hooks/useVisibleEventSource";
-import type { Block, Character, Scene } from "@/lib/script-types";
-import type { CueList } from "@/lib/cue-list-types";
-import type { Cue, CueAnchor } from "@/lib/cue-types";
+import type { Block, Character, Scene } from "@/lib/script/script-types";
+import type { CueList } from "@/lib/ops/cue-list-types";
+import type { Cue, CueAnchor } from "@/lib/ops/cue-types";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/SmartTextarea";
 import SmartText from "@/components/SmartText";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
-import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
-import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
-import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script-insertion-gaps";
+import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script/script-marker-blocks";
+import { buildMarkerLabelIndex } from "@/lib/script/script-generated-labels";
+import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script/script-insertion-gaps";
 import ProductionTopMenu, {
   PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
   PRODUCTION_TOOLBAR_STAGE,
@@ -3007,7 +3007,7 @@ export default function CuePage({
 
 // ─── ShareModal ───────────────────────────────────────────────────────────────
 
-import type { CueListGrant, CueListDeptAccess } from "@/lib/cue-list-types";
+import type { CueListGrant, CueListDeptAccess } from "@/lib/ops/cue-list-types";
 import type { MemberWithRoles } from "@/lib/db";
 
 const SM_GRANT_LEVELS = [

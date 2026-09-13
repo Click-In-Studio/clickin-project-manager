@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { getSession, createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/session";
+import { getSession, createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/account/session";
 
 export async function GET(req: NextRequest) {
   if (process.env.NODE_ENV !== "development") {

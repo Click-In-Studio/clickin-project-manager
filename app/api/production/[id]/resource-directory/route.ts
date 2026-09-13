@@ -1,17 +1,17 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasAdminPanelEligibility } from "@/lib/permissions";
+import { hasAdminPanelEligibility } from "@/lib/perm/permissions";
 import { getPool } from "@/lib/pg";
-import { toActor } from "@/lib/grant-check";
+import { toActor } from "@/lib/perm/grant-check";
 import { listEnumerableNodeIds } from "@/lib/node/perm";
 import { listVisibleWikiIds } from "@/lib/wiki/perm";
-import { RESOURCE_DIRECTORY_QUERIES } from "@/lib/resource-directory";
+import { RESOURCE_DIRECTORY_QUERIES } from "@/lib/perm/resource-directory";
 
 // GET ?type=<resource_type> — 该类型的资源实例清单 {id,label}，供权限键
 // 选择器的 id 位下拉。只回 id+名称（无内容字段）；门=管理面资格。
 // 未支持的类型返回空数组（picker 落回自由输入）。
-// 查询表在 lib/resource-directory.ts——权限中心的实例行折叠（#274）同源使用。
+// 查询表在 lib/perm/resource-directory.ts——权限中心的实例行折叠（#274）同源使用。
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;

@@ -6,10 +6,10 @@ import Badge from "@/components/Badge";
 import AdminModal from "@/components/AdminModal";
 import MemberPickerModal, { type PickerDept } from "@/components/MemberPickerModal";
 import styles from "@/components/my-pages.module.css";
-import { userAvatarSrc } from "@/lib/avatar-url";
+import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import { BASE_PATH } from "@/lib/base-path";
-import type { MemberStatus } from "@/lib/member-status-shared";
-import { isInactiveMember } from "@/lib/member-status-shared";
+import type { MemberStatus } from "@/lib/perm/member-status-shared";
+import { isInactiveMember } from "@/lib/perm/member-status-shared";
 
 type Role = { id: string; name: string };
 

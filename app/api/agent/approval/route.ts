@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-chat/http";
-import { approvalSession, resolveApproval } from "@/lib/agent-runtime/approvals";
+import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent/chat/http";
+import { approvalSession, resolveApproval } from "@/lib/agent/runtime/approvals";
 
 export const runtime = "nodejs";
 

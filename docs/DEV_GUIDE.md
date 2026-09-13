@@ -34,20 +34,27 @@
 │   ├── assets/             # Asset 相关组件（上传、预览、挂载）
 │   └── ...                 # 其他功能组件
 │
-├── lib/                    # 服务端工具库
+├── lib/                    # 服务端工具库——按域分目录（#482），根只留跨域基建
 │   ├── db.ts               # 主数据库查询（production、member、permission）
-│   ├── asset-db.ts         # Asset 数据库操作
-│   ├── event-db.ts         # 事件/日程数据库操作
-│   ├── r2.ts               # Cloudflare R2 presigned URL、multipart upload
-│   ├── permissions.ts      # 原子权限定义、PermissionContext、角色模版权限映射
-│   ├── roles.ts            # ROLE_GROUPS（UI 角色分组数据，仅供前端展示）
-│   ├── session.ts          # Cookie session（HMAC 签名，无服务端状态）
-│   ├── feishu-auth.ts      # 飞书 OAuth
-│   ├── feishu-bot.ts       # 飞书 Bot 消息发送
-│   ├── notify.ts           # 通知触发逻辑
-│   └── ...                 # 其他工具
+│   ├── pg.ts / r2.ts       # 连接池 / Cloudflare R2 presigned URL、multipart upload
+│   ├── agent/              # AI：runtime/ tools/ memory/ chat/ + 注入安全、指令、配额、llm-chat
+│   ├── script/             # 剧本：方言、标记、分页、template/（剧本版式模版）、打印 CSS
+│   ├── editor/             # 文档编辑器原语：tiptap 扩展、块操作、粘贴、mention 类型
+│   ├── wiki/               # 文档库
+│   ├── asset/              # 素材、元数据、头像
+│   ├── node/               # 节点树（asset / wiki 壳节点）
+│   ├── import/ doc-extract/# 剧本导入管线、文档抽取
+│   ├── ops/                # 演出运营：事件、cue、任务、阶段、物料、财务
+│   ├── approval/           # 审批：引擎、模版、路由、TTL、时间线
+│   ├── perm/               # 权限：grant / policy / resource / 角色 / 部门 / 成员 / 路由门
+│   ├── production/         # 项目模版（templates/ + template-seeders/）与项目类型
+│   ├── account/            # 账号：session、飞书身份、邀请、注册门、等级
+│   ├── notify/             # 通知：触发、偏好、收件箱、卡片 token、doc/（通知文档渲染）
+│   ├── platform/           # 外部平台适配：feishu/ email/ 注册表与路由
+│   ├── job/                # 任务队列
+│   └── tz.ts money.ts …    # 其余根文件 = 纯基建白名单（conventions.test.ts 钉死）
 │
-├── agent-runner/           # AI 运行时独立进程入口（lib/agent-runtime/ 是主体，见第 9 节与 docs/AGENT_RUNTIME.md）
+├── agent-runner/           # AI 运行时独立进程入口（lib/agent/runtime/ 是主体，见第 9 节与 docs/AGENT_RUNTIME.md）
 ├── vendor/openclaw/        # vendor 的 agent-core / llm-core（本地补丁登记在 VENDOR.md）
 │
 ├── db/                     # SQL 迁移文件（schema.sql + migrate-*.sql）
@@ -116,7 +123,7 @@ R2_ACCESS_KEY_ID=xxxxxxxx
 R2_SECRET_ACCESS_KEY=xxxxxxxx
 R2_BUCKET=click-in-test                 # 本地建议用独立测试 bucket
 
-# ── LLM（记忆蒸馏 lib/llm-chat.ts；站内 AI 对话见 docs/AGENT_RUNTIME.md）──────
+# ── LLM（记忆蒸馏 lib/agent/llm-chat.ts；站内 AI 对话见 docs/AGENT_RUNTIME.md）──────
 LLM_PROVIDER=openai                     # openai（默认）或 deepseek
 OPENAI_API_KEY=sk-xxxxxxxx
 # OPENAI_MODEL=gpt-4o-mini             # 可选，默认 gpt-4o-mini
@@ -234,15 +241,15 @@ npm run dev
 权限由三层叠加决定：
 
 1. **超级管理员（isAdmin）**：登录时从飞书 `is_tenant_manager` 读取，写入 session cookie。SA 对大部分权限有 bypass；少数权限（标注 `adminBypass: false`，如 `script:edit_block`）即使 SA 也必须持有对应角色。
-2. **角色权限（role permissions）**：每个用户在每个剧目中有若干角色，存于 `production_member.roles[]`。每个角色对应 `production_role_permission` 中的一组原子权限 key，由 `seedProductionRoles` 在剧目创建时从 `lib/permissions.ts` 的模版写入。
+2. **角色权限（role permissions）**：每个用户在每个剧目中有若干角色，存于 `production_member.roles[]`。每个角色对应 `production_role_permission` 中的一组原子权限 key，由 `seedProductionRoles` 在剧目创建时从 `lib/perm/permissions.ts` 的模版写入。
 3. **手动覆盖（overrides）**：可以为单个用户在特定剧目中覆盖某项权限（允许或拒绝），优先于角色推导，存于 `production_member_permission`。
 
 ### 5.2 原子权限系统
 
-所有权限检查统一使用 `lib/permissions.ts` 中的接口：
+所有权限检查统一使用 `lib/perm/permissions.ts` 中的接口：
 
 ```typescript
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission } from "@/lib/perm/permissions";
 import { getProductionPermissionContext } from "@/lib/db";
 
 // 取权限上下文（返回 ProductionAccess | null，null = 无成员资格且非管理员）
@@ -270,11 +277,11 @@ type PermissionContext = {
 
 ### 5.3 Permission 枚举
 
-所有合法的 `Permission` key 定义在 `lib/permissions.ts` 的 `Permission` union type 中，按功能域分组（`cue_list:*`、`script:*`、`event:*`、`contacts:*` 等）。**新增功能需要新权限时，在此文件中追加**。
+所有合法的 `Permission` key 定义在 `lib/perm/permissions.ts` 的 `Permission` union type 中，按功能域分组（`cue_list:*`、`script:*`、`event:*`、`contacts:*` 等）。**新增功能需要新权限时，在此文件中追加**。
 
 ### 5.4 角色模版权限（ROLE_TEMPLATE_PERMISSIONS）
 
-`lib/permissions.ts` 中的 `ROLE_TEMPLATE_PERMISSIONS` 定义了各角色默认持有哪些权限：
+`lib/perm/permissions.ts` 中的 `ROLE_TEMPLATE_PERMISSIONS` 定义了各角色默认持有哪些权限：
 
 ```typescript
 export const ROLE_TEMPLATE_PERMISSIONS: Record<string, Permission[]> = {
@@ -300,7 +307,7 @@ if (!allowedTypes.includes(body.template)) { /* 403 */ }
 
 开发新 API 路由或页面时，依次确认：
 
-1. **是否需要新的 Permission key？** → 在 `lib/permissions.ts` 的 `Permission` union 中追加
+1. **是否需要新的 Permission key？** → 在 `lib/perm/permissions.ts` 的 `Permission` union 中追加
 2. **哪些角色默认拥有该权限？** → 更新 `ROLE_TEMPLATE_PERMISSIONS` 对应角色
 3. **是否需要 adminBypass: false？** → 在 `PERMISSION_CONFIG` 中标注
 4. **路由中调用** `getProductionPermissionContext` + `hasPermission`，不要用旧的 `getProductionMemberContext`
@@ -439,8 +446,8 @@ Session 存为 HMAC 签名的 Cookie，不需要服务端 session store。内容
 
 ## 9. AI Agent
 
-站内 AI 对话由自建运行时承担（`lib/agent-runtime/` + 独立进程 `agent-runner/`），设计与运维见 `docs/AGENT_RUNTIME.md`。
-老运行时保留下来的两个通用模块：`lib/llm-chat.ts`（OpenAI-compatible 对话调用，记忆蒸馏在用）与 `lib/agent-memory/embedding.ts`（向量嵌入，记忆检索与工具索引在用）。
+站内 AI 对话由自建运行时承担（`lib/agent/runtime/` + 独立进程 `agent-runner/`），设计与运维见 `docs/AGENT_RUNTIME.md`。
+老运行时保留下来的两个通用模块：`lib/agent/llm-chat.ts`（OpenAI-compatible 对话调用，记忆蒸馏在用）与 `lib/agent/memory/embedding.ts`（向量嵌入，记忆检索与工具索引在用）。
 
 ---
 
@@ -459,9 +466,9 @@ Session 存为 HMAC 签名的 Cookie，不需要服务端 session store。内容
 
 ```typescript
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission } from "@/lib/perm/permissions";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;          // Next.js 16: params 是 Promise
@@ -487,7 +494,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     return Response.json({ error: "权限不足" }, { status: 403 });
 ```
 
-**不要使用旧的 `getProductionMemberContext` / `lib/roles` 的 `hasPermission`**——那套接口已废弃。
+**不要使用旧的 `getProductionMemberContext` / `lib/perm/roles` 的 `hasPermission`**——那套接口已废弃。
 
 ### 步骤三：页面
 
@@ -581,6 +588,28 @@ tests/
 
 新增测试放进对应域目录；**归属不明**时按「这条测试红了，先去看哪个模块」来定。
 
+`lib/` 与 `tests/` 用同一套域名（#482），`tests/<域>/x.test.ts` ↔ `lib/<域>/x.ts` 能直接对上；`lib/` 比 `tests/` 多出几个更细的域，对应关系如下：
+
+| `lib/` 域 | 收纳 | 对应 `tests/` 域 |
+|---|---|---|
+| `agent/` | `runtime/` `tools/` `memory/` `chat/` 四个子目录 + 注入安全、指令、页面/UI 上下文、工具标签、`ai-quota`、`llm-chat` | `agent/` |
+| `script/` | `script-*`（方言、标记、分页、选区、焦点…）、`template/`（剧本版式模版）、`head-version`、`print-css`、场次/角色字段权限 | `script/` |
+| `editor/` | `editor-*`（块模型）、`tiptap-*`（扩展）、`line-merge` `table-ops` `remark-columns`、粘贴处理、`mention-types` | `wiki/`（编辑器原语的测试跟文档库走） |
+| `wiki/` `asset/` `node/` `import/` `doc-extract/` | 原有目录，未动 | `wiki/` `asset/` `script/`（导入管线） |
+| `ops/` | `event-*` `cue-*` `task-*` `phase-*` `finance-db` `material-*` `scene-duration` | `ops/` |
+| `approval/` | `approval-*`：引擎、模版、路由、阶段、TTL、时间线 | `ops/` |
+| `perm/` | `permissions` `grant-*` `policy-*` `resource-*` `perm-center-db` `page-permission-scopes` `permission-*` `roles` `dept-db` `member-*` `admin-guard` `api-guard` | `perm/` |
+| `production/` | `production-template` `production-types` `templates/`（各类型项目模版）`template-seeders/` | `ops/` |
+| `account/` | `session` `db-feishu` `invite-db` `registration-gate` `account-return` `plan` | `account/` |
+| `notify/` | `notify` `notification-prefs` `inbox-db` `card-token` `doc/`（通知文档渲染） | `notify/` |
+| `platform/` | 外部平台适配（`feishu/` `email/` 注册表、通知路由），原有目录未动 | `notify/` `account/` |
+| `job/` | 任务队列，原有目录未动 | `platform/` |
+| 根 | 纯基建：`db` `pg` `r2` `server-cache` `tz` `money` `duration` `lex-order` `z-index` `base-path` `server-url` `request-json` `sse-keepalive` `nav-pending` `search-db` | `platform/` |
+
+「template」一词在仓库里指五种东西，现在各归其域：剧本版式模版 `script/template/`、项目模版 `production/templates/`、权限模版 `perm/grant-template`、审批模版 `approval/approval-flow-template*`、cue 模版 `ops/cue-template-db`。
+
+`lib/` 根目录的文件清单由 `conventions.test.ts` 白名单钉死：新文件一律进域目录，真正的跨域基建才加白名单（同 PR 更新本表）。不加 barrel `index.ts`（`platform/email` `platform/feishu` `script/template` 三个既有的保留）——全仓 import 走深路径，barrel 只会引入循环依赖风险。
+
 域内的相对 import 一律走 `../_support/`：
 
 ```typescript
@@ -598,7 +627,7 @@ export const TEST_USER = "test-sys-user";
 
 ### 11.3 DB 层测试规范
 
-DB 层测试直接调用 `lib/db.ts` / `lib/event-db.ts` 中的函数，不经过 HTTP 层。
+DB 层测试直接调用 `lib/db.ts` / `lib/ops/event-db.ts` 中的函数，不经过 HTTP 层。
 
 #### 工厂模式（必须遵守）
 
@@ -669,10 +698,10 @@ API 层测试**直接 import 并调用 route handler 函数**，不需要启动 
 
 #### Session 构造
 
-使用 `lib/session.ts` 的 `createSession()` 构造合法或故意损坏的 session cookie：
+使用 `lib/account/session.ts` 的 `createSession()` 构造合法或故意损坏的 session cookie：
 
 ```typescript
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 
 function adminSession() {
   return createSession({ openId: TEST_USER, name: "测试员", avatarUrl: null, isAdmin: true });
@@ -704,7 +733,7 @@ const res = await listCueListsHandler(
 
 #### 权限注意事项
 
-权限检查现在使用原子权限系统（`lib/permissions.ts`）。`getProductionPermissionContext` 在测试中的行为：
+权限检查现在使用原子权限系统（`lib/perm/permissions.ts`）。`getProductionPermissionContext` 在测试中的行为：
 - `isAdmin: true` 的 session → `permCtx.isAdmin = true`，大多数权限自动通过（`adminBypass: true`）
 - `isAdmin: false` 且用户不是成员 → `getProductionPermissionContext` 返回 `null` → 403
 - `isAdmin: false` 且用户是成员 → `permCtx.memberPermissions` 为该用户角色对应的权限集合
@@ -786,6 +815,13 @@ Run "npm run seed:schema" and commit db/seed-schema.json.
   production.new_col: COLUMN ADDED (run: npm run seed:schema)
   notification_job: TABLE DROPPED   ← 说明 fingerprint 包含了未合并 feature 表，需在干净 DB 上重新生成
 ```
+
+#### ④ 目录形态棘轮
+
+`tests/`（#472）与 `lib/`（#482）各整理过一次，整理完由两组形态断言防回退：
+
+- `tests/`：根目录无测试文件、域目录下不套层、`_support/` 不放测试、migration 三件套只住 `migrations/`。只钉形态不钉名单，新开域目录不用改测试。
+- `lib/`：根目录文件 ⊆ 基建白名单（`db` `pg` `r2` `server-cache` `tz` …，见 §11.2 归属表末行），且白名单无幽灵条目。往根加文件 = 同一 PR 加白名单 + 更新归属表；业务文件一律进域目录。
 
 ### 11.6 覆盖范围约定
 

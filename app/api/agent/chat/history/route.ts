@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent-chat/http";
-import { getHistory } from "@/lib/agent-runtime/client";
+import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent/chat/http";
+import { getHistory } from "@/lib/agent/runtime/client";
 
 export const runtime = "nodejs";
 

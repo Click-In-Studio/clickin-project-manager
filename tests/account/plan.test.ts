@@ -8,17 +8,17 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import {
   upsertFeishuUser, deleteProduction, createProduction, ProductionQuotaError,
   listMyProductionsWithRoles,
 } from "@/lib/db";
-import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
-import { createInvite, acceptInvite } from "@/lib/invite-db";
+import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/perm/permissions";
+import { createInvite, acceptInvite } from "@/lib/account/invite-db";
 import {
   getUserTier, getProductionPlan, redeemPlanCode, requireProductionFeature,
   productionFeatureAllowed, normalizeProductionTier, PRODUCTION_TIERS, USER_TIERS,
-} from "@/lib/plan";
+} from "@/lib/account/plan";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { getPool } from "@/lib/pg";
 import { POST as createProductionHandler } from "@/app/api/productions/route";

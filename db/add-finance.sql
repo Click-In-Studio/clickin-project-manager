@@ -11,7 +11,7 @@
 --
 -- ## 审批复用路由，不复用表（2026-08-20 用户定谳：「流程是一致的，未必要完全一套表」）
 --
--- 审批人由 lib/approval-routing.ts 的 buildApprovalLadder 算，与权限申请同一个函数：
+-- 审批人由 lib/approval/approval-routing.ts 的 buildApprovalLadder 算，与权限申请同一个函数：
 --   直属上级链 → 资源持有者 → 共管部门 POC → 父部门 POC → 制作人 → owner
 -- 支出的 target 表达成 `finance/<科目id>/expenses`，于是「共管部门 POC」那一级自动
 -- 变成「这个预算科目归哪个部门管」——建科目时往 resource_dept_manage 写一行即可，

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { MyTechReqFullEntry } from "@/lib/event-db";
+import type { MyTechReqFullEntry } from "@/lib/ops/event-db";
 
 const STATUS_LABELS: Record<string, string> = {
   awaiting: "待确认", pending: "待处理", in_progress: "进行中", done: "完成",

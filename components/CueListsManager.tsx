@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import Link from "next/link";
 import styles from "./my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
-import type { CueList, CueListGrant, CueListDeptAccess } from "@/lib/cue-list-types";
+import type { CueList, CueListGrant, CueListDeptAccess } from "@/lib/ops/cue-list-types";
 
 import type { MemberWithRoles } from "@/lib/db";
 import CueListDetail from "./CueListDetail";

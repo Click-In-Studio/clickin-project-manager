@@ -4,7 +4,7 @@ import OverflowSafeSelect from "@/components/OverflowSafeSelect";
 
 import { useState, useEffect, useRef } from "react";
 import { BASE_PATH } from "@/lib/base-path";
-import { PRODUCTION_TYPES } from "@/lib/production-types";
+import { PRODUCTION_TYPES } from "@/lib/production/production-types";
 
 
 const field: React.CSSProperties = {

@@ -12,8 +12,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { getPool } from "../lib/pg";
-import { listUserIds, memoryRoot, type RunRecord } from "../lib/agent-memory/store";
-import { embedMissing, ensureIndexIdentity, indexCurated, indexEpisodicRun } from "../lib/agent-memory/index-db";
+import { listUserIds, memoryRoot, type RunRecord } from "../lib/agent/memory/store";
+import { embedMissing, ensureIndexIdentity, indexCurated, indexEpisodicRun } from "../lib/agent/memory/index-db";
 
 async function main() {
   const rebuild = process.argv.includes("--rebuild");

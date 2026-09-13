@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { workspacePrompt, resetWorkspacePromptForTests, WORKSPACE_FILES, buildSystemPrompt } from "@/lib/agent-runtime/prompt";
-import { exposedName } from "@/lib/agent-runtime/tools";
+import { workspacePrompt, resetWorkspacePromptForTests, WORKSPACE_FILES, buildSystemPrompt } from "@/lib/agent/runtime/prompt";
+import { exposedName } from "@/lib/agent/runtime/tools";
 
 // AI review #372：workspacePrompt 缺文件时要喊一声——但每个文件只喊一次（长驻进程不刷屏），
 // 文件齐全时不喊，mtime 缓存不受影响。PR #371 首发就是 standalone 没带 openclaw-workspace/

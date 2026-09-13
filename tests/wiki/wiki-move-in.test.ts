@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createWiki } from "@/lib/wiki/content";
 import { getDramaturgyTreeConfig } from "@/lib/node/anchors";
 import { listNodeLibrary, setNodeListable, getNodeByWikiId, type NodeEntry } from "@/lib/node/db";
@@ -11,7 +11,7 @@ import {
 import { listDramaturgyTreeFor } from "@/lib/node/tree-view";
 import { readParentAnchor } from "@/lib/wiki/input";
 import { resolveNodeAnchorParent } from "@/lib/node/placement";
-import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
+import { WIKI_LEVEL_ROW_SETS } from "@/lib/perm/resource-grant-db";
 import { PATCH as wikiPATCH } from "@/app/api/production/[id]/wiki/[wikiId]/route";
 import { POST as aliasPOST } from "@/app/api/production/[id]/wiki-alias/route";
 import { makeProduction, cleanupProduction } from "../_support/factories";

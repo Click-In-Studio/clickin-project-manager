@@ -8,10 +8,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { POST as mentionResolvePOST } from "@/app/api/production/[id]/mention-resolve/route";
 import { GET as blockSearchGET } from "@/app/api/production/[id]/script/block-search/route";
-import type { ContentMentionAttrs } from "@/lib/mention-types";
+import type { ContentMentionAttrs } from "@/lib/editor/mention-types";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
 let prodId: string;

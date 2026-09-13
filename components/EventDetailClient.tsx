@@ -12,7 +12,7 @@ import ChevronIcon from "@/components/ChevronIcon";
 import type {
   ProductionEvent, EventScheduleItemWithParticipants, ScheduleItemParticipant,
   EventCallTime, EventTechReq, EventReport, EventReportNote, EventDepartment,
-} from "@/lib/event-db";
+} from "@/lib/ops/event-db";
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
 const EVENT_TYPE_LABELS: Record<string, string> = {

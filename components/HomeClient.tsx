@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState } from "react";
 import { fmtCallAt, isoCSTDateStr, todayCSTStr as tzTodayCSTStr } from "@/lib/tz";
-import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, MyFollowedEventEntry, UnreadReportEntry } from "@/lib/event-db";
+import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, MyFollowedEventEntry, UnreadReportEntry } from "@/lib/ops/event-db";
 import type { UpcomingMilestoneEntry } from "@/lib/db";
 import styles from "./home.module.css";
 

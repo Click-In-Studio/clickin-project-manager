@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { exchangeCode, getUserInfo, TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { bindPlatformIdentity, getUserProfile, attachFeishuToUser, getFeishuUser } from "@/lib/db";
 import { signConflictToken } from "@/lib/platform/email/email-tokens";
-import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS, OAUTH_STATE_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS, OAUTH_STATE_COOKIE } from "@/lib/account/session";
 
 const BIND_SOURCE_COOKIE = "bind_source_user_id";
 

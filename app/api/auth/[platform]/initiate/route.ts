@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getPersonalChannel } from "@/lib/platform/registry";
-import { generateOAuthState, OAUTH_STATE_COOKIE, OAUTH_CTX_COOKIE, type OAuthContext } from "@/lib/session";
-import { RegistrationDeniedError, AuthIntentMismatchError, registrationRateLimited } from "@/lib/registration-gate";
+import { generateOAuthState, OAUTH_STATE_COOKIE, OAUTH_CTX_COOKIE, type OAuthContext } from "@/lib/account/session";
+import { RegistrationDeniedError, AuthIntentMismatchError, registrationRateLimited } from "@/lib/account/registration-gate";
 
 function requestBaseUrl(req: NextRequest): string {
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";

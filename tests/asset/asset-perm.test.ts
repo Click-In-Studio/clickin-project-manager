@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { setPolicies } from "@/lib/policy-db";
-import { POLICY_ON, POLICY_OFF } from "@/lib/policy-keys";
+import { setPolicies } from "@/lib/perm/policy-db";
+import { POLICY_ON, POLICY_OFF } from "@/lib/perm/policy-keys";
 import { createAsset } from "@/lib/asset/db";
 import { canViewAsset, filterVisibleAssets, canPublishAsset, canCreateShareToken } from "@/lib/asset/perm";
 import { addNodeMount, removeNodeMount, getNodeMount, listNodeMounts } from "@/lib/node/mount";
 import { getNodeByAssetId } from "@/lib/node/db";
-import type { PermissionContext } from "@/lib/permissions";
+import type { PermissionContext } from "@/lib/perm/permissions";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 

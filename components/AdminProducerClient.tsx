@@ -7,9 +7,9 @@ import PermissionKeyPicker, { type Vocabulary } from "@/components/PermissionKey
 import MemberPickerModal, { type PickerMember, type PickerDept } from "@/components/MemberPickerModal";
 import { BASE_PATH } from "@/lib/base-path";
 
-import type { GovernanceGrantRow } from "@/lib/grant-audit-db";
-import { memberStatusLabel } from "@/lib/member-status-shared";
-import type { MemberStatus, MemberStatusSource } from "@/lib/member-status-shared";
+import type { GovernanceGrantRow } from "@/lib/perm/grant-audit-db";
+import { memberStatusLabel } from "@/lib/perm/member-status-shared";
+import type { MemberStatus, MemberStatusSource } from "@/lib/perm/member-status-shared";
 
 type Member = PickerMember;
 

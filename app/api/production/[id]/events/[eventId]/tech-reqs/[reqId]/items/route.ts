@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getProductionEvent, getEventTechReq, setTechReqItems } from "@/lib/event-db";
-import { canEditTechReq } from "@/lib/event-permissions";
+import { getProductionEvent, getEventTechReq, setTechReqItems } from "@/lib/ops/event-db";
+import { canEditTechReq } from "@/lib/ops/event-permissions";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reqId: string }> };
 

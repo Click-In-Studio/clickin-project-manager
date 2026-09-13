@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { consumeEmailOtp, getUserProfile } from "@/lib/db";
-import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/session";
+import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/account/session";
 
 export async function POST(req: NextRequest) {
   let body: { email?: string; code?: string };

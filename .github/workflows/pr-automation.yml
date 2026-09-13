@@ -220,7 +220,7 @@ jobs:
               'Key conventions:',
               '- All DB writes use transactions (`client.query("BEGIN")` ... `COMMIT`).',
               '- Copy-on-Write for script snapshots: never mutate a shared snapshot (refCount > 1).',
-              '- Every new exported function in `lib/db.ts` or `lib/*-db.ts` must have a corresponding test in `tests/`.',
+              '- Every new exported function in `lib/db.ts` or `lib/<domain>/*-db.ts` must have a corresponding test in `tests/` — normally `tests/<domain>/`; a few finer lib/ domains fold into a coarser tests/ domain (`lib/editor/`→`tests/wiki/`, `lib/approval/` and `lib/production/`→`tests/ops/`), see docs/DEV_GUIDE.md §11.2.',
               '- Every new `app/api/` route handler must have auth-guard + happy-path tests in `tests/platform/api.test.ts` or a dedicated test file.',
               '- Runtime migration functions (named `ensureXxx` or `backfillXxx`) must have idempotency tests.',
               '- `db/schema.sql` changes must be paired with a regenerated `db/seed-schema.json`.',

@@ -2,10 +2,10 @@ import type { Metadata } from "next";
 import PageHeader from "@/components/PageHeader";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionName, getProductionPermissionContext } from "@/lib/db";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { listMaterials, listMaterialStatuses } from "@/lib/material-db";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { listMaterials, listMaterialStatuses } from "@/lib/ops/material-db";
 
 export const metadata: Metadata = { title: "实体物料" };
 
@@ -76,7 +76,7 @@ export default async function MaterialsPage({ params }: { params: Promise<{ id: 
                   <code style={{ color: "var(--stage)" }}>{item.code}</code>
                   <b style={{ color: "var(--ink)" }}>{item.name}</b>
                   <span>{item.category || "—"}</span>
-                  {/* 责任方是部门**或**用户组（二选一，见 lib/task-poc.ts 的 TaskSubject） */}
+                  {/* 责任方是部门**或**用户组（二选一，见 lib/ops/task-poc.ts 的 TaskSubject） */}
                   <span>{item.departmentName ?? item.groupName ?? "—"}</span>
                   {/* 颜色取状态自己带的那个，不靠名字里有没有「待」「制作」去猜 */}
                   <span style={{ color: item.statusColor ?? "var(--muted)" }}>{item.statusName ?? "—"}</span>

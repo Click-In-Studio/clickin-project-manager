@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/session";
-import { listMyTechReqsFull } from "@/lib/event-db";
+import { getSession } from "@/lib/account/session";
+import { listMyTechReqsFull } from "@/lib/ops/event-db";
 import MyTasksClient from "@/components/MyTasksClient";
 
 export const metadata: Metadata = { title: "我的任务" };

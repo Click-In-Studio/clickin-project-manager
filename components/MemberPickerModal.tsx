@@ -6,9 +6,9 @@ import { useMemo, useState } from "react";
 import AdminModal from "@/components/AdminModal";
 import Badge from "@/components/Badge";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
-import { userAvatarSrc } from "@/lib/avatar-url";
-import type { MemberStatus, MemberStatusSource } from "@/lib/member-status-shared";
-import { isInactiveMember } from "@/lib/member-status-shared";
+import { userAvatarSrc } from "@/lib/asset/avatar-url";
+import type { MemberStatus, MemberStatusSource } from "@/lib/perm/member-status-shared";
+import { isInactiveMember } from "@/lib/perm/member-status-shared";
 
 export type PickerMember = {
   userId: string;

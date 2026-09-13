@@ -1,5 +1,5 @@
 /**
- * lib/avatar-serve 分支覆盖（R2 层 mock，sharp 走真实现）：
+ * lib/asset/avatar-serve 分支覆盖（R2 层 mock，sharp 走真实现）：
  * - 变体命中：直接返回，不取原图
  * - 变体缺失：懒生成（尺寸/格式正确）+ 写回 R2（存量头像自愈路径）
  * - 原图缺失：null（调用方走外链兜底）
@@ -16,7 +16,7 @@ vi.mock("@/lib/r2", () => ({
 }));
 
 import { getR2Object, putR2Object, deleteR2Object } from "@/lib/r2";
-import { getAvatarVariant, parseAvatarSize, deleteAvatarObjects } from "@/lib/avatar-serve";
+import { getAvatarVariant, parseAvatarSize, deleteAvatarObjects } from "@/lib/asset/avatar-serve";
 
 const mockGet = vi.mocked(getR2Object);
 const mockPut = vi.mocked(putR2Object);

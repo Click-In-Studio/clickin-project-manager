@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { canEditTechReq } from "@/lib/event-permissions";
-import { isTaskPoc } from "@/lib/task-poc";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { canEditTechReq } from "@/lib/ops/event-permissions";
+import { isTaskPoc } from "@/lib/ops/task-poc";
 import { readJsonObject } from "@/lib/request-json";
 import {
   getProductionEvent,
@@ -12,7 +12,7 @@ import {
   listEventTaskIds,
   setEventMilestones,
   updateTaskByProduction,
-} from "@/lib/event-db";
+} from "@/lib/ops/event-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 

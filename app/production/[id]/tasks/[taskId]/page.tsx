@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { Suspense } from "react";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
-import { listPhases } from "@/lib/phase-db";
+import { listPhases } from "@/lib/ops/phase-db";
 import {
   getTechReqByProduction,
   getProductionEvent,
@@ -13,7 +13,7 @@ import {
   listProductionTechReqs,
   listScheduleItems,
   listEventDepartments,
-} from "@/lib/event-db";
+} from "@/lib/ops/event-db";
 import ReqDetailClient from "@/components/ReqDetailClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; taskId: string }> }): Promise<Metadata> {

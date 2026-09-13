@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, UnreadReportEntry } from "@/lib/event-db";
+import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, UnreadReportEntry } from "@/lib/ops/event-db";
 import { BASE_PATH } from "@/lib/base-path";
 import { fmtCallAt } from "@/lib/tz";
 import styles from "@/components/home.module.css";

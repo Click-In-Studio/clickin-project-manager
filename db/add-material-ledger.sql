@@ -17,7 +17,7 @@
 --
 -- ## 责任方复用 task 的口径
 --
--- 部门 | 用户组，二选一（见 lib/task-poc.ts 的 TaskSubject）。组自带 POC，所以
+-- 部门 | 用户组，二选一（见 lib/ops/task-poc.ts 的 TaskSubject）。组自带 POC，所以
 -- 「这批道具归谁负责」和「这条任务归谁负责」是同一套解析，不另造一套。
 
 BEGIN;
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS production_material (
   /** 道具 / 服装 / 设备 / 布景。刻意留自由文本：分类比状态稳定得多，先不建实体；
    *  真要收敛成一等实体时，现有取值就是迁移数据。 */
   category      TEXT        NOT NULL DEFAULT '',
-  -- 责任方：部门 | 用户组，二选一（同 task，见 lib/task-poc.ts）
+  -- 责任方：部门 | 用户组，二选一（同 task，见 lib/ops/task-poc.ts）
   department_id UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
   group_id      UUID        REFERENCES event_group(id)     ON DELETE SET NULL,
   -- ON DELETE SET NULL：状态定义被删掉不该连坐删台账行，落成「未标状态」

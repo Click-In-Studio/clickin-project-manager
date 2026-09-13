@@ -229,12 +229,12 @@ describe("模版 resource_type ⊆ resource_permission_level 词汇表", () => {
   // 才撞 production_member_grant_level_fk，整个授权操作失败。
   // 本审计让「模版发键在先、词汇表登记在后」在 CI 就红，不再等线上。
   it("所有模版键（角色 + 部门静态区间）的 resource_type 均已登记", async () => {
-    // 覆盖面依据：lib/templates/ 下除 shared.ts 外的 7 个模版文件全部注册在
+    // 覆盖面依据：lib/production/templates/ 下除 shared.ts 外的 7 个模版文件全部注册在
     // PRODUCTION_TEMPLATES；shared.ts 是纯积木模块（被 7 个模版 import），
     // 自身不独立发键。故审计 PRODUCTION_TEMPLATES 即审计全部模版键源。
     // 若未来新增模版文件而忘了注册，resolveTemplate 也拿不到它——注册表
     // 就是运行时的唯一取用面，不存在绕过审计又能生效的键源。
-    const { PRODUCTION_TEMPLATES } = await import("@/lib/production-template");
+    const { PRODUCTION_TEMPLATES } = await import("@/lib/production/production-template");
 
     const keys = new Set<string>();
     for (const template of Object.values(PRODUCTION_TEMPLATES)) {
@@ -322,5 +322,36 @@ describe("tests/ 按域分目录，不回退成平铺", () => {
       }
     }
     expect(strays).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// lib/ 目录形态棘轮（#482）
+// ─────────────────────────────────────────────────────────────────────────────
+// 124 个文件靠文件名前缀平铺过一次，收进域目录后不许回退。与 tests/ 的形态棘轮
+// 不同，这里钉的是一份**根目录白名单**：根只留跨域基建，任何业务文件都有它的域。
+// 新开域目录不用改这里；往根加文件必须同时加白名单并更新 DEV_GUIDE §11.2 的归属表。
+
+describe("lib/ 按域分目录，根只留基建", () => {
+  const LIB_ROOT = path.join(ROOT, "lib");
+  const ROOT_INFRA = [
+    "db.ts", "pg.ts", "r2.ts", "server-cache.ts",
+    "tz.ts", "money.ts", "duration.ts", "lex-order.ts", "z-index.ts",
+    "base-path.ts", "server-url.ts", "request-json.ts", "sse-keepalive.ts",
+    "nav-pending.ts", "search-db.ts",
+  ];
+
+  it("根目录文件 ⊆ 基建白名单——业务文件进域目录", async () => {
+    const entries = await readdir(LIB_ROOT, { withFileTypes: true });
+    const files = entries.filter((e) => e.isFile()).map((e) => e.name);
+    const strays = files.filter((f) => !ROOT_INFRA.includes(f));
+    expect(strays, "lib/ 根目录出现了白名单之外的文件，请移到对应域目录（DEV_GUIDE §11.2）").toEqual([]);
+  });
+
+  it("白名单没有幽灵条目——移走或删除的基建文件要同步从白名单摘掉", async () => {
+    const entries = await readdir(LIB_ROOT, { withFileTypes: true });
+    const files = new Set(entries.filter((e) => e.isFile()).map((e) => e.name));
+    const ghosts = ROOT_INFRA.filter((f) => !files.has(f));
+    expect(ghosts).toEqual([]);
   });
 });

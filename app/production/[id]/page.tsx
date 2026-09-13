@@ -1,6 +1,6 @@
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionName, getProductionPermissionContext } from "@/lib/db";
 import ProductionHomeClient from "@/components/ProductionHomeClient";
 

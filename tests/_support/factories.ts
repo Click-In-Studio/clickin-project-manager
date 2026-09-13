@@ -9,8 +9,8 @@ import {
   flushToDBVersioned,
   applyPatchToDB,
 } from "@/lib/db";
-import type { Block } from "@/lib/script-types";
-import type { ScriptPatch } from "@/lib/script-ops";
+import type { Block } from "@/lib/script/script-types";
+import type { ScriptPatch } from "@/lib/script/script-ops";
 
 // ── ID helpers ────────────────────────────────────────────────────────────────
 

@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
-import { hasEventDomainView, filterDraftVisibleEvents } from "@/lib/event-permissions";
-import { canAccessNode } from "@/lib/grant-template";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+import { hasEventDomainView, filterDraftVisibleEvents } from "@/lib/ops/event-permissions";
+import { canAccessNode } from "@/lib/perm/grant-template";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "事件" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
-import { listProductionEvents, listUserEventParticipations, listEventDepartments, listEventTaskCounts } from "@/lib/event-db";
+import { listProductionEvents, listUserEventParticipations, listEventDepartments, listEventTaskCounts } from "@/lib/ops/event-db";
 import EventsClient from "@/components/EventsClient";
 import PageActivationGate from "@/components/PageActivationGate";
 

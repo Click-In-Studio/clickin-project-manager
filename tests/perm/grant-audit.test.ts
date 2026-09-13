@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { listGrantLedger, revokeGrantById } from "@/lib/grant-audit-db";
+import { listGrantLedger, revokeGrantById } from "@/lib/perm/grant-audit-db";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 
 // 管理后台·权限审计：账本筛选、status 派生（active/revoked/expired）、强制撤销

@@ -3,8 +3,8 @@ import { getPool } from "../pg";
 import { keyBetween } from "../lex-order";
 import { ensureReportTreeAnchors } from "./anchors";
 import { getNodeByWikiId, newNodeId } from "./db";
-import { canEnterEvent } from "../event-permissions";
-import { hasGrant, hasAnyGrant, type GrantActor } from "../grant-check";
+import { canEnterEvent } from "../ops/event-permissions";
+import { hasGrant, hasAnyGrant, type GrantActor } from "../perm/grant-check";
 
 // ─── 缺省落点（#420 第二批收官，2026-09-05 拍板）─────────────────────────────
 //

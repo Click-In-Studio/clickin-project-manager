@@ -1007,7 +1007,7 @@ ALTER TABLE production_member
 ### Phase 1（#158）✅ 已完成（commit ca5e7d7）权限体系基础设施
 **实际交付：**
 - `add-resource-grant.sql`：新建 `production_member_grant` 表（含基础字段）
-- `lib/permissions.ts`：新增 `ResourceType`、`PermissionLevel`、`AccessResult` 类型；新增 `canAccess()` 函数（内部回落到 `hasPermission()`，用户无感知）；新增 `DEPT_ASSIGNABLE_PERMISSIONS`
+- `lib/perm/permissions.ts`：新增 `ResourceType`、`PermissionLevel`、`AccessResult` 类型；新增 `canAccess()` 函数（内部回落到 `hasPermission()`，用户无感知）；新增 `DEPT_ASSIGNABLE_PERMISSIONS`
 - `MEMBER_BASE_PERMISSIONS` 暂未缩减（保留至 Phase 4 production_member_grant 完全接管后执行，确保无 UX 变化）
 
 **与 PRD 目标态的已知偏差（Phase 2c 修正）：**
@@ -1061,7 +1061,7 @@ ALTER TABLE production_member
 - `migrate-dept-member-poc-cleanup.sql`（**migrate**，需配套测试文件）
   - `ALTER TABLE production_dept_member DROP COLUMN poc_block_write_from_children`
 
-**lib/permissions.ts 同步修正（无 DB 变化）：**
+**lib/perm/permissions.ts 同步修正（无 DB 变化）：**
 - `PermissionLevel` 去掉 `"write"`，改为 `"view" | "mount" | "edit" | "manage"`
 - `ResourceType` 补全 `"scene" | "script_view" | "event" | "report" | "asset"`
 

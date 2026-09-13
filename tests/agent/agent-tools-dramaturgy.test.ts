@@ -2,14 +2,14 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, makeScene, makeCharacter, shortId } from "../_support/factories";
 import { upsertFeishuUser, addProductionMember, listMarkerProjectionByVersion, listCharactersByVersion } from "@/lib/db";
 import { getPool } from "@/lib/pg";
-import { DENIED_NOT_MEMBER } from "@/lib/agent-tools/production-tools";
+import { DENIED_NOT_MEMBER } from "@/lib/agent/tools/production-tools";
 import {
   dramaturgyPermissions, sceneList, sceneRead, characterList, characterRead,
   runDramaturgyProposal, previewDramaturgyProposal, DRAMATURGY_PROPOSE_TOOLS,
   DENIED_SCENE_VIEW, DENIED_CHARACTER_VIEW,
-} from "@/lib/agent-tools/dramaturgy-tools";
-import { approvalCard } from "@/lib/agent-runtime/cards";
-import { buildTools, bareName } from "@/lib/agent-runtime/tools";
+} from "@/lib/agent/tools/dramaturgy-tools";
+import { approvalCard } from "@/lib/agent/runtime/cards";
+import { buildTools, bareName } from "@/lib/agent/runtime/tools";
 
 // 构作族的核心保证：一个写工具横跨多把钥匙 → ①权限查询工具给出三态；②写工具按 REST
 // 同一套钥匙逐项判定，任一无权整批不动（原子）；③读门 = 页面门票（scene/character meta@view）。

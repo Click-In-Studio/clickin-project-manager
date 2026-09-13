@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { toActor } from "@/lib/grant-check";
+import { toActor } from "@/lib/perm/grant-check";
 import { moveNodeLink, renameNodeLink } from "@/lib/node/link";
 import { deleteNode, getNode } from "@/lib/node/db";
 import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";

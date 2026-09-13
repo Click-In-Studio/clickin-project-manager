@@ -21,11 +21,11 @@ import {
   createProductionEvent, deleteProductionEvent, createEventTechReq,
   upsertAwaitingTechReqs, updateTaskByProduction, getTechReqByProduction,
   setTechReqAssignees, createScheduleItem, deleteScheduleItem,
-} from "@/lib/event-db";
-import { setPolicies } from "@/lib/policy-db";
+} from "@/lib/ops/event-db";
+import { setPolicies } from "@/lib/perm/policy-db";
 import {
   ORPHAN_TASK_KEEP, ORPHAN_TASK_MIDDLE, ORPHAN_TASK_DELETE,
-} from "@/lib/policy-keys";
+} from "@/lib/perm/policy-keys";
 
 let prodId: string;
 let ownerId: string;

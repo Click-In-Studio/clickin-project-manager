@@ -1,8 +1,8 @@
 import type { PoolClient } from "pg";
 import { getPool } from "../pg";
-import { writeWikiGrants, WIKI_LEVEL_ROW_SETS, type WikiLevel } from "../resource-grant-db";
+import { writeWikiGrants, WIKI_LEVEL_ROW_SETS, type WikiLevel } from "../perm/resource-grant-db";
 import { broadcastWikiLibraryChange } from "./collab";
-import type { Mention } from "../event-db";
+import type { Mention } from "../ops/event-db";
 import { rowToWiki, type WikiDoc, type WikiRow } from "./types";
 import { isWikiId } from "./id";
 import { syncWikiLinks } from "./links";
@@ -128,7 +128,7 @@ export async function updateWiki(
 
   if (patch.body !== undefined && patch.mergeBase !== undefined) {
     // 行锁事务内合并写回：SELECT FOR UPDATE 排队并发保存者，各自基于最新现值合并
-    const { mergeLines } = await import("../line-merge");
+    const { mergeLines } = await import("../editor/line-merge");
     const client = await getPool().connect();
     try {
       await client.query("BEGIN");

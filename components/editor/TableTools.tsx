@@ -6,7 +6,7 @@
 // 边界，把它同时当操作区，命中范围只有 1~2px，且和单元格的选中语义纠缠。
 //
 // 编辑单位与分栏同构：**表格的单位是行与列**。外缘上点一段 = 选中整行/整列；
-// 单元格内部完全不给块级手柄（见 lib/editor-drag-unit）。
+// 单元格内部完全不给块级手柄（见 lib/editor/editor-drag-unit）。
 //
 // 两个定位上的决定：
 //
@@ -27,7 +27,7 @@ import {
   insertColumnAtBoundary, insertRowAtBoundary,
   moveRow, moveColumn, hasMergedCells, selectionSpan,
   type TableLoc,
-} from "@/lib/table-ops";
+} from "@/lib/editor/table-ops";
 
 /** 外缘带的厚度 */
 const STRIP = 14;

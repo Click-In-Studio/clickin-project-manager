@@ -7,9 +7,9 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { addProductionMember, submitAccessRequest } from "@/lib/db";
-import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval-stages";
+import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval/approval-stages";
 import { getPool } from "@/lib/pg";
 import { TEST_USER } from "../_support/helpers";
 import { makeProduction, cleanupProduction } from "../_support/factories";

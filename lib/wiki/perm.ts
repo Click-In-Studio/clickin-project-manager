@@ -1,7 +1,7 @@
 import { getPool } from "../pg";
-import { isPolicyOn } from "../policy-db";
-import { hasGrant, listGrantedResourceIds, type GrantActor } from "../grant-check";
-import { hasEventDomainView } from "../event-permissions";
+import { isPolicyOn } from "../perm/policy-db";
+import { hasGrant, listGrantedResourceIds, type GrantActor } from "../perm/grant-check";
+import { hasEventDomainView } from "../ops/event-permissions";
 import { mountConcededNodeIds } from "../node/host-visibility";
 import { isWikiId } from "./id";
 

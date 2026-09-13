@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
-import { canViewScriptBlocks, scriptBlocksUnauthorizedUrl } from "@/lib/script-perm";
+import { getSession } from "@/lib/account/session";
+import { canViewScriptBlocks, scriptBlocksUnauthorizedUrl } from "@/lib/script/script-perm";
 import {
   getProductionPermissionContext,
   getActiveVersionId,
@@ -10,8 +10,8 @@ import {
   getMasterScriptViewId,
   loadProduction,
 } from "@/lib/db";
-import { hasEffectiveGrant } from "@/lib/grant-check";
-import { buildMarkerContextById, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script-marker-blocks";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
+import { buildMarkerContextById, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script/script-marker-blocks";
 import ScriptPrintRoute from "@/components/print/ScriptPrintRoute";
 import PageActivationGate from "@/components/PageActivationGate";
 

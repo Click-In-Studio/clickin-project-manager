@@ -1,18 +1,18 @@
 import type { Metadata } from "next";
-import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "技术需求" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
-import { getUserTechReqGrantIdsInEvent } from "@/lib/resource-grant-db";
+import { getUserTechReqGrantIdsInEvent } from "@/lib/perm/resource-grant-db";
 import {
   getProductionEvent,
   listEventTechReqs,
   listEventDepartments,
   isUserEventTechAssignee,
-} from "@/lib/event-db";
+} from "@/lib/ops/event-db";
 import ReqsClient from "@/components/ReqsClient";
 
 export default async function ReqsPage({

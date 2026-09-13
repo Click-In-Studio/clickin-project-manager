@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
-import { hasEventDomainView } from "@/lib/event-permissions";
-import { toActor, hasGrant } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasEventDomainView } from "@/lib/ops/event-permissions";
+import { toActor, hasGrant } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getBossUserIds, batchGetFeishuOpenIds } from "@/lib/db";
-import { getProductionDept, getDeptMembers, setDeptMembers } from "@/lib/dept-db";
+import { getProductionDept, getDeptMembers, setDeptMembers } from "@/lib/perm/dept-db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 
 type Ctx = { params: Promise<{ id: string; deptId: string }> };

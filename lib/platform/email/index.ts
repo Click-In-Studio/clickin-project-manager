@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { signMagicToken, verifyMagicToken } from "./email-tokens";
 import { sendEmail } from "./email-send";
 import { upsertEmailUser, getUserProfile, createEmailOtp } from "../../db";
-import { requireRegistrationJustification, identityExists, AuthIntentMismatchError } from "../../registration-gate";
+import { requireRegistrationJustification, identityExists, AuthIntentMismatchError } from "../../account/registration-gate";
 import { buildNotificationEmail } from "./email-templates";
 import type {
   PersonalChannel,

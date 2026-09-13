@@ -11,7 +11,7 @@
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
-import type { Block, Character, Scene, ScriptConfig } from "@/lib/script-types";
+import type { Block, Character, Scene, ScriptConfig } from "@/lib/script/script-types";
 import PrintPreview from "@/components/print/ScriptPrint";
 
 export default function ScriptPrintRoute({

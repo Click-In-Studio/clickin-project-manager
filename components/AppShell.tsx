@@ -4,7 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, createContext, useContext } from "react";
 import Link, { useLinkStatus } from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import { userAvatarSrc, productionAvatarSrc } from "@/lib/avatar-url";
+import { userAvatarSrc, productionAvatarSrc } from "@/lib/asset/avatar-url";
 import { nextNavPendingHref } from "@/lib/nav-pending";
 import { isWikiId } from "@/lib/wiki/id";
 import { AiTargetContext, nextAiTargetState, type AiTargetState, type ReportAiTarget } from "./ai-target";
@@ -26,7 +26,7 @@ import {
 
 // planAi / planAdvancedPerms 是**付费档位**开关（#280），与 canAdmin 那条权限维度正交：
 // 权限决定视图里能看到什么内容，档位决定菜单里有没有这一项。两者都由服务端解析好下发
-// （lib/plan.ts 的常量表不能进客户端包）。
+// （lib/account/plan.ts 的常量表不能进客户端包）。
 type Production = { id: string; name: string; archivedAt: string | null; roles: string[]; firstTag: string | null; canAdmin: boolean; avatarUrl: string | null; planAi: boolean; planAdvancedPerms: boolean };
 type ShellSession = { userId: string; name: string; avatarUrl: string | null };
 

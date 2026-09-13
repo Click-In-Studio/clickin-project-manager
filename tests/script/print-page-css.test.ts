@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { PAGE_CONFIGS } from "@/lib/script-page";
-import { printPageCss, PRINT_PAGE_CSS_A4 } from "@/lib/print-css";
-import type { PageLayout } from "@/lib/script-types";
+import { PAGE_CONFIGS } from "@/lib/script/script-page";
+import { printPageCss, PRINT_PAGE_CSS_A4 } from "@/lib/script/print-css";
+import type { PageLayout } from "@/lib/script/script-types";
 
 /**
  * 纸张尺寸回归护栏（#335）。
@@ -42,7 +42,7 @@ describe("printPageCss", () => {
     expect(PRINT_PAGE_CSS_A4).not.toBe(printPageCss(PAGE_CONFIGS.a4));
     // 但描述的必须是同一张纸：A4 在 96dpi 下就是 794×1123
     expect(printPageCss(PAGE_CONFIGS.a4)).toContain("794px 1123px");
-    // 两种形态都必须来自 lib/print-css.ts——纸张字面量散落就一定会漂
+    // 两种形态都必须来自 lib/script/print-css.ts——纸张字面量散落就一定会漂
     expect(PRINT_PAGE_CSS_A4).toContain("margin: 0");
   });
 

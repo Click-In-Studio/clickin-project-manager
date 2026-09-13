@@ -4,13 +4,13 @@
 --   · 限流主体是**人**，不是项目：某人的用量 = 他的个人会话 + 他**当前** own 的
 --     全部项目的用量（谁在那些项目里用都算他的）。owner 转移后账单随人走——
 --     聚合走 production.owner_id 实时 JOIN，任何地方不得物化「此项目算谁的」。
---   · 额度只挂 user_plan 档位（lib/plan.ts 常量）：free（无行）/ creator 有日周
+--   · 额度只挂 user_plan 档位（lib/account/plan.ts 常量）：free（无行）/ creator 有日周
 --     双闸，internal 无限。production_plan 不加额度字段，它继续只管布尔 ai
 --     （能不能用），用多少一律记 owner 头上。
 --   · 计量单位 credit：1 credit = 1 个 deepseek-v4-flash cache-miss input token
 --     的 peak 单价（$0.44/1M）。裸 token 会被 cache_read 淹没（缓存读只有 1/31
 --     单价），按裸 token 限流会限错地方；credit 是成本折算，跨模型自动可比。
---     chat 侧的美元数由 provider 层算好（Model.cost，见 lib/agent-runtime/config.ts），
+--     chat 侧的美元数由 provider 层算好（Model.cost，见 lib/agent/runtime/config.ts），
 --     embedding 侧按常量折算——权重表不存在，只有单价表。
 --   · 豁免（owner 是 internal ∨ production_plan.billing_exempt）= 不限流，但
 --     照记（add-plan.sql 的既有约定），落 paid_from='exempt' 排除在窗口聚合外。
@@ -41,7 +41,7 @@ BEGIN
     WHERE table_name = 'ai_usage' AND column_name = 'billed_credits'
   ) THEN
     ALTER TABLE ai_usage ADD COLUMN billed_credits BIGINT NOT NULL DEFAULT 0;
-    -- 存量行回填：按各 kind 的单价比折算（比值须与 lib/plan.ts 的单价表一致；
+    -- 存量行回填：按各 kind 的单价比折算（比值须与 lib/account/plan.ts 的单价表一致；
     -- 改单价不回改历史行——历史按当时价计价是对的）。迁移前的行是旧写入端
     -- 落的，三个 kind 各自带着自己那部分 token，所以这里逐行折算是对的。
     --   chat_input      $0.44/1M → 1
@@ -65,7 +65,7 @@ CREATE INDEX IF NOT EXISTS ai_usage_production_created_idx ON ai_usage (producti
 -- 余额型，不随窗口重置。窗口两闸都满之后才动它，按 expires_at 最早的先扣。
 -- remaining 允许为负：判定在 run 开始处做一次，run 内不打断（轮内超限打断
 -- 用户等于把一次已经花掉的调用扔掉），所以最后一次扣款可能扣穿——透支上限
--- 就是单个 run 的量，由 lib/plan.ts 的 RUN_CREDIT_HARD_CAP 封顶。
+-- 就是单个 run 的量，由 lib/account/plan.ts 的 RUN_CREDIT_HARD_CAP 封顶。
 CREATE TABLE IF NOT EXISTS ai_credit_grant (
   id         TEXT        PRIMARY KEY,
   user_id    UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,

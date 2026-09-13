@@ -3,18 +3,18 @@ export const metadata: Metadata = { title: "管理员设置" };
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { requireAdminAccess } from "@/lib/admin-guard";
-import { getSession } from "@/lib/session";
-import { hasGrant } from "@/lib/grant-check";
+import { requireAdminAccess } from "@/lib/perm/admin-guard";
+import { getSession } from "@/lib/account/session";
+import { hasGrant } from "@/lib/perm/grant-check";
 import {
   getProductionPermissionContext,
   getProductionName,
   listProductionRolesWithPermissions,
   listProductionMembersWithRoles,
 } from "@/lib/db";
-import { getPermissionVocabulary } from "@/lib/perm-center-db";
-import { listGovernanceGrants } from "@/lib/grant-audit-db";
-import { listProductionDepts } from "@/lib/dept-db";
+import { getPermissionVocabulary } from "@/lib/perm/perm-center-db";
+import { listGovernanceGrants } from "@/lib/perm/grant-audit-db";
+import { listProductionDepts } from "@/lib/perm/dept-db";
 import AdminProducerClient from "@/components/AdminProducerClient";
 
 export default async function ProducerPage({ params }: { params: Promise<{ id: string }> }) {

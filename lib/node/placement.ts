@@ -1,6 +1,6 @@
 import { ensureDramaturgyRootAnchor, getDramaturgyTreeConfig } from "./anchors";
 import { canPlaceNodeUnder, canWriteNodeContainer } from "./perm";
-import type { GrantActor } from "../grant-check";
+import type { GrantActor } from "../perm/grant-check";
 
 // ─── 锚点落位的门 + 解析（write-before-authz，逐字继承 wiki 侧 #355 拍板）─────
 //

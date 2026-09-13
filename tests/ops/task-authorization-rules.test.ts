@@ -6,12 +6,12 @@ import {
   createProductionEvent, createEventTechReq, upsertAwaitingTechReqs,
   setTechReqAssignees, updateTaskByProduction, deleteTaskByProduction,
   getTechReqByProduction, getEventDepartment, isUserDeptPoc, isUserDeptMember,
-} from "@/lib/event-db";
-import { canAssignTechReq, canEditTechReq, canViewTechReq } from "@/lib/event-permissions";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+} from "@/lib/ops/event-db";
+import { canAssignTechReq, canEditTechReq, canViewTechReq } from "@/lib/ops/event-permissions";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { GET as taskAccessHandler } from "@/app/api/production/[id]/tasks/[taskId]/access/route";
 import { getPool } from "@/lib/pg";
-import type { PermissionContext } from "@/lib/permissions";
+import type { PermissionContext } from "@/lib/perm/permissions";
 
 // task 自动授权规则（用户规范）：
 //   1. 不论路径与进度：关联部门的 POC 可编辑内容+推进状态（上下文判定）

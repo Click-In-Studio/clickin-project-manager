@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { WIKI_LEVEL_ROW_SETS, writeWikiGrants } from "@/lib/resource-grant-db";
-import { TYPE_LABELS } from "@/lib/permission-labels";
-import { PAGE_PERMISSION_SCOPES } from "@/lib/page-permission-scopes";
+import { WIKI_LEVEL_ROW_SETS, writeWikiGrants } from "@/lib/perm/resource-grant-db";
+import { TYPE_LABELS } from "@/lib/perm/permission-labels";
+import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
 import { mergeAccounts } from "@/lib/db";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 import { insertNode, newNodeId } from "@/lib/node/db";

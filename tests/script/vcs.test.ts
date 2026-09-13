@@ -7,8 +7,8 @@
  * Each describe block uses its own isolated production to avoid cross-test contamination.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import type { Block } from "@/lib/script-types";
-import type { ScriptPatch } from "@/lib/script-ops";
+import type { Block } from "@/lib/script/script-types";
+import type { ScriptPatch } from "@/lib/script/script-ops";
 import {
   createProduction, deleteProduction,
   getActiveVersionId, getVersion,

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getPool } from "@/lib/pg";
-import { PRODUCTION_TEMPLATES } from "@/lib/production-template";
+import { PRODUCTION_TEMPLATES } from "@/lib/production/production-template";
 
 // ─── 权限REST化 §0.5 终局判据（机器可判，非人的记忆）────────────────────────────
 // 2026-08-11 开工 → 批0/A/B/C/D/E/F/G 八批完毕。本文件是工程的最终验收：

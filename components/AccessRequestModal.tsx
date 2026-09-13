@@ -8,7 +8,7 @@ import {
   localTodayDateInputValue,
   ttlPayloadForSelection,
   type TtlOptionValue,
-} from "@/lib/approval-ttl";
+} from "@/lib/approval/approval-ttl";
 
 // ─── Labels ───────────────────────────────────────────────────────────────────
 

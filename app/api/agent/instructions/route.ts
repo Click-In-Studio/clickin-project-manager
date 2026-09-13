@@ -1,17 +1,17 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { requireUser } from "@/lib/agent-chat/http";
+import { requireUser } from "@/lib/agent/chat/http";
 import {
   INSTRUCTIONS_MAX_LEN,
   canEditProductionInstructions,
   getAgentInstructions,
   setAgentInstructions,
-} from "@/lib/agent-instructions";
+} from "@/lib/agent/agent-instructions";
 
 export const runtime = "nodejs";
 
 // agents.md 编辑面（个人 / 制作两级；系统级在 openclaw-workspace/ 版本控制，
 // 刻意无在线编辑）。制作级编辑权判定见 canEditProductionInstructions
-// （lib/agent-instructions.ts，与 MCP 工具共用同一个门）。
+// （lib/agent/agent-instructions.ts，与 MCP 工具共用同一个门）。
 const productionEditAccess = canEditProductionInstructions;
 
 export async function GET(req: NextRequest) {

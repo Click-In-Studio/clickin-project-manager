@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { presignedGet } from "@/lib/r2";
-import { userAvatarSrc, productionAvatarSrc } from "@/lib/avatar-url";
+import { userAvatarSrc, productionAvatarSrc } from "@/lib/asset/avatar-url";
 
 afterEach(() => {
   vi.useRealTimers();

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { isGovernanceNodeKey } from "@/lib/grant-template";
-import { resolveTemplate } from "@/lib/production-template";
-import { roleKeys as templateRoleKeys } from "@/lib/template-seeders/roles";
+import { isGovernanceNodeKey } from "@/lib/perm/grant-template";
+import { resolveTemplate } from "@/lib/production/production-template";
+import { roleKeys as templateRoleKeys } from "@/lib/production/template-seeders/roles";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 
 /**

@@ -21,11 +21,11 @@ import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/production/[id]/events/[eventId]/reports/[reportId]/access/route";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
-import { checkNodeFreeApprovalZone } from "@/lib/resource-grant-db";
-import { createProductionDept, setDeptMembers, addResourceDeptManage } from "@/lib/dept-db";
-import { createProductionEvent, createEventReport } from "@/lib/event-db";
+import { checkNodeFreeApprovalZone } from "@/lib/perm/resource-grant-db";
+import { createProductionDept, setDeptMembers, addResourceDeptManage } from "@/lib/perm/dept-db";
+import { createProductionEvent, createEventReport } from "@/lib/ops/event-db";
 import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 

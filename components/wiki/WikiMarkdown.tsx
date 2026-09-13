@@ -13,16 +13,16 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
-import remarkColumns from "@/lib/remark-columns";
+import remarkColumns from "@/lib/editor/remark-columns";
 import { BASE_PATH } from "@/lib/base-path";
-import { userAvatarSrc } from "@/lib/avatar-url";
+import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import {
   decodeMentionHref, decodeUserHref, decodeAssetSrc, CM_HREF_PREFIX,
   type ContentMentionAttrs,
-} from "@/lib/mention-types";
+} from "@/lib/editor/mention-types";
 import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
 import { embedMediaKind } from "@/lib/asset/embed-media";
-import { parseCalloutMarker } from "@/lib/tiptap-callout";
+import { parseCalloutMarker } from "@/lib/editor/tiptap-callout";
 
 type Resolved = { label: string | null; url: string | null };
 
@@ -64,7 +64,7 @@ export function preprocessRawWikilinks(md: string): { text: string; titles: stri
   return { text: t, titles: [...titles] };
 }
 
-// ── callout 方言渲染（> [!emoji|#color]，lib/tiptap-callout 同一 marker）─────
+// ── callout 方言渲染（> [!emoji|#color]，lib/editor/tiptap-callout 同一 marker）─────
 // blockquote 首段以 marker 开头 → 剥 marker 渲染成 callout 框；否则原样引用块。
 // 在 React children 层剥（而非 markdown 字符串层）：marker 后内容可能与正文行
 // 同段（remark-breaks 的 <br> 分行），字符串层改写会破坏 mention 链接等结构。

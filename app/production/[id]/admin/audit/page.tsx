@@ -3,12 +3,12 @@ export const metadata: Metadata = { title: "权限审计" };
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { requireAdminAccess } from "@/lib/admin-guard";
-import { getSession } from "@/lib/session";
-import { hasGrant } from "@/lib/grant-check";
+import { requireAdminAccess } from "@/lib/perm/admin-guard";
+import { getSession } from "@/lib/account/session";
+import { hasGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName, listProductionMembersWithRoles } from "@/lib/db";
-import { listProductionDepts } from "@/lib/dept-db";
-import { listGrantLedger } from "@/lib/grant-audit-db";
+import { listProductionDepts } from "@/lib/perm/dept-db";
+import { listGrantLedger } from "@/lib/perm/grant-audit-db";
 import AdminAuditClient from "@/components/AdminAuditClient";
 
 export default async function AuditPage({ params }: { params: Promise<{ id: string }> }) {

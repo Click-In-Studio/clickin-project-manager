@@ -18,7 +18,7 @@
 -- 层级里，删列不丢信息。
 --
 -- 保留：scene_version 表本体及其余各列。它是有真实读者的派生读模型
--- （全局搜索 lib/search-db.ts、权限资源名 lib/resource-directory.ts、
+-- （全局搜索 lib/search-db.ts、权限资源名 lib/perm/resource-directory.ts、
 -- agent 剧本 SQL agent/db-script.ts），不属化石，不要顺手删表。
 
 BEGIN;

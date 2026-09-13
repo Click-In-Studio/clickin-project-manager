@@ -17,9 +17,9 @@ import {
   GRANT_TEMPLATE_RETIRE_SNAPSHOT_PATH,
   type GrantTemplateRetireSnapshot,
 } from "./grant-template-retire-snapshot";
-import { THEATRE_TEMPLATE } from "@/lib/templates/theatre";
-import { roleKeys } from "@/lib/template-seeders/roles";
-import { parseNodeKey, nodeKeyCandidates } from "@/lib/grant-template";
+import { THEATRE_TEMPLATE } from "@/lib/production/templates/theatre";
+import { roleKeys } from "@/lib/production/template-seeders/roles";
+import { parseNodeKey, nodeKeyCandidates } from "@/lib/perm/grant-template";
 
 let snapshot: GrantTemplateRetireSnapshot | null = null;
 try {

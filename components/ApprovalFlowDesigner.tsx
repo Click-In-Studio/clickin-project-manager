@@ -8,7 +8,7 @@
  * 「保存」落库为 draft；「发布」走 publish 端点，**引擎（prB）已生效**：
  * 发布后本项目新提交的资源申请按此流程流转，在途申请不受影响（快照定格）。
  *
- * 词表与校验与服务端同源（lib/approval-flow-template.ts）：多人策略 v1 仅或签
+ * 词表与校验与服务端同源（lib/approval/approval-flow-template.ts）：多人策略 v1 仅或签
  * （渐进暴露，会签/依次待后续开放），cc 节点无超时，project_role/specific_members
  * 必须选到具体角色/成员才能保存。
  *
@@ -28,7 +28,7 @@ import {
   type ApprovalFlowTemplateStatus,
   type ApprovalTemplateNode,
   type ApprovalTemplateNodeType,
-} from "@/lib/approval-flow-template";
+} from "@/lib/approval/approval-flow-template";
 
 type TemplateRow = {
   id: string;

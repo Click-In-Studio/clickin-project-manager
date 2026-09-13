@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, listAnnouncements, listMilestones, countCueWarningsForProduction } from "@/lib/db";
 import {
   listMyUpcomingCallTimes,
   listMyPendingTechReqs,
   listMyPocAwaitingReqs,
   listUnreadFollowedReports,
-} from "@/lib/event-db";
+} from "@/lib/ops/event-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 

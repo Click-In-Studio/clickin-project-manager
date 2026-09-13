@@ -1,11 +1,11 @@
 import { type NextRequest } from "next/server";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
-import { getSession } from "@/lib/session";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { getProductionEvent, getEventReport, updateEventReport, deleteEventReport } from "@/lib/event-db";
-import { canWriteReport, canPublishReport } from "@/lib/event-permissions";
-import { dispatchReportNotification, dispatchMentionNotifications } from "@/lib/notify";
-import type { Mention } from "@/lib/event-db";
+import { getProductionEvent, getEventReport, updateEventReport, deleteEventReport } from "@/lib/ops/event-db";
+import { canWriteReport, canPublishReport } from "@/lib/ops/event-permissions";
+import { dispatchReportNotification, dispatchMentionNotifications } from "@/lib/notify/notify";
+import type { Mention } from "@/lib/ops/event-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; reportId: string }> };
 

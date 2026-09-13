@@ -2,7 +2,7 @@
  * Pre-migration snapshot for migrate-retire-grant-template invariance tests.
  *
  * 这支迁移是纯 DROP，没有数据要迁——真正要守的不变量是**收编的等价性**：
- * 表里那份模板（`role_name × permission_key`）必须在 `lib/templates/*.ts` 里
+ * 表里那份模板（`role_name × permission_key`）必须在 `lib/production/templates/*.ts` 里
  * 一键不差地重现。故快照直接存表的全部内容，迁移测试拿它逐键比对模版常量。
  *
  * isMigrationNeeded: grant_template 表还在。

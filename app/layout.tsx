@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { listMyProductionsWithRoles } from "@/lib/db";
-import { countUnreadNotifications } from "@/lib/inbox-db";
-import { countPendingTasksForUser, countUnreadReportsForUser } from "@/lib/event-db";
-import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
-import { getUserTier, PRODUCTION_TIERS } from "@/lib/plan";
+import { countUnreadNotifications } from "@/lib/notify/inbox-db";
+import { countPendingTasksForUser, countUnreadReportsForUser } from "@/lib/ops/event-db";
+import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/perm/permissions";
+import { getUserTier, PRODUCTION_TIERS } from "@/lib/account/plan";
 import ManualSaveNotice from "@/components/ManualSaveNotice";
 import AppShell from "@/components/AppShell";
 // 剧本字体的 @font-face（生成文件，见 scripts/fonts/build-fonts.py）；先于 globals.css 引入
@@ -51,7 +51,7 @@ export default async function RootLayout({
     // or fallback text-role path for pre-migration productions.
     canAdmin: session!.isAdmin || p.isOwner || p.hasAdminPerm,
     // 档位开关（#280）：付费维度，与 canAdmin 那条权限维度正交——权限决定视图里
-    // 能看到什么内容，档位决定菜单里有没有这一项。lib/plan.ts 的常量表不能进客户端
+    // 能看到什么内容，档位决定菜单里有没有这一项。lib/account/plan.ts 的常量表不能进客户端
     // 包，所以在这里解析成布尔值下发。
     planAi: PRODUCTION_TIERS[p.planTier].ai,
     planAdvancedPerms: PRODUCTION_TIERS[p.planTier].advancedPerms,

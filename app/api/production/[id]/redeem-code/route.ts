@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { redeemPlanCode, redeemRateLimited, REDEEM_ERROR_MESSAGES, PRODUCTION_TIERS, type ProductionTier } from "@/lib/plan";
+import { redeemPlanCode, redeemRateLimited, REDEEM_ERROR_MESSAGES, PRODUCTION_TIERS, type ProductionTier } from "@/lib/account/plan";
 
 // 项目档位兑换码（#280）：kind=production_upgrade 的 plan_code 在这里消费，
 // owner-only——owner 是账单责任人（未来付费），档位变更只能由其本人操作。

@@ -1,6 +1,6 @@
 -- 审批流程模版存储层（prA）。设计：docs/approval-flow-template-design-2026-09-03.md。
 -- 只存不驱动：执行引擎（prB）落地前，published 仅是「使用中」声明标记。
--- 节点结构校验在 lib/approval-flow-template.ts 的运行时白名单（服务端 create/update 必经），
+-- 节点结构校验在 lib/approval/approval-flow-template.ts 的运行时白名单（服务端 create/update 必经），
 -- DB 侧只押结构无关的硬约束。
 
 CREATE TABLE IF NOT EXISTS approval_flow_template (

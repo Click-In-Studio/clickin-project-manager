@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/agent/questions/route";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 
 // ask_user 问题面的 guard 测试。行为（待答列表、路人/伪造 id 统一 404、回答落表）在
 // tests/agent-runtime-routes.test.ts 里对着真表测；这里只测每条拒绝路径与协议形状。

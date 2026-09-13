@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import { hasGrant, hasAnyGrant, toActor } from "@/lib/grant-check";
+import { hasGrant, hasAnyGrant, toActor } from "@/lib/perm/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
-import { verifyCardToken } from "@/lib/card-token";
+import { getSession } from "@/lib/account/session";
+import { verifyCardToken } from "@/lib/notify/card-token";
 import { getProductionPermissionContext, listProductionMembers } from "@/lib/db";
 import {
   getReportByProduction,
@@ -12,13 +12,13 @@ import {
   listReportReplies,
   listEventDepartments,
   markReportRead,
-} from "@/lib/event-db";
+} from "@/lib/ops/event-db";
 import {
   loadEventPermContext,
   canModerateNotes, isReportViewer,
   canReplyToReport,
   hasEventDomainView,
-} from "@/lib/event-permissions";
+} from "@/lib/ops/event-permissions";
 import ReportViewClient from "@/components/ReportViewClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; reportId: string }> }): Promise<Metadata> {

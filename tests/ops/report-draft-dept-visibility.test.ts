@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { createEventReport, listProductionReports } from "@/lib/event-db";
+import { createEventReport, listProductionReports } from "@/lib/ops/event-db";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 

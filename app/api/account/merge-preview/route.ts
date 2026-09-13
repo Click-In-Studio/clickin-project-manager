@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { verifyConflictToken } from "@/lib/platform/email/email-tokens";
 import { getAccountSummary, getSharedProductions } from "@/lib/db";
 

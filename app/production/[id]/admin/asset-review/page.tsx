@@ -3,9 +3,9 @@ export const metadata: Metadata = { title: "数字资产审查" };
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { requireAdminAccess } from "@/lib/admin-guard";
-import { getSession } from "@/lib/session";
-import { hasGrant } from "@/lib/grant-check";
+import { requireAdminAccess } from "@/lib/perm/admin-guard";
+import { getSession } from "@/lib/account/session";
+import { hasGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listPrivateAssets } from "@/lib/asset/review-db";
 import AdminAssetReviewClient from "@/components/AdminAssetReviewClient";

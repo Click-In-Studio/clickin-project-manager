@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
 import type { Mention } from "@/lib/db";
-import { hasAnyEffectiveGrant, toActor } from "@/lib/grant-check";
-import { notifyUsers } from "@/lib/notify";
+import { hasAnyEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { notifyUsers } from "@/lib/notify/notify";
 
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);

@@ -11,22 +11,22 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import { useVisibleEventSource } from "@/hooks/useVisibleEventSource";
-import { userAvatarSrc } from "@/lib/avatar-url";
+import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import { fmtDateTime } from "@/lib/tz";
 import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/SmartTextarea";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import AdminModal from "@/components/AdminModal";
 import DropdownPicker from "@/components/DropdownPicker";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
-import { encodeAssetSrc } from "@/lib/mention-types";
+import { encodeAssetSrc } from "@/lib/editor/mention-types";
 import { collectWikilinkTitles, promoteWikilinks } from "@/lib/wiki/input-normalize";
 import { checkFidelity, lineDiff, type FidelityDiff, type DiffHunk } from "@/lib/wiki/fidelity";
 import type { WikiDoc } from "@/lib/wiki/types";
 import type { WikiRef, WikiEntityRef } from "@/lib/wiki/links";
 import WikiEntityRefs from "@/components/wiki/WikiEntityRefs";
 import type { WikiPeer } from "@/lib/wiki/collab";
-import { mergeLines } from "@/lib/line-merge";
-import type { Mention } from "@/lib/event-db";
+import { mergeLines } from "@/lib/editor/line-merge";
+import type { Mention } from "@/lib/ops/event-db";
 
 type ShareLevel = "view" | "edit" | "manage";
 type ShareState = {

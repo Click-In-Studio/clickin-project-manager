@@ -1,18 +1,18 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createWiki, getWiki } from "@/lib/wiki/content";
 import { setNodePublic, setNodeListable, setNodeDeptShares, listNodeLibrary, getNodeByWikiId, moveNode } from "@/lib/node/db";
 import { isNodeAnchor, ensureDramaturgyRootAnchor } from "@/lib/node/anchors";
 import { canViewWiki } from "@/lib/wiki/perm";
 import { listEnumerableNodeIds, canEnumerateNode, canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
-import { WIKI_LEVEL_ROW_SETS } from "@/lib/resource-grant-db";
+import { WIKI_LEVEL_ROW_SETS } from "@/lib/perm/resource-grant-db";
 import { GET as wikiListGET, POST as wikiPOST } from "@/app/api/production/[id]/wiki/route";
 import { PATCH as wikiPATCH } from "@/app/api/production/[id]/wiki/[wikiId]/route";
 import { GET as shareGET, PUT as sharePUT } from "@/app/api/production/[id]/wiki/[wikiId]/share/route";
 import { GET as directoryGET } from "@/app/api/production/[id]/resource-directory/route";
-import { wikiProposeCreate, wikiProposeMove } from "@/lib/agent-tools/wiki-tools";
+import { wikiProposeCreate, wikiProposeMove } from "@/lib/agent/tools/wiki-tools";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
 // #357 枚举面：目录树可见性，与内容面（canViewWiki）正交。

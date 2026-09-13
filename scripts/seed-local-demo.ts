@@ -21,13 +21,13 @@ import {
   createEventTechReq,
   createProductionEvent,
   createScheduleItem,
-} from "../lib/event-db";
+} from "../lib/ops/event-db";
 import { createWiki } from "../lib/wiki/content";
 import { createAsset } from "../lib/asset/db";
-import { createUserNotification } from "../lib/inbox-db";
-import { createMaterial, listMaterialStatuses } from "../lib/material-db";
-import { approveExpense, createBudgetCategory, submitExpense } from "../lib/finance-db";
-import { createPhase } from "../lib/phase-db";
+import { createUserNotification } from "../lib/notify/inbox-db";
+import { createMaterial, listMaterialStatuses } from "../lib/ops/material-db";
+import { approveExpense, createBudgetCategory, submitExpense } from "../lib/ops/finance-db";
+import { createPhase } from "../lib/ops/phase-db";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 
@@ -502,7 +502,7 @@ async function main() {
     [PRODUCTION_ID, user.id],
   );
 
-  // 时长只能取 lib/approval-ttl 的档位（服务端白名单同一份表），别写 "30 days"
+  // 时长只能取 lib/approval/approval-ttl 的档位（服务端白名单同一份表），别写 "30 days"
   const approvalTime = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
   const pendingApprovals = [
     {

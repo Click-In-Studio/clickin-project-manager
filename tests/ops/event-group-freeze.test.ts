@@ -20,16 +20,16 @@ import { makeProduction, cleanupProduction, shortId } from "../_support/factorie
 import { upsertFeishuUser, addProductionMember, getProductionPermissionContext } from "@/lib/db";
 import {
   createProductionEvent, createScheduleItem, createEventTechReq, getTechReqByProduction,
-} from "@/lib/event-db";
-import { createEventGroup, deleteEventGroup, EventGroupError, setScheduleItemGroups } from "@/lib/event-group-db";
+} from "@/lib/ops/event-db";
+import { createEventGroup, deleteEventGroup, EventGroupError, setScheduleItemGroups } from "@/lib/ops/event-group-db";
 import {
   FREEZE_GRACE_DAYS, describeFrozenGroups, freezeEventGroups, freezeExpiredEventGroups,
   frozenGroupPocUserIds, frozenGroupUserIds, isEventFrozen, isGroupFrozenForEvent,
   unfreezeEventGroups,
-} from "@/lib/event-group-freeze";
-import { canEnterEvent } from "@/lib/event-permissions";
-import { isTaskPoc } from "@/lib/task-poc";
-import { toActor } from "@/lib/grant-check";
+} from "@/lib/ops/event-group-freeze";
+import { canEnterEvent } from "@/lib/ops/event-permissions";
+import { isTaskPoc } from "@/lib/ops/task-poc";
+import { toActor } from "@/lib/perm/grant-check";
 
 let prodId: string;
 let ownerId: string, organizerId: string, pocId: string, newbieId: string, runnerId: string, laterId: string;

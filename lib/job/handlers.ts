@@ -2,7 +2,7 @@
 // next 路由只 import queue，enqueue 快路径不背这些包；worker bundle 才真正装载。
 
 import { TerminalJobError, type JobRow } from "./queue";
-import { neutralizeInjectionTags } from "@/lib/agent-injection-safety";
+import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
 
 export type JobHandler = (payload: Record<string, unknown>, job: JobRow) => Promise<Record<string, unknown> | null>;
 

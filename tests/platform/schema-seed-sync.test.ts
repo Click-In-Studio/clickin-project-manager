@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
-import { PRODUCTION_TEMPLATES } from "@/lib/production-template";
-import { THEATRE_TEMPLATE } from "@/lib/templates/theatre";
+import { PRODUCTION_TEMPLATES } from "@/lib/production/production-template";
+import { THEATRE_TEMPLATE } from "@/lib/production/templates/theatre";
 
 /**
  * 模板 seed 的防漂移棘轮。

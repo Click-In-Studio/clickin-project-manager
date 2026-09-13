@@ -6,9 +6,9 @@ import { describe, it, expect } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
-import { Column, ColumnGroup, promoteColumnFences, parseColsRatios } from "@/lib/tiptap-columns";
-import { transformColumns } from "@/lib/remark-columns";
-import { transformFeishuHtml } from "@/lib/feishu-paste";
+import { Column, ColumnGroup, promoteColumnFences, parseColsRatios } from "@/lib/editor/tiptap-columns";
+import { transformColumns } from "@/lib/editor/remark-columns";
+import { transformFeishuHtml } from "@/lib/editor/feishu-paste";
 
 describe("parseColsRatios", () => {
   it("合法/非法参数", () => {

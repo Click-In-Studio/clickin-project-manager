@@ -4,7 +4,7 @@ import OverflowSafeSelect from "@/components/OverflowSafeSelect";
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import type { MyReportEntry } from "@/lib/event-db";
+import type { MyReportEntry } from "@/lib/ops/event-db";
 import { BASE_PATH } from "@/lib/base-path";
 import styles from "@/components/my-pages.module.css";
 

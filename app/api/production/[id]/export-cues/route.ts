@@ -1,12 +1,12 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getProductionPermissionContext, listCues, loadProduction, getActiveVersionId } from "@/lib/db";
-import { canAccessNode } from "@/lib/grant-template";
+import { canAccessNode } from "@/lib/perm/grant-template";
 import { resolveWikiToSheet, getFirstSheetId, writeSheetData, type CellValue } from "@/lib/platform/feishu/feishu-sheet";
-import { formatCuePosition } from "@/lib/cue-export";
-import type { CueAnchor } from "@/lib/cue-types";
-import { textBlocksWithMarkerOwnership } from "@/lib/script-marker-blocks";
+import { formatCuePosition } from "@/lib/ops/cue-export";
+import type { CueAnchor } from "@/lib/ops/cue-types";
+import { textBlocksWithMarkerOwnership } from "@/lib/script/script-marker-blocks";
 
 function sseFrame(event: string, data: string): string {
   return `event: ${event}\ndata: ${data}\n\n`;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseCron, nextCronFire, nextFireAt, validateSchedule, describeSchedule, wallClock, wallToInstant, formatInTz } from "@/lib/agent-runtime/schedule-cron";
-import { SCHEDULE_LIMITS } from "@/lib/plan";
+import { parseCron, nextCronFire, nextFireAt, validateSchedule, describeSchedule, wallClock, wallToInstant, formatInTz } from "@/lib/agent/runtime/schedule-cron";
+import { SCHEDULE_LIMITS } from "@/lib/account/plan";
 
 // 定时任务时间表（纯函数）：cron 解析、按 tz 墙钟算下一次、成本闸校验、人话。
 
@@ -59,7 +59,7 @@ describe("nextCronFire / nextFireAt", () => {
   });
 });
 
-describe("validateSchedule（成本闸在 lib/plan.ts）", () => {
+describe("validateSchedule（成本闸在 lib/account/plan.ts）", () => {
   const now = at("2026-08-30T12:00:00Z");
   it("规范化：cron 默认上海时区；at 转 ISO；every 取整", () => {
     expect(validateSchedule({ kind: "cron", expr: " 0 23 * * * " }, now)).toMatchObject({ ok: true, schedule: { kind: "cron", expr: "0 23 * * *", tz: TZ }, firesPerDay: 1 });

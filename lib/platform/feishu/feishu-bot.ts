@@ -1,5 +1,5 @@
 import { getAppAccessToken, getTenantAccessToken } from "./feishu-auth";
-import type { WeeklyCallEntry, DailyCallScheduleItem } from "../../event-db";
+import type { WeeklyCallEntry, DailyCallScheduleItem } from "../../ops/event-db";
 
 const BASE = "https://open.feishu.cn/open-apis";
 
@@ -161,7 +161,7 @@ export function buildReportCard(
   publishedAt: string,
   url: string,
 ): object {
-  // body 已由 notify 经通知管线投影 + AST 层截断（见 lib/notify-doc）。
+  // body 已由 notify 经通知管线投影 + AST 层截断（见 lib/notify/doc）。
   // 这里**不再自己切**：按字符数切裸 markdown 会把 [标签](私有href) 拦腰截断。
   const preview = body;
   const lines = [

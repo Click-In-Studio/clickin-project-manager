@@ -75,8 +75,8 @@ function fixtureBlocks(): Array<{ content: string; lyric: boolean; character: 0 
 async function seedFixture(): Promise<{ prodId: string; cookie: string; pageLayout: string; textLayoutMode: string; templateId: string | null }> {
   const { getPool } = await import("../../lib/pg");
   const { createProduction, getActiveVersionId, applyPatchToDB, flushToDBVersioned, loadProduction, saveScriptConfig } = await import("../../lib/db");
-  const { DEFAULT_SCRIPT_CONFIG } = await import("../../lib/script-types");
-  const { createSession, SESSION_COOKIE } = await import("../../lib/session");
+  const { DEFAULT_SCRIPT_CONFIG } = await import("../../lib/script/script-types");
+  const { createSession, SESSION_COOKIE } = await import("../../lib/account/session");
   const { randomUUID: uuid } = await import("node:crypto");
 
   const pool = getPool();

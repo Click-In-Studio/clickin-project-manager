@@ -14,8 +14,8 @@
 import { describe, it, expect } from "vitest";
 import {
   POLICY_QUESTIONS, QUESTION_COVERED_KEYS, questionKeys, matchAnswer,
-} from "@/lib/policy-questions";
-import { POLICY_KEYS, policyDef, isLegalValue } from "@/lib/policy-keys";
+} from "@/lib/perm/policy-questions";
+import { POLICY_KEYS, policyDef, isLegalValue } from "@/lib/perm/policy-keys";
 
 const defaults = (): Map<string, string> =>
   new Map(POLICY_KEYS.map((d) => [d.key, d.defaultValue]));

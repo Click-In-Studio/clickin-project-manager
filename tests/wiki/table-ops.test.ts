@@ -18,8 +18,8 @@ import {
   moveRow, moveColumn, duplicateRow, duplicateColumn, hasMergedCells,
   isRowSelection, isColSelection, duplicateSelectedRow, duplicateSelectedColumn,
   applyAcrossCells, selectionSpan,
-} from "@/lib/table-ops";
-import { TableKeymap } from "@/lib/tiptap-table-keymap";
+} from "@/lib/editor/table-ops";
+import { TableKeymap } from "@/lib/editor/tiptap-table-keymap";
 
 function makeEditor(content: string) {
   return new Editor({

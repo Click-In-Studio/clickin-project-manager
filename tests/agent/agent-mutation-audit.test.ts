@@ -3,8 +3,8 @@ import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/db";
 import { createWiki, getWiki } from "@/lib/wiki/content";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { buildTools, exposedName, type RunHandle } from "@/lib/agent-runtime/tools";
-import { AUDITED_SCOPES, describeMutation, diffSnapshots, sanitizeChanges, textDiffStats, listRunMutations, type MutationRecord } from "@/lib/agent-runtime/mutation-audit";
+import { buildTools, exposedName, type RunHandle } from "@/lib/agent/runtime/tools";
+import { AUDITED_SCOPES, describeMutation, diffSnapshots, sanitizeChanges, textDiffStats, listRunMutations, type MutationRecord } from "@/lib/agent/runtime/mutation-audit";
 
 // AI 写操作 diff 审计（db/add-agent-mutation.sql）：写工具真改了东西才落行，
 // before/after 由域读取器定形，changes 是给人看的字段级变化。
@@ -148,8 +148,8 @@ describe("账本落行（真 DB、真工具函数、无模型）", () => {
   it("wiki 删除：写前在、写后不在 → deleted 行带 before 快照；listRunMutations 按 run 取", async () => {
     const doc = await createWiki({ productionId: prodId, title: "过时的", body: "x", createdBy: userId });
     // 造一个 run 行，让账本挂上 run_id
-    const { createNewSessionKey } = await import("@/lib/agent-tools/session-identity");
-    const { PgSessionStorage } = await import("@/lib/agent-runtime/pg-session-storage");
+    const { createNewSessionKey } = await import("@/lib/agent/tools/session-identity");
+    const { PgSessionStorage } = await import("@/lib/agent/runtime/pg-session-storage");
     const key = createNewSessionKey(userId, prodId);
     await PgSessionStorage.create({ id: key, userId, productionId: prodId });
     const runId = `ar_audit_${shortId()}`;

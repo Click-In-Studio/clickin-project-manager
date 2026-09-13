@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasEffectiveGrant, toActor } from "@/lib/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { canReachLinkTarget, createNodeLink, isLinkableTarget } from "@/lib/node/link";
 import { getNode, getNodeByWikiId } from "@/lib/node/db";
 import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";

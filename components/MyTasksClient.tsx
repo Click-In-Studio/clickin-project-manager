@@ -4,7 +4,7 @@ import OverflowSafeSelect from "@/components/OverflowSafeSelect";
 
 import { useState } from "react";
 import Link from "next/link";
-import type { MyTechReqFullEntry } from "@/lib/event-db";
+import type { MyTechReqFullEntry } from "@/lib/ops/event-db";
 import { BASE_PATH } from "@/lib/base-path";
 import SmartText from "@/components/SmartText";
 import styles from "@/components/my-pages.module.css";

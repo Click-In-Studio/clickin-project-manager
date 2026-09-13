@@ -1,15 +1,15 @@
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/account/session";
 import {
   getProductionPermissionContext, listScenesByVersion, getActiveVersionId,
   loadProduction, applyPatchToDB, getVersion, listMarkerProjectionByVersion,
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasGrant } from "@/lib/grant-check";
-import { canAccessNode } from "@/lib/grant-template";
-import { diffState } from "@/lib/script-ops";
-import { insertHierarchyMarker, projectMarkers } from "@/lib/script-marker-domain";
-import { rejectNonHeadWrite } from "@/lib/head-version";
+import { hasGrant } from "@/lib/perm/grant-check";
+import { canAccessNode } from "@/lib/perm/grant-template";
+import { diffState } from "@/lib/script/script-ops";
+import { insertHierarchyMarker, projectMarkers } from "@/lib/script/script-marker-domain";
+import { rejectNonHeadWrite } from "@/lib/script/head-version";
 
 const createId = () => crypto.randomUUID();
 

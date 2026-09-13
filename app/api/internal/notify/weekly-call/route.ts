@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { dispatchWeeklyCall } from "@/lib/notify";
+import { dispatchWeeklyCall } from "@/lib/notify/notify";
 
 function authorized(req: NextRequest): boolean {
   const secret = process.env.INTERNAL_NOTIFY_SECRET;

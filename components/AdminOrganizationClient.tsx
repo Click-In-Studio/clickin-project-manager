@@ -10,12 +10,12 @@ import MemberPickerModal from "@/components/MemberPickerModal";
 import InviteModal from "@/components/InviteModal";
 import TreePickerModal from "@/components/TreePickerModal";
 import styles from "@/components/my-pages.module.css";
-import { userAvatarSrc } from "@/lib/avatar-url";
+import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberTag } from "@/lib/db";
-import type { MemberStatus, MemberStatusSource } from "@/lib/member-status-shared";
-import { memberStatusLabel } from "@/lib/member-status-shared";
-import { isInactiveMember } from "@/lib/member-status-shared";
+import type { MemberStatus, MemberStatusSource } from "@/lib/perm/member-status-shared";
+import { memberStatusLabel } from "@/lib/perm/member-status-shared";
+import { isInactiveMember } from "@/lib/perm/member-status-shared";
 
 type Member = {
   userId: string;

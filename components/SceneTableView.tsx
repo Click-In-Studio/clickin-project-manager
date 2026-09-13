@@ -1,12 +1,12 @@
 "use client";
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import type { MarkerProjection } from "@/lib/script-marker-domain";
-import { canMountScene, type SceneFieldPerms } from "@/lib/scene-field-perms-shared";
+import type { MarkerProjection } from "@/lib/script/script-marker-domain";
+import { canMountScene, type SceneFieldPerms } from "@/lib/script/scene-field-perms-shared";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import { parseDuration, formatDuration } from "@/lib/duration";
-import { getChapterDurationDisplay } from "@/lib/scene-duration";
+import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
 import ChevronIcon from "@/components/ChevronIcon";
 
 export type TableColumnDef = {

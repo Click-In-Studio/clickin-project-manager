@@ -1,7 +1,7 @@
 import { getPool } from "../pg";
 import { canPublishAsset } from "../asset/perm";
 import { uid } from "../asset/db";
-import type { GrantActor } from "../grant-check";
+import type { GrantActor } from "../perm/grant-check";
 import { isWikiId } from "./id";
 
 // ─── mention 边提取（两种序列化形态：纯 token 与 markdown 私有 href）───────────

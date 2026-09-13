@@ -1,7 +1,7 @@
 import { getPool } from "../pg";
-import { hasGrant, listGrantedResourceIds } from "../grant-check";
-import { type GrantActor } from "../grant-check";
-import { isPolicyOn } from "../policy-db";
+import { hasGrant, listGrantedResourceIds } from "../perm/grant-check";
+import { type GrantActor } from "../perm/grant-check";
+import { isPolicyOn } from "../perm/policy-db";
 import { canEditWiki, listVisibleWikiIds } from "../wiki/perm";
 import { listEnumerableNodeIds } from "../node/perm";
 import { mountConcededNodeIds, SCENE_MOUNT_TYPES } from "../node/host-visibility";

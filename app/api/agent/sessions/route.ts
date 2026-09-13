@@ -1,10 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { requireUser, toErrorResponse } from "@/lib/agent-chat/http";
+import { requireUser, toErrorResponse } from "@/lib/agent/chat/http";
 import { getProductionPermissionContext, listMyProductionsWithRoles, getUserProfile } from "@/lib/db";
-import { requireProductionFeature } from "@/lib/plan";
-import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/permissions";
-import { PRODUCTION_ID_RE, createNewSessionKey } from "@/lib/agent-tools/session-identity";
-import { listSessions } from "@/lib/agent-runtime/client";
+import { requireProductionFeature } from "@/lib/account/plan";
+import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/perm/permissions";
+import { PRODUCTION_ID_RE, createNewSessionKey } from "@/lib/agent/tools/session-identity";
+import { listSessions } from "@/lib/agent/runtime/client";
 
 export const runtime = "nodejs";
 

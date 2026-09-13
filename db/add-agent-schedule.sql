@@ -1,4 +1,4 @@
--- AI 定时任务（2026-08-30 定谳，见 lib/agent-runtime/schedules.ts）。
+-- AI 定时任务（2026-08-30 定谳，见 lib/agent/runtime/schedules.ts）。
 --
 -- 不是真 cron：一行任务 = 谁（创建者）在哪个制作（可空 = 个人）以什么时间表跑什么指令。
 -- agent-runner 的节拍（60s）用租约式原子 UPDATE 认领到期行，到点以创建者身份**开一个新会话**
@@ -10,7 +10,7 @@
 -- allowed_tools（创建时人在确认卡上圈定的工具清单）；每次写都进 agent_mutation 账本，
 -- 通知里给改动清单——先做后审。
 --
--- id 规约：TEXT PK + 带随机尾的 short id（lib/agent-runtime/ids.ts）。
+-- id 规约：TEXT PK + 带随机尾的 short id（lib/agent/runtime/ids.ts）。
 
 CREATE TABLE IF NOT EXISTS agent_schedule (
   id                    TEXT        PRIMARY KEY,

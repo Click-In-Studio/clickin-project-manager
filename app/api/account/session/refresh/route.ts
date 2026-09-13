@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { getSession, createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/session";
+import { getSession, createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/account/session";
 import { getUserProfile } from "@/lib/db";
 
 export async function POST() {

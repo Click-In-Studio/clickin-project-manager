@@ -1,4 +1,4 @@
-import { FIXED_INITIAL_CHAPTER_NAME } from "@/lib/script-fixed-markers";
+import { FIXED_INITIAL_CHAPTER_NAME } from "@/lib/script/script-fixed-markers";
 import type { JointImportMappingRow, JointImportMarker } from "@/lib/import/types";
 
 export function buildFinalImportMarkers(

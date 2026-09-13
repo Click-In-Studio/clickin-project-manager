@@ -10,8 +10,8 @@
  */
 
 import { type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
-import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval-stages";
+import { getSession } from "@/lib/account/session";
+import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval/approval-stages";
 import { getProductionPermissionContext, isProductionArchived } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 import {
@@ -23,9 +23,9 @@ import {
   getMemberStatus,
   listMemberStatusAudit,
   type TransitionResult,
-} from "@/lib/member-status";
-import { canHandleMemberExit, resolveExitHandlers } from "@/lib/member-exit-routing";
-import { notifyMemberExitPending, notifyMemberStatusChanged } from "@/lib/notify";
+} from "@/lib/perm/member-status";
+import { canHandleMemberExit, resolveExitHandlers } from "@/lib/perm/member-exit-routing";
+import { notifyMemberExitPending, notifyMemberStatusChanged } from "@/lib/notify/notify";
 
 const ACTIONS = ["self_exit", "suspend", "restore", "confirm_exit", "object", "endorse"] as const;
 type Action = (typeof ACTIONS)[number];

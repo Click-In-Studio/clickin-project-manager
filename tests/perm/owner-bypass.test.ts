@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import type { PermissionContext } from "@/lib/permissions";
+import type { PermissionContext } from "@/lib/perm/permissions";
 import {
   canWriteReport, canPublishReport, canEditTechReq, canAssignTechReq,
   canViewTechReq, canWriteNote, canEditNote, canModerateNotes, isReportViewer,
-} from "@/lib/event-permissions";
+} from "@/lib/ops/event-permissions";
 import { canViewAsset, filterVisibleAssets, canPublishAsset, canCreateShareToken } from "@/lib/asset/perm";
 
 // owner 代码级旁路回归（PR #246，#228 二次漏网教训）：
@@ -26,7 +26,7 @@ function ownerCtx(): PermissionContext {
 
 const PROD = "t_nonexistent_prod";
 
-describe("owner bypass — event/report domain (lib/event-permissions.ts)", () => {
+describe("owner bypass — event/report domain (lib/ops/event-permissions.ts)", () => {
   it("all nine gates short-circuit for a non-member owner with zero grants", async () => {
     const ctx = ownerCtx();
     expect(await canWriteReport(ctx, "rp_x", PROD)).toBe(true);

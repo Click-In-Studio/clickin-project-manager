@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 export const metadata: Metadata = { title: "我的项目" };
 
 import { cookies } from "next/headers";
-import { getSession } from "@/lib/session";
-import { getUserTier } from "@/lib/plan";
+import { getSession } from "@/lib/account/session";
+import { getUserTier } from "@/lib/account/plan";
 import MyProjectsClient from "@/components/MyProjectsClient";
 
 export default async function MyProjectsPage() {

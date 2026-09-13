@@ -4,15 +4,15 @@ import type { AssistantMessage, StreamFn, ToolCall } from "../../vendor/openclaw
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/db";
-import { createNewSessionKey } from "@/lib/agent-tools/session-identity";
-import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent-chat/stream-reducer";
+import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
+import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent/chat/stream-reducer";
 import {
   startRun, steerRun, abortRun, getHistory, listSessions, resumeOrphans, waitForIdle, runtimeOverrides, sessionRunState, __internal,
-} from "@/lib/agent-runtime/service";
-import { readEventsSince, subscribeSessionEvents } from "@/lib/agent-runtime/events";
-import { resolveApproval, approvalSession } from "@/lib/agent-runtime/approvals";
-import { CHAT_MODEL } from "@/lib/agent-runtime/config";
-import { exposedName } from "@/lib/agent-runtime/tools";
+} from "@/lib/agent/runtime/service";
+import { readEventsSince, subscribeSessionEvents } from "@/lib/agent/runtime/events";
+import { resolveApproval, approvalSession } from "@/lib/agent/runtime/approvals";
+import { CHAT_MODEL } from "@/lib/agent/runtime/config";
+import { exposedName } from "@/lib/agent/runtime/tools";
 
 // #367 S2：run 服务端到端（真 DB、假模型、真 harness、真工具函数）。
 // 覆盖：事件落表+NOTIFY、历史投影、会话列表、审批门（deny 带理由 / allow）、
@@ -254,7 +254,7 @@ describe("agent-runtime service", () => {
     runtimeOverrides.streamFn = streamFn;
     const key = newKey();
     // 手工制造"上一个进程死了"的状态：会话 + 一条用户消息 + running 且心跳过期的 run
-    const { PgSessionStorage } = await import("@/lib/agent-runtime/pg-session-storage");
+    const { PgSessionStorage } = await import("@/lib/agent/runtime/pg-session-storage");
     const { Session } = await import("../../vendor/openclaw/packages/agent-core/src/harness/session/session");
     const storage = await PgSessionStorage.create({ id: key, userId, productionId: prodId });
     await new Session(storage).appendMessage({ role: "user", content: [{ type: "text", text: "崩溃前的问题" }], timestamp: Date.now() });
@@ -286,7 +286,7 @@ describe("ask_user（#290）：提问 → 卡片 → 回答 → 工具结果", (
   });
 
   it("模型调 ask_user → question 行（QuestionInfo 形态）→ 用户回答 → 模型看到答案；取消 → 错误结果", async () => {
-    const { questionSession, resolveQuestion, listPendingQuestions } = await import("@/lib/agent-runtime/questions");
+    const { questionSession, resolveQuestion, listPendingQuestions } = await import("@/lib/agent/runtime/questions");
     const ask = (id: string): ToolCall => ({
       type: "toolCall", id, name: exposedName("ask_user"),
       arguments: { questions: [{ questionId: "q1", header: "演出日期", question: "首演定在哪天？", options: [{ label: "10月18日" }, { label: "10月25日" }] }] },
@@ -349,8 +349,8 @@ describe("§4.4 排水/脱离：等待态 run 交给下一个进程，不留痕�
   });
 
   it("等提问时脱离 → transcript 无 aborted、run 仍 awaiting_answer、无 aborted 事件；接管后复用同一问题并续跑", async () => {
-    const { detachAll, resumeOrphans } = await import("@/lib/agent-runtime/service");
-    const { resolveQuestion } = await import("@/lib/agent-runtime/questions");
+    const { detachAll, resumeOrphans } = await import("@/lib/agent/runtime/service");
+    const { resolveQuestion } = await import("@/lib/agent/runtime/questions");
     const ask: ToolCall = {
       type: "toolCall", id: "c_det", name: exposedName("ask_user"),
       arguments: { questions: [{ questionId: "q1", header: "颜色", question: "主色调？", options: [{ label: "深蓝" }, { label: "酒红" }] }] },
@@ -394,7 +394,7 @@ describe("§4.4 排水/脱离：等待态 run 交给下一个进程，不留痕�
   });
 
   it("等审批时脱离 → 接管后复用同一张卡，批准后写工具真执行", async () => {
-    const { detachAll, resumeOrphans } = await import("@/lib/agent-runtime/service");
+    const { detachAll, resumeOrphans } = await import("@/lib/agent/runtime/service");
     const write: ToolCall = { type: "toolCall", id: "c_det_w", name: exposedName("my.update_instructions"), arguments: { content: "叫我导演" } };
     runtimeOverrides.streamFn = scripted([{ calls: [write] }]).streamFn;
     const key = createNewSessionKey(userId);

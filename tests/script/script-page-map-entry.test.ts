@@ -13,7 +13,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
-import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import {
   applyPatchToDB,
   getEstimatedPageMap,
@@ -23,9 +23,9 @@ import {
   savePageMap,
   saveScriptConfig,
 } from "@/lib/db";
-import { computePageMap } from "@/lib/script-page";
-import { DEFAULT_SCRIPT_CONFIG, type Block } from "@/lib/script-types";
-import { buildMarkerLabelIndex } from "@/lib/script-generated-labels";
+import { computePageMap } from "@/lib/script/script-page";
+import { DEFAULT_SCRIPT_CONFIG, type Block } from "@/lib/script/script-types";
+import { buildMarkerLabelIndex } from "@/lib/script/script-generated-labels";
 import { GET as pagesGET } from "@/app/api/script/[id]/pages/route";
 import { GET as blockSearchGET } from "@/app/api/production/[id]/script/block-search/route";
 import { POST as mentionResolvePOST } from "@/app/api/production/[id]/mention-resolve/route";
