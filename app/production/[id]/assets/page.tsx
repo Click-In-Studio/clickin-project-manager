@@ -7,7 +7,7 @@ import { getSession } from "@/lib/account/session";
 import { hasAnyGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getActiveVersionId } from "@/lib/db";
 import AssetPageClient from "@/components/assets/AssetPageClient";
-import PageActivationGate from "@/components/PageActivationGate";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export default async function AssetsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

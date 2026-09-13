@@ -1,4 +1,4 @@
-import PageHeader from "@/components/PageHeader";
+import PageHeader from "@/components/ui/PageHeader";
 
 // 管理后台占位页（v3 统一风格）：eyebrow=项目名，group 显示于空态 kicker。
 export default function AdminPlaceholder({

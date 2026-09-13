@@ -1,12 +1,12 @@
 "use client";
 
-import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import SheetPicker from "./SheetPicker";
 import ColumnMapper, { columnLetter } from "./ColumnMapper";
-import TagFormatOptionList, { TagFormatGuide } from "@/components/TagFormatOptionList";
+import TagFormatOptionList, { TagFormatGuide } from "@/components/import/TagFormatOptionList";
 import { buildImportFormatOptionIds, mergeVisibleTagOptionOrder } from "@/lib/import/tag-format";
 import { shouldImportFirstChapterAsOpening } from "@/lib/import/opening-chapter";
 import { buildFinalImportMarkers } from "@/lib/import/final-markers";

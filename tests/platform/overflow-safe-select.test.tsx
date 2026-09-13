@@ -4,7 +4,7 @@ import { act, Fragment, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import { Z_INDEX } from "@/lib/z-index";
 
 describe("OverflowSafeSelect", () => {

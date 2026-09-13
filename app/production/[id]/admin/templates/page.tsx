@@ -9,7 +9,7 @@ import { hasGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import { listDeptCueTemplates, listCueTemplateTypes } from "@/lib/ops/cue-template-db";
-import AdminTemplatesClient from "@/components/AdminTemplatesClient";
+import AdminTemplatesClient from "@/components/admin/AdminTemplatesClient";
 
 export default async function TemplatesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

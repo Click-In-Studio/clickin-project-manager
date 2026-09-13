@@ -6,7 +6,7 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getProductionPermissionContext, getProductionName, listMilestones } from "@/lib/db";
 import { getSession } from "@/lib/account/session";
 import { cookies } from "next/headers";
-import AdminMilestonesClient from "@/components/AdminMilestonesClient";
+import AdminMilestonesClient from "@/components/admin/AdminMilestonesClient";
 
 export default async function MilestonesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

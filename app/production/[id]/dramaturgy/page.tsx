@@ -14,8 +14,8 @@ import {
   listMarkerProjectionByVersion,
   listCharactersByVersion,
 } from "@/lib/db";
-import Dramaturgy from "@/components/Dramaturgy";
-import PageActivationGate from "@/components/PageActivationGate";
+import Dramaturgy from "@/components/script/Dramaturgy";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export default async function DramaturgyPage({
   params,

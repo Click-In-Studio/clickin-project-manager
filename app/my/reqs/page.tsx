@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { listMyTechReqsFull } from "@/lib/ops/event-db";
-import MyReqsClient from "@/components/MyReqsClient";
+import MyReqsClient from "@/components/ops/MyReqsClient";
 
 export default async function MyReqsPage() {
   const cookieStore = await cookies();

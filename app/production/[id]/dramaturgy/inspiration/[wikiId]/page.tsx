@@ -18,10 +18,10 @@ import { canEditWiki, canShareWiki, canViewWiki } from "@/lib/wiki/perm";
 import { listEventDepartments } from "@/lib/ops/event-db";
 import { getNode } from "@/lib/node/db";
 import { listDramaturgyTreeFor } from "@/lib/node/tree-view";
-import { DramaturgyInspirationShell } from "@/components/DramaturgyWorkspaceTabs";
+import { DramaturgyInspirationShell } from "@/components/script/DramaturgyWorkspaceTabs";
 import WikiShell from "@/components/wiki/WikiShell";
 import WikiDocClient from "@/components/wiki/WikiDocClient";
-import PageActivationGate from "@/components/PageActivationGate";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export default async function DramaturgyInspirationDocPage({
   params,

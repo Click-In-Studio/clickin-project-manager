@@ -355,3 +355,45 @@ describe("lib/ 按域分目录，根只留基建", () => {
     expect(ghosts).toEqual([]);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// components/ 目录形态棘轮（#482）
+// ─────────────────────────────────────────────────────────────────────────────
+// 104 个文件平铺过一次，三分（ui 原语 / 页面容器按域 / admin）之后不许回退。
+// 只钉形态不钉名单：根目录不放文件、域下不套层、文件名两种形态之一。
+// 域目录清单与归属原则见 DEV_GUIDE §11.2。
+
+describe("components/ 按域分目录，不回退成平铺", () => {
+  const COMPONENTS_ROOT = path.join(ROOT, "components");
+
+  it("根目录没有文件——组件必须进域目录（通用原语进 ui/，壳进 shell/）", async () => {
+    const entries = await readdir(COMPONENTS_ROOT, { withFileTypes: true });
+    const strays = entries.filter((e) => e.isFile()).map((e) => e.name);
+    expect(strays, "components/ 根目录出现了文件，请移到对应域目录（DEV_GUIDE §11.2）").toEqual([]);
+  });
+
+  it("域目录只有一层：components/<domain>/ 之下没有子目录", async () => {
+    const deep: string[] = [];
+    for (const d of await readdir(COMPONENTS_ROOT, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      for (const e of await readdir(path.join(COMPONENTS_ROOT, d.name), { withFileTypes: true })) {
+        if (e.isDirectory()) deep.push(`${d.name}/${e.name}`);
+      }
+    }
+    expect(deep).toEqual([]);
+  });
+
+  it("文件名两种形态：组件 PascalCase.tsx；hook / context / util 与样式 kebab-case", async () => {
+    // PascalCase 给默认导出一个组件的文件（含其 .module.css）；kebab-case 给
+    // 非组件模块（use-fonts-settled.ts、ai-target.tsx、watermark-tile.ts）与共享样式。
+    const ok = /^(?:[A-Z][A-Za-z0-9]*|[a-z0-9]+(?:-[a-z0-9]+)*)(?:\.module)?\.(?:tsx?|css)$/;
+    const bad: string[] = [];
+    for (const d of await readdir(COMPONENTS_ROOT, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      for (const f of await readdir(path.join(COMPONENTS_ROOT, d.name))) {
+        if (!ok.test(f)) bad.push(`${d.name}/${f}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+});

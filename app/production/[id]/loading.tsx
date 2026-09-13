@@ -1,4 +1,4 @@
-import PageSkeleton from "@/components/PageSkeleton";
+import PageSkeleton from "@/components/ui/PageSkeleton";
 
 /**
  * 项目内全部页面（含 admin 子段）的 Suspense 边界。

@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/account/session";
 import { listMyTechReqsFull } from "@/lib/ops/event-db";
-import MyTasksClient from "@/components/MyTasksClient";
+import MyTasksClient from "@/components/ops/MyTasksClient";
 
 export const metadata: Metadata = { title: "我的任务" };
 

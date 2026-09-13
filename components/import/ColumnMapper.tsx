@@ -1,6 +1,6 @@
 "use client";
 
-import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import type { SheetData } from "@/lib/import/types";
 

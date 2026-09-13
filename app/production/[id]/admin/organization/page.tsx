@@ -14,7 +14,7 @@ import {
   listMemberTags,
 } from "@/lib/db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
-import AdminOrganizationClient from "@/components/AdminOrganizationClient";
+import AdminOrganizationClient from "@/components/admin/AdminOrganizationClient";
 
 export default async function OrganizationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

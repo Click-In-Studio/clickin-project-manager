@@ -7,8 +7,8 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName, listCueListsWithAccess, getUserAllowedCueTypes, listProductionMembersWithRoles } from "@/lib/db";
 import { canAccessNode } from "@/lib/perm/grant-template";
 import { listCueTemplateTypes } from "@/lib/ops/cue-template-db";
-import CueListsManager from "@/components/CueListsManager";
-import PageActivationGate from "@/components/PageActivationGate";
+import CueListsManager from "@/components/ops/CueListsManager";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export default async function CueListsPage({
   params,

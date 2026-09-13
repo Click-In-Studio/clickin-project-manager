@@ -12,10 +12,10 @@ import {
   getProductionName,
   listProductionMembersWithRoles,
 } from "@/lib/db";
-import PageHeader from "@/components/PageHeader";
+import PageHeader from "@/components/ui/PageHeader";
 import { listProductionDepts } from "@/lib/perm/dept-db";
-import TransferOwnerCard from "@/components/TransferOwnerCard";
-import AdminDangerSection from "@/components/AdminDangerSection";
+import TransferOwnerCard from "@/components/admin/TransferOwnerCard";
+import AdminDangerSection from "@/components/admin/AdminDangerSection";
 
 export default async function DangerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

@@ -6,8 +6,8 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getProductionPermissionContext, getProductionMeta } from "@/lib/db";
 import { getSession } from "@/lib/account/session";
 import { cookies } from "next/headers";
-import AdminSettingsClient from "@/components/AdminSettingsClient";
-import ProductionPlanCard from "@/components/ProductionPlanCard";
+import AdminSettingsClient from "@/components/admin/AdminSettingsClient";
+import ProductionPlanCard from "@/components/admin/ProductionPlanCard";
 import { getProductionPlan, PRODUCTION_TIERS } from "@/lib/account/plan";
 
 export default async function SettingsPage({ params }: { params: Promise<{ id: string }> }) {

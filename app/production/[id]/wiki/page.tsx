@@ -7,8 +7,8 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { listNodeTreeFor } from "@/lib/node/tree-view";
-import PageHeader from "@/components/PageHeader";
-import PageActivationGate from "@/components/PageActivationGate";
+import PageHeader from "@/components/ui/PageHeader";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 import WikiShell from "@/components/wiki/WikiShell";
 
 export default async function WikiLibraryPage({ params }: { params: Promise<{ id: string }> }) {

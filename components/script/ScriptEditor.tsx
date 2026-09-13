@@ -1,0 +1,12316 @@
+"use client";
+
+import React from "react";
+import {
+  type DragEvent,
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { flushSync } from "react-dom";
+import Link from "next/link";
+import { BASE_PATH } from "@/lib/base-path";
+import { useDocumentVisible } from "@/hooks/useVisibleEventSource";
+import ChevronIcon from "@/components/ui/ChevronIcon";
+import type { Block, BlockType, Character, Scene, ScriptState, ScriptConfig, ScriptTextLayoutMode } from "@/lib/script/script-types";
+import type { TagGroup, BlockTagValue, SceneDetail } from "@/lib/db";
+import TagGroupEditor from "@/components/script/TagGroupEditor";
+import MountPointAssets from "@/components/assets/MountPointAssets";
+import DurationInput from "@/components/ui/DurationInput";
+import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script/script-types";
+import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
+import { diffState, type TagEntry } from "@/lib/script/script-ops";
+import { convertMarker, executeMarkerDeletion, getMarkerChange, insertMarker, markerCacheUpdateBlockIds, normalizeScriptMarkerInvariants as normalizeSharedMarkerInvariants, planMarkerDeletion, type BlockChange, type MarkerChange, type MarkerDeleteOperation } from "@/lib/script/script-marker-domain";
+import MarkerDeleteDialog, {
+  type MarkerDeleteDialogState,
+} from "@/components/script/MarkerDeleteDialog";
+import ScriptDialog, {
+  SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS,
+  SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS,
+} from "@/components/script/ScriptDialog";
+import { updateEstimatedPageMap } from "@/lib/script/script-page";
+import type { EstimatedPageMapCache } from "@/lib/script/script-page";
+import SmartTextarea from "@/components/editor/SmartTextarea";
+import SmartText from "@/components/ui/SmartText";
+import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
+import { formatDuration, parseDuration } from "@/lib/duration";
+import { buildMarkerLabelIndex } from "@/lib/script/script-generated-labels";
+import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script/script-marker-blocks";
+import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script/script-marker-ownership-cache";
+import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script/script-selection";
+import { publishScriptFocus } from "@/lib/script/script-focus";
+import { useAgentMutation } from "@/lib/agent/agent-mutations";
+import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script/script-insertion-gaps";
+import ProductionTopMenu, {
+  ProductionOverflowSubmenuButton,
+  ProductionTopMenuDivider,
+  PRODUCTION_TOP_MENU_RIGHT_CLASS,
+  PRODUCTION_TOP_MENU_SLOT_ID,
+  PRODUCTION_TOOLBAR_STAGE,
+  useAnchoredMenu,
+  useProductionToolbar,
+  useProductionToolbarStage,
+} from "@/components/shell/ProductionTopMenu";
+
+import ModeSwitch from "@/components/script/ModeSwitch";
+import { mdToHtml, stagePairRegex } from "@/lib/script/script-md";
+import { isTextBlock, sameCharacters, shouldHideCharacterLabel, shouldShowCharacterGap, shouldShowSceneEndGap } from "@/lib/script/script-block-layout";
+let _seq = 0;
+const uid = () => `${Date.now().toString(36)}${(++_seq).toString(36)}`;
+const LARGE_SELECTION_BLOCK_THRESHOLD = 500;
+const TOOLBAR_FOLD_HYSTERESIS_PX = 16;
+const COMPACT_STAGE_COMMENT_EDITOR_WIDTH_RATIO = 0.8;
+const LINE_INDEX_GUTTER_OFFSET_REM = 1.25;
+const LINE_INDEX_CONTROL_MIN_WIDTH_REM = 0.5;
+const SCRIPT_TOC_CENTER_EVENT = "script-toc-center-active";
+const SCRIPT_EDITOR_MAX_WIDTH_PX = 768; // Tailwind max-w-3xl
+const SCRIPT_BODY_HORIZONTAL_PADDING_REM = 1; // Tailwind px-4; side rails may overlap this padding.
+const SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX = 240;
+const SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM = 11;
+const SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM = 2.5;
+const SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM = 1.75;
+const SCRIPT_TOC_RAIL_NUMBER_SLOT_REM = 0.5; // Minimum number slot width; widened when longer scene numbers need it.
+const SCRIPT_TOC_RAIL_LABEL_GAP_REM = 1.5;
+const SCRIPT_TOC_RAIL_SUBSCENE_INDENT_REM = 1; // Right-edge gap between chapter numbers and scene numbers.
+const SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM = 18;
+const SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX = 576;
+const SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX = 12;
+const SCRIPT_SCENE_DETAIL_MODE_BUTTON_EXTRA_INSET_REM = 0.25;
+const SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM = 2.5;
+const SCRIPT_SCENE_DETAIL_MODE_LABEL = { view: "编辑", edit: "完成" } as const;
+const SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX = 80;
+/** Returns the workspace scroll container element, or document.documentElement as fallback. */
+function getScrollEl(): HTMLElement {
+  return (typeof document !== 'undefined' ? document.getElementById('workspace-scroll') as HTMLElement | null : null)
+    ?? (typeof document !== 'undefined' ? document.documentElement : { scrollTop: 0, clientHeight: 720, getBoundingClientRect: () => ({ top: 0, bottom: 720 }) } as unknown as HTMLElement);
+}
+
+/** Computes visible bounds of the scroll container in viewport coordinates. */
+function getScrollMetrics() {
+  const el = getScrollEl();
+  const isRoot = el === document.documentElement;
+  if (isRoot) {
+    const ch = typeof window !== 'undefined' ? window.innerHeight : 720;
+    return { el, scrollTop: typeof window !== 'undefined' ? window.scrollY : 0, clientHeight: ch, viewTop: 0, viewBottom: ch };
+  }
+  const rect = el.getBoundingClientRect();
+  return { el, scrollTop: el.scrollTop, clientHeight: el.clientHeight, viewTop: rect.top, viewBottom: rect.bottom };
+}
+
+function scrollContainerBy(opts: ScrollToOptions) {
+  if (typeof document === 'undefined') return;
+  const el = document.getElementById('workspace-scroll');
+  if (el) el.scrollBy(opts); else window.scrollBy(opts);
+}
+
+function scrollElementIntoView(
+  element: HTMLElement,
+  align: ScrollLogicalPosition,
+  viewportTopRatio?: number,
+) {
+  if (viewportTopRatio === undefined) {
+    element.scrollIntoView({ behavior: "instant", block: align });
+    return;
+  }
+  const blockElement = element.closest<HTMLElement>("[data-bwrap]") ?? element;
+  const { clientHeight, viewTop } = getScrollMetrics();
+  const targetTop = viewTop + clientHeight * viewportTopRatio;
+  const delta = blockElement.getBoundingClientRect().top - targetTop;
+  if (Math.abs(delta) >= 0.5) scrollContainerBy({ top: delta, behavior: "instant" });
+}
+
+const REHEARSAL_MARKER_ROW_BASE_HEIGHT_REM = 1.75;
+const REHEARSAL_MARKER_ROW_HEIGHT_SCALE = 0;
+const REHEARSAL_MARKER_ROW_MIN_HEIGHT_PX = 1;
+const REHEARSAL_MARKER_FLOAT_LEFT_OFFSET_REM = -0.75;
+const MARKER_CONTROL_DELETE_LEFT_PX = 0;
+const MARKER_CONTROL_BAR_LEFT_PX = 12;
+const MARKER_CONTROL_TRIANGLE_LEFT_PX = MARKER_CONTROL_BAR_LEFT_PX * 2 - MARKER_CONTROL_DELETE_LEFT_PX + 1;
+const MARKER_CONTROL_TRIANGLE_TOP_OFFSET_PX = 0.6;
+const MARKER_DIVIDER_RIGHT_MARGIN = 0.2;
+let scriptTocMeasureElement: HTMLSpanElement | null = null;
+let scriptTocMeasureCache: {
+  scenes: Scene[];
+  rootFontSizePx: number;
+  chapterNumberSlotWidthPx: number;
+  sceneNumberSlotWidthPx: number;
+} | null = null;
+
+function measureScriptTocNumberWidths(scenes: Scene[], rootFontSizePx: number): {
+  chapterNumberSlotWidthPx: number;
+  sceneNumberSlotWidthPx: number;
+} {
+  const minimumNumberSlotWidthPx = SCRIPT_TOC_RAIL_NUMBER_SLOT_REM * rootFontSizePx;
+  if (scriptTocMeasureCache?.scenes === scenes && scriptTocMeasureCache.rootFontSizePx === rootFontSizePx) {
+    return scriptTocMeasureCache;
+  }
+  if (typeof document === "undefined" || scenes.length === 0) {
+    return {
+      chapterNumberSlotWidthPx: minimumNumberSlotWidthPx,
+      sceneNumberSlotWidthPx: minimumNumberSlotWidthPx,
+    };
+  }
+
+  let chapterNumberSlotWidthPx = minimumNumberSlotWidthPx;
+  let sceneNumberSlotWidthPx = minimumNumberSlotWidthPx;
+  const numberFontSizePx = 0.75 * rootFontSizePx;
+  scriptTocMeasureElement ??= document.createElement("span");
+  const measureElement = scriptTocMeasureElement;
+  if (!measureElement.isConnected) document.body.appendChild(measureElement);
+  Object.assign(measureElement.style, {
+    position: "fixed",
+    top: "-9999px",
+    left: "-9999px",
+    visibility: "hidden",
+    whiteSpace: "nowrap",
+    pointerEvents: "none",
+    fontFamily: window.getComputedStyle(document.body).fontFamily,
+    fontSize: `${numberFontSizePx}px`,
+    fontWeight: "700",
+    letterSpacing: `${0.05 * numberFontSizePx}px`,
+  });
+
+  for (const scene of scenes) {
+    measureElement.textContent = scene.number || "—";
+    const measuredNumberWidthPx = measureElement.getBoundingClientRect().width;
+    if (scene.parentId === null) {
+      chapterNumberSlotWidthPx = Math.max(chapterNumberSlotWidthPx, measuredNumberWidthPx);
+    } else {
+      sceneNumberSlotWidthPx = Math.max(sceneNumberSlotWidthPx, measuredNumberWidthPx);
+    }
+  }
+
+  scriptTocMeasureCache = {
+    scenes,
+    rootFontSizePx,
+    chapterNumberSlotWidthPx,
+    sceneNumberSlotWidthPx,
+  };
+  return scriptTocMeasureCache;
+}
+
+/**
+ * Computes the `lyric` flag a block should have based on its tags and the
+ * production's lyricSplitAfterOptionId rules (OR logic across groups).
+ *
+ * Returns null if none of the block's tag groups has a lyric-split rule —
+ * meaning the caller should leave block.lyric unchanged.
+ */
+function computeLyricFromTags(tags: BlockTagValue[], tagGroups: TagGroup[]): boolean | null {
+  const lyricGroups = tagGroups.filter(g => g.lyricSplitAfterOptionId);
+  if (lyricGroups.length === 0) return null;
+  for (const tag of tags) {
+    if (!tag.optionId) continue;
+    const group = lyricGroups.find(g => g.id === tag.groupId);
+    if (!group) continue;
+    const splitOpt = group.options.find(o => o.id === group.lyricSplitAfterOptionId);
+    const selOpt = group.options.find(o => o.id === tag.optionId);
+    if (!splitOpt || !selOpt) continue;
+    if (selOpt.sortOrder <= splitOpt.sortOrder) return true;
+  }
+  // Has lyric groups, but no tag qualifies → false
+  const blockHasLyricGroup = tags.some(t => lyricGroups.some(g => g.id === t.groupId));
+  return blockHasLyricGroup ? false : null;
+}
+
+type LargeSelectionOperation = "delete" | "move" | "type" | "lyric";
+type PendingLargeSelectionConfirmation = {
+  operation: LargeSelectionOperation;
+  count: number;
+  onConfirm: () => void;
+  onCancel?: () => void;
+};
+type PendingStageDelimiterChange = {
+  open: string;
+  close: string;
+};
+type EmptyScriptCleanupTarget = {
+  id: string;
+  key: string;
+  label: string;
+  kind: "chapter" | "scene" | "rehearsal";
+  parentKey: string | null;
+  dividerKey: string;
+  chapterKey: string;
+  disabledReason?: string;
+};
+type EmptyScriptCleanupAnalysis = {
+  targets: EmptyScriptCleanupTarget[];
+  hasEmptyTextBlock: boolean;
+};
+type PendingAggregateFocusPrompt = {
+  characterId: string;
+  aggregateIds: string[];
+  selectedIds: Set<string>;
+};
+type SceneMetaFields = Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">;
+type MarkerDetailDeleteBlockedKind = "chapter" | "scene";
+type NonEmptyDramaturgyMarker = {
+  id: string;
+  kind: MarkerDetailDeleteBlockedKind;
+};
+type MarkerDetailField = {
+  label: string;
+  value: string;
+};
+
+function hasTextValue(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasNonNameSceneDetails(
+  detail?: Partial<SceneMetaFields> | null,
+  markerMeta?: Partial<SceneMetaFields> | null,
+  ignoreExpectedDuration = false
+): boolean {
+  const hasExpectedDuration = !ignoreExpectedDuration && (
+    hasTextValue(markerMeta?.expectedDuration) ||
+    hasTextValue(detail?.expectedDuration)
+  );
+  return (
+    hasTextValue(markerMeta?.synopsis) ||
+    hasTextValue(markerMeta?.actionLine) ||
+    hasTextValue(markerMeta?.music) ||
+    hasTextValue(markerMeta?.stageNotes) ||
+    hasTextValue(detail?.synopsis) ||
+    hasTextValue(detail?.actionLine) ||
+    hasTextValue(detail?.music) ||
+    hasTextValue(detail?.stageNotes) ||
+    hasExpectedDuration
+  );
+}
+
+function sceneDetailDeleteBlockedMessage(kind: MarkerDetailDeleteBlockedKind): string {
+  const label = kind === "chapter" ? "章节" : "段落";
+  return `${label}详情不为空，不可删除当前${label}块。\n如需删除，请确保详情内容均已转移或清空。`;
+}
+
+function markerBlockDramaturgyDeleteBlockedKind(block: Block, detail?: SceneDetail | null): MarkerDetailDeleteBlockedKind | null {
+  if (block.type !== "chapter_marker" && block.type !== "scene_marker") return null;
+  const markerMeta = block.markerMeta ?? {};
+  const hasDetails = hasNonNameSceneDetails(detail, markerMeta, block.type === "chapter_marker");
+  if (!hasDetails) return null;
+  return block.type === "chapter_marker" ? "chapter" : "scene";
+}
+
+function markerDetailFields(block: Block, detail: SceneDetail | null): MarkerDetailField[] {
+  if (block.type !== "chapter_marker" && block.type !== "scene_marker") return [];
+  const markerMeta = block.markerMeta ?? {};
+  const fields: Array<[string, keyof SceneMetaFields]> = [
+    ["简介", "synopsis"],
+    ["行动线", "actionLine"],
+    ["音乐", "music"],
+    ["舞台呈现", "stageNotes"],
+  ];
+  return fields.map(([label, key]) => {
+    const value = markerMeta[key] || detail?.[key] || "";
+    return { label, value: value.trim() };
+  });
+}
+
+function markerExpectedDuration(block: Block, detail: SceneDetail | null, scenes: SceneDetail[]): string {
+  if (block.type === "chapter_marker" && block.sceneId) {
+    const chapterDuration = getChapterDurationDisplay(scenes.filter((scene) => scene.parentId === block.sceneId));
+    return !chapterDuration || chapterDuration.hasMissingDuration ? "—" : chapterDuration.text || "—";
+  }
+  const value = block.markerMeta?.expectedDuration || detail?.expectedDuration || "";
+  if (!hasTextValue(value)) return "—";
+  return formatDuration(parseDuration(value)) || "—";
+}
+
+function largeSelectionOperationMessage(operation: LargeSelectionOperation, count: number) {
+  const actionLabel =
+    operation === "delete" ? "删除" :
+    operation === "move" ? "移动" :
+    operation === "type" ? "更改" :
+    "更改";
+  const objectLabel =
+    operation === "type" ? `${count} 行的类型` :
+    operation === "lyric" ? `${count} 行的文本状态` :
+    `${count} 行`;
+  return `${actionLabel} ${objectLabel}可能导致页面卡顿，建议分批次进行。\n是否确认继续操作？`;
+}
+
+function anchoredManagementPanelStyle(style: React.CSSProperties): React.CSSProperties {
+  const availableHeight = typeof style.maxHeight === "number" ? `${style.maxHeight}px` : "calc(100vh - 1rem)";
+  return { ...style, maxHeight: `min(28rem, ${availableHeight})`, overflowY: undefined };
+}
+
+const FoldTriangle = ({ open }: { open: boolean }) => (
+  <span
+    aria-hidden
+    className={`h-0 w-0 border-x-[3px] border-x-transparent ${
+      open ? "border-b-[4px] border-b-current" : "border-t-[4px] border-t-current"
+    }`}
+  />
+);
+
+const CHECKBOX_OPTION_BASE_CLASS = "h-4 w-4 rounded border text-[10px] leading-none flex items-center justify-center transition-colors";
+const DISABLED_CHECKBOX_OPTION_CLASS = "cursor-not-allowed text-zinc-300 hover:bg-zinc-50";
+function checkboxOptionClass(selected: boolean): string {
+  return `${CHECKBOX_OPTION_BASE_CLASS} ${
+    selected
+      ? "border-zinc-800 bg-zinc-800 text-white"
+      : "border-zinc-300 text-transparent"
+  }`;
+}
+
+// ── Display settings (cookie-persisted) ───────────────────────────────────────
+type DisplaySettings = {
+  pageBreaks: boolean;
+  lineNumbers: boolean;
+  blockTags: boolean;
+  rehearsalMode: boolean;
+  rehearsalBlockScenes: boolean;
+  sceneDetail: boolean;
+};
+const DEFAULT_DISPLAY: DisplaySettings = {
+  pageBreaks: true,
+  lineNumbers: true,
+  blockTags: true,
+  rehearsalMode: false,
+  rehearsalBlockScenes: true,
+  sceneDetail: true,
+};
+const DISPLAY_COOKIE = "script_display";
+const CHARACTER_FOCUS_STORAGE_PREFIX = "script_character_focus";
+function readDisplayCookie(): DisplaySettings {
+  try {
+    const m = document.cookie.match(/(?:^|;\s*)script_display=([^;]*)/);
+    if (m) return { ...DEFAULT_DISPLAY, ...JSON.parse(decodeURIComponent(m[1])) };
+  } catch { /* ignore */ }
+  return DEFAULT_DISPLAY;
+}
+function writeDisplayCookie(s: DisplaySettings) {
+  document.cookie = `${DISPLAY_COOKIE}=${encodeURIComponent(JSON.stringify(s))}; path=/; max-age=31536000; SameSite=Lax`;
+}
+
+function characterFocusStorageKey(scriptId: string): string {
+  return `${CHARACTER_FOCUS_STORAGE_PREFIX}:${scriptId}:${getOrCreateClientId()}`;
+}
+
+function readStoredCharacterFocus(scriptId: string): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(characterFocusStorageKey(scriptId));
+    const ids = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeStoredCharacterFocus(scriptId: string, ids: Set<string>) {
+  if (typeof window === "undefined") return;
+  try {
+    const key = characterFocusStorageKey(scriptId);
+    if (ids.size === 0) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(Array.from(ids)));
+  } catch { /* ignore storage failures */ }
+}
+
+
+const makeBlock = (content = "", characterIds: string[] = [], type: BlockType = "dialogue"): Block => ({
+  id: uid(),
+  type,
+  content,
+  characterIds,
+  characterAnnotations: {},
+  lyric: false,
+  sceneId: null,
+  rehearsalMark: null,
+  forceShowCharacterName: false,
+});
+
+
+const makeMarkerBlock = (
+  type: Extract<BlockType, "chapter_marker" | "scene_marker" | "rehearsal_marker">,
+  fields: Pick<Partial<Block>, "sceneId"> = {}
+): Block => ({
+  ...makeBlock("", [], type),
+  sceneId: fields.sceneId ?? null,
+});
+
+const isBlockEmptyForDelete = (block: Block) =>
+  block.content.trim() === "" &&
+  !(block.stageComment ?? "").trim() &&
+  block.characterIds.length === 0 &&
+  Object.values(block.characterAnnotations).every((ann) => ann.trim() === "");
+
+const isEmptyTextBlock = (block: Block) => isTextBlock(block) && isBlockEmptyForDelete(block);
+
+// ─── contenteditable helpers ─────────────────────────────────────────────────
+
+function getTextBeforeCursor(div: HTMLDivElement): string {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return "";
+  const r = document.createRange();
+  r.setStart(div, 0);
+  r.setEnd(sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset);
+  const tmp = document.createElement("div");
+  tmp.appendChild(r.cloneContents());
+  return tmp.innerText;
+}
+
+function getTextAfterCursor(div: HTMLDivElement): string {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return "";
+  const r = document.createRange();
+  r.setStart(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
+  r.setEnd(div, div.childNodes.length);
+  const tmp = document.createElement("div");
+  tmp.appendChild(r.cloneContents());
+  return tmp.innerText;
+}
+
+function isAtStart(div: HTMLDivElement): boolean {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
+  const r = document.createRange();
+  r.setStart(div, 0);
+  r.setEnd(sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset);
+  return r.toString().length === 0;
+}
+
+function isOnFirstLine(div: HTMLDivElement): boolean {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return false;
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  // Fallback for browsers that return a zero rect for collapsed ranges
+  if (rect.height === 0) return !getTextBeforeCursor(div).includes("\n");
+  return rect.top <= div.getBoundingClientRect().top + rect.height;
+}
+
+function isOnLastLine(div: HTMLDivElement): boolean {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return false;
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  if (rect.height === 0) return !getTextAfterCursor(div).includes("\n");
+  return rect.bottom >= div.getBoundingClientRect().bottom - rect.height;
+}
+
+function getHtmlSplit(div: HTMLDivElement): { before: string; after: string } {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return { before: div.innerHTML, after: "" };
+  const range = sel.getRangeAt(0);
+  const t1 = document.createElement("div");
+  const r1 = document.createRange();
+  r1.setStart(div, 0);
+  r1.setEnd(range.startContainer, range.startOffset);
+  t1.appendChild(r1.cloneContents());
+  const t2 = document.createElement("div");
+  const r2 = document.createRange();
+  r2.setStart(range.endContainer, range.endOffset);
+  r2.setEnd(div, div.childNodes.length);
+  t2.appendChild(r2.cloneContents());
+  return { before: t1.innerHTML, after: t2.innerHTML };
+}
+
+function setCursorAtStart(div: HTMLDivElement) {
+  const r = document.createRange();
+  r.setStart(div, 0);
+  r.collapse(true);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(r);
+}
+
+function setCursorAtEnd(div: HTMLDivElement) {
+  const r = document.createRange();
+  r.selectNodeContents(div);
+  r.collapse(false);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(r);
+}
+
+function setCursorAtTextOffset(div: HTMLDivElement, target: number) {
+  // Walk both text nodes and <br> elements. <br> counts as 1 character (same
+  // as the \n it represents in innerText / mdToHtml output).
+  const walker = document.createTreeWalker(div, NodeFilter.SHOW_ALL, {
+    acceptNode(node) {
+      if (node.nodeType === Node.TEXT_NODE) return NodeFilter.FILTER_ACCEPT;
+      if (node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName === "BR")
+        return NodeFilter.FILTER_ACCEPT;
+      return NodeFilter.FILTER_SKIP;
+    },
+  });
+  const sel = window.getSelection();
+  let offset = 0;
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      // BR element: counts as 1 character
+      if (offset + 1 > target) {
+        // target <= offset: the position is before this BR.
+        // Place the cursor right before the BR element.
+        const r = document.createRange();
+        r.setStartBefore(node);
+        r.collapse(true);
+        sel?.removeAllRanges();
+        sel?.addRange(r);
+        return;
+      }
+      offset += 1;
+      if (offset === target) {
+        // Position right after the BR (= start of the next line)
+        const r = document.createRange();
+        r.setStartAfter(node);
+        r.collapse(true);
+        sel?.removeAllRanges();
+        sel?.addRange(r);
+        return;
+      }
+    } else {
+      const textNode = node as Text;
+      if (offset + textNode.length >= target) {
+        const r = document.createRange();
+        r.setStart(textNode, target - offset);
+        r.collapse(true);
+        sel?.removeAllRanges();
+        sel?.addRange(r);
+        return;
+      }
+      offset += textNode.length;
+    }
+  }
+  setCursorAtEnd(div);
+}
+
+function getEditableElementForRange(range: Range): HTMLElement | null {
+  let node: Node | null = range.commonAncestorContainer;
+  while (node) {
+    if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).isContentEditable) {
+      return node as HTMLElement;
+    }
+    node = node.parentNode;
+  }
+  return null;
+}
+
+function eventTargetElement(target: EventTarget | null): HTMLElement | null {
+  const node = target instanceof Node ? target : null;
+  return node instanceof HTMLElement
+    ? node
+    : node?.parentElement ?? null;
+}
+
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  const element = eventTargetElement(target);
+  if (!element) return false;
+  return !!element.closest("input, textarea, select, [contenteditable='true'], [contenteditable='plaintext-only']");
+}
+
+function isFormEditingTarget(target: EventTarget | null): boolean {
+  const element = eventTargetElement(target);
+  return !!element?.closest("input, textarea, select");
+}
+
+function getTextLength(html: string): number {
+  if (!html) return 0;
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  return tmp.innerText.length;
+}
+
+function sanitizePasteNode(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return (node.textContent ?? "")
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+  const el = node as HTMLElement;
+  const tag = el.tagName.toLowerCase();
+  const inner = Array.from(el.childNodes).map(sanitizePasteNode).join("");
+  switch (tag) {
+    case "b": case "strong": return `<b>${inner}</b>`;
+    case "u": return `<u>${inner}</u>`;
+    case "br": return "<br>";
+    case "span":
+      if (el.hasAttribute("data-stage-inline"))
+        return `<span data-stage-inline="" style="font-family:var(--font-stage);font-style:italic;color:#a1a1aa">${inner}</span>`;
+      return inner;
+    case "p": case "div": case "li":
+    case "h1": case "h2": case "h3": case "h4": case "h5": case "h6":
+      return inner ? inner + "<br>" : "";
+    default: return inner;
+  }
+}
+
+function sanitizePasteHtml(html: string): string {
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  return Array.from(tmp.childNodes).map(sanitizePasteNode).join("").replace(/<br>$/, "");
+}
+
+// ─── Markdown ↔ HTML conversion ───────────────────────────────────────────────
+// Storage format: plain text with **bold** and __underline__ markers.
+// Stage-inline cues are stored as plain bracketed text — no span markup.
+
+function nodeToMd(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+  const el = node as HTMLElement;
+  const tag = el.tagName.toLowerCase();
+  const inner = Array.from(el.childNodes).map(nodeToMd).join("");
+  switch (tag) {
+    case "b": case "strong": return `**${inner}**`;
+    case "u": return `__${inner}__`;
+    case "br": return "\n";
+    case "span": return inner; // strip all spans (including stage-inline); brackets remain
+    case "p": case "div": case "li":
+    case "h1": case "h2": case "h3": case "h4": case "h5": case "h6":
+      return inner ? inner + "\n" : "";
+    default: return inner;
+  }
+}
+
+function htmlToMd(html: string): string {
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  return Array.from(tmp.childNodes).map(nodeToMd).join("").replace(/\n$/, "");
+}
+
+
+
+
+function replaceInlineStageDelimiters(content: string, fromOpen: string, fromClose: string, toOpen: string, toClose: string): string {
+  const pairRegex = stagePairRegex(fromOpen, fromClose);
+  return content.replace(pairRegex, (match) =>
+    `${toOpen}${match.slice(fromOpen.length, match.length - fromClose.length)}${toClose}`
+  );
+}
+
+// Properly toggle a bold/underline tag on the given range:
+// - If the common ancestor of the range is inside ONE existing tag element → unwrap it.
+// - Otherwise → flatten any nested tags inside the range, wrap the whole range,
+//   and restore the selection over the new wrapper so the next toggle works immediately.
+function toggleInlineTag(range: Range, tag: "b" | "u"): void {
+  // commonAncestorContainer is inside the <b>/<u> whenever the selection is fully
+  // within it — even when start/end containers land at the element boundary in the parent.
+  const ancestor = range.commonAncestorContainer;
+  const ancestorEl = ancestor.nodeType === Node.TEXT_NODE
+    ? ancestor.parentElement
+    : (ancestor as HTMLElement);
+  const existingTag = ancestorEl?.closest(tag) ?? null;
+  const sel = window.getSelection();
+
+  // Helper: restore selection spanning first..last nodes.
+  // Anchors to child nodes (text nodes or elements), NOT to the wrapper element,
+  // so the range stays valid even if the wrapper is later removed by another toggle.
+  const restoreSelection = (first: ChildNode, last: ChildNode) => {
+    if (!sel) return;
+    try {
+      const r = document.createRange();
+      r.setStart(first, 0);
+      r.setEnd(
+        last,
+        last.nodeType === Node.TEXT_NODE
+          ? (last.textContent?.length ?? 0)
+          : (last as Element).childNodes.length
+      );
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch { /* ignore stale-range errors */ }
+  };
+
+  if (existingTag) {
+    const first = existingTag.firstChild;
+    const last  = existingTag.lastChild;
+    existingTag.replaceWith(...Array.from(existingTag.childNodes));
+    if (first && last) restoreSelection(first, last);
+    return;
+  }
+
+  const frag = range.extractContents();
+  frag.querySelectorAll(tag).forEach(el => el.replaceWith(...Array.from(el.childNodes)));
+  const wrapper = document.createElement(tag);
+  wrapper.appendChild(frag);
+  range.insertNode(wrapper);
+  if (wrapper.firstChild && wrapper.lastChild)
+    restoreSelection(wrapper.firstChild, wrapper.lastChild);
+}
+
+function wrapSelectionAsInlineStageCue(
+  range: Range,
+  delimOpen: string,
+  delimClose: string,
+): void {
+  const frag = range.extractContents();
+  const tmp = document.createElement("div");
+  tmp.appendChild(frag.cloneNode(true));
+  const selectedMd = htmlToMd(tmp.innerHTML);
+  if (selectedMd.includes("\n")) {
+    const wrappedMd = selectedMd
+      .split("\n")
+      .map((line) => line ? `${delimOpen}${line}${delimClose}` : line)
+      .join("\n");
+    const html = mdToHtml(wrappedMd, delimOpen, delimClose);
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html;
+    const replacement = document.createDocumentFragment();
+    while (wrapper.firstChild) replacement.appendChild(wrapper.firstChild);
+    const last = replacement.lastChild;
+    range.insertNode(replacement);
+
+    const sel = window.getSelection();
+    if (last) {
+      const after = document.createRange();
+      after.setStartAfter(last);
+      after.collapse(true);
+      sel?.removeAllRanges();
+      sel?.addRange(after);
+    }
+    return;
+  }
+
+  const span = document.createElement("span");
+  span.setAttribute("data-stage-inline", "");
+  span.style.fontFamily = "var(--font-stage)";
+  span.style.fontStyle = "italic";
+  span.style.color = "#a1a1aa";
+  span.appendChild(document.createTextNode(delimOpen));
+  span.appendChild(frag);
+  span.appendChild(document.createTextNode(delimClose));
+  range.insertNode(span);
+
+  const sel = window.getSelection();
+  const after = document.createRange();
+  after.setStartAfter(span);
+  after.collapse(true);
+  sel?.removeAllRanges();
+  sel?.addRange(after);
+}
+
+function applyInlineStageStyling(div: HTMLDivElement, delimOpen = "（", delimClose = "）") {
+  const sel = window.getSelection();
+  let savedOffset: number | null = null;
+  if (sel && sel.rangeCount && sel.isCollapsed && div.contains(sel.anchorNode)) {
+    savedOffset = getTextBeforeCursor(div).length;
+  }
+
+  const isStageSpan = (el: Element) =>
+    el.hasAttribute("data-stage-inline");
+
+  const validStageText = (text: string) =>
+    text.startsWith(delimOpen) &&
+    text.endsWith(delimClose) &&
+    text.length >= delimOpen.length + delimClose.length;
+
+  // Remove spans whose content no longer forms a valid pair
+  div.querySelectorAll("span[data-stage-inline]").forEach((span) => {
+    if (!validStageText(span.textContent ?? "")) {
+      const parent = span.parentNode!;
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+    }
+  });
+
+  div.normalize();
+
+  // Wrap new delimiter patterns in text nodes outside existing spans
+  const walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    let el: Node | null = (node as Text).parentNode;
+    let inside = false;
+    while (el && el !== div) {
+      if (el instanceof Element && isStageSpan(el)) { inside = true; break; }
+      el = el.parentNode;
+    }
+    if (!inside) textNodes.push(node as Text);
+  }
+
+  const pairRegex = stagePairRegex(delimOpen, delimClose);
+
+  for (const textNode of textNodes) {
+    const text = textNode.textContent ?? "";
+    const matches: { start: number; end: number }[] = [];
+    let m;
+    pairRegex.lastIndex = 0;
+    while ((m = pairRegex.exec(text)) !== null) matches.push({ start: m.index, end: m.index + m[0].length });
+    if (!matches.length) continue;
+
+    const parent = textNode.parentNode!;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (const { start, end } of matches) {
+      if (start > last) frag.appendChild(document.createTextNode(text.slice(last, start)));
+      const span = document.createElement("span");
+      span.setAttribute("data-stage-inline", "");
+      span.style.fontFamily = "var(--font-stage)";
+      span.style.fontStyle = "italic";
+      span.style.color = "#a1a1aa";
+      span.textContent = text.slice(start, end);
+      frag.appendChild(span);
+      last = end;
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    parent.replaceChild(frag, textNode);
+  }
+
+  if (savedOffset !== null) {
+    setCursorAtTextOffset(div, savedOffset);
+    // If cursor landed at the end of a stage-inline span, push it outside
+    const s = window.getSelection();
+    if (s && s.rangeCount && s.isCollapsed) {
+      const r = s.getRangeAt(0);
+      let el: Node | null = r.startContainer;
+      while (el && el !== div) {
+        if (el instanceof HTMLSpanElement && isStageSpan(el)) {
+          const endR = document.createRange();
+          endR.selectNodeContents(el);
+          endR.collapse(false);
+          if (r.compareBoundaryPoints(Range.START_TO_END, endR) >= 0) {
+            const after = document.createRange();
+            after.setStartAfter(el);
+            after.collapse(true);
+            s.removeAllRanges();
+            s.addRange(after);
+          }
+          break;
+        }
+        el = el.parentNode;
+      }
+    }
+  }
+}
+
+// ─── TableOfContents ──────────────────────────────────────────────────────────
+
+function buildOrderedTocScenes(scenes: Scene[], blocks: Block[]): Scene[] {
+  const usesMarkerBlocks = blocks.some(isMarkerBlock);
+  const usedSceneIds = new Set(blocks.map((b) => b.sceneId).filter((id): id is string => id !== null));
+  const sceneById = new Map(scenes.map((scene) => [scene.id, scene]));
+  const usedOrdered: Scene[] = [];
+  const usedOrderedIds = new Set<string>();
+  for (const b of blocks) {
+    if (b.sceneId) {
+      const scene = sceneById.get(b.sceneId);
+      if (scene && !usedOrderedIds.has(scene.id)) {
+        usedOrderedIds.add(scene.id);
+        usedOrdered.push(scene);
+      }
+    }
+  }
+  if (usedOrdered.length === 0 && usedSceneIds.size === 0) return [];
+  if (usesMarkerBlocks) return usedOrdered;
+
+  const orderedScenes: Scene[] = [];
+  const orderedSceneIds = new Set<string>();
+  const pushOrderedScene = (scene: Scene) => {
+    if (orderedSceneIds.has(scene.id)) return;
+    orderedSceneIds.add(scene.id);
+    orderedScenes.push(scene);
+  };
+
+  for (let i = 0; i < usedOrdered.length; i++) {
+    const prevIdx = i === 0 ? -1 : scenes.findIndex((s) => s.id === usedOrdered[i - 1].id);
+    const currIdx = scenes.findIndex((s) => s.id === usedOrdered[i].id);
+    for (let j = prevIdx + 1; j < currIdx; j++) {
+      if (!usedSceneIds.has(scenes[j].id)) pushOrderedScene(scenes[j]);
+    }
+    pushOrderedScene(usedOrdered[i]);
+  }
+
+  const lastIdx = usedOrdered.length
+    ? scenes.findIndex((s) => s.id === usedOrdered[usedOrdered.length - 1].id)
+    : -1;
+  for (let j = lastIdx + 1; j < scenes.length; j++) {
+    if (!usedSceneIds.has(scenes[j].id)) pushOrderedScene(scenes[j]);
+  }
+
+  return orderedScenes;
+}
+
+function toSceneDetail(scene: Scene): SceneDetail {
+  return {
+    ...scene,
+    synopsis: "",
+    actionLine: "",
+    music: "",
+    stageNotes: "",
+    expectedDuration: "",
+  };
+}
+
+function syncSceneDetailsWithScenes(details: SceneDetail[], scenes: Scene[]): SceneDetail[] {
+  const detailById = new Map(details.map((detail) => [detail.id, detail]));
+  const next = scenes.map((scene) => ({ ...(detailById.get(scene.id) ?? toSceneDetail(scene)), ...scene }));
+  return sameSceneDetails(next, details) ? details : next;
+}
+
+function TableOfContents({
+  scenes,
+  blocks,
+  onScrollToScene,
+  activeSceneId,
+  placement = "inline",
+  chapterNumberSlotWidthPx,
+  sceneNumberSlotWidthPx,
+}: {
+  scenes: Scene[];
+  blocks: Block[];
+  onScrollToScene?: (sceneId: string) => void;
+  activeSceneId?: string | null;
+  placement?: "inline" | "rail" | "rail-compact";
+  chapterNumberSlotWidthPx?: number;
+  sceneNumberSlotWidthPx?: number;
+}) {
+  const isRailPlacement = placement !== "inline";
+  const isCompactRail = placement === "rail-compact";
+  const orderedScenes = useMemo(() => buildOrderedTocScenes(scenes, blocks), [scenes, blocks]);
+  const navRef = useRef<HTMLElement | null>(null);
+  const activeItemRef = useRef<HTMLButtonElement | null>(null);
+  const didInitialCenterRef = useRef(false);
+  const centerFrameRef = useRef<number | null>(null);
+  const centerActiveItem = useCallback(() => {
+    const nav = navRef.current;
+    const item = activeItemRef.current;
+    if (!nav || !item) return;
+    const navRect = nav.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    nav.scrollTop += itemRect.top + itemRect.height / 2 - (navRect.top + nav.clientHeight / 2);
+  }, []);
+  const centerActiveItemSoon = useCallback(() => {
+    if (centerFrameRef.current !== null) cancelAnimationFrame(centerFrameRef.current);
+    centerFrameRef.current = requestAnimationFrame(() => {
+      centerFrameRef.current = null;
+      centerActiveItem();
+    });
+  }, [centerActiveItem]);
+
+  useEffect(() => {
+    if (!isRailPlacement || !activeSceneId || didInitialCenterRef.current) return;
+    didInitialCenterRef.current = true;
+    centerActiveItem();
+  }, [activeSceneId, centerActiveItem, isRailPlacement]);
+
+  useEffect(() => {
+    if (!isRailPlacement) return;
+    window.addEventListener(SCRIPT_TOC_CENTER_EVENT, centerActiveItemSoon);
+    return () => {
+      window.removeEventListener(SCRIPT_TOC_CENTER_EVENT, centerActiveItemSoon);
+      if (centerFrameRef.current !== null) cancelAnimationFrame(centerFrameRef.current);
+    };
+  }, [centerActiveItemSoon, isRailPlacement]);
+
+  if (orderedScenes.length === 0) return null;
+
+  const scrollTo = (sceneId: string) => {
+    if (onScrollToScene) { onScrollToScene(sceneId); return; }
+    document.getElementById(`scene-block-${sceneId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const wrapClass = isRailPlacement
+    ? `panel-scrollbar-area flex h-full min-w-0 w-full flex-col overflow-hidden rounded-xl border border-transparent bg-transparent py-3 ${isCompactRail ? "px-1" : "px-3"}`
+    : "px-8 pt-6 pb-5 border-b border-zinc-100";
+  const navClass = isRailPlacement
+    ? "panel-scrollbar flex min-h-0 min-w-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
+    : "flex flex-col gap-0.5";
+
+  return (
+    <div className={wrapClass}>
+      <p className={`mb-3 text-[10px] font-bold tracking-widest text-zinc-300 uppercase ${isCompactRail ? "text-center" : ""}`}>目录</p>
+      <nav ref={navRef} className={navClass}>
+        {orderedScenes.map((scene) => {
+          const isSubScene = scene.parentId !== null;
+          const isActive = scene.id === activeSceneId;
+          const numberSlotWidthPx = isSubScene ? sceneNumberSlotWidthPx : chapterNumberSlotWidthPx;
+          return (
+            <button
+              key={scene.id}
+              ref={isActive ? activeItemRef : undefined}
+              title={scene.name ? `${scene.number || "—"} ${scene.name}` : (scene.number || "—")}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.currentTarget.blur();
+                scrollTo(scene.id);
+              }}
+              style={isCompactRail ? undefined : {
+                columnGap: `${SCRIPT_TOC_RAIL_LABEL_GAP_REM}rem`,
+                ...(isRailPlacement && isSubScene ? { paddingLeft: `calc(0.5rem + ${SCRIPT_TOC_RAIL_SUBSCENE_INDENT_REM}rem)` } : {}),
+              }}
+              className={`flex w-full min-w-0 shrink-0 items-baseline overflow-hidden rounded-lg px-2 py-1 text-left transition-colors hover:bg-zinc-50 group ${
+                isCompactRail ? "justify-center gap-0" : `${!isRailPlacement && isSubScene ? "pl-6" : ""}`
+              } ${
+                isActive ? "bg-white hover:bg-white" : ""
+              }`}
+            >
+              <span
+                style={isCompactRail
+                  ? undefined
+                  : { minWidth: numberSlotWidthPx ? `${numberSlotWidthPx}px` : `${SCRIPT_TOC_RAIL_NUMBER_SLOT_REM}rem` }}
+                className={`${isCompactRail ? "min-w-0" : "inline-block shrink-0 text-right"} text-xs tracking-wider ${
+                isActive
+                  ? "font-bold text-[#637ca1]"
+                  : isSubScene
+                    ? "font-medium text-zinc-300 group-hover:text-zinc-400"
+                    : "font-bold text-zinc-400 group-hover:text-zinc-600"
+                }`}
+              >
+                {scene.number || "—"}
+              </span>
+              {!isCompactRail && (
+                <span className={`min-w-0 flex-1 truncate ${
+                  isActive
+                    ? `${isSubScene ? "text-xs" : "text-sm"} font-semibold text-zinc-700`
+                    : isSubScene
+                      ? "text-xs text-zinc-300 group-hover:text-zinc-500"
+                      : "text-sm font-medium text-zinc-400 group-hover:text-zinc-700"
+                }`}>
+                  {scene.name || <span className="italic text-zinc-200">未命名</span>}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+    </div>
+  );
+}
+
+function ScriptSceneMetaField({
+  label,
+  value,
+  multiline,
+  canEdit,
+  onSave,
+}: {
+  label: string;
+  value: string;
+  multiline?: boolean;
+  canEdit: boolean;
+  onSave: (value: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  useLayoutEffect(() => {
+    if (!canEdit || !multiline) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    const borderHeight = textarea.offsetHeight - textarea.clientHeight;
+    textarea.style.height = `${textarea.scrollHeight + borderHeight}px`;
+  }, [canEdit, draft, multiline]);
+
+  const commit = async () => {
+    if (draft === value) return;
+    setSaving(true);
+    try {
+      await onSave(draft);
+    } catch {
+      setDraft(value);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="group space-y-1.5">
+      <label className="text-[10px] font-semibold tracking-widest text-zinc-500 uppercase transition-colors group-hover:text-zinc-600">{label}</label>
+      {canEdit ? (
+        multiline ? (
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            disabled={saving}
+            rows={3}
+            className="w-full resize-none overflow-hidden rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs leading-relaxed text-zinc-800 outline-none transition-colors placeholder:text-zinc-400 hover:border-zinc-300 hover:text-zinc-950 focus:border-zinc-400 disabled:opacity-50"
+            placeholder="—"
+          />
+        ) : (
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+            disabled={saving}
+            className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs text-zinc-800 outline-none transition-colors placeholder:text-zinc-400 hover:border-zinc-300 hover:text-zinc-950 focus:border-zinc-400 disabled:opacity-50"
+            placeholder="—"
+          />
+        )
+      ) : (
+        <p className="min-h-[1.75rem] whitespace-pre-wrap rounded-lg border border-zinc-200 bg-transparent px-2.5 py-2 text-xs leading-relaxed text-zinc-700 transition-colors group-hover:border-zinc-300 group-hover:text-zinc-950">
+          {value || <span className="italic text-zinc-400">—</span>}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ScriptSceneDetailRail({
+  scene,
+  scenes,
+  productionId,
+  versionId,
+  canEdit,
+  controlledEditMode,
+  showHeader = true,
+  isDeleteConfirmHighlighted = false,
+  scrollbarOffsetPx,
+  onUpdateIdentity,
+  onPatchMeta,
+}: {
+  scene: SceneDetail | null;
+  scenes: SceneDetail[];
+  productionId: string;
+  versionId: string | null;
+  canEdit: boolean;
+  controlledEditMode?: boolean;
+  showHeader?: boolean;
+  isDeleteConfirmHighlighted?: boolean;
+  scrollbarOffsetPx: number;
+  onUpdateIdentity: (id: string, name: string) => void;
+  onPatchMeta: (id: string, fields: Partial<SceneMetaFields>) => Promise<void>;
+}) {
+  const [nameDraft, setNameDraft] = useState(scene?.name ?? "");
+  const [savingIdentity, setSavingIdentity] = useState(false);
+  const [internalEditMode, setInternalEditMode] = useState(false);
+  const editMode = controlledEditMode ?? internalEditMode;
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const sectionCanEdit = canEdit && editMode;
+  const chapterDurationDisplay = useMemo(
+    () => scene?.parentId === null
+      ? getChapterDurationDisplay(scenes.filter((child) => child.parentId === scene.id))
+      : null,
+    [scene?.id, scene?.parentId, scenes]
+  );
+  const expectedDuration = scene?.expectedDuration ?? "";
+  const expectedDurationSeconds = useMemo(
+    () => expectedDuration ? parseDuration(expectedDuration) : null,
+    [expectedDuration]
+  );
+  const chapterDurationHasMissing = chapterDurationDisplay?.hasMissingDuration ?? false;
+  const durationText = scene
+    ? (chapterDurationHasMissing && !sectionCanEdit
+      ? "—"
+      : chapterDurationDisplay?.text ?? (formatDuration(expectedDurationSeconds) || "—"))
+    : "—";
+  const sceneCaptionNumber = scene ? scene.number.trim() || "—" : "";
+  const sceneCaptionName = scene ? scene.name.trim() || "未命名" : "";
+  const sceneCaptionText = scene
+    ? `【${sceneCaptionNumber}】${sceneCaptionName}`
+    : "";
+
+  useEffect(() => {
+    setNameDraft(scene?.name ?? "");
+  }, [scene?.id, scene?.name]);
+  useEffect(() => {
+    setInternalEditMode(false);
+  }, [scene?.id]);
+  useEffect(() => {
+    if (!editMode || controlledEditMode !== undefined) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const rail = railRef.current;
+      if (!rail || rail.contains(event.target as Node)) return;
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && rail.contains(active)) active.blur();
+      window.setTimeout(() => setInternalEditMode(false), 0);
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [controlledEditMode, editMode]);
+
+  const commitIdentity = async () => {
+    if (!scene) return;
+    const name = nameDraft.trim();
+    if (name === scene.name) return;
+    setSavingIdentity(true);
+    try {
+      onUpdateIdentity(scene.id, name);
+    } finally {
+      setSavingIdentity(false);
+    }
+  };
+  const renderDurationField = () => {
+    if (!scene) return null;
+    return (
+      <div className="group space-y-1.5">
+        <label className="text-[10px] font-semibold tracking-widest text-zinc-500 uppercase transition-colors group-hover:text-zinc-600">预期时长</label>
+        {chapterDurationDisplay ? (
+          <p className="min-h-[1.75rem] whitespace-pre-wrap rounded-lg border border-zinc-200 bg-transparent px-2.5 py-2 text-xs leading-relaxed text-zinc-700 transition-colors group-hover:border-zinc-300 group-hover:text-zinc-950">
+            {chapterDurationHasMissing && !sectionCanEdit
+              ? <span className="italic text-zinc-400">—</span>
+              : chapterDurationDisplay.text || <span className="italic text-zinc-400">—</span>}
+          </p>
+        ) : (
+          <DurationInput
+            value={expectedDurationSeconds}
+            canEdit={sectionCanEdit}
+            onSave={(seconds) => onPatchMeta(scene.id, { expectedDuration: seconds != null ? String(seconds) : "" })}
+            className="!min-h-[1.75rem] !rounded-lg !border !border-zinc-200 !bg-transparent !px-2.5 !py-2 !text-xs !text-zinc-700 hover:!border-zinc-300 hover:!bg-transparent hover:!text-zinc-950"
+          />
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div
+      ref={railRef}
+      data-script-scene-detail="true"
+      className="panel-scrollbar-area group/scene-detail box-border flex h-full min-h-0 w-full flex-col rounded-lg px-3 pt-3 text-left"
+      style={{
+        background: isDeleteConfirmHighlighted
+          ? "#fee2e2"
+          : `linear-gradient(to bottom, rgb(255, 255, 255) 0, rgb(255, 255, 255) ${SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM}rem, rgba(255, 255, 255, ${sectionCanEdit ? "1" : "0.5"}) ${SCRIPT_SCENE_DETAIL_CAPTION_BG_HEIGHT_REM}rem, rgba(255, 255, 255, ${sectionCanEdit ? "1" : "0.5"}) 100%)`,
+      }}
+    >
+      {showHeader && <div
+        className="mb-3 flex shrink-0 items-center justify-between gap-2"
+        style={{
+          marginRight: `calc(-0.75rem - ${scrollbarOffsetPx}px)`,
+          paddingRight: `calc(${scrollbarOffsetPx}px + 8px + ${SCRIPT_SCENE_DETAIL_MODE_BUTTON_EXTRA_INSET_REM}rem)`,
+        }}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {sectionCanEdit ? (
+            <p className="shrink-0 text-xs font-bold tracking-widest text-zinc-500 uppercase">章节详情</p>
+          ) : scene ? (
+            <>
+              <p className="min-w-0 flex-1 truncate text-xs text-zinc-600" title={sceneCaptionText}>
+                <span className="font-bold">【{sceneCaptionNumber}】</span>
+                <span>{sceneCaptionName}</span>
+              </p>
+              <div className="h-4 w-px shrink-0 bg-zinc-100" />
+              <p className="shrink-0 whitespace-nowrap text-xs text-zinc-600">
+                <span className="font-bold">预期时长：</span>
+                <span className="font-normal">{durationText}</span>
+              </p>
+            </>
+          ) : (
+            <p className="shrink-0 text-xs font-bold tracking-widest text-zinc-500 uppercase">章节详情</p>
+          )}
+        </div>
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={() => setInternalEditMode((value) => !value)}
+            className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
+              editMode
+                ? "bg-zinc-700 text-white opacity-100 hover:bg-zinc-600"
+                : "pointer-events-none bg-[#637ca1] text-white opacity-0 hover:bg-[#91a8ca] group-hover/scene-detail:pointer-events-auto group-hover/scene-detail:opacity-100"
+            }`}
+          >
+            {editMode ? SCRIPT_SCENE_DETAIL_MODE_LABEL.edit : SCRIPT_SCENE_DETAIL_MODE_LABEL.view}
+          </button>
+        ) : (
+          <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">只读</span>
+        )}
+      </div>}
+      {!scene ? (
+        <div className="flex flex-1 items-center justify-center text-center text-xs leading-relaxed text-zinc-500">
+          滚动或选择目录中的章节
+        </div>
+      ) : (
+        <div
+          className="panel-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain"
+          style={{
+            marginRight: `calc(-0.75rem - ${scrollbarOffsetPx}px)`,
+            paddingRight: `calc(${scrollbarOffsetPx}px + 8px)`,
+          }}
+        >
+          {sectionCanEdit && (
+            <>
+              <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2">
+                <div className="group space-y-1.5">
+                  <label className="text-[10px] font-semibold tracking-widest text-zinc-500 uppercase transition-colors group-hover:text-zinc-600">编号</label>
+                  <div className="w-full rounded-lg border border-zinc-100 bg-zinc-50 px-2.5 py-2 text-xs font-semibold tabular-nums text-zinc-500">
+                    {scene.number || "—"}
+                  </div>
+                </div>
+                <div className="group space-y-1.5">
+                  <label className="text-[10px] font-semibold tracking-widest text-zinc-500 uppercase transition-colors group-hover:text-zinc-600">名称</label>
+                  <input
+                    value={nameDraft}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    onBlur={commitIdentity}
+                    onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                    disabled={savingIdentity}
+                    className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs text-zinc-800 outline-none transition-colors placeholder:text-zinc-400 hover:border-zinc-300 hover:text-zinc-950 focus:border-zinc-400 disabled:opacity-50"
+                    placeholder="未命名"
+                  />
+                </div>
+              </div>
+              {renderDurationField()}
+            </>
+          )}
+          <ScriptSceneMetaField label="简介" value={scene.synopsis} multiline canEdit={sectionCanEdit} onSave={(value) => onPatchMeta(scene.id, { synopsis: value })} />
+          <ScriptSceneMetaField label="行动线" value={scene.actionLine} multiline canEdit={sectionCanEdit} onSave={(value) => onPatchMeta(scene.id, { actionLine: value })} />
+          <ScriptSceneMetaField label="音乐" value={scene.music} multiline canEdit={sectionCanEdit} onSave={(value) => onPatchMeta(scene.id, { music: value })} />
+          <ScriptSceneMetaField label="舞台呈现" value={scene.stageNotes} multiline canEdit={sectionCanEdit} onSave={(value) => onPatchMeta(scene.id, { stageNotes: value })} />
+          <div className="pt-3">
+            <MountPointAssets
+              productionId={productionId}
+              mountType="scene"
+              mountId={scene.id}
+              label={`${scene.number}${scene.name ? ` ${scene.name}` : ""}`}
+              canEdit={sectionCanEdit}
+              display="compact"
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ScenePanel ───────────────────────────────────────────────────────────────
+
+function SceneRow({
+  scene,
+  onUpdate,
+  onRemove,
+  canRemove = true,
+  indent = false,
+}: {
+  scene: Scene;
+  onUpdate: (id: string, name: string) => void;
+  onRemove: (id: string) => void;
+  canRemove?: boolean;
+  indent?: boolean;
+}) {
+  const [name, setName] = useState(scene.name);
+  const [lastSeenName, setLastSeenName] = useState(scene.name);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  if (lastSeenName !== scene.name) { setLastSeenName(scene.name); setName(scene.name); }
+
+  const commit = () => {
+    if (name.trim() !== scene.name) {
+      onUpdate(scene.id, name.trim());
+    }
+  };
+
+  return (
+    <tr className="group border-b border-zinc-50 last:border-0">
+      <td className={`py-1 pr-2 align-middle${indent ? " pl-4" : ""}`}>
+        <span className={`block w-14 px-1 py-0.5 text-sm font-medium tabular-nums${indent ? " text-zinc-400" : " text-zinc-600"}`}>
+          {scene.number || "—"}
+        </span>
+      </td>
+      <td className="py-1 align-middle">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.currentTarget.blur(); } }}
+          className="w-full rounded border border-transparent px-1 py-0.5 text-sm outline-none focus:border-zinc-300"
+          placeholder="名称"
+        />
+      </td>
+      <td className="py-1 pl-2 align-middle">
+        {!canRemove ? null : confirmDelete ? (
+          <span className="inline-flex items-center gap-2 whitespace-nowrap">
+            <button
+              onClick={() => onRemove(scene.id)}
+              className="text-xs text-red-500 hover:text-red-700"
+            >
+              确认
+            </button>
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="text-xs text-zinc-400 hover:text-zinc-600"
+            >
+              取消
+            </button>
+          </span>
+        ) : (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="text-zinc-300 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+          >
+            ×
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function ScenePanel({
+  scenes,
+  productionId,
+  onAdd,
+  onUpdate,
+  onRemove,
+  open,
+  onOpenChange,
+  canImport,
+  onNavigate,
+  triggerClassName,
+  nestedFromMore = false,
+  nestedMenuRef,
+  nestedMenuStyle,
+  label = "章节",
+}: {
+  scenes: Scene[];
+  productionId: string;
+  onAdd: (parentId?: string, target?: { insertAfterSceneId?: string; insertBeforeSceneId?: string }) => void;
+  onUpdate: (id: string, name: string) => void;
+  onRemove: (id: string) => void;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  canImport?: boolean;
+  onNavigate?: () => void;
+  triggerClassName?: string;
+  nestedFromMore?: boolean;
+  nestedMenuRef?: React.RefObject<HTMLDivElement | null>;
+  nestedMenuStyle?: React.CSSProperties;
+  label?: string;
+}) {
+  return (
+    <div className="relative shrink-0">
+      <button
+        data-script-toolbar-menu-trigger="scene"
+        onClick={() => onOpenChange(!open)}
+        className={triggerClassName ?? "flex items-center gap-0.5 rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"}
+      >
+        {label} <ChevronIcon size={12} className="opacity-50" />
+      </button>
+      {open && (
+        <div
+          data-script-toolbar-menu-panel="scene"
+          data-production-overflow-menu-child={nestedFromMore ? "true" : undefined}
+          ref={nestedFromMore ? nestedMenuRef : undefined}
+          className={`${nestedFromMore ? "" : "absolute right-0 top-full mt-2.5"} z-40 flex w-72 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
+          style={nestedFromMore ? anchoredManagementPanelStyle(nestedMenuStyle ?? {}) : { maxHeight: "min(28rem, calc(100vh - 8rem))" }}
+        >
+          <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-3 py-2">
+            <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">章节管理</span>
+            <div className="flex items-center gap-2">
+              <Link href={`/production/${productionId}/dramaturgy`} onNavigate={onNavigate} className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors">
+                构作 →
+              </Link>
+            </div>
+          </div>
+          <div className="overflow-y-auto p-3">
+            {scenes.length === 0 ? (
+              <p className="mb-2 text-center text-xs text-zinc-300">暂无章节</p>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-zinc-100 text-left text-xs text-zinc-400">
+                    <th className="pb-1 pr-2 font-medium">编号</th>
+                    <th className="pb-1 font-medium">名称</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {scenes.map((s, index) => {
+                    const isSubScene = s.parentId !== null;
+                    const nextScene = scenes[index + 1];
+                    const isChapterEnd = !nextScene || nextScene.parentId === null;
+                    const chapterId = isSubScene ? s.parentId : s.id;
+                    return (
+                      <React.Fragment key={s.id}>
+                        <SceneRow
+                          scene={s}
+                          onUpdate={onUpdate}
+                          onRemove={onRemove}
+                          canRemove
+                          indent={isSubScene}
+                        />
+                        {isChapterEnd && chapterId && (
+                          <tr>
+                            <td colSpan={3} className="pt-0 pb-1 pl-5">
+                              <button
+                                onClick={() => onAdd(chapterId, nextScene ? { insertBeforeSceneId: nextScene.id } : undefined)}
+                                className="text-[11px] text-zinc-300 hover:text-zinc-500 transition-colors"
+                              >
+                                + 添加段落
+                              </button>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <div className="shrink-0 border-t border-zinc-100 p-3">
+            <button
+              onClick={() => onAdd(undefined, scenes.length > 0 ? { insertAfterSceneId: scenes[scenes.length - 1].id } : undefined)}
+              className="w-full rounded-lg border border-dashed border-zinc-200 py-1.5 text-sm text-zinc-400 transition-colors hover:border-zinc-400 hover:text-zinc-600"
+            >
+              + 添加章节
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type ScriptMarkerNode =
+  | { kind: "chapter"; id: string; scene: Scene }
+  | { kind: "scene"; id: string; scene: Scene }
+  | { kind: "rehearsal"; id: string; mark: string };
+
+function SceneHeader({
+  scene,
+  canEditName = false,
+  onNameChange,
+}: {
+  scene: Scene;
+  canEditName?: boolean;
+  onNameChange?: (id: string, name: string) => void;
+}) {
+  const [nameDraft, setNameDraft] = useState(scene.name);
+  const [editingName, setEditingName] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    setNameDraft(scene.name);
+  }, [scene.id, scene.name]);
+  useEffect(() => {
+    if (!editingName) return;
+    nameInputRef.current?.focus();
+    nameInputRef.current?.select();
+  }, [editingName]);
+
+  const commitName = () => {
+    const nextName = nameDraft.trim();
+    if (nextName !== scene.name) onNameChange?.(scene.id, nextName);
+    setEditingName(false);
+  };
+
+  const startEditingName = () => {
+    if (!canEditName) return;
+    setNameDraft(scene.name);
+    setEditingName(true);
+  };
+
+  const nameEl = (className: string, placeholder: string) => editingName ? (
+    <input
+      ref={nameInputRef}
+      value={nameDraft}
+      onChange={(e) => setNameDraft(e.target.value)}
+      onBlur={commitName}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          setNameDraft(scene.name);
+          setEditingName(false);
+        }
+      }}
+      placeholder={placeholder}
+      className={`${className} min-w-[6rem] max-w-[18rem] rounded border border-transparent bg-transparent px-1 py-0.5 outline-none transition-colors placeholder:text-zinc-300 hover:border-zinc-200 hover:bg-white/70 focus:border-zinc-300 focus:bg-white`}
+    />
+  ) : (
+    scene.name ? <span className={className}>{scene.name}</span> : null
+  );
+
+  if (scene.parentId === null) {
+    return (
+      <div className="flex select-none items-center gap-3 py-4">
+        <div className="h-px flex-1 bg-zinc-300" />
+        <div
+          data-script-marker-title="true"
+          className={`flex items-baseline gap-2.5${canEditName ? " cursor-text" : ""}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            startEditingName();
+          }}
+        >
+          <span className="text-xs font-extrabold tracking-widest text-zinc-500">{scene.number}</span>
+          {nameEl("text-base font-semibold text-zinc-600", "章节名称")}
+        </div>
+        <div className="h-px flex-1 bg-zinc-300" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex select-none items-center gap-2 py-2">
+      <div className="h-px flex-1 bg-zinc-100" />
+      <div
+        data-script-marker-title="true"
+        className={`flex items-baseline gap-1.5${canEditName ? " cursor-text" : ""}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          startEditingName();
+        }}
+      >
+        <span className="text-[10px] font-bold tracking-widest text-zinc-400">{scene.number}</span>
+        {nameEl("text-xs text-zinc-400", "段落名称")}
+      </div>
+      <div className="h-px flex-1 bg-zinc-100" />
+    </div>
+  );
+}
+
+function ScriptMarkerRow({
+  node,
+  canEdit,
+  isSelected,
+  isDeleteConfirmHighlighted,
+  isDeleteConfirmationOpen,
+  isMobileMenuOpen = false,
+  isReorderLocked,
+  isScriptDragging,
+  dragTarget,
+  onRemove,
+  onRequestDelete,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  onSelect,
+  canAddChapterScene,
+  canAddRehearsal,
+  onAddChapterBefore,
+  onAddSceneBefore,
+  onAddRehearsalBefore,
+  onConvertToChapter,
+  onConvertToScene,
+  onOpenSceneDetail,
+  onDeleteConfirmChange,
+  onSceneNameChange,
+  onMobileMenuOpen,
+  deleteCount = 1,
+  lineIndexWidth,
+  isRecentlyMoved = false,
+  isTocHighlighted = false,
+  reserveRehearsalGap = false,
+}: {
+  node: ScriptMarkerNode;
+  canEdit: boolean;
+  isSelected: boolean;
+  isDeleteConfirmHighlighted: boolean;
+  isDeleteConfirmationOpen: boolean;
+  isMobileMenuOpen?: boolean;
+  isReorderLocked: boolean;
+  isScriptDragging: boolean;
+  dragTarget?: DragTarget | null;
+  onRemove: () => void;
+  onRequestDelete: () => boolean;
+  onDragStart: (e: DragEvent<HTMLButtonElement>) => void;
+  onDragEnd: () => void;
+  onDragOver: (e: DragEvent<HTMLDivElement>) => void;
+  onDrop: (e: DragEvent<HTMLDivElement>) => void;
+  onSelect: (e: React.MouseEvent<HTMLElement>) => void;
+  canAddChapterScene: boolean;
+  canAddRehearsal: boolean;
+  onAddChapterBefore: () => void;
+  onAddSceneBefore: () => void;
+  onAddRehearsalBefore: () => void;
+  onConvertToChapter?: () => void;
+  onConvertToScene?: () => void;
+  onOpenSceneDetail?: () => void;
+  onDeleteConfirmChange?: (confirming: boolean) => void;
+  onSceneNameChange?: (id: string, name: string) => void;
+  onMobileMenuOpen?: () => void;
+  deleteCount?: number;
+  lineIndexWidth?: string;
+  isRecentlyMoved?: boolean;
+  isTocHighlighted?: boolean;
+  reserveRehearsalGap?: boolean;
+}) {
+  const isRehearsal = node.kind === "rehearsal";
+  const markerRootStyle: React.CSSProperties | undefined = lineIndexWidth
+    ? { paddingLeft: `calc(${lineIndexWidth} + ${LINE_INDEX_GUTTER_OFFSET_REM}rem)`,
+        marginRight: `${MARKER_DIVIDER_RIGHT_MARGIN}rem` }
+    : undefined;
+  const rehearsalMarkerStyle: React.CSSProperties | undefined = isRehearsal
+    ? { height: reserveRehearsalGap ? "1.25rem" : `max(${REHEARSAL_MARKER_ROW_MIN_HEIGHT_PX}px, ${REHEARSAL_MARKER_ROW_BASE_HEIGHT_REM * REHEARSAL_MARKER_ROW_HEIGHT_SCALE}rem)` }
+    : undefined;
+  const rehearsalFloatStyle: React.CSSProperties | undefined = isRehearsal
+    ? { left: `calc(1.5rem + ${REHEARSAL_MARKER_FLOAT_LEFT_OFFSET_REM}rem)` }
+    : undefined;
+  const title = isRehearsal
+    ? `排练记号 ${node.mark}`
+    : [node.scene.number, node.scene.name].filter(Boolean).join(" ");
+  const deleteConfirmText = deleteCount > 1
+    ? `确认删除所选 ${deleteCount} 行？`
+    : node.kind === "chapter"
+      ? "确认删除此章节标记？"
+      : node.kind === "scene"
+        ? "确认删除此段落标记？"
+        : "确认删除此排练记号？";
+  const markerMovedGlowClass = isRecentlyMoved && !isRehearsal ? "script-block-moved-glow" : "";
+  const markerTocGlowClass = !isRehearsal && !isRecentlyMoved && isTocHighlighted ? "script-toc-marker-glow" : "";
+  const isDeleteHighlighted = isDeleteConfirmationOpen || isDeleteConfirmHighlighted;
+  const markerGlowEndColor = !isRehearsal && isTocHighlighted
+    ? isDeleteHighlighted ? "#fee2e2" : isSelected ? "#eef3fa" : "#ffffff"
+    : undefined;
+  const convertToChapter = node.kind === "scene" || node.kind === "rehearsal" ? onConvertToChapter : undefined;
+  const convertToScene = node.kind === "chapter" || node.kind === "rehearsal" ? onConvertToScene : undefined;
+  const canShowBoundaryMenu = (
+    canAddChapterScene ||
+    canAddRehearsal ||
+    !!convertToChapter ||
+    !!convertToScene ||
+    !!onOpenSceneDetail
+  );
+  const boundaryMenuControl = canShowBoundaryMenu ? (
+    <RehearsalMarkInput
+      variant="marker-control"
+      canAddChapterScene={canAddChapterScene}
+      canAddRehearsal={canAddRehearsal}
+      onAddChapterBefore={onAddChapterBefore}
+      onAddSceneBefore={onAddSceneBefore}
+      onAddRehearsalBefore={onAddRehearsalBefore}
+      onConvertToChapter={convertToChapter}
+      onConvertToScene={convertToScene}
+      onOpenSceneDetail={isRehearsal ? undefined : onOpenSceneDetail}
+    />
+  ) : null;
+  const markerRootCombinedStyle: React.CSSProperties | undefined = (
+    markerRootStyle || rehearsalMarkerStyle || markerGlowEndColor
+      ? ({
+          ...markerRootStyle,
+          ...rehearsalMarkerStyle,
+          ...(markerGlowEndColor ? { "--script-block-glow-fade-end": markerGlowEndColor } : {}),
+        } as React.CSSProperties)
+      : undefined
+  );
+  const openDeleteConfirmation = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isScriptDragging) return;
+    if (!onRequestDelete()) return;
+    onDeleteConfirmChange?.(true);
+  };
+  const deleteConfirmationControl = (
+    <span
+      className="flex items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm"
+      data-script-confirmation="true"
+    >
+      <span className="whitespace-nowrap text-[10px] text-zinc-400">{deleteConfirmText}</span>
+      <button
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDeleteConfirmChange?.(false);
+          onRemove();
+        }}
+        className="shrink-0 whitespace-nowrap text-[10px] text-red-500 hover:text-red-700"
+      >
+        确认
+      </button>
+      <button
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDeleteConfirmChange?.(false);
+        }}
+        className="shrink-0 whitespace-nowrap text-[10px] text-zinc-400 hover:text-zinc-600"
+      >
+        取消
+      </button>
+    </span>
+  );
+
+  return (
+    <div
+      id={`marker-${node.id}`}
+      data-script-marker={node.id}
+      data-script-marker-selectable={!isRehearsal ? "true" : undefined}
+      title={title}
+      onClick={(e) => {
+        if (isScriptDragging) return;
+        if (isRehearsal) return;
+        if (!canEdit) return;
+        if ((e.target as HTMLElement | null)?.closest("[data-script-marker-title='true']")) return;
+        onSelect(e);
+      }}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      style={markerRootCombinedStyle}
+      className={`group/marker relative select-none text-left transition-colors ${
+        isRehearsal
+          ? ""
+          : isDeleteHighlighted ? "bg-red-100" : isSelected ? "bg-[#eef3fa]" : "hover:bg-zinc-50/70"
+      } ${markerMovedGlowClass} ${markerTocGlowClass} px-6 ${isRehearsal ? "overflow-visible" : ""}`}
+    >
+      {isRehearsal && isTocHighlighted ? (
+        <div
+          className="pointer-events-none absolute left-6 right-6 top-1/2 -translate-y-1/2 rounded script-toc-marker-glow"
+          style={{ height: "1.25rem", "--script-block-glow-fade-end": isDeleteHighlighted ? "#fee2e2" : "#ffffff" } as React.CSSProperties}
+        />
+      ) : null}
+      {dragTarget && (
+        <div
+          className={`pointer-events-none absolute left-4 right-4 z-10 border-t-2 ${
+            dragTarget.kind !== "edge" && dragTarget.position === "before"
+              ? isRehearsal ? "-top-3.5" : "-top-0.5"
+              : isRehearsal ? "-bottom-3.5" : "-bottom-0.5"
+          }`}
+          style={{ borderColor: "#91a8ca" }}
+        />
+      )}
+      {!isRehearsal && (canEdit || boundaryMenuControl) && (
+        <div className="absolute left-0 top-1 bottom-1 z-20 w-12">
+          {canEdit && isDeleteConfirmationOpen ? (
+            <span
+              className="absolute left-0 top-1/2 z-10 hidden -translate-y-1/2 translate-x-8 sm:block"
+            >
+              {deleteConfirmationControl}
+            </span>
+          ) : canEdit ? (
+            <button
+              type="button"
+              data-script-confirmation="true"
+              onPointerDown={openDeleteConfirmation}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+              }}
+              style={{ left: MARKER_CONTROL_DELETE_LEFT_PX }}
+              className="absolute top-1/2 hidden h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover/marker:opacity-100 sm:flex"
+              title="删除此标记"
+              aria-label="删除此标记"
+            >
+              ×
+            </button>
+          ) : null}
+          {canEdit && (
+            <button
+              type="button"
+              draggable={!isReorderLocked}
+              disabled={isReorderLocked}
+              data-script-block-bar="true"
+              data-script-marker-bar="true"
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              onMouseDown={(e) => {
+                if (e.shiftKey) e.preventDefault();
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect(e);
+                if (window.matchMedia("(max-width: 639px)").matches) onMobileMenuOpen?.();
+              }}
+              style={{ left: MARKER_CONTROL_BAR_LEFT_PX }}
+              className={`absolute top-1/2 h-[max(1.25rem,calc(100%-0.25rem))] w-4 -translate-y-1/2 select-none rounded text-zinc-300 outline-none transition-colors hover:text-zinc-500 focus:outline-none focus-visible:outline-none sm:opacity-0 sm:transition-all sm:group-hover/marker:opacity-100 ${
+                isReorderLocked
+                  ? "cursor-not-allowed text-zinc-200 opacity-40"
+                  : isDeleteHighlighted
+                    ? "cursor-grab bg-red-100 text-red-500 hover:bg-red-100 hover:text-red-600 active:cursor-grabbing sm:opacity-100"
+                    : `cursor-grab active:cursor-grabbing sm:hover:bg-[#dbe5f3] sm:hover:text-[#91a8ca] ${
+                        isSelected ? "sm:bg-[#dbe5f3] sm:text-[#91a8ca] sm:opacity-100" : "sm:text-zinc-200"
+                      }`
+              }`}
+              title="拖动调整标记位置"
+              aria-label="拖动调整标记位置"
+            >
+              <span className="pointer-events-none flex h-full items-center justify-center text-[11px] font-bold sm:hidden">▶</span>
+              <span className="pointer-events-none absolute bottom-1 left-1/2 top-1 hidden w-0.5 -translate-x-1/2 rounded bg-current sm:block" />
+            </button>
+          )}
+          {boundaryMenuControl && (
+            <span
+              className="absolute top-1/2 hidden -translate-y-1/2 opacity-0 transition-opacity group-hover/marker:opacity-100 sm:block"
+              style={{
+                left: MARKER_CONTROL_TRIANGLE_LEFT_PX,
+                marginTop: MARKER_CONTROL_TRIANGLE_TOP_OFFSET_PX,
+              }}
+            >
+              {boundaryMenuControl}
+            </span>
+          )}
+        </div>
+      )}
+      {isRehearsal ? (
+        <div
+          className="absolute top-1/2 z-10 flex -translate-y-1/2 items-center gap-1"
+          style={rehearsalFloatStyle}
+        >
+          <button
+            type="button"
+            draggable={canEdit && !isReorderLocked}
+            data-script-block-bar="true"
+            data-script-marker-bar="true"
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            onMouseDown={(e) => {
+              if (e.shiftKey) e.preventDefault();
+              e.stopPropagation();
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isScriptDragging) return;
+              if (!canEdit) return;
+              onSelect(e);
+            }}
+            className={`inline-flex h-5 min-w-6 items-center justify-center rounded px-2 text-[10px] font-bold tracking-wider ${isDeleteConfirmationOpen ? "transition-none" : "transition-all"} ${
+              isDeleteHighlighted
+                ? "bg-red-100 text-red-600 ring-1 ring-red-300"
+                : isSelected || isMobileMenuOpen ? "bg-[#eef3fa] text-[#637ca1] ring-1 ring-[#91a8ca]" : "bg-zinc-100 text-zinc-500"
+            } ${
+              canEdit && !isReorderLocked
+                ? isDeleteHighlighted
+                  ? "cursor-grab hover:bg-red-100 hover:text-red-700 active:cursor-grabbing"
+                  : "cursor-grab hover:bg-[#dbe5f3] hover:text-[#637ca1] active:cursor-grabbing"
+                : "cursor-default"
+            }`}
+            title="拖动调整排练记号位置"
+            aria-label={`排练记号 ${node.mark}`}
+          >
+            {node.mark}
+          </button>
+          {canEdit && isDeleteConfirmationOpen ? (
+            deleteConfirmationControl
+          ) : canEdit ? (
+            <button
+              type="button"
+              data-script-confirmation="true"
+              onPointerDown={openDeleteConfirmation}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+              }}
+              className={`hidden h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 transition-all hover:bg-red-100 hover:text-red-500 sm:flex ${
+                isSelected ? "opacity-100" : "opacity-0 group-hover/marker:opacity-100"
+              }`}
+              title="删除此排练记号"
+              aria-label="删除此排练记号"
+            >
+              ×
+            </button>
+          ) : null}
+          {!isDeleteConfirmationOpen && boundaryMenuControl ? (
+            <span className="hidden h-4 items-center opacity-0 transition-opacity group-hover/marker:opacity-100 sm:flex">
+              {boundaryMenuControl}
+            </span>
+          ) : null}
+          {!isDeleteConfirmationOpen && (canEdit || boundaryMenuControl) ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onMobileMenuOpen?.();
+              }}
+              className="flex h-5 w-4 items-center justify-center rounded text-zinc-300 transition-colors hover:text-zinc-500 sm:hidden"
+              title="更多操作"
+              aria-label="更多操作"
+            >
+              <span className="pointer-events-none flex h-full items-center justify-center text-[11px] font-bold">▶</span>
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <div className="grid min-w-0 grid-cols-[7.5rem_1rem_minmax(0,1fr)] gap-x-2">
+          <div className="col-span-3">
+            <SceneHeader
+              scene={node.scene}
+              canEditName={canEdit}
+              onNameChange={onSceneNameChange}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BoundaryInsertMenu({
+  canAddChapterScene,
+  canAddRehearsal,
+  onAddChapter,
+  onAddScene,
+  onAddRehearsal,
+  onConvertToChapter,
+  onConvertToScene,
+  onOpenSceneDetail,
+}: {
+  canAddChapterScene: boolean;
+  canAddRehearsal: boolean;
+  onAddChapter: () => void;
+  onAddScene: () => void;
+  onAddRehearsal: () => void;
+  onConvertToChapter?: () => void;
+  onConvertToScene?: () => void;
+  onOpenSceneDetail?: () => void;
+}) {
+  const actions: Array<[string, () => void]> = [
+    ...(canAddChapterScene ? [
+      ["添加新章", onAddChapter] as [string, () => void],
+      ["添加新段", onAddScene] as [string, () => void],
+    ] : []),
+    ...(canAddRehearsal ? [["添加新排练记号", onAddRehearsal] as [string, () => void]] : []),
+  ];
+  const conversionActions: Array<[string, () => void]> = [
+    ...(onConvertToChapter ? [["转为章节", onConvertToChapter] as [string, () => void]] : []),
+    ...(onConvertToScene ? [["转为段落", onConvertToScene] as [string, () => void]] : []),
+  ];
+  const renderAction = ([label, handler]: [string, () => void]) => (
+    <button
+      key={label}
+      type="button"
+      onMouseDown={(e) => {
+        e.preventDefault();
+        handler();
+      }}
+      className="block w-full px-3 py-1.5 text-left text-xs text-zinc-600 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="absolute left-0 top-full z-50 mt-1 w-36 rounded-lg border border-[var(--line)] bg-[var(--surface)] py-1 text-left shadow-xl">
+      {actions.length > 0 && (
+        <>
+          <div className="px-3 py-1 text-[10px] font-semibold tracking-wide text-zinc-400">在块前</div>
+          {actions.map(renderAction)}
+        </>
+      )}
+      {conversionActions.length > 0 && (
+        <>
+          {actions.length > 0 && <div className="my-1 h-px bg-zinc-100" />}
+          <div className="px-3 py-1 text-[10px] font-semibold tracking-wide text-zinc-400">转换</div>
+          {conversionActions.map(renderAction)}
+        </>
+      )}
+      {onOpenSceneDetail && (
+        <>
+          {(actions.length > 0 || conversionActions.length > 0) && <div className="my-1 h-px bg-zinc-100" />}
+          <div className="px-3 py-1 text-[10px] font-semibold tracking-wide text-zinc-400">详情</div>
+          {renderAction(["查看构作详情", onOpenSceneDetail])}
+        </>
+      )}
+    </div>
+  );
+}
+
+function SceneLabel({ scene, focused = false }: { scene: Scene; focused?: boolean }) {
+  return (
+    <span
+      title={scene.name ? `${scene.number} ${scene.name}` : scene.number}
+      className={`pointer-events-none select-none rounded px-1.5 py-0.5 text-[11px] font-bold tracking-wide transition-colors ${
+        focused ? "text-zinc-600" : "text-zinc-300 group-hover:text-zinc-500"
+      }`}
+    >
+      {scene.number}
+    </span>
+  );
+}
+
+// ─── Per-block rehearsal mark ──────────────────────────────────────────────────
+
+function RehearsalMarkInput({
+  variant = "script-block",
+  canAddChapterScene,
+  canAddRehearsal,
+  onAddChapterBefore,
+  onAddSceneBefore,
+  onAddRehearsalBefore,
+  onConvertToChapter,
+  onConvertToScene,
+  onOpenSceneDetail,
+}: {
+  variant?: "script-block" | "marker-control";
+  canAddChapterScene: boolean;
+  canAddRehearsal: boolean;
+  onAddChapterBefore: () => void;
+  onAddSceneBefore: () => void;
+  onAddRehearsalBefore: () => void;
+  onConvertToChapter?: () => void;
+  onConvertToScene?: () => void;
+  onOpenSceneDetail?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const closeAfter = (fn: () => void) => {
+    fn();
+    setOpen(false);
+  };
+  const triggerLayoutClass = variant === "marker-control"
+    ? "flex h-4 w-4 items-center justify-center p-0"
+    : "px-0.5 py-0";
+  const triggerTitle = canAddRehearsal
+    ? "添加章节/段落/排练记号"
+    : canAddChapterScene
+      ? "添加章节/段落"
+      : "标记操作";
+
+  return (
+    <span
+      ref={wrapRef}
+      className={`relative flex items-start gap-1 ${open ? "z-50" : ""}`}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setOpen((value) => !value)}
+        title={triggerTitle}
+        data-rehearsal-triangle="true"
+        className={`rounded ${triggerLayoutClass} text-[8px] font-bold leading-none tracking-wide text-zinc-300 transition-colors hover:text-zinc-500`}
+      >
+        ▶
+      </button>
+      {open && (
+        <BoundaryInsertMenu
+          canAddChapterScene={canAddChapterScene}
+          canAddRehearsal={canAddRehearsal}
+          onAddChapter={() => closeAfter(onAddChapterBefore)}
+          onAddScene={() => closeAfter(onAddSceneBefore)}
+          onAddRehearsal={() => closeAfter(onAddRehearsalBefore)}
+          onConvertToChapter={onConvertToChapter ? () => closeAfter(onConvertToChapter) : undefined}
+          onConvertToScene={onConvertToScene ? () => closeAfter(onConvertToScene) : undefined}
+          onOpenSceneDetail={onOpenSceneDetail ? () => closeAfter(onOpenSceneDetail) : undefined}
+        />
+      )}
+    </span>
+  );
+}
+
+function RehearsalMarkLabel({ mark }: { mark: string }) {
+  return (
+    <span className="flex items-start gap-1">
+      <span
+        data-rehearsal-triangle="true"
+        className="rounded px-0.5 py-0 text-[8px] font-bold leading-none tracking-wide text-zinc-500"
+      >
+        ▶
+      </span>
+      <span className="text-[9px] font-bold leading-none tracking-wide text-zinc-500">
+        {mark}
+      </span>
+    </span>
+  );
+}
+
+// ─── CharacterPanel ───────────────────────────────────────────────────────────
+
+function CharacterRow({
+  char,
+  focused,
+  onToggleFocus,
+  onRename,
+  onRemove,
+  readOnly = false,
+}: {
+  char: Character;
+  focused: boolean;
+  onToggleFocus: () => void;
+  onRename: (name: string) => void;
+  onRemove: () => void;
+  readOnly?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(char.name);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const commit = () => {
+    const t = draft.trim();
+    if (t) onRename(t);
+    else setDraft(char.name);
+    setEditing(false);
+  };
+
+  return (
+    <tr className="group border-b border-zinc-50 last:border-0">
+      <td className="max-w-0 px-4 py-2 w-full">
+        {editing ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") { setDraft(char.name); setEditing(false); }
+            }}
+            className="w-full border-b border-zinc-400 text-sm text-zinc-800 outline-none"
+          />
+        ) : (
+          <span
+            onClick={() => {
+              if (readOnly) return;
+              setDraft(char.name);
+              setEditing(true);
+            }}
+            className={`block truncate whitespace-nowrap text-sm text-zinc-700 ${readOnly ? "" : "cursor-text hover:text-zinc-900"}`}
+            title={readOnly ? undefined : "点击重命名"}
+          >
+            {char.name}
+          </span>
+        )}
+      </td>
+      <td className="w-8 py-2 pr-2 text-right align-middle">
+        <button
+          type="button"
+          onClick={onToggleFocus}
+          className="inline-flex items-center align-middle"
+          title={focused ? "取消聚焦角色" : "聚焦角色"}
+          aria-pressed={focused}
+        >
+          <ModeSwitch active={focused} activeClassName="bg-purple-800/60" />
+        </button>
+      </td>
+      {!readOnly && (
+        <td className="w-7 py-2 pr-4 text-right align-middle whitespace-nowrap">
+          {confirmDelete ? (
+            <span className="inline-flex items-center gap-2 whitespace-nowrap">
+              <button
+                onClick={onRemove}
+                className="text-xs text-red-500 hover:text-red-700"
+              >
+                确认
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="text-xs text-zinc-400 hover:text-zinc-600"
+              >
+                取消
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="text-sm text-zinc-300 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+            >
+              ×
+            </button>
+          )}
+        </td>
+      )}
+    </tr>
+  );
+}
+
+function CharacterPanel({
+  characters,
+  productionId,
+  focusedCharacterIds,
+  onToggleFocus,
+  onClearFocus,
+  onAdd,
+  onRemove,
+  onRename,
+  open,
+  onOpenChange,
+  onNavigate,
+  readOnly = false,
+  triggerClassName,
+  nestedFromMore = false,
+  nestedMenuRef,
+  nestedMenuStyle,
+  label = "角色",
+}: {
+  characters: Character[];
+  productionId: string;
+  focusedCharacterIds: Set<string>;
+  onToggleFocus: (id: string) => void;
+  onClearFocus: () => void;
+  onAdd: (name: string) => void;
+  onRemove: (id: string) => void;
+  onRename: (id: string, name: string) => void;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onNavigate?: () => void;
+  readOnly?: boolean;
+  triggerClassName?: string;
+  nestedFromMore?: boolean;
+  nestedMenuRef?: React.RefObject<HTMLDivElement | null>;
+  nestedMenuStyle?: React.CSSProperties;
+  label?: string;
+}) {
+  const [draft, setDraft] = useState("");
+
+  const submit = () => {
+    if (readOnly) return;
+    const name = draft.trim();
+    if (!name) return;
+    onAdd(name);
+    setDraft("");
+  };
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        data-script-toolbar-menu-trigger="char"
+        onClick={() => onOpenChange(!open)}
+        className={triggerClassName ?? `flex items-center gap-0.5 rounded px-1.5 py-1 text-sm transition-colors ${
+          open
+            ? "bg-zinc-100 text-zinc-800"
+            : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
+        }`}
+      >
+        {label} <ChevronIcon size={12} className="opacity-50" />
+      </button>
+
+      {open && (
+        <div
+          data-script-toolbar-menu-panel="char"
+          data-production-overflow-menu-child={nestedFromMore ? "true" : undefined}
+          ref={nestedFromMore ? nestedMenuRef : undefined}
+          className={`${nestedFromMore ? "" : "absolute right-0 top-full mt-2.5"} z-40 flex w-56 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl`}
+          style={nestedFromMore ? anchoredManagementPanelStyle(nestedMenuStyle ?? {}) : { maxHeight: "min(28rem, calc(100vh - 8rem))" }}
+        >
+          <div className="shrink-0 flex items-center justify-between border-b border-zinc-100 px-4 py-2">
+            <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">{readOnly ? "聚焦角色" : "角色管理"}</span>
+            {(focusedCharacterIds.size > 0 || !readOnly) && (
+              <div className="flex items-center gap-2">
+                {focusedCharacterIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={onClearFocus}
+                    className="whitespace-nowrap text-[11px] text-purple-800/60 transition-colors hover:text-purple-800"
+                  >
+                    重置聚焦
+                  </button>
+                )}
+                {!readOnly && (
+                  <Link href={`/production/${productionId}/characters`} onNavigate={onNavigate} className="whitespace-nowrap text-[11px] text-zinc-300 transition-colors hover:text-zinc-500">
+                    管理页 →
+                  </Link>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="overflow-y-auto">
+          <table className="w-full">
+            <tbody>
+              {characters.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-3 text-sm text-zinc-300">暂无角色</td>
+                </tr>
+              ) : (
+                characters.map((c) => (
+                  <CharacterRow
+                    key={c.id}
+                    char={c}
+                    focused={focusedCharacterIds.has(c.id)}
+                    onToggleFocus={() => onToggleFocus(c.id)}
+                    onRename={(name) => onRename(c.id, name)}
+                    onRemove={() => onRemove(c.id)}
+                    readOnly={readOnly}
+                  />
+                ))
+              )}
+            </tbody>
+          </table>
+          </div>
+
+          {!readOnly && (
+            <div className="shrink-0 flex items-center gap-2 border-t border-zinc-100 px-4 py-2.5">
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+                placeholder="新角色名…"
+                className="min-w-0 flex-1 text-sm text-zinc-800 outline-none placeholder:text-zinc-300"
+              />
+              <button
+                onClick={submit}
+                disabled={!draft.trim()}
+                className="shrink-0 rounded-md bg-zinc-700 px-2.5 py-1 text-xs text-white hover:bg-zinc-600 disabled:opacity-30"
+              >
+                添加
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── BlockCharacterSelector ───────────────────────────────────────────────────
+
+function CharacterControlBottomSheet({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:hidden" onClick={onClose}>
+      <div
+        data-script-selection-action="true"
+        className="max-h-[75vh] w-full overflow-y-auto rounded-t-2xl border-t border-[var(--line)] bg-[var(--surface)] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="h-1 w-10 rounded-full bg-zinc-200" />
+        </div>
+        <p className="px-5 py-2 text-xs font-medium text-zinc-400">{title}</p>
+        {children}
+        <div className="h-6" />
+      </div>
+    </div>
+  );
+}
+
+function BlockCharacterSelector({
+  block,
+  characters,
+  onChange,
+  onAnnotationChange,
+  onForceShowCharacterNameChange,
+  onEditingChange,
+  editRequestToken,
+  onArrowUp,
+  onArrowDown,
+  readOnly = false,
+  layoutMode = "center",
+  bottomGapClassName = "mb-2",
+}: {
+  block: Block;
+  characters: Character[];
+  onChange: (ids: string[]) => void;
+  onAnnotationChange: (charId: string, annotation: string) => void;
+  onForceShowCharacterNameChange: (force: boolean) => void;
+  onEditingChange: (editing: boolean) => void;
+  editRequestToken: number;
+  onArrowUp: () => void;
+  onArrowDown: () => void;
+  readOnly?: boolean;
+  layoutMode?: ScriptTextLayoutMode;
+  bottomGapClassName?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const setEditingWithNotify = useCallback((v: boolean) => { setEditing(v); onEditingChange(v); }, [onEditingChange]);
+  const [query, setQuery] = useState("");
+  const [highlightIdx, setHighlightIdx] = useState(0);
+  const [showAnnotations, setShowAnnotations] = useState(false);
+  const [displayMenuOpen, setDisplayMenuOpen] = useState(false);
+  const [mobileControlMenu, setMobileControlMenu] = useState<"display" | "annotations" | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Open editing when token increments (token changes on each external open request)
+  const prevTokenRef = useRef(editRequestToken);
+  useEffect(() => {
+    if (editRequestToken > 0 && editRequestToken !== prevTokenRef.current) {
+      prevTokenRef.current = editRequestToken;
+      setEditingWithNotify(true);
+    }
+  }, [editRequestToken, setEditingWithNotify]);
+
+  // Focus input whenever editing mode activates; auto-expand annotations if any exist
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      if (block.characterIds.some((id) => block.characterAnnotations[id])) setShowAnnotations(true);
+    } else {
+      setShowAnnotations(false);
+      setDisplayMenuOpen(false);
+      setMobileControlMenu(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
+
+  useEffect(() => {
+    if (!editing) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) {
+        setEditingWithNotify(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [editing, setEditingWithNotify]);
+
+  const selected = characters.filter((c) => block.characterIds.includes(c.id));
+  const suggestions = characters.filter(
+    (c) => !block.characterIds.includes(c.id) && c.name.includes(query)
+  );
+  const selectorControlClass = "flex h-4 items-center gap-0.5 text-[11px] leading-none transition-colors";
+
+  const addChar = (id: string) => {
+    onChange([...block.characterIds, id]);
+    setQuery("");
+    setHighlightIdx(0);
+    inputRef.current?.focus();
+  };
+
+  const removeChar = (id: string) =>
+    onChange(block.characterIds.filter((c) => c !== id));
+
+  const close = () => { setEditingWithNotify(false); setQuery(""); setHighlightIdx(0); setDisplayMenuOpen(false); };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (highlightIdx < suggestions.length - 1) {
+        setHighlightIdx((i) => i + 1);
+      } else {
+        close();
+        onArrowDown();
+      }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (highlightIdx > 0) {
+        setHighlightIdx((i) => i - 1);
+      } else {
+        close();
+        onArrowUp();
+      }
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (suggestions.length > 0) {
+        addChar(suggestions[Math.min(highlightIdx, suggestions.length - 1)].id);
+        close();
+        onArrowDown();
+      }
+    } else if (e.key === "Escape") {
+      close();
+    } else if (e.key === "Backspace" && query === "" && selected.length > 0) {
+      removeChar(selected[selected.length - 1].id);
+    } else if ((e.metaKey || e.ctrlKey) && (e.key === "c" || e.key === "C") && query === "") {
+      // Copy current character names as plain text
+      e.preventDefault();
+      const names = selected.map((c) => c.name).join("、");
+      navigator.clipboard.writeText(names).catch(() => {});
+    }
+  };
+
+  const charLabel = (c: Character) => {
+    const ann = block.characterAnnotations[c.id];
+    return ann ? `${c.name}（${ann}）` : c.name;
+  };
+  const compactLayout = layoutMode === "compact";
+
+  if (!editing) {
+    return (
+      <div className={`${compactLayout ? "mb-0 flex justify-end text-right" : `${bottomGapClassName} flex translate-x-px justify-center`}`}>
+        {readOnly ? (
+          <span data-character-label="true" className={`max-w-full break-words text-sm font-bold leading-7 tracking-[0.12em] ${selected.length ? "text-zinc-800" : "text-zinc-300"}`}>
+            {selected.length ? selected.map(charLabel).join("、") : "无角色"}
+          </span>
+        ) : (
+          <button
+            data-character-label="true"
+            onClick={() => setEditingWithNotify(true)}
+            className={`max-w-full break-words text-right text-sm font-bold leading-7 tracking-[0.12em] transition-colors ${
+              selected.length
+                ? "text-zinc-800 hover:text-zinc-500"
+                : "text-zinc-300 hover:text-zinc-400"
+            }`}
+          >
+            {selected.length ? selected.map(charLabel).join("、") : "无角色"}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={wrapRef} className={`relative z-30 ${compactLayout ? "mb-0" : "mb-2"}`}>
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1.5 transition-colors focus-within:border-zinc-500">
+        {selected.map((c) => (
+          <span
+            key={c.id}
+            className="inline-flex items-center gap-0.5 rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-700"
+          >
+            {c.name}
+            <button
+              onMouseDown={(e) => { e.preventDefault(); removeChar(c.id); }}
+              className="ml-0.5 text-zinc-400 hover:text-zinc-700"
+            >×</button>
+          </span>
+        ))}
+        {characters.length === 0 ? (
+          <p className="min-w-[12rem] flex-1 text-left text-xs leading-5 text-zinc-400">
+            当前版本尚无任何角色。请通过【戏剧构作】—【角色】进行添加。
+          </p>
+        ) : (
+          <input
+            ref={inputRef}
+            autoFocus
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setHighlightIdx(0); }}
+            onKeyDown={handleKeyDown}
+            onPaste={(e) => {
+              const text = e.clipboardData.getData("text/plain");
+              const matches = text
+                .split(/[、，,\n]+/)
+                .map((s) => s.trim())
+                .filter(Boolean)
+                .flatMap((name) => {
+                  const c = characters.find((c) => c.name === name && !block.characterIds.includes(c.id));
+                  return c ? [c.id] : [];
+                });
+              if (matches.length > 0) {
+                e.preventDefault();
+                onChange([...block.characterIds, ...matches]);
+              }
+              // No matches → let default paste fill the search query
+            }}
+            placeholder={selected.length === 0 ? "搜索角色…" : ""}
+            className="min-w-[5rem] flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-300"
+          />
+        )}
+        {selected.length > 0 && !readOnly && (
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <div className="relative flex h-4 items-center">
+              <button
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (window.matchMedia("(max-width: 639px)").matches) {
+                    setMobileControlMenu((current) => current === "display" ? null : "display");
+                    return;
+                  }
+                  setDisplayMenuOpen((v) => !v);
+                }}
+                className={`${selectorControlClass} ${
+                  block.forceShowCharacterName ? "text-zinc-600" : "text-zinc-300 hover:text-zinc-500"
+                }`}
+              >
+                <span>显示状态</span>
+                <span className="sm:hidden"><FoldTriangle open={mobileControlMenu === "display"} /></span>
+                <span className="hidden sm:inline"><FoldTriangle open={displayMenuOpen} /></span>
+              </button>
+              {displayMenuOpen && (
+                <div className="absolute right-0 top-full z-50 mt-1 hidden w-32 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-xl sm:block">
+                  <button
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onForceShowCharacterNameChange(true);
+                      setDisplayMenuOpen(false);
+                    }}
+                    className={`w-full px-3 py-1.5 text-left text-xs ${
+                      block.forceShowCharacterName ? "text-zinc-900" : "text-zinc-500 hover:bg-zinc-50"
+                    }`}
+                  >
+                    永远显示该行角色
+                  </button>
+                  <button
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onForceShowCharacterNameChange(false);
+                      setDisplayMenuOpen(false);
+                    }}
+                    className={`w-full px-3 py-1.5 text-left text-xs ${
+                      block.forceShowCharacterName ? "text-zinc-500 hover:bg-zinc-50" : "text-zinc-900"
+                    }`}
+                  >
+                    自动
+                  </button>
+                </div>
+              )}
+            </div>
+            <button
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (window.matchMedia("(max-width: 639px)").matches) {
+                  setMobileControlMenu((current) => current === "annotations" ? null : "annotations");
+                  return;
+                }
+                setShowAnnotations((v) => !v);
+              }}
+              className={`${selectorControlClass} text-zinc-300 hover:text-zinc-500`}
+            >
+              <span>备注</span>
+              <span className="sm:hidden"><FoldTriangle open={mobileControlMenu === "annotations"} /></span>
+              <span className="hidden sm:inline"><FoldTriangle open={showAnnotations} /></span>
+            </button>
+          </div>
+        )}
+      </div>
+      {showAnnotations && selected.length > 0 && (
+        <div className="hidden flex-wrap gap-x-4 gap-y-0.5 rounded-b-lg border border-t-0 border-zinc-200 px-2.5 py-1.5 sm:flex">
+          {selected.map((c) => (
+            <label key={c.id} className="flex items-center gap-1">
+              <span className="text-[11px] text-zinc-400">{c.name}</span>
+              <input
+                value={block.characterAnnotations[c.id] ?? ""}
+                onChange={(e) => onAnnotationChange(c.id, e.target.value)}
+                onMouseDown={(e) => e.stopPropagation()}
+                placeholder="备注…"
+                className="w-16 border-b border-zinc-200 bg-transparent text-[11px] text-zinc-600 outline-none placeholder:text-zinc-300 focus:border-zinc-400"
+              />
+            </label>
+          ))}
+        </div>
+      )}
+      {mobileControlMenu === "display" && (
+        <CharacterControlBottomSheet title="显示状态" onClose={() => setMobileControlMenu(null)}>
+          <button
+            type="button"
+            onClick={() => {
+              onForceShowCharacterNameChange(true);
+              setMobileControlMenu(null);
+            }}
+            className={`flex w-full items-center justify-between border-t border-zinc-100 px-5 py-3.5 text-left text-[15px] ${
+              block.forceShowCharacterName ? "font-medium text-zinc-900" : "text-zinc-600"
+            }`}
+          >
+            <span>永远显示该行角色</span>
+            {block.forceShowCharacterName && <span className="text-xs">✓</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onForceShowCharacterNameChange(false);
+              setMobileControlMenu(null);
+            }}
+            className={`flex w-full items-center justify-between border-t border-zinc-100 px-5 py-3.5 text-left text-[15px] ${
+              block.forceShowCharacterName ? "text-zinc-600" : "font-medium text-zinc-900"
+            }`}
+          >
+            <span>自动</span>
+            {!block.forceShowCharacterName && <span className="text-xs">✓</span>}
+          </button>
+        </CharacterControlBottomSheet>
+      )}
+      {mobileControlMenu === "annotations" && (
+        <CharacterControlBottomSheet title="备注" onClose={() => setMobileControlMenu(null)}>
+          <div className="border-t border-zinc-100 px-5 py-2">
+            {selected.map((c) => (
+              <label key={c.id} className="flex items-center gap-3 border-b border-zinc-100 py-3 last:border-0">
+                <span className="w-20 shrink-0 truncate text-sm text-zinc-500">{c.name}</span>
+                <input
+                  value={block.characterAnnotations[c.id] ?? ""}
+                  onChange={(e) => onAnnotationChange(c.id, e.target.value)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  placeholder="备注…"
+                  className="min-w-0 flex-1 border-b border-zinc-200 bg-transparent py-1 text-sm text-zinc-700 outline-none placeholder:text-zinc-300 focus:border-zinc-500"
+                />
+              </label>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setMobileControlMenu(null)}
+            className="w-full border-t border-zinc-100 px-5 py-3.5 text-center text-[15px] font-medium text-zinc-700"
+          >
+            完成
+          </button>
+        </CharacterControlBottomSheet>
+      )}
+      {suggestions.length > 0 && (
+        <div className="absolute left-0 top-full z-30 mt-1 w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-xl overflow-y-auto" style={{ maxHeight: "min(16rem, calc(100vh - 12rem))" }}>
+          {suggestions.map((c, i) => (
+            <button
+              key={c.id}
+              onMouseDown={(e) => { e.preventDefault(); addChar(c.id); }}
+              className={`w-full px-4 py-1.5 text-left text-sm ${
+                i === highlightIdx
+                  ? "bg-zinc-100 text-zinc-900"
+                  : "text-zinc-700 hover:bg-zinc-50"
+              }`}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {suggestions.length === 0 && query && (
+        <div className="absolute left-0 top-full z-30 mt-1 w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2 shadow-xl">
+          <p className="text-xs text-zinc-400">无匹配角色</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BlockStageComment({
+  value,
+  onChange,
+  showAddButton = true,
+  topGap,
+  readOnly = false,
+  stageDelimOpen,
+  stageDelimClose,
+  layoutMode = "center",
+  placementClassName = "",
+  onEditingChange,
+  addButtonCenter = false,
+  alignFirstLineToEnd = false,
+  alignAddButtonToLineAnchor = false,
+  onOverflowBelowChange,
+  addButtonRevealOnHover = false,
+  lineAnchorCenter,
+  lineAnchorRowHeight,
+  zeroHeightAddButton = false,
+  manualOffsetYPx = 0,
+  getEditorWidth,
+}: {
+  value?: string | null;
+  onChange: (value: string | null) => void;
+  showAddButton?: boolean;
+  topGap?: "compact" | "leading";
+  readOnly?: boolean;
+  stageDelimOpen: string;
+  stageDelimClose: string;
+  layoutMode?: ScriptTextLayoutMode;
+  placementClassName?: string;
+  onEditingChange?: (editing: boolean) => void;
+  addButtonCenter?: boolean;
+  alignFirstLineToEnd?: boolean;
+  alignAddButtonToLineAnchor?: boolean;
+  onOverflowBelowChange?: (height: number) => void;
+  addButtonRevealOnHover?: boolean;
+  lineAnchorCenter?: number;
+  lineAnchorRowHeight?: number;
+  zeroHeightAddButton?: boolean;
+  manualOffsetYPx?: number;
+  getEditorWidth?: () => number | null;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? "");
+  const skipBlurCommitRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const addButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [lineAnchorShift, setLineAnchorShift] = useState(0);
+  const [editorWidth, setEditorWidth] = useState<number | null>(null);
+  const text = value?.trim() ?? "";
+
+  const commit = () => {
+    const next = draft.trim();
+    onChange(next || null);
+    skipBlurCommitRef.current = false;
+    setEditing(false);
+    onEditingChange?.(false);
+  };
+  const openEditor = () => {
+    skipBlurCommitRef.current = false;
+    setDraft(value ?? "");
+    setEditorWidth(getEditorWidth?.() ?? null);
+    setEditing(true);
+    onEditingChange?.(true);
+  };
+  const topGapClass = topGap === "leading" ? "mt-2 " : topGap === "compact" ? "-mt-1 " : "";
+  const compactLayout = layoutMode === "compact";
+  const alignClass = compactLayout ? "justify-start text-left" : "justify-center text-center";
+  const addButtonAlignClass = addButtonCenter ? "justify-center" : alignClass;
+  const stageCommentLeadingClass = "leading-normal";
+  const stageCommentTextClass = `font-stage text-sm italic text-zinc-400 ${compactLayout ? "text-left" : ""} ${stageCommentLeadingClass} whitespace-pre-wrap`;
+  const rootTranslateY = ((alignFirstLineToEnd || alignAddButtonToLineAnchor) ? lineAnchorShift : 0) + manualOffsetYPx;
+  const rootStyle: React.CSSProperties | undefined = rootTranslateY !== 0
+    ? { transform: `translateY(${rootTranslateY}px)` }
+    : undefined;
+  const addButtonStyle: React.CSSProperties | undefined = zeroHeightAddButton
+    ? { transform: "translateY(-0.75rem)" }
+    : undefined;
+
+  useLayoutEffect(() => {
+    if (!editing) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [editing, draft]);
+
+  useLayoutEffect(() => {
+    if (!alignFirstLineToEnd && !alignAddButtonToLineAnchor) {
+      setLineAnchorShift(0);
+      onOverflowBelowChange?.(0);
+      return;
+    }
+    const el = rootRef.current;
+    if (!el) return;
+    const measure = () => {
+      const target = alignFirstLineToEnd
+        ? el.querySelector<HTMLElement>("[data-stage-comment-body='true']")
+        : addButtonRef.current;
+      if (!target) {
+        setLineAnchorShift(0);
+        onOverflowBelowChange?.(0);
+        return;
+      }
+      const rootRect = el.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const lineHeight = alignFirstLineToEnd
+        ? parseFloat(window.getComputedStyle(target).lineHeight)
+        : targetRect.height;
+      const firstLineCenter = targetRect.top - rootRect.top + (Number.isFinite(lineHeight) ? lineHeight : targetRect.height) / 2;
+      if (lineAnchorCenter === undefined) {
+        setLineAnchorShift(0);
+        onOverflowBelowChange?.(0);
+        return;
+      }
+      const shift = Math.round(lineAnchorCenter - firstLineCenter);
+      const rowHeight = Math.max(lineAnchorRowHeight ?? 0, rootRect.height);
+      setLineAnchorShift(shift);
+      onOverflowBelowChange?.(
+        alignFirstLineToEnd ? Math.max(0, Math.ceil(shift + rootRect.height - rowHeight)) : 0
+      );
+    };
+    measure();
+    if (alignAddButtonToLineAnchor && !alignFirstLineToEnd) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [
+    alignFirstLineToEnd,
+    alignAddButtonToLineAnchor,
+    editing,
+    draft,
+    text,
+    readOnly,
+    showAddButton,
+    onOverflowBelowChange,
+    lineAnchorCenter,
+    lineAnchorRowHeight,
+  ]);
+
+  if (editing && !readOnly) {
+    return (
+      <div ref={rootRef} style={rootStyle} className={`${topGapClass}mb-0.5 flex ${alignClass} ${placementClassName}`}>
+        <textarea
+          data-stage-comment-body="true"
+          ref={textareaRef}
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            if (skipBlurCommitRef.current) {
+              skipBlurCommitRef.current = false;
+              return;
+            }
+            commit();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commit(); }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              skipBlurCommitRef.current = true;
+              setDraft(value ?? "");
+              setEditing(false);
+              onEditingChange?.(false);
+            }
+          }}
+          placeholder="在此输入演员提示/补充舞台提示"
+          rows={1}
+          style={editorWidth ? { width: editorWidth } : undefined}
+          className={`${editorWidth ? "shrink-0" : "w-full max-w-xs"} ${compactLayout ? "min-h-[1.125rem]" : "min-h-7"} ${stageCommentLeadingClass} resize-none overflow-hidden border-b border-zinc-200 bg-transparent px-1 ${compactLayout ? "text-left" : "text-center"} font-stage text-sm italic text-zinc-500 outline-none placeholder:text-zinc-300 focus:border-zinc-400`}
+        />
+      </div>
+    );
+  }
+
+  if (text) {
+    const label = text
+      .split(/\r\n|\r|\n/)
+      .map((line) => `${stageDelimOpen}${line}${stageDelimClose}`)
+      .join("\n");
+    return (
+      <div ref={rootRef} style={rootStyle} className={`${topGapClass}mb-0.5 flex ${alignClass} ${placementClassName}`}>
+        {readOnly ? (
+          <span data-stage-comment-body="true" className={stageCommentTextClass}>{label}</span>
+        ) : (
+          <button
+            data-stage-comment-body="true"
+            type="button"
+            onClick={openEditor}
+            className={`${stageCommentTextClass} transition-colors hover:text-zinc-600`}
+          >
+            {label}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (readOnly || !showAddButton) return null;
+  return (
+    <div
+      ref={rootRef}
+      style={rootStyle}
+      className={`${zeroHeightAddButton ? "mb-0 h-0 overflow-visible" : "mb-1"} flex ${addButtonAlignClass} ${placementClassName}`}
+    >
+      <button
+        ref={addButtonRef}
+        type="button"
+        onClick={openEditor}
+        title="添加演员提示/补充舞台提示"
+        aria-label="添加演员提示/补充舞台提示"
+        style={addButtonStyle}
+        className={`relative flex h-4 w-4 items-center justify-center rounded-full text-zinc-200 transition-colors hover:bg-zinc-100 hover:text-zinc-500 ${
+          addButtonRevealOnHover ? "opacity-0 transition-opacity group-hover:opacity-100" : ""
+        }`}
+      >
+        <span aria-hidden className="absolute left-1/2 top-1/2 h-[9px] w-[9px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-current" />
+        <span aria-hidden className="absolute left-1/2 top-1/2 h-px w-[5px] -translate-x-1/2 -translate-y-1/2 rounded bg-current" />
+        <span aria-hidden className="absolute left-1/2 top-1/2 h-[5px] w-px -translate-x-1/2 -translate-y-1/2 rounded bg-current" />
+      </button>
+    </div>
+  );
+}
+
+// 打印相关组件已抽到 components/print/ScriptPrint.tsx（#335）
+
+
+// ─── Presence helpers ─────────────────────────────────────────────────────────
+
+type RemotePresence = {
+  clientId: string;
+  userName: string;
+  color: string;
+  blockId: string | null;
+};
+
+// ─── Comment types ────────────────────────────────────────────────────────────
+
+type Mention = { userId: string; name: string };
+
+type Comment = {
+  id: string;
+  productionId: string;
+  contextType: string;
+  contextId: string;
+  parentId: string | null;
+  userId: string;
+  authorName: string;
+  body: string;
+  mentions: Mention[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type CommentBlockCaption = {
+  label: string;
+  body: string;
+};
+
+type SideBlockPanelNavigation = {
+  hasPrevious: boolean;
+  hasNext: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+};
+
+type BlockSidePanelKind = "comment" | "asset";
+
+type CommentDraft = {
+  text: string;
+  mentions: Mention[];
+};
+
+type SideBlockPanelNavigationTargets = {
+  previousBlockId: string | null;
+  nextBlockId: string | null;
+};
+
+type BlockAssetBubbleItem = {
+  id: string;
+  name: string | null;
+  fileName: string;
+};
+
+const EMPTY_COMMENTS: Comment[] = [];
+const EMPTY_BLOCK_ASSETS: BlockAssetBubbleItem[] = [];
+const COMMENT_BUBBLE_MIN_WIDTH_PX = 135;
+const COMMENT_BUBBLE_GAP_REM = 1.5; // Tailwind ml-6
+const SPEECH_TAIL_PIN_OFFSET_PX = 96;
+const SPEECH_TAIL_BASE_HALF_PX = 14;
+const SPEECH_TAIL_EDGE_INSET_PX = 24;
+const SIDE_PANEL_TOP_PX = 64; // Merged AppShell and ScriptEditor header
+const SIDE_PANEL_FALLBACK_WIDTH_PX = 270;
+
+function buildCommentBlockCaption(block: Block, characters: Character[], displayNumber: number): CommentBlockCaption {
+  const normalizedBlockContent = block.content.replace(/\s+/g, " ").trim();
+  const blockContentPreview = normalizedBlockContent.slice(0, 20);
+  const blockContentSuffix = normalizedBlockContent.length > blockContentPreview.length ? "..." : "";
+  const characterCaption = block.type === "stage"
+    ? ""
+    : block.characterIds
+        .map(id => characters.find(c => c.id === id)?.name)
+        .filter((name): name is string => !!name)
+        .join("/");
+
+  return {
+    label: `【${displayNumber}】`,
+    body: `${characterCaption ? `${characterCaption}: ` : ""}${blockContentPreview || "（空）"}${blockContentSuffix}`,
+  };
+}
+
+function findSideBlockPanelNavigationTargets(
+  blocks: Block[],
+  activeBlockId: string | null,
+  hasPanelItem: (blockId: string) => boolean,
+): SideBlockPanelNavigationTargets {
+  if (!activeBlockId) return { previousBlockId: null, nextBlockId: null };
+  const activeIndex = blocks.findIndex(block => block.id === activeBlockId);
+  if (activeIndex < 0) return { previousBlockId: null, nextBlockId: null };
+
+  let previousBlockId: string | null = null;
+  let nextBlockId: string | null = null;
+  for (let index = activeIndex - 1; index >= 0; index--) {
+    if (hasPanelItem(blocks[index].id)) {
+      previousBlockId = blocks[index].id;
+      break;
+    }
+  }
+  for (let index = activeIndex + 1; index < blocks.length; index++) {
+    if (hasPanelItem(blocks[index].id)) {
+      nextBlockId = blocks[index].id;
+      break;
+    }
+  }
+  return { previousBlockId, nextBlockId };
+}
+
+function SpeechTail({
+  offsetY = 0,
+  top = "50%",
+  fillClassName = "fill-white",
+}: {
+  offsetY?: number;
+  top?: number | string;
+  fillClassName?: string;
+}) {
+  const rawPointOffset = -Math.round(offsetY);
+  const width = 24;
+  const overlap = 4;
+  const baseHalf = SPEECH_TAIL_BASE_HALF_PX;
+  const padding = 16;
+  const pointSlideLimit = SPEECH_TAIL_PIN_OFFSET_PX;
+  const baseSlideLimit = 48;
+  const isPinned = Math.abs(offsetY) >= pointSlideLimit;
+  const pointOffset = Math.max(-pointSlideLimit, Math.min(pointSlideLimit, rawPointOffset));
+  const baseOffset = Math.max(-baseSlideLimit, Math.min(baseSlideLimit, rawPointOffset * 0.65));
+  const height = isPinned ? 36 : Math.max(32, (Math.max(Math.abs(pointOffset), Math.abs(baseOffset)) + padding) * 2);
+  const centerY = height / 2;
+  const pinnedFromTop = offsetY > 0;
+  const pointY = isPinned ? (pinnedFromTop ? 2 : height - 2) : centerY + pointOffset;
+  const baseY = isPinned ? pointY : centerY + baseOffset;
+  const baseTopY = isPinned && pinnedFromTop ? pointY : isPinned ? pointY - baseHalf * 2 : baseY - baseHalf;
+  const baseBottomY = isPinned && !pinnedFromTop ? pointY : isPinned ? pointY + baseHalf * 2 : baseY + baseHalf;
+  const topValue = typeof top === "number" ? `${top}px` : top;
+
+  return (
+    <svg
+      className="pointer-events-none absolute left-0 z-[5] overflow-visible"
+      style={{
+        top: topValue,
+        width,
+        height,
+        transform: `translate(${-width + overlap}px, ${-height / 2}px)`,
+      }}
+      aria-hidden="true"
+    >
+      <polygon
+        className={fillClassName}
+        points={`0,${pointY} ${width},${baseTopY} ${width},${baseBottomY}`}
+        stroke="#e4e4e7"
+        strokeWidth="1"
+      />
+    </svg>
+  );
+}
+
+function useBlockSpeechTail(blockId: string) {
+  const [pointerTop, setPointerTop] = useState(SPEECH_TAIL_EDGE_INSET_PX);
+  const [pointerOffsetY, setPointerOffsetY] = useState(0);
+
+  useLayoutEffect(() => {
+    const updatePointer = () => {
+      const panelHeight = window.innerHeight - SIDE_PANEL_TOP_PX;
+      const blockEl = document.getElementById(`block-${blockId}`);
+      if (!blockEl) {
+        setPointerTop(SPEECH_TAIL_EDGE_INSET_PX);
+        setPointerOffsetY(0);
+        return;
+      }
+      const rect = blockEl.getBoundingClientRect();
+      const raw = rect.top + rect.height / 2 - SIDE_PANEL_TOP_PX;
+      const minPointerTop = SPEECH_TAIL_EDGE_INSET_PX;
+      const maxPointerTop = Math.max(minPointerTop, panelHeight - minPointerTop);
+      if (raw - SPEECH_TAIL_BASE_HALF_PX <= minPointerTop) {
+        setPointerTop(minPointerTop);
+        setPointerOffsetY(SPEECH_TAIL_PIN_OFFSET_PX);
+        return;
+      }
+      if (raw + SPEECH_TAIL_BASE_HALF_PX >= maxPointerTop) {
+        setPointerTop(maxPointerTop);
+        setPointerOffsetY(-SPEECH_TAIL_PIN_OFFSET_PX);
+        return;
+      }
+      setPointerTop(raw);
+      setPointerOffsetY(0);
+    };
+    updatePointer();
+    window.addEventListener("resize", updatePointer);
+    const tailScrollEl = getScrollEl();
+    tailScrollEl.addEventListener("scroll", updatePointer, { passive: true });
+    return () => {
+      window.removeEventListener("resize", updatePointer);
+      tailScrollEl.removeEventListener("scroll", updatePointer);
+    };
+  }, [blockId]);
+
+  return { pointerTop, pointerOffsetY };
+}
+
+function CommentBubble({
+  comments,
+  assets,
+  active,
+  offsetY = 0,
+  mode,
+  width,
+  blockLabel,
+  captionBody,
+  onCommentClick,
+  onAssetClick,
+  onHoverChange,
+}: {
+  comments: Comment[];
+  assets: BlockAssetBubbleItem[];
+  active: boolean;
+  offsetY?: number;
+  mode: "full" | "compact" | null;
+  width: number;
+  blockLabel: string;
+  captionBody: string;
+  onCommentClick: () => void;
+  onAssetClick: () => void;
+  onHoverChange: (hovered: boolean) => void;
+}) {
+  if ((comments.length === 0 && assets.length === 0) || mode === null) return null;
+
+  if (active) return null;
+
+  let visibleComments: Array<{ comment: Comment; reply: boolean }> = [];
+  let visibleAssets = EMPTY_BLOCK_ASSETS;
+  let hiddenCommentCount = 0;
+  let hiddenAssetCount = 0;
+  if (mode === "full") {
+    const sortedComments = [...comments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const childrenByParent = new Map<string, Comment[]>();
+    for (const comment of sortedComments) {
+      if (!comment.parentId) continue;
+      const replies = childrenByParent.get(comment.parentId) ?? [];
+      replies.push(comment);
+      childrenByParent.set(comment.parentId, replies);
+    }
+    const commentIds = new Set(sortedComments.map(comment => comment.id));
+    const orderedComments: Array<{ comment: Comment; reply: boolean }> = [];
+    for (const comment of sortedComments.filter(c => c.parentId === null)) {
+      orderedComments.push({ comment, reply: false });
+      for (const reply of childrenByParent.get(comment.id) ?? []) {
+        orderedComments.push({ comment: reply, reply: true });
+      }
+    }
+    for (const orphanReply of sortedComments.filter(c => c.parentId !== null && !commentIds.has(c.parentId))) {
+      orderedComments.push({ comment: orphanReply, reply: true });
+    }
+    const visibleCommentLimit = assets.length > 0 ? Math.min(3, orderedComments.length) : 4;
+    visibleComments = orderedComments.slice(0, visibleCommentLimit);
+    visibleAssets = assets.slice(0, 4 - visibleComments.length);
+    hiddenCommentCount = orderedComments.length - visibleComments.length;
+    hiddenAssetCount = assets.length - visibleAssets.length;
+  }
+  const defaultAction = comments.length > 0 ? onCommentClick : onAssetClick;
+  const handleClick = (e: React.MouseEvent, action: () => void) => {
+    e.stopPropagation();
+    action();
+  };
+
+  return (
+    <div
+      className="absolute left-full top-1/2 z-0 ml-6"
+      style={{ transform: mode === "compact" ? "translateY(-50%)" : `translateY(calc(-50% + ${offsetY}px))` }}
+      onMouseEnter={() => onHoverChange(true)}
+      onMouseLeave={() => onHoverChange(false)}
+    >
+      <div
+        className={`relative z-10 flex max-h-40 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white text-left shadow-sm transition-colors hover:border-zinc-300 ${mode === "compact" ? "w-max" : ""}`}
+        style={mode === "compact"
+          ? { maxWidth: width }
+          : { width, minWidth: COMMENT_BUBBLE_MIN_WIDTH_PX }}
+      >
+        {mode === "compact" ? (
+          <div className="flex items-center justify-center gap-2 whitespace-nowrap px-2 py-1.5 text-[10px] font-medium text-zinc-600">
+            {comments.length > 0 && (
+              <button type="button" onClick={(e) => handleClick(e, onCommentClick)} className="hover:text-zinc-900">
+                评 {comments.length}
+              </button>
+            )}
+            {assets.length > 0 && (
+              <button type="button" onClick={(e) => handleClick(e, onAssetClick)} className="hover:text-zinc-900">
+                附 {assets.length}
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={(e) => handleClick(e, defaultAction)}
+              className="shrink-0 truncate whitespace-nowrap border-b border-zinc-100 bg-zinc-100 px-2.5 py-1 text-left text-[10px] font-medium text-zinc-600"
+              title={`${blockLabel} ${captionBody}`}
+            >
+              <span className="font-bold text-zinc-800">{blockLabel}</span>{" "}
+              <span>{captionBody}</span>
+            </button>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {(visibleComments.length > 0 || hiddenCommentCount > 0) && (
+            <div
+              className={`flex shrink-0 flex-col gap-0.5 px-2.5 py-1.5 transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 ${hiddenCommentCount > 0 ? "relative pr-10" : ""}`}
+              title="打开评论"
+            >
+              {visibleComments.map(({ comment, reply }) => (
+                <button
+                  key={comment.id}
+                  type="button"
+                  onClick={(e) => handleClick(e, onCommentClick)}
+                  className={`line-clamp-1 shrink-0 text-left text-[11px] leading-snug text-zinc-700 ${reply ? "pl-3 text-zinc-500" : ""}`}
+                >
+                  {reply && <span className="text-zinc-400">↳ </span>}
+                  <span className="font-semibold text-zinc-900">{comment.authorName}: </span>
+                  <span className="font-normal">{comment.body.trim() || "（空评论）"}</span>
+                </button>
+              ))}
+              {hiddenCommentCount > 0 && (
+                <button
+                  type="button"
+                  onClick={(e) => handleClick(e, onCommentClick)}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-zinc-500 shadow-sm hover:border-zinc-300 hover:text-zinc-700"
+                >
+                  +{hiddenCommentCount}
+                </button>
+              )}
+            </div>
+          )}
+          {visibleComments.length > 0 && visibleAssets.length > 0 && (
+            <div className="shrink-0 border-t border-zinc-300" aria-hidden="true" />
+          )}
+          {(visibleAssets.length > 0 || hiddenAssetCount > 0) && (
+            <div
+              className={`flex shrink-0 flex-col gap-0.5 px-2.5 py-1.5 transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50 ${hiddenAssetCount > 0 ? "relative pr-10" : ""}`}
+              title="打开附件"
+            >
+              {visibleAssets.map(asset => (
+                <button
+                  key={asset.id}
+                  type="button"
+                  onClick={(e) => handleClick(e, onAssetClick)}
+                  className="line-clamp-1 shrink-0 text-left text-[11px] leading-snug text-zinc-700"
+                >
+                  <span className="font-semibold text-zinc-900">附件: </span>
+                  <span className="font-normal">{asset.name ?? asset.fileName}</span>
+                </button>
+              ))}
+              {hiddenAssetCount > 0 && (
+                <button
+                  type="button"
+                  onClick={(e) => handleClick(e, onAssetClick)}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-zinc-500 shadow-sm hover:border-zinc-300 hover:text-zinc-700"
+                >
+                  +{hiddenAssetCount}
+                </button>
+              )}
+            </div>
+          )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const PRESENCE_COLORS = [
+  "#E53E3E", "#DD6B20", "#D69E2E", "#38A169",
+  "#3182CE", "#805AD5", "#D53F8C", "#00B5D8",
+];
+const EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS = 5;
+const REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS = 8;
+
+function presenceColor(clientId: string): string {
+  let h = 0;
+  for (let i = 0; i < clientId.length; i++) h = ((h * 31) + clientId.charCodeAt(i)) & 0xffff;
+  return PRESENCE_COLORS[h % PRESENCE_COLORS.length];
+}
+
+function getOrCreateClientId(): string {
+  const key = "presence_client_id";
+  let id = sessionStorage.getItem(key);
+  if (!id) { id = Math.random().toString(36).slice(2) + Date.now().toString(36); sessionStorage.setItem(key, id); }
+  return id;
+}
+
+function anonymousName(clientId: string): string {
+  return "访客 " + clientId.slice(-4).toUpperCase();
+}
+
+function PresenceAvatar({ name, color, title }: { name: string; color: string; title?: string }) {
+  return (
+    <div
+      title={title ?? name}
+      style={{ backgroundColor: color }}
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+    >
+      {name.slice(0, 1)}
+    </div>
+  );
+}
+
+// ─── Server-state merge ───────────────────────────────────────────────────────
+
+function mergeServerBlocks(
+  local: Block[],
+  serverBlocks: Block[],
+  synced: ScriptState | null
+): Block[] {
+  const syncedMap = new Map((synced?.blocks ?? []).map(b => [b.id, b]));
+  const localMap = new Map(local.map(b => [b.id, b]));
+  const projectedLocalMap = new Map(normalizeScriptBlockStream(local).map(b => [b.id, b]));
+  const syncedBlocks = synced?.blocks ?? [];
+  const localOrderDirty = !!synced && (
+    local.length !== syncedBlocks.length ||
+    local.some((b, i) => b.id !== syncedBlocks[i]?.id)
+  );
+
+  const isDirty = (b: Block): boolean => {
+    const s = syncedMap.get(b.id);
+    if (!s) return true;
+    const projected = projectedLocalMap.get(b.id) ?? b;
+    return (
+      projected.content !== s.content ||
+      (projected.stageComment ?? "") !== (s.stageComment ?? "") ||
+      projected.type !== s.type ||
+      projected.lyric !== s.lyric ||
+      (projected.forceShowCharacterName ?? false) !== (s.forceShowCharacterName ?? false) ||
+      projected.rehearsalMark !== s.rehearsalMark ||
+      projected.sceneId !== s.sceneId ||
+      projected.characterIds.length !== s.characterIds.length ||
+      projected.characterIds.some((id, i) => id !== s.characterIds[i]) ||
+      projected.characterIds.some((id) => (projected.characterAnnotations[id] ?? "") !== (s.characterAnnotations[id] ?? ""))
+    );
+  };
+
+  if (localOrderDirty) {
+    const serverMap = new Map(serverBlocks.map(b => [b.id, b]));
+    const result = local.map(lb => {
+      const sb = serverMap.get(lb.id);
+      return isDirty(lb) ? lb : (sb ?? lb);
+    });
+    for (const sb of serverBlocks) {
+      if (!localMap.has(sb.id)) result.push(sb);
+    }
+    return result;
+  }
+
+  // Server ordering is authoritative when local ordering has no unsynced edits.
+  const result: Block[] = serverBlocks.map(sb => {
+    const loc = localMap.get(sb.id);
+    return loc && isDirty(loc) ? loc : sb;
+  });
+
+  // Keep locally-new blocks not yet on server
+  const serverIds = new Set(serverBlocks.map(b => b.id));
+  for (const loc of local) {
+    if (!serverIds.has(loc.id) && isDirty(loc)) result.push(loc);
+  }
+
+  return result;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function stripHtmlText(html: string): string {
+  return html.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
+
+
+
+
+
+
+function expandLegacyMarkersToBlocks(blocks: Block[], scenes: Scene[] = []): Block[] {
+  if (blocks.some(isMarkerBlock)) {
+    return normalizeScriptBlockStream(blocks);
+  }
+
+  let changed = false;
+  let previousSceneId: string | null = null;
+  let previousRehearsalMark: string | null = null;
+  let lastChapterId: string | null = null;
+  const sceneById = new Map(scenes.map((scene) => [scene.id, scene]));
+  const next: Block[] = [];
+
+  for (const block of blocks) {
+    const sceneChanged = block.sceneId !== previousSceneId;
+    if (sceneChanged && block.sceneId) {
+      const scene = sceneById.get(block.sceneId) ?? null;
+      if (scene?.parentId) {
+        if (scene.parentId !== lastChapterId) {
+          next.push(makeMarkerBlock("chapter_marker", { sceneId: scene.parentId }));
+          lastChapterId = scene.parentId;
+        }
+        next.push(makeMarkerBlock("scene_marker", { sceneId: scene.id }));
+      } else {
+        next.push(makeMarkerBlock("chapter_marker", { sceneId: block.sceneId }));
+        lastChapterId = block.sceneId;
+      }
+      changed = true;
+      previousRehearsalMark = null;
+    }
+
+    if (block.rehearsalMark && block.rehearsalMark !== previousRehearsalMark) {
+      next.push(makeMarkerBlock("rehearsal_marker"));
+      changed = true;
+    }
+
+    previousSceneId = block.sceneId;
+    previousRehearsalMark = block.rehearsalMark;
+    if (block.sceneId || block.rehearsalMark) {
+      changed = true;
+      next.push({ ...block, sceneId: null, rehearsalMark: null });
+    } else {
+      next.push(block);
+    }
+  }
+
+  return changed ? normalizeScriptBlockStream(next) : blocks;
+}
+
+function normalizeScriptBlockStream(blocks: Block[]): Block[] {
+  return withMarkerOwnership(blocks);
+}
+
+function sameBlocks(a: Block[], b: Block[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((block, index) => {
+    const other = b[index];
+    return !!other &&
+      block.id === other.id &&
+      block.type === other.type &&
+      block.content === other.content &&
+      (block.stageComment ?? null) === (other.stageComment ?? null) &&
+      (block.forceShowCharacterName ?? false) === (other.forceShowCharacterName ?? false) &&
+      block.lyric === other.lyric &&
+      block.sceneId === other.sceneId &&
+      block.rehearsalMark === other.rehearsalMark &&
+      sameMarkerMeta(block.markerMeta, other.markerMeta) &&
+      block.characterIds.length === other.characterIds.length &&
+      block.characterIds.every((id, charIndex) => id === other.characterIds[charIndex]) &&
+      sameCharacterAnnotations(block.characterAnnotations, other.characterAnnotations);
+  });
+}
+
+function sameMarkerMeta(a: Block["markerMeta"], b: Block["markerMeta"]): boolean {
+  const aMeta = a ?? {};
+  const bMeta = b ?? {};
+  return (aMeta.name ?? undefined) === (bMeta.name ?? undefined) &&
+    (aMeta.parentMarkerId ?? undefined) === (bMeta.parentMarkerId ?? undefined) &&
+    (aMeta.synopsis ?? undefined) === (bMeta.synopsis ?? undefined) &&
+    (aMeta.actionLine ?? undefined) === (bMeta.actionLine ?? undefined) &&
+    (aMeta.music ?? undefined) === (bMeta.music ?? undefined) &&
+    (aMeta.stageNotes ?? undefined) === (bMeta.stageNotes ?? undefined) &&
+    (aMeta.expectedDuration ?? undefined) === (bMeta.expectedDuration ?? undefined);
+}
+
+function sameCharacterAnnotations(a: Record<string, string>, b: Record<string, string>): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key) => a[key] === b[key]);
+}
+
+function markerSegmentIsOpeningWithoutScene(blocks: Block[], markerIndex: number, openingChapterMarkerId: string | null): boolean {
+  const marker = blocks[markerIndex];
+  return !!openingChapterMarkerId && marker?.id === openingChapterMarkerId && !markerSegmentHasScene(blocks, markerIndex);
+}
+
+function normalizeScriptMarkerInvariants(
+  blocks: Block[],
+  scenes: Scene[],
+  config: ScriptConfig,
+  change?: ReturnType<typeof getMarkerChange>,
+): { blocks: Block[]; scenes: Scene[]; config: ScriptConfig } {
+  const normalized = normalizeSharedMarkerInvariants({
+    blocks,
+    scenes,
+    characters: [],
+    config,
+  }, uid, change ? { mode: "scoped", ...change } : { mode: "full" });
+  return {
+    blocks: sameBlocks(normalized.blocks, blocks) ? blocks : normalized.blocks,
+    scenes: sameSceneRows(normalized.scenes, scenes) ? scenes : normalized.scenes,
+    config: normalized.config.openingChapterMarkerId === config.openingChapterMarkerId ? config : normalized.config,
+  };
+}
+
+function previousAdjacentMarker(blocks: Block[], index: number): Block | null {
+  const block = blocks[index - 1];
+  return block && isMarkerBlock(block) ? block : null;
+}
+
+function markerSegmentHasScene(blocks: Block[], markerIndex: number): boolean {
+  for (let index = markerIndex + 1; index < blocks.length; index++) {
+    const block = blocks[index];
+    if (block.type === "chapter_marker") return false;
+    if (block.type === "scene_marker") return true;
+  }
+  return false;
+}
+
+function insertMarkerWithEmptyBlockIfNeeded(blocks: Block[], marker: Block, insertIndex: number, openingChapterMarkerId: string | null): Block[] {
+  const next = [...blocks];
+  const boundedIndex = Math.max(0, Math.min(next.length, insertIndex));
+  const previousMarker = previousAdjacentMarker(blocks, boundedIndex);
+  next.splice(boundedIndex, 0, marker);
+  return repairEmptyMarkerSegments(
+    next,
+    [previousMarker?.id, marker.id].filter((id): id is string => !!id),
+    openingChapterMarkerId,
+  );
+}
+
+function repairEmptyMarkerSegments(
+  blocks: Block[],
+  markerIds: Iterable<string>,
+  openingChapterMarkerId: string | null,
+): Block[] {
+  const ids = [...new Set(markerIds)];
+  if (ids.length === 0) return blocks;
+  const positions = ids
+    .map((id) => blocks.findIndex((block) => block.id === id))
+    .filter((index) => index >= 0);
+  const changes = positions.map((position) => ({
+    kind: "structure" as const,
+    position,
+    blockId: blocks[position].id,
+    beforeType: blocks[position].type,
+    afterType: blocks[position].type,
+  }));
+  return normalizeSharedMarkerInvariants({
+    blocks,
+    scenes: [],
+    characters: [],
+    config: { ...DEFAULT_SCRIPT_CONFIG, openingChapterMarkerId },
+  }, uid, { mode: "scoped", changes, positions, markerStructureChanged: true }).blocks;
+}
+
+function buildEmptyScriptCleanupRemovalPlan(
+  currentBlocks: Block[],
+  selectedTargets: EmptyScriptCleanupTarget[],
+) {
+  const selectedSceneIds = new Set(
+    selectedTargets
+      .filter((target) => target.kind === "chapter" || target.kind === "scene")
+      .map((target) => target.id)
+  );
+  const selectedRehearsalBlockIds = new Set(
+    selectedTargets
+      .filter((target) => target.kind === "rehearsal")
+      .map((target) => target.id)
+  );
+  const deleteBlockIds = new Set<string>();
+  let currentSectionSelected = false;
+  let currentRehearsalSelected = false;
+  for (const block of currentBlocks) {
+    if (block.type === "chapter_marker") {
+      currentSectionSelected = !!block.sceneId && selectedSceneIds.has(block.sceneId);
+      currentRehearsalSelected = false;
+      if (
+        block.sceneId &&
+        selectedSceneIds.has(block.sceneId)
+      ) {
+        deleteBlockIds.add(block.id);
+      }
+      continue;
+    }
+    if (block.type === "scene_marker") {
+      currentSectionSelected = !!block.sceneId && selectedSceneIds.has(block.sceneId);
+      currentRehearsalSelected = false;
+      if (block.sceneId && selectedSceneIds.has(block.sceneId)) {
+        deleteBlockIds.add(block.id);
+      }
+      continue;
+    }
+    if (block.type === "rehearsal_marker") {
+      currentRehearsalSelected = currentSectionSelected || selectedRehearsalBlockIds.has(block.id);
+      if (currentRehearsalSelected) {
+        deleteBlockIds.add(block.id);
+      }
+      continue;
+    }
+    if (currentSectionSelected || currentRehearsalSelected) {
+      deleteBlockIds.add(block.id);
+    } else if (isEmptyTextBlock(block)) {
+      deleteBlockIds.add(block.id);
+    }
+  }
+  return { deleteBlockIds, selectedSceneIds };
+}
+
+function isOnlyTextBlockInMarkerSegment(blocks: Block[], index: number, openingChapterMarkerId: string | null): boolean {
+  const block = blocks[index];
+  if (!block || isMarkerBlock(block)) return false;
+
+  let start = index;
+  while (start > 0) {
+    const prev = blocks[start - 1];
+    if (isMarkerBlock(prev)) break;
+    start--;
+  }
+  if (markerSegmentIsOpeningWithoutScene(blocks, start - 1, openingChapterMarkerId)) return false;
+
+  let textCount = 0;
+  for (let cursor = start; cursor < blocks.length; cursor++) {
+    const current = blocks[cursor];
+    if (cursor !== start && isMarkerBlock(current)) break;
+    if (isTextBlock(current)) textCount++;
+    if (textCount > 1) return false;
+  }
+  return textCount === 1;
+}
+
+function analyzeEmptyScriptCleanup(
+  blocks: Block[],
+  scenes: Scene[],
+  sceneDetailById: Map<string, SceneDetail>,
+  openingChapterMarkerId: string | null,
+  options?: { includeOpeningChapter?: boolean }
+): EmptyScriptCleanupAnalysis {
+  const textCountsBySceneId = new Map<string, number>();
+  const textCountsByRehearsalBlockId = new Map<string, number>();
+  const rehearsalTargetById = new Map<string, EmptyScriptCleanupTarget>();
+  const sceneById = new Map(scenes.map((scene) => [scene.id, scene]));
+  const rehearsalLabelByMarkerId = buildMarkerLabelIndex(blocks).rehearsalLabelByMarkerId;
+  const chapterMarkerBlocks: Block[] = [];
+  const sceneMarkerBlocks: Block[] = [];
+  let hasEmptyTextBlock = false;
+  let currentSceneId: string | null = null;
+  let currentRehearsalBlockId: string | null = null;
+
+  for (const block of blocks) {
+    if (block.type === "chapter_marker") {
+      chapterMarkerBlocks.push(block);
+      currentSceneId = block.sceneId;
+      currentRehearsalBlockId = null;
+      continue;
+    }
+    if (block.type === "scene_marker") {
+      sceneMarkerBlocks.push(block);
+      currentSceneId = block.sceneId;
+      currentRehearsalBlockId = null;
+      continue;
+    }
+    if (block.type === "rehearsal_marker") {
+      currentRehearsalBlockId = block.id;
+      if (currentSceneId) {
+        const parentScene = sceneById.get(currentSceneId) ?? null;
+        const parentKind = parentScene?.parentId === null ? "chapter" : "scene";
+        const parentKey = `${parentKind}:${currentSceneId}`;
+        const rehearsalLabel = [
+          parentScene?.number.trim(),
+          rehearsalLabelByMarkerId.get(block.id),
+        ].filter(Boolean).join("-");
+        rehearsalTargetById.set(block.id, {
+          id: block.id,
+          key: `rehearsal:${block.id}`,
+          label: rehearsalLabel || "未命名排练记号",
+          kind: "rehearsal",
+          parentKey,
+          dividerKey: currentSceneId,
+          chapterKey: parentScene?.parentId ?? currentSceneId,
+        });
+      }
+      continue;
+    }
+    if (isMarkerBlock(block)) continue;
+    if (isEmptyTextBlock(block)) {
+      hasEmptyTextBlock = true;
+      continue;
+    }
+    if (!currentSceneId) continue;
+    textCountsBySceneId.set(currentSceneId, (textCountsBySceneId.get(currentSceneId) ?? 0) + 1);
+    if (currentRehearsalBlockId) {
+      textCountsByRehearsalBlockId.set(
+        currentRehearsalBlockId,
+        (textCountsByRehearsalBlockId.get(currentRehearsalBlockId) ?? 0) + 1
+      );
+    }
+  }
+
+  const removableSceneIds = new Set<string>();
+  const removableChapterIds = new Set<string>();
+  const childSceneIdsByChapter = new Map<string, string[]>();
+  for (const scene of scenes) {
+    if (!scene.parentId) continue;
+    const childIds = childSceneIdsByChapter.get(scene.parentId);
+    if (childIds) childIds.push(scene.id);
+    else childSceneIdsByChapter.set(scene.parentId, [scene.id]);
+  }
+
+  for (const block of sceneMarkerBlocks) {
+    if (!block.sceneId) continue;
+    if ((textCountsBySceneId.get(block.sceneId) ?? 0) > 0) continue;
+    removableSceneIds.add(block.sceneId);
+  }
+
+  for (const block of chapterMarkerBlocks) {
+    if (!block.sceneId) continue;
+    if (!options?.includeOpeningChapter && block.id === openingChapterMarkerId) continue;
+    const chapterHasOwnText = (textCountsBySceneId.get(block.sceneId) ?? 0) > 0;
+    const chapterHasRemainingScene = (childSceneIdsByChapter.get(block.sceneId) ?? [])
+      .some((sceneId) => !removableSceneIds.has(sceneId));
+    if (chapterHasOwnText || chapterHasRemainingScene) continue;
+    removableChapterIds.add(block.sceneId);
+  }
+
+  const makeSectionTarget = (scene: Scene, markerMeta?: Block["markerMeta"]): EmptyScriptCleanupTarget => {
+    const kind = scene.parentId === null ? "chapter" : "scene";
+    const label = [scene.number.trim(), scene.name.trim()].filter(Boolean).join(" ") ||
+      (kind === "chapter" ? "未命名章节" : "未命名段落");
+    const hasDetails = hasNonNameSceneDetails(sceneDetailById.get(scene.id), markerMeta, kind === "chapter");
+    return {
+      id: scene.id,
+      key: `${kind}:${scene.id}`,
+      label,
+      kind,
+      parentKey: scene.parentId ? `chapter:${scene.parentId}` : null,
+      dividerKey: scene.id,
+      chapterKey: scene.parentId ?? scene.id,
+      disabledReason: hasDetails ? (kind === "chapter" ? "章节详情不为空" : "段落详情不为空") : undefined,
+    };
+  };
+
+  const targets: EmptyScriptCleanupTarget[] = [];
+  const seenTargetKeys = new Set<string>();
+  for (const block of blocks) {
+    let target: EmptyScriptCleanupTarget | null = null;
+    if (block.type === "chapter_marker" && block.sceneId && removableChapterIds.has(block.sceneId)) {
+      const scene = sceneById.get(block.sceneId);
+      if (scene) target = makeSectionTarget(scene, block.markerMeta);
+    } else if (block.type === "scene_marker" && block.sceneId && removableSceneIds.has(block.sceneId)) {
+      const scene = sceneById.get(block.sceneId);
+      if (scene) target = makeSectionTarget(scene, block.markerMeta);
+    } else if (block.type === "rehearsal_marker") {
+      const rehearsalTarget = rehearsalTargetById.get(block.id) ?? null;
+      target = rehearsalTarget && (textCountsByRehearsalBlockId.get(rehearsalTarget.id) ?? 0) === 0
+        ? rehearsalTarget
+        : null;
+    }
+    if (!target || seenTargetKeys.has(target.key)) continue;
+    seenTargetKeys.add(target.key);
+    targets.push(target);
+  }
+  const targetByKey = new Map(targets.map((target) => [target.key, target]));
+  const protectedChildSceneNumbersByChapter = new Map<string, string[]>();
+  for (const target of targets) {
+    if (target.kind !== "scene" || !target.disabledReason || !target.parentKey) continue;
+    const childSceneNumbers = protectedChildSceneNumbersByChapter.get(target.parentKey) ?? [];
+    childSceneNumbers.push(sceneById.get(target.id)?.number.trim() || target.label);
+    protectedChildSceneNumbersByChapter.set(target.parentKey, childSceneNumbers);
+  }
+  for (const [chapterKey, childSceneNumbers] of protectedChildSceneNumbersByChapter) {
+    const chapter = targetByKey.get(chapterKey);
+    if (!chapter || chapter.disabledReason) continue;
+    chapter.disabledReason = `子段落详情不为空：${childSceneNumbers.join("、")}`;
+  }
+  return { targets, hasEmptyTextBlock };
+}
+
+function findTocSceneBlockIndex(sceneId: string, scenes: Scene[], blocks: Block[]): number {
+  const directIdx = blocks.findIndex((block) => block.sceneId === sceneId);
+  if (directIdx >= 0) return directIdx;
+
+  const scene = scenes.find((row) => row.id === sceneId);
+  if (!scene || scene.parentId !== null) return -1;
+  const childSceneIds = new Set(scenes.filter((row) => row.parentId === scene.id).map((row) => row.id));
+  return blocks.findIndex((block) => !!block.sceneId && childSceneIds.has(block.sceneId));
+}
+
+function findSceneMarkerBlockIndex(sceneId: string, blocks: Block[]): number {
+  return blocks.findIndex((block) => (
+    (block.type === "chapter_marker" || block.type === "scene_marker") &&
+    block.sceneId === sceneId
+  ));
+}
+
+function clearTimeoutMap(timers: Map<string, ReturnType<typeof setTimeout>>) {
+  timers.forEach((timer) => clearTimeout(timer));
+  timers.clear();
+}
+
+function markProgrammaticScroll(
+  suppressRef: React.MutableRefObject<boolean>,
+  frameRef: React.MutableRefObject<number | null>,
+) {
+  suppressRef.current = true;
+  if (frameRef.current !== null) {
+    cancelAnimationFrame(frameRef.current);
+  }
+  frameRef.current = requestAnimationFrame(() => {
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      suppressRef.current = false;
+    });
+  });
+}
+
+function sameSceneRows(a: Scene[], b: Scene[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((scene, index) => {
+    const other = b[index];
+    return !!other &&
+      scene.id === other.id &&
+      scene.number === other.number &&
+      scene.name === other.name &&
+      scene.parentId === other.parentId;
+  });
+}
+
+function sameSceneDetails(a: SceneDetail[], b: SceneDetail[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((scene, index) => {
+    const other = b[index];
+    return !!other &&
+      scene.id === other.id &&
+      scene.number === other.number &&
+      scene.name === other.name &&
+      scene.parentId === other.parentId &&
+      scene.synopsis === other.synopsis &&
+      scene.actionLine === other.actionLine &&
+      scene.music === other.music &&
+      scene.stageNotes === other.stageNotes &&
+      scene.expectedDuration === other.expectedDuration;
+  });
+}
+
+type DragTarget =
+  | { kind: "block"; id: string; position: "before" | "after" }
+  | { kind: "edge"; edge: "top" | "bottom" };
+type BlockDragTarget = Extract<DragTarget, { kind: "block" }>;
+
+function sameDragTarget(a: DragTarget | null, b: DragTarget | null): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.kind !== b.kind) return false;
+  if (a.kind === "edge" && b.kind === "edge") return a.edge === b.edge;
+  if (a.kind === "block" && b.kind === "block") return a.id === b.id && a.position === b.position;
+  return false;
+}
+
+function resolveDragTarget(target: DragTarget, blocks: Block[], windowRange: { start: number; end: number }): BlockDragTarget | null {
+  if (target.kind === "block") return target;
+  if (blocks.length === 0) return null;
+  const targetIdx = target.edge === "top"
+    ? Math.min(windowRange.start, blocks.length - 1)
+    : Math.max(0, Math.min(windowRange.end - 1, blocks.length - 1));
+  const anchor = blocks[targetIdx];
+  if (!anchor) return null;
+  return { kind: "block", id: anchor.id, position: target.edge === "top" ? "before" : "after" };
+}
+
+function getDragInsertIndex(target: BlockDragTarget, blocks: Block[]): number {
+  const targetIdx = blocks.findIndex((b) => b.id === target.id);
+  if (targetIdx === -1) return -1;
+  return target.position === "before" ? targetIdx : targetIdx + 1;
+}
+
+// ─── TagPicker ────────────────────────────────────────────────────────────────
+
+function TagPicker({
+  tagGroups,
+  blockTagValues,
+  onTagChange,
+  onCopy,
+  onPaste,
+  onClose,
+}: {
+  tagGroups: TagGroup[];
+  blockTagValues: BlockTagValue[];
+  onTagChange: (groupId: string, optionId: string | null, value: number | null, del: boolean) => void;
+  onCopy: () => void;
+  onPaste: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="absolute left-0 bottom-full z-50 mb-1 w-52 rounded-xl border border-zinc-200 bg-white p-2.5 shadow-lg"
+      onMouseDown={e => e.stopPropagation()}
+    >
+      {tagGroups.map(group => {
+        const tagVal = blockTagValues.find(t => t.groupId === group.id);
+        return (
+          <div key={group.id} className="mb-2.5 last:mb-0">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{group.name}</p>
+            {group.type === "exclusive" ? (
+              <div className="flex flex-wrap gap-1">
+                {group.options.map(opt => {
+                  const selected = tagVal?.optionId === opt.id;
+                  const isDefault = !tagVal?.optionId && opt.id === group.defaultOptionId;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => selected
+                        ? onTagChange(group.id, null, null, true)
+                        : onTagChange(group.id, opt.id, null, false)
+                      }
+                      className="rounded-full px-2 py-0.5 text-[10px] font-medium transition-all"
+                      style={{
+                        backgroundColor: (selected || isDefault) ? opt.color + "22" : "#f4f4f5",
+                        color: (selected || isDefault) ? opt.color : "#a1a1aa",
+                        outline: selected ? `1.5px solid ${opt.color}` : "none",
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={group.rangeMin ?? 0}
+                  max={group.rangeMax ?? 10}
+                  step={group.rangeStep ?? 1}
+                  value={tagVal?.value ?? group.rangeDefault ?? group.rangeMin ?? 0}
+                  onChange={e => onTagChange(group.id, null, Number(e.target.value), false)}
+                  className="flex-1 h-1 accent-zinc-600"
+                />
+                <span className="w-6 text-right text-[10px] text-zinc-500">
+                  {tagVal?.value ?? group.rangeDefault ?? group.rangeMin ?? 0}
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div className="mt-2 flex items-center justify-end gap-3 border-t border-zinc-100 pt-2">
+        <button onClick={() => { onCopy(); onClose(); }} className="text-[10px] text-zinc-400 hover:text-zinc-600">复制标签</button>
+        <button onClick={() => { onPaste(); onClose(); }} className="text-[10px] text-zinc-400 hover:text-zinc-600">粘贴标签</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── ScriptBlock ──────────────────────────────────────────────────────────────
+
+const COMPACT_STAGE_CONTROL_THRESHOLD_REM = 1.9;
+const COMPACT_STAGE_DELETE_SHIFT_PX = -3;
+const COMPACT_CONTENT_OPTICAL_OFFSET_PX = -2;
+const COMPACT_CHARACTER_COLUMN_WIDTH_REM = 7.5;
+const NARROW_COMPACT_CHARACTER_COLUMN_WIDTH_REM = 3.5;
+const COMPACT_TEXT_AUXILIARY_WIDTH_REM = 2;
+const COMPACT_TEXT_GRID_STYLE = {
+  "--compact-character-column-width": `${NARROW_COMPACT_CHARACTER_COLUMN_WIDTH_REM}rem`,
+  "--compact-character-column-width-wide": `${COMPACT_CHARACTER_COLUMN_WIDTH_REM}rem`,
+} as React.CSSProperties;
+const COMPACT_TEXT_GRID_UNFOLDED_STYLE = {
+  ...COMPACT_TEXT_GRID_STYLE,
+  "--compact-character-column-width": `${COMPACT_CHARACTER_COLUMN_WIDTH_REM}rem`,
+} as React.CSSProperties;
+const IN_BLOCK_STAGE_COMMENT_MANUAL_OFFSET_PX = -2;
+const REHEARSAL_NON_COMPACT_CHARACTER_BOTTOM_GAP_CLASS = "mb-[0.18rem]";
+const REHEARSAL_NON_COMPACT_CHARACTER_STAGE_COMMENT_GAP_CLASS = "mb-2";
+const REHEARSAL_NON_COMPACT_HIDDEN_CHARACTER_STAGE_COMMENT_GAP_CLASS = "mt-1";
+const REHEARSAL_SWITCH_OPTICAL_OFFSET_STYLE: React.CSSProperties = { position: "relative", left: "3%" };
+
+function getCompactFallbackLineHeightPx() {
+  if (typeof window === "undefined") return 28;
+  const rootFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+  return (Number.isFinite(rootFontSize) ? rootFontSize : 16) * 1.75;
+}
+
+function ScriptBlock({
+  block,
+  characters,
+  scenes,
+  hideCharSelector,
+  isFocused,
+  charEditToken,
+  presenceEditors,
+  onRegisterRef,
+  onUpdate,
+  onSplit,
+  onMerge,
+  onDelete,
+  onFocus,
+  onDeleteFocus,
+  onToggleType,
+  onToggleLyric,
+  onRequestLargeSelectionOperation,
+  onCanStartSelectionAction,
+  onArrowUpFromChar,
+  onArrowDownFromChar,
+  onArrowUpFromTextarea,
+  onArrowDownFromTextarea,
+  onAddChapterBefore,
+  onAddSceneBefore,
+  onAddRehearsalBefore,
+  onDragStartBlock,
+  onDragEndBlock,
+  onDragOverBlock,
+  onDropBlock,
+  onToggleSelected,
+  onDeleteConfirmationChange,
+  isMarkStart,
+  commentCount,
+  blockComments,
+  blockAssets,
+  isCommentPanelActive,
+  isAssetPanelActive,
+  commentBubbleOffsetY = 0,
+  commentBubbleMode,
+  commentBubbleWidth,
+  onCommentClick,
+  onAssetClick,
+  dragTarget = null,
+  isSelected = false,
+  isDeleteConfirmHighlighted = false,
+  isCharacterFocusHighlighted = false,
+  isRecentlyMoved = false,
+  deleteConfirmToken,
+  selectedCount = 0,
+  dismissToken = 0,
+  canDeleteWithoutConfirmation = false,
+  deleteConfirmNoopMessage,
+  isReorderLocked = false,
+  isScriptDragging = false,
+  lineNum,
+  captionLineNum,
+  lineIndexWidth,
+  isSearchHighlight,
+  showReadOnlyRehearsalMark = false,
+  readOnlyRehearsalMode = false,
+  readOnlyScene = null,
+  showSceneLabel = true,
+  stageDelimOpen = "（",
+  stageDelimClose = "）",
+  textLayoutMode = "center",
+  canEditText = false,
+  canEditMetadata = false,
+  canEditRehearsalMark = false,
+  canMergeWithPrevious = false,
+  tagGroups,
+  blockTagValues,
+  showBlockTags = false,
+  hasLyricConfig = false,
+  onTagChange,
+  onTagCopyClick,
+  onTagPasteClick,
+  onCharacterChangeFocus,
+  onMobileMenuOpen,
+  contentPlaceholder,
+}: {
+  block: Block;
+  characters: Character[];
+  scenes: Scene[];
+  hideCharSelector: boolean;
+  isFocused: boolean;
+  charEditToken: number;
+  presenceEditors: RemotePresence[];
+  onRegisterRef: (id: string, el: HTMLDivElement | null) => void;
+  onUpdate: (changes: Partial<Block>) => void;
+  onSplit: (before: string, after: string) => void;
+  onMerge: () => void;
+  onDelete: () => void;
+  onFocus: () => void;
+  onDeleteFocus: () => void;
+  onToggleType: () => void;
+  onToggleLyric: () => void;
+  onRequestLargeSelectionOperation: (operation: LargeSelectionOperation, count: number, onConfirm: () => void) => void;
+  onCanStartSelectionAction: () => boolean;
+  onArrowUpFromChar: () => void;
+  onArrowDownFromChar: () => void;
+  onArrowUpFromTextarea: () => void;
+  onArrowDownFromTextarea: () => void;
+  onAddChapterBefore: () => void;
+  onAddSceneBefore: () => void;
+  onAddRehearsalBefore: () => void;
+  onDragStartBlock: (e: DragEvent<HTMLButtonElement>) => void;
+  onDragEndBlock: () => void;
+  onDragOverBlock: (e: DragEvent<HTMLDivElement>) => void;
+  onDropBlock: (e: DragEvent<HTMLDivElement>) => void;
+  onToggleSelected: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  onDeleteConfirmationChange: (active: boolean) => void;
+  isMarkStart: boolean;
+  commentCount: number;
+  blockComments: Comment[];
+  blockAssets: BlockAssetBubbleItem[];
+  isCommentPanelActive: boolean;
+  isAssetPanelActive: boolean;
+  commentBubbleOffsetY?: number;
+  commentBubbleMode: "full" | "compact" | null;
+  commentBubbleWidth: number;
+  onCommentClick: () => void;
+  onAssetClick: () => void;
+  dragTarget?: BlockDragTarget | null;
+  isSelected?: boolean;
+  isDeleteConfirmHighlighted?: boolean;
+  isCharacterFocusHighlighted?: boolean;
+  isRecentlyMoved?: boolean;
+  deleteConfirmToken?: number;
+  selectedCount?: number;
+  dismissToken?: number;
+  canDeleteWithoutConfirmation?: boolean;
+  deleteConfirmNoopMessage?: string;
+  isReorderLocked?: boolean;
+  isScriptDragging?: boolean;
+  lineNum?: number;
+  captionLineNum: number;
+  lineIndexWidth?: string;
+  isSearchHighlight?: "match" | "focused";
+  showReadOnlyRehearsalMark?: boolean;
+  readOnlyRehearsalMode?: boolean;
+  readOnlyScene?: Scene | null;
+  showSceneLabel?: boolean;
+  stageDelimOpen?: string;
+  stageDelimClose?: string;
+  textLayoutMode?: ScriptTextLayoutMode;
+  canEditText?: boolean;
+  canEditMetadata?: boolean;
+  canEditRehearsalMark?: boolean;
+  canMergeWithPrevious?: boolean;
+  tagGroups?: TagGroup[];
+  blockTagValues?: BlockTagValue[];
+  showBlockTags?: boolean;
+  hasLyricConfig?: boolean;
+  onTagChange?: (groupId: string, optionId: string | null, value: number | null, del: boolean) => void;
+  onTagCopyClick?: () => void;
+  onTagPasteClick?: () => void;
+  onCharacterChangeFocus?: () => void;
+  onMobileMenuOpen?: () => void;
+  contentPlaceholder?: string;
+}) {
+  const blockRootRef = useRef<HTMLDivElement | null>(null);
+  const leftControlsRef = useRef<HTMLDivElement | null>(null);
+  const blockTagsRef = useRef<HTMLDivElement | null>(null);
+  const compactCharacterColumnRef = useRef<HTMLDivElement | null>(null);
+  const divRef = useRef<HTMLDivElement | null>(null);
+  const localContentRef = useRef<string | null>(null);
+  const localTypeRef = useRef<BlockType | null>(null);
+  const localStageDelimRef = useRef<{ open: string | null; close: string | null }>({ open: null, close: null });
+  const latestBlockRef = useRef(block);
+  const latestStageDelimRef = useRef({ open: stageDelimOpen, close: stageDelimClose });
+  const composingRef = useRef(false);
+  const compactControlLayoutActiveRef = useRef(false);
+  const [charSelectorOpen, setCharSelectorOpen] = useState(false);
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmTypeAction, setConfirmTypeAction] = useState<"type" | "lyric" | null>(null);
+  const [stageCommentEditing, setStageCommentEditing] = useState(false);
+  const [stageCommentOverflowBelow, setStageCommentOverflowBelow] = useState(0);
+  const [commentBubbleHovered, setCommentBubbleHovered] = useState(false);
+  const [compactCharacterColumnHeight, setCompactCharacterColumnHeight] = useState(0);
+  const [compactCharacterLineHeight, setCompactCharacterLineHeight] = useState(getCompactFallbackLineHeightPx);
+  const [compactContentLineHeight, setCompactContentLineHeight] = useState(getCompactFallbackLineHeightPx);
+  const [unfoldForCompactControls, setUnfoldForCompactControls] = useState(false);
+  const [compactControlLayout, setCompactControlLayout] = useState<{
+    deleteLeft: number | null;
+    compact: boolean;
+    hoverWidth: number;
+    mode: "stage" | "hidden-character";
+  } | null>(null);
+
+  useEffect(() => {
+    setConfirmDelete(false);
+    setConfirmTypeAction(null);
+  }, [dismissToken]);
+
+  useEffect(() => {
+    if (deleteConfirmToken === undefined) return;
+    setConfirmDelete(true);
+  }, [deleteConfirmToken]);
+
+  latestBlockRef.current = block;
+  latestStageDelimRef.current = { open: stageDelimOpen, close: stageDelimClose };
+
+  const refCallback = useCallback(
+    (el: HTMLDivElement | null) => {
+      divRef.current = el;
+      if (el) {
+        const currentBlock = latestBlockRef.current;
+        const currentDelims = latestStageDelimRef.current;
+        el.innerHTML = currentBlock.type === "stage"
+          ? mdToHtml(currentBlock.content)
+          : mdToHtml(currentBlock.content, currentDelims.open, currentDelims.close);
+        localContentRef.current = currentBlock.content;
+        localTypeRef.current = currentBlock.type;
+        localStageDelimRef.current = currentDelims;
+      }
+      onRegisterRef(block.id, el);
+    },
+    [block.id, onRegisterRef]
+  );
+
+  const isStage = block.type === "stage";
+  const isCompactTextLayout = textLayoutMode === "compact" && !isStage;
+  const hasBlockTags = !isStage && showBlockTags && !!tagGroups?.length;
+  const isEditingLocked = isSelected || confirmDelete || isDeleteConfirmHighlighted;
+  const hiddenCharacterCollapsed = !isStage && hideCharSelector && !isFocused && !isSelected;
+  const canUnfoldHiddenCharacterControls = hiddenCharacterCollapsed && !isCompactTextLayout;
+  const effectiveHideCharSelector = hideCharSelector && !(canUnfoldHiddenCharacterControls && unfoldForCompactControls);
+  const shouldMeasureCompactControls = canEditText && (
+    isStage || isCompactTextLayout || canUnfoldHiddenCharacterControls && !unfoldForCompactControls
+  );
+  const isCompactHiddenCharacterLayout = !!(
+    compactControlLayout?.compact && compactControlLayout.mode === "hidden-character"
+  );
+  const unfoldCompactControls = () => {
+    if (canUnfoldHiddenCharacterControls && isCompactHiddenCharacterLayout && !unfoldForCompactControls) {
+      setUnfoldForCompactControls(true);
+    }
+  };
+  const resetCompactControlHover = () => {
+    if (unfoldForCompactControls) setUnfoldForCompactControls(false);
+  };
+
+  useEffect(() => {
+    if (!shouldMeasureCompactControls) {
+      compactControlLayoutActiveRef.current = false;
+      setCompactControlLayout(null);
+      return;
+    }
+
+    const blockEl = blockRootRef.current;
+    if (!blockEl) return;
+
+    const rootFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+    const compactControlThreshold = COMPACT_STAGE_CONTROL_THRESHOLD_REM * (Number.isFinite(rootFontSize) ? rootFontSize : 16);
+
+    const updateCompactControls = () => {
+      const railEl = leftControlsRef.current;
+      const triangleEl = blockEl.querySelector<HTMLElement>("[data-rehearsal-triangle='true']");
+      const mode = isStage ? "stage" : "hidden-character";
+      const blockRect = blockEl.getBoundingClientRect();
+      const tagRect = hasBlockTags
+        ? blockTagsRef.current?.getBoundingClientRect()
+        : null;
+      const measuredBlockHeight = tagRect
+        ? Math.max(blockRect.height, tagRect.bottom - blockRect.top)
+        : blockRect.height;
+      const isCompactBlock = measuredBlockHeight < compactControlThreshold;
+
+      if (isCompactBlock) compactControlLayoutActiveRef.current = true;
+
+      if (!compactControlLayoutActiveRef.current || !railEl || !triangleEl) {
+        setCompactControlLayout(null);
+        return;
+      }
+
+      const railRect = railEl.getBoundingClientRect();
+      const triangleRect = triangleEl.getBoundingClientRect();
+      const measuredDeleteLeft = triangleRect.left - railRect.left + COMPACT_STAGE_DELETE_SHIFT_PX;
+      const deleteLeft = isCompactBlock ? measuredDeleteLeft : null;
+      const controlRight = Math.max(triangleRect.right, railRect.left + measuredDeleteLeft + 16);
+      const hoverWidth = Math.max(16, Math.ceil(controlRight - railRect.left));
+
+      setCompactControlLayout((prev) => {
+        if (
+          prev &&
+          prev.compact === isCompactBlock &&
+          prev.mode === mode &&
+          Math.abs(prev.hoverWidth - hoverWidth) < 0.5 &&
+          (prev.deleteLeft === null && deleteLeft === null ||
+            prev.deleteLeft !== null && deleteLeft !== null && Math.abs(prev.deleteLeft - deleteLeft) < 0.5)
+        ) {
+          return prev;
+        }
+        return { deleteLeft, compact: isCompactBlock, hoverWidth, mode };
+      });
+    };
+
+    const observer = new ResizeObserver(updateCompactControls);
+    observer.observe(blockEl);
+    const tagEl = blockTagsRef.current;
+    if (tagEl) observer.observe(tagEl);
+    return () => observer.disconnect();
+  }, [shouldMeasureCompactControls, isStage, hasBlockTags, lineNum, canEditRehearsalMark]);
+
+  // Sync state → DOM only for external changes (split, merge, type toggle, etc.)
+  useLayoutEffect(() => {
+    const div = divRef.current;
+    if (!div) return;
+    const contentOrTypeChanged = block.content !== localContentRef.current || block.type !== localTypeRef.current;
+    const stageDelimChanged =
+      stageDelimOpen !== localStageDelimRef.current.open ||
+      stageDelimClose !== localStageDelimRef.current.close;
+
+    if (contentOrTypeChanged) {
+      localContentRef.current = block.content;
+      localTypeRef.current = block.type;
+      div.innerHTML = block.type === "stage"
+        ? mdToHtml(block.content)
+        : mdToHtml(block.content, stageDelimOpen, stageDelimClose);
+    }
+    if (block.type !== "stage" && stageDelimChanged && !contentOrTypeChanged) {
+      applyInlineStageStyling(div, stageDelimOpen, stageDelimClose);
+    }
+    localStageDelimRef.current = { open: stageDelimOpen, close: stageDelimClose };
+  }, [block.content, block.type, stageDelimOpen, stageDelimClose]);
+
+  const syncContent = () => {
+    if (!canEditText) return;
+    let html = divRef.current?.innerHTML ?? "";
+    if (html === "<br>") html = "";
+    const md = htmlToMd(html);
+    localContentRef.current = md;
+    onUpdate({ content: md });
+  };
+
+  const applyInlineFormat = (tag: "b" | "u") => {
+    if (!canEditText) return;
+    const sel = window.getSelection();
+    if (!sel?.rangeCount || sel.isCollapsed) return;
+    toggleInlineTag(sel.getRangeAt(0), tag);
+    syncContent();
+  };
+
+  const handleInput = () => {
+    if (!canEditText) return;
+    if (composingRef.current) return;
+    const div = divRef.current;
+    if (!div) return;
+    if (block.type !== "stage") applyInlineStageStyling(div, stageDelimOpen, stageDelimClose);
+    syncContent();
+  };
+
+  const handleCompositionStart = () => { composingRef.current = true; };
+  const handleCompositionEnd = () => { composingRef.current = false; if (canEditText) syncContent(); };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!canEditText) {
+      e.preventDefault();
+      return;
+    }
+    const div = divRef.current!;
+
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "l" || e.key === "L")) {
+      e.preventDefault();
+      if (isStage || hasLyricConfig) return;
+      if (selectedCount > 1) setConfirmTypeAction("lyric");
+      else onToggleLyric();
+      return;
+    }
+
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
+      if (e.key === "i" || e.key === "I") {
+        e.preventDefault();
+        const sel = window.getSelection();
+        if (block.type !== "stage" && sel && !sel.isCollapsed && div.contains(sel.anchorNode)) {
+          const range = sel.getRangeAt(0);
+          wrapSelectionAsInlineStageCue(range, stageDelimOpen, stageDelimClose);
+          syncContent();
+        } else {
+          onToggleType();
+        }
+        return;
+      }
+      if (e.key === "b" || e.key === "B") { e.preventDefault(); applyInlineFormat("b"); return; }
+      if (e.key === "u" || e.key === "U") { e.preventDefault(); applyInlineFormat("u"); return; }
+    }
+
+    if (e.key === "ArrowUp" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      if (isOnFirstLine(div)) { e.preventDefault(); onArrowUpFromTextarea(); return; }
+    }
+    if (e.key === "ArrowDown" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      if (isOnLastLine(div)) { e.preventDefault(); onArrowDownFromTextarea(); return; }
+    }
+    if (e.key === "Enter" && e.shiftKey) {
+      e.preventDefault();
+      const sel = window.getSelection();
+      if (sel?.rangeCount) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        const br = document.createElement("br");
+        range.insertNode(br);
+        range.setStartAfter(br);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        syncContent();
+      }
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const { before, after } = getHtmlSplit(div);
+      onSplit(htmlToMd(before), htmlToMd(after));
+      return;
+    }
+    if (e.key === "Backspace" && isAtStart(div)) {
+      e.preventDefault();
+      if (canMergeWithPrevious) onMerge();
+    }
+  };
+
+  const firstEditor = presenceEditors[0];
+
+  const searchRingClass =
+    isSearchHighlight === "focused" ? "ring-2 ring-inset ring-amber-400" :
+    isSearchHighlight === "match"   ? "ring-1 ring-inset ring-amber-200" : "";
+  const hasExpandedSidePanel = isCommentPanelActive || isAssetPanelActive || commentBubbleHovered;
+  const hasSideVisibleHighlight = hasExpandedSidePanel || isCharacterFocusHighlighted;
+  const hasHardBlockHighlight = isDeleteConfirmHighlighted || isSelected;
+  const usePartialFocusHighlight = isFocused && !hasHardBlockHighlight && hasSideVisibleHighlight;
+  const blockBgClass = isDeleteConfirmHighlighted
+    ? "bg-red-100"
+    : isSelected
+      ? "bg-[#eef3fa]"
+      : isFocused && !hasSideVisibleHighlight
+      ? "bg-zinc-100/70"
+      : hasExpandedSidePanel
+        ? "bg-emerald-500/10"
+    : isCharacterFocusHighlighted
+      ? "bg-purple-50"
+      : captionLineNum % 2 === 1
+        ? "bg-zinc-50/60"
+        : "";
+  const movedGlowClass = isRecentlyMoved ? "script-block-moved-glow" : "";
+  const compactDeleteStyle: React.CSSProperties | undefined = compactControlLayout?.deleteLeft !== null && compactControlLayout?.deleteLeft !== undefined
+    ? { left: compactControlLayout.deleteLeft }
+    : undefined;
+  const displayScene = showSceneLabel
+    ? readOnlyScene ?? (block.sceneId ? scenes.find((scene) => scene.id === block.sceneId) ?? null : null)
+    : null;
+  const hasSceneLabel = !!displayScene;
+  const hasStageComment = !!block.stageComment?.trim();
+  const showCompactStageCommentRow = hasStageComment || stageCommentEditing;
+  const stageCommentManualOffsetYPx =
+    isCompactTextLayout && (canEditText || readOnlyRehearsalMode) && (hasStageComment || stageCommentEditing)
+      ? IN_BLOCK_STAGE_COMMENT_MANUAL_OFFSET_PX
+      : 0;
+  const characterBottomGapClassName =
+    readOnlyRehearsalMode && !isCompactTextLayout && block.characterIds.length > 0
+      ? hasStageComment
+        ? REHEARSAL_NON_COMPACT_CHARACTER_STAGE_COMMENT_GAP_CLASS
+        : REHEARSAL_NON_COMPACT_CHARACTER_BOTTOM_GAP_CLASS
+      : undefined;
+  const compactCharacterLastLineCenter = compactCharacterColumnHeight - compactCharacterLineHeight / 2;
+  const compactContentFirstLineTop = Math.max(
+    0,
+    Math.round(compactCharacterLastLineCenter - compactContentLineHeight / 2 + COMPACT_CONTENT_OPTICAL_OFFSET_PX)
+  );
+  const showStageCommentAddButton = !hasStageComment && (
+    isCompactTextLayout ||
+    (!isCompactTextLayout && !effectiveHideCharSelector)
+  );
+  const handleCommentClick = () => {
+    setCommentBubbleHovered(false);
+    onCommentClick();
+  };
+  const handleAssetClick = () => {
+    setCommentBubbleHovered(false);
+    onAssetClick();
+  };
+  const showCharacterSelector = !effectiveHideCharSelector || isFocused || isSelected;
+  const stageCommentPlacementClassName =
+    readOnlyRehearsalMode && !isCompactTextLayout && hasStageComment && !showCharacterSelector
+      ? REHEARSAL_NON_COMPACT_HIDDEN_CHARACTER_STAGE_COMMENT_GAP_CLASS
+      : undefined;
+  const compactControlHoverStyle: React.CSSProperties | undefined = isCompactHiddenCharacterLayout
+    ? { width: compactControlLayout.hoverWidth }
+    : undefined;
+  const rightActionRowClass = `absolute z-20 hidden sm:flex items-center transition-opacity ${
+    isStage || isCompactTextLayout || isCompactHiddenCharacterLayout ? "-top-5" : "top-1"
+  } ${hasSceneLabel ? "right-8" : "right-2"}`;
+  const readOnlySceneLabelClass = `absolute right-1.5 z-10 leading-none ${
+    isStage || isCompactTextLayout || isCompactHiddenCharacterLayout ? "-top-5" : "top-1"
+  }`;
+  const lineNumberClass = isFocused
+    ? "text-zinc-600"
+    : readOnlyRehearsalMode
+      ? "text-zinc-300 group-hover:text-zinc-500"
+      : "text-zinc-400 group-hover:text-zinc-600";
+  const blockRootStyle: React.CSSProperties | undefined = lineIndexWidth
+    ? { paddingLeft: `calc(${lineIndexWidth} + ${LINE_INDEX_GUTTER_OFFSET_REM}rem)` }
+    : undefined;
+  const partialFocusStyle: React.CSSProperties | undefined = usePartialFocusHighlight
+    ? {
+        backgroundImage: "linear-gradient(rgba(244, 244, 245, 0.7), rgba(244, 244, 245, 0.7))",
+        backgroundPosition: "left 1.5rem center",
+        backgroundRepeat: "no-repeat",
+        backgroundSize: "calc(100% - 2rem) 100%",
+      }
+    : undefined;
+  const combinedBlockRootStyle: React.CSSProperties | undefined =
+    blockRootStyle || partialFocusStyle
+      ? ({
+          ...blockRootStyle,
+          ...partialFocusStyle,
+        } as React.CSSProperties)
+      : undefined;
+  const commentBlockCaption = commentBubbleMode === "full"
+    && !isCommentPanelActive
+    && !isAssetPanelActive
+    && (blockComments.length > 0 || blockAssets.length > 0)
+    ? buildCommentBlockCaption(block, characters, captionLineNum)
+    : null;
+  const lineIndexSlotStyle: React.CSSProperties | undefined = lineNum === undefined
+    ? {
+        width: lineIndexWidth
+          ? lineIndexWidth
+          : `${LINE_INDEX_CONTROL_MIN_WIDTH_REM}rem`,
+      }
+    : undefined;
+
+  const measureStageCommentEditorWidth = useCallback(() => {
+    const blockEl = blockRootRef.current;
+    if (!blockEl) return null;
+    const blockStyle = window.getComputedStyle(blockEl);
+    const rootFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+    const remPx = Number.isFinite(rootFontSize) ? rootFontSize : 16;
+    const blockContentWidth =
+      blockEl.getBoundingClientRect().width -
+      parseFloat(blockStyle.paddingLeft) -
+      parseFloat(blockStyle.paddingRight);
+    const compactCharacterWidth = compactCharacterColumnRef.current?.getBoundingClientRect().width
+      ?? COMPACT_CHARACTER_COLUMN_WIDTH_REM * remPx;
+    const compactContentWidth = blockContentWidth - compactCharacterWidth - COMPACT_TEXT_AUXILIARY_WIDTH_REM * remPx;
+    const width = Math.round(compactContentWidth * COMPACT_STAGE_COMMENT_EDITOR_WIDTH_RATIO);
+    return width > 0 ? width : null;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isCompactTextLayout) return;
+    const el = compactCharacterColumnRef.current;
+    if (!el) return;
+    const measure = () => {
+      const height = el.getBoundingClientRect().height;
+      setCompactCharacterColumnHeight(height);
+      const characterLabelEl = el.querySelector<HTMLElement>("[data-character-label='true']");
+      if (characterLabelEl) {
+        const lineHeight = parseFloat(window.getComputedStyle(characterLabelEl).lineHeight);
+        if (Number.isFinite(lineHeight)) setCompactCharacterLineHeight(lineHeight);
+      }
+      const contentEl = divRef.current;
+      if (contentEl) {
+        const lineHeight = parseFloat(window.getComputedStyle(contentEl).lineHeight);
+        if (Number.isFinite(lineHeight)) setCompactContentLineHeight(lineHeight);
+      }
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isCompactTextLayout, showCharacterSelector, block.characterIds, block.characterAnnotations]);
+
+  useEffect(() => {
+    if (!showCompactStageCommentRow && stageCommentOverflowBelow !== 0) {
+      setStageCommentOverflowBelow(0);
+    }
+  }, [showCompactStageCommentRow, stageCommentOverflowBelow]);
+
+  return (
+    <div
+      id={`block-content-${block.id}`}
+      data-block-content={block.id}
+      ref={blockRootRef}
+      onDragOver={onDragOverBlock}
+      onDrop={onDropBlock}
+      onMouseLeave={resetCompactControlHover}
+      style={combinedBlockRootStyle}
+      className={`group relative px-6 py-0 text-center transition-colors ${searchRingClass} ${blockBgClass} ${movedGlowClass}`}
+    >
+      {dragTarget && (
+        <div
+          className={`pointer-events-none absolute left-4 right-4 z-10 border-t-2 ${
+            dragTarget.position === "before" ? "-top-2.5" : "-bottom-2.5"
+          }`}
+          style={{ borderColor: "#91a8ca" }}    /* my signature color (lighter version). ^v^ -- QPT */
+        />
+      )}
+
+      {(lineNum !== undefined || canEditMetadata || canEditRehearsalMark || (showReadOnlyRehearsalMark && isMarkStart && block.rehearsalMark)) && (
+        <span className="absolute left-1.5 top-[3px] z-20 flex items-start gap-1 leading-none">
+          {lineNum !== undefined && (
+            <span
+              className={`pointer-events-none select-none tabular-nums text-[9px] leading-none transition-colors ${lineNumberClass}`}
+            >
+              {lineNum}
+            </span>
+          )}
+          {lineNum === undefined && (
+            <span aria-hidden className="pointer-events-none shrink-0 select-none" style={lineIndexSlotStyle} />
+          )}
+          {(canEditMetadata || canEditRehearsalMark) && (
+            <span
+              onMouseEnter={unfoldCompactControls}
+              className="relative top-[1px] hidden opacity-0 transition-opacity group-hover:opacity-100 sm:inline-flex"
+            >
+              <RehearsalMarkInput
+                canAddChapterScene={canEditMetadata}
+                canAddRehearsal={canEditRehearsalMark}
+                onAddChapterBefore={onAddChapterBefore}
+                onAddSceneBefore={onAddSceneBefore}
+                onAddRehearsalBefore={onAddRehearsalBefore}
+              />
+            </span>
+          )}
+          {!canEditRehearsalMark && showReadOnlyRehearsalMark && isMarkStart && block.rehearsalMark && (
+            <span className="relative top-[1px]">
+              <RehearsalMarkLabel mark={block.rehearsalMark} />
+            </span>
+          )}
+        </span>
+      )}
+
+      {canEditText && (
+        <div
+          ref={leftControlsRef}
+          onMouseEnter={unfoldCompactControls}
+          style={compactControlHoverStyle}
+          className="absolute left-0 top-1 bottom-0 flex w-4 flex-col items-start justify-between"
+        >
+          <span />
+
+          {( /* `91a8ca` is my signature color (lighter version). ^v^ -- QPT */
+            confirmDelete ? (
+              <span
+                className="absolute left-0 bottom-0 z-10 hidden translate-x-5 items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm sm:flex"
+                style={compactDeleteStyle}
+                data-script-confirmation="true"
+              >
+                <span className="whitespace-nowrap text-[10px] text-zinc-400">
+                  {deleteConfirmNoopMessage ?? (selectedCount > 1 ? `确认删除所选 ${selectedCount} 行？` : "确认删除此行？")}
+                </span>
+                <button
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    if (deleteConfirmNoopMessage) {
+                      setConfirmDelete(false);
+                      onDeleteConfirmationChange(false);
+                      return;
+                    }
+                    onRequestLargeSelectionOperation("delete", selectedCount, () => {
+                      setConfirmDelete(false);
+                      onDeleteConfirmationChange(false);
+                      onDelete();
+                    });
+                  }}
+                  className="shrink-0 whitespace-nowrap text-[10px] text-red-500 hover:text-red-700"
+                >
+                  确认
+                </button>
+                <button
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { setConfirmDelete(false); onDeleteConfirmationChange(false); }}
+                  className="shrink-0 whitespace-nowrap text-[10px] text-zinc-400 hover:text-zinc-600"
+                >
+                  取消
+                </button>
+              </span>
+            ) : (
+              <button
+                data-script-selection-action={selectedCount > 1 ? "true" : undefined}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  if (isScriptDragging) return;
+                  if (!onCanStartSelectionAction()) return;
+                  onDeleteFocus();
+                  if (canDeleteWithoutConfirmation) {
+                    onRequestLargeSelectionOperation("delete", selectedCount, onDelete);
+                  }
+                  else { setConfirmDelete(true); onDeleteConfirmationChange(true); }
+                }}
+                style={compactDeleteStyle}
+                className="relative hidden h-4 w-4 items-center justify-center rounded text-[12px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-red-100 hover:text-red-500 group-hover:opacity-100 sm:flex"
+                title="删除此行"
+                aria-label="删除此行"
+              >
+                ×
+              </button>
+            )
+          )}
+
+          {(
+            <button
+              draggable={!isReorderLocked}
+              disabled={isReorderLocked}
+              data-script-block-bar="true"
+              onDragStart={onDragStartBlock}
+              onDragEnd={onDragEndBlock}
+              onMouseDown={(e) => {
+                if (e.shiftKey) e.preventDefault();
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                onToggleSelected(e);
+                if (window.matchMedia("(max-width: 639px)").matches) onMobileMenuOpen?.();
+              }}
+              className={`absolute left-0 top-[calc(50%-2px)] h-[max(1.5rem,calc(100%-3rem))] w-4 -translate-y-1/2 select-none rounded outline-none transition-all focus:outline-none focus-visible:outline-none sm:opacity-0 sm:group-hover:opacity-100 ${
+                isReorderLocked
+                  ? "cursor-not-allowed text-zinc-200 opacity-40"
+                  : `sm:cursor-grab active:cursor-grabbing ${
+                      isDeleteConfirmHighlighted
+                        ? "bg-red-100 text-red-500 hover:bg-red-100 hover:text-red-600 sm:opacity-100"
+                        : `hover:bg-[#dbe5f3] hover:text-[#91a8ca] ${
+                            isSelected ? "bg-[#dbe5f3] text-[#91a8ca] sm:opacity-100" : "text-zinc-400 sm:text-zinc-200"
+                          }`
+                    }`
+              }`}
+              title="更多操作"
+              aria-label="更多操作"
+            >
+              <span className="pointer-events-none flex items-center justify-center text-[13px] font-bold sm:hidden">⋮</span>
+              <span className="pointer-events-none absolute bottom-1 left-1/2 top-1 w-0.5 -translate-x-1/2 rounded bg-current hidden sm:block" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Colored left bar showing a remote editor is active in this block */}
+      {firstEditor && (
+        <div
+          className="pointer-events-none absolute inset-y-0 left-0 w-0.5"
+          style={{ backgroundColor: firstEditor.color }}
+        />
+      )}
+
+      {/* Remote editor name badge — floats above the block on the top-left */}
+      {firstEditor && (
+        <div
+          className="absolute left-3 -top-3 z-10 flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white shadow"
+          style={{ backgroundColor: firstEditor.color }}
+        >
+          {presenceEditors.map(e => (
+            <span key={e.clientId}>{e.userName}</span>
+          ))}
+        </div>
+      )}
+
+      <CommentBubble
+        comments={blockComments}
+        assets={blockAssets}
+        active={isCommentPanelActive || isAssetPanelActive}
+        offsetY={commentBubbleOffsetY}
+        mode={commentBubbleMode}
+        width={commentBubbleWidth}
+        blockLabel={commentBlockCaption?.label ?? ""}
+        captionBody={commentBlockCaption?.body ?? ""}
+        onCommentClick={handleCommentClick}
+        onAssetClick={handleAssetClick}
+        onHoverChange={setCommentBubbleHovered}
+      />
+
+      {/* Right-side action buttons — flex row, no overlap */}
+      <div className={`${rightActionRowClass} ${charSelectorOpen ? "opacity-0 pointer-events-none" : ""}`}>
+        {confirmTypeAction && (
+          <span className="z-10 mr-1 flex items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm" data-script-confirmation="true">
+            <span className="whitespace-nowrap text-[10px] text-zinc-400">
+              {confirmTypeAction === "type"
+                ? `确认修改所选 ${selectedCount} 行类型？`
+                : `确认修改所选 ${selectedCount} 行文本状态？`}
+            </span>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                const action = confirmTypeAction;
+                onRequestLargeSelectionOperation(action, selectedCount, () => {
+                  setConfirmTypeAction(null);
+                  if (action === "type") onToggleType();
+                  else onToggleLyric();
+                });
+              }}
+              className="text-[10px] text-red-500 hover:text-red-700"
+            >
+              确认
+            </button>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setConfirmTypeAction(null)}
+              className="text-[10px] text-zinc-400 hover:text-zinc-600"
+            >
+              取消
+            </button>
+          </span>
+        )}
+        {canEditText && !isStage && !hasLyricConfig && (
+          <button
+            data-script-selection-action={selectedCount > 1 ? "true" : undefined}
+            onClick={() => {
+              if (selectedCount > 1) setConfirmTypeAction("lyric");
+              else onToggleLyric();
+            }}
+            className="rounded px-1.5 py-0.5 text-[11px] text-zinc-200 opacity-0 transition-opacity hover:text-zinc-400 group-hover:opacity-100"
+          >
+            {block.lyric ? "台词" : "歌词"}
+          </button>
+        )}
+        {canEditText && (
+          <button
+            data-script-selection-action={selectedCount > 1 ? "true" : undefined}
+            onClick={() => {
+              if (selectedCount > 1) setConfirmTypeAction("type");
+              else onToggleType();
+            }}
+            className="rounded px-1.5 py-0.5 text-[11px] text-zinc-200 opacity-0 transition-opacity hover:text-zinc-400 group-hover:opacity-100"
+          >
+            {isStage ? "台词" : "舞台"}
+          </button>
+        )}
+        <button
+          onClick={e => { e.stopPropagation(); onAssetClick(); }}
+          title="附件"
+          className="rounded px-1.5 py-0.5 text-[11px] text-zinc-200 opacity-0 transition-opacity hover:text-zinc-400 group-hover:opacity-100"
+        >
+          附件
+        </button>
+        <button
+          onClick={e => { e.stopPropagation(); onCommentClick(); }}
+          title="评论"
+          className={`rounded px-1.5 py-0.5 text-[11px] transition-opacity ${
+            commentCount > 0
+              ? "text-zinc-400 opacity-100 hover:text-zinc-600"
+              : "text-zinc-200 opacity-0 hover:text-zinc-400 group-hover:opacity-100"
+          }`}
+        >
+          {commentCount > 0 ? `${commentCount} 评` : "评论"}
+        </button>
+      </div>
+      {displayScene && (
+        <span className={readOnlySceneLabelClass}>
+          <SceneLabel scene={displayScene} focused={isFocused} />
+        </span>
+      )}
+
+      {isCompactTextLayout ? (
+        <div
+          className="grid grid-cols-[var(--compact-character-column-width)_1rem_minmax(0,1fr)] items-start gap-x-2 text-left sm:grid-cols-[var(--compact-character-column-width-wide)_1rem_minmax(0,1fr)]"
+          style={charSelectorOpen ? COMPACT_TEXT_GRID_UNFOLDED_STYLE : COMPACT_TEXT_GRID_STYLE}
+        >
+          <div ref={compactCharacterColumnRef} className="col-start-1 row-start-1 min-w-0 pt-0.5">
+            {(showCharacterSelector || hiddenCharacterCollapsed) && (
+              <div className={hiddenCharacterCollapsed && !showCharacterSelector ? "opacity-0 transition-opacity group-hover:opacity-100" : undefined}>
+                <BlockCharacterSelector
+                  block={block}
+                  characters={characters}
+                  onChange={(ids) => { onUpdate({ characterIds: ids }); onCharacterChangeFocus?.(); }}
+                  onAnnotationChange={(charId, ann) => onUpdate({ characterAnnotations: { ...block.characterAnnotations, [charId]: ann } })}
+                  onForceShowCharacterNameChange={(force) => onUpdate({ forceShowCharacterName: force })}
+                  onEditingChange={setCharSelectorOpen}
+                  editRequestToken={charEditToken}
+                  onArrowUp={onArrowUpFromChar}
+                  onArrowDown={onArrowDownFromChar}
+                  readOnly={!canEditText || isEditingLocked}
+                  layoutMode={textLayoutMode}
+                />
+              </div>
+            )}
+            {!showCharacterSelector && !hiddenCharacterCollapsed && (
+              <span aria-hidden className="block invisible text-sm font-bold leading-7 tracking-[0.12em]">
+                无角色
+              </span>
+            )}
+          </div>
+          {block.characterIds.length > 0 && (hasStageComment || isFocused || isSelected || isCompactTextLayout) && (
+            <BlockStageComment
+              value={block.stageComment}
+              onChange={(stageComment) => onUpdate({ stageComment })}
+              showAddButton={showStageCommentAddButton}
+              readOnly={!canEditText || isEditingLocked}
+              stageDelimOpen={stageDelimOpen}
+              stageDelimClose={stageDelimClose}
+              layoutMode={textLayoutMode}
+              placementClassName={showCompactStageCommentRow ? "col-start-3 row-start-1 self-start pt-[0.0625rem]" : stageCommentEditing ? "col-start-3 row-start-1 self-start" : "col-start-2 row-start-1 self-start justify-self-center"}
+              onEditingChange={setStageCommentEditing}
+              addButtonCenter
+              alignAddButtonToLineAnchor={!showCompactStageCommentRow}
+              addButtonRevealOnHover
+              alignFirstLineToEnd={showCompactStageCommentRow}
+              onOverflowBelowChange={setStageCommentOverflowBelow}
+              lineAnchorCenter={compactCharacterColumnHeight > 0 ? compactCharacterLastLineCenter : undefined}
+              lineAnchorRowHeight={compactCharacterColumnHeight || undefined}
+              manualOffsetYPx={stageCommentManualOffsetYPx}
+              getEditorWidth={measureStageCommentEditorWidth}
+            />
+          )}
+          <div
+            className={`col-start-3 min-w-0 ${showCompactStageCommentRow ? "row-start-2" : "row-start-1"}`}
+            style={showCompactStageCommentRow
+              ? stageCommentOverflowBelow > 0 ? { marginTop: stageCommentOverflowBelow } : undefined
+              : compactContentFirstLineTop > 0 ? { marginTop: compactContentFirstLineTop } : undefined}
+          >
+            <div
+              ref={refCallback}
+              contentEditable={canEditText && !isScriptDragging && !isEditingLocked}
+              suppressContentEditableWarning
+              tabIndex={isEditingLocked ? -1 : undefined}
+              onInput={handleInput}
+              onCompositionStart={handleCompositionStart}
+              onCompositionEnd={handleCompositionEnd}
+              onKeyDown={handleKeyDown}
+              onFocus={onFocus}
+              onPaste={(e) => {
+                if (!canEditText) {
+                  e.preventDefault();
+                  return;
+                }
+                e.preventDefault();
+                const html = e.clipboardData.getData("text/html");
+                const plain = e.clipboardData.getData("text/plain");
+                const sel = window.getSelection();
+                if (!sel || !sel.rangeCount) return;
+                sel.deleteFromDocument();
+                const range = sel.getRangeAt(0);
+                if (html) {
+                  const sanitized = sanitizePasteHtml(html);
+                  const tmp = document.createElement("div");
+                  tmp.innerHTML = sanitized;
+                  const frag = document.createDocumentFragment();
+                  while (tmp.firstChild) frag.appendChild(tmp.firstChild);
+                  const last = frag.lastChild;
+                  range.insertNode(frag);
+                  if (last) {
+                    const r = document.createRange();
+                    r.setStartAfter(last);
+                    r.collapse(true);
+                    sel.removeAllRanges();
+                    sel.addRange(r);
+                  }
+                } else {
+                  const node = document.createTextNode(plain);
+                  range.insertNode(node);
+                  sel.collapseToEnd();
+                }
+                if (block.type !== "stage") applyInlineStageStyling(divRef.current!, stageDelimOpen, stageDelimClose);
+                syncContent();
+              }}
+              data-placeholder={contentPlaceholder ?? "在此输入台词…"}
+              className={`w-full min-h-[1.75rem] pl-1 outline-none text-base leading-7 break-words text-left ${isScriptDragging || isEditingLocked ? "caret-transparent" : ""} ${
+                block.lyric ? "font-lyric font-bold text-zinc-700 uppercase" : "font-script text-zinc-700"
+              }`}
+            />
+          </div>
+        </div>
+      ) : (
+        <>
+          {!isStage && showCharacterSelector && (
+            <BlockCharacterSelector
+              block={block}
+              characters={characters}
+              onChange={(ids) => { onUpdate({ characterIds: ids }); onCharacterChangeFocus?.(); }}
+              onAnnotationChange={(charId, ann) => onUpdate({ characterAnnotations: { ...block.characterAnnotations, [charId]: ann } })}
+              onForceShowCharacterNameChange={(force) => onUpdate({ forceShowCharacterName: force })}
+              onEditingChange={setCharSelectorOpen}
+              editRequestToken={charEditToken}
+              onArrowUp={onArrowUpFromChar}
+              onArrowDown={onArrowDownFromChar}
+              readOnly={!canEditText || isEditingLocked}
+              bottomGapClassName={characterBottomGapClassName}
+            />
+          )}
+
+          {!isStage && block.characterIds.length > 0 && (hasStageComment || !effectiveHideCharSelector || isFocused || isSelected) && (
+            <BlockStageComment
+              value={block.stageComment}
+              onChange={(stageComment) => onUpdate({ stageComment })}
+              showAddButton={showStageCommentAddButton}
+              topGap={showCharacterSelector ? "compact" : undefined}
+              readOnly={!canEditText || isEditingLocked}
+              stageDelimOpen={stageDelimOpen}
+              stageDelimClose={stageDelimClose}
+              placementClassName={stageCommentPlacementClassName}
+              addButtonRevealOnHover
+              zeroHeightAddButton
+              getEditorWidth={measureStageCommentEditorWidth}
+            />
+          )}
+
+          <div
+        ref={refCallback}
+        contentEditable={canEditText && !isScriptDragging && !isEditingLocked}
+        suppressContentEditableWarning
+        tabIndex={isEditingLocked ? -1 : undefined}
+        onInput={handleInput}
+        onCompositionStart={handleCompositionStart}
+        onCompositionEnd={handleCompositionEnd}
+        onKeyDown={handleKeyDown}
+        onFocus={onFocus}
+        onPaste={(e) => {
+          if (!canEditText) {
+            e.preventDefault();
+            return;
+          }
+          e.preventDefault();
+          const html = e.clipboardData.getData("text/html");
+          const plain = e.clipboardData.getData("text/plain");
+          const sel = window.getSelection();
+          if (!sel || !sel.rangeCount) return;
+          sel.deleteFromDocument();
+          const range = sel.getRangeAt(0);
+          if (html) {
+            const sanitized = sanitizePasteHtml(html);
+            const tmp = document.createElement("div");
+            tmp.innerHTML = sanitized;
+            const frag = document.createDocumentFragment();
+            while (tmp.firstChild) frag.appendChild(tmp.firstChild);
+            const last = frag.lastChild;
+            range.insertNode(frag);
+            if (last) {
+              const r = document.createRange();
+              r.setStartAfter(last);
+              r.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(r);
+            }
+          } else {
+            const node = document.createTextNode(plain);
+            range.insertNode(node);
+            sel.collapseToEnd();
+          }
+          if (block.type !== "stage") applyInlineStageStyling(divRef.current!, stageDelimOpen, stageDelimClose);
+          syncContent();
+        }}
+        data-placeholder={contentPlaceholder ?? (isStage ? "舞台提示…" : "在此输入台词…")}
+        className={`w-full min-h-[1.75rem] ${isStage ? "pl-1" : ""} outline-none text-base leading-7 break-words ${isScriptDragging || isEditingLocked ? "caret-transparent" : ""} ${
+          isStage ? "font-stage italic text-zinc-400 text-left" :
+          block.lyric ? "font-lyric font-bold text-zinc-700 text-center uppercase" :
+          "font-script text-zinc-700 text-center"
+        }`}
+          />
+        </>
+      )}
+
+      {hasBlockTags && (
+        <div ref={blockTagsRef} className="relative mt-0.5 pb-1">
+          <div className="flex flex-wrap items-center gap-1">
+            {tagGroups.map(group => {
+              const tagVal = (blockTagValues ?? []).find(t => t.groupId === group.id);
+              const selectedOpt = group.type === "exclusive"
+                ? group.options.find(o => o.id === (tagVal?.optionId ?? group.defaultOptionId))
+                : null;
+              const isDefault = group.type === "exclusive" && !tagVal?.optionId;
+              const rangeVal = group.type === "range" ? (tagVal?.value ?? group.rangeDefault) : null;
+              return (
+                <span
+                  key={group.id}
+                  onClick={() => { if (canEditMetadata) setTagPickerOpen(v => !v); }}
+                  className={`${canEditMetadata ? "cursor-pointer" : "cursor-default"} rounded-full px-2 py-0.5 text-[10px] font-medium transition-opacity select-none ${isDefault ? "opacity-35" : ""}`}
+                  style={selectedOpt
+                    ? { backgroundColor: selectedOpt.color + "20", color: selectedOpt.color }
+                    : { backgroundColor: "#f4f4f5", color: "#71717a" }
+                  }
+                >
+                  {group.type === "exclusive"
+                    ? (selectedOpt?.label ?? group.name)
+                    : `${group.name}${rangeVal !== null && rangeVal !== undefined ? `: ${rangeVal}` : ""}`
+                  }
+                </span>
+              );
+            })}
+          </div>
+          {tagPickerOpen && (
+            <TagPicker
+              tagGroups={tagGroups}
+              blockTagValues={blockTagValues ?? []}
+              onTagChange={(groupId, optionId, value, del) => { onTagChange?.(groupId, optionId, value, del); }}
+              onCopy={() => onTagCopyClick?.()}
+              onPaste={() => onTagPasteClick?.()}
+              onClose={() => setTagPickerOpen(false)}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Block spacing / insertion ────────────────────────────────────────────────
+
+function BlockGap() {
+  return <div className="h-5" aria-hidden="true" />;
+}
+
+function InsertZone({ lineIndexWidth, onInsert }: { lineIndexWidth?: string; onInsert: () => void }) {
+  const style: React.CSSProperties | undefined = lineIndexWidth
+    ? { paddingLeft: `calc(${lineIndexWidth} + ${LINE_INDEX_GUTTER_OFFSET_REM}rem)` }
+    : undefined;
+  return (
+    <div className="group flex h-5 items-center justify-center px-6" style={style}>
+      <button
+        onClick={onInsert}
+        title="插入新块"
+        className="flex h-5 w-5 items-center justify-center rounded-full text-[12px] leading-none text-zinc-300 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-500 group-hover:opacity-100"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+// ─── CommentsPanel helpers ────────────────────────────────────────────────────
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "刚刚";
+  if (mins < 60) return `${mins} 分钟前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  return new Date(iso).toLocaleDateString("zh-CN");
+}
+
+function SideBlockPanel({
+  blockId,
+  activePanel,
+  onPanelChange,
+  blockCaption,
+  width,
+  navigation,
+  onClose,
+  children,
+}: {
+  blockId: string;
+  activePanel: BlockSidePanelKind;
+  onPanelChange: (panel: BlockSidePanelKind) => void;
+  blockCaption?: CommentBlockCaption | null;
+  width: number;
+  navigation?: SideBlockPanelNavigation;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const { pointerTop, pointerOffsetY } = useBlockSpeechTail(blockId);
+  const headerRef = useRef<HTMLDivElement | null>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+
+  useLayoutEffect(() => {
+    const updateHeaderHeight = () => setHeaderHeight(headerRef.current?.offsetHeight ?? 0);
+    updateHeaderHeight();
+    window.addEventListener("resize", updateHeaderHeight);
+    return () => window.removeEventListener("resize", updateHeaderHeight);
+  }, [activePanel, blockCaption?.label, blockCaption?.body]);
+
+  const tailUsesHeaderFill = pointerTop + SPEECH_TAIL_BASE_HALF_PX <= headerHeight;
+
+  return (
+    <div
+      className="fixed right-0 bottom-0 isolate z-30 flex flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full"
+      style={{
+        top: SIDE_PANEL_TOP_PX,
+        width,
+      }}
+    >
+      <SpeechTail top={pointerTop} offsetY={pointerOffsetY} fillClassName={tailUsesHeaderFill ? "fill-zinc-100" : "fill-white"} />
+      <div ref={headerRef} className="relative z-10 shrink-0 border-y border-emerald-600/80 bg-zinc-100 px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-1.5 text-sm font-semibold">
+            <button
+              type="button"
+              onClick={() => onPanelChange("comment")}
+              aria-pressed={activePanel === "comment"}
+              className={activePanel === "comment" ? "text-zinc-700" : "text-zinc-300 hover:text-emerald-600/80"}
+            >
+              评论
+            </button>
+            <span className="text-zinc-300" aria-hidden="true">/</span>
+            <button
+              type="button"
+              onClick={() => onPanelChange("asset")}
+              aria-pressed={activePanel === "asset"}
+              className={activePanel === "asset" ? "text-zinc-700" : "text-zinc-300 hover:text-emerald-600/80"}
+            >
+              附件
+            </button>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {navigation && (
+              <>
+                <button
+                  type="button"
+                  onClick={navigation.onPrevious}
+                  disabled={!navigation.hasPrevious}
+                  className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
+                  title="上一条"
+                >
+                  <ChevronIcon direction="up" />
+                </button>
+                <button
+                  type="button"
+                  onClick={navigation.onNext}
+                  disabled={!navigation.hasNext}
+                  className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80 disabled:cursor-default disabled:opacity-25 disabled:hover:text-zinc-800"
+                  title="下一条"
+                >
+                  <ChevronIcon />
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-5 w-5 items-center justify-center text-zinc-800 hover:text-emerald-600/80"
+              title="关闭"
+            >
+              <span className="relative h-3 w-3" aria-hidden="true">
+                <span className="absolute left-1/2 top-1/2 h-0.5 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-current" />
+                <span className="absolute left-1/2 top-1/2 h-0.5 w-3 -translate-x-1/2 -translate-y-1/2 -rotate-45 bg-current" />
+              </span>
+            </button>
+          </div>
+        </div>
+        {blockCaption && (
+          <p className="mt-2 line-clamp-1 text-xs leading-snug text-zinc-500" title={`${blockCaption.label} ${blockCaption.body}`}>
+            <span className="font-bold text-zinc-700">{blockCaption.label}</span>{" "}
+            <span>{blockCaption.body}</span>
+          </p>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ─── CommentsPanel ────────────────────────────────────────────────────────────
+
+function CommentsPanel({
+  blockId, productionId, comments, currentUserId, isAdmin,
+  onAdd, onEdit, onDelete, onClose, onNavigate,
+  onPanelChange, draft, onDraftChange,
+  width,
+  blockCaption,
+  navigation,
+}: {
+  blockId: string; productionId: string; comments: Comment[];
+  currentUserId: string; isAdmin: boolean;
+  onAdd: (c: Comment) => void; onEdit: (c: Comment) => void;
+  onDelete: (id: string) => void; onClose: () => void;
+  onNavigate?: () => void;
+  onPanelChange: (panel: BlockSidePanelKind) => void;
+  draft?: CommentDraft;
+  onDraftChange: (blockId: string, draft: CommentDraft) => void;
+  width: number;
+  blockCaption?: CommentBlockCaption | null;
+  navigation?: SideBlockPanelNavigation;
+}) {
+  const [members, setMembers] = useState<Mention[]>([]);
+  const [newText, setNewText] = useState(draft?.text ?? "");
+  const [newMentions, setNewMentions] = useState<Mention[]>(draft?.mentions ?? []);
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
+  const [replyMentions, setReplyMentions] = useState<Mention[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [pendingNewAssets, setPendingNewAssets] = useState<PendingAsset[]>([]);
+  const [pendingReplyAssets, setPendingReplyAssets] = useState<PendingAsset[]>([]);
+  const draftRef = useRef<CommentDraft>(draft ?? { text: "", mentions: [] });
+
+  const updateDraft = (patch: Partial<CommentDraft>) => {
+    const next = { ...draftRef.current, ...patch };
+    draftRef.current = next;
+    onDraftChange(blockId, next);
+  };
+
+  useEffect(() => {
+    fetch(`${BASE_PATH}/api/production/${productionId}/mention-users`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.users) setMembers(d.users); })
+      .catch(() => {});
+  }, [productionId]);
+
+  const topLevel = useMemo(
+    () => comments.filter(c => c.parentId === null)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    [comments],
+  );
+  const repliesFor = useCallback(
+    (parentId: string) => comments.filter(c => c.parentId === parentId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    [comments],
+  );
+
+  const postComment = async (opts: { parentId?: string; text: string; mentions: Mention[] }) => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${BASE_PATH}/api/script/${productionId}/comments`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blockId, body: opts.text, parentId: opts.parentId ?? null, mentions: opts.mentions }),
+      });
+      if (res.ok) return (await res.json()).comment as Comment;
+    } finally { setSubmitting(false); }
+    return null;
+  };
+
+  const mountAssets = (commentId: string, assetIds: PendingAsset[]) =>
+    Promise.all(assetIds.map(({ id: assetId }) =>
+      fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}/mounts`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mountType: "comment", mountId: commentId }),
+      })
+    ));
+
+  const submitNew = async () => {
+    const text = newText.trim(); if (!text) return;
+    const c = await postComment({ text, mentions: newMentions });
+    if (c) {
+      if (pendingNewAssets.length > 0) await mountAssets(c.id, pendingNewAssets);
+      const emptyDraft = { text: "", mentions: [] };
+      draftRef.current = emptyDraft;
+      onDraftChange(blockId, emptyDraft);
+      onAdd(c); setNewText(""); setNewMentions([]); setPendingNewAssets([]);
+    }
+  };
+
+  const submitReply = async () => {
+    const text = replyText.trim(); if (!text || !replyingTo) return;
+    const c = await postComment({ parentId: replyingTo, text, mentions: replyMentions });
+    if (c) {
+      if (pendingReplyAssets.length > 0) await mountAssets(c.id, pendingReplyAssets);
+      onAdd(c); setReplyText(""); setReplyMentions([]); setReplyingTo(null); setPendingReplyAssets([]);
+    }
+  };
+
+  const saveEdit = async (id: string) => {
+    const text = editText.trim(); if (!text) return;
+    const res = await fetch(`${BASE_PATH}/api/script/${productionId}/comments/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: text }),
+    });
+    if (res.ok) { onEdit((await res.json()).comment); setEditingId(null); }
+  };
+
+  const doDelete = async (id: string) => {
+    const res = await fetch(`${BASE_PATH}/api/script/${productionId}/comments/${id}`, { method: "DELETE" });
+    if (res.ok) onDelete(id);
+  };
+
+  const startReply = (parentId: string, authorUserId: string, authorName: string) => {
+    setReplyingTo(parentId);
+    setReplyText(`@${authorName} `);
+    setReplyMentions([{ userId: authorUserId, name: authorName }]);
+  };
+
+  const taClass = "w-full resize-none rounded border border-zinc-200 px-2 py-1.5 text-sm text-zinc-700 outline-none focus:border-zinc-400";
+  const replyThreadBorderClass = "border-emerald-600/30";
+
+  // Shared: header row (author + timestamp + edit/delete)
+  const commentHeader = (c: Comment) => (
+    <div className="flex items-baseline justify-between">
+      <span className="flex min-w-0 items-baseline gap-1.5">
+        <span className="truncate text-xs font-semibold text-zinc-700">{c.authorName}</span>
+        <span className="shrink-0 text-[10px] text-zinc-500" title={new Date(c.createdAt).toLocaleString("zh-CN")}>
+          {relativeTime(c.createdAt)}
+        </span>
+      </span>
+      <div className="flex items-center gap-2">
+        {editingId !== c.id && (
+          <>
+            {c.userId === currentUserId && (
+              <button onClick={() => { setEditingId(c.id); setEditText(c.body); }}
+                className="text-[11px] text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 hover:text-zinc-600">
+                编辑
+              </button>
+            )}
+            {(c.userId === currentUserId || isAdmin) && (
+              <button onClick={() => doDelete(c.id)}
+                className="text-[11px] text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400">
+                删除
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  // Shared: body or inline edit form
+  const commentBody = (c: Comment, replyAction?: { label: string; onClick: () => void }) => (
+    editingId === c.id ? (
+      <div className="mt-1">
+        <textarea value={editText} onChange={e => setEditText(e.target.value)} autoFocus rows={3} className={taClass} />
+        <div className="mt-1.5 flex gap-2">
+          <button onClick={() => setEditingId(null)} className="flex-1 rounded border border-zinc-200 py-1 text-xs text-zinc-500 hover:border-zinc-400">取消</button>
+          <button onClick={() => saveEdit(c.id)} className="flex-1 rounded bg-zinc-800 py-1 text-xs text-white hover:bg-zinc-700">保存</button>
+        </div>
+      </div>
+    ) : (
+      <div className="mt-0.5">
+        <SmartText content={c.body} memberMention={{ members: c.mentions }} className="inline whitespace-pre-wrap text-zinc-600" />
+        {replyAction && (
+          <button onClick={replyAction.onClick} className="ml-2 inline text-[11px] text-zinc-300 hover:text-zinc-500">
+            {replyAction.label}
+          </button>
+        )}
+      </div>
+    )
+  );
+
+  return (
+    <SideBlockPanel
+      blockId={blockId}
+      activePanel="comment"
+      onPanelChange={onPanelChange}
+      blockCaption={blockCaption}
+      width={width}
+      navigation={navigation}
+      onClose={onClose}
+    >
+      <div className="relative z-10 flex-1 overflow-y-auto bg-white px-4 py-3 space-y-4">
+        {topLevel.length === 0 && <p className="py-4 text-center text-xs text-zinc-300">暂无评论</p>}
+        {topLevel.map(topC => (
+          <div key={topC.id}>
+            {/* Top-level comment */}
+            <div className="group">
+              {commentHeader(topC)}
+              {commentBody(topC, {
+                label: replyingTo === topC.id ? "取消回复" : "回复",
+                onClick: () => replyingTo === topC.id ? setReplyingTo(null) : startReply(topC.id, topC.userId, topC.authorName),
+              })}
+              <MountPointAssets
+                productionId={productionId}
+                mountType="comment"
+                mountId={topC.id}
+                label="评论附件"
+                display="compact"
+                onNavigate={onNavigate}
+              />
+            </div>
+
+            {/* Replies */}
+            {repliesFor(topC.id).map(r => (
+              <div key={r.id} className={`group mt-2 ml-3 border-l-2 pl-3 ${replyThreadBorderClass}`}>
+                <p className="mb-0.5 text-[10px] text-zinc-300">↳ 回复 {r.mentions[0]?.name ?? topC.authorName}</p>
+                {commentHeader(r)}
+                {commentBody(r, {
+                  label: "回复",
+                  onClick: () => startReply(topC.id, r.userId, r.authorName),
+                })}
+                <MountPointAssets
+                  productionId={productionId}
+                  mountType="comment"
+                  mountId={r.id}
+                  label="评论附件"
+                  display="compact"
+                  onNavigate={onNavigate}
+                />
+              </div>
+            ))}
+
+            {/* Reply compose */}
+            {replyingTo === topC.id && (
+              <div className={`mt-2 ml-3 border-l-2 pl-3 ${replyThreadBorderClass}`}>
+                <SmartTextarea value={replyText} onChange={setReplyText}
+                  memberMention={{ members, onMentionsChange: setReplyMentions }}
+                  placeholder="回复… (⌘↵ 发布)" rows={2} autoFocus
+                  onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitReply(); }}
+                  className={taClass} />
+                <div className="mt-1 flex items-center justify-between">
+                  <CommentAssetPicker productionId={productionId} selected={pendingReplyAssets} onSelect={setPendingReplyAssets} />
+                  <div className="flex gap-2">
+                    <button onClick={() => setReplyingTo(null)} className="px-2 py-1 text-xs text-zinc-400 hover:text-zinc-600">取消</button>
+                    <button onClick={submitReply} disabled={!replyText.trim() || submitting}
+                      className="rounded bg-zinc-800 px-3 py-1 text-xs text-white hover:bg-zinc-700 disabled:opacity-40">
+                      {submitting ? "…" : "回复"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="relative z-10 shrink-0 border-t border-zinc-100 bg-white px-4 py-3">
+        <SmartTextarea value={newText} onChange={value => { setNewText(value); updateDraft({ text: value }); }}
+          memberMention={{ members, onMentionsChange: mentions => { setNewMentions(mentions); updateDraft({ mentions }); } }}
+          placeholder="添加评论… (⌘↵ 发布)" rows={3}
+          onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitNew(); }}
+          className="w-full resize-none rounded border border-zinc-200 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-zinc-400" />
+        <div className="mt-2 flex items-center justify-between">
+          <CommentAssetPicker productionId={productionId} selected={pendingNewAssets} onSelect={setPendingNewAssets} />
+          <button onClick={submitNew} disabled={!newText.trim() || submitting}
+            className="rounded bg-zinc-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 disabled:opacity-40">
+            {submitting ? "发布中…" : "发布"}
+          </button>
+        </div>
+      </div>
+    </SideBlockPanel>
+  );
+}
+
+// ─── ScriptEditor ─────────────────────────────────────────────────────────────
+
+function mergeDirtyRanges(
+  current: MarkerOwnershipDirty,
+  dirty: Exclude<MarkerOwnershipDirty, null>,
+): Exclude<MarkerOwnershipDirty, null> {
+  if (current === "full" || dirty === "full") return "full";
+  const currentRanges = current ? (Array.isArray(current) ? current : [current]) : [];
+  const nextRanges = Array.isArray(dirty) ? dirty : [dirty];
+  return [...currentRanges, ...nextRanges];
+}
+
+function markerChangeFromOperations(changes: BlockChange[]): MarkerChange {
+  const markerType = (type: BlockType | null) =>
+    type === "chapter_marker" || type === "scene_marker" || type === "rehearsal_marker";
+  return {
+    changes,
+    positions: [...new Set(changes.map((change) => change.position))].sort((a, b) => a - b),
+    markerStructureChanged: changes.some((change) => markerType(change.beforeType) || markerType(change.afterType)),
+  };
+}
+
+type ScriptToolbarOpenMenu = "script" | "edit" | "display" | "export" | "scene" | "char" | "presence" | null;
+type ScriptToolbarMode = "full" | "short" | "compact";
+
+type ScriptToolbarMenuControls = {
+  openMenu: ScriptToolbarOpenMenu;
+  setOpenMenu: (menu: ScriptToolbarOpenMenu) => void;
+  toggleMenu: (menu: Exclude<ScriptToolbarOpenMenu, null>) => void;
+  openNestedMenu: (menu: Exclude<ScriptToolbarOpenMenu, null>, anchor: HTMLButtonElement) => void;
+  handleCharacterPanelOpenChange: (open: boolean) => void;
+  scriptMenuPosition: ReturnType<typeof useAnchoredMenu<HTMLButtonElement>>;
+  nestedMenuPosition: ReturnType<typeof useAnchoredMenu<HTMLButtonElement>>;
+};
+
+function ScriptToolbarMenuController({
+  toolbarCompact,
+  characterCloseBlocked,
+  openMenuRef,
+  closeMenuRef,
+  children,
+}: {
+  toolbarCompact: boolean;
+  characterCloseBlocked: boolean;
+  openMenuRef: React.MutableRefObject<ScriptToolbarOpenMenu>;
+  closeMenuRef: React.MutableRefObject<() => void>;
+  children: (controls: ScriptToolbarMenuControls) => React.ReactNode;
+}) {
+  const { overflowOpen } = useProductionToolbar();
+  const [openMenu, setOpenMenuState] = useState<ScriptToolbarOpenMenu>(null);
+  const scriptMenuPosition = useAnchoredMenu<HTMLButtonElement>(openMenu === "script", "bottom");
+  const nestedMenuPosition = useAnchoredMenu<HTMLButtonElement>(
+    toolbarCompact && openMenu !== null && openMenu !== "script",
+    "left",
+    openMenu,
+  );
+  const setOpenMenu = useCallback((menu: ScriptToolbarOpenMenu) => {
+    openMenuRef.current = menu;
+    setOpenMenuState(menu);
+  }, [openMenuRef]);
+  const closeMenu = useCallback(() => setOpenMenu(null), [setOpenMenu]);
+  const toggleMenu = useCallback((menu: Exclude<ScriptToolbarOpenMenu, null>) => {
+    setOpenMenuState((current) => {
+      const next = current === menu ? null : menu;
+      openMenuRef.current = next;
+      return next;
+    });
+  }, [openMenuRef]);
+  const openNestedMenu = useCallback((menu: Exclude<ScriptToolbarOpenMenu, null>, anchor: HTMLButtonElement) => {
+    nestedMenuPosition.anchorRef.current = anchor;
+    setOpenMenuState((current) => {
+      const next = current === menu ? null : menu;
+      openMenuRef.current = next;
+      return next;
+    });
+  }, [nestedMenuPosition.anchorRef, openMenuRef]);
+  const handleCharacterPanelOpenChange = useCallback((open: boolean) => {
+    if (!open && characterCloseBlocked) return;
+    setOpenMenu(open ? "char" : null);
+  }, [characterCloseBlocked, setOpenMenu]);
+
+  closeMenuRef.current = closeMenu;
+
+  useEffect(() => {
+    if (toolbarCompact && !overflowOpen) closeMenu();
+  }, [closeMenu, overflowOpen, toolbarCompact]);
+
+  useEffect(() => {
+    if (!openMenu) return;
+    const dismissOnOutsideMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const panel = target.closest<HTMLElement>("[data-script-toolbar-menu-panel]");
+      const scriptTrigger = target.closest<HTMLElement>("[data-script-toolbar-menu-trigger]");
+      const overflowTrigger = target.closest<HTMLElement>("[data-production-overflow-submenu-trigger]");
+      const triggerMenu = scriptTrigger?.dataset.scriptToolbarMenuTrigger
+        ?? overflowTrigger?.dataset.productionOverflowSubmenuTrigger;
+      if (panel?.dataset.scriptToolbarMenuPanel === openMenu || triggerMenu) return;
+      if (openMenu === "char") handleCharacterPanelOpenChange(false);
+      else closeMenu();
+    };
+    document.addEventListener("mousedown", dismissOnOutsideMouseDown);
+    return () => document.removeEventListener("mousedown", dismissOnOutsideMouseDown);
+  }, [closeMenu, handleCharacterPanelOpenChange, openMenu]);
+
+  useEffect(() => () => {
+    openMenuRef.current = null;
+    if (closeMenuRef.current === closeMenu) closeMenuRef.current = () => {};
+  }, [closeMenu, closeMenuRef, openMenuRef]);
+
+  return children({
+    openMenu,
+    setOpenMenu,
+    toggleMenu,
+    openNestedMenu,
+    handleCharacterPanelOpenChange,
+    scriptMenuPosition,
+    nestedMenuPosition,
+  });
+}
+
+export default function ScriptEditor({
+  scriptId = "default",
+  productionId,
+  productionName,
+  canEditText: canEditTextProp = true,
+  canEditMetadata: canEditMetadataProp = true,
+  canEditLayout = true,
+  canEditRehearsalMark = true,
+  canImport = false,
+  initialSearchQuery,
+}: {
+  scriptId?: string;
+  productionId?: string;
+  productionName?: string;
+  canEditText?: boolean;
+  canEditMetadata?: boolean;
+  /** 剧本排版（页面类型 / 紧凑排版 / 模版）的门：script_view/<主本>@edit——与
+   *  app/api/script/[id]/config 的版式字段判定同一把钥匙。canEditMetadata 是
+   *  「任一 scene 字段可改」的粗门，不能拿来当排版开关的依据。 */
+  canEditLayout?: boolean;
+  canEditRehearsalMark?: boolean;
+  canImport?: boolean;
+  initialSearchQuery?: string;
+}) {
+  const toolbarStage = useProductionToolbarStage();
+  const effectiveScriptId = productionId ?? scriptId;
+
+  // ── Version state ─────────────────────────────────────────────────────────────
+  // 版本退役 Phase B：版本恒为 head（服务端解析活跃版本），无选择、无状态门。
+  const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
+
+  const baseCanEditText = canEditTextProp;
+  const baseCanEditMetadata = canEditMetadataProp;
+  const baseCanEditTextLayout = canEditLayout;
+  const baseCanEdit = baseCanEditText || baseCanEditMetadata || canEditRehearsalMark;
+  const [manualLockedMode, setManualLockedMode] = useState(() => readDisplayCookie().rehearsalMode);
+  const isLockedMode = !baseCanEdit || manualLockedMode;
+  const canEditText = baseCanEditText && !isLockedMode;
+  const canEditMetadata = baseCanEditMetadata && !isLockedMode;
+  const effectiveCanEditRehearsalMark = canEditRehearsalMark && !isLockedMode;
+
+  const canEdit = canEditText || canEditMetadata || effectiveCanEditRehearsalMark;
+  const [characters, setCharacters] = useState<Character[]>([]);
+  const [focusedCharacterIds, setFocusedCharacterIds] = useState<Set<string>>(() => readStoredCharacterFocus(effectiveScriptId));
+  const [pendingAggregateFocusPrompt, setPendingAggregateFocusPrompt] = useState<PendingAggregateFocusPrompt | null>(null);
+  const [scenes, setScenes] = useState<Scene[]>([]);
+  const [sceneDetails, setSceneDetails] = useState<SceneDetail[]>([]);
+  const [blocks, setBlocks] = useState<Block[]>([makeBlock()]);
+  const [rehearsalLabels, setRehearsalLabels] = useState(() => buildMarkerLabelIndex(blocks));
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const focusedIdRef = useRef<string | null>(null);
+  const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
+  const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
+  const dragCountBadgeRef = useRef<HTMLDivElement>(null);
+  const [isScriptDragging, setIsScriptDragging] = useState(false);
+  const [isReorderLocked, setIsReorderLocked] = useState(false);
+  const [reorderNotice, setReorderNotice] = useState("");
+  const [selectionChangeNotice, setSelectionChangeNotice] = useState("");
+  const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
+  const [mobileBlockMenuBlockId, setMobileBlockMenuBlockId] = useState<string | null>(null);
+  const [mobileInsertMenuOpen, setMobileInsertMenuOpen] = useState(false);
+  const [mobileBatchAction, setMobileBatchAction] = useState<"type" | "lyric" | null>(null);
+  const closeMobileBlockMenu = useCallback(() => {
+    setMobileBatchAction(null);
+    setMobileInsertMenuOpen(false);
+    setMobileBlockMenuBlockId(null);
+  }, []);
+  useEffect(() => {
+    if (mobileBlockMenuBlockId === null) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (
+        !(target instanceof Element) ||
+        target.closest("[data-script-mobile-block-menu='true']") ||
+        target.closest("[data-script-block-bar='true']:not([data-script-marker-bar='true'])")
+      ) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeMobileBlockMenu();
+    };
+    document.addEventListener("click", handleOutsideClick, true);
+    return () => document.removeEventListener("click", handleOutsideClick, true);
+  }, [closeMobileBlockMenu, mobileBlockMenuBlockId]);
+  const [sceneDetailDialogSceneId, setSceneDetailDialogSceneId] = useState<string | null>(null);
+  const [sceneDetailDialogEditing, setSceneDetailDialogEditing] = useState(false);
+  const [mobileDeleteConfirmation, setMobileDeleteConfirmation] = useState<
+    | { kind: "marker"; markerId: string; message: string }
+    | { kind: "blocks"; blockIds: string[]; message: string; blocked: boolean }
+    | null
+  >(null);
+  const selectedDetailBlockId = selectedBlockIds.size === 1
+    ? selectedBlockIds.values().next().value as string | undefined
+    : undefined;
+  // AI 信封的剧本 focus 上下文（lib/script/script-focus.ts → AgentPopout chip）：
+  // 多选 > 光标 > 视野顶部块（纯浏览兜底——用户没点任何块时也要能感知"正在看哪"）。
+  // 只发指针（块 id），正文由 AI 用读工具自取。
+  const [viewportBlockId, setViewportBlockId] = useState<string | null>(null);
+  const viewportBlockIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedBlockIds.size > 0) {
+      publishScriptFocus({ kind: "selection", blockIds: Array.from(selectedBlockIds).slice(0, 5), total: selectedBlockIds.size });
+    } else if (focusedId) {
+      publishScriptFocus({ kind: "caret", blockIds: [focusedId], total: 1 });
+    } else if (viewportBlockId) {
+      publishScriptFocus({ kind: "viewport", blockIds: [viewportBlockId], total: 1 });
+    } else {
+      publishScriptFocus(null);
+    }
+  }, [selectedBlockIds, focusedId, viewportBlockId]);
+  useEffect(() => () => publishScriptFocus(null), []);
+  const selectionAnchorBlockIdRef = useRef<string | null>(null);
+  const selectionDetachedRef = useRef(false);
+  const markerEndedScopeIdsRef = useRef<Set<string>>(new Set());
+  const [invalidSelectionEndIds, setInvalidSelectionEndIds] = useState<Set<string>>(() => new Set());
+  const [shiftKeyDown, setShiftKeyDown] = useState(false);
+  const [recentlyMovedBlockIds, setRecentlyMovedBlockIds] = useState<Set<string>>(() => new Set());
+  const [tocHighlightedMarkerIds, setTocHighlightedMarkerIds] = useState<Set<string>>(() => new Set());
+  const [deleteConfirmationRequest, setDeleteConfirmationRequest] = useState<{ anchorId: string; token: number } | null>(null);
+  const [deleteConfirmingBlockIds, setDeleteConfirmingBlockIds] = useState<Set<string>>(() => new Set());
+  const [markerDeleteConfirmBlockId, setMarkerDeleteConfirmBlockId] = useState<string | null>(null);
+  const [markerDeleteDialog, setMarkerDeleteDialog] = useState<(MarkerDeleteDialogState & { source: "local" | "server" }) | null>(null);
+  const [markerDeleteDialogBusy, setMarkerDeleteDialogBusy] = useState(false);
+  const [dismissActionToken, setDismissActionToken] = useState(0);
+  const [pendingLargeSelectionConfirmation, setPendingLargeSelectionConfirmation] =
+    useState<PendingLargeSelectionConfirmation | null>(null);
+  const [markerDetailDeleteBlockedKind, setMarkerDetailDeleteBlockedKind] =
+    useState<MarkerDetailDeleteBlockedKind | null>(null);
+  const [pendingNonEmptyMarkerSelectionDeleteIds, setPendingNonEmptyMarkerSelectionDeleteIds] =
+    useState<string[] | null>(null);
+  const [selectedNonEmptyMarkerDeleteIds, setSelectedNonEmptyMarkerDeleteIds] =
+    useState<Set<string>>(() => new Set());
+  const [expandedNonEmptyMarkerDetailIds, setExpandedNonEmptyMarkerDetailIds] =
+    useState<Set<string>>(() => new Set());
+  const [pendingEmptyScriptCleanup, setPendingEmptyScriptCleanup] =
+    useState<EmptyScriptCleanupTarget[] | null>(null);
+  const [selectedEmptyScriptCleanupKeys, setSelectedEmptyScriptCleanupKeys] =
+    useState<Set<string>>(() => new Set());
+  const [scrollLocked, setScrollLocked] = useState(true);
+  const scrollLockedRef = useRef(true);
+  const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
+  const activeSceneIdRef = useRef<string | null>(null);
+  const [detailBlockVisibility, setDetailBlockVisibility] = useState({ selected: false, focused: false });
+  const [charEditTokens, setCharEditTokens] = useState<Record<string, number>>({});
+  const lineIndexMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const lineIndexMinMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const [lineIndexWidth, setLineIndexWidth] = useState(0);
+  const [lineIndexMinWidth, setLineIndexMinWidth] = useState(0);
+  const openSceneDetailDialog = (sceneId: string) => {
+    setSceneDetailDialogEditing(false);
+    setSceneDetailDialogSceneId(sceneId);
+  };
+  const closeSceneDetailDialog = () => {
+    setSceneDetailDialogEditing(false);
+    setSceneDetailDialogSceneId(null);
+  };
+
+  // ── Block tags ───────────────────────────────────────────────────────────────
+  const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
+  const [blockTagMap, setBlockTagMap] = useState<Map<string, BlockTagValue[]>>(new Map());
+  const blockTagMapRef = useRef<Map<string, BlockTagValue[]>>(new Map());
+  const tagClipboardRef = useRef<BlockTagValue[] | null>(null);
+
+  // ── Script config (page layout, stage delimiters) ─────────────────────────
+  const [scriptConfig, setScriptConfig] = useState<ScriptConfig>(DEFAULT_SCRIPT_CONFIG);
+  const canAddRehearsalMark = effectiveCanEditRehearsalMark && scriptConfig.useRehearsalMarks;
+  const scriptConfigRef = useRef(scriptConfig);
+  useEffect(() => { scriptConfigRef.current = scriptConfig; }, [scriptConfig]);
+  const syncOpeningChapterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (syncOpeningChapterTimerRef.current) clearTimeout(syncOpeningChapterTimerRef.current); }, []);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [pendingLockedMode, setPendingLockedMode] = useState<boolean | null>(null);
+  const pendingModeScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
+  const [pendingStageDelimiterChange, setPendingStageDelimiterChange] =
+    useState<PendingStageDelimiterChange | null>(null);
+  const toolbarOpenMenuRef = useRef<ScriptToolbarOpenMenu>(null);
+  const toolbarMenuCloseRef = useRef<() => void>(() => {});
+  const closeToolbarMenu = useCallback(() => toolbarMenuCloseRef.current(), []);
+
+  // config PUT 的门是 scene 的 meta/name@edit（app/api/script/[id]/config），
+  // 与 baseCanEditTextLayout 同源；用粗门 baseCanEditMetadata 会让只有别的
+  // scene 字段权限的人白写一次再被 403。
+  const saveScriptConfig = useCallback(async (patch: Partial<ScriptConfig>) => {
+    if (!baseCanEditTextLayout) return;
+    const previous = scriptConfigRef.current;
+    const next = { ...previous, ...patch };
+    scriptConfigRef.current = next;
+    setScriptConfig(next);
+    const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
+    const response = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/config${vParam}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(next),
+    });
+    if (!response.ok && scriptConfigRef.current === next) {
+      scriptConfigRef.current = previous;
+      setScriptConfig(previous);
+    }
+  }, [activeVersionId, baseCanEditTextLayout, effectiveScriptId]);
+
+  const syncOpeningChapterMarkerId = useCallback((nextBlocks: Block[]) => {
+    if (!baseCanEditTextLayout) return;
+    const openingChapterMarkerId = nextBlocks.find((block) => block.type === "chapter_marker")?.id ?? null;
+    if (openingChapterMarkerId === scriptConfigRef.current.openingChapterMarkerId) return;
+    const next = { ...scriptConfigRef.current, openingChapterMarkerId };
+    scriptConfigRef.current = next;
+    setScriptConfig(next);
+    // Debounce: rapid chapter reordering collapses into a single PUT using the
+    // latest ref value, preventing out-of-order stale writes.
+    if (syncOpeningChapterTimerRef.current) clearTimeout(syncOpeningChapterTimerRef.current);
+    syncOpeningChapterTimerRef.current = setTimeout(() => {
+      syncOpeningChapterTimerRef.current = null;
+      const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
+      void fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/config${vParam}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(scriptConfigRef.current),
+      });
+    }, 500);
+  }, [activeVersionId, baseCanEditTextLayout, effectiveScriptId]);
+
+  const requestStageDelimiterChange = useCallback((open: string, close: string) => {
+    if (scriptConfig.stageDelimOpen === open && scriptConfig.stageDelimClose === close) {
+      closeToolbarMenu();
+      return;
+    }
+    setPendingStageDelimiterChange({ open, close });
+    closeToolbarMenu();
+  }, [closeToolbarMenu, scriptConfig.stageDelimOpen, scriptConfig.stageDelimClose]);
+
+  // ── Page map (computed client-side, deterministic) ──────────────────────────
+  const ownershipDirtyRef = useRef<MarkerOwnershipDirty>("full");
+  const pageMapCacheRef = useRef<EstimatedPageMapCache | null>(null);
+  const pageMapDirtyRef = useRef<MarkerOwnershipDirty>("full");
+  const markPageMapDirty = useCallback((dirty: Exclude<MarkerOwnershipDirty, null>) => {
+    pageMapDirtyRef.current = mergeDirtyRanges(pageMapDirtyRef.current, dirty);
+  }, []);
+  const markOwnershipDirty = useCallback((dirty: Exclude<MarkerOwnershipDirty, null>) => {
+    ownershipDirtyRef.current = mergeDirtyRanges(ownershipDirtyRef.current, dirty);
+    markPageMapDirty(dirty);
+  }, [markPageMapDirty]);
+  const markBlockStructureDirty = useCallback((previous: Block[], next: Block[], movedBlockIds?: Iterable<string>) => {
+    const change = getMarkerChange(previous, next, movedBlockIds);
+    if (change.positions.length === 0) return;
+    if (change.markerStructureChanged) setRehearsalLabels(buildMarkerLabelIndex(next));
+    markPageMapDirty(change.positions.map((start) => ({ start, end: start + 1 })));
+    const nextIndexById = new Map(next.map((block, index) => [block.id, index]));
+    const ownershipRanges = markerCacheUpdateBlockIds(next, change).flatMap((id): MarkerOwnershipRange[] => {
+      const start = nextIndexById.get(id);
+      return start === undefined ? [] : [{ start, end: start + 1, throughNextMarker: false }];
+    });
+    if (ownershipRanges.length > 0) markOwnershipDirty(ownershipRanges);
+  }, [markOwnershipDirty, markPageMapDirty]);
+  const ownedBlocks = useMemo(() => {
+    const owned = updateMarkerOwnership(blocks, ownershipDirtyRef.current);
+    ownershipDirtyRef.current = null;
+    return owned;
+  }, [blocks]);
+  const markerContextById = useMemo(() => buildMarkerContextById(ownedBlocks), [ownedBlocks]);
+  const legacyProjectedBlocks = useMemo(
+    () => withLegacyOwnershipProjection(ownedBlocks, markerContextById),
+    [markerContextById, ownedBlocks],
+  );
+  const openingChapterState = useMemo(() => {
+    const openingChapterMarkerId = scriptConfig.openingChapterMarkerId;
+    const markerIndex = openingChapterMarkerId
+      ? blocks.findIndex((block) => block.id === openingChapterMarkerId)
+      : -1;
+    const marker = markerIndex >= 0 ? blocks[markerIndex] : null;
+    let mustBeVisible = false;
+    for (let index = markerIndex + 1; markerIndex >= 0 && index < blocks.length; index++) {
+      const block = blocks[index];
+      if (block.type === "chapter_marker") break;
+      if (block.type === "scene_marker" || block.type === "rehearsal_marker") {
+        mustBeVisible = true;
+        break;
+      }
+    }
+    return {
+      mustBeVisible,
+      sceneId: marker?.type === "chapter_marker" ? marker.sceneId : null,
+    };
+  }, [blocks, scriptConfig.openingChapterMarkerId]);
+  const openingChapterSceneId = openingChapterState.sceneId;
+  const openingChapterMustBeVisible = openingChapterState.mustBeVisible;
+  const openingChapterVisible = scriptConfig.showOpeningChapter || openingChapterMustBeVisible;
+  const tocScenes = useMemo(
+    () => openingChapterVisible
+      ? scenes
+      : scenes.filter((scene) => scene.id !== openingChapterSceneId),
+    [openingChapterSceneId, openingChapterVisible, scenes]
+  );
+  const pageMap = useMemo(() => {
+    const cache = updateEstimatedPageMap(
+      pageMapCacheRef.current,
+      ownedBlocks,
+      scriptConfig.pageLayout,
+      scriptConfig.textLayoutMode,
+      true,
+      pageMapDirtyRef.current,
+      // 模版必须传：服务端 page_map（saveEstimatedPageMaps/getEstimatedPageMap）
+      // 按主本模版几何算页，这里漏传就退回 legacy 模版——配了模版的演出会出现
+      // 屏上页码与 AI/搜索页码整页级分叉（52 vs 57 事故）
+      scriptConfig.templateId ?? null,
+    );
+    pageMapCacheRef.current = cache;
+    pageMapDirtyRef.current = null;
+    return cache.pageMap;
+  }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode, scriptConfig.templateId]);
+  const reloadScriptState = useCallback(async () => {
+    const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
+    const response = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
+    if (!response.ok) throw new Error("Failed to reload script state");
+    const serverState = await response.json() as ScriptState;
+    const expandedBlocks = expandLegacyMarkersToBlocks(serverState.blocks, serverState.scenes);
+    const normalized = normalizeScriptMarkerInvariants(expandedBlocks, serverState.scenes, serverState.config ?? DEFAULT_SCRIPT_CONFIG);
+    markOwnershipDirty("full");
+    setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
+    setBlocks(normalized.blocks);
+    setCharacters(serverState.characters);
+    setScenes(normalized.scenes);
+    setScriptConfig(normalized.config);
+    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
+    syncedStateRef.current = { ...serverState, blocks: normalized.blocks, scenes: normalized.scenes, config: normalized.config };
+  }, [activeVersionId, effectiveScriptId, markOwnershipDirty]);
+  // AI 写剧本（scope "script" 的 mutation 信号）落库后整体重载——最粗但最稳的粒度：
+  // reloadScriptState 会重置 syncedStateRef，编辑器后续 diff 以新服务端状态为基准，
+  // 不会把 AI 的改动当作"本地被删的内容"再冲掉。
+  useAgentMutation({ scope: "script", productionId: productionId ?? undefined }, () => {
+    void reloadScriptState().catch((err) => console.error("[script-editor] AI 写入后重载失败:", err));
+  });
+  const sceneById = useMemo(() => new Map(scenes.map((scene) => [scene.id, scene])), [scenes]);
+  const sceneParentIdById = useMemo(() => sceneParentIdMap(scenes), [scenes]);
+  const sceneDetailById = useMemo(() => new Map(sceneDetails.map((scene) => [scene.id, scene])), [sceneDetails]);
+  const firstRehearsalMarkerLabel = useMemo(() => {
+    const markerId = rehearsalLabels.rehearsalLabelByMarkerId.keys().next().value;
+    if (!markerId) return null;
+    return rehearsalLabels.labelByMarkerId.get(markerId)
+      ?? "（未命名）";
+  }, [rehearsalLabels]);
+  const rehearsalMarksCannotBeDisabled = scriptConfig.useRehearsalMarks && firstRehearsalMarkerLabel !== null;
+  const scriptLineNumberByBlockId = useMemo(() => {
+    const map = new Map<string, number>();
+    let lineNumber = 0;
+    for (const block of blocks) {
+      if (!isTextBlock(block)) continue;
+      lineNumber += 1;
+      map.set(block.id, lineNumber);
+    }
+    return map;
+  }, [blocks]);
+  const maxLineIndexText = String(Math.max(1, scriptLineNumberByBlockId.size));
+  const applyBlockStructureEdit = useCallback((previousBlocks: Block[], nextBlocks: Block[], change: MarkerChange | "full") => {
+    const normalized = normalizeScriptMarkerInvariants(
+      nextBlocks,
+      scenes,
+      scriptConfigRef.current,
+      change === "full" ? undefined : change,
+    );
+    if (change === "full") {
+      setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
+      markOwnershipDirty("full");
+    }
+    else markBlockStructureDirty(previousBlocks, normalized.blocks);
+    setBlocks(normalized.blocks);
+    if (!sameSceneRows(normalized.scenes, scenes)) {
+      setScenes(normalized.scenes);
+      setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
+    }
+    if (normalized.config.openingChapterMarkerId !== scriptConfigRef.current.openingChapterMarkerId) {
+      syncOpeningChapterMarkerId(normalized.blocks);
+    }
+  }, [markBlockStructureDirty, markOwnershipDirty, scenes, syncOpeningChapterMarkerId]);
+  useEffect(() => {
+    setFocusedCharacterIds(readStoredCharacterFocus(effectiveScriptId));
+    setPendingAggregateFocusPrompt(null);
+  }, [effectiveScriptId]);
+  const setAndStoreFocusedCharacterIds = useCallback((ids: Set<string>) => {
+    setFocusedCharacterIds(ids);
+    writeStoredCharacterFocus(effectiveScriptId, ids);
+  }, [effectiveScriptId]);
+  const toggleCharacterFocus = useCallback((id: string) => {
+    const ids = new Set(focusedCharacterIds);
+    if (ids.has(id)) {
+      ids.delete(id);
+      setAndStoreFocusedCharacterIds(ids);
+      setPendingAggregateFocusPrompt((prompt) => prompt?.characterId === id ? null : prompt);
+      return;
+    }
+
+    ids.add(id);
+    setAndStoreFocusedCharacterIds(ids);
+
+    const aggregateIds = characters
+      .filter((char) => char.isAggregate && (char.memberIds ?? []).includes(id) && !focusedCharacterIds.has(char.id))
+      .map((char) => char.id);
+    if (aggregateIds.length > 0) {
+      setPendingAggregateFocusPrompt({
+        characterId: id,
+        aggregateIds,
+        selectedIds: new Set(),
+      });
+    }
+  }, [characters, focusedCharacterIds, setAndStoreFocusedCharacterIds]);
+  const clearCharacterFocus = useCallback(() => {
+    setAndStoreFocusedCharacterIds(new Set());
+  }, [setAndStoreFocusedCharacterIds]);
+  const confirmAggregateFocusPrompt = useCallback(() => {
+    if (!pendingAggregateFocusPrompt) return;
+    const ids = new Set(focusedCharacterIds);
+    ids.add(pendingAggregateFocusPrompt.characterId);
+    for (const aggregateId of pendingAggregateFocusPrompt.selectedIds) ids.add(aggregateId);
+    setAndStoreFocusedCharacterIds(ids);
+    setPendingAggregateFocusPrompt(null);
+  }, [focusedCharacterIds, pendingAggregateFocusPrompt, setAndStoreFocusedCharacterIds]);
+  const addAllAggregateFocusPrompt = useCallback(() => {
+    if (!pendingAggregateFocusPrompt) return;
+    const ids = new Set(focusedCharacterIds);
+    ids.add(pendingAggregateFocusPrompt.characterId);
+    for (const aggregateId of pendingAggregateFocusPrompt.aggregateIds) ids.add(aggregateId);
+    setAndStoreFocusedCharacterIds(ids);
+    setPendingAggregateFocusPrompt(null);
+  }, [focusedCharacterIds, pendingAggregateFocusPrompt, setAndStoreFocusedCharacterIds]);
+  const cancelAggregateFocusPrompt = useCallback(() => {
+    if (!pendingAggregateFocusPrompt) return;
+    const ids = new Set(focusedCharacterIds);
+    ids.add(pendingAggregateFocusPrompt.characterId);
+    for (const aggregateId of pendingAggregateFocusPrompt.aggregateIds) ids.delete(aggregateId);
+    setAndStoreFocusedCharacterIds(ids);
+    setPendingAggregateFocusPrompt(null);
+  }, [focusedCharacterIds, pendingAggregateFocusPrompt, setAndStoreFocusedCharacterIds]);
+  const togglePendingAggregateFocus = useCallback((id: string) => {
+    setPendingAggregateFocusPrompt((prompt) => {
+      if (!prompt) return prompt;
+      const selectedIds = new Set(prompt.selectedIds);
+      if (selectedIds.has(id)) selectedIds.delete(id);
+      else selectedIds.add(id);
+      return { ...prompt, selectedIds };
+    });
+  }, []);
+
+  // ── Search ──────────────────────────────────────────────────────────────────
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchExact, setSearchExact] = useState(false);
+  const [searchCurrentPage, setSearchCurrentPage] = useState(false);
+  const [searchIdx, setSearchIdx] = useState(0);
+
+  // initialSearchQueryRef — consumed after load (see effect below, after loadState declaration)
+  const initialSearchQueryRef = useRef(initialSearchQuery);
+
+  // ── Jump (line / page) ──────────────────────────────────────────────────────
+  const [jumpTarget, setJumpTarget] = useState<"line" | "page" | null>(null);
+  const [jumpValue, setJumpValue] = useState("");
+
+  // ── Toolbar dropdowns ────────────────────────────────────────────────────────
+  const [toolbarMode, setToolbarMode] = useState<ScriptToolbarMode>("full");
+  const [toolbarMeasureTick, setToolbarMeasureTick] = useState(0);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const fullToolbarWidthRef = useRef(0);
+  const shortToolbarWidthRef = useRef(0);
+  const toolbarCompact = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored || toolbarMode === "compact";
+  const toolbarShort = !toolbarCompact && (toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryShort || toolbarMode === "short");
+  const presenceFolded = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.lowPriorityStored;
+  const setToolbarElement = useCallback((el: HTMLDivElement | null) => {
+    toolbarRef.current = el;
+    if (el) setToolbarMeasureTick(tick => tick + 1);
+  }, []);
+  const resetToolbarMeasurement = useCallback((closeMenus = true) => {
+    fullToolbarWidthRef.current = 0;
+    shortToolbarWidthRef.current = 0;
+    setToolbarMode("full");
+    if (closeMenus) {
+      closeToolbarMenu();
+    }
+  }, [closeToolbarMenu]);
+
+  useEffect(() => {
+    const el = toolbarRef.current;
+    if (!el) return;
+    const productionTopMenuSlot = el.closest(`#${PRODUCTION_TOP_MENU_SLOT_ID}`);
+    if (productionTopMenuSlot) return;
+    let frame: number | null = null;
+    const measure = () => {
+      frame = null;
+      if (navigatingAwayRef.current || toolbarOpenMenuRef.current) return;
+      const available = el.clientWidth;
+      const required = el.scrollWidth;
+      if (toolbarMode === "full") {
+        fullToolbarWidthRef.current = required;
+        if (required > available + 1) {
+          setToolbarMode("short");
+        }
+        return;
+      }
+      if (toolbarMode === "short") {
+        shortToolbarWidthRef.current = required;
+        if (required > available + 1) {
+          setToolbarMode("compact");
+          return;
+        }
+        if (fullToolbarWidthRef.current > 0 && available >= fullToolbarWidthRef.current + TOOLBAR_FOLD_HYSTERESIS_PX) {
+          setToolbarMode("full");
+        }
+        return;
+      }
+      if (fullToolbarWidthRef.current > 0 && available >= fullToolbarWidthRef.current + TOOLBAR_FOLD_HYSTERESIS_PX) {
+        setToolbarMode("full");
+        return;
+      }
+      if (shortToolbarWidthRef.current > 0 && available >= shortToolbarWidthRef.current + TOOLBAR_FOLD_HYSTERESIS_PX) {
+        setToolbarMode("short");
+      }
+    };
+    const scheduleMeasure = () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    scheduleMeasure();
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [toolbarMode, toolbarMeasureTick]);
+
+  useEffect(() => {
+    resetToolbarMeasurement();
+  }, [activeVersionId, isLockedMode, canEditMetadata, resetToolbarMeasurement]);
+
+  // ── Display settings (cookie-persisted) ──────────────────────────────────────
+  const [display, setDisplay] = useState<DisplaySettings>(readDisplayCookie);
+  useLayoutEffect(() => {
+    if (!display.lineNumbers) {
+      setLineIndexWidth(0);
+      setLineIndexMinWidth(0);
+      return;
+    }
+    const el = lineIndexMeasureRef.current;
+    const minEl = lineIndexMinMeasureRef.current;
+    if (!el || !minEl) return;
+    const measure = () => {
+      const width = Math.ceil(el.getBoundingClientRect().width);
+      const minWidth = Math.ceil(minEl.getBoundingClientRect().width);
+      setLineIndexWidth((prev) => prev === width ? prev : width);
+      setLineIndexMinWidth((prev) => prev === minWidth ? prev : minWidth);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    observer.observe(minEl);
+    return () => observer.disconnect();
+  }, [display.lineNumbers, maxLineIndexText]);
+  const lineIndexWidthStyle = display.lineNumbers && lineIndexWidth > 0
+    ? `${lineIndexWidth}px`
+    : undefined;
+  const markerLineIndexWidthStyle = display.lineNumbers && (lineIndexWidth > 0 || lineIndexMinWidth > 0)
+    ? `${Math.max(lineIndexWidth, lineIndexMinWidth)}px`
+    : undefined;
+  const toggleDisplay = useCallback((key: keyof DisplaySettings) => {
+    setDisplay(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      writeDisplayCookie(next);
+      return next;
+    });
+  }, []);
+
+  const prepareForNavigation = useCallback(() => {
+    navigatingAwayRef.current = true;
+    if (windowRangeFrameRef.current !== null) {
+      cancelAnimationFrame(windowRangeFrameRef.current);
+      windowRangeFrameRef.current = null;
+    }
+    pendingWindowRangeRef.current = null;
+    if (reorderUnlockFrame.current !== null) {
+      cancelAnimationFrame(reorderUnlockFrame.current);
+      reorderUnlockFrame.current = null;
+    }
+    if (reorderNoticeTimer.current !== null) {
+      clearTimeout(reorderNoticeTimer.current);
+      reorderNoticeTimer.current = null;
+    }
+    if (selectionChangeNoticeTimer.current !== null) {
+      clearTimeout(selectionChangeNoticeTimer.current);
+      selectionChangeNoticeTimer.current = null;
+    }
+    if (programmaticScrollFrameRef.current !== null) {
+      cancelAnimationFrame(programmaticScrollFrameRef.current);
+      programmaticScrollFrameRef.current = null;
+    }
+    suppressProgrammaticScrollRef.current = false;
+    clearTimeoutMap(movedHighlightTimersRef.current);
+    clearTimeoutMap(tocMarkerGlowTimersRef.current);
+    if (presenceTimerRef.current !== null) {
+      clearTimeout(presenceTimerRef.current);
+      presenceTimerRef.current = null;
+    }
+    if (presenceLayoutTimerRef.current !== null) {
+      clearTimeout(presenceLayoutTimerRef.current);
+      presenceLayoutTimerRef.current = null;
+    }
+    if (streamDebounceTimerRef.current !== null) {
+      clearTimeout(streamDebounceTimerRef.current);
+      streamDebounceTimerRef.current = null;
+    }
+    if (eventSourceRef.current !== null) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    pendingNavigateRef.current = null;
+    postNavCorrectionRef.current = null;
+    pendingMoveCenterRef.current = null;
+  }, []);
+
+  const taRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const pendingFocus = useRef<{ id: string; textOffset?: number; atEnd?: boolean } | null>(null);
+  const pendingCharOpen = useRef<string | null>(null);
+  const draggingBlockId = useRef<string | null>(null);
+  const draggingBlockIds = useRef<string[]>([]);
+  const dragTargetRef = useRef<DragTarget | null>(null);
+  const dragInvalidReasonRef = useRef<string | null>(null);
+  const dragButtonDownSeenRef = useRef(false);
+  const dragButtonReleasedRef = useRef(false);
+  const dropHandledRef = useRef(false);
+  const isReorderLockedRef = useRef(false);
+  const windowRangeFrameRef = useRef<number | null>(null);
+  const reorderUnlockFrame = useRef<number | null>(null);
+  const pendingReorderUnlockRef = useRef(false);
+  const pendingMoveCenterRef = useRef<string | null>(null);
+  const reorderNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectionChangeNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const movedHighlightTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const tocMarkerGlowTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const suppressProgrammaticScrollRef = useRef(false);
+  const programmaticScrollFrameRef = useRef<number | null>(null);
+  const navigatingAwayRef = useRef(false);
+  const blocksRef = useRef(blocks);
+  const ownedBlocksRef = useRef(ownedBlocks);
+  const scenesRef = useRef(scenes);
+  const sceneIdSetRef = useRef<Set<string>>(new Set(scenes.map((scene) => scene.id)));
+  const blockIndexByIdRef = useRef<Map<string, number>>(new Map(blocks.map((block, index) => [block.id, index])));
+  const clampWindowRange = useCallback((range: { start: number; end: number }, blockCount = blocksRef.current.length) => {
+    if (blockCount <= 0) return { start: 0, end: 0 };
+    const start = Math.max(0, Math.min(range.start, blockCount - 1));
+    const end = Math.max(start + 1, Math.min(range.end, blockCount));
+    return { start, end };
+  }, []);
+  useLayoutEffect(() => {
+    blocksRef.current = blocks;
+    blockIndexByIdRef.current = new Map(blocks.map((block, index) => [block.id, index]));
+  }, [blocks]);
+  useLayoutEffect(() => { ownedBlocksRef.current = ownedBlocks; }, [ownedBlocks]);
+  useLayoutEffect(() => {
+    scenesRef.current = scenes;
+    sceneIdSetRef.current = new Set(scenes.map((scene) => scene.id));
+  }, [scenes]);
+  useEffect(() => { blockTagMapRef.current = blockTagMap; }, [blockTagMap]);
+  const markBlockPageMapDirty = useCallback((id: string) => {
+    const idx = blockIndexByIdRef.current.get(id);
+    if (idx !== undefined) markPageMapDirty({ start: idx, end: idx + 1 });
+  }, [markPageMapDirty]);
+  const markBlockIdsPageMapDirty = useCallback((ids: Set<string>) => {
+    markPageMapDirty(Array.from(ids, (id) => {
+      const index = blockIndexByIdRef.current.get(id);
+      return index === undefined ? null : { start: index, end: index + 1 };
+    }).filter((range): range is MarkerOwnershipRange => range !== null));
+  }, [markPageMapDirty]);
+  useEffect(() => () => {
+    if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
+    if (windowRangeFrameRef.current !== null) cancelAnimationFrame(windowRangeFrameRef.current);
+    pendingWindowRangeRef.current = null;
+    if (programmaticScrollFrameRef.current !== null) cancelAnimationFrame(programmaticScrollFrameRef.current);
+    if (reorderNoticeTimer.current !== null) clearTimeout(reorderNoticeTimer.current);
+    if (selectionChangeNoticeTimer.current !== null) clearTimeout(selectionChangeNoticeTimer.current);
+    clearTimeoutMap(movedHighlightTimersRef.current);
+    clearTimeoutMap(tocMarkerGlowTimersRef.current);
+  }, []);
+
+  const clearDragCountBadge = useCallback(() => {
+    dragButtonReleasedRef.current = true;
+    dragButtonDownSeenRef.current = false;
+    const badge = dragCountBadgeRef.current;
+    if (badge) badge.hidden = true;
+  }, []);
+
+  useEffect(() => {
+    const clearIfDragButtonReleased = (event: globalThis.DragEvent) => {
+      if (event.buttons > 0) {
+        dragButtonDownSeenRef.current = true;
+        return;
+      }
+      if (!dragButtonDownSeenRef.current || event.buttons !== 0) return;
+      clearDragCountBadge();
+    };
+    document.addEventListener("drag", clearIfDragButtonReleased, true);
+    document.addEventListener("dragend", clearDragCountBadge, true);
+    document.addEventListener("dragover", clearIfDragButtonReleased, true);
+    document.addEventListener("drop", clearDragCountBadge, true);
+    document.addEventListener("pointerup", clearDragCountBadge, true);
+    document.addEventListener("mouseup", clearDragCountBadge, true);
+    window.addEventListener("drag", clearIfDragButtonReleased, true);
+    window.addEventListener("dragover", clearIfDragButtonReleased, true);
+    window.addEventListener("pointerup", clearDragCountBadge, true);
+    window.addEventListener("mouseup", clearDragCountBadge, true);
+    return () => {
+      document.removeEventListener("drag", clearIfDragButtonReleased, true);
+      document.removeEventListener("dragend", clearDragCountBadge, true);
+      document.removeEventListener("dragover", clearIfDragButtonReleased, true);
+      document.removeEventListener("drop", clearDragCountBadge, true);
+      document.removeEventListener("pointerup", clearDragCountBadge, true);
+      document.removeEventListener("mouseup", clearDragCountBadge, true);
+      window.removeEventListener("drag", clearIfDragButtonReleased, true);
+      window.removeEventListener("dragover", clearIfDragButtonReleased, true);
+      window.removeEventListener("pointerup", clearDragCountBadge, true);
+      window.removeEventListener("mouseup", clearDragCountBadge, true);
+    };
+  }, [clearDragCountBadge]);
+
+  const setScriptDragging = useCallback((dragging: boolean) => {
+    setIsScriptDragging((current) => current === dragging ? current : dragging);
+  }, []);
+
+  const resetScriptInteractions = useCallback(() => {
+    selectionAnchorBlockIdRef.current = null;
+    selectionDetachedRef.current = false;
+    markerEndedScopeIdsRef.current = new Set();
+    pendingFocus.current = null;
+    pendingCharOpen.current = null;
+    draggingBlockId.current = null;
+    draggingBlockIds.current = [];
+    dragTargetRef.current = null;
+    dragInvalidReasonRef.current = null;
+    dropHandledRef.current = false;
+    setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
+    setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
+    setDeleteConfirmationRequest(null);
+    setMarkerDeleteConfirmBlockId(null);
+    setDismissActionToken((token) => token + 1);
+    setDragTarget(null);
+    setIsScriptDragging(false);
+    clearDragCountBadge();
+    window.getSelection()?.removeAllRanges();
+  }, [clearDragCountBadge]);
+
+  const toggleLockedMode = useCallback(() => {
+    setPendingLockedMode(!manualLockedMode);
+    closeToolbarMenu();
+  }, [closeToolbarMenu, manualLockedMode]);
+
+  const confirmLockedModeChange = useCallback(() => {
+    if (pendingLockedMode === null) return;
+    const container = blocksContainerRef.current;
+    if (container) {
+      const { viewTop, viewBottom } = getScrollMetrics();
+      const visibleBlock = Array.from(container.querySelectorAll<HTMLElement>("[data-vitem]"))
+        .find((el) => {
+          const rect = el.getBoundingClientRect();
+          return rect.bottom > viewTop && rect.top < viewBottom;
+        });
+      const id = visibleBlock?.dataset.vitem;
+      pendingModeScrollAnchorRef.current = id
+        ? { id, top: visibleBlock.getBoundingClientRect().top }
+        : null;
+    }
+    resetScriptInteractions();
+    closeToolbarMenu();
+    setManualLockedMode(pendingLockedMode);
+    setDisplay(prev => {
+      const next = { ...prev, rehearsalMode: pendingLockedMode };
+      writeDisplayCookie(next);
+      return next;
+    });
+    setPendingLockedMode(null);
+  }, [closeToolbarMenu, pendingLockedMode, resetScriptInteractions]);
+
+  const unlockReorder = useCallback(() => {
+    if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
+    reorderUnlockFrame.current = null;
+    pendingReorderUnlockRef.current = false;
+    isReorderLockedRef.current = false;
+    setIsReorderLocked(false);
+  }, []);
+
+  const lockReorder = useCallback(() => {
+    if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
+    reorderUnlockFrame.current = null;
+    isReorderLockedRef.current = true;
+    setIsReorderLocked(true);
+  }, []);
+
+  const unlockReorderAfterCommit = useCallback(() => {
+    pendingReorderUnlockRef.current = true;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!pendingReorderUnlockRef.current) return;
+    reorderUnlockFrame.current = requestAnimationFrame(() => {
+      reorderUnlockFrame.current = null;
+      unlockReorder();
+    });
+  }, [blocks, unlockReorder]);
+
+  const showReorderNotice = useCallback((message: string) => {
+    if (reorderNoticeTimer.current !== null) clearTimeout(reorderNoticeTimer.current);
+    setReorderNotice(message);
+    reorderNoticeTimer.current = setTimeout(() => {
+      reorderNoticeTimer.current = null;
+      setReorderNotice("");
+    }, 1800);
+  }, []);
+
+  const showSelectionChangeNotice = useCallback((message: string) => {
+    if (selectionChangeNoticeTimer.current !== null) clearTimeout(selectionChangeNoticeTimer.current);
+    setSelectionChangeNotice(message);
+    selectionChangeNoticeTimer.current = setTimeout(() => {
+      selectionChangeNoticeTimer.current = null;
+      setSelectionChangeNotice("");
+    }, 1800);
+  }, []);
+
+  const commitBlockSelection = useCallback((next: SelectionState) => {
+    markerEndedScopeIdsRef.current = next.markerEndIds;
+    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
+    setSelectedBlockIds(next.selectedIds);
+    if (next.selectedIds.size === 0) {
+      selectionAnchorBlockIdRef.current = null;
+      selectionDetachedRef.current = false;
+    }
+  }, []);
+
+  const clearBlockSelection = useCallback(() => {
+    markerEndedScopeIdsRef.current = new Set();
+    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
+    setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
+    selectionAnchorBlockIdRef.current = null;
+    selectionDetachedRef.current = false;
+  }, []);
+
+  const canPerformSelectedBlockAction = useCallback((ids: string[]) => {
+    if (ids.length <= 1 || markerEndedScopeIdsRef.current.size === 0) {
+      setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
+      return true;
+    }
+    setInvalidSelectionEndIds(new Set(markerEndedScopeIdsRef.current));
+    showSelectionChangeNotice("每个选中范围的最后一行必须是剧本行。");
+    return false;
+  }, [showSelectionChangeNotice]);
+
+  const requestLargeSelectionOperation = useCallback((
+    operation: LargeSelectionOperation,
+    count: number,
+    onConfirm: () => void,
+    onCancel?: () => void
+  ) => {
+    if (count <= LARGE_SELECTION_BLOCK_THRESHOLD) {
+      onConfirm();
+      return;
+    }
+    setPendingLargeSelectionConfirmation({ operation, count, onConfirm, onCancel });
+  }, []);
+
+  const glowChangedBlocks = useCallback((ids: string[]) => {
+    const nextIds = ids.filter(Boolean);
+    if (nextIds.length === 0) return;
+    const idsToStart = nextIds.filter((id) => !movedHighlightTimersRef.current.has(id));
+    if (idsToStart.length === 0) return;
+    setRecentlyMovedBlockIds((current) => {
+      const next = new Set(current);
+      idsToStart.forEach((id) => next.add(id));
+      return next;
+    });
+    idsToStart.forEach((id) => {
+      const timer = setTimeout(() => {
+        movedHighlightTimersRef.current.delete(id);
+        setRecentlyMovedBlockIds((current) => {
+          if (!current.has(id)) return current;
+          const next = new Set(current);
+          next.delete(id);
+          return next;
+        });
+      }, 1000);
+      movedHighlightTimersRef.current.set(id, timer);
+    });
+  }, []);
+
+  const glowTocMarker = useCallback((id: string) => {
+    if (tocMarkerGlowTimersRef.current.has(id)) return;
+    setTocHighlightedMarkerIds((current) => {
+      const next = new Set(current);
+      next.add(id);
+      return next;
+    });
+    const timer = setTimeout(() => {
+      tocMarkerGlowTimersRef.current.delete(id);
+      setTocHighlightedMarkerIds((current) => {
+        if (!current.has(id)) return current;
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }, 1500);
+    tocMarkerGlowTimersRef.current.set(id, timer);
+  }, []);
+
+  const clearEditorFocusForDrag = useCallback(() => {
+    focusedIdRef.current = null;
+    setFocusedId(null);
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.closest("[data-bwrap]")) active.blur();
+    window.getSelection()?.removeAllRanges();
+  }, []);
+
+  // ── Virtual scroll ────────────────────────────────────────────────────────────
+  const VSCROLL_BUFFER = 120;
+  const DEFAULT_BLOCK_H = 80;
+  const INITIAL_WINDOW_SIZE = 240;
+  const blocksContainerRef = useRef<HTMLDivElement>(null);
+  const topSpacerRef = useRef<HTMLDivElement>(null);
+  const botSpacerRef = useRef<HTMLDivElement>(null);
+  const measuredHeightsRef = useRef<Map<string, number>>(new Map());
+  const measuredHeightTotalRef = useRef(0);
+  const cumulativeHRef = useRef<number[]>([0]); // indexed 0..blocks.length
+  const updateDragCountBadge = useCallback((clientX: number, clientY: number, count: number, buttons?: number) => {
+    if (buttons !== undefined) {
+      if (buttons > 0) dragButtonDownSeenRef.current = true;
+      if (dragButtonDownSeenRef.current && buttons === 0) {
+        clearDragCountBadge();
+        return;
+      }
+    }
+    if (dragButtonReleasedRef.current || count <= 1) {
+      clearDragCountBadge();
+      return;
+    }
+    const rect = blocksContainerRef.current?.getBoundingClientRect();
+    const midpoint = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const side = clientX > midpoint ? "left" : "right";
+    const badge = dragCountBadgeRef.current;
+    if (!badge) return;
+    badge.textContent = String(count);
+    badge.style.left = `${side === "right" ? clientX + 16 : clientX - 16}px`;
+    badge.style.top = `${clientY}px`;
+    badge.style.transform = side === "right" ? "" : "translateX(-100%)";
+    badge.hidden = false;
+  }, [clearDragCountBadge]);
+  const [windowRange, setWindowRange] = useState(() => ({ start: 0, end: Math.min(INITIAL_WINDOW_SIZE, blocks.length) }));
+  const windowRangeRef = useRef(windowRange);
+  useLayoutEffect(() => { windowRangeRef.current = windowRange; }, [windowRange]);
+  const pendingWindowRangeRef = useRef<{ start: number; end: number } | null>(null);
+  const [spacerH, setSpacerH] = useState({ top: 0, bot: 0 });
+  const pendingVirtualScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
+  const pendingVirtualWindowRefreshRef = useRef(false);
+  // Pending navigation: set before windowRange update, consumed by useLayoutEffect after DOM commit
+  const pendingNavigateRef = useRef<
+    { kind: 'block'; id: string; align: ScrollLogicalPosition; viewportTopRatio?: number } | { kind: 'scene'; id: string } | null
+  >(null);
+  // After the initial estimated scroll, store the target for a precise correction after measurement
+  const postNavCorrectionRef = useRef<
+    { kind: 'block'; id: string; align: ScrollLogicalPosition; viewportTopRatio?: number } | { kind: 'scene'; id: string } | null
+  >(null);
+  // Incremented by the measurement effect to trigger the correction layout effect
+  const [correctionTick, setCorrectionTick] = useState(0);
+
+  const captureVirtualScrollAnchor = useCallback((): { id: string; top: number } | null => {
+    const container = blocksContainerRef.current;
+    if (!container) return null;
+    const { viewTop, viewBottom } = getScrollMetrics();
+    const anchorLine = Math.max(viewTop, Math.min(viewBottom - 1, viewTop + SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX));
+    let fallback: { id: string; top: number } | null = null;
+    for (const el of container.querySelectorAll<HTMLElement>("[data-vitem]")) {
+      const id = el.dataset.vitem;
+      if (!id) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom < viewTop) continue;
+      if (rect.top > viewBottom) break;
+      fallback ??= { id, top: rect.top };
+      if (rect.bottom >= anchorLine) return { id, top: rect.top };
+    }
+    return fallback;
+  }, []);
+
+  const restoreVirtualScrollAnchor = useCallback((anchor: { id: string; top: number } | null) => {
+    if (!anchor) return;
+    const container = blocksContainerRef.current;
+    if (!container) return;
+    let target: HTMLElement | null = null;
+    for (const el of container.querySelectorAll<HTMLElement>("[data-vitem]")) {
+      if (el.dataset.vitem === anchor.id) {
+        target = el;
+        break;
+      }
+    }
+    if (!target) return;
+    const delta = target.getBoundingClientRect().top - anchor.top;
+    if (Math.abs(delta) < 0.5) return;
+    markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
+    scrollContainerBy({ top: delta, behavior: "instant" });
+  }, []);
+
+  useLayoutEffect(() => {
+    const anchor = pendingModeScrollAnchorRef.current;
+    if (!anchor) return;
+    pendingModeScrollAnchorRef.current = null;
+    restoreVirtualScrollAnchor(anchor);
+  }, [isLockedMode, scriptConfig.textLayoutMode, restoreVirtualScrollAnchor]);
+
+  const requestVirtualWindowRefresh = useCallback(() => {
+    pendingVirtualScrollAnchorRef.current = captureVirtualScrollAnchor();
+    pendingVirtualWindowRefreshRef.current = true;
+  }, [captureVirtualScrollAnchor]);
+
+  const applyWindowRange = useCallback((next: { start: number; end: number }, sync = false, preserveAnchor = false, flushCommit = false) => {
+    const targetRange = clampWindowRange(next);
+    const pending = pendingWindowRangeRef.current;
+    const current = pending ?? windowRangeRef.current;
+    if (current.start === targetRange.start && current.end === targetRange.end) return;
+    if (preserveAnchor) pendingVirtualScrollAnchorRef.current = captureVirtualScrollAnchor();
+    pendingWindowRangeRef.current = targetRange;
+    if (windowRangeFrameRef.current !== null) cancelAnimationFrame(windowRangeFrameRef.current);
+    const commit = () => {
+      windowRangeFrameRef.current = null;
+      const target = pendingWindowRangeRef.current ? clampWindowRange(pendingWindowRangeRef.current) : null;
+      pendingWindowRangeRef.current = null;
+      if (!target) return;
+      setWindowRange((currentRange) => {
+        if (currentRange.start === target.start && currentRange.end === target.end) {
+          windowRangeRef.current = currentRange;
+          return currentRange;
+        }
+        windowRangeRef.current = target;
+        return target;
+      });
+    };
+    if (sync) {
+      if (flushCommit) {
+        queueMicrotask(() => {
+          if (navigatingAwayRef.current) return;
+          if (pendingWindowRangeRef.current !== targetRange) return;
+          flushSync(commit);
+        });
+      }
+      else commit();
+    }
+    else windowRangeFrameRef.current = requestAnimationFrame(commit);
+  }, [captureVirtualScrollAnchor, clampWindowRange]);
+
+  // Rebuild cumulative heights from cache
+  const rebuildCumulative = useCallback(() => {
+    const bl = ownedBlocksRef.current;
+    const measured = measuredHeightsRef.current;
+    // Use measured average for unmeasured blocks — much more accurate than a fixed default
+    const avgH = measured.size > 0 ? measuredHeightTotalRef.current / measured.size : DEFAULT_BLOCK_H;
+    const arr = new Array(bl.length + 1);
+    arr[0] = 0;
+    const openingChapterMarkerId = scriptConfigRef.current.openingChapterMarkerId;
+    for (let i = 0; i < bl.length; i++) {
+      arr[i + 1] = arr[i] + (
+        !openingChapterVisible && bl[i].id === openingChapterMarkerId
+          ? 0
+          : measured.get(bl[i].id) ?? avgH
+      );
+    }
+    cumulativeHRef.current = arr;
+  }, [openingChapterVisible]);
+  const syncSpacerHeights = useCallback((range: { start: number; end: number }, anchor: { id: string; top: number } | null = null) => {
+    const cum = cumulativeHRef.current;
+    const n = blocksRef.current.length;
+    const safeRange = clampWindowRange(range, n);
+    const top = cum[safeRange.start] ?? safeRange.start * DEFAULT_BLOCK_H;
+    const total = cum[n] ?? n * DEFAULT_BLOCK_H;
+    const bot = Math.max(0, total - (cum[safeRange.end] ?? safeRange.end * DEFAULT_BLOCK_H));
+    if (topSpacerRef.current) topSpacerRef.current.style.height = `${top}px`;
+    if (botSpacerRef.current) botSpacerRef.current.style.height = `${bot}px`;
+    if (anchor) restoreVirtualScrollAnchor(anchor);
+    const next = { top, bot };
+    setSpacerH((prev) => prev.top === top && prev.bot === bot ? prev : next);
+  }, [clampWindowRange, restoreVirtualScrollAnchor]);
+  useEffect(() => {
+    rebuildCumulative();
+    syncSpacerHeights(windowRangeRef.current);
+  }, [openingChapterVisible, rebuildCumulative, syncSpacerHeights]);
+
+  // Binary search: first block index whose top >= offset
+  const blockAtOffset = useCallback((offset: number) => {
+    const cum = cumulativeHRef.current;
+    const n = cum.length - 1;
+    if (n <= 0) return 0;
+    let lo = 0, hi = n - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (cum[mid + 1] <= offset) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }, []);
+
+  const getBlockScrollElement = useCallback((blockId: string) => (
+    document.getElementById(`block-content-${blockId}`) ?? document.getElementById(`block-${blockId}`)
+  ), []);
+
+  const resolveActiveSceneIdForBlockIndex = useCallback((index: number): string | null => {
+    const bl = blocksRef.current;
+    const owned = ownedBlocksRef.current;
+    const sceneIds = sceneIdSetRef.current;
+    if (bl.length === 0 || sceneIds.size === 0) return null;
+
+    const validSceneId = (id: string | null | undefined): string | null => (
+      id && sceneIds.has(id) ? id : null
+    );
+    const sceneIdAt = (idx: number): string | null => {
+      const block = bl[idx];
+      if (!block) return null;
+      if ((block.type === "chapter_marker" || block.type === "scene_marker") && block.sceneId) {
+        return validSceneId(block.sceneId);
+      }
+      return validSceneId(owned[idx]?.sceneId) ?? validSceneId(block.sceneId);
+    };
+
+    const safeIndex = Math.max(0, Math.min(index, bl.length - 1));
+    const direct = sceneIdAt(safeIndex);
+    if (direct) return direct;
+
+    const nearbyStart = Math.max(0, safeIndex - VSCROLL_BUFFER);
+    const nearbyEnd = Math.min(bl.length - 1, safeIndex + VSCROLL_BUFFER);
+    for (let idx = safeIndex - 1; idx >= nearbyStart; idx--) {
+      const sceneId = sceneIdAt(idx);
+      if (sceneId) return sceneId;
+    }
+    for (let idx = safeIndex + 1; idx <= nearbyEnd; idx++) {
+      const sceneId = sceneIdAt(idx);
+      if (sceneId) return sceneId;
+    }
+    return null;
+  }, []);
+
+  const updateActiveSceneFromScroll = useCallback(() => {
+    const container = blocksContainerRef.current;
+    const bl = blocksRef.current;
+    if (!container || bl.length === 0) {
+      if (activeSceneIdRef.current !== null) {
+        activeSceneIdRef.current = null;
+        setActiveSceneId(null);
+        return true;
+      }
+      return false;
+    }
+
+    const { viewTop } = getScrollMetrics();
+    const anchorY = viewTop + SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX;
+    let idx = -1;
+    let previousIdx = -1;
+    for (const el of container.querySelectorAll<HTMLElement>("[data-bwrap]")) {
+      const id = el.dataset.bwrap;
+      if (!id) continue;
+      const rect = el.getBoundingClientRect();
+      const blockIdx = blockIndexByIdRef.current.get(id) ?? -1;
+      if (blockIdx < 0) continue;
+
+      if (rect.bottom > anchorY) {
+        idx = blockIdx;
+        break;
+      }
+
+      previousIdx = blockIdx;
+    }
+
+    if (idx < 0 && previousIdx >= 0) idx = previousIdx;
+
+    if (idx < 0) {
+      idx = blockAtOffset(Math.max(0, anchorY - container.getBoundingClientRect().top));
+    }
+
+    // 视野顶部块顺手发布给 AI focus 通道（滚动已有 rAF 节流；ref 比对免于每帧 setState）
+    const viewportId = idx >= 0 ? bl[idx]?.id ?? null : null;
+    if (viewportBlockIdRef.current !== viewportId) {
+      viewportBlockIdRef.current = viewportId;
+      setViewportBlockId(viewportId);
+    }
+
+    const nextSceneId = resolveActiveSceneIdForBlockIndex(idx) ?? activeSceneIdRef.current;
+    if (nextSceneId !== activeSceneIdRef.current) {
+      activeSceneIdRef.current = nextSceneId;
+      setActiveSceneId(nextSceneId);
+      return true;
+    }
+    return false;
+  }, [blockAtOffset, resolveActiveSceneIdForBlockIndex]);
+
+  const recomputeWindow = useCallback(() => {
+    if (navigatingAwayRef.current) return false;
+    if (draggingBlockId.current || isReorderLockedRef.current) return false;
+    const container = blocksContainerRef.current;
+    const bl = blocksRef.current;
+    if (!container || bl.length === 0) return false;
+
+    const { viewTop, viewBottom, clientHeight } = getScrollMetrics();
+    let firstVisibleIdx = -1;
+    let lastVisibleIdx = -1;
+    for (const el of container.querySelectorAll<HTMLElement>("[data-vitem]")) {
+      const id = el.dataset.vitem;
+      if (!id) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom < viewTop) continue;
+      if (rect.top > viewBottom) break;
+      const idx = blockIndexByIdRef.current.get(id) ?? -1;
+      if (idx < 0) continue;
+      if (firstVisibleIdx < 0) firstVisibleIdx = idx;
+      lastVisibleIdx = idx;
+    }
+
+    if (firstVisibleIdx < 0 || lastVisibleIdx < 0) {
+      const viewStart = Math.max(0, viewTop - container.getBoundingClientRect().top);
+      const viewEnd = viewStart + clientHeight;
+      firstVisibleIdx = blockAtOffset(viewStart);
+      lastVisibleIdx = blockAtOffset(viewEnd);
+    }
+
+    const currentRange = windowRangeRef.current;
+    const edgeThreshold = Math.max(40, Math.floor(VSCROLL_BUFFER / 3));
+    const hasEnoughHeadroom = firstVisibleIdx >= currentRange.start + edgeThreshold;
+    const hasEnoughFootroom = lastVisibleIdx <= currentRange.end - edgeThreshold;
+    if (hasEnoughHeadroom && hasEnoughFootroom) {
+      return updateActiveSceneFromScroll();
+    }
+
+    let newStart = Math.max(0, firstVisibleIdx - VSCROLL_BUFFER);
+    let newEnd = Math.min(bl.length, lastVisibleIdx + VSCROLL_BUFFER + 1);
+
+    const fi = focusedIdRef.current ? blockIndexByIdRef.current.get(focusedIdRef.current) ?? -1 : -1;
+    if (fi >= 0) { newStart = Math.min(newStart, fi); newEnd = Math.max(newEnd, fi + 1); }
+    const pfi = pendingFocus.current ? blockIndexByIdRef.current.get(pendingFocus.current.id) ?? -1 : -1;
+    if (pfi >= 0) { newStart = Math.min(newStart, pfi); newEnd = Math.max(newEnd, pfi + 1); }
+
+    applyWindowRange({ start: newStart, end: newEnd }, true, true, true);
+    return updateActiveSceneFromScroll();
+  }, [applyWindowRange, blockAtOffset, updateActiveSceneFromScroll]);
+
+  type LoadState = "loading" | "ready" | "not-found" | "error";
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadError, setLoadError] = useState<string>("");
+
+  // Auto-open search when arriving from appshell search with a query
+  useEffect(() => {
+    const q = initialSearchQueryRef.current;
+    if (!q || loadState !== "ready") return;
+    initialSearchQueryRef.current = undefined;
+    setSearchOpen(true);
+    setSearchQuery(q);
+    setSearchIdx(0);
+  }, [loadState]);
+
+  // Keep scrollLockedRef in sync
+  useEffect(() => { scrollLockedRef.current = scrollLocked; }, [scrollLocked]);
+
+  // Block user scroll (wheel, touch, arrow keys) while scroll is locked
+  useEffect(() => {
+    if (!scrollLocked) return;
+    const prevent = (e: Event) => e.preventDefault();
+    const preventKeys = (e: Event) => {
+      if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', ' '].includes((e as globalThis.KeyboardEvent).key)) e.preventDefault();
+    };
+    window.addEventListener('wheel', prevent, { passive: false });
+    window.addEventListener('touchmove', prevent, { passive: false });
+    window.addEventListener('keydown', preventKeys);
+    return () => {
+      window.removeEventListener('wheel', prevent);
+      window.removeEventListener('touchmove', prevent);
+      window.removeEventListener('keydown', preventKeys);
+    };
+  }, [scrollLocked]);
+
+  // Always-fresh scroll-position saver — reads DOM directly to avoid stale estimates
+  const saveScrollPosRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    saveScrollPosRef.current = () => {
+      if (loadState !== "ready" || !productionId) return;
+      const container = blocksContainerRef.current;
+      if (!container) return;
+      let savedId: string | null = null;
+      const { viewTop: saveViewTop } = getScrollMetrics();
+      for (const el of container.querySelectorAll<HTMLElement>("[data-bwrap]")) {
+        if (el.getBoundingClientRect().top <= saveViewTop) savedId = el.dataset.bwrap ?? null;
+        else break;
+      }
+      if (savedId) {
+        const idx = blockIndexByIdRef.current.get(savedId) ?? 0;
+        document.cookie = `script_pos_${productionId}=${encodeURIComponent(`${savedId}:${idx}`)}; path=/; max-age=31536000; SameSite=Lax`;
+      }
+    };
+  });
+
+  // Scroll listener + debounced position save
+  useEffect(() => {
+    let rafId = 0;
+    let didCenterForScrollGesture = false;
+    let scrollGestureTimer: ReturnType<typeof setTimeout> | undefined;
+    let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    const cancelPendingCorrectionForUserScroll = () => {
+      if (suppressProgrammaticScrollRef.current) return;
+      postNavCorrectionRef.current = null;
+      pendingNavigateRef.current = null;
+      setScrollLocked(false);
+    };
+    const onScroll = () => {
+      if (navigatingAwayRef.current) return;
+      if (suppressProgrammaticScrollRef.current) return;
+      cancelAnimationFrame(rafId);
+      const shouldRecenterToc = !didCenterForScrollGesture;
+      didCenterForScrollGesture = true;
+      clearTimeout(scrollGestureTimer);
+      scrollGestureTimer = setTimeout(() => {
+        didCenterForScrollGesture = false;
+      }, 350);
+      rafId = requestAnimationFrame(() => {
+        const activeSceneChanged = recomputeWindow();
+        if (shouldRecenterToc || activeSceneChanged) window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
+      });
+      if (!scrollLockedRef.current) {
+        postNavCorrectionRef.current = null;
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => saveScrollPosRef.current(), 400);
+      }
+    };
+    const scrollEl = getScrollEl();
+    window.addEventListener('wheel', cancelPendingCorrectionForUserScroll, { passive: true });
+    window.addEventListener('touchmove', cancelPendingCorrectionForUserScroll, { passive: true });
+    window.addEventListener('keydown', cancelPendingCorrectionForUserScroll);
+    scrollEl.addEventListener('scroll', onScroll, { passive: true });
+    recomputeWindow();
+    updateActiveSceneFromScroll();
+    return () => {
+      window.removeEventListener('wheel', cancelPendingCorrectionForUserScroll);
+      window.removeEventListener('touchmove', cancelPendingCorrectionForUserScroll);
+      window.removeEventListener('keydown', cancelPendingCorrectionForUserScroll);
+      scrollEl.removeEventListener('scroll', onScroll);
+      cancelAnimationFrame(rafId);
+      clearTimeout(scrollGestureTimer);
+      clearTimeout(saveTimer);
+    };
+  }, [recomputeWindow, updateActiveSceneFromScroll]);
+
+  useEffect(() => {
+    updateActiveSceneFromScroll();
+  }, [blocks.length, updateActiveSceneFromScroll]);
+
+  useLayoutEffect(() => {
+    const bl = blocksRef.current;
+    const current = windowRangeRef.current;
+    const measured = measuredHeightsRef.current;
+    if (measured.size > 0) {
+      const liveIds = new Set(bl.map((block) => block.id));
+      let total = 0;
+      let changed = false;
+      measured.forEach((height, id) => {
+        if (liveIds.has(id)) total += height;
+        else {
+          measured.delete(id);
+          changed = true;
+        }
+      });
+      if (changed) measuredHeightTotalRef.current = total;
+    }
+    if (bl.length === 0) {
+      applyWindowRange({ start: 0, end: 0 }, true);
+      return;
+    }
+    let start = Math.min(current.start, Math.max(0, bl.length - 1));
+    let end = Math.min(Math.max(current.end, start + 1), bl.length);
+    const pendingFocusId = pendingFocus.current?.id ?? pendingCharOpen.current;
+    const pendingFocusIdx = pendingFocusId ? blockIndexByIdRef.current.get(pendingFocusId) ?? -1 : -1;
+    if (pendingFocusIdx >= 0) {
+      start = Math.min(start, pendingFocusIdx);
+      end = Math.max(end, pendingFocusIdx + 1);
+    }
+    applyWindowRange({ start, end }, true, true);
+  }, [blocks.length, applyWindowRange]);
+
+  const measureVirtualItemElements = useCallback((elements: Iterable<HTMLElement>) => {
+    let changed = false;
+    for (const el of elements) {
+      const id = el.dataset.vitem;
+      if (!id) continue;
+      const h = el.offsetHeight;
+      const prevH = measuredHeightsRef.current.get(id);
+      if (h > 0 && prevH !== h) {
+        measuredHeightsRef.current.set(id, h);
+        measuredHeightTotalRef.current += h - (prevH ?? 0);
+        changed = true;
+      }
+    }
+    if (changed) {
+      rebuildCumulative();
+      const anchor = pendingMoveCenterRef.current === null ? captureVirtualScrollAnchor() : null;
+      syncSpacerHeights(windowRangeRef.current, anchor);
+      // If there's a pending navigation correction, trigger the layout effect that will re-scroll
+      if (postNavCorrectionRef.current) {
+        setCorrectionTick(t => t + 1);
+      }
+    }
+  }, [captureVirtualScrollAnchor, rebuildCumulative, syncSpacerHeights]);
+
+  // Measure rendered block heights after each render pass
+  useLayoutEffect(() => {
+    if (navigatingAwayRef.current) return;
+    const container = blocksContainerRef.current;
+    if (!container) return;
+    measureVirtualItemElements(container.querySelectorAll<HTMLElement>('[data-vitem]'));
+  }, [blocks.length, scriptConfig.textLayoutMode, windowRange.start, windowRange.end, measureVirtualItemElements]);
+
+  useLayoutEffect(() => {
+    if (navigatingAwayRef.current) return;
+    if (!pendingVirtualWindowRefreshRef.current) return;
+    pendingVirtualWindowRefreshRef.current = false;
+    rebuildCumulative();
+    const anchor = pendingVirtualScrollAnchorRef.current;
+    if (anchor) {
+      const anchorIdx = blockIndexByIdRef.current.get(anchor.id) ?? -1;
+      const currentRange = windowRangeRef.current;
+      if (anchorIdx >= 0 && (anchorIdx < currentRange.start || anchorIdx >= currentRange.end)) {
+        const windowSize = Math.min(INITIAL_WINDOW_SIZE, blocksRef.current.length);
+        let start = Math.max(0, anchorIdx - Math.floor(windowSize / 2));
+        const end = Math.min(blocksRef.current.length, start + windowSize);
+        start = Math.max(0, end - windowSize);
+        applyWindowRange({ start, end }, true, false, true);
+        return;
+      }
+    }
+    const container = blocksContainerRef.current;
+    if (container) {
+      measureVirtualItemElements(container.querySelectorAll<HTMLElement>("[data-vitem]"));
+    }
+    pendingVirtualScrollAnchorRef.current = null;
+    syncSpacerHeights(windowRangeRef.current, anchor);
+    updateActiveSceneFromScroll();
+  }, [blocks, applyWindowRange, measureVirtualItemElements, rebuildCumulative, syncSpacerHeights, updateActiveSceneFromScroll]);
+
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    const container = blocksContainerRef.current;
+    if (!container) return;
+    let frame = 0;
+    const pendingEntries = new Set<HTMLElement>();
+    const observer = new ResizeObserver((entries) => {
+      entries.forEach((entry) => {
+        const target = entry.target;
+        if (target instanceof HTMLElement && target.hasAttribute("data-vitem")) {
+          pendingEntries.add(target);
+        }
+      });
+      if (frame !== 0) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const elements = Array.from(pendingEntries);
+        pendingEntries.clear();
+        measureVirtualItemElements(elements);
+      });
+    });
+    container.querySelectorAll<HTMLElement>("[data-vitem]").forEach((el) => observer.observe(el));
+    return () => {
+      if (frame !== 0) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [blocks.length, windowRange.start, windowRange.end, measureVirtualItemElements]);
+
+  useLayoutEffect(() => {
+    if (navigatingAwayRef.current) return;
+    const centerTarget = pendingMoveCenterRef.current;
+    if (centerTarget === null) return;
+    pendingVirtualScrollAnchorRef.current = null;
+    postNavCorrectionRef.current = null;
+    if (blocks.length === 0) {
+      pendingMoveCenterRef.current = null;
+      return;
+    }
+    const currentTargetIndex = blockIndexByIdRef.current.get(centerTarget);
+    if (currentTargetIndex === undefined) {
+      pendingMoveCenterRef.current = null;
+      return;
+    }
+    const windowSize = Math.min(INITIAL_WINDOW_SIZE, blocks.length);
+    const centerIdx = Math.max(0, Math.min(blocks.length - 1, currentTargetIndex));
+    let start = Math.max(0, centerIdx - Math.floor(windowSize / 2));
+    const end = Math.min(blocks.length, start + windowSize);
+    start = Math.max(0, end - windowSize);
+    pendingMoveCenterRef.current = null;
+    const nextRange = { start, end };
+    const currentRange = windowRangeRef.current;
+    const rangeChanged = currentRange.start !== nextRange.start || currentRange.end !== nextRange.end;
+    pendingNavigateRef.current = { kind: "block", id: centerTarget, align: "center" };
+    applyWindowRange(nextRange, true, false, true);
+    if (!rangeChanged) {
+      const el = document.getElementById(`block-${centerTarget}`);
+      const scrollEl = getBlockScrollElement(centerTarget);
+      if (scrollEl || el) {
+        pendingNavigateRef.current = null;
+        rebuildCumulative();
+        syncSpacerHeights(windowRangeRef.current);
+        markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
+        (scrollEl ?? el)?.scrollIntoView({ behavior: "instant", block: "center" });
+      }
+    }
+  }, [blocks, applyWindowRange, getBlockScrollElement, rebuildCumulative, syncSpacerHeights]);
+
+  useLayoutEffect(() => {
+    if (navigatingAwayRef.current) return;
+    const anchor = pendingVirtualScrollAnchorRef.current;
+    if (!anchor) return;
+    pendingVirtualScrollAnchorRef.current = null;
+    restoreVirtualScrollAnchor(anchor);
+  }, [windowRange, spacerH.top, spacerH.bot, restoreVirtualScrollAnchor]);
+
+  // Precise correction pass: fires after newly-rendered blocks are measured (before next paint)
+  useLayoutEffect(() => {
+    if (navigatingAwayRef.current) return;
+    if (correctionTick === 0) return;
+    const nav = postNavCorrectionRef.current;
+    if (!nav) return;
+    postNavCorrectionRef.current = null;
+    const el = nav.kind === 'block'
+      ? getBlockScrollElement(nav.id)
+      : document.getElementById(`scene-block-${nav.id}`);
+    if (!el) return;
+    // Measurements are now fresh — rebuild and re-correct spacers before scrollIntoView
+    rebuildCumulative();
+    syncSpacerHeights(windowRange);
+    markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
+    scrollElementIntoView(el, nav.kind === 'block' ? nav.align : 'center', nav.kind === 'block' ? nav.viewportTopRatio : undefined);
+    setScrollLocked(false);
+    requestAnimationFrame(() => {
+      updateActiveSceneFromScroll();
+      window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
+    });
+  // windowRange is intentionally in deps — ensures this captures the post-recomputeWindow value;
+  // postNavCorrectionRef going null after the first correction prevents repeated firing.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [correctionTick, windowRange, getBlockScrollElement, syncSpacerHeights, updateActiveSceneFromScroll]);
+
+  // After each window-changing render, execute any pending navigation (fires before paint)
+  useLayoutEffect(() => {
+    if (navigatingAwayRef.current) return;
+    const nav = pendingNavigateRef.current;
+    if (!nav) return;
+    const el = nav.kind === 'block'
+      ? getBlockScrollElement(nav.id)
+      : document.getElementById(`scene-block-${nav.id}`);
+    if (!el) return;
+    pendingNavigateRef.current = null;
+
+    rebuildCumulative();
+    syncSpacerHeights(windowRange);
+
+    markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
+    scrollElementIntoView(el, nav.kind === 'block' ? nav.align : 'center', nav.kind === 'block' ? nav.viewportTopRatio : undefined);
+
+    // Newly-rendered blocks haven't been measured yet so the cumulative heights are estimated.
+    // Store the target so the measurement effect can trigger a precise correction pass.
+    postNavCorrectionRef.current = nav;
+    requestAnimationFrame(() => {
+      updateActiveSceneFromScroll();
+      window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
+    });
+  }, [windowRange, rebuildCumulative, getBlockScrollElement, syncSpacerHeights, updateActiveSceneFromScroll]);
+
+  // Update spacer heights from cumulative cache after each render (safe: layoutEffect, not render)
+  useLayoutEffect(() => {
+    if (navigatingAwayRef.current) return;
+    syncSpacerHeights(windowRange);
+  }, [windowRange, blocks.length, syncSpacerHeights]);
+
+  // Teleport to a block: load target window, then instant-jump in the layout effect.
+  const scrollToBlockIdx = useCallback((
+    idx: number,
+    align: ScrollLogicalPosition = 'center',
+    viewportTopRatio?: number,
+  ) => {
+    if (idx < 0 || idx >= blocksRef.current.length) return;
+    const block = blocksRef.current[idx];
+    pendingNavigateRef.current = { kind: 'block', id: block.id, align, viewportTopRatio };
+    const windowSize = Math.min(INITIAL_WINDOW_SIZE, blocksRef.current.length);
+    let start = Math.max(0, idx - Math.floor(windowSize / 2));
+    const end = Math.min(blocksRef.current.length, start + windowSize);
+    start = Math.max(0, end - windowSize);
+    const nextRange = { start, end };
+    const currentRange = windowRangeRef.current;
+    const rangeChanged = currentRange.start !== nextRange.start || currentRange.end !== nextRange.end;
+    applyWindowRange(nextRange, true, false, true);
+    if (!rangeChanged) {
+      const el = getBlockScrollElement(block.id);
+      if (!el) return;
+      pendingNavigateRef.current = null;
+      markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
+      scrollElementIntoView(el, align, viewportTopRatio);
+      requestAnimationFrame(() => {
+        updateActiveSceneFromScroll();
+        window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
+      });
+    }
+  }, [applyWindowRange, getBlockScrollElement, updateActiveSceneFromScroll]);
+
+  const openMobileBlockMenu = useCallback((blockId: string, blockIndex: number) => {
+    setMobileBatchAction(null);
+    setMobileInsertMenuOpen(false);
+    scrollToBlockIdx(blockIndex, "start", 0.2);
+    setMobileBlockMenuBlockId(blockId);
+  }, [scrollToBlockIdx]);
+
+  const scrollToScene = useCallback((sceneId: string) => {
+    const markerIdx = findSceneMarkerBlockIndex(sceneId, blocksRef.current);
+    if (markerIdx >= 0) glowTocMarker(blocksRef.current[markerIdx].id);
+    activeSceneIdRef.current = sceneId;
+    setActiveSceneId(sceneId);
+    const idx = markerIdx >= 0
+      ? markerIdx
+      : findTocSceneBlockIndex(sceneId, scenesRef.current, ownedBlocksRef.current);
+    if (idx >= 0) {
+      scrollToBlockIdx(idx, "start");
+      return;
+    }
+    const existing = document.getElementById(`scene-block-${sceneId}`);
+    if (existing) {
+      markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
+      existing.scrollIntoView({ behavior: 'instant', block: 'start' });
+      requestAnimationFrame(() => window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT)));
+      return;
+    }
+    showReorderNotice("跳转失败：该章节或段落没有对应剧本块。");
+  }, [glowTocMarker, scrollToBlockIdx, showReorderNotice]);
+  useEffect(() => { focusedIdRef.current = focusedId; }, [focusedId]);
+
+  const readBlockInViewport = useCallback((blockId: string | null | undefined): boolean => {
+    if (!blockId || typeof window === "undefined") return false;
+    const el = document.getElementById(`block-${blockId}`);
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    const { viewTop: rvt, viewBottom: rvb } = getScrollMetrics();
+    return rect.bottom > rvt && rect.top < rvb;
+  }, []);
+
+  useEffect(() => {
+    const update = () => {
+      const next = {
+        selected: readBlockInViewport(selectedDetailBlockId),
+        focused: readBlockInViewport(focusedId),
+      };
+      setDetailBlockVisibility((current) => (
+        current.selected === next.selected && current.focused === next.focused ? current : next
+      ));
+    };
+    update();
+    if (typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(update);
+    const observedIds = new Set([selectedDetailBlockId, focusedId].filter(Boolean));
+    for (const blockId of observedIds) {
+      const el = document.getElementById(`block-${blockId}`);
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [focusedId, readBlockInViewport, selectedDetailBlockId, windowRange.start, windowRange.end]);
+
+  // ── Server sync ─────────────────────────────────────────────────────────────
+
+  const syncedStateRef = useRef<ScriptState | null>(null);
+  // Mirrors the tag state that was last successfully pushed to the server.
+  // Used to diff tag changes and embed them in block ops.
+  const syncedBlockTagMapRef = useRef<Map<string, BlockTagValue[]>>(new Map());
+  // Tags registered by inheritTags() that must be included in the NEXT insert op
+  // for the corresponding blockId.  Written synchronously from the event handler;
+  // consumed by pushPatchRef when the insert op is found.
+  const pendingTagInsertsRef = useRef<Map<string, TagEntry[]>>(new Map());
+  const clientSeqRef = useRef(0);
+  const serverSeqRef = useRef(0);
+  const isSyncingRef = useRef(false);
+  const syncIdleWaitersRef = useRef<Array<() => void>>([]);
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingMovedBlockIdsRef = useRef<Set<string>>(new Set());
+
+  // Stable ref to the push function so the debounce closure never goes stale.
+  const pushPatchRef = useRef<(curr: ScriptState) => void>(() => {});
+
+  useEffect(() => {
+    pushPatchRef.current = async (curr: ScriptState) => {
+      if (!canEdit || loadState !== "ready" || syncedStateRef.current === null) return;
+      if (isSyncingRef.current) return;
+      isSyncingRef.current = true;
+      try {
+        const seq = ++clientSeqRef.current;
+        const patch = diffState(syncedStateRef.current, curr, seq);
+        const movedIdsForPatch = [...pendingMovedBlockIdsRef.current];
+        if (movedIdsForPatch.length > 0) {
+          const reorder = patch.blockOps.find((op) => op.op === "reorder");
+          if (reorder?.op === "reorder") reorder.movedIds = movedIdsForPatch;
+        }
+
+        // ── Step 1: pending tag inserts (from inheritTags) ───────────────────────
+        // These are written synchronously into pendingTagInsertsRef when a new block
+        // is created via Enter.  Consume them first so the insert op always carries
+        // the inherited tags, regardless of useEffect / blockTagMapRef timing.
+        if (pendingTagInsertsRef.current.size > 0) {
+          for (const [blockId, tags] of pendingTagInsertsRef.current) {
+            const insertOp = patch.blockOps.find(
+              o => o.op === 'insert' && (o as { block: { id: string } }).block.id === blockId
+            );
+            if (insertOp) {
+              (insertOp as { tags?: TagEntry[] }).tags = tags;
+              pendingTagInsertsRef.current.delete(blockId); // consumed
+            }
+            // If no insert op yet (shouldn't happen), leave for the diff pass below.
+          }
+        }
+
+        // ── Step 2: tag diff — embed all other tag changes into block ops ─────────
+        // blockTagMapRef.current is kept in sync with blockTagMap state via useEffect.
+        const currTagMap = blockTagMapRef.current;
+        const syncedTagMap = syncedBlockTagMapRef.current;
+        const deletedBlockIds = new Set(
+          patch.blockOps.filter(o => o.op === 'delete').map(o => (o as { id: string }).id)
+        );
+
+        const changedTagBlockIds: string[] = [];
+        for (const [blockId, tags] of currTagMap) {
+          if (deletedBlockIds.has(blockId)) continue;
+          const syncedTags = syncedTagMap.get(blockId) ?? [];
+          if (JSON.stringify(tags) !== JSON.stringify(syncedTags)) changedTagBlockIds.push(blockId);
+        }
+        for (const blockId of syncedTagMap.keys()) {
+          if (!currTagMap.has(blockId) && !deletedBlockIds.has(blockId))
+            changedTagBlockIds.push(blockId);
+        }
+
+        if (changedTagBlockIds.length > 0) {
+          for (const blockId of changedTagBlockIds) {
+            const tags: TagEntry[] = (currTagMap.get(blockId) ?? []).map(t => ({
+              groupId: t.groupId, optionId: t.optionId, value: t.value,
+            }));
+            const insertOp = patch.blockOps.find(o => o.op === 'insert' && (o as { block: { id: string } }).block.id === blockId);
+            const updateOp = patch.blockOps.find(o => o.op === 'update' && (o as { block: { id: string } }).block.id === blockId);
+            if (insertOp && 'block' in insertOp) {
+              (insertOp as { tags?: TagEntry[] }).tags = tags; // may already be set by step 1
+            } else if (updateOp && 'block' in updateOp) {
+              (updateOp as { tags?: TagEntry[] }).tags = tags;
+            } else {
+              // Tag-only change: synthesise a minimal update op so tags reach the server.
+              const block = curr.blocks.find(b => b.id === blockId);
+              if (block) patch.blockOps.push({ op: 'update', block, tags });
+            }
+          }
+        }
+        // ── End tag handling ─────────────────────────────────────────────────────
+
+        if (!patch.blockOps.length && !patch.charOps.length && !patch.sceneOps.length) {
+          for (const id of movedIdsForPatch) pendingMovedBlockIdsRef.current.delete(id);
+          return;
+        }
+        const vPatch = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
+        const res = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vPatch}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        if (res.ok) {
+          const body = await res.json() as { ok: boolean; serverSeq: number };
+          serverSeqRef.current = body.serverSeq;
+          syncedStateRef.current = curr;
+          // Advance the synced tag baseline so the next diff starts fresh.
+          syncedBlockTagMapRef.current = new Map(currTagMap);
+          // Any pending inserts that were consumed above are already deleted;
+          // clear whatever might remain (orphaned entries for blocks that were
+          // deleted before the sync fired).
+          pendingTagInsertsRef.current.clear();
+          for (const id of movedIdsForPatch) pendingMovedBlockIdsRef.current.delete(id);
+        }
+      } catch {
+        // Sync failure is non-fatal — will retry on next state change.
+      } finally {
+        isSyncingRef.current = false;
+        const waiters = syncIdleWaitersRef.current;
+        syncIdleWaitersRef.current = [];
+        for (const resolve of waiters) resolve();
+      }
+    };
+  }, [effectiveScriptId, activeVersionId, canEdit, loadState]);
+
+  useEffect(() => {
+    setLoadState("loading");
+    setLoadError("");
+    const placeholderBlock = makeBlock();
+    measuredHeightsRef.current.clear();
+    measuredHeightTotalRef.current = 0;
+    cumulativeHRef.current = [0, DEFAULT_BLOCK_H];
+    markOwnershipDirty("full");
+    setRehearsalLabels(buildMarkerLabelIndex([placeholderBlock]));
+    setBlocks([placeholderBlock]);
+    applyWindowRange({ start: 0, end: 1 }, true);
+    setCharacters([]);
+    setScenes([]);
+    setSceneDetails([]);
+    syncedStateRef.current = null;
+    pendingMovedBlockIdsRef.current.clear();
+
+    const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
+    const loadUrl = productionId
+      ? `${BASE_PATH}/api/production/${productionId}${vParam}`
+      : `${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`;
+
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await fetch(loadUrl);
+        // Production route returns { state, versionId, ... }; script route returns ScriptState directly.
+        type ProdResponse = { state: ScriptState; versionId: string };
+        type ErrResponse = { error?: string };
+        const body = await r.json() as ProdResponse | ScriptState | ErrResponse;
+        if (cancelled) return;
+        if (r.status === 404) { setLoadState("not-found"); return; }
+        if (!r.ok) { setLoadError((body as ErrResponse).error ?? "加载失败"); setLoadState("error"); return; }
+
+        const isProdResponse = productionId && "state" in body;
+        const state: ScriptState = isProdResponse
+          ? (body as ProdResponse).state
+          : (body as ScriptState);
+
+        if (state.blocks.length > 0) {
+          const expandedBlocks = expandLegacyMarkersToBlocks(state.blocks, state.scenes);
+          const normalized = normalizeScriptMarkerInvariants(expandedBlocks, state.scenes, { ...DEFAULT_SCRIPT_CONFIG, ...(state.config ?? {}) });
+          const initialWindowEnd = Math.min(INITIAL_WINDOW_SIZE, normalized.blocks.length);
+          measuredHeightsRef.current.clear();
+          measuredHeightTotalRef.current = 0;
+          cumulativeHRef.current = new Array(normalized.blocks.length + 1);
+          cumulativeHRef.current[0] = 0;
+          for (let i = 0; i < normalized.blocks.length; i++) {
+            cumulativeHRef.current[i + 1] = cumulativeHRef.current[i] + DEFAULT_BLOCK_H;
+          }
+          markOwnershipDirty("full");
+          setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
+          blocksRef.current = normalized.blocks;
+          blockIndexByIdRef.current = new Map(normalized.blocks.map((block, index) => [block.id, index]));
+          applyWindowRange({ start: 0, end: initialWindowEnd }, true);
+          syncSpacerHeights({ start: 0, end: initialWindowEnd });
+          setBlocks(normalized.blocks);
+          setCharacters(state.characters);
+          setScenes(normalized.scenes);
+          setScriptConfig(normalized.config);
+          setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
+          syncedStateRef.current = { ...state, blocks: normalized.blocks, scenes: normalized.scenes, config: normalized.config };
+        }
+        if (state.config && state.blocks.length === 0) setScriptConfig({ ...DEFAULT_SCRIPT_CONFIG, ...state.config });
+
+        // Capture version info from production route response
+        if (isProdResponse) {
+          const { versionId: respVid } = body as ProdResponse;
+          const resolvedVid = respVid ?? activeVersionId;
+          if (resolvedVid) setActiveVersionId(resolvedVid);
+        }
+
+        setLoadState("ready");
+
+        // Load tag groups and block tags in parallel (non-blocking)
+        if (productionId) {
+          Promise.all([
+            fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups`).then(r => r.ok ? r.json() : null),
+            fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/block-tags`).then(r => r.ok ? r.json() : null),
+          ]).then(([tgData, btData]) => {
+            if (tgData?.groups) setTagGroups(tgData.groups as TagGroup[]);
+            if (btData?.tags) {
+              const map = new Map<string, BlockTagValue[]>();
+              for (const tag of btData.tags as BlockTagValue[]) {
+                if (!map.has(tag.blockId)) map.set(tag.blockId, []);
+                map.get(tag.blockId)!.push(tag);
+              }
+              setBlockTagMap(map);
+              // Initialise the synced baseline so we don't re-send tags that
+              // are already on the server after the first load.
+              syncedBlockTagMapRef.current = new Map(map);
+            }
+          }).catch(() => {});
+        }
+      } catch {
+        if (!cancelled) {
+          setLoadError("网络错误，请稍后重试");
+          setLoadState("error");
+        }
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [effectiveScriptId, productionId, activeVersionId, applyWindowRange, markOwnershipDirty, syncSpacerHeights]);
+
+  useEffect(() => {
+    if (!productionId || !activeVersionId || loadState !== "ready") return;
+    let cancelled = false;
+    fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${encodeURIComponent(activeVersionId)}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (cancelled || !Array.isArray(data)) return;
+        setSceneDetails(syncSceneDetailsWithScenes(data as SceneDetail[], scenesRef.current));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [productionId, activeVersionId, loadState]);
+
+  // ── Presence — must be declared before the SSE effect that closes over setPresenceMap ──
+
+  const [clientId] = useState<string>(() =>
+    typeof window !== "undefined" ? getOrCreateClientId() : ""
+  );
+  const [userName, setUserName] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    const stored = localStorage.getItem("presence_name");
+    return stored || anonymousName(getOrCreateClientId());
+  });
+  const [presenceMap, setPresenceMap] = useState<Map<string, RemotePresence>>(new Map());
+  const presenceCountRef = useRef(0);
+  const lastSentPresenceRef = useRef<{ versionId: string | null; blockId: string | null } | null>(null);
+  const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const presenceLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const streamDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 后台标签不占同源连接名额（#467）——门控抽成了共享 hook，cue / wiki / 场景表
+  // 同款接入；本组件的建连被下面的 leader 选举包着，所以只用可见性这一层。
+  const streamVisible = useDocumentVisible();
+
+  // ── Hash-based deep link + position restore ──────────────────────────────────
+  useEffect(() => {
+    if (loadState !== "ready") return;
+    // Fallback: unlock scroll 300ms after ready; correction useLayoutEffect unlocks earlier.
+    const unlockTimer = setTimeout(() => setScrollLocked(false), 300);
+    const hash = window.location.hash;
+    if (hash.startsWith("#block-")) {
+      const [fragment, query] = hash.slice(1).split("?");
+      const blockId = fragment.slice("block-".length);
+      const idx = blocksRef.current.findIndex(b => b.id === blockId);
+      if (idx >= 0) { scrollToBlockIdx(idx, "center"); setHighlightedBlockId(blockId); }
+      if (new URLSearchParams(query).get("open_comment") === "true") {
+        setActiveCommentBlockId(blockId);
+        setTagEditorOnTop(false);
+      }
+      return () => clearTimeout(unlockTimer);
+    }
+    // Restore last scroll position from cookie
+    if (productionId) {
+      const cookieKey = `script_pos_${productionId}`;
+      const raw = document.cookie.split(";").map(c => c.trim()).find(c => c.startsWith(cookieKey + "="))?.slice(cookieKey.length + 1);
+      if (raw) {
+        const decoded = decodeURIComponent(raw);
+        const colonAt = decoded.lastIndexOf(":");
+        const blockId = colonAt > 0 ? decoded.slice(0, colonAt) : decoded;
+        const savedIndex = colonAt > 0 ? parseInt(decoded.slice(colonAt + 1), 10) : NaN;
+        const bl = blocksRef.current;
+        const idx = bl.findIndex(b => b.id === blockId);
+        if (idx >= 0) {
+          scrollToBlockIdx(idx, "start");
+        } else if (!isNaN(savedIndex) && bl.length > 0) {
+          scrollToBlockIdx(Math.min(savedIndex, bl.length - 1), "start");
+        }
+      }
+    }
+    return () => clearTimeout(unlockTimer);
+  }, [loadState, productionId, scrollToBlockIdx]);
+
+  // ── Clear block highlight on scroll or click ─────────────────────────────────
+  useEffect(() => {
+    if (!highlightedBlockId) return;
+    const clear = (event?: Event) => {
+      if (navigatingAwayRef.current) return;
+      const target = event?.target as HTMLElement | null;
+      if (target?.closest("a[href]")) return;
+      setHighlightedBlockId(null);
+    };
+    const timer = setTimeout(() => {
+      document.addEventListener("scroll", clear, { passive: true, capture: true });
+      document.addEventListener("click", clear);
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("scroll", clear, { capture: true });
+      document.removeEventListener("click", clear);
+    };
+  }, [highlightedBlockId]);
+
+
+  // SSE: receive seq pushes (state sync) and presence pushes from other clients.
+  // Multiple open script tabs can exhaust the browser's per-origin HTTP/1.1
+  // connection pool, so tabs share one EventSource through BroadcastChannel.
+  useEffect(() => {
+    if (loadState !== "ready" || !streamVisible) return;
+
+    let es: EventSource | null = null;
+    let leaderRenewTimer: ReturnType<typeof setInterval> | null = null;
+    let electionTimer: ReturnType<typeof setInterval> | null = null;
+    let isLeader = false;
+    let closed = false;
+    const tabId = `${clientId || "tab"}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
+    const streamKey = `${effectiveScriptId}:${activeVersionId ?? ""}`;
+    const leaderKey = `script_sse_leader:${streamKey}`;
+    const channelName = `script_sse:${streamKey}`;
+    const leaderTtlMs = 8_000;
+    const bc = typeof window !== "undefined" && "BroadcastChannel" in window
+      ? new BroadcastChannel(channelName)
+      : null;
+
+    const handleSeq = (seq: number) => {
+      if (seq <= serverSeqRef.current) return;
+
+      if (streamDebounceTimerRef.current) clearTimeout(streamDebounceTimerRef.current);
+      streamDebounceTimerRef.current = setTimeout(async () => {
+        streamDebounceTimerRef.current = null;
+        // Re-check: the PATCH response for our own edit may have arrived during
+        // the 300 ms window and already advanced serverSeqRef.  If so there is
+        // nothing to fetch — the server state equals what we already synced.
+        if (seq <= serverSeqRef.current) return;
+        try {
+          const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
+          const r = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
+          if (!r.ok) return;
+          const serverState = await r.json() as ScriptState;
+
+          const oldSynced = syncedStateRef.current;
+          serverSeqRef.current = seq;
+
+          const mergedBlocks = expandLegacyMarkersToBlocks(mergeServerBlocks(blocksRef.current, serverState.blocks, oldSynced), serverState.scenes);
+          const normalized = normalizeScriptMarkerInvariants(mergedBlocks, serverState.scenes, { ...scriptConfigRef.current, ...(serverState.config ?? {}) });
+          markOwnershipDirty("full");
+          setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
+          requestVirtualWindowRefresh();
+          setBlocks(normalized.blocks);
+          setCharacters(serverState.characters);
+          setScenes(normalized.scenes);
+          setScriptConfig(normalized.config);
+          setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
+          syncedStateRef.current = { ...serverState, blocks: normalized.blocks, scenes: normalized.scenes, config: normalized.config };
+        } catch { /* ignore */ }
+      }, 300);
+    };
+
+    const handlePresence = (list: RemotePresence[]) => {
+      const next = new Map(list.map(p => [p.clientId, p]));
+      const previousSize = presenceCountRef.current;
+      if (next.size !== previousSize) {
+        presenceCountRef.current = next.size;
+        setToolbarMeasureTick(tick => tick + 1);
+        if (presenceLayoutTimerRef.current !== null) {
+          clearTimeout(presenceLayoutTimerRef.current);
+          presenceLayoutTimerRef.current = null;
+        }
+        if (next.size < previousSize) {
+          presenceLayoutTimerRef.current = setTimeout(() => {
+            presenceLayoutTimerRef.current = null;
+            resetToolbarMeasurement(false);
+          }, 120);
+        }
+      }
+      setPresenceMap(next);
+    };
+
+    const handleConfig = (cfg: ScriptConfig) => {
+      setScriptConfig(prev => ({ ...DEFAULT_SCRIPT_CONFIG, ...prev, ...cfg }));
+    };
+
+    const openEventSource = (streamClientId: string, onEvent: (type: "seq" | "presence" | "config", data: unknown) => void) => {
+      const streamParams = new URLSearchParams();
+      streamParams.set("cid", streamClientId);
+      if (activeVersionId) streamParams.set("v", activeVersionId);
+      const streamQuery = streamParams.toString() ? `?${streamParams.toString()}` : "";
+      const nextEs = new EventSource(`${BASE_PATH}/api/script/${effectiveScriptId}/stream${streamQuery}`);
+      eventSourceRef.current = nextEs;
+
+      nextEs.onmessage = (e: MessageEvent) => {
+        const { seq } = JSON.parse(e.data as string) as { seq: number };
+        handleSeq(seq);
+        onEvent("seq", seq);
+      };
+      nextEs.addEventListener("presence", (e: MessageEvent) => {
+        const list = JSON.parse(e.data as string) as RemotePresence[];
+        handlePresence(list);
+        onEvent("presence", list);
+      });
+      nextEs.addEventListener("config", (e: MessageEvent) => {
+        const cfg = JSON.parse(e.data as string) as ScriptConfig;
+        handleConfig(cfg);
+        onEvent("config", cfg);
+      });
+
+      return nextEs;
+    };
+
+    const broadcast = (type: "seq" | "presence" | "config", data: unknown) => {
+      bc?.postMessage({ source: tabId, type, data });
+    };
+
+    const readLeader = (): { tabId: string; expiresAt: number } | null => {
+      try {
+        const raw = localStorage.getItem(leaderKey);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as { tabId?: unknown; expiresAt?: unknown };
+        if (typeof parsed.tabId !== "string" || typeof parsed.expiresAt !== "number") return null;
+        return { tabId: parsed.tabId, expiresAt: parsed.expiresAt };
+      } catch {
+        return null;
+      }
+    };
+
+    const writeLeader = () => {
+      localStorage.setItem(leaderKey, JSON.stringify({ tabId, expiresAt: Date.now() + leaderTtlMs }));
+    };
+
+    const stopLeader = (clearLock: boolean) => {
+      if (leaderRenewTimer) {
+        clearInterval(leaderRenewTimer);
+        leaderRenewTimer = null;
+      }
+      es?.close();
+      if (eventSourceRef.current === es) eventSourceRef.current = null;
+      es = null;
+      isLeader = false;
+      if (clearLock) {
+        try {
+          const current = readLeader();
+          if (current?.tabId === tabId) localStorage.removeItem(leaderKey);
+        } catch { /* ignore */ }
+      }
+    };
+
+    const startLeader = () => {
+      if (closed || isLeader) return;
+      const current = readLeader();
+      if (current && current.tabId !== tabId && current.expiresAt > Date.now()) return;
+      try {
+        writeLeader();
+        const confirmed = readLeader();
+        if (confirmed?.tabId !== tabId) return;
+      } catch {
+        return;
+      }
+
+      isLeader = true;
+      es = openEventSource(`stream:${streamKey}`, broadcast);
+      leaderRenewTimer = setInterval(() => {
+        try { writeLeader(); }
+        catch { stopLeader(true); }
+      }, 2_000);
+    };
+
+    const maybeElectLeader = () => {
+      if (closed || isLeader) return;
+      const current = readLeader();
+      if (!current || current.expiresAt <= Date.now()) startLeader();
+    };
+
+    if (bc) {
+      bc.onmessage = (event: MessageEvent) => {
+        const msg = event.data as { source?: string; type?: string; data?: unknown };
+        if (msg.source === tabId) return;
+        if (msg.type === "seq" && typeof msg.data === "number") handleSeq(msg.data);
+        else if (msg.type === "presence" && Array.isArray(msg.data)) handlePresence(msg.data as RemotePresence[]);
+        else if (msg.type === "config" && msg.data && typeof msg.data === "object") handleConfig(msg.data as ScriptConfig);
+      };
+      electionTimer = setInterval(maybeElectLeader, 2_500);
+      maybeElectLeader();
+    } else {
+      es = openEventSource(clientId || tabId, () => {});
+    }
+
+    return () => {
+      closed = true;
+      stopLeader(true);
+      if (electionTimer) clearInterval(electionTimer);
+      bc?.close();
+      if (streamDebounceTimerRef.current) {
+        clearTimeout(streamDebounceTimerRef.current);
+        streamDebounceTimerRef.current = null;
+      }
+      if (presenceLayoutTimerRef.current !== null) {
+        clearTimeout(presenceLayoutTimerRef.current);
+        presenceLayoutTimerRef.current = null;
+      }
+    };
+  }, [effectiveScriptId, loadState, clientId, activeVersionId, markOwnershipDirty, requestVirtualWindowRefresh, resetToolbarMeasurement, streamVisible]);
+
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [blockAssetsByBlockId, setBlockAssetsByBlockId] = useState<Map<string, BlockAssetBubbleItem[]>>(new Map());
+  const [activeCommentBlockId, setActiveCommentBlockId] = useState<string | null>(null);
+  const [activeAssetBlockId, setActiveAssetBlockId] = useState<string | null>(null);
+  const [tagEditorOpen, setTagEditorOpen] = useState(false);
+  const [tagEditorOnTop, setTagEditorOnTop] = useState(false);
+  const commentDraftsRef = useRef(new Map<string, CommentDraft>());
+  const updateCommentDraft = useCallback((blockId: string, draft: CommentDraft) => {
+    if (draft.text.length > 0) commentDraftsRef.current.set(blockId, draft);
+    else commentDraftsRef.current.delete(blockId);
+  }, []);
+  const openBlockSidePanel = useCallback((panel: BlockSidePanelKind, blockId: string) => {
+    setActiveCommentBlockId(panel === "comment" ? blockId : null);
+    setActiveAssetBlockId(panel === "asset" ? blockId : null);
+    setTagEditorOnTop(false);
+  }, []);
+  const [meUserId, setMeUserId] = useState("");
+  const [meIsAdmin, setMeIsAdmin] = useState(false);
+  const [workspaceWidth, setWorkspaceWidth] = useState(0);
+  const [productionSidebarReservedWidth, setProductionSidebarReservedWidth] = useState(0);
+  const workspaceMeasureRoRef = useRef<ResizeObserver | null>(null);
+  const setWorkspaceMeasureRef = useCallback((el: HTMLDivElement | null) => {
+    workspaceMeasureRoRef.current?.disconnect();
+    workspaceMeasureRoRef.current = null;
+    if (!el) return;
+    const workspaceScrollEl = el.closest<HTMLElement>("#workspace-scroll") ?? el;
+    const measure = () => {
+      setWorkspaceWidth(workspaceScrollEl.clientWidth);
+      setProductionSidebarReservedWidth(Math.max(0, workspaceScrollEl.getBoundingClientRect().left));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(workspaceScrollEl);
+    workspaceMeasureRoRef.current = ro;
+  }, []);
+
+  // Resolve Feishu display name and identity on mount
+  useEffect(() => {
+    fetch(`${BASE_PATH}/api/me`)
+      .then(r => r.json())
+      .then((data: { name: string | null; userId: string | null; isAdmin: boolean }) => {
+        if (data.name) {
+          setUserName(data.name);
+          localStorage.setItem("presence_name", data.name);
+        }
+        if (data.userId) setMeUserId(data.userId);
+        setMeIsAdmin(data.isAdmin ?? false);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Load comments for this production
+  useEffect(() => {
+    if (!productionId) return;
+    fetch(`${BASE_PATH}/api/script/${productionId}/comments`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.comments) setComments(d.comments); })
+      .catch(() => {});
+  }, [productionId]);
+
+  const loadBlockAssetBubbles = useCallback(() => {
+    if (!productionId) {
+      setBlockAssetsByBlockId(new Map());
+      return;
+    }
+    // #420：挂载锚稳定 block_id，服务端无版本分辨路径，不再传 ?v=
+    fetch(`${BASE_PATH}/api/production/${productionId}/assets/block-summary`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { blocks?: Array<{ blockId: string; asset: BlockAssetBubbleItem }> } | null) => {
+        const grouped = new Map<string, BlockAssetBubbleItem[]>();
+        for (const item of data?.blocks ?? []) {
+          const blockAssets = grouped.get(item.blockId);
+          if (blockAssets) {
+            if (!blockAssets.some(asset => asset.id === item.asset.id)) blockAssets.push(item.asset);
+          }
+          else grouped.set(item.blockId, [item.asset]);
+        }
+        setBlockAssetsByBlockId(grouped);
+      })
+      .catch(() => setBlockAssetsByBlockId(new Map()));
+  }, [productionId]);
+
+  useEffect(() => {
+    loadBlockAssetBubbles();
+  }, [loadBlockAssetBubbles]);
+
+  const commentsByBlockId = useMemo(() => {
+    const grouped = new Map<string, Comment[]>();
+    for (const comment of comments) {
+      const blockComments = grouped.get(comment.contextId);
+      if (blockComments) blockComments.push(comment);
+      else grouped.set(comment.contextId, [comment]);
+    }
+    return grouped;
+  }, [comments]);
+
+  const sendPresence = useCallback((blockId: string | null) => {
+    if (!clientId || !effectiveScriptId) return;
+    const lastSent = lastSentPresenceRef.current;
+    if (lastSent?.versionId === activeVersionId && lastSent.blockId === blockId) return;
+    lastSentPresenceRef.current = { versionId: activeVersionId, blockId };
+    if (presenceTimerRef.current) clearTimeout(presenceTimerRef.current);
+    presenceTimerRef.current = setTimeout(() => {
+      const presenceQuery = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
+      fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/presence${presenceQuery}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, userName, blockId }),
+      }).catch(() => {});
+    }, 200);
+  }, [clientId, effectiveScriptId, userName, activeVersionId]);
+
+  const markBlockFocused = useCallback((id: string) => {
+    focusedIdRef.current = id;
+    setFocusedId(id);
+    sendPresence(id);
+    requestAnimationFrame(() => {
+      updateActiveSceneFromScroll();
+      window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
+    });
+  }, [sendPresence, updateActiveSceneFromScroll]);
+
+  const focusBlockContent = useCallback((id: string, atEnd = true) => {
+    markBlockFocused(id);
+    pendingFocus.current = { id, atEnd };
+  }, [markBlockFocused]);
+
+  const glowAndFocusBlocks = useCallback((ids: string[], focusId = ids[ids.length - 1]) => {
+    glowChangedBlocks(ids);
+    focusBlockContent(focusId);
+  }, [focusBlockContent, glowChangedBlocks]);
+
+  // Debounced sync: fires 1500 ms after the last state change.
+  const charactersRef = useRef(characters);
+  useEffect(() => { charactersRef.current = characters; }, [characters]);
+
+  useEffect(() => {
+    if (loadState !== "ready") return;
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      const curr: ScriptState = {
+        config: scriptConfigRef.current,
+        blocks: normalizeScriptBlockStream(blocksRef.current),
+        characters: charactersRef.current,
+        scenes: scenesRef.current,
+      };
+      pushPatchRef.current(curr);
+    }, 1500);
+    return () => {
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    };
+  // blockTagMap included so tag-only changes (inherit, paste, manual edit)
+  // also trigger the debounced sync and embed tags in the block op.
+  }, [blocks, characters, scenes, blockTagMap, loadState]);
+
+  const flushPendingPatch = useCallback(async () => {
+    if (syncTimerRef.current) {
+      clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = null;
+    }
+    if (isSyncingRef.current) {
+      await new Promise<void>((resolve) => {
+        syncIdleWaitersRef.current.push(resolve);
+      });
+    }
+    const curr: ScriptState = {
+      config: scriptConfigRef.current,
+      blocks: normalizeScriptBlockStream(blocksRef.current),
+      characters: charactersRef.current,
+      scenes: scenesRef.current,
+    };
+    await pushPatchRef.current(curr);
+    const remaining = diffState(syncedStateRef.current, curr, 0);
+    const stateSynced = remaining.blockOps.length === 0 && remaining.charOps.length === 0 && remaining.sceneOps.length === 0;
+    const currentTags = [...blockTagMapRef.current.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const syncedTags = [...syncedBlockTagMapRef.current.entries()].sort(([a], [b]) => a.localeCompare(b));
+    return stateSynced &&
+      pendingTagInsertsRef.current.size === 0 &&
+      JSON.stringify(currentTags) === JSON.stringify(syncedTags);
+  }, []);
+
+  const persistMarkerState = useCallback(async (next: ScriptState) => {
+    if (syncTimerRef.current) {
+      clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = null;
+    }
+    if (isSyncingRef.current) {
+      await new Promise<void>((resolve) => syncIdleWaitersRef.current.push(resolve));
+    }
+    await pushPatchRef.current(next);
+  }, []);
+
+  const undoStack = useRef<Block[][]>([]);
+  const redoStack = useRef<Block[][]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const isTypingSession = useRef(false);
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const registerRef = useCallback((id: string, el: HTMLDivElement | null) => {
+    if (el) taRefs.current.set(id, el);
+    else taRefs.current.delete(id);
+  }, []);
+
+  const openCharSelector = useCallback((id: string) => {
+    setCharEditTokens((prev) => ({ ...prev, [id]: (prev[id] ?? 0) + 1 }));
+  }, []);
+
+  const handleArrowUpFromTextarea = useCallback((id: string) => {
+    const cur = blocksRef.current;
+    const block = cur.find((b) => b.id === id);
+    if (block?.type === "stage") {
+      const idx = cur.findIndex((b) => b.id === id);
+      if (idx > 0) {
+        const prev = cur[idx - 1];
+        const el = taRefs.current.get(prev.id);
+        if (el) { el.focus(); setCursorAtEnd(el); }
+      }
+    } else {
+      openCharSelector(id);
+    }
+  }, [openCharSelector]);
+
+  const handleArrowDownFromTextarea = useCallback((id: string) => {
+    const cur = blocksRef.current;
+    const idx = cur.findIndex((b) => b.id === id);
+    if (idx < cur.length - 1) {
+      const next = cur[idx + 1];
+      if (next.type === "stage") {
+        const el = taRefs.current.get(next.id);
+        if (el) { el.focus(); setCursorAtStart(el); }
+      } else {
+        openCharSelector(next.id);
+      }
+    }
+  }, [openCharSelector]);
+
+  const handleArrowUpFromChar = useCallback((id: string) => {
+    const cur = blocksRef.current;
+    const idx = cur.findIndex((b) => b.id === id);
+    if (idx > 0) {
+      const el = taRefs.current.get(cur[idx - 1].id);
+      if (el) { el.focus(); setCursorAtEnd(el); }
+    }
+  }, []);
+
+  const handleArrowDownFromChar = useCallback((id: string) => {
+    const el = taRefs.current.get(id);
+    if (el) { el.focus(); setCursorAtStart(el); }
+  }, []);
+
+  const saveSnapshot = useCallback(() => {
+    undoStack.current.push(blocksRef.current);
+    redoStack.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+  }, []);
+
+  const applyStageDelimiterChange = useCallback(async (updateExisting: boolean) => {
+    const pending = pendingStageDelimiterChange;
+    if (!pending) return;
+    const previousOpen = scriptConfig.stageDelimOpen;
+    const previousClose = scriptConfig.stageDelimClose;
+    setPendingStageDelimiterChange(null);
+    if (updateExisting) {
+      const nextBlocks = blocksRef.current.map((block) => {
+        if (block.type === "stage") return block;
+        const content = replaceInlineStageDelimiters(
+          block.content,
+          previousOpen,
+          previousClose,
+          pending.open,
+          pending.close
+        );
+        return content === block.content ? block : { ...block, content };
+      });
+      if (nextBlocks.some((block, index) => block !== blocksRef.current[index])) {
+        saveSnapshot();
+        markPageMapDirty("full");
+        setBlocks(nextBlocks);
+      }
+    }
+    await saveScriptConfig({ stageDelimOpen: pending.open, stageDelimClose: pending.close });
+  }, [
+    markPageMapDirty,
+    pendingStageDelimiterChange,
+    saveScriptConfig,
+    saveSnapshot,
+    scriptConfig.stageDelimOpen,
+    scriptConfig.stageDelimClose,
+  ]);
+
+  // Apply inline format (bold/underline) to the current window selection.
+  // Called from toolbar buttons via onMouseDown+preventDefault, which keeps
+  // the selection alive even after the contenteditable loses focus.
+  const applyFormatToFocused = useCallback((tag: "b" | "u") => {
+    if (isLockedMode) return;
+    const sel = window.getSelection();
+    if (!sel?.rangeCount || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const editableEl = getEditableElementForRange(range);
+    if (!editableEl) return;
+    // End typing session so startTypingSession (called by updateBlock via input event)
+    // saves a fresh pre-format snapshot rather than lumping with active typing.
+    isTypingSession.current = false;
+    toggleInlineTag(range, tag);
+    // Re-focus then fire input so ScriptBlock's handleInput → syncContent runs
+    editableEl.focus();
+    editableEl.dispatchEvent(new Event("input", { bubbles: true }));
+  }, [isLockedMode]);
+
+  const startTypingSession = useCallback(() => {
+    if (!isTypingSession.current) {
+      saveSnapshot();
+      isTypingSession.current = true;
+    }
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    typingTimer.current = setTimeout(() => {
+      isTypingSession.current = false;
+      typingTimer.current = null;
+    }, 800);
+  }, [saveSnapshot]);
+
+  const undo = useCallback(() => {
+    if (isLockedMode) return;
+    if (typingTimer.current) { clearTimeout(typingTimer.current); typingTimer.current = null; }
+    isTypingSession.current = false;
+    const snapshot = undoStack.current.pop();
+    if (!snapshot) return;
+    redoStack.current.push(blocksRef.current);
+    applyBlockStructureEdit(blocksRef.current, snapshot, "full");
+    requestVirtualWindowRefresh();
+    setCanUndo(undoStack.current.length > 0);
+    setCanRedo(true);
+  }, [applyBlockStructureEdit, isLockedMode, requestVirtualWindowRefresh]);
+
+  const redo = useCallback(() => {
+    if (isLockedMode) return;
+    if (typingTimer.current) { clearTimeout(typingTimer.current); typingTimer.current = null; }
+    isTypingSession.current = false;
+    const snapshot = redoStack.current.pop();
+    if (!snapshot) return;
+    undoStack.current.push(blocksRef.current);
+    applyBlockStructureEdit(blocksRef.current, snapshot, "full");
+    requestVirtualWindowRefresh();
+    setCanUndo(true);
+    setCanRedo(redoStack.current.length > 0);
+  }, [applyBlockStructureEdit, isLockedMode, requestVirtualWindowRefresh]);
+
+  // ── Tag handlers ─────────────────────────────────────────────────────────────
+  // Tag mutations are no longer sent via a dedicated block-tags PATCH.
+  // Instead they are embedded in the block op and synced atomically via the
+  // debounced PATCH to /api/script/[id].  The block-tags route is still
+  // available for server-side / admin use but is not called from here.
+
+  const handleTagChange = useCallback((blockId: string, groupId: string, optionId: string | null, value: number | null, del: boolean) => {
+    if (isLockedMode) return;
+    setBlockTagMap(prev => {
+      const map = new Map(prev);
+      const existing = map.get(blockId) ?? [];
+      if (del) {
+        map.set(blockId, existing.filter(t => t.groupId !== groupId));
+      } else {
+        map.set(blockId, [...existing.filter(t => t.groupId !== groupId), { blockId, groupId, optionId, value }]);
+      }
+      return map;
+    });
+    // Tag change is synced as part of the block op via the debounced PATCH —
+    // no separate block-tags PATCH needed.
+    // Auto-sync block.lyric when any group has a lyric split configured (OR logic)
+    const changedGroup = tagGroups.find(g => g.id === groupId);
+    if (changedGroup?.lyricSplitAfterOptionId) {
+      const splitOpt = changedGroup.options.find(o => o.id === changedGroup.lyricSplitAfterOptionId);
+      if (splitOpt) {
+        const groupIsLyric = !del && !!optionId &&
+          (changedGroup.options.find(o => o.id === optionId)?.sortOrder ?? Infinity) <= splitOpt.sortOrder;
+        const currentTags = blockTagMapRef.current.get(blockId) ?? [];
+        const otherGroupsLyric = tagGroups.some(g => {
+          if (g.id === groupId || !g.lyricSplitAfterOptionId) return false;
+          const sp = g.options.find(o => o.id === g.lyricSplitAfterOptionId);
+          if (!sp) return false;
+          const tag = currentTags.find(t => t.groupId === g.id);
+          return !!tag?.optionId &&
+            (g.options.find(o => o.id === tag.optionId)?.sortOrder ?? Infinity) <= sp.sortOrder;
+        });
+        const newLyric = groupIsLyric || otherGroupsLyric;
+        markBlockPageMapDirty(blockId);
+        setBlocks(bs => bs.map(b => b.id === blockId && b.lyric !== newLyric ? { ...b, lyric: newLyric } : b));
+      }
+    }
+  }, [blockTagMapRef, markBlockPageMapDirty, tagGroups, isLockedMode]);
+
+  const handleTagCopy = useCallback((blockId: string) => {
+    tagClipboardRef.current = blockTagMapRef.current.get(blockId) ?? [];
+  }, []);
+
+  const handleTagPaste = useCallback((blockId: string) => {
+    if (isLockedMode) return;
+    const clipboard = tagClipboardRef.current;
+    if (!clipboard?.length) return;
+    const inherited = clipboard.map(t => ({ ...t, blockId }));
+    setBlockTagMap(prev => { const m = new Map(prev); m.set(blockId, inherited); return m; });
+    // Tag change is synced as part of the block op via the debounced PATCH.
+  }, [isLockedMode]);
+
+  const inheritTags = useCallback((fromId: string, toId: string) => {
+    // Use blockTagMap from the closure (latest committed state) rather than
+    // blockTagMapRef so we're never stale when Enter is pressed right after
+    // a tag change (useEffect syncing the ref fires asynchronously).
+    const sourceTags = blockTagMap.get(fromId) ?? [];
+    if (!sourceTags.length) return;
+    const inherited = sourceTags.map(t => ({ ...t, blockId: toId }));
+    setBlockTagMap(prev => { const m = new Map(prev); m.set(toId, inherited); return m; });
+    // Register the tags directly in a ref so pushPatchRef can embed them in the
+    // insert op synchronously, without any dependency on useEffect timing.
+    pendingTagInsertsRef.current.set(toId, inherited.map(t => ({
+      groupId: t.groupId, optionId: t.optionId, value: t.value,
+    })));
+    // Apply the lyric mapping rule immediately so the new block's display is correct.
+    const newLyric = computeLyricFromTags(inherited, tagGroups);
+    if (newLyric !== null) {
+      markBlockPageMapDirty(toId);
+      setBlocks(bs => bs.map(b => b.id === toId && b.lyric !== newLyric ? { ...b, lyric: newLyric } : b));
+    }
+    // Tags (and the corrected lyric) are synced atomically via the debounced block op PATCH.
+  }, [blockTagMap, markBlockPageMapDirty, tagGroups]);
+
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === "z" && !e.shiftKey) {
+        if (isFormEditingTarget(e.target)) return;
+        e.preventDefault();
+        undo();
+      }
+      else if (e.key === "z" && e.shiftKey) {
+        if (isFormEditingTarget(e.target)) return;
+        e.preventDefault();
+        redo();
+      }
+      else if (e.key === "f" && !e.shiftKey) { e.preventDefault(); setSearchOpen(true); }
+      // Tag clipboard: ⌘/Ctrl+Shift+C copies tags from focused block, ⌘/Ctrl+Shift+V pastes
+      else if (e.key === "c" && e.shiftKey) {
+        const id = focusedIdRef.current;
+        if (id) { e.preventDefault(); tagClipboardRef.current = blockTagMapRef.current.get(id) ?? []; }
+      }
+      else if (e.key === "v" && e.shiftKey) {
+        const id = focusedIdRef.current;
+        if (id && tagClipboardRef.current?.length) { e.preventDefault(); handleTagPaste(id); }
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [undo, redo, handleTagPaste]);
+
+  // ── Search matches (computed from blocks + pageMap) ─────────────────────────
+  const currentPageNum = focusedId ? pageMap[focusedId] : undefined;
+
+  const searchMatches = useMemo<number[]>(() => {
+    if (!searchOpen || !searchQuery.trim()) return [];
+    const q = searchExact ? searchQuery : searchQuery.toLowerCase();
+    return blocks.reduce<number[]>((acc, block, idx) => {
+      if (!isTextBlock(block)) return acc;
+      const text = stripHtmlText(block.content);
+      const haystack = searchExact ? text : text.toLowerCase();
+      if (!haystack.includes(q)) return acc;
+      if (searchCurrentPage && currentPageNum !== undefined && pageMap[block.id] !== currentPageNum) return acc;
+      acc.push(idx);
+      return acc;
+    }, []);
+  }, [searchOpen, searchQuery, searchExact, searchCurrentPage, blocks, pageMap, currentPageNum]);
+
+
+  // Scroll to focused search result
+  useEffect(() => {
+    const matchIdx = searchMatches[searchIdx];
+    if (matchIdx === undefined) return;
+    scrollToBlockIdx(matchIdx, 'center');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchIdx, searchMatches]);
+
+  // Jump helpers
+  const jumpToLine = useCallback((n: number) => {
+    const targetLine = Math.max(1, n);
+    let lineNumber = 0;
+    for (let idx = 0; idx < blocks.length; idx++) {
+      if (!isTextBlock(blocks[idx])) continue;
+      lineNumber += 1;
+      if (lineNumber === targetLine) {
+        scrollToBlockIdx(idx, 'center');
+        return;
+      }
+    }
+  }, [blocks, scrollToBlockIdx]);
+
+  const jumpToPage = useCallback((n: number) => {
+    const idx = blocks.findIndex(b => pageMap[b.id] === n);
+    if (idx >= 0) scrollToBlockIdx(idx, 'start');
+  }, [blocks, pageMap, scrollToBlockIdx]);
+
+  const toggleBlockType = useCallback((id: string) => {
+    if (isLockedMode) return;
+    saveSnapshot();
+    const previousBlocks = blocksRef.current;
+    const changes: BlockChange[] = [];
+    const nextBlocks: Block[] = previousBlocks.map((b, position) => {
+      if (b.id !== id) return b;
+      const next = { ...b, type: b.type === "dialogue" ? "stage" as const : "dialogue" as const, characterIds: [] };
+      if (b.type !== next.type) changes.push({
+        kind: "convert", position, blockId: b.id, beforeType: b.type, afterType: next.type,
+      });
+      return next;
+    });
+    applyBlockStructureEdit(previousBlocks, nextBlocks, markerChangeFromOperations(changes));
+    glowAndFocusBlocks([id]);
+  }, [applyBlockStructureEdit, glowAndFocusBlocks, saveSnapshot, isLockedMode]);
+
+  const toggleStageCueToFocused = useCallback(() => {
+    const id = focusedIdRef.current;
+    if (!id) return;
+
+    const block = blocksRef.current.find((b) => b.id === id);
+    const sel = window.getSelection();
+    const range = sel?.rangeCount ? sel.getRangeAt(0) : null;
+    const editableEl = range ? getEditableElementForRange(range) : null;
+
+    if (
+      block?.type !== "stage" &&
+      range &&
+      !sel?.isCollapsed &&
+      editableEl &&
+      editableEl === taRefs.current.get(id)
+    ) {
+      wrapSelectionAsInlineStageCue(range, scriptConfigRef.current.stageDelimOpen, scriptConfigRef.current.stageDelimClose);
+      editableEl.focus();
+      editableEl.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
+
+    toggleBlockType(id);
+  }, [toggleBlockType]);
+
+  const toggleBlockLyric = useCallback((id: string) => {
+    if (isLockedMode) return;
+    saveSnapshot();
+    markBlockPageMapDirty(id);
+    setBlocks((prev) => prev.map((b) =>
+      b.id === id ? { ...b, lyric: !b.lyric } : b
+    ));
+    glowAndFocusBlocks([id]);
+  }, [glowAndFocusBlocks, markBlockPageMapDirty, saveSnapshot, isLockedMode]);
+
+  const setBlocksType = useCallback((ids: string[], type: BlockType) => {
+    if (isLockedMode) return;
+    const targetIds = new Set(ids);
+    if (targetIds.size === 0) return;
+    saveSnapshot();
+    const previousBlocks = blocksRef.current;
+    const changes: BlockChange[] = [];
+    const nextBlocks = previousBlocks.map((b, position) => {
+      if (!targetIds.has(b.id)) return b;
+      const next = { ...b, type, characterIds: type === "stage" ? [] : b.characterIds };
+      if (b.type !== type) changes.push({
+        kind: "convert", position, blockId: b.id, beforeType: b.type, afterType: type,
+      });
+      return next;
+    });
+    applyBlockStructureEdit(previousBlocks, nextBlocks, markerChangeFromOperations(changes));
+    glowAndFocusBlocks(ids);
+  }, [applyBlockStructureEdit, glowAndFocusBlocks, saveSnapshot, isLockedMode]);
+
+  const setBlocksLyric = useCallback((ids: string[], lyric: boolean) => {
+    if (isLockedMode) return;
+    const targetIds = new Set(ids);
+    if (targetIds.size === 0) return;
+    saveSnapshot();
+    markBlockIdsPageMapDirty(targetIds);
+    setBlocks((prev) => prev.map((b) =>
+      targetIds.has(b.id) && b.type !== "stage"
+        ? { ...b, lyric }
+        : b
+    ));
+    glowAndFocusBlocks(ids);
+  }, [glowAndFocusBlocks, markBlockIdsPageMapDirty, saveSnapshot, isLockedMode]);
+
+  // Apply pending focus on every render until resolved
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const pf = pendingFocus.current;
+    if (pf) {
+      const el = taRefs.current.get(pf.id);
+      if (el) {
+        el.focus();
+        if (el.isContentEditable) {
+          if (pf.atEnd) setCursorAtEnd(el);
+          else if (pf.textOffset !== undefined) setCursorAtTextOffset(el, pf.textOffset);
+        } else {
+          window.getSelection()?.removeAllRanges();
+        }
+        pendingFocus.current = null;
+      }
+    }
+    const pco = pendingCharOpen.current;
+    if (pco) {
+      pendingCharOpen.current = null;
+      setCharEditTokens((prev) => ({ ...prev, [pco]: (prev[pco] ?? 0) + 1 }));
+    }
+  });
+
+  const updateBlock = useCallback(
+    (id: string, changes: Partial<Block>) => {
+      if (isLockedMode) return;
+      startTypingSession();
+      markBlockPageMapDirty(id);
+      setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...changes } : b)));
+    },
+    [markBlockPageMapDirty, startTypingSession, isLockedMode]
+  );
+
+  const findChapterIdForBlock = useCallback((blockId: string): string | null => {
+    const currentBlocks = ownedBlocksRef.current;
+    const currentScenes = scenesRef.current;
+    const sceneMap = new Map(currentScenes.map((scene) => [scene.id, scene]));
+    const idx = currentBlocks.findIndex((block) => block.id === blockId);
+    if (idx !== -1) {
+      for (let i = idx; i >= 0; i--) {
+        const sceneId = currentBlocks[i].sceneId;
+        if (!sceneId) continue;
+        const scene = sceneMap.get(sceneId);
+        if (!scene) continue;
+        return scene.parentId ?? scene.id;
+      }
+    }
+    return currentScenes.find((scene) => scene.parentId === null)?.id ?? null;
+  }, []);
+
+  const addChapterBeforeBlock = useCallback((blockId: string) => {
+    if (isLockedMode || !canEditMetadata) return;
+    const previousBlocks = blocksRef.current;
+    const next = insertMarker({
+      blocks: previousBlocks,
+      scenes: scenesRef.current,
+      characters: charactersRef.current,
+      config: scriptConfigRef.current,
+    }, { kind: "chapter", name: "", beforeBlockId: blockId }, uid);
+    saveSnapshot();
+    markBlockStructureDirty(previousBlocks, next.blocks);
+    setBlocks(next.blocks);
+    setScenes(next.scenes);
+    setScriptConfig(next.config);
+    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
+    void persistMarkerState(next);
+  }, [canEditMetadata, isLockedMode, markBlockStructureDirty, persistMarkerState, saveSnapshot]);
+
+  const addSceneBeforeBlock = useCallback((blockId: string) => {
+    if (isLockedMode || !canEditMetadata) return;
+    const chapterId = findChapterIdForBlock(blockId);
+    const previousBlocks = blocksRef.current;
+    const next = insertMarker({
+      blocks: previousBlocks,
+      scenes: scenesRef.current,
+      characters: charactersRef.current,
+      config: scriptConfigRef.current,
+    }, {
+      kind: chapterId ? "scene" : "chapter",
+      name: "",
+      parentId: chapterId,
+      beforeBlockId: blockId,
+    }, uid);
+    saveSnapshot();
+    markBlockStructureDirty(previousBlocks, next.blocks);
+    setBlocks(next.blocks);
+    setScenes(next.scenes);
+    setScriptConfig(next.config);
+    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
+    void persistMarkerState(next);
+  }, [canEditMetadata, findChapterIdForBlock, isLockedMode, markBlockStructureDirty, persistMarkerState, saveSnapshot]);
+
+  const addRehearsalBeforeBlock = useCallback((blockId: string) => {
+    if (isLockedMode || !effectiveCanEditRehearsalMark || !scriptConfigRef.current.useRehearsalMarks) return;
+    const marker = makeMarkerBlock("rehearsal_marker");
+    const previousBlocks = blocksRef.current;
+    const index = previousBlocks.findIndex((block) => block.id === blockId);
+    const insertIndex = index === -1 ? previousBlocks.length : index;
+    const nextBlocks = insertMarkerWithEmptyBlockIfNeeded(
+      previousBlocks,
+      marker,
+      insertIndex,
+      scriptConfigRef.current.openingChapterMarkerId,
+    );
+    saveSnapshot();
+    markBlockStructureDirty(previousBlocks, nextBlocks);
+    setBlocks(nextBlocks);
+  }, [effectiveCanEditRehearsalMark, isLockedMode, markBlockStructureDirty, saveSnapshot]);
+
+  const convertMarkerBlockType = useCallback((blockId: string, nextType: Extract<BlockType, "chapter_marker" | "scene_marker">) => {
+    if (isLockedMode || !canEditMetadata) return;
+    const currentIdx = blockIndexByIdRef.current.get(blockId);
+    if (currentIdx === undefined) return;
+    const currentBlock = blocksRef.current[currentIdx];
+    if (!currentBlock) return;
+    if (!isMarkerBlock(currentBlock)) return;
+    if (currentBlock.type === nextType) return;
+    const previousBlocks = blocksRef.current;
+    const next = convertMarker({
+      blocks: previousBlocks,
+      scenes: scenesRef.current,
+      characters,
+      config: scriptConfigRef.current,
+    }, blockId, nextType === "chapter_marker" ? "chapter" : "scene", uid);
+
+    saveSnapshot();
+    markBlockStructureDirty(previousBlocks, next.blocks);
+    setBlocks(next.blocks);
+    setScenes(next.scenes);
+    setScriptConfig(next.config);
+    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
+    void persistMarkerState(next);
+    selectionAnchorBlockIdRef.current = blockId;
+    selectionDetachedRef.current = false;
+    markerEndedScopeIdsRef.current = new Set([blockId]);
+    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
+    setSelectedBlockIds(new Set([blockId]));
+  }, [canEditMetadata, characters, isLockedMode, markBlockStructureDirty, persistMarkerState, saveSnapshot]);
+
+  const splitBlock = useCallback((id: string, before: string, after: string) => {
+    if (isLockedMode) return;
+    saveSnapshot();
+    // Pre-generate the new block ID **outside** the setBlocks updater so the ID
+    // is stable across React Strict Mode's double-invocation of the updater.
+    // If makeBlock() were called inside the updater, each invocation would
+    // produce a different uid(), causing nextId (from the 2nd call) to diverge
+    // from the block actually committed to state (from the 1st call).
+    const nextBlockId = uid();
+    const previousBlocks = blocksRef.current;
+    const currentIdx = previousBlocks.findIndex((block) => block.id === id);
+    if (currentIdx !== -1) {
+      const cur = previousBlocks[currentIdx];
+      // New block inherits scene, rehearsal mark, and character from the block being split
+      const next: Block = {
+        ...makeBlock(after, cur.characterIds),
+        id: nextBlockId,   // use the pre-generated stable ID
+        sceneId: null,
+        rehearsalMark: null,
+        characterAnnotations: { ...cur.characterAnnotations },
+      };
+      const updated = [...previousBlocks];
+      updated[currentIdx] = { ...cur, content: before };
+      updated.splice(currentIdx + 1, 0, next);
+      pendingFocus.current = { id: next.id, textOffset: 0 };
+      markOwnershipDirty({ start: currentIdx, end: currentIdx + 1, throughNextMarker: false });
+      applyBlockStructureEdit(previousBlocks, updated, markerChangeFromOperations([{
+        kind: "insert",
+        position: currentIdx + 1,
+        blockId: next.id,
+        beforeType: null,
+        afterType: next.type,
+      }]));
+    }
+    inheritTags(id, nextBlockId);
+  }, [applyBlockStructureEdit, markOwnershipDirty, saveSnapshot, inheritTags, isLockedMode]);
+
+  const mergeBlock = useCallback((id: string) => {
+    if (isLockedMode) return;
+    saveSnapshot();
+    const previousBlocks = blocksRef.current;
+    const currentIdx = previousBlocks.findIndex((block) => block.id === id);
+    if (currentIdx === 0) {
+      // Delete empty first block if there are more blocks after it
+      if (previousBlocks.length > 1 && !previousBlocks[0].content.trim()) {
+        pendingFocus.current = { id: previousBlocks[1].id, atEnd: false };
+        applyBlockStructureEdit(previousBlocks, previousBlocks.slice(1), markerChangeFromOperations([{
+          kind: "delete",
+          position: 0,
+          blockId: previousBlocks[0].id,
+          beforeType: previousBlocks[0].type,
+          afterType: null,
+        }]));
+      }
+      return;
+    }
+    if (currentIdx > 0) {
+      const p = previousBlocks[currentIdx - 1];
+      const c = previousBlocks[currentIdx];
+      const mergedContent =
+        p.content && c.content ? `${p.content}\n${c.content}` : p.content + c.content;
+      const merged = { ...p, content: mergedContent };
+      const updated = [...previousBlocks];
+      updated[currentIdx - 1] = merged;
+      updated.splice(currentIdx, 1);
+      // Place cursor right after the \n separator (= start of the merged-in content).
+      // When only one side is non-empty there's no \n, so offset = end of p.content.
+      const pLen = getTextLength(mdToHtml(p.content));
+      pendingFocus.current = {
+        id: p.id,
+        textOffset: p.content && c.content ? pLen + 1 : pLen,
+      };
+      markOwnershipDirty({ start: currentIdx - 1, end: currentIdx, throughNextMarker: false });
+      applyBlockStructureEdit(previousBlocks, updated, markerChangeFromOperations([{
+        kind: "delete",
+        position: Math.min(currentIdx, updated.length),
+        blockId: c.id,
+        beforeType: c.type,
+        afterType: null,
+      }]));
+    }
+  }, [applyBlockStructureEdit, markOwnershipDirty, saveSnapshot, isLockedMode]);
+
+  const nonEmptyDramaturgyMarkersForBlockIds = useCallback((ids: Iterable<string>): NonEmptyDramaturgyMarker[] => {
+    const currentBlocks = blocksRef.current;
+    const currentIndexById = blockIndexByIdRef.current;
+    const markers: NonEmptyDramaturgyMarker[] = [];
+    for (const id of ids) {
+      const index = currentIndexById.get(id);
+      const block = index === undefined ? undefined : currentBlocks[index];
+      if (!block) continue;
+      const detail = block.sceneId ? sceneDetailById.get(block.sceneId) ?? null : null;
+      const kind = markerBlockDramaturgyDeleteBlockedKind(block, detail);
+      if (kind) markers.push({ id, kind });
+    }
+    return markers;
+  }, [sceneDetailById]);
+
+  const deleteBlocks = useCallback((ids: string[], options?: { forceDeleteNonEmptyMarkerDetails?: boolean }) => {
+    if (isLockedMode) return;
+    const deleteIds = new Set<string>(ids);
+    if (deleteIds.size === 0) return;
+    const blockedMarkers = nonEmptyDramaturgyMarkersForBlockIds(deleteIds);
+    if (blockedMarkers.length > 0 && !options?.forceDeleteNonEmptyMarkerDetails) {
+      if (deleteIds.size === 1) {
+        setMarkerDetailDeleteBlockedKind(blockedMarkers[0].kind);
+      } else {
+        setSelectedNonEmptyMarkerDeleteIds(new Set());
+        setExpandedNonEmptyMarkerDetailIds(new Set());
+        setPendingNonEmptyMarkerSelectionDeleteIds(Array.from(deleteIds));
+      }
+      return;
+    }
+    saveSnapshot();
+    const emptyBlockId2 = uid(); // pre-generated for the case where all blocks are deleted
+    const currentBlocks = blocksRef.current;
+    const firstDeletedIdx = currentBlocks.findIndex((block) => deleteIds.has(block.id));
+    if (firstDeletedIdx === -1) return;
+    const remaining = currentBlocks.filter((block) => !deleteIds.has(block.id));
+    const editedBlocks = remaining.length > 0 ? remaining : [{ ...makeBlock(), id: emptyBlockId2 }];
+    let retainedBefore = 0;
+    const changes: BlockChange[] = [];
+    for (const block of currentBlocks) {
+      if (deleteIds.has(block.id)) {
+        changes.push({
+          kind: "delete",
+          position: retainedBefore,
+          blockId: block.id,
+          beforeType: block.type,
+          afterType: null,
+        });
+      } else retainedBefore++;
+    }
+    if (remaining.length === 0) changes.push({
+      kind: "insert",
+      position: 0,
+      blockId: editedBlocks[0].id,
+      beforeType: null,
+      afterType: editedBlocks[0].type,
+    });
+    const normalized = normalizeScriptMarkerInvariants(
+      editedBlocks,
+      scenesRef.current,
+      scriptConfigRef.current,
+      markerChangeFromOperations(changes),
+    );
+    const focusIdx = Math.min(firstDeletedIdx, editedBlocks.length - 1);
+    pendingFocus.current = { id: editedBlocks[focusIdx].id, atEnd: false };
+    markBlockStructureDirty(currentBlocks, normalized.blocks);
+    setBlocks(normalized.blocks);
+    if (!sameSceneRows(normalized.scenes, scenesRef.current)) {
+      setScenes(normalized.scenes);
+      setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
+    }
+    if (normalized.config.openingChapterMarkerId !== scriptConfigRef.current.openingChapterMarkerId) {
+      syncOpeningChapterMarkerId(normalized.blocks);
+    }
+    setSelectedBlockIds((current) => {
+      const next = new Set(current);
+      for (const id of deleteIds) next.delete(id);
+      return next;
+    });
+    markerEndedScopeIdsRef.current = new Set();
+    selectionDetachedRef.current = false;
+    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
+    if (selectionAnchorBlockIdRef.current && deleteIds.has(selectionAnchorBlockIdRef.current)) {
+      selectionAnchorBlockIdRef.current = null;
+    }
+  }, [markBlockStructureDirty, nonEmptyDramaturgyMarkersForBlockIds, saveSnapshot, syncOpeningChapterMarkerId, isLockedMode]);
+
+  const emptyScriptCleanupDescendantKeys = useMemo(() => {
+    const childKeysByParent = new Map<string, string[]>();
+    for (const target of pendingEmptyScriptCleanup ?? []) {
+      if (!target.parentKey) continue;
+      const childKeys = childKeysByParent.get(target.parentKey);
+      if (childKeys) childKeys.push(target.key);
+      else childKeysByParent.set(target.parentKey, [target.key]);
+    }
+    const descendantKeys = new Map<string, Set<string>>();
+    const collect = (key: string): Set<string> => {
+      const cached = descendantKeys.get(key);
+      if (cached) return cached;
+      const collected = new Set<string>();
+      for (const childKey of childKeysByParent.get(key) ?? []) {
+        collected.add(childKey);
+        for (const descendantKey of collect(childKey)) collected.add(descendantKey);
+      }
+      descendantKeys.set(key, collected);
+      return collected;
+    };
+    for (const target of pendingEmptyScriptCleanup ?? []) {
+      collect(target.key);
+    }
+    return descendantKeys;
+  }, [pendingEmptyScriptCleanup]);
+
+  const setEmptyScriptCleanupDialog = useCallback((targets: EmptyScriptCleanupTarget[] | null) => {
+    setPendingEmptyScriptCleanup(targets);
+    setSelectedEmptyScriptCleanupKeys(new Set());
+  }, []);
+
+  const toggleEmptyScriptCleanupTarget = useCallback((target: EmptyScriptCleanupTarget) => {
+    if (target.disabledReason) return;
+    setSelectedEmptyScriptCleanupKeys((current) => {
+      const next = new Set(current);
+      const relatedKeys = emptyScriptCleanupDescendantKeys.get(target.key) ?? new Set<string>();
+      if (next.has(target.key)) {
+        next.delete(target.key);
+        for (const key of relatedKeys) next.delete(key);
+      } else {
+        next.add(target.key);
+        for (const key of relatedKeys) next.add(key);
+      }
+      return next;
+    });
+  }, [emptyScriptCleanupDescendantKeys]);
+
+  const requestEmptyScriptCleanup = useCallback(() => {
+    if (isLockedMode || !canEditText) return;
+    const cleanupAnalysis = analyzeEmptyScriptCleanup(
+      blocksRef.current,
+      scenesRef.current,
+      sceneDetailById,
+      scriptConfigRef.current.openingChapterMarkerId
+    );
+    if (!cleanupAnalysis.hasEmptyTextBlock && cleanupAnalysis.targets.length === 0) {
+      showReorderNotice("没有可清除的空白内容。");
+      closeToolbarMenu();
+      return;
+    }
+    setEmptyScriptCleanupDialog(cleanupAnalysis.targets);
+    closeToolbarMenu();
+  }, [canEditText, closeToolbarMenu, isLockedMode, sceneDetailById, setEmptyScriptCleanupDialog, showReorderNotice]);
+
+  const applyEmptyScriptCleanup = useCallback((selectedTargetKeys: Set<string>) => {
+    if (isLockedMode || !canEditText) return;
+    const currentBlocks = blocksRef.current;
+    const emptyTextBlockIds = currentBlocks
+      .filter(isEmptyTextBlock)
+      .map((block) => block.id);
+    if (emptyTextBlockIds.length === 0 && selectedTargetKeys.size === 0) {
+      setEmptyScriptCleanupDialog(null);
+      return;
+    }
+
+    if (selectedTargetKeys.size === 0) {
+      setEmptyScriptCleanupDialog(null);
+      deleteBlocks(emptyTextBlockIds);
+      showReorderNotice("已清除空白剧本块。");
+      return;
+    }
+
+    if (!pendingEmptyScriptCleanup) return;
+    const selectedTargets = pendingEmptyScriptCleanup
+      .filter((target) => !target.disabledReason && selectedTargetKeys.has(target.key));
+    if (selectedTargets.length === 0) {
+      setEmptyScriptCleanupDialog(null);
+      if (emptyTextBlockIds.length > 0) {
+        deleteBlocks(emptyTextBlockIds);
+        showReorderNotice("已清除空白剧本块。");
+      }
+      return;
+    }
+    const { deleteBlockIds, selectedSceneIds } = buildEmptyScriptCleanupRemovalPlan(
+      currentBlocks,
+      selectedTargets
+    );
+
+    const remainingBlocks = currentBlocks.filter((block) => !deleteBlockIds.has(block.id));
+    const remainingScenes = scenesRef.current.filter((scene) => !selectedSceneIds.has(scene.id));
+    const editedBlocks = remainingBlocks.length > 0 ? remainingBlocks : [makeBlock()];
+    let retainedBefore = 0;
+    const changes: BlockChange[] = [];
+    for (const block of currentBlocks) {
+      if (deleteBlockIds.has(block.id)) {
+        changes.push({
+          kind: "delete",
+          position: retainedBefore,
+          blockId: block.id,
+          beforeType: block.type,
+          afterType: null,
+        });
+      } else retainedBefore++;
+    }
+    if (remainingBlocks.length === 0) changes.push({
+      kind: "insert",
+      position: 0,
+      blockId: editedBlocks[0].id,
+      beforeType: null,
+      afterType: editedBlocks[0].type,
+    });
+    const normalized = normalizeScriptMarkerInvariants(
+      editedBlocks,
+      remainingScenes,
+      scriptConfigRef.current,
+      markerChangeFromOperations(changes),
+    );
+
+    saveSnapshot();
+    markBlockStructureDirty(currentBlocks, normalized.blocks);
+    resetScriptInteractions();
+    setEmptyScriptCleanupDialog(null);
+    setBlocks(normalized.blocks);
+    setScenes(normalized.scenes);
+    setSceneDetails((prev) => syncSceneDetailsWithScenes(
+      prev.filter((scene) => !selectedSceneIds.has(scene.id)),
+      normalized.scenes
+    ));
+    showReorderNotice("已清除选中空白内容。");
+  }, [canEditText, deleteBlocks, isLockedMode, markBlockStructureDirty, pendingEmptyScriptCleanup, resetScriptInteractions, saveSnapshot, setEmptyScriptCleanupDialog, showReorderNotice]);
+
+  const applyMarkerDeleteOperation = useCallback((operation: MarkerDeleteOperation) => {
+    const previousBlocks = blocksRef.current;
+    const next = executeMarkerDeletion({
+      blocks: previousBlocks,
+      scenes: scenesRef.current,
+      characters: charactersRef.current,
+      config: scriptConfigRef.current,
+    }, operation, uid);
+    saveSnapshot();
+    markBlockStructureDirty(previousBlocks, next.blocks);
+    resetScriptInteractions();
+    setBlocks(next.blocks);
+    setScenes(next.scenes);
+    setScriptConfig(next.config);
+    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
+    setMarkerDeleteDialog(null);
+    void persistMarkerState(next);
+  }, [markBlockStructureDirty, persistMarkerState, resetScriptInteractions, saveSnapshot]);
+
+  const deleteMarker = useCallback((markerBlockId: string) => {
+    if (isLockedMode) return;
+    const plan = planMarkerDeletion({
+      blocks: blocksRef.current,
+      scenes: scenesRef.current,
+      characters: charactersRef.current,
+      config: scriptConfigRef.current,
+    }, markerBlockId, sceneDetails);
+    if (plan.status === "blocked" || plan.status === "choice") {
+      setMarkerDeleteDialog({ plan, source: "local" });
+      return;
+    }
+    if (plan.operation.type === "whole" && !canEditText) {
+      setMarkerDeleteDialog({ plan: null, message: "删除整段空白剧本需要剧本编辑权限。", source: "local" });
+      return;
+    }
+    applyMarkerDeleteOperation(plan.operation);
+  }, [applyMarkerDeleteOperation, canEditText, isLockedMode, sceneDetails]);
+
+  const blockIdsRequireNonEmptySceneConfirm = useCallback((ids: string[]) => ids.some((id) => {
+    const index = blockIndexByIdRef.current.get(id);
+    if (index === undefined) return false;
+    const block = blocks[index];
+    return !!block && isBlockEmptyForDelete(block) && isOnlyTextBlockInMarkerSegment(ownedBlocks, index, scriptConfigRef.current.openingChapterMarkerId);
+  }), [blocks, ownedBlocks]);
+
+  const blockIdsAreEmptyForDelete = useCallback((ids: string[]) => ids.every((id) => {
+    const index = blockIndexByIdRef.current.get(id);
+    const block = index === undefined ? undefined : blocks[index];
+    return block ? isBlockEmptyForDelete(block) : false;
+  }), [blocks]);
+
+  const selectedBlockIdsArray = useMemo(() => Array.from(selectedBlockIds), [selectedBlockIds]);
+  const selectedBlocksRequireNonEmptySceneConfirm = useMemo(
+    () => selectedBlockIdsArray.length === 1 && blockIdsRequireNonEmptySceneConfirm(selectedBlockIdsArray),
+    [blockIdsRequireNonEmptySceneConfirm, selectedBlockIdsArray]
+  );
+  const selectedBlocksAreEmptyForDelete = useMemo(
+    () => blockIdsAreEmptyForDelete(selectedBlockIdsArray),
+    [blockIdsAreEmptyForDelete, selectedBlockIdsArray]
+  );
+
+  const requestSelectedBlocksDelete = useCallback(() => {
+    if (isLockedMode) return false;
+    const selectedIds = selectedBlockIdsArray;
+    if (selectedIds.length === 0) return false;
+    if (!canPerformSelectedBlockAction(selectedIds)) return true;
+    const selectedBlocks = selectedIds
+      .map((id) => {
+        const index = blockIndexByIdRef.current.get(id);
+        return index === undefined ? null : blocks[index] ?? null;
+      })
+      .filter((block): block is Block => block !== null);
+    if (selectedBlocks.length === 0) return false;
+    if (selectedBlocksAreEmptyForDelete && !selectedBlocksRequireNonEmptySceneConfirm) {
+      requestLargeSelectionOperation("delete", selectedIds.length, () => deleteBlocks(selectedIds));
+      return true;
+    }
+    const visibleAnchor = blocks
+      .slice(windowRange.start, windowRange.end)
+      .find((b) => selectedBlockIds.has(b.id));
+    const anchorId = visibleAnchor?.id ?? selectedBlocks[0].id;
+    setDeleteConfirmationRequest((current) => ({
+      anchorId,
+      token: (current?.token ?? 0) + 1,
+    }));
+    setDeleteConfirmingBlockIds(new Set(selectedIds));
+    return true;
+  }, [blocks, canPerformSelectedBlockAction, deleteBlocks, requestLargeSelectionOperation, selectedBlockIds, selectedBlockIdsArray, selectedBlocksAreEmptyForDelete, selectedBlocksRequireNonEmptySceneConfirm, windowRange.end, windowRange.start, isLockedMode]);
+
+  const requestMarkerDelete = useCallback((id: string) => {
+    if (isLockedMode) return false;
+    const ids = selectedBlockIds.has(id) ? selectedBlockIdsArray : [id];
+    if (!selectedBlockIds.has(id) && selectedBlockIds.size > 0) {
+      clearBlockSelection();
+    }
+    if (ids.length === 1) {
+      const plan = planMarkerDeletion({
+        blocks: blocksRef.current,
+        scenes: scenesRef.current,
+        characters: charactersRef.current,
+        config: scriptConfigRef.current,
+      }, id, sceneDetails);
+      setDeleteConfirmingBlockIds(new Set(plan.status === "blocked" ? [id] : plan.previewBlockIds));
+      return true;
+    }
+    if (!canPerformSelectedBlockAction(ids)) return false;
+    setDeleteConfirmingBlockIds(new Set(ids));
+    return true;
+  }, [canPerformSelectedBlockAction, clearBlockSelection, isLockedMode, sceneDetails, selectedBlockIds, selectedBlockIdsArray]);
+
+  const requestMobileDelete = useCallback((id: string) => {
+    const index = blockIndexByIdRef.current.get(id);
+    const block = index === undefined ? null : blocksRef.current[index] ?? null;
+    if (!block) return;
+
+    if (isMarkerBlock(block)) {
+      if (!requestMarkerDelete(id)) return;
+      setMobileDeleteConfirmation({
+        kind: "marker",
+        markerId: id,
+        message: block.type === "chapter_marker"
+          ? "确认删除此章节标记？"
+          : block.type === "scene_marker"
+            ? "确认删除此段落标记？"
+            : "确认删除此排练记号？",
+      });
+      return;
+    }
+
+    const ids = selectedBlockIds.has(id) ? selectedBlockIdsArray : [id];
+    if (!canPerformSelectedBlockAction(ids)) return;
+    const blocked = ids.length === 1 && blockIdsRequireNonEmptySceneConfirm(ids);
+    const canDeleteWithoutConfirmation = blockIdsAreEmptyForDelete(ids) && !blocked;
+    if (canDeleteWithoutConfirmation) {
+      requestLargeSelectionOperation("delete", ids.length, () => deleteBlocks(ids));
+      return;
+    }
+    setDeleteConfirmingBlockIds(new Set(ids));
+    setMobileDeleteConfirmation({
+      kind: "blocks",
+      blockIds: ids,
+      message: blocked
+        ? "章节/段落/排练记号内容不可为空，至少需包含一个剧本块"
+        : ids.length > 1
+          ? `确认删除所选 ${ids.length} 行？`
+          : "确认删除此行？",
+      blocked,
+    });
+  }, [
+    blockIdsAreEmptyForDelete,
+    blockIdsRequireNonEmptySceneConfirm,
+    canPerformSelectedBlockAction,
+    deleteBlocks,
+    requestLargeSelectionOperation,
+    requestMarkerDelete,
+    selectedBlockIds,
+    selectedBlockIdsArray,
+  ]);
+
+  const dismissBlockConfirmations = useCallback(() => {
+    setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
+    setMarkerDeleteConfirmBlockId(null);
+    setDismissActionToken((token) => token + 1);
+  }, []);
+
+  useEffect(() => {
+    const hasDeleteConfirmationOpen = deleteConfirmingBlockIds.size > 0 || markerDeleteConfirmBlockId !== null;
+    const handler = (e: PointerEvent) => {
+      if (draggingBlockId.current || isReorderLockedRef.current) return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (mobileBlockMenuBlockId !== null && !target.closest("[data-script-selection-action='true']")) return;
+      if (target.closest("a[href]")) return;
+      const docEl = document.documentElement;
+      const isViewportScrollbar = e.clientX >= docEl.clientWidth || e.clientY >= docEl.clientHeight;
+      if (isViewportScrollbar) return;
+      if (target.closest("[data-script-scene-detail='true']")) return;
+      if (target.closest("[data-script-confirmation='true']")) return;
+      const isSelectionBarClick = !!target.closest("[data-script-block-bar='true'], [data-script-marker-bar='true']");
+      const isMarkerViewClick = !!target.closest("[data-script-marker-selectable='true']") &&
+        !target.closest("[data-script-marker-title='true'], button, input, textarea, [contenteditable='true']");
+      if (isSelectionBarClick || isMarkerViewClick || target.closest("[data-script-selection-action='true']")) {
+        if (isSelectionBarClick && hasDeleteConfirmationOpen) {
+          clearBlockSelection();
+        }
+        dismissBlockConfirmations();
+        return;
+      }
+      if (selectedBlockIds.size > 0) {
+        clearBlockSelection();
+      }
+      dismissBlockConfirmations();
+    };
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
+  }, [clearBlockSelection, deleteConfirmingBlockIds.size, dismissBlockConfirmations, markerDeleteConfirmBlockId, mobileBlockMenuBlockId, selectedBlockIds.size]);
+
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (isTextEditingTarget(e.target)) return;
+      if (!requestSelectedBlocksDelete()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      clearEditorFocusForDrag();
+    };
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
+  }, [clearEditorFocusForDrag, requestSelectedBlocksDelete]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Shift") setShiftKeyDown(true);
+      if (e.key === "Shift" || e.key === "Control" || e.key === "Meta") {
+        selectionDetachedRef.current = true;
+      }
+    };
+    const handleKeyUp = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Shift") setShiftKeyDown(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keyup", handleKeyUp);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
+
+  const moveDraggedBlocks = useCallback((fromIds: string[], target: DragTarget): boolean => {
+    if (isLockedMode) return false;
+    const movingIds = new Set(fromIds);
+    if (movingIds.size === 0) {
+      showReorderNotice("移动失败：未找到被拖拽内容。");
+      return false;
+    }
+    const prev = blocksRef.current;
+    const resolvedTarget = resolveDragTarget(target, prev, windowRangeRef.current);
+    if (!resolvedTarget) {
+      showReorderNotice("移动失败：目标位置已失效，请重新拖拽。");
+      return false;
+    }
+    const rawInsertIdx = getDragInsertIndex(resolvedTarget, prev);
+    if (rawInsertIdx === -1) {
+      showReorderNotice("移动失败：目标位置已失效，请重新拖拽。");
+      return false;
+    }
+
+    const moving = prev.filter((b) => movingIds.has(b.id));
+    if (moving.length === 0) {
+      showReorderNotice("移动失败：未找到被拖拽内容。");
+      return false;
+    }
+
+    const remaining = prev.filter((b) => !movingIds.has(b.id));
+    const removedBeforeInsert = prev
+      .slice(0, rawInsertIdx)
+      .filter((b) => movingIds.has(b.id)).length;
+    const insertIdx = Math.max(0, Math.min(remaining.length, rawInsertIdx - removedBeforeInsert));
+    const next = [...remaining];
+    next.splice(insertIdx, 0, ...moving);
+    if (next.every((b, i) => b.id === prev[i]?.id)) {
+      showReorderNotice("移动未执行：目标位置与当前位置相同。");
+      return false;
+    }
+    const normalized = normalizeScriptMarkerInvariants(
+      next,
+      scenesRef.current,
+      scriptConfigRef.current,
+      getMarkerChange(prev, next, movingIds),
+    );
+    const normalizedNext = normalized.blocks;
+    const movedStartIndex = normalizedNext.findIndex((block) => movingIds.has(block.id));
+    const movingHasMarker = moving.some(isMarkerBlock);
+    const firstMovedOwnerMarkerId = normalizedNext[movedStartIndex].ownerMarkerId ?? null;
+    const movedTextOwnershipChanged = !movingHasMarker && moving.some((block, offset) => {
+      const beforeIdx = blockIndexByIdRef.current.get(block.id);
+      const before = beforeIdx === undefined ? null : ownedBlocksRef.current[beforeIdx];
+      return (before?.ownerMarkerId ?? null) !== (normalizedNext[movedStartIndex + offset]?.ownerMarkerId ?? null);
+    });
+
+    requestLargeSelectionOperation("move", moving.length, () => {
+      saveSnapshot();
+      for (const id of movingIds) pendingMovedBlockIdsRef.current.add(id);
+      markBlockStructureDirty(prev, normalizedNext, movingIds);
+      pendingVirtualScrollAnchorRef.current = null;
+      pendingNavigateRef.current = null;
+      postNavCorrectionRef.current = null;
+      requestVirtualWindowRefresh();
+      pendingMoveCenterRef.current = moving[0].id;
+      if (movingHasMarker) {
+        if (!sameSceneRows(normalized.scenes, scenesRef.current)) {
+          setScenes(normalized.scenes);
+          setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
+        }
+        syncOpeningChapterMarkerId(normalizedNext);
+      }
+      setBlocks(normalizedNext);
+      const movedBlockIds: string[] = [];
+      const movedRehearsalMarkerIds: string[] = [];
+      const movedNonRehearsalIds: string[] = [];
+      for (const block of moving) {
+        movedBlockIds.push(block.id);
+        if (block.type === "rehearsal_marker") movedRehearsalMarkerIds.push(block.id);
+        else movedNonRehearsalIds.push(block.id);
+      }
+      glowChangedBlocks(movedNonRehearsalIds);
+      movedRehearsalMarkerIds.forEach(glowTocMarker);
+      const movedEndBlockId = movedBlockIds[movedBlockIds.length - 1];
+      const movedEndBlock = normalizedNext.find((block) => block.id === movedEndBlockId);
+      selectionAnchorBlockIdRef.current = moving[0]?.id ?? null;
+      selectionDetachedRef.current = false;
+      markerEndedScopeIdsRef.current = movedEndBlock && isMarkerBlock(movedEndBlock)
+        ? new Set([movedEndBlock.id])
+        : new Set();
+      setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
+      setSelectedBlockIds(new Set(movedBlockIds));
+      if (movingHasMarker) {
+        showSelectionChangeNotice("章节标记/段落标记/排练记号已更新。");
+      } else if (movedTextOwnershipChanged) {
+        const context = firstMovedOwnerMarkerId
+          ? markerContextById.get(firstMovedOwnerMarkerId) ?? null
+          : null;
+        const scene = context?.sceneId ? sceneById.get(context.sceneId) : null;
+        const sceneLabel = scene
+          ? [scene.number.trim(), scene.name.trim()].filter(Boolean).join("-") || "（未命名）"
+          : "（无章节）";
+        const markLabel = context?.rehearsalId
+          ? rehearsalLabels.rehearsalLabelByMarkerId.get(context.rehearsalId) ?? "(空)"
+          : "(空)";
+        showSelectionChangeNotice(`当前 ${moving.length} 行的章节与排练记号已更改为：${sceneLabel}-${markLabel}`);
+      }
+      unlockReorderAfterCommit();
+    }, unlockReorder);
+    return true;
+  }, [glowChangedBlocks, glowTocMarker, markBlockStructureDirty, markerContextById, rehearsalLabels.rehearsalLabelByMarkerId, requestLargeSelectionOperation, requestVirtualWindowRefresh, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, syncOpeningChapterMarkerId, unlockReorder, unlockReorderAfterCommit, isLockedMode]);
+
+  const isNoopDragTarget = useCallback((fromIds: string[], target: DragTarget): boolean => {
+    const movingIds = new Set(fromIds);
+    if (movingIds.size === 0) return true;
+    const currentBlocks = blocksRef.current;
+    const resolvedTarget = resolveDragTarget(target, currentBlocks, windowRangeRef.current);
+    if (!resolvedTarget) return true;
+    const rawInsertIdx = getDragInsertIndex(resolvedTarget, currentBlocks);
+    if (rawInsertIdx < 0) return true;
+    const remaining = currentBlocks.filter((b) => !movingIds.has(b.id));
+    const removedBeforeInsert = currentBlocks
+      .slice(0, rawInsertIdx)
+      .filter((b) => movingIds.has(b.id)).length;
+    const insertIdx = Math.max(0, Math.min(remaining.length, rawInsertIdx - removedBeforeInsert));
+    const next = [...remaining];
+    next.splice(insertIdx, 0, ...currentBlocks.filter((b) => movingIds.has(b.id)));
+    return next.every((b, i) => b.id === currentBlocks[i]?.id);
+  }, []);
+
+  const getDragTargetFromClientY = useCallback((clientY: number): DragTarget | null => {
+    const container = blocksContainerRef.current;
+    if (!container) return null;
+    const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-bwrap]"));
+    if (rows.length === 0) return null;
+
+    const firstRect = rows[0].getBoundingClientRect();
+    const lastRect = rows[rows.length - 1].getBoundingClientRect();
+    if (clientY < firstRect.top) return { kind: "edge", edge: "top" };
+    if (clientY > lastRect.bottom) return { kind: "edge", edge: "bottom" };
+
+    const currentBlocks = blocksRef.current;
+    let insertIdx = currentBlocks.length;
+    const blockIndexById = blockIndexByIdRef.current;
+    for (const row of rows) {
+      const id = row.dataset.bwrap;
+      if (!id) continue;
+      const idx = blockIndexById.get(id);
+      if (idx === undefined) continue;
+      const rect = row.getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) {
+        insertIdx = idx;
+        break;
+      }
+      insertIdx = idx + 1;
+    }
+
+    if (currentBlocks.length === 0) return null;
+    const target = insertIdx >= currentBlocks.length
+      ? { kind: "block" as const, id: currentBlocks[currentBlocks.length - 1].id, position: "after" as const }
+      : { kind: "block" as const, id: currentBlocks[insertIdx].id, position: "before" as const };
+    if (isNoopDragTarget(draggingBlockIds.current, target)) {
+      dragInvalidReasonRef.current = "移动未执行：目标位置与当前位置相同。";
+      return null;
+    }
+    dragInvalidReasonRef.current = null;
+    return target;
+  }, [isNoopDragTarget]);
+
+  const updateDragTargetFromClientY = useCallback((clientY: number): DragTarget | null => {
+    const nextTarget = getDragTargetFromClientY(clientY);
+    dragTargetRef.current = nextTarget;
+    setDragTarget((current) => (sameDragTarget(current, nextTarget) ? current : nextTarget));
+    return nextTarget;
+  }, [getDragTargetFromClientY]);
+
+  const setEdgeDragTarget = useCallback((edge: "top" | "bottom") => {
+    const nextTarget: DragTarget = { kind: "edge", edge };
+    dragTargetRef.current = nextTarget;
+    setDragTarget((current) => (sameDragTarget(current, nextTarget) ? current : nextTarget));
+    dragInvalidReasonRef.current = null;
+  }, []);
+
+  const clearDragTarget = useCallback(() => {
+    dragTargetRef.current = null;
+    setDragTarget(null);
+  }, []);
+
+  const handleEdgeSpacerDragOver = useCallback((e: DragEvent<HTMLDivElement>, edge: "top" | "bottom") => {
+    if (isLockedMode) return;
+    if (isReorderLockedRef.current) return;
+    if (!draggingBlockId.current) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setEdgeDragTarget(edge);
+  }, [setEdgeDragTarget, isLockedMode]);
+
+  const handleEdgeSpacerDrop = useCallback((e: DragEvent<HTMLDivElement>, edge: "top" | "bottom") => {
+    if (isLockedMode) return;
+    if (isReorderLockedRef.current) return;
+    if (!draggingBlockId.current && draggingBlockIds.current.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    lockReorder();
+    dropHandledRef.current = true;
+    const draggedIds = draggingBlockIds.current.length
+      ? draggingBlockIds.current
+      : e.dataTransfer.getData("text/plain").split(",").filter(Boolean);
+    const target: DragTarget = { kind: "edge", edge };
+    draggingBlockId.current = null;
+    draggingBlockIds.current = [];
+    clearDragTarget();
+    clearDragCountBadge();
+    setScriptDragging(false);
+    dragInvalidReasonRef.current = null;
+    const moved = moveDraggedBlocks(draggedIds, target);
+    if (!moved) unlockReorder();
+  }, [clearDragCountBadge, clearDragTarget, lockReorder, moveDraggedBlocks, setScriptDragging, unlockReorder, isLockedMode]);
+
+  const insertBlockAt = useCallback((index: number) => {
+    if (isLockedMode) return;
+    saveSnapshot();
+    // Pre-generate the new block ID outside the updater (Strict Mode double-invocation fix).
+    const newBlockId = uid();
+    // refId must also be determined outside the updater; read it from blocksRef.
+    const previousBlocks = blocksRef.current;
+    const insertIndex = Math.max(0, Math.min(index, previousBlocks.length));
+    const refId = insertIndex > 0 ? (previousBlocks[insertIndex - 1]?.id ?? null) : null;
+    const newBlock: Block = {
+      ...makeBlock(),
+      id: newBlockId,  // use the pre-generated stable ID
+      sceneId: null,
+      rehearsalMark: null,
+    };
+    const updated = [...previousBlocks];
+    updated.splice(insertIndex, 0, newBlock);
+    pendingCharOpen.current = newBlock.id;
+    applyBlockStructureEdit(previousBlocks, updated, markerChangeFromOperations([{
+      kind: "insert",
+      position: insertIndex,
+      blockId: newBlock.id,
+      beforeType: null,
+      afterType: newBlock.type,
+    }]));
+    if (refId) inheritTags(refId, newBlockId);
+  }, [applyBlockStructureEdit, saveSnapshot, inheritTags, isLockedMode]);
+
+  const addChar = (name: string) => {
+    if (isLockedMode) return;
+    setCharacters((prev) => [...prev, { id: uid(), name, isAggregate: false }]);
+  };
+
+  const removeChar = (charId: string) => {
+    if (isLockedMode) return;
+    setCharacters((prev) => prev.filter((c) => c.id !== charId));
+    markPageMapDirty("full");
+    setBlocks((prev) =>
+      prev.map((b) => {
+        const restAnnotations = { ...b.characterAnnotations };
+        delete restAnnotations[charId];
+        return { ...b, characterIds: b.characterIds.filter((id) => id !== charId), characterAnnotations: restAnnotations };
+      })
+    );
+  };
+
+  const renameChar = (charId: string, name: string) =>
+    !isLockedMode && setCharacters((prev) =>
+      prev.map((c) => (c.id === charId ? { ...c, name } : c))
+    );
+
+  const runSceneMenuMutation = async (request: () => Promise<Response>, failureMessage: string) => {
+    try {
+      if (!await flushPendingPatch()) throw new Error("剧本尚未保存，请稍后重试。");
+      const response = await request();
+      if (!response.ok) throw new Error(failureMessage);
+      await reloadScriptState();
+    } catch (error) {
+      showReorderNotice(error instanceof Error ? error.message : failureMessage);
+    }
+  };
+
+  const addScene = async (
+    parentId?: string,
+    target?: { insertAfterSceneId?: string; insertBeforeSceneId?: string }
+  ) => {
+    if (isLockedMode || !productionId || !canEditMetadata) return;
+    const payload = activeVersionId
+      ? { name: "", parentId: parentId ?? null, versionId: activeVersionId, ...target }
+      : { name: "", parentId: parentId ?? null, ...target };
+    await runSceneMenuMutation(
+      () => fetch(`${BASE_PATH}/api/production/${productionId}/scenes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+      "添加章节失败，请稍后重试。"
+    );
+  };
+
+  const updateScene = async (id: string, name: string) => {
+    if (isLockedMode || !productionId || !canEditMetadata) return;
+    await runSceneMenuMutation(
+      () => fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(activeVersionId ? { name, versionId: activeVersionId } : { name }),
+      }),
+      "更新章节失败，请稍后重试。"
+    );
+  };
+
+  const removeScene = async (id: string) => {
+    if (isLockedMode || !productionId || !canEditMetadata) return;
+    try {
+      if (!await flushPendingPatch()) throw new Error("剧本尚未保存，请稍后重试。");
+      const request = (operation?: MarkerDeleteOperation["type"]) => fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...(activeVersionId ? { versionId: activeVersionId } : {}), ...(operation ? { operation } : {}) }),
+      });
+      const response = await request();
+      const data = await response.json().catch(() => ({}));
+      if ((response.status === 300 && data.plan?.status === "choice") || (response.status === 409 && data.plan?.status === "blocked")) {
+        setMarkerDeleteDialog({ plan: data.plan, source: "server" });
+        return;
+      }
+      if (!response.ok) {
+        setMarkerDeleteDialog({ plan: null, message: data.error ?? "删除章节失败，请稍后重试。", source: "server" });
+        return;
+      }
+      await reloadScriptState();
+    } catch (error) {
+      setMarkerDeleteDialog({
+        plan: null,
+        message: error instanceof Error ? error.message : "删除章节失败，请稍后重试。",
+        source: "server",
+      });
+    }
+  };
+
+  const applyServerMarkerDeleteOperation = async (operation: MarkerDeleteOperation) => {
+    if (!productionId) return;
+    setMarkerDeleteDialogBusy(true);
+    try {
+      const response = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${operation.markerId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...(activeVersionId ? { versionId: activeVersionId } : {}), operation: operation.type }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setMarkerDeleteDialog({ plan: null, message: data.error ?? "删除章节失败，请稍后重试。", source: "server" });
+        return;
+      }
+      await reloadScriptState();
+      setMarkerDeleteDialog(null);
+    } finally {
+      setMarkerDeleteDialogBusy(false);
+    }
+  };
+
+  const patchSceneMeta = async (id: string, fields: Partial<SceneMetaFields>) => {
+    if (!productionId || !canEditMetadata) return;
+    const response = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(activeVersionId ? { ...fields, versionId: activeVersionId } : fields),
+    });
+    if (!response.ok) throw new Error("Failed to update scene metadata");
+    setSceneDetails((prev) => prev.map((scene) => (scene.id === id ? { ...scene, ...fields } : scene)));
+  };
+
+  const commentPanelNavigationTargets = useMemo(
+    () => findSideBlockPanelNavigationTargets(
+      blocks,
+      activeCommentBlockId,
+      blockId => (commentsByBlockId.get(blockId)?.length ?? 0) > 0,
+    ),
+    [activeCommentBlockId, blocks, commentsByBlockId],
+  );
+  const assetPanelNavigationTargets = useMemo(
+    () => findSideBlockPanelNavigationTargets(
+      blocks,
+      activeAssetBlockId,
+      blockId => (blockAssetsByBlockId.get(blockId)?.length ?? 0) > 0,
+    ),
+    [activeAssetBlockId, blocks, blockAssetsByBlockId],
+  );
+  const navigateSidePanelBlock = useCallback((kind: "comment" | "asset", direction: -1 | 1) => {
+    const targets = kind === "comment" ? commentPanelNavigationTargets : assetPanelNavigationTargets;
+    const nextBlockId = direction === -1 ? targets.previousBlockId : targets.nextBlockId;
+    if (!nextBlockId) return;
+
+    openBlockSidePanel(kind, nextBlockId);
+
+    const blockIndex = blocksRef.current.findIndex(block => block.id === nextBlockId);
+    if (blockIndex >= 0) scrollToBlockIdx(blockIndex, "center");
+  }, [
+    assetPanelNavigationTargets,
+    commentPanelNavigationTargets,
+    openBlockSidePanel,
+    scrollToBlockIdx,
+  ]);
+
+  if (loadState === "loading") {
+    return (
+      <div className="flex min-h-full items-center justify-center bg-[var(--paper)]">
+        <span className="text-sm text-zinc-400">加载中...</span>
+      </div>
+    );
+  }
+
+  if (loadState === "not-found") {
+    return (
+      <div className="flex min-h-full flex-col items-center justify-center gap-3 bg-[var(--paper)]">
+        <p className="text-sm font-medium text-zinc-500">找不到文档</p>
+        <p className="text-xs text-zinc-400">ID：{scriptId}</p>
+        <Link href={productionId ? `/production/${productionId}` : "/"} className="mt-2 text-xs text-zinc-400 underline hover:text-zinc-600">
+          返回
+        </Link>
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="flex min-h-full flex-col items-center justify-center gap-3 bg-[var(--paper)]">
+        <p className="text-sm font-medium text-zinc-500">加载失败</p>
+        {loadError && (
+          <p className="max-w-sm whitespace-pre-wrap text-center text-xs text-zinc-400">
+            {loadError}
+          </p>
+        )}
+        <Link href={productionId ? `/production/${productionId}` : "/"} className="mt-2 text-xs text-zinc-400 underline hover:text-zinc-600">
+          返回
+        </Link>
+      </div>
+    );
+  }
+
+  const selectionNotice = selectedBlockIds.size > 1
+    ? `已选中 ${selectedBlockIds.size} 行`
+    : "";
+  const safeWindowStart = blocks.length === 0
+    ? 0
+    : Math.min(windowRange.start, Math.max(0, blocks.length - 1));
+  const safeWindowEnd = blocks.length === 0
+    ? 0
+    : Math.min(Math.max(windowRange.end, safeWindowStart + 1), blocks.length);
+  const largeSelectionNotice = selectedBlockIds.size > LARGE_SELECTION_BLOCK_THRESHOLD
+    ? "当前选中行数已超过 500 行，继续操作可能导致页面卡顿。"
+    : "";
+  const shiftSelectionNotice = shiftKeyDown && selectedBlockIds.size > 0
+    ? "连续多选模式"
+    : "";
+  const edgeDragNotice = dragTarget?.kind === "edge"
+    ? (dragTarget.edge === "top"
+      ? "拖拽至此释放以移动至更上方区域"
+      : "拖拽至此释放以移动至更下方区域")
+    : "";
+  const rootFontSizePx = typeof window === "undefined"
+    ? 16
+    : parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
+  const scriptTocNumberWidths = measureScriptTocNumberWidths(tocScenes, rootFontSizePx);
+  const scriptTocRailFullWidthPx = SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM * rootFontSizePx;
+  const scriptTocRailCompactWidthPx = Math.max(
+    scriptTocNumberWidths.chapterNumberSlotWidthPx,
+    scriptTocNumberWidths.sceneNumberSlotWidthPx,
+  ) + (SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM + SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM) * rootFontSizePx;
+  const scriptSceneDetailRailMinWidthPx = SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM * rootFontSizePx;
+  const canShowSceneDetail = productionSidebarReservedWidth > 0
+    && workspaceWidth >= (
+      SCRIPT_EDITOR_MAX_WIDTH_PX + scriptTocRailCompactWidthPx + scriptSceneDetailRailMinWidthPx
+    );
+  const isSceneDetailRequested = !!productionId && display.sceneDetail;
+  const isSceneDetailVisible = isSceneDetailRequested && canShowSceneDetail;
+  const centeredScriptWidthPx = Math.min(workspaceWidth, SCRIPT_EDITOR_MAX_WIDTH_PX);
+  const centeredLeftPanelWidthPx = Math.max(
+    0,
+    (workspaceWidth - centeredScriptWidthPx) / 2,
+  );
+  const detailReservedContentsWidthPx = Math.max(
+    0,
+    workspaceWidth - centeredScriptWidthPx - scriptSceneDetailRailMinWidthPx,
+  );
+  const fullContentsPanelAvailableWidthPx = isSceneDetailRequested
+    ? detailReservedContentsWidthPx
+    : centeredLeftPanelWidthPx;
+  const compactContentsPanelAvailableWidthPx = isSceneDetailVisible
+    ? detailReservedContentsWidthPx
+    : centeredLeftPanelWidthPx;
+  const scriptTocRailMode: "full" | "compact" | null =
+    productionSidebarReservedWidth >= SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX
+      || workspaceWidth === 0
+      || fullContentsPanelAvailableWidthPx >= scriptTocRailFullWidthPx
+      ? "full"
+      : compactContentsPanelAvailableWidthPx + SCRIPT_BODY_HORIZONTAL_PADDING_REM * rootFontSizePx
+          >= scriptTocRailCompactWidthPx
+        ? "compact"
+        : null;
+  const tocAsideWidthPx = scriptTocRailMode === "compact"
+    ? scriptTocRailCompactWidthPx
+    : scriptTocRailFullWidthPx;
+  const renderedLeftPanelWidthPx = isSceneDetailVisible
+    ? scriptTocRailMode ? tocAsideWidthPx : 0
+    : centeredLeftPanelWidthPx;
+  const availableRightGutterWidthPx = Math.max(
+    0,
+    workspaceWidth - renderedLeftPanelWidthPx - centeredScriptWidthPx,
+  );
+  const rightGutterWidthPx = isSceneDetailVisible
+    ? Math.min(
+        availableRightGutterWidthPx,
+        SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX + SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX,
+      )
+    : availableRightGutterWidthPx;
+  const scriptBodyWidthPx = Math.max(
+    0,
+    workspaceWidth - renderedLeftPanelWidthPx - rightGutterWidthPx,
+  );
+  const tocAsideStyle: React.CSSProperties = {
+    width: `${tocAsideWidthPx}px`,
+    marginLeft: `${Math.max(
+      0,
+      renderedLeftPanelWidthPx - tocAsideWidthPx + SCRIPT_BODY_HORIZONTAL_PADDING_REM * rootFontSizePx,
+    )}px`,
+  };
+  const sceneDetailAsideWidthPx = Math.min(
+    SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX,
+    Math.max(
+      scriptSceneDetailRailMinWidthPx,
+      rightGutterWidthPx - SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX,
+    ),
+  );
+  const sceneDetailAsideStyle: React.CSSProperties = {
+    width: `${sceneDetailAsideWidthPx}px`,
+    marginRight: `${Math.max(0, rightGutterWidthPx - sceneDetailAsideWidthPx)}px`,
+  };
+  const sceneIdForBlockAtIndex = (block: Block, index: number): string | null => {
+    const markerId = isMarkerBlock(block) ? block.id : (ownedBlocks[index] ?? block).ownerMarkerId;
+    return markerId ? markerContextById.get(markerId)?.sceneId ?? null : null;
+  };
+  const sceneIdForBlockId = (blockId: string | null | undefined): string | null => {
+    if (!blockId) return null;
+    const cachedIndex = blockIndexByIdRef.current.get(blockId) ?? -1;
+    const blockIndex = blocks[cachedIndex]?.id === blockId
+      ? cachedIndex
+      : blocks.findIndex((block) => block.id === blockId);
+    return blockIndex >= 0 ? sceneIdForBlockAtIndex(blocks[blockIndex], blockIndex) : null;
+  };
+  const markerDeleteConfirmBlockIndex = markerDeleteConfirmBlockId
+    ? blockIndexByIdRef.current.get(markerDeleteConfirmBlockId)
+    : undefined;
+  const markerDeleteConfirmBlock = markerDeleteConfirmBlockIndex === undefined
+    ? null
+    : blocks[markerDeleteConfirmBlockIndex] ?? null;
+  const markerDeleteConfirmDetailSceneId = isSceneDetailVisible
+    && markerDeleteConfirmBlockIndex !== undefined
+    && markerDeleteConfirmBlock && (
+    markerDeleteConfirmBlock.type === "chapter_marker" || markerDeleteConfirmBlock.type === "scene_marker"
+  )
+    ? sceneIdForBlockAtIndex(markerDeleteConfirmBlock, markerDeleteConfirmBlockIndex)
+    : null;
+  const detailSceneId = isSceneDetailVisible
+    ? markerDeleteConfirmDetailSceneId ?? (
+        selectedBlockIds.size > 1
+          ? null
+          : (selectedBlockIds.size === 1 && detailBlockVisibility.selected
+              ? sceneIdForBlockId(selectedDetailBlockId)
+              : null)
+            ?? (detailBlockVisibility.focused ? sceneIdForBlockId(focusedId) : null)
+            ?? activeSceneId
+      )
+    : null;
+  const activeScene = detailSceneId ? sceneById.get(detailSceneId) ?? null : null;
+  const activeSceneDetail = activeScene
+    ? sceneDetailById.get(activeScene.id) ?? toSceneDetail(activeScene)
+    : null;
+  const commentBubbleMode = workspaceWidth === 0
+    ? null
+    : isSceneDetailVisible ? "full" : scriptTocRailMode;
+  const blockSidePanelWidthPx = isSceneDetailVisible
+    ? sceneDetailAsideWidthPx
+    : SIDE_PANEL_FALLBACK_WIDTH_PX;
+  const commentBubbleWidthPx = commentBubbleMode === "compact"
+    ? scriptTocRailCompactWidthPx - COMMENT_BUBBLE_GAP_REM * rootFontSizePx
+    : Math.max(
+        COMMENT_BUBBLE_MIN_WIDTH_PX,
+        rightGutterWidthPx - COMMENT_BUBBLE_GAP_REM * rootFontSizePx,
+      );
+  const activeCommentBlockIndex = activeCommentBlockId
+    ? blocks.findIndex(block => block.id === activeCommentBlockId)
+    : -1;
+  const activeCommentBlockLineNumber = activeCommentBlockId
+    ? scriptLineNumberByBlockId.get(activeCommentBlockId)
+    : undefined;
+  const activeCommentBlockCaption = activeCommentBlockIndex >= 0 && activeCommentBlockLineNumber !== undefined
+    ? buildCommentBlockCaption(blocks[activeCommentBlockIndex], characters, activeCommentBlockLineNumber)
+    : null;
+  const activeAssetBlockIndex = activeAssetBlockId
+    ? blocks.findIndex(block => block.id === activeAssetBlockId)
+    : -1;
+  const activeAssetBlockLineNumber = activeAssetBlockId
+    ? scriptLineNumberByBlockId.get(activeAssetBlockId)
+    : undefined;
+  const activeAssetBlockCaption = activeAssetBlockIndex >= 0 && activeAssetBlockLineNumber !== undefined
+    ? buildCommentBlockCaption(blocks[activeAssetBlockIndex], characters, activeAssetBlockLineNumber)
+    : null;
+  const dragInstructionNotice = !edgeDragNotice && (isScriptDragging || isReorderLocked)
+      ? "拖拽当前剧本块至指定位置松开以调整位置"
+      : "";
+  const rightMenuClass = `${
+    toolbarCompact
+      ? ""
+      : "absolute right-0 top-full"
+  } ${toolbarCompact ? "" : "mt-2.5"} z-40 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`;
+  const selfPresence: RemotePresence | null = clientId
+    ? {
+        clientId,
+        userName: userName || "?",
+        color: presenceColor(clientId),
+        blockId: null,
+      }
+    : null;
+  const onlineUsers = [
+    ...Array.from(presenceMap.values()).filter((presence) => presence.clientId !== clientId),
+    ...(selfPresence ? [selfPresence] : []),
+  ];
+  const renderPresenceStack = (maxVisibleAvatars: number) => {
+    const overflowCount = onlineUsers.length > maxVisibleAvatars
+      ? onlineUsers.length - maxVisibleAvatars + 1
+      : 0;
+    const visibleUsers = overflowCount > 0
+      ? onlineUsers.slice(0, maxVisibleAvatars - 1)
+      : onlineUsers;
+    return (
+      <div className="flex flex-nowrap items-center">
+        {visibleUsers.map((presence) => (
+          <div key={presence.clientId} className={`-ml-1 first:ml-0 ${presence.clientId === clientId ? "opacity-40" : ""}`}>
+            <PresenceAvatar
+              name={presence.userName}
+              color={presence.color}
+              title={presence.clientId === clientId ? `${presence.userName}（你）` : presence.userName}
+            />
+          </div>
+        ))}
+        {overflowCount > 0 && (
+          <div className="-ml-1 first:ml-0">
+            <div
+              title={`另有 ${overflowCount} 位在线人员`}
+              className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-100 px-1 text-[10px] font-bold text-zinc-500"
+            >
+              +{overflowCount}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+  return (
+    <div ref={setWorkspaceMeasureRef} className="bg-[var(--paper)]">
+      {/* Toolbar */}
+      <header className={searchOpen || jumpTarget
+        ? "sticky top-0 z-40 border-b border-[var(--line)] bg-[var(--surface)] shadow-sm"
+        : "contents"
+      }>
+        <ScriptToolbarMenuController
+          toolbarCompact={toolbarCompact}
+          characterCloseBlocked={pendingAggregateFocusPrompt !== null}
+          openMenuRef={toolbarOpenMenuRef}
+          closeMenuRef={toolbarMenuCloseRef}
+        >
+          {({
+            openMenu,
+            setOpenMenu,
+            toggleMenu,
+            openNestedMenu,
+            handleCharacterPanelOpenChange,
+            scriptMenuPosition,
+            nestedMenuPosition,
+          }) => {
+            const toolbarOverflow = toolbarCompact ? (
+              <>
+                {presenceFolded && onlineUsers.length > 0 && (
+                  <div className="border-b border-zinc-100">
+                    <ProductionOverflowSubmenuButton
+                      menuId="presence"
+                      label={<span className="text-[10px] font-medium tracking-wide text-zinc-400">当前在线</span>}
+                      detail={renderPresenceStack(4)}
+                      expanded={openMenu === "presence"}
+                      onToggle={(anchor) => openNestedMenu("presence", anchor)}
+                    />
+                  </div>
+                )}
+                {canEditMetadata && (
+                  <ProductionOverflowSubmenuButton
+                    menuId="scene"
+                    label="章节"
+                    expanded={openMenu === "scene"}
+                    onToggle={(anchor) => openNestedMenu("scene", anchor)}
+                  />
+                )}
+                {(canEditMetadata || isLockedMode) && (
+                  <ProductionOverflowSubmenuButton
+                    menuId="char"
+                    label="角色"
+                    expanded={openMenu === "char"}
+                    onToggle={(anchor) => openNestedMenu("char", anchor)}
+                  />
+                )}
+                <ProductionOverflowSubmenuButton
+                  menuId="edit"
+                  label={isLockedMode ? "查找" : "编辑"}
+                  expanded={openMenu === "edit"}
+                  onToggle={(anchor) => openNestedMenu("edit", anchor)}
+                />
+                <ProductionOverflowSubmenuButton
+                  menuId="display"
+                  label="显示"
+                  expanded={openMenu === "display"}
+                  onToggle={(anchor) => openNestedMenu("display", anchor)}
+                />
+                <ProductionOverflowSubmenuButton
+                  menuId="export"
+                  label="导出"
+                  expanded={openMenu === "export"}
+                  onToggle={(anchor) => openNestedMenu("export", anchor)}
+                />
+              </>
+            ) : null;
+
+            return (
+        <ProductionTopMenu
+          barRef={setToolbarElement}
+          fallbackClassName="gap-0 px-6"
+          overflow={toolbarOverflow}
+        >
+          {(portaled) => (
+            <>
+          {productionName && (
+            <>
+              <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {productionName}
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>剧本</span>
+              </div>
+              <ProductionTopMenuDivider />
+            </>
+          )}
+          {!isLockedMode && (
+            <>
+
+              {/* 剧本菜单 — 关于 + 元数据设置 */}
+              <div className="relative -ml-1 shrink-0">
+                <button
+                  ref={scriptMenuPosition.anchorRef}
+                  data-script-toolbar-menu-trigger="script"
+                  onClick={() => toggleMenu("script")}
+                  className="flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+                >
+                  剧本 <ChevronIcon size={12} className="opacity-50" />
+                </button>
+                {openMenu === "script" && (
+                  <div
+                    data-script-toolbar-menu-panel="script"
+                    ref={scriptMenuPosition.menuRef}
+                    style={scriptMenuPosition.style}
+                    className="z-40 w-52 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
+                  >
+                    <button
+                      onClick={() => { setAboutOpen(true); setOpenMenu(null); }}
+                      className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                    >
+                      关于
+                    </button>
+                    <div className="group/display-option relative">
+                      <button
+                        onClick={() => {
+                          if (openingChapterMustBeVisible) return;
+                          void saveScriptConfig({ showOpeningChapter: !scriptConfig.showOpeningChapter });
+                        }}
+                        aria-disabled={openingChapterMustBeVisible}
+                        aria-describedby={openingChapterMustBeVisible ? "opening-chapter-in-use-notice" : undefined}
+                        className={`peer flex w-full items-center justify-between px-3 py-1.5 text-sm ${
+                          openingChapterMustBeVisible ? DISABLED_CHECKBOX_OPTION_CLASS : "text-zinc-600 hover:bg-zinc-50"
+                        }`}
+                      >
+                        <span>显示开场</span>
+                        <span className={checkboxOptionClass(openingChapterVisible)}>✓</span>
+                      </button>
+                      {openingChapterMustBeVisible && (
+                        <span
+                          id="opening-chapter-in-use-notice"
+                          role="tooltip"
+                          className="pointer-events-none invisible absolute right-2 top-full z-50 mt-1 whitespace-nowrap rounded bg-zinc-800 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow-md transition-opacity group-hover/display-option:visible group-hover/display-option:opacity-100 peer-focus-visible:visible peer-focus-visible:opacity-100"
+                        >
+                          开场下已有段落或排练记号，必须显示
+                        </span>
+                      )}
+                    </div>
+                    <div className="group/display-option relative">
+                      <button
+                        onClick={() => {
+                          if (rehearsalMarksCannotBeDisabled) return;
+                          void saveScriptConfig({ useRehearsalMarks: !scriptConfig.useRehearsalMarks });
+                        }}
+                        aria-disabled={rehearsalMarksCannotBeDisabled}
+                        aria-describedby={rehearsalMarksCannotBeDisabled
+                          ? "rehearsal-marks-in-use-notice"
+                          : undefined}
+                        className={`peer flex w-full items-center justify-between px-3 py-1.5 text-sm ${
+                          rehearsalMarksCannotBeDisabled ? DISABLED_CHECKBOX_OPTION_CLASS : "text-zinc-600 hover:bg-zinc-50"
+                        }`}
+                      >
+                        <span>使用排练记号</span>
+                        <span className={checkboxOptionClass(scriptConfig.useRehearsalMarks)}>✓</span>
+                      </button>
+                      {rehearsalMarksCannotBeDisabled && (
+                        <span
+                          id="rehearsal-marks-in-use-notice"
+                          role="tooltip"
+                          className="pointer-events-none invisible absolute right-2 top-full z-50 mt-1 whitespace-nowrap rounded bg-zinc-800 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow-md transition-opacity group-hover/display-option:visible group-hover/display-option:opacity-100 peer-focus-visible:visible peer-focus-visible:opacity-100"
+                        >
+                          无法禁用，当前剧本存在排练记号 {firstRehearsalMarkerLabel}
+                        </span>
+                      )}
+                    </div>
+                    <div className="my-1 border-t border-zinc-50" />
+                    <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">段内舞台提示</p>
+                    {(
+                      [
+                        ["（", "）", "（台词内）"],
+                        ["【", "】", "【台词内】"],
+                      ] as [string, string, string][]
+                    ).map(([open, close, label]) => (
+                      <button
+                        key={open}
+                        onClick={() => requestStageDelimiterChange(open, close)}
+                        className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-zinc-50 ${scriptConfig.stageDelimOpen === open ? "font-medium text-zinc-800" : "text-zinc-500"}`}
+                      >
+                        <span>{label}</span>
+                        {scriptConfig.stageDelimOpen === open && <span className="text-[10px] text-zinc-400">✓</span>}
+                      </button>
+                    ))}
+                    <div className="my-1 border-t border-zinc-50" />
+                    <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">页面类型</p>
+                    {(
+                      [
+                        ["a4",         "A4"],
+                        ["letter",     "Letter"],
+                        ["a3-2col",    "A3 横排双排"],
+                        ["tablet-2col","Tablet 横排双排"],
+                      ] as [import("@/lib/script/script-types").PageLayout, string][]
+                    ).map(([layout, label]) => (
+                      <button
+                        key={layout}
+                        onClick={() => { saveScriptConfig({ pageLayout: layout }); setOpenMenu(null); }}
+                        className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-zinc-50 ${scriptConfig.pageLayout === layout ? "font-medium text-zinc-800" : "text-zinc-500"}`}
+                      >
+                        <span>{label}</span>
+                        {scriptConfig.pageLayout === layout && <span className="text-[10px] text-zinc-400">✓</span>}
+                      </button>
+                    ))}
+                    {productionId && (
+                      <>
+                        <div className="my-1 border-t border-zinc-50" />
+                        <button
+                          onClick={() => { setTagEditorOpen(true); setTagEditorOnTop(true); setOpenMenu(null); }}
+                          className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                        >
+                          标签设置…
+                        </button>
+                        <div className="my-1 border-t border-zinc-50" />
+                        <button
+                          onClick={requestEmptyScriptCleanup}
+                          className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                        >
+                          清除空白内容
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+          <span className={`${canEdit ? "ml-[3px]" : "ml-0.5"} shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400`}>
+            {canEdit ? "可编辑" : "只读"}
+          </span>
+          {baseCanEdit && isLockedMode && (
+            <div
+              className="flex flex-1 justify-center"
+            >
+              <button
+                onClick={toggleLockedMode}
+                data-production-toolbar-flex-content="true"
+                aria-pressed={isLockedMode}
+                style={toolbarShort || toolbarCompact ? undefined : REHEARSAL_SWITCH_OPTICAL_OFFSET_STYLE}
+                title="退出排练模式"
+                className="flex shrink-0 items-center gap-2 rounded px-2 py-1 text-sm font-medium transition-colors text-teal-600 hover:bg-teal-50 hover:text-teal-700 whitespace-nowrap"
+              >
+                <ModeSwitch active={isLockedMode} />
+                <span>{(toolbarShort || toolbarCompact) ? "排练" : "排练模式"}</span>
+              </button>
+            </div>
+          )}
+          <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ${presenceFolded ? "absolute right-0 flex w-0 items-center" : "ml-auto flex shrink-0 items-center gap-1"}`}>
+          <div className={`${toolbarCompact ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
+          {(canEditMetadata || isLockedMode) && (
+            <>
+              {canEditMetadata && (
+                <>
+                  <ScenePanel
+                    scenes={scenes}
+                    productionId={productionId ?? ""}
+                    onAdd={(parentId, target) => addScene(parentId, target)}
+                    onUpdate={updateScene}
+                    onRemove={removeScene}
+                    open={openMenu === "scene"}
+                    onOpenChange={(v) => setOpenMenu(v ? "scene" : null)}
+                    canImport={canImport}
+                    onNavigate={prepareForNavigation}
+                    triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+                    nestedFromMore={toolbarCompact}
+                    nestedMenuRef={nestedMenuPosition.menuRef}
+                    nestedMenuStyle={nestedMenuPosition.style}
+                    label={toolbarShort ? "章" : "章节"}
+                  />
+                  <div className={`${toolbarCompact || portaled ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
+                </>
+              )}
+              <CharacterPanel
+                characters={characters}
+                productionId={productionId ?? ""}
+                focusedCharacterIds={focusedCharacterIds}
+                onToggleFocus={toggleCharacterFocus}
+                onClearFocus={clearCharacterFocus}
+                onAdd={addChar}
+                onRemove={removeChar}
+                onRename={renameChar}
+                open={openMenu === "char"}
+                onOpenChange={handleCharacterPanelOpenChange}
+                onNavigate={prepareForNavigation}
+                readOnly={isLockedMode}
+                triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm transition-colors ${
+                  openMenu === "char"
+                    ? "bg-zinc-100 text-zinc-800"
+                    : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
+                }`}
+                nestedFromMore={toolbarCompact}
+                nestedMenuRef={nestedMenuPosition.menuRef}
+                nestedMenuStyle={nestedMenuPosition.style}
+                label={toolbarShort ? "角" : "角色"}
+              />
+              <div className={`${toolbarCompact || portaled ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
+            </>
+          )}
+
+          {/* 编辑菜单 — undo/redo + 格式 + 搜索/跳转 */}
+          <div className="relative shrink-0">
+            <button
+              data-script-toolbar-menu-trigger="edit"
+              onClick={() => toggleMenu("edit")}
+              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+            >
+              {toolbarShort ? (isLockedMode ? "找" : "编") : (isLockedMode ? "查找" : "编辑")} <ChevronIcon size={12} className="opacity-50" />
+            </button>
+            {openMenu === "edit" && (
+              <div
+                data-script-toolbar-menu-panel="edit"
+                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
+                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
+                style={toolbarCompact ? nestedMenuPosition.style : undefined}
+                className={`${rightMenuClass} w-44`}
+              >
+                {canEdit && (
+                  <>
+                    <button
+                      onClick={() => { undo(); setOpenMenu(null); }}
+                      disabled={!canUndo}
+                      className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${canUndo ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"}`}
+                    >
+                      <span>撤销</span>
+                      <kbd className="text-[10px] text-zinc-300">⌘Z</kbd>
+                    </button>
+                    <button
+                      onClick={() => { redo(); setOpenMenu(null); }}
+                      disabled={!canRedo}
+                      className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${canRedo ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"}`}
+                    >
+                      <span>重做</span>
+                      <kbd className="text-[10px] text-zinc-300">⌘⇧Z</kbd>
+                    </button>
+                    <div className="my-1 border-t border-zinc-50" />
+                    <button
+                      onMouseDown={e => { e.preventDefault(); applyFormatToFocused("b"); }}
+                      onClick={() => setOpenMenu(null)}
+                      className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                    >
+                      <span className="font-bold">粗体</span>
+                      <kbd className="text-[10px] text-zinc-300">⌘B</kbd>
+                    </button>
+                    <button
+                      onMouseDown={e => { e.preventDefault(); applyFormatToFocused("u"); }}
+                      onClick={() => setOpenMenu(null)}
+                      className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                    >
+                      <span className="underline">下划线</span>
+                      <kbd className="text-[10px] text-zinc-300">⌘U</kbd>
+                    </button>
+                    <button
+                      onMouseDown={e => { e.preventDefault(); toggleStageCueToFocused(); }}
+                      onClick={() => setOpenMenu(null)}
+                      className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                    >
+                      <span className="italic text-zinc-400">切换舞台提示</span>
+                      <kbd className="text-[10px] text-zinc-300">⌘I</kbd>
+                    </button>
+                    <div className="my-1 border-t border-zinc-50" />
+                  </>
+                )}
+                <button
+                  onClick={() => { setSearchOpen(true); setOpenMenu(null); }}
+                  className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                >
+                  <span>搜索</span>
+                  <kbd className="text-[10px] text-zinc-300">⌘F</kbd>
+                </button>
+                <button
+                  onClick={() => { setJumpTarget("line"); setJumpValue(""); setOpenMenu(null); }}
+                  className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                >
+                  跳转到行…
+                </button>
+                <button
+                  onClick={() => { setJumpTarget("page"); setJumpValue(""); setOpenMenu(null); }}
+                  className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                >
+                  跳转到页…
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 显示菜单 */}
+          <div className="relative shrink-0">
+            <button
+              data-script-toolbar-menu-trigger="display"
+              onClick={() => toggleMenu("display")}
+              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+            >
+              {toolbarShort ? "显" : "显示"} <ChevronIcon size={12} className="opacity-50" />
+            </button>
+            {openMenu === "display" && (
+              <div
+                data-script-toolbar-menu-panel="display"
+                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
+                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
+                style={toolbarCompact ? nestedMenuPosition.style : undefined}
+                className={`${rightMenuClass} w-44`}
+              >
+                {(
+                  [
+                    ["pageBreaks",     "分页线"],
+                    ["lineNumbers",    "行号"],
+                    ["blockTags",      "Block 标签"],
+                    ["rehearsalBlockScenes", "逐行章节"],
+                    ["sceneDetail",    "构作详情"],
+                  ] as [keyof Pick<DisplaySettings, "pageBreaks" | "lineNumbers" | "blockTags" | "rehearsalBlockScenes" | "sceneDetail">, string][]
+                ).map(([key, label]) => {
+                  if (key === "blockTags" && tagGroups.length === 0) return null;
+                  if (key === "sceneDetail" && !productionId) return null;
+                  const isSceneDetail = key === "sceneDetail";
+                  const enabled = !isSceneDetail || canShowSceneDetail;
+                  const active = enabled && display[key];
+                  const disabledNotice = "当前窗口宽度过窄，无法显示构作详情";
+                  const disabledNoticeId = "scene-detail-width-notice";
+                  return (
+                    <div key={key} className="group/display-option relative">
+                      <button
+                        onClick={() => { if (enabled) toggleDisplay(key); }}
+                        aria-disabled={!enabled}
+                        aria-describedby={!enabled ? disabledNoticeId : undefined}
+                        title={key === "rehearsalBlockScenes" ? "显示每行所属章节" : undefined}
+                        className={`peer flex w-full items-center justify-between px-3 py-1.5 text-sm ${
+                          enabled ? "text-zinc-600 hover:bg-zinc-50" : DISABLED_CHECKBOX_OPTION_CLASS
+                        }`}
+                      >
+                        <span>{label}</span>
+                        <span className={checkboxOptionClass(active)}>✓</span>
+                      </button>
+                      {!enabled && (
+                        <span
+                          id={disabledNoticeId}
+                          role="tooltip"
+                          className="pointer-events-none invisible absolute right-2 top-full z-50 mt-1 whitespace-nowrap rounded bg-zinc-800 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow-md transition-opacity group-hover/display-option:visible group-hover/display-option:opacity-100 peer-focus-visible:visible peer-focus-visible:opacity-100"
+                        >
+                          {disabledNotice}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+                <div className="my-1 border-t border-zinc-50" />
+                <button
+                  onClick={() => {
+                    if (!baseCanEditTextLayout) return;
+                    pendingModeScrollAnchorRef.current = captureVirtualScrollAnchor();
+                    saveScriptConfig({
+                      textLayoutMode: scriptConfig.textLayoutMode === "compact" ? "center" : "compact",
+                    });
+                  }}
+                  disabled={!baseCanEditTextLayout}
+                  className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${
+                    baseCanEditTextLayout ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"
+                  }`}
+                  title={baseCanEditTextLayout ? "保存为所有人共用的剧本排版模式" : "无权修改剧本排版模式"}
+                >
+                  <span>紧凑排版</span>
+                  <span className="flex items-center">
+                    <ModeSwitch
+                      active={scriptConfig.textLayoutMode === "compact"}
+                      activeClassName="bg-[#637ca1]" /* my signature color (darker version). ^v^ -- QPT */
+                    />
+                  </span>
+                </button>
+                {baseCanEdit && (
+                  <>
+                    <div className="my-1 border-t border-zinc-50" />
+                    <button
+                      onClick={toggleLockedMode}
+                      className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                    >
+                      <span>排练模式</span>
+                      <span className="flex items-center">
+                        <ModeSwitch active={isLockedMode} />
+                      </span>
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Online users: self (dimmed) + overflow menu */}
+          <div className="relative shrink-0">
+            {!presenceFolded && onlineUsers.length > 0 && (() => {
+              const maxVisibleAvatars = toolbarShort || toolbarCompact
+                ? 2
+                : isLockedMode
+                  ? REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS
+                  : EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS;
+              const stack = renderPresenceStack(maxVisibleAvatars);
+              if (onlineUsers.length <= maxVisibleAvatars) return stack;
+              return (
+                <button
+                  type="button"
+                  ref={toolbarCompact ? nestedMenuPosition.anchorRef : undefined}
+                  data-script-toolbar-menu-trigger="presence"
+                  onClick={(event) => {
+                    if (toolbarCompact) openNestedMenu("presence", event.currentTarget);
+                    else toggleMenu("presence");
+                  }}
+                  className="flex items-center rounded px-1 py-1 transition-colors hover:bg-zinc-100"
+                  aria-label={`当前在线：${onlineUsers.length} 人`}
+                  title={`当前在线：${onlineUsers.map((presence) => presence.clientId === clientId ? `${presence.userName}（你）` : presence.userName).join("、")}`}
+                >
+                  {stack}
+                </button>
+              );
+            })()}
+            {openMenu === "presence" && (
+              <div
+                data-script-toolbar-menu-panel="presence"
+                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
+                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
+                style={toolbarCompact ? nestedMenuPosition.style : undefined}
+                className={`${rightMenuClass} w-44`}
+              >
+                <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">当前在线</p>
+                {onlineUsers.map((presence) => (
+                  <div key={presence.clientId} className="flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-600">
+                    <span
+                      aria-hidden
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: presence.color }}
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      {presence.userName}{presence.clientId === clientId ? "（你）" : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 导出菜单 */}
+          <div className="relative shrink-0">
+            <button
+              data-script-toolbar-menu-trigger="export"
+              onClick={() => toggleMenu("export")}
+              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+            >
+              导出 <ChevronIcon size={12} className="opacity-50" />
+            </button>
+            {openMenu === "export" && (
+              <div
+                data-script-toolbar-menu-panel="export"
+                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
+                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
+                style={toolbarCompact ? nestedMenuPosition.style : undefined}
+                className={`${rightMenuClass} w-36`}
+              >
+                {/* 打印页现在是独立路由（#335）。新标签打开：印本子的人通常一边继续
+                    改本子一边比对，同标签跳走会把编辑态一起带走。 */}
+                <Link
+                  href={`/production/${productionId}/script/print`}
+                  target="_blank"
+                  rel="noopener"
+                  onClick={() => setOpenMenu(null)}
+                  className="block w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+                >
+                  打印预览
+                </Link>
+              </div>
+            )}
+          </div>
+          </div>
+            </>
+          )}
+        </ProductionTopMenu>
+            );
+          }}
+        </ScriptToolbarMenuController>
+
+        {/* 搜索栏 */}
+        {searchOpen && (
+          <div className="border-t border-[var(--line)] bg-[var(--surface)] px-6 py-2 flex items-center gap-3">
+            <input
+              autoFocus
+              value={searchQuery}
+              onChange={e => { setSearchQuery(e.target.value); setSearchIdx(0); }}
+              onKeyDown={e => {
+                if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); setSearchIdx(0); }
+                if (e.key === "Enter") {
+                  if (searchMatches.length === 0) return;
+                  setSearchIdx(i => (i + 1) % searchMatches.length);
+                }
+              }}
+              placeholder="搜索…"
+              className="h-7 w-48 rounded border border-zinc-200 px-2 text-sm text-zinc-700 outline-none placeholder:text-zinc-300 focus:border-zinc-400"
+            />
+            <span className="shrink-0 text-xs text-zinc-400">
+              {searchMatches.length > 0 ? `${searchIdx + 1} / ${searchMatches.length}` : searchQuery.trim() ? "无结果" : ""}
+            </span>
+            <button
+              onClick={() => setSearchIdx(i => i <= 0 ? searchMatches.length - 1 : i - 1)}
+              disabled={searchMatches.length === 0}
+              className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-100 disabled:opacity-30"
+            ><ChevronIcon direction="up" size={12} /></button>
+            <button
+              onClick={() => setSearchIdx(i => (i + 1) % searchMatches.length)}
+              disabled={searchMatches.length === 0}
+              className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-100 disabled:opacity-30"
+            ><ChevronIcon size={12} /></button>
+            <div className="h-4 w-px bg-zinc-100" />
+            <label className="flex items-center gap-1 cursor-pointer select-none text-xs text-zinc-400">
+              <input type="checkbox" checked={searchExact} onChange={e => { setSearchExact(e.target.checked); setSearchIdx(0); }} className="h-3 w-3" />
+              精确
+            </label>
+            <label className="flex items-center gap-1 cursor-pointer select-none text-xs text-zinc-400">
+              <input type="checkbox" checked={searchCurrentPage} onChange={e => { setSearchCurrentPage(e.target.checked); setSearchIdx(0); }} className="h-3 w-3" />
+              当页
+            </label>
+            <button
+              onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
+              className="ml-auto text-xs text-zinc-300 hover:text-zinc-500"
+            >✕</button>
+          </div>
+        )}
+
+        {/* 跳转弹窗 */}
+        {jumpTarget && (
+          <div className="border-t border-[var(--line)] bg-[var(--surface)] px-6 py-2 flex items-center gap-3">
+            <span className="shrink-0 text-xs text-zinc-400">
+              {jumpTarget === "line" ? "跳转到行" : "跳转到页"}
+            </span>
+            <input
+              autoFocus
+              type="number"
+              min={1}
+              max={jumpTarget === "line" ? scriptLineNumberByBlockId.size : Math.max(...Object.values(pageMap), 1)}
+              value={jumpValue}
+              onChange={e => setJumpValue(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Escape") setJumpTarget(null);
+                if (e.key === "Enter") {
+                  const n = parseInt(jumpValue, 10);
+                  if (!isNaN(n)) {
+                    if (jumpTarget === "line") jumpToLine(n);
+                    else jumpToPage(n);
+                  }
+                  setJumpTarget(null);
+                }
+              }}
+              placeholder={jumpTarget === "line" ? `1–${scriptLineNumberByBlockId.size}` : `1–${Math.max(...Object.values(pageMap), 1)}`}
+              className="h-7 w-28 rounded border border-zinc-200 px-2 text-sm text-zinc-700 outline-none placeholder:text-zinc-300 focus:border-zinc-400"
+            />
+            <button
+              onClick={() => {
+                const n = parseInt(jumpValue, 10);
+                if (!isNaN(n)) { if (jumpTarget === "line") jumpToLine(n); else jumpToPage(n); }
+                setJumpTarget(null);
+              }}
+              className="rounded bg-zinc-800 px-3 py-1 text-xs font-medium text-white hover:bg-zinc-700"
+            >
+              跳转
+            </button>
+            <button onClick={() => setJumpTarget(null)} className="text-xs text-zinc-300 hover:text-zinc-500">取消</button>
+          </div>
+        )}
+      </header>
+
+      {edgeDragNotice && (
+        <div
+          className={`pointer-events-none fixed left-1/2 z-10 -translate-x-1/2 select-none text-center text-2xl font-semibold tracking-wide text-zinc-400/35 ${
+            dragTarget?.kind === "edge" && dragTarget.edge === "top" ? "top-[5rem]" : "bottom-12"
+          }`}
+        >
+          {edgeDragNotice}
+        </div>
+      )}
+
+      {(dragInstructionNotice || reorderNotice || shiftSelectionNotice || selectionNotice || largeSelectionNotice || selectionChangeNotice) && (
+        <div className="pointer-events-none fixed left-1/2 top-[4rem] z-50 flex -translate-x-1/2 flex-col items-center gap-1">
+          {dragInstructionNotice ? (
+            <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
+              {dragInstructionNotice}
+            </div>
+          ) : reorderNotice ? (
+            <div className="rounded bg-amber-100 px-2 py-1 text-[11px] text-amber-800 shadow-sm">
+              {reorderNotice}
+            </div>
+          ) : (
+            <>
+              {selectionNotice && (
+                <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
+                  {selectionNotice}
+                </div>
+              )}
+              {largeSelectionNotice && (
+                <div className="rounded bg-amber-100 px-2 py-1 text-[11px] text-amber-800 shadow-sm">
+                  {largeSelectionNotice}
+                </div>
+              )}
+              {selectionChangeNotice && (
+                <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
+                  {selectionChangeNotice}
+                </div>
+              )}
+              {shiftSelectionNotice && (
+                <div className="rounded bg-zinc-900/80 px-2 py-1 text-[11px] text-white shadow-sm">
+                  {shiftSelectionNotice}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      <div
+        ref={dragCountBadgeRef}
+        hidden
+        className="pointer-events-none fixed z-50 rounded border bg-white/90 px-1.5 py-0.5 text-lg font-semibold leading-none tabular-nums shadow-sm"
+        style={{ borderColor: "#91a8ca", color: "#91a8ca" }}
+      />
+      <style jsx global>{`
+        @keyframes scriptBlockMovedGlow {
+          0% {
+            background-color: #eef3fa;
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0);
+          }
+          50% {
+            background-color: #eef3fa;
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0.14);
+          }
+          100% {
+            background-color: #eef3fa;
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0);
+          }
+        }
+
+        @keyframes scriptTocMarkerGlow {
+          0% {
+            background-color: #eef3fa;
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0);
+          }
+          38% {
+            background-color: #eef3fa;
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0.14);
+          }
+          62% {
+            background-color: #eef3fa;
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0);
+          }
+          100% {
+            background-color: var(--script-block-glow-fade-end, #ffffff);
+            box-shadow: inset 0 0 0 9999px rgba(145, 168, 202, 0);
+          }
+        }
+
+        .script-block-moved-glow {
+          animation: scriptBlockMovedGlow 1s ease-in-out;
+        }
+
+        .script-toc-marker-glow {
+          animation: scriptTocMarkerGlow 1.5s ease-out;
+        }
+
+      `}</style>
+
+      {/* Document: 3-column flex — left gutter | script content | right gutter */}
+      <div className="flex items-start">
+        {/* Offset the script only while the scene detail panel is actually visible. */}
+        <div
+          className="hidden md:flex min-w-0 flex-col self-stretch"
+          style={{ width: `${renderedLeftPanelWidthPx}px`, flexShrink: 0 }}
+        >
+          {scriptTocRailMode && (
+            <aside
+              style={tocAsideStyle}
+              className="sticky top-0 h-[calc(44.444vh_-_1.778rem)] min-h-[14.667rem] max-h-[32rem]"
+            >
+              <TableOfContents
+                scenes={tocScenes}
+                blocks={legacyProjectedBlocks}
+                onScrollToScene={scrollToScene}
+                activeSceneId={activeSceneId}
+                placement={scriptTocRailMode === "compact" ? "rail-compact" : "rail"}
+                chapterNumberSlotWidthPx={scriptTocNumberWidths.chapterNumberSlotWidthPx}
+                sceneNumberSlotWidthPx={scriptTocNumberWidths.sceneNumberSlotWidthPx}
+              />
+            </aside>
+          )}
+        </div>
+
+        {/* Center column (script content) */}
+        <main
+          className="w-full flex-none min-w-0 px-4 py-8"
+          style={{ maxWidth: scriptBodyWidthPx || SCRIPT_EDITOR_MAX_WIDTH_PX }}
+        >
+        <div className="relative min-h-[70vh] rounded-2xl bg-white shadow-sm flex flex-col pt-6 pb-8">
+          {display.lineNumbers && (
+            <>
+              <span
+                ref={lineIndexMeasureRef}
+                aria-hidden="true"
+                className="pointer-events-none absolute left-0 top-0 -z-10 select-none whitespace-pre tabular-nums text-[9px] leading-none opacity-0"
+              >
+                {maxLineIndexText}
+              </span>
+              <span
+                ref={lineIndexMinMeasureRef}
+                aria-hidden="true"
+                className="pointer-events-none absolute left-0 top-0 -z-10 select-none whitespace-pre tabular-nums text-[9px] leading-none opacity-0"
+              >
+                0000
+              </span>
+            </>
+          )}
+          <TableOfContents scenes={tocScenes} blocks={legacyProjectedBlocks} onScrollToScene={scrollToScene} />
+          <div
+            ref={blocksContainerRef}
+            onDragOver={(e) => {
+              if (isReorderLockedRef.current) return;
+              if (!draggingBlockId.current) return;
+              if (draggingBlockIds.current.length > 1) {
+                updateDragCountBadge(e.clientX, e.clientY, draggingBlockIds.current.length, e.buttons);
+              }
+              const nextTarget = updateDragTargetFromClientY(e.clientY);
+              if (!nextTarget) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+            }}
+            onDrop={(e) => {
+              if (isReorderLockedRef.current) return;
+              if (!draggingBlockId.current && draggingBlockIds.current.length === 0) return;
+              e.preventDefault();
+              lockReorder();
+              dropHandledRef.current = true;
+              const draggedIds = draggingBlockIds.current.length
+                ? draggingBlockIds.current
+                : e.dataTransfer.getData("text/plain").split(",").filter(Boolean);
+              const target = updateDragTargetFromClientY(e.clientY) ?? dragTargetRef.current;
+              draggingBlockId.current = null;
+              draggingBlockIds.current = [];
+              clearDragTarget();
+              clearDragCountBadge();
+              setScriptDragging(false);
+              if (!target) {
+                showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
+                dragInvalidReasonRef.current = null;
+                unlockReorder();
+                return;
+              }
+              dragInvalidReasonRef.current = null;
+              const moved = moveDraggedBlocks(draggedIds, target);
+              if (!moved) unlockReorder();
+            }}
+          >
+          {(() => {
+            const hasFocusedCharacters = focusedCharacterIds.size > 0;
+            let commentBubbleOffsets: Map<string, number> | null = null;
+            if (commentBubbleMode === "full") {
+              commentBubbleOffsets = new Map<string, number>();
+              let lastBubbleBottom = -Infinity;
+              for (let i = safeWindowStart; i < safeWindowEnd; i++) {
+                const windowBlock = blocks[i];
+                const commentCount = commentsByBlockId.get(windowBlock.id)?.length ?? 0;
+                const assetCount = blockAssetsByBlockId.get(windowBlock.id)?.length ?? 0;
+                const count = commentCount + assetCount;
+                if (count === 0 || activeCommentBlockId === windowBlock.id || activeAssetBlockId === windowBlock.id) continue;
+                const blockHeight = measuredHeightsRef.current.get(windowBlock.id) ?? DEFAULT_BLOCK_H;
+                const blockTop = cumulativeHRef.current[i] - spacerH.top;
+                const desiredCenter = blockTop + blockHeight / 2;
+                const visibleCommentCount = assetCount > 0 ? Math.min(3, commentCount) : Math.min(4, commentCount);
+                const visibleAssetCount = Math.min(assetCount, 4 - visibleCommentCount);
+                const hasDivider = commentCount > 0 && assetCount > 0;
+                const bubbleHeight = Math.min(160, 38 + (visibleCommentCount + visibleAssetCount) * 17 + (hasDivider ? 11 : 0));
+                const desiredTop = desiredCenter - bubbleHeight / 2;
+                const top = Math.max(desiredTop, lastBubbleBottom + 6);
+                lastBubbleBottom = top + bubbleHeight;
+                commentBubbleOffsets.set(windowBlock.id, top - desiredTop);
+              }
+            }
+
+            return [
+              <div
+                key="__vtop"
+                ref={topSpacerRef}
+                style={{ height: spacerH.top }}
+                aria-hidden="true"
+                onDragOver={(e) => handleEdgeSpacerDragOver(e, "top")}
+                onDrop={(e) => handleEdgeSpacerDrop(e, "top")}
+              />,
+              ...blocks.slice(safeWindowStart, safeWindowEnd).flatMap((block, wIdx) => {
+            const bIdx = safeWindowStart + wIdx;
+            const prev = bIdx > 0 ? blocks[bIdx - 1] : null;
+            const hasInsertionGap = hasScriptInsertionGapBefore(blocks, bIdx, sceneParentIdById);
+            const showSceneEndGap = isLockedMode && shouldShowSceneEndGap(prev, block);
+            if (isMarkerBlock(block)) {
+              if (!openingChapterVisible && block.id === scriptConfig.openingChapterMarkerId) return [];
+              const markerScene = block.sceneId ? sceneById.get(block.sceneId) ?? null : null;
+              const markerNode: ScriptMarkerNode | null =
+                block.type === "chapter_marker" && markerScene
+                  ? { kind: "chapter", id: block.id, scene: markerScene }
+                  : block.type === "scene_marker" && markerScene
+                    ? { kind: "scene", id: block.id, scene: markerScene }
+                    : block.type === "rehearsal_marker"
+                      ? { kind: "rehearsal", id: block.id, mark: rehearsalLabels.rehearsalLabelByMarkerId.get(block.id) ?? "" }
+                      : null;
+              const markerEl = markerNode ? (
+                <div
+                  key={block.id}
+                  id={`block-${block.id}`}
+                  data-bwrap={block.id}
+                  data-scene-anchor={block.sceneId ?? undefined}
+                  className={`min-w-0 scroll-mt-20 rounded-lg transition-[outline] duration-150${highlightedBlockId === block.id ? " outline outline-2 outline-amber-400" : ""}`}
+                >
+                  {block.sceneId && <span id={`scene-block-${block.sceneId}`} className="pointer-events-none absolute" />}
+                  <ScriptMarkerRow
+                    node={markerNode}
+                    canEdit={block.type === "rehearsal_marker" ? effectiveCanEditRehearsalMark : canEditMetadata}
+                    isSelected={selectedBlockIds.has(block.id)}
+                    isDeleteConfirmHighlighted={deleteConfirmingBlockIds.has(block.id) || invalidSelectionEndIds.has(block.id)}
+                    isDeleteConfirmationOpen={markerDeleteConfirmBlockId === block.id}
+                    isMobileMenuOpen={mobileBlockMenuBlockId === block.id}
+                    isReorderLocked={isReorderLocked}
+                    isScriptDragging={isScriptDragging}
+                    dragTarget={dragTarget?.kind === "block" && dragTarget.id === block.id ? dragTarget : null}
+                    isRecentlyMoved={recentlyMovedBlockIds.has(block.id)}
+                    isTocHighlighted={tocHighlightedMarkerIds.has(block.id)}
+                    onRemove={() => deleteMarker(block.id)}
+                    onRequestDelete={() => requestMarkerDelete(block.id)}
+                    canAddChapterScene={canEditMetadata}
+                    canAddRehearsal={canAddRehearsalMark}
+                    onAddChapterBefore={() => addChapterBeforeBlock(block.id)}
+                    onAddSceneBefore={() => addSceneBeforeBlock(block.id)}
+                    onAddRehearsalBefore={() => addRehearsalBeforeBlock(block.id)}
+                    onConvertToChapter={canEditMetadata ? () => convertMarkerBlockType(block.id, "chapter_marker") : undefined}
+                    onConvertToScene={canEditMetadata ? () => convertMarkerBlockType(block.id, "scene_marker") : undefined}
+                    onOpenSceneDetail={productionId && block.sceneId && (block.type === "chapter_marker" || block.type === "scene_marker")
+                      ? () => openSceneDetailDialog(block.sceneId as string)
+                      : undefined}
+                    onDeleteConfirmChange={(confirming) => {
+                      if (confirming) {
+                        setMarkerDeleteConfirmBlockId(block.id);
+                        return;
+                      }
+                      dismissBlockConfirmations();
+                    }}
+                    onMobileMenuOpen={() => {
+                      openMobileBlockMenu(block.id, bIdx);
+                    }}
+                    onSelect={(e) => {
+                      if (isReorderLockedRef.current) return;
+                      const isAdditiveSelection = e.ctrlKey || e.metaKey;
+                      if (e.shiftKey && selectedBlockIds.size > 0) {
+                        clearBlockSelection();
+                        return;
+                      }
+                      if (isAdditiveSelection) {
+                        selectionDetachedRef.current = true;
+                        const next = toggleSelectionItem(blocks, {
+                          selectedIds: selectedBlockIds,
+                          markerEndIds: markerEndedScopeIdsRef.current,
+                        }, bIdx, isMarkerBlock);
+                        selectionAnchorBlockIdRef.current = next.selectedIds.has(block.id)
+                          ? block.id
+                          : next.selectedIds.values().next().value ?? null;
+                        commitBlockSelection(next);
+                        return;
+                      }
+                      if (selectedBlockIds.has(block.id)) {
+                        const next = toggleSelectionItem(blocks, {
+                          selectedIds: selectedBlockIds,
+                          markerEndIds: markerEndedScopeIdsRef.current,
+                        }, bIdx, isMarkerBlock);
+                        selectionAnchorBlockIdRef.current = next.selectedIds.values().next().value ?? null;
+                        commitBlockSelection(next);
+                        return;
+                      }
+                      selectionAnchorBlockIdRef.current = block.id;
+                      if (selectionDetachedRef.current) {
+                        commitBlockSelection(replaceSelectionItem(blocks, bIdx, isMarkerBlock));
+                        return;
+                      }
+                      commitBlockSelection(toggleSelectionItem(blocks, {
+                        selectedIds: selectedBlockIds,
+                        markerEndIds: markerEndedScopeIdsRef.current,
+                      }, bIdx, isMarkerBlock));
+                      selectionDetachedRef.current = true;
+                    }}
+                    onSceneNameChange={updateScene}
+                    onDragStart={(e) => {
+                      if (isReorderLockedRef.current) {
+                        e.preventDefault();
+                        return;
+                      }
+                      const isDraggingSelection = selectedBlockIds.has(block.id);
+                      const ids = isDraggingSelection ? Array.from(selectedBlockIds) : [block.id];
+                      if (isDraggingSelection && !canPerformSelectedBlockAction(ids)) {
+                        e.preventDefault();
+                        return;
+                      }
+                      dismissBlockConfirmations();
+                      if (!isDraggingSelection && selectedBlockIds.size > 0) {
+                        clearBlockSelection();
+                      }
+                      clearEditorFocusForDrag();
+                      setScriptDragging(true);
+                      dragButtonDownSeenRef.current = false;
+                      dragButtonReleasedRef.current = false;
+                      updateDragCountBadge(e.clientX, e.clientY, ids.length);
+                      draggingBlockId.current = block.id;
+                      draggingBlockIds.current = ids;
+                      dropHandledRef.current = false;
+                      pendingFocus.current = null;
+                      clearDragTarget();
+                      dragInvalidReasonRef.current = null;
+                      if (!isDraggingSelection) {
+                        selectionAnchorBlockIdRef.current = block.id;
+                        commitBlockSelection(replaceSelectionItem(blocks, bIdx, isMarkerBlock));
+                      }
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", ids.join(","));
+                    }}
+                    onDragEnd={() => {
+                      const draggedIds = draggingBlockIds.current;
+                      const target = dragTargetRef.current;
+                      if (!dropHandledRef.current && draggedIds.length > 0) {
+                        if (target) {
+                          lockReorder();
+                          const moved = moveDraggedBlocks(draggedIds, target);
+                          if (!moved) unlockReorder();
+                        } else {
+                          showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
+                        }
+                      }
+                      dropHandledRef.current = false;
+                      draggingBlockId.current = null;
+                      draggingBlockIds.current = [];
+                      clearDragTarget();
+                      dragInvalidReasonRef.current = null;
+                      clearDragCountBadge();
+                      setScriptDragging(false);
+                      dismissBlockConfirmations();
+                    }}
+                    onDragOver={(e) => {
+                      if (isReorderLockedRef.current) return;
+                      if (!draggingBlockId.current) return;
+                      const nextTarget = updateDragTargetFromClientY(e.clientY);
+                      if (!nextTarget) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                    }}
+                    onDrop={(e) => {
+                      if (isReorderLockedRef.current) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      lockReorder();
+                      dropHandledRef.current = true;
+                      const draggedIds = draggingBlockIds.current.length
+                        ? draggingBlockIds.current
+                        : e.dataTransfer.getData("text/plain").split(",").filter(Boolean);
+                      const target = updateDragTargetFromClientY(e.clientY) ?? dragTargetRef.current ?? dragTarget;
+                      draggingBlockId.current = null;
+                      draggingBlockIds.current = [];
+                      clearDragTarget();
+                      clearDragCountBadge();
+                      setScriptDragging(false);
+                      dismissBlockConfirmations();
+                      if (!target) {
+                        showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
+                        dragInvalidReasonRef.current = null;
+                        unlockReorder();
+                        return;
+                      }
+                      dragInvalidReasonRef.current = null;
+                      const moved = moveDraggedBlocks(draggedIds, target);
+                      if (!moved) unlockReorder();
+                    }}
+                    lineIndexWidth={markerLineIndexWidthStyle}
+                    reserveRehearsalGap={isLockedMode}
+                  />
+                </div>
+              ) : null;
+              if (!markerEl) return [];
+              const preBlockGap = bIdx > 0
+                ? canEditText && hasInsertionGap
+                  ? <InsertZone lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} />
+                  : showSceneEndGap
+                    ? <BlockGap />
+                    : null
+                : null;
+              return [
+                <div
+                  key={`vi-${block.id}`}
+                  data-vitem={block.id}
+                >
+                  {preBlockGap}
+                  {markerEl}
+                </div>,
+              ];
+            }
+            const projectedOwnedBlock = legacyProjectedBlocks[bIdx] ?? block;
+            const projectedOwnedPrev = bIdx > 0 ? legacyProjectedBlocks[bIdx - 1] ?? null : null;
+            const ownedSceneId = projectedOwnedBlock.sceneId;
+            const ownedRehearsalId = projectedOwnedBlock.rehearsalMark;
+            const displayRehearsalMark = ownedRehearsalId
+              ? rehearsalLabels.rehearsalLabelByMarkerId.get(ownedRehearsalId) ?? null
+              : null;
+            const displayBlock = block.sceneId === ownedSceneId && block.rehearsalMark === displayRehearsalMark
+              ? block
+              : { ...block, sceneId: ownedSceneId, rehearsalMark: displayRehearsalMark };
+
+            const sceneStart = ownedSceneId !== null && ownedSceneId !== projectedOwnedPrev?.sceneId;
+            const isMarkStart = !!ownedRehearsalId && ownedRehearsalId !== (projectedOwnedPrev?.rehearsalMark ?? null);
+            // 分页线改吃估算 pageMap（与服务端 page_map 同源同参、逐块同值）——
+            // 全组页码单一口径（AI/搜索/@提及/分页线同数）。它与打印实测有偏差是
+            // 已接受的事实；「定稿排版时刻回传实测数据覆盖 page_map」挂 issue 另批。
+            const dividerPage = pageMap[block.id];
+            const prevDividerPage = prev ? pageMap[prev.id] : undefined;
+            const pageBreak = !!(
+              display.pageBreaks &&
+              bIdx > 0 &&
+              dividerPage !== undefined &&
+              prevDividerPage !== undefined &&
+              dividerPage !== prevDividerPage
+            );
+            const isBlockFocused = !isLockedMode && focusedId === block.id;
+            const hideCharSelector =
+              isBlockFocused || pageBreak
+                ? false
+                : shouldHideCharacterLabel(
+                    projectedOwnedPrev,
+                    projectedOwnedBlock,
+                  );
+            const showCharacterGap = isLockedMode && shouldShowCharacterGap(projectedOwnedPrev, projectedOwnedBlock, hideCharSelector);
+            const matchOrder = searchMatches.indexOf(bIdx);
+            const searchHighlight: "focused" | "match" | undefined =
+              matchOrder === searchIdx ? "focused" : matchOrder >= 0 ? "match" : undefined;
+            const isSelected = selectedBlockIds.has(block.id);
+            const isCharacterFocusHighlighted =
+              hasFocusedCharacters && block.characterIds.some((id) => focusedCharacterIds.has(id));
+            const selectedDeleteIds = isSelected ? selectedBlockIdsArray : [block.id];
+            const selectedCount = selectedDeleteIds.length;
+            const blockComments = commentsByBlockId.get(block.id) ?? EMPTY_COMMENTS;
+            const blockAssets = blockAssetsByBlockId.get(block.id) ?? EMPTY_BLOCK_ASSETS;
+            const blockLineNumber = scriptLineNumberByBlockId.get(block.id)!;
+            const requiresNonEmptySceneConfirm = isSelected
+              ? selectedBlocksRequireNonEmptySceneConfirm
+              : blockIdsRequireNonEmptySceneConfirm(selectedDeleteIds);
+            const canDeleteWithoutConfirmation = (
+              isSelected ? selectedBlocksAreEmptyForDelete : blockIdsAreEmptyForDelete(selectedDeleteIds)
+            ) && !requiresNonEmptySceneConfirm;
+            const deleteConfirmNoopMessage = requiresNonEmptySceneConfirm
+              ? "章节/段落/排练记号内容不可为空，至少需包含一个剧本块"
+              : undefined;
+            const canMergeWithPrevious = !!(
+              prev &&
+              prev.type === block.type &&
+              prev.lyric === block.lyric &&
+              sameCharacters(prev.characterIds, block.characterIds)
+            );
+            const contentPlaceholder = ownedSceneId === openingChapterSceneId
+              ? displayBlock.type === "stage"
+                ? "在此输入演出正式开始前的舞台提示…"
+                : "在此输入演出正式开始前的台词…"
+              : undefined;
+
+            const blockEl = (
+              <div
+                key={block.id}
+                id={`block-${block.id}`}
+                data-bwrap={block.id}
+                data-scene-anchor={sceneStart ? ownedSceneId ?? undefined : undefined}
+                className={`min-w-0 scroll-mt-20 transition-[outline] duration-150${highlightedBlockId === block.id ? " outline outline-2 outline-amber-400 rounded-lg" : ""}`}
+              >
+                {/* Scene anchor for TableOfContents links */}
+                {sceneStart && ownedSceneId && <span id={`scene-block-${ownedSceneId}`} className="pointer-events-none absolute" />}
+                {pageBreak && (
+                  <div className="relative my-2 flex items-center gap-2 px-6 select-none">
+                    <div className="flex-1 border-t border-dashed border-zinc-200" />
+                    <span className="shrink-0 rounded bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-300">
+                      第 {dividerPage} 页
+                    </span>
+                    <div className="flex-1 border-t border-dashed border-zinc-200" />
+                  </div>
+                )}
+                <ScriptBlock
+                  block={displayBlock}
+                  lineNum={display.lineNumbers ? blockLineNumber : undefined}
+                  captionLineNum={blockLineNumber}
+                  lineIndexWidth={lineIndexWidthStyle}
+                  isSearchHighlight={searchHighlight}
+                  readOnlyRehearsalMode={isLockedMode}
+                  readOnlyScene={isLockedMode && display.rehearsalBlockScenes && ownedSceneId ? sceneById.get(ownedSceneId) ?? null : null}
+                  showSceneLabel={display.rehearsalBlockScenes}
+                  stageDelimOpen={scriptConfig.stageDelimOpen}
+                  stageDelimClose={scriptConfig.stageDelimClose}
+                  textLayoutMode={scriptConfig.textLayoutMode}
+                  contentPlaceholder={contentPlaceholder}
+                  characters={characters}
+                  scenes={scenes}
+                  hideCharSelector={hideCharSelector}
+                  isFocused={isBlockFocused}
+                  dragTarget={
+                    dragTarget?.kind === "block" &&
+                    dragTarget.id === block.id
+                      ? dragTarget
+                      : null
+                  }
+                  isSelected={isSelected}
+                  isDeleteConfirmHighlighted={deleteConfirmingBlockIds.has(block.id)}
+                  isCharacterFocusHighlighted={isCharacterFocusHighlighted}
+                  isRecentlyMoved={recentlyMovedBlockIds.has(block.id)}
+                  deleteConfirmToken={deleteConfirmationRequest?.anchorId === block.id ? deleteConfirmationRequest.token : undefined}
+                  selectedCount={selectedCount}
+                  canDeleteWithoutConfirmation={canDeleteWithoutConfirmation}
+                  deleteConfirmNoopMessage={deleteConfirmNoopMessage}
+                  dismissToken={dismissActionToken}
+                  isReorderLocked={isReorderLocked}
+                  isScriptDragging={isScriptDragging}
+                  charEditToken={charEditTokens[block.id] ?? 0}
+                  presenceEditors={Array.from(presenceMap.values()).filter(
+                    p => p.blockId === block.id && p.clientId !== clientId
+                  )}
+                  onRegisterRef={registerRef}
+                  onUpdate={(changes) => updateBlock(block.id, changes)}
+                  onSplit={(before, after) => splitBlock(block.id, before, after)}
+                  onMerge={() => mergeBlock(block.id)}
+                  onDelete={() => {
+                    if (selectedDeleteIds.length > 1) deleteBlocks(selectedDeleteIds);
+                    else deleteBlocks([block.id]);
+                  }}
+                  onFocus={() => markBlockFocused(block.id)}
+                  onDeleteFocus={() => focusBlockContent(block.id, false)}
+                  onRequestLargeSelectionOperation={requestLargeSelectionOperation}
+                  onCanStartSelectionAction={() => canPerformSelectedBlockAction(selectedDeleteIds)}
+                  onToggleType={() => {
+                    if (isSelected && selectedDeleteIds.length > 1) {
+                      if (!canPerformSelectedBlockAction(selectedDeleteIds)) return;
+                      setBlocksType(selectedDeleteIds, block.type === "stage" ? "dialogue" : "stage");
+                    } else {
+                      toggleBlockType(block.id);
+                    }
+                  }}
+                  onToggleLyric={() => {
+                    if (isSelected && selectedDeleteIds.length > 1) {
+                      if (!canPerformSelectedBlockAction(selectedDeleteIds)) return;
+                      setBlocksLyric(selectedDeleteIds, !block.lyric);
+                    } else {
+                      toggleBlockLyric(block.id);
+                    }
+                  }}
+                  onArrowUpFromChar={() => handleArrowUpFromChar(block.id)}
+                  onArrowDownFromChar={() => handleArrowDownFromChar(block.id)}
+                  onArrowUpFromTextarea={() => handleArrowUpFromTextarea(block.id)}
+                  onArrowDownFromTextarea={() => handleArrowDownFromTextarea(block.id)}
+                  onAddChapterBefore={() => addChapterBeforeBlock(block.id)}
+                  onAddSceneBefore={() => addSceneBeforeBlock(block.id)}
+                  onAddRehearsalBefore={() => addRehearsalBeforeBlock(block.id)}
+                  onCharacterChangeFocus={() => {
+                    glowAndFocusBlocks([block.id]);
+                  }}
+                  onToggleSelected={(e) => {
+                    if (isReorderLockedRef.current) return;
+                    focusBlockContent(block.id);
+                    const isAdditiveSelection = e.ctrlKey || e.metaKey || (
+                      window.matchMedia("(max-width: 639px)").matches && selectedBlockIds.size > 0
+                    );
+                    if (e.shiftKey) {
+                      const anchorId = selectionAnchorBlockIdRef.current;
+                      const anchorIdx = anchorId ? blockIndexByIdRef.current.get(anchorId) ?? -1 : -1;
+                      const start = anchorIdx === -1 ? bIdx : Math.min(anchorIdx, bIdx);
+                      const end = anchorIdx === -1 ? bIdx : Math.max(anchorIdx, bIdx);
+                      if (anchorIdx === -1) selectionAnchorBlockIdRef.current = block.id;
+                      selectionDetachedRef.current = true;
+                      if (isAdditiveSelection) {
+                        commitBlockSelection(addSelectionRange(blocks, {
+                          selectedIds: selectedBlockIds,
+                          markerEndIds: markerEndedScopeIdsRef.current,
+                        }, start, end, isMarkerBlock));
+                      } else {
+                        commitBlockSelection(replaceSelectionRange(blocks, start, end, isMarkerBlock));
+                      }
+                      return;
+                    }
+                    if (isAdditiveSelection) {
+                      selectionDetachedRef.current = true;
+                      const next = toggleSelectionItem(blocks, {
+                        selectedIds: selectedBlockIds,
+                        markerEndIds: markerEndedScopeIdsRef.current,
+                      }, bIdx, isMarkerBlock);
+                      selectionAnchorBlockIdRef.current = next.selectedIds.has(block.id)
+                        ? block.id
+                        : next.selectedIds.values().next().value ?? null;
+                      commitBlockSelection(next);
+                      return;
+                    }
+                    if (!selectedBlockIds.has(block.id) && selectionDetachedRef.current) {
+                      selectionAnchorBlockIdRef.current = block.id;
+                      commitBlockSelection(replaceSelectionItem(blocks, bIdx, isMarkerBlock));
+                      selectionDetachedRef.current = false;
+                      return;
+                    }
+                    const next = toggleSelectionItem(blocks, {
+                      selectedIds: selectedBlockIds,
+                      markerEndIds: markerEndedScopeIdsRef.current,
+                    }, bIdx, isMarkerBlock);
+                    selectionAnchorBlockIdRef.current = next.selectedIds.has(block.id)
+                      ? block.id
+                      : next.selectedIds.values().next().value ?? null;
+                    commitBlockSelection(next);
+                  }}
+                  onDeleteConfirmationChange={(active) => {
+                    setDeleteConfirmingBlockIds((current) => {
+                      if (active) return new Set(selectedDeleteIds);
+                      return current.size === 0 ? current : new Set();
+                    });
+                  }}
+                  onDragStartBlock={(e) => {
+                    if (isReorderLockedRef.current) {
+                      e.preventDefault();
+                      return;
+                    }
+                    const isDraggingSelection = selectedBlockIds.has(block.id);
+                    const ids = isDraggingSelection ? Array.from(selectedBlockIds) : [block.id];
+                    if (isDraggingSelection && !canPerformSelectedBlockAction(ids)) {
+                      e.preventDefault();
+                      return;
+                    }
+                    dismissBlockConfirmations();
+                    if (!isDraggingSelection && selectedBlockIds.size > 0) {
+                      clearBlockSelection();
+                    }
+                    clearEditorFocusForDrag();
+                    setScriptDragging(true);
+                    dragButtonDownSeenRef.current = false;
+                    dragButtonReleasedRef.current = false;
+                    updateDragCountBadge(e.clientX, e.clientY, ids.length);
+                    draggingBlockId.current = block.id;
+                    draggingBlockIds.current = ids;
+                    dropHandledRef.current = false;
+                    pendingFocus.current = null;
+                    clearDragTarget();
+                    dragInvalidReasonRef.current = null;
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", ids.join(","));
+                  }}
+                  onDragEndBlock={() => {
+                    const draggedIds = draggingBlockIds.current;
+                    const target = dragTargetRef.current;
+                    if (!dropHandledRef.current && draggedIds.length > 0) {
+                      if (target) {
+                        lockReorder();
+                        const moved = moveDraggedBlocks(draggedIds, target);
+                        if (!moved) unlockReorder();
+                      } else {
+                        showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
+                      }
+                    }
+                    dropHandledRef.current = false;
+                    draggingBlockId.current = null;
+                    draggingBlockIds.current = [];
+                    clearDragTarget();
+                    dragInvalidReasonRef.current = null;
+                    clearDragCountBadge();
+                    setScriptDragging(false);
+                    dismissBlockConfirmations();
+                  }}
+                  onDragOverBlock={(e) => {
+                    if (isReorderLockedRef.current) return;
+                    if (!draggingBlockId.current) return;
+                    const nextTarget = updateDragTargetFromClientY(e.clientY);
+                    if (!nextTarget) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                  }}
+                  onDropBlock={(e) => {
+                    if (isReorderLockedRef.current) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    lockReorder();
+                    dropHandledRef.current = true;
+                    const draggedIds = draggingBlockIds.current.length
+                      ? draggingBlockIds.current
+                      : e.dataTransfer.getData("text/plain").split(",").filter(Boolean);
+                    const target = updateDragTargetFromClientY(e.clientY) ?? dragTargetRef.current ?? dragTarget;
+                    draggingBlockId.current = null;
+                    draggingBlockIds.current = [];
+                    clearDragTarget();
+                    clearDragCountBadge();
+                    setScriptDragging(false);
+                    dismissBlockConfirmations();
+                    if (!target) {
+                      showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
+                      dragInvalidReasonRef.current = null;
+                      unlockReorder();
+                      return;
+                    }
+                    dragInvalidReasonRef.current = null;
+                    const moved = moveDraggedBlocks(draggedIds, target);
+                    if (!moved) unlockReorder();
+                  }}
+                  isMarkStart={isMarkStart}
+                  commentCount={blockComments.length}
+                  blockComments={blockComments}
+                  blockAssets={blockAssets}
+                  isCommentPanelActive={activeCommentBlockId === block.id}
+                  isAssetPanelActive={activeAssetBlockId === block.id}
+                  commentBubbleOffsetY={commentBubbleOffsets?.get(block.id) ?? 0}
+                  commentBubbleMode={commentBubbleMode}
+                  commentBubbleWidth={commentBubbleWidthPx}
+                  onCommentClick={() => openBlockSidePanel("comment", block.id)}
+                  onAssetClick={() => openBlockSidePanel("asset", block.id)}
+                  canEditText={canEditText}
+                  canEditMetadata={canEditMetadata}
+                  canEditRehearsalMark={canAddRehearsalMark}
+                  canMergeWithPrevious={canMergeWithPrevious}
+                  tagGroups={tagGroups}
+                  blockTagValues={blockTagMap.get(block.id) ?? []}
+                  showBlockTags={display.blockTags && tagGroups.length > 0}
+                  hasLyricConfig={tagGroups.some(g => !!g.lyricSplitAfterOptionId)}
+                  onTagChange={(groupId, optionId, value, del) => handleTagChange(block.id, groupId, optionId, value, del)}
+                  onTagCopyClick={() => handleTagCopy(block.id)}
+                  onTagPasteClick={() => handleTagPaste(block.id)}
+                  onMobileMenuOpen={() => {
+                    openMobileBlockMenu(block.id, bIdx);
+                  }}
+                />
+              </div>
+            );
+            const preBlockGap = bIdx > 0
+              ? canEditText && hasInsertionGap ? <InsertZone lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} /> :
+                showSceneEndGap ? <BlockGap /> :
+                isLockedMode && showCharacterGap ? <BlockGap /> :
+                null
+              : null;
+            return [
+              <div
+                key={`vi-${block.id}`}
+                data-vitem={block.id}
+              >
+                {preBlockGap}
+                {blockEl}
+              </div>,
+            ];
+              }),
+              <div
+                key="__vbot"
+                ref={botSpacerRef}
+                style={{ height: spacerH.bot }}
+                aria-hidden="true"
+                onDragOver={(e) => handleEdgeSpacerDragOver(e, "bottom")}
+                onDrop={(e) => handleEdgeSpacerDrop(e, "bottom")}
+              />,
+            ];
+          })()}
+          {canEditText ? <InsertZone lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(blocks.length)} /> : null}
+          </div>
+        </div>
+        {canEditText && (
+          <p className="mt-4 text-center text-xs text-zinc-300">
+            Enter 新建块 · Shift+Enter 块内换行 · Backspace（行首）合并到上一块
+          </p>
+        )}
+        </main>
+
+        {/* Right column: scene detail below the top third; overlays render above it. */}
+        <div className="hidden min-w-0 flex-1 self-stretch md:block">
+          {isSceneDetailVisible && productionId && (
+            <aside
+              style={sceneDetailAsideStyle}
+              className="pointer-events-none sticky top-0 z-10 flex h-[calc(100vh-4rem)] min-h-0 flex-col"
+            >
+              <div className="h-[calc((100vh-4rem)/3)] min-h-44 max-h-96 shrink-0" aria-hidden="true" />
+              <div className="pointer-events-auto mt-3 flex min-h-0 flex-1 flex-col border-t border-zinc-300 bg-[var(--paper)] pt-3 pr-2">
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  <ScriptSceneDetailRail
+                    scene={activeSceneDetail}
+                    scenes={sceneDetails}
+                    productionId={productionId}
+                    versionId={activeVersionId ?? null}
+                    canEdit={canEditMetadata}
+                    isDeleteConfirmHighlighted={!!markerDeleteConfirmDetailSceneId}
+                    scrollbarOffsetPx={0}
+                    onUpdateIdentity={updateScene}
+                    onPatchMeta={patchSceneMeta}
+                  />
+                </div>
+              </div>
+            </aside>
+          )}
+        </div>
+      </div>
+
+      {tagEditorOpen && productionId && (
+        <>
+          <div className="sm:hidden fixed inset-0 z-20" onClick={() => setTagEditorOpen(false)} />
+        <div
+          className={`fixed right-0 top-[4rem] bottom-0 flex w-80 flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl panel-mobile-full ${tagEditorOnTop ? "z-[31]" : "z-30"}`}
+        >
+          <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-4 py-3">
+            <span className="text-sm font-semibold text-zinc-700">标签设置</span>
+            <button onClick={() => setTagEditorOpen(false)} className="text-lg leading-none text-zinc-300 hover:text-zinc-500">×</button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 py-3">
+            <TagGroupEditor
+              productionId={productionId}
+              initialGroups={tagGroups}
+              canEdit={canEditMetadata}
+              onGroupsChange={setTagGroups}
+            />
+          </div>
+        </div>
+        </>
+      )}
+
+      {activeAssetBlockId && productionId && (
+        <>
+          <div className="sm:hidden fixed inset-0 z-20" onClick={() => setActiveAssetBlockId(null)} />
+        <SideBlockPanel
+          blockId={activeAssetBlockId}
+          activePanel="asset"
+          onPanelChange={panel => openBlockSidePanel(panel, activeAssetBlockId)}
+          blockCaption={activeAssetBlockCaption}
+          width={blockSidePanelWidthPx}
+          navigation={{
+            hasPrevious: assetPanelNavigationTargets.previousBlockId !== null,
+            hasNext: assetPanelNavigationTargets.nextBlockId !== null,
+            onPrevious: () => navigateSidePanelBlock("asset", -1),
+            onNext: () => navigateSidePanelBlock("asset", 1),
+          }}
+          onClose={() => setActiveAssetBlockId(null)}
+        >
+          <div className="relative z-10 flex-1 overflow-y-auto bg-white px-4 py-3">
+            {/* #420：挂载锚稳定 block_id，快照分辨路径退役 */}
+            <MountPointAssets
+              productionId={productionId}
+              mountType="block"
+              mountId={activeAssetBlockId}
+              label="Block 附件"
+              canEdit={true}
+              display="panel"
+              onNavigate={prepareForNavigation}
+              onChange={loadBlockAssetBubbles}
+            />
+          </div>
+        </SideBlockPanel>
+        </>
+      )}
+
+      {activeCommentBlockId && productionId && (
+        <>
+          <div className="sm:hidden fixed inset-0 z-20" onClick={() => setActiveCommentBlockId(null)} />
+        <CommentsPanel
+          key={activeCommentBlockId}
+          blockId={activeCommentBlockId}
+          productionId={productionId}
+          comments={commentsByBlockId.get(activeCommentBlockId) ?? EMPTY_COMMENTS}
+          currentUserId={meUserId}
+          isAdmin={meIsAdmin}
+          onAdd={c => setComments(prev => [...prev, c])}
+          onEdit={c => setComments(prev => prev.map(x => x.id === c.id ? c : x))}
+          onDelete={id => setComments(prev => prev.filter(x => x.id !== id))}
+          onClose={() => setActiveCommentBlockId(null)}
+          onNavigate={prepareForNavigation}
+          onPanelChange={panel => openBlockSidePanel(panel, activeCommentBlockId)}
+          draft={commentDraftsRef.current.get(activeCommentBlockId)}
+          onDraftChange={updateCommentDraft}
+          width={blockSidePanelWidthPx}
+          blockCaption={activeCommentBlockCaption}
+          navigation={{
+            hasPrevious: commentPanelNavigationTargets.previousBlockId !== null,
+            hasNext: commentPanelNavigationTargets.nextBlockId !== null,
+            onPrevious: () => navigateSidePanelBlock("comment", -1),
+            onNext: () => navigateSidePanelBlock("comment", 1),
+          }}
+        />
+        </>
+      )}
+
+      {pendingLockedMode !== null && (
+        <ScriptDialog
+          onClose={() => setPendingLockedMode(null)}
+          panelClassName="w-[360px] rounded-2xl bg-white p-5 shadow-xl"
+        >
+            <h2 className="text-base font-semibold text-zinc-800">
+              {pendingLockedMode ? "确认进入排练模式？" : "确认退出排练模式？"}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-500">
+              {pendingLockedMode
+                ? "进入该模式后，将只能添加附件和评论，对剧本的其他编辑权限将被锁定。"
+                : "退出后，将恢复到可编辑模式。"}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setPendingLockedMode(null)}
+                className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-500 hover:border-zinc-300 hover:text-zinc-700"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmLockedModeChange}
+                className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                确认
+              </button>
+            </div>
+        </ScriptDialog>
+      )}
+
+      {pendingAggregateFocusPrompt && (() => {
+        const currentCharacter = characters.find((char) => char.id === pendingAggregateFocusPrompt.characterId);
+        const aggregateCharacters = pendingAggregateFocusPrompt.aggregateIds
+          .map((id) => characters.find((char) => char.id === id))
+          .filter((char): char is Character => Boolean(char));
+        if (!currentCharacter || aggregateCharacters.length === 0) return null;
+        return (
+          <ScriptDialog
+            onClose={cancelAggregateFocusPrompt}
+            panelClassName="w-[420px] rounded-2xl bg-white p-5 shadow-xl"
+          >
+              <h2 className="text-base font-semibold text-zinc-800">
+                是否同时聚焦以下包含该角色的聚合角色？
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-zinc-500">
+                “{currentCharacter.name}” 也是以下聚合角色的一部分。<br />按需求添加所需要的角色后，点击确认。
+              </p>
+              <div className="mt-4 max-h-56 overflow-y-auto rounded-xl border border-zinc-100">
+                {aggregateCharacters.map((char) => {
+                  const active = pendingAggregateFocusPrompt.selectedIds.has(char.id);
+                  return (
+                    <button
+                      key={char.id}
+                      type="button"
+                      onClick={() => togglePendingAggregateFocus(char.id)}
+                      className="flex w-full items-center justify-between border-b border-zinc-50 px-4 py-2.5 text-left last:border-0 hover:bg-zinc-50"
+                    >
+                      <span className="min-w-0 truncate text-sm text-zinc-700">{char.name}</span>
+                      <ModeSwitch active={active} activeClassName="bg-purple-800/60" />
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-5 flex justify-between gap-2">
+                <button
+                  onClick={addAllAggregateFocusPrompt}
+                  className="rounded bg-purple-900/70 px-3 py-1.5 text-sm text-white hover:bg-purple-800/80"
+                >
+                  全部添加
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={cancelAggregateFocusPrompt}
+                    className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-500 hover:border-zinc-300 hover:text-zinc-700"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={confirmAggregateFocusPrompt}
+                    className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+                  >
+                    确认
+                  </button>
+                </div>
+              </div>
+          </ScriptDialog>
+        );
+      })()}
+
+      {markerDeleteDialog && (
+        <MarkerDeleteDialog
+          state={markerDeleteDialog}
+          busy={markerDeleteDialogBusy}
+          onClose={() => setMarkerDeleteDialog(null)}
+          onChoose={(operation) => {
+            if (markerDeleteDialog.source === "server") {
+              void applyServerMarkerDeleteOperation(operation);
+              return;
+            }
+            if (operation.type === "whole" && !canEditText) {
+              setMarkerDeleteDialog({ plan: null, message: "删除整章及空段落需要剧本编辑权限。", source: "local" });
+              return;
+            }
+            applyMarkerDeleteOperation(operation);
+          }}
+        />
+      )}
+
+      {markerDetailDeleteBlockedKind && (
+        <ScriptDialog
+          onClose={() => setMarkerDetailDeleteBlockedKind(null)}
+          panelClassName="w-[380px] rounded-2xl bg-white p-5 shadow-xl"
+        >
+          <h2 className="text-base font-semibold text-zinc-800">
+            不可删除该{markerDetailDeleteBlockedKind === "chapter" ? "章节" : "段落"}
+          </h2>
+          <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-500">
+            {sceneDetailDeleteBlockedMessage(markerDetailDeleteBlockedKind)}
+          </p>
+          <div className="mt-5 flex justify-end">
+            <button
+              onClick={() => setMarkerDetailDeleteBlockedKind(null)}
+              className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+            >
+              确认
+            </button>
+          </div>
+        </ScriptDialog>
+      )}
+
+      {pendingNonEmptyMarkerSelectionDeleteIds && (() => {
+        const blockedMarkers = nonEmptyDramaturgyMarkersForBlockIds(pendingNonEmptyMarkerSelectionDeleteIds)
+          .map((marker) => {
+            const index = blockIndexByIdRef.current.get(marker.id);
+            const block = index === undefined ? null : blocks[index] ?? null;
+            if (!block) return null;
+            const detail = block.sceneId ? sceneDetailById.get(block.sceneId) ?? null : null;
+            const scene = block.sceneId ? sceneById.get(block.sceneId) ?? null : null;
+            return {
+              id: marker.id,
+              captionNumber: scene?.number?.trim() || "—",
+              captionName: scene?.name?.trim() || "未命名",
+              captionDuration: markerExpectedDuration(block, detail, sceneDetails),
+              details: markerDetailFields(block, detail),
+            };
+          })
+          .filter((item): item is { id: string; captionNumber: string; captionName: string; captionDuration: string; details: MarkerDetailField[] } => item !== null);
+        const scriptBlockDeleteIds = pendingNonEmptyMarkerSelectionDeleteIds.filter((id) => {
+          const index = blockIndexByIdRef.current.get(id);
+          const block = index === undefined ? undefined : blocks[index];
+          return !!block && (block.type === "rehearsal_marker" || !isMarkerBlock(block));
+        });
+        const cancelNonEmptyMarkerSelectionDelete = () => {
+          setPendingNonEmptyMarkerSelectionDeleteIds(null);
+          setSelectedNonEmptyMarkerDeleteIds(new Set());
+          setExpandedNonEmptyMarkerDetailIds(new Set());
+          clearBlockSelection();
+          dismissBlockConfirmations();
+        };
+        const toggleNonEmptyMarkerSelection = (markerId: string) => {
+          setSelectedNonEmptyMarkerDeleteIds((current) => {
+            const next = new Set(current);
+            if (next.has(markerId)) next.delete(markerId);
+            else next.add(markerId);
+            return next;
+          });
+        };
+        const toggleNonEmptyMarkerDetails = (markerId: string) => {
+          setExpandedNonEmptyMarkerDetailIds((current) => {
+            const next = new Set(current);
+            if (next.has(markerId)) next.delete(markerId);
+            else next.add(markerId);
+            return next;
+          });
+        };
+        return (
+          <ScriptDialog
+            panelClassName="w-[520px] max-w-[calc(100vw-2rem)] rounded-xl bg-white p-5 shadow-xl"
+            onClose={cancelNonEmptyMarkerSelectionDelete}
+          >
+              <h2 className="text-base font-semibold text-zinc-800">所选标记详情不为空</h2>
+              <p className="mt-2 text-sm leading-6 text-zinc-500">
+                以下章节/段落标记包含详情内容。请选择只删除剧本块，或连同这些标记一起删除。
+              </p>
+              <div className="mt-4 overflow-hidden rounded-lg border border-zinc-200 bg-white">
+                <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50 px-3 py-2">
+                  <span className="text-xs font-semibold tracking-wide text-zinc-600 uppercase">包含详情的标记</span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedNonEmptyMarkerDeleteIds(new Set(blockedMarkers.map((marker) => marker.id)))}
+                      className="text-[11px] font-medium text-red-700/70 transition-colors hover:text-red-700"
+                    >
+                      全选
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedNonEmptyMarkerDeleteIds(new Set())}
+                      className="text-[11px] font-medium text-zinc-400 transition-colors hover:text-red-700"
+                    >
+                      清空
+                    </button>
+                  </div>
+                </div>
+                <div className="max-h-56 overflow-y-auto">
+                  {blockedMarkers.map((marker) => {
+                    const selected = selectedNonEmptyMarkerDeleteIds.has(marker.id);
+                    const expanded = expandedNonEmptyMarkerDetailIds.has(marker.id);
+                    return (
+                      <div key={marker.id} className="border-b border-zinc-100 last:border-0">
+                        <div className={`sticky top-0 z-10 flex items-center transition-colors ${selected ? "bg-red-50" : "bg-white hover:bg-zinc-50"}`}>
+                          <button
+                            type="button"
+                            onClick={() => toggleNonEmptyMarkerDetails(marker.id)}
+                            className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-600"
+                            aria-expanded={expanded}
+                          >
+                            <ChevronIcon direction={expanded ? "up" : "down"} className="shrink-0 text-zinc-400 transition-transform" />
+                            <span className="min-w-0 flex-1 truncate">
+                              <span className="font-bold">【{marker.captionNumber}】</span>
+                              <span>{marker.captionName}</span>
+                            </span>
+                            <span className="h-4 w-px shrink-0 bg-zinc-100" />
+                            <span className="shrink-0 whitespace-nowrap text-xs">
+                              <span className="font-bold">预期时长：</span>
+                              <span className="font-normal">{marker.captionDuration}</span>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={selected}
+                            aria-label={`${selected ? "取消选择" : "选择"}${marker.captionNumber} ${marker.captionName}`}
+                            onClick={() => toggleNonEmptyMarkerSelection(marker.id)}
+                            className={`mr-3 flex h-5 w-9 shrink-0 items-center rounded-full p-0.5 transition-colors ${selected ? "bg-red-700" : "bg-zinc-200"}`}
+                          >
+                            <span className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${selected ? "translate-x-4" : ""}`} />
+                          </button>
+                        </div>
+                        {expanded && (
+                          <div className="space-y-2.5 border-t border-zinc-100 bg-white px-3 py-3 text-xs text-zinc-600">
+                            {marker.details.map((field) => (
+                              <div key={field.label} className="space-y-1.5">
+                                <p className="text-[10px] font-semibold tracking-widest text-zinc-500 uppercase">{field.label}</p>
+                                <p className="min-h-[1.75rem] whitespace-pre-wrap break-words rounded-lg border border-zinc-200 bg-transparent px-2.5 py-2 leading-relaxed text-zinc-700">
+                                  {field.value || <span className="italic text-zinc-400">—</span>}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+                <button
+                  onClick={cancelNonEmptyMarkerSelectionDelete}
+                  className={SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => {
+                    const deletingMarkers = selectedNonEmptyMarkerDeleteIds.size > 0;
+                    const ids = !deletingMarkers
+                      ? scriptBlockDeleteIds
+                      : [...scriptBlockDeleteIds, ...selectedNonEmptyMarkerDeleteIds];
+                    setPendingNonEmptyMarkerSelectionDeleteIds(null);
+                    setSelectedNonEmptyMarkerDeleteIds(new Set());
+                    setExpandedNonEmptyMarkerDetailIds(new Set());
+                    if (ids.length > 0) {
+                      deleteBlocks(ids, { forceDeleteNonEmptyMarkerDetails: true });
+                      if (!deletingMarkers) clearBlockSelection();
+                    }
+                  }}
+                  className={selectedNonEmptyMarkerDeleteIds.size === 0
+                    ? "rounded border border-red-700/80 px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:border-red-900 hover:bg-red-800/80 hover:text-white"
+                    : SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS}
+                >
+                  {selectedNonEmptyMarkerDeleteIds.size === 0 ? "仅删除剧本块" : "删除选中标记"}
+                </button>
+              </div>
+          </ScriptDialog>
+        );
+      })()}
+
+      {pendingLargeSelectionConfirmation && (
+        <ScriptDialog
+          onClose={() => {
+            pendingLargeSelectionConfirmation.onCancel?.();
+            setPendingLargeSelectionConfirmation(null);
+          }}
+          panelClassName="w-[380px] rounded-2xl bg-white p-5 shadow-xl"
+        >
+            <h2 className="text-base font-semibold text-zinc-800">确认继续操作？</h2>
+            <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-500">
+              {largeSelectionOperationMessage(
+                pendingLargeSelectionConfirmation.operation,
+                pendingLargeSelectionConfirmation.count
+              )}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  pendingLargeSelectionConfirmation.onCancel?.();
+                  setPendingLargeSelectionConfirmation(null);
+                }}
+                className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-500 hover:border-zinc-300 hover:text-zinc-700"
+              >
+                取消
+              </button>
+              <button
+                onClick={(e) => {
+                  (e.currentTarget as HTMLButtonElement).disabled = true;
+                  const action = pendingLargeSelectionConfirmation.onConfirm;
+                  setPendingLargeSelectionConfirmation(null);
+                  action();
+                }}
+                className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
+              >
+                确认
+              </button>
+            </div>
+        </ScriptDialog>
+      )}
+
+      {pendingEmptyScriptCleanup && (
+        <ScriptDialog
+          onClose={() => setEmptyScriptCleanupDialog(null)}
+          panelClassName="w-[560px] max-w-[calc(100vw-2rem)] rounded-2xl bg-white p-5 shadow-xl"
+        >
+            <h2 className="text-base font-semibold text-zinc-800">确认清除空白内容？</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-500">
+              以下章节、段落和排练记号 仅包含空剧本块 或 不包含任何剧本块，可选择移除。
+            </p>
+            {pendingEmptyScriptCleanup.length > 0 ? (
+              <div className="mt-3 overflow-hidden rounded-xl border border-zinc-100 bg-zinc-50/60">
+                <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50 px-3 py-2">
+                  <span className="text-xs font-semibold tracking-wide text-zinc-600 uppercase">
+                    可清除空白章节/段落/排练记号
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedEmptyScriptCleanupKeys(new Set(
+                        pendingEmptyScriptCleanup
+                          .filter((target) => !target.disabledReason)
+                          .map((target) => target.key)
+                      ))}
+                      className="text-[11px] font-medium text-[#637ca1]/75 transition-colors hover:text-[#637ca1]"
+                    >
+                      全选
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedEmptyScriptCleanupKeys(new Set())}
+                      className="text-[11px] font-medium text-zinc-400 transition-colors hover:text-[#637ca1]"
+                    >
+                      清空
+                    </button>
+                  </div>
+                </div>
+                <div className="max-h-60 overflow-y-auto">
+                  {pendingEmptyScriptCleanup.map((target, index) => {
+                    const disabled = !!target.disabledReason;
+                    const selected = !disabled && selectedEmptyScriptCleanupKeys.has(target.key);
+                    const previousTarget = index > 0 ? pendingEmptyScriptCleanup[index - 1] : null;
+                    const entersNewChapter = !!previousTarget &&
+                      previousTarget.chapterKey !== target.chapterKey;
+                    const nextTarget = pendingEmptyScriptCleanup[index + 1] ?? null;
+                    const showSceneDivider = !!nextTarget &&
+                      target.chapterKey === nextTarget.chapterKey &&
+                      target.kind !== "chapter" &&
+                      nextTarget.kind === "rehearsal" &&
+                      target.dividerKey !== nextTarget.dividerKey;
+                    const kindLabel =
+                      target.kind === "chapter" ? "章节" :
+                      target.kind === "scene" ? "段落" :
+                      "排练记号";
+                    const indentClass =
+                      target.kind === "chapter" ? "" :
+                      target.kind === "scene" ? "pl-6" :
+                      "pl-10";
+                    return (
+                      <React.Fragment key={target.key}>
+                        {entersNewChapter ? (
+                          <div className="border-t-[3px] border-zinc-900/30" />
+                        ) : null}
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={selected}
+                          disabled={disabled}
+                          onClick={() => toggleEmptyScriptCleanupTarget(target)}
+                          className={`flex w-full items-center gap-3 border-b px-3 py-2.5 text-left text-sm transition-colors last:border-0 disabled:cursor-not-allowed ${
+                            showSceneDivider ? "bg-[linear-gradient(to_right,#a1a1aa_0_9px,transparent_9px_12px)] bg-[length:12px_1px] bg-bottom bg-repeat-x" : ""
+                          } ${
+                            showSceneDivider ? "border-transparent" : disabled ? "border-zinc-100" : selected ? "border-[#91a8ca]/20" : "border-zinc-50"
+                          } ${
+                            disabled ? "bg-white/60" : selected ? "bg-[#eef3fa]" : "bg-white hover:bg-zinc-50"
+                          } ${indentClass}`}
+                        >
+                          <span className="shrink-0 rounded border border-[#91a8ca]/30 bg-zinc-50 px-1.5 py-0.5 text-[11px] text-[#637ca1]">
+                            {kindLabel}
+                          </span>
+                          <span className={`min-w-0 truncate ${disabled ? "text-zinc-400" : "text-zinc-700"}`}>{target.label}</span>
+                          {target.disabledReason && (
+                            <span className="shrink-0 rounded border border-[#91a8ca]/30 bg-[#637ca1] px-2 py-0.5 text-xs text-white">
+                              {target.disabledReason}
+                            </span>
+                          )}
+                          <span
+                            className={`ml-auto flex h-5 w-9 shrink-0 items-center rounded-full p-0.5 transition-colors ${
+                              disabled ? "bg-zinc-100" : selected ? "bg-[#637ca1]" : "bg-zinc-200"
+                            }`}
+                          >
+                            <span
+                              className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                                selected ? "translate-x-4" : ""
+                              }`}
+                            />
+                          </span>
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50/60 px-3 py-2 text-sm text-zinc-500">
+                无空章节、空段落或空排练记号可移除。
+              </p>
+            )}
+            <p className="mt-3 text-sm leading-6 text-zinc-500">
+              如未选择任何条目，点击 “仅清除空白剧本块” 按钮 将清除所有多余的空白剧本块，并保留所有既有构作。上述章节、段落、排练记号下的首个空白剧本块仍会被保留，以便后续编辑。
+              <br />
+              选择条目后，点击 “清除选中空白内容” 按钮 将清除所选的空白章节、段落或排练记号，以及所有的空白剧本块。
+            </p>
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+              <button
+                onClick={() => setEmptyScriptCleanupDialog(null)}
+                className={SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS}
+              >
+                取消
+              </button>
+              <button
+                onClick={() => applyEmptyScriptCleanup(selectedEmptyScriptCleanupKeys)}
+                className={selectedEmptyScriptCleanupKeys.size === 0
+                  ? "rounded bg-[#637ca1] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#536b8e]"
+                  : "rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-zinc-700"}
+              >
+                {selectedEmptyScriptCleanupKeys.size === 0 ? "仅清除空白剧本块" : "清除选中空白内容"}
+              </button>
+            </div>
+        </ScriptDialog>
+      )}
+
+      {pendingStageDelimiterChange && (
+        <ScriptDialog
+          onClose={() => setPendingStageDelimiterChange(null)}
+          panelClassName="w-[420px] rounded-2xl bg-white p-5 shadow-xl"
+        >
+            <h2 className="text-base font-semibold text-zinc-800">确认切换段内舞台提示括号？</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-500">
+              切换括号后，剧本中原本由 “
+              {pendingStageDelimiterChange.open}
+              ” 和 “
+              {pendingStageDelimiterChange.close}
+              ” 包含的内容也将会被视为块内舞台提示。
+              <br />
+              如确定需要切换，请选择是否自动更新现有剧本，将所有的块内舞台提示括号更新为 “
+              {pendingStageDelimiterChange.open}
+              ” 和 “
+              {pendingStageDelimiterChange.close}
+              ”。
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setPendingStageDelimiterChange(null)}
+                className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-500 hover:border-zinc-300 hover:text-zinc-700"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => applyStageDelimiterChange(false)}
+                className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:border-zinc-300 hover:text-zinc-800"
+              >
+                仅切换括号
+              </button>
+              <button
+                onClick={() => applyStageDelimiterChange(true)}
+                className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                确认更新
+              </button>
+            </div>
+        </ScriptDialog>
+      )}
+
+      {sceneDetailDialogSceneId && productionId && (() => {
+        const dialogScene = sceneById.get(sceneDetailDialogSceneId) ?? null;
+        if (!dialogScene) return null;
+        const dialogSceneDetail = sceneDetailById.get(dialogScene.id) ?? toSceneDetail(dialogScene);
+        const chapterDurationDisplay = dialogScene.parentId === null
+          ? getChapterDurationDisplay(sceneDetails.filter((scene) => scene.parentId === dialogScene.id))
+          : null;
+        const durationText = chapterDurationDisplay
+          ? chapterDurationDisplay.hasMissingDuration ? "—" : chapterDurationDisplay.text || "—"
+          : formatDuration(parseDuration(dialogSceneDetail.expectedDuration)) || "—";
+        const sceneCaption = `【${dialogScene.number.trim() || "—"}】${dialogScene.name.trim() || "未命名"}`;
+        return (
+          <ScriptDialog
+            onClose={closeSceneDetailDialog}
+            overlayClassName="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+            panelClassName="flex h-[28rem] max-h-[calc(100vh-2rem)] w-[560px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl bg-white p-5 shadow-xl"
+          >
+            <div className="flex h-6 shrink-0 items-center justify-between gap-4">
+              <div className="flex min-w-0 flex-1 items-center gap-2 text-base font-semibold text-zinc-800">
+                {sceneDetailDialogEditing ? (
+                  <h2 className="truncate">编辑构作详情</h2>
+                ) : (
+                  <>
+                    <p className="min-w-0 flex-1 truncate" title={sceneCaption}>{sceneCaption}</p>
+                    <div className="h-4 w-px shrink-0 bg-zinc-200" />
+                    <p className="shrink-0 whitespace-nowrap">预期时长：{durationText}</p>
+                  </>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={closeSceneDetailDialog}
+                className="flex h-6 w-6 items-center justify-center rounded text-lg leading-none text-zinc-300 transition-colors hover:bg-zinc-100 hover:text-zinc-500"
+                title="关闭"
+                aria-label="关闭构作详情"
+              >
+                ×
+              </button>
+            </div>
+            <div className="mt-4 min-h-0 flex-1 overflow-hidden">
+              <ScriptSceneDetailRail
+                scene={dialogSceneDetail}
+                scenes={sceneDetails}
+                productionId={productionId}
+                versionId={activeVersionId ?? null}
+                canEdit={canEditMetadata}
+                controlledEditMode={sceneDetailDialogEditing}
+                showHeader={false}
+                scrollbarOffsetPx={0}
+                onUpdateIdentity={updateScene}
+                onPatchMeta={patchSceneMeta}
+              />
+            </div>
+            {canEditMetadata && (
+              <div className="mt-5 flex shrink-0 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSceneDetailDialogEditing((editing) => !editing)}
+                  className={`rounded px-3 py-1.5 text-sm font-medium text-white transition-colors ${
+                    sceneDetailDialogEditing
+                      ? "bg-zinc-800 hover:bg-zinc-700"
+                      : "bg-[#637ca1] hover:bg-[#536b8e]"
+                  }`}
+                >
+                  {sceneDetailDialogEditing ? SCRIPT_SCENE_DETAIL_MODE_LABEL.edit : SCRIPT_SCENE_DETAIL_MODE_LABEL.view}
+                </button>
+              </div>
+            )}
+          </ScriptDialog>
+        );
+      })()}
+
+      {/* Mobile block action bottom sheet */}
+      {mobileBlockMenuBlockId !== null && (() => {
+        const menuBlock = blocks.find(b => b.id === mobileBlockMenuBlockId);
+        if (!menuBlock) return null;
+        const isMarker = isMarkerBlock(menuBlock);
+        const isBatchMode = !isMarker && selectedBlockIds.size > 1;
+        const actionBlock = isBatchMode
+          ? blocks.find(block => selectedBlockIds.has(block.id) && !isMarkerBlock(block)) ?? menuBlock
+          : menuBlock;
+        const isStageBlock = actionBlock.type === "stage";
+        const hasLyricBlock = !!actionBlock.lyric;
+        const hasLyricCfg = tagGroups.some(g => !!g.lyricSplitAfterOptionId);
+        const commentCount = commentsByBlockId.get(mobileBlockMenuBlockId)?.length ?? 0;
+        const batchCount = selectedBlockIds.size;
+        const insertActions: Array<[string, () => void]> = [
+          ...(canEditMetadata ? [
+            ["添加新章", () => addChapterBeforeBlock(menuBlock.id)] as [string, () => void],
+            ["添加新段", () => addSceneBeforeBlock(menuBlock.id)] as [string, () => void],
+          ] : []),
+          ...(canAddRehearsalMark ? [
+            ["添加新排练记号", () => addRehearsalBeforeBlock(menuBlock.id)] as [string, () => void],
+          ] : []),
+        ];
+        const conversionActions: Array<[string, () => void]> = isMarker && canEditMetadata ? [
+          ...(menuBlock.type !== "chapter_marker"
+            ? [["转为章节", () => convertMarkerBlockType(menuBlock.id, "chapter_marker")] as [string, () => void]]
+            : []),
+          ...(menuBlock.type !== "scene_marker"
+            ? [["转为段落", () => convertMarkerBlockType(menuBlock.id, "scene_marker")] as [string, () => void]]
+            : []),
+        ] : [];
+        const detailSceneId = productionId && menuBlock.sceneId && (
+          menuBlock.type === "chapter_marker" || menuBlock.type === "scene_marker"
+        ) ? menuBlock.sceneId : null;
+        const canDeleteMenuBlock = isMarker
+          ? menuBlock.type === "rehearsal_marker" ? effectiveCanEditRehearsalMark : canEditMetadata
+          : canEditText;
+        const runAndClose = (action: () => void) => {
+          closeMobileBlockMenu();
+          action();
+        };
+        return (
+          <div className="pointer-events-none fixed inset-0 z-50 flex items-end sm:hidden">
+            <div
+              data-script-selection-action="true"
+              data-script-mobile-block-menu="true"
+              className="pointer-events-auto max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-[var(--surface)] border-t border-[var(--line)] shadow-2xl"
+            >
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-10 h-1 rounded-full bg-zinc-200" />
+              </div>
+              {isBatchMode && (
+                <p className="px-5 py-2 text-xs text-zinc-400">已选中 {batchCount} 行</p>
+              )}
+              <div className="flex flex-col">
+                {mobileBatchAction && (
+                  <div className="flex items-center justify-between gap-3 border-t border-zinc-100 px-5 py-3.5">
+                    <span className="min-w-0 text-sm leading-5 text-zinc-500">
+                      确认修改所选 {batchCount} 行{mobileBatchAction === "type" ? "类型" : "文本状态"}？
+                    </span>
+                    <span className="flex shrink-0 items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const action = mobileBatchAction;
+                          setMobileBatchAction(null);
+                          if (!canPerformSelectedBlockAction(selectedBlockIdsArray)) return;
+                          closeMobileBlockMenu();
+                          requestLargeSelectionOperation(action, batchCount, () => {
+                            if (action === "type") {
+                              setBlocksType(selectedBlockIdsArray, isStageBlock ? "dialogue" : "stage");
+                            } else {
+                              setBlocksLyric(selectedBlockIdsArray, !hasLyricBlock);
+                            }
+                          });
+                        }}
+                        className="text-sm text-red-500 hover:text-red-700"
+                      >
+                        确认
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMobileBatchAction(null)}
+                        className="text-sm text-zinc-400 hover:text-zinc-600"
+                      >
+                        取消
+                      </button>
+                    </span>
+                  </div>
+                )}
+                {!isBatchMode && insertActions.length > 0 && (
+                  <>
+                    <button
+                      onClick={() => setMobileInsertMenuOpen((open) => !open)}
+                      className="flex w-full items-center justify-between border-t border-zinc-100 px-5 py-3.5 text-left text-[15px] text-zinc-700"
+                      aria-expanded={mobileInsertMenuOpen}
+                    >
+                      <span>在块前添加</span>
+                      <ChevronIcon size={16} className={`text-zinc-400 transition-transform ${mobileInsertMenuOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {mobileInsertMenuOpen && insertActions.map(([label, action]) => (
+                      <button
+                        key={label}
+                        onClick={() => runAndClose(action)}
+                        className="w-full border-t border-zinc-100 bg-zinc-50 px-8 py-3 text-left text-[14px] text-zinc-600"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </>
+                )}
+                {conversionActions.map(([label, action]) => (
+                  <button
+                    key={label}
+                    onClick={() => runAndClose(action)}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                  >
+                    {label}
+                  </button>
+                ))}
+                {detailSceneId && (
+                  <>
+                    <p className="border-t border-zinc-100 px-5 pt-3 pb-1 text-xs font-medium text-zinc-400">详情</p>
+                    <button
+                      onClick={() => runAndClose(() => openSceneDetailDialog(detailSceneId))}
+                      className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700"
+                    >
+                      查看构作详情
+                    </button>
+                  </>
+                )}
+                {!isMarker && canEditText && !isStageBlock && !hasLyricCfg && (
+                  <button
+                    onClick={() => {
+                      if (isBatchMode) {
+                        setMobileBatchAction("lyric");
+                      } else {
+                        toggleBlockLyric(mobileBlockMenuBlockId);
+                        closeMobileBlockMenu();
+                      }
+                    }}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                  >
+                    {hasLyricBlock ? "转为台词" : "转为歌词"}
+                  </button>
+                )}
+                {!isMarker && canEditText && (
+                  <button
+                    onClick={() => {
+                      if (isBatchMode) {
+                        setMobileBatchAction("type");
+                      } else {
+                        toggleBlockType(mobileBlockMenuBlockId);
+                        closeMobileBlockMenu();
+                      }
+                    }}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                  >
+                    {isStageBlock ? "转为台词" : "转为舞台提示"}
+                  </button>
+                )}
+                {!isMarker && !isBatchMode && (
+                  <>
+                    <button
+                      onClick={() => { openBlockSidePanel("asset", mobileBlockMenuBlockId); closeMobileBlockMenu(); }}
+                      className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                    >
+                      附件
+                    </button>
+                    <button
+                      onClick={() => { openBlockSidePanel("comment", mobileBlockMenuBlockId); closeMobileBlockMenu(); }}
+                      className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                    >
+                      {commentCount > 0 ? `评论（${commentCount}）` : "评论"}
+                    </button>
+                  </>
+                )}
+                {canDeleteMenuBlock && (
+                  <button
+                    onClick={() => {
+                      closeMobileBlockMenu();
+                      requestMobileDelete(actionBlock.id);
+                    }}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-red-500 border-t border-zinc-100"
+                  >
+                    {isBatchMode ? `删除所选 ${batchCount} 行` : isMarker ? "删除此标记" : "删除此行"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={closeMobileBlockMenu}
+                  className="w-full border-t border-zinc-100 px-5 py-3.5 text-center text-[15px] font-medium text-zinc-600"
+                >
+                  取消
+                </button>
+              </div>
+              <div className="h-6" />
+            </div>
+          </div>
+        );
+      })()}
+
+      {mobileDeleteConfirmation && (() => {
+        const blocked = mobileDeleteConfirmation.kind === "blocks" && mobileDeleteConfirmation.blocked;
+        const cancel = () => {
+          setMobileDeleteConfirmation(null);
+          dismissBlockConfirmations();
+        };
+        const confirm = () => {
+          const request = mobileDeleteConfirmation;
+          setMobileDeleteConfirmation(null);
+          dismissBlockConfirmations();
+          if (request.kind === "marker") {
+            deleteMarker(request.markerId);
+            return;
+          }
+          if (request.blocked) return;
+          requestLargeSelectionOperation("delete", request.blockIds.length, () => {
+            deleteBlocks(request.blockIds);
+          });
+        };
+        return (
+          <ScriptDialog
+            onClose={cancel}
+            overlayClassName="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4"
+            panelClassName="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl"
+          >
+            <h2 className="text-base font-semibold text-zinc-800">
+              {blocked ? "无法删除" : "确认删除？"}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-500">
+              {mobileDeleteConfirmation.message}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={cancel} className={SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS}>
+                取消
+              </button>
+              <button onClick={confirm} className={SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS}>
+                确认
+              </button>
+            </div>
+          </ScriptDialog>
+        );
+      })()}
+
+      {/* 关于 modal */}
+      {aboutOpen && (
+        <ScriptDialog
+          onClose={() => setAboutOpen(false)}
+          panelClassName="w-[420px] rounded-2xl bg-white p-6 shadow-xl"
+        >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold text-zinc-800">关于 · 快捷键</h2>
+              <button onClick={() => setAboutOpen(false)} className="text-zinc-300 hover:text-zinc-500 text-lg leading-none">✕</button>
+            </div>
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-zinc-50">
+                {[
+                  ["⌘Z", "撤销"],
+                  ["⌘⇧Z", "重做"],
+                  ["⌘F", "搜索"],
+                  ["⌘B", "粗体（选中文字）"],
+                  ["⌘U", "下划线（选中文字）"],
+                  ["⌘I", "切换舞台提示 / 段内括注"],
+                  ["Enter", "新建块（行尾）"],
+                  ["⇧Enter", "块内换行"],
+                  ["Backspace", "对行首：合并至上一块（如类型、角色相同）\n对选中块：删除所选行"],
+                  ["⌘⇧L", "切换歌词模式"],
+                  ["⌘⇧C", "复制当前块标签"],
+                  ["⌘⇧V", "粘贴标签到当前块"],
+                ].map(([key, desc]) => (
+                  <tr key={key}>
+                    <td className="py-1.5 pr-4 font-mono text-[13px] text-zinc-400 whitespace-nowrap">{key}</td>
+                    <td className="py-1.5 whitespace-pre-line text-zinc-600">{desc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+        </ScriptDialog>
+      )}
+    </div>
+  );
+}

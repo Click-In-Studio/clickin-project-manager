@@ -20,7 +20,7 @@ type Ctx = { params: Promise<{ id: string }> };
 //   树列表 → 枚举面 listWikiTreeFor（能不能在目录里列到；含软链接别名 #358）
 //   搜索   → 内容面 listVisibleWikiIds（能不能读）——**不得改用枚举面**：按标题搜
 //            闭包外的文档就是枚举面的后门，反复搜即枚举。`[[` 补全走的正是这个
-//            分支（components/SmartTextarea.tsx），候选集永远不得超出内容可读集。
+//            分支（components/editor/SmartTextarea.tsx），候选集永远不得超出内容可读集。
 
 export async function GET(req: NextRequest, ctx: Ctx) {
   const { id: productionId } = await ctx.params;

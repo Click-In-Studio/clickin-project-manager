@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { getWatermarkInfo } from "@/lib/db";
-import WatermarkOverlay from "@/components/WatermarkOverlay";
+import WatermarkOverlay from "@/components/shell/WatermarkOverlay";
 
 /** production 全部页面的共享 layout：按项目配置渲染访问者水印。 */
 export default async function ProductionLayout({

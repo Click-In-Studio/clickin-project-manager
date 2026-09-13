@@ -11,13 +11,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAgentMutation } from "@/lib/agent/agent-mutations";
 import { BASE_PATH } from "@/lib/base-path";
-import TreePickerModal from "@/components/TreePickerModal";
+import TreePickerModal from "@/components/ui/TreePickerModal";
 import AssetUploadPanel from "@/components/assets/AssetUploadPanel";
-import AdminModal from "@/components/AdminModal";
-import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
+import AdminModal from "@/components/ui/AdminModal";
+import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
 import type { NodeEntry } from "@/lib/node/db";
 import type { NodeMoveInCandidate } from "@/lib/node/dramaturgy";
-import { useReportAiTarget } from "@/components/ai-target";
+import { useReportAiTarget } from "@/components/agent/ai-target";
 import { aiTargetForNode } from "@/lib/node/ai-target";
 
 type DropZone = "before" | "after" | "inside";

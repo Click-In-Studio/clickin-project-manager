@@ -16,8 +16,8 @@ import { canViewWiki, canEditWiki, canShareWiki } from "@/lib/wiki/perm";
 import { listNodeTreeFor } from "@/lib/node/tree-view";
 import { getNode } from "@/lib/node/db";
 import { listEventDepartments } from "@/lib/ops/event-db";
-import PageHeader from "@/components/PageHeader";
-import PageActivationGate from "@/components/PageActivationGate";
+import PageHeader from "@/components/ui/PageHeader";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 import WikiShell from "@/components/wiki/WikiShell";
 import WikiDocClient from "@/components/wiki/WikiDocClient";
 

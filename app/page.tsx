@@ -5,7 +5,7 @@ import { getSession } from "@/lib/account/session";
 export const metadata: Metadata = { title: "首页" };
 import { listProductions, listUpcomingMilestonesForUser, countCueWarningsForUser } from "@/lib/db";
 import { listMyUpcomingCallTimes, listMyPendingTechReqs, listMyPocAwaitingReqs, listMyFollowedUpcomingEvents, listUnreadFollowedReports } from "@/lib/ops/event-db";
-import HomeClient from "@/components/HomeClient";
+import HomeClient from "@/components/ops/HomeClient";
 
 export default async function Home() {
   const cookieStore = await cookies();

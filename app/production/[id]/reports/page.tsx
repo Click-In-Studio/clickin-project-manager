@@ -7,9 +7,9 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listProductionReports } from "@/lib/ops/event-db";
 import { isReportViewer } from "@/lib/ops/event-permissions";
-import PageHeader from "@/components/PageHeader";
-import ProductionReportsClient from "@/components/ProductionReportsClient";
-import PageActivationGate from "@/components/PageActivationGate";
+import PageHeader from "@/components/ui/PageHeader";
+import ProductionReportsClient from "@/components/ops/ProductionReportsClient";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 
 export default async function ProductionReportsPage({ params }: { params: Promise<{ id: string }> }) {

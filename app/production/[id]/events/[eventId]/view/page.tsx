@@ -15,7 +15,7 @@ import {
 } from "@/lib/ops/event-db";
 import { hasUserAnyTechReqGrantInEvent } from "@/lib/perm/resource-grant-db";
 import { hasGrant as hasGrantCheck } from "@/lib/perm/grant-check";
-import EventFollowerClient from "@/components/EventFollowerClient";
+import EventFollowerClient from "@/components/ops/EventFollowerClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; eventId: string }> }): Promise<Metadata> {
   const { id, eventId } = await params;

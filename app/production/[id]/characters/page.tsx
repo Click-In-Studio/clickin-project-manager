@@ -7,8 +7,8 @@ import { getSession } from "@/lib/account/session";
 import { hasAnyGrant } from "@/lib/perm/grant-check";
 import { getCharacterPerms } from "@/lib/script/character-perms";
 import { getProductionPermissionContext, getProductionName, listCharactersByVersion, getActiveVersionId } from "@/lib/db";
-import CharactersManager from "@/components/CharactersManager";
-import PageActivationGate from "@/components/PageActivationGate";
+import CharactersManager from "@/components/script/CharactersManager";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export default async function CharactersPage({
   params,

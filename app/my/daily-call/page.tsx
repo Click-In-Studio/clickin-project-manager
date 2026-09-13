@@ -15,7 +15,7 @@ import Link from "next/link";
 import { getSession } from "@/lib/account/session";
 import { verifyCardToken } from "@/lib/notify/card-token";
 import { getPool } from "@/lib/pg";
-import SmartText from "@/components/SmartText";
+import SmartText from "@/components/ui/SmartText";
 
 function fmtTime(iso: string): string {
   const d = new Date(new Date(iso).getTime() + 8 * 3_600_000);

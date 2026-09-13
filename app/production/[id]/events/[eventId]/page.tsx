@@ -20,7 +20,7 @@ import {
 } from "@/lib/ops/event-db";
 import { canEnterEvent, isReportViewer, loadEventPermContext } from "@/lib/ops/event-permissions";
 import { getEventAccess } from "@/lib/perm/resource-grant-db";
-import EventDetailClient from "@/components/EventDetailClient";
+import EventDetailClient from "@/components/ops/EventDetailClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; eventId: string }> }): Promise<Metadata> {
   const { id, eventId } = await params;

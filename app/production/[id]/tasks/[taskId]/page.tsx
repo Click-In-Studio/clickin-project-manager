@@ -14,7 +14,7 @@ import {
   listScheduleItems,
   listEventDepartments,
 } from "@/lib/ops/event-db";
-import ReqDetailClient from "@/components/ReqDetailClient";
+import ReqDetailClient from "@/components/ops/ReqDetailClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; taskId: string }> }): Promise<Metadata> {
   const { id: productionId, taskId } = await params;

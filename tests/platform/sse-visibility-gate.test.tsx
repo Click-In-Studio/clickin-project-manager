@@ -210,8 +210,8 @@ describe("接线棘轮：四处消费方确实接上了门控", () => {
   const read = (p: string) => readFileSync(p, "utf8");
 
   it.each([
-    ["components/CuePage.tsx"],
-    ["components/ScenesManager.tsx"],
+    ["components/ops/CuePage.tsx"],
+    ["components/script/ScenesManager.tsx"],
     ["components/wiki/WikiDocClient.tsx"],
   ])("%s 走 hook 建连，不留裸 EventSource", (file) => {
     const src = read(file);
@@ -220,7 +220,7 @@ describe("接线棘轮：四处消费方确实接上了门控", () => {
   });
 
   it("ScriptEditor 用共享的可见性门（建连被 leader 选举包着，只接这一层）", () => {
-    const src = read("components/ScriptEditor.tsx");
+    const src = read("components/script/ScriptEditor.tsx");
     expect(src).toContain("useDocumentVisible()");
     // 自建一套 visibilitychange 监听 = 门控又分叉了
     expect(src).not.toContain('addEventListener("visibilitychange"');
@@ -232,14 +232,14 @@ describe("接线棘轮：四处消费方确实接上了门控", () => {
   it("CuePage 保留了变更帧触发重拉的路径", () => {
     // 旧实现挂在 es.onmessage 上。搬进 hook 时若只搬了 presence 落下 message，
     // 别人改 cue 本端就不刷新了——而这条回归在 presence 头像正常时毫无征兆。
-    const src = read("components/CuePage.tsx");
+    const src = read("components/ops/CuePage.tsx");
     expect(src).toMatch(/message:\s*\(\)\s*=>\s*scheduleCueRefetch\(\)/);
   });
 
   it("CuePage 重连时清掉 presence 去重键", () => {
     // 断连即出场，重连必须重报；sendCuePresence 的「值没变就不发」会把重报吞掉，
     // 不清 lastSentPresRef 的话切回标签页后别人看不见我，直到我下次动选区。
-    const src = read("components/CuePage.tsx");
+    const src = read("components/ops/CuePage.tsx");
     expect(src).toContain('lastSentPresRef.current = ""');
   });
 

@@ -7,8 +7,8 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listProductionTechReqs, listMyTechReqsFull } from "@/lib/ops/event-db";
-import ProductionTasksClient from "@/components/ProductionTasksClient";
-import PageHeader from "@/components/PageHeader";
+import ProductionTasksClient from "@/components/ops/ProductionTasksClient";
+import PageHeader from "@/components/ui/PageHeader";
 
 
 export default async function ProductionTasksPage({ params, searchParams }: {

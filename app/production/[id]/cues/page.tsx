@@ -9,7 +9,7 @@ import {
   loadProduction, listCueLists, listCuesByProduction,
   getActiveVersionId, listCueListsWithAccess, getEstimatedPageMap,
 } from "@/lib/db";
-import CuePage from "@/components/CuePage";
+import CuePage from "@/components/ops/CuePage";
 
 export default async function CuesPage({
   params,

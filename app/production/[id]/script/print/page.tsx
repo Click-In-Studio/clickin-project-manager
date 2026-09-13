@@ -13,7 +13,7 @@ import {
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { buildMarkerContextById, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script/script-marker-blocks";
 import ScriptPrintRoute from "@/components/print/ScriptPrintRoute";
-import PageActivationGate from "@/components/PageActivationGate";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export const metadata: Metadata = { title: "打印剧本" };
 

@@ -14,7 +14,7 @@ import {
   listProductionMembersWithRoles,
 } from "@/lib/db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
-import AdminRolesClient from "@/components/AdminRolesClient";
+import AdminRolesClient from "@/components/admin/AdminRolesClient";
 
 export default async function RolesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

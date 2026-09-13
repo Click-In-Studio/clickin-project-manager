@@ -15,7 +15,7 @@ import {
 import { getPermissionVocabulary } from "@/lib/perm/perm-center-db";
 import { listGovernanceGrants } from "@/lib/perm/grant-audit-db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
-import AdminProducerClient from "@/components/AdminProducerClient";
+import AdminProducerClient from "@/components/admin/AdminProducerClient";
 
 export default async function ProducerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

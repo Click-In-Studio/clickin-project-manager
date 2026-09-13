@@ -32,5 +32,5 @@ GitHub Issue：[#283](https://github.com/Click-In-Studio/clickin-project-manager
 ## 验收记录
 
 - `npx tsc --noEmit`：通过。
-- `npx eslint components/PlanningClient.tsx`：0 error。
+- `npx eslint components/ops/PlanningClient.tsx`：0 error。
 - 浏览器回归：快捷建点、确认关闭、删除测试地点和刷新恢复“执行日程”均通过。

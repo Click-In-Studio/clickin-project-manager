@@ -14,8 +14,8 @@ import { useFontsSettled } from "@/components/print/use-fonts-settled";
 import { useRouter } from "next/navigation";
 import { fmtDateTime } from "@/lib/tz";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
-import { buildWatermarkTile } from "@/components/watermark-tile";
-import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/PageHeader";
+import { buildWatermarkTile } from "@/components/shell/watermark-tile";
+import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
 import { PRINT_PAGE_CSS_A4 } from "@/lib/script/print-css";
 
 export default function WikiPrintPage({

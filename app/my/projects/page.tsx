@@ -4,7 +4,7 @@ export const metadata: Metadata = { title: "我的项目" };
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { getUserTier } from "@/lib/account/plan";
-import MyProjectsClient from "@/components/MyProjectsClient";
+import MyProjectsClient from "@/components/account/MyProjectsClient";
 
 export default async function MyProjectsPage() {
   // 「+ 新建项目」的显隐是用户等级（付费维度），与项目内权限无关：user_plan 无行的

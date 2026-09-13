@@ -1,12 +1,12 @@
 "use client";
 
-import OverflowSafeSelect from "@/components/OverflowSafeSelect";
+import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { AssetType } from "@/lib/asset/db";
 import { ASSET_TYPE_LABELS } from "@/lib/asset/types";
 import { BASE_PATH } from "@/lib/base-path";
-import TreePickerModal from "@/components/TreePickerModal";
+import TreePickerModal from "@/components/ui/TreePickerModal";
 import type { NodeEntry } from "@/lib/node/db";
 
 // R2 single PUT max is 5 GiB; use multipart for anything above 50 MB

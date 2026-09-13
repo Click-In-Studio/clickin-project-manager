@@ -4,7 +4,7 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RundownColumnEditor } from "@/components/PlanningClient";
+import { RundownColumnEditor } from "@/components/ops/PlanningClient";
 
 describe("RundownColumnEditor", () => {
   let container: HTMLDivElement;

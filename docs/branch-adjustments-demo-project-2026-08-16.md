@@ -100,11 +100,11 @@
 
 ## 相关文件
 
-- `components/AccessRequestsClient.tsx`
-- `components/AnnouncementsClient.tsx`
-- `components/EventsClient.tsx`
-- `components/PlanningClient.tsx`
-- `components/ContactsClient.tsx`
+- `components/approval/AccessRequestsClient.tsx`
+- `components/notify/AnnouncementsClient.tsx`
+- `components/ops/EventsClient.tsx`
+- `components/ops/PlanningClient.tsx`
+- `components/perm/ContactsClient.tsx`
 - `lib/db.ts`
 - `scripts/seed-local-demo.ts`
 - `docs/branch-adjustments-demo-project-2026-08-16.md`
@@ -190,7 +190,7 @@
 ### 2026-08-18 验证记录
 
 - TypeScript：`npx tsc --noEmit` 通过。
-- ESLint：`components/PlanningClient.tsx` 0 error。
+- ESLint：`components/ops/PlanningClient.tsx` 0 error。
 - 浏览器实测：旧的大配置面板已消失，列头菜单、列缝插入、冻结切换、地点行与多选人员组正常。
 - 浏览器实测：编辑模式点击“舞台道具清点”后 URL 保持在计划页，右侧出现事项编辑抽屉、人员组多选、颜色和上下缩放把手。
 

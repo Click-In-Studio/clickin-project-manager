@@ -30,9 +30,13 @@
 │   ├── my/                 # 个人页面（通知、权限、周 call、日 call）
 │   └── login/              # 登录页
 │
-├── components/             # React 客户端组件
-│   ├── assets/             # Asset 相关组件（上传、预览、挂载）
-│   └── ...                 # 其他功能组件
+├── components/             # React 客户端组件——按域分目录（#482），根目录不放文件
+│   ├── ui/                 # 通用原语：Badge PageHeader DropdownPicker OverflowSafeSelect TreePickerModal …
+│   ├── shell/              # 应用外壳：AppShell、顶部菜单、搜索、水印
+│   ├── admin/              # 管理后台各页面（Admin*Client）与其专属卡片
+│   ├── ops/ script/ approval/ perm/ account/ notify/ agent/   # 页面级容器与页面专属组件，按域
+│   ├── editor/ wiki/ assets/ import/ print/                   # 原有功能域目录
+│   └── （域名与 lib/ tests/ 同一套，见 §11.2 归属表）
 │
 ├── lib/                    # 服务端工具库——按域分目录（#482），根只留跨域基建
 │   ├── db.ts               # 主数据库查询（production、member、permission）
@@ -561,7 +565,7 @@ npm test -- --reporter=verbose       # 显示每条测试名称
 TEST_SEED=1234567890 npm test        # 用固定 seed 复现 CI 失败
 ```
 
-### 11.2 测试文件结构
+### 11.2 源码与测试目录结构（tests/ · lib/ · components/）
 
 `tests/` 按**业务域**分目录，migration 测试单独成域（#472）。域目录只有一层，不再嵌套：
 
@@ -605,6 +609,22 @@ tests/
 | `platform/` | 外部平台适配（`feishu/` `email/` 注册表、通知路由），原有目录未动 | `notify/` `account/` |
 | `job/` | 任务队列，原有目录未动 | `platform/` |
 | 根 | 纯基建：`db` `pg` `r2` `server-cache` `tz` `money` `duration` `lex-order` `z-index` `base-path` `server-url` `request-json` `sse-keepalive` `nav-pending` `search-db` | `platform/` |
+
+`components/` 三分：通用原语进 `ui/`、应用外壳进 `shell/`、后台页面进 `admin/`，其余页面级 `*Client.tsx` 与页面专属组件按域走（与 `lib/` 同名）。页面容器**留在 `components/` 不 colocate 到 `app/`**——`app/` 路由树已深达十层，且页面容器有复用（`ProductionTasksClient` / `MyTasksClient` 共用子件）。归属按消费者定：只被一个域的页面用的，进那个域（如 `TableViewSelector` 只服务戏剧构作 → `script/`）；跨域共用才进 `ui/`。`.module.css` 跟随消费者，跨域共用的进 `ui/`。文件名两种形态：默认导出组件的文件 PascalCase，hook / context / util / 共享样式 kebab-case（`use-fonts-settled.ts` `ai-target.tsx` `my-pages.module.css`）。
+
+| `components/` 域 | 收纳 |
+|---|---|
+| `ui/` | Badge ChevronIcon DropdownPicker DurationInput Markdown MarkdownEditor OverflowSafeSelect PageHeader PageSkeleton SmartText TreePickerModal AdminModal（通用弹窗，名字是历史）`my-pages.module.css` |
+| `shell/` | AppShell ProductionTopMenu SearchBar ManualSaveNotice WatermarkOverlay `watermark-tile` |
+| `admin/` | 13 个 `Admin*Client` + AdminActivationGate、Danger/Migration 段、BulkInvite / TransferOwner / ProductionPlan 卡片、InviteModal |
+| `ops/` | 事件、cue、计划、任务、需求（req）、报告、周 call、工作区首页与项目首页 |
+| `script/` | ScriptEditor 及其对话框、场次/角色管理、戏剧构作与其表格视图组件 |
+| `approval/` | AccessRequests 页与弹窗、ApprovalFlowDesigner |
+| `perm/` | 权限激活弹窗 / 页面门、权限键选择器、成员选择器、我的权限页、通讯录、未授权页动作 |
+| `account/` | 邀请接受页、我的项目、新建项目弹窗 |
+| `notify/` | 通知页、通知中心、公告页 |
+| `agent/` | AgentPopout、AI 指令 / 用量卡片、`ai-target`、wiki 提案预览 |
+| `editor/` `wiki/` `assets/` `import/` `print/` | 原有目录；`SmartTextarea` 归 `editor/`、`TagFormatOptionList` 归 `import/` |
 
 「template」一词在仓库里指五种东西，现在各归其域：剧本版式模版 `script/template/`、项目模版 `production/templates/`、权限模版 `perm/grant-template`、审批模版 `approval/approval-flow-template*`、cue 模版 `ops/cue-template-db`。
 
@@ -818,9 +838,10 @@ Run "npm run seed:schema" and commit db/seed-schema.json.
 
 #### ④ 目录形态棘轮
 
-`tests/`（#472）与 `lib/`（#482）各整理过一次，整理完由两组形态断言防回退：
+`tests/`（#472）、`lib/` 与 `components/`（#482）各整理过一次，整理完由三组形态断言防回退：
 
 - `tests/`：根目录无测试文件、域目录下不套层、`_support/` 不放测试、migration 三件套只住 `migrations/`。只钉形态不钉名单，新开域目录不用改测试。
+- `components/`（#482）：根目录无文件、域目录下不套层、文件名为 PascalCase 或 kebab-case 两种形态之一。
 - `lib/`：根目录文件 ⊆ 基建白名单（`db` `pg` `r2` `server-cache` `tz` …，见 §11.2 归属表末行），且白名单无幽灵条目。往根加文件 = 同一 PR 加白名单 + 更新归属表；业务文件一律进域目录。
 
 ### 11.6 覆盖范围约定
