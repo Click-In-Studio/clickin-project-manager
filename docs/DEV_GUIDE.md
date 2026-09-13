@@ -613,10 +613,12 @@ tests/
 | `job/` | 任务队列（原有目录） | — | `platform/` |
 | `admin/` | — | 13 个 `Admin*Client` + AdminActivationGate、Danger/Migration 段、BulkInvite / TransferOwner / ProductionPlan 卡片、InviteModal | `perm/` `ops/` |
 | `ui/` | — | 通用原语：Badge ChevronIcon DropdownPicker DurationInput Markdown MarkdownEditor OverflowSafeSelect PageHeader PageSkeleton SmartText TreePickerModal AdminModal（通用弹窗，名字是历史）`my-pages.module.css` | `platform/` |
-| `shell/` | — | 应用外壳：AppShell ProductionTopMenu SearchBar ManualSaveNotice WatermarkOverlay `watermark-tile` | `platform/` |
+| `shell/` | — | 应用外壳：AppShell（子件与纯函数在 `app-shell/` 族目录）ProductionTopMenu SearchBar ManualSaveNotice WatermarkOverlay `watermark-tile` | `platform/` |
 | 根 | 纯基建白名单：`db` `pg` `r2` `server-cache` `tz` `money` `duration` `lex-order` `z-index` `base-path` `server-url` `request-json` `sse-keepalive` `nav-pending` `search-db` | 不放文件 | `platform/` |
 
 `components/` 三分：通用原语进 `ui/`、应用外壳进 `shell/`、后台页面进 `admin/`，其余页面级 `*Client.tsx` 与页面专属组件按域走。页面容器**留在 `components/` 不 colocate 到 `app/`**——`app/` 路由树已深达十层，且页面容器有复用（`ProductionTasksClient` / `MyTasksClient` 共用子件）。归属按消费者定：只被一个域的页面用的，进那个域（如 `TableViewSelector` 只服务戏剧构作 → `script/`）；跨域共用才进 `ui/`。`.module.css` 跟随消费者，跨域共用的进 `ui/`。文件名两种形态：默认导出组件的文件 PascalCase，hook / context / util / 共享样式 kebab-case（`use-fonts-settled.ts` `ai-target.tsx` `my-pages.module.css`）。
+
+**组件族目录**（#487）：域下允许**一层**族目录，收巨石组件拆出来的子件 / hook / 纯函数——`components/shell/app-shell/{ProjectSwitcher,NavItem,…}.tsx` + `toolbar-stage.ts` `route.ts` `nav-config.ts`。族目录名 kebab-case = 主组件名（`AppShell` → `app-shell/`、`ScriptEditor` → `script-editor/`），主组件自己留在域目录不进族；族内不再套目录，文件名规则同上。族目录不是"给相关文件找个家"的通用手段——只为一个主组件服务，跨组件共用的东西按消费者归域或进 `ui/`。族内文件有行数上限：组件 ≤ 800、`use-*` hook ≤ 400（`conventions.test.ts` 的 `FAMILY_FILE_CEILING`）；整块搬出来就超标的子件按搬出时的行数记账只降不升（`FAMILY_FILE_GRANDFATHERED`）。
 
 「template」一词在仓库里指五种东西，现在各归其域：剧本版式模版 `script/template/`、项目模版 `production/templates/`、权限模版 `perm/grant-template`、审批模版 `approval/approval-flow-template*`、cue 模版 `ops/cue-template-db`。
 
@@ -833,7 +835,8 @@ Run "npm run seed:schema" and commit db/seed-schema.json.
 `tests/`（#472）、`lib/` 与 `components/`（#482）各整理过一次，整理完由三组形态断言防回退：
 
 - `tests/`：根目录无测试文件、域目录下不套层、`_support/` 不放测试、migration 三件套只住 `migrations/`。只钉形态不钉名单，新开域目录不用改测试。
-- `components/`（#482）：根目录无文件、域目录下不套层、文件名为 PascalCase 或 kebab-case 两种形态之一。
+- `components/`（#482 / #487）：根目录无文件、域目录下最多一层组件族目录（族目录名 kebab-case、族内不套层）、文件名为 PascalCase 或 kebab-case 两种形态之一。
+- 巨石组件行数（#487）：`MONOLITH_LINE_CEILING` 钉住 `ScriptEditor` `EventDetailClient` `CuePage` `PlanningClient` `AppShell` 五个文件的当前行数，只降不升——拆分 PR 同时把数字改小，功能 PR 不该让它增长（要加东西先拆出去再加）。族目录内文件组件 ≤ 800 / hook ≤ 400，记账豁免见 `FAMILY_FILE_GRANDFATHERED`。
 - `lib/`：根目录文件 ⊆ 基建白名单（`db` `pg` `r2` `server-cache` `tz` …，见 §11.2 归属表末行），且白名单无幽灵条目。往根加文件 = 同一 PR 加白名单 + 更新归属表；业务文件一律进域目录。
 
 ### 11.6 覆盖范围约定
