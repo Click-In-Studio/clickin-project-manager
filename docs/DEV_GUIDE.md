@@ -592,39 +592,31 @@ tests/
 
 新增测试放进对应域目录；**归属不明**时按「这条测试红了，先去看哪个模块」来定。
 
-`lib/` 与 `tests/` 用同一套域名（#482），`tests/<域>/x.test.ts` ↔ `lib/<域>/x.ts` 能直接对上；`lib/` 比 `tests/` 多出几个更细的域，对应关系如下：
+`tests/` `lib/` `components/` 三处用**同一套域名**（#482）。`tests/<域>/x.test.ts ↔ lib/<域>/x.ts` 能直接对上；`lib/` `components/` 比 `tests/` 多出几个更细的域，各自折叠进哪个 `tests/` 域以下表「测试归」列为准。归属不明时按「这个文件出 bug 先去看哪个模块」来定。
 
-| `lib/` 域 | 收纳 | 对应 `tests/` 域 |
-|---|---|---|
-| `agent/` | `runtime/` `tools/` `memory/` `chat/` 四个子目录 + 注入安全、指令、页面/UI 上下文、工具标签、`ai-quota`、`llm-chat` | `agent/` |
-| `script/` | `script-*`（方言、标记、分页、选区、焦点…）、`template/`（剧本版式模版）、`head-version`、`print-css`、场次/角色字段权限 | `script/` |
-| `editor/` | `editor-*`（块模型）、`tiptap-*`（扩展）、`line-merge` `table-ops` `remark-columns`、粘贴处理、`mention-types` | `wiki/`（编辑器原语的测试跟文档库走） |
-| `wiki/` `asset/` `node/` `import/` `doc-extract/` | 原有目录，未动 | `wiki/` `asset/` `script/`（导入管线） |
-| `ops/` | `event-*` `cue-*` `task-*` `phase-*` `finance-db` `material-*` `scene-duration` | `ops/` |
-| `approval/` | `approval-*`：引擎、模版、路由、阶段、TTL、时间线 | `ops/` |
-| `perm/` | `permissions` `grant-*` `policy-*` `resource-*` `perm-center-db` `page-permission-scopes` `permission-*` `roles` `dept-db` `member-*` `admin-guard` `api-guard` | `perm/` |
-| `production/` | `production-template` `production-types` `templates/`（各类型项目模版）`template-seeders/` | `ops/` |
-| `account/` | `session` `db-feishu` `invite-db` `registration-gate` `account-return` `plan` | `account/` |
-| `notify/` | `notify` `notification-prefs` `inbox-db` `card-token` `doc/`（通知文档渲染） | `notify/` |
-| `platform/` | 外部平台适配（`feishu/` `email/` 注册表、通知路由），原有目录未动 | `notify/` `account/` |
-| `job/` | 任务队列，原有目录未动 | `platform/` |
-| 根 | 纯基建：`db` `pg` `r2` `server-cache` `tz` `money` `duration` `lex-order` `z-index` `base-path` `server-url` `request-json` `sse-keepalive` `nav-pending` `search-db` | `platform/` |
+| 域 | `lib/` 收纳 | `components/` 收纳 | 测试归 |
+|---|---|---|---|
+| `agent/` | `runtime/` `tools/` `memory/` `chat/` 四个子目录 + 注入安全、指令、页面/UI 上下文、工具标签、`ai-quota` `llm-chat` | AgentPopout、AI 指令 / 用量卡片、`ai-target`、wiki 提案预览 | `agent/` |
+| `script/` | `script-*`（方言、标记、分页、选区、焦点…）、`template/`（剧本版式模版）、`head-version` `print-css`、场次/角色字段权限 | ScriptEditor 及其对话框、场次/角色管理、戏剧构作与其表格视图组件 | `script/` |
+| `editor/` | `editor-*`（块模型）、`tiptap-*`（扩展）、`line-merge` `table-ops` `remark-columns`、粘贴处理、`mention-types` | 块菜单 / 气泡菜单 / 表格工具、`SmartTextarea` | `wiki/`（编辑器原语的测试跟文档库走） |
+| `wiki/` | 文档库（原有目录） | 文档页、挂载面板、`WikiPrintPage`（文档打印，与剧本打印无关）（原有目录） | `wiki/` |
+| `asset/` | 素材、元数据、头像（`avatar-*`） | `assets/`：上传、预览、挂载、分享（原有目录） | `asset/` |
+| `node/` `import/` `doc-extract/` | 节点树 / 导入管线 / 文档抽取（原有目录） | 只有 `import/`：向导、列映射、`TagFormatOptionList`（`node/` `doc-extract/` 无对应 components 目录） | `node/`→`wiki/`；`import/` `doc-extract/`→`script/` |
+| `print/` | —（打印 CSS 在 `script/print-css`） | `ScriptPrint*`（剧本打印路由与渲染）、`template-render`、`use-fonts-settled` | `script/` |
+| `ops/` | `event-*` `cue-*` `task-*` `phase-*` `finance-db` `material-*` `scene-duration` | 事件、cue、计划、任务、需求（req）、报告、周 call、工作区首页与项目首页 | `ops/` |
+| `approval/` | `approval-*`：引擎、模版、路由、阶段、TTL、时间线 | AccessRequests 页与弹窗、ApprovalFlowDesigner | `ops/` |
+| `perm/` | `permissions` `grant-*` `policy-*` `resource-*` `perm-center-db` `page-permission-scopes` `permission-*` `roles` `dept-db` `member-*` `admin-guard` `api-guard` | 权限激活弹窗 / 页面门、权限键选择器、成员选择器、我的权限页、通讯录、未授权页动作 | `perm/` |
+| `production/` | `production-template` `production-types` `templates/`（各类型项目模版）`template-seeders/` | — | `ops/` |
+| `account/` | `session` `db-feishu` `invite-db` `registration-gate` `account-return` `plan` | 邀请接受页、我的项目、新建项目弹窗 | `account/` |
+| `notify/` | `notify` `notification-prefs` `inbox-db` `card-token` `doc/`（通知文档渲染） | 通知页、通知中心、公告页 | `notify/` |
+| `platform/` | 外部平台适配：`feishu/` `email/` 注册表、通知路由（原有目录） | — | `notify/` `account/` |
+| `job/` | 任务队列（原有目录） | — | `platform/` |
+| `admin/` | — | 13 个 `Admin*Client` + AdminActivationGate、Danger/Migration 段、BulkInvite / TransferOwner / ProductionPlan 卡片、InviteModal | `perm/` `ops/` |
+| `ui/` | — | 通用原语：Badge ChevronIcon DropdownPicker DurationInput Markdown MarkdownEditor OverflowSafeSelect PageHeader PageSkeleton SmartText TreePickerModal AdminModal（通用弹窗，名字是历史）`my-pages.module.css` | `platform/` |
+| `shell/` | — | 应用外壳：AppShell ProductionTopMenu SearchBar ManualSaveNotice WatermarkOverlay `watermark-tile` | `platform/` |
+| 根 | 纯基建白名单：`db` `pg` `r2` `server-cache` `tz` `money` `duration` `lex-order` `z-index` `base-path` `server-url` `request-json` `sse-keepalive` `nav-pending` `search-db` | 不放文件 | `platform/` |
 
-`components/` 三分：通用原语进 `ui/`、应用外壳进 `shell/`、后台页面进 `admin/`，其余页面级 `*Client.tsx` 与页面专属组件按域走（与 `lib/` 同名）。页面容器**留在 `components/` 不 colocate 到 `app/`**——`app/` 路由树已深达十层，且页面容器有复用（`ProductionTasksClient` / `MyTasksClient` 共用子件）。归属按消费者定：只被一个域的页面用的，进那个域（如 `TableViewSelector` 只服务戏剧构作 → `script/`）；跨域共用才进 `ui/`。`.module.css` 跟随消费者，跨域共用的进 `ui/`。文件名两种形态：默认导出组件的文件 PascalCase，hook / context / util / 共享样式 kebab-case（`use-fonts-settled.ts` `ai-target.tsx` `my-pages.module.css`）。
-
-| `components/` 域 | 收纳 |
-|---|---|
-| `ui/` | Badge ChevronIcon DropdownPicker DurationInput Markdown MarkdownEditor OverflowSafeSelect PageHeader PageSkeleton SmartText TreePickerModal AdminModal（通用弹窗，名字是历史）`my-pages.module.css` |
-| `shell/` | AppShell ProductionTopMenu SearchBar ManualSaveNotice WatermarkOverlay `watermark-tile` |
-| `admin/` | 13 个 `Admin*Client` + AdminActivationGate、Danger/Migration 段、BulkInvite / TransferOwner / ProductionPlan 卡片、InviteModal |
-| `ops/` | 事件、cue、计划、任务、需求（req）、报告、周 call、工作区首页与项目首页 |
-| `script/` | ScriptEditor 及其对话框、场次/角色管理、戏剧构作与其表格视图组件 |
-| `approval/` | AccessRequests 页与弹窗、ApprovalFlowDesigner |
-| `perm/` | 权限激活弹窗 / 页面门、权限键选择器、成员选择器、我的权限页、通讯录、未授权页动作 |
-| `account/` | 邀请接受页、我的项目、新建项目弹窗 |
-| `notify/` | 通知页、通知中心、公告页 |
-| `agent/` | AgentPopout、AI 指令 / 用量卡片、`ai-target`、wiki 提案预览 |
-| `editor/` `wiki/` `assets/` `import/` `print/` | 原有目录；`SmartTextarea` 归 `editor/`、`TagFormatOptionList` 归 `import/` |
+`components/` 三分：通用原语进 `ui/`、应用外壳进 `shell/`、后台页面进 `admin/`，其余页面级 `*Client.tsx` 与页面专属组件按域走。页面容器**留在 `components/` 不 colocate 到 `app/`**——`app/` 路由树已深达十层，且页面容器有复用（`ProductionTasksClient` / `MyTasksClient` 共用子件）。归属按消费者定：只被一个域的页面用的，进那个域（如 `TableViewSelector` 只服务戏剧构作 → `script/`）；跨域共用才进 `ui/`。`.module.css` 跟随消费者，跨域共用的进 `ui/`。文件名两种形态：默认导出组件的文件 PascalCase，hook / context / util / 共享样式 kebab-case（`use-fonts-settled.ts` `ai-target.tsx` `my-pages.module.css`）。
 
 「template」一词在仓库里指五种东西，现在各归其域：剧本版式模版 `script/template/`、项目模版 `production/templates/`、权限模版 `perm/grant-template`、审批模版 `approval/approval-flow-template*`、cue 模版 `ops/cue-template-db`。
 
