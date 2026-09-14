@@ -147,7 +147,12 @@ describe("路由：`nd_` 段不再 500", () => {
 describe("前端同源（棘轮）", () => {
   it("AppShell 的「当前文档」提取器过同一道闸", async () => {
     const { readFileSync } = await import("fs");
-    const src = readFileSync("components/shell/AppShell.tsx", "utf8");
+    // 提取器住在 app-shell/route.ts（#487 A1 从 AppShell.tsx 搬出）；AppShell 必须从那里接线，
+    // 免得有人在壳里重新写一个裸正则版本绕过闸。
+    const shell = readFileSync("components/shell/AppShell.tsx", "utf8");
+    expect(shell).toMatch(/import \{[^}]*\bextractCurrentWikiId\b[^}]*\} from "\.\/app-shell\/route"/);
+    expect(shell).not.toContain("function extractCurrentWikiId");
+    const src = readFileSync("components/shell/app-shell/route.ts", "utf8");
     expect(src).toContain(`import { isWikiId } from "@/lib/wiki/id"`);
     // 提取器体内必须出现 isWikiId——裸 `return m ? m[1] : null` 就是 #476 的原样。
     const body = src.slice(src.indexOf("function extractCurrentWikiId"));
