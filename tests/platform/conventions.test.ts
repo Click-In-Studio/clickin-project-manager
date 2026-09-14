@@ -428,7 +428,7 @@ const MONOLITH_LINE_CEILING: Record<string, number> = {
   "components/ops/EventDetailClient.tsx": 3538,
   "components/ops/CuePage.tsx": 3210,
   "components/ops/PlanningClient.tsx": 2586,
-  "components/shell/AppShell.tsx": 1090,
+  "components/shell/AppShell.tsx": 871,
 };
 
 const FAMILY_FILE_CEILING = { component: 800, module: 400 } as const;
