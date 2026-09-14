@@ -14,11 +14,8 @@ import {
   PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID,
   PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID,
   PRODUCTION_TOP_MENU_SLOT_ID,
-  PRODUCTION_TOOLBAR_STAGE,
   ProductionToolbarContext,
   ProductionToolbarStageContext,
-  type ProductionToolbarStage,
-  useAnchoredMenu,
 } from "./ProductionTopMenu";
 import type { Production, ShellSession } from "./app-shell/types";
 import { CREATION_NAV, PRODUCTION_NAV, ADMIN_NAV_GROUPS, OVERVIEW_NAV, PRODUCTION_TOP_MENU_LABELS } from "./app-shell/nav-config";
