@@ -417,9 +417,11 @@ describe("components/ 按域分目录，不回退成平铺", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // 巨石组件行数棘轮（#487）
 // ─────────────────────────────────────────────────────────────────────────────
-// 五个巨石文件只降不升：每次拆分 PR 把这里的数字改小。
-// 拆出来的文件（组件族目录内）有上限：组件 ≤ 800、hook ≤ 400；两个整块搬出来时就超标
-// 的子件按当前行数记账，同样只降不升——它们自己的瘦身不在 #487 范围。
+// 五个巨石文件只降不升：每次拆分 PR 把这里的数字改小。上限比实际高出 RATCHET_SLACK 行
+// 以上也红——否则数字只会越来越松，reviewer 看到绿就过，棘轮名存实亡。
+// 拆出来的文件（组件族目录内）有上限：PascalCase 组件 ≤ 800、kebab 的 hook / 纯函数 /
+// context ≤ 400；两个整块搬出来时就超标的子件按当前行数记账，同样只降不升——它们自己的
+// 瘦身不在 #487 范围。
 
 const MONOLITH_LINE_CEILING: Record<string, number> = {
   "components/script/ScriptEditor.tsx": 12316,
@@ -429,7 +431,9 @@ const MONOLITH_LINE_CEILING: Record<string, number> = {
   "components/shell/AppShell.tsx": 1090,
 };
 
-const FAMILY_FILE_CEILING = { component: 800, hook: 400 } as const;
+const FAMILY_FILE_CEILING = { component: 800, module: 400 } as const;
+/** 上限允许比实际行数高出的余量：功能 PR 删掉几十行不用动表，整块搬走就得收紧。 */
+const RATCHET_SLACK = 100;
 
 /** 整块搬出即超标的子件：按搬出时的行数记账，只降不升。 */
 const FAMILY_FILE_GRANDFATHERED: Record<string, number> = {
@@ -445,13 +449,14 @@ async function countLines(rel: string): Promise<number> {
 
 describe("巨石组件行数只降不升", () => {
   for (const [rel, ceiling] of Object.entries(MONOLITH_LINE_CEILING)) {
-    it(`${rel} ≤ ${ceiling} 行`, async () => {
+    it(`${rel} ≤ ${ceiling} 行，且上限与实际之差 < ${RATCHET_SLACK}`, async () => {
       const lines = await countLines(rel);
       expect(lines, `${rel} 长了。拆分 PR 请同时把 MONOLITH_LINE_CEILING 改小；功能 PR 不该让它增长`).toBeLessThanOrEqual(ceiling);
+      expect(ceiling - lines, `${rel} 已瘦到 ${lines} 行，请把 MONOLITH_LINE_CEILING 收紧到当前值`).toBeLessThan(RATCHET_SLACK);
     });
   }
 
-  it("组件族目录内的文件：组件 ≤ 800 行、hook ≤ 400 行（记账豁免见 FAMILY_FILE_GRANDFATHERED）", async () => {
+  it("组件族目录内的文件：PascalCase 组件 ≤ 800 行、kebab 模块 ≤ 400 行（记账豁免见 FAMILY_FILE_GRANDFATHERED）", async () => {
     const COMPONENTS_ROOT = path.join(ROOT, "components");
     const over: string[] = [];
     for (const d of await readdir(COMPONENTS_ROOT, { withFileTypes: true })) {
@@ -462,9 +467,13 @@ describe("巨石组件行数只降不升", () => {
           if (!/\.tsx?$/.test(f)) continue;
           const rel = `components/${d.name}/${e.name}/${f}`;
           const lines = await countLines(rel);
-          const ceiling = FAMILY_FILE_GRANDFATHERED[rel]
-            ?? (f.startsWith("use-") ? FAMILY_FILE_CEILING.hook : FAMILY_FILE_CEILING.component);
+          const grandfathered = FAMILY_FILE_GRANDFATHERED[rel];
+          const ceiling = grandfathered
+            ?? (/^[A-Z]/.test(f) ? FAMILY_FILE_CEILING.component : FAMILY_FILE_CEILING.module);
           if (lines > ceiling) over.push(`${rel}: ${lines} > ${ceiling}`);
+          if (grandfathered !== undefined && grandfathered - lines >= RATCHET_SLACK) {
+            over.push(`${rel}: 已瘦到 ${lines} 行，请把 FAMILY_FILE_GRANDFATHERED 收紧到当前值（≤ 上限时删掉这条）`);
+          }
         }
       }
     }
