@@ -65,11 +65,7 @@ type PendingAggregateFocusPrompt = {
   selectedIds: Set<string>;
 };
 
-// ─── BlockCharacterSelector ───────────────────────────────────────────────────
-
 // 打印相关组件已抽到 components/print/ScriptPrint.tsx（#335）
-
-
 
 // ─── TagPicker ────────────────────────────────────────────────────────────────
 
@@ -1301,8 +1297,6 @@ function InsertZone({ lineIndexWidth, onInsert }: { lineIndexWidth?: string; onI
     </div>
   );
 }
-
-
 
 // ─── ScriptEditor ─────────────────────────────────────────────────────────────
 
