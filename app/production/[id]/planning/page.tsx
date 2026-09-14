@@ -9,7 +9,8 @@ import { getProductionPermissionContext, getProductionName, listMilestones, list
 import { listPhases } from "@/lib/ops/phase-db";
 import { isPolicyOn } from "@/lib/perm/policy-db";
 import { listProductionEvents, listEventDepartments, listProductionTechReqs, listMyTechReqsFull } from "@/lib/ops/event-db";
-import PlanningClient, { type PlanningTask } from "@/components/ops/PlanningClient";
+import PlanningClient from "@/components/ops/PlanningClient";
+import type { PlanningTask } from "@/components/ops/planning/types";
 
 export const metadata: Metadata = { title: "计划与日程" };
 
