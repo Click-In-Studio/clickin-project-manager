@@ -215,12 +215,15 @@ describe("searchMemory", () => {
       "SELECT count(*)::int AS n FROM agent_memory_recall_log WHERE user_id = $1", [userA],
     );
     await searchMemory(userA, "明天排练几点开始");
-    // 记账是 fire-and-forget，轮询等它落库
-    await new Promise((r) => setTimeout(r, 200));
-    const after = await getPool().query(
-      "SELECT count(*)::int AS n FROM agent_memory_recall_log WHERE user_id = $1", [userA],
-    );
-    expect(after.rows[0].n).toBeGreaterThan(before.rows[0].n);
+    // 记账是 fire-and-forget，轮询等它落库（固定 200ms 在 CI 负载高时会漏，#490 撞过）
+    let n = before.rows[0].n;
+    for (let i = 0; i < 25 && n <= before.rows[0].n; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      n = (await getPool().query(
+        "SELECT count(*)::int AS n FROM agent_memory_recall_log WHERE user_id = $1", [userA],
+      )).rows[0].n;
+    }
+    expect(n).toBeGreaterThan(before.rows[0].n);
   });
 });
 
