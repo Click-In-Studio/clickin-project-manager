@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
@@ -22,12 +22,6 @@ import {
 } from "./ProductionTopMenu";
 import type { Production, ShellSession } from "./app-shell/types";
 import { CREATION_NAV, PRODUCTION_NAV, ADMIN_NAV_GROUPS, OVERVIEW_NAV, PRODUCTION_TOP_MENU_LABELS } from "./app-shell/nav-config";
-import {
-  type ProductionHeaderStage,
-  productionHeaderStageForWidth,
-  adjacentProductionToolbarStage,
-  productionTopbarContentWidth,
-} from "./app-shell/toolbar-stage";
 import { firstContentChar } from "./app-shell/first-content-char";
 import { extractProductionId, extractCurrentWikiId, extractCurrentAssetId, extractModule, extractAdminModule } from "./app-shell/route";
 import { NavPendingContext, type NavPendingBus } from "./app-shell/nav-pending";
@@ -39,6 +33,9 @@ import DropdownItem from "./app-shell/DropdownItem";
 import BottomDrawer from "./app-shell/BottomDrawer";
 import MobileTab from "./app-shell/MobileTab";
 import ProjectSwitcher from "./app-shell/ProjectSwitcher";
+import { useShellBadges } from "./app-shell/use-shell-badges";
+import { useProductionToolbarStage } from "./app-shell/use-production-toolbar-stage";
+import { useSidebarFold } from "./app-shell/use-sidebar-fold";
 
 interface AppShellProps {
   session: ShellSession | null;
@@ -52,11 +49,7 @@ interface AppShellProps {
   initialUnreadReports?: number;
 }
 
-const PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX = 16;
-const PRODUCTION_SIDEBAR_TRANSITION_MS = 150;
 const SCROLLBAR_ACTIVITY_HIDE_DELAY_MS = 700;
-// Below this width the full production sidebar no longer fits the script layout.
-const SCRIPT_SIDEBAR_FOLD_THRESHOLD_PX = 1496;
 
 type DrawerType = "overview" | "creation" | "production" | "admin" | "me";
 
@@ -72,43 +65,22 @@ export default function AppShell({ session, productions, canCreateProduction = f
   const [aiPopoutOpen, setAiPopoutOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState<DrawerType | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
-  const [pendingTasks, setPendingTasks] = useState(initialPendingTasks);
-  const [unreadReports, setUnreadReports] = useState(initialUnreadReports);
-  const [cueWarnings, setCueWarnings] = useState(0);
-  const [productionHeaderStage, setProductionHeaderStage] = useState<ProductionHeaderStage>(0);
-  const [productionToolbarStage, setProductionToolbarStage] = useState<ProductionToolbarStage>(0);
-  const [productionToolbarHasStoredControls, setProductionToolbarHasStoredControls] = useState(false);
-  const [scriptProductionSidebarAutoFolded, setScriptProductionSidebarAutoFolded] = useState(false);
-  const [scriptProductionSidebarManuallyFolded, setScriptProductionSidebarManuallyFolded] = useState(false);
-  // v3：非剧本类页面的全局侧栏折叠（原型 sidebarControls toggle）
-  const [generalSidebarFolded, setGeneralSidebarFolded] = useState(false);
-  const [scriptProductionSidebarOverlayOpen, setScriptProductionSidebarOverlayOpen] = useState(false);
-  const [scriptProductionSidebarContentFolded, setScriptProductionSidebarContentFolded] = useState(false);
-  const [topOverflowOpen, setTopOverflowOpen] = useState(false);
-  const [productionSearchPath, setProductionSearchPath] = useState<string | null>(null);
-  const topbarRef = useRef<HTMLElement>(null);
-  const topOverflowRef = useRef<HTMLDivElement>(null);
-  const productionSearchOpenRef = useRef(false);
-  const productionToolbarStageRef = useRef<ProductionToolbarStage>(productionToolbarStage);
-  const productionToolbarHasStoredControlsRef = useRef(productionToolbarHasStoredControls);
-  const productionToolbarRequiredWidthRef = useRef<Partial<Record<ProductionToolbarStage, number>>>({});
-  productionToolbarStageRef.current = productionToolbarStage;
-  productionToolbarHasStoredControlsRef.current = productionToolbarHasStoredControls;
-  const closeTopOverflow = useCallback(() => setTopOverflowOpen(false), []);
-  const topOverflowMenu = useAnchoredMenu<HTMLButtonElement>(topOverflowOpen, "bottom");
-  const handleProductionSearchOpenChange = useCallback((open: boolean, stored: boolean) => {
-    productionSearchOpenRef.current = open;
-    if (open && !stored) closeTopOverflow();
-    setProductionSearchPath(open && !stored ? pathname : null);
-  }, [pathname, closeTopOverflow]);
-  const productionToolbarContext = useMemo(() => ({
-    stage: productionToolbarStage,
-    closeOverflow: closeTopOverflow,
-    overflowOpen: topOverflowOpen,
-    hasStoredControls: productionToolbarHasStoredControls,
-    setHasStoredControls: setProductionToolbarHasStoredControls,
-  }), [productionToolbarStage, productionToolbarHasStoredControls, topOverflowOpen, closeTopOverflow]);
+  const { unreadCount, pendingTasks, unreadReports, cueWarnings } = useShellBadges({
+    session, pathname, initialUnreadCount, initialPendingTasks, initialUnreadReports,
+  });
+  const {
+    productionHeaderStage,
+    productionToolbarStage,
+    productionToolbarHasStoredControls,
+    topbarRef,
+    topOverflowRef,
+    topOverflowOpen,
+    setTopOverflowOpen,
+    topOverflowMenu,
+    productionSearchPath,
+    handleProductionSearchOpenChange,
+    productionToolbarContext,
+  } = useProductionToolbarStage({ pathname });
 
   // 侧栏在途项（见 NavPendingContext）。归约规则连同连点竞态的说明
   // 见 lib/nav-pending.ts。
@@ -123,72 +95,10 @@ export default function AppShell({ session, productions, canCreateProduction = f
   // 导航落地即交还给 pathname 推导的 active。
   useEffect(() => { setNavPendingHref(null); }, [pathname]);
 
-  useLayoutEffect(() => {
-    const syncHeaderStage = () => setProductionHeaderStage(productionHeaderStageForWidth(window.innerWidth));
-    syncHeaderStage();
-    window.addEventListener("resize", syncHeaderStage);
-    return () => window.removeEventListener("resize", syncHeaderStage);
-  }, []);
 
-  const measureProductionToolbar = useCallback(() => {
-    const topbar = topbarRef.current;
-    if (!topbar) return;
-    if (productionSearchOpenRef.current) return;
 
-    const current = productionToolbarStageRef.current;
-    if (!topbar.querySelector(`#${PRODUCTION_TOP_MENU_SLOT_ID}`)) return;
-    const overflowTarget = topbar.querySelector(`#${PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID}`);
-    if (!!overflowTarget?.childElementCount !== productionToolbarHasStoredControlsRef.current) return;
 
-    const overflow = productionTopbarContentWidth(topbar) - topbar.clientWidth;
-    if (overflow > 1 && current < PRODUCTION_TOOLBAR_STAGE.lowPriorityStored) {
-      productionToolbarRequiredWidthRef.current[current] = topbar.clientWidth + overflow;
-      setProductionToolbarStage(adjacentProductionToolbarStage(current, 1));
-      return;
-    }
 
-    if (current > 0) {
-      const previous = adjacentProductionToolbarStage(current, -1);
-      const previousRequiredWidth = productionToolbarRequiredWidthRef.current[previous];
-      if (previousRequiredWidth && topbar.clientWidth >= previousRequiredWidth + PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX) {
-        setProductionToolbarStage(previous);
-      }
-    }
-  }, []);
-
-  useLayoutEffect(() => {
-    measureProductionToolbar();
-  }, [productionSearchPath, productionHeaderStage, productionToolbarStage, productionToolbarHasStoredControls, measureProductionToolbar]);
-
-  useEffect(() => {
-    const topbar = topbarRef.current;
-    if (!topbar) return;
-    let frame: number | null = null;
-    const scheduleMeasure = () => {
-      if (frame !== null) return;
-      frame = requestAnimationFrame(() => {
-        frame = null;
-        measureProductionToolbar();
-      });
-    };
-    const resizeObserver = new ResizeObserver(scheduleMeasure);
-    const mutationObserver = new MutationObserver(scheduleMeasure);
-    resizeObserver.observe(topbar);
-    mutationObserver.observe(topbar, { childList: true, characterData: true, subtree: true });
-    window.addEventListener("resize", scheduleMeasure);
-    return () => {
-      resizeObserver.disconnect();
-      mutationObserver.disconnect();
-      window.removeEventListener("resize", scheduleMeasure);
-      if (frame !== null) cancelAnimationFrame(frame);
-    };
-  }, [measureProductionToolbar]);
-
-  useLayoutEffect(() => {
-    productionToolbarRequiredWidthRef.current = {};
-    productionToolbarStageRef.current = 0;
-    setProductionToolbarStage(0);
-  }, [pathname]);
 
   useEffect(() => {
     const hideTimers = new Map<HTMLElement, number>();
@@ -234,92 +144,14 @@ export default function AppShell({ session, productions, canCreateProduction = f
     };
   }, []);
 
-  useLayoutEffect(() => {
-    closeTopOverflow();
-  }, [productionToolbarStage, productionToolbarHasStoredControls, closeTopOverflow]);
 
-  // Track current productionId via ref so fetchCounts always uses the latest value
-  // without needing to be in the effect dependency array.
-  const currentProductionIdRef = useRef<string | null>(extractProductionId(pathname));
-  currentProductionIdRef.current = extractProductionId(pathname);
-
-  // Expose fetchCounts via ref so the production-switch effect can call it.
-  const fetchCountsRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     setDrawerOpen(null);
-    setProductionSearchPath(null);
-    productionSearchOpenRef.current = false;
-    setTopOverflowOpen(false);
     document.getElementById("workspace-scroll")?.scrollTo({ top: 0, behavior: "instant" });
   }, [pathname]);
 
-  // When the user switches to a different production, clear badges immediately so
-  // stale counts from the previous context don't briefly show.
-  const prevProductionIdRef = useRef<string | null>(currentProductionIdRef.current);
-  useEffect(() => {
-    const pid = extractProductionId(pathname);
-    if (pid !== prevProductionIdRef.current) {
-      prevProductionIdRef.current = pid;
-      if (session) {
-        setUnreadCount(0);
-        setPendingTasks(0);
-        setUnreadReports(0);
-        setCueWarnings(0);
-        fetchCountsRef.current?.();
-      }
-    }
-  }, [pathname, session]);
 
-  // Keep badge fresh:
-  // 1. Re-fetch when tab becomes visible (like GitHub) or window regains focus.
-  // 2. Listen for custom 'notif-read' events dispatched by the notifications page
-  //    so the badge decrements instantly without waiting for the next poll.
-  // 3. 60 s poll as a backstop for long-lived focused tabs.
-  useEffect(() => {
-    if (!session) return;
-
-    const fetchCounts = () => {
-      const pid = currentProductionIdRef.current;
-      const url = pid
-        ? `/api/my/pending-counts?productionId=${encodeURIComponent(pid)}`
-        : "/api/my/pending-counts";
-      return fetch(url)
-        .then((r) => r.json())
-        .then((d: { notifications?: number; tasks?: number; reports?: number; cueWarnings?: number }) => {
-          if (typeof d.notifications === "number") setUnreadCount(d.notifications);
-          if (typeof d.tasks === "number") setPendingTasks(d.tasks);
-          if (typeof d.reports === "number") setUnreadReports(d.reports);
-          if (typeof d.cueWarnings === "number") setCueWarnings(d.cueWarnings);
-        })
-        .catch(() => {});
-    };
-
-    fetchCountsRef.current = fetchCounts;
-
-    const onVisible = () => { if (!document.hidden) fetchCounts(); };
-    const onRead = (e: Event) => {
-      const delta = (e as CustomEvent<{ delta?: number }>).detail?.delta;
-      if (typeof delta === "number") {
-        setUnreadCount((c) => Math.max(0, c - delta));
-      } else {
-        fetchCounts();
-      }
-    };
-
-    fetchCounts();
-    const id = setInterval(fetchCounts, 60_000);
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onVisible);
-    window.addEventListener("notif-read", onRead);
-
-    return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onVisible);
-      window.removeEventListener("notif-read", onRead);
-    };
-  }, [session]);
 
   useEffect(() => {
     if (!dropdownOpen) return;
@@ -332,61 +164,17 @@ export default function AppShell({ session, productions, canCreateProduction = f
     return () => document.removeEventListener("mousedown", handler);
   }, [dropdownOpen]);
 
-  useEffect(() => {
-    if (!topOverflowOpen) return;
-    const handler = (event: MouseEvent) => {
-      const target = event.target;
-      if (topOverflowRef.current?.contains(target as Node)) return;
-      if (target instanceof Element && target.closest("[data-production-overflow-menu-child]")) return;
-      closeTopOverflow();
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [topOverflowOpen, closeTopOverflow]);
 
   const isScriptPage = /^\/production\/[^/]+\/script(?:\/|$)/.test(pathname);
-  useLayoutEffect(() => {
-    if (!isScriptPage) {
-      setScriptProductionSidebarAutoFolded(false);
-      setScriptProductionSidebarManuallyFolded(false);
-      setScriptProductionSidebarOverlayOpen(false);
-      setScriptProductionSidebarContentFolded(false);
-      return;
-    }
+  const {
+    generalSidebarFolded,
+    setGeneralSidebarFolded,
+    productionSidebarOverlayOpen,
+    productionSidebarFolded,
+    productionSidebarContentFolded,
+    toggleScriptProductionSidebar,
+  } = useSidebarFold({ isScriptPage });
 
-    const foldQuery = window.matchMedia(`(max-width: ${SCRIPT_SIDEBAR_FOLD_THRESHOLD_PX - 1}px)`);
-    const hiddenQuery = window.matchMedia("(max-width: 1023px)");
-    const syncSidebarState = () => {
-      const autoFolded = foldQuery.matches;
-      setScriptProductionSidebarAutoFolded(autoFolded);
-      if (!autoFolded || hiddenQuery.matches) setScriptProductionSidebarOverlayOpen(false);
-    };
-    syncSidebarState();
-    foldQuery.addEventListener("change", syncSidebarState);
-    hiddenQuery.addEventListener("change", syncSidebarState);
-    return () => {
-      foldQuery.removeEventListener("change", syncSidebarState);
-      hiddenQuery.removeEventListener("change", syncSidebarState);
-    };
-  }, [isScriptPage]);
-
-  const productionSidebarOverlayOpen = isScriptPage
-    && scriptProductionSidebarAutoFolded
-    && scriptProductionSidebarOverlayOpen;
-  const productionSidebarFolded = isScriptPage
-    ? (scriptProductionSidebarAutoFolded
-        ? !productionSidebarOverlayOpen
-        : scriptProductionSidebarManuallyFolded)
-    : generalSidebarFolded;
-  const productionSidebarContentFolded = isScriptPage ? scriptProductionSidebarContentFolded : generalSidebarFolded;
-  useEffect(() => {
-    if (!isScriptPage) return;
-    const timer = window.setTimeout(
-      () => setScriptProductionSidebarContentFolded(productionSidebarFolded),
-      PRODUCTION_SIDEBAR_TRANSITION_MS + 20,
-    );
-    return () => window.clearTimeout(timer);
-  }, [isScriptPage, productionSidebarFolded]);
 
   // 打印路由不要 app shell：纸上不该有导航，无头浏览器也不该为一张 PDF
   // 加载整个侧栏。打印页挂在各资源自己的路径下（/production/x/script/print），
@@ -432,13 +220,6 @@ export default function AppShell({ session, productions, canCreateProduction = f
   const adminNavGroups = ADMIN_NAV_GROUPS
     .map((g) => ({ ...g, items: g.items.filter((it) => !it.feature || planAdvancedPerms) }))
     .filter((g) => g.items.length > 0);
-  const toggleScriptProductionSidebar = () => {
-    if (scriptProductionSidebarAutoFolded) {
-      setScriptProductionSidebarOverlayOpen((open) => !open);
-      return;
-    }
-    setScriptProductionSidebarManuallyFolded((folded) => !folded);
-  };
 
   function navHref(path: string) {
     return productionId ? `/production/${productionId}/${path}` : "#";
