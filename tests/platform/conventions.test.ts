@@ -425,7 +425,7 @@ describe("components/ 按域分目录，不回退成平铺", () => {
 
 const MONOLITH_LINE_CEILING: Record<string, number> = {
   "components/script/ScriptEditor.tsx": 10825,
-  "components/ops/EventDetailClient.tsx": 3538,
+  "components/ops/EventDetailClient.tsx": 421,
   "components/ops/CuePage.tsx": 2174,
   "components/ops/PlanningClient.tsx": 2586,
   "components/shell/AppShell.tsx": 871,
