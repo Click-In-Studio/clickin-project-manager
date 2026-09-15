@@ -17,7 +17,9 @@ type Snapshot = ReturnType<typeof useScriptToolbarFold>;
 const seen: Snapshot[] = [];
 const latest = () => seen[seen.length - 1];
 const closeToolbarMenu = vi.fn();
-// 三档各自的所需宽度：切档后 DOM 真的变窄，scrollWidth 要跟着档位走，否则一次降级会连降到底
+// 三档各自的所需宽度：切档后 DOM 真的变窄，scrollWidth 要跟着档位走，否则一次降级会连降到底。
+// 这是简化代理——按「上一次渲染出的档位」报宽，不模拟真实布局多帧收敛；钉的是每次测量只走一级
+// 与回滞阈值，不是布局时序。
 const NEED = { full: 800, short: 600, compact: 400 } as const;
 const size = { client: 1000 };
 let menuOpen: "x" | null = null;
