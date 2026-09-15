@@ -54,8 +54,12 @@ describe("useCueToolbarMenus — 跳转目标", () => {
     expect(latest().jumpValue).toBe("");
     expect(latest().openToolbarMenu).toBe(null);
     expect(closeOverflow).toHaveBeenCalledTimes(1);
+    act(() => latest().setJumpValue("3"));
     act(() => latest().selectJumpTarget("line"));
     expect(latest().jumpTarget).toBe(null);
+    expect(latest().jumpValue).toBe("");
+    expect(latest().openToolbarMenu).toBe(null);
+    expect(closeOverflow).toHaveBeenCalledTimes(2);
   });
 });
 
