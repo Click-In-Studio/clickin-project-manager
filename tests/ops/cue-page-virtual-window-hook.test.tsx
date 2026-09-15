@@ -41,6 +41,7 @@ function Probe({ blocks }: { blocks: Block[] }) {
 let container: HTMLDivElement;
 let root: Root;
 const scrollIntoView = vi.fn();
+const origScrollIntoView = Element.prototype.scrollIntoView;
 function clearCookies() {
   for (const c of document.cookie.split(";")) { const k = c.split("=")[0]?.trim(); if (k) document.cookie = `${k}=; path=/; max-age=0`; }
 }
@@ -65,6 +66,7 @@ afterEach(() => {
   container.remove();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  Element.prototype.scrollIntoView = origScrollIntoView;
 });
 function mount(blocks: Block[]) { act(() => root.render(<Probe blocks={blocks} />)); }
 const el = () => container.querySelector<HTMLDivElement>('[data-testid="container"]')!;

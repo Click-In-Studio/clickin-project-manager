@@ -35,6 +35,7 @@ function Probe() {
 let container: HTMLDivElement;
 let root: Root;
 let pointTarget: Element | null = null;
+const origElementFromPoint = (document as unknown as { elementFromPoint?: unknown }).elementFromPoint;
 
 beforeEach(() => {
   seen.length = 0;
@@ -46,7 +47,11 @@ beforeEach(() => {
   root = createRoot(container);
   act(() => root.render(<Probe />));
 });
-afterEach(() => { act(() => root.unmount()); container.remove(); });
+afterEach(() => {
+  act(() => root.unmount());
+  container.remove();
+  (document as unknown as { elementFromPoint?: unknown }).elementFromPoint = origElementFromPoint;
+});
 
 const q = (id: string) => container.querySelector(`[data-testid="${id}"]`)!;
 function press(cueId: string, dragType: "move" | "expand" | "handle-start" | "handle-end", originalAnchor?: CueAnchor) {
