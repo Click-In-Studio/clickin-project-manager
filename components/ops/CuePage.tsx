@@ -3,7 +3,7 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect, useLayoutEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, PRODUCTION_TOOLBAR_STAGE, ProductionOverflowSubmenuButton, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, useAnchoredMenu, useProductionToolbar } from "@/components/shell/ProductionTopMenu";
+import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, ProductionOverflowSubmenuButton, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, useProductionToolbar } from "@/components/shell/ProductionTopMenu";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import { useVisibleEventSource } from "@/hooks/useVisibleEventSource";
@@ -17,37 +17,19 @@ import type { Block, Scene } from "@/lib/script/script-types";
 import BlockText from "./cue-page/BlockText";
 import CueChip from "./cue-page/CueChip";
 import CueCommentsPanel from "./cue-page/CueCommentsPanel";
-import CueJumpOptions, { CUE_JUMP_OPTIONS, type CueJumpTarget } from "./cue-page/CueJumpOptions";
+import CueJumpOptions, { CUE_JUMP_OPTIONS } from "./cue-page/CueJumpOptions";
 import ExportModal from "./cue-page/ExportModal";
 import InlineField from "./cue-page/InlineField";
 import ShareModal from "./cue-page/ShareModal";
 import { LIST_COLORS, colorFor } from "./cue-page/colors";
-import type { CueViewState, CueSequenceItem, DragType, DragStateRef, Props, Selection, CueMark, GuideLineData, Comment, CuePresence } from "./cue-page/types";
-
-// ─── Per-production cookies ───────────────────────────────────────────────────
-
-function readCookie(key: string): string | null {
-  try {
-    const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${key}=([^;]*)`));
-    return m ? decodeURIComponent(m[1]) : null;
-  } catch { return null; }
-}
-function writeCookie(key: string, value: string) {
-  document.cookie = `${key}=${encodeURIComponent(value)}; path=/; max-age=31536000; SameSite=Lax`;
-}
+import type { CueSequenceItem, DragType, DragStateRef, Props, Selection, CueMark, GuideLineData, CuePresence } from "./cue-page/types";
+import { readCookie, writeCookie } from "./cue-page/cookies";
+import { useCueLists } from "./cue-page/use-cue-lists";
+import { useCuePresence } from "./cue-page/use-cue-presence";
+import { useCueComments } from "./cue-page/use-cue-comments";
+import { useCueToolbarMenus } from "./cue-page/use-cue-toolbar-menus";
 
 // ─── Comment helpers ─────────────────────────────────────────────────────────
-
-function getOrCreateClientId(): string {
-  const key = "presence_client_id";
-  let id = sessionStorage.getItem(key);
-  if (!id) { id = Math.random().toString(36).slice(2) + Date.now().toString(36); sessionStorage.setItem(key, id); }
-  return id;
-}
-
-function anonymousName(clientId: string): string {
-  return "访客 " + clientId.slice(-4).toUpperCase();
-}
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -77,121 +59,30 @@ export default function CuePage({
   const [copiedCue, setCopiedCue] = useState<Cue | null>(null);
   const [showExport, setShowExport] = useState(false);
   const [mobileChipSheetCueId, setMobileChipSheetCueId] = useState<string | null>(null);
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [activeCommentCueId, setActiveCommentCueId] = useState<string | null>(null);
-  const [visibleListIds, setVisibleListIds] = useState<Set<string>>(
-    () => new Set(cueLists.slice(0, 3).map(cl => cl.id))
-  );
-  const [activeListId, setActiveListId] = useState<string | null>(
-    editableListIds[0] ?? cueLists[0]?.id ?? null
-  );
-  const toggleListVisibility = (listId: string) => {
-    setVisibleListIds((current) => {
-      if (listId === activeListId) return current;
-      const next = new Set(current);
-      if (next.has(listId)) next.delete(listId); else next.add(listId);
-      return next;
-    });
-  };
-  // Phase 4: localEditableIds starts from server-computed editableListIds and can be
-  // extended when the user self-confirms access to additional lists.
-  const [localEditableIds, setLocalEditableIds] = useState<Set<string>>(
-    () => new Set(editableListIds),
-  );
-  const [localManageIds, setLocalManageIds] = useState<Set<string>>(
-    // creator always has implicit manage permission regardless of production_member_grant state
-    () => new Set([...manageListIds, ...cueLists.filter(cl => cl.createdBy === myUserId).map(cl => cl.id)]),
-  );
-  const [shareModalListId, setShareModalListId] = useState<string | null>(null);
-  // Phase 4: Access modal state — shown when user activates a list they don't yet have edit access to.
-  type AccessModal =
-    | { listId: string; listName: string; status: "loading" }
-    | { listId: string; listName: string; status: "can_self_confirm"; selfConfirmLevel: "edit" | "manage" }
-    | { listId: string; listName: string; status: "needs_approval" };
-  const [accessModal, setAccessModal] = useState<AccessModal | null>(null);
-  const [accessModalConfirming, setAccessModalConfirming] = useState(false);
+  const {
+    visibleListIds, setVisibleListIds, activeListId, setActiveListId, toggleListVisibility,
+    localEditableIds, setLocalEditableIds, setLocalManageIds,
+    shareModalListId, setShareModalListId,
+    accessModal, setAccessModal, accessModalConfirming, setAccessModalConfirming,
+    visibleListIdsRef, activeListIdRef,
+    activeCueList, canShareActive, visibleLists, listColorIndex, canEditActive, canEditCue,
+    handleActivateList,
+  } = useCueLists({ productionId, cueLists, editableListIds, manageListIds, myUserId });
   const [selection, setSelection] = useState<Selection>({ kind: "none" });
   const [savingCueId, setSavingCueId] = useState<string | null>(null);
   const [highlightedCueId, setHighlightedCueId] = useState<string | null>(null);
   const [scrollLocked, setScrollLocked] = useState(true);
   const scrollLockedRef = useRef(true);
-
-  // ── Cookie: restore cue view state once on mount ──────────────────────────
-  const cueStateRestoredRef = useRef(false);
-  useEffect(() => {
-    if (cueStateRestoredRef.current) return;
-    cueStateRestoredRef.current = true;
-    const raw = readCookie(`cue_view_${productionId}`);
-    if (!raw) return;
-    try {
-      const saved = JSON.parse(raw) as CueViewState;
-      const validIds = (saved.visibleIds ?? []).filter(id => cueLists.some(cl => cl.id === id));
-      if (validIds.length > 0) setVisibleListIds(new Set(validIds));
-      if (saved.activeId && cueLists.some(cl => cl.id === saved.activeId))
-        setActiveListId(saved.activeId);
-    } catch { /* ignore */ }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ── Cookie: save cue view state on change ────────────────────────────────
-  useEffect(() => {
-    if (!cueStateRestoredRef.current) return;
-    writeCookie(`cue_view_${productionId}`, JSON.stringify({ visibleIds: [...visibleListIds], activeId: activeListId } satisfies CueViewState));
-  }, [visibleListIds, activeListId, productionId]);
-
-  // ── Jump bar ──────────────────────────────────────────────────────────────
-  const [jumpTarget, setJumpTarget] = useState<CueJumpTarget | null>(null);
-  const [jumpValue, setJumpValue] = useState("");
+  const { comments, setComments, activeCommentCueId, setActiveCommentCueId } = useCueComments({ productionId, selection });
+  const {
+    jumpTarget, setJumpTarget, jumpValue, setJumpValue,
+    openToolbarMenu, secondaryMenusFolded, cueTagsFolded, toolbarCompact,
+    activeMenuPosition, settingsMenuPosition, toggleToolbarMenu, finishToolbarAction, selectJumpTarget,
+  } = useCueToolbarMenus({ toolbarStage, overflowOpen, closeOverflow });
+  const { clientId, setPresenceMap, lastSentPresRef, sendCuePresence, presenceForCue, presenceForList } =
+    useCuePresence({ productionId, activeListId, selection });
 
   // ── Toolbar menus ─────────────────────────────────────────────────────────
-  type CueToolbarMenu = "active" | "jump" | "settings" | null;
-  const [openToolbarMenu, setOpenToolbarMenu] = useState<CueToolbarMenu>(null);
-  const secondaryMenusFolded = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.secondaryStored;
-  const cueTagsFolded = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryShort;
-  const toolbarCompact = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored;
-  const activeMenuPosition = useAnchoredMenu<HTMLButtonElement>(
-    openToolbarMenu === "active",
-    "bottom",
-  );
-  const settingsMenuPosition = useAnchoredMenu<HTMLButtonElement>(
-    openToolbarMenu === "settings" && secondaryMenusFolded,
-    toolbarCompact ? "left" : "bottom",
-  );
-  const toggleToolbarMenu = (menu: Exclude<CueToolbarMenu, null>) => {
-    setOpenToolbarMenu((current) => current === menu ? null : menu);
-  };
-  const finishToolbarAction = () => {
-    setOpenToolbarMenu(null);
-    closeOverflow();
-  };
-  const selectJumpTarget = (target: CueJumpTarget) => {
-    setJumpTarget((current) => current === target ? null : target);
-    setJumpValue("");
-    finishToolbarAction();
-  };
-
-  useEffect(() => {
-    if ((openToolbarMenu === "jump" && (!secondaryMenusFolded || toolbarCompact))
-      || (openToolbarMenu === "settings" && (!secondaryMenusFolded || (toolbarCompact && !overflowOpen)))) {
-      setOpenToolbarMenu(null);
-    }
-  }, [openToolbarMenu, overflowOpen, secondaryMenusFolded, toolbarCompact]);
-
-  useEffect(() => {
-    if (!openToolbarMenu) return;
-    const dismissOnOutsideMouseDown = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      const panel = target.closest<HTMLElement>("[data-cue-toolbar-menu-panel]");
-      const trigger = target.closest<HTMLElement>("[data-cue-toolbar-menu-trigger]");
-      const triggerMenu = trigger?.dataset.cueToolbarMenuTrigger;
-      if (panel?.dataset.cueToolbarMenuPanel === openToolbarMenu
-        || triggerMenu === openToolbarMenu) return;
-      setOpenToolbarMenu(null);
-    };
-    document.addEventListener("mousedown", dismissOnOutsideMouseDown);
-    return () => document.removeEventListener("mousedown", dismissOnOutsideMouseDown);
-  }, [openToolbarMenu]);
 
   // ── Virtual scroll ────────────────────────────────────────────────────────
   const VSCROLL_BUFFER = 80;
@@ -223,155 +114,13 @@ export default function CuePage({
   // Stable refs for use inside event handlers (avoid stale closures in global listeners)
   const cuesRef = useRef(cues);
   useEffect(() => { cuesRef.current = cues; }, [cues]);
-  const visibleListIdsRef = useRef(visibleListIds);
-  useEffect(() => { visibleListIdsRef.current = visibleListIds; }, [visibleListIds]);
-  const activeListIdRef = useRef(activeListId);
-  useEffect(() => { activeListIdRef.current = activeListId; }, [activeListId]);
   const blockIndexMapRef = useRef<Map<string, number>>(new Map());
   // Suppresses the browser click event that fires immediately after a completed drag mouseup.
   const justDraggedRef = useRef(false);
 
   // ── Presence ──────────────────────────────────────────────────────────────
-  const [clientId] = useState<string>(() =>
-    typeof window !== "undefined" ? getOrCreateClientId() : ""
-  );
-  const [userName, setUserName] = useState<string>(() =>
-    typeof window !== "undefined"
-      ? (localStorage.getItem("presence_name") || anonymousName(getOrCreateClientId()))
-      : ""
-  );
-  const [presenceMap, setPresenceMap] = useState<Map<string, CuePresence>>(new Map());
-  const lastSentPresRef = useRef("");
-  const presTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   // Fetch real name from session (same localStorage key as ScriptEditor)
-  useEffect(() => {
-    fetch(`${BASE_PATH}/api/me`)
-      .then(r => r.json())
-      .then((d: { name: string | null }) => {
-        if (d.name) { setUserName(d.name); localStorage.setItem("presence_name", d.name); }
-      })
-      .catch(() => {});
-  }, []);
-
   // Load cue comments for this production
-  useEffect(() => {
-    fetch(`${BASE_PATH}/api/production/${productionId}/cue-comments`)
-      .then(r => r.ok ? r.json() : null)
-      .then((d: { comments?: Comment[] } | null) => { if (d?.comments) setComments(d.comments); })
-      .catch(() => {});
-  }, [productionId]);
-
-  // Close comment panel when cue is deselected
-  useEffect(() => {
-    if (selection.kind === "none") {
-      setActiveCommentCueId(null);
-    }
-  }, [selection]);
-
-  const sendCuePresence = useCallback((listId: string | null, cueId: string | null) => {
-    if (!clientId || !userName) return;
-    const key = `${listId}|${cueId}`;
-    if (lastSentPresRef.current === key) return;
-    lastSentPresRef.current = key;
-    if (presTimerRef.current) clearTimeout(presTimerRef.current);
-    presTimerRef.current = setTimeout(() => {
-      fetch(`${BASE_PATH}/api/production/${productionId}/cue-presence`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, userName, listId, cueId }),
-      }).catch(() => {});
-    }, 200);
-  }, [clientId, userName, productionId]);
-
-  useEffect(() => {
-    if (selection.kind === "cue") {
-      sendCuePresence(activeListId, selection.cueId);
-    } else {
-      // Delay clearing cueId so brief transitions through "pending" (text-drag to
-      // create a selection) don't immediately wipe the cue presence indicator.
-      const t = setTimeout(() => sendCuePresence(activeListId, null), 1500);
-      return () => clearTimeout(t);
-    }
-  }, [activeListId, selection, sendCuePresence]);
-
-  const presenceForCue = useMemo(() => {
-    const m = new Map<string, CuePresence[]>();
-    for (const p of presenceMap.values()) {
-      if (p.clientId === clientId || !p.cueId) continue;
-      if (!m.has(p.cueId)) m.set(p.cueId, []);
-      m.get(p.cueId)!.push(p);
-    }
-    return m;
-  }, [presenceMap, clientId]);
-
-  const presenceForList = useMemo(() => {
-    const m = new Map<string, CuePresence[]>();
-    for (const p of presenceMap.values()) {
-      if (p.clientId === clientId || !p.listId) continue;
-      if (!m.has(p.listId)) m.set(p.listId, []);
-      m.get(p.listId)!.push(p);
-    }
-    return m;
-  }, [presenceMap, clientId]);
-
-  // Active list is always visible even if toggled off
-  const activeCueList = useMemo(
-    () => cueLists.find((list) => list.id === activeListId) ?? null,
-    [cueLists, activeListId],
-  );
-  const canShareActive = activeListId !== null && localManageIds.has(activeListId);
-  const visibleLists = useMemo(
-    () => cueLists.filter(cl => visibleListIds.has(cl.id) || cl.id === activeListId),
-    [cueLists, visibleListIds, activeListId],
-  );
-  const listColorIndex = useMemo(() => {
-    const m = new Map<string, number>();
-    cueLists.forEach((cl, i) => m.set(cl.id, i));
-    return m;
-  }, [cueLists]);
-
-  const canEditActive = localEditableIds.has(activeListId ?? "");
-  // Editing any cue requires an active list — prevents accidental edits with no context
-  const canEditCue = useCallback((cue: Cue) =>
-    cue.cueListId === activeListId && localEditableIds.has(cue.cueListId),
-  [activeListId, localEditableIds]);
-
-  // Phase 4: activate a cue list, showing access modal if not yet granted
-  const handleActivateList = useCallback(async (listId: string | null) => {
-    if (!listId || localEditableIds.has(listId)) {
-      setActiveListId(listId);
-      return;
-    }
-    const list = cueLists.find(cl => cl.id === listId);
-    if (!list) { setActiveListId(listId); return; }
-    setActiveListId(listId);
-    setAccessModal({ listId, listName: list.name, status: "loading" });
-    try {
-      const res = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/access`,
-        { credentials: "include" },
-      );
-      if (!res.ok) { setAccessModal(null); return; }
-      const data = await res.json() as
-        | { canAccess: true }
-        | { canAccess: false; canSelfConfirm: true; selfConfirmLevel: "edit" | "manage" }
-        | { canAccess: false; canSelfConfirm: false };
-      if (data.canAccess) {
-        setLocalEditableIds(prev => new Set([...prev, listId]));
-        if ((data as { level?: string }).level === "manage") {
-          setLocalManageIds(prev => new Set([...prev, listId]));
-        }
-        setAccessModal(null);
-      } else if (data.canSelfConfirm) {
-        setAccessModal({ listId, listName: list.name, status: "can_self_confirm", selfConfirmLevel: data.selfConfirmLevel });
-      } else {
-        setAccessModal({ listId, listName: list.name, status: "needs_approval" });
-      }
-    } catch {
-      setAccessModal(null);
-    }
-  }, [cueLists, localEditableIds, productionId]);
 
   // ── updateCueField ────────────────────────────────────────────────────────
   const updateCueField = useCallback(async (
@@ -531,7 +280,7 @@ export default function CuePage({
       const fresh = results.flat();
       setCues(prev => [...prev.filter(c => !ids.has(c.cueListId)), ...fresh]);
     }, 300);
-  }, [productionId]);
+  }, [productionId, visibleListIdsRef, activeListIdRef]);
 
   // debounce timer 的生命周期比单次连接长（连接随可见性开合），挂 ref 由卸载统一清
   useEffect(() => () => {
@@ -757,7 +506,7 @@ export default function CuePage({
   const startOrphanDrag = useCallback((e: React.MouseEvent, cue: Cue) => {
     setVisibleListIds(prev => prev.has(cue.cueListId) ? prev : new Set([...prev, cue.cueListId]));
     startCueDrag(e, cue.id, "move");
-  }, [startCueDrag]);
+  }, [startCueDrag, setVisibleListIds]);
 
   // ── Virtual scroll hooks ──────────────────────────────────────────────────
 
