@@ -46,8 +46,10 @@ import SideBlockPanel from "./script-editor/SideBlockPanel";
 import TableOfContents from "./script-editor/TableOfContents";
 import { EMPTY_COMMENTS, EMPTY_BLOCK_ASSETS, buildCommentBlockCaption, findSideBlockPanelNavigationTargets, type RemotePresence, type Comment, type BlockSidePanelKind, type CommentDraft, type BlockAssetBubbleItem } from "./script-editor/comments";
 import { SCRIPT_TOC_CENTER_EVENT, SCRIPT_EDITOR_MAX_WIDTH_PX, SCRIPT_BODY_HORIZONTAL_PADDING_REM, SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX, SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM, SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM, SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM, SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM, SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX, SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX, SCRIPT_SCENE_DETAIL_MODE_LABEL, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX, DISABLED_CHECKBOX_OPTION_CLASS, checkboxOptionClass, COMMENT_BUBBLE_MIN_WIDTH_PX, COMMENT_BUBBLE_GAP_REM, SIDE_PANEL_FALLBACK_WIDTH_PX } from "./script-editor/constants";
-import { readDisplayCookie, writeDisplayCookie, readStoredCharacterFocus, writeStoredCharacterFocus, type DisplaySettings } from "./script-editor/display-settings";
+import { readDisplayCookie, writeDisplayCookie, type DisplaySettings } from "./script-editor/display-settings";
 import { useScriptSearch } from "./script-editor/use-script-search";
+import { useCharacterFocus } from "./script-editor/use-character-focus";
+import { useSceneDetailDialog } from "./script-editor/use-scene-detail-dialog";
 import { useMobileBlockMenus } from "./script-editor/use-mobile-block-menus";
 import { useDisplaySettings } from "./script-editor/use-display-settings";
 import { useScriptToolbarFold } from "./script-editor/use-script-toolbar-fold";
@@ -61,11 +63,6 @@ import { flushSync } from "react-dom";
 type PendingStageDelimiterChange = {
   open: string;
   close: string;
-};
-type PendingAggregateFocusPrompt = {
-  characterId: string;
-  aggregateIds: string[];
-  selectedIds: Set<string>;
 };
 
 // 打印相关组件已抽到 components/print/ScriptPrint.tsx（#335）
@@ -117,8 +114,11 @@ export default function ScriptEditor({
 
   const canEdit = canEditText || canEditMetadata || effectiveCanEditRehearsalMark;
   const [characters, setCharacters] = useState<Character[]>([]);
-  const [focusedCharacterIds, setFocusedCharacterIds] = useState<Set<string>>(() => readStoredCharacterFocus(effectiveScriptId));
-  const [pendingAggregateFocusPrompt, setPendingAggregateFocusPrompt] = useState<PendingAggregateFocusPrompt | null>(null);
+  const {
+    focusedCharacterIds, pendingAggregateFocusPrompt,
+    toggleCharacterFocus, clearCharacterFocus,
+    confirmAggregateFocusPrompt, addAllAggregateFocusPrompt, cancelAggregateFocusPrompt, togglePendingAggregateFocus,
+  } = useCharacterFocus({ effectiveScriptId, characters });
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [sceneDetails, setSceneDetails] = useState<SceneDetail[]>([]);
   const [blocks, setBlocks] = useState<Block[]>([makeBlock()]);
@@ -139,8 +139,7 @@ export default function ScriptEditor({
     mobileBatchAction, setMobileBatchAction,
     closeMobileBlockMenu,
   } = useMobileBlockMenus();
-  const [sceneDetailDialogSceneId, setSceneDetailDialogSceneId] = useState<string | null>(null);
-  const [sceneDetailDialogEditing, setSceneDetailDialogEditing] = useState(false);
+  const { sceneDetailDialogSceneId, sceneDetailDialogEditing, setSceneDetailDialogEditing, openSceneDetailDialog, closeSceneDetailDialog } = useSceneDetailDialog();
   const [mobileDeleteConfirmation, setMobileDeleteConfirmation] = useState<
     | { kind: "marker"; markerId: string; message: string }
     | { kind: "blocks"; blockIds: string[]; message: string; blocked: boolean }
@@ -199,14 +198,6 @@ export default function ScriptEditor({
   const activeSceneIdRef = useRef<string | null>(null);
   const [detailBlockVisibility, setDetailBlockVisibility] = useState({ selected: false, focused: false });
   const [charEditTokens, setCharEditTokens] = useState<Record<string, number>>({});
-  const openSceneDetailDialog = (sceneId: string) => {
-    setSceneDetailDialogEditing(false);
-    setSceneDetailDialogSceneId(sceneId);
-  };
-  const closeSceneDetailDialog = () => {
-    setSceneDetailDialogEditing(false);
-    setSceneDetailDialogSceneId(null);
-  };
 
   // ── Block tags ───────────────────────────────────────────────────────────────
   const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
@@ -424,73 +415,6 @@ export default function ScriptEditor({
       syncOpeningChapterMarkerId(normalized.blocks);
     }
   }, [markBlockStructureDirty, markOwnershipDirty, scenes, syncOpeningChapterMarkerId]);
-  useEffect(() => {
-    setFocusedCharacterIds(readStoredCharacterFocus(effectiveScriptId));
-    setPendingAggregateFocusPrompt(null);
-  }, [effectiveScriptId]);
-  const setAndStoreFocusedCharacterIds = useCallback((ids: Set<string>) => {
-    setFocusedCharacterIds(ids);
-    writeStoredCharacterFocus(effectiveScriptId, ids);
-  }, [effectiveScriptId]);
-  const toggleCharacterFocus = useCallback((id: string) => {
-    const ids = new Set(focusedCharacterIds);
-    if (ids.has(id)) {
-      ids.delete(id);
-      setAndStoreFocusedCharacterIds(ids);
-      setPendingAggregateFocusPrompt((prompt) => prompt?.characterId === id ? null : prompt);
-      return;
-    }
-
-    ids.add(id);
-    setAndStoreFocusedCharacterIds(ids);
-
-    const aggregateIds = characters
-      .filter((char) => char.isAggregate && (char.memberIds ?? []).includes(id) && !focusedCharacterIds.has(char.id))
-      .map((char) => char.id);
-    if (aggregateIds.length > 0) {
-      setPendingAggregateFocusPrompt({
-        characterId: id,
-        aggregateIds,
-        selectedIds: new Set(),
-      });
-    }
-  }, [characters, focusedCharacterIds, setAndStoreFocusedCharacterIds]);
-  const clearCharacterFocus = useCallback(() => {
-    setAndStoreFocusedCharacterIds(new Set());
-  }, [setAndStoreFocusedCharacterIds]);
-  const confirmAggregateFocusPrompt = useCallback(() => {
-    if (!pendingAggregateFocusPrompt) return;
-    const ids = new Set(focusedCharacterIds);
-    ids.add(pendingAggregateFocusPrompt.characterId);
-    for (const aggregateId of pendingAggregateFocusPrompt.selectedIds) ids.add(aggregateId);
-    setAndStoreFocusedCharacterIds(ids);
-    setPendingAggregateFocusPrompt(null);
-  }, [focusedCharacterIds, pendingAggregateFocusPrompt, setAndStoreFocusedCharacterIds]);
-  const addAllAggregateFocusPrompt = useCallback(() => {
-    if (!pendingAggregateFocusPrompt) return;
-    const ids = new Set(focusedCharacterIds);
-    ids.add(pendingAggregateFocusPrompt.characterId);
-    for (const aggregateId of pendingAggregateFocusPrompt.aggregateIds) ids.add(aggregateId);
-    setAndStoreFocusedCharacterIds(ids);
-    setPendingAggregateFocusPrompt(null);
-  }, [focusedCharacterIds, pendingAggregateFocusPrompt, setAndStoreFocusedCharacterIds]);
-  const cancelAggregateFocusPrompt = useCallback(() => {
-    if (!pendingAggregateFocusPrompt) return;
-    const ids = new Set(focusedCharacterIds);
-    ids.add(pendingAggregateFocusPrompt.characterId);
-    for (const aggregateId of pendingAggregateFocusPrompt.aggregateIds) ids.delete(aggregateId);
-    setAndStoreFocusedCharacterIds(ids);
-    setPendingAggregateFocusPrompt(null);
-  }, [focusedCharacterIds, pendingAggregateFocusPrompt, setAndStoreFocusedCharacterIds]);
-  const togglePendingAggregateFocus = useCallback((id: string) => {
-    setPendingAggregateFocusPrompt((prompt) => {
-      if (!prompt) return prompt;
-      const selectedIds = new Set(prompt.selectedIds);
-      if (selectedIds.has(id)) selectedIds.delete(id);
-      else selectedIds.add(id);
-      return { ...prompt, selectedIds };
-    });
-  }, []);
 
   const {
     display, setDisplay, toggleDisplay,
