@@ -7,7 +7,7 @@ import MarkerDeleteDialog, { type MarkerDeleteDialogState } from "@/components/s
 import ModeSwitch from "@/components/script/ModeSwitch";
 import ScriptDialog, { SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS, SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS } from "@/components/script/ScriptDialog";
 import TagGroupEditor from "@/components/script/TagGroupEditor";
-import ProductionTopMenu, { ProductionOverflowSubmenuButton, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, PRODUCTION_TOP_MENU_SLOT_ID, PRODUCTION_TOOLBAR_STAGE, useProductionToolbarStage } from "@/components/shell/ProductionTopMenu";
+import ProductionTopMenu, { ProductionOverflowSubmenuButton, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, useProductionToolbarStage } from "@/components/shell/ProductionTopMenu";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import { useDocumentVisible } from "@/hooks/useVisibleEventSource";
 import { useAgentMutation } from "@/lib/agent/agent-mutations";
@@ -16,7 +16,7 @@ import type { TagGroup, BlockTagValue, SceneDetail } from "@/lib/db";
 import { formatDuration, parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
 import { isTextBlock, sameCharacters, shouldHideCharacterLabel, shouldShowCharacterGap, shouldShowSceneEndGap } from "@/lib/script/script-block-layout";
-import { uid, makeBlock, makeMarkerBlock, isBlockEmptyForDelete, isEmptyTextBlock, mergeServerBlocks, stripHtmlText, expandLegacyMarkersToBlocks, normalizeScriptBlockStream, normalizeScriptMarkerInvariants, insertMarkerWithEmptyBlockIfNeeded, findTocSceneBlockIndex, findSceneMarkerBlockIndex, mergeDirtyRanges, markerChangeFromOperations } from "@/lib/script/script-block-stream";
+import { uid, makeBlock, makeMarkerBlock, isBlockEmptyForDelete, isEmptyTextBlock, mergeServerBlocks, expandLegacyMarkersToBlocks, normalizeScriptBlockStream, normalizeScriptMarkerInvariants, insertMarkerWithEmptyBlockIfNeeded, findTocSceneBlockIndex, findSceneMarkerBlockIndex, mergeDirtyRanges, markerChangeFromOperations } from "@/lib/script/script-block-stream";
 import { sameDragTarget, resolveDragTarget, getDragInsertIndex, type DragTarget } from "@/lib/script/script-drag-target";
 import { buildEmptyScriptCleanupRemovalPlan, isOnlyTextBlockInMarkerSegment, analyzeEmptyScriptCleanup, type EmptyScriptCleanupTarget } from "@/lib/script/script-empty-cleanup";
 import { publishScriptFocus } from "@/lib/script/script-focus";
@@ -41,12 +41,17 @@ import ScenePanel from "./script-editor/ScenePanel";
 import ScriptBlock from "./script-editor/ScriptBlock";
 import ScriptMarkerRow, { type ScriptMarkerNode } from "./script-editor/ScriptMarkerRow";
 import ScriptSceneDetailRail from "./script-editor/ScriptSceneDetailRail";
-import ScriptToolbarMenuController, { type ScriptToolbarOpenMenu, type ScriptToolbarMode } from "./script-editor/ScriptToolbarMenuController";
+import ScriptToolbarMenuController, { type ScriptToolbarOpenMenu } from "./script-editor/ScriptToolbarMenuController";
 import SideBlockPanel from "./script-editor/SideBlockPanel";
 import TableOfContents from "./script-editor/TableOfContents";
 import { EMPTY_COMMENTS, EMPTY_BLOCK_ASSETS, buildCommentBlockCaption, findSideBlockPanelNavigationTargets, type RemotePresence, type Comment, type BlockSidePanelKind, type CommentDraft, type BlockAssetBubbleItem } from "./script-editor/comments";
-import { TOOLBAR_FOLD_HYSTERESIS_PX, SCRIPT_TOC_CENTER_EVENT, SCRIPT_EDITOR_MAX_WIDTH_PX, SCRIPT_BODY_HORIZONTAL_PADDING_REM, SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX, SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM, SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM, SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM, SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM, SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX, SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX, SCRIPT_SCENE_DETAIL_MODE_LABEL, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX, DISABLED_CHECKBOX_OPTION_CLASS, checkboxOptionClass, COMMENT_BUBBLE_MIN_WIDTH_PX, COMMENT_BUBBLE_GAP_REM, SIDE_PANEL_FALLBACK_WIDTH_PX } from "./script-editor/constants";
+import { SCRIPT_TOC_CENTER_EVENT, SCRIPT_EDITOR_MAX_WIDTH_PX, SCRIPT_BODY_HORIZONTAL_PADDING_REM, SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX, SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM, SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM, SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM, SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM, SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX, SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX, SCRIPT_SCENE_DETAIL_MODE_LABEL, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX, DISABLED_CHECKBOX_OPTION_CLASS, checkboxOptionClass, COMMENT_BUBBLE_MIN_WIDTH_PX, COMMENT_BUBBLE_GAP_REM, SIDE_PANEL_FALLBACK_WIDTH_PX } from "./script-editor/constants";
 import { readDisplayCookie, writeDisplayCookie, readStoredCharacterFocus, writeStoredCharacterFocus, type DisplaySettings } from "./script-editor/display-settings";
+import { useScriptSearch } from "./script-editor/use-script-search";
+import { useMobileBlockMenus } from "./script-editor/use-mobile-block-menus";
+import { useDisplaySettings } from "./script-editor/use-display-settings";
+import { useScriptToolbarFold } from "./script-editor/use-script-toolbar-fold";
+import { useWorkspaceWidth } from "./script-editor/use-workspace-width";
 import { setCursorAtStart, setCursorAtEnd, setCursorAtTextOffset, getEditableElementForRange, isTextEditingTarget, isFormEditingTarget, getTextLength } from "./script-editor/dom-cursor";
 import { getScrollEl, getScrollMetrics, scrollContainerBy, scrollElementIntoView, measureScriptTocNumberWidths, clearTimeoutMap, markProgrammaticScroll } from "./script-editor/dom-scroll";
 import { replaceInlineStageDelimiters, toggleInlineTag, wrapSelectionAsInlineStageCue } from "./script-editor/inline-stage";
@@ -128,30 +133,12 @@ export default function ScriptEditor({
   const [reorderNotice, setReorderNotice] = useState("");
   const [selectionChangeNotice, setSelectionChangeNotice] = useState("");
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
-  const [mobileBlockMenuBlockId, setMobileBlockMenuBlockId] = useState<string | null>(null);
-  const [mobileInsertMenuOpen, setMobileInsertMenuOpen] = useState(false);
-  const [mobileBatchAction, setMobileBatchAction] = useState<"type" | "lyric" | null>(null);
-  const closeMobileBlockMenu = useCallback(() => {
-    setMobileBatchAction(null);
-    setMobileInsertMenuOpen(false);
-    setMobileBlockMenuBlockId(null);
-  }, []);
-  useEffect(() => {
-    if (mobileBlockMenuBlockId === null) return;
-    const handleOutsideClick = (event: MouseEvent) => {
-      const target = event.target;
-      if (
-        !(target instanceof Element) ||
-        target.closest("[data-script-mobile-block-menu='true']") ||
-        target.closest("[data-script-block-bar='true']:not([data-script-marker-bar='true'])")
-      ) return;
-      event.preventDefault();
-      event.stopPropagation();
-      closeMobileBlockMenu();
-    };
-    document.addEventListener("click", handleOutsideClick, true);
-    return () => document.removeEventListener("click", handleOutsideClick, true);
-  }, [closeMobileBlockMenu, mobileBlockMenuBlockId]);
+  const {
+    mobileBlockMenuBlockId, setMobileBlockMenuBlockId,
+    mobileInsertMenuOpen, setMobileInsertMenuOpen,
+    mobileBatchAction, setMobileBatchAction,
+    closeMobileBlockMenu,
+  } = useMobileBlockMenus();
   const [sceneDetailDialogSceneId, setSceneDetailDialogSceneId] = useState<string | null>(null);
   const [sceneDetailDialogEditing, setSceneDetailDialogEditing] = useState(false);
   const [mobileDeleteConfirmation, setMobileDeleteConfirmation] = useState<
@@ -212,10 +199,6 @@ export default function ScriptEditor({
   const activeSceneIdRef = useRef<string | null>(null);
   const [detailBlockVisibility, setDetailBlockVisibility] = useState({ selected: false, focused: false });
   const [charEditTokens, setCharEditTokens] = useState<Record<string, number>>({});
-  const lineIndexMeasureRef = useRef<HTMLSpanElement | null>(null);
-  const lineIndexMinMeasureRef = useRef<HTMLSpanElement | null>(null);
-  const [lineIndexWidth, setLineIndexWidth] = useState(0);
-  const [lineIndexMinWidth, setLineIndexMinWidth] = useState(0);
   const openSceneDetailDialog = (sceneId: string) => {
     setSceneDetailDialogEditing(false);
     setSceneDetailDialogSceneId(sceneId);
@@ -509,132 +492,10 @@ export default function ScriptEditor({
     });
   }, []);
 
-  // ── Search ──────────────────────────────────────────────────────────────────
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchExact, setSearchExact] = useState(false);
-  const [searchCurrentPage, setSearchCurrentPage] = useState(false);
-  const [searchIdx, setSearchIdx] = useState(0);
-
-  // initialSearchQueryRef — consumed after load (see effect below, after loadState declaration)
-  const initialSearchQueryRef = useRef(initialSearchQuery);
-
-  // ── Jump (line / page) ──────────────────────────────────────────────────────
-  const [jumpTarget, setJumpTarget] = useState<"line" | "page" | null>(null);
-  const [jumpValue, setJumpValue] = useState("");
-
-  // ── Toolbar dropdowns ────────────────────────────────────────────────────────
-  const [toolbarMode, setToolbarMode] = useState<ScriptToolbarMode>("full");
-  const [toolbarMeasureTick, setToolbarMeasureTick] = useState(0);
-  const toolbarRef = useRef<HTMLDivElement>(null);
-  const fullToolbarWidthRef = useRef(0);
-  const shortToolbarWidthRef = useRef(0);
-  const toolbarCompact = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored || toolbarMode === "compact";
-  const toolbarShort = !toolbarCompact && (toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryShort || toolbarMode === "short");
-  const presenceFolded = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.lowPriorityStored;
-  const setToolbarElement = useCallback((el: HTMLDivElement | null) => {
-    toolbarRef.current = el;
-    if (el) setToolbarMeasureTick(tick => tick + 1);
-  }, []);
-  const resetToolbarMeasurement = useCallback((closeMenus = true) => {
-    fullToolbarWidthRef.current = 0;
-    shortToolbarWidthRef.current = 0;
-    setToolbarMode("full");
-    if (closeMenus) {
-      closeToolbarMenu();
-    }
-  }, [closeToolbarMenu]);
-
-  useEffect(() => {
-    const el = toolbarRef.current;
-    if (!el) return;
-    const productionTopMenuSlot = el.closest(`#${PRODUCTION_TOP_MENU_SLOT_ID}`);
-    if (productionTopMenuSlot) return;
-    let frame: number | null = null;
-    const measure = () => {
-      frame = null;
-      if (navigatingAwayRef.current || toolbarOpenMenuRef.current) return;
-      const available = el.clientWidth;
-      const required = el.scrollWidth;
-      if (toolbarMode === "full") {
-        fullToolbarWidthRef.current = required;
-        if (required > available + 1) {
-          setToolbarMode("short");
-        }
-        return;
-      }
-      if (toolbarMode === "short") {
-        shortToolbarWidthRef.current = required;
-        if (required > available + 1) {
-          setToolbarMode("compact");
-          return;
-        }
-        if (fullToolbarWidthRef.current > 0 && available >= fullToolbarWidthRef.current + TOOLBAR_FOLD_HYSTERESIS_PX) {
-          setToolbarMode("full");
-        }
-        return;
-      }
-      if (fullToolbarWidthRef.current > 0 && available >= fullToolbarWidthRef.current + TOOLBAR_FOLD_HYSTERESIS_PX) {
-        setToolbarMode("full");
-        return;
-      }
-      if (shortToolbarWidthRef.current > 0 && available >= shortToolbarWidthRef.current + TOOLBAR_FOLD_HYSTERESIS_PX) {
-        setToolbarMode("short");
-      }
-    };
-    const scheduleMeasure = () => {
-      if (frame !== null) cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(measure);
-    };
-    scheduleMeasure();
-    const observer = new ResizeObserver(scheduleMeasure);
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      if (frame !== null) cancelAnimationFrame(frame);
-    };
-  }, [toolbarMode, toolbarMeasureTick]);
-
-  useEffect(() => {
-    resetToolbarMeasurement();
-  }, [activeVersionId, isLockedMode, canEditMetadata, resetToolbarMeasurement]);
-
-  // ── Display settings (cookie-persisted) ──────────────────────────────────────
-  const [display, setDisplay] = useState<DisplaySettings>(readDisplayCookie);
-  useLayoutEffect(() => {
-    if (!display.lineNumbers) {
-      setLineIndexWidth(0);
-      setLineIndexMinWidth(0);
-      return;
-    }
-    const el = lineIndexMeasureRef.current;
-    const minEl = lineIndexMinMeasureRef.current;
-    if (!el || !minEl) return;
-    const measure = () => {
-      const width = Math.ceil(el.getBoundingClientRect().width);
-      const minWidth = Math.ceil(minEl.getBoundingClientRect().width);
-      setLineIndexWidth((prev) => prev === width ? prev : width);
-      setLineIndexMinWidth((prev) => prev === minWidth ? prev : minWidth);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    observer.observe(minEl);
-    return () => observer.disconnect();
-  }, [display.lineNumbers, maxLineIndexText]);
-  const lineIndexWidthStyle = display.lineNumbers && lineIndexWidth > 0
-    ? `${lineIndexWidth}px`
-    : undefined;
-  const markerLineIndexWidthStyle = display.lineNumbers && (lineIndexWidth > 0 || lineIndexMinWidth > 0)
-    ? `${Math.max(lineIndexWidth, lineIndexMinWidth)}px`
-    : undefined;
-  const toggleDisplay = useCallback((key: keyof DisplaySettings) => {
-    setDisplay(prev => {
-      const next = { ...prev, [key]: !prev[key] };
-      writeDisplayCookie(next);
-      return next;
-    });
-  }, []);
+  const {
+    display, setDisplay, toggleDisplay,
+    lineIndexMeasureRef, lineIndexMinMeasureRef, lineIndexWidthStyle, markerLineIndexWidthStyle,
+  } = useDisplaySettings({ maxLineIndexText });
 
   const prepareForNavigation = useCallback(() => {
     navigatingAwayRef.current = true;
@@ -705,6 +566,9 @@ export default function ScriptEditor({
   const suppressProgrammaticScrollRef = useRef(false);
   const programmaticScrollFrameRef = useRef<number | null>(null);
   const navigatingAwayRef = useRef(false);
+  const { toolbarCompact, toolbarShort, presenceFolded, setToolbarElement, setToolbarMeasureTick, resetToolbarMeasurement } = useScriptToolbarFold({
+    toolbarStage, navigatingAwayRef, toolbarOpenMenuRef, closeToolbarMenu, activeVersionId, isLockedMode, canEditMetadata,
+  });
   const blocksRef = useRef(blocks);
   const ownedBlocksRef = useRef(ownedBlocks);
   const scenesRef = useRef(scenes);
@@ -843,7 +707,7 @@ export default function ScriptEditor({
       return next;
     });
     setPendingLockedMode(null);
-  }, [closeToolbarMenu, pendingLockedMode, resetScriptInteractions]);
+  }, [closeToolbarMenu, pendingLockedMode, resetScriptInteractions, setDisplay]);
 
   const unlockReorder = useCallback(() => {
     if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
@@ -1311,16 +1175,6 @@ export default function ScriptEditor({
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadError, setLoadError] = useState<string>("");
 
-  // Auto-open search when arriving from appshell search with a query
-  useEffect(() => {
-    const q = initialSearchQueryRef.current;
-    if (!q || loadState !== "ready") return;
-    initialSearchQueryRef.current = undefined;
-    setSearchOpen(true);
-    setSearchQuery(q);
-    setSearchIdx(0);
-  }, [loadState]);
-
   // Keep scrollLockedRef in sync
   useEffect(() => { scrollLockedRef.current = scrollLocked; }, [scrollLocked]);
 
@@ -1674,7 +1528,7 @@ export default function ScriptEditor({
     setMobileInsertMenuOpen(false);
     scrollToBlockIdx(blockIndex, "start", 0.2);
     setMobileBlockMenuBlockId(blockId);
-  }, [scrollToBlockIdx]);
+  }, [scrollToBlockIdx, setMobileBatchAction, setMobileBlockMenuBlockId, setMobileInsertMenuOpen]);
 
   const scrollToScene = useCallback((sceneId: string) => {
     const markerIdx = findSceneMarkerBlockIndex(sceneId, blocksRef.current);
@@ -2245,7 +2099,7 @@ export default function ScriptEditor({
         presenceLayoutTimerRef.current = null;
       }
     };
-  }, [effectiveScriptId, loadState, clientId, activeVersionId, markOwnershipDirty, requestVirtualWindowRefresh, resetToolbarMeasurement, streamVisible]);
+  }, [effectiveScriptId, loadState, clientId, activeVersionId, markOwnershipDirty, requestVirtualWindowRefresh, resetToolbarMeasurement, setToolbarMeasureTick, streamVisible]);
 
   const [comments, setComments] = useState<Comment[]>([]);
   const [blockAssetsByBlockId, setBlockAssetsByBlockId] = useState<Map<string, BlockAssetBubbleItem[]>>(new Map());
@@ -2265,23 +2119,7 @@ export default function ScriptEditor({
   }, []);
   const [meUserId, setMeUserId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
-  const [workspaceWidth, setWorkspaceWidth] = useState(0);
-  const [productionSidebarReservedWidth, setProductionSidebarReservedWidth] = useState(0);
-  const workspaceMeasureRoRef = useRef<ResizeObserver | null>(null);
-  const setWorkspaceMeasureRef = useCallback((el: HTMLDivElement | null) => {
-    workspaceMeasureRoRef.current?.disconnect();
-    workspaceMeasureRoRef.current = null;
-    if (!el) return;
-    const workspaceScrollEl = el.closest<HTMLElement>("#workspace-scroll") ?? el;
-    const measure = () => {
-      setWorkspaceWidth(workspaceScrollEl.clientWidth);
-      setProductionSidebarReservedWidth(Math.max(0, workspaceScrollEl.getBoundingClientRect().left));
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(workspaceScrollEl);
-    workspaceMeasureRoRef.current = ro;
-  }, []);
+  const { workspaceWidth, productionSidebarReservedWidth, setWorkspaceMeasureRef } = useWorkspaceWidth();
 
   // Resolve Feishu display name and identity on mount
   useEffect(() => {
@@ -2674,6 +2512,12 @@ export default function ScriptEditor({
     // Tags (and the corrected lyric) are synced atomically via the debounced block op PATCH.
   }, [blockTagMap, markBlockPageMapDirty, tagGroups]);
 
+  const {
+    searchOpen, setSearchOpen, searchQuery, setSearchQuery, searchExact, setSearchExact,
+    searchCurrentPage, setSearchCurrentPage, searchIdx, setSearchIdx, searchMatches,
+    jumpTarget, setJumpTarget, jumpValue, setJumpValue, jumpToLine, jumpToPage,
+  } = useScriptSearch({ blocks, pageMap, focusedId, loadState, initialSearchQuery, scrollToBlockIdx });
+
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -2700,51 +2544,7 @@ export default function ScriptEditor({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [undo, redo, handleTagPaste]);
-
-  // ── Search matches (computed from blocks + pageMap) ─────────────────────────
-  const currentPageNum = focusedId ? pageMap[focusedId] : undefined;
-
-  const searchMatches = useMemo<number[]>(() => {
-    if (!searchOpen || !searchQuery.trim()) return [];
-    const q = searchExact ? searchQuery : searchQuery.toLowerCase();
-    return blocks.reduce<number[]>((acc, block, idx) => {
-      if (!isTextBlock(block)) return acc;
-      const text = stripHtmlText(block.content);
-      const haystack = searchExact ? text : text.toLowerCase();
-      if (!haystack.includes(q)) return acc;
-      if (searchCurrentPage && currentPageNum !== undefined && pageMap[block.id] !== currentPageNum) return acc;
-      acc.push(idx);
-      return acc;
-    }, []);
-  }, [searchOpen, searchQuery, searchExact, searchCurrentPage, blocks, pageMap, currentPageNum]);
-
-  // Scroll to focused search result
-  useEffect(() => {
-    const matchIdx = searchMatches[searchIdx];
-    if (matchIdx === undefined) return;
-    scrollToBlockIdx(matchIdx, 'center');
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchIdx, searchMatches]);
-
-  // Jump helpers
-  const jumpToLine = useCallback((n: number) => {
-    const targetLine = Math.max(1, n);
-    let lineNumber = 0;
-    for (let idx = 0; idx < blocks.length; idx++) {
-      if (!isTextBlock(blocks[idx])) continue;
-      lineNumber += 1;
-      if (lineNumber === targetLine) {
-        scrollToBlockIdx(idx, 'center');
-        return;
-      }
-    }
-  }, [blocks, scrollToBlockIdx]);
-
-  const jumpToPage = useCallback((n: number) => {
-    const idx = blocks.findIndex(b => pageMap[b.id] === n);
-    if (idx >= 0) scrollToBlockIdx(idx, 'start');
-  }, [blocks, pageMap, scrollToBlockIdx]);
+  }, [undo, redo, handleTagPaste, setSearchOpen]);
 
   const toggleBlockType = useCallback((id: string) => {
     if (isLockedMode) return;
