@@ -10,13 +10,15 @@ import type { CueListGrant, CueListDeptAccess } from "@/lib/ops/cue-list-types";
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 
+/** 版本参数：cue 的读写都要带上当前剧本版本，服务端按它校验锚点是否还指向存在的块。 */
+function versionQuery(versionId: string | null | undefined): string {
+  return versionId ? `?v=${encodeURIComponent(versionId)}` : "";
+}
 function cuesUrl(productionId: string, listId: string, versionId: string | null | undefined): string {
-  const vParam = versionId ? `?v=${encodeURIComponent(versionId)}` : "";
-  return `${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/cues${vParam}`;
+  return `${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/cues${versionQuery(versionId)}`;
 }
 function cueUrl(productionId: string, listId: string, cueId: string, versionId: string | null | undefined): string {
-  const vParam = versionId ? `?v=${encodeURIComponent(versionId)}` : "";
-  return `${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/cues/${cueId}${vParam}`;
+  return `${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/cues/${cueId}${versionQuery(versionId)}`;
 }
 
 // ── cue CRUD ─────────────────────────────────────────────────────────────────
