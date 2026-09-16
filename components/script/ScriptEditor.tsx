@@ -48,6 +48,16 @@ import { EMPTY_COMMENTS, EMPTY_BLOCK_ASSETS, buildCommentBlockCaption, findSideB
 import { SCRIPT_TOC_CENTER_EVENT, SCRIPT_EDITOR_MAX_WIDTH_PX, SCRIPT_BODY_HORIZONTAL_PADDING_REM, SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX, SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM, SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM, SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM, SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM, SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX, SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX, SCRIPT_SCENE_DETAIL_MODE_LABEL, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX, DISABLED_CHECKBOX_OPTION_CLASS, checkboxOptionClass, COMMENT_BUBBLE_MIN_WIDTH_PX, COMMENT_BUBBLE_GAP_REM, SIDE_PANEL_FALLBACK_WIDTH_PX } from "./script-editor/constants";
 import { readDisplayCookie, writeDisplayCookie, type DisplaySettings } from "./script-editor/display-settings";
 import { useScriptSearch } from "./script-editor/use-script-search";
+import { useDragCountBadge } from "./script-editor/use-drag-count-badge";
+import { useReorderLock } from "./script-editor/use-reorder-lock";
+import {
+  clampWindowRange as clampWindowRangePure,
+  buildCumulativeHeights,
+  blockAtOffset as blockAtOffsetPure,
+  spacerHeightsFor,
+  resolveActiveSceneIdForBlockIndex as resolveActiveSceneIdForBlockIndexPure,
+  nextWindowRange,
+} from "@/lib/script/script-virtual-window";
 import { useCharacterFocus } from "./script-editor/use-character-focus";
 import { useSceneDetailDialog } from "./script-editor/use-scene-detail-dialog";
 import { useMobileBlockMenus } from "./script-editor/use-mobile-block-menus";
@@ -127,10 +137,7 @@ export default function ScriptEditor({
   const focusedIdRef = useRef<string | null>(null);
   const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
-  const dragCountBadgeRef = useRef<HTMLDivElement>(null);
   const [isScriptDragging, setIsScriptDragging] = useState(false);
-  const [isReorderLocked, setIsReorderLocked] = useState(false);
-  const [reorderNotice, setReorderNotice] = useState("");
   const [selectionChangeNotice, setSelectionChangeNotice] = useState("");
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
   const {
@@ -421,6 +428,11 @@ export default function ScriptEditor({
     lineIndexMeasureRef, lineIndexMinMeasureRef, lineIndexWidthStyle, markerLineIndexWidthStyle,
   } = useDisplaySettings({ maxLineIndexText });
 
+  const {
+    isReorderLocked, reorderNotice, isReorderLockedRef, reorderUnlockFrame, reorderNoticeTimer,
+    lockReorder, unlockReorder, unlockReorderAfterCommit, showReorderNotice,
+  } = useReorderLock({ blocks });
+
   const prepareForNavigation = useCallback(() => {
     navigatingAwayRef.current = true;
     if (windowRangeFrameRef.current !== null) {
@@ -466,7 +478,7 @@ export default function ScriptEditor({
     pendingNavigateRef.current = null;
     postNavCorrectionRef.current = null;
     pendingMoveCenterRef.current = null;
-  }, []);
+  }, [reorderNoticeTimer, reorderUnlockFrame]);
 
   const taRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const pendingFocus = useRef<{ id: string; textOffset?: number; atEnd?: boolean } | null>(null);
@@ -475,15 +487,9 @@ export default function ScriptEditor({
   const draggingBlockIds = useRef<string[]>([]);
   const dragTargetRef = useRef<DragTarget | null>(null);
   const dragInvalidReasonRef = useRef<string | null>(null);
-  const dragButtonDownSeenRef = useRef(false);
-  const dragButtonReleasedRef = useRef(false);
   const dropHandledRef = useRef(false);
-  const isReorderLockedRef = useRef(false);
   const windowRangeFrameRef = useRef<number | null>(null);
-  const reorderUnlockFrame = useRef<number | null>(null);
-  const pendingReorderUnlockRef = useRef(false);
   const pendingMoveCenterRef = useRef<string | null>(null);
-  const reorderNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectionChangeNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const movedHighlightTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const tocMarkerGlowTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -498,12 +504,9 @@ export default function ScriptEditor({
   const scenesRef = useRef(scenes);
   const sceneIdSetRef = useRef<Set<string>>(new Set(scenes.map((scene) => scene.id)));
   const blockIndexByIdRef = useRef<Map<string, number>>(new Map(blocks.map((block, index) => [block.id, index])));
-  const clampWindowRange = useCallback((range: { start: number; end: number }, blockCount = blocksRef.current.length) => {
-    if (blockCount <= 0) return { start: 0, end: 0 };
-    const start = Math.max(0, Math.min(range.start, blockCount - 1));
-    const end = Math.max(start + 1, Math.min(range.end, blockCount));
-    return { start, end };
-  }, []);
+  const clampWindowRange = useCallback((range: { start: number; end: number }, blockCount = blocksRef.current.length) => (
+    clampWindowRangePure(range, blockCount)
+  ), []);
   useLayoutEffect(() => {
     blocksRef.current = blocks;
     blockIndexByIdRef.current = new Map(blocks.map((block, index) => [block.id, index]));
@@ -533,48 +536,10 @@ export default function ScriptEditor({
     if (selectionChangeNoticeTimer.current !== null) clearTimeout(selectionChangeNoticeTimer.current);
     clearTimeoutMap(movedHighlightTimersRef.current);
     clearTimeoutMap(tocMarkerGlowTimersRef.current);
-  }, []);
+  }, [reorderNoticeTimer, reorderUnlockFrame]);
 
-  const clearDragCountBadge = useCallback(() => {
-    dragButtonReleasedRef.current = true;
-    dragButtonDownSeenRef.current = false;
-    const badge = dragCountBadgeRef.current;
-    if (badge) badge.hidden = true;
-  }, []);
-
-  useEffect(() => {
-    const clearIfDragButtonReleased = (event: globalThis.DragEvent) => {
-      if (event.buttons > 0) {
-        dragButtonDownSeenRef.current = true;
-        return;
-      }
-      if (!dragButtonDownSeenRef.current || event.buttons !== 0) return;
-      clearDragCountBadge();
-    };
-    document.addEventListener("drag", clearIfDragButtonReleased, true);
-    document.addEventListener("dragend", clearDragCountBadge, true);
-    document.addEventListener("dragover", clearIfDragButtonReleased, true);
-    document.addEventListener("drop", clearDragCountBadge, true);
-    document.addEventListener("pointerup", clearDragCountBadge, true);
-    document.addEventListener("mouseup", clearDragCountBadge, true);
-    window.addEventListener("drag", clearIfDragButtonReleased, true);
-    window.addEventListener("dragover", clearIfDragButtonReleased, true);
-    window.addEventListener("pointerup", clearDragCountBadge, true);
-    window.addEventListener("mouseup", clearDragCountBadge, true);
-    return () => {
-      document.removeEventListener("drag", clearIfDragButtonReleased, true);
-      document.removeEventListener("dragend", clearDragCountBadge, true);
-      document.removeEventListener("dragover", clearIfDragButtonReleased, true);
-      document.removeEventListener("drop", clearDragCountBadge, true);
-      document.removeEventListener("pointerup", clearDragCountBadge, true);
-      document.removeEventListener("mouseup", clearDragCountBadge, true);
-      window.removeEventListener("drag", clearIfDragButtonReleased, true);
-      window.removeEventListener("dragover", clearIfDragButtonReleased, true);
-      window.removeEventListener("pointerup", clearDragCountBadge, true);
-      window.removeEventListener("mouseup", clearDragCountBadge, true);
-    };
-  }, [clearDragCountBadge]);
-
+  const blocksContainerRef = useRef<HTMLDivElement>(null);
+  const { dragCountBadgeRef, dragButtonDownSeenRef, dragButtonReleasedRef, clearDragCountBadge, updateDragCountBadge } = useDragCountBadge({ blocksContainerRef });
   const setScriptDragging = useCallback((dragging: boolean) => {
     setIsScriptDragging((current) => current === dragging ? current : dragging);
   }, []);
@@ -632,42 +597,6 @@ export default function ScriptEditor({
     });
     setPendingLockedMode(null);
   }, [closeToolbarMenu, pendingLockedMode, resetScriptInteractions, setDisplay]);
-
-  const unlockReorder = useCallback(() => {
-    if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
-    reorderUnlockFrame.current = null;
-    pendingReorderUnlockRef.current = false;
-    isReorderLockedRef.current = false;
-    setIsReorderLocked(false);
-  }, []);
-
-  const lockReorder = useCallback(() => {
-    if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
-    reorderUnlockFrame.current = null;
-    isReorderLockedRef.current = true;
-    setIsReorderLocked(true);
-  }, []);
-
-  const unlockReorderAfterCommit = useCallback(() => {
-    pendingReorderUnlockRef.current = true;
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!pendingReorderUnlockRef.current) return;
-    reorderUnlockFrame.current = requestAnimationFrame(() => {
-      reorderUnlockFrame.current = null;
-      unlockReorder();
-    });
-  }, [blocks, unlockReorder]);
-
-  const showReorderNotice = useCallback((message: string) => {
-    if (reorderNoticeTimer.current !== null) clearTimeout(reorderNoticeTimer.current);
-    setReorderNotice(message);
-    reorderNoticeTimer.current = setTimeout(() => {
-      reorderNoticeTimer.current = null;
-      setReorderNotice("");
-    }, 1800);
-  }, []);
 
   const showSelectionChangeNotice = useCallback((message: string) => {
     if (selectionChangeNoticeTimer.current !== null) clearTimeout(selectionChangeNoticeTimer.current);
@@ -774,35 +703,11 @@ export default function ScriptEditor({
   const VSCROLL_BUFFER = 120;
   const DEFAULT_BLOCK_H = 80;
   const INITIAL_WINDOW_SIZE = 240;
-  const blocksContainerRef = useRef<HTMLDivElement>(null);
   const topSpacerRef = useRef<HTMLDivElement>(null);
   const botSpacerRef = useRef<HTMLDivElement>(null);
   const measuredHeightsRef = useRef<Map<string, number>>(new Map());
   const measuredHeightTotalRef = useRef(0);
   const cumulativeHRef = useRef<number[]>([0]); // indexed 0..blocks.length
-  const updateDragCountBadge = useCallback((clientX: number, clientY: number, count: number, buttons?: number) => {
-    if (buttons !== undefined) {
-      if (buttons > 0) dragButtonDownSeenRef.current = true;
-      if (dragButtonDownSeenRef.current && buttons === 0) {
-        clearDragCountBadge();
-        return;
-      }
-    }
-    if (dragButtonReleasedRef.current || count <= 1) {
-      clearDragCountBadge();
-      return;
-    }
-    const rect = blocksContainerRef.current?.getBoundingClientRect();
-    const midpoint = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
-    const side = clientX > midpoint ? "left" : "right";
-    const badge = dragCountBadgeRef.current;
-    if (!badge) return;
-    badge.textContent = String(count);
-    badge.style.left = `${side === "right" ? clientX + 16 : clientX - 16}px`;
-    badge.style.top = `${clientY}px`;
-    badge.style.transform = side === "right" ? "" : "translateX(-100%)";
-    badge.hidden = false;
-  }, [clearDragCountBadge]);
   const [windowRange, setWindowRange] = useState(() => ({ start: 0, end: Math.min(INITIAL_WINDOW_SIZE, blocks.length) }));
   const windowRangeRef = useRef(windowRange);
   useLayoutEffect(() => { windowRangeRef.current = windowRange; }, [windowRange]);
@@ -906,92 +811,37 @@ export default function ScriptEditor({
 
   // Rebuild cumulative heights from cache
   const rebuildCumulative = useCallback(() => {
-    const bl = ownedBlocksRef.current;
-    const measured = measuredHeightsRef.current;
-    // Use measured average for unmeasured blocks — much more accurate than a fixed default
-    const avgH = measured.size > 0 ? measuredHeightTotalRef.current / measured.size : DEFAULT_BLOCK_H;
-    const arr = new Array(bl.length + 1);
-    arr[0] = 0;
-    const openingChapterMarkerId = scriptConfigRef.current.openingChapterMarkerId;
-    for (let i = 0; i < bl.length; i++) {
-      arr[i + 1] = arr[i] + (
-        !openingChapterVisible && bl[i].id === openingChapterMarkerId
-          ? 0
-          : measured.get(bl[i].id) ?? avgH
-      );
-    }
-    cumulativeHRef.current = arr;
+    cumulativeHRef.current = buildCumulativeHeights(
+      ownedBlocksRef.current,
+      measuredHeightsRef.current,
+      measuredHeightTotalRef.current,
+      openingChapterVisible ? null : scriptConfigRef.current.openingChapterMarkerId,
+      DEFAULT_BLOCK_H,
+    );
   }, [openingChapterVisible]);
   const syncSpacerHeights = useCallback((range: { start: number; end: number }, anchor: { id: string; top: number } | null = null) => {
-    const cum = cumulativeHRef.current;
-    const n = blocksRef.current.length;
-    const safeRange = clampWindowRange(range, n);
-    const top = cum[safeRange.start] ?? safeRange.start * DEFAULT_BLOCK_H;
-    const total = cum[n] ?? n * DEFAULT_BLOCK_H;
-    const bot = Math.max(0, total - (cum[safeRange.end] ?? safeRange.end * DEFAULT_BLOCK_H));
+    const { top, bot } = spacerHeightsFor(cumulativeHRef.current, range, blocksRef.current.length, DEFAULT_BLOCK_H);
     if (topSpacerRef.current) topSpacerRef.current.style.height = `${top}px`;
     if (botSpacerRef.current) botSpacerRef.current.style.height = `${bot}px`;
     if (anchor) restoreVirtualScrollAnchor(anchor);
     const next = { top, bot };
     setSpacerH((prev) => prev.top === top && prev.bot === bot ? prev : next);
-  }, [clampWindowRange, restoreVirtualScrollAnchor]);
+  }, [restoreVirtualScrollAnchor]);
   useEffect(() => {
     rebuildCumulative();
     syncSpacerHeights(windowRangeRef.current);
   }, [openingChapterVisible, rebuildCumulative, syncSpacerHeights]);
 
   // Binary search: first block index whose top >= offset
-  const blockAtOffset = useCallback((offset: number) => {
-    const cum = cumulativeHRef.current;
-    const n = cum.length - 1;
-    if (n <= 0) return 0;
-    let lo = 0, hi = n - 1;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (cum[mid + 1] <= offset) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo;
-  }, []);
+  const blockAtOffset = useCallback((offset: number) => blockAtOffsetPure(cumulativeHRef.current, offset), []);
 
   const getBlockScrollElement = useCallback((blockId: string) => (
     document.getElementById(`block-content-${blockId}`) ?? document.getElementById(`block-${blockId}`)
   ), []);
 
-  const resolveActiveSceneIdForBlockIndex = useCallback((index: number): string | null => {
-    const bl = blocksRef.current;
-    const owned = ownedBlocksRef.current;
-    const sceneIds = sceneIdSetRef.current;
-    if (bl.length === 0 || sceneIds.size === 0) return null;
-
-    const validSceneId = (id: string | null | undefined): string | null => (
-      id && sceneIds.has(id) ? id : null
-    );
-    const sceneIdAt = (idx: number): string | null => {
-      const block = bl[idx];
-      if (!block) return null;
-      if ((block.type === "chapter_marker" || block.type === "scene_marker") && block.sceneId) {
-        return validSceneId(block.sceneId);
-      }
-      return validSceneId(owned[idx]?.sceneId) ?? validSceneId(block.sceneId);
-    };
-
-    const safeIndex = Math.max(0, Math.min(index, bl.length - 1));
-    const direct = sceneIdAt(safeIndex);
-    if (direct) return direct;
-
-    const nearbyStart = Math.max(0, safeIndex - VSCROLL_BUFFER);
-    const nearbyEnd = Math.min(bl.length - 1, safeIndex + VSCROLL_BUFFER);
-    for (let idx = safeIndex - 1; idx >= nearbyStart; idx--) {
-      const sceneId = sceneIdAt(idx);
-      if (sceneId) return sceneId;
-    }
-    for (let idx = safeIndex + 1; idx <= nearbyEnd; idx++) {
-      const sceneId = sceneIdAt(idx);
-      if (sceneId) return sceneId;
-    }
-    return null;
-  }, []);
+  const resolveActiveSceneIdForBlockIndex = useCallback((index: number): string | null => (
+    resolveActiveSceneIdForBlockIndexPure(blocksRef.current, ownedBlocksRef.current, sceneIdSetRef.current, index, VSCROLL_BUFFER)
+  ), []);
 
   const updateActiveSceneFromScroll = useCallback(() => {
     const container = blocksContainerRef.current;
@@ -1075,25 +925,16 @@ export default function ScriptEditor({
       lastVisibleIdx = blockAtOffset(viewEnd);
     }
 
-    const currentRange = windowRangeRef.current;
-    const edgeThreshold = Math.max(40, Math.floor(VSCROLL_BUFFER / 3));
-    const hasEnoughHeadroom = firstVisibleIdx >= currentRange.start + edgeThreshold;
-    const hasEnoughFootroom = lastVisibleIdx <= currentRange.end - edgeThreshold;
-    if (hasEnoughHeadroom && hasEnoughFootroom) {
+    const fi = focusedIdRef.current ? blockIndexByIdRef.current.get(focusedIdRef.current) ?? -1 : -1;
+    const pfi = pendingFocus.current ? blockIndexByIdRef.current.get(pendingFocus.current.id) ?? -1 : -1;
+    const next = nextWindowRange(windowRangeRef.current, firstVisibleIdx, lastVisibleIdx, bl.length, VSCROLL_BUFFER, [fi, pfi]);
+    if (!next) {
       return updateActiveSceneFromScroll();
     }
 
-    let newStart = Math.max(0, firstVisibleIdx - VSCROLL_BUFFER);
-    let newEnd = Math.min(bl.length, lastVisibleIdx + VSCROLL_BUFFER + 1);
-
-    const fi = focusedIdRef.current ? blockIndexByIdRef.current.get(focusedIdRef.current) ?? -1 : -1;
-    if (fi >= 0) { newStart = Math.min(newStart, fi); newEnd = Math.max(newEnd, fi + 1); }
-    const pfi = pendingFocus.current ? blockIndexByIdRef.current.get(pendingFocus.current.id) ?? -1 : -1;
-    if (pfi >= 0) { newStart = Math.min(newStart, pfi); newEnd = Math.max(newEnd, pfi + 1); }
-
-    applyWindowRange({ start: newStart, end: newEnd }, true, true, true);
+    applyWindowRange(next, true, true, true);
     return updateActiveSceneFromScroll();
-  }, [applyWindowRange, blockAtOffset, updateActiveSceneFromScroll]);
+  }, [applyWindowRange, blockAtOffset, updateActiveSceneFromScroll, isReorderLockedRef]);
 
   type LoadState = "loading" | "ready" | "not-found" | "error";
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -3201,7 +3042,7 @@ export default function ScriptEditor({
     };
     document.addEventListener("pointerdown", handler);
     return () => document.removeEventListener("pointerdown", handler);
-  }, [clearBlockSelection, deleteConfirmingBlockIds.size, dismissBlockConfirmations, markerDeleteConfirmBlockId, mobileBlockMenuBlockId, selectedBlockIds.size]);
+  }, [clearBlockSelection, deleteConfirmingBlockIds.size, dismissBlockConfirmations, markerDeleteConfirmBlockId, mobileBlockMenuBlockId, selectedBlockIds.size, isReorderLockedRef]);
 
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -3425,7 +3266,7 @@ export default function ScriptEditor({
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     setEdgeDragTarget(edge);
-  }, [setEdgeDragTarget, isLockedMode]);
+  }, [setEdgeDragTarget, isLockedMode, isReorderLockedRef]);
 
   const handleEdgeSpacerDrop = useCallback((e: DragEvent<HTMLDivElement>, edge: "top" | "bottom") => {
     if (isLockedMode) return;
@@ -3447,7 +3288,7 @@ export default function ScriptEditor({
     dragInvalidReasonRef.current = null;
     const moved = moveDraggedBlocks(draggedIds, target);
     if (!moved) unlockReorder();
-  }, [clearDragCountBadge, clearDragTarget, lockReorder, moveDraggedBlocks, setScriptDragging, unlockReorder, isLockedMode]);
+  }, [clearDragCountBadge, clearDragTarget, lockReorder, moveDraggedBlocks, setScriptDragging, unlockReorder, isLockedMode, isReorderLockedRef]);
 
   const insertBlockAt = useCallback((index: number) => {
     if (isLockedMode) return;
