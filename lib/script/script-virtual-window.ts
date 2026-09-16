@@ -18,6 +18,8 @@ export function clampWindowRange(range: WindowRange, blockCount: number): Window
  * 累计高度表：cum[i] = 前 i 块的总高度（cum[0] = 0，长度 blocks.length + 1）。
  * 没量过的块用已量块的平均值——比固定默认值准得多；一块都没量过时用 defaultH。
  * hiddenBlockId（折叠的开场章节标记）按 0 高计。
+ * measuredTotal 是调用方维护的不变量（= measured 各值之和，编辑器在测量时增量累加）；
+ * 这里不重算，传错只会让平均值歪掉而不会报错。
  */
 export function buildCumulativeHeights(
   blocks: readonly { id: string }[],
@@ -31,7 +33,7 @@ export function buildCumulativeHeights(
   arr[0] = 0;
   for (let i = 0; i < blocks.length; i++) {
     arr[i + 1] = arr[i] + (
-      hiddenBlockId !== null && hiddenBlockId !== undefined && blocks[i].id === hiddenBlockId
+      hiddenBlockId != null && blocks[i].id === hiddenBlockId
         ? 0
         : measured.get(blocks[i].id) ?? avgH
     );
