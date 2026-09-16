@@ -424,7 +424,7 @@ describe("components/ 按域分目录，不回退成平铺", () => {
 // 瘦身不在 #487 范围。
 
 const MONOLITH_LINE_CEILING: Record<string, number> = {
-  "components/script/ScriptEditor.tsx": 6399,
+  "components/script/ScriptEditor.tsx": 6323,
   "components/ops/EventDetailClient.tsx": 421,
   "components/ops/CuePage.tsx": 2174,
   "components/ops/PlanningClient.tsx": 98,
