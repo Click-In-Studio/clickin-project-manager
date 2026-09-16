@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { BASE_PATH } from "@/lib/base-path";
+import { startCueExport } from "@/lib/ops/cue-client";
 import type { CueList } from "@/lib/ops/cue-list-types";
 import { colorFor } from "./colors";
 
@@ -41,11 +41,7 @@ export default function ExportModal({
     setErrMsg("");
     const addLog = (msg: string) => setLog(prev => [...prev, msg]);
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/export-cues`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cueListIds: [...selectedIds], wikiUrl: wikiUrl.trim() }),
-      });
+      const res = await startCueExport(productionId, { cueListIds: [...selectedIds], wikiUrl: wikiUrl.trim() });
       if (!res.ok || !res.body) {
         const text = await res.text().catch(() => `HTTP ${res.status}`);
         setPhase("error");

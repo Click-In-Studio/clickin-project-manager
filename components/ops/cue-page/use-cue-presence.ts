@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { BASE_PATH } from "@/lib/base-path";
+import { postCuePresence } from "@/lib/ops/cue-client";
 import type { CuePresence, Selection } from "./types";
 
 function getOrCreateClientId(): string {
@@ -53,11 +54,7 @@ export function useCuePresence({ productionId, activeListId, selection }: {
     lastSentPresRef.current = key;
     if (presTimerRef.current) clearTimeout(presTimerRef.current);
     presTimerRef.current = setTimeout(() => {
-      fetch(`${BASE_PATH}/api/production/${productionId}/cue-presence`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, userName, listId, cueId }),
-      }).catch(() => {});
+      postCuePresence(productionId, { clientId, userName, listId, cueId });
     }, 200);
   }, [clientId, userName, productionId]);
 

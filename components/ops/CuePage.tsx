@@ -23,6 +23,7 @@ import InlineField from "./cue-page/InlineField";
 import ShareModal from "./cue-page/ShareModal";
 import { LIST_COLORS, colorFor } from "./cue-page/colors";
 import type { CueSequenceItem, Props, Selection, CueMark, CuePresence } from "./cue-page/types";
+import { patchCue, fetchListCues, createCue, deleteCueRemote, selfConfirmCueListAccess } from "@/lib/ops/cue-client";
 import { useCueLists } from "./cue-page/use-cue-lists";
 import { useCuePresence } from "./cue-page/use-cue-presence";
 import { useCueComments } from "./cue-page/use-cue-comments";
@@ -96,21 +97,11 @@ export default function CuePage({
   ) => {
     setSavingCueId(cue.id);
     try {
-      const vid = versionIdRef.current;
-      const vParam = vid ? `?v=${encodeURIComponent(vid)}` : "";
-      const res = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/cuelists/${cue.cueListId}/cues/${cue.id}${vParam}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(fields),
-        }
-      );
+      const res = await patchCue(productionId, cue.cueListId, cue.id, versionIdRef.current, fields);
       if (res.ok) {
         setCues(prev => prev.map(c => c.id === cue.id ? { ...c, ...fields } : c));
       } else if (res.status === 409) {
-        const body = await res.json() as { error: string };
-        alert(body.error || "修改被拒绝");
+        alert(res.error || "修改被拒绝");
       }
     } finally {
       setSavingCueId(null);
@@ -133,14 +124,7 @@ export default function CuePage({
       if (activeListIdRef.current) ids.add(activeListIdRef.current);
       const listIds = [...ids];
       const vid = versionIdRef.current;
-      const vParam = vid ? `?v=${encodeURIComponent(vid)}` : "";
-      const results = await Promise.all(
-        listIds.map(listId =>
-          fetch(`${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/cues${vParam}`)
-            .then(r => r.ok ? (r.json() as Promise<Cue[]>) : [])
-            .catch(() => [] as Cue[])
-        )
-      );
+      const results = await Promise.all(listIds.map(listId => fetchListCues(productionId, listId, vid)));
       const fresh = results.flat();
       setCues(prev => [...prev.filter(c => !ids.has(c.cueListId)), ...fresh]);
     }, 300);
@@ -321,18 +305,8 @@ export default function CuePage({
     const nums = existing.map(n => parseInt(n, 10)).filter(n => !isNaN(n));
     const next = nums.length ? Math.max(...nums) + 1 : 1;
 
-    const vid = versionIdRef.current;
-    const vParam = vid ? `?v=${encodeURIComponent(vid)}` : "";
-    const res = await fetch(
-      `${BASE_PATH}/api/production/${productionId}/cuelists/${activeListId}/cues${vParam}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ number: String(next), name: "", content: "", start, end }),
-      }
-    );
-    if (res.ok) {
-      const newCues = await res.json() as Cue[];
+    const newCues = await createCue(productionId, activeListId, versionIdRef.current, { number: String(next), name: "", content: "", start, end });
+    if (newCues) {
       setCues(prev => {
         const withoutList = prev.filter(c => c.cueListId !== activeListId);
         return [...withoutList, ...newCues];
@@ -344,13 +318,7 @@ export default function CuePage({
 
   // ── Delete cue ────────────────────────────────────────────────────────────
   const deleteCue = useCallback(async (cue: Cue) => {
-    const vid = versionIdRef.current;
-    const vParam = vid ? `?v=${encodeURIComponent(vid)}` : "";
-    const res = await fetch(
-      `${BASE_PATH}/api/production/${productionId}/cuelists/${cue.cueListId}/cues/${cue.id}${vParam}`,
-      { method: "DELETE" }
-    );
-    if (res.ok) {
+    if (await deleteCueRemote(productionId, cue.cueListId, cue.id, versionIdRef.current)) {
       setCues(prev => prev.filter(c => c.id !== cue.id));
       setSelection({ kind: "none" });
     }
@@ -539,18 +507,8 @@ export default function CuePage({
       const existing = (cuesByList.get(activeListId) ?? []).map(c => c.number);
       const nums = existing.map(n => parseInt(n, 10)).filter(n => !isNaN(n));
       const next = nums.length ? Math.max(...nums) + 1 : 1;
-      const vid = versionIdRef.current;
-      const vParam = vid ? `?v=${encodeURIComponent(vid)}` : "";
-      const res = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/cuelists/${activeListId}/cues${vParam}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ number: String(next), name: copiedCue.name, content: copiedCue.content, start, end }),
-        }
-      );
-      if (res.ok) {
-        const newCues = await res.json() as Cue[];
+      const newCues = await createCue(productionId, activeListId, versionIdRef.current, { number: String(next), name: copiedCue.name, content: copiedCue.content, start, end });
+      if (newCues) {
         setCues(prev => {
           const withoutList = prev.filter(c => c.cueListId !== activeListId);
           return [...withoutList, ...newCues];
@@ -1436,16 +1394,7 @@ export default function CuePage({
                     onClick={async () => {
                       setAccessModalConfirming(true);
                       try {
-                        const res = await fetch(
-                          `${BASE_PATH}/api/production/${productionId}/cuelists/${accessModal.listId}/access`,
-                          {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            credentials: "include",
-                            body: JSON.stringify({ action: "self_confirm", level: accessModal.selfConfirmLevel }),
-                          },
-                        );
-                        if (res.ok) {
+                        if (await selfConfirmCueListAccess(productionId, accessModal.listId, accessModal.selfConfirmLevel)) {
                           setLocalEditableIds(prev => new Set([...prev, accessModal.listId]));
                           if (accessModal.selfConfirmLevel === "manage") {
                             setLocalManageIds(prev => new Set([...prev, accessModal.listId]));

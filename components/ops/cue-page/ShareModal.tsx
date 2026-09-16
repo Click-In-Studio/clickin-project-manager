@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import { BASE_PATH } from "@/lib/base-path";
+import { fetchCueListCollaborators, addCueListCollaborator, removeCueListCollaborator } from "@/lib/ops/cue-client";
 import type { MemberWithRoles } from "@/lib/db";
 import type { CueListGrant, CueListDeptAccess } from "@/lib/ops/cue-list-types";
 
@@ -34,16 +35,13 @@ export default function ShareModal({
   const [userSearch, setUserSearch] = useState("");
   const [pendingUser, setPendingUser] = useState<{ userId: string; name: string } | null>(null);
 
-  const COLLAB_BASE = `${BASE_PATH}/api/production/${productionId}/cuelists/${cueListId}/collaborators`;
-
   useEffect(() => {
     void (async () => {
-      const [collabRes, membersRes] = await Promise.all([
-        fetch(COLLAB_BASE, { credentials: "include" }),
+      const [d, membersRes] = await Promise.all([
+        fetchCueListCollaborators(productionId, cueListId),
         fetch(`${BASE_PATH}/api/production/${productionId}/contacts`, { credentials: "include" }),
       ]);
-      if (collabRes.ok) {
-        const d = await collabRes.json() as { grants: CueListGrant[]; deptAccess: CueListDeptAccess[]; productionDepts: { id: string; name: string }[] };
+      if (d) {
         setGrants(d.grants); setDeptAccess(d.deptAccess); setProductionDepts(d.productionDepts);
       }
       if (membersRes.ok) setMembers(await membersRes.json() as MemberWithRoles[]);
@@ -54,16 +52,16 @@ export default function ShareModal({
   const postCollaborator = async (body: object) => {
     setSaving(true);
     try {
-      const res = await fetch(COLLAB_BASE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), credentials: "include" });
-      if (res.ok) { const d = await res.json() as { grants: CueListGrant[]; deptAccess: CueListDeptAccess[] }; setGrants(d.grants); setDeptAccess(d.deptAccess); }
+      const d = await addCueListCollaborator(productionId, cueListId, body);
+      if (d) { setGrants(d.grants); setDeptAccess(d.deptAccess); }
     } finally { setSaving(false); }
   };
 
   const deleteCollaborator = async (body: object) => {
     setSaving(true);
     try {
-      const res = await fetch(COLLAB_BASE, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), credentials: "include" });
-      if (res.ok) { const d = await res.json() as { grants: CueListGrant[]; deptAccess: CueListDeptAccess[] }; setGrants(d.grants); setDeptAccess(d.deptAccess); }
+      const d = await removeCueListCollaborator(productionId, cueListId, body);
+      if (d) { setGrants(d.grants); setDeptAccess(d.deptAccess); }
     } finally { setSaving(false); }
   };
 

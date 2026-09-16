@@ -7,6 +7,7 @@ import SmartTextarea from "@/components/editor/SmartTextarea";
 import SmartText from "@/components/ui/SmartText";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import { BASE_PATH } from "@/lib/base-path";
+import { postCueComment, patchCueComment, deleteCueComment } from "@/lib/ops/cue-client";
 import type { Mention, Comment } from "./types";
 
 function relativeTime(iso: string): string {
@@ -66,11 +67,8 @@ export default function CueCommentsPanel({
     if (submitting) return null;
     setSubmitting(true);
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/cue-comments`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cueId, body: opts.text, parentId: opts.parentId ?? null, mentions: opts.mentions }),
-      });
-      if (res.ok) return (await res.json()).comment as Comment;
+      const created = await postCueComment<Comment>(productionId, { cueId, body: opts.text, parentId: opts.parentId ?? null, mentions: opts.mentions });
+      if (created) return created;
     } finally { setSubmitting(false); }
     return null;
   };
@@ -103,16 +101,12 @@ export default function CueCommentsPanel({
 
   const saveEdit = async (id: string) => {
     const text = editText.trim(); if (!text) return;
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/cue-comments/${id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: text }),
-    });
-    if (res.ok) { onEdit((await res.json()).comment); setEditingId(null); }
+    const updated = await patchCueComment<Comment>(productionId, id, text);
+    if (updated) { onEdit(updated); setEditingId(null); }
   };
 
   const doDelete = async (id: string) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/cue-comments/${id}`, { method: "DELETE" });
-    if (res.ok) onDelete(id);
+    if (await deleteCueComment(productionId, id)) onDelete(id);
   };
 
   const startReply = (parentId: string, authorUserId: string, authorName: string) => {
