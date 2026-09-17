@@ -36,8 +36,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
     // 项目侧只可能兑到档位码（wantKinds 只放行 production_upgrade），credits 分支不可达
     if (result.kind !== "tier") return Response.json({ error: "该兑换码不适用于此处" }, { status: 400 });
-    const label = PRODUCTION_TIERS[result.tier as ProductionTier]?.label ?? result.tier;
-    return Response.json({ ok: true, tier: result.tier, tierLabel: label, billingExempt: result.billingExempt });
+    const conf = PRODUCTION_TIERS[result.tier as ProductionTier];
+    return Response.json({
+      ok: true, tier: result.tier, tierLabel: conf?.label ?? result.tier, billingExempt: result.billingExempt,
+      // 升档即扩席位（#313）：卡片就地更新 x / N，不用等刷新
+      seatLimit: conf?.seatLimit ?? null,
+    });
   } catch (err) {
     console.error("[redeem-code] production redeem error:", err);
     return Response.json({ error: "兑换失败，请稍后重试" }, { status: 500 });

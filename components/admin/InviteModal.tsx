@@ -9,6 +9,7 @@ import TreePickerModal from "@/components/ui/TreePickerModal";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
 import type { InviteRow } from "@/lib/account/invite-db";
+import { SEAT_TONE_COLOR, seatHint, seatTone, type SeatInfo } from "@/lib/account/seat-ui";
 
 type Dept = { id: string; name: string; parentId: string | null; kind: "dept" | "group" };
 
@@ -16,6 +17,8 @@ type Props = {
   productionId: string;
   roleNames: string[];
   depts: Dept[];
+  /** 席位占用（#313）：满员时提交置灰、顶部说明原因；余量吃紧时提醒。 */
+  seats: SeatInfo;
   onClose: () => void;
 };
 
@@ -32,7 +35,7 @@ const STATUS_BADGE: Record<InviteRow["status"], [string, "green" | "red" | "neut
 };
 
 /** 邀请 modal：单个邮件邀请 + 邀请链接管理（批量邀请在「数据迁移」页）。 */
-export default function InviteModal({ productionId, roleNames, depts, onClose }: Props) {
+export default function InviteModal({ productionId, roleNames, depts, seats, onClose }: Props) {
   const [tab, setTab] = useState<"email" | "link">("email");
   const [email, setEmail] = useState("");
   const [presetRoles, setPresetRoles] = useState<string[]>([]);
@@ -121,6 +124,12 @@ export default function InviteModal({ productionId, roleNames, depts, onClose }:
     color: active ? "#fff" : "var(--muted)",
   });
 
+  const seatsFull = seatTone(seats) === "full";
+  const seatMsg = seatHint(seats);
+  const submitBtn = (disabled: boolean): React.CSSProperties => ({
+    ...PRIMARY_BTN, ...(disabled ? { opacity: .45, cursor: "not-allowed" } : {}),
+  });
+
   const presetSummary = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
       <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>预配：</span>
@@ -144,6 +153,10 @@ export default function InviteModal({ productionId, roleNames, depts, onClose }:
         <button style={segBtn(tab === "link")} onClick={() => setTab("link")}>邀请链接</button>
       </div>
 
+      {/* 席位余量：满员/将满才出现，充裕时不打扰 */}
+      {seatMsg && (
+        <p style={{ margin: "0 0 10px", fontSize: 12, color: SEAT_TONE_COLOR[seatTone(seats)], fontWeight: 700 }}>{seatMsg}</p>
+      )}
       {error && <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--danger)", fontWeight: 700 }}>{error}</p>}
       {msg && <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--success)", fontWeight: 700 }}>{msg}</p>}
 
@@ -159,7 +172,10 @@ export default function InviteModal({ productionId, roleNames, depts, onClose }:
             定向邀请（仅该邮箱账号可用，14 天有效）。对方已注册则登录后加入，未注册则注册后自动加入。批量邀请在「数据迁移」页。
           </p>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button style={PRIMARY_BTN} disabled={busy || !email.trim()} onClick={sendEmailInvite}>发送邀请</button>
+            <button
+              style={submitBtn(seatsFull)} disabled={busy || seatsFull || !email.trim()}
+              title={seatsFull ? seatMsg ?? undefined : undefined} onClick={sendEmailInvite}
+            >发送邀请</button>
           </div>
         </div>
       ) : (
@@ -183,7 +199,10 @@ export default function InviteModal({ productionId, roleNames, depts, onClose }:
             任何拿到链接的人登录/注册后即可加入本项目——请仅在可信渠道分发，可随时在下方撤销。
           </p>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button style={PRIMARY_BTN} disabled={busy} onClick={createLink}>生成链接并复制</button>
+            <button
+              style={submitBtn(seatsFull)} disabled={busy || seatsFull}
+              title={seatsFull ? seatMsg ?? undefined : undefined} onClick={createLink}
+            >生成链接并复制</button>
           </div>
         </div>
       )}

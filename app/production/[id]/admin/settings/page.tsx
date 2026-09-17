@@ -8,7 +8,7 @@ import { getSession } from "@/lib/account/session";
 import { cookies } from "next/headers";
 import AdminSettingsClient from "@/components/admin/AdminSettingsClient";
 import ProductionPlanCard from "@/components/admin/ProductionPlanCard";
-import { getProductionPlan, PRODUCTION_TIERS } from "@/lib/account/plan";
+import { getProductionPlan, getSeatUsage, PRODUCTION_TIERS } from "@/lib/account/plan";
 
 export default async function SettingsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -17,12 +17,13 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
 
-  const [meta, access, plan] = await Promise.all([
+  const [meta, access, plan, seats] = await Promise.all([
     getProductionMeta(id),
     session
       ? getProductionPermissionContext(session.userId, session.isAdmin, id)
       : Promise.resolve(null),
     getProductionPlan(id),
+    getSeatUsage(id),
   ]);
 
   const permCtx = access?.permCtx ?? null;
@@ -69,6 +70,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
           label: tierConf.label,
           billingExempt: plan.billingExempt,
           seatLimit: tierConf.seatLimit,
+          seatUsed: seats.used,
           ai: tierConf.ai,
           advancedPerms: tierConf.advancedPerms,
         }}

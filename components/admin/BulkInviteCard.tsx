@@ -5,6 +5,7 @@ import Badge from "@/components/ui/Badge";
 import TreePickerModal from "@/components/ui/TreePickerModal";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
+import { SEAT_TONE_COLOR, seatHint, seatOverflowHint, seatTone, type SeatInfo } from "@/lib/account/seat-ui";
 
 type Dept = { id: string; name: string; parentId: string | null; kind: "dept" | "group" };
 
@@ -12,6 +13,8 @@ type Props = {
   productionId: string;
   roleNames: string[];
   depts: Dept[];
+  /** 席位占用（#313）：满员置灰；超余量不拦、只把后果说清楚（谁先接受谁进）。 */
+  seats: SeatInfo;
 };
 
 type ParsedRow = {
@@ -37,7 +40,7 @@ const CATEGORY_LABEL: Record<ParsedRow["category"], [string, "green" | "blue" | 
 };
 
 /** 批量邀请（#156，数据迁移页）：飞书表格识别分发 / 粘贴邮箱列表。替代原直接导入。 */
-export default function BulkInviteCard({ productionId, roleNames, depts }: Props) {
+export default function BulkInviteCard({ productionId, roleNames, depts, seats }: Props) {
   const [mode, setMode] = useState<"sheet" | "paste">("sheet");
   const [wikiUrl, setWikiUrl] = useState("");
   const [parsed, setParsed] = useState<ParsedRow[] | null>(null);
@@ -55,6 +58,18 @@ export default function BulkInviteCard({ productionId, roleNames, depts }: Props
   const [result, setResult] = useState<{ sent: number; failed: number; results: { email: string; ok: boolean; error?: string }[] } | null>(null);
 
   const emails = [...new Set(raw.split(/[\n,;，；\s]+/).map(e => e.trim().toLowerCase()).filter(Boolean))];
+
+  const seatsFull = seatTone(seats) === "full";
+  const seatMsg = seatHint(seats);
+  const submitBtn = (extra?: React.CSSProperties): React.CSSProperties => ({
+    ...PRIMARY_BTN, ...extra, ...(seatsFull ? { opacity: .45, cursor: "not-allowed" } : {}),
+  });
+  // 表格模式实际会发出的人数：跳过已是成员；无渠道行只在勾了认领链接时算
+  const sheetCount = parsed
+    ? parsed.filter(r => !r.alreadyMember && (r.category !== "none" || makeClaimLink)).length
+    : 0;
+  const sheetOverflow = seatOverflowHint(seats, sheetCount);
+  const pasteOverflow = seatOverflowHint(seats, emails.length);
 
   async function send() {
     setBusy(true); setError(null); setResult(null);
@@ -123,6 +138,9 @@ export default function BulkInviteCard({ productionId, roleNames, depts }: Props
       <h3 style={{ margin: "0 0 6px", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)" }}>
         批量邀请成员
       </h3>
+      {seatMsg && (
+        <p style={{ margin: "0 0 10px", fontSize: 12, color: SEAT_TONE_COLOR[seatTone(seats)], fontWeight: 700 }}>{seatMsg}</p>
+      )}
       <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface-2)", borderRadius: 9, marginBottom: 12, maxWidth: 360 }}>
         <button style={segBtn(mode === "sheet")} onClick={() => setMode("sheet")}>飞书表格</button>
         <button style={segBtn(mode === "paste")} onClick={() => setMode("paste")}>粘贴邮箱</button>
@@ -181,10 +199,16 @@ export default function BulkInviteCard({ productionId, roleNames, depts }: Props
                     为 {parseStats.none} 名无渠道人员生成认领链接
                   </label>
                 )}
-                <button style={{ ...PRIMARY_BTN, marginLeft: "auto" }} disabled={busy} onClick={sendSheet}>
+                <button
+                  style={submitBtn({ marginLeft: "auto" })} disabled={busy || seatsFull}
+                  title={seatsFull ? seatMsg ?? undefined : undefined} onClick={sendSheet}
+                >
                   {busy ? "发送中…" : "发送邀请"}
                 </button>
               </div>
+              {!seatsFull && sheetOverflow && (
+                <p style={{ margin: "6px 0 0", fontSize: 11, color: "var(--warn)" }}>{sheetOverflow}</p>
+              )}
             </div>
           )}
 
@@ -242,10 +266,16 @@ export default function BulkInviteCard({ productionId, roleNames, depts }: Props
         <span style={{ marginLeft: "auto", fontSize: 11, color: emails.length > 100 ? "var(--danger)" : "var(--muted)", fontWeight: 700 }}>
           {emails.length} 个邮箱
         </span>
-        <button style={PRIMARY_BTN} disabled={busy || emails.length === 0 || emails.length > 100} onClick={send}>
+        <button
+          style={submitBtn()} disabled={busy || seatsFull || emails.length === 0 || emails.length > 100}
+          title={seatsFull ? seatMsg ?? undefined : undefined} onClick={send}
+        >
           {busy ? "发送中…" : "发送邀请"}
         </button>
       </div>
+      {!seatsFull && pasteOverflow && (
+        <p style={{ margin: "-4px 0 10px", fontSize: 11, color: "var(--warn)" }}>{pasteOverflow}</p>
+      )}
 
       {result && (
         <div style={{ fontSize: 12 }}>

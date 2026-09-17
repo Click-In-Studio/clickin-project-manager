@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { requireGrantGate } from "@/lib/perm/api-guard";
 import { createInvite, createClaimInvite } from "@/lib/account/invite-db";
+import { getSeatUsage, seatsFullMessage } from "@/lib/account/plan";
 import { getProductionName } from "@/lib/db";
 import { notifyUsers } from "@/lib/notify/notify";
 import { sendBotDm } from "@/lib/platform/feishu/feishu-bot";
@@ -40,6 +41,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "rows 须为 1-200 行" }, { status: 400 });
   }
   const rows = body.rows as InRow[];
+  // 席位预检（#313）：与 POST /invites 同一道门——满员不发；超余量不硬拦，带 seats 回去提示。
+  const seats = await getSeatUsage(id);
+  if (seats.used >= seats.limit) {
+    return Response.json({ error: seatsFullMessage(seats), reason: "seats_full", seats }, { status: 409 });
+  }
   const name = (await getProductionName(id)) ?? "项目";
   const me = session!.userId;
 
@@ -139,5 +145,5 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     result.claimCount = noneRows.length;
   }
 
-  return Response.json({ ok: true, ...result });
+  return Response.json({ ok: true, ...result, seats });
 }

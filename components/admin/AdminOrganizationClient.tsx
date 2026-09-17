@@ -8,6 +8,7 @@ import Badge from "@/components/ui/Badge";
 import AdminModal from "@/components/ui/AdminModal";
 import MemberPickerModal from "@/components/perm/MemberPickerModal";
 import InviteModal from "@/components/admin/InviteModal";
+import { SEAT_TONE_COLOR, seatHint, seatTone } from "@/lib/account/seat-ui";
 import TreePickerModal from "@/components/ui/TreePickerModal";
 import styles from "@/components/ui/my-pages.module.css";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
@@ -59,6 +60,8 @@ type Props = {
   initialDepts: Dept[];
   tags: MemberTag[];
   roleNames: string[];
+  /** 档位席位上限（#313）；占用数按 status <> 'exited' 的成员数算，与服务端判定同口径。 */
+  seatLimit: number;
   caps: Caps;
   currentUserId: string;
 };
@@ -85,7 +88,7 @@ function Avatar({ m, size }: { m: Member; size: number }) {
 }
 
 export default function AdminOrganizationClient({
-  productionId, productionName, initialMembers, initialDepts, tags, roleNames, caps, currentUserId,
+  productionId, productionName, initialMembers, initialDepts, tags, roleNames, seatLimit, caps, currentUserId,
 }: Props) {
   const [tab, setTab] = useState<"members" | "depts">("members");
   const [members, setMembers] = useState<Member[]>(initialMembers);
@@ -98,6 +101,14 @@ export default function AdminOrganizationClient({
   const [busy, setBusy] = useState(false);
 
   const memberMap = useMemo(() => new Map(members.map(m => [m.userId, m])), [members]);
+  // 席位占用：suspended 占席位、exited 不占（#141 定谳，见 lib/account/plan.ts seatsFullForNewMember）。
+  const seats = { used: members.filter(m => m.status !== "exited").length, limit: seatLimit };
+  const seatsFull = seatTone(seats) === "full";
+  const seatMsg = seatHint(seats);
+  // 摘要格只放得下一行短句；完整话术在按钮 title 与弹窗里
+  const seatTileHint = seatsFull
+    ? "席位已满，确认离组或升档后可继续邀请"
+    : seatTone(seats) === "warn" ? `余 ${seats.limit - seats.used} 席，接近上限` : null;
   const selected = selectedUserId ? memberMap.get(selectedUserId) ?? null : null;
   const selectedDept = selectedDeptId ? depts.find(d => d.id === selectedDeptId) ?? null : null;
 
@@ -246,7 +257,13 @@ export default function AdminOrganizationClient({
         title="成员与部门"
         side="stage"
         actions={caps.invite ? (
-          <button style={PRIMARY_BTN} onClick={() => setInviteOpen(true)}>＋ 邀请成员</button>
+          // 满员置灰不消失，title 说原因（菜单/入口统一置灰定式）
+          <button
+            style={{ ...PRIMARY_BTN, ...(seatsFull ? { opacity: .45, cursor: "not-allowed" } : {}) }}
+            disabled={seatsFull}
+            title={seatsFull ? seatMsg ?? undefined : undefined}
+            onClick={() => setInviteOpen(true)}
+          >＋ 邀请成员</button>
         ) : undefined}
       />
 
@@ -258,21 +275,22 @@ export default function AdminOrganizationClient({
       }}>
         {[
           [
-            String(members.length),
+            `${seats.used} / ${seats.limit}`,
             "项目成员",
-            members.some(m => m.status !== "active")
+            seatTileHint ?? (members.some(m => m.status !== "active")
               ? `含 ${members.filter(m => m.status !== "active").length} 名不在职`
-              : "全部在职",
+              : "全部在职"),
+            SEAT_TONE_COLOR[seatTone(seats)],
           ],
           [String(depts.filter(d => d.kind === "dept").length), "部门", "组织架构"],
           [String(depts.filter(d => d.kind === "group").length), "用户组", "仅供选人"],
           [String(pocCount), "POC", "部门联络人次"],
-        ].map(([num, label, hint]) => (
+        ].map(([num, label, hint, hintColor]) => (
           <div key={label} style={{ minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13, background: "var(--surface)" }}>
-            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
+            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)", whiteSpace: "nowrap" }}>{num}</span>
             <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
               <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
-              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
+              <small style={{ marginTop: 3, color: hintColor ?? "var(--muted)", fontSize: 9 }}>{hint}</small>
             </p>
           </div>
         ))}
@@ -435,6 +453,7 @@ export default function AdminOrganizationClient({
           productionId={productionId}
           roleNames={roleNames}
           depts={depts.map(d => ({ id: d.id, name: d.name, parentId: d.parentId, kind: d.kind }))}
+          seats={seats}
           onClose={() => setInviteOpen(false)}
         />
       )}

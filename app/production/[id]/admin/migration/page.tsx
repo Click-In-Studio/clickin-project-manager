@@ -12,6 +12,7 @@ import AdminMigrationSection from "@/components/admin/AdminMigrationSection";
 import BulkInviteCard from "@/components/admin/BulkInviteCard";
 import { listProductionRolesWithPermissions } from "@/lib/db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
+import { getSeatUsage } from "@/lib/account/plan";
 
 export default async function MigrationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -32,20 +33,22 @@ export default async function MigrationPage({ params }: { params: Promise<{ id: 
   ]);
   if (!canImportScript && !canImportScenes && !canInvite) redirect(`/production/${id}/admin`);
 
-  const [name, roles, depts] = await Promise.all([
+  const [name, roles, depts, seats] = await Promise.all([
     getProductionName(id),
     canInvite ? listProductionRolesWithPermissions(id) : Promise.resolve([]),
     canInvite ? listProductionDepts(id) : Promise.resolve([]),
+    canInvite ? getSeatUsage(id) : Promise.resolve(null),
   ]);
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
       <PageHeader eyebrow={name ?? ""} title="数据迁移" side="stage" />
-      {canInvite && (
+      {canInvite && seats && (
         <BulkInviteCard
           productionId={id}
           roleNames={roles.map(r => r.name)}
           depts={depts.map(d => ({ id: d.id, name: d.name, parentId: d.parentId, kind: d.kind }))}
+          seats={{ used: seats.used, limit: seats.limit }}
         />
       )}
       <AdminMigrationSection

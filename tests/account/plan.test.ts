@@ -3,6 +3,8 @@
  *   层 1 建项目门 —— user_plan 无行 403 / creator free / internal 直落最高档 / 配额
  *   层 2 兑换码 —— 只升不降、过期/用尽/错类不消耗、特邀豁免落库
  *   层 3 座位上限 —— acceptInvite 事务内按档位拦 seats_full，升档后放行
+ *   层 3b 席位发起侧可见性（#313）—— getSeatUsage 与判定同口径；满员时 POST /invites、
+ *          table-send 409 不再生成邀请，升档后放行且响应带 seats
  *   层 4 功能门 —— requireProductionFeature 独立于 grant 判定
  *   层 5 菜单显隐数据源 —— listMyProductionsWithRoles 带出的 planTier（PR #312）
  */
@@ -17,13 +19,16 @@ import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/perm/permissions";
 import { createInvite, acceptInvite } from "@/lib/account/invite-db";
 import {
   getUserTier, getProductionPlan, redeemPlanCode, requireProductionFeature,
-  productionFeatureAllowed, normalizeProductionTier, PRODUCTION_TIERS, USER_TIERS,
+  productionFeatureAllowed, normalizeProductionTier, getSeatUsage, seatsFullForNewMember,
+  PRODUCTION_TIERS, USER_TIERS,
 } from "@/lib/account/plan";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { getPool } from "@/lib/pg";
 import { POST as createProductionHandler } from "@/app/api/productions/route";
 import { POST as accountRedeemHandler } from "@/app/api/account/redeem-code/route";
 import { PATCH as memberPermPatch, POST as memberPermPost } from "@/app/api/production/[id]/permissions/route";
+import { POST as invitesPost } from "@/app/api/production/[id]/invites/route";
+import { POST as tableSendPost } from "@/app/api/production/[id]/invites/table-send/route";
 
 function req(url: string, opts: { session?: string; method?: string; body?: string } = {}): NextRequest {
   const headers = new Headers();
@@ -258,6 +263,80 @@ describe("座位上限", () => {
 
   afterAll(async () => {
     await cleanupProduction(prodId).catch(() => {});
+  });
+});
+
+// ── 层 3b：席位发起侧可见性（#313） ───────────────────────────────────────────
+
+describe("席位发起侧可见性", () => {
+  let ownerId: string;
+  let ownerSession: string;
+  let prodId: string;
+
+  beforeAll(async () => {
+    ({ userId: ownerId, session: ownerSession } = await makeUser("creator"));
+    ({ prodId } = await makeProduction(ownerId));
+    createdProds.push(prodId);
+  });
+
+  afterAll(async () => {
+    await cleanupProduction(prodId).catch(() => {});
+  });
+
+  it("getSeatUsage 与 seatsFullForNewMember 同口径：owner 占一席、free 档 limit", async () => {
+    const usage = await getSeatUsage(prodId);
+    expect(usage).toEqual({ used: 1, limit: PRODUCTION_TIERS.free.seatLimit, tier: "free" });
+    const client = await getPool().connect();
+    try {
+      expect(await seatsFullForNewMember(client, prodId)).toBe(false);
+    } finally { client.release(); }
+  });
+
+  it("满员：POST /invites 与 table-send 409 seats_full、不生成邀请；升档后放行且响应带 seats", async () => {
+    const limit = PRODUCTION_TIERS.free.seatLimit;
+    for (let i = 1; i < limit; i++) {
+      const { userId } = await makeUser();
+      await getPool().query("INSERT INTO production_member (production_id, user_id) VALUES ($1, $2)", [prodId, userId]);
+    }
+    expect(await getSeatUsage(prodId)).toMatchObject({ used: limit, limit });
+
+    const before = await getPool().query<{ n: string }>(
+      "SELECT count(*) AS n FROM production_invite WHERE production_id = $1", [prodId],
+    );
+
+    const linkRes = await invitesPost(
+      req(`/api/production/${prodId}/invites`, { session: ownerSession, method: "POST", body: JSON.stringify({ kind: "link" }) }),
+      { params: Promise.resolve({ id: prodId }) },
+    );
+    expect(linkRes.status).toBe(409);
+    expect(await linkRes.json()).toMatchObject({ reason: "seats_full", seats: { used: limit, limit } });
+
+    const tableRes = await tableSendPost(
+      req(`/api/production/${prodId}/invites/table-send`, {
+        session: ownerSession, method: "POST",
+        body: JSON.stringify({ rows: [{ name: "某人", category: "none" }], makeClaimLink: true }),
+      }),
+      { params: Promise.resolve({ id: prodId }) },
+    );
+    expect(tableRes.status).toBe(409);
+    expect(await tableRes.json()).toMatchObject({ reason: "seats_full" });
+
+    // 门在 createInvite 之前——满员时一张邀请都不落库
+    const after = await getPool().query<{ n: string }>(
+      "SELECT count(*) AS n FROM production_invite WHERE production_id = $1", [prodId],
+    );
+    expect(after.rows[0].n).toBe(before.rows[0].n);
+
+    // 升 pro 后同一请求放行，响应带 seats 让前端提示余量
+    const up = await makeCode({ kind: "production_upgrade", grantsTier: "pro" });
+    createdCodes.push(up);
+    expect(await redeemPlanCode({ code: up, userId: ownerId, productionId: prodId })).toMatchObject({ ok: true });
+    const okRes = await invitesPost(
+      req(`/api/production/${prodId}/invites`, { session: ownerSession, method: "POST", body: JSON.stringify({ kind: "link" }) }),
+      { params: Promise.resolve({ id: prodId }) },
+    );
+    expect(okRes.status).toBe(201);
+    expect(await okRes.json()).toMatchObject({ ok: true, seats: { used: limit, limit: PRODUCTION_TIERS.pro.seatLimit, tier: "pro" } });
   });
 });
 
