@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { BASE_PATH } from "@/lib/base-path";
+import { fetchCueListAccess } from "@/lib/ops/cue-client";
 import type { CueList } from "@/lib/ops/cue-list-types";
 import type { Cue } from "@/lib/ops/cue-types";
 import { readCookie, writeCookie } from "./cookies";
@@ -114,18 +114,11 @@ export function useCueLists({
     setActiveListId(listId);
     setAccessModal({ listId, listName: list.name, status: "loading" });
     try {
-      const res = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/cuelists/${listId}/access`,
-        { credentials: "include" },
-      );
-      if (!res.ok) { setAccessModal(null); return; }
-      const data = await res.json() as
-        | { canAccess: true }
-        | { canAccess: false; canSelfConfirm: true; selfConfirmLevel: "edit" | "manage" }
-        | { canAccess: false; canSelfConfirm: false };
+      const data = await fetchCueListAccess(productionId, listId);
+      if (!data) { setAccessModal(null); return; }
       if (data.canAccess) {
         setLocalEditableIds(prev => new Set([...prev, listId]));
-        if ((data as { level?: string }).level === "manage") {
+        if (data.level === "manage") {
           setLocalManageIds(prev => new Set([...prev, listId]));
         }
         setAccessModal(null);
