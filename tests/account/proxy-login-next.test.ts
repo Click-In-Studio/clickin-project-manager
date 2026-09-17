@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 import { proxy, loginNext } from "@/proxy";
+import { loginDest, inviteTokenFromDest } from "@/app/login/LoginClient";
 
 // 回归（#516）：proxy 层先于页面拦截无会话请求，重定向到 /login 时曾把 search
 // 清空——目的地丢了。页面层 app/invite/[token]/page.tsx 自己写的
@@ -47,6 +48,25 @@ describe("proxy：无会话重定向到 /login 带回跳目标", () => {
   it("公开前缀不重定向", () => {
     expect(redirectTarget("/login")).toBeNull();
     expect(redirectTarget("/api/auth/email/initiate")).toBeNull();
+  });
+});
+
+// AI review 提出的疑点：目的地自带 ?/& 时，proxy 编码 → 登录页 loginDest 解码
+// 这一往返是否无损。两端分别是 URLSearchParams.set / .get，本该对称，但这条
+// 契约跨两个文件，值得钉住。
+afterEach(() => vi.unstubAllGlobals());
+
+describe("proxy → LoginClient 往返", () => {
+  it("带 ?/& 的深链接经编码后被 loginDest 完整解回", () => {
+    const target = redirectTarget("/production/abc/tasks?tab=mine&x=1");
+    vi.stubGlobal("window", { location: { search: target!.search } });
+    expect(loginDest()).toBe("/production/abc/tasks?tab=mine&x=1");
+  });
+
+  it("/invite/<token> 经往返后 inviteTokenFromDest 抠得出 token", () => {
+    const target = redirectTarget(`/invite/${TOKEN}`);
+    vi.stubGlobal("window", { location: { search: target!.search } });
+    expect(inviteTokenFromDest()).toBe(TOKEN);
   });
 });
 
