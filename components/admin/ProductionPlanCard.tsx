@@ -9,7 +9,7 @@ import { BASE_PATH } from "@/lib/base-path";
 type Props = {
   productionId: string;
   isOwner: boolean;
-  initial: { tier: string; label: string; billingExempt: boolean; seatLimit: number; ai: boolean; advancedPerms: boolean };
+  initial: { tier: string; label: string; billingExempt: boolean; seatLimit: number; seatUsed: number; ai: boolean; advancedPerms: boolean };
 };
 
 export default function ProductionPlanCard({ productionId, isOwner, initial }: Props) {
@@ -30,7 +30,10 @@ export default function ProductionPlanCard({ productionId, isOwner, initial }: P
       });
       const data = await res.json();
       if (!res.ok) { setMsg({ ok: false, text: data.error ?? "兑换失败" }); return; }
-      setPlan(p => ({ ...p, tier: data.tier, label: data.tierLabel ?? data.tier, billingExempt: data.billingExempt }));
+      setPlan(p => ({
+        ...p, tier: data.tier, label: data.tierLabel ?? data.tier, billingExempt: data.billingExempt,
+        seatLimit: typeof data.seatLimit === "number" ? data.seatLimit : p.seatLimit,
+      }));
       setCode("");
       setMsg({ ok: true, text: `兑换成功，当前档位：${data.tierLabel ?? data.tier}。部分功能开关在下次刷新后生效。` });
     } catch {
@@ -52,7 +55,7 @@ export default function ProductionPlanCard({ productionId, isOwner, initial }: P
       </h2>
       <p style={{ margin: "7px 0 0", fontSize: 12, color: "var(--muted)" }}>
         当前档位：<b style={{ color: "var(--ink)" }}>{plan.label}</b>
-        {" · "}成员上限 {plan.seatLimit} 人
+        {" · "}成员 {plan.seatUsed} / {plan.seatLimit} 人
         {" · "}AI 助手{plan.ai ? "已开通" : "未开通"}
         {" · "}高级权限配置{plan.advancedPerms ? "已开通" : "未开通"}
       </p>

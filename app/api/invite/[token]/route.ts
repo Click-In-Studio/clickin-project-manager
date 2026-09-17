@@ -11,9 +11,9 @@ const REASON_MSG: Record<string, string> = {
   target_mismatch: "该邀请为定向邀请，与当前登录身份不符",
   needs_claim: "该邀请为名单认领链接，请选择你的名字",
   claim_taken: "该名额已被认领",
-  // 停用的人一直占席位（见 lib/account/plan.ts seatsFullForNewMember），而这是 owner 点一下
-  // 「确认离组」就能自解的——报错必须说出这条路，否则他只会以为唯一出路是掏钱升档。
-  seats_full: "该项目成员人数已达当前档位上限。若有已停用成员，项目所有者可将其确认离组以释放席位，或升级项目档位",
+  // 这句是说给**受邀方**听的（#313）：他既不知道什么是席位也无从解决，只能找发起方。
+  // 「确认离组已停用成员 / 升档」那套自解路径在发起侧（lib/account/plan.ts seatsFullMessage）。
+  seats_full: "该项目席位已满，暂时无法加入，请联系项目所有者处理后重试",
 };
 
 // POST — 接受邀请（登录后）。Body 可选 { claimId }（名单认领链接）。

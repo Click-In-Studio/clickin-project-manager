@@ -14,6 +14,7 @@ import {
   listMemberTags,
 } from "@/lib/db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
+import { getSeatUsage } from "@/lib/account/plan";
 import AdminOrganizationClient from "@/components/admin/AdminOrganizationClient";
 
 export default async function OrganizationPage({ params }: { params: Promise<{ id: string }> }) {
@@ -41,12 +42,13 @@ export default async function OrganizationPage({ params }: { params: Promise<{ i
       bypass || hasGrant(permCtx.userId, id, "dept", "*", "poc", "create"),
     ]);
 
-  const [name, membersRaw, depts, tags, roles] = await Promise.all([
+  const [name, membersRaw, depts, tags, roles, seats] = await Promise.all([
     getProductionName(id),
     listProductionMembersWithRoles(id),
     listProductionDepts(id),
     listMemberTags(id),
     listProductionRolesWithPermissions(id),
+    getSeatUsage(id),
   ]);
 
   const members = membersRaw.map(m => ({
@@ -80,6 +82,8 @@ export default async function OrganizationPage({ params }: { params: Promise<{ i
       }))}
       tags={tags}
       roleNames={roles.map(r => r.name)}
+      // 席位上限（#313）：占用数客户端按 members 自算（确认离组后实时掉），只传 limit。
+      seatLimit={seats.limit}
       caps={{
         viewContact: canViewContact,
         editMember: canEditMember,

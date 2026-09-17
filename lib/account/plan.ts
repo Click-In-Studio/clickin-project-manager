@@ -253,13 +253,39 @@ export async function seatsFullForNewMember(
   client: PoolClient,
   productionId: string,
 ): Promise<boolean> {
+  const { used, limit } = await getSeatUsage(productionId, client);
+  return used >= limit;
+}
+
+export type SeatUsage = { used: number; limit: number; tier: ProductionTier };
+
+/**
+ * 席位占用（#313）：发起侧展示与预检用，与 seatsFullForNewMember **同一条 count**——
+ * 展示口径和事务内判定共用一个函数体，不会各算各的分叉。
+ *
+ * 事务外调用只是体验层的预检（满员不再生成邀请、按钮置灰）；并发安全仍靠
+ * acceptInvite/claimInvite 里 FOR UPDATE 同事务的 seatsFullForNewMember，那道门不可替代。
+ */
+export async function getSeatUsage(
+  productionId: string,
+  client?: PoolClient,
+): Promise<SeatUsage> {
+  const q = client ?? getPool();
   const { tier } = await getProductionPlan(productionId, client);
-  const limit = PRODUCTION_TIERS[tier].seatLimit;
-  const { rows } = await client.query<{ n: string }>(
+  const { rows } = await q.query<{ n: string }>(
     "SELECT count(*) AS n FROM production_member WHERE production_id = $1 AND status <> 'exited'",
     [productionId],
   );
-  return Number(rows[0].n) >= limit;
+  return { used: Number(rows[0].n), limit: PRODUCTION_TIERS[tier].seatLimit, tier };
+}
+
+/**
+ * 发起侧的满员文案。停用的人一直占席位，而「确认离组」是 owner 点一下就能自解的——
+ * 必须说出这条路，否则他只会以为唯一出路是掏钱升档。受邀方那侧的话术不在这里
+ * （见 app/api/invite/[token]/route.ts REASON_MSG），他既不知道什么是席位也无从解决。
+ */
+export function seatsFullMessage(u: SeatUsage): string {
+  return `席位已满（${u.used} / ${u.limit}）。若有已停用成员，可将其确认离组以释放席位，或升级项目档位后继续邀请`;
 }
 
 // ─── 兑换码 ───────────────────────────────────────────────────────────────────
