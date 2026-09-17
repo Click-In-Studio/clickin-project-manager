@@ -132,7 +132,8 @@ export default function MyProjectsClient(
       {showCreate && (
         <NewProductionModal
           onClose={() => setShowCreate(false)}
-          onCreated={id => router.push(`/production/${id}`)}
+          // 同 ProjectSwitcher：侧栏项目列表来自 root layout，软导航不重渲，须 refresh（#528）
+          onCreated={id => { router.push(`/production/${id}`); router.refresh(); }}
         />
       )}
 
