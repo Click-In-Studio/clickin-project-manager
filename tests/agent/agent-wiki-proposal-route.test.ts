@@ -7,6 +7,7 @@ import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { getPool } from "@/lib/pg";
 import { createWiki } from "@/lib/wiki/content";
 import { insertWikiProposal } from "@/lib/wiki/proposal-db";
+import { insertNode } from "@/lib/node/db";
 
 // AI review #249 finding 1 回归锁定：/api/agent/wiki-proposal 不能无脑
 // getWiki(parentWikiId) 暴露父文档标题——proposeId 关联的 parentWikiId
@@ -78,6 +79,31 @@ describe("GET /api/agent/wiki-proposal：parentTitle 过可见性门", () => {
     expect(res.status).toBe(200);
     const data = (await res.json()) as { parentTitle: string | null };
     expect(data.parentTitle).toBe("路由测试私有父文档");
+  });
+
+  it("父是 [目录] folder 节点（parentNodeId，#510）→ 可枚举者拿到 node.title；不可枚举者为 null", async () => {
+    const folderId = await insertNode({ productionId: prodId, kind: "folder", parentId: null, sortKey: null, title: "路由测试目录", createdBy: ownerId });
+    const toolCallId = `call_${shortId()}`;
+    await insertWikiProposal({
+      productionId: prodId, toolCallId, proposedBy: ownerId, action: "create", parentNodeId: folderId,
+      title: "子文档", body: "", summary: "",
+      hasPermission: true, permissionKey: "node:wiki/*@create",
+    });
+    const res = await GET(makeReq(ownerId, toolCallId));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { parentTitle: string | null }).parentTitle).toBe("路由测试目录");
+
+    // 不可枚举（listable=false，无部门分享）的目录：零权限成员看不见 → 不泄露标题
+    const hiddenFolderId = await insertNode({ productionId: prodId, kind: "folder", parentId: null, sortKey: null, title: "私有目录", listable: false, createdBy: ownerId });
+    const toolCallId2 = `call_${shortId()}`;
+    await insertWikiProposal({
+      productionId: prodId, toolCallId: toolCallId2, proposedBy: memberId, action: "create", parentNodeId: hiddenFolderId,
+      title: "子文档", body: "", summary: "",
+      hasPermission: true, permissionKey: "node:wiki/*@create",
+    });
+    const res2 = await GET(makeReq(memberId, toolCallId2));
+    expect(res2.status).toBe(200);
+    expect(((await res2.json()) as { parentTitle: string | null }).parentTitle).toBeNull();
   });
 
   it("未登录 → 401；找不到该 proposal（非本人发起）→ 404", async () => {

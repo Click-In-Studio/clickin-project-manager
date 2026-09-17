@@ -4,6 +4,8 @@ import { getWikiProposalByToolCallId } from "@/lib/wiki/proposal-db";
 import { getWiki } from "@/lib/wiki/content";
 import { resolveProductionActor } from "@/lib/agent/tools/production-tools";
 import { canViewWiki } from "@/lib/wiki/perm";
+import { canEnumerateNode } from "@/lib/node/perm";
+import { getNode } from "@/lib/node/db";
 
 // 供 WikiProposalPreviewModal 按 toolCallId 拉取完整提议内容（确认卡片
 // description 硬上限 512 字符装不下）。自范围：只认自己发起的那一行——
@@ -32,6 +34,9 @@ export async function GET(req: NextRequest) {
     let parentTitle: string | null = null;
     if (proposal.parentWikiId && resolved && await canViewWiki(resolved.actor, productionId, proposal.parentWikiId)) {
       parentTitle = (await getWiki(proposal.parentWikiId, productionId))?.title ?? null;
+    } else if (proposal.parentNodeId && resolved && await canEnumerateNode(resolved.actor, productionId, proposal.parentNodeId)) {
+      // 父是 [目录] folder 节点（#510）：标题在 node.title 上，门是可枚举
+      parentTitle = (await getNode(proposal.parentNodeId, productionId))?.title ?? null;
     }
 
     let targetTitle: string | null = null;

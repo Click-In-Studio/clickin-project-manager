@@ -51,9 +51,10 @@ const SCRIPT_WRITE = [
   "production.script_propose_rewrite", "production.script_propose_edit_blocks",
 ];
 
-/** #47 文档解读族：资产枚举（id 供给）+ docx/pdf 结构信号读面 + 导入指引与日志 */
+/** #47 文档解读族：资产枚举（id 供给）+ docx/pdf 结构信号读面 + 导入指引与日志；
+ *  #510 起也带资产写面两工具（改名/移动，走确认卡）——分层不是权限（不变量 2） */
 const DOC_FAMILY = [
-  "production.asset_list",
+  "production.asset_list", "production.asset_propose_rename", "production.asset_propose_move",
   "production.doc_outline", "production.doc_read", "production.doc_search",
   "production.doc_import_guide", "production.doc_import_log_create", "production.doc_import_log_append",
 ];
@@ -106,6 +107,9 @@ const CLOSURE: Record<string, string[]> = {
   "production.doc_read": ["production.doc_outline", "production.doc_import_guide"],
   "production.doc_search": ["production.doc_outline", "production.doc_import_guide"],
   "production.doc_import_log_create": ["production.doc_import_guide"],
+  // #510 资产写面：id 来自 asset_list 或 wiki_tree 的 [文件] 行（与工具描述一致）；移动的目标父也来自 wiki_tree
+  "production.asset_propose_rename": ["production.asset_list", "production.wiki_tree"],
+  "production.asset_propose_move": ["production.asset_list", "production.wiki_tree"],
   "production.doc_import_log_append": ["production.doc_import_log_create", "production.doc_import_guide", "production.wiki_read"],
   // 剧本正文族：段 id 来自 scene_list；页码/搜索着陆后靠相对窗口微调；方言说明随读面闭包携带
   // 写面闭包：改写前必须能读出该段（id 往返协议的物料来源）

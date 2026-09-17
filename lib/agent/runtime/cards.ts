@@ -133,6 +133,24 @@ export function approvalCard(bareTool: string, params: Record<string, unknown>, 
         params.newParentId ? `📂 新父文档 id：${str(params.newParentId, 60)}` : "📂 移到文档库根",
         `📝 理由：${str(params.summary, 150)}`,
       ]) };
+    case "production-asset_propose_rename":
+      return { severity, title: `提议资产改名：${str(params.name, 60)}`, description: lines([
+        extra?.hasPermission === true ? "✅ 你有修改该资产信息的权限，批准后会直接生效。" : null,
+        extra?.hasPermission === false ? "⛔ 你目前没有修改该资产信息的权限——批准后调用会被拒绝、不会生效。" : null,
+        ...(extra?.notes ?? []).map((n) => str(n, 120)),
+        `🆔 资产 id：${str(params.assetId, 40)}`,
+        `📝 理由：${str(params.summary, 100)}`,
+      ]) };
+    case "production-asset_propose_move":
+      return { severity, title: `提议移动资产（id: ${str(params.assetId, 40)}）`, description: lines([
+        extra?.hasPermission === true ? "✅ 权限齐全，批准后直接生效。" : null,
+        extra?.hasPermission === false ? "⛔ 缺少权限——批准后调用会被拒绝、不会生效。" : null,
+        // 目的地无条件从参数回显（预览抛错时 notes 为空，人审的卡不能只剩 id + 理由）；
+        // notes 里的解析后标题是锦上添花
+        params.newParentId ? `📂 新父 id：${str(params.newParentId, 60)}` : "📂 移到目录树根",
+        ...(extra?.notes ?? []).map((n) => str(n, 120)),
+        `📝 理由：${str(params.summary, 100)}`,
+      ]) };
     case "production-wiki_propose_tag": {
       const tagList = Array.isArray(params.tags) ? params.tags.join("、") : str(params.tags, 100);
       return { severity, title: `提议设置文档标签（id: ${str(params.wikiId, 40)}）`, description: lines([
