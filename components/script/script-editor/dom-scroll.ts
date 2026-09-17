@@ -1,6 +1,7 @@
 import React from "react";
 import type { Scene } from "@/lib/script/script-types";
 import { SCRIPT_TOC_RAIL_NUMBER_SLOT_REM } from "./constants";
+import { blockAtOffset } from "@/lib/script/script-virtual-window";
 
 /** Returns the workspace scroll container element, or document.documentElement as fallback. */
 export function getScrollEl(): HTMLElement {
@@ -18,6 +19,25 @@ export function getScrollMetrics() {
   }
   const rect = el.getBoundingClientRect();
   return { el, scrollTop: el.scrollTop, clientHeight: el.clientHeight, viewTop: rect.top, viewBottom: rect.bottom };
+}
+
+/**
+ * 虚拟窗口的估算锚：视口里一个已渲染块都没有时（快速滚动冲进 spacer 空白区），
+ * 按累计高度表找出「此刻本该在视口顶的块」，锚在它的估算位置上。窗口渲染测量后由
+ * 调用方把它钉回同一位置，等价于把这次窗口平移当成一次小型跳转处理。
+ * cum 与 blocks 长度不匹配（累计表还没重建）时不合成，返回 null。
+ */
+export function estimateVirtualScrollAnchor(
+  container: HTMLElement,
+  blocks: readonly { id: string }[],
+  cum: readonly number[],
+): { id: string; top: number } | null {
+  if (blocks.length === 0 || cum.length !== blocks.length + 1) return null;
+  const containerTop = container.getBoundingClientRect().top;
+  const { viewTop } = getScrollMetrics();
+  const idx = blockAtOffset(cum, Math.max(0, viewTop - containerTop));
+  const block = blocks[idx];
+  return block ? { id: block.id, top: containerTop + cum[idx] } : null;
 }
 
 export function scrollContainerBy(opts: ScrollToOptions) {
