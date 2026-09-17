@@ -44,12 +44,14 @@ import ScriptSceneDetailRail from "./script-editor/ScriptSceneDetailRail";
 import ScriptToolbarMenuController, { type ScriptToolbarOpenMenu } from "./script-editor/ScriptToolbarMenuController";
 import SideBlockPanel from "./script-editor/SideBlockPanel";
 import TableOfContents from "./script-editor/TableOfContents";
-import { EMPTY_COMMENTS, EMPTY_BLOCK_ASSETS, buildCommentBlockCaption, findSideBlockPanelNavigationTargets, type RemotePresence, type Comment, type BlockSidePanelKind, type CommentDraft, type BlockAssetBubbleItem } from "./script-editor/comments";
+import { EMPTY_COMMENTS, EMPTY_BLOCK_ASSETS, buildCommentBlockCaption, findSideBlockPanelNavigationTargets, type RemotePresence } from "./script-editor/comments";
 import { SCRIPT_TOC_CENTER_EVENT, SCRIPT_EDITOR_MAX_WIDTH_PX, SCRIPT_BODY_HORIZONTAL_PADDING_REM, SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX, SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM, SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM, SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM, SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM, SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX, SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX, SCRIPT_SCENE_DETAIL_MODE_LABEL, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX, DISABLED_CHECKBOX_OPTION_CLASS, checkboxOptionClass, COMMENT_BUBBLE_MIN_WIDTH_PX, COMMENT_BUBBLE_GAP_REM, SIDE_PANEL_FALLBACK_WIDTH_PX } from "./script-editor/constants";
 import { readDisplayCookie, writeDisplayCookie, type DisplaySettings } from "./script-editor/display-settings";
 import { useScriptSearch } from "./script-editor/use-script-search";
 import { useDragCountBadge } from "./script-editor/use-drag-count-badge";
 import { useReorderLock } from "./script-editor/use-reorder-lock";
+import { useScriptPresence } from "./script-editor/use-script-presence";
+import { useBlockSidePanels } from "./script-editor/use-block-side-panels";
 import {
   clampWindowRange as clampWindowRangePure,
   buildCumulativeHeights,
@@ -67,7 +69,7 @@ import { useWorkspaceWidth } from "./script-editor/use-workspace-width";
 import { setCursorAtStart, setCursorAtEnd, setCursorAtTextOffset, getEditableElementForRange, isTextEditingTarget, isFormEditingTarget, getTextLength } from "./script-editor/dom-cursor";
 import { getScrollEl, getScrollMetrics, scrollContainerBy, scrollElementIntoView, measureScriptTocNumberWidths, clearTimeoutMap, markProgrammaticScroll } from "./script-editor/dom-scroll";
 import { replaceInlineStageDelimiters, toggleInlineTag, wrapSelectionAsInlineStageCue } from "./script-editor/inline-stage";
-import { EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS, REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS, presenceColor, getOrCreateClientId, anonymousName } from "./script-editor/presence";
+import { EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS, REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS, presenceColor } from "./script-editor/presence";
 import { flushSync } from "react-dom";
 
 type PendingStageDelimiterChange = {
@@ -433,6 +435,17 @@ export default function ScriptEditor({
     lockReorder, unlockReorder, unlockReorderAfterCommit, showReorderNotice,
   } = useReorderLock({ blocks });
 
+  const {
+    clientId, userName, setUserName, presenceMap, setPresenceMap,
+    presenceCountRef, presenceTimerRef, presenceLayoutTimerRef, sendPresence,
+  } = useScriptPresence({ effectiveScriptId, activeVersionId });
+  const {
+    setComments, blockAssetsByBlockId, loadBlockAssetBubbles, commentsByBlockId,
+    activeCommentBlockId, setActiveCommentBlockId, activeAssetBlockId, setActiveAssetBlockId,
+    tagEditorOpen, setTagEditorOpen, tagEditorOnTop, setTagEditorOnTop,
+    commentDraftsRef, updateCommentDraft, openBlockSidePanel,
+  } = useBlockSidePanels({ productionId });
+
   const prepareForNavigation = useCallback(() => {
     navigatingAwayRef.current = true;
     if (windowRangeFrameRef.current !== null) {
@@ -478,7 +491,7 @@ export default function ScriptEditor({
     pendingNavigateRef.current = null;
     postNavCorrectionRef.current = null;
     pendingMoveCenterRef.current = null;
-  }, [reorderNoticeTimer, reorderUnlockFrame]);
+  }, [reorderNoticeTimer, reorderUnlockFrame, presenceLayoutTimerRef, presenceTimerRef]);
 
   const taRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const pendingFocus = useRef<{ id: string; textOffset?: number; atEnd?: boolean } | null>(null);
@@ -1589,21 +1602,8 @@ export default function ScriptEditor({
     return () => { cancelled = true; };
   }, [productionId, activeVersionId, loadState]);
 
-  // ── Presence — must be declared before the SSE effect that closes over setPresenceMap ──
+  // ── Presence 与块侧栏 hook 在上面（prepareForNavigation 之前）调用；SSE 订阅在下面接线 ──
 
-  const [clientId] = useState<string>(() =>
-    typeof window !== "undefined" ? getOrCreateClientId() : ""
-  );
-  const [userName, setUserName] = useState<string>(() => {
-    if (typeof window === "undefined") return "";
-    const stored = localStorage.getItem("presence_name");
-    return stored || anonymousName(getOrCreateClientId());
-  });
-  const [presenceMap, setPresenceMap] = useState<Map<string, RemotePresence>>(new Map());
-  const presenceCountRef = useRef(0);
-  const lastSentPresenceRef = useRef<{ versionId: string | null; blockId: string | null } | null>(null);
-  const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const presenceLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const streamDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 后台标签不占同源连接名额（#467）——门控抽成了共享 hook，cue / wiki / 场景表
@@ -1646,7 +1646,7 @@ export default function ScriptEditor({
       }
     }
     return () => clearTimeout(unlockTimer);
-  }, [loadState, productionId, scrollToBlockIdx]);
+  }, [loadState, productionId, scrollToBlockIdx, setActiveCommentBlockId, setTagEditorOnTop]);
 
   // ── Clear block highlight on scroll or click ─────────────────────────────────
   useEffect(() => {
@@ -1864,24 +1864,8 @@ export default function ScriptEditor({
         presenceLayoutTimerRef.current = null;
       }
     };
-  }, [effectiveScriptId, loadState, clientId, activeVersionId, markOwnershipDirty, requestVirtualWindowRefresh, resetToolbarMeasurement, setToolbarMeasureTick, streamVisible]);
+  }, [effectiveScriptId, loadState, clientId, activeVersionId, markOwnershipDirty, requestVirtualWindowRefresh, resetToolbarMeasurement, setToolbarMeasureTick, streamVisible, presenceCountRef, presenceLayoutTimerRef, setPresenceMap]);
 
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [blockAssetsByBlockId, setBlockAssetsByBlockId] = useState<Map<string, BlockAssetBubbleItem[]>>(new Map());
-  const [activeCommentBlockId, setActiveCommentBlockId] = useState<string | null>(null);
-  const [activeAssetBlockId, setActiveAssetBlockId] = useState<string | null>(null);
-  const [tagEditorOpen, setTagEditorOpen] = useState(false);
-  const [tagEditorOnTop, setTagEditorOnTop] = useState(false);
-  const commentDraftsRef = useRef(new Map<string, CommentDraft>());
-  const updateCommentDraft = useCallback((blockId: string, draft: CommentDraft) => {
-    if (draft.text.length > 0) commentDraftsRef.current.set(blockId, draft);
-    else commentDraftsRef.current.delete(blockId);
-  }, []);
-  const openBlockSidePanel = useCallback((panel: BlockSidePanelKind, blockId: string) => {
-    setActiveCommentBlockId(panel === "comment" ? blockId : null);
-    setActiveAssetBlockId(panel === "asset" ? blockId : null);
-    setTagEditorOnTop(false);
-  }, []);
   const [meUserId, setMeUserId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
   const { workspaceWidth, productionSidebarReservedWidth, setWorkspaceMeasureRef } = useWorkspaceWidth();
@@ -1899,68 +1883,7 @@ export default function ScriptEditor({
         setMeIsAdmin(data.isAdmin ?? false);
       })
       .catch(() => {});
-  }, []);
-
-  // Load comments for this production
-  useEffect(() => {
-    if (!productionId) return;
-    fetch(`${BASE_PATH}/api/script/${productionId}/comments`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.comments) setComments(d.comments); })
-      .catch(() => {});
-  }, [productionId]);
-
-  const loadBlockAssetBubbles = useCallback(() => {
-    if (!productionId) {
-      setBlockAssetsByBlockId(new Map());
-      return;
-    }
-    // #420：挂载锚稳定 block_id，服务端无版本分辨路径，不再传 ?v=
-    fetch(`${BASE_PATH}/api/production/${productionId}/assets/block-summary`)
-      .then(r => r.ok ? r.json() : null)
-      .then((data: { blocks?: Array<{ blockId: string; asset: BlockAssetBubbleItem }> } | null) => {
-        const grouped = new Map<string, BlockAssetBubbleItem[]>();
-        for (const item of data?.blocks ?? []) {
-          const blockAssets = grouped.get(item.blockId);
-          if (blockAssets) {
-            if (!blockAssets.some(asset => asset.id === item.asset.id)) blockAssets.push(item.asset);
-          }
-          else grouped.set(item.blockId, [item.asset]);
-        }
-        setBlockAssetsByBlockId(grouped);
-      })
-      .catch(() => setBlockAssetsByBlockId(new Map()));
-  }, [productionId]);
-
-  useEffect(() => {
-    loadBlockAssetBubbles();
-  }, [loadBlockAssetBubbles]);
-
-  const commentsByBlockId = useMemo(() => {
-    const grouped = new Map<string, Comment[]>();
-    for (const comment of comments) {
-      const blockComments = grouped.get(comment.contextId);
-      if (blockComments) blockComments.push(comment);
-      else grouped.set(comment.contextId, [comment]);
-    }
-    return grouped;
-  }, [comments]);
-
-  const sendPresence = useCallback((blockId: string | null) => {
-    if (!clientId || !effectiveScriptId) return;
-    const lastSent = lastSentPresenceRef.current;
-    if (lastSent?.versionId === activeVersionId && lastSent.blockId === blockId) return;
-    lastSentPresenceRef.current = { versionId: activeVersionId, blockId };
-    if (presenceTimerRef.current) clearTimeout(presenceTimerRef.current);
-    presenceTimerRef.current = setTimeout(() => {
-      const presenceQuery = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-      fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/presence${presenceQuery}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, userName, blockId }),
-      }).catch(() => {});
-    }, 200);
-  }, [clientId, effectiveScriptId, userName, activeVersionId]);
+  }, [setUserName]);
 
   const markBlockFocused = useCallback((id: string) => {
     focusedIdRef.current = id;
