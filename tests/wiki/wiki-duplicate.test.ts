@@ -66,6 +66,7 @@ describe("duplicateTitle", () => {
     expect(duplicateTitle("排练计划 副本 2")).toBe("排练计划 副本 3");
     expect(duplicateTitle(null)).toBe("无标题 副本");
     expect(duplicateTitle("  ")).toBe("无标题 副本");
+    expect(duplicateTitle("副本")).toBe("副本 副本");   // 正则要求前置空格，标题就叫「副本」不算副本
   });
 });
 
