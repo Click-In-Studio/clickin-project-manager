@@ -145,6 +145,9 @@ export function approvalCard(bareTool: string, params: Record<string, unknown>, 
       return { severity, title: `提议移动资产（id: ${str(params.assetId, 40)}）`, description: lines([
         extra?.hasPermission === true ? "✅ 权限齐全，批准后直接生效。" : null,
         extra?.hasPermission === false ? "⛔ 缺少权限——批准后调用会被拒绝、不会生效。" : null,
+        // 目的地无条件从参数回显（预览抛错时 notes 为空，人审的卡不能只剩 id + 理由）；
+        // notes 里的解析后标题是锦上添花
+        params.newParentId ? `📂 新父 id：${str(params.newParentId, 60)}` : "📂 移到目录树根",
         ...(extra?.notes ?? []).map((n) => str(n, 120)),
         `📝 理由：${str(params.summary, 100)}`,
       ]) };
