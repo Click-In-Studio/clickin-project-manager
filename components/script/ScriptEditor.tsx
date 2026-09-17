@@ -50,6 +50,11 @@ import { readDisplayCookie, writeDisplayCookie, type DisplaySettings } from "./s
 import { useScriptSearch } from "./script-editor/use-script-search";
 import { useDragCountBadge } from "./script-editor/use-drag-count-badge";
 import { useReorderLock } from "./script-editor/use-reorder-lock";
+import {
+  fetchScriptState, loadScriptEnvelope, patchScript, putScriptConfig,
+  fetchTagGroups, fetchBlockTags, fetchSceneDetails,
+  createScene, renameScene, deleteScene, patchSceneMetadata,
+} from "@/lib/script/script-client";
 import { useScriptPresence } from "./script-editor/use-script-presence";
 import { useBlockSidePanels } from "./script-editor/use-block-side-panels";
 import {
@@ -239,13 +244,8 @@ export default function ScriptEditor({
     const next = { ...previous, ...patch };
     scriptConfigRef.current = next;
     setScriptConfig(next);
-    const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-    const response = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/config${vParam}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(next),
-    });
-    if (!response.ok && scriptConfigRef.current === next) {
+    const ok = await putScriptConfig(effectiveScriptId, activeVersionId, next);
+    if (!ok && scriptConfigRef.current === next) {
       scriptConfigRef.current = previous;
       setScriptConfig(previous);
     }
@@ -263,12 +263,7 @@ export default function ScriptEditor({
     if (syncOpeningChapterTimerRef.current) clearTimeout(syncOpeningChapterTimerRef.current);
     syncOpeningChapterTimerRef.current = setTimeout(() => {
       syncOpeningChapterTimerRef.current = null;
-      const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-      void fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/config${vParam}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(scriptConfigRef.current),
-      });
+      void putScriptConfig(effectiveScriptId, activeVersionId, scriptConfigRef.current);
     }, 500);
   }, [activeVersionId, baseCanEditTextLayout, effectiveScriptId]);
 
@@ -361,10 +356,8 @@ export default function ScriptEditor({
     return cache.pageMap;
   }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode, scriptConfig.templateId]);
   const reloadScriptState = useCallback(async () => {
-    const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-    const response = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
-    if (!response.ok) throw new Error("Failed to reload script state");
-    const serverState = await response.json() as ScriptState;
+    const serverState = await fetchScriptState(effectiveScriptId, activeVersionId);
+    if (!serverState) throw new Error("Failed to reload script state");
     const expandedBlocks = expandLegacyMarkersToBlocks(serverState.blocks, serverState.scenes);
     const normalized = normalizeScriptMarkerInvariants(expandedBlocks, serverState.scenes, serverState.config ?? DEFAULT_SCRIPT_CONFIG);
     markOwnershipDirty("full");
@@ -1455,14 +1448,8 @@ export default function ScriptEditor({
           for (const id of movedIdsForPatch) pendingMovedBlockIdsRef.current.delete(id);
           return;
         }
-        const vPatch = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-        const res = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vPatch}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(patch),
-        });
-        if (res.ok) {
-          const body = await res.json() as { ok: boolean; serverSeq: number };
+        const body = await patchScript(effectiveScriptId, activeVersionId, patch);
+        if (body) {
           serverSeqRef.current = body.serverSeq;
           syncedStateRef.current = curr;
           // Advance the synced tag baseline so the next diff starts fresh.
@@ -1501,19 +1488,14 @@ export default function ScriptEditor({
     syncedStateRef.current = null;
     pendingMovedBlockIdsRef.current.clear();
 
-    const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-    const loadUrl = productionId
-      ? `${BASE_PATH}/api/production/${productionId}${vParam}`
-      : `${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`;
-
     let cancelled = false;
     const load = async () => {
       try {
-        const r = await fetch(loadUrl);
+        const r = await loadScriptEnvelope(productionId, effectiveScriptId, activeVersionId);
         // Production route returns { state, versionId, ... }; script route returns ScriptState directly.
         type ProdResponse = { state: ScriptState; versionId: string };
         type ErrResponse = { error?: string };
-        const body = await r.json() as ProdResponse | ScriptState | ErrResponse;
+        const body = r.body as ProdResponse | ScriptState | ErrResponse;
         if (cancelled) return;
         if (r.status === 404) { setLoadState("not-found"); return; }
         if (!r.ok) { setLoadError((body as ErrResponse).error ?? "加载失败"); setLoadState("error"); return; }
@@ -1561,8 +1543,8 @@ export default function ScriptEditor({
         // Load tag groups and block tags in parallel (non-blocking)
         if (productionId) {
           Promise.all([
-            fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups`).then(r => r.ok ? r.json() : null),
-            fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/block-tags`).then(r => r.ok ? r.json() : null),
+            fetchTagGroups(productionId),
+            fetchBlockTags(effectiveScriptId),
           ]).then(([tgData, btData]) => {
             if (tgData?.groups) setTagGroups(tgData.groups as TagGroup[]);
             if (btData?.tags) {
@@ -1592,13 +1574,10 @@ export default function ScriptEditor({
   useEffect(() => {
     if (!productionId || !activeVersionId || loadState !== "ready") return;
     let cancelled = false;
-    fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${encodeURIComponent(activeVersionId)}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (cancelled || !Array.isArray(data)) return;
-        setSceneDetails(syncSceneDetailsWithScenes(data as SceneDetail[], scenesRef.current));
-      })
-      .catch(() => {});
+    fetchSceneDetails(productionId, activeVersionId).then((data) => {
+      if (cancelled || !data) return;
+      setSceneDetails(syncSceneDetailsWithScenes(data, scenesRef.current));
+    });
     return () => { cancelled = true; };
   }, [productionId, activeVersionId, loadState]);
 
@@ -1699,10 +1678,8 @@ export default function ScriptEditor({
         // nothing to fetch — the server state equals what we already synced.
         if (seq <= serverSeqRef.current) return;
         try {
-          const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-          const r = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
-          if (!r.ok) return;
-          const serverState = await r.json() as ScriptState;
+          const serverState = await fetchScriptState(effectiveScriptId, activeVersionId);
+          if (!serverState) return;
 
           const oldSynced = syncedStateRef.current;
           serverSeqRef.current = seq;
@@ -3284,11 +3261,7 @@ export default function ScriptEditor({
       ? { name: "", parentId: parentId ?? null, versionId: activeVersionId, ...target }
       : { name: "", parentId: parentId ?? null, ...target };
     await runSceneMenuMutation(
-      () => fetch(`${BASE_PATH}/api/production/${productionId}/scenes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
+      () => createScene(productionId, payload),
       "添加章节失败，请稍后重试。"
     );
   };
@@ -3296,11 +3269,7 @@ export default function ScriptEditor({
   const updateScene = async (id: string, name: string) => {
     if (isLockedMode || !productionId || !canEditMetadata) return;
     await runSceneMenuMutation(
-      () => fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(activeVersionId ? { name, versionId: activeVersionId } : { name }),
-      }),
+      () => renameScene(productionId, id, activeVersionId ? { name, versionId: activeVersionId } : { name }),
       "更新章节失败，请稍后重试。"
     );
   };
@@ -3309,13 +3278,9 @@ export default function ScriptEditor({
     if (isLockedMode || !productionId || !canEditMetadata) return;
     try {
       if (!await flushPendingPatch()) throw new Error("剧本尚未保存，请稍后重试。");
-      const request = (operation?: MarkerDeleteOperation["type"]) => fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...(activeVersionId ? { versionId: activeVersionId } : {}), ...(operation ? { operation } : {}) }),
-      });
+      const request = (operation?: MarkerDeleteOperation["type"]) => deleteScene(productionId, id, { ...(activeVersionId ? { versionId: activeVersionId } : {}), ...(operation ? { operation } : {}) });
       const response = await request();
-      const data = await response.json().catch(() => ({}));
+      const data = response.data as { plan?: MarkerDeleteDialogState["plan"]; error?: string };
       if ((response.status === 300 && data.plan?.status === "choice") || (response.status === 409 && data.plan?.status === "blocked")) {
         setMarkerDeleteDialog({ plan: data.plan, source: "server" });
         return;
@@ -3338,12 +3303,8 @@ export default function ScriptEditor({
     if (!productionId) return;
     setMarkerDeleteDialogBusy(true);
     try {
-      const response = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${operation.markerId}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...(activeVersionId ? { versionId: activeVersionId } : {}), operation: operation.type }),
-      });
-      const data = await response.json().catch(() => ({}));
+      const response = await deleteScene(productionId, operation.markerId, { ...(activeVersionId ? { versionId: activeVersionId } : {}), operation: operation.type });
+      const data = response.data as { plan?: MarkerDeleteDialogState["plan"]; error?: string };
       if (!response.ok) {
         setMarkerDeleteDialog({ plan: null, message: data.error ?? "删除章节失败，请稍后重试。", source: "server" });
         return;
@@ -3357,12 +3318,8 @@ export default function ScriptEditor({
 
   const patchSceneMeta = async (id: string, fields: Partial<SceneMetaFields>) => {
     if (!productionId || !canEditMetadata) return;
-    const response = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(activeVersionId ? { ...fields, versionId: activeVersionId } : fields),
-    });
-    if (!response.ok) throw new Error("Failed to update scene metadata");
+    const ok = await patchSceneMetadata(productionId, id, activeVersionId ? { ...fields, versionId: activeVersionId } : fields);
+    if (!ok) throw new Error("Failed to update scene metadata");
     setSceneDetails((prev) => prev.map((scene) => (scene.id === id ? { ...scene, ...fields } : scene)));
   };
 

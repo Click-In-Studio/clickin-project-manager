@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import { BASE_PATH } from "@/lib/base-path";
+import { postScriptPresence } from "@/lib/script/script-client";
 import { getOrCreateClientId, anonymousName } from "./presence";
 import type { RemotePresence } from "./comments";
 
@@ -35,12 +35,7 @@ export function useScriptPresence({ effectiveScriptId, activeVersionId }: {
     lastSentPresenceRef.current = { versionId: activeVersionId, blockId };
     if (presenceTimerRef.current) clearTimeout(presenceTimerRef.current);
     presenceTimerRef.current = setTimeout(() => {
-      const presenceQuery = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-      fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/presence${presenceQuery}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, userName, blockId }),
-      }).catch(() => {});
+      postScriptPresence(effectiveScriptId, activeVersionId, { clientId, userName, blockId });
     }, 200);
   }, [clientId, effectiveScriptId, userName, activeVersionId]);
 

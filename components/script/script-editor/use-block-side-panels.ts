@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { BASE_PATH } from "@/lib/base-path";
+import { fetchScriptComments, fetchBlockAssetSummary } from "@/lib/script/script-client";
 import type { Comment, CommentDraft, BlockSidePanelKind, BlockAssetBubbleItem } from "./comments";
 
 /**
@@ -29,10 +29,7 @@ export function useBlockSidePanels({ productionId }: { productionId: string | un
   // Load comments for this production
   useEffect(() => {
     if (!productionId) return;
-    fetch(`${BASE_PATH}/api/script/${productionId}/comments`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.comments) setComments(d.comments); })
-      .catch(() => {});
+    fetchScriptComments<Comment>(productionId).then((list) => { if (list) setComments(list); });
   }, [productionId]);
 
   const loadBlockAssetBubbles = useCallback(() => {
@@ -40,21 +37,17 @@ export function useBlockSidePanels({ productionId }: { productionId: string | un
       setBlockAssetsByBlockId(new Map());
       return;
     }
-    // #420：挂载锚稳定 block_id，服务端无版本分辨路径，不再传 ?v=
-    fetch(`${BASE_PATH}/api/production/${productionId}/assets/block-summary`)
-      .then(r => r.ok ? r.json() : null)
-      .then((data: { blocks?: Array<{ blockId: string; asset: BlockAssetBubbleItem }> } | null) => {
-        const grouped = new Map<string, BlockAssetBubbleItem[]>();
-        for (const item of data?.blocks ?? []) {
-          const blockAssets = grouped.get(item.blockId);
-          if (blockAssets) {
-            if (!blockAssets.some(asset => asset.id === item.asset.id)) blockAssets.push(item.asset);
-          }
-          else grouped.set(item.blockId, [item.asset]);
+    fetchBlockAssetSummary<BlockAssetBubbleItem>(productionId).then((items) => {
+      const grouped = new Map<string, BlockAssetBubbleItem[]>();
+      for (const item of items ?? []) {
+        const blockAssets = grouped.get(item.blockId);
+        if (blockAssets) {
+          if (!blockAssets.some(asset => asset.id === item.asset.id)) blockAssets.push(item.asset);
         }
-        setBlockAssetsByBlockId(grouped);
-      })
-      .catch(() => setBlockAssetsByBlockId(new Map()));
+        else grouped.set(item.blockId, [item.asset]);
+      }
+      setBlockAssetsByBlockId(grouped);
+    });
   }, [productionId]);
 
   useEffect(() => {
