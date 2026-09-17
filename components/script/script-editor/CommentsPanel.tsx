@@ -6,6 +6,7 @@ import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/editor/SmartTextarea";
 import SmartText from "@/components/ui/SmartText";
 import { BASE_PATH } from "@/lib/base-path";
+import { postScriptComment, patchScriptComment, deleteScriptComment } from "@/lib/script/script-client";
 import SideBlockPanel from "./SideBlockPanel";
 import type { Mention, Comment, CommentBlockCaption, SideBlockPanelNavigation, BlockSidePanelKind, CommentDraft } from "./comments";
 
@@ -80,11 +81,8 @@ export default function CommentsPanel({
     if (submitting) return;
     setSubmitting(true);
     try {
-      const res = await fetch(`${BASE_PATH}/api/script/${productionId}/comments`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ blockId, body: opts.text, parentId: opts.parentId ?? null, mentions: opts.mentions }),
-      });
-      if (res.ok) return (await res.json()).comment as Comment;
+      const created = await postScriptComment<Comment>(productionId, { blockId, body: opts.text, parentId: opts.parentId ?? null, mentions: opts.mentions });
+      if (created) return created;
     } finally { setSubmitting(false); }
     return null;
   };
@@ -120,16 +118,12 @@ export default function CommentsPanel({
 
   const saveEdit = async (id: string) => {
     const text = editText.trim(); if (!text) return;
-    const res = await fetch(`${BASE_PATH}/api/script/${productionId}/comments/${id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: text }),
-    });
-    if (res.ok) { onEdit((await res.json()).comment); setEditingId(null); }
+    const updated = await patchScriptComment<Comment>(productionId, id, text);
+    if (updated) { onEdit(updated); setEditingId(null); }
   };
 
   const doDelete = async (id: string) => {
-    const res = await fetch(`${BASE_PATH}/api/script/${productionId}/comments/${id}`, { method: "DELETE" });
-    if (res.ok) onDelete(id);
+    if (await deleteScriptComment(productionId, id)) onDelete(id);
   };
 
   const startReply = (parentId: string, authorUserId: string, authorName: string) => {

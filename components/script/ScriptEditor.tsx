@@ -44,12 +44,19 @@ import ScriptSceneDetailRail from "./script-editor/ScriptSceneDetailRail";
 import ScriptToolbarMenuController, { type ScriptToolbarOpenMenu } from "./script-editor/ScriptToolbarMenuController";
 import SideBlockPanel from "./script-editor/SideBlockPanel";
 import TableOfContents from "./script-editor/TableOfContents";
-import { EMPTY_COMMENTS, EMPTY_BLOCK_ASSETS, buildCommentBlockCaption, findSideBlockPanelNavigationTargets, type RemotePresence, type Comment, type BlockSidePanelKind, type CommentDraft, type BlockAssetBubbleItem } from "./script-editor/comments";
+import { EMPTY_COMMENTS, EMPTY_BLOCK_ASSETS, buildCommentBlockCaption, findSideBlockPanelNavigationTargets, type RemotePresence } from "./script-editor/comments";
 import { SCRIPT_TOC_CENTER_EVENT, SCRIPT_EDITOR_MAX_WIDTH_PX, SCRIPT_BODY_HORIZONTAL_PADDING_REM, SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX, SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM, SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM, SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM, SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM, SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX, SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX, SCRIPT_SCENE_DETAIL_MODE_LABEL, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX, DISABLED_CHECKBOX_OPTION_CLASS, checkboxOptionClass, COMMENT_BUBBLE_MIN_WIDTH_PX, COMMENT_BUBBLE_GAP_REM, SIDE_PANEL_FALLBACK_WIDTH_PX } from "./script-editor/constants";
 import { readDisplayCookie, writeDisplayCookie, type DisplaySettings } from "./script-editor/display-settings";
 import { useScriptSearch } from "./script-editor/use-script-search";
 import { useDragCountBadge } from "./script-editor/use-drag-count-badge";
 import { useReorderLock } from "./script-editor/use-reorder-lock";
+import {
+  fetchScriptState, loadScriptEnvelope, patchScript, putScriptConfig,
+  fetchTagGroups, fetchBlockTags, fetchSceneDetails,
+  createScene, renameScene, deleteScene, patchSceneMetadata,
+} from "@/lib/script/script-client";
+import { useScriptPresence } from "./script-editor/use-script-presence";
+import { useBlockSidePanels } from "./script-editor/use-block-side-panels";
 import {
   clampWindowRange as clampWindowRangePure,
   buildCumulativeHeights,
@@ -67,7 +74,7 @@ import { useWorkspaceWidth } from "./script-editor/use-workspace-width";
 import { setCursorAtStart, setCursorAtEnd, setCursorAtTextOffset, getEditableElementForRange, isTextEditingTarget, isFormEditingTarget, getTextLength } from "./script-editor/dom-cursor";
 import { getScrollEl, getScrollMetrics, scrollContainerBy, scrollElementIntoView, measureScriptTocNumberWidths, clearTimeoutMap, markProgrammaticScroll } from "./script-editor/dom-scroll";
 import { replaceInlineStageDelimiters, toggleInlineTag, wrapSelectionAsInlineStageCue } from "./script-editor/inline-stage";
-import { EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS, REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS, presenceColor, getOrCreateClientId, anonymousName } from "./script-editor/presence";
+import { EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS, REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS, presenceColor } from "./script-editor/presence";
 import { flushSync } from "react-dom";
 
 type PendingStageDelimiterChange = {
@@ -237,13 +244,8 @@ export default function ScriptEditor({
     const next = { ...previous, ...patch };
     scriptConfigRef.current = next;
     setScriptConfig(next);
-    const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-    const response = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/config${vParam}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(next),
-    });
-    if (!response.ok && scriptConfigRef.current === next) {
+    const ok = await putScriptConfig(effectiveScriptId, activeVersionId, next);
+    if (!ok && scriptConfigRef.current === next) {
       scriptConfigRef.current = previous;
       setScriptConfig(previous);
     }
@@ -261,12 +263,7 @@ export default function ScriptEditor({
     if (syncOpeningChapterTimerRef.current) clearTimeout(syncOpeningChapterTimerRef.current);
     syncOpeningChapterTimerRef.current = setTimeout(() => {
       syncOpeningChapterTimerRef.current = null;
-      const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-      void fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/config${vParam}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(scriptConfigRef.current),
-      });
+      void putScriptConfig(effectiveScriptId, activeVersionId, scriptConfigRef.current);
     }, 500);
   }, [activeVersionId, baseCanEditTextLayout, effectiveScriptId]);
 
@@ -359,10 +356,8 @@ export default function ScriptEditor({
     return cache.pageMap;
   }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode, scriptConfig.templateId]);
   const reloadScriptState = useCallback(async () => {
-    const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-    const response = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
-    if (!response.ok) throw new Error("Failed to reload script state");
-    const serverState = await response.json() as ScriptState;
+    const serverState = await fetchScriptState(effectiveScriptId, activeVersionId);
+    if (!serverState) throw new Error("Failed to reload script state");
     const expandedBlocks = expandLegacyMarkersToBlocks(serverState.blocks, serverState.scenes);
     const normalized = normalizeScriptMarkerInvariants(expandedBlocks, serverState.scenes, serverState.config ?? DEFAULT_SCRIPT_CONFIG);
     markOwnershipDirty("full");
@@ -433,6 +428,17 @@ export default function ScriptEditor({
     lockReorder, unlockReorder, unlockReorderAfterCommit, showReorderNotice,
   } = useReorderLock({ blocks });
 
+  const {
+    clientId, userName, setUserName, presenceMap, setPresenceMap,
+    presenceCountRef, presenceTimerRef, presenceLayoutTimerRef, sendPresence,
+  } = useScriptPresence({ effectiveScriptId, activeVersionId });
+  const {
+    setComments, blockAssetsByBlockId, loadBlockAssetBubbles, commentsByBlockId,
+    activeCommentBlockId, setActiveCommentBlockId, activeAssetBlockId, setActiveAssetBlockId,
+    tagEditorOpen, setTagEditorOpen, tagEditorOnTop, setTagEditorOnTop,
+    commentDraftsRef, updateCommentDraft, openBlockSidePanel,
+  } = useBlockSidePanels({ productionId });
+
   const prepareForNavigation = useCallback(() => {
     navigatingAwayRef.current = true;
     if (windowRangeFrameRef.current !== null) {
@@ -478,7 +484,7 @@ export default function ScriptEditor({
     pendingNavigateRef.current = null;
     postNavCorrectionRef.current = null;
     pendingMoveCenterRef.current = null;
-  }, [reorderNoticeTimer, reorderUnlockFrame]);
+  }, [reorderNoticeTimer, reorderUnlockFrame, presenceLayoutTimerRef, presenceTimerRef]);
 
   const taRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const pendingFocus = useRef<{ id: string; textOffset?: number; atEnd?: boolean } | null>(null);
@@ -1442,14 +1448,8 @@ export default function ScriptEditor({
           for (const id of movedIdsForPatch) pendingMovedBlockIdsRef.current.delete(id);
           return;
         }
-        const vPatch = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-        const res = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vPatch}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(patch),
-        });
-        if (res.ok) {
-          const body = await res.json() as { ok: boolean; serverSeq: number };
+        const body = await patchScript(effectiveScriptId, activeVersionId, patch);
+        if (body) {
           serverSeqRef.current = body.serverSeq;
           syncedStateRef.current = curr;
           // Advance the synced tag baseline so the next diff starts fresh.
@@ -1488,19 +1488,14 @@ export default function ScriptEditor({
     syncedStateRef.current = null;
     pendingMovedBlockIdsRef.current.clear();
 
-    const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-    const loadUrl = productionId
-      ? `${BASE_PATH}/api/production/${productionId}${vParam}`
-      : `${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`;
-
     let cancelled = false;
     const load = async () => {
       try {
-        const r = await fetch(loadUrl);
+        const r = await loadScriptEnvelope(productionId, effectiveScriptId, activeVersionId);
         // Production route returns { state, versionId, ... }; script route returns ScriptState directly.
         type ProdResponse = { state: ScriptState; versionId: string };
         type ErrResponse = { error?: string };
-        const body = await r.json() as ProdResponse | ScriptState | ErrResponse;
+        const body = r.body as ProdResponse | ScriptState | ErrResponse;
         if (cancelled) return;
         if (r.status === 404) { setLoadState("not-found"); return; }
         if (!r.ok) { setLoadError((body as ErrResponse).error ?? "加载失败"); setLoadState("error"); return; }
@@ -1548,8 +1543,8 @@ export default function ScriptEditor({
         // Load tag groups and block tags in parallel (non-blocking)
         if (productionId) {
           Promise.all([
-            fetch(`${BASE_PATH}/api/production/${productionId}/tag-groups`).then(r => r.ok ? r.json() : null),
-            fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/block-tags`).then(r => r.ok ? r.json() : null),
+            fetchTagGroups(productionId),
+            fetchBlockTags(effectiveScriptId),
           ]).then(([tgData, btData]) => {
             if (tgData?.groups) setTagGroups(tgData.groups as TagGroup[]);
             if (btData?.tags) {
@@ -1579,31 +1574,15 @@ export default function ScriptEditor({
   useEffect(() => {
     if (!productionId || !activeVersionId || loadState !== "ready") return;
     let cancelled = false;
-    fetch(`${BASE_PATH}/api/production/${productionId}/scenes?versionId=${encodeURIComponent(activeVersionId)}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (cancelled || !Array.isArray(data)) return;
-        setSceneDetails(syncSceneDetailsWithScenes(data as SceneDetail[], scenesRef.current));
-      })
-      .catch(() => {});
+    fetchSceneDetails(productionId, activeVersionId).then((data) => {
+      if (cancelled || !data) return;
+      setSceneDetails(syncSceneDetailsWithScenes(data, scenesRef.current));
+    });
     return () => { cancelled = true; };
   }, [productionId, activeVersionId, loadState]);
 
-  // ── Presence — must be declared before the SSE effect that closes over setPresenceMap ──
+  // ── Presence 与块侧栏 hook 在上面（prepareForNavigation 之前）调用；SSE 订阅在下面接线 ──
 
-  const [clientId] = useState<string>(() =>
-    typeof window !== "undefined" ? getOrCreateClientId() : ""
-  );
-  const [userName, setUserName] = useState<string>(() => {
-    if (typeof window === "undefined") return "";
-    const stored = localStorage.getItem("presence_name");
-    return stored || anonymousName(getOrCreateClientId());
-  });
-  const [presenceMap, setPresenceMap] = useState<Map<string, RemotePresence>>(new Map());
-  const presenceCountRef = useRef(0);
-  const lastSentPresenceRef = useRef<{ versionId: string | null; blockId: string | null } | null>(null);
-  const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const presenceLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const streamDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 后台标签不占同源连接名额（#467）——门控抽成了共享 hook，cue / wiki / 场景表
@@ -1646,7 +1625,7 @@ export default function ScriptEditor({
       }
     }
     return () => clearTimeout(unlockTimer);
-  }, [loadState, productionId, scrollToBlockIdx]);
+  }, [loadState, productionId, scrollToBlockIdx, setActiveCommentBlockId, setTagEditorOnTop]);
 
   // ── Clear block highlight on scroll or click ─────────────────────────────────
   useEffect(() => {
@@ -1699,10 +1678,8 @@ export default function ScriptEditor({
         // nothing to fetch — the server state equals what we already synced.
         if (seq <= serverSeqRef.current) return;
         try {
-          const vParam = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-          const r = await fetch(`${BASE_PATH}/api/script/${effectiveScriptId}${vParam}`);
-          if (!r.ok) return;
-          const serverState = await r.json() as ScriptState;
+          const serverState = await fetchScriptState(effectiveScriptId, activeVersionId);
+          if (!serverState) return;
 
           const oldSynced = syncedStateRef.current;
           serverSeqRef.current = seq;
@@ -1864,24 +1841,8 @@ export default function ScriptEditor({
         presenceLayoutTimerRef.current = null;
       }
     };
-  }, [effectiveScriptId, loadState, clientId, activeVersionId, markOwnershipDirty, requestVirtualWindowRefresh, resetToolbarMeasurement, setToolbarMeasureTick, streamVisible]);
+  }, [effectiveScriptId, loadState, clientId, activeVersionId, markOwnershipDirty, requestVirtualWindowRefresh, resetToolbarMeasurement, setToolbarMeasureTick, streamVisible, presenceCountRef, presenceLayoutTimerRef, setPresenceMap]);
 
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [blockAssetsByBlockId, setBlockAssetsByBlockId] = useState<Map<string, BlockAssetBubbleItem[]>>(new Map());
-  const [activeCommentBlockId, setActiveCommentBlockId] = useState<string | null>(null);
-  const [activeAssetBlockId, setActiveAssetBlockId] = useState<string | null>(null);
-  const [tagEditorOpen, setTagEditorOpen] = useState(false);
-  const [tagEditorOnTop, setTagEditorOnTop] = useState(false);
-  const commentDraftsRef = useRef(new Map<string, CommentDraft>());
-  const updateCommentDraft = useCallback((blockId: string, draft: CommentDraft) => {
-    if (draft.text.length > 0) commentDraftsRef.current.set(blockId, draft);
-    else commentDraftsRef.current.delete(blockId);
-  }, []);
-  const openBlockSidePanel = useCallback((panel: BlockSidePanelKind, blockId: string) => {
-    setActiveCommentBlockId(panel === "comment" ? blockId : null);
-    setActiveAssetBlockId(panel === "asset" ? blockId : null);
-    setTagEditorOnTop(false);
-  }, []);
   const [meUserId, setMeUserId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
   const { workspaceWidth, productionSidebarReservedWidth, setWorkspaceMeasureRef } = useWorkspaceWidth();
@@ -1899,68 +1860,7 @@ export default function ScriptEditor({
         setMeIsAdmin(data.isAdmin ?? false);
       })
       .catch(() => {});
-  }, []);
-
-  // Load comments for this production
-  useEffect(() => {
-    if (!productionId) return;
-    fetch(`${BASE_PATH}/api/script/${productionId}/comments`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.comments) setComments(d.comments); })
-      .catch(() => {});
-  }, [productionId]);
-
-  const loadBlockAssetBubbles = useCallback(() => {
-    if (!productionId) {
-      setBlockAssetsByBlockId(new Map());
-      return;
-    }
-    // #420：挂载锚稳定 block_id，服务端无版本分辨路径，不再传 ?v=
-    fetch(`${BASE_PATH}/api/production/${productionId}/assets/block-summary`)
-      .then(r => r.ok ? r.json() : null)
-      .then((data: { blocks?: Array<{ blockId: string; asset: BlockAssetBubbleItem }> } | null) => {
-        const grouped = new Map<string, BlockAssetBubbleItem[]>();
-        for (const item of data?.blocks ?? []) {
-          const blockAssets = grouped.get(item.blockId);
-          if (blockAssets) {
-            if (!blockAssets.some(asset => asset.id === item.asset.id)) blockAssets.push(item.asset);
-          }
-          else grouped.set(item.blockId, [item.asset]);
-        }
-        setBlockAssetsByBlockId(grouped);
-      })
-      .catch(() => setBlockAssetsByBlockId(new Map()));
-  }, [productionId]);
-
-  useEffect(() => {
-    loadBlockAssetBubbles();
-  }, [loadBlockAssetBubbles]);
-
-  const commentsByBlockId = useMemo(() => {
-    const grouped = new Map<string, Comment[]>();
-    for (const comment of comments) {
-      const blockComments = grouped.get(comment.contextId);
-      if (blockComments) blockComments.push(comment);
-      else grouped.set(comment.contextId, [comment]);
-    }
-    return grouped;
-  }, [comments]);
-
-  const sendPresence = useCallback((blockId: string | null) => {
-    if (!clientId || !effectiveScriptId) return;
-    const lastSent = lastSentPresenceRef.current;
-    if (lastSent?.versionId === activeVersionId && lastSent.blockId === blockId) return;
-    lastSentPresenceRef.current = { versionId: activeVersionId, blockId };
-    if (presenceTimerRef.current) clearTimeout(presenceTimerRef.current);
-    presenceTimerRef.current = setTimeout(() => {
-      const presenceQuery = activeVersionId ? `?v=${encodeURIComponent(activeVersionId)}` : "";
-      fetch(`${BASE_PATH}/api/script/${effectiveScriptId}/presence${presenceQuery}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, userName, blockId }),
-      }).catch(() => {});
-    }, 200);
-  }, [clientId, effectiveScriptId, userName, activeVersionId]);
+  }, [setUserName]);
 
   const markBlockFocused = useCallback((id: string) => {
     focusedIdRef.current = id;
@@ -3361,11 +3261,7 @@ export default function ScriptEditor({
       ? { name: "", parentId: parentId ?? null, versionId: activeVersionId, ...target }
       : { name: "", parentId: parentId ?? null, ...target };
     await runSceneMenuMutation(
-      () => fetch(`${BASE_PATH}/api/production/${productionId}/scenes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
+      () => createScene(productionId, payload),
       "添加章节失败，请稍后重试。"
     );
   };
@@ -3373,11 +3269,7 @@ export default function ScriptEditor({
   const updateScene = async (id: string, name: string) => {
     if (isLockedMode || !productionId || !canEditMetadata) return;
     await runSceneMenuMutation(
-      () => fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(activeVersionId ? { name, versionId: activeVersionId } : { name }),
-      }),
+      () => renameScene(productionId, id, activeVersionId ? { name, versionId: activeVersionId } : { name }),
       "更新章节失败，请稍后重试。"
     );
   };
@@ -3386,13 +3278,9 @@ export default function ScriptEditor({
     if (isLockedMode || !productionId || !canEditMetadata) return;
     try {
       if (!await flushPendingPatch()) throw new Error("剧本尚未保存，请稍后重试。");
-      const request = (operation?: MarkerDeleteOperation["type"]) => fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...(activeVersionId ? { versionId: activeVersionId } : {}), ...(operation ? { operation } : {}) }),
-      });
+      const request = (operation?: MarkerDeleteOperation["type"]) => deleteScene(productionId, id, { ...(activeVersionId ? { versionId: activeVersionId } : {}), ...(operation ? { operation } : {}) });
       const response = await request();
-      const data = await response.json().catch(() => ({}));
+      const data = response.data as { plan?: MarkerDeleteDialogState["plan"]; error?: string };
       if ((response.status === 300 && data.plan?.status === "choice") || (response.status === 409 && data.plan?.status === "blocked")) {
         setMarkerDeleteDialog({ plan: data.plan, source: "server" });
         return;
@@ -3415,12 +3303,8 @@ export default function ScriptEditor({
     if (!productionId) return;
     setMarkerDeleteDialogBusy(true);
     try {
-      const response = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${operation.markerId}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...(activeVersionId ? { versionId: activeVersionId } : {}), operation: operation.type }),
-      });
-      const data = await response.json().catch(() => ({}));
+      const response = await deleteScene(productionId, operation.markerId, { ...(activeVersionId ? { versionId: activeVersionId } : {}), operation: operation.type });
+      const data = response.data as { plan?: MarkerDeleteDialogState["plan"]; error?: string };
       if (!response.ok) {
         setMarkerDeleteDialog({ plan: null, message: data.error ?? "删除章节失败，请稍后重试。", source: "server" });
         return;
@@ -3434,12 +3318,8 @@ export default function ScriptEditor({
 
   const patchSceneMeta = async (id: string, fields: Partial<SceneMetaFields>) => {
     if (!productionId || !canEditMetadata) return;
-    const response = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(activeVersionId ? { ...fields, versionId: activeVersionId } : fields),
-    });
-    if (!response.ok) throw new Error("Failed to update scene metadata");
+    const ok = await patchSceneMetadata(productionId, id, activeVersionId ? { ...fields, versionId: activeVersionId } : fields);
+    if (!ok) throw new Error("Failed to update scene metadata");
     setSceneDetails((prev) => prev.map((scene) => (scene.id === id ? { ...scene, ...fields } : scene)));
   };
 
