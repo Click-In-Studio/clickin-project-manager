@@ -72,7 +72,7 @@ import { useDisplaySettings } from "./script-editor/use-display-settings";
 import { useScriptToolbarFold } from "./script-editor/use-script-toolbar-fold";
 import { useWorkspaceWidth } from "./script-editor/use-workspace-width";
 import { setCursorAtStart, setCursorAtEnd, setCursorAtTextOffset, getEditableElementForRange, isTextEditingTarget, isFormEditingTarget, getTextLength } from "./script-editor/dom-cursor";
-import { getScrollEl, getScrollMetrics, scrollContainerBy, scrollElementIntoView, measureScriptTocNumberWidths, clearTimeoutMap, markProgrammaticScroll } from "./script-editor/dom-scroll";
+import { getScrollEl, getScrollMetrics, scrollContainerBy, scrollElementIntoView, estimateVirtualScrollAnchor, measureScriptTocNumberWidths, clearTimeoutMap, markProgrammaticScroll } from "./script-editor/dom-scroll";
 import { replaceInlineStageDelimiters, toggleInlineTag, wrapSelectionAsInlineStageCue } from "./script-editor/inline-stage";
 import { EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS, REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS, presenceColor } from "./script-editor/presence";
 import { flushSync } from "react-dom";
@@ -785,7 +785,13 @@ export default function ScriptEditor({
     const pending = pendingWindowRangeRef.current;
     const current = pending ?? windowRangeRef.current;
     if (current.start === targetRange.start && current.end === targetRange.end) return;
-    if (preserveAnchor) pendingVirtualScrollAnchorRef.current = captureVirtualScrollAnchor();
+    if (preserveAnchor) {
+      // 视口里一个已渲染块都没有（快速滚动冲进 spacer 空白区）时抓不到 DOM 锚，
+      // 退回按估算累计表合成的锚——否则视口上方缓冲区的估算误差会整体位移（#508）。
+      const container = blocksContainerRef.current;
+      pendingVirtualScrollAnchorRef.current = captureVirtualScrollAnchor()
+        ?? (container ? estimateVirtualScrollAnchor(container, blocksRef.current, cumulativeHRef.current) : null);
+    }
     pendingWindowRangeRef.current = targetRange;
     if (windowRangeFrameRef.current !== null) cancelAnimationFrame(windowRangeFrameRef.current);
     const commit = () => {
@@ -1198,13 +1204,19 @@ export default function ScriptEditor({
     }
   }, [blocks, applyWindowRange, getBlockScrollElement, rebuildCumulative, syncSpacerHeights]);
 
+  // 窗口 commit 后：先把 spacer 对齐新窗口，再把 commit 前抓的锚点块拉回原位。
+  // 顺序不能反——spacer 一变，锚点块就跟着位移；先恢复锚点再改 spacer 等于白恢复。
+  // 测量 effect 只在窗口里有没量过的块时才顺手同步 spacer（带锚）；窗口里全是量过的块
+  // （窗口触底后每滚一格平移一块、或来回滚过的区段）就只靠这里——之前这一步在锚点恢复
+  // 之后无锚执行，表现为每格回弹一块高、快速上滚回弹一两幕（#508）。
   useLayoutEffect(() => {
     if (navigatingAwayRef.current) return;
+    syncSpacerHeights(windowRange);
     const anchor = pendingVirtualScrollAnchorRef.current;
     if (!anchor) return;
     pendingVirtualScrollAnchorRef.current = null;
     restoreVirtualScrollAnchor(anchor);
-  }, [windowRange, spacerH.top, spacerH.bot, restoreVirtualScrollAnchor]);
+  }, [windowRange, blocks.length, spacerH.top, spacerH.bot, syncSpacerHeights, restoreVirtualScrollAnchor]);
 
   // Precise correction pass: fires after newly-rendered blocks are measured (before next paint)
   useLayoutEffect(() => {
@@ -1257,12 +1269,6 @@ export default function ScriptEditor({
       window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
     });
   }, [windowRange, rebuildCumulative, getBlockScrollElement, syncSpacerHeights, updateActiveSceneFromScroll]);
-
-  // Update spacer heights from cumulative cache after each render (safe: layoutEffect, not render)
-  useLayoutEffect(() => {
-    if (navigatingAwayRef.current) return;
-    syncSpacerHeights(windowRange);
-  }, [windowRange, blocks.length, syncSpacerHeights]);
 
   // Teleport to a block: load target window, then instant-jump in the layout effect.
   const scrollToBlockIdx = useCallback((
