@@ -643,6 +643,36 @@ export const DEFS: Def[] = [
     ),
   },
   {
+    mcpName: "production.asset_propose_rename",
+    description:
+      "提议给一个资产文件改显示名（EN: rename asset file display name），需要人工在聊天栏确认；确认后若你没有修改该资产信息的权限（meta@edit，上传者默认有），调用会被拒绝。" +
+      "改的是显示名，原始文件名与扩展名不变。资产 id 来自 production.asset_list 或 production.wiki_tree 的 [文件] 行。",
+    parameters: Type.Object({
+      assetId: Type.String({ description: "要改名的资产 id" }),
+      name: Type.String({ description: "新的显示名（不含路径；不必带扩展名）" }),
+      summary: Type.String({ description: "一句话说明为什么要改名" }),
+    }),
+    readOnly: false, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/asset-tools")).assetProposeRename(ctx.userId, ctx.productionId, {
+      assetId: String(args.assetId), name: String(args.name ?? ""), summary: String(args.summary ?? ""),
+    }),
+  },
+  {
+    mcpName: "production.asset_propose_move",
+    description:
+      "提议把一个资产文件在目录树里移动到某篇文档或某个目录下（或移到树根）（EN: move asset file in tree），需要人工在聊天栏确认；确认后若你没有修改该资产信息的权限或没有目标/源父节点的子目录写权限，调用会被拒绝。" +
+      "资产 id 来自 production.asset_list 或 wiki_tree 的 [文件] 行；目标父传 wiki_tree 里 [文档] 行的 id 或 [目录] 行的节点 id（文件不能作父）。",
+    parameters: Type.Object({
+      assetId: Type.String({ description: "要移动的资产 id" }),
+      newParentId: Type.Optional(Type.String({ description: "移动到的新父：文档 id 或目录节点 id；移到树根就整个省略这个字段，不要传空字符串" })),
+      summary: Type.String({ description: "一句话说明为什么要移动" }),
+    }),
+    readOnly: false, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/asset-tools")).assetProposeMove(ctx.userId, ctx.productionId, {
+      assetId: String(args.assetId), newParentId: optString(args.newParentId), summary: String(args.summary ?? ""),
+    }),
+  },
+  {
     mcpName: "production.doc_import_guide",
     description:
       "获取剧本文档导入的完整作业指引（EN: script document import guide methodology）。**做任何导入类工作（把 docx/pdf 剧本转写进本站剧本结构）之前必须先读它**：" +

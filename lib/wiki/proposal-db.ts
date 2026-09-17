@@ -22,7 +22,9 @@ export type WikiProposal = {
   action: WikiProposalAction;
   /** 被操作的既有文档——create 没有，update/delete/move/tag 都要。 */
   targetWikiId: string | null;
-  /** create/move 的新父；其余动作不用。 */
+  /** create/move 的新父（壳节点 id，folder 或 wiki 壳都可能，#510）；其余动作不用。 */
+  parentNodeId: string | null;
+  /** 新父是 wiki 壳时的 wiki id（AI 协议面）；父是 folder 时为 null——位置以 parentNodeId 为准。 */
   parentWikiId: string | null;
   title: string | null;
   body: string;
@@ -41,7 +43,7 @@ export type WikiProposal = {
 type WikiProposalRow = {
   id: string; production_id: string; tool_call_id: string; proposed_by: string;
   action: WikiProposalAction; target_wiki_id: string | null;
-  parent_wiki_id: string | null; title: string | null; body: string; tags: string[] | null; summary: string;
+  parent_node_id: string | null; parent_wiki_id: string | null; title: string | null; body: string; tags: string[] | null; summary: string;
   has_permission: boolean; permission_key: string; status: WikiProposalStatus;
   created_wiki_id: string | null; created_at: Date;
 };
@@ -49,7 +51,7 @@ type WikiProposalRow = {
 // #420：存储列是 parent_node_id（node id），对外接口维持 AI 协议的 wiki id——
 // 读时经壳节点翻译回来，写时反向翻译。协议与存储解耦在此一处。
 const SELECT_COLUMNS = `id::text AS id, production_id, tool_call_id, proposed_by::text AS proposed_by,
-            action, target_wiki_id::text AS target_wiki_id,
+            action, target_wiki_id::text AS target_wiki_id, parent_node_id,
             (SELECT n.wiki_id::text FROM node n WHERE n.id = wiki_proposal.parent_node_id) AS parent_wiki_id,
             title, body, tags, summary, has_permission, permission_key, status,
             created_wiki_id::text AS created_wiki_id, created_at`;
@@ -58,7 +60,7 @@ function rowToProposal(r: WikiProposalRow): WikiProposal {
   return {
     id: r.id, productionId: r.production_id, toolCallId: r.tool_call_id,
     proposedBy: r.proposed_by, action: r.action, targetWikiId: r.target_wiki_id,
-    parentWikiId: r.parent_wiki_id, title: r.title, body: r.body, tags: r.tags,
+    parentNodeId: r.parent_node_id, parentWikiId: r.parent_wiki_id, title: r.title, body: r.body, tags: r.tags,
     summary: r.summary, hasPermission: r.has_permission, permissionKey: r.permission_key,
     status: r.status, createdWikiId: r.created_wiki_id, createdAt: r.created_at.toISOString(),
   };
@@ -70,7 +72,8 @@ function rowToProposal(r: WikiProposalRow): WikiProposal {
 export async function insertWikiProposal(params: {
   productionId: string; toolCallId: string; proposedBy: string;
   action: WikiProposalAction; targetWikiId?: string | null;
-  parentWikiId?: string | null; title?: string | null; body?: string; tags?: string[] | null;
+  /** 新父二选一：parentNodeId 直接落列（folder/wiki 壳皆可）；parentWikiId 经壳节点翻译（老协议）。 */
+  parentNodeId?: string | null; parentWikiId?: string | null; title?: string | null; body?: string; tags?: string[] | null;
   summary: string;
   hasPermission: boolean; permissionKey: string;
 }): Promise<WikiProposal> {
@@ -79,7 +82,7 @@ export async function insertWikiProposal(params: {
        (production_id, tool_call_id, proposed_by, action, target_wiki_id, parent_node_id,
         title, body, tags, summary, has_permission, permission_key)
      VALUES ($1, $2, $3, $4, $5::uuid,
-             (SELECT n.id FROM node n WHERE n.wiki_id = $6::uuid), $7, $8, $9, $10, $11, $12)
+             COALESCE($13::text, (SELECT n.id FROM node n WHERE n.wiki_id = $6::uuid)), $7, $8, $9, $10, $11, $12)
      ON CONFLICT (production_id, tool_call_id) DO UPDATE SET
        action = EXCLUDED.action, target_wiki_id = EXCLUDED.target_wiki_id,
        parent_node_id = EXCLUDED.parent_node_id, title = EXCLUDED.title, body = EXCLUDED.body,
@@ -91,6 +94,7 @@ export async function insertWikiProposal(params: {
       params.productionId, params.toolCallId, params.proposedBy, params.action,
       params.targetWikiId ?? null, params.parentWikiId ?? null, params.title ?? null,
       params.body ?? "", params.tags ?? null, params.summary, params.hasPermission, params.permissionKey,
+      params.parentNodeId ?? null,
     ],
   );
   // WHERE 子句在冲突且已 resolve 时不更新——RETURNING 该情况下为空，

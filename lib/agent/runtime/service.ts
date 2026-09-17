@@ -627,6 +627,18 @@ async function preflight(g: GateInput): Promise<{ block?: boolean; reason?: stri
       console.error("[agent-runtime] script write preview failed (card without permission info):", err);
     }
   }
+  // #510 资产写面两个工具：同款——业务错误 block 不弹卡；本体门/位置面三门的结果进卡片
+  const { ASSET_PROPOSE_TOOLS, previewAssetProposal } = await import("@/lib/agent/tools/asset-tools");
+  if (ASSET_PROPOSE_TOOLS.has(bare) && g.productionId) {
+    try {
+      const p = await previewAssetProposal(g.userId, g.productionId, bare, g.args);
+      if (p.error) return { block: true, reason: `${p.error}（未提交给用户确认）`, preview };
+      hasPermission = p.hasPermission;
+      notes = p.notes;
+    } catch (err) {
+      console.error("[agent-runtime] asset write preview failed (card without permission info):", err);
+    }
+  }
   return { hasPermission, preview, notes };
 }
 

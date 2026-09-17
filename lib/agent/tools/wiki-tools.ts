@@ -4,7 +4,7 @@
 
 import { resolveProductionActor, DENIED_NOT_MEMBER } from "./production-tools";
 import {
-  listNodeLibrary, getNodeByWikiId, moveNode,
+  listNodeLibrary, getNodeByWikiId, moveNode, resolveContainerNode,
   setNodePublic, setNodeDeptShares, listNodeDeptShares,
   type NodeEntry,
 } from "@/lib/node/db";
@@ -115,7 +115,7 @@ export async function wikiTree(userId: string, productionId: string): Promise<st
   // 文档标题/正文是成员可写的自由文本——读回给模型前中和注入分隔符，防有人
   // 在文档里塞 <clickin-instructions> 之类经工具结果做间接注入。
   return neutralizeInjectionTags(buildTreeText(visible))
-    + "\n\n（[文档] 用 wiki_read 按 id 读取；[文件] 用 production.doc_outline/doc_read 按资产 id 读取（docx/pdf），其余格式看 production.asset_list；[目录] 的节点 id 可作 wiki_propose_create 的 parentId。）";
+    + "\n\n（[文档] 用 wiki_read 按 id 读取；[文件] 用 production.doc_outline/doc_read 按资产 id 读取（docx/pdf），其余格式看 production.asset_list；[目录] 的节点 id 与 [文档] 的 id 都可作 wiki_propose_create 的 parentId / wiki_propose_move 与 asset_propose_move 的 newParentId；[文件] 改名/移动用 production.asset_propose_rename / asset_propose_move。）";
 }
 
 // ─── wiki.backlinks ─────────────────────────────────────────────────────────
@@ -250,13 +250,13 @@ export async function wikiProposeCreate(
     return "权限被拒绝：你没有在该制作新建文档的权限。已记录本次调用，需人工审批通过后才能重试。";
   }
 
-  // AI 传的是父文档的 wiki id（方言协议），此处翻译为壳节点 id
+  // AI 传父文档的 wiki id 或 [目录] 的节点 id（#510），此处翻译为壳节点 id
   let parentNodeId: string | null = null;
   if (args.parentId) {
-    const parentShell = await getNodeByWikiId(args.parentId);
-    if (!parentShell || parentShell.productionId !== productionId) {
+    const parentShell = await resolveContainerNode(productionId, args.parentId);
+    if (!parentShell) {
       if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_business_rule");
-      return "父文档不存在。";
+      return "父文档/目录不存在（parentId 应是树里 [文档] 行的 id 或 [目录] 行的节点 id）。";
     }
     parentNodeId = parentShell.id;
   }
@@ -355,13 +355,13 @@ export async function wikiProposeMove(
   const existing = await getWiki(args.wikiId, productionId);
   const shell = existing ? await getNodeByWikiId(args.wikiId) : null;
   if (!existing || !shell) return "没有找到该文档。";
-  // AI 传 wiki id，位置面在 node 域——目标父翻译为壳节点
+  // AI 传 wiki id，位置面在 node 域——目标父（文档 wiki id 或目录节点 id，#510）翻译为壳节点
   let newParentNodeId: string | null = null;
   if (args.newParentId) {
-    const parentShell = await getNodeByWikiId(args.newParentId);
-    if (!parentShell || parentShell.productionId !== productionId) {
+    const parentShell = await resolveContainerNode(productionId, args.newParentId);
+    if (!parentShell) {
       if (proposal) await markWikiProposalBlocked(proposal.id, "blocked_business_rule");
-      return "目标父文档不存在。";
+      return "目标父文档/目录不存在（newParentId 应是树里 [文档] 行的 id 或 [目录] 行的节点 id）。";
     }
     newParentNodeId = parentShell.id;
   }
@@ -383,7 +383,7 @@ export async function wikiProposeMove(
   }
   if (proposal) await markWikiProposalApplied(proposal.id, doc.id);
   return args.newParentId
-    ? `已把文档《${doc.title}》移动到新的父文档下。`
+    ? `已把文档《${doc.title}》移动到新的父节点下。`
     : `已把文档《${doc.title}》移动到文档库根。`;
 }
 

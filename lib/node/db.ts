@@ -116,6 +116,18 @@ export async function getNodeByAssetId(assetId: string): Promise<NodeRecord | nu
   return rows[0] ? rowToNode(rows[0]) : null;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** AI 侧「父引用」解析（#510）：树里 [目录] 行打节点 id、[文档] 行打 wiki id，模型两种
+ *  都会传。先按节点 id 查，uuid 形态再按 wiki id 查壳；只认容器 kind（folder/wiki），
+ *  asset/link 是叶子、跨制作的一律视同不存在。 */
+export async function resolveContainerNode(productionId: string, ref: string): Promise<NodeRecord | null> {
+  const direct = await getNode(ref, productionId);
+  const node = direct ?? (UUID_RE.test(ref) ? await getNodeByWikiId(ref) : null);
+  if (!node || node.productionId !== productionId) return null;
+  return node.kind === "folder" || node.kind === "wiki" ? node : null;
+}
+
 type EntryRow = NodeRow & {
   wiki_title: string | null; wiki_body_absent: boolean | null;
   asset_name: string | null; asset_file_name: string | null;

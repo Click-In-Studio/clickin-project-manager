@@ -6,6 +6,7 @@
 // 真正的安全边界是各 wiki_propose_* 工具函数批准后自己重新查一遍权限。
 
 import { getPool } from "@/lib/pg";
+import { resolveContainerNode } from "@/lib/node/db";
 import { WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "./wiki-link-syntax";
 import { extractDisplayTitles, restoreAndCheckBody } from "./wiki-dialect-check";
 
@@ -38,9 +39,12 @@ export async function prepareWikiProposal(input: PrepareWikiProposalInput): Prom
   const title = input.title ?? null;
   const tags = input.tags ?? null;
   const summary = input.summary ?? "";
-  const parentWikiId = action === "create" ? (input.parentId ?? null)
+  // 新父可以是 [文档] 的 wiki id 或 [目录] 的节点 id（#510）——统一解析成壳节点 id 落列；
+  // 解析不到就落 null（工具执行时会以「父不存在」拒绝，这里不抢先 block）
+  const parentRef = action === "create" ? (input.parentId ?? null)
     : action === "move" ? (input.newParentId ?? null)
     : null;
+  const parentNodeId = parentRef ? (await resolveContainerNode(productionId, parentRef))?.id ?? null : null;
 
   const { resolveProductionActor } = await import("./production-tools");
   const { CREATE_PERMISSION_KEY, editPermissionKey, deletePermissionKey } = await import("./wiki-tools");
@@ -98,7 +102,7 @@ export async function prepareWikiProposal(input: PrepareWikiProposalInput): Prom
 
   const proposal = await insertWikiProposal({
     productionId, toolCallId, proposedBy: callerUserId, action,
-    targetWikiId: action === "create" ? null : wikiId, parentWikiId,
+    targetWikiId: action === "create" ? null : wikiId, parentNodeId,
     title, body: effectiveBody, tags, summary, hasPermission, permissionKey,
   });
   return { ok: true, id: proposal.id, hasPermission, reason, ...(bodyRestored ? { restoredBody: effectiveBody } : {}) };
