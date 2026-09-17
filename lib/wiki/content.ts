@@ -54,6 +54,9 @@ export async function createWiki(params: {
   listable?: boolean;
   /** revision provenance（如 "ai-proposed"）。 */
   origin?: string;
+  /** 随建带上的标签 / 提及（创建副本 #511 用；一般新建不传）。与内容行同事务。 */
+  tags?: string[];
+  mentions?: Mention[];
   /** 调用方已在事务里（报告归档管线）：内容行+壳节点写进它的事务。 */
   external?: PoolClient;
 }): Promise<WikiDoc & { tags: string[]; nodeId: string }> {
@@ -65,14 +68,21 @@ export async function createWiki(params: {
     ? await placementSortKey(params.productionId, parentNodeId, params.place, null)
     : await tailSortKey(params.productionId, parentNodeId);
   const body = params.body ?? "";
+  const mentions = params.mentions ?? [];
+  const tags = [...new Set((params.tags ?? []).map(t => t.trim()).filter(Boolean))];
 
   const write = async (client: PoolClient): Promise<{ id: string; nodeId: string }> => {
     const res = await client.query<{ id: string }>(
-      `INSERT INTO wiki (production_id, title, body, created_by)
-       VALUES ($1, $2, $3, $4) RETURNING id::text AS id`,
-      [params.productionId, params.title, body, params.createdBy],
+      `INSERT INTO wiki (production_id, title, body, mentions, created_by)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id::text AS id`,
+      [params.productionId, params.title, body, JSON.stringify(mentions), params.createdBy],
     );
     const id = res.rows[0].id;
+    if (tags.length > 0) {
+      await client.query(
+        `INSERT INTO wiki_tag (wiki_id, tag) SELECT $1::uuid, unnest($2::text[]) ON CONFLICT DO NOTHING`,
+        [id, tags]);
+    }
     const nodeId = await insertNode({
       productionId: params.productionId, kind: "wiki",
       parentId: parentNodeId, sortKey, wikiId: id,
@@ -99,11 +109,45 @@ export async function createWiki(params: {
   }
   // §0.9 C-6：创建者 manage 行集 + person 归属
   await writeWikiGrants(created.id, params.productionId, params.createdBy);
-  await writeRevision(created.id, params.title, body, [], params.createdBy, params.origin ?? "user");
+  await writeRevision(created.id, params.title, body, mentions, params.createdBy, params.origin ?? "user");
   await syncWikiLinks(created.id, params.productionId, body, params.createdBy);
   // 结构变化推给同制作在线页面——放 db 层让所有写入来源自动同步
   broadcastWikiLibraryChange(params.productionId, { kind: "created", wikiId: created.nodeId });
   return { ...(await getWiki(created.id, params.productionId))!, nodeId: created.nodeId };
+}
+
+/** 副本标题：「X 副本」；已经是副本再复制则递增（「X 副本 2」「X 副本 3」…）。 */
+export function duplicateTitle(title: string | null): string {
+  const base = (title ?? "").trim() || "无标题";
+  const m = /^(.*?) 副本(?: (\d+))?$/.exec(base);
+  if (!m) return `${base} 副本`;
+  return `${m[1]} 副本 ${(m[2] ? Number(m[2]) : 1) + 1}`;
+}
+
+/**
+ * 创建副本（#511）：正文/标签/提及照抄，壳节点落在**原件紧后**、同父、同可枚举位。
+ * 不抄的：分享行集（副本是新建，走创建者 manage 行集）、公开位、指向原件的链接与
+ * 挂载边（那些是别人对原件的引用，不是原件的内容）。wikilink 边由 createWiki 的
+ * syncWikiLinks 按新正文重建。门在路由（读原件 ∧ create ∧ 落位双门）。
+ */
+export async function duplicateWiki(
+  sourceId: string, productionId: string, createdBy: string,
+): Promise<(WikiDoc & { tags: string[]; nodeId: string }) | null> {
+  const source = await getWiki(sourceId, productionId);
+  if (!source) return null;
+  const node = await getNodeByWikiId(sourceId);
+  if (!node || node.productionId !== productionId) return null;
+  return createWiki({
+    productionId,
+    title: duplicateTitle(source.title),
+    body: source.body,
+    mentions: source.mentions,
+    tags: source.tags,
+    parentNodeId: node.parentId,
+    place: { anchorId: node.id, side: "after" },
+    listable: node.listable,
+    createdBy,
+  });
 }
 
 export async function updateWiki(
