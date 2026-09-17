@@ -5,13 +5,24 @@ import { toActor } from "@/lib/perm/grant-check";
 import { getWiki, updateWiki, deleteWiki } from "@/lib/wiki/content";
 import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki } from "@/lib/wiki/perm";
 import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
-import { broadcastWikiUpdate } from "@/lib/wiki/collab";
+import { broadcastWikiUpdate, setWikiPresenceCursor } from "@/lib/wiki/collab";
+import type { WikiCursor } from "@/lib/wiki/collab-cursor";
 import { readParentAnchor } from "@/lib/wiki/input";
 import { gateNodeAnchorPlacement, resolveNodeAnchorParent } from "@/lib/node/placement";
 import type { Mention } from "@/lib/ops/event-db";
 import { getNodeByWikiId, moveNode, setNodePublic, setNodeListable, type NodePlacement } from "@/lib/node/db";
 
 type Ctx = { params: Promise<{ id: string; wikiId: string }> };
+
+/** 请求体里的光标：缺席 → undefined（不带）；null → 阅读态；形状不对当缺席 */
+function readCursor(raw: unknown): WikiCursor | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  if (typeof raw !== "object") return undefined;
+  const c = raw as { blockIndex?: unknown; offset?: unknown };
+  if (typeof c.blockIndex !== "number") return undefined;
+  return { blockIndex: c.blockIndex, offset: typeof c.offset === "number" ? Math.max(0, c.offset) : 0 };
+}
 
 export async function GET(req: NextRequest, ctx: Ctx) {
   const { id: productionId, wikiId } = await ctx.params;
@@ -68,6 +79,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     baseBody?: string;
     /** 协作：发起端 SSE clientId（广播自过滤） */
     clientId?: string;
+    /** 协作（#515）：发起端保存那一刻的光标，随 update 帧同帧到达；缺席=本帧不带 */
+    cursor?: WikiCursor | null;
   };
 
   const wantsContent = body.title !== undefined || body.body !== undefined
@@ -159,12 +172,17 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const fresh = await getWiki(wikiId, productionId);
     // 协作广播（内容/标题/标签变化才推；标签帧缺省=本帧没动标签）
     if (fresh && (body.body !== undefined || body.title !== undefined || body.tags !== undefined)) {
+      // 光标先静默落注册表再随 update 帧发出：不单独推 presence 帧，否则它会抢在
+      // 内容前面到达——那正是 #515 的乱跳
+      const cursor = readCursor(body.cursor);
+      if (body.clientId && cursor !== undefined) setWikiPresenceCursor(wikiId, body.clientId, cursor);
       broadcastWikiUpdate(wikiId, {
         byClientId: body.clientId ?? null,
         title: fresh.title,
         body: fresh.body,
         updatedAt: fresh.updatedAt,
         ...(body.tags !== undefined ? { tags: fresh.tags } : {}),
+        ...(cursor !== undefined ? { cursor } : {}),
       });
     }
     return Response.json({ wiki: fresh });

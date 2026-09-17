@@ -14,6 +14,7 @@ import { hostname } from "node:os";
 import type { Pool, PoolClient } from "pg";
 import { getPool } from "@/lib/pg";
 import { registerSSEKeepalive } from "@/lib/sse-keepalive";
+import type { WikiCursor } from "@/lib/wiki/collab-cursor";
 
 export type WikiPeer = {
   clientId: string;
@@ -228,6 +229,19 @@ export function updateWikiPresence(
   localBroadcast(wikiId, wikiPresenceFrame(wikiId));
 }
 
+/**
+ * 保存搭车的光标（#515）：只改注册表、不单独广播——光标随 update 帧到达，之后
+ * 别人进出触发的 presence 全量帧读到的已是新值，不会把它拨回旧位置。发起端不在
+ * 表里（SSE 已断：隐藏标签页的卸载兜底保存）就不造幽灵条目。
+ */
+export function setWikiPresenceCursor(wikiId: string, clientId: string, cursor: WikiCursor | null): void {
+  const p = presReg().get(wikiId)?.get(clientId);
+  if (!p) return;
+  p.blockIndex = cursor?.blockIndex ?? null;
+  p.offset = cursor?.offset ?? null;
+  p.updatedAt = Date.now();
+}
+
 export function removeWikiPresence(wikiId: string, clientId: string): void {
   const m = presReg().get(wikiId);
   if (!m) return;
@@ -243,6 +257,9 @@ export function broadcastWikiUpdate(
     byClientId: string | null; title: string | null; body: string; updatedAt: string;
     /** 省略=标签未变（老帧形态），接收端不动本地标签。 */
     tags?: string[];
+    /** 发起端保存那一刻的光标（#515）：与 body 同一份快照；省略=本帧不带光标
+     *  （AI 写入、老帧形态），接收端不动在场表。 */
+    cursor?: WikiCursor | null;
   },
 ): void {
   broadcast(wikiId, `event: update\ndata: ${JSON.stringify(payload)}\n\n`);

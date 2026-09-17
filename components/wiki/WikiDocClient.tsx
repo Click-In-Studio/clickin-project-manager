@@ -25,6 +25,8 @@ import type { WikiDoc } from "@/lib/wiki/types";
 import type { WikiRef, WikiEntityRef } from "@/lib/wiki/links";
 import WikiEntityRefs from "@/components/wiki/WikiEntityRefs";
 import type { WikiPeer } from "@/lib/wiki/collab";
+import { applyPeerCursor, createCursorRelay, type WikiCursor } from "@/lib/wiki/collab-cursor";
+import { createSaveDebounce } from "@/lib/editor/save-debounce";
 import { mergeLines } from "@/lib/editor/line-merge";
 import type { Mention } from "@/lib/ops/event-db";
 
@@ -41,6 +43,12 @@ type ShareState = {
 const LEVEL_LABELS: Record<ShareLevel, string> = { view: "可阅读", edit: "可编辑", manage: "可管理" };
 
 type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
+
+// 自动保存：停手 1.2s 落一笔；连续打字每 5s 强制落一笔（#515——纯 trailing 会被
+// 每个击键重置，打一大段期间丢数据窗口与协作延迟都无界）
+const SAVE_DEBOUNCE_MS = 1200;
+const SAVE_MAX_WAIT_MS = 5000;
+const CURSOR_THROTTLE_MS = 400;
 
 export default function WikiDocClient({
   productionId,
@@ -111,8 +119,10 @@ export default function WikiDocClient({
 
   const mentionsRef = useRef<Mention[]>(wiki.mentions);
   const savedRef = useRef({ title: wiki.title ?? "", body: wiki.body, tags: wiki.tags.join(" ") });
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingRef = useRef(false);
+  // 保存到点撞上 savingRef 锁（上一笔还在飞）：不能静默丢——那要靠用户再敲一个键
+  // 才重新 arm，停手前最后一段就一直不落库。记下来，上一笔结束后重排
+  const deferredSaveRef = useRef(false);
   // effect 闭包会捕获旧渲染的值，卸载兜底保存必须经 ref 取最新
   const latestRef = useRef({ title, body, tags: tagsInput });
   latestRef.current = { title, body, tags: tagsInput };
@@ -122,15 +132,19 @@ export default function WikiDocClient({
   // 这个值只进 URL 不进渲染输出，SSR/CSR 取值不同也不会导致水合不一致）
   const [collabClientId] = useState(() => Math.random().toString(36).slice(2));
   const [peers, setPeers] = useState<WikiPeer[]>([]);
-  const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  type WikiUpdateFrame =
-    { byClientId: string | null; title: string | null; body: string; updatedAt: string; tags?: string[] };
+  type WikiUpdateFrame = {
+    byClientId: string | null; title: string | null; body: string; updatedAt: string; tags?: string[];
+    /** 发起端保存那一刻的光标（#515）；缺席=本帧不带 */
+    cursor?: WikiCursor | null;
+  };
 
   /** 远端内容落地：SSE update 帧与重连补齐共用这一条路径。 */
   function applyRemoteUpdate(data: WikiUpdateFrame) {
     if (data.byClientId === collabClientId) return; // 本端 PATCH 响应已处理
+    // 发起端光标与内容同一次提交落地：装饰器对着新文档算一次到位（#515）
+    setPeers(prev => applyPeerCursor(prev, data.byClientId, data.cursor));
     const base = savedRef.current.body;
     const local = latestRef.current.body;
     // 本地干净 → 直接采纳；本地有未存改动 → 行级三路合并（本地为 mine）
@@ -212,22 +226,27 @@ export default function WikiDocClient({
     },
   );
 
-  // 光标位置上报（trailing 节流 400ms——leading 会发陈旧位置）
-  const pendingCursorRef = useRef<{ blockIndex: number; offset: number } | null>(null);
-  function reportCursor(cursor: { blockIndex: number; offset: number }) {
-    pendingCursorRef.current = cursor;
-    if (presenceTimerRef.current) return;
-    presenceTimerRef.current = setTimeout(() => {
-      presenceTimerRef.current = null;
-      const latest = pendingCursorRef.current;
-      if (!latest) return;
-      void fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}/presence`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: collabClientId, ...latest }),
-      }).catch(() => {});
-    }, 400);
-  }
+  // 光标位置上报（#515）：本地干净才走独立通道（trailing 节流）；有未保存改动时
+  // 压住，搭保存那一笔的 update 帧——远端拿新坐标套旧文档只会乱跳
+  const isDirty = () => {
+    const cur = latestRef.current, prev = savedRef.current;
+    return cur.body !== prev.body || cur.title.trim() !== prev.title || cur.tags !== prev.tags;
+  };
+  const postCursor = (cursor: WikiCursor) => {
+    void fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}/presence`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId: collabClientId, ...cursor }),
+    }).catch(() => {});
+  };
+  // relay 只建一次；post 经 ref 取最新闭包，切文档后不会发到旧 wiki.id
+  const postCursorRef = useRef(postCursor);
+  postCursorRef.current = postCursor;
+  const [cursorRelay] = useState(() => createCursorRelay({
+    isDirty,
+    throttleMs: CURSOR_THROTTLE_MS,
+    post: (cursor) => postCursorRef.current(cursor),
+  }));
 
   const memberName = (userId: string) => members.find(m => m.userId === userId)?.name ?? userId.slice(0, 8);
 
@@ -307,7 +326,7 @@ export default function WikiDocClient({
   }
 
   async function saveNow(next?: { title?: string; body?: string; tags?: string }) {
-    if (savingRef.current) return;
+    if (savingRef.current) { deferredSaveRef.current = true; return; }
     // 占锁必须在任何 await 之前：promoteBody 可能要取一次文档清单，那段 await
     // 窗口里第二次 saveNow 会整个越过上面的守卫，两笔并发 PATCH。
     savingRef.current = true;
@@ -319,12 +338,17 @@ export default function WikiDocClient({
     const t = (next?.title ?? cur.title).trim();
     const b0 = next?.body ?? cur.body;
     const tg = next?.tags ?? cur.tags;
+    // 光标与正文同一时刻取（#515）：下面的 await 期间用户可能还在打
+    const cursor = cursorRelay.takeForSave();
     if (!t) return; // 空标题不落库，等用户补
     const b = await promoteBody(b0);
-    if (b !== b0) setBody(b); // 升格结果回灌，编辑器立刻显示 chip
+    // 升格结果回灌，编辑器立刻显示 chip。await 期间用户可能又打了字（maxWait 让
+    // 保存会在打字中途发生）——那就别盖，下一轮保存会再升格一次
+    if (b !== b0 && latestRef.current.body === b0) setBody(b);
     const prev = savedRef.current;
     if (t === prev.title && b === prev.body && tg === prev.tags) { setStatus(s => s === "dirty" ? "saved" : s); return; }
     setStatus("saving");
+    cursorRelay.markSent(cursor);
     try {
       const res = await fetch(api, {
         method: "PATCH",
@@ -337,6 +361,8 @@ export default function WikiDocClient({
           // 协作：带上本端 base，服务端被他人推进时做行级三路合并
           baseBody: prev.body,
           clientId: collabClientId,
+          // 协作（#515）：光标搭内容帧，远端同帧落地
+          cursor,
         }),
       });
       if (!res.ok) { setStatus("error"); return; }
@@ -346,7 +372,8 @@ export default function WikiDocClient({
       savedRef.current = { title: t, body: serverBody, tags: tg };
       // 服务端合并产物 ≠ 本端提交 → 回灌（本端期间的新击键经下一轮 schedule 再保）
       if (serverBody !== b && latestRef.current.body === b) setBody(serverBody);
-      setStatus("saved");
+      // maxWait 让保存发生在打字中途：响应回来时本端可能又脏了，别把它标成已保存
+      setStatus(isDirty() ? "dirty" : "saved");
       // 标题/标签变化会影响侧栏树与搜索，刷新服务端数据；正文变化不刷（不打断输入）
       if (structuralChange) router.refresh();
       } catch {
@@ -354,19 +381,28 @@ export default function WikiDocClient({
       }
     } finally {
       savingRef.current = false;
+      cursorRelay.afterSave();
+      if (deferredSaveRef.current) { deferredSaveRef.current = false; saveDebounce.trigger(); }
     }
   }
 
+  const saveNowRef = useRef(saveNow);
+  saveNowRef.current = saveNow;
+  const [saveDebounce] = useState(() => createSaveDebounce(
+    () => { void saveNowRef.current(); },
+    { wait: SAVE_DEBOUNCE_MS, maxWait: SAVE_MAX_WAIT_MS },
+  ));
+
   function schedule() {
     setStatus("dirty");
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => saveNow(), 1200);
+    saveDebounce.trigger();
   }
 
   // 卸载/切文档前尽力落一笔（经 latestRef 取最新值，避免闭包捕获旧渲染）
   useEffect(() => {
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+      saveDebounce.cancel();
+      cursorRelay.dispose();
       const cur = latestRef.current;
       const prev = savedRef.current;
       if (cur.title.trim() && (cur.title.trim() !== prev.title || cur.body !== prev.body || cur.tags !== prev.tags)) {
@@ -584,7 +620,7 @@ export default function WikiDocClient({
               remoteCursors={peers
                 .filter(p => p.blockIndex != null)
                 .map(p => ({ name: p.userName, color: p.color, blockIndex: p.blockIndex as number, offset: p.offset ?? 0 }))}
-              onCursorChange={reportCursor}
+              onCursorChange={cursorRelay.report}
             />
           )
         ) : wiki.body.trim() ? (

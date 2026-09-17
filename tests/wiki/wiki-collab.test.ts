@@ -5,6 +5,11 @@ import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createWiki, updateWiki, getWiki } from "@/lib/wiki/content";
 import { POST as presencePOST } from "@/app/api/production/[id]/wiki/[wikiId]/presence/route";
 import { GET as streamGET } from "@/app/api/production/[id]/wiki/[wikiId]/stream/route";
+import { PATCH as wikiPATCH } from "@/app/api/production/[id]/wiki/[wikiId]/route";
+import {
+  registerWikiSSE, updateWikiPresence, removeWikiPresence, setWikiPresenceCursor, wikiPresenceFrame,
+  stopCollabListenerForTests,
+} from "@/lib/wiki/collab";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 
 // wiki 协作（PR #247）：行锁内三路合并（消 read-then-write 竞态）+ 协作路由门
@@ -29,6 +34,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await stopCollabListenerForTests();
+  await getPool().query(`DELETE FROM wiki_collab_outbox WHERE topic = $1`, [wikiId]).catch(() => {});
   await cleanupProduction(prodId).catch(() => {});
   await getPool().query("DELETE FROM app_user WHERE id = $1", [creator]).catch(() => {});
 });
@@ -113,5 +120,134 @@ describe("collab routes — auth guards", () => {
     } finally {
       await getPool().query("DELETE FROM app_user WHERE id = $1", [stranger]).catch(() => {});
     }
+  });
+});
+
+// #515：光标是纯位置量，presence 帧抢在内容前面到达就会在旧文档上乱跳。保存带上的
+// 光标要**静默**落注册表、随 update 帧同帧发出——不能多推一条 presence 帧。
+describe("PATCH 带光标 — 光标随 update 帧同帧到达", () => {
+  const cookieFor = (userId: string) =>
+    `${SESSION_COOKIE}=${createSession({ userId, name: "测试", avatarUrl: null, isAdmin: true })}`;
+  const ctx = () => ({ params: Promise.resolve({ id: prodId, wikiId }) });
+  const patch = (body: unknown) => wikiPATCH(new NextRequest("http://localhost/x", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Cookie: cookieFor(creator) },
+    body: JSON.stringify(body),
+  }), ctx());
+  const info = { userId: "u", userName: "甲", avatarUrl: null };
+  const peerOf = (cid: string) =>
+    (JSON.parse(wikiPresenceFrame(wikiId).replace(/^event: presence\ndata: /, "")) as { clientId: string; blockIndex: number | null; offset: number | null }[])
+      .find(p => p.clientId === cid);
+
+  it("在场的发起端：update 帧带 cursor、注册表已更新、其前后没有多出 presence 帧", async () => {
+    const frames: string[] = [];
+    const cancel = registerWikiSSE(wikiId, "obs", (f) => frames.push(f));
+    updateWikiPresence(wikiId, "cA", info, { blockIndex: 0, offset: 0 });
+    frames.length = 0; // 入场那帧不算
+    try {
+      const body = (await getWiki(wikiId, prodId))!.body;
+      const res = await patch({ body: body + "\n六", baseBody: body, clientId: "cA", cursor: { blockIndex: 5, offset: 1 } });
+      expect(res.status).toBe(200);
+      expect(frames).toHaveLength(1);
+      expect(frames[0].startsWith("event: update\n")).toBe(true);
+      const data = JSON.parse(frames[0].replace(/^event: update\ndata: /, ""));
+      expect(data.byClientId).toBe("cA");
+      expect(data.cursor).toEqual({ blockIndex: 5, offset: 1 });
+      expect(peerOf("cA")).toMatchObject({ blockIndex: 5, offset: 1 });
+    } finally {
+      cancel();
+      removeWikiPresence(wikiId, "cA");
+    }
+  });
+
+  it("不带 cursor 的保存（老客户端 / AI）：帧不带 cursor，注册表不动", async () => {
+    updateWikiPresence(wikiId, "cB", info, { blockIndex: 2, offset: 3 });
+    const frames: string[] = [];
+    const cancel = registerWikiSSE(wikiId, "obs2", (f) => frames.push(f));
+    try {
+      const body = (await getWiki(wikiId, prodId))!.body;
+      const res = await patch({ body: body + "\n七", baseBody: body, clientId: "cB" });
+      expect(res.status).toBe(200);
+      expect(frames).toHaveLength(1);
+      expect(JSON.parse(frames[0].replace(/^event: update\ndata: /, ""))).not.toHaveProperty("cursor");
+      expect(peerOf("cB")).toMatchObject({ blockIndex: 2, offset: 3 });
+    } finally {
+      cancel();
+      removeWikiPresence(wikiId, "cB");
+    }
+  });
+
+  it("没有 clientId 的保存：帧 byClientId 为 null，注册表不动", async () => {
+    updateWikiPresence(wikiId, "cD", info, { blockIndex: 2, offset: 3 });
+    const frames: string[] = [];
+    const cancel = registerWikiSSE(wikiId, "obs3", (f) => frames.push(f));
+    try {
+      const body = (await getWiki(wikiId, prodId))!.body;
+      const res = await patch({ body: body + "\n零", baseBody: body, cursor: { blockIndex: 0, offset: 0 } });
+      expect(res.status).toBe(200);
+      expect(frames).toHaveLength(1);
+      expect(JSON.parse(frames[0].replace(/^event: update\ndata: /, "")).byClientId).toBeNull();
+      expect(peerOf("cD")).toMatchObject({ blockIndex: 2, offset: 3 });
+    } finally {
+      cancel();
+      removeWikiPresence(wikiId, "cD");
+    }
+  });
+
+  it("发起端不在场（SSE 已断的卸载兜底保存）：不造幽灵条目", async () => {
+    const body = (await getWiki(wikiId, prodId))!.body;
+    const res = await patch({ body: body + "\n八", baseBody: body, clientId: "ghost", cursor: { blockIndex: 1, offset: 0 } });
+    expect(res.status).toBe(200);
+    expect(peerOf("ghost")).toBeUndefined();
+  });
+
+  it("形状不对的 cursor 当缺席；null 是阅读态", async () => {
+    updateWikiPresence(wikiId, "cC", info, { blockIndex: 2, offset: 3 });
+    try {
+      let body = (await getWiki(wikiId, prodId))!.body;
+      expect((await patch({ body: body + "\n九", baseBody: body, clientId: "cC", cursor: { blockIndex: "x" } })).status).toBe(200);
+      expect(peerOf("cC")).toMatchObject({ blockIndex: 2, offset: 3 });
+      body = (await getWiki(wikiId, prodId))!.body;
+      expect((await patch({ body: body + "\n十", baseBody: body, clientId: "cC", cursor: null })).status).toBe(200);
+      expect(peerOf("cC")).toMatchObject({ blockIndex: null, offset: null });
+    } finally {
+      removeWikiPresence(wikiId, "cC");
+    }
+  });
+});
+
+describe("setWikiPresenceCursor — 静默改注册表", () => {
+  const info = { userId: "u", userName: "甲", avatarUrl: null };
+  const peers = () =>
+    JSON.parse(wikiPresenceFrame(wikiId).replace(/^event: presence\ndata: /, "")) as
+      { clientId: string; blockIndex: number | null; offset: number | null; updatedAt: number }[];
+
+  it("在场：只改光标与 updatedAt，不推帧", () => {
+    const frames: string[] = [];
+    const cancel = registerWikiSSE(wikiId, "obs4", (f) => frames.push(f));
+    try {
+      updateWikiPresence(wikiId, "sA", info, { blockIndex: 0, offset: 0 });
+      const before = peers().find(p => p.clientId === "sA")!;
+      frames.length = 0;
+      setWikiPresenceCursor(wikiId, "sA", { blockIndex: 3, offset: 4 });
+      expect(frames).toHaveLength(0);
+      const after = peers().find(p => p.clientId === "sA")!;
+      expect(after).toMatchObject({ blockIndex: 3, offset: 4 });
+      expect(after.updatedAt).toBeGreaterThanOrEqual(before.updatedAt);
+      setWikiPresenceCursor(wikiId, "sA", null);
+      expect(peers().find(p => p.clientId === "sA")).toMatchObject({ blockIndex: null, offset: null });
+    } finally {
+      cancel();
+      removeWikiPresence(wikiId, "sA");
+    }
+  });
+
+  it("不在场：no-op，不造条目；不存在的文档也不建表", () => {
+    const n = peers().length;
+    setWikiPresenceCursor(wikiId, "nobody", { blockIndex: 1, offset: 1 });
+    expect(peers().length).toBe(n);
+    expect(peers().some(p => p.clientId === "nobody")).toBe(false);
+    setWikiPresenceCursor("no-such-wiki", "nobody", { blockIndex: 1, offset: 1 });
+    expect(JSON.parse(wikiPresenceFrame("no-such-wiki").replace(/^event: presence\ndata: /, ""))).toEqual([]);
   });
 });
