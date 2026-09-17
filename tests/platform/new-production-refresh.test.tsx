@@ -53,6 +53,9 @@ function expectPushedAndRefreshed() {
   expect(push).toHaveBeenCalledWith("/production/prod-new");
   // refresh 让 root layout 重跑，侧栏项目列表才会包含刚建的项目
   expect(refresh).toHaveBeenCalledTimes(1);
+  // 顺序也是契约：Next 的 action queue 里 navigate 优先于排在它前面的 pending action，
+  // 若 refresh 先于 push 入队会被标成 discarded 直接丢掉，等于没刷。
+  expect(push.mock.invocationCallOrder[0]).toBeLessThan(refresh.mock.invocationCallOrder[0]);
 }
 
 describe("#528 新建项目后项目列表自动刷新", () => {

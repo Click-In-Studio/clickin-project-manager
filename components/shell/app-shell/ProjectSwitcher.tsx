@@ -263,6 +263,8 @@ export default function ProjectSwitcher({
           onClose={() => setNewProdOpen(false)}
           // 项目列表是 root layout SSR 下发的 props，软导航不重渲 layout（#528）：
           // 只 push 的话侧栏切换器里没有新项目，非手动刷新不可。refresh 让 layout 重跑。
+          // 顺序不能反：Next 的 action queue 里 navigate 优先，会把排在它前面还没跑的
+          // refresh 标成 discarded；push 在前则 refresh 串行跑在导航后的新 URL 上。
           onCreated={id => { setNewProdOpen(false); router.push(`/production/${id}`); router.refresh(); }}
         />
       )}
