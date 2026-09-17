@@ -43,14 +43,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { deny, session } = await requireGrantGate(req, id, [["member", "*", "create"]], { blockArchived: true });
   if (deny) return deny;
 
-  // 席位预检（#313）：满员就不再生成邀请——否则错误只会落到受邀方头上。这只是发起侧的
-  // 体验拦截，并发安全仍靠 acceptInvite 事务内那道门；批量超余量不硬拦（谁先接受谁进，
-  // 排序权归发起方），响应里带 seats 让前端提示。
-  const seats = await getSeatUsage(id);
-  if (seats.used >= seats.limit) {
-    return Response.json({ error: seatsFullMessage(seats), reason: "seats_full", seats }, { status: 409 });
-  }
-
   const body = (await req.json()) as {
     kind?: string;
     emails?: unknown;
@@ -59,8 +51,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     presetRoles?: string[];
     presetDeptIds?: string[];
   };
+  if (body.kind !== "link" && body.kind !== "email") {
+    return Response.json({ error: "kind 须为 link 或 email" }, { status: 400 });
+  }
   const presetRoles = Array.isArray(body.presetRoles) ? body.presetRoles.filter(r => typeof r === "string") : [];
   const presetDeptIds = Array.isArray(body.presetDeptIds) ? body.presetDeptIds.filter(d => typeof d === "string") : [];
+
+  // 席位预检（#313）：满员就不再生成邀请——否则错误只会落到受邀方头上。这只是发起侧的
+  // 体验拦截，并发安全仍靠 acceptInvite 事务内那道门；批量超余量不硬拦（谁先接受谁进，
+  // 排序权归发起方），响应里带 seats 让前端提示。放在 body 校验之后，与 table-send 同序。
+  const seats = await getSeatUsage(id);
+  if (seats.used >= seats.limit) {
+    return Response.json({ error: seatsFullMessage(seats), reason: "seats_full", seats }, { status: 409 });
+  }
 
   if (body.kind === "link") {
     const expiresInDays = typeof body.expiresInDays === "number" && body.expiresInDays > 0
@@ -108,6 +111,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ ok: sent > 0, sent, failed: results.length - sent, results, seats }, { status: 201 });
   }
 
+  // kind 已在上面校验过，此处仅为类型收口
   return Response.json({ error: "kind 须为 link 或 email" }, { status: 400 });
 }
 
