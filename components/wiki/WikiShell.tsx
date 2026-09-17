@@ -4,6 +4,9 @@
 // 移动、删除、软链接、树导航。节点四 kind：folder / wiki / asset / link，单数组
 // 单邻接表；写路径按 kind 分派到三套 API（wiki 内容路由 / wiki-alias / 通用 node
 // 位置路由），漏一处是编译错误而不是静默错写（#358 判别联合的同一个理由）。
+//
+// ⋯ 菜单的项表在 lib/node/tree-menu.ts（#511）：四 kind 同一套项同一顺序，不支持的
+// 灰掉给原因，不按 kind 消失。这里只做分派与渲染。
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -19,6 +22,7 @@ import type { NodeEntry } from "@/lib/node/db";
 import type { NodeMoveInCandidate } from "@/lib/node/dramaturgy";
 import { useReportAiTarget } from "@/components/agent/ai-target";
 import { aiTargetForNode } from "@/lib/node/ai-target";
+import { treeMenuItems, type TreeMenuKey } from "@/lib/node/tree-menu";
 
 type DropZone = "before" | "after" | "inside";
 
@@ -350,7 +354,8 @@ export default function WikiShell({
       router.refresh();
       return;
     }
-    if (it.kind !== "wiki" || !it.wikiId) return; // asset/folder 的删除入口不在树上（批1）
+    if (it.kind === "asset") return removeAsset(id);
+    if (it.kind !== "wiki" || !it.wikiId) return; // folder 无删除入口（批1：全是系统产物）
     // 指向本节点的软链接会随删（FK 级联）——只数得出自己看得见的那些
     const linked = items.filter(n => n.kind === "link" && n.linkTargetId === id).length;
     const extra = linked > 0 ? `\n指向它的链接（至少 ${linked} 处）也会一并移除。` : "";
@@ -397,6 +402,65 @@ export default function WikiShell({
     });
     if (!res.ok) { alert((await res.json()).error ?? "重命名失败"); return; }
     router.refresh();
+  }
+
+  /** 就地重命名（#511）：三 kind 三条 PATCH——link 改别名（空＝跟随目标）、wiki 改
+   *  标题（空＝不改）、asset 改显示名（空＝回落文件名）。folder 无通道，菜单里灰。 */
+  function startRename(it: NodeEntry) {
+    setMenu(null);
+    setRenameValue(it.kind === "link" ? it.title ?? "" : it.displayTitle ?? "");
+    setRenamingId(it.id);
+  }
+  function renamePlaceholder(it: NodeEntry): string {
+    if (it.kind === "link") return "留空＝跟随目标标题";
+    if (it.kind === "asset") return "留空＝恢复文件名";
+    return "标题不能为空";
+  }
+  async function commitRename(it: NodeEntry, raw: string) {
+    const value = raw.trim();
+    if (it.kind === "link") return renameAlias(it.id, value || null);
+    setRenamingId(null);
+    let res: Response;
+    if (it.kind === "wiki" && it.wikiId) {
+      if (!value || value === (it.displayTitle ?? "")) return;
+      res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${it.wikiId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: value }),
+      });
+    } else if (it.kind === "asset" && it.assetId) {
+      res = await fetch(`${BASE_PATH}/api/production/${productionId}/assets/${it.assetId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: value || null }),
+      });
+    } else return;
+    if (!res.ok) { alert((await res.json().catch(() => ({}))).error ?? "重命名失败"); return; }
+    router.refresh();
+  }
+
+  /** 创建副本（#511）：服务端抄正文/标签落原件紧后；成功后跳到副本。 */
+  async function duplicate(it: NodeEntry) {
+    setMenu(null);
+    if (it.kind !== "wiki" || !it.wikiId) return;
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${it.wikiId}/duplicate`,
+      { method: "POST" });
+    if (!res.ok) { alert((await res.json().catch(() => ({}))).error ?? "创建副本失败"); return; }
+    const data = await res.json() as { wiki?: { id: string } };
+    router.refresh();
+    if (data.wiki?.id) router.push(`${routeBase}/${data.wiki.id}`);
+  }
+
+  /** ⋯ 菜单分派：项表（含灰化）在 treeMenuItems，这里只接动作。 */
+  function runMenuAction(key: TreeMenuKey, it: NodeEntry) {
+    switch (key) {
+      case "rename": return startRename(it);
+      case "resetTitle": setMenu(null); return renameAlias(it.id, null);
+      case "duplicate": return duplicate(it);
+      case "move": setMenu(null); setMovingId(it.id); return;
+      case "link": setMenu(null); setLinkingId(it.id); return;
+      case "delete": return remove(it.id);
+    }
   }
 
   async function createAlias(targetNodeId: string, targetIds: string[]) {
@@ -658,11 +722,11 @@ export default function WikiShell({
                       value={renameValue}
                       onChange={e => setRenameValue(e.target.value)}
                       onKeyDown={e => {
-                        if (e.key === "Enter") renameAlias(item.id, renameValue);
+                        if (e.key === "Enter") commitRename(item, renameValue);
                         if (e.key === "Escape") setRenamingId(null);
                       }}
                       onBlur={() => setRenamingId(null)}
-                      placeholder="留空＝跟随目标标题"
+                      placeholder={renamePlaceholder(item)}
                       className="flex-1 min-w-0 my-1 rounded border border-zinc-300 px-1.5 py-0.5 text-[13px] outline-none focus:border-zinc-500"
                     />
                   ) : href ? (
@@ -726,7 +790,7 @@ export default function WikiShell({
                       onClick={e => {
                         if (menu?.id === item.id) { setMenu(null); return; }
                         const r = e.currentTarget.getBoundingClientRect();
-                        setMenu({ id: item.id, top: r.bottom + 2, left: Math.max(8, r.right - 148) });
+                        setMenu({ id: item.id, top: r.bottom + 2, left: Math.max(8, r.right - 180) });
                       }}
                       className="w-5 h-5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/60 text-sm leading-none"
                     >
@@ -747,85 +811,32 @@ export default function WikiShell({
         <div
           ref={menuRef}
           style={{ position: "fixed", top: menu.top, left: menu.left, zIndex: 9999 }}
-          className="w-36 rounded-lg border border-zinc-200 bg-white shadow-lg py-1"
+          className="w-44 rounded-lg border border-zinc-200 bg-white shadow-lg py-1"
         >
-          <button
-            type="button"
-            className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
-            onClick={() => { const id = menu.id; setMenu(null); setMovingId(id); }}
-          >
-            移动到…
-          </button>
-          {/* 软链接：wiki/asset 节点可被链接；link 不能再被链接（链式结构上不存在） */}
-          {(() => {
-            const it = byId.get(menu.id);
-            return it && (it.kind === "wiki" || it.kind === "asset") && canCreate ? (
-              <button
-                type="button"
-                className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
-                onClick={() => { const id = menu.id; setMenu(null); setLinkingId(id); }}
-              >
-                链接到…
-              </button>
-            ) : null;
-          })()}
-          {byId.get(menu.id)?.kind === "link" && (
-            <>
-              <button
-                type="button"
-                className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
-                onClick={() => {
-                  const it = byId.get(menu.id);
-                  setMenu(null);
-                  setRenameValue(it?.kind === "link" ? it.title ?? "" : "");
-                  setRenamingId(menu.id);
-                }}
-              >
-                重命名
-              </button>
-              {byId.get(menu.id)?.title !== null && (
-                <button
-                  type="button"
-                  className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
-                  onClick={() => { const id = menu.id; setMenu(null); renameAlias(id, null); }}
-                >
-                  改回目标标题
-                </button>
-              )}
-            </>
-          )}
           {(() => {
             const it = byId.get(menu.id);
             if (!it) return null;
-            if (it.isAnchor)
-              return <p className="px-3 py-1.5 text-[12px] text-zinc-400">系统目录，不可删除</p>;
-            if (it.kind === "asset") {
-              const mayDelete = canManageAssets || (myUserId != null && it.createdBy === myUserId);
+            return treeMenuItems(it, { canCreate, myUserId, canManageAssets }).map(mi => {
+              const disabled = mi.disabledReason !== undefined;
+              // 灰化用 aria-disabled 而非 disabled：disabled 的按钮不冒鼠标事件，
+              // title 里的原因用户读不到——灰掉却不说为什么，跟消失没两样。
               return (
                 <button
+                  key={mi.key}
                   type="button"
-                  disabled={!mayDelete}
-                  title={mayDelete ? undefined : "仅上传者或管理员可删除"}
+                  aria-disabled={disabled || undefined}
+                  title={mi.disabledReason}
                   className={`w-full text-left px-3 py-1.5 text-[13px] ${
-                    mayDelete ? "text-red-600 hover:bg-red-50" : "text-zinc-300 cursor-not-allowed"
+                    disabled ? "text-zinc-300 cursor-not-allowed"
+                    : mi.danger ? "text-red-600 hover:bg-red-50"
+                    : "text-zinc-700 hover:bg-zinc-50"
                   }`}
-                  onClick={() => { if (mayDelete) removeAsset(menu.id); }}
+                  onClick={() => { if (!disabled) void runMenuAction(mi.key, it); }}
                 >
-                  删除
+                  {mi.label}
                 </button>
               );
-            }
-            if (it.kind === "folder")
-              return null; // 批1 folder 全是系统产物，无删除入口
-            return (
-              <button
-                type="button"
-                className="w-full text-left px-3 py-1.5 text-[13px] text-red-600 hover:bg-red-50"
-                onClick={() => remove(menu.id)}
-              >
-                {it.kind === "link" ? "移除链接" : "删除"}
-              </button>
-            );
+            });
           })()}
         </div>,
         document.body,
