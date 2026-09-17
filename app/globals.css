@@ -194,6 +194,9 @@ body {
 .prose ol ol ol ol ol ol { list-style-type: lower-roman; }
 .prose ul ul { list-style-type: circle; }
 .prose ul ul ul { list-style-type: square; }
+.prose ul ul ul ul { list-style-type: disc; }
+.prose ul ul ul ul ul { list-style-type: circle; }
+.prose ul ul ul ul ul ul { list-style-type: square; }
 
 /* wiki 分栏（方言 :::cols，lib/tiptap-columns / lib/remark-columns）——
    编辑器与只读渲染共用；窄屏折叠为纵排 */
