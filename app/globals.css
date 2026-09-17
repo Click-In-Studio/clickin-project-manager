@@ -181,6 +181,20 @@ body {
   vertical-align: -0.1em;
 }
 
+/* 多级列表按嵌套层级换弹头（#502）——编辑器 / 只读 / 打印页都套 .prose，一处三吃。
+   有序：1. → a. → i. 三级一循环，与 Notion / 飞书 / Google Docs 同款；
+   无序：• → ◦ → ▪。typography 插件把各层级一律设成 decimal / disc（:where 零特异度），
+   这里按后代深度覆盖，越深的规则复合选择器越多、特异度越高，天然压过浅层规则。
+   后代选择器数的是**同类列表祖先数**——ol 里套 ul 再套 ol，内层仍算第二级 a.，
+   与 Notion 只数有序祖先的规则一致。任务列表自带 list-style: none，类选择器特异度更高，不受影响。 */
+.prose ol ol { list-style-type: lower-alpha; }
+.prose ol ol ol { list-style-type: lower-roman; }
+.prose ol ol ol ol { list-style-type: decimal; }
+.prose ol ol ol ol ol { list-style-type: lower-alpha; }
+.prose ol ol ol ol ol ol { list-style-type: lower-roman; }
+.prose ul ul { list-style-type: circle; }
+.prose ul ul ul { list-style-type: square; }
+
 /* wiki 分栏（方言 :::cols，lib/tiptap-columns / lib/remark-columns）——
    编辑器与只读渲染共用；窄屏折叠为纵排 */
 .wiki-cols {
