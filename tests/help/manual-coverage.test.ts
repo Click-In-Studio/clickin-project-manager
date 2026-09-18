@@ -52,8 +52,8 @@ const MISSING_ALLOWED = new Set<string>([
   "admin", "admin/milestones", "admin/announcements", "admin/organization", "admin/roles",
   "admin/permissions", "admin/templates", "admin/policies", "admin/audit", "admin/asset-review",
   "admin/settings", "admin/producer", "admin/migration", "admin/danger",
-  // #537 个人与账号
-  "/my/announcements", "/my/weekly-call", "/my/tasks", "/my/notifications", "/my/reports",
+  // #537 个人与账号（/my/notifications 已由 #532 通知篇覆盖）
+  "/my/announcements", "/my/weekly-call", "/my/tasks", "/my/reports",
 ]);
 
 /** `_TEMPLATE.md` 的四个固定小节；内容 issue 的验收标准之一是「按模板写」。 */
