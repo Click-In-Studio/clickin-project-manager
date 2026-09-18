@@ -12,7 +12,7 @@
 
 ## 文档
 
-- [使用指南](docs/USER_GUIDE.md) — 各功能的操作说明与注意事项
+- 使用手册 — 站内公开帮助中心 `/help`，内容源在 [content/manual/](content/manual/)（写法见 [DEV_GUIDE §12](docs/DEV_GUIDE.md#12-使用手册页)）
 - [开发指南](docs/DEV_GUIDE.md) — 项目结构、本地开发、新增功能流程
 - [测试指南](docs/TEST_GUIDE.md) — UI 功能验证与对抗性测试
 - [部署流程](docs/DEPLOY.md) — 首次部署与日常发版说明
