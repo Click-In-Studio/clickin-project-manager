@@ -5,7 +5,7 @@
 import { randomBytes } from "node:crypto";
 import { getPool } from "@/lib/pg";
 import { sendEmail } from "@/lib/platform/email/email-send";
-import { BUG_REPORT_INBOX, BUG_REPORT_KIND_LABELS } from "./bug-report-types";
+import { BUG_REPORT_INBOX, BUG_REPORT_KIND_LABELS, BUG_REPORT_HOURLY_LIMIT } from "./bug-report-types";
 
 export {
   BUG_REPORT_KINDS, BUG_REPORT_KIND_LABELS, BUG_REPORT_BODY_MAX, BUG_REPORT_HOURLY_LIMIT, BUG_REPORT_INBOX, isBugReportKind,
@@ -46,22 +46,24 @@ export async function countRecentBugReports(userId: string): Promise<number> {
   return Number(rows[0].n);
 }
 
-export async function insertBugReport(input: BugReportInput): Promise<string> {
+/**
+ * 落库。一条语句同时完成三件事，不开事务也没有 check-then-act 的缝（AI review 指出）：
+ *   · production_id 用子查询核 FK——路径里抠出来的 id 可能已删或根本不是项目，对不上记 NULL
+ *     而不是让整条 23503 失败（上下文丢一格，比丢整条报告好）；
+ *   · 限频放进 INSERT 的 WHERE：近一小时该用户已有 N 条就一行都不插，返回 null 让调用方 429。
+ *     两个并发请求各自读到 9 再各插一条的竞态在单语句里不存在。
+ */
+export async function insertBugReport(input: BugReportInput): Promise<string | null> {
   const id = newBugReportId();
-  // production_id 是 FK：路径里抠出来的 id 可能已删或根本不是项目，落库前核一遍，
-  // 对不上就记 NULL 而不是让整条提交 23503 失败——上下文丢一格，比丢整条报告好。
-  let productionId: string | null = null;
-  if (input.productionId) {
-    const { rows } = await getPool().query<{ id: string }>("SELECT id FROM production WHERE id = $1", [input.productionId]);
-    productionId = rows[0]?.id ?? null;
-  }
-  await getPool().query(
+  const { rows } = await getPool().query<{ id: string }>(
     `INSERT INTO bug_report (id, user_id, production_id, kind, body, contact, page_path, manual_slug, user_agent, viewport)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [id, input.userId, productionId, input.kind, input.body, input.contact ?? null,
-     input.pagePath, input.manualSlug ?? null, input.userAgent ?? null, input.viewport ?? null],
+     SELECT $1, $2, (SELECT p.id FROM production p WHERE p.id = $3), $4, $5, $6, $7, $8, $9, $10
+     WHERE (SELECT count(*) FROM bug_report b WHERE b.user_id = $2 AND b.created_at > now() - interval '1 hour') < $11
+     RETURNING id`,
+    [id, input.userId, input.productionId ?? null, input.kind, input.body, input.contact ?? null,
+     input.pagePath, input.manualSlug ?? null, input.userAgent ?? null, input.viewport ?? null, BUG_REPORT_HOURLY_LIMIT],
   );
-  return id;
+  return rows[0]?.id ?? null;
 }
 
 /** 开发翻看用（也给以后的内部列表页）。默认只看 new。 */

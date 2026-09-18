@@ -2,8 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { readJsonObject } from "@/lib/request-json";
 import {
-  insertBugReport, countRecentBugReports, emailBugReport, isBugReportKind,
-  BUG_REPORT_BODY_MAX, BUG_REPORT_HOURLY_LIMIT,
+  insertBugReport, emailBugReport, isBugReportKind, BUG_REPORT_BODY_MAX,
 } from "@/lib/help/bug-report-db";
 
 // 「报告问题」（#538）：只收登录用户——手册页是公开的，匿名表单等于开一个刷库口。
@@ -23,10 +22,6 @@ export async function POST(req: NextRequest) {
   const pagePath = typeof b.pagePath === "string" && b.pagePath.startsWith("/") ? b.pagePath.slice(0, 500) : "/";
   const str = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
 
-  if (await countRecentBugReports(session.userId) >= BUG_REPORT_HOURLY_LIMIT) {
-    return Response.json({ error: "提交太频繁了，一小时后再试" }, { status: 429 });
-  }
-
   const input = {
     userId: session.userId, kind, body,
     contact: str(b.contact, 200),
@@ -36,7 +31,9 @@ export async function POST(req: NextRequest) {
     userAgent: req.headers.get("user-agent")?.slice(0, 500) ?? null,
     viewport: str(b.viewport, 40),
   };
+  // 限频在 INSERT 语句内判（每人每小时 N 条），插不进就是超了
   const id = await insertBugReport(input);
+  if (!id) return Response.json({ error: "提交太频繁了，一小时后再试" }, { status: 429 });
   // 日志是真相源，邮件只是提醒：不等它，也不因它失败
   void emailBugReport(id, input, session.name);
   return Response.json({ ok: true, id });
