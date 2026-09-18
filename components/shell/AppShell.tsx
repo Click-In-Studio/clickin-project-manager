@@ -416,7 +416,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
           }`}
         >
           {/* v3 sidebarControls：导航标签 + 全局折叠 toggle（原型样式） */}
-          <div className={`mb-2 flex min-h-[30px] items-center text-[9px] font-bold uppercase tracking-[0.12em] text-[#667676] ${
+          <div className={`sticky top-0 z-20 mb-2 flex min-h-[30px] shrink-0 items-center bg-[#e8e8e1] text-[9px] font-bold uppercase tracking-[0.12em] text-[#667676] ${
             productionSidebarContentFolded ? "justify-center px-0" : "justify-between pl-2.5 pr-0.5"
           }`}>
             {!productionSidebarContentFolded && <span>导航</span>}

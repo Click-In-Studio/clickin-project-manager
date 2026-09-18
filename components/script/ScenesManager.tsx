@@ -102,12 +102,18 @@ function SceneEditRow({
   fieldPerms,
   canDelete,
   productionId,
-  versionId,
   initialExpanded,
   onUpdate,
   onConvert,
   onDelete,
   onPatchMeta,
+  canReorder,
+  isDragging,
+  dropEdge,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
 }: {
   scene: MarkerProjection;
   indent: boolean;
@@ -117,12 +123,18 @@ function SceneEditRow({
   fieldPerms: SceneFieldPerms;
   canDelete: boolean;
   productionId: string;
-  versionId: string | null;
   initialExpanded?: boolean;
   onUpdate: (name: string) => Promise<void>;
   onConvert: () => Promise<void>;
   onDelete: () => Promise<void>;
   onPatchMeta: (fields: Partial<MetaFields>) => Promise<void>;
+  canReorder: boolean;
+  isDragging: boolean;
+  dropEdge: "top" | "bottom" | null;
+  onDragStart: (event: React.DragEvent<HTMLElement>) => void;
+  onDragEnd: () => void;
+  onDragOver: (event: React.DragEvent<HTMLTableRowElement>) => void;
+  onDrop: (event: React.DragEvent<HTMLTableRowElement>) => void;
 }) {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(scene.name);
@@ -171,10 +183,30 @@ function SceneEditRow({
       <tr
         ref={rowRef}
         onClick={handleRowClick}
-        className={`group cursor-pointer border-b ${expanded ? "border-zinc-200" : "border-zinc-100 last:border-0"}${indent ? " bg-zinc-50/40" : ""}`}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        style={{
+          boxShadow: dropEdge === "top"
+            ? "inset 0 2px #2563eb"
+            : dropEdge === "bottom" ? "inset 0 -2px #2563eb" : undefined,
+        }}
+        className={`group cursor-pointer border-b transition-colors hover:bg-zinc-100/70 ${expanded ? "border-zinc-200" : "border-zinc-100 last:border-0"}${indent ? " bg-zinc-50/40" : ""}${isDragging ? " relative z-10 bg-blue-50/70 opacity-70 outline outline-2 outline-blue-400 outline-offset-[-2px]" : ""}`}
       >
-        <td className={`py-3 w-16 sm:w-24${indent ? " pl-2 sm:pl-8 pr-2 sm:pr-4" : " px-2 sm:px-4"}`}>
+        <td className={`border-r border-zinc-100/80 py-3 w-16 sm:w-24${indent ? " pl-2 sm:pl-8 pr-2 sm:pr-4" : " px-2 sm:px-4"}`}>
           <div className="flex items-center gap-1">
+            {canReorder && (
+              <span
+                draggable
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+                onClick={(event) => event.stopPropagation()}
+                className="hidden cursor-grab select-none text-[10px] tracking-[-2px] text-zinc-300 opacity-0 transition-opacity active:cursor-grabbing group-hover:opacity-100 sm:inline"
+                title="拖动调整顺序"
+                aria-label="拖动调整顺序"
+              >
+                ⋮⋮
+              </span>
+            )}
             <span className="flex w-4 flex-shrink-0 items-center text-zinc-400 sm:hidden">
               <ChevronIcon direction={expanded ? "down" : "right"} size={12} />
             </span>
@@ -183,7 +215,7 @@ function SceneEditRow({
             </span>
           </div>
         </td>
-        <td className="px-2 sm:px-4 py-3">
+        <td className="border-r border-zinc-100/80 px-2 sm:px-4 py-3">
           {editingName ? (
             <input
               autoFocus
@@ -204,7 +236,7 @@ function SceneEditRow({
             </span>
           )}
         </td>
-        <td className="px-4 py-3">
+        <td className="border-r border-zinc-100/80 px-4 py-3">
           {marks.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {marks.map((m) => (
@@ -352,11 +384,13 @@ function InsertSceneRow({
   onAddChapter,
   onAddScene,
   allowEmptyChapterName = false,
+  prominent = false,
 }: {
   colSpan: number;
   onAddChapter: ((name: string) => Promise<void>) | null;
   onAddScene: ((name: string) => Promise<void>) | null;
   allowEmptyChapterName?: boolean;
+  prominent?: boolean;
 }) {
   const [open, setOpen] = useState<"chapter" | "scene" | null>(null);
   const [draftName, setDraftName] = useState("");
@@ -395,16 +429,19 @@ function InsertSceneRow({
 
   return (
     <>
-      <tr className="group border-b border-zinc-50">
-        <td colSpan={colSpan} className="px-4 py-0">
-          <div ref={panelRef} className="relative flex justify-center">
+      <tr className={`group border-b border-zinc-50 ${prominent ? "h-32" : ""}`}>
+        <td colSpan={colSpan} className={prominent ? "p-0" : "px-4 py-0"}>
+          <div ref={panelRef} className={`relative flex justify-center ${prominent ? "h-full" : ""}`}>
             {!open ? (
               <button
                 onClick={() => setOpen(onAddScene ? "scene" : "chapter")}
-                className="flex h-4 w-5 items-center justify-center rounded-full text-[11px] leading-none text-zinc-300 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-500 group-hover:opacity-100"
+                className={prominent
+                  ? "flex h-full min-h-32 w-full items-center justify-center gap-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-50 hover:text-zinc-700"
+                  : "flex h-6 w-full items-center justify-center gap-1.5 rounded text-[11px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-zinc-100/80 hover:text-zinc-600 group-hover:opacity-100"}
                 aria-label="添加章节或场景"
               >
-                +
+                <span className="text-base leading-none">+</span>
+                <span>{prominent ? "暂无章节，点击添加章节/段落" : "添加章节或段落"}</span>
               </button>
             ) : (
               <div className="flex w-full items-center gap-2 rounded border border-zinc-200 bg-white px-2 py-1 shadow-sm">
@@ -457,6 +494,8 @@ function InsertSceneRow({
 
 export default function ScenesManager({ productionId, productionName, initialScenes, canEdit, fieldPerms, embedded, canImport, versionId, initialExpandedId }: Props & { canImport?: boolean }) {
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
+  const [dragging, setDragging] = useState<MarkerProjection | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; edge: "top" | "bottom"; beforeId: string | null } | null>(null);
   const currentVersionId = versionId ?? null;
   const [deleteDialog, setDeleteDialog] = useState<MarkerDeleteDialogState | null>(null);
   const [deleteDialogBusy, setDeleteDialogBusy] = useState(false);
@@ -584,36 +623,89 @@ export default function ScenesManager({ productionId, productionName, initialSce
     });
   };
 
+  const reorder = async (markerId: string, beforeMarkerId: string | null) => {
+    await mutate(`${BASE_PATH}/api/production/${productionId}/scenes`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(currentVersionId ? { markerId, beforeMarkerId, versionId: currentVersionId } : { markerId, beforeMarkerId }),
+    });
+  };
+
   const acts = scenes.filter((s) => s.kind === "chapter");
   const subScenes = (actId: string) => scenes.filter((s) => s.parentId === actId);
   const beforeMarker = (marker?: MarkerProjection) => marker ? { insertBeforeSceneId: marker.id } : undefined;
   const colSpan = 4;
 
+  const dragPosition = (target: MarkerProjection, event: React.DragEvent<HTMLTableRowElement>) => {
+    if (!dragging || dragging.id === target.id || dragging.kind !== target.kind || dragging.parentId !== target.parentId) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const edge = event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.offsetHeight / 2 ? "top" : "bottom";
+    const siblings = target.kind === "chapter" ? acts : subScenes(target.parentId ?? "");
+    const targetIndex = siblings.findIndex((item) => item.id === target.id);
+    const beforeId = edge === "top"
+      ? target.id
+      : siblings[targetIndex + 1]?.id ?? (target.kind === "scene" ? acts[acts.findIndex((item) => item.id === target.parentId) + 1]?.id ?? null : null);
+    setDropTarget({ id: target.id, edge, beforeId });
+  };
+
+  const drop = async (event: React.DragEvent<HTMLTableRowElement>) => {
+    event.preventDefault();
+    const active = dragging;
+    const target = dropTarget;
+    setDragging(null);
+    setDropTarget(null);
+    if (!active || !target || target.beforeId === active.id) return;
+    try {
+      await reorder(active.id, target.beforeId);
+    } catch (error) {
+      console.error("Failed to reorder scene marker", error);
+      await refreshCanonicalState();
+    }
+  };
+
+  const dragProps = (scene: MarkerProjection) => ({
+    canReorder: canEdit && fieldPerms.structure,
+    isDragging: dragging?.id === scene.id,
+    dropEdge: dropTarget?.id === scene.id ? dropTarget.edge : null,
+    onDragStart: (event: React.DragEvent<HTMLElement>) => {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", scene.id);
+      setDragging(scene);
+    },
+    onDragEnd: () => { setDragging(null); setDropTarget(null); },
+    onDragOver: (event: React.DragEvent<HTMLTableRowElement>) => dragPosition(scene, event),
+    onDrop: (event: React.DragEvent<HTMLTableRowElement>) => { void drop(event); },
+  });
+
   const card = (
         <div className="rounded-2xl bg-white shadow-sm overflow-hidden">
           {acts.length === 0 ? (
             <div>
-              <p className="px-4 py-8 text-center text-sm text-zinc-300">暂无章节</p>
               {fieldPerms.create && (
-                <table className="w-full border-t border-zinc-100">
+                <table className="w-full">
                   <tbody>
                     <InsertSceneRow
                       colSpan={colSpan}
                       onAddChapter={(name) => add(name, null)}
                       onAddScene={null}
                       allowEmptyChapterName
+                      prominent
                     />
                   </tbody>
                 </table>
               )}
+              {!fieldPerms.create && <p className="px-4 py-8 text-center text-sm text-zinc-300">暂无章节</p>}
             </div>
           ) : (
             <table className="w-full table-auto sm:table-fixed">
               <thead>
                 <tr className="border-b border-zinc-100 text-left text-xs text-zinc-400">
-                  <th className="px-2 sm:px-4 py-3 font-medium w-16 sm:w-24">编号</th>
-                  <th className="px-2 sm:px-4 py-3 font-medium">名称</th>
-                  <th className="px-4 py-3 font-medium">排练记号</th>
+                  <th className="border-r border-zinc-100/80 px-2 sm:px-4 py-3 font-medium w-16 sm:w-24">编号</th>
+                  <th className="border-r border-zinc-100/80 px-2 sm:px-4 py-3 font-medium">名称</th>
+                  <th className="border-r border-zinc-100/80 px-4 py-3 font-medium">排练记号</th>
                   <th className="w-72 px-4 py-3 hidden sm:table-cell" />
                 </tr>
               </thead>
@@ -640,12 +732,12 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         fieldPerms={fieldPerms}
                         canDelete={canDeleteScene(fieldPerms, act.id)}
                         productionId={productionId}
-                        versionId={currentVersionId}
                         initialExpanded={act.id === initialExpandedId}
                         onUpdate={(name) => update(act.id, name)}
                         onConvert={() => convert(act)}
                         onDelete={() => del(act.id)}
                         onPatchMeta={(fields) => patchMeta(act.id, fields)}
+                        {...dragProps(act)}
                       />
                       {fieldPerms.create && (
                         <InsertSceneRow
@@ -664,12 +756,12 @@ export default function ScenesManager({ productionId, productionName, initialSce
                             fieldPerms={fieldPerms}
                             canDelete={canDeleteScene(fieldPerms, sub.id)}
                             productionId={productionId}
-                            versionId={currentVersionId}
                             initialExpanded={sub.id === initialExpandedId}
                             onUpdate={(name) => update(sub.id, name)}
                             onConvert={() => convert(sub)}
                             onDelete={() => del(sub.id)}
                             onPatchMeta={(fields) => patchMeta(sub.id, fields)}
+                            {...dragProps(sub)}
                           />
                           {fieldPerms.create && (
                             <InsertSceneRow

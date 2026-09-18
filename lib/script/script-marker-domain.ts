@@ -935,6 +935,63 @@ export function insertHierarchyMarker(state: ScriptState, input: MarkerInsert, c
   return insertMarker(state, input, createId);
 }
 
+/**
+ * Move a chapter (including all of its scenes and script blocks) or a scene
+ * (including its owned script blocks) before another marker.  Scene moves stay
+ * inside their current chapter; callers may use the next chapter as the
+ * boundary that represents "last scene in this chapter".
+ */
+export function moveHierarchyMarker(
+  state: ScriptState,
+  markerId: string,
+  beforeMarkerId: string | null,
+  createId: IdFactory,
+): ScriptState {
+  const sourceIndex = state.blocks.findIndex((block) => isMarkerBlock(block) && block.id === markerId);
+  if (sourceIndex < 0) return state;
+  const source = state.blocks[sourceIndex];
+  if (source.type !== "chapter_marker" && source.type !== "scene_marker") return state;
+
+  const targetIndex = beforeMarkerId
+    ? state.blocks.findIndex((block) => isMarkerBlock(block) && block.id === beforeMarkerId)
+    : state.blocks.length;
+  if (beforeMarkerId && targetIndex < 0) return state;
+
+  if (source.type === "chapter_marker") {
+    if (beforeMarkerId && state.blocks[targetIndex]?.type !== "chapter_marker") return state;
+  } else {
+    const parentId = source.markerMeta?.parentMarkerId ?? null;
+    if (!parentId) return state;
+    if (beforeMarkerId) {
+      const target = state.blocks[targetIndex];
+      const isSibling = target?.type === "scene_marker" && target.markerMeta?.parentMarkerId === parentId;
+      let isNextChapterBoundary = false;
+      if (target?.type === "chapter_marker") {
+        const parentIndex = state.blocks.findIndex((block) => block.id === parentId && block.type === "chapter_marker");
+        const nextChapter = state.blocks.find((block, index) => index > parentIndex && block.type === "chapter_marker");
+        isNextChapterBoundary = nextChapter?.id === target.id;
+      }
+      if (!isSibling && !isNextChapterBoundary) return state;
+    } else {
+      const parentIndex = state.blocks.findIndex((block) => block.id === parentId && block.type === "chapter_marker");
+      const hasLaterChapter = state.blocks.some((block, index) => index > parentIndex && block.type === "chapter_marker");
+      if (hasLaterChapter) return state;
+    }
+  }
+
+  const range = ownedRange(state.blocks, sourceIndex);
+  if (targetIndex >= sourceIndex && targetIndex <= range.end) return state;
+  const moving = state.blocks.slice(sourceIndex, range.end);
+  const blocks = [...state.blocks];
+  blocks.splice(sourceIndex, moving.length);
+  let insertIndex = beforeMarkerId
+    ? blocks.findIndex((block) => block.id === beforeMarkerId)
+    : blocks.length;
+  if (insertIndex < 0) insertIndex = blocks.length;
+  blocks.splice(insertIndex, 0, ...moving);
+  return normalizeMarkerStateAfterEdit(state, { ...state, blocks }, createId);
+}
+
 export function convertMarker(state: ScriptState, id: string, kind: MarkerKind, createId: IdFactory): ScriptState {
   const index = markerIndex(state, id);
   if (index < 0) return state;
