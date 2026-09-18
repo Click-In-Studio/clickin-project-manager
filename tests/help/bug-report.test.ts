@@ -3,8 +3,9 @@ import { getPool } from "@/lib/pg";
 
 // 外部边界（Resend）打桩：本地 .env.local 有真 key，不桩会真发到 dev@。断言调用参数，
 // 邮件内容与 reply-to 的接线在这里盯住。
-const sendEmail = vi.fn(async () => {});
-vi.mock("@/lib/platform/email/email-send", () => ({ sendEmail: (...a: unknown[]) => sendEmail(...a) }));
+type SendEmailParams = import("@/lib/platform/email/email-send").SendEmailParams;
+const sendEmail = vi.fn<(p: SendEmailParams) => Promise<void>>(async () => {});
+vi.mock("@/lib/platform/email/email-send", () => ({ sendEmail: (p: SendEmailParams) => sendEmail(p) }));
 
 import { POST } from "@/app/api/bug-reports/route";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
@@ -65,7 +66,7 @@ describe("POST /api/bug-reports", () => {
 
     // 落库后抄一封到反馈邮箱（fire-and-forget，等一拍）；联系方式不是邮箱时不设 reply-to
     await new Promise((r) => setTimeout(r, 50));
-    const mails = sendEmail.mock.calls.map((c) => c[0] as { to: string; subject: string; text: string; replyTo?: string });
+    const mails = sendEmail.mock.calls.map((c) => c[0]);
     const m = mails.find((x) => x.text.includes("这一页写的和实际不一样"))!;
     expect(m.to).toBe(BUG_REPORT_INBOX);
     expect(m.subject).toContain("手册写得不对");
@@ -91,7 +92,7 @@ describe("POST /api/bug-reports", () => {
     const r2 = await post({ body: "带邮箱联系方式", pagePath: "/", contact: "who@example.com" }, cookieFor(userId));
     expect(r2.status).toBe(200);
     await new Promise((r) => setTimeout(r, 50));
-    const last = sendEmail.mock.calls.at(-1)![0] as { replyTo?: string };
+    const last = sendEmail.mock.calls.at(-1)![0];
     expect(last.replyTo).toBe("who@example.com");
     const rows = await listBugReports({ status: "new", limit: 500 });
     expect(rows.some((r) => r.userId === userId && r.body === "邮件挂了也要落库")).toBe(true);
