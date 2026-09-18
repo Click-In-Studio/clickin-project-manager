@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
-import { searchDocs, type SearchDoc } from "@/lib/help/search-index";
+import { searchDocs, type SearchDoc } from "@/lib/help/search-score";
 
 let indexPromise: Promise<SearchDoc[]> | null = null;
 function loadIndex(): Promise<SearchDoc[]> {

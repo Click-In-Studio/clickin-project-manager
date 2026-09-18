@@ -10,7 +10,7 @@ import AdminModal from "@/components/ui/AdminModal";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
 import { extractProductionId } from "@/components/shell/app-shell/route";
-import { BUG_REPORT_KINDS, BUG_REPORT_KIND_LABELS, BUG_REPORT_BODY_MAX, type BugReportKind } from "@/lib/help/bug-report-db";
+import { BUG_REPORT_KINDS, BUG_REPORT_KIND_LABELS, BUG_REPORT_BODY_MAX, type BugReportKind } from "@/lib/help/bug-report-types";
 
 export default function BugReportModal({ onClose, manualSlug, defaultKind = "bug" }: {
   onClose: () => void;

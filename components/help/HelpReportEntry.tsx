@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import BugReportModal from "./BugReportModal";
-import type { BugReportKind } from "@/lib/help/bug-report-db";
+import type { BugReportKind } from "@/lib/help/bug-report-types";
 
 export default function HelpReportEntry({ slug, loggedIn }: { slug: string; loggedIn: boolean }) {
   const [open, setOpen] = useState<BugReportKind | null>(null);

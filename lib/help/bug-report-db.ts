@@ -5,18 +5,11 @@
 import { randomBytes } from "node:crypto";
 import { getPool } from "@/lib/pg";
 
-export const BUG_REPORT_KINDS = ["bug", "manual", "suggestion"] as const;
-export type BugReportKind = (typeof BUG_REPORT_KINDS)[number];
-export const BUG_REPORT_KIND_LABELS: Record<BugReportKind, string> = {
-  bug: "功能有问题",
-  manual: "手册写得不对",
-  suggestion: "建议",
-};
-
-/** 正文长度上限；再长就该发邮件了。 */
-export const BUG_REPORT_BODY_MAX = 4000;
-/** 限频：每人每小时 N 条（同一账号连点 / 脚本刷）。 */
-export const BUG_REPORT_HOURLY_LIMIT = 10;
+export {
+  BUG_REPORT_KINDS, BUG_REPORT_KIND_LABELS, BUG_REPORT_BODY_MAX, BUG_REPORT_HOURLY_LIMIT, isBugReportKind,
+  type BugReportKind,
+} from "./bug-report-types";
+import type { BugReportKind } from "./bug-report-types";
 
 export type BugReportInput = {
   userId: string;
@@ -40,10 +33,6 @@ export type BugReportRow = BugReportInput & {
 /** bug_report 的 short id（仓库 id 规约：TEXT PK + 前缀 + 时间 + 随机尾）。 */
 export function newBugReportId(): string {
   return `br_${Date.now().toString(36)}${randomBytes(4).toString("hex")}`;
-}
-
-export function isBugReportKind(v: unknown): v is BugReportKind {
-  return typeof v === "string" && (BUG_REPORT_KINDS as readonly string[]).includes(v);
 }
 
 /** 近一小时该用户已提交的条数（限频判据）。 */
