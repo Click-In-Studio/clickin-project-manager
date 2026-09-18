@@ -32,7 +32,7 @@ const EXTRA_ROUTES = new Set([
   "/", "/login", "/invite", "/share", "/unauthorized",
   "/account", "/account/profile", "/account/security", "/account/preferences",
   "/my/projects", "/my/permissions", "/my/daily-call", "/my/notification-settings",
-  "characters", "cuelists", "notifications", "access-requests", "import-script", "import-scenes",
+  "characters", "cuelists", "notifications", "announcements", "access-requests", "import-script", "import-scenes",
   "script/print", "wiki/print", "events/callsheet", "events/reqs", "events/reports", "events/view",
   "assets/upload", "assets/preview", "dramaturgy/inspiration",
 ]);
@@ -45,13 +45,8 @@ const MISSING_ALLOWED = new Set<string>([
   // #535 制作（后半）：财务 / 物料页目前只有查看、没有录入界面（#309 / #310），
   // 等写入口落地再写手册页，届时一并从这里划掉
   "finance", "materials",
-  // #536 管理项目
-  // （admin/templates 已由 #533 Cue 表设置覆盖、admin/migration 已由 #533 导入篇覆盖）
-  "admin", "admin/milestones", "admin/announcements", "admin/organization", "admin/roles",
-  "admin/permissions", "admin/policies", "admin/audit", "admin/asset-review",
-  "admin/settings", "admin/producer", "admin/danger",
-  // #537 个人与账号（/my/notifications 已由 #532 通知篇覆盖、/my/reports 已由 #534 报告篇覆盖）
-  "/my/announcements", "/my/weekly-call", "/my/tasks",
+  // #537 个人与账号（/my/notifications #532、/my/reports #534、/my/announcements #536 已覆盖）
+  "/my/weekly-call", "/my/tasks",
 ]);
 
 /** `_TEMPLATE.md` 的四个固定小节；内容 issue 的验收标准之一是「按模板写」。 */
