@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
@@ -26,7 +26,7 @@ import UserAvatarContent from "./app-shell/UserAvatarContent";
 import ProdAvatarIcon from "./app-shell/ProdAvatarIcon";
 import NavItem from "./app-shell/NavItem";
 import NavGroup from "./app-shell/NavGroup";
-import DropdownItem from "./app-shell/DropdownItem";
+import UserMenu from "./app-shell/UserMenu";
 import BottomDrawer from "./app-shell/BottomDrawer";
 import MobileTab from "./app-shell/MobileTab";
 import ProjectSwitcher from "./app-shell/ProjectSwitcher";
@@ -44,16 +44,17 @@ interface AppShellProps {
   initialUnreadCount?: number;
   initialPendingTasks?: number;
   initialUnreadReports?: number;
+  /** 产品路由 → 手册页 slug（#538「本页帮助」），RootLayout 从 content/manual 算出。 */
+  helpRoutes?: Record<string, string>;
 }
 
 const SCROLLBAR_ACTIVITY_HIDE_DELAY_MS = 700;
 
 type DrawerType = "overview" | "creation" | "production" | "admin" | "me";
 
-export default function AppShell({ session, productions, canCreateProduction = false, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0 }: AppShellProps) {
+export default function AppShell({ session, productions, canCreateProduction = false, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0, helpRoutes = {} }: AppShellProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [dropdownOpen, setDropdownOpen] = useState(false);
   // 页面显式上报的「当前对象」（#476 follow-up）——见 components/agent/ai-target.tsx
   const [aiTarget, setAiTarget] = useState<AiTargetState>(null);
   const reportAiTarget = useCallback<ReportAiTarget>((path, kind, id) => {
@@ -61,7 +62,6 @@ export default function AppShell({ session, productions, canCreateProduction = f
   }, []);
   const [aiPopoutOpen, setAiPopoutOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState<DrawerType | null>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
   const { unreadCount, pendingTasks, unreadReports, cueWarnings } = useShellBadges({
     session, pathname, initialUnreadCount, initialPendingTasks, initialUnreadReports,
   });
@@ -150,16 +150,6 @@ export default function AppShell({ session, productions, canCreateProduction = f
 
 
 
-  useEffect(() => {
-    if (!dropdownOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [dropdownOpen]);
 
 
   const isScriptPage = /^\/production\/[^/]+\/script(?:\/|$)/.test(pathname);
@@ -297,7 +287,6 @@ export default function AppShell({ session, productions, canCreateProduction = f
           currentProduction={currentProduction ?? null}
           currentProductionId={productionId}
           canCreateProduction={canCreateProduction}
-          onOpen={() => setDropdownOpen(false)}
         />
 
         {isAdminMode && productionId && (
@@ -357,65 +346,19 @@ export default function AppShell({ session, productions, canCreateProduction = f
           </button>
           )}
 
-          {/* User avatar + dropdown: sm+ only */}
-          <div className={`relative shrink-0 ${productionHeaderStage >= 2 ? "hidden" : "block"}`} ref={dropdownRef}>
-            <button
-              onClick={() => setDropdownOpen((v) => !v)}
-              aria-label="个人中心"
-              aria-expanded={dropdownOpen}
-              className="relative w-9 h-9 rounded-full border border-[var(--line)] overflow-hidden bg-[#182a2a] flex items-center justify-center hover:opacity-90 transition-opacity shrink-0"
-            >
-              <UserAvatarContent src={avatarSrc} initial={userInitial} />
-              {unreadCount > 0 && (
-                <span className="absolute top-0 right-0 w-2.5 h-2.5 rounded-full bg-[#c0392b] border-2 border-[var(--surface)]" />
-              )}
-            </button>
-
-            {dropdownOpen && (
-              <div className="absolute right-0 top-full mt-2.5 w-[240px] bg-[var(--surface)] border border-[var(--line)] rounded-[13px] shadow-[0_18px_55px_rgba(24,42,42,.18)] z-50 overflow-hidden p-2">
-                {/* ── 用户概要 ── */}
-                <div className="flex items-center gap-2.5 px-2 py-2 mb-1 border-b border-[var(--line)]">
-                  <span className="w-9 h-9 rounded-full bg-[#182a2a] overflow-hidden shrink-0 flex items-center justify-center">
-                    <UserAvatarContent src={avatarSrc} initial={userInitial} />
-                  </span>
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-[11px] font-bold text-[#182a2a] truncate">{session.name}</span>
-                  </div>
-                </div>
-
-                {/* ── 账户 ── */}
-                <DropdownItem href={accountHref("profile")} onClick={() => setDropdownOpen(false)}>个人信息</DropdownItem>
-                <DropdownItem href={accountHref("security")} onClick={() => setDropdownOpen(false)}>账号安全中心</DropdownItem>
-
-                {/* ── 偏好 ── */}
-                <div className="h-px bg-[var(--line)] mx-1 my-1.5" />
-                <DropdownItem href={accountHref("preferences")} onClick={() => setDropdownOpen(false)}>功能与设置</DropdownItem>
-                <DropdownItem href="/help" onClick={() => setDropdownOpen(false)}>使用手册</DropdownItem>
-
-                {/* ── 配置中心 ── */}
-                {currentProduction?.canAdmin && productionId && (
-                  <>
-                    <div className="h-px bg-[var(--line)] mx-1 my-1.5" />
-                    <DropdownItem href={`/production/${productionId}/admin`} onClick={() => setDropdownOpen(false)}>
-                      配置中心
-                      <span className="ml-auto text-[10px] text-[#667676] truncate max-w-[90px]">{currentProduction.name}</span>
-                    </DropdownItem>
-                  </>
-                )}
-
-                {/* ── 退出 ── */}
-                <div className="h-px bg-[var(--line)] mx-1 mt-1.5 mb-1" />
-                <form action={`${BASE_PATH}/api/auth/logout`} method="post">
-                  <button
-                    type="submit"
-                    className="w-full text-left flex items-center px-2.5 py-2 rounded-[7px] text-[11px] text-[#c0392b] hover:bg-[var(--paper)] transition-colors"
-                  >
-                    退出登录
-                  </button>
-                </form>
-              </div>
-            )}
-          </div>
+          {/* User avatar + dropdown: sm+ only（#538 抽成 UserMenu，含本页帮助 / 报告问题） */}
+          <UserMenu
+            name={session.name}
+            avatarSrc={avatarSrc}
+            userInitial={userInitial}
+            unreadCount={unreadCount}
+            pathname={pathname}
+            helpRoutes={helpRoutes}
+            accountHref={accountHref}
+            adminHref={currentProduction?.canAdmin && productionId ? `/production/${productionId}/admin` : null}
+            adminName={currentProduction?.name ?? null}
+            hidden={productionHeaderStage >= 2}
+          />
 
           {hasProductionTopMenu && (
             <div

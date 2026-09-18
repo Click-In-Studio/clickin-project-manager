@@ -2544,3 +2544,30 @@ CREATE INDEX IF NOT EXISTS job_lease_idx
 
 COMMENT ON TABLE job IS
   '后台重活任务队列：heavy-worker 租约认领执行（pdf/docx 解析、缩略图等）；完成经 pg_notify(job_done) 通知等待方';
+
+-- ── 「报告问题」日志（db/add-bug-report.sql）──────────────────────────────────
+-- 产品内 / 手册页提交的问题与建议，只记 log；开发定期查看后上 issue 并回填 issue_url。
+
+CREATE TABLE IF NOT EXISTS bug_report (
+  id             TEXT        PRIMARY KEY,               -- br_ 前缀短 id（lib/help/bug-report-db.ts）
+  user_id        UUID        NULL REFERENCES app_user(id) ON DELETE SET NULL,
+  production_id  TEXT        NULL REFERENCES production(id) ON DELETE SET NULL,
+  kind           TEXT        NOT NULL DEFAULT 'bug',    -- bug | manual | suggestion
+  body           TEXT        NOT NULL,
+  contact        TEXT        NULL,                      -- 用户自填的联系方式（选填）
+  page_path      TEXT        NOT NULL,                  -- 提交时所在页面
+  manual_slug    TEXT        NULL,                      -- 从手册页提交时的页 slug
+  user_agent     TEXT        NULL,
+  viewport       TEXT        NULL,                      -- 如 1440x900
+  status         TEXT        NOT NULL DEFAULT 'new',    -- new | triaged | filed | closed
+  issue_url      TEXT        NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 开发翻看：按状态、最新在前
+CREATE INDEX IF NOT EXISTS bug_report_status_idx ON bug_report (status, created_at DESC);
+-- 限频：每人每小时 N 条
+CREATE INDEX IF NOT EXISTS bug_report_user_time_idx ON bug_report (user_id, created_at DESC);
+
+COMMENT ON TABLE bug_report IS
+  '「报告问题」日志（#538）：产品内 / 手册页提交的问题与建议，开发定期查看后上 issue 并回填 issue_url';
