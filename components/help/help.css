@@ -189,6 +189,10 @@
 .help-home-section { margin-top: 40px; }
 .help-home-section h2 { margin: 0 0 14px; font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .help-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); counter-reset: step; }
+/* 面板列表的通则：grid 拉伸的是 <li>，卡片本体是里面的 <a>——不让 <a> 撑满 <li>，
+   摘要多一行的那张就比同排的矮，边框对不齐。所有「li > a 卡片」都走 flex 撑满。 */
+.help-steps li, .help-popular li { display: flex; }
+.help-steps li a, .help-popular li a { flex: 1; min-width: 0; }
 .help-steps li a {
   display: block; text-decoration: none; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
 }
