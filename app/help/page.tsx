@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { loadManual } from "@/lib/help/manual";
+import HelpSearch from "@/components/help/HelpSearch";
 
 // 手册首页：搜索占位 + 六张一级分类卡 + 三步上手 + 热门问题（飞书 / Slack 帮助中心
 // 首页同款骨架）。三步上手与热门问题读 content/manual/_home.md。
@@ -14,10 +15,7 @@ export default function HelpHome() {
       <section className="help-hero">
         <h1>Backstage 使用手册</h1>
         <p>从注册登录到剧本、Cue、日程、权限与 AI 助手——每个功能怎么用、谁能用、注意什么。</p>
-        <label className="help-search" title="搜索即将上线">
-          <span aria-hidden>⌕</span>
-          <input type="search" placeholder="搜索手册（即将上线）" disabled aria-label="搜索手册" />
-        </label>
+        <HelpSearch size="large" />
       </section>
 
       <div className="help-cards">

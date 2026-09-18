@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
+import { getSession } from "@/lib/account/session";
 import { loadManual, getManualNeighbors } from "@/lib/help/manual";
 import HelpSidebar from "@/components/help/HelpSidebar";
 import HelpScope from "@/components/help/HelpScope";
 import HelpToc from "@/components/help/HelpToc";
 import HelpMarkdown from "@/components/help/HelpMarkdown";
+import HelpReportEntry from "@/components/help/HelpReportEntry";
 
 type Params = { slug: string[] };
 
@@ -25,6 +28,8 @@ export default async function HelpArticle({ params }: { params: Promise<Params> 
   const section = manual.sections.find((s) => s.slug === page.sectionSlug)!;
   const group = section.groups.find((g) => g.slug === page.groupSlug)!;
   const { prev, next } = getManualNeighbors(slug);
+  // 「报告问题」只给登录用户（#538）：手册是公开页，匿名表单等于开刷库口
+  const loggedIn = getSession(await cookies()) !== null;
   const related = page.related.map((s) => manual.pages.find((p) => p.slug === s)).filter((p) => p != null);
 
   return (
@@ -48,6 +53,8 @@ export default async function HelpArticle({ params }: { params: Promise<Params> 
           {page.updated && <div className="help-updated">更新于 {page.updated}</div>}
           <HelpScope page={page} />
           <HelpMarkdown body={page.body} slug={slug} />
+
+          <HelpReportEntry slug={slug} loggedIn={loggedIn} />
 
           {related.length > 0 && (
             <section className="help-related">

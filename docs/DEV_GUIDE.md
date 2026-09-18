@@ -1024,13 +1024,32 @@ updated: 2026-09-18               # 必填 YYYY-MM-DD
 - `routes` 只能写已知路由（导航口径或测试里的 `EXTRA_ROUTES`），防拼写错误。
 - `related`、`_home.md`、正文互链必须指向存在的页；图片必须在 `public/manual/`。
 
-### 12.5 相关文件
+### 12.5 功能 PR 必须同步手册页（规约）
+
+手册跟代码走，没有第二真相源。凡是改了用户可感知行为的 PR——加 / 删菜单项、改按钮文案、改流程步骤、改权限边界、改档位限制——**同一 PR 里改对应的 `content/manual/**/*.md`**，并把 frontmatter `updated` 改成当天。判断标准：手册里有没有一句话因为这个 PR 变得不对了。
+
+- 新增侧栏入口：覆盖棘轮会红（`MISSING_ALLOWED` 只减不增），补页是过 CI 的前提。
+- 删功能：删掉对应页或段落，别留「即将」「暂不」。
+- 手册页也是 review 对象：AI review 与人工 review 都要看 md 改动是否与代码改动对得上。
+
+### 12.6 「本页帮助」「报告问题」「搜索」（#538）
+
+| 件 | 在哪 | 怎么工作 |
+|---|---|---|
+| 本页帮助 | 头像菜单 | `RootLayout` 用 `manualRouteIndex(loadManual())` 算出「产品路由 → 手册 slug」下发 `AppShell`；`components/shell/app-shell/help-link.ts` 把 pathname 归一化成 nav-config 口径的键（项目内相对 path、项目外绝对 path、剔除 id 段）由具体到泛逐级查，没命中回 `/help` |
+| 报告问题 | 头像菜单、每篇手册页底部 | `components/help/BugReportModal.tsx` → `POST /api/bug-reports` → `bug_report` 表（`db/add-bug-report.sql`）。只收登录用户，每人每小时 10 条；自动带 page_path / manual_slug / production_id / user_agent / viewport。落库后经 Resend 抄一封到 `dev@clickinmusical.com`（`BUG_REPORT_INBOX`，邮箱侧路由到全体开发者；联系方式是邮箱时设 reply-to；发送失败只记 console 不影响落库）。**日志表是真相源**：开发也可 `SELECT … FROM bug_report WHERE status='new' ORDER BY created_at DESC`（或 `listBugReports()`）翻看，上 issue 后回填 `status` / `issue_url` |
+| 搜索 | 手册顶栏与首页 | `GET /api/help/search-index`（公开，缓存 1h）给一份轻量索引；`components/help/HelpSearch.tsx` 客户端过滤，打分在 `lib/help/search-index.ts`（标题 > 摘要 > 小节 > 面包屑 > 正文，多词 AND） |
+
+### 12.7 相关文件
 
 | 文件 | 作用 |
 |---|---|
 | `lib/help/manual.ts` | 目录树加载、frontmatter 校验、标题锚点、路由索引 |
 | `components/help/*` | 顶栏、左树、适用范围块、页内目录、正文渲染、`help.css` |
 | `app/help/` | 首页 `/help`、文章 `/help/[...slug]` |
-| `proxy.ts` | `/help` 列为公开前缀 |
+| `proxy.ts` | `/help` `/manual/` `/api/help/` 列为公开前缀 |
+| `lib/help/bug-report-db.ts` `app/api/bug-reports/` | 报告问题落库与接口 |
+| `lib/help/search-index.ts` `app/api/help/search-index/` | 搜索索引 |
+| `components/shell/app-shell/help-link.ts` | 本页帮助的路由归一化 |
 | `next.config.ts` | `outputFileTracingIncludes` 圈进 `content/manual/**`（standalone 不追踪 fs 读） |
 

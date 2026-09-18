@@ -1226,6 +1226,73 @@
       "default": "now()"
     }
   ],
+  "bug_report": [
+    {
+      "column": "id",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "user_id",
+      "type": "uuid",
+      "nullable": true
+    },
+    {
+      "column": "production_id",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "kind",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "body",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "contact",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "page_path",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "manual_slug",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "user_agent",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "viewport",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "status",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "column": "issue_url",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "column": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false
+    }
+  ],
   "character": [
     {
       "column": "id",

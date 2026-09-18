@@ -29,4 +29,4 @@ updated: 2026-09-18
 ## 常见问题
 
 **兑换码从哪来？**
-找我们。
+写信到 dev@clickinmusical.com。

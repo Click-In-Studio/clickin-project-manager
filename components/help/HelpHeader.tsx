@@ -1,7 +1,8 @@
 // 手册站点顶栏（#531）：独立于 AppShell——手册是给未登录的外人看的帮助中心，
-// 不该背着整套产品侧栏。搜索框壳子阶段只是占位（客户端索引在收尾 issue #538）。
+// 不该背着整套产品侧栏。搜索是客户端过滤（#538，索引来自 /api/help/search-index）。
 
 import Link from "next/link";
+import HelpSearch from "./HelpSearch";
 
 export default function HelpHeader() {
   return (
@@ -11,10 +12,7 @@ export default function HelpHeader() {
           <span className="help-brand-mark">B</span>
           <span className="help-brand-text">Backstage <span>使用手册</span></span>
         </Link>
-        <label className="help-search" title="搜索即将上线">
-          <span aria-hidden>⌕</span>
-          <input type="search" placeholder="搜索手册（即将上线）" disabled aria-label="搜索手册" />
-        </label>
+        <HelpSearch />
         <Link href="/" className="help-open-app">打开 Backstage</Link>
       </div>
     </header>
