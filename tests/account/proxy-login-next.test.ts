@@ -50,6 +50,8 @@ describe("proxy：无会话重定向到 /login 带回跳目标", () => {
     // 使用手册（#531）是公开帮助中心：不登录可看、可外发
     expect(redirectTarget("/help")).toBeNull();
     expect(redirectTarget("/help/start/login/register-and-login")).toBeNull();
+    // 手册截图在 public/manual/**：未登录读者也要能加载（#532 第一次上图时撞到 307）
+    expect(redirectTarget("/manual/start/home.png")).toBeNull();
     expect(redirectTarget("/api/auth/email/initiate")).toBeNull();
   });
 });
