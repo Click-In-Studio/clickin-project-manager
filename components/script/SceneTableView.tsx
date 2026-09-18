@@ -33,6 +33,7 @@ export type TableViewConfigData = {
   columnOrder: string[];
   visibleColumns: string[];
   columnWidths: Record<string, number>;
+  frozenColumns: string[];
 };
 
 export function getDefaultViewConfig(): TableViewConfigData {
@@ -40,7 +41,7 @@ export function getDefaultViewConfig(): TableViewConfigData {
   const visibleColumns = [...columnOrder];
   const columnWidths: Record<string, number> = {};
   for (const c of DEFAULT_COLUMNS) columnWidths[c.key] = c.defaultWidth;
-  return { columnOrder, visibleColumns, columnWidths };
+  return { columnOrder, visibleColumns, columnWidths, frozenColumns: ["number"] };
 }
 
 export function normalizeTableViewConfig(value: unknown): TableViewConfigData {
@@ -70,8 +71,11 @@ export function normalizeTableViewConfig(value: unknown): TableViewConfigData {
     const width = providedWidths[key];
     return [key, typeof width === "number" && Number.isFinite(width) && width >= 40 ? width : defaults.columnWidths[key]];
   }));
+  const frozenColumns = Array.isArray(config.frozenColumns)
+    ? [...new Set(config.frozenColumns.filter((key): key is string => typeof key === "string" && knownKeys.has(key) && visibleColumns.includes(key)))]
+    : defaults.frozenColumns;
 
-  return { columnOrder, visibleColumns, columnWidths };
+  return { columnOrder, visibleColumns, columnWidths, frozenColumns };
 }
 
 export type SceneTableViewProps = {
@@ -80,7 +84,6 @@ export type SceneTableViewProps = {
   canEdit: boolean;
   /** 逐字段编辑权限；canEdit 是「值得显示编辑态」的粗门，字段能不能改看这个 */
   fieldPerms: SceneFieldPerms;
-  versionId: string | null;
   viewConfig: TableViewConfigData;
   onViewConfigChange: (config: TableViewConfigData) => void;
   onUpdateScene: (sceneId: string, name: string) => Promise<void>;
@@ -108,6 +111,16 @@ function MetaCell({
     if (!editing) setDraft(value);
   }, [value, editing]);
 
+  const resizeTextarea = useCallback((element: HTMLTextAreaElement | null) => {
+    if (!element) return;
+    element.style.height = "0px";
+    element.style.height = `${Math.max(24, element.scrollHeight)}px`;
+  }, []);
+
+  useEffect(() => {
+    if (editing && multiline) resizeTextarea(textareaRef.current);
+  }, [draft, editing, multiline, resizeTextarea]);
+
   const commit = async () => {
     if (draft === value) { setEditing(false); return; }
     setSaving(true);
@@ -121,9 +134,9 @@ function MetaCell({
       return (
         <textarea
           autoFocus
-          ref={(el) => { textareaRef.current = el; }}
+          ref={(el) => { textareaRef.current = el; resizeTextarea(el); }}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => { setDraft(e.target.value); resizeTextarea(e.currentTarget); }}
           onBlur={commit}
           onCompositionStart={() => setIsComposing(true)}
           onCompositionEnd={() => setIsComposing(false)}
@@ -146,8 +159,8 @@ function MetaCell({
             if (e.key === "Escape") { setDraft(value); setEditing(false); }
           }}
           disabled={saving}
-          rows={3}
-          className="w-full rounded border border-zinc-300 px-2 py-1 text-xs leading-relaxed outline-none resize-none focus:border-zinc-500 disabled:opacity-50"
+          rows={1}
+          className="block min-h-6 w-full overflow-hidden rounded border border-zinc-300 px-2 py-1 text-xs leading-relaxed outline-none resize-none focus:border-zinc-500 disabled:opacity-50"
         />
       );
     }
@@ -173,8 +186,8 @@ function MetaCell({
   return (
     <div
       className={`text-xs text-zinc-600 whitespace-pre-wrap break-words min-h-[1.25rem] ${canEdit ? "cursor-text hover:bg-zinc-50 rounded px-1 -mx-1" : ""}`}
-      onDoubleClick={() => canEdit && setEditing(true)}
-      title={canEdit ? "双击编辑" : undefined}
+      onClick={() => canEdit && setEditing(true)}
+      title={canEdit ? "单击编辑" : undefined}
     >
       {value || <span className="text-zinc-300 italic">—</span>}
     </div>
@@ -246,8 +259,8 @@ function DurationCell({
   return (
     <div
       className={`text-xs text-zinc-500 min-h-[1.25rem] ${canEdit ? "cursor-text hover:bg-zinc-50 rounded px-1 -mx-1" : ""}`}
-      onDoubleClick={() => canEdit && setEditing(true)}
-      title={canEdit ? "双击编辑" : undefined}
+      onClick={() => canEdit && setEditing(true)}
+      title={canEdit ? "单击编辑" : undefined}
     >
       {displayValue || <span className="text-zinc-300 italic">—</span>}
     </div>
@@ -304,8 +317,8 @@ function SceneNameCell({
   return (
     <span
       className={`text-xs ${canEdit ? "cursor-text hover:opacity-70" : ""}`}
-      onDoubleClick={() => canEdit && setEditing(true)}
-      title={canEdit ? "双击编辑" : undefined}
+      onClick={() => canEdit && setEditing(true)}
+      title={canEdit ? "单击编辑" : undefined}
     >
       {scene.name || <span className="italic text-zinc-300">未命名</span>}
     </span>
@@ -317,7 +330,6 @@ export default function SceneTableView({
   scenes,
   canEdit,
   fieldPerms,
-  versionId,
   viewConfig,
   onViewConfigChange,
   onUpdateScene,
@@ -339,6 +351,30 @@ export default function SceneTableView({
       .map(key => DEFAULT_COLUMNS.find(c => c.key === key)!)
       .filter(Boolean);
   }, [viewConfig]);
+  const frozenLayout = useMemo(() => {
+    const frozen = new Set(viewConfig.frozenColumns);
+    let left = 0;
+    const offsets = new Map<string, number>();
+    for (const column of visibleColumns) {
+      if (!frozen.has(column.key)) continue;
+      offsets.set(column.key, left);
+      left += viewConfig.columnWidths[column.key] ?? column.defaultWidth;
+    }
+    return { frozen, offsets, lastKey: [...offsets.keys()].at(-1) ?? null };
+  }, [viewConfig.columnWidths, viewConfig.frozenColumns, visibleColumns]);
+
+  const frozenCell = (key: string, header = false): React.CSSProperties => {
+    if (!frozenLayout.frozen.has(key)) return {};
+    return {
+      position: "sticky",
+      left: frozenLayout.offsets.get(key) ?? 0,
+      zIndex: header ? 30 : 5,
+      // Sticky cells must paint their own opaque layer; inheriting the row
+      // background lets horizontally-scrolling content show through them.
+      backgroundColor: "#fff",
+      boxShadow: frozenLayout.lastKey === key ? "2px 0 5px rgba(24,42,42,.08)" : undefined,
+    };
+  };
 
   const acts = useMemo(() => scenes.filter(s => s.kind === "chapter"), [scenes]);
   const subScenes = useCallback((actId: string) => scenes.filter(s => s.parentId === actId), [scenes]);
@@ -519,12 +555,12 @@ export default function SceneTableView({
     const isExpanded = expandedAssets.has(scene.id);
     return (
       <React.Fragment key={scene.id}>
-        <tr className={`group border-b border-[var(--line)] ${isChapter ? "bg-zinc-50/60" : ""}`}>
+        <tr className={`group border-b border-[var(--line)] transition-colors ${isChapter ? "bg-zinc-50/70 hover:bg-zinc-100" : "hover:bg-zinc-100/70"}`}>
           {visibleColumns.map((col) => (
             <td
               key={col.key}
-              className="px-3 py-2.5 align-top"
-              style={{ width: viewConfig.columnWidths[col.key] ?? col.defaultWidth }}
+              className="border-r border-zinc-100/90 px-3 py-2.5 align-top"
+              style={{ width: viewConfig.columnWidths[col.key] ?? col.defaultWidth, ...frozenCell(col.key) }}
             >
               {renderCell(scene, col.key, isChapter, children)}
             </td>
@@ -563,19 +599,19 @@ export default function SceneTableView({
   );
 
   return (
-    <div className="overflow-x-auto rounded-2xl bg-white shadow-sm">
+    <div className="max-h-[calc(100dvh-9rem)] overflow-auto overscroll-contain rounded-2xl bg-white shadow-sm">
       <table
         ref={tableRef}
         className="border-collapse text-left w-full table-fixed"
         style={{ minWidth: totalWidth }}
       >
-        <thead className="sticky top-0 z-10 bg-white">
+        <thead className="sticky top-0 z-20 bg-white shadow-[0_1px_0_var(--line)]">
           <tr className="border-b border-[var(--line)]">
             {visibleColumns.map((col) => (
               <th
                 key={col.key}
-                className="relative px-3 py-3 text-xs font-medium text-zinc-500 select-none"
-                style={{ width: viewConfig.columnWidths[col.key] ?? col.defaultWidth }}
+                className="relative border-r border-zinc-100/90 px-3 py-3 text-xs font-medium text-zinc-500 select-none"
+                style={{ width: viewConfig.columnWidths[col.key] ?? col.defaultWidth, ...frozenCell(col.key, true) }}
               >
                 <span className="truncate block">{col.label}</span>
                 <div

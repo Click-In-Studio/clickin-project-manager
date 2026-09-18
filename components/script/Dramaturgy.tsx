@@ -358,7 +358,6 @@ export default function Dramaturgy({
             scenes={scenes}
             canEdit={canEdit}
             fieldPerms={fieldPerms}
-            versionId={versionId}
             viewConfig={tableConfig}
             onViewConfigChange={handleConfigChange}
             onUpdateScene={handleUpdateScene}
