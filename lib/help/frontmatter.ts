@@ -41,21 +41,31 @@ export function parseFrontmatter(source: string): { data: Frontmatter; body: str
   return { data, body: lines.slice(end + 1).join("\n") };
 }
 
-/** 行尾 ` # 注释`（引号内的 # 不算）。 */
+/**
+ * 行尾 ` # 注释`。只有**以引号开头**的值才按引号串处理（引号内的 # 不算注释）；
+ * 裸值里的撇号（`summary: it's fine # 说明`）是正文，不是引号——否则它会把后面
+ * 真正的注释一起吞进值里（AI review 指出）。
+ */
 function stripComment(v: string): string {
-  let quote: string | null = null;
-  for (let i = 0; i < v.length; i++) {
-    const c = v[i];
-    if (quote) { if (c === quote) quote = null; continue; }
-    if (c === '"' || c === "'") { quote = c; continue; }
-    if (c === "#" && (i === 0 || /\s/.test(v[i - 1]))) return v.slice(0, i).trimEnd();
+  const t = v.trim();
+  const q = t[0];
+  if (q === '"' || q === "'") {
+    const close = t.indexOf(q, 1);
+    if (close > 0) {
+      const after = t.slice(close + 1).trim();
+      if (after === "" || after.startsWith("#")) return t.slice(0, close + 1);
+    }
+    // 引号没闭合 / 闭合后还有非注释内容：当裸值处理，落到下面的规则
   }
-  return v.trim();
+  const m = /(^|\s)#/.exec(t);
+  return (m ? t.slice(0, m.index) : t).trim();
 }
 
 function parseValue(v: string, line: number): FrontmatterValue {
   if (v === "") throw new FrontmatterError("值为空", line);
   if (v.startsWith("[")) {
+    // 行内数组按逗号硬切，引号里的逗号不做特殊处理——手册数组只装 slug / 路由 /
+    // 平台名，这些值不含逗号。刻意不做：做一半的引号感知比不做更难预测。
     if (!v.endsWith("]")) throw new FrontmatterError("数组没有闭合的 ]", line);
     const inner = v.slice(1, -1).trim();
     if (!inner) return [];

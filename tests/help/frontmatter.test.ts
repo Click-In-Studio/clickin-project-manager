@@ -27,6 +27,23 @@ describe("parseFrontmatter：支持的子集", () => {
     expect(body).toBe("\n## 正文");
   });
 
+  it("裸值里的撇号是正文不是引号，行尾注释照样剥掉（AI review）", () => {
+    const { data } = parseFrontmatter("---\nsummary: it's fine   # 说明\nwho: 有「Cue 表管理」权限的成员 # 谁能用\nnote: a#b 不是注释\n---\n");
+    expect(data).toEqual({ summary: "it's fine", who: "有「Cue 表管理」权限的成员", note: "a#b 不是注释" });
+  });
+
+  it("引号串：内部 # 与撇号保留；引号没闭合时当裸值", () => {
+    const { data } = parseFrontmatter("---\na: \"x # y\"\nb: 'it''s'\nc: \"未闭合 # 注释\n---\n");
+    expect(data.a).toBe("x # y");
+    expect(data.b).toBe("it''s");
+    expect(data.c).toBe("\"未闭合");
+  });
+
+  it("行内数组按逗号硬切，不做引号感知（刻意不支持，值里不该有逗号）", () => {
+    const { data } = parseFrontmatter("---\nroutes: [\"a, b\", c]\n---\n");
+    expect(data.routes).toEqual(["\"a", "b\"", "c"]);
+  });
+
   it("没有 frontmatter 块 → 空 data、全文为正文", () => {
     expect(parseFrontmatter("# 标题\n正文")).toEqual({ data: {}, body: "# 标题\n正文" });
   });

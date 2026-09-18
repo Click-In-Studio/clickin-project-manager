@@ -71,6 +71,10 @@ let cached: Manual | null = null;
 /**
  * 生产环境进程内缓存一次（内容随构建走，不会变）；开发环境每次重读，作者
  * 改 md 刷新即见。测试可传自定义 root 绕过缓存。
+ *
+ * 整棵树一次读完、任一页出错整体抛——**刻意的**。手册页有问题该在 CI 红掉
+ * （tests/help/manual-coverage.test.ts 加载的就是仓库真实内容），而不是线上
+ * 静默少一页让读者以为功能不存在。能合进 main 的内容一定加载得过。
  */
 export function loadManual(root: string = MANUAL_ROOT): Manual {
   if (root === MANUAL_ROOT && process.env.NODE_ENV === "production" && cached) return cached;
@@ -135,7 +139,7 @@ type IndexMeta = { title: string; order: number; summary: string | null };
 
 function readIndex(dir: string): IndexMeta {
   const file = path.join(dir, "_index.md");
-  if (!existsSync(file)) throw new ManualContentError(file, "分组目录缺少 _index.md（title / order）");
+  if (!existsSync(file)) throw new ManualContentError(file, "目录缺少 _index.md（title / order）——一级分类与二级分组都要有");
   const { data } = readFrontmatter(file);
   return { title: requireString(file, data, "title"), order: optionalNumber(file, data, "order") ?? 0, summary: optionalString(file, data, "summary") };
 }
