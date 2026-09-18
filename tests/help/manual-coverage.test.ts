@@ -42,16 +42,15 @@ const EXTRA_ROUTES = new Set([
  * 只减不增：往这里加条目 = 侧栏新增了功能却没写手册，请同 PR 补页。
  */
 const MISSING_ALLOWED = new Set<string>([
-  // #533 创作
-  "dramaturgy", "script", "cues",
   // #534 制作（前半）
   "contacts", "planning", "events", "tasks", "reports",
   // #535 制作（后半）
   "wiki", "finance", "materials", "assets",
   // #536 管理项目
+  // （admin/templates 已由 #533 Cue 表设置覆盖、admin/migration 已由 #533 导入篇覆盖）
   "admin", "admin/milestones", "admin/announcements", "admin/organization", "admin/roles",
-  "admin/permissions", "admin/templates", "admin/policies", "admin/audit", "admin/asset-review",
-  "admin/settings", "admin/producer", "admin/migration", "admin/danger",
+  "admin/permissions", "admin/policies", "admin/audit", "admin/asset-review",
+  "admin/settings", "admin/producer", "admin/danger",
   // #537 个人与账号（/my/notifications 已由 #532 通知篇覆盖）
   "/my/announcements", "/my/weekly-call", "/my/tasks", "/my/reports",
 ]);
