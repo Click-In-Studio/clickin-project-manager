@@ -67,3 +67,7 @@ Trace-*.json
 
 # Claude Code 的临时 worktree（并发验证任务用），不属于仓库内容
 .claude/worktrees/
+
+# 会话内临时脚本（手册截图 / 复现），不进仓库
+/.*.tmp.mjs
+/.*.tmp.ts
