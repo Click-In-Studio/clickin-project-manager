@@ -42,8 +42,6 @@ const EXTRA_ROUTES = new Set([
  * 只减不增：往这里加条目 = 侧栏新增了功能却没写手册，请同 PR 补页。
  */
 const MISSING_ALLOWED = new Set<string>([
-  // #534 制作（前半）
-  "contacts", "planning", "events", "tasks", "reports",
   // #535 制作（后半）
   "wiki", "finance", "materials", "assets",
   // #536 管理项目
@@ -51,8 +49,8 @@ const MISSING_ALLOWED = new Set<string>([
   "admin", "admin/milestones", "admin/announcements", "admin/organization", "admin/roles",
   "admin/permissions", "admin/policies", "admin/audit", "admin/asset-review",
   "admin/settings", "admin/producer", "admin/danger",
-  // #537 个人与账号（/my/notifications 已由 #532 通知篇覆盖）
-  "/my/announcements", "/my/weekly-call", "/my/tasks", "/my/reports",
+  // #537 个人与账号（/my/notifications 已由 #532 通知篇覆盖、/my/reports 已由 #534 报告篇覆盖）
+  "/my/announcements", "/my/weekly-call", "/my/tasks",
 ]);
 
 /** `_TEMPLATE.md` 的四个固定小节；内容 issue 的验收标准之一是「按模板写」。 */
