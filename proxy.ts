@@ -3,8 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 const SESSION_COOKIE = "sid";
 
 // Paths that don't require a session cookie
-// /help：使用手册（#531）是公开帮助中心，不登录可看、可外发给潜在客户
-const PUBLIC_PREFIXES = ["/login", "/unauthorized", "/help", "/api/auth/", "/api/oath-callback", "/api/email-inbound", "/api/internal/", "/api/feishu-webhook", "/api/account/bind/", "/api/rsvp"];
+// /help：使用手册（#531）是公开帮助中心，不登录可看、可外发给潜在客户；
+// /manual/ 是手册截图（public/manual/**），matcher 不排除 public 下的目录，不列在这里会被 307 到登录页
+const PUBLIC_PREFIXES = ["/login", "/unauthorized", "/help", "/manual/", "/api/auth/", "/api/oath-callback", "/api/email-inbound", "/api/internal/", "/api/feishu-webhook", "/api/account/bind/", "/api/rsvp"];
 
 // Paths that accept a card token (?t=...) in lieu of a session
 const TOKEN_ALLOWED_PREFIXES = ["/my/weekly-call", "/my/daily-call"];
