@@ -9,6 +9,9 @@ export const BUG_REPORT_KIND_LABELS: Record<BugReportKind, string> = {
   suggestion: "建议",
 };
 
+/** 反馈邮箱：报告落库后同时发一封到这里（路由到全体开发者，由邮箱侧配置）；未登录的手册访客直接写信。 */
+export const BUG_REPORT_INBOX = "dev@clickinmusical.com";
+
 /** 正文长度上限；再长就该发邮件了。 */
 export const BUG_REPORT_BODY_MAX = 4000;
 /** 限频：每人每小时 N 条（同一账号连点 / 脚本刷）。 */

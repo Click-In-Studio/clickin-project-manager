@@ -4,9 +4,11 @@
 
 import { randomBytes } from "node:crypto";
 import { getPool } from "@/lib/pg";
+import { sendEmail } from "@/lib/platform/email/email-send";
+import { BUG_REPORT_INBOX, BUG_REPORT_KIND_LABELS } from "./bug-report-types";
 
 export {
-  BUG_REPORT_KINDS, BUG_REPORT_KIND_LABELS, BUG_REPORT_BODY_MAX, BUG_REPORT_HOURLY_LIMIT, isBugReportKind,
+  BUG_REPORT_KINDS, BUG_REPORT_KIND_LABELS, BUG_REPORT_BODY_MAX, BUG_REPORT_HOURLY_LIMIT, BUG_REPORT_INBOX, isBugReportKind,
   type BugReportKind,
 } from "./bug-report-types";
 import type { BugReportKind } from "./bug-report-types";
@@ -81,4 +83,28 @@ export async function listBugReports(opts: { status?: BugReportRow["status"]; li
     contact: r.contact, pagePath: r.page_path, manualSlug: r.manual_slug, userAgent: r.user_agent,
     viewport: r.viewport, status: r.status, issueUrl: r.issue_url, createdAt: r.created_at.toISOString(),
   }));
+}
+
+const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+
+/**
+ * 报告落库后抄一封到反馈邮箱（#538）。日志表是真相源，邮件只是提醒——发送失败只记
+ * console，不影响用户那边的「已收到」。联系方式长得像邮箱就设成 reply-to，开发直接回。
+ */
+export async function emailBugReport(id: string, input: BugReportInput, reporterName: string): Promise<void> {
+  const kind = BUG_REPORT_KIND_LABELS[input.kind];
+  const lines: [string, string | null | undefined][] = [
+    ["编号", id], ["类型", kind], ["提交人", reporterName], ["联系方式", input.contact],
+    ["页面", input.pagePath], ["手册页", input.manualSlug], ["项目", input.productionId],
+    ["窗口", input.viewport], ["浏览器", input.userAgent],
+  ];
+  const meta = lines.filter(([, v]) => v);
+  const text = `${input.body}\n\n——\n${meta.map(([k, v]) => `${k}：${v}`).join("\n")}`;
+  const html = `<p style="white-space:pre-wrap;font-size:14px;line-height:1.7">${esc(input.body)}</p><hr><table style="font-size:12px;color:#666">${meta.map(([k, v]) => `<tr><td style="padding:2px 12px 2px 0">${k}</td><td>${esc(String(v))}</td></tr>`).join("")}</table>`;
+  const replyTo = input.contact && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.contact) ? input.contact : undefined;
+  try {
+    await sendEmail({ to: BUG_REPORT_INBOX, subject: `[报告问题·${kind}] ${input.body.slice(0, 40).replace(/\s+/g, " ")}`, text, html, replyTo });
+  } catch (e) {
+    console.error("[bug-report] email failed (log row kept):", e);
+  }
 }

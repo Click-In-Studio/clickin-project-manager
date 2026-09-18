@@ -10,7 +10,7 @@ import AdminModal from "@/components/ui/AdminModal";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
 import { extractProductionId } from "@/components/shell/app-shell/route";
-import { BUG_REPORT_KINDS, BUG_REPORT_KIND_LABELS, BUG_REPORT_BODY_MAX, type BugReportKind } from "@/lib/help/bug-report-types";
+import { BUG_REPORT_KINDS, BUG_REPORT_KIND_LABELS, BUG_REPORT_BODY_MAX, BUG_REPORT_INBOX, type BugReportKind } from "@/lib/help/bug-report-types";
 
 export default function BugReportModal({ onClose, manualSlug, defaultKind = "bug" }: {
   onClose: () => void;
@@ -63,7 +63,7 @@ export default function BugReportModal({ onClose, manualSlug, defaultKind = "bug
     return (
       <AdminModal kicker="Report" title="已收到" onClose={onClose} width={420}>
         <p style={{ margin: "0 0 18px", fontSize: 13, lineHeight: 1.7, color: "var(--ink)" }}>
-          谢谢。我们会定期查看这些反馈，需要进一步了解时按你留的方式联系。
+          谢谢。反馈已经送到开发这边，需要进一步了解时按你留的方式联系；急事直接写信 {BUG_REPORT_INBOX}。
         </p>
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <button type="button" style={PRIMARY_BTN} onClick={onClose}>关闭</button>

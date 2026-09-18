@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import BugReportModal from "./BugReportModal";
-import type { BugReportKind } from "@/lib/help/bug-report-types";
+import { BUG_REPORT_INBOX, type BugReportKind } from "@/lib/help/bug-report-types";
 
 export default function HelpReportEntry({ slug, loggedIn }: { slug: string; loggedIn: boolean }) {
   const [open, setOpen] = useState<BugReportKind | null>(null);
@@ -22,7 +22,7 @@ export default function HelpReportEntry({ slug, loggedIn }: { slug: string; logg
           <button type="button" onClick={() => setOpen("suggestion")}>提个建议</button>
         </p>
       ) : (
-        <p>登录 Backstage 之后，这里可以直接报告问题；页面里说的和你看到的不一样，也请告诉我们。</p>
+        <p>登录 Backstage 之后，这里可以直接报告问题；也可以写信到 <a href={`mailto:${BUG_REPORT_INBOX}`}>{BUG_REPORT_INBOX}</a>。</p>
       )}
       {open && <BugReportModal onClose={() => setOpen(null)} manualSlug={slug} defaultKind={open} />}
     </div>

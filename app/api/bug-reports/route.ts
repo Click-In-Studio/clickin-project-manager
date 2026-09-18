@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { readJsonObject } from "@/lib/request-json";
 import {
-  insertBugReport, countRecentBugReports, isBugReportKind,
+  insertBugReport, countRecentBugReports, emailBugReport, isBugReportKind,
   BUG_REPORT_BODY_MAX, BUG_REPORT_HOURLY_LIMIT,
 } from "@/lib/help/bug-report-db";
 
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "提交太频繁了，一小时后再试" }, { status: 429 });
   }
 
-  const id = await insertBugReport({
+  const input = {
     userId: session.userId, kind, body,
     contact: str(b.contact, 200),
     pagePath,
@@ -35,6 +35,9 @@ export async function POST(req: NextRequest) {
     productionId: str(b.productionId, 100),
     userAgent: req.headers.get("user-agent")?.slice(0, 500) ?? null,
     viewport: str(b.viewport, 40),
-  });
+  };
+  const id = await insertBugReport(input);
+  // 日志是真相源，邮件只是提醒：不等它，也不因它失败
+  void emailBugReport(id, input, session.name);
   return Response.json({ ok: true, id });
 }

@@ -1037,7 +1037,7 @@ updated: 2026-09-18               # 必填 YYYY-MM-DD
 | 件 | 在哪 | 怎么工作 |
 |---|---|---|
 | 本页帮助 | 头像菜单 | `RootLayout` 用 `manualRouteIndex(loadManual())` 算出「产品路由 → 手册 slug」下发 `AppShell`；`components/shell/app-shell/help-link.ts` 把 pathname 归一化成 nav-config 口径的键（项目内相对 path、项目外绝对 path、剔除 id 段）由具体到泛逐级查，没命中回 `/help` |
-| 报告问题 | 头像菜单、每篇手册页底部 | `components/help/BugReportModal.tsx` → `POST /api/bug-reports` → `bug_report` 表（`db/add-bug-report.sql`）。只收登录用户，每人每小时 10 条；自动带 page_path / manual_slug / production_id / user_agent / viewport。**只记 log**：开发定期 `SELECT … FROM bug_report WHERE status='new' ORDER BY created_at DESC`（或 `listBugReports()`）翻看，上 issue 后回填 `status` / `issue_url` |
+| 报告问题 | 头像菜单、每篇手册页底部 | `components/help/BugReportModal.tsx` → `POST /api/bug-reports` → `bug_report` 表（`db/add-bug-report.sql`）。只收登录用户，每人每小时 10 条；自动带 page_path / manual_slug / production_id / user_agent / viewport。落库后经 Resend 抄一封到 `dev@clickinmusical.com`（`BUG_REPORT_INBOX`，邮箱侧路由到全体开发者；联系方式是邮箱时设 reply-to；发送失败只记 console 不影响落库）。**日志表是真相源**：开发也可 `SELECT … FROM bug_report WHERE status='new' ORDER BY created_at DESC`（或 `listBugReports()`）翻看，上 issue 后回填 `status` / `issue_url` |
 | 搜索 | 手册顶栏与首页 | `GET /api/help/search-index`（公开，缓存 1h）给一份轻量索引；`components/help/HelpSearch.tsx` 客户端过滤，打分在 `lib/help/search-index.ts`（标题 > 摘要 > 小节 > 面包屑 > 正文，多词 AND） |
 
 ### 12.7 相关文件
