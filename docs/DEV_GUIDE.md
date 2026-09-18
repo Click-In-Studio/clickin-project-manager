@@ -13,6 +13,7 @@
 9. [Agent Bot](#9-agent-bot)
 10. [新增功能典型流程](#10-新增功能典型流程)
 11. [单元测试](#11-单元测试)
+12. [使用手册页](#12-使用手册页)
 
 ---
 
@@ -958,3 +959,76 @@ Migration 测试与常规单元测试在**同一个 `unit-test` job** 中完成�
 
 - ❌ **不要跳过 invariance 测试**：`it.skipIf(!snapshot)` 是正确模式，不要将 invariance 测试改为无条件 skip 或 todo
 - ❌ **不要修改已 commit 的 migration 文件 SQL 内容**：每个 migration 文件一旦 commit 不可实质修改（见"Migration 文件的修改规则"）
+
+---
+
+## 12. 使用手册页
+
+面向用户的使用手册是站内公开的帮助中心 **`/help`**（#523 / #531）：不登录可看、可外发给潜在客户。
+内容不进数据库，就是仓库里的 markdown——**功能 PR 顺手改手册页，部署即更新**，没有第二真相源。
+
+### 12.1 目录即信息架构
+
+```
+content/manual/
+├── _TEMPLATE.md               # 作者模板（复制它开新页）
+├── _home.md                   # 首页配置：quickstart / popular 两个 slug 列表
+├── start/                     # 一级：按用户旅程（start / creation / production / admin / account / ai）
+│   ├── _index.md              #   title / order / summary
+│   └── login/                 # 二级：逐字对齐 nav-config 的菜单名（「注册与登录」「Cue」「成员与部门」…）
+│       ├── _index.md
+│       └── register-and-login.md   # 文章；slug = start/login/register-and-login → /help/start/login/register-and-login
+└── …
+public/manual/<一级>/*.png     # 截图；正文里写 ![说明](/manual/start/login.png)
+```
+
+三层封顶：二级目录下不允许再建目录（加载器直接报错）。下划线开头的文件不是页面。
+
+### 12.2 frontmatter 契约
+
+```yaml
+---
+title: 创建 Cue 表                # 必填，动宾短语
+order: 2                          # 同组排序
+summary: 一句话说明这页解决什么问题   # 必填：首页卡片 / 列表 / 相关文章处显示
+routes: [cuelists]                # 对应产品内路由，nav-config 口径：cuelists / admin/roles / /my/tasks
+who: 有「Cue 表管理」权限的成员      # 谁能用；不写 = 所有成员
+tier: all                         # all | free | pro；文案取 PRODUCTION_TIERS[tier].label，档位改名自动跟
+platform: [desktop, mobile]       # 不写 = 两端
+related: [creation/cues/link-to-script]
+updated: 2026-09-18               # 必填 YYYY-MM-DD
+---
+```
+
+`who` / `tier` / `platform` 自动渲染成标题下的「适用范围」块（Slack "Who can use this feature?" 同款），正文不要再手写一遍。
+解析器是刻意收窄的 yaml 子集（`lib/help/frontmatter.ts`）：标量、数字、布尔、行内数组 `[a, b]`。缩进块、多行字符串不支持，会报错带行号。
+
+### 12.3 正文写法
+
+**读者是剧组里搞艺术的人**（导演、舞监、演员、设计师），不是开发者。三条硬规则：
+
+1. **去技术化**：正文不出现路由（`/login`）、代码、字段名、环境变量、「浏览器站点数据」这类词。界面上的按钮 / 菜单用「」原样引用（「使用飞书登录」「账号安全中心」），位置写成人话（右上角头像 → …）。
+2. **只写现状，没有「如果」**：这是我们自己部署的服务，功能有就是有、没有就是没有。不写「如果站点开启了邀请制…」——现在是邀请制就写邀请制，以后改成 toC 付费就改手册。
+3. **站在读者那边**：先说他要做什么、会看到什么，再说注意什么；常见问题用读者会问的原话做标题。
+
+- 固定四节 `## 这是什么` `## 怎么操作` `## 注意事项` `## 常见问题`（覆盖测试会查）。操作步骤用编号列表，一步一图。
+- 提示框用知识库同款 callout：`> [!💡]` 提示、`> [!📱]` 窄窗口差异、`> [!⚠️ bg=#f5edda]` 警告。不引入 tabs 等新方言。
+- 站内互链写相对 slug（`../cues/create`）或 `/help/<slug>`；外链自动新窗口打开。
+- 渲染管线是 `components/help/HelpMarkdown.tsx`（react-markdown + gfm，服务端组件，零客户端 JS）；**不要**改用 `WikiMarkdown`——那条管线绑着 wiki 方言与观看者解析。
+
+### 12.4 覆盖棘轮（`tests/help/manual-coverage.test.ts`）
+
+- nav-config 里每个入口（创作 / 制作 / 管理面板 / 我的面）必须映射到一篇手册页（`routes`），否则要列进 `MISSING_ALLOWED`。名单**只减不增**：往侧栏加新功能 = 同 PR 补手册页；内容 issue 合并时把对应路由从名单划掉；已有页的路由留在名单里会红（幽灵条目）。
+- `routes` 只能写已知路由（导航口径或测试里的 `EXTRA_ROUTES`），防拼写错误。
+- `related`、`_home.md`、正文互链必须指向存在的页；图片必须在 `public/manual/`。
+
+### 12.5 相关文件
+
+| 文件 | 作用 |
+|---|---|
+| `lib/help/manual.ts` | 目录树加载、frontmatter 校验、标题锚点、路由索引 |
+| `components/help/*` | 顶栏、左树、适用范围块、页内目录、正文渲染、`help.css` |
+| `app/help/` | 首页 `/help`、文章 `/help/[...slug]` |
+| `proxy.ts` | `/help` 列为公开前缀 |
+| `next.config.ts` | `outputFileTracingIncludes` 圈进 `content/manual/**`（standalone 不追踪 fs 读） |
+

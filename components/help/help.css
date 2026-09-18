@@ -1,0 +1,203 @@
+/* 使用手册（#531）站点样式。单一亮色外观：手册与产品共用 design tokens
+   （app/globals.css :root），外人看到的手册和登录后看到的产品是同一套颜色。 */
+
+.help-root {
+  height: 100%;
+  overflow-y: auto;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.help-root a { color: inherit; }
+
+/* ── 顶栏 ── */
+.help-header {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.help-header-inner {
+  max-width: 1240px; margin: 0 auto; padding: 0 20px;
+  height: 56px; display: flex; align-items: center; gap: 16px;
+}
+.help-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; flex-shrink: 0; }
+.help-brand-mark {
+  width: 28px; height: 28px; border-radius: 8px; background: var(--ink); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: Georgia, "Noto Serif SC", serif; font-size: 15px; font-weight: 700;
+}
+.help-brand-text { font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
+.help-brand-text span { font-weight: 500; color: var(--muted); margin-left: 6px; }
+.help-search {
+  flex: 1; min-width: 0; max-width: 460px; margin-left: auto;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 9px;
+  padding: 0 12px; height: 34px; color: var(--muted); font-size: 13px;
+}
+.help-search input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; font-size: 13px; color: var(--ink); }
+.help-search input::placeholder { color: var(--muted); }
+.help-open-app {
+  flex-shrink: 0; text-decoration: none; font-size: 12px; font-weight: 700;
+  border: 1px solid var(--ink); border-radius: 8px; padding: 7px 12px; white-space: nowrap;
+}
+.help-open-app:hover { background: var(--ink); color: #fff; }
+@media (max-width: 640px) {
+  .help-search { display: none; }
+  .help-brand-text span { display: none; }
+}
+
+/* ── 三栏骨架 ── */
+.help-frame {
+  max-width: 1240px; margin: 0 auto; padding: 24px 20px 64px;
+  display: grid; grid-template-columns: 1fr; gap: 24px;
+}
+@media (min-width: 900px)  { .help-frame { grid-template-columns: 232px minmax(0, 1fr); } }
+@media (min-width: 1200px) { .help-frame { grid-template-columns: 232px minmax(0, 1fr) 200px; } }
+.help-aside { position: sticky; top: 76px; align-self: start; max-height: calc(100vh - 96px); overflow-y: auto; }
+.help-main { min-width: 0; }
+
+/* 窄窗口：左树收进「目录」折叠条 */
+.help-mobile-tree { display: none; }
+@media (max-width: 899px) {
+  .help-aside { display: none; }
+  .help-mobile-tree { display: block; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  .help-mobile-tree > summary { padding: 10px 14px; font-size: 13px; font-weight: 700; cursor: pointer; list-style: none; }
+  .help-mobile-tree > summary::-webkit-details-marker { display: none; }
+  .help-mobile-tree > summary::before { content: "☰"; margin-right: 8px; color: var(--muted); }
+  .help-mobile-tree .help-tree { padding: 0 14px 10px; }
+}
+
+/* ── 左树 ── */
+.help-tree { font-size: 13px; }
+.help-tree-section { border-bottom: 1px solid var(--line); padding: 6px 0; }
+.help-tree-section:last-child { border-bottom: 0; }
+.help-tree-section > summary {
+  cursor: pointer; list-style: none; padding: 6px 4px;
+  font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--ink);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.help-tree-section > summary::-webkit-details-marker { display: none; }
+.help-tree-section > summary::after { content: "›"; color: var(--muted); transition: transform .15s; }
+.help-tree-section[open] > summary::after { transform: rotate(90deg); }
+.help-tree-group { padding: 2px 4px 8px; }
+.help-tree-group-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; padding: 6px 4px 2px; }
+.help-tree-group-title.is-current { color: var(--script); }
+.help-tree ul { list-style: none; margin: 0; padding: 0; }
+.help-tree li a {
+  display: block; padding: 5px 8px; border-radius: 6px; text-decoration: none; color: var(--ink); line-height: 1.4;
+}
+.help-tree li a:hover { background: var(--surface-2); }
+.help-tree li a.is-current { background: var(--script-soft); color: var(--script); font-weight: 600; }
+.help-tree-empty { margin: 0; padding: 4px 8px 8px; font-size: 12px; color: var(--muted); }
+
+/* ── 文章 ── */
+.help-article {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 32px clamp(20px, 4vw, 44px) 40px;
+}
+.help-crumbs { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--muted); margin: 0 0 14px; }
+.help-crumbs a { text-decoration: none; }
+.help-crumbs a:hover { color: var(--ink); text-decoration: underline; }
+.help-title {
+  margin: 0 0 8px; font-family: Georgia, "Noto Serif SC", serif; font-weight: 600;
+  font-size: clamp(24px, 3.2vw, 32px); letter-spacing: -.01em; line-height: 1.25;
+}
+.help-summary { margin: 0 0 18px; font-size: 15px; color: var(--muted); line-height: 1.6; }
+.help-updated { font-size: 12px; color: var(--muted); }
+
+.help-scope {
+  margin: 18px 0 28px; padding: 12px 16px; display: grid; gap: 6px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 10px; font-size: 13px;
+}
+.help-scope-title { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.help-scope-row { display: grid; grid-template-columns: 56px 1fr; gap: 12px; margin: 0; }
+.help-scope-row dt { color: var(--muted); }
+.help-scope-row dd { margin: 0; }
+
+/* 正文：在 @tailwindcss/typography 的 prose 之上覆一层品牌色 */
+.help-prose { font-size: 15px; line-height: 1.8; color: var(--ink); }
+.help-prose .help-h2 {
+  margin: 2em 0 .7em; padding-top: .4em; border-top: 1px solid var(--line);
+  font-size: 20px; font-weight: 700; letter-spacing: -.01em; scroll-margin-top: 76px;
+}
+.help-prose .help-h2:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+.help-prose .help-h3 { margin: 1.6em 0 .5em; font-size: 16px; font-weight: 700; scroll-margin-top: 76px; }
+.help-prose a { color: var(--script); text-decoration: underline; text-underline-offset: 3px; }
+.help-prose code { font-size: .9em; background: var(--surface-2); padding: .1em .35em; border-radius: 4px; font-weight: 500; }
+.help-prose code::before, .help-prose code::after { content: none; }
+.help-prose pre { background: #182a2a; color: #eef2f0; border-radius: 10px; }
+.help-prose pre code { background: transparent; padding: 0; }
+.help-prose ol > li::marker { font-weight: 700; color: var(--script); }
+.help-prose blockquote { font-style: normal; border-left-color: var(--line); color: var(--muted); }
+.help-prose strong { color: var(--ink); }
+.help-figure { display: block; margin: 14px 0 18px; }
+.help-figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 10px; background: #fff; margin: 0; }
+.help-figcaption { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); text-align: center; }
+.help-table-wrap { overflow-x: auto; margin: 14px 0; }
+.help-table-wrap table { margin: 0; font-size: 14px; }
+.help-callout {
+  display: flex; gap: 10px; align-items: flex-start; margin: 16px 0;
+  padding: 12px 14px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line);
+}
+.help-callout-emoji { flex-shrink: 0; font-size: 16px; line-height: 1.5; }
+.help-callout-body { min-width: 0; flex: 1; }
+.help-callout-body > p { margin: 0; }
+.help-callout-body > p + p { margin-top: .5em; }
+
+/* 相关文章 / 上下页 */
+.help-related { margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--line); }
+.help-related h2 { margin: 0 0 10px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.help-related ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.help-related a { text-decoration: none; font-size: 14px; color: var(--script); }
+.help-related a:hover { text-decoration: underline; }
+.help-pager { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
+.help-pager a {
+  display: block; text-decoration: none; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); min-width: 0;
+}
+.help-pager a:hover { border-color: var(--ink); }
+.help-pager a.is-next { text-align: right; grid-column: 2; }
+.help-pager small { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.help-pager span { font-size: 14px; font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 480px) { .help-pager { grid-template-columns: 1fr; } .help-pager a.is-next { grid-column: auto; } }
+
+/* ── 右侧页内目录 ── */
+.help-toc { font-size: 12px; }
+.help-toc-title { font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.help-toc ul { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--line); }
+.help-toc li a { display: block; padding: 4px 0 4px 12px; margin-left: -1px; border-left: 1px solid transparent; text-decoration: none; color: var(--muted); line-height: 1.4; }
+.help-toc li a:hover { color: var(--ink); border-left-color: var(--ink); }
+.help-toc li.is-sub a { padding-left: 24px; }
+
+/* ── 首页 ── */
+.help-home { max-width: 1240px; margin: 0 auto; padding: 40px 20px 64px; }
+.help-hero { text-align: center; padding: 16px 0 36px; }
+.help-hero h1 { margin: 0 0 10px; font-family: Georgia, "Noto Serif SC", serif; font-weight: 600; font-size: clamp(28px, 4vw, 40px); letter-spacing: -.01em; }
+.help-hero p { margin: 0 auto; max-width: 520px; color: var(--muted); font-size: 15px; line-height: 1.6; }
+.help-hero .help-search { margin: 22px auto 0; max-width: 560px; height: 44px; font-size: 14px; background: var(--surface); }
+.help-cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.help-card {
+  display: block; text-decoration: none; background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 18px 20px; min-height: 120px; transition: border-color .15s, transform .15s;
+}
+.help-card:hover { border-color: var(--ink); transform: translateY(-1px); }
+.help-card-n { font-size: 11px; font-weight: 700; letter-spacing: .1em; color: var(--script); }
+.help-card h2 { margin: 6px 0 6px; font-size: 18px; font-weight: 700; letter-spacing: -.01em; }
+.help-card p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.help-card-meta { margin-top: 10px; font-size: 12px; color: var(--muted); }
+.help-home-section { margin-top: 40px; }
+.help-home-section h2 { margin: 0 0 14px; font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.help-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); counter-reset: step; }
+.help-steps li a {
+  display: block; text-decoration: none; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
+}
+.help-steps li a::before { counter-increment: step; content: counter(step); display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 12px; font-weight: 700; align-items: center; justify-content: center; margin-bottom: 8px; }
+.help-steps li a:hover { border-color: var(--ink); }
+.help-steps strong { display: block; font-size: 15px; }
+.help-steps span { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+.help-popular { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.help-popular a { display: block; text-decoration: none; font-size: 14px; padding: 10px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+.help-popular a:hover { border-color: var(--ink); }
+.help-popular small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.help-empty { padding: 48px 20px; text-align: center; color: var(--muted); }

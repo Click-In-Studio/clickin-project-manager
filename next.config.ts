@@ -12,6 +12,8 @@ const nextConfig: NextConfig = {
       './node_modules/pdfjs-dist/standard_fonts/**',
       './node_modules/pdfjs-dist/wasm/**',
       './node_modules/pdfjs-dist/iccs/**',
+      // #531 使用手册：content/manual 由 lib/help/manual.ts 运行时 fs 直读，同样不会被追踪
+      './content/manual/**',
     ],
   },
 };

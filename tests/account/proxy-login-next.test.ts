@@ -47,6 +47,9 @@ describe("proxy：无会话重定向到 /login 带回跳目标", () => {
 
   it("公开前缀不重定向", () => {
     expect(redirectTarget("/login")).toBeNull();
+    // 使用手册（#531）是公开帮助中心：不登录可看、可外发
+    expect(redirectTarget("/help")).toBeNull();
+    expect(redirectTarget("/help/start/login/register-and-login")).toBeNull();
     expect(redirectTarget("/api/auth/email/initiate")).toBeNull();
   });
 });

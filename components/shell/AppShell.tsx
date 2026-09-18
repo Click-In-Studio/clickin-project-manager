@@ -178,7 +178,8 @@ export default function AppShell({ session, productions, canCreateProduction = f
   // 所以按末段判定，不另起顶层前缀——那会让 extractProductionId 之类
   // 按 /production/<id>/ 解析上下文的地方全部失效。
   const isPrintRoute = pathname.endsWith("/print") || pathname.includes("/print/");
-  if (!session || pathname.startsWith("/login") || isPrintRoute) {
+  // /help 使用手册（#531）同理：公开帮助中心自带顶栏，不背产品侧栏
+  if (!session || pathname.startsWith("/login") || pathname.startsWith("/help") || isPrintRoute) {
     return <>{children}</>;
   }
 
@@ -389,6 +390,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                 {/* ── 偏好 ── */}
                 <div className="h-px bg-[var(--line)] mx-1 my-1.5" />
                 <DropdownItem href={accountHref("preferences")} onClick={() => setDropdownOpen(false)}>功能与设置</DropdownItem>
+                <DropdownItem href="/help" onClick={() => setDropdownOpen(false)}>使用手册</DropdownItem>
 
                 {/* ── 配置中心 ── */}
                 {currentProduction?.canAdmin && productionId && (
