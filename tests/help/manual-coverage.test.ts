@@ -42,8 +42,9 @@ const EXTRA_ROUTES = new Set([
  * 只减不增：往这里加条目 = 侧栏新增了功能却没写手册，请同 PR 补页。
  */
 const MISSING_ALLOWED = new Set<string>([
-  // #535 制作（后半）
-  "wiki", "finance", "materials", "assets",
+  // #535 制作（后半）：财务 / 物料页目前只有查看、没有录入界面（#309 / #310），
+  // 等写入口落地再写手册页，届时一并从这里划掉
+  "finance", "materials",
   // #536 管理项目
   // （admin/templates 已由 #533 Cue 表设置覆盖、admin/migration 已由 #533 导入篇覆盖）
   "admin", "admin/milestones", "admin/announcements", "admin/organization", "admin/roles",
