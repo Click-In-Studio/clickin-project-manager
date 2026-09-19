@@ -7,7 +7,7 @@ who: 所有成员可看已发布的事件；新建需要事件创建权限
 tier: all
 platform: [desktop, mobile]
 related: [production/events/event-detail, production/events/publish-callsheet, production/planning/calendar]
-updated: 2026-09-18
+updated: 2026-09-19
 ---
 
 ## 这是什么
@@ -44,7 +44,7 @@ updated: 2026-09-18
 
 ### 关注
 
-卡片上点「关注」，即便你不在参加名单里，首页「我的工作」也会列出这个事件，它的报告发布后会出现在首页「报告」块的未读里。制作人、导演通常关注所有排练。
+卡片上点「关注」，即便你不在参加名单里，首页「我的工作」也会列出这个事件，它的报告发布时你会收到「报告发布通知」，首页「报告」块里也会有未读。制作人、导演通常关注所有排练。
 
 ## 注意事项
 

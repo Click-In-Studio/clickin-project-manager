@@ -7,7 +7,7 @@ who: 写报告：有报告创建权限的成员（通常是舞监）；部门备
 tier: all
 platform: [desktop, mobile]
 related: [production/reports/reports-hub, production/events/event-detail]
-updated: 2026-09-18
+updated: 2026-09-19
 ---
 
 ## 这是什么
@@ -30,7 +30,7 @@ updated: 2026-09-18
 
 ### 发布
 
-「发布报告」页签 → 发布。参加这场事件的人（流程参与人员、有 Call Time 的人）收到「报告发布通知」；被 @ 的人另收「报告 @ 提及」；关注了事件的人在首页「报告」块看到未读。
+「发布报告」页签 → 发布。参加或关注这场事件的人（流程参与人员、有 Call Time 的人、点了「关注」的人）收到「报告发布通知」；被 @ 的人另收「报告 @ 提及」。这些人在首页「报告」块也能看到未读。
 
 ## 注意事项
 
