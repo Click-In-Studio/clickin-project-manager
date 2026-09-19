@@ -96,6 +96,16 @@ describe("permissionLabel 拼接规则", () => {
     expect(permissionLabel("node:script/*/blocks@view")).toBe("查看剧本");
   });
 
+  it("棘轮与渲染同一条子面规则：门票不查子面词，其它 meta 动词照查", () => {
+    expect(unlabelledParts("node:gizmo/*/meta@view")).toEqual(["GROUP_LABELS.gizmo"]);
+    expect(permissionLabel("node:scene/*/meta@edit")).toBe("编辑章节/段落基本信息");
+    // 渲染里会带（sub）兜底的键，棘轮必须同步报缺
+    for (const k of ["node:scene/*/whatever@view", "node:scene/*/whatever@edit"]) {
+      expect(permissionLabel(k), k).toContain("（whatever）");
+      expect(unlabelledParts(k), k).toContain("SUB_LABELS.whatever");
+    }
+  });
+
   it("兜底：未知段嵌进人话，不裸吐整枚键", () => {
     // 线上老数据可能带没登记过的子面 / 类型——棘轮拦得住模板，拦不住历史行
     expect(permissionLabel("node:scene/*/whatever@view")).toBe("查看章节/段落（whatever）");

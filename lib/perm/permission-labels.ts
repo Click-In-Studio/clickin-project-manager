@@ -131,13 +131,23 @@ function splitLabelKey(key: string): LabelParts | null {
 }
 
 /**
+ * 这一段拼接时要不要带子面词。null = 不带（主面 `*`；`meta@view` 是资源的门票，
+ * 三态模型下说成「查看 X」，不说「查看 X 基本信息」）。
+ * permissionLabel 与 unlabelledParts 共用，保证棘轮和渲染走同一条规则。
+ */
+function subToLabel(p: LabelParts): string | null {
+  if (p.sub === "*") return null;
+  if (p.sub === "meta" && p.verb === "view") return null;
+  return p.sub;
+}
+
+/**
  * 把权限键翻成人话。手写表 → 三段拼接 → 兜底。
  *
  * 拼接规则：
- *   - `meta@view` 是资源的门票（三态模型），说成「查看 X」，不带「基本信息」；
- *   - 主面（sub=*）不带子面：「编辑任务」；
+ *   - 子面词按 subToLabel（门票 / 主面不带）；
  *   - 实例级 id 说成「此」：「编辑此文档」；
- *   - 通配 verb：「X（全部操作）」。
+ *   - 通配 verb：「X（全部操作）」——「全部操作X」不像话，词序有意不对称。
  * 兜底：某段词表里没有时，那一段原样嵌进人话（「查看剧本（foo）」），
  * 决不裸吐整枚键；只有连键形都不对（原子键）才原样返回。
  */
@@ -148,9 +158,8 @@ export function permissionLabel(key: string): string {
   if (!p) return key;
   const typeText = GROUP_LABELS[p.type] ?? p.type;
   const subject = `${p.id === "*" ? "" : "此"}${typeText}`;
-  const subText = p.sub === "*" || (p.sub === "meta" && p.verb === "view")
-    ? ""
-    : (SUB_LABELS[p.sub] ?? `（${p.sub}）`);
+  const sub = subToLabel(p);
+  const subText = sub === null ? "" : (SUB_LABELS[sub] ?? `（${sub}）`);
   if (p.verb === "*") return `${subject}${subText}（全部操作）`;
   const verbText = VERB_LABELS[p.verb] ?? p.verb;
   return `${verbText}${subject}${subText}`;
@@ -167,7 +176,8 @@ export function unlabelledParts(key: string): string[] {
   if (!p) return [`PERMISSION_LABELS.${key}`];
   const missing: string[] = [];
   if (!GROUP_LABELS[p.type]) missing.push(`GROUP_LABELS.${p.type}`);
-  if (p.sub !== "*" && !SUB_LABELS[p.sub]) missing.push(`SUB_LABELS.${p.sub}`);
+  const sub = subToLabel(p);
+  if (sub !== null && !SUB_LABELS[sub]) missing.push(`SUB_LABELS.${sub}`);
   if (!VERB_LABELS[p.verb]) missing.push(`VERB_LABELS.${p.verb}`);
   return missing;
 }
