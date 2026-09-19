@@ -72,7 +72,9 @@ async function endsWithin(reader: Reader, ms = 2000): Promise<boolean> {
 }
 
 async function openStream(
-  handler: (req: NextRequest, c: unknown) => Promise<Response>,
+  // 三条路由的 ctx 形状各异，any 避免结构性不匹配的假报错
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handler: (req: NextRequest, c: any) => Promise<Response>,
   url: string, userId: string, params: Record<string, string>,
 ): Promise<Reader> {
   const res = await handler(streamReq(url, userId), ctx(params));
