@@ -3847,7 +3847,7 @@ export default function ScriptEditor({
               </div>
             </>
           )}
-          <span className={`${canEdit ? "ml-[3px]" : "ml-0.5"} shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400`}>
+          <span className={`${toolbarCompact ? "hidden" : "inline-flex"} ${canEdit ? "ml-[3px]" : "ml-0.5"} shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-400`}>
             {canEdit ? "可编辑" : "只读"}
           </span>
           {baseCanEdit && isLockedMode && (
