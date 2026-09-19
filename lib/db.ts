@@ -5558,26 +5558,6 @@ export async function deleteBlockTag(blockId: string, groupId: string): Promise<
   );
 }
 
-// ─── Asset mount CoW helpers ──────────────────────────────────────────────────
-
-/** All productions where the user has a membership role (regardless of SA status). */
-export async function listMemberProductions(userId: string): Promise<{ id: string; name: string; archivedAt: string | null; roles: string[] }[]> {
-  const res = await getPool().query<{ id: string; name: string; archived_at: Date | null; roles: string[] }>(
-    `SELECT p.id, p.name, p.archived_at, pm.roles
-     FROM production p
-     JOIN production_member pm ON pm.production_id = p.id
-     WHERE pm.user_id = $1
-     ORDER BY CASE WHEN p.archived_at IS NULL THEN 0 ELSE 1 END, p.sort_order ASC, p.created_at ASC`,
-    [userId],
-  );
-  return res.rows.map(r => ({
-    id: r.id,
-    name: r.name,
-    archivedAt: r.archived_at?.toISOString() ?? null,
-    roles: r.roles,
-  }));
-}
-
 // ─── Atomic patch application ─────────────────────────────────────────────────
 
 const PAGE_LAYOUTS: PageLayout[] = ["a4", "letter", "a3-2col", "tablet-2col"];
