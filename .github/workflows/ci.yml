@@ -83,6 +83,12 @@ jobs:
         id: migrations
         run: |
           NEW=$(git diff origin/$GITHUB_BASE_REF HEAD --name-only --diff-filter=A -- 'db/migrations/*.sql')
+          # base 分支还没有 db/migrations（只有 dbmate 接管那个 PR 会遇到）：没有「旧结构」
+          # 可建，按 normal path 走。
+          if [ -z "$(git ls-tree -d origin/$GITHUB_BASE_REF db/migrations)" ]; then
+            echo "Base branch has no db/migrations yet — normal path."
+            NEW=""
+          fi
           if [ -n "$NEW" ]; then
             echo "has_migrations=true" >> $GITHUB_OUTPUT
             echo "New migrations:"; echo "$NEW"
