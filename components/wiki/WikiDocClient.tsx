@@ -455,8 +455,8 @@ export default function WikiDocClient({
   return (
     <div className="rounded-xl border border-zinc-200 bg-white flex flex-col">
       {/* 标题区 */}
-      <div className="px-8 pt-6 pb-3">
-        <div className="flex items-start gap-3">
+      <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-6 pb-3">
+        <div className="flex flex-col sm:flex-row items-start gap-3">
           <div className="flex-1 min-w-0">
             {canEdit ? (
               <input
@@ -488,7 +488,7 @@ export default function WikiDocClient({
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex w-full sm:w-auto items-center gap-2 shrink-0 overflow-x-auto pb-1 sm:pb-0">
             {/* 协作在场者（飞书式头像堆叠；tooltip 含光标行） */}
             {peers.length > 0 && (
               <div className="flex items-center -space-x-1.5 mr-1">
@@ -512,7 +512,7 @@ export default function WikiDocClient({
               </div>
             )}
             <div className="relative">
-              <button type="button" style={SECONDARY_BTN} onClick={() => setExportOpen(v => !v)}>导出</button>
+              <button type="button" className="whitespace-nowrap" style={SECONDARY_BTN} onClick={() => setExportOpen(v => !v)}>导出</button>
               {exportOpen && <div className="fixed inset-0 z-20" onClick={() => setExportOpen(false)} />}
               {exportOpen && (
                 <div className="absolute right-0 top-full z-30 mt-1 w-40 rounded-lg border border-zinc-200 bg-white shadow-lg py-1">
@@ -538,7 +538,7 @@ export default function WikiDocClient({
               )}
             </div>
             {canEdit && (
-              <div className="flex rounded-lg border border-zinc-200 overflow-hidden text-[11px] font-medium">
+              <div className="flex shrink-0 rounded-lg border border-zinc-200 overflow-hidden text-[11px] font-medium">
                 <button
                   type="button"
                   onClick={() => switchMode("wysiwyg")}
@@ -558,14 +558,14 @@ export default function WikiDocClient({
               </div>
             )}
             {canShare && (
-              <button type="button" style={SECONDARY_BTN} onClick={openShare}>分享</button>
+              <button type="button" className="whitespace-nowrap" style={SECONDARY_BTN} onClick={openShare}>分享</button>
             )}
           </div>
         </div>
       </div>
 
       {/* 正文：有编辑权即整页可写（Notion 式），防抖自动保存；富文本/源码双模 */}
-      <div className={`flex-1 flex flex-col ${canEdit ? "px-5 pb-6" : "px-8 pb-6"}`}>
+      <div className={`flex-1 flex flex-col ${canEdit ? "px-3 sm:px-5 pb-6" : "px-4 sm:px-6 lg:px-8 pb-6"}`}>
         {lossy && canEdit && (
           <div className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 print:hidden">
             <p>

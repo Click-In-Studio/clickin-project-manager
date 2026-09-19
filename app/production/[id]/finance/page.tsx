@@ -9,6 +9,7 @@ import {
   listBudgetCategories, listBudgetCategoryOptions, listExpenses, type ExpenseStatus,
 } from "@/lib/ops/finance-db";
 import { fmtCny, pctCents, pctUsed, sumCents, toCents } from "@/lib/money";
+import responsive from "@/components/ops/responsive.module.css";
 
 export const metadata: Metadata = { title: "财务" };
 
@@ -101,11 +102,11 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
       </div>
 
       {canBudget && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 18 }}>
+        <div className={responsive.metricGrid}>
           {summary.map(([value, label]) => (
-            <div key={label} style={{ ...CARD, padding: "20px" }}>
-              <strong style={{ display: "block", fontFamily: "Georgia, serif", color: "var(--ink)", fontSize: 24, fontWeight: 500 }}>{value}</strong>
-              <span style={{ display: "block", marginTop: 5, color: "var(--muted)", fontSize: 11 }}>{label}</span>
+            <div key={label} className={responsive.metricCard}>
+              <strong className={responsive.metricValue}>{value}</strong>
+              <span className={responsive.metricLabel}>{label}</span>
             </div>
           ))}
         </div>

@@ -17,6 +17,7 @@ import TaskGanttView from "./planning/TaskGanttView";
 import TimetableView from "./planning/TimetableView";
 import { readPref, writePref } from "./planning/prefs";
 import type { Props } from "./planning/types";
+import styles from "@/components/ops/planning.module.css";
 
 // ─── 主组件：三视图 tab ────────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ export default function PlanningClient(props: Props) {
         </div>
       )}
       {/* viewTabs（原型：三等宽撑满、62px 卡、选中 ink 反色） */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+      <div className={styles.planningViewTabs}>
         {([
           ["calendar", "项目日历", "事件、任务、里程碑与阶段"],
           ["gantt", "任务甘特", "阶段背景带与任务周期"],
@@ -69,12 +70,12 @@ export default function PlanningClient(props: Props) {
             style={{
               border: `1px solid ${mode === id ? "var(--ink)" : "var(--line)"}`,
               borderRadius: 10, background: mode === id ? "var(--ink)" : "var(--surface)",
-              minHeight: 62, padding: "12px 15px", display: "flex", flexDirection: "column",
+              minHeight: 62, padding: "12px 15px", display: "flex", flexDirection: "column", minWidth: 0,
               textAlign: "left", cursor: "pointer",
             }}
           >
             <b style={{ fontSize: 12, color: mode === id ? "#fff" : "var(--ink)" }}>{label}</b>
-            <small style={{ color: mode === id ? "#b9c8c4" : "var(--muted)", fontSize: 9, marginTop: 4 }}>{hint}</small>
+            <small className={styles.planningTabHint} style={{ color: mode === id ? "#b9c8c4" : "var(--muted)" }}>{hint}</small>
           </button>
         ))}
       </div>

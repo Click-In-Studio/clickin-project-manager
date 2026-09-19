@@ -1,3 +1,30 @@
+.planningViewTabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.planningTabHint { font-size: 9px; margin-top: 4px; line-height: 1.35; }
+
+.calendarPanel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 22px;
+}
+
+.calendarHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.calendarHeading { min-width: 0; }
+.calendarDescription { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); line-height: 1.5; }
+.calendarControls { margin-left: auto; display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+.calendarLegend { display: flex; gap: 12px; color: var(--muted); font-size: 9px; }
+
 .calendarCell {
   position: relative;
   height: 126px;
@@ -34,10 +61,30 @@
   text-align: left;
   font-size: 8px;
   cursor: pointer;
-  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  white-space: normal;
   overflow: hidden;
   text-overflow: ellipsis;
   transition: filter .12s ease, border-color .12s ease, transform .12s ease;
+}
+
+.calendarChipType {
+  display: block;
+  font-size: 7px;
+  line-height: 1;
+  font-weight: 700;
+  opacity: .72;
+}
+
+.calendarChipTitle {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.15;
 }
 
 .calendarChip:hover,
@@ -527,4 +574,22 @@
 
 @media (prefers-reduced-motion: reduce) {
   .detailDrawer { animation: none; }
+}
+
+@media (max-width: 760px) {
+  .planningViewTabs { gap: 5px; }
+  .planningTabHint { display: none; }
+  .calendarPanel { padding: 14px 10px; }
+  .calendarHeader { flex-direction: column; gap: 10px; margin-bottom: 12px; }
+  .calendarDescription { max-width: 42ch; font-size: 10px; }
+  .calendarControls { width: 100%; margin-left: 0; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+  .calendarLegend { width: 100%; flex-wrap: wrap; gap: 6px 10px; }
+  .calendarCell { height: 86px; padding: 4px 3px; gap: 3px; }
+  .calendarChip { min-height: 27px; padding: 3px; font-size: 7px; }
+  .detailDrawer { top: auto; right: 0; bottom: 0; left: 0; width: 100%; max-height: min(78vh, 640px); border-radius: 16px 16px 0 0; }
+}
+
+@media (max-width: 420px) {
+  .calendarCell { height: 78px; }
+  .calendarChip { min-height: 25px; }
 }
