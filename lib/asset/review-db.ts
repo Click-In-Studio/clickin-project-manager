@@ -25,8 +25,9 @@ export type PrivateAssetRow = {
   grants: PrivateAssetGrant[];
 };
 
-// #550：is_public 已随 #420 迁到 node（asset 壳节点，1:1），asset 表上没有这列。
-// 用 INNER JOIN——没有壳节点的资产是坏数据，审查页不替它假装存在。
+// #550：is_public 已随 #420 迁到 node（asset 壳节点），asset 表上没有这列。
+// 1:1 由 node_asset_uidx 部分唯一索引钉死，JOIN 不会放大行；用 INNER JOIN——
+// 没有壳节点的资产是坏数据，审查页不替它假装存在。
 export async function listPrivateAssets(productionId: string): Promise<PrivateAssetRow[]> {
   const pool = getPool();
   const [assetsRes, grantsRes] = await Promise.all([
@@ -38,7 +39,7 @@ export async function listPrivateAssets(productionId: string): Promise<PrivateAs
               a.uploader_user_id, up.name AS uploader_name, a.created_at,
               (SELECT COUNT(*) FROM node_mount m JOIN node nn ON nn.id = m.node_id WHERE nn.asset_id = a.id)::text AS mount_count
        FROM asset a
-       JOIN node n ON n.asset_id = a.id
+       JOIN node n ON n.asset_id = a.id AND n.kind = 'asset'
        LEFT JOIN user_profile up ON up.user_id = a.uploader_user_id
        WHERE a.production_id = $1 AND NOT n.is_public
        ORDER BY a.created_at DESC`,
