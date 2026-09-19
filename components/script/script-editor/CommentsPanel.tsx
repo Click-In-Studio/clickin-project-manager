@@ -5,6 +5,7 @@ import CommentAssetPicker, { type PendingAsset } from "@/components/assets/Comme
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/editor/SmartTextarea";
 import SmartText from "@/components/ui/SmartText";
+import { useShortcutLabel } from "@/components/ui/shortcut-label";
 import { BASE_PATH } from "@/lib/base-path";
 import { postScriptComment, patchScriptComment, deleteScriptComment } from "@/lib/script/script-client";
 import SideBlockPanel from "./SideBlockPanel";
@@ -40,6 +41,7 @@ export default function CommentsPanel({
   blockCaption?: CommentBlockCaption | null;
   navigation?: SideBlockPanelNavigation;
 }) {
+  const submitKey = useShortcutLabel("Mod+Enter");
   const [members, setMembers] = useState<Mention[]>([]);
   const [newText, setNewText] = useState(draft?.text ?? "");
   const [newMentions, setNewMentions] = useState<Mention[]>(draft?.mentions ?? []);
@@ -243,7 +245,7 @@ export default function CommentsPanel({
               <div className={`mt-2 ml-3 border-l-2 pl-3 ${replyThreadBorderClass}`}>
                 <SmartTextarea value={replyText} onChange={setReplyText}
                   memberMention={{ members, onMentionsChange: setReplyMentions }}
-                  placeholder="回复… (⌘↵ 发布)" rows={2} autoFocus
+                  placeholder={`回复… (${submitKey} 发布)`} rows={2} autoFocus
                   onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitReply(); }}
                   className={taClass} />
                 <div className="mt-1 flex items-center justify-between">
@@ -265,7 +267,7 @@ export default function CommentsPanel({
       <div className="relative z-10 shrink-0 border-t border-zinc-100 bg-white px-4 py-3">
         <SmartTextarea value={newText} onChange={value => { setNewText(value); updateDraft({ text: value }); }}
           memberMention={{ members, onMentionsChange: mentions => { setNewMentions(mentions); updateDraft({ mentions }); } }}
-          placeholder="添加评论… (⌘↵ 发布)" rows={3}
+          placeholder={`添加评论… (${submitKey} 发布)`} rows={3}
           onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitNew(); }}
           className="w-full resize-none rounded border border-zinc-200 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-zinc-400" />
         <div className="mt-2 flex items-center justify-between">

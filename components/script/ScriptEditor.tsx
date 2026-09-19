@@ -9,6 +9,8 @@ import ScriptDialog, { SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS, SCRIPT_CONFIRM_PRIMAR
 import TagGroupEditor from "@/components/script/TagGroupEditor";
 import ProductionTopMenu, { ProductionOverflowSubmenuButton, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, useProductionToolbarStage } from "@/components/shell/ProductionTopMenu";
 import ChevronIcon from "@/components/ui/ChevronIcon";
+import Kbd from "@/components/ui/Kbd";
+import { formatShortcut, useIsMacLike } from "@/components/ui/shortcut-label";
 import { useDocumentVisible } from "@/hooks/useVisibleEventSource";
 import { useAgentMutation } from "@/lib/agent/agent-mutations";
 import { BASE_PATH } from "@/lib/base-path";
@@ -45,7 +47,7 @@ import ScriptToolbarMenuController, { type ScriptToolbarOpenMenu } from "./scrip
 import SideBlockPanel from "./script-editor/SideBlockPanel";
 import TableOfContents from "./script-editor/TableOfContents";
 import { EMPTY_COMMENTS, EMPTY_BLOCK_ASSETS, buildCommentBlockCaption, findSideBlockPanelNavigationTargets, type RemotePresence } from "./script-editor/comments";
-import { SCRIPT_TOC_CENTER_EVENT, SCRIPT_EDITOR_MAX_WIDTH_PX, SCRIPT_BODY_HORIZONTAL_PADDING_REM, SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX, SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM, SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM, SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM, SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM, SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX, SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX, SCRIPT_SCENE_DETAIL_MODE_LABEL, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX, DISABLED_CHECKBOX_OPTION_CLASS, checkboxOptionClass, COMMENT_BUBBLE_MIN_WIDTH_PX, COMMENT_BUBBLE_GAP_REM, SIDE_PANEL_FALLBACK_WIDTH_PX } from "./script-editor/constants";
+import { SCRIPT_TOC_CENTER_EVENT, SCRIPT_EDITOR_MAX_WIDTH_PX, SCRIPT_BODY_HORIZONTAL_PADDING_REM, SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX, SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM, SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM, SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM, SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM, SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX, SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX, SCRIPT_SCENE_DETAIL_MODE_LABEL, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX, DISABLED_CHECKBOX_OPTION_CLASS, checkboxOptionClass, COMMENT_BUBBLE_MIN_WIDTH_PX, COMMENT_BUBBLE_GAP_REM, SIDE_PANEL_FALLBACK_WIDTH_PX, SCRIPT_SHORTCUTS } from "./script-editor/constants";
 import { readDisplayCookie, writeDisplayCookie, type DisplaySettings } from "./script-editor/display-settings";
 import { useScriptSearch } from "./script-editor/use-script-search";
 import { useDragCountBadge } from "./script-editor/use-drag-count-badge";
@@ -227,6 +229,7 @@ export default function ScriptEditor({
   const syncOpeningChapterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (syncOpeningChapterTimerRef.current) clearTimeout(syncOpeningChapterTimerRef.current); }, []);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const isMac = useIsMacLike(); // 「关于 · 快捷键」表格按平台显示 ⌘ / Ctrl（#542）
   const [pendingLockedMode, setPendingLockedMode] = useState<boolean | null>(null);
   const pendingModeScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
   const [pendingStageDelimiterChange, setPendingStageDelimiterChange] =
@@ -3941,7 +3944,7 @@ export default function ScriptEditor({
                       className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${canUndo ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"}`}
                     >
                       <span>撤销</span>
-                      <kbd className="text-[10px] text-zinc-300">⌘Z</kbd>
+                      <Kbd combo="Mod+Z" className="text-[10px] text-zinc-300" />
                     </button>
                     <button
                       onClick={() => { redo(); setOpenMenu(null); }}
@@ -3949,7 +3952,7 @@ export default function ScriptEditor({
                       className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${canRedo ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"}`}
                     >
                       <span>重做</span>
-                      <kbd className="text-[10px] text-zinc-300">⌘⇧Z</kbd>
+                      <Kbd combo="Mod+Shift+Z" className="text-[10px] text-zinc-300" />
                     </button>
                     <div className="my-1 border-t border-zinc-50" />
                     <button
@@ -3958,7 +3961,7 @@ export default function ScriptEditor({
                       className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
                     >
                       <span className="font-bold">粗体</span>
-                      <kbd className="text-[10px] text-zinc-300">⌘B</kbd>
+                      <Kbd combo="Mod+B" className="text-[10px] text-zinc-300" />
                     </button>
                     <button
                       onMouseDown={e => { e.preventDefault(); applyFormatToFocused("u"); }}
@@ -3966,7 +3969,7 @@ export default function ScriptEditor({
                       className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
                     >
                       <span className="underline">下划线</span>
-                      <kbd className="text-[10px] text-zinc-300">⌘U</kbd>
+                      <Kbd combo="Mod+U" className="text-[10px] text-zinc-300" />
                     </button>
                     <button
                       onMouseDown={e => { e.preventDefault(); toggleStageCueToFocused(); }}
@@ -3974,7 +3977,7 @@ export default function ScriptEditor({
                       className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
                     >
                       <span className="italic text-zinc-400">切换舞台提示</span>
-                      <kbd className="text-[10px] text-zinc-300">⌘I</kbd>
+                      <Kbd combo="Mod+I" className="text-[10px] text-zinc-300" />
                     </button>
                     <div className="my-1 border-t border-zinc-50" />
                   </>
@@ -3984,7 +3987,7 @@ export default function ScriptEditor({
                   className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
                 >
                   <span>搜索</span>
-                  <kbd className="text-[10px] text-zinc-300">⌘F</kbd>
+                  <Kbd combo="Mod+F" className="text-[10px] text-zinc-300" />
                 </button>
                 <button
                   onClick={() => { setJumpTarget("line"); setJumpValue(""); setOpenMenu(null); }}
@@ -6022,22 +6025,9 @@ export default function ScriptEditor({
             </div>
             <table className="w-full text-sm">
               <tbody className="divide-y divide-zinc-50">
-                {[
-                  ["⌘Z", "撤销"],
-                  ["⌘⇧Z", "重做"],
-                  ["⌘F", "搜索"],
-                  ["⌘B", "粗体（选中文字）"],
-                  ["⌘U", "下划线（选中文字）"],
-                  ["⌘I", "切换舞台提示 / 段内括注"],
-                  ["Enter", "新建块（行尾）"],
-                  ["⇧Enter", "块内换行"],
-                  ["Backspace", "对行首：合并至上一块（如类型、角色相同）\n对选中块：删除所选行"],
-                  ["⌘⇧L", "切换歌词模式"],
-                  ["⌘⇧C", "复制当前块标签"],
-                  ["⌘⇧V", "粘贴标签到当前块"],
-                ].map(([key, desc]) => (
-                  <tr key={key}>
-                    <td className="py-1.5 pr-4 font-mono text-[13px] text-zinc-400 whitespace-nowrap">{key}</td>
+                {SCRIPT_SHORTCUTS.map(([combo, desc]) => (
+                  <tr key={combo}>
+                    <td className="py-1.5 pr-4 font-mono text-[13px] text-zinc-400 whitespace-nowrap">{formatShortcut(combo, isMac)}</td>
                     <td className="py-1.5 whitespace-pre-line text-zinc-600">{desc}</td>
                   </tr>
                 ))}
