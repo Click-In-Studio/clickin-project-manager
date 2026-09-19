@@ -12,7 +12,7 @@ import { detectMacLike, formatShortcut, useShortcutLabel } from "@/components/ui
 
 function setPlatform(platform: string) {
   Object.defineProperty(navigator, "platform", { configurable: true, value: platform });
-  Object.defineProperty(navigator, "userAgentData", { configurable: true, value: undefined });
+  delete (navigator as { userAgentData?: unknown }).userAgentData;
 }
 
 describe("formatShortcut", () => {
@@ -21,6 +21,7 @@ describe("formatShortcut", () => {
     expect(formatShortcut("Mod+Shift+Z", true)).toBe("⌘⇧Z");
     expect(formatShortcut("Shift+Enter", true)).toBe("⇧↵");
     expect(formatShortcut("Mod+Enter", true)).toBe("⌘↵");
+    expect(formatShortcut("Backspace", true)).toBe("Backspace"); // 没有符号的键回落原名
   });
 
   it("Windows：Ctrl 加号分隔，其它键原样", () => {
@@ -33,7 +34,10 @@ describe("formatShortcut", () => {
 });
 
 describe("detectMacLike", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (navigator as { userAgentData?: unknown }).userAgentData;
+  });
 
   it("按 navigator.platform 判：Win32 → false，MacIntel / iPhone → true", () => {
     setPlatform("Win32");
