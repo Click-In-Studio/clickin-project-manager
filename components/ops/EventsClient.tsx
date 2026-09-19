@@ -10,6 +10,7 @@ import PageHeader, { PRIMARY_BTN } from "@/components/ui/PageHeader";
 import Badge, { type BadgeTone } from "@/components/ui/Badge";
 import type { ProductionEvent, EventDepartment } from "@/lib/ops/event-db";
 import { fmtDateTimeSmart, datetimeLocalToIso, dateTimeToIso } from "@/lib/tz";
+import responsive from "@/components/ops/responsive.module.css";
 
 // ─── Shared constants ────────────────────────────────────────────────────────
 
@@ -453,28 +454,20 @@ export default function EventsClient({
           {/* 三步流程说明条（原型 flowExplainer：三卡 + 箭头——设计语言保留；
               高度对齐各页摘要卡 92px 体系） */}
           {canCreate && (
-            <section style={{
-              display: "grid", gridTemplateColumns: "1fr auto 1fr auto 1fr",
-              alignItems: "center", gap: 13, marginBottom: 18,
-            }}>
+            <section className={responsive.flowExplainer}>
               {[["1", "定义事件", "类型、时间、地点、人员"],
                 ["2", "确认任务", "负责人、截止、通知对象"],
                 ["3", "发布与追踪", "站内通知、确认、执行"]].map(([n, t, s], i) => (
                 <Fragment key={n}>
-                  {i > 0 && <i style={{ fontStyle: "normal", color: "var(--muted)" }}>→</i>}
-                  <div style={{
-                    minHeight: 92, padding: "17px 19px", border: "1px solid var(--line)", borderRadius: 14,
-                    background: "var(--surface)", display: "grid",
-                    gridTemplateColumns: "32px 1fr", gridTemplateRows: "1fr 1fr",
-                    alignItems: "center", columnGap: 13,
-                  }}>
+                  {i > 0 && <i className={responsive.flowArrow}>→</i>}
+                  <div className={responsive.flowCard}>
                     <span style={{
                       width: 32, height: 32, borderRadius: "50%", gridRow: "1 / 3",
                       display: "grid", placeItems: "center",
                       background: "var(--ink)", color: "#fff", fontSize: 10,
                     }}>{n}</span>
-                    <b style={{ fontSize: 11, alignSelf: "end", color: "var(--ink)" }}>{t}</b>
-                    <small style={{ color: "var(--muted)", fontSize: 9, alignSelf: "start", marginTop: 3 }}>{s}</small>
+                    <b style={{ fontSize: 11, color: "var(--ink)", wordBreak: "keep-all" }}>{t}</b>
+                    <small style={{ color: "var(--muted)", fontSize: 9, marginTop: 3, lineHeight: 1.45 }}>{s}</small>
                   </div>
                 </Fragment>
               ))}

@@ -9,6 +9,7 @@ import { fmtDate } from "@/lib/tz";
 // 在列表预览和详情页会渲染出两个样子。
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import styles from "@/components/ui/my-pages.module.css";
+import responsive from "@/components/ops/responsive.module.css";
 
 type RelFilter = "all" | "mentioned" | "follower" | "participant" | "other";
 type PubFilter = "all" | "published" | "draft";
@@ -90,25 +91,18 @@ export default function ProductionReportsClient({
   return (
     <>
       {/* ── 摘要统计（原型 taskSummary 语汇）── */}
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 1,
-        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
-        background: "var(--line)", marginBottom: 18,
-      }}>
+      <div className={responsive.summaryGrid}>
         {[
           [String(summaryStats.total), "全部报告", "本项目累计"],
           [String(summaryStats.published), "已发布", "全员可读"],
           [String(summaryStats.draft), "草稿", canViewDrafts ? "待发布" : "对你不可见"],
           [String(summaryStats.mentioned), "提到我", "报告中被 @ "],
         ].map(([num, label, hint]) => (
-          <div key={label} style={{
-            minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13,
-            background: "var(--surface)",
-          }}>
-            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
-            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
-              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
-              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
+          <div key={label} className={responsive.summaryCard}>
+            <span className={responsive.summaryValue}>{num}</span>
+            <p className={responsive.summaryText}>
+              <b className={responsive.summaryLabel}>{label}</b>
+              <small className={responsive.summaryHint}>{hint}</small>
             </p>
           </div>
         ))}
@@ -117,7 +111,7 @@ export default function ProductionReportsClient({
       {/* ── Panel（原型排版）：内部维持现有分栏 ── */}
       <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column" }}>
       {/* ── Mobile: filter chips + accordion ── */}
-      <div className={styles.mobileOnly}>
+      <div className={`${styles.mobileOnly} ${styles.reportMobile}`}>
         <div className={styles.mobileTaskFilterBar}>
           <div className={styles.mobileTaskStatusScroll}>
             {relFilters.map(f => (
@@ -220,8 +214,8 @@ export default function ProductionReportsClient({
       </div>
 
       {/* ── Desktop: 3-column layout ── */}
-      <div className={styles.desktopOnly} style={{ flex: 1, minHeight: 0 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "200px 1fr 420px", gap: 0, height: "100%", minHeight: 0 }}>
+      <div className={`${styles.desktopOnly} ${styles.reportDesktop}`} style={{ flex: 1, minHeight: 0 }}>
+        <div className={styles.reportWorkspaceGrid}>
           {/* Left: filters */}
           <div style={{ borderRight: "1px solid var(--line)", padding: "0 16px 24px 0", overflowY: "auto" }}>
             <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--muted)", margin: "0 0 8px" }}>与我的关系</h3>

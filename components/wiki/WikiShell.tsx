@@ -73,6 +73,8 @@ export default function WikiShell({
   });
   const routeBase = navigationBasePath ?? `/production/${productionId}/wiki`;
   const [query, setQuery] = useState("");
+  const [mobileTreeOpen, setMobileTreeOpen] = useState(false);
+  const [desktopTreeCollapsed, setDesktopTreeCollapsed] = useState(false);
   const items = nodes;
   const byId = useMemo(() => new Map(items.map(i => [i.id, i])), [items]);
   const byIdRef = useRef(byId);
@@ -594,8 +596,37 @@ export default function WikiShell({
   );
 
   return (
-    <div className="flex gap-6 items-start">
-      <aside className="w-[264px] shrink-0 sticky top-4 h-[calc(100vh-120px)] flex flex-col rounded-xl border border-zinc-200 bg-white overflow-hidden">
+    <div className="relative flex gap-3 md:gap-6 items-start">
+      <button
+        type="button"
+        onClick={() => setMobileTreeOpen(true)}
+        className="md:hidden fixed left-4 bottom-4 z-40 rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 shadow-lg"
+        aria-expanded={mobileTreeOpen}
+      >
+        ☰ 文档目录
+      </button>
+      {mobileTreeOpen && (
+        <button
+          type="button"
+          aria-label="关闭文档目录"
+          onClick={() => setMobileTreeOpen(false)}
+          className="md:hidden fixed inset-0 z-40 bg-zinc-950/35"
+        />
+      )}
+      <button
+        type="button"
+        onClick={() => setDesktopTreeCollapsed(v => !v)}
+        className="hidden md:inline-flex sticky top-4 z-10 h-9 shrink-0 items-center rounded-lg border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50"
+        aria-expanded={!desktopTreeCollapsed}
+        title={desktopTreeCollapsed ? "展开文档目录" : "收起文档目录"}
+      >
+        {desktopTreeCollapsed ? "目录 →" : "←"}
+      </button>
+      <aside className={`${desktopTreeCollapsed ? "md:hidden" : "md:flex"} ${mobileTreeOpen ? "translate-x-0" : "-translate-x-[110%]"} fixed left-3 top-3 bottom-3 z-50 w-[min(300px,calc(100vw-24px))] flex flex-col rounded-xl border border-zinc-200 bg-white overflow-hidden shadow-2xl transition-transform md:translate-x-0 md:shadow-none md:w-[264px] md:shrink-0 md:sticky md:top-4 md:h-[calc(100vh-120px)]`}>
+        <div className="md:hidden flex items-center justify-between border-b border-zinc-200 px-3 py-2">
+          <b className="text-sm text-zinc-800">文档目录</b>
+          <button type="button" onClick={() => setMobileTreeOpen(false)} className="h-8 w-8 rounded-full text-lg text-zinc-500 hover:bg-zinc-100" aria-label="关闭目录">×</button>
+        </div>
         <div className="p-2.5 border-b border-zinc-200">
           <input
             value={query}
@@ -732,6 +763,7 @@ export default function WikiShell({
                   ) : href ? (
                     <Link
                       href={href}
+                      onClick={() => setMobileTreeOpen(false)}
                       className={`flex-1 min-w-0 truncate py-1.5 text-[13px] ${
                         active ? "font-semibold text-sky-800" : "text-zinc-600"
                       }`}
@@ -805,7 +837,7 @@ export default function WikiShell({
           {creatingUnder === "" && newDocInput("", 0)}
         </nav>
       </aside>
-      <main className="flex-1 min-w-0 flex flex-col min-h-[calc(100vh-120px)] [&>*]:flex-1">{children}</main>
+      <main className="w-full flex-1 min-w-0 flex flex-col min-h-[calc(100vh-120px)] [&>*]:flex-1">{children}</main>
 
       {menu && typeof document !== "undefined" && createPortal(
         <div

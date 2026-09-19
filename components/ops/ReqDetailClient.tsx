@@ -17,6 +17,7 @@ import PageHeader, { PAGE_TITLE_FONT, PRIMARY_BTN, SECONDARY_BTN } from "@/compo
 import AccessRequestModal from "@/components/approval/AccessRequestModal";
 import DropdownPicker from "@/components/ui/DropdownPicker";
 import styles from "@/components/ui/my-pages.module.css";
+import responsive from "@/components/ops/responsive.module.css";
 import type { EventTechReq, EventScheduleItem, ProductionEvent, TaskDependencyRef } from "@/lib/ops/event-db";
 import { fmtTime, fmtDateTime } from "@/lib/tz";
 
@@ -620,6 +621,16 @@ export default function ReqDetailClient({
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--paper)", padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
+      <nav className={responsive.taskTopActions} aria-label="任务详情导航">
+        <Link href={`/production/${productionId}/tasks`} style={{ ...SECONDARY_BTN, textDecoration: "none", display: "inline-block" }}>
+          ← 返回任务面板
+        </Link>
+        {event && (
+          <Link href={`/production/${productionId}/tasks?event=${event.id}`} style={{ ...SECONDARY_BTN, textDecoration: "none", display: "inline-block" }}>
+            同事件任务
+          </Link>
+        )}
+      </nav>
       {/* 统一页头：eyebrow + serif 标题 + 徽章行 */}
       <PageHeader eyebrow="Task · 信息与编辑" title={displayTitle} side="stage">
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
@@ -1046,17 +1057,6 @@ export default function ReqDetailClient({
             )}
           </section>
 
-          {/* 返回入口（次按钮语汇） */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <Link href={`/production/${productionId}/tasks`} style={{ ...SECONDARY_BTN, textDecoration: "none", display: "inline-block" }}>
-              ← 返回任务面板
-            </Link>
-            {event && (
-              <Link href={`/production/${productionId}/tasks?event=${event.id}`} style={{ ...SECONDARY_BTN, textDecoration: "none", display: "inline-block" }}>
-                同事件任务
-              </Link>
-            )}
-          </div>
         </div>
       </div>
 
