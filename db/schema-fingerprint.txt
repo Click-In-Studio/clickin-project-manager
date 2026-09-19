@@ -1,0 +1,1761 @@
+COL|agent_approval|args|jsonb|jsonb|NO|
+COL|agent_approval|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_approval|decision|text|text|YES|
+COL|agent_approval|executed_at|timestamp with time zone|timestamptz|YES|
+COL|agent_approval|expires_at|timestamp with time zone|timestamptz|NO|
+COL|agent_approval|id|text|text|NO|
+COL|agent_approval|preview|jsonb|jsonb|NO|'{}'::jsonb
+COL|agent_approval|reason|text|text|YES|
+COL|agent_approval|resolved_at|timestamp with time zone|timestamptz|YES|
+COL|agent_approval|resolved_by|uuid|uuid|YES|
+COL|agent_approval|run_id|text|text|NO|
+COL|agent_approval|session_id|text|text|NO|
+COL|agent_approval|status|text|text|NO|'pending'::text
+COL|agent_approval|tool_call_id|text|text|NO|
+COL|agent_approval|tool|text|text|NO|
+COL|agent_event|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_event|line|jsonb|jsonb|NO|
+COL|agent_event|run_id|text|text|YES|
+COL|agent_event|seq|bigint|int8|NO|
+COL|agent_event|session_id|text|text|NO|
+COL|agent_instructions|content|text|text|NO|''::text
+COL|agent_instructions|scope_id|text|text|NO|
+COL|agent_instructions|scope_type|text|text|NO|
+COL|agent_instructions|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_instructions|updated_by|uuid|uuid|YES|
+COL|agent_memory_chunk|author_user_id|uuid|uuid|YES|
+COL|agent_memory_chunk|content_hash|text|text|NO|
+COL|agent_memory_chunk|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_memory_chunk|embedding|USER-DEFINED|vector|YES|
+COL|agent_memory_chunk|id|uuid|uuid|NO|gen_random_uuid()
+COL|agent_memory_chunk|importance|smallint|int2|YES|
+COL|agent_memory_chunk|model|text|text|YES|
+COL|agent_memory_chunk|observed_at|timestamp with time zone|timestamptz|NO|
+COL|agent_memory_chunk|origin_class|text|text|NO|
+COL|agent_memory_chunk|scope_id|text|text|NO|
+COL|agent_memory_chunk|scope_type|text|text|NO|
+COL|agent_memory_chunk|session_kind|text|text|NO|
+COL|agent_memory_chunk|source|text|text|NO|
+COL|agent_memory_chunk|supersedes_key|text|text|YES|
+COL|agent_memory_chunk|text_tokens|text|text|NO|
+COL|agent_memory_chunk|text|text|text|NO|
+COL|agent_memory_chunk|triggers|text|text|YES|
+COL|agent_memory_embedding_cache|content_hash|text|text|NO|
+COL|agent_memory_embedding_cache|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_memory_embedding_cache|embedding|USER-DEFINED|vector|NO|
+COL|agent_memory_embedding_cache|model|text|text|NO|
+COL|agent_memory_index_meta|dim|integer|int4|NO|
+COL|agent_memory_index_meta|id|smallint|int2|NO|1
+COL|agent_memory_index_meta|model|text|text|NO|
+COL|agent_memory_index_meta|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_memory_recall_log|chunk_id|uuid|uuid|NO|
+COL|agent_memory_recall_log|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_memory_recall_log|id|bigint|int8|NO|
+COL|agent_memory_recall_log|query_hash|text|text|NO|
+COL|agent_memory_recall_log|user_id|uuid|uuid|NO|
+COL|agent_mutation|action|text|text|NO|
+COL|agent_mutation|after|jsonb|jsonb|YES|
+COL|agent_mutation|before|jsonb|jsonb|YES|
+COL|agent_mutation|changes|jsonb|jsonb|NO|'[]'::jsonb
+COL|agent_mutation|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_mutation|entity_id|text|text|YES|
+COL|agent_mutation|id|text|text|NO|
+COL|agent_mutation|label|text|text|YES|
+COL|agent_mutation|production_id|text|text|YES|
+COL|agent_mutation|run_id|text|text|YES|
+COL|agent_mutation|schedule_id|text|text|YES|
+COL|agent_mutation|scope|text|text|NO|
+COL|agent_mutation|session_id|text|text|YES|
+COL|agent_mutation|summary|text|text|YES|
+COL|agent_mutation|tool_call_id|text|text|NO|
+COL|agent_mutation|tool|text|text|NO|
+COL|agent_mutation|unattended|boolean|bool|NO|false
+COL|agent_mutation|user_id|uuid|uuid|NO|
+COL|agent_question|answer|jsonb|jsonb|YES|
+COL|agent_question|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_question|expires_at|timestamp with time zone|timestamptz|NO|
+COL|agent_question|id|text|text|NO|
+COL|agent_question|payload|jsonb|jsonb|NO|
+COL|agent_question|resolved_at|timestamp with time zone|timestamptz|YES|
+COL|agent_question|run_id|text|text|NO|
+COL|agent_question|session_id|text|text|NO|
+COL|agent_question|status|text|text|NO|'pending'::text
+COL|agent_question|tool_call_id|text|text|NO|
+COL|agent_run|cache_read_tokens|integer|int4|NO|0
+COL|agent_run|ended_at|timestamp with time zone|timestamptz|YES|
+COL|agent_run|error|text|text|YES|
+COL|agent_run|heartbeat_at|timestamp with time zone|timestamptz|YES|
+COL|agent_run|id|text|text|NO|
+COL|agent_run|input_tokens|integer|int4|NO|0
+COL|agent_run|model|text|text|YES|
+COL|agent_run|output_tokens|integer|int4|NO|0
+COL|agent_run|owner|text|text|YES|
+COL|agent_run|page_key|text|text|YES|
+COL|agent_run|schedule_id|text|text|YES|
+COL|agent_run|session_id|text|text|NO|
+COL|agent_run|started_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_run|status|text|text|NO|'queued'::text
+COL|agent_schedule|allowed_tools|ARRAY|_text|NO|'{}'::text[]
+COL|agent_schedule|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_schedule|created_by_session_id|text|text|YES|
+COL|agent_schedule|expires_at|timestamp with time zone|timestamptz|YES|
+COL|agent_schedule|fire_count|integer|int4|NO|0
+COL|agent_schedule|id|text|text|NO|
+COL|agent_schedule|last_fired_at|timestamp with time zone|timestamptz|YES|
+COL|agent_schedule|last_run_id|text|text|YES|
+COL|agent_schedule|last_summary|text|text|YES|
+COL|agent_schedule|lease_owner|text|text|YES|
+COL|agent_schedule|lease_until|timestamp with time zone|timestamptz|YES|
+COL|agent_schedule|max_fires|integer|int4|YES|
+COL|agent_schedule|name|text|text|NO|
+COL|agent_schedule|next_fire_at|timestamp with time zone|timestamptz|YES|
+COL|agent_schedule|page_key|text|text|YES|
+COL|agent_schedule|paused_reason|text|text|YES|
+COL|agent_schedule|production_id|text|text|YES|
+COL|agent_schedule|prompt|text|text|NO|
+COL|agent_schedule|schedule|jsonb|jsonb|NO|
+COL|agent_schedule|status|text|text|NO|'active'::text
+COL|agent_schedule|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_schedule|user_id|uuid|uuid|NO|
+COL|agent_session_entry|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_session_entry|entry_id|text|text|NO|
+COL|agent_session_entry|parent_id|text|text|YES|
+COL|agent_session_entry|payload|jsonb|jsonb|NO|
+COL|agent_session_entry|seq|integer|int4|NO|
+COL|agent_session_entry|session_id|text|text|NO|
+COL|agent_session_entry|type|text|text|NO|
+COL|agent_session|archived_at|timestamp with time zone|timestamptz|YES|
+COL|agent_session|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_session|id|text|text|NO|
+COL|agent_session|last_message_at|timestamp with time zone|timestamptz|YES|
+COL|agent_session|production_id|text|text|YES|
+COL|agent_session|schedule_id|text|text|YES|
+COL|agent_session|title|text|text|YES|
+COL|agent_session|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_session|user_id|uuid|uuid|NO|
+COL|ai_credit_grant|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|ai_credit_grant|credits|bigint|int8|NO|
+COL|ai_credit_grant|expires_at|timestamp with time zone|timestamptz|YES|
+COL|ai_credit_grant|id|text|text|NO|
+COL|ai_credit_grant|note|text|text|YES|
+COL|ai_credit_grant|remaining|bigint|int8|NO|
+COL|ai_credit_grant|source|text|text|YES|
+COL|ai_credit_grant|user_id|uuid|uuid|NO|
+COL|ai_usage|billed_credits|bigint|int8|NO|0
+COL|ai_usage|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|ai_usage|id|bigint|int8|NO|
+COL|ai_usage|kind|text|text|NO|
+COL|ai_usage|model|text|text|NO|
+COL|ai_usage|paid_from|text|text|NO|'quota'::text
+COL|ai_usage|production_id|text|text|YES|
+COL|ai_usage|tokens|integer|int4|NO|
+COL|ai_usage|user_id|uuid|uuid|YES|
+COL|announcement_read|announcement_id|text|text|NO|
+COL|announcement_read|read_at|timestamp with time zone|timestamptz|NO|now()
+COL|announcement_read|user_id|uuid|uuid|NO|
+COL|app_user|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|app_user|id|uuid|uuid|NO|gen_random_uuid()
+COL|approval_flow_template|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|approval_flow_template|description|text|text|NO|''::text
+COL|approval_flow_template|id|text|text|NO|
+COL|approval_flow_template|name|text|text|NO|
+COL|approval_flow_template|nodes|jsonb|jsonb|NO|'[]'::jsonb
+COL|approval_flow_template|production_id|text|text|NO|
+COL|approval_flow_template|resource_scope|text|text|NO|''::text
+COL|approval_flow_template|status|text|text|NO|'draft'::text
+COL|approval_flow_template|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|approval_flow_template|updated_by|uuid|uuid|YES|
+COL|approval_request|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|approval_request|current_approver_ids|ARRAY|_uuid|NO|'{}'::uuid[]
+COL|approval_request|current_stage_depth|integer|int4|NO|0
+COL|approval_request|current_stage|text|text|YES|
+COL|approval_request|escalation_chain|jsonb|jsonb|NO|'[]'::jsonb
+COL|approval_request|expires_at|timestamp with time zone|timestamptz|YES|
+COL|approval_request|flow_snapshot|jsonb|jsonb|YES|
+COL|approval_request|flow_template_id|text|text|YES|
+COL|approval_request|grant_type|text|text|YES|
+COL|approval_request|granted_at|timestamp with time zone|timestamptz|YES|
+COL|approval_request|id|uuid|uuid|NO|gen_random_uuid()
+COL|approval_request|note|text|text|YES|
+COL|approval_request|permission_level|text|text|YES|
+COL|approval_request|production_id|text|text|NO|
+COL|approval_request|requested_expires_at|timestamp with time zone|timestamptz|YES|
+COL|approval_request|resolved_at|timestamp with time zone|timestamptz|YES|
+COL|approval_request|resolved_by|uuid|uuid|YES|
+COL|approval_request|resource_id|text|text|YES|'*'::text
+COL|approval_request|resource_sub|text|text|YES|'*'::text
+COL|approval_request|resource_type|text|text|YES|
+COL|approval_request|status|text|text|NO|'pending_resource'::text
+COL|approval_request|subject_id|uuid|uuid|NO|
+COL|approval_request|ttl_duration|interval|interval|YES|
+COL|approval_request|type|text|text|NO|
+COL|asset_file|asset_id|text|text|NO|
+COL|asset_file|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|asset_file|file_size|bigint|int8|YES|
+COL|asset_file|id|text|text|NO|
+COL|asset_file|metadata|jsonb|jsonb|YES|
+COL|asset_file|r2_key|text|text|YES|
+COL|asset_file|thumbnail_r2_key|text|text|YES|
+COL|asset|asset_type|text|text|NO|'reference'::text
+COL|asset|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|asset|feishu_url|text|text|YES|
+COL|asset|file_name|text|text|NO|
+COL|asset|id|text|text|NO|
+COL|asset|mime_type|text|text|YES|
+COL|asset|name|text|text|YES|
+COL|asset|production_id|text|text|NO|
+COL|asset|storage_type|text|text|NO|'r2'::text
+COL|asset|uploader_user_id|uuid|uuid|NO|
+COL|avatar_upload_audit|committed_at|timestamp with time zone|timestamptz|YES|
+COL|avatar_upload_audit|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|avatar_upload_audit|deleted_at|timestamp with time zone|timestamptz|YES|
+COL|avatar_upload_audit|id|text|text|NO|
+COL|avatar_upload_audit|kind|text|text|NO|
+COL|avatar_upload_audit|r2_key|text|text|NO|
+COL|avatar_upload_audit|subject_id|text|text|NO|
+COL|avatar_upload_audit|uploader_id|uuid|uuid|NO|
+COL|block_tag|block_id|text|text|NO|
+COL|block_tag|group_id|text|text|NO|
+COL|block_tag|option_id|text|text|YES|
+COL|block_tag|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|block_tag|value|numeric|numeric|YES|
+COL|bot_testers|added_at|timestamp with time zone|timestamptz|NO|now()
+COL|bot_testers|name|text|text|NO|''::text
+COL|bot_testers|open_id|text|text|NO|
+COL|bug_report|body|text|text|NO|
+COL|bug_report|contact|text|text|YES|
+COL|bug_report|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|bug_report|id|text|text|NO|
+COL|bug_report|issue_url|text|text|YES|
+COL|bug_report|kind|text|text|NO|'bug'::text
+COL|bug_report|manual_slug|text|text|YES|
+COL|bug_report|page_path|text|text|NO|
+COL|bug_report|production_id|text|text|YES|
+COL|bug_report|status|text|text|NO|'new'::text
+COL|bug_report|user_agent|text|text|YES|
+COL|bug_report|user_id|uuid|uuid|YES|
+COL|bug_report|viewport|text|text|YES|
+COL|character_aggregate|aggregate_id|text|text|NO|
+COL|character_aggregate|member_id|text|text|NO|
+COL|character_version|biography|text|text|YES|
+COL|character_version|character_id|text|text|NO|
+COL|character_version|gender|text|text|YES|
+COL|character_version|is_aggregate|boolean|bool|NO|false
+COL|character_version|name|text|text|NO|''::text
+COL|character_version|role_type|text|text|YES|
+COL|character_version|sort_order|integer|int4|NO|0
+COL|character_version|version_id|text|text|NO|
+COL|character|id|text|text|NO|
+COL|character|production_id|text|text|NO|
+COL|comment|author_name|text|text|NO|
+COL|comment|body|text|text|NO|
+COL|comment|context_id|text|text|NO|
+COL|comment|context_type|text|text|NO|'block'::text
+COL|comment|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|comment|id|text|text|NO|(gen_random_uuid())::text
+COL|comment|mentions|jsonb|jsonb|NO|'[]'::jsonb
+COL|comment|parent_id|text|text|YES|
+COL|comment|production_id|text|text|NO|
+COL|comment|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|comment|user_id|uuid|uuid|NO|
+COL|cue_list|abbr|text|text|YES|
+COL|cue_list|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|cue_list|created_by|uuid|uuid|NO|
+COL|cue_list|id|text|text|NO|
+COL|cue_list|name|text|text|NO|
+COL|cue_list|notes|text|text|NO|''::text
+COL|cue_list|production_id|text|text|NO|
+COL|cue_list|template|text|text|YES|
+COL|cue_mention_text_backup|body|text|text|NO|
+COL|cue_mention_text_backup|column_name|text|text|NO|
+COL|cue_mention_text_backup|row_id|text|text|NO|
+COL|cue_mention_text_backup|table_name|text|text|NO|
+COL|cue_mention_text_backup|taken_at|timestamp with time zone|timestamptz|NO|now()
+COL|cue_version|cue_id|text|text|NO|
+COL|cue_version|revision_id|text|text|NO|
+COL|cue_version|version_id|text|text|NO|
+COL|cue|content|text|text|NO|''::text
+COL|cue|cue_id|text|text|NO|
+COL|cue|cue_list_id|text|text|NO|
+COL|cue|end_kind|text|text|NO|
+COL|cue|end_offset|integer|int4|YES|
+COL|cue|end_snapshot_id|text|text|YES|
+COL|cue|id|text|text|NO|
+COL|cue|name|text|text|NO|''::text
+COL|cue|number|text|text|NO|
+COL|cue|start_kind|text|text|NO|
+COL|cue|start_offset|integer|int4|YES|
+COL|cue|start_snapshot_id|text|text|YES|
+COL|cue|warning|boolean|bool|NO|false
+COL|dept_cue_list_template|can_create|boolean|bool|NO|false
+COL|dept_cue_list_template|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|dept_cue_list_template|dept_id|uuid|uuid|NO|
+COL|dept_cue_list_template|permissions|ARRAY|_text|NO|'{}'::text[]
+COL|dept_cue_list_template|production_id|text|text|NO|
+COL|dept_cue_list_template|template|text|text|NO|
+COL|dialect_v2_text_backup|body|text|text|NO|
+COL|dialect_v2_text_backup|column_name|text|text|NO|
+COL|dialect_v2_text_backup|row_id|text|text|NO|
+COL|dialect_v2_text_backup|table_name|text|text|NO|
+COL|dialect_v2_text_backup|taken_at|timestamp with time zone|timestamptz|NO|now()
+COL|email_otp|code|text|text|NO|
+COL|email_otp|email|text|text|NO|
+COL|email_otp|expires_at|timestamp with time zone|timestamptz|NO|
+COL|email_otp|id|uuid|uuid|NO|gen_random_uuid()
+COL|email_otp|used_at|timestamp with time zone|timestamptz|YES|
+COL|email_otp|user_id|uuid|uuid|NO|
+COL|event_call_time|call_at|timestamp with time zone|timestamptz|NO|
+COL|event_call_time|confirmed_at|timestamp with time zone|timestamptz|YES|
+COL|event_call_time|department_id|uuid|uuid|YES|
+COL|event_call_time|event_id|text|text|NO|
+COL|event_call_time|id|text|text|NO|
+COL|event_call_time|name|text|text|NO|
+COL|event_call_time|notes|text|text|NO|''::text
+COL|event_call_time|rsvp_at|timestamp with time zone|timestamptz|YES|
+COL|event_call_time|rsvp|text|text|YES|
+COL|event_call_time|schedule_item_id|text|text|YES|
+COL|event_call_time|user_id|uuid|uuid|NO|
+COL|event_group_freeze_member|event_id|text|text|NO|
+COL|event_group_freeze_member|frozen_at|timestamp with time zone|timestamptz|NO|
+COL|event_group_freeze_member|group_id|uuid|uuid|NO|
+COL|event_group_freeze_member|id|uuid|uuid|NO|gen_random_uuid()
+COL|event_group_freeze_member|user_id|uuid|uuid|YES|
+COL|event_group_freeze_member|user_name|text|text|NO|
+COL|event_group_freeze_member|via_dept_id|uuid|uuid|YES|
+COL|event_group_freeze_member|via_dept_name|text|text|YES|
+COL|event_group_freeze_member|was_poc|boolean|bool|NO|false
+COL|event_group_freeze|event_id|text|text|NO|
+COL|event_group_freeze|frozen_at|timestamp with time zone|timestamptz|NO|now()
+COL|event_group_freeze|frozen_by|uuid|uuid|YES|
+COL|event_group_freeze|group_id|uuid|uuid|NO|
+COL|event_group_freeze|group_name|text|text|NO|
+COL|event_group_freeze|poc_dept_id|uuid|uuid|YES|
+COL|event_group_freeze|poc_dept_name|text|text|YES|
+COL|event_group_freeze|poc_user_id|uuid|uuid|YES|
+COL|event_group_freeze|poc_user_name|text|text|YES|
+COL|event_group_freeze|released_at|timestamp with time zone|timestamptz|YES|
+COL|event_group_member|added_at|timestamp with time zone|timestamptz|NO|now()
+COL|event_group_member|dept_id|uuid|uuid|YES|
+COL|event_group_member|group_id|uuid|uuid|NO|
+COL|event_group_member|user_id|uuid|uuid|YES|
+COL|event_group|color|text|text|YES|
+COL|event_group|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|event_group|created_by|uuid|uuid|NO|
+COL|event_group|event_id|text|text|YES|
+COL|event_group|id|uuid|uuid|NO|gen_random_uuid()
+COL|event_group|name|text|text|NO|
+COL|event_group|order_index|integer|int4|NO|0
+COL|event_group|poc_dept_id|uuid|uuid|YES|
+COL|event_group|poc_user_id|uuid|uuid|YES|
+COL|event_group|production_id|text|text|NO|
+COL|event_milestone|event_id|text|text|NO|
+COL|event_milestone|milestone_id|text|text|NO|
+COL|event_participant|department_id|uuid|uuid|YES|
+COL|event_participant|event_id|text|text|NO|
+COL|event_participant|id|text|text|NO|
+COL|event_participant|name|text|text|NO|
+COL|event_participant|role|text|text|NO|'participant'::text
+COL|event_participant|user_id|uuid|uuid|NO|
+COL|event_report_note|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|event_report_note|created_via|text|text|NO|'dept'::text
+COL|event_report_note|department_id|uuid|uuid|NO|
+COL|event_report_note|id|text|text|NO|
+COL|event_report_note|node_id|text|text|NO|
+COL|event_report_note|report_id|text|text|NO|
+COL|event_report_note|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|event_report_read|read_at|timestamp with time zone|timestamptz|NO|now()
+COL|event_report_read|report_id|text|text|NO|
+COL|event_report_read|user_id|uuid|uuid|NO|
+COL|event_report|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|event_report|event_id|text|text|NO|
+COL|event_report|id|text|text|NO|
+COL|event_report|node_id|text|text|NO|
+COL|event_report|published_at|timestamp with time zone|timestamptz|YES|
+COL|event_report|report_type|text|text|NO|'rehearsal'::text
+COL|event_report|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|event_rundown_column|event_id|text|text|NO|
+COL|event_rundown_column|group_id|uuid|uuid|YES|
+COL|event_rundown_column|id|uuid|uuid|NO|gen_random_uuid()
+COL|event_rundown_column|is_pinned|boolean|bool|NO|false
+COL|event_rundown_column|is_visible|boolean|bool|NO|true
+COL|event_rundown_column|match_location|text|text|YES|
+COL|event_rundown_column|order_index|integer|int4|NO|0
+COL|event_rundown_placement_column|column_id|uuid|uuid|NO|
+COL|event_rundown_placement_column|placement_id|uuid|uuid|NO|
+COL|event_rundown_placement|color|text|text|YES|
+COL|event_rundown_placement|event_id|text|text|NO|
+COL|event_rundown_placement|id|uuid|uuid|NO|gen_random_uuid()
+COL|event_rundown_placement|item_id|text|text|YES|
+COL|event_rundown_placement|task_id|text|text|YES|
+COL|event_schedule_item|end_time|timestamp with time zone|timestamptz|YES|
+COL|event_schedule_item|event_id|text|text|NO|
+COL|event_schedule_item|id|text|text|NO|
+COL|event_schedule_item|item_type|text|text|NO|'custom'::text
+COL|event_schedule_item|location|text|text|NO|''::text
+COL|event_schedule_item|notes|text|text|NO|''::text
+COL|event_schedule_item|order_index|integer|int4|NO|0
+COL|event_schedule_item|start_time|timestamp with time zone|timestamptz|YES|
+COL|event_schedule_item|target_block_id|text|text|YES|
+COL|event_schedule_item|target_scene_id|text|text|YES|
+COL|event_schedule_item|title|text|text|NO|
+COL|event_stage_manager|event_id|text|text|NO|
+COL|event_stage_manager|name|text|text|NO|
+COL|event_stage_manager|user_id|uuid|uuid|NO|
+COL|feishu_user|avatar_url|text|text|YES|
+COL|feishu_user|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|feishu_user|email|text|text|YES|
+COL|feishu_user|is_super_admin|boolean|bool|NO|false
+COL|feishu_user|name|text|text|NO|
+COL|feishu_user|open_id|text|text|NO|
+COL|feishu_user|phone|text|text|YES|
+COL|feishu_user|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|feishu_user|user_id|uuid|uuid|NO|
+COL|job|attempts|integer|int4|NO|0
+COL|job|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|job|dedupe_key|text|text|YES|
+COL|job|error|text|text|YES|
+COL|job|finished_at|timestamp with time zone|timestamptz|YES|
+COL|job|id|text|text|NO|
+COL|job|kind|text|text|NO|
+COL|job|lease_owner|text|text|YES|
+COL|job|lease_until|timestamp with time zone|timestamptz|YES|
+COL|job|max_attempts|integer|int4|NO|3
+COL|job|payload|jsonb|jsonb|NO|'{}'::jsonb
+COL|job|priority|integer|int4|NO|0
+COL|job|result|jsonb|jsonb|YES|
+COL|job|run_after|timestamp with time zone|timestamptz|NO|now()
+COL|job|started_at|timestamp with time zone|timestamptz|YES|
+COL|job|status|text|text|NO|'queued'::text
+COL|milestone|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|milestone|end_date|date|date|NO|
+COL|milestone|id|text|text|NO|
+COL|milestone|name|text|text|NO|
+COL|milestone|production_id|text|text|NO|
+COL|milestone|sort_order|integer|int4|NO|0
+COL|node_dept_share|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|node_dept_share|dept_id|uuid|uuid|NO|
+COL|node_dept_share|node_id|text|text|NO|
+COL|node_entity_dir|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|node_entity_dir|entity_id|text|text|NO|
+COL|node_entity_dir|entity_type|text|text|NO|
+COL|node_entity_dir|node_id|text|text|NO|
+COL|node_entity_dir|production_id|text|text|NO|
+COL|node_mount|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|node_mount|created_by|uuid|uuid|NO|
+COL|node_mount|id|text|text|NO|
+COL|node_mount|mount_aux_id|text|text|YES|
+COL|node_mount|mount_id|text|text|NO|
+COL|node_mount|mount_type|text|text|NO|
+COL|node_mount|node_id|text|text|NO|
+COL|node_mount|production_id|text|text|NO|
+COL|node|asset_id|text|text|YES|
+COL|node|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|node|created_by|uuid|uuid|YES|
+COL|node|id|text|text|NO|
+COL|node|is_public|boolean|bool|NO|false
+COL|node|kind|text|text|NO|
+COL|node|link_target_id|text|text|YES|
+COL|node|listable|boolean|bool|NO|true
+COL|node|parent_id|text|text|YES|
+COL|node|production_id|text|text|NO|
+COL|node|sort_key|text|text|YES|
+COL|node|title|text|text|YES|
+COL|node|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|node|wiki_id|uuid|uuid|YES|
+COL|notification_preference|platform_identity_id|uuid|uuid|NO|
+COL|notification_preference|scope_id|text|text|NO|''::text
+COL|notification_preference|scope_type|text|text|NO|
+COL|notification_preference|user_id|uuid|uuid|NO|
+COL|notification_subscription|enabled|boolean|bool|NO|
+COL|notification_subscription|notification_type|text|text|NO|
+COL|notification_subscription|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|notification_subscription|user_id|uuid|uuid|NO|
+COL|phase_milestone|milestone_id|text|text|NO|
+COL|phase_milestone|phase_id|text|text|NO|
+COL|phase|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|phase|dept_id|uuid|uuid|YES|
+COL|phase|end_date|date|date|YES|
+COL|phase|id|text|text|NO|
+COL|phase|name|text|text|NO|
+COL|phase|production_id|text|text|NO|
+COL|phase|sort_order|integer|int4|NO|0
+COL|phase|start_date|date|date|NO|
+COL|plan_code_redemption|code|text|text|NO|
+COL|plan_code_redemption|id|bigint|int8|NO|
+COL|plan_code_redemption|production_id|text|text|YES|
+COL|plan_code_redemption|redeemed_at|timestamp with time zone|timestamptz|NO|now()
+COL|plan_code_redemption|user_id|uuid|uuid|NO|
+COL|plan_code|code|text|text|NO|
+COL|plan_code|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|plan_code|exempt_note|text|text|YES|
+COL|plan_code|expires_at|timestamp with time zone|timestamptz|YES|
+COL|plan_code|grants_credits|bigint|int8|NO|0
+COL|plan_code|grants_exempt|boolean|bool|NO|false
+COL|plan_code|grants_tier|text|text|YES|
+COL|plan_code|kind|text|text|NO|
+COL|plan_code|max_uses|integer|int4|NO|1
+COL|plan_code|note|text|text|YES|
+COL|plan_code|used_count|integer|int4|NO|0
+COL|production_announcement|content|text|text|NO|''::text
+COL|production_announcement|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_announcement|created_by|uuid|uuid|NO|
+COL|production_announcement|id|text|text|NO|
+COL|production_announcement|is_pinned|boolean|bool|NO|false
+COL|production_announcement|production_id|text|text|NO|
+COL|production_announcement|title|text|text|NO|
+COL|production_announcement|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_approval_config|production_id|text|text|NO|
+COL|production_approval_config|ttl_hours|integer|int4|NO|24
+COL|production_approval_config|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_approval_config|updated_by|uuid|uuid|YES|
+COL|production_budget_category|amount|numeric|numeric|NO|0
+COL|production_budget_category|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_budget_category|created_by|uuid|uuid|NO|
+COL|production_budget_category|currency|text|text|NO|'CNY'::text
+COL|production_budget_category|dept_id|uuid|uuid|YES|
+COL|production_budget_category|id|uuid|uuid|NO|gen_random_uuid()
+COL|production_budget_category|name|text|text|NO|
+COL|production_budget_category|notes|text|text|NO|''::text
+COL|production_budget_category|order_index|integer|int4|NO|0
+COL|production_budget_category|production_id|text|text|NO|
+COL|production_budget_category|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_cue_template_type|abbr_hint|text|text|YES|
+COL|production_cue_template_type|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_cue_template_type|creator_roles|ARRAY|_text|NO|'{}'::text[]
+COL|production_cue_template_type|display_order|integer|int4|NO|0
+COL|production_cue_template_type|id|uuid|uuid|NO|gen_random_uuid()
+COL|production_cue_template_type|key|text|text|NO|
+COL|production_cue_template_type|production_id|text|text|NO|
+COL|production_dept_member|dept_id|uuid|uuid|NO|
+COL|production_dept_member|id|uuid|uuid|NO|gen_random_uuid()
+COL|production_dept_member|is_poc|boolean|bool|NO|false
+COL|production_dept_member|joined_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_dept_member|production_id|text|text|NO|
+COL|production_dept_member|user_id|uuid|uuid|NO|
+COL|production_dept_permission|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_dept_permission|dept_id|uuid|uuid|NO|
+COL|production_dept_permission|id|uuid|uuid|NO|gen_random_uuid()
+COL|production_dept_permission|permission_key|text|text|NO|
+COL|production_dept_permission|production_id|text|text|NO|
+COL|production_dept_permission|source|text|text|NO|'manual'::text
+COL|production_dept|chat_id|text|text|YES|
+COL|production_dept|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_dept|display_order|integer|int4|NO|0
+COL|production_dept|id|uuid|uuid|NO|gen_random_uuid()
+COL|production_dept|kind|text|text|NO|'dept'::text
+COL|production_dept|name|text|text|NO|
+COL|production_dept|parent_id|uuid|uuid|YES|
+COL|production_dept|production_id|text|text|NO|
+COL|production_event|chat_id|text|text|YES|
+COL|production_event|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_event|created_by|uuid|uuid|NO|
+COL|production_event|description|text|text|NO|''::text
+COL|production_event|end_time|timestamp with time zone|timestamptz|YES|
+COL|production_event|event_type|text|text|NO|'custom'::text
+COL|production_event|id|text|text|NO|
+COL|production_event|location|text|text|NO|''::text
+COL|production_event|production_id|text|text|NO|
+COL|production_event|report_doc_node_id|text|text|YES|
+COL|production_event|start_time|timestamp with time zone|timestamptz|YES|
+COL|production_event|status|text|text|NO|'draft'::text
+COL|production_event|title|text|text|NO|
+COL|production_event|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_event|version_id|text|text|YES|
+COL|production_expense|amount|numeric|numeric|NO|
+COL|production_expense|category_id|uuid|uuid|YES|
+COL|production_expense|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_expense|currency|text|text|NO|'CNY'::text
+COL|production_expense|current_approver_ids|ARRAY|_uuid|NO|'{}'::uuid[]
+COL|production_expense|current_stage_depth|integer|int4|NO|0
+COL|production_expense|current_stage|text|text|YES|
+COL|production_expense|escalation_chain|jsonb|jsonb|NO|'[]'::jsonb
+COL|production_expense|id|uuid|uuid|NO|gen_random_uuid()
+COL|production_expense|note|text|text|NO|''::text
+COL|production_expense|production_id|text|text|NO|
+COL|production_expense|resolved_at|timestamp with time zone|timestamptz|YES|
+COL|production_expense|resolved_by|uuid|uuid|YES|
+COL|production_expense|status|text|text|NO|'pending'::text
+COL|production_expense|submitted_by|uuid|uuid|NO|
+COL|production_expense|title|text|text|NO|
+COL|production_expense|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_invite_claim|claimed_at|timestamp with time zone|timestamptz|YES|
+COL|production_invite_claim|claimed_by|uuid|uuid|YES|
+COL|production_invite_claim|id|uuid|uuid|NO|gen_random_uuid()
+COL|production_invite_claim|name|text|text|NO|
+COL|production_invite_claim|preset_dept_ids|ARRAY|_uuid|NO|'{}'::uuid[]
+COL|production_invite_claim|preset_roles|ARRAY|_text|NO|'{}'::text[]
+COL|production_invite_claim|token|uuid|uuid|NO|
+COL|production_invite|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_invite|created_by|uuid|uuid|NO|
+COL|production_invite|email|text|text|YES|
+COL|production_invite|expires_at|timestamp with time zone|timestamptz|YES|
+COL|production_invite|feishu_open_id|text|text|YES|
+COL|production_invite|kind|text|text|NO|'standard'::text
+COL|production_invite|max_uses|integer|int4|YES|
+COL|production_invite|preset_dept_ids|ARRAY|_uuid|NO|'{}'::uuid[]
+COL|production_invite|preset_roles|ARRAY|_text|NO|'{}'::text[]
+COL|production_invite|production_id|text|text|NO|
+COL|production_invite|revoked_at|timestamp with time zone|timestamptz|YES|
+COL|production_invite|target_user_id|uuid|uuid|YES|
+COL|production_invite|token|uuid|uuid|NO|gen_random_uuid()
+COL|production_invite|used_count|integer|int4|NO|0
+COL|production_material_status|color|text|text|YES|
+COL|production_material_status|id|uuid|uuid|NO|gen_random_uuid()
+COL|production_material_status|is_system|boolean|bool|NO|false
+COL|production_material_status|name|text|text|NO|
+COL|production_material_status|order_index|integer|int4|NO|0
+COL|production_material_status|production_id|text|text|YES|
+COL|production_material|category|text|text|NO|''::text
+COL|production_material|code|text|text|NO|
+COL|production_material|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_material|created_by|uuid|uuid|NO|
+COL|production_material|department_id|uuid|uuid|YES|
+COL|production_material|group_id|uuid|uuid|YES|
+COL|production_material|id|uuid|uuid|NO|gen_random_uuid()
+COL|production_material|location|text|text|NO|''::text
+COL|production_material|name|text|text|NO|
+COL|production_material|notes|text|text|NO|''::text
+COL|production_material|production_id|text|text|NO|
+COL|production_material|quantity|integer|int4|NO|1
+COL|production_material|status_id|uuid|uuid|YES|
+COL|production_material|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_member_grant|approval_id|uuid|uuid|YES|
+COL|production_member_grant|confirmed_by|uuid|uuid|YES|
+COL|production_member_grant|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_member_grant|expires_at|timestamp with time zone|timestamptz|YES|
+COL|production_member_grant|grant_source|text|text|NO|
+COL|production_member_grant|id|uuid|uuid|NO|gen_random_uuid()
+COL|production_member_grant|is_revoked|boolean|bool|NO|false
+COL|production_member_grant|permission_level|text|text|NO|
+COL|production_member_grant|production_id|text|text|NO|
+COL|production_member_grant|resource_id|text|text|NO|'*'::text
+COL|production_member_grant|resource_sub|text|text|NO|'*'::text
+COL|production_member_grant|resource_type|text|text|NO|
+COL|production_member_grant|revoked_reason|text|text|YES|
+COL|production_member_grant|user_id|uuid|uuid|NO|
+COL|production_member_permission|granted|boolean|bool|NO|
+COL|production_member_permission|permission|text|text|NO|
+COL|production_member_permission|production_id|text|text|NO|
+COL|production_member_permission|user_id|uuid|uuid|NO|
+COL|production_member_role|production_id|text|text|NO|
+COL|production_member_role|role_id|text|text|NO|
+COL|production_member_role|user_id|uuid|uuid|NO|
+COL|production_member_status_audit|action|text|text|NO|
+COL|production_member_status_audit|actor_id|uuid|uuid|YES|
+COL|production_member_status_audit|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_member_status_audit|from_status|text|text|NO|
+COL|production_member_status_audit|id|bigint|int8|NO|nextval('production_member_status_audit_id_seq'::regclass)
+COL|production_member_status_audit|note|text|text|YES|
+COL|production_member_status_audit|production_id|text|text|NO|
+COL|production_member_status_audit|to_status|text|text|YES|
+COL|production_member_status_audit|user_id|uuid|uuid|NO|
+COL|production_member_tag_assignment|production_id|text|text|NO|
+COL|production_member_tag_assignment|tag_id|uuid|uuid|NO|
+COL|production_member_tag_assignment|user_id|uuid|uuid|NO|
+COL|production_member_tag|id|uuid|uuid|NO|gen_random_uuid()
+COL|production_member_tag|is_system|boolean|bool|NO|false
+COL|production_member_tag|name|text|text|NO|
+COL|production_member_tag|production_id|text|text|YES|
+COL|production_member|added_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_member|photo_url|text|text|YES|
+COL|production_member|production_id|text|text|NO|
+COL|production_member|roles|ARRAY|_text|NO|'{}'::text[]
+COL|production_member|status_changed_at|timestamp with time zone|timestamptz|YES|
+COL|production_member|status_changed_by|uuid|uuid|YES|
+COL|production_member|status_source|text|text|YES|
+COL|production_member|status|text|text|NO|'active'::text
+COL|production_member|supervisor_id|uuid|uuid|YES|
+COL|production_member|user_id|uuid|uuid|NO|
+COL|production_node_config|assets_root_node_id|text|text|YES|
+COL|production_node_config|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_node_config|dramaturgy_root_node_id|text|text|YES|
+COL|production_node_config|dramaturgy_root_title|text|text|NO|'戏剧构作'::text
+COL|production_node_config|dramaturgy_tree_enabled|boolean|bool|NO|true
+COL|production_node_config|production_id|text|text|NO|
+COL|production_node_config|reports_root_node_id|text|text|YES|
+COL|production_node_config|reports_root_title|text|text|NO|'报告'::text
+COL|production_node_config|reports_tree_enabled|boolean|bool|NO|true
+COL|production_node_config|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_plan|billing_exempt|boolean|bool|NO|false
+COL|production_plan|exempt_note|text|text|YES|
+COL|production_plan|production_id|text|text|NO|
+COL|production_plan|source|text|text|YES|
+COL|production_plan|tier|text|text|NO|
+COL|production_plan|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_platform_channel|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_platform_channel|id|uuid|uuid|NO|gen_random_uuid()
+COL|production_platform_channel|org_id|text|text|YES|
+COL|production_platform_channel|platform_channel_id|text|text|NO|
+COL|production_platform_channel|platform_id|text|text|NO|
+COL|production_platform_channel|production_id|text|text|NO|
+COL|production_policy_audit|changed_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_policy_audit|changed_by|uuid|uuid|YES|
+COL|production_policy_audit|id|bigint|int8|NO|nextval('production_policy_audit_id_seq'::regclass)
+COL|production_policy_audit|new_value|text|text|NO|
+COL|production_policy_audit|old_value|text|text|NO|
+COL|production_policy_audit|policy_key|text|text|NO|
+COL|production_policy_audit|production_id|text|text|NO|
+COL|production_policy|policy_key|text|text|NO|
+COL|production_policy|production_id|text|text|NO|
+COL|production_policy|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_policy|updated_by|uuid|uuid|YES|
+COL|production_policy|value|text|text|NO|
+COL|production_role_permission|permission_key|text|text|NO|
+COL|production_role_permission|role_id|text|text|NO|
+COL|production_role|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_role|id|text|text|NO|
+COL|production_role|is_deprecated|boolean|bool|NO|false
+COL|production_role|name|text|text|NO|
+COL|production_role|production_id|text|text|NO|
+COL|production|active_version_id|text|text|YES|
+COL|production|archived_at|timestamp with time zone|timestamptz|YES|
+COL|production|avatar_url|text|text|YES|
+COL|production|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production|description|text|text|NO|''::text
+COL|production|id|text|text|NO|
+COL|production|language|text|text|YES|
+COL|production|master_view_id|text|text|YES|
+COL|production|name|text|text|NO|
+COL|production|owner_id|uuid|uuid|NO|
+COL|production|page_map|jsonb|jsonb|NO|'{}'::jsonb
+COL|production|script_config|jsonb|jsonb|NO|'{}'::jsonb
+COL|production|sort_order|integer|int4|NO|0
+COL|production|type_label|text|text|YES|
+COL|production|type|text|text|YES|
+COL|production|watermark_enabled|boolean|bool|NO|false
+COL|registration_code_redemption|code|text|text|NO|
+COL|registration_code_redemption|email|text|text|NO|
+COL|registration_code_redemption|id|bigint|int8|NO|
+COL|registration_code_redemption|redeemed_at|timestamp with time zone|timestamptz|NO|now()
+COL|registration_code_redemption|user_id|uuid|uuid|NO|
+COL|registration_code|code|text|text|NO|
+COL|registration_code|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|registration_code|expires_at|timestamp with time zone|timestamptz|YES|
+COL|registration_code|max_uses|integer|int4|NO|1
+COL|registration_code|note|text|text|YES|
+COL|registration_code|used_count|integer|int4|NO|0
+COL|registration_email|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|registration_email|email|text|text|NO|
+COL|registration_email|note|text|text|YES|
+COL|resource_dept_manage|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|resource_dept_manage|dept_id|uuid|uuid|NO|
+COL|resource_dept_manage|established_by|uuid|uuid|NO|
+COL|resource_dept_manage|id|uuid|uuid|NO|gen_random_uuid()
+COL|resource_dept_manage|production_id|text|text|NO|
+COL|resource_dept_manage|resource_id|text|text|NO|'*'::text
+COL|resource_dept_manage|resource_sub|text|text|NO|'*'::text
+COL|resource_dept_manage|resource_type|text|text|NO|
+COL|resource_permission_level|permission_level|text|text|NO|
+COL|resource_permission_level|resource_type|text|text|NO|
+COL|resource_permission_level|sort_order|integer|int4|NO|0
+COL|resource_person_manage|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|resource_person_manage|established_by|uuid|uuid|NO|
+COL|resource_person_manage|id|uuid|uuid|NO|gen_random_uuid()
+COL|resource_person_manage|production_id|text|text|NO|
+COL|resource_person_manage|resource_id|text|text|NO|'*'::text
+COL|resource_person_manage|resource_sub|text|text|NO|'*'::text
+COL|resource_person_manage|resource_type|text|text|NO|
+COL|resource_person_manage|user_id|uuid|uuid|NO|
+COL|scene_table_view_config|config|jsonb|jsonb|NO|'{}'::jsonb
+COL|scene_table_view_config|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|scene_table_view_config|id|text|text|NO|
+COL|scene_table_view_config|is_default|boolean|bool|NO|false
+COL|scene_table_view_config|production_id|text|text|NO|
+COL|scene_table_view_config|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|scene_table_view_config|user_id|uuid|uuid|NO|
+COL|scene_table_view_config|view_name|text|text|NO|'默认视图'::text
+COL|scene_version|action_line|text|text|YES|
+COL|scene_version|expected_duration|text|text|YES|
+COL|scene_version|music|text|text|YES|
+COL|scene_version|name|text|text|NO|''::text
+COL|scene_version|parent_id|text|text|YES|
+COL|scene_version|scene_id|text|text|NO|
+COL|scene_version|sort_order|integer|int4|NO|0
+COL|scene_version|stage_notes|text|text|YES|
+COL|scene_version|synopsis|text|text|YES|
+COL|scene_version|version_id|text|text|NO|
+COL|scene|id|text|text|NO|
+COL|scene|production_id|text|text|NO|
+COL|schedule_item_department|dept_id|uuid|uuid|NO|
+COL|schedule_item_department|item_id|text|text|NO|
+COL|schedule_item_group|group_id|uuid|uuid|NO|
+COL|schedule_item_group|item_id|text|text|NO|
+COL|schedule_item_participant|item_id|text|text|NO|
+COL|schedule_item_participant|name|text|text|NO|
+COL|schedule_item_participant|user_id|uuid|uuid|NO|
+COL|script_character|annotation|text|text|YES|
+COL|script_character|character_id|text|text|NO|
+COL|script_character|position|integer|int4|NO|0
+COL|script_character|script_id|text|text|NO|
+COL|script_version|block_id|text|text|NO|
+COL|script_version|snapshot_id|text|text|NO|
+COL|script_version|sort_key|text|text|NO|
+COL|script_version|version_id|text|text|NO|
+COL|script_view|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|script_view|id|text|text|NO|
+COL|script_view|name|text|text|NO|''::text
+COL|script_view|page_layout|text|text|NO|'a4'::text
+COL|script_view|page_sequence|jsonb|jsonb|NO|'[{"kind": "content"}]'::jsonb
+COL|script_view|production_id|text|text|NO|
+COL|script_view|sort_order|integer|int4|NO|0
+COL|script_view|template_overrides|jsonb|jsonb|NO|'{}'::jsonb
+COL|script_view|text_layout_mode|text|text|NO|'center'::text
+COL|script|block_id|text|text|NO|
+COL|script|content|text|text|NO|''::text
+COL|script|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|script|force_show_character_name|boolean|bool|NO|false
+COL|script|id|text|text|NO|
+COL|script|marker_meta|jsonb|jsonb|NO|'{}'::jsonb
+COL|script|owner_marker_id|text|text|YES|
+COL|script|production_id|text|text|NO|
+COL|script|rehearsal_mark|text|text|YES|
+COL|script|scene_id|text|text|YES|
+COL|script|sort_key|text|text|NO|
+COL|script|stage_comment|text|text|YES|
+COL|script|type|USER-DEFINED|block_type|NO|'dialogue'::block_type
+COL|tag_group|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|tag_group|default_option_id|text|text|YES|
+COL|tag_group|id|text|text|NO|
+COL|tag_group|lyric_split_after_option_id|text|text|YES|
+COL|tag_group|name|text|text|NO|
+COL|tag_group|production_id|text|text|NO|
+COL|tag_group|range_default|numeric|numeric|YES|
+COL|tag_group|range_max|numeric|numeric|YES|
+COL|tag_group|range_min|numeric|numeric|YES|
+COL|tag_group|range_step|numeric|numeric|YES|1
+COL|tag_group|sort_order|integer|int4|NO|0
+COL|tag_group|type|text|text|NO|
+COL|tag_option|color|text|text|NO|'#a1a1aa'::text
+COL|tag_option|group_id|text|text|NO|
+COL|tag_option|id|text|text|NO|
+COL|tag_option|label|text|text|NO|
+COL|tag_option|sort_order|integer|int4|NO|0
+COL|task_assignee|name|text|text|NO|
+COL|task_assignee|task_id|text|text|NO|
+COL|task_assignee|user_id|uuid|uuid|NO|
+COL|task_dependency|blocked_id|text|text|NO|
+COL|task_dependency|blocking_id|text|text|NO|
+COL|task_dependency|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|task_dependency|created_by|uuid|uuid|YES|
+COL|task_phase|phase_id|text|text|NO|
+COL|task_phase|task_id|text|text|NO|
+COL|task_schedule_item|item_id|text|text|NO|
+COL|task_schedule_item|task_id|text|text|NO|
+COL|task|chat_id|text|text|YES|
+COL|task|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|task|created_via|text|text|NO|'explicit'::text
+COL|task|department_id|uuid|uuid|YES|
+COL|task|description|text|text|NO|''::text
+COL|task|end_time|timestamp with time zone|timestamptz|YES|
+COL|task|event_id|text|text|YES|
+COL|task|group_id|uuid|uuid|YES|
+COL|task|id|text|text|NO|
+COL|task|orphaned_at|timestamp with time zone|timestamptz|YES|
+COL|task|preset_minutes|integer|int4|YES|
+COL|task|production_id|text|text|NO|
+COL|task|start_time|timestamp with time zone|timestamptz|YES|
+COL|task|status|text|text|NO|'pending'::text
+COL|task|title|text|text|NO|
+COL|user_notification|acted_at|timestamp with time zone|timestamptz|YES|
+COL|user_notification|action_required|boolean|bool|NO|false
+COL|user_notification|action_result|jsonb|jsonb|YES|
+COL|user_notification|actions|jsonb|jsonb|NO|'[]'::jsonb
+COL|user_notification|approval_request_id|uuid|uuid|YES|
+COL|user_notification|body|text|text|NO|''::text
+COL|user_notification|category|text|text|NO|'info'::text
+COL|user_notification|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|user_notification|entity_id|text|text|NO|
+COL|user_notification|entity_type|text|text|NO|
+COL|user_notification|expired_at|timestamp with time zone|timestamptz|YES|
+COL|user_notification|id|text|text|NO|
+COL|user_notification|kind|text|text|NO|
+COL|user_notification|production_id|text|text|YES|
+COL|user_notification|read_at|timestamp with time zone|timestamptz|YES|
+COL|user_notification|title|text|text|NO|
+COL|user_notification|user_id|uuid|uuid|NO|
+COL|user_notification|view_href|text|text|YES|
+COL|user_plan|source|text|text|YES|
+COL|user_plan|tier|text|text|NO|
+COL|user_plan|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|user_plan|user_id|uuid|uuid|NO|
+COL|user_platform_identity|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|user_platform_identity|id|uuid|uuid|NO|gen_random_uuid()
+COL|user_platform_identity|is_login_method|boolean|bool|NO|false
+COL|user_platform_identity|is_primary|boolean|bool|NO|false
+COL|user_platform_identity|label|text|text|YES|
+COL|user_platform_identity|platform_id|text|text|NO|
+COL|user_platform_identity|platform_user_id|text|text|NO|
+COL|user_platform_identity|user_id|uuid|uuid|NO|
+COL|user_profile|avatar_url|text|text|YES|
+COL|user_profile|bio|text|text|YES|
+COL|user_profile|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|user_profile|display_name|text|text|YES|
+COL|user_profile|name|text|text|NO|
+COL|user_profile|phone|text|text|YES|
+COL|user_profile|preferred_platform|text|text|YES|
+COL|user_profile|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|user_profile|user_id|uuid|uuid|NO|
+COL|version|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|version|id|text|text|NO|
+COL|version|marker_structure_revision|bigint|int8|NO|0
+COL|version|parent_version_id|text|text|YES|
+COL|version|production_id|text|text|NO|
+COL|version|script_config|jsonb|jsonb|NO|'{}'::jsonb
+COL|wiki_alias_backup_node_tree|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|wiki_alias_backup_node_tree|created_by|uuid|uuid|YES|
+COL|wiki_alias_backup_node_tree|display_title|text|text|YES|
+COL|wiki_alias_backup_node_tree|id|text|text|NO|
+COL|wiki_alias_backup_node_tree|parent_id|uuid|uuid|YES|
+COL|wiki_alias_backup_node_tree|production_id|text|text|NO|
+COL|wiki_alias_backup_node_tree|sort_key|text|text|YES|
+COL|wiki_alias_backup_node_tree|target_id|text|text|NO|
+COL|wiki_alias_backup_node_tree|target_type|text|text|NO|'wiki'::text
+COL|wiki_body_backup_dialect_v2|body|text|text|NO|
+COL|wiki_body_backup_dialect_v2|taken_at|timestamp with time zone|timestamptz|NO|now()
+COL|wiki_body_backup_dialect_v2|wiki_id|uuid|uuid|NO|
+COL|wiki_collab_outbox|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|wiki_collab_outbox|frame|text|text|NO|
+COL|wiki_collab_outbox|id|bigint|int8|NO|nextval('wiki_collab_outbox_id_seq'::regclass)
+COL|wiki_collab_outbox|origin|text|text|NO|
+COL|wiki_collab_outbox|topic|text|text|NO|
+COL|wiki_comment|author_name|text|text|NO|
+COL|wiki_comment|content|text|text|NO|
+COL|wiki_comment|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|wiki_comment|id|uuid|uuid|NO|gen_random_uuid()
+COL|wiki_comment|mentions|jsonb|jsonb|NO|'[]'::jsonb
+COL|wiki_comment|parent_comment_id|uuid|uuid|YES|
+COL|wiki_comment|user_id|uuid|uuid|YES|
+COL|wiki_comment|wiki_id|uuid|uuid|NO|
+COL|wiki_entity_link|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|wiki_entity_link|created_by|uuid|uuid|YES|
+COL|wiki_entity_link|entity_id|text|text|NO|
+COL|wiki_entity_link|entity_type|text|text|NO|
+COL|wiki_entity_link|origin|text|text|NO|'wiki_body'::text
+COL|wiki_entity_link|production_id|text|text|NO|
+COL|wiki_entity_link|wiki_id|uuid|uuid|NO|
+COL|wiki_proposal|action|text|text|NO|'create'::text
+COL|wiki_proposal|body|text|text|NO|''::text
+COL|wiki_proposal|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|wiki_proposal|created_wiki_id|uuid|uuid|YES|
+COL|wiki_proposal|has_permission|boolean|bool|NO|
+COL|wiki_proposal|id|uuid|uuid|NO|gen_random_uuid()
+COL|wiki_proposal|parent_node_id|text|text|YES|
+COL|wiki_proposal|permission_key|text|text|NO|
+COL|wiki_proposal|production_id|text|text|NO|
+COL|wiki_proposal|proposed_by|uuid|uuid|NO|
+COL|wiki_proposal|resolved_at|timestamp with time zone|timestamptz|YES|
+COL|wiki_proposal|status|text|text|NO|'pending'::text
+COL|wiki_proposal|summary|text|text|NO|''::text
+COL|wiki_proposal|tags|ARRAY|_text|YES|
+COL|wiki_proposal|target_wiki_id|uuid|uuid|YES|
+COL|wiki_proposal|title|text|text|YES|
+COL|wiki_proposal|tool_call_id|text|text|NO|
+COL|wiki_revision|author_user_id|uuid|uuid|YES|
+COL|wiki_revision|body|text|text|NO|
+COL|wiki_revision|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|wiki_revision|id|uuid|uuid|NO|gen_random_uuid()
+COL|wiki_revision|mentions|jsonb|jsonb|NO|'[]'::jsonb
+COL|wiki_revision|origin|text|text|NO|'user'::text
+COL|wiki_revision|title|text|text|YES|
+COL|wiki_revision|wiki_id|uuid|uuid|NO|
+COL|wiki_tag|tag|text|text|NO|
+COL|wiki_tag|wiki_id|uuid|uuid|NO|
+COL|wiki_tree_backup_node_tree|is_public|boolean|bool|YES|
+COL|wiki_tree_backup_node_tree|listable|boolean|bool|YES|
+COL|wiki_tree_backup_node_tree|parent_id|uuid|uuid|YES|
+COL|wiki_tree_backup_node_tree|sort_key|text|text|YES|
+COL|wiki_tree_backup_node_tree|wiki_id|uuid|uuid|YES|
+COL|wiki|body|text|text|NO|''::text
+COL|wiki|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|wiki|created_by|uuid|uuid|YES|
+COL|wiki|id|uuid|uuid|NO|gen_random_uuid()
+COL|wiki|mentions|jsonb|jsonb|NO|'[]'::jsonb
+COL|wiki|production_id|text|text|NO|
+COL|wiki|title|text|text|YES|
+COL|wiki|updated_at|timestamp with time zone|timestamptz|NO|now()
+CON|"character"|character_pkey|PRIMARY KEY (id)
+CON|"character"|character_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|agent_approval|agent_approval_pkey|PRIMARY KEY (id)
+CON|agent_approval|agent_approval_resolved_by_fkey|FOREIGN KEY (resolved_by) REFERENCES app_user(id) ON DELETE SET NULL
+CON|agent_approval|agent_approval_run_id_fkey|FOREIGN KEY (run_id) REFERENCES agent_run(id) ON DELETE CASCADE
+CON|agent_approval|agent_approval_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
+CON|agent_approval|agent_approval_status_check|CHECK ((status = ANY (ARRAY['pending'::text, 'allowed'::text, 'denied'::text, 'expired'::text, 'cancelled'::text])))
+CON|agent_event|agent_event_pkey|PRIMARY KEY (session_id, seq)
+CON|agent_event|agent_event_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
+CON|agent_instructions|agent_instructions_pkey|PRIMARY KEY (scope_type, scope_id)
+CON|agent_instructions|agent_instructions_scope_type_check|CHECK ((scope_type = ANY (ARRAY['user'::text, 'production'::text])))
+CON|agent_instructions|agent_instructions_updated_by_fkey|FOREIGN KEY (updated_by) REFERENCES app_user(id) ON DELETE SET NULL
+CON|agent_memory_chunk|agent_memory_chunk_importance_check|CHECK (((importance IS NULL) OR ((importance >= 1) AND (importance <= 10))))
+CON|agent_memory_chunk|agent_memory_chunk_origin_class_check|CHECK ((origin_class = ANY (ARRAY['owner'::text, 'agent'::text, 'untrusted'::text, 'system'::text])))
+CON|agent_memory_chunk|agent_memory_chunk_pkey|PRIMARY KEY (id)
+CON|agent_memory_chunk|agent_memory_chunk_scope_type_check|CHECK ((scope_type = ANY (ARRAY['user'::text, 'production'::text])))
+CON|agent_memory_chunk|agent_memory_chunk_scope_type_scope_id_source_content_hash_key|UNIQUE (scope_type, scope_id, source, content_hash)
+CON|agent_memory_chunk|agent_memory_chunk_session_kind_check|CHECK ((session_kind = ANY (ARRAY['interactive'::text, 'cron'::text, 'heartbeat'::text, 'subagent'::text, 'unknown'::text])))
+CON|agent_memory_chunk|agent_memory_chunk_source_check|CHECK ((source = ANY (ARRAY['curated'::text, 'episodic'::text])))
+CON|agent_memory_embedding_cache|agent_memory_embedding_cache_pkey|PRIMARY KEY (model, content_hash)
+CON|agent_memory_index_meta|agent_memory_index_meta_id_check|CHECK ((id = 1))
+CON|agent_memory_index_meta|agent_memory_index_meta_pkey|PRIMARY KEY (id)
+CON|agent_memory_recall_log|agent_memory_recall_log_chunk_id_fkey|FOREIGN KEY (chunk_id) REFERENCES agent_memory_chunk(id) ON DELETE CASCADE
+CON|agent_memory_recall_log|agent_memory_recall_log_pkey|PRIMARY KEY (id)
+CON|agent_mutation|agent_mutation_action_check|CHECK ((action = ANY (ARRAY['created'::text, 'updated'::text, 'deleted'::text])))
+CON|agent_mutation|agent_mutation_pkey|PRIMARY KEY (id)
+CON|agent_mutation|agent_mutation_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|agent_mutation|agent_mutation_run_id_fkey|FOREIGN KEY (run_id) REFERENCES agent_run(id) ON DELETE SET NULL
+CON|agent_mutation|agent_mutation_schedule_id_fkey|FOREIGN KEY (schedule_id) REFERENCES agent_schedule(id) ON DELETE SET NULL
+CON|agent_mutation|agent_mutation_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE SET NULL
+CON|agent_mutation|agent_mutation_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|agent_question|agent_question_pkey|PRIMARY KEY (id)
+CON|agent_question|agent_question_run_id_fkey|FOREIGN KEY (run_id) REFERENCES agent_run(id) ON DELETE CASCADE
+CON|agent_question|agent_question_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
+CON|agent_question|agent_question_status_check|CHECK ((status = ANY (ARRAY['pending'::text, 'answered'::text, 'cancelled'::text, 'expired'::text])))
+CON|agent_run|agent_run_pkey|PRIMARY KEY (id)
+CON|agent_run|agent_run_schedule_id_fkey|FOREIGN KEY (schedule_id) REFERENCES agent_schedule(id) ON DELETE SET NULL
+CON|agent_run|agent_run_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
+CON|agent_run|agent_run_status_check|CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'awaiting_approval'::text, 'awaiting_answer'::text, 'completed'::text, 'aborted'::text, 'failed'::text, 'interrupted'::text])))
+CON|agent_schedule|agent_schedule_created_by_session_id_fkey|FOREIGN KEY (created_by_session_id) REFERENCES agent_session(id) ON DELETE SET NULL
+CON|agent_schedule|agent_schedule_last_run_id_fkey|FOREIGN KEY (last_run_id) REFERENCES agent_run(id) ON DELETE SET NULL
+CON|agent_schedule|agent_schedule_pkey|PRIMARY KEY (id)
+CON|agent_schedule|agent_schedule_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|agent_schedule|agent_schedule_status_check|CHECK ((status = ANY (ARRAY['active'::text, 'paused'::text, 'done'::text])))
+CON|agent_schedule|agent_schedule_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|agent_session_entry|agent_session_entry_pkey|PRIMARY KEY (session_id, seq)
+CON|agent_session_entry|agent_session_entry_session_id_entry_id_key|UNIQUE (session_id, entry_id)
+CON|agent_session_entry|agent_session_entry_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
+CON|agent_session|agent_session_pkey|PRIMARY KEY (id)
+CON|agent_session|agent_session_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|agent_session|agent_session_schedule_id_fkey|FOREIGN KEY (schedule_id) REFERENCES agent_schedule(id) ON DELETE SET NULL
+CON|agent_session|agent_session_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|ai_credit_grant|ai_credit_grant_credits_check|CHECK ((credits > 0))
+CON|ai_credit_grant|ai_credit_grant_pkey|PRIMARY KEY (id)
+CON|ai_credit_grant|ai_credit_grant_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|ai_usage|ai_usage_check|CHECK (((user_id IS NOT NULL) OR (production_id IS NOT NULL)))
+CON|ai_usage|ai_usage_paid_from_check|CHECK ((paid_from = ANY (ARRAY['quota'::text, 'extra'::text, 'exempt'::text])))
+CON|ai_usage|ai_usage_pkey|PRIMARY KEY (id)
+CON|announcement_read|announcement_read_announcement_id_fkey|FOREIGN KEY (announcement_id) REFERENCES production_announcement(id) ON DELETE CASCADE
+CON|announcement_read|announcement_read_pkey|PRIMARY KEY (announcement_id, user_id)
+CON|announcement_read|announcement_read_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|app_user|app_user_pkey|PRIMARY KEY (id)
+CON|approval_flow_template|approval_flow_template_name_check|CHECK (((char_length(name) >= 1) AND (char_length(name) <= 60)))
+CON|approval_flow_template|approval_flow_template_pkey|PRIMARY KEY (id)
+CON|approval_flow_template|approval_flow_template_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|approval_flow_template|approval_flow_template_status_check|CHECK ((status = ANY (ARRAY['draft'::text, 'published'::text])))
+CON|approval_flow_template|approval_flow_template_updated_by_fkey|FOREIGN KEY (updated_by) REFERENCES app_user(id)
+CON|approval_request|approval_request_current_stage_check|CHECK (((current_stage IS NULL) OR (current_stage = ANY (ARRAY['supervisor'::text, 'holder'::text, 'dept_poc'::text, 'ancestor_poc'::text, 'producer'::text, 'owner'::text]))))
+CON|approval_request|approval_request_flow_template_id_fkey|FOREIGN KEY (flow_template_id) REFERENCES approval_flow_template(id) ON DELETE SET NULL
+CON|approval_request|approval_request_grant_type_check|CHECK ((grant_type = ANY (ARRAY['permanent'::text, 'ttl'::text])))
+CON|approval_request|approval_request_pkey|PRIMARY KEY (id)
+CON|approval_request|approval_request_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|approval_request|approval_request_resolved_by_fkey|FOREIGN KEY (resolved_by) REFERENCES app_user(id)
+CON|approval_request|approval_request_status_check|CHECK ((status = ANY (ARRAY['pending_supervisor'::text, 'pending_resource'::text, 'approved'::text, 'rejected'::text, 'cancelled'::text])))
+CON|approval_request|approval_request_subject_id_fkey|FOREIGN KEY (subject_id) REFERENCES app_user(id)
+CON|approval_request|approval_request_ttl_duration_required|CHECK (((grant_type IS DISTINCT FROM 'ttl'::text) OR (ttl_duration IS NOT NULL) OR (requested_expires_at IS NOT NULL)))
+CON|approval_request|approval_request_ttl_source_exclusive|CHECK (((ttl_duration IS NULL) OR (requested_expires_at IS NULL)))
+CON|approval_request|approval_request_type_check|CHECK ((type = ANY (ARRAY['resource_access'::text, 'member_exit'::text, 'owner_transfer'::text, 'atomic_permission'::text])))
+CON|approval_request|approval_resource_fields_required|CHECK (((type <> 'resource_access'::text) OR ((resource_type IS NOT NULL) AND (permission_level IS NOT NULL))))
+CON|asset_file|asset_file_asset_id_fkey|FOREIGN KEY (asset_id) REFERENCES asset(id) ON DELETE CASCADE
+CON|asset_file|asset_file_pkey|PRIMARY KEY (id)
+CON|asset|asset_pkey|PRIMARY KEY (id)
+CON|asset|asset_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|asset|asset_uploader_user_id_fkey|FOREIGN KEY (uploader_user_id) REFERENCES app_user(id)
+CON|avatar_upload_audit|avatar_upload_audit_kind_check|CHECK ((kind = ANY (ARRAY['user'::text, 'production'::text])))
+CON|avatar_upload_audit|avatar_upload_audit_pkey|PRIMARY KEY (id)
+CON|avatar_upload_audit|avatar_upload_audit_uploader_id_fkey|FOREIGN KEY (uploader_id) REFERENCES app_user(id)
+CON|block_tag|block_tag_group_id_fkey|FOREIGN KEY (group_id) REFERENCES tag_group(id) ON DELETE CASCADE
+CON|block_tag|block_tag_option_id_fkey|FOREIGN KEY (option_id) REFERENCES tag_option(id) ON DELETE SET NULL
+CON|block_tag|block_tag_pkey|PRIMARY KEY (block_id, group_id)
+CON|bot_testers|bot_testers_pkey|PRIMARY KEY (open_id)
+CON|bug_report|bug_report_pkey|PRIMARY KEY (id)
+CON|bug_report|bug_report_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE SET NULL
+CON|bug_report|bug_report_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE SET NULL
+CON|character_aggregate|character_aggregate_aggregate_id_fkey|FOREIGN KEY (aggregate_id) REFERENCES "character"(id) ON DELETE CASCADE
+CON|character_aggregate|character_aggregate_member_id_fkey|FOREIGN KEY (member_id) REFERENCES "character"(id) ON DELETE CASCADE
+CON|character_aggregate|character_aggregate_pkey|PRIMARY KEY (aggregate_id, member_id)
+CON|character_version|character_version_character_id_fkey|FOREIGN KEY (character_id) REFERENCES "character"(id)
+CON|character_version|character_version_pkey|PRIMARY KEY (character_id, version_id)
+CON|character_version|character_version_version_id_fkey|FOREIGN KEY (version_id) REFERENCES version(id) ON DELETE CASCADE
+CON|comment|comment_parent_id_fkey|FOREIGN KEY (parent_id) REFERENCES comment(id) ON DELETE CASCADE
+CON|comment|comment_pkey|PRIMARY KEY (id)
+CON|comment|comment_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|comment|comment_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|cue_list|cue_list_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|cue_list|cue_list_pkey|PRIMARY KEY (id)
+CON|cue_list|cue_list_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|cue_mention_text_backup|cue_mention_text_backup_pkey|PRIMARY KEY (table_name, row_id, column_name)
+CON|cue_version|cue_version_pkey|PRIMARY KEY (revision_id, version_id)
+CON|cue_version|cue_version_revision_id_fkey|FOREIGN KEY (revision_id) REFERENCES cue(id) ON DELETE CASCADE
+CON|cue_version|cue_version_version_id_fkey|FOREIGN KEY (version_id) REFERENCES version(id) ON DELETE CASCADE
+CON|cue|cue_cue_list_id_fkey|FOREIGN KEY (cue_list_id) REFERENCES cue_list(id) ON DELETE CASCADE
+CON|cue|cue_end_kind_check|CHECK ((end_kind = ANY (ARRAY['block'::text, 'gap'::text])))
+CON|cue|cue_pkey|PRIMARY KEY (id)
+CON|cue|cue_start_kind_check|CHECK ((start_kind = ANY (ARRAY['block'::text, 'gap'::text])))
+CON|dept_cue_list_template|dept_cue_list_template_dept_id_fkey|FOREIGN KEY (dept_id) REFERENCES production_dept(id) ON DELETE CASCADE
+CON|dept_cue_list_template|dept_cue_list_template_dept_id_template_key|UNIQUE (dept_id, template)
+CON|dept_cue_list_template|dept_cue_list_template_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|dialect_v2_text_backup|dialect_v2_text_backup_pkey|PRIMARY KEY (table_name, row_id, column_name)
+CON|email_otp|email_otp_pkey|PRIMARY KEY (id)
+CON|email_otp|email_otp_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|event_call_time|event_call_time_department_id_fkey|FOREIGN KEY (department_id) REFERENCES production_dept(id) ON DELETE SET NULL
+CON|event_call_time|event_call_time_event_id_fkey|FOREIGN KEY (event_id) REFERENCES production_event(id) ON DELETE CASCADE
+CON|event_call_time|event_call_time_pkey|PRIMARY KEY (id)
+CON|event_call_time|event_call_time_rsvp_check|CHECK ((rsvp = ANY (ARRAY['yes'::text, 'no'::text, 'tentative'::text])))
+CON|event_call_time|event_call_time_schedule_item_id_fkey|FOREIGN KEY (schedule_item_id) REFERENCES event_schedule_item(id) ON DELETE SET NULL
+CON|event_call_time|event_call_time_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|event_group_freeze_member|event_group_freeze_member_event_id_group_id_frozen_at_fkey|FOREIGN KEY (event_id, group_id, frozen_at) REFERENCES event_group_freeze(event_id, group_id, frozen_at) ON DELETE CASCADE
+CON|event_group_freeze_member|event_group_freeze_member_pkey|PRIMARY KEY (id)
+CON|event_group_freeze_member|event_group_freeze_member_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE SET NULL
+CON|event_group_freeze_member|event_group_freeze_member_via_dept_id_fkey|FOREIGN KEY (via_dept_id) REFERENCES production_dept(id) ON DELETE SET NULL
+CON|event_group_freeze|event_group_freeze_event_id_fkey|FOREIGN KEY (event_id) REFERENCES production_event(id) ON DELETE CASCADE
+CON|event_group_freeze|event_group_freeze_frozen_by_fkey|FOREIGN KEY (frozen_by) REFERENCES app_user(id) ON DELETE SET NULL
+CON|event_group_freeze|event_group_freeze_pkey|PRIMARY KEY (event_id, group_id, frozen_at)
+CON|event_group_freeze|event_group_freeze_poc_dept_id_fkey|FOREIGN KEY (poc_dept_id) REFERENCES production_dept(id) ON DELETE SET NULL
+CON|event_group_freeze|event_group_freeze_poc_user_id_fkey|FOREIGN KEY (poc_user_id) REFERENCES app_user(id) ON DELETE SET NULL
+CON|event_group_member|event_group_member_dept_id_fkey|FOREIGN KEY (dept_id) REFERENCES production_dept(id) ON DELETE CASCADE
+CON|event_group_member|event_group_member_group_id_fkey|FOREIGN KEY (group_id) REFERENCES event_group(id) ON DELETE CASCADE
+CON|event_group_member|event_group_member_one_kind|CHECK ((num_nonnulls(dept_id, user_id) = 1))
+CON|event_group_member|event_group_member_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|event_group|event_group_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|event_group|event_group_event_id_fkey|FOREIGN KEY (event_id) REFERENCES production_event(id) ON DELETE CASCADE
+CON|event_group|event_group_pkey|PRIMARY KEY (id)
+CON|event_group|event_group_poc_dept_id_fkey|FOREIGN KEY (poc_dept_id) REFERENCES production_dept(id) ON DELETE SET NULL
+CON|event_group|event_group_poc_single|CHECK ((num_nonnulls(poc_dept_id, poc_user_id) <= 1))
+CON|event_group|event_group_poc_user_id_fkey|FOREIGN KEY (poc_user_id) REFERENCES app_user(id) ON DELETE SET NULL
+CON|event_group|event_group_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|event_milestone|event_milestone_event_id_fkey|FOREIGN KEY (event_id) REFERENCES production_event(id) ON DELETE CASCADE
+CON|event_milestone|event_milestone_milestone_id_fkey|FOREIGN KEY (milestone_id) REFERENCES milestone(id) ON DELETE CASCADE
+CON|event_milestone|event_milestone_pkey|PRIMARY KEY (event_id, milestone_id)
+CON|event_participant|event_participant_department_id_fkey|FOREIGN KEY (department_id) REFERENCES production_dept(id) ON DELETE SET NULL
+CON|event_participant|event_participant_event_id_fkey|FOREIGN KEY (event_id) REFERENCES production_event(id) ON DELETE CASCADE
+CON|event_participant|event_participant_event_id_user_id_key|UNIQUE (event_id, user_id)
+CON|event_participant|event_participant_pkey|PRIMARY KEY (id)
+CON|event_participant|event_participant_role_check|CHECK ((role = ANY (ARRAY['participant'::text, 'follower'::text])))
+CON|event_participant|event_participant_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|event_report_note|event_report_note_created_via_check|CHECK ((created_via = ANY (ARRAY['dept'::text, 'wildcard'::text, 'moderator'::text])))
+CON|event_report_note|event_report_note_department_id_fkey|FOREIGN KEY (department_id) REFERENCES production_dept(id) ON DELETE CASCADE
+CON|event_report_note|event_report_note_node_id_fkey|FOREIGN KEY (node_id) REFERENCES node(id)
+CON|event_report_note|event_report_note_pkey|PRIMARY KEY (id)
+CON|event_report_note|event_report_note_report_id_fkey|FOREIGN KEY (report_id) REFERENCES event_report(id) ON DELETE CASCADE
+CON|event_report_read|event_report_read_pkey|PRIMARY KEY (report_id, user_id)
+CON|event_report_read|event_report_read_report_id_fkey|FOREIGN KEY (report_id) REFERENCES event_report(id) ON DELETE CASCADE
+CON|event_report_read|event_report_read_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|event_report|event_report_event_id_fkey|FOREIGN KEY (event_id) REFERENCES production_event(id) ON DELETE CASCADE
+CON|event_report|event_report_node_id_fkey|FOREIGN KEY (node_id) REFERENCES node(id)
+CON|event_report|event_report_pkey|PRIMARY KEY (id)
+CON|event_rundown_column|event_rundown_column_event_id_fkey|FOREIGN KEY (event_id) REFERENCES production_event(id) ON DELETE CASCADE
+CON|event_rundown_column|event_rundown_column_group_id_fkey|FOREIGN KEY (group_id) REFERENCES event_group(id) ON DELETE CASCADE
+CON|event_rundown_column|event_rundown_column_kind|CHECK ((num_nonnulls(group_id, match_location) = 1))
+CON|event_rundown_column|event_rundown_column_pkey|PRIMARY KEY (id)
+CON|event_rundown_placement_column|event_rundown_placement_column_column_id_fkey|FOREIGN KEY (column_id) REFERENCES event_rundown_column(id) ON DELETE CASCADE
+CON|event_rundown_placement_column|event_rundown_placement_column_pkey|PRIMARY KEY (placement_id, column_id)
+CON|event_rundown_placement_column|event_rundown_placement_column_placement_id_fkey|FOREIGN KEY (placement_id) REFERENCES event_rundown_placement(id) ON DELETE CASCADE
+CON|event_rundown_placement|event_rundown_placement_entry|CHECK ((num_nonnulls(item_id, task_id) = 1))
+CON|event_rundown_placement|event_rundown_placement_event_id_fkey|FOREIGN KEY (event_id) REFERENCES production_event(id) ON DELETE CASCADE
+CON|event_rundown_placement|event_rundown_placement_item_id_fkey|FOREIGN KEY (item_id) REFERENCES event_schedule_item(id) ON DELETE CASCADE
+CON|event_rundown_placement|event_rundown_placement_pkey|PRIMARY KEY (id)
+CON|event_rundown_placement|event_rundown_placement_task_id_fkey|FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
+CON|event_schedule_item|event_schedule_item_event_id_fkey|FOREIGN KEY (event_id) REFERENCES production_event(id) ON DELETE CASCADE
+CON|event_schedule_item|event_schedule_item_pkey|PRIMARY KEY (id)
+CON|event_schedule_item|event_schedule_item_target_scene_id_fkey|FOREIGN KEY (target_scene_id) REFERENCES scene(id) ON DELETE SET NULL
+CON|event_stage_manager|event_stage_manager_event_id_fkey|FOREIGN KEY (event_id) REFERENCES production_event(id) ON DELETE CASCADE
+CON|event_stage_manager|event_stage_manager_pkey|PRIMARY KEY (event_id, user_id)
+CON|event_stage_manager|event_stage_manager_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|feishu_user|feishu_user_pkey|PRIMARY KEY (open_id)
+CON|feishu_user|feishu_user_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|feishu_user|feishu_user_user_id_key|UNIQUE (user_id)
+CON|job|job_pkey|PRIMARY KEY (id)
+CON|milestone|milestone_pkey|PRIMARY KEY (id)
+CON|milestone|milestone_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|node_dept_share|node_dept_share_dept_id_fkey|FOREIGN KEY (dept_id) REFERENCES production_dept(id) ON DELETE CASCADE
+CON|node_dept_share|node_dept_share_node_id_fkey|FOREIGN KEY (node_id) REFERENCES node(id) ON DELETE CASCADE
+CON|node_dept_share|node_dept_share_pkey|PRIMARY KEY (node_id, dept_id)
+CON|node_entity_dir|node_entity_dir_node_id_fkey|FOREIGN KEY (node_id) REFERENCES node(id) ON DELETE CASCADE
+CON|node_entity_dir|node_entity_dir_pkey|PRIMARY KEY (production_id, entity_type, entity_id)
+CON|node_entity_dir|node_entity_dir_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|node_mount|node_mount_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|node_mount|node_mount_node_id_fkey|FOREIGN KEY (node_id) REFERENCES node(id) ON DELETE CASCADE
+CON|node_mount|node_mount_pkey|PRIMARY KEY (id)
+CON|node_mount|node_mount_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|node_mount|node_mount_type_check|CHECK ((mount_type = ANY (ARRAY['scene'::text, 'block'::text, 'cue'::text, 'comment'::text, 'event'::text, 'event_schedule'::text, 'task'::text, 'event_report'::text, 'embed'::text])))
+CON|node|node_asset_id_fkey|FOREIGN KEY (asset_id) REFERENCES asset(id) ON DELETE CASCADE
+CON|node|node_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|node|node_kind_check|CHECK ((kind = ANY (ARRAY['folder'::text, 'wiki'::text, 'asset'::text, 'link'::text])))
+CON|node|node_kind_target_check|CHECK ((((kind = 'folder'::text) AND (wiki_id IS NULL) AND (asset_id IS NULL) AND (link_target_id IS NULL) AND (title IS NOT NULL)) OR ((kind = 'wiki'::text) AND (wiki_id IS NOT NULL) AND (asset_id IS NULL) AND (link_target_id IS NULL) AND (title IS NULL)) OR ((kind = 'asset'::text) AND (wiki_id IS NULL) AND (asset_id IS NOT NULL) AND (link_target_id IS NULL) AND (title IS NULL)) OR ((kind = 'link'::text) AND (wiki_id IS NULL) AND (asset_id IS NULL) AND (link_target_id IS NOT NULL))))
+CON|node|node_link_no_perm_check|CHECK (((kind <> 'link'::text) OR ((listable = true) AND (is_public = false))))
+CON|node|node_link_target_id_fkey|FOREIGN KEY (link_target_id) REFERENCES node(id) ON DELETE CASCADE
+CON|node|node_parent_id_fkey|FOREIGN KEY (parent_id) REFERENCES node(id) ON DELETE SET NULL
+CON|node|node_pkey|PRIMARY KEY (id)
+CON|node|node_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|node|node_wiki_id_fkey|FOREIGN KEY (wiki_id) REFERENCES wiki(id) ON DELETE CASCADE
+CON|notification_preference|notification_preference_pkey|PRIMARY KEY (user_id, scope_type, scope_id)
+CON|notification_preference|notification_preference_platform_identity_id_fkey|FOREIGN KEY (platform_identity_id) REFERENCES user_platform_identity(id) ON DELETE CASCADE
+CON|notification_preference|notification_preference_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|notification_subscription|notification_subscription_pkey|PRIMARY KEY (user_id, notification_type)
+CON|notification_subscription|notification_subscription_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|phase_milestone|phase_milestone_milestone_id_fkey|FOREIGN KEY (milestone_id) REFERENCES milestone(id) ON DELETE CASCADE
+CON|phase_milestone|phase_milestone_phase_id_fkey|FOREIGN KEY (phase_id) REFERENCES phase(id) ON DELETE CASCADE
+CON|phase_milestone|phase_milestone_pkey|PRIMARY KEY (phase_id, milestone_id)
+CON|phase|phase_date_order_check|CHECK (((end_date IS NULL) OR (end_date >= start_date)))
+CON|phase|phase_dept_id_fkey|FOREIGN KEY (dept_id) REFERENCES production_dept(id) ON DELETE SET NULL
+CON|phase|phase_pkey|PRIMARY KEY (id)
+CON|phase|phase_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|plan_code_redemption|plan_code_redemption_code_fkey|FOREIGN KEY (code) REFERENCES plan_code(code) ON DELETE CASCADE
+CON|plan_code_redemption|plan_code_redemption_pkey|PRIMARY KEY (id)
+CON|plan_code_redemption|plan_code_redemption_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|plan_code_redemption|plan_code_redemption_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|plan_code|plan_code_grants_check|CHECK ((((kind = 'ai_credits'::text) = (grants_tier IS NULL)) AND ((kind = 'ai_credits'::text) = (grants_credits > 0))))
+CON|plan_code|plan_code_kind_check|CHECK ((kind = ANY (ARRAY['user_upgrade'::text, 'production_upgrade'::text, 'ai_credits'::text])))
+CON|plan_code|plan_code_max_uses_check|CHECK ((max_uses > 0))
+CON|plan_code|plan_code_pkey|PRIMARY KEY (code)
+CON|production_announcement|production_announcement_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|production_announcement|production_announcement_pkey|PRIMARY KEY (id)
+CON|production_announcement|production_announcement_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_approval_config|production_approval_config_pkey|PRIMARY KEY (production_id)
+CON|production_approval_config|production_approval_config_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_approval_config|production_approval_config_ttl_hours_check|CHECK (((ttl_hours > 0) AND (ttl_hours <= 720)))
+CON|production_approval_config|production_approval_config_updated_by_fkey|FOREIGN KEY (updated_by) REFERENCES app_user(id)
+CON|production_budget_category|production_budget_category_amount_check|CHECK ((amount >= (0)::numeric))
+CON|production_budget_category|production_budget_category_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|production_budget_category|production_budget_category_dept_id_fkey|FOREIGN KEY (dept_id) REFERENCES production_dept(id) ON DELETE SET NULL
+CON|production_budget_category|production_budget_category_pkey|PRIMARY KEY (id)
+CON|production_budget_category|production_budget_category_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_cue_template_type|production_cue_template_type_pkey|PRIMARY KEY (id)
+CON|production_cue_template_type|production_cue_template_type_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_cue_template_type|production_cue_template_type_production_id_key_key|UNIQUE (production_id, key)
+CON|production_dept_member|production_dept_member_dept_id_fkey|FOREIGN KEY (dept_id) REFERENCES production_dept(id) ON DELETE CASCADE
+CON|production_dept_member|production_dept_member_pkey|PRIMARY KEY (id)
+CON|production_dept_member|production_dept_member_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_dept_member|production_dept_member_user_id_dept_id_key|UNIQUE (user_id, dept_id)
+CON|production_dept_member|production_dept_member_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|production_dept_permission|production_dept_permission_dept_id_fkey|FOREIGN KEY (dept_id) REFERENCES production_dept(id) ON DELETE CASCADE
+CON|production_dept_permission|production_dept_permission_dept_id_permission_key_key|UNIQUE (dept_id, permission_key)
+CON|production_dept_permission|production_dept_permission_pkey|PRIMARY KEY (id)
+CON|production_dept_permission|production_dept_permission_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_dept_permission|production_dept_permission_source_check|CHECK ((source = ANY (ARRAY['manual'::text, 'template'::text, 'resource'::text])))
+CON|production_dept|production_dept_parent_id_fkey|FOREIGN KEY (parent_id) REFERENCES production_dept(id)
+CON|production_dept|production_dept_pkey|PRIMARY KEY (id)
+CON|production_dept|production_dept_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_event|production_event_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|production_event|production_event_pkey|PRIMARY KEY (id)
+CON|production_event|production_event_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_event|production_event_report_doc_node_id_fkey|FOREIGN KEY (report_doc_node_id) REFERENCES node(id) ON DELETE SET NULL
+CON|production_event|production_event_status_check|CHECK ((status = ANY (ARRAY['draft'::text, 'published'::text, 'completed'::text, 'cancelled'::text])))
+CON|production_event|production_event_version_id_fkey|FOREIGN KEY (version_id) REFERENCES version(id) ON DELETE SET NULL
+CON|production_expense|production_expense_amount_check|CHECK ((amount >= (0)::numeric))
+CON|production_expense|production_expense_category_id_fkey|FOREIGN KEY (category_id) REFERENCES production_budget_category(id) ON DELETE SET NULL
+CON|production_expense|production_expense_current_stage_check|CHECK (((current_stage IS NULL) OR (current_stage = ANY (ARRAY['supervisor'::text, 'holder'::text, 'dept_poc'::text, 'ancestor_poc'::text, 'producer'::text, 'owner'::text]))))
+CON|production_expense|production_expense_pkey|PRIMARY KEY (id)
+CON|production_expense|production_expense_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_expense|production_expense_resolved_by_fkey|FOREIGN KEY (resolved_by) REFERENCES app_user(id)
+CON|production_expense|production_expense_status_check|CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text, 'cancelled'::text])))
+CON|production_expense|production_expense_submitted_by_fkey|FOREIGN KEY (submitted_by) REFERENCES app_user(id)
+CON|production_invite_claim|production_invite_claim_claimed_by_fkey|FOREIGN KEY (claimed_by) REFERENCES app_user(id) ON DELETE SET NULL
+CON|production_invite_claim|production_invite_claim_pkey|PRIMARY KEY (id)
+CON|production_invite_claim|production_invite_claim_token_fkey|FOREIGN KEY (token) REFERENCES production_invite(token) ON DELETE CASCADE
+CON|production_invite_claim|production_invite_claim_token_name_key|UNIQUE (token, name)
+CON|production_invite|production_invite_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|production_invite|production_invite_kind_check|CHECK ((kind = ANY (ARRAY['standard'::text, 'claim'::text])))
+CON|production_invite|production_invite_pkey|PRIMARY KEY (token)
+CON|production_invite|production_invite_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_invite|production_invite_target_user_id_fkey|FOREIGN KEY (target_user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|production_material_status|production_material_status_pkey|PRIMARY KEY (id)
+CON|production_material_status|production_material_status_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_material|material_owner_single|CHECK ((num_nonnulls(department_id, group_id) <= 1))
+CON|production_material|production_material_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|production_material|production_material_department_id_fkey|FOREIGN KEY (department_id) REFERENCES production_dept(id) ON DELETE SET NULL
+CON|production_material|production_material_group_id_fkey|FOREIGN KEY (group_id) REFERENCES event_group(id) ON DELETE SET NULL
+CON|production_material|production_material_pkey|PRIMARY KEY (id)
+CON|production_material|production_material_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_material|production_material_quantity_check|CHECK ((quantity >= 0))
+CON|production_material|production_material_status_id_fkey|FOREIGN KEY (status_id) REFERENCES production_material_status(id) ON DELETE SET NULL
+CON|production_member_grant|production_member_grant_approval_id_fkey|FOREIGN KEY (approval_id) REFERENCES approval_request(id)
+CON|production_member_grant|production_member_grant_confirmed_by_fkey|FOREIGN KEY (confirmed_by) REFERENCES app_user(id)
+CON|production_member_grant|production_member_grant_grant_source_check|CHECK ((grant_source = ANY (ARRAY['self_confirmed'::text, 'auto'::text, 'approval'::text, 'direct'::text, 'assigned'::text, 'migrated'::text])))
+CON|production_member_grant|production_member_grant_level_fk|FOREIGN KEY (resource_type, permission_level) REFERENCES resource_permission_level(resource_type, permission_level) DEFERRABLE INITIALLY DEFERRED
+CON|production_member_grant|production_member_grant_pkey|PRIMARY KEY (id)
+CON|production_member_grant|production_member_grant_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_member_grant|production_member_grant_revoked_reason_check|CHECK ((revoked_reason = ANY (ARRAY['role_change'::text, 'dept_change'::text, 'dept_dissolved'::text, 'poc_change'::text, 'manual'::text, 'member_removed'::text])))
+CON|production_member_grant|production_member_grant_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|production_member_permission|production_member_permission_pkey|PRIMARY KEY (production_id, user_id, permission)
+CON|production_member_permission|production_member_permission_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_member_permission|production_member_permission_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|production_member_role|production_member_role_pkey|PRIMARY KEY (production_id, user_id, role_id)
+CON|production_member_role|production_member_role_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_member_role|production_member_role_role_id_fkey|FOREIGN KEY (role_id) REFERENCES production_role(id) ON DELETE CASCADE
+CON|production_member_role|production_member_role_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|production_member_status_audit|pmsa_stance_has_no_target|CHECK (((action = ANY (ARRAY['object'::text, 'endorse'::text])) = (to_status IS NULL)))
+CON|production_member_status_audit|production_member_status_audit_action_check|CHECK ((action = ANY (ARRAY['self_exit'::text, 'suspend'::text, 'restore'::text, 'confirm_exit'::text, 'object'::text, 'endorse'::text])))
+CON|production_member_status_audit|production_member_status_audit_actor_id_fkey|FOREIGN KEY (actor_id) REFERENCES app_user(id)
+CON|production_member_status_audit|production_member_status_audit_pkey|PRIMARY KEY (id)
+CON|production_member_status_audit|production_member_status_audit_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_member_status_audit|production_member_status_audit_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|production_member_tag_assignment|production_member_tag_assignment_pkey|PRIMARY KEY (production_id, user_id, tag_id)
+CON|production_member_tag_assignment|production_member_tag_assignment_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_member_tag_assignment|production_member_tag_assignment_tag_id_fkey|FOREIGN KEY (tag_id) REFERENCES production_member_tag(id) ON DELETE CASCADE
+CON|production_member_tag_assignment|production_member_tag_assignment_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|production_member_tag|production_member_tag_pkey|PRIMARY KEY (id)
+CON|production_member_tag|production_member_tag_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_member|production_member_pkey|PRIMARY KEY (production_id, user_id)
+CON|production_member|production_member_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_member|production_member_status_changed_by_fkey|FOREIGN KEY (status_changed_by) REFERENCES app_user(id)
+CON|production_member|production_member_status_check|CHECK ((status = ANY (ARRAY['active'::text, 'suspended'::text, 'exited'::text])))
+CON|production_member|production_member_status_source_check|CHECK (((status = 'active'::text) = (status_source IS NULL)))
+CON|production_member|production_member_status_source_value_check|CHECK (((status_source IS NULL) OR (status_source = ANY (ARRAY['self'::text, 'admin'::text]))))
+CON|production_member|production_member_supervisor_id_fkey|FOREIGN KEY (supervisor_id) REFERENCES app_user(id)
+CON|production_member|production_member_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|production_node_config|production_node_config_assets_root_node_id_fkey|FOREIGN KEY (assets_root_node_id) REFERENCES node(id) ON DELETE SET NULL
+CON|production_node_config|production_node_config_dramaturgy_root_node_id_fkey|FOREIGN KEY (dramaturgy_root_node_id) REFERENCES node(id) ON DELETE SET NULL
+CON|production_node_config|production_node_config_pkey|PRIMARY KEY (production_id)
+CON|production_node_config|production_node_config_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_node_config|production_node_config_reports_root_node_id_fkey|FOREIGN KEY (reports_root_node_id) REFERENCES node(id) ON DELETE SET NULL
+CON|production_plan|production_plan_pkey|PRIMARY KEY (production_id)
+CON|production_plan|production_plan_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_platform_channel|production_platform_channel_pkey|PRIMARY KEY (id)
+CON|production_platform_channel|production_platform_channel_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_policy_audit|production_policy_audit_changed_by_fkey|FOREIGN KEY (changed_by) REFERENCES app_user(id)
+CON|production_policy_audit|production_policy_audit_pkey|PRIMARY KEY (id)
+CON|production_policy_audit|production_policy_audit_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_policy|production_policy_pkey|PRIMARY KEY (production_id, policy_key)
+CON|production_policy|production_policy_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_policy|production_policy_updated_by_fkey|FOREIGN KEY (updated_by) REFERENCES app_user(id)
+CON|production_role_permission|production_role_permission_pkey|PRIMARY KEY (role_id, permission_key)
+CON|production_role_permission|production_role_permission_role_id_fkey|FOREIGN KEY (role_id) REFERENCES production_role(id) ON DELETE CASCADE
+CON|production_role|production_role_pkey|PRIMARY KEY (id)
+CON|production_role|production_role_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_role|production_role_production_id_name_key|UNIQUE (production_id, name)
+CON|production|production_active_version_id_fkey|FOREIGN KEY (active_version_id) REFERENCES version(id)
+CON|production|production_master_view_id_fkey|FOREIGN KEY (master_view_id, id) REFERENCES script_view(id, production_id)
+CON|production|production_owner_id_fkey|FOREIGN KEY (owner_id) REFERENCES app_user(id)
+CON|production|production_pkey|PRIMARY KEY (id)
+CON|registration_code_redemption|registration_code_redemption_code_fkey|FOREIGN KEY (code) REFERENCES registration_code(code) ON DELETE CASCADE
+CON|registration_code_redemption|registration_code_redemption_pkey|PRIMARY KEY (id)
+CON|registration_code_redemption|registration_code_redemption_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|registration_code|registration_code_max_uses_check|CHECK ((max_uses > 0))
+CON|registration_code|registration_code_pkey|PRIMARY KEY (code)
+CON|registration_email|registration_email_pkey|PRIMARY KEY (email)
+CON|resource_dept_manage|resource_dept_manage_dept_id_fkey|FOREIGN KEY (dept_id) REFERENCES production_dept(id) ON DELETE CASCADE
+CON|resource_dept_manage|resource_dept_manage_established_by_fkey|FOREIGN KEY (established_by) REFERENCES app_user(id)
+CON|resource_dept_manage|resource_dept_manage_pkey|PRIMARY KEY (id)
+CON|resource_dept_manage|resource_dept_manage_production_id_dept_id_resource_type_re_key|UNIQUE (production_id, dept_id, resource_type, resource_id, resource_sub)
+CON|resource_dept_manage|resource_dept_manage_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|resource_permission_level|resource_permission_level_pkey|PRIMARY KEY (resource_type, permission_level)
+CON|resource_person_manage|resource_person_manage_established_by_fkey|FOREIGN KEY (established_by) REFERENCES app_user(id)
+CON|resource_person_manage|resource_person_manage_pkey|PRIMARY KEY (id)
+CON|resource_person_manage|resource_person_manage_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|resource_person_manage|resource_person_manage_production_id_user_id_resource_type__key|UNIQUE (production_id, user_id, resource_type, resource_id, resource_sub)
+CON|resource_person_manage|resource_person_manage_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|scene_table_view_config|scene_table_view_config_pkey|PRIMARY KEY (id)
+CON|scene_table_view_config|scene_table_view_config_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|scene_table_view_config|scene_table_view_config_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|scene_version|scene_version_parent_id_fkey|FOREIGN KEY (parent_id) REFERENCES scene(id) ON DELETE SET NULL
+CON|scene_version|scene_version_pkey|PRIMARY KEY (scene_id, version_id)
+CON|scene_version|scene_version_scene_id_fkey|FOREIGN KEY (scene_id) REFERENCES scene(id)
+CON|scene_version|scene_version_version_id_fkey|FOREIGN KEY (version_id) REFERENCES version(id) ON DELETE CASCADE
+CON|scene|scene_pkey|PRIMARY KEY (id)
+CON|scene|scene_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|schedule_item_department|schedule_item_department_dept_id_fkey|FOREIGN KEY (dept_id) REFERENCES production_dept(id) ON DELETE CASCADE
+CON|schedule_item_department|schedule_item_department_item_id_fkey|FOREIGN KEY (item_id) REFERENCES event_schedule_item(id) ON DELETE CASCADE
+CON|schedule_item_department|schedule_item_department_pkey|PRIMARY KEY (item_id, dept_id)
+CON|schedule_item_group|schedule_item_group_group_id_fkey|FOREIGN KEY (group_id) REFERENCES event_group(id) ON DELETE CASCADE
+CON|schedule_item_group|schedule_item_group_item_id_fkey|FOREIGN KEY (item_id) REFERENCES event_schedule_item(id) ON DELETE CASCADE
+CON|schedule_item_group|schedule_item_group_pkey|PRIMARY KEY (item_id, group_id)
+CON|schedule_item_participant|schedule_item_participant_item_id_fkey|FOREIGN KEY (item_id) REFERENCES event_schedule_item(id) ON DELETE CASCADE
+CON|schedule_item_participant|schedule_item_participant_pkey|PRIMARY KEY (item_id, user_id)
+CON|schedule_item_participant|schedule_item_participant_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|script_character|script_character_character_id_fkey|FOREIGN KEY (character_id) REFERENCES "character"(id) ON DELETE CASCADE
+CON|script_character|script_character_pkey|PRIMARY KEY (script_id, character_id)
+CON|script_character|script_character_script_id_fkey|FOREIGN KEY (script_id) REFERENCES script(id) ON DELETE CASCADE
+CON|script_version|script_version_pkey|PRIMARY KEY (snapshot_id, version_id)
+CON|script_version|script_version_snapshot_id_fkey|FOREIGN KEY (snapshot_id) REFERENCES script(id) ON DELETE CASCADE
+CON|script_version|script_version_version_id_fkey|FOREIGN KEY (version_id) REFERENCES version(id) ON DELETE CASCADE
+CON|script_view|script_view_id_production_key|UNIQUE (id, production_id)
+CON|script_view|script_view_page_layout_check|CHECK ((page_layout = ANY (ARRAY['a4'::text, 'letter'::text, 'a3-2col'::text, 'tablet-2col'::text])))
+CON|script_view|script_view_pkey|PRIMARY KEY (id)
+CON|script_view|script_view_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|script_view|script_view_text_layout_mode_check|CHECK ((text_layout_mode = ANY (ARRAY['center'::text, 'compact'::text])))
+CON|script|script_pkey|PRIMARY KEY (id)
+CON|script|script_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|script|script_scene_id_fkey|FOREIGN KEY (scene_id) REFERENCES scene(id) ON DELETE SET NULL
+CON|tag_group|tag_group_default_option_id_fkey|FOREIGN KEY (default_option_id) REFERENCES tag_option(id) ON DELETE SET NULL
+CON|tag_group|tag_group_lyric_split_after_option_id_fkey|FOREIGN KEY (lyric_split_after_option_id) REFERENCES tag_option(id) ON DELETE SET NULL
+CON|tag_group|tag_group_pkey|PRIMARY KEY (id)
+CON|tag_group|tag_group_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|tag_group|tag_group_type_check|CHECK ((type = ANY (ARRAY['exclusive'::text, 'range'::text])))
+CON|tag_option|tag_option_group_id_fkey|FOREIGN KEY (group_id) REFERENCES tag_group(id) ON DELETE CASCADE
+CON|tag_option|tag_option_pkey|PRIMARY KEY (id)
+CON|task_assignee|task_assignee_pkey|PRIMARY KEY (task_id, user_id)
+CON|task_assignee|task_assignee_task_id_fkey|FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
+CON|task_assignee|task_assignee_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|task_dependency|task_dependency_blocked_id_fkey|FOREIGN KEY (blocked_id) REFERENCES task(id) ON DELETE CASCADE
+CON|task_dependency|task_dependency_blocking_id_fkey|FOREIGN KEY (blocking_id) REFERENCES task(id) ON DELETE CASCADE
+CON|task_dependency|task_dependency_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id) ON DELETE SET NULL
+CON|task_dependency|task_dependency_no_self_check|CHECK ((blocking_id <> blocked_id))
+CON|task_dependency|task_dependency_pkey|PRIMARY KEY (blocking_id, blocked_id)
+CON|task_phase|task_phase_phase_id_fkey|FOREIGN KEY (phase_id) REFERENCES phase(id) ON DELETE CASCADE
+CON|task_phase|task_phase_pkey|PRIMARY KEY (task_id, phase_id)
+CON|task_phase|task_phase_task_id_fkey|FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
+CON|task_schedule_item|task_schedule_item_item_id_fkey|FOREIGN KEY (item_id) REFERENCES event_schedule_item(id) ON DELETE CASCADE
+CON|task_schedule_item|task_schedule_item_pkey|PRIMARY KEY (task_id, item_id)
+CON|task_schedule_item|task_schedule_item_task_id_fkey|FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
+CON|task|task_created_via_check|CHECK ((created_via = ANY (ARRAY['explicit'::text, 'dept_auto'::text, 'poc'::text])))
+CON|task|task_department_id_fkey|FOREIGN KEY (department_id) REFERENCES production_dept(id) ON DELETE SET NULL
+CON|task|task_event_id_fkey|FOREIGN KEY (event_id) REFERENCES production_event(id) ON DELETE SET NULL
+CON|task|task_group_id_fkey|FOREIGN KEY (group_id) REFERENCES event_group(id) ON DELETE SET NULL
+CON|task|task_pkey|PRIMARY KEY (id)
+CON|task|task_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|task|task_subject_single|CHECK ((num_nonnulls(department_id, group_id) <= 1))
+CON|task|task_time_order_check|CHECK (((start_time IS NULL) OR (end_time IS NULL) OR (end_time >= start_time)))
+CON|user_notification|user_notification_approval_request_id_fkey|FOREIGN KEY (approval_request_id) REFERENCES approval_request(id)
+CON|user_notification|user_notification_category_check|CHECK ((category = ANY (ARRAY['info'::text, 'action'::text, 'warning'::text])))
+CON|user_notification|user_notification_pkey|PRIMARY KEY (id)
+CON|user_notification|user_notification_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|user_notification|user_notification_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|user_plan|user_plan_pkey|PRIMARY KEY (user_id)
+CON|user_plan|user_plan_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|user_platform_identity|user_platform_identity_pkey|PRIMARY KEY (id)
+CON|user_platform_identity|user_platform_identity_platform_id_platform_user_id_key|UNIQUE (platform_id, platform_user_id)
+CON|user_platform_identity|user_platform_identity_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|user_profile|user_profile_pkey|PRIMARY KEY (user_id)
+CON|user_profile|user_profile_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|version|version_parent_version_id_fkey|FOREIGN KEY (parent_version_id) REFERENCES version(id) ON DELETE SET NULL
+CON|version|version_pkey|PRIMARY KEY (id)
+CON|version|version_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|wiki_alias_backup_node_tree|wiki_alias_backup_node_tree_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|wiki_alias_backup_node_tree|wiki_alias_backup_node_tree_pkey|PRIMARY KEY (id)
+CON|wiki_alias_backup_node_tree|wiki_alias_backup_node_tree_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|wiki_body_backup_dialect_v2|wiki_body_backup_dialect_v2_pkey|PRIMARY KEY (wiki_id)
+CON|wiki_body_backup_dialect_v2|wiki_body_backup_dialect_v2_wiki_id_fkey|FOREIGN KEY (wiki_id) REFERENCES wiki(id) ON DELETE CASCADE
+CON|wiki_collab_outbox|wiki_collab_outbox_pkey|PRIMARY KEY (id)
+CON|wiki_comment|wiki_comment_parent_comment_id_fkey|FOREIGN KEY (parent_comment_id) REFERENCES wiki_comment(id) ON DELETE CASCADE
+CON|wiki_comment|wiki_comment_pkey|PRIMARY KEY (id)
+CON|wiki_comment|wiki_comment_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id)
+CON|wiki_comment|wiki_comment_wiki_id_fkey|FOREIGN KEY (wiki_id) REFERENCES wiki(id) ON DELETE CASCADE
+CON|wiki_entity_link|wiki_entity_link_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|wiki_entity_link|wiki_entity_link_pkey|PRIMARY KEY (wiki_id, entity_type, entity_id, origin)
+CON|wiki_entity_link|wiki_entity_link_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|wiki_entity_link|wiki_entity_link_wiki_id_fkey|FOREIGN KEY (wiki_id) REFERENCES wiki(id) ON DELETE CASCADE
+CON|wiki_proposal|wiki_proposal_action_check|CHECK ((action = ANY (ARRAY['create'::text, 'update'::text, 'delete'::text, 'move'::text, 'tag'::text])))
+CON|wiki_proposal|wiki_proposal_created_wiki_id_fkey|FOREIGN KEY (created_wiki_id) REFERENCES wiki(id) ON DELETE SET NULL
+CON|wiki_proposal|wiki_proposal_parent_node_id_fkey|FOREIGN KEY (parent_node_id) REFERENCES node(id) ON DELETE SET NULL
+CON|wiki_proposal|wiki_proposal_pkey|PRIMARY KEY (id)
+CON|wiki_proposal|wiki_proposal_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|wiki_proposal|wiki_proposal_production_tool_call_uniq|UNIQUE (production_id, tool_call_id)
+CON|wiki_proposal|wiki_proposal_proposed_by_fkey|FOREIGN KEY (proposed_by) REFERENCES app_user(id)
+CON|wiki_proposal|wiki_proposal_status_check|CHECK ((status = ANY (ARRAY['pending'::text, 'applied'::text, 'blocked_no_permission'::text, 'blocked_business_rule'::text, 'rejected'::text])))
+CON|wiki_proposal|wiki_proposal_target_wiki_id_fkey|FOREIGN KEY (target_wiki_id) REFERENCES wiki(id) ON DELETE SET NULL
+CON|wiki_revision|wiki_revision_author_user_id_fkey|FOREIGN KEY (author_user_id) REFERENCES app_user(id)
+CON|wiki_revision|wiki_revision_pkey|PRIMARY KEY (id)
+CON|wiki_revision|wiki_revision_wiki_id_fkey|FOREIGN KEY (wiki_id) REFERENCES wiki(id) ON DELETE CASCADE
+CON|wiki_tag|wiki_tag_pkey|PRIMARY KEY (wiki_id, tag)
+CON|wiki_tag|wiki_tag_wiki_id_fkey|FOREIGN KEY (wiki_id) REFERENCES wiki(id) ON DELETE CASCADE
+CON|wiki|wiki_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|wiki|wiki_pkey|PRIMARY KEY (id)
+CON|wiki|wiki_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+ENUM|block_type|dialogue,stage,lyric,chapter_marker,scene_marker,rehearsal_marker
+EXT|pg_trgm
+EXT|vector
+IDX|agent_approval|agent_approval_pending_idx|CREATE INDEX agent_approval_pending_idx ON public.agent_approval USING btree (status, expires_at) WHERE (status = 'pending'::text)
+IDX|agent_approval|agent_approval_pkey|CREATE UNIQUE INDEX agent_approval_pkey ON public.agent_approval USING btree (id)
+IDX|agent_approval|agent_approval_run_idx|CREATE INDEX agent_approval_run_idx ON public.agent_approval USING btree (run_id)
+IDX|agent_event|agent_event_pkey|CREATE UNIQUE INDEX agent_event_pkey ON public.agent_event USING btree (session_id, seq)
+IDX|agent_instructions|agent_instructions_pkey|CREATE UNIQUE INDEX agent_instructions_pkey ON public.agent_instructions USING btree (scope_type, scope_id)
+IDX|agent_memory_chunk|agent_memory_chunk_embedding_idx|CREATE INDEX agent_memory_chunk_embedding_idx ON public.agent_memory_chunk USING hnsw (embedding vector_cosine_ops)
+IDX|agent_memory_chunk|agent_memory_chunk_pkey|CREATE UNIQUE INDEX agent_memory_chunk_pkey ON public.agent_memory_chunk USING btree (id)
+IDX|agent_memory_chunk|agent_memory_chunk_scope_idx|CREATE INDEX agent_memory_chunk_scope_idx ON public.agent_memory_chunk USING btree (scope_type, scope_id, source)
+IDX|agent_memory_chunk|agent_memory_chunk_scope_type_scope_id_source_content_hash_key|CREATE UNIQUE INDEX agent_memory_chunk_scope_type_scope_id_source_content_hash_key ON public.agent_memory_chunk USING btree (scope_type, scope_id, source, content_hash)
+IDX|agent_memory_embedding_cache|agent_memory_embedding_cache_pkey|CREATE UNIQUE INDEX agent_memory_embedding_cache_pkey ON public.agent_memory_embedding_cache USING btree (model, content_hash)
+IDX|agent_memory_index_meta|agent_memory_index_meta_pkey|CREATE UNIQUE INDEX agent_memory_index_meta_pkey ON public.agent_memory_index_meta USING btree (id)
+IDX|agent_memory_recall_log|agent_memory_recall_log_chunk_idx|CREATE INDEX agent_memory_recall_log_chunk_idx ON public.agent_memory_recall_log USING btree (chunk_id, created_at)
+IDX|agent_memory_recall_log|agent_memory_recall_log_pkey|CREATE UNIQUE INDEX agent_memory_recall_log_pkey ON public.agent_memory_recall_log USING btree (id)
+IDX|agent_mutation|agent_mutation_pkey|CREATE UNIQUE INDEX agent_mutation_pkey ON public.agent_mutation USING btree (id)
+IDX|agent_mutation|agent_mutation_production_idx|CREATE INDEX agent_mutation_production_idx ON public.agent_mutation USING btree (production_id, created_at DESC) WHERE (production_id IS NOT NULL)
+IDX|agent_mutation|agent_mutation_run_idx|CREATE INDEX agent_mutation_run_idx ON public.agent_mutation USING btree (run_id) WHERE (run_id IS NOT NULL)
+IDX|agent_mutation|agent_mutation_schedule_idx|CREATE INDEX agent_mutation_schedule_idx ON public.agent_mutation USING btree (schedule_id, created_at DESC) WHERE (schedule_id IS NOT NULL)
+IDX|agent_mutation|agent_mutation_user_idx|CREATE INDEX agent_mutation_user_idx ON public.agent_mutation USING btree (user_id, created_at DESC)
+IDX|agent_question|agent_question_pending_idx|CREATE INDEX agent_question_pending_idx ON public.agent_question USING btree (status, expires_at) WHERE (status = 'pending'::text)
+IDX|agent_question|agent_question_pkey|CREATE UNIQUE INDEX agent_question_pkey ON public.agent_question USING btree (id)
+IDX|agent_run|agent_run_active_idx|CREATE INDEX agent_run_active_idx ON public.agent_run USING btree (status, heartbeat_at) WHERE (status = ANY (ARRAY['running'::text, 'awaiting_approval'::text, 'awaiting_answer'::text]))
+IDX|agent_run|agent_run_pkey|CREATE UNIQUE INDEX agent_run_pkey ON public.agent_run USING btree (id)
+IDX|agent_run|agent_run_schedule_idx|CREATE INDEX agent_run_schedule_idx ON public.agent_run USING btree (schedule_id, started_at DESC) WHERE (schedule_id IS NOT NULL)
+IDX|agent_run|agent_run_session_idx|CREATE INDEX agent_run_session_idx ON public.agent_run USING btree (session_id, started_at DESC)
+IDX|agent_schedule|agent_schedule_due_idx|CREATE INDEX agent_schedule_due_idx ON public.agent_schedule USING btree (next_fire_at) WHERE (status = 'active'::text)
+IDX|agent_schedule|agent_schedule_pkey|CREATE UNIQUE INDEX agent_schedule_pkey ON public.agent_schedule USING btree (id)
+IDX|agent_schedule|agent_schedule_user_idx|CREATE INDEX agent_schedule_user_idx ON public.agent_schedule USING btree (user_id, created_at DESC)
+IDX|agent_session_entry|agent_session_entry_pkey|CREATE UNIQUE INDEX agent_session_entry_pkey ON public.agent_session_entry USING btree (session_id, seq)
+IDX|agent_session_entry|agent_session_entry_session_id_entry_id_key|CREATE UNIQUE INDEX agent_session_entry_session_id_entry_id_key ON public.agent_session_entry USING btree (session_id, entry_id)
+IDX|agent_session|agent_session_pkey|CREATE UNIQUE INDEX agent_session_pkey ON public.agent_session USING btree (id)
+IDX|agent_session|agent_session_production_idx|CREATE INDEX agent_session_production_idx ON public.agent_session USING btree (production_id) WHERE (production_id IS NOT NULL)
+IDX|agent_session|agent_session_schedule_idx|CREATE INDEX agent_session_schedule_idx ON public.agent_session USING btree (schedule_id) WHERE (schedule_id IS NOT NULL)
+IDX|agent_session|agent_session_user_idx|CREATE INDEX agent_session_user_idx ON public.agent_session USING btree (user_id, updated_at DESC)
+IDX|ai_credit_grant|ai_credit_grant_pkey|CREATE UNIQUE INDEX ai_credit_grant_pkey ON public.ai_credit_grant USING btree (id)
+IDX|ai_credit_grant|ai_credit_grant_user_idx|CREATE INDEX ai_credit_grant_user_idx ON public.ai_credit_grant USING btree (user_id, expires_at)
+IDX|ai_usage|ai_usage_created_idx|CREATE INDEX ai_usage_created_idx ON public.ai_usage USING btree (created_at)
+IDX|ai_usage|ai_usage_pkey|CREATE UNIQUE INDEX ai_usage_pkey ON public.ai_usage USING btree (id)
+IDX|ai_usage|ai_usage_production_created_idx|CREATE INDEX ai_usage_production_created_idx ON public.ai_usage USING btree (production_id, created_at)
+IDX|ai_usage|ai_usage_user_created_idx|CREATE INDEX ai_usage_user_created_idx ON public.ai_usage USING btree (user_id, created_at)
+IDX|announcement_read|announcement_read_announcement_idx|CREATE INDEX announcement_read_announcement_idx ON public.announcement_read USING btree (announcement_id)
+IDX|announcement_read|announcement_read_pkey|CREATE UNIQUE INDEX announcement_read_pkey ON public.announcement_read USING btree (announcement_id, user_id)
+IDX|app_user|app_user_pkey|CREATE UNIQUE INDEX app_user_pkey ON public.app_user USING btree (id)
+IDX|approval_flow_template|approval_flow_template_pkey|CREATE UNIQUE INDEX approval_flow_template_pkey ON public.approval_flow_template USING btree (id)
+IDX|approval_flow_template|idx_approval_flow_template_production|CREATE INDEX idx_approval_flow_template_production ON public.approval_flow_template USING btree (production_id)
+IDX|approval_flow_template|uq_approval_flow_template_published|CREATE UNIQUE INDEX uq_approval_flow_template_published ON public.approval_flow_template USING btree (production_id) WHERE (status = 'published'::text)
+IDX|approval_request|approval_request_current_approvers_idx|CREATE INDEX approval_request_current_approvers_idx ON public.approval_request USING gin (current_approver_ids) WHERE (status = ANY (ARRAY['pending_supervisor'::text, 'pending_resource'::text]))
+IDX|approval_request|approval_request_pkey|CREATE UNIQUE INDEX approval_request_pkey ON public.approval_request USING btree (id)
+IDX|approval_request|approval_request_production_status_idx|CREATE INDEX approval_request_production_status_idx ON public.approval_request USING btree (production_id, status)
+IDX|approval_request|approval_request_subject_idx|CREATE INDEX approval_request_subject_idx ON public.approval_request USING btree (subject_id, production_id)
+IDX|asset_file|asset_file_asset_idx|CREATE INDEX asset_file_asset_idx ON public.asset_file USING btree (asset_id)
+IDX|asset_file|asset_file_pkey|CREATE UNIQUE INDEX asset_file_pkey ON public.asset_file USING btree (id)
+IDX|asset|asset_pkey|CREATE UNIQUE INDEX asset_pkey ON public.asset USING btree (id)
+IDX|asset|asset_production_idx|CREATE INDEX asset_production_idx ON public.asset USING btree (production_id, created_at DESC)
+IDX|asset|asset_uploader_idx|CREATE INDEX asset_uploader_idx ON public.asset USING btree (uploader_user_id)
+IDX|avatar_upload_audit|avatar_upload_audit_pkey|CREATE UNIQUE INDEX avatar_upload_audit_pkey ON public.avatar_upload_audit USING btree (id)
+IDX|avatar_upload_audit|idx_avatar_upload_audit_orphan|CREATE INDEX idx_avatar_upload_audit_orphan ON public.avatar_upload_audit USING btree (created_at) WHERE ((committed_at IS NULL) AND (deleted_at IS NULL))
+IDX|avatar_upload_audit|idx_avatar_upload_audit_r2_key|CREATE INDEX idx_avatar_upload_audit_r2_key ON public.avatar_upload_audit USING btree (r2_key)
+IDX|block_tag|block_tag_block_idx|CREATE INDEX block_tag_block_idx ON public.block_tag USING btree (block_id)
+IDX|block_tag|block_tag_group_idx|CREATE INDEX block_tag_group_idx ON public.block_tag USING btree (group_id)
+IDX|block_tag|block_tag_pkey|CREATE UNIQUE INDEX block_tag_pkey ON public.block_tag USING btree (block_id, group_id)
+IDX|bot_testers|bot_testers_pkey|CREATE UNIQUE INDEX bot_testers_pkey ON public.bot_testers USING btree (open_id)
+IDX|bug_report|bug_report_pkey|CREATE UNIQUE INDEX bug_report_pkey ON public.bug_report USING btree (id)
+IDX|bug_report|bug_report_status_idx|CREATE INDEX bug_report_status_idx ON public.bug_report USING btree (status, created_at DESC)
+IDX|bug_report|bug_report_user_time_idx|CREATE INDEX bug_report_user_time_idx ON public.bug_report USING btree (user_id, created_at DESC)
+IDX|character_aggregate|character_aggregate_pkey|CREATE UNIQUE INDEX character_aggregate_pkey ON public.character_aggregate USING btree (aggregate_id, member_id)
+IDX|character_version|character_version_pkey|CREATE UNIQUE INDEX character_version_pkey ON public.character_version USING btree (character_id, version_id)
+IDX|character_version|character_version_version_idx|CREATE INDEX character_version_version_idx ON public.character_version USING btree (version_id, sort_order)
+IDX|character|character_pkey|CREATE UNIQUE INDEX character_pkey ON public."character" USING btree (id)
+IDX|comment|comment_context_idx|CREATE INDEX comment_context_idx ON public.comment USING btree (context_type, context_id)
+IDX|comment|comment_mentions_idx|CREATE INDEX comment_mentions_idx ON public.comment USING gin (mentions)
+IDX|comment|comment_pkey|CREATE UNIQUE INDEX comment_pkey ON public.comment USING btree (id)
+IDX|comment|comment_production_idx|CREATE INDEX comment_production_idx ON public.comment USING btree (production_id, created_at DESC)
+IDX|cue_list|cue_list_abbr_production_unique|CREATE UNIQUE INDEX cue_list_abbr_production_unique ON public.cue_list USING btree (production_id, abbr)
+IDX|cue_list|cue_list_pkey|CREATE UNIQUE INDEX cue_list_pkey ON public.cue_list USING btree (id)
+IDX|cue_list|cue_list_production_idx|CREATE INDEX cue_list_production_idx ON public.cue_list USING btree (production_id, created_at)
+IDX|cue_mention_text_backup|cue_mention_text_backup_pkey|CREATE UNIQUE INDEX cue_mention_text_backup_pkey ON public.cue_mention_text_backup USING btree (table_name, row_id, column_name)
+IDX|cue_version|cue_version_pkey|CREATE UNIQUE INDEX cue_version_pkey ON public.cue_version USING btree (revision_id, version_id)
+IDX|cue_version|cue_version_version_idx|CREATE INDEX cue_version_version_idx ON public.cue_version USING btree (version_id)
+IDX|cue|cue_list_idx|CREATE INDEX cue_list_idx ON public.cue USING btree (cue_list_id)
+IDX|cue|cue_pkey|CREATE UNIQUE INDEX cue_pkey ON public.cue USING btree (id)
+IDX|cue|cue_stable_id_idx|CREATE INDEX cue_stable_id_idx ON public.cue USING btree (cue_id)
+IDX|dept_cue_list_template|dept_cue_list_template_dept_id_template_key|CREATE UNIQUE INDEX dept_cue_list_template_dept_id_template_key ON public.dept_cue_list_template USING btree (dept_id, template)
+IDX|dept_cue_list_template|dept_cue_list_template_prod_idx|CREATE INDEX dept_cue_list_template_prod_idx ON public.dept_cue_list_template USING btree (production_id, template)
+IDX|dialect_v2_text_backup|dialect_v2_text_backup_pkey|CREATE UNIQUE INDEX dialect_v2_text_backup_pkey ON public.dialect_v2_text_backup USING btree (table_name, row_id, column_name)
+IDX|email_otp|email_otp_lookup|CREATE INDEX email_otp_lookup ON public.email_otp USING btree (email, code) WHERE (used_at IS NULL)
+IDX|email_otp|email_otp_pkey|CREATE UNIQUE INDEX email_otp_pkey ON public.email_otp USING btree (id)
+IDX|event_call_time|event_call_time_event_idx|CREATE INDEX event_call_time_event_idx ON public.event_call_time USING btree (event_id)
+IDX|event_call_time|event_call_time_pkey|CREATE UNIQUE INDEX event_call_time_pkey ON public.event_call_time USING btree (id)
+IDX|event_group_freeze_member|event_group_freeze_member_pkey|CREATE UNIQUE INDEX event_group_freeze_member_pkey ON public.event_group_freeze_member USING btree (id)
+IDX|event_group_freeze_member|event_group_freeze_member_snapshot_idx|CREATE INDEX event_group_freeze_member_snapshot_idx ON public.event_group_freeze_member USING btree (event_id, group_id, frozen_at)
+IDX|event_group_freeze_member|event_group_freeze_member_user_idx|CREATE INDEX event_group_freeze_member_user_idx ON public.event_group_freeze_member USING btree (user_id) WHERE (user_id IS NOT NULL)
+IDX|event_group_freeze|event_group_freeze_active_idx|CREATE UNIQUE INDEX event_group_freeze_active_idx ON public.event_group_freeze USING btree (event_id, group_id) WHERE (released_at IS NULL)
+IDX|event_group_freeze|event_group_freeze_event_idx|CREATE INDEX event_group_freeze_event_idx ON public.event_group_freeze USING btree (event_id)
+IDX|event_group_freeze|event_group_freeze_pkey|CREATE UNIQUE INDEX event_group_freeze_pkey ON public.event_group_freeze USING btree (event_id, group_id, frozen_at)
+IDX|event_group_member|event_group_member_dept_idx|CREATE UNIQUE INDEX event_group_member_dept_idx ON public.event_group_member USING btree (group_id, dept_id) WHERE (dept_id IS NOT NULL)
+IDX|event_group_member|event_group_member_user_idx|CREATE UNIQUE INDEX event_group_member_user_idx ON public.event_group_member USING btree (group_id, user_id) WHERE (user_id IS NOT NULL)
+IDX|event_group|event_group_event_idx|CREATE INDEX event_group_event_idx ON public.event_group USING btree (event_id) WHERE (event_id IS NOT NULL)
+IDX|event_group|event_group_name_unique_idx|CREATE UNIQUE INDEX event_group_name_unique_idx ON public.event_group USING btree (production_id, COALESCE(event_id, ''::text), name)
+IDX|event_group|event_group_pkey|CREATE UNIQUE INDEX event_group_pkey ON public.event_group USING btree (id)
+IDX|event_group|event_group_production_idx|CREATE INDEX event_group_production_idx ON public.event_group USING btree (production_id)
+IDX|event_milestone|event_milestone_milestone_idx|CREATE INDEX event_milestone_milestone_idx ON public.event_milestone USING btree (milestone_id)
+IDX|event_milestone|event_milestone_pkey|CREATE UNIQUE INDEX event_milestone_pkey ON public.event_milestone USING btree (event_id, milestone_id)
+IDX|event_participant|event_participant_event_id_user_id_key|CREATE UNIQUE INDEX event_participant_event_id_user_id_key ON public.event_participant USING btree (event_id, user_id)
+IDX|event_participant|event_participant_event_idx|CREATE INDEX event_participant_event_idx ON public.event_participant USING btree (event_id)
+IDX|event_participant|event_participant_pkey|CREATE UNIQUE INDEX event_participant_pkey ON public.event_participant USING btree (id)
+IDX|event_report_note|event_report_note_node_idx|CREATE INDEX event_report_note_node_idx ON public.event_report_note USING btree (node_id)
+IDX|event_report_note|event_report_note_pkey|CREATE UNIQUE INDEX event_report_note_pkey ON public.event_report_note USING btree (id)
+IDX|event_report_note|event_report_note_report_idx|CREATE INDEX event_report_note_report_idx ON public.event_report_note USING btree (report_id)
+IDX|event_report_read|event_report_read_pkey|CREATE UNIQUE INDEX event_report_read_pkey ON public.event_report_read USING btree (report_id, user_id)
+IDX|event_report|event_report_event_idx|CREATE INDEX event_report_event_idx ON public.event_report USING btree (event_id)
+IDX|event_report|event_report_node_idx|CREATE INDEX event_report_node_idx ON public.event_report USING btree (node_id)
+IDX|event_report|event_report_pkey|CREATE UNIQUE INDEX event_report_pkey ON public.event_report USING btree (id)
+IDX|event_rundown_column|event_rundown_column_event_idx|CREATE INDEX event_rundown_column_event_idx ON public.event_rundown_column USING btree (event_id)
+IDX|event_rundown_column|event_rundown_column_group_idx|CREATE UNIQUE INDEX event_rundown_column_group_idx ON public.event_rundown_column USING btree (event_id, group_id) WHERE (group_id IS NOT NULL)
+IDX|event_rundown_column|event_rundown_column_location_idx|CREATE UNIQUE INDEX event_rundown_column_location_idx ON public.event_rundown_column USING btree (event_id, match_location) WHERE (match_location IS NOT NULL)
+IDX|event_rundown_column|event_rundown_column_pkey|CREATE UNIQUE INDEX event_rundown_column_pkey ON public.event_rundown_column USING btree (id)
+IDX|event_rundown_placement_column|event_rundown_placement_column_pkey|CREATE UNIQUE INDEX event_rundown_placement_column_pkey ON public.event_rundown_placement_column USING btree (placement_id, column_id)
+IDX|event_rundown_placement|event_rundown_placement_item_idx|CREATE UNIQUE INDEX event_rundown_placement_item_idx ON public.event_rundown_placement USING btree (event_id, item_id) WHERE (item_id IS NOT NULL)
+IDX|event_rundown_placement|event_rundown_placement_pkey|CREATE UNIQUE INDEX event_rundown_placement_pkey ON public.event_rundown_placement USING btree (id)
+IDX|event_rundown_placement|event_rundown_placement_task_idx|CREATE UNIQUE INDEX event_rundown_placement_task_idx ON public.event_rundown_placement USING btree (event_id, task_id) WHERE (task_id IS NOT NULL)
+IDX|event_schedule_item|event_schedule_item_event_idx|CREATE INDEX event_schedule_item_event_idx ON public.event_schedule_item USING btree (event_id, order_index)
+IDX|event_schedule_item|event_schedule_item_pkey|CREATE UNIQUE INDEX event_schedule_item_pkey ON public.event_schedule_item USING btree (id)
+IDX|event_stage_manager|event_stage_manager_event_idx|CREATE INDEX event_stage_manager_event_idx ON public.event_stage_manager USING btree (event_id)
+IDX|event_stage_manager|event_stage_manager_pkey|CREATE UNIQUE INDEX event_stage_manager_pkey ON public.event_stage_manager USING btree (event_id, user_id)
+IDX|feishu_user|feishu_user_pkey|CREATE UNIQUE INDEX feishu_user_pkey ON public.feishu_user USING btree (open_id)
+IDX|feishu_user|feishu_user_user_id_key|CREATE UNIQUE INDEX feishu_user_user_id_key ON public.feishu_user USING btree (user_id)
+IDX|job|job_claim_idx|CREATE INDEX job_claim_idx ON public.job USING btree (priority DESC, created_at) WHERE (status = 'queued'::text)
+IDX|job|job_dedupe_active_idx|CREATE UNIQUE INDEX job_dedupe_active_idx ON public.job USING btree (dedupe_key) WHERE ((dedupe_key IS NOT NULL) AND (status = ANY (ARRAY['queued'::text, 'running'::text])))
+IDX|job|job_lease_idx|CREATE INDEX job_lease_idx ON public.job USING btree (lease_until) WHERE (status = 'running'::text)
+IDX|job|job_pkey|CREATE UNIQUE INDEX job_pkey ON public.job USING btree (id)
+IDX|milestone|milestone_pkey|CREATE UNIQUE INDEX milestone_pkey ON public.milestone USING btree (id)
+IDX|milestone|milestone_production_idx|CREATE INDEX milestone_production_idx ON public.milestone USING btree (production_id, end_date)
+IDX|node_dept_share|node_dept_share_pkey|CREATE UNIQUE INDEX node_dept_share_pkey ON public.node_dept_share USING btree (node_id, dept_id)
+IDX|node_entity_dir|node_entity_dir_pkey|CREATE UNIQUE INDEX node_entity_dir_pkey ON public.node_entity_dir USING btree (production_id, entity_type, entity_id)
+IDX|node_mount|node_mount_node_idx|CREATE INDEX node_mount_node_idx ON public.node_mount USING btree (node_id)
+IDX|node_mount|node_mount_pkey|CREATE UNIQUE INDEX node_mount_pkey ON public.node_mount USING btree (id)
+IDX|node_mount|node_mount_point_idx|CREATE INDEX node_mount_point_idx ON public.node_mount USING btree (mount_type, mount_id)
+IDX|node_mount|node_mount_production_idx|CREATE INDEX node_mount_production_idx ON public.node_mount USING btree (production_id)
+IDX|node|node_asset_uidx|CREATE UNIQUE INDEX node_asset_uidx ON public.node USING btree (asset_id) WHERE (asset_id IS NOT NULL)
+IDX|node|node_link_place_uidx|CREATE UNIQUE INDEX node_link_place_uidx ON public.node USING btree (parent_id, link_target_id) WHERE (kind = 'link'::text)
+IDX|node|node_link_target_idx|CREATE INDEX node_link_target_idx ON public.node USING btree (link_target_id) WHERE (link_target_id IS NOT NULL)
+IDX|node|node_parent_idx|CREATE INDEX node_parent_idx ON public.node USING btree (parent_id)
+IDX|node|node_pkey|CREATE UNIQUE INDEX node_pkey ON public.node USING btree (id)
+IDX|node|node_production_idx|CREATE INDEX node_production_idx ON public.node USING btree (production_id)
+IDX|node|node_wiki_uidx|CREATE UNIQUE INDEX node_wiki_uidx ON public.node USING btree (wiki_id) WHERE (wiki_id IS NOT NULL)
+IDX|notification_preference|notification_preference_pkey|CREATE UNIQUE INDEX notification_preference_pkey ON public.notification_preference USING btree (user_id, scope_type, scope_id)
+IDX|notification_subscription|notification_subscription_pkey|CREATE UNIQUE INDEX notification_subscription_pkey ON public.notification_subscription USING btree (user_id, notification_type)
+IDX|phase_milestone|phase_milestone_milestone_idx|CREATE INDEX phase_milestone_milestone_idx ON public.phase_milestone USING btree (milestone_id)
+IDX|phase_milestone|phase_milestone_pkey|CREATE UNIQUE INDEX phase_milestone_pkey ON public.phase_milestone USING btree (phase_id, milestone_id)
+IDX|phase|phase_pkey|CREATE UNIQUE INDEX phase_pkey ON public.phase USING btree (id)
+IDX|phase|phase_production_idx|CREATE INDEX phase_production_idx ON public.phase USING btree (production_id, start_date)
+IDX|plan_code_redemption|plan_code_redemption_code_idx|CREATE INDEX plan_code_redemption_code_idx ON public.plan_code_redemption USING btree (code)
+IDX|plan_code_redemption|plan_code_redemption_pkey|CREATE UNIQUE INDEX plan_code_redemption_pkey ON public.plan_code_redemption USING btree (id)
+IDX|plan_code|plan_code_pkey|CREATE UNIQUE INDEX plan_code_pkey ON public.plan_code USING btree (code)
+IDX|production_announcement|production_announcement_pinned_unique|CREATE UNIQUE INDEX production_announcement_pinned_unique ON public.production_announcement USING btree (production_id) WHERE (is_pinned = true)
+IDX|production_announcement|production_announcement_pkey|CREATE UNIQUE INDEX production_announcement_pkey ON public.production_announcement USING btree (id)
+IDX|production_announcement|production_announcement_production_idx|CREATE INDEX production_announcement_production_idx ON public.production_announcement USING btree (production_id, created_at DESC)
+IDX|production_approval_config|production_approval_config_pkey|CREATE UNIQUE INDEX production_approval_config_pkey ON public.production_approval_config USING btree (production_id)
+IDX|production_budget_category|pbc_name_idx|CREATE UNIQUE INDEX pbc_name_idx ON public.production_budget_category USING btree (production_id, name)
+IDX|production_budget_category|pbc_production_idx|CREATE INDEX pbc_production_idx ON public.production_budget_category USING btree (production_id)
+IDX|production_budget_category|production_budget_category_pkey|CREATE UNIQUE INDEX production_budget_category_pkey ON public.production_budget_category USING btree (id)
+IDX|production_cue_template_type|production_cue_template_type_pkey|CREATE UNIQUE INDEX production_cue_template_type_pkey ON public.production_cue_template_type USING btree (id)
+IDX|production_cue_template_type|production_cue_template_type_prod_idx|CREATE INDEX production_cue_template_type_prod_idx ON public.production_cue_template_type USING btree (production_id, display_order)
+IDX|production_cue_template_type|production_cue_template_type_production_id_key_key|CREATE UNIQUE INDEX production_cue_template_type_production_id_key_key ON public.production_cue_template_type USING btree (production_id, key)
+IDX|production_dept_member|pdm_dept_idx|CREATE INDEX pdm_dept_idx ON public.production_dept_member USING btree (dept_id)
+IDX|production_dept_member|pdm_prod_user_idx|CREATE INDEX pdm_prod_user_idx ON public.production_dept_member USING btree (production_id, user_id)
+IDX|production_dept_member|production_dept_member_pkey|CREATE UNIQUE INDEX production_dept_member_pkey ON public.production_dept_member USING btree (id)
+IDX|production_dept_member|production_dept_member_user_id_dept_id_key|CREATE UNIQUE INDEX production_dept_member_user_id_dept_id_key ON public.production_dept_member USING btree (user_id, dept_id)
+IDX|production_dept_permission|production_dept_permission_dept_id_permission_key_key|CREATE UNIQUE INDEX production_dept_permission_dept_id_permission_key_key ON public.production_dept_permission USING btree (dept_id, permission_key)
+IDX|production_dept_permission|production_dept_permission_pkey|CREATE UNIQUE INDEX production_dept_permission_pkey ON public.production_dept_permission USING btree (id)
+IDX|production_dept_permission|production_dept_permission_prod_idx|CREATE INDEX production_dept_permission_prod_idx ON public.production_dept_permission USING btree (production_id, dept_id)
+IDX|production_dept|production_dept_name_unique_idx|CREATE UNIQUE INDEX production_dept_name_unique_idx ON public.production_dept USING btree (production_id, name, COALESCE((parent_id)::text, ''::text))
+IDX|production_dept|production_dept_parent_idx|CREATE INDEX production_dept_parent_idx ON public.production_dept USING btree (parent_id)
+IDX|production_dept|production_dept_pkey|CREATE UNIQUE INDEX production_dept_pkey ON public.production_dept USING btree (id)
+IDX|production_dept|production_dept_production_idx|CREATE INDEX production_dept_production_idx ON public.production_dept USING btree (production_id, display_order)
+IDX|production_event|production_event_pkey|CREATE UNIQUE INDEX production_event_pkey ON public.production_event USING btree (id)
+IDX|production_event|production_event_production_idx|CREATE INDEX production_event_production_idx ON public.production_event USING btree (production_id, start_time)
+IDX|production_expense|pe_approver_idx|CREATE INDEX pe_approver_idx ON public.production_expense USING gin (current_approver_ids)
+IDX|production_expense|pe_category_idx|CREATE INDEX pe_category_idx ON public.production_expense USING btree (category_id) WHERE (category_id IS NOT NULL)
+IDX|production_expense|pe_pending_idx|CREATE INDEX pe_pending_idx ON public.production_expense USING btree (production_id, status) WHERE (status = 'pending'::text)
+IDX|production_expense|pe_production_idx|CREATE INDEX pe_production_idx ON public.production_expense USING btree (production_id)
+IDX|production_expense|production_expense_pkey|CREATE UNIQUE INDEX production_expense_pkey ON public.production_expense USING btree (id)
+IDX|production_invite_claim|production_invite_claim_pkey|CREATE UNIQUE INDEX production_invite_claim_pkey ON public.production_invite_claim USING btree (id)
+IDX|production_invite_claim|production_invite_claim_token_idx|CREATE INDEX production_invite_claim_token_idx ON public.production_invite_claim USING btree (token)
+IDX|production_invite_claim|production_invite_claim_token_name_key|CREATE UNIQUE INDEX production_invite_claim_token_name_key ON public.production_invite_claim USING btree (token, name)
+IDX|production_invite|production_invite_pkey|CREATE UNIQUE INDEX production_invite_pkey ON public.production_invite USING btree (token)
+IDX|production_invite|production_invite_prod_idx|CREATE INDEX production_invite_prod_idx ON public.production_invite USING btree (production_id, created_at DESC)
+IDX|production_material_status|pms_prod_name_idx|CREATE UNIQUE INDEX pms_prod_name_idx ON public.production_material_status USING btree (production_id, name) WHERE (production_id IS NOT NULL)
+IDX|production_material_status|pms_system_name_idx|CREATE UNIQUE INDEX pms_system_name_idx ON public.production_material_status USING btree (name) WHERE (production_id IS NULL)
+IDX|production_material_status|production_material_status_pkey|CREATE UNIQUE INDEX production_material_status_pkey ON public.production_material_status USING btree (id)
+IDX|production_material|production_material_code_idx|CREATE UNIQUE INDEX production_material_code_idx ON public.production_material USING btree (production_id, code)
+IDX|production_material|production_material_pkey|CREATE UNIQUE INDEX production_material_pkey ON public.production_material USING btree (id)
+IDX|production_material|production_material_production_idx|CREATE INDEX production_material_production_idx ON public.production_material USING btree (production_id)
+IDX|production_material|production_material_status_idx|CREATE INDEX production_material_status_idx ON public.production_material USING btree (status_id) WHERE (status_id IS NOT NULL)
+IDX|production_member_grant|production_member_grant_active_unique_idx|CREATE UNIQUE INDEX production_member_grant_active_unique_idx ON public.production_member_grant USING btree (production_id, user_id, resource_type, resource_id, resource_sub, permission_level) WHERE (is_revoked = false)
+IDX|production_member_grant|production_member_grant_lookup_idx|CREATE INDEX production_member_grant_lookup_idx ON public.production_member_grant USING btree (production_id, resource_type, resource_id, resource_sub, user_id) WHERE (is_revoked = false)
+IDX|production_member_grant|production_member_grant_pkey|CREATE UNIQUE INDEX production_member_grant_pkey ON public.production_member_grant USING btree (id)
+IDX|production_member_permission|production_member_permission_pkey|CREATE UNIQUE INDEX production_member_permission_pkey ON public.production_member_permission USING btree (production_id, user_id, permission)
+IDX|production_member_role|pmr_user_prod_idx|CREATE INDEX pmr_user_prod_idx ON public.production_member_role USING btree (production_id, user_id)
+IDX|production_member_role|production_member_role_pkey|CREATE UNIQUE INDEX production_member_role_pkey ON public.production_member_role USING btree (production_id, user_id, role_id)
+IDX|production_member_status_audit|pmsa_member_time_idx|CREATE INDEX pmsa_member_time_idx ON public.production_member_status_audit USING btree (production_id, user_id, created_at DESC)
+IDX|production_member_status_audit|production_member_status_audit_pkey|CREATE UNIQUE INDEX production_member_status_audit_pkey ON public.production_member_status_audit USING btree (id)
+IDX|production_member_tag_assignment|pmta_user_prod_idx|CREATE INDEX pmta_user_prod_idx ON public.production_member_tag_assignment USING btree (production_id, user_id)
+IDX|production_member_tag_assignment|production_member_tag_assignment_pkey|CREATE UNIQUE INDEX production_member_tag_assignment_pkey ON public.production_member_tag_assignment USING btree (production_id, user_id, tag_id)
+IDX|production_member_tag|pmt_prod_name_idx|CREATE UNIQUE INDEX pmt_prod_name_idx ON public.production_member_tag USING btree (production_id, name) WHERE (production_id IS NOT NULL)
+IDX|production_member_tag|pmt_system_name_idx|CREATE UNIQUE INDEX pmt_system_name_idx ON public.production_member_tag USING btree (name) WHERE (production_id IS NULL)
+IDX|production_member_tag|production_member_tag_pkey|CREATE UNIQUE INDEX production_member_tag_pkey ON public.production_member_tag USING btree (id)
+IDX|production_member|production_member_pkey|CREATE UNIQUE INDEX production_member_pkey ON public.production_member USING btree (production_id, user_id)
+IDX|production_node_config|production_node_config_pkey|CREATE UNIQUE INDEX production_node_config_pkey ON public.production_node_config USING btree (production_id)
+IDX|production_plan|production_plan_pkey|CREATE UNIQUE INDEX production_plan_pkey ON public.production_plan USING btree (production_id)
+IDX|production_platform_channel|ppc_prod_org_uniq|CREATE UNIQUE INDEX ppc_prod_org_uniq ON public.production_platform_channel USING btree (production_id, COALESCE(org_id, ''::text))
+IDX|production_platform_channel|production_platform_channel_pkey|CREATE UNIQUE INDEX production_platform_channel_pkey ON public.production_platform_channel USING btree (id)
+IDX|production_policy_audit|production_policy_audit_pkey|CREATE UNIQUE INDEX production_policy_audit_pkey ON public.production_policy_audit USING btree (id)
+IDX|production_policy_audit|production_policy_audit_prod_time_idx|CREATE INDEX production_policy_audit_prod_time_idx ON public.production_policy_audit USING btree (production_id, changed_at DESC)
+IDX|production_policy|production_policy_pkey|CREATE UNIQUE INDEX production_policy_pkey ON public.production_policy USING btree (production_id, policy_key)
+IDX|production_role_permission|production_role_permission_pkey|CREATE UNIQUE INDEX production_role_permission_pkey ON public.production_role_permission USING btree (role_id, permission_key)
+IDX|production_role_permission|production_role_permission_role_idx|CREATE INDEX production_role_permission_role_idx ON public.production_role_permission USING btree (role_id)
+IDX|production_role|production_role_pkey|CREATE UNIQUE INDEX production_role_pkey ON public.production_role USING btree (id)
+IDX|production_role|production_role_production_id_name_key|CREATE UNIQUE INDEX production_role_production_id_name_key ON public.production_role USING btree (production_id, name)
+IDX|production_role|production_role_production_idx|CREATE INDEX production_role_production_idx ON public.production_role USING btree (production_id)
+IDX|production|production_pkey|CREATE UNIQUE INDEX production_pkey ON public.production USING btree (id)
+IDX|registration_code_redemption|registration_code_redemption_code_idx|CREATE INDEX registration_code_redemption_code_idx ON public.registration_code_redemption USING btree (code)
+IDX|registration_code_redemption|registration_code_redemption_pkey|CREATE UNIQUE INDEX registration_code_redemption_pkey ON public.registration_code_redemption USING btree (id)
+IDX|registration_code|registration_code_pkey|CREATE UNIQUE INDEX registration_code_pkey ON public.registration_code USING btree (code)
+IDX|registration_email|registration_email_pkey|CREATE UNIQUE INDEX registration_email_pkey ON public.registration_email USING btree (email)
+IDX|resource_dept_manage|rdm_dept_idx|CREATE INDEX rdm_dept_idx ON public.resource_dept_manage USING btree (dept_id)
+IDX|resource_dept_manage|rdm_production_resource_idx|CREATE INDEX rdm_production_resource_idx ON public.resource_dept_manage USING btree (production_id, resource_type, resource_id)
+IDX|resource_dept_manage|resource_dept_manage_pkey|CREATE UNIQUE INDEX resource_dept_manage_pkey ON public.resource_dept_manage USING btree (id)
+IDX|resource_dept_manage|resource_dept_manage_production_id_dept_id_resource_type_re_key|CREATE UNIQUE INDEX resource_dept_manage_production_id_dept_id_resource_type_re_key ON public.resource_dept_manage USING btree (production_id, dept_id, resource_type, resource_id, resource_sub)
+IDX|resource_permission_level|resource_permission_level_pkey|CREATE UNIQUE INDEX resource_permission_level_pkey ON public.resource_permission_level USING btree (resource_type, permission_level)
+IDX|resource_person_manage|resource_person_manage_pkey|CREATE UNIQUE INDEX resource_person_manage_pkey ON public.resource_person_manage USING btree (id)
+IDX|resource_person_manage|resource_person_manage_production_id_user_id_resource_type__key|CREATE UNIQUE INDEX resource_person_manage_production_id_user_id_resource_type__key ON public.resource_person_manage USING btree (production_id, user_id, resource_type, resource_id, resource_sub)
+IDX|resource_person_manage|rpm_production_resource_idx|CREATE INDEX rpm_production_resource_idx ON public.resource_person_manage USING btree (production_id, resource_type, resource_id)
+IDX|scene_table_view_config|scene_table_view_config_pkey|CREATE UNIQUE INDEX scene_table_view_config_pkey ON public.scene_table_view_config USING btree (id)
+IDX|scene_table_view_config|scene_table_view_one_default_idx|CREATE UNIQUE INDEX scene_table_view_one_default_idx ON public.scene_table_view_config USING btree (user_id, production_id) WHERE is_default
+IDX|scene_table_view_config|scene_table_view_user_prod_idx|CREATE INDEX scene_table_view_user_prod_idx ON public.scene_table_view_config USING btree (user_id, production_id)
+IDX|scene_version|scene_version_pkey|CREATE UNIQUE INDEX scene_version_pkey ON public.scene_version USING btree (scene_id, version_id)
+IDX|scene_version|scene_version_version_idx|CREATE INDEX scene_version_version_idx ON public.scene_version USING btree (version_id, sort_order)
+IDX|scene|scene_pkey|CREATE UNIQUE INDEX scene_pkey ON public.scene USING btree (id)
+IDX|schedule_item_department|schedule_item_department_pkey|CREATE UNIQUE INDEX schedule_item_department_pkey ON public.schedule_item_department USING btree (item_id, dept_id)
+IDX|schedule_item_group|schedule_item_group_group_idx|CREATE INDEX schedule_item_group_group_idx ON public.schedule_item_group USING btree (group_id)
+IDX|schedule_item_group|schedule_item_group_pkey|CREATE UNIQUE INDEX schedule_item_group_pkey ON public.schedule_item_group USING btree (item_id, group_id)
+IDX|schedule_item_participant|schedule_item_participant_item_idx|CREATE INDEX schedule_item_participant_item_idx ON public.schedule_item_participant USING btree (item_id)
+IDX|schedule_item_participant|schedule_item_participant_pkey|CREATE UNIQUE INDEX schedule_item_participant_pkey ON public.schedule_item_participant USING btree (item_id, user_id)
+IDX|script_character|script_character_pkey|CREATE UNIQUE INDEX script_character_pkey ON public.script_character USING btree (script_id, character_id)
+IDX|script_version|script_version_pkey|CREATE UNIQUE INDEX script_version_pkey ON public.script_version USING btree (snapshot_id, version_id)
+IDX|script_version|script_version_version_block_uidx|CREATE UNIQUE INDEX script_version_version_block_uidx ON public.script_version USING btree (version_id, block_id)
+IDX|script_version|script_version_version_idx|CREATE INDEX script_version_version_idx ON public.script_version USING btree (version_id, sort_key)
+IDX|script_view|script_view_id_production_key|CREATE UNIQUE INDEX script_view_id_production_key ON public.script_view USING btree (id, production_id)
+IDX|script_view|script_view_pkey|CREATE UNIQUE INDEX script_view_pkey ON public.script_view USING btree (id)
+IDX|script_view|script_view_production_idx|CREATE INDEX script_view_production_idx ON public.script_view USING btree (production_id, sort_order)
+IDX|script|script_pkey|CREATE UNIQUE INDEX script_pkey ON public.script USING btree (id)
+IDX|script|script_production_sort_idx|CREATE INDEX script_production_sort_idx ON public.script USING btree (production_id, sort_key)
+IDX|tag_group|tag_group_pkey|CREATE UNIQUE INDEX tag_group_pkey ON public.tag_group USING btree (id)
+IDX|tag_option|tag_option_pkey|CREATE UNIQUE INDEX tag_option_pkey ON public.tag_option USING btree (id)
+IDX|task_assignee|task_assignee_pkey|CREATE UNIQUE INDEX task_assignee_pkey ON public.task_assignee USING btree (task_id, user_id)
+IDX|task_dependency|task_dependency_blocked_idx|CREATE INDEX task_dependency_blocked_idx ON public.task_dependency USING btree (blocked_id)
+IDX|task_dependency|task_dependency_pkey|CREATE UNIQUE INDEX task_dependency_pkey ON public.task_dependency USING btree (blocking_id, blocked_id)
+IDX|task_phase|task_phase_phase_idx|CREATE INDEX task_phase_phase_idx ON public.task_phase USING btree (phase_id)
+IDX|task_phase|task_phase_pkey|CREATE UNIQUE INDEX task_phase_pkey ON public.task_phase USING btree (task_id, phase_id)
+IDX|task_schedule_item|task_schedule_item_pkey|CREATE UNIQUE INDEX task_schedule_item_pkey ON public.task_schedule_item USING btree (task_id, item_id)
+IDX|task_schedule_item|task_schedule_item_task_idx|CREATE INDEX task_schedule_item_task_idx ON public.task_schedule_item USING btree (task_id)
+IDX|task|task_event_idx|CREATE INDEX task_event_idx ON public.task USING btree (event_id)
+IDX|task|task_group_idx|CREATE INDEX task_group_idx ON public.task USING btree (group_id) WHERE (group_id IS NOT NULL)
+IDX|task|task_orphaned_idx|CREATE INDEX task_orphaned_idx ON public.task USING btree (production_id) WHERE (orphaned_at IS NOT NULL)
+IDX|task|task_pkey|CREATE UNIQUE INDEX task_pkey ON public.task USING btree (id)
+IDX|task|task_production_idx|CREATE INDEX task_production_idx ON public.task USING btree (production_id)
+IDX|user_notification|user_notification_approval_idx|CREATE INDEX user_notification_approval_idx ON public.user_notification USING btree (approval_request_id) WHERE (approval_request_id IS NOT NULL)
+IDX|user_notification|user_notification_entity_idx|CREATE INDEX user_notification_entity_idx ON public.user_notification USING btree (entity_type, entity_id)
+IDX|user_notification|user_notification_pkey|CREATE UNIQUE INDEX user_notification_pkey ON public.user_notification USING btree (id)
+IDX|user_notification|user_notification_user_created_idx|CREATE INDEX user_notification_user_created_idx ON public.user_notification USING btree (user_id, created_at DESC)
+IDX|user_notification|user_notification_user_pending_idx|CREATE INDEX user_notification_user_pending_idx ON public.user_notification USING btree (user_id, created_at DESC) WHERE ((action_required = true) AND (acted_at IS NULL))
+IDX|user_notification|user_notification_user_unread_idx|CREATE INDEX user_notification_user_unread_idx ON public.user_notification USING btree (user_id, read_at) WHERE (read_at IS NULL)
+IDX|user_plan|user_plan_pkey|CREATE UNIQUE INDEX user_plan_pkey ON public.user_plan USING btree (user_id)
+IDX|user_platform_identity|upi_primary_email_uniq|CREATE UNIQUE INDEX upi_primary_email_uniq ON public.user_platform_identity USING btree (user_id) WHERE ((platform_id = 'email'::text) AND (is_primary = true))
+IDX|user_platform_identity|upi_user_id_idx|CREATE INDEX upi_user_id_idx ON public.user_platform_identity USING btree (user_id)
+IDX|user_platform_identity|user_platform_identity_pkey|CREATE UNIQUE INDEX user_platform_identity_pkey ON public.user_platform_identity USING btree (id)
+IDX|user_platform_identity|user_platform_identity_platform_id_platform_user_id_key|CREATE UNIQUE INDEX user_platform_identity_platform_id_platform_user_id_key ON public.user_platform_identity USING btree (platform_id, platform_user_id)
+IDX|user_profile|user_profile_pkey|CREATE UNIQUE INDEX user_profile_pkey ON public.user_profile USING btree (user_id)
+IDX|version|version_pkey|CREATE UNIQUE INDEX version_pkey ON public.version USING btree (id)
+IDX|version|version_production_idx|CREATE INDEX version_production_idx ON public.version USING btree (production_id, created_at)
+IDX|wiki_alias_backup_node_tree|wiki_alias_backup_node_tree_pkey|CREATE UNIQUE INDEX wiki_alias_backup_node_tree_pkey ON public.wiki_alias_backup_node_tree USING btree (id)
+IDX|wiki_body_backup_dialect_v2|wiki_body_backup_dialect_v2_pkey|CREATE UNIQUE INDEX wiki_body_backup_dialect_v2_pkey ON public.wiki_body_backup_dialect_v2 USING btree (wiki_id)
+IDX|wiki_collab_outbox|wiki_collab_outbox_created_idx|CREATE INDEX wiki_collab_outbox_created_idx ON public.wiki_collab_outbox USING btree (created_at)
+IDX|wiki_collab_outbox|wiki_collab_outbox_pkey|CREATE UNIQUE INDEX wiki_collab_outbox_pkey ON public.wiki_collab_outbox USING btree (id)
+IDX|wiki_comment|wiki_comment_pkey|CREATE UNIQUE INDEX wiki_comment_pkey ON public.wiki_comment USING btree (id)
+IDX|wiki_comment|wiki_comment_wiki_idx|CREATE INDEX wiki_comment_wiki_idx ON public.wiki_comment USING btree (wiki_id, created_at)
+IDX|wiki_entity_link|wiki_entity_link_entity_idx|CREATE INDEX wiki_entity_link_entity_idx ON public.wiki_entity_link USING btree (production_id, entity_type, entity_id)
+IDX|wiki_entity_link|wiki_entity_link_pkey|CREATE UNIQUE INDEX wiki_entity_link_pkey ON public.wiki_entity_link USING btree (wiki_id, entity_type, entity_id, origin)
+IDX|wiki_proposal|wiki_proposal_pkey|CREATE UNIQUE INDEX wiki_proposal_pkey ON public.wiki_proposal USING btree (id)
+IDX|wiki_proposal|wiki_proposal_production_tool_call_uniq|CREATE UNIQUE INDEX wiki_proposal_production_tool_call_uniq ON public.wiki_proposal USING btree (production_id, tool_call_id)
+IDX|wiki_revision|wiki_revision_pkey|CREATE UNIQUE INDEX wiki_revision_pkey ON public.wiki_revision USING btree (id)
+IDX|wiki_revision|wiki_revision_wiki_idx|CREATE INDEX wiki_revision_wiki_idx ON public.wiki_revision USING btree (wiki_id, created_at)
+IDX|wiki_tag|wiki_tag_pkey|CREATE UNIQUE INDEX wiki_tag_pkey ON public.wiki_tag USING btree (wiki_id, tag)
+IDX|wiki_tag|wiki_tag_tag_idx|CREATE INDEX wiki_tag_tag_idx ON public.wiki_tag USING btree (tag)
+IDX|wiki|wiki_body_trgm_idx|CREATE INDEX wiki_body_trgm_idx ON public.wiki USING gin (body gin_trgm_ops)
+IDX|wiki|wiki_mentions_idx|CREATE INDEX wiki_mentions_idx ON public.wiki USING gin (mentions)
+IDX|wiki|wiki_pkey|CREATE UNIQUE INDEX wiki_pkey ON public.wiki USING btree (id)
+IDX|wiki|wiki_production_idx|CREATE INDEX wiki_production_idx ON public.wiki USING btree (production_id)
+IDX|wiki|wiki_title_trgm_idx|CREATE INDEX wiki_title_trgm_idx ON public.wiki USING gin (title gin_trgm_ops)
+SEQ|agent_memory_recall_log_id_seq
+SEQ|ai_usage_id_seq
+SEQ|plan_code_redemption_id_seq
+SEQ|production_member_status_audit_id_seq
+SEQ|production_policy_audit_id_seq
+SEQ|registration_code_redemption_id_seq
+SEQ|wiki_collab_outbox_id_seq

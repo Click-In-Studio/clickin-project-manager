@@ -16,8 +16,8 @@ import { THEATRE_TEMPLATE } from "@/lib/production/templates/theatre";
  */
 
 const SEED_FILES = [
-  "db/migrate-role-template-seed.sql",
-  "db/migrate-scene-field-gates.sql",
+  "db/legacy/migrate-role-template-seed.sql",
+  "db/legacy/migrate-scene-field-gates.sql",
 ];
 
 /** 抽出 grant_template 的 (role, key) 对，覆盖 VALUES 与 CROSS JOIN 两种写法。 */
@@ -74,7 +74,7 @@ describe("项目模版收下了历史 seed 的全部模板行", () => {
   });
 
   it("seed 文件解析出的对不为空（防止正则失配导致空断言通过）", () => {
-    const pairs = extractTemplatePairs(readFileSync("db/migrate-role-template-seed.sql", "utf8"));
+    const pairs = extractTemplatePairs(readFileSync("db/legacy/migrate-role-template-seed.sql", "utf8"));
     expect(pairs.size).toBe(69);
   });
 });

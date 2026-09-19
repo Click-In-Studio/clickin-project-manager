@@ -1,3 +1,14 @@
+-- migrate:up
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Baseline（#561）：dbmate 接管时 db/schema.sql 的完整内容，对应线上 2026-09-19
+-- 对账（db/legacy/reconcile-prod-2026-09.sql）之后的状态。
+--
+-- 已有库（线上、本地已建库）不要跑它——在 schema_migrations 里手动记一行即可：
+--   INSERT INTO schema_migrations (version) VALUES ('20260919000000');
+-- 新库直接 `npm run db -- up`，本支就是第一支。
+-- 本文件与 db/schema.sql 从此各自演进：schema.sql 持续更新，本文件冻结。
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- script_editor — canonical schema（手写、可读、幂等）
 --
 -- 与 db/migrations/ 的关系（#561）：
@@ -2580,3 +2591,6 @@ CREATE INDEX IF NOT EXISTS bug_report_user_time_idx ON bug_report (user_id, crea
 
 COMMENT ON TABLE bug_report IS
   '「报告问题」日志（#538）：产品内 / 手册页提交的问题与建议，开发定期查看后上 issue 并回填 issue_url';
+
+-- migrate:down
+DO $$ BEGIN RAISE EXCEPTION 'baseline 不可回滚：这是接管前的全量 schema，回退只能靠备份'; END $$;

@@ -122,7 +122,7 @@ describe("owner 可见性", () => {
 describe("add-owner-member-backfill.sql", () => {
   it("补上缺失的 owner 成员行，且重复执行幂等", async () => {
     const sql = readFileSync(
-      path.join(process.cwd(), "db", "add-owner-member-backfill.sql"), "utf8",
+      path.join(process.cwd(), "db", "legacy", "add-owner-member-backfill.sql"), "utf8",
     );
     const prodId = `test-backfill-${shortId()}`;
     const client = await getPool().connect();

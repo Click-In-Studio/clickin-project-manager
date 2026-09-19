@@ -315,7 +315,7 @@ describe("invariance verification", () => {
   it.skipIf(!snapshot)("幂等重放：再跑一遍迁移 SQL，node/node_mount 行数不变", async () => {
     const before = await getPool().query(
       `SELECT (SELECT COUNT(*) FROM node) AS n, (SELECT COUNT(*) FROM node_mount) AS m`);
-    const sql = readFileSync("db/migrate-node-tree.sql", "utf8");
+    const sql = readFileSync("db/legacy/migrate-node-tree.sql", "utf8");
     await getPool().query(sql);
     const after = await getPool().query(
       `SELECT (SELECT COUNT(*) FROM node) AS n, (SELECT COUNT(*) FROM node_mount) AS m`);
