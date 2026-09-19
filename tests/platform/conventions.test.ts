@@ -7,11 +7,14 @@
  *
  * Invariants:
  *  1. No runtime DDL in application code  (static file scan)
- *  2. Schema fingerprint matches seed     (schema drift detection)
+ *
+ * 曾经的 2「schema 指纹 vs seed-schema.json」已被 `npm run db:check` 取代（#561）：
+ * CI 里空库跑 migrations、空库跑 schema.sql、提交的 db/schema-fingerprint.txt
+ * 三方逐行比，覆盖列 / 约束 / 索引 / 枚举 / 函数 / 触发器，不再只比列。
  *
  * 曾经的 2「运行时 migration 幂等性」已随最后一支运行时 migration
  * (ensureScriptMarkerMigration, commit 2110bb1) 一同退役——现在一条都没有，
- * 存量数据一律走 db/migrate-*.sql。真要新增，先补回这一节（见 DEV_GUIDE §11.5 ②）。
+ * 存量数据一律走 db/migrations/。真要新增，先补回这一节（见 DEV_GUIDE §11.5 ②）。
  */
 import { describe, it, expect } from "vitest";
 import { readdir, readFile } from "fs/promises";
@@ -115,89 +118,6 @@ describe("no runtime DDL in application source", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. Schema fingerprint — detect seed vs schema drift
-// ─────────────────────────────────────────────────────────────────────────────
-
-type ColumnEntry = { column: string; type: string; nullable: boolean; default?: string };
-type SchemaFingerprint = Record<string, ColumnEntry[]>;
-
-describe("schema fingerprint matches committed seed-schema.json", () => {
-  it("current DB structure matches db/seed-schema.json (re-run npm run seed:schema if this fails)", async () => {
-    // Read committed fingerprint
-    const committedRaw = await readFile(path.join(ROOT, "db/seed-schema.json"), "utf8");
-    const committed: SchemaFingerprint = JSON.parse(committedRaw);
-
-    // Query current DB structure
-    const res = await getPool().query<{
-      table_name: string; column_name: string;
-      data_type: string; is_nullable: string; column_default: string | null;
-    }>(`
-      SELECT table_name, column_name, data_type, is_nullable, column_default
-      FROM information_schema.columns
-      WHERE table_schema = current_schema()
-        AND table_name NOT LIKE 'test-%'
-      ORDER BY table_name, ordinal_position
-    `);
-
-    const actual: SchemaFingerprint = {};
-    for (const r of res.rows) {
-      if (!actual[r.table_name]) actual[r.table_name] = [];
-      const entry: ColumnEntry = {
-        column: r.column_name, type: r.data_type, nullable: r.is_nullable === "YES",
-      };
-      if (r.column_default) entry.default = r.column_default.substring(0, 80);
-      actual[r.table_name].push(entry);
-    }
-
-    const diffs: string[] = [];
-
-    // Tables in committed but not in actual (dropped)
-    for (const table of Object.keys(committed)) {
-      if (!actual[table]) {
-        diffs.push(`TABLE DROPPED: ${table}`);
-      }
-    }
-    // Tables in actual but not in committed (added — need seed re-export)
-    for (const table of Object.keys(actual)) {
-      if (!committed[table]) {
-        diffs.push(`TABLE ADDED (run: npm run seed:schema): ${table}`);
-      }
-    }
-
-    // Column-level diff for shared tables
-    for (const table of Object.keys(committed)) {
-      if (!actual[table]) continue;
-      const committedCols = new Map(committed[table].map((c) => [c.column, c]));
-      const actualCols = new Map(actual[table].map((c) => [c.column, c]));
-
-      for (const [col, info] of committedCols) {
-        if (!actualCols.has(col)) {
-          diffs.push(`${table}.${col}: COLUMN DROPPED`);
-        } else {
-          const a = actualCols.get(col)!;
-          if (a.type !== info.type)
-            diffs.push(`${table}.${col}: type changed ${info.type} → ${a.type}`);
-          if (a.nullable !== info.nullable)
-            diffs.push(`${table}.${col}: nullable changed ${info.nullable} → ${a.nullable}`);
-        }
-      }
-      for (const col of actualCols.keys()) {
-        if (!committedCols.has(col)) {
-          diffs.push(`${table}.${col}: COLUMN ADDED (run: npm run seed:schema)`);
-        }
-      }
-    }
-
-    if (diffs.length > 0) {
-      throw new Error(
-        `Schema has drifted from db/seed-schema.json.\n` +
-        `Run "npm run seed:schema" and commit db/seed-schema.json, ` +
-        `then re-export the seed with "npm run seed:ci-export".\n\n` +
-        diffs.map((d) => `  ${d}`).join("\n"),
-      );
-    }
-  });
-});
 
 describe("openclaw-workspace files are fully tracked (gitignore guard)", () => {
   it("every on-disk workspace file is in git — none silently ignored", async () => {

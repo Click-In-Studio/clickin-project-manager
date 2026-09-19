@@ -12,7 +12,7 @@
 | run 服务 | `lib/agent/runtime/service.ts` | 一轮 run 的骨架：注入链 → harness → 事件 → 收尾 |
 | 独立进程 | `agent-runner/index.ts` | loopback HTTP：`POST /runs` `/runs/steer` `/runs/abort`、`GET /health`；心跳、孤儿接管、SIGTERM 排水 |
 | next 侧 | `lib/agent/runtime/{client,dispatch}.ts` + `app/api/agent/*` 路由 | 发起/插话/中止交给 runner；SSE 从 `agent_event` 直出；行协议在 `lib/agent/chat/` |
-| 持久化 | `db/add-agent-runtime.sql`（六表）+ `db/add-agent-mutation.sql` + `db/add-agent-schedule.sql` | 会话/transcript/run/审批/提问/事件 + 写审计账本 + 定时任务 |
+| 持久化 | `db/legacy/add-agent-runtime.sql`（六表）+ `db/legacy/add-agent-mutation.sql` + `db/legacy/add-agent-schedule.sql`（历史文件，现均在 baseline 里） | 会话/transcript/run/审批/提问/事件 + 写审计账本 + 定时任务 |
 
 ## 环境变量
 
@@ -79,7 +79,7 @@ curl -sN --noproxy '*' -H "Cookie: $COOKIE" -H 'Content-Type: application/json' 
 CD（`.github/workflows/deploy.yml`）已经把 runner 纳入发布，**代码侧不需要人工动作**：
 
 1. `npm run build:runner`：esbuild 把 `agent-runner/index.ts` + `lib/` + `vendor/` 打成单文件 `agent-runner.js` 放进 `.next/standalone/`，随 bundle 一起发；node_modules 用 standalone 追踪出来的那份（CD 会逐个核对 runner 的外部依赖都在，缺一个直接失败）。
-2. DDL：`db/add-agent-runtime.sql` 由 CD 自动执行（记账 `shared/db-applied.txt`）。
+2. DDL：运行时五表已在 baseline 里（历史文件 `db/legacy/add-agent-runtime.sql`）；以后的 schema 变更走 `db/migrations/`，CD 以 dbmate 自动执行（记账在库里的 `schema_migrations`）。
 3. pm2 进程定义收在仓库 [`deploy/ecosystem.config.js`](../deploy/ecosystem.config.js)（`agent-runner` + `production-manager`），每次发布覆盖到 `shared/ecosystem.config.js` 再 `pm2 reload … --update-env`。**注意 reload 只更新 env，不更新 cwd/exec_mode 这类进程定义**——改了那些字段要在服务器上 `pm2 delete <app> && pm2 start ecosystem.config.js --only <app>` 一次；所以路径类配置一律走 env（如 `AGENT_WORKSPACE_DIR`）。runner 用 **cluster 模式单实例**：新进程 `ready` 后才向旧进程发 SIGTERM（fork 模式的 reload 等于 restart，排水期间没人接请求）；`kill_timeout` ≥ 排水上限。
 
 **唯一的人工动作：服务器 `shared/.env.local` 有 `AGENT_RUNNER_URL=http://127.0.0.1:3102`**（已配；CD reload 带 `--update-env`）。
@@ -100,7 +100,7 @@ OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，
 
 ## AI 写操作的 diff 审计（agent_mutation）
 
-每一次由 AI 工具落地的写都记一行 `agent_mutation`（`db/add-agent-mutation.sql`，`lib/agent/runtime/mutation-audit.ts`）：
+每一次由 AI 工具落地的写都记一行 `agent_mutation`（`lib/agent/runtime/mutation-audit.ts`）：
 谁的哪次 run、哪个工具、动了哪个域的哪个实体、写前/写后快照、字段级 `changes`。聊天里的确认卡审的是**意图**（args），
 这里记的是**结果**——它也是无人值守写（定时任务）的合法性来源：先做后审，审得了才能先做。
 
@@ -115,7 +115,7 @@ OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，
 
 ## 定时任务（agent_schedule）
 
-不是真 cron。一行 `agent_schedule`（`db/add-agent-schedule.sql`，`lib/agent/runtime/schedules.ts`）= 谁在哪个制作（可空 = 个人）
+不是真 cron。一行 `agent_schedule`（`lib/agent/runtime/schedules.ts`）= 谁在哪个制作（可空 = 个人）
 以什么时间表跑什么指令。**执行者节拍**（runner 每 60s `tickSchedules`，in-process 模式由 `instrumentation.ts` 节拍；
 `AGENT_SCHEDULE_TICK_MS`）用租约式原子 UPDATE 认领到期行，到点**以创建者身份开一个新会话**跑一次 run（标题 `⏰ <名> · <时间>`，
 `agent_session.schedule_id` 挂回任务），结果经站内通知（kind `agent_schedule`，飞书 DM 随偏好）**只投给创建者**，

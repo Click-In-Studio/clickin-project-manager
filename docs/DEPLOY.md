@@ -23,13 +23,12 @@ sudo apt install -y postgresql postgresql-contrib
 ### 2. 数据库初始化
 
 ```bash
-# 主库
-sudo -u postgres psql <<'EOF'
-CREATE USER script_editor WITH PASSWORD 'your-password';
-CREATE DATABASE script_editor OWNER script_editor;
-EOF
-
-sudo -u postgres psql -d script_editor -f /var/www/production-manager/db/schema.sql
+# 主库：角色 + 默认权限（幂等），再由 dbmate 从 baseline 建到最新。
+# 表 owner 必须是 postgres，应用用户 script_editor 只拿 DML（见 DEV_GUIDE §6）。
+cd /var/www/production-manager/current
+sudo -u postgres psql -v app_password='your-password' -f db/bootstrap-roles.sql
+sudo -u postgres ./bin/dbmate --url 'postgres:///script_editor?host=/var/run/postgresql&sslmode=disable' \
+  --migrations-dir db/migrations --no-dump-schema up
 
 # Agent Bot 数据库
 sudo -u postgres psql -f /var/www/production-manager/db/setup-agent-db.sql
@@ -232,7 +231,7 @@ push 到 `main` 后 GitHub Actions 自动完成：
 
 1. `npm ci` + `npm run build`（standalone 模式）
 2. 打包产物，上传到服务器 `releases/<run>-<sha>/`
-3. 按 git commit 顺序执行新增的 `db/add-*.sql`（已执行记录在 `shared/db-applied.txt`）
+3. `dbmate up` 应用 `db/migrations/` 里所有 pending（记账在库里的 `schema_migrations`；有 pending 先 `pg_dump` 到 `shared/backups/`），随后核对线上结构指纹 == `db/schema-fingerprint.txt`，不等即部署失败
 4. 切换 `current` symlink → 新 release
 5. `pm2 reload` 热重启
 6. 清理旧 releases（保留最新 5 个）
@@ -249,15 +248,25 @@ ssh <server> "bash /var/www/production-manager/shared/scripts/rollback.sh 2"
 
 脚本将 `current` symlink 切到上一个（或第 N 个）release，并热重启 PM2。
 
-## 数据库迁移
-
-CI 自动处理。如需手动执行（紧急修复）：
+切代码不切库。这是安全的，因为 migration 遵守 expand / contract（DEV_GUIDE §6）：删列 / 删表永远晚于停用它的代码一个版本，所以上一版代码在当前 schema 上照常跑。真要回退 schema：
 
 ```bash
-ssh <server> "sudo -u postgres psql -d script_editor -f /tmp/fix.sql"
-# 手动追加到 manifest，防止 CI 重复执行：
-ssh <server> "echo 'add-xxx.sql' >> /var/www/production-manager/shared/db-applied.txt"
+# 只加不删的那支（写了真 migrate:down）：
+ssh <server> "cd /var/www/production-manager/current && sudo -u postgres ./bin/dbmate --url 'postgres:///script_editor?host=/var/run/postgresql&sslmode=disable' --migrations-dir db/migrations --no-dump-schema down"
+# 破坏性 / 数据迁移：用发布前 CD 自动做的备份
+ls -lt /var/www/production-manager/shared/backups/
+sudo -u postgres pg_restore -d script_editor --clean --if-exists <备份文件>
 ```
+
+## 数据库迁移
+
+CD 自动处理（dbmate）。查线上状态：
+
+```bash
+ssh <server> "cd /var/www/production-manager/current && sudo -u postgres ./bin/dbmate --url 'postgres:///script_editor?host=/var/run/postgresql&sslmode=disable' --migrations-dir db/migrations --no-dump-schema status"
+```
+
+紧急修复也走 migration：`npm run db -- new hotfix_xxx` → 合并 → CD 执行。不要在服务器上手跑 SQL 改结构——线上指纹校验会在下一次发布把手改的差异报成红。
 
 ---
 

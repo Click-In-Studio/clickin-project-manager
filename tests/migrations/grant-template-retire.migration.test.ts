@@ -96,7 +96,7 @@ describe("integrity verification", () => {
       expect(before).toBeGreaterThan(0);
 
       // 幂等：DROP TABLE IF EXISTS 可重放，且重放不碰实例行
-      await getPool().query(readFileSync("db/migrate-retire-grant-template.sql", "utf8"));
+      await getPool().query(readFileSync("db/legacy/migrate-retire-grant-template.sql", "utf8"));
       expect(await count()).toBe(before);
     } finally {
       await cleanupProduction(prodId).catch(() => {});

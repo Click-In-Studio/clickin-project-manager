@@ -1637,7 +1637,7 @@ describe("escalateExpiredApprovals", () => {
 describe("add-approval-config-backfill.sql", () => {
   /** 直接跑仓库里的那份 SQL——测的是要部署的文件本身，不是它的副本。 */
   async function runBackfill() {
-    const sql = await readFile(path.join(process.cwd(), "db/add-approval-config-backfill.sql"), "utf8");
+    const sql = await readFile(path.join(process.cwd(), "db/legacy/add-approval-config-backfill.sql"), "utf8");
     await getPool().query(sql);
   }
 

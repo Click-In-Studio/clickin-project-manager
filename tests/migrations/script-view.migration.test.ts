@@ -23,7 +23,7 @@ try {
   snapshot = null;
 }
 
-const MIGRATION_SQL = readFileSync("db/migrate-script-view.sql", "utf8");
+const MIGRATION_SQL = readFileSync("db/legacy/migrate-script-view.sql", "utf8");
 
 // ── 1. Schema verification ────────────────────────────────────────────────────
 
