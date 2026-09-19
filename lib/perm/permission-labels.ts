@@ -1,75 +1,95 @@
-type Permission = string;
+/**
+ * 权限键 → 人话（#541）。
+ *
+ * 面向成员的三个消费点（激活弹窗 / 403 页 / 申请弹窗）统一走 permissionLabel()。
+ * 键是规则串 `node:<type>/<id>[/<sub>]@<verb>`，标签也按规则**拼**：
+ * `动词 + 资源名 + 子面`（「查看 + 章节/段落 + 梗概」）。三张小词表
+ * （GROUP_LABELS / SUB_LABELS / VERB_LABELS）就是全部真相，新加一枚键只要
+ * 三段都已登记，不用再来这里补一行。只有拼出来不像人话的键才进 PERMISSION_LABELS
+ * 手写表（「关注事件」而不是「创建事件关注」）。
+ *
+ * 棘轮 tests/perm/permission-labels.test.ts：模板与激活面目录里的每枚键必须
+ * 三段齐全（unlabelledParts 为空），缺一段就红。
+ */
 
-// 批A 起同时容纳原子键与树节点键（node:<type>/<id>[/<sub>]@<verb>）
-export const PERMISSION_LABELS: Partial<Record<Permission, string>> & Record<string, string> = {
-  // ── 树节点键（cue 域，批A）──
+/** 手写覆盖：拼接读起来别扭的键才登记。同风格：动宾短语。 */
+export const PERMISSION_LABELS: Record<string, string> = {
+  // ── 制作人通配五行（lib/production/templates/shared.ts PRODUCER_KEYS）──
+  "node:*/*@*": "全部资源的全部操作",
+  "node:*/*/assignees@*": "全部资源的指派",
+  "node:*/*/grants@*": "全部资源的授权管理",
+  "node:*/*/imports@create": "全部资源的导入",
+  "node:*/*/publication@*": "全部资源的发布与撤回",
+  // ── 剧本 ──
+  "node:script/*/blocks@view": "查看剧本",
+  "node:script/*/blocks@edit": "编辑剧本",
+  "node:script/*/blocks@create": "插入剧本文本块",
+  "node:script/*/comments@create": "评论剧本",
+  "node:script/*/imports@create": "导入剧本",
+  "node:script/*/mounts@create": "挂载资产到剧本",
+  "node:dramaturgy/*/imports@create": "导入构作",
+  // ── 章节/段落 / 角色 ──
+  "node:scene/*/mounts@create": "挂载资产到章节/段落",
+  "node:character/*/members@view": "查看角色扮演者",
+  "node:character/*/role_type@view": "查看角色类型",
+  // ── Cue ──
   "node:cue_list/*/meta@view": "查看Cue表目录",
   "node:cue_list/*/cues@view": "查看Cue表内容",
   "node:cue_list/*/cues/comments@create": "评论Cue",
-  "node:cue_list/*@create": "创建Cue表",
-  // ── 树节点键（event/task 域，批B）──
+  // ── 事件 / 任务 / 报告 ──
   "node:event/*/meta@view": "查看事件目录",
-  "node:event/*/details@view": "查看事件详情",
   "node:event/*/followers@create": "关注事件",
-  "node:event/*@create": "创建事件",
   "node:event/*/chat@create": "事件群聊",
   "node:event/*/call_sheet@view": "查看他人Call Sheet",
+  "node:event/*/publication@view": "查看未发布的事件",
+  "node:event/*/publication@create": "发布事件",
+  "node:event/*/publication@delete": "撤回已发布的事件",
   "node:task/*@view": "查看全部任务",
-  "node:task/*@delete": "删除任务",
-  // ── 树节点键（AI 用量，#383）──
-  "node:ai/*/usage@view": "查看项目AI用量",
-  "node:ai/*/usage/members@view": "查看成员AI用量明细",
-  // ── 树节点键（report 域，批C）──
-  "node:event/*/reports@create": "创建报告",
   "node:report/*/replies@create": "回复报告",
   "node:report/*/replies@edit": "编辑他人报告评论",
   "node:report/*/replies@delete": "删除他人报告评论",
-  // 项目管理
-  // 通讯录
-  // 成员管理
-  // 职位管理
-  // 部门管理
-  // 剧本
-  // 章节/段落
-  // 角色
-  // 剧本标签
-  // Cue表
-  // 构作
-  // 事件（per-event 写操作已迁移至 production_member_grant，原子权限只保留生产级和管理员绕过）
-  // Task（技术需求，per-task 写操作已迁移至 production_member_grant）
-  // 报告（per-report 写操作已迁移至 production_member_grant，保留生产级和管理员绕过）
-  // 数字资产
-  // 组织
-  // 里程碑
-  // 公告
+  // ── 数字资产 / 财务 ──
+  "node:asset/*@create": "上传数字资产",
+  "node:asset/*/file@create": "上传数字资产新版本",
+  "node:asset/*/shares@create": "分享数字资产",
+  "node:finance/*/expenses@create": "登记支出",
+  // ── 项目 / 部门 ──
+  "node:production/*/mounts@view": "查看项目挂载的资产",
+  "node:dept/*/notes@create": "添加部门备注",
+  // ── AI 用量（#383）──
+  "node:ai/*/usage@view": "查看项目AI用量",
+  "node:ai/*/usage/members@view": "查看成员AI用量明细",
 };
 
+/** 面向成员的资源名（弹窗分组标题、拼接标签的主语）。管理后台选择器另有带括注消歧的 TYPE_LABELS。 */
 export const GROUP_LABELS: Record<string, string> = {
+  "*": "全部资源",
   ai: "AI 用量",
-  production: "项目管理",
-  contacts: "通讯录",
-  members: "成员管理",
-  role: "职位管理",
-  dept: "部门管理",
-  script: "剧本",
-  rehearsal_mark: "排练记号",
-  scene: "章节/段落",
+  announcement: "公告",
+  asset: "数字资产",
   character: "角色",
-  tag_group: "剧本标签组",
-  tag_option: "剧本标签",
   cue_list: "Cue表",
-  cue: "Cue",
+  dept: "部门",
   dramaturgy: "构作",
   dramaturgy_view: "构作视图",
   event: "事件",
-  task: "任务",
-  report: "报告",
-  asset: "数字资产",
-  org: "组织",
   finance: "财务",
   material: "物料台账",
+  member: "成员",
   milestone: "里程碑",
-  announcement: "公告",
+  note: "备注",
+  phase: "阶段",
+  producer: "制作人域",
+  production: "项目",
+  report: "报告",
+  role: "职位",
+  scene: "章节/段落",
+  script: "剧本",
+  script_view: "剧本视图",
+  tag_group: "剧本标签组",
+  task: "任务",
+  user_group: "用户组",
+  wiki: "文档",
 };
 
 /** 键的分组前缀：原子键取 ':' 前段，节点键取资源类型段 */
@@ -78,19 +98,78 @@ export function permissionGroupPrefix(key: string): string {
   return key.split(":")[0] ?? key;
 }
 
+/** 分组标题：查不到资源名时给原样前缀（不会再是裸键）。 */
+export function permissionGroupLabel(key: string): string {
+  const prefix = permissionGroupPrefix(key);
+  return GROUP_LABELS[prefix] ?? prefix;
+}
+
 /** Deduplicated category labels for a list of permission keys */
 export function permissionCategories(perms: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   for (const p of perms) {
-    const prefix = permissionGroupPrefix(p);
-    const label = GROUP_LABELS[prefix] ?? prefix;
+    const label = permissionGroupLabel(p);
     if (!seen.has(label)) {
       seen.add(label);
       result.push(label);
     }
   }
   return result;
+}
+
+// 比 grant-template 的 parseNodeKey 宽：type / verb 位允许通配（区间键语法），
+// 动词不限闭集——这里只做展示，不做判定，遇到未知动词照样拼出人话。
+const LABEL_KEY_RE = /^node:([a-z_*]+)\/([^/@]+)(?:\/([^@]+))?@([a-z_*]+)$/;
+
+type LabelParts = { type: string; id: string; sub: string; verb: string };
+
+function splitLabelKey(key: string): LabelParts | null {
+  const m = LABEL_KEY_RE.exec(key);
+  if (!m) return null;
+  return { type: m[1], id: m[2], sub: m[3] ?? "*", verb: m[4] };
+}
+
+/**
+ * 把权限键翻成人话。手写表 → 三段拼接 → 兜底。
+ *
+ * 拼接规则：
+ *   - `meta@view` 是资源的门票（三态模型），说成「查看 X」，不带「基本信息」；
+ *   - 主面（sub=*）不带子面：「编辑任务」；
+ *   - 实例级 id 说成「此」：「编辑此文档」；
+ *   - 通配 verb：「X（全部操作）」。
+ * 兜底：某段词表里没有时，那一段原样嵌进人话（「查看剧本（foo）」），
+ * 决不裸吐整枚键；只有连键形都不对（原子键）才原样返回。
+ */
+export function permissionLabel(key: string): string {
+  const hand = PERMISSION_LABELS[key];
+  if (hand) return hand;
+  const p = splitLabelKey(key);
+  if (!p) return key;
+  const typeText = GROUP_LABELS[p.type] ?? p.type;
+  const subject = `${p.id === "*" ? "" : "此"}${typeText}`;
+  const subText = p.sub === "*" || (p.sub === "meta" && p.verb === "view")
+    ? ""
+    : (SUB_LABELS[p.sub] ?? `（${p.sub}）`);
+  if (p.verb === "*") return `${subject}${subText}（全部操作）`;
+  const verbText = VERB_LABELS[p.verb] ?? p.verb;
+  return `${verbText}${subject}${subText}`;
+}
+
+/**
+ * 棘轮用：这枚键拼人话时缺哪些词表条目。手写表命中 → 空；
+ * 否则逐段查 GROUP_LABELS / SUB_LABELS / VERB_LABELS，返回缺的条目名
+ * （如 "SUB_LABELS.categories"）。原子键（非 node 键形）也算缺：它没有任何人话来源。
+ */
+export function unlabelledParts(key: string): string[] {
+  if (PERMISSION_LABELS[key]) return [];
+  const p = splitLabelKey(key);
+  if (!p) return [`PERMISSION_LABELS.${key}`];
+  const missing: string[] = [];
+  if (!GROUP_LABELS[p.type]) missing.push(`GROUP_LABELS.${p.type}`);
+  if (p.sub !== "*" && !SUB_LABELS[p.sub]) missing.push(`SUB_LABELS.${p.sub}`);
+  if (!VERB_LABELS[p.verb]) missing.push(`VERB_LABELS.${p.verb}`);
+  return missing;
 }
 
 // ─── 权限键选择器展示层（管理后台 v3）：type/sub/verb 中文翻译 ───────────────
@@ -177,6 +256,7 @@ export const SUB_LABELS: Record<string, string> = {
   "meta/description": "简介",
   "meta/type": "类型",
   "meta/language": "语言",
+  "meta/expected_duration": "预计时长",
   usage: "AI 用量",
   "usage/members": "AI 用量（按成员）",
   grants: "授权管理",
@@ -195,12 +275,19 @@ export const SUB_LABELS: Record<string, string> = {
   members: "成员",
   poc: "POC",
   budget: "预算科目",
+  categories: "预算科目",
   expenses: "支出",
   contact: "联系方式",
   cues: "Cue 行",
   "cues/comments": "Cue 评论",
   comments: "评论",
   blocks: "文本块",
+  "blocks/character": "文本块角色归属",
+  "blocks/position": "文本块顺序",
+  "blocks/tags": "文本块标签",
+  "blocks/type": "文本块类型",
+  rehearsal_marks: "排练标记",
+  "rehearsal_marks/position": "排练标记位置",
   details: "详情",
   call_sheet: "通告",
   chat: "群聊",
@@ -214,6 +301,7 @@ export const SUB_LABELS: Record<string, string> = {
   biography: "人物小传",
   gender: "性别",
   role_type: "角色类型",
+  options: "选项",
   synopsis: "梗概",
   action_line: "行动线",
   music: "音乐",
@@ -225,7 +313,7 @@ export const VERB_LABELS: Record<string, string> = {
   create: "创建",
   edit: "编辑",
   delete: "删除",
-  "*": "全部动词",
+  "*": "全部操作",
 };
 
 export function typeLabel(type: string): string {
