@@ -9,15 +9,7 @@ import {
   ttlPayloadForSelection,
   type TtlOptionValue,
 } from "@/lib/approval/approval-ttl";
-
-// ─── Labels ───────────────────────────────────────────────────────────────────
-
-export const PERMISSION_LABELS: Record<string, string> = {
-  "event:view":          "查看日程",
-  "event:edit":          "编辑日程",
-  "event:publish":       "发布日程",
-  "event:manage":        "管理日程",
-};
+import { permissionLabel } from "@/lib/perm/permission-labels";
 
 // ─── Resource selector options (free-form mode only) ─────────────────────────
 
@@ -229,30 +221,8 @@ export default function AccessRequestModal({
     }
   }
 
-  const NODE_LABELS: Record<string, string> = {
-    "node:scene/*/meta@view": "查看章节/段落",
-    "node:script/*/blocks@view": "查看剧本",
-    "node:character/*/meta@view": "查看角色",
-    "node:member/*/meta@view": "查看人员通讯录",
-    "node:asset/*/meta@view": "查看附件",
-    "node:task/*/meta@view": "查看任务",
-    "node:event/*/meta@view": "查看事件",
-  };
-  // 实例级 node 键（node:task/<id>/*@edit）精确表匹配不到 → 按 type+verb 通用取名
-  const NODE_TYPE_LABELS: Record<string, string> = {
-    task: "任务", event: "事件", cue_list: "Cue 表", scene: "章节/段落",
-    character: "角色", script: "剧本", asset: "附件", member: "人员",
-    report: "报告", note: "备注", dept: "部门", production: "项目", wiki: "文档",
-  };
-  const NODE_VERB_LABELS: Record<string, string> = {
-    view: "查看", edit: "编辑", create: "创建", delete: "删除", manage: "管理", "*": "全部操作",
-  };
-  const genericNodeLabel = nodeMatch
-    ? `${NODE_VERB_LABELS[nodeMatch[4]] ?? nodeMatch[4]}${NODE_TYPE_LABELS[nodeMatch[1]] ?? nodeMatch[1]}${nodeMatch[2] !== "*" ? "（单个）" : ""}`
-    : null;
-  const permLabel = permission
-    ? (NODE_LABELS[permission] ?? PERMISSION_LABELS[permission] ?? genericNodeLabel ?? permission)
-    : null;
+  // 键 → 人话统一走 lib/perm/permission-labels（#541）：与激活弹窗、403 页同一套词
+  const permLabel = permission ? permissionLabel(permission) : null;
 
   return (
     <div

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect } from "react";
-import { PERMISSION_LABELS, GROUP_LABELS } from "@/lib/perm/permission-labels";
+import { permissionLabel, permissionGroupLabel } from "@/lib/perm/permission-labels";
 
 type Props = {
   pending: string[];
@@ -15,9 +15,7 @@ type Props = {
 function groupByCategory(perms: string[]): { label: string; perms: string[] }[] {
   const map = new Map<string, string[]>();
   for (const p of perms) {
-    // 节点键（node:<type>/...）按资源类型分组
-    const prefix = p.startsWith("node:") ? p.slice(5).split("/")[0] ?? p : p.split(":")[0] ?? p;
-    const label = GROUP_LABELS[prefix] ?? prefix;
+    const label = permissionGroupLabel(p);
     const existing = map.get(label);
     if (existing) existing.push(p);
     else map.set(label, [p]);
@@ -115,9 +113,7 @@ export default function PermissionActivationModal({
                     {g.label}
                   </div>
                   <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.7 }}>
-                    {g.perms
-                      .map(p => PERMISSION_LABELS[p as keyof typeof PERMISSION_LABELS] ?? p)
-                      .join("、")}
+                    {g.perms.map(permissionLabel).join("、")}
                   </div>
                 </div>
                 <div style={{

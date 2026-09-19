@@ -3,23 +3,11 @@ import type { Metadata } from "next";
 import { getProductionName } from "@/lib/db";
 import { getTechReqByProduction } from "@/lib/ops/event-db";
 import UnauthorizedActions from "@/components/perm/UnauthorizedActions";
+import { permissionLabel } from "@/lib/perm/permission-labels";
 
 export const metadata: Metadata = { title: "无访问权限" };
 
 type Ctx = { searchParams: Promise<{ resource?: string; id?: string; taskId?: string }> };
-
-// Maps atomic permission strings to human-readable descriptions
-const PERMISSION_LABELS: Record<string, string> = {
-  // 读权限
-  "event:view": "查看日程列表",
-  "event:view_call_sheet": "查看 Call Sheet",
-  // 写权限
-  "event:edit": "编辑日程",
-  "event:edit_call": "编辑 Call 时间",
-  "event:edit_schedule": "编辑日程安排",
-  "event:assign_participants": "分配参与者",
-  "event:delete_tech_req_any": "删除技术需求",
-};
 
 export default async function UnauthorizedPage({ searchParams }: Ctx) {
   const { resource, id, taskId } = await searchParams;
@@ -32,7 +20,7 @@ export default async function UnauthorizedPage({ searchParams }: Ctx) {
   const backHref = id ? `/production/${id}` : "/";
   const backLabel = productionName ? `返回《${productionName}》` : "返回首页";
 
-  const permLabel = resource ? (PERMISSION_LABELS[resource] ?? resource) : null;
+  const permLabel = resource ? permissionLabel(resource) : null;
 
   return (
     <div style={{
