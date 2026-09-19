@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { requireGrantGate } from "@/lib/perm/api-guard";
 import { listGrantLedger, revokeGrantById, type GrantLedgerFilters } from "@/lib/perm/grant-audit-db";
+import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -38,7 +39,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { grantId } = (await req.json()) as { grantId?: string };
   if (!grantId) return Response.json({ error: "缺少 grantId" }, { status: 400 });
 
-  const ok = await revokeGrantById(id, grantId);
-  if (!ok) return Response.json({ error: "授权不存在或已撤销" }, { status: 404 });
+  const revokedUserId = await revokeGrantById(id, grantId);
+  if (!revokedUserId) return Response.json({ error: "授权不存在或已撤销" }, { status: 404 });
+  kickRevokedStreams(id, revokedUserId); // #469
   return Response.json({ ok: true });
 }

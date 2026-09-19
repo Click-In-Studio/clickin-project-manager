@@ -4,6 +4,7 @@ import { toActor, hasGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getBossUserIds, batchGetFeishuOpenIds } from "@/lib/db";
 import { getProductionDept, getDeptMembers, setDeptMembers } from "@/lib/perm/dept-db";
+import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 import { feishuPlatform } from "@/lib/platform/feishu";
 
 type Ctx = { params: Promise<{ id: string; deptId: string }> };
@@ -89,6 +90,13 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   ]);
 
   const { pocConflictsResolved } = await setDeptMembers(deptId, productionId, members);
+
+  // #469：移出部门 / 卸任 POC 的人权限收窄（dept 区间行 + 级联撤销的 grant），断流重连再过门
+  const afterPoc = new Map(members.map((m) => [m.userId, m.isPoc]));
+  for (const m of before) {
+    const nowPoc = afterPoc.get(m.userId);
+    if (nowPoc === undefined || (m.isPoc && !nowPoc)) kickRevokedStreams(productionId, m.userId);
+  }
 
   const updated = await getProductionDept(deptId, productionId);
 

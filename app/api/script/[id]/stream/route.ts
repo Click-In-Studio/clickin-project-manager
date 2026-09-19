@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/perm/grant-check";
 import { registerSSE, removePresence, presenceFrameFor } from "@/lib/server-cache";
+import { registerSSEKick } from "@/lib/sse-kick";
 import { getActiveVersionId, getVersion, getProductionPermissionContext } from "@/lib/db";
 import { getSession } from "@/lib/account/session";
 
@@ -23,23 +24,36 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
   const enc = new TextEncoder();
 
-  let cancelSSE: (() => boolean) | null = null;
+  // 整套清理集中一处、幂等：cancel()（客户端断开）、push 失败（坏管道）、被踢（#469
+  // 权限撤销，服务端主动 close 不触发 cancel()）三条路径都走它。
+  let teardown: (() => void) | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const push = (frame: string) => {
         try { controller.enqueue(enc.encode(frame)); }
-        catch { cancelSSE?.(); }
+        catch { teardown?.(); }
       };
-      cancelSSE = registerSSE(id, versionId, connectionId, clientId, push);
+      const cancelSSE = registerSSE(id, versionId, connectionId, clientId, push);
+      const releaseKick = registerSSEKick(id, session.userId, () => {
+        teardown?.();
+        try { controller.close(); } catch { /* 已关 */ }
+      });
+      let done = false;
+      teardown = () => {
+        if (done) return;
+        done = true;
+        releaseKick();
+        const hasOtherConnections = cancelSSE();
+        if (!hasOtherConnections) {
+          removePresence(id, versionId, clientId);
+        }
+      };
       push(presenceFrameFor(id, versionId));
       push(`: connected\n\n`);
     },
     cancel() {
-      const hasOtherConnections = cancelSSE?.() ?? false;
-      if (!hasOtherConnections) {
-        removePresence(id, versionId, clientId);
-      }
+      teardown?.();
     },
   });
 

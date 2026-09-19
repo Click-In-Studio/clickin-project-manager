@@ -6,6 +6,7 @@ import { getWiki, listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson
 import { getNodeByWikiId, setNodePublic, setNodeListable, setNodeDeptShares, listNodeDeptShares, type NodeRecord } from "@/lib/node/db";
 import { canShareWiki } from "@/lib/wiki/perm";
 import { type WikiLevel } from "@/lib/perm/resource-grant-db";
+import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 
 type Ctx = { params: Promise<{ id: string; wikiId: string }> };
 
@@ -74,6 +75,8 @@ export async function PUT(req: NextRequest, ctx: Ctx): Promise<Response> {
   if (body.isPublic !== undefined) await setNodePublic(shell.id, productionId, body.isPublic);
   if (body.listable !== undefined) await setNodeListable(shell.id, productionId, body.listable);
   if (body.deptIds !== undefined) await setNodeDeptShares(shell.id, productionId, body.deptIds);
+  // #469：结构面收窄（取消全体可见 / 换部门）影响的是一群人，踢整个 production
+  if (body.isPublic === false || body.deptIds !== undefined) kickRevokedStreams(productionId);
 
   if (body.addPerson) {
     const { userId, level } = body.addPerson;
@@ -84,6 +87,7 @@ export async function PUT(req: NextRequest, ctx: Ctx): Promise<Response> {
 
   if (body.removePersonUserId) {
     await removeWikiSharePerson(wikiId, productionId, body.removePersonUserId);
+    kickRevokedStreams(productionId, body.removePersonUserId); // #469
   }
 
   return Response.json({ ok: true });
