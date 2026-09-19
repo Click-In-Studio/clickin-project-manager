@@ -54,3 +54,19 @@ export const SPEECH_TAIL_BASE_HALF_PX = 14;
 export const SPEECH_TAIL_EDGE_INSET_PX = 24;
 export const SIDE_PANEL_TOP_PX = 64; // Merged AppShell and ScriptEditor header
 export const SIDE_PANEL_FALLBACK_WIDTH_PX = 270;
+
+// 「关于 · 快捷键」表格。组合键写平台无关的 Mod/Shift，渲染时按平台翻成 ⌘⇧ / Ctrl+Shift（#542）。
+export const SCRIPT_SHORTCUTS: ReadonlyArray<readonly [combo: string, desc: string]> = [
+  ["Mod+Z", "撤销"],
+  ["Mod+Shift+Z", "重做"],
+  ["Mod+F", "搜索"],
+  ["Mod+B", "粗体（选中文字）"],
+  ["Mod+U", "下划线（选中文字）"],
+  ["Mod+I", "切换舞台提示 / 段内括注"],
+  ["Enter", "新建块（行尾）"],
+  ["Shift+Enter", "块内换行"],
+  ["Backspace", "对行首：合并至上一块（如类型、角色相同）\n对选中块：删除所选行"],
+  ["Mod+Shift+L", "切换歌词模式"],
+  ["Mod+Shift+C", "复制当前块标签"],
+  ["Mod+Shift+V", "粘贴标签到当前块"],
+];
