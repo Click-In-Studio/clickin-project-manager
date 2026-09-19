@@ -25,6 +25,7 @@ import {
   type TransitionResult,
 } from "@/lib/perm/member-status";
 import { canHandleMemberExit, resolveExitHandlers } from "@/lib/perm/member-exit-routing";
+import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 import { notifyMemberExitPending, notifyMemberStatusChanged } from "@/lib/notify/notify";
 
 const ACTIONS = ["self_exit", "suspend", "restore", "confirm_exit", "object", "endorse"] as const;
@@ -148,6 +149,7 @@ export async function POST(
 
     const res = await selfExitMember(id, userId, note);
     if (!res.ok) return failureResponse(res);
+    kickRevokedStreams(id, userId); // #469：退出即断流，不等自然断连
 
     await bestEffortNotify("self_exit", async () => {
       const [prodName, subjectName, handlers] = await Promise.all([
@@ -213,6 +215,8 @@ export async function POST(
     }
   }
   if (!res.ok) return failureResponse(res);
+  // #469：停用 / 确认离组后断掉他的在册流（restore 是加权，不踢）
+  if (act !== "restore") kickRevokedStreams(id, userId);
 
   await bestEffortNotify(act, async () => {
     const prodName = await getProductionName(id);

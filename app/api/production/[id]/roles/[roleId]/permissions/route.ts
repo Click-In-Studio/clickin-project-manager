@@ -7,6 +7,7 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { requireProductionFeature } from "@/lib/account/plan";
 
 import { setRolePermissions } from "@/lib/db";
+import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 
 type Ctx = { params: Promise<{ id: string; roleId: string }> };
 
@@ -42,5 +43,6 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const filtered = (body.permissions as string[]).filter(
     (p) => isGovernanceNodeKey(p) === false);
   await setRolePermissions(roleId, filtered);
+  kickRevokedStreams(id); // #469：持此角色的人不止一个，踢整个 production
   return Response.json({ ok: true, permissions: filtered });
 }

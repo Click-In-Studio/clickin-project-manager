@@ -11,6 +11,7 @@ import {
   isProductionArchived,
   getProductionPermissionContext,
 } from "@/lib/db";
+import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 
 function requireAdmin(req: NextRequest) {
   const session = getSession(req.cookies);
@@ -73,6 +74,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if (roles !== undefined) {
     if (!canEditMember) return Response.json({ error: "权限不足" }, { status: 403 });
     await setMemberRoles(id, userId, roles);
+    kickRevokedStreams(id, userId); // #469：角色可能收窄，重连再过门
   }
   if (tagIds !== undefined) {
     if (!canEditMember) return Response.json({ error: "权限不足" }, { status: 403 });

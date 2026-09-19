@@ -17,6 +17,7 @@ import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import { listProductionMembers } from "@/lib/db";
 import type { WikiLevel } from "@/lib/perm/resource-grant-db";
+import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 import { broadcastWikiUpdate } from "@/lib/wiki/collab";
 import { hasEffectiveGrant, type GrantActor } from "@/lib/perm/grant-check";
 import { getPool } from "@/lib/pg";
@@ -511,6 +512,8 @@ export async function wikiSetGrant(
     await setNodeDeptShares(targetShell.id, productionId, args.deptIds);
     changes.push(args.deptIds.length > 0 ? `部门分享已设为 ${args.deptIds.length} 个部门` : "已清空部门分享");
   }
+  // #469：结构面收窄要断流。本进程是 runner，连接在 next 进程——走 outbox 桥
+  if (args.isPublic === false || args.deptIds !== undefined) kickRevokedStreams(productionId);
   for (const p of addPeople) {
     const r = await addWikiSharePerson(args.wikiId, productionId, { userId: p.userId, level: p.level, confirmedBy: userId });
     changes.push(r === "ok"
@@ -519,6 +522,7 @@ export async function wikiSetGrant(
   }
   for (const uid of removeIds) {
     await removeWikiSharePerson(args.wikiId, productionId, uid);
+    kickRevokedStreams(productionId, uid); // #469
     changes.push(`已撤销 ${uid} 的单独分享`);
   }
 

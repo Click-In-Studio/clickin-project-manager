@@ -257,7 +257,7 @@ describe("lib/ 按域分目录，根只留基建", () => {
   const ROOT_INFRA = [
     "db.ts", "pg.ts", "r2.ts", "server-cache.ts",
     "tz.ts", "money.ts", "duration.ts", "lex-order.ts", "z-index.ts",
-    "base-path.ts", "server-url.ts", "request-json.ts", "sse-keepalive.ts",
+    "base-path.ts", "server-url.ts", "request-json.ts", "sse-keepalive.ts", "sse-kick.ts",
     "nav-pending.ts", "search-db.ts",
   ];
 

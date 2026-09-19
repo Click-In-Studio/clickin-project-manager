@@ -61,15 +61,15 @@ describe("listGrantLedger", () => {
 });
 
 describe("revokeGrantById", () => {
-  it("撤销有效行→manual；重复撤销与跨项目撤销返回 false", async () => {
-    expect(await revokeGrantById(prodId, activeId)).toBe(true);
+  it("撤销有效行→manual 并返回被撤销者；重复撤销与跨项目撤销返回 null", async () => {
+    expect(await revokeGrantById(prodId, activeId)).toBe(userId);
     const { rows } = await listGrantLedger(prodId, { userId, status: "revoked" });
     const revoked = rows.find(r => r.id === activeId);
     expect(revoked?.revokedReason).toBe("manual");
-    expect(await revokeGrantById(prodId, activeId)).toBe(false);
+    expect(await revokeGrantById(prodId, activeId)).toBeNull();
     const { prodId: otherProd } = await makeProduction();
     try {
-      expect(await revokeGrantById(otherProd, expiredId)).toBe(false);
+      expect(await revokeGrantById(otherProd, expiredId)).toBeNull();
     } finally {
       await cleanupProduction(otherProd).catch(() => {});
     }

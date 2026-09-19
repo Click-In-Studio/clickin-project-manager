@@ -10,6 +10,7 @@
  */
 import { type NextRequest } from "next/server";
 import { requireGrantGate } from "@/lib/perm/api-guard";
+import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 import { listPolicies, setPolicies, listPolicyAudit } from "@/lib/perm/policy-db";
 import { POLICY_QUESTIONS, matchAnswer, QUESTION_COVERED_KEYS } from "@/lib/perm/policy-questions";
 import { requireProductionFeature } from "@/lib/account/plan";
@@ -74,5 +75,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
 
   const res = await setPolicies(id, changes, session!.userId);
   if (!res.ok) return Response.json({ error: res.error }, { status: 400 });
+  // #469：wiki 公开开关参与 canViewWiki 判定，关掉即收窄全体可见文档的读面
+  if (res.changed.some((c) => c.key === "policy.wiki_public_enabled")) kickRevokedStreams(id);
   return Response.json({ ok: true, changed: res.changed });
 }

@@ -3,6 +3,7 @@ import { requireGrantGate } from "@/lib/perm/api-guard";
 import { getProductionDept } from "@/lib/perm/dept-db";
 import { listDeptPermissionView, setDeptPermissionRows } from "@/lib/perm/perm-center-db";
 import { isGovernanceNodeKey } from "@/lib/perm/grant-template";
+import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 import { requireProductionFeature } from "@/lib/account/plan";
 
 type Ctx = { params: Promise<{ id: string; deptId: string }> };
@@ -49,5 +50,6 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     }
   }
   await setDeptPermissionRows(id, deptId, keys);
+  kickRevokedStreams(id); // #469：部门权限影响全部门成员，踢整个 production
   return Response.json({ ok: true, keys: [...new Set(keys)] });
 }

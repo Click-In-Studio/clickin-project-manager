@@ -54,7 +54,6 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
 
   const { grantId } = (await req.json()) as { grantId?: string };
   if (!grantId) return Response.json({ error: "缺少 grantId" }, { status: 400 });
-  const ok = await revokeGrantById(id, grantId);
-  if (!ok) return Response.json({ error: "授权不存在或已撤销" }, { status: 404 });
+  if (!await revokeGrantById(id, grantId)) return Response.json({ error: "授权不存在或已撤销" }, { status: 404 });
   return Response.json({ ok: true });
 }

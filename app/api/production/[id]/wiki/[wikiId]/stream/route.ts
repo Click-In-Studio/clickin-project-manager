@@ -6,6 +6,7 @@ import { canViewWiki } from "@/lib/wiki/perm";
 import {
   registerWikiSSE, registerWikiLibrarySSE, updateWikiPresence, removeWikiPresence, wikiPresenceFrame,
 } from "@/lib/wiki/collab";
+import { registerSSEKick } from "@/lib/sse-kick";
 
 // wiki 文档 SSE（多人协作）：presence（在场者+光标块索引）与 update（内容广播），
 // 外加所属制作的 library 帧（结构变化：增/删/移动/改名/换标签）——后者影响的是
@@ -24,17 +25,30 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
   const clientId = req.nextUrl.searchParams.get("cid") ?? Math.random().toString(36).slice(2);
   const connectionId = `${clientId}:${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
   const enc = new TextEncoder();
-  let cancelSSE: (() => void) | null = null;
+  // 清理集中一处、幂等：cancel() / push 失败 / 被踢（#469）三条路径同源，同 script stream。
+  let teardown: (() => void) | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const push = (frame: string) => {
         try { controller.enqueue(enc.encode(frame)); }
-        catch { cancelSSE?.(); }
+        catch { teardown?.(); }
       };
       const cancelDoc = registerWikiSSE(wikiId, connectionId, push);
       const cancelLibrary = registerWikiLibrarySSE(productionId, connectionId, push);
-      cancelSSE = () => { cancelDoc(); cancelLibrary(); };
+      const releaseKick = registerSSEKick(productionId, session.userId, () => {
+        teardown?.();
+        try { controller.close(); } catch { /* 已关 */ }
+      });
+      let done = false;
+      teardown = () => {
+        if (done) return;
+        done = true;
+        releaseKick();
+        cancelDoc();
+        cancelLibrary();
+        removeWikiPresence(wikiId, clientId);
+      };
       // 上线即入场（阅读态光标为 null）
       updateWikiPresence(wikiId, clientId, {
         userId: session.userId, userName: session.name, avatarUrl: session.avatarUrl ?? null,
@@ -43,8 +57,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
       push(`: connected\n\n`);
     },
     cancel() {
-      cancelSSE?.();
-      removeWikiPresence(wikiId, clientId);
+      teardown?.();
     },
   });
 
