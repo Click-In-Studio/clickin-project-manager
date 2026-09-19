@@ -48,7 +48,10 @@ export default function PermissionActivationModal({
         position: "fixed", inset: 0, zIndex: 300,
         background: "rgba(0,0,0,.45)",
         display: "flex", alignItems: "center", justifyContent: "center",
-        padding: "clamp(12px, 4vh, 32px) 16px",
+        paddingTop: "max(clamp(12px, 4vh, 32px), env(safe-area-inset-top))",
+        paddingRight: "max(clamp(8px, 4vw, 16px), env(safe-area-inset-right))",
+        paddingBottom: "max(clamp(12px, 4vh, 32px), env(safe-area-inset-bottom))",
+        paddingLeft: "max(clamp(8px, 4vw, 16px), env(safe-area-inset-left))",
       }}
       onClick={e => { if (e.target === e.currentTarget) onDismiss(); }}
     >
@@ -58,7 +61,7 @@ export default function PermissionActivationModal({
         aria-labelledby="perm-activation-title"
         style={{
           width: "min(440px, 100%)",
-          maxHeight: "calc(100dvh - clamp(24px, 8vh, 64px))",
+          maxHeight: "calc(100dvh - max(clamp(12px, 4vh, 32px), env(safe-area-inset-top)) - max(clamp(12px, 4vh, 32px), env(safe-area-inset-bottom)))",
           background: "var(--surface)",
           borderRadius: 16,
           boxShadow: "0 24px 80px rgba(24,42,42,.22)",
@@ -69,7 +72,7 @@ export default function PermissionActivationModal({
       >
         {/* Header */}
         <div style={{
-          padding: "24px 28px 18px",
+          padding: "clamp(16px, 5vw, 24px) clamp(16px, 6vw, 28px) 18px",
           borderBottom: "1px solid var(--line)",
           flexShrink: 0,
         }}>
@@ -89,11 +92,15 @@ export default function PermissionActivationModal({
 
         {/* Body */}
         <div style={{
-          padding: "20px 28px",
+          padding: "20px clamp(16px, 6vw, 28px)",
+          flex: "1 1 auto",
           minHeight: 0,
           overflowY: "auto",
+          overflowX: "hidden",
           overscrollBehavior: "contain",
           scrollbarGutter: "stable",
+          WebkitOverflowScrolling: "touch",
+          touchAction: "pan-y",
         }}>
           <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--muted)", lineHeight: 1.6 }}>
             {subtitle}
@@ -131,8 +138,8 @@ export default function PermissionActivationModal({
 
         {/* Footer */}
         <div style={{
-          padding: "14px 28px 20px",
-          display: "flex", gap: 10,
+          padding: "14px clamp(16px, 6vw, 28px) max(16px, env(safe-area-inset-bottom))",
+          display: "flex", flexWrap: "wrap", gap: 10,
           flexShrink: 0,
           borderTop: "1px solid var(--line)",
           background: "var(--surface)",
@@ -141,7 +148,7 @@ export default function PermissionActivationModal({
             onClick={onDismiss}
             disabled={confirming}
             style={{
-              flex: 1, padding: "10px 0", borderRadius: 10,
+              flex: "1 1 104px", minHeight: 44, padding: "10px 12px", borderRadius: 10,
               border: "1px solid var(--line)",
               background: "transparent",
               fontSize: 13, color: "var(--muted)",
@@ -154,7 +161,7 @@ export default function PermissionActivationModal({
             onClick={() => onConfirm(pending)}
             disabled={confirming}
             style={{
-              flex: 2, padding: "10px 0", borderRadius: 10,
+              flex: "2 1 176px", minHeight: 44, padding: "10px 12px", borderRadius: 10,
               border: "none",
               background: "var(--ink)",
               fontSize: 13, fontWeight: 600, color: "var(--paper)",
