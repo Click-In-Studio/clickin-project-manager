@@ -25,6 +25,8 @@ export type PrivateAssetRow = {
   grants: PrivateAssetGrant[];
 };
 
+// #550：is_public 已随 #420 迁到 node（asset 壳节点，1:1），asset 表上没有这列。
+// 用 INNER JOIN——没有壳节点的资产是坏数据，审查页不替它假装存在。
 export async function listPrivateAssets(productionId: string): Promise<PrivateAssetRow[]> {
   const pool = getPool();
   const [assetsRes, grantsRes] = await Promise.all([
@@ -36,8 +38,9 @@ export async function listPrivateAssets(productionId: string): Promise<PrivateAs
               a.uploader_user_id, up.name AS uploader_name, a.created_at,
               (SELECT COUNT(*) FROM node_mount m JOIN node nn ON nn.id = m.node_id WHERE nn.asset_id = a.id)::text AS mount_count
        FROM asset a
+       JOIN node n ON n.asset_id = a.id
        LEFT JOIN user_profile up ON up.user_id = a.uploader_user_id
-       WHERE a.production_id = $1 AND NOT a.is_public
+       WHERE a.production_id = $1 AND NOT n.is_public
        ORDER BY a.created_at DESC`,
       [productionId],
     ),
@@ -103,10 +106,13 @@ export async function revokeAssetGrant(productionId: string, grantId: string): P
   return "ok";
 }
 
-/** 审查处置：改公开性。返回 false = 资产不存在。 */
+/** 审查处置：改公开性（写在壳节点 node.is_public 上，同 setNodePublic）。
+ *  返回 false = 资产不存在（或无壳节点）。 */
 export async function setAssetPublic(productionId: string, assetId: string, isPublic: boolean): Promise<boolean> {
   const res = await getPool().query(
-    "UPDATE asset SET is_public = $3 WHERE id = $1 AND production_id = $2 RETURNING id",
+    `UPDATE node SET is_public = $3, updated_at = now()
+     WHERE asset_id = $1 AND production_id = $2 AND kind = 'asset'
+     RETURNING id`,
     [assetId, productionId, isPublic],
   );
   return (res.rowCount ?? 0) > 0;
