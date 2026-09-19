@@ -31,7 +31,7 @@ function navRoutes(): string[] {
 const EXTRA_ROUTES = new Set([
   "/", "/login", "/invite", "/share", "/unauthorized",
   "/account", "/account/profile", "/account/security", "/account/preferences",
-  "/my/projects", "/my/permissions", "/my/daily-call", "/my/notification-settings",
+  "/my/projects", "/my/daily-call", "/my/notification-settings",
   "characters", "cuelists", "notifications", "announcements", "access-requests", "import-script", "import-scenes",
   "script/print", "wiki/print", "events/callsheet", "events/reqs", "events/reports", "events/view",
   "assets/upload", "assets/preview", "dramaturgy/inspiration",
