@@ -4,7 +4,7 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { toActor, hasEffectiveGrant } from "@/lib/perm/grant-check";
-import { hasEventDomainView, filterDraftVisibleEvents } from "@/lib/ops/event-permissions";
+import { hasEventDomainView, filterDraftVisibleEvents, canEditTechReq } from "@/lib/ops/event-permissions";
 import { getProductionPermissionContext, getProductionName, listMilestones, listProductionMembersWithRoles } from "@/lib/db";
 import { listPhases } from "@/lib/ops/phase-db";
 import { isPolicyOn } from "@/lib/perm/policy-db";
@@ -70,6 +70,18 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
           description: t.description,
         }));
 
+  const [editableEventIds, editableTaskIds] = await Promise.all([
+    Promise.all(events.map(async event => {
+      const editable = event.status === "published"
+        ? await hasEffectiveGrant(actor, id, "event", event.id, "publication", "edit")
+        : await hasEffectiveGrant(actor, id, "event", event.id, "details", "edit");
+      return editable ? event.id : null;
+    })).then(ids => ids.filter((eventId): eventId is string => eventId !== null)),
+    Promise.all(tasks.map(async task =>
+      await canEditTechReq(access.permCtx, task.id, task.eventId, id) ? task.id : null
+    )).then(ids => ids.filter((taskId): taskId is string => taskId !== null)),
+  ]);
+
   // 阶段管理资格：phase 键（owner 旁路内建）∨ 部门 POC（policy 开关，活引用）
   const pocDeptIds = departments
     .filter(d => d.kind === "dept" && d.pocUserIds.includes(session.userId))
@@ -102,6 +114,8 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
           pocDeptIds,
           deptPocEnabled: phaseDeptPocEnabled,
         }}
+        editableEventIds={editableEventIds}
+        editableTaskIds={editableTaskIds}
       />
     </div>
   );

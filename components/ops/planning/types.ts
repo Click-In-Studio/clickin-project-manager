@@ -54,4 +54,6 @@ export type Props = {
   /** 阶段归属候选（仅 kind='dept'——用户组不该有阶段） */
   deptOptions: PlanningDept[];
   phasePerm: PhasePerm;
+  editableEventIds: string[];
+  editableTaskIds: string[];
 };

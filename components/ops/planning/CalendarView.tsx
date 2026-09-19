@@ -11,7 +11,7 @@ import { PHASE_TONES, phaseTone, phaseRangeLabel, phaseCoversDate } from "./phas
 import { readPref, writePref } from "./prefs";
 import type { PlanningMilestone, PlanningTask, Props } from "./types";
 
-export default function CalendarView({ productionId, events, tasks, milestones, phases, departments }: Props) {
+export default function CalendarView({ productionId, events, tasks, milestones, phases, departments, editableEventIds, editableTaskIds }: Props) {
   // 「今天」按 CST 算，不按浏览器本地——跨时区的人不该看到不同的当月/今日高亮
   const today = useMemo(() => {
     const [y, m, d] = todayCSTStr().split("-").map(Number);
@@ -223,7 +223,16 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
             aria-label="关闭事项详情"
             onClick={() => setSelection(null)}
           />
-          <CalendarDetailDrawer productionId={productionId} selection={selection} onClose={() => setSelection(null)} />
+          <CalendarDetailDrawer
+            key={`${selection.kind}-${selection.value.id}`}
+            productionId={productionId}
+            selection={selection}
+            canEdit={selection.kind === "event"
+              ? editableEventIds.includes(selection.value.id)
+              : selection.kind === "task" && editableTaskIds.includes(selection.value.id)}
+            onSaved={setSelection}
+            onClose={() => setSelection(null)}
+          />
         </>
       )}
     </section>
