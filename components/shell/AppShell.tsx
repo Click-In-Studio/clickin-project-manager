@@ -262,7 +262,9 @@ export default function AppShell({ session, productions, canCreateProduction = f
     <NavPendingContext.Provider value={navPendingBus}>
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--paper)]">
       {/* Topbar */}
-      <header ref={topbarRef} className="h-16 shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center gap-5 px-5 z-50">
+      <header ref={topbarRef} className={`h-16 shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center z-50 ${
+        productionHeaderStage >= 2 ? "gap-2 px-2.5" : "gap-5 px-5"
+      }`}>
         {/* Brand / production icon */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
           <span className="w-8 h-8 rounded-full bg-[#182a2a] overflow-hidden flex items-center justify-center select-none shrink-0">
@@ -287,6 +289,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
           currentProduction={currentProduction ?? null}
           currentProductionId={productionId}
           canCreateProduction={canCreateProduction}
+          compact={productionHeaderStage >= 2}
         />
 
         {isAdminMode && productionId && (
@@ -374,9 +377,9 @@ export default function AppShell({ session, productions, canCreateProduction = f
                   aria-label="更多工具"
                   aria-expanded={topOverflowOpen}
                   onClick={() => setTopOverflowOpen((open) => !open)}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg border-0 bg-[var(--surface)] text-base font-bold text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]"
+                  className="flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border-0 bg-[var(--surface)] px-2 text-xs font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]"
                 >
-                  ⋮
+                  <span>更多</span><span aria-hidden="true">⋮</span>
                 </button>
               )}
               <div
@@ -413,8 +416,8 @@ export default function AppShell({ session, productions, canCreateProduction = f
           }`}
         >
           {/* v3 sidebarControls：导航标签 + 全局折叠 toggle（原型样式） */}
-          <div className={`mb-2 flex min-h-[30px] items-center text-[9px] font-bold uppercase tracking-[0.12em] text-[#667676] ${
-            productionSidebarContentFolded ? "justify-center px-0" : "justify-between pl-2.5 pr-0.5"
+          <div className={`sticky -top-5 z-30 mb-2 flex min-h-[50px] shrink-0 isolate items-end border-b border-[var(--line)] bg-[#e8e8e1] pb-2 text-[9px] font-bold uppercase tracking-[0.12em] text-[#667676] ${
+            productionSidebarContentFolded ? "-mx-2 justify-center px-2" : "-mx-3.5 justify-between pl-6 pr-4"
           }`}>
             {!productionSidebarContentFolded && <span>导航</span>}
             <button

@@ -206,9 +206,15 @@ function CharacterEditRow({
     try { await onDelete(); } finally { setDeleting(false); }
   };
 
+  const handleRowClick = (event: React.MouseEvent<HTMLTableRowElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button,input,textarea,select,a,[contenteditable='true'],[data-character-editable='true']")) return;
+    onToggleExpand();
+  };
+
   return (
     <>
-      <tr className="group border-b border-[var(--line)]">
+      <tr onClick={handleRowClick} className="group cursor-pointer border-b border-[var(--line)] transition-colors hover:bg-zinc-100/70">
         {/* 姓名 */}
         <td className="px-4 py-3">
           <div className="flex items-center gap-2">
@@ -225,6 +231,7 @@ function CharacterEditRow({
             ) : (
               <span
                 onClick={() => canEdit && setEditing(true)}
+                data-character-editable={canEdit ? "true" : undefined}
                 className={`text-sm text-zinc-700 ${canEdit ? "cursor-text hover:text-zinc-900" : ""}`}
               >
                 {char.name}

@@ -27,12 +27,14 @@ export default function ProjectSwitcher({
   currentProduction,
   currentProductionId,
   canCreateProduction,
+  compact = false,
   onOpen,
 }: {
   activeProductions: Production[];
   currentProduction: Production | null;
   currentProductionId: string | null;
   canCreateProduction: boolean;
+  compact?: boolean;
   onOpen?: () => void;
 }) {
   const router = useRouter();
@@ -72,18 +74,19 @@ export default function ProjectSwitcher({
         onMouseEnter={() => setBtnHovered(true)}
         onMouseLeave={() => setBtnHovered(false)}
         style={{
-          height: 44,
-          padding: "8px 12px",
+          height: compact ? 38 : 44,
+          padding: compact ? "6px 9px" : "8px 12px",
           display: "flex",
           alignItems: "center",
-          gap: 10,
+          gap: compact ? 6 : 10,
           border: `1px solid ${btnHovered || open ? "var(--ink)" : "var(--line)"}`,
           borderRadius: 10,
           background: "var(--paper)",
           cursor: "pointer",
           textAlign: "left",
-          minWidth: 180,
-          maxWidth: 280,
+          minWidth: compact ? 112 : 180,
+          width: compact ? "clamp(112px, 31vw, 148px)" : undefined,
+          maxWidth: compact ? 148 : 280,
           transition: "border-color .12s",
         }}
       >
@@ -92,7 +95,7 @@ export default function ProjectSwitcher({
             <>
               {currentProduction.roles.length > 0 && (
                 <small style={{
-                  color: "var(--muted)", fontSize: 10, lineHeight: 1.2,
+                  color: "var(--muted)", fontSize: compact ? 9 : 10, lineHeight: 1.15,
                   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                 }}>
                   {currentProduction.roles[0]}
@@ -102,8 +105,8 @@ export default function ProjectSwitcher({
                 </small>
               )}
               <b style={{
-                fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                marginTop: currentProduction.roles.length > 0 ? 2 : 0,
+                fontSize: compact ? 11 : 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                marginTop: currentProduction.roles.length > 0 ? (compact ? 1 : 2) : 0,
               }}>
                 {currentProduction.name}
               </b>

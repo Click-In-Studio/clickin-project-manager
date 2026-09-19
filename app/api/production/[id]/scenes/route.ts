@@ -8,7 +8,7 @@ import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasGrant } from "@/lib/perm/grant-check";
 import { canAccessNode } from "@/lib/perm/grant-template";
 import { diffState } from "@/lib/script/script-ops";
-import { insertHierarchyMarker, projectMarkers } from "@/lib/script/script-marker-domain";
+import { insertHierarchyMarker, moveHierarchyMarker, projectMarkers } from "@/lib/script/script-marker-domain";
 import { rejectNonHeadWrite } from "@/lib/script/head-version";
 
 const createId = () => crypto.randomUUID();
@@ -83,4 +83,35 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/production/
   const details = await listScenesByVersion(resolved.versionId);
   const scenes = projectMarkers(next, details);
   return Response.json({ ok: true, scenes }, { status: 201 });
+}
+
+export async function PUT(req: NextRequest, ctx: RouteContext<"/api/production/[id]/scenes">) {
+  const { id } = await ctx.params;
+  const { session, access } = await getCtx(req, id);
+  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const { permCtx, isArchived } = access;
+  if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
+  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "scene", "*", "*", "edit"))) {
+    return Response.json({ error: "权限不足" }, { status: 403 });
+  }
+
+  const body = await req.json();
+  if (typeof body.markerId !== "string" || (body.beforeMarkerId !== null && typeof body.beforeMarkerId !== "string")) {
+    return Response.json({ error: "排序参数无效" }, { status: 400 });
+  }
+  const nonHead = await rejectNonHeadWrite(id, typeof body.versionId === "string" ? body.versionId : null);
+  if (nonHead) return nonHead;
+  const resolved = await resolveProductionVersion(id, body.versionId);
+  if (resolved.error) return resolved.error;
+  const result = await loadProduction(id, resolved.versionId);
+  if (!result) return Response.json({ error: "未找到版本" }, { status: 404 });
+
+  const next = moveHierarchyMarker(result.state, body.markerId, body.beforeMarkerId, createId);
+  if (next === result.state) return Response.json({ error: "无法移动到该位置" }, { status: 400 });
+  await applyPatchToDB(id, resolved.versionId, diffState(result.state, next, 0));
+  const serverSeq = tickAndBroadcastSeq(id, resolved.versionId);
+  broadcastEvent(id, resolved.versionId, "markers", { seq: serverSeq });
+  const details = await listScenesByVersion(resolved.versionId);
+  return Response.json({ ok: true, scenes: projectMarkers(next, details) });
 }

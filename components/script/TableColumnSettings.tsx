@@ -36,10 +36,34 @@ export default function TableColumnSettings({
   }, [onClose, nestedFromOverflow]);
 
   const toggleColumn = (key: string) => {
-    const newVisible = config.visibleColumns.includes(key)
+    const hiding = config.visibleColumns.includes(key);
+    const newVisible = hiding
       ? config.visibleColumns.filter((k) => k !== key)
       : [...config.visibleColumns, key];
-    onChange({ ...config, visibleColumns: newVisible });
+    onChange({
+      ...config,
+      visibleColumns: newVisible,
+      frozenColumns: hiding ? config.frozenColumns.filter((k) => k !== key) : config.frozenColumns,
+    });
+  };
+
+  const toggleFrozen = (key: string) => {
+    const frozen = config.frozenColumns.includes(key);
+    if (frozen) {
+      onChange({ ...config, frozenColumns: config.frozenColumns.filter((item) => item !== key) });
+      return;
+    }
+    const frozenSet = new Set([...config.frozenColumns, key]);
+    const columnOrder = [
+      ...config.columnOrder.filter((item) => frozenSet.has(item)),
+      ...config.columnOrder.filter((item) => !frozenSet.has(item)),
+    ];
+    onChange({
+      ...config,
+      columnOrder,
+      visibleColumns: config.visibleColumns.includes(key) ? config.visibleColumns : [...config.visibleColumns, key],
+      frozenColumns: [...config.frozenColumns, key],
+    });
   };
 
   const handleDragStart = (key: string) => {
@@ -75,7 +99,7 @@ export default function TableColumnSettings({
         ...(nestedFromOverflow
           ? nestedMenuStyle
           : { position: "absolute", right: 0, top: "calc(100% + 10px)" }),
-        width: 220, borderRadius: 12,
+        width: 260, borderRadius: 12,
         border: "1px solid var(--line)", background: "var(--surface)",
         boxShadow: "0 4px 20px rgba(24,42,42,.10)", zIndex: nestedFromOverflow ? 40 : 20,
       }}
@@ -88,6 +112,7 @@ export default function TableColumnSettings({
       <div style={{ padding: "4px 0", maxHeight: 320, overflowY: "auto" }}>
         {columnsByOrder.map((col) => {
           const checked = config.visibleColumns.includes(col.key);
+          const frozen = config.frozenColumns.includes(col.key);
           return (
             <div
               key={col.key}
@@ -120,6 +145,20 @@ export default function TableColumnSettings({
                 )}
               </span>
               <span style={{ fontSize: 12, color: "var(--ink)", flex: 1 }}>{col.label}</span>
+              <button
+                type="button"
+                onClick={(event) => { event.stopPropagation(); toggleFrozen(col.key); }}
+                title={frozen ? `取消冻结「${col.label}」` : `冻结「${col.label}」`}
+                aria-pressed={frozen}
+                style={{
+                  border: 0, borderRadius: 5, padding: "3px 6px", cursor: "pointer",
+                  fontSize: 10, fontWeight: 600,
+                  color: frozen ? "#2563eb" : "var(--muted)",
+                  background: frozen ? "#eff6ff" : "transparent",
+                }}
+              >
+                {frozen ? "已冻结" : "冻结"}
+              </button>
             </div>
           );
         })}
