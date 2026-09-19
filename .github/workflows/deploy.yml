@@ -1,11 +1,13 @@
 name: Deploy
 
 # 两套环境（#558）：
-#   push main      → dev（AWS click-in，app-dev.clickinmusical.com）
-#   push tag v*    → prod（阿里云 click-in-2，app.clickinmusical.com）
+#   push main      → dev（阿里云 click-in-dev 47.243.12.173，app-dev.clickinmusical.com）
+#   push tag v*    → prod（阿里云 click-in-prod 47.242.131.56，app.clickinmusical.com）
 # 两台机器目录布局 / pm2 定义 / 迁移流程完全一致，只有 SSH 目标不同：
 # secrets.SERVER_HOST / SERVER_USER 是 dev，SERVER_HOST_PROD / SERVER_USER_PROD 是 prod，
 # 部署私钥两边共用（SERVER_SSH_KEY，公钥 github-actions-deploy 已放进两台的 authorized_keys）。
+# dev 原在 AWS（52.20.28.226，user ubuntu），2026-09-19 迁到阿里云后 AWS 机已关停；
+# 换机器只需改 secrets + 把部署公钥放进新机 authorized_keys，本文件不用动。
 #
 # 发布到 prod：`git tag v0.N && git push origin v0.N`；hotfix 从 tag 拉分支、cherry-pick、再打 tag。
 run-name: "Deploy ${{ github.ref_type == 'tag' && 'PROD' || 'dev' }} · ${{ github.ref_name }}"
