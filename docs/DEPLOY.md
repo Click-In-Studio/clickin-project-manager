@@ -8,6 +8,11 @@
 
 ### 1. 服务器环境
 
+> 2026-09 新机器（阿里云 `click-in-2`，Ubuntu 24.04）就是按本节 + 下面各节从零装起来的，
+> 差异只有：部署用户是 `admin` 不是 `ubuntu`（需 NOPASSWD sudo）；node 装在 `/opt/node`（官方
+> tarball，`/usr/local/bin/{node,npm,npx,pm2}` 软链）；`pm2 startup systemd -u <user>`；加了 1G swap
+> （`vm.swappiness=10`）；时区设成 UTC 与 crontab 的 UTC 写法对齐。
+
 ```bash
 # Node.js（建议通过 nvm 安装 LTS 版本）
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
@@ -225,9 +230,28 @@ crontab -e
 
 ---
 
+## 两套环境（#558）
+
+| 环境 | 触发 | 机器 | 域名 | 用途 |
+|---|---|---|---|---|
+| dev | push `main` | AWS（`click-in`） | `app-dev.clickinmusical.com` | 团队日常，跟着 main 走 |
+| prod | push tag `v*` | 阿里云（`click-in-2`） | `app.clickinmusical.com` / `backstage.clickinmusical.com` | 测试用户，只随 tag 变 |
+
+两台机器的目录布局、pm2 定义、迁移流程完全一致，`deploy.yml` 只按 `github.ref_type` 选 SSH 目标（secrets `SERVER_HOST[_PROD]` / `SERVER_USER[_PROD]`，私钥共用）。两边各有自己的库，互不同步；dev 的库是切换时从 prod 拷的快照。
+
+发布到 prod：
+
+```bash
+git tag v0.12 && git push origin v0.12        # 从 main 上已验证的 commit 打 tag
+```
+
+hotfix：从上一个 tag 拉分支，cherry-pick 修复，打新 tag；不需要动 main（migration 按版本号逐支判断 pending，hotfix 分支上时间戳更早的也能正常上）。
+
+dev 与 prod 互不阻塞、同一环境串行（workflow `concurrency`）。
+
 ## 日常发版
 
-push 到 `main` 后 GitHub Actions 自动完成：
+push 到 `main`（dev）或 tag（prod）后 GitHub Actions 自动完成：
 
 1. `npm ci` + `npm run build`（standalone 模式）
 2. 打包产物，上传到服务器 `releases/<run>-<sha>/`

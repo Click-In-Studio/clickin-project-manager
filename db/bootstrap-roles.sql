@@ -14,11 +14,9 @@
 
 \set ON_ERROR_STOP on
 
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'script_editor') THEN
-    EXECUTE format('CREATE ROLE script_editor LOGIN PASSWORD %L', :'app_password');
-  END IF;
-END $$;
+-- psql 变量在 DO $$ 块（dollar-quoted）里不做替换，所以用 SELECT … \gexec 的写法。
+SELECT format('CREATE ROLE script_editor LOGIN PASSWORD %L', :'app_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'script_editor') \gexec
 
 -- 建库（已存在则跳过）；owner 留 postgres。
 SELECT 'CREATE DATABASE script_editor'
