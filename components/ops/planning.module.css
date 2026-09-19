@@ -228,6 +228,44 @@
 .drawerBackdrop { z-index: 89; }
 .editorBackdrop { z-index: 119; }
 
+.drawerTextButton,
+.drawerSecondaryButton,
+.drawerPrimaryButton {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 7px 11px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.drawerPrimaryButton { flex: 1; border-color: var(--ink); background: var(--ink); color: #fff; }
+.drawerSecondaryButton { flex: 0 0 88px; }
+.drawerPrimaryButton:disabled,
+.drawerSecondaryButton:disabled { opacity: .55; cursor: wait; }
+
+.drawerField { display: flex; flex-direction: column; gap: 5px; }
+.drawerField > span { color: var(--muted); font-size: 10px; font-weight: 700; }
+.drawerField input,
+.drawerField textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 12px;
+  resize: vertical;
+}
+.drawerField input:focus,
+.drawerField textarea:focus { outline: 2px solid color-mix(in srgb, var(--script) 24%, transparent); border-color: var(--script); }
+.drawerTimeGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
 @keyframes drawerIn {
   from { transform: translateX(18px); opacity: 0; }
 }
@@ -587,6 +625,7 @@
   .calendarCell { height: 86px; padding: 4px 3px; gap: 3px; }
   .calendarChip { min-height: 27px; padding: 3px; font-size: 7px; }
   .detailDrawer { top: auto; right: 0; bottom: 0; left: 0; width: 100%; max-height: min(78vh, 640px); border-radius: 16px 16px 0 0; }
+  .drawerTimeGrid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 420px) {
