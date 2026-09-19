@@ -141,7 +141,10 @@ jobs:
         run: |
           SHARED="/var/www/production-manager/shared"
           URL="postgres:///script_editor?host=/var/run/postgresql&sslmode=disable"
-          DBMATE="sudo -u postgres /tmp/deploy-db/dbmate --url '$URL' --migrations-dir /tmp/deploy-db/migrations --no-dump-schema"
+          # 先 cd 进工具目录：dbmate 默认从 cwd 读 .env，ssh 登录目录是 /home/ubuntu，
+          # postgres 用户读不了它会直接报错退出（首发事故：status 报错被 tee 吞掉，误判成
+          # 「仍有 pending」）。/tmp/deploy-db 里没有 .env，不存在即忽略。
+          DBMATE="cd /tmp/deploy-db && sudo -u postgres ./dbmate --url '$URL' --migrations-dir /tmp/deploy-db/migrations --no-dump-schema"
           PSQL="sudo -u postgres psql -d script_editor -qAt"
 
           TABLES=$(ssh prod "$PSQL -c \"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename <> 'schema_migrations'\"" < /dev/null)
@@ -152,7 +155,10 @@ jobs:
           fi
 
           echo "── status（before）"
-          ssh prod "$DBMATE status" < /dev/null | tee /tmp/status-before.txt
+          # 不用管道：管道会吞掉 dbmate 的退出码，status 本身报错必须让部署红
+          ssh prod "$DBMATE status" < /dev/null > /tmp/status-before.txt \
+            || { echo "::error::dbmate status 失败"; cat /tmp/status-before.txt; exit 1; }
+          cat /tmp/status-before.txt
           PENDING=$(grep -c '^\[ \]' /tmp/status-before.txt || true)
 
           if [ "$PENDING" -gt 0 ]; then
