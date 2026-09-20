@@ -637,7 +637,7 @@ tests/
 | `node/` `import/` `doc-extract/` | 节点树 / 导入管线 / 文档抽取（原有目录） | 只有 `import/`：向导、列映射、`TagFormatOptionList`（`node/` `doc-extract/` 无对应 components 目录） | `node/`→`wiki/`；`import/` `doc-extract/`→`script/` |
 | `print/` | —（打印 CSS 在 `script/print-css`） | `ScriptPrint*`（剧本打印路由与渲染）、`template-render`、`use-fonts-settled` | `script/` |
 | `ops/` | `event-*` `cue-*` `task-*` `phase-*` `finance-db` `material-*` `scene-duration` | 事件、cue、计划、任务、需求（req）、报告、周 call、工作区首页与项目首页 | `ops/` |
-| `approval/` | `approval-*`：引擎、模版、路由、阶段、TTL、时间线 | AccessRequests 页与弹窗、ApprovalFlowDesigner | `ops/` |
+| `approval/` | `approval-*`：引擎、模版、路由、阶段、TTL、时间线；`access-request-db`（申请读模型：类型 / 行映射 / people / 鉴权 / 列表 / 预览 / 流程视图）`access-request-action-db`（状态机：提交 / 批准 / 转交 / 拒绝 / 撤回 / 超时升级 + 通知；单向依赖读模型） | AccessRequests 页与弹窗、ApprovalFlowDesigner | `ops/` |
 | `perm/` | `permissions` `grant-*` `policy-*` `resource-*` `perm-center-db` `page-permission-scopes` `permission-*` `roles` `dept-db` `member-*` `admin-guard` `api-guard` | 权限激活弹窗 / 页面门、权限键选择器、成员选择器、通讯录、未授权页动作 | `perm/` |
 | `production/` | `production-template` `production-types` `templates/`（各类型项目模版）`template-seeders/` | — | `ops/` |
 | `account/` | `session` `db-feishu` `invite-db` `registration-gate` `account-return` `plan` | 邀请接受页、我的项目、新建项目弹窗 | `account/` |
@@ -654,6 +654,8 @@ tests/
 **组件族目录**（#487）：域下允许**一层**族目录，收巨石组件拆出来的子件 / hook / 纯函数——`components/shell/app-shell/{ProjectSwitcher,NavItem,…}.tsx` + `toolbar-stage.ts` `route.ts` `nav-config.ts`。族目录名 kebab-case = 主组件名（`AppShell` → `app-shell/`、`ScriptEditor` → `script-editor/`），主组件自己留在域目录不进族；族内不再套目录，文件名规则同上。族目录不是"给相关文件找个家"的通用手段——只为一个主组件服务，跨组件共用的东西按消费者归域或进 `ui/`。族内文件有行数上限：PascalCase 组件 ≤ 800、kebab 模块（hook / 纯函数 / context）≤ 400（`conventions.test.ts` 的 `FAMILY_FILE_CEILING`）；整块搬出来就超标的子件按搬出时的行数记账只降不升（`FAMILY_FILE_GRANDFATHERED`）。
 
 「template」一词在仓库里指五种东西，现在各归其域：剧本版式模版 `script/template/`、项目模版 `production/templates/`、权限模版 `perm/grant-template`、审批模版 `approval/approval-flow-template*`、cue 模版 `ops/cue-template-db`。
+
+**`lib/db.ts` 分家中（#486）**：8280 行的 `db.ts` 正按上表按域搬进 `lib/<域>/*-db.ts`，分文件的依据是概念边界与依赖方向（如审批：读模型 ← 状态机），不是行数。搬出去的段在 `db.ts` 尾部的「转发壳」里只留 `export *`，importer 暂不必改路径，全部搬完后由最后一个 PR 脚本改写并删壳。`conventions.test.ts` 钉三条：`db.ts` 行数只降不升（`DB_TS_LINE_CEILING`）、壳里不许长函数、`*-db.ts` 单文件 ≤ 1000 行（存量超标的按行数记账只降不升，`DB_FILE_GRANDFATHERED`）。**新函数一律写进域文件，不再进 `db.ts`。**
 
 `lib/` 根目录的文件清单由 `conventions.test.ts` 白名单钉死：新文件一律进域目录，真正的跨域基建才加白名单（同 PR 更新本表）。不加 barrel `index.ts`（`platform/email` `platform/feishu` `script/template` 三个既有的保留）——全仓 import 走深路径，barrel 只会引入循环依赖风险。
 
