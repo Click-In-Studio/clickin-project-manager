@@ -67,11 +67,10 @@ export default function PlanningClient(props: Props) {
             key={id}
             aria-pressed={mode === id}
             onClick={() => setMode(id)}
+            className={styles.planningViewTab}
             style={{
               border: `1px solid ${mode === id ? "var(--ink)" : "var(--line)"}`,
-              borderRadius: 10, background: mode === id ? "var(--ink)" : "var(--surface)",
-              minHeight: 62, padding: "12px 15px", display: "flex", flexDirection: "column", minWidth: 0,
-              textAlign: "left", cursor: "pointer",
+              background: mode === id ? "var(--ink)" : "var(--surface)",
             }}
           >
             <b style={{ fontSize: 12, color: mode === id ? "#fff" : "var(--ink)" }}>{label}</b>

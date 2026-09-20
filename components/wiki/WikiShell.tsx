@@ -596,11 +596,11 @@ export default function WikiShell({
   );
 
   return (
-    <div className="relative flex gap-3 md:gap-6 items-start">
+    <div className="relative flex flex-col gap-3 items-start md:flex-row md:gap-6">
       <button
         type="button"
         onClick={() => setMobileTreeOpen(true)}
-        className="md:hidden fixed left-4 bottom-4 z-40 rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 shadow-lg"
+        className="md:hidden inline-flex items-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm"
         aria-expanded={mobileTreeOpen}
       >
         ☰ 文档目录
