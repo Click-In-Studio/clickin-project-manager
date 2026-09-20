@@ -156,7 +156,6 @@ export async function copyProductionRole(productionId: string, sourceRoleId: str
   }
 }
 
-
 /** Returns the set of role names defined for a production (from production_role table). */
 export async function getProductionRoleNames(productionId: string): Promise<Set<string>> {
   const res = await getPool().query<{ name: string }>(
@@ -164,14 +163,4 @@ export async function getProductionRoleNames(productionId: string): Promise<Set<
     [productionId],
   );
   return new Set(res.rows.map((r) => r.name));
-}
-
-/** Resolves role names to production_role IDs for the given production. */
-export async function resolveRoleIdsByNames(productionId: string, names: string[]): Promise<string[]> {
-  if (!names.length) return [];
-  const res = await getPool().query<{ id: string }>(
-    `SELECT id FROM production_role WHERE production_id = $1 AND name = ANY($2)`,
-    [productionId, names]
-  );
-  return res.rows.map(r => r.id);
 }
