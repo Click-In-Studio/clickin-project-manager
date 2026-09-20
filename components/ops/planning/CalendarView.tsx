@@ -85,21 +85,21 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
 
   // 原型 CalendarMock：panel + panelHeading(kicker/h2/legend) + calendarWeek + calendarGrid + hint
   return (
-    <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22 }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginBottom: 18 }}>
-        <div style={{ minWidth: 0 }}>
+    <section className={styles.calendarPanel}>
+      <div className={styles.calendarHeader}>
+        <div className={styles.calendarHeading}>
           <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>
             {year} 年
           </p>
           <h2 style={{ margin: "5px 0 0", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>
             项目日历
           </h2>
-          <small style={{ display: "block", marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+          <small className={styles.calendarDescription}>
             月历统一展示事件、任务、里程碑与阶段；点击事项在右侧查看，点击空白处新建。
           </small>
         </div>
         {/* 月导航 + legend（原型 legend 右上） */}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+        <div className={styles.calendarControls}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
               onClick={() => { setYear(today.getUTCFullYear()); setMonth(today.getUTCMonth()); }}
@@ -113,7 +113,7 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
               <button onClick={() => move(1)} aria-label="下一月" style={CAL_NAV_BTN}>›</button>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 12, color: "var(--muted)", fontSize: 9 }}>
+          <div className={styles.calendarLegend}>
             <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <i style={{ width: 7, height: 7, borderRadius: 2, background: "var(--script)" }} />事件
             </span>
@@ -148,8 +148,11 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
             ...day.events.map(value => ({ kind: "event" as const, value })),
             ...day.tasks.map(value => ({ kind: "task" as const, value })),
           ] : [];
-          const shownEntries = dayEntries.slice(0, 4);
+          // 预算按 cell 定高算：桌面 132px 放得下阶段条 + 3 个单行 chip + 提示，手机 2 个。
+          // 超出的靠 +N 提示告知，不能靠 overflow:hidden 静默吞掉。
+          const shownEntries = dayEntries.slice(0, 3);
           const hidden = Math.max(0, dayEntries.length - shownEntries.length);
+          const hiddenOnMobile = Math.max(0, dayEntries.length - 2);
           return (
             <div
               key={date}
@@ -181,22 +184,25 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
                     style={{ height: 3, borderRadius: 2, background: phaseStyle.solid, opacity: .4, flexShrink: 0 }} />
                 );
               })}
-              {shownEntries.map(entry => {
+              {shownEntries.map((entry, index) => {
                 const entryTitle = entry.kind === "event" ? entry.value.title : entry.kind === "task" ? entry.value.title : entry.value.name;
-                const prefix = entry.kind === "event" ? "事件 · " : entry.kind === "task" ? "任务 · " : "◆ ";
+                const typeLabel = entry.kind === "event" ? "事件" : entry.kind === "task" ? "任务" : "里程碑";
                 const tone = entry.kind === "event"
                   ? { background: "var(--script-soft)", color: "var(--script)" }
                   : entry.kind === "task"
                     ? { background: "#f2e3d6", color: "var(--stage)" }
                     : { background: "var(--ink)", color: "#fff" };
                 return (
-                  <button key={`${entry.kind}-${entry.value.id}`} type="button" className={styles.calendarChip} title={entryTitle} onClick={e => { e.stopPropagation(); setSelection(entry); }} style={tone}>
-                    {prefix}{entryTitle}
+                  <button key={`${entry.kind}-${entry.value.id}`} type="button" className={`${styles.calendarChip} ${index >= 2 ? styles.calendarMobileHidden : ""}`} title={entryTitle} onClick={e => { e.stopPropagation(); setSelection(entry); }} style={tone}>
+                    <span className={styles.calendarChipType}>{typeLabel} · </span>{entryTitle}
                   </button>
                 );
               })}
               {hidden > 0 && (
-                <span style={{ fontSize: 8, color: "var(--muted)" }}>+{hidden} 项</span>
+                <span className={styles.calendarHiddenDesktop} style={{ fontSize: 8, color: "var(--muted)" }}>+{hidden} 项</span>
+              )}
+              {hiddenOnMobile > 0 && (
+                <span className={styles.calendarHiddenMobile}>+{hiddenOnMobile} 项</span>
               )}
             </div>
           );

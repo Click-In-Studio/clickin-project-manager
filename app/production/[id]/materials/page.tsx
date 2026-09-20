@@ -6,6 +6,7 @@ import { getSession } from "@/lib/account/session";
 import { getProductionName, getProductionPermissionContext } from "@/lib/db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { listMaterials, listMaterialStatuses } from "@/lib/ops/material-db";
+import responsive from "@/components/ops/responsive.module.css";
 
 export const metadata: Metadata = { title: "实体物料" };
 
@@ -54,14 +55,14 @@ export default async function MaterialsPage({ params }: { params: Promise<{ id: 
         </div>
       ) : (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 18 }}>
+          <div className={responsive.metricGrid}>
             {[{ label: "物料总数", value: String(materials.length), color: null as string | null },
               ...statusCards,
               ...(noStatus ? [{ label: "未设状态", value: String(noStatus), color: null as string | null }] : []),
             ].map(card => (
-              <div key={card.label} style={{ ...CARD, padding: "18px 20px" }}>
-                <strong style={{ display: "block", fontFamily: "Georgia, serif", color: card.color ?? "var(--ink)", fontSize: 24, fontWeight: 500 }}>{card.value}</strong>
-                <span style={{ display: "block", marginTop: 4, color: "var(--muted)", fontSize: 11 }}>{card.label}</span>
+              <div key={card.label} className={responsive.metricCard}>
+                <strong className={responsive.metricValue} style={{ color: card.color ?? "var(--ink)" }}>{card.value}</strong>
+                <span className={responsive.metricLabel}>{card.label}</span>
               </div>
             ))}
           </div>

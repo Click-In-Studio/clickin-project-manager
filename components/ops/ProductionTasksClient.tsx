@@ -12,6 +12,7 @@ import SmartText from "@/components/ui/SmartText";
 import type { PickerMember, PickerDept } from "@/components/perm/MemberPickerModal";
 import DropdownPicker, { type DropdownPickerItem } from "@/components/ui/DropdownPicker";
 import styles from "@/components/ui/my-pages.module.css";
+import responsive from "@/components/ops/responsive.module.css";
 
 const STATUS_LABEL: Record<string, string> = {
   awaiting: "待确认",
@@ -776,28 +777,21 @@ export default function ProductionTasksClient({
   return (
     <>
       {/* ── 摘要统计（原型 taskSummary：1px 缝 grid、92px 高、serif 28px 数字）── */}
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 1,
-        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
-        background: "var(--line)", marginBottom: 18,
-      }}>
+      <div className={responsive.summaryGrid}>
         {[
           [String(summary.pending), "待处理", dueToday > 0 ? `${dueToday} 项今日截止` : "含待认领"],
           [String(summary.inProgress), "进行中", inProgressDepts > 1 ? `跨 ${inProgressDepts} 个部门` : "推进中"],
           [String(summary.blocked), "已阻塞", "等待前置任务"],
           [weekPct, "本周完成度", weekHint],
         ].map(([num, label, hint]) => (
-          <div key={label} style={{
-            minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13,
-            background: "var(--surface)",
-          }}>
+          <div key={label} className={responsive.summaryCard}>
             <span style={{
-              fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28,
+              fontFamily: 'Georgia, "Noto Serif SC", serif',
               color: label === "已阻塞" && summary.blocked > 0 ? "var(--danger)" : "var(--ink)",
-            }}>{num}</span>
-            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
-              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
-              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
+            }} className={responsive.summaryValue}>{num}</span>
+            <p className={responsive.summaryText}>
+              <b className={responsive.summaryLabel}>{label}</b>
+              <small className={responsive.summaryHint}>{hint}</small>
             </p>
           </div>
         ))}
