@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { loadManual } from "@/lib/help/manual";
+import { loadChangelog, formatChangelogDate } from "@/lib/help/changelog";
 import HelpSearch from "@/components/help/HelpSearch";
 
 // 手册首页：搜索占位 + 六张一级分类卡 + 三步上手 + 热门问题（飞书 / Slack 帮助中心
@@ -9,6 +10,7 @@ export default function HelpHome() {
   const bySlug = new Map(manual.pages.map((p) => [p.slug, p]));
   const quickstart = manual.home.quickstart.map((s) => bySlug.get(s)).filter((p) => p != null);
   const popular = manual.home.popular.map((s) => bySlug.get(s)).filter((p) => p != null);
+  const latestRelease = loadChangelog().versions[0] ?? null;
 
   return (
     <div className="help-home">
@@ -44,6 +46,15 @@ export default function HelpHome() {
               <li key={p.slug}><Link href={`/help/${p.slug}`}><strong>{p.title}</strong>{p.summary && <span>{p.summary}</span>}</Link></li>
             ))}
           </ol>
+        </section>
+      )}
+
+      {latestRelease && (
+        <section className="help-home-section">
+          <h2>更新日志</h2>
+          <ul className="help-popular">
+            <li><Link href="/help/changelog"><span>最近一次更新：{formatChangelogDate(latestRelease.date)}</span><small>{latestRelease.entries.length > 0 ? `${latestRelease.entries.length} 项改动，看看有什么新东西` : "查看全部版本"}</small></Link></li>
+          </ul>
         </section>
       )}
 

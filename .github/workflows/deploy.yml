@@ -35,6 +35,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
+      # ── 1b. 更新日志闸（#569）───────────────────────────────────────────────
+      # tag 发布 = 给用户一个版本，必须有对应的 content/changelog/<tag>/_index.md，
+      # 且 unreleased/ 已清空（这个 commit 里合并的改动都得卷进这一版）。
+      # 与「schema 指纹不等即红」同一个逻辑：不许发一个没交代的版本。
+      # 流程：npm run changelog:release -- <tag> → 编辑 → commit → git tag <tag>。
+      - name: Check changelog for release
+        if: github.ref_type == 'tag'
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [ ! -f "content/changelog/$TAG/_index.md" ]; then
+            echo "::error::没有 content/changelog/$TAG/_index.md——先 npm run changelog:release -- $TAG，编辑后 commit，再打 tag（#569）"
+            exit 1
+          fi
+          LEFT=$(ls content/changelog/unreleased/*.md 2>/dev/null | grep -v '/_' | wc -l | tr -d ' ')
+          if [ "$LEFT" != "0" ]; then
+            echo "::error::content/changelog/unreleased/ 还有 $LEFT 条没卷进 $TAG——这个 tag 会把它们一起发出去，请先 npm run changelog:release"
+            ls content/changelog/unreleased/*.md
+            exit 1
+          fi
+          echo "changelog $TAG 就绪：$(ls content/changelog/$TAG/*.md | grep -vc '/_') 条"
+
       # ── 2. Setup Node ────────────────────────────────────────────────────────
       - name: Setup Node.js
         uses: actions/setup-node@v4.4.0

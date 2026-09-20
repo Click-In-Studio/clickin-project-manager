@@ -57,6 +57,8 @@
 .help-search-snippet { display: block; font-size: 12px; color: var(--muted); line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .help-search-empty { padding: 14px; font-size: 13px; color: var(--muted); }
 @media (max-width: 640px) { .help-header .help-search-wrap { display: none; } }
+.help-header-link { flex-shrink: 0; text-decoration: none; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.help-header-link:hover { color: var(--ink); }
 .help-open-app {
   flex-shrink: 0; text-decoration: none; font-size: 12px; font-weight: 700;
   border: 1px solid var(--ink); border-radius: 8px; padding: 7px 12px; white-space: nowrap;
@@ -230,3 +232,37 @@
 .help-popular a:hover { border-color: var(--ink); }
 .help-popular small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 .help-empty { padding: 48px 20px; text-align: center; color: var(--muted); }
+
+/* ── 更新日志（#569） ── */
+.help-changelog { max-width: 760px; margin: 0 auto; padding: 32px 20px 64px; }
+.help-changelog-version {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 24px clamp(20px, 4vw, 36px) 28px; margin-top: 18px;
+}
+.help-changelog-version.is-unreleased { border-style: dashed; }
+.help-changelog-version > header h2 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.01em; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.help-changelog-version > header p { margin: 6px 0 0; font-size: 14px; color: var(--muted); line-height: 1.6; }
+.help-changelog-tag { font-size: 11px; font-weight: 600; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.help-changelog-group { margin-top: 18px; }
+.help-changelog-group h3 {
+  margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  display: flex; align-items: center; gap: 8px;
+}
+.help-changelog-group h3::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.help-changelog-group.is-new h3::before { background: #2f8f5b; }
+.help-changelog-group.is-improved h3::before { background: #2c6fbf; }
+.help-changelog-group.is-fixed h3::before { background: #c9862b; }
+.help-changelog-group.is-removed h3::before { background: #8a8a8a; }
+.help-changelog-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.help-changelog-list li { padding: 10px 14px; border-radius: 10px; background: var(--paper); border: 1px solid var(--line); font-size: 14px; line-height: 1.6; }
+.help-changelog-list li strong { display: block; font-weight: 600; }
+.help-changelog-list .help-prose { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.help-changelog-list .help-prose p { margin: 0 0 6px; }
+.help-changelog-more { display: inline-block; margin-top: 4px; font-size: 12px; color: var(--script); text-decoration: none; }
+.help-changelog-more:hover { text-decoration: underline; }
+.help-changelog-empty { margin: 14px 0 0; font-size: 14px; color: var(--muted); }
+/* 手册页顶部的「本页功能有更新」条（B3） */
+.help-page-changes { margin: 0 0 18px; padding: 10px 14px; border-radius: 10px; background: var(--script-soft); font-size: 13px; line-height: 1.6; }
+.help-page-changes a { font-weight: 600; text-decoration: none; }
+.help-page-changes a:hover { text-decoration: underline; }
+.help-page-changes ul { margin: 4px 0 0; padding-left: 18px; list-style: disc; }

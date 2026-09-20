@@ -46,13 +46,15 @@ interface AppShellProps {
   initialUnreadReports?: number;
   /** 产品路由 → 手册页 slug（#538「本页帮助」），RootLayout 从 content/manual 算出。 */
   helpRoutes?: Record<string, string>;
+  /** 最新已发版本号（#569 更新日志红点） */
+  latestChangelogVersion?: string | null;
 }
 
 const SCROLLBAR_ACTIVITY_HIDE_DELAY_MS = 700;
 
 type DrawerType = "overview" | "creation" | "production" | "admin" | "me";
 
-export default function AppShell({ session, productions, canCreateProduction = false, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0, helpRoutes = {} }: AppShellProps) {
+export default function AppShell({ session, productions, canCreateProduction = false, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0, helpRoutes = {}, latestChangelogVersion = null }: AppShellProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   // 页面显式上报的「当前对象」（#476 follow-up）——见 components/agent/ai-target.tsx
@@ -354,6 +356,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             unreadCount={unreadCount}
             pathname={pathname}
             helpRoutes={helpRoutes}
+            latestChangelogVersion={latestChangelogVersion}
             accountHref={accountHref}
             adminHref={currentProduction?.canAdmin && productionId ? `/production/${productionId}/admin` : null}
             adminName={currentProduction?.name ?? null}

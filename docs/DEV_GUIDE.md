@@ -1074,6 +1074,7 @@ updated: 2026-09-18               # 必填 YYYY-MM-DD
 - 新增侧栏入口：覆盖棘轮会红（`MISSING_ALLOWED` 只减不增），补页是过 CI 的前提。
 - 删功能：删掉对应页或段落，别留「即将」「暂不」。
 - 手册页也是 review 对象：AI review 与人工 review 都要看 md 改动是否与代码改动对得上。
+- 同一个 PR 顺手写一条更新日志条目（§12.8）：手册是「现在怎么用」，日志是「这次改了什么」。
 
 ### 12.6 「本页帮助」「报告问题」「搜索」（#538）
 
@@ -1094,5 +1095,37 @@ updated: 2026-09-18               # 必填 YYYY-MM-DD
 | `lib/help/bug-report-db.ts` `app/api/bug-reports/` | 报告问题落库与接口 |
 | `lib/help/search-index.ts` `app/api/help/search-index/` | 搜索索引 |
 | `components/shell/app-shell/help-link.ts` | 本页帮助的路由归一化 |
-| `next.config.ts` | `outputFileTracingIncludes` 圈进 `content/manual/**`（standalone 不追踪 fs 读） |
+| `next.config.ts` | `outputFileTracingIncludes` 圈进 `content/manual/**` 与 `content/changelog/**`（standalone 不追踪 fs 读） |
+| `lib/help/changelog.ts` `lib/help/changelog-seen.ts` | 更新日志加载 / 红点「看过没有」（§12.8） |
+| `app/help/changelog/` `scripts/changelog-release.ts` | 更新日志页 / 发版卷起脚本 |
+
+### 12.8 更新日志（#569）
+
+`/help/changelog` 是给用户看的版本记录：头像菜单「更新日志」、手册顶栏、手册首页都能进；有没看过的新版本时头像亮红点（键是最新版本号，存 localStorage，不进库）。手册页顶部若有已发版本提到这页，显示「某日的更新改了这页说的功能」。
+
+**不是 commit message 拼接**。读者是导演 / 舞监，`chore(db): #486 项目本体搬出 db.ts` 对他们是噪音，`fix(collab): #578 在场心跳` 得翻译成「安静读剧本的人不再从在线头像里消失」。翻译没法机械做，所以日志是人写的独立内容——**改手册页的那个 PR 顺手写一条**，发版时卷成一个版本。
+
+```
+content/changelog/
+├── _TEMPLATE.md               # 作者模板
+├── unreleased/                # 已合并、还没随 tag 发到 prod 的条目；每 PR 一个文件（避免冲突）
+│   └── 566-calendar-inline-edit.md
+└── v0.2/                      # 目录名 = git tag；发版脚本从 unreleased/ 搬进来
+    ├── _index.md              #   date（必填）/ summary
+    └── 566-calendar-inline-edit.md
+```
+
+条目 frontmatter：`kind`（new 新增 / improved 优化 / fixed 修复 / removed 下线）、`title`（必填，一句话）、`page`（对应手册页 slug → 「了解更多」，测试校验存在）、`pr`（unreleased 里必填）、`order`。正文可选：一两句补充或一张截图。
+
+**写法 = 手册写法（§12.3）**，外加：一条只说一件事；修复类写「X 不再 Y」；标题不出现 issue 号 / 路径 / 代码标识（`tests/help/changelog.test.ts` 会拦）。**内部改动不写条目**：重构、测试、CI、依赖升级给 PR 打 `chore`（或 `documentation` / `docs/help` / `workflow` / `research` / `db`）标签即可。
+
+流程：
+
+| 时机 | 谁 | 做什么 |
+|---|---|---|
+| 功能 PR | 作者 | 复制 `_TEMPLATE.md` 到 `unreleased/<PR号>-<两三个词>.md`。没写又没打豁免标签，`pr-automation` 会留一条提醒评论（软提醒不红；补上自动删） |
+| 发版 | 打 tag 的人 | `npm run changelog:release -- v0.N`：建 `v0.N/_index.md`、`git mv` 碎片进去。**然后人来编辑**：重排、合并、删太细的、补 summary。commit 后再 `git tag` |
+| tag 部署 | CD | `deploy.yml` 闸：`content/changelog/<tag>/_index.md` 不存在、或 `unreleased/` 还有条目 → 红。与 schema 指纹同一个逻辑：不许发一个没交代的版本 |
+
+dev 环境（main 自动发）上 `unreleased/` 有条目时页面顶部多一段「即将发布」，测试同学用它知道 dev 上有什么新东西；prod 上发版已卷走，不显示。纯内部版本用 `--allow-empty`，页面显示「这一版没有你能感知到的改动」。
 
