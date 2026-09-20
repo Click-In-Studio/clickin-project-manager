@@ -38,15 +38,35 @@ export function isVisuallyEmptyParagraph(node: PMNode): boolean {
   return onlyTextOrBreak && node.textContent.trim() === "";
 }
 
+/** 一个 nbsp 文本节点「独占一行」：两侧要么没有兄弟、要么是块元素（行内兄弟说明它是正文的一部分） */
+const BLOCK_TAGS = new Set(["P", "UL", "OL", "LI", "BLOCKQUOTE", "DIV", "TABLE", "PRE", "HR", "H1", "H2", "H3", "H4", "H5", "H6"]);
+function standsAlone(t: ChildNode): boolean {
+  const prev = t.previousSibling, next = t.nextSibling;
+  return (!prev || BLOCK_TAGS.has(prev.nodeName)) && (!next || BLOCK_TAGS.has(next.nodeName));
+}
+
 /**
  * 解析侧：markdown-it 把 `&nbsp;` 行渲染成 `<p>\u00a0</p>`（U+00A0），这里还原成空 `<p></p>`。
- * 只认「整段就是一个 nbsp」——正文里夹着 nbsp 的段落是用户自己写的，不动。
+ * 紧凑列表项里 markdown-it 不出 `<p>`，nbsp 直接裸在 `<li>` 下（`<li>\u00a0<ul>…`），
+ * 同样换成空 `<p></p>`——否则 ProseMirror 会包成一个含 nbsp 的段落。
+ * 只认「独占一行的一个 nbsp」——正文里夹着 nbsp 的段落是用户自己写的，不动。
  * 供 tiptap-markdown 的 parse.updateDOM 钩子与单测使用。
  */
 export function restoreEmptyParagraphs(root: HTMLElement) {
-  for (const p of Array.from(root.querySelectorAll("p"))) {
-    const only = p.childNodes.length === 1 ? p.firstChild : null;
-    if (only && only.nodeType === 3 /* TEXT_NODE */ && only.textContent === NBSP) p.textContent = "";
+  for (const host of Array.from(root.querySelectorAll("p, li"))) {
+    for (const t of Array.from(host.childNodes)) {
+      // 紧凑列表项里 nbsp 后面跟着 markdown-it 的换行（`\u00a0\n<ul>`），换行不算内容
+      if (t.nodeType !== 3 /* TEXT_NODE */ || (t.textContent ?? "").replace(/\n/g, "") !== NBSP || !standsAlone(t)) continue;
+      if (host.nodeName === "P") { t.remove(); continue; }
+      // `<li>\u00a0<ul>…`：得塞一个真 `<p></p>`——只删文本留下 `<li><ul>…`，ProseMirror
+      // 按 listItem 的 `paragraph block*` 放不下开头的 <ul>，会把嵌套列表整个提到外面。
+      // 但 tiptap-markdown 判 tight 的依据是「列表里没有 <p>」，塞进去之前先把本来
+      // 紧凑的祖先列表钉成 data-tight，别让一个空段把整个列表撑成 loose
+      for (let list = host.parentElement; list; list = list.parentElement) {
+        if ((list.nodeName === "UL" || list.nodeName === "OL") && !list.querySelector("p")) list.setAttribute("data-tight", "true");
+      }
+      t.replaceWith(root.ownerDocument.createElement("p"));
+    }
   }
 }
 

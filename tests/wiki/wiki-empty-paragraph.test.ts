@@ -111,6 +111,21 @@ describe("空段落在各种位置", () => {
     expect(inCallout.md2).toBe(inCallout.md);
   });
 
+  it("列表项开头的空段 + 嵌套列表：嵌套关系保住，空段还原成空段", () => {
+    const nested = { type: "bulletList", content: [li(P("x"))] };
+    const r = roundtrip(doc({ type: "bulletList", content: [li(P(), nested)] }));
+    expect(r.md).toBe(`- ${EMPTY_PARAGRAPH_MD}\n  - x`);
+    expect(r.receiverShape).toEqual(["bulletList(1)"]);
+    const item = makeEditor(r.md).state.doc.child(0).child(0);
+    expect(item.childCount).toBe(2);
+    expect(item.child(0).textContent).toBe("");
+    expect(item.child(1).type.name).toBe("bulletList");
+    expect(r.md2).toBe(r.md);
+    // 反证：没有方言时 `- \n  - x` 被 markdown-it 拆成两个顶层列表（嵌套关系吃掉）
+    const plain = new Editor({ extensions: [StarterKit, Markdown.configure({ breaks: true })], content: "- \n  - x" });
+    expect(shape(plain)).toEqual(["bulletList(1)", "bulletList(1)"]);
+  });
+
   it("表格空单元格不写 `&nbsp;`——由 `|` 撑着", () => {
     const md = "| a |  |\n| --- | --- |\n| 1 |  |\n";
     const e = makeEditor(md);
@@ -129,9 +144,13 @@ describe("解析侧", () => {
 
   it("正文里夹着的 nbsp 不动——那是用户自己写的", () => {
     const root = document.createElement("div");
-    root.innerHTML = "<p>\u00a0</p><p>甲\u00a0乙</p><p>\u00a0<b>x</b></p>";
+    root.innerHTML = "<p>\u00a0</p><p>甲\u00a0乙</p><p>\u00a0<b>x</b></p><ul><li>\u00a0\n<ul><li>x</li></ul></li><li>a\u00a0</li></ul>";
     restoreEmptyParagraphs(root);
-    expect(root.innerHTML).toBe("<p></p><p>甲&nbsp;乙</p><p>&nbsp;<b>x</b></p>");
+    // 紧凑列表项里的裸 nbsp 换成空 <p>，本来紧凑的祖先列表钉 data-tight（嵌套列表不是祖先，自己本来就紧凑）
+    expect(root.innerHTML).toBe(
+      "<p></p><p>甲&nbsp;乙</p><p>&nbsp;<b>x</b></p>" +
+      '<ul data-tight="true"><li><p></p><ul><li>x</li></ul></li><li>a&nbsp;</li></ul>',
+    );
   });
 
   it("isVisuallyEmptyParagraph：图片/mention 等原子节点不算空", () => {
