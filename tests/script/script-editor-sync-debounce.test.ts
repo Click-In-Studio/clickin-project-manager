@@ -37,7 +37,7 @@ describe("ScriptEditor 自动同步 debounce（#520）", () => {
 
   it("撞锁记 deferred 并在飞完后重排，而不是静默丢弃", () => {
     expect(src).toMatch(/if \(isSyncingRef\.current\) \{ deferredSyncRef\.current = true; return; \}/);
-    expect(src).toMatch(/if \(deferredSyncRef\.current\) \{\s*deferredSyncRef\.current = false;\s*if \(!syncUnmountedRef\.current\) syncDebounce\.trigger\(\);\s*\}/);
+    expect(src).toMatch(/if \(deferredSyncRef\.current\) \{ deferredSyncRef\.current = false; if \(!syncUnmountedRef\.current\) syncDebounce\.trigger\(\); \}/);
   });
 
   it("卸载后在飞的那笔不再重排计时器", () => {

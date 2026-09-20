@@ -1386,9 +1386,8 @@ export default function ScriptEditor({
   const isSyncingRef = useRef(false);
   const syncIdleWaitersRef = useRef<Array<() => void>>([]);
   // 计时器到期时上一笔还在飞：记下来，飞完重排一轮（不能丢——停手前最后一段
-  // 输入若恰好撞锁，没有下一个击键就再也不落库）。
+  // 输入若恰好撞锁，没有下一个击键就再也不落库）；已卸载则不再重排。
   const deferredSyncRef = useRef(false);
-  // 卸载时若上一笔还在飞，它的 finally 不能再重排（会在卸载后 arm 计时器）
   const syncUnmountedRef = useRef(false);
   const pendingMovedBlockIdsRef = useRef<Set<string>>(new Set());
 
@@ -1497,10 +1496,7 @@ export default function ScriptEditor({
         const waiters = syncIdleWaitersRef.current;
         syncIdleWaitersRef.current = [];
         for (const resolve of waiters) resolve();
-        if (deferredSyncRef.current) {
-          deferredSyncRef.current = false;
-          if (!syncUnmountedRef.current) syncDebounce.trigger();
-        }
+        if (deferredSyncRef.current) { deferredSyncRef.current = false; if (!syncUnmountedRef.current) syncDebounce.trigger(); }
       }
     };
   }, [effectiveScriptId, activeVersionId, canEdit, loadState, syncDebounce]);
