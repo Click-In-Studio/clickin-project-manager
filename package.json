@@ -11,6 +11,7 @@
     "db": "tsx scripts/db.ts",
     "db:fingerprint": "tsx scripts/db-fingerprint.ts",
     "db:check": "tsx scripts/db-check.ts",
+    "changelog:release": "tsx scripts/changelog-release.ts",
     "test": "vitest run",
     "test:ui": "vitest run --config vitest.ui.config.ts",
     "test:markers": "tsc -p tsconfig.marker-tests.json && node .marker-test-dist/tests/script/marker-transitions.js",

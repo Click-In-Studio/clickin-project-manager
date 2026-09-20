@@ -18,6 +18,8 @@ const nextConfig: NextConfig = {
       './node_modules/pdfjs-dist/iccs/**',
       // #531 使用手册：content/manual 由 lib/help/manual.ts 运行时 fs 直读，同样不会被追踪
       './content/manual/**',
+      // #569 更新日志：content/changelog 由 lib/help/changelog.ts 同样方式直读
+      './content/changelog/**',
     ],
   },
 };

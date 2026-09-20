@@ -9,10 +9,11 @@ import { BASE_PATH } from "@/lib/base-path";
 import DropdownItem from "./DropdownItem";
 import UserAvatarContent from "./UserAvatarContent";
 import { helpHrefFor } from "./help-link";
+import { hasUnseenChangelog, markChangelogSeen, readSeenChangelogVersion } from "@/lib/help/changelog-seen";
 import BugReportModal from "@/components/help/BugReportModal";
 
 export default function UserMenu({
-  name, avatarSrc, userInitial, unreadCount, pathname, helpRoutes, accountHref, adminHref, adminName, hidden,
+  name, avatarSrc, userInitial, unreadCount, pathname, helpRoutes, latestChangelogVersion, accountHref, adminHref, adminName, hidden,
 }: {
   name: string;
   avatarSrc: string | null;
@@ -21,6 +22,8 @@ export default function UserMenu({
   pathname: string;
   /** 产品路由 → 手册页 slug（RootLayout 从 content/manual 算出下发） */
   helpRoutes: Record<string, string>;
+  /** 最新已发版本号（RootLayout 从 content/changelog 算出下发）；与 localStorage 里看过的不同就亮红点（#569） */
+  latestChangelogVersion: string | null;
   accountHref: (tab: "profile" | "security" | "preferences") => string;
   /** 有管理面资格时给配置中心链接 */
   adminHref: string | null;
@@ -30,7 +33,13 @@ export default function UserMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [reporting, setReporting] = useState(false);
+  const [changelogNew, setChangelogNew] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  // localStorage 只能在 effect 里读（SSR 会先渲染一次，见 feedback_ssr_window_guard）
+  useEffect(() => {
+    setChangelogNew(hasUnseenChangelog(latestChangelogVersion, readSeenChangelogVersion()));
+  }, [latestChangelogVersion]);
 
   useEffect(() => {
     if (!open) return;
@@ -53,7 +62,7 @@ export default function UserMenu({
         className="relative w-9 h-9 rounded-full border border-[var(--line)] overflow-hidden bg-[#182a2a] flex items-center justify-center hover:opacity-90 transition-opacity shrink-0"
       >
         <UserAvatarContent src={avatarSrc} initial={userInitial} />
-        {unreadCount > 0 && (
+        {(unreadCount > 0 || changelogNew) && (
           <span className="absolute top-0 right-0 w-2.5 h-2.5 rounded-full bg-[#c0392b] border-2 border-[var(--surface)]" />
         )}
       </button>
@@ -82,6 +91,17 @@ export default function UserMenu({
           <div className="h-px bg-[var(--line)] mx-1 my-1.5" />
           <DropdownItem href={helpHref} onClick={close}>本页帮助</DropdownItem>
           <DropdownItem href="/help" onClick={close}>使用手册</DropdownItem>
+          <DropdownItem
+            href="/help/changelog"
+            onClick={() => {
+              close();
+              if (latestChangelogVersion) markChangelogSeen(latestChangelogVersion);
+              setChangelogNew(false);
+            }}
+          >
+            更新日志
+            {changelogNew && <span className="ml-auto text-[10px] font-bold text-white bg-[#c0392b] rounded-full px-1.5 leading-4">新</span>}
+          </DropdownItem>
           <button
             type="button"
             onClick={() => { close(); setReporting(true); }}

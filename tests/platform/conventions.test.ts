@@ -348,7 +348,7 @@ const MONOLITH_LINE_CEILING: Record<string, number> = {
   "components/ops/EventDetailClient.tsx": 421,
   "components/ops/CuePage.tsx": 1449,
   "components/ops/PlanningClient.tsx": 98,
-  "components/shell/AppShell.tsx": 813,
+  "components/shell/AppShell.tsx": 816, // #569 更新日志红点：latestChangelogVersion 一个 prop 透传（+3）
 };
 
 const FAMILY_FILE_CEILING = { component: 800, module: 400 } as const;

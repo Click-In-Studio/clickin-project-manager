@@ -10,6 +10,7 @@ import { getUserTier, PRODUCTION_TIERS } from "@/lib/account/plan";
 import ManualSaveNotice from "@/components/shell/ManualSaveNotice";
 import AppShell from "@/components/shell/AppShell";
 import { loadManual, manualRouteIndex } from "@/lib/help/manual";
+import { loadChangelog, latestChangelogVersion } from "@/lib/help/changelog";
 // 剧本字体的 @font-face（生成文件，见 scripts/fonts/build-fonts.py）；先于 globals.css 引入
 import "./fonts.css";
 import "./globals.css";
@@ -69,6 +70,7 @@ export default async function RootLayout({
 
   // 「本页帮助」（#538）：产品路由 → 手册页。内容随构建走，生产环境 loadManual 有进程内缓存。
   const helpRoutes = Object.fromEntries(manualRouteIndex(loadManual()));
+  const latestRelease = latestChangelogVersion(loadChangelog());
 
   return (
     <html
@@ -93,7 +95,7 @@ export default async function RootLayout({
       </head>
       <body className="h-full overflow-hidden">
         <ManualSaveNotice />
-        <AppShell session={shellSession} productions={productions} canCreateProduction={canCreateProduction} initialUnreadCount={unreadNotificationCount} initialPendingTasks={pendingTaskCount} initialUnreadReports={unreadReportCount} helpRoutes={helpRoutes}>
+        <AppShell session={shellSession} productions={productions} canCreateProduction={canCreateProduction} initialUnreadCount={unreadNotificationCount} initialPendingTasks={pendingTaskCount} initialUnreadReports={unreadReportCount} helpRoutes={helpRoutes} latestChangelogVersion={latestRelease}>
           {children}
         </AppShell>
       </body>

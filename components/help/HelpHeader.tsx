@@ -13,6 +13,7 @@ export default function HelpHeader() {
           <span className="help-brand-text">Backstage <span>使用手册</span></span>
         </Link>
         <HelpSearch />
+        <Link href="/help/changelog" className="help-header-link">更新日志</Link>
         <Link href="/" className="help-open-app">打开 Backstage</Link>
       </div>
     </header>

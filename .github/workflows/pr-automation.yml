@@ -2,7 +2,8 @@ name: PR Automation
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    # labeled / unlabeled 是给 changelog-check 的：打上 chore 标签就该撤掉提醒
+    types: [opened, synchronize, labeled, unlabeled]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -116,6 +117,78 @@ jobs:
               });
             }
 
+  # 更新日志提醒（#569，DEV_GUIDE §12.8）：功能 PR 要在 content/changelog/unreleased/
+  # 留一条给用户看的条目。豁免两种：改动全在文档 / 测试 / CI / 迁移这些用户碰不到的
+  # 路径里（按路径判，不靠标签——docs/help 是手册内容 PR 的标签，功能 PR 顺手打上就
+  # 漏网，AI review 指出）；或打了 chore 等内部标签。软提醒不红——判断「用户能不能
+  # 感知」是人的事，CI 只负责别让人忘了。满足后自动删评论。
+  # 仓库是私有 org 仓、没有 fork 贡献，pull_request 事件的 token 够写评论。
+  changelog-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const MARKER = '<!-- changelog-reminder -->';
+            const EXEMPT_LABELS = ['chore', 'workflow', 'research'];
+            // 用户碰不到的路径：全部改动都在这里面就不用条目
+            const INTERNAL_PATH = /^(content\/manual\/|docs\/|tests\/|\.github\/|db\/|scripts\/|deploy\/|README\.md$|AGENTS\.md$|CLAUDE\.md$)/;
+            const pr = context.payload.pull_request;
+
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+            const hasEntry = files.some(f =>
+              /^content\/changelog\/unreleased\/[^_][^/]*\.md$/.test(f.filename) && f.status !== 'removed'
+            );
+            const exempt = pr.labels.some(l => EXEMPT_LABELS.includes(l.name))
+              || files.every(f => INTERNAL_PATH.test(f.filename));
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+            });
+            const existing = comments.find(c => c.user.type === 'Bot' && c.body.includes(MARKER));
+
+            if (hasEntry || exempt) {
+              if (existing) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                });
+              }
+              return;
+            }
+            if (existing) return;
+
+            const body = [
+              MARKER,
+              '## 📝 这个 PR 还没有更新日志条目',
+              '',
+              '用户在「更新日志」里看到的不是 commit message，是人写的一句话（#569，DEV_GUIDE §12.8）。二选一：',
+              '',
+              '- **用户能感知到变化**（新功能 / 改了流程或文案 / 修了他们碰得到的 bug）→ 复制 `content/changelog/_TEMPLATE.md` 到 `content/changelog/unreleased/' + pr.number + '-<两三个词>.md`，写给导演 / 舞监看得懂的一句话，`page` 指向对应手册页',
+              '- **纯内部改动**（重构、依赖升级）→ 给 PR 打 `chore` 标签（或 ' + EXEMPT_LABELS.filter(l => l !== 'chore').map(l => '`' + l + '`').join(' / ') + '）。只改文档 / 测试 / CI / 迁移的 PR 自动豁免，不用打',
+              '',
+              '补上任一项后这条评论会自动消失。',
+              '',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body,
+            });
+
   # AI-based code review: posts findings as a PR comment (not a CI gate).
   # Triggers automatically on PR open; re-run manually via workflow_dispatch.
   ai-review:
@@ -219,6 +292,7 @@ jobs:
               '- Runtime migration functions (named `ensureXxx` or `backfillXxx`) must have idempotency tests.',
               '- `db/schema.sql` changes must be paired with a regenerated `db/seed-schema.json`.',
               '- No raw DDL (`ALTER TABLE`, `CREATE INDEX`, `DROP TABLE`) in `lib/` or `app/api/` -- DDL belongs in `db/` files only.',
+              '- User-facing changes ship with a changelog entry in `content/changelog/unreleased/*.md` (and manual updates in `content/manual/`). Both are written for non-technical readers (directors, stage managers): flag entries that leak issue numbers, file paths, code identifiers, or describe the implementation instead of what the user will see.',
               '- GC queries must use separate statements, not CTEs (CTE snapshot isolation prevents NOT EXISTS from seeing same-transaction deletes).',
               '',
               'Review ONLY what is visible in the diff. Do not speculate about files not shown.',
