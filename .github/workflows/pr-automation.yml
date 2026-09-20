@@ -118,8 +118,11 @@ jobs:
             }
 
   # 更新日志提醒（#569，DEV_GUIDE §12.8）：功能 PR 要在 content/changelog/unreleased/
-  # 留一条给用户看的条目；纯内部改动打 chore 等标签豁免。软提醒不红——判断「用户
-  # 能不能感知」是人的事，CI 只负责别让人忘了。满足后自动删评论。
+  # 留一条给用户看的条目。豁免两种：改动全在文档 / 测试 / CI / 迁移这些用户碰不到的
+  # 路径里（按路径判，不靠标签——docs/help 是手册内容 PR 的标签，功能 PR 顺手打上就
+  # 漏网，AI review 指出）；或打了 chore 等内部标签。软提醒不红——判断「用户能不能
+  # 感知」是人的事，CI 只负责别让人忘了。满足后自动删评论。
+  # 仓库是私有 org 仓、没有 fork 贡献，pull_request 事件的 token 够写评论。
   changelog-check:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -131,7 +134,9 @@ jobs:
         with:
           script: |
             const MARKER = '<!-- changelog-reminder -->';
-            const EXEMPT_LABELS = ['chore', 'documentation', 'docs/help', 'workflow', 'research', 'db'];
+            const EXEMPT_LABELS = ['chore', 'workflow', 'research'];
+            // 用户碰不到的路径：全部改动都在这里面就不用条目
+            const INTERNAL_PATH = /^(content\/manual\/|docs\/|tests\/|\.github\/|db\/|scripts\/|deploy\/|README\.md$|AGENTS\.md$|CLAUDE\.md$)/;
             const pr = context.payload.pull_request;
 
             const { data: files } = await github.rest.pulls.listFiles({
@@ -143,7 +148,8 @@ jobs:
             const hasEntry = files.some(f =>
               /^content\/changelog\/unreleased\/[^_][^/]*\.md$/.test(f.filename) && f.status !== 'removed'
             );
-            const exempt = pr.labels.some(l => EXEMPT_LABELS.includes(l.name));
+            const exempt = pr.labels.some(l => EXEMPT_LABELS.includes(l.name))
+              || files.every(f => INTERNAL_PATH.test(f.filename));
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -171,7 +177,7 @@ jobs:
               '用户在「更新日志」里看到的不是 commit message，是人写的一句话（#569，DEV_GUIDE §12.8）。二选一：',
               '',
               '- **用户能感知到变化**（新功能 / 改了流程或文案 / 修了他们碰得到的 bug）→ 复制 `content/changelog/_TEMPLATE.md` 到 `content/changelog/unreleased/' + pr.number + '-<两三个词>.md`，写给导演 / 舞监看得懂的一句话，`page` 指向对应手册页',
-              '- **纯内部改动**（重构、测试、CI、依赖）→ 给 PR 打 `chore` 标签（或 ' + EXEMPT_LABELS.filter(l => l !== 'chore').map(l => '`' + l + '`').join(' / ') + '）',
+              '- **纯内部改动**（重构、依赖升级）→ 给 PR 打 `chore` 标签（或 ' + EXEMPT_LABELS.filter(l => l !== 'chore').map(l => '`' + l + '`').join(' / ') + '）。只改文档 / 测试 / CI / 迁移的 PR 自动豁免，不用打',
               '',
               '补上任一项后这条评论会自动消失。',
               '',

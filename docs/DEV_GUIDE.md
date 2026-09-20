@@ -1117,7 +1117,7 @@ content/changelog/
 
 条目 frontmatter：`kind`（new 新增 / improved 优化 / fixed 修复 / removed 下线）、`title`（必填，一句话）、`page`（对应手册页 slug → 「了解更多」，测试校验存在）、`pr`（unreleased 里必填）、`order`。正文可选：一两句补充或一张截图。
 
-**写法 = 手册写法（§12.3）**，外加：一条只说一件事；修复类写「X 不再 Y」；标题不出现 issue 号 / 路径 / 代码标识（`tests/help/changelog.test.ts` 会拦）。**内部改动不写条目**：重构、测试、CI、依赖升级给 PR 打 `chore`（或 `documentation` / `docs/help` / `workflow` / `research` / `db`）标签即可。
+**写法 = 手册写法（§12.3）**，外加：一条只说一件事；修复类写「X 不再 Y」；标题不出现 issue 号 / 路径 / 代码标识（`tests/help/changelog.test.ts` 会拦）。**内部改动不写条目**：改动全在 `content/manual/` `docs/` `tests/` `.github/` `db/` `scripts/` 里的 PR 自动豁免；重构、依赖升级这类碰了代码的内部改动给 PR 打 `chore`（或 `workflow` / `research`）标签。
 
 流程：
 
