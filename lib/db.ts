@@ -3571,53 +3571,6 @@ export async function listProductionDepts(
   return rows;
 }
 
-// ─── 成员 upsert（随成员段搬 perm/member-db）───────────────────────────────────
-
-export async function upsertProductionMemberWithRoles(
-  productionId: string,
-  userId: string,
-  roles: string[],
-  photoUrl: string | null,
-): Promise<void> {
-  const pool = getPool();
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-
-    await client.query(
-      `INSERT INTO production_member (production_id, user_id, roles, photo_url)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (production_id, user_id) DO UPDATE
-         SET roles     = EXCLUDED.roles,
-             photo_url = EXCLUDED.photo_url`,
-      [productionId, userId, roles, photoUrl],
-    );
-
-    // Rebuild production_member_role FK rows
-    await client.query(
-      "DELETE FROM production_member_role WHERE production_id = $1 AND user_id = $2",
-      [productionId, userId],
-    );
-    if (roles.length > 0) {
-      await client.query(
-        `INSERT INTO production_member_role (production_id, user_id, role_id)
-         SELECT $1, $2, pr.id
-         FROM production_role pr
-         WHERE pr.production_id = $1 AND pr.name = ANY($3::text[])
-         ON CONFLICT DO NOTHING`,
-        [productionId, userId, roles],
-      );
-    }
-
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
-  } finally {
-    client.release();
-  }
-}
-
 // ─── Block Tags ───────────────────────────────────────────────────────────────
 
 export type TagOption = {
