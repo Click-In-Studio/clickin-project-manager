@@ -45,9 +45,9 @@ next-env.d.ts
 /public/fonts/*.otf
 .r2-config
 
-# AI agent instruction files (not intended for human readers)
-AGENTS.md
-agent_bot.md
+# AI coding agent 的个人偏好文件（仓库级规约 AGENTS.md / CLAUDE.md 入库，个人层不入库；#559）
+CLAUDE.local.md
+AGENTS.local.md
 
 # Local deployment config (contains sensitive server/credential info)
 docs/DEPLOY_LOCAL.md
@@ -59,11 +59,6 @@ Trace-*.json
 # Agent 记忆运行时数据（本地开发时 AGENT_MEMORY_PATH 未设的兜底目录，
 # 含对话原文，见 lib/agent-memory/store.ts）
 /data/agent-memory/
-
-# openclaw-workspace/AGENTS.md 是系统级 agent 指令的版本控制源（CD 同步到
-# gateway workspace，见 openclaw-workspace/README.md）——必须入库，对上面
-# 的 AGENTS.md 通配规则开反例。
-!/openclaw-workspace/AGENTS.md
 
 # Claude Code 的临时 worktree（并发验证任务用），不属于仓库内容
 .claude/worktrees/

@@ -236,8 +236,10 @@ crontab -e
 
 | 环境 | 触发 | 机器 | 域名 | 用途 |
 |---|---|---|---|---|
-| dev | push `main` | AWS（`click-in`） | `app-dev.clickinmusical.com` | 团队日常，跟着 main 走 |
-| prod | push tag `v*` | 阿里云（`click-in-2`） | `app.clickinmusical.com` / `backstage.clickinmusical.com` | 测试用户，只随 tag 变 |
+| dev | push `main` | 阿里云香港（ssh alias `click-in-dev`） | `app-dev.clickinmusical.com` | 团队日常，跟着 main 走 |
+| prod | push tag `v*` | 阿里云香港（ssh alias `click-in-prod`） | `app.clickinmusical.com` / `backstage.clickinmusical.com` | 测试用户，只随 tag 变 |
+
+（AWS 机 `click-in` 已于 2026-09-19 关停；两台阿里云机都是它的整机搬迁。新机恢复库前先装 pgvector，恢复后跑 `db/fingerprint.sql` 对指纹、再扫一遍 `has_table_privilege('script_editor', …)`——指纹看不到 ACL。）
 
 两台机器的目录布局、pm2 定义、迁移流程完全一致，`deploy.yml` 只按 `github.ref_type` 选 SSH 目标（secrets `SERVER_HOST[_PROD]` / `SERVER_USER[_PROD]`，私钥共用）。两边各有自己的库，互不同步；dev 的库是切换时从 prod 拷的快照。
 
@@ -247,7 +249,7 @@ crontab -e
 git tag v0.12 && git push origin v0.12        # 从 main 上已验证的 commit 打 tag
 ```
 
-hotfix：从上一个 tag 拉分支，cherry-pick 修复，打新 tag；不需要动 main（migration 按版本号逐支判断 pending，hotfix 分支上时间戳更早的也能正常上）。
+hotfix：从上一个 tag 拉分支（**不从 main**——main 领先 tag 一大截），修复后在该 commit 打新 tag 发 prod，再补 `content/changelog/<新 tag>/` 并 PR 回 main（migration 按版本号逐支判断 pending，hotfix 分支上时间戳更早的也能正常上）。两台机 nginx 站点块都要有 `proxy_set_header X-Forwarded-Proto $scheme;`（应用侧对非回环 host 一律按 https，不信这个头，#591）。
 
 dev 与 prod 互不阻塞、同一环境串行（workflow `concurrency`）。
 
