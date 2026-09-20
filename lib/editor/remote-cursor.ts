@@ -43,7 +43,8 @@ export function projectBlockIndex(doc: PMNode, localIndex: number): number {
  * 整篇都是空行时钳到末块。文档至少有一个块，所以总能落到一个位置。
  */
 export function resolveRemoteCursorPos(doc: PMNode, cursor: RemoteCursor): number {
-  const offset = Math.max(0, cursor.offset || 0);
+  // 坐标来自远端帧：非有限数当 0（JSON 本身带不出 NaN，这里只是把意图写明）
+  const offset = Number.isFinite(cursor.offset) ? Math.max(0, cursor.offset) : 0;
   if (doc.childCount === 0) return 0;
   let pos = 0;
   let projected = 0;
