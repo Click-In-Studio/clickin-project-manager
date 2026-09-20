@@ -7,11 +7,14 @@
  *
  * Invariants:
  *  1. No runtime DDL in application code  (static file scan)
- *  2. Schema fingerprint matches seed     (schema drift detection)
+ *
+ * 曾经的 2「schema 指纹 vs seed-schema.json」已被 `npm run db:check` 取代（#561）：
+ * CI 里空库跑 migrations、空库跑 schema.sql、提交的 db/schema-fingerprint.txt
+ * 三方逐行比，覆盖列 / 约束 / 索引 / 枚举 / 函数 / 触发器，不再只比列。
  *
  * 曾经的 2「运行时 migration 幂等性」已随最后一支运行时 migration
  * (ensureScriptMarkerMigration, commit 2110bb1) 一同退役——现在一条都没有，
- * 存量数据一律走 db/migrate-*.sql。真要新增，先补回这一节（见 DEV_GUIDE §11.5 ②）。
+ * 存量数据一律走 db/migrations/。真要新增，先补回这一节（见 DEV_GUIDE §11.5 ②）。
  */
 import { describe, it, expect } from "vitest";
 import { readdir, readFile } from "fs/promises";
@@ -115,89 +118,6 @@ describe("no runtime DDL in application source", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. Schema fingerprint — detect seed vs schema drift
-// ─────────────────────────────────────────────────────────────────────────────
-
-type ColumnEntry = { column: string; type: string; nullable: boolean; default?: string };
-type SchemaFingerprint = Record<string, ColumnEntry[]>;
-
-describe("schema fingerprint matches committed seed-schema.json", () => {
-  it("current DB structure matches db/seed-schema.json (re-run npm run seed:schema if this fails)", async () => {
-    // Read committed fingerprint
-    const committedRaw = await readFile(path.join(ROOT, "db/seed-schema.json"), "utf8");
-    const committed: SchemaFingerprint = JSON.parse(committedRaw);
-
-    // Query current DB structure
-    const res = await getPool().query<{
-      table_name: string; column_name: string;
-      data_type: string; is_nullable: string; column_default: string | null;
-    }>(`
-      SELECT table_name, column_name, data_type, is_nullable, column_default
-      FROM information_schema.columns
-      WHERE table_schema = current_schema()
-        AND table_name NOT LIKE 'test-%'
-      ORDER BY table_name, ordinal_position
-    `);
-
-    const actual: SchemaFingerprint = {};
-    for (const r of res.rows) {
-      if (!actual[r.table_name]) actual[r.table_name] = [];
-      const entry: ColumnEntry = {
-        column: r.column_name, type: r.data_type, nullable: r.is_nullable === "YES",
-      };
-      if (r.column_default) entry.default = r.column_default.substring(0, 80);
-      actual[r.table_name].push(entry);
-    }
-
-    const diffs: string[] = [];
-
-    // Tables in committed but not in actual (dropped)
-    for (const table of Object.keys(committed)) {
-      if (!actual[table]) {
-        diffs.push(`TABLE DROPPED: ${table}`);
-      }
-    }
-    // Tables in actual but not in committed (added — need seed re-export)
-    for (const table of Object.keys(actual)) {
-      if (!committed[table]) {
-        diffs.push(`TABLE ADDED (run: npm run seed:schema): ${table}`);
-      }
-    }
-
-    // Column-level diff for shared tables
-    for (const table of Object.keys(committed)) {
-      if (!actual[table]) continue;
-      const committedCols = new Map(committed[table].map((c) => [c.column, c]));
-      const actualCols = new Map(actual[table].map((c) => [c.column, c]));
-
-      for (const [col, info] of committedCols) {
-        if (!actualCols.has(col)) {
-          diffs.push(`${table}.${col}: COLUMN DROPPED`);
-        } else {
-          const a = actualCols.get(col)!;
-          if (a.type !== info.type)
-            diffs.push(`${table}.${col}: type changed ${info.type} → ${a.type}`);
-          if (a.nullable !== info.nullable)
-            diffs.push(`${table}.${col}: nullable changed ${info.nullable} → ${a.nullable}`);
-        }
-      }
-      for (const col of actualCols.keys()) {
-        if (!committedCols.has(col)) {
-          diffs.push(`${table}.${col}: COLUMN ADDED (run: npm run seed:schema)`);
-        }
-      }
-    }
-
-    if (diffs.length > 0) {
-      throw new Error(
-        `Schema has drifted from db/seed-schema.json.\n` +
-        `Run "npm run seed:schema" and commit db/seed-schema.json, ` +
-        `then re-export the seed with "npm run seed:ci-export".\n\n` +
-        diffs.map((d) => `  ${d}`).join("\n"),
-      );
-    }
-  });
-});
 
 describe("openclaw-workspace files are fully tracked (gitignore guard)", () => {
   it("every on-disk workspace file is in git — none silently ignored", async () => {
@@ -337,8 +257,8 @@ describe("lib/ 按域分目录，根只留基建", () => {
   const ROOT_INFRA = [
     "db.ts", "pg.ts", "r2.ts", "server-cache.ts",
     "tz.ts", "money.ts", "duration.ts", "lex-order.ts", "z-index.ts",
-    "base-path.ts", "server-url.ts", "request-json.ts", "sse-keepalive.ts",
-    "nav-pending.ts", "search-db.ts",
+    "base-path.ts", "server-url.ts", "request-json.ts", "sse-keepalive.ts", "sse-kick.ts",
+    "presence-heartbeat.ts", "nav-pending.ts", "search-db.ts",
   ];
 
   it("根目录文件 ⊆ 基建白名单——业务文件进域目录", async () => {
@@ -474,6 +394,63 @@ describe("巨石组件行数只降不升", () => {
           if (grandfathered !== undefined && grandfathered - lines >= RATCHET_SLACK) {
             over.push(`${rel}: 已瘦到 ${lines} 行，请把 FAMILY_FILE_GRANDFATHERED 收紧到当前值（≤ 上限时删掉这条）`);
           }
+        }
+      }
+    }
+    expect(over).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// lib/db.ts 分家棘轮（#486）
+// ─────────────────────────────────────────────────────────────────────────────
+// 8280 行的 db.ts 正按域搬进 lib/<域>/*-db.ts。搬运期间 db.ts 只降不升；搬出去的段
+// 在文件尾的「转发壳」里只留 `export *`（386 个 importer 不必逐 PR 改路径，最后一个
+// PR 脚本改写并删壳），壳里不许长出函数——否则壳会变成第二个 db.ts。
+// 拆出来的 *-db.ts 单文件 ≤ 1000 行：超了按子概念再分，别搬出一个新的 event-db。
+// 分文件的依据是概念边界与依赖方向（读模型 ← 状态机），行数上限只是防止回退的护栏。
+
+const DB_TS_LINE_CEILING = 4143;
+const DB_FILE_CEILING = 1000;
+/** 拆分前就超标的 *-db.ts：按当前行数记账，只降不升；降到上限内就删掉这条。 */
+const DB_FILE_GRANDFATHERED: Record<string, number> = {
+  "lib/ops/event-db.ts": 3246,
+  "lib/perm/resource-grant-db.ts": 1023,
+};
+const DB_SHELL_MARKER = "// ─── 转发壳";
+
+describe("lib/db.ts 分家只进不退", () => {
+  it(`lib/db.ts ≤ ${DB_TS_LINE_CEILING} 行，且上限与实际之差 < ${RATCHET_SLACK}`, async () => {
+    const lines = await countLines("lib/db.ts");
+    expect(lines, "lib/db.ts 长了。搬运 PR 请同时把 DB_TS_LINE_CEILING 改小；功能 PR 的新函数请直接写进 lib/<域>/*-db.ts").toBeLessThanOrEqual(DB_TS_LINE_CEILING);
+    expect(DB_TS_LINE_CEILING - lines, `lib/db.ts 已瘦到 ${lines} 行，请把 DB_TS_LINE_CEILING 收紧到当前值`).toBeLessThan(RATCHET_SLACK);
+  });
+
+  it("转发壳里只有注释与 `export * from \"./<域>/…\"`，不长函数", async () => {
+    const text = await readFile(path.join(ROOT, "lib/db.ts"), "utf-8");
+    const at = text.indexOf(DB_SHELL_MARKER);
+    expect(at, "db.ts 尾部的转发壳标记不见了").toBeGreaterThan(0);
+    const strays = text.slice(at).split("\n").filter((line) => {
+      const t = line.trim();
+      return t !== "" && !t.startsWith("//") && !/^export \* from "\.\/[a-z-]+\/[a-z-]+-db";$/.test(t);
+    });
+    expect(strays, "转发壳只许 `export *`；新函数请写进对应域的 *-db.ts").toEqual([]);
+  });
+
+  it(`lib/<域>/*-db.ts 单文件 ≤ ${DB_FILE_CEILING} 行（记账豁免见 DB_FILE_GRANDFATHERED）`, async () => {
+    const LIB_ROOT = path.join(ROOT, "lib");
+    const over: string[] = [];
+    for (const d of await readdir(LIB_ROOT, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      for (const f of await readdir(path.join(LIB_ROOT, d.name))) {
+        if (!/-db\.ts$/.test(f)) continue;
+        const rel = `lib/${d.name}/${f}`;
+        const lines = await countLines(rel);
+        const grandfathered = DB_FILE_GRANDFATHERED[rel];
+        const ceiling = grandfathered ?? DB_FILE_CEILING;
+        if (lines > ceiling) over.push(`${rel}: ${lines} > ${ceiling}`);
+        if (grandfathered !== undefined && grandfathered - lines >= RATCHET_SLACK) {
+          over.push(`${rel}: 已瘦到 ${lines} 行，请把 DB_FILE_GRANDFATHERED 收紧到当前值（≤ 上限时删掉这条）`);
         }
       }
     }

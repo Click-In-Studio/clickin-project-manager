@@ -3,6 +3,7 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { parseNodeKey } from "@/lib/perm/grant-template";
 import { listGovernanceGrants, createDirectGrant, revokeGrantById } from "@/lib/perm/grant-audit-db";
+import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -54,7 +55,8 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
 
   const { grantId } = (await req.json()) as { grantId?: string };
   if (!grantId) return Response.json({ error: "缺少 grantId" }, { status: 400 });
-  const ok = await revokeGrantById(id, grantId);
-  if (!ok) return Response.json({ error: "授权不存在或已撤销" }, { status: 404 });
+  const revokedUserId = await revokeGrantById(id, grantId);
+  if (!revokedUserId) return Response.json({ error: "授权不存在或已撤销" }, { status: 404 });
+  kickRevokedStreams(id, revokedUserId); // #469：与 grants/route 同款，不留"治理域行不挡流"的隐含假设
   return Response.json({ ok: true });
 }

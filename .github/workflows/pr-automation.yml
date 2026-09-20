@@ -29,9 +29,9 @@ jobs:
               assignees: [context.payload.pull_request.user.login],
             });
 
-  # Post (or update) a migration checklist comment when db/add-*.sql or
-  # db/migrate-*.sql files are present in the PR. Removes the comment if those
-  # files are later removed from the PR.
+  # Post (or update) a migration checklist comment when db/migrations/*.sql
+  # files are present in the PR. Removes the comment if those files are later
+  # removed from the PR.
   migration-check:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -53,7 +53,7 @@ jobs:
             });
 
             const migrationFiles = files
-              .filter(f => /^db\/(add|migrate)-.*\.sql$/.test(f.filename))
+              .filter(f => /^db\/migrations\/.*\.sql$/.test(f.filename))
               .map(f => f.filename);
 
             const { data: comments } = await github.rest.issues.listComments({
@@ -77,31 +77,25 @@ jobs:
             }
 
             const fileList = migrationFiles.map(f => `- \`${f}\``).join('\n');
-            const verifyLines = migrationFiles
-              .map(f => `grep "${f.split('/').pop()}" /var/www/production-manager/shared/db-applied.txt`)
-              .join('\n');
-            const applyLines = migrationFiles
-              .map(f => `sudo -u postgres psql -d script_editor -f ${f}\necho "${f.split('/').pop()}" >> /var/www/production-manager/shared/db-applied.txt`)
-              .join('\n');
+            const names = migrationFiles.map(f => f.split('/').pop().replace(/^\d{14}_/, '').replace(/\.sql$/, ''));
 
             const body = [
               MARKER,
-              '## ⚠️ 此 PR 包含数据库 Migration 文件',
+              '## ⚠️ 此 PR 包含数据库 Migration（dbmate）',
               '',
-              '以下文件将在合并后由 CD **自动执行**：',
+              '以下文件将在合并后由 CD 以 `dbmate up` **自动执行**（单事务，失败整体回滚、部署中止）：',
               fileList,
               '',
-              '**Reviewer 检查项：**',
-              '- [ ] Migration 使用 `IF NOT EXISTS`，可安全重复执行',
-              '- [ ] 没有破坏性 schema 变更（删列、改非空类型等）导致当前线上代码 crash',
-              '- [ ] 合并部署后，在服务器确认 migration 已执行：',
-              '  ```bash',
-              '  ' + verifyLines,
-              '  ```',
+              '**Reviewer 检查项（DEV_GUIDE §6）：**',
+              '- [ ] `-- migrate:up` / `-- migrate:down` 两段齐全；只加不删的写真 down，删列删表的 down 写 `RAISE EXCEPTION`',
+              '- [ ] expand / contract：本 PR 若删列 / 删表 / 改类型，当前线上（N-1）代码在新 schema 上仍能跑；删除应放在停用代码的下一个版本',
+              '- [ ] DDL 已同步进 `db/schema.sql`，且 `npm run db:check -- --update` 重生成了 `db/schema-fingerprint.txt`（CI 的 Schema consistency check 绿）',
+              '- [ ] 破坏性 / 数据迁移带 `tests/migrations/<name>.migration.test.ts` 三层测试 + `<name>.snapshot.ts` hook（name = ' + names.map(n => '`' + n + '`').join(', ') + '）',
+              '- [ ] 迁移里若引用权限键 / 角色名等应用词汇，与 `lib/` 常量一致',
               '',
-              '**如果 CD 未自动执行，手动补跑：**',
+              '**合并部署后核实**（CD 自己会做，这里是手动看的方法）：',
               '```bash',
-              applyLines,
+              "sudo -u postgres psql -d script_editor -c \"SELECT * FROM schema_migrations ORDER BY version\"",
               '```',
               '',
             ].join('\n');

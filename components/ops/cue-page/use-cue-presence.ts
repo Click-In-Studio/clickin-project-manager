@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { BASE_PATH } from "@/lib/base-path";
+import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { postCuePresence } from "@/lib/ops/cue-client";
 import type { CuePresence, Selection } from "./types";
 
@@ -37,6 +38,8 @@ export function useCuePresence({ productionId, activeListId, selection }: {
   const [presenceMap, setPresenceMap] = useState<Map<string, CuePresence>>(new Map());
   const lastSentPresRef = useRef("");
   const presTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 真正发出去过的最后一份载荷（去重键 lastSentPresRef 会被重连清空，不能拿它反推）
+  const lastPostedRef = useRef<{ listId: string | null; cueId: string | null } | null>(null);
 
   useEffect(() => {
     fetch(`${BASE_PATH}/api/me`)
@@ -54,9 +57,17 @@ export function useCuePresence({ productionId, activeListId, selection }: {
     lastSentPresRef.current = key;
     if (presTimerRef.current) clearTimeout(presTimerRef.current);
     presTimerRef.current = setTimeout(() => {
+      lastPostedRef.current = { listId, cueId };
       postCuePresence(productionId, { clientId, userName, listId, cueId });
     }, 200);
   }, [clientId, userName, productionId]);
+
+  // 在场心跳（#578）：重发上一份载荷续 updatedAt；首拍由上面的选区 effect 发
+  usePresenceHeartbeat(() => {
+    const last = lastPostedRef.current;
+    if (!last || !clientId || !userName) return;
+    postCuePresence(productionId, { clientId, userName, ...last });
+  });
 
   useEffect(() => {
     if (selection.kind === "cue") {

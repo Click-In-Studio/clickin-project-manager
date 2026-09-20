@@ -1,19 +1,39 @@
-name: Deploy to Production
+name: Deploy
+
+# 两套环境（#558）：
+#   push main      → dev（阿里云 click-in-dev 47.243.12.173，app-dev.clickinmusical.com）
+#   push tag v*    → prod（阿里云 click-in-prod 47.242.131.56，app.clickinmusical.com）
+# 两台机器目录布局 / pm2 定义 / 迁移流程完全一致，只有 SSH 目标不同：
+# secrets.SERVER_HOST / SERVER_USER 是 dev，SERVER_HOST_PROD / SERVER_USER_PROD 是 prod，
+# 部署私钥两边共用（SERVER_SSH_KEY，公钥 github-actions-deploy 已放进两台的 authorized_keys）。
+# dev 原在 AWS（52.20.28.226，user ubuntu），2026-09-19 迁到阿里云后 AWS 机已关停；
+# 换机器只需改 secrets + 把部署公钥放进新机 authorized_keys，本文件不用动。
+#
+# 发布到 prod：`git tag v0.N && git push origin v0.N`；hotfix 从 tag 拉分支、cherry-pick、再打 tag。
+run-name: "Deploy ${{ github.ref_type == 'tag' && 'PROD' || 'dev' }} · ${{ github.ref_name }}"
 
 on:
   push:
     branches: [main]
+    tags: ['v*']
+
+# 同一环境的部署串行；dev 与 prod 互不阻塞
+concurrency:
+  group: deploy-${{ github.ref_type == 'tag' && 'prod' || 'dev' }}
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      TARGET: ${{ github.ref_type == 'tag' && 'prod' || 'dev' }}
+      SERVER_HOST: ${{ github.ref_type == 'tag' && secrets.SERVER_HOST_PROD || secrets.SERVER_HOST }}
+      SERVER_USER: ${{ github.ref_type == 'tag' && secrets.SERVER_USER_PROD || secrets.SERVER_USER }}
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4.2.2
-        with:
-          fetch-depth: 0   # full history required for migration ordering
 
       # ── 2. Setup Node ────────────────────────────────────────────────────────
       - name: Setup Node.js
@@ -74,6 +94,13 @@ jobs:
           # pm2 里 agent-runner 的 cwd 指向 current/
           mkdir -p .next/standalone/openclaw-workspace
           cp openclaw-workspace/{AGENTS,SOUL,IDENTITY,USER,TOOLS}.md .next/standalone/openclaw-workspace/
+          # 迁移（#561）：migrations 目录 + 指纹 SQL / 期望指纹 + dbmate 二进制随 bundle 走，
+          # 服务器上不装任何东西。二进制来自 npm 的平台包（runner 是 linux-x64）。
+          mkdir -p .next/standalone/db .next/standalone/bin
+          cp -r db/migrations .next/standalone/db/
+          cp db/fingerprint.sql db/schema-fingerprint.txt .next/standalone/db/
+          cp node_modules/@dbmate/linux-x64/bin/dbmate .next/standalone/bin/dbmate
+          chmod +x .next/standalone/bin/dbmate
           tar -czf /tmp/deploy_bundle.tar.gz -C .next/standalone .
 
       # ── 5. Setup SSH ─────────────────────────────────────────────────────────
@@ -82,14 +109,15 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+          echo "Deploy target: $TARGET ($SERVER_USER@$SERVER_HOST)"
+          ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
 
       - name: Set SSH alias
         run: |
           cat >> ~/.ssh/config <<EOF
           Host prod
-            HostName ${{ secrets.SERVER_HOST }}
-            User ${{ secrets.SERVER_USER }}
+            HostName $SERVER_HOST
+            User $SERVER_USER
             IdentityFile ~/.ssh/deploy_key
             StrictHostKeyChecking yes
           EOF
@@ -107,26 +135,55 @@ jobs:
           scp /tmp/deploy_bundle.tar.gz prod:/tmp/deploy_bundle.tar.gz
           ssh prod "tar -xzf /tmp/deploy_bundle.tar.gz -C $RELEASE_DIR && rm /tmp/deploy_bundle.tar.gz" < /dev/null
 
-      # ── 7. Backup DB if migrations pending ──────────────────────────────────
-      - name: Backup production DB before migrations
+      # ── 7. Stage migration toolkit on server ─────────────────────────────────
+      # 迁移以 postgres 用户执行（表 owner），它读不到 ubuntu 的 release 目录，所以
+      # 把 dbmate + migrations + 指纹拷到 /tmp 并放开读权限，与旧流程的 /tmp/migration.sql
+      # 同理。URL 走 Unix socket + peer auth，不需要任何密码。
+      - name: Stage migration toolkit
+        run: |
+          ssh prod "
+            rm -rf /tmp/deploy-db && mkdir -p /tmp/deploy-db &&
+            cp -r ${{ env.RELEASE_DIR }}/db/migrations /tmp/deploy-db/migrations &&
+            cp ${{ env.RELEASE_DIR }}/db/fingerprint.sql ${{ env.RELEASE_DIR }}/db/schema-fingerprint.txt /tmp/deploy-db/ &&
+            cp ${{ env.RELEASE_DIR }}/bin/dbmate /tmp/deploy-db/dbmate &&
+            chmod -R a+rX /tmp/deploy-db
+          " < /dev/null
+
+      # ── 8. DB migrations（dbmate，#561）──────────────────────────────────────
+      # 「已执行」的唯一真相是库里的 schema_migrations 表；shared/db-applied.txt 退役。
+      #
+      # 闸一：库里有表却没有 schema_migrations → 拒绝。这是接管前建的库没记 baseline，
+      #       让 dbmate 在它上面重放 baseline 不是我们要的（新机器空库才允许从 baseline 起）。
+      # 闸二：有 pending 才备份（备份文件保留最近 5 份）。
+      # 闸三：up 之后 status 必须 0 pending，否则红——不再有「跳过了也不知道」。
+      # 闸四：线上结构指纹必须逐行等于仓库的 db/schema-fingerprint.txt，不等即红：
+      #       「删了没删掉 / 记了没执行 / schema.sql 忘同步」全在这里现形。
+      #       此时代码还没切换，老代码跑在新 schema 上（expand / contract 保证可行），
+      #       红了就停在这里排查，不会发出去一个和库不匹配的版本。
+      - name: Run DB migrations
         run: |
           SHARED="/var/www/production-manager/shared"
-          # 只部署当前 HEAD 仍存在的迁移。分支中途新增后又改名/删除的文件不能进入
-          # 清单，否则会把从未进主干的名字写成「已执行」幽灵记录，更危险时还会先
-          # 执行一份已经废弃的表结构。awk 同时去掉删除后重加造成的重复路径。
-          ORDERED=$(git log --reverse --diff-filter=A --format="%H" -- 'db/add-*.sql' 'db/migrate-*.sql'             | while read commit; do
-                git diff-tree --no-commit-id -r --name-only --diff-filter=A "$commit" -- 'db/add-*.sql' 'db/migrate-*.sql' | sort
-              done | awk '!seen[$0]++' | while IFS= read -r filepath; do
-                [ -f "$filepath" ] && printf '%s\n' "$filepath"
-              done)
-          ssh prod "cat $SHARED/db-applied.txt 2>/dev/null || true" < /dev/null > /tmp/db-applied-backup-check.txt
-          PENDING=0
-          while IFS= read -r FILEPATH; do
-            FILENAME=$(basename "$FILEPATH")
-            if [ -f "$FILEPATH" ] && ! grep -qxF "$FILENAME" /tmp/db-applied-backup-check.txt 2>/dev/null; then
-              PENDING=$((PENDING + 1))
-            fi
-          done <<< "$ORDERED"
+          URL="postgres:///script_editor?host=/var/run/postgresql&sslmode=disable"
+          # 先 cd 进工具目录：dbmate 默认从 cwd 读 .env，ssh 登录目录是 /home/ubuntu，
+          # postgres 用户读不了它会直接报错退出（首发事故：status 报错被 tee 吞掉，误判成
+          # 「仍有 pending」）。/tmp/deploy-db 里没有 .env，不存在即忽略。
+          DBMATE="cd /tmp/deploy-db && sudo -u postgres ./dbmate --url '$URL' --migrations-dir /tmp/deploy-db/migrations --no-dump-schema"
+          PSQL="sudo -u postgres psql -d script_editor -qAt"
+
+          TABLES=$(ssh prod "$PSQL -c \"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename <> 'schema_migrations'\"" < /dev/null)
+          HAS_LEDGER=$(ssh prod "$PSQL -c \"SELECT to_regclass('public.schema_migrations') IS NOT NULL\"" < /dev/null)
+          if [ "$TABLES" != "0" ] && [ "$HAS_LEDGER" != "t" ]; then
+            echo "::error::线上库有 $TABLES 张表但没有 schema_migrations 记账——先按 #561 跑对账脚本并记 baseline，再发布"
+            exit 1
+          fi
+
+          echo "── status（before）"
+          # 不用管道：管道会吞掉 dbmate 的退出码，status 本身报错必须让部署红
+          ssh prod "$DBMATE status" < /dev/null > /tmp/status-before.txt \
+            || { echo "::error::dbmate status 失败"; cat /tmp/status-before.txt; exit 1; }
+          cat /tmp/status-before.txt
+          PENDING=$(grep -c '^\[ \]' /tmp/status-before.txt || true)
+
           if [ "$PENDING" -gt 0 ]; then
             echo "Found $PENDING pending migration(s) — creating production DB backup..."
             BACKUP="pre_migration_${{ github.run_number }}_$(date +%Y%m%d_%H%M%S).pgdump"
@@ -137,60 +194,26 @@ jobs:
               ls -1t $SHARED/backups/*.pgdump 2>/dev/null | tail -n +6 | xargs -r rm -f
             " < /dev/null
             echo "Backup saved to $SHARED/backups/$BACKUP"
+
+            echo "── dbmate up"
+            ssh prod "$DBMATE up" < /dev/null \
+              || { echo "::error::MIGRATION FAILED — 该支已整体回滚（单事务），部署中止；备份在 $SHARED/backups/$BACKUP"; exit 1; }
           else
             echo "No pending migrations — backup skipped."
           fi
 
-      # ── 8. Run DB migrations ───────────────────────────────────────────────
-      - name: Run DB migrations
-        run: |
-          SHARED="/var/www/production-manager/shared"
-          DB="script_editor"
+          echo "── status（after）：必须 0 pending"
+          ssh prod "$DBMATE status --exit-code" < /dev/null \
+            || { echo "::error::dbmate up 之后仍有 pending migration"; exit 1; }
 
-          # Get all db/add-*.sql and db/migrate-*.sql files ordered by first-commit date (oldest first),
-          # alphabetically within the same commit.
-          ORDERED=$(git log --reverse --diff-filter=A --format="%H" -- 'db/add-*.sql' 'db/migrate-*.sql' \
-            | while read commit; do
-                git diff-tree --no-commit-id -r --name-only --diff-filter=A "$commit" -- 'db/add-*.sql' 'db/migrate-*.sql' | sort
-              done | awk '!seen[$0]++' | while IFS= read -r filepath; do
-                [ -f "$filepath" ] && printf '%s\n' "$filepath"
-              done)
-
-          if [ -z "$ORDERED" ]; then
-            echo "No migration files found."
-            exit 0
+          echo "── 结构指纹校验"
+          ssh prod "$PSQL -f /tmp/deploy-db/fingerprint.sql" < /dev/null > /tmp/prod-fingerprint.txt
+          if ! diff -u db/schema-fingerprint.txt /tmp/prod-fingerprint.txt > /tmp/fingerprint.diff; then
+            echo "::error::线上 schema 与 db/schema-fingerprint.txt 不一致（- 期望 / + 线上）："
+            cat /tmp/fingerprint.diff
+            exit 1
           fi
-
-          # Fetch the applied manifest from server (empty if not yet created)
-          ssh prod "cat $SHARED/db-applied.txt 2>/dev/null || true" < /dev/null > /tmp/db-applied.txt
-
-          echo "Already applied:"
-          cat /tmp/db-applied.txt || echo "(none)"
-
-          while IFS= read -r FILEPATH; do
-            FILENAME=$(basename "$FILEPATH")
-            if grep -qxF "$FILENAME" /tmp/db-applied.txt 2>/dev/null; then
-              echo "SKIP  $FILENAME (already applied)"
-            else
-              echo "APPLY $FILENAME"
-              scp "$FILEPATH" prod:/tmp/migration.sql
-              # `< /dev/null` on every ssh call below is required: this loop's stdin is
-              # the migration file list (via `<<< "$ORDERED"`), and ssh forwards local
-              # stdin to the remote command by default. Without this, ssh competes with
-              # `read -r FILEPATH` for the same fd and can silently swallow the next
-              # line(s), dropping migrations from a run with 2+ pending files without
-              # any error (this is exactly what happened to migrate-cue-list-role.sql).
-              # ON_ERROR_STOP：脚本错误即非零退出（此前 psql -f 出错仍退 0，失败被
-              # 静默记入 db-applied.txt——批A 部署事故）。显式 || exit 1 确保记账
-              # 语句不会在失败后执行，不依赖外层 shell 的 -e 隐式行为。
-              # 失败时 /tmp/migration.sql 留在服务器上供排查（有意为之）。
-              ssh prod "sudo -u postgres psql -v ON_ERROR_STOP=1 -d $DB -f /tmp/migration.sql && rm /tmp/migration.sql" < /dev/null \
-                || { echo "MIGRATION FAILED: $FILENAME — aborting deploy, NOT recorded in manifest"; exit 1; }
-              # Record in manifest
-              ssh prod "echo '$FILENAME' >> $SHARED/db-applied.txt" < /dev/null
-              echo "$FILENAME" >> /tmp/db-applied.txt
-            fi
-          done <<< "$ORDERED"
+          echo "线上 schema 指纹一致（$(wc -l < /tmp/prod-fingerprint.txt) 行）"
 
       # ── 9. Swap symlink & reload PM2 ─────────────────────────────────────────
       # pm2 进程定义收在仓库 deploy/ecosystem.config.js（含 agent-runner），每次发布

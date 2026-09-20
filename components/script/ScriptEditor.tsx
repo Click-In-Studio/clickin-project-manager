@@ -9,9 +9,12 @@ import ScriptDialog, { SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS, SCRIPT_CONFIRM_PRIMAR
 import TagGroupEditor from "@/components/script/TagGroupEditor";
 import ProductionTopMenu, { ProductionOverflowSubmenuButton, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, useProductionToolbarStage } from "@/components/shell/ProductionTopMenu";
 import ChevronIcon from "@/components/ui/ChevronIcon";
+import Kbd from "@/components/ui/Kbd";
+import { formatShortcut, useIsMacLike } from "@/components/ui/shortcut-label";
 import { useDocumentVisible } from "@/hooks/useVisibleEventSource";
 import { useAgentMutation } from "@/lib/agent/agent-mutations";
 import { BASE_PATH } from "@/lib/base-path";
+import { createSaveDebounce } from "@/lib/editor/save-debounce";
 import type { TagGroup, BlockTagValue, SceneDetail } from "@/lib/db";
 import { formatDuration, parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
@@ -45,7 +48,7 @@ import ScriptToolbarMenuController, { type ScriptToolbarOpenMenu } from "./scrip
 import SideBlockPanel from "./script-editor/SideBlockPanel";
 import TableOfContents from "./script-editor/TableOfContents";
 import { EMPTY_COMMENTS, EMPTY_BLOCK_ASSETS, buildCommentBlockCaption, findSideBlockPanelNavigationTargets, type RemotePresence } from "./script-editor/comments";
-import { SCRIPT_TOC_CENTER_EVENT, SCRIPT_EDITOR_MAX_WIDTH_PX, SCRIPT_BODY_HORIZONTAL_PADDING_REM, SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX, SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM, SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM, SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM, SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM, SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX, SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX, SCRIPT_SCENE_DETAIL_MODE_LABEL, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX, DISABLED_CHECKBOX_OPTION_CLASS, checkboxOptionClass, COMMENT_BUBBLE_MIN_WIDTH_PX, COMMENT_BUBBLE_GAP_REM, SIDE_PANEL_FALLBACK_WIDTH_PX } from "./script-editor/constants";
+import { SCRIPT_TOC_CENTER_EVENT, SCRIPT_EDITOR_MAX_WIDTH_PX, SCRIPT_BODY_HORIZONTAL_PADDING_REM, SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX, SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM, SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM, SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM, SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM, SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX, SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX, SCRIPT_SCENE_DETAIL_MODE_LABEL, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX, DISABLED_CHECKBOX_OPTION_CLASS, checkboxOptionClass, COMMENT_BUBBLE_MIN_WIDTH_PX, COMMENT_BUBBLE_GAP_REM, SIDE_PANEL_FALLBACK_WIDTH_PX, SCRIPT_SHORTCUTS } from "./script-editor/constants";
 import { readDisplayCookie, writeDisplayCookie, type DisplaySettings } from "./script-editor/display-settings";
 import { useScriptSearch } from "./script-editor/use-script-search";
 import { useDragCountBadge } from "./script-editor/use-drag-count-badge";
@@ -83,6 +86,11 @@ type PendingStageDelimiterChange = {
 };
 
 // 打印相关组件已抽到 components/print/ScriptPrint.tsx（#335）
+
+// 自动同步（#520）：trailing 1.5s，但自第一次改动起最迟 5s 必落一笔——
+// 连续打字不再无界不落库（丢数据窗口 / 协作延迟 / presence 先于内容到达）。
+const SYNC_DEBOUNCE_MS = 1500;
+const SYNC_MAX_WAIT_MS = 5000;
 
 const REHEARSAL_SWITCH_OPTICAL_OFFSET_STYLE: React.CSSProperties = { position: "relative", left: "3%" };
 
@@ -227,6 +235,7 @@ export default function ScriptEditor({
   const syncOpeningChapterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (syncOpeningChapterTimerRef.current) clearTimeout(syncOpeningChapterTimerRef.current); }, []);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const isMac = useIsMacLike(); // 「关于 · 快捷键」表格按平台显示 ⌘ / Ctrl（#542）
   const [pendingLockedMode, setPendingLockedMode] = useState<boolean | null>(null);
   const pendingModeScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
   const [pendingStageDelimiterChange, setPendingStageDelimiterChange] =
@@ -508,6 +517,8 @@ export default function ScriptEditor({
   const blocksRef = useRef(blocks);
   const ownedBlocksRef = useRef(ownedBlocks);
   const scenesRef = useRef(scenes);
+  const charactersRef = useRef(characters);
+  useEffect(() => { charactersRef.current = characters; }, [characters]);
   const sceneIdSetRef = useRef<Set<string>>(new Set(scenes.map((scene) => scene.id)));
   const blockIndexByIdRef = useRef<Map<string, number>>(new Map(blocks.map((block, index) => [block.id, index])));
   const clampWindowRange = useCallback((range: { start: number; end: number }, blockCount = blocksRef.current.length) => (
@@ -1374,16 +1385,28 @@ export default function ScriptEditor({
   const serverSeqRef = useRef(0);
   const isSyncingRef = useRef(false);
   const syncIdleWaitersRef = useRef<Array<() => void>>([]);
-  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 计时器到期时上一笔还在飞：记下来，飞完重排一轮（不能丢——停手前最后一段
+  // 输入若恰好撞锁，没有下一个击键就再也不落库）；已卸载则不再重排。
+  const deferredSyncRef = useRef(false);
+  const syncUnmountedRef = useRef(false);
   const pendingMovedBlockIdsRef = useRef<Set<string>>(new Set());
 
   // Stable ref to the push function so the debounce closure never goes stale.
   const pushPatchRef = useRef<(curr: ScriptState) => void>(() => {});
+  const [syncDebounce] = useState(() => createSaveDebounce(() => {
+    const curr: ScriptState = {
+      config: scriptConfigRef.current,
+      blocks: normalizeScriptBlockStream(blocksRef.current),
+      characters: charactersRef.current,
+      scenes: scenesRef.current,
+    };
+    pushPatchRef.current(curr);
+  }, { wait: SYNC_DEBOUNCE_MS, maxWait: SYNC_MAX_WAIT_MS }));
 
   useEffect(() => {
     pushPatchRef.current = async (curr: ScriptState) => {
       if (!canEdit || loadState !== "ready" || syncedStateRef.current === null) return;
-      if (isSyncingRef.current) return;
+      if (isSyncingRef.current) { deferredSyncRef.current = true; return; }
       isSyncingRef.current = true;
       try {
         const seq = ++clientSeqRef.current;
@@ -1473,9 +1496,10 @@ export default function ScriptEditor({
         const waiters = syncIdleWaitersRef.current;
         syncIdleWaitersRef.current = [];
         for (const resolve of waiters) resolve();
+        if (deferredSyncRef.current) { deferredSyncRef.current = false; if (!syncUnmountedRef.current) syncDebounce.trigger(); }
       }
     };
-  }, [effectiveScriptId, activeVersionId, canEdit, loadState]);
+  }, [effectiveScriptId, activeVersionId, canEdit, loadState, syncDebounce]);
 
   useEffect(() => {
     setLoadState("loading");
@@ -1888,38 +1912,26 @@ export default function ScriptEditor({
     focusBlockContent(focusId);
   }, [focusBlockContent, glowChangedBlocks]);
 
-  // Debounced sync: fires 1500 ms after the last state change.
-  const charactersRef = useRef(characters);
-  useEffect(() => { charactersRef.current = characters; }, [characters]);
-
+  // Debounced sync: SYNC_DEBOUNCE_MS after the last state change, at most
+  // SYNC_MAX_WAIT_MS after the first (#520). 每次改动只 trigger，不在 cleanup 里
+  // cancel——cancel 会把 maxWait 窗口起点一起清掉，等于回到纯 trailing。
   useEffect(() => {
     if (loadState !== "ready") return;
-    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    syncTimerRef.current = setTimeout(() => {
-      const curr: ScriptState = {
-        config: scriptConfigRef.current,
-        blocks: normalizeScriptBlockStream(blocksRef.current),
-        characters: charactersRef.current,
-        scenes: scenesRef.current,
-      };
-      pushPatchRef.current(curr);
-    }, 1500);
-    return () => {
-      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    };
+    syncDebounce.trigger();
   // blockTagMap included so tag-only changes (inherit, paste, manual edit)
   // also trigger the debounced sync and embed tags in the block op.
-  }, [blocks, characters, scenes, blockTagMap, loadState]);
+  }, [blocks, characters, scenes, blockTagMap, loadState, syncDebounce]);
+  useEffect(() => () => { syncUnmountedRef.current = true; syncDebounce.cancel(); }, [syncDebounce]);
 
   const flushPendingPatch = useCallback(async () => {
-    if (syncTimerRef.current) {
-      clearTimeout(syncTimerRef.current);
-      syncTimerRef.current = null;
-    }
+    syncDebounce.cancel();
     if (isSyncingRef.current) {
       await new Promise<void>((resolve) => {
         syncIdleWaitersRef.current.push(resolve);
       });
+      // 等待期间上一笔可能把撞锁的那轮重排了；这里马上就推，不用再等
+      deferredSyncRef.current = false;
+      syncDebounce.cancel();
     }
     const curr: ScriptState = {
       config: scriptConfigRef.current,
@@ -1935,18 +1947,17 @@ export default function ScriptEditor({
     return stateSynced &&
       pendingTagInsertsRef.current.size === 0 &&
       JSON.stringify(currentTags) === JSON.stringify(syncedTags);
-  }, []);
+  }, [syncDebounce]);
 
   const persistMarkerState = useCallback(async (next: ScriptState) => {
-    if (syncTimerRef.current) {
-      clearTimeout(syncTimerRef.current);
-      syncTimerRef.current = null;
-    }
+    syncDebounce.cancel();
     if (isSyncingRef.current) {
       await new Promise<void>((resolve) => syncIdleWaitersRef.current.push(resolve));
+      deferredSyncRef.current = false;
+      syncDebounce.cancel();
     }
     await pushPatchRef.current(next);
-  }, []);
+  }, [syncDebounce]);
 
   const undoStack = useRef<Block[][]>([]);
   const redoStack = useRef<Block[][]>([]);
@@ -3941,7 +3952,7 @@ export default function ScriptEditor({
                       className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${canUndo ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"}`}
                     >
                       <span>撤销</span>
-                      <kbd className="text-[10px] text-zinc-300">⌘Z</kbd>
+                      <Kbd combo="Mod+Z" className="text-[10px] text-zinc-300" />
                     </button>
                     <button
                       onClick={() => { redo(); setOpenMenu(null); }}
@@ -3949,7 +3960,7 @@ export default function ScriptEditor({
                       className={`flex w-full items-center justify-between px-3 py-1.5 text-sm ${canRedo ? "text-zinc-600 hover:bg-zinc-50" : "cursor-not-allowed text-zinc-300"}`}
                     >
                       <span>重做</span>
-                      <kbd className="text-[10px] text-zinc-300">⌘⇧Z</kbd>
+                      <Kbd combo="Mod+Shift+Z" className="text-[10px] text-zinc-300" />
                     </button>
                     <div className="my-1 border-t border-zinc-50" />
                     <button
@@ -3958,7 +3969,7 @@ export default function ScriptEditor({
                       className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
                     >
                       <span className="font-bold">粗体</span>
-                      <kbd className="text-[10px] text-zinc-300">⌘B</kbd>
+                      <Kbd combo="Mod+B" className="text-[10px] text-zinc-300" />
                     </button>
                     <button
                       onMouseDown={e => { e.preventDefault(); applyFormatToFocused("u"); }}
@@ -3966,7 +3977,7 @@ export default function ScriptEditor({
                       className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
                     >
                       <span className="underline">下划线</span>
-                      <kbd className="text-[10px] text-zinc-300">⌘U</kbd>
+                      <Kbd combo="Mod+U" className="text-[10px] text-zinc-300" />
                     </button>
                     <button
                       onMouseDown={e => { e.preventDefault(); toggleStageCueToFocused(); }}
@@ -3974,7 +3985,7 @@ export default function ScriptEditor({
                       className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
                     >
                       <span className="italic text-zinc-400">切换舞台提示</span>
-                      <kbd className="text-[10px] text-zinc-300">⌘I</kbd>
+                      <Kbd combo="Mod+I" className="text-[10px] text-zinc-300" />
                     </button>
                     <div className="my-1 border-t border-zinc-50" />
                   </>
@@ -3984,7 +3995,7 @@ export default function ScriptEditor({
                   className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
                 >
                   <span>搜索</span>
-                  <kbd className="text-[10px] text-zinc-300">⌘F</kbd>
+                  <Kbd combo="Mod+F" className="text-[10px] text-zinc-300" />
                 </button>
                 <button
                   onClick={() => { setJumpTarget("line"); setJumpValue(""); setOpenMenu(null); }}
@@ -6022,22 +6033,9 @@ export default function ScriptEditor({
             </div>
             <table className="w-full text-sm">
               <tbody className="divide-y divide-zinc-50">
-                {[
-                  ["⌘Z", "撤销"],
-                  ["⌘⇧Z", "重做"],
-                  ["⌘F", "搜索"],
-                  ["⌘B", "粗体（选中文字）"],
-                  ["⌘U", "下划线（选中文字）"],
-                  ["⌘I", "切换舞台提示 / 段内括注"],
-                  ["Enter", "新建块（行尾）"],
-                  ["⇧Enter", "块内换行"],
-                  ["Backspace", "对行首：合并至上一块（如类型、角色相同）\n对选中块：删除所选行"],
-                  ["⌘⇧L", "切换歌词模式"],
-                  ["⌘⇧C", "复制当前块标签"],
-                  ["⌘⇧V", "粘贴标签到当前块"],
-                ].map(([key, desc]) => (
-                  <tr key={key}>
-                    <td className="py-1.5 pr-4 font-mono text-[13px] text-zinc-400 whitespace-nowrap">{key}</td>
+                {SCRIPT_SHORTCUTS.map(([combo, desc]) => (
+                  <tr key={combo}>
+                    <td className="py-1.5 pr-4 font-mono text-[13px] text-zinc-400 whitespace-nowrap">{formatShortcut(combo, isMac)}</td>
                     <td className="py-1.5 whitespace-pre-line text-zinc-600">{desc}</td>
                   </tr>
                 ))}

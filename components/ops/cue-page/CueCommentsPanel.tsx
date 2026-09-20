@@ -5,6 +5,7 @@ import CommentAssetPicker, { type PendingAsset } from "@/components/assets/Comme
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/editor/SmartTextarea";
 import SmartText from "@/components/ui/SmartText";
+import { useShortcutLabel } from "@/components/ui/shortcut-label";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import { BASE_PATH } from "@/lib/base-path";
 import { postCueComment, patchCueComment, deleteCueComment } from "@/lib/ops/cue-client";
@@ -33,6 +34,7 @@ export default function CueCommentsPanel({
   onAdd: (c: Comment) => void; onEdit: (c: Comment) => void;
   onDelete: (id: string) => void; onClose: () => void;
 }) {
+  const submitKey = useShortcutLabel("Mod+Enter");
   const [members, setMembers] = useState<Mention[]>([]);
   const [newText, setNewText] = useState("");
   const [newMentions, setNewMentions] = useState<Mention[]>([]);
@@ -229,7 +231,7 @@ export default function CueCommentsPanel({
               <div className="mt-2 ml-3 border-l-2 border-zinc-200 pl-3">
                 <SmartTextarea value={replyText} onChange={setReplyText}
                   memberMention={{ members, onMentionsChange: setReplyMentions }}
-                  placeholder="回复… (⌘↵ 发布)" rows={2} autoFocus
+                  placeholder={`回复… (${submitKey} 发布)`} rows={2} autoFocus
                   onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitReply(); }}
                   className={taClass} />
                 <div className="mt-1 flex items-center justify-between">
@@ -251,7 +253,7 @@ export default function CueCommentsPanel({
       <div className="shrink-0 border-t border-zinc-100 px-4 py-3">
         <SmartTextarea value={newText} onChange={setNewText}
           memberMention={{ members, onMentionsChange: setNewMentions }}
-          placeholder="添加评论… (⌘↵ 发布)" rows={3}
+          placeholder={`添加评论… (${submitKey} 发布)`} rows={3}
           onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitNew(); }}
           className={taClass} />
         <div className="mt-2 flex items-center justify-between">

@@ -1599,9 +1599,6 @@
 @media (min-width: 768px) and (max-width: 1180px) {
   .reportMobile { display: block; }
   .reportDesktop { display: none; }
-  .reportWorkspaceGrid {
-    grid-template-columns: minmax(140px, 170px) minmax(230px, 1fr) minmax(260px, .9fr);
-  }
 }
 
 @media (max-width: 767px) {

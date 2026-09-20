@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "./permission-context-db";
 import { hasAdminPanelEligibility } from "@/lib/perm/permissions";
 
 export async function requireAdminAccess(productionId: string) {

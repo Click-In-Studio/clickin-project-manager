@@ -1,6 +1,6 @@
 "use client";
 import { useEffect } from "react";
-import { PERMISSION_LABELS, GROUP_LABELS } from "@/lib/perm/permission-labels";
+import { permissionLabel, permissionGroupLabel } from "@/lib/perm/permission-labels";
 
 type Props = {
   pending: string[];
@@ -15,9 +15,7 @@ type Props = {
 function groupByCategory(perms: string[]): { label: string; perms: string[] }[] {
   const map = new Map<string, string[]>();
   for (const p of perms) {
-    // 节点键（node:<type>/...）按资源类型分组
-    const prefix = p.startsWith("node:") ? p.slice(5).split("/")[0] ?? p : p.split(":")[0] ?? p;
-    const label = GROUP_LABELS[prefix] ?? prefix;
+    const label = permissionGroupLabel(p);
     const existing = map.get(label);
     if (existing) existing.push(p);
     else map.set(label, [p]);
@@ -50,7 +48,7 @@ export default function PermissionActivationModal({
         position: "fixed", inset: 0, zIndex: 300,
         background: "rgba(0,0,0,.45)",
         display: "flex", alignItems: "center", justifyContent: "center",
-        padding: "0 16px",
+        padding: "clamp(12px, 4vh, 32px) 16px",
       }}
       onClick={e => { if (e.target === e.currentTarget) onDismiss(); }}
     >
@@ -60,16 +58,20 @@ export default function PermissionActivationModal({
         aria-labelledby="perm-activation-title"
         style={{
           width: "min(440px, 100%)",
+          maxHeight: "calc(100dvh - clamp(24px, 8vh, 64px))",
           background: "var(--surface)",
           borderRadius: 16,
           boxShadow: "0 24px 80px rgba(24,42,42,.22)",
           overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
         {/* Header */}
         <div style={{
           padding: "24px 28px 18px",
           borderBottom: "1px solid var(--line)",
+          flexShrink: 0,
         }}>
           <p style={{
             margin: "0 0 3px", fontSize: 9, fontWeight: 700,
@@ -86,7 +88,13 @@ export default function PermissionActivationModal({
         </div>
 
         {/* Body */}
-        <div style={{ padding: "20px 28px" }}>
+        <div style={{
+          padding: "20px 28px",
+          minHeight: 0,
+          overflowY: "auto",
+          overscrollBehavior: "contain",
+          scrollbarGutter: "stable",
+        }}>
           <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--muted)", lineHeight: 1.6 }}>
             {subtitle}
           </p>
@@ -105,9 +113,7 @@ export default function PermissionActivationModal({
                     {g.label}
                   </div>
                   <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.7 }}>
-                    {g.perms
-                      .map(p => PERMISSION_LABELS[p as keyof typeof PERMISSION_LABELS] ?? p)
-                      .join("、")}
+                    {g.perms.map(permissionLabel).join("、")}
                   </div>
                 </div>
                 <div style={{
@@ -125,8 +131,11 @@ export default function PermissionActivationModal({
 
         {/* Footer */}
         <div style={{
-          padding: "0 28px 24px",
+          padding: "14px 28px 20px",
           display: "flex", gap: 10,
+          flexShrink: 0,
+          borderTop: "1px solid var(--line)",
+          background: "var(--surface)",
         }}>
           <button
             onClick={onDismiss}

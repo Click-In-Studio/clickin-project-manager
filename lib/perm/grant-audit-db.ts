@@ -105,16 +105,16 @@ export async function listGrantLedger(
   };
 }
 
-/** 强制撤销一条 grant（manual）。返回 false = 不存在或已撤销。 */
-export async function revokeGrantById(productionId: string, grantId: string): Promise<boolean> {
-  const res = await getPool().query(
+/** 强制撤销一条 grant（manual）。返回被撤销者 userId；null = 不存在或已撤销。 */
+export async function revokeGrantById(productionId: string, grantId: string): Promise<string | null> {
+  const res = await getPool().query<{ user_id: string }>(
     `UPDATE production_member_grant
      SET is_revoked = true, revoked_reason = 'manual'
      WHERE id = $1 AND production_id = $2 AND NOT is_revoked
-     RETURNING id`,
+     RETURNING user_id::text AS user_id`,
     [grantId, productionId],
   );
-  return (res.rowCount ?? 0) > 0;
+  return res.rows[0]?.user_id ?? null;
 }
 
 // ─── 治理域授权（管理员设置页）：production/producer 域 grant 行直发 ─────────

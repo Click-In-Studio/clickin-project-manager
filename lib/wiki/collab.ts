@@ -14,6 +14,8 @@ import { hostname } from "node:os";
 import type { Pool, PoolClient } from "pg";
 import { getPool } from "@/lib/pg";
 import { registerSSEKeepalive } from "@/lib/sse-keepalive";
+import { PRESENCE_STALE_MS } from "@/lib/presence-heartbeat";
+import { kickUserStreams } from "@/lib/sse-kick";
 import type { WikiCursor } from "@/lib/wiki/collab-cursor";
 
 export type WikiPeer = {
@@ -56,13 +58,11 @@ function presReg(): Map<string, Map<string, WikiPeer>> {
   return g.__wikiPresenceRegistry;
 }
 
-const STALE_MS = 90_000;
-
 function livePeers(wikiId: string): WikiPeer[] {
   const m = presReg().get(wikiId);
   if (!m) return [];
   const now = Date.now();
-  for (const [cid, p] of m) if (now - p.updatedAt > STALE_MS) m.delete(cid);
+  for (const [cid, p] of m) if (now - p.updatedAt > PRESENCE_STALE_MS) m.delete(cid);
   return [...m.values()];
 }
 
@@ -83,6 +83,25 @@ function broadcast(topic: string, frame: string): void {
 // ─── 跨进程 ──────────────────────────────────────────────────────────────────
 
 export const COLLAB_CHANNEL = "wiki_collab";
+
+// 断流指令搭同一条 outbox（#469）：agent-runner 收 wiki 分享时，被收权者的连接在 next
+// 进程，本地 kick 打的是空注册表。topic 恒带 "kick:" 前缀、frame 是 userId 或 "*"，
+// 与 wikiId（UUID）/ "library:" 前缀不撞。到达端不当帧推，转调 kickUserStreams。
+const KICK_TOPIC_PREFIX = "kick:";
+
+/** 出站一条断流指令；本进程自己的踢由调用方先做（origin 回声过滤会跳过这条）。 */
+export function publishKickRemote(productionId: string, userId?: string): Promise<void> {
+  return publishRemote(`${KICK_TOPIC_PREFIX}${productionId}`, userId ?? "*");
+}
+
+/** LISTEN 端收到别的进程的帧：断流指令转调注册表，其余照常本地推。 */
+function deliverRemote(topic: string, frame: string): void {
+  if (topic.startsWith(KICK_TOPIC_PREFIX)) {
+    kickUserStreams(topic.slice(KICK_TOPIC_PREFIX.length), frame === "*" ? undefined : frame);
+    return;
+  }
+  localBroadcast(topic, frame);
+}
 /** 本进程标识：回声过滤用 */
 export const COLLAB_ORIGIN = `${hostname()}:${process.pid}`;
 
@@ -143,7 +162,7 @@ class CollabListener {
         const origin = msg.payload.slice(idx + 1);
         if (origin === COLLAB_ORIGIN) return; // 自己发的，本地已经推过
         void this.pool.query<{ topic: string; frame: string }>(`SELECT topic, frame FROM wiki_collab_outbox WHERE id = $1`, [id])
-          .then((r) => { if (r.rows[0]) localBroadcast(r.rows[0].topic, r.rows[0].frame); })
+          .then((r) => { if (r.rows[0]) deliverRemote(r.rows[0].topic, r.rows[0].frame); })
           .catch((err) => console.error("[wiki-collab] fetch frame failed:", err));
       });
       client.on("error", drop);
@@ -208,6 +227,19 @@ export function registerWikiSSE(
   };
 }
 
+/**
+ * 心跳快路径的依据（#578）：条目由 stream 路由建连时登记、连接拆除时摘掉，在表里
+ * 且 userId 与 session 一致 = 这个人已过建连的权限门；心跳免重跑可见性查询。
+ * 过期条目不算（livePeers 顺手清掉），那就落回慢路径重新登记。
+ */
+export function hasWikiPresence(wikiId: string, clientId: string, userId: string): boolean {
+  return livePeers(wikiId).some((p) => p.clientId === clientId && p.userId === userId);
+}
+
+/**
+ * 同值心跳只续 updatedAt 不广播（#578）：每个可见客户端每 30s 一拍，逐拍广播全场
+ * 就是 N² 帧。过期条目视同缺席——它在别人那里已经消失，续命必须重新广播才回得来。
+ */
 export function updateWikiPresence(
   wikiId: string,
   clientId: string,
@@ -216,6 +248,14 @@ export function updateWikiPresence(
 ): void {
   let m = presReg().get(wikiId);
   if (!m) { m = new Map(); presReg().set(wikiId, m); }
+  const now = Date.now();
+  const prev = m.get(clientId);
+  if (prev && now - prev.updatedAt <= PRESENCE_STALE_MS
+    && prev.userId === info.userId && prev.userName === info.userName && prev.avatarUrl === info.avatarUrl
+    && prev.blockIndex === (cursor?.blockIndex ?? null) && prev.offset === (cursor?.offset ?? null)) {
+    prev.updatedAt = now;
+    return;
+  }
   m.set(clientId, {
     clientId,
     userId: info.userId,
@@ -224,7 +264,7 @@ export function updateWikiPresence(
     color: assignColor(clientId),
     blockIndex: cursor?.blockIndex ?? null,
     offset: cursor?.offset ?? null,
-    updatedAt: Date.now(),
+    updatedAt: now,
   });
   localBroadcast(wikiId, wikiPresenceFrame(wikiId));
 }

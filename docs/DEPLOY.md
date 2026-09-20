@@ -8,6 +8,11 @@
 
 ### 1. 服务器环境
 
+> 2026-09 新机器（阿里云 `click-in-2`，Ubuntu 24.04）就是按本节 + 下面各节从零装起来的，
+> 差异只有：部署用户是 `admin` 不是 `ubuntu`（需 NOPASSWD sudo）；node 装在 `/opt/node`（官方
+> tarball，`/usr/local/bin/{node,npm,npx,pm2}` 软链）；`pm2 startup systemd -u <user>`；加了 1G swap
+> （`vm.swappiness=10`）；时区设成 UTC 与 crontab 的 UTC 写法对齐。
+
 ```bash
 # Node.js（建议通过 nvm 安装 LTS 版本）
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
@@ -23,13 +28,12 @@ sudo apt install -y postgresql postgresql-contrib
 ### 2. 数据库初始化
 
 ```bash
-# 主库
-sudo -u postgres psql <<'EOF'
-CREATE USER script_editor WITH PASSWORD 'your-password';
-CREATE DATABASE script_editor OWNER script_editor;
-EOF
-
-sudo -u postgres psql -d script_editor -f /var/www/production-manager/db/schema.sql
+# 主库：角色 + 默认权限（幂等），再由 dbmate 从 baseline 建到最新。
+# 表 owner 必须是 postgres，应用用户 script_editor 只拿 DML（见 DEV_GUIDE §6）。
+cd /var/www/production-manager/current
+sudo -u postgres psql -v app_password='your-password' -f db/bootstrap-roles.sql
+sudo -u postgres ./bin/dbmate --url 'postgres:///script_editor?host=/var/run/postgresql&sslmode=disable' \
+  --migrations-dir db/migrations --no-dump-schema up
 
 # Agent Bot 数据库
 sudo -u postgres psql -f /var/www/production-manager/db/setup-agent-db.sql
@@ -226,13 +230,32 @@ crontab -e
 
 ---
 
+## 两套环境（#558）
+
+| 环境 | 触发 | 机器 | 域名 | 用途 |
+|---|---|---|---|---|
+| dev | push `main` | AWS（`click-in`） | `app-dev.clickinmusical.com` | 团队日常，跟着 main 走 |
+| prod | push tag `v*` | 阿里云（`click-in-2`） | `app.clickinmusical.com` / `backstage.clickinmusical.com` | 测试用户，只随 tag 变 |
+
+两台机器的目录布局、pm2 定义、迁移流程完全一致，`deploy.yml` 只按 `github.ref_type` 选 SSH 目标（secrets `SERVER_HOST[_PROD]` / `SERVER_USER[_PROD]`，私钥共用）。两边各有自己的库，互不同步；dev 的库是切换时从 prod 拷的快照。
+
+发布到 prod：
+
+```bash
+git tag v0.12 && git push origin v0.12        # 从 main 上已验证的 commit 打 tag
+```
+
+hotfix：从上一个 tag 拉分支，cherry-pick 修复，打新 tag；不需要动 main（migration 按版本号逐支判断 pending，hotfix 分支上时间戳更早的也能正常上）。
+
+dev 与 prod 互不阻塞、同一环境串行（workflow `concurrency`）。
+
 ## 日常发版
 
-push 到 `main` 后 GitHub Actions 自动完成：
+push 到 `main`（dev）或 tag（prod）后 GitHub Actions 自动完成：
 
 1. `npm ci` + `npm run build`（standalone 模式）
 2. 打包产物，上传到服务器 `releases/<run>-<sha>/`
-3. 按 git commit 顺序执行新增的 `db/add-*.sql`（已执行记录在 `shared/db-applied.txt`）
+3. `dbmate up` 应用 `db/migrations/` 里所有 pending（记账在库里的 `schema_migrations`；有 pending 先 `pg_dump` 到 `shared/backups/`），随后核对线上结构指纹 == `db/schema-fingerprint.txt`，不等即部署失败
 4. 切换 `current` symlink → 新 release
 5. `pm2 reload` 热重启
 6. 清理旧 releases（保留最新 5 个）
@@ -249,15 +272,25 @@ ssh <server> "bash /var/www/production-manager/shared/scripts/rollback.sh 2"
 
 脚本将 `current` symlink 切到上一个（或第 N 个）release，并热重启 PM2。
 
-## 数据库迁移
-
-CI 自动处理。如需手动执行（紧急修复）：
+切代码不切库。这是安全的，因为 migration 遵守 expand / contract（DEV_GUIDE §6）：删列 / 删表永远晚于停用它的代码一个版本，所以上一版代码在当前 schema 上照常跑。真要回退 schema：
 
 ```bash
-ssh <server> "sudo -u postgres psql -d script_editor -f /tmp/fix.sql"
-# 手动追加到 manifest，防止 CI 重复执行：
-ssh <server> "echo 'add-xxx.sql' >> /var/www/production-manager/shared/db-applied.txt"
+# 只加不删的那支（写了真 migrate:down）：
+ssh <server> "cd /var/www/production-manager/current && sudo -u postgres ./bin/dbmate --url 'postgres:///script_editor?host=/var/run/postgresql&sslmode=disable' --migrations-dir db/migrations --no-dump-schema down"
+# 破坏性 / 数据迁移：用发布前 CD 自动做的备份
+ls -lt /var/www/production-manager/shared/backups/
+sudo -u postgres pg_restore -d script_editor --clean --if-exists <备份文件>
 ```
+
+## 数据库迁移
+
+CD 自动处理（dbmate）。查线上状态：
+
+```bash
+ssh <server> "cd /var/www/production-manager/current && sudo -u postgres ./bin/dbmate --url 'postgres:///script_editor?host=/var/run/postgresql&sslmode=disable' --migrations-dir db/migrations --no-dump-schema status"
+```
+
+紧急修复也走 migration：`npm run db -- new hotfix_xxx` → 合并 → CD 执行。不要在服务器上手跑 SQL 改结构——线上指纹校验会在下一次发布把手改的差异报成红。
 
 ---
 

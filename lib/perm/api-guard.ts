@@ -1,5 +1,5 @@
 import { getSession, type SessionData } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "./permission-context-db";
 import { hasGrant } from "@/lib/perm/grant-check";
 import type { NextRequest } from "next/server";
 

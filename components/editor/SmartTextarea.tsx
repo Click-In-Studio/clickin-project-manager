@@ -36,6 +36,8 @@ import { ColumnResize } from "@/lib/editor/tiptap-column-resize";
 import { TableKeymap } from "@/lib/editor/tiptap-table-keymap";
 import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor/editor-slash-commands";
 import { DROP_INDICATOR_OPTIONS } from "@/lib/editor/editor-drop-indicator";
+import { resolveRemoteCursorPos } from "@/lib/editor/remote-cursor";
+import { MarkdownParagraph } from "@/lib/editor/tiptap-empty-paragraph";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 import BlockHandle from "@/components/editor/BlockHandle";
 import TableTools from "@/components/editor/TableTools";
@@ -617,13 +619,10 @@ export default function SmartTextarea({
               if (!cursors.length) return DecorationSet.empty;
               const decos: Decoration[] = [];
               for (const c of cursors) {
-                if (c.blockIndex == null || c.blockIndex < 0 || c.blockIndex >= state.doc.childCount) continue;
-                let pos = 0;
-                for (let i = 0; i < c.blockIndex; i++) pos += state.doc.child(i).nodeSize;
-                // 精确位：块内容起点 + 偏移（钳到块内容尺寸——远端文档可能略有出入）
-                const block = state.doc.child(c.blockIndex);
-                const offset = Math.min(Math.max(0, c.offset ?? 0), block.content.size);
-                decos.push(Decoration.widget(pos + 1 + offset, () => {
+                if (c.blockIndex == null || c.blockIndex < 0) continue;
+                // 越界钳到末块尾（#517）：光标只会偏、不会消失
+                const pos = resolveRemoteCursorPos(state.doc, { blockIndex: c.blockIndex, offset: c.offset });
+                decos.push(Decoration.widget(pos, () => {
                   const el = document.createElement("span");
                   el.className = "wiki-remote-cursor";
                   el.style.setProperty("--rc-color", c.color);
@@ -661,6 +660,9 @@ export default function SmartTextarea({
     // 「同一时刻只可能有一种形态」天然保证。
     const base = StarterKit.configure({
       dropcursor: hasColumnTools ? false : { ...DROP_INDICATOR_OPTIONS },
+      // 段落换成带空段落方言的版本（#576）：空行序列化成独占一行的 `&nbsp;`，
+      // 否则相邻同类列表之间的空行一过 markdown 就没了、两个列表并成一个
+      paragraph: false,
     });
 
     const contentMentionCfg = ContentMentionExt.configure({
@@ -770,7 +772,7 @@ export default function SmartTextarea({
     // 扩展集也只有一套：`markdown` prop 只决定要不要工具栏（见下方渲染），
     // 不再决定能力。image 仍按 imageUpload 是否提供门控——它需要一个上传器。
     // TableKit: StarterKit 不含表格节点，缺了它 markdown 表格进编辑器会被吞。
-    return [base, markdownExt,
+    return [base, MarkdownParagraph, markdownExt,
       TableKit.configure({ table: { resizable: false } }),
       // 外缘选中整行/整列后按 Delete 删的是结构，不是清空内容
       TableKeymap,
@@ -936,6 +938,7 @@ export default function SmartTextarea({
       try {
         const $head = editor.state.selection.$head;
         if ($head.depth < 1) return;
+        // 顶层块序号。两端块结构一致的前提是空段落也过得了 markdown（#576 方言）
         const blockIndex = $head.index(0);
         // 块内偏移：绝对 pos - 顶层块内容起点（跨嵌套结构展平计数）
         const offset = Math.max(0, $head.pos - $head.start(1));

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { postScriptPresence } from "@/lib/script/script-client";
 import { getOrCreateClientId, anonymousName } from "./presence";
 import type { RemotePresence } from "./comments";
@@ -38,6 +39,14 @@ export function useScriptPresence({ effectiveScriptId, activeVersionId }: {
       postScriptPresence(effectiveScriptId, activeVersionId, { clientId, userName, blockId });
     }, 200);
   }, [clientId, effectiveScriptId, userName, activeVersionId]);
+
+  // 在场心跳（#578）：重发上一次上报的块，让服务端的 updatedAt 跟上。还没聚焦过块
+  // （或上次上报属于别的版本）就没什么可续，保持「聚焦才入场」的原语义。
+  usePresenceHeartbeat(() => {
+    const last = lastSentPresenceRef.current;
+    if (!last || last.versionId !== activeVersionId || !clientId || !effectiveScriptId) return;
+    postScriptPresence(effectiveScriptId, activeVersionId, { clientId, userName, blockId: last.blockId });
+  });
 
   return {
     clientId, userName, setUserName, presenceMap, setPresenceMap,

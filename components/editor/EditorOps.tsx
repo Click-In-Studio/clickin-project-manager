@@ -19,6 +19,7 @@ import type { Editor } from "@tiptap/core";
 import { FORMAT_ACTIONS, currentFormat } from "@/lib/editor/editor-block-ops";
 import { applyAcrossCells } from "@/lib/editor/table-ops";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
+import { useShortcutLabel } from "@/components/ui/shortcut-label";
 
 export function OpsBtn({
   onClick, active, title, danger, children,
@@ -115,16 +116,18 @@ export default function EditorOps({
   onDelete?: () => void;
   deleteTitle?: string;
 }) {
+  const boldKey = useShortcutLabel("Mod+B");
+  const italicKey = useShortcutLabel("Mod+I");
   return (
     <>
       <FormatMenu editor={editor} />
       <OpsSep />
       <OpsBtn onClick={() => editor.chain().focus().toggleBold().run()}
-        active={editor.isActive("bold")} title="加粗 (⌘B)"><strong>B</strong></OpsBtn>
+        active={editor.isActive("bold")} title={`加粗 (${boldKey})`}><strong>B</strong></OpsBtn>
       <OpsBtn onClick={() => editor.chain().focus().toggleStrike().run()}
         active={editor.isActive("strike")} title="删除线"><s>S</s></OpsBtn>
       <OpsBtn onClick={() => editor.chain().focus().toggleItalic().run()}
-        active={editor.isActive("italic")} title="斜体 (⌘I)"><em>I</em></OpsBtn>
+        active={editor.isActive("italic")} title={`斜体 (${italicKey})`}><em>I</em></OpsBtn>
       <OpsBtn onClick={() => editor.chain().focus().toggleCode().run()}
         active={editor.isActive("code")} title="行内代码">{"</>"}</OpsBtn>
       {onDelete && (

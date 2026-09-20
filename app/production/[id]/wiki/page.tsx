@@ -39,7 +39,11 @@ export default async function WikiLibraryPage({ params }: { params: Promise<{ id
         <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} myUserId={session.userId} canManageAssets={access.permCtx.isAdmin || access.permCtx.isOwner}>
           <div className="rounded-xl border border-dashed border-zinc-200 bg-white/60 px-8 flex items-center justify-center">
             <p className="text-sm text-zinc-400">
-              {nodes.length > 0 ? "从左侧选择一篇文档" : canCreate ? "还没有文档，从左侧新建一篇" : "还没有你可见的文档"}
+              {nodes.length > 0 ? (
+                <><span className="md:hidden">在「文档目录」里选择一篇文档</span><span className="hidden md:inline">从左侧选择一篇文档</span></>
+              ) : canCreate ? (
+                <><span className="md:hidden">还没有文档，打开「文档目录」新建一篇</span><span className="hidden md:inline">还没有文档，从左侧新建一篇</span></>
+              ) : "还没有你可见的文档"}
             </p>
           </div>
         </WikiShell>

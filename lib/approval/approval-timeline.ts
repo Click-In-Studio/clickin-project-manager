@@ -9,7 +9,7 @@
  * 此模块只做 type-only 的 lib/db 引用（编译期擦除），不碰 pg，client component 可直接引。
  */
 
-import type { ApprovalChainEntry, ApprovalRequest } from "../db";
+import type { ApprovalChainEntry, ApprovalRequest } from "./access-request-db";
 import { APPROVAL_ACTION_LABELS, approvalStageLabel } from "./approval-stages";
 
 export type TimelineNodeKind = "发起" | "审批" | "发放" | "结束";

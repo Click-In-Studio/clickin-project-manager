@@ -1,5 +1,11 @@
--- script_editor — canonical schema
--- Idempotent: safe to run on a fresh or existing database.
+-- script_editor — canonical schema（手写、可读、幂等）
+--
+-- 与 db/migrations/ 的关系（#561）：
+--   · 线上与本地库由 dbmate 按 db/migrations/ 逐支演进；本文件是「全部 migration
+--     跑完之后」的规范快照，新库可以直接 psql -f 本文件（CI 的 print 任务就这么建库）。
+--   · 每支带 DDL 的 migration 必须同步改这里。不靠人记：`npm run db:check` 把
+--     「空库跑 migrations」与「空库跑本文件」各取结构指纹逐行比，不等即 CI 红。
+--   · 指纹另存 db/schema-fingerprint.txt，CD 发布后拿它核对线上库。
 -- Run as: sudo -u postgres psql -d script_editor -f schema.sql
 --
 -- Table creation order follows FK dependency (parents before children).
@@ -447,7 +453,7 @@ CREATE TABLE IF NOT EXISTS production_event (
   location      TEXT NOT NULL DEFAULT '',
   start_time    TIMESTAMPTZ,
   end_time      TIMESTAMPTZ,
-  status        TEXT NOT NULL DEFAULT 'draft',
+  status        TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'completed', 'cancelled')),
   description   TEXT NOT NULL DEFAULT '',
   created_by    UUID NOT NULL REFERENCES app_user(id),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -514,7 +520,7 @@ CREATE TABLE IF NOT EXISTS event_participant (
   user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   name          TEXT NOT NULL,
   department_id UUID REFERENCES production_dept(id) ON DELETE SET NULL,
-  role          TEXT NOT NULL DEFAULT 'participant',
+  role          TEXT NOT NULL DEFAULT 'participant' CHECK (role IN ('participant', 'follower')),
   UNIQUE (event_id, user_id)
 );
 
@@ -978,10 +984,13 @@ CREATE TABLE IF NOT EXISTS approval_request (
   production_id   TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
 
   subject_id      UUID NOT NULL REFERENCES app_user(id),
+  -- 'atomic_permission' 已随原子键退役（批G），代码只剩「旧格式跳过」分支；线上仍有
+  -- 存量行，CHECK 里保留到那些行清掉为止（去掉它 = 一支 migration + 先删行）。
   type            TEXT NOT NULL CHECK (type IN (
                     'resource_access',
                     'member_exit',
-                    'owner_transfer'
+                    'owner_transfer',
+                    'atomic_permission'
                   )),
 
   resource_type       TEXT NULL,

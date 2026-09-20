@@ -1,5 +1,6 @@
 import { type NextRequest } from "next/server";
 import { registerCueSSE, removeCuePresence, cuePresenceFrame } from "@/lib/server-cache";
+import { registerSSEKick } from "@/lib/sse-kick";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { hasAnyEffectiveGrant, toActor } from "@/lib/perm/grant-check";
@@ -20,21 +21,33 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const clientId = req.nextUrl.searchParams.get("cid") ?? Math.random().toString(36).slice(2);
   const enc = new TextEncoder();
 
-  let cancel: (() => void) | null = null;
+  // 清理集中一处、幂等：cancel() / push 失败 / 被踢（#469）三条路径同源，同 script stream。
+  let teardown: (() => void) | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const push = (frame: string) => {
         try { controller.enqueue(enc.encode(frame)); }
-        catch { cancel?.(); }
+        catch { teardown?.(); }
       };
-      cancel = registerCueSSE(id, clientId, push);
+      const cancelSSE = registerCueSSE(id, clientId, push);
+      const releaseKick = registerSSEKick(id, session.userId, () => {
+        teardown?.();
+        try { controller.close(); } catch { /* 已关 */ }
+      });
+      let done = false;
+      teardown = () => {
+        if (done) return;
+        done = true;
+        releaseKick();
+        cancelSSE();
+        removeCuePresence(id, clientId);
+      };
       push(cuePresenceFrame(id));
       push(`: connected\n\n`);
     },
     cancel() {
-      cancel?.();
-      removeCuePresence(id, clientId);
+      teardown?.();
     },
   });
 

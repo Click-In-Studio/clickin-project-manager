@@ -220,7 +220,7 @@ describe("invariance verification", () => {
 
     // Run the migration (idempotent — safe to re-run)
     const migrationSql = readFileSync(
-      path.resolve(process.cwd(), "db/migrate-assistant-roles.sql"),
+      path.resolve(process.cwd(), "db/legacy/migrate-assistant-roles.sql"),
       "utf8",
     );
     await pool.query(migrationSql);

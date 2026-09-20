@@ -102,7 +102,7 @@ describe("integrity verification", () => {
       expect(before.find((s) => s.id === sceneId)?.name).toBe("幂等验场");
 
       // 幂等：DROP COLUMN IF EXISTS，可重放
-      await getPool().query(readFileSync("db/migrate-scene-num-retire.sql", "utf8"));
+      await getPool().query(readFileSync("db/legacy/migrate-scene-num-retire.sql", "utf8"));
 
       const after = await listScenesByVersion(versionId);
       expect(after).toEqual(before);

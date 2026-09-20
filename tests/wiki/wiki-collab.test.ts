@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
@@ -8,8 +8,9 @@ import { GET as streamGET } from "@/app/api/production/[id]/wiki/[wikiId]/stream
 import { PATCH as wikiPATCH } from "@/app/api/production/[id]/wiki/[wikiId]/route";
 import {
   registerWikiSSE, updateWikiPresence, removeWikiPresence, setWikiPresenceCursor, wikiPresenceFrame,
-  stopCollabListenerForTests,
+  hasWikiPresence, stopCollabListenerForTests,
 } from "@/lib/wiki/collab";
+import { PRESENCE_STALE_MS } from "@/lib/presence-heartbeat";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 
 // wiki 协作（PR #247）：行锁内三路合并（消 read-then-write 竞态）+ 协作路由门
@@ -249,5 +250,81 @@ describe("setWikiPresenceCursor — 静默改注册表", () => {
     expect(peers().some(p => p.clientId === "nobody")).toBe(false);
     setWikiPresenceCursor("no-such-wiki", "nobody", { blockIndex: 1, offset: 1 });
     expect(JSON.parse(wikiPresenceFrame("no-such-wiki").replace(/^event: presence\ndata: /, ""))).toEqual([]);
+  });
+});
+
+// #578 在场心跳：同值只续 updatedAt 不广播；过期视同缺席，续命重新广播。
+// presence POST 的快路径：本人以该 clientId 在场 = 建连时已过可见性门，免重查。
+describe("在场心跳（#578）", () => {
+  const info = { userId: "u", userName: "甲", avatarUrl: null };
+  const peers = () =>
+    JSON.parse(wikiPresenceFrame(wikiId).replace(/^event: presence\ndata: /, "")) as
+      { clientId: string; updatedAt: number }[];
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("同值心跳零帧只续 updatedAt；换位置一帧；过期后同值心跳也要一帧", () => {
+    const frames: string[] = [];
+    const cancel = registerWikiSSE(wikiId, "obs5", (f) => frames.push(f));
+    try {
+      updateWikiPresence(wikiId, "hA", info, { blockIndex: 1, offset: 2 });
+      expect(frames).toHaveLength(1);
+      const before = peers().find(p => p.clientId === "hA")!.updatedAt;
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(before + 1000);
+      updateWikiPresence(wikiId, "hA", info, { blockIndex: 1, offset: 2 });
+      expect(frames).toHaveLength(1);
+      expect(peers().find(p => p.clientId === "hA")!.updatedAt).toBe(before + 1000);
+      updateWikiPresence(wikiId, "hA", info, null); // 阅读态也是一种「变」
+      expect(frames).toHaveLength(2);
+
+      vi.setSystemTime(before + 1000 + PRESENCE_STALE_MS + 1);
+      expect(peers().some(p => p.clientId === "hA")).toBe(false);
+      updateWikiPresence(wikiId, "hA", info, null);
+      expect(frames).toHaveLength(3);
+      expect(peers().some(p => p.clientId === "hA")).toBe(true);
+    } finally {
+      cancel();
+      removeWikiPresence(wikiId, "hA");
+    }
+  });
+
+  it("hasWikiPresence：同人在场 true；cid 对上但人不对 false；过期 false", () => {
+    updateWikiPresence(wikiId, "hB", { ...info, userId: "me" }, null);
+    try {
+      expect(hasWikiPresence(wikiId, "hB", "me")).toBe(true);
+      expect(hasWikiPresence(wikiId, "hB", "someone-else")).toBe(false);
+      expect(hasWikiPresence(wikiId, "nobody", "me")).toBe(false);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.now() + PRESENCE_STALE_MS + 1);
+      expect(hasWikiPresence(wikiId, "hB", "me")).toBe(false);
+    } finally {
+      removeWikiPresence(wikiId, "hB");
+    }
+  });
+
+  it("presence POST 快路径：无可见性的人若已在场（建连时过了门）→ 200；不在场 → 403", async () => {
+    const stranger = await newUser();
+    const cookie = `${SESSION_COOKIE}=${createSession({ userId: stranger, name: "陌生人", avatarUrl: null, isAdmin: false })}`;
+    const ctx = () => ({ params: Promise.resolve({ id: prodId, wikiId }) });
+    const post = (clientId: string) => presencePOST(new NextRequest("http://localhost/x", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ clientId, blockIndex: 1, offset: 0 }),
+    }), ctx());
+    try {
+      await getPool().query(
+        `INSERT INTO production_member (production_id, user_id, roles) VALUES ($1, $2, '{}')`,
+        [prodId, stranger]);
+      expect((await post("hC")).status).toBe(403);
+      updateWikiPresence(wikiId, "hC", { userId: stranger, userName: "陌生人", avatarUrl: null }, null);
+      expect((await post("hC")).status).toBe(200);
+      // cid 冒用别人的在场条目不放行
+      updateWikiPresence(wikiId, "hD", { userId: creator, userName: "作者", avatarUrl: null }, null);
+      expect((await post("hD")).status).toBe(403);
+    } finally {
+      removeWikiPresence(wikiId, "hC");
+      removeWikiPresence(wikiId, "hD");
+      await getPool().query("DELETE FROM app_user WHERE id = $1", [stranger]).catch(() => {});
+    }
   });
 });

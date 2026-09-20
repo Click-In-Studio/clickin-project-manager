@@ -7,6 +7,7 @@ import {
   setCueListGrant, type CueListLevel,
 } from "@/lib/perm/resource-grant-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 
 async function getManageCtx(req: NextRequest, productionId: string, cueListId: string) {
   const session = getSession(req.cookies);
@@ -76,8 +77,10 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/productio
 
   if (body.type === "dept" && body.deptId) {
     await removeCueListDeptAccess(cueListId, id, body.deptId);
+    kickRevokedStreams(id); // #469：整个部门失去这张表，踢整个 production
   } else if (body.type === "user" && body.userId) {
     await setCueListGrant(cueListId, id, body.userId, false, mc.session.userId);
+    kickRevokedStreams(id, body.userId); // #469
   } else {
     return Response.json({ error: "参数错误" }, { status: 400 });
   }

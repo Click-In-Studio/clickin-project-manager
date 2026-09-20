@@ -40,7 +40,7 @@
 │   └── （域名与 lib/ tests/ 同一套，见 §11.2 归属表）
 │
 ├── lib/                    # 服务端工具库——按域分目录（#482），根只留跨域基建
-│   ├── db.ts               # 主数据库查询（production、member、permission）
+│   ├── db.ts               # 剧本 / production 等尚未分家的查询 + 转发壳（#486 搬运中）
 │   ├── pg.ts / r2.ts       # 连接池 / Cloudflare R2 presigned URL、multipart upload
 │   ├── agent/              # AI：runtime/ tools/ memory/ chat/ + 注入安全、指令、配额、llm-chat
 │   ├── script/             # 剧本：方言、标记、分页、template/（剧本版式模版）、打印 CSS
@@ -62,7 +62,7 @@
 ├── agent-runner/           # AI 运行时独立进程入口（lib/agent/runtime/ 是主体，见第 9 节与 docs/AGENT_RUNTIME.md）
 ├── vendor/openclaw/        # vendor 的 agent-core / llm-core（本地补丁登记在 VENDOR.md）
 │
-├── db/                     # SQL 迁移文件（schema.sql + migrate-*.sql）
+├── db/                     # schema.sql + migrations/（dbmate）+ legacy/
 │
 └── docs/                   # 项目文档
 ```
@@ -149,7 +149,10 @@ INTERNAL_NOTIFY_SECRET=any-local-secret # 定时通知 cron 鉴权 Bearer token
 ```bash
 # 主库（macOS Homebrew PostgreSQL — 当前 OS 用户拥有该库）
 createdb script_editor
-psql -d script_editor -f db/schema.sql
+npm run db -- up          # 空库：从 baseline 跑到最新（dbmate，见 §6「Schema 演进」）
+
+# 已经用旧方式（psql -f db/schema.sql）建过库的：只记账，不重跑
+npm run db -- mark-baseline
 
 # Agent 库（先修改 db/setup-agent-db.sql 中的 CHANGE_ME 密码，或直接用 peer auth）
 psql -f db/setup-agent-db.sql
@@ -234,7 +237,7 @@ npm run dev
 ### 特别注意
 
 - CI 通过与否不强制阻断合并（无 required status checks），但 CI 红灯时不应合并
-- PR 包含 `db/add-*.sql` 或 `db/migrate-*.sql` 时，CI 会走 migration 测试路径（见 §6 数据库）
+- PR 包含 `db/migrations/*.sql` 时，CI 会走 migration 测试路径（见 §6 数据库）；CI 另有 `Schema consistency check`（`npm run db:check`）保证 migrations、`db/schema.sql`、`db/schema-fingerprint.txt` 三方一致
 - **`.github/workflows/` 文件（CI/CD pipeline）属于基础设施，不在普通功能开发范围内。** CODEOWNERS 对该目录配置了独立规则，任何改动必须由仓库 owner（`@kevin-wang-2`）审批，不得作为日常 feature PR 的一部分附带修改。
 
 ---
@@ -316,7 +319,7 @@ if (!allowedTypes.includes(body.template)) { /* 403 */ }
 2. **哪些角色默认拥有该权限？** → 更新 `ROLE_TEMPLATE_PERMISSIONS` 对应角色
 3. **是否需要 adminBypass: false？** → 在 `PERMISSION_CONFIG` 中标注
 4. **路由中调用** `getProductionPermissionContext` + `hasPermission`，不要用旧的 `getProductionMemberContext`
-5. **如已有生产数据的剧目需要补填**，写 `db/add-*.sql` 补充 INSERT 到 `production_role_permission`
+5. **如已有生产数据的剧目需要补填**，写一支 migration（`npm run db -- new backfill_xxx`）补充 INSERT 到 `production_role_permission`
 
 ---
 
@@ -333,54 +336,83 @@ if (!allowedTypes.includes(body.template)) { /* 403 */ }
 
 ### Schema 文件
 
-- **`db/schema.sql`** — 主库（`script_editor`）的完整规范 schema，幂等，可在空库或现有库上重复执行。涵盖所有 44 张表、枚举类型和索引。
-- **`db/setup-agent-db.sql`** — Agent 库（`click_in_agent`）的一次性初始化脚本（含建库、建用户、建 4 张表）。
+- **`db/schema.sql`** — 主库（`script_editor`）的完整规范 schema：手写、可读、幂等。它是「全部 migration 跑完之后」的快照，也是新库的快速建库脚本（CI 的 print 任务、`psql -f`）。
+- **`db/migrations/`** — dbmate 迁移目录，一支一个文件 `<YYYYMMDDHHMMSS>_<name>.sql`。库怎么从上一版走到这一版，只看这里。第一支 `20260919000000_baseline.sql` 是接管时 schema.sql 的冻结拷贝。
+- **`db/schema-fingerprint.txt`** — 由 `db/fingerprint.sql` 从 schema.sql 建出的空库算出的结构指纹（列 / 约束 / 索引 / 枚举 / 自有函数 / 触发器，一行一对象）。CI 与 CD 都拿它比对，**生成不手改**。
+- **`db/bootstrap-roles.sql`** — 新环境一次性引导：应用角色 `script_editor` 与默认权限。schema.sql 从不含 GRANT。
+- **`db/legacy/`** — dbmate 接管前的 144 支历史迁移，只读，见其 README。
+- **`db/setup-agent-db.sql`** — Agent 库（`click_in_agent`）的一次性初始化脚本。
 
-首次部署时：
+线上首次部署：
 
 ```bash
-# 主库
-sudo -u postgres psql -d script_editor -f /var/www/production-manager/db/schema.sql
-
-# Agent 库（仅首次，需先修改 CHANGE_ME 密码）
-sudo -u postgres psql -f /var/www/production-manager/db/setup-agent-db.sql
+sudo -u postgres psql -v app_password='…' -f db/bootstrap-roles.sql
+sudo -u postgres dbmate --url 'postgres:///script_editor?host=/var/run/postgresql&sslmode=disable' \
+  --migrations-dir db/migrations --no-dump-schema up
 ```
 
-### 新增 Schema 的约定
+### Schema 演进（dbmate）
 
-开发过程中如需新增表或字段，直接在 `db/` 目录下新建一个描述性 SQL 文件（如 `db/add-something.sql`），并在文件顶部注释中注明：
+三个真相源，各管一件事：
 
-1. **依赖**：该文件依赖哪些已有的表/字段（新文件必须在依赖已执行完后再跑）
-2. **用途**：简要说明变更内容
+| 文件 | 回答什么 | 谁写 |
+|---|---|---|
+| `schema_migrations` 表（库里） | 这个库应用过哪些 migration | dbmate |
+| `db/migrations/*.sql` | 库怎么从上一版走到这一版 | 人 |
+| `db/schema.sql` | 最终形状是什么 | 人 |
+
+「人写两份会不一致」由 `npm run db:check` 机器兜底：空库跑 migrations、空库跑 schema.sql、提交的指纹三方逐行比，不等即 CI 红；CD 发布后再拿线上库指纹比一次，不等即部署红。
+
+**加一支 migration：**
+
+```bash
+npm run db -- new add_something        # 生成 db/migrations/20260919120000_add_something.sql
+```
 
 ```sql
--- db/add-something.sql
--- 依赖：production 表、feishu_user 表
--- 用途：新增 XXX 功能所需的 something 表
-
+-- migrate:up
 ALTER TABLE production ADD COLUMN IF NOT EXISTS new_col TEXT;
-CREATE TABLE IF NOT EXISTS something ( ... );
+
+-- migrate:down
+ALTER TABLE production DROP COLUMN IF EXISTS new_col;
 ```
 
-**CI 自动执行**：merge 到 main 后，CI 按文件的 **git commit 顺序**自动在服务器上执行尚未运行的文件（同一 commit 内的多个文件按字母序排列）。执行记录保存在服务器 `shared/db-applied.txt`。
+然后：
 
-执行完毕后，同步更新 `db/schema.sql`，将该变更合并进去（保持 schema.sql 始终是当前生产状态的完整快照）。
+1. 同样的 DDL 写进 `db/schema.sql` 对应位置（保持它是完整快照）。
+2. `npm run db:check -- --update` 重生成 `db/schema-fingerprint.txt`，三个文件一起提交。
+3. 本地 `npm run db -- up` 应用；`npm run db -- status` 看状态；`npm run db -- down` 回滚最近一支。
+4. 破坏性 / 数据迁移另需 `tests/migrations/<name>.migration.test.ts` 三层测试与 `<name>.snapshot.ts` hook（§11.7）。
+
+`<name>` 用 snake_case 动词短语（`add_x` / `drop_x` / `backfill_x` / `rename_x`），不再区分 add- / migrate- 前缀：是否破坏性看内容，不看文件名。
+
+**`-- migrate:down` 的规则**
+
+- 只加列 / 加表 / 加索引：写真正的 down（`DROP … IF EXISTS`）。
+- 删列 / 删表 / 改类型 / 数据回填：down 写 `DO $$ BEGIN RAISE EXCEPTION 'irreversible'; END $$;`——不要假装能逆。这类变更的回退靠 CD 发布前自动做的 `shared/backups/pre_migration_*.pgdump`。
+- 一支文件默认整段一个事务；`CREATE INDEX CONCURRENTLY` 之类不能进事务的，段头写 `-- migrate:up transaction:false`。
+
+**expand / contract（回退能力的真正来源）**
+
+- 代码停止读写某列的那个版本**不删列**；删列放到再下一个版本。
+- 因此任何时刻 N-1 版本的代码都能跑在 N 版本的 schema 上，`rollback.sh` 切软链就是完整回退，不需要 reverse migration。
+- 改列类型、改 NOT NULL 同理：先加新列双写，再切读，最后删旧列，三个版本。
+
+**CI 自动执行**：merge 到 `main` 后 CD 以 `dbmate up` 应用全部 pending（单事务、失败整体回滚并中止部署），随后核对线上指纹。**无需任何手动操作**；不再有 `shared/db-applied.txt`。
 
 > ⚠️ **严禁在应用代码（`lib/`、`app/`）中执行任何 DDL（`ALTER TABLE`、`CREATE TABLE`、`DROP`、`TRUNCATE` 等）。**
 >
-> 原因：应用 DB 用户（`script_editor`）以 `GRANT` 方式获得 DML 权限，但**不是表的 owner**，执行 DDL 会报 `must be owner of table`（PostgreSQL 42501），导致请求 500。所有 schema 变更必须通过 `db/add-*.sql` 由 CI 以 `postgres` 用户身份执行。
+> 原因：应用 DB 用户（`script_editor`）以 `GRANT` 方式获得 DML 权限，但**不是表的 owner**，执行 DDL 会报 `must be owner of table`（PostgreSQL 42501），导致请求 500。所有 schema 变更必须通过 `db/migrations/` 由 CD 以 `postgres` 用户身份执行。
 
 ### Migration 文件的修改规则
 
-Migration 文件一经 commit，**只允许 chore 类修改**（注释、格式、typo），**不允许任何实质性的 SQL 修改**。
+Migration 文件一经合并到 `main`，**不得修改、改名或删除**，CI 硬拦（`Forbid touching merged migrations`）。
 
-原因：CI 以文件名为 key 记录是否已执行，修改文件内容不会触发重新执行，改动会静默丢失。
-
-如果需要修正已提交的 migration（如 ALTER TABLE 语句有误）：
+原因：dbmate 以文件名里的版本号记账，改内容不会触发重新执行，改动会静默丢失。
 
 ```
-❌ 错误：直接修改 db/add-something.sql
-✅ 正确：新建 db/fix-something.sql，写补丁 SQL
+❌ 错误：直接修改 db/migrations/20260919120000_add_something.sql
+✅ 正确：npm run db -- new fix_something，写补丁 SQL
 ```
 
 ### 时区约定
@@ -462,7 +494,7 @@ Session 存为 HMAC 签名的 Cookie，不需要服务端 session store。内容
 
 ### 步骤一：数据库（如需新表/字段）
 
-1. 在 `db/add-xxx.sql` 写 `ALTER TABLE` 或 `CREATE TABLE`。
+1. `npm run db -- new add_xxx`，在生成的 `db/migrations/<时间戳>_add_xxx.sql` 写 `ALTER TABLE` 或 `CREATE TABLE`，同步写进 `db/schema.sql`，`npm run db:check -- --update`（见 §6「Schema 演进」）。
 2. 在 `lib/` 对应的 `*-db.ts` 文件（或新建一个）里加查询函数。
 
 ### 步骤二：API
@@ -579,7 +611,7 @@ tests/
 │   ├── helpers.ts         # 常量：TEST_USER
 │   ├── fixtures/          # 参照样本（如 legacy-script-page.ts）
 │   └── mocks/             # 模块替身（vitest.config.ts 的 alias 指过来）
-├── migrations/        # *.migration.test.ts + 配套 *-snapshot.ts（见 §11.7）
+├── migrations/        # *.migration.test.ts + 配套 *.snapshot.ts hook（见 §11.7）
 ├── agent/             # AI runtime / 工具 / 记忆 / 配额
 ├── wiki/              # 文档库、方言、协作、文档编辑器原语
 ├── script/            # 剧本、场次、导入管线、打印与分页
@@ -598,30 +630,32 @@ tests/
 | 域 | `lib/` 收纳 | `components/` 收纳 | 测试归 |
 |---|---|---|---|
 | `agent/` | `runtime/` `tools/` `memory/` `chat/` 四个子目录 + 注入安全、指令、页面/UI 上下文、工具标签、`ai-quota` `llm-chat` | AgentPopout、AI 指令 / 用量卡片、`ai-target`、wiki 提案预览 | `agent/` |
-| `script/` | `script-*`（方言、标记、分页、选区、焦点…）、`template/`（剧本版式模版）、`head-version` `print-css`、场次/角色字段权限 | ScriptEditor 及其对话框、场次/角色管理、戏剧构作与其表格视图组件 | `script/` |
+| `script/` | `script-*`（方言、标记、分页、选区、焦点…）、`version-db`（线性版本：head / 初始版本）`script-view-db`（本子：主本 + 版式解释）`head-version`、`template/`（剧本版式模版）、`print-css`、场次/角色字段权限 | ScriptEditor 及其对话框、场次/角色管理、戏剧构作与其表格视图组件 | `script/` |
 | `editor/` | `editor-*`（块模型）、`tiptap-*`（扩展）、`line-merge` `table-ops` `remark-columns`、粘贴处理、`mention-types` | 块菜单 / 气泡菜单 / 表格工具、`SmartTextarea` | `wiki/`（编辑器原语的测试跟文档库走） |
 | `wiki/` | 文档库（原有目录） | 文档页、挂载面板、`WikiPrintPage`（文档打印，与剧本打印无关）（原有目录） | `wiki/` |
 | `asset/` | 素材、元数据、头像（`avatar-*`） | `assets/`：上传、预览、挂载、分享（原有目录） | `asset/` |
 | `node/` `import/` `doc-extract/` | 节点树 / 导入管线 / 文档抽取（原有目录） | 只有 `import/`：向导、列映射、`TagFormatOptionList`（`node/` `doc-extract/` 无对应 components 目录） | `node/`→`wiki/`；`import/` `doc-extract/`→`script/` |
 | `print/` | —（打印 CSS 在 `script/print-css`） | `ScriptPrint*`（剧本打印路由与渲染）、`template-render`、`use-fonts-settled` | `script/` |
-| `ops/` | `event-*` `cue-*` `task-*` `phase-*` `finance-db` `material-*` `scene-duration` | 事件、cue、计划、任务、需求（req）、报告、周 call、工作区首页与项目首页 | `ops/` |
-| `approval/` | `approval-*`：引擎、模版、路由、阶段、TTL、时间线 | AccessRequests 页与弹窗、ApprovalFlowDesigner | `ops/` |
-| `perm/` | `permissions` `grant-*` `policy-*` `resource-*` `perm-center-db` `page-permission-scopes` `permission-*` `roles` `dept-db` `member-*` `admin-guard` `api-guard` | 权限激活弹窗 / 页面门、权限键选择器、成员选择器、我的权限页、通讯录、未授权页动作 | `perm/` |
-| `production/` | `production-template` `production-types` `templates/`（各类型项目模版）`template-seeders/` | — | `ops/` |
+| `ops/` | `event-*` `cue-*`（`cue-list-db` 表本体 + 授权 + 导入建表；`cue-db` cue 本体 + CoW + 随块漂移 + 跨项目告警）`task-*` `phase-*` `milestone-db` `finance-db` `material-*` `scene-duration` | 事件、cue、计划、任务、需求（req）、报告、周 call、工作区首页与项目首页 | `ops/` |
+| `approval/` | `approval-*`：引擎、模版、路由、阶段、TTL、时间线；`access-request-db`（申请读模型：类型 / 行映射 / people / 鉴权 / 列表 / 预览 / 流程视图）`access-request-action-db`（状态机：提交 / 批准 / 转交 / 拒绝 / 撤回 / 超时升级 + 通知；单向依赖读模型） | AccessRequests 页与弹窗、ApprovalFlowDesigner | `ops/` |
+| `perm/` | `permissions` `grant-*` `policy-*` `resource-*` `perm-center-db` `page-permission-scopes` `permission-*` `roles`（默认职位分组常量）`role-db`（职位 CRUD + 权限键）`permission-context-db`（getProductionPermissionContext + override）`dept-db` `member-db`（名册 / 入组 / 职位 / 标签 / 上级）`member-*`（状态机、退出路由）`admin-guard` `api-guard` | 权限激活弹窗 / 页面门、权限键选择器、成员选择器、通讯录、未授权页动作 | `perm/` |
+| `production/` | `production-db`（建项目事务、列表、归档、元数据、概览）`production-template` `production-types` `templates/`（各类型项目模版）`template-seeders/` | — | `ops/` |
 | `account/` | `session` `db-feishu` `invite-db` `registration-gate` `account-return` `plan` | 邀请接受页、我的项目、新建项目弹窗 | `account/` |
-| `notify/` | `notify` `notification-prefs` `inbox-db` `card-token` `doc/`（通知文档渲染） | 通知页、通知中心、公告页 | `notify/` |
+| `notify/` | `notify` `notification-prefs` `inbox-db` `announcement-db`（公告本体 + 已读回执）`card-token` `doc/`（通知文档渲染） | 通知页、通知中心、公告页 | `notify/` |
 | `platform/` | 外部平台适配：`feishu/` `email/` 注册表、通知路由（原有目录） | — | `notify/` `account/` |
 | `job/` | 任务队列（原有目录） | — | `platform/` |
 | `admin/` | — | 13 个 `Admin*Client` + AdminActivationGate、Danger/Migration 段、BulkInvite / TransferOwner / ProductionPlan 卡片、InviteModal | `perm/` `ops/` |
 | `ui/` | — | 通用原语：Badge ChevronIcon DropdownPicker DurationInput Markdown MarkdownEditor OverflowSafeSelect PageHeader PageSkeleton SmartText TreePickerModal AdminModal（通用弹窗，名字是历史）`my-pages.module.css` | `platform/` |
 | `shell/` | — | 应用外壳：AppShell（子件与纯函数在 `app-shell/` 族目录）ProductionTopMenu SearchBar ManualSaveNotice WatermarkOverlay `watermark-tile` | `platform/` |
-| 根 | 纯基建白名单：`db` `pg` `r2` `server-cache` `tz` `money` `duration` `lex-order` `z-index` `base-path` `server-url` `request-json` `sse-keepalive` `nav-pending` `search-db` | 不放文件 | `platform/` |
+| 根 | 纯基建白名单：`db` `pg` `r2` `server-cache` `tz` `money` `duration` `lex-order` `z-index` `base-path` `server-url` `request-json` `sse-keepalive` `sse-kick` `presence-heartbeat` `nav-pending` `search-db` | 不放文件 | `platform/` |
 
 `components/` 三分：通用原语进 `ui/`、应用外壳进 `shell/`、后台页面进 `admin/`，其余页面级 `*Client.tsx` 与页面专属组件按域走。页面容器**留在 `components/` 不 colocate 到 `app/`**——`app/` 路由树已深达十层，且页面容器有复用（`ProductionTasksClient` / `MyTasksClient` 共用子件）。归属按消费者定：只被一个域的页面用的，进那个域（如 `TableViewSelector` 只服务戏剧构作 → `script/`）；跨域共用才进 `ui/`。`.module.css` 跟随消费者，跨域共用的进 `ui/`。文件名两种形态：默认导出组件的文件 PascalCase，hook / context / util / 共享样式 kebab-case（`use-fonts-settled.ts` `ai-target.tsx` `my-pages.module.css`）。
 
 **组件族目录**（#487）：域下允许**一层**族目录，收巨石组件拆出来的子件 / hook / 纯函数——`components/shell/app-shell/{ProjectSwitcher,NavItem,…}.tsx` + `toolbar-stage.ts` `route.ts` `nav-config.ts`。族目录名 kebab-case = 主组件名（`AppShell` → `app-shell/`、`ScriptEditor` → `script-editor/`），主组件自己留在域目录不进族；族内不再套目录，文件名规则同上。族目录不是"给相关文件找个家"的通用手段——只为一个主组件服务，跨组件共用的东西按消费者归域或进 `ui/`。族内文件有行数上限：PascalCase 组件 ≤ 800、kebab 模块（hook / 纯函数 / context）≤ 400（`conventions.test.ts` 的 `FAMILY_FILE_CEILING`）；整块搬出来就超标的子件按搬出时的行数记账只降不升（`FAMILY_FILE_GRANDFATHERED`）。
 
 「template」一词在仓库里指五种东西，现在各归其域：剧本版式模版 `script/template/`、项目模版 `production/templates/`、权限模版 `perm/grant-template`、审批模版 `approval/approval-flow-template*`、cue 模版 `ops/cue-template-db`。
+
+**`lib/db.ts` 分家中（#486）**：8280 行的 `db.ts` 正按上表按域搬进 `lib/<域>/*-db.ts`，分文件的依据是概念边界与依赖方向（如审批：读模型 ← 状态机），不是行数。搬出去的段在 `db.ts` 尾部的「转发壳」里只留 `export *`，importer 暂不必改路径，全部搬完后由最后一个 PR 脚本改写并删壳。`conventions.test.ts` 钉三条：`db.ts` 行数只降不升（`DB_TS_LINE_CEILING`）、壳里不许长函数、`*-db.ts` 单文件 ≤ 1000 行（存量超标的按行数记账只降不升，`DB_FILE_GRANDFATHERED`）。**新函数一律写进域文件，不再进 `db.ts`。**
 
 `lib/` 根目录的文件清单由 `conventions.test.ts` 白名单钉死：新文件一律进域目录，真正的跨域基建才加白名单（同 PR 更新本表）。不加 barrel `index.ts`（`platform/email` `platform/feishu` `script/template` 三个既有的保留）——全仓 import 走深路径，barrel 只会引入循环依赖风险。
 
@@ -776,7 +810,7 @@ const session = createSession({ openId: TEST_USER, name: "测试员", avatarUrl:
 
 **豁免**：在违规行末尾加注释 `// ddl-check-ignore`。仅在有充分理由时使用（如读取外部 SQL 文件后经 strip 再执行）。
 
-> 背景：应用 DB 用户（`script_editor`）只有 DML 权限，运行时 DDL 会导致 PostgreSQL `42501 permission denied` 错误。所有 schema 变更必须通过 `db/add-*.sql` 以 `postgres` 用户身份执行（见第 6 节）。
+> 背景：应用 DB 用户（`script_editor`）只有 DML 权限，运行时 DDL 会导致 PostgreSQL `42501 permission denied` 错误。所有 schema 变更必须通过 `db/migrations/` 以 `postgres` 用户身份执行（见第 6 节）。
 
 #### ② 运行时 Migration 幂等性
 
@@ -784,52 +818,38 @@ const session = createSession({ openId: TEST_USER, name: "测试员", avatarUrl:
 `ensureScriptMarkerMigration` 已于 commit `2110bb1` 连同整套基础设施删除，
 原因是运行时迁移路径天生带四个系统性风险：DB 出错时无退避的重试死循环、
 void promise 让调用方观察不到真实成败、进程重启丢失内存态导致全量重跑、
-以及迁移检查闸死整条写路径。存量数据一律走 `db/migrate-*.sql` 人工迁移。
+以及迁移检查闸死整条写路径。存量数据一律走 `db/migrations/` 的数据迁移。
 
 **若确有不得已要新增运行时 migration**：必须在 `conventions.test.ts` 的本节
 补上对应的幂等性测试（空 version 立即返回 ready + 连调两次行数不变），
 并同时给出上述四个风险各自的规避方案，否则 PR 不应被合并。
 
-#### ③ Schema Fingerprint 检查
+#### ③ Schema 三方一致性（`npm run db:check`）
 
-CI 每次跑测试时，将当前 DB 的列结构与 `db/seed-schema.json` 做精确比对。
+CI 每次跑 `unit-test` 前执行：建两个临时库，一个只跑 `db/migrations`（`dbmate up`），一个只跑 `db/schema.sql`（`psql -f`），各取结构指纹（`db/fingerprint.sql`：列 / 约束 / 索引 / 枚举 / 自有函数 / 触发器），要求
 
-**触发时机**：当 `db/add-*.sql` 或 `db/schema.sql` 变更后，需要同步更新 fingerprint：
+```
+migrations 指纹 == schema.sql 指纹 == 提交的 db/schema-fingerprint.txt
+```
+
+**触发时机**：任何改了 `db/migrations/` 或 `db/schema.sql` 的 PR。
 
 ```bash
-# 1. 在本地 apply 新 DDL 文件
-psql -d script_editor -f db/add-new-feature.sql
-
-# 2. 在干净 DB 上重新生成 fingerprint
-npm run seed:schema     # 写入 db/seed-schema.json
-
-# 3. 提交
-git add db/seed-schema.json
+npm run db:check -- --update   # 以 schema.sql 为准重写 db/schema-fingerprint.txt
+git add db/schema.sql db/schema-fingerprint.txt db/migrations/
 ```
 
-> **关键注意事项：`seed:schema` 必须在"干净 DB"上运行。**
->
-> `npm run seed:schema` 直接连接 `.env.local` 里指定的本地 DB。如果该 DB 还包含未合并 feature 分支的表（例如另一个本地分支曾经在同一个 DB 上跑过 migration），生成的 fingerprint 就会含有 CI DB 里不存在的表，导致 CI 报"TABLE DROPPED"。
->
-> **正确做法**：运行 `seed:schema` 前，确保目标 DB 只有 `db/schema.sql` + 已合并到 main 的 migration 文件，没有本地 feature 分支的表。如有疑问，可临时建一个干净 DB 验证：
->
-> ```bash
-> psql -d script_editor -c "CREATE DATABASE schema_ci_tmp;"
-> psql -d schema_ci_tmp -f db/schema.sql
-> # 依次 apply 所有已合并的 add-*.sql
-> PGDATABASE=schema_ci_tmp npm run seed:schema
-> psql -d script_editor -c "DROP DATABASE schema_ci_tmp;"
-> ```
+它在临时库上跑，不看你本地开发库的状态——以前 `seed:schema` 那个「必须在干净 DB 上运行」的坑不存在了。
 
-fingerprint 比对失败时，CI 会给出明确提示：
+失败时会分两段说清是哪一侧不一致：
 
 ```
-Schema has drifted from db/seed-schema.json.
-Run "npm run seed:schema" and commit db/seed-schema.json.
-
-  production.new_col: COLUMN ADDED (run: npm run seed:schema)
-  notification_job: TABLE DROPPED   ← 说明 fingerprint 包含了未合并 feature 表，需在干净 DB 上重新生成
+db/migrations 跑出来的库 与 db/schema.sql 建出来的库 结构不一致（1 处）：
+  只在 migrations: COL|production|new_col|text|text|YES|
+→ 新 migration 的 DDL 要同步写进 db/schema.sql（或反过来）。
 ```
+
+CD 发布后用同一份 `fingerprint.sql` 在服务器上算线上指纹，与 `db/schema-fingerprint.txt` 逐行比，不等即部署红——「删了没删掉 / 记了没执行」不再静默存在（#561）。
 
 #### ④ 目录形态棘轮
 
@@ -853,7 +873,7 @@ Run "npm run seed:schema" and commit db/seed-schema.json.
 | **P1** | 新增跨 production 的读写操作 | **必须**在 `security.test.ts` 中加"错误 productionId → null / no-op"验证 |
 | — | 新增读操作 DB 函数 | 建议加 happy path + 不存在时返回 null 的测试 |
 | — | 新增运行时 migration | **必须**在 `conventions.test.ts` 中加幂等性测试 |
-| — | Schema 变更（`db/add-*.sql`） | **必须**在干净 DB 上重新生成 `db/seed-schema.json`（schema 指纹文件，`npm run seed:schema`）并提交，conventions 测试用此文件做 schema drift 检测 |
+| — | Schema 变更（`db/migrations/`） | **必须**同步 `db/schema.sql` 并 `npm run db:check -- --update` 重生成 `db/schema-fingerprint.txt` 一起提交（CI 三方比对） |
 | — | 破坏性 Schema Migration | **必须**提供 `tests/migrations/<name>.migration.test.ts`，含 invariance 测试（见 §11.7）|
 | — | 流式路由（SSE）、R2、飞书 Bot | 暂不强制（依赖外部服务，需独立策略） |
 
@@ -906,39 +926,60 @@ it.skipIf(!snapshot)("someTable: every user_id resolves to original open_id", as
 
 `it.skipIf(!snapshot)` 保证：有快照时强制跑（CI migration job），没有快照时自动跳过（本地已迁移环境）。
 
+#### Hook 契约（迁移前造数）
+
+invariance 测试需要「迁移前」的工厂数据。这由 `tests/migrations/<name>.snapshot.ts` 提供，`<name>` 与 `db/migrations/<版本>_<name>.sql` 的 `<name>` 完全一致，`global-setup.ts` 按名字自动发现，**不需要改 global-setup**：
+
+```typescript
+// tests/migrations/drop_task_milestone.snapshot.ts
+import type { MigrationHook } from "../_support/global-setup";
+
+export const SNAPSHOT_PATH = path.join(os.tmpdir(), "drop-task-milestone-snapshot.json");
+
+export type Snapshot = { prodId: string; edges: { taskId: string; milestoneId: string }[] };
+
+export const createPreMigrationData: MigrationHook<Snapshot>["createPreMigrationData"] =
+  async ({ pool, testUser }) => { /* 在旧结构上裸 SQL 造数，返回快照 */ };
+
+export const cleanup: MigrationHook<Snapshot>["cleanup"] =
+  async (pool, snap) => { await pool.query("DELETE FROM production WHERE id = $1", [snap.prodId]); };
+```
+
 #### CI Workflow（实际实现）
 
-Migration 测试与常规单元测试在**同一个 `unit-test` job** 中完成，通过条件步骤区分两条路径：
+Migration 测试与常规单元测试在**同一个 `unit-test` job** 中完成：
 
 ```
-检测：git diff origin/$GITHUB_BASE_REF HEAD --diff-filter=A -- 'db/add-*.sql' 'db/migrate-*.sql'
+检测：git diff origin/$GITHUB_BASE_REF HEAD --diff-filter=A -- 'db/migrations/*.sql'
 
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                       CI: unit-test job                                  │
 │                                                                          │
-│  ① 检测 PR 是否含新 migration 文件                                          │
+│  ① 已合并的 migration 文件被改 / 改名 / 删 → 直接红                          │
+│  ② 检测 PR 是否含新 migration 文件                                          │
 │                                                                          │
 │  ┌─ MIGRATION PATH (has_migrations = true) ──────────────────────────┐  │
-│  │  ② Apply BASE branch schema.sql（旧结构）                           │  │
-│  │  ③ Apply 新增的 add-*.sql 文件（via psql）                           │  │
-│  │  ④ npm test                                                         │  │
-│  │     global-setup: 若检测到迁移前 schema，创建工厂数据                 │  │
-│  │                   快照旧 FK 值 → 执行 migrate-*.sql                  │  │
-│  │     invariance 测试：有快照时强制验证 FK 映射                          │  │
+│  │  ③ 用 base 分支的 db/migrations 建库（旧结构）                        │  │
+│  │  ④ npm run db:check（三方一致）                                      │  │
+│  │  ⑤ npm test                                                         │  │
+│  │     global-setup: 发现 pending → 逐支找 <name>.snapshot.ts 造数、快照  │  │
+│  │                   → dbmate up                                        │  │
+│  │     invariance 测试：有快照时强制验证                                  │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                          │
 │  ┌─ NORMAL PATH (has_migrations = false) ──────────────────────────┐  │
-│  │  ② Apply CURRENT schema.sql                                       │  │
-│  │  ③ npm test                                                        │  │
+│  │  ③ 空库 npm run db -- up（baseline → 最新）                          │  │
+│  │  ④ npm run db:check                                                │  │
+│  │  ⑤ npm test                                                        │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-所有测试统一用 `npm test` 触发；`global-setup.ts` 在运行时判断 DB 状态，自动决定是否执行 migration。
-
 #### 本地开发说明
 
-本地 DB 已迁移后，invariance 测试会以 `it.skipIf(!snapshot)` 自动跳过（快照从未生成）。这是预期行为；完整 invariance 验证发生在 CI migration path 中，不需要在本地手动复现。
+本地库已应用全部 migration 时没有 pending，hook 不跑，invariance 测试以 `it.skipIf(!snapshot)` 自动跳过。这是预期行为；完整 invariance 验证发生在 CI migration path 中。想本地复现：`npm run db -- down` 回到上一版（前提是该支 down 可逆），再 `npm test`。
+
+`db/legacy/` 里的历史迁移测试仍在 `tests/migrations/`，它们的 invariance 层永远 skip（快照不再生成），只剩 schema / integrity 层当回归护栏。
 
 ### 11.9 Migration PR 完整检查清单
 
@@ -946,10 +987,12 @@ Migration 测试与常规单元测试在**同一个 `unit-test` job** 中完成�
 
 #### 文件层面
 
-- [ ] `db/migrate-<name>.sql`：完整的 migration SQL
+- [ ] `db/migrations/<版本>_<name>.sql`：`migrate:up` 完整；`migrate:down` 真逆或 `RAISE EXCEPTION`
 - [ ] `db/schema.sql`：更新为迁移后的最终状态（完整快照）
-- [ ] `db/seed-schema.json`：在干净 DB 上重新生成（`npm run seed:schema`）
+- [ ] `db/schema-fingerprint.txt`：`npm run db:check -- --update` 重新生成
 - [ ] `tests/migrations/<name>.migration.test.ts`：包含三层测试（schema / integrity / invariance）
+- [ ] `tests/migrations/<name>.snapshot.ts`：hook（`SNAPSHOT_PATH` / `createPreMigrationData` / `cleanup`）
+- [ ] expand / contract：删列 / 删表不与停用它的代码同一版本上线
 
 #### 测试层面
 
@@ -958,7 +1001,7 @@ Migration 测试与常规单元测试在**同一个 `unit-test` job** 中完成�
 #### 不可做的事
 
 - ❌ **不要跳过 invariance 测试**：`it.skipIf(!snapshot)` 是正确模式，不要将 invariance 测试改为无条件 skip 或 todo
-- ❌ **不要修改已 commit 的 migration 文件 SQL 内容**：每个 migration 文件一旦 commit 不可实质修改（见"Migration 文件的修改规则"）
+- ❌ **不要修改已合并的 migration 文件**：CI 硬拦（见"Migration 文件的修改规则"）
 
 ---
 
@@ -1010,7 +1053,7 @@ updated: 2026-09-18               # 必填 YYYY-MM-DD
 1. **去技术化**：正文不出现路由（`/login`）、代码、字段名、环境变量、「浏览器站点数据」这类词。界面上的按钮 / 菜单用「」原样引用（「使用飞书登录」「账号安全中心」），位置写成人话（右上角头像 → …）。
 2. **只写现状，没有「如果」**：这是我们自己部署的服务，功能有就是有、没有就是没有。不写「如果站点开启了邀请制…」——现在是邀请制就写邀请制，以后改成 toC 付费就改手册。
 3. **站在读者那边**：先说他要做什么、会看到什么，再说注意什么；常见问题用读者会问的原话做标题。
-4. **快捷键同时给 Mac / Windows**：写成 `⌘/Ctrl+F`，表格分两列。产品菜单里只显示 ⌘，手册要替 Windows 用户补上。
+4. **快捷键同时给 Mac / Windows**：写成 `⌘/Ctrl+F`，表格分两列。手册是静态文本不知道读者用什么电脑；产品界面则按平台渲染（`components/ui/shortcut-label.ts`，#542），新加的 `<kbd>` / placeholder 不要再写死 ⌘。
 5. **界面元素用读者的词**：chip 是「卡片」不是「芯片」、badge 是「角标」、modal 是「窗口」、tab 是「页签」、dropdown 是「下拉」。
 
 - 固定四节 `## 这是什么` `## 怎么操作` `## 注意事项` `## 常见问题`（覆盖测试会查）。操作步骤用编号列表，一步一图。
@@ -1037,7 +1080,7 @@ updated: 2026-09-18               # 必填 YYYY-MM-DD
 | 件 | 在哪 | 怎么工作 |
 |---|---|---|
 | 本页帮助 | 头像菜单 | `RootLayout` 用 `manualRouteIndex(loadManual())` 算出「产品路由 → 手册 slug」下发 `AppShell`；`components/shell/app-shell/help-link.ts` 把 pathname 归一化成 nav-config 口径的键（项目内相对 path、项目外绝对 path、剔除 id 段）由具体到泛逐级查，没命中回 `/help` |
-| 报告问题 | 头像菜单、每篇手册页底部 | `components/help/BugReportModal.tsx` → `POST /api/bug-reports` → `bug_report` 表（`db/add-bug-report.sql`）。只收登录用户，每人每小时 10 条；自动带 page_path / manual_slug / production_id / user_agent / viewport。落库后经 Resend 抄一封到 `dev@clickinmusical.com`（`BUG_REPORT_INBOX`，邮箱侧路由到全体开发者；联系方式是邮箱时设 reply-to；发送失败只记 console 不影响落库）。**日志表是真相源**：开发也可 `SELECT … FROM bug_report WHERE status='new' ORDER BY created_at DESC`（或 `listBugReports()`）翻看，上 issue 后回填 `status` / `issue_url` |
+| 报告问题 | 头像菜单、每篇手册页底部 | `components/help/BugReportModal.tsx` → `POST /api/bug-reports` → `bug_report` 表。只收登录用户，每人每小时 10 条；自动带 page_path / manual_slug / production_id / user_agent / viewport。落库后经 Resend 抄一封到 `dev@clickinmusical.com`（`BUG_REPORT_INBOX`，邮箱侧路由到全体开发者；联系方式是邮箱时设 reply-to；发送失败只记 console 不影响落库）。**日志表是真相源**：开发也可 `SELECT … FROM bug_report WHERE status='new' ORDER BY created_at DESC`（或 `listBugReports()`）翻看，上 issue 后回填 `status` / `issue_url` |
 | 搜索 | 手册顶栏与首页 | `GET /api/help/search-index`（公开，缓存 1h）给一份轻量索引；`components/help/HelpSearch.tsx` 客户端过滤，打分在 `lib/help/search-index.ts`（标题 > 摘要 > 小节 > 面包屑 > 正文，多词 AND） |
 
 ### 12.7 相关文件

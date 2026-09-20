@@ -59,7 +59,6 @@ const PAGE_LABELS: Record<string, string> = {
   "my:notifications": "我的通知",
   "my:notification-settings": "通知设置",
   "my:announcements": "公告",
-  "my:permissions": "我的权限",
   "my:daily-call": "每日通告",
   "my:weekly-call": "每周通告",
 

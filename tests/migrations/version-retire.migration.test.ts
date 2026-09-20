@@ -101,7 +101,7 @@ describe("integrity verification", () => {
       expect((await getVersion(headId))?.parentVersionId).toBe(versionId);
 
       // 幂等：IF EXISTS 全套，可重放
-      await getPool().query(readFileSync("db/migrate-version-retire.sql", "utf8"));
+      await getPool().query(readFileSync("db/legacy/migrate-version-retire.sql", "utf8"));
       expect((await getVersion(headId))?.parentVersionId).toBe(versionId);
     } finally {
       await cleanupProduction(prodId).catch(() => {});

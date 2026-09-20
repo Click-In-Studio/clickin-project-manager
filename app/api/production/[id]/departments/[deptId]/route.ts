@@ -8,6 +8,7 @@ import {
   updateProductionDept,
   deleteProductionDept,
 } from "@/lib/perm/dept-db";
+import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 
 type Ctx = { params: Promise<{ id: string; deptId: string }> };
 
@@ -84,5 +85,6 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     if (result.reason === "has_resource_manage")
       return Response.json({ error: "部门仍在管理资源，无法解散。请先移除资源管理关系。" }, { status: 409 });
   }
+  kickRevokedStreams(productionId); // #469：整个部门的区间行随之消失
   return Response.json({ ok: true });
 }

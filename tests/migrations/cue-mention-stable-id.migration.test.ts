@@ -130,7 +130,7 @@ async function migrationFingerprint(): Promise<string> {
 
 describe("idempotency verification", () => {
   it("re-running the migration changes nothing", async () => {
-    const sql = readFileSync("db/migrate-cue-mention-stable-id.sql", "utf8");
+    const sql = readFileSync("db/legacy/migrate-cue-mention-stable-id.sql", "utf8");
     const before = await migrationFingerprint();
     await getPool().query(sql);
     const after = await migrationFingerprint();
