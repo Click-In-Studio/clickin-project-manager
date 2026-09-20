@@ -135,7 +135,6 @@ export async function getCueList(id: string, productionId: string): Promise<CueL
   return rowToCueList(res.rows[0]);
 }
 
-/** Returns the set of role names defined for a production (from production_role table). */
 /**
  * Returns true if the user can edit this cue list（批A REST 语义）：
  * 持有 (id|'*') 上覆盖 cues 的 edit 动词行（'*' 整树或显式 cues）。

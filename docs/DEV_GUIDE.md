@@ -638,7 +638,7 @@ tests/
 | `print/` | —（打印 CSS 在 `script/print-css`） | `ScriptPrint*`（剧本打印路由与渲染）、`template-render`、`use-fonts-settled` | `script/` |
 | `ops/` | `event-*` `cue-*`（`cue-list-db` 表本体 + 授权 + 导入建表；`cue-db` cue 本体 + CoW + 随块漂移 + 跨项目告警）`task-*` `phase-*` `milestone-db` `finance-db` `material-*` `scene-duration` | 事件、cue、计划、任务、需求（req）、报告、周 call、工作区首页与项目首页 | `ops/` |
 | `approval/` | `approval-*`：引擎、模版、路由、阶段、TTL、时间线；`access-request-db`（申请读模型：类型 / 行映射 / people / 鉴权 / 列表 / 预览 / 流程视图）`access-request-action-db`（状态机：提交 / 批准 / 转交 / 拒绝 / 撤回 / 超时升级 + 通知；单向依赖读模型） | AccessRequests 页与弹窗、ApprovalFlowDesigner | `ops/` |
-| `perm/` | `permissions` `grant-*` `policy-*` `resource-*` `perm-center-db` `page-permission-scopes` `permission-*` `roles` `dept-db` `member-*` `admin-guard` `api-guard` | 权限激活弹窗 / 页面门、权限键选择器、成员选择器、通讯录、未授权页动作 | `perm/` |
+| `perm/` | `permissions` `grant-*` `policy-*` `resource-*` `perm-center-db` `page-permission-scopes` `permission-*` `roles`（默认职位分组常量）`role-db`（职位 CRUD + 权限键）`dept-db` `member-*` `admin-guard` `api-guard` | 权限激活弹窗 / 页面门、权限键选择器、成员选择器、通讯录、未授权页动作 | `perm/` |
 | `production/` | `production-template` `production-types` `templates/`（各类型项目模版）`template-seeders/` | — | `ops/` |
 | `account/` | `session` `db-feishu` `invite-db` `registration-gate` `account-return` `plan` | 邀请接受页、我的项目、新建项目弹窗 | `account/` |
 | `notify/` | `notify` `notification-prefs` `inbox-db` `announcement-db`（公告本体 + 已读回执）`card-token` `doc/`（通知文档渲染） | 通知页、通知中心、公告页 | `notify/` |
