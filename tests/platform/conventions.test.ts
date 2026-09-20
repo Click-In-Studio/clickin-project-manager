@@ -410,7 +410,7 @@ describe("巨石组件行数只降不升", () => {
 // 拆出来的 *-db.ts 单文件 ≤ 1000 行：超了按子概念再分，别搬出一个新的 event-db。
 // 分文件的依据是概念边界与依赖方向（读模型 ← 状态机），行数上限只是防止回退的护栏。
 
-const DB_TS_LINE_CEILING = 5254;
+const DB_TS_LINE_CEILING = 4761;
 const DB_FILE_CEILING = 1000;
 /** 拆分前就超标的 *-db.ts：按当前行数记账，只降不升；降到上限内就删掉这条。 */
 const DB_FILE_GRANDFATHERED: Record<string, number> = {

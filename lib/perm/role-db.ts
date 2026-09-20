@@ -3,8 +3,8 @@
  * 职位 CRUD、权限键集合、复制职位，以及按名查职位（通讯录导入解析用）。
  *
  * ROLE_NAMES 默认名单是项目模版的一个 slot（production/production-template.ts），
- * 这里不认名单只认表；「制作人」等结构性职位的不可改不可删守卫在路由层与
- * member 侧（setMemberRoles）。
+ * 这里不认名单只认表；「制作人」是结构性职位，不可改名不可删除的守卫就在本文件的
+ * rename / delete 里。
  */
 import { getPool } from "../pg";
 

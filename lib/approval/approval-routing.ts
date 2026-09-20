@@ -349,7 +349,7 @@ async function ancestorPocLevels(
 }
 
 /**
- * 制作人：结构性角色，名称不可改不可删（lib/db.ts setMemberRoles 守卫），按名匹配安全。
+ * 制作人：结构性角色，名称不可改不可删（perm/role-db.ts 的 rename / delete 守卫），按名匹配安全。
  *
  * 导出是为了让「谁能配资源审批人」（#262，app/api/.../resource-approvers）用同一份判据：
  * 制作人身份在别处再按名查一次，'制作人' 这个字面量就有了第二处真相。
