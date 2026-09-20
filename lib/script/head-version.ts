@@ -1,4 +1,4 @@
-import { getActiveVersionId, getVersion } from "@/lib/db";
+import { getActiveVersionId, getVersion } from "./version-db";
 
 /**
  * 线性化不变量（版本退役 Phase B）：写操作只允许落在当前活跃版本（head）上。
