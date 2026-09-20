@@ -36,6 +36,7 @@ import { ColumnResize } from "@/lib/editor/tiptap-column-resize";
 import { TableKeymap } from "@/lib/editor/tiptap-table-keymap";
 import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor/editor-slash-commands";
 import { DROP_INDICATOR_OPTIONS } from "@/lib/editor/editor-drop-indicator";
+import { projectBlockIndex, resolveRemoteCursorPos } from "@/lib/editor/remote-cursor";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 import BlockHandle from "@/components/editor/BlockHandle";
 import TableTools from "@/components/editor/TableTools";
@@ -617,13 +618,10 @@ export default function SmartTextarea({
               if (!cursors.length) return DecorationSet.empty;
               const decos: Decoration[] = [];
               for (const c of cursors) {
-                if (c.blockIndex == null || c.blockIndex < 0 || c.blockIndex >= state.doc.childCount) continue;
-                let pos = 0;
-                for (let i = 0; i < c.blockIndex; i++) pos += state.doc.child(i).nodeSize;
-                // 精确位：块内容起点 + 偏移（钳到块内容尺寸——远端文档可能略有出入）
-                const block = state.doc.child(c.blockIndex);
-                const offset = Math.min(Math.max(0, c.offset ?? 0), block.content.size);
-                decos.push(Decoration.widget(pos + 1 + offset, () => {
+                if (c.blockIndex == null || c.blockIndex < 0) continue;
+                // 块序是 markdown 投影坐标（#517）：越界钳到末块尾，光标只会偏、不会消失
+                const pos = resolveRemoteCursorPos(state.doc, { blockIndex: c.blockIndex, offset: c.offset });
+                decos.push(Decoration.widget(pos, () => {
                   const el = document.createElement("span");
                   el.className = "wiki-remote-cursor";
                   el.style.setProperty("--rc-color", c.color);
@@ -936,7 +934,8 @@ export default function SmartTextarea({
       try {
         const $head = editor.state.selection.$head;
         if ($head.depth < 1) return;
-        const blockIndex = $head.index(0);
+        // 顶层块序号按 markdown 投影（#517）：本端敲出的空行在对方文档里不存在
+        const blockIndex = projectBlockIndex(editor.state.doc, $head.index(0));
         // 块内偏移：绝对 pos - 顶层块内容起点（跨嵌套结构展平计数）
         const offset = Math.max(0, $head.pos - $head.start(1));
         const last = lastCursorRef.current;
