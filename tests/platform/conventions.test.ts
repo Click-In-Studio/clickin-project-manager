@@ -400,3 +400,60 @@ describe("巨石组件行数只降不升", () => {
     expect(over).toEqual([]);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// lib/db.ts 分家棘轮（#486）
+// ─────────────────────────────────────────────────────────────────────────────
+// 8280 行的 db.ts 正按域搬进 lib/<域>/*-db.ts。搬运期间 db.ts 只降不升；搬出去的段
+// 在文件尾的「转发壳」里只留 `export *`（386 个 importer 不必逐 PR 改路径，最后一个
+// PR 脚本改写并删壳），壳里不许长出函数——否则壳会变成第二个 db.ts。
+// 拆出来的 *-db.ts 单文件 ≤ 1000 行：超了按子概念再分，别搬出一个新的 event-db。
+// 分文件的依据是概念边界与依赖方向（读模型 ← 状态机），行数上限只是防止回退的护栏。
+
+const DB_TS_LINE_CEILING = 6800;
+const DB_FILE_CEILING = 1000;
+/** 拆分前就超标的 *-db.ts：按当前行数记账，只降不升；降到上限内就删掉这条。 */
+const DB_FILE_GRANDFATHERED: Record<string, number> = {
+  "lib/ops/event-db.ts": 3246,
+  "lib/perm/resource-grant-db.ts": 1023,
+};
+const DB_SHELL_MARKER = "// ─── 转发壳";
+
+describe("lib/db.ts 分家只进不退", () => {
+  it(`lib/db.ts ≤ ${DB_TS_LINE_CEILING} 行，且上限与实际之差 < ${RATCHET_SLACK}`, async () => {
+    const lines = await countLines("lib/db.ts");
+    expect(lines, "lib/db.ts 长了。搬运 PR 请同时把 DB_TS_LINE_CEILING 改小；功能 PR 的新函数请直接写进 lib/<域>/*-db.ts").toBeLessThanOrEqual(DB_TS_LINE_CEILING);
+    expect(DB_TS_LINE_CEILING - lines, `lib/db.ts 已瘦到 ${lines} 行，请把 DB_TS_LINE_CEILING 收紧到当前值`).toBeLessThan(RATCHET_SLACK);
+  });
+
+  it("转发壳里只有注释与 `export * from \"./<域>/…\"`，不长函数", async () => {
+    const text = await readFile(path.join(ROOT, "lib/db.ts"), "utf-8");
+    const at = text.indexOf(DB_SHELL_MARKER);
+    expect(at, "db.ts 尾部的转发壳标记不见了").toBeGreaterThan(0);
+    const strays = text.slice(at).split("\n").filter((line) => {
+      const t = line.trim();
+      return t !== "" && !t.startsWith("//") && !/^export \* from "\.\/[a-z-]+\/[a-z-]+-db";$/.test(t);
+    });
+    expect(strays, "转发壳只许 `export *`；新函数请写进对应域的 *-db.ts").toEqual([]);
+  });
+
+  it(`lib/<域>/*-db.ts 单文件 ≤ ${DB_FILE_CEILING} 行（记账豁免见 DB_FILE_GRANDFATHERED）`, async () => {
+    const LIB_ROOT = path.join(ROOT, "lib");
+    const over: string[] = [];
+    for (const d of await readdir(LIB_ROOT, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      for (const f of await readdir(path.join(LIB_ROOT, d.name))) {
+        if (!/-db\.ts$/.test(f)) continue;
+        const rel = `lib/${d.name}/${f}`;
+        const lines = await countLines(rel);
+        const grandfathered = DB_FILE_GRANDFATHERED[rel];
+        const ceiling = grandfathered ?? DB_FILE_CEILING;
+        if (lines > ceiling) over.push(`${rel}: ${lines} > ${ceiling}`);
+        if (grandfathered !== undefined && grandfathered - lines >= RATCHET_SLACK) {
+          over.push(`${rel}: 已瘦到 ${lines} 行，请把 DB_FILE_GRANDFATHERED 收紧到当前值（≤ 上限时删掉这条）`);
+        }
+      }
+    }
+    expect(over).toEqual([]);
+  });
+});

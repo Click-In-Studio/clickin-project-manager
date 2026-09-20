@@ -3,7 +3,7 @@
  *
  * 单引擎双源：提交时「有已发布模版？」决定编译源——
  *   有  → 本模块把模版编译成 flow_snapshot（多节点，逐节点推进）；
- *   无  → flow_snapshot 为 NULL，lib/db.ts 走原封不动的阶梯路径。
+ *   无  → flow_snapshot 为 NULL，access-request-action-db.ts 走原封不动的阶梯路径。
  * 存量在途行天然 NULL = 懒编译（其实是零编译）：不回填、零行为变化。
  *
  * 两段式快照（§4）：
@@ -14,7 +14,7 @@
  * 一律落到 owner 兜底（节点内事件，不换节点）；空处理人按 optional 二值：
  * 跳过 或 兜底 owner。
  *
- * 分层纪律：本模块不发通知（返回 FlowNotifyPlan 由 lib/db.ts 执行——通知文案、
+ * 分层纪律：本模块不发通知（返回 FlowNotifyPlan 由 access-request-action-db.ts 执行——通知文案、
  * 外部消息、user_notification 都在那边），不碰 grant 行（终局发行仍归
  * approveAccessRequest 的既有路径）。
  *
@@ -90,7 +90,7 @@ export type FlowSnapshot = {
   rev: number;
 };
 
-/** 引擎要求的行子集（结构兼容 lib/db.ts 的 ApprovalRow，避免反向 import 成环）。 */
+/** 引擎要求的行子集（结构兼容 access-request-db.ts 的 ApprovalRow，避免反向 import 成环）。 */
 export type FlowRequestRow = {
   id: string;
   production_id: string;
@@ -104,7 +104,7 @@ export type FlowRequestRow = {
   flow_snapshot: FlowSnapshot | null;
 };
 
-/** 通知计划：由 lib/db.ts 执行（文案与投递渠道都在那边，引擎不碰）。 */
+/** 通知计划：由 access-request-action-db.ts 执行（文案与投递渠道都在那边，引擎不碰）。 */
 export type FlowNotifyPlan =
   | {
       kind: "node_pending";
@@ -189,7 +189,7 @@ function stageOfSource(source: ApprovalAssigneeSource): ApprovalStageName | unde
 
 // ─── 编译与推进 ───────────────────────────────────────────────────────────────
 
-/** escalation_chain 条目（结构同 lib/db.ts 的 ApprovalChainEntry；JSONB 落库）。 */
+/** escalation_chain 条目（结构同 access-request-db.ts 的 ApprovalChainEntry；JSONB 落库）。 */
 type FlowChainEntry = {
   phase: "supervisor" | "resource";
   stage?: ApprovalStageName;
@@ -579,7 +579,7 @@ export async function timeoutFlowNode(req: FlowRequestRow): Promise<FlowTimeoutR
 
 /**
  * 节点超时时限（小时）：节点自带的 timeoutHours 优先，缺省回项目配置/全局默认。
- * cron 的选行 SQL 与此同一口径（lib/db.ts escalateExpiredApprovals）。
+ * cron 的选行 SQL 与此同一口径（access-request-action-db.ts escalateExpiredApprovals）。
  */
 export function nodeTimeoutHours(snapshot: FlowSnapshot, configTtlHours: number | null): number {
   const node = snapshot.nodes[snapshot.cursor];
