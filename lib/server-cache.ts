@@ -14,6 +14,7 @@
  */
 
 import { registerSSEKeepalive } from "@/lib/sse-keepalive";
+import { PRESENCE_STALE_MS } from "@/lib/presence-heartbeat";
 
 // ─── Presence types ───────────────────────────────────────────────────────────
 
@@ -41,7 +42,8 @@ function assignColor(clientId: string): string {
 // ─── HMR-safe global singletons ───────────────────────────────────────────────
 
 type SSEPush = (frame: string) => void;
-type SSEClient = { clientId: string; push: SSEPush };
+/** userId 是建连时过了权限门的那个人（session），供心跳快路径按人核对（#578）。 */
+type SSEClient = { clientId: string; userId: string; push: SSEPush };
 
 const g = global as typeof globalThis & {
   __sseRegistry?:      Map<string, Map<string, SSEClient>>;
@@ -128,12 +130,13 @@ export function registerSSE(
   versionId: string,
   connectionId: string,
   clientId: string,
+  userId: string,
   push: SSEPush,
 ): () => boolean {
   const key = cacheKey(productionId, versionId);
   const reg = sseRegistry();
   if (!reg.has(key)) reg.set(key, new Map());
-  reg.get(key)!.set(connectionId, { clientId, push });
+  reg.get(key)!.set(connectionId, { clientId, userId, push });
   const releaseKeepalive = registerSSEKeepalive(push);
   return () => {
     releaseKeepalive();
@@ -163,16 +166,37 @@ export function hasActiveSSEClient(productionId: string, versionId: string, clie
   return false;
 }
 
+/**
+ * 按人版的 hasActiveSSEClient（#578）：同一浏览器的多个剧本标签页共用一条 SSE
+ * （leader 选举，cid=`stream:<key>`），在场条目却是每标签页一条 cid——按 cid 对
+ * 在 BroadcastChannel 可用的浏览器里永远对不上，#460 的快路径实际是死的。权限门
+ * 是按人过的，「这个人在这个 (production, version) 上有活跃连接」是同等强度的证明，
+ * 且 userId 来自 session、不像 cid 由客户端自报。
+ */
+export function hasActiveSSEUser(productionId: string, versionId: string, userId: string): boolean {
+  const clients = sseRegistry().get(cacheKey(productionId, versionId));
+  if (!clients) return false;
+  for (const client of clients.values()) {
+    if (client.userId === userId) return true;
+  }
+  return false;
+}
+
 // ─── Presence ─────────────────────────────────────────────────────────────────
 
 export function getPresence(productionId: string, versionId: string): PresenceClient[] {
   const key = cacheKey(productionId, versionId);
   const clients = presenceRegistry().get(key);
   if (!clients) return [];
-  const cutoff = Date.now() - 90_000;
+  const cutoff = Date.now() - PRESENCE_STALE_MS;
   return Array.from(clients.values()).filter(p => p.updatedAt >= cutoff);
 }
 
+/**
+ * 同值心跳只续 updatedAt 不广播（#578）：每个可见标签页每 30s 一拍，逐拍广播会让
+ * 全场每 30s 收 N 帧、ScriptEditor 跟着重渲染 N 次。过期条目视同缺席——它在别人
+ * 那里已经消失，续命必须重新广播才回得来。
+ */
 export function updatePresence(
   productionId: string,
   versionId: string,
@@ -183,8 +207,14 @@ export function updatePresence(
   const key = cacheKey(productionId, versionId);
   const reg = presenceRegistry();
   if (!reg.has(key)) reg.set(key, new Map());
+  const now = Date.now();
+  const prev = reg.get(key)!.get(clientId);
+  if (prev && now - prev.updatedAt <= PRESENCE_STALE_MS && prev.userName === userName && prev.blockId === blockId) {
+    prev.updatedAt = now;
+    return;
+  }
   reg.get(key)!.set(clientId, {
-    clientId, userName, color: assignColor(clientId), blockId, updatedAt: Date.now(),
+    clientId, userName, color: assignColor(clientId), blockId, updatedAt: now,
   });
   broadcastPresence(key);
 }
@@ -250,7 +280,7 @@ export type CuePresenceClient = {
 function getCuePresence(productionId: string): CuePresenceClient[] {
   const clients = cuePresReg().get(productionId);
   if (!clients) return [];
-  const cutoff = Date.now() - 90_000;
+  const cutoff = Date.now() - PRESENCE_STALE_MS;
   return Array.from(clients.values()).filter(p => p.updatedAt >= cutoff);
 }
 
@@ -276,8 +306,16 @@ export function updateCuePresence(
 ): void {
   const reg = cuePresReg();
   if (!reg.has(productionId)) reg.set(productionId, new Map());
+  // 同值心跳只续命不广播，同 updatePresence（#578）
+  const now = Date.now();
+  const prev = reg.get(productionId)!.get(clientId);
+  if (prev && now - prev.updatedAt <= PRESENCE_STALE_MS && prev.userName === userName
+    && prev.listId === listId && prev.cueId === cueId) {
+    prev.updatedAt = now;
+    return;
+  }
   reg.get(productionId)!.set(clientId, {
-    clientId, userName, color: assignColor(clientId), listId, cueId, updatedAt: Date.now(),
+    clientId, userName, color: assignColor(clientId), listId, cueId, updatedAt: now,
   });
   broadcastCuePresence(productionId);
 }

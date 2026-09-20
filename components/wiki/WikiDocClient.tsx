@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import { useVisibleEventSource } from "@/hooks/useVisibleEventSource";
+import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import { fmtDateTime } from "@/lib/tz";
 import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/editor/SmartTextarea";
@@ -232,11 +233,11 @@ export default function WikiDocClient({
     const cur = latestRef.current, prev = savedRef.current;
     return cur.body !== prev.body || cur.title.trim() !== prev.title || cur.tags !== prev.tags;
   };
-  const postCursor = (cursor: WikiCursor) => {
+  const postCursor = (cursor: WikiCursor | null) => {
     void fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${wiki.id}/presence`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: collabClientId, ...cursor }),
+      body: JSON.stringify({ clientId: collabClientId, blockIndex: cursor?.blockIndex ?? null, offset: cursor?.offset ?? null }),
     }).catch(() => {});
   };
   // relay 只建一次；post 经 ref 取最新闭包，切文档后不会发到旧 wiki.id
@@ -247,6 +248,9 @@ export default function WikiDocClient({
     throttleMs: CURSOR_THROTTLE_MS,
     post: (cursor) => postCursorRef.current(cursor),
   }));
+  // 在场心跳（#578）：重发服务端已知的最后位置（阅读态就是 null），只为续命不为挪光标——
+  // 本端脏时的新位置仍旧搭保存那一笔走，这里不碰 pending
+  usePresenceHeartbeat(() => postCursor(cursorRelay.sent()));
 
   const memberName = (userId: string) => members.find(m => m.userId === userId)?.name ?? userId.slice(0, 8);
 

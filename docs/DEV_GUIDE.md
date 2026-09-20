@@ -647,7 +647,7 @@ tests/
 | `admin/` | — | 13 个 `Admin*Client` + AdminActivationGate、Danger/Migration 段、BulkInvite / TransferOwner / ProductionPlan 卡片、InviteModal | `perm/` `ops/` |
 | `ui/` | — | 通用原语：Badge ChevronIcon DropdownPicker DurationInput Markdown MarkdownEditor OverflowSafeSelect PageHeader PageSkeleton SmartText TreePickerModal AdminModal（通用弹窗，名字是历史）`my-pages.module.css` | `platform/` |
 | `shell/` | — | 应用外壳：AppShell（子件与纯函数在 `app-shell/` 族目录）ProductionTopMenu SearchBar ManualSaveNotice WatermarkOverlay `watermark-tile` | `platform/` |
-| 根 | 纯基建白名单：`db` `pg` `r2` `server-cache` `tz` `money` `duration` `lex-order` `z-index` `base-path` `server-url` `request-json` `sse-keepalive` `sse-kick` `nav-pending` `search-db` | 不放文件 | `platform/` |
+| 根 | 纯基建白名单：`db` `pg` `r2` `server-cache` `tz` `money` `duration` `lex-order` `z-index` `base-path` `server-url` `request-json` `sse-keepalive` `sse-kick` `presence-heartbeat` `nav-pending` `search-db` | 不放文件 | `platform/` |
 
 `components/` 三分：通用原语进 `ui/`、应用外壳进 `shell/`、后台页面进 `admin/`，其余页面级 `*Client.tsx` 与页面专属组件按域走。页面容器**留在 `components/` 不 colocate 到 `app/`**——`app/` 路由树已深达十层，且页面容器有复用（`ProductionTasksClient` / `MyTasksClient` 共用子件）。归属按消费者定：只被一个域的页面用的，进那个域（如 `TableViewSelector` 只服务戏剧构作 → `script/`）；跨域共用才进 `ui/`。`.module.css` 跟随消费者，跨域共用的进 `ui/`。文件名两种形态：默认导出组件的文件 PascalCase，hook / context / util / 共享样式 kebab-case（`use-fonts-settled.ts` `ai-target.tsx` `my-pages.module.css`）。
 

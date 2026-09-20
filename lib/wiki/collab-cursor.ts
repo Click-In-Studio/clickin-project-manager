@@ -23,6 +23,8 @@ export type CursorRelay = {
   markSent(cursor: WikiCursor | null): void;
   /** 保存路径结束（不论是否真的发了 PATCH）：干净且还有没送出的位置 → 走独立通道 */
   afterSave(): void;
+  /** 服务端已知的最后位置（心跳重发用，#578）；null=从没送出过 / 阅读态 */
+  sent(): WikiCursor | null;
   dispose(): void;
 };
 
@@ -60,6 +62,7 @@ export function createCursorRelay(opts: {
     afterSave() {
       if (!opts.isDirty() && pending && !sameCursor(pending, lastSent)) arm();
     },
+    sent() { return lastSent; },
     dispose() {
       if (timer) clearTimeout(timer);
       timer = null;

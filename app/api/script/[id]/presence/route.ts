@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/perm/grant-check";
-import { hasActiveSSEClient, updatePresence } from "@/lib/server-cache";
+import { hasActiveSSEClient, hasActiveSSEUser, updatePresence } from "@/lib/server-cache";
 import { getActiveVersionId, getVersion, getProductionPermissionContext } from "@/lib/db";
 import { getSession } from "@/lib/account/session";
 
@@ -27,8 +27,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // 撤销本就不断开已建立的 SSE 流（撤销者照收广播，读面缺口先于本 PR 存在，
   // 见 #469），心跳逐拍重查只守住了写面的 200ms 窗口、守不住读面；真正的修法
   // 是撤销写点主动断流（#469），断流后快路径自然失效。
+  //
+  // 按人核对是主路径（#578）：多标签页共用一条 SSE 时 cid 是 `stream:<key>` 而非本标签页
+  // 的 clientId，按 cid 对永远落空；按 cid 只剩无 BroadcastChannel 的兜底建连会命中。
   const explicitVersionId = bodyVersionId ?? req.nextUrl.searchParams.get("v");
-  if (explicitVersionId !== null && hasActiveSSEClient(id, explicitVersionId, clientId)) {
+  if (explicitVersionId !== null
+    && (hasActiveSSEUser(id, explicitVersionId, session.userId) || hasActiveSSEClient(id, explicitVersionId, clientId))) {
     updatePresence(id, explicitVersionId, clientId, userName, blockId);
     return Response.json({ ok: true });
   }

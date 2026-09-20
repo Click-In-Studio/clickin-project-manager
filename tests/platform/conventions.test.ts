@@ -258,7 +258,7 @@ describe("lib/ 按域分目录，根只留基建", () => {
     "db.ts", "pg.ts", "r2.ts", "server-cache.ts",
     "tz.ts", "money.ts", "duration.ts", "lex-order.ts", "z-index.ts",
     "base-path.ts", "server-url.ts", "request-json.ts", "sse-keepalive.ts", "sse-kick.ts",
-    "nav-pending.ts", "search-db.ts",
+    "presence-heartbeat.ts", "nav-pending.ts", "search-db.ts",
   ];
 
   it("根目录文件 ⊆ 基建白名单——业务文件进域目录", async () => {
