@@ -4,7 +4,6 @@ import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import {
   registerSSE,
-  hasActiveSSEClient,
   hasActiveSSEUser,
   registerCueSSE,
   hasActiveCueSSEClient,
@@ -20,13 +19,13 @@ import { POST as presencePOST } from "@/app/api/script/[id]/presence/route";
 import { POST as cuePresencePOST } from "@/app/api/production/[id]/cue-presence/route";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
-// #460 presence 心跳快路径：clientId 在 SSE 注册表在册 = 建连时已过权限门，
+// #460 presence 心跳快路径：本人在 SSE 注册表在册 = 建连时已过权限门，
 // 心跳免重跑 7 条 DB 查询。这里钉住三件事：
 //  ① 快路径确实绕开权限重查（非成员 + 在册连接 → 200）——信任模型是"门在建连处"；
 //  ② 慢路径没有松动（无在册连接的非成员 403、未登录 401）；
-//  ③ 快路径的 key 是 (production, version, clientId) 三元组，错一个都落回慢路径。
-// #578 补按人核对：多标签页共用一条 SSE 时 cid 是 `stream:<key>`，按 cid 对永远落空；
-// 同一 session 用户在该 (production, version) 上有活跃连接也走快路径（④）。
+//  ③ 快路径的 key 是 (production, version, session 用户) 三元组，错一个都落回慢路径。
+// #578 改按人核对：多标签页共用一条 SSE 时 cid 是 `stream:<key>`，按 cid 对永远落空；
+// 且 cid 由客户端自报，按 cid 等于允许任何登录用户冒用在册 cid 绕门（④⑤）。
 
 async function newUser(): Promise<string> {
   const res = await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id");
@@ -70,18 +69,8 @@ afterAll(async () => {
   }
 });
 
-describe("hasActiveSSEClient — 注册表即令牌", () => {
-  it("在册 → true；version / clientId 错位 → false；断开 → false", () => {
-    const cid = shortId();
-    const cleanup = registerSSE(prodId, versionId, `${cid}:conn1`, cid, strangerId, () => {});
-    expect(hasActiveSSEClient(prodId, versionId, cid)).toBe(true);
-    expect(hasActiveSSEClient(prodId, "other-version", cid)).toBe(false);
-    expect(hasActiveSSEClient(prodId, versionId, "other-client")).toBe(false);
-    cleanup();
-    expect(hasActiveSSEClient(prodId, versionId, cid)).toBe(false);
-  });
-
-  it("按人（#578）：同人在册 → true；version / user 错位 → false；断开 → false", () => {
+describe("hasActiveSSEUser — 注册表即令牌", () => {
+  it("同人在册 → true；version / user 错位 → false；断开 → false", () => {
     const cleanup = registerSSE(prodId, versionId, `stream:${prodId}:${versionId}:conn`, `stream:${prodId}:${versionId}`, strangerId, () => {});
     expect(hasActiveSSEUser(prodId, versionId, strangerId)).toBe(true);
     expect(hasActiveSSEUser(prodId, "other-version", strangerId)).toBe(false);
@@ -115,14 +104,16 @@ describe("script presence 心跳", () => {
     expect(getPresence(prodId, versionId).some(p => p.clientId === tabCid)).toBe(true);
   });
 
-  it("按人不串人：在册的是别人的连接，本人无连接 → 慢路径 → 非成员 403", async () => {
+  it("⑤ 不串人：在册的是别人的连接，本人无连接 → 慢路径 → 非成员 403；冒用那条连接的 cid 也不行", async () => {
     const cid = shortId();
     cleanups.push(registerSSE(prodId, versionId, `${cid}:conn`, cid, ownerId, () => {}));
-    const res = await presencePOST(
-      presenceReq(strangerId, { clientId: shortId(), userName: "陌生人", blockId: null, versionId }),
-      scriptCtx(),
-    );
-    expect(res.status).toBe(403);
+    for (const claimed of [shortId(), cid]) {
+      const res = await presencePOST(
+        presenceReq(strangerId, { clientId: claimed, userName: "陌生人", blockId: null, versionId }),
+        scriptCtx(),
+      );
+      expect(res.status, `clientId=${claimed}`).toBe(403);
+    }
   });
 
   it("快路径不豁免登录：无 session 一律 401", async () => {

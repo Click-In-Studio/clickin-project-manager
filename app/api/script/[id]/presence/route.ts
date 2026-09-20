@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { hasGrant } from "@/lib/perm/grant-check";
-import { hasActiveSSEClient, hasActiveSSEUser, updatePresence } from "@/lib/server-cache";
+import { hasActiveSSEUser, updatePresence } from "@/lib/server-cache";
 import { getActiveVersionId, getVersion, getProductionPermissionContext } from "@/lib/db";
 import { getSession } from "@/lib/account/session";
 
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { clientId, userName, blockId, versionId: bodyVersionId } = (await req.json()) as PresenceBody;
   if (!clientId || !userName) return Response.json({ error: "missing fields" }, { status: 400 });
 
-  // 快路径（#460）：同一 clientId 在该 (production, version) 上已有活跃 SSE 连接。
+  // 快路径（#460）：本人在该 (production, version) 上已有活跃 SSE 连接。
   // stream/route.ts 建连时已过与下面逐字相同的权限门和版本归属校验，且连接断开
   // 即失效——心跳不再重跑 7 条 DB 查询，只写内存 presence Map。
   //
@@ -28,11 +28,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // 见 #469），心跳逐拍重查只守住了写面的 200ms 窗口、守不住读面；真正的修法
   // 是撤销写点主动断流（#469），断流后快路径自然失效。
   //
-  // 按人核对是主路径（#578）：多标签页共用一条 SSE 时 cid 是 `stream:<key>` 而非本标签页
-  // 的 clientId，按 cid 对永远落空；按 cid 只剩无 BroadcastChannel 的兜底建连会命中。
+  // 核对单位是 session 用户不是 cid（#578）：多标签页共用一条 SSE 时 cid 是 `stream:<key>`
+  // 而非本标签页的 clientId，按 cid 对永远落空；而且 cid 由客户端自报，按 cid 核对等于
+  // 任何登录用户都能冒用在册 cid 绕门。权限门本就按人过，按人是同等证明、更窄的信任面。
   const explicitVersionId = bodyVersionId ?? req.nextUrl.searchParams.get("v");
-  if (explicitVersionId !== null
-    && (hasActiveSSEUser(id, explicitVersionId, session.userId) || hasActiveSSEClient(id, explicitVersionId, clientId))) {
+  if (explicitVersionId !== null && hasActiveSSEUser(id, explicitVersionId, session.userId)) {
     updatePresence(id, explicitVersionId, clientId, userName, blockId);
     return Response.json({ ok: true });
   }

@@ -10,7 +10,7 @@ import { restoreMember } from "@/lib/perm/member-status";
 import { createWiki } from "@/lib/wiki/content";
 import { registerSSEKick, kickUserStreams, countKickableStreams } from "@/lib/sse-kick";
 import {
-  hasActiveSSEClient, hasActiveCueSSEClient, updatePresence, getPresence,
+  hasActiveSSEUser, hasActiveCueSSEClient, updatePresence, getPresence,
   updateCuePresence, cuePresenceFrame,
 } from "@/lib/server-cache";
 import { registerWikiSSE, wikiPresenceFrame, stopCollabListenerForTests, COLLAB_CHANNEL } from "@/lib/wiki/collab";
@@ -156,12 +156,12 @@ describe("三条路由被踢 → 流结束 + 整套清理", () => {
     const reader = await openStream(scriptStreamGET,
       `http://localhost/api/script/${prodId}/stream?cid=${cid}&v=${versionId}`, memberId, { id: prodId });
     updatePresence(prodId, versionId, cid, "被踢者", null);
-    expect(hasActiveSSEClient(prodId, versionId, cid)).toBe(true);
+    expect(hasActiveSSEUser(prodId, versionId, memberId)).toBe(true);
     expect(countKickableStreams(prodId, memberId)).toBe(1);
 
     expect(kickUserStreams(prodId, memberId)).toBe(1);
     expect(await endsWithin(reader)).toBe(true);
-    expect(hasActiveSSEClient(prodId, versionId, cid)).toBe(false);
+    expect(hasActiveSSEUser(prodId, versionId, memberId)).toBe(false);
     expect(getPresence(prodId, versionId).some((p) => p.clientId === cid)).toBe(false);
     expect(countKickableStreams(prodId, memberId)).toBe(0);
   });
@@ -201,7 +201,7 @@ describe("三条路由被踢 → 流结束 + 整套清理", () => {
     kickUserStreams(prodId, memberId);
     expect(await endsWithin(readerA)).toBe(true);
     expect(await endsWithin(readerB, 300)).toBe(false);
-    expect(hasActiveSSEClient(prodId, versionId, cidB)).toBe(true);
+    expect(hasActiveSSEUser(prodId, versionId, ownerId)).toBe(true);
     kickUserStreams(prodId, ownerId);
     expect(await endsWithin(readerB)).toBe(true);
   });
@@ -223,7 +223,7 @@ describe("撤销写点接线：停用成员", () => {
     );
     expect(res.status).toBe(200);
     expect(await endsWithin(reader)).toBe(true);
-    expect(hasActiveSSEClient(prodId, versionId, cid)).toBe(false);
+    expect(hasActiveSSEUser(prodId, versionId, memberId)).toBe(false);
     // EventSource 自动重连 → 建连门拒绝 → 浏览器停止重试：状态收敛
     expect((await scriptStreamGET(streamReq(url, memberId), ctx({ id: prodId }))).status).toBe(403);
 
@@ -249,7 +249,7 @@ describe("跨进程：agent-runner 发的 kick 指令经 outbox 到达", () => {
         [`kick:${prodId}`, memberId, COLLAB_CHANNEL],
       );
       expect(await endsWithin(reader, 3000)).toBe(true);
-      expect(hasActiveSSEClient(prodId, versionId, cid)).toBe(false);
+      expect(hasActiveSSEUser(prodId, versionId, memberId)).toBe(false);
     } finally {
       cancelDummy();
     }

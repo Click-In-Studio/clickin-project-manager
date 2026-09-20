@@ -151,27 +151,17 @@ export function registerSSE(
 }
 
 /**
- * 该 clientId 在此 (production, version) 上是否有活跃 SSE 连接。
+ * 该用户在此 (production, version) 上是否有活跃 SSE 连接。
  *
  * #460 心跳快路径的依据：SSE 建连时已过与 presence POST 完全相同的权限门
  * （getProductionPermissionContext + hasGrant + 版本归属校验），注册表里查得到
  * 就等于校验过——心跳无需重跑那 7 条 DB 查询。连接断开即失效，无 TTL 缓存。
- */
-export function hasActiveSSEClient(productionId: string, versionId: string, clientId: string): boolean {
-  const clients = sseRegistry().get(cacheKey(productionId, versionId));
-  if (!clients) return false;
-  for (const client of clients.values()) {
-    if (client.clientId === clientId) return true;
-  }
-  return false;
-}
-
-/**
- * 按人版的 hasActiveSSEClient（#578）：同一浏览器的多个剧本标签页共用一条 SSE
- * （leader 选举，cid=`stream:<key>`），在场条目却是每标签页一条 cid——按 cid 对
- * 在 BroadcastChannel 可用的浏览器里永远对不上，#460 的快路径实际是死的。权限门
- * 是按人过的，「这个人在这个 (production, version) 上有活跃连接」是同等强度的证明，
- * 且 userId 来自 session、不像 cid 由客户端自报。
+ *
+ * 按人不按 cid（#578）：同一浏览器的多个剧本标签页共用一条 SSE（leader 选举，
+ * cid=`stream:<key>`），在场条目却是每标签页一条 cid——按 cid 对在 BroadcastChannel
+ * 可用的浏览器里永远对不上，#460 的快路径实际是死的。权限门是按人过的，「这个人
+ * 在这个 (production, version) 上有活跃连接」是同等强度的证明，且 userId 来自
+ * session、不像 cid 由客户端自报可冒用。
  */
 export function hasActiveSSEUser(productionId: string, versionId: string, userId: string): boolean {
   const clients = sseRegistry().get(cacheKey(productionId, versionId));
