@@ -1388,6 +1388,8 @@ export default function ScriptEditor({
   // 计时器到期时上一笔还在飞：记下来，飞完重排一轮（不能丢——停手前最后一段
   // 输入若恰好撞锁，没有下一个击键就再也不落库）。
   const deferredSyncRef = useRef(false);
+  // 卸载时若上一笔还在飞，它的 finally 不能再重排（会在卸载后 arm 计时器）
+  const syncUnmountedRef = useRef(false);
   const pendingMovedBlockIdsRef = useRef<Set<string>>(new Set());
 
   // Stable ref to the push function so the debounce closure never goes stale.
@@ -1495,7 +1497,10 @@ export default function ScriptEditor({
         const waiters = syncIdleWaitersRef.current;
         syncIdleWaitersRef.current = [];
         for (const resolve of waiters) resolve();
-        if (deferredSyncRef.current) { deferredSyncRef.current = false; syncDebounce.trigger(); }
+        if (deferredSyncRef.current) {
+          deferredSyncRef.current = false;
+          if (!syncUnmountedRef.current) syncDebounce.trigger();
+        }
       }
     };
   }, [effectiveScriptId, activeVersionId, canEdit, loadState, syncDebounce]);
@@ -1920,7 +1925,7 @@ export default function ScriptEditor({
   // blockTagMap included so tag-only changes (inherit, paste, manual edit)
   // also trigger the debounced sync and embed tags in the block op.
   }, [blocks, characters, scenes, blockTagMap, loadState, syncDebounce]);
-  useEffect(() => () => syncDebounce.cancel(), [syncDebounce]);
+  useEffect(() => () => { syncUnmountedRef.current = true; syncDebounce.cancel(); }, [syncDebounce]);
 
   const flushPendingPatch = useCallback(async () => {
     syncDebounce.cancel();
