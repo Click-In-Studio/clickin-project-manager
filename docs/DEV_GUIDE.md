@@ -630,7 +630,7 @@ tests/
 | 域 | `lib/` 收纳 | `components/` 收纳 | 测试归 |
 |---|---|---|---|
 | `agent/` | `runtime/` `tools/` `memory/` `chat/` 四个子目录 + 注入安全、指令、页面/UI 上下文、工具标签、`ai-quota` `llm-chat` | AgentPopout、AI 指令 / 用量卡片、`ai-target`、wiki 提案预览 | `agent/` |
-| `script/` | `script-*`（方言、标记、分页、选区、焦点…）、`template/`（剧本版式模版）、`head-version` `print-css`、场次/角色字段权限 | ScriptEditor 及其对话框、场次/角色管理、戏剧构作与其表格视图组件 | `script/` |
+| `script/` | `script-*`（方言、标记、分页、选区、焦点…）、`version-db`（线性版本：head / 初始版本）`script-view-db`（本子：主本 + 版式解释）`head-version`、`template/`（剧本版式模版）、`print-css`、场次/角色字段权限 | ScriptEditor 及其对话框、场次/角色管理、戏剧构作与其表格视图组件 | `script/` |
 | `editor/` | `editor-*`（块模型）、`tiptap-*`（扩展）、`line-merge` `table-ops` `remark-columns`、粘贴处理、`mention-types` | 块菜单 / 气泡菜单 / 表格工具、`SmartTextarea` | `wiki/`（编辑器原语的测试跟文档库走） |
 | `wiki/` | 文档库（原有目录） | 文档页、挂载面板、`WikiPrintPage`（文档打印，与剧本打印无关）（原有目录） | `wiki/` |
 | `asset/` | 素材、元数据、头像（`avatar-*`） | `assets/`：上传、预览、挂载、分享（原有目录） | `asset/` |
@@ -639,7 +639,7 @@ tests/
 | `ops/` | `event-*` `cue-*`（`cue-list-db` 表本体 + 授权 + 导入建表；`cue-db` cue 本体 + CoW + 随块漂移 + 跨项目告警）`task-*` `phase-*` `milestone-db` `finance-db` `material-*` `scene-duration` | 事件、cue、计划、任务、需求（req）、报告、周 call、工作区首页与项目首页 | `ops/` |
 | `approval/` | `approval-*`：引擎、模版、路由、阶段、TTL、时间线；`access-request-db`（申请读模型：类型 / 行映射 / people / 鉴权 / 列表 / 预览 / 流程视图）`access-request-action-db`（状态机：提交 / 批准 / 转交 / 拒绝 / 撤回 / 超时升级 + 通知；单向依赖读模型） | AccessRequests 页与弹窗、ApprovalFlowDesigner | `ops/` |
 | `perm/` | `permissions` `grant-*` `policy-*` `resource-*` `perm-center-db` `page-permission-scopes` `permission-*` `roles`（默认职位分组常量）`role-db`（职位 CRUD + 权限键）`permission-context-db`（getProductionPermissionContext + override）`dept-db` `member-db`（名册 / 入组 / 职位 / 标签 / 上级）`member-*`（状态机、退出路由）`admin-guard` `api-guard` | 权限激活弹窗 / 页面门、权限键选择器、成员选择器、通讯录、未授权页动作 | `perm/` |
-| `production/` | `production-template` `production-types` `templates/`（各类型项目模版）`template-seeders/` | — | `ops/` |
+| `production/` | `production-db`（建项目事务、列表、归档、元数据、概览）`production-template` `production-types` `templates/`（各类型项目模版）`template-seeders/` | — | `ops/` |
 | `account/` | `session` `db-feishu` `invite-db` `registration-gate` `account-return` `plan` | 邀请接受页、我的项目、新建项目弹窗 | `account/` |
 | `notify/` | `notify` `notification-prefs` `inbox-db` `announcement-db`（公告本体 + 已读回执）`card-token` `doc/`（通知文档渲染） | 通知页、通知中心、公告页 | `notify/` |
 | `platform/` | 外部平台适配：`feishu/` `email/` 注册表、通知路由（原有目录） | — | `notify/` `account/` |

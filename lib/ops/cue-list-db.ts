@@ -439,3 +439,12 @@ export async function importCueColumnsInTx(
     [cueRows.map(row => row.id), versionId],
   );
 }
+
+// ── 可建的 cue 类型 ──────────────────────────────────────────────────────────
+
+/** Returns cue_type keys the user is allowed to create in a production, via dept membership. */
+export async function getUserAllowedCueTypes(userId: string, productionId: string): Promise<string[]> {
+  // §3.5：改读声明表 can_create 路径（原 production_dept.allowed_cue_types 数组已迁移）
+  const { listCreatableTemplates } = await import("./cue-template-db");
+  return listCreatableTemplates(userId, productionId);
+}
