@@ -14,6 +14,7 @@ import { formatShortcut, useIsMacLike } from "@/components/ui/shortcut-label";
 import { useDocumentVisible } from "@/hooks/useVisibleEventSource";
 import { useAgentMutation } from "@/lib/agent/agent-mutations";
 import { BASE_PATH } from "@/lib/base-path";
+import { createSaveDebounce } from "@/lib/editor/save-debounce";
 import type { TagGroup, BlockTagValue, SceneDetail } from "@/lib/db";
 import { formatDuration, parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
@@ -85,6 +86,11 @@ type PendingStageDelimiterChange = {
 };
 
 // 打印相关组件已抽到 components/print/ScriptPrint.tsx（#335）
+
+// 自动同步（#520）：trailing 1.5s，但自第一次改动起最迟 5s 必落一笔——
+// 连续打字不再无界不落库（丢数据窗口 / 协作延迟 / presence 先于内容到达）。
+const SYNC_DEBOUNCE_MS = 1500;
+const SYNC_MAX_WAIT_MS = 5000;
 
 const REHEARSAL_SWITCH_OPTICAL_OFFSET_STYLE: React.CSSProperties = { position: "relative", left: "3%" };
 
@@ -511,6 +517,8 @@ export default function ScriptEditor({
   const blocksRef = useRef(blocks);
   const ownedBlocksRef = useRef(ownedBlocks);
   const scenesRef = useRef(scenes);
+  const charactersRef = useRef(characters);
+  useEffect(() => { charactersRef.current = characters; }, [characters]);
   const sceneIdSetRef = useRef<Set<string>>(new Set(scenes.map((scene) => scene.id)));
   const blockIndexByIdRef = useRef<Map<string, number>>(new Map(blocks.map((block, index) => [block.id, index])));
   const clampWindowRange = useCallback((range: { start: number; end: number }, blockCount = blocksRef.current.length) => (
@@ -1377,16 +1385,27 @@ export default function ScriptEditor({
   const serverSeqRef = useRef(0);
   const isSyncingRef = useRef(false);
   const syncIdleWaitersRef = useRef<Array<() => void>>([]);
-  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 计时器到期时上一笔还在飞：记下来，飞完重排一轮（不能丢——停手前最后一段
+  // 输入若恰好撞锁，没有下一个击键就再也不落库）。
+  const deferredSyncRef = useRef(false);
   const pendingMovedBlockIdsRef = useRef<Set<string>>(new Set());
 
   // Stable ref to the push function so the debounce closure never goes stale.
   const pushPatchRef = useRef<(curr: ScriptState) => void>(() => {});
+  const [syncDebounce] = useState(() => createSaveDebounce(() => {
+    const curr: ScriptState = {
+      config: scriptConfigRef.current,
+      blocks: normalizeScriptBlockStream(blocksRef.current),
+      characters: charactersRef.current,
+      scenes: scenesRef.current,
+    };
+    pushPatchRef.current(curr);
+  }, { wait: SYNC_DEBOUNCE_MS, maxWait: SYNC_MAX_WAIT_MS }));
 
   useEffect(() => {
     pushPatchRef.current = async (curr: ScriptState) => {
       if (!canEdit || loadState !== "ready" || syncedStateRef.current === null) return;
-      if (isSyncingRef.current) return;
+      if (isSyncingRef.current) { deferredSyncRef.current = true; return; }
       isSyncingRef.current = true;
       try {
         const seq = ++clientSeqRef.current;
@@ -1476,9 +1495,10 @@ export default function ScriptEditor({
         const waiters = syncIdleWaitersRef.current;
         syncIdleWaitersRef.current = [];
         for (const resolve of waiters) resolve();
+        if (deferredSyncRef.current) { deferredSyncRef.current = false; syncDebounce.trigger(); }
       }
     };
-  }, [effectiveScriptId, activeVersionId, canEdit, loadState]);
+  }, [effectiveScriptId, activeVersionId, canEdit, loadState, syncDebounce]);
 
   useEffect(() => {
     setLoadState("loading");
@@ -1891,38 +1911,26 @@ export default function ScriptEditor({
     focusBlockContent(focusId);
   }, [focusBlockContent, glowChangedBlocks]);
 
-  // Debounced sync: fires 1500 ms after the last state change.
-  const charactersRef = useRef(characters);
-  useEffect(() => { charactersRef.current = characters; }, [characters]);
-
+  // Debounced sync: SYNC_DEBOUNCE_MS after the last state change, at most
+  // SYNC_MAX_WAIT_MS after the first (#520). 每次改动只 trigger，不在 cleanup 里
+  // cancel——cancel 会把 maxWait 窗口起点一起清掉，等于回到纯 trailing。
   useEffect(() => {
     if (loadState !== "ready") return;
-    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    syncTimerRef.current = setTimeout(() => {
-      const curr: ScriptState = {
-        config: scriptConfigRef.current,
-        blocks: normalizeScriptBlockStream(blocksRef.current),
-        characters: charactersRef.current,
-        scenes: scenesRef.current,
-      };
-      pushPatchRef.current(curr);
-    }, 1500);
-    return () => {
-      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    };
+    syncDebounce.trigger();
   // blockTagMap included so tag-only changes (inherit, paste, manual edit)
   // also trigger the debounced sync and embed tags in the block op.
-  }, [blocks, characters, scenes, blockTagMap, loadState]);
+  }, [blocks, characters, scenes, blockTagMap, loadState, syncDebounce]);
+  useEffect(() => () => syncDebounce.cancel(), [syncDebounce]);
 
   const flushPendingPatch = useCallback(async () => {
-    if (syncTimerRef.current) {
-      clearTimeout(syncTimerRef.current);
-      syncTimerRef.current = null;
-    }
+    syncDebounce.cancel();
     if (isSyncingRef.current) {
       await new Promise<void>((resolve) => {
         syncIdleWaitersRef.current.push(resolve);
       });
+      // 等待期间上一笔可能把撞锁的那轮重排了；这里马上就推，不用再等
+      deferredSyncRef.current = false;
+      syncDebounce.cancel();
     }
     const curr: ScriptState = {
       config: scriptConfigRef.current,
@@ -1938,18 +1946,17 @@ export default function ScriptEditor({
     return stateSynced &&
       pendingTagInsertsRef.current.size === 0 &&
       JSON.stringify(currentTags) === JSON.stringify(syncedTags);
-  }, []);
+  }, [syncDebounce]);
 
   const persistMarkerState = useCallback(async (next: ScriptState) => {
-    if (syncTimerRef.current) {
-      clearTimeout(syncTimerRef.current);
-      syncTimerRef.current = null;
-    }
+    syncDebounce.cancel();
     if (isSyncingRef.current) {
       await new Promise<void>((resolve) => syncIdleWaitersRef.current.push(resolve));
+      deferredSyncRef.current = false;
+      syncDebounce.cancel();
     }
     await pushPatchRef.current(next);
-  }, []);
+  }, [syncDebounce]);
 
   const undoStack = useRef<Block[][]>([]);
   const redoStack = useRef<Block[][]>([]);
