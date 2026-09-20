@@ -34,7 +34,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         try { controller.enqueue(enc.encode(frame)); }
         catch { teardown?.(); }
       };
-      const cancelSSE = registerSSE(id, versionId, connectionId, clientId, push);
+      const cancelSSE = registerSSE(id, versionId, connectionId, clientId, session.userId, push);
       const releaseKick = registerSSEKick(id, session.userId, () => {
         teardown?.();
         try { controller.close(); } catch { /* 已关 */ }

@@ -14,6 +14,7 @@ import { hostname } from "node:os";
 import type { Pool, PoolClient } from "pg";
 import { getPool } from "@/lib/pg";
 import { registerSSEKeepalive } from "@/lib/sse-keepalive";
+import { PRESENCE_STALE_MS } from "@/lib/presence-heartbeat";
 import { kickUserStreams } from "@/lib/sse-kick";
 import type { WikiCursor } from "@/lib/wiki/collab-cursor";
 
@@ -57,13 +58,11 @@ function presReg(): Map<string, Map<string, WikiPeer>> {
   return g.__wikiPresenceRegistry;
 }
 
-const STALE_MS = 90_000;
-
 function livePeers(wikiId: string): WikiPeer[] {
   const m = presReg().get(wikiId);
   if (!m) return [];
   const now = Date.now();
-  for (const [cid, p] of m) if (now - p.updatedAt > STALE_MS) m.delete(cid);
+  for (const [cid, p] of m) if (now - p.updatedAt > PRESENCE_STALE_MS) m.delete(cid);
   return [...m.values()];
 }
 
@@ -228,6 +227,19 @@ export function registerWikiSSE(
   };
 }
 
+/**
+ * 心跳快路径的依据（#578）：条目由 stream 路由建连时登记、连接拆除时摘掉，在表里
+ * 且 userId 与 session 一致 = 这个人已过建连的权限门；心跳免重跑可见性查询。
+ * 过期条目不算（livePeers 顺手清掉），那就落回慢路径重新登记。
+ */
+export function hasWikiPresence(wikiId: string, clientId: string, userId: string): boolean {
+  return livePeers(wikiId).some((p) => p.clientId === clientId && p.userId === userId);
+}
+
+/**
+ * 同值心跳只续 updatedAt 不广播（#578）：每个可见客户端每 30s 一拍，逐拍广播全场
+ * 就是 N² 帧。过期条目视同缺席——它在别人那里已经消失，续命必须重新广播才回得来。
+ */
 export function updateWikiPresence(
   wikiId: string,
   clientId: string,
@@ -236,6 +248,14 @@ export function updateWikiPresence(
 ): void {
   let m = presReg().get(wikiId);
   if (!m) { m = new Map(); presReg().set(wikiId, m); }
+  const now = Date.now();
+  const prev = m.get(clientId);
+  if (prev && now - prev.updatedAt <= PRESENCE_STALE_MS
+    && prev.userId === info.userId && prev.userName === info.userName && prev.avatarUrl === info.avatarUrl
+    && prev.blockIndex === (cursor?.blockIndex ?? null) && prev.offset === (cursor?.offset ?? null)) {
+    prev.updatedAt = now;
+    return;
+  }
   m.set(clientId, {
     clientId,
     userId: info.userId,
@@ -244,7 +264,7 @@ export function updateWikiPresence(
     color: assignColor(clientId),
     blockIndex: cursor?.blockIndex ?? null,
     offset: cursor?.offset ?? null,
-    updatedAt: Date.now(),
+    updatedAt: now,
   });
   localBroadcast(wikiId, wikiPresenceFrame(wikiId));
 }

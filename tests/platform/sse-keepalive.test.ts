@@ -80,7 +80,7 @@ describe("registerSSEKeepalive", () => {
 describe("三条协作注册表接入 keepalive", () => {
   it("registerSSE（script）：注册即在扫描名单，cleanup 后退出", () => {
     const c = collect();
-    const cancel = registerSSE(shortId(), shortId(), "conn1", "client1", c.push);
+    const cancel = registerSSE(shortId(), shortId(), "conn1", "client1", "user1", c.push);
     sseKeepaliveTick();
     expect(c.frames).toHaveLength(1);
     cancel();
