@@ -3,12 +3,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { signBindingToken } from "@/lib/platform/email/email-tokens";
 import { sendEmail } from "@/lib/platform/email/email-send";
-
-function requestBaseUrl(req: NextRequest): string {
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
-  const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  return `${proto}://${host}`;
-}
+import { requestOrigin } from "@/lib/account/request-origin";
 
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies();
@@ -20,7 +15,7 @@ export async function POST(req: NextRequest) {
   if (!email) return Response.json({ error: "missing email" }, { status: 400 });
 
   const token = signBindingToken(session.userId, email);
-  const baseUrl = requestBaseUrl(req);
+  const baseUrl = requestOrigin(req);
   const link = `${baseUrl}/api/account/bind/email/callback?token=${encodeURIComponent(token)}`;
 
   await sendEmail({

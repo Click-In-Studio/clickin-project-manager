@@ -2,12 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { getPersonalChannel } from "@/lib/platform/registry";
 import { generateOAuthState, OAUTH_STATE_COOKIE, OAUTH_CTX_COOKIE, type OAuthContext } from "@/lib/account/session";
 import { RegistrationDeniedError, AuthIntentMismatchError, registrationRateLimited } from "@/lib/account/registration-gate";
-
-function requestBaseUrl(req: NextRequest): string {
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
-  const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  return `${proto}://${host}`;
-}
+import { requestOrigin } from "@/lib/account/request-origin";
 
 type Params = { params: Promise<{ platform: string }> };
 
@@ -22,7 +17,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   const state = generateOAuthState();
-  const baseUrl = requestBaseUrl(req);
+  const baseUrl = requestOrigin(req);
   const redirectUri = `${baseUrl}/api/auth/${platform}/callback`;
   const url = ch.generateAuthUrl(state, redirectUri);
 
@@ -79,7 +74,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     return Response.json({ error: "尝试过于频繁，请稍后再试" }, { status: 429 });
   }
 
-  const baseUrl = requestBaseUrl(req);
+  const baseUrl = requestOrigin(req);
   try {
     await ch.initiateLogin(body, { baseUrl });
   } catch (e) {
