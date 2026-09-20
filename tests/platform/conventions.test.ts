@@ -189,7 +189,7 @@ describe("模版 resource_type ⊆ resource_permission_level 词汇表", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // 297 个文件平铺过一次，整理成域目录后不许回退。规则只钉形态、不钉目录名单——
 // 新开一个域目录不用改这里，但「顺手丢在根目录」和「域下再套一层」都会红。
-// 域目录的清单与归属原则见 DEV_GUIDE §11.2。
+// 域目录的清单与归属原则见 DEV_GUIDE §1.2。
 
 describe("tests/ 按域分目录，不回退成平铺", () => {
   const TESTS_ROOT = path.join(ROOT, "tests");
@@ -250,7 +250,7 @@ describe("tests/ 按域分目录，不回退成平铺", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // 124 个文件靠文件名前缀平铺过一次，收进域目录后不许回退。与 tests/ 的形态棘轮
 // 不同，这里钉的是一份**根目录白名单**：根只留跨域基建，任何业务文件都有它的域。
-// 新开域目录不用改这里；往根加文件必须同时加白名单并更新 DEV_GUIDE §11.2 的归属表。
+// 新开域目录不用改这里；往根加文件必须同时加白名单并更新 DEV_GUIDE §1.2 的归属表。
 
 describe("lib/ 按域分目录，根只留基建", () => {
   const LIB_ROOT = path.join(ROOT, "lib");
@@ -265,7 +265,7 @@ describe("lib/ 按域分目录，根只留基建", () => {
     const entries = await readdir(LIB_ROOT, { withFileTypes: true });
     const files = entries.filter((e) => e.isFile()).map((e) => e.name);
     const strays = files.filter((f) => !ROOT_INFRA.includes(f));
-    expect(strays, "lib/ 根目录出现了白名单之外的文件，请移到对应域目录（DEV_GUIDE §11.2）").toEqual([]);
+    expect(strays, "lib/ 根目录出现了白名单之外的文件，请移到对应域目录（DEV_GUIDE §1.2）").toEqual([]);
   });
 
   it("白名单没有幽灵条目——移走或删除的基建文件要同步从白名单摘掉", async () => {
@@ -283,7 +283,7 @@ describe("lib/ 按域分目录，根只留基建", () => {
 // 只钉形态不钉名单：根目录不放文件、文件名两种形态之一。
 // 域下允许**一层**「组件族」目录（#487）：巨石组件拆出来的子件 / hook / 纯函数收进
 // components/<domain>/<family>/，族目录名 kebab-case = 主组件名，族内不再套目录。
-// 域目录清单与归属原则见 DEV_GUIDE §11.2。
+// 域目录清单与归属原则见 DEV_GUIDE §1.2。
 
 const FILE_NAME_OK = /^(?:[A-Z][A-Za-z0-9]*|[a-z0-9]+(?:-[a-z0-9]+)*)(?:\.module)?\.(?:tsx?|css)$/;
 const FAMILY_DIR_OK = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -294,7 +294,7 @@ describe("components/ 按域分目录，不回退成平铺", () => {
   it("根目录没有文件——组件必须进域目录（通用原语进 ui/，壳进 shell/）", async () => {
     const entries = await readdir(COMPONENTS_ROOT, { withFileTypes: true });
     const strays = entries.filter((e) => e.isFile()).map((e) => e.name);
-    expect(strays, "components/ 根目录出现了文件，请移到对应域目录（DEV_GUIDE §11.2）").toEqual([]);
+    expect(strays, "components/ 根目录出现了文件，请移到对应域目录（DEV_GUIDE §1.2）").toEqual([]);
   });
 
   it("域下最多一层组件族目录：族目录名 kebab-case，族目录下没有子目录", async () => {
