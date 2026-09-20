@@ -159,3 +159,15 @@ export async function listGrantedResourceIds(
   if (ids.includes("*")) return { wildcard: true, ids: [] };
   return { wildcard: false, ids };
 }
+
+/** 列表入口的 owner 旁路版（与 hasEffectiveGrant 同族）：admin/owner 视同持通配行。 */
+export async function listEffectiveGrantedResourceIds(
+  ctx: { userId: string; isAdmin: boolean; isOwner: boolean },
+  productionId: string,
+  resourceType: string,
+  resourceSub: string,
+  verb: GrantVerb,
+): Promise<{ wildcard: boolean; ids: string[] }> {
+  if (ctx.isAdmin || ctx.isOwner) return { wildcard: true, ids: [] };
+  return listGrantedResourceIds(ctx.userId, productionId, resourceType, resourceSub, verb);
+}

@@ -3,8 +3,8 @@ import PageHeader from "@/components/ui/PageHeader";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { toActor, hasEffectiveGrant } from "@/lib/perm/grant-check";
-import { hasEventDomainView, filterDraftVisibleEvents } from "@/lib/ops/event-permissions";
+import { toActor, hasEffectiveGrant, listEffectiveGrantedResourceIds } from "@/lib/perm/grant-check";
+import { hasEventDomainView, filterDraftVisibleEvents, canEditTechReq } from "@/lib/ops/event-permissions";
 import { getProductionPermissionContext, getProductionName, listMilestones, listProductionMembersWithRoles } from "@/lib/db";
 import { listPhases } from "@/lib/ops/phase-db";
 import { isPolicyOn } from "@/lib/perm/policy-db";
@@ -64,11 +64,30 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
           id: t.id, title: t.title, status: t.status,
           departmentId: t.departmentId, departmentName: t.departmentName,
           eventId: t.eventId, eventTitle: t.eventTitle,
-          startTime: null, endTime: null,
+          startTime: t.startTime, endTime: t.endTime,
           effectiveStartTime: t.effectiveStartTime, effectiveEndTime: t.effectiveEndTime,
           isBlocked: false,
           description: t.description,
         }));
+
+  // 日历抽屉的就地编辑入口：与 PATCH /events/[id]、/tasks/[id] 同门（API 仍是权威）。
+  // 归档项目 API 一律 403，入口直接不给。
+  // 事件侧按 published→publication@edit / 其余→details@edit 分档，用行集合查两次，
+  // 不逐事件 hasGrant；任务侧 canEditTechReq 含 POC 上下文判定，仍逐条（批量化挂 #589）。
+  const [editableEventIds, editableTaskIds] = access.isArchived ? [[], []] : await Promise.all([
+    Promise.all([
+      listEffectiveGrantedResourceIds(actor, id, "event", "publication", "edit"),
+      listEffectiveGrantedResourceIds(actor, id, "event", "details", "edit"),
+    ]).then(([pub, details]) => events
+      .filter(event => {
+        const vis = event.status === "published" ? pub : details;
+        return vis.wildcard || vis.ids.includes(event.id);
+      })
+      .map(event => event.id)),
+    Promise.all(tasks.map(async task =>
+      await canEditTechReq(access.permCtx, task.id, task.eventId, id) ? task.id : null
+    )).then(ids => ids.filter((taskId): taskId is string => taskId !== null)),
+  ]);
 
   // 阶段管理资格：phase 键（owner 旁路内建）∨ 部门 POC（policy 开关，活引用）
   const pocDeptIds = departments
@@ -102,6 +121,8 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
           pocDeptIds,
           deptPocEnabled: phaseDeptPocEnabled,
         }}
+        editableEventIds={editableEventIds}
+        editableTaskIds={editableTaskIds}
       />
     </div>
   );

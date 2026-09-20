@@ -23,6 +23,8 @@ const baseProps: Parameters<typeof PlanningClient>[0] = {
   members: [],
   deptOptions: [],
   phasePerm: { canCreate: false, canEdit: false, canDelete: false, pocDeptIds: [], deptPocEnabled: false },
+  editableEventIds: [],
+  editableTaskIds: [],
 };
 
 const timetableProps: Parameters<typeof PlanningClient>[0] = {

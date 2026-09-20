@@ -2368,6 +2368,9 @@ export type MyTechReqFullEntry = {
   eventTitle: string | null;
   productionId: string;
   productionName: string;
+  /** 自有起止；降级投喂的编辑面需要它回显，不能拿 effective 顶替（会把继承值固化） */
+  startTime: string | null;
+  endTime: string | null;
   effectiveStartTime: string | null;
   effectiveEndTime: string | null;
   assignees: { userId: string; name: string }[];
@@ -2383,6 +2386,7 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
     group_id: string | null; group_name: string | null;
     event_id: string | null; event_title: string | null;
     production_id: string; production_name: string;
+    start_time: Date | null; end_time: Date | null;
     effective_start_time: Date | null; effective_end_time: Date | null;
     am_poc: boolean;
     assignees_json: { userId: string; name: string }[] | null;
@@ -2394,6 +2398,7 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
        t.group_id, eg.name AS group_name,
        pe.id AS event_id, pe.title AS event_title,
        t.production_id, p.name AS production_name,
+       t.start_time, t.end_time,
        COALESCE(t.start_time,
          (SELECT MIN(esi.start_time) FROM task_schedule_item tsi
           JOIN event_schedule_item esi ON esi.id = tsi.item_id WHERE tsi.task_id = t.id),
@@ -2458,6 +2463,8 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
     eventTitle: r.event_title,
     productionId: r.production_id,
     productionName: r.production_name,
+    startTime: r.start_time?.toISOString() ?? null,
+    endTime: r.end_time?.toISOString() ?? null,
     effectiveStartTime: r.effective_start_time?.toISOString() ?? null,
     effectiveEndTime: r.effective_end_time?.toISOString() ?? null,
     amPoc: r.am_poc,
