@@ -9,6 +9,7 @@ import {
   RegistrationDeniedError,
   type RegistrationPlatform,
 } from "@/lib/account/registration-gate";
+import { requestOrigin } from "@/lib/account/request-origin";
 
 type Params = { params: Promise<{ platform: string }> };
 
@@ -59,11 +60,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     } catch { /* 坏 cookie 当作没有上下文 */ }
   }
 
-  // 反代下以 x-forwarded-* 为准；两者都缺时回落到请求自身的 origin，
-  // 免得拼出 "https://" 这种非法 URL 直接抛 TypeError。
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
-  const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  const origin = host ? `${proto}://${host}` : req.nextUrl.origin;
+  const origin = requestOrigin(req);
 
   let loginResult;
   const gated = gatedPlatform(platform);

@@ -4,20 +4,15 @@ import { exchangeCode, getUserInfo, TOKEN_COOKIE } from "@/lib/platform/feishu/f
 import { bindPlatformIdentity, getUserProfile, attachFeishuToUser, getFeishuUser } from "@/lib/db";
 import { signConflictToken } from "@/lib/platform/email/email-tokens";
 import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS, OAUTH_STATE_COOKIE } from "@/lib/account/session";
+import { requestOrigin } from "@/lib/account/request-origin";
 
 const BIND_SOURCE_COOKIE = "bind_source_user_id";
-
-function redirectBase(req: NextRequest): string {
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
-  const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  return `${proto}://${host}`;
-}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const code = searchParams.get("code");
   const state = searchParams.get("state");
-  const base = redirectBase(req);
+  const base = requestOrigin(req);
 
   const cookieStore = await cookies();
   const savedState = cookieStore.get(OAUTH_STATE_COOKIE)?.value;

@@ -3,12 +3,7 @@ import { cookies } from "next/headers";
 import { verifyBindingToken, signConflictToken } from "@/lib/platform/email/email-tokens";
 import { bindPlatformIdentity, getUserProfile } from "@/lib/db";
 import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/account/session";
-
-function redirectBase(req: NextRequest): string {
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
-  const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  return `${proto}://${host}`;
-}
+import { requestOrigin } from "@/lib/account/request-origin";
 
 function confirmPage(token: string, email: string): NextResponse {
   const html = `<!doctype html><html lang="zh"><head><meta charset="utf-8">
@@ -41,7 +36,7 @@ function confirmPage(token: string, email: string): NextResponse {
 // GET — verify token and render confirmation page (no mutation, safe for mail scanners)
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token");
-  const base = redirectBase(req);
+  const base = requestOrigin(req);
 
   if (!token) return NextResponse.redirect(new URL("/account?bind_error=invalid", base));
 
@@ -53,7 +48,7 @@ export async function GET(req: NextRequest) {
 
 // POST — user clicked confirm; perform the actual binding
 export async function POST(req: NextRequest) {
-  const base = redirectBase(req);
+  const base = requestOrigin(req);
   const form = await req.formData();
   const token = form.get("token");
 
