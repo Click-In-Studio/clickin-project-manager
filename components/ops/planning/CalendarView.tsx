@@ -148,7 +148,9 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
             ...day.events.map(value => ({ kind: "event" as const, value })),
             ...day.tasks.map(value => ({ kind: "task" as const, value })),
           ] : [];
-          const shownEntries = dayEntries.slice(0, 4);
+          // 预算按 cell 定高算：桌面 132px 放得下阶段条 + 3 个单行 chip + 提示，手机 2 个。
+          // 超出的靠 +N 提示告知，不能靠 overflow:hidden 静默吞掉。
+          const shownEntries = dayEntries.slice(0, 3);
           const hidden = Math.max(0, dayEntries.length - shownEntries.length);
           const hiddenOnMobile = Math.max(0, dayEntries.length - 2);
           return (
@@ -192,8 +194,7 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
                     : { background: "var(--ink)", color: "#fff" };
                 return (
                   <button key={`${entry.kind}-${entry.value.id}`} type="button" className={`${styles.calendarChip} ${index >= 2 ? styles.calendarMobileHidden : ""}`} title={entryTitle} onClick={e => { e.stopPropagation(); setSelection(entry); }} style={tone}>
-                    <span className={styles.calendarChipType}>{typeLabel}</span>
-                    <span className={styles.calendarChipTitle}>{entryTitle}</span>
+                    <span className={styles.calendarChipType}>{typeLabel} · </span>{entryTitle}
                   </button>
                 );
               })}

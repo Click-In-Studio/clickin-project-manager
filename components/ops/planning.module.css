@@ -40,7 +40,7 @@
 
 .calendarCell {
   position: relative;
-  height: 126px;
+  height: 132px; /* 日期 + 阶段条 + 3 个单行 chip +「+N 项」刚好装下，改 chip 高度要同步 */
   min-width: 0;
   padding: 7px;
   overflow: hidden;
@@ -68,37 +68,22 @@
 .calendarChip {
   width: 100%;
   min-height: 23px;
+  /* cell 是定高 flex 列：不设 flex-shrink:0 的话，装不下时 chip 会被压到 min-height、
+     标题在自己的 overflow:hidden 里被切成半截字——溢出该由 shownEntries 预算控制 */
+  flex-shrink: 0;
   border: 1px solid transparent;
   border-radius: 5px;
   padding: 5px;
   text-align: left;
   font-size: 8px;
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  white-space: normal;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   transition: filter .12s ease, border-color .12s ease, transform .12s ease;
 }
 
-.calendarChipType {
-  display: block;
-  font-size: 7px;
-  line-height: 1;
-  font-weight: 700;
-  opacity: .72;
-}
-
-.calendarChipTitle {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  line-height: 1.15;
-}
+.calendarChipType { font-weight: 700; opacity: .72; }
 
 .calendarChip:hover,
 .calendarChip:focus-visible {
@@ -597,7 +582,7 @@
   .calendarDescription { max-width: 42ch; font-size: 10px; }
   .calendarControls { width: 100%; margin-left: 0; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
   .calendarLegend { width: 100%; flex-wrap: wrap; gap: 6px 10px; }
-  .calendarCell { height: 86px; padding: 4px 3px; gap: 3px; }
+  .calendarCell { height: 90px; padding: 4px 3px; gap: 3px; }
   .calendarChip { min-height: 18px; padding: 2px 3px; font-size: 7px; }
   .calendarChipType { display: none; }
   .calendarMobileHidden, .calendarHiddenDesktop { display: none; }
@@ -606,5 +591,5 @@
 }
 
 @media (max-width: 420px) {
-  .calendarCell { height: 78px; }
+  .calendarCell { height: 82px; }
 }

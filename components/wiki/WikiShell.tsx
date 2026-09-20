@@ -605,12 +605,14 @@ export default function WikiShell({
       >
         ☰ 文档目录
       </button>
+      {/* 手机抽屉：AppShell 顶栏 z-50、底部导航 z-40 都在同一个根层叠上下文里，
+          遮罩要压过它们才算把页面真的挡住；桌面侧栏是 sticky，不参与这套 z。 */}
       {mobileTreeOpen && (
         <button
           type="button"
           aria-label="关闭文档目录"
           onClick={() => setMobileTreeOpen(false)}
-          className="md:hidden fixed inset-0 z-40 bg-zinc-950/35"
+          className="md:hidden fixed inset-0 z-[60] bg-zinc-950/35"
         />
       )}
       <button
@@ -622,7 +624,7 @@ export default function WikiShell({
       >
         {desktopTreeCollapsed ? "目录 →" : "←"}
       </button>
-      <aside className={`${desktopTreeCollapsed ? "md:hidden" : "md:flex"} ${mobileTreeOpen ? "translate-x-0" : "-translate-x-[110%]"} fixed left-3 top-3 bottom-3 z-50 w-[min(300px,calc(100vw-24px))] flex flex-col rounded-xl border border-zinc-200 bg-white overflow-hidden shadow-2xl transition-transform md:translate-x-0 md:shadow-none md:w-[264px] md:shrink-0 md:sticky md:top-4 md:h-[calc(100vh-120px)]`}>
+      <aside className={`${desktopTreeCollapsed ? "md:hidden" : "md:flex"} ${mobileTreeOpen ? "translate-x-0" : "-translate-x-[110%]"} fixed left-3 top-3 bottom-3 z-[70] w-[min(300px,calc(100vw-24px))] flex flex-col rounded-xl border border-zinc-200 bg-white overflow-hidden shadow-2xl transition-transform md:translate-x-0 md:shadow-none md:w-[264px] md:shrink-0 md:sticky md:left-auto md:top-4 md:bottom-auto md:z-auto md:h-[calc(100vh-120px)]`}>
         <div className="md:hidden flex items-center justify-between border-b border-zinc-200 px-3 py-2">
           <b className="text-sm text-zinc-800">文档目录</b>
           <button type="button" onClick={() => setMobileTreeOpen(false)} className="h-8 w-8 rounded-full text-lg text-zinc-500 hover:bg-zinc-100" aria-label="关闭目录">×</button>
