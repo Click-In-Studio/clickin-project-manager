@@ -636,7 +636,7 @@ tests/
 | `asset/` | 素材、元数据、头像（`avatar-*`） | `assets/`：上传、预览、挂载、分享（原有目录） | `asset/` |
 | `node/` `import/` `doc-extract/` | 节点树 / 导入管线 / 文档抽取（原有目录） | 只有 `import/`：向导、列映射、`TagFormatOptionList`（`node/` `doc-extract/` 无对应 components 目录） | `node/`→`wiki/`；`import/` `doc-extract/`→`script/` |
 | `print/` | —（打印 CSS 在 `script/print-css`） | `ScriptPrint*`（剧本打印路由与渲染）、`template-render`、`use-fonts-settled` | `script/` |
-| `ops/` | `event-*` `cue-*` `task-*` `phase-*` `milestone-db` `finance-db` `material-*` `scene-duration` | 事件、cue、计划、任务、需求（req）、报告、周 call、工作区首页与项目首页 | `ops/` |
+| `ops/` | `event-*` `cue-*`（`cue-list-db` 表本体 + 授权 + 导入建表；`cue-db` cue 本体 + CoW + 随块漂移 + 跨项目告警）`task-*` `phase-*` `milestone-db` `finance-db` `material-*` `scene-duration` | 事件、cue、计划、任务、需求（req）、报告、周 call、工作区首页与项目首页 | `ops/` |
 | `approval/` | `approval-*`：引擎、模版、路由、阶段、TTL、时间线；`access-request-db`（申请读模型：类型 / 行映射 / people / 鉴权 / 列表 / 预览 / 流程视图）`access-request-action-db`（状态机：提交 / 批准 / 转交 / 拒绝 / 撤回 / 超时升级 + 通知；单向依赖读模型） | AccessRequests 页与弹窗、ApprovalFlowDesigner | `ops/` |
 | `perm/` | `permissions` `grant-*` `policy-*` `resource-*` `perm-center-db` `page-permission-scopes` `permission-*` `roles` `dept-db` `member-*` `admin-guard` `api-guard` | 权限激活弹窗 / 页面门、权限键选择器、成员选择器、通讯录、未授权页动作 | `perm/` |
 | `production/` | `production-template` `production-types` `templates/`（各类型项目模版）`template-seeders/` | — | `ops/` |
