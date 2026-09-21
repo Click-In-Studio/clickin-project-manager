@@ -1,6 +1,6 @@
 ---
 kind: improved
-title: 剧本页字体首次加载更快——常用字打包成一片，一页台词从几十个请求降到几个
+title: 剧本页的中文字体第一次打开时加载更快，网络不好时也更不容易出现一句话里字体不一样
 page: creation/script/reading
 pr: 594
 ---

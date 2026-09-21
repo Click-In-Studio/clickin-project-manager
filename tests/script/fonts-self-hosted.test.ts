@@ -150,8 +150,14 @@ describe("字频分层的声明顺序（后声明优先，没字形落到前面�
     });
   }
 
-  it("manifest：cjk-common 片的字数 = GB2312 一级 3755，cjk-rare = 二级 3008（全覆盖的面）", () => {
-    for (const [out, face] of Object.entries(manifest.faces)) {
+  it("manifest：有 CJK 片的面，cjk-common 字数 = GB2312 一级 3755，cjk-rare = 二级 3008", () => {
+    const coversCjk = (range: string) => {
+      const m = /^U\+([0-9A-F]+)-([0-9A-F]+)$/i.exec(range)!;
+      return parseInt(m[2], 16) >= 0x4e00 && parseInt(m[1], 16) <= 0x9fff;
+    };
+    const cjkFaces = Object.entries(manifest.faces).filter(([, face]) => face.chunks.some(c => coversCjk(c.range)));
+    expect(cjkFaces.length, "至少三个剧本面都有 CJK").toBeGreaterThanOrEqual(3);
+    for (const [out, face] of cjkFaces) {
       const common = face.chunks.find(c => c.file === "cjk-common.woff2");
       const rare = face.chunks.find(c => c.file === "cjk-rare.woff2");
       expect(common?.glyphs, `${out} cjk-common`).toBe(3755);
