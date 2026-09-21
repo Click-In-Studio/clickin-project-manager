@@ -9,7 +9,8 @@ name: Deploy
 # dev 原在 AWS（52.20.28.226，user ubuntu），2026-09-19 迁到阿里云后 AWS 机已关停；
 # 换机器只需改 secrets + 把部署公钥放进新机 authorized_keys，本文件不用动。
 #
-# 发布到 prod：`git tag v0.N && git push origin v0.N`；hotfix 从 tag 拉分支、cherry-pick、再打 tag。
+# 发布到 prod：`git tag v0.1.2-260924 && git push origin v0.1.2-260924`（tag 形态见 DEV_GUIDE §4「版本号」）；
+# hotfix 从被修的 tag 拉分支、cherry-pick、再打 `<被修 tag>-hot<n>`。
 run-name: "Deploy ${{ github.ref_type == 'tag' && 'PROD' || 'dev' }} · ${{ github.ref_name }}"
 
 on:

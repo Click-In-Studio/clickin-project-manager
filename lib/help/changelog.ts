@@ -9,8 +9,8 @@
 // 目录：
 //   content/changelog/_TEMPLATE.md          作者模板，不是条目
 //   content/changelog/unreleased/<pr>-<x>.md 已合并、还没随 tag 发到 prod 的条目（每 PR 一个文件，避免冲突）
-//   content/changelog/v0.2/_index.md        一个版本：date（必填）/ summary
-//   content/changelog/v0.2/<pr>-<x>.md      该版本的条目（发版脚本从 unreleased/ 搬进来）
+//   content/changelog/v0.1.2/_index.md      一个版本：date（必填）/ summary
+//   content/changelog/v0.1.2/<pr>-<x>.md    该版本的条目（发版脚本从 unreleased/ 搬进来）
 // 版本目录名 = git tag 名；deploy 在 tag 发布时校验 content/changelog/<tag>/_index.md 存在。
 // 下划线开头的文件不是条目。standalone 构建靠 next.config.ts 的 outputFileTracingIncludes 圈进来。
 
@@ -26,8 +26,23 @@ export const CHANGELOG_KINDS = ["new", "improved", "fixed", "removed"] as const;
 export type ChangelogKind = (typeof CHANGELOG_KINDS)[number];
 export const CHANGELOG_KIND_LABELS: Record<ChangelogKind, string> = { new: "新增", improved: "优化", fixed: "修复", removed: "下线" };
 
-/** 版本目录名 = tag 名：v0.2 / v0.1.0 / v1.10.3 */
-export const CHANGELOG_VERSION_RE = /^v\d+(\.\d+)*$/;
+/**
+ * 版本目录名 = tag 名，形态见 DEV_GUIDE §4「版本号」（#612）：
+ *   v<M>.<m>.<p>                里程碑（阶段 / 正式版 / 功能落地），无日期段
+ *   v<M>.<m>.<p>-yymmdd         日常发版（周三、周日会后），日期段 = 上一个里程碑之后的第几天
+ *   <上面任一>-hot<n>           hotfix：沿用被修版本的完整号 + 序号
+ * 三段固定，`v0.2` 这种两段号不再接受。
+ */
+export const CHANGELOG_VERSION_RE = /^v(\d+)\.(\d+)\.(\d+)(?:-(\d{6}))?(?:-hot([1-9]\d*))?$/;
+
+export type ParsedVersion = { major: number; minor: number; patch: number; date: number; hot: number };
+
+/** 拆 tag 名；不合形态返回 null。缺日期段 / 缺 hot 段记 0，排序时自然排在同里程碑的日常版 / hotfix 之前。 */
+export function parseVersion(tag: string): ParsedVersion | null {
+  const m = CHANGELOG_VERSION_RE.exec(tag);
+  if (!m) return null;
+  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), date: m[4] ? Number(m[4]) : 0, hot: m[5] ? Number(m[5]) : 0 };
+}
 
 export type ChangelogEntry = {
   /** 文件名去 .md；同一版本内唯一 */
@@ -46,7 +61,7 @@ export type ChangelogEntry = {
 };
 
 export type ChangelogVersion = {
-  /** 目录名 = tag：v0.2 */
+  /** 目录名 = tag：v0.1.2 / v0.1.2-260921 */
   version: string;
   dir: string;
   /** YYYY-MM-DD，`_index.md` 必填 */
@@ -105,16 +120,16 @@ export function groupByKind(entries: ChangelogEntry[]): { kind: ChangelogKind; l
     .filter((g) => g.entries.length > 0);
 }
 
-/** 版本号比较：按点分数字逐段比，段数不等按缺省 0（v0.2 == v0.2.0）。返回正数表示 a 更新。 */
+/**
+ * 版本号比较，返回正数表示 a 更新。顺序：里程碑三段 → 日期 → hot 序号，
+ * 即 v0.1.1 < v0.1.1-260921 < v0.1.1-260921-hot1 < v0.1.1-260924 < v0.1.2 < v0.2.0。
+ * 注意日期版在同号里程碑**之后**，与 semver 预发布语义相反——日常版是里程碑的后续，不是它的预览。
+ * 不合形态的号按 0 处理（调用前目录名已过正则校验，这里只是兜底不抛）。
+ */
 export function compareVersions(a: string, b: string): number {
-  const pa = a.slice(1).split(".").map(Number);
-  const pb = b.slice(1).split(".").map(Number);
-  const n = Math.max(pa.length, pb.length);
-  for (let i = 0; i < n; i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
-    if (d !== 0) return d;
-  }
-  return 0;
+  const pa = parseVersion(a) ?? { major: 0, minor: 0, patch: 0, date: 0, hot: 0 };
+  const pb = parseVersion(b) ?? { major: 0, minor: 0, patch: 0, date: 0, hot: 0 };
+  return pa.major - pb.major || pa.minor - pb.minor || pa.patch - pb.patch || pa.date - pb.date || pa.hot - pb.hot;
 }
 
 function readChangelogTree(root: string): Changelog {
@@ -129,7 +144,7 @@ function readChangelogTree(root: string): Changelog {
       continue;
     }
     if (!CHANGELOG_VERSION_RE.test(name)) {
-      throw new ChangelogContentError(dir, `版本目录名必须是 tag 形态（v0.2 / v0.1.0），收到 ${name}`);
+      throw new ChangelogContentError(dir, `版本目录名必须是 tag 形态（v0.1.0 / v0.1.0-260921 / v0.1.0-260921-hot1），收到 ${name}`);
     }
     const indexFile = path.join(dir, "_index.md");
     if (!existsSync(indexFile)) throw new ChangelogContentError(indexFile, "版本目录缺少 _index.md（date 必填）");
