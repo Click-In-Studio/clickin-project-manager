@@ -364,7 +364,7 @@ if (!await hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"))
   return Response.json({ error: "权限不足" }, { status: 403 });
 ```
 
-- **门语境一律用 `hasEffectiveGrant` / `hasAnyEffectiveGrant`**（自带 owner 旁路）。裸 `hasGrant` / `hasAnyGrant` / `listGrantedResourceIds` 不含任何旁路，只在明确「能力票不该给 owner 旁路」的场景使用并写注释。 `app/` `components/` 下裸调用已清零并硬禁（`tests/perm/bare-grant-ratchet.test.ts`，#604）：出现一处即红，`import { hasGrant as x }` 改名也红；真要「不给 owner 旁路」把判定下沉到 `lib/<域>/*-perm.ts` 并注释。
+- **门语境一律用 `hasEffectiveGrant` / `hasAnyEffectiveGrant`**（自带 owner 旁路）。裸 `hasGrant` / `hasAnyGrant` / `listGrantedResourceIds` 不含任何旁路，只在明确「能力票不该给 owner 旁路」的场景使用并写注释。 `app/` `components/` `lib/` 全域硬禁（`tests/perm/bare-grant-ratchet.test.ts`，#604）：判定核白名单（`lib/perm/*`、各域 `perm.ts` 等，见测试文件）之外出现一处即红，`import { hasGrant as x }` 改名也红。白名单里的文件每个函数顶端自己写旁路；真要「不给 owner 旁路」把判定下沉到白名单文件并注释，加白名单要在 PR 里说明。
 - 样板收敛：`requireGrantGate(req, productionId, [[type, sub, verb], …], { blockArchived })`（`lib/perm/api-guard.ts`）= session → ctx → OR 链 → 归档 一次搞定。
 - 需要三态（告诉用户「去激活」还是「去申请」）用 `canAccessNode`；批量判定用 `canAccessNodesBatch`。create 类路由走 `canAccessNode` 六步链而非裸 `hasGrant`，否则持区间未激活的人只拿到无指向的「权限不足」。
 - 全项目级通道（SSE 流等）的粗门用 `hasAnyGrant(type, subs, verb)`。

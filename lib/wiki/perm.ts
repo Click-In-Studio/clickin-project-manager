@@ -32,6 +32,7 @@ async function reportEdgeVisible(
   productionId: string,
   edge: { reportId: string; eventId: string; published: boolean },
 ): Promise<boolean> {
+  // 裸 hasGrant（#604 刻意不旁路）：只从 canViewWiki 的 owner 旁路**之后**被调，这里不重复。
   if (edge.published && await hasEventDomainView(actor, productionId)) return true;
   if (await hasGrant(actor.userId, productionId, "report", edge.reportId, "meta", "view")) return true;
   if (await hasGrant(actor.userId, productionId, "report", edge.reportId, "publication", "view")) return true;

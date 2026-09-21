@@ -65,6 +65,8 @@ export async function mountConcededNodeIds(
   productionId: string,
   filter: { nodeIds: string[] } | { kind: "asset" | "wiki" },
 ): Promise<Set<string>> {
+  // 裸 hasGrant（#604 刻意不旁路）：让渡只回答「宿主对该用户可见吗」，admin/owner 旁路在各
+  // 内容域判定顶端，这里不重复。
   const mounts = await fetchMounts(productionId, filter);
   const conceded = new Set<string>();
   if (mounts.length === 0) return conceded;

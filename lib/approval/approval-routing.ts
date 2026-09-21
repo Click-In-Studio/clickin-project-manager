@@ -262,6 +262,8 @@ export async function walkSupervisorChain(
 
 /** 该用户是否已持有申请要的**全部**动词行——决定上级能终局还是只能转发。 */
 async function holdsRequestedRows(userId: string, t: ApprovalTarget): Promise<boolean> {
+  // 裸 hasGrant（#604 刻意不旁路）：问的是「持不持有行」不是门；owner 终局在调用点
+  // `hop.userId === ownerId ||` 单独判。
   const rows = expandLevelRows(t.resourceType, t.resourceSub, t.permissionLevel);
   for (const [sub, verb] of rows) {
     // 动词闭集之外的伪级别（未迁移域的 'manage' 等）无法用行判定回答，
