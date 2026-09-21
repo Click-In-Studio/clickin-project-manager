@@ -158,47 +158,60 @@ export async function loadProduction(productionId: string, versionId: string): P
 }
 
 export async function saveScriptConfig(productionId: string, versionId: string | null, config: ScriptConfig): Promise<void> {
-  const pool = getPool();
-  // 版式不进 JSONB（#336 B2）：写主本的 script_view 行。
-  const configJson = JSON.stringify({
-    stageDelimOpen: config.stageDelimOpen,
-    stageDelimClose: config.stageDelimClose,
-    useRehearsalMarks: config.useRehearsalMarks,
-  });
-  await pool.query("UPDATE production SET script_config = $1 WHERE id = $2", [configJson, productionId]);
-  const masterViewId = await ensureMasterScriptView(productionId);
-  // 模版 id 进 template_overrides（JSONB，保留将来的覆盖项）；null = 删掉键（按 textLayoutMode 回退）
-  const templateId = isKnownTemplateId(config.templateId) ? config.templateId : null;
-  const configUpdate = await pool.query<{ pagination_changed: boolean }>(
-    `WITH previous AS (
-       SELECT page_layout, text_layout_mode, template_overrides->>'templateId' AS template_id
-       FROM script_view WHERE id = $1
-     ), updated AS (
-       UPDATE script_view
-          SET page_layout = $2,
-              text_layout_mode = $3,
-              template_overrides = CASE
-                WHEN $4::text IS NULL THEN COALESCE(template_overrides, '{}'::jsonb) - 'templateId'
-                ELSE COALESCE(template_overrides, '{}'::jsonb) || jsonb_build_object('templateId', $4::text)
-              END
-        WHERE id = $1 RETURNING 1
-     )
-     SELECT previous.page_layout IS DISTINCT FROM $2
-         OR previous.text_layout_mode IS DISTINCT FROM $3
-         OR previous.template_id IS DISTINCT FROM $4::text AS pagination_changed
-     FROM previous, updated`,
-    [masterViewId, config.pageLayout, config.textLayoutMode, templateId]
-  );
-  if (versionId) {
-    await pool.query(
-      "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2 AND production_id = $3",
-      [JSON.stringify({
-        openingChapterMarkerId: config.openingChapterMarkerId,
-        showOpeningChapter: config.showOpeningChapter,
-      }), versionId, productionId]
+  // 三张表四条写包一个事务（#629）：中途失败不留「production 改了、主本版式没改」的静默不一致。
+  const client = await getPool().connect();
+  let paginationChanged = false;
+  try {
+    await client.query("BEGIN");
+    // 版式不进 JSONB（#336 B2）：写主本的 script_view 行。
+    const configJson = JSON.stringify({
+      stageDelimOpen: config.stageDelimOpen,
+      stageDelimClose: config.stageDelimClose,
+      useRehearsalMarks: config.useRehearsalMarks,
+    });
+    await client.query("UPDATE production SET script_config = $1 WHERE id = $2", [configJson, productionId]);
+    const masterViewId = await ensureMasterScriptView(productionId, client);
+    // 模版 id 进 template_overrides（JSONB，保留将来的覆盖项）；null = 删掉键（按 textLayoutMode 回退）
+    const templateId = isKnownTemplateId(config.templateId) ? config.templateId : null;
+    const configUpdate = await client.query<{ pagination_changed: boolean }>(
+      `WITH previous AS (
+         SELECT page_layout, text_layout_mode, template_overrides->>'templateId' AS template_id
+         FROM script_view WHERE id = $1
+       ), updated AS (
+         UPDATE script_view
+            SET page_layout = $2,
+                text_layout_mode = $3,
+                template_overrides = CASE
+                  WHEN $4::text IS NULL THEN COALESCE(template_overrides, '{}'::jsonb) - 'templateId'
+                  ELSE COALESCE(template_overrides, '{}'::jsonb) || jsonb_build_object('templateId', $4::text)
+                END
+          WHERE id = $1 RETURNING 1
+       )
+       SELECT previous.page_layout IS DISTINCT FROM $2
+           OR previous.text_layout_mode IS DISTINCT FROM $3
+           OR previous.template_id IS DISTINCT FROM $4::text AS pagination_changed
+       FROM previous, updated`,
+      [masterViewId, config.pageLayout, config.textLayoutMode, templateId]
     );
-    if (configUpdate.rows[0]?.pagination_changed) {
-      await scheduleEstimatedPageMapSave(productionId, versionId, "full");
+    paginationChanged = configUpdate.rows[0]?.pagination_changed ?? false;
+    if (versionId) {
+      await client.query(
+        "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2 AND production_id = $3",
+        [JSON.stringify({
+          openingChapterMarkerId: config.openingChapterMarkerId,
+          showOpeningChapter: config.showOpeningChapter,
+        }), versionId, productionId]
+      );
     }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+  // page-map 重算自己读库，必须在 COMMIT 之后触发，否则读到的还是旧版式。
+  if (versionId && paginationChanged) {
+    await scheduleEstimatedPageMapSave(productionId, versionId, "full");
   }
 }
