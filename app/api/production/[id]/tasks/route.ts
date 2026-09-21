@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { canAccessNode } from "@/lib/perm/grant-template";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { notifyTaskAssigned } from "@/lib/notify/notify";
 import { isSubjectPoc, parseTaskSubject, subjectColumns } from "@/lib/ops/task-poc";
 import {

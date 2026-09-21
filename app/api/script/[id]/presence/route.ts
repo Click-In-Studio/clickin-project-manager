@@ -1,7 +1,8 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { hasActiveSSEUser, updatePresence } from "@/lib/server-cache";
-import { getActiveVersionId, getVersion, getProductionPermissionContext } from "@/lib/db";
+import { getActiveVersionId, getVersion } from "@/lib/script/version-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getSession } from "@/lib/account/session";
 
 type PresenceBody = {

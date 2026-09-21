@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getAvatarVariant, parseAvatarSize } from "@/lib/asset/avatar-serve";
 import { getPool } from "@/lib/pg";
 

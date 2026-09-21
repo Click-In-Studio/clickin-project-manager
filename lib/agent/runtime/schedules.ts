@@ -343,7 +343,7 @@ async function fireSchedule(row: ScheduleRow, startRun: StartRunFn, now: Date): 
 }
 
 async function terminalGate(row: ScheduleRow): Promise<string | null> {
-  const { getUserProfile } = await import("@/lib/db");
+  const { getUserProfile } = await import("@/lib/account/user-db");
   if (!(await getUserProfile(row.userId))) return "创建者账号不存在";
   if (!row.productionId) return null;
   const { resolveProductionActor } = await import("@/lib/agent/tools/production-tools");

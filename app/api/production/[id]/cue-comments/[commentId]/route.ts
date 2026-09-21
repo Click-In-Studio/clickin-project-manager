@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { updateComment, deleteComment, getProductionPermissionContext } from "@/lib/db";
+import { updateComment, deleteComment } from "@/lib/ops/comment-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 
 export async function PATCH(
   req: NextRequest,

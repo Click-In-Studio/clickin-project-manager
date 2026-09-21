@@ -6,7 +6,7 @@ import ApprovalFlowDesigner from "@/components/approval/ApprovalFlowDesigner";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
 import styles from "@/components/ui/my-pages.module.css";
-import type { AccessRequestFlowView, ApprovalPerson, ApprovalRequest } from "@/lib/db";
+import type { AccessRequestFlowView, ApprovalPerson, ApprovalRequest } from "@/lib/approval/access-request-db";
 import {
   TTL_OPTIONS,
   displayTtlLabel,

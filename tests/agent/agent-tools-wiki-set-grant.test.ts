@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { createWiki, addWikiSharePerson, getWiki } from "@/lib/wiki/content";
 import { getNodeByWikiId, listNodeDeptShares } from "@/lib/node/db";
 import { createProductionDept, setDeptMembers } from "@/lib/perm/dept-db";

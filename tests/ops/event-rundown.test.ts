@@ -15,7 +15,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { createProductionEvent, createScheduleItem, createEventTechReq } from "@/lib/ops/event-db";
 import { createEventGroup, deleteEventGroup, EventGroupError } from "@/lib/ops/event-group-db";
 import {

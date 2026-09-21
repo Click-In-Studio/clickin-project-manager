@@ -30,10 +30,10 @@ import { canAccessNodesBatch, formatNodeKey, type NodeAccessResult, type NodeKey
 import { SCENE_FIELD_SUBS, touchedSceneFields, type SceneField } from "@/lib/script/scene-field-perms-shared";
 import { getSceneFieldPerms } from "@/lib/script/scene-field-perms";
 import { getCharacterPerms } from "@/lib/script/character-perms";
-import {
-  getActiveVersionId, loadProduction, applyPatchToDB, listScenesByVersion, listMarkerProjectionByVersion,
-  listCharactersByVersion, patchCharacterMeta, setCharacterMembers, type CharacterDetail,
-} from "@/lib/db";
+import { getActiveVersionId } from "@/lib/script/version-db";
+import { loadProduction } from "@/lib/script/script-state-db";
+import { applyPatchToDB } from "@/lib/script/script-patch-db";
+import { listScenesByVersion, listMarkerProjectionByVersion, listCharactersByVersion, patchCharacterMeta, setCharacterMembers, type CharacterDetail } from "@/lib/script/script-scene-character-db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { diffState } from "@/lib/script/script-ops";
 import {

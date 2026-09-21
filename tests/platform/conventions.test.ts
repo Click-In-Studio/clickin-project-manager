@@ -255,7 +255,7 @@ describe("tests/ 按域分目录，不回退成平铺", () => {
 describe("lib/ 按域分目录，根只留基建", () => {
   const LIB_ROOT = path.join(ROOT, "lib");
   const ROOT_INFRA = [
-    "db.ts", "pg.ts", "r2.ts", "server-cache.ts",
+    "pg.ts", "r2.ts", "server-cache.ts",
     "tz.ts", "money.ts", "duration.ts", "lex-order.ts", "z-index.ts",
     "base-path.ts", "server-url.ts", "request-json.ts", "sse-keepalive.ts", "sse-kick.ts",
     "presence-heartbeat.ts", "nav-pending.ts", "search-db.ts",
@@ -402,15 +402,13 @@ describe("巨石组件行数只降不升", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// lib/db.ts 分家棘轮（#486）
+// lib/db.ts 分家（#486，已收官）
 // ─────────────────────────────────────────────────────────────────────────────
-// 8280 行的 db.ts 正按域搬进 lib/<域>/*-db.ts。搬运期间 db.ts 只降不升；搬出去的段
-// 在文件尾的「转发壳」里只留 `export *`（386 个 importer 不必逐 PR 改路径，最后一个
-// PR 脚本改写并删壳），壳里不许长出函数——否则壳会变成第二个 db.ts。
-// 拆出来的 *-db.ts 单文件 ≤ 1000 行：超了按子概念再分，别搬出一个新的 event-db。
+// 8280 行的 db.ts 已按域拆进 lib/<域>/*-db.ts，壳也删了（#486 收尾 PR）。这里钉两条：
+// lib/db.ts 不许再出现（谁也别再造一个「先放这儿」的总仓）；拆出来的 *-db.ts 单文件
+// ≤ 1000 行，超了按子概念再分，别搬出一个新的 event-db。
 // 分文件的依据是概念边界与依赖方向（读模型 ← 状态机），行数上限只是防止回退的护栏。
 
-const DB_TS_LINE_CEILING = 33;
 const DB_FILE_CEILING = 1000;
 /**
  * 拆分前就超标的 *-db.ts：按当前行数记账，降到上限内就删掉这条。
@@ -421,24 +419,13 @@ const DB_FILE_GRANDFATHERED: Record<string, number> = {
   "lib/ops/event-db.ts": 3253, // #566 listMyTechReqsFull 补 start_time/end_time（+7）
   "lib/perm/resource-grant-db.ts": 1023,
 };
-const DB_SHELL_MARKER = "// ─── 转发壳";
 
-describe("lib/db.ts 分家只进不退", () => {
-  it(`lib/db.ts ≤ ${DB_TS_LINE_CEILING} 行，且上限与实际之差 < ${RATCHET_SLACK}`, async () => {
-    const lines = await countLines("lib/db.ts");
-    expect(lines, "lib/db.ts 长了。搬运 PR 请同时把 DB_TS_LINE_CEILING 改小；功能 PR 的新函数请直接写进 lib/<域>/*-db.ts").toBeLessThanOrEqual(DB_TS_LINE_CEILING);
-    expect(DB_TS_LINE_CEILING - lines, `lib/db.ts 已瘦到 ${lines} 行，请把 DB_TS_LINE_CEILING 收紧到当前值`).toBeLessThan(RATCHET_SLACK);
-  });
-
-  it("转发壳里只有注释与 `export * from \"./<域>/…\"`，不长函数", async () => {
-    const text = await readFile(path.join(ROOT, "lib/db.ts"), "utf-8");
-    const at = text.indexOf(DB_SHELL_MARKER);
-    expect(at, "db.ts 尾部的转发壳标记不见了").toBeGreaterThan(0);
-    const strays = text.slice(at).split("\n").filter((line) => {
-      const t = line.trim();
-      return t !== "" && !t.startsWith("//") && !/^export \* from "\.\/[a-z-]+\/[a-z-]+-db";$/.test(t);
-    });
-    expect(strays, "转发壳只许 `export *`；新函数请写进对应域的 *-db.ts").toEqual([]);
+describe("lib/db.ts 分家不回退", () => {
+  it("lib/db.ts 不存在——查询函数各归其域的 *-db.ts，不再有总仓", async () => {
+    await expect(
+      readFile(path.join(ROOT, "lib/db.ts"), "utf-8"),
+      "lib/db.ts 又出现了。新查询函数写进 lib/<域>/*-db.ts，跨域的类型放 *-types.ts",
+    ).rejects.toThrow();
   });
 
   it(`lib/<域>/*-db.ts 单文件 ≤ ${DB_FILE_CEILING} 行（记账豁免见 DB_FILE_GRANDFATHERED）`, async () => {

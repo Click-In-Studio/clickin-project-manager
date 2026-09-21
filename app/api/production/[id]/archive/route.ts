@@ -1,7 +1,8 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, archiveProduction, unarchiveProduction } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { archiveProduction, unarchiveProduction } from "@/lib/production/production-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 

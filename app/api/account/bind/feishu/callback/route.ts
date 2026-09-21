@@ -1,7 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { exchangeCode, getUserInfo, TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
-import { bindPlatformIdentity, getUserProfile, attachFeishuToUser, getFeishuUser } from "@/lib/db";
+import { bindPlatformIdentity, getUserProfile } from "@/lib/account/user-db";
+import { attachFeishuToUser, getFeishuUser } from "@/lib/account/db-feishu";
 import { signConflictToken } from "@/lib/platform/email/email-tokens";
 import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS, OAUTH_STATE_COOKIE } from "@/lib/account/session";
 import { requestOrigin } from "@/lib/account/request-origin";

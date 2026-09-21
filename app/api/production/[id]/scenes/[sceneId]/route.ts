@@ -1,8 +1,10 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import {
-  getProductionPermissionContext, getActiveVersionId, loadProduction, applyPatchToDB, getVersion, listScenesByVersion,
-} from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getActiveVersionId, getVersion } from "@/lib/script/version-db";
+import { loadProduction } from "@/lib/script/script-state-db";
+import { applyPatchToDB } from "@/lib/script/script-patch-db";
+import { listScenesByVersion } from "@/lib/script/script-scene-character-db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { SCENE_FIELD_SUBS, touchedSceneFields } from "@/lib/script/scene-field-perms";

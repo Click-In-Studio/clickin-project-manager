@@ -5,11 +5,9 @@ export const metadata: Metadata = { title: "人员" };
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import {
-  getProductionPermissionContext,
-  getProductionName,
-  listProductionMembersWithRoles,
-} from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getProductionName } from "@/lib/production/production-db";
+import { listProductionMembersWithRoles } from "@/lib/perm/member-db";
 import ContactsClient from "@/components/perm/ContactsClient";
 
 export default async function ContactsPage({

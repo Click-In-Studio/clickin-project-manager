@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { GET as initiateHandler } from "@/app/api/auth/[platform]/initiate/route";
 import { GET as callbackHandler } from "@/app/api/auth/[platform]/callback/route";
 import { feishuPlatform } from "@/lib/platform/feishu";
-import { upsertFeishuUser } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { createInvite } from "@/lib/account/invite-db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { getPool } from "@/lib/pg";

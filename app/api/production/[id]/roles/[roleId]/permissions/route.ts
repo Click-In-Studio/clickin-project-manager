@@ -3,10 +3,10 @@ import { getPool } from "@/lib/pg";
 import { isGovernanceNodeKey } from "@/lib/perm/grant-template";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { requireProductionFeature } from "@/lib/account/plan";
 
-import { setRolePermissions } from "@/lib/db";
+import { setRolePermissions } from "@/lib/perm/role-db";
 import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 
 type Ctx = { params: Promise<{ id: string; roleId: string }> };

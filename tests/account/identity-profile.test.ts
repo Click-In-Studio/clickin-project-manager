@@ -1,12 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import {
-  listProductionMembers,
-  listProductionMembersWithRoles,
-  listCueLists,
-  bindPlatformIdentity,
-  findUserByName,
-} from "@/lib/db";
+import { listProductionMembers, listProductionMembersWithRoles } from "@/lib/perm/member-db";
+import { listCueLists } from "@/lib/ops/cue-list-db";
+import { bindPlatformIdentity, findUserByName } from "@/lib/account/user-db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
 // feishu_user 滥用债务清理：显示名/联系方式一律走 user_profile / identity 层。

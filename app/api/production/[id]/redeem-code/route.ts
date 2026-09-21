@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { redeemPlanCode, redeemRateLimited, REDEEM_ERROR_MESSAGES, PRODUCTION_TIERS, type ProductionTier } from "@/lib/account/plan";
 
 // 项目档位兑换码（#280）：kind=production_upgrade 的 plan_code 在这里消费，

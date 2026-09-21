@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getAsset } from "@/lib/asset/db";
 import { canCreateShareToken } from "@/lib/asset/perm";
 import { signShareToken } from "@/lib/asset/share-token";

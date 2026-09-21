@@ -1,7 +1,8 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, deleteMemberTag } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { deleteMemberTag } from "@/lib/perm/member-db";
 
 export async function DELETE(
   req: NextRequest,

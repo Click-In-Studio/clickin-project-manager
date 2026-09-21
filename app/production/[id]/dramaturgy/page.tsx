@@ -7,13 +7,10 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSceneFieldPerms } from "@/lib/script/scene-field-perms";
-import {
-  getProductionPermissionContext,
-  getProductionName,
-  getActiveVersionId,
-  listMarkerProjectionByVersion,
-  listCharactersByVersion,
-} from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getProductionName } from "@/lib/production/production-db";
+import { getActiveVersionId } from "@/lib/script/version-db";
+import { listMarkerProjectionByVersion, listCharactersByVersion } from "@/lib/script/script-scene-character-db";
 import Dramaturgy from "@/components/script/Dramaturgy";
 import PageActivationGate from "@/components/perm/PageActivationGate";
 

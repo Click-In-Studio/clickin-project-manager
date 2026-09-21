@@ -4,7 +4,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { createAsset } from "@/lib/asset/db";
 import { docPageOcr, DENIED_ASSET_VIEW } from "@/lib/agent/tools/doc-tools";
 import { DENIED_NOT_MEMBER } from "@/lib/agent/tools/production-tools";

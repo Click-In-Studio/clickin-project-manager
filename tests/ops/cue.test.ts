@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import {
-  listCueLists, createCueList, getCueList, updateCueList, deleteCueList,
-  createCue, getCue, listCues, updateCue, deleteCue,
-} from "@/lib/db";
+import { listCueLists, createCueList, getCueList, updateCueList, deleteCueList } from "@/lib/ops/cue-list-db";
+import { createCue, getCue, listCues, updateCue, deleteCue } from "@/lib/ops/cue-db";
 import { TEST_USER } from "../_support/helpers";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 

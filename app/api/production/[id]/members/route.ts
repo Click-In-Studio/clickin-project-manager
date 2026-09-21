@@ -1,16 +1,9 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import {
-  listProductionMembers,
-  addProductionMember,
-  setMemberRoles,
-  setMemberPhoto,
-  setMemberSupervisor,
-  setMemberTags,
-  isProductionArchived,
-  getProductionPermissionContext,
-} from "@/lib/db";
+import { listProductionMembers, addProductionMember, setMemberRoles, setMemberPhoto, setMemberSupervisor, setMemberTags } from "@/lib/perm/member-db";
+import { isProductionArchived } from "@/lib/production/production-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 
 function requireAdmin(req: NextRequest) {

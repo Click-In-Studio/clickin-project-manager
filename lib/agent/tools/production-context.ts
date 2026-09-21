@@ -3,8 +3,10 @@
 // 不注入。内容原则：语境不是权限——只描述"用户在这个制作里是什么身份"，
 // 能查什么由工具内部权限判定，注入段不放权限清单。
 
-import { getUserProfile, listMyProductionsWithRoles, listUpcomingMilestonesForUser } from "@/lib/db";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getUserProfile } from "@/lib/account/user-db";
+import { listMyProductionsWithRoles } from "@/lib/production/production-db";
+import { listUpcomingMilestonesForUser } from "@/lib/ops/milestone-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/perm/permissions";
 import { isoToDateInput } from "@/lib/tz";

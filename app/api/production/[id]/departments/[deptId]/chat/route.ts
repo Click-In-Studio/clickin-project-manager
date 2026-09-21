@@ -11,13 +11,10 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import {
-  getProductionPermissionContext,
-  getProductionName,
-  getBossOpenIds,
-  batchGetFeishuOpenIds,
-  getFeishuOpenId,
-} from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getProductionName } from "@/lib/production/production-db";
+import { getBossOpenIds } from "@/lib/perm/member-db";
+import { batchGetFeishuOpenIds, getFeishuOpenId } from "@/lib/account/db-feishu";
 import { getProductionDept, setDeptChatId } from "@/lib/perm/dept-db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { getWatermarkInfo, updateProductionMeta } from "@/lib/db";
+import { getWatermarkInfo, updateProductionMeta } from "@/lib/production/production-db";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 
 // 项目水印：开关读取 + 访问者身份解析

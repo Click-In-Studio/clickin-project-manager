@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { getSession } from "@/lib/account/session";
 import { hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
 import { canViewAsset } from "@/lib/asset/perm";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getAsset } from "@/lib/asset/db";
 import AssetPreviewClient from "@/components/assets/AssetPreviewClient";
 

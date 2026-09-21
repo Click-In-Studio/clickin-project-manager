@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { listScenesByVersion, getSceneById, listCharactersByVersion, getCharacterById } from "@/lib/db";
+import { listScenesByVersion, getSceneById, listCharactersByVersion, getCharacterById } from "@/lib/script/script-scene-character-db";
 import { makeProduction, makeScene, makeCharacter, cleanupProduction } from "../_support/factories";
 
 let prodId: string;

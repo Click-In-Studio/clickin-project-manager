@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { unbindEmail } from "@/lib/db";
+import { unbindEmail } from "@/lib/account/user-db";
 
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies();

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { faker } from "@faker-js/faker";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 
 // 记忆后端所有权 PR 的三层测试：
 //   1. store：追加/尾读/蒸馏增量消费的字节偏移语义

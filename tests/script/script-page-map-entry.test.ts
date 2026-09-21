@@ -14,15 +14,10 @@ import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
-import {
-  applyPatchToDB,
-  getEstimatedPageMap,
-  getMasterScriptViewId,
-  loadPageMap,
-  loadProduction,
-  savePageMap,
-  saveScriptConfig,
-} from "@/lib/db";
+import { applyPatchToDB } from "@/lib/script/script-patch-db";
+import { getEstimatedPageMap, loadPageMap, savePageMap } from "@/lib/script/page-map-db";
+import { getMasterScriptViewId } from "@/lib/script/script-view-db";
+import { loadProduction, saveScriptConfig } from "@/lib/script/script-state-db";
 import { computePageMap } from "@/lib/script/script-page";
 import { DEFAULT_SCRIPT_CONFIG, type Block } from "@/lib/script/script-types";
 import { buildMarkerLabelIndex } from "@/lib/script/script-generated-labels";

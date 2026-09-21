@@ -1,6 +1,6 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
-import { submitAccessRequest } from "@/lib/db";
+import { submitAccessRequest } from "@/lib/approval/access-request-action-db";
 
 async function main() {
   const req = await submitAccessRequest(

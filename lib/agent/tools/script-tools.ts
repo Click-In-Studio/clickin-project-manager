@@ -14,7 +14,9 @@
 import { resolveProductionActor, DENIED_NOT_MEMBER } from "./production-tools";
 import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
-import { getActiveVersionId, loadProduction, getEstimatedPageMap } from "@/lib/db";
+import { getActiveVersionId } from "@/lib/script/version-db";
+import { loadProduction } from "@/lib/script/script-state-db";
+import { getEstimatedPageMap } from "@/lib/script/page-map-db";
 import { buildMarkerLabelIndex, type MarkerLabelIndex } from "@/lib/script/script-generated-labels";
 import { isMarkerBlock, markerBlockRank, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script/script-marker-blocks";
 import { serializeBlocksToDialect, SCRIPT_DIALECT_POINTER_READ } from "@/lib/script/script-dialect";

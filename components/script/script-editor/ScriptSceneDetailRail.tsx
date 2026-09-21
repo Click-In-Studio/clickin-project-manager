@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import MountPointAssets from "@/components/assets/MountPointAssets";
 import DurationInput from "@/components/ui/DurationInput";
-import type { SceneDetail } from "@/lib/db";
+import type { SceneDetail } from "@/lib/script/script-scene-character-db";
 import { formatDuration, parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
 import type { SceneMetaFields } from "@/lib/script/script-scene-details";

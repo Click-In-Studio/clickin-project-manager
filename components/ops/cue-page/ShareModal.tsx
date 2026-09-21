@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import { BASE_PATH } from "@/lib/base-path";
 import { fetchCueListCollaborators, addCueListCollaborator, removeCueListCollaborator } from "@/lib/ops/cue-client";
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 import type { CueListGrant, CueListDeptAccess } from "@/lib/ops/cue-list-types";
 
 

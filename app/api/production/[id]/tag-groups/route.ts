@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, listTagGroups, createTagGroup } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { listTagGroups, createTagGroup } from "@/lib/script/script-block-tag-db";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 
 async function getCtx(req: NextRequest, productionId: string) {

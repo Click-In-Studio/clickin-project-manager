@@ -11,10 +11,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
-import {
-  upsertFeishuUser, deleteProduction, createProduction, ProductionQuotaError,
-  listMyProductionsWithRoles,
-} from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { deleteProduction, createProduction, ProductionQuotaError, listMyProductionsWithRoles } from "@/lib/production/production-db";
 import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/perm/permissions";
 import { createInvite, acceptInvite } from "@/lib/account/invite-db";
 import {

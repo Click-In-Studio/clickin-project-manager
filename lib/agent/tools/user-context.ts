@@ -11,7 +11,8 @@
 // 环境落地（sessionKey 扩展 productionId）后再回来加成员查询。
 
 import { getPool } from "@/lib/pg";
-import { getUserProfile, listMyProductionsWithRoles } from "@/lib/db";
+import { getUserProfile } from "@/lib/account/user-db";
+import { listMyProductionsWithRoles } from "@/lib/production/production-db";
 import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/perm/permissions";
 
 export async function buildUserContextMarkdown(userId: string): Promise<string | null> {

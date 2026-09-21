@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getActiveVersionId, loadProduction } from "@/lib/db";
+import { getActiveVersionId } from "@/lib/script/version-db";
+import { loadProduction } from "@/lib/script/script-state-db";
 import { makeProduction, makeBlocks, cleanupProduction } from "../_support/factories";
 
 let prodId: string;

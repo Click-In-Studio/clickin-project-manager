@@ -3,7 +3,7 @@ import { analyzeEmptyScriptCleanup, buildEmptyScriptCleanupRemovalPlan, isOnlyTe
 import { makeBlock, makeMarkerBlock } from "@/lib/script/script-block-stream";
 import { toSceneDetail } from "@/lib/script/script-scene-details";
 import type { Block, Scene } from "@/lib/script/script-types";
-import type { SceneDetail } from "@/lib/db";
+import type { SceneDetail } from "@/lib/script/script-scene-character-db";
 
 /**
  * 「清理空剧本结构」的分析与删除计划（#487 S1 从 ScriptEditor.tsx 搬出）。

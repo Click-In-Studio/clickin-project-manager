@@ -15,7 +15,7 @@ import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki, listVisibleWikiI
 import { listEnumerableNodeIds, canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
 import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
 import { listProductionDepts } from "@/lib/perm/dept-db";
-import { listProductionMembers } from "@/lib/db";
+import { listProductionMembers } from "@/lib/perm/member-db";
 import type { WikiLevel } from "@/lib/perm/resource-grant-db";
 import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 import { broadcastWikiUpdate } from "@/lib/wiki/collab";

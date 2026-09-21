@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { getProductionName } from "@/lib/db";
+import { getProductionName } from "@/lib/production/production-db";
 import { getTechReqByProduction } from "@/lib/ops/event-db";
 import UnauthorizedActions from "@/components/perm/UnauthorizedActions";
 import { permissionLabel } from "@/lib/perm/permission-labels";

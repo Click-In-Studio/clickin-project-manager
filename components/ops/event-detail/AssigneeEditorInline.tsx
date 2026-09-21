@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 import MemberCard from "./MemberCard";
 import { groupByRole } from "./group-by-role";
 

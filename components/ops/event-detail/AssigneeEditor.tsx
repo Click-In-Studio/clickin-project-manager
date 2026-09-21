@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import ChevronIcon from "@/components/ui/ChevronIcon";
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 import type { EventTechReq } from "@/lib/ops/event-db";
 import MemberCard from "./MemberCard";
 import { groupByRole } from "./group-by-role";

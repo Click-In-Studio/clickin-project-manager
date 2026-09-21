@@ -45,7 +45,6 @@
 │   └── editor/ wiki/ assets/ import/ print/                         # 原有功能域目录
 │
 ├── lib/                    # 服务端工具库——按域分目录（#482），根只留跨域基建
-│   ├── db.ts               # 主数据库查询（正在按域拆出，#486）
 │   ├── pg.ts / r2.ts       # 连接池 / Cloudflare R2 presigned URL、multipart upload
 │   ├── agent/              # AI：runtime/ tools/ memory/ chat/ + 注入安全、指令、配额、llm-chat
 │   ├── script/             # 剧本：方言、标记、分页、template/（剧本版式模版）、打印 CSS
@@ -96,7 +95,7 @@
 | `admin/` | — | 13 个 `Admin*Client` + AdminActivationGate、Danger/Migration 段、BulkInvite / TransferOwner / ProductionPlan 卡片、InviteModal | `perm/` `ops/` |
 | `ui/` | — | 通用原语：Badge ChevronIcon DropdownPicker DurationInput Markdown MarkdownEditor OverflowSafeSelect PageHeader PageSkeleton SmartText TreePickerModal AdminModal（通用弹窗，名字是历史）`my-pages.module.css` | `platform/` |
 | `shell/` | — | 应用外壳：AppShell（子件与纯函数在 `app-shell/` 族目录）ProductionTopMenu SearchBar ManualSaveNotice WatermarkOverlay `watermark-tile` | `platform/` |
-| 根 | 纯基建白名单：`db` `pg` `r2` `server-cache` `tz` `money` `duration` `lex-order` `z-index` `base-path` `server-url` `request-json` `sse-keepalive` `nav-pending` `search-db` | 不放文件 | `platform/` |
+| 根 | 纯基建白名单：`pg` `r2` `server-cache` `tz` `money` `duration` `lex-order` `z-index` `base-path` `server-url` `request-json` `sse-keepalive` `nav-pending` `search-db` | 不放文件 | `platform/` |
 
 ### 1.3 归属与命名规则
 
@@ -363,7 +362,7 @@ verb ∈ { view, create, edit, delete }        # 闭集，永不扩充
 
 ```typescript
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 
 const session = getSession(req.cookies);
@@ -833,7 +832,7 @@ const res = await listCueListsHandler(req(`/api/production/${prodId}/cuelists`, 
 - `tests/`：根目录无测试文件、域目录下不套层、`_support/` 不放测试、migration 三件套只住 `migrations/`。只钉形态不钉名单，新开域目录不用改测试。
 - `components/`：根目录无文件、域目录下最多一层组件族目录、文件名为 PascalCase 或 kebab-case 两种形态之一（§1.3）。
 - `lib/`：根目录文件 ⊆ 基建白名单，且白名单无幽灵条目。
-- 行数：`MONOLITH_LINE_CEILING`（五个巨石组件只降不升，上限不得比实际高 100 行以上）、族内文件上限、`DB_FILE_GRANDFATHERED` / `DB_TS_LINE_CEILING`（`lib/db.ts` 与各 `*-db.ts`）。撞线的处理见 §1.3 末条。
+- 行数：`MONOLITH_LINE_CEILING`（五个巨石组件只降不升，上限不得比实际高 100 行以上）、族内文件上限、`DB_FILE_GRANDFATHERED`（各 `*-db.ts` ≤ 1000 行）；`lib/db.ts` 已于 #486 拆完删除，棘轮钉它不再出现。撞线的处理见 §1.3 末条。
 - `openclaw-workspace/` 五件套必须全部 tracked（gitignore guard）。
 
 #### ⑤ 静态棘轮跨域读原文

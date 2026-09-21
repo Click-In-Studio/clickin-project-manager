@@ -7,7 +7,9 @@ import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { canViewScriptBlocks, scriptBlocksUnauthorizedUrl } from "@/lib/script/script-perm";
 import { getSceneFieldPerms } from "@/lib/script/scene-field-perms";
-import { getProductionPermissionContext, getProductionName, getMasterScriptViewId } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getProductionName } from "@/lib/production/production-db";
+import { getMasterScriptViewId } from "@/lib/script/script-view-db";
 import ScriptEditor from "@/components/script/ScriptEditor";
 import PageActivationGate from "@/components/perm/PageActivationGate";
 

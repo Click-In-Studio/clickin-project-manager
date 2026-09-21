@@ -4,7 +4,8 @@ import { Suspense } from "react";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { listProductionMembersWithRoles } from "@/lib/perm/member-db";
 import { listPhases } from "@/lib/ops/phase-db";
 import {
   getTechReqByProduction,

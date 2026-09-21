@@ -1,15 +1,5 @@
 import { describe, it, expect, afterAll } from "vitest";
-import {
-  listProductions,
-  listMyProductionsWithRoles,
-  createProduction,
-  getProductionName,
-  updateProductionName,
-  archiveProduction,
-  isProductionArchived,
-  unarchiveProduction,
-  deleteProduction,
-} from "@/lib/db";
+import { listProductions, listMyProductionsWithRoles, createProduction, getProductionName, updateProductionName, archiveProduction, isProductionArchived, unarchiveProduction, deleteProduction } from "@/lib/production/production-db";
 import { getPool } from "@/lib/pg";
 import { readFileSync } from "fs";
 import path from "path";

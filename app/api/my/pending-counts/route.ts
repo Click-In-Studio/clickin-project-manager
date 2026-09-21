@@ -9,7 +9,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { countUnreadNotifications } from "@/lib/notify/inbox-db";
 import { countPendingTasksForUser, countUnreadReportsForUser } from "@/lib/ops/event-db";
-import { countCueWarningsForProduction } from "@/lib/db";
+import { countCueWarningsForProduction } from "@/lib/ops/cue-db";
 
 export async function GET(req: NextRequest) {
   const session = getSession(req.cookies);

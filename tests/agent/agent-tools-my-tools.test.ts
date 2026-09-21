@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { myCallTimes, myTechReqs, myFollowedEvents, myMilestones, myProductions } from "@/lib/agent/tools/my-tools";
 
 // my.* 只读工具的 self-scope 测试：工厂用户 + 一个 production 成员关系。

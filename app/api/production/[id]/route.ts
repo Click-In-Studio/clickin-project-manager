@@ -1,6 +1,9 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
-import { loadProduction, getProductionPermissionContext, getActiveVersionId, updateProductionName, updateProductionMeta, updateProductionType, getVersion, deleteProduction } from "@/lib/db";
+import { loadProduction } from "@/lib/script/script-state-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getActiveVersionId, getVersion } from "@/lib/script/version-db";
+import { updateProductionName, updateProductionMeta, updateProductionType, deleteProduction } from "@/lib/production/production-db";
 import { getSession } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
 import { markAvatarCommitted, cleanupAvatarObjects } from "@/lib/asset/avatar-db";

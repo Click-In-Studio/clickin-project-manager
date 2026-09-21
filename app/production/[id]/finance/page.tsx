@@ -3,7 +3,8 @@ import PageHeader from "@/components/ui/PageHeader";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { getProductionName, getProductionPermissionContext } from "@/lib/db";
+import { getProductionName } from "@/lib/production/production-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import {
   listBudgetCategories, listBudgetCategoryOptions, listExpenses, type ExpenseStatus,

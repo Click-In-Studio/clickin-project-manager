@@ -4,7 +4,7 @@ import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import type { MyProductionEntry } from "@/lib/db";
+import type { MyProductionEntry } from "@/lib/production/production-db";
 import { BASE_PATH } from "@/lib/base-path";
 import { productionAvatarSrc } from "@/lib/asset/avatar-url";
 import styles from "@/components/ui/my-pages.module.css";

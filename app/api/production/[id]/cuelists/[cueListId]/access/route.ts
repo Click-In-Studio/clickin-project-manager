@@ -15,7 +15,8 @@
  */
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, getCueList } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getCueList } from "@/lib/ops/cue-list-db";
 import {
   getCueListAccess,
   selfConfirmCueListGrant,

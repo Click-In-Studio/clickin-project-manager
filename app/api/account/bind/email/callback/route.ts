@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { verifyBindingToken, signConflictToken } from "@/lib/platform/email/email-tokens";
-import { bindPlatformIdentity, getUserProfile } from "@/lib/db";
+import { bindPlatformIdentity, getUserProfile } from "@/lib/account/user-db";
 import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/account/session";
 import { requestOrigin } from "@/lib/account/request-origin";
 

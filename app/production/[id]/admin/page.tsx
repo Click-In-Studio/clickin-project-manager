@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = { title: "项目概览" };
 
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
-import { getProductionMeta, getAdminOverviewStats } from "@/lib/db";
+import { getProductionMeta, getAdminOverviewStats } from "@/lib/production/production-db";
 import { getPool } from "@/lib/pg";
 import { notFound } from "next/navigation";
 import PageHeader from "@/components/ui/PageHeader";

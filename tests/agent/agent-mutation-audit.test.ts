@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { upsertFeishuUser } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { createWiki, getWiki } from "@/lib/wiki/content";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { buildTools, exposedName, type RunHandle } from "@/lib/agent/runtime/tools";

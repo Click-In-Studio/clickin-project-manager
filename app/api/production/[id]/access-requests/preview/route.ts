@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, previewApprovalLadder } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { previewApprovalLadder } from "@/lib/approval/access-request-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 

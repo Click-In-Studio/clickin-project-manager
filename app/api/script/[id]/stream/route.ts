@@ -2,7 +2,8 @@ import { type NextRequest } from "next/server";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { registerSSE, removePresence, presenceFrameFor } from "@/lib/server-cache";
 import { registerSSEKick } from "@/lib/sse-kick";
-import { getActiveVersionId, getVersion, getProductionPermissionContext } from "@/lib/db";
+import { getActiveVersionId, getVersion } from "@/lib/script/version-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getSession } from "@/lib/account/session";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

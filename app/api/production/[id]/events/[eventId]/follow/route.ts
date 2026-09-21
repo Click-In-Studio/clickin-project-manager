@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getProductionEvent, selfFollowEvent, selfUnfollowEvent, getSelfParticipantRole } from "@/lib/ops/event-db";
 import { addChatMembers } from "@/lib/platform/feishu/feishu-chat";
 

@@ -18,7 +18,7 @@
 import os from "os";
 import path from "path";
 import type { Pool } from "pg";
-import { createProduction } from "@/lib/db";
+import { createProduction } from "@/lib/production/production-db";
 
 export const VERSION_RETIRE_SNAPSHOT_PATH = path.join(
   os.tmpdir(),

@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getAsset, addUniversalAssetFile } from "@/lib/asset/db";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { completeMultipartUpload, listMultipartParts, headR2Object } from "@/lib/r2";

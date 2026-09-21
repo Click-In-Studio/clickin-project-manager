@@ -4,7 +4,9 @@
 // 全部 readOnlyHint: true → 插件门控直通，Level A（AI base）。
 
 import { isoToDatetimeLocal, isoToDateInput } from "@/lib/tz";
-import { getUserProfile, listMyProductionsWithRoles, listUpcomingMilestonesForUser } from "@/lib/db";
+import { getUserProfile } from "@/lib/account/user-db";
+import { listMyProductionsWithRoles } from "@/lib/production/production-db";
+import { listUpcomingMilestonesForUser } from "@/lib/ops/milestone-db";
 import {
   listMyUpcomingCallTimes,
   listMyTechReqsFull,

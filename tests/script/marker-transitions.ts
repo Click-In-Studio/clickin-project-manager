@@ -8,7 +8,7 @@ import { diffState, patchAffectsMarkerProjection, type ScriptPatch } from "../..
 import { buildMarkerContextById, withLegacyOwnershipProjection, withMarkerOwnership } from "../../lib/script/script-marker-blocks";
 import { buildMarkerLabelIndex } from "../../lib/script/script-generated-labels";
 import { updateMarkerOwnership } from "../../lib/script/script-marker-ownership-cache";
-import { getMarkerLabelIndex } from "../../lib/db";
+import { getMarkerLabelIndex } from "@/lib/script/script-marker-label-db";
 import { computePageMap, updateEstimatedPageMap } from "../../lib/script/script-page";
 
 let id = 0;

@@ -14,7 +14,8 @@ import { readdir, readFile } from "fs/promises";
 import path from "path";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { isTaskPoc, isSubjectPoc, isDeptSubjectPoc, taskSubjectOf } from "@/lib/ops/task-poc";
 
 // ─────────────────────────────────────────────────────────────────────────────

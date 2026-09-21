@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { listMyProductionsWithRoles } from "@/lib/db";
+import { listMyProductionsWithRoles } from "@/lib/production/production-db";
 import { countUnreadNotifications } from "@/lib/notify/inbox-db";
 import { countPendingTasksForUser, countUnreadReportsForUser } from "@/lib/ops/event-db";
 import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/perm/permissions";

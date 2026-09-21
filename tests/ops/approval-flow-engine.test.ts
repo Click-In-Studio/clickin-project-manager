@@ -1,14 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import {
-  addProductionMember,
-  approveAccessRequest,
-  escalateAccessRequest,
-  escalateExpiredApprovals,
-  getAccessRequestFlow,
-  rejectAccessRequest,
-  submitAccessRequest,
-} from "@/lib/db";
+import { addProductionMember } from "@/lib/perm/member-db";
+import { approveAccessRequest, escalateAccessRequest, escalateExpiredApprovals, rejectAccessRequest, submitAccessRequest } from "@/lib/approval/access-request-action-db";
+import { getAccessRequestFlow } from "@/lib/approval/access-request-db";
 import { createFlowTemplate, publishFlowTemplate, updateFlowTemplate } from "@/lib/approval/approval-flow-template-db";
 import { forwardFlowNodeToOwner, type FlowRequestRow } from "@/lib/approval/approval-flow-engine";
 import type { ApprovalTemplateNode } from "@/lib/approval/approval-flow-template";

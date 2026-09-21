@@ -1,4 +1,4 @@
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 
 export function groupByRole(members: MemberWithRoles[]): { role: string; members: MemberWithRoles[] }[] {
   const order: string[] = [];

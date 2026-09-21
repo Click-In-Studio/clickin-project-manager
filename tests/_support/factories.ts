@@ -1,14 +1,11 @@
 import { faker } from "@faker-js/faker";
 import { randomUUID } from "node:crypto";
 import { getPool } from "@/lib/pg";
-import {
-  createProduction,
-  upsertFeishuUser,
-  deleteProduction,
-  getActiveVersionId,
-  writeVersionContent,
-  applyPatchToDB,
-} from "@/lib/db";
+import { createProduction, deleteProduction } from "@/lib/production/production-db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { getActiveVersionId } from "@/lib/script/version-db";
+import { writeVersionContent } from "@/lib/script/script-version-content-db";
+import { applyPatchToDB } from "@/lib/script/script-patch-db";
 import type { Block } from "@/lib/script/script-types";
 import type { ScriptPatch } from "@/lib/script/script-ops";
 

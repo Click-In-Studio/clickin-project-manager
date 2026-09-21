@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { registerCueSSE, removeCuePresence, cuePresenceFrame } from "@/lib/server-cache";
 import { registerSSEKick } from "@/lib/sse-kick";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasAnyEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

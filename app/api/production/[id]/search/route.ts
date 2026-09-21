@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { searchProduction } from "@/lib/search-db";
 
 export async function GET(

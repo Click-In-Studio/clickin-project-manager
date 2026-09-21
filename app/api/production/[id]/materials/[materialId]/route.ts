@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { toActor } from "@/lib/perm/grant-check";
 import { canWriteMaterial } from "@/lib/ops/material-perm";
 import { resolveSubjectPatch } from "@/lib/ops/task-poc";

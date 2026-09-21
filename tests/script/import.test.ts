@@ -6,13 +6,13 @@
  *   D. version-import hybrid — CoW block/cue isolation, orphan GC, v1 preservation
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import {
-  createProduction,
-  importScriptToVersion, writeVersionContent,
-  getActiveVersionId,
-  createCueList, createCue, updateCue,
-  applyPatchToDB,
-} from "@/lib/db";
+import { createProduction } from "@/lib/production/production-db";
+import { importScriptToVersion } from "@/lib/script/script-import-db";
+import { writeVersionContent } from "@/lib/script/script-version-content-db";
+import { getActiveVersionId } from "@/lib/script/version-db";
+import { createCueList } from "@/lib/ops/cue-list-db";
+import { createCue, updateCue } from "@/lib/ops/cue-db";
+import { applyPatchToDB } from "@/lib/script/script-patch-db";
 import { makeLegacyVersion } from "../_support/factories";
 import { getPool } from "@/lib/pg";
 import { TEST_USER, TEST_OWNER } from "../_support/helpers";

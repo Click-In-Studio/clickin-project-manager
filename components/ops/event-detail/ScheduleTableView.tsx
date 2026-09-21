@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import SmartText from "@/components/ui/SmartText";
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 import type { EventScheduleItemWithParticipants, EventTechReq, EventDepartment } from "@/lib/ops/event-db";
 import { fmtTime } from "@/lib/tz";
 import ScheduleItemModal, { type ModalState } from "./ScheduleItemModal";

@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { createProduction, listProductions, updateProductionSortOrders, ProductionQuotaError } from "@/lib/db";
+import { createProduction, listProductions, updateProductionSortOrders, ProductionQuotaError } from "@/lib/production/production-db";
 import { getSession } from "@/lib/account/session";
 import { getUserTier, countOwnedActiveProductions, USER_TIERS } from "@/lib/account/plan";
 
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
   if (ikey) storeIdem(ikey, id);
 
   try {
-    const { updateProductionMeta } = await import("@/lib/db");
+    const { updateProductionMeta } = await import("@/lib/production/production-db");
     await createProduction(
       id,
       name.trim(),

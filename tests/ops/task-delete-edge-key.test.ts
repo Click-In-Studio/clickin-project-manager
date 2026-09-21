@@ -24,7 +24,8 @@ import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { NextRequest } from "next/server";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import {
   createProductionEvent, createEventTechReq, upsertAwaitingTechReqs,
   getTechReqByProduction,

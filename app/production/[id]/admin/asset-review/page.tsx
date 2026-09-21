@@ -6,7 +6,8 @@ import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
-import { getProductionPermissionContext, getProductionName } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getProductionName } from "@/lib/production/production-db";
 import { listPrivateAssets } from "@/lib/asset/review-db";
 import AdminAssetReviewClient from "@/components/admin/AdminAssetReviewClient";
 

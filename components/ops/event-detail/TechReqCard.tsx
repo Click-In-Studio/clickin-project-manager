@@ -5,7 +5,7 @@ import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/editor/SmartTextarea";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import SmartText from "@/components/ui/SmartText";
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 import type { EventScheduleItemWithParticipants, EventTechReq } from "@/lib/ops/event-db";
 import AssigneeEditor from "./AssigneeEditor";
 import ScheduleItemPicker from "./ScheduleItemPicker";

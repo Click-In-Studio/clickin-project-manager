@@ -9,12 +9,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Block } from "@/lib/script/script-types";
 import type { ScriptPatch } from "@/lib/script/script-ops";
-import {
-  createProduction, deleteProduction,
-  getActiveVersionId, getVersion,
-  applyPatchToDB,
-  createCueList, createCue, updateCue, deleteCue,
-} from "@/lib/db";
+import { createProduction, deleteProduction } from "@/lib/production/production-db";
+import { getActiveVersionId, getVersion } from "@/lib/script/version-db";
+import { applyPatchToDB } from "@/lib/script/script-patch-db";
+import { createCueList } from "@/lib/ops/cue-list-db";
+import { createCue, updateCue, deleteCue } from "@/lib/ops/cue-db";
 import { getPool } from "@/lib/pg";
 import { TEST_USER, TEST_OWNER } from "../_support/helpers";
 import { makeLegacyVersion } from "../_support/factories";

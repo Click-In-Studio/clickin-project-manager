@@ -1,12 +1,8 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import {
-  getProductionPermissionContext,
-  getAllPermissionOverrides,
-  setPermissionOverride,
-  listProductionMembersWithRoles,
-} from "@/lib/db";
+import { getProductionPermissionContext, getAllPermissionOverrides, setPermissionOverride } from "@/lib/perm/permission-context-db";
+import { listProductionMembersWithRoles } from "@/lib/perm/member-db";
 import { getPool } from "@/lib/pg";
 import { isGovernanceNodeKey } from "@/lib/perm/grant-template";
 import { requireProductionFeature } from "@/lib/account/plan";

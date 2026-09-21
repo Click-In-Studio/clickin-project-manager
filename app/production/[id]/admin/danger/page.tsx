@@ -7,11 +7,9 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getPool } from "@/lib/pg";
-import {
-  getProductionPermissionContext,
-  getProductionName,
-  listProductionMembersWithRoles,
-} from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getProductionName } from "@/lib/production/production-db";
+import { listProductionMembersWithRoles } from "@/lib/perm/member-db";
 import PageHeader from "@/components/ui/PageHeader";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import TransferOwnerCard from "@/components/admin/TransferOwnerCard";

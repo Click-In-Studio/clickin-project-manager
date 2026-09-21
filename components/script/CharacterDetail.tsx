@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
-import type { CharacterDetail } from "@/lib/db";
+import type { CharacterDetail } from "@/lib/script/script-scene-character-db";
 
 const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
 

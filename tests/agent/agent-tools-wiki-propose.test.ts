@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { getPool } from "@/lib/pg";
 import { wikiProposeCreate } from "@/lib/agent/tools/wiki-tools";
 import { prepareWikiProposal } from "@/lib/agent/tools/wiki-proposal-prepare";

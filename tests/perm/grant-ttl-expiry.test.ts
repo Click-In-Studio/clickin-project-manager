@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember, getProductionPermissionContext, hasListAccess } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { hasListAccess } from "@/lib/ops/cue-list-db";
 import { getPool } from "@/lib/pg";
 
 // TTL 回归：过期 grant 不得再通过任何权限判定读取（批0 修复）。

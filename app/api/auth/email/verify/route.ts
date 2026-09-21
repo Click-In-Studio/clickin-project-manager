@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
-import { consumeEmailOtp, getUserProfile } from "@/lib/db";
+import { consumeEmailOtp } from "@/lib/account/email-auth-db";
+import { getUserProfile } from "@/lib/account/user-db";
 import { createSession, SESSION_COOKIE, SESSION_COOKIE_OPTS } from "@/lib/account/session";
 
 export async function POST(req: NextRequest) {

@@ -1,7 +1,9 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, listProductionComments, createComment, getCommentById, getProductionName } from "@/lib/db";
-import type { Mention } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { listProductionComments, createComment, getCommentById } from "@/lib/ops/comment-db";
+import { getProductionName } from "@/lib/production/production-db";
+import type { Mention } from "@/lib/ops/comment-db";
 import { hasAnyEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { notifyUsers } from "@/lib/notify/notify";
 

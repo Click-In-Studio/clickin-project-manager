@@ -1,12 +1,9 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import {
-  getProductionPermissionContext,
-  getAnnouncement,
-  getUnreadMemberIds,
-  getProductionName,
-} from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getAnnouncement, getUnreadMemberIds } from "@/lib/notify/announcement-db";
+import { getProductionName } from "@/lib/production/production-db";
 import { notifyAnnouncementRemind } from "@/lib/notify/notify";
 
 type Ctx = { params: Promise<{ id: string; announcementId: string }> };

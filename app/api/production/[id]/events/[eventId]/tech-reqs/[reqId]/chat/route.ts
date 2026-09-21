@@ -13,7 +13,8 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, getProductionName } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getProductionName } from "@/lib/production/production-db";
 import {
   getProductionEvent, getEventTechReq, setTechReqChatId,
   getReqChatTargets, getProductionDeptChatIds,

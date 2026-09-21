@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { updateComment, deleteComment } from "@/lib/db";
+import { updateComment, deleteComment } from "@/lib/ops/comment-db";
 
 export async function PATCH(
   req: NextRequest,

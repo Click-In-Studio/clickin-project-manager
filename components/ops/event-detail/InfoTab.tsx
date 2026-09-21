@@ -6,7 +6,7 @@ import SmartTextarea from "@/components/editor/SmartTextarea";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import SmartText from "@/components/ui/SmartText";
 import { BASE_PATH } from "@/lib/base-path";
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 import type { ProductionEvent, EventTechReq, EventDepartment } from "@/lib/ops/event-db";
 import { datetimeLocalToIso, dateTimeToIso, fmtDateTime as fmt, fmtDateLong } from "@/lib/tz";
 import AssigneeEditorInline from "./AssigneeEditorInline";

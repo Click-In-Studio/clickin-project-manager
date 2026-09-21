@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { cancelAccessRequest, getProductionPermissionContext } from "@/lib/db";
+import { cancelAccessRequest } from "@/lib/approval/access-request-action-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval/approval-stages";
 
 type Ctx = { params: Promise<{ id: string; reqId: string }> };

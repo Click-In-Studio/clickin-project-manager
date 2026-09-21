@@ -27,7 +27,8 @@ export async function canEditProductionInstructions(userId: string, productionId
   // mcp/server.ts），lib/db / grant-template 的依赖树很重且有过 Turbopack
   // 循环依赖 TDZ 前科——权限判定只在编辑面/写工具触发，按需加载让注入
   // 链的静态依赖图保持最小（与 mcp/server.ts 的同一条纪律）。
-  const { getProductionPermissionContext, getUserProfile } = await import("@/lib/db");
+  const { getProductionPermissionContext } = await import("@/lib/perm/permission-context-db");
+  const { getUserProfile } = await import("@/lib/account/user-db");
   const { canAccessNode } = await import("@/lib/perm/grant-template");
   const profile = await getUserProfile(userId);
   if (!profile) return false;

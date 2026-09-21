@@ -4,7 +4,7 @@ import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import {
   getProductionEvent,
   listScheduleItemsWithParticipants,

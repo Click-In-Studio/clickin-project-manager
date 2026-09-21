@@ -3,7 +3,8 @@ import { hasEventDomainView } from "@/lib/ops/event-permissions";
 import { canAccessNode } from "@/lib/perm/grant-template";
 import { toActor } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, getVersion } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getVersion } from "@/lib/script/version-db";
 import { listProductionEvents, createProductionEvent } from "@/lib/ops/event-db";
 
 type Ctx = { params: Promise<{ id: string }> };

@@ -1,8 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import {
-  getProductionPermissionContext, getCueList, listCueListPermissions, setCueListPermission,
-} from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getCueList, listCueListPermissions, setCueListPermission } from "@/lib/ops/cue-list-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 
 // PATCH /api/production/[id]/cuelists/[cueListId]/permissions

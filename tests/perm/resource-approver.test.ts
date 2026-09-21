@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { addProductionMember } from "@/lib/db";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { createProductionDept, setDeptMembers, addResourceDeptManage } from "@/lib/perm/dept-db";
 import { buildApprovalLadder, findProducers } from "@/lib/approval/approval-routing";
 import {

@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { escalateExpiredApprovals } from "@/lib/db";
+import { escalateExpiredApprovals } from "@/lib/approval/access-request-action-db";
 import { escalateExpiredExpenses } from "@/lib/ops/finance-db";
 
 function authorized(req: NextRequest): boolean {

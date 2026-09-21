@@ -29,12 +29,8 @@ import {
   recomputeAndRevokeGrants,
   revokeAllGrantsForMember,
 } from "@/lib/perm/dept-db";
-import {
-  setMemberRoles,
-  createProductionRole,
-  setRolePermissions,
-  deleteProductionRole,
-} from "@/lib/db";
+import { setMemberRoles } from "@/lib/perm/member-db";
+import { createProductionRole, setRolePermissions, deleteProductionRole } from "@/lib/perm/role-db";
 import { suspendMember, confirmMemberExit } from "@/lib/perm/member-status";
 import type { PermissionContext } from "@/lib/perm/permissions";
 

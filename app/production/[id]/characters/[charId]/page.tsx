@@ -3,7 +3,10 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant, hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
-import { getProductionPermissionContext, getCharacterById, getProductionName, listCharactersByVersion, getActiveVersionId } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getCharacterById, listCharactersByVersion } from "@/lib/script/script-scene-character-db";
+import { getProductionName } from "@/lib/production/production-db";
+import { getActiveVersionId } from "@/lib/script/version-db";
 import CharacterDetailView from "@/components/script/CharacterDetail";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; charId: string }> }): Promise<Metadata> {

@@ -4,7 +4,7 @@ import { useState } from "react";
 import CommentAssetPicker, { type PendingAsset } from "@/components/assets/CommentAssetPicker";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import { BASE_PATH } from "@/lib/base-path";
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 import type { EventScheduleItemWithParticipants, ScheduleItemParticipant, EventTechReq, EventDepartment } from "@/lib/ops/event-db";
 import { datetimeLocalToIso } from "@/lib/tz";
 import ParticipantPicker from "./ParticipantPicker";

@@ -1,7 +1,9 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, getActiveVersionId, getVersion, getEstimatedPageMap } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getActiveVersionId, getVersion } from "@/lib/script/version-db";
+import { getEstimatedPageMap } from "@/lib/script/page-map-db";
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]/pages">) {
   const { id } = await ctx.params;

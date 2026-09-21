@@ -74,7 +74,11 @@ function fixtureBlocks(): Array<{ content: string; lyric: boolean; character: 0 
 
 async function seedFixture(): Promise<{ prodId: string; cookie: string; pageLayout: string; textLayoutMode: string; templateId: string | null }> {
   const { getPool } = await import("../../lib/pg");
-  const { createProduction, getActiveVersionId, applyPatchToDB, writeVersionContent, loadProduction, saveScriptConfig } = await import("../../lib/db");
+  const { createProduction } = await import("../../lib/production/production-db");
+  const { getActiveVersionId } = await import("../../lib/script/version-db");
+  const { applyPatchToDB } = await import("../../lib/script/script-patch-db");
+  const { writeVersionContent } = await import("../../lib/script/script-version-content-db");
+  const { loadProduction, saveScriptConfig } = await import("../../lib/script/script-state-db");
   const { DEFAULT_SCRIPT_CONFIG } = await import("../../lib/script/script-types");
   const { createSession, SESSION_COOKIE } = await import("../../lib/account/session");
   const { randomUUID: uuid } = await import("node:crypto");

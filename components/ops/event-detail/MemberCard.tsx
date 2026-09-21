@@ -1,6 +1,6 @@
 "use client";
 
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 
 export default function MemberCard({
   m, isSelected, onToggle,
