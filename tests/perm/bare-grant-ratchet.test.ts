@@ -20,6 +20,8 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "fs";
 import { join, relative } from "path";
 
+// 只剥注释不剥字符串：字符串 / 模板字面量里出现 `hasGrant(` 会被计入。目前全库没有这种写法；
+// 撞上「记账对不上但源码里找不到调用」先查这一条。
 const BARE_CALL = /\b(?:hasGrant|hasAnyGrant|listGrantedResourceIds)\(/g;
 const SCAN_ROOTS = ["app", "components"] as const;
 

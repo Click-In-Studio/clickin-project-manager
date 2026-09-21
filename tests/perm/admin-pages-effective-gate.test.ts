@@ -12,6 +12,8 @@ import { upsertFeishuUser, addProductionMember } from "@/lib/db";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getPool } from "@/lib/pg";
+import { readdirSync, readFileSync } from "fs";
+import { join, relative } from "path";
 
 let prodId: string;
 let ownerId: string;
@@ -69,5 +71,30 @@ describe("admin 页面入口门：hasEffectiveGrant(permCtx, ...)", () => {
     expect(await hasEffectiveGrant(permCtx, prodId, "production", "*", "asset_review", "edit")).toBe(false);
     expect(await hasEffectiveGrant(permCtx, prodId, "production", "*", "config", "edit")).toBe(false);
     expect(await hasEffectiveGrant(permCtx, prodId, "member", "*", "contact", "view")).toBe(false);
+  });
+});
+
+/**
+ * 金丝雀：上面「三种旁路链折成 hasEffectiveGrant 零行为变化」的前提是 `isAdmin` 恒 false
+ * （DEV_GUIDE §5.3：`feishu_user.is_super_admin` 每次登录被覆盖回 false，`/api/dev/make-admin`
+ * 线上 403）。哪天有人给 isAdmin 接上真数据源，这里先红，别让 admin 页面的门悄悄变宽。
+ */
+describe("金丝雀：isAdmin 仍是死字段", () => {
+  it("生产代码里唯一置 isAdmin: true 的写点是 dev-only 的 make-admin，且被 NODE_ENV 门住", () => {
+    const hits: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) { walk(full); continue; }
+        if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+        if (/isAdmin\s*[:=]\s*true|is_super_admin\s*[:=]\s*(true|TRUE)/.test(readFileSync(full, "utf8"))) {
+          hits.push(relative(process.cwd(), full));
+        }
+      }
+    };
+    for (const root of ["app", "lib", "components"]) walk(join(process.cwd(), root));
+    expect(hits).toEqual(["app/api/dev/make-admin/route.ts"]);
+    const makeAdmin = readFileSync(join(process.cwd(), "app/api/dev/make-admin/route.ts"), "utf8");
+    expect(makeAdmin).toMatch(/process\.env\.NODE_ENV !== "development"/);
   });
 });
