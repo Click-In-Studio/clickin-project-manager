@@ -442,3 +442,12 @@ export async function mergeAccounts(keepUserId: string, deleteUserId: string): P
     client.release();
   }
 }
+
+/** 按显示名找人（user_profile.name 精确匹配，取第一个）。飞书 OAuth 回填用。 */
+export async function findUserByName(name: string): Promise<{ userId: string } | null> {
+  const res = await getPool().query<{ user_id: string }>(
+    "SELECT user_id FROM user_profile WHERE name = $1 LIMIT 1",
+    [name],
+  );
+  return res.rows[0] ? { userId: res.rows[0].user_id } : null;
+}

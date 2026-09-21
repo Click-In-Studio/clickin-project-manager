@@ -5,7 +5,8 @@
 // 跨域端点（/api/me、mention-users、assets/*/mounts）不在这里，等各自域的 client。
 import { BASE_PATH } from "@/lib/base-path";
 import type { ScriptConfig, ScriptState } from "@/lib/script/script-types";
-import type { SceneDetail, TagGroup, BlockTagValue } from "@/lib/db";
+import type { TagGroup, BlockTagValue } from "./script-block-tag-db";
+import type { SceneDetail } from "./script-scene-character-db";
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 
