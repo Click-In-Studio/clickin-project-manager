@@ -140,3 +140,21 @@ export async function getFeishuUser(openId: string): Promise<UserInfo | null> {
   const r = res.rows[0];
   return { userId: r.user_id, openId, name: r.name, avatarUrl: r.avatar_url, isAdmin: r.is_super_admin };
 }
+
+/** Look up the Feishu open_id for an internal user — used by Feishu-specific subsystems. */
+export async function getFeishuOpenId(userId: string): Promise<string | null> {
+  const res = await getPool().query<{ open_id: string }>(
+    "SELECT open_id FROM feishu_user WHERE user_id = $1",
+    [userId],
+  );
+  return res.rows[0]?.open_id ?? null;
+}
+
+export async function batchGetFeishuOpenIds(userIds: string[]): Promise<Map<string, string>> {
+  if (!userIds.length) return new Map();
+  const res = await getPool().query<{ user_id: string; open_id: string }>(
+    "SELECT user_id, open_id FROM feishu_user WHERE user_id = ANY($1)",
+    [userIds],
+  );
+  return new Map(res.rows.map(r => [r.user_id, r.open_id]));
+}
