@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasGrant, toActor } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getNode, moveNode, setNodeListable, type NodePlacement } from "@/lib/node/db";
 import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
 import { canEditWiki } from "@/lib/wiki/perm";
@@ -48,9 +48,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (listable !== undefined) {
     if (node.kind !== "asset" || !node.assetId)
       return Response.json({ error: "该节点的可枚举性不在本路由管理" }, { status: 400 });
-    const permitted = actor.isAdmin || actor.isOwner
-      || (await canPublishAsset(access.permCtx, productionId, node.assetId, listable ? "create" : "delete")
-          && await hasGrant(session.userId, productionId, "production", "*", "mounts", "create"));
+    const permitted = await canPublishAsset(access.permCtx, productionId, node.assetId, listable ? "create" : "delete")
+      && await hasEffectiveGrant(actor, productionId, "production", "*", "mounts", "create");
     if (!permitted) return Response.json({ error: "权限不足" }, { status: 403 });
     await setNodeListable(nodeId, productionId, listable);
     if (!movingPosition) return Response.json({ node: await getNode(nodeId, productionId) });
@@ -63,8 +62,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (!await canEditWiki(actor, productionId, node.wikiId))
       return Response.json({ error: "权限不足" }, { status: 403 });
   } else if (node.kind === "asset" && node.assetId) {
-    if (!(actor.isAdmin || actor.isOwner
-        || await hasGrant(session.userId, productionId, "asset", node.assetId, "meta", "edit")))
+    if (!await hasEffectiveGrant(actor, productionId, "asset", node.assetId, "meta", "edit"))
       return Response.json({ error: "权限不足" }, { status: 403 });
   }
   // 位置面三道门

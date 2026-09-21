@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getCueListIdForCue } from "@/lib/db";
-import { hasGrant, hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { canAccessNode } from "@/lib/perm/grant-template";
 import { listWikiRefsForEntity, addManualWikiEntityLink, removeManualWikiEntityLink } from "@/lib/wiki/links";
 import { createWiki, deleteWiki } from "@/lib/wiki/content";
@@ -34,8 +34,7 @@ async function hostViewPermitted(
       // 实例上，先找宿主才知道门在哪；剧本域门是 production 级通配，无宿主可找）：
       // 传外剧组 id 也只能查到 *本* production 的边（listWikiRefsForEntity 按
       // production_id 过滤），返回的是本剧组 wiki 的标题级信息，观看者已过本域门
-      return permCtx.isAdmin || permCtx.isOwner
-        || await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view");
+      return await hasEffectiveGrant(permCtx, productionId, "script", "*", "blocks", "view");
     case "cue": {
       const cueListId = await getCueListIdForCue(entityId, productionId);
       if (!cueListId) return false;

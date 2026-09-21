@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { findProducers } from "@/lib/approval/approval-routing";
 import {
   listResourceApprovers,
@@ -31,12 +31,10 @@ async function gate(req: NextRequest, productionId: string) {
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) } as const;
 
   const { permCtx } = access;
-  const bypass = permCtx.isAdmin || permCtx.isOwner;
-  const canEdit = bypass
-    || (await findProducers(productionId)).includes(permCtx.userId)
-    || await hasGrant(permCtx.userId, productionId, "production", "*", "grants", "edit");
+  const canEdit = (await findProducers(productionId)).includes(permCtx.userId)
+    || await hasEffectiveGrant(permCtx, productionId, "production", "*", "grants", "edit");
   const canView = canEdit
-    || await hasGrant(permCtx.userId, productionId, "production", "*", "grants", "view");
+    || await hasEffectiveGrant(permCtx, productionId, "production", "*", "grants", "view");
 
   return { deny: null, userId: permCtx.userId, canEdit, canView, isArchived: access.isArchived } as const;
 }

@@ -4,7 +4,7 @@ import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset, updateAsset, deleteAsset } from "@/lib/asset/db";
 import { isAssetType } from "@/lib/asset/types";
 import { canViewAsset } from "@/lib/asset/perm";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { deleteR2Object } from "@/lib/r2";
 
 type Ctx = { params: Promise<{ id: string; assetId: string }> };
@@ -38,7 +38,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });
 
   // 批D：rename/change_type = meta@edit（创建者行集承担 own 语义）
-  if (!session.isAdmin && !permCtx?.isOwner && !await hasGrant(session.userId, id, "asset", assetId, "meta", "edit"))
+  if (!await hasEffectiveGrant(permCtx!, id, "asset", assetId, "meta", "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { assetType?: unknown; name?: unknown; fileName?: unknown };
@@ -67,7 +67,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });
   // 批D：delete = 实例 delete 行（创建者行集/delete_any 通配承担）
-  if (!session.isAdmin && !permCtx?.isOwner && !await hasGrant(session.userId, id, "asset", assetId, "*", "delete"))
+  if (!await hasEffectiveGrant(permCtx!, id, "asset", assetId, "*", "delete"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const { r2Keys } = await deleteAsset(assetId);

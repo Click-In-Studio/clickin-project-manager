@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { isGovernanceNodeKey } from "@/lib/perm/grant-template";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { requireProductionFeature } from "@/lib/account/plan";
@@ -16,7 +16,7 @@ async function requireManage(req: NextRequest, productionId: string) {
   if (!session) return { deny: Response.json({ error: "未登录" }, { status: 401 }), access: null };
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }), access: null };
-  if (!session.isAdmin && !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, productionId, "role", "*", "grants", "edit")))
+  if (!await hasEffectiveGrant(access.permCtx, productionId, "role", "*", "grants", "edit"))
     return { deny: Response.json({ error: "权限不足" }, { status: 403 }), access };
   if (access.isArchived) return { deny: Response.json({ error: "已归档" }, { status: 403 }), access };
   return { deny: null, access };

@@ -9,7 +9,7 @@
  */
 import { type NextRequest } from "next/server";
 import { requireGrantGate } from "@/lib/perm/api-guard";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getProductionAiUsage, getProductionMemberUsage } from "@/lib/agent/ai-quota";
 import { getPool } from "@/lib/pg";
 
@@ -45,9 +45,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   // `&& session` 是 TS 收窄不是防御：requireGrantGate 只在 deny 非空时才可能
   // 交出 session=null（未登录那条分支），deny 已经在上面 return 掉了。
-  if (req.nextUrl.searchParams.get("members") === "1" && session) {
-    const canMembers = isOwner || session.isAdmin
-      || (await hasGrant(session.userId, id, "ai", "*", "usage/members", "view"));
+  if (req.nextUrl.searchParams.get("members") === "1" && session && access) {
+    const canMembers = await hasEffectiveGrant(toActor(session, access.permCtx), id, "ai", "*", "usage/members", "view");
     if (canMembers) body.members = await getProductionMemberUsage(id);
   }
 

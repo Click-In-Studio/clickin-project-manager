@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import {
   listProductionMembers,
@@ -68,8 +68,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   // active → suspended 既可能是自助退出也可能是人事停用。
   const canEditMember =
     session.isAdmin ||
-    !!(access && (access.permCtx.isAdmin || access.permCtx.isOwner ||
-      await hasGrant(access.permCtx.userId, id, "member", "*", "roles", "edit")));
+    !!(access && await hasEffectiveGrant(access.permCtx, id, "member", "*", "roles", "edit"));
 
   if (roles !== undefined) {
     if (!canEditMember) return Response.json({ error: "权限不足" }, { status: 403 });

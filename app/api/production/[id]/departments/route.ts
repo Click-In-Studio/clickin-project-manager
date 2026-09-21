@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { hasEventDomainView } from "@/lib/ops/event-permissions";
-import { toActor, hasGrant } from "@/lib/perm/grant-check";
+import { toActor, hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName, getBossOpenIds } from "@/lib/db";
 import {
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "dept", "*", "*", "create")))
+  if (!await hasEffectiveGrant(permCtx, id, "dept", "*", "*", "create"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as {

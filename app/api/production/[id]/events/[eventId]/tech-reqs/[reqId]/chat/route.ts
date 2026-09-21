@@ -11,7 +11,7 @@
  */
 
 import { type NextRequest } from "next/server";
-import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import {
@@ -38,8 +38,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!techReq) return Response.json({ error: "需求不存在" }, { status: 404 });
   if (techReq.chatId) return Response.json({ error: "需求群已存在" }, { status: 409 });
 
-  const canManage = await hasEffectiveGrant(toActor(session, permCtx), productionId, "task", "*", "*", "delete")
-    || await hasGrant(session.userId, productionId, "task", reqId, "grants", "edit");
+  const actor = toActor(session, permCtx);
+  const canManage = await hasEffectiveGrant(actor, productionId, "task", "*", "*", "delete")
+    || await hasEffectiveGrant(actor, productionId, "task", reqId, "grants", "edit");
   if (!canManage) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const body = (await req.json()) as { action: "create" | "bind"; chatId?: string };

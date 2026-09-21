@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { filterVisibleAssets } from "@/lib/asset/perm";
-import { hasGrant, toActor } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { createAsset, listAssets, assetTreePaths, assetSizeStats, type AssetType } from "@/lib/asset/db";
 import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
 import { listNodeLibrary } from "@/lib/node/db";
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
   // 批D：上传 = asset/*@create（原为裸门，按名义键收紧，与批A GET 补门先例一致）
-  if (!session.isAdmin && !access.permCtx.isOwner && !await hasGrant(session.userId, id, "asset", "*", "*", "create"))
+  if (!await hasEffectiveGrant(access.permCtx, id, "asset", "*", "*", "create"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const ct = req.headers.get("content-type") ?? "";

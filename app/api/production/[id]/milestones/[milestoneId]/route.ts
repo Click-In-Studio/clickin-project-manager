@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getMilestone, updateMilestone, deleteMilestone } from "@/lib/db";
 
@@ -11,7 +11,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const { id: productionId, milestoneId } = await ctx.params;
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, productionId, "milestone", "*", "*", "edit"))) {
+  if (!access || !await hasEffectiveGrant(access.permCtx, productionId, "milestone", "*", "*", "edit")) {
     return Response.json({ error: "无权操作" }, { status: 403 });
   }
 
@@ -44,7 +44,7 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
 
   const { id: productionId, milestoneId } = await ctx.params;
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, productionId, "milestone", "*", "*", "delete"))) {
+  if (!access || !await hasEffectiveGrant(access.permCtx, productionId, "milestone", "*", "*", "delete")) {
     return Response.json({ error: "无权操作" }, { status: 403 });
   }
 

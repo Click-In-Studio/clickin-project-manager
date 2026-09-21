@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "项目不存在" }, { status: 404 });
-  if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/avatar", "edit"))) {
+  if (!await hasEffectiveGrant(access.permCtx, id, "production", "*", "meta/avatar", "edit")) {
     return Response.json({ error: "无权限" }, { status: 403 });
   }
 

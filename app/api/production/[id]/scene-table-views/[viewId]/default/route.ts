@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getPool } from "@/lib/pg";
 import { getCtx } from "../../ctx";
 
@@ -10,7 +10,7 @@ export async function PATCH(
   const { id, viewId } = await ctx.params;
   const { session, permCtx } = await getCtx(req, id);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!permCtx || !(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
+  if (!permCtx || !await hasEffectiveGrant(permCtx, id, "script", "*", "blocks", "view")) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
 

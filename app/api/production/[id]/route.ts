@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { loadProduction, getProductionPermissionContext, getActiveVersionId, updateProductionName, updateProductionMeta, updateProductionType, getVersion, deleteProduction } from "@/lib/db";
 import { getSession } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
@@ -65,7 +65,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   const jobs: Promise<void>[] = [];
 
   if (body.name !== undefined) {
-    if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/name", "edit"))) {
+    if (!await hasEffectiveGrant(access.permCtx, id, "production", "*", "meta/name", "edit")) {
       return Response.json({ error: "无权修改名称" }, { status: 403 });
     }
     if (!body.name.trim()) return Response.json({ error: "名称不能为空" }, { status: 400 });
@@ -73,14 +73,14 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   }
 
   if ("description" in body) {
-    if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/description", "edit"))) {
+    if (!await hasEffectiveGrant(access.permCtx, id, "production", "*", "meta/description", "edit")) {
       return Response.json({ error: "无权修改项目简介" }, { status: 403 });
     }
     jobs.push(updateProductionMeta(id, { description: body.description }));
   }
 
   if ("avatarUrl" in body) {
-    if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/avatar", "edit"))) {
+    if (!await hasEffectiveGrant(access.permCtx, id, "production", "*", "meta/avatar", "edit")) {
       return Response.json({ error: "无权修改项目头像" }, { status: 403 });
     }
     // 头像 key 每次上传换新（presign 路由）；提交平账 + 换掉后清旧对象。
@@ -98,21 +98,21 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   }
 
   if ("language" in body) {
-    if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/language", "edit"))) {
+    if (!await hasEffectiveGrant(access.permCtx, id, "production", "*", "meta/language", "edit")) {
       return Response.json({ error: "无权修改项目语言" }, { status: 403 });
     }
     jobs.push(updateProductionMeta(id, { language: body.language }));
   }
 
   if (typeof body.watermarkEnabled === "boolean") {
-    if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "config", "edit"))) {
+    if (!await hasEffectiveGrant(access.permCtx, id, "production", "*", "config", "edit")) {
       return Response.json({ error: "无权修改水印配置" }, { status: 403 });
     }
     jobs.push(updateProductionMeta(id, { watermarkEnabled: body.watermarkEnabled }));
   }
 
   if ("type" in body || "typeLabel" in body) {
-    if (!(access.permCtx.isOwner || (access.permCtx.isAdmin && access.permCtx.memberPermissions === null) || await hasGrant(access.permCtx.userId, id, "production", "*", "meta/type", "edit"))) {
+    if (!await hasEffectiveGrant(access.permCtx, id, "production", "*", "meta/type", "edit")) {
       return Response.json({ error: "无权修改项目类型" }, { status: 403 });
     }
     jobs.push(updateProductionType(id, body.type ?? null, body.typeLabel ?? null));

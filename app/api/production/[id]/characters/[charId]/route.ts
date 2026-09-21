@@ -5,7 +5,7 @@ import {
   getActiveVersionId, listCharactersByVersion, applyPatchToDB, getVersion,
 } from "@/lib/db";
 import { tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { rejectNonHeadWrite } from "@/lib/script/head-version";
 
 async function getCtx(req: NextRequest, productionId: string) {
@@ -32,7 +32,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!permCtx.isAdmin && !permCtx.isOwner && !await hasGrant(permCtx.userId, id, "character", charId, "*", "edit")) {
+  if (!await hasEffectiveGrant(permCtx, id, "character", charId, "*", "edit")) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 
@@ -108,7 +108,7 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext<"/api/producti
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!permCtx.isAdmin && !permCtx.isOwner && !await hasGrant(permCtx.userId, id, "character", charId, "*", "delete")) {
+  if (!await hasEffectiveGrant(permCtx, id, "character", charId, "*", "delete")) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 
