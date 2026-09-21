@@ -239,6 +239,8 @@ npm run dev
 
 - 改字体（换版本、加面、调切片区间）只改 `scripts/fonts/build-fonts.py`，然后跑 `python3 scripts/fonts/build-fonts.py`（需要 `pip install fonttools brotli`）——它会按钉死的 URL + sha256 下载源文件到 `scripts/fonts/src/`（gitignored），重切并重写 `app/fonts.css` 与 `public/fonts/manifest.json`。**不要手改 fonts.css**。
 - 字体栈的次序是分页一致性的一部分：首选自托管面 → 缺字落到同样自托管的 `SourceHanSerif` → 最后才是系统字体。`tests/script/fonts-self-hosted.test.ts` 守着这条与切片覆盖。
+- 切片按**字频分层**不按码位（#594）：`cjk-common`（GB2312 一级 3755 字）/ `cjk-rare`（二级 3008 字）各一片，其余 CJK 按 0x400 码位一片。两层的 `unicode-range` 故意写整段 `U+4E00-9FFF` 而不是几千段精确区间，靠 CSS Fonts 的「同 family 后声明的面优先、没字形落到前一条」——所以 fonts.css 里**块片在前、rare 次之、common 最后**，顺序是语义，护栏测试盯着。一页中文台词只拉 common 一片（思源 Medium 约 700 KB），二级字多拉 rare，更罕见的字才拉对应块片。
+- 弱网：`/fonts/*` 一年 `immutable`（url 带内容 sha 的 `?v=`），某片加载失败由 `components/print/font-retry.ts` 按同描述符重建 FontFace 重试三次（CSS 声明的面没有重试 API）。
 - 跨平台一致性：`scripts/print-consistency/check.ts` 在无头 Chromium 里打开一份夹具剧本的打印路由，与 `golden.json`（Mac 生成）比对页数与每页边界；CI 在 Linux 上跑。三份 golden：`golden.json`（居中角色名）、`golden-compact.json`（左栏角色名，`FIXTURE_TEXT_LAYOUT=compact GOLDEN_PATH=…`）、`golden-broadway.json`（百老汇模版，`FIXTURE_TEMPLATE_ID=broadway-musical@1 GOLDEN_PATH=…`）。改了分页 / 打印 / 字体相关文件而 golden 该变时，本地起 dev server 后 `BASE_URL=http://localhost:3000 npx tsx scripts/print-consistency/check.ts --update` 重新生成并提交。这两份 golden 也是**排版模版引擎的验收线**：legacy 模版的输出必须与它们一致（`docs/script-template-engine.md` §4）。
 - 打印就绪信号 `body[data-print-ready="1"]` 只在**字体全部就位之后的那次分页测量**完成时才出现（`components/print/use-fonts-settled.ts`）。无头出片等这个属性，不要 sleep。
 

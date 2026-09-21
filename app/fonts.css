@@ -1,5 +1,7 @@
 /* 由 scripts/fonts/build-fonts.py 生成——不要手改；改配置后重跑脚本。
  * 每片一条 @font-face + unicode-range：浏览器只下载页面真正用到的片。
+ * CJK 按字频分层：cjk-common（GB2312 一级）/ cjk-rare（二级）声明在块片之后、范围写整段
+ * U+4E00-9FFF——后声明的面优先，没字形才落到前面的块片；所以顺序不能动（#594）。
  * url 的 ?v= 是该片内容 sha256 前 8 位：/fonts/ 响应头是一年 immutable（next.config.ts），
  * 重切后靠这个参数让浏览器拿新片（#594）。
  * 面与许可说明见脚本头注。 */
@@ -87,7 +89,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/4e00.woff2?v=ff752d28') format('woff2');
+  src: url('/fonts/shs-medium/4e00.woff2?v=631ac013') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -95,7 +97,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/5200.woff2?v=e3863761') format('woff2');
+  src: url('/fonts/shs-medium/5200.woff2?v=6c5052c6') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -103,7 +105,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/5600.woff2?v=59eaa6fc') format('woff2');
+  src: url('/fonts/shs-medium/5600.woff2?v=fca36986') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -111,7 +113,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/5a00.woff2?v=580425d6') format('woff2');
+  src: url('/fonts/shs-medium/5a00.woff2?v=d72363ec') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -119,7 +121,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/5e00.woff2?v=de27075a') format('woff2');
+  src: url('/fonts/shs-medium/5e00.woff2?v=a82474d1') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -127,7 +129,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/6200.woff2?v=d6319017') format('woff2');
+  src: url('/fonts/shs-medium/6200.woff2?v=716316b1') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -135,7 +137,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/6600.woff2?v=44f92964') format('woff2');
+  src: url('/fonts/shs-medium/6600.woff2?v=e7f5bef9') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -143,7 +145,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/6a00.woff2?v=cc2cf05a') format('woff2');
+  src: url('/fonts/shs-medium/6a00.woff2?v=2bb1114b') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -151,7 +153,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/6e00.woff2?v=86c9a52a') format('woff2');
+  src: url('/fonts/shs-medium/6e00.woff2?v=e5758783') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -159,7 +161,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/7200.woff2?v=c8c5863c') format('woff2');
+  src: url('/fonts/shs-medium/7200.woff2?v=cccb5bde') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -167,7 +169,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/7600.woff2?v=79750304') format('woff2');
+  src: url('/fonts/shs-medium/7600.woff2?v=280bbf94') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -175,7 +177,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/7a00.woff2?v=0fdb135d') format('woff2');
+  src: url('/fonts/shs-medium/7a00.woff2?v=52868bff') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -183,7 +185,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/7e00.woff2?v=7b67da56') format('woff2');
+  src: url('/fonts/shs-medium/7e00.woff2?v=34d22e17') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -191,7 +193,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/8200.woff2?v=d6b9fd53') format('woff2');
+  src: url('/fonts/shs-medium/8200.woff2?v=18ee280e') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -199,7 +201,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/8600.woff2?v=3a4169da') format('woff2');
+  src: url('/fonts/shs-medium/8600.woff2?v=f5fd22bd') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -207,7 +209,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/8a00.woff2?v=46a31810') format('woff2');
+  src: url('/fonts/shs-medium/8a00.woff2?v=88797e14') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -215,7 +217,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/8e00.woff2?v=6f3451a2') format('woff2');
+  src: url('/fonts/shs-medium/8e00.woff2?v=68b34b8f') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -223,7 +225,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/9200.woff2?v=17bf9b10') format('woff2');
+  src: url('/fonts/shs-medium/9200.woff2?v=5079e608') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -231,7 +233,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/9600.woff2?v=cc3ad150') format('woff2');
+  src: url('/fonts/shs-medium/9600.woff2?v=a6f77b94') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -239,7 +241,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/9a00.woff2?v=32a6823d') format('woff2');
+  src: url('/fonts/shs-medium/9a00.woff2?v=27e895aa') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -247,7 +249,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-medium/9e00.woff2?v=faeb91b3') format('woff2');
+  src: url('/fonts/shs-medium/9e00.woff2?v=090b727a') format('woff2');
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -292,6 +294,24 @@
   font-style: normal;
   font-display: swap;
   unicode-range: U+20000-2FFFF;
+}
+/* cjk-rare.woff2 · GB2312 二级 3008 字 */
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/cjk-rare.woff2?v=f0da4bb2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4E00-9FFF;
+}
+/* cjk-common.woff2 · GB2312 一级 3755 字 */
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-medium/cjk-common.woff2?v=5cc53306') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4E00-9FFF;
 }
 
 /* SourceHanSerif · 思源宋体 CN Bold · 角色名 / 加粗 */
@@ -377,7 +397,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/4e00.woff2?v=dfd1ba90') format('woff2');
+  src: url('/fonts/shs-bold/4e00.woff2?v=3a8d40e5') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -385,7 +405,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/5200.woff2?v=0f90047b') format('woff2');
+  src: url('/fonts/shs-bold/5200.woff2?v=4371c1be') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -393,7 +413,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/5600.woff2?v=1541a0c3') format('woff2');
+  src: url('/fonts/shs-bold/5600.woff2?v=37c12ffe') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -401,7 +421,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/5a00.woff2?v=39eaf2ba') format('woff2');
+  src: url('/fonts/shs-bold/5a00.woff2?v=72e2ff11') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -409,7 +429,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/5e00.woff2?v=f657ccc3') format('woff2');
+  src: url('/fonts/shs-bold/5e00.woff2?v=51dc033b') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -417,7 +437,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/6200.woff2?v=ae892952') format('woff2');
+  src: url('/fonts/shs-bold/6200.woff2?v=672c0103') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -425,7 +445,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/6600.woff2?v=b0b2cc64') format('woff2');
+  src: url('/fonts/shs-bold/6600.woff2?v=a1479109') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -433,7 +453,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/6a00.woff2?v=d1bbee8b') format('woff2');
+  src: url('/fonts/shs-bold/6a00.woff2?v=e1b34a05') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -441,7 +461,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/6e00.woff2?v=85814297') format('woff2');
+  src: url('/fonts/shs-bold/6e00.woff2?v=402b6de6') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -449,7 +469,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/7200.woff2?v=3f440a2c') format('woff2');
+  src: url('/fonts/shs-bold/7200.woff2?v=9eb8c7ff') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -457,7 +477,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/7600.woff2?v=fd5149b9') format('woff2');
+  src: url('/fonts/shs-bold/7600.woff2?v=6eee2caf') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -465,7 +485,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/7a00.woff2?v=4b47689b') format('woff2');
+  src: url('/fonts/shs-bold/7a00.woff2?v=ef283c1f') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -473,7 +493,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/7e00.woff2?v=ac4bd47e') format('woff2');
+  src: url('/fonts/shs-bold/7e00.woff2?v=3de4c5d9') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -481,7 +501,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/8200.woff2?v=90fa65d6') format('woff2');
+  src: url('/fonts/shs-bold/8200.woff2?v=53976d84') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -489,7 +509,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/8600.woff2?v=c9b65847') format('woff2');
+  src: url('/fonts/shs-bold/8600.woff2?v=6b536770') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -497,7 +517,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/8a00.woff2?v=56267a71') format('woff2');
+  src: url('/fonts/shs-bold/8a00.woff2?v=8a71f83c') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -505,7 +525,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/8e00.woff2?v=8e4f867a') format('woff2');
+  src: url('/fonts/shs-bold/8e00.woff2?v=6f2f675a') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -513,7 +533,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/9200.woff2?v=2c738f6c') format('woff2');
+  src: url('/fonts/shs-bold/9200.woff2?v=37b9d8c8') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -521,7 +541,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/9600.woff2?v=b4e64589') format('woff2');
+  src: url('/fonts/shs-bold/9600.woff2?v=079b0f92') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -529,7 +549,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/9a00.woff2?v=c5459ba2') format('woff2');
+  src: url('/fonts/shs-bold/9a00.woff2?v=235d431f') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -537,7 +557,7 @@
 }
 @font-face {
   font-family: 'SourceHanSerif';
-  src: url('/fonts/shs-bold/9e00.woff2?v=4d68b600') format('woff2');
+  src: url('/fonts/shs-bold/9e00.woff2?v=7735eb33') format('woff2');
   font-weight: 700 900;
   font-style: normal;
   font-display: swap;
@@ -590,6 +610,24 @@
   font-style: normal;
   font-display: swap;
   unicode-range: U+20000-2FFFF;
+}
+/* cjk-rare.woff2 · GB2312 二级 3008 字 */
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/cjk-rare.woff2?v=ef4dd8a7') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4E00-9FFF;
+}
+/* cjk-common.woff2 · GB2312 一级 3755 字 */
+@font-face {
+  font-family: 'SourceHanSerif';
+  src: url('/fonts/shs-bold/cjk-common.woff2?v=d33ddbea') format('woff2');
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4E00-9FFF;
 }
 
 /* LXGWWenKai · 霞鹜文楷 Regular v1.522 · 舞台指示（斜体由浏览器合成） */
@@ -675,7 +713,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/4e00.woff2?v=9fdfdb21') format('woff2');
+  src: url('/fonts/lxgw-regular/4e00.woff2?v=f2763763') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -683,7 +721,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/5200.woff2?v=b5c8786d') format('woff2');
+  src: url('/fonts/lxgw-regular/5200.woff2?v=79dcbaa7') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -691,7 +729,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/5600.woff2?v=00123bf5') format('woff2');
+  src: url('/fonts/lxgw-regular/5600.woff2?v=951fd5fc') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -699,7 +737,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/5a00.woff2?v=c05e3546') format('woff2');
+  src: url('/fonts/lxgw-regular/5a00.woff2?v=e5cd9634') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -707,7 +745,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/5e00.woff2?v=9619acf5') format('woff2');
+  src: url('/fonts/lxgw-regular/5e00.woff2?v=3484a0ae') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -715,7 +753,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/6200.woff2?v=b5084c97') format('woff2');
+  src: url('/fonts/lxgw-regular/6200.woff2?v=190ec735') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -723,7 +761,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/6600.woff2?v=41540717') format('woff2');
+  src: url('/fonts/lxgw-regular/6600.woff2?v=fd369f0c') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -731,7 +769,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/6a00.woff2?v=f1243d22') format('woff2');
+  src: url('/fonts/lxgw-regular/6a00.woff2?v=067e7fa1') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -739,7 +777,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/6e00.woff2?v=a1df8ba0') format('woff2');
+  src: url('/fonts/lxgw-regular/6e00.woff2?v=4ca199a6') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -747,7 +785,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/7200.woff2?v=01956264') format('woff2');
+  src: url('/fonts/lxgw-regular/7200.woff2?v=f74eed96') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -755,7 +793,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/7600.woff2?v=b55393de') format('woff2');
+  src: url('/fonts/lxgw-regular/7600.woff2?v=2220d2a4') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -763,7 +801,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/7a00.woff2?v=2d6d5776') format('woff2');
+  src: url('/fonts/lxgw-regular/7a00.woff2?v=922c1f03') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -771,7 +809,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/7e00.woff2?v=912bf5fb') format('woff2');
+  src: url('/fonts/lxgw-regular/7e00.woff2?v=083ab0e7') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -779,7 +817,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/8200.woff2?v=ef4aa3b0') format('woff2');
+  src: url('/fonts/lxgw-regular/8200.woff2?v=27e88276') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -787,7 +825,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/8600.woff2?v=b398c259') format('woff2');
+  src: url('/fonts/lxgw-regular/8600.woff2?v=497e8c20') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -795,7 +833,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/8a00.woff2?v=ea5b515f') format('woff2');
+  src: url('/fonts/lxgw-regular/8a00.woff2?v=c00abee7') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -803,7 +841,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/8e00.woff2?v=59b51d99') format('woff2');
+  src: url('/fonts/lxgw-regular/8e00.woff2?v=c011ba63') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -811,7 +849,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/9200.woff2?v=248d6e63') format('woff2');
+  src: url('/fonts/lxgw-regular/9200.woff2?v=a728128f') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -819,7 +857,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/9600.woff2?v=cab2d289') format('woff2');
+  src: url('/fonts/lxgw-regular/9600.woff2?v=77bbc47e') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -827,7 +865,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/9a00.woff2?v=f4fd84c7') format('woff2');
+  src: url('/fonts/lxgw-regular/9a00.woff2?v=5d2d7f5c') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -835,7 +873,7 @@
 }
 @font-face {
   font-family: 'LXGWWenKai';
-  src: url('/fonts/lxgw-regular/9e00.woff2?v=a409f62d') format('woff2');
+  src: url('/fonts/lxgw-regular/9e00.woff2?v=456af3b6') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -896,6 +934,24 @@
   font-style: normal;
   font-display: swap;
   unicode-range: U+30000-3FFFF;
+}
+/* cjk-rare.woff2 · GB2312 二级 3008 字 */
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/cjk-rare.woff2?v=302e07f0') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4E00-9FFF;
+}
+/* cjk-common.woff2 · GB2312 一级 3755 字 */
+@font-face {
+  font-family: 'LXGWWenKai';
+  src: url('/fonts/lxgw-regular/cjk-common.woff2?v=68d5629d') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4E00-9FFF;
 }
 
 /* ZhuqueFangsong · 朱雀仿宋 Regular v0.212 · 歌词（加粗由浏览器合成） */
@@ -981,7 +1037,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/4e00.woff2?v=442389e2') format('woff2');
+  src: url('/fonts/zhuque-regular/4e00.woff2?v=57ea9b50') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -989,7 +1045,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/5200.woff2?v=78e0b34d') format('woff2');
+  src: url('/fonts/zhuque-regular/5200.woff2?v=6ea073f2') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -997,7 +1053,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/5600.woff2?v=c3ccbfe4') format('woff2');
+  src: url('/fonts/zhuque-regular/5600.woff2?v=14cee0a0') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1005,7 +1061,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/5a00.woff2?v=ccb9dc8d') format('woff2');
+  src: url('/fonts/zhuque-regular/5a00.woff2?v=6d0fa781') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1013,7 +1069,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/5e00.woff2?v=612301fa') format('woff2');
+  src: url('/fonts/zhuque-regular/5e00.woff2?v=2928d11f') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1021,7 +1077,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/6200.woff2?v=63e1e69f') format('woff2');
+  src: url('/fonts/zhuque-regular/6200.woff2?v=6824bd72') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1029,7 +1085,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/6600.woff2?v=b4042634') format('woff2');
+  src: url('/fonts/zhuque-regular/6600.woff2?v=c00179fe') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1037,7 +1093,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/6a00.woff2?v=41bc93f9') format('woff2');
+  src: url('/fonts/zhuque-regular/6a00.woff2?v=bc058ea9') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1045,7 +1101,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/6e00.woff2?v=be345b56') format('woff2');
+  src: url('/fonts/zhuque-regular/6e00.woff2?v=9fb1bca5') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1053,7 +1109,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/7200.woff2?v=277ece44') format('woff2');
+  src: url('/fonts/zhuque-regular/7200.woff2?v=d7f23abd') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1061,7 +1117,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/7600.woff2?v=e228186f') format('woff2');
+  src: url('/fonts/zhuque-regular/7600.woff2?v=0f1b8c4f') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1069,7 +1125,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/7a00.woff2?v=ee85b2a2') format('woff2');
+  src: url('/fonts/zhuque-regular/7a00.woff2?v=5ffa898a') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1077,7 +1133,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/7e00.woff2?v=acc19b62') format('woff2');
+  src: url('/fonts/zhuque-regular/7e00.woff2?v=83b36b39') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1085,7 +1141,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/8200.woff2?v=0f7df7f1') format('woff2');
+  src: url('/fonts/zhuque-regular/8200.woff2?v=8d590395') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1093,7 +1149,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/8600.woff2?v=f4e47ab6') format('woff2');
+  src: url('/fonts/zhuque-regular/8600.woff2?v=0cf0d3e2') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1101,7 +1157,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/8a00.woff2?v=984e6629') format('woff2');
+  src: url('/fonts/zhuque-regular/8a00.woff2?v=87952aec') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1109,7 +1165,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/8e00.woff2?v=6eb7a8b4') format('woff2');
+  src: url('/fonts/zhuque-regular/8e00.woff2?v=70d45675') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1117,7 +1173,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/9200.woff2?v=cac81cdc') format('woff2');
+  src: url('/fonts/zhuque-regular/9200.woff2?v=eb74dda7') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1125,7 +1181,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/9600.woff2?v=de715407') format('woff2');
+  src: url('/fonts/zhuque-regular/9600.woff2?v=58404245') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1133,7 +1189,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/9a00.woff2?v=70b2a1dc') format('woff2');
+  src: url('/fonts/zhuque-regular/9a00.woff2?v=ff50bacd') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1141,7 +1197,7 @@
 }
 @font-face {
   font-family: 'ZhuqueFangsong';
-  src: url('/fonts/zhuque-regular/9e00.woff2?v=9125abd4') format('woff2');
+  src: url('/fonts/zhuque-regular/9e00.woff2?v=fc821a6a') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1178,4 +1234,22 @@
   font-style: normal;
   font-display: swap;
   unicode-range: U+20000-2FFFF;
+}
+/* cjk-rare.woff2 · GB2312 二级 3008 字 */
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/cjk-rare.woff2?v=98c9a666') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4E00-9FFF;
+}
+/* cjk-common.woff2 · GB2312 一级 3755 字 */
+@font-face {
+  font-family: 'ZhuqueFangsong';
+  src: url('/fonts/zhuque-regular/cjk-common.woff2?v=465b1219') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+4E00-9FFF;
 }

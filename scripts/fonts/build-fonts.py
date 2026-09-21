@@ -6,6 +6,16 @@
 app/fonts.css（每片一条 @font-face）。浏览器只下载页面真正用到的片，首屏不必
 等 8MB / 16MB 的整包。
 
+切法（#594 D）：CJK 统一表意文字按**字频分层**而不是按码位——
+  · cjk-common  GB2312 一级 3755 字，一片；一页中文台词几乎只碰它
+  · cjk-rare    GB2312 二级 3008 字，一片
+  · 其余（GB2312 外的 CJK）仍按每 0x400 码位一片
+两层字频片的 unicode-range 都写成整段 U+4E00-9FFF，而不是几千段精确区间：
+CSS Fonts 规定同 family 里后声明的面优先，面里没这个字形就落到前一个声明的面。
+所以 CSS 里按「块片 → rare → common」顺序声明，浏览器碰到任何 CJK 字先拉 common
+（反正每页都要），常用字到此为止；二级字再拉 rare；更罕见的字才拉那一块的块片。
+Chrome / WebKit 实测都按这个走（见 PR #594 D）。
+
 为什么要自托管楷体与歌词字体：`.stage-inline`（行内舞台指示）内嵌在对白块里，
 字体不同 → 拉丁字母 / 标点的进宽不同 → 换行点不同 → 块高不同 → 分页不同。
 原先楷体走 KaiTi（Win）/ STKaiti（Mac）/ Linux 无，三个平台三种字宽；歌词的
@@ -110,11 +120,35 @@ FACES = [
          "朱雀仿宋 Regular v0.212 · 歌词（加粗由浏览器合成）"),
 ]
 
-# 切片：每片一个 unicode 区间。CJK 统一表意文字每 0x400（1024 码位）一片，
-# 一片约 75–190KB；其余按 Unicode 块归并。区间只是「可能包含」——某字体在该区间
-# 没字形的片会被跳过，不生成 @font-face。
+# 切片：每片一个 unicode 区间。CJK 统一表意文字里 GB2312 之外的字每 0x400（1024 码位）
+# 一片；其余按 Unicode 块归并。区间只是「可能包含」——某字体在该区间没字形的片会被
+# 跳过，不生成 @font-face。
 def _chunks(start: int, end: int, step: int) -> list[tuple[int, int]]:
     return [(a, min(a + step - 1, end)) for a in range(start, end + 1, step)]
+
+
+def _gb2312(rows: range) -> frozenset[int]:
+    """GB2312 指定区（行）里的全部汉字码位。一级 B0–D7（3755 字，按拼音序），二级 D8–F7（3008 字）。"""
+    out: set[int] = set()
+    for row in rows:
+        for col in range(0xA1, 0xFF):
+            try:
+                out.add(ord(bytes([row, col]).decode("gb2312")))
+            except UnicodeDecodeError:
+                pass
+    return frozenset(out)
+
+
+CJK_START, CJK_END = 0x4E00, 0x9FFF
+GB2312_L1 = _gb2312(range(0xB0, 0xD8))
+GB2312_L2 = _gb2312(range(0xD8, 0xF8))
+assert len(GB2312_L1) == 3755 and len(GB2312_L2) == 3008, "Python gb2312 codec 枚举结果异常"
+
+# 字频层：(文件名, 码位集合, 说明)。CSS 里声明在所有块片**之后**、common 最后（见头注）。
+TIERS: list[tuple[str, frozenset[int], str]] = [
+    ("cjk-rare", GB2312_L2, "GB2312 二级 3008 字"),
+    ("cjk-common", GB2312_L1, "GB2312 一级 3755 字"),
+]
 
 
 RANGES: list[tuple[int, int]] = [
@@ -122,7 +156,7 @@ RANGES: list[tuple[int, int]] = [
     (0x0100, 0x2E7F),   # 其余拉丁 / 通用标点（…、—、“”）/ 货币 / 箭头 / 数学
     (0x2E80, 0x33FF),   # CJK 标点、部首、注音、假名、兼容符号
     *_chunks(0x3400, 0x4DBF, 0x0400),   # 扩展 A
-    *_chunks(0x4E00, 0x9FFF, 0x0400),   # 统一表意文字
+    *_chunks(CJK_START, CJK_END, 0x0400),   # 统一表意文字（GB2312 之外的部分，见 TIERS）
     (0xA000, 0xF8FF),   # 彝文、谚文、私用区（多数字体为空）
     (0xF900, 0xFAFF),   # 兼容表意文字
     (0xFB00, 0xFE2F),
@@ -178,7 +212,26 @@ def rename_family(font: TTFont, family: str, subfamily: str) -> None:
             rec.string = f"{ps};subset"
 
 
-def build_face(face: Face, src_path: Path, force: bool, previous: dict) -> list[dict]:
+def _subset_one(face: Face, src_path: Path, subfamily: str, present: list[int], out_path: Path) -> None:
+    options = subset.Options()
+    options.flavor = "woff2"
+    options.hinting = False
+    options.desubroutinize = True
+    options.recalc_timestamp = False
+    options.name_IDs = ["*"]
+    options.name_legacy = True
+    options.name_languages = ["*"]
+    font = subset.load_font(str(src_path), options)
+    subsetter = subset.Subsetter(options=options)
+    subsetter.populate(unicodes=present)
+    subsetter.subset(font)
+    if face.rename_family:
+        rename_family(font, face.rename_family, subfamily)
+    subset.save_font(font, str(out_path), options)
+    font.close()
+
+
+def build_face(face: Face, src_path: Path, force: bool, previous: dict) -> tuple[list[dict], str]:
     out_dir = OUT_DIR / face.out
     out_dir.mkdir(parents=True, exist_ok=True)
     base = TTFont(str(src_path), lazy=True)
@@ -189,35 +242,35 @@ def build_face(face: Face, src_path: Path, force: bool, previous: dict) -> list[
     codepoints = sorted(cmap)
     src_digest = sha256_of(src_path)
     prev_chunks = {c["file"]: c for c in previous.get("chunks", [])} if previous.get("source_sha256") == src_digest else {}
-    chunks: list[dict] = []
+    tiered = frozenset().union(*(cps for _, cps, _ in TIERS))
+
+    # 计划：块片在前、字频层在后（= CSS 声明顺序）
+    plan: list[tuple[str, str, list[int], str]] = []  # (file, css range, codepoints, note)
     for start, end in RANGES:
-        present = [cp for cp in codepoints if start <= cp <= end]
-        if not present:
-            continue
-        file_name = f"{start:04x}.woff2"
+        present = [cp for cp in codepoints if start <= cp <= end and cp not in tiered]
+        if present:
+            plan.append((f"{start:04x}.woff2", f"U+{start:04X}-{end:04X}", present, ""))
+    for name, cps, note in TIERS:
+        present = [cp for cp in codepoints if cp in cps]
+        if present:
+            plan.append((f"{name}.woff2", f"U+{CJK_START:04X}-{CJK_END:04X}", present, note))
+
+    chunks: list[dict] = []
+    for file_name, css_range, present, note in plan:
         out_path = out_dir / file_name
-        entry = {"file": file_name, "range": f"U+{start:04X}-{end:04X}", "glyphs": len(present)}
-        if not force and out_path.exists() and file_name in prev_chunks:
+        # 增量键：源文件 sha（上面已比过）+ 这一片的码位集合。切法一变（比如 GB2312 从块片里
+        # 抠掉）码位集合就变，旧片不能复用。
+        cp_digest = hashlib.sha256(",".join(map(str, present)).encode()).hexdigest()
+        entry = {"file": file_name, "range": css_range, "glyphs": len(present), "codepoints_sha256": cp_digest}
+        if note:
+            entry["note"] = note
+        prev = prev_chunks.get(file_name)
+        if not force and out_path.exists() and prev and prev.get("codepoints_sha256") == cp_digest:
             entry["bytes"] = out_path.stat().st_size
             entry["sha256"] = sha256_of(out_path)
             chunks.append(entry)
             continue
-        options = subset.Options()
-        options.flavor = "woff2"
-        options.hinting = False
-        options.desubroutinize = True
-        options.recalc_timestamp = False
-        options.name_IDs = ["*"]
-        options.name_legacy = True
-        options.name_languages = ["*"]
-        font = subset.load_font(str(src_path), options)
-        subsetter = subset.Subsetter(options=options)
-        subsetter.populate(unicodes=present)
-        subsetter.subset(font)
-        if face.rename_family:
-            rename_family(font, face.rename_family, subfamily)
-        subset.save_font(font, str(out_path), options)
-        font.close()
+        _subset_one(face, src_path, subfamily, present, out_path)
         entry["bytes"] = out_path.stat().st_size
         entry["sha256"] = sha256_of(out_path)
         chunks.append(entry)
@@ -235,6 +288,8 @@ def write_css(manifest: dict) -> None:
     lines = [
         "/* 由 scripts/fonts/build-fonts.py 生成——不要手改；改配置后重跑脚本。",
         " * 每片一条 @font-face + unicode-range：浏览器只下载页面真正用到的片。",
+        " * CJK 按字频分层：cjk-common（GB2312 一级）/ cjk-rare（二级）声明在块片之后、范围写整段",
+        " * U+4E00-9FFF——后声明的面优先，没字形才落到前面的块片；所以顺序不能动（#594）。",
         " * url 的 ?v= 是该片内容 sha256 前 8 位：/fonts/ 响应头是一年 immutable（next.config.ts），",
         " * 重切后靠这个参数让浏览器拿新片（#594）。",
         " * 面与许可说明见脚本头注。 */",
@@ -244,6 +299,8 @@ def write_css(manifest: dict) -> None:
         entry = manifest["faces"][face.out]
         lines.append(f"/* {face.css_family} · {face.note} */")
         for chunk in entry["chunks"]:
+            if chunk.get("note"):
+                lines.append(f"/* {chunk['file']} · {chunk['note']} */")
             lines.append("@font-face {")
             lines.append(f"  font-family: '{face.css_family}';")
             lines.append(f"  src: url('/fonts/{face.out}/{chunk['file']}?v={chunk['sha256'][:8]}') format('woff2');")

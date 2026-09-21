@@ -14,6 +14,7 @@
           "file": "0000.woff2",
           "range": "U+0000-00FF",
           "glyphs": 191,
+          "codepoints_sha256": "abb846e071f3faf9ee732f31fc4cde1f596899af37b8f5c9e3e9b9c3778c20e1",
           "bytes": 16584,
           "sha256": "64e16c81afc1fca25536e04b99acbf52ffec0ef4602a3eed84249693c59db0e0"
         },
@@ -21,6 +22,7 @@
           "file": "0100.woff2",
           "range": "U+0100-2E7F",
           "glyphs": 914,
+          "codepoints_sha256": "c35aeff39da1ca7e83aec8ce5724d6b74e221afdcc5a11310c035c56dda0b8e9",
           "bytes": 55540,
           "sha256": "51f382ce2945cc52eca7fc1c9c54ffb3eb35aee454bfc0df10484bf29b14ac68"
         },
@@ -28,6 +30,7 @@
           "file": "2e80.woff2",
           "range": "U+2E80-33FF",
           "glyphs": 1334,
+          "codepoints_sha256": "86824afa80d29b58d4cc4928e81122789e71f0bfb4f467ca599591921ed4c803",
           "bytes": 194032,
           "sha256": "6496b58ce355e6628be1cb44bf55468679d814be462d048a0a0402c30a1d86c6"
         },
@@ -35,6 +38,7 @@
           "file": "3400.woff2",
           "range": "U+3400-37FF",
           "glyphs": 1024,
+          "codepoints_sha256": "172322bb333e05980135eeeddfe02d4dc568f5770144cbfd8a13dd84bcb3841f",
           "bytes": 224032,
           "sha256": "3431d1fafce91433f27b09554f6971fd4cd223855484f10210e7a5736368548d"
         },
@@ -42,6 +46,7 @@
           "file": "3800.woff2",
           "range": "U+3800-3BFF",
           "glyphs": 1024,
+          "codepoints_sha256": "a12ed4b510c3f8c697660a6a786515effd407be1ba2b0446982a61c5c77a9dd8",
           "bytes": 234404,
           "sha256": "8b74bacbb59d6d5c58f227fe91d35550a2f03ca0e9a6dacada697a2044d3c152"
         },
@@ -49,6 +54,7 @@
           "file": "3c00.woff2",
           "range": "U+3C00-3FFF",
           "glyphs": 1024,
+          "codepoints_sha256": "787de168c39761de7c6e629f3ecabecc6c34da7034d169b2aff0da7340b06160",
           "bytes": 255928,
           "sha256": "4f71e7c3ffc573ca4efc27f9f841433417dc3b2f7c674bb570cf9a443b25883f"
         },
@@ -56,6 +62,7 @@
           "file": "4000.woff2",
           "range": "U+4000-43FF",
           "glyphs": 1024,
+          "codepoints_sha256": "1abcf967b73585a48b4e63b191a9e90129fae97d2d4759b1902fc6cbb7008776",
           "bytes": 246220,
           "sha256": "d421fa81cc01fae41f74f371d105e7db2b659426b4cb81f41e75185768bc245a"
         },
@@ -63,6 +70,7 @@
           "file": "4400.woff2",
           "range": "U+4400-47FF",
           "glyphs": 1024,
+          "codepoints_sha256": "003bee8e22c9bae966269d6db70a51a7bfc0a38be8e2bba33a637b4a64a51735",
           "bytes": 248992,
           "sha256": "13e70751f9670cb80d51c74a3db073b7f2db915e01306ca54b08140997bb2def"
         },
@@ -70,6 +78,7 @@
           "file": "4800.woff2",
           "range": "U+4800-4BFF",
           "glyphs": 1024,
+          "codepoints_sha256": "fa5788724a958e08f429303666d57694e354604b054886d0319fc89f6b46e569",
           "bytes": 264060,
           "sha256": "a2ff38b4ac5d45d474aecf7fe0eebf65e4f2ff5348ed3c59821f781b55c63ccb"
         },
@@ -77,160 +86,183 @@
           "file": "4c00.woff2",
           "range": "U+4C00-4DBF",
           "glyphs": 438,
+          "codepoints_sha256": "31d894c1482a832090c114f67d1f275ee87c464171065c3c877ca4f75c371c4d",
           "bytes": 137768,
           "sha256": "c696b7c896938a98848259dfec9b44b1e8034943b70126e5bafcd84874e7f320"
         },
         {
           "file": "4e00.woff2",
           "range": "U+4E00-51FF",
-          "glyphs": 1024,
-          "bytes": 180916,
-          "sha256": "ff752d284ff47453ed437b037c585394bc866f8227702af079ddc196bc5ab485"
+          "glyphs": 591,
+          "codepoints_sha256": "152e13eaab390cfc9fecfd68fc3b11bdd698accb4f1a549ea05e4566b3b1a2f9",
+          "bytes": 118640,
+          "sha256": "631ac01358bd992775d8dbbd59fa5f3407f9dabbfe395797fdbe6aa42ff6dd3a"
         },
         {
           "file": "5200.woff2",
           "range": "U+5200-55FF",
-          "glyphs": 1024,
-          "bytes": 185340,
-          "sha256": "e3863761474ff09e601862685849e4849166ff4155c16b8f9795f06df976dad0"
+          "glyphs": 545,
+          "codepoints_sha256": "9a507399db02e9c75d2eb08d5b6977c1a20b4b790526cbc41231c96bb46a9903",
+          "bytes": 109448,
+          "sha256": "6c5052c68b6de6a0d855e959f62989adfa347b912cd7f8872b64995d530b671a"
         },
         {
           "file": "5600.woff2",
           "range": "U+5600-59FF",
-          "glyphs": 1024,
-          "bytes": 220972,
-          "sha256": "59eaa6fc480ea406423b640efa72d583bc05a87ad152ebcd94c9e8a4009e71a8"
+          "glyphs": 696,
+          "codepoints_sha256": "dd403438286225457ca20ee4e712fb3a33d7294e72c2918cd82879a2a14f8de8",
+          "bytes": 160360,
+          "sha256": "fca36986393894e5518187fb0852abc6a31557421095f7a14088ad608f85cbdf"
         },
         {
           "file": "5a00.woff2",
           "range": "U+5A00-5DFF",
-          "glyphs": 1024,
-          "bytes": 224620,
-          "sha256": "580425d60a827460602199cf8287b27ccc7cd6b8e1b272b76dee5c7c000929e2"
+          "glyphs": 710,
+          "codepoints_sha256": "966127ee8b8062553fbf4427532f936d6eaeb87dccf21b68aec3fdb51b20d7c3",
+          "bytes": 166248,
+          "sha256": "d72363ec54732390635581b61f027a018a76f038d06ac647562d045339b8a81a"
         },
         {
           "file": "5e00.woff2",
           "range": "U+5E00-61FF",
-          "glyphs": 1024,
-          "bytes": 216220,
-          "sha256": "de27075ac56e0fa3478cadaef113c64ec062317c0aa948e620ee2f7b94e95e66"
+          "glyphs": 650,
+          "codepoints_sha256": "eff13c45f21f668cdb836447b487f07a12050ba3450d768aab82153453d370b6",
+          "bytes": 149348,
+          "sha256": "a82474d15c707e4d79c86cf8067f44ffb857a60147a2390c8fc4a2ce649b59ac"
         },
         {
           "file": "6200.woff2",
           "range": "U+6200-65FF",
-          "glyphs": 1024,
-          "bytes": 238368,
-          "sha256": "d631901791e987dd774a1ca1d772d74ecb80c8c08386c4540823ca6c760aae23"
+          "glyphs": 619,
+          "codepoints_sha256": "2f91eb9a26ad2ec5fde08ca08e65201a5f3deb5d7e38ce3156f00873a677f89e",
+          "bytes": 156428,
+          "sha256": "716316b1a21757874dec2f02d95930deea3c898436ce8d6d0e05f7c1056649ad"
         },
         {
           "file": "6600.woff2",
           "range": "U+6600-69FF",
-          "glyphs": 1024,
-          "bytes": 197760,
-          "sha256": "44f929646ec1d2c6ccad767bef640a745ef30328de9b115b209b5163ba8ec02a"
+          "glyphs": 675,
+          "codepoints_sha256": "ead5a1bb020304f0c1c312d27a5c638fc8ce752b4d764cb852bde47efa11b66c",
+          "bytes": 137764,
+          "sha256": "e7f5bef991bfed4d8696b1920de09c5991c4b9824773a4706ff51134a0faf250"
         },
         {
           "file": "6a00.woff2",
           "range": "U+6A00-6DFF",
-          "glyphs": 1024,
-          "bytes": 238584,
-          "sha256": "cc2cf05a647ed7c29a14cd4296f88ced53eb0c18c2dcfe1f4f53b1bf6546f3ba"
+          "glyphs": 676,
+          "codepoints_sha256": "2e39fa9bb13db879dc393e748e84d929b13f399e5277bbb148e92aa2ff58706f",
+          "bytes": 171956,
+          "sha256": "2bb1114ba8220eee626f17b4818067f61423bd76009b011bc3f98cc8376d1c00"
         },
         {
           "file": "6e00.woff2",
           "range": "U+6E00-71FF",
-          "glyphs": 1024,
-          "bytes": 263820,
-          "sha256": "86c9a52a6d3cb28d92d60a4db9b39002e4513de5093e4c47b91e562acbf72b68"
+          "glyphs": 765,
+          "codepoints_sha256": "661832c4623d278bc2a2452461246d28f962e3fbed975e9b4d6322bc65111b87",
+          "bytes": 204920,
+          "sha256": "e575878345cb99fbdea393430883609b4ff5f2470e670c05563326bb2fe76c6d"
         },
         {
           "file": "7200.woff2",
           "range": "U+7200-75FF",
-          "glyphs": 1024,
-          "bytes": 229636,
-          "sha256": "c8c5863c76988b1c8aef4cee5e3a402263dfeaeecc818244ed0063e02b1427fb"
+          "glyphs": 692,
+          "codepoints_sha256": "1801e58cfc6d5fd412cbf7ae419f00eb37944037f717d8be96f792cd1020d85f",
+          "bytes": 167608,
+          "sha256": "cccb5bde789facfda48d342a96ffd2b203b2d3a1e9906ef109c7dbf9bbc1f054"
         },
         {
           "file": "7600.woff2",
           "range": "U+7600-79FF",
-          "glyphs": 1024,
-          "bytes": 221880,
-          "sha256": "797503044e0d947fcf2b82b25747613792b84571de62e8d38d6fe1176950ecea"
+          "glyphs": 690,
+          "codepoints_sha256": "86e51e44b98b70f3bc73616f0df612bbf1f2ca8425433765820a93b4d3803395",
+          "bytes": 157960,
+          "sha256": "280bbf948ed84bfa0761e600a9c1e43387b533f9459e454bff1f32900474a816"
         },
         {
           "file": "7a00.woff2",
           "range": "U+7A00-7DFF",
-          "glyphs": 1024,
-          "bytes": 252292,
-          "sha256": "0fdb135d48c9d932e12e878c2fbdc0e272fd2b7582089e715d86523d43acce04"
+          "glyphs": 792,
+          "codepoints_sha256": "1cc52f52aec6db9ba44c657f9361ff0be073b0cb50d2aee4be84e3da3d60f4cf",
+          "bytes": 200548,
+          "sha256": "52868bffecfe836b80124652eab1fb2010ed61d6b8d24c08c79c5b97cc860c2f"
         },
         {
           "file": "7e00.woff2",
           "range": "U+7E00-81FF",
-          "glyphs": 1024,
-          "bytes": 248232,
-          "sha256": "7b67da56f2fe23379a1083965d9073d5039c7943e4cf35af82f3f2882722f640"
+          "glyphs": 605,
+          "codepoints_sha256": "92eccef306ad12f8b9c2a1244a1d6780d27e4cc7d2cb7fea4145c04571fcec0f",
+          "bytes": 159284,
+          "sha256": "34d22e174cf324d64f9996cc8d23958360ee53fe3a265e2797c363028e924cd2"
         },
         {
           "file": "8200.woff2",
           "range": "U+8200-85FF",
-          "glyphs": 1024,
-          "bytes": 223024,
-          "sha256": "d6b9fd53393b5acd65ac3c1d1bf2ee8f2f162c05ef04ae79f7f1864eebeea90c"
+          "glyphs": 643,
+          "codepoints_sha256": "9963765e9d29183a2bae9c164be18d45ce338a55b69effefcb9d14d20fac3a5f",
+          "bytes": 149628,
+          "sha256": "18ee280e611d66541c7dce69f276dfc82d08cbfafc6ddc9493fb98003bed0bee"
         },
         {
           "file": "8600.woff2",
           "range": "U+8600-89FF",
-          "glyphs": 1024,
-          "bytes": 261480,
-          "sha256": "3a4169da4f944bb13a0c30833112f3e9d98b1641e08c28e15a2bc02223130712"
+          "glyphs": 735,
+          "codepoints_sha256": "b89ba43de8e7b6ecf3880b872a2d6f3fafa4433ae1c0fe7c3cc0485b37c2378e",
+          "bytes": 196964,
+          "sha256": "f5fd22bd21ae9c48cdee15ffa3b521c6bf0d226b92075bdb801a5d76d649b56d"
         },
         {
           "file": "8a00.woff2",
           "range": "U+8A00-8DFF",
-          "glyphs": 1024,
-          "bytes": 222164,
-          "sha256": "46a318102e6830d4fbb407d5345666f57aa6b492dd384fa23fef29cbdf332d7c"
+          "glyphs": 721,
+          "codepoints_sha256": "69b57e4a00ca60fa5bcddf947e87804442ccea4fdb988280141bddf215722d12",
+          "bytes": 163704,
+          "sha256": "88797e14adc7c71ee3951989f155a3e92aeaf50eaa49f7f7d5e3bcd90f5d3af3"
         },
         {
           "file": "8e00.woff2",
           "range": "U+8E00-91FF",
-          "glyphs": 1024,
-          "bytes": 235172,
-          "sha256": "6f3451a24a76cd398cd40f7c8e8a3d2f1327a8839c2ed8833178169c195ff0ed"
+          "glyphs": 677,
+          "codepoints_sha256": "fa5ddd2f514b1c20b756a28fccc19dfd533df84fa56b1df1f469821a784a11d0",
+          "bytes": 163964,
+          "sha256": "68b34b8f817544d7e8f4549e8d704b3e34c5e6e7cfb936c8e103f1b497eca0a1"
         },
         {
           "file": "9200.woff2",
           "range": "U+9200-95FF",
-          "glyphs": 1024,
-          "bytes": 247632,
-          "sha256": "17bf9b10aff7fc2a7d091e1c6a374ed6e1b555d9d8dc6b063fafef1748f5743b"
+          "glyphs": 772,
+          "codepoints_sha256": "c15f3e935d832ab3d8e6977146d643886adced5b61e3eefe1558b10d5670f197",
+          "bytes": 193664,
+          "sha256": "5079e6086349c28ec23c11d131876e1b16fd658fa596c694fb68e5ebd1b49449"
         },
         {
           "file": "9600.woff2",
           "range": "U+9600-99FF",
-          "glyphs": 1024,
-          "bytes": 249092,
-          "sha256": "cc3ad150765dddf8779dedd3967b5933aa157e8b0cf838912c22f2231641710a"
+          "glyphs": 744,
+          "codepoints_sha256": "280ae900ed7345316ec32b4600bfa591fc05ade0c91100587dc859e7e698b95a",
+          "bytes": 190784,
+          "sha256": "a6f77b944902022ca2d0e469a5c85df00a0751c11497615dcf45bcff367e68f7"
         },
         {
           "file": "9a00.woff2",
           "range": "U+9A00-9DFF",
-          "glyphs": 1024,
-          "bytes": 272440,
-          "sha256": "32a6823d14976ddd9c4210ad25f61f700c93ef4d233448fc025e279ca6db279e"
+          "glyphs": 855,
+          "codepoints_sha256": "47d81f927e725ee7870c31701fb2931a1868bb35e59d8c29660fc1f2ffea7d34",
+          "bytes": 231276,
+          "sha256": "27e895aab0d38ac2aa02a3498e9f2eb5f63a14ed5ff86d2b981a65d1cbb91b90"
         },
         {
           "file": "9e00.woff2",
           "range": "U+9E00-9FFF",
-          "glyphs": 491,
-          "bytes": 153000,
-          "sha256": "faeb91b3f81bb5962dd936878d22fe2a5c1d1f405308930c49bf6dc8650abd88"
+          "glyphs": 355,
+          "codepoints_sha256": "085e4cfecfc24c2a42fd4605aebec1a9027d0283916b32587bea4ba50988535b",
+          "bytes": 117872,
+          "sha256": "090b727a76e181d4785265410458f2c6b212fd861081cb73162f889e3e84aabf"
         },
         {
           "file": "f900.woff2",
           "range": "U+F900-FAFF",
           "glyphs": 123,
+          "codepoints_sha256": "f784250922be664987138bd0b5044cfc7d7b0028be08ed06b8df847f498a2173",
           "bytes": 30504,
           "sha256": "3cf9bd24639ea733a535e73b046476cfb056bae6c06c0f289bd867b098aef2f0"
         },
@@ -238,6 +270,7 @@
           "file": "fb00.woff2",
           "range": "U+FB00-FE2F",
           "glyphs": 15,
+          "codepoints_sha256": "f85cc8d1123247619d68fb85d89e2a75de1041e6ec3fecddd0c954da89a6b447",
           "bytes": 2604,
           "sha256": "fef5b9c4f68de2104720d128be5b411759411b3518c5dc705ef7bfcd6e9db8da"
         },
@@ -245,6 +278,7 @@
           "file": "fe30.woff2",
           "range": "U+FE30-FFEF",
           "glyphs": 283,
+          "codepoints_sha256": "a6ef2ac9aeecb7c9a5333a385a694a1b1ae5f092cf42ce8f170804d1e73cde53",
           "bytes": 26264,
           "sha256": "e608a1a13bbc71a2ee194b85cde9ba9c63bf5f321a97123bd23aa18799988739"
         },
@@ -252,6 +286,7 @@
           "file": "10000.woff2",
           "range": "U+10000-1FFFF",
           "glyphs": 222,
+          "codepoints_sha256": "94c40c083de70a76ec71636b8ad1e0f4568abdaed51d54cf5c1b304103325b09",
           "bytes": 25396,
           "sha256": "27966039d6fe620cf91f2b16deb1c22942360165cee23b744215237314869cb3"
         },
@@ -259,11 +294,30 @@
           "file": "20000.woff2",
           "range": "U+20000-2FFFF",
           "glyphs": 212,
+          "codepoints_sha256": "99c12cc86b329b7a159fabce363887c04ce3bda66ef358cbecd23fc23f010240",
           "bytes": 54064,
           "sha256": "43de44a1301d060d95e61aeb8ff2b954c3ee315d2a5ceab44667bb4d34c9e311"
+        },
+        {
+          "file": "cjk-rare.woff2",
+          "range": "U+4E00-9FFF",
+          "glyphs": 3008,
+          "codepoints_sha256": "8f1078d234ca2fa698be14e7d63fa561ff1bce12b41b2ceef77485ce65604b33",
+          "note": "GB2312 二级 3008 字",
+          "bytes": 673696,
+          "sha256": "f0da4bb26e6cc073eee17a2e42da97cb6820861304d7ad250a569c847d3446f8"
+        },
+        {
+          "file": "cjk-common.woff2",
+          "range": "U+4E00-9FFF",
+          "glyphs": 3755,
+          "codepoints_sha256": "ce316e8f69238ae031acb9338b3aa3cc7de5ddb590ad0455bc224036f654cda9",
+          "note": "GB2312 一级 3755 字",
+          "bytes": 722520,
+          "sha256": "5cc533061204737d2d231f54447ab86199562fe2b1cd83693f519d50075c670e"
         }
       ],
-      "bytes": 6799036
+      "bytes": 6880976
     },
     "shs-bold": {
       "css_family": "SourceHanSerif",
@@ -278,6 +332,7 @@
           "file": "0000.woff2",
           "range": "U+0000-00FF",
           "glyphs": 191,
+          "codepoints_sha256": "abb846e071f3faf9ee732f31fc4cde1f596899af37b8f5c9e3e9b9c3778c20e1",
           "bytes": 17660,
           "sha256": "ad9ac561e1d501e8026d7dc002dabc72c1f8bc7d2be09e1e95c74041a4bcc545"
         },
@@ -285,6 +340,7 @@
           "file": "0100.woff2",
           "range": "U+0100-2E7F",
           "glyphs": 1170,
+          "codepoints_sha256": "4776dd62ffe8d6e0e0d9bf790c746b9da27b85b8b717b8d3dc48c10a93818a90",
           "bytes": 277488,
           "sha256": "e64cd57534ede2097206918303d1c51fa9c15a1b5f2987c38886fa085366349d"
         },
@@ -292,6 +348,7 @@
           "file": "2e80.woff2",
           "range": "U+2E80-33FF",
           "glyphs": 1334,
+          "codepoints_sha256": "86824afa80d29b58d4cc4928e81122789e71f0bfb4f467ca599591921ed4c803",
           "bytes": 218480,
           "sha256": "e9c78059555abc6991106476c4f4faab0f0ff92ecd2ddf2b98606ef8d75c6c29"
         },
@@ -299,6 +356,7 @@
           "file": "3400.woff2",
           "range": "U+3400-37FF",
           "glyphs": 1024,
+          "codepoints_sha256": "172322bb333e05980135eeeddfe02d4dc568f5770144cbfd8a13dd84bcb3841f",
           "bytes": 252412,
           "sha256": "8fa6c9a2ad9b49fd331a31c786b7206660a7b1e7456993d768aeb70745c77643"
         },
@@ -306,6 +364,7 @@
           "file": "3800.woff2",
           "range": "U+3800-3BFF",
           "glyphs": 1024,
+          "codepoints_sha256": "a12ed4b510c3f8c697660a6a786515effd407be1ba2b0446982a61c5c77a9dd8",
           "bytes": 271508,
           "sha256": "255358c309265f0020d699ce10b3cedc7cd55f23fdd54bd49018a66bae8a8d18"
         },
@@ -313,6 +372,7 @@
           "file": "3c00.woff2",
           "range": "U+3C00-3FFF",
           "glyphs": 1024,
+          "codepoints_sha256": "787de168c39761de7c6e629f3ecabecc6c34da7034d169b2aff0da7340b06160",
           "bytes": 283036,
           "sha256": "261233c4a2baccca9bfa5b61b80182c9ef00a2712a628a3e0e9bf9dc35a37eda"
         },
@@ -320,6 +380,7 @@
           "file": "4000.woff2",
           "range": "U+4000-43FF",
           "glyphs": 1024,
+          "codepoints_sha256": "1abcf967b73585a48b4e63b191a9e90129fae97d2d4759b1902fc6cbb7008776",
           "bytes": 275760,
           "sha256": "9b2ebfe56ab8e6b12664b3b9797a1a1694d7c62d54054b2e5078f7822b67df64"
         },
@@ -327,6 +388,7 @@
           "file": "4400.woff2",
           "range": "U+4400-47FF",
           "glyphs": 1024,
+          "codepoints_sha256": "003bee8e22c9bae966269d6db70a51a7bfc0a38be8e2bba33a637b4a64a51735",
           "bytes": 278608,
           "sha256": "954e6734fa3afcb8260f1fc7ec1c1f7002bdba46364e4797d3fa4817871f2c48"
         },
@@ -334,6 +396,7 @@
           "file": "4800.woff2",
           "range": "U+4800-4BFF",
           "glyphs": 1024,
+          "codepoints_sha256": "fa5788724a958e08f429303666d57694e354604b054886d0319fc89f6b46e569",
           "bytes": 291880,
           "sha256": "3a7a9fc8e5a9b1cb8f86ea2ff440f03c815ad93ed071bc60a49ce2b81751ac3d"
         },
@@ -341,160 +404,183 @@
           "file": "4c00.woff2",
           "range": "U+4C00-4DBF",
           "glyphs": 438,
+          "codepoints_sha256": "31d894c1482a832090c114f67d1f275ee87c464171065c3c877ca4f75c371c4d",
           "bytes": 152020,
           "sha256": "f140c44ebcd511fa43ccc20c00a7ff4d2597f6b678b14ad591e50a21201d064b"
         },
         {
           "file": "4e00.woff2",
           "range": "U+4E00-51FF",
-          "glyphs": 1024,
-          "bytes": 306512,
-          "sha256": "dfd1ba90c7648785eb0a4264e5072e2d38feb4d8d3791f11292fc24014af5a7e"
+          "glyphs": 591,
+          "codepoints_sha256": "152e13eaab390cfc9fecfd68fc3b11bdd698accb4f1a549ea05e4566b3b1a2f9",
+          "bytes": 201876,
+          "sha256": "3a8d40e598a8b6d7ed34703c412117cfd1b974455ca04e46ceb9a3eb141f4295"
         },
         {
           "file": "5200.woff2",
           "range": "U+5200-55FF",
-          "glyphs": 1024,
-          "bytes": 314380,
-          "sha256": "0f90047b2457f61a86256f79440287dae69a72bb59865a2055a8a0cc842cf1c0"
+          "glyphs": 545,
+          "codepoints_sha256": "9a507399db02e9c75d2eb08d5b6977c1a20b4b790526cbc41231c96bb46a9903",
+          "bytes": 185888,
+          "sha256": "4371c1be7c076a768434bfbd96e3b99174dfbdb2f8426652ef650f8667c5debd"
         },
         {
           "file": "5600.woff2",
           "range": "U+5600-59FF",
-          "glyphs": 1024,
-          "bytes": 421524,
-          "sha256": "1541a0c30415fb4a190b46c80ffd5de2d19105770f8dbfd67a7b6f958207384a"
+          "glyphs": 696,
+          "codepoints_sha256": "dd403438286225457ca20ee4e712fb3a33d7294e72c2918cd82879a2a14f8de8",
+          "bytes": 303856,
+          "sha256": "37c12ffeeca1d104316a5065f6dcb67eba38707f93f7a9ff9ca70a1bb78e6a91"
         },
         {
           "file": "5a00.woff2",
           "range": "U+5A00-5DFF",
-          "glyphs": 1024,
-          "bytes": 524600,
-          "sha256": "39eaf2bae57d4c7f58ac6a5c5737d6f6f420df39816e3c9939297d4c5aa4db2a"
+          "glyphs": 710,
+          "codepoints_sha256": "966127ee8b8062553fbf4427532f936d6eaeb87dccf21b68aec3fdb51b20d7c3",
+          "bytes": 395136,
+          "sha256": "72e2ff111d12e8262d421f328b42ef30b02f9caaafe0ea277702e82316638b67"
         },
         {
           "file": "5e00.woff2",
           "range": "U+5E00-61FF",
-          "glyphs": 1024,
-          "bytes": 426772,
-          "sha256": "f657ccc36ec5c96f06d74354b7e569609896fe121907cb7afaf1d9f91813c125"
+          "glyphs": 650,
+          "codepoints_sha256": "eff13c45f21f668cdb836447b487f07a12050ba3450d768aab82153453d370b6",
+          "bytes": 291596,
+          "sha256": "51dc033b6a39d8421d1107c0b89f8eedb5f150e3418bd9aaa024c1365a17ceda"
         },
         {
           "file": "6200.woff2",
           "range": "U+6200-65FF",
-          "glyphs": 1024,
-          "bytes": 441640,
-          "sha256": "ae892952011111daabf6d79ecd0bcc4f8d13bbcb0f831a741e4722287ce5414c"
+          "glyphs": 619,
+          "codepoints_sha256": "2f91eb9a26ad2ec5fde08ca08e65201a5f3deb5d7e38ce3156f00873a677f89e",
+          "bytes": 292100,
+          "sha256": "672c010391b9cad5cc25f5ea382f4c4287b1dd5ddddcf2b944fd0e29825f9408"
         },
         {
           "file": "6600.woff2",
           "range": "U+6600-69FF",
-          "glyphs": 1024,
-          "bytes": 356048,
-          "sha256": "b0b2cc642031042755193929490646b29242498028048ecd93c708e57ba0af93"
+          "glyphs": 675,
+          "codepoints_sha256": "ead5a1bb020304f0c1c312d27a5c638fc8ce752b4d764cb852bde47efa11b66c",
+          "bytes": 249560,
+          "sha256": "a14791094b47a2a01329d76a60cdc2259c3fc91aafca42bc0dea6588e44a53b5"
         },
         {
           "file": "6a00.woff2",
           "range": "U+6A00-6DFF",
-          "glyphs": 1024,
-          "bytes": 434020,
-          "sha256": "d1bbee8bdfebcdbec718b031f81080a209d92f05b737821d13653c9ceb72a2a0"
+          "glyphs": 676,
+          "codepoints_sha256": "2e39fa9bb13db879dc393e748e84d929b13f399e5277bbb148e92aa2ff58706f",
+          "bytes": 315900,
+          "sha256": "e1b34a05c0faab8501eb62dd1353ce7e5da33b28d4f1b62108d9a89171671859"
         },
         {
           "file": "6e00.woff2",
           "range": "U+6E00-71FF",
-          "glyphs": 1024,
-          "bytes": 522812,
-          "sha256": "8581429753d209b54447f0e3f8ee8e539c190b29e1fc923ee7123b365fef0d1e"
+          "glyphs": 765,
+          "codepoints_sha256": "661832c4623d278bc2a2452461246d28f962e3fbed975e9b4d6322bc65111b87",
+          "bytes": 407240,
+          "sha256": "402b6de688f0997daee830968e64881a5542d8c128ac9d6ff41a7d5eb62435ef"
         },
         {
           "file": "7200.woff2",
           "range": "U+7200-75FF",
-          "glyphs": 1024,
-          "bytes": 437792,
-          "sha256": "3f440a2c57eb793168c34dc9a2bf1c1d52763a541e80052cc617f2dfac63ea9d"
+          "glyphs": 692,
+          "codepoints_sha256": "1801e58cfc6d5fd412cbf7ae419f00eb37944037f717d8be96f792cd1020d85f",
+          "bytes": 324668,
+          "sha256": "9eb8c7ff150a72ebd1c1d74f25892fb02ade74b0b76d6b3fc76eb021575dbfeb"
         },
         {
           "file": "7600.woff2",
           "range": "U+7600-79FF",
-          "glyphs": 1024,
-          "bytes": 419336,
-          "sha256": "fd5149b9c3856d0f39380bc86f39e1a4e88422b40175e178b4c58bd04a560e80"
+          "glyphs": 690,
+          "codepoints_sha256": "86e51e44b98b70f3bc73616f0df612bbf1f2ca8425433765820a93b4d3803395",
+          "bytes": 297308,
+          "sha256": "6eee2caf100c455349e18fd0a33d5699712d5ee9a5dc327e14f94720ded85a5d"
         },
         {
           "file": "7a00.woff2",
           "range": "U+7A00-7DFF",
-          "glyphs": 1024,
-          "bytes": 556492,
-          "sha256": "4b47689b85a7b3a8fee98a5a81c13b808943f91897721a37ece5c48b68c01dd8"
+          "glyphs": 792,
+          "codepoints_sha256": "1cc52f52aec6db9ba44c657f9361ff0be073b0cb50d2aee4be84e3da3d60f4cf",
+          "bytes": 440844,
+          "sha256": "ef283c1fdd0592c66b52207becebddb7a47a82cdeda5ab624b3077ec25ccb2af"
         },
         {
           "file": "7e00.woff2",
           "range": "U+7E00-81FF",
-          "glyphs": 1024,
-          "bytes": 516408,
-          "sha256": "ac4bd47ee380ca735daff6c025cbaed99caaf4f57467528e9bb5454824fe7796"
+          "glyphs": 605,
+          "codepoints_sha256": "92eccef306ad12f8b9c2a1244a1d6780d27e4cc7d2cb7fea4145c04571fcec0f",
+          "bytes": 355680,
+          "sha256": "3de4c5d9026e36557902dd527d941b724bf10100d5ea97890f28ebc76ba5fdd6"
         },
         {
           "file": "8200.woff2",
           "range": "U+8200-85FF",
-          "glyphs": 1024,
-          "bytes": 516520,
-          "sha256": "90fa65d6038b4b66872d86d05a5b2510353d9535222b6d0f0f72c28b91b283ab"
+          "glyphs": 643,
+          "codepoints_sha256": "9963765e9d29183a2bae9c164be18d45ce338a55b69effefcb9d14d20fac3a5f",
+          "bytes": 346636,
+          "sha256": "53976d84215bd8d68cef9aee9267be13ef9c75a3b6c2a2012a0e03f373f5c4cc"
         },
         {
           "file": "8600.woff2",
           "range": "U+8600-89FF",
-          "glyphs": 1024,
-          "bytes": 529112,
-          "sha256": "c9b6584787bf314224dbc55c53eebb60c9674c76e39d67e50b0195ed56d2db95"
+          "glyphs": 735,
+          "codepoints_sha256": "b89ba43de8e7b6ecf3880b872a2d6f3fafa4433ae1c0fe7c3cc0485b37c2378e",
+          "bytes": 404160,
+          "sha256": "6b536770ff4492f51a332ae2950a1c13e1c24e48db27e98448404e0fe3671e04"
         },
         {
           "file": "8a00.woff2",
           "range": "U+8A00-8DFF",
-          "glyphs": 1024,
-          "bytes": 421628,
-          "sha256": "56267a71f806917128ae148764590faadfa88a571edcaa888dd9b5ab9c5885d3"
+          "glyphs": 721,
+          "codepoints_sha256": "69b57e4a00ca60fa5bcddf947e87804442ccea4fdb988280141bddf215722d12",
+          "bytes": 347228,
+          "sha256": "8a71f83ca56f13a6c860406beb93d4b16e938125383739bc6d1a17eeb57c9a49"
         },
         {
           "file": "8e00.woff2",
           "range": "U+8E00-91FF",
-          "glyphs": 1024,
-          "bytes": 483592,
-          "sha256": "8e4f867a2f6a6f52f527e793f2c9e931b4f82ae074299222927e4a952028cfff"
+          "glyphs": 677,
+          "codepoints_sha256": "fa5ddd2f514b1c20b756a28fccc19dfd533df84fa56b1df1f469821a784a11d0",
+          "bytes": 336656,
+          "sha256": "6f2f675a28199892e70809a8801077ff3d33bdce76850ed1f565eca2378fcdab"
         },
         {
           "file": "9200.woff2",
           "range": "U+9200-95FF",
-          "glyphs": 1024,
-          "bytes": 406296,
-          "sha256": "2c738f6c6fafe397d8cb7b60254b2e60221713e23e4c4f4ea60046c967bf93e6"
+          "glyphs": 772,
+          "codepoints_sha256": "c15f3e935d832ab3d8e6977146d643886adced5b61e3eefe1558b10d5670f197",
+          "bytes": 347160,
+          "sha256": "37b9d8c8dc7d2533ac3f4359d6bedd96998f5969527cebb0e3dc96b570901dc6"
         },
         {
           "file": "9600.woff2",
           "range": "U+9600-99FF",
-          "glyphs": 1024,
-          "bytes": 486940,
-          "sha256": "b4e645899ff42bba7af09a1109ec0993e027207b5f0a5b99a5bb6930e1da6b47"
+          "glyphs": 744,
+          "codepoints_sha256": "280ae900ed7345316ec32b4600bfa591fc05ade0c91100587dc859e7e698b95a",
+          "bytes": 388488,
+          "sha256": "079b0f92d340566bc0a10788b21b0ed3015d8256f65cca89c5e20a2dac3c32a1"
         },
         {
           "file": "9a00.woff2",
           "range": "U+9A00-9DFF",
-          "glyphs": 1024,
-          "bytes": 499412,
-          "sha256": "c5459ba21d1e7355a451c2fa664f546e92fb164eadb3ac565b996c6ab03a4f44"
+          "glyphs": 855,
+          "codepoints_sha256": "47d81f927e725ee7870c31701fb2931a1868bb35e59d8c29660fc1f2ffea7d34",
+          "bytes": 438576,
+          "sha256": "235d431fe2e3f51fdaf77b24455f7965e185f5220e420d79b3c63249fb3716ef"
         },
         {
           "file": "9e00.woff2",
           "range": "U+9E00-9FFF",
-          "glyphs": 491,
-          "bytes": 292728,
-          "sha256": "4d68b60086b18271f97f7a451abe9bd41d15dca095e0dd3746f6e3a31700ae5d"
+          "glyphs": 355,
+          "codepoints_sha256": "085e4cfecfc24c2a42fd4605aebec1a9027d0283916b32587bea4ba50988535b",
+          "bytes": 236520,
+          "sha256": "7735eb336bebc53131ff3c7cb4b1d85e138556c2fcfc395e14f96023109fa590"
         },
         {
           "file": "a000.woff2",
           "range": "U+A000-F8FF",
           "glyphs": 11273,
+          "codepoints_sha256": "95d00dc8b9f6ab7562c34eb4c1ec9c531ae1d748535962ebbb0be52e6667800b",
           "bytes": 1048608,
           "sha256": "8f6263e86c851a69b121627f5429528f9ad63b1da21bdc36ff36636af3466f25"
         },
@@ -502,6 +588,7 @@
           "file": "f900.woff2",
           "range": "U+F900-FAFF",
           "glyphs": 366,
+          "codepoints_sha256": "a2668c7ca63e322b8523c94ef089cddbc179d04f78e0a6f028afc34d0fd96c7c",
           "bytes": 110660,
           "sha256": "4990064addec88f9564da747cbd10668b6d9aa7786023e9bfb0719b8e96c9325"
         },
@@ -509,6 +596,7 @@
           "file": "fb00.woff2",
           "range": "U+FB00-FE2F",
           "glyphs": 15,
+          "codepoints_sha256": "f85cc8d1123247619d68fb85d89e2a75de1041e6ec3fecddd0c954da89a6b447",
           "bytes": 2664,
           "sha256": "7bc2a3ab9b53d94a18a4101b5c2576d7ba9b818cc5f10cc3411a8cce4351586e"
         },
@@ -516,6 +604,7 @@
           "file": "fe30.woff2",
           "range": "U+FE30-FFEF",
           "glyphs": 283,
+          "codepoints_sha256": "a6ef2ac9aeecb7c9a5333a385a694a1b1ae5f092cf42ce8f170804d1e73cde53",
           "bytes": 26932,
           "sha256": "a2ee5e7c621463abe107cefe28379f837d815f5b4dda6c6119a517eddbca2ac2"
         },
@@ -523,6 +612,7 @@
           "file": "10000.woff2",
           "range": "U+10000-1FFFF",
           "glyphs": 222,
+          "codepoints_sha256": "94c40c083de70a76ec71636b8ad1e0f4568abdaed51d54cf5c1b304103325b09",
           "bytes": 29572,
           "sha256": "b9690e1bfe62cb4df77edb91d5a160ff308e1d487a541242e587c99c3d7eb3d9"
         },
@@ -530,11 +620,30 @@
           "file": "20000.woff2",
           "range": "U+20000-2FFFF",
           "glyphs": 622,
+          "codepoints_sha256": "e0a6b06eadacd529f8f1b75dd652024e186b4de9f10415b75b86b3970ca5c223",
           "bytes": 160512,
           "sha256": "44f736e0d7494684e218b9fb0a3f92373f8557c4813dc1039a30e6179fadff99"
+        },
+        {
+          "file": "cjk-rare.woff2",
+          "range": "U+4E00-9FFF",
+          "glyphs": 3008,
+          "codepoints_sha256": "8f1078d234ca2fa698be14e7d63fa561ff1bce12b41b2ceef77485ce65604b33",
+          "note": "GB2312 二级 3008 字",
+          "bytes": 1235756,
+          "sha256": "ef4dd8a711693de820f4b867ef71c9e14387017de8209a024ed3478ae6135f41"
+        },
+        {
+          "file": "cjk-common.woff2",
+          "range": "U+4E00-9FFF",
+          "glyphs": 3755,
+          "codepoints_sha256": "ce316e8f69238ae031acb9338b3aa3cc7de5ddb590ad0455bc224036f654cda9",
+          "note": "GB2312 一级 3755 字",
+          "bytes": 1338032,
+          "sha256": "d33ddbeaae64c2eff63f07524d315e0c90753e115eaec81aa7c1d5fe2fdf6a1f"
         }
       ],
-      "bytes": 13012364
+      "bytes": 13178664
     },
     "lxgw-regular": {
       "css_family": "LXGWWenKai",
@@ -549,6 +658,7 @@
           "file": "0000.woff2",
           "range": "U+0000-00FF",
           "glyphs": 190,
+          "codepoints_sha256": "e155c16a9caf2f45f38bbb8bc656ae4c51ceee3795780bb5fbad5d30e0e36cfc",
           "bytes": 14856,
           "sha256": "ea48b9cb8a05885fc2929ac91f54157030ae01a1f555cfc2948a7c3fc822b687"
         },
@@ -556,6 +666,7 @@
           "file": "0100.woff2",
           "range": "U+0100-2E7F",
           "glyphs": 2380,
+          "codepoints_sha256": "edb4a6f505d0d103a41682c60c84ed2ad077c7b3de9dec027be2e4d83abb1c2e",
           "bytes": 114352,
           "sha256": "224413994efb6ba12c6a8b219fc5c194809458af663212b2d8c7c3e2b5c31a4f"
         },
@@ -563,6 +674,7 @@
           "file": "2e80.woff2",
           "range": "U+2E80-33FF",
           "glyphs": 1345,
+          "codepoints_sha256": "e201e2488cabd79bcbdfa1468013f47ac995216a161111a186abe6c5864caf5f",
           "bytes": 170132,
           "sha256": "e01980364d592b44a24b5f3b602c0133d26b093fcb80604e58c9a259f25f8561"
         },
@@ -570,6 +682,7 @@
           "file": "3400.woff2",
           "range": "U+3400-37FF",
           "glyphs": 1024,
+          "codepoints_sha256": "172322bb333e05980135eeeddfe02d4dc568f5770144cbfd8a13dd84bcb3841f",
           "bytes": 294768,
           "sha256": "e943b827b98a9f9a14ae0bee92b8612f63d442793021749e48e74c0bada8b773"
         },
@@ -577,6 +690,7 @@
           "file": "3800.woff2",
           "range": "U+3800-3BFF",
           "glyphs": 1024,
+          "codepoints_sha256": "a12ed4b510c3f8c697660a6a786515effd407be1ba2b0446982a61c5c77a9dd8",
           "bytes": 317308,
           "sha256": "d981f5872f0eed463f485c31451cb1a9947444b6acc4e2ac28cbe659be49d30b"
         },
@@ -584,6 +698,7 @@
           "file": "3c00.woff2",
           "range": "U+3C00-3FFF",
           "glyphs": 1024,
+          "codepoints_sha256": "787de168c39761de7c6e629f3ecabecc6c34da7034d169b2aff0da7340b06160",
           "bytes": 332900,
           "sha256": "99a5e56bb0039c785c763f2be5ae9de84869291b8c00d93961b1b4fb434b399f"
         },
@@ -591,6 +706,7 @@
           "file": "4000.woff2",
           "range": "U+4000-43FF",
           "glyphs": 1024,
+          "codepoints_sha256": "1abcf967b73585a48b4e63b191a9e90129fae97d2d4759b1902fc6cbb7008776",
           "bytes": 328448,
           "sha256": "24b875114a0a463a6d7f03f8536c431b4cefe6bfd914171e6e97b70d24d4ae10"
         },
@@ -598,6 +714,7 @@
           "file": "4400.woff2",
           "range": "U+4400-47FF",
           "glyphs": 1024,
+          "codepoints_sha256": "003bee8e22c9bae966269d6db70a51a7bfc0a38be8e2bba33a637b4a64a51735",
           "bytes": 346344,
           "sha256": "88485566d61d8c921e4aae6b715e15de9f694c5fb5839a11fa7bb6a63d76b37c"
         },
@@ -605,6 +722,7 @@
           "file": "4800.woff2",
           "range": "U+4800-4BFF",
           "glyphs": 1024,
+          "codepoints_sha256": "fa5788724a958e08f429303666d57694e354604b054886d0319fc89f6b46e569",
           "bytes": 374124,
           "sha256": "09d7f2230554b1fc5a22ae839d5f4dfdffaa37201b9eefbaf7618dc92bb040b4"
         },
@@ -612,160 +730,183 @@
           "file": "4c00.woff2",
           "range": "U+4C00-4DBF",
           "glyphs": 448,
+          "codepoints_sha256": "a19620cea9d1efcaa4c6f2c79a50ab9d13a1629d5a7387600f86aa8dee414b6b",
           "bytes": 188516,
           "sha256": "552b9a9221e3425e206f271fbc9ca4e627aad42fcd95b4202ea70560b1fef871"
         },
         {
           "file": "4e00.woff2",
           "range": "U+4E00-51FF",
-          "glyphs": 1024,
-          "bytes": 226964,
-          "sha256": "9fdfdb21e47778baa3157e1645e3bbbdb19a339a42f1afacfb92df729b303c51"
+          "glyphs": 591,
+          "codepoints_sha256": "152e13eaab390cfc9fecfd68fc3b11bdd698accb4f1a549ea05e4566b3b1a2f9",
+          "bytes": 151300,
+          "sha256": "f2763763abd2a591142e0f9ae7e25305234e8e18fd119d8091394c9c024a3292"
         },
         {
           "file": "5200.woff2",
           "range": "U+5200-55FF",
-          "glyphs": 1024,
-          "bytes": 230908,
-          "sha256": "b5c8786dae5c7613ea824412e4ba997df9ab71987667982da909101866a11564"
+          "glyphs": 545,
+          "codepoints_sha256": "9a507399db02e9c75d2eb08d5b6977c1a20b4b790526cbc41231c96bb46a9903",
+          "bytes": 140148,
+          "sha256": "79dcbaa7c7976abdf621e0cd95c61eb1ae662d6d66726829353adeb63a7f5da3"
         },
         {
           "file": "5600.woff2",
           "range": "U+5600-59FF",
-          "glyphs": 1024,
-          "bytes": 274680,
-          "sha256": "00123bf59ac5a7183b14b3635eafc26f9ff1a84988b7d51f61d422d13303e291"
+          "glyphs": 696,
+          "codepoints_sha256": "dd403438286225457ca20ee4e712fb3a33d7294e72c2918cd82879a2a14f8de8",
+          "bytes": 204564,
+          "sha256": "951fd5fceaa5288cc768655c5e53eb80bbc2350ef178cb0864378fabf0312dcc"
         },
         {
           "file": "5a00.woff2",
           "range": "U+5A00-5DFF",
-          "glyphs": 1024,
-          "bytes": 283464,
-          "sha256": "c05e35463cea7a3dfc51d565986942040e0c6d02a013b37e3db1f934154bfad8"
+          "glyphs": 710,
+          "codepoints_sha256": "966127ee8b8062553fbf4427532f936d6eaeb87dccf21b68aec3fdb51b20d7c3",
+          "bytes": 215840,
+          "sha256": "e5cd9634850d71f6a7e79b5c35bde2c501e0c5a8ef6727c13f6ea4c711d66264"
         },
         {
           "file": "5e00.woff2",
           "range": "U+5E00-61FF",
-          "glyphs": 1024,
-          "bytes": 272816,
-          "sha256": "9619acf5f4b7b8ad08bf0708ff9400dc9eaa19329fad9f84c962bcd0acaf3b88"
+          "glyphs": 650,
+          "codepoints_sha256": "eff13c45f21f668cdb836447b487f07a12050ba3450d768aab82153453d370b6",
+          "bytes": 194300,
+          "sha256": "3484a0ae6e3dd804f5d86be33011891dcf0b4ebd25ef37f9c74365bfcd1d432b"
         },
         {
           "file": "6200.woff2",
           "range": "U+6200-65FF",
-          "glyphs": 1024,
-          "bytes": 292568,
-          "sha256": "b5084c97ce217ffb89781008d65c2b4243c7a35831cd1c9667b998b422e70440"
+          "glyphs": 619,
+          "codepoints_sha256": "2f91eb9a26ad2ec5fde08ca08e65201a5f3deb5d7e38ce3156f00873a677f89e",
+          "bytes": 196676,
+          "sha256": "190ec73517e3cbc6b899d852f205ae4079a17718235fada7d8f5f06c5e4e05df"
         },
         {
           "file": "6600.woff2",
           "range": "U+6600-69FF",
-          "glyphs": 1024,
-          "bytes": 259744,
-          "sha256": "4154071739c3b6d7927d5b0c59172f78a9a8e45392f8684ba5cc76fa5b62bb8c"
+          "glyphs": 675,
+          "codepoints_sha256": "ead5a1bb020304f0c1c312d27a5c638fc8ce752b4d764cb852bde47efa11b66c",
+          "bytes": 186408,
+          "sha256": "fd369f0c4138c27bad3a76088ed56680d056fb429ae2da95df4d00693a835960"
         },
         {
           "file": "6a00.woff2",
           "range": "U+6A00-6DFF",
-          "glyphs": 1024,
-          "bytes": 292412,
-          "sha256": "f1243d22e289a19009f79569aab3f2ff9e44b1624d7d2ae59bea583a81f8f93c"
+          "glyphs": 676,
+          "codepoints_sha256": "2e39fa9bb13db879dc393e748e84d929b13f399e5277bbb148e92aa2ff58706f",
+          "bytes": 217552,
+          "sha256": "067e7fa1a699569c23718f6088c71789b327ed6e207da2d629aed44c79a9eb86"
         },
         {
           "file": "6e00.woff2",
           "range": "U+6E00-71FF",
-          "glyphs": 1024,
-          "bytes": 314176,
-          "sha256": "a1df8ba08162bead13100c7af96bad3bfed82b64b717b7f062aa590dd8d64c9a"
+          "glyphs": 765,
+          "codepoints_sha256": "661832c4623d278bc2a2452461246d28f962e3fbed975e9b4d6322bc65111b87",
+          "bytes": 249180,
+          "sha256": "4ca199a6fe9b08e9c6efba53baf4fb97a60864ad4d4ea4820213f22a540e1a67"
         },
         {
           "file": "7200.woff2",
           "range": "U+7200-75FF",
-          "glyphs": 1024,
-          "bytes": 277136,
-          "sha256": "01956264b3146464c644975aab13f1448cbc0b15eedba87e0f7567a18e3f8d12"
+          "glyphs": 692,
+          "codepoints_sha256": "1801e58cfc6d5fd412cbf7ae419f00eb37944037f717d8be96f792cd1020d85f",
+          "bytes": 207592,
+          "sha256": "f74eed96a68b0027126d420d3a2ddc8f3ca2bffc5bcd174906fbfa34bce918d0"
         },
         {
           "file": "7600.woff2",
           "range": "U+7600-79FF",
-          "glyphs": 1024,
-          "bytes": 274360,
-          "sha256": "b55393de2e9ae0e933bee8db742a5474dcb2e3c19fb78a8991cfe1a89192a576"
+          "glyphs": 690,
+          "codepoints_sha256": "86e51e44b98b70f3bc73616f0df612bbf1f2ca8425433765820a93b4d3803395",
+          "bytes": 200820,
+          "sha256": "2220d2a45bea3b6cff91e04e4fb786f435079879f92b498526f6fc26185562c6"
         },
         {
           "file": "7a00.woff2",
           "range": "U+7A00-7DFF",
-          "glyphs": 1024,
-          "bytes": 314400,
-          "sha256": "2d6d5776a82ec52a708acf21a41eb07f0f6946877687f2cd1c47d7cda125684d"
+          "glyphs": 792,
+          "codepoints_sha256": "1cc52f52aec6db9ba44c657f9361ff0be073b0cb50d2aee4be84e3da3d60f4cf",
+          "bytes": 259064,
+          "sha256": "922c1f03410c1da175363dc1bddf339d57e2832401396d3fd7b01b98aa11c200"
         },
         {
           "file": "7e00.woff2",
           "range": "U+7E00-81FF",
-          "glyphs": 1024,
-          "bytes": 297568,
-          "sha256": "912bf5fb4505f8d8bb2e7e782dbd0d047c97b3db7526995664407e6fdac5ad77"
+          "glyphs": 605,
+          "codepoints_sha256": "92eccef306ad12f8b9c2a1244a1d6780d27e4cc7d2cb7fea4145c04571fcec0f",
+          "bytes": 205984,
+          "sha256": "083ab0e72169aa2bc86644d921c4cc432af3f4e3fa472b7a631eaaaabab57515"
         },
         {
           "file": "8200.woff2",
           "range": "U+8200-85FF",
-          "glyphs": 1024,
-          "bytes": 282836,
-          "sha256": "ef4aa3b02f5999468e30f736756433ffe6a72423072725f18304b685a4958a4a"
+          "glyphs": 643,
+          "codepoints_sha256": "9963765e9d29183a2bae9c164be18d45ce338a55b69effefcb9d14d20fac3a5f",
+          "bytes": 199096,
+          "sha256": "27e882766faff6df79770b3a7b5ff09562224fadf7d9c49cbdd27936e9dda0c0"
         },
         {
           "file": "8600.woff2",
           "range": "U+8600-89FF",
-          "glyphs": 1024,
-          "bytes": 319916,
-          "sha256": "b398c259b2c5e35d5f81c654deb7cf2722ac228fe27651735aa1ba3e8217b9a3"
+          "glyphs": 735,
+          "codepoints_sha256": "b89ba43de8e7b6ecf3880b872a2d6f3fafa4433ae1c0fe7c3cc0485b37c2378e",
+          "bytes": 248612,
+          "sha256": "497e8c208573717ba7df2030cd868a5b64ce24502db0d669ad06f919a0af1eb9"
         },
         {
           "file": "8a00.woff2",
           "range": "U+8A00-8DFF",
-          "glyphs": 1024,
-          "bytes": 279412,
-          "sha256": "ea5b515fda7b788901b2a5ff8727865276a65b65a64996c196434bb28dd2cfa6"
+          "glyphs": 721,
+          "codepoints_sha256": "69b57e4a00ca60fa5bcddf947e87804442ccea4fdb988280141bddf215722d12",
+          "bytes": 217852,
+          "sha256": "c00abee73685483907497160f8cc01de77b3bf48b523804b60212e3555810482"
         },
         {
           "file": "8e00.woff2",
           "range": "U+8E00-91FF",
-          "glyphs": 1024,
-          "bytes": 291500,
-          "sha256": "59b51d99e9e1a3c9eb1283099615b4aaeca00bc5d0df5831212813aa15e71f8f"
+          "glyphs": 677,
+          "codepoints_sha256": "fa5ddd2f514b1c20b756a28fccc19dfd533df84fa56b1df1f469821a784a11d0",
+          "bytes": 211500,
+          "sha256": "c011ba635eb1a5728d99050468d82a4d52cfc6726da7d2cf8b081dd5de170eaf"
         },
         {
           "file": "9200.woff2",
           "range": "U+9200-95FF",
-          "glyphs": 1024,
-          "bytes": 297520,
-          "sha256": "248d6e636a183b58079adfba01cfddf7af6bc73340eb0e6bd62549d38fc92a75"
+          "glyphs": 772,
+          "codepoints_sha256": "c15f3e935d832ab3d8e6977146d643886adced5b61e3eefe1558b10d5670f197",
+          "bytes": 247848,
+          "sha256": "a728128f04563b801f47796144332d3f75509498d485be804440fcf758233555"
         },
         {
           "file": "9600.woff2",
           "range": "U+9600-99FF",
-          "glyphs": 1024,
-          "bytes": 310624,
-          "sha256": "cab2d2897d8d8f5ea0cceb1195a59a961d23eacfe5a970b16de76477bc896f5f"
+          "glyphs": 744,
+          "codepoints_sha256": "280ae900ed7345316ec32b4600bfa591fc05ade0c91100587dc859e7e698b95a",
+          "bytes": 243752,
+          "sha256": "77bbc47e8775a7bfbad527f3321ff0758523fa087d261c9930dd1f6ed49411b4"
         },
         {
           "file": "9a00.woff2",
           "range": "U+9A00-9DFF",
-          "glyphs": 1024,
-          "bytes": 334952,
-          "sha256": "f4fd84c79e67a86413f89c065adb36ce62e40c2b98d19f7283612d16cf3c440d"
+          "glyphs": 855,
+          "codepoints_sha256": "47d81f927e725ee7870c31701fb2931a1868bb35e59d8c29660fc1f2ffea7d34",
+          "bytes": 293720,
+          "sha256": "5d2d7f5cb359ea17c144ee9fffcc1d4a43581e492f489d13d0eb6a074bd278a6"
         },
         {
           "file": "9e00.woff2",
           "range": "U+9E00-9FFF",
-          "glyphs": 512,
-          "bytes": 183348,
-          "sha256": "a409f62d35acfdb4d2ed1a7d1031bcd9b241ae58ffcfc3a8275f14f9e6864389"
+          "glyphs": 376,
+          "codepoints_sha256": "cf48df2daf44b53f6e76e6ec707499b795c53f524f081955f353753e41f8b290",
+          "bytes": 145248,
+          "sha256": "456af3b61e0711f18d297bf9a56d5f9a658f6d89a6fc0c9a78f26b79d7bccee1"
         },
         {
           "file": "a000.woff2",
           "range": "U+A000-F8FF",
           "glyphs": 11247,
+          "codepoints_sha256": "2d6cb7a9997ba2092fbe1763e1d355003ca55248cca85b05574da113e4a95dda",
           "bytes": 265764,
           "sha256": "9e5238b68bc98330c60e20a27d96de5d97ce90e3a4f05dc44ac8053b3364f54d"
         },
@@ -773,6 +914,7 @@
           "file": "f900.woff2",
           "range": "U+F900-FAFF",
           "glyphs": 368,
+          "codepoints_sha256": "b78f52365c43a302cf23c79fbf1a9bf8e29c28a02e461090d26c7efdaadddc97",
           "bytes": 126556,
           "sha256": "37b1398f63832b617a6a09e31917f857ddd952a170d25711177e94574e3c3b0e"
         },
@@ -780,6 +922,7 @@
           "file": "fb00.woff2",
           "range": "U+FB00-FE2F",
           "glyphs": 15,
+          "codepoints_sha256": "f85cc8d1123247619d68fb85d89e2a75de1041e6ec3fecddd0c954da89a6b447",
           "bytes": 1828,
           "sha256": "872ba5099d0478efd6e5b203179531eaab5304699646a64bcf50f314b65bab16"
         },
@@ -787,6 +930,7 @@
           "file": "fe30.woff2",
           "range": "U+FE30-FFEF",
           "glyphs": 283,
+          "codepoints_sha256": "a6ef2ac9aeecb7c9a5333a385a694a1b1ae5f092cf42ce8f170804d1e73cde53",
           "bytes": 25636,
           "sha256": "104a4d7932838329c312b63878d4123a1f8ed3fa76ac0d82d9aa23a01d31a6f4"
         },
@@ -794,6 +938,7 @@
           "file": "10000.woff2",
           "range": "U+10000-1FFFF",
           "glyphs": 371,
+          "codepoints_sha256": "bb2e4d5bd27cb15fe23174d2b57eaac6b244d2096c7a13371c4fa7b37e85b219",
           "bytes": 39408,
           "sha256": "fc0df43552ca54aa397d750ddc552edec5287bfa0fc23d5b2cc3830ff57c2751"
         },
@@ -801,6 +946,7 @@
           "file": "20000.woff2",
           "range": "U+20000-2FFFF",
           "glyphs": 2304,
+          "codepoints_sha256": "398b0b010c5a9f8c2adb27a95da1f0e5488db7c41bb4f8e7a946d75b9f83f913",
           "bytes": 739476,
           "sha256": "a9cffec70600a6b5953f63476c4b673803c6d81143788b39e3b255c764c1f999"
         },
@@ -808,11 +954,30 @@
           "file": "30000.woff2",
           "range": "U+30000-3FFFF",
           "glyphs": 336,
+          "codepoints_sha256": "e647bb97879283ccc164978cb06280253f79ddce2ba7abb038099b0a34852190",
           "bytes": 98404,
           "sha256": "0f87f8f9a4283ae3fcfe97b621b68e7c132d162789075a4bfc7c8ff513776c9a"
+        },
+        {
+          "file": "cjk-rare.woff2",
+          "range": "U+4E00-9FFF",
+          "glyphs": 3008,
+          "codepoints_sha256": "8f1078d234ca2fa698be14e7d63fa561ff1bce12b41b2ceef77485ce65604b33",
+          "note": "GB2312 二级 3008 字",
+          "bytes": 781932,
+          "sha256": "302e07f03c05fcd30376197cec11bd861bc7f82cb50e0f8487693e226c7a79d4"
+        },
+        {
+          "file": "cjk-common.woff2",
+          "range": "U+4E00-9FFF",
+          "glyphs": 3755,
+          "codepoints_sha256": "ce316e8f69238ae031acb9338b3aa3cc7de5ddb590ad0455bc224036f654cda9",
+          "note": "GB2312 一级 3755 字",
+          "bytes": 858784,
+          "sha256": "68d5629d9803171fd5fe5d08a50e459ce9896acc505f4d6ae69bf0da681356e8"
         }
       ],
-      "bytes": 9690124
+      "bytes": 9856592
     },
     "zhuque-regular": {
       "css_family": "ZhuqueFangsong",
@@ -827,6 +992,7 @@
           "file": "0000.woff2",
           "range": "U+0000-00FF",
           "glyphs": 192,
+          "codepoints_sha256": "d0b6cd3504ac483a5cd55199ae1efca9411275bdd3ea3f5287259ea242b8e026",
           "bytes": 12980,
           "sha256": "1db5b44856edd7a08eed08ba9f7f2bb508aad146d31a8b106ba912d1674a14fa"
         },
@@ -834,6 +1000,7 @@
           "file": "0100.woff2",
           "range": "U+0100-2E7F",
           "glyphs": 1142,
+          "codepoints_sha256": "08b5270038189d96dbd043155ae83bca08ed1fdfe370884f66026a46e06a3c2d",
           "bytes": 48428,
           "sha256": "8452cf326b5cfda830d2bda1e54fb75a37be1753a23332665a359dead67e9629"
         },
@@ -841,6 +1008,7 @@
           "file": "2e80.woff2",
           "range": "U+2E80-33FF",
           "glyphs": 201,
+          "codepoints_sha256": "bcb5ede1aad3e7a73ed4d8c1be8003b588f63261a89e370d87f406d3c82345dc",
           "bytes": 26920,
           "sha256": "030a568b5414ad2c8cb067ab9ec559d3fd55b284c8c3a2f014d48f760a181b14"
         },
@@ -848,6 +1016,7 @@
           "file": "3400.woff2",
           "range": "U+3400-37FF",
           "glyphs": 12,
+          "codepoints_sha256": "bd378eca1293d8e0b589f72459f9fc4c4a9c508f1148810c6d20bf58e98bbe0c",
           "bytes": 6384,
           "sha256": "fd933c6f9519b46c54364d940681a415676774be40302c068106c63f187d1db0"
         },
@@ -855,6 +1024,7 @@
           "file": "3800.woff2",
           "range": "U+3800-3BFF",
           "glyphs": 14,
+          "codepoints_sha256": "5a251a40a54805e17729e774b9fc328921828ed6ebc371086b85d01d454b7b2c",
           "bytes": 7368,
           "sha256": "a4d6c746c4525b77dc5427c5f013852194525bb849aef52155f09e88a286bc24"
         },
@@ -862,6 +1032,7 @@
           "file": "3c00.woff2",
           "range": "U+3C00-3FFF",
           "glyphs": 13,
+          "codepoints_sha256": "d89199fe6ab827418211cbcb808cae8ad5d7b162ac9654bed2c9b35580e8dbae",
           "bytes": 7528,
           "sha256": "f811667f7fab596e3af09ad524106cf77b25efd173ca28356e20b2990c89e11a"
         },
@@ -869,6 +1040,7 @@
           "file": "4000.woff2",
           "range": "U+4000-43FF",
           "glyphs": 11,
+          "codepoints_sha256": "81a2be2956ea8357c8e383b85a2fc5ced77dbbd2e4e354d26a0094f55b443fa9",
           "bytes": 6192,
           "sha256": "50ff4c795c852fa88c5eed5074a4d67172f80a5cfffa032a19ebc98c1c1cc83b"
         },
@@ -876,6 +1048,7 @@
           "file": "4400.woff2",
           "range": "U+4400-47FF",
           "glyphs": 13,
+          "codepoints_sha256": "0ffedda050b208374951c3dccfebdd6008832534f7303abca1954f9f1d3050d1",
           "bytes": 7392,
           "sha256": "857731f2a6c2044515d456b34cc77eadb8e6217d665dc985986157468e540b2d"
         },
@@ -883,6 +1056,7 @@
           "file": "4800.woff2",
           "range": "U+4800-4BFF",
           "glyphs": 5,
+          "codepoints_sha256": "0ec3805d3c087ae3f53cadf4e30da5bdae3d207b7a38b8f3fa3d4ce69de222e1",
           "bytes": 3260,
           "sha256": "d30e2888300bb32b6506b6f854e1ff62ccc63ae836783bf30cc5f776c60082de"
         },
@@ -890,160 +1064,183 @@
           "file": "4c00.woff2",
           "range": "U+4C00-4DBF",
           "glyphs": 11,
+          "codepoints_sha256": "58ef5acc84f3d7fc0da6a7c8674b46e62832d6b7b6c6347a0fbc1426e31fba28",
           "bytes": 7232,
           "sha256": "3f365f2cba8756c5d1c6738338bb5c344541137459beb54db2c6fbed4bce7ce9"
         },
         {
           "file": "4e00.woff2",
           "range": "U+4E00-51FF",
-          "glyphs": 610,
-          "bytes": 197300,
-          "sha256": "442389e29a02a2f4658840a215aedeaebe388e0f685335e8a8b8f6d316e78d39"
+          "glyphs": 177,
+          "codepoints_sha256": "7f31019b96e4637323be84de8b11f16011f221fcc747b35a2e2deb9025cb0c12",
+          "bytes": 71668,
+          "sha256": "57ea9b50121cac3dc8cd308ca9d9fa7d0f7cda68052d68f8448fbe87404f7330"
         },
         {
           "file": "5200.woff2",
           "range": "U+5200-55FF",
-          "glyphs": 631,
-          "bytes": 213292,
-          "sha256": "78e0b34d3c8222ce6265fa39be51b838662242c3c93225588e713f5f6fc0b6ae"
+          "glyphs": 152,
+          "codepoints_sha256": "c5f688fb1d36157b9a319d52129fc7c84df8dab7c868182b9dad19b56efaa373",
+          "bytes": 62184,
+          "sha256": "6ea073f2156de37fff41e2427aa664ff055624c3eaf2a9f1906e72edb0c0304e"
         },
         {
           "file": "5600.woff2",
           "range": "U+5600-59FF",
-          "glyphs": 562,
-          "bytes": 222924,
-          "sha256": "c3ccbfe4235e69552629891d6e88b02d06b1e8e69a6a139a53a300c3b0daeec6"
+          "glyphs": 234,
+          "codepoints_sha256": "11305b7d74ae6d32910081035a91523edb22063a8769a9c2ae8a558c36836c69",
+          "bytes": 106048,
+          "sha256": "14cee0a0381cb2357ab504a16ac83e5d1dc7bff4a6fd0e76e836ee3bd3e8d6fa"
         },
         {
           "file": "5a00.woff2",
           "range": "U+5A00-5DFF",
-          "glyphs": 504,
-          "bytes": 206652,
-          "sha256": "ccb9dc8df1d67e3f1df10bb9c539272a4e8759d879657a45b244874f00c8c356"
+          "glyphs": 190,
+          "codepoints_sha256": "79148798ff27e64a37f613b5826de5f6a488d0860e9c1814a78cef94a46a5fcc",
+          "bytes": 91572,
+          "sha256": "6d0fa781d00d4084bcd32cf3de9ca44889aefe947138f227a818846afb7dcab2"
         },
         {
           "file": "5e00.woff2",
           "range": "U+5E00-61FF",
-          "glyphs": 552,
-          "bytes": 224152,
-          "sha256": "612301faa16967895eb561e2463948051bf21cc86f8afbb20f356c698979093b"
+          "glyphs": 178,
+          "codepoints_sha256": "0f05582192ec4a699c29fdd2de20a15ef103817d6a055b2a7b298d23c963e874",
+          "bytes": 86744,
+          "sha256": "2928d11fdd86fa51c63ce18fe25c95c4918d26faabd5f6ce252ccdd237699e1f"
         },
         {
           "file": "6200.woff2",
           "range": "U+6200-65FF",
-          "glyphs": 567,
-          "bytes": 236648,
-          "sha256": "63e1e69f0bbe6f30c252fe80880d820dad417b293c536e0f1b7e4dbb27d0671d"
+          "glyphs": 162,
+          "codepoints_sha256": "8ebac57d319495c8adda8ac8093b45ea856416d0553ad5ca7ce030db2c3a84a1",
+          "bytes": 81036,
+          "sha256": "6824bd7218533eeee4156ca7a5016fcc45481d2c5f2fc4c7b28a191d1cb095a3"
         },
         {
           "file": "6600.woff2",
           "range": "U+6600-69FF",
-          "glyphs": 529,
-          "bytes": 203468,
-          "sha256": "b4042634707a4614b6e67b614116eb1ec43d50e579af21140c54f5ae9bccbbc6"
+          "glyphs": 180,
+          "codepoints_sha256": "7206b4e61adf0b818894fa4e575d9a1e5fd695cdb2a419b92ed5cb71930fe61f",
+          "bytes": 76544,
+          "sha256": "c00179fe6bdd2f9906491fdb1ab4414b78042e8721cf65f423ab2617ad582d2d"
         },
         {
           "file": "6a00.woff2",
           "range": "U+6A00-6DFF",
-          "glyphs": 536,
-          "bytes": 212748,
-          "sha256": "41bc93f9d304477095181bcf4afeafe357124ebf1659ffdcb4fe4ac433897bad"
+          "glyphs": 188,
+          "codepoints_sha256": "615573e15d2dafd199bfb4be86b5c20b5fe561a350444971300975326263a6a0",
+          "bytes": 88220,
+          "sha256": "bc058ea9c4bf698b6957ae8c160d7d2497aeda285ef6548f8cdcccd0531615e0"
         },
         {
           "file": "6e00.woff2",
           "range": "U+6E00-71FF",
-          "glyphs": 494,
-          "bytes": 230800,
-          "sha256": "be345b56e21ecb98c9da7ec3fd39b0d2c5b3560cb78b27e99e5fb3176a3fea8a"
+          "glyphs": 235,
+          "codepoints_sha256": "ac15314034263b5c5ad835cb1cb218ee21d3608042cd9f307c9cdf10cf184a25",
+          "bytes": 120392,
+          "sha256": "9fb1bca554e99379f6a5168ba330a6b6268aede2fb30cc7dc85cf6a5e03517bc"
         },
         {
           "file": "7200.woff2",
           "range": "U+7200-75FF",
-          "glyphs": 545,
-          "bytes": 222100,
-          "sha256": "277ece440ef893969eafaf49e6eaecc1946e13706d8ac5ffd4ce147651e32207"
+          "glyphs": 213,
+          "codepoints_sha256": "c6b84a43188cd963b63148d5b7132003e525a4c6cc28c1c902c4a1fe058c4814",
+          "bytes": 97600,
+          "sha256": "d7f23abde8f9e7e95add24c8f9816578380e13d6aeb06755e6e6da5b4c35b92b"
         },
         {
           "file": "7600.woff2",
           "range": "U+7600-79FF",
-          "glyphs": 502,
-          "bytes": 214288,
-          "sha256": "e228186f456fdfebd094bca5735f4b7ee04a3710fa5b859e7e1acd6e3551e236"
+          "glyphs": 168,
+          "codepoints_sha256": "23a9ec64c2be82e60a17e5c6568bf3e648a820d5b6027c05335252d53e8d6f6e",
+          "bytes": 82424,
+          "sha256": "0f1b8c4f8bea7a0fff9d2c04a7fd923e0afbe120116b2c8963f5426b255e4969"
         },
         {
           "file": "7a00.woff2",
           "range": "U+7A00-7DFF",
-          "glyphs": 484,
-          "bytes": 230148,
-          "sha256": "ee85b2a2e53929d709706a02fb3795cce3dbeab79eee9009708ee01602a1b12d"
+          "glyphs": 252,
+          "codepoints_sha256": "4c13300462908c2cc481a0f993308a3b0ec7735fbdefa27ba4ed6542d7422112",
+          "bytes": 130228,
+          "sha256": "5ffa898af1fb4a9308533b0834680f6dc6b9270dbe86691d4414710739df1a34"
         },
         {
           "file": "7e00.woff2",
           "range": "U+7E00-81FF",
-          "glyphs": 604,
-          "bytes": 269372,
-          "sha256": "acc19b6296e773f1c4ebea0feb90a6396621e94eaa3183325fe554136c7942aa"
+          "glyphs": 185,
+          "codepoints_sha256": "d7ef424b513adf415ffbe1e4fc473861901bb9cf29d393e6c0d99c98ae615d6f",
+          "bytes": 102184,
+          "sha256": "83b36b3996e68d38cc78ce1e706c85fb12cf33acd2e0e713957242ecf3d5f956"
         },
         {
           "file": "8200.woff2",
           "range": "U+8200-85FF",
-          "glyphs": 541,
-          "bytes": 230016,
-          "sha256": "0f7df7f1e58851ffec1e1a143c96b894f2562cbf0dc313f9da55084d8a3ac866"
+          "glyphs": 160,
+          "codepoints_sha256": "4338d1f5c52e7ccfa285fc138e21fd78aa4ebbc2ec8098738540d19667d9852a",
+          "bytes": 79472,
+          "sha256": "8d5903959b92b5c9411bd0db5abd4ab83e8417e58d9b9b4a94116013518c13b8"
         },
         {
           "file": "8600.woff2",
           "range": "U+8600-89FF",
-          "glyphs": 441,
-          "bytes": 206748,
-          "sha256": "f4e47ab6ed935c53f8a002cbe6e00fe409ded97b5eb29c21dc67c6d7cb8da046"
+          "glyphs": 152,
+          "codepoints_sha256": "4eb0943bac334397b3d22e38349420985bb1f52337a948a7f0748356dbaf0d15",
+          "bytes": 82168,
+          "sha256": "0cf0d3e25c7130cd333dea0b2f2e2b524ad6d2b7980c461ceff90e9103351788"
         },
         {
           "file": "8a00.woff2",
           "range": "U+8A00-8DFF",
-          "glyphs": 586,
-          "bytes": 255524,
-          "sha256": "984e662934d69737f0383e78b72e6d00ad887113abc0583c83aac996e0600dd7"
+          "glyphs": 283,
+          "codepoints_sha256": "39ae76c9373b046c64d8f5dbe36ce993f93eb15a51b2823e9338352dfb748126",
+          "bytes": 140888,
+          "sha256": "87952aec6cf6caad06108015b0acef30acf3ea2436c9dd0e626c42c2ebbc2c40"
         },
         {
           "file": "8e00.woff2",
           "range": "U+8E00-91FF",
-          "glyphs": 570,
-          "bytes": 261956,
-          "sha256": "6eb7a8b4cf7fe6a02886ea7fbdcd40ab89f89469070d481388dfe4fc9aa8b9b4"
+          "glyphs": 223,
+          "codepoints_sha256": "e964d748d5ed7aa6db4af1d99603017d84b60eee4b26c98e42009cca4c3004ae",
+          "bytes": 115348,
+          "sha256": "70d456757b1cff39c643926a02b718a108758ca597188fc518b27c92ebb87e11"
         },
         {
           "file": "9200.woff2",
           "range": "U+9200-95FF",
-          "glyphs": 561,
-          "bytes": 266988,
-          "sha256": "cac81cdcac465eb139e639e7afca4cfb9232850da535699ec736f2a7e138fbb3"
+          "glyphs": 309,
+          "codepoints_sha256": "1005e6c90291f392ce7780eb484c145d215721df1292763f8751f7acb63b867b",
+          "bytes": 160008,
+          "sha256": "eb74dda73a27f9670d57ec5151e1fcc391e4aa871e4f7e34f0b968963862c35d"
         },
         {
           "file": "9600.woff2",
           "range": "U+9600-99FF",
-          "glyphs": 532,
-          "bytes": 251300,
-          "sha256": "de715407c0fd58f3da4bcdbc04db05c8f9c41915ae434758073b582da1b822d2"
+          "glyphs": 252,
+          "codepoints_sha256": "2ccfc09c9bea159ced6b9fad7f9706d76fc1b7e9c82870e1d76bc608fe1031cd",
+          "bytes": 133084,
+          "sha256": "584042456c34d4cb3fa49572994c0d4ee829f810a69497d8cc14801b5cf95fcf"
         },
         {
           "file": "9a00.woff2",
           "range": "U+9A00-9DFF",
-          "glyphs": 420,
-          "bytes": 236264,
-          "sha256": "70b2a1dc2086a9ee161f9d7e3ff12b733616bd6f391ca4958db87a99f542475b"
+          "glyphs": 251,
+          "codepoints_sha256": "b6e742149d87e10f027b8d3ac85517b36ac554af58e6e69e159f2ca642dde9af",
+          "bytes": 153000,
+          "sha256": "ff50bacddbe033de3a844b71fad84571c9bf0b819ec2aa8099efda1732ba7653"
         },
         {
           "file": "9e00.woff2",
           "range": "U+9E00-9FFF",
-          "glyphs": 238,
-          "bytes": 132008,
-          "sha256": "9125abd49ea100e50897a17fcfceac08f632734d01f13c289d42f017d9332c48"
+          "glyphs": 102,
+          "codepoints_sha256": "3c9bc99320c6198b149ff38fa4d84e9aef171f0af56f996aa8fa3bd2dcb171e6",
+          "bytes": 63852,
+          "sha256": "fc821a6a572d1821338437aa0893c6f10bd405eec77b71e6f1606b54c851e9a5"
         },
         {
           "file": "a000.woff2",
           "range": "U+A000-F8FF",
           "glyphs": 2,
+          "codepoints_sha256": "32671a32813248db00f5605e84d0616b9fcc89ce6fc04b6843edcfc48b07830d",
           "bytes": 868,
           "sha256": "49fee297141eec3cd67ff988316867c8da13f44f4d5a5b011f8c5698dbc0d231"
         },
@@ -1051,6 +1248,7 @@
           "file": "fb00.woff2",
           "range": "U+FB00-FE2F",
           "glyphs": 10,
+          "codepoints_sha256": "edd2ed0d95d91ffd7ca332e4019d953b4ed3d6b574f5a1e3f7d0e79fc792ea3f",
           "bytes": 1876,
           "sha256": "a33cd721daba477fd7ddf9ab05e5d32f20d2e909b34d2b37d289205835a6d620"
         },
@@ -1058,6 +1256,7 @@
           "file": "fe30.woff2",
           "range": "U+FE30-FFEF",
           "glyphs": 43,
+          "codepoints_sha256": "a80af7633a17479e1e851741c49a6e1f6de6151af502f218e69029709164d12b",
           "bytes": 3608,
           "sha256": "effa70c9833fbe92fdb1314600b504ba8fbfd3b361a712edd954936b2f092b43"
         },
@@ -1065,11 +1264,30 @@
           "file": "20000.woff2",
           "range": "U+20000-2FFFF",
           "glyphs": 204,
+          "codepoints_sha256": "1a6980390705517e866f0783ceba59969d4f97f494c822a8fb9b0cdadeef00d6",
           "bytes": 95888,
           "sha256": "ce1b51509c631c6bb49e3057cf870180e315aa39fa3cd148a0156f30f364c1ff"
+        },
+        {
+          "file": "cjk-rare.woff2",
+          "range": "U+4E00-9FFF",
+          "glyphs": 3008,
+          "codepoints_sha256": "8f1078d234ca2fa698be14e7d63fa561ff1bce12b41b2ceef77485ce65604b33",
+          "note": "GB2312 二级 3008 字",
+          "bytes": 1237568,
+          "sha256": "98c9a6667c20bb2965d46b2eb8e1b913d7ad3287325b1c78491fe24198ed5ab6"
+        },
+        {
+          "file": "cjk-common.woff2",
+          "range": "U+4E00-9FFF",
+          "glyphs": 3755,
+          "codepoints_sha256": "ce316e8f69238ae031acb9338b3aa3cc7de5ddb590ad0455bc224036f654cda9",
+          "note": "GB2312 一级 3755 字",
+          "bytes": 1343852,
+          "sha256": "465b1219a41d1606b37819c87ca0649dfcee414ef232225814423cfdab309a69"
         }
       ],
-      "bytes": 4960620
+      "bytes": 4942008
     }
   }
 }
