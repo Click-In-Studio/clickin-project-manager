@@ -29,9 +29,15 @@ export type FontRetryOptions = {
   createFace?: (family: string, src: string, descriptors: FontFaceDescriptors) => FontFace;
 };
 
-/** 同一片的身份：family 与四个描述符。引号 / 大小写按各浏览器规范化后一致，直接拼。 */
+/**
+ * 同一片的身份：family 与三个描述符。FontFace 属性与 CSSFontFaceRule 的 getPropertyValue
+ * 都是同一引擎序列化的，理论上一致；仍去引号、折叠空白、统一小写，别让 `U+4E00-51FF`
+ * 与 `u+4e00-51ff` 记成两份账。
+ */
 export function fontFaceKey(face: Pick<FontFace, "family" | "weight" | "style" | "unicodeRange">): string {
-  return [stripQuotes(face.family), face.weight, face.style, face.unicodeRange].join("|");
+  return [stripQuotes(face.family), face.weight, face.style, face.unicodeRange]
+    .map((v) => v.trim().replace(/\s+/g, " ").toLowerCase())
+    .join("|");
 }
 
 function stripQuotes(s: string): string {

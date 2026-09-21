@@ -68,10 +68,12 @@ describe("bustSrc / fontFaceKey", () => {
     expect(bustSrc(SRC, 2)).toBe("url(\"/fonts/shs-medium/4e00.woff2?v=abcd1234&r=2\") format(\"woff2\")");
     expect(bustSrc("url(/a.woff2)", 1)).toBe("url(/a.woff2?r=1)");
   });
-  it("family 引号不影响身份", () => {
-    const a = fontFaceKey({ family: "\"SourceHanSerif\"", weight: "400 600", style: "normal", unicodeRange: "U+4E00-51FF" });
-    const b = fontFaceKey({ family: "SourceHanSerif", weight: "400 600", style: "normal", unicodeRange: "U+4E00-51FF" });
-    expect(a).toBe(b);
+  it("family 引号、大小写、多余空白不影响身份；描述符不同则不同", () => {
+    const base = fontFaceKey({ family: "SourceHanSerif", weight: "400 600", style: "normal", unicodeRange: "U+4E00-51FF" });
+    expect(fontFaceKey({ family: "\"SourceHanSerif\"", weight: "400 600", style: "normal", unicodeRange: "U+4E00-51FF" })).toBe(base);
+    expect(fontFaceKey({ family: "SourceHanSerif", weight: " 400   600 ", style: "Normal", unicodeRange: "u+4e00-51ff" })).toBe(base);
+    expect(fontFaceKey({ family: "SourceHanSerif", weight: "700 900", style: "normal", unicodeRange: "U+4E00-51FF" })).not.toBe(base);
+    expect(fontFaceKey({ family: "SourceHanSerif", weight: "400 600", style: "normal", unicodeRange: "U+5200-55FF" })).not.toBe(base);
   });
 });
 
@@ -88,7 +90,8 @@ describe("installFontRetry", () => {
     expect(created[0].family).toBe("SourceHanSerif");
     expect(created[0].weight).toBe("400 600");
     expect(created[0].unicodeRange).toBe("U+4E00-51FF");
-    expect(created[0].src).toContain("&r=1");
+    // 整串比对：重试计数必须由样式表原始 src 重新推导，不能在上一轮已 bust 的 url 上再叠
+    expect(created[0].src).toBe("url(\"/fonts/shs-medium/4e00.woff2?v=abcd1234&r=1\") format(\"woff2\")");
     expect(fonts.faces).toContain(created[0]);
   });
 
@@ -103,10 +106,11 @@ describe("installFontRetry", () => {
     expect(created).toHaveLength(1);
     vi.advanceTimersByTime(1);           // 200ms
     expect(created).toHaveLength(2);
-    expect(created[1].src).toContain("&r=2");
+    expect(created[1].src).toBe("url(\"/fonts/shs-medium/4e00.woff2?v=abcd1234&r=2\") format(\"woff2\")");
     fonts.fail([created[1]]);
     vi.advanceTimersByTime(400);
     expect(created).toHaveLength(3);
+    expect(created[2].src).toBe("url(\"/fonts/shs-medium/4e00.woff2?v=abcd1234&r=3\") format(\"woff2\")");
     fonts.fail([created[2]]);            // 第 4 次：放弃
     vi.advanceTimersByTime(10_000);
     expect(created).toHaveLength(3);
