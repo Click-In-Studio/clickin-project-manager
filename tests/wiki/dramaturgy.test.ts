@@ -24,19 +24,19 @@ describe("scenes", () => {
   });
 
   it("getSceneById returns the correct scene", async () => {
-    const scene = await getSceneById(sceneId, prodId);
+    const scene = await getSceneById(sceneId, prodId, versionId);
     expect(scene).not.toBeNull();
     expect(scene!.id).toBe(sceneId);
   });
 
   it("getSceneById returns null for non-existent scene", async () => {
-    expect(await getSceneById("no-such-scene", prodId)).toBeNull();
+    expect(await getSceneById("no-such-scene", prodId, versionId)).toBeNull();
   });
 
   it("getSceneById returns null for correct scene id with wrong production", async () => {
     const other = await makeProduction();
     const otherSceneId = await makeScene(other.prodId, other.versionId);
-    const result = await getSceneById(otherSceneId, prodId);
+    const result = await getSceneById(otherSceneId, prodId, other.versionId);
     await cleanupProduction(other.prodId).catch(() => {});
     expect(result).toBeNull();
   });
@@ -49,14 +49,14 @@ describe("characters", () => {
   });
 
   it("getCharacterById returns the correct character", async () => {
-    const char = await getCharacterById(charId, prodId);
+    const char = await getCharacterById(charId, prodId, versionId);
     expect(char).not.toBeNull();
     expect(char!.id).toBe(charId);
   });
 
   it("getCharacterById returns null for wrong production", async () => {
     const other = await makeProduction();
-    const result = await getCharacterById(charId, other.prodId);
+    const result = await getCharacterById(charId, other.prodId, versionId);
     await cleanupProduction(other.prodId).catch(() => {});
     expect(result).toBeNull();
   });

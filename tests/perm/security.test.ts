@@ -70,11 +70,12 @@ describe("production isolation — reads", () => {
   });
 
   it("getSceneById rejects correct id + wrong production", async () => {
-    expect(await getSceneById(sceneAId, prodB.prodId)).toBeNull();
+    // 正确的 scene + 它自己的 version，但冒充 PROD_B——productionId 必须起护栏作用
+    expect(await getSceneById(sceneAId, prodB.prodId, prodA.versionId)).toBeNull();
   });
 
   it("getCharacterById rejects correct id + wrong production", async () => {
-    expect(await getCharacterById(charAId, prodB.prodId)).toBeNull();
+    expect(await getCharacterById(charAId, prodB.prodId, prodA.versionId)).toBeNull();
   });
 
   it("getCueList rejects correct id + wrong production", async () => {
@@ -107,7 +108,7 @@ describe("production isolation — writes blocked by parent scope", () => {
 
 describe("two separate productions cannot access each other's resources by ID", () => {
   it("getSceneById with PROD_A scene id returns null for PROD_B", async () => {
-    expect(await getSceneById(sceneAId, prodB.prodId)).toBeNull();
+    expect(await getSceneById(sceneAId, prodB.prodId, prodB.versionId)).toBeNull();
   });
 
   it("cue list created in PROD_A is not visible via PROD_B", async () => {

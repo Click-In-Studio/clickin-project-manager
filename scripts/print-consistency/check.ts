@@ -74,7 +74,7 @@ function fixtureBlocks(): Array<{ content: string; lyric: boolean; character: 0 
 
 async function seedFixture(): Promise<{ prodId: string; cookie: string; pageLayout: string; textLayoutMode: string; templateId: string | null }> {
   const { getPool } = await import("../../lib/pg");
-  const { createProduction, getActiveVersionId, applyPatchToDB, flushToDBVersioned, loadProduction, saveScriptConfig } = await import("../../lib/db");
+  const { createProduction, getActiveVersionId, applyPatchToDB, writeVersionContent, loadProduction, saveScriptConfig } = await import("../../lib/db");
   const { DEFAULT_SCRIPT_CONFIG } = await import("../../lib/script/script-types");
   const { createSession, SESSION_COOKIE } = await import("../../lib/account/session");
   const { randomUUID: uuid } = await import("node:crypto");
@@ -86,7 +86,7 @@ async function seedFixture(): Promise<{ prodId: string; cookie: string; pageLayo
   const versionId = (await getActiveVersionId(prodId))!;
 
   const charIds = [uuid(), uuid()];
-  await flushToDBVersioned(prodId, versionId, {
+  await writeVersionContent(prodId, versionId, {
     upsertBlocks: [], deleteSnapshotIds: [],
     upsertChars: [
       { id: charIds[0], name: "林晚", isAggregate: false, sortOrder: 1 },

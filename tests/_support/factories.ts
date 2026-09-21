@@ -6,7 +6,7 @@ import {
   upsertFeishuUser,
   deleteProduction,
   getActiveVersionId,
-  flushToDBVersioned,
+  writeVersionContent,
   applyPatchToDB,
 } from "@/lib/db";
 import type { Block } from "@/lib/script/script-types";
@@ -153,7 +153,7 @@ export async function makeCharacter(
   opts?: { name?: string },
 ): Promise<string> {
   const charId = randomUUID();
-  await flushToDBVersioned(productionId, versionId, {
+  await writeVersionContent(productionId, versionId, {
     upsertBlocks: [],
     deleteSnapshotIds: [],
     upsertChars: [
