@@ -34,6 +34,9 @@ app/fonts.css（每片一条 @font-face）。浏览器只下载页面真正用�
   python3 scripts/fonts/build-fonts.py --force  # 全部重切
 
 输出是确定性的（不重算时间戳），重跑不产生 diff。
+
+缓存（#594）：/fonts/ 由 next.config.ts 打一年 immutable，所以 css 里每片 url 带
+?v=<该片 sha256 前 8 位>——片内容一变 url 就变，旧缓存自然失效；片没变就继续命中。
 """
 from __future__ import annotations
 
@@ -196,6 +199,7 @@ def build_face(face: Face, src_path: Path, force: bool, previous: dict) -> list[
         entry = {"file": file_name, "range": f"U+{start:04X}-{end:04X}", "glyphs": len(present)}
         if not force and out_path.exists() and file_name in prev_chunks:
             entry["bytes"] = out_path.stat().st_size
+            entry["sha256"] = sha256_of(out_path)
             chunks.append(entry)
             continue
         options = subset.Options()
@@ -215,6 +219,7 @@ def build_face(face: Face, src_path: Path, force: bool, previous: dict) -> list[
         subset.save_font(font, str(out_path), options)
         font.close()
         entry["bytes"] = out_path.stat().st_size
+        entry["sha256"] = sha256_of(out_path)
         chunks.append(entry)
         print(f"  {face.out}/{file_name}  {len(present):5d} 字  {entry['bytes'] // 1024:4d} KB")
     # 清掉配置里已不存在的旧片
@@ -230,6 +235,8 @@ def write_css(manifest: dict) -> None:
     lines = [
         "/* 由 scripts/fonts/build-fonts.py 生成——不要手改；改配置后重跑脚本。",
         " * 每片一条 @font-face + unicode-range：浏览器只下载页面真正用到的片。",
+        " * url 的 ?v= 是该片内容 sha256 前 8 位：/fonts/ 响应头是一年 immutable（next.config.ts），",
+        " * 重切后靠这个参数让浏览器拿新片（#594）。",
         " * 面与许可说明见脚本头注。 */",
         "",
     ]
@@ -239,7 +246,7 @@ def write_css(manifest: dict) -> None:
         for chunk in entry["chunks"]:
             lines.append("@font-face {")
             lines.append(f"  font-family: '{face.css_family}';")
-            lines.append(f"  src: url('/fonts/{face.out}/{chunk['file']}') format('woff2');")
+            lines.append(f"  src: url('/fonts/{face.out}/{chunk['file']}?v={chunk['sha256'][:8]}') format('woff2');")
             lines.append(f"  font-weight: {face.css_weight};")
             lines.append("  font-style: normal;")
             lines.append("  font-display: swap;")

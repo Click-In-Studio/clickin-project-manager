@@ -8,6 +8,7 @@ import { countPendingTasksForUser, countUnreadReportsForUser } from "@/lib/ops/e
 import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/perm/permissions";
 import { getUserTier, PRODUCTION_TIERS } from "@/lib/account/plan";
 import ManualSaveNotice from "@/components/shell/ManualSaveNotice";
+import FontRetry from "@/components/print/FontRetry";
 import AppShell from "@/components/shell/AppShell";
 import { loadManual, manualRouteIndex } from "@/lib/help/manual";
 import { loadChangelog, latestChangelogVersion } from "@/lib/help/changelog";
@@ -77,23 +78,9 @@ export default async function RootLayout({
       lang="zh"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <head>
-        <link
-          rel="preload"
-          href="/fonts/SourceHanSerifCN-Medium.woff2"
-          as="font"
-          type="font/woff2"
-          crossOrigin="anonymous"
-        />
-        <link
-          rel="preload"
-          href="/fonts/SourceHanSerifCN-Bold.woff2"
-          as="font"
-          type="font/woff2"
-          crossOrigin="anonymous"
-        />
-      </head>
+      {/* 不再 preload 整包思源宋体：#336 B3 切片后那两个文件已不在 public/，每次进站白打两个 404（#594） */}
       <body className="h-full overflow-hidden">
+        <FontRetry />
         <ManualSaveNotice />
         <AppShell session={shellSession} productions={productions} canCreateProduction={canCreateProduction} initialUnreadCount={unreadNotificationCount} initialPendingTasks={pendingTaskCount} initialUnreadReports={unreadReportCount} helpRoutes={helpRoutes} latestChangelogVersion={latestRelease}>
           {children}
