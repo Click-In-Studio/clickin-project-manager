@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { GET, PUT } from "@/app/api/agent/instructions/route";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
-import { upsertFeishuUser } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 

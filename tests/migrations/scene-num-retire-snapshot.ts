@@ -16,7 +16,10 @@
 import os from "os";
 import path from "path";
 import type { Pool } from "pg";
-import { createProduction, getActiveVersionId, applyPatchToDB, listScenesByVersion } from "@/lib/db";
+import { createProduction } from "@/lib/production/production-db";
+import { getActiveVersionId } from "@/lib/script/version-db";
+import { applyPatchToDB } from "@/lib/script/script-patch-db";
+import { listScenesByVersion } from "@/lib/script/script-scene-character-db";
 import type { Block } from "@/lib/script/script-types";
 
 export const SCENE_NUM_RETIRE_SNAPSHOT_PATH = path.join(

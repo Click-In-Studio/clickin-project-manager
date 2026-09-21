@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
-import type { TagGroup, BlockTagValue } from "@/lib/db";
+import type { TagGroup, BlockTagValue } from "@/lib/script/script-block-tag-db";
 import type { BlockDragTarget } from "@/lib/script/script-drag-target";
 import type { LargeSelectionOperation } from "@/lib/script/script-large-selection";
 import { mdToHtml } from "@/lib/script/script-md";

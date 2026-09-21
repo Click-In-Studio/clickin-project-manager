@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { getPool } from "@/lib/pg";
 import { resolveAssetFile } from "@/lib/asset/db";
-import { getVersion, getActiveVersionId } from "@/lib/db";
+import { getVersion, getActiveVersionId } from "@/lib/script/version-db";
 import { makeProduction, cleanupProduction, makeLegacyVersion } from "../_support/factories";
 import {
   VERSION_RETIRE_SNAPSHOT_PATH,

@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { BASE_PATH } from "@/lib/base-path";
-import type { TagGroup, TagOption } from "@/lib/db";
+import type { TagGroup, TagOption } from "@/lib/script/script-block-tag-db";
 import TagFormatOptionList, { TagFormatGuide } from "@/components/import/TagFormatOptionList";
 
 type Props = {

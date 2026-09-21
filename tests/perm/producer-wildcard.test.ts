@@ -116,7 +116,7 @@ describe("制作人五行区间 = 全集", () => {
 
 describe("制作人 role 结构保护（批G，用户定谳）", () => {
   it("deleteProductionRole 对制作人 role 抛错", async () => {
-    const { deleteProductionRole } = await import("@/lib/db");
+    const { deleteProductionRole } = await import("@/lib/perm/role-db");
     const roleRes = await getPool().query<{ id: string }>(
       "SELECT id FROM production_role WHERE production_id = $1 AND name = '制作人'", [prodId]);
     await expect(deleteProductionRole(roleRes.rows[0].id, prodId)).rejects.toThrow("制作人角色不可删除");
@@ -126,7 +126,7 @@ describe("制作人 role 结构保护（批G，用户定谳）", () => {
   });
 
   it("renameProductionRole 对制作人 role 抛错", async () => {
-    const { renameProductionRole } = await import("@/lib/db");
+    const { renameProductionRole } = await import("@/lib/perm/role-db");
     const roleRes = await getPool().query<{ id: string }>(
       "SELECT id FROM production_role WHERE production_id = $1 AND name = '制作人'", [prodId]);
     await expect(renameProductionRole(roleRes.rows[0].id, prodId, "别的名字")).rejects.toThrow("制作人角色不可改名");

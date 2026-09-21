@@ -5,7 +5,8 @@ import Link from "next/link";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import styles from "@/components/ui/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
-import type { CrossProjectAnnouncement, CueWarningEntry } from "@/lib/db";
+import type { CrossProjectAnnouncement } from "@/lib/notify/announcement-db";
+import type { CueWarningEntry } from "@/lib/ops/cue-db";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);

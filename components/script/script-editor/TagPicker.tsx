@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { TagGroup, BlockTagValue } from "@/lib/db";
+import type { TagGroup, BlockTagValue } from "@/lib/script/script-block-tag-db";
 
 export default function TagPicker({
   tagGroups,

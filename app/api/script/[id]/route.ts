@@ -5,10 +5,10 @@ import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSession } from "@/lib/account/session";
 import { rejectNonHeadWrite } from "@/lib/script/head-version";
-import {
-  getProductionPermissionContext, getActiveVersionId, getVersion,
-  loadProduction, applyPatchToDB,
-} from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getActiveVersionId, getVersion } from "@/lib/script/version-db";
+import { loadProduction } from "@/lib/script/script-state-db";
+import { applyPatchToDB } from "@/lib/script/script-patch-db";
 
 async function getCtx(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);

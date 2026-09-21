@@ -1,8 +1,9 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, getBlockTagsForProduction, upsertBlockTag, deleteBlockTag } from "@/lib/db";
-import type { ProductionAccess } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getBlockTagsForProduction, upsertBlockTag, deleteBlockTag } from "@/lib/script/script-block-tag-db";
+import type { ProductionAccess } from "@/lib/perm/permission-context-db";
 
 async function guard(req: NextRequest, productionId: string) {
   const session = getSession(req.cookies);

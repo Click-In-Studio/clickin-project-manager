@@ -12,7 +12,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember, createMilestone } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
+import { createMilestone } from "@/lib/ops/milestone-db";
 import { createEventTechReq, setTaskPhases, getTechReqByProduction } from "@/lib/ops/event-db";
 import { listPhases, getPhase, setPhaseMilestones } from "@/lib/ops/phase-db";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";

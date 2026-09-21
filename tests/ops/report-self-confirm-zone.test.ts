@@ -26,7 +26,8 @@ import { getPool } from "@/lib/pg";
 import { checkNodeFreeApprovalZone } from "@/lib/perm/resource-grant-db";
 import { createProductionDept, setDeptMembers, addResourceDeptManage } from "@/lib/perm/dept-db";
 import { createProductionEvent, createEventReport } from "@/lib/ops/event-db";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
 let prodId: string;

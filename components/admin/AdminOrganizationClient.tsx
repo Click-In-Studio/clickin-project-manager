@@ -13,7 +13,7 @@ import TreePickerModal from "@/components/ui/TreePickerModal";
 import styles from "@/components/ui/my-pages.module.css";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import { BASE_PATH } from "@/lib/base-path";
-import type { MemberTag } from "@/lib/db";
+import type { MemberTag } from "@/lib/perm/member-db";
 import type { MemberStatus, MemberStatusSource } from "@/lib/perm/member-status-shared";
 import { memberStatusLabel } from "@/lib/perm/member-status-shared";
 import { isInactiveMember } from "@/lib/perm/member-status-shared";

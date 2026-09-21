@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { requireGrantGate } from "@/lib/perm/api-guard";
 import { createInvite, listInvites, revokeInvite } from "@/lib/account/invite-db";
 import { getSeatUsage, seatsFullMessage } from "@/lib/account/plan";
-import { getProductionName } from "@/lib/db";
+import { getProductionName } from "@/lib/production/production-db";
 import { sendEmail } from "@/lib/platform/email/email-send";
 import { SERVER_URL } from "@/lib/server-url";
 

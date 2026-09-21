@@ -1,7 +1,7 @@
 "use client";
 
 import { BASE_PATH } from "@/lib/base-path";
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 import type { EventScheduleItemWithParticipants, EventCallTime, EventTechReq } from "@/lib/ops/event-db";
 import { datetimeLocalToIso } from "@/lib/tz";
 import PersonCallTimeRow from "./PersonCallTimeRow";

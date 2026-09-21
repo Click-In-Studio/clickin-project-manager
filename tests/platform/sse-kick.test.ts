@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
-import { addProductionMember } from "@/lib/db";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { createDirectGrant } from "@/lib/perm/grant-audit-db";
 import { restoreMember } from "@/lib/perm/member-status";
 import { createWiki } from "@/lib/wiki/content";

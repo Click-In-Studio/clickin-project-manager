@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getUserPrimaryEmail } from "@/lib/db";
+import { getUserPrimaryEmail } from "@/lib/account/user-db";
 
 export async function GET(req: NextRequest) {
   const session = getSession(req.cookies);

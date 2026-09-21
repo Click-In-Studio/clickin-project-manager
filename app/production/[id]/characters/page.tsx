@@ -6,7 +6,10 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
 import { getCharacterPerms } from "@/lib/script/character-perms";
-import { getProductionPermissionContext, getProductionName, listCharactersByVersion, getActiveVersionId } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getProductionName } from "@/lib/production/production-db";
+import { listCharactersByVersion } from "@/lib/script/script-scene-character-db";
+import { getActiveVersionId } from "@/lib/script/version-db";
 import CharactersManager from "@/components/script/CharactersManager";
 import PageActivationGate from "@/components/perm/PageActivationGate";
 

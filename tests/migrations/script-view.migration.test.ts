@@ -11,7 +11,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { getPool } from "@/lib/pg";
-import { getMasterScriptViewId, loadPageMap, loadProduction, saveScriptConfig } from "@/lib/db";
+import { getMasterScriptViewId } from "@/lib/script/script-view-db";
+import { loadPageMap } from "@/lib/script/page-map-db";
+import { loadProduction, saveScriptConfig } from "@/lib/script/script-state-db";
 import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script/script-types";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 import { SCRIPT_VIEW_SNAPSHOT_PATH, type ScriptViewSnapshot } from "./script-view-snapshot";

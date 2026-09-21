@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { readParentAnchor } from "@/lib/wiki/input";
 import { gateNodeAnchorPlacement, resolveNodeAnchorParent } from "@/lib/node/placement";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { createWiki } from "@/lib/wiki/content";
 import { searchWiki } from "@/lib/wiki/links";

@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { toActor } from "@/lib/perm/grant-check";
 import { getProductionEvent, getScheduleItem } from "@/lib/ops/event-db";
 import { canBindGroupToSchedule } from "@/lib/ops/event-group-perm";

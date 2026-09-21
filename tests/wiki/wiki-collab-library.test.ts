@@ -6,7 +6,7 @@
 // 注册一个假 push 当订阅者，断言收到的帧。
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { registerWikiLibrarySSE, type WikiLibraryChange } from "@/lib/wiki/collab";
 import { moveNode } from "@/lib/node/db";
 import { createWiki, updateWiki, deleteWiki } from "@/lib/wiki/content";

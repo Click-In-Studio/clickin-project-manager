@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import {
   PRODUCTION_TEMPLATES, TEMPLATE_BY_TYPE, DEFAULT_TEMPLATE_KEY,
   resolveTemplate, validateTemplate, validateAllTemplates, applyTemplate,

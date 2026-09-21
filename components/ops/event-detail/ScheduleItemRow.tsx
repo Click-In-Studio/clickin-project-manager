@@ -5,7 +5,7 @@ import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/editor/SmartTextarea";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import { BASE_PATH } from "@/lib/base-path";
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 import type { EventScheduleItemWithParticipants, ScheduleItemParticipant, EventTechReq, EventDepartment } from "@/lib/ops/event-db";
 import { datetimeLocalToIso, fmtTime } from "@/lib/tz";
 import ParticipantPicker from "./ParticipantPicker";

@@ -17,22 +17,10 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFile } from "fs/promises";
 import path from "path";
 import { getPool } from "@/lib/pg";
-import {
-  addProductionMember,
-  submitAccessRequest,
-  approveAccessRequest,
-  escalateAccessRequest,
-  rejectAccessRequest,
-  cancelAccessRequest,
-  listMyAccessRequests,
-  listPendingApprovals,
-  escalateExpiredApprovals,
-  previewApprovalLadder,
-  formatPgInterval,
-  getActiveVersionId,
-  ApprovalRequestError,
-  type ApprovalChainEntry,
-} from "@/lib/db";
+import { addProductionMember } from "@/lib/perm/member-db";
+import { submitAccessRequest, approveAccessRequest, escalateAccessRequest, rejectAccessRequest, cancelAccessRequest, escalateExpiredApprovals, ApprovalRequestError } from "@/lib/approval/access-request-action-db";
+import { listMyAccessRequests, listPendingApprovals, previewApprovalLadder, formatPgInterval, type ApprovalChainEntry } from "@/lib/approval/access-request-db";
+import { getActiveVersionId } from "@/lib/script/version-db";
 import { buildApprovalLadder, classifyApprovalNode, nextStage } from "@/lib/approval/approval-routing";
 import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval/approval-stages";
 import {

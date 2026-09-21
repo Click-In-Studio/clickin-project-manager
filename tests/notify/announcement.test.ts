@@ -9,12 +9,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
-import {
-  addProductionMember,
-  createAnnouncement,
-  deleteAnnouncement,
-  markAnnouncementRead,
-} from "@/lib/db";
+import { addProductionMember } from "@/lib/perm/member-db";
+import { createAnnouncement, deleteAnnouncement, markAnnouncementRead } from "@/lib/notify/announcement-db";
 import { TEST_USER } from "../_support/helpers";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 

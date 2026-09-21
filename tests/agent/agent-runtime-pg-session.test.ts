@@ -9,7 +9,7 @@ import { newSessionId } from "@/lib/agent/runtime/ids";
 import { repairAndClassify, type RuntimeTool } from "@/lib/agent/runtime/resume";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
 
 // #367 S2：Postgres 会话树存储。真 DB + 假模型 + 真 harness：
 //   ① 会话与 user/production 的关联是一等列

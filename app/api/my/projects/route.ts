@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { listMyProductionsWithRoles } from "@/lib/db";
+import { listMyProductionsWithRoles } from "@/lib/production/production-db";
 
 export async function GET() {
   const cookieStore = await cookies();

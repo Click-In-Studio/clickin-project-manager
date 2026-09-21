@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { createWiki } from "@/lib/wiki/content";
 import {
   DOC_IMPORT_GUIDE, IMPORT_LOG_ORIGIN,

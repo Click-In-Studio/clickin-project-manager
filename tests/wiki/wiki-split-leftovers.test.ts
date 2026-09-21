@@ -5,7 +5,7 @@ import {
   createReportReply, deleteReportReply, getReportReply,
 } from "@/lib/ops/event-db";
 import { dispatchReportNotification, dispatchMentionNotifications } from "@/lib/notify/notify";
-import { mergeAccounts } from "@/lib/db";
+import { mergeAccounts } from "@/lib/account/user-db";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import {

@@ -17,7 +17,8 @@ import {
   RegistrationDeniedError,
   registrationRateLimited,
 } from "@/lib/account/registration-gate";
-import { upsertEmailUser, upsertFeishuUser } from "@/lib/db";
+import { upsertEmailUser } from "@/lib/account/email-auth-db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { createInvite } from "@/lib/account/invite-db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { getPool } from "@/lib/pg";

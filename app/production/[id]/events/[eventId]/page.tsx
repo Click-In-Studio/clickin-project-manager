@@ -3,7 +3,10 @@ import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, getProductionName, listMilestones, listProductionMembersWithRoles } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getProductionName } from "@/lib/production/production-db";
+import { listMilestones } from "@/lib/ops/milestone-db";
+import { listProductionMembersWithRoles } from "@/lib/perm/member-db";
 import {
   getProductionEvent,
   listScheduleItemsWithParticipants,

@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { requireGrantGate } from "@/lib/perm/api-guard";
 import { createInvite, createClaimInvite } from "@/lib/account/invite-db";
 import { getSeatUsage, seatsFullMessage } from "@/lib/account/plan";
-import { getProductionName } from "@/lib/db";
+import { getProductionName } from "@/lib/production/production-db";
 import { notifyUsers } from "@/lib/notify/notify";
 import { sendBotDm } from "@/lib/platform/feishu/feishu-bot";
 import { sendEmail } from "@/lib/platform/email/email-send";

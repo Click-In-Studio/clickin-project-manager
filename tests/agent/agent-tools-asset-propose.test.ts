@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { createAsset, getAsset } from "@/lib/asset/db";
 import { createWiki } from "@/lib/wiki/content";
 import { getNode, getNodeByAssetId, getNodeByWikiId, insertNode, resolveContainerNode } from "@/lib/node/db";

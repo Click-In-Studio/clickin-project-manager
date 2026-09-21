@@ -15,7 +15,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getUserNotification, markNotificationActed, rsvpCallTime } from "@/lib/notify/inbox-db";
-import { approveAccessRequest, escalateAccessRequest, rejectAccessRequest } from "@/lib/db";
+import { approveAccessRequest, escalateAccessRequest, rejectAccessRequest } from "@/lib/approval/access-request-action-db";
 import { getPool } from "@/lib/pg";
 import type { ActionEffect } from "@/lib/notify/inbox-db";
 import type { PoolClient } from "pg";

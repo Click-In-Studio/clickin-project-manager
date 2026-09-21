@@ -18,7 +18,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { getPool } from "@/lib/pg";
-import { listScenesByVersion } from "@/lib/db";
+import { listScenesByVersion } from "@/lib/script/script-scene-character-db";
 import { makeProduction, makeScene, cleanupProduction } from "../_support/factories";
 import {
   SCENE_NUM_RETIRE_SNAPSHOT_PATH,

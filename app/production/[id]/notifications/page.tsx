@@ -2,12 +2,9 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import { getSession } from "@/lib/account/session";
-import {
-  getProductionName,
-  getProductionPermissionContext,
-  getUserAnnouncementReadIds,
-  listAnnouncements,
-} from "@/lib/db";
+import { getProductionName } from "@/lib/production/production-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getUserAnnouncementReadIds, listAnnouncements } from "@/lib/notify/announcement-db";
 import ProductionNotificationsHub from "@/components/notify/ProductionNotificationsHub";
 
 export const metadata: Metadata = { title: "我的通知" };

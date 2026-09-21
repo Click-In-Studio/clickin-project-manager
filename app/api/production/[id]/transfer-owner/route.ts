@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getPool } from "@/lib/pg";
 
 // Owner 转让：ROOT OPERATION——仅现任 owner 或平台 admin。

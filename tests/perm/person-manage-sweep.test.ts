@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember, createCueList } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
+import { createCueList } from "@/lib/ops/cue-list-db";
 import { recomputeAndRevokeGrants } from "@/lib/perm/dept-db";
 import { getPool } from "@/lib/pg";
 

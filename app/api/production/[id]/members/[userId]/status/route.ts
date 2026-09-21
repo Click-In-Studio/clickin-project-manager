@@ -12,7 +12,8 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval/approval-stages";
-import { getProductionPermissionContext, isProductionArchived } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { isProductionArchived } from "@/lib/production/production-db";
 import { getPool } from "@/lib/pg";
 import {
   selfExitMember,

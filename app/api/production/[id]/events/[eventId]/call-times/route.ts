@@ -2,7 +2,8 @@ import { type NextRequest } from "next/server";
 import { hasEventDomainView } from "@/lib/ops/event-permissions";
 import { toActor, hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { batchGetFeishuOpenIds } from "@/lib/account/db-feishu";
 import { getProductionEvent, listEventCallTimes, createEventCallTime } from "@/lib/ops/event-db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 

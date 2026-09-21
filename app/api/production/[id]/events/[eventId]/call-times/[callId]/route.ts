@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 
 import { toActor, hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getProductionEvent, updateEventCallTime, deleteEventCallTime } from "@/lib/ops/event-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; callId: string }> };

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { toActor } from "@/lib/perm/grant-check";
 import { hasEventDomainView, hasEventContentEdit } from "@/lib/ops/event-permissions";
 import { getPool } from "@/lib/pg";

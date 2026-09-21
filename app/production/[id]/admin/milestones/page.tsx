@@ -3,7 +3,9 @@ import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "里程碑" };
 
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
-import { getProductionPermissionContext, getProductionName, listMilestones } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getProductionName } from "@/lib/production/production-db";
+import { listMilestones } from "@/lib/ops/milestone-db";
 import { getSession } from "@/lib/account/session";
 import { cookies } from "next/headers";
 import AdminMilestonesClient from "@/components/admin/AdminMilestonesClient";

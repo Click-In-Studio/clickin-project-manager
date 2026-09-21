@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
-import { copyProductionRole } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { copyProductionRole } from "@/lib/perm/role-db";
 
 type Ctx = { params: Promise<{ id: string; roleId: string }> };
 

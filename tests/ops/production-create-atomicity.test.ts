@@ -27,7 +27,7 @@ vi.mock("@/lib/production/production-template", async (importOriginal) => {
   };
 });
 
-const { createProduction } = await import("@/lib/db");
+const { createProduction } = await import("@/lib/production/production-db");
 
 beforeEach(() => { templateFails.value = false; });
 

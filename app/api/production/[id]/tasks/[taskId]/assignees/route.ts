@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { batchGetFeishuOpenIds } from "@/lib/account/db-feishu";
 import { getTechReqByProduction, setTechReqAssignees, getProductionEvent } from "@/lib/ops/event-db";
 import { feishuPlatform } from "@/lib/platform/feishu";
 import { canAssignTechReq } from "@/lib/ops/event-permissions";

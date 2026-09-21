@@ -1,6 +1,10 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, getActiveVersionId, getFirstRehearsalMarkerLabel, getMasterScriptViewId, getScriptConfig, getVersion, saveScriptConfig } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getActiveVersionId, getVersion } from "@/lib/script/version-db";
+import { getFirstRehearsalMarkerLabel } from "@/lib/script/script-marker-label-db";
+import { getMasterScriptViewId } from "@/lib/script/script-view-db";
+import { getScriptConfig, saveScriptConfig } from "@/lib/script/script-state-db";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { broadcastEvent } from "@/lib/server-cache";
 import { rejectNonHeadWrite } from "@/lib/script/head-version";

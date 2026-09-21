@@ -6,7 +6,7 @@ import { BASE_PATH } from "@/lib/base-path";
 import { useVisibleEventSource } from "@/hooks/useVisibleEventSource";
 import MountPointAssets from "../assets/MountPointAssets";
 import RelatedWikiChips from "../wiki/RelatedWikiChips";
-import type { SceneDetail } from "@/lib/db";
+import type { SceneDetail } from "@/lib/script/script-scene-character-db";
 import DurationInput from "@/components/ui/DurationInput";
 import { parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";

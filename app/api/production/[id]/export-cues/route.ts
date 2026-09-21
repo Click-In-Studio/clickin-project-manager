@@ -1,7 +1,10 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
-import { getProductionPermissionContext, listCues, loadProduction, getActiveVersionId } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { listCues } from "@/lib/ops/cue-db";
+import { loadProduction } from "@/lib/script/script-state-db";
+import { getActiveVersionId } from "@/lib/script/version-db";
 import { canAccessNode } from "@/lib/perm/grant-template";
 import { resolveWikiToSheet, getFirstSheetId, writeSheetData, type CellValue } from "@/lib/platform/feishu/feishu-sheet";
 import { formatCuePosition } from "@/lib/ops/cue-export";

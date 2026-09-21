@@ -1,5 +1,5 @@
 import { getPool } from "../pg";
-import { addProductionMember, setMemberRoles } from "../db";
+import { addProductionMember, setMemberRoles } from "../perm/member-db";
 import { seatsFullForNewMember } from "./plan";
 
 // #156 邀请制数据层：开放链接 + 定向邮件邀请（production_invite 一表两用）。

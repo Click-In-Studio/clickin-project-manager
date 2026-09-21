@@ -3,7 +3,7 @@
 import PageHeader from "@/components/ui/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 import { ROLE_GROUPS } from "@/lib/perm/roles";
 import { isInactiveMember, memberStatusLabel } from "@/lib/perm/member-status-shared";
 

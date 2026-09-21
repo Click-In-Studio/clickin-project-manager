@@ -5,11 +5,9 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/account/session";
-import {
-  getProductionName,
-  getProductionPermissionContext,
-  listProductionMembers,
-} from "@/lib/db";
+import { getProductionName } from "@/lib/production/production-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { listProductionMembers } from "@/lib/perm/member-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getDramaturgyTreeConfig } from "@/lib/node/anchors";
 import { getWiki } from "@/lib/wiki/content";

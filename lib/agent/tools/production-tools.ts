@@ -9,16 +9,11 @@
 // 职位/通知天然 self-scoped；里程碑/通讯录/部门树成员可见）。未来需要更细
 // 权限键的工具（tech reqs 等）在 requireMember 之上再叠 hasPermission。
 
-import {
-  getUserProfile,
-  getProductionMeta,
-  getProductionOwnerInfo,
-  getProductionPermissionContext,
-  listProductionMembers,
-  listProductionMembersWithRoles,
-  listMyProductionsWithRoles,
-  listMilestones,
-} from "@/lib/db";
+import { getUserProfile } from "@/lib/account/user-db";
+import { getProductionMeta, getProductionOwnerInfo, listMyProductionsWithRoles } from "@/lib/production/production-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { listProductionMembers, listProductionMembersWithRoles } from "@/lib/perm/member-db";
+import { listMilestones } from "@/lib/ops/milestone-db";
 import { listUserNotifications } from "@/lib/notify/inbox-db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/perm/permissions";

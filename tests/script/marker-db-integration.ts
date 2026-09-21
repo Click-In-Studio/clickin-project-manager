@@ -2,17 +2,13 @@ import { TEST_OWNER } from "../_support/helpers";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import {
-  applyPatchToDB,
-  createProduction,
-  deleteProduction,
-  writeVersionContent,
-  getActiveVersionId,
-  loadPageMap,
-  getMarkerLabelIndex,
-  savePageMap,
-  saveScriptConfig,
-} from "../../lib/db";
+import { applyPatchToDB } from "@/lib/script/script-patch-db";
+import { createProduction, deleteProduction } from "@/lib/production/production-db";
+import { writeVersionContent } from "@/lib/script/script-version-content-db";
+import { getActiveVersionId } from "@/lib/script/version-db";
+import { loadPageMap, savePageMap } from "@/lib/script/page-map-db";
+import { getMarkerLabelIndex } from "@/lib/script/script-marker-label-db";
+import { saveScriptConfig } from "@/lib/script/script-state-db";
 import { getPool } from "../../lib/pg";
 import { DEFAULT_SCRIPT_CONFIG, type Block } from "../../lib/script/script-types";
 

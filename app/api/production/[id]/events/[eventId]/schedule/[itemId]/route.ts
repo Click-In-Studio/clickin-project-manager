@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { hasEventContentEdit } from "@/lib/ops/event-permissions";
 import { toActor } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getProductionEvent, getScheduleItem, updateScheduleItem, deleteScheduleItem, setScheduleItemDepartments } from "@/lib/ops/event-db";
 
 type Ctx = { params: Promise<{ id: string; eventId: string; itemId: string }> };

@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { parseNodeKey } from "@/lib/perm/grant-template";
 import { listGovernanceGrants, createDirectGrant, revokeGrantById } from "@/lib/perm/grant-audit-db";
 import { kickRevokedStreams } from "@/lib/perm/revoke-streams";

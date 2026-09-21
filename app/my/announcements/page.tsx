@@ -4,7 +4,8 @@ export const metadata: Metadata = { title: "公告与风险提醒" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { listAnnouncementsForUser, listCueWarningsForUser, getUserAllReadAnnouncementIds } from "@/lib/db";
+import { listAnnouncementsForUser, getUserAllReadAnnouncementIds } from "@/lib/notify/announcement-db";
+import { listCueWarningsForUser } from "@/lib/ops/cue-db";
 import AnnouncementsClient from "@/components/notify/AnnouncementsClient";
 
 export default async function AnnouncementsPage() {

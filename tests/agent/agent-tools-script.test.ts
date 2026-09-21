@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import { makeProduction, cleanupProduction, makeScene, makeCharacter, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember, applyPatchToDB } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
+import { applyPatchToDB } from "@/lib/script/script-patch-db";
 import { getPool } from "@/lib/pg";
 import { DENIED_NOT_MEMBER } from "@/lib/agent/tools/production-tools";
 import {

@@ -3,7 +3,8 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/agent/sessions/route";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { makeProduction, cleanupProduction, setProductionTier, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 
 // production 会话签发的守卫测试：sessionKey 由后端签发是隔离的根——
 // 成员才发 production key，非成员 403，格式非法 400。

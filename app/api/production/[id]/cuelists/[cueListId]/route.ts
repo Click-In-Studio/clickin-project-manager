@@ -1,10 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import {
-  getProductionPermissionContext,
-  getCueList, updateCueList, deleteCueList,
-  hasListAccess,
-} from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getCueList, updateCueList, deleteCueList, hasListAccess } from "@/lib/ops/cue-list-db";
 import { listProductionDeptNames } from "@/lib/perm/dept-db";
 import { listCueListGrants, listCueListDeptAccess } from "@/lib/perm/resource-grant-db";
 import { canAccessNode } from "@/lib/perm/grant-template";

@@ -11,11 +11,9 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import {
-  upsertFeishuUser,
-  addProductionMember,
-  getProductionPermissionContext,
-} from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import {
   selfExitMember,
   suspendMember,
@@ -249,7 +247,7 @@ describe("席位", () => {
 describe("账号合并", () => {
   it("状态与轨迹跟着身份走，合并不会把已离组的人悄悄复活", async () => {
     // 合并要求两个账号无共同项目，故另起一个演出
-    const { mergeAccounts } = await import("@/lib/db");
+    const { mergeAccounts } = await import("@/lib/account/user-db");
     const keep = (await upsertFeishuUser(`test-open-${shortId()}`, `留存${shortId()}`, null, false)).userId;
     const del = (await upsertFeishuUser(`test-open-${shortId()}`, `待并${shortId()}`, null, false)).userId;
     const owner2 = (await upsertFeishuUser(`test-open-${shortId()}`, `并owner${shortId()}`, null, false)).userId;

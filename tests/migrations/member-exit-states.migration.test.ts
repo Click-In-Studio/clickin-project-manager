@@ -150,7 +150,7 @@ describe("invariance verification", () => {
 
   it.skipIf(!snapshot)("suspended 成员拿不到权限上下文（访问闸门已生效）", async () => {
     const s = snapshot!;
-    const { getProductionPermissionContext } = await import("@/lib/db");
+    const { getProductionPermissionContext } = await import("@/lib/perm/permission-context-db");
     // 成员行还在、授权行还在，但 status <> 'active' → 不是 member，也不是 owner
     const access = await getProductionPermissionContext(s.pendingExitUserId, false, s.prodId);
     expect(access).toBeNull();

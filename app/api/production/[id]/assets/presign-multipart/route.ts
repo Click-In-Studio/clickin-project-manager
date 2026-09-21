@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { canUploadAssetBytes } from "@/lib/asset/perm";
 import { createMultipartUpload, presignedUploadPart, assetR2Key } from "@/lib/r2";
 

@@ -6,7 +6,7 @@ import styles from "../ui/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 import type { CueList, CueListGrant, CueListDeptAccess } from "@/lib/ops/cue-list-types";
 
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 import CueListDetail from "./CueListDetail";
 import ChevronIcon from "../ui/ChevronIcon";
 import ProductionTopMenu, {

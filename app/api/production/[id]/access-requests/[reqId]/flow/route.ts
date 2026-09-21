@@ -8,7 +8,8 @@
  */
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getAccessRequestFlow, getProductionPermissionContext } from "@/lib/db";
+import { getAccessRequestFlow } from "@/lib/approval/access-request-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 
 type Ctx = { params: Promise<{ id: string; reqId: string }> };
 

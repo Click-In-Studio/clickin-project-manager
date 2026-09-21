@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import { readFile } from "fs/promises";
 import path from "path";
 import { buildApprovalTimeline } from "@/lib/approval/approval-timeline";
-import type { ApprovalChainEntry, ApprovalRequest } from "@/lib/db";
+import type { ApprovalChainEntry, ApprovalRequest } from "@/lib/approval/access-request-db";
 
 const U_SUBJECT = "u-subject";
 const U_SUP     = "u-supervisor";

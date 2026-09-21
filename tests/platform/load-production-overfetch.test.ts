@@ -16,15 +16,10 @@ import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { POST as mentionResolvePOST } from "@/app/api/production/[id]/mention-resolve/route";
-import {
-  applyPatchToDB,
-  getMarkerLabelIndex,
-  getScriptConfig,
-  listTextBlockIdsByVersion,
-  loadProduction,
-  loadVersionBlocks,
-  loadVersionBlocksByIds,
-} from "@/lib/db";
+import { applyPatchToDB } from "@/lib/script/script-patch-db";
+import { getMarkerLabelIndex } from "@/lib/script/script-marker-label-db";
+import { getScriptConfig, loadProduction } from "@/lib/script/script-state-db";
+import { listTextBlockIdsByVersion, loadVersionBlocks, loadVersionBlocksByIds } from "@/lib/script/script-block-read-db";
 import type { Block } from "@/lib/script/script-types";
 import type { ContentMentionAttrs } from "@/lib/editor/mention-types";
 import { makeProduction, makeScene, makeCharacter, cleanupProduction } from "../_support/factories";

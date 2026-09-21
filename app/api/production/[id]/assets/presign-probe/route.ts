@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { canUploadAssetBytes } from "@/lib/asset/perm";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { presignedPut } from "@/lib/r2";
 
 // Fixed key — probe uploads always overwrite this object, no accumulation.

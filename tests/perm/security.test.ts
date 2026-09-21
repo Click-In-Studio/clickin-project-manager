@@ -4,13 +4,9 @@
  * reach data belonging to a different production.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import {
-  createCueList, deleteCueList, getCueList, updateCueList,
-  createCue, getCue, deleteCue,
-  listScenesByVersion, getSceneById,
-  listCharactersByVersion, getCharacterById,
-  listCueLists,
-} from "@/lib/db";
+import { createCueList, deleteCueList, getCueList, updateCueList, listCueLists } from "@/lib/ops/cue-list-db";
+import { createCue, getCue, deleteCue } from "@/lib/ops/cue-db";
+import { listScenesByVersion, getSceneById, listCharactersByVersion, getCharacterById } from "@/lib/script/script-scene-character-db";
 import { createProductionEvent, getProductionEvent, deleteProductionEvent } from "@/lib/ops/event-db";
 import { TEST_USER } from "../_support/helpers";
 import { makeProduction, makeScene, makeCharacter, cleanupProduction, shortId } from "../_support/factories";

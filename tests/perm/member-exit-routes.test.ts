@@ -8,7 +8,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
-import { addProductionMember, upsertFeishuUser } from "@/lib/db";
+import { addProductionMember } from "@/lib/perm/member-db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { getMemberStatus, restoreMember } from "@/lib/perm/member-status";
 import { getPool } from "@/lib/pg";
 import { MAX_APPROVAL_COMMENT_LENGTH } from "@/lib/approval/approval-stages";

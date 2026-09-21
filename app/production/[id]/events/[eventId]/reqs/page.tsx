@@ -5,7 +5,8 @@ export const metadata: Metadata = { title: "技术需求" };
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, listProductionMembersWithRoles } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { listProductionMembersWithRoles } from "@/lib/perm/member-db";
 import { getUserTechReqGrantIdsInEvent } from "@/lib/perm/resource-grant-db";
 import {
   getProductionEvent,

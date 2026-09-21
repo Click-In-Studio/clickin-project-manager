@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
-import { getProductionPermissionContext, getActiveVersionId } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getActiveVersionId } from "@/lib/script/version-db";
 import AssetPageClient from "@/components/assets/AssetPageClient";
 import PageActivationGate from "@/components/perm/PageActivationGate";
 

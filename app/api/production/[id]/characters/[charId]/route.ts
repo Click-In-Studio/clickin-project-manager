@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import {
-  getProductionPermissionContext, patchCharacterMeta, setCharacterMembers,
-  getActiveVersionId, listCharactersByVersion, applyPatchToDB, getVersion,
-} from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { patchCharacterMeta, setCharacterMembers, listCharactersByVersion } from "@/lib/script/script-scene-character-db";
+import { getActiveVersionId, getVersion } from "@/lib/script/version-db";
+import { applyPatchToDB } from "@/lib/script/script-patch-db";
 import { tickAndBroadcastSeq } from "@/lib/server-cache";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { rejectNonHeadWrite } from "@/lib/script/head-version";

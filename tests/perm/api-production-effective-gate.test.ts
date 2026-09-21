@@ -14,7 +14,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
 import { POST as postAnnouncement } from "@/app/api/production/[id]/announcements/route";

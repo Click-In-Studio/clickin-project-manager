@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { upsertFeishuUser } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { validateTemplateNodes, type ApprovalTemplateNode } from "@/lib/approval/approval-flow-template";
 import {

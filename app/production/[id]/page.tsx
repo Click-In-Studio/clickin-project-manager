@@ -1,7 +1,8 @@
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { getProductionName, getProductionPermissionContext } from "@/lib/db";
+import { getProductionName } from "@/lib/production/production-db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import ProductionHomeClient from "@/components/ops/ProductionHomeClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {

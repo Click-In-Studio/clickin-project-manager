@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import type { PermissionContext } from "@/lib/perm/permissions";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getAsset, updateAsset, deleteAsset } from "@/lib/asset/db";
 import { isAssetType } from "@/lib/asset/types";
 import { canViewAsset } from "@/lib/asset/perm";

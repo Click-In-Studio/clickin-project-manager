@@ -1,6 +1,9 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, getCueList, listCues, createCue, getVersion, hasListAccess } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getCueList, hasListAccess } from "@/lib/ops/cue-list-db";
+import { listCues, createCue } from "@/lib/ops/cue-db";
+import { getVersion } from "@/lib/script/version-db";
 import { canAccessNode } from "@/lib/perm/grant-template";
 import type { PermissionContext } from "@/lib/perm/permissions";
 import type { CueAnchor } from "@/lib/ops/cue-types";

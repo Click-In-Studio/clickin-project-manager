@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { verifyConflictToken } from "@/lib/platform/email/email-tokens";
-import { getAccountSummary, getSharedProductions } from "@/lib/db";
+import { getAccountSummary, getSharedProductions } from "@/lib/account/user-db";
 
 export async function GET(req: NextRequest) {
   const cookieStore = await cookies();

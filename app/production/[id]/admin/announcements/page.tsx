@@ -3,7 +3,9 @@ import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "通知公告" };
 
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
-import { getProductionPermissionContext, getProductionName, listAnnouncements } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getProductionName } from "@/lib/production/production-db";
+import { listAnnouncements } from "@/lib/notify/announcement-db";
 import { getSession } from "@/lib/account/session";
 import { cookies } from "next/headers";
 import AdminAnnouncementsClient from "@/components/admin/AdminAnnouncementsClient";

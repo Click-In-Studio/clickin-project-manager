@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { getUserIdentities } from "@/lib/db";
+import { getUserIdentities } from "@/lib/account/user-db";
 
 export async function GET() {
   const cookieStore = await cookies();

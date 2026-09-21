@@ -15,7 +15,7 @@
  */
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getPool } from "@/lib/pg";
 
 import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";

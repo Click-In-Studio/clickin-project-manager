@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { toActor } from "@/lib/perm/grant-check";
 import { canViewWiki } from "@/lib/wiki/perm";
 import { hasWikiPresence, updateWikiPresence } from "@/lib/wiki/collab";

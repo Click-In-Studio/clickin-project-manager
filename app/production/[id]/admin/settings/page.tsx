@@ -3,7 +3,8 @@ import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "项目信息" };
 
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
-import { getProductionPermissionContext, getProductionMeta } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getProductionMeta } from "@/lib/production/production-db";
 import { getSession } from "@/lib/account/session";
 import { cookies } from "next/headers";
 import AdminSettingsClient from "@/components/admin/AdminSettingsClient";

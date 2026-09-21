@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import { getUserPrimaryEmail } from "@/lib/db";
+import { getUserPrimaryEmail } from "@/lib/account/user-db";
 
 // 打印水印身份来源：email identity 任一（primary 优先）→ feishu_user.email fallback
 

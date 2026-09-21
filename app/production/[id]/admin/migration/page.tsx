@@ -6,11 +6,12 @@ import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
-import { getProductionPermissionContext, getProductionName } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getProductionName } from "@/lib/production/production-db";
 import PageHeader from "@/components/ui/PageHeader";
 import AdminMigrationSection from "@/components/admin/AdminMigrationSection";
 import BulkInviteCard from "@/components/admin/BulkInviteCard";
-import { listProductionRolesWithPermissions } from "@/lib/db";
+import { listProductionRolesWithPermissions } from "@/lib/perm/role-db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import { getSeatUsage } from "@/lib/account/plan";
 

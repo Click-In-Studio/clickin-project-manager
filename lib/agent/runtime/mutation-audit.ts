@@ -188,7 +188,9 @@ const READERS: Record<string, ScopeReader> = {
       const out = new Map<string, Snapshot>();
       if (!productionId || ids.length === 0) return out;
       // 定点装被写的那几行 + 角色名，别为审计快照扛整本（#461）
-      const { getActiveVersionId, loadVersionBlocksByIds, listCharactersByVersion } = await import("@/lib/db");
+      const { getActiveVersionId } = await import("@/lib/script/version-db");
+      const { loadVersionBlocksByIds } = await import("@/lib/script/script-block-read-db");
+      const { listCharactersByVersion } = await import("@/lib/script/script-scene-character-db");
       const versionId = await getActiveVersionId(productionId);
       if (!versionId) return out;
       const [blocks, characters] = await Promise.all([
@@ -211,7 +213,8 @@ const READERS: Record<string, ScopeReader> = {
     },
     listIds: async ({ productionId }) => {
       if (!productionId) return [];
-      const { getActiveVersionId, listTextBlockIdsByVersion } = await import("@/lib/db");
+      const { getActiveVersionId } = await import("@/lib/script/version-db");
+      const { listTextBlockIdsByVersion } = await import("@/lib/script/script-block-read-db");
       const versionId = await getActiveVersionId(productionId);
       if (!versionId) return [];
       return listTextBlockIdsByVersion(versionId);
@@ -248,14 +251,16 @@ async function latestWikiRevisionId(wikiId: string): Promise<string | null> {
 
 async function listScenes(productionId: string | null) {
   if (!productionId) return [];
-  const { getActiveVersionId, listScenesByVersion } = await import("@/lib/db");
+  const { getActiveVersionId } = await import("@/lib/script/version-db");
+  const { listScenesByVersion } = await import("@/lib/script/script-scene-character-db");
   const versionId = await getActiveVersionId(productionId);
   return versionId ? listScenesByVersion(versionId) : [];
 }
 
 async function listCharacters(productionId: string | null) {
   if (!productionId) return [];
-  const { getActiveVersionId, listCharactersByVersion } = await import("@/lib/db");
+  const { getActiveVersionId } = await import("@/lib/script/version-db");
+  const { listCharactersByVersion } = await import("@/lib/script/script-scene-character-db");
   const versionId = await getActiveVersionId(productionId);
   return versionId ? listCharactersByVersion(versionId) : [];
 }

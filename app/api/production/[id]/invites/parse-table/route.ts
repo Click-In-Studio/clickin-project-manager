@@ -10,7 +10,7 @@ import {
   validateInviteSchema,
   toInviteRows,
 } from "@/lib/platform/feishu/feishu-bitable";
-import { getProductionRoleNames } from "@/lib/db";
+import { getProductionRoleNames } from "@/lib/perm/role-db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import { getPool } from "@/lib/pg";
 

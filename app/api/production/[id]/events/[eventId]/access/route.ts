@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { hasEventDomainView } from "@/lib/ops/event-permissions";
 import { toActor } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getProductionEvent } from "@/lib/ops/event-db";
 import {
   getEventAccess,

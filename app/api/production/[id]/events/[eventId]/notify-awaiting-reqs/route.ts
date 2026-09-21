@@ -10,7 +10,8 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, batchGetFeishuOpenIds } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { batchGetFeishuOpenIds } from "@/lib/account/db-feishu";
 import { getProductionEvent, listEventTechReqs, getEventDepartment } from "@/lib/ops/event-db";
 import { buildUrgeReqCard } from "@/lib/platform/feishu/feishu-bot";
 import { SERVER_URL } from "@/lib/server-url";

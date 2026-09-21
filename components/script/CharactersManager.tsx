@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import { useAgentMutation } from "@/lib/agent/agent-mutations";
-import type { CharacterDetail } from "@/lib/db";
+import type { CharacterDetail } from "@/lib/script/script-scene-character-db";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, PRODUCTION_TOOLBAR_STAGE, ProductionTopMenuDivider, useProductionToolbar } from "../shell/ProductionTopMenu";
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";

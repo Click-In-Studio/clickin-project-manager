@@ -5,7 +5,7 @@ import {
 } from "@/lib/script/script-scene-details";
 import { makeBlock, makeMarkerBlock } from "@/lib/script/script-block-stream";
 import type { Block, Scene } from "@/lib/script/script-types";
-import type { TagGroup } from "@/lib/db";
+import type { TagGroup } from "@/lib/script/script-block-tag-db";
 
 /** 场次详情 / TOC 顺序的纯函数（#487 S1 从 ScriptEditor.tsx 搬出）。 */
 const scenes: Scene[] = [

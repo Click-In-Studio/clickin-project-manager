@@ -5,7 +5,8 @@ export const metadata: Metadata = { title: "导入章节信息" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, getActiveVersionId } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getActiveVersionId } from "@/lib/script/version-db";
 import ImportScenesWizardPage from "@/components/import/ImportScenesWizardPage";
 
 export default async function ImportScenesPage({ params }: { params: Promise<{ id: string }> }) {

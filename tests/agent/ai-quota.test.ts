@@ -12,7 +12,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
-import { upsertFeishuUser, deleteProduction } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { deleteProduction } from "@/lib/production/production-db";
 import {
   creditsFromUsd, creditsFromEmbeddingTokens, aiLimitsForTier, redeemPlanCode,
   CREDIT_USD, AI_UNIT_PRICES_USD_PER_M, USER_TIERS, FREE_TIER_AI,

@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import {
   deleteTaskByProduction,
   getProductionEvent,

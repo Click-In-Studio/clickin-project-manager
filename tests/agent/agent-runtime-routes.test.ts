@@ -4,7 +4,7 @@ import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import type { AssistantMessage, StreamFn } from "../../vendor/openclaw/packages/llm-core/src/types";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, setProductionTier, shortId } from "../_support/factories";
-import { upsertFeishuUser } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
 import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent/chat/stream-reducer";

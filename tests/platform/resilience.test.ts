@@ -10,12 +10,9 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
-import {
-  createProduction, deleteProduction, getProductionName,
-  createCueList, deleteCueList, getCueList,
-  createCue, getCue, deleteCue, updateCue, listCues,
-  archiveProduction, unarchiveProduction, isProductionArchived,
-} from "@/lib/db";
+import { createProduction, deleteProduction, getProductionName, archiveProduction, unarchiveProduction, isProductionArchived } from "@/lib/production/production-db";
+import { createCueList, deleteCueList, getCueList } from "@/lib/ops/cue-list-db";
+import { createCue, getCue, deleteCue, updateCue, listCues } from "@/lib/ops/cue-db";
 import { listProductionEvents } from "@/lib/ops/event-db";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { TEST_USER, TEST_OWNER } from "../_support/helpers";

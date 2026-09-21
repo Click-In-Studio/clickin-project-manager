@@ -5,7 +5,7 @@ import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import React, { useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import type { CueList, CueListGrant, CueListDeptAccess } from "@/lib/ops/cue-list-types";
-import type { MemberWithRoles } from "@/lib/db";
+import type { MemberWithRoles } from "@/lib/perm/member-db";
 
 type Props = {
   productionId: string;

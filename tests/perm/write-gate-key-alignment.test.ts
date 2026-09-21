@@ -37,7 +37,8 @@ import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
 import { createProductionDept, setDeptMembers } from "@/lib/perm/dept-db";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
 // ── ① 纯函数层 ────────────────────────────────────────────────────────────────

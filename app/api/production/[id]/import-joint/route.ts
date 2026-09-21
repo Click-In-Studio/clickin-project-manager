@@ -4,7 +4,8 @@ import { getSession } from "@/lib/account/session";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSheetValues } from "@/lib/import/feishu-sheet";
 import { parseSceneNum } from "@/lib/import/parse-scene-num";
-import { getProductionPermissionContext, getVersion, getActiveVersionId } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getVersion, getActiveVersionId } from "@/lib/script/version-db";
 import { rejectNonHeadWrite } from "@/lib/script/head-version";
 import type { JointImportMarker, JointImportMappingRow, JointImportPreview, SceneColMap, ScriptColMap } from "@/lib/import/types";
 

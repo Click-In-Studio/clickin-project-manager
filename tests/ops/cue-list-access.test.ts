@@ -17,10 +17,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getPool } from "@/lib/pg";
-import {
-  createCueList, hasListAccess, listCueListsWithAccess,
-  getUserAllowedCueTypes, getCueList,
-} from "@/lib/db";
+import { createCueList, hasListAccess, listCueListsWithAccess, getUserAllowedCueTypes, getCueList } from "@/lib/ops/cue-list-db";
 import {
   getCueListGrantLevel, getCueListAccess,
   selfConfirmCueListGrant, checkCueListFreeApprovalZone,

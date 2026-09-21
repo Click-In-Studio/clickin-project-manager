@@ -4,7 +4,8 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { verifyCardToken } from "@/lib/notify/card-token";
-import { getProductionPermissionContext, listProductionMembers } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { listProductionMembers } from "@/lib/perm/member-db";
 import {
   getReportByProduction,
   getProductionEvent,

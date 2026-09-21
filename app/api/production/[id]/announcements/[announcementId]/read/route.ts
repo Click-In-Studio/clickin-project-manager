@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, getAnnouncement, markAnnouncementRead } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { getAnnouncement, markAnnouncementRead } from "@/lib/notify/announcement-db";
 
 type Ctx = { params: Promise<{ id: string; announcementId: string }> };
 

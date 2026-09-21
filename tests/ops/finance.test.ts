@@ -16,7 +16,8 @@ import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { PATCH as patchCategory } from "@/app/api/production/[id]/finance/categories/[categoryId]/route";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
-import { upsertFeishuUser, addProductionMember } from "@/lib/db";
+import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { classifyApprovalNode, buildApprovalLadder } from "@/lib/approval/approval-routing";
 import {
   approveExpense, cancelExpense, createBudgetCategory, deleteBudgetCategory,

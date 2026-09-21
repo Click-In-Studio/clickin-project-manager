@@ -4,7 +4,7 @@ export const metadata: Metadata = { title: "项目公告" };
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext } from "@/lib/db";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 
 export default async function ProductionAnnouncementsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
