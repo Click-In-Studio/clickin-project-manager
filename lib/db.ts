@@ -1042,15 +1042,6 @@ export type CharacterDetail = Character & {
   memberIds: string[]; // IDs of constituent characters (only non-empty for aggregate)
 };
 
-// Upserts a production member with roles and an optional production-specific photo.
-// Photo only overwrites if a new value is provided.
-export async function listProductionCharacters(productionId: string): Promise<CharacterDetail[]> {
-  console.error(`[fallback] listProductionCharacters called without versionId for production ${productionId} — caller should use listCharactersByVersion directly`);
-  const versionId = await getActiveVersionId(productionId);
-  if (!versionId) return [];
-  return listCharactersByVersion(versionId);
-}
-
 export async function setCharacterMembers(productionId: string, aggregateId: string, memberIds: string[]): Promise<void> {
   const client = await getPool().connect();
   try {

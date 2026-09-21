@@ -8,7 +8,7 @@ import {
   createCueList, deleteCueList, getCueList, updateCueList,
   createCue, getCue, deleteCue,
   listScenesByVersion, getSceneById,
-  listProductionCharacters, getCharacterById,
+  listCharactersByVersion, getCharacterById,
   listCueLists,
 } from "@/lib/db";
 import { createProductionEvent, getProductionEvent, deleteProductionEvent } from "@/lib/ops/event-db";
@@ -62,9 +62,9 @@ describe("production isolation — reads", () => {
     expect(theirs.every((s) => !ourIds.has(s.id))).toBe(true);
   });
 
-  it("listProductionCharacters for PROD_B cannot see PROD_A characters", async () => {
-    const ours   = await listProductionCharacters(prodA.prodId);
-    const theirs = await listProductionCharacters(prodB.prodId);
+  it("listCharactersByVersion for PROD_B cannot see PROD_A characters", async () => {
+    const ours   = await listCharactersByVersion(prodA.versionId);
+    const theirs = await listCharactersByVersion(prodB.versionId);
     const ourIds = new Set(ours.map((c) => c.id));
     expect(theirs.every((c) => !ourIds.has(c.id))).toBe(true);
   });
