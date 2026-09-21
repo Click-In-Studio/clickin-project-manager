@@ -194,9 +194,6 @@ npm run db -- up          # 空库：从 baseline 跑到最新（dbmate，见 §
 
 # 已经用旧方式（psql -f db/schema.sql）建过库的：只记账，不重跑
 npm run db -- mark-baseline
-
-# Agent 库（先修改 db/setup-agent-db.sql 中的 CHANGE_ME 密码，或直接用 peer auth）
-psql -f db/setup-agent-db.sql
 ```
 
 > Linux / Docker 环境需切换到 postgres 超级用户：`sudo -u postgres psql ...`
@@ -418,12 +415,9 @@ if (!await hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"))
 
 ## 6. 数据库与 Migration
 
-### 6.1 两个数据库
+### 6.1 数据库
 
-| 库 | 用途 | 连接配置 |
-|----|------|---------|
-| `script_editor` | 主业务数据 | `PG*` 环境变量 |
-| `click_in_agent` | 历史遗留（当前代码不读 `AGENT_PG*`） | — |
+只有一个库 `script_editor`（`PG*` 环境变量）。OpenClaw 时代的 `click_in_agent` 库与 `agent_user` 角色已退役（#367 / #603）：代码不读 `AGENT_PG*`，主库上的授权由 migration 回收，老机器上残留的库与角色按 DEPLOY.md「退役 Agent 库」一次性清掉。
 
 ### 6.2 Schema 文件
 
@@ -432,7 +426,6 @@ if (!await hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"))
 - **`db/schema-fingerprint.txt`** — 由 `db/fingerprint.sql` 从 schema.sql 建出的空库算出的结构指纹（列 / 约束 / 索引 / 枚举 / 自有函数 / 触发器，一行一对象）。CI 与 CD 都拿它比对，**生成不手改**。
 - **`db/bootstrap-roles.sql`** — 新环境一次性引导：应用角色 `script_editor` 与默认权限。schema.sql 从不含 GRANT。
 - **`db/legacy/`** — dbmate 接管前的 144 支历史迁移，只读，见其 README。不要往里加文件，不要引用它写新东西。
-- **`db/setup-agent-db.sql`** — Agent 库的一次性初始化脚本。
 
 ### 6.3 Schema 演进（dbmate）
 
