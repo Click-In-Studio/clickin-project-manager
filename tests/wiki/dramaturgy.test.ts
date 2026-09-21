@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { listScenesByVersion, getSceneById, listProductionCharacters, getCharacterById } from "@/lib/db";
+import { listScenesByVersion, getSceneById, listCharactersByVersion, getCharacterById } from "@/lib/db";
 import { makeProduction, makeScene, makeCharacter, cleanupProduction } from "../_support/factories";
 
 let prodId: string;
@@ -43,8 +43,8 @@ describe("scenes", () => {
 });
 
 describe("characters", () => {
-  it("listProductionCharacters returns the created character", async () => {
-    const chars = await listProductionCharacters(prodId);
+  it("listCharactersByVersion returns the created character", async () => {
+    const chars = await listCharactersByVersion(versionId);
     expect(chars.some((c) => c.id === charId)).toBe(true);
   });
 

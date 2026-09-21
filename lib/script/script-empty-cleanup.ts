@@ -1,4 +1,4 @@
-import type { SceneDetail } from "@/lib/db";
+import type { SceneDetail } from "./script-scene-character-db";
 import { isTextBlock } from "@/lib/script/script-block-layout";
 import { isEmptyTextBlock, markerSegmentIsOpeningWithoutScene } from "@/lib/script/script-block-stream";
 import { buildMarkerLabelIndex } from "@/lib/script/script-generated-labels";

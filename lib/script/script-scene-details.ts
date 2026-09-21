@@ -1,4 +1,5 @@
-import type { TagGroup, BlockTagValue, SceneDetail } from "@/lib/db";
+import type { TagGroup, BlockTagValue } from "./script-block-tag-db";
+import type { SceneDetail } from "./script-scene-character-db";
 import { formatDuration, parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
 import { isMarkerBlock } from "@/lib/script/script-marker-blocks";
