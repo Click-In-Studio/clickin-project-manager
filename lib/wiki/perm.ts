@@ -26,14 +26,13 @@ type WikiVisibilityRow = { id: string; is_public: boolean; node_id: string | nul
 
 /** report 边的宿主可见判据（对齐 reports/[reportId]/page.tsx 的门）：
  *  已发布 ∧ 事件域 view；或 draft 四通道（report 实例行 / publication@view /
- *  event reports@view / 部门参与者）。
- *  裸 hasGrant（#604）：只从 canViewWiki 的 owner 旁路**之后**被调，
- *  这里不重复旁路。 */
+ *  event reports@view / 部门参与者）。 */
 async function reportEdgeVisible(
   actor: GrantActor,
   productionId: string,
   edge: { reportId: string; eventId: string; published: boolean },
 ): Promise<boolean> {
+  // 裸 hasGrant（#604 刻意不旁路）：只从 canViewWiki 的 owner 旁路**之后**被调，这里不重复。
   if (edge.published && await hasEventDomainView(actor, productionId)) return true;
   if (await hasGrant(actor.userId, productionId, "report", edge.reportId, "meta", "view")) return true;
   if (await hasGrant(actor.userId, productionId, "report", edge.reportId, "publication", "view")) return true;

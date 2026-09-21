@@ -169,7 +169,7 @@ describe("resolveDefaultLanding", () => {
 
   // #604 收尾：block / cue / scene 三条干系门改走 hasEffectiveGrant 族——
   // owner 非成员零行要能落到目录，只持单枚键的成员只开自己那条。
-  it("干系门：owner 非成员零行三条都过；只持 scene meta@view 的成员 block 落 null", async () => {
+  it("干系门：owner 非成员零行三条都过；只持单枚键的成员只开自己那条（cue 按 cue_list 实例）", async () => {
     const { rows: [{ owner_id }] } = await getPool().query<{ owner_id: string }>(
       `SELECT owner_id FROM production WHERE id = $1`, [prodId]);
     await getPool().query(
@@ -177,16 +177,35 @@ describe("resolveDefaultLanding", () => {
     const owner = { userId: owner_id, isAdmin: false, isOwner: true };
     const [blockId] = await makeBlocks(prodId, versionId, 1);
     const sceneId = await makeScene(prodId, versionId, { name: "尾声" });
-    expect(await resolveDefaultLanding(owner, prodId, { kind: "mount", mountType: "block", mountId: blockId })).toBeTruthy();
-    expect(await resolveDefaultLanding(owner, prodId, { kind: "mount", mountType: "scene", mountId: sceneId })).toBeTruthy();
+    const listId = shortId(); const cueStable = shortId();
+    await getPool().query(
+      `INSERT INTO cue_list (id, production_id, name, created_by) VALUES ($1, $2, '音响CUE', $3::uuid)`,
+      [listId, prodId, userId]);
+    await getPool().query(
+      `INSERT INTO cue (id, cue_list_id, number, start_kind, end_kind, cue_id)
+       VALUES ($1, $2, '1', 'gap', 'gap', $3)`, [shortId(), listId, cueStable]);
+    const block = { kind: "mount", mountType: "block", mountId: blockId } as const;
+    const scene = { kind: "mount", mountType: "scene", mountId: sceneId } as const;
+    const cue = { kind: "mount", mountType: "cue", mountId: cueStable } as const;
+    expect(await resolveDefaultLanding(owner, prodId, block)).toBeTruthy();
+    expect(await resolveDefaultLanding(owner, prodId, scene)).toBeTruthy();
+    expect(await resolveDefaultLanding(owner, prodId, cue)).toBeTruthy();
 
+    // cue 门是实例级（cue_list_id）：持别的表的行不算
     const sceneOnly = await newMember(prodId);
     await getPool().query(
       `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
-       VALUES ($1, $2::uuid, 'scene', '*', 'meta', 'view', 'auto')`,
+       VALUES ($1, $2::uuid, 'scene', '*', 'meta', 'view', 'auto'),
+              ($1, $2::uuid, 'cue_list', 'cl_other', 'cues', 'view', 'auto')`,
       [prodId, sceneOnly]);
-    expect(await resolveDefaultLanding(actorOf(sceneOnly), prodId, { kind: "mount", mountType: "scene", mountId: sceneId })).toBeTruthy();
-    expect(await resolveDefaultLanding(actorOf(sceneOnly), prodId, { kind: "mount", mountType: "block", mountId: blockId })).toBeNull();
+    expect(await resolveDefaultLanding(actorOf(sceneOnly), prodId, scene)).toBeTruthy();
+    expect(await resolveDefaultLanding(actorOf(sceneOnly), prodId, block)).toBeNull();
+    expect(await resolveDefaultLanding(actorOf(sceneOnly), prodId, cue)).toBeNull();
+    await getPool().query(
+      `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES ($1, $2::uuid, 'cue_list', $3, 'cues', 'view', 'auto')`,
+      [prodId, sceneOnly, listId]);
+    expect(await resolveDefaultLanding(actorOf(sceneOnly), prodId, cue)).toBeTruthy();
   });
 
   it("readLandingContext：非法形状一律 undefined", () => {
