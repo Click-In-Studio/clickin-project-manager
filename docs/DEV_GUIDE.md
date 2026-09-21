@@ -77,7 +77,7 @@
 | 域 | `lib/` 收纳 | `components/` 收纳 | 测试归 |
 |---|---|---|---|
 | `agent/` | `runtime/` `tools/` `memory/` `chat/` 四个子目录 + 注入安全、指令、页面/UI 上下文、工具标签、`ai-quota` `llm-chat` | AgentPopout、AI 指令 / 用量卡片、`ai-target`、wiki 提案预览 | `agent/` |
-| `script/` | `script-*`（方言、标记、分页、选区、焦点…）、`template/`（剧本版式模版）、`head-version` `print-css`、场次/角色字段权限 | ScriptEditor 及其对话框、场次/角色管理、戏剧构作与其表格视图组件 | `script/` |
+| `script/` | `script-*`（方言、标记、分页、选区、焦点…）、`*-db`（`version-db` `script-view-db` `page-map-db` 及 #486 拆出的剧本读写）、`template/`（剧本版式模版）、`head-version` `print-css`、场次/角色字段权限 | ScriptEditor 及其对话框、场次/角色管理、戏剧构作与其表格视图组件 | `script/` |
 | `editor/` | `editor-*`（块模型）、`tiptap-*`（扩展）、`line-merge` `table-ops` `remark-columns`、粘贴处理、`mention-types` | 块菜单 / 气泡菜单 / 表格工具、`SmartTextarea` | `wiki/`（编辑器原语的测试跟文档库走） |
 | `wiki/` | 文档库 | 文档页、挂载面板、`WikiPrintPage`（文档打印，与剧本打印无关） | `wiki/` |
 | `asset/` | 素材、元数据、头像（`avatar-*`） | `assets/`：上传、预览、挂载、分享 | `asset/` |
