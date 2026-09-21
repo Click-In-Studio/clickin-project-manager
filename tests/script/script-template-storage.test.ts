@@ -127,6 +127,23 @@ describe("落库与读出", () => {
   });
 });
 
+describe("saveScriptConfig 是一个事务（#629）", () => {
+  it("第 3 步 script_view 写失败（page_layout 违反 CHECK）→ 整体回滚，production.script_config 不变", async () => {
+    await saveScriptConfig(prodId, versionId, { ...DEFAULT_SCRIPT_CONFIG, stageDelimOpen: "（", stageDelimClose: "）" });
+    const before = await getPool().query<{ c: unknown }>("SELECT script_config AS c FROM production WHERE id = $1", [prodId]);
+    expect(before.rows[0].c).toMatchObject({ stageDelimOpen: "（", stageDelimClose: "）" });
+
+    await expect(saveScriptConfig(prodId, versionId, {
+      ...DEFAULT_SCRIPT_CONFIG,
+      stageDelimOpen: "[", stageDelimClose: "]",
+      pageLayout: "not-a-layout" as never,
+    })).rejects.toThrow(/check/i);
+
+    const after = await getPool().query<{ c: unknown }>("SELECT script_config AS c FROM production WHERE id = $1", [prodId]);
+    expect(after.rows[0].c).toEqual(before.rows[0].c);
+  });
+});
+
 describe("门：版式字段走 script_view/<主本>@edit，其余剧本设置走 scene meta/name@edit", () => {
   let sceneOnly: string;
   let viewEditor: string;

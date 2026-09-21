@@ -42,16 +42,17 @@ export async function createMasterScriptView(productionId: string, client: PoolC
   return id;
 }
 
-export async function getMasterScriptViewId(productionId: string): Promise<string | null> {
-  const res = await getPool().query<{ master_view_id: string | null }>(
+export async function getMasterScriptViewId(productionId: string, client: PoolClient | Pool = getPool()): Promise<string | null> {
+  const res = await client.query<{ master_view_id: string | null }>(
     "SELECT master_view_id FROM production WHERE id = $1", [productionId],
   );
   return res.rows[0]?.master_view_id ?? null;
 }
 
-/** 写路径的自愈：主本缺席（迁移前建的演出且迁移未跑）就补一条，别让版式保存静默丢失。 */
-export async function ensureMasterScriptView(productionId: string): Promise<string> {
-  const existing = await getMasterScriptViewId(productionId);
+/** 写路径的自愈：主本缺席（迁移前建的演出且迁移未跑）就补一条，别让版式保存静默丢失。
+ *  传 client ＝调用方在事务里（saveScriptConfig，#629），补建随外层一起提交 / 回滚。 */
+export async function ensureMasterScriptView(productionId: string, client: PoolClient | Pool = getPool()): Promise<string> {
+  const existing = await getMasterScriptViewId(productionId, client);
   if (existing) return existing;
-  return createMasterScriptView(productionId, getPool());
+  return createMasterScriptView(productionId, client);
 }
