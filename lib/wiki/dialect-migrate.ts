@@ -1,7 +1,8 @@
 // wiki 正文方言 v1 → v2 归一化（语法大纲 §2/§3/§5 + §7 迁移方案）。
 //
 // 一份实现，三处共用：
-//   1. 存量迁移（scripts/migrate-wiki-dialect.ts，一次性扫全量 wiki.body）
+//   1. 存量迁移（原 scripts/migrate-wiki-dialect.ts，一次性扫全量 wiki.body；已跑完，
+//      随备份表 #606 退役删除）
 //   2. 编辑器载入兼容（SmartTextarea markdown 模式；读历史版本/回滚场景）
 //   3. 渲染侧兼容（WikiMarkdown 渲染 wiki_revision 历史正文——历史不迁移）
 //

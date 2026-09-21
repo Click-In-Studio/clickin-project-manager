@@ -901,18 +901,6 @@ COL|version|marker_structure_revision|bigint|int8|NO|0
 COL|version|parent_version_id|text|text|YES|
 COL|version|production_id|text|text|NO|
 COL|version|script_config|jsonb|jsonb|NO|'{}'::jsonb
-COL|wiki_alias_backup_node_tree|created_at|timestamp with time zone|timestamptz|NO|now()
-COL|wiki_alias_backup_node_tree|created_by|uuid|uuid|YES|
-COL|wiki_alias_backup_node_tree|display_title|text|text|YES|
-COL|wiki_alias_backup_node_tree|id|text|text|NO|
-COL|wiki_alias_backup_node_tree|parent_id|uuid|uuid|YES|
-COL|wiki_alias_backup_node_tree|production_id|text|text|NO|
-COL|wiki_alias_backup_node_tree|sort_key|text|text|YES|
-COL|wiki_alias_backup_node_tree|target_id|text|text|NO|
-COL|wiki_alias_backup_node_tree|target_type|text|text|NO|'wiki'::text
-COL|wiki_body_backup_dialect_v2|body|text|text|NO|
-COL|wiki_body_backup_dialect_v2|taken_at|timestamp with time zone|timestamptz|NO|now()
-COL|wiki_body_backup_dialect_v2|wiki_id|uuid|uuid|NO|
 COL|wiki_collab_outbox|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|wiki_collab_outbox|frame|text|text|NO|
 COL|wiki_collab_outbox|id|bigint|int8|NO|nextval('wiki_collab_outbox_id_seq'::regclass)
@@ -960,11 +948,6 @@ COL|wiki_revision|title|text|text|YES|
 COL|wiki_revision|wiki_id|uuid|uuid|NO|
 COL|wiki_tag|tag|text|text|NO|
 COL|wiki_tag|wiki_id|uuid|uuid|NO|
-COL|wiki_tree_backup_node_tree|is_public|boolean|bool|YES|
-COL|wiki_tree_backup_node_tree|listable|boolean|bool|YES|
-COL|wiki_tree_backup_node_tree|parent_id|uuid|uuid|YES|
-COL|wiki_tree_backup_node_tree|sort_key|text|text|YES|
-COL|wiki_tree_backup_node_tree|wiki_id|uuid|uuid|YES|
 COL|wiki|body|text|text|NO|''::text
 COL|wiki|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|wiki|created_by|uuid|uuid|YES|
@@ -1418,11 +1401,6 @@ CON|user_profile|user_profile_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_
 CON|version|version_parent_version_id_fkey|FOREIGN KEY (parent_version_id) REFERENCES version(id) ON DELETE SET NULL
 CON|version|version_pkey|PRIMARY KEY (id)
 CON|version|version_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
-CON|wiki_alias_backup_node_tree|wiki_alias_backup_node_tree_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
-CON|wiki_alias_backup_node_tree|wiki_alias_backup_node_tree_pkey|PRIMARY KEY (id)
-CON|wiki_alias_backup_node_tree|wiki_alias_backup_node_tree_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
-CON|wiki_body_backup_dialect_v2|wiki_body_backup_dialect_v2_pkey|PRIMARY KEY (wiki_id)
-CON|wiki_body_backup_dialect_v2|wiki_body_backup_dialect_v2_wiki_id_fkey|FOREIGN KEY (wiki_id) REFERENCES wiki(id) ON DELETE CASCADE
 CON|wiki_collab_outbox|wiki_collab_outbox_pkey|PRIMARY KEY (id)
 CON|wiki_comment|wiki_comment_parent_comment_id_fkey|FOREIGN KEY (parent_comment_id) REFERENCES wiki_comment(id) ON DELETE CASCADE
 CON|wiki_comment|wiki_comment_pkey|PRIMARY KEY (id)
@@ -1733,8 +1711,6 @@ IDX|user_platform_identity|user_platform_identity_platform_id_platform_user_id_k
 IDX|user_profile|user_profile_pkey|CREATE UNIQUE INDEX user_profile_pkey ON public.user_profile USING btree (user_id)
 IDX|version|version_pkey|CREATE UNIQUE INDEX version_pkey ON public.version USING btree (id)
 IDX|version|version_production_idx|CREATE INDEX version_production_idx ON public.version USING btree (production_id, created_at)
-IDX|wiki_alias_backup_node_tree|wiki_alias_backup_node_tree_pkey|CREATE UNIQUE INDEX wiki_alias_backup_node_tree_pkey ON public.wiki_alias_backup_node_tree USING btree (id)
-IDX|wiki_body_backup_dialect_v2|wiki_body_backup_dialect_v2_pkey|CREATE UNIQUE INDEX wiki_body_backup_dialect_v2_pkey ON public.wiki_body_backup_dialect_v2 USING btree (wiki_id)
 IDX|wiki_collab_outbox|wiki_collab_outbox_created_idx|CREATE INDEX wiki_collab_outbox_created_idx ON public.wiki_collab_outbox USING btree (created_at)
 IDX|wiki_collab_outbox|wiki_collab_outbox_pkey|CREATE UNIQUE INDEX wiki_collab_outbox_pkey ON public.wiki_collab_outbox USING btree (id)
 IDX|wiki_comment|wiki_comment_pkey|CREATE UNIQUE INDEX wiki_comment_pkey ON public.wiki_comment USING btree (id)
