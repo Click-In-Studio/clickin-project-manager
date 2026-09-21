@@ -9,6 +9,9 @@
  *   · 三个 CSS 变量的**首选**家族都有 @font-face（首选面不能是系统字体）
  *   · 每个家族的 unicode-range 并集覆盖 CJK 统一表意文字、CJK 标点、全角形式
  *   · manifest 与 CSS 一致（同一个生成器的两份产物）
+ *   · 字频分层的声明顺序（#594 D）：每个 family × 字重里 cjk-common 必须是最后一条
+ *     CJK 面、cjk-rare 紧挨其前、两者范围整段 U+4E00-9FFF——「后声明优先、没字形落到
+ *     前一条」全靠这个顺序；块片被排到后面就等于每页都拉整套块片
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync, statSync } from "fs";
@@ -19,7 +22,7 @@ const ROOT = process.cwd();
 const css = readFileSync(path.join(ROOT, "app/fonts.css"), "utf8");
 const globals = readFileSync(path.join(ROOT, "app/globals.css"), "utf8");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "public/fonts/manifest.json"), "utf8")) as {
-  faces: Record<string, { css_family: string; chunks: Array<{ file: string; range: string; sha256: string }> }>;
+  faces: Record<string, { css_family: string; chunks: Array<{ file: string; range: string; sha256: string; glyphs: number }> }>;
 };
 
 /** src 是不带 query 的文件路径；version 是 url 上的 ?v= */
@@ -124,4 +127,42 @@ describe("每个家族的 unicode-range 覆盖剧本需要的区间", () => {
     const weights = [...new Set(faces.filter(f => f.family === "SourceHanSerif").map(f => f.weight))].sort();
     expect(weights).toEqual(["400 600", "700 900"]);
   });
+});
+
+describe("字频分层的声明顺序（后声明优先，没字形落到前面的块片）", () => {
+  const groups = new Map<string, Face[]>();
+  for (const f of faces) {
+    const k = `${f.family} ${f.weight}`;
+    groups.set(k, [...(groups.get(k) ?? []), f]);
+  }
+  for (const [key, group] of groups) {
+    it(`${key}：cjk-common 是最后一条 CJK 面，cjk-rare 紧挨其前，范围都是整段 U+4E00-9FFF`, () => {
+      const cjk = group.filter(f => f.range[1] >= 0x4e00 && f.range[0] <= 0x9fff);
+      expect(cjk.length, "没有覆盖 CJK 的面").toBeGreaterThanOrEqual(2);
+      const last = cjk[cjk.length - 1];
+      const beforeLast = cjk[cjk.length - 2];
+      expect(last.src.endsWith("/cjk-common.woff2"), `最后一条是 ${last.src}`).toBe(true);
+      expect(beforeLast.src.endsWith("/cjk-rare.woff2"), `倒数第二条是 ${beforeLast.src}`).toBe(true);
+      expect(last.range).toEqual([0x4e00, 0x9fff]);
+      expect(beforeLast.range).toEqual([0x4e00, 0x9fff]);
+      // 块片不许再含 GB2312 的字（否则常用字有两处来源，谁先谁后就看运气）
+      for (const f of cjk.slice(0, -2)) expect(f.src).not.toMatch(/cjk-(common|rare)/);
+    });
+  }
+
+  it("manifest：有 CJK 片的面，cjk-common 字数 = GB2312 一级 3755，cjk-rare = 二级 3008", () => {
+    const coversCjk = (range: string) => {
+      const m = /^U\+([0-9A-F]+)-([0-9A-F]+)$/i.exec(range)!;
+      return parseInt(m[2], 16) >= 0x4e00 && parseInt(m[1], 16) <= 0x9fff;
+    };
+    const cjkFaces = Object.entries(manifest.faces).filter(([, face]) => face.chunks.some(c => coversCjk(c.range)));
+    expect(cjkFaces.length, "至少三个剧本面都有 CJK").toBeGreaterThanOrEqual(3);
+    for (const [out, face] of cjkFaces) {
+      const common = face.chunks.find(c => c.file === "cjk-common.woff2");
+      const rare = face.chunks.find(c => c.file === "cjk-rare.woff2");
+      expect(common?.glyphs, `${out} cjk-common`).toBe(3755);
+      expect(rare?.glyphs, `${out} cjk-rare`).toBe(3008);
+    }
+  });
+
 });
