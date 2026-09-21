@@ -55,7 +55,7 @@ const SCRIPT_WRITE = [
  *  #510 起也带资产写面两工具（改名/移动，走确认卡）——分层不是权限（不变量 2） */
 const DOC_FAMILY = [
   "production.asset_list", "production.asset_propose_rename", "production.asset_propose_move",
-  "production.doc_outline", "production.doc_read", "production.doc_search",
+  "production.doc_outline", "production.doc_read", "production.doc_search", "production.doc_page_ocr",
   "production.doc_import_guide", "production.doc_import_log_create", "production.doc_import_log_append",
 ];
 
@@ -106,6 +106,8 @@ const CLOSURE: Record<string, string[]> = {
   "production.doc_outline": ["production.asset_list", "production.doc_import_guide"],
   "production.doc_read": ["production.doc_outline", "production.doc_import_guide"],
   "production.doc_search": ["production.doc_outline", "production.doc_import_guide"],
+  // #453 OCR：页序与「哪些页是栅格化」来自 outline
+  "production.doc_page_ocr": ["production.doc_outline", "production.doc_import_guide"],
   "production.doc_import_log_create": ["production.doc_import_guide"],
   // #510 资产写面：id 来自 asset_list 或 wiki_tree 的 [文件] 行（与工具描述一致）；移动的目标父也来自 wiki_tree
   "production.asset_propose_rename": ["production.asset_list", "production.wiki_tree"],

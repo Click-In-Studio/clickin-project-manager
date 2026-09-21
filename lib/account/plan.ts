@@ -56,6 +56,20 @@ export function creditsFromEmbeddingTokens(tokens: number): number {
 }
 
 /**
+ * MMP 多模态感知服务（#453 / #618）的 GPU 档计价：自有卡按「每 GPU 小时成本」折算，
+ * 按算力节点上报的**实际推理毫秒**计费（`timings_ms`，不含媒体下载、排队与引擎冷启动——
+ * 用户不该为卡冷付钱）。$0.40/h 是 4090 级折旧 + 电按峰值利用率的保守估
+ * （同「按 peak 价记」纪律），一周真账后复核（#618）。cpu 档记 0 但照记行。
+ */
+export const MMP_GPU_USD_PER_HOUR = 0.40;
+
+export function creditsFromMmpCompute(tier: string, computeMs: number): number {
+  if (tier === "cpu") return 0;
+  if (!Number.isFinite(computeMs) || computeMs <= 0) return 0;
+  return creditsFromUsd((computeMs / 3_600_000) * MMP_GPU_USD_PER_HOUR);
+}
+
+/**
  * 档位额度（credit）。标定基准：线上实测一次问答 ≈ 12k credit ≈ $0.005
  * （input 4.6k + cache_read 16k + output 2.4k，2026-08-29 ai_usage 实测均值）。
  *   free    100k/日 ≈ 8 次、400k/周 ≈ 33 次   —— 只够个人会话轻用

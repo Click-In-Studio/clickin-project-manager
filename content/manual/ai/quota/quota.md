@@ -7,12 +7,12 @@ who: 所有使用 AI 助手的人
 tier: all
 platform: [desktop, mobile]
 related: [ai/assistant/chat, start/join/new-production, account/profile/preferences]
-updated: 2026-09-18
+updated: 2026-09-21
 ---
 
 ## 这是什么
 
-AI 用量按 **credit** 计——它是按实际成本折算的数字，一次普通问答大约一万多 credit，读一整场剧本会多一些。有每日和每周两道上限：
+AI 用量按 **credit** 计——它是按实际成本折算的数字，一次普通问答大约一万多 credit，读一整场剧本会多一些；让它识别扫描页文字，每页几百到一两千 credit。有每日和每周两道上限：
 
 | 等级 | 每日 | 每周 |
 |---|---|---|
