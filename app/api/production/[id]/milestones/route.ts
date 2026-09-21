@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, listMilestones, createMilestone } from "@/lib/db";
 
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const { id: productionId } = await ctx.params;
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, productionId, "milestone", "*", "*", "create"))) {
+  if (!access || !await hasEffectiveGrant(access.permCtx, productionId, "milestone", "*", "*", "create")) {
     return Response.json({ error: "无权操作" }, { status: 403 });
   }
 

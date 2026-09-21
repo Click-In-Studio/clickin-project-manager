@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getActiveVersionId, getVersion, loadProduction, getEstimatedPageMap } from "@/lib/db";
 import { getPool } from "@/lib/pg";
@@ -56,7 +56,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   );
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view")))
+  if (!await hasEffectiveGrant(permCtx, productionId, "script", "*", "blocks", "view"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const q = req.nextUrl.searchParams.get("q") ?? "";

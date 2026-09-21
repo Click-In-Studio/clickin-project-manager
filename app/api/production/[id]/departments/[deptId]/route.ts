@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { hasEventDomainView } from "@/lib/ops/event-permissions";
-import { toActor, hasGrant } from "@/lib/perm/grant-check";
+import { toActor, hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import {
@@ -20,7 +20,7 @@ async function requireManage(req: NextRequest, productionId: string) {
   );
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
   const { permCtx, isArchived } = access;
-  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, productionId, "dept", "*", "*", "create")))
+  if (!await hasEffectiveGrant(permCtx, productionId, "dept", "*", "*", "create"))
     return { session, deny: Response.json({ error: "权限不足" }, { status: 403 }), isArchived };
   return { session, deny: null, isArchived };
 }

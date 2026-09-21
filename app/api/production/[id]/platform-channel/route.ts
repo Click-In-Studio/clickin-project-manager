@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
 import { getProductionPermissionContext } from "@/lib/db";
@@ -33,7 +33,7 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/production/[
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!(permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "integrations", "edit"))) {
+  if (!await hasEffectiveGrant(permCtx, id, "production", "*", "integrations", "edit")) {
     return Response.json({ error: "无权配置通知通道" }, { status: 403 });
   }
 
@@ -63,7 +63,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/productio
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!(permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "integrations", "edit"))) {
+  if (!await hasEffectiveGrant(permCtx, id, "production", "*", "integrations", "edit")) {
     return Response.json({ error: "无权配置通知通道" }, { status: 403 });
   }
 

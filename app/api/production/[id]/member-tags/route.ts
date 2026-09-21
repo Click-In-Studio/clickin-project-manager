@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, listMemberTags, createMemberTag } from "@/lib/db";
 
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { id: productionId } = await ctx.params;
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, productionId, "member", "*", "roles", "edit"))) {
+  if (!access || !await hasEffectiveGrant(access.permCtx, productionId, "member", "*", "roles", "edit")) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
 

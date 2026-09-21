@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { renameProductionRole, deleteProductionRole } from "@/lib/db";
@@ -11,7 +11,7 @@ async function requireGate(req: NextRequest, productionId: string, sub: string, 
   if (!session) return { deny: Response.json({ error: "未登录" }, { status: 401 }) };
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return { deny: Response.json({ error: "无权访问" }, { status: 403 }) };
-  if (!session.isAdmin && !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, productionId, "role", "*", sub, verb)))
+  if (!await hasEffectiveGrant(access.permCtx, productionId, "role", "*", sub, verb))
     return { deny: Response.json({ error: "权限不足" }, { status: 403 }) };
   if (access.isArchived) return { deny: Response.json({ error: "已归档" }, { status: 403 }) };
   return { deny: null };

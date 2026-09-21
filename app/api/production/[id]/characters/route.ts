@@ -5,7 +5,7 @@ import {
   getActiveVersionId, applyPatchToDB, getVersion,
 } from "@/lib/db";
 import { tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { canAccessNode } from "@/lib/perm/grant-template";
 import { rejectNonHeadWrite } from "@/lib/script/head-version";
 
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
+  if (!await hasEffectiveGrant(permCtx, id, "script", "*", "blocks", "view")) {
     return Response.json({ error: "无权访问" }, { status: 403 });
   }
   const resolved = await resolveProductionVersion(id, req.nextUrl.searchParams.get("versionId") ?? undefined);

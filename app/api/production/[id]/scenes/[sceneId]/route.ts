@@ -4,7 +4,7 @@ import {
   getProductionPermissionContext, getActiveVersionId, loadProduction, applyPatchToDB, getVersion, listScenesByVersion,
 } from "@/lib/db";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { SCENE_FIELD_SUBS, touchedSceneFields } from "@/lib/script/scene-field-perms";
 import { diffState } from "@/lib/script/script-ops";
 import {
@@ -61,15 +61,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/production
   // 逐字段判权限：任一字段无权即整体 403。不做「静默丢弃无权字段」——
   // 前端会以为保存成功，实际内容没落库。
   const touched = touchedSceneFields(body);
-  if (!current.permCtx.isAdmin && !current.permCtx.isOwner) {
-    for (const field of touched) {
-      const sub = SCENE_FIELD_SUBS[field];
-      if (!await hasGrant(current.permCtx.userId, id, "scene", "*", sub, "edit")) {
-        return Response.json(
-          { error: `权限不足：node:scene/*/${sub}@edit` },
-          { status: 403 },
-        );
-      }
+  for (const field of touched) {
+    const sub = SCENE_FIELD_SUBS[field];
+    if (!await hasEffectiveGrant(current.permCtx, id, "scene", "*", sub, "edit")) {
+      return Response.json(
+        { error: `权限不足：node:scene/*/${sub}@edit` },
+        { status: 403 },
+      );
     }
   }
   let next = current.result.state;
@@ -103,13 +101,13 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/productio
   if (plan.status === "blocked" || (plan.status === "choice" && !body.operation)) {
     return Response.json({ ok: false, plan }, { status: plan.status === "blocked" ? 409 : 300 });
   }
-  if (!current.permCtx.isAdmin && !current.permCtx.isOwner && !await hasGrant(current.permCtx.userId, id, "scene", sceneId, "*", "delete")) {
+  if (!await hasEffectiveGrant(current.permCtx, id, "scene", sceneId, "*", "delete")) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   }
   const operation: MarkerDeleteOperation = plan.status === "ready"
     ? plan.operation
     : { type: body.operation === "whole" ? "whole" : "marker-only", markerId: sceneId };
-  if (operation.type === "whole" && !current.permCtx.isAdmin && !current.permCtx.isOwner && !await hasGrant(current.permCtx.userId, id, "script", "*", "blocks", "edit")) {
+  if (operation.type === "whole" && !await hasEffectiveGrant(current.permCtx, id, "script", "*", "blocks", "edit")) {
     return Response.json({ error: "删除整段内容需要剧本编辑权限" }, { status: 403 });
   }
   const next = executeMarkerDeletion(current.result.state, operation, createId);

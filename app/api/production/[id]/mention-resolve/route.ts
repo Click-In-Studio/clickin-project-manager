@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext, getActiveVersionId, getMarkerLabelIndex, getVersion, getEstimatedPageMap } from "@/lib/db";
 import { getPool } from "@/lib/pg";
@@ -56,8 +56,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   // 标题=目录级信息沿引用流出（账本 §4.1），内容门在 wiki 页面/API 自身。
   // 无剧本权限不再整请求 403（混合正文会连累 wiki/@ 解析）：剧本域 kinds
   // 软跳过（labels/urls 留 null，客户端回退编辑期快照），wiki 恒可解析
-  const canResolveScript = permCtx.isAdmin || permCtx.isOwner
-    || await hasGrant(permCtx.userId, productionId, "script", "*", "blocks", "view");
+  const canResolveScript = await hasEffectiveGrant(permCtx, productionId, "script", "*", "blocks", "view");
   const effectiveMentions = canResolveScript
     ? mentions
     : mentions.map(m => (m?.kind === "wiki" ? m : null));

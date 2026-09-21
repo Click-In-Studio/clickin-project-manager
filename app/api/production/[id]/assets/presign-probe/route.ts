@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/db";
 import { presignedPut } from "@/lib/r2";
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view")))
+  if (!await hasEffectiveGrant(permCtx, id, "script", "*", "blocks", "view"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const { url } = presignedPut(PROBE_R2_KEY, "application/octet-stream", 120);
