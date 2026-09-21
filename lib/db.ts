@@ -117,15 +117,6 @@ export type VersionedDbBlock = DbBlock & { snapshotId: string };
 export type DbScene = Scene & { sortOrder: number };
 export type DbChar = Character & { sortOrder: number };
 
-export type FlushPayload = {
-  upsertBlocks: DbBlock[];
-  deleteBlockIds: string[];
-  upsertChars: DbChar[];
-  deleteCharIds: string[];
-  upsertScenes: DbScene[];
-  deleteSceneIds: string[];
-};
-
 export type VersionedFlushPayload = {
   upsertBlocks: VersionedDbBlock[];
   deleteSnapshotIds: string[];  // snapshot_ids to remove from this version
@@ -942,28 +933,6 @@ export async function saveScriptConfig(productionId: string, versionId: string |
   }
 }
 
-export async function saveOpeningChapterMarkerId(
-  productionId: string,
-  versionId: string,
-  openingChapterMarkerId: string | null,
-  showOpeningChapter?: boolean,
-): Promise<void> {
-  const config = showOpeningChapter === undefined
-    ? { openingChapterMarkerId }
-    : { openingChapterMarkerId, showOpeningChapter };
-  await getPool().query(
-    "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2 AND production_id = $3",
-    [JSON.stringify(config), versionId, productionId]
-  );
-}
-
-export async function saveScriptStageDelimiters(productionId: string, stageDelimOpen: string, stageDelimClose: string): Promise<void> {
-  await getPool().query(
-    "UPDATE production SET script_config = script_config || $1::jsonb WHERE id = $2",
-    [JSON.stringify({ stageDelimOpen, stageDelimClose }), productionId]
-  );
-}
-
 // ── page_map（页码缓存；随剧本簇拆 page-map-db）─────────────────────────────
 
 /** Load the pre-computed page map for a production (keyed by script_view id → blockId → page). */
@@ -1309,199 +1278,6 @@ export async function flushToDBVersioned(
   if (driftJobs.length > 0) await Promise.allSettled(driftJobs);
 
   return { newSnapshotIds };
-}
-
-/** Legacy flush used by management pages (import-script, import-scenes).
- *  Operates on the active editing version; no CoW for blocks. */
-export async function flushToDB(productionId: string, payload: FlushPayload): Promise<void> {
-  const { upsertBlocks: rawUpsertBlocks, deleteBlockIds, upsertChars, deleteCharIds, upsertScenes, deleteSceneIds } = payload;
-  const upsertBlocks = withLegacyOwnershipProjection(withMarkerOwnership(rawUpsertBlocks));
-  const mayChangeMarkerStructure = upsertBlocks.length > 0 || deleteBlockIds.length > 0;
-  if (!upsertBlocks.length && !deleteBlockIds.length && !upsertChars.length &&
-      !deleteCharIds.length && !upsertScenes.length && !deleteSceneIds.length) return;
-
-  const versionId = await getActiveVersionId(productionId);
-
-  // ── Phase 1: snapshot pre-flush state needed for cue drift ────────────────
-  const oldContents = new Map<string, string>();
-  const blockAdj = new Map<string, { prevId: string | null; nextId: string | null }>();
-
-  if (upsertBlocks.length > 0) {
-    const ids = upsertBlocks.map(b => b.id);
-    const res = await getPool().query<{ id: string; content: string }>(
-      "SELECT id, content FROM script WHERE id = ANY($1::text[])", [ids]
-    );
-    for (const r of res.rows) oldContents.set(r.id, r.content);
-  }
-
-  if (deleteBlockIds.length > 0 && versionId) {
-    const res = await getPool().query<{ id: string; prev_id: string | null; next_id: string | null }>(
-      `WITH ordered AS (
-         SELECT sv.snapshot_id AS id,
-           LAG(sv.snapshot_id)  OVER (ORDER BY sv.sort_key) AS prev_id,
-           LEAD(sv.snapshot_id) OVER (ORDER BY sv.sort_key) AS next_id
-         FROM script_version sv WHERE sv.version_id = $1
-       )
-       SELECT id, prev_id, next_id FROM ordered WHERE id = ANY($2::text[])`,
-      [versionId, deleteBlockIds]
-    );
-    for (const r of res.rows) blockAdj.set(r.id, { prevId: r.prev_id, nextId: r.next_id });
-  }
-
-  // ── Phase 2: main script transaction ─────────────────────────────────────
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [versionId]);
-    const previousMarkerStructure = versionId && mayChangeMarkerStructure
-      ? await markerStructureBlocksInTx(client, versionId)
-      : [];
-
-    if (upsertScenes.length > 0) {
-      await client.query(
-        `INSERT INTO scene (id, production_id)
-         SELECT unnest($1::text[]), $2::text
-         ON CONFLICT (id) DO NOTHING`,
-        [upsertScenes.map(s => s.id), productionId]
-      );
-      if (versionId) {
-        await client.query(
-          `INSERT INTO scene_version (scene_id, version_id, name, sort_order, parent_id)
-           SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::text[])
-           ON CONFLICT (scene_id, version_id) DO UPDATE
-             SET name = EXCLUDED.name,
-                 sort_order = EXCLUDED.sort_order, parent_id = EXCLUDED.parent_id`,
-          [upsertScenes.map(s => s.id), versionId,
-           upsertScenes.map(s => s.name), upsertScenes.map(s => s.sortOrder),
-           upsertScenes.map(s => s.parentId ?? null)]
-        );
-      } else {
-        console.error(`[fallback] flushToDB: no active version for production ${productionId} — scene data lost (identity rows created, scene_version not written)`);
-      }
-    }
-
-    if (upsertChars.length > 0) {
-      await client.query(
-        `INSERT INTO character (id, production_id)
-         SELECT unnest($1::text[]), $2::text
-         ON CONFLICT (id) DO NOTHING`,
-        [upsertChars.map(c => c.id), productionId]
-      );
-      if (versionId) {
-        await client.query(
-          `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate)
-           SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::bool[])
-           ON CONFLICT (character_id, version_id) DO UPDATE
-             SET name = EXCLUDED.name, sort_order = EXCLUDED.sort_order, is_aggregate = EXCLUDED.is_aggregate`,
-          [upsertChars.map(c => c.id), versionId,
-           upsertChars.map(c => c.name), upsertChars.map(c => c.sortOrder),
-           upsertChars.map(c => c.isAggregate)]
-        );
-      } else {
-        console.error(`[fallback] flushToDB: no active version for production ${productionId} — character data lost (identity rows created, character_version not written)`);
-      }
-    }
-
-    if (upsertBlocks.length > 0) {
-      // Full upsert into script (using block id as snapshot id — legacy mode)
-      await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, marker_meta, force_show_character_name, owner_marker_id)
-         SELECT unnest($1::text[]), unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[]),
-                unnest($5::text[]), unnest($6::block_type[]), unnest($7::text[]), unnest($8::text[]),
-                unnest($9::jsonb[]), unnest($10::bool[]), unnest($11::text[])
-         ON CONFLICT (id) DO UPDATE SET
-           block_id = EXCLUDED.block_id, sort_key = EXCLUDED.sort_key, scene_id = EXCLUDED.scene_id,
-           rehearsal_mark = EXCLUDED.rehearsal_mark, owner_marker_id = EXCLUDED.owner_marker_id,
-           type = EXCLUDED.type, content = EXCLUDED.content,
-           stage_comment = EXCLUDED.stage_comment, marker_meta = EXCLUDED.marker_meta,
-           force_show_character_name = EXCLUDED.force_show_character_name`,
-        [
-          upsertBlocks.map(b => b.id), productionId,
-          upsertBlocks.map(b => b.lexKey), upsertBlocks.map(b => b.sceneId ?? null),
-          upsertBlocks.map(b => b.rehearsalMark ?? null), upsertBlocks.map(b => toDbType(b)),
-          upsertBlocks.map(b => b.content),
-          upsertBlocks.map(b => b.stageComment?.trim() || null),
-          upsertBlocks.map(b => markerMetaJson(b)),
-          upsertBlocks.map(b => b.forceShowCharacterName ?? false),
-          upsertBlocks.map(b => b.ownerMarkerId ?? null),
-        ]
-      );
-
-      // Upsert version relation if we have a versionId
-      if (versionId) {
-        await client.query(
-          `INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key)
-           SELECT unnest($1::text[]), $2::text, unnest($1::text[]), unnest($3::text[])
-           ON CONFLICT (snapshot_id, version_id) DO UPDATE SET sort_key = EXCLUDED.sort_key`,
-          [upsertBlocks.map(b => b.id), versionId, upsertBlocks.map(b => b.lexKey)]
-        );
-      }
-
-      await client.query(
-        "DELETE FROM script_character WHERE script_id = ANY($1::text[])",
-        [upsertBlocks.map(b => b.id)]
-      );
-      const scRows = upsertBlocks.flatMap(b =>
-        b.characterIds.map((cid, pos) => ({ sid: b.id, cid, pos, ann: b.characterAnnotations[cid] ?? null }))
-      );
-      if (scRows.length > 0) {
-        await client.query(
-          `INSERT INTO script_character (script_id, character_id, position, annotation)
-           SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
-          [scRows.map(r => r.sid), scRows.map(r => r.cid), scRows.map(r => r.pos), scRows.map(r => r.ann)]
-        );
-      }
-    }
-
-    if (deleteBlockIds.length > 0) {
-      if (versionId) {
-        await client.query(
-          `WITH removed AS (
-             DELETE FROM script_version WHERE snapshot_id = ANY($1::text[]) AND version_id = $2 RETURNING snapshot_id
-           )
-           DELETE FROM script s WHERE s.id IN (SELECT snapshot_id FROM removed)
-             AND NOT EXISTS (SELECT 1 FROM script_version sv2 WHERE sv2.snapshot_id = s.id)`,
-          [deleteBlockIds, versionId]
-        );
-      } else {
-        await client.query("DELETE FROM script WHERE id = ANY($1::text[])", [deleteBlockIds]);
-      }
-    }
-    if (deleteCharIds.length > 0)
-      await client.query("DELETE FROM character WHERE id = ANY($1::text[])", [deleteCharIds]);
-    if (deleteSceneIds.length > 0)
-      await client.query("DELETE FROM scene WHERE id = ANY($1::text[])", [deleteSceneIds]);
-
-    if (versionId && mayChangeMarkerStructure) {
-      await normalizeRehearsalMarkOwnershipInTx(client, versionId);
-      const finalMarkerStructure = await markerStructureBlocksInTx(client, versionId);
-      if (!sameMarkerStructure(previousMarkerStructure, finalMarkerStructure)) {
-        await bumpMarkerStructureRevisionInTx(client, versionId);
-      }
-    }
-
-    await client.query("COMMIT");
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
-
-  // ── Phase 3: cue drift adjustments (best-effort) ──────────────────────────
-  if (versionId) {
-    const driftJobs: Promise<void>[] = [];
-    for (const blockId of deleteBlockIds) {
-      const adj = blockAdj.get(blockId);
-      if (adj) driftJobs.push(handleBlockDeleted(blockId, adj.prevId, adj.nextId, versionId));
-    }
-    for (const block of upsertBlocks) {
-      const old = oldContents.get(block.id);
-      if (old !== undefined && old !== block.content)
-        driftJobs.push(handleBlockContentChanged(block.id, block.id, old, block.content, versionId));
-    }
-    if (driftJobs.length > 0) await Promise.allSettled(driftJobs);
-  }
 }
 
 /**
@@ -2087,18 +1863,6 @@ export async function setCharacterMembers(productionId: string, aggregateId: str
   }
 }
 
-export async function bulkUpsertBlockTags(
-  tags: Array<{ blockId: string; groupId: string; optionId: string }>
-): Promise<void> {
-  if (!tags.length) return;
-  await getPool().query(
-    `INSERT INTO block_tag (block_id, group_id, option_id, updated_at)
-     SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::text[]), now()
-     ON CONFLICT (block_id, group_id) DO UPDATE SET option_id = EXCLUDED.option_id, updated_at = now()`,
-    [tags.map(t => t.blockId), tags.map(t => t.groupId), tags.map(t => t.optionId)]
-  );
-}
-
 export async function patchCharacterMeta(
   id: string,
   versionId: string,
@@ -2177,13 +1941,6 @@ export async function listCharactersByVersion(versionId: string): Promise<Charac
     roleType: r.role_type ?? "",
     memberIds: memberMap.get(r.id) ?? [],
   }));
-}
-
-export async function listProductionScenes(productionId: string): Promise<SceneDetail[]> {
-  console.error(`[fallback] listProductionScenes called without versionId for production ${productionId} — caller should use listScenesByVersion directly`);
-  const versionId = await getActiveVersionId(productionId);
-  if (!versionId) return [];
-  return listScenesByVersion(versionId);
 }
 
 export async function listRehearsalMarksByVersion(versionId: string): Promise<Record<string, string[]>> {
@@ -2288,86 +2045,6 @@ export async function getSceneById(
   const activeVersionId = await getActiveVersionId(productionId);
   if (!activeVersionId) return null;
   return getSceneById(sceneId, productionId, activeVersionId);
-}
-
-export async function updateSceneMetadata(
-  productionId: string,
-  sceneId: string,
-  versionId: string,
-  fields: Partial<Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">>
-): Promise<void> {
-  const meta: MarkerMeta = {};
-  for (const key of ["synopsis", "actionLine", "music", "stageNotes", "expectedDuration"] as const) {
-    if (key in fields) meta[key] = fields[key] ?? "";
-  }
-  if (Object.keys(meta).length === 0) return;
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [versionId]);
-    const versionRes = await client.query<{ production_id: string }>(
-      "SELECT production_id FROM version WHERE id = $1",
-      [versionId]
-    );
-    if (versionRes.rows[0]?.production_id !== productionId) {
-      throw new Error("Scene metadata version does not belong to production");
-    }
-    const markerRes = await client.query<{ snapshot_id: string; production_id: string; refs: string }>(
-      `SELECT sv.snapshot_id, s.production_id, COUNT(*) OVER (PARTITION BY sv.block_id) AS refs
-       FROM script_version sv
-       JOIN script s ON s.id = sv.snapshot_id
-       WHERE sv.version_id = $2
-         AND sv.block_id = $1
-         AND s.type IN ('chapter_marker', 'scene_marker')`,
-      [sceneId, versionId]
-    );
-    // marker 是构作字段的唯一真相源，scene_version 只是它的派生读模型。
-    // 没有 marker block 就没有可写之处——旧的「直写 scene_version」回落分支
-    // 已随存量版本全量 marker 化而作废（#159）。
-    if (markerRes.rows.length !== 1) {
-      throw new Error(`Expected exactly one marker block for scene ${sceneId} in version ${versionId}, found ${markerRes.rows.length}`);
-    }
-    const marker = markerRes.rows[0];
-    if (marker.production_id !== productionId) {
-      throw new Error("Scene marker does not belong to production");
-    }
-    const refRes = await client.query<{ cnt: string }>(
-      "SELECT COUNT(*) AS cnt FROM script_version WHERE snapshot_id = $1",
-      [marker.snapshot_id]
-    );
-    const refCount = parseInt(refRes.rows[0]?.cnt ?? "0", 10);
-    if (refCount <= 1) {
-      await client.query(
-        `UPDATE script
-         SET marker_meta = COALESCE(marker_meta, '{}'::jsonb) || $2::jsonb
-         WHERE id = $1`,
-        [marker.snapshot_id, JSON.stringify(meta)]
-      );
-    } else {
-      const newSnapshotId = genSnapshotId();
-      await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
-         SELECT $1, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment,
-                COALESCE(marker_meta, '{}'::jsonb) || $2::jsonb, force_show_character_name
-         FROM script
-         WHERE id = $3`,
-        [newSnapshotId, JSON.stringify(meta), marker.snapshot_id]
-      );
-      await client.query(
-        `UPDATE script_version
-         SET snapshot_id = $1
-         WHERE version_id = $2 AND block_id = $3`,
-        [newSnapshotId, versionId, sceneId]
-      );
-    }
-    await syncSceneVersionsFromMarkersInTx(client, marker.production_id, versionId);
-    await client.query("COMMIT");
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
 }
 
 // ─── Block Tags ───────────────────────────────────────────────────────────────
