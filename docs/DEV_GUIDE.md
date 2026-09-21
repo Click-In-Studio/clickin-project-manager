@@ -280,10 +280,26 @@ npm run dev
 6. **需要 1 个 approving review** 才能合并（必须来自 code owner）
 7. **合并方式**：merge / squash / rebase 均允许；日常开发推荐 squash 保持 `main` 历史干净
 
+### 版本号（#612）
+
+tag 名 = `content/changelog/` 版本目录名，形态由 `lib/help/changelog.ts` 的 `CHANGELOG_VERSION_RE` 硬校验（目录名不合形态整站 `loadChangelog()` 抛错）。三种：
+
+| 形态 | 什么时候打 | 例 |
+|---|---|---|
+| `v<M>.<m>.<p>` | **里程碑**。`M` 阶段（内测 / 公开 / …，几年一动）；`m` 正式版（一组功能闭环，会上大家认可进入新阶段）；`p` 功能（一个跨多周的大功能**用户能完整用上了**，版本本身还没闭环） | `v0.1.2` |
+| `v<M>.<m>.<p>-yymmdd` | **日常发版**（每周三、周日会后）。三段沿用上一个里程碑，加当天日期 | `v0.1.2-260924` |
+| `<被修版本完整号>-hot<n>` | **hotfix**。线上炸了从被修的 tag 切分支修，序号从 1 起；里程碑本身炸了没有日期段 | `v0.1.2-260924-hot1` / `v0.2.0-hot1` |
+
+- 顺序：里程碑三段 → 日期 → hot 序号，`v0.1.1 < v0.1.1-260921 < v0.1.1-260921-hot1 < v0.1.1-260924 < v0.1.2 < v0.2.0`。**日期版在同号里程碑之后**——日常版是里程碑的后续，不是它的预览，和 semver 预发布语义相反；`git tag --sort=v:refname` 会排反，以 `compareVersions` 为准。
+- 任意一段跳，日期段清零：大功能落地的那次周三 / 周日发版直接打 `v0.1.2`，不打 `v0.1.1-yymmdd`。
+- `p` 是里程碑不是补丁：它没有日期段、可以被 hotfix，与 semver patch 含义不同。bump `p` 的判据是「用户能完整用上」，不是「开始做了」或「合了一半」——半成品继续走日期版。
+- 同一天不打两个日期版：会后发的版炸了就是 hotfix。
+- 两段号（`v0.2`）不再接受；已有的 `v0.1.0` `v0.1.1` 不动。
+
 ### 发版与 hotfix（#558）
 
-- push `main` → 自动发 **dev**（`app-dev.clickinmusical.com`）；push tag `v*` → 自动发 **prod**（`app.clickinmusical.com`）。发 prod = `git tag v0.N && git push origin v0.N`。
-- **hotfix 从最近的 tag 切分支，不从 main**（main 领先 tag 一大截，从 main 发等于把未发的全推上去）：`git switch -c hotfix/<n> v0.N.M` → 改 → 在该 commit 打 `v0.N.M+1` 推 tag → 分支再补 `content/changelog/<tag>/`（只含本次修复）→ PR 回 main。
+- push `main` → 自动发 **dev**（`app-dev.clickinmusical.com`）；push tag `v*` → 自动发 **prod**（`app.clickinmusical.com`）。发 prod = `npm run changelog:release -- <tag>` → 编辑 commit → `git tag <tag> && git push origin <tag>`。
+- **hotfix 从被修的 tag 切分支，不从 main**（main 领先 tag 一大截，从 main 发等于把未发的全推上去）：`git switch -c hotfix/<n> v0.1.2-260924` → 改 → 在该 commit 打 `v0.1.2-260924-hot1` 推 tag → 分支再补 `content/changelog/<tag>/`（只含本次修复）→ PR 回 main。
 - 详见 [DEPLOY.md](./DEPLOY.md)。
 
 ### 叠 PR（stacked PR）
@@ -956,7 +972,7 @@ content/changelog/
 ├── _TEMPLATE.md               # 作者模板
 ├── unreleased/                # 已合并、还没随 tag 发到 prod 的条目；每 PR 一个文件（避免冲突）
 │   └── 566-calendar-inline-edit.md
-└── v0.2/                      # 目录名 = git tag；发版脚本从 unreleased/ 搬进来
+└── v0.1.2-260924/             # 目录名 = git tag（形态见 §4「版本号」）；发版脚本从 unreleased/ 搬进来
     ├── _index.md              #   date（必填）/ summary
     └── 566-calendar-inline-edit.md
 ```
@@ -970,7 +986,7 @@ content/changelog/
 | 时机 | 谁 | 做什么 |
 |---|---|---|
 | 功能 PR | 作者 | 复制 `_TEMPLATE.md` 到 `unreleased/<PR号>-<两三个词>.md`。没写又没打豁免标签，`pr-automation` 会留一条提醒评论（软提醒不红；补上自动删） |
-| 发版 | 打 tag 的人 | `npm run changelog:release -- v0.N`：建 `v0.N/_index.md`、`git mv` 碎片进去。**然后人来编辑**：重排、合并、删太细的、补 summary。commit 后再 `git tag` |
+| 发版 | 打 tag 的人 | `npm run changelog:release -- <tag>`：建 `<tag>/_index.md`、`git mv` 碎片进去。**然后人来编辑**：重排、合并、删太细的、补 summary。commit 后再 `git tag` |
 | tag 部署 | CD | `deploy.yml` 闸：`content/changelog/<tag>/_index.md` 不存在、或 `unreleased/` 还有条目 → 红。与 schema 指纹同一个逻辑：不许发一个没交代的版本 |
 
 dev 环境（main 自动发）上 `unreleased/` 有条目时页面顶部多一段「即将发布」，测试同学用它知道 dev 上有什么新东西；prod 上发版已卷走，不显示。纯内部版本用 `--allow-empty`，页面显示「这一版没有你能感知到的改动」。

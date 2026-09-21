@@ -1,7 +1,9 @@
 /**
  * 发版：把 content/changelog/unreleased/ 里的条目卷成一个版本目录（#569）。
  *
- *   npm run changelog:release -- v0.2
+ *   npm run changelog:release -- v0.1.2            # 里程碑
+ *   npm run changelog:release -- v0.1.2-260924     # 日常发版
+ *   npm run changelog:release -- v0.1.2-260924-hot1 # hotfix
  *
  * 做的事：
  *   1. 校验 tag 形态、版本目录不存在、unreleased/ 非空、内容加载得过（同 CI 的校验）
@@ -28,8 +30,8 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
-if (!tag) fail("用法：npm run changelog:release -- v0.2 [--allow-empty]");
-if (!CHANGELOG_VERSION_RE.test(tag)) fail(`版本号要是 tag 形态（v0.2 / v0.1.0），收到 ${tag}`);
+if (!tag) fail("用法：npm run changelog:release -- v0.1.2 | v0.1.2-260924 | v0.1.2-260924-hot1 [--allow-empty]");
+if (!CHANGELOG_VERSION_RE.test(tag)) fail(`版本号要是 tag 形态（v0.1.2 / v0.1.2-260924 / v0.1.2-260924-hot1，见 DEV_GUIDE §4），收到 ${tag}`);
 
 const versionDir = path.join(CHANGELOG_ROOT, tag);
 const unreleasedDir = path.join(CHANGELOG_ROOT, CHANGELOG_UNRELEASED_DIR);

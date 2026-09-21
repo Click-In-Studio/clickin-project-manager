@@ -243,13 +243,14 @@ crontab -e
 
 两台机器的目录布局、pm2 定义、迁移流程完全一致，`deploy.yml` 只按 `github.ref_type` 选 SSH 目标（secrets `SERVER_HOST[_PROD]` / `SERVER_USER[_PROD]`，私钥共用）。两边各有自己的库，互不同步；dev 的库是切换时从 prod 拷的快照。
 
-发布到 prod：
+发布到 prod（tag 形态见 DEV_GUIDE §4「版本号」：里程碑 `v0.1.2` / 日常 `v0.1.2-260924` / hotfix `v0.1.2-260924-hot1`）：
 
 ```bash
-git tag v0.12 && git push origin v0.12        # 从 main 上已验证的 commit 打 tag
+npm run changelog:release -- v0.1.2-260924     # 卷 unreleased/，编辑后 commit
+git tag v0.1.2-260924 && git push origin v0.1.2-260924   # 从 main 上已验证的 commit 打 tag
 ```
 
-hotfix：从上一个 tag 拉分支（**不从 main**——main 领先 tag 一大截），修复后在该 commit 打新 tag 发 prod，再补 `content/changelog/<新 tag>/` 并 PR 回 main（migration 按版本号逐支判断 pending，hotfix 分支上时间戳更早的也能正常上）。两台机 nginx 站点块都要有 `proxy_set_header X-Forwarded-Proto $scheme;`（应用侧对非回环 host 一律按 https，不信这个头，#591）。
+hotfix：从被修的 tag 拉分支（**不从 main**——main 领先 tag 一大截），修复后在该 commit 打 `<被修 tag>-hot<n>` 发 prod，再补 `content/changelog/<新 tag>/` 并 PR 回 main（migration 按版本号逐支判断 pending，hotfix 分支上时间戳更早的也能正常上）。两台机 nginx 站点块都要有 `proxy_set_header X-Forwarded-Proto $scheme;`（应用侧对非回环 host 一律按 https，不信这个头，#591）。
 
 dev 与 prod 互不阻塞、同一环境串行（workflow `concurrency`）。
 
