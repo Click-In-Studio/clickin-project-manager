@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getPool } from "@/lib/pg";
 import {
   getProductionPermissionContext,
@@ -26,14 +26,13 @@ export default async function RolesPage({ params }: { params: Promise<{ id: stri
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect("/");
   const { permCtx } = access;
-  const bypass = permCtx.isAdmin || permCtx.isOwner;
 
   const [canCreate, canRename, canDelete, canAssign, canViewContact] = await Promise.all([
-    bypass || hasGrant(permCtx.userId, id, "role", "*", "*", "create"),
-    bypass || hasGrant(permCtx.userId, id, "role", "*", "meta/name", "edit"),
-    bypass || hasGrant(permCtx.userId, id, "role", "*", "*", "delete"),
-    bypass || hasGrant(permCtx.userId, id, "member", "*", "roles", "edit"),
-    bypass || hasGrant(permCtx.userId, id, "member", "*", "contact", "view"),
+    hasEffectiveGrant(permCtx, id, "role", "*", "*", "create"),
+    hasEffectiveGrant(permCtx, id, "role", "*", "meta/name", "edit"),
+    hasEffectiveGrant(permCtx, id, "role", "*", "*", "delete"),
+    hasEffectiveGrant(permCtx, id, "member", "*", "roles", "edit"),
+    hasEffectiveGrant(permCtx, id, "member", "*", "contact", "view"),
   ]);
 
   const [name, roles, membersRaw, depts, ownerRes] = await Promise.all([

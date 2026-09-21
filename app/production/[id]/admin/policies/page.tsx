@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listPolicies, listPolicyAudit } from "@/lib/perm/policy-db";
 import { POLICY_QUESTIONS, matchAnswer, QUESTION_COVERED_KEYS } from "@/lib/perm/policy-questions";
@@ -30,8 +30,7 @@ export default async function PoliciesPage({ params }: { params: Promise<{ id: s
   // 门与 API 同源：整个配置中心一个治理面门，键表内零 SENSITIVE。
   // SENSITIVE 是给「权限的权限」用的，判据是「改的是不是权限系统本身」而不是
   // 「后果严不严重」；策略键按定义都是产品能力开关。
-  const canEdit = permCtx.isAdmin || permCtx.isOwner
-    || await hasGrant(permCtx.userId, id, "production", "*", "config", "edit");
+  const canEdit = await hasEffectiveGrant(permCtx, id, "production", "*", "config", "edit");
 
   const [name, policies, audit] = await Promise.all([
     getProductionName(id),

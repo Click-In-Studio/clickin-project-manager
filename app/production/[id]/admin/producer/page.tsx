@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import {
   getProductionPermissionContext,
   getProductionName,
@@ -31,9 +31,9 @@ export default async function ProducerPage({ params }: { params: Promise<{ id: s
   // 编辑=ROOT（owner/平台 admin）；只读=producer 域显式 view（通配不穿透，
   // 制作人默认不可见本页）。
   const isRoot = permCtx.isAdmin || permCtx.isOwner;
-  const canView = isRoot || await hasGrant(permCtx.userId, id, "producer", "*", "*", "view");
+  const canView = await hasEffectiveGrant(permCtx, id, "producer", "*", "*", "view");
   if (!canView) redirect(`/production/${id}/admin`);
-  const canViewContact = isRoot || await hasGrant(permCtx.userId, id, "member", "*", "contact", "view");
+  const canViewContact = await hasEffectiveGrant(permCtx, id, "member", "*", "contact", "view");
 
   const [name, roles, members, depts, governance, vocabulary] = await Promise.all([
     getProductionName(id),

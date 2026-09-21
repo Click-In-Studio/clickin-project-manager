@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName, listProductionMembersWithRoles } from "@/lib/db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import { listGrantLedger } from "@/lib/perm/grant-audit-db";
@@ -21,12 +21,11 @@ export default async function AuditPage({ params }: { params: Promise<{ id: stri
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect("/");
   const { permCtx } = access;
-  const bypass = permCtx.isAdmin || permCtx.isOwner;
 
   const [canRevoke, canViewOnly, canViewContact] = await Promise.all([
-    bypass || hasGrant(permCtx.userId, id, "production", "*", "grants", "delete"),
-    bypass || hasGrant(permCtx.userId, id, "production", "*", "grants", "view"),
-    bypass || hasGrant(permCtx.userId, id, "member", "*", "contact", "view"),
+    hasEffectiveGrant(permCtx, id, "production", "*", "grants", "delete"),
+    hasEffectiveGrant(permCtx, id, "production", "*", "grants", "view"),
+    hasEffectiveGrant(permCtx, id, "member", "*", "contact", "view"),
   ]);
   const canView = canRevoke || canViewOnly;
   if (!canView) redirect(`/production/${id}/admin`);

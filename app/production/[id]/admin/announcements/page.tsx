@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "通知公告" };
 
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
@@ -43,9 +43,9 @@ export default async function AnnouncementsPage({ params }: { params: Promise<{ 
         createdAt: a.createdAt,
         updatedAt: a.updatedAt,
       }))}
-      canCreate={!!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "announcement", "*", "*", "create"))}
-      canEdit={!!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "announcement", "*", "*", "edit"))}
-      canDelete={!!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "announcement", "*", "*", "delete"))}
+      canCreate={!!permCtx && await hasEffectiveGrant(permCtx, id, "announcement", "*", "*", "create")}
+      canEdit={!!permCtx && await hasEffectiveGrant(permCtx, id, "announcement", "*", "*", "edit")}
+      canDelete={!!permCtx && await hasEffectiveGrant(permCtx, id, "announcement", "*", "*", "delete")}
     />
   );
 }

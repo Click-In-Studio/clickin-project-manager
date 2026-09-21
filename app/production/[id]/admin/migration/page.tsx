@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import PageHeader from "@/components/ui/PageHeader";
 import AdminMigrationSection from "@/components/admin/AdminMigrationSection";
@@ -24,12 +24,11 @@ export default async function MigrationPage({ params }: { params: Promise<{ id: 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect("/");
   const { permCtx } = access;
-  const bypass = permCtx.isAdmin || permCtx.isOwner;
 
   const [canImportScript, canImportScenes, canInvite] = await Promise.all([
-    bypass || hasGrant(permCtx.userId, id, "script", "*", "imports", "create"),
-    bypass || hasGrant(permCtx.userId, id, "dramaturgy", "*", "imports", "create"),
-    bypass || hasGrant(permCtx.userId, id, "member", "*", "*", "create"),
+    hasEffectiveGrant(permCtx, id, "script", "*", "imports", "create"),
+    hasEffectiveGrant(permCtx, id, "dramaturgy", "*", "imports", "create"),
+    hasEffectiveGrant(permCtx, id, "member", "*", "*", "create"),
   ]);
   if (!canImportScript && !canImportScenes && !canInvite) redirect(`/production/${id}/admin`);
 

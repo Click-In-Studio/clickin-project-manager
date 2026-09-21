@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getPool } from "@/lib/pg";
 import {
   getProductionPermissionContext,
@@ -27,14 +27,13 @@ export default async function DangerPage({ params }: { params: Promise<{ id: str
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect("/");
   const { permCtx } = access;
-  const bypass = permCtx.isAdmin || permCtx.isOwner;
 
-  const canArchive = bypass || await hasGrant(permCtx.userId, id, "production", "*", "archival", "create");
+  const canArchive = await hasEffectiveGrant(permCtx, id, "production", "*", "archival", "create");
   const canDelete = permCtx.isAdmin || permCtx.isOwner;
   const canTransfer = permCtx.isAdmin || permCtx.isOwner;
   if (!canArchive && !canDelete && !canTransfer) redirect(`/production/${id}/admin`);
 
-  const canViewContact = bypass || await hasGrant(permCtx.userId, id, "member", "*", "contact", "view");
+  const canViewContact = await hasEffectiveGrant(permCtx, id, "member", "*", "contact", "view");
   const [name, ownerRes, members, depts] = await Promise.all([
     getProductionName(id),
     getPool().query<{ owner_id: string | null; owner_name: string | null }>(

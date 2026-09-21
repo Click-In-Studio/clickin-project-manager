@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "项目信息" };
 
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
@@ -30,24 +30,24 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
   const isArchived = access?.isArchived ?? false;
 
   const perms = {
-    canRename: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/name", "edit")),
-    canChangeAvatar: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/avatar", "edit")),
-    canEditDescription: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/description", "edit")),
-    canChangeType: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/type", "edit")),
-    canChangeLanguage: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "meta/language", "edit")),
-    canArchive: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "archival", "create")),
+    canRename: !!permCtx && await hasEffectiveGrant(permCtx, id, "production", "*", "meta/name", "edit"),
+    canChangeAvatar: !!permCtx && await hasEffectiveGrant(permCtx, id, "production", "*", "meta/avatar", "edit"),
+    canEditDescription: !!permCtx && await hasEffectiveGrant(permCtx, id, "production", "*", "meta/description", "edit"),
+    canChangeType: !!permCtx && await hasEffectiveGrant(permCtx, id, "production", "*", "meta/type", "edit"),
+    canChangeLanguage: !!permCtx && await hasEffectiveGrant(permCtx, id, "production", "*", "meta/language", "edit"),
+    canArchive: !!permCtx && await hasEffectiveGrant(permCtx, id, "production", "*", "archival", "create"),
     canDelete: !!permCtx && (permCtx.isAdmin || permCtx.isOwner),
-    canImportScript: !!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "imports", "create")),
-    canImportScenes: !!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "dramaturgy", "*", "imports", "create")),
-    canManageTags: !!permCtx && (permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "member", "*", "roles", "edit")),
-    canToggleWatermark: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "production", "*", "config", "edit")),
+    canImportScript: !!permCtx && await hasEffectiveGrant(permCtx, id, "script", "*", "imports", "create"),
+    canImportScenes: !!permCtx && await hasEffectiveGrant(permCtx, id, "dramaturgy", "*", "imports", "create"),
+    canManageTags: !!permCtx && await hasEffectiveGrant(permCtx, id, "member", "*", "roles", "edit"),
+    canToggleWatermark: !!permCtx && await hasEffectiveGrant(permCtx, id, "production", "*", "config", "edit"),
     // 制作级 agents.md：制作人经模版 node:*/*@* 类型通配持有区间（激活成行
     // 后 hasGrant 命中），POC 部门区间无此键——「默认仅制作人」由此天然成立。
-    canEditAiInstructions: !!permCtx && (permCtx.isOwner || (permCtx.isAdmin && permCtx.memberPermissions === null) || await hasGrant(permCtx.userId, id, "ai_instructions", "*", "*", "edit")),
+    canEditAiInstructions: !!permCtx && await hasEffectiveGrant(permCtx, id, "ai_instructions", "*", "*", "edit"),
     // AI 用量可见性（#383）：默认只有 owner 命中（第 1 步旁路），其余人要 owner
     // 在权限中心显式发 node:ai/*/usage@view。两枚键正交——总览与成员分解分开判。
-    canSeeAiUsage: !!permCtx && (permCtx.isOwner || permCtx.isAdmin || await hasGrant(permCtx.userId, id, "ai", "*", "usage", "view")),
-    canSeeAiUsageMembers: !!permCtx && (permCtx.isOwner || permCtx.isAdmin || await hasGrant(permCtx.userId, id, "ai", "*", "usage/members", "view")),
+    canSeeAiUsage: !!permCtx && await hasEffectiveGrant(permCtx, id, "ai", "*", "usage", "view"),
+    canSeeAiUsageMembers: !!permCtx && await hasEffectiveGrant(permCtx, id, "ai", "*", "usage/members", "view"),
   };
 
   const tierConf = PRODUCTION_TIERS[plan.tier];
