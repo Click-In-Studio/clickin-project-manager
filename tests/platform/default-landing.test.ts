@@ -167,6 +167,28 @@ describe("resolveDefaultLanding", () => {
     expect(await resolveDefaultLanding(actorOf(userId), prodId, { kind: "doc-sibling", wikiId: parent.id })).toBeNull();
   });
 
+  // #604 收尾：block / cue / scene 三条干系门改走 hasEffectiveGrant 族——
+  // owner 非成员零行要能落到目录，只持单枚键的成员只开自己那条。
+  it("干系门：owner 非成员零行三条都过；只持 scene meta@view 的成员 block 落 null", async () => {
+    const { rows: [{ owner_id }] } = await getPool().query<{ owner_id: string }>(
+      `SELECT owner_id FROM production WHERE id = $1`, [prodId]);
+    await getPool().query(
+      `DELETE FROM production_member WHERE production_id = $1 AND user_id = $2`, [prodId, owner_id]);
+    const owner = { userId: owner_id, isAdmin: false, isOwner: true };
+    const [blockId] = await makeBlocks(prodId, versionId, 1);
+    const sceneId = await makeScene(prodId, versionId, { name: "尾声" });
+    expect(await resolveDefaultLanding(owner, prodId, { kind: "mount", mountType: "block", mountId: blockId })).toBeTruthy();
+    expect(await resolveDefaultLanding(owner, prodId, { kind: "mount", mountType: "scene", mountId: sceneId })).toBeTruthy();
+
+    const sceneOnly = await newMember(prodId);
+    await getPool().query(
+      `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES ($1, $2::uuid, 'scene', '*', 'meta', 'view', 'auto')`,
+      [prodId, sceneOnly]);
+    expect(await resolveDefaultLanding(actorOf(sceneOnly), prodId, { kind: "mount", mountType: "scene", mountId: sceneId })).toBeTruthy();
+    expect(await resolveDefaultLanding(actorOf(sceneOnly), prodId, { kind: "mount", mountType: "block", mountId: blockId })).toBeNull();
+  });
+
   it("readLandingContext：非法形状一律 undefined", () => {
     expect(readLandingContext(undefined)).toBeUndefined();
     expect(readLandingContext("x")).toBeUndefined();
