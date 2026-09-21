@@ -749,7 +749,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- node 树统一（#420）后 wiki 回归**纯文档内容对象**：树位置（parent/sort）与
 -- 权限位（is_public/listable）全部活在 node 表的 kind='wiki' 壳节点上
--- （migrate-node-tree.sql；树列备份见 wiki_tree_backup_node_tree）。
+-- （migrate-node-tree.sql）。
 CREATE TABLE IF NOT EXISTS wiki (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
@@ -769,7 +769,7 @@ CREATE INDEX IF NOT EXISTS wiki_body_trgm_idx  ON wiki USING GIN (body gin_trgm_
 -- 软链接（原 wiki_alias，#358）已随 node 树统一（#420）合入 node 表的
 -- kind='link' 节点；#358 的全部不变量（叶子性、无权限列的物理保证、本地可枚举
 -- 判据、惰性兜底）以 node 表 CHECK 与 lib/node 判定的形态延续，见 node 表注释。
--- 原表保留为 wiki_alias_backup_node_tree（回滚依据，落稳后单独 DROP）。
+-- 原表的回滚备份 wiki_alias_backup_node_tree 已随 #606 DROP。
 
 -- 交叉引用边（wiki↔任意对象；backlinks/unlinked references/对象侧"相关 wiki"面板的数据基础）。
 -- entity 多态无 FK（scene/cue 等 TEXT short id、wiki UUID 存文本），存在性校验在应用层，
@@ -801,18 +801,10 @@ CREATE INDEX IF NOT EXISTS wiki_tag_tag_idx ON wiki_tag (tag);
 
 -- 部门分享面已随 node 树统一（#420）迁为 node_dept_share（树/分享面归 node 域），
 -- 见 node 表区段。结构面定式不变：判定时查部门成员，零 sweep，不物化。
--- 方言 v1→v2 迁移的正文备份（migrate-wiki-dialect-v2.sql）。既是回滚依据，也是
--- 「本库是否已迁移」的判据——本迁移是纯 DML 正文改写，没有可供判定的列变化。
--- 迁移落稳后可单独 DROP，但在那之前它是唯一能还原迁移前正文的地方
--- （wiki_revision 只有编辑历史，不含迁移这一次的改写）。
-CREATE TABLE IF NOT EXISTS wiki_body_backup_dialect_v2 (
-  wiki_id    UUID        PRIMARY KEY REFERENCES wiki(id) ON DELETE CASCADE,
-  body       TEXT        NOT NULL,
-  taken_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- 方言 v1→v2 迁移里 wiki.body 之外那几列的正文备份（agent_memory_chunk.text /
--- comment.body / user_notification.body）。通用形状，行数极少。
+-- 方言 v1→v2 迁移（migrate-wiki-dialect-v2.sql）的 wiki.body 正文备份表
+-- wiki_body_backup_dialect_v2 已随 #606 DROP；下面这张是同一次迁移里 wiki.body
+-- 之外那几列的正文备份（agent_memory_chunk.text / comment.body /
+-- user_notification.body）。通用形状，行数极少。
 CREATE TABLE IF NOT EXISTS dialect_v2_text_backup (
   table_name  TEXT        NOT NULL,
   row_id      TEXT        NOT NULL,
@@ -1300,27 +1292,6 @@ CREATE TABLE IF NOT EXISTS event_report_read (
   user_id   UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   read_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (report_id, user_id)
-);
-
--- 迁移备份（migrate-node-tree.sql；回滚依据，落稳后单独 DROP——同
--- wiki_body_backup_dialect_v2 定式）
-CREATE TABLE IF NOT EXISTS wiki_tree_backup_node_tree (
-  wiki_id   UUID,
-  parent_id UUID,
-  sort_key  TEXT,
-  is_public BOOLEAN,
-  listable  BOOLEAN
-);
-CREATE TABLE IF NOT EXISTS wiki_alias_backup_node_tree (
-  id            TEXT        PRIMARY KEY,
-  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  parent_id     UUID        NULL,
-  sort_key      TEXT        NULL,
-  target_type   TEXT        NOT NULL DEFAULT 'wiki',
-  target_id     TEXT        NOT NULL,
-  display_title TEXT        NULL,
-  created_by    UUID        NULL REFERENCES app_user(id),
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- ── Scene table view configs ──────────────────────────────────────────────────

@@ -1,9 +1,11 @@
 /**
  * migrate-wiki-dialect-v2 三层验证。
  *
- * 本迁移没有 DDL，所以「层 1 schema」验的是备份表（它同时是迁移标记与回滚依据），
- * 「层 2 完整性」验全库不再残留 v1 形态，「层 3 invariance」验工厂正文迁移前后
- * **引用集合逐字相等**——只许换形态，不许增减、不许改指向。
+ * 本迁移没有 DDL，「层 1 schema」只验 wiki.body 列形未动，「层 2 完整性」验全库
+ * 不再残留 v1 形态，「层 3 invariance」验工厂正文迁移前后**引用集合逐字相等**——
+ * 只许换形态，不许增减、不许改指向。
+ * 备份表 wiki_body_backup_dialect_v2 曾兼作迁移标记与回滚依据，已随 #606 DROP，
+ * 相关断言（存在、列型、无孤儿、存的是迁移前正文）一并退役。
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -41,24 +43,6 @@ try {
 
 // ── 层 1：schema 验证 ─────────────────────────────────────────────────────────
 describe("schema verification", () => {
-  it("备份表存在（迁移标记 + 回滚依据）", async () => {
-    const { rows } = await pool.query<{ exists: boolean }>(
-      "SELECT to_regclass('wiki_body_backup_dialect_v2') IS NOT NULL AS exists",
-    );
-    expect(rows[0].exists).toBe(true);
-  });
-
-  it("备份表列型正确：wiki_id UUID PK / body TEXT NOT NULL", async () => {
-    const { rows } = await pool.query<{ column_name: string; data_type: string; is_nullable: string }>(
-      `SELECT column_name, data_type, is_nullable FROM information_schema.columns
-       WHERE table_name = 'wiki_body_backup_dialect_v2' ORDER BY column_name`,
-    );
-    const byName = new Map(rows.map(r => [r.column_name, r]));
-    expect(byName.get("wiki_id")?.data_type).toBe("uuid");
-    expect(byName.get("body")?.data_type).toBe("text");
-    expect(byName.get("body")?.is_nullable).toBe("NO");
-  });
-
   it("本迁移不含 DDL 改动：wiki.body 仍是 TEXT NOT NULL", async () => {
     const { rows } = await pool.query<{ data_type: string; is_nullable: string }>(
       `SELECT data_type, is_nullable FROM information_schema.columns
@@ -79,14 +63,6 @@ describe("integrity verification", () => {
       .filter(r => hasLegacyDialect(r.body))
       .map(r => `${r.id} ${r.title ?? "(无标题)"}`);
     expect(stragglers).toEqual([]);
-  });
-
-  it("备份表无孤儿行（FK 到 wiki，CASCADE 删除）", async () => {
-    const { rows } = await pool.query<{ n: string }>(
-      `SELECT count(*)::text AS n FROM wiki_body_backup_dialect_v2 b
-       LEFT JOIN wiki w ON w.id = b.wiki_id WHERE w.id IS NULL`,
-    );
-    expect(rows[0].n).toBe("0");
   });
 
   it("wiki_entity_link 里没有指向 user 的边——@提及不落引用边", async () => {
@@ -121,17 +97,6 @@ describe("invariance verification", () => {
     for (const w of snapshot!.wikis) {
       expect(edgeKey(after.get(w.id)!), `${w.label} 的引用集合漂移了`)
         .toBe(edgeKey(w.bodyBefore));
-    }
-  });
-
-  it.skipIf(!snapshot)("备份表存的是迁移**前**的正文（回滚依据不能被覆盖）", async () => {
-    const { rows } = await pool.query<{ wiki_id: string; body: string }>(
-      "SELECT wiki_id::text AS wiki_id, body FROM wiki_body_backup_dialect_v2 WHERE wiki_id = ANY($1::uuid[])",
-      [snapshot!.wikis.map(w => w.id)],
-    );
-    const backup = new Map(rows.map(r => [r.wiki_id, r.body]));
-    for (const w of snapshot!.wikis) {
-      expect(backup.get(w.id), `${w.label} 缺备份行`).toBe(w.bodyBefore);
     }
   });
 

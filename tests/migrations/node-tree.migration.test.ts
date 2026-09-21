@@ -116,12 +116,12 @@ describe("schema verification", () => {
     expect((await columns("wiki_proposal")).get("parent_node_id")?.type).toBe("text");
   });
 
-  it("退役表消失、备份表在位", async () => {
+  it("退役表消失、node_dept_share 在位", async () => {
+    // 两张回滚备份表 wiki_alias_backup_node_tree / wiki_tree_backup_node_tree 已随
+    // #606 DROP，消失断言见 drop_wiki_migration_backup_tables.migration.test.ts。
     expect(await tableExists("wiki_alias")).toBe(false);
     expect(await tableExists("wiki_dept_share")).toBe(false);
     expect(await tableExists("asset_share_token")).toBe(false);
-    expect(await tableExists("wiki_alias_backup_node_tree")).toBe(true);
-    expect(await tableExists("wiki_tree_backup_node_tree")).toBe(true);
     expect(await tableExists("node_dept_share")).toBe(true);
   });
 });
