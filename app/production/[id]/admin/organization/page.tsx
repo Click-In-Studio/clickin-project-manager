@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import {
   getProductionPermissionContext,
   getProductionName,
@@ -28,18 +28,17 @@ export default async function OrganizationPage({ params }: { params: Promise<{ i
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect("/");
   const { permCtx } = access;
-  const bypass = permCtx.isAdmin || permCtx.isOwner;
 
   // 可见门与可改门分离；SSR props 按门裁剪，无权数据不出服务端。
   const [canViewContact, canEditMember, canInvite, canRemove, canDeptStructure, canDeptMembers, canDeptPoc] =
     await Promise.all([
-      bypass || hasGrant(permCtx.userId, id, "member", "*", "contact", "view"),
-      bypass || hasGrant(permCtx.userId, id, "member", "*", "roles", "edit"),
-      bypass || hasGrant(permCtx.userId, id, "member", "*", "*", "create"),
-      bypass || hasGrant(permCtx.userId, id, "member", "*", "*", "delete"),
-      bypass || hasGrant(permCtx.userId, id, "dept", "*", "*", "create"),
-      bypass || hasGrant(permCtx.userId, id, "dept", "*", "members", "create"),
-      bypass || hasGrant(permCtx.userId, id, "dept", "*", "poc", "create"),
+      hasEffectiveGrant(permCtx, id, "member", "*", "contact", "view"),
+      hasEffectiveGrant(permCtx, id, "member", "*", "roles", "edit"),
+      hasEffectiveGrant(permCtx, id, "member", "*", "*", "create"),
+      hasEffectiveGrant(permCtx, id, "member", "*", "*", "delete"),
+      hasEffectiveGrant(permCtx, id, "dept", "*", "*", "create"),
+      hasEffectiveGrant(permCtx, id, "dept", "*", "members", "create"),
+      hasEffectiveGrant(permCtx, id, "dept", "*", "poc", "create"),
     ]);
 
   const [name, membersRaw, depts, tags, roles, seats] = await Promise.all([

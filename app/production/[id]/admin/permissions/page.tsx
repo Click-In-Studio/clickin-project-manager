@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import {
   getProductionPermissionContext,
   getProductionName,
@@ -40,14 +40,14 @@ export default async function PermissionCenterPage({ params }: { params: Promise
 
   // 四 tab 各自 view/edit 双门；无 view 门的 tab 数据不出服务端。
   const [deptEdit, deptViewOnly, roleEdit, overrideEdit, canViewContact, isProducer, approverGrantEdit, approverGrantView] = await Promise.all([
-    bypass || hasGrant(permCtx.userId, id, "dept", "*", "grants", "edit"),
-    bypass || hasGrant(permCtx.userId, id, "dept", "*", "grants", "view"),
-    bypass || hasGrant(permCtx.userId, id, "role", "*", "grants", "edit"),
-    bypass || hasGrant(permCtx.userId, id, "member", "*", "overrides", "edit"),
-    bypass || hasGrant(permCtx.userId, id, "member", "*", "contact", "view"),
+    hasEffectiveGrant(permCtx, id, "dept", "*", "grants", "edit"),
+    hasEffectiveGrant(permCtx, id, "dept", "*", "grants", "view"),
+    hasEffectiveGrant(permCtx, id, "role", "*", "grants", "edit"),
+    hasEffectiveGrant(permCtx, id, "member", "*", "overrides", "edit"),
+    hasEffectiveGrant(permCtx, id, "member", "*", "contact", "view"),
     findProducers(id).then(ids => ids.includes(permCtx.userId)),
-    bypass || hasGrant(permCtx.userId, id, "production", "*", "grants", "edit"),
-    bypass || hasGrant(permCtx.userId, id, "production", "*", "grants", "view"),
+    hasEffectiveGrant(permCtx, id, "production", "*", "grants", "edit"),
+    hasEffectiveGrant(permCtx, id, "production", "*", "grants", "view"),
   ]);
   const deptView = deptEdit || deptViewOnly;
   // 角色/override 现无独立 view 节点：读随写门（宁严勿松）。

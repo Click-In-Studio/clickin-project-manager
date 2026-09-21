@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listPrivateAssets } from "@/lib/asset/review-db";
 import AdminAssetReviewClient from "@/components/admin/AdminAssetReviewClient";
@@ -20,11 +20,10 @@ export default async function AssetReviewPage({ params }: { params: Promise<{ id
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect("/");
   const { permCtx } = access;
-  const bypass = permCtx.isAdmin || permCtx.isOwner;
 
   const [canEdit, canViewOnly] = await Promise.all([
-    bypass || hasGrant(permCtx.userId, id, "production", "*", "asset_review", "edit"),
-    bypass || hasGrant(permCtx.userId, id, "production", "*", "asset_review", "view"),
+    hasEffectiveGrant(permCtx, id, "production", "*", "asset_review", "edit"),
+    hasEffectiveGrant(permCtx, id, "production", "*", "asset_review", "view"),
   ]);
   const canView = canEdit || canViewOnly;
   if (!canView) redirect(`/production/${id}/admin`);

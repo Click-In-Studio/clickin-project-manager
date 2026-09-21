@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getProductionName } from "@/lib/db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import { listDeptCueTemplates, listCueTemplateTypes } from "@/lib/ops/cue-template-db";
@@ -21,12 +21,11 @@ export default async function TemplatesPage({ params }: { params: Promise<{ id: 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect("/");
   const { permCtx } = access;
-  const bypass = permCtx.isAdmin || permCtx.isOwner;
 
   const [canEdit, canViewOnly, canManageTypes] = await Promise.all([
-    bypass || hasGrant(permCtx.userId, id, "dept", "*", "grants", "edit"),
-    bypass || hasGrant(permCtx.userId, id, "dept", "*", "grants", "view"),
-    bypass || hasGrant(permCtx.userId, id, "production", "*", "config", "edit"),
+    hasEffectiveGrant(permCtx, id, "dept", "*", "grants", "edit"),
+    hasEffectiveGrant(permCtx, id, "dept", "*", "grants", "view"),
+    hasEffectiveGrant(permCtx, id, "production", "*", "config", "edit"),
   ]);
   const canView = canEdit || canViewOnly || canManageTypes;
   if (!canView) redirect(`/production/${id}/admin`);
