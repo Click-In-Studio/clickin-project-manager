@@ -34,10 +34,17 @@ cd /var/www/production-manager/current
 sudo -u postgres psql -v app_password='your-password' -f db/bootstrap-roles.sql
 sudo -u postgres ./bin/dbmate --url 'postgres:///script_editor?host=/var/run/postgresql&sslmode=disable' \
   --migrations-dir db/migrations --no-dump-schema up
-
-# Agent Bot 数据库
-sudo -u postgres psql -f /var/www/production-manager/db/setup-agent-db.sql
 ```
+
+#### 退役 Agent 库（老机器一次性）
+
+OpenClaw 时代的 `click_in_agent` 库与 `agent_user` 角色已退役（#367 / #603）。migration `retire_agent_user_role` 会回收 `agent_user` 在主库上的全部授权，但它跑在 `script_editor` 里够不着 `click_in_agent` 库内的表级 ACL，于是 `DROP ROLE` 会以 WARNING 跳过。2026-09 之后建的新机器没有这两样东西，跳过本节；老机器 CD 日志见到 `#603: agent_user 在其他库仍有依赖` 后，手动收尾一次：
+
+```bash
+sudo -u postgres psql -c "DROP DATABASE IF EXISTS click_in_agent" -c "DROP ROLE IF EXISTS agent_user"
+```
+
+新机器不再需要建 Agent 库。
 
 ### 3. 飞书应用配置
 
