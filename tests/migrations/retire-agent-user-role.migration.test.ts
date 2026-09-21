@@ -46,10 +46,12 @@ describe("integrity verification", () => {
       `SELECT 1 FROM pg_roles WHERE rolname = 'script_editor'`,
     );
     if (roles.length === 0) return;
+    // 按 oid 问权限，不走 information_schema：规划器会把 has_table_privilege 下推到
+    // table_schema 过滤之前，对 information_schema 自己的表按裸名解析就报 relation 不存在。
     const { rows } = await getPool().query<{ n: string }>(
-      `SELECT count(*)::text AS n FROM information_schema.tables t
-       WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
-         AND NOT has_table_privilege('script_editor', quote_ident(t.table_name), 'SELECT')`,
+      `SELECT count(*)::text AS n FROM pg_class c
+       WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r'
+         AND NOT has_table_privilege('script_editor', c.oid, 'SELECT')`,
     );
     expect(rows[0].n).toBe("0");
   });
