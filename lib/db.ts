@@ -2034,11 +2034,6 @@ async function ensureEmptyScriptBlocksForEmptyScenesInTx(
 
 // ─── Auth / users ─────────────────────────────────────────────────────────────
 
-/**
- * Upsert a Feishu user after OAuth login. Creates an app_user row for new
- * users; updates profile fields for returning users. Returns the internal userId.
- */
-
 /** Look up the Feishu open_id for an internal user — used by Feishu-specific subsystems. */
 export async function getFeishuOpenId(userId: string): Promise<string | null> {
   const res = await getPool().query<{ open_id: string }>(
