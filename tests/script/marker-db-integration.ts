@@ -6,7 +6,7 @@ import {
   applyPatchToDB,
   createProduction,
   deleteProduction,
-  flushToDBVersioned,
+  writeVersionContent,
   getActiveVersionId,
   loadPageMap,
   getMarkerLabelIndex,
@@ -156,7 +156,7 @@ async function run() {
       "UPDATE script SET marker_meta = jsonb_set(marker_meta, '{parentMarkerId}', 'null'::jsonb) WHERE id = $1",
       [repairRow.rows[0].snapshot_id],
     );
-    await flushToDBVersioned(productionId, repairVersionId, {
+    await writeVersionContent(productionId, repairVersionId, {
       upsertBlocks: [{
         ...repairScene,
         snapshotId: repairRow.rows[0].snapshot_id,

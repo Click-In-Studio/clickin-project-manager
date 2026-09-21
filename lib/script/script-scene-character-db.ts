@@ -1,6 +1,5 @@
 import { getPool } from "../pg";
 import type { Block, Character, Scene } from "./script-types";
-import { getActiveVersionId } from "./version-db";
 import { generatedRehearsalMarksByScene } from "./script-generated-labels";
 import { VERSION_OWNED_BLOCKS_CTE, VERSION_SCENES_FROM_MARKERS_CTE } from "./script-marker-sql";
 import { projectMarkers, type MarkerProjection } from "./script-marker-domain";
@@ -143,13 +142,8 @@ export async function listRehearsalMarksByVersion(versionId: string): Promise<Re
 }
 
 
-export async function getCharacterById(id: string, productionId: string, versionId?: string | null): Promise<CharacterDetail | null> {
-  const resolvedVersionId = versionId ?? await (async () => {
-    console.error(`[fallback] getCharacterById called without versionId for char ${id} production ${productionId} — frontend bug`);
-    return getActiveVersionId(productionId);
-  })();
-  if (!resolvedVersionId) return null;
-
+/** productionId 是隔离护栏：id 属于别的项目时返回 null，不泄漏。 */
+export async function getCharacterById(id: string, productionId: string, versionId: string): Promise<CharacterDetail | null> {
   const pool = getPool();
   const [charRes, membersRes] = await Promise.all([
     pool.query<{
@@ -160,7 +154,7 @@ export async function getCharacterById(id: string, productionId: string, version
        FROM character_version cv
        JOIN character c ON c.id = cv.character_id
        WHERE cv.character_id = $1 AND c.production_id = $2 AND cv.version_id = $3`,
-      [id, productionId, resolvedVersionId]
+      [id, productionId, versionId]
     ),
     pool.query<{ member_id: string }>(
       "SELECT member_id FROM character_aggregate WHERE aggregate_id = $1",
@@ -216,17 +210,15 @@ export async function listMarkerProjectionByVersion(
   return projectMarkers({ blocks, scenes: [] }, [], labels);
 }
 
+/** productionId 是隔离护栏：version 不属于该项目时返回 null，不泄漏。 */
 export async function getSceneById(
-  sceneId: string, productionId: string, versionId?: string | null
+  sceneId: string, productionId: string, versionId: string,
 ): Promise<SceneDetail | null> {
-  if (versionId) {
-    const markerScenes = await listScenesByVersion(versionId);
-    const markerScene = markerScenes.find((scene) => scene.id === sceneId);
-    return markerScene ?? null;
-  }
-  // No cookie version: fall back to production's active version
-  console.error(`[fallback] getSceneById called without versionId for scene ${sceneId} production ${productionId} — frontend bug`);
-  const activeVersionId = await getActiveVersionId(productionId);
-  if (!activeVersionId) return null;
-  return getSceneById(sceneId, productionId, activeVersionId);
+  const owner = await getPool().query(
+    "SELECT 1 FROM version WHERE id = $1 AND production_id = $2",
+    [versionId, productionId],
+  );
+  if (owner.rows.length === 0) return null;
+  const markerScenes = await listScenesByVersion(versionId);
+  return markerScenes.find((scene) => scene.id === sceneId) ?? null;
 }

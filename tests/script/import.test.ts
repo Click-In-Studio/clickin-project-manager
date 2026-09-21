@@ -1,14 +1,14 @@
 /**
  * Import pipeline tests:
  *   A. importScriptToVersion — DB integration (full replacement, character links, cross-production isolation)
- *   B. flushToDBVersioned scene-only path — add / delete / upsert
+ *   B. writeVersionContent scene-only path — add / delete / upsert
  *   C. parseSceneNum — pure function (various formats)
  *   D. version-import hybrid — CoW block/cue isolation, orphan GC, v1 preservation
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   createProduction,
-  importScriptToVersion, flushToDBVersioned,
+  importScriptToVersion, writeVersionContent,
   getActiveVersionId,
   createCueList, createCue, updateCue,
   applyPatchToDB,
@@ -405,11 +405,11 @@ describe("A: importScriptToVersion DB integration", () => {
   });
 });
 
-// ── Group B: flushToDBVersioned scene-only path ───────────────────────────────
+// ── Group B: writeVersionContent scene-only path ───────────────────────────────
 
 const PROD_B = "test-import-b";
 
-describe("B: flushToDBVersioned scene-only path", () => {
+describe("B: writeVersionContent scene-only path", () => {
   let versionId: string;
 
   beforeAll(async () => {
@@ -423,7 +423,7 @@ describe("B: flushToDBVersioned scene-only path", () => {
   });
 
   it("B1: adds scenes to empty version", async () => {
-    await flushToDBVersioned(PROD_B, versionId, {
+    await writeVersionContent(PROD_B, versionId, {
       upsertScenes: [
         { id: "b-sc1", number: "1", name: "第一幕", parentId: null, sortOrder: 1 },
         { id: "b-sc2", number: "1-1", name: "第一场", parentId: "b-sc1", sortOrder: 2 },
@@ -439,7 +439,7 @@ describe("B: flushToDBVersioned scene-only path", () => {
   });
 
   it("B2: upsert updates existing scene name", async () => {
-    await flushToDBVersioned(PROD_B, versionId, {
+    await writeVersionContent(PROD_B, versionId, {
       upsertScenes: [{ id: "b-sc1", number: "1", name: "序幕（改名）", parentId: null, sortOrder: 1 }],
       deleteSceneIds: [],
       upsertBlocks: [], deleteSnapshotIds: [],
@@ -454,7 +454,7 @@ describe("B: flushToDBVersioned scene-only path", () => {
   });
 
   it("B3: deleteSceneIds removes scene from scene_version but global scene row persists", async () => {
-    await flushToDBVersioned(PROD_B, versionId, {
+    await writeVersionContent(PROD_B, versionId, {
       upsertScenes: [],
       deleteSceneIds: ["b-sc2"],
       upsertBlocks: [], deleteSnapshotIds: [],
@@ -470,7 +470,7 @@ describe("B: flushToDBVersioned scene-only path", () => {
 
   it("B4: replaceExisting=false leaves unlisted scenes intact", async () => {
     // scene "1" is still present from B1; add a new one without deleting existing
-    await flushToDBVersioned(PROD_B, versionId, {
+    await writeVersionContent(PROD_B, versionId, {
       upsertScenes: [{ id: "b-sc3", number: "2", name: "第二幕", parentId: null, sortOrder: 2 }],
       deleteSceneIds: [],
       upsertBlocks: [], deleteSnapshotIds: [],

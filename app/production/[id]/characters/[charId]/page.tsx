@@ -9,7 +9,7 @@ import CharacterDetailView from "@/components/script/CharacterDetail";
 export async function generateMetadata({ params }: { params: Promise<{ id: string; charId: string }> }): Promise<Metadata> {
   const { id, charId } = await params;
   const versionId = await getActiveVersionId(id);
-  const character = await getCharacterById(charId, id, versionId);
+  const character = versionId ? await getCharacterById(charId, id, versionId) : null;
   return { title: character?.name ?? "角色" };
 }
 
@@ -36,7 +36,7 @@ export default async function CharacterDetailPage({
     getActiveVersionId(id),
   ]);
   const [character, allCharacters] = await Promise.all([
-    getCharacterById(charId, id, versionId),
+    versionId ? getCharacterById(charId, id, versionId) : Promise.resolve(null),
     versionId ? listCharactersByVersion(versionId) : Promise.resolve([]),
   ]);
   if (!name || !character) redirect(`/production/${id}/characters`);
