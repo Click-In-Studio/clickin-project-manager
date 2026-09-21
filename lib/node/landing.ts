@@ -4,7 +4,7 @@ import { keyBetween } from "../lex-order";
 import { ensureReportTreeAnchors } from "./anchors";
 import { getNodeByWikiId, newNodeId } from "./db";
 import { canEnterEvent } from "../ops/event-permissions";
-import { hasGrant, hasAnyGrant, type GrantActor } from "../perm/grant-check";
+import { hasEffectiveGrant, hasAnyEffectiveGrant, type GrantActor } from "../perm/grant-check";
 
 // ─── 缺省落点（#420 第二批收官，2026-09-05 拍板）─────────────────────────────
 //
@@ -162,8 +162,7 @@ export async function resolveDefaultLanding(
     case "block": {
       // 拍板：单个「剧本」目录收全部剧本上下文内容，不做 per-block（过度设计）。
       // 干系＝剧本读者（与挂载让渡的 script 通道同锚）
-      if (!actor.isAdmin && !actor.isOwner
-          && !await hasGrant(actor.userId, productionId, "script", "*", "blocks", "view")) return null;
+      if (!await hasEffectiveGrant(actor, productionId, "script", "*", "blocks", "view")) return null;
       const { rows } = await pool.query(
         `SELECT 1 FROM script WHERE block_id = $1 AND production_id = $2 LIMIT 1`,
         [ctx.mountId, productionId],
@@ -181,8 +180,7 @@ export async function resolveDefaultLanding(
         [ctx.mountId, productionId],
       );
       if (!rows[0]) return null;
-      if (!actor.isAdmin && !actor.isOwner
-          && !await hasGrant(actor.userId, productionId, "cue_list", rows[0].cue_list_id, "cues", "view")) return null;
+      if (!await hasEffectiveGrant(actor, productionId, "cue_list", rows[0].cue_list_id, "cues", "view")) return null;
       const { cue_list_id, name } = rows[0];
       return withEntityDirTxn(productionId, async c => {
         const root = await ensureEntityDir(c, productionId, "cue_root", "*", "Cue", null);
@@ -193,8 +191,7 @@ export async function resolveDefaultLanding(
       // 拍板：「场景/<场名>」per-scene。场名取 head 版（scene 表裸 id，名字在
       // scene_version；场次号是 marker 运行时派生不落库，标题只用名字）。
       // 干系＝scene meta@view（与让渡通道同锚）
-      if (!actor.isAdmin && !actor.isOwner
-          && !await hasAnyGrant(actor.userId, productionId, "scene", ["meta"], "view")) return null;
+      if (!await hasAnyEffectiveGrant(actor, productionId, "scene", ["meta"], "view")) return null;
       const { rows } = await pool.query<{ name: string }>(
         `SELECT sv.name FROM scene s
          JOIN production p ON p.id = s.production_id

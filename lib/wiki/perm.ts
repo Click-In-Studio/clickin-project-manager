@@ -26,7 +26,9 @@ type WikiVisibilityRow = { id: string; is_public: boolean; node_id: string | nul
 
 /** report 边的宿主可见判据（对齐 reports/[reportId]/page.tsx 的门）：
  *  已发布 ∧ 事件域 view；或 draft 四通道（report 实例行 / publication@view /
- *  event reports@view / 部门参与者）。 */
+ *  event reports@view / 部门参与者）。
+ *  裸 hasGrant（#604）：只从 canViewWiki 的 owner 旁路**之后**被调，
+ *  这里不重复旁路。 */
 async function reportEdgeVisible(
   actor: GrantActor,
   productionId: string,

@@ -260,7 +260,9 @@ export async function walkSupervisorChain(
   return out;
 }
 
-/** 该用户是否已持有申请要的**全部**动词行——决定上级能终局还是只能转发。 */
+/** 该用户是否已持有申请要的**全部**动词行——决定上级能终局还是只能转发。
+ *  裸 hasGrant（#604）：问的是「持不持有行」不是门；owner 终局在调用点
+ *  `hop.userId === ownerId ||` 单独判。 */
 async function holdsRequestedRows(userId: string, t: ApprovalTarget): Promise<boolean> {
   const rows = expandLevelRows(t.resourceType, t.resourceSub, t.permissionLevel);
   for (const [sub, verb] of rows) {
