@@ -115,6 +115,11 @@ INTERNAL_NOTIFY_SECRET=xxxxxxxx   # 随机字符串，用于保护 cron 接口
 OPENAI_API_KEY=sk-xxxxxxxx
 OPENAI_MODEL=gpt-4o-mini
 
+# MMP 多模态感知服务（#453 / #454：OCR 等由自建 broker 承接）。不设 = AI 的 OCR 工具
+# 诚实报「服务不可用」，其余功能不受影响。key 是 broker 的 api_key，不进仓库。
+MMP_BASE_URL=https://mmp.<your-domain>
+MMP_API_KEY=xxxxxxxx
+
 # 后台重活队列（lib/job/queue.ts）：设 1 表示由 heavy-worker 进程消费任务
 # （pdf/docx 解析、缩略图等）。不设则 enqueue 方原地执行——dev/未部署 worker 的
 # 环境用；生产必设，否则重活又回到 next / agent-runner 进程里跑。

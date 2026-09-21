@@ -19,6 +19,10 @@ import { getWiki } from "@/lib/wiki/content";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 import { TransientReadError } from "@/lib/asset/byte-source";
 import { loadParsedDocx, loadParsedPdf } from "@/lib/doc-extract/load";
+import { presignedGet } from "@/lib/r2";
+import { ocrPages, type OcrPage, type OcrTier } from "@/lib/mmp/ocr";
+import { recordMmpUsage } from "@/lib/mmp/billing";
+import type { Asset, AssetFile } from "@/lib/asset/db";
 import type { DocxDoc, DocxItem, DocxParagraph } from "@/lib/doc-extract/docx";
 import type { PdfDoc, PdfPage } from "@/lib/doc-extract/pdf";
 
@@ -93,10 +97,10 @@ export interface DocToolOpts {
   sessionId?: string | null;
 }
 
-async function loadDoc(
+/** 权限门 + 取文件行：doc_* 与 doc_page_ocr 共用（口径 = asset meta face，与预览同门）。 */
+async function resolveReadableAsset(
   userId: string, productionId: string, assetId: string,
-  opts: DocToolOpts = {},
-): Promise<Loaded | string> {
+): Promise<{ asset: Asset; file: AssetFile & { r2Key: string } } | string> {
   const resolved = await resolveProductionActor(userId, productionId);
   if (!resolved) return DENIED_NOT_MEMBER;
   const asset = await getAsset(assetId);
@@ -110,6 +114,19 @@ async function loadDoc(
     return "没有找到该资产（资产 id 来自树里的 [文件] 行或 production.asset_list）。";
   }
   if (!await canViewAsset(resolved.actor, productionId, asset, "meta")) return DENIED_ASSET_VIEW;
+  if (asset.storageType !== "r2") return "该资产不是本站存储的文件（如飞书链接），无法解析。";
+  const file = await resolveAssetFile(assetId);
+  if (!file?.r2Key) return "该资产没有可读的文件内容。";
+  return { asset, file: { ...file, r2Key: file.r2Key } };
+}
+
+async function loadDoc(
+  userId: string, productionId: string, assetId: string,
+  opts: DocToolOpts = {},
+): Promise<Loaded | string> {
+  const got = await resolveReadableAsset(userId, productionId, assetId);
+  if (typeof got === "string") return got;
+  const { asset, file } = got;
 
   const name = asset.fileName ?? "";
   const lower = name.toLowerCase();
@@ -119,10 +136,6 @@ async function loadDoc(
       return "老式 .doc（二进制格式）不支持解析——请把文件另存为 .docx 后重新上传。";
     return `该资产（${name || "无文件名"}）不是 .docx / .pdf 文档，暂不支持解析。`;
   }
-  if (asset.storageType !== "r2") return "该资产不是本站存储的文件（如飞书链接），无法解析。";
-
-  const file = await resolveAssetFile(assetId);
-  if (!file?.r2Key) return "该资产没有可读的文件内容。";
   // 解析在 heavy-worker 进程做（lib/doc-extract/load.ts 双模式装载）：
   // 快路径命中缓存/IR 或短等内完成；慢路径转后台，worker 终局后插话唤醒本会话。
   const ref = { fileId: file.id, r2Key: file.r2Key, fileSize: file.fileSize, fileName: name };
@@ -299,7 +312,7 @@ function pdfOutline(doc: PdfDoc, fileName: string): string {
   if (!s.assetsAvailable)
     lines.push("⚠ 服务端 cMaps 字体资源缺失——CJK 文档会整页抽取不完整，这是环境问题不是文档问题。");
   if (s.rasterizedPages > 0)
-    lines.push("⚠ 存在栅格化页：那些页的内容是图像，文本工具读不到（≠没有内容），处置需问用户。");
+    lines.push("⚠ 存在栅格化页：那些页的内容是图像，文本工具读不到（≠没有内容）——用 production.doc_page_ocr 按页识别文字（识别结果可能有错字，关键处问用户核对）。");
   lines.push(`逐页密度带：${densityBands(doc.pages)}`);
 
   // 横排页的 x 聚类（缩进 lane 直方图）
@@ -464,4 +477,122 @@ export async function docSearch(
   if (total === 0) return `没有找到「${neutralizeInjectionTags(q)}」。`;
   const head = total > limit ? `命中 ${total} 处（显示前 ${limit} 处，可加 limit 或缩小词）：` : `命中 ${total} 处：`;
   return neutralizeInjectionTags([head, ...hits].join("\n"));
+}
+
+// ─── doc_page_ocr（#453：MMP 接入首例）───────────────────────────────────────
+// 栅格化 / 抽取不完整的页文本层读不到，按页交给 MMP 的 ocr.structured：快档
+// （PP-OCR 文本行 + 每页质量信号）先跑，某页 flags 非空再对那些页提慢档（版面
+// 结构 + markdown + 表格 / 印章元素）。升不升档由模型决定，服务不自动升。
+// - 权限 = asset meta face（与 doc_* 同门，能预览即能识别）；
+// - 媒体走 R2 预签名 URL（算力节点在别的网络，只有公网 URL 拉得到）；
+// - OCR 输出是不可信文本（用户文件），统一过 neutralizeInjectionTags；识别可能有错字，
+//   输出里明说，关键处让模型问用户核对；
+// - 计费：GPU 推理毫秒折 credit（lib/mmp/billing.ts，#618），缓存命中不记。
+
+const OCR_MIME_BY_EXT: Record<string, string> = {
+  pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+  tif: "image/tiff", tiff: "image/tiff", webp: "image/webp",
+};
+const OCR_PAGE_CAP: Record<OcrTier, number> = { "gpu-fast": READ_PDF_PAGE_CAP, gpu: 5 };
+/** 预签名有效期：要盖住排队 + 冷启动 + 单次任务，15 分钟够。 */
+const OCR_URL_TTL_SEC = 15 * 60;
+const OCR_TIER_LABEL: Record<OcrTier, string> = { "gpu-fast": "快档", gpu: "慢档（版面结构）" };
+
+export type DocPageOcrOpts = DocToolOpts & { tier?: "fast" | "full"; signal?: AbortSignal };
+
+export async function docPageOcr(
+  userId: string, productionId: string, assetId: string,
+  pages: number[],
+  opts: DocPageOcrOpts = {},
+): Promise<string> {
+  const got = await resolveReadableAsset(userId, productionId, assetId);
+  if (typeof got === "string") return neutralizeInjectionTags(got);
+  const { asset, file } = got;
+  const name = asset.fileName ?? "";
+  const ext = name.toLowerCase().split(".").pop() ?? "";
+  const mime = OCR_MIME_BY_EXT[ext] ?? (asset.mimeType && Object.values(OCR_MIME_BY_EXT).includes(asset.mimeType) ? asset.mimeType : null);
+  if (!mime) return neutralizeInjectionTags(`该资产（${name || "无文件名"}）不是 pdf / png / jpeg / tiff / webp，无法做 OCR。`);
+
+  const tier: OcrTier = opts.tier === "full" ? "gpu" : "gpu-fast";
+  let wanted = [...new Set(pages.map((p) => Math.floor(p)).filter((p) => Number.isFinite(p) && p >= 1))].sort((a, b) => a - b);
+  if (!wanted.length) return "pages 不能为空（1 起的页序，例：[3, 4]；图片文件用 [1]）。";
+
+  // pdf 已解析过的话拿页状态：有文本层的页提醒用 doc_read（便宜且无错字），越界页裁掉
+  const textLayerPages = new Set<number>();
+  let pageCount: number | null = null;
+  if (mime === "application/pdf") {
+    const parsed = await loadParsedPdf(
+      { fileId: file.id, r2Key: file.r2Key, fileSize: file.fileSize, fileName: name },
+      { notifySessionId: opts.sessionId ?? null },
+    ).catch(() => null);
+    if (parsed?.status === "ok") {
+      pageCount = parsed.doc.stats.pageCount;
+      wanted = wanted.filter((p) => p <= pageCount!);
+      if (!wanted.length) return `页序越界：该 pdf 共 ${pageCount} 页。`;
+      for (const p of wanted) if (parsed.doc.pages[p - 1]?.status === "ok") textLayerPages.add(p);
+    }
+  } else {
+    wanted = [1];
+  }
+  const cap = OCR_PAGE_CAP[tier];
+  const truncated = wanted.length > cap ? wanted.slice(cap) : [];
+  if (truncated.length) wanted = wanted.slice(0, cap);
+
+  const url = presignedGet(file.r2Key, OCR_URL_TTL_SEC, { contentType: mime });
+  const out = await ocrPages({ fileId: file.id, url, pages: wanted, tier }, { signal: opts.signal });
+  if (out.status === "error") {
+    if (out.unavailable) {
+      return `⚠ OCR 服务当前不可用（${out.code}）：本次没有识别到任何内容，不要把这当作页面为空。` +
+        "可以稍后重试；如果用户急用，请他提供文本版或口述关键内容。";
+    }
+    return neutralizeInjectionTags(`OCR 请求失败（${out.code}）：${out.message}`);
+  }
+
+  const credits = out.cached ? 0 : await recordMmpUsage({
+    userId, productionId, type: "ocr.structured", tier: out.tier, computeMs: out.computeMs,
+  }).catch((e) => { console.error("[doc_page_ocr] 记账失败（结果照常返回）:", e); return 0; });
+
+  const lines: string[] = [];
+  lines.push(
+    `《${name}》OCR（${OCR_TIER_LABEL[out.tier]}，引擎 ${out.engine || "?"}，${out.pages.length} 页` +
+    (out.cached ? "，缓存命中不计费" : `，本次约 ${credits.toLocaleString("zh-CN")} credit${out.computeEstimated ? "（估算）" : ""}`) +
+    "）。识别文本可能有错字 / 漏行，关键处要让用户核对。",
+  );
+  const budget = { chars: 0 };
+  for (const p of out.pages) lines.push(...renderOcrPage(p, textLayerPages.has(p.page), budget));
+  if (budget.chars >= READ_CHAR_BUDGET) lines.push("…（单次字符上限已满，其余页分批再识别）");
+  if (truncated.length) lines.push(`（单次最多 ${cap} 页，未处理：p${truncated.join(", p")}——分批续跑）`);
+  if (out.tier === "gpu-fast" && out.suggestUpgradePages.length) {
+    lines.push(`建议升慢档的页（质量信号异常）：p${out.suggestUpgradePages.join(", p")}——用 tier: "full" 只对这些页重跑，能拿到版面结构与更稳的识别。`);
+  }
+  return neutralizeInjectionTags(lines.join("\n"));
+}
+
+const OCR_FLAG_LABEL: Record<string, string> = {
+  low_confidence: "低置信行偏多",
+  coverage_anomaly: "有字没被认出（覆盖率低）",
+  empty: "没认出文字",
+};
+
+function renderOcrPage(p: OcrPage, hasTextLayer: boolean, budget: { chars: number }): string[] {
+  const q = p.quality;
+  const meta = [
+    `行=${q.lines}`,
+    typeof q.mean_score === "number" ? `置信=${q.mean_score.toFixed(2)}` : null,
+    p.flags.length ? `⚠ ${p.flags.map((f) => OCR_FLAG_LABEL[f] ?? f).join("、")}` : null,
+  ].filter(Boolean).join(" ");
+  const out = [`── p${p.page} [OCR ${meta}]${hasTextLayer ? "（该页有文本层，doc_read 可直接读，OCR 仅作核对）" : ""} ──`];
+  if (budget.chars >= READ_CHAR_BUDGET) return out;
+  let body = p.tier === "gpu" && p.markdown ? p.markdown : p.text;
+  if (!body.trim()) body = "（本页没有识别到文字）";
+  const room = READ_CHAR_BUDGET - budget.chars;
+  if (body.length > room) body = body.slice(0, room) + "…";
+  out.push(body);
+  budget.chars += body.length;
+  if (p.tier === "gpu" && p.elements?.length) {
+    const counts = new Map<string, number>();
+    for (const e of p.elements) counts.set(e.type, (counts.get(e.type) ?? 0) + 1);
+    out.push(`版面元素：${[...counts].map(([t, n]) => `${t}×${n}`).join("、")}`);
+  }
+  return out;
 }

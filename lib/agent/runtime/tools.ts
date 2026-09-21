@@ -629,6 +629,26 @@ export const DEFS: Def[] = [
     ),
   },
   {
+    // #453 栅格化页 / 图片文件的 OCR（MMP 接入首例，lib/mmp/*）。快档先、flags 再慢档，升档是模型的决定。
+    mcpName: "production.doc_page_ocr",
+    description:
+      "对 pdf 的栅格化 / 抽取不完整页，或 png/jpeg/tiff/webp 图片文件，按页识别文字（EN: OCR scanned pages image text recognize rasterized）。" +
+      "doc_outline 标了栅格化的页用它读；有文本层的页用 doc_read（更便宜且无错字）。" +
+      "默认快档（每页文本行 + 质量信号）；结果里提示「建议升慢档的页」时，再只对那些页用 tier: \"full\" 重跑（版面结构 + markdown + 表格/印章元素，慢且贵）。" +
+      "识别结果可能有错字，关键内容要让用户核对；单次快档 10 页 / 慢档 5 页。GPU 推理按用量计入 AI 额度。",
+    parameters: Type.Object({
+      assetId: Type.String({ description: "资产 id" }),
+      pages: Type.Array(Type.Integer({ minimum: 1 }), { minItems: 1, description: "页序（1 起）；图片文件传 [1]" }),
+      tier: Type.Optional(Type.Union([Type.Literal("fast"), Type.Literal("full")], { description: "fast=快档（默认）；full=慢档，只对快档提示需要升档的页用" })),
+    }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/doc-tools")).docPageOcr(
+      ctx.userId, ctx.productionId, String(args.assetId),
+      (args.pages as unknown[]).map(Number),
+      { tier: args.tier === "full" ? "full" : "fast", sessionId: ctx.run?.sessionId ?? null, signal: ctx.run?.signal },
+    ),
+  },
+  {
     mcpName: "production.asset_list",
     description:
       "列出该制作里当前用户可见的资产文件：文件名、id、类型，docx/pdf 会标注可解析（EN: list assets files documents pdf docx enumerate）。" +
