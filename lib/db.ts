@@ -2370,18 +2370,6 @@ export async function updateSceneMetadata(
   }
 }
 
-// ─── listProductionDepts（随成员段搬 perm/；与 perm/dept-db 同名不同返回类型，届时消解）──
-
-export async function listProductionDepts(
-  productionId: string,
-): Promise<Array<{ id: string; name: string }>> {
-  const { rows } = await getPool().query<{ id: string; name: string }>(
-    `SELECT id, name FROM production_dept WHERE production_id = $1 ORDER BY display_order, name`,
-    [productionId],
-  );
-  return rows;
-}
-
 // ─── Block Tags ───────────────────────────────────────────────────────────────
 
 export type TagOption = {

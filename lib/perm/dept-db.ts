@@ -82,6 +82,18 @@ function toDept(row: DeptRow, members: MemberRow[]): ProductionDept {
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
 
+/** 只取 id / name 的轻量清单（cue 表分享面用）；要成员 / POC / 层级用 listProductionDepts。
+ *  #486 前叫 db.ts 里的 listProductionDepts，与本文件的全量版同名不同返回类型，搬来时改名。 */
+export async function listProductionDeptNames(
+  productionId: string,
+): Promise<Array<{ id: string; name: string }>> {
+  const { rows } = await getPool().query<{ id: string; name: string }>(
+    `SELECT id, name FROM production_dept WHERE production_id = $1 ORDER BY display_order, name`,
+    [productionId],
+  );
+  return rows;
+}
+
 /** Load all depts for a production, including member lists. */
 export async function listProductionDepts(productionId: string): Promise<ProductionDept[]> {
   const pool = getPool();

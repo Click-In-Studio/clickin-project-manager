@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
-import { getProductionPermissionContext, getCueList, listProductionDepts } from "@/lib/db";
+import { getProductionPermissionContext, getCueList } from "@/lib/db";
+import { listProductionDeptNames } from "@/lib/perm/dept-db";
 import {
   listCueListGrants, listCueListDeptAccess,
   addCueListDeptAccess, removeCueListDeptAccess,
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   const [grants, deptAccess, productionDepts] = await Promise.all([
     listCueListGrants(cueListId),
     listCueListDeptAccess(cueListId),
-    listProductionDepts(id),
+    listProductionDeptNames(id),
   ]);
   return Response.json({ grants, deptAccess, productionDepts });
 }

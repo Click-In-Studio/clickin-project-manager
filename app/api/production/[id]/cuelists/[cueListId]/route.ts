@@ -3,8 +3,9 @@ import { getSession } from "@/lib/account/session";
 import {
   getProductionPermissionContext,
   getCueList, updateCueList, deleteCueList,
-  hasListAccess, listProductionDepts,
+  hasListAccess,
 } from "@/lib/db";
+import { listProductionDeptNames } from "@/lib/perm/dept-db";
 import { listCueListGrants, listCueListDeptAccess } from "@/lib/perm/resource-grant-db";
 import { canAccessNode } from "@/lib/perm/grant-template";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
@@ -42,7 +43,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/production/[
   const [grants, deptAccess, productionDepts] = await Promise.all([
     canManage ? listCueListGrants(cueListId) : Promise.resolve([]),
     canManage ? listCueListDeptAccess(cueListId) : Promise.resolve([]),
-    canManage ? listProductionDepts(id) : Promise.resolve([]),
+    canManage ? listProductionDeptNames(id) : Promise.resolve([]),
   ]);
 
   return Response.json({ cueList, grants, deptAccess, productionDepts, canEdit, canManage });
