@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { registerSSE, removePresence, presenceFrameFor } from "@/lib/server-cache";
 import { registerSSEKick } from "@/lib/sse-kick";
 import { getActiveVersionId, getVersion, getProductionPermissionContext } from "@/lib/db";
@@ -10,7 +10,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "script", "*", "blocks", "view")))
+  if (!access || !await hasEffectiveGrant(access.permCtx, id, "script", "*", "blocks", "view"))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const clientId = req.nextUrl.searchParams.get("cid") ?? Math.random().toString(36).slice(2);

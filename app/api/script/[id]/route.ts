@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { broadcastEvent, tickAndBroadcastSeq } from "@/lib/server-cache";
 import { patchAffectsMarkerProjection, type ScriptPatch, requiredPermissions } from "@/lib/script/script-ops";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getSession } from "@/lib/account/session";
 import { rejectNonHeadWrite } from "@/lib/script/head-version";
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/script/[id]"
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
-  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
+  if (!await hasEffectiveGrant(permCtx, id, "script", "*", "blocks", "view")) {
     return Response.json({ error: "无权访问该剧本" }, { status: 403 });
   }
   const versionId = await resolveVersion(req, id);
@@ -49,7 +49,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "script", "*", "blocks", "view"))) {
+  if (!await hasEffectiveGrant(permCtx, id, "script", "*", "blocks", "view")) {
     return Response.json({ error: "无权访问该剧本" }, { status: 403 });
   }
 
@@ -67,9 +67,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
   for (const perm of needed) {
     // E1 过渡双制：node: 前缀键走行判定，其余仍走原子键（E2 收敛）
     if (perm.startsWith("node:")) {
-      if (permCtx.isAdmin || permCtx.isOwner) continue;
       const m = /^node:([^/]+)\/([^/@]+)(?:\/(.+))?@(\w+)$/.exec(perm);
-      if (!m || !await hasGrant(permCtx.userId, id, m[1], m[2], m[3] ?? "*", m[4] as "view" | "create" | "edit" | "delete")) {
+      if (!m || !await hasEffectiveGrant(permCtx, id, m[1], m[2], m[3] ?? "*", m[4] as "view" | "create" | "edit" | "delete")) {
         return Response.json({ error: `权限不足：${perm}` }, { status: 403 });
       }
     }

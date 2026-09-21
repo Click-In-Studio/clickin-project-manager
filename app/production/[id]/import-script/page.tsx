@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "导入剧本内容" };
 
 import { redirect } from "next/navigation";
@@ -15,7 +15,7 @@ export default async function ImportScriptPage({ params }: { params: Promise<{ i
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "script", "*", "imports", "create"))) redirect(`/production/${id}`);
+  if (!access || !await hasEffectiveGrant(access.permCtx, id, "script", "*", "imports", "create")) redirect(`/production/${id}`);
 
   const versionId = await getActiveVersionId(id);
 

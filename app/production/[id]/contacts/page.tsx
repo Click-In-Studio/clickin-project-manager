@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "人员" };
 
 import { redirect, notFound } from "next/navigation";
@@ -24,7 +24,7 @@ export default async function ContactsPage({
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "member", "*", "meta", "view"))) redirect(`/unauthorized?resource=node%3Amember%2F*%2Fmeta%40view&id=${id}`);
+  if (!await hasEffectiveGrant(access.permCtx, id, "member", "*", "meta", "view")) redirect(`/unauthorized?resource=node%3Amember%2F*%2Fmeta%40view&id=${id}`);
 
   const [name, members] = await Promise.all([
     getProductionName(id),

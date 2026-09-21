@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { hasAnyGrant } from "@/lib/perm/grant-check";
+import { hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSceneFieldPerms } from "@/lib/script/scene-field-perms";
 import {
   getProductionPermissionContext,
@@ -32,7 +32,7 @@ export default async function DramaturgyPage({
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!access.permCtx.isAdmin && !access.permCtx.isOwner && !await hasAnyGrant(session.userId, id, "scene", ["meta"], "view"))
+  if (!await hasAnyEffectiveGrant(access.permCtx, id, "scene", ["meta"], "view"))
     redirect(`/unauthorized?resource=node%3Ascene%2F*%2Fmeta%40view&id=${id}`);
 
   // 逐字段权限：scene 的每个字段各有一把钥匙（lib/script/scene-field-perms）。

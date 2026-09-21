@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { hasGrant, hasAnyGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant, hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getCharacterById, getProductionName, listCharactersByVersion, getActiveVersionId } from "@/lib/db";
 import CharacterDetailView from "@/components/script/CharacterDetail";
 
@@ -25,12 +25,11 @@ export default async function CharacterDetailPage({
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!access.permCtx.isAdmin && !access.permCtx.isOwner && !await hasAnyGrant(session.userId, id, "character", ["meta"], "view"))
+  if (!await hasAnyEffectiveGrant(access.permCtx, id, "character", ["meta"], "view"))
     redirect(`/unauthorized?resource=node%3Acharacter%2F*%2Fmeta%40view&id=${id}`);
 
   // owner 旁路（#228 漏网）；域对齐 API 真相：character 编辑门是 character/*@edit（原 scene meta/name 为复制残留）
-  const canEdit = access.permCtx.isAdmin || access.permCtx.isOwner
-    || await hasGrant(session.userId, id, "character", "*", "*", "edit");
+  const canEdit = await hasEffectiveGrant(access.permCtx, id, "character", "*", "*", "edit");
 
   const [name, versionId] = await Promise.all([
     getProductionName(id),

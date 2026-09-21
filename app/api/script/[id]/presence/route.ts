@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { hasActiveSSEUser, updatePresence } from "@/lib/server-cache";
 import { getActiveVersionId, getVersion, getProductionPermissionContext } from "@/lib/db";
 import { getSession } from "@/lib/account/session";
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   // 慢路径：无活跃 SSE（首拍抢跑、断线重连间隙、未带版本号）——走全套权限门。
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "script", "*", "blocks", "view")))
+  if (!access || !await hasEffectiveGrant(access.permCtx, id, "script", "*", "blocks", "view"))
     return Response.json({ error: "无权访问" }, { status: 403 });
 
   const versionId = explicitVersionId ?? await getActiveVersionId(id) ?? '';

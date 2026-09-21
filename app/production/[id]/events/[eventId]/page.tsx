@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
@@ -104,7 +104,7 @@ export default async function EventDetailPage({
   const canTechReqDelete = await hasEffectiveGrant(toActor(session, prodPermCtx), productionId, "task", "*", "*", "delete");
   // canWriteReport: check if user has edit+ on any report in this event OR has event edit grant
   const canWriteReport = hasEditGrant ||
-    (reports.length > 0 && await hasGrant(session.userId, productionId, "report", reports[0].id, "*", "edit"));
+    (reports.length > 0 && await hasEffectiveGrant(toActor(session, prodPermCtx), productionId, "report", reports[0].id, "*", "edit"));
   const canEditAnyTechReq = hasEditGrant;
   const pocDeptIds = eventPermCtx.pocDeptIds;
 
