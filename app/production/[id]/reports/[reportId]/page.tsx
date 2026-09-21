@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasGrant, hasAnyGrant, toActor } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant, hasAnyEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
@@ -85,7 +85,8 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
-  if (!(await hasEventDomainView(toActor(session, prodPermCtx), productionId))) // event:follow 批B 两职拆分：订阅=followers@create、读取=meta/details@view——
+  const actor = toActor(session, prodPermCtx);
+  if (!(await hasEventDomainView(actor, productionId))) // event:follow 批B 两职拆分：订阅=followers@create、读取=meta/details@view——
   // 此门是 hasEventDomainView（域 view），申请节点=meta@view 才与门一致（非 verb swap）
   redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${productionId}`);
 
@@ -102,8 +103,8 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   // → 部门参与者可见 draft report（上下文判定，与 canWriteNote 的授权面对齐）
   const canViewReportUnpublished = await isReportViewer(prodPermCtx, productionId)
     || eventPermCtx.participantDeptIds.length > 0
-    || await hasGrant(session.userId, productionId, "event", eventId, "reports", "view")
-    || await hasGrant(session.userId, productionId, "report", reportId, "publication", "view");
+    || await hasEffectiveGrant(actor, productionId, "event", eventId, "reports", "view")
+    || await hasEffectiveGrant(actor, productionId, "report", reportId, "publication", "view");
 
   if (!canViewReportUnpublished && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/reports`);
@@ -123,10 +124,9 @@ export default async function ReportViewPage({ params, searchParams }: Ctx) {
   }
 
   // Page-level: can write note for at least one dept (specific dept check is in POST /notes)
-  const userCanWriteNote = prodPermCtx.isAdmin
-    || eventPermCtx.participantDeptIds.length > 0
+  const userCanWriteNote = eventPermCtx.participantDeptIds.length > 0
     // 批C C3：dept/<D>/notes@create 行（POC/导演通配）——本人无需在 event 中
-    || await hasAnyGrant(session.userId, productionId, "dept", ["notes"], "create")
+    || await hasAnyEffectiveGrant(actor, productionId, "dept", ["notes"], "create")
     || await canModerateNotes(prodPermCtx, productionId, eventId);
   const userCanModerate = await canModerateNotes(prodPermCtx, productionId, eventId);
   const userCanReply = canReplyToReport(session.isAdmin, eventPermCtx.isFollower, eventPermCtx.isInCall);

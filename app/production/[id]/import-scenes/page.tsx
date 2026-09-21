@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { hasGrant } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 export const metadata: Metadata = { title: "导入章节信息" };
 
 import { redirect } from "next/navigation";
@@ -15,7 +15,7 @@ export default async function ImportScenesPage({ params }: { params: Promise<{ i
   if (!session) redirect("/login");
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
-  if (!access || !(access.permCtx.isAdmin || access.permCtx.isOwner || await hasGrant(access.permCtx.userId, id, "dramaturgy", "*", "imports", "create"))) redirect(`/production/${id}`);
+  if (!access || !await hasEffectiveGrant(access.permCtx, id, "dramaturgy", "*", "imports", "create")) redirect(`/production/${id}`);
 
   const versionId = await getActiveVersionId(id);
 

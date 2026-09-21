@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { canEnterEvent, loadEventPermContext } from "@/lib/ops/event-permissions";
-import { hasEffectiveGrant, hasGrant, toActor } from "@/lib/perm/grant-check";
+import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
@@ -14,7 +14,6 @@ import {
   listEventDepartments,
 } from "@/lib/ops/event-db";
 import { hasUserAnyTechReqGrantInEvent } from "@/lib/perm/resource-grant-db";
-import { hasGrant as hasGrantCheck } from "@/lib/perm/grant-check";
 import EventFollowerClient from "@/components/ops/EventFollowerClient";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string; eventId: string }> }): Promise<Metadata> {
@@ -38,22 +37,22 @@ export default async function EventViewPage({
   const _prodAccess = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!_prodAccess) redirect(`/unauthorized?id=${productionId}`);
   const { permCtx: prodPermCtx } = _prodAccess;
+  const actor = toActor(session, prodPermCtx);
   // 门 = 域 view 行，或通过用户组参与了这个 event（后者是 Type B 上下文判定，
   // 见 canEnterEvent）。批B 两职拆分：订阅=followers@create、读取=meta/details@view——
   // 申请节点=meta@view 才与门一致（非 verb swap）
-  if (!(await canEnterEvent(toActor(session, prodPermCtx), productionId, eventId)))
+  if (!(await canEnterEvent(actor, productionId, eventId)))
     redirect(`/unauthorized?resource=node%3Aevent%2F*%2Fmeta%40view&id=${productionId}`);
 
   const event = await getProductionEvent(eventId, productionId);
   if (!event) notFound();
 
   // Per-instance production_member_grant edit+ → full editor view on this page
-  const canViewFull = prodPermCtx.isAdmin || prodPermCtx.isOwner
-    || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit");
+  const canViewFull = await hasEffectiveGrant(actor, productionId, "event", eventId, "details", "edit");
 
   // Non-editors cannot see unpublished events
   // draft 门 = publication@view 行（发布生命周期面的 view 档；保留段不被通配覆盖）
-  const canSeeDraft = await hasEffectiveGrant(toActor(session, prodPermCtx), productionId, "event", eventId, "publication", "view");
+  const canSeeDraft = await hasEffectiveGrant(actor, productionId, "event", eventId, "publication", "view");
   if (!canSeeDraft && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 
@@ -67,10 +66,9 @@ export default async function EventViewPage({
   ]);
 
   const pocDeptIds = departments.filter(d => d.pocUserIds.includes(session.userId));
-  const canViewReqsFull = await hasGrant(session.userId, productionId, "task", "*", "*", "view")
-    || await hasGrant(session.userId, productionId, "event", eventId, "tasks", "view")
-    || await hasGrant(session.userId, productionId, "event", eventId, "details", "edit")
-    || prodPermCtx.isAdmin || prodPermCtx.isOwner;
+  const canViewReqsFull = await hasEffectiveGrant(actor, productionId, "task", "*", "*", "view")
+    || await hasEffectiveGrant(actor, productionId, "event", eventId, "tasks", "view")
+    || await hasEffectiveGrant(actor, productionId, "event", eventId, "details", "edit");
   const canViewReqs = canViewReqsFull || isAssignee || pocDeptIds.length > 0 || hasAnyTechReqGrant;
 
   const viewerPermCtx = await loadEventPermContext(session.userId, eventId);
@@ -81,7 +79,7 @@ export default async function EventViewPage({
           if (r.publishedAt !== null) return r;
           // 部门参与者可见 draft（发布前写 note 的业务规则）
           if (viewerPermCtx.participantDeptIds.length > 0) return r;
-          const hasReportView = await hasGrantCheck(session.userId, productionId, "report", r.id, "publication", "view");
+          const hasReportView = await hasEffectiveGrant(actor, productionId, "report", r.id, "publication", "view");
           return hasReportView ? r : null;
         })
       )).filter((r): r is NonNullable<typeof r> => r !== null);

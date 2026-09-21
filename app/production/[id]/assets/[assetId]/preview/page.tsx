@@ -2,7 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import type { Metadata } from "next";
 import { getSession } from "@/lib/account/session";
-import { hasAnyGrant } from "@/lib/perm/grant-check";
+import { hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
 import { canViewAsset } from "@/lib/asset/perm";
 import { getProductionPermissionContext } from "@/lib/db";
 import { getAsset } from "@/lib/asset/db";
@@ -35,7 +35,7 @@ export default async function AssetPreviewPage({
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
   // 批D：实例可见判定（能力票∧结构 ∨ publication@view），asset 加载后判
-  if (!access.permCtx.isAdmin && !access.permCtx.isOwner && !await hasAnyGrant(session.userId, id, "asset", ["meta"], "view"))
+  if (!await hasAnyEffectiveGrant(access.permCtx, id, "asset", ["meta"], "view"))
     redirect(`/unauthorized?resource=node%3Aasset%2F*%2Fmeta%40view&id=${id}`);
 
   const asset = await getAsset(assetId);

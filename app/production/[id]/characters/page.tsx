@@ -4,7 +4,7 @@ export const metadata: Metadata = { title: "角色" };
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { hasAnyGrant } from "@/lib/perm/grant-check";
+import { hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
 import { getCharacterPerms } from "@/lib/script/character-perms";
 import { getProductionPermissionContext, getProductionName, listCharactersByVersion, getActiveVersionId } from "@/lib/db";
 import CharactersManager from "@/components/script/CharactersManager";
@@ -22,7 +22,7 @@ export default async function CharactersPage({
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  if (!access.permCtx.isAdmin && !access.permCtx.isOwner && !await hasAnyGrant(session.userId, id, "character", ["meta"], "view"))
+  if (!await hasAnyEffectiveGrant(access.permCtx, id, "character", ["meta"], "view"))
     redirect(`/unauthorized?resource=node%3Acharacter%2F*%2Fmeta%40view&id=${id}`);
 
   // owner 旁路（#228 漏网）。三枚键分开算：判定端 create/edit/delete 是三条不同的

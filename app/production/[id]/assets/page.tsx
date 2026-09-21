@@ -4,7 +4,7 @@ export const metadata: Metadata = { title: "Assets" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { hasAnyGrant } from "@/lib/perm/grant-check";
+import { hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getActiveVersionId } from "@/lib/db";
 import AssetPageClient from "@/components/assets/AssetPageClient";
 import PageActivationGate from "@/components/perm/PageActivationGate";
@@ -18,7 +18,7 @@ export default async function AssetsPage({ params }: { params: Promise<{ id: str
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
   // 批D：能力票（meta@view 实例或通配）
-  if (!access.permCtx.isAdmin && !access.permCtx.isOwner && !await hasAnyGrant(session.userId, id, "asset", ["meta"], "view"))
+  if (!await hasAnyEffectiveGrant(access.permCtx, id, "asset", ["meta"], "view"))
     redirect(`/unauthorized?resource=node%3Aasset%2F*%2Fmeta%40view&id=${id}`);
 
   const versionId = await getActiveVersionId(id);
