@@ -2126,6 +2126,9 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   production_id  TEXT        NULL,
   kind           TEXT        NOT NULL,
   model          TEXT        NOT NULL,
+  -- tokens 是「计量数」不是恒为 token：chat_* / embedding_* 行是 token 数，
+  -- mmp_compute 行（lib/mmp/usage-db.ts，#618）是可计费推理毫秒。跨 kind 不要 SUM(tokens)，
+  -- 钱一律看 billed_credits。
   tokens         INTEGER     NOT NULL,
   billed_credits BIGINT      NOT NULL DEFAULT 0,
   paid_from      TEXT        NOT NULL DEFAULT 'quota',

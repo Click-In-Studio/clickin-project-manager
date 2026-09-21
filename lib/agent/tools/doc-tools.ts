@@ -21,7 +21,7 @@ import { TransientReadError } from "@/lib/asset/byte-source";
 import { loadParsedDocx, loadParsedPdf } from "@/lib/doc-extract/load";
 import { presignedGet } from "@/lib/r2";
 import { ocrPages, type OcrPage, type OcrTier } from "@/lib/mmp/ocr";
-import { recordMmpUsage } from "@/lib/mmp/billing";
+import { recordMmpUsage } from "@/lib/mmp/usage-db";
 import type { Asset, AssetFile } from "@/lib/asset/db";
 import type { DocxDoc, DocxItem, DocxParagraph } from "@/lib/doc-extract/docx";
 import type { PdfDoc, PdfPage } from "@/lib/doc-extract/pdf";
@@ -487,7 +487,7 @@ export async function docSearch(
 // - 媒体走 R2 预签名 URL（算力节点在别的网络，只有公网 URL 拉得到）；
 // - OCR 输出是不可信文本（用户文件），统一过 neutralizeInjectionTags；识别可能有错字，
 //   输出里明说，关键处让模型问用户核对；
-// - 计费：GPU 推理毫秒折 credit（lib/mmp/billing.ts，#618），缓存命中不记。
+// - 计费：GPU 推理毫秒折 credit（lib/mmp/usage-db.ts，#618），缓存命中不记。
 
 const OCR_MIME_BY_EXT: Record<string, string> = {
   pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
@@ -520,6 +520,7 @@ export async function docPageOcr(
   // pdf 已解析过的话拿页状态：有文本层的页提醒用 doc_read（便宜且无错字），越界页裁掉
   const textLayerPages = new Set<number>();
   let pageCount: number | null = null;
+  let imageNote = "";
   if (mime === "application/pdf") {
     const parsed = await loadParsedPdf(
       { fileId: file.id, r2Key: file.r2Key, fileSize: file.fileSize, fileName: name },
@@ -531,8 +532,10 @@ export async function docPageOcr(
       if (!wanted.length) return `页序越界：该 pdf 共 ${pageCount} 页。`;
       for (const p of wanted) if (parsed.doc.pages[p - 1]?.status === "ok") textLayerPages.add(p);
     }
-  } else {
+  } else if (wanted.length !== 1 || wanted[0] !== 1) {
+    // 图片文件只有一页：多页请求不静默裁，回话里说明
     wanted = [1];
+    imageNote = "（图片文件只有 1 页，pages 按 [1] 处理）";
   }
   const cap = OCR_PAGE_CAP[tier];
   const truncated = wanted.length > cap ? wanted.slice(cap) : [];
@@ -548,15 +551,24 @@ export async function docPageOcr(
     return neutralizeInjectionTags(`OCR 请求失败（${out.code}）：${out.message}`);
   }
 
-  const credits = out.cached ? 0 : await recordMmpUsage({
-    userId, productionId, type: "ocr.structured", tier: out.tier, computeMs: out.computeMs,
-  }).catch((e) => { console.error("[doc_page_ocr] 记账失败（结果照常返回）:", e); return 0; });
+  // 记账失败不吞成「0 credit」：结果照常返回（推理已经花了），文案如实说没记上。
+  // 与 chat 侧 recordUsage 同款只打日志——系统性记账失败的告警是 #618 复核账本时看的。
+  let billingNote: string;
+  if (out.cached) {
+    billingNote = "，缓存命中不计费";
+  } else {
+    const credits = await recordMmpUsage({
+      userId, productionId, type: "ocr.structured", tier: out.tier, computeMs: out.computeMs,
+    }).catch((e) => { console.error("[doc_page_ocr] 记账失败（结果照常返回）:", e); return null; });
+    billingNote = credits === null
+      ? "，本次用量记账失败（已记日志）"
+      : `，本次约 ${credits.toLocaleString("zh-CN")} credit${out.computeEstimated ? "（估算）" : ""}`;
+  }
 
   const lines: string[] = [];
   lines.push(
-    `《${name}》OCR（${OCR_TIER_LABEL[out.tier]}，引擎 ${out.engine || "?"}，${out.pages.length} 页` +
-    (out.cached ? "，缓存命中不计费" : `，本次约 ${credits.toLocaleString("zh-CN")} credit${out.computeEstimated ? "（估算）" : ""}`) +
-    "）。识别文本可能有错字 / 漏行，关键处要让用户核对。",
+    `《${name}》OCR（${OCR_TIER_LABEL[out.tier]}，引擎 ${out.engine || "?"}，${out.pages.length} 页${billingNote}）${imageNote}。` +
+    "识别文本可能有错字 / 漏行，关键处要让用户核对。",
   );
   const budget = { chars: 0 };
   for (const p of out.pages) lines.push(...renderOcrPage(p, textLayerPages.has(p.page), budget));

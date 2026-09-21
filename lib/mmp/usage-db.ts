@@ -1,4 +1,4 @@
-// MMP 任务记账（#618）：与 chat / embedding 同一张 ai_usage、同一套 credit（成本折算），
+// MMP 任务记账写点（#618；DB I/O 按规约进 *-db.ts）：与 chat / embedding 同一张 ai_usage、同一套 credit（成本折算），
 // 日 / 周闸、hard cap、owner 归属全部照旧，不另立账本。
 //
 // - model = `mmp:<type>@<tier>`，kind = 'mmp_compute'，**tokens 列存的是可计费推理毫秒**

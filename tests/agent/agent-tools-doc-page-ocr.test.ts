@@ -11,7 +11,7 @@ import { DENIED_NOT_MEMBER } from "@/lib/agent/tools/production-tools";
 import { DEFS } from "@/lib/agent/runtime/tools";
 import { TOOL_CATALOG } from "@/lib/agent/tools/tool-catalog";
 import { TOOL_LABELS } from "@/lib/agent/agent-tool-labels";
-import { recordMmpUsage } from "@/lib/mmp/billing";
+import { recordMmpUsage } from "@/lib/mmp/usage-db";
 import { getPool } from "@/lib/pg";
 
 let prodId: string;
@@ -31,7 +31,7 @@ async function makeAsset(fileName: string, mimeType: string | null, r2Key: strin
   return asset.id;
 }
 
-const ENV_BEFORE = { url: process.env.MMP_BASE_URL };
+const ENV_BEFORE = { url: process.env.MMP_BASE_URL, key: process.env.MMP_API_KEY };
 
 beforeAll(async () => {
   ownerId = await makeUser("ocr-owner");
@@ -43,6 +43,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (ENV_BEFORE.url === undefined) delete process.env.MMP_BASE_URL; else process.env.MMP_BASE_URL = ENV_BEFORE.url;
+  if (ENV_BEFORE.key === undefined) delete process.env.MMP_API_KEY; else process.env.MMP_API_KEY = ENV_BEFORE.key;
   await cleanupProduction(prodId).catch(() => {});
 });
 
@@ -59,6 +60,40 @@ describe("doc_page_ocr：门", () => {
     expect(await docPageOcr(ownerId, prodId, docx, [1])).toContain("无法做 OCR");
     const png = await makeAsset("photo.png", "image/png");
     expect(await docPageOcr(ownerId, prodId, png, [])).toContain("pages 不能为空");
+  });
+
+  it("成功路径（stub fetch）：图片多页请求按 [1] 处理并说明、识别文本与计费行都在、ai_usage 落行", async () => {
+    process.env.MMP_BASE_URL = "https://mmp.test";
+    process.env.MMP_API_KEY = "k";
+    const realFetch = globalThis.fetch;
+    const seen: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      seen.push(init?.body ? JSON.parse(String(init.body)) : {});
+      return new Response(JSON.stringify({
+        job_id: "gpu-lab-02", type: "ocr.structured", status: "done", media_id: "sha256:img", cached: false,
+        source: { tier: "gpu-fast", engine: "pp-ocrv6", engine_version: "1", generated_at: "2026-09-21T00:00:00Z", degraded: false, params: {} },
+        result: { page_count: 1, pages: [{ page: 1, tier: "gpu-fast", text: "老周：信？什么信。", quality: { lines: 1, chars: 8, mean_score: 0.97 }, flags: ["low_confidence"] }], suggest_upgrade_pages: [1] },
+        timings_ms: { fetch: 900, render: 0, ocr: 400, total: 1300 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof globalThis.fetch;
+    try {
+      const png = await makeAsset("photo.png", "image/png");
+      const out = await docPageOcr(ownerId, prodId, png, [1, 2, 3]);
+      expect(out).toContain("图片文件只有 1 页");
+      expect(out).toContain("老周：信？什么信。");
+      expect(out).toContain("⚠ 低置信行偏多");
+      expect(out).toContain("建议升慢档的页");
+      expect(out).toMatch(/本次约 \d+ credit/);
+      expect((seen[0].params as { pages: number[] }).pages).toEqual([1]);
+      expect((seen[0].media as { get?: { url: string } }).get?.url).toMatch(/^https?:\/\//);
+      const { rows } = await getPool().query<{ tokens: number; billed_credits: string }>(
+        `SELECT tokens, billed_credits::text FROM ai_usage WHERE production_id = $1 AND model = 'mmp:ocr.structured@gpu-fast'`, [prodId],
+      );
+      expect(rows.map((r) => [r.tokens, Number(r.billed_credits) > 0])).toEqual([[400, true]]);
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.MMP_BASE_URL;
+    }
   });
 
   it("MMP 未配置 → 诚实标注不可用，且明说不是页面为空（图片文件不经 pdf 解析直接到服务）", async () => {
@@ -92,7 +127,7 @@ describe("recordMmpUsage（#618）", () => {
     expect(cpu).toBe(0);
     const { rows } = await getPool().query<{ kind: string; model: string; tokens: number; billed_credits: string; paid_from: string }>(
       `SELECT kind, model, tokens, billed_credits::text, paid_from FROM ai_usage
-       WHERE production_id = $1 AND kind = 'mmp_compute' ORDER BY id`,
+       WHERE production_id = $1 AND kind = 'mmp_compute' AND model IN ('mmp:ocr.structured@gpu', 'mmp:triage.audio@cpu') ORDER BY id`,
       [prodId],
     );
     expect(rows.map((r) => [r.kind, r.model, r.tokens, Number(r.billed_credits)])).toEqual([
