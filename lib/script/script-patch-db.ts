@@ -6,8 +6,9 @@ import { handleBlockContentChanged, handleBlockDeleted } from "../ops/cue-db";
 import type { ScriptPatch, TagEntry } from "./script-ops";
 import { keyBetween, initialKeys } from "../lex-order";
 import { getMarkerChange, markerCacheUpdateBlockIds, markerHierarchyUpdateBlockIds, normalizeScriptMarkerInvariants, type MarkerChange } from "./script-marker-domain";
-import { cleanMarkerMeta, genBlockId, genSnapshotId, isChapterSceneMarkerType, isMarkerBlockType, markerMetaJson, toDbType } from "./script-row-model";
-import { bumpMarkerStructureRevisionInTx, normalizeRehearsalMarkOwnershipInTx, syncSceneVersionsFromMarkersInTx } from "./script-marker-tx";
+import { cleanMarkerMeta, genBlockId, genSnapshotId, isChapterSceneMarkerType, isMarkerBlockType, toDbType } from "./script-row-model";
+import { deleteSnapshotRowsInTx, ensureSceneAnchorsInTx, insertSnapshotRowsInTx, snapshotRowFromBlock, updateSnapshotRowInTx, upsertCharacterRowsInTx, deleteCharacterRowsInTx } from "./script-row-tx";
+import { finalizeMarkerInvariantsInTx } from "./script-marker-tx";
 import { scheduleEstimatedPageMapSave } from "./page-map-db";
 
 // 编辑器 / 协作的写路径（#486 从 lib/db.ts 搬出）：applyPatchToDB 在一个事务里按 ScriptPatch
@@ -279,27 +280,8 @@ export async function applyPatchToDB(
       }
     }
 
-    if (deletedCharIds.size > 0) {
-      await client.query(
-        "DELETE FROM character_version WHERE character_id = ANY($1::text[]) AND version_id = $2",
-        [[...deletedCharIds], versionId]
-      );
-    }
-    if (dirtyCharIds.size > 0) {
-      const toWrite = txChars.filter(c => dirtyCharIds.has(c.id));
-      await client.query(
-        `INSERT INTO character (id, production_id) SELECT unnest($1::text[]), $2 ON CONFLICT (id) DO NOTHING`,
-        [toWrite.map(c => c.id), productionId]
-      );
-      await client.query(
-        `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate)
-         SELECT unnest($1::text[]), $2, unnest($3::text[]), unnest($4::int[]), unnest($5::bool[])
-         ON CONFLICT (character_id, version_id) DO UPDATE
-           SET name = EXCLUDED.name, sort_order = EXCLUDED.sort_order, is_aggregate = EXCLUDED.is_aggregate`,
-        [toWrite.map(c => c.id), versionId,
-         toWrite.map(c => c.name), toWrite.map(c => c.sortOrder), toWrite.map(c => c.isAggregate)]
-      );
-    }
+    await deleteCharacterRowsInTx(client, versionId, [...deletedCharIds]);
+    await upsertCharacterRowsInTx(client, productionId, versionId, txChars.filter(c => dirtyCharIds.has(c.id)));
 
     // ── Apply block ops ───────────────────────────────────────────────────────
     for (const op of patch.blockOps) {
@@ -351,34 +333,12 @@ export async function applyPatchToDB(
             updatedBlockIds?.has(previousBlock.blockId)
           ) explicitOwnershipBlockIds?.add(previousBlock.blockId);
           if (isChapterSceneMarkerType(insertType) && insertBlock.sceneId) {
-            await client.query(
-              `INSERT INTO scene (id, production_id) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
-              [insertBlock.sceneId, productionId]
-            );
+            await ensureSceneAnchorsInTx(client, productionId, [insertBlock.sceneId]);
           }
-
-          await client.query(
-            `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::block_type, $9, $10, $11::jsonb, $12)`,
-            [snapshotId, insertBlock.id, productionId, lexKey,
-             insertBlock.sceneId ?? null, insertRehearsalMark, insertOwnerMarkerId,
-             insertType, insertBlock.content,
-             insertBlock.stageComment?.trim() || null, markerMetaJson(insertBlock), insertBlock.forceShowCharacterName ?? false]
-          );
-          await client.query(
-            "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) VALUES ($1, $2, $3, $4)",
-            [snapshotId, versionId, insertBlock.id, lexKey]
-          );
-          if (insertBlock.characterIds.length > 0) {
-            await client.query(
-              `INSERT INTO script_character (script_id, character_id, position, annotation)
-               SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
-              [insertBlock.characterIds.map(() => snapshotId),
-               insertBlock.characterIds,
-               insertBlock.characterIds.map((_, i) => i),
-               insertBlock.characterIds.map(cid => insertBlock.characterAnnotations[cid] ?? null)]
-            );
-          }
+          await insertSnapshotRowsInTx(client, productionId, versionId, [
+            snapshotRowFromBlock(insertBlock, { snapshotId, lexKey },
+              { rehearsalMark: insertRehearsalMark, ownerMarkerId: insertOwnerMarkerId }),
+          ]);
 
           // Write tags atomically within the same transaction.
           if (op.tags !== undefined) {
@@ -428,26 +388,10 @@ export async function applyPatchToDB(
           }
 
           // 版本体系已退役（#634）：snapshot 引用数恒为 1，一律就地更新，不再 copy-on-write。
-          await client.query(
-            `UPDATE script
-             SET scene_id = $1, rehearsal_mark = $2, type = $3::block_type,
-                 content = $4, stage_comment = $5, marker_meta = $6::jsonb, force_show_character_name = $7
-             WHERE id = $8`,
-            [updateBlock.sceneId ?? null, cur.rehearsalMark, nextType, updateBlock.content,
-             updateBlock.stageComment?.trim() || null, markerMetaJson(updateBlock),
-             updateBlock.forceShowCharacterName ?? false, cur.snapshotId]
-          );
-          await client.query("DELETE FROM script_character WHERE script_id = $1", [cur.snapshotId]);
-          if (updateBlock.characterIds.length > 0) {
-            await client.query(
-              `INSERT INTO script_character (script_id, character_id, position, annotation)
-               SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
-              [updateBlock.characterIds.map(() => cur.snapshotId),
-               updateBlock.characterIds,
-               updateBlock.characterIds.map((_, i) => i),
-               updateBlock.characterIds.map(cid => updateBlock.characterAnnotations[cid] ?? null)]
-            );
-          }
+          // 归属列（rehearsalMark / ownerMarkerId）沿用工作态，不信客户端传的。
+          await updateSnapshotRowInTx(client, versionId, snapshotRowFromBlock(updateBlock,
+            { snapshotId: cur.snapshotId, lexKey: cur.lexKey },
+            { rehearsalMark: cur.rehearsalMark, ownerMarkerId: cur.ownerMarkerId }));
           const oldContent = oldContentMap.get(cur.snapshotId);
           if (oldContent !== undefined && oldContent !== updateBlock.content) {
             driftUpdates.push({ snapshotId: cur.snapshotId, oldContent, newContent: updateBlock.content });
@@ -479,9 +423,7 @@ export async function applyPatchToDB(
             updatedBlockIds?.has(previousBlock.blockId)
           ) explicitOwnershipBlockIds?.add(previousBlock.blockId);
 
-          // 物理删 snapshot（script_version 随 FK 级联）；block_tag 按逻辑 block_id 一并清。
-          await client.query("DELETE FROM script WHERE id = $1", [cur.snapshotId]);
-          await client.query("DELETE FROM block_tag WHERE block_id = $1", [op.id]);
+          await deleteSnapshotRowsInTx(client, [{ snapshotId: cur.snapshotId, blockId: op.id }]);
 
           if (idx >= 0) txBlocks.splice(idx, 1);
           txBlockMap.delete(op.id);
@@ -545,21 +487,10 @@ export async function applyPatchToDB(
       const snapshotId = genSnapshotId();
       const type = toDbType(block);
       const sceneId = isChapterSceneMarkerType(type) ? block.id : null;
-      if (isChapterSceneMarkerType(type)) {
-        await client.query(
-          "INSERT INTO scene (id, production_id) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
-          [block.id, productionId],
-        );
-      }
-      await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
-         VALUES ($1, $2, $3, $4, $5, NULL, $6, $7::block_type, $8, NULL, $9::jsonb, false)`,
-        [snapshotId, block.id, productionId, lexKey, sceneId, block.ownerMarkerId ?? null, type, block.content, markerMetaJson(block)],
-      );
-      await client.query(
-        "INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key) VALUES ($1, $2, $3, $4)",
-        [snapshotId, versionId, block.id, lexKey],
-      );
+      if (sceneId) await ensureSceneAnchorsInTx(client, productionId, [sceneId]);
+      await insertSnapshotRowsInTx(client, productionId, versionId, [
+        snapshotRowFromBlock(block, { snapshotId, lexKey }, { sceneId, rehearsalMark: null, forceShowCharacterName: false }),
+      ]);
       const txBlock: TxBlock = {
         blockId: block.id,
         snapshotId,
@@ -600,30 +531,24 @@ export async function applyPatchToDB(
           ? [change.blockId]
           : []),
     ]);
-    await syncSceneVersionsFromMarkersInTx(
-      client,
-      productionId,
-      versionId,
-      [...affectedSceneMarkerIds],
-      [...deletedSceneMarkerIds],
-    );
     pageMapDirtyPositions = [...new Set([
       ...finalBlockChange.positions,
       ...pageMapContentPositions,
     ])].filter((position) => position >= 0).sort((a, b) => a - b);
-    const affectedBlockIds = normalizedServerState
-      ? markerCacheUpdateBlockIds(finalBlocks, finalBlockChange)
-      : [];
-    if (affectedBlockIds.length > 0) {
-      await normalizeRehearsalMarkOwnershipInTx(client, versionId, affectedBlockIds);
-    }
+    await finalizeMarkerInvariantsInTx(client, productionId, versionId, {
+      mode: "scoped",
+      affectedBlockIds: normalizedServerState ? markerCacheUpdateBlockIds(finalBlocks, finalBlockChange) : [],
+      affectedSceneMarkerIds: [...affectedSceneMarkerIds],
+      deletedSceneMarkerIds: [...deletedSceneMarkerIds],
+      markerStructureChanged,
+    });
     if (markerStructureChanged) {
+      // 派生配置 openingChapterMarkerId 的多写点问题见 #636
       const openingChapterMarkerId = finalBlocks.find((block) => block.type === "chapter_marker")?.id ?? null;
       await client.query(
         "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2",
         [JSON.stringify({ openingChapterMarkerId }), versionId],
       );
-      await bumpMarkerStructureRevisionInTx(client, versionId);
     }
 
     await client.query("COMMIT");

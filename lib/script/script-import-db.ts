@@ -3,12 +3,13 @@ import type { PoolClient } from "pg";
 import type { Block, MarkerMeta } from "./script-types";
 import { importCueColumnsInTx } from "../ops/cue-list-db";
 import { keyBetween } from "../lex-order";
-import { sameMarkerStructure } from "./script-marker-domain";
 import { withLegacyOwnershipProjection, withMarkerOwnership } from "./script-marker-blocks";
 import { randomUUID } from "node:crypto";
 import type { ImportTagChanges } from "../import/types";
-import { genSnapshotId, markerMetaJson, toDbType } from "./script-row-model";
-import { bumpMarkerStructureRevisionInTx, markerStructureBlocksInTx, normalizeRehearsalMarkOwnershipInTx, syncSceneVersionsFromMarkersInTx } from "./script-marker-tx";
+import { genSnapshotId } from "./script-row-model";
+import { ensureSceneAnchorsInTx, insertSnapshotRowsInTx, snapshotRowFromBlock, upsertCharacterRowsInTx } from "./script-row-tx";
+import { finalizeMarkerInvariantsInTx, markerStructureBlocksInTx } from "./script-marker-tx";
+import { scheduleEstimatedPageMapSave } from "./page-map-db";
 
 // 导入落库（#486 从 lib/db.ts 搬出）：importScriptToVersion 把导入管线（lib/import）的结果
 // 一次性原子替换进目标 version——构作、剧本内容、Cue 全量以本次为准（DEV_GUIDE §8「联合导入」）。
@@ -40,7 +41,6 @@ export async function importScriptToVersion(
       cues: Array<{ afterBlockId: string | null; content: string }>;
     }>;
     cueListCreatedBy?: string;
-    deleteSceneIds?: string[];
     blockTagAssignments?: Array<{ blockId: string; groupId: string; optionId: string }>;
     tagChanges?: ImportTagChanges;
     aggregateMembers?: Array<{ aggregateId: string; memberIds: string[] }>;
@@ -57,7 +57,6 @@ export async function importScriptToVersion(
     ...block,
     id: payload.upsertBlocks[index].id,
   }));
-  const { deleteSceneIds = [] } = payload;
   const seenCharIds = new Set<string>();
   const upsertChars = payload.upsertChars.filter((char) => {
     if (seenCharIds.has(char.id)) return false;
@@ -273,94 +272,18 @@ export async function importScriptToVersion(
     }
 
     // Import is a full replacement of script + dramaturgy for this version.
-    // scene_version is a derived read model over the markers; rebuild it below.
+    // scene_version 是标记的派生读模型：这里只清空 + 立 identity 锚，行由收尾的整版同步
+    // 从标记重建（payload.upsertScenes 的 name / parentId / sortOrder 不直写——直写也会被同步
+    // 覆盖，#635）。
     await client.query("DELETE FROM scene_version WHERE version_id = $1", [versionId]);
-
-    if (sceneAnchorIds.length > 0) {
-      await client.query(
-        `INSERT INTO scene (id, production_id)
-         SELECT unnest($1::text[]), $2::text
-         ON CONFLICT (id) DO NOTHING`,
-        [sceneAnchorIds, productionId]
-      );
-    }
-    if (upsertScenes.length > 0) {
-      await client.query(
-        `INSERT INTO scene_version (scene_id, version_id, name, sort_order, parent_id)
-         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::text[])
-         ON CONFLICT (scene_id, version_id) DO UPDATE
-           SET name = EXCLUDED.name,
-               sort_order = EXCLUDED.sort_order, parent_id = EXCLUDED.parent_id`,
-        [upsertScenes.map(s => s.id), versionId,
-          upsertScenes.map(s => s.name),
-         upsertScenes.map(s => s.sortOrder), upsertScenes.map(s => s.parentId ?? null)]
-      );
-    }
-    if (deleteSceneIds.length > 0) {
-      await client.query(
-        "DELETE FROM scene_version WHERE scene_id = ANY($1::text[]) AND version_id = $2",
-        [deleteSceneIds, versionId]
-      );
-    }
-
-    if (upsertChars.length > 0) {
-      await client.query(
-        `INSERT INTO character (id, production_id)
-         SELECT unnest($1::text[]), $2::text
-         ON CONFLICT (id) DO NOTHING`,
-        [upsertChars.map(c => c.id), productionId]
-      );
-      await client.query(
-        `INSERT INTO character_version (character_id, version_id, name, sort_order, is_aggregate)
-         SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::int[]), unnest($5::bool[])
-         ON CONFLICT (character_id, version_id) DO UPDATE
-           SET name = EXCLUDED.name, sort_order = EXCLUDED.sort_order, is_aggregate = EXCLUDED.is_aggregate`,
-        [upsertChars.map(c => c.id), versionId,
-         upsertChars.map(c => c.name), upsertChars.map(c => c.sortOrder),
-         upsertChars.map(c => c.isAggregate)]
-      );
-    }
-
-    if (upsertBlocks.length > 0) {
-      await client.query(
-        `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name, marker_meta, owner_marker_id)
-         SELECT unnest($1::text[]), unnest($10::text[]), $2::text, unnest($3::text[]),
-                unnest($4::text[]), unnest($5::text[]), unnest($6::block_type[]), unnest($7::text[]),
-                unnest($8::text[]), unnest($9::bool[]), unnest($11::jsonb[]), unnest($12::text[])`,
-        [
-          upsertBlocks.map(b => b.id), productionId,
-          upsertBlocks.map(b => b.lexKey), upsertBlocks.map(b => b.sceneId ?? null),
-          upsertBlocks.map(b => b.rehearsalMark ?? null),
-          upsertBlocks.map(b => toDbType(b as Block)),
-          upsertBlocks.map(b => b.content),
-          upsertBlocks.map(b => b.stageComment?.trim() || null),
-          upsertBlocks.map(() => false),
-          upsertBlocks.map(b => b.blockId ?? b.id),
-          upsertBlocks.map(b => markerMetaJson(b)),
-          upsertBlocks.map(b => b.ownerMarkerId ?? null),
-        ]
-      );
-      await client.query(
-        `INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key)
-         SELECT unnest($1::text[]), $2::text, unnest($4::text[]), unnest($3::text[])`,
-        [
-          upsertBlocks.map(b => b.id),
-          versionId,
-          upsertBlocks.map(b => b.lexKey),
-          upsertBlocks.map(b => b.blockId ?? b.id),
-        ]
-      );
-      const scRows = upsertBlocks.flatMap(b =>
-        b.characterIds.map((cid, pos) => ({ sid: b.id, cid, pos, ann: b.characterAnnotations[cid] ?? null }))
-      );
-      if (scRows.length > 0) {
-        await client.query(
-          `INSERT INTO script_character (script_id, character_id, position, annotation)
-           SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
-          [scRows.map(r => r.sid), scRows.map(r => r.cid), scRows.map(r => r.pos), scRows.map(r => r.ann)]
-        );
-      }
-    }
+    await ensureSceneAnchorsInTx(client, productionId, sceneAnchorIds);
+    await upsertCharacterRowsInTx(client, productionId, versionId, upsertChars);
+    await insertSnapshotRowsInTx(client, productionId, versionId, upsertBlocks.map((b) =>
+      snapshotRowFromBlock(
+        { ...b, id: b.blockId ?? b.id, characterIds: b.characterIds, characterAnnotations: b.characterAnnotations } as Block,
+        { snapshotId: b.id, lexKey: b.lexKey },
+        { forceShowCharacterName: false },
+      )));
 
     if (upsertCueColumns.length > 0) {
       await importCueColumnsInTx(
@@ -423,15 +346,11 @@ export async function importScriptToVersion(
       );
     }
 
-    await normalizeRehearsalMarkOwnershipInTx(client, versionId);
-    await syncSceneVersionsFromMarkersInTx(client, productionId, versionId);
     if (payload.ensureEmptySceneBlocks) {
+      // 占位块的两套实现见 #637；先插再收尾，让归一化把它们的归属列一并核对
       await ensureEmptyScriptBlocksForEmptyScenesInTx(client, productionId, versionId);
     }
-    const finalMarkerStructure = await markerStructureBlocksInTx(client, versionId);
-    if (!sameMarkerStructure(previousMarkerStructure, finalMarkerStructure)) {
-      await bumpMarkerStructureRevisionInTx(client, versionId);
-    }
+    await finalizeMarkerInvariantsInTx(client, productionId, versionId, { mode: "full", previousMarkerStructure });
 
     await client.query("COMMIT");
   } catch (err) {
@@ -440,6 +359,10 @@ export async function importScriptToVersion(
   } finally {
     client.release();
   }
+
+  // 导入整版替换，页码全量重算（此前只有 patch 路径触发，#635 统一）
+  void scheduleEstimatedPageMapSave(productionId, versionId, "full")
+    .catch(err => console.error("[page-map] update error:", err));
 }
 
 async function ensureEmptyScriptBlocksForEmptyScenesInTx(
@@ -503,28 +426,10 @@ async function ensureEmptyScriptBlocksForEmptyScenesInTx(
     const lexKey = keyBetween(row.sort_key, nextSortKey);
     emptyBlocks.push({ snapshotId, blockId, sortKey: lexKey, ownerMarkerId: row.block_id });
   }
-  if (emptyBlocks.length > 0) {
-    await client.query(
-      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, type, content, stage_comment, force_show_character_name, marker_meta, owner_marker_id)
-       SELECT unnest($1::text[]), unnest($2::text[]), $3::text, unnest($4::text[]),
-              NULL, NULL, 'dialogue'::block_type, '', NULL, false, '{}'::jsonb, unnest($5::text[])`,
-      [
-        emptyBlocks.map((block) => block.snapshotId),
-        emptyBlocks.map((block) => block.blockId),
-        productionId,
-        emptyBlocks.map((block) => block.sortKey),
-        emptyBlocks.map((block) => block.ownerMarkerId),
-      ],
-    );
-    await client.query(
-      `INSERT INTO script_version (snapshot_id, version_id, block_id, sort_key)
-       SELECT unnest($1::text[]), $2::text, unnest($3::text[]), unnest($4::text[])`,
-      [
-        emptyBlocks.map((block) => block.snapshotId),
-        versionId,
-        emptyBlocks.map((block) => block.blockId),
-        emptyBlocks.map((block) => block.sortKey),
-      ],
-    );
-  }
+  await insertSnapshotRowsInTx(client, productionId, versionId, emptyBlocks.map((block) => ({
+    snapshotId: block.snapshotId, blockId: block.blockId, lexKey: block.sortKey,
+    sceneId: null, rehearsalMark: null, ownerMarkerId: block.ownerMarkerId,
+    type: "dialogue", content: "", stageComment: null, markerMetaJson: "{}", forceShowCharacterName: false,
+    characterIds: [], characterAnnotations: {},
+  })));
 }

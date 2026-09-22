@@ -162,8 +162,6 @@ async function run() {
       deleteSnapshotIds: [],
       upsertChars: [],
       deleteCharIds: [],
-      upsertScenes: [],
-      deleteSceneIds: [],
     });
     const repairedParent = await getPool().query<{ parent_marker_id: string | null }>(
       "SELECT marker_meta->>'parentMarkerId' AS parent_marker_id FROM script WHERE id = $1",

@@ -1,12 +1,57 @@
 import type { PoolClient } from "pg";
 import type { Block, BlockType, MarkerMeta } from "./script-types";
+import { sameMarkerStructure } from "./script-marker-domain";
 
 // 标记结构事务 helper（#486 从 lib/db.ts 搬出）：在写侧事务内维护「标记 ↔ 场次 ↔ 归属」
 // 不变量——scene_version 排序归一、marker_structure_revision 递增、排练标记归属回填、
 // 从标记同步 scene_version。只被 flush / import / patch 三条写路径在事务内调用，
 // 自己不开事务、不拿 pool。SQL 片段见 script-marker-sql，纯领域判定见 script-marker-domain。
+// 三条写路径的收尾一律走 finalizeMarkerInvariantsInTx（#635），不要各自拼归一化序列。
 
-export async function normalizeSceneOwnershipOrderInTx(client: PoolClient, versionId: string): Promise<void> {
+export type FinalizeMarkerScope =
+  // 整版重算：不知道动了哪些块（批量写 / 导入）。传写前的标记结构，收尾比对决定是否 bump。
+  | { mode: "full"; previousMarkerStructure: Block[] }
+  // 局部：patch 路径已在内存里算出受影响的块 / 场次标记与结构是否变化
+  | {
+      mode: "scoped";
+      affectedBlockIds: string[];
+      affectedSceneMarkerIds: string[];
+      deletedSceneMarkerIds: string[];
+      markerStructureChanged: boolean;
+    };
+
+/**
+ * 写侧事务的统一收尾：从标记同步 scene_version → 归属回填 → 结构变了就 bump revision。
+ * 必须先场次后归属：场次同步顺手给每个 chapter / scene 标记立 scene identity 行，归属
+ * 归一化随后把标记的 script.scene_id 指向自己——FK 锚不先立就撞 script_scene_id_fkey
+ * （patch 路径插标记块时 sceneId 常为 null）。返回结构是否变化，调用方据此决定要不要
+ * 写派生配置。
+ */
+export async function finalizeMarkerInvariantsInTx(
+  client: PoolClient,
+  productionId: string,
+  versionId: string,
+  scope: FinalizeMarkerScope,
+): Promise<boolean> {
+  if (scope.mode === "full") {
+    await syncSceneVersionsFromMarkersInTx(client, productionId, versionId);
+    await normalizeRehearsalMarkOwnershipInTx(client, versionId);
+    const finalMarkerStructure = await markerStructureBlocksInTx(client, versionId);
+    const changed = !sameMarkerStructure(scope.previousMarkerStructure, finalMarkerStructure);
+    if (changed) await bumpMarkerStructureRevisionInTx(client, versionId);
+    return changed;
+  }
+  await syncSceneVersionsFromMarkersInTx(
+    client, productionId, versionId, scope.affectedSceneMarkerIds, scope.deletedSceneMarkerIds,
+  );
+  if (scope.affectedBlockIds.length > 0) {
+    await normalizeRehearsalMarkOwnershipInTx(client, versionId, scope.affectedBlockIds);
+  }
+  if (scope.markerStructureChanged) await bumpMarkerStructureRevisionInTx(client, versionId);
+  return scope.markerStructureChanged;
+}
+
+async function normalizeSceneOwnershipOrderInTx(client: PoolClient, versionId: string): Promise<void> {
   await client.query(
     `WITH RECURSIVE ranked AS (
        SELECT
