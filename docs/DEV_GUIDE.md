@@ -994,7 +994,7 @@ dev 环境（main 自动发）上 `unreleased/` 有条目时页面顶部多一�
 
 - **新表 PK 一律 `TEXT PRIMARY KEY` + 应用侧 short id**：`${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`——**必须带随机尾巴**（纯计数器在 pm2 多进程同毫秒会撞 PK）。不要再用 `UUID PRIMARY KEY DEFAULT gen_random_uuid()`：类型一旦是 UUID 就永远换不成 short id。存量 UUID 表不迁移（2026-08-22 定）。
 - **分享链接一律走 token 间接层**（照 `asset_share_token`：token PK + `expires_at` / `one_time` / `revoked_at`），实体 id 不进分享 URL——可撤销、可过期、不暴露内部 id；「知道 id ≠ 有权访问」。
-- **版本体系已退役**（PR #300）：所有剧只有 head 可见；新设计**完全不考虑「版本迁移」**，不引入 version 维度，不引用「CoW 地基」约束新工作。`version` / `script_version` / `cue_version` / `parent_version_id` 是历史债，纯为迁移麻烦才留着。将来的「历史记录」（#31）不会重建分支语义。
+- **版本体系已退役**（PR #300）：所有剧只有 head 可见；新设计**完全不考虑「版本迁移」**，不引入 version 维度，不引用「CoW 地基」约束新工作。剧本写侧的 snapshot copy-on-write 已删（#634）：编辑就地 UPDATE、删除物理 DELETE，遗留多版本共享的 snapshot 不再受保护（旧版本本就不可见）；cue 侧的修订 CoW 待同样处理。`version` / `script_version` / `cue_version` / `parent_version_id` 是历史债，纯为迁移麻烦才留着。将来的「历史记录」（#31）不会重建分支语义。
 - **node 树契约**（#420）：asset / wiki 壳节点在同一棵 node 树上；挂载边是关系概念不是一张表，各业务自建边表；三条硬约束——node id 寻址、**悬空即删**（边某端实体删了就是删了，不做悬空占位）、**边不投权限票**（可见性由内容门 + 结构让渡算，引用边零权限语义）。业务实体（event / scene …）不进树，靠「缺省落点」把新内容自动放进实体文件夹（`lib/node/landing.ts`）。
 - **权限与等级正交**（PR #312）：权限（grant 树，owner / 制作人定）决定视图里**看得到什么内容**，不动菜单结构；等级（`user_plan` / `production_plan`，付费维度）决定**菜单栏里有没有这一项**。代码里分开传（`perms` vs `planXxx`），不得合并成一个布尔；菜单藏了 URL 直达也要挡（服务端 redirect）。`lib/account/plan.ts` 有 pg import，不可入客户端包。用户等级只在建项目一处被消费；功能跟项目走。
 - **成员三态**（PR #329）：`production_member.status ∈ active / suspended / exited`。新增成员查询必须选口径：访问判定 / 指派候选 / 通知收件人 → `active`；名册 / 通讯录 / **席位** → `<> 'exited'`（suspended 占席位，为随时原样复职预留）。邀请路径用 `occupiesSeat` 挡座位，不能用 `alreadyMember`。`supervisor_id` 是纯路由字段不携带权限。

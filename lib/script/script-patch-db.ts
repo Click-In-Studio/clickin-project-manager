@@ -101,7 +101,7 @@ async function writeBlockTagsInTx(
  * Design:
  *  • All ops in the patch are executed in a single transaction (all-or-nothing).
  *  • pg_advisory_xact_lock(hashtext(versionId)) serialises concurrent patches for
- *    the same version so lexKey computation and CoW never interleave.
+ *    the same version so lexKey computation never interleaves.
  *  • A minimal "working state" (txBlocks / txScenes / txChars) is loaded once
  *    inside the lock; subsequent ops are applied against it sequentially.
  *  • Post-commit: cue drift (best-effort) and page-map update (fire-and-forget).
@@ -120,7 +120,7 @@ export async function applyPatchToDB(
 
   // Collected inside the transaction; consumed post-commit for cue drift
   const driftDeletes: Array<{ snapshotId: string; prevId: string | null; nextId: string | null }> = [];
-  const driftUpdates: Array<{ oldSnapshotId: string; newSnapshotId: string; oldContent: string; newContent: string }> = [];
+  const driftUpdates: Array<{ snapshotId: string; oldContent: string; newContent: string }> = [];
   let pageMapChanged = false;
   const pageMapContentPositions = new Set<number>();
   let pageMapDirtyPositions: number[] = [];
@@ -427,80 +427,30 @@ export async function applyPatchToDB(
             markerMetadataIds.add(cur.blockId);
           }
 
-          const refRes = await client.query<{ cnt: string }>(
-            "SELECT COUNT(*) AS cnt FROM script_version WHERE snapshot_id = $1",
-            [cur.snapshotId]
+          // 版本体系已退役（#634）：snapshot 引用数恒为 1，一律就地更新，不再 copy-on-write。
+          await client.query(
+            `UPDATE script
+             SET scene_id = $1, rehearsal_mark = $2, type = $3::block_type,
+                 content = $4, stage_comment = $5, marker_meta = $6::jsonb, force_show_character_name = $7
+             WHERE id = $8`,
+            [updateBlock.sceneId ?? null, cur.rehearsalMark, nextType, updateBlock.content,
+             updateBlock.stageComment?.trim() || null, markerMetaJson(updateBlock),
+             updateBlock.forceShowCharacterName ?? false, cur.snapshotId]
           );
-          const refCount = parseInt(refRes.rows[0].cnt, 10);
-
-          if (refCount <= 1) {
-            // Sole reference — update in-place
+          await client.query("DELETE FROM script_character WHERE script_id = $1", [cur.snapshotId]);
+          if (updateBlock.characterIds.length > 0) {
             await client.query(
-              `UPDATE script
-               SET scene_id = $1, rehearsal_mark = $2, type = $3::block_type,
-                   content = $4, stage_comment = $5, marker_meta = $6::jsonb, force_show_character_name = $7
-               WHERE id = $8`,
-              [updateBlock.sceneId ?? null, cur.rehearsalMark, nextType, updateBlock.content,
-               updateBlock.stageComment?.trim() || null, markerMetaJson(updateBlock),
-               updateBlock.forceShowCharacterName ?? false, cur.snapshotId]
+              `INSERT INTO script_character (script_id, character_id, position, annotation)
+               SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
+              [updateBlock.characterIds.map(() => cur.snapshotId),
+               updateBlock.characterIds,
+               updateBlock.characterIds.map((_, i) => i),
+               updateBlock.characterIds.map(cid => updateBlock.characterAnnotations[cid] ?? null)]
             );
-            await client.query("DELETE FROM script_character WHERE script_id = $1", [cur.snapshotId]);
-            if (updateBlock.characterIds.length > 0) {
-              await client.query(
-                `INSERT INTO script_character (script_id, character_id, position, annotation)
-                 SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
-                [updateBlock.characterIds.map(() => cur.snapshotId),
-                 updateBlock.characterIds,
-                 updateBlock.characterIds.map((_, i) => i),
-                 updateBlock.characterIds.map(cid => updateBlock.characterAnnotations[cid] ?? null)]
-              );
-            }
-            const oldContent = oldContentMap.get(cur.snapshotId);
-            if (oldContent !== undefined && oldContent !== updateBlock.content) {
-              driftUpdates.push({
-                oldSnapshotId: cur.snapshotId, newSnapshotId: cur.snapshotId,
-                oldContent, newContent: updateBlock.content,
-              });
-            }
-          } else {
-            // Multi-referenced — copy-on-write
-            const oldSnapshotId = cur.snapshotId;
-            const newSnapshotId = genSnapshotId();
-
-            await client.query(
-              `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8::block_type, $9, $10, $11::jsonb, $12)`,
-              [newSnapshotId, updateBlock.id, productionId, cur.lexKey,
-               updateBlock.sceneId ?? null, cur.rehearsalMark, cur.ownerMarkerId,
-               nextType, updateBlock.content,
-               updateBlock.stageComment?.trim() || null, markerMetaJson(updateBlock), updateBlock.forceShowCharacterName ?? false]
-            );
-            await client.query(
-              "UPDATE script_version SET snapshot_id = $1 WHERE snapshot_id = $2 AND version_id = $3",
-              [newSnapshotId, oldSnapshotId, versionId]
-            );
-            if (updateBlock.characterIds.length > 0) {
-              await client.query(
-                `INSERT INTO script_character (script_id, character_id, position, annotation)
-                 SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
-                [updateBlock.characterIds.map(() => newSnapshotId),
-                 updateBlock.characterIds,
-                 updateBlock.characterIds.map((_, i) => i),
-                 updateBlock.characterIds.map(cid => updateBlock.characterAnnotations[cid] ?? null)]
-              );
-            }
-            // block_tag rows are keyed by logical block_id (op.id), not by
-            // snapshot_id — no copy needed during CoW.
-            // （挂载边 CoW 复制已随 #420 退役：node_mount 锚稳定 block_id）
-            // Update working state so subsequent ops in this patch see the new snapshotId
-            cur.snapshotId = newSnapshotId;
-            const oldContent = oldContentMap.get(oldSnapshotId);
-            if (oldContent !== undefined && oldContent !== updateBlock.content) {
-              driftUpdates.push({
-                oldSnapshotId, newSnapshotId,
-                oldContent, newContent: updateBlock.content,
-              });
-            }
+          }
+          const oldContent = oldContentMap.get(cur.snapshotId);
+          if (oldContent !== undefined && oldContent !== updateBlock.content) {
+            driftUpdates.push({ snapshotId: cur.snapshotId, oldContent, newContent: updateBlock.content });
           }
 
           // Write tags atomically within the same transaction.
@@ -529,32 +479,9 @@ export async function applyPatchToDB(
             updatedBlockIds?.has(previousBlock.blockId)
           ) explicitOwnershipBlockIds?.add(previousBlock.blockId);
 
-          // Remove from version; GC orphan snapshot if no other version references it.
-          // Two separate statements so the second sees the effect of the first
-          // (CTE and its main query share one snapshot and cannot see each other's writes).
-          await client.query(
-            "DELETE FROM script_version WHERE snapshot_id = $1 AND version_id = $2",
-            [cur.snapshotId, versionId]
-          );
-          await client.query(
-            `DELETE FROM script
-             WHERE id = $1
-               AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.snapshot_id = $1)`,
-            [cur.snapshotId]
-          );
-          // Clean up block_tag rows keyed by logical block_id.
-          // Only delete when the block no longer appears in any version (i.e. the
-          // script snapshot was fully GC'd above). Check by logical block_id.
-          await client.query(
-            `DELETE FROM block_tag
-             WHERE block_id = $1
-               AND NOT EXISTS (
-                 SELECT 1 FROM script s
-                 JOIN script_version sv ON sv.snapshot_id = s.id
-                 WHERE s.block_id = $1
-               )`,
-            [op.id]
-          );
+          // 物理删 snapshot（script_version 随 FK 级联）；block_tag 按逻辑 block_id 一并清。
+          await client.query("DELETE FROM script WHERE id = $1", [cur.snapshotId]);
+          await client.query("DELETE FROM block_tag WHERE block_id = $1", [op.id]);
 
           if (idx >= 0) txBlocks.splice(idx, 1);
           txBlockMap.delete(op.id);
@@ -713,7 +640,7 @@ export async function applyPatchToDB(
       handleBlockDeleted(d.snapshotId, d.prevId, d.nextId, versionId)
     ),
     ...driftUpdates.map(u =>
-      handleBlockContentChanged(u.oldSnapshotId, u.newSnapshotId, u.oldContent, u.newContent, versionId)
+      handleBlockContentChanged(u.snapshotId, u.snapshotId, u.oldContent, u.newContent, versionId)
     ),
   ];
   if (driftJobs.length > 0) await Promise.allSettled(driftJobs);

@@ -240,28 +240,20 @@ export async function importScriptToVersion(
       if (invalid) throw new Error(`Imported Tag mapping is invalid: ${invalid.groupId}/${invalid.optionId}`);
     }
 
-    // Clear all blocks from this version; GC snapshots no longer referenced by any version.
-    // Split into three separate statements to avoid PostgreSQL CTE snapshot isolation:
-    // a single statement's NOT EXISTS would see the pre-deletion state of the CTE rows.
+    // Clear all blocks from this version: 物理删 snapshot（script_version 随 FK 级联），
+    // block_tag 按逻辑 block_id 一并清。版本体系已退役，不再按引用数 GC（#634）。
     const removedSV = await client.query<{ snapshot_id: string; block_id: string }>(
-      "DELETE FROM script_version WHERE version_id = $1 RETURNING snapshot_id, block_id",
+      "SELECT snapshot_id, block_id FROM script_version WHERE version_id = $1",
       [versionId]
     );
-    const removedSnapshotIds = removedSV.rows.map(r => r.snapshot_id);
-    const removedBlockIds    = removedSV.rows.map(r => r.block_id);
-
-    if (removedBlockIds.length > 0) {
+    if (removedSV.rows.length > 0) {
       await client.query(
-        `DELETE FROM block_tag WHERE block_id = ANY($1::text[])
-           AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.block_id = block_tag.block_id)`,
-        [removedBlockIds]
+        "DELETE FROM block_tag WHERE block_id = ANY($1::text[])",
+        [removedSV.rows.map(r => r.block_id)]
       );
-    }
-    if (removedSnapshotIds.length > 0) {
       await client.query(
-        `DELETE FROM script WHERE id = ANY($1::text[])
-           AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.snapshot_id = script.id)`,
-        [removedSnapshotIds]
+        "DELETE FROM script WHERE id = ANY($1::text[])",
+        [removedSV.rows.map(r => r.snapshot_id)]
       );
     }
 

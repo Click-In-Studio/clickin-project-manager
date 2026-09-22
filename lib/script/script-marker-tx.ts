@@ -1,6 +1,5 @@
 import type { PoolClient } from "pg";
 import type { Block, BlockType, MarkerMeta } from "./script-types";
-import { genSnapshotId } from "./script-row-model";
 
 // 标记结构事务 helper（#486 从 lib/db.ts 搬出）：在写侧事务内维护「标记 ↔ 场次 ↔ 归属」
 // 不变量——scene_version 排序归一、marker_structure_revision 递增、排练标记归属回填、
@@ -251,11 +250,9 @@ export async function normalizeRehearsalMarkOwnershipInTx(
     expected_mark: string | null;
     expected_owner_marker_id: string | null;
     expected_meta: MarkerMeta;
-    ref_count: number;
   }>(
     `${ownershipCte}
      SELECT snapshot_id,
-            (SELECT COUNT(*)::int FROM script_version refs WHERE refs.snapshot_id = owned.snapshot_id) AS ref_count,
             ${EXPECTED_REHEARSAL_SCENE_SQL} AS expected_scene_id,
             ${EXPECTED_REHEARSAL_MARK_SQL} AS expected_mark,
             ${EXPECTED_OWNER_MARKER_SQL} AS expected_owner_marker_id,
@@ -266,49 +263,25 @@ export async function normalizeRehearsalMarkOwnershipInTx(
     [versionId, affectedBlockIds ?? null],
   );
   if (stale.length === 0) return;
-  const exclusive = stale.filter((row) => row.ref_count <= 1);
-  if (exclusive.length > 0) {
-    await client.query(
-      `UPDATE script s
-       SET scene_id = updates.expected_scene_id,
-           rehearsal_mark = updates.expected_mark,
-           owner_marker_id = updates.expected_owner_marker_id,
-           marker_meta = updates.expected_meta
-       FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::jsonb[])
-         AS updates(snapshot_id, expected_scene_id, expected_mark, expected_owner_marker_id, expected_meta)
-       WHERE s.id = updates.snapshot_id`,
-      [
-        exclusive.map((row) => row.snapshot_id),
-        exclusive.map((row) => row.expected_scene_id),
-        exclusive.map((row) => row.expected_mark),
-        exclusive.map((row) => row.expected_owner_marker_id),
-        exclusive.map((row) => JSON.stringify(row.expected_meta)),
-      ],
-    );
-  }
-  const shared = stale.filter((row) => row.ref_count > 1);
-  for (const row of shared) {
-    const newSnapshotId = genSnapshotId();
-    await client.query(
-      `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
-       SELECT $1, block_id, production_id, sort_key, $2, $3, $4, type, content, stage_comment, $5::jsonb, force_show_character_name
-       FROM script WHERE id = $6`,
-      [newSnapshotId, row.expected_scene_id, row.expected_mark, row.expected_owner_marker_id, JSON.stringify(row.expected_meta), row.snapshot_id],
-    );
-    await client.query(
-      `INSERT INTO script_character (script_id, character_id, position, annotation)
-       SELECT $1, character_id, position, annotation FROM script_character WHERE script_id = $2`,
-      [newSnapshotId, row.snapshot_id],
-    );
-    // 挂载边 CoW 复制已随 #420 退役：node_mount 一律锚稳定 block_id，快照更替
-    // 与挂载无关（版本纪律：挂载即对最新状态的挂载）
-    await client.query(
-      "UPDATE script_version SET snapshot_id = $1 WHERE version_id = $2 AND snapshot_id = $3",
-      [newSnapshotId, versionId, row.snapshot_id],
-    );
-  }
+  // 版本体系已退役（#634）：snapshot 引用数恒为 1，一律就地改写，不再 copy-on-write。
+  await client.query(
+    `UPDATE script s
+     SET scene_id = updates.expected_scene_id,
+         rehearsal_mark = updates.expected_mark,
+         owner_marker_id = updates.expected_owner_marker_id,
+         marker_meta = updates.expected_meta
+     FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::jsonb[])
+       AS updates(snapshot_id, expected_scene_id, expected_mark, expected_owner_marker_id, expected_meta)
+     WHERE s.id = updates.snapshot_id`,
+    [
+      stale.map((row) => row.snapshot_id),
+      stale.map((row) => row.expected_scene_id),
+      stale.map((row) => row.expected_mark),
+      stale.map((row) => row.expected_owner_marker_id),
+      stale.map((row) => JSON.stringify(row.expected_meta)),
+    ],
+  );
 }
-
 
 export async function syncSceneVersionsFromMarkersInTx(
   client: PoolClient,

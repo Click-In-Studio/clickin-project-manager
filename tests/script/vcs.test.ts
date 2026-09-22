@@ -1,6 +1,7 @@
 /**
  * 线性历史完整性测试（版本退役 Phase B 后）：
- * CoW on blocks and cues（遗留多版本共享态的只读保护）、GC、并发。
+ * block 就地写 / 物理删（snapshot CoW 已随 #634 删除）、cue CoW（遗留多版本共享态的
+ * 只读保护，尚未删）、GC、并发。
  *
  * 分支（createVersion）与 rollback 已退役——多版本共享态只能来自遗留数据，
  * 测试用 makeLegacyVersion 工厂（裸 SQL）模拟。
@@ -152,9 +153,12 @@ describe("makeLegacyVersion — 遗留多版本共享态", () => {
   });
 });
 
-// ─── G2: Block CoW (applyPatchToDB update path) ──────────────────────────────
+// ─── G2: Block 就地写（snapshot CoW 已随 #634 删除）─────────────────────────
+//
+// 版本体系退役后 snapshot 引用数恒为 1，写侧不再按引用数分支：编辑就地 UPDATE、
+// 删除物理 DELETE。遗留多版本共享的 snapshot 也照此处理——旧版本不可见，不再受保护。
 
-describe("block CoW — applyPatchToDB 编辑路径", () => {
+describe("block 就地写 — applyPatchToDB 不再 copy-on-write", () => {
   const PROD = "test-vcs-block-cow";
   let v1Id: string;
   let v2Id: string;
@@ -162,7 +166,7 @@ describe("block CoW — applyPatchToDB 编辑路径", () => {
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "Block CoW 测试", TEST_OWNER);
+    await createProduction(PROD, "Block 就地写测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("bk1", "原始内容")));
     origSnap = (await snapshotId(v1Id, "bk1"))!;
@@ -175,75 +179,24 @@ describe("block CoW — applyPatchToDB 编辑路径", () => {
     expect(await snapshotRefCount(origSnap)).toBe(2);
   });
 
-  it("head 编辑共享 block → head 得到新 snapshot，历史版本保持旧 snapshot", async () => {
+  it("head 编辑共享 block → 就地更新，snapshot_id 不变，遗留版本一并看到新内容", async () => {
     await applyPatchToDB(PROD, v2Id, upd(mkBlock("bk1", "V2 改后内容")));
-    const s1 = await snapshotId(v1Id, "bk1");
-    const s2 = await snapshotId(v2Id, "bk1");
-    expect(s1).toBe(origSnap);
-    expect(s2).not.toBe(origSnap);
-    expect(s2).not.toBeNull();
+    expect(await snapshotId(v1Id, "bk1")).toBe(origSnap);
+    expect(await snapshotId(v2Id, "bk1")).toBe(origSnap);
+    expect(await snapshotContent(origSnap)).toBe("V2 改后内容");
+    expect(await snapshotRefCount(origSnap)).toBe(2);
   });
 
-  it("历史版本内容逐字节不变", async () => {
-    expect(await snapshotContent(origSnap)).toBe("原始内容");
-  });
-
-  it("head 内容已更新为新值", async () => {
-    const s2 = await snapshotId(v2Id, "bk1");
-    expect(await snapshotContent(s2!)).toBe("V2 改后内容");
-  });
-
-  it("head 独占新 snapshot 后再次编辑 → 原地更新（同一 snapshot_id）", async () => {
-    const s2Before = (await snapshotId(v2Id, "bk1"))!;
-    expect(await snapshotRefCount(s2Before)).toBe(1);      // sole owner
+  it("再次编辑仍是同一 snapshot_id", async () => {
     await applyPatchToDB(PROD, v2Id, upd(mkBlock("bk1", "V2 再改")));
-    const s2After = await snapshotId(v2Id, "bk1");
-    expect(s2After).toBe(s2Before);                         // same ID — in-place
-    expect(await snapshotContent(s2After!)).toBe("V2 再改");
+    expect(await snapshotId(v2Id, "bk1")).toBe(origSnap);
+    expect(await snapshotContent(origSnap)).toBe("V2 再改");
   });
 });
 
-// ─── G2b: Block CoW 只 remap 本版本 ──────────────────────────────────────────
+// ─── G3: Block 删除 ───────────────────────────────────────────────────────────
 
-describe("block CoW — 版本本地 remap，不波及其他共享版本", () => {
-  const PROD = "test-vcs-block-nocasc";
-  let v1Id: string;
-  let v2Id: string;
-  let v3Id: string;
-  let origSnap: string;
-
-  beforeAll(async () => {
-    await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "Block 本地 remap 测试", TEST_OWNER);
-    v1Id = (await getActiveVersionId(PROD))!;
-    await applyPatchToDB(PROD, v1Id, ins(mkBlock("bk2", "初始内容")));
-    origSnap = (await snapshotId(v1Id, "bk2"))!;
-    v2Id = await makeLegacyVersion(PROD, v1Id);
-    v3Id = await makeLegacyVersion(PROD, v2Id);
-    // v1/v2/v3 共享同一 snapshot，现在编辑 v2（遗留中间版本）
-    await applyPatchToDB(PROD, v2Id, upd(mkBlock("bk2", "V2 修改")));
-  });
-
-  afterAll(async () => { await deleteProduction(PROD).catch(() => {}); });
-
-  it("V2 编辑后 V1 仍持有旧 snapshot", async () => {
-    expect(await snapshotId(v1Id, "bk2")).toBe(origSnap);
-  });
-
-  it("V2 编辑后 V3 仍持有旧 snapshot（CoW 只 remap 当前版本）", async () => {
-    expect(await snapshotId(v3Id, "bk2")).toBe(origSnap);
-  });
-
-  it("V2 本身指向新 snapshot", async () => {
-    const s2 = await snapshotId(v2Id, "bk2");
-    expect(s2).not.toBe(origSnap);
-    expect(await snapshotContent(s2!)).toBe("V2 修改");
-  });
-});
-
-// ─── G3: Block GC ─────────────────────────────────────────────────────────────
-
-describe("block GC — 删除时 NOT EXISTS 守护", () => {
+describe("block 删除 — 物理删 snapshot，不再按引用数 GC", () => {
   const PROD = "test-vcs-block-gc";
   let v1Id: string;
   let v2Id: string;
@@ -252,31 +205,27 @@ describe("block GC — 删除时 NOT EXISTS 守护", () => {
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "Block GC 测试", TEST_OWNER);
+    await createProduction(PROD, "Block 删除测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     await applyPatchToDB(PROD, v1Id, ins(mkBlock("bgc1", "GC 测试块")));
     sharedSnap = (await snapshotId(v1Id, "bgc1"))!;
     v2Id = await makeLegacyVersion(PROD, v1Id);
-    // V2 专属 block：共享态形成之后插入，V1 不持有
     await applyPatchToDB(PROD, v2Id, ins(mkBlock("bgc2", "V2 专属块")));
     v2OnlySnap = (await snapshotId(v2Id, "bgc2"))!;
   });
 
   afterAll(async () => { await deleteProduction(PROD).catch(() => {}); });
 
-  it("从 V2 删除共享 block：snapshot 物理行仍存在（V1 还持有）", async () => {
+  it("从 head 删除共享 block：物理行直接删，遗留版本的 script_version 行随 FK 级联消失", async () => {
+    expect(await snapshotRefCount(sharedSnap)).toBe(2);
     await applyPatchToDB(PROD, v2Id, del("bgc1"));
-    expect(await snapshotId(v2Id, "bgc1")).toBeNull();       // V2 no longer has the block
-    expect(await physicalSnapshotExists(sharedSnap)).toBe(true); // but physical row survives
-  });
-
-  it("从 V1 再删除 block：snapshot 物理行被 GC", async () => {
-    await applyPatchToDB(PROD, v1Id, del("bgc1"));
+    expect(await snapshotId(v2Id, "bgc1")).toBeNull();
+    expect(await snapshotId(v1Id, "bgc1")).toBeNull();
     expect(await physicalSnapshotExists(sharedSnap)).toBe(false);
   });
 
-  it("V2 专属 block（V1 不持有）被删除后物理行被 GC", async () => {
-    expect(await snapshotRefCount(v2OnlySnap)).toBe(1);      // sole owner
+  it("head 专属 block 被删除后物理行消失", async () => {
+    expect(await snapshotRefCount(v2OnlySnap)).toBe(1);
     await applyPatchToDB(PROD, v2Id, del("bgc2"));
     expect(await physicalSnapshotExists(v2OnlySnap)).toBe(false);
   });
