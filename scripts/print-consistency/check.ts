@@ -77,7 +77,6 @@ async function seedFixture(): Promise<{ prodId: string; cookie: string; pageLayo
   const { createProduction } = await import("../../lib/production/production-db");
   const { getActiveVersionId } = await import("../../lib/script/version-db");
   const { applyPatchToDB } = await import("../../lib/script/script-patch-db");
-  const { writeVersionContent } = await import("../../lib/script/script-version-content-db");
   const { loadProduction, saveScriptConfig } = await import("../../lib/script/script-state-db");
   const { DEFAULT_SCRIPT_CONFIG } = await import("../../lib/script/script-types");
   const { createSession, SESSION_COOKIE } = await import("../../lib/account/session");
@@ -90,13 +89,12 @@ async function seedFixture(): Promise<{ prodId: string; cookie: string; pageLayo
   const versionId = (await getActiveVersionId(prodId))!;
 
   const charIds = [uuid(), uuid()];
-  await writeVersionContent(prodId, versionId, {
-    upsertBlocks: [], deleteSnapshotIds: [],
-    upsertChars: [
-      { id: charIds[0], name: "林晚", isAggregate: false, sortOrder: 1 },
-      { id: charIds[1], name: "Daniel", isAggregate: false, sortOrder: 2 },
+  await applyPatchToDB(prodId, versionId, {
+    clientSeq: 1, blockOps: [], sceneOps: [],
+    charOps: [
+      { op: "upsert", char: { id: charIds[0], name: "林晚", isAggregate: false } },
+      { op: "upsert", char: { id: charIds[1], name: "Daniel", isAggregate: false } },
     ],
-    deleteCharIds: [], upsertScenes: [], deleteSceneIds: [],
   });
 
   const sceneId = randomUUID();

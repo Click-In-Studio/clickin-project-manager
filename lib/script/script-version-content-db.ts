@@ -7,9 +7,12 @@ import { genSnapshotId, markerMetaJson, toDbType } from "./script-row-model";
 import { bumpMarkerStructureRevisionInTx, markerStructureBlocksInTx, normalizeRehearsalMarkOwnershipInTx, normalizeSceneOwnershipOrderInTx } from "./script-marker-tx";
 
 // 整批写入某 version 的内容（#486 从 lib/db.ts 搬出，原名 flushToDBVersioned）。
-// 这是**批量写原语**，不是编辑器的写路径：生产代码零调用，只有测试工厂、标记修复与
-// print-consistency 脚本在用；编辑器与协作走 applyPatchToDB（script-patch-db）。
-// 两条路径各自维护标记不变量、尚未共享主干——保真度裂缝见 #625。
+// 定位：**测试 / 修复专用的批量写原语**，不是编辑器的写路径，生产代码零调用（#625）。
+// 它绕过 applyPatchToDB 的 op 级归一化直接落行，然后在收尾跑一遍全量标记归一化——
+// 正因如此，只有两种调用方有资格用它：
+//   - 自身的行为用例（tests/script/import.test.ts Group B）
+//   - 需要「先写坏、再验证归一化能修回来」的修复场景（tests/script/marker-db-integration.ts）
+// 造数一律走 applyPatchToDB（tests/_support/factories.ts），不要为省事回到这里。
 
 export type DbBlock = Block & { lexKey: string };
 // 写入时带上块当前的 snapshot_id：多引用的 snapshot 需要 copy-on-write
@@ -283,9 +286,3 @@ export async function writeVersionContent(
 
   return { newSnapshotIds };
 }
-
-/**
- * Brute-force import: clears ALL blocks from a specific version and replaces them.
- * No copy-on-write, no cue drift — caller is responsible for choosing an editing version.
- * Scenes and characters are upserted at both the production level and the version level.
- */
