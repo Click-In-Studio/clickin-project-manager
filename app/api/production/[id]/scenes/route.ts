@@ -93,8 +93,12 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/production/[
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx, isArchived } = access;
   if (isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!(permCtx.isAdmin || permCtx.isOwner || await hasGrant(permCtx.userId, id, "scene", "*", "*", "edit"))) {
-    return Response.json({ error: "权限不足" }, { status: 403 });
+  const editAccess = await canAccessNode(permCtx, id, "scene", "*", "*", "edit");
+  if (!editAccess.allowed) {
+    return Response.json(
+      { error: editAccess.reason === "needs_self_confirm" ? "请先确认编辑权限" : "权限不足" },
+      { status: 403 },
+    );
   }
 
   const body = await req.json();

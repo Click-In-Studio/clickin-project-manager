@@ -22,6 +22,7 @@ type Props = {
   productionId: string;
   productionName: string;
   initialScenes: MarkerProjection[];
+  openingChapterMarkerId: string | null;
   canEdit: boolean;
   /** 逐字段编辑权限；canEdit 是「值得显示编辑态」的粗门 */
   fieldPerms: SceneFieldPerms;
@@ -492,7 +493,7 @@ function InsertSceneRow({
   );
 }
 
-export default function ScenesManager({ productionId, productionName, initialScenes, canEdit, fieldPerms, embedded, canImport, versionId, initialExpandedId }: Props & { canImport?: boolean }) {
+export default function ScenesManager({ productionId, productionName, initialScenes, openingChapterMarkerId, canEdit, fieldPerms, embedded, canImport, versionId, initialExpandedId }: Props & { canImport?: boolean }) {
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
   const [dragging, setDragging] = useState<MarkerProjection | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; edge: "top" | "bottom"; beforeId: string | null } | null>(null);
@@ -667,7 +668,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
   };
 
   const dragProps = (scene: MarkerProjection) => ({
-    canReorder: canEdit && fieldPerms.structure,
+    canReorder: canEdit && fieldPerms.structure && scene.id !== openingChapterMarkerId,
     isDragging: dragging?.id === scene.id,
     dropEdge: dropTarget?.id === scene.id ? dropTarget.edge : null,
     onDragStart: (event: React.DragEvent<HTMLElement>) => {

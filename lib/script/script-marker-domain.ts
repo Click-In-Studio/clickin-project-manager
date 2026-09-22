@@ -951,6 +951,7 @@ export function moveHierarchyMarker(
   if (sourceIndex < 0) return state;
   const source = state.blocks[sourceIndex];
   if (source.type !== "chapter_marker" && source.type !== "scene_marker") return state;
+  if (source.id === state.config.openingChapterMarkerId) return state;
 
   const targetIndex = beforeMarkerId
     ? state.blocks.findIndex((block) => isMarkerBlock(block) && block.id === beforeMarkerId)

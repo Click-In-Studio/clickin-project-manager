@@ -264,7 +264,9 @@ export default function AppShell({ session, productions, canCreateProduction = f
     <NavPendingContext.Provider value={navPendingBus}>
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--paper)]">
       {/* Topbar */}
-      <header ref={topbarRef} className={`h-16 shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center z-50 ${productionHeaderStage >= 2 ? "gap-2 px-2.5" : "gap-5 px-5"}`}>
+      <header
+        ref={topbarRef}
+        className={`h-16 shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center z-50 ${productionHeaderStage >= 2 ? "gap-2 px-2.5" : "gap-5 px-5"}`}>
         {/* Brand / production icon */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
           <span className="w-8 h-8 rounded-full bg-[#182a2a] overflow-hidden flex items-center justify-center select-none shrink-0">
@@ -288,7 +290,8 @@ export default function AppShell({ session, productions, canCreateProduction = f
           activeProductions={activeProductions}
           currentProduction={currentProduction ?? null}
           currentProductionId={productionId}
-          canCreateProduction={canCreateProduction} compact={productionHeaderStage >= 2}
+          canCreateProduction={canCreateProduction}
+          compact={productionHeaderStage >= 2}
         />
 
         {isAdminMode && productionId && (
