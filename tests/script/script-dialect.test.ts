@@ -11,7 +11,7 @@ import type { Block, Character, ScriptState } from "@/lib/script/script-types";
 
 /**
  * 剧本方言 P0 护栏：序列化 → 解析回填的往返必须产出空 patch（id 往返协议的
- * 根基——任何虚假 diff 都会变成对 cue/tag/page_map 锚点的无谓 CoW），
+ * 根基——任何虚假 diff 都会变成对 cue/tag/page_map 锚点的无谓漂移），
  * 各类编辑必须映射为最小 op 组合，畸形输入必须给出可教学的错误。
  */
 

@@ -10,7 +10,7 @@
 //                              applyDialectToBlocks 按 id 往返协议算出目标状态
 //   script_propose_edit_blocks 单/多块精修——结构化字段逐块改/插/删
 // 两者殊途同归：目标 blocks → diffState 算最小 patch → requiredPermissions 反推
-// 所需钥匙（与编辑器 PATCH 路由同一套判定）→ applyPatchToDB（CoW/锁/cue 漂移/
+// 所需钥匙（与编辑器 PATCH 路由同一套判定）→ applyPatchToDB（锁/cue 漂移/
 // page_map 全继承）。块 id 不变即锚点不变——评论/cue/标签不受改写影响。
 //
 // 无人值守：不声明 unattended → 缺省 deny。剧本正文写入不进定时任务白名单。

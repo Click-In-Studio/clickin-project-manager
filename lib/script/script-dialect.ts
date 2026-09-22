@@ -12,7 +12,7 @@
  *   有「说话人：」前缀且说话人可解析为已存在角色，否则报错——错误信息本身在教
  *   模型正确写法。
  * - 解析产物经 diffState（lib/script/script-ops.ts）算最小 patch，落库走 applyPatchToDB
- *   （CoW / advisory lock / cue 漂移 / page_map 全部继承），本模块只做纯函数变换。
+ *   （advisory lock / cue 漂移 / page_map 全部继承），本模块只做纯函数变换。
  *
  * 三落点同批纪律（同 wiki 方言，见 lib/agent/tools/wiki-link-syntax.ts）：
  * 序列化器（读工具输出）、解析器（写工具输入）、SCRIPT_DIALECT_NOTE（AI 说明书）

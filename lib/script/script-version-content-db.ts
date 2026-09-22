@@ -15,7 +15,7 @@ import { bumpMarkerStructureRevisionInTx, markerStructureBlocksInTx, normalizeRe
 // 造数一律走 applyPatchToDB（tests/_support/factories.ts），不要为省事回到这里。
 
 export type DbBlock = Block & { lexKey: string };
-// 写入时带上块当前的 snapshot_id：多引用的 snapshot 需要 copy-on-write
+// 写入时带上块当前的 snapshot_id；`sn_new_` 前缀表示新块，由本函数分配真实 id
 export type SnapshotDbBlock = DbBlock & { snapshotId: string };
 export type DbScene = Scene & { sortOrder: number };
 export type DbChar = Character & { sortOrder: number };
@@ -29,28 +29,22 @@ export type VersionContentWrite = {
   deleteSceneIds: string[];
 };
 
-// block_id → new snapshot_id for any block whose snapshot was CoW'd
-export type VersionContentWriteResult = {
-  newSnapshotIds: Map<string, string>;
-};
-
 /**
- * 把一批块 / 场次 / 角色整体写进 versionId。块按 snapshot 引用计数做 copy-on-write，
- * 场次与角色按 version 行 upsert。返回被 CoW 的块的 block_id → 新 snapshot_id。
+ * 把一批块 / 场次 / 角色整体写进 versionId。块按 snapshot 就地 upsert（版本体系已退役，
+ * 引用数恒为 1，不再 copy-on-write，#634），场次与角色按 version 行 upsert。
  */
 export async function writeVersionContent(
   productionId: string,
   versionId: string,
   payload: VersionContentWrite,
-): Promise<VersionContentWriteResult> {
+): Promise<void> {
   const { upsertBlocks: rawUpsertBlocks, deleteSnapshotIds, upsertChars, deleteCharIds, upsertScenes, deleteSceneIds } = payload;
   const upsertBlocks = withLegacyOwnershipProjection(withMarkerOwnership(rawUpsertBlocks));
-  const newSnapshotIds = new Map<string, string>();
   const mayChangeMarkerStructure = upsertBlocks.length > 0 || deleteSnapshotIds.length > 0;
 
   if (!upsertBlocks.length && !deleteSnapshotIds.length && !upsertChars.length &&
       !deleteCharIds.length && !upsertScenes.length && !deleteSceneIds.length) {
-    return { newSnapshotIds };
+    return;
   }
 
   // ── Phase 1: snapshot pre-flush for cue drift ─────────────────────────────
@@ -127,12 +121,11 @@ export async function writeVersionContent(
       );
     }
 
-    // Blocks: copy-on-write for multi-referenced snapshots
+    // Blocks: new snapshots insert, existing snapshots update in place
     for (const block of upsertBlocks) {
       const isNew = block.snapshotId.startsWith('sn_new_');
 
       if (isNew) {
-        // Brand new block: insert snapshot + relation
         const snapshotId = genSnapshotId();
         await client.query(
           `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
@@ -155,88 +148,35 @@ export async function writeVersionContent(
             [scRows.map(r => r.sid), scRows.map(r => r.cid), scRows.map(r => r.pos), scRows.map(r => r.ann)]
           );
         }
-        newSnapshotIds.set(block.id, snapshotId);
       } else {
-        // Existing block: check reference count for CoW
-        const refRes = await client.query<{ cnt: string }>(
-          "SELECT COUNT(*) AS cnt FROM script_version WHERE snapshot_id = $1",
-          [block.snapshotId]
+        await client.query(
+          `UPDATE script SET scene_id = $1, rehearsal_mark = $2, owner_marker_id = $3, type = $4::block_type, content = $5, stage_comment = $6, marker_meta = $7::jsonb, force_show_character_name = $8 WHERE id = $9`,
+          [block.sceneId ?? null, block.rehearsalMark ?? null, block.ownerMarkerId ?? null, toDbType(block), block.content,
+           block.stageComment?.trim() || null, markerMetaJson(block), block.forceShowCharacterName ?? false, block.snapshotId]
         );
-        const refCount = parseInt(refRes.rows[0].cnt, 10);
-
-        if (refCount <= 1) {
-          // Sole reference: update in-place
+        await client.query(
+          "UPDATE script_version SET sort_key = $1 WHERE snapshot_id = $2 AND version_id = $3",
+          [block.lexKey, block.snapshotId, versionId]
+        );
+        await client.query(
+          "DELETE FROM script_character WHERE script_id = $1", [block.snapshotId]
+        );
+        if (block.characterIds.length > 0) {
+          const scRows = block.characterIds.map((cid, pos) => ({
+            sid: block.snapshotId, cid, pos, ann: block.characterAnnotations[cid] ?? null,
+          }));
           await client.query(
-            `UPDATE script SET scene_id = $1, rehearsal_mark = $2, owner_marker_id = $3, type = $4::block_type, content = $5, stage_comment = $6, marker_meta = $7::jsonb, force_show_character_name = $8 WHERE id = $9`,
-            [block.sceneId ?? null, block.rehearsalMark ?? null, block.ownerMarkerId ?? null, toDbType(block), block.content,
-             block.stageComment?.trim() || null, markerMetaJson(block), block.forceShowCharacterName ?? false, block.snapshotId]
+            `INSERT INTO script_character (script_id, character_id, position, annotation)
+             SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
+            [scRows.map(r => r.sid), scRows.map(r => r.cid), scRows.map(r => r.pos), scRows.map(r => r.ann)]
           );
-          // Update sort_key in relation table
-          await client.query(
-            "UPDATE script_version SET sort_key = $1 WHERE snapshot_id = $2 AND version_id = $3",
-            [block.lexKey, block.snapshotId, versionId]
-          );
-          // Replace character associations
-          await client.query(
-            "DELETE FROM script_character WHERE script_id = $1", [block.snapshotId]
-          );
-          if (block.characterIds.length > 0) {
-            const scRows = block.characterIds.map((cid, pos) => ({
-              sid: block.snapshotId, cid, pos, ann: block.characterAnnotations[cid] ?? null,
-            }));
-            await client.query(
-              `INSERT INTO script_character (script_id, character_id, position, annotation)
-               SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
-              [scRows.map(r => r.sid), scRows.map(r => r.cid), scRows.map(r => r.pos), scRows.map(r => r.ann)]
-            );
-          }
-        } else {
-          // Multi-referenced: copy-on-write
-          const newSnapshotId = genSnapshotId();
-          await client.query(
-            `INSERT INTO script (id, block_id, production_id, sort_key, scene_id, rehearsal_mark, owner_marker_id, type, content, stage_comment, marker_meta, force_show_character_name)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::block_type, $9, $10, $11::jsonb, $12)`,
-            [newSnapshotId, block.id, productionId, block.lexKey,
-             block.sceneId ?? null, block.rehearsalMark ?? null, block.ownerMarkerId ?? null, toDbType(block), block.content,
-             block.stageComment?.trim() || null, markerMetaJson(block), block.forceShowCharacterName ?? false]
-          );
-          // Remap relation for this version to the new snapshot
-          await client.query(
-            "UPDATE script_version SET snapshot_id = $1, sort_key = $2 WHERE snapshot_id = $3 AND version_id = $4",
-            [newSnapshotId, block.lexKey, block.snapshotId, versionId]
-          );
-          if (block.characterIds.length > 0) {
-            const scRows = block.characterIds.map((cid, pos) => ({
-              sid: newSnapshotId, cid, pos, ann: block.characterAnnotations[cid] ?? null,
-            }));
-            await client.query(
-              `INSERT INTO script_character (script_id, character_id, position, annotation)
-               SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::int[]), unnest($4::text[])`,
-              [scRows.map(r => r.sid), scRows.map(r => r.cid), scRows.map(r => r.pos), scRows.map(r => r.ann)]
-            );
-          }
-          // block_tag rows are keyed by logical block_id (block.id), not by
-          // snapshot_id, so they do not need to be copied during CoW.
-          // （挂载边 CoW 复制已随 #420 退役：node_mount 锚稳定 block_id）
-          newSnapshotIds.set(block.id, newSnapshotId);
         }
       }
     }
 
-    // Deletes: remove from version relation; garbage-collect orphan snapshots.
-    // Two separate statements — CTE and its main query share one snapshot and
-    // cannot see each other's writes, so split into sequential statements.
+    // Deletes: 物理删 snapshot（script_version 随 FK 级联）
     if (deleteSnapshotIds.length > 0) {
-      await client.query(
-        "DELETE FROM script_version WHERE snapshot_id = ANY($1::text[]) AND version_id = $2",
-        [deleteSnapshotIds, versionId]
-      );
-      await client.query(
-        `DELETE FROM script s
-         WHERE s.id = ANY($1::text[])
-           AND NOT EXISTS (SELECT 1 FROM script_version sv WHERE sv.snapshot_id = s.id)`,
-        [deleteSnapshotIds]
-      );
+      await client.query("DELETE FROM script WHERE id = ANY($1::text[])", [deleteSnapshotIds]);
     }
 
     // Version-scoped deletes: remove from versioned tables only; keep scene/character
@@ -277,12 +217,9 @@ export async function writeVersionContent(
     if (adj) driftJobs.push(handleBlockDeleted(snapshotId, adj.prevId, adj.nextId, versionId));
   }
   for (const block of upsertBlocks) {
-    const effectiveSnapshotId = newSnapshotIds.get(block.id) ?? block.snapshotId;
     const old = oldContents.get(block.snapshotId);
     if (old !== undefined && old !== block.content)
-      driftJobs.push(handleBlockContentChanged(block.snapshotId, effectiveSnapshotId, old, block.content, versionId));
+      driftJobs.push(handleBlockContentChanged(block.snapshotId, block.snapshotId, old, block.content, versionId));
   }
   if (driftJobs.length > 0) await Promise.allSettled(driftJobs);
-
-  return { newSnapshotIds };
 }

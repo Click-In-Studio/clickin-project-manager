@@ -548,15 +548,13 @@ describe("C: parseSceneNum", () => {
 //
 // Scenario:
 //   v1: B1, B2, B3 (imported) + cue CQ_rev1
-//   v2 (fork of v1): inherits B1, B2, B3 + CQ_rev1
-//     → CoW B2 in v2: new snapshot snap-b2-v2 (sole in v2); snap-b2-orig now sole in v1
-//     → CoW CQ in v2: new revision CQ_rev2 (sole in v2); CQ_rev1 now sole in v1
+//   v2 (legacy fork of v1): inherits B1, B2, B3 + CQ_rev1
+//     → 编辑 B2 in v2：snapshot CoW 已删（#634），就地改写，v1 一并看到
+//     → CoW CQ in v2: new revision CQ_rev2 (sole in v2); CQ_rev1 now sole in v1（cue CoW 仍在）
 //   Import [B4] to v2 (full replacement)
 //
 // Key assertions:
-//   - snap-b2-v2 GC'd (v2 sole → deleted)
-//   - snap-b1, snap-b3 survive (shared → v1 still holds them)
-//   - snap-b2-orig survives (v1 sole → untouched)
+//   - v2 的三个 snapshot 物理删除，不看引用数；v1 的 script_version 行随 FK 级联消失
 //   - v2.cue_version cleared; CQ_rev2 GC'd (v2 sole cue)
 //   - v1.cue_version + CQ_rev1 intact
 
@@ -564,7 +562,7 @@ const PROD_E    = "test-import-e";
 const CL_E_ID   = "test-imp-cl-e";
 const CUE_E_ID  = "test-imp-cue-e";
 
-describe("D: version-import hybrid — CoW block/cue isolation and GC", () => {
+describe("D: version-import hybrid — block 物理删 / cue CoW 隔离与 GC", () => {
   let v1Id: string;
   let v2Id: string;
   let snapB2InV2:  string;
@@ -599,7 +597,7 @@ describe("D: version-import hybrid — CoW block/cue isolation and GC", () => {
     // ── Step 3: fork v2 from v1（遗留多版本状态，工厂裸 SQL 模拟）──────────────
     v2Id = await makeLegacyVersion(PROD_E, v1Id);
 
-    // ── Step 4: CoW B2 in v2 — new snapshot sole-owned by v2 ──────────────────
+    // ── Step 4: 编辑 B2 in v2 — 就地改写（snapshot CoW 已删，#634）────────────
     await applyPatchToDB(PROD_E, v2Id, {
       clientSeq: 1,
       blockOps: [{ op: "update", block: { id: "e-b2", type: "dialogue", content: "B2-v2修改", characterIds: [], characterAnnotations: {}, lyric: false, sceneId: null, rehearsalMark: null } }],
@@ -607,6 +605,8 @@ describe("D: version-import hybrid — CoW block/cue isolation and GC", () => {
       sceneOps: [],
     });
     snapB2InV2 = (await snapshotIdForBlock(v2Id, "e-b2"))!;
+    expect(snapB2InV2).toBe("e-snap-b2");
+    expect(await snapshotContent("e-snap-b2")).toBe("B2-v2修改");
 
     // ── Step 5: CoW cue in v2 — new revision sole-owned by v2 ─────────────────
     // refCount of CUE_E_ID is now 2 (v1 + v2), so updateCue triggers CoW
@@ -633,29 +633,14 @@ describe("D: version-import hybrid — CoW block/cue isolation and GC", () => {
     expect(await snapshotIdForBlock(v2Id, "e-b4")).not.toBeNull();
   });
 
-  it("E2: v1 blocks are completely untouched after v2 import", async () => {
-    expect(await countScriptVersion(v1Id)).toBe(3);
-    expect(await snapshotContent(await snapshotIdForBlock(v1Id, "e-b1") as string)).toBe("B1内容");
-    expect(await snapshotContent(await snapshotIdForBlock(v1Id, "e-b2") as string)).toBe("B2内容");
-    expect(await snapshotContent(await snapshotIdForBlock(v1Id, "e-b3") as string)).toBe("B3内容");
-  });
-
-  it("E3: v2-sole snapshot (B2 after CoW) is GC'd", async () => {
+  it("E2: v2 的三个 snapshot 物理删除，不看引用数（#634）", async () => {
+    expect(await physicalSnapshotExists("e-snap-b1")).toBe(false);
     expect(await physicalSnapshotExists(snapB2InV2)).toBe(false);
+    expect(await physicalSnapshotExists("e-snap-b3")).toBe(false);
   });
 
-  it("E4: shared snapshots (B1, B3) survive — v1 still references them", async () => {
-    const snapB1V1 = (await snapshotIdForBlock(v1Id, "e-b1"))!;
-    const snapB3V1 = (await snapshotIdForBlock(v1Id, "e-b3"))!;
-    expect(await physicalSnapshotExists(snapB1V1)).toBe(true);
-    expect(await physicalSnapshotExists(snapB3V1)).toBe(true);
-  });
-
-  it("E5: v1-sole snapshot (original B2 before v2 CoW) survives", async () => {
-    // v2 had already diverged from this snapshot before the import, so it was never
-    // an orphan from import's perspective — v1 is the sole remaining reference.
-    const snapB2V1 = (await snapshotIdForBlock(v1Id, "e-b2"))!;
-    expect(await physicalSnapshotExists(snapB2V1)).toBe(true);
+  it("E3: 遗留 v1 的 script_version 行随 FK 级联消失，旧版本不再受保护", async () => {
+    expect(await countScriptVersion(v1Id)).toBe(0);
   });
 
   it("E6: v2 cue_version is empty after import", async () => {
