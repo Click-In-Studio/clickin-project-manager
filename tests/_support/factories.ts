@@ -4,7 +4,6 @@ import { getPool } from "@/lib/pg";
 import { createProduction, deleteProduction } from "@/lib/production/production-db";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { getActiveVersionId } from "@/lib/script/version-db";
-import { writeVersionContent } from "@/lib/script/script-version-content-db";
 import { applyPatchToDB } from "@/lib/script/script-patch-db";
 import type { Block } from "@/lib/script/script-types";
 import type { ScriptPatch } from "@/lib/script/script-ops";
@@ -150,20 +149,11 @@ export async function makeCharacter(
   opts?: { name?: string },
 ): Promise<string> {
   const charId = randomUUID();
-  await writeVersionContent(productionId, versionId, {
-    upsertBlocks: [],
-    deleteSnapshotIds: [],
-    upsertChars: [
-      {
-        id: charId,
-        name: opts?.name ?? faker.person.fullName(),
-        isAggregate: false,
-        sortOrder: 1,
-      },
-    ],
-    deleteCharIds: [],
-    upsertScenes: [],
-    deleteSceneIds: [],
+  await applyPatchToDB(productionId, versionId, {
+    clientSeq: 1,
+    blockOps: [],
+    charOps: [{ op: "upsert", char: { id: charId, name: opts?.name ?? faker.person.fullName(), isAggregate: false } }],
+    sceneOps: [],
   });
   return charId;
 }
