@@ -809,7 +809,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     values.push(...row.cueValues);
     markerCueValuesBySceneId.set(sceneId, values);
   }
-  const chapterIdsWithScriptBlocks = new Set<string>();
   let currentChapterId: string | null = null;
   let currentSceneId: string | null = null;
   let previousOutputBlockId: string | null = null;
@@ -964,7 +963,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     const scene = spec.sceneId ? sceneById.get(spec.sceneId) ?? null : null;
     if (scene) {
       if (scene.parentId === null) {
-        chapterIdsWithScriptBlocks.add(scene.id);
         if (currentChapterId !== scene.id) {
           if (scene.id !== openingChapterMarkerId) {
             pushSceneMarkerBlock("chapter_marker", scene.id);
@@ -973,7 +971,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
           currentSceneId = null;
         }
       } else {
-        chapterIdsWithScriptBlocks.add(scene.parentId);
         if (currentChapterId !== scene.parentId) {
           if (scene.parentId !== openingChapterMarkerId) {
             pushSceneMarkerBlock("chapter_marker", scene.parentId);
@@ -996,26 +993,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     ...block,
     lexKey: lexKeys[index],
   }));
-  const blankChapterIds = body.sceneOverrides ? new Set<string>() : new Set(
-    [...sceneById.values()]
-      .filter((scene) => (
-        scene.id !== openingChapterMarkerId &&
-        scene.parentId === null &&
-        !chapterIdsWithScriptBlocks.has(scene.id)
-      ))
-      .map((scene) => scene.id)
-  );
-  const deleteSceneIds = [
-    ...blankChapterIds,
-    ...[...sceneById.values()]
-      .filter((scene) => scene.parentId !== null && blankChapterIds.has(scene.parentId))
-      .map((scene) => scene.id),
-    ...(replaceScenes
-      ? existingScenes
-          .filter((scene) => !replacementSceneIds.has(scene.id))
-          .map((scene) => scene.id)
-      : []),
-  ].filter((id, index, ids) => ids.indexOf(id) === index);
   const aggregateMemberships: Array<{ aggregateId: string; memberIds: string[] }> = [];
   for (const [aggregateName, memberNames] of Object.entries(body.aggregateMembers ?? {})) {
     const aggregateId = charIdByName.get(aggregateName);
@@ -1036,7 +1013,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     upsertBlocks,
     upsertChars,
     upsertScenes: upsertScenesFromScript,
-    deleteSceneIds,
     upsertCueColumns: [...cueImportsByColumn.values()],
     cueListCreatedBy: session.userId,
     blockTagAssignments,

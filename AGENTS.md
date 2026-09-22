@@ -42,6 +42,7 @@
 
 - 版本体系已退役：只有 head，新设计不引入 version 维度，不引用「CoW 地基」约束新工作；悬空边 = 删除。
 - node 树契约：边不投权限票、悬空即删、node id 寻址；业务实体不进树。
+- 剧本核心表行级写 SQL 只在 `lib/script/script-row-tx.ts`，写事务收尾一律 `finalizeMarkerInvariantsInTx`；`scene_version` 是标记的派生读模型，不得直写。
 - 显示名 / 头像 / 联系方式一律 `LEFT JOIN user_profile`，禁增 `JOIN feishu_user` 取名（§8）。
 - 权限与等级正交：权限管内容可见、等级管菜单有无，代码里分开传。`lib/account/plan.ts` 不可入客户端包。
 - 成员查询必须选口径（active / `<> 'exited'`）；席位用 `occupiesSeat`。

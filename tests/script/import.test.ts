@@ -1,14 +1,12 @@
 /**
  * Import pipeline tests:
  *   A. importScriptToVersion — DB integration (full replacement, character links, cross-production isolation)
- *   B. writeVersionContent scene-only path — add / delete / upsert
  *   C. parseSceneNum — pure function (various formats)
  *   D. version-import hybrid — CoW block/cue isolation, orphan GC, v1 preservation
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createProduction } from "@/lib/production/production-db";
 import { importScriptToVersion } from "@/lib/script/script-import-db";
-import { writeVersionContent } from "@/lib/script/script-version-content-db";
 import { getActiveVersionId } from "@/lib/script/version-db";
 import { createCueList } from "@/lib/ops/cue-list-db";
 import { createCue, updateCue } from "@/lib/ops/cue-db";
@@ -37,14 +35,6 @@ async function countCharacterVersion(versionId: string): Promise<number> {
   return parseInt(r.rows[0].count);
 }
 
-async function countSceneVersion(versionId: string): Promise<number> {
-  const r = await getPool().query<{ count: string }>(
-    "SELECT COUNT(*)::text AS count FROM scene_version WHERE version_id = $1",
-    [versionId],
-  );
-  return parseInt(r.rows[0].count);
-}
-
 async function scriptCharLinks(snapshotId: string): Promise<string[]> {
   const r = await getPool().query<{ character_id: string }>(
     "SELECT character_id FROM script_character WHERE script_id = $1 ORDER BY position",
@@ -67,14 +57,6 @@ async function snapshotIdForBlock(versionId: string, blockId: string): Promise<s
     [versionId, blockId],
   );
   return r.rows[0]?.snapshot_id ?? null;
-}
-
-async function sceneIdsForVersion(versionId: string): Promise<string[]> {
-  const r = await getPool().query<{ scene_id: string }>(
-    "SELECT scene_id FROM scene_version WHERE version_id = $1 ORDER BY sort_order",
-    [versionId],
-  );
-  return r.rows.map(row => row.scene_id);
 }
 
 async function sceneIdentityExists(sceneId: string): Promise<boolean> {
@@ -402,84 +384,6 @@ describe("A: importScriptToVersion DB integration", () => {
       [versionId],
     );
     expect(scriptContents.rows.map(row => row.content)).toEqual(["第一句台词", "第二句台词"]);
-  });
-});
-
-// ── Group B: writeVersionContent scene-only path ───────────────────────────────
-
-const PROD_B = "test-import-b";
-
-describe("B: writeVersionContent scene-only path", () => {
-  let versionId: string;
-
-  beforeAll(async () => {
-    await forceDeleteProduction(PROD_B).catch(() => {});
-    await createProduction(PROD_B, "导入测试-场景", TEST_OWNER);
-    versionId = (await getActiveVersionId(PROD_B))!;
-  });
-
-  afterAll(async () => {
-    await forceDeleteProduction(PROD_B).catch(() => {});
-  });
-
-  it("B1: adds scenes to empty version", async () => {
-    await writeVersionContent(PROD_B, versionId, {
-      upsertScenes: [
-        { id: "b-sc1", number: "1", name: "第一幕", parentId: null, sortOrder: 1 },
-        { id: "b-sc2", number: "1-1", name: "第一场", parentId: "b-sc1", sortOrder: 2 },
-      ],
-      deleteSceneIds: [],
-      upsertBlocks: [], deleteSnapshotIds: [],
-      upsertChars: [], deleteCharIds: [],
-    });
-
-    const ids = await sceneIdsForVersion(versionId);
-    expect(ids).toContain("b-sc1");
-    expect(ids).toContain("b-sc2");
-  });
-
-  it("B2: upsert updates existing scene name", async () => {
-    await writeVersionContent(PROD_B, versionId, {
-      upsertScenes: [{ id: "b-sc1", number: "1", name: "序幕（改名）", parentId: null, sortOrder: 1 }],
-      deleteSceneIds: [],
-      upsertBlocks: [], deleteSnapshotIds: [],
-      upsertChars: [], deleteCharIds: [],
-    });
-
-    const r = await getPool().query<{ name: string }>(
-      "SELECT name FROM scene_version WHERE scene_id = $1 AND version_id = $2",
-      ["b-sc1", versionId],
-    );
-    expect(r.rows[0]?.name).toBe("序幕（改名）");
-  });
-
-  it("B3: deleteSceneIds removes scene from scene_version but global scene row persists", async () => {
-    await writeVersionContent(PROD_B, versionId, {
-      upsertScenes: [],
-      deleteSceneIds: ["b-sc2"],
-      upsertBlocks: [], deleteSnapshotIds: [],
-      upsertChars: [], deleteCharIds: [],
-    });
-
-    const ids = await sceneIdsForVersion(versionId);
-    expect(ids).not.toContain("b-sc2");
-
-    // global identity row must survive — other versions/productions may reference it
-    expect(await sceneIdentityExists("b-sc2")).toBe(true);
-  });
-
-  it("B4: replaceExisting=false leaves unlisted scenes intact", async () => {
-    // scene "1" is still present from B1; add a new one without deleting existing
-    await writeVersionContent(PROD_B, versionId, {
-      upsertScenes: [{ id: "b-sc3", number: "2", name: "第二幕", parentId: null, sortOrder: 2 }],
-      deleteSceneIds: [],
-      upsertBlocks: [], deleteSnapshotIds: [],
-      upsertChars: [], deleteCharIds: [],
-    });
-
-    const ids = await sceneIdsForVersion(versionId);
-    expect(ids).toContain("b-sc1");
-    expect(ids).toContain("b-sc3");
   });
 });
 
