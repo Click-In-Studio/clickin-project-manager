@@ -421,8 +421,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const cueNumMatch = mentionQuery.match(/^([A-Z][A-Z0-9]*)\.(.*)$/);
   if (cueNumMatch) {
     const [, abbr, numPrefix] = cueNumMatch;
-    // 交给编辑器的是**稳定 cue_id**（#302），不是行 id——行 id 会被 CoW 换掉，
-    // 插进正文就成了改一次即失效的引用。无版本过滤时同一逻辑 cue 可能有多条修订，
+    // 交给编辑器的是**稳定 cue_id**（#302），不是行 id——正文里的引用只认逻辑身份，
+    // 锚行 id 会被删改一次就失效。无版本过滤时同一逻辑 cue 可能有多条遗留修订，
     // DISTINCT ON 先收敛到一条，否则重复行会在 dedup 之前就把 LIMIT 8 吃光。
     const cueRes = await pool.query<{ cue_id: string; number: string; name: string; abbr: string }>(
       `SELECT d.cue_id, d.number, d.name, d.abbr FROM (

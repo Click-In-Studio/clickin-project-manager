@@ -68,8 +68,8 @@ export async function cleanupProduction(prodId: string): Promise<void> {
  * 模拟「版本退役 Phase B」之前的遗留多版本数据：从 fromVersionId 复制出一个
  * 新的活跃版本（共享 snapshot / cue revision，ref_count 变为 2+），旧版本沦为
  * 只读历史。生产代码已不再有制造这种状态的入口——这个工厂用裸 SQL
- * 复刻老 createVersion 的复制语义，专供「遗留共享态」相关测试（cue CoW 分支、
- * 以及断言剧本写侧已不再区分共享 / 独占的用例）。
+ * 复刻老 createVersion 的复制语义，此后只剩一种用途：断言剧本与 cue 写侧
+ * 已不再区分共享 / 独占（#634 #639）。
  */
 export async function makeLegacyVersion(
   prodId: string,

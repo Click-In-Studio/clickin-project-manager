@@ -1,7 +1,7 @@
 /**
  * 线性历史完整性测试（版本退役 Phase B 后）：
- * block 就地写 / 物理删（snapshot CoW 已随 #634 删除）、cue CoW（遗留多版本共享态的
- * 只读保护，尚未删）、GC、并发。
+ * block 与 cue 一律就地写 / 物理删——snapshot CoW 随 #634 删除，cue 修订 CoW 随 #639
+ * 删除，两侧都不再按引用数分支。并发。
  *
  * 分支（createVersion）与 rollback 已退役——多版本共享态只能来自遗留数据，
  * 测试用 makeLegacyVersion 工厂（裸 SQL）模拟。
@@ -231,9 +231,12 @@ describe("block 删除 — 物理删 snapshot，不再按引用数 GC", () => {
   });
 });
 
-// ─── G4: Cue CoW (updateCue) ─────────────────────────────────────────────────
+// ─── G4: Cue 就地写（修订 CoW 已随 #639 删除）────────────────────────────────
+//
+// 与 block 同理：cue_version 引用数恒为 1，写侧不再按引用数分支。遗留多版本共享的
+// 修订行也照此就地改——旧版本不可见，不再受保护。
 
-describe("cue CoW — updateCue refCount 分支", () => {
+describe("cue 就地写 — updateCue 不再 copy-on-write", () => {
   const PROD = "test-vcs-cue-cow";
   const CL   = "vcs-cl-cue-cow";
   let v1Id: string;
@@ -242,7 +245,7 @@ describe("cue CoW — updateCue refCount 分支", () => {
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "Cue CoW 测试", TEST_OWNER);
+    await createProduction(PROD, "Cue 就地写测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     await mkCueList(PROD, CL);
     await mkCue("g4-cue1", CL, "原始名", v1Id);
@@ -252,70 +255,65 @@ describe("cue CoW — updateCue refCount 分支", () => {
 
   afterAll(async () => { await deleteProduction(PROD).catch(() => {}); });
 
-  it("refCount = 2：updateCue CoW — V2 获得新 revision，V1 不变", async () => {
+  it("遗留共享后修订被两个版本共享（refCount = 2）", async () => {
     expect(await cueRevRefCount(origRev)).toBe(2);
-    await updateCue(origRev, CL, { name: "V2 名" }, v2Id);
-    const r1 = await cueRevisionId(v1Id, "g4-cue1");
-    const r2 = await cueRevisionId(v2Id, "g4-cue1");
-    expect(r1).toBe(origRev);
-    expect(r2).not.toBe(origRev);
-    expect(await cueName(origRev)).toBe("原始名");
-    expect(await cueName(r2!)).toBe("V2 名");
   });
 
-  it("refCount = 1：updateCue 原地更新（revision_id 不变）", async () => {
-    const v2Rev = (await cueRevisionId(v2Id, "g4-cue1"))!;
-    expect(await cueRevRefCount(v2Rev)).toBe(1);
-    await updateCue(v2Rev, CL, { name: "V2 再改" }, v2Id);
-    const v2RevAfter = await cueRevisionId(v2Id, "g4-cue1");
-    expect(v2RevAfter).toBe(v2Rev);                          // same physical row
-    expect(await cueName(v2RevAfter!)).toBe("V2 再改");
+  it("head 编辑共享修订 → 就地更新，revision_id 不变，遗留版本一并看到新名字", async () => {
+    await updateCue(origRev, CL, { name: "V2 名" }, v2Id);
+    expect(await cueRevisionId(v1Id, "g4-cue1")).toBe(origRev);
+    expect(await cueRevisionId(v2Id, "g4-cue1")).toBe(origRev);
+    expect(await cueName(origRev)).toBe("V2 名");
+    expect(await cueRevRefCount(origRev)).toBe(2);
+  });
+
+  it("再次编辑仍是同一 revision_id（独占与共享同一条路径）", async () => {
+    await updateCue(origRev, CL, { name: "V2 再改" }, v2Id);
+    expect(await cueRevisionId(v2Id, "g4-cue1")).toBe(origRev);
+    expect(await cueName(origRev)).toBe("V2 再改");
   });
 });
 
-// ─── G4b: Cue CoW — 只 remap 本版本（级联已随分支概念退役）───────────────────
+// ─── G4b: 三版本共享也不分叉（旧「CoW 级联」之问彻底消失）────────────────────
 
-describe("cue CoW — 版本本地 remap，不波及其他共享版本", () => {
+describe("cue 就地写 — 多版本共享不分叉", () => {
   const PROD = "test-vcs-cue-casc";
   const CL   = "vcs-cl-cue-casc";
   let v1Id: string;
   let v2Id: string;
   let v3Id: string;
+  let rev: string;
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "Cue 本地 remap 测试", TEST_OWNER);
+    await createProduction(PROD, "Cue 多版本共享测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     await mkCueList(PROD, CL);
     await mkCue("casc-cue1", CL, "初始", v1Id);
-    // v1/v2/v3 共享同一 revision（refCount = 3），从 v2 触发 CoW
+    // v1/v2/v3 共享同一 revision（refCount = 3），从 v2 触发编辑
     v2Id = await makeLegacyVersion(PROD, v1Id);
     v3Id = await makeLegacyVersion(PROD, v2Id);
-    const rev = (await cueRevisionId(v2Id, "casc-cue1"))!;
+    rev = (await cueRevisionId(v2Id, "casc-cue1"))!;
     await updateCue(rev, CL, { name: "V2 改" }, v2Id);
   });
 
   afterAll(async () => { await deleteProduction(PROD).catch(() => {}); });
 
-  it("V2 得到新 revision，内容正确", async () => {
-    expect(await cueName((await cueRevisionId(v2Id, "casc-cue1"))!)).toBe("V2 改");
+  it("三个版本指向同一条修订行，没有任何 remap", async () => {
+    expect(await cueRevisionId(v1Id, "casc-cue1")).toBe(rev);
+    expect(await cueRevisionId(v2Id, "casc-cue1")).toBe(rev);
+    expect(await cueRevisionId(v3Id, "casc-cue1")).toBe(rev);
+    expect(await cueRevRefCount(rev)).toBe(3);
   });
 
-  it("V1 不受影响", async () => {
-    expect(await cueName((await cueRevisionId(v1Id, "casc-cue1"))!)).toBe("初始");
-  });
-
-  it("V3 不受影响（级联已退役——CoW 只 remap 触发版本自己）", async () => {
-    const r2 = await cueRevisionId(v2Id, "casc-cue1");
-    const r3 = await cueRevisionId(v3Id, "casc-cue1");
-    expect(r3).not.toBe(r2);
-    expect(await cueName(r3!)).toBe("初始");
+  it("三个版本读到的都是改后的名字", async () => {
+    expect(await cueName(rev)).toBe("V2 改");
   });
 });
 
-// ─── G5: Cue GC ───────────────────────────────────────────────────────────────
+// ─── G5: Cue 删除 ─────────────────────────────────────────────────────────────
 
-describe("cue GC — deleteCue 引用计数守护", () => {
+describe("cue 删除 — 物理删，不再按引用数 GC", () => {
   const PROD = "test-vcs-cue-gc";
   const CL   = "vcs-cl-cue-gc";
   let v1Id: string;
@@ -324,7 +322,7 @@ describe("cue GC — deleteCue 引用计数守护", () => {
 
   beforeAll(async () => {
     await deleteProduction(PROD).catch(() => {});
-    await createProduction(PROD, "Cue GC 测试", TEST_OWNER);
+    await createProduction(PROD, "Cue 删除测试", TEST_OWNER);
     v1Id = (await getActiveVersionId(PROD))!;
     await mkCueList(PROD, CL);
     await mkCue("gc-cue1", CL, "GC 测试 cue", v1Id);
@@ -334,16 +332,12 @@ describe("cue GC — deleteCue 引用计数守护", () => {
 
   afterAll(async () => { await deleteProduction(PROD).catch(() => {}); });
 
-  it("从 V2 删除共享 cue：physical 行仍存在，V1 的 cue_version 条目保留", async () => {
-    await deleteCue(origRevId, CL, v2Id);
-    expect(await physicalCueExists(origRevId)).toBe(true);
-    expect(await cueRevisionId(v2Id, "gc-cue1")).toBeNull();      // V2 entry gone
-    expect(await cueRevisionId(v1Id, "gc-cue1")).toBe(origRevId); // V1 still intact
-  });
-
-  it("从 V1 再删除 cue：physical 行被 GC", async () => {
-    await deleteCue(origRevId, CL, v1Id);
+  it("从 head 删除共享 cue：物理行直接删，遗留版本的 cue_version 行随 FK 级联消失", async () => {
+    expect(await cueRevRefCount(origRevId)).toBe(2);
+    await deleteCue(origRevId, CL);
     expect(await physicalCueExists(origRevId)).toBe(false);
+    expect(await cueRevisionId(v2Id, "gc-cue1")).toBeNull();
+    expect(await cueRevisionId(v1Id, "gc-cue1")).toBeNull();
   });
 });
 

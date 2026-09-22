@@ -11,7 +11,8 @@ export type CueAnchor =
 
 // Point cue: start and end are identical.
 export type Cue = {
-  /** 行 id（修订身份）。CoW 改写会换掉它——只用于本地选中态/DOM 锚，不得外流为引用。 */
+  /** 行 id。修订 CoW 删除后（#639）它就地稳定，但遗留数据里同一逻辑 cue 仍可能有多条
+   *  修订行——只用于本地选中态/DOM 锚，不得外流为引用。 */
   id: string;
   /** 稳定逻辑 id（跨修订不变）。对外的一切引用锚它：mention、wiki 引用边、深链（#302）。 */
   cueId: string;

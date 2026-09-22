@@ -114,7 +114,7 @@ export async function writeVersionContent(
   for (const block of upsertBlocks) {
     const old = oldContents.get(block.snapshotId);
     if (old !== undefined && old !== block.content)
-      driftJobs.push(handleBlockContentChanged(block.snapshotId, block.snapshotId, old, block.content, versionId));
+      driftJobs.push(handleBlockContentChanged(block.snapshotId, old, block.content, versionId));
   }
   if (driftJobs.length > 0) await Promise.allSettled(driftJobs);
   if (blocksChanged) {

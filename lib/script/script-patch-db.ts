@@ -566,7 +566,7 @@ export async function applyPatchToDB(
       handleBlockDeleted(d.snapshotId, d.prevId, d.nextId, versionId)
     ),
     ...driftUpdates.map(u =>
-      handleBlockContentChanged(u.snapshotId, u.snapshotId, u.oldContent, u.newContent, versionId)
+      handleBlockContentChanged(u.snapshotId, u.oldContent, u.newContent, versionId)
     ),
   ];
   if (driftJobs.length > 0) await Promise.allSettled(driftJobs);

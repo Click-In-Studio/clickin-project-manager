@@ -2,7 +2,7 @@
  * Import pipeline tests:
  *   A. importScriptToVersion — DB integration (full replacement, character links, cross-production isolation)
  *   C. parseSceneNum — pure function (various formats)
- *   D. version-import hybrid — CoW block/cue isolation, orphan GC, v1 preservation
+ *   D. version-import hybrid — 遗留共享态下 block / cue 一律物理删，旧版本不再受保护
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createProduction } from "@/lib/production/production-db";
@@ -454,19 +454,19 @@ describe("C: parseSceneNum", () => {
 //   v1: B1, B2, B3 (imported) + cue CQ_rev1
 //   v2 (legacy fork of v1): inherits B1, B2, B3 + CQ_rev1
 //     → 编辑 B2 in v2：snapshot CoW 已删（#634），就地改写，v1 一并看到
-//     → CoW CQ in v2: new revision CQ_rev2 (sole in v2); CQ_rev1 now sole in v1（cue CoW 仍在）
+//     → 改 CQ in v2：修订 CoW 已删（#639），就地改写，仍是 CQ_rev1
 //   Import [B4] to v2 (full replacement)
 //
 // Key assertions:
 //   - v2 的三个 snapshot 物理删除，不看引用数；v1 的 script_version 行随 FK 级联消失
-//   - v2.cue_version cleared; CQ_rev2 GC'd (v2 sole cue)
-//   - v1.cue_version + CQ_rev1 intact
+//   - v2.cue_version 清空，CQ_rev1 物理删除，不看引用数
+//   - v1 的 cue_version 行随 FK 级联消失
 
 const PROD_E    = "test-import-e";
 const CL_E_ID   = "test-imp-cl-e";
 const CUE_E_ID  = "test-imp-cue-e";
 
-describe("D: version-import hybrid — block 物理删 / cue CoW 隔离与 GC", () => {
+describe("D: version-import hybrid — block 与 cue 一律物理删", () => {
   let v1Id: string;
   let v2Id: string;
   let snapB2InV2:  string;
@@ -512,8 +512,8 @@ describe("D: version-import hybrid — block 物理删 / cue CoW 隔离与 GC", 
     expect(snapB2InV2).toBe("e-snap-b2");
     expect(await snapshotContent("e-snap-b2")).toBe("B2-v2修改");
 
-    // ── Step 5: CoW cue in v2 — new revision sole-owned by v2 ─────────────────
-    // refCount of CUE_E_ID is now 2 (v1 + v2), so updateCue triggers CoW
+    // ── Step 5: 从 v2 改 cue — 就地改写（修订 CoW 已删，#639）─────────────────
+    // CUE_E_ID 此刻被 v1 + v2 共享，改名不再分叉出新行
     await updateCue(CUE_E_ID, CL_E_ID, { name: "Q1-v2改名" }, v2Id);
     cueRev2Id = (await cueRevisionIdForVersion(v2Id, CUE_E_ID))!;
 
@@ -551,16 +551,15 @@ describe("D: version-import hybrid — block 物理删 / cue CoW 隔离与 GC", 
     expect(await countCueVersion(v2Id)).toBe(0);
   });
 
-  it("E7: v1 cue_version is untouched — still holds the original revision", async () => {
-    expect(await cueRevisionIdForVersion(v1Id, CUE_E_ID)).toBe(CUE_E_ID);
+  it("E7: 改名没有分叉出新修订行——v2 用的仍是原来那条（#639）", async () => {
+    expect(cueRev2Id).toBe(CUE_E_ID);
   });
 
-  it("E8: v2-sole cue revision (after CoW) is GC'd", async () => {
-    expect(cueRev2Id).not.toBe(CUE_E_ID); // sanity: CoW did create a new row
-    expect(await physicalCueExists(cueRev2Id)).toBe(false);
+  it("E8: v2 绑的 cue 修订被物理删，不看引用数（#639）", async () => {
+    expect(await physicalCueExists(CUE_E_ID)).toBe(false);
   });
 
-  it("E9: v1's original cue revision still exists in cue table", async () => {
-    expect(await physicalCueExists(CUE_E_ID)).toBe(true);
+  it("E9: 遗留 v1 的 cue_version 行随 FK 级联消失，旧版本不再受保护", async () => {
+    expect(await cueRevisionIdForVersion(v1Id, CUE_E_ID)).toBeNull();
   });
 });
