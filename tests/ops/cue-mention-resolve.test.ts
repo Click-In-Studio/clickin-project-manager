@@ -1,9 +1,11 @@
 /**
  * cue mention 解析锚稳定 cue_id（#302）。
  *
- * 这条测试钉的是 issue 的正题：cue 是修订表，改一次 cue 就 CoW 出新行 id。
- * 引用若锚行 id，改一次就变成 "#[已删除]" 幻影。所以核心用例是
- * 「CoW 之后同一条 mention 仍然解析得出，并且跟到新修订的编号/名字」。
+ * 这条测试钉的是 issue 的正题：cue 表分行 id 与稳定 cue_id 两层身份，引用若锚行 id，
+ * 行一被换掉就变成 "#[已删除]" 幻影。核心用例是「版本改挂到另一条修订行之后，同一条
+ * mention 仍然解析得出，并且跟到那条行的编号/名字」。
+ *
+ * 写侧的修订 CoW 已随 #639 删除，换行只存在于遗留数据；间接层与本测试照旧（#302）。
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
@@ -47,8 +49,8 @@ async function resolveOne(id: string): Promise<{ label: string | null; url: stri
   return { label: data.labels[0], url: data.urls[0] };
 }
 
-/** 模拟一次 CoW：同 cue_id 落新行，把版本归属从旧修订挪到新修订。 */
-async function cowRevision(fields: { number: string; name: string }): Promise<string> {
+/** 造一次遗留换修订：同 cue_id 落新行，把版本归属从旧修订挪到新修订。 */
+async function legacyRevision(fields: { number: string; name: string }): Promise<string> {
   const newId = `tcue${shortId()}`;
   await getPool().query(
     `INSERT INTO cue (id, cue_id, cue_list_id, number, name, start_kind, end_kind)
@@ -101,9 +103,9 @@ describe("cue mention resolve", () => {
     expect(url).toContain(`cueId=${cueId}`);
   });
 
-  it("survives a CoW revision and follows the new revision's fields", async () => {
+  it("换过修订行之后仍解析得出，并跟到新行的编号 / 名字", async () => {
     // 这就是 #302 的正题：换过修订之后，同一条 mention 不许变成 "#[已删除]"。
-    const revision2 = await cowRevision({ number: "2", name: "追光" });
+    const revision2 = await legacyRevision({ number: "2", name: "追光" });
     expect(revision2).not.toBe(revision1);
 
     const { label, url } = await resolveOne(cueId);
@@ -114,7 +116,7 @@ describe("cue mention resolve", () => {
   it("a mention anchored on a revision row id resolves to nothing", async () => {
     // 反证：锚行 id 的旧式引用查不到。这条钉的是"锚的确实是 cue_id 而不是行 id"——
     // 若哪天解析退回按 id 查，它会变绿。
-    const revision3 = await cowRevision({ number: "3", name: "暗场" });
+    const revision3 = await legacyRevision({ number: "3", name: "暗场" });
     const { label } = await resolveOne(revision3);
     expect(label).toBe("#[已删除]");
   });
@@ -135,8 +137,8 @@ describe("cue mention resolve", () => {
   });
 
   it("block-search hands the editor the stable cue_id, not the revision row id", async () => {
-    // 这条钉的是插入侧：编辑器拿到什么，就会把什么写进正文。CoW 之后版本指向的是
-    // **新修订行**，若这里吐 c.id，用户插进正文的引用下一次改 cue 就失效。
+    // 这条钉的是插入侧：编辑器拿到什么，就会把什么写进正文。遗留数据里版本指向的可能是
+    // **后来那条修订行**，若这里吐 c.id，用户插进正文的引用就会锚在一条随时作废的行上。
     //
     // 注：路由里的 DISTINCT ON 是防御性的——正常库里 production.active_version_id
     // 恒有值，版本过滤后每条逻辑 cue 只剩一条修订，撞不到重复。它防的是无版本
@@ -155,7 +157,7 @@ describe("cue mention resolve", () => {
        VALUES ($1, $1, $3, '1', '初版', 'gap', 'gap'), ($2, $1, $3, '1', '改过', 'gap', 'gap')`,
       [logical, revision, listId],
     );
-    // 真实 CoW 的形态：版本挂在新修订行上，初版行不在版本里
+    // 遗留数据的形态：版本挂在后一条修订行上，初版行不在版本里
     await getPool().query(
       "INSERT INTO cue_version (revision_id, version_id, cue_id) VALUES ($1, $2, $3)",
       [revision, versionId, logical],

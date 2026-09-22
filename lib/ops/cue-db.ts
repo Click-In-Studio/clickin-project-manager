@@ -1,10 +1,13 @@
 /**
  * Cue 本体（cue / cue_version 表）数据层。
  *
- * 一条 cue 锚在剧本块的 snapshot 上：读写、按 cue 表 / 项目列出、CoW 修订（同一
- * cue 在不同版本上分叉）、以及剧本块被删 / 改内容时的锚点漂移（handleBlockDeleted /
- * handleBlockContentChanged，由剧本写路径在 flush / patch 后调用）。末尾是工作区
- * 首页用的跨项目告警统计。
+ * 一条 cue 锚在剧本块的 snapshot 上：读写、按 cue 表 / 项目列出、就地改写 / 物理删，
+ * 以及剧本块被删 / 改内容时的锚点漂移（handleBlockDeleted / handleBlockContentChanged，
+ * 由剧本写路径在 flush / patch 后调用）。末尾是工作区首页用的跨项目告警统计。
+ *
+ * 修订 copy-on-write 已随 #639 删除（同 #634 一笔债）：版本体系退役后 cue_version
+ * 引用数恒为 1，「共享修订」只存在于不可见的遗留版本。cue 表仍有 id（行 id）与
+ * cue_id（稳定逻辑 id）两栏——行 id 现在也稳定了，但对外引用一律锚 cue_id（#302）。
  *
  * cue 表本体与授权在 cue-list-db.ts；锚点算法（lcsAdjust / adjustBlockAnchor）是
  * 纯函数，在 cue-types.ts。
@@ -37,7 +40,7 @@ function rowToCue(r: CueRow): Cue {
 }
 
 // Resolve a CueAnchor to the snapshot_id stored in the DB.
-// For the initial migration: snapshot_id = block_id. After CoW, lookup is needed.
+// snapshot_id 与 block_id 不同名时（遗留多版本数据）需按 version 查 script_version。
 async function anchorToDb(a: CueAnchor, versionId?: string): Promise<{ kind: string; snapshotId: string | null; offset: number | null }> {
   if (a.kind === "gap") {
     if (a.afterBlockId === null) return { kind: "gap", snapshotId: null, offset: null };
@@ -81,8 +84,8 @@ export async function getCue(id: string, cueListId: string): Promise<Cue | null>
 
 /** cue → 所属 cue_list（production 归属校验内含）。cue 级权限门都长在 cue_list 上，
  *  拿到宿主 list id 才能过门（wiki-refs 等只有 cueId 的入口用）。
- *  入参是**稳定 cue_id**（#302 换锚后引用侧一律持它）；一个逻辑 cue 的多条修订
- *  同属一张 list（cowCue 逐字继承 cue_list_id），故 LIMIT 1 取哪条都一样。 */
+ *  入参是**稳定 cue_id**（#302 换锚后引用侧一律持它）；遗留数据里一个逻辑 cue 可能
+ *  仍有多条修订行，但同属一张 list，故 LIMIT 1 取哪条都一样。 */
 export async function getCueListIdForCue(cueId: string, productionId: string): Promise<string | null> {
   const res = await getPool().query<{ cue_list_id: string }>(
     `SELECT c.cue_list_id FROM cue c
@@ -184,138 +187,39 @@ export async function createCue(data: {
   }
 }
 
-let _cueSeq = 0;
-const newCueId = () => `cue${Date.now().toString(36)}${(++_cueSeq).toString(36)}`;
-
 export async function updateCue(
   id: string, cueListId: string,
   fields: { number?: string; name?: string; content?: string; start?: CueAnchor; end?: CueAnchor; warning?: boolean },
   versionId?: string
 ): Promise<void> {
-  // Resolve anchors outside transaction (async DB lookups)
+  // 锚点解析要查库（blockId → snapshotId），先于 UPDATE 做
   const resolvedStart = fields.start !== undefined ? await anchorToDb(fields.start, versionId) : undefined;
   const resolvedEnd   = fields.end   !== undefined ? await anchorToDb(fields.end,   versionId) : undefined;
 
-  const buildInPlaceUpdate = () => {
-    const sets: string[] = [];
-    const vals: unknown[] = [id, cueListId];
-    if (fields.number  !== undefined) sets.push(`number  = $${vals.push(fields.number)}`);
-    if (fields.name    !== undefined) sets.push(`name    = $${vals.push(fields.name)}`);
-    if (fields.content !== undefined) sets.push(`content = $${vals.push(fields.content)}`);
-    if (fields.warning !== undefined) sets.push(`warning = $${vals.push(fields.warning)}`);
-    if (resolvedStart) {
-      const s = resolvedStart;
-      sets.push(`start_kind=$${vals.push(s.kind)}, start_snapshot_id=$${vals.push(s.snapshotId)}, start_offset=$${vals.push(s.offset)}`);
-    }
-    if (resolvedEnd) {
-      const e = resolvedEnd;
-      sets.push(`end_kind=$${vals.push(e.kind)}, end_snapshot_id=$${vals.push(e.snapshotId)}, end_offset=$${vals.push(e.offset)}`);
-    }
-    return { sets, vals };
-  };
-
-  if (!versionId) {
-    const { sets, vals } = buildInPlaceUpdate();
-    if (!sets.length) return;
-    await getPool().query(`UPDATE cue SET ${sets.join(", ")} WHERE id = $1 AND cue_list_id = $2`, vals);
-    return;
+  const sets: string[] = [];
+  const vals: unknown[] = [id, cueListId];
+  if (fields.number  !== undefined) sets.push(`number  = $${vals.push(fields.number)}`);
+  if (fields.name    !== undefined) sets.push(`name    = $${vals.push(fields.name)}`);
+  if (fields.content !== undefined) sets.push(`content = $${vals.push(fields.content)}`);
+  if (fields.warning !== undefined) sets.push(`warning = $${vals.push(fields.warning)}`);
+  if (resolvedStart) {
+    const s = resolvedStart;
+    sets.push(`start_kind=$${vals.push(s.kind)}, start_snapshot_id=$${vals.push(s.snapshotId)}, start_offset=$${vals.push(s.offset)}`);
   }
-
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [versionId]);
-    const refRes = await client.query<{ count: string }>(
-      "SELECT COUNT(*) AS count FROM cue_version WHERE revision_id = $1", [id]
-    );
-    const refCount = parseInt(refRes.rows[0].count, 10);
-
-    if (refCount <= 1) {
-      const { sets, vals } = buildInPlaceUpdate();
-      if (sets.length) await client.query(`UPDATE cue SET ${sets.join(", ")} WHERE id = $1 AND cue_list_id = $2`, vals);
-    } else {
-      // CoW: fork a new physical row for versionId（共享修订属于遗留多版本数据，只读保护）
-      const curRes = await client.query<{
-        number: string; name: string; content: string; warning: boolean; cue_id: string | null;
-        start_kind: string; start_snapshot_id: string | null; start_offset: number | null;
-        end_kind: string; end_snapshot_id: string | null; end_offset: number | null;
-      }>(
-        `SELECT number, name, content, warning, cue_id,
-                start_kind, start_snapshot_id, start_offset,
-                end_kind, end_snapshot_id, end_offset
-         FROM cue WHERE id = $1 AND cue_list_id = $2`,
-        [id, cueListId]
-      );
-      if (!curRes.rows.length) { await client.query("ROLLBACK"); return; }
-      const cur = curRes.rows[0];
-
-      const newId = newCueId();
-      await client.query(
-        `INSERT INTO cue (id, cue_id, cue_list_id, number, name, content,
-           start_kind, start_snapshot_id, start_offset,
-           end_kind,   end_snapshot_id,   end_offset, warning)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [
-          newId, cur.cue_id ?? id, cueListId,
-          fields.number  !== undefined ? fields.number  : cur.number,
-          fields.name    !== undefined ? fields.name    : cur.name,
-          fields.content !== undefined ? fields.content : cur.content,
-          resolvedStart ? resolvedStart.kind       : cur.start_kind,
-          resolvedStart ? resolvedStart.snapshotId : cur.start_snapshot_id,
-          resolvedStart ? resolvedStart.offset     : cur.start_offset,
-          resolvedEnd   ? resolvedEnd.kind         : cur.end_kind,
-          resolvedEnd   ? resolvedEnd.snapshotId   : cur.end_snapshot_id,
-          resolvedEnd   ? resolvedEnd.offset       : cur.end_offset,
-          fields.warning !== undefined ? fields.warning : cur.warning,
-        ]
-      );
-
-      // Remap cue_version for versionId only（线性化后 head 无子孙，不存在级联目标）
-      await client.query(
-        "UPDATE cue_version SET revision_id = $1 WHERE revision_id = $2 AND version_id = $3",
-        [newId, id, versionId]
-      );
-      // （挂载边 CoW 复制已随 #420 退役：node_mount 锚稳定 cue_id）
-    }
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
-  } finally {
-    client.release();
+  if (resolvedEnd) {
+    const e = resolvedEnd;
+    sets.push(`end_kind=$${vals.push(e.kind)}, end_snapshot_id=$${vals.push(e.snapshotId)}, end_offset=$${vals.push(e.offset)}`);
   }
+  if (!sets.length) return;
+  await getPool().query(`UPDATE cue SET ${sets.join(", ")} WHERE id = $1 AND cue_list_id = $2`, vals);
 }
 
-export async function deleteCue(id: string, cueListId: string, versionId?: string): Promise<void> {
-  if (!versionId) {
-    await getPool().query("DELETE FROM cue WHERE id = $1 AND cue_list_id = $2", [id, cueListId]);
-    return;
-  }
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    // Remove cue_version for versionId only（线性化后 head 无子孙）
-    await client.query(
-      "DELETE FROM cue_version WHERE revision_id = $1 AND version_id = $2",
-      [id, versionId]
-    );
-    // Delete the physical row only if no version references it anymore
-    const refRes = await client.query<{ count: string }>(
-      "SELECT COUNT(*) AS count FROM cue_version WHERE revision_id = $1", [id]
-    );
-    if (parseInt(refRes.rows[0].count, 10) === 0) {
-      await client.query("DELETE FROM cue WHERE id = $1 AND cue_list_id = $2", [id, cueListId]);
-    }
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
-  } finally {
-    client.release();
-  }
+/** 物理删除一条 cue 修订行。cue_version 行随 `revision_id` 的 ON DELETE CASCADE 消失。 */
+export async function deleteCue(id: string, cueListId: string): Promise<void> {
+  await getPool().query("DELETE FROM cue WHERE id = $1 AND cue_list_id = $2", [id, cueListId]);
 }
 
-// ── CoW helper: fork a cue revision for a version and remap cue_version ──────
+// ── 锚点漂移的行内改写 ───────────────────────────────────────────────────────
 
 type CueFullRow = {
   id: string; cue_id: string | null; cue_list_id: string;
@@ -324,95 +228,28 @@ type CueFullRow = {
   end_kind: string; end_snapshot_id: string | null; end_offset: number | null;
 };
 
-/** Insert a new physical cue row that is a copy of `cur` with `patch` applied,
- *  then remap cue_version for `versionId` from old to new id.
- *  Must be called inside an open transaction on `client`. Returns the new revision id. */
-async function cowCue(
-  client: PoolClient,
-  versionId: string,
-  cur: CueFullRow,
-  patch: Partial<Pick<CueFullRow, "start_kind"|"start_snapshot_id"|"start_offset"|
-                                  "end_kind"|"end_snapshot_id"|"end_offset"|"warning">>
-): Promise<string> {
-  const newId = newCueId();
-  await client.query(
-    `INSERT INTO cue (id, cue_id, cue_list_id, number, name, content,
-       start_kind, start_snapshot_id, start_offset,
-       end_kind,   end_snapshot_id,   end_offset, warning)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-    [
-      newId, cur.cue_id ?? cur.id, cur.cue_list_id, cur.number, cur.name, cur.content,
-      patch.start_kind        ?? cur.start_kind,
-      patch.start_snapshot_id ?? cur.start_snapshot_id,
-      patch.start_offset      !== undefined ? patch.start_offset : cur.start_offset,
-      patch.end_kind          ?? cur.end_kind,
-      patch.end_snapshot_id   ?? cur.end_snapshot_id,
-      patch.end_offset        !== undefined ? patch.end_offset : cur.end_offset,
-      patch.warning           !== undefined ? patch.warning : cur.warning,
-    ]
-  );
-  await client.query(
-    "UPDATE cue_version SET revision_id = $1 WHERE revision_id = $2 AND version_id = $3",
-    [newId, cur.id, versionId]
-  );
-  // （挂载边 CoW 复制已随 #420 退役：node_mount 锚稳定 cue_id）
-  return newId;
-}
+type CuePatch = Partial<Pick<CueFullRow, "start_kind"|"start_snapshot_id"|"start_offset"|
+                                         "end_kind"|"end_snapshot_id"|"end_offset"|"warning">>;
 
-/** Apply `patch` to a cue revision with CoW if the revision is shared.
- *  Returns the (possibly new) revision id. */
-async function applyPatchWithCow(
-  client: PoolClient,
-  versionId: string,
-  cur: CueFullRow,
-  patch: Parameters<typeof cowCue>[3]
-): Promise<string> {
-  const refRes = await client.query<{ count: string }>(
-    "SELECT COUNT(*) AS count FROM cue_version WHERE revision_id = $1", [cur.id]
-  );
-  if (parseInt(refRes.rows[0].count, 10) <= 1) {
-    // Single reference — update in place
-    const sets: string[] = [];
-    const vals: unknown[] = [];
-    if (patch.start_kind        !== undefined) { sets.push(`start_kind=$${vals.push(patch.start_kind)}`); }
-    if (patch.start_snapshot_id !== undefined) { sets.push(`start_snapshot_id=$${vals.push(patch.start_snapshot_id)}`); }
-    if ("start_offset" in patch) { sets.push(`start_offset=$${vals.push(patch.start_offset ?? null)}`); }
-    if (patch.end_kind          !== undefined) { sets.push(`end_kind=$${vals.push(patch.end_kind)}`); }
-    if (patch.end_snapshot_id   !== undefined) { sets.push(`end_snapshot_id=$${vals.push(patch.end_snapshot_id)}`); }
-    if ("end_offset" in patch) { sets.push(`end_offset=$${vals.push(patch.end_offset ?? null)}`); }
-    if (patch.warning !== undefined) { sets.push(`warning=$${vals.push(patch.warning)}`); }
-    if (sets.length) {
-      vals.push(cur.id);
-      await client.query(`UPDATE cue SET ${sets.join(",")} WHERE id=$${vals.length}`, vals);
-    }
-    return cur.id;
-  }
-  return cowCue(client, versionId, cur, patch);
-}
-
-/** Remove a cue revision from a version with CoW semantics.
- *  Must be called inside an open transaction. */
-async function removeCueFromVersion(
-  client: PoolClient,
-  versionId: string,
-  revisionId: string
-): Promise<void> {
-  const refRes = await client.query<{ count: string }>(
-    "SELECT COUNT(*) AS count FROM cue_version WHERE revision_id = $1", [revisionId]
-  );
-  if (parseInt(refRes.rows[0].count, 10) <= 1) {
-    await client.query("DELETE FROM cue WHERE id = $1", [revisionId]);
-  } else {
-    await client.query(
-      "DELETE FROM cue_version WHERE revision_id = $1 AND version_id = $2",
-      [revisionId, versionId]
-    );
-  }
+/** 就地把 `patch` 写进 cue 行。必须在 `client` 上已开的事务里调用。 */
+async function applyCuePatch(client: PoolClient, id: string, patch: CuePatch): Promise<void> {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (patch.start_kind        !== undefined) { sets.push(`start_kind=$${vals.push(patch.start_kind)}`); }
+  if (patch.start_snapshot_id !== undefined) { sets.push(`start_snapshot_id=$${vals.push(patch.start_snapshot_id)}`); }
+  if ("start_offset" in patch) { sets.push(`start_offset=$${vals.push(patch.start_offset ?? null)}`); }
+  if (patch.end_kind          !== undefined) { sets.push(`end_kind=$${vals.push(patch.end_kind)}`); }
+  if (patch.end_snapshot_id   !== undefined) { sets.push(`end_snapshot_id=$${vals.push(patch.end_snapshot_id)}`); }
+  if ("end_offset" in patch) { sets.push(`end_offset=$${vals.push(patch.end_offset ?? null)}`); }
+  if (patch.warning !== undefined) { sets.push(`warning=$${vals.push(patch.warning)}`); }
+  if (!sets.length) return;
+  vals.push(id);
+  await client.query(`UPDATE cue SET ${sets.join(",")} WHERE id=$${vals.length}`, vals);
 }
 
 /**
- * Called when a snapshot is deleted from a version.
- * Re-anchors (or removes) cue revisions in the affected version with CoW semantics.
+ * 剧本块被删时调用：把锚在该 snapshot 上的 cue 重锚到前 / 后块（并置 warning），
+ * 整份剧本被删空时连 cue 行一并物理删。
  */
 export async function handleBlockDeleted(
   deletedSnapshotId: string,
@@ -440,12 +277,12 @@ export async function handleBlockDeleted(
       const endHit   = cur.end_snapshot_id   === deletedSnapshotId;
 
       if (!prevSnapshotId && !nextSnapshotId) {
-        // Deleted block was the only one — remove the cue from this version
-        await removeCueFromVersion(client, versionId, cur.id);
+        // 删掉的是唯一一个块——cue 无处可锚，物理删
+        await client.query("DELETE FROM cue WHERE id = $1", [cur.id]);
         continue;
       }
 
-      const patch: Parameters<typeof cowCue>[3] = { warning: true };
+      const patch: CuePatch = { warning: true };
       if (startHit) {
         if (prevSnapshotId) { patch.start_kind = "gap";   patch.start_snapshot_id = prevSnapshotId; patch.start_offset = null; }
         else                { patch.start_kind = "block"; patch.start_snapshot_id = nextSnapshotId!; patch.start_offset = 0; }
@@ -454,7 +291,7 @@ export async function handleBlockDeleted(
         if (prevSnapshotId) { patch.end_kind = "gap";   patch.end_snapshot_id = prevSnapshotId; patch.end_offset = null; }
         else                { patch.end_kind = "block"; patch.end_snapshot_id = nextSnapshotId!; patch.end_offset = 0; }
       }
-      await applyPatchWithCow(client, versionId, cur, patch);
+      await applyCuePatch(client, cur.id, patch);
     }
     await client.query("COMMIT");
   } catch (err) {
@@ -466,13 +303,11 @@ export async function handleBlockDeleted(
 }
 
 /**
- * Called when a snapshot's text content changes (and optionally gets a new snapshot id via CoW).
- * Adjusts cue offsets that reference oldSnapshotId, re-pointing to newSnapshotId.
- * Performs CoW on shared cue revisions.
+ * 剧本块内容改变时调用：按 LCS 把锚在该 snapshot 上的 cue 偏移量挪到新位置并置 warning。
+ * snapshot id 就地稳定（块 CoW 已随 #634 退役），故只动偏移量。
  */
 export async function handleBlockContentChanged(
-  oldSnapshotId: string,
-  newSnapshotId: string,  // equals oldSnapshotId when no block CoW occurred
+  snapshotId: string,
   oldContent: string,
   newContent: string,
   versionId: string,
@@ -487,7 +322,7 @@ export async function handleBlockContentChanged(
      WHERE ((start_kind='block' AND start_snapshot_id=$1)
         OR  (end_kind='block'   AND end_snapshot_id=$1))
        AND EXISTS (SELECT 1 FROM cue_version cv WHERE cv.revision_id = cue.id AND cv.version_id = $2)`,
-    [oldSnapshotId, versionId]
+    [snapshotId, versionId]
   );
   if (!res.rows.length) return;
 
@@ -495,8 +330,8 @@ export async function handleBlockContentChanged(
   try {
     await client.query("BEGIN");
     for (const row of res.rows) {
-      const startInBlock = row.start_kind === "block" && row.start_snapshot_id === oldSnapshotId;
-      const endInBlock   = row.end_kind   === "block" && row.end_snapshot_id   === oldSnapshotId;
+      const startInBlock = row.start_kind === "block" && row.start_snapshot_id === snapshotId;
+      const endInBlock   = row.end_kind   === "block" && row.end_snapshot_id   === snapshotId;
 
       let newStartOffset = row.start_offset;
       let newEndOffset   = row.end_offset;
@@ -512,22 +347,15 @@ export async function handleBlockContentChanged(
       }
       warn = true; // any automatic position adjustment warrants review
 
-      const snapshotChanged = oldSnapshotId !== newSnapshotId;
-      const offsetChanged   = newStartOffset !== row.start_offset || newEndOffset !== row.end_offset;
-      const warnChanged     = warn !== row.warning;
-      if (!snapshotChanged && !offsetChanged && !warnChanged) continue;
+      const offsetChanged = newStartOffset !== row.start_offset || newEndOffset !== row.end_offset;
+      const warnChanged   = warn !== row.warning;
+      if (!offsetChanged && !warnChanged) continue;
 
-      const patch: Parameters<typeof cowCue>[3] = { warning: warn };
-      if (startInBlock) {
-        patch.start_snapshot_id = newSnapshotId;
-        patch.start_offset = newStartOffset ?? undefined;
-      }
-      if (endInBlock) {
-        patch.end_snapshot_id = newSnapshotId;
-        patch.end_offset = newEndOffset ?? undefined;
-      }
+      const patch: CuePatch = { warning: warn };
+      if (startInBlock) patch.start_offset = newStartOffset ?? undefined;
+      if (endInBlock)   patch.end_offset   = newEndOffset ?? undefined;
 
-      await applyPatchWithCow(client, versionId, row, patch);
+      await applyCuePatch(client, row.id, patch);
     }
     await client.query("COMMIT");
   } catch (err) {

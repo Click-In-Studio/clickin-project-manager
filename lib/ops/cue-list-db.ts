@@ -3,7 +3,7 @@
  * 以及创建定式（创建者行集 + 部门归属）。剧本导入时按列建表 / 落 cue 的事务件
  * 也在这里——它先建 cue_list 再插 cue，归属按「谁的表」定。
  *
- * cue 本体（锚点、CoW 修订、随剧本块漂移）在 cue-db.ts；cue 类型模版的发键在
+ * cue 本体（锚点、就地改写、随剧本块漂移）在 cue-db.ts；cue 类型模版的发键在
  * cue-template-db.ts；策略开关在 perm/policy-db.ts（两处仍按原样动态 import）。
  */
 import { getPool } from "../pg";

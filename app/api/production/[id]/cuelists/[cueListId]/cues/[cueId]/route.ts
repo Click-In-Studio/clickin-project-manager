@@ -134,8 +134,7 @@ export async function DELETE(
   if (nonHead) return nonHead;
   const resolved = await resolveVersion(id, req.nextUrl.searchParams.get("v"));
   if (resolved.error) return resolved.error;
-  const { versionId } = resolved;
-  await deleteCue(cueId, cueListId, versionId);
+  await deleteCue(cueId, cueListId);
   broadcastCueUpdate(id);
   return Response.json({ ok: true });
 }

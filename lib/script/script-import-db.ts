@@ -256,20 +256,12 @@ export async function importScriptToVersion(
       );
     }
 
-    // Clear cue bindings for this version; GC cue revision rows sole-referenced by it.
-    // Anchors are soft references (no FK), so deleted snapshots leave no FK constraint.
-    const removedCV = await client.query<{ revision_id: string }>(
-      "DELETE FROM cue_version WHERE version_id = $1 RETURNING revision_id",
+    // 整版替换：本版本绑的 cue 修订行物理删（引用数守护已随 #639 退役），
+    // cue_version 行随 FK 级联。锚点是软引用（无 FK），删 snapshot 不会撞约束。
+    await client.query(
+      "DELETE FROM cue WHERE id IN (SELECT revision_id FROM cue_version WHERE version_id = $1)",
       [versionId]
     );
-    const removedCueRevisionIds = removedCV.rows.map(r => r.revision_id);
-    if (removedCueRevisionIds.length > 0) {
-      await client.query(
-        `DELETE FROM cue WHERE id = ANY($1::text[])
-           AND NOT EXISTS (SELECT 1 FROM cue_version cv WHERE cv.revision_id = cue.id)`,
-        [removedCueRevisionIds]
-      );
-    }
 
     // Import is a full replacement of script + dramaturgy for this version.
     // scene_version 是标记的派生读模型：这里只清空 + 立 identity 锚，行由收尾的整版同步
