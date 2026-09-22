@@ -336,7 +336,7 @@ export async function applyPatchToDB(
             await ensureSceneAnchorsInTx(client, productionId, [insertBlock.sceneId]);
           }
           await insertSnapshotRowsInTx(client, productionId, versionId, [
-            snapshotRowFromBlock(insertBlock, { snapshotId, lexKey },
+            snapshotRowFromBlock(insertBlock, { snapshotId, blockId: insertBlock.id, lexKey },
               { rehearsalMark: insertRehearsalMark, ownerMarkerId: insertOwnerMarkerId }),
           ]);
 
@@ -390,7 +390,7 @@ export async function applyPatchToDB(
           // 版本体系已退役（#634）：snapshot 引用数恒为 1，一律就地更新，不再 copy-on-write。
           // 归属列（rehearsalMark / ownerMarkerId）沿用工作态，不信客户端传的。
           await updateSnapshotRowInTx(client, versionId, snapshotRowFromBlock(updateBlock,
-            { snapshotId: cur.snapshotId, lexKey: cur.lexKey },
+            { snapshotId: cur.snapshotId, blockId: cur.blockId, lexKey: cur.lexKey },
             { rehearsalMark: cur.rehearsalMark, ownerMarkerId: cur.ownerMarkerId }));
           const oldContent = oldContentMap.get(cur.snapshotId);
           if (oldContent !== undefined && oldContent !== updateBlock.content) {
@@ -489,7 +489,8 @@ export async function applyPatchToDB(
       const sceneId = isChapterSceneMarkerType(type) ? block.id : null;
       if (sceneId) await ensureSceneAnchorsInTx(client, productionId, [sceneId]);
       await insertSnapshotRowsInTx(client, productionId, versionId, [
-        snapshotRowFromBlock(block, { snapshotId, lexKey }, { sceneId, rehearsalMark: null, forceShowCharacterName: false }),
+        snapshotRowFromBlock(block, { snapshotId, blockId: block.id, lexKey },
+          { sceneId, rehearsalMark: null, forceShowCharacterName: false }),
       ]);
       const txBlock: TxBlock = {
         blockId: block.id,

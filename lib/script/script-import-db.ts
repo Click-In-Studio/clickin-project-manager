@@ -278,12 +278,10 @@ export async function importScriptToVersion(
     await client.query("DELETE FROM scene_version WHERE version_id = $1", [versionId]);
     await ensureSceneAnchorsInTx(client, productionId, sceneAnchorIds);
     await upsertCharacterRowsInTx(client, productionId, versionId, upsertChars);
+    // 导入 payload 的 `id` 是 snapshot id、`blockId` 才是逻辑块 id（与其余路径相反）
     await insertSnapshotRowsInTx(client, productionId, versionId, upsertBlocks.map((b) =>
-      snapshotRowFromBlock(
-        { ...b, id: b.blockId ?? b.id, characterIds: b.characterIds, characterAnnotations: b.characterAnnotations } as Block,
-        { snapshotId: b.id, lexKey: b.lexKey },
-        { forceShowCharacterName: false },
-      )));
+      snapshotRowFromBlock(b, { snapshotId: b.id, blockId: b.blockId ?? b.id, lexKey: b.lexKey },
+        { forceShowCharacterName: false })));
 
     if (upsertCueColumns.length > 0) {
       await importCueColumnsInTx(

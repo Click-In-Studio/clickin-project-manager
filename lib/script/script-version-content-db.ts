@@ -87,10 +87,10 @@ export async function writeVersionContent(
     const newRows: SnapshotRow[] = [];
     for (const block of upsertBlocks) {
       if (block.snapshotId.startsWith('sn_new_')) {
-        newRows.push(snapshotRowFromBlock(block, { snapshotId: genSnapshotId(), lexKey: block.lexKey }));
+        newRows.push(snapshotRowFromBlock(block, { snapshotId: genSnapshotId(), blockId: block.id, lexKey: block.lexKey }));
       } else {
         await updateSnapshotRowInTx(client, versionId,
-          snapshotRowFromBlock(block, { snapshotId: block.snapshotId, lexKey: block.lexKey }), { sortKey: true });
+          snapshotRowFromBlock(block, { snapshotId: block.snapshotId, blockId: block.id, lexKey: block.lexKey }), { sortKey: true });
       }
     }
     await insertSnapshotRowsInTx(client, productionId, versionId, newRows);

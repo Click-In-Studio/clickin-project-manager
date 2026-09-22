@@ -25,17 +25,19 @@ export type SnapshotRow = {
 };
 
 /**
- * 从领域 Block 换算一行；`overrides` 给调用方覆盖归属列（patch 路径按前一块推导
- * rehearsalMark / ownerMarkerId，不信 block 自带的）。
+ * 从领域 Block 换算一行。`ids.blockId` 显式给逻辑块 id：导入路径的 `Block.id` 装的是
+ * snapshot id（历史包袱），不能拿它当块 id 用；其余调用方传 `block.id` 即可。
+ * `overrides` 给调用方覆盖归属列（patch 路径按前一块推导 rehearsalMark / ownerMarkerId，
+ * 不信 block 自带的）。
  */
 export function snapshotRowFromBlock(
   block: Block,
-  ids: { snapshotId: string; lexKey: string },
+  ids: { snapshotId: string; blockId: string; lexKey: string },
   overrides: Partial<Pick<SnapshotRow, "sceneId" | "rehearsalMark" | "ownerMarkerId" | "forceShowCharacterName">> = {},
 ): SnapshotRow {
   return {
     snapshotId: ids.snapshotId,
-    blockId: block.id,
+    blockId: ids.blockId,
     lexKey: ids.lexKey,
     sceneId: block.sceneId ?? null,
     rehearsalMark: block.rehearsalMark ?? null,
@@ -121,8 +123,13 @@ async function insertSnapshotCharactersInTx(
 }
 
 /**
- * 物理删 snapshot（script_version / script_character 随 FK 级联）；block_tag 按逻辑 block_id
- * 一并清。版本体系已退役，不按引用数 GC（#634）。
+ * 物理删 snapshot：`script_version.snapshot_id` 与 `script_character.script_id` 都是
+ * `REFERENCES script(id) ON DELETE CASCADE`（db/schema.sql），删 script 行即带走两张表的行，
+ * 不必先手删关系行。
+ *
+ * block_tag 按逻辑 block_id 无条件清，不加「别的版本还引用着吗」守护：版本体系已退役
+ * （#634），一个 block_id 在一个演出里只属于当前这一条 version。**若将来重建多版本共享，
+ * 这里必须先恢复引用计数守护**，否则删 head 的块会连带清掉历史版本的标签。
  */
 export async function deleteSnapshotRowsInTx(
   client: PoolClient,
