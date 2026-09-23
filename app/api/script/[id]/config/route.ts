@@ -45,7 +45,8 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
   //   openingChapterMarkerId 是派生值（#636）：客户端发来的原样忽略，不参与分门也不落库
   // 只取 config 做变更分门，别为它扛整本剧本（#461）
   const current = versionId ? await getScriptConfig(id, versionId) : null;
-  // 落库与广播都用服务端派生的值，别把某个客户端的旧值扩散给其他人
+  // 落库与广播都用服务端派生的值，别把某个客户端的旧值扩散给其他人；
+  // current 为 null 只在演出没有活跃版本时发生，此时没有块也就没有开场章，null 即正确值
   config.openingChapterMarkerId = current?.openingChapterMarkerId ?? null;
   const layoutChanged = !current
     || current.pageLayout !== config.pageLayout
