@@ -77,6 +77,23 @@ function MemberChip({ member }: { member: ReadMember }) {
   );
 }
 
+// ── 保存请求 ─────────────────────────────────────────────────────────────────
+
+// 网络错误与非 2xx 都抛 Error，消息由表单接住显示（#659）；成功返回解析后的 JSON。
+async function saveAnnouncement<T extends object = Record<string, never>>(
+  url: string, method: "POST" | "PATCH", fields: { title: string; content: string; isPinned: boolean }, verb: string,
+): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields) });
+  } catch {
+    throw new Error(`网络错误，${verb}没有成功，请检查连接后重试`);
+  }
+  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok) throw new Error(data.error || `${verb}失败（${res.status}），请重试`);
+  return data;
+}
+
 // ── 编辑/新建表单 ─────────────────────────────────────────────────────────────
 
 function AnnouncementForm({
@@ -87,7 +104,7 @@ function AnnouncementForm({
 }: {
   initial: { title: string; content: string; isPinned: boolean };
   isNew: boolean;
-  onSave: (updated: { title: string; content: string; isPinned: boolean }) => void;
+  onSave: (updated: { title: string; content: string; isPinned: boolean }) => void | Promise<void>;
   onCancel: () => void;
 }) {
   const [title, setTitle] = useState(initial.title);
@@ -98,12 +115,16 @@ function AnnouncementForm({
 
   const dirty = title.trim() !== initial.title || content !== initial.content || isPinned !== initial.isPinned;
 
+  // #659：onSave 是父层的异步请求，必须 await——否则 saving 同一 tick 内 true→false，
+  // 「保存中…」与 disabled 从不生效，请求在途时连点会发出多个 POST 产生重复公告。
   const handleSave = async () => {
     if (!title.trim() || saving) return;
     setSaving(true);
     setError(null);
     try {
-      onSave({ title: title.trim(), content, isPinned });
+      await onSave({ title: title.trim(), content, isPinned });
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : "保存失败，请重试");
     } finally {
       setSaving(false);
     }
@@ -228,35 +249,26 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
   const handleCancel = () => setMode(mode?.kind === "edit" && mode.id ? { kind: "view", id: mode.id } : null);
 
   const handleCreate = useCallback(async (fields: { title: string; content: string; isPinned: boolean }) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/announcements`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(fields),
+    const data = await saveAnnouncement<{ announcement?: Announcement }>(
+      `${BASE_PATH}/api/production/${productionId}/announcements`, "POST", fields, "发布",
+    );
+    const newItem = data.announcement;
+    // 2xx 但没带回执：服务端可能已经建好了，这时不能引导重发（会重复公告），让人刷新核实
+    if (!newItem) throw new Error("已发出但没收到回执，请刷新页面确认是否已发布，不要重复发布");
+    setAnnouncements(prev => {
+      const list = fields.isPinned ? prev.map(a => ({ ...a, isPinned: false })) : prev;
+      return [newItem, ...list];
     });
-    const data = await res.json() as { announcement?: Announcement; error?: string };
-    if (res.ok && data.announcement) {
-      const newItem = data.announcement;
-      setAnnouncements(prev => {
-        const list = fields.isPinned ? prev.map(a => ({ ...a, isPinned: false })) : prev;
-        return [newItem, ...list];
-      });
-      setMode({ kind: "view", id: newItem.id });
-    }
+    setMode({ kind: "view", id: newItem.id });
   }, [productionId]);
 
   const handleUpdate = useCallback(async (id: string, fields: { title: string; content: string; isPinned: boolean }) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/announcements/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(fields),
+    await saveAnnouncement(`${BASE_PATH}/api/production/${productionId}/announcements/${id}`, "PATCH", fields, "保存");
+    setAnnouncements(prev => {
+      const list = fields.isPinned ? prev.map(a => ({ ...a, isPinned: a.id === id ? true : false })) : prev;
+      return list.map(a => a.id === id ? { ...a, ...fields, updatedAt: new Date().toISOString() } : a);
     });
-    if (res.ok) {
-      setAnnouncements(prev => {
-        const list = fields.isPinned ? prev.map(a => ({ ...a, isPinned: a.id === id ? true : false })) : prev;
-        return list.map(a => a.id === id ? { ...a, ...fields, updatedAt: new Date().toISOString() } : a);
-      });
-      setMode({ kind: "view", id });
-    }
+    setMode({ kind: "view", id });
   }, [productionId]);
 
   const handleDelete = useCallback(async (id: string, title: string) => {
