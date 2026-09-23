@@ -253,7 +253,8 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
       `${BASE_PATH}/api/production/${productionId}/announcements`, "POST", fields, "发布",
     );
     const newItem = data.announcement;
-    if (!newItem) throw new Error("发布失败，请重试");
+    // 2xx 但没带回执：服务端可能已经建好了，这时不能引导重发（会重复公告），让人刷新核实
+    if (!newItem) throw new Error("已发出但没收到回执，请刷新页面确认是否已发布，不要重复发布");
     setAnnouncements(prev => {
       const list = fields.isPinned ? prev.map(a => ({ ...a, isPinned: false })) : prev;
       return [newItem, ...list];
