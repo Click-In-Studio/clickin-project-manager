@@ -24,11 +24,19 @@ describe("评论面板懒加载与加载态（#647）", () => {
     expect(editor).not.toMatch(/import CommentsPanel from "\.\/script-editor\/CommentsPanel"/);
   });
 
-  it("壳对真面板只有动态 import 和类型 import（否则 TipTap 那条线又回首屏包）", () => {
+  it("壳对真面板只有动态 import 和类型 import", () => {
     expect(shell).toMatch(/lazy\(importCommentsPanel\)/);
     expect(shell).toMatch(/import\("\.\/CommentsPanel"\)/);
     expect(shell).toMatch(/import type \{ CommentsPanelProps \} from "\.\/CommentsPanel"/);
-    expect(shell).not.toMatch(/^import CommentsPanel from/m);
+  });
+
+  // 白名单而不是黑名单：新增一条静态 import 就红，逼人当场说清它拖不拖编辑器
+  // 那条线——`tsc` 与 vitest 都不报这类回退，只有构建产物看得出来。
+  it("壳的静态 import 只有 react 与面板外壳（纯类型那条不算）", () => {
+    const statics = [...shell.matchAll(/^import\s+(type\s+)?[\s\S]*?from\s+"([^"]+)";$/gm)]
+      .filter(m => !m[1])
+      .map(m => m[2]);
+    expect(statics.sort()).toEqual(["./SideBlockPanel", "react"]);
   });
 
   it("等待期间画的是面板外壳 + 加载提示，不是空白", () => {
