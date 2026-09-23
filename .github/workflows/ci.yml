@@ -139,6 +139,14 @@ jobs:
       - name: Run unit tests
         run: npm test
 
+      # 三条 node:assert 直跑脚本不在 vitest 里；#486 后坏了一年没人发现（#633），
+      # 进 CI 守住。marker-db-integration 会自 spawn 子进程验证跨进程标签缓存失效，需要库。
+      - name: Run marker / selection scripts
+        run: |
+          npm run test:markers
+          npm run test:markers:db
+          npm run test:selection
+
   # ── 跨平台分页一致性（#336 B3）─────────────────────────────────────────────
   # golden.json 在 Mac 上生成，这里在 Linux 的无头 Chromium 里比对：字体自托管
   # 的目的就是「同一份剧本在不同平台页码相同」，这一步守的是结果而不是配置。
