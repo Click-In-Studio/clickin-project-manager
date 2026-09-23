@@ -396,7 +396,6 @@ export default function CueListsManager({
                 members={members}
                 canEdit={drawerData.canEdit}
                 canManage={drawerData.canManage}
-                myUserId={myUserId}
                 onUpdated={(fields) => {
                   setLists(prev => prev.map(cl => cl.id === drawerListId ? { ...cl, ...fields } : cl));
                   setDrawerData(prev => prev ? { ...prev, cueList: { ...prev.cueList, ...fields } } : null);

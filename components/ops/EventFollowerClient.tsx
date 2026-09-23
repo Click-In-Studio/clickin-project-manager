@@ -39,7 +39,6 @@ type Props = {
   scheduleItems: EventScheduleItemWithParticipants[];
   departments?: EventDepartment[];
   reports: EventReport[];
-  isAssignee: boolean;
   selfParticipantRole: "participant" | "follower" | null;
   canViewFull?: boolean;
   canViewReqs?: boolean;
@@ -48,7 +47,7 @@ type Props = {
 export default function EventFollowerClient({
   productionId, eventId, event,
   scheduleItems, departments = [], reports,
-  isAssignee, selfParticipantRole, canViewFull, canViewReqs,
+  selfParticipantRole, canViewFull, canViewReqs,
 }: Props) {
   const [followBusy, setFollowBusy] = useState(false);
   const [selfRole, setSelfRole] = useState(selfParticipantRole);
@@ -176,7 +175,7 @@ export default function EventFollowerClient({
         </div>
       ) : (
         <div>
-          {sortedItems.map((item, i) => (
+          {sortedItems.map((item) => (
             <div key={item.id} style={{ padding: "11px 0", borderBottom: "1px solid var(--line)" }}>
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -287,7 +286,7 @@ function FollowerScheduleTableView({
 
   const blockMinutes = useMemo(() => blockMinutesFor(timedItems), [timedItems]);
 
-  const { startMs, endMs: _endMs, totalBlocks } = useMemo(() => {
+  const { startMs, totalBlocks } = useMemo(() => {
     if (timedItems.length === 0) return { startMs: 0, endMs: 0, totalBlocks: 0 };
     const s = Math.min(...timedItems.map(i => new Date(i.startTime!).getTime()));
     const e = Math.max(...timedItems.map(i => new Date(i.endTime!).getTime()));
@@ -411,7 +410,6 @@ function FollowerScheduleTableView({
     return <p className="text-xs text-zinc-300 py-4 text-center">暂无带时间的流程项</p>;
   }
 
-  const LABEL_EVERY = blockMinutes <= 20 ? 2 : 1;
   const timeLabels = Array.from(labelledBlocks).map(b => ({
     b,
     row: b < totalBlocks ? b + 2 : totalBlocks + 2,

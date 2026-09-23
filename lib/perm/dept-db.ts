@@ -14,7 +14,6 @@
 import { getPool } from "../pg";
 import { policyFilteredRows } from "./policy-db";
 import type { Pool, PoolClient } from "pg";
-type Permission = string;
 
 import { RESERVED_TYPES } from "./grant-template";
 

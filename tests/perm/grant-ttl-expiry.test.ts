@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { addProductionMember } from "@/lib/perm/member-db";
-import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasListAccess } from "@/lib/ops/cue-list-db";
 import { getPool } from "@/lib/pg";
 

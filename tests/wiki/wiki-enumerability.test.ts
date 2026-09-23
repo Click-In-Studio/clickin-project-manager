@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
-import { createWiki, getWiki } from "@/lib/wiki/content";
+import { createWiki } from "@/lib/wiki/content";
 import { setNodePublic, setNodeListable, setNodeDeptShares, listNodeLibrary, getNodeByWikiId, moveNode } from "@/lib/node/db";
 import { isNodeAnchor, ensureDramaturgyRootAnchor } from "@/lib/node/anchors";
 import { canViewWiki } from "@/lib/wiki/perm";

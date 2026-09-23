@@ -7,7 +7,7 @@ import {
   createNodeLink, moveNodeLink, renameNodeLink, filterEnumerableLinkEntries,
 } from "@/lib/node/link";
 import {
-  getNode, deleteNode, listNodeLibrary, setNodePublic, moveNode, insertNode, newNodeId,
+  getNode, deleteNode, listNodeLibrary, setNodePublic, moveNode, newNodeId,
 } from "@/lib/node/db";
 import { canViewWiki } from "@/lib/wiki/perm";
 import { listEnumerableNodeIds } from "@/lib/node/perm";

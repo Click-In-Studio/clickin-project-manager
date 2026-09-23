@@ -7,7 +7,7 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getProductionName } from "@/lib/production/production-db";
 import { loadProduction } from "@/lib/script/script-state-db";
-import { listCueLists, listCueListsWithAccess } from "@/lib/ops/cue-list-db";
+import { listCueListsWithAccess } from "@/lib/ops/cue-list-db";
 import { listCuesByProduction } from "@/lib/ops/cue-db";
 import { getActiveVersionId } from "@/lib/script/version-db";
 import { getEstimatedPageMap } from "@/lib/script/page-map-db";

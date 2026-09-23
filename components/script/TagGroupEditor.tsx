@@ -10,7 +10,6 @@ type Props = {
   initialGroups: TagGroup[];
   canEdit: boolean;
   onGroupsChange?: (groups: TagGroup[]) => void;
-  onClose?: () => void;
 };
 
 // ─── Color palette ────────────────────────────────────────────────────────────
@@ -462,7 +461,7 @@ function GroupCard({
 
 // ─── TagGroupEditor ───────────────────────────────────────────────────────────
 
-export default function TagGroupEditor({ productionId, initialGroups, canEdit, onGroupsChange, onClose }: Props) {
+export default function TagGroupEditor({ productionId, initialGroups, canEdit, onGroupsChange }: Props) {
   const [groups, setGroups] = useState<TagGroup[]>(
     [...initialGroups].sort((a, b) => a.sortOrder - b.sortOrder)
   );

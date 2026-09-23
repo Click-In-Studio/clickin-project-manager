@@ -2,7 +2,6 @@
 
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { BASE_PATH } from "@/lib/base-path";
 import SmartText from "@/components/ui/SmartText";
 import { fmtDateTime, fmtTime as fmtTimeTz } from "@/lib/tz";
 import type {

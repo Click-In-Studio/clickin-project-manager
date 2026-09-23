@@ -49,7 +49,7 @@ export default function ScheduleTableView({
 
   const blockMinutes = useMemo(() => computeBlockMinutes(timedItems), [timedItems]);
 
-  const { startMs, endMs, totalBlocks } = useMemo(() => {
+  const { startMs, totalBlocks } = useMemo(() => {
     if (timedItems.length === 0) return { startMs: 0, endMs: 0, totalBlocks: 0 };
     const s = Math.min(...timedItems.map(i => new Date(i.startTime!).getTime()));
     const e = Math.max(...timedItems.map(i => new Date(i.endTime!).getTime()));

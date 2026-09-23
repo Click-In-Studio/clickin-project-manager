@@ -6,7 +6,6 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
-import { listProductionMembersWithRoles } from "@/lib/perm/member-db";
 import { getUserTechReqGrantIdsInEvent } from "@/lib/perm/resource-grant-db";
 import {
   getProductionEvent,
@@ -45,10 +44,9 @@ export default async function ReqsPage({
   if (!canSeeDraft && !VISIBLE_STATUSES.has(event.status))
     redirect(`/production/${productionId}/events`);
 
-  const [isAssignee, departments, productionMembers, grantedReqIds] = await Promise.all([
+  const [isAssignee, departments, grantedReqIds] = await Promise.all([
     isUserEventTechAssignee(eventId, session.userId),
     listEventDepartments(productionId),
-    listProductionMembersWithRoles(productionId),
     canViewFull ? Promise.resolve([] as string[]) : getUserTechReqGrantIdsInEvent(session.userId, productionId, eventId),
   ]);
 
@@ -81,7 +79,6 @@ export default async function ReqsPage({
       techReqs={techReqs}
       departments={departments}
       currentUserId={session.userId}
-      productionMembers={productionMembers.map(m => ({ userId: m.userId, name: m.name }))}
       canViewFull={canViewFull}
     />
   );

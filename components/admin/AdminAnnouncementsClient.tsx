@@ -80,13 +80,11 @@ function MemberChip({ member }: { member: ReadMember }) {
 // ── 编辑/新建表单 ─────────────────────────────────────────────────────────────
 
 function AnnouncementForm({
-  productionId,
   initial,
   isNew,
   onSave,
   onCancel,
 }: {
-  productionId: string;
   initial: { title: string; content: string; isPinned: boolean };
   isNew: boolean;
   onSave: (updated: { title: string; content: string; isPinned: boolean }) => void;
@@ -204,7 +202,6 @@ function AnnouncementForm({
 export default function AdminAnnouncementsClient({ productionId, productionName, recent30Count, initialAnnouncements, canCreate, canEdit, canDelete }: Props) {
   const [announcements, setAnnouncements] = useState<Announcement[]>(initialAnnouncements);
   const [mode, setMode] = useState<Mode | null>(null);
-  const [saving, setSaving] = useState(false);
   const [readStatus, setReadStatus] = useState<ReadStatus | null>(null);
   const [readStatusLoading, setReadStatusLoading] = useState(false);
   const [reminding, setReminding] = useState(false);
@@ -231,41 +228,35 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
   const handleCancel = () => setMode(mode?.kind === "edit" && mode.id ? { kind: "view", id: mode.id } : null);
 
   const handleCreate = useCallback(async (fields: { title: string; content: string; isPinned: boolean }) => {
-    setSaving(true);
-    try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/announcements`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(fields),
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/announcements`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    const data = await res.json() as { announcement?: Announcement; error?: string };
+    if (res.ok && data.announcement) {
+      const newItem = data.announcement;
+      setAnnouncements(prev => {
+        const list = fields.isPinned ? prev.map(a => ({ ...a, isPinned: false })) : prev;
+        return [newItem, ...list];
       });
-      const data = await res.json() as { announcement?: Announcement; error?: string };
-      if (res.ok && data.announcement) {
-        const newItem = data.announcement;
-        setAnnouncements(prev => {
-          const list = fields.isPinned ? prev.map(a => ({ ...a, isPinned: false })) : prev;
-          return [newItem, ...list];
-        });
-        setMode({ kind: "view", id: newItem.id });
-      }
-    } finally { setSaving(false); }
+      setMode({ kind: "view", id: newItem.id });
+    }
   }, [productionId]);
 
   const handleUpdate = useCallback(async (id: string, fields: { title: string; content: string; isPinned: boolean }) => {
-    setSaving(true);
-    try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/announcements/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(fields),
+    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/announcements/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    if (res.ok) {
+      setAnnouncements(prev => {
+        const list = fields.isPinned ? prev.map(a => ({ ...a, isPinned: a.id === id ? true : false })) : prev;
+        return list.map(a => a.id === id ? { ...a, ...fields, updatedAt: new Date().toISOString() } : a);
       });
-      if (res.ok) {
-        setAnnouncements(prev => {
-          const list = fields.isPinned ? prev.map(a => ({ ...a, isPinned: a.id === id ? true : false })) : prev;
-          return list.map(a => a.id === id ? { ...a, ...fields, updatedAt: new Date().toISOString() } : a);
-        });
-        setMode({ kind: "view", id });
-      }
-    } finally { setSaving(false); }
+      setMode({ kind: "view", id });
+    }
   }, [productionId]);
 
   const handleDelete = useCallback(async (id: string, title: string) => {
@@ -425,7 +416,6 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
           <div style={{ maxWidth: 680 }}>
             <p style={{ fontSize: 12, fontWeight: 700, color: "var(--stage)", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 16 }}>新建公告</p>
             <AnnouncementForm
-              productionId={productionId}
               initial={{ title: "", content: "", isPinned: false }}
               isNew
               onSave={handleCreate}
@@ -439,7 +429,6 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
           <div style={{ maxWidth: 680 }}>
             <p style={{ fontSize: 12, fontWeight: 700, color: "var(--stage)", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 16 }}>编辑公告</p>
             <AnnouncementForm
-              productionId={productionId}
               initial={{ title: selected.title, content: selected.content, isPinned: selected.isPinned }}
               isNew={false}
               onSave={fields => handleUpdate(selected.id, fields)}

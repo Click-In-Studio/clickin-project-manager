@@ -21,7 +21,7 @@ import {
   listEventDepartments,
   getSelfParticipantRole,
 } from "@/lib/ops/event-db";
-import { canEnterEvent, isReportViewer, loadEventPermContext } from "@/lib/ops/event-permissions";
+import { canEnterEvent, loadEventPermContext } from "@/lib/ops/event-permissions";
 import { getEventAccess } from "@/lib/perm/resource-grant-db";
 import EventDetailClient from "@/components/ops/EventDetailClient";
 

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "剧本" };
 
-import { redirect, notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
@@ -39,7 +39,7 @@ export default async function ProductionScriptPage({
   // canEditLayout 要等 masterViewId，所以留在第二轮。
   // scene 已拆到字段级门（lib/script/scene-field-perms）：canEditMetadata 是「值得显示
   // 编辑态」的粗门，紧凑排版/config PUT 单独看 meta/name@edit。
-  const [sceneFieldPerms, masterViewId, activeVersionId, canEditText, canEditRehearsalMark, canImport] =
+  const [sceneFieldPerms, masterViewId, activeVersionId, canEditText, canEditRehearsalMark] =
     await Promise.all([
       getSceneFieldPerms(session.userId, id, access.permCtx.isAdmin || access.permCtx.isOwner),
       getMasterScriptViewId(id),
@@ -47,7 +47,6 @@ export default async function ProductionScriptPage({
       getActiveVersionId(id),
       hasEffectiveGrant(access.permCtx, id, "script", "*", "blocks", "edit"),
       hasEffectiveGrant(access.permCtx, id, "script", "*", "rehearsal_marks", "create"),
-      hasEffectiveGrant(access.permCtx, id, "script", "*", "imports", "create"),
     ]);
 
   return (
@@ -59,7 +58,6 @@ export default async function ProductionScriptPage({
         canEditMetadata={sceneFieldPerms.any}
         canEditLayout={await hasEffectiveGrant(access.permCtx, id, "script_view", masterViewId ?? "*", "*", "edit")}
         canEditRehearsalMark={canEditRehearsalMark}
-        canImport={canImport}
         initialSearchQuery={q}
         initialVersionId={activeVersionId}
       />

@@ -14,7 +14,6 @@ const SM_GRANT_LEVELS = [
   { value: "edit",  label: "编辑" },
   { value: "manage", label: "管理" },
 ] as const;
-const SM_LEVEL_LABEL: Record<string, string> = Object.fromEntries(SM_GRANT_LEVELS.map(l => [l.value, l.label]));
 
 export default function ShareModal({
   productionId, cueListId, cueListName, onClose,

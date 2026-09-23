@@ -21,10 +21,6 @@ type Props = {
   canDelete: boolean;
 };
 
-function isCurrentMilestone(endDate: string, today: string): boolean {
-  return endDate >= today;
-}
-
 function formatDate(iso: string): string {
   const [y, m, d] = iso.split("-");
   return `${y} 年 ${m} 月 ${d} 日`;

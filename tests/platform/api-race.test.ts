@@ -21,7 +21,6 @@ import type { Block, ScriptState } from "@/lib/script/script-types";
 import { POST as createCueListHandler } from "@/app/api/production/[id]/cuelists/route";
 import {
   PATCH as renameProdHandler,
-  GET as getProdScriptHandler,
 } from "@/app/api/production/[id]/route";
 import {
   GET as getScriptHandler,

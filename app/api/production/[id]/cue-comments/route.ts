@@ -75,7 +75,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         title: `${session.name} 在${prefix}的 Cue 评论中提到了你`,
         body: text,
         category: "info",
-        buildExternalMessage: async (_userId, target) => ({
+        buildExternalMessage: async () => ({
           text: `${session.name} 在${prefix}的 Cue 评论中提到了你：\n${text}`,
         }),
       }).catch((e: unknown) => console.error("[mention] notify failed:", e));

@@ -6,19 +6,18 @@ export const metadata: Metadata = { title: "首页" };
 import { listProductions } from "@/lib/production/production-db";
 import { listUpcomingMilestonesForUser } from "@/lib/ops/milestone-db";
 import { countCueWarningsForUser } from "@/lib/ops/cue-db";
-import { listMyUpcomingCallTimes, listMyPendingTechReqs, listMyPocAwaitingReqs, listMyFollowedUpcomingEvents, listUnreadFollowedReports } from "@/lib/ops/event-db";
+import { listMyUpcomingCallTimes, listMyPendingTechReqs, listMyPocAwaitingReqs, listUnreadFollowedReports } from "@/lib/ops/event-db";
 import HomeClient from "@/components/ops/HomeClient";
 
 export default async function Home() {
   const cookieStore = await cookies();
   const session = getSession(cookieStore)!;
 
-  const [productions, myCallTimes, myPendingReqs, myAwaitingReqs, myFollowedEvents, myUnreadReports, upcomingMilestones, totalCueWarnings] = await Promise.all([
+  const [productions, myCallTimes, myPendingReqs, myAwaitingReqs, myUnreadReports, upcomingMilestones, totalCueWarnings] = await Promise.all([
     listProductions({ userId: session.userId, isAdmin: session.isAdmin }),
     listMyUpcomingCallTimes(session.userId),
     listMyPendingTechReqs(session.userId),
     listMyPocAwaitingReqs(session.userId),
-    listMyFollowedUpcomingEvents(session.userId),
     listUnreadFollowedReports(session.userId),
     listUpcomingMilestonesForUser(session.userId, session.isAdmin),
     countCueWarningsForUser(session.userId, session.isAdmin),
@@ -27,11 +26,9 @@ export default async function Home() {
   return (
     <HomeClient
       productions={productions}
-      isAdmin={session.isAdmin}
       myCallTimes={myCallTimes}
       myPendingReqs={myPendingReqs}
       myAwaitingReqs={myAwaitingReqs}
-      myFollowedEvents={myFollowedEvents}
       myUnreadReports={myUnreadReports}
       upcomingMilestones={upcomingMilestones}
       totalCueWarnings={totalCueWarnings}

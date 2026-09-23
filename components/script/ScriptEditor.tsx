@@ -106,7 +106,6 @@ export default function ScriptEditor({
   canEditMetadata: canEditMetadataProp = true,
   canEditLayout = true,
   canEditRehearsalMark = true,
-  canImport = false,
   initialSearchQuery,
   initialVersionId = null,
 }: {
@@ -120,7 +119,6 @@ export default function ScriptEditor({
    *  「任一 scene 字段可改」的粗门，不能拿来当排版开关的依据。 */
   canEditLayout?: boolean;
   canEditRehearsalMark?: boolean;
-  canImport?: boolean;
   initialSearchQuery?: string;
   /** 服务端解析好的活跃版本（#641）：不给的话首帧是 null，首个请求不带 ?v=，
    *  回包的 versionId 一 set 就把加载 effect 的依赖改了——整本剧本要再拉一遍。 */
@@ -3907,7 +3905,6 @@ export default function ScriptEditor({
                     onRemove={removeScene}
                     open={openMenu === "scene"}
                     onOpenChange={(v) => setOpenMenu(v ? "scene" : null)}
-                    canImport={canImport}
                     onNavigate={prepareForNavigation}
                     triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
                     nestedFromMore={toolbarCompact}
@@ -5121,7 +5118,6 @@ export default function ScriptEditor({
                     scene={activeSceneDetail}
                     scenes={sceneDetails}
                     productionId={productionId}
-                    versionId={activeVersionId ?? null}
                     canEdit={canEditMetadata}
                     isDeleteConfirmHighlighted={!!markerDeleteConfirmDetailSceneId}
                     scrollbarOffsetPx={0}
@@ -5766,7 +5762,6 @@ export default function ScriptEditor({
                 scene={dialogSceneDetail}
                 scenes={sceneDetails}
                 productionId={productionId}
-                versionId={activeVersionId ?? null}
                 canEdit={canEditMetadata}
                 controlledEditMode={sceneDetailDialogEditing}
                 showHeader={false}

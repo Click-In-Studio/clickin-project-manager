@@ -26,18 +26,12 @@ import {
   setDeptMembers,
   addResourceDeptManage,
   getOrCreateApprovalConfig,
-  recomputeAndRevokeGrants,
-  revokeAllGrantsForMember,
 } from "@/lib/perm/dept-db";
-import { setMemberRoles } from "@/lib/perm/member-db";
-import { createProductionRole, setRolePermissions, deleteProductionRole } from "@/lib/perm/role-db";
 import { suspendMember, confirmMemberExit } from "@/lib/perm/member-status";
-import type { PermissionContext } from "@/lib/perm/permissions";
+import { makeProduction, cleanupProduction } from "../_support/factories";
 
 // 批F 后原子键仅剩 org 域 2 枚；本文件测试 zone/recompute 机制本身（键无关），
-// 用已退役键作为载荷（RETIRED 棘轮 grep 仅扫 app/lib/components，tests 不在其列）。
-const asPerm = (k: string) => k;
-import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
+// 用已退役键字面量作为载荷（RETIRED 棘轮 grep 仅扫 app/lib/components，tests 不在其列）。
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -51,10 +45,9 @@ const EXTRA_USER_2 = "00000000-0000-0000-0000-000000000011";
 // ── Production fixture ─────────────────────────────────────────────────────────
 
 let prodId: string;
-let versionId: string;
 
 beforeAll(async () => {
-  ({ prodId, versionId } = await makeProduction());
+  ({ prodId } = await makeProduction());
 
   // Create extra users for multi-user scenarios
   const pool = getPool();

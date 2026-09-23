@@ -23,7 +23,6 @@
  * 运行时零读取。原 grant_template 表已退役（#163）。
  */
 import { getPool } from "../pg";
-import type { Pool, PoolClient } from "pg";
 import { hasGrant, isReservedSub, type GrantVerb } from "./grant-check";
 
 export type NodeKeyParts = {

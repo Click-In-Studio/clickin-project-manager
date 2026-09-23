@@ -14,7 +14,6 @@ export default function ScriptSceneDetailRail({
   scene,
   scenes,
   productionId,
-  versionId,
   canEdit,
   controlledEditMode,
   showHeader = true,
@@ -26,7 +25,6 @@ export default function ScriptSceneDetailRail({
   scene: SceneDetail | null;
   scenes: SceneDetail[];
   productionId: string;
-  versionId: string | null;
   canEdit: boolean;
   controlledEditMode?: boolean;
   showHeader?: boolean;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
+import PageHeader, { SECONDARY_BTN } from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import PermissionKeyPicker, { type Vocabulary } from "@/components/perm/PermissionKeyPicker";
 import MemberPickerModal, { type PickerMember, type PickerDept } from "@/components/perm/MemberPickerModal";
@@ -9,7 +9,6 @@ import { BASE_PATH } from "@/lib/base-path";
 
 import type { GovernanceGrantRow } from "@/lib/perm/grant-audit-db";
 import { memberStatusLabel } from "@/lib/perm/member-status-shared";
-import type { MemberStatus, MemberStatusSource } from "@/lib/perm/member-status-shared";
 
 type Member = PickerMember;
 

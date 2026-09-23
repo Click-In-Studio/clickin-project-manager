@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { getPool } from "@/lib/pg";
 import { SCENE_FIELD_SUBS } from "@/lib/script/scene-field-perms";
 import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
 import { parseNodeKey, isSensitiveNode, isRootNode } from "@/lib/perm/grant-template";
