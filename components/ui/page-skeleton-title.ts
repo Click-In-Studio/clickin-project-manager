@@ -6,8 +6,12 @@
  */
 import { ADMIN_NAV_GROUPS, CREATION_NAV, OVERVIEW_NAV, PRODUCTION_NAV } from "@/components/shell/app-shell/nav-config";
 
-/** 项目内首段 → 页面名。侧栏三组之外的页面按各自 metadata.title 补。 */
-const PRODUCTION_SEGMENT_TITLES: Record<string, string> = {
+/**
+ * 侧栏三组之外的项目内页面 → 页面名（按各自 metadata.title）。
+ * 键不得与 CREATION_NAV / PRODUCTION_NAV 的 path 重名——重名时该用侧栏的词，
+ * 这里的手写项就该删掉；tests/platform/page-skeleton-title.test.ts 钉着这条。
+ */
+export const EXTRA_PRODUCTION_TITLES: Record<string, string> = {
   "": "我的工作",
   notifications: "我的通知",
   "access-requests": "资源申请",
@@ -17,6 +21,11 @@ const PRODUCTION_SEGMENT_TITLES: Record<string, string> = {
   "import-script": "导入剧本内容",
   "import-scenes": "导入章节信息",
   admin: "配置中心",
+};
+
+/** 项目内首段 → 页面名：侧栏的词优先。 */
+const PRODUCTION_SEGMENT_TITLES: Record<string, string> = {
+  ...EXTRA_PRODUCTION_TITLES,
   ...Object.fromEntries([...CREATION_NAV, ...PRODUCTION_NAV].map((n) => [n.path, n.label])),
 };
 

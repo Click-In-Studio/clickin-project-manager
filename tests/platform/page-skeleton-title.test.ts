@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
-import { pageTitleFor } from "@/components/ui/page-skeleton-title";
+import { pageTitleFor, EXTRA_PRODUCTION_TITLES } from "@/components/ui/page-skeleton-title";
+import { CREATION_NAV, PRODUCTION_NAV } from "@/components/shell/app-shell/nav-config";
 
 /** #652 骨架屏「正在打开「××」…」的页面名：与侧栏 / 菜单口径一致，没收录的返回 null。 */
 describe("pageTitleFor", () => {
@@ -31,5 +33,17 @@ describe("pageTitleFor", () => {
     expect(pageTitleFor("/production/p1/unknown-module")).toBeNull();
     expect(pageTitleFor("/account")).toBeNull();
     expect(pageTitleFor("")).toBeNull();
+  });
+
+  it("手写补充表不与侧栏 path 重名：重名时侧栏的词该赢，手写项应删掉而不是被静默盖过", () => {
+    const navPaths = new Set<string>([...CREATION_NAV, ...PRODUCTION_NAV].map((n) => n.path));
+    const collisions = Object.keys(EXTRA_PRODUCTION_TITLES).filter((k) => navPaths.has(k));
+    expect(collisions).toEqual([]);
+  });
+
+  it("nav-config 必须是零依赖的纯常量：它经 ScriptEditor → PageSkeleton 进了客户端包（§13.3）", () => {
+    const src = readFileSync("components/shell/app-shell/nav-config.ts", "utf8");
+    expect(src).not.toMatch(/^\s*import\b/m);
+    expect(src).not.toMatch(/require\(/);
   });
 });
