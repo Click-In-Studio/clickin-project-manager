@@ -29,12 +29,15 @@ type CueRow = {
   warning: boolean;
 };
 
+// 锚点 snapshot 已不在 script 表时（连删相邻块曾把 cue 重锚到同批被删的块上，#655），
+// 保留悬空的 snapshot id 而不是折叠成 null：gap 的 null 是「第一块之前」的合法值，
+// 折叠进去前端既不渲染也判不出失效；悬空 id 查不到块，才会进「失效的 Cue」面板。
 function rowToCue(r: CueRow): Cue {
   const start: CueAnchor = r.start_kind === "gap"
-    ? { kind: "gap", afterBlockId: r.start_block_id ?? null }
+    ? { kind: "gap", afterBlockId: r.start_block_id ?? r.start_snapshot_id ?? null }
     : { kind: "block", blockId: r.start_block_id ?? r.start_snapshot_id ?? '', offset: r.start_offset! };
   const end: CueAnchor = r.end_kind === "gap"
-    ? { kind: "gap", afterBlockId: r.end_block_id ?? null }
+    ? { kind: "gap", afterBlockId: r.end_block_id ?? r.end_snapshot_id ?? null }
     : { kind: "block", blockId: r.end_block_id ?? r.end_snapshot_id ?? '', offset: r.end_offset! };
   return { id: r.id, cueId: r.cue_id, cueListId: r.cue_list_id, number: r.number, name: r.name, content: r.content, start, end, warning: r.warning };
 }
@@ -369,6 +372,8 @@ export async function handleBlockContentChanged(
 
 export type CueWarningEntry = {
   id: string;
+  /** 稳定 cue_id（#302）：Cue 页 `?cueId=` 深链接认的是它，不是修订行 id。 */
+  cueId: string;
   cueListId: string;
   cueListAbbr: string;
   number: string;
@@ -385,11 +390,11 @@ export async function listCueWarningsForUser(
   isAdmin: boolean,
 ): Promise<CueWarningEntry[]> {
   const res = await getPool().query<{
-    id: string; cue_list_id: string; cue_list_abbr: string;
+    id: string; cue_id: string; cue_list_id: string; cue_list_abbr: string;
     number: string; name: string; production_id: string; production_name: string;
     start_kind: string; end_kind: string;
   }>(
-    `SELECT c.id, c.cue_list_id, cl.abbr AS cue_list_abbr,
+    `SELECT c.id, c.cue_id, c.cue_list_id, cl.abbr AS cue_list_abbr,
             c.number, c.name, cl.production_id, p.name AS production_name,
             c.start_kind, c.end_kind
      FROM cue c
@@ -407,6 +412,7 @@ export async function listCueWarningsForUser(
   );
   return res.rows.map(r => ({
     id: r.id,
+    cueId: r.cue_id,
     cueListId: r.cue_list_id,
     cueListAbbr: r.cue_list_abbr,
     number: r.number,

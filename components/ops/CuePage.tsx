@@ -173,15 +173,16 @@ export default function CuePage({
   useEffect(() => { blockIndexMapRef.current = blockIndexMap; }, [blockIndexMap]);
 
   // ── Orphaned cues: either anchor references a block that no longer exists ──
+  // 跨表列出（#655）：报警来自公告页 / 首页时用户未必激活了那张表，只列激活表会让
+  // 面板恒空、报警无处可消。按钮按各自表的编辑权限出，不再要求激活。
   const orphanedCues = useMemo(() => {
-    if (!activeListId) return [];
     return cues.filter(cue => {
-      if (cue.cueListId !== activeListId) return false;
       const startId = cue.start.kind === "block" ? cue.start.blockId : cue.start.afterBlockId;
       const endId   = cue.end.kind   === "block" ? cue.end.blockId   : cue.end.afterBlockId;
       return (startId !== null && !blockIndexMap.has(startId)) || (endId !== null && !blockIndexMap.has(endId));
     });
-  }, [cues, blockIndexMap, activeListId]);
+  }, [cues, blockIndexMap]);
+  const cueListNameById = useMemo(() => new Map(cueLists.map(cl => [cl.id, cl.abbr || cl.name])), [cueLists]);
 
   // ── effectiveCues: apply live drag override for preview ───────────────────
   const effectiveCues = useMemo(() => {
@@ -330,9 +331,9 @@ export default function CuePage({
 
   // Re-anchor an orphaned cue to the current pending selection
   const reassignOrphanedCue = useCallback(async (cue: Cue) => {
-    if (selection.kind !== "pending" || !canEditCue(cue)) return;
+    if (selection.kind !== "pending" || !localEditableIds.has(cue.cueListId)) return;
     await updateCueField(cue, { start: selection.start, end: selection.end, warning: false });
-  }, [selection, canEditCue, updateCueField]);
+  }, [selection, localEditableIds, updateCueField]);
 
   // Start dragging an orphaned cue into the script; ensure the list is visible so preview renders
   const startOrphanDrag = useCallback((e: React.MouseEvent, cue: Cue) => {
@@ -1136,19 +1137,20 @@ export default function CuePage({
         >
           <div className="flex items-center gap-2 mb-2">
             <span className="text-[11px] font-semibold text-amber-700">⚠ 失效的 Cue</span>
-            <span className="text-[10px] text-amber-500">块引用已失效 · 从此处拖拽或选中脚本范围后点击「定位到选区」</span>
+            <span className="text-[10px] text-amber-500">所在的剧本块已删除 · 从此处拖拽或选中脚本范围后点击「定位到选区」</span>
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1.5">
             {orphanedCues.map(cue => {
               const listIdx = listColorIndex.get(cue.cueListId) ?? 0;
               const isDragging = dragLive?.cueId === cue.id;
-              const canEdit = canEditCue(cue);
+              const canEdit = localEditableIds.has(cue.cueListId);
               const canReassign = selection.kind === "pending" && canEdit;
               return (
                 <div
                   key={cue.id}
                   className={`flex items-center gap-1.5 transition-opacity ${isDragging ? "opacity-25" : ""}`}
                 >
+                  <span className="text-[10px] text-amber-700/70 shrink-0">{cueListNameById.get(cue.cueListId) ?? ""}</span>
                   <CueChip
                     cue={cue}
                     colorIdx={listIdx}

@@ -58,17 +58,24 @@ export async function writeVersionContent(
   }
 
   if (deleteSnapshotIds.length > 0) {
-    const res = await getPool().query<{ id: string; block_id: string; prev_id: string | null; next_id: string | null }>(
-      `WITH ordered AS (
-         SELECT sv.snapshot_id AS id, sv.block_id,
-           LAG(sv.snapshot_id)  OVER (ORDER BY sv.sort_key) AS prev_id,
-           LEAD(sv.snapshot_id) OVER (ORDER BY sv.sort_key) AS next_id
-         FROM script_version sv WHERE sv.version_id = $1
-       )
-       SELECT id, block_id, prev_id, next_id FROM ordered WHERE id = ANY($2::text[])`,
-      [versionId, deleteSnapshotIds]
+    // 邻居只在同批不删的块里找（与 applyPatchToDB 同一条理由，#655）：整版按序取回，
+    // 内存里越过被删块找最近的存活者。
+    const res = await getPool().query<{ id: string; block_id: string }>(
+      "SELECT snapshot_id AS id, block_id FROM script_version WHERE version_id = $1 ORDER BY sort_key",
+      [versionId]
     );
-    for (const r of res.rows) deleteRows.push({ snapshotId: r.id, blockId: r.block_id, prevId: r.prev_id, nextId: r.next_id });
+    const deleting = new Set(deleteSnapshotIds);
+    const ordered = res.rows;
+    const survivingNeighbor = (from: number, step: -1 | 1): string | null => {
+      for (let i = from + step; i >= 0 && i < ordered.length; i += step) {
+        if (!deleting.has(ordered[i].id)) return ordered[i].id;
+      }
+      return null;
+    };
+    ordered.forEach((r, idx) => {
+      if (!deleting.has(r.id)) return;
+      deleteRows.push({ snapshotId: r.id, blockId: r.block_id, prevId: survivingNeighbor(idx, -1), nextId: survivingNeighbor(idx, 1) });
+    });
   }
 
   // ── Phase 2: main transaction ─────────────────────────────────────────────
