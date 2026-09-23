@@ -1527,6 +1527,11 @@ export default function ScriptEditor({
     let cancelled = false;
     const load = async () => {
       try {
+        // #650 标签与整本并发发起，不排在整本回包之后。tag_group 一落地每个非 stage 块都多出
+        // 一行胶囊，晚到就是全窗口重排，所以标签到齐才 ready；单条失败按空处理，不拖垮整本。
+        const tagsPromise = productionId
+          ? Promise.allSettled([fetchTagGroups(productionId), fetchBlockTags(effectiveScriptId)])
+          : null;
         const r = await loadScriptEnvelope(productionId, effectiveScriptId, activeVersionId);
         // Production route returns { state, versionId, ... }; script route returns ScriptState directly.
         type ProdResponse = { state: ScriptState; versionId: string };
@@ -1575,28 +1580,25 @@ export default function ScriptEditor({
           if (resolvedVid && resolvedVid !== activeVersionId) setActiveVersionId(resolvedVid);
         }
 
-        setLoadState("ready");
-
-        // Load tag groups and block tags in parallel (non-blocking)
-        if (productionId) {
-          Promise.all([
-            fetchTagGroups(productionId),
-            fetchBlockTags(effectiveScriptId),
-          ]).then(([tgData, btData]) => {
-            if (tgData?.groups) setTagGroups(tgData.groups as TagGroup[]);
-            if (btData?.tags) {
-              const map = new Map<string, BlockTagValue[]>();
-              for (const tag of btData.tags as BlockTagValue[]) {
-                if (!map.has(tag.blockId)) map.set(tag.blockId, []);
-                map.get(tag.blockId)!.push(tag);
-              }
-              setBlockTagMap(map);
-              // Initialise the synced baseline so we don't re-send tags that
-              // are already on the server after the first load.
-              syncedBlockTagMapRef.current = new Map(map);
-            }
-          }).catch(() => {});
+        if (tagsPromise) {
+          const [tgRes, btRes] = await tagsPromise;
+          if (cancelled) return;
+          // 失败按空处理要落到实处：这个 effect 在切版本时重跑，条件写入会让上一版的
+          // 标签留在屏上、同步基线也跟着错位。无论成败都整体覆盖。
+          const tgData = tgRes.status === "fulfilled" ? tgRes.value : null;
+          const btData = btRes.status === "fulfilled" ? btRes.value : null;
+          setTagGroups((tgData?.groups ?? []) as TagGroup[]);
+          const map = new Map<string, BlockTagValue[]>();
+          for (const tag of (btData?.tags ?? []) as BlockTagValue[]) {
+            if (!map.has(tag.blockId)) map.set(tag.blockId, []);
+            map.get(tag.blockId)!.push(tag);
+          }
+          setBlockTagMap(map);
+          // 同步基线与服务端对齐，首次加载不把已有标签再发一遍。
+          syncedBlockTagMapRef.current = new Map(map);
         }
+
+        setLoadState("ready");
       } catch {
         if (!cancelled) {
           setLoadError("网络错误，请稍后重试");
