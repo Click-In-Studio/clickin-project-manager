@@ -63,6 +63,9 @@ export type UserNotification = {
    * Set when a superseding notification was sent for the same entity
    * (e.g. call time modified after dispatch). Expired notifications render
    * their action buttons as disabled — the new notification supersedes them.
+   *
+   * #658：按钮灰掉后没人能再「处理」它，所以失效即退化成告知——看过就算完成。
+   * 未读计数与 pending 过滤都按此口径（见 countUnreadNotifications）。
    */
   expiredAt: string | null;
   approvalRequestId: string | null;
@@ -216,11 +219,13 @@ export async function batchCreateUserNotifications(
 export async function countUnreadNotifications(userId: string, productionId?: string): Promise<number> {
   const params: unknown[] = [userId];
   const prodFilter = productionId ? `AND production_id = $${params.push(productionId)}` : "";
+  // 待确认（action_required）只要没处理就一直计数；但已失效的待确认没人能再点，
+  // 退化成告知：读过即不计（#658）。
   const res = await getPool().query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM user_notification
      WHERE user_id = $1
        AND acted_at IS NULL
-       AND (action_required = true OR read_at IS NULL)
+       AND ((action_required = true AND expired_at IS NULL) OR read_at IS NULL)
        ${prodFilter}`,
     params,
   );
@@ -229,7 +234,7 @@ export async function countUnreadNotifications(userId: string, productionId?: st
 
 export type ListNotificationsOptions = {
   productionId?: string;
-  /** "all" | "pending" (action_required + not acted) | "read" */
+  /** "all" | "pending" (action_required + not acted + not expired) | "read" */
   filter?: "all" | "pending" | "read";
   limit?: number;
   before?: string; // ISO timestamp cursor for pagination
@@ -247,7 +252,8 @@ export async function listUserNotifications(
     conditions.push(`production_id = $${params.push(productionId)}`);
   }
   if (filter === "pending") {
-    conditions.push("action_required = true AND acted_at IS NULL");
+    // 已失效的待确认不再算 pending（#658，口径同 countUnreadNotifications）
+    conditions.push("action_required = true AND acted_at IS NULL AND expired_at IS NULL");
   } else if (filter === "read") {
     conditions.push("read_at IS NOT NULL");
   }

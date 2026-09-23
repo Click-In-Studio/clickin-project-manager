@@ -231,6 +231,34 @@ describe("countUnreadNotifications", () => {
       await getPool().query("DELETE FROM app_user WHERE id = $1", [u]).catch(() => {});
     }
   });
+
+  // #658：待确认被新通知覆盖后按钮灰掉，没人能再处理它；若仍按待确认计数就永远挂在徽标里。
+  // 失效即退化成告知：未读仍计、读过即不计。反证：把 countUnreadNotifications 的
+  // expired_at 条件去掉，第二段断言会红。
+  it("已失效的待确认：未读计入、读过即不计（#658）", async () => {
+    const u = await createTestUser();
+    try {
+      const live = await createUserNotification({
+        userId: u, kind: "call_time", entityType: "call_time", entityId: "cnt-exp-live", title: "待确认（未失效）",
+        actionRequired: true,
+        actions: [{ id: "a1", presentation: "primary_button", label: "确认", effects: [{ type: "mark_acted" }] }],
+      });
+      const stale = await createUserNotification({
+        userId: u, kind: "call_time", entityType: "call_time", entityId: "cnt-exp-stale", title: "待确认（失效）",
+        actionRequired: true,
+        actions: [{ id: "a1", presentation: "primary_button", label: "确认", effects: [{ type: "mark_acted" }] }],
+      });
+      await expireNotificationsByEntity("call_time", "cnt-exp-stale", u);
+      expect(await countUnreadNotifications(u)).toBe(2);
+
+      await markNotificationRead(stale.id, u);
+      await markNotificationRead(live.id, u);
+      // 未失效的待确认读过仍计（该点的还得点）；失效的读过即消
+      expect(await countUnreadNotifications(u)).toBe(1);
+    } finally {
+      await getPool().query("DELETE FROM app_user WHERE id = $1", [u]).catch(() => {});
+    }
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -268,6 +296,20 @@ describe("listUserNotifications", () => {
   it("filter=pending returns only action_required + not acted", async () => {
     const items = await listUserNotifications(u, { filter: "pending" });
     expect(items.every((n) => n.actionRequired && !n.actedAt)).toBe(true);
+  });
+
+  it("filter=pending 不含已失效的待确认（#658）", async () => {
+    const stale = await createUserNotification({
+      userId: u, kind: "call_time", entityType: "call_time", entityId: "lst-stale", title: "待确认（失效）",
+      actionRequired: true,
+      actions: [{ id: "a1", presentation: "primary_button", label: "确认", effects: [{ type: "mark_acted" }] }],
+    });
+    await expireNotificationsByEntity("call_time", "lst-stale", u);
+    const items = await listUserNotifications(u, { filter: "pending" });
+    expect(items.some((n) => n.id === stale.id)).toBe(false);
+    // 「全部」仍能看到它——失效不是删除
+    const all = await listUserNotifications(u, { filter: "all" });
+    expect(all.some((n) => n.id === stale.id)).toBe(true);
   });
 
   it("filter=read returns only read notifications", async () => {
