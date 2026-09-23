@@ -38,7 +38,7 @@ import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleS
 import { DEFAULT_SCRIPT_CONFIG, type Block, type BlockType, type Character, type Scene, type ScriptState, type ScriptConfig } from "@/lib/script/script-types";
 import BlockGap from "./script-editor/BlockGap";
 import CharacterPanel from "./script-editor/CharacterPanel";
-import dynamic from "next/dynamic";
+import CommentsPanel, { preloadCommentsPanel } from "./script-editor/CommentsPanelLazy";
 import InsertZone from "./script-editor/InsertZone";
 import PresenceAvatar from "./script-editor/PresenceAvatar";
 import ScenePanel from "./script-editor/ScenePanel";
@@ -92,10 +92,6 @@ type PendingStageDelimiterChange = {
 // 连续打字不再无界不落库（丢数据窗口 / 协作延迟 / presence 先于内容到达）。
 const SYNC_DEBOUNCE_MS = 1500;
 const SYNC_MAX_WAIT_MS = 5000;
-
-// 评论面板懒加载（#641）：它静态 import SmartTextarea，而那条线拖着整套 TipTap /
-// ProseMirror 进剧本页首屏包——面板默认不开，这些字节不该挡在「加载中」前面。
-const CommentsPanel = dynamic(() => import("./script-editor/CommentsPanel"), { ssr: false });
 
 const REHEARSAL_SWITCH_OPTICAL_OFFSET_STYLE: React.CSSProperties = { position: "relative", left: "3%" };
 
@@ -1620,6 +1616,19 @@ export default function ScriptEditor({
     });
     return () => { cancelled = true; };
   }, [productionId, activeVersionId, loadState]);
+
+  // 评论面板 chunk 在首屏画完后空闲预热（#647）：拆包省下的是首屏字节，不该把
+  // 这笔成本原样转嫁成每次点开评论的等待。Safari 到近版才有 requestIdleCallback，
+  // 没有就退回一次延时。
+  useEffect(() => {
+    if (loadState !== "ready") return;
+    if (typeof window.requestIdleCallback === "function") {
+      const handle = window.requestIdleCallback(() => preloadCommentsPanel(), { timeout: 3000 });
+      return () => window.cancelIdleCallback(handle);
+    }
+    const timer = window.setTimeout(() => preloadCommentsPanel(), 1500);
+    return () => window.clearTimeout(timer);
+  }, [loadState]);
 
   // ── Presence 与块侧栏 hook 在上面（prepareForNavigation 之前）调用；SSE 订阅在下面接线 ──
 

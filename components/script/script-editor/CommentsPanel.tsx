@@ -21,14 +21,7 @@ export function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString("zh-CN");
 }
 
-export default function CommentsPanel({
-  blockId, productionId, comments, currentUserId, isAdmin,
-  onAdd, onEdit, onDelete, onClose, onNavigate,
-  onPanelChange, draft, onDraftChange,
-  width,
-  blockCaption,
-  navigation,
-}: {
+export type CommentsPanelProps = {
   blockId: string; productionId: string; comments: Comment[];
   currentUserId: string; isAdmin: boolean;
   onAdd: (c: Comment) => void; onEdit: (c: Comment) => void;
@@ -40,7 +33,16 @@ export default function CommentsPanel({
   width: number;
   blockCaption?: CommentBlockCaption | null;
   navigation?: SideBlockPanelNavigation;
-}) {
+};
+
+export default function CommentsPanel({
+  blockId, productionId, comments, currentUserId, isAdmin,
+  onAdd, onEdit, onDelete, onClose, onNavigate,
+  onPanelChange, draft, onDraftChange,
+  width,
+  blockCaption,
+  navigation,
+}: CommentsPanelProps) {
   const submitKey = useShortcutLabel("Mod+Enter");
   const [members, setMembers] = useState<Mention[]>([]);
   const [newText, setNewText] = useState(draft?.text ?? "");

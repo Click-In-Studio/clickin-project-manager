@@ -344,7 +344,7 @@ describe("components/ 按域分目录，不回退成平铺", () => {
 // 瘦身不在 #487 范围。
 
 const MONOLITH_LINE_CEILING: Record<string, number> = {
-  "components/script/ScriptEditor.tsx": 6058, // #641 首屏减负（+9）：活跃版本初值 prop、评论面板改 next/dynamic
+  "components/script/ScriptEditor.tsx": 6067, // #647 评论面板懒加载补加载态（+9）：壳搬进 CommentsPanelLazy，这里加空闲预热
   "components/ops/EventDetailClient.tsx": 421,
   "components/ops/CuePage.tsx": 1449,
   "components/ops/PlanningClient.tsx": 98,
