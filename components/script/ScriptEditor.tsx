@@ -9,6 +9,7 @@ import ScriptDialog, { SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS, SCRIPT_CONFIRM_PRIMAR
 import TagGroupEditor from "@/components/script/TagGroupEditor";
 import ProductionTopMenu, { ProductionOverflowSubmenuButton, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, useProductionToolbarStage } from "@/components/shell/ProductionTopMenu";
 import ChevronIcon from "@/components/ui/ChevronIcon";
+import PageSkeleton from "@/components/ui/PageSkeleton";
 import Kbd from "@/components/ui/Kbd";
 import { formatShortcut, useIsMacLike } from "@/components/ui/shortcut-label";
 import { useDocumentVisible } from "@/hooks/useVisibleEventSource";
@@ -3391,13 +3392,9 @@ export default function ScriptEditor({
     scrollToBlockIdx,
   ]);
 
-  if (loadState === "loading") {
-    return (
-      <div className="flex min-h-full items-center justify-center bg-[var(--paper)]">
-        <span className="text-sm text-zinc-400">加载中...</span>
-      </div>
-    );
-  }
+  // 与路由骨架（app/production/[id]/loading.tsx）同一个组件：RSC 换页与首窗到齐之间
+  // 画面不变，不再「灰条列表 → 居中小字」闪两下（#652）。
+  if (loadState === "loading") return <PageSkeleton instant />;
 
   if (loadState === "not-found") {
     return (
