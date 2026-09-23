@@ -1583,19 +1583,19 @@ export default function ScriptEditor({
         if (tagsPromise) {
           const [tgRes, btRes] = await tagsPromise;
           if (cancelled) return;
+          // 失败按空处理要落到实处：这个 effect 在切版本时重跑，条件写入会让上一版的
+          // 标签留在屏上、同步基线也跟着错位。无论成败都整体覆盖。
           const tgData = tgRes.status === "fulfilled" ? tgRes.value : null;
           const btData = btRes.status === "fulfilled" ? btRes.value : null;
-          if (tgData?.groups) setTagGroups(tgData.groups as TagGroup[]);
-          if (btData?.tags) {
-            const map = new Map<string, BlockTagValue[]>();
-            for (const tag of btData.tags as BlockTagValue[]) {
-              if (!map.has(tag.blockId)) map.set(tag.blockId, []);
-              map.get(tag.blockId)!.push(tag);
-            }
-            setBlockTagMap(map);
-            // 同步基线与服务端对齐，首次加载不把已有标签再发一遍。
-            syncedBlockTagMapRef.current = new Map(map);
+          setTagGroups((tgData?.groups ?? []) as TagGroup[]);
+          const map = new Map<string, BlockTagValue[]>();
+          for (const tag of (btData?.tags ?? []) as BlockTagValue[]) {
+            if (!map.has(tag.blockId)) map.set(tag.blockId, []);
+            map.get(tag.blockId)!.push(tag);
           }
+          setBlockTagMap(map);
+          // 同步基线与服务端对齐，首次加载不把已有标签再发一遍。
+          syncedBlockTagMapRef.current = new Map(map);
         }
 
         setLoadState("ready");
