@@ -8,6 +8,7 @@ type ViewConfig = {
   columnOrder: string[];
   visibleColumns: string[];
   columnWidths: Record<string, number>;
+  frozenColumns?: string[];
 };
 
 type ViewRow = {

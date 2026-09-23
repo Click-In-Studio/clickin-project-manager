@@ -7,7 +7,7 @@ who: 看：有角色查看权限的成员；改：有角色编辑权限的成员
 tier: all
 platform: [desktop, mobile]
 related: [creation/dramaturgy/dramaturgy-view, creation/script/editing]
-updated: 2026-09-18
+updated: 2026-09-21
 ---
 
 ## 这是什么
@@ -26,7 +26,7 @@ updated: 2026-09-18
 
 ### 编辑
 
-点姓名可直接改名；行末箭头「展开」看到全部字段：
+点姓名可直接改名；点行上其他任何地方（或行末箭头）展开，看到全部字段：
 
 - **性别**
 - **角色属性**：演员 / 肢体 / 画外音——这个人物是由演员在台上演、由肢体演员呈现，还是只有声音。

@@ -29,6 +29,7 @@ type Props = {
   productionName: string;
   versionId: string | null;
   initialScenes: MarkerProjection[];
+  openingChapterMarkerId: string | null;
   canEdit: boolean;
   /** 逐字段编辑权限（scene 的每个字段各有一把钥匙，见 lib/script/scene-field-perms） */
   fieldPerms: SceneFieldPerms;
@@ -44,6 +45,7 @@ export default function Dramaturgy({
   productionName,
   versionId,
   initialScenes,
+  openingChapterMarkerId,
   canEdit,
   fieldPerms,
   initialSceneId,
@@ -345,6 +347,7 @@ export default function Dramaturgy({
             productionId={productionId}
             productionName={productionName}
             initialScenes={scenes}
+            openingChapterMarkerId={openingChapterMarkerId}
             canEdit={canEdit}
             fieldPerms={fieldPerms}
             versionId={versionId}
@@ -358,7 +361,6 @@ export default function Dramaturgy({
             scenes={scenes}
             canEdit={canEdit}
             fieldPerms={fieldPerms}
-            versionId={versionId}
             viewConfig={tableConfig}
             onViewConfigChange={handleConfigChange}
             onUpdateScene={handleUpdateScene}

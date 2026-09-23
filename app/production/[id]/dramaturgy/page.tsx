@@ -10,7 +10,8 @@ import { getSceneFieldPerms } from "@/lib/script/scene-field-perms";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getProductionName } from "@/lib/production/production-db";
 import { getActiveVersionId } from "@/lib/script/version-db";
-import { listMarkerProjectionByVersion, listCharactersByVersion } from "@/lib/script/script-scene-character-db";
+import { listMarkerProjectionByVersion } from "@/lib/script/script-scene-character-db";
+import { getScriptConfig } from "@/lib/script/script-state-db";
 import Dramaturgy from "@/components/script/Dramaturgy";
 import PageActivationGate from "@/components/perm/PageActivationGate";
 
@@ -45,12 +46,12 @@ export default async function DramaturgyPage({
   ]);
   if (!name) notFound();
 
-  const [scenes] = resolvedVersionId
+  const [scenes, scriptConfig] = resolvedVersionId
     ? await Promise.all([
         listMarkerProjectionByVersion(resolvedVersionId),
-        listCharactersByVersion(resolvedVersionId),
+        getScriptConfig(id, resolvedVersionId),
       ])
-    : [[]];
+    : [[], null];
 
   return (
     <>
@@ -60,6 +61,7 @@ export default async function DramaturgyPage({
           productionName={name}
           versionId={resolvedVersionId}
           initialScenes={scenes}
+          openingChapterMarkerId={scriptConfig?.openingChapterMarkerId ?? null}
           canEdit={canEdit}
           fieldPerms={fieldPerms}
           initialSceneId={sceneId}
