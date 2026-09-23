@@ -26,10 +26,25 @@ interface Props {
  */
 type ActMode = "button" | "view" | "external";
 
+/**
+ * #658：已失效（被新通知覆盖）且没处理过的通知，按钮已灰掉、没人能再点它，
+ * 若仍按待确认计算，它会永远挂在「全部」「待确认」和徽标里。退化成告知：看过即算完成。
+ * 服务端 countUnreadNotifications / filter=pending 与此同口径。
+ */
 function actMode(n: UserNotification): ActMode {
+  if (n.expiredAt && !n.actedAt) return "view";
   if (n.actions.length > 0) return "button";
   if (!n.actionRequired) return "view";
   return "external";
+}
+
+/**
+ * 还在等人回应的待确认：actionRequired 且没处理、没失效。
+ * 显式写三个字段而不借 actMode：actMode 对「有按钮但 actionRequired=false」也回 button，
+ * 借它会把这类条目扩进待确认（AI review #661）。
+ */
+function isAwaitingAction(n: UserNotification): boolean {
+  return n.actionRequired && !n.actedAt && !n.expiredAt;
 }
 
 function isDone(n: UserNotification): boolean {
@@ -49,9 +64,8 @@ function getStatus(n: UserNotification): DisplayStatus {
 }
 
 function dotColor(n: UserNotification): string {
+  if (isDone(n) || n.readAt) return "var(--line)";
   const mode = actMode(n);
-  const status = getStatus(n);
-  if (status === "done" || status === "read") return "var(--line)";
   if (mode === "button" || mode === "external") return "var(--stage)";
   return "var(--script)";
 }
@@ -95,9 +109,9 @@ function filterByTab(items: UserNotification[], tab: Tab): UserNotification[] {
     // "全部": everything not yet done — includes read-but-unacted (external-mode) items.
     case "all":
       return items.filter((n) => !isDone(n));
-    // "待确认": actionRequired and not yet acted (button + external modes).
+    // "待确认": not yet acted and still actionable (button + external modes; expired excluded).
     case "action":
-      return items.filter((n) => n.actionRequired && !n.actedAt);
+      return items.filter(isAwaitingAction);
     // "仅告知": view-mode items not yet read.
     case "info":
       return items.filter((n) => actMode(n) === "view" && !n.readAt);
@@ -301,7 +315,7 @@ export default function MyNotificationsClient({ productions = [], productionId, 
   };
 
   const filtered = filterByTab(items, tab);
-  const pendingActionCount = items.filter((n) => n.actionRequired && !n.actedAt).length;
+  const pendingActionCount = items.filter(isAwaitingAction).length;
   // Items not yet done and not yet read — used for badge decrement in "全部已读".
   const unreadUndoneCount = items.filter((n) => !isDone(n) && !n.readAt).length;
 
@@ -328,7 +342,7 @@ export default function MyNotificationsClient({ productions = [], productionId, 
                 待处理
               </span>
             )}
-            {mode === "view" && !isDone(n) && (
+            {status === "pending" && mode === "view" && (
               <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
                 background: "var(--surface-2)", color: "var(--script)" }}>
                 告知
@@ -398,7 +412,6 @@ export default function MyNotificationsClient({ productions = [], productionId, 
 
   function renderListItem(n: UserNotification, isSelected: boolean, onClick: () => void) {
     const prodName = n.productionId ? (prodMap[n.productionId] ?? null) : null;
-    const status = getStatus(n);
     return (
       <button
         key={n.id}
@@ -417,7 +430,7 @@ export default function MyNotificationsClient({ productions = [], productionId, 
         }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{
-            margin: "0 0 3px", fontSize: 13, fontWeight: status === "pending" ? 700 : 500,
+            margin: "0 0 3px", fontSize: 13, fontWeight: !n.readAt && !n.actedAt ? 700 : 500,
             color: isSelected ? "#fff" : "var(--ink)",
             display: "-webkit-box", WebkitLineClamp: 2,
             WebkitBoxOrient: "vertical", overflow: "hidden", lineHeight: 1.35,
