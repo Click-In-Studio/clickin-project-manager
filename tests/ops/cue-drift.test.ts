@@ -10,7 +10,7 @@ import { getPool } from "@/lib/pg";
 import { applyPatchToDB } from "@/lib/script/script-patch-db";
 import { writeVersionContent } from "@/lib/script/script-version-content-db";
 import { createCueList } from "@/lib/ops/cue-list-db";
-import { createCue, getCue } from "@/lib/ops/cue-db";
+import { createCue, getCue, listCueWarningsForUser } from "@/lib/ops/cue-db";
 import { TEST_USER } from "../_support/helpers";
 import { makeProduction, makeBlocks, cleanupProduction, shortId } from "../_support/factories";
 
@@ -100,6 +100,42 @@ describe("写侧：连删相邻块时 cue 只重锚到同批存活的邻居（#6
     const anchored = cue.start.kind === "gap" ? cue.start.afterBlockId : cue.start.blockId;
     expect(anchored).not.toBeNull();
     expect(survivors.has(anchored!)).toBe(true);
+  });
+
+  it("applyPatchToDB 同批删 B2 并改 B1 内容：cue 落到 B1 之后且 B1 的 snapshot 就地不换", async () => {
+    // AI review 关切：重锚目标若在同批被 update、换了 snapshot，会再次悬空。#634 后 update
+    // 就地改写不换 snapshot，这条用例把「删 + 改同批」的组合钉住。
+    const { prodId, versionId, blockIds, snapshotByBlock, listId } = await setup(3);
+    const [b1, b2] = blockIds;
+    const cueId = await makeGapCue(listId, versionId, b2);
+
+    await applyPatchToDB(prodId, versionId, {
+      clientSeq: 1,
+      blockOps: [
+        { op: "delete", id: b2 },
+        { op: "update", block: {
+          id: b1, type: "dialogue", content: "同批改写的 B1", characterIds: [],
+          characterAnnotations: {}, lyric: false, sceneId: null, rehearsalMark: null,
+        } },
+      ],
+      charOps: [], sceneOps: [],
+    });
+
+    const b1Snapshot = await getPool().query<{ snapshot_id: string }>(
+      "SELECT snapshot_id FROM script_version WHERE version_id = $1 AND block_id = $2", [versionId, b1],
+    );
+    expect(b1Snapshot.rows[0]?.snapshot_id).toBe(snapshotByBlock.get(b1));
+    const cue = (await getCue(cueId, listId))!;
+    expect(cue.warning).toBe(true);
+    expect(cue.start).toEqual({ kind: "gap", afterBlockId: b1 });
+
+    // 跨项目告警条目带稳定 cue_id（公告页深链接用），成员口径按 production_member
+    await getPool().query(
+      "INSERT INTO production_member (production_id, user_id, roles) VALUES ($1, $2, '{}') ON CONFLICT DO NOTHING",
+      [prodId, TEST_USER],
+    );
+    const entry = (await listCueWarningsForUser(TEST_USER, false)).find((e) => e.cueListId === listId);
+    expect(entry).toMatchObject({ cueId, cueListId: listId, productionId: prodId, warningType: "orphaned" });
   });
 
   it("writeVersionContent 一批删 B2、B3：锚在 B3 后的 cue 落到 B1 之后", async () => {
