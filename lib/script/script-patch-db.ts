@@ -210,15 +210,26 @@ export async function applyPatchToDB(
     }));
 
     // ── Pre-flight: collect data needed for post-commit cue drift ─────────────
-    // Adjacency snapshot of blocks that will be deleted (before any ops run)
+    // Adjacency snapshot of blocks that will be deleted (before any ops run).
+    // 邻居只在**同批不删**的块里找：连删相邻块时若把 cue 重锚到同批被删的邻居上，
+    // 各块的漂移任务并发跑，后者查不到它，cue 就永远锚在死 snapshot 上（#655）。
+    const deletingBlockIds = new Set(
+      patch.blockOps.flatMap(op => (op.op === 'delete' ? [op.id] : [])),
+    );
+    const survivingNeighbor = (from: number, step: -1 | 1): string | null => {
+      for (let i = from + step; i >= 0 && i < txBlocks.length; i += step) {
+        if (!deletingBlockIds.has(txBlocks[i].blockId)) return txBlocks[i].snapshotId;
+      }
+      return null;
+    };
     for (const op of patch.blockOps) {
       if (op.op !== 'delete') continue;
       const idx = txBlocks.findIndex(b => b.blockId === op.id);
       if (idx < 0) continue;
       driftDeletes.push({
         snapshotId: txBlocks[idx].snapshotId,
-        prevId: idx > 0 ? txBlocks[idx - 1].snapshotId : null,
-        nextId: idx + 1 < txBlocks.length ? txBlocks[idx + 1].snapshotId : null,
+        prevId: survivingNeighbor(idx, -1),
+        nextId: survivingNeighbor(idx, 1),
       });
     }
     // Old content for blocks that will be updated (for cue offset drift detection)

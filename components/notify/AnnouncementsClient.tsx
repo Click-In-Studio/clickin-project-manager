@@ -335,7 +335,7 @@ function CueWarningList({ items }: { items: CueWarningEntry[] }) {
             {group.items.map((cue, i) => (
               <Link
                 key={cue.id}
-                href={`/production/${cue.productionId}/cues`}
+                href={`/production/${cue.productionId}/cues?cueList=${cue.cueListId}&cueId=${cue.cueId}`}
                 style={{
                   display: "flex",
                   alignItems: "center",
