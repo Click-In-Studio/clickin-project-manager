@@ -10,7 +10,13 @@
  * （dynamic 路由只能预取到最近的 loading 边界）。
  *
  * 骨架本身用 .skeleton-page 的延迟淡入，服务端够快时不会闪一下。
+ *
+ * 顶上有一行可见的「正在打开「××」…」+ 转圈（#652）：灰条脉动太轻，没有它
+ * 用户第一眼以为页面渲染坏了。剧本页的客户端加载态（ScriptEditor loadState
+ * === "loading"）也渲染这同一个骨架，两段等待画面接力时不换样子；那一处传
+ * instant 跳过延迟淡入，否则 RSC 换页那一帧会先空一下再浮现。
  */
+import PageSkeletonStatus from "./PageSkeletonStatus";
 
 /** 行宽固定枚举而非随机，避免 hydration 前后不一致。 */
 const ROWS: { title: number; hint: number; tail: number }[] = [
@@ -22,15 +28,15 @@ const ROWS: { title: number; hint: number; tail: number }[] = [
   { title: 120, hint: 104, tail: 48 },
 ];
 
-export default function PageSkeleton() {
+export default function PageSkeleton({ instant = false }: { instant?: boolean }) {
   return (
     <div
-      className="skeleton-page"
+      className={instant ? undefined : "skeleton-page"}
       style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}
       role="status"
       aria-busy="true"
-      aria-label="页面加载中"
     >
+      <PageSkeletonStatus />
       {/* 页头占位：eyebrow + 大标题 + 场景动作区（对齐 PageHeader 语汇） */}
       <div style={{ display: "flex", alignItems: "flex-end", gap: 20, marginBottom: 22, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0 }}>

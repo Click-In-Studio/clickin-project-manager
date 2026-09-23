@@ -6,7 +6,7 @@ routes: [/]
 tier: all
 platform: [desktop, mobile]
 related: [start/interface/glossary, start/notifications/notifications]
-updated: 2026-09-20
+updated: 2026-09-23
 ---
 
 ## 这是什么
@@ -76,6 +76,7 @@ updated: 2026-09-20
 
 ## 注意事项
 
+- 换页时正文会先出现一行「正在打开「××」…」和几条灰色占位，几秒内换成真正的页面；剧本页打开时也是同一个画面，不用重复点。
 - 有些菜单项你可能看不到。两种原因：项目档位没开这个功能（比如免费档没有 AI 助手），或者管理员没给你这项权限。前者找项目所有者升级，后者找管理员分配。
 - 灰色的按钮是「这里有这个功能，但你现在不能用」，把鼠标停上去会显示原因。
 
