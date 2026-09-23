@@ -32,9 +32,15 @@ function rowToVersion(r: VersionRow): Version {
   };
 }
 
+/** 开场章 = 该版本里排在最前的 chapter_marker（派生值，不落库，#636）；没有章时为 null。 */
 export async function getVersionOpeningChapterId(versionId: string): Promise<string | null> {
-  const res = await getPool().query<{ id: string | null }>(
-    "SELECT script_config->>'openingChapterMarkerId' AS id FROM version WHERE id = $1",
+  const res = await getPool().query<{ id: string }>(
+    `SELECT sv.block_id AS id
+     FROM script_version sv
+     JOIN script s ON s.id = sv.snapshot_id
+     WHERE sv.version_id = $1 AND s.type = 'chapter_marker'
+     ORDER BY sv.sort_key
+     LIMIT 1`,
     [versionId]
   );
   return res.rows[0]?.id ?? null;

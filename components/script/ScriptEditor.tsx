@@ -236,8 +236,6 @@ export default function ScriptEditor({
   const canAddRehearsalMark = effectiveCanEditRehearsalMark && scriptConfig.useRehearsalMarks;
   const scriptConfigRef = useRef(scriptConfig);
   useEffect(() => { scriptConfigRef.current = scriptConfig; }, [scriptConfig]);
-  const syncOpeningChapterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (syncOpeningChapterTimerRef.current) clearTimeout(syncOpeningChapterTimerRef.current); }, []);
   const [aboutOpen, setAboutOpen] = useState(false);
   const isMac = useIsMacLike(); // 「关于 · 快捷键」表格按平台显示 ⌘ / Ctrl（#542）
   const [pendingLockedMode, setPendingLockedMode] = useState<boolean | null>(null);
@@ -264,21 +262,15 @@ export default function ScriptEditor({
     }
   }, [activeVersionId, baseCanEditTextLayout, effectiveScriptId]);
 
+  // 开场章 = 排在最前的 chapter_marker，是块序列的派生值（#636）：只更新本地 config，
+  // 不 PUT 回服务端——服务端读时自己从块算，落库反而多一个会漂的写点。
   const syncOpeningChapterMarkerId = useCallback((nextBlocks: Block[]) => {
-    if (!baseCanEditTextLayout) return;
     const openingChapterMarkerId = nextBlocks.find((block) => block.type === "chapter_marker")?.id ?? null;
     if (openingChapterMarkerId === scriptConfigRef.current.openingChapterMarkerId) return;
     const next = { ...scriptConfigRef.current, openingChapterMarkerId };
     scriptConfigRef.current = next;
     setScriptConfig(next);
-    // Debounce: rapid chapter reordering collapses into a single PUT using the
-    // latest ref value, preventing out-of-order stale writes.
-    if (syncOpeningChapterTimerRef.current) clearTimeout(syncOpeningChapterTimerRef.current);
-    syncOpeningChapterTimerRef.current = setTimeout(() => {
-      syncOpeningChapterTimerRef.current = null;
-      void putScriptConfig(effectiveScriptId, activeVersionId, scriptConfigRef.current);
-    }, 500);
-  }, [activeVersionId, baseCanEditTextLayout, effectiveScriptId]);
+  }, []);
 
   const requestStageDelimiterChange = useCallback((open: string, close: string) => {
     if (scriptConfig.stageDelimOpen === open && scriptConfig.stageDelimClose === close) {

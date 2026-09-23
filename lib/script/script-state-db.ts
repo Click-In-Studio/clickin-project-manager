@@ -37,44 +37,27 @@ type ProductionConfigRow = {
 };
 
 /** ScriptConfig 的唯一装配口（loadProduction 与 getScriptConfig 共用）。
- *  openingChapterMarkerId 配置无效（缺失/指向已不存在的章 marker）时兜底到第一章；
- *  兜底值经 backfillOpeningChapterMarkerId 返回，由 loadProduction 决定是否写回。 */
-function assembleScriptConfig(
-  row: ProductionConfigRow,
-  chapterMarkerIds: string[],
-): { config: ScriptConfig; backfillOpeningChapterMarkerId: string | null } {
+ *  openingChapterMarkerId 是块序列的派生值 = 排在最前的 chapter_marker（#636）：读时直接
+ *  从块算，不落库、不回填；JSONB 里残留的旧键一律不认。 */
+function assembleScriptConfig(row: ProductionConfigRow, chapterMarkerIds: string[]): ScriptConfig {
   // 版式只有 script_view 一处真相（#336 B2）：主本行装配进 ScriptConfig，JSONB 里
   // 即便残留旧键也不算数。无主本（不应发生）落缺省。
   const masterLayout = scriptViewLayout(row);
   // 排版模版 id 也住在主本上（template_overrides.templateId，#338 T3）；不认识的 id 当没有
   const templateId = isKnownTemplateId(row.template_id) ? row.template_id : null;
-  const rawVersionConfig = row.version_script_config;
-  let openingChapterMarkerId =
-    typeof rawVersionConfig?.openingChapterMarkerId === "string"
-      ? rawVersionConfig.openingChapterMarkerId
-      : null;
-  let backfillOpeningChapterMarkerId: string | null = null;
-  if (!openingChapterMarkerId || !chapterMarkerIds.includes(openingChapterMarkerId)) {
-    openingChapterMarkerId = chapterMarkerIds[0] ?? null;
-    backfillOpeningChapterMarkerId = openingChapterMarkerId;
-  }
   // 后者覆盖前者：主本的版式与模版 id 压过 JSONB 里的残留键（scriptViewLayout 只产出
   // pageLayout / textLayoutMode 两个键，templateId 单独装配）
   return {
-    config: {
-      ...DEFAULT_SCRIPT_CONFIG,
-      ...(row.production_script_config ?? {}),
-      ...(rawVersionConfig ?? {}),
-      ...masterLayout,
-      templateId,
-      openingChapterMarkerId,
-    },
-    backfillOpeningChapterMarkerId,
+    ...DEFAULT_SCRIPT_CONFIG,
+    ...(row.production_script_config ?? {}),
+    ...(row.version_script_config ?? {}),
+    ...masterLayout,
+    templateId,
+    openingChapterMarkerId: chapterMarkerIds[0] ?? null,
   };
 }
 
-/** 只装配 ScriptConfig，不拖 blocks/scenes/characters（#461）。与 loadProduction
- *  同一套装配，但纯读——不做 openingChapterMarkerId 的写回。 */
+/** 只装配 ScriptConfig，不拖 blocks/scenes/characters（#461）。与 loadProduction 同一套装配。 */
 export async function getScriptConfig(productionId: string, versionId: string): Promise<ScriptConfig | null> {
   const pool = getPool();
   const [prodRes, chapterRes] = await Promise.all([
@@ -89,7 +72,7 @@ export async function getScriptConfig(productionId: string, versionId: string): 
     ),
   ]);
   if (!prodRes.rows.length) return null;
-  return assembleScriptConfig(prodRes.rows[0], chapterRes.rows.map(r => r.block_id)).config;
+  return assembleScriptConfig(prodRes.rows[0], chapterRes.rows.map(r => r.block_id));
 }
 
 /**
@@ -129,16 +112,10 @@ export async function loadProduction(productionId: string, versionId: string): P
   const { blocks, sortKeys, snapshotIds } = loadedBlocks;
   const markerLabels = buildMarkerLabelIndex(blocks);
 
-  const { config, backfillOpeningChapterMarkerId } = assembleScriptConfig(
+  const config = assembleScriptConfig(
     prodRes.rows[0],
     blocks.filter((block) => block.type === "chapter_marker").map((block) => block.id),
   );
-  if (backfillOpeningChapterMarkerId) {
-    await pool.query(
-      "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2",
-      [JSON.stringify({ openingChapterMarkerId: backfillOpeningChapterMarkerId }), versionId]
-    );
-  }
 
   return {
     state: {
@@ -194,13 +171,11 @@ export async function saveScriptConfig(productionId: string, versionId: string |
       [masterViewId, config.pageLayout, config.textLayoutMode, templateId]
     );
     paginationChanged = configUpdate.rows[0]?.pagination_changed ?? false;
+    // version 层只剩 showOpeningChapter 一个键；openingChapterMarkerId 是派生值不落库（#636）
     if (versionId) {
       await client.query(
         "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2 AND production_id = $3",
-        [JSON.stringify({
-          openingChapterMarkerId: config.openingChapterMarkerId,
-          showOpeningChapter: config.showOpeningChapter,
-        }), versionId, productionId]
+        [JSON.stringify({ showOpeningChapter: config.showOpeningChapter }), versionId, productionId]
       );
     }
     await client.query("COMMIT");

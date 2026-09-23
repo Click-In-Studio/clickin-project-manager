@@ -1018,10 +1018,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     blockTagAssignments,
     tagChanges: body.tagChanges,
     aggregateMembers: aggregateMemberships,
-    openingChapter: {
-      markerId: openingChapterMarkerId,
-      show: importedOpeningIds.size > 0 ? undefined : false,
-    },
+    // 导入的开场章 marker 总在块序列最前，openingChapterMarkerId 由读侧派生（#636）；
+    // 只有自动补的隐藏开场章才需要把显示开关置 false
+    ...(importedOpeningIds.size > 0 ? {} : { showOpeningChapter: false }),
     stageDelimiters: { open: stageDelimiter.open, close: stageDelimiter.close },
     ensureEmptySceneBlocks: !!body.sceneOverrides,
   });

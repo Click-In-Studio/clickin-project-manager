@@ -161,8 +161,7 @@ describe("门：版式字段走 script_view/<主本>@edit，其余剧本设置�
     await saveScriptConfig(prodId, versionId, { ...DEFAULT_SCRIPT_CONFIG });
   });
 
-  // 客户端每次发的是整份 config（含 loadProduction 自动装配的 openingChapterMarkerId），
-  // 测试也按这个形状发：在当前值上打补丁，别让没动的字段被判成「改了」
+  // 客户端每次发的是整份 config，测试也按这个形状发：在当前值上打补丁，别让没动的字段被判成「改了」
   const patch = async (p: Record<string, unknown>) => ({ ...(await loadProduction(prodId, versionId))!.state.config, ...p });
 
   it("只持 scene meta/name@edit：改分隔符 200，改模版 403（库里不变）", async () => {
