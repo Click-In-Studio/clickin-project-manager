@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { canAccessNode, nodeKeyCandidates, selfConfirmTemplateNodes, RESERVED_TYPES } from "@/lib/perm/grant-template";
 import { recomputeAndRevokeGrants } from "@/lib/perm/dept-db";
 import { getPool } from "@/lib/pg";
-import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
+import { makeProduction, cleanupProduction } from "../_support/factories";
 
 // 批G G-1：制作人通配区间
 // node:*/*@* 主行 + 保留段显式四行 = 永久全集；RESERVED_TYPES 不被类型通配穿透

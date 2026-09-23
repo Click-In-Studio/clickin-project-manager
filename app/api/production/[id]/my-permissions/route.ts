@@ -16,7 +16,6 @@
 import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
-import { getPool } from "@/lib/pg";
 
 import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
 import {
@@ -74,7 +73,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   if (access.isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  const { permCtx } = access;
 
   const body = await req.json() as { permissions?: unknown };
   if (!Array.isArray(body.permissions) || body.permissions.length === 0) {

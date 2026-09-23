@@ -225,6 +225,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // 先删本文件自造的用户（app_user CASCADE 带走 grant 行），再清演出
+  await getPool().query("DELETE FROM app_user WHERE id = ANY($1)", [allUsers()]).catch(() => {});
   await cleanupProduction(prodId).catch(() => {});
 });
 

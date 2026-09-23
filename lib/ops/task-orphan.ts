@@ -34,7 +34,7 @@
 import type { PoolClient } from "pg";
 import { getPolicyValue } from "../perm/policy-db";
 import {
-  ORPHAN_TASK_KEEP, ORPHAN_TASK_MIDDLE, ORPHAN_TASK_DELETE,
+  ORPHAN_TASK_KEEP, ORPHAN_TASK_DELETE,
 } from "../perm/policy-keys";
 
 export type OrphanOutcome = { deleted: string[]; marked: string[] };

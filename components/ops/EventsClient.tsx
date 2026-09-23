@@ -2,7 +2,7 @@
 
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
-import { useState, useMemo, Fragment, type CSSProperties } from "react";
+import { useState, Fragment, type CSSProperties } from "react";
 import Link from "next/link";
 import type React from "react";
 import { BASE_PATH } from "@/lib/base-path";
@@ -391,7 +391,6 @@ function CreateEventModal({
 
 type Props = {
   productionId: string;
-  productionName: string;
   initialEvents: ProductionEvent[];
   canCreate: boolean;
   canViewFull: boolean;
@@ -402,7 +401,7 @@ type Props = {
 };
 
 export default function EventsClient({
-  productionId, productionName, initialEvents, canCreate, canViewFull,
+  productionId, initialEvents, canCreate, canViewFull,
   myParticipations, departments, taskCounts = {},
 }: Props) {
   const [events,      setEvents]      = useState(initialEvents);

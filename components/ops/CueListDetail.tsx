@@ -16,7 +16,6 @@ type Props = {
   members: MemberWithRoles[];
   canEdit: boolean;
   canManage: boolean;
-  myUserId: string;
   onUpdated: (updated: Partial<CueList>) => void;
   onDeleted: () => void;
   onClose: () => void;
@@ -97,10 +96,9 @@ const GRANT_LEVELS: { value: string; label: string }[] = [
   { value: "edit",   label: "编辑" },
   { value: "manage", label: "管理" },
 ];
-const LEVEL_LABEL: Record<string, string> = Object.fromEntries(GRANT_LEVELS.map(l => [l.value, l.label]));
 
 function CollaboratorSection({
-  productionId, cueListId, initialGrants, initialDeptAccess, productionDepts, members, myUserId,
+  productionId, cueListId, initialGrants, initialDeptAccess, productionDepts, members,
 }: {
   productionId: string;
   cueListId: string;
@@ -108,7 +106,6 @@ function CollaboratorSection({
   initialDeptAccess: CueListDeptAccess[];
   productionDepts: { id: string; name: string }[];
   members: MemberWithRoles[];
-  myUserId: string;
 }) {
   const [grants, setGrants] = useState(initialGrants);
   const [deptAccess, setDeptAccess] = useState(initialDeptAccess);
@@ -294,7 +291,7 @@ function CollaboratorSection({
 
 export default function CueListDetail({
   productionId, cueList: initialCueList, grants, deptAccess, productionDepts,
-  members, canEdit, canManage, myUserId,
+  members, canEdit, canManage,
   onUpdated, onDeleted, onClose,
 }: Props) {
   const [cueList, setCueList] = useState(initialCueList);
@@ -396,7 +393,6 @@ export default function CueListDetail({
               initialDeptAccess={deptAccess}
               productionDepts={productionDepts}
               members={members}
-              myUserId={myUserId}
             />
           </div>
         )}

@@ -24,12 +24,12 @@ function relativeTime(iso: string): string {
 // ─── CueCommentsPanel ─────────────────────────────────────────────────────────
 
 export default function CueCommentsPanel({
-  cueId, logicalCueId, productionId, versionId, comments, currentUserId, isAdmin,
+  cueId, logicalCueId, productionId, comments, currentUserId, isAdmin,
   onAdd, onEdit, onDelete, onClose,
 }: {
   // cueId = 行 id：评论 contextId 与附件挂载都锚修订行，保持不动。
   // logicalCueId = 稳定 cue_id：wiki 引用边锚它（#302），两者不可混用。
-  cueId: string; logicalCueId: string; productionId: string; versionId?: string | null; comments: Comment[];
+  cueId: string; logicalCueId: string; productionId: string; comments: Comment[];
   currentUserId: string; isAdmin: boolean;
   onAdd: (c: Comment) => void; onEdit: (c: Comment) => void;
   onDelete: (id: string) => void; onClose: () => void;

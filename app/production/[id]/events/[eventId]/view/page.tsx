@@ -92,7 +92,6 @@ export default async function EventViewPage({
       scheduleItems={scheduleItems}
       departments={departments}
       reports={visibleReports}
-      isAssignee={isAssignee}
       selfParticipantRole={selfRole}
       canViewFull={canViewFull}
       canViewReqs={canViewReqs}

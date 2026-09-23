@@ -37,7 +37,6 @@ type Props = {
   techReqs: EventTechReq[];
   departments: EventDepartment[];
   currentUserId: string;
-  productionMembers: { userId: string; name: string }[];
   canViewFull?: boolean;
 };
 
@@ -184,7 +183,7 @@ function ReqCard({
 
 export default function ReqsClient({
   productionId, eventId, event,
-  techReqs, departments, currentUserId, productionMembers, canViewFull,
+  techReqs, departments, currentUserId, canViewFull,
 }: Props) {
   const [reqs, setReqs] = useState(techReqs);
 

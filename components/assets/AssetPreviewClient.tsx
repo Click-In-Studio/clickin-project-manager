@@ -500,7 +500,7 @@ export default function AssetPreviewClient({
 
         {!loading && url && previewType === "video" && (
           <Suspense fallback={<p className="text-sm text-white/30">加载中…</p>}>
-            <VideoPlayer url={url} fileName={fileName} />
+            <VideoPlayer url={url} />
           </Suspense>
         )}
 

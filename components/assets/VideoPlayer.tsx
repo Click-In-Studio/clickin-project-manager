@@ -13,10 +13,9 @@ function formatTime(s: number): string {
 
 interface Props {
   url: string;
-  fileName: string;
 }
 
-export default function VideoPlayer({ url, fileName }: Props) {
+export default function VideoPlayer({ url }: Props) {
   const videoRef   = useRef<HTMLVideoElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const speedValRef = useRef(1);       // always reflects latest speed without stale closure

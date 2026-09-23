@@ -15,7 +15,6 @@ export default function ScenePanel({
   onRemove,
   open,
   onOpenChange,
-  canImport,
   onNavigate,
   triggerClassName,
   nestedFromMore = false,
@@ -30,7 +29,6 @@ export default function ScenePanel({
   onRemove: (id: string) => void;
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  canImport?: boolean;
   onNavigate?: () => void;
   triggerClassName?: string;
   nestedFromMore?: boolean;

@@ -2,7 +2,6 @@
 
 import React, { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, ProductionOverflowSubmenuButton, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, useProductionToolbar } from "@/components/shell/ProductionTopMenu";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
@@ -42,7 +41,6 @@ export default function CuePage({
   versionId,
 }: Props) {
   const { stage: toolbarStage, closeOverflow, overflowOpen } = useProductionToolbar();
-  const router = useRouter();
   const orderedBlocks = useMemo(() => withLegacyOwnershipProjection(
     withMarkerOwnership(rawBlocks),
     buildMarkerContextById(rawBlocks),
@@ -1350,7 +1348,6 @@ export default function CuePage({
           cueId={activeCommentCueId}
           logicalCueId={effectiveCues.find(c => c.id === activeCommentCueId)?.cueId ?? activeCommentCueId}
           productionId={productionId}
-          versionId={versionId}
           comments={comments}
           currentUserId={myUserId}
           isAdmin={isAdmin}

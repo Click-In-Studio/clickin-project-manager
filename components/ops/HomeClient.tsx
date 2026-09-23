@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState } from "react";
 import { fmtCallAt, isoCSTDateStr, todayCSTStr as tzTodayCSTStr } from "@/lib/tz";
-import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, MyFollowedEventEntry, UnreadReportEntry } from "@/lib/ops/event-db";
+import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, UnreadReportEntry } from "@/lib/ops/event-db";
 import type { UpcomingMilestoneEntry } from "@/lib/ops/milestone-db";
 import styles from "./home.module.css";
 
@@ -21,11 +21,9 @@ type Production = { id: string; name: string; createdAt: string; archivedAt: str
 
 type Props = {
   productions: Production[];
-  isAdmin: boolean;
   myCallTimes: MyCallTimeEntry[];
   myPendingReqs: MyPendingTechReqEntry[];
   myAwaitingReqs: MyPocAwaitingReqEntry[];
-  myFollowedEvents: MyFollowedEventEntry[];
   myUnreadReports: UnreadReportEntry[];
   upcomingMilestones: UpcomingMilestoneEntry[];
   totalCueWarnings: number;
@@ -36,9 +34,8 @@ const STATUS_LABEL: Record<string, string> = {
   in_progress: "进行中",
 };
 
-export default function HomeClient({ productions: initial, isAdmin, myCallTimes, myPendingReqs, myAwaitingReqs, myFollowedEvents, myUnreadReports, upcomingMilestones, totalCueWarnings }: Props) {
+export default function HomeClient({ productions, myCallTimes, myPendingReqs, myAwaitingReqs, myUnreadReports, upcomingMilestones, totalCueWarnings }: Props) {
   const router = useRouter();
-  const [productions, setProductions] = useState<Production[]>(initial);
   const [callView, setCallView] = useState<"today" | "week">("today");
 
   const today = todayCSTStr();

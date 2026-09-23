@@ -41,7 +41,6 @@ import type {
   GroupInfo,
   ReceivedMessage,
   InteractionOption,
-  AuthToken,
   LoginResult,
 } from "../types";
 

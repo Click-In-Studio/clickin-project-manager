@@ -1902,11 +1902,6 @@ function CalendarMock({ items, openRundown, setDrawer, openCreate }: { items: Pl
   </section>;
 }
 
-function AgendaMock({ items, setDrawer, openCreate }: { items: PlannerItem[]; setDrawer: (v: "event" | "task" | "milestone") => void; openCreate: (type: PlannerObjectType, date: string) => void }) {
-  const sorted = [...items].sort((a, b) => a.date.localeCompare(b.date));
-  return <section className={styles.panel}><div className={styles.panelHeading}><div><p className={styles.kicker}>AGENDA</p><h2>按时间顺序</h2></div><button type="button" onClick={() => openCreate("task", "2026-07-20")}>＋ 快速记录 Task</button></div><div className={styles.agendaList}>{sorted.map((item) => <button type="button" key={item.id} onClick={() => setDrawer(item.type)}><time><b>{item.date.slice(8)}</b><small>{item.date.slice(5, 7)} 月</small></time><span className={styles.agendaType} data-type={item.type}>{item.type === "event" ? "E" : item.type === "task" ? "T" : "◆"}</span><span><b>{item.title}</b><small>{item.time ? `${item.time} · ` : ""}{item.meta}</small></span><strong>{item.type === "event" ? "Event" : item.type === "task" ? "Task" : "里程碑"}</strong></button>)}</div></section>;
-}
-
 function GanttMock({ openRundown, setDrawer }: { openRundown: (id: string) => void; setDrawer: (v: "task") => void }) {
   const rows = [
     { name: "剧本与构作", left: 4, right: 29, tone: "normal", label: "第三稿锁定", eventId: "" },

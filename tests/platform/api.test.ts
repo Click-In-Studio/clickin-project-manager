@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
-import { deleteProduction, createProduction, archiveProduction } from "@/lib/production/production-db";
+import { deleteProduction, createProduction } from "@/lib/production/production-db";
 import { addProductionMember } from "@/lib/perm/member-db";
 import { getActiveVersionId } from "@/lib/script/version-db";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
@@ -31,7 +31,6 @@ import {
 } from "@/app/api/production/[id]/events/route";
 import {
   POST as archiveProdHandler,
-  DELETE as unarchiveProdHandler,
 } from "@/app/api/production/[id]/archive/route";
 import {
   GET as loadProdHandler,

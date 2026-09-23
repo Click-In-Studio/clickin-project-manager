@@ -226,7 +226,6 @@ describe("tree constraints & delete", () => {
 describe("routes", () => {
   const cookieFor = (userId: string, isAdmin = false) =>
     `${SESSION_COOKIE}=${createSession({ userId, name: "测试", avatarUrl: null, isAdmin })}`;
-  const listCtx = { params: Promise.resolve({ id: "" }) };
 
   function makeReq(method: string, url: string, userId: string, isAdmin = false, body?: unknown) {
     return new NextRequest(`http://localhost${url}`, {
