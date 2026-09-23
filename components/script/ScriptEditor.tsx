@@ -38,7 +38,7 @@ import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleS
 import { DEFAULT_SCRIPT_CONFIG, type Block, type BlockType, type Character, type Scene, type ScriptState, type ScriptConfig } from "@/lib/script/script-types";
 import BlockGap from "./script-editor/BlockGap";
 import CharacterPanel from "./script-editor/CharacterPanel";
-import CommentsPanel from "./script-editor/CommentsPanel";
+import dynamic from "next/dynamic";
 import InsertZone from "./script-editor/InsertZone";
 import PresenceAvatar from "./script-editor/PresenceAvatar";
 import ScenePanel from "./script-editor/ScenePanel";
@@ -93,6 +93,10 @@ type PendingStageDelimiterChange = {
 const SYNC_DEBOUNCE_MS = 1500;
 const SYNC_MAX_WAIT_MS = 5000;
 
+// 评论面板懒加载（#641）：它静态 import SmartTextarea，而那条线拖着整套 TipTap /
+// ProseMirror 进剧本页首屏包——面板默认不开，这些字节不该挡在「加载中」前面。
+const CommentsPanel = dynamic(() => import("./script-editor/CommentsPanel"), { ssr: false });
+
 const REHEARSAL_SWITCH_OPTICAL_OFFSET_STYLE: React.CSSProperties = { position: "relative", left: "3%" };
 
 // ─── ScriptEditor ─────────────────────────────────────────────────────────────
@@ -107,6 +111,7 @@ export default function ScriptEditor({
   canEditRehearsalMark = true,
   canImport = false,
   initialSearchQuery,
+  initialVersionId = null,
 }: {
   scriptId?: string;
   productionId?: string;
@@ -120,13 +125,16 @@ export default function ScriptEditor({
   canEditRehearsalMark?: boolean;
   canImport?: boolean;
   initialSearchQuery?: string;
+  /** 服务端解析好的活跃版本（#641）：不给的话首帧是 null，首个请求不带 ?v=，
+   *  回包的 versionId 一 set 就把加载 effect 的依赖改了——整本剧本要再拉一遍。 */
+  initialVersionId?: string | null;
 }) {
   const toolbarStage = useProductionToolbarStage();
   const effectiveScriptId = productionId ?? scriptId;
 
   // ── Version state ─────────────────────────────────────────────────────────────
   // 版本退役 Phase B：版本恒为 head（服务端解析活跃版本），无选择、无状态门。
-  const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
+  const [activeVersionId, setActiveVersionId] = useState<string | null>(initialVersionId);
 
   const baseCanEditText = canEditTextProp;
   const baseCanEditMetadata = canEditMetadataProp;
@@ -1566,7 +1574,8 @@ export default function ScriptEditor({
         if (isProdResponse) {
           const { versionId: respVid } = body as ProdResponse;
           const resolvedVid = respVid ?? activeVersionId;
-          if (resolvedVid) setActiveVersionId(resolvedVid);
+          // 同值不写：服务端预置了 initialVersionId 时这里恒为同值，写了只是白渲染一帧。
+          if (resolvedVid && resolvedVid !== activeVersionId) setActiveVersionId(resolvedVid);
         }
 
         setLoadState("ready");
