@@ -7,7 +7,7 @@ who: 看：有构作查看权限的成员；改：各字段分别授权（简介
 tier: all
 platform: [desktop, mobile]
 related: [creation/dramaturgy/characters, creation/script/reading, creation/dramaturgy/inspiration]
-updated: 2026-09-21
+updated: 2026-09-23
 ---
 
 ## 这是什么
@@ -55,6 +55,8 @@ updated: 2026-09-21
 ### 拖动调整顺序
 
 列表视图里鼠标移到一行上，编号左边会出现「⋮⋮」拖柄，按住拖到目标行的上沿或下沿松手即可（手机上没有拖柄）。段落只能在**本章内**上下移动，拖到别的章上不会有反应；章节拖动时整章连同下面的段落和台词一起搬。顺序改的是剧本本身，剧本页里的台词顺序会跟着变。
+
+开场那一章（编号 0）固定在最前面：它自己没有拖柄，别的章也放不到它前面。
 
 ## 注意事项
 

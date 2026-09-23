@@ -952,6 +952,9 @@ export function moveHierarchyMarker(
   const source = state.blocks[sourceIndex];
   if (source.type !== "chapter_marker" && source.type !== "scene_marker") return state;
   if (source.id === state.config.openingChapterMarkerId) return state;
+  // 开场章是「排在最前的那一章」派生出来的：把别人插到它前面，规范化就会把
+  // openingChapterMarkerId 重指给新的首章，编号 0 跟着跳到别的章头上。
+  if (beforeMarkerId && beforeMarkerId === state.config.openingChapterMarkerId) return state;
 
   const targetIndex = beforeMarkerId
     ? state.blocks.findIndex((block) => isMarkerBlock(block) && block.id === beforeMarkerId)

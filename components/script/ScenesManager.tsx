@@ -637,18 +637,28 @@ export default function ScenesManager({ productionId, productionName, initialSce
   const beforeMarker = (marker?: MarkerProjection) => marker ? { insertBeforeSceneId: marker.id } : undefined;
   const colSpan = 4;
 
+  /** 某一行下沿对应的落点：下一个同级；本章最后一段则是下一章（章末边界），再往后就是末尾。 */
+  const afterEdgeBeforeId = (row: MarkerProjection) => {
+    const siblings = row.kind === "chapter" ? acts : subScenes(row.parentId ?? "");
+    const index = siblings.findIndex((item) => item.id === row.id);
+    return siblings[index + 1]?.id
+      ?? (row.kind === "scene" ? acts[acts.findIndex((item) => item.id === row.parentId) + 1]?.id ?? null : null);
+  };
+
   const dragPosition = (target: MarkerProjection, event: React.DragEvent<HTMLTableRowElement>) => {
     if (!dragging || dragging.id === target.id || dragging.kind !== target.kind || dragging.parentId !== target.parentId) {
       return;
     }
+    const edge = event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.offsetHeight / 2 ? "top" : "bottom";
+    const beforeId = edge === "top" ? target.id : afterEdgeBeforeId(target);
+    // 开场章不让别人插到它前面（拖柄那边也不让它自己动），否则编号 0 会跳到别的章头上。
+    // 不 preventDefault，浏览器显示禁止光标；同时清掉上一次悬停留下的落点线。
+    if (beforeId !== null && beforeId === openingChapterMarkerId) {
+      setDropTarget(null);
+      return;
+    }
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
-    const edge = event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.offsetHeight / 2 ? "top" : "bottom";
-    const siblings = target.kind === "chapter" ? acts : subScenes(target.parentId ?? "");
-    const targetIndex = siblings.findIndex((item) => item.id === target.id);
-    const beforeId = edge === "top"
-      ? target.id
-      : siblings[targetIndex + 1]?.id ?? (target.kind === "scene" ? acts[acts.findIndex((item) => item.id === target.parentId) + 1]?.id ?? null : null);
     setDropTarget({ id: target.id, edge, beforeId });
   };
 
@@ -658,7 +668,9 @@ export default function ScenesManager({ productionId, productionName, initialSce
     const target = dropTarget;
     setDragging(null);
     setDropTarget(null);
-    if (!active || !target || target.beforeId === active.id) return;
+    // 原位放置（放回自己的上沿或下沿）服务端会原样退回 400，这里直接吞掉。
+    if (!active || !target) return;
+    if (target.beforeId === active.id || target.beforeId === afterEdgeBeforeId(active)) return;
     try {
       await reorder(active.id, target.beforeId);
     } catch (error) {

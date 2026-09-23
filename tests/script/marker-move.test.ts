@@ -75,4 +75,11 @@ describe("moveHierarchyMarker", () => {
   it("开场章不可移动", () => {
     expect(moveHierarchyMarker(base, "c0", null, createId)).toBe(base);
   });
+
+  it("别的章也插不到开场章之前", () => {
+    // 开场章是「排在最前的那一章」派生的：真让 c2 插到 c0 前面，规范化会把
+    // openingChapterMarkerId 重指成 c2，编号 0 就跳到第二章头上了。
+    expect(moveHierarchyMarker(base, "c2", "c0", createId)).toBe(base);
+    expect(moveHierarchyMarker(base, "c1", "c0", createId)).toBe(base);
+  });
 });
