@@ -4,8 +4,7 @@
  * 钉两件事：
  * 1. 轻量读口（loadVersionBlocks / loadVersionBlocksByIds / listTextBlockIdsByVersion /
  *    getScriptConfig）与 loadProduction 的装配**等价**——它们是同一份真相的窄投影，
- *    不是第二套实现；getScriptConfig 额外钉「纯读」：不做 loadProduction 的
- *    openingChapterMarkerId 写回。
+ *    不是第二套实现；两条读路径都不写库（openingChapterMarkerId 读时从块派生，#636）。
  * 2. mention-resolve 改结构定点查后的语义保真：场号查询限定章/场域——scene 提及
  *    拿着排练记号 id 必须解析成 #[已删除]，不能借 labelByMarkerId 的混装解析出
  *    记号标签（旧 sceneNumById 只含章/场）。
@@ -94,26 +93,24 @@ afterAll(async () => {
 });
 
 describe("getScriptConfig：同装配、纯读", () => {
-  it("不做 openingChapterMarkerId 写回；装配结果与 loadProduction 等价", async () => {
+  it("openingChapterMarkerId 读时从块派生、两条读路径都不写库；JSONB 残留旧键不认（#636）", async () => {
     const readConfig = async () =>
       (await getPool().query<{ script_config: { openingChapterMarkerId?: string } | null }>(
         "SELECT script_config FROM version WHERE id = $1", [versionId],
       )).rows[0].script_config;
 
-    // applyPatchToDB 在 marker 结构变化时就维护该键；手动清掉模拟遗留脏数据，
-    // 才能分辨「getScriptConfig 纯读」与「loadProduction 写回自愈」两副面孔。
+    // 塞一个指向不存在的章的旧键，模拟 #636 之前各写点留下的漂移数据
     await getPool().query(
-      "UPDATE version SET script_config = script_config - 'openingChapterMarkerId' WHERE id = $1",
+      "UPDATE version SET script_config = script_config || '{\"openingChapterMarkerId\":\"stale_chapter\"}'::jsonb WHERE id = $1",
       [versionId],
     );
-    expect((await readConfig())?.openingChapterMarkerId).toBeUndefined();
     const config = await getScriptConfig(prodId, versionId);
-    expect(config?.openingChapterMarkerId).toBe(sceneId); // 兜底到第一章
-    expect((await readConfig())?.openingChapterMarkerId).toBeUndefined(); // 纯读：没写回
+    expect(config?.openingChapterMarkerId).toBe(sceneId); // 派生：排在最前的章
+    expect((await readConfig())?.openingChapterMarkerId).toBe("stale_chapter"); // 纯读：没写回也没「修正」
 
     const full = await loadProduction(prodId, versionId);
     expect(full!.state.config).toEqual(config); // 单一装配口，逐键等价
-    expect((await readConfig())?.openingChapterMarkerId).toBe(sceneId); // loadProduction 的写回仍在
+    expect((await readConfig())?.openingChapterMarkerId).toBe("stale_chapter"); // loadProduction 同样不写库
   });
 
   it("版本不存在时返回 null（与 loadProduction 的哨兵同口径）", async () => {

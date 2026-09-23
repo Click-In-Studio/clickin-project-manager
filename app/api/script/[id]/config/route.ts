@@ -41,9 +41,13 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
   // 两把钥匙（客户端总是整份 config 发过来，按「哪些字段真变了」分门）：
   //   · 版式字段（pageLayout / textLayoutMode / templateId）= 改主本的排版
   //     → script_view/<主本>@edit（epic #337 §9），与编辑器「页面类型」菜单、打印页模版菜单同键
-  //   · 其余剧本设置（舞台指示分隔符、排练记号开关、开篇章节）→ 沿用 scene meta/name@edit
+  //   · 其余剧本设置（舞台指示分隔符、排练记号开关、开篇章节显示）→ 沿用 scene meta/name@edit
+  //   openingChapterMarkerId 是派生值（#636）：客户端发来的原样忽略，不参与分门也不落库
   // 只取 config 做变更分门，别为它扛整本剧本（#461）
   const current = versionId ? await getScriptConfig(id, versionId) : null;
+  // 落库与广播都用服务端派生的值，别把某个客户端的旧值扩散给其他人；
+  // current 为 null 只在演出没有活跃版本时发生，此时没有块也就没有开场章，null 即正确值
+  config.openingChapterMarkerId = current?.openingChapterMarkerId ?? null;
   const layoutChanged = !current
     || current.pageLayout !== config.pageLayout
     || current.textLayoutMode !== config.textLayoutMode
@@ -52,8 +56,7 @@ export async function PUT(req: NextRequest, ctx: RouteContext<"/api/script/[id]/
     || current.stageDelimOpen !== config.stageDelimOpen
     || current.stageDelimClose !== config.stageDelimClose
     || current.useRehearsalMarks !== config.useRehearsalMarks
-    || current.showOpeningChapter !== config.showOpeningChapter
-    || (current.openingChapterMarkerId ?? null) !== (config.openingChapterMarkerId ?? null);
+    || current.showOpeningChapter !== config.showOpeningChapter;
   if (layoutChanged) {
     const masterViewId = await getMasterScriptViewId(id);
     if (!await hasEffectiveGrant(permCtx, id, "script_view", masterViewId ?? "*", "*", "edit")) {

@@ -44,7 +44,8 @@ export async function importScriptToVersion(
     blockTagAssignments?: Array<{ blockId: string; groupId: string; optionId: string }>;
     tagChanges?: ImportTagChanges;
     aggregateMembers?: Array<{ aggregateId: string; memberIds: string[] }>;
-    openingChapter?: { markerId: string; show?: boolean };
+    /** 开场章是否显示；开场章本身 = 排在最前的 chapter_marker，读时派生不落库（#636） */
+    showOpeningChapter?: boolean;
     stageDelimiters?: { open: string; close: string };
     ensureEmptySceneBlocks?: boolean;
   },
@@ -320,13 +321,10 @@ export async function importScriptToVersion(
       );
     }
 
-    if (payload.openingChapter) {
-      const config = payload.openingChapter.show === undefined
-        ? { openingChapterMarkerId: payload.openingChapter.markerId }
-        : { openingChapterMarkerId: payload.openingChapter.markerId, showOpeningChapter: payload.openingChapter.show };
+    if (payload.showOpeningChapter !== undefined) {
       await client.query(
         "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2 AND production_id = $3",
-        [JSON.stringify(config), versionId, productionId],
+        [JSON.stringify({ showOpeningChapter: payload.showOpeningChapter }), versionId, productionId],
       );
     }
     if (payload.stageDelimiters) {
@@ -380,15 +378,8 @@ async function ensureEmptyScriptBlocksForEmptyScenesInTx(
         .map(row => row.marker_meta?.parentMarkerId)
         .filter((id): id is string => !!id),
   );
-  const configRes = await client.query<{ opening_chapter_marker_id: string | null }>(
-      "SELECT script_config->>'openingChapterMarkerId' AS opening_chapter_marker_id FROM version WHERE id = $1",
-      [versionId],
-  );
-  const configuredOpeningChapterMarkerId = configRes.rows[0]?.opening_chapter_marker_id ?? null;
-  const openingChapterMarkerId =
-    configuredOpeningChapterMarkerId && res.rows.some(row => row.block_id === configuredOpeningChapterMarkerId && row.type === "chapter_marker")
-      ? configuredOpeningChapterMarkerId
-      : res.rows.find(row => row.type === "chapter_marker")?.block_id ?? null;
+  // 开场章 = 排在最前的 chapter_marker（#636），不查 version.script_config
+  const openingChapterMarkerId = res.rows.find(row => row.type === "chapter_marker")?.block_id ?? null;
 
   const emptyBlocks: Array<{ snapshotId: string; blockId: string; sortKey: string; ownerMarkerId: string }> = [];
   for (let index = 0; index < res.rows.length; index++) {

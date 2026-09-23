@@ -554,15 +554,6 @@ export async function applyPatchToDB(
       deletedSceneMarkerIds: [...deletedSceneMarkerIds],
       markerStructureChanged,
     });
-    if (markerStructureChanged) {
-      // 派生配置 openingChapterMarkerId 的多写点问题见 #636
-      const openingChapterMarkerId = finalBlocks.find((block) => block.type === "chapter_marker")?.id ?? null;
-      await client.query(
-        "UPDATE version SET script_config = COALESCE(script_config, '{}'::jsonb) || $1::jsonb WHERE id = $2",
-        [JSON.stringify({ openingChapterMarkerId }), versionId],
-      );
-    }
-
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
