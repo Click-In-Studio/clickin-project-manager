@@ -224,6 +224,20 @@ SSL 证书申请（两个子域名可共用一张）：
 sudo certbot --nginx -d app.<your-domain> -d backstage.<your-domain>
 ```
 
+**压缩不在这一层**（#641 排查结论）：两机 `nginx.conf` 虽是 `gzip on`，但 `gzip_types`
+整段注释着，默认只压 `text/html`——实际把 JSON 与 JS 压掉的是 Next 自己的
+`compress: true`（`.next/required-server-files.json` 里可查），nginx 只是透传。
+实测 `/login` 与 `/_next/static/chunks/*.js` 出口都带 `content-encoding: gzip`，
+静态 chunk 另带 `max-age=31536000, immutable`。所以**排性能时不必先怀疑压缩，
+也不需要在 nginx 加 `gzip_types`**：加了只会让同一份响应白压两遍。
+
+验证的办法（在服务器上，绕过与经过 nginx 各一次）：
+
+```bash
+curl -s -o /dev/null -D - -H "Accept-Encoding: gzip" http://127.0.0.1:3001/login | grep -i content-encoding
+curl -sk -o /dev/null -D - -H "Accept-Encoding: gzip" -H "Host: app.<your-domain>" https://127.0.0.1/login | grep -i content-encoding
+```
+
 ### 8. Cron 通知
 
 ```bash
