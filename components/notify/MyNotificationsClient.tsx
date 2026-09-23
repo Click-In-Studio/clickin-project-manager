@@ -38,9 +38,13 @@ function actMode(n: UserNotification): ActMode {
   return "external";
 }
 
-/** 还在等人回应的待确认：有可点的动作且没处理——已失效的不算。 */
+/**
+ * 还在等人回应的待确认：actionRequired 且没处理、没失效。
+ * 显式写三个字段而不借 actMode：actMode 对「有按钮但 actionRequired=false」也回 button，
+ * 借它会把这类条目扩进待确认（AI review #661）。
+ */
 function isAwaitingAction(n: UserNotification): boolean {
-  return actMode(n) !== "view" && !n.actedAt;
+  return n.actionRequired && !n.actedAt && !n.expiredAt;
 }
 
 function isDone(n: UserNotification): boolean {
