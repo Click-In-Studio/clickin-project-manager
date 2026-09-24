@@ -201,7 +201,9 @@ export async function listEditableTaskIds(
   taskIds: readonly string[],
 ): Promise<string[]> {
   if (taskIds.length === 0) return [];
-  if (permCtx.isAdmin || permCtx.isOwner) return [...taskIds];
+  // owner 短路必须在 memberPermissions 判空之前（owner 可以不是成员，见 AGENTS §2），
+  // 与单条门同序；顺带省掉下面全部查询。不看 permCtx.isAdmin：那是恒 false 的死字段。
+  if (permCtx.isOwner) return [...taskIds];
   if (permCtx.memberPermissions === null) return [];
   const pool = getPool();
   const uid = permCtx.userId;
