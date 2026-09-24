@@ -467,6 +467,23 @@ describe("submitAccessRequest", () => {
     await cancelRows([req.id]);
   });
 
+  // #582：通知正文的类型名以前只登记了 cue_list / scene / event 三种，其余类型
+  // 页面上有名字、飞书里却拼原始 key（「所有 dramaturgy_view 的编辑权限」）。
+  // 现在与 permission-labels 的 GROUP_LABELS 同源。
+  it("#582: 三种之外的资源类型，通知正文也是中文名而非原始 key", async () => {
+    const req = await submitAccessRequest(prodId, U_REQUESTER, {
+      resourceType: "dramaturgy_view",
+      permissionLevel: "edit",
+    });
+
+    const notifs = await notifForRequest(U_SUPERVISOR, req.id);
+    expect(notifs.length).toBe(1);
+    expect(notifs[0].body).toContain("所有构作视图的编辑权限");
+    expect(notifs[0].body).not.toContain("dramaturgy_view");
+
+    await cancelRows([req.id]);
+  });
+
   it("notify: 上级持有该权限时主动作是「批准」", async () => {
     await grantRows(U_SUPERVISOR, [["*", "view"]]);
     try {

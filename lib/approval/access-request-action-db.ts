@@ -22,6 +22,7 @@ import {
   type FlowNotifyPlan, type FlowSnapshot,
 } from "./approval-flow-engine";
 import { approvalStageLabel, isApprovalCommentTooLong, normalizeApprovalComment } from "./approval-stages";
+import { permissionLevelLabel, resourceTypeLabel } from "../perm/permission-labels";
 import {
   approvalTargetOf, authorizeApprovalAction, currentPositionOf, isPendingStatus,
   loadApproval, rowToApproval, withApprovalPeople,
@@ -35,33 +36,21 @@ export class ApprovalRequestError extends Error {
   }
 }
 
-const RESOURCE_TYPE_LABELS: Record<string, string> = {
-  cue_list: "Cue表",
-  scene:    "章节/段落",
-  event:    "事件",
-};
-
-const PERMISSION_LEVEL_LABELS: Record<string, string> = {
-  view:           "查看",
-  mount:          "挂载",
-  edit:           "编辑",
-  manage:         "管理",
-  publish:        "发布",
-  edit_published: "修改已发布",
-  revoke:         "撤销",
-};
-
 /**
- * Returns a human-readable description of a resource for use in notification text.
- * e.g. "「声响」Cue表的编辑权限"
+ * 通知正文里的申请对象：「「声响」Cue表的编辑权限」。
+ *
+ * 类型名与级别名不在这里另抄一份：resourceTypeLabel / permissionLevelLabel
+ * （lib/perm/permission-labels.ts）与申请页、申请弹窗同源（#582）。
+ * 只有 cue_list / scene / event 三种类型解析具体资源名；其余类型带具体 id 时
+ * 说「某个X」——兜底也是人话，不会把原始 key 拼进飞书。
  */
 async function describeResource(
   resourceType: string,
   resourceId: string,
   permissionLevel: string,
 ): Promise<string> {
-  const typeLabel  = RESOURCE_TYPE_LABELS[resourceType] ?? resourceType;
-  const levelLabel = PERMISSION_LEVEL_LABELS[permissionLevel] ?? permissionLevel;
+  const typeLabel  = resourceTypeLabel(resourceType);
+  const levelLabel = permissionLevelLabel(permissionLevel);
 
   // Fetch the specific resource name when a concrete ID is given
   let resourceName: string | null = null;

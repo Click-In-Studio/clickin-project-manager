@@ -16,42 +16,21 @@ import {
 } from "@/lib/approval/approval-ttl";
 import { buildApprovalTimeline, type TimelineNode, type TimelineNodeState } from "@/lib/approval/approval-timeline";
 import { APPROVAL_STAGE_LABELS, STAGE_ORDER } from "@/lib/approval/approval-stages";
+import { permissionLevelLabel, resourceTypeLabel } from "@/lib/perm/permission-labels";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-type ResourceOption = { type: string; label: string; levels: { value: string; label: string }[] };
+/**
+ * 自由申请表单开放的资源类型与级别。只登记 key：中文名一律走
+ * resourceTypeLabel / permissionLevelLabel（lib/perm/permission-labels.ts），
+ * 与飞书通知正文、AccessRequestModal 同源，不再各抄一份（#582）。
+ */
+type ResourceOption = { type: string; levels: string[] };
 
 const RESOURCE_OPTIONS: ResourceOption[] = [
-  {
-    type: "cue_list",
-    label: "Cue表",
-    levels: [
-      { value: "view",   label: "查看" },
-      { value: "mount",  label: "挂载" },
-      { value: "edit",   label: "编辑" },
-      { value: "manage", label: "管理" },
-    ],
-  },
-  {
-    type: "scene",
-    label: "章节/段落",
-    levels: [
-      { value: "view",   label: "查看" },
-      { value: "mount",  label: "挂载" },
-      { value: "edit",   label: "编辑" },
-      { value: "manage", label: "管理" },
-    ],
-  },
-  {
-    type: "event",
-    label: "事件",
-    levels: [
-      { value: "view",    label: "查看" },
-      { value: "edit",    label: "编辑" },
-      { value: "publish", label: "发布" },
-      { value: "manage",  label: "管理" },
-    ],
-  },
+  { type: "cue_list", levels: ["view", "mount", "edit", "manage"] },
+  { type: "scene",    levels: ["view", "mount", "edit", "manage"] },
+  { type: "event",    levels: ["view", "edit", "publish", "manage"] },
 ];
 
 const STATUS_LABELS: Record<ApprovalRequest["status"], string> = {
@@ -83,10 +62,11 @@ function statusColor(s: ApprovalRequest["status"]): StatusColor {
   return "muted";
 }
 
+// 不按 RESOURCE_OPTIONS 查：403 页 / 申请弹窗提交的节点键申请可以是任何资源类型，
+// 只认表单里那三种的话其余行就露出原始 key。
 function resourceLabel(req: ApprovalRequest) {
-  const opt = RESOURCE_OPTIONS.find((o) => o.type === req.resourceType);
-  const typeLabel  = opt?.label ?? req.resourceType ?? "—";
-  const levelLabel = opt?.levels.find((l) => l.value === req.permissionLevel)?.label ?? req.permissionLevel ?? "—";
+  const typeLabel  = req.resourceType ? resourceTypeLabel(req.resourceType) : "—";
+  const levelLabel = req.permissionLevel ? permissionLevelLabel(req.permissionLevel) : "—";
   return `${typeLabel} · ${levelLabel}`;
 }
 
@@ -391,7 +371,7 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
   onClose: () => void;
 }) {
   const [resourceType, setResourceType]       = useState(RESOURCE_OPTIONS[0].type);
-  const [permissionLevel, setPermissionLevel] = useState(RESOURCE_OPTIONS[0].levels[0].value);
+  const [permissionLevel, setPermissionLevel] = useState(RESOURCE_OPTIONS[0].levels[0]);
   const [ttlOption, setTtlOption]             = useState<TtlOptionValue>("permanent");
   const [customExpiryDate, setCustomExpiryDate] = useState("");
   const [note, setNote]                       = useState("");
@@ -403,7 +383,7 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
   function handleResourceChange(type: string) {
     setResourceType(type);
     const opt = RESOURCE_OPTIONS.find((o) => o.type === type);
-    if (opt) setPermissionLevel(opt.levels[0].value);
+    if (opt) setPermissionLevel(opt.levels[0]);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -451,14 +431,14 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>资源类型</label>
         <OverflowSafeSelect value={resourceType} onChange={(e) => handleResourceChange(e.target.value)} style={fieldStyle}>
-          {RESOURCE_OPTIONS.map((o) => <option key={o.type} value={o.type}>{o.label}</option>)}
+          {RESOURCE_OPTIONS.map((o) => <option key={o.type} value={o.type}>{resourceTypeLabel(o.type)}</option>)}
         </OverflowSafeSelect>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <label style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>权限等级</label>
         <OverflowSafeSelect value={permissionLevel} onChange={(e) => setPermissionLevel(e.target.value)} style={fieldStyle}>
-          {currentResource.levels.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+          {currentResource.levels.map((l) => <option key={l} value={l}>{permissionLevelLabel(l)}</option>)}
         </OverflowSafeSelect>
       </div>
 
