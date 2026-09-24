@@ -106,7 +106,10 @@ async function grant(
     `INSERT INTO production_member_grant
        (production_id, user_id, resource_type, resource_id, resource_sub,
         permission_level, grant_source, confirmed_by, is_revoked, revoked_reason, expires_at)
-     VALUES ($1, $2, $3, $4, $5, 'edit', 'direct', $2, $6, $7, $8)`,
+     VALUES ($1, $2, $3, $4, $5, 'edit', 'direct', $2, $6, $7, $8)
+     -- 随机身份抽到的实例行可能与建任务时自动发给 POC 的同一行撞唯一索引，撞了就当已有
+     ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+       WHERE is_revoked = false DO NOTHING`,
     [prodId, userId, type, resourceId, sub,
      opts.revoked ?? false, opts.revoked ? "manual" : null,
      opts.expired ? new Date(Date.now() - 86_400_000).toISOString() : null],
