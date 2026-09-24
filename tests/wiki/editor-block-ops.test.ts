@@ -17,7 +17,7 @@ import {
   getSelectedBlock, moveBlock, duplicateBlock, deleteBlock,
   turnInto, canTurnInto, isColumnGroup, changeColumnCount, equalizeColumns,
   findColumnGroup, selectColumnGroup,
-  findCallout, setCalloutColor,
+  findCallout, setCalloutColor, setCalloutEmoji,
 } from "@/lib/editor/editor-block-ops";
 import { ColumnEditing, isEmptyColumn } from "@/lib/editor/tiptap-column-editing";
 
@@ -424,6 +424,44 @@ describe("高亮块配色（#525 颜色一半）", () => {
     expect(findCallout(editor)).toBeNull();
     expect(setCalloutColor(editor, "#dbeafe")).toBe(false);
     expect(md(editor)).toBe("普通段落\n\n> 只是引用");
+    editor.destroy();
+  });
+});
+
+describe("高亮块图标（#525 图标一半）", () => {
+  const md = (editor: Editor) => (editor.storage as unknown as { markdown: { getMarkdown: () => string } }).markdown.getMarkdown();
+
+  it("按 pos 改：只动 marker 主参数位，bg= 与正文原样", () => {
+    const editor = makeEditor("> [!💡 bg=#dbeafe]\n> 需要强调");
+    expect(setCalloutEmoji(editor, "🔥", 0)).toBe(true);
+    expect(md(editor)).toBe("> [!🔥 bg=#dbeafe]\n> 需要强调");
+    editor.destroy();
+  });
+
+  it("无图标：空串落成 `[!]`，再解析回来 emoji 仍是空（不回落默认 💡）", () => {
+    const editor = makeEditor("> [!📌]\n> 第一行");
+    expect(setCalloutEmoji(editor, "", 0)).toBe(true);
+    const out = md(editor);
+    expect(out).toBe("> [!]\n> 第一行");
+    const again = makeEditor(out);
+    expect(again.state.doc.firstChild?.attrs.emoji).toBe("");
+    expect(md(again)).toBe(out);
+    again.destroy();
+    editor.destroy();
+  });
+
+  it("不给 pos 走当前选区：光标在高亮块段落里也能改", () => {
+    const editor = makeEditor("> [!📌]\n> 第一行");
+    editor.commands.setTextSelection(4);
+    expect(setCalloutEmoji(editor, " 🎭 ")).toBe(true);
+    expect(md(editor)).toBe("> [!🎭]\n> 第一行");
+    editor.destroy();
+  });
+
+  it("pos 不是高亮块：不改、返回 false", () => {
+    const editor = makeEditor("普通段落\n\n> [!💡]\n> 高亮");
+    expect(setCalloutEmoji(editor, "🔥", 0)).toBe(false);
+    expect(md(editor)).toBe("普通段落\n\n> [!💡]\n> 高亮");
     editor.destroy();
   });
 });

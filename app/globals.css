@@ -140,6 +140,19 @@ body {
   font-size: 16px;
   line-height: 1.5;
 }
+/* 编辑面：图标可点（#525）。::before 不是事件目标，点击落在 .wiki-callout 自身的
+   左侧留白上，由 CalloutEmojiPicker 按左上 40×40 判定——改 padding / 位置要同步
+   lib/editor/callout-emoji 的 CALLOUT_ICON_ZONE。只读渲染不在 .smart-textarea-content 里，不受影响 */
+.smart-textarea-content .wiki-callout::before {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0 2px;
+  margin-left: -2px;
+}
+.smart-textarea-content .wiki-callout:hover::before { background: rgba(0, 0, 0, 0.06); }
+/* 无图标时留一个淡淡的占位，悬停才显——不然没地方点回来 */
+.smart-textarea-content .wiki-callout[data-emoji=""]::before { content: "☺"; opacity: 0; }
+.smart-textarea-content .wiki-callout[data-emoji=""]:hover::before { opacity: 0.35; }
 .wiki-callout > p { margin: 0; }
 .wiki-callout > p + p { margin-top: 4px; }
 

@@ -216,6 +216,24 @@ export function setCalloutColor(editor: Editor, color: string | null): boolean {
   return true;
 }
 
+/**
+ * 改高亮块图标。emoji 是字面字符，空串 = 无图标（marker 写成 `[!]`，方言本就允许）。
+ * `pos` 给了就改那一个（图标选择器点的是哪个块就改哪个，与选区无关）；不给按
+ * findCallout 找当前的。
+ */
+export function setCalloutEmoji(editor: Editor, emoji: string, pos?: number): boolean {
+  const block = pos === undefined ? findCallout(editor) : (() => {
+    const node = editor.state.doc.nodeAt(pos);
+    return node?.type.name === "callout" ? { node, pos, end: pos + node.nodeSize } : null;
+  })();
+  if (!block) return false;
+  const tr = editor.state.tr.setNodeMarkup(block.pos, undefined, { ...block.node.attrs, emoji: emoji.trim() });
+  selectNodeAt(tr, block.pos);
+  editor.view.dispatch(tr);
+  editor.commands.focus();
+  return true;
+}
+
 /** 选中祖先分栏组 —— 之后上移/下移/复制/删除就作用于整组 */
 export function selectColumnGroup(editor: Editor): boolean {
   const group = findColumnGroup(editor);

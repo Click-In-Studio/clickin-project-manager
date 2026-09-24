@@ -22,6 +22,7 @@ import {
 } from "@/lib/editor/editor-block-ops";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
 import { CALLOUT_COLORS } from "@/lib/editor/tiptap-callout";
+import { CALLOUT_EMOJI_PICKER_EVENT } from "@/lib/editor/callout-emoji";
 
 function Item({
   onClick, children, hint, danger, disabled,
@@ -133,7 +134,17 @@ export default function BlockMenu({
 
           {callout && (
             <>
-              <SectionLabel>高亮块颜色</SectionLabel>
+              <SectionLabel>高亮块</SectionLabel>
+              {/* 图标选择器住在 SmartTextarea（CalloutEmojiPicker），这里只发事件：
+                  菜单关掉之后面板才有地方站，且点图标本身也能开同一个面板 */}
+              <Item onClick={() => run(() => {
+                editor.view.dom.dispatchEvent(new CustomEvent(CALLOUT_EMOJI_PICKER_EVENT, { detail: { pos: callout.pos } }));
+              })}>
+                <span className="flex items-center gap-2.5">
+                  <span className="w-5 text-center">{(callout.node.attrs.emoji as string) || "☺"}</span>
+                  换图标…
+                </span>
+              </Item>
               {/* 色板而不是文字项：颜色靠看不靠读。选中态描蓝边，默认灰底也是一格 */}
               <div className="flex gap-1.5 px-3 pb-2">
                 {CALLOUT_COLORS.map(({ value, label }) => {
