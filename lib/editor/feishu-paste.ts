@@ -3,6 +3,8 @@
 // 非猜测。纪律：只在识别为飞书来源时介入；漏判/识别失败的代价只是丢样式
 // 不丢文字（一律降级为纯文本，不吃内容）。callout 与图片在后续批次。
 
+import { snapTextBg, snapTextFg } from "./inline-style-dialect";
+
 export type FeishuMember = { userId: string; name: string };
 
 /** 剪贴板 HTML 是否来自飞书（文档 root 标记 / 电子表格块 / @提及属性） */
@@ -26,9 +28,44 @@ export function transformFeishuHtml(html: string, opts: { members?: FeishuMember
   normalizeCodeBlocks(body);
   normalizeChecklists(body);
   mapAtMentions(doc, body, opts.members ?? []);
+  mapInlineStyles(doc, body);
   replaceFeishuImages(doc, body);
   replaceVideos(doc, body);
   return body.innerHTML;
+}
+
+// ── 行内样式：字色 / 底色 / 下划线吸附到色板（#524）────────────────────────────
+// 飞书把文字样式写在 <span style="color: rgb(…); background-color: rgb(…);
+// text-decoration: underline"> 上，颜色是它自己的色板 hex（字色 #d83931 一族、
+// 底色 #fbbfbc 一族）。我们的方言只收色名枚举（lib/editor/inline-style-dialect），
+// 所以这里按色相吸附到最近的一档，重建成 canonical 的嵌套结构：
+// 底色 > 字色 > 下划线 > 删除线，由外到内——与编辑器 mark 的 priority 顺序一致，
+// 再序列化时形态不变。飞书默认字色 #1f2329 吸成「默认」= 不落标签（粘来的字
+// 极少是用户主动选的黑）；近白底同理。认不出的颜色值不动，编辑器 parse 路径
+// 只收枚举，会静默丢样式保文字。
+function mapInlineStyles(doc: Document, body: HTMLElement) {
+  for (const el of Array.from(body.querySelectorAll("span[style]")) as HTMLElement[]) {
+    if (el.closest("pre, [data-callout]")) continue; // 代码块里没有样式；callout 底色另有归宿
+    const fg = snapTextFg(el.style.color);
+    const bg = snapTextBg(el.style.backgroundColor);
+    const deco = `${el.style.textDecoration} ${el.style.textDecorationLine}`;
+    const layers: HTMLElement[] = [];
+    if (bg && bg !== "default") { const s = doc.createElement("span"); s.setAttribute("data-bg", bg); layers.push(s); }
+    if (fg && fg !== "default") { const s = doc.createElement("span"); s.setAttribute("data-fg", fg); layers.push(s); }
+    if (/underline/.test(deco)) layers.push(doc.createElement("u"));
+    if (/line-through/.test(deco)) layers.push(doc.createElement("s"));
+    // 已处理的属性从原 span 上摘掉（留着会被 parse 规则再看一遍；font-weight 之类
+    // 别的样式保留给 bold 等 mark 自己认）
+    el.style.removeProperty("color");
+    el.style.removeProperty("background-color");
+    el.style.removeProperty("text-decoration");
+    el.style.removeProperty("text-decoration-line");
+    if (!el.getAttribute("style")?.trim()) el.removeAttribute("style");
+    if (layers.length === 0) continue;
+    for (let i = 0; i < layers.length - 1; i++) layers[i].appendChild(layers[i + 1]);
+    el.replaceWith(layers[0]);
+    layers[layers.length - 1].appendChild(el);
+  }
 }
 
 // ── 图片：整篇粘贴路径降级为占位文本 ─────────────────────────────────────────

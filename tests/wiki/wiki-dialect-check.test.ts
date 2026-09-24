@@ -118,3 +118,35 @@ describe("restoreAndCheckBody：块锚点消失（update）", () => {
     expect(r.ok).toBe(true);
   });
 });
+
+describe("行内样式方言校验（#524）", () => {
+  const none = new Map<string, string[]>();
+
+  it("canonical 三种写法与两层嵌套放行", () => {
+    const body = '甲<span style="background-color:yellow">这是一段<span style="color:red">红色</span>的字</span>，<u>下划线</u>';
+    const r = restoreAndCheckBody(body, none);
+    expect(r.ok).toBe(true);
+  });
+
+  it("拼法变体 / hex / 合写 / <font> 一律拒绝，提示里带色名枚举", () => {
+    for (const bad of [
+      '<span style="color: red">甲</span>',
+      '<span style="color:#dc2626">甲</span>',
+      '<span style="color:red;background-color:yellow">甲</span>',
+      '<font color="red">甲</font>',
+      '<span class="x">甲</span>',
+    ]) {
+      const r = restoreAndCheckBody(bad, none);
+      expect(r.ok, bad).toBe(false);
+      if (!r.ok) {
+        expect(r.problems.some((p) => p.includes("行内样式标签"))).toBe(true);
+        expect(r.problems.some((p) => p.includes("black/gray/red"))).toBe(true);
+      }
+    }
+  });
+
+  it("代码段里的语法示例不算违规", () => {
+    const r = restoreAndCheckBody('写法示例：`<span style="color: red">`\n\n```\n<font color="red">\n```', none);
+    expect(r.ok).toBe(true);
+  });
+});

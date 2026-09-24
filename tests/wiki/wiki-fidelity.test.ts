@@ -23,6 +23,10 @@ const STYLE_ONLY: [string, string, string][] = [
   ["多余空行折叠", "甲\n\n\n乙", "甲\n\n乙"],
   ["引用型链接转行内", "[甲][a]\n\n[a]: https://x.com", "[甲](https://x.com)"],
   ["段落重新折行", "甲乙\n丙丁", "甲乙 丙丁"],
+  // 行内样式方言（#524）：拼法变体与编辑器写出的 canonical 是同一个东西
+  ["字色拼法归一化", '甲<span style="color: Red;">乙</span>', '甲<span style="color:red">乙</span>'],
+  ["底色 background 简写归一化", "甲<span style='background: yellow'>乙</span>", '甲<span style="background-color:yellow">乙</span>'],
+  ["下划线大写标签归一化", "甲<U>乙</U>", "甲<u>乙</u>"],
 ];
 
 describe("书写风格归一化不该触发", () => {
@@ -39,6 +43,13 @@ describe("真丢内容必须触发", () => {
     const r = checkFidelity("甲[^1]\n\n[^1]: 注", "甲[^1](%E6%B3%A8)");
     expect(r.lossy).toBe(true);
     expect(r.missing.join()).toContain("fn:1");
+  });
+
+  it("字色 / 底色 / 下划线标签丢失也是丢内容（#524）", () => {
+    expect(checkFidelity('甲<span style="color:red">乙</span>', "甲乙").lossy).toBe(true);
+    expect(checkFidelity("甲<u>乙</u>", "甲乙").lossy).toBe(true);
+    // 换了颜色也算——签名比的是 canonical 原文
+    expect(checkFidelity('甲<span style="color:red">乙</span>', '甲<span style="color:blue">乙</span>').lossy).toBe(true);
   });
 
   it("裸 HTML 标签丢失", () => {

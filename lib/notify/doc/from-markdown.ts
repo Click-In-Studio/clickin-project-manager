@@ -17,6 +17,7 @@ import remarkBreaks from "remark-breaks";
 import { CM_HREF_PREFIX } from "../../editor/mention-types";
 import { parseCalloutMarker } from "../../editor/tiptap-callout";
 import { COLS_OPEN_RE, COLS_CLOSE_RE } from "../../editor/tiptap-columns";
+import { parseCanonicalOpenTag, SPAN_CLOSE_TAG, U_CLOSE_TAG } from "../../editor/inline-style-dialect";
 import type { DocBlock, DocInline, NotifyDoc, RefResolver } from "./ast";
 
 type MdNode = {
@@ -62,6 +63,13 @@ async function inlines(
         break;
       case "delete":
         out.push(...await inlines(n.children ?? [], resolve, marks));
+        break;
+      case "html":
+        // 行内样式方言的三种标签（字色 / 底色 / 下划线，#524）：通知通道没有这些样式，
+        // 标签整个丢、标签之间的文字照走 text 分支。**别的** HTML 仍按字面文字给
+        // （与只读渲染一致，平台 renderer 会转义）——不认的东西不吃字
+        if (!n.value || parseCanonicalOpenTag(n.value) || n.value === SPAN_CLOSE_TAG || n.value === U_CLOSE_TAG) break;
+        out.push({ t: "text", text: n.value, ...marks });
         break;
       case "break":
         out.push({ t: "br" });
