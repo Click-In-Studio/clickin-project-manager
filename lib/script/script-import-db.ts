@@ -1,12 +1,9 @@
 import { getPool } from "../pg";
-import type { PoolClient } from "pg";
 import type { Block, MarkerMeta } from "./script-types";
 import { importCueColumnsInTx } from "../ops/cue-list-db";
-import { keyBetween } from "../lex-order";
 import { withLegacyOwnershipProjection, withMarkerOwnership } from "./script-marker-blocks";
 import { randomUUID } from "node:crypto";
 import type { ImportTagChanges } from "../import/types";
-import { genSnapshotId } from "./script-row-model";
 import { ensureSceneAnchorsInTx, insertSnapshotRowsInTx, snapshotRowFromBlock, upsertCharacterRowsInTx } from "./script-row-tx";
 import { finalizeMarkerInvariantsInTx, markerStructureBlocksInTx } from "./script-marker-tx";
 import { scheduleEstimatedPageMapSave } from "./page-map-db";
@@ -47,7 +44,6 @@ export async function importScriptToVersion(
     /** 开场章是否显示；开场章本身 = 排在最前的 chapter_marker，读时派生不落库（#636） */
     showOpeningChapter?: boolean;
     stageDelimiters?: { open: string; close: string };
-    ensureEmptySceneBlocks?: boolean;
   },
 ): Promise<void> {
   // Marker projection operates on logical block IDs, while import IDs identify snapshots.
@@ -334,10 +330,7 @@ export async function importScriptToVersion(
       );
     }
 
-    if (payload.ensureEmptySceneBlocks) {
-      // 占位块的两套实现见 #637；先插再收尾，让归一化把它们的归属列一并核对
-      await ensureEmptyScriptBlocksForEmptyScenesInTx(client, productionId, versionId);
-    }
+    // 空场次的占位正文块等结构修复由收尾统一跑域模型补（#637），导入不再自带 SQL 扫描
     await finalizeMarkerInvariantsInTx(client, productionId, versionId, { mode: "full", previousMarkerStructure });
 
     await client.query("COMMIT");
@@ -351,66 +344,4 @@ export async function importScriptToVersion(
   // 导入整版替换，页码全量重算（此前只有 patch 路径触发，#635 统一）
   void scheduleEstimatedPageMapSave(productionId, versionId, "full")
     .catch(err => console.error("[page-map] update error:", err));
-}
-
-async function ensureEmptyScriptBlocksForEmptyScenesInTx(
-  client: PoolClient,
-  productionId: string,
-  versionId: string,
-): Promise<void> {
-  const res = await client.query<{
-      block_id: string;
-      sort_key: string;
-      type: string;
-      marker_meta: MarkerMeta | null;
-    }>(
-      `SELECT sv.block_id, sv.sort_key, s.type::text, s.marker_meta
-       FROM script_version sv
-       JOIN script s ON s.id = sv.snapshot_id
-       WHERE sv.version_id = $1
-       ORDER BY sv.sort_key`,
-      [versionId],
-  );
-
-  const childSceneParentIds = new Set(
-      res.rows
-        .filter(row => row.type === "scene_marker" && row.marker_meta?.parentMarkerId)
-        .map(row => row.marker_meta?.parentMarkerId)
-        .filter((id): id is string => !!id),
-  );
-  // 开场章 = 排在最前的 chapter_marker（#636），不查 version.script_config
-  const openingChapterMarkerId = res.rows.find(row => row.type === "chapter_marker")?.block_id ?? null;
-
-  const emptyBlocks: Array<{ snapshotId: string; blockId: string; sortKey: string; ownerMarkerId: string }> = [];
-  for (let index = 0; index < res.rows.length; index++) {
-    const row = res.rows[index];
-    if (row.type !== "scene_marker" && row.type !== "chapter_marker") continue;
-    if (row.block_id === openingChapterMarkerId) continue;
-    if (row.type === "chapter_marker" && childSceneParentIds.has(row.block_id)) continue;
-
-    let hasScriptBlock = false;
-    for (let cursor = index + 1; cursor < res.rows.length; cursor++) {
-      const next = res.rows[cursor];
-      if (next.type === "chapter_marker" || next.type === "scene_marker") {
-        break;
-      }
-      if (next.type === "dialogue" || next.type === "stage" || next.type === "lyric") {
-        hasScriptBlock = true;
-        break;
-      }
-    }
-    if (hasScriptBlock) continue;
-
-    const snapshotId = genSnapshotId();
-    const blockId = `blk_${snapshotId}`;
-    const nextSortKey = res.rows[index + 1]?.sort_key ?? null;
-    const lexKey = keyBetween(row.sort_key, nextSortKey);
-    emptyBlocks.push({ snapshotId, blockId, sortKey: lexKey, ownerMarkerId: row.block_id });
-  }
-  await insertSnapshotRowsInTx(client, productionId, versionId, emptyBlocks.map((block) => ({
-    snapshotId: block.snapshotId, blockId: block.blockId, lexKey: block.sortKey,
-    sceneId: null, rehearsalMark: null, ownerMarkerId: block.ownerMarkerId,
-    type: "dialogue", content: "", stageComment: null, markerMetaJson: "{}", forceShowCharacterName: false,
-    characterIds: [], characterAnnotations: {},
-  })));
 }

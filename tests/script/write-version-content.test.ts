@@ -67,7 +67,9 @@ describe("A: 块与角色的批量写", () => {
       upsertChars: [{ id: charId, name: "角色A", isAggregate: false, sortOrder: 0 }],
     });
     const p = await project(versionId);
-    expect(p.blocks.map((b) => [b.block_id, b.content, b.chars])).toEqual([[b1, "甲", `${charId}:旁白`], [b2, "乙", ""]]);
+    // 写入序列没有章标记，收尾按域模型在最前补一枚开场章（#637）
+    expect(p.blocks.map((b) => b.type)).toEqual(["chapter_marker", "dialogue", "dialogue"]);
+    expect(p.blocks.slice(1).map((b) => [b.block_id, b.content, b.chars])).toEqual([[b1, "甲", `${charId}:旁白`], [b2, "乙", ""]]);
     expect(p.chars).toEqual([{ character_id: charId, name: "角色A", is_aggregate: false }]);
   });
 

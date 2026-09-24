@@ -1,6 +1,10 @@
 import type { PoolClient } from "pg";
 import type { Block, BlockType, MarkerMeta } from "./script-types";
-import { sameMarkerStructure } from "./script-marker-domain";
+import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
+import { normalizeScriptMarkerInvariants, sameMarkerStructure } from "./script-marker-domain";
+import { genBlockId, genSnapshotId, isChapterSceneMarkerType } from "./script-row-model";
+import { ensureSceneAnchorsInTx, insertSnapshotRowsInTx, snapshotRowFromBlock, type SnapshotRow } from "./script-row-tx";
+import { keyBetween } from "../lex-order";
 
 // 标记结构事务 helper（#486 从 lib/db.ts 搬出）：在写侧事务内维护「标记 ↔ 场次 ↔ 归属」
 // 不变量——scene_version 排序归一、marker_structure_revision 递增、排练标记归属回填、
@@ -21,7 +25,8 @@ export type FinalizeMarkerScope =
     };
 
 /**
- * 写侧事务的统一收尾：从标记同步 scene_version → 归属回填 → 结构变了就 bump revision。
+ * 写侧事务的统一收尾：（整版模式先跑域模型的结构修复）→ 从标记同步 scene_version → 归属回填
+ * → 结构变了就 bump revision。
  * 必须先场次后归属：场次同步顺手给每个 chapter / scene 标记立 scene identity 行，归属
  * 归一化随后把标记的 script.scene_id 指向自己——FK 锚不先立就撞 script_scene_id_fkey
  * （patch 路径插标记块时 sceneId 常为 null）。返回结构是否变化，调用方据此决定要不要
@@ -34,6 +39,7 @@ export async function finalizeMarkerInvariantsInTx(
   scope: FinalizeMarkerScope,
 ): Promise<boolean> {
   if (scope.mode === "full") {
+    await repairMarkerStructureInTx(client, productionId, versionId);
     await syncSceneVersionsFromMarkersInTx(client, productionId, versionId);
     await normalizeRehearsalMarkOwnershipInTx(client, versionId);
     const finalMarkerStructure = await markerStructureBlocksInTx(client, versionId);
@@ -49,6 +55,96 @@ export async function finalizeMarkerInvariantsInTx(
   }
   if (scope.markerStructureChanged) await bumpMarkerStructureRevisionInTx(client, versionId);
   return scope.markerStructureChanged;
+}
+
+/**
+ * 整版跑域模型的标记结构修复（#637）：读全序列 → normalizeScriptMarkerInvariants 全量模式 →
+ * 把模型补出来的块插进库（首块开场章、章内正文前的首场、排练标记补位、标记后的占位正文块）。
+ * 「什么算正文块」「哪个标记后面要占位」只在 script-marker-domain 判一份：patch 路径在内存里
+ * 做同一件事（scoped 模式），整版写（导入 / 批量写）走这里，此前导入自带一份 SQL 扫描已删。
+ * 只插行不改既有行——既有行的归属列由随后的 normalizeRehearsalMarkOwnershipInTx 按 SQL 回填，
+ * 新插的标记块要先立 scene identity 锚（同 patch 路径）。
+ */
+async function repairMarkerStructureInTx(
+  client: PoolClient,
+  productionId: string,
+  versionId: string,
+): Promise<void> {
+  const { rows } = await client.query<{
+    block_id: string;
+    sort_key: string;
+    type: BlockType;
+    scene_id: string | null;
+    rehearsal_mark: string | null;
+    owner_marker_id: string | null;
+    marker_meta: MarkerMeta | null;
+  }>(
+    `SELECT sv.block_id, sv.sort_key, s.type::text AS type, s.scene_id, s.rehearsal_mark,
+            s.owner_marker_id, s.marker_meta
+     FROM script_version sv
+     JOIN script s ON s.id = sv.snapshot_id
+     WHERE sv.version_id = $1
+     ORDER BY sv.sort_key`,
+    [versionId],
+  );
+  const sortKeyById = new Map(rows.map((row) => [row.block_id, row.sort_key]));
+  // 只重建结构字段（type / sceneId / ownerMarkerId / parentMarkerId），content / 角色一律占位：
+  // normalizeScriptMarkerInvariants 的规则不看内容，patch 路径的 toBlock 传的也是同样的骨架。
+  // 域模型里唯一读 content 的 isEmptyTextBlock 只用于删除规划，不在归一化路径上；
+  // 若将来归一化规则要看内容，这里与 patch 路径的 toBlock 必须一起补真值。
+  const blocks: Block[] = rows.map((row) => ({
+    id: row.block_id,
+    type: row.type,
+    content: "",
+    characterIds: [],
+    characterAnnotations: {},
+    lyric: false,
+    sceneId: row.scene_id,
+    rehearsalMark: row.rehearsal_mark,
+    ownerMarkerId: row.owner_marker_id,
+    markerMeta: { parentMarkerId: row.marker_meta?.parentMarkerId ?? null },
+  }));
+  const normalized = normalizeScriptMarkerInvariants({
+    blocks,
+    scenes: [],
+    characters: [],
+    config: {
+      ...DEFAULT_SCRIPT_CONFIG,
+      openingChapterMarkerId: blocks.find((block) => block.type === "chapter_marker")?.id ?? null,
+    },
+  }, genBlockId);
+
+  // 修复只插不删不换序，既有块相对顺序不变：新块的 sort_key 取「前一块（含刚补的）」与
+  // 「后面最近一个既有块」之间
+  const inserted: SnapshotRow[] = [];
+  let previousKey: string | null = null;
+  for (let index = 0; index < normalized.blocks.length; index++) {
+    const block = normalized.blocks[index];
+    const existingKey = sortKeyById.get(block.id);
+    if (existingKey !== undefined) {
+      previousKey = existingKey;
+      continue;
+    }
+    let nextKey: string | null = null;
+    for (let cursor = index + 1; cursor < normalized.blocks.length; cursor++) {
+      const key = sortKeyById.get(normalized.blocks[cursor].id);
+      if (key !== undefined) {
+        nextKey = key;
+        break;
+      }
+    }
+    const lexKey = keyBetween(previousKey, nextKey);
+    previousKey = lexKey;
+    const sceneId = isChapterSceneMarkerType(block.type) ? block.id : null;
+    inserted.push(snapshotRowFromBlock(
+      block,
+      { snapshotId: genSnapshotId(), blockId: block.id, lexKey },
+      { sceneId, rehearsalMark: null, forceShowCharacterName: false },
+    ));
+  }
+  if (inserted.length === 0) return;
+  await ensureSceneAnchorsInTx(client, productionId, inserted.flatMap((row) => row.sceneId ? [row.sceneId] : []));
+  await insertSnapshotRowsInTx(client, productionId, versionId, inserted);
 }
 
 async function normalizeSceneOwnershipOrderInTx(client: PoolClient, versionId: string): Promise<void> {
