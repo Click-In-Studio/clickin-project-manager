@@ -18,15 +18,15 @@ import { BASE_PATH } from "@/lib/base-path";
 import type { SuggestionProps, SuggestionKeyDownProps } from "@tiptap/suggestion";
 import type { MentionSearchResult } from "@/lib/editor/mention-types";
 import {
-  encodeMentionHref, decodeMentionHref, CM_HREF_PREFIX,
-  encodeUserHref, decodeUserHref, decodeAssetSrc,
-  type ContentMentionAttrs,
+  encodeMentionHref, encodeUserHref, decodeUserHref, decodeAssetSrc,
+  type ContentMentionAttrs, type ContentMentionKind,
 } from "@/lib/editor/mention-types";
 import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
 import { isFeishuHtml, transformFeishuHtml } from "@/lib/editor/feishu-paste";
 import { stripExternalPastedImages } from "@/lib/editor/external-img-paste";
 import { isEmbeddableUpload, embedMediaKind } from "@/lib/asset/embed-media";
 import { Callout } from "@/lib/editor/tiptap-callout";
+import { MarkdownContentMentionExt } from "@/lib/editor/tiptap-content-mention";
 import { INLINE_STYLE_EXTENSIONS } from "@/lib/editor/tiptap-inline-style";
 import { WikiImage, type WikiEmbedMeta } from "@/lib/wiki/tiptap-image";
 import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/editor/tiptap-upload-placeholder";
@@ -43,6 +43,7 @@ import { suggestionMenuLayout } from "@/lib/editor/editor-floating-menu";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 import CalloutEmojiPicker from "@/components/editor/CalloutEmojiPicker";
 import BlockHandle from "@/components/editor/BlockHandle";
+import TaskSyncMenu from "@/components/editor/TaskSyncMenu";
 import TableTools from "@/components/editor/TableTools";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
 
@@ -200,6 +201,9 @@ export function slashCommandPlugin(): DropPlugin {
   };
 }
 
+/** 编辑态 chip 标签要跟实时真相走的 kind（见下方标签刷新 effect） */
+const LIVE_LABEL_KINDS = new Set<ContentMentionKind>(["wiki", "task"]);
+
 // ── TipTap extensions ─────────────────────────────────────────────────────────
 
 // Content mention — plain text mode: serialises as [#kind:id] tokens
@@ -231,58 +235,6 @@ const PlainContentMentionExt = Mention.extend({
       aux: { default: null },
       versionId: { default: null },
       label: { default: null },
-    };
-  },
-});
-
-// Content mention — markdown mode: serialises as [#label](cm://...) links
-const MarkdownContentMentionExt = Mention.extend({
-  name: "contentMention",
-  addAttributes() {
-    return {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...(this.parent as any)?.(),
-      kind: { default: "scene" },
-      displayMode: { default: null },
-      aux: { default: null },
-      versionId: { default: null },
-      label: { default: null },
-    };
-  },
-  parseHTML() {
-    return [
-      { tag: "span[data-content-mention]" },
-      {
-        tag: "a",
-        priority: 1001,
-        getAttrs(el) {
-          if (typeof el === "string") return false;
-          const href = el.getAttribute("href") ?? "";
-          if (!href.startsWith(CM_HREF_PREFIX)) return false;
-          const attrs = decodeMentionHref(href);
-          if (!attrs) return false;
-          // wiki 链接文本恒为占位 "#"（见下方 serialize），textContent 剥完前缀后是
-          // 空串——归一化成 null 而不是 ""，renderHTML 的 label ?? "文档" 才接得住
-          const label = (el.textContent ?? "").replace(/^#/, "") || null;
-          return { ...attrs, label };
-        },
-      },
-    ];
-  },
-  addStorage() {
-    return {
-      markdown: {
-        serialize(state: { write: (s: string) => void }, node: { attrs: ContentMentionAttrs }) {
-          const { kind, displayMode, id, aux, versionId } = node.attrs;
-          const href = encodeMentionHref({ kind, displayMode, id, aux, versionId });
-          // 显示位恒为固定哨兵 "#"，**所有 kind 一视同仁**（语法大纲 G4：显示位是
-          // 缓存不是真相）。原先只有 wiki 落 "#"、其余 kind 落 `#${label}`——那段
-          // label 是编辑期快照，目标改名后就冻在正文里，看着像"链接坏了"。
-          // 为什么不真的留空 `[](…)`：空链接文字在不认方言的渲染器里**完全不可见**，
-          // 违反 G5「降级可读」；`#` 携带零信息、永不过期，是"留空"的可降级写法。
-          state.write(`[#](${href})`);
-        },
-      },
     };
   },
 });
@@ -454,6 +406,10 @@ export interface SmartTextareaProps {
    *  180~360px 的小框既没有放手柄的地方，也用不到块级移动/分栏。
    *  浮动条不受此门控（它贴选区，不占版面），markdown 面一律有。 */
   blockTools?: boolean;
+  /** 任务项同步（#670）：光标停在 `- [ ]` 任务项上出「同步任务」浮条，建 production
+   *  任务并往该行写 task 引用。需要 contentMention.productionId；只给 wiki 整页
+   *  （引用边落 wiki_entity_link 才有反向链接，别的面建了任务也回不到文档）。 */
+  taskSync?: boolean;
   /** Extra custom-trigger plugins (escape hatch) */
   plugins?: DropPlugin[];
   /** 图片粘贴上传（wiki 文档场景）。提供即解锁 image 节点：粘贴的图片文件
@@ -487,6 +443,7 @@ export default function SmartTextarea({
   markdown = false,
   frameless = false,
   blockTools = false,
+  taskSync = false,
   plugins: extraPlugins = [],
   imageUpload,
   placeholder,
@@ -1048,29 +1005,34 @@ export default function SmartTextarea({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(remoteCursors ?? []), editor]);
 
-  // wiki mention 标题活刷新：contentMention chip 的 label attr 只是解析/插入时的
-  // 快照（同 WikiMarkdown/SmartText 一样不可信——目标文档改名后会长期挂着旧标题）。
+  // wiki / task mention 标签活刷新：contentMention chip 的 label attr 只是解析/插入时的
+  // 快照（同 WikiMarkdown/SmartText 一样不可信——目标文档改名后会长期挂着旧标题；
+  // 任务推进了状态，chip 上的「· 待处理」也该跟着变，#670）。
   // 只读渲染那两处天生走 mention-resolve 逐次覆盖；这里手动补一次，用静默
   // transaction（wikiLabelRefresh meta，onUpdate 见上方）落地，不触发自动保存。
+  // 剧本域 kind 不在此列：它们的 label 由 # 补全时写入，解析要版本上下文。
   const wikiLabelSigRef = useRef("");
   useEffect(() => {
     if (!markdown || !editor || editor.isDestroyed) return;
     const pid = contentMentionRef.current?.productionId;
     if (!pid) return;
-    const ids = new Set<string>();
+    const keys = new Set<string>();
     editor.state.doc.descendants((node) => {
-      if (node.type.name === "contentMention" && node.attrs.kind === "wiki" && node.attrs.id) {
-        ids.add(node.attrs.id as string);
+      if (node.type.name === "contentMention" && LIVE_LABEL_KINDS.has(node.attrs.kind) && node.attrs.id) {
+        keys.add(`${node.attrs.kind}:${node.attrs.id}`);
       }
     });
-    if (ids.size === 0) return;
-    const idList = [...ids].sort();
-    const sig = idList.join(",");
+    if (keys.size === 0) return;
+    const keyList = [...keys].sort();
+    const sig = keyList.join(",");
     if (wikiLabelSigRef.current === sig) return;
     wikiLabelSigRef.current = sig;
     (async () => {
       try {
-        const mentions = idList.map(id => ({ kind: "wiki", displayMode: null, id, aux: null, versionId: null }));
+        const mentions = keyList.map(k => {
+          const at = k.indexOf(":");
+          return { kind: k.slice(0, at), displayMode: null, id: k.slice(at + 1), aux: null, versionId: null };
+        });
         const res = await fetch(`${BASE_PATH}/api/production/${pid}/mention-resolve`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1078,14 +1040,14 @@ export default function SmartTextarea({
         });
         if (!res.ok || editor.isDestroyed) return;
         const data = await res.json() as { labels: (string | null)[] };
-        const labelById = new Map<string, string>();
-        idList.forEach((id, i) => { if (data.labels[i]) labelById.set(id, data.labels[i]!); });
-        if (labelById.size === 0) return;
+        const labelByKey = new Map<string, string>();
+        keyList.forEach((k, i) => { if (data.labels[i]) labelByKey.set(k, data.labels[i]!); });
+        if (labelByKey.size === 0) return;
         const tr = editor.state.tr;
         let changed = false;
         editor.state.doc.descendants((node, pos) => {
-          if (node.type.name !== "contentMention" || node.attrs.kind !== "wiki") return;
-          const fresh = labelById.get(node.attrs.id as string);
+          if (node.type.name !== "contentMention" || !LIVE_LABEL_KINDS.has(node.attrs.kind)) return;
+          const fresh = labelByKey.get(`${node.attrs.kind}:${node.attrs.id}`);
           if (fresh && fresh !== node.attrs.label) {
             tr.setNodeMarkup(pos, undefined, { ...node.attrs, label: fresh });
             changed = true;
@@ -1118,6 +1080,10 @@ export default function SmartTextarea({
       {/* 浮动条与固定工具栏的作用域严格一致（markdown 面），commit「收工具栏」
           才是 1:1 替换而不是能力平移 */}
       {markdown && !readOnly && <TextBubbleMenu editor={editor} />}
+      {/* 任务项同步浮条（#670）：与 TextBubbleMenu 靠选区判据互斥；补全菜单开着时让位 */}
+      {markdown && taskSync && !readOnly && contentMention && (
+        <TaskSyncMenu editor={editor} productionId={contentMention.productionId} hidden={!!drop && !dropHidden} />
+      )}
       {/* 高亮块图标：点块左上角的表情换（#525）。不随 blockTools 门控——小框里也能有高亮块 */}
       {markdown && !readOnly && <CalloutEmojiPicker editor={editor} />}
       {markdown && blockTools && !readOnly && <BlockHandle editor={editor} />}

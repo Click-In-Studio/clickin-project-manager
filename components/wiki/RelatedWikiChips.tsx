@@ -16,7 +16,7 @@ export default function RelatedWikiChips({
   productionId, entityType, entityId, canEdit = false, createDefaultTitle, onNavigate,
 }: {
   productionId: string;
-  entityType: "scene" | "rehearsal" | "block" | "cue" | "asset";
+  entityType: "scene" | "rehearsal" | "block" | "cue" | "asset" | "task";
   entityId: string;
   canEdit?: boolean;
   /** 提供即启用"新建文档"入口（如「第3场 · 大纲」），创建后跳 wiki 页写作 */

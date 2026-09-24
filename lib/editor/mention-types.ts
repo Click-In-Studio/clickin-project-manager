@@ -1,6 +1,11 @@
 // Shared types and serialization for content mentions (#-prefix)
 
-export type ContentMentionKind = "page" | "scene" | "rehearsal" | "block" | "cue" | "asset" | "wiki";
+/** 引用类型全集（`/__cm__/<type>/<id>` 的 type 位，user 除外——它走 atMention）。
+ *  单一真相：EDGE_KINDS（lib/wiki/links.ts）、方言校验的未知类型检查、AI 说明书
+ *  都从这里派生；加 kind 只改这一处 + 各落点的解析分支。
+ *  task（#670）：文档任务项同步出来的 production 任务，标题 / 状态实时 resolve。 */
+export const CONTENT_MENTION_KINDS = ["page", "scene", "rehearsal", "block", "cue", "asset", "wiki", "task"] as const;
+export type ContentMentionKind = (typeof CONTENT_MENTION_KINDS)[number];
 export type BlockDisplayMode = "page" | "scene" | "rehearsal";
 
 export type ContentMentionAttrs = {

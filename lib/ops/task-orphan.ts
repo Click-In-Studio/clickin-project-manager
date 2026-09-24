@@ -33,6 +33,7 @@
  */
 import type { PoolClient } from "pg";
 import { getPolicyValue } from "../perm/policy-db";
+import { clearEntityLinks } from "../wiki/entity-link-db";
 import {
   ORPHAN_TASK_KEEP, ORPHAN_TASK_DELETE,
 } from "../perm/policy-keys";
@@ -86,6 +87,8 @@ export async function disposeOrphanedTasks(
       `DELETE FROM task WHERE id = ANY($1::text[]) AND production_id = $2`,
       [toDelete, productionId],
     );
+    // 文档引用边随本体走（#670）——同事务，不留「任务没了、边还在」的空窗
+    await clearEntityLinks(productionId, "task", toDelete, client);
   }
 
   // 活下来的标记为待处理，交给部门 POC 决定删还是转挂

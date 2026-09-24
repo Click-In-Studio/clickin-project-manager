@@ -7,6 +7,7 @@ import { extractMentionEdges, listBacklinks, listWikiRefsForEntity, listEntityRe
 import { ensureDramaturgyRootAnchor } from "@/lib/node/anchors";
 import { getNodeByWikiId } from "@/lib/node/db";
 import { GET as wikiRefsGET, POST as wikiRefsPOST, DELETE as wikiRefsDELETE } from "@/app/api/production/[id]/wiki-refs/route";
+import { createEventTechReq, deleteTaskByProduction } from "@/lib/ops/event-db";
 import { makeProduction, makeScene, cleanupProduction, shortId } from "../_support/factories";
 
 // wiki↔entity 引用边（wiki_entity_link）：提取全 kind、派生重建只清 body 边、
@@ -52,6 +53,7 @@ describe("extractMentionEdges", () => {
       "[排练标记](/__cm__rehearsal:blk_2)",
       "[Q](/__cm__cue:cue_9)",
       "[图纸](/__cm__asset:as_7:scene:sc_abc)",
+      "[#](/__cm__/task/tr_42)",
       "[p.3](/__cm__page:3)",
       "[外链](https://example.com)",
     ].join("\n");
@@ -61,6 +63,7 @@ describe("extractMentionEdges", () => {
       { entityType: "cue", entityId: "cue_9" },
       { entityType: "rehearsal", entityId: "blk_2" },
       { entityType: "scene", entityId: "sc_abc" },
+      { entityType: "task", entityId: "tr_42" },
       { entityType: "wiki", entityId: w.toLowerCase() },
     ]);
   });
@@ -330,5 +333,59 @@ describe("manual edges & dramaturgy root (Phase 2)", () => {
     await post(linker, { entityType: "scene", entityId: sceneId, wikiId: doc.id });
     const refs = await listEntityRefsForWiki(doc.id, prodId);
     expect(refs).toEqual([{ entityType: "scene", entityId: sceneId, manual: true }]);
+  });
+});
+
+// ── task（#670）：文档任务项同步出的任务 ────────────────────────────────────────
+describe("task 引用边", () => {
+  const cookieFor = (userId: string) =>
+    `${SESSION_COOKIE}=${createSession({ userId, name: "测试", avatarUrl: null, isAdmin: false })}`;
+  const refsReq = (taskId: string, userId?: string) =>
+    new NextRequest(`http://localhost/api/production/${prodId}/wiki-refs?type=task&id=${taskId}`, {
+      headers: userId ? { Cookie: cookieFor(userId) } : {},
+    });
+  const ctx = () => ({ params: Promise.resolve({ id: prodId }) });
+
+  async function newTask(assignee: string | null): Promise<string> {
+    const req = await createEventTechReq({
+      id: `tr_${shortId()}`, productionId: prodId, eventId: null, scheduleItemIds: [],
+      title: `装台${shortId()}`, description: "", presetMinutes: null, departmentId: null, groupId: null,
+      assignees: assignee ? [{ userId: assignee, name: "指派人" }] : [], createdBy: creator,
+    });
+    return req.id;
+  }
+
+  it("正文 [#](/__cm__/task/<id>) 落边；GET /wiki-refs 门 = 任务可见性（401 / 非相关成员 403 / 指派人 200）", async () => {
+    const taskId = await newTask(stranger);
+    const doc = await createWiki({
+      productionId: prodId, title: "装台清单",
+      body: `- [ ] 装台 [#](/__cm__/task/${taskId})`, createdBy: creator,
+    });
+    expect((await listWikiRefsForEntity(prodId, "task", taskId)).map(r => r.id)).toContain(doc.id);
+
+    expect((await wikiRefsGET(refsReq(taskId), ctx())).status).toBe(401);
+    // creator 是成员但既非指派人也无 task 权限 → 403
+    expect((await wikiRefsGET(refsReq(taskId, creator), ctx())).status).toBe(403);
+    const res = await wikiRefsGET(refsReq(taskId, stranger), ctx());
+    expect(res.status).toBe(200);
+    expect(((await res.json()).refs as { id: string }[]).map(r => r.id)).toContain(doc.id);
+  });
+
+  it("删任务 → 指向它的边（body + manual）一并清掉，不留死 chip", async () => {
+    const taskId = await newTask(null);
+    const doc = await createWiki({
+      productionId: prodId, title: "会被清边", body: `[#](/__cm__/task/${taskId})`, createdBy: creator,
+    });
+    await getPool().query(
+      `INSERT INTO wiki_entity_link (wiki_id, production_id, entity_type, entity_id, origin, created_by)
+       VALUES ($1::uuid, $2, 'task', $3, 'manual', $4::uuid)`,
+      [doc.id, prodId, taskId, creator],
+    );
+    expect((await listEntityRefsForWiki(doc.id, prodId)).some(r => r.entityType === "task" && r.entityId === taskId)).toBe(true);
+
+    await deleteTaskByProduction(taskId, prodId);
+    const leftover = await getPool().query(
+      `SELECT 1 FROM wiki_entity_link WHERE entity_type = 'task' AND entity_id = $1`, [taskId]);
+    expect(leftover.rows).toHaveLength(0);
   });
 });

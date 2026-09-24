@@ -3,6 +3,7 @@ import { canPublishAsset } from "../asset/perm";
 import { uid } from "../asset/db";
 import type { GrantActor } from "../perm/grant-check";
 import { isWikiId } from "./id";
+import { CONTENT_MENTION_KINDS } from "../editor/mention-types";
 
 // ─── mention 边提取（两种序列化形态：纯 token 与 markdown 私有 href）───────────
 
@@ -10,7 +11,7 @@ import { isWikiId } from "./id";
 // 锚定语义逐字继承 mention 体系：全 kind 一律锚**稳定 id**，不锚修订行 id。
 // cue 曾是唯一的例外（锚 cue.id 行 id），#302 已随 migrate-cue-mention-stable-id
 // 与 mention 体系同批切到 cue.cue_id——边表与正文不允许锚不同的 id。
-const EDGE_KINDS = new Set(["wiki", "scene", "rehearsal", "block", "cue", "asset"]);
+const EDGE_KINDS = new Set<string>(CONTENT_MENTION_KINDS.filter(k => k !== "page"));
 
 export type MentionEdge = { entityType: string; entityId: string };
 

@@ -20,6 +20,8 @@ import styles from "@/components/ui/my-pages.module.css";
 import responsive from "@/components/ops/responsive.module.css";
 import type { EventTechReq, EventScheduleItem, ProductionEvent, TaskDependencyRef } from "@/lib/ops/event-db";
 import { fmtTime, fmtDateTime } from "@/lib/tz";
+import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
+import { TASK_STATUS_LABELS } from "@/lib/ops/task-types";
 
 const SCHEDULE_ITEM_TYPE_LABELS: Record<string, string> = {
   scene_rehearsal: "场景排练",
@@ -36,9 +38,7 @@ const STATUS_OPTIONS = [
   { value: "in_progress", label: "进行中" },
   { value: "done",        label: "完成"   },
 ];
-const STATUS_LABELS: Record<string, string> = {
-  awaiting: "待确认", pending: "待处理", in_progress: "进行中", done: "完成",
-};
+const STATUS_LABELS = TASK_STATUS_LABELS;
 
 /** 状态徽章：主题色板（与任务面板同门） */
 function statusBadgeStyle(status: string): React.CSSProperties {
@@ -1055,6 +1055,11 @@ export default function ReqDetailClient({
                 />
               </div>
             )}
+
+            {/* 引用了本任务的文档（#670：文档任务项「同步任务」建出来的边）——只读反链 */}
+            <div style={{ marginTop: 12 }}>
+              <RelatedWikiChips productionId={productionId} entityType="task" entityId={req.id} />
+            </div>
           </section>
 
         </div>

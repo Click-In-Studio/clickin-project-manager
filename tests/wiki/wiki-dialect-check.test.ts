@@ -168,3 +168,19 @@ describe("行内样式方言校验（#524）", () => {
     expect(r.ok).toBe(true);
   });
 });
+
+describe("引用类型白名单（#670）", () => {
+  it("task 引用放行；模型自造的类型报未知", () => {
+    expect(restoreAndCheckBody("- [ ] 装台 [#](/__cm__/task/tr_1)", new Map()).ok).toBe(true);
+    const r = restoreAndCheckBody("[#](/__cm__/todo/x) 与 [#](/__cm__/scene/sc_1)", new Map());
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.problems).toHaveLength(1);
+      expect(r.problems[0]).toContain("/__cm__/todo/");
+      expect(r.problems[0]).toContain("task");
+    }
+  });
+  it("代码块里的自造类型是语法示例，不报", () => {
+    expect(restoreAndCheckBody("```\n[#](/__cm__/todo/x)\n```", new Map()).ok).toBe(true);
+  });
+});

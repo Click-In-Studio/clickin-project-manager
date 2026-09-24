@@ -618,6 +618,7 @@ export default function WikiDocClient({
                 onMentionsChange: m => { mentionsRef.current = m.map(x => ({ userId: x.userId, name: x.name })); },
               }}
               contentMention={{ productionId }}
+              taskSync
               plugins={[wikiLinkDropPlugin(productionId)]}
               imageUpload={uploadWikiImage}
               onInitialRoundTrip={handleRoundTrip}
