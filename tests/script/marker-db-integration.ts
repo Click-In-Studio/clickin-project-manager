@@ -351,9 +351,10 @@ async function run() {
 
     const childSceneId = `scene_${randomUUID()}`;
     await new Promise<void>((resolve, reject) => {
+      // 本文件由 `tsx` 直跑（#633）；子进程是裸 node，得带上 tsx loader 才能解析 .ts 与 @/ 别名。
       const child = spawn(
         process.execPath,
-        [__filename, "mutate", productionId, sourceVersionId, chapterId, childSceneId],
+        ["--import", "tsx", __filename, "mutate", productionId, sourceVersionId, chapterId, childSceneId],
         { stdio: "inherit" },
       );
       child.once("error", reject);
