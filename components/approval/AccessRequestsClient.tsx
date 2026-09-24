@@ -544,6 +544,42 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
   );
 }
 
+// ─── 动作按钮 ─────────────────────────────────────────────────────────────────
+
+type ActionKind = "approve" | "reject" | "escalate" | "cancel";
+/** 在途动作：哪条申请、哪个动作。null = 没有请求在途。 */
+type Acting = { reqId: string; kind: ActionKind } | null;
+
+/**
+ * #593：审批动作按钮。请求在途时按钮灰掉并写「处理中…」——PRIMARY_BTN 没有 disabled
+ * 外观，只加 disabled 的话深底白字纹丝不动，网络慢时看起来像「点了没反应」。
+ * `busy` 是本按钮的动作在途，`disabled` 是同一条申请上任一动作在途（兄弟按钮一起锁）。
+ */
+function ActionButton({ label, busy, disabled, primary, small, onClick }: {
+  label: string;
+  busy: boolean;
+  disabled: boolean;
+  primary?: boolean;
+  small?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      style={{
+        ...(primary ? PRIMARY_BTN : SECONDARY_BTN),
+        fontSize: small ? 12 : 13,
+        ...(small ? { padding: "7px 12px" } : {}),
+        ...(disabled ? { opacity: 0.55, cursor: busy ? "wait" : "not-allowed" } : {}),
+      }}
+      disabled={disabled}
+      aria-busy={busy || undefined}
+      onClick={onClick}
+    >
+      {busy ? "处理中…" : label}
+    </button>
+  );
+}
+
 // ─── RequestDetail ────────────────────────────────────────────────────────────
 
 function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel, acting }: {
@@ -553,7 +589,8 @@ function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel,
   onReject?: () => void;
   onEscalate?: () => void;
   onCancel?: () => void;
-  acting?: boolean;
+  /** 本条申请上在途的动作；null = 没有请求在途。 */
+  acting: ActionKind | null;
 }) {
   const label = resourceLabel(req);
   const isPending = req.status === "pending_supervisor" || req.status === "pending_resource";
@@ -623,17 +660,17 @@ function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel,
             {canAct ? (
               <>
                 {forwardOnly ? (
-                  <button style={{ ...PRIMARY_BTN, fontSize: 13 }} disabled={acting} onClick={onEscalate}>向上转交</button>
+                  <ActionButton primary label="向上转交" busy={acting === "escalate"} disabled={acting !== null} onClick={() => onEscalate?.()} />
                 ) : (
-                  <button style={{ ...PRIMARY_BTN, fontSize: 13 }} disabled={acting} onClick={onApprove}>批准</button>
+                  <ActionButton primary label="批准" busy={acting === "approve"} disabled={acting !== null} onClick={() => onApprove?.()} />
                 )}
-                <button style={{ ...SECONDARY_BTN, fontSize: 13 }} disabled={acting} onClick={onReject}>拒绝</button>
+                <ActionButton label="拒绝" busy={acting === "reject"} disabled={acting !== null} onClick={() => onReject?.()} />
                 {!forwardOnly && (
-                  <button style={{ ...SECONDARY_BTN, fontSize: 13 }} disabled={acting} onClick={onEscalate}>向上转交</button>
+                  <ActionButton label="向上转交" busy={acting === "escalate"} disabled={acting !== null} onClick={() => onEscalate?.()} />
                 )}
               </>
             ) : (
-              <button style={{ ...SECONDARY_BTN, fontSize: 13 }} disabled={acting} onClick={onCancel}>撤回申请</button>
+              <ActionButton label="撤回申请" busy={acting === "cancel"} disabled={acting !== null} onClick={() => onCancel?.()} />
             )}
           </div>
         </div>
@@ -660,7 +697,7 @@ export default function AccessRequestsClient({ productionId, productionName, can
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [loadingMine, setLoadingMine]         = useState(true);
   const [loadingPending, setLoadingPending]   = useState(true);
-  const [acting, setActing]                   = useState<string | null>(null);
+  const [acting, setActing]                   = useState<Acting>(null);
   const [actionError, setActionError]         = useState<string | null>(null);
   const [rightPanel, setRightPanel]           = useState<RightPanel>(null);
 
@@ -702,57 +739,46 @@ export default function AccessRequestsClient({ productionId, productionName, can
     if (updated) setRightPanel({ type: "detail", req: updated, canAct: rightPanel.canAct });
   }, [myRequests, pendingApprovals]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleApprove(reqId: string) {
-    setActing(reqId);
+  /**
+   * 四个审批动作共用的请求壳（#593）。
+   * - 成功：服务端回的申请若已到终态（批准 / 拒绝 / 撤回），先写回右侧面板再重拉列表。
+   *   批准后这条申请会从「待审批」里消失，而上面的面板同步 effect 只在列表里还找得到它时
+   *   才替换——不写回的话面板会一直停在旧快照：状态仍「等待…」、「批准」按钮又能点，
+   *   再点一次得 409「已被他人处理」。仍在等待（转交到下一级、多级流程走到别人手里）
+   *   则关掉面板，免得对着一条已经不归自己管的申请再点出 403。
+   * - 失败（非 2xx / 网络错误）：原因写进 actionError 并重拉待办——过期自动结束的申请
+   *   已不在待办里，不重拉它会继续留在列表上，点一次错一次。
+   */
+  async function runAction(reqId: string, kind: ActionKind, fallback: string) {
+    setActing({ reqId, kind });
     setActionError(null);
     try {
-      const res = await fetch(`/api/production/${productionId}/access-requests/${reqId}/approve`, { method: "POST" });
-      if (res.ok) {
-        await Promise.all([fetchMine(), fetchPending()]);
-      } else {
-        // forward_only（只能转交）等服务端判定要显示出来，否则按钮像是没反应
-        const data = await res.json().catch(() => ({}));
-        setActionError((data as { error?: string }).error ?? "审批失败");
+      const res = await fetch(`/api/production/${productionId}/access-requests/${reqId}/${kind}`, { method: "POST" });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setActionError(data.error ?? fallback);
         await fetchPending();
+        return;
       }
-    } finally { setActing(null); }
+      const { request: fresh } = (await res.json().catch(() => ({}))) as { request?: ApprovalRequest };
+      const settled = fresh && fresh.status !== "pending_supervisor" && fresh.status !== "pending_resource";
+      setRightPanel((panel) => {
+        if (panel?.type !== "detail" || panel.req.id !== reqId) return panel;
+        return settled ? { ...panel, req: fresh } : null;
+      });
+      await Promise.all([fetchMine(), fetchPending()]);
+    } catch {
+      setActionError("网络错误，请重试");
+    } finally {
+      setActing(null);
+    }
   }
 
+  const handleApprove  = (reqId: string) => runAction(reqId, "approve", "审批失败");
+  const handleReject   = (reqId: string) => runAction(reqId, "reject", "拒绝失败");
   /** #140：转交到审批阶梯的下一级——不是拒绝，链路完整记在 escalation_chain。 */
-  async function handleEscalate(reqId: string) {
-    setActing(reqId);
-    setActionError(null);
-    try {
-      const res = await fetch(`/api/production/${productionId}/access-requests/${reqId}/escalate`, { method: "POST" });
-      if (res.ok) {
-        await Promise.all([fetchMine(), fetchPending()]);
-        setRightPanel(null);
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setActionError((data as { error?: string }).error ?? "转交失败");
-        // 与 handleApprove 一致：失败也要重拉。过期自动结束的申请已经不在待办里，
-        // 不重拉的话它会继续留在列表上，点一次错一次。
-        await fetchPending();
-      }
-    } finally { setActing(null); }
-  }
-
-  async function handleReject(reqId: string) {
-    setActing(reqId);
-    setActionError(null);
-    try {
-      const res = await fetch(`/api/production/${productionId}/access-requests/${reqId}/reject`, { method: "POST" });
-      if (res.ok) await Promise.all([fetchMine(), fetchPending()]);
-    } finally { setActing(null); }
-  }
-
-  async function handleCancel(reqId: string) {
-    setActing(reqId);
-    try {
-      const res = await fetch(`/api/production/${productionId}/access-requests/${reqId}/cancel`, { method: "POST" });
-      if (res.ok) { await fetchMine(); setRightPanel(null); }
-    } finally { setActing(null); }
-  }
+  const handleEscalate = (reqId: string) => runAction(reqId, "escalate", "转交失败");
+  const handleCancel   = (reqId: string) => runAction(reqId, "cancel", "撤回失败");
 
   const pendingCount = pendingApprovals.length;
   const currentList = tab === "mine" ? myRequests : tab === "pending" ? pendingApprovals : [];
@@ -810,6 +836,7 @@ export default function AccessRequestsClient({ productionId, productionName, can
   // ── Mobile card ────────────────────────────────────────────────────────────
   function renderMobileCard(req: ApprovalRequest, canAct: boolean) {
     const isExpanded = mobileExpanded === req.id;
+    const cardActing = acting?.reqId === req.id ? acting.kind : null;
     const col = statusColor(req.status);
     const cardMod = col === "amber" ? styles.warn : col === "red" ? styles.danger : col === "green" ? styles.info : "";
 
@@ -841,7 +868,7 @@ export default function AccessRequestsClient({ productionId, productionName, can
               </p>
             )}
             <ApprovalFlow req={req} compact />
-            {actionError && acting !== req.id && (
+            {actionError && acting?.reqId !== req.id && (
               <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--danger, #ef4444)" }}>{actionError}</p>
             )}
             {(req.status === "pending_supervisor" || req.status === "pending_resource") && (
@@ -849,14 +876,14 @@ export default function AccessRequestsClient({ productionId, productionName, can
                 {canAct ? (
                   <>
                     {req.canFinalize === false ? (
-                      <button style={{ ...PRIMARY_BTN, fontSize: 12, padding: "7px 12px" }} disabled={acting === req.id} onClick={() => void handleEscalate(req.id)}>向上转交</button>
+                      <ActionButton primary small label="向上转交" busy={cardActing === "escalate"} disabled={cardActing !== null} onClick={() => void handleEscalate(req.id)} />
                     ) : (
-                      <button style={{ ...PRIMARY_BTN, fontSize: 12, padding: "7px 12px" }} disabled={acting === req.id} onClick={() => void handleApprove(req.id)}>批准</button>
+                      <ActionButton primary small label="批准" busy={cardActing === "approve"} disabled={cardActing !== null} onClick={() => void handleApprove(req.id)} />
                     )}
-                    <button style={{ ...SECONDARY_BTN, fontSize: 12, padding: "7px 12px" }} disabled={acting === req.id} onClick={() => void handleReject(req.id)}>拒绝</button>
+                    <ActionButton small label="拒绝" busy={cardActing === "reject"} disabled={cardActing !== null} onClick={() => void handleReject(req.id)} />
                   </>
                 ) : (
-                  <button style={{ ...SECONDARY_BTN, fontSize: 12, padding: "7px 12px" }} disabled={acting === req.id} onClick={() => void handleCancel(req.id)}>撤回申请</button>
+                  <ActionButton small label="撤回申请" busy={cardActing === "cancel"} disabled={cardActing !== null} onClick={() => void handleCancel(req.id)} />
                 )}
               </div>
             )}
@@ -1031,7 +1058,7 @@ export default function AccessRequestsClient({ productionId, productionName, can
                 <RequestDetail
                   req={rightPanel.req}
                   canAct={rightPanel.canAct}
-                  acting={acting === rightPanel.req.id}
+                  acting={acting?.reqId === rightPanel.req.id ? acting.kind : null}
                   onApprove={() => void handleApprove(rightPanel.req.id)}
                   onReject={() => void handleReject(rightPanel.req.id)}
                   onEscalate={() => void handleEscalate(rightPanel.req.id)}
