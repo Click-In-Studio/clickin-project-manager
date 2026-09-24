@@ -9,82 +9,26 @@ import {
   ttlPayloadForSelection,
   type TtlOptionValue,
 } from "@/lib/approval/approval-ttl";
-import { permissionLabel } from "@/lib/perm/permission-labels";
+import { permissionLabel, permissionLevelLabel, resourceTypeLabel } from "@/lib/perm/permission-labels";
 
 // ─── Resource selector options (free-form mode only) ─────────────────────────
 
-export type ResourceOption = {
-  type: string;
-  label: string;
-  levels: { value: string; label: string }[];
-};
+/**
+ * 自由申请模式开放的资源类型与级别。只登记 key：中文名走 resourceTypeLabel /
+ * permissionLevelLabel（lib/perm/permission-labels.ts），与飞书通知正文、
+ * 资源申请页同源（#582）。
+ */
+export type ResourceOption = { type: string; levels: string[] };
 
 export const RESOURCE_OPTIONS: ResourceOption[] = [
-  {
-    type: "cue_list",
-    label: "Cue 表",
-    levels: [
-      { value: "view",   label: "查看" },
-      { value: "mount",  label: "挂载" },
-      { value: "edit",   label: "编辑" },
-      { value: "manage", label: "管理" },
-    ],
-  },
-  {
-    type: "scene",
-    label: "章节/段落",
-    levels: [
-      { value: "view",   label: "查看" },
-      { value: "edit",   label: "编辑" },
-    ],
-  },
-  {
-    type: "event",
-    label: "事件",
-    levels: [
-      { value: "view",    label: "查看" },
-      { value: "edit",    label: "编辑" },
-      { value: "publish", label: "发布" },
-      { value: "manage",  label: "管理" },
-    ],
-  },
-  {
-    type: "script",
-    label: "剧本",
-    levels: [
-      { value: "view",   label: "查看" },
-      { value: "edit",   label: "编辑" },
-    ],
-  },
-  {
-    type: "character",
-    label: "角色",
-    levels: [
-      { value: "view",   label: "查看" },
-    ],
-  },
-  {
-    type: "member",
-    label: "人员通讯录",
-    levels: [
-      { value: "view",   label: "查看" },
-    ],
-  },
-  {
-    type: "asset",
-    label: "附件",
-    levels: [
-      { value: "view",     label: "查看" },
-      { value: "edit",     label: "编辑" },
-    ],
-  },
-  {
-    type: "task",
-    label: "任务",
-    levels: [
-      { value: "view", label: "查看" },
-    ],
-  },
+  { type: "cue_list",  levels: ["view", "mount", "edit", "manage"] },
+  { type: "scene",     levels: ["view", "edit"] },
+  { type: "event",     levels: ["view", "edit", "publish", "manage"] },
+  { type: "script",    levels: ["view", "edit"] },
+  { type: "character", levels: ["view"] },
+  { type: "member",    levels: ["view"] },
+  { type: "asset",     levels: ["view", "edit"] },
+  { type: "task",      levels: ["view"] },
 ];
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -126,7 +70,7 @@ export default function AccessRequestModal({
 }: Props) {
   // Free-form mode state (only used when permission is NOT set)
   const [resourceType,    setResourceType]    = useState(RESOURCE_OPTIONS[0].type);
-  const [permissionLevel, setPermissionLevel] = useState(RESOURCE_OPTIONS[0].levels[0].value);
+  const [permissionLevel, setPermissionLevel] = useState(RESOURCE_OPTIONS[0].levels[0]);
 
   const [ttlOption,  setTtlOption]  = useState<TtlOptionValue>("permanent");
   const [customExpiryDate, setCustomExpiryDate] = useState("");
@@ -138,7 +82,7 @@ export default function AccessRequestModal({
   useEffect(() => {
     if (!open) return;
     setResourceType(RESOURCE_OPTIONS[0].type);
-    setPermissionLevel(RESOURCE_OPTIONS[0].levels[0].value);
+    setPermissionLevel(RESOURCE_OPTIONS[0].levels[0]);
     setTtlOption("permanent");
     // 一起清掉：不清的话重开表单再选「自定义」会带出上次的日期，而那个日期
     // 很可能已经是过去时间——min 只挡新选，挡不住残留值。
@@ -183,7 +127,7 @@ export default function AccessRequestModal({
   function handleResourceChange(type: string) {
     setResourceType(type);
     const opt = RESOURCE_OPTIONS.find((o) => o.type === type);
-    if (opt) setPermissionLevel(opt.levels[0].value);
+    if (opt) setPermissionLevel(opt.levels[0]);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -335,7 +279,7 @@ export default function AccessRequestModal({
                       style={fieldStyle}
                     >
                       {RESOURCE_OPTIONS.map((o) => (
-                        <option key={o.type} value={o.type}>{o.label}</option>
+                        <option key={o.type} value={o.type}>{resourceTypeLabel(o.type)}</option>
                       ))}
                     </OverflowSafeSelect>
                   </div>
@@ -348,7 +292,7 @@ export default function AccessRequestModal({
                       style={fieldStyle}
                     >
                       {currentOpt.levels.map((l) => (
-                        <option key={l.value} value={l.value}>{l.label}</option>
+                        <option key={l} value={l}>{permissionLevelLabel(l)}</option>
                       ))}
                     </OverflowSafeSelect>
                   </div>

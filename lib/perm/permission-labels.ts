@@ -92,6 +92,46 @@ export const GROUP_LABELS: Record<string, string> = {
   wiki: "文档",
 };
 
+/**
+ * 审批申请的伪级别 → 人话（#582）。
+ *
+ * 申请单上的 permission_level 有两种形：sub='*' 时是伪级别（cue_list 的 manage、
+ * event 的 publish……展开表见 lib/perm/resource-grant-db.ts 的 *_LEVEL_ROW_SETS），
+ * 带具体 sub 时就是动词（VERB_LABELS）。飞书通知正文、资源申请页列表、两个申请
+ * 表单的下拉都从这一张表取名——以前各抄一份，新开放一种级别就有一处漏改。
+ *
+ * 棘轮 tests/perm/permission-labels.test.ts：每张 *_LEVEL_ROW_SETS 的键都必须在此登记。
+ */
+export const LEVEL_LABELS: Record<string, string> = {
+  view:           "查看",
+  mount:          "挂载",
+  edit:           "编辑",
+  assign:         "指派",
+  manage:         "管理",
+  publish:        "发布",
+  edit_published: "修改已发布",
+  revoke:         "撤销",
+};
+
+/**
+ * 资源类型名（申请单主语）。查不到不裸吐 key：通知正文里「所有 dramaturgy_view 的
+ * 编辑权限」审批人看不懂，兜底同 permissionLabel 的风格把 key 放进括注。
+ */
+export function resourceTypeLabel(type: string | null | undefined): string {
+  if (!type) return "资源";
+  return GROUP_LABELS[type] ?? `资源（${type}）`;
+}
+
+/**
+ * 权限级别名：先查伪级别表，再查动词表（带 sub 的节点键申请 level 位就是动词）。
+ * 两张表都没有时用「」框住原样嵌进句子（「所有剧本的「foo」权限」），与
+ * resourceTypeLabel 一样不让裸 key 混进中文正文。
+ */
+export function permissionLevelLabel(level: string | null | undefined): string {
+  if (!level) return "访问";
+  return LEVEL_LABELS[level] ?? VERB_LABELS[level] ?? `「${level}」`;
+}
+
 /** 键的分组前缀：原子键取 ':' 前段，节点键取资源类型段 */
 export function permissionGroupPrefix(key: string): string {
   if (key.startsWith("node:")) return key.slice(5).split("/")[0] ?? key;

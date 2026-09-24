@@ -16,9 +16,16 @@ import {
   permissionLabel,
   permissionGroupLabel,
   permissionCategories,
+  permissionLevelLabel,
+  resourceTypeLabel,
   unlabelledParts,
+  LEVEL_LABELS,
   PERMISSION_LABELS,
 } from "@/lib/perm/permission-labels";
+import {
+  CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS,
+  REPORT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS, WIKI_LEVEL_ROW_SETS,
+} from "@/lib/perm/resource-grant-db";
 
 /** 模板 + 激活面目录里声明的全部键（cue 受益相对键实例化成 cue_list 域键）。 */
 function declaredKeys(): string[] {
@@ -123,5 +130,38 @@ describe("permissionLabel 拼接规则", () => {
     expect(permissionCategories([
       "node:scene/*/meta@view", "node:scene/*/synopsis@view", "node:member/*/meta@view",
     ])).toEqual(["章节/段落", "成员"]);
+  });
+});
+
+// #582：审批申请单上的资源类型名 / 级别名以前在通知、申请页、申请弹窗各抄一份，
+// 新开放的类型页面上有名字、飞书里却拼原始 key。现在三处同源，这里盯住词表不漏。
+describe("access request labels (#582)", () => {
+  it("每张伪级别展开表的级别都登记了人话", () => {
+    const tables = {
+      CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS,
+      REPORT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS, WIKI_LEVEL_ROW_SETS,
+    };
+    const missing: string[] = [];
+    for (const [name, table] of Object.entries(tables)) {
+      for (const level of Object.keys(table)) {
+        if (!LEVEL_LABELS[level]) missing.push(`${name}.${level}`);
+      }
+    }
+    expect(missing, "补 lib/perm/permission-labels.ts 的 LEVEL_LABELS").toEqual([]);
+  });
+
+  it("资源类型名与弹窗分组标题同源，查不到也不裸吐 key", () => {
+    expect(resourceTypeLabel("cue_list")).toBe(permissionGroupLabel("node:cue_list/*/meta@view"));
+    expect(resourceTypeLabel("dramaturgy_view")).toBe("构作视图");
+    expect(resourceTypeLabel("gizmo")).toBe("资源（gizmo）");
+    expect(resourceTypeLabel(null)).toBe("资源");
+  });
+
+  it("级别名：伪级别查 LEVEL_LABELS，带 sub 的节点键申请 level 位是动词，落到 VERB_LABELS", () => {
+    expect(permissionLevelLabel("edit_published")).toBe("修改已发布");
+    expect(permissionLevelLabel("create")).toBe("创建");
+    expect(permissionLevelLabel("view")).toBe("查看");
+    expect(permissionLevelLabel("gizmo")).toBe("「gizmo」");
+    expect(permissionLevelLabel(null)).toBe("访问");
   });
 });
