@@ -11,6 +11,9 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* 高亮块默认灰底——唯一定义处。.wiki-callout 与块菜单色板的「默认」格都读它，
+     不在 TS 里复写 hex，免得两边漂移 */
+  --callout-bg-default: #f5f6f7;
   --font-script: 'SourceHanSerif', 'Source Han Serif CN', 'STSong', 'SimSun', serif;
   /* 舞台指示：霞鹜文楷（OFL，作者明确允许 web 子集化）。以前是 KaiTi / STKaiti
      这类系统楷体，Linux 没有、三个平台三种字宽。 */
@@ -122,7 +125,7 @@ body {
 /* wiki callout（方言 > [!emoji|#color]，lib/tiptap-callout）——
    编辑器（TipTap renderHTML）与只读渲染（WikiMarkdown）共用同一形态 */
 .wiki-callout {
-  --callout-bg: #f5f6f7;
+  --callout-bg: var(--callout-bg-default);
   position: relative;
   background: var(--callout-bg);
   border-radius: 8px;

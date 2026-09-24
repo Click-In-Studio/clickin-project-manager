@@ -17,6 +17,21 @@ export const CALLOUT_MARKER_RE = /^\[!([^\]\n]*)\]/;
 
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
 
+/**
+ * 块菜单里的高亮块色板（#525 颜色一半）。value=null 是默认灰底——marker 不写
+ * `bg=`，展示色由 globals.css 的 `--callout-bg-default` 给（唯一定义处，这里不
+ * 复写 hex）。其余六色写进 markdown 的就是这串 hex，所以别改成 CSS 变量。
+ */
+export const CALLOUT_COLORS: readonly { value: string | null; label: string }[] = [
+  { value: null, label: "默认" },
+  { value: "#fee2e2", label: "红" },
+  { value: "#ffedd5", label: "橙" },
+  { value: "#fef9c3", label: "黄" },
+  { value: "#dcfce7", label: "绿" },
+  { value: "#dbeafe", label: "蓝" },
+  { value: "#ede9fe", label: "紫" },
+];
+
 export type CalloutMarker = {
   emoji: string;
   color: string | null;

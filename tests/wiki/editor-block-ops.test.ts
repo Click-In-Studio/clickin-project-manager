@@ -17,6 +17,7 @@ import {
   getSelectedBlock, moveBlock, duplicateBlock, deleteBlock,
   turnInto, canTurnInto, isColumnGroup, changeColumnCount, equalizeColumns,
   findColumnGroup, selectColumnGroup,
+  findCallout, setCalloutColor,
 } from "@/lib/editor/editor-block-ops";
 import { ColumnEditing, isEmptyColumn } from "@/lib/editor/tiptap-column-editing";
 
@@ -393,5 +394,36 @@ describe("分栏增删栏", () => {
     expect(changeColumnCount(e, 1)).toBe(false);
     expect(equalizeColumns(e)).toBe(false);
     e.destroy();
+  });
+});
+
+describe("高亮块配色（#525 颜色一半）", () => {
+  const md = (editor: Editor) => (editor.storage as unknown as { markdown: { getMarkdown: () => string } }).markdown.getMarkdown();
+
+  it("整块选中：改色只改首行 marker，正文原样", () => {
+    const editor = makeEditor("> [!💡]\n> 需要强调");
+    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, 0)));
+    expect(findCallout(editor)?.pos).toBe(0);
+    expect(setCalloutColor(editor, "#dbeafe")).toBe(true);
+    expect(md(editor)).toBe("> [!💡 bg=#dbeafe]\n> 需要强调");
+    editor.destroy();
+  });
+
+  it("光标在高亮块里的段落上：沿祖先找到它，回默认色时 marker 不写 bg=", () => {
+    const editor = makeEditor("> [!📌 bg=#fee2e2]\n> 第一行");
+    editor.commands.setTextSelection(4);
+    expect(findCallout(editor)?.node.attrs.color).toBe("#fee2e2");
+    expect(setCalloutColor(editor, null)).toBe(true);
+    expect(md(editor)).toBe("> [!📌]\n> 第一行");
+    editor.destroy();
+  });
+
+  it("不在高亮块里：找不到、不改任何东西", () => {
+    const editor = makeEditor("普通段落\n\n> 只是引用");
+    editor.commands.setTextSelection(3);
+    expect(findCallout(editor)).toBeNull();
+    expect(setCalloutColor(editor, "#dbeafe")).toBe(false);
+    expect(md(editor)).toBe("普通段落\n\n> 只是引用");
+    editor.destroy();
   });
 });

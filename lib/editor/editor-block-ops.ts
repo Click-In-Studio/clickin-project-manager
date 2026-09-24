@@ -184,6 +184,38 @@ export function findColumnGroup(editor: Editor): SelectedBlock | null {
   return null;
 }
 
+/**
+ * 当前选中的高亮块，或光标所在段落的祖先高亮块——手柄可能命中 callout 自身
+ * （整块选中），也可能命中它里面的段落（文本光标），两种都要认。
+ */
+export function findCallout(editor: Editor): SelectedBlock | null {
+  const selected = getSelectedBlock(editor);
+  if (selected?.node.type.name === "callout") return selected;
+  const $from = editor.state.selection.$from;
+  for (let d = $from.depth; d >= 1; d--) {
+    const node = $from.node(d);
+    if (node.type.name === "callout") {
+      const pos = $from.before(d);
+      return { node, pos, end: pos + node.nodeSize };
+    }
+  }
+  return null;
+}
+
+/**
+ * 改高亮块底色（null = 回默认灰底，marker 不写 bg=）。只改 attrs 不动内容，
+ * 落盘就是 `> [!emoji bg=#xxx]` 首行 marker 的差异——见 tiptap-callout 的 serializer。
+ */
+export function setCalloutColor(editor: Editor, color: string | null): boolean {
+  const block = findCallout(editor);
+  if (!block) return false;
+  const tr = editor.state.tr.setNodeMarkup(block.pos, undefined, { ...block.node.attrs, color });
+  selectNodeAt(tr, block.pos);
+  editor.view.dispatch(tr);
+  editor.commands.focus();
+  return true;
+}
+
 /** 选中祖先分栏组 —— 之后上移/下移/复制/删除就作用于整组 */
 export function selectColumnGroup(editor: Editor): boolean {
   const group = findColumnGroup(editor);
