@@ -51,8 +51,12 @@ async function hostViewPermitted(
       return canViewAsset(permCtx, productionId, asset, "meta");
     }
     case "task": {
-      // 与任务详情页 / GET /tasks/[taskId] 同门（#670）：task/*@view ∨ event tasks@view
-      // ∨ 部门参与 ∨ 指派人。归属校验是找门的副产品（同 cue / asset 分支）。
+      // 与 GET /tasks/[taskId] 逐字同门（#670）：task/*@view ∨ event tasks@view ∨ 该 task
+      // 实例 view ∨ 指派人 ∨ 已确认任务的责任主体成员。participantDeptIds 传空与那条
+      // 路由一致——「事件参与部门」是 event 语境的身份（getEventPermContext），task API
+      // 本身不取它，这里不比它多开也不比它少开。任务详情页是另一套判定
+      // （task/*@view ∨ 部门 POC ∨ 指派人），本门不以它为准。
+      // 归属校验是找门的副产品（同 cue / asset 分支）。
       const task = await getTechReqByProduction(entityId, productionId);
       if (!task) return false;
       return canViewTechReq(permCtx, entityId, task.eventId, productionId, task.departmentId, { participantDeptIds: [] });
