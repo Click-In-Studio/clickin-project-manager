@@ -1022,7 +1022,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     // 只有自动补的隐藏开场章才需要把显示开关置 false
     ...(importedOpeningIds.size > 0 ? {} : { showOpeningChapter: false }),
     stageDelimiters: { open: stageDelimiter.open, close: stageDelimiter.close },
-    ensureEmptySceneBlocks: !!body.sceneOverrides,
   });
 
   // Build per-scene block count summary (covers both existing and auto-created scenes)

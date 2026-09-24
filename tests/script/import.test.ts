@@ -27,6 +27,16 @@ async function countScriptVersion(versionId: string): Promise<number> {
   return parseInt(r.rows[0].count);
 }
 
+/** 版本内块类型按序（收尾会给无章的序列补开场章，#637：计数断言改看序列） */
+async function versionBlockTypes(versionId: string): Promise<string[]> {
+  const r = await getPool().query<{ type: string }>(
+    `SELECT s.type::text AS type FROM script_version sv JOIN script s ON s.id = sv.snapshot_id
+     WHERE sv.version_id = $1 ORDER BY sv.sort_key`,
+    [versionId],
+  );
+  return r.rows.map(row => row.type);
+}
+
 async function countCharacterVersion(versionId: string): Promise<number> {
   const r = await getPool().query<{ count: string }>(
     "SELECT COUNT(*)::text AS count FROM character_version WHERE version_id = $1",
@@ -167,7 +177,8 @@ describe("A: importScriptToVersion DB integration", () => {
       upsertScenes: [scene1, scene2],
     });
 
-    expect(await countScriptVersion(versionId)).toBe(3);
+    // 导入序列没有章标记，收尾按域模型在最前补一枚开场章（#637）
+    expect(await versionBlockTypes(versionId)).toEqual(["chapter_marker", "dialogue", "stage", "dialogue"]);
     expect(await countCharacterVersion(versionId)).toBe(2);
     // scene identity rows must exist in the global table (FK anchors)
     expect(await sceneIdentityExists("imp-sc1")).toBe(true);
@@ -202,7 +213,7 @@ describe("A: importScriptToVersion DB integration", () => {
       upsertScenes: [],
     });
 
-    expect(await countScriptVersion(versionId)).toBe(1);
+    expect(await versionBlockTypes(versionId)).toEqual(["chapter_marker", "dialogue"]);
     const sid = await snapshotIdForBlock(versionId, "imp-b4");
     expect(await snapshotContent(sid!)).toBe("全新台词");
 
@@ -532,8 +543,8 @@ describe("D: version-import hybrid — block 与 cue 一律物理删", () => {
     await forceDeleteProduction(PROD_E).catch(() => {});
   });
 
-  it("E1: v2 has only the newly imported block", async () => {
-    expect(await countScriptVersion(v2Id)).toBe(1);
+  it("E1: v2 has only the newly imported block (plus the auto-inserted opening chapter)", async () => {
+    expect(await versionBlockTypes(v2Id)).toEqual(["chapter_marker", "dialogue"]);
     expect(await snapshotIdForBlock(v2Id, "e-b4")).not.toBeNull();
   });
 
