@@ -122,10 +122,14 @@ export function resourceTypeLabel(type: string | null | undefined): string {
   return GROUP_LABELS[type] ?? `资源（${type}）`;
 }
 
-/** 权限级别名：先查伪级别表，再查动词表（带 sub 的节点键申请 level 位就是动词）。 */
+/**
+ * 权限级别名：先查伪级别表，再查动词表（带 sub 的节点键申请 level 位就是动词）。
+ * 两张表都没有时用「」框住原样嵌进句子（「所有剧本的「foo」权限」），与
+ * resourceTypeLabel 一样不让裸 key 混进中文正文。
+ */
 export function permissionLevelLabel(level: string | null | undefined): string {
   if (!level) return "访问";
-  return LEVEL_LABELS[level] ?? VERB_LABELS[level] ?? `${level}`;
+  return LEVEL_LABELS[level] ?? VERB_LABELS[level] ?? `「${level}」`;
 }
 
 /** 键的分组前缀：原子键取 ':' 前段，节点键取资源类型段 */

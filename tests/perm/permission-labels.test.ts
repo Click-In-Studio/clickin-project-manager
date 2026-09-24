@@ -161,6 +161,7 @@ describe("access request labels (#582)", () => {
     expect(permissionLevelLabel("edit_published")).toBe("修改已发布");
     expect(permissionLevelLabel("create")).toBe("创建");
     expect(permissionLevelLabel("view")).toBe("查看");
+    expect(permissionLevelLabel("gizmo")).toBe("「gizmo」");
     expect(permissionLevelLabel(null)).toBe("访问");
   });
 });
