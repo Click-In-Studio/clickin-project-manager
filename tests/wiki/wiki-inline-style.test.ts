@@ -140,6 +140,8 @@ describe("editor roundtrip（保真锁纪律）", () => {
     // 加粗里套色：序列化后色在外、粗在内（mark 次序），再解析回同一形态
     '甲<span style="color:red">**乙**</span>丙',
     '甲**乙<span style="color:red">丙</span>丁**戊',
+    // 下划线里套删除线（飞书粘贴产物）：strike 在内层，`>~~乙` 满足侧翼规则
+    "甲<u>~~乙~~</u>丙",
     // 相邻同色、含空格
     '甲<span style="color:red">乙</span><span style="color:blue">丙</span>丁',
     '甲<span style="color:red">乙 </span>丙',
@@ -175,6 +177,8 @@ describe("editor roundtrip（保真锁纪律）", () => {
     expect(idx("textColor")).toBeLessThan(idx("underline"));
     expect(idx("underline")).toBeLessThan(idx("link"));
     expect(idx("link")).toBeLessThan(idx("bold"));
+    // 飞书粘贴把 line-through 落回 StarterKit 的 strike，嵌在 <u> 里面——strike 必须排在样式 mark 之后
+    expect(idx("underline")).toBeLessThan(idx("strike"));
     expect(INLINE_STYLE_PRIORITY.textBackground).toBeGreaterThan(INLINE_STYLE_PRIORITY.textColor);
     expect(INLINE_STYLE_PRIORITY.textColor).toBeGreaterThan(INLINE_STYLE_PRIORITY.underline);
     expect(INLINE_STYLE_PRIORITY.underline).toBeGreaterThan(1000); // Link 是 1000

@@ -39,8 +39,11 @@ export function transformFeishuHtml(html: string, opts: { members?: FeishuMember
 // text-decoration: underline"> 上，颜色是它自己的色板 hex（字色 #d83931 一族、
 // 底色 #fbbfbc 一族）。我们的方言只收色名枚举（lib/editor/inline-style-dialect），
 // 所以这里按色相吸附到最近的一档，重建成 canonical 的嵌套结构：
-// 底色 > 字色 > 下划线 > 删除线，由外到内——与编辑器 mark 的 priority 顺序一致，
-// 再序列化时形态不变。飞书默认字色 #1f2329 吸成「默认」= 不落标签（粘来的字
+// 底色 > 字色 > 下划线 > 删除线，由外到内——与编辑器 mark 的 schema 次序一致
+// （前三个是 lib/editor/tiptap-inline-style 的 INLINE_STYLE_PRIORITY 1003/1002/1001，
+// 删除线是 StarterKit 自带的 strike、priority 100、序列化成 `~~`，不是本方言的一员，
+// 只是飞书把它和下划线写在同一个 text-decoration 里，顺手落回它自己的 mark），
+// 再序列化时形态不变。次序护栏在 tests/wiki/wiki-inline-style.test.ts。飞书默认字色 #1f2329 吸成「默认」= 不落标签（粘来的字
 // 极少是用户主动选的黑）；近白底同理。认不出的颜色值不动，编辑器 parse 路径
 // 只收枚举，会静默丢样式保文字。
 function mapInlineStyles(doc: Document, body: HTMLElement) {

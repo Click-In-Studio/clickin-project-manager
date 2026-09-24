@@ -145,6 +145,24 @@ describe("行内样式方言校验（#524）", () => {
     }
   });
 
+  it("嵌套顺序 / 配对：反序、同类套同类、交叉、未闭合、多余闭合都拒绝", () => {
+    for (const bad of [
+      '<u><span style="color:red">甲</span></u>',                       // 下划线套字色：反序
+      '<span style="color:red"><span style="background-color:yellow">甲</span></span>', // 字色套底色：反序
+      '<span style="color:red">外<span style="color:blue">内</span>外</span>',       // 同类套同类
+      '<u><span style="color:red">甲</u></span>',                       // 交叉
+      '<span style="color:red">甲',                                     // 未闭合
+      "甲</u>",                                                          // 多余闭合
+    ]) {
+      const r = restoreAndCheckBody(bad, none);
+      expect(r.ok, bad).toBe(false);
+      if (!r.ok) expect(r.problems.some((p) => p.includes("嵌套不合规"))).toBe(true);
+    }
+    // 正序三层 + 相邻两个同类 + 加粗在最里面：放行
+    const ok = '<span style="background-color:yellow"><span style="color:red"><u>**甲**</u></span></span><span style="color:blue">乙</span><span style="color:red">丙</span>';
+    expect(restoreAndCheckBody(ok, none).ok).toBe(true);
+  });
+
   it("代码段里的语法示例不算违规", () => {
     const r = restoreAndCheckBody('写法示例：`<span style="color: red">`\n\n```\n<font color="red">\n```', none);
     expect(r.ok).toBe(true);
