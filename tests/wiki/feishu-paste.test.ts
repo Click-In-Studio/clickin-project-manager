@@ -132,3 +132,43 @@ describe("transformFeishuHtml", () => {
     expect(out).toContain("<strong>粗</strong>");
   });
 });
+
+describe("行内样式：字色 / 底色 / 下划线吸附到色板（#524）", () => {
+  const root = (inner: string) => `<div data-lark-html-role="root"><p>${inner}</p></div>`;
+
+  it("飞书红字 + 黄底 + 下划线 → 底色 > 字色 > 下划线 三层嵌套（与编辑器 mark 次序一致）", () => {
+    const out = transformFeishuHtml(root('甲<span style="color: rgb(216, 57, 49); background-color: rgb(255, 246, 122); text-decoration: underline;">乙</span>丙'));
+    expect(out).toContain('<span data-bg="yellow"><span data-fg="red"><u><span>乙</span></u></span></span>');
+    expect(out).not.toMatch(/style="/);
+  });
+
+  it("飞书默认字色 #1f2329 与白底不落标签；灰底落 gray", () => {
+    const out = transformFeishuHtml(root('<span style="color: rgb(31, 35, 41); background-color: rgb(255, 255, 255);">甲</span><span style="background-color: rgb(239, 240, 241);">乙</span>'));
+    expect(out).not.toContain("data-fg");
+    expect(out).toContain('<span data-bg="gray"><span>乙</span></span>');
+    expect(out).toContain("甲");
+  });
+
+  it("认不出的颜色值：样式摘掉、文字保留、不造标签（编辑器 parse 路径只收枚举）", () => {
+    const out = transformFeishuHtml(root('<span style="color: var(--x);">甲</span>'));
+    expect(out).toContain("甲");
+    expect(out).not.toContain("data-fg");
+    expect(out).not.toContain("style=");
+  });
+
+  it("font-weight 之类别的样式留给对应 mark 自己认，不被摘掉", () => {
+    const out = transformFeishuHtml(root('<span style="color: rgb(36, 91, 219); font-weight: bold;">甲</span>'));
+    expect(out).toContain('<span data-fg="blue">');
+    expect(out).toMatch(/font-weight:\s*bold/);
+  });
+
+  it("删除线走 text-decoration: line-through → <s>", () => {
+    const out = transformFeishuHtml(root('<span style="text-decoration: line-through;">甲</span>'));
+    expect(out).toContain("<s><span>甲</span></s>");
+  });
+
+  it("代码块里的 span 不动", () => {
+    const html = `<div data-lark-html-role="root"><pre><code class="language-js"><span style="color: rgb(216, 57, 49);">x</span></code></pre></div>`;
+    expect(transformFeishuHtml(html)).not.toContain("data-fg");
+  });
+});

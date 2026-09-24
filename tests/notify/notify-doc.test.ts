@@ -71,6 +71,23 @@ describe("方言降级", () => {
   });
 });
 
+describe("行内样式方言降级（#524）", () => {
+  it("字色 / 底色 / 下划线标签整个丢、文字一个不少、标签字样绝不漏给用户", async () => {
+    const d = await doc('甲<span style="background-color:yellow">这是一段<span style="color:red">红色</span>的字</span><u>乙</u>丙');
+    const out = toPlainText(d);
+    expect(out).toBe("甲这是一段红色的字乙丙");
+    expect(out).not.toContain("<");
+    expect(toLarkMd(d)).not.toContain("span");
+    expect(toEmailHtml(d)).not.toContain("data-fg");
+  });
+
+  it("样式标签里的加粗照旧是加粗", async () => {
+    const d = await doc("<u>**乙**</u>");
+    const p = d.blocks[0];
+    expect(p.t === "p" && p.children.some(c => c.t === "text" && c.text === "乙" && c.bold)).toBe(true);
+  });
+});
+
 describe("飞书平台 renderer", () => {
   it("链接/粗体/列表落成 lark_md", async () => {
     const d = await doc(`**重点**：见 [#](/__cm__/wiki/${UUID})\n\n- 甲\n- 乙`);

@@ -18,8 +18,8 @@
 // 实际 UI 里从未被渲染成真正的链接，只是原样显示成一段无用的方括号文字。
 // 链接之外的三个私有方言（callout/分栏/图片）+ @提及形态。AI 能读懂标准
 // markdown 但不认识私有方言——不教就不会用，编辑时还可能当噪音改写掉。
-// 与 lib/editor/tiptap-callout.ts / lib/editor/tiptap-columns.ts / lib/tiptap-wiki-image.ts
-// 的 canonical 形态同批维护：方言变，这里必须同批变（方言两侧同落纪律的
+// 与 lib/editor/tiptap-callout.ts / lib/editor/tiptap-columns.ts / lib/tiptap-wiki-image.ts /
+// lib/editor/inline-style-dialect.ts 的 canonical 形态同批维护：方言变，这里必须同批变（方言两侧同落纪律的
 // 第三落点：编辑器 roundtrip、渲染器、AI 说明书）。
 //
 // 送达通道（#333 T1）：本说明书不再内联进工具描述（曾占全量工具面 19%），
@@ -48,6 +48,13 @@ export const WIKI_DIALECT_NOTE =
   "只隔空行会被 Markdown 并成一个列表；读到它原样保留。" +
   "【标识类】行尾的 `^xxxx` 是块锚点，由系统发放，**不要自己创建、也不要删改**——" +
   "它是评论和块引用的挂载点，动了会让引用指错地方。" +
+  "【样式类】只改文字外观，用 HTML 子集，且**只有三种写法**（大小写、空格、分号、引号都不能变）：" +
+  "字色 `<span style=\"color:red\">文字</span>`、底色 `<span style=\"background-color:yellow\">文字</span>`、" +
+  "下划线 `<u>文字</u>`。颜色只能写色名：字色 black / gray / red / orange / yellow / green / blue / purple，" +
+  "底色 gray / red / orange / yellow / green / blue / purple；不接受 hex、rgb()、`<font>`、`<mark>`、`style` 里的其他属性。" +
+  "字色和底色同时要就两层嵌套、底色在外，不要合写进一个 style。" +
+  "恢复默认颜色 = 去掉这层标签，没有 `default` 这个值。" +
+  "加粗 / 斜体 / 删除线要写在样式标签**里面**（`<u>**文字**</u>`），写在外面会失效。" +
   "凡 `/__cm__` 开头的链接一律原样保留，不要展开或改写。";
 
 export const WIKI_LINK_SYNTAX_NOTE =

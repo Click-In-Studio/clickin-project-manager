@@ -14,6 +14,24 @@
   /* 高亮块默认灰底——唯一定义处。.wiki-callout 与块菜单色板的「默认」格都读它，
      不在 TS 里复写 hex，免得两边漂移 */
   --callout-bg-default: #f5f6f7;
+  /* 行内样式色板（#524 字色 / 底色）——唯一定义处。正文里存的是色名
+     （<span style="color:red">），编辑器与只读渲染都落 data-fg / data-bg 走下面
+     同一套规则；浮动条色板的 swatch 也读这些变量，TS 里没有 hex */
+  --text-fg-black: #18181b;
+  --text-fg-gray: #71717a;
+  --text-fg-red: #dc2626;
+  --text-fg-orange: #ea580c;
+  --text-fg-yellow: #ca8a04;
+  --text-fg-green: #16a34a;
+  --text-fg-blue: #2563eb;
+  --text-fg-purple: #7c3aed;
+  --text-bg-gray: #ececea;
+  --text-bg-red: #fee2e2;
+  --text-bg-orange: #ffedd5;
+  --text-bg-yellow: #fef9c3;
+  --text-bg-green: #dcfce7;
+  --text-bg-blue: #dbeafe;
+  --text-bg-purple: #ede9fe;
   --font-script: 'SourceHanSerif', 'Source Han Serif CN', 'STSong', 'SimSun', serif;
   /* 舞台指示：霞鹜文楷（OFL，作者明确允许 web 子集化）。以前是 KaiTi / STKaiti
      这类系统楷体，Linux 没有、三个平台三种字宽。 */
@@ -121,6 +139,31 @@ body {
   margin: 0;
   line-height: 1.5;
 }
+
+/* 行内样式方言（#524，lib/editor/inline-style-dialect）——编辑器 renderHTML 与
+   只读渲染（remark-inline-style）共用 data-fg / data-bg 形态。每个枚举值一条，
+   tests/wiki/wiki-inline-style.test.ts 逐个核对 */
+[data-fg="black"]  { color: var(--text-fg-black); }
+[data-fg="gray"]   { color: var(--text-fg-gray); }
+[data-fg="red"]    { color: var(--text-fg-red); }
+[data-fg="orange"] { color: var(--text-fg-orange); }
+[data-fg="yellow"] { color: var(--text-fg-yellow); }
+[data-fg="green"]  { color: var(--text-fg-green); }
+[data-fg="blue"]   { color: var(--text-fg-blue); }
+[data-fg="purple"] { color: var(--text-fg-purple); }
+[data-bg] {
+  border-radius: 2px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+[data-bg="gray"]   { background: var(--text-bg-gray); }
+[data-bg="red"]    { background: var(--text-bg-red); }
+[data-bg="orange"] { background: var(--text-bg-orange); }
+[data-bg="yellow"] { background: var(--text-bg-yellow); }
+[data-bg="green"]  { background: var(--text-bg-green); }
+[data-bg="blue"]   { background: var(--text-bg-blue); }
+[data-bg="purple"] { background: var(--text-bg-purple); }
 
 /* wiki callout（方言 > [!emoji|#color]，lib/tiptap-callout）——
    编辑器（TipTap renderHTML）与只读渲染（WikiMarkdown）共用同一形态 */

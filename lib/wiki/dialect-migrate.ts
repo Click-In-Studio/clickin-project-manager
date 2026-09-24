@@ -13,6 +13,7 @@
 //
 // 幂等：对已是 v2 的正文施加本函数必须原样返回（迁移可重跑，编辑器每次载入都跑）。
 import { encodeMentionHref, encodeUserHref, encodeAssetSrc, type ContentMentionAttrs } from "../editor/mention-types";
+import { canonicalizeInlineStyleTags } from "../editor/inline-style-dialect";
 
 // 码内的方言是「关于语法的文档」不是真引用——先换占位保护再改写
 // （MindWeave protectCodeSpans 同款教训，wiki-db 的边提取也吃过这个亏）
@@ -60,6 +61,7 @@ function convertLegacyInner(inner: string): string | null {
  *   ④ 引用链接               [#label](/__cm__k:id)  → [#](/__cm__/k/id?…)
  *   ⑤ 废弃裸 token           [#wiki:uuid]           → [#](/__cm__/wiki/uuid)
  *   ⑥ callout 管道参数        > [!💡|#fff]           → > [!💡 bg=#fff]
+ *   ⑦ 行内样式拼法变体        <span style="color: Red;"> → <span style="color:red">（#524）
  *
  * ④ 的显示位一律塌成哨兵 `#`：原先非 wiki 的 kind 会把编辑期 label 写进正文，
  * 目标改名后就冻在那儿（语法大纲 G4）。哨兵不携带信息、永不过期，且在不认
@@ -97,6 +99,11 @@ export function normalizeWikiDialect(md: string): string {
   // ⑥ callout 管道参数 → k=v（只认行首 `>` 引用块里的 marker，避免误伤正文方括号）
   t = t.replace(/^((?:[ \t]*>)+[ \t]*)\[!([^\]\n|]*)\|(#[0-9a-fA-F]{3,8})\]/gm,
     (_m, prefix, emoji, color) => `${prefix}[!${emoji} bg=${color}]`);
+
+  // ⑦ 行内样式（HTML 子集方言）拼法变体收成唯一 canonical——保真锁按 html 原文比，
+  //    `color: red;` 与 `color:red` 不收成一个就会误报。只收无损可收的变体，其余
+  //    原样（见 inline-style-dialect.canonicalizeInlineStyleTags）
+  t = canonicalizeInlineStyleTags(t);
 
   return restoreCode(t, parts);
 }

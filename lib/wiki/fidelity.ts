@@ -36,6 +36,7 @@
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
+import { canonicalizeInlineStyleTags } from "../editor/inline-style-dialect";
 import { diffLines } from "diff";
 
 /** mdast 节点（只声明我们用得到的字段） */
@@ -77,8 +78,10 @@ export function contentSignature(markdown: string): string[] {
         if (node.value) out.push(`code:${node.lang ?? ""}:${node.value}`);
         break;
       case "html":
-        // 裸 HTML 原样收。它掉了就是掉了——只读端还会把它当纯文本显示出来
-        if (node.value) out.push(`html:${collapse(node.value)}`);
+        // 裸 HTML 原样收。它掉了就是掉了——只读端还会把它当纯文本显示出来。
+        // 行内样式方言（#524）的拼法变体先收成 canonical 再比：`color: red;` 与
+        // 编辑器写出的 `color:red` 是同一个东西，不是失真
+        if (node.value) out.push(`html:${collapse(canonicalizeInlineStyleTags(node.value))}`);
         break;
       case "image":
         out.push(`img:${node.url ?? ""}:${collapse(node.alt ?? "")}`);

@@ -13,6 +13,8 @@
 // 代码块安全：code fence / 行内码里的语法示例是"关于语法的文档"不是真引用
 // （与 lib/wiki/links.ts extractMentionEdges 同款纪律），反解与校验都跳过。
 
+import { parseCanonicalOpenTag, TEXT_BG_COLORS, TEXT_FG_COLORS } from "../../editor/inline-style-dialect";
+
 // 与 lib/wiki/links.ts CODE_SPAN_RE 同构（单捕获组 → split 后奇数下标是代码段）
 const CODE_SPAN_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
 
@@ -27,6 +29,48 @@ export const DEAD_LINK_LITERAL = "已删除的文档";
 const LEGACY_TOKEN_RE = /\[#wiki:[0-9a-fA-F-]{36}\]/;
 /** 旧式冒号 href（v1 废弃）：](/__cm__wiki:<id>) 一族 */
 const LEGACY_COLON_RE = /\]\(\/__cm__[a-z_.]+:/;
+
+/** 行内样式方言（#524）：正文里出现的 <span …> / <font …> 一律要过 canonical 校验。
+ *  <span> 在本库只有一个用途（字色 / 底色），所以拼法不是 canonical 的就是错的，
+ *  不猜、不归一化——模型手里有说明书，写对是零成本。 */
+const SPAN_OR_FONT_OPEN_RE = /<(span|font)\b[^>]*>/gi;
+
+/** 样式标签流（开 / 闭），供嵌套顺序与配对检查。只认三种 canonical 开标签与两种闭标签；
+ *  别的 HTML 不在本检查范围（拼法错的 span 已由上面那条单独报）。 */
+const STYLE_TAG_RE = /<span style="[^"]*">|<\/span>|<u>|<\/u>/g;
+
+/** canonical 嵌套顺序（外 → 内）：底色 > 字色 > 下划线。与编辑器 mark priority 同源
+ *  （lib/editor/tiptap-inline-style INLINE_STYLE_PRIORITY），这里只查文本层的相对顺序。 */
+const STYLE_RANK = { bg: 3, fg: 2, u: 1 } as const;
+
+/**
+ * 嵌套顺序 + 配对检查。顺序反了（`<u><span style="color:red">`）、同类套同类、交叉闭合、
+ * 未闭合 / 多余闭合都报。为什么在文本层就拦而不是交给编辑器往返：编辑器会按 mark 次序
+ * 静默重排，落库形态与模型提交的不同，保真锁会为一件本可提前说清的事响一次。
+ */
+function checkStyleNesting(text: string): string | null {
+  const stack: (keyof typeof STYLE_RANK)[] = [];
+  for (const m of text.matchAll(STYLE_TAG_RE)) {
+    const tag = m[0];
+    if (tag === "</span>" || tag === "</u>") {
+      const top = stack.pop();
+      if (!top) return `多出的闭标签 ${tag}`;
+      const expect = top === "u" ? "</u>" : "</span>";
+      if (tag !== expect) return `标签交叉闭合：${top === "u" ? "<u>" : "<span>"} 内先遇到 ${tag}`;
+      continue;
+    }
+    const open = parseCanonicalOpenTag(tag);
+    if (!open) continue; // 拼法错的由 SPAN_OR_FONT_OPEN_RE 那条报，这里不重复
+    const rank = STYLE_RANK[open.kind];
+    for (const outer of stack) {
+      if (STYLE_RANK[outer] === rank) return `同类样式套同类（${tag} 套在同类标签里）——换颜色请先闭合外层`;
+      if (STYLE_RANK[outer] < rank) return `嵌套顺序反了：${tag} 不能套在 ${outer === "u" ? "<u>" : "字色"} 里面`;
+    }
+    stack.push(open.kind);
+  }
+  if (stack.length > 0) return `有 ${stack.length} 个样式标签没有闭合`;
+  return null;
+}
 
 /** 行尾块锚点 ^xxxx（系统发放；当前"预留解析、不发放"——lib/editor/mention-types.ts，
  *  本检查对存量正文恒通过，为未来发放护航）。 */
@@ -104,6 +148,24 @@ export function restoreAndCheckBody(
   }
   if (LEGACY_COLON_RE.test(scannable)) {
     problems.push("正文含已退役的冒号形态 /__cm__<类型>:<id>，请改用 /__cm__/<类型>/<id>。");
+  }
+  const badTags = [...scannable.matchAll(SPAN_OR_FONT_OPEN_RE)]
+    .map((m) => m[0])
+    .filter((tag) => !parseCanonicalOpenTag(tag));
+  if (badTags.length > 0) {
+    problems.push(
+      `正文含不合规的行内样式标签 ${[...new Set(badTags)].slice(0, 3).join("、")}。` +
+      `字色只能写 <span style="color:<色名>"> 一种拼法（色名 ${TEXT_FG_COLORS.join("/")}），` +
+      `底色只能写 <span style="background-color:<色名>">（色名 ${TEXT_BG_COLORS.join("/")}），` +
+      "字色与底色同时要就两层嵌套、底色在外；不接受 hex / rgb / <font> / 其他 style 属性；恢复默认颜色就去掉标签。",
+    );
+  }
+  const nesting = checkStyleNesting(scannable);
+  if (nesting) {
+    problems.push(
+      `行内样式标签嵌套不合规：${nesting}。固定顺序由外到内是 <span style="background-color:…"> > <span style="color:…"> > <u>，` +
+      "每个开标签要有对应闭标签且不交叉；加粗 / 斜体 / 删除线写在最里面。",
+    );
   }
 
   if (oldBody) {

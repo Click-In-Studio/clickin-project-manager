@@ -7,17 +7,22 @@
 // 什么"），差异只有一个按钮。各写一遍的下场早有先例——同一个块类型在插入菜单
 // 和转换菜单里长出两副样子（见 lib/editor/editor-block-types 的由来）。
 //
-// 顺序按飞书：段落格式 → 加粗 → 删除线 → 斜体 → 行内代码 →（删除）。
+// 顺序按飞书：段落格式 → 加粗 → 删除线 → 斜体 → 下划线 → 行内代码 → 颜色 →（删除）。
 //
-// **没有下划线**：markdown 没有下划线这个构造，tiptap 会把它序列化成裸
-// `<u>` HTML，而只读渲染端（WikiMarkdown）不挂 rehype-raw，react-markdown 会
-// 把 raw 节点转成纯文本——读者看到的是字面的 `<u>甲</u>`。飞书能有是因为它不
-// 存 markdown，我们存。
+// **下划线与颜色（#524）**：这里原先写着「没有下划线：markdown 没有这个构造，
+// tiptap 会序列化成裸 `<u>`，只读端不挂 rehype-raw 会显示成字面标签」。那条
+// 论据的前半句仍成立，后半句已被推翻——现在 `<u>` / `<span style="color:…">`
+// 就是正式方言（HTML 子集，lib/editor/inline-style-dialect），只读端用
+// remark-inline-style 只配对这三种 canonical 标签，不开 rehype-raw。
+// 「默认颜色」是去掉标签而不是某个值，所以色板里「默认」单独一项，不画成黑块。
 
 import { useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import { FORMAT_ACTIONS, currentFormat } from "@/lib/editor/editor-block-ops";
 import { applyAcrossCells } from "@/lib/editor/table-ops";
+import {
+  TEXT_BG_COLORS, TEXT_COLOR_LABELS, TEXT_FG_COLORS, isTextBgColor, isTextFgColor,
+} from "@/lib/editor/inline-style-dialect";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
 import { useShortcutLabel } from "@/components/ui/shortcut-label";
 
@@ -54,24 +59,28 @@ export function OpsSep() {
   return <span className="w-px bg-zinc-700 mx-1 self-stretch" />;
 }
 
-/** 段落格式（飞书那个大 T）—— 点开是一张「当前是什么、能变成什么」的清单 */
-function FormatMenu({ editor }: { editor: Editor }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
+/** 点外面 / Esc 关闭的下拉壳（段落格式与颜色两个下拉共用） */
+function useDismiss(open: boolean, close: () => void, ref: React.RefObject<HTMLDivElement | null>) {
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+      if (!ref.current?.contains(e.target as Node)) close();
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
     document.addEventListener("mousedown", onDown, true);
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("mousedown", onDown, true);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, close, ref]);
+}
+
+/** 段落格式（飞书那个大 T）—— 点开是一张「当前是什么、能变成什么」的清单 */
+function FormatMenu({ editor }: { editor: Editor }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(open, () => setOpen(false), ref);
 
   const now = currentFormat(editor);
 
@@ -103,6 +112,99 @@ function FormatMenu({ editor }: { editor: Editor }) {
   );
 }
 
+/** 色板一格：aria-pressed 表选中，描蓝边；swatch 里的 A 用 CSS 变量取色（hex 只在 globals.css） */
+function Swatch({
+  active, title, onPick, children, style,
+}: {
+  active: boolean; title: string; onPick: () => void; children: React.ReactNode; style?: React.CSSProperties;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      aria-pressed={active}
+      onMouseDown={e => { e.preventDefault(); onPick(); }}
+      style={style}
+      className={`h-7 w-7 rounded-md text-sm font-semibold leading-none flex items-center justify-center border-2 transition-colors ${
+        active ? "border-sky-400" : "border-transparent hover:border-zinc-500"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * 字色 / 底色下拉（#524）。两排色板各带「默认」一格：默认 = unsetMark 去壳，
+ * 不是写 `color:default`——所以它画成带斜线的 A，不画成黑块（黑是真实的一档）。
+ */
+function ColorMenu({ editor }: { editor: Editor }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(open, () => setOpen(false), ref);
+
+  const fgNow = editor.getAttributes("textColor").color as unknown;
+  const bgNow = editor.getAttributes("textBackground").color as unknown;
+  const fg = isTextFgColor(fgNow) ? fgNow : null;
+  const bg = isTextBgColor(bgNow) ? bgNow : null;
+
+  const pickFg = (c: typeof fg) => {
+    if (c) editor.chain().focus().setTextColor(c).run();
+    else editor.chain().focus().unsetTextColor().run();
+    setOpen(false);
+  };
+  const pickBg = (c: typeof bg) => {
+    if (c) editor.chain().focus().setTextBackground(c).run();
+    else editor.chain().focus().unsetTextBackground().run();
+    setOpen(false);
+  };
+
+  return (
+    <div ref={ref} className="relative flex items-stretch">
+      <OpsBtn onClick={() => setOpen(o => !o)} active={open || !!fg || !!bg} title="字体颜色 / 背景颜色">
+        {/* 触发钮本身就是当前状态的预览：A 取当前字色，底下一道取当前底色 */}
+        <span className="inline-flex flex-col items-center leading-none">
+          <span style={fg ? { color: `var(--text-fg-${fg})` } : undefined}>A</span>
+          <span
+            className="mt-0.5 h-[3px] w-4 rounded-sm"
+            style={{ background: bg ? `var(--text-bg-${bg})` : "currentColor", opacity: bg ? 1 : 0.35 }}
+          />
+        </span>
+      </OpsBtn>
+      {open && (
+        <div
+          data-text-color-menu=""
+          className="absolute left-0 top-full mt-1 px-2 py-1.5 rounded-lg bg-zinc-800 shadow-xl border border-zinc-700 z-10"
+        >
+          <p className="px-1 pt-0.5 pb-1 text-[11px] text-zinc-400">字体颜色</p>
+          <div className="flex gap-0.5">
+            <Swatch active={fg === null} title="字体颜色：默认" onPick={() => pickFg(null)}>
+              <span className="relative text-zinc-200">A<span className="absolute -left-0.5 top-1/2 h-px w-4 -rotate-45 bg-zinc-400" /></span>
+            </Swatch>
+            {TEXT_FG_COLORS.map(c => (
+              <Swatch key={c} active={fg === c} title={`字体颜色：${TEXT_COLOR_LABELS[c]}`} onPick={() => pickFg(c)}>
+                <span className="rounded bg-zinc-100 px-1 py-0.5" style={{ color: `var(--text-fg-${c})` }}>A</span>
+              </Swatch>
+            ))}
+          </div>
+          <p className="px-1 pt-1.5 pb-1 text-[11px] text-zinc-400">背景颜色</p>
+          <div className="flex gap-0.5">
+            <Swatch active={bg === null} title="背景颜色：默认" onPick={() => pickBg(null)}>
+              <span className="relative text-zinc-200">A<span className="absolute -left-0.5 top-1/2 h-px w-4 -rotate-45 bg-zinc-400" /></span>
+            </Swatch>
+            {TEXT_BG_COLORS.map(c => (
+              <Swatch key={c} active={bg === c} title={`背景颜色：${TEXT_COLOR_LABELS[c]}`} onPick={() => pickBg(c)}>
+                <span className="rounded px-1 py-0.5 text-zinc-800" style={{ background: `var(--text-bg-${c})` }}>A</span>
+              </Swatch>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * 浮动条的操作组。
  *
@@ -118,6 +220,7 @@ export default function EditorOps({
 }) {
   const boldKey = useShortcutLabel("Mod+B");
   const italicKey = useShortcutLabel("Mod+I");
+  const underlineKey = useShortcutLabel("Mod+U");
   return (
     <>
       <FormatMenu editor={editor} />
@@ -128,8 +231,11 @@ export default function EditorOps({
         active={editor.isActive("strike")} title="删除线"><s>S</s></OpsBtn>
       <OpsBtn onClick={() => editor.chain().focus().toggleItalic().run()}
         active={editor.isActive("italic")} title={`斜体 (${italicKey})`}><em>I</em></OpsBtn>
+      <OpsBtn onClick={() => editor.chain().focus().toggleUnderline().run()}
+        active={editor.isActive("underline")} title={`下划线 (${underlineKey})`}><u>U</u></OpsBtn>
       <OpsBtn onClick={() => editor.chain().focus().toggleCode().run()}
         active={editor.isActive("code")} title="行内代码">{"</>"}</OpsBtn>
+      <ColorMenu editor={editor} />
       {onDelete && (
         <>
           <OpsSep />

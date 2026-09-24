@@ -27,6 +27,7 @@ import { isFeishuHtml, transformFeishuHtml } from "@/lib/editor/feishu-paste";
 import { stripExternalPastedImages } from "@/lib/editor/external-img-paste";
 import { isEmbeddableUpload, embedMediaKind } from "@/lib/asset/embed-media";
 import { Callout } from "@/lib/editor/tiptap-callout";
+import { INLINE_STYLE_EXTENSIONS } from "@/lib/editor/tiptap-inline-style";
 import { WikiImage, type WikiEmbedMeta } from "@/lib/wiki/tiptap-image";
 import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/editor/tiptap-upload-placeholder";
 import { Column, ColumnGroup } from "@/lib/editor/tiptap-columns";
@@ -665,6 +666,10 @@ export default function SmartTextarea({
       // 段落换成带空段落方言的版本（#576）：空行序列化成独占一行的 `&nbsp;`，
       // 否则相邻同类列表之间的空行一过 markdown 就没了、两个列表并成一个
       paragraph: false,
+      // 下划线换成带 markdown serializer、priority 压过 bold 的版本（#524）：
+      // 内建的会落到 HTMLMark 兜底且排在 bold 之后，`<strong><u>` 序列化成
+      // `<**u>`（#674）
+      underline: false,
     });
 
     const contentMentionCfg = ContentMentionExt.configure({
@@ -782,6 +787,9 @@ export default function SmartTextarea({
       // ColumnEditing 不随 blockTools 门控：空栏退格、禁止嵌套是分栏方言自身
       // 的不变量，哪个面都得维护（粘贴、AI 写入都可能造出嵌套组）
       Callout, Column, ColumnGroup, ColumnEditing,
+      // 字色 / 底色 / 下划线（#524）：全站同一套 schema，粘贴 / AI 写入 / 协作
+      // 同步在哪个面都可能带进来，不随 markdown prop 门控
+      ...INLINE_STYLE_EXTENSIONS,
       // 拖拽造栏、栏宽拖拽只在有手柄的面才有意义（也才有那条栏间沟槽放操作件）
       ...(hasColumnTools ? [ColumnDrop, ColumnResize] : []),
       imageExt,
