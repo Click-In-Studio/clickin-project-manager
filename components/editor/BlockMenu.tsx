@@ -17,9 +17,11 @@ import {
   getSelectedBlock, moveBlock, duplicateBlock, deleteBlock,
   turnInto, canTurnInto, isColumnGroup, changeColumnCount, equalizeColumns,
   findColumnGroup, selectColumnGroup,
+  findCallout, setCalloutColor,
   TURN_INTO,
 } from "@/lib/editor/editor-block-ops";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
+import { CALLOUT_COLORS, CALLOUT_DEFAULT_BG } from "@/lib/editor/tiptap-callout";
 
 function Item({
   onClick, children, hint, danger, disabled,
@@ -84,6 +86,7 @@ export default function BlockMenu({
 
   const block = getSelectedBlock(editor);
   const group = findColumnGroup(editor);
+  const callout = findCallout(editor);
   const selectedIsGroup = isColumnGroup(block?.node ?? null);
   const selectedIsColumn = block?.node.type.name === "column";
 
@@ -127,6 +130,31 @@ export default function BlockMenu({
           <Item onClick={() => run(() => moveBlock(editor, -1))}>上移</Item>
           <Item onClick={() => run(() => moveBlock(editor, 1))}>下移</Item>
           <Item onClick={() => run(() => duplicateBlock(editor))}>复制</Item>
+
+          {callout && (
+            <>
+              <SectionLabel>高亮块颜色</SectionLabel>
+              {/* 色板而不是文字项：颜色靠看不靠读。选中态描蓝边，默认灰底也是一格 */}
+              <div className="flex gap-1.5 px-3 pb-2">
+                {CALLOUT_COLORS.map(({ value, label }) => {
+                  const current = (callout.node.attrs.color as string | null) ?? null;
+                  const active = current === value;
+                  return (
+                    <button
+                      key={value ?? "default"}
+                      type="button"
+                      title={label}
+                      aria-label={`高亮块颜色：${label}`}
+                      aria-pressed={active}
+                      onMouseDown={e => { e.preventDefault(); run(() => setCalloutColor(editor, value)); }}
+                      className={`h-6 w-6 rounded border-2 ${active ? "border-sky-500" : "border-white ring-1 ring-zinc-300"}`}
+                      style={{ background: value ?? CALLOUT_DEFAULT_BG }}
+                    />
+                  );
+                })}
+              </div>
+            </>
+          )}
 
           {group && (
             <>

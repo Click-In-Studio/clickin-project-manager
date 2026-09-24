@@ -38,6 +38,7 @@ import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor/editor-slash-c
 import { DROP_INDICATOR_OPTIONS } from "@/lib/editor/editor-drop-indicator";
 import { resolveRemoteCursorPos } from "@/lib/editor/remote-cursor";
 import { MarkdownParagraph } from "@/lib/editor/tiptap-empty-paragraph";
+import { suggestionMenuLayout } from "@/lib/editor/editor-floating-menu";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 import BlockHandle from "@/components/editor/BlockHandle";
 import TableTools from "@/components/editor/TableTools";
@@ -1091,6 +1092,11 @@ export default function SmartTextarea({
   }, [markdown, editor, value]);
 
   const rect = drop?.clientRect?.();
+  // 弹层按视口定位（#671）：靠底向上开、靠右夹回来、矮视口缩高。drop 只会在
+  // 客户端交互后被 set，SSR 那次渲染 rect 恒为空，这里读 window 不会跑在服务端。
+  const menuLayout = rect && typeof window !== "undefined"
+    ? suggestionMenuLayout(rect, { width: window.innerWidth, height: window.innerHeight })
+    : null;
   // `/` 无命中时整个弹层不出现——正文里的 and/or、日期 2026/08 不该弹空菜单
   const dropPlugin = drop ? allPlugins.find(p => p.trigger === drop.trigger) : undefined;
   const dropHidden = !!drop && drop.items.length === 0 && !!dropPlugin?.hideWhenEmpty;
@@ -1105,11 +1111,22 @@ export default function SmartTextarea({
       {markdown && !readOnly && <TextBubbleMenu editor={editor} />}
       {markdown && blockTools && !readOnly && <BlockHandle editor={editor} />}
       {markdown && blockTools && !readOnly && <TableTools editor={editor} />}
-      {drop && rect && !dropHidden && typeof document !== "undefined" &&
+      {drop && rect && menuLayout && !dropHidden && typeof document !== "undefined" &&
         createPortal(
           <div
-            style={{ position: "fixed", left: rect.left, top: rect.bottom + 4, zIndex: 9999 }}
-            className="bg-white rounded-xl shadow-lg border border-zinc-100 py-1 min-w-[160px] max-w-[360px] max-h-64 overflow-y-auto"
+            data-placement={menuLayout.placement}
+            style={{
+              position: "fixed",
+              left: menuLayout.left,
+              top: menuLayout.top,
+              maxHeight: menuLayout.maxHeight,
+              maxWidth: menuLayout.maxWidth,
+              minWidth: Math.min(160, menuLayout.maxWidth),
+              // 向上开时 top 是菜单底边，整体上翻一个自身高度
+              transform: menuLayout.placement === "top" ? "translateY(-100%)" : undefined,
+              zIndex: 9999,
+            }}
+            className="bg-white rounded-xl shadow-lg border border-zinc-100 py-1 overflow-y-auto"
           >
             {drop.items.length === 0 ? (
               <p className="px-3 py-2 text-sm text-zinc-400">
