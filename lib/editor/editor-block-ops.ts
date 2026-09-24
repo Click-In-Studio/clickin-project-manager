@@ -216,17 +216,22 @@ export function setCalloutColor(editor: Editor, color: string | null): boolean {
   return true;
 }
 
+/** pos 处若是高亮块给它（与 findCallout 同一个 SelectedBlock 形状），否则 null */
+function calloutAt(editor: Editor, pos: number): SelectedBlock | null {
+  const node = editor.state.doc.nodeAt(pos);
+  return node?.type.name === "callout" ? { node, pos, end: pos + node.nodeSize } : null;
+}
+
 /**
  * 改高亮块图标。emoji 是字面字符，空串 = 无图标（marker 写成 `[!]`，方言本就允许）。
  * `pos` 给了就改那一个（图标选择器点的是哪个块就改哪个，与选区无关）；不给按
  * findCallout 找当前的。
  */
 export function setCalloutEmoji(editor: Editor, emoji: string, pos?: number): boolean {
-  const block = pos === undefined ? findCallout(editor) : (() => {
-    const node = editor.state.doc.nodeAt(pos);
-    return node?.type.name === "callout" ? { node, pos, end: pos + node.nodeSize } : null;
-  })();
+  const block = pos === undefined ? findCallout(editor) : calloutAt(editor, pos);
   if (!block) return false;
+  // trim 是刻意的：marker 按空白切参数，带首尾空格的 emoji 再解析就不是同一个
+  // marker，会撞保真锁。这是选择器专用写点，不是粘贴 / AI 路径。
   const tr = editor.state.tr.setNodeMarkup(block.pos, undefined, { ...block.node.attrs, emoji: emoji.trim() });
   selectNodeAt(tr, block.pos);
   editor.view.dispatch(tr);
