@@ -40,6 +40,7 @@ import { resolveRemoteCursorPos } from "@/lib/editor/remote-cursor";
 import { MarkdownParagraph } from "@/lib/editor/tiptap-empty-paragraph";
 import { suggestionMenuLayout } from "@/lib/editor/editor-floating-menu";
 import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
+import CalloutEmojiPicker from "@/components/editor/CalloutEmojiPicker";
 import BlockHandle from "@/components/editor/BlockHandle";
 import TableTools from "@/components/editor/TableTools";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
@@ -1109,6 +1110,8 @@ export default function SmartTextarea({
       {/* 浮动条与固定工具栏的作用域严格一致（markdown 面），commit「收工具栏」
           才是 1:1 替换而不是能力平移 */}
       {markdown && !readOnly && <TextBubbleMenu editor={editor} />}
+      {/* 高亮块图标：点块左上角的表情换（#525）。不随 blockTools 门控——小框里也能有高亮块 */}
+      {markdown && !readOnly && <CalloutEmojiPicker editor={editor} />}
       {markdown && blockTools && !readOnly && <BlockHandle editor={editor} />}
       {markdown && blockTools && !readOnly && <TableTools editor={editor} />}
       {drop && rect && menuLayout && !dropHidden && typeof document !== "undefined" &&
