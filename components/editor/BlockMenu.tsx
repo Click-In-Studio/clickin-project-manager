@@ -21,7 +21,7 @@ import {
   TURN_INTO,
 } from "@/lib/editor/editor-block-ops";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
-import { CALLOUT_COLORS, CALLOUT_DEFAULT_BG } from "@/lib/editor/tiptap-callout";
+import { CALLOUT_COLORS } from "@/lib/editor/tiptap-callout";
 
 function Item({
   onClick, children, hint, danger, disabled,
@@ -148,7 +148,7 @@ export default function BlockMenu({
                       aria-pressed={active}
                       onMouseDown={e => { e.preventDefault(); run(() => setCalloutColor(editor, value)); }}
                       className={`h-6 w-6 rounded border-2 ${active ? "border-sky-500" : "border-white ring-1 ring-zinc-300"}`}
-                      style={{ background: value ?? CALLOUT_DEFAULT_BG }}
+                      style={{ background: value ?? "var(--callout-bg-default)" }}
                     />
                   );
                 })}

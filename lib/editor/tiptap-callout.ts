@@ -19,8 +19,8 @@ const HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
 
 /**
  * 块菜单里的高亮块色板（#525 颜色一半）。value=null 是默认灰底——marker 不写
- * `bg=`，与 globals.css 的 `--callout-bg` 同色。色值与浅色 tailwind 100 系一致，
- * 写进 markdown 的就是这串 hex，所以别改成 CSS 变量。
+ * `bg=`，展示色由 globals.css 的 `--callout-bg-default` 给（唯一定义处，这里不
+ * 复写 hex）。其余六色写进 markdown 的就是这串 hex，所以别改成 CSS 变量。
  */
 export const CALLOUT_COLORS: readonly { value: string | null; label: string }[] = [
   { value: null, label: "默认" },
@@ -31,8 +31,6 @@ export const CALLOUT_COLORS: readonly { value: string | null; label: string }[] 
   { value: "#dbeafe", label: "蓝" },
   { value: "#ede9fe", label: "紫" },
 ];
-/** 默认灰底的展示色——只给色板画样子用，markdown 里不落这个值 */
-export const CALLOUT_DEFAULT_BG = "#f5f6f7";
 
 export type CalloutMarker = {
   emoji: string;
