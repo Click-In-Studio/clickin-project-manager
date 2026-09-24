@@ -88,6 +88,10 @@ async function repairMarkerStructureInTx(
     [versionId],
   );
   const sortKeyById = new Map(rows.map((row) => [row.block_id, row.sort_key]));
+  // 只重建结构字段（type / sceneId / ownerMarkerId / parentMarkerId），content / 角色一律占位：
+  // normalizeScriptMarkerInvariants 的规则不看内容，patch 路径的 toBlock 传的也是同样的骨架。
+  // 域模型里唯一读 content 的 isEmptyTextBlock 只用于删除规划，不在归一化路径上；
+  // 若将来归一化规则要看内容，这里与 patch 路径的 toBlock 必须一起补真值。
   const blocks: Block[] = rows.map((row) => ({
     id: row.block_id,
     type: row.type,
