@@ -4,7 +4,7 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { toActor, hasEffectiveGrant, listEffectiveGrantedResourceIds } from "@/lib/perm/grant-check";
-import { hasEventDomainView, filterDraftVisibleEvents, canEditTechReq } from "@/lib/ops/event-permissions";
+import { hasEventDomainView, filterDraftVisibleEvents, listEditableTaskIds } from "@/lib/ops/event-permissions";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getProductionName } from "@/lib/production/production-db";
 import { listMilestones } from "@/lib/ops/milestone-db";
@@ -76,7 +76,8 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
   // 日历抽屉的就地编辑入口：与 PATCH /events/[id]、/tasks/[id] 同门（API 仍是权威）。
   // 归档项目 API 一律 403，入口直接不给。
   // 事件侧按 published→publication@edit / 其余→details@edit 分档，用行集合查两次，
-  // 不逐事件 hasGrant；任务侧 canEditTechReq 含 POC 上下文判定，仍逐条（批量化挂 #589）。
+  // 不逐事件 hasGrant；任务侧走 listEditableTaskIds（与单条 canEditTechReq 同口径的
+  // 集合版，常数次查询，#589）。
   const [editableEventIds, editableTaskIds] = access.isArchived ? [[], []] : await Promise.all([
     Promise.all([
       listEffectiveGrantedResourceIds(actor, id, "event", "publication", "edit"),
@@ -87,9 +88,7 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
         return vis.wildcard || vis.ids.includes(event.id);
       })
       .map(event => event.id)),
-    Promise.all(tasks.map(async task =>
-      await canEditTechReq(access.permCtx, task.id, task.eventId, id) ? task.id : null
-    )).then(ids => ids.filter((taskId): taskId is string => taskId !== null)),
+    listEditableTaskIds(access.permCtx, id, tasks.map(task => task.id)),
   ]);
 
   // 阶段管理资格：phase 键（owner 旁路内建）∨ 部门 POC（policy 开关，活引用）

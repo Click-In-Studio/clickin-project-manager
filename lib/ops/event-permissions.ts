@@ -11,7 +11,7 @@
 import { getPool } from "../pg";
 import { isPolicyOn } from "../perm/policy-db";
 import { type PermissionContext } from "../perm/permissions";
-import { hasGrant } from "../perm/grant-check";
+import { hasGrant, listEffectiveGrantedResourceIds } from "../perm/grant-check";
 
 // ─── Context loader ───────────────────────────────────────────────────────────
 
@@ -178,6 +178,100 @@ export async function canEditTechReq(
   const req = await getTechReqByProduction(techReqId, productionId);
   if (req && await isTaskPoc(productionId, req, permCtx.userId)) return true;
   return false;
+}
+
+/**
+ * 页面集合入口（#589）：`taskIds` 里当前用户可编辑的那一部分，保持入参顺序。
+ *
+ * 与 {@link canEditTechReq} 逐条判定**结果相同**（tests/ops/editable-task-ids.test.ts
+ * 用随机工厂数据对拍），但查询次数与任务数无关（常数 5–6 次）：
+ *   1. task/*@edit 行集合、event/<id>/details@edit 行集合各一次
+ *   2. 一次读回 task 的责任主体与宿主 event——与单条门一样以库为准，不信调用方手里的行
+ *   3. 用户在本剧组任 POC 的部门（一次）；用户任**现任** POC 的用户组（一次）
+ *   4. 涉及「绑组 + 绑 event」的 task 时，再一次读这些 (event, group) 对的冻结快照
+ *      ——冻结的 event 认快照里当时的 POC，不认组的现任 POC（同 isSubjectPoc）
+ *
+ * 只认本剧组的 task：不在 `production_id` 下的 id 一律不给（单条门在通配行下对任意
+ * id 都放行，那是 API 路由先做过存在性校验的语境）。这只是 UI 开关，API 仍逐条
+ * 走 canEditTechReq 做权威判定。
+ */
+export async function listEditableTaskIds(
+  permCtx: PermissionContext,
+  productionId: string,
+  taskIds: readonly string[],
+): Promise<string[]> {
+  if (taskIds.length === 0) return [];
+  // owner 短路必须在 memberPermissions 判空之前（owner 可以不是成员，见 AGENTS §2），
+  // 与单条门同序；顺带省掉下面全部查询。不看 permCtx.isAdmin：那是恒 false 的死字段。
+  if (permCtx.isOwner) return [...taskIds];
+  if (permCtx.memberPermissions === null) return [];
+  const pool = getPool();
+  const uid = permCtx.userId;
+  const [taskGrants, eventGrants, subjectRes, pocDeptRes, pocGroupRes] = await Promise.all([
+    listEffectiveGrantedResourceIds(permCtx, productionId, "task", "*", "edit"),
+    listEffectiveGrantedResourceIds(permCtx, productionId, "event", "details", "edit"),
+    pool.query<{ id: string; event_id: string | null; department_id: string | null; group_id: string | null }>(
+      `SELECT id, event_id, department_id, group_id
+         FROM task WHERE production_id = $1 AND id = ANY($2::text[])`,
+      [productionId, [...taskIds]],
+    ),
+    pool.query<{ dept_id: string }>(
+      `SELECT dept_id FROM production_dept_member
+        WHERE production_id = $1 AND user_id = $2 AND is_poc = true`,
+      [productionId, uid],
+    ),
+    // 与 task-poc.ts 的 isGroupPocScoped 同一条判定，只是从「判一个组」改成「列出全部命中的组」
+    pool.query<{ id: string }>(
+      `SELECT eg.id FROM event_group eg
+        WHERE eg.production_id = $1
+          AND (eg.poc_user_id = $2
+               OR EXISTS (SELECT 1 FROM production_dept_member pdm
+                           WHERE pdm.dept_id = eg.poc_dept_id
+                             AND pdm.user_id = $2 AND pdm.is_poc = true))`,
+      [productionId, uid],
+    ),
+  ]);
+  const taskGrantIds = new Set(taskGrants.ids);
+  const eventGrantIds = new Set(eventGrants.ids);
+  const pocDeptIds = new Set(pocDeptRes.rows.map(r => r.dept_id));
+  const pocGroupIds = new Set(pocGroupRes.rows.map(r => r.id));
+
+  // 冻结快照：key = `${eventId}|${groupId}`，值 = 用户是不是快照里当时的 POC。
+  // 缺 key = 该对未冻结，走组的现任 POC。与 frozenGroupPocUserIds 同口径（成员行
+  // was_poc ∪ 头表 poc_user_id，后者兼容迁移前的历史快照）。
+  const frozenPoc = new Map<string, boolean>();
+  const pairs = subjectRes.rows.filter(t => t.event_id && t.group_id);
+  if (pairs.length) {
+    const { rows } = await pool.query<{ event_id: string; group_id: string; is_poc: boolean }>(
+      `SELECT f.event_id, f.group_id,
+              bool_or(COALESCE(f.poc_user_id = $3::uuid, false)
+                      OR EXISTS (SELECT 1 FROM event_group_freeze_member m
+                                  WHERE m.event_id = f.event_id AND m.group_id = f.group_id
+                                    AND m.frozen_at = f.frozen_at
+                                    AND m.was_poc = true AND m.user_id = $3::uuid)) AS is_poc
+         FROM event_group_freeze f
+        WHERE f.released_at IS NULL
+          AND f.event_id = ANY($1::text[]) AND f.group_id = ANY($2::uuid[])
+        GROUP BY f.event_id, f.group_id`,
+      [[...new Set(pairs.map(t => t.event_id))], [...new Set(pairs.map(t => t.group_id))], uid],
+    );
+    for (const r of rows) frozenPoc.set(`${r.event_id}|${r.group_id}`, r.is_poc);
+  }
+
+  const editable = new Set<string>();
+  for (const t of subjectRes.rows) {
+    if (taskGrants.wildcard || taskGrantIds.has(t.id)) { editable.add(t.id); continue; }
+    if (t.event_id && (eventGrants.wildcard || eventGrantIds.has(t.event_id))) { editable.add(t.id); continue; }
+    if (t.department_id) {
+      if (pocDeptIds.has(t.department_id)) editable.add(t.id);
+      continue;   // 主体互斥（task_subject_single）：有部门就不再看组
+    }
+    if (t.group_id) {
+      const snap = t.event_id ? frozenPoc.get(`${t.event_id}|${t.group_id}`) : undefined;
+      if (snap !== undefined ? snap : pocGroupIds.has(t.group_id)) editable.add(t.id);
+    }
+  }
+  return taskIds.filter(id => editable.has(id));
 }
 
 /**
