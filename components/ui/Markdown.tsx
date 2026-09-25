@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown as MarkdownExt } from "tiptap-markdown";
+import { CjkMarkdown } from "@/lib/editor/tiptap-cjk-markdown";
 
 type Props = {
   content: string;
@@ -17,6 +18,7 @@ export default function Markdown({ content, size = "base" }: Props) {
     extensions: [
       StarterKit,
       MarkdownExt.configure({ transformCopiedText: true }),
+      CjkMarkdown, // 与 SmartTextarea 同一套解析规则（#674）
     ],
     content,
     editorProps: {

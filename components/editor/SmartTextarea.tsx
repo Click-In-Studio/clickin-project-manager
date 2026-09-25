@@ -27,6 +27,7 @@ import { isFeishuHtml, transformFeishuHtml } from "@/lib/editor/feishu-paste";
 import { stripExternalPastedImages } from "@/lib/editor/external-img-paste";
 import { isEmbeddableUpload, embedMediaKind } from "@/lib/asset/embed-media";
 import { Callout } from "@/lib/editor/tiptap-callout";
+import { CjkMarkdown } from "@/lib/editor/tiptap-cjk-markdown";
 import { WikiImage, type WikiEmbedMeta } from "@/lib/wiki/tiptap-image";
 import { UploadPlaceholder, uploadPlaceholderKey, findUploadPlaceholder } from "@/lib/editor/tiptap-upload-placeholder";
 import { Column, ColumnGroup } from "@/lib/editor/tiptap-columns";
@@ -772,7 +773,8 @@ export default function SmartTextarea({
     // 扩展集也只有一套：`markdown` prop 只决定要不要工具栏（见下方渲染），
     // 不再决定能力。image 仍按 imageUpload 是否提供门控——它需要一个上传器。
     // TableKit: StarterKit 不含表格节点，缺了它 markdown 表格进编辑器会被吞。
-    return [base, MarkdownParagraph, markdownExt,
+    // CjkMarkdown 紧跟 markdownExt：解析侧 CJK 侧翼规则 + 序列化侧绕开 trimInline（#674）
+    return [base, MarkdownParagraph, markdownExt, CjkMarkdown,
       TableKit.configure({ table: { resizable: false } }),
       // 外缘选中整行/整列后按 Delete 删的是结构，不是清空内容
       TableKeymap,

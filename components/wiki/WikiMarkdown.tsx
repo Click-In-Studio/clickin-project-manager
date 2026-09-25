@@ -14,6 +14,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkColumns from "@/lib/editor/remark-columns";
+import { REMARK_CJK_PLUGINS } from "@/lib/editor/remark-cjk-friendly";
 import { BASE_PATH } from "@/lib/base-path";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import {
@@ -321,7 +322,8 @@ export default function WikiMarkdown({
     <Wrapper className={wrapperClass}>
       <ReactMarkdown
         // breaks：单回车即换行（对齐 MindWeave 与编辑器 tiptap breaks:true——CJK 写作习惯）
-        remarkPlugins={[remarkGfm, remarkBreaks, remarkColumns]}
+        // REMARK_CJK_PLUGINS：紧贴中文的加粗 / 删除线也算定界符，与编辑器同源（#674）
+        remarkPlugins={[remarkGfm, ...REMARK_CJK_PLUGINS, remarkBreaks, remarkColumns]}
         {...(inline ? { disallowedElements: BLOCK_ELEMENTS, unwrapDisallowed: true } : {})}
         components={{
           ...(inline ? { p: ({ children }: { children?: ReactNode }) => <>{children}</> } : {}),
