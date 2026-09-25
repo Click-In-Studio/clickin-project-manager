@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import http from "node:http";
-import { webFetch, webSearch, htmlToText, isPrivateAddress, formatSearchHits, resolvePublicAddresses, WEB_FETCH_MAX_CHARS } from "@/lib/agent/runtime/web-tools";
+import { webFetch, webSearch, htmlToText, isPrivateAddress, formatSearchHits, resolvePublicAddresses, sanitizeText, isTextualContentType, WEB_FETCH_MAX_CHARS } from "@/lib/agent/runtime/web-tools";
 
 // 假 DNS：让「域名」形式的 URL 也能落到本地 server，从而真正走建连层的 lookup 回调（#683）。
 // 字面 IP 不触发 lookup、localhost 在 lookup 前就被拒——只用它们的用例永远碰不到那条路径。
@@ -43,6 +43,15 @@ describe("web.fetch", () => {
         // 同一台服务器换个主机名：白名单只放 127.0.0.1，localhost 不在 → 这一跳必须在建连前被拒
         res.writeHead(302, { location: `http://localhost:${port}/page` });
         res.end();
+      } else if (req.url === "/paper.pdf") {
+        res.writeHead(200, { "content-type": "application/pdf", "content-length": String(3 * 1024 * 1024) });
+        res.end(Buffer.concat([Buffer.from("%PDF-1.7\n%"), Buffer.from([0xe2, 0xe3, 0xcf, 0xd3, 0x00, 0x00, 0x01])]));
+      } else if (req.url === "/untyped-binary") {
+        res.writeHead(200); // 没有 content-type：只能靠嗅探
+        res.end(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x00, 0x08]));
+      } else if (req.url === "/dirty-text") {
+        res.setHeader("content-type", "text/plain; charset=utf-8");
+        res.end(Buffer.concat([Buffer.from("前\u0001后"), Buffer.from([0x00]), Buffer.from("\t保留\n换行"), Buffer.from([0xed, 0xa0, 0x80])]));
       } else {
         res.writeHead(404); res.end("nope");
       }
@@ -81,6 +90,18 @@ describe("web.fetch", () => {
     hits.length = 0;
     await expect(webFetch(`${base}/redirect-private`)).rejects.toThrow("不允许抓取内网地址");
     expect(hits).toEqual([`127.0.0.1:${port}/redirect-private`]); // localhost 那一跳从未到达服务器
+  });
+
+  it("二进制不当文本读（#685）：PDF / 无 content-type 的二进制都回可读错误；文本里的 NUL 与控制字符被清掉", async () => {
+    process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE = "1";
+    await expect(webFetch(`${base}/paper.pdf`)).rejects.toThrow(/PDF文件（application\/pdf，约 3\.0 MB）.*上传为项目资产/);
+    await expect(webFetch(`${base}/untyped-binary`)).rejects.toThrow("二进制文件（类型未知");
+    const dirty = await webFetch(`${base}/dirty-text`);
+    expect(dirty.text).not.toContain("\u0000");
+    expect(dirty.text).not.toContain("\u0001");
+    expect(dirty.text).toContain("前后");
+    expect(dirty.text).toContain("\t保留\n换行");
+    expect(dirty.text.isWellFormed()).toBe(true);
   });
 
   it("超长正文截断并标记；重定向跟随；404 报错", async () => {
@@ -179,5 +200,25 @@ describe("web.search（Brave，fetch 打桩）", () => {
 describe("htmlToText 不依赖网络", () => {
   it("实体与数字实体解码", () => {
     expect(htmlToText("<p>A &lt; B &#20320;&#x597D;</p>").text).toBe("A < B 你好");
+  });
+
+  it("数字实体的非法码点（0 / 代理区 / 超限）解成 U+FFFD，不产 NUL、不产孤立代理、不抛（#685）", () => {
+    expect(htmlToText("<p>a&#0;b</p>").text).toBe("a�b");
+    expect(htmlToText("<p>a&#xD800;b</p>").text).toBe("a�b");
+    expect(htmlToText("<p>a&#1114112;b</p>").text).toBe("a�b");
+    expect(htmlToText("<p>&#x1F3AD;</p>").text).toBe("🎭"); // 合法的增补平面码点照常
+  });
+
+  it("sanitizeText / isTextualContentType", () => {
+    expect(sanitizeText("a\u0000b\u0007c\td\ne\u007Ff")).toBe("abc\td\nef");
+    expect(sanitizeText("x\uD800y")).toBe("x�y");
+    expect(sanitizeText("x\uDC00y")).toBe("x�y");
+    expect(sanitizeText("🎭")).toBe("🎭"); // 成对代理不动
+    for (const t of ["text/html; charset=utf-8", "text/plain", "application/json", "application/xhtml+xml", "application/ld+json", "image/svg+xml"]) {
+      expect(isTextualContentType(t), t).toBe(true);
+    }
+    for (const t of ["application/pdf", "image/png", "application/octet-stream", "application/zip", "audio/mpeg"]) {
+      expect(isTextualContentType(t), t).toBe(false);
+    }
   });
 });

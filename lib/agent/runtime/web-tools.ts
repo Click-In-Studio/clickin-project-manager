@@ -83,10 +83,21 @@ export async function webFetch(rawUrl: string, signal?: AbortSignal): Promise<Fe
     }
     break;
   }
-  if (!res.ok) throw new WebToolError(`抓取失败：HTTP ${res.status}`);
+  if (!res.ok) {
+    await res.body?.cancel().catch(() => {});
+    throw new WebToolError(`抓取失败：HTTP ${res.status}`);
+  }
 
+  // 二进制（PDF / 图片 / 压缩包…）不当文本读（#685）：解码出来是满是 NUL 的乱码，模型读不了、
+  // 落库也会被 jsonb 拒。按 content-type 先分流，没有 content-type 的再嗅探正文。真正的
+  // 出路（存为项目资产、抽正文）是另一个 feature，这里只如实告诉模型。
+  const ctype = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  if (ctype && !isTextualContentType(ctype)) {
+    await res.body?.cancel().catch(() => {});
+    throw new WebToolError(binaryRejection(ctype, res.headers.get("content-length")));
+  }
   const body = await readCapped(res, WEB_FETCH_MAX_BYTES);
-  const ctype = res.headers.get("content-type") ?? "";
+  if (!ctype && looksBinary(body)) throw new WebToolError(binaryRejection("类型未知", res.headers.get("content-length")));
   let title = "";
   let text: string;
   if (/html|xml/i.test(ctype) || /^\s*<(!doctype|html)/i.test(body.slice(0, 200))) {
@@ -94,8 +105,38 @@ export async function webFetch(rawUrl: string, signal?: AbortSignal): Promise<Fe
   } else {
     text = body;
   }
+  title = sanitizeText(title);
+  text = sanitizeText(text);
   const truncated = text.length > WEB_FETCH_MAX_CHARS;
   return { url: current.href, title, text: truncated ? text.slice(0, WEB_FETCH_MAX_CHARS) : text, truncated };
+}
+
+const TEXTUAL_CTYPE = /^text\/|[/+](html|xml|json|javascript|ecmascript|yaml|csv|markdown|x-www-form-urlencoded)$/;
+
+export function isTextualContentType(ctype: string): boolean {
+  return TEXTUAL_CTYPE.test(ctype.split(";")[0].trim().toLowerCase());
+}
+
+function binaryRejection(ctype: string, contentLength: string | null): string {
+  const bytes = Number(contentLength);
+  const size = Number.isFinite(bytes) && bytes > 0 ? `，约 ${(bytes / 1024 / 1024).toFixed(1)} MB` : "";
+  const kind = ctype === "application/pdf" ? "PDF" : "二进制";
+  return `该链接是${kind}文件（${ctype}${size}），目前只能读网页正文，不能读 PDF / 图片 / 压缩包等文件。如需使用其内容，请让用户手动下载后上传为项目资产。`;
+}
+
+/** 无 content-type 时的嗅探：开头 8000 字符里出现 NUL 就当二进制。 */
+function looksBinary(body: string): boolean {
+  return body.slice(0, 8000).includes("\u0000");
+}
+
+/**
+ * 工具输出必须是「文本」：去 NUL 与 C0 控制字符（保留 \t \n \r），孤立代理项换成 U+FFFD。
+ * 不这样做，jsonb 落库会拒（NUL 的转义 → 22P05，孤立代理 → 22P02）。
+ */
+export function sanitizeText(s: string): string {
+  return s
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
 }
 
 export function formatFetchedPage(p: FetchedPage): string {
@@ -126,8 +167,14 @@ function decodeEntities(s: string): string {
   return s
     .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
     .replace(/&quot;/g, "\"").replace(/&#39;|&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)));
+    .replace(/&#(\d+);/g, (_, n) => codePointOrReplacement(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => codePointOrReplacement(parseInt(h, 16)));
+}
+
+/** 数字实体：0、代理区、超出 Unicode 上限的一律 U+FFFD——String.fromCodePoint 对超限会直接抛 RangeError。 */
+function codePointOrReplacement(n: number): string {
+  if (!Number.isFinite(n) || n <= 0 || n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff)) return "�";
+  return String.fromCodePoint(n);
 }
 
 /** 按字节上限读体。截断点落在多字节字符中间时那个字符会解成 �——正文只是给模型看的，best-effort。 */
