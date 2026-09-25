@@ -34,6 +34,8 @@ function rfc3986(s: string): string {
 /**
  * SigV4 规范查询串：键按码点序（不是 localeCompare——'X'(0x58) < 'r'(0x72)），
  * 键值都按 RFC 3986 编码。签名用它、最终 URL 也用它，两边字节级一致。
+ * 排序按编码前的键名：SigV4 规定按编码后排，现有键名（X-Amz-* / response-*）
+ * 编码前后相同所以等价；新增含特殊字符的键名时要改成先编码再排。
  *
  * 不能用 URLSearchParams.toString()：那是 x-www-form-urlencoded，空格编成 "+"；
  * R2 重算签名时按 "%20" 走，带空格的值（response-cache-control 的

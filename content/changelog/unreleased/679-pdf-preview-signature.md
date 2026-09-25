@@ -1,6 +1,6 @@
 ---
 kind: fixed
-title: 资产预览页打开 PDF、图片、视频、音频不再报「SignatureDoesNotMatch」
+title: 资产预览页打开 PDF、图片、视频、音频不再只显示一段英文错误
 page: production/assets/preview
 pr: 696
 ---
