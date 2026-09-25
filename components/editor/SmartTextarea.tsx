@@ -40,6 +40,8 @@ import { TableKeymap } from "@/lib/editor/tiptap-table-keymap";
 import { MarkdownTable } from "@/lib/editor/tiptap-table-markdown";
 import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor/editor-slash-commands";
 import { DROP_INDICATOR_OPTIONS } from "@/lib/editor/editor-drop-indicator";
+import { readDragRef, dragRefMentionAttrs } from "@/lib/editor/editor-drop-payload";
+import { navigateToMention } from "@/lib/editor/mention-navigate";
 import { resolveRemoteCursorPos } from "@/lib/editor/remote-cursor";
 import { MarkdownParagraph } from "@/lib/editor/tiptap-empty-paragraph";
 import { suggestionMenuLayout } from "@/lib/editor/editor-floating-menu";
@@ -47,6 +49,7 @@ import TextBubbleMenu from "@/components/editor/TextBubbleMenu";
 import CalloutEmojiPicker from "@/components/editor/CalloutEmojiPicker";
 import BlockHandle from "@/components/editor/BlockHandle";
 import TaskSyncMenu from "@/components/editor/TaskSyncMenu";
+import MentionChipMenu from "@/components/editor/MentionChipMenu";
 import TableTools from "@/components/editor/TableTools";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
 
@@ -808,28 +811,13 @@ export default function SmartTextarea({
         return false;
       },
       // 富文本 chip 点击跳转（wiki 直跳文档页；剧本域 chip 经 mention-resolve 取 url）。
-      // chip 是原子节点，点击导航是自然语义（飞书/Notion 同款）
+      // chip 是原子节点，点击导航是自然语义（飞书/Notion 同款）。与悬浮条的「打开」
+      // 同一个函数（lib/editor/mention-navigate）
       handleClickOn: (_view, _pos, node) => {
         if (node.type.name !== "contentMention") return false;
         const pid = contentMentionRef.current?.productionId;
         if (!pid) return false;
-        const { kind, id, aux, versionId, displayMode } = node.attrs as ContentMentionAttrs;
-        if (kind === "wiki") {
-          window.location.assign(`${BASE_PATH}/production/${pid}/wiki/${id}`);
-          return true;
-        }
-        void (async () => {
-          try {
-            const res = await fetch(`${BASE_PATH}/api/production/${pid}/mention-resolve`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ mentions: [{ kind, displayMode, id, aux, versionId }] }),
-            });
-            if (!res.ok) return;
-            const data = await res.json() as { urls: (string | null)[] };
-            if (data.urls?.[0]) window.location.assign(`${BASE_PATH}${data.urls[0]}`);
-          } catch { /* 解析失败不跳 */ }
-        })();
+        void navigateToMention(pid, node.attrs as ContentMentionAttrs);
         return true;
       },
       // 从文档树拖文档进编辑器 → 自动成为双向链接 chip（UI 修缮轮）
@@ -862,22 +850,16 @@ export default function SmartTextarea({
           }
           return true;
         }
-        const raw = event.dataTransfer?.getData("application/x-clickin-wiki");
-        if (!raw) return false;
-        try {
-          const { id, label } = JSON.parse(raw) as { id: string; label: string };
-          if (!id) return false;
-          event.preventDefault();
-          const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
-            ?? view.state.selection.to;
-          const node = view.state.schema.nodes.contentMention.create({
-            kind: "wiki", displayMode: null, id, aux: null, versionId: null, label: label ?? "文档",
-          });
-          view.dispatch(view.state.tr.insert(pos, [node, view.state.schema.text(" ")]));
-          return true;
-        } catch {
-          return false;
-        }
+        // 文档 / 素材一律先落引用 chip，不弹「引用 / 嵌入」面板；素材要嵌入的话
+        // hover chip 上「转为嵌入」（#692，MentionChipMenu）。载荷与树端同源
+        const ref = readDragRef(event.dataTransfer);
+        if (!ref) return false;
+        event.preventDefault();
+        const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
+          ?? view.state.selection.to;
+        const node = view.state.schema.nodes.contentMention.create(dragRefMentionAttrs(ref));
+        view.dispatch(view.state.tr.insert(pos, [node, view.state.schema.text(" ")]));
+        return true;
       },
     },
     onSelectionUpdate: ({ editor }) => {
@@ -1073,6 +1055,11 @@ export default function SmartTextarea({
       {/* 任务项同步浮条（#670）：与 TextBubbleMenu 靠选区判据互斥；补全菜单开着时让位 */}
       {markdown && taskSync && !readOnly && contentMention && (
         <TaskSyncMenu editor={editor} productionId={contentMention.productionId} hidden={!!drop && !dropHidden} />
+      )}
+      {/* 引用 chip 悬浮条（#692）：「打开 ｜ 转为嵌入」。只在有 productionId 语境的
+          可编辑面出现——「打开」要经 mention-resolve，「转为嵌入」要查素材类型 */}
+      {markdown && !readOnly && contentMention && (
+        <MentionChipMenu editor={editor} productionId={contentMention.productionId} hidden={!!drop && !dropHidden} />
       )}
       {/* 高亮块图标：点块左上角的表情换（#525）。不随 blockTools 门控——小框里也能有高亮块 */}
       {markdown && !readOnly && <CalloutEmojiPicker editor={editor} />}

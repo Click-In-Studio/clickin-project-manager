@@ -21,22 +21,27 @@ import {
   TURN_INTO,
 } from "@/lib/editor/editor-block-ops";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
+import { embedToMentionReason, embedToMentionTx } from "@/lib/editor/editor-embed-switch";
 import { CALLOUT_COLORS } from "@/lib/editor/tiptap-callout";
 import { CALLOUT_EMOJI_PICKER_EVENT } from "@/lib/editor/callout-emoji";
 
 function Item({
-  onClick, children, hint, danger, disabled,
+  onClick, children, hint, danger, disabledReason,
 }: {
   onClick: () => void;
   children: React.ReactNode;
   hint?: string;
   danger?: boolean;
-  disabled?: boolean;
+  /** 有值 = 灰掉，值就是给用户看的原因（§13.4：aria-disabled + title，不用 disabled
+   *  属性——disabled 的按钮不冒鼠标事件，title 里的原因读不到） */
+  disabledReason?: string;
 }) {
+  const disabled = !!disabledReason;
   return (
     <button
       type="button"
-      disabled={disabled}
+      aria-disabled={disabled}
+      title={disabledReason}
       // 菜单项一律 onMouseDown + preventDefault：不拦的话点击会先让编辑器失焦，
       // NodeSelection 随之丢失，命令执行时已经没有作用对象了
       onMouseDown={e => { e.preventDefault(); if (!disabled) onClick(); }}
@@ -126,6 +131,19 @@ export default function BlockMenu({
         <>
           {canTurnInto(block?.node ?? null) && (
             <Item onClick={() => setPage("turn")} hint="▸">转换为</Item>
+          )}
+          {/* 嵌入块 → 引用 chip（#692）：图片块的「转换为」就是这一项。外链图不在
+              素材库里，灰掉给原因 */}
+          {block?.node.type.name === "image" && (
+            <Item
+              disabledReason={embedToMentionReason(block.node) ?? undefined}
+              onClick={() => run(() => {
+                const tr = embedToMentionTx(editor.state, block.pos);
+                if (tr) editor.view.dispatch(tr.scrollIntoView());
+              })}
+            >
+              转为引用
+            </Item>
           )}
 
           <Item onClick={() => run(() => moveBlock(editor, -1))}>上移</Item>
