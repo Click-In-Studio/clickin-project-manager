@@ -36,6 +36,7 @@ import { ColumnDrop } from "@/lib/editor/tiptap-column-drop";
 import { ColumnEditing } from "@/lib/editor/tiptap-column-editing";
 import { ColumnResize } from "@/lib/editor/tiptap-column-resize";
 import { TableKeymap } from "@/lib/editor/tiptap-table-keymap";
+import { MarkdownTable } from "@/lib/editor/tiptap-table-markdown";
 import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor/editor-slash-commands";
 import { DROP_INDICATOR_OPTIONS } from "@/lib/editor/editor-drop-indicator";
 import { resolveRemoteCursorPos } from "@/lib/editor/remote-cursor";
@@ -737,9 +738,11 @@ export default function SmartTextarea({
     // 扩展集也只有一套：`markdown` prop 只决定要不要工具栏（见下方渲染），
     // 不再决定能力。image 仍按 imageUpload 是否提供门控——它需要一个上传器。
     // TableKit: StarterKit 不含表格节点，缺了它 markdown 表格进编辑器会被吞。
+    // table 节点本身换成 MarkdownTable（#694）：自带序列化，单元格里只有 # 引用
+    // 或图片时不再被 tiptap-markdown 内置实现当空格跳过；行 / 格 / 表头仍用 TableKit 的
     // CjkMarkdown 紧跟 markdownExt：解析侧 CJK 侧翼规则 + 序列化侧绕开 trimInline（#674）
     return [base, MarkdownParagraph, markdownExt, CjkMarkdown,
-      TableKit.configure({ table: { resizable: false } }),
+      TableKit.configure({ table: false }), MarkdownTable.configure({ resizable: false }),
       // 外缘选中整行/整列后按 Delete 删的是结构，不是清空内容
       TableKeymap,
       TaskList, TaskItem.configure({ nested: true }),
