@@ -1004,6 +1004,7 @@ dev 环境（main 自动发）上 `unreleased/` 有条目时页面顶部多一�
 - **头像缓存契约三处联动**（PR #419）：presign 生成版本化 key `avatar-<ts>` → `lib/asset/avatar-url.ts` 派生 `?v=` → GET 路由回 `immutable`；改一处必须同改。成员 API 返回的 `avatarUrl` 是 DB 裸值，渲染必须走 helper。裸 `<img>` 是架构决定（standalone VPS 下 `next/image` = 在自己服务器实时 sharp），`no-img-element` 已全局关闭。
 - **元数据信封挂 `asset_file` 不挂 `asset`**（#85）：文件行不可变 ⇒ `(fileId, parserVersion)` 键永不失效；版本契约是唯一失效通道——新增分析器忘 bump `BROKER_VERSION` = 存量 unsupported 永不重算。broker 判定：magic 主判 → 扩展名破同门 → 声明 mime 不参与。
 - **wiki-asset 嵌入**：存储方言 v2 URI 唯一文法（`![](/__cm__/asset/<id>)`），统一发生在输入层；embed 边由 `syncWikiLinks` 从正文派生（单写入方），前端不直写 mounts。
+- **引用 kind 单一真相在 `CONTENT_MENTION_KINDS`**（`lib/editor/mention-types.ts`，#670 加 task 时立的）：`EDGE_KINDS`、方言校验的未知类型检查都从它派生。新增一种可引用实体的落点清单——① `mention-resolve` 路由加解析分支（标签 + URL，已删除给「#[已删除]」）；② `lib/notify/doc/resolver.ts` 同款分支（通知没有观看者会话，只做归属校验）；③ `wiki-refs` 路由 `ENTITY_TYPES` + `hostViewPermitted` 沿用该实体页面的读取门；④ `RelatedWikiChips` 的 `entityType` union 与实体页挂面板；⑤ `WIKI_DIALECT_NOTE` 类型清单；⑥ 实体删除路径调 `clearEntityLinks`（悬空即删）。存成普通站内链接绕过这一层是被驳回过的（#379）：不落边、显示文字冻死、删了只剩 404。
 
 ### 13.2 权限门定式
 

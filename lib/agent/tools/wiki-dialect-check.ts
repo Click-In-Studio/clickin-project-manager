@@ -14,6 +14,7 @@
 // （与 lib/wiki/links.ts extractMentionEdges 同款纪律），反解与校验都跳过。
 
 import { parseCanonicalOpenTag, TEXT_BG_COLORS, TEXT_FG_COLORS } from "../../editor/inline-style-dialect";
+import { CONTENT_MENTION_KINDS } from "../../editor/mention-types";
 
 // 与 lib/wiki/links.ts CODE_SPAN_RE 同构（单捕获组 → split 后奇数下标是代码段）
 const CODE_SPAN_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
@@ -24,6 +25,12 @@ const DISPLAY_LINK_RE = /\[\[([^[\]\n]+)\]\]/g;
 /** 死链接的显示占位（resolveBodyLinksForDisplay 对已删目标的输出）。显示转换
  *  丢失了原始 id，反解无从恢复——原样放行为字面文本，不算违规也不反解。 */
 export const DEAD_LINK_LITERAL = "已删除的文档";
+
+/** 引用 URI 的 type 位：`](/__cm__/<type>/`。type 只认 CONTENT_MENTION_KINDS + user——
+ *  模型自造的 `/__cm__/todo/…` 一类既不落边也解析不出，与其静默变成死 chip，不如
+ *  在写回时就报清楚（#670 加 task kind 时补的护栏）。 */
+const CM_TYPE_RE = /\]\(\/__cm__\/([a-z]+)\//g;
+const KNOWN_REFERENCE_TYPES = new Set<string>([...CONTENT_MENTION_KINDS, "user"]);
 
 /** 旧式裸 token（W1 废弃）：[#wiki:<uuid>] */
 const LEGACY_TOKEN_RE = /\[#wiki:[0-9a-fA-F-]{36}\]/;
@@ -148,6 +155,15 @@ export function restoreAndCheckBody(
   }
   if (LEGACY_COLON_RE.test(scannable)) {
     problems.push("正文含已退役的冒号形态 /__cm__<类型>:<id>，请改用 /__cm__/<类型>/<id>。");
+  }
+  const unknownTypes = [...new Set(
+    [...scannable.matchAll(CM_TYPE_RE)].map((m) => m[1]).filter((t) => !KNOWN_REFERENCE_TYPES.has(t)),
+  )];
+  if (unknownTypes.length > 0) {
+    problems.push(
+      `正文含未知的引用类型 /__cm__/${unknownTypes.join("、/__cm__/")}/。` +
+      `引用类型只有 ${[...KNOWN_REFERENCE_TYPES].join(" / ")}，不要自造。`,
+    );
   }
   const badTags = [...scannable.matchAll(SPAN_OR_FONT_OPEN_RE)]
     .map((m) => m[0])

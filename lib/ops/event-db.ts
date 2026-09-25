@@ -6,6 +6,7 @@ import { ensureReportTreeAnchors } from "../node/anchors";
 import { insertNode, placeNodeUnder } from "../node/db";
 import { registerNodeReferenceResolver } from "../node/mount";
 import { keyBetween } from "../lex-order";
+import { clearEntityLinks } from "../wiki/entity-link-db";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1385,6 +1386,8 @@ export async function deleteTaskByProduction(id: string, productionId: string): 
     "DELETE FROM task WHERE id = $1 AND production_id = $2",
     [id, productionId]
   );
+  // 文档引用边悬空即删（#670）：正文里的 chip 由 mention-resolve 降级成「#[已删除]」
+  await clearEntityLinks(productionId, "task", [id]);
 }
 
 /**

@@ -9,6 +9,7 @@ import { getPool } from "@/lib/pg";
 import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "@/lib/script/script-marker-sql";
 import { buildMarkerLabelIndex, type MarkerLabelIndex } from "@/lib/script/script-generated-labels";
 import type { ContentMentionAttrs, BlockDisplayMode } from "@/lib/editor/mention-types";
+import { taskMentionLabel } from "@/lib/ops/task-types";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -55,14 +56,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ labels: [], urls: [] });
   }
 
-  // 剧本域 kinds 沿用 script blocks@view 门；wiki kind 不受此门约束——
-  // 标题=目录级信息沿引用流出（账本 §4.1），内容门在 wiki 页面/API 自身。
+  // 剧本域 kinds 沿用 script blocks@view 门；wiki / task kind 不受此门约束——
+  // 标题=目录级信息沿引用流出（账本 §4.1），内容门在各自页面/API 自身
+  // （task 详情页门：task/*@view ∨ 部门 POC ∨ 指派人）。
   // 无剧本权限不再整请求 403（混合正文会连累 wiki/@ 解析）：剧本域 kinds
-  // 软跳过（labels/urls 留 null，客户端回退编辑期快照），wiki 恒可解析
+  // 软跳过（labels/urls 留 null，客户端回退编辑期快照），wiki / task 恒可解析
   const canResolveScript = await hasEffectiveGrant(permCtx, productionId, "script", "*", "blocks", "view");
   const effectiveMentions = canResolveScript
     ? mentions
-    : mentions.map(m => (m?.kind === "wiki" ? m : null));
+    : mentions.map(m => (m?.kind === "wiki" || m?.kind === "task" ? m : null));
 
   const pool = getPool();
   const effectiveVersionId = await resolveProductionVersion(productionId, contextVersionId);
@@ -277,6 +279,25 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (!wikiMap.has(id)) { labels[i] = "#[已删除]"; continue; }
       labels[i] = wikiMap.get(id) ?? "#[无标题]";
       urls[i] = `${base}/wiki/${id}`;
+    }
+  }
+
+  // ── task（#670）────────────────────────────────────────────────────────────
+  // 文档任务项同步出来的 production 任务。标签 = 标题 · 状态（taskMentionLabel），
+  // 已删除 → 「#[已删除]」走既有死引用降级；production 归属校验防跨剧组解析。
+  if (byKind.has("task")) {
+    const taskIdxs = byKind.get("task")!;
+    const taskIds = [...new Set(taskIdxs.map(i => mentions[i].id))];
+    const r = await pool.query<{ id: string; title: string; status: string }>(
+      `SELECT id, title, status FROM task WHERE id = ANY($1::text[]) AND production_id = $2`,
+      [taskIds, productionId],
+    );
+    const taskMap = new Map(r.rows.map(row => [row.id, row]));
+    for (const i of taskIdxs) {
+      const task = taskMap.get(mentions[i].id);
+      if (!task) { labels[i] = "#[已删除]"; continue; }
+      labels[i] = taskMentionLabel(task.title, task.status);
+      urls[i] = `${base}/tasks/${task.id}`;
     }
   }
 

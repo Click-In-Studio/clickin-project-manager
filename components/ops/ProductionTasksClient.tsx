@@ -13,13 +13,9 @@ import type { PickerMember, PickerDept } from "@/components/perm/MemberPickerMod
 import DropdownPicker, { type DropdownPickerItem } from "@/components/ui/DropdownPicker";
 import styles from "@/components/ui/my-pages.module.css";
 import responsive from "@/components/ops/responsive.module.css";
+import { TASK_STATUS_LABELS } from "@/lib/ops/task-types";
 
-const STATUS_LABEL: Record<string, string> = {
-  awaiting: "待确认",
-  pending: "待处理",
-  in_progress: "进行中",
-  done: "完成",
-};
+const STATUS_LABEL = TASK_STATUS_LABELS;
 
 /** 状态徽章：主题色板（原型 notes 紫 / warn / script 青 / success 绿） */
 function statusBadgeStyle(status: string): React.CSSProperties {
@@ -69,10 +65,10 @@ type StatusFilter = "active" | "awaiting" | "pending" | "in_progress" | "done";
 
 const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
   active: "进行中任务",
-  awaiting: "待确认",
-  pending: "待处理",
-  in_progress: "进行中",
-  done: "已完成",
+  awaiting: TASK_STATUS_LABELS.awaiting,
+  pending: TASK_STATUS_LABELS.pending,
+  in_progress: TASK_STATUS_LABELS.in_progress,
+  done: "已完成", // 筛选器用完成时态，与状态词「完成」刻意不同
 };
 
 const VALID_STATUSES = ["awaiting", "pending", "in_progress", "done"] as const;

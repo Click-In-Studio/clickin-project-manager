@@ -10,6 +10,8 @@ import { ensureDramaturgyRootAnchor } from "@/lib/node/anchors";
 import { canViewWiki } from "@/lib/wiki/perm";
 import { canViewAsset } from "@/lib/asset/perm";
 import { getAsset } from "@/lib/asset/db";
+import { getTechReqByProduction } from "@/lib/ops/event-db";
+import { canViewTechReq } from "@/lib/ops/event-permissions";
 import type { PermissionContext } from "@/lib/perm/permissions";
 
 // 对象侧"相关 wiki"面板：引用了该实体的 wiki 列表 + manual 边读写（Phase 2）。
@@ -21,7 +23,7 @@ import type { PermissionContext } from "@/lib/perm/permissions";
 // 额外要 wiki/*@create（与 wiki POST 路由同门），文档默认落「戏剧构作」系统根。
 // wiki→wiki 不走此端点（已有 /wiki/[wikiId]/backlinks；正文 [[ 即建边）。
 
-const ENTITY_TYPES = new Set(["scene", "rehearsal", "block", "cue", "asset"]);
+const ENTITY_TYPES = new Set(["scene", "rehearsal", "block", "cue", "asset", "task"]);
 
 async function hostViewPermitted(
   permCtx: PermissionContext, productionId: string, entityType: string, entityId: string,
@@ -47,6 +49,17 @@ async function hostViewPermitted(
       const asset = await getAsset(entityId);
       if (!asset || asset.productionId !== productionId) return false;
       return canViewAsset(permCtx, productionId, asset, "meta");
+    }
+    case "task": {
+      // 与 GET /tasks/[taskId] 逐字同门（#670）：task/*@view ∨ event tasks@view ∨ 该 task
+      // 实例 view ∨ 指派人 ∨ 已确认任务的责任主体成员。participantDeptIds 传空与那条
+      // 路由一致——「事件参与部门」是 event 语境的身份（getEventPermContext），task API
+      // 本身不取它，这里不比它多开也不比它少开。任务详情页是另一套判定
+      // （task/*@view ∨ 部门 POC ∨ 指派人），本门不以它为准。
+      // 归属校验是找门的副产品（同 cue / asset 分支）。
+      const task = await getTechReqByProduction(entityId, productionId);
+      if (!task) return false;
+      return canViewTechReq(permCtx, entityId, task.eventId, productionId, task.departmentId, { participantDeptIds: [] });
     }
     default:
       return false;

@@ -416,7 +416,7 @@ const DB_FILE_CEILING = 1000;
  * 不许为了凑数把新代码压成一行或顺手删无关代码——行数限制是为可读性与解耦服务的。
  */
 const DB_FILE_GRANDFATHERED: Record<string, number> = {
-  "lib/ops/event-db.ts": 3253, // #566 listMyTechReqsFull 补 start_time/end_time（+7）
+  "lib/ops/event-db.ts": 3256, // #670 deleteTaskByProduction 清文档引用边（+3）
   "lib/perm/resource-grant-db.ts": 1023,
 };
 

@@ -6,11 +6,12 @@
 //   · 通知 = 已经决定要发给这个人了，正文里的标签是"这条通知的内容"
 // 所以这里只做 production 归属校验（不跨演出泄漏），不做逐人权限门。
 //
-// 目前覆盖 wiki / user 两类——它们是通知正文里实际会出现的引用（文档链接、
-// @提及）。剧本域（scene/block/cue）的标签解析逻辑在 mention-resolve 路由里
-// 有 400 行，抽出来是独立工作；在此之前它们走 resolve→null 的中性降级：
-// 显示正文里的原文字，不漏裸 id、不漏私有 href。
+// 目前覆盖 wiki / user / task 三类——它们是通知正文里实际会出现的引用（文档链接、
+// @提及、文档任务项同步出来的任务 #670）。剧本域（scene/block/cue）的标签解析逻辑
+// 在 mention-resolve 路由里有 400 行，抽出来是独立工作；在此之前它们走
+// resolve→null 的中性降级：显示正文里的原文字，不漏裸 id、不漏私有 href。
 import { getPool } from "../../pg";
+import { taskMentionLabel } from "../../ops/task-types";
 import type { RefResolver } from "./ast";
 
 /** 建一个按 production 作用域的解析器。同一次渲染内做缓存，避免逐引用打库。 */
@@ -35,6 +36,17 @@ export function createNotifyRefResolver(productionId: string): RefResolver {
           out = {
             label: r.rows[0].title ?? "（无标题文档）",
             url: `/production/${productionId}/wiki/${id}`,
+          };
+        }
+      } else if (type === "task") {
+        const r = await pool.query<{ title: string; status: string }>(
+          "SELECT title, status FROM task WHERE id = $1 AND production_id = $2",
+          [id, productionId],
+        );
+        if (r.rows[0]) {
+          out = {
+            label: taskMentionLabel(r.rows[0].title, r.rows[0].status),
+            url: `/production/${productionId}/tasks/${id}`,
           };
         }
       } else if (type === "user") {
