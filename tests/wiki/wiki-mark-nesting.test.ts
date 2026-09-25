@@ -21,6 +21,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { TableKit } from "@tiptap/extension-table";
 import { Markdown } from "tiptap-markdown";
 import { INLINE_STYLE_EXTENSIONS } from "@/lib/editor/tiptap-inline-style";
+import { Callout } from "@/lib/editor/tiptap-callout";
 import { CjkMarkdown, applyCjkFriendly } from "@/lib/editor/tiptap-cjk-markdown";
 import { REMARK_CJK_PLUGINS } from "@/lib/editor/remark-cjk-friendly";
 import { checkFidelity, contentSignature } from "@/lib/wiki/fidelity";
@@ -35,7 +36,8 @@ function makeEditor(content: string, opts: { cjk?: boolean; cjkFirst?: boolean }
   const md = Markdown.configure({ transformCopiedText: true, breaks: true });
   const core = cjkFirst ? [CjkMarkdown, StarterKit, md] : [StarterKit, md, ...(cjk ? [CjkMarkdown] : [])];
   return new Editor({
-    extensions: [...core, TableKit.configure({ table: { resizable: false } }), ...INLINE_STYLE_EXTENSIONS],
+    // Callout：#686 的用例要走 callout 方言
+    extensions: [...core, TableKit.configure({ table: { resizable: false } }), ...INLINE_STYLE_EXTENSIONS, Callout],
     content,
   });
 }
@@ -134,6 +136,70 @@ describe("反证：不挂 CjkMarkdown 的裸 tiptap-markdown 仍毁字", () => {
   it("裸 markdown-it 解析不回 `甲**~~乙~~**丙`、`甲**乙。**丙`（CommonMark 侧翼规则）", () => {
     expect(makeEditor("甲**~~乙~~**丙", { cjk: false }).getHTML()).not.toContain("<strong>");
     expect(makeEditor("甲**乙。**丙", { cjk: false }).getHTML()).not.toContain("<strong>");
+  });
+});
+
+// ── ⑤ 引用块 / callout 行首 mark（#686）───────────────────────────────────────
+//
+// 同一个 trimInline hack 的另一条触发路径：markString 在写 `**` 之前记下 out.length，
+// 但 `**` 经 state.text() → write() 写出，write() 在行首先补块前缀 `> `（段落间是
+// `\n>\n`），所以记下的位置指向 `> ` 而不是 `**`；shiftDelim 按定界符长度删两个字符，
+// 删掉的是引用前缀。`> ` 与 `**` 都是两个字符，长度不变、静默毁掉。
+// 顶层段落、列表项不受影响（列表续行前缀是空格，normalizeInline 会跳过），所以只在
+// 引用块 / callout 里、且 mark 从行首开始时出问题——硬换行之后、第二段开头、软换行
+// （breaks: true 先变硬换行）都是行首。
+
+describe("引用块 / callout 行首的加粗往返（#686）", () => {
+  const CASES: [string, string][] = [
+    ["引用块：硬换行后行首加粗", "> 甲\\\n> **乙**丙"],
+    ["callout：硬换行后行首加粗", "> [!📌 bg=#fff5eb]\n> 甲\\\n> **乙**丙"],
+    ["callout：第二段以加粗开头（中间的空 `>` 行不得被吃掉）", "> [!📌]\n> 甲\n>\n> **乙**丙"],
+    ["引用块：行首斜体 / 删除线", "> 甲\\\n> *乙*丙\\\n> ~~丁~~戊"],
+    ["issue 原文的最后两行", "> [!📌 bg=#fff5eb]\n> 引用标注：**［全文］** = 已读到原文；**［摘要］** = 仅有搜索摘要。\\\n> **Taylor & Francis（tandfonline）对自动抓取返回 HTTP 403**（出版商反爬），其上的论文**仍只有摘要**，须人工获取。"],
+  ];
+  for (const [label, md] of CASES) {
+    it(label, () => {
+      const e = makeEditor(md);
+      const out = getMarkdown(e);
+      expect(out).toBe(md);
+      const f = checkFidelity(md, out);
+      expect(f.lossy, `保真锁必须安静：${JSON.stringify(f)}`).toBe(false);
+    });
+  }
+
+  it("callout 里的软换行变硬换行是书写风格，不算失真", () => {
+    const md = "> [!📌]\n> 甲\n> **乙**丙";
+    const out = getMarkdown(makeEditor(md));
+    expect(out).toBe("> [!📌]\n> 甲\\\n> **乙**丙");
+    expect(checkFidelity(md, out).lossy).toBe(false);
+  });
+
+  it("反证：裸 tiptap-markdown 把 `> ` 前缀当成定界符删掉", () => {
+    // 红了 = 上游修了 trimInline 的位置记录，届时与 ② 一起撤 workaround
+    expect(getMarkdown(makeEditor("> 甲\\\n> **乙**丙", { cjk: false }))).toBe("> 甲\\\n****乙**丙");
+    expect(getMarkdown(makeEditor("> [!📌]\n> 甲\n>\n> **乙**丙", { cjk: false }))).toBe("> [!📌]\n> 甲\n> ****乙**丙");
+  });
+});
+
+// ── ⑥ 引用块里「）**或」——定界符内侧全角标点、外侧紧贴中文（#687）──────────────
+// 与 ⑤ 无关，是 ② 那层：CommonMark 侧翼规则下 `）**或` 的闭合 `**` 不算 right-flanking，
+// GitHub 同样不渲染。两侧解析器挂 CJK 规则后才认，引用块只是它出现的地方。
+
+describe("引用块里的「）**或」加粗（#687）", () => {
+  const LINE = "剧场从业者关心诸如**同步（sync）**或**空间化（spatialisation）**这样的方面——并且对「**声音作为效果**」（Brown 2020, 14）有深刻的理解。";
+  const MD = "> " + LINE;
+  const strongCount = (tree: unknown) => (JSON.stringify(tree).match(/"type":"strong"/g) ?? []).length;
+
+  it("只读侧：三处加粗全部解析成 strong；反证：不挂 CJK 插件只认两处", () => {
+    expect(strongCount(unified().use(remarkParse).use(remarkGfm).use([...REMARK_CJK_PLUGINS]).parse(MD))).toBe(3);
+    expect(strongCount(unified().use(remarkParse).use(remarkGfm).parse(MD))).toBe(2);
+  });
+  it("编辑器：解析出三处 strong，写回原样，保真锁安静", () => {
+    const e = makeEditor(MD);
+    expect((e.getHTML().match(/<strong>/g) ?? []).length).toBe(3);
+    const out = getMarkdown(e);
+    expect(out).toBe(MD);
+    expect(checkFidelity(MD, out).lossy).toBe(false);
   });
 });
 
