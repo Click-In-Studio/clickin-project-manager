@@ -36,6 +36,7 @@
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
+import { REMARK_CJK_PLUGINS } from "../editor/remark-cjk-friendly";
 import { canonicalizeInlineStyleTags } from "../editor/inline-style-dialect";
 import { diffLines } from "diff";
 
@@ -62,7 +63,8 @@ function collapse(s: string): string {
  * 一起丢，比较就永远相等，保真锁形同虚设。
  */
 export function contentSignature(markdown: string): string[] {
-  const tree = unified().use(remarkParse).use(remarkGfm).parse(markdown) as unknown as MdNode;
+  // CJK 侧翼规则与编辑器 / 只读侧同源（#674）：不挂的话 `甲**乙**丙` 两侧签名不一致
+  const tree = unified().use(remarkParse).use(remarkGfm).use(REMARK_CJK_PLUGINS[0]).use(REMARK_CJK_PLUGINS[1]).parse(markdown) as unknown as MdNode;
   const out: string[] = [];
 
   const walk = (node: MdNode) => {
