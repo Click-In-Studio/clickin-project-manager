@@ -86,7 +86,7 @@
 
 - 叠 PR：前一个合并后**删分支**，否则下一层合进分支不进 main。
 - tag 三种形态：里程碑 `v<M>.<m>.<p>`、日常 `-yymmdd`、hotfix `<被修 tag>-hot<n>`；日期版排在同号里程碑**之后**（§4「版本号」）。
-- hotfix 从被修的 tag 切分支，不从 main；打 `<被修 tag>-hot<n>` 发 prod，changelog 只含本次修复。
+- hotfix 从被修的 tag 切分支，不从 main；先 commit `content/changelog/<tag>/`（只含本次修复），再在那个 commit 上打 `<被修 tag>-hot<n>` 发 prod——反了 CD 直接红。
 - 已定位的 bug 直接 `gh issue create`（现象 / 根因 / 要做 / 定级）；孤儿组件、半成品、feature 方向先问。
 - 报风险前先查可达性（后端门 → 前端调用点 → 组件是否被渲染 → setState 是否被调用过）。
 

@@ -1,6 +1,21 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import http from "node:http";
-import { webFetch, webSearch, htmlToText, isPrivateAddress, formatSearchHits, WEB_FETCH_MAX_CHARS } from "@/lib/agent/runtime/web-tools";
+import { webFetch, webSearch, htmlToText, isPrivateAddress, formatSearchHits, resolvePublicAddresses, WEB_FETCH_MAX_CHARS } from "@/lib/agent/runtime/web-tools";
+
+// 假 DNS：让「域名」形式的 URL 也能落到本地 server，从而真正走建连层的 lookup 回调（#683）。
+// 字面 IP 不触发 lookup、localhost 在 lookup 前就被拒——只用它们的用例永远碰不到那条路径。
+const dnsTable = vi.hoisted(() => new Map<string, Array<{ address: string; family: number }>>());
+vi.mock("node:dns/promises", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:dns/promises")>();
+  return {
+    ...real,
+    lookup: async (host: string, opts?: unknown) => {
+      const hit = dnsTable.get(host);
+      if (hit) return hit;
+      return (real.lookup as (h: string, o?: unknown) => Promise<unknown>)(host, opts);
+    },
+  };
+});
 
 // 网关退役后模型的联网能力由这两个工具承接：抓页要能抽正文、挡内网、截长文；搜索走 Brave。
 
@@ -75,6 +90,42 @@ describe("web.fetch", () => {
     expect(long.truncated).toBe(true);
     expect((await webFetch(`${base}/redirect`)).title).toBe("排练 & 通告");
     await expect(webFetch(`${base}/missing`)).rejects.toThrow("HTTP 404");
+  });
+});
+
+describe("web.fetch 建连层 lookup（#683）", () => {
+  let server: http.Server;
+  let port = 0;
+  const prevAllow = process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE;
+  beforeAll(async () => {
+    server = http.createServer((_req, res) => { res.setHeader("content-type", "text/html"); res.end("<title>建连</title><p>正文</p>"); });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    port = (server.address() as { port: number }).port;
+    dnsTable.set("hot.web-fetch.test", [{ address: "127.0.0.1", family: 4 }]);
+    dnsTable.set("mixed.web-fetch.test", [{ address: "10.0.0.1", family: 4 }, { address: "fd00::1", family: 6 }, { address: "93.184.216.34", family: 4 }]);
+    dnsTable.set("priv.web-fetch.test", [{ address: "10.0.0.1", family: 4 }, { address: "fd00::1", family: 6 }]);
+  });
+  afterAll(async () => {
+    await new Promise<void>((r) => server.close(() => r()));
+    dnsTable.clear();
+    if (prevAllow === undefined) delete process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE; else process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE = prevAllow;
+  });
+
+  it("域名 URL 能抓到正文：lookup 回调必须按 Node autoSelectFamily 的 { all: true } 契约回数组", async () => {
+    process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE = "hot.web-fetch.test";
+    const p = await webFetch(`http://hot.web-fetch.test:${port}/page`);
+    expect(p.title).toBe("建连");
+    expect(p.text).toContain("正文");
+  });
+
+  it("解析结果逐地址过滤：公网混私网只留公网；全是私网才拒", async () => {
+    delete process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE;
+    await expect(resolvePublicAddresses("mixed.web-fetch.test")).resolves.toEqual([{ address: "93.184.216.34", family: 4 }]);
+    await expect(resolvePublicAddresses("priv.web-fetch.test")).rejects.toThrow("不允许抓取内网地址");
+    await expect(webFetch(`http://priv.web-fetch.test:${port}/page`)).rejects.toThrow("不允许抓取内网地址");
+    // 不用真实的 NXDOMAIN：VPN fake-ip 之类的本机环境会把任何名字都解出地址，改让假 DNS 回空
+    dnsTable.set("nx.web-fetch.test", []);
+    await expect(resolvePublicAddresses("nx.web-fetch.test")).rejects.toThrow("域名无法解析");
   });
 });
 

@@ -179,21 +179,40 @@ export function assertHostnameAllowed(hostname: string): void {
   if (isIP(host) && isPrivateAddress(host)) throw new WebToolError("不允许抓取内网地址");
 }
 
-type LookupCb = (err: NodeJS.ErrnoException | null, address: string, family: number) => void;
+type LookupAddr = { address: string; family: number };
+type LookupCb = (err: NodeJS.ErrnoException | null, address: string | LookupAddr[], family?: number) => void;
 
-/** 建连用的 lookup：解析 → 逐地址判私网 → 只把通过的地址交给 socket。 */
-function guardedLookup(hostname: string, _opts: unknown, cb: LookupCb): void {
+/**
+ * 解析主机名并只留公网地址：字面 IP 直接判，域名走系统 lookup 后逐地址过滤，私网地址不交给
+ * socket，一个公网都不剩才拒。白名单主机（测试开关）不过滤。这是建连与 assertPublicHost 共用的判据。
+ */
+export async function resolvePublicAddresses(hostname: string): Promise<LookupAddr[]> {
   const host = normalizeHost(hostname);
+  assertHostnameAllowed(host);
   const allow = privateAllowlist();
   const allowed = allow === "all" || allow.has(host);
-  try { assertHostnameAllowed(host); } catch (err) { cb(err as Error, "", 0); return; }
-  const resolve = isIP(host) ? Promise.resolve([{ address: host, family: isIP(host) }]) : lookup(host, { all: true });
-  resolve.then((addrs) => {
-    if (addrs.length === 0) { cb(new WebToolError("域名无法解析"), "", 0); return; }
-    const a = addrs[0];
-    if (!allowed && isPrivateAddress(a.address)) { cb(new WebToolError("不允许抓取内网地址"), "", 0); return; }
-    cb(null, a.address, a.family);
-  }, () => cb(new WebToolError("域名无法解析"), "", 0));
+  const literal = isIP(host);
+  let addrs: LookupAddr[];
+  if (literal) addrs = [{ address: host, family: literal }];
+  else {
+    try { addrs = await lookup(host, { all: true }); } catch { throw new WebToolError("域名无法解析"); }
+  }
+  if (addrs.length === 0) throw new WebToolError("域名无法解析");
+  const pub = allowed ? addrs : addrs.filter((a) => !isPrivateAddress(a.address));
+  if (pub.length === 0) throw new WebToolError("不允许抓取内网地址");
+  return pub;
+}
+
+/**
+ * 建连用的 lookup。Node ≥ 20 的 net.connect 默认 autoSelectFamily，用 `{ all: true }` 调 lookup
+ * 并期望回调给**数组**；此前一律回单地址，Node 取 `addresses[0].address` 得 undefined，所有域名 URL
+ * 在建连前就以 ERR_INVALID_IP_ADDRESS 失败（#683）。不带 all 的旧契约仍回单地址。
+ */
+function guardedLookup(hostname: string, opts: { all?: boolean } | undefined, cb: LookupCb): void {
+  resolvePublicAddresses(hostname).then(
+    (addrs) => (opts?.all ? cb(null, addrs) : cb(null, addrs[0].address, addrs[0].family)),
+    (err) => cb(err as NodeJS.ErrnoException, opts?.all ? [] : "", 0),
+  );
 }
 
 function guardedDispatcher(): Agent {
@@ -202,7 +221,7 @@ function guardedDispatcher(): Agent {
 
 /** 供测试/其他调用方单独判一个主机名（解析 + 私网判定），与建连用的判据同一份。 */
 export async function assertPublicHost(hostname: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => guardedLookup(hostname, {}, (err) => (err ? reject(err) : resolve())));
+  await resolvePublicAddresses(hostname);
 }
 
 export function isPrivateAddress(ip: string): boolean {
