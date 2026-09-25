@@ -513,7 +513,7 @@ export const DEFS: Def[] = [
       "以剧本方言整段改写一个章节/场次/排练标记段的正文，需要人工在聊天栏确认（EN: rewrite script section dialogue batch）。" +
       "先用 production.script_read_section 读出该段（输出即方言形态），在其文本上改写后**整段提交**：" +
       "保留的块必须带原 [b:<id>]（评论/cue/标签锚定在 id 上，重写内容也要带原 id，不要删了用 [new] 重建）；" +
-      "新块用 [new]；输出中省略某个 [b:<id>] 即删除该块；[m:] 锚点行原样保留。系统会计算最小 diff，只落真正变化的块。" +
+      "新块用 [new]；输出中省略某个 [b:<id>] 即删除该块；[m:] 锚点行原样保留。系统会计算最小 diff，只落真正变化的块；只调整 [b:] 行的先后顺序也算改动，会按提交的顺序重排（可用于修正错序）。" +
       "改写剧本正文必须按剧本方言输出；方言完整说明若不在语境中，先调用 production.script_dialect_ref——违反方言的提议会被解析器拒绝。",
     parameters: Type.Object({
       sectionId: Type.String({ description: "要改写的章节/场次/排练标记 id（来自 production.scene_list 或 [m:] 锚点）" }),

@@ -4,7 +4,7 @@ import type { Block, BlockType, Character, Scene, MarkerMeta } from "./script-ty
 import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
 import { handleBlockContentChanged, handleBlockDeleted } from "../ops/cue-db";
 import type { ScriptPatch, TagEntry } from "./script-ops";
-import { keyBetween, initialKeys } from "../lex-order";
+import { initialKeys, keyStrictlyBetween } from "../lex-order";
 import { getMarkerChange, markerCacheUpdateBlockIds, markerHierarchyUpdateBlockIds, normalizeScriptMarkerInvariants, type MarkerChange } from "./script-marker-domain";
 import { cleanMarkerMeta, genBlockId, genSnapshotId, isChapterSceneMarkerType, isMarkerBlockType, toDbType } from "./script-row-model";
 import { deleteSnapshotRowsInTx, ensureSceneAnchorsInTx, insertSnapshotRowsInTx, snapshotRowFromBlock, updateSnapshotRowInTx, upsertCharacterRowsInTx, deleteCharacterRowsInTx } from "./script-row-tx";
@@ -94,6 +94,45 @@ async function writeBlockTagsInTx(
       [blockId, tag.groupId, tag.optionId ?? null, tag.value ?? null],
     );
   }
+}
+
+/**
+ * 为 insertAt 位置分配 sort_key；两侧 key 之间已无空位时先把整版 key 均匀重铺再取。
+ * #680：定宽 key 取中，同一间隙同侧连续插入约 45 次即耗尽（一批最多 60 块、逐批追加到
+ * 段尾都会踩到）；此前耗尽后 keyBetween 返回与锚点相同的 key，ORDER BY sort_key 对同 key
+ * 行顺序不定——批量插入的块散落、甚至排到下一段标记之后。重铺只改 key 不改相对顺序，
+ * 一次 UPDATE 落完；正常情况下不会触发。
+ */
+async function allocateInsertKeyInTx(
+  client: PoolClient,
+  versionId: string,
+  txBlocks: Array<{ snapshotId: string; lexKey: string }>,
+  insertAt: number,
+): Promise<string> {
+  const prevLexKey = insertAt > 0 ? txBlocks[insertAt - 1].lexKey : null;
+  const nextLexKey = insertAt < txBlocks.length ? txBlocks[insertAt].lexKey : null;
+  const between = keyStrictlyBetween(prevLexKey, nextLexKey);
+  if (between !== null) return between;
+
+  const keys = initialKeys(txBlocks.length + 1);
+  const snapshotIds: string[] = [];
+  const sortKeys: string[] = [];
+  txBlocks.forEach((block, index) => {
+    const key = keys[index < insertAt ? index : index + 1];
+    if (key === block.lexKey) return;
+    block.lexKey = key;
+    snapshotIds.push(block.snapshotId);
+    sortKeys.push(key);
+  });
+  if (snapshotIds.length > 0) {
+    await client.query(
+      `UPDATE script_version AS sv SET sort_key = u.sort_key
+       FROM unnest($1::text[], $2::text[]) AS u(snapshot_id, sort_key)
+       WHERE sv.snapshot_id = u.snapshot_id AND sv.version_id = $3`,
+      [snapshotIds, sortKeys, versionId],
+    );
+  }
+  return keys[insertAt];
 }
 
 /**
@@ -299,9 +338,7 @@ export async function applyPatchToDB(
             : afterIdx >= 0 ? afterIdx + 1
             : txBlocks.length;
 
-          const prevLexKey = insertAt > 0 ? txBlocks[insertAt - 1].lexKey : null;
-          const nextLexKey = insertAt < txBlocks.length ? txBlocks[insertAt].lexKey : null;
-          const lexKey = keyBetween(prevLexKey, nextLexKey);
+          const lexKey = await allocateInsertKeyInTx(client, versionId, txBlocks, insertAt);
           const snapshotId = genSnapshotId();
 
           // If tags are included, validate them and derive lyric flag before insertion.
@@ -481,9 +518,7 @@ export async function applyPatchToDB(
         insertAt = txBlocks.indexOf(next);
         break;
       }
-      const previousKey = insertAt > 0 ? txBlocks[insertAt - 1].lexKey : null;
-      const nextKey = insertAt < txBlocks.length ? txBlocks[insertAt].lexKey : null;
-      const lexKey = keyBetween(previousKey, nextKey);
+      const lexKey = await allocateInsertKeyInTx(client, versionId, txBlocks, insertAt);
       const snapshotId = genSnapshotId();
       const type = toDbType(block);
       const sceneId = isChapterSceneMarkerType(type) ? block.id : null;

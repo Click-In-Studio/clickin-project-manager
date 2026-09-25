@@ -50,3 +50,18 @@ export function keyBetween(lo: string | null, hi: string | null): string {
 export function isValidKey(s: unknown): s is string {
   return typeof s === 'string' && s.length === LEN && [...s].every(c => ALPHA.includes(c));
 }
+
+/**
+ * 严格落在 lo 与 hi 之间的 key；间隙耗尽（两 key 相邻或相同）时返回 null，
+ * 由调用方重铺该序列的 key（见 script-patch-db 的 allocateInsertKeyInTx）。
+ * 背景（#680）：定宽 key 每次取中，同一间隙同侧连续插入约 45 次就耗尽；此时
+ * keyBetween 会返回与 lo 相同的 key，ORDER BY sort_key 对同 key 的行顺序不定——
+ * 批量插入的块散落、甚至排到下一段标记之后。null 为 lo 表示「没有下界」，null 为
+ * hi 表示「没有上界」。
+ */
+export function keyStrictlyBetween(lo: string | null, hi: string | null): string | null {
+  const a = lo ? decode(lo) : -1;
+  const b = hi ? decode(hi) : MAX + 1;
+  if (b - a < 2) return null;
+  return encode(Math.floor((a + b) / 2));
+}
