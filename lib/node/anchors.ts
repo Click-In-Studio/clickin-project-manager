@@ -1,7 +1,6 @@
 import type { PoolClient } from "pg";
 import { getPool } from "../pg";
-import { keyBetween } from "../lex-order";
-import { newNodeId, NODE_ANCHOR_EXISTS_SQL } from "./db";
+import { newNodeId, tailSortKey, NODE_ANCHOR_EXISTS_SQL } from "./db";
 
 // ─── 系统锚点（node 根，#420 锚点泛化）───────────────────────────────────────
 //
@@ -58,13 +57,7 @@ export async function getDramaturgyTreeConfig(productionId: string): Promise<Nod
 
 /** 顶层末尾排序键（client 版——ensure 系列在自己的事务里取键）。 */
 async function tailRootSortKey(client: PoolClient, productionId: string): Promise<string> {
-  const last = await client.query<{ sort_key: string | null }>(
-    `SELECT sort_key FROM node
-     WHERE production_id = $1 AND parent_id IS NULL AND sort_key IS NOT NULL
-     ORDER BY sort_key DESC LIMIT 1`,
-    [productionId],
-  );
-  return keyBetween(last.rows[0]?.sort_key ?? null, null);
+  return tailSortKey(productionId, null, client);
 }
 
 /** 事务内建「wiki 锚点」＝wiki 内容行 + wiki-kind 壳节点（is_public+listable 写死）。 */
@@ -129,15 +122,9 @@ export async function ensureReportTreeAnchors(
 
     let eventDocId = ev.rows[0].report_doc_node_id;
     if (!eventDocId) {
-      const lastChild = await client.query<{ sort_key: string | null }>(
-        `SELECT sort_key FROM node
-         WHERE parent_id = $1 AND sort_key IS NOT NULL
-         ORDER BY sort_key DESC LIMIT 1`,
-        [rootId],
-      );
       eventDocId = await insertWikiAnchor(
         client, productionId, ev.rows[0].title, rootId,
-        keyBetween(lastChild.rows[0]?.sort_key ?? null, null),
+        await tailSortKey(productionId, rootId, client),
       );
       await client.query(
         `UPDATE production_event SET report_doc_node_id = $2 WHERE id = $1`,

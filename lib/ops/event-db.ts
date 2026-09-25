@@ -3,9 +3,8 @@ import { policyFilteredRows } from "../perm/policy-db";
 import { writeEventGrants, writeReportGrants, writeTechReqGrants, writeWikiGrants } from "../perm/resource-grant-db";
 import { taskSubjectOf } from "./task-poc";
 import { ensureReportTreeAnchors } from "../node/anchors";
-import { insertNode, placeNodeUnder } from "../node/db";
+import { insertNode, placeNodeUnder, tailSortKey } from "../node/db";
 import { registerNodeReferenceResolver } from "../node/mount";
-import { keyBetween } from "../lex-order";
 import { clearEntityLinks } from "../wiki/entity-link-db";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1808,12 +1807,6 @@ export async function createReportNote(data: {
     );
     if (!host.rows[0]) throw new Error(`report not found: ${data.reportId}`);
     const { node_id: reportNodeId, production_id: productionId, title: deptName } = host.rows[0];
-    const tail = await client.query<{ sort_key: string | null }>(
-      `SELECT sort_key FROM node
-       WHERE parent_id = $1 AND sort_key IS NOT NULL
-       ORDER BY sort_key DESC LIMIT 1`,
-      [reportNodeId]
-    );
     const wikiRow = await client.query<{ id: string }>(
       `INSERT INTO wiki (production_id, title, body, mentions, created_by)
        VALUES ($1, $2, $3, $4, $5) RETURNING id::text AS id`,
@@ -1822,7 +1815,7 @@ export async function createReportNote(data: {
     );
     const noteNodeId = await insertNode({
       productionId, kind: "wiki", parentId: reportNodeId,
-      sortKey: keyBetween(tail.rows[0]?.sort_key ?? null, null),
+      sortKey: await tailSortKey(productionId, reportNodeId, client),
       wikiId: wikiRow.rows[0].id, listable: true, createdBy: data.authorUserId,
     }, client);
     await client.query(

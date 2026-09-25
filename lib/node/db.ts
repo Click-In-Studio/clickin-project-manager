@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
-import type { PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { getPool } from "../pg";
-import { keyBetween } from "../lex-order";
+import { initialKeys, keyStrictlyBetween } from "../lex-order";
 import { broadcastWikiLibraryChange } from "../wiki/collab";
 
 /**
@@ -225,11 +225,14 @@ export async function validateParent(
   return !cyc.rows[0].hit;
 }
 
+type Queryable = Pool | PoolClient;
+type KeyedSibling = { id: string; sort_key: string };
+
 /** 同层兄弟集（单表——原 wiki∪alias 的 UNION 随合表消亡）。 */
 async function siblingRows(
-  productionId: string, parentId: string | null, excludeId: string | null,
+  productionId: string, parentId: string | null, excludeId: string | null, db: Queryable = getPool(),
 ): Promise<{ id: string; sort_key: string | null }[]> {
-  const { rows } = await getPool().query<{ id: string; sort_key: string | null }>(
+  const { rows } = await db.query<{ id: string; sort_key: string | null }>(
     `SELECT id, sort_key FROM node
       WHERE production_id = $1 AND parent_id IS NOT DISTINCT FROM $2
         AND ($3::text IS NULL OR id <> $3::text)
@@ -239,11 +242,41 @@ async function siblingRows(
   return rows;
 }
 
-/** 末尾排序键：同层最后一个之后。 */
-export async function tailSortKey(productionId: string, parentId: string | null): Promise<string> {
-  const rows = await siblingRows(productionId, parentId, null);
-  const last = [...rows].reverse().find(r => r.sort_key !== null);
-  return keyBetween(last?.sort_key ?? null, null);
+const keyedOnly = (rows: { id: string; sort_key: string | null }[]): KeyedSibling[] =>
+  rows.filter((r): r is KeyedSibling => r.sort_key !== null);
+
+/** 给同层 keyed（按 sort_key 升序）里的 slot 位置分配 key；两侧无空位时把这一层已有的
+ *  key 均匀重铺（一次 UPDATE）再取（#682：定宽 key 连续追加约 45 次即耗尽，之后同 key 行
+ *  顺序不定）。重铺不改相对顺序；无界侧按步长走，正常情况下重铺不会触发。 */
+async function allocateSiblingKey(db: Queryable, keyed: KeyedSibling[], slot: number): Promise<string> {
+  const prev = slot > 0 ? keyed[slot - 1].sort_key : null;
+  const next = slot < keyed.length ? keyed[slot].sort_key : null;
+  const between = keyStrictlyBetween(prev, next);
+  if (between !== null) return between;
+  const keys = initialKeys(keyed.length + 1);
+  const ids: string[] = [];
+  const sortKeys: string[] = [];
+  keyed.forEach((row, index) => {
+    const key = keys[index < slot ? index : index + 1];
+    if (key === row.sort_key) return;
+    ids.push(row.id);
+    sortKeys.push(key);
+  });
+  if (ids.length > 0) {
+    await db.query(
+      `UPDATE node AS n SET sort_key = u.sort_key
+       FROM unnest($1::text[], $2::text[]) AS u(id, sort_key)
+       WHERE n.id = u.id`,
+      [ids, sortKeys],
+    );
+  }
+  return keys[slot];
+}
+
+/** 末尾排序键：同层最后一个之后。事务内调用传 client（ensure 系列 / 报告归档管线）。 */
+export async function tailSortKey(productionId: string, parentId: string | null, db: Queryable = getPool()): Promise<string> {
+  const keyed = keyedOnly(await siblingRows(productionId, parentId, null, db));
+  return allocateSiblingKey(db, keyed, keyed.length);
 }
 
 /** 相对锚点落位（#357 症状②）：客户端只说「放在谁的前/后」，键由服务端在
@@ -257,9 +290,10 @@ export async function placementSortKey(
   const rows = await siblingRows(productionId, parentId, excludeId);
   const idx = rows.findIndex(r => r.id === place.anchorId);
   if (idx < 0) return tailSortKey(productionId, parentId);
-  const prev = place.side === "before" ? rows[idx - 1] : rows[idx];
-  const next = place.side === "before" ? rows[idx] : rows[idx + 1];
-  return keyBetween(prev?.sort_key ?? null, next?.sort_key ?? null);
+  // 无 key 的行排在最后，新节点在 keyed 序列里的下标 = 落点之前的 keyed 行数
+  const at = place.side === "before" ? idx : idx + 1;
+  const slot = keyedOnly(rows.slice(0, at)).length;
+  return allocateSiblingKey(getPool(), keyedOnly(rows), slot);
 }
 
 /** 事务内建壳节点（createWiki / createAsset / 报告归档管线复用）。
