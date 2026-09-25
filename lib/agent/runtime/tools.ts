@@ -870,8 +870,13 @@ export const DEFS: Def[] = [
       } catch (err) {
         if (err instanceof WebToolError) return err.message;
         if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return "抓取超时";
-        // 其余（TLS/网络栈内部错误）不把细节回给模型
-        if (err instanceof Error) return "抓取失败：无法连接该网址";
+        // 其余（TLS/网络栈内部错误）不把细节回给模型，但要留日志：#683 就是这条兜底把
+        // 「所有域名都连不上」吞成了「目标站不可达」，靠人手动 probe 才发现。
+        if (err instanceof Error) {
+          const cause = (err as { cause?: { code?: string; message?: string } }).cause;
+          console.warn(`[web.fetch] ${String(args.url ?? "")} 失败：${cause?.code ?? err.name} ${cause?.message ?? err.message}`);
+          return "抓取失败：无法连接该网址";
+        }
         throw err;
       }
     },
