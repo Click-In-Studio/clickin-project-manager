@@ -10,6 +10,8 @@ import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { POST as mentionResolvePOST } from "@/app/api/production/[id]/mention-resolve/route";
 import { applyPatchToDB } from "@/lib/script/script-patch-db";
+import { loadBlockMentionDigests } from "@/lib/script/script-block-read-db";
+import { loadMarkerNaming } from "@/lib/script/script-marker-label-db";
 import { MENTION_SENTINEL } from "@/lib/editor/mention-display";
 import type { Block } from "@/lib/script/script-types";
 import type { ContentMentionAttrs } from "@/lib/editor/mention-types";
@@ -174,6 +176,41 @@ describe("block 引用：坐标 + 谁说了什么", () => {
     const { labels, urls } = await resolve([{ kind: "block", displayMode: "scene", id: randomUUID() }]);
     expect(labels[0]).toBe(MENTION_SENTINEL.deleted);
     expect(urls[0]).toBeNull();
+  });
+});
+
+// 路由那几条走的是「一块一个角色」的常态。说话人的取位规则（按 position 取第一位、
+// 跳过没名字的）在多角色块上才看得出来，这里直接对读口下断言。
+describe("loadBlockMentionDigests：说话人取位", () => {
+  it("多位角色只取 position 最小的那一位，空名字不顶位", async () => {
+    const solo = await makeCharacter(prodId, versionId, { name: "证人乙" });
+    const nameless = await makeCharacter(prodId, versionId, { name: "临时角色" });
+    await getPool().query(
+      "UPDATE character_version SET name = '' WHERE character_id = $1 AND version_id = $2",
+      [nameless, versionId],
+    );
+    const chorusId = randomUUID();
+    // characterIds 的先后即 script_character.position
+    await insert(dialogue(chorusId, "我们一起说这句", [nameless, charId, solo]), emptyId);
+
+    const digests = await loadBlockMentionDigests(versionId, [chorusId, spokenId]);
+    expect(digests.get(chorusId)).toEqual({ content: "我们一起说这句", speaker: "证人甲" });
+    expect(digests.get(spokenId)!.speaker).toBe("证人甲");
+    expect(digests.size).toBe(2);
+  });
+
+  it("不传 id 不打库；不存在的 id 不进结果", async () => {
+    expect(await loadBlockMentionDigests(versionId, [])).toEqual(new Map());
+    expect((await loadBlockMentionDigests(versionId, [randomUUID()])).size).toBe(0);
+  });
+});
+
+describe("loadMarkerNaming：场名与提纲", () => {
+  it("空字符串归一成 null，让标签退回纯场号而不是拼一个空格", async () => {
+    const naming = await loadMarkerNaming(versionId, [sceneId, chapterId]);
+    expect(naming.get(sceneId)).toEqual({ name: SCENE_NAME, synopsis: SCENE_SYNOPSIS });
+    expect(naming.get(chapterId)!.synopsis).toBeNull(); // 章没写提纲 → 不是 ""
+    expect(await loadMarkerNaming(versionId, [])).toEqual(new Map());
   });
 });
 
