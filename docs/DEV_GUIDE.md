@@ -296,7 +296,7 @@ tag 名 = `content/changelog/` 版本目录名，形态由 `lib/help/changelog.t
 ### 发版与 hotfix（#558）
 
 - push `main` → 自动发 **dev**（`app-dev.clickinmusical.com`）；push tag `v*` → 自动发 **prod**（`app.clickinmusical.com`）。发 prod = `npm run changelog:release -- <tag>` → 编辑 commit → `git tag <tag> && git push origin <tag>`。
-- **hotfix 从被修的 tag 切分支，不从 main**（main 领先 tag 一大截，从 main 发等于把未发的全推上去）：`git switch -c hotfix/<n> v0.1.2-260924` → 改 → 在该 commit 打 `v0.1.2-260924-hot1` 推 tag → 分支再补 `content/changelog/<tag>/`（只含本次修复）→ PR 回 main。
+- **hotfix 从被修的 tag 切分支，不从 main**（main 领先 tag 一大截，从 main 发等于把未发的全推上去）：`git switch -c hotfix/<n> v0.1.2-260924` → 改 → 补 `content/changelog/<tag>/`（只含本次修复）并 commit → 在**changelog 那个 commit** 上打 `v0.1.2-260924-hot1` 推 tag → PR 回 main。顺序不能反：prod CD 会检查 tag 所在 commit 有没有 `content/changelog/<tag>/_index.md`（#569），先打 tag 再补 changelog 会直接部署失败（#684 踩过）。
 - 详见 [DEPLOY.md](./DEPLOY.md)。
 
 ### 叠 PR（stacked PR）
