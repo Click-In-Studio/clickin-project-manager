@@ -45,6 +45,21 @@ describe("presignedGet cacheWindow", () => {
     const url = new URL(presignedGet("assets/x/y.png", 3600, { cacheControl: "private, max-age=3600" }));
     expect(url.searchParams.get("response-cache-control")).toBe("private, max-age=3600");
   });
+
+  // #679：上一条用 searchParams.get 读，"+" 和 "%20" 都解成空格，是假绿。
+  // SigV4 规范查询串要求空格编成 %20；URLSearchParams 编成 "+"，R2 重算签名
+  // 时按 %20 走，整条 URL 直接 SignatureDoesNotMatch——预览 PDF / 图片 / 视频全挂。
+  it("查询串按 RFC 3986 编码：空格是 %20 不是 +（否则 R2 报 SignatureDoesNotMatch）", () => {
+    const url = presignedGet("assets/x/y.pdf", 3600, {
+      inline: true,
+      contentType: "application/pdf",
+      cacheWindow: 3600,
+      cacheControl: "private, max-age=3600",
+    });
+    const query = url.split("?")[1];
+    expect(query).toContain("response-cache-control=private%2C%20max-age%3D3600");
+    expect(query).not.toContain("+");
+  });
 });
 
 describe("avatar-url helpers", () => {
