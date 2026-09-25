@@ -25,11 +25,14 @@ import {
 import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
 import { embedMediaKind } from "@/lib/asset/embed-media";
 import { parseCalloutMarker } from "@/lib/editor/tiptap-callout";
+import { MENTION_CHIP_CLASS, MENTION_SENTINEL, mentionChipView } from "@/lib/editor/mention-display";
 
-type Resolved = { label: string | null; url: string | null };
+type Resolved = { label: string | null; url: string | null; detail: string | null };
 
+/** displayMode 必须在键里（#689）：同一个 block 以 `?as=scene` 与 `?as=page` 两种
+ *  形态出现在同一篇正文里，标签与悬浮都不一样，漏了它后者会覆盖前者。 */
 function attrsKey(a: ContentMentionAttrs): string {
-  return `${a.kind}:${a.id}:${a.aux ?? ""}:${a.versionId ?? ""}`;
+  return `${a.kind}:${a.displayMode ?? ""}:${a.id}:${a.aux ?? ""}:${a.versionId ?? ""}`;
 }
 
 // ── 手写 [[标题]] 支持（UI 修缮轮）────────────────────────────────────────────
@@ -304,9 +307,11 @@ export default function WikiMarkdown({
           body: JSON.stringify({ mentions: mentionAttrs, versionId }),
         });
         if (!res.ok) { setResolveFailed(true); return; }
-        const data = await res.json() as { labels: (string | null)[]; urls: (string | null)[] };
+        const data = await res.json() as { labels: (string | null)[]; urls: (string | null)[]; details?: (string | null)[] };
         const next = new Map<string, Resolved>();
-        mentionAttrs.forEach((a, i) => next.set(attrsKey(a), { label: data.labels[i], url: data.urls[i] }));
+        mentionAttrs.forEach((a, i) => next.set(attrsKey(a), {
+          label: data.labels[i], url: data.urls[i], detail: data.details?.[i] ?? null,
+        }));
         setResolved(next);
       } catch { setResolveFailed(true); }
     })();
@@ -412,7 +417,7 @@ export default function WikiMarkdown({
                     </span>
                   );
                 }
-                const deleted = r.label === "#[已删除]";
+                const deleted = r.label === MENTION_SENTINEL.deleted;
                 if (deleted) {
                   return (
                     <span className="inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-zinc-50 text-zinc-400 border border-zinc-200 no-underline">
@@ -428,31 +433,27 @@ export default function WikiMarkdown({
                 return (
                   <Link
                     href={url}
-                    className="inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-sky-50 text-sky-700 border border-sky-200 no-underline hover:bg-sky-100"
+                    className={`${MENTION_CHIP_CLASS.wiki} no-underline hover:bg-sky-100`}
                   >
-                    [[{r.label}]]
+                    [[{r.label === MENTION_SENTINEL.untitled ? "无标题文档" : r.label}]]
                   </Link>
                 );
               }
               // 显示位已恒为哨兵 "#"（不再是编辑期 label 快照），解析不出来就没有
-              // 任何可显示的东西——给中性占位，绝不拿正文里的字冒充实时标签。
-              if (!r) {
-                return (
-                  <span
-                    title={resolveFailed ? "解析失败" : "解析中…"}
-                    className="inline-flex items-center px-1 py-0.5 rounded text-[11px] font-mono font-semibold bg-zinc-50 text-zinc-400 border border-dashed border-zinc-300"
-                  >
-                    #{resolveFailed ? "解析失败" : "…"}
-                  </span>
-                );
-              }
-              const label = r.label ?? attrs.kind;
+              // 任何可显示的东西——给类别名 + 原因的中性占位（#689，此前是裸 kind
+              // 名 `#block`），绝不拿正文里的字冒充实时标签。
+              const view = mentionChipView(attrs.kind, r?.label ?? null, r?.detail, resolveFailed);
               const chip = (
-                <span className="inline-flex items-center px-1 py-0.5 rounded text-[11px] font-mono font-semibold bg-amber-50 text-amber-700 border border-amber-200 no-underline">
-                  {label.startsWith("#") ? label : `#${label}`}
+                <span
+                  title={view.title ?? undefined}
+                  className={`${view.muted ? MENTION_CHIP_CLASS.muted : MENTION_CHIP_CLASS.ref} no-underline`}
+                >
+                  {view.text}
                 </span>
               );
-              return r?.url ? <Link href={r.url} className="no-underline">{chip}</Link> : chip;
+              return !view.muted && r?.url
+                ? <Link href={r.url} className="no-underline">{chip}</Link>
+                : chip;
             }
             // 普通链接
             return (

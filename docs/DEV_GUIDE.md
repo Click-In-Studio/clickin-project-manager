@@ -1005,6 +1005,7 @@ dev 环境（main 自动发）上 `unreleased/` 有条目时页面顶部多一�
 - **元数据信封挂 `asset_file` 不挂 `asset`**（#85）：文件行不可变 ⇒ `(fileId, parserVersion)` 键永不失效；版本契约是唯一失效通道——新增分析器忘 bump `BROKER_VERSION` = 存量 unsupported 永不重算。broker 判定：magic 主判 → 扩展名破同门 → 声明 mime 不参与。
 - **wiki-asset 嵌入**：存储方言 v2 URI 唯一文法（`![](/__cm__/asset/<id>)`），统一发生在输入层；embed 边由 `syncWikiLinks` 从正文派生（单写入方），前端不直写 mounts。
 - **引用 kind 单一真相在 `CONTENT_MENTION_KINDS`**（`lib/editor/mention-types.ts`，#670 加 task 时立的）：`EDGE_KINDS`、方言校验的未知类型检查都从它派生。新增一种可引用实体的落点清单——① `mention-resolve` 路由加解析分支（标签 + URL，已删除给「#[已删除]」）；② `lib/notify/doc/resolver.ts` 同款分支（通知没有观看者会话，只做归属校验）；③ `wiki-refs` 路由 `ENTITY_TYPES` + `hostViewPermitted` 沿用该实体页面的读取门；④ `RelatedWikiChips` 的 `entityType` union 与实体页挂面板；⑤ `WIKI_DIALECT_NOTE` 类型清单；⑥ 实体删除路径调 `clearEntityLinks`（悬空即删）。存成普通站内链接绕过这一层是被驳回过的（#379）：不落边、显示文字冻死、删了只剩 404。
+- **chip 上的字一律由解析给，降级文案单一真相在 `lib/editor/mention-display.ts`**（#689）。正文里显示位恒为哨兵 `#`，`label` attr 只是解析结果的缓存——**任何渲染点都不许拿 kind 名 / 截断 id 当兜底**（`?? kind` 曾在三处各写一遍，哨兵化之后全部变成常态路径，读者看到 `#block` / `block:3f2a9b1c`）。新增渲染点：从 `mentionChipView` / `wikiChipView` 取 `{text, title, muted}`，并登记进 `tests/wiki/mention-chip-display.test.ts` 的 `RENDER_POINTS`。**编辑态的活刷新不设 kind 白名单**——原先只刷 wiki / task，剧本域于是永久停在降级态。服务端解析不出时落哨兵（`MENTION_SENTINEL`）而不是 `null`：`null` 的原契约「客户端回退编辑期快照」随哨兵化一起失效了。剧本片段的摘要素材走 `loadBlockMentionDigests`、场名走 `loadMarkerNaming`，两条都按 id 定点取——**不许**为它们拓宽 mention-resolve 那条扫整版的 CTE 投影（#461），也**不许**把场名塞进 `getMarkerLabelIndex` 的缓存（那份按 `marker_structure_revision` 失效，改名不 bump，进去就冻住）。
 
 ### 13.2 权限门定式
 

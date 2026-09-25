@@ -87,3 +87,29 @@ export async function getFirstRehearsalMarkerLabel(versionId: string): Promise<s
   if (!markerId) return null;
   return labels.labelByMarkerId.get(markerId) ?? "（未命名）";
 }
+
+/** 场 / 章标记的场名与提纲（#689 引用 chip 用）。 */
+export type MarkerNaming = { name: string | null; synopsis: string | null };
+
+/**
+ * 被引用的标记的场名与提纲，按 marker id 定点取。
+ *
+ * 不塞进 getMarkerLabelIndex 那份缓存：它的失效键是 `marker_structure_revision`，
+ * 只跟**结构**变动走。给某场改个名不动结构、不 bump revision，名字要是进了那份
+ * 缓存就会一直冻在旧值上——而 chip 的全部意义就是显示当前真相（语法大纲 G4）。
+ */
+export async function loadMarkerNaming(
+  versionId: string, markerIds: string[], pool: Pool = getPool(),
+): Promise<Map<string, MarkerNaming>> {
+  if (markerIds.length === 0) return new Map();
+  const res = await pool.query<{ block_id: string; name: string | null; synopsis: string | null }>(
+    `SELECT sv.block_id,
+            NULLIF(s.marker_meta->>'name', '')     AS name,
+            NULLIF(s.marker_meta->>'synopsis', '') AS synopsis
+       FROM script_version sv
+       JOIN script s ON s.id = sv.snapshot_id
+      WHERE sv.version_id = $1 AND sv.block_id = ANY($2::text[])`,
+    [versionId, markerIds],
+  );
+  return new Map(res.rows.map(r => [r.block_id, { name: r.name, synopsis: r.synopsis }]));
+}

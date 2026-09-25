@@ -21,6 +21,7 @@ import { getScriptConfig, loadProduction } from "@/lib/script/script-state-db";
 import { listTextBlockIdsByVersion, loadVersionBlocks, loadVersionBlocksByIds } from "@/lib/script/script-block-read-db";
 import type { Block } from "@/lib/script/script-types";
 import type { ContentMentionAttrs } from "@/lib/editor/mention-types";
+import { MENTION_SENTINEL } from "@/lib/editor/mention-display";
 import { makeProduction, makeScene, makeCharacter, cleanupProduction } from "../_support/factories";
 
 let owner: string;
@@ -149,7 +150,7 @@ describe("blocks 轻量读口与 loadProduction 等价", () => {
 describe("mention-resolve 结构定点查的语义保真", () => {
   it("scene 提及拿排练记号 id 解析成 #[已删除]，不借混装标签", async () => {
     const [label] = await resolve([{ kind: "scene", id: rehearsalMarkerId }]);
-    expect(label).toBe("#[已删除]");
+    expect(label).toBe(MENTION_SENTINEL.deleted);
   });
 
   it("scene/rehearsal 提及解析出各自的标签", async () => {
@@ -162,18 +163,23 @@ describe("mention-resolve 结构定点查的语义保真", () => {
       { kind: "scene", id: sceneId },
       { kind: "rehearsal", id: rehearsalMarkerId },
     ]);
-    expect(resolved).toEqual([`#${sceneLabel}`, `#${rehearsalLabel}`]);
+    // 钉的是「各自的标签」这件事，即标签**以自己的那枚编号开头**；编号后面还跟
+    // 什么（场名 / 摘要）是显示层的事，由 tests/script/script-mention-resolve 管，
+    // 别在这里也钉一遍格式（#689 改显示时这条曾因此误红）
+    expect(resolved[0]!.startsWith(`#${sceneLabel}`)).toBe(true);
+    expect(resolved[1]).toBe(`#${rehearsalLabel}`);
   });
 
   it("block 提及 scene 模式：场内序号按正文顺序（marker 不占位）", async () => {
     const labels = await getMarkerLabelIndex(versionId);
     const sceneLabel = labels.labelByMarkerId.get(sceneId)!;
     const resolved = await resolve([{ kind: "block", id: dialogueIds[2], displayMode: "scene" }]);
-    expect(resolved).toEqual([`#${sceneLabel}-3`]); // d3 是场内第 3 块正文，排练 marker 不计数
+    // d3 是场内第 3 块正文，排练 marker 不计数。坐标之后的摘要不在本条的守备范围
+    expect(resolved[0]!.startsWith(`#${sceneLabel}-3`)).toBe(true);
   });
 
   it("已删除的 block id 解析成 #[已删除]", async () => {
     const [label] = await resolve([{ kind: "block", id: randomUUID(), displayMode: "scene" }]);
-    expect(label).toBe("#[已删除]");
+    expect(label).toBe(MENTION_SENTINEL.deleted);
   });
 });

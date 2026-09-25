@@ -3,12 +3,14 @@ import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getActiveVersionId, getVersion } from "@/lib/script/version-db";
-import { getMarkerLabelIndex } from "@/lib/script/script-marker-label-db";
+import { getMarkerLabelIndex, loadMarkerNaming, type MarkerNaming } from "@/lib/script/script-marker-label-db";
+import { loadBlockMentionDigests, type BlockMentionDigest } from "@/lib/script/script-block-read-db";
 import { getEstimatedPageMap } from "@/lib/script/page-map-db";
 import { getPool } from "@/lib/pg";
 import { MARKER_TYPES_SQL, VERSION_OWNED_BLOCKS_CTE } from "@/lib/script/script-marker-sql";
 import { buildMarkerLabelIndex, type MarkerLabelIndex } from "@/lib/script/script-generated-labels";
-import type { ContentMentionAttrs, BlockDisplayMode } from "@/lib/editor/mention-types";
+import { CONTENT_MENTION_KINDS, type ContentMentionAttrs, type BlockDisplayMode } from "@/lib/editor/mention-types";
+import { MENTION_SENTINEL, blockMentionDetail, blockMentionLabel, sceneMentionLabel } from "@/lib/editor/mention-display";
 import { taskMentionLabel } from "@/lib/ops/task-types";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -53,14 +55,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const body = await req.json() as ResolveInput;
   const { mentions, versionId: contextVersionId } = body;
   if (!Array.isArray(mentions) || mentions.length === 0) {
-    return Response.json({ labels: [], urls: [] });
+    return Response.json({ labels: [], urls: [], details: [] });
   }
 
   // 剧本域 kinds 沿用 script blocks@view 门；wiki / task kind 不受此门约束——
   // 标题=目录级信息沿引用流出（账本 §4.1），内容门在各自页面/API 自身
   // （task 详情页门：task/*@view ∨ 部门 POC ∨ 指派人）。
   // 无剧本权限不再整请求 403（混合正文会连累 wiki/@ 解析）：剧本域 kinds
-  // 软跳过（labels/urls 留 null，客户端回退编辑期快照），wiki / task 恒可解析
+  // 软跳过，wiki / task 恒可解析。
+  //
+  // 软跳过的标签位落「无权查看」哨兵而不是留 null（#689）：留 null 的原契约是
+  // 「客户端回退编辑期快照」，而快照早随显示位哨兵化一起没了（语法大纲 G4），
+  // null 到了渲染端只能退成裸 kind 名。这不是新泄露——正文里有个 chip 这件事
+  // 读者本来就看得见，哨兵只是把「看不到内容」说成人话。
   const canResolveScript = await hasEffectiveGrant(permCtx, productionId, "script", "*", "blocks", "view");
   const effectiveMentions = canResolveScript
     ? mentions
@@ -77,6 +84,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const labels: (string | null)[] = new Array(mentions.length).fill(null);
   const urls: (string | null)[] = new Array(mentions.length).fill(null);
+  // 悬浮补充（#689）：chip 上放不下、但读者常要的那一层——场次的提纲、剧本片段
+  // 所在的场与块序。标签位只有一行的预算，深一层信息进 title。
+  const details: (string | null)[] = new Array(mentions.length).fill(null);
+
+  const KNOWN_KINDS = new Set<string>(CONTENT_MENTION_KINDS);
+  if (!canResolveScript) {
+    for (let i = 0; i < mentions.length; i++) {
+      const kind = mentions[i]?.kind;
+      if (effectiveMentions[i] === null && kind && KNOWN_KINDS.has(kind)) {
+        labels[i] = MENTION_SENTINEL.noAccess;
+      }
+    }
+  }
 
   // ── 剧本索引（懒加载：没有剧本域 mention 就不碰正文）────────────────────
   let scriptPromise: Promise<ScriptIndex | null> | null = null;
@@ -134,16 +154,24 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const sceneIdxs = byKind.get("scene") ?? [];
   if (sceneIdxs.length > 0 && effectiveVersionId) {
     const sceneLabels = (await loadScript())?.labels ?? buildMarkerLabelIndex([]);
+    // 场名与提纲定点取（#689）：`#0-1` 这种纯场号读者认不出是哪一场，场名才认得出。
+    // 不走 getMarkerLabelIndex 的缓存，理由见 loadMarkerNaming 的注释（改名不 bump
+    // marker_structure_revision，进了那份缓存就冻住）。
+    const naming: Map<string, MarkerNaming> = await loadMarkerNaming(
+      effectiveVersionId, [...new Set(sceneIdxs.map(i => mentions[i].id))],
+    );
     for (const i of sceneIdxs) {
       const m = mentions[i];
       const num = sceneNum(sceneLabels, m.id);
-      if (!num) { labels[i] = "#[已删除]"; continue; }
-      labels[i] = `#${num}`;
+      if (!num) { labels[i] = MENTION_SENTINEL.deleted; continue; }
+      const named = naming.get(m.id);
+      labels[i] = sceneMentionLabel(num, named?.name ?? null);
+      details[i] = named?.synopsis ?? null;
       urls[i] = `${base}/script${vParam}`;
     }
   } else if (sceneIdxs.length > 0) {
     for (const i of sceneIdxs) {
-      labels[i] = "#[未知版本]";
+      labels[i] = MENTION_SENTINEL.unknownVersion;
       urls[i] = `${base}/script${vParam}`;
     }
   }
@@ -153,12 +181,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     for (const i of rehearsalIdxs) {
       const mention = mentions[i];
       const label = rehearsalLabels.labelByMarkerId.get(mention.id);
-      labels[i] = label ? `#${label}` : "#[已删除]";
+      labels[i] = label ? `#${label}` : MENTION_SENTINEL.deleted;
       urls[i] = `${base}/script${vParam}${label ? `#block-${mention.id}` : ""}`;
     }
   } else if (rehearsalIdxs.length > 0) {
     for (const i of rehearsalIdxs) {
-      labels[i] = "#[未知版本]";
+      labels[i] = MENTION_SENTINEL.unknownVersion;
       urls[i] = `${base}/script`;
     }
   }
@@ -173,6 +201,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const mode = mentions[i].displayMode ?? "scene";
       if (!byMode.has(mode)) byMode.set(mode, []);
       byMode.get(mode)!.push(i);
+    }
+
+    // 摘要素材（#689）：三种展示模式共用一次定点查询。坐标（`0-1-3` / `p.4-2`）
+    // 是剧组内部的通用坐标语，读者照着它翻纸本，所以留在可见位；但光有坐标认不出
+    // 是哪一刻，所以后面补一句「谁说了什么」。正文为空的块只剩坐标。
+    const digests: Map<string, BlockMentionDigest> = effectiveVersionId
+      ? await loadBlockMentionDigests(effectiveVersionId, [...new Set(blockIdxs.map(i => mentions[i].id))])
+      : new Map();
+    /** 坐标 + 摘要写进 labels/details 的同一套动作，三个模式分支共用。 */
+    function writeBlockLabel(i: number, coord: string) {
+      const d = digests.get(mentions[i].id);
+      labels[i] = blockMentionLabel(coord, d?.content ?? "", d?.speaker ?? null);
+      details[i] = d ? blockMentionDetail(d.content, d.speaker) : null;
     }
 
     // scene mode: find scene num and position within scene
@@ -191,9 +232,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       for (const i of idxs) {
         const blockId = mentions[i].id;
         const info = posMap.get(blockId);
-        if (!info) { labels[i] = "#[已删除]"; continue; }
+        if (!info) { labels[i] = MENTION_SENTINEL.deleted; continue; }
         const num = script ? sceneNum(script.labels, info.sceneId) : undefined;
-        labels[i] = num ? `#${num}-${info.pos}` : "#[已删除]";
+        if (!num) { labels[i] = MENTION_SENTINEL.deleted; continue; }
+        writeBlockLabel(i, `${num}-${info.pos}`);
         urls[i] = `${base}/script${vParam}#block-${blockId}`;
       }
     }
@@ -217,10 +259,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       for (const i of idxs) {
         const blockId = mentions[i].id;
         const page = pageMap[blockId];
-        if (!page) { labels[i] = "#[已删除]"; continue; }
+        if (!page) { labels[i] = MENTION_SENTINEL.deleted; continue; }
         const pageBlocks = pageGroups.get(page) ?? [];
         const pos = pageBlocks.indexOf(blockId) + 1;
-        labels[i] = `#p.${page}-${pos}`;
+        writeBlockLabel(i, `p.${page}-${pos}`);
         urls[i] = `${base}/script${vParam}#block-${blockId}`;
       }
     }
@@ -243,9 +285,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       for (const i of idxs) {
         const blockId = mentions[i].id;
         const info = blockInfo.get(blockId);
-        if (!info) { labels[i] = "#[已删除]"; continue; }
+        if (!info) { labels[i] = MENTION_SENTINEL.deleted; continue; }
         const label = rehearsalLabels.labelByMarkerId.get(info.rehearsalMark);
-        labels[i] = label ? `#${label}-${info.pos}` : "#[已删除]";
+        if (!label) { labels[i] = MENTION_SENTINEL.deleted; continue; }
+        writeBlockLabel(i, `${label}-${info.pos}`);
         urls[i] = `${base}/script${vParam}#block-${blockId}`;
       }
     }
@@ -253,7 +296,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // Fallback for blocks without effectiveVersionId
     if (!effectiveVersionId) {
       for (const i of blockIdxs) {
-        if (labels[i] === null) labels[i] = "#[未知版本]";
+        if (labels[i] === null) labels[i] = MENTION_SENTINEL.unknownVersion;
         urls[i] = `${base}/script`;
       }
     }
@@ -276,8 +319,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
     for (const i of wikiIdxs) {
       const id = mentions[i].id.toLowerCase();
-      if (!wikiMap.has(id)) { labels[i] = "#[已删除]"; continue; }
-      labels[i] = wikiMap.get(id) ?? "#[无标题]";
+      if (!wikiMap.has(id)) { labels[i] = MENTION_SENTINEL.deleted; continue; }
+      labels[i] = wikiMap.get(id) ?? MENTION_SENTINEL.untitled;
       urls[i] = `${base}/wiki/${id}`;
     }
   }
@@ -295,7 +338,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const taskMap = new Map(r.rows.map(row => [row.id, row]));
     for (const i of taskIdxs) {
       const task = taskMap.get(mentions[i].id);
-      if (!task) { labels[i] = "#[已删除]"; continue; }
+      if (!task) { labels[i] = MENTION_SENTINEL.deleted; continue; }
       labels[i] = taskMentionLabel(task.title, task.status);
       urls[i] = `${base}/tasks/${task.id}`;
     }
@@ -323,7 +366,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const cueMap = new Map(r.rows.map(row => [row.cue_id, row]));
     for (const i of cueIdxs) {
       const cue = cueMap.get(mentions[i].id);
-      if (!cue) { labels[i] = "#[已删除]"; continue; }
+      if (!cue) { labels[i] = MENTION_SENTINEL.deleted; continue; }
       labels[i] = cue.name
         ? `${cue.abbr}.${cue.number}: ${cue.name}`
         : `${cue.abbr}.${cue.number}`;
@@ -346,7 +389,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     for (const i of assetIdxs) {
       const asset = assetMap.get(mentions[i].id);
-      labels[i] = asset ? (asset.name ?? asset.file_name) : "#[已删除]";
+      labels[i] = asset ? (asset.name ?? asset.file_name) : MENTION_SENTINEL.deleted;
 
       if (!asset) continue;
 
@@ -435,5 +478,5 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
   }
 
-  return Response.json({ labels, urls });
+  return Response.json({ labels, urls, details });
 }

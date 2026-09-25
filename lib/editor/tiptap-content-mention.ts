@@ -21,6 +21,8 @@ export const MarkdownContentMentionExt = Mention.extend({
       aux: { default: null },
       versionId: { default: null },
       label: { default: null },
+      // 悬浮补充（#689）：与 label 同源同寿——都是解析结果的缓存，都不入正文。
+      detail: { default: null },
     };
   },
   parseHTML() {

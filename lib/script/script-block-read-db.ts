@@ -109,3 +109,38 @@ export async function listTextBlockIdsByVersion(versionId: string): Promise<stri
   );
   return res.rows.map(r => r.block_id);
 }
+
+/** 引用 chip 的摘要素材（#689）：正文 + 首位角色名。 */
+export type BlockMentionDigest = { content: string; speaker: string | null };
+
+/**
+ * 被引用块的摘要素材，按 block id 定点取。
+ *
+ * 为什么另开一条查询、不把 `content` 加进 mention-resolve 那条 `VERSION_OWNED_BLOCKS_CTE`
+ * 的投影：那条 CTE 扫**整个版本**的块（它要算「场内第几块」这种序号），把正文列
+ * 拉上就是整本 over-fetch，正是 #461 收掉的东西。一篇文档里被引用的块通常只有
+ * 几个，按 id 取才是这里的规模。
+ *
+ * 角色名取 `position` 最小的那一位：对白块的说话人。合唱 / 群杂那种挂多位角色的
+ * 块只显示第一位——chip 是行内元素，列全了撑坏段落，完整信息点进剧本看。
+ */
+export async function loadBlockMentionDigests(
+  versionId: string, blockIds: string[],
+): Promise<Map<string, BlockMentionDigest>> {
+  if (blockIds.length === 0) return new Map();
+  const res = await getPool().query<{ block_id: string; content: string; speaker: string | null }>(
+    `SELECT sv.block_id, s.content,
+            (SELECT cv.name
+               FROM script_character sc
+               JOIN character_version cv
+                 ON cv.character_id = sc.character_id AND cv.version_id = sv.version_id
+              WHERE sc.script_id = s.id AND cv.name <> ''
+              ORDER BY sc.position
+              LIMIT 1) AS speaker
+       FROM script_version sv
+       JOIN script s ON s.id = sv.snapshot_id
+      WHERE sv.version_id = $1 AND sv.block_id = ANY($2::text[])`,
+    [versionId, blockIds],
+  );
+  return new Map(res.rows.map(r => [r.block_id, { content: r.content, speaker: r.speaker }]));
+}
