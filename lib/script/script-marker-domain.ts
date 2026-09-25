@@ -110,7 +110,8 @@ function moveSourcePositions(
   return positions;
 }
 
-function movedIds(previousIds: string[], nextIds: string[]): Set<string> {
+/** 两个 id 序列之间「真正移动」的最小块集（LIS 之外的块）；写工具用它播报纯顺序变化（#680）。 */
+export function movedIds(previousIds: string[], nextIds: string[]): Set<string> {
   if (previousIds.every((id, index) => nextIds[index] === id)) return new Set();
   const nextIndexById = new Map(nextIds.map((id, index) => [id, index]));
   const tails: number[] = [];

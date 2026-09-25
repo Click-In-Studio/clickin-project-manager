@@ -27,6 +27,7 @@ import { diffState, requiredPermissions, type ScriptPermissionKey, type ScriptPa
 import { applyDialectToBlocks, resolveSpeakerRefs, type ApplyDialectSummary, type ParsedSpeaker } from "@/lib/script/script-dialect";
 import { sectionEndIndex } from "./script-tools";
 import { isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script/script-marker-blocks";
+import { movedIds } from "@/lib/script/script-marker-domain";
 import type { Block, ScriptState } from "@/lib/script/script-types";
 
 const ARCHIVED = "该制作已归档，无法修改。";
@@ -125,12 +126,17 @@ function diffNotes(
   prevById: Map<string, Block>,
   nextBlocks: Block[],
   summary: ApplyDialectSummary,
+  moved: ReadonlySet<string>,
   insertCtx?: Map<string, { prev: string; next: string | null }>,
 ): string[] {
   const nextById = new Map(nextBlocks.map((b) => [b.id, b]));
   const lines: string[] = [
-    `新增 ${summary.inserted.length} 块 / 修改 ${summary.updated.length} 块 / 删除 ${summary.deleted.length} 块 / 保留 ${summary.retained} 块`,
+    `新增 ${summary.inserted.length} 块 / 修改 ${summary.updated.length} 块 / 删除 ${summary.deleted.length} 块 / 保留 ${summary.retained} 块${movedPhrase(moved.size)}`,
   ];
+  // 纯顺序变化（#680 线上实测：只调顺序的 rewrite 被播报成「0/0/0」，模型以为没生效）
+  const movedInDocOrder = nextBlocks.filter((b) => moved.has(b.id));
+  for (const b of movedInDocOrder.slice(0, MOVED_NOTE_LIMIT)) lines.push(`移：${clip(b.content ?? "", 40)}`);
+  if (movedInDocOrder.length > MOVED_NOTE_LIMIT) lines.push(`移：…等共 ${movedInDocOrder.length} 块换位`);
   for (const id of summary.updated) lines.push(`改：${clip(nextById.get(id)?.content ?? "", 40)}`);
   for (const id of summary.inserted) {
     const c = insertCtx?.get(id);
@@ -141,6 +147,9 @@ function diffNotes(
   for (const id of summary.deleted) lines.push(`删：${clip(prevById.get(id)?.content ?? "", 40)}`);
   return lines;
 }
+
+const MOVED_NOTE_LIMIT = 12;
+const movedPhrase = (n: number): string => (n > 0 ? ` / 顺序调整 ${n} 块` : "");
 
 function finishPlan(
   ctx: WriteCtx,
@@ -157,7 +166,11 @@ function finishPlan(
     return { error: "内容与现状相同，未做任何变更。" };
   }
   const prevById = new Map(prevState.blocks.map((b) => [b.id, b]));
-  const notes = [headline, ...diffNotes(prevById, nextBlocks, summary, insertCtx)];
+  // 顺序变化只在 patch 带 reorder 时才算（插入/删除引起的位移不是换位）
+  const moved = patch.blockOps.some((op) => op.op === "reorder")
+    ? movedIds(prevState.blocks.map((b) => b.id), nextBlocks.map((b) => b.id))
+    : new Set<string>();
+  const notes = [headline, ...diffNotes(prevById, nextBlocks, summary, moved, insertCtx)];
   return {
     wants: wantsFromPatch(patch, prevState),
     notes,
@@ -173,7 +186,7 @@ function finishPlan(
         ? `本次新增块 id（按文档顺序，可直接作下一批的插入锚点）：${insertedInDocOrder.join("、")}`
         : null;
       return [
-        `已完成剧本改动：新增 ${summary.inserted.length} 块、修改 ${summary.updated.length} 块、删除 ${summary.deleted.length} 块（保留 ${summary.retained} 块未动）。`,
+        `已完成剧本改动：新增 ${summary.inserted.length} 块、修改 ${summary.updated.length} 块、删除 ${summary.deleted.length} 块${moved.size > 0 ? `、顺序调整 ${moved.size} 块` : ""}（保留 ${summary.retained} 块未动）。`,
         ...(insertedLine ? [insertedLine] : []),
         "保留的块 id 未变，其上的评论/cue/标签锚点不受影响。",
       ].join("\n");
