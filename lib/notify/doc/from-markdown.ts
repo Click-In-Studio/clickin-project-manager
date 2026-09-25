@@ -14,6 +14,7 @@ import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
+import { REMARK_CJK_PLUGINS } from "../../editor/remark-cjk-friendly";
 import { CM_HREF_PREFIX } from "../../editor/mention-types";
 import { parseCalloutMarker } from "../../editor/tiptap-callout";
 import { COLS_OPEN_RE, COLS_CLOSE_RE } from "../../editor/tiptap-columns";
@@ -220,7 +221,7 @@ export async function renderNotifyDoc(md: string, resolve: RefResolver): Promise
   // 转成 break 节点），只调 .parse() 它根本不会跑——换行会留在 text 里，
   // callout 的 marker 剥不干净、行内换行也丢失结构。remark-gfm 则两阶段都有，
   // 表格靠的是它的 parser 扩展，所以只 parse 时表格看着是好的，更容易漏掉。
-  const processor = unified().use(remarkParse).use(remarkGfm).use(remarkBreaks);
+  const processor = unified().use(remarkParse).use(remarkGfm).use([...REMARK_CJK_PLUGINS]).use(remarkBreaks);
   const tree = processor.runSync(processor.parse(md)) as unknown as MdNode;
   return { blocks: await blocks(tree.children ?? [], resolve) };
 }

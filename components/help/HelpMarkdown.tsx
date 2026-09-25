@@ -12,6 +12,7 @@ import Link from "next/link";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
+import { REMARK_CJK_PLUGINS } from "@/lib/editor/remark-cjk-friendly";
 import { parseCalloutMarker } from "@/lib/editor/tiptap-callout";
 import { HeadingIds, resolveManualLink } from "@/lib/help/manual";
 
@@ -83,7 +84,7 @@ export default function HelpMarkdown({ body, slug }: { body: string; slug: strin
 
   return (
     <div className="help-prose prose prose-zinc max-w-none">
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>{body}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm, ...REMARK_CJK_PLUGINS, remarkBreaks]} components={components}>{body}</ReactMarkdown>
     </div>
   );
 }
