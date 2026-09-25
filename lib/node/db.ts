@@ -285,15 +285,15 @@ export type NodePlacement = { anchorId: string; side: "before" | "after" };
 
 export async function placementSortKey(
   productionId: string, parentId: string | null,
-  place: NodePlacement, excludeId: string | null,
+  place: NodePlacement, excludeId: string | null, db: Queryable = getPool(),
 ): Promise<string> {
-  const rows = await siblingRows(productionId, parentId, excludeId);
+  const rows = await siblingRows(productionId, parentId, excludeId, db);
   const idx = rows.findIndex(r => r.id === place.anchorId);
-  if (idx < 0) return tailSortKey(productionId, parentId);
+  if (idx < 0) return tailSortKey(productionId, parentId, db);
   // 无 key 的行排在最后，新节点在 keyed 序列里的下标 = 落点之前的 keyed 行数
   const at = place.side === "before" ? idx : idx + 1;
   const slot = keyedOnly(rows.slice(0, at)).length;
-  return allocateSiblingKey(getPool(), keyedOnly(rows), slot);
+  return allocateSiblingKey(db, keyedOnly(rows), slot);
 }
 
 /** 事务内建壳节点（createWiki / createAsset / 报告归档管线复用）。
@@ -371,7 +371,7 @@ export async function placeNodeUnder(
   nodeId: string, productionId: string, parentNodeId: string, external?: PoolClient,
 ): Promise<void> {
   const q = external ?? getPool();
-  const sortKey = await tailSortKey(productionId, parentNodeId);
+  const sortKey = await tailSortKey(productionId, parentNodeId, q);
   await q.query(
     `UPDATE node SET parent_id = $3, sort_key = $4, updated_at = now()
      WHERE id = $1 AND production_id = $2

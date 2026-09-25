@@ -64,9 +64,10 @@ export async function createWiki(params: {
   if (parentNodeId && !await validateParent(params.productionId, null, parentNodeId)) {
     throw new Error("父节点不存在或不可作容器");
   }
+  // 取键可能整层重铺（写库），必须落在调用方的事务里
   const sortKey = params.place
-    ? await placementSortKey(params.productionId, parentNodeId, params.place, null)
-    : await tailSortKey(params.productionId, parentNodeId);
+    ? await placementSortKey(params.productionId, parentNodeId, params.place, null, params.external)
+    : await tailSortKey(params.productionId, parentNodeId, params.external);
   const body = params.body ?? "";
   const mentions = params.mentions ?? [];
   const tags = [...new Set((params.tags ?? []).map(t => t.trim()).filter(Boolean))];
