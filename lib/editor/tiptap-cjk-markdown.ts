@@ -23,6 +23,8 @@
 // 已知限制：纯 ASCII 紧贴嵌套（`a**~~b~~**c`）在 CommonMark / GFM 下本来就无法
 // 表示，CJK 规则只放宽 CJK 字周围，这种写法仍会 lossy——区别是保真锁会响，
 // 不再静默毁字。本产品中文为主，作为已知限制记在 #674。
+//
+// 零 node 依赖，可进客户端包（SmartTextarea / components/ui/Markdown.tsx 都是 "use client"）。
 import { Extension } from "@tiptap/core";
 import type { Fragment, Node as PmNode } from "@tiptap/pm/model";
 import { MarkdownSerializer } from "prosemirror-markdown";
@@ -43,7 +45,11 @@ type TiptapMarkdownSerializer = {
  * 用 prosemirror-markdown 原版 serializer 跑；nodes / marks 仍取 tiptap-markdown
  * 按扩展聚合的那套。原版 state 没有 `inTable` 字段，但 table 节点是运行期赋值、
  * hardBreak 节点只做真值判断，缺省 undefined 与 false 同义，不用补子类。
- * renderContent 只用 `parent.forEach`，Fragment 与 Node 都有，剪贴板切片传 Fragment。
+ *
+ * `content as PmNode`：serialize 的类型只收 Node，但 renderContent 只用
+ * `parent.forEach`，Fragment 与 Node 都有；tiptap-markdown 自己的 serialize 就是
+ * 这样把剪贴板切片（Fragment）喂进同一个 renderContent 的，它的 serializeHTML
+ * 还显式处理了 `parent instanceof Fragment`。这里沿用同一契约，剪贴板用例盯着。
  */
 export function serializeWithoutTrimInline(serializer: TiptapMarkdownSerializer, content: PmNode | Fragment): string {
   const plain = new MarkdownSerializer(serializer.nodes, serializer.marks, { hardBreakNodeName: HARD_BREAK_NODE_NAME });
@@ -70,6 +76,9 @@ export function applyCjkFriendly(md: MarkdownIt): void {
  * 时 onCreate 还没跑。priority 压到 Markdown 扩展之下——它自己声明的是 50
  * （不是默认 100），同值按列表顺序稳定排序，所以必须严格更低——保证它的
  * onBeforeCreate 先建好 serializer 再轮到这里，与装配时的书写顺序无关。
+ * 这是本文件最脆的不变量：测试里有一条静态护栏盯着 node_modules 里那个 50，
+ * 升 tiptap-markdown 改了它会红；找不到 serializer 时这里静默不生效，也有
+ * 用例直接断言替换已落到实例上。
  */
 export const CjkMarkdown = Extension.create({
   name: "cjkMarkdown",

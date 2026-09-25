@@ -150,7 +150,7 @@ describe("已知限制：纯 ASCII 紧贴嵌套", () => {
 describe("remark 侧 CJK 规则", () => {
   const parse = (md: string, cjk: boolean) => {
     let p = unified().use(remarkParse).use(remarkGfm);
-    if (cjk) p = p.use(REMARK_CJK_PLUGINS[0]).use(REMARK_CJK_PLUGINS[1]);
+    if (cjk) p = p.use([...REMARK_CJK_PLUGINS]);
     return JSON.stringify(p.parse(md));
   };
   it("紧贴中文的加粗 + 删除线解析成 strong > delete", () => {
@@ -193,7 +193,20 @@ describe("接线（mock 遮不住的那一层）", () => {
   it("四处 remark 都挂了 REMARK_CJK_PLUGINS，且排在 remarkGfm 之后", () => {
     expect(readFileSync("components/wiki/WikiMarkdown.tsx", "utf8")).toMatch(/remarkPlugins=\{\[remarkGfm, \.\.\.REMARK_CJK_PLUGINS,/);
     expect(readFileSync("components/help/HelpMarkdown.tsx", "utf8")).toMatch(/remarkPlugins=\{\[remarkGfm, \.\.\.REMARK_CJK_PLUGINS,/);
-    expect(readFileSync("lib/wiki/fidelity.ts", "utf8")).toMatch(/use\(remarkGfm\)\.use\(REMARK_CJK_PLUGINS\[0\]\)\.use\(REMARK_CJK_PLUGINS\[1\]\)/);
-    expect(readFileSync("lib/notify/doc/from-markdown.ts", "utf8")).toMatch(/use\(remarkGfm\)\.use\(REMARK_CJK_PLUGINS\[0\]\)\.use\(REMARK_CJK_PLUGINS\[1\]\)/);
+    expect(readFileSync("lib/wiki/fidelity.ts", "utf8")).toMatch(/use\(remarkGfm\)\.use\(\[\.\.\.REMARK_CJK_PLUGINS\]\)/);
+    expect(readFileSync("lib/notify/doc/from-markdown.ts", "utf8")).toMatch(/use\(remarkGfm\)\.use\(\[\.\.\.REMARK_CJK_PLUGINS\]\)/);
+  });
+  it("序列化替换真的落到了实例上（不是靠往返结果间接推断）", () => {
+    const e = makeEditor("甲");
+    const serializer = (e.storage as unknown as MdStorage).markdown.serializer;
+    expect(Object.prototype.hasOwnProperty.call(serializer, "serialize")).toBe(true);
+    const bare = (makeEditor("甲", { cjk: false }).storage as unknown as MdStorage).markdown.serializer;
+    expect(Object.prototype.hasOwnProperty.call(bare, "serialize")).toBe(false);
+  });
+  it("静态护栏：tiptap-markdown 的 Markdown 扩展仍声明 priority 50，CjkMarkdown 严格更低", () => {
+    // 升 tiptap-markdown 后这条红了：去核它新的 priority，把 CjkMarkdown 的压到更低，再改这里
+    const src = readFileSync("node_modules/tiptap-markdown/dist/tiptap-markdown.es.js", "utf8");
+    expect(src).toMatch(/name: "markdown",\s*priority: 50,/);
+    expect(CjkMarkdown.config.priority).toBeLessThan(50);
   });
 });

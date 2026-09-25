@@ -64,7 +64,7 @@ function collapse(s: string): string {
  */
 export function contentSignature(markdown: string): string[] {
   // CJK 侧翼规则与编辑器 / 只读侧同源（#674）：不挂的话 `甲**乙**丙` 两侧签名不一致
-  const tree = unified().use(remarkParse).use(remarkGfm).use(REMARK_CJK_PLUGINS[0]).use(REMARK_CJK_PLUGINS[1]).parse(markdown) as unknown as MdNode;
+  const tree = unified().use(remarkParse).use(remarkGfm).use([...REMARK_CJK_PLUGINS]).parse(markdown) as unknown as MdNode;
   const out: string[] = [];
 
   const walk = (node: MdNode) => {
