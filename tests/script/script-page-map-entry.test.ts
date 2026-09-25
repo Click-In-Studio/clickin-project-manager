@@ -25,6 +25,7 @@ import { GET as pagesGET } from "@/app/api/script/[id]/pages/route";
 import { GET as blockSearchGET } from "@/app/api/production/[id]/script/block-search/route";
 import { POST as mentionResolvePOST } from "@/app/api/production/[id]/mention-resolve/route";
 import { makeProduction, cleanupProduction, makeScene } from "../_support/factories";
+import { MENTION_SENTINEL } from "@/lib/editor/mention-display";
 
 let prodId: string;
 let versionId: string;
@@ -187,7 +188,9 @@ describe("四个消费点", () => {
     const page = expected[witness];
     const pos = textIds().filter(id => expected[id] === page).indexOf(witness) + 1;
     const { labels, urls } = await resolve([{ kind: "block", id: witness, displayMode: "page" }]);
-    expect(labels[0]).toBe(`#p.${page}-${pos}`);
+    // 本条钉的是**页码与页内序号**；坐标后面的正文摘要属显示层（#689），
+    // 所以只钉前缀，不把这条用例绑在 chip 文案上
+    expect(labels[0]!.startsWith(`#p.${page}-${pos}`)).toBe(true);
     expect(urls[0]).toBe(`/production/${prodId}/script?v=${versionId}#block-${witness}`);
   });
 
@@ -237,7 +240,13 @@ describe("收编野路后的等价性（场 / 排练记号序号与原 SQL 一�
       { kind: "rehearsal", id: rehearsalMarkerId },
       { kind: "scene", id: sceneId },
     ]);
-    expect(labels).toEqual([`#${sceneNum}-5`, `#${full}-3`, `#${autoFull}-3`, "#[已删除]", `#${full}`, `#${sceneNum}`]);
+    // 同上：坐标钉前缀，摘要 / 场名不在本条守备范围；已删除那条仍是精确哨兵
+    const coords = [`#${sceneNum}-5`, `#${full}-3`, `#${autoFull}-3`, null, `#${full}`, `#${sceneNum}`];
+    coords.forEach((coord, i) => {
+      if (coord === null) expect(labels[i]).toBe(MENTION_SENTINEL.deleted);
+      else expect(labels[i]!.startsWith(coord), `第 ${i} 条：${labels[i]} 不以 ${coord} 开头`).toBe(true);
+    });
+    expect(labels[4]).toBe(`#${full}`); // 记号引用本身没有可补的摘要，仍是纯编号
   });
 
   it("带冒号的查询不再 500（原「版本名:查询」分支查已 DROP 的 version.name）", async () => {

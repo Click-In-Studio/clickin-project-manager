@@ -19,7 +19,7 @@ import type { SuggestionProps, SuggestionKeyDownProps } from "@tiptap/suggestion
 import type { MentionSearchResult } from "@/lib/editor/mention-types";
 import {
   encodeMentionHref, encodeUserHref, decodeUserHref, decodeAssetSrc,
-  type ContentMentionAttrs, type ContentMentionKind,
+  type ContentMentionAttrs,
 } from "@/lib/editor/mention-types";
 import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
 import { isFeishuHtml, transformFeishuHtml } from "@/lib/editor/feishu-paste";
@@ -27,6 +27,7 @@ import { stripExternalPastedImages } from "@/lib/editor/external-img-paste";
 import { isEmbeddableUpload, embedMediaKind } from "@/lib/asset/embed-media";
 import { Callout } from "@/lib/editor/tiptap-callout";
 import { MarkdownContentMentionExt } from "@/lib/editor/tiptap-content-mention";
+import { MENTION_CHIP_CLASS, mentionChipView, wikiChipView } from "@/lib/editor/mention-display";
 import { INLINE_STYLE_EXTENSIONS } from "@/lib/editor/tiptap-inline-style";
 import { CjkMarkdown } from "@/lib/editor/tiptap-cjk-markdown";
 import { WikiImage, type WikiEmbedMeta } from "@/lib/wiki/tiptap-image";
@@ -203,43 +204,7 @@ export function slashCommandPlugin(): DropPlugin {
   };
 }
 
-/** 编辑态 chip 标签要跟实时真相走的 kind（见下方标签刷新 effect） */
-const LIVE_LABEL_KINDS = new Set<ContentMentionKind>(["wiki", "task"]);
-
 // ── TipTap extensions ─────────────────────────────────────────────────────────
-
-// Content mention — plain text mode: serialises as [#kind:id] tokens
-const PlainContentMentionExt = Mention.extend({
-  name: "contentMention",
-  addKeyboardShortcuts() {
-    return {
-      Backspace: () =>
-        this.editor.commands.command(({ tr, state }) => {
-          let handled = false;
-          const { selection } = state;
-          if (!selection.empty) return false;
-          state.doc.nodesBetween(selection.anchor - 1, selection.anchor, (node, pos) => {
-            if (node.type.name === this.name) {
-              handled = true;
-              tr.insertText("#", pos, pos + node.nodeSize);
-              return false;
-            }
-          });
-          return handled;
-        }),
-    };
-  },
-  addAttributes() {
-    return {
-      kind: { default: "scene" },
-      displayMode: { default: null },
-      id: { default: "" },
-      aux: { default: null },
-      versionId: { default: null },
-      label: { default: null },
-    };
-  },
-});
 
 // [[wikilink 触发器（UI 修缮轮重构）：不再用独立 node——插入走已验证的
 // contentMention(kind='wiki') 管线（序列化/重载/chip 渲染全部现成）。
@@ -600,7 +565,11 @@ export default function SmartTextarea({
     });
   }, []);
 
-  const ContentMentionExt = markdown ? MarkdownContentMentionExt : PlainContentMentionExt;
+  // 引用节点两面同一个（#689）：plain 面原先挂一个不认 `[#](/__cm__/…)` 的
+  // 变体，而存储早已统一成 markdown——于是 cue 评论 / 技术需求 / 部门备注里存
+  // 下的引用一重载就被 Link 接走，显示成一个光秃秃的 `#` 超链接。既然扩展集
+  // 已经只有一套（见下方 extensions 的注释），引用节点也没有理由分两套。
+  const ContentMentionExt = MarkdownContentMentionExt;
 
   // 栏操作件（造栏落点 + 栏宽拖拽）的开关。dropcursor 的取舍要跟它一致：
   // 关了内建横线却又没装 ColumnDrop，就会一条落点指示都没有
@@ -640,9 +609,17 @@ export default function SmartTextarea({
         return `[#](${encodeMentionHref({ kind, displayMode, id, aux, versionId })})`;
       },
       renderHTML: ({ node }) => {
-        const { kind, displayMode, id, aux, versionId, label } = node.attrs;
-        // wiki 引用（含重载回流的 [[链接]]）用 sky 色 [[标题]] 形态，与剧本域 # 区分
+        const { kind, displayMode, id, aux, versionId, label, detail } = node.attrs;
+        // wiki 引用（含重载回流的 [[链接]]）用 sky 色 [[标题]] 形态，与剧本域 # 区分。
+        // 两种形态的降级文案都在 lib/editor/mention-display 里，与只读渲染同源
+        // （#689：此前这里拿 kind 名当兜底文案，重载后一律显示成 `#block`）。
         const isWiki = kind === "wiki";
+        const view = isWiki ? wikiChipView(label) : mentionChipView(kind, label, detail);
+        const tone = view.muted
+          ? MENTION_CHIP_CLASS.muted
+          : isWiki
+            ? `${MENTION_CHIP_CLASS.wiki} hover:bg-sky-100`
+            : `${MENTION_CHIP_CLASS.ref} hover:bg-amber-100`;
         return [
           "span",
           {
@@ -653,11 +630,10 @@ export default function SmartTextarea({
             "data-id": id,
             "data-aux": aux ?? "",
             "data-version-id": versionId ?? "",
-            class: isWiki
-              ? "inline-flex items-center px-1 py-0.5 rounded text-[12px] font-medium bg-sky-50 text-sky-700 border border-sky-200 cursor-pointer hover:bg-sky-100"
-              : "inline-flex items-center px-1 py-0.5 rounded text-[11px] font-mono font-semibold bg-amber-50 text-amber-700 border border-amber-200 cursor-pointer hover:bg-amber-100",
+            title: view.title ?? "",
+            class: `${tone} cursor-pointer`,
           },
-          isWiki ? `[[${label ?? "文档"}]]` : `#${label ?? kind}`,
+          view.text,
         ];
       },
       suggestion: makeSuggestion("#", hasHashPlugin),
@@ -1010,51 +986,60 @@ export default function SmartTextarea({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(remoteCursors ?? []), editor]);
 
-  // wiki / task mention 标签活刷新：contentMention chip 的 label attr 只是解析/插入时的
-  // 快照（同 WikiMarkdown/SmartText 一样不可信——目标文档改名后会长期挂着旧标题；
-  // 任务推进了状态，chip 上的「· 待处理」也该跟着变，#670）。
-  // 只读渲染那两处天生走 mention-resolve 逐次覆盖；这里手动补一次，用静默
-  // transaction（wikiLabelRefresh meta，onUpdate 见上方）落地，不触发自动保存。
-  // 剧本域 kind 不在此列：它们的 label 由 # 补全时写入，解析要版本上下文。
+  // 引用 chip 标签活刷新（#689 起覆盖**全部 kind**）。
+  //
+  // 为什么非得有这一步：正文里存的是哨兵 `[#](/__cm__/<kind>/<id>)`，显示位不带
+  // 标签（语法大纲 G4）。label attr 只在 `#` 补全那一瞬间被写进节点，文档一重载
+  // 就是 null——此前只有 wiki / task 会被刷回来，剧本域于是永久显示成裸 kind 名
+  // `#block` / `#scene`（#689 的直接病因）。它们的解析确实要版本上下文，但上下文
+  // 就在 contentMention prop 里，路由也会自己回退到在用版本，没有理由排除。
+  //
+  // 只读渲染那条路天生每次 resolve；这里手动补一次，用静默 transaction
+  // （wikiLabelRefresh meta，onUpdate 见上方）落地，不触发自动保存。
   const wikiLabelSigRef = useRef("");
   useEffect(() => {
-    if (!markdown || !editor || editor.isDestroyed) return;
+    if (!editor || editor.isDestroyed) return;
     const pid = contentMentionRef.current?.productionId;
     if (!pid) return;
+    const versionId = contentMentionRef.current?.versionId ?? null;
+    // 键必须带 displayMode：同一个 block 以 `?as=scene` 与 `?as=page` 出现时标签
+    // 不同（`0-1-3` vs `p.4-2`），漏了它两个 chip 会共用同一个解析结果。
     const keys = new Set<string>();
     editor.state.doc.descendants((node) => {
-      if (node.type.name === "contentMention" && LIVE_LABEL_KINDS.has(node.attrs.kind) && node.attrs.id) {
-        keys.add(`${node.attrs.kind}:${node.attrs.id}`);
+      if (node.type.name === "contentMention" && node.attrs.id) {
+        keys.add(`${node.attrs.kind}\u0000${node.attrs.displayMode ?? ""}\u0000${node.attrs.id}`);
       }
     });
     if (keys.size === 0) return;
     const keyList = [...keys].sort();
-    const sig = keyList.join(",");
+    const sig = `${versionId ?? ""}|${keyList.join(",")}`;
     if (wikiLabelSigRef.current === sig) return;
     wikiLabelSigRef.current = sig;
     (async () => {
       try {
         const mentions = keyList.map(k => {
-          const at = k.indexOf(":");
-          return { kind: k.slice(0, at), displayMode: null, id: k.slice(at + 1), aux: null, versionId: null };
+          const [kind, displayMode, id] = k.split("\u0000");
+          return { kind, displayMode: displayMode || null, id, aux: null, versionId: null };
         });
         const res = await fetch(`${BASE_PATH}/api/production/${pid}/mention-resolve`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mentions }),
+          body: JSON.stringify({ mentions, versionId }),
         });
         if (!res.ok || editor.isDestroyed) return;
-        const data = await res.json() as { labels: (string | null)[] };
-        const labelByKey = new Map<string, string>();
-        keyList.forEach((k, i) => { if (data.labels[i]) labelByKey.set(k, data.labels[i]!); });
-        if (labelByKey.size === 0) return;
+        const data = await res.json() as { labels: (string | null)[]; details?: (string | null)[] };
+        const byKey = new Map<string, { label: string; detail: string | null }>();
+        keyList.forEach((k, i) => {
+          if (data.labels[i]) byKey.set(k, { label: data.labels[i]!, detail: data.details?.[i] ?? null });
+        });
+        if (byKey.size === 0) return;
         const tr = editor.state.tr;
         let changed = false;
         editor.state.doc.descendants((node, pos) => {
-          if (node.type.name !== "contentMention" || !LIVE_LABEL_KINDS.has(node.attrs.kind)) return;
-          const fresh = labelByKey.get(`${node.attrs.kind}:${node.attrs.id}`);
-          if (fresh && fresh !== node.attrs.label) {
-            tr.setNodeMarkup(pos, undefined, { ...node.attrs, label: fresh });
+          if (node.type.name !== "contentMention") return;
+          const fresh = byKey.get(`${node.attrs.kind}\u0000${node.attrs.displayMode ?? ""}\u0000${node.attrs.id}`);
+          if (fresh && (fresh.label !== node.attrs.label || fresh.detail !== node.attrs.detail)) {
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, label: fresh.label, detail: fresh.detail });
             changed = true;
           }
         });
@@ -1063,9 +1048,9 @@ export default function SmartTextarea({
           tr.setMeta("wikiLabelRefresh", true);
           editor.view.dispatch(tr);
         }
-      } catch { /* 静默失败，chip 保留旧快照 */ }
+      } catch { /* 静默失败，chip 停在降级态 */ }
     })();
-  }, [markdown, editor, value]);
+  }, [editor, value]);
 
   const rect = drop?.clientRect?.();
   // 弹层按视口定位（#671）：靠底向上开、靠右夹回来、矮视口缩高。drop 只会在

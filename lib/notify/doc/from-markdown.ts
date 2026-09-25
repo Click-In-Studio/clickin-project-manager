@@ -15,7 +15,8 @@ import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import { REMARK_CJK_PLUGINS } from "../../editor/remark-cjk-friendly";
-import { CM_HREF_PREFIX } from "../../editor/mention-types";
+import { CM_HREF_PREFIX, type ContentMentionKind } from "../../editor/mention-types";
+import { MENTION_KIND_LABEL } from "../../editor/mention-display";
 import { parseCalloutMarker } from "../../editor/tiptap-callout";
 import { COLS_OPEN_RE, COLS_CLOSE_RE } from "../../editor/tiptap-columns";
 import { parseCanonicalOpenTag, SPAN_CLOSE_TAG, U_CLOSE_TAG } from "../../editor/inline-style-dialect";
@@ -91,8 +92,13 @@ async function inlines(
           break;
         }
         if (!r) {
-          // 解析不出来：给中性文字，绝不把裸 id 或私有 href 漏给用户
-          out.push({ t: "text", text: innerText || "（引用）", ...marks });
+          // 解析不出来：给中性文字，绝不把裸 id 或私有 href 漏给用户。
+          // 显示位是哨兵 `#` 时 innerText 就是那个 `#`，拿它当文案等于给读者一个
+          // 光秃秃的井号——退到类别名（#689，与页面侧 chip 同一张表）。历史正文
+          // 里的真标签（旧形态 `[#0-1-3](…)`）仍优先沿用。
+          const kindName = MENTION_KIND_LABEL[ref.type as ContentMentionKind] ?? "引用";
+          const neutral = innerText && innerText !== "#" ? innerText : `（${kindName}引用）`;
+          out.push({ t: "text", text: neutral, ...marks });
           break;
         }
         if (r.url) out.push({ t: "link", text: r.label, url: r.url });
