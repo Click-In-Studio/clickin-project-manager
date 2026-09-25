@@ -4,12 +4,12 @@ import { makeProduction, cleanupProduction, makeScene } from "../_support/factor
 import { applyPatchToDB } from "@/lib/script/script-patch-db";
 import { loadProduction } from "@/lib/script/script-state-db";
 import { diffState, type ScriptPatch } from "@/lib/script/script-ops";
-import { initialKeys, keyBetween, keyStrictlyBetween } from "@/lib/lex-order";
+import { initialKeys, keysBetween, keyStrictlyBetween } from "@/lib/lex-order";
 import { getPool } from "@/lib/pg";
 import type { Block, ScriptState } from "@/lib/script/script-types";
 
 // #680：定宽 base36 的 sort_key 每次取中，同一间隙同侧连续插入约 45 次即耗尽。
-// 此前耗尽后 keyBetween 返回与锚点相同的 key，ORDER BY sort_key 对同 key 行顺序不定——
+// 此前耗尽后（已删除的）keyBetween 返回与锚点相同的 key，ORDER BY sort_key 对同 key 行顺序不定——
 // AI 批量插入的块散落、跨到下一段标记之后（线上剧本第一幕 117 块被打乱）。
 // 修复：分配 key 发现无空位时整版重铺后再取（allocateInsertKeyInTx）。
 
@@ -58,7 +58,7 @@ afterAll(async () => {
 });
 
 describe("lex-order：严格取中", () => {
-  it("间隙耗尽时 keyStrictlyBetween 给 null，而 keyBetween 会退回锚点自身的 key（旧行为即 #680 根因）", () => {
+  it("同一间隙同侧连续取中会耗尽：keyStrictlyBetween 在无空位时给 null 而不是重复 key", () => {
     const [lo, hi] = initialKeys(2);
     let cursor = lo;
     let exhaustedAt = -1;
@@ -70,10 +70,43 @@ describe("lex-order：严格取中", () => {
     }
     expect(exhaustedAt).toBeGreaterThan(0);
     expect(exhaustedAt).toBeLessThan(60);
-    expect(keyBetween(cursor, hi)).toBe(cursor);
-    expect(keyStrictlyBetween(null, null)).not.toBeNull();
     expect(keyStrictlyBetween(null, "0000000000")).toBeNull();
     expect(keyStrictlyBetween("zzzzzzzzzz", null)).toBeNull();
+    expect(keyStrictlyBetween(null, null)).not.toBeNull();
+  });
+
+  it("无界侧按步长走（#682）：文末追加 10 万次不耗尽；两次追加之间还能再折半插入", () => {
+    let last: string | null = null;
+    for (let i = 0; i < 100_000; i++) {
+      const next = keyStrictlyBetween(last, null);
+      expect(next).not.toBeNull();
+      if (last !== null) expect(next! > last).toBe(true);
+      last = next;
+    }
+    const a = keyStrictlyBetween(null, null)!;
+    const b = keyStrictlyBetween(a, null)!;
+    let cursor = a;
+    let inserted = 0;
+    for (let i = 0; i < 40; i++) {
+      const mid = keyStrictlyBetween(cursor, b);
+      if (mid === null) break;
+      cursor = mid;
+      inserted += 1;
+    }
+    expect(inserted).toBeGreaterThanOrEqual(20);
+  });
+
+  it("keysBetween 一次取 n 个严格递增的 key；空位不够给 null", () => {
+    const [lo, hi] = initialKeys(2);
+    const keys = keysBetween(lo, hi, 60)!;
+    expect(keys).toHaveLength(60);
+    for (let i = 0; i < keys.length; i++) {
+      expect(keys[i] > (i === 0 ? lo : keys[i - 1])).toBe(true);
+      expect(keys[i] < hi).toBe(true);
+    }
+    expect(keysBetween("0000000000", "0000000003", 2)).toEqual(["0000000001", "0000000002"]);
+    expect(keysBetween("0000000000", "0000000003", 3)).toBeNull();
+    expect(keysBetween(null, null, 0)).toEqual([]);
   });
 });
 

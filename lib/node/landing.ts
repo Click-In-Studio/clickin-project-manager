@@ -1,8 +1,7 @@
 import type { PoolClient } from "pg";
 import { getPool } from "../pg";
-import { keyBetween } from "../lex-order";
 import { ensureReportTreeAnchors } from "./anchors";
-import { getNodeByWikiId, newNodeId } from "./db";
+import { getNodeByWikiId, newNodeId, tailSortKey } from "./db";
 import { canEnterEvent } from "../ops/event-permissions";
 import { hasEffectiveGrant, hasAnyEffectiveGrant, type GrantActor } from "../perm/grant-check";
 
@@ -51,18 +50,12 @@ async function ensureEntityDir(
     );
     return ptr.rows[0].node_id;
   }
-  const last = parentId
-    ? await client.query<{ sort_key: string | null }>(
-        `SELECT sort_key FROM node WHERE parent_id = $1 AND sort_key IS NOT NULL ORDER BY sort_key DESC LIMIT 1`,
-        [parentId])
-    : await client.query<{ sort_key: string | null }>(
-        `SELECT sort_key FROM node WHERE production_id = $1 AND parent_id IS NULL AND sort_key IS NOT NULL ORDER BY sort_key DESC LIMIT 1`,
-        [productionId]);
+  const sortKey = await tailSortKey(productionId, parentId, client);
   const id = newNodeId();
   await client.query(
     `INSERT INTO node (id, production_id, kind, parent_id, sort_key, is_public, listable, title)
      VALUES ($1, $2, 'folder', $3, $4, true, true, $5)`,
-    [id, productionId, parentId, keyBetween(last.rows[0]?.sort_key ?? null, null), title],
+    [id, productionId, parentId, sortKey, title],
   );
   await client.query(
     `INSERT INTO node_entity_dir (production_id, entity_type, entity_id, node_id)

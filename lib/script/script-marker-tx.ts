@@ -4,7 +4,7 @@ import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
 import { normalizeScriptMarkerInvariants, sameMarkerStructure } from "./script-marker-domain";
 import { genBlockId, genSnapshotId, isChapterSceneMarkerType } from "./script-row-model";
 import { ensureSceneAnchorsInTx, insertSnapshotRowsInTx, snapshotRowFromBlock, type SnapshotRow } from "./script-row-tx";
-import { keyBetween } from "../lex-order";
+import { initialKeys, keysBetween } from "../lex-order";
 
 // 标记结构事务 helper（#486 从 lib/db.ts 搬出）：在写侧事务内维护「标记 ↔ 场次 ↔ 归属」
 // 不变量——scene_version 排序归一、marker_structure_revision 递增、排练标记归属回填、
@@ -114,34 +114,56 @@ async function repairMarkerStructureInTx(
     },
   }, genBlockId);
 
-  // 修复只插不删不换序，既有块相对顺序不变：新块的 sort_key 取「前一块（含刚补的）」与
-  // 「后面最近一个既有块」之间
-  const inserted: SnapshotRow[] = [];
+  // 修复只插不删不换序，既有块相对顺序不变。连续一段新块整批取均匀分布在前后既有块
+  // 之间的 key（#682：逐块折半会在同一间隙里耗尽）；任一段放不下就整版按 normalized
+  // 顺序重铺，既有行一次 UPDATE，新旧块都按重铺后的 key 落。
+  const keyById = new Map<string, string>();
+  let runStart = -1;
   let previousKey: string | null = null;
-  for (let index = 0; index < normalized.blocks.length; index++) {
+  let exhausted = false;
+  for (let index = 0; index <= normalized.blocks.length; index++) {
     const block = normalized.blocks[index];
-    const existingKey = sortKeyById.get(block.id);
-    if (existingKey !== undefined) {
-      previousKey = existingKey;
+    const existingKey = block ? sortKeyById.get(block.id) : undefined;
+    if (block && existingKey === undefined) {
+      if (runStart < 0) runStart = index;
       continue;
     }
-    let nextKey: string | null = null;
-    for (let cursor = index + 1; cursor < normalized.blocks.length; cursor++) {
-      const key = sortKeyById.get(normalized.blocks[cursor].id);
-      if (key !== undefined) {
-        nextKey = key;
-        break;
-      }
+    if (runStart >= 0) {
+      const keys = keysBetween(previousKey, existingKey ?? null, index - runStart);
+      if (keys === null) { exhausted = true; break; }
+      keys.forEach((key, offset) => keyById.set(normalized.blocks[runStart + offset].id, key));
+      runStart = -1;
     }
-    const lexKey = keyBetween(previousKey, nextKey);
-    previousKey = lexKey;
-    const sceneId = isChapterSceneMarkerType(block.type) ? block.id : null;
-    inserted.push(snapshotRowFromBlock(
-      block,
-      { snapshotId: genSnapshotId(), blockId: block.id, lexKey },
-      { sceneId, rehearsalMark: null, forceShowCharacterName: false },
-    ));
+    if (existingKey !== undefined) previousKey = existingKey;
   }
+  if (exhausted) {
+    const keys = initialKeys(normalized.blocks.length);
+    const blockIds: string[] = [];
+    const sortKeys: string[] = [];
+    normalized.blocks.forEach((block, index) => {
+      keyById.set(block.id, keys[index]);
+      const existing = sortKeyById.get(block.id);
+      if (existing !== undefined && existing !== keys[index]) {
+        blockIds.push(block.id);
+        sortKeys.push(keys[index]);
+      }
+    });
+    if (blockIds.length > 0) {
+      await client.query(
+        `UPDATE script_version AS sv SET sort_key = u.sort_key
+         FROM unnest($1::text[], $2::text[]) AS u(block_id, sort_key)
+         WHERE sv.version_id = $3 AND sv.block_id = u.block_id`,
+        [blockIds, sortKeys, versionId],
+      );
+    }
+  }
+  const inserted: SnapshotRow[] = normalized.blocks
+    .filter((block) => !sortKeyById.has(block.id))
+    .map((block) => snapshotRowFromBlock(
+      block,
+      { snapshotId: genSnapshotId(), blockId: block.id, lexKey: keyById.get(block.id)! },
+      { sceneId: isChapterSceneMarkerType(block.type) ? block.id : null, rehearsalMark: null, forceShowCharacterName: false },
+    ));
   if (inserted.length === 0) return;
   await ensureSceneAnchorsInTx(client, productionId, inserted.flatMap((row) => row.sceneId ? [row.sceneId] : []));
   await insertSnapshotRowsInTx(client, productionId, versionId, inserted);
