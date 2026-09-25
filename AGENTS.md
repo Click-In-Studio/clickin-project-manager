@@ -49,6 +49,7 @@
 - 页码单一口径 = 服务端估算 `page_map`；mention 存 block 锚点不存页码。
 - 分享链接走 token 间接层，实体 id 不进 URL。
 - 文档里指向实体一律 `[#](/__cm__/<kind>/<id>)`，kind 单一真相 `CONTENT_MENTION_KINDS`；新增 kind 按 §13.1 六个落点同批登记，❌ 用普通站内链接冒充引用。
+- chip 上的字只能来自解析，降级文案单一真相 `lib/editor/mention-display.ts`；❌ 任何渲染点拿 kind 名 / 截断 id 当兜底、❌ 给编辑态活刷新设 kind 白名单、❌ 为摘要拓宽 mention-resolve 的整版 CTE 投影或把场名塞进 marker 标签缓存（§13.1）。
 
 ## 4. Next / React 边界（§13.3）
 
