@@ -10,9 +10,11 @@ import type { Pool } from "pg";
 import { getPool } from "@/lib/pg";
 import { BaseSessionStorage } from "../../../vendor/openclaw/packages/agent-core/src/harness/session/storage-base";
 import type {
+  MessageEntry,
   SessionMetadata,
   SessionTreeEntry,
 } from "../../../vendor/openclaw/packages/agent-core/src/harness/types";
+import type { ToolResultMessage } from "../../../vendor/openclaw/packages/llm-core/src/types";
 
 export interface PgSessionMetadata extends SessionMetadata {
   userId: string;
@@ -100,7 +102,36 @@ export class PgSessionStorage extends BaseSessionStorage<PgSessionMetadata> {
   override async appendEntry(entry: SessionTreeEntry): Promise<void> {
     if (this.detached) return;
     // 先落库再入内存：DB 拒绝（唯一约束）时内存树保持与 DB 一致
-    await this.persist(entry);
+    try {
+      await this.persist(entry);
+    } catch (err) {
+      // 工具结果被数据库以「数据非法」拒绝（SQLSTATE 22xxx，如 jsonb 不收 NUL 的转义）：
+      // 这是那一次 tool call 的失败，不是 run 的失败——就地改写成 isError 的工具结果再落库，
+      // 让模型下一轮如实看到「结果写不进去、已丢弃」，run 继续（#685）。
+      // 就地改写成立的前提：agent-loop 推进 messages 的 toolResultMessage 与这里的
+      // entry.message 是同一个对象（emitToolResultMessage → message_end → session.appendMessage）。
+      // 其他条目类型 / 其他错误类别（连接断、唯一约束）仍按原样抛出终止 run。
+      if (!isToolResultEntry(entry) || !isDataRejection(err)) throw err;
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(`[agent-runtime] toolResult(${entry.message.toolName}) 落库被拒，改写为工具失败：${reason}`);
+      entry.message.content = [{
+        type: "text",
+        text: `工具「${entry.message.toolName}」的结果无法写入会话，数据库拒绝了这份数据：${reason}。这次结果已丢弃，请换个来源或方式再试。`,
+      }];
+      entry.message.details = undefined;
+      entry.message.isError = true;
+      await this.persist(entry);
+    }
     this.recordEntry(entry);
   }
+}
+
+function isToolResultEntry(e: SessionTreeEntry): e is MessageEntry & { message: ToolResultMessage } {
+  return e.type === "message" && e.message.role === "toolResult";
+}
+
+/** pg 的 DatabaseError.code 是 SQLSTATE；22 类 = data exception（数据本身被拒），不含连接 / 约束类。 */
+function isDataRejection(err: unknown): boolean {
+  const code = (err as { code?: unknown }).code;
+  return typeof code === "string" && code.startsWith("22");
 }
