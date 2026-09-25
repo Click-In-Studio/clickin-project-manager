@@ -26,12 +26,26 @@ function getSigningKey(dateStr: string): Buffer {
   return hmac(hmac(hmac(hmac(`AWS4${secretAccessKey}`, dateStr), region), "s3"), "aws4_request");
 }
 
-function sortedParams(entries: Record<string, string>): URLSearchParams {
-  // AWS Signature V4 requires byte-order (code point) sort, not locale-aware sort.
-  // localeCompare treats 'r' < 'X' (alphabetically x > r), but byte-order has X(0x58) < r(0x72).
-  return new URLSearchParams(
-    Object.entries(entries).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-  );
+/** RFC 3986 编码：encodeURIComponent 之外再把 !'()* 也编掉（SigV4 要求）。 */
+function rfc3986(s: string): string {
+  return encodeURIComponent(s).replace(/[!'()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+/**
+ * SigV4 规范查询串：键按码点序（不是 localeCompare——'X'(0x58) < 'r'(0x72)），
+ * 键值都按 RFC 3986 编码。签名用它、最终 URL 也用它，两边字节级一致。
+ * 排序按编码前的键名：SigV4 规定按编码后排，现有键名（X-Amz-* / response-*）
+ * 编码前后相同所以等价；新增含特殊字符的键名时要改成先编码再排。
+ *
+ * 不能用 URLSearchParams.toString()：那是 x-www-form-urlencoded，空格编成 "+"；
+ * R2 重算签名时按 "%20" 走，带空格的值（response-cache-control 的
+ * "private, max-age=3600"）必然 SignatureDoesNotMatch（#679）。
+ */
+function canonicalQuery(entries: Record<string, string>): string {
+  return Object.entries(entries)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${rfc3986(k)}=${rfc3986(v)}`)
+    .join("&");
 }
 
 export function assetR2Key(assetFileId: string, fileName: string): string {
@@ -76,11 +90,11 @@ export function presignedGet(
   if (opts?.contentType)  baseParams["response-content-type"] = opts.contentType;
   if (opts?.cacheControl) baseParams["response-cache-control"] = opts.cacheControl;
 
-  const params = sortedParams(baseParams);
+  const query = canonicalQuery(baseParams);
   const canonical = [
     "GET",
     `/${r2Bucket}/${key}`,
-    params.toString(),
+    query,
     `host:${host}\n`,
     "host",
     "UNSIGNED-PAYLOAD",
@@ -89,8 +103,7 @@ export function presignedGet(
     .createHmac("sha256", getSigningKey(dateStr))
     .update(`AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${sha256hex(canonical)}`)
     .digest("hex");
-  params.set("X-Amz-Signature", sig);
-  return `${endpoint}/${r2Bucket}/${key}?${params.toString()}`;
+  return `${endpoint}/${r2Bucket}/${key}?${query}&X-Amz-Signature=${sig}`;
 }
 
 /** Presigned PUT URL. Client must send Content-Type: mimeType header. */
@@ -98,7 +111,7 @@ export function presignedPut(key: string, mimeType: string, expiresIn = 3600): {
   const { dateStr, amzDate } = dateParts();
   const scope = `${dateStr}/${region}/s3/aws4_request`;
   const signedHeaders = "content-type;host";
-  const params = sortedParams({
+  const query = canonicalQuery({
     "X-Amz-Algorithm":    "AWS4-HMAC-SHA256",
     "X-Amz-Credential":   `${accessKeyId}/${scope}`,
     "X-Amz-Date":         amzDate,
@@ -108,7 +121,7 @@ export function presignedPut(key: string, mimeType: string, expiresIn = 3600): {
   const canonical = [
     "PUT",
     `/${r2Bucket}/${key}`,
-    params.toString(),
+    query,
     `content-type:${mimeType}\nhost:${host}\n`,
     signedHeaders,
     "UNSIGNED-PAYLOAD",
@@ -117,8 +130,7 @@ export function presignedPut(key: string, mimeType: string, expiresIn = 3600): {
     .createHmac("sha256", getSigningKey(dateStr))
     .update(`AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${sha256hex(canonical)}`)
     .digest("hex");
-  params.set("X-Amz-Signature", sig);
-  return { url: `${endpoint}/${r2Bucket}/${key}?${params.toString()}`, contentType: mimeType };
+  return { url: `${endpoint}/${r2Bucket}/${key}?${query}&X-Amz-Signature=${sig}`, contentType: mimeType };
 }
 
 /**
