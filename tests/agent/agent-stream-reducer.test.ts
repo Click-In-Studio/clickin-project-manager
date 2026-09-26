@@ -33,6 +33,17 @@ describe("applyStreamLine", () => {
     ]);
   });
 
+  it("thinking 在异常交错时先收尾已有的正文气泡", () => {
+    const b = applyStreamLine(
+      [{ kind: "assistant", text: "先给出一部分", streaming: true }],
+      { type: "thinking", text: "重新判断" },
+    );
+    expect(b).toEqual([
+      { kind: "assistant", text: "先给出一部分" },
+      { kind: "thinking", text: "重新判断", streaming: true },
+    ]);
+  });
+
   it("只有 thinking 的回复也会在 final 时收尾", () => {
     let b: Bubble[] = [{ kind: "thinking", text: "正在判断", streaming: true }];
     b = applyStreamLine(b, { type: "final", text: "" });

@@ -78,7 +78,11 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
   const last = next[next.length - 1];
   switch (line.type) {
     case "thinking": {
-      if (last?.kind === "thinking" && last.streaming) {
+      if (last?.kind === "assistant" && last.streaming) {
+        next[next.length - 1] = { kind: "assistant", text: last.text };
+      }
+      const current = next[next.length - 1];
+      if (current?.kind === "thinking" && current.streaming) {
         next[next.length - 1] = { kind: "thinking", text: line.text, streaming: true };
       } else {
         next.push({ kind: "thinking", text: line.text, streaming: true });
