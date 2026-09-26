@@ -141,12 +141,18 @@ function tableSignature(table: MarkdownNode): unknown {
   };
   return (table.children ?? []).map((row, i) => (row.children ?? []).map((cell, j) => {
     const attrs = cell.tableCell as TableCell | undefined;
+    let content: MarkdownNode[] = attrs ? cell.children ?? [] : [{ type: "paragraph", children: cell.children }];
+    // 一个空格的结构由 td/th 自身承载，空正文和唯一空段落等价；多个空段仍逐个比较。
+    if (!content.length || (content.length === 1 && content[0].type === "paragraph"
+      && content[0].children?.every(n => n.type === "text" && !collapse(n.value ?? "")))) {
+      content = [{ type: "paragraph", children: [] }];
+    }
     return {
       header: attrs?.header ?? i === 0,
       colspan: attrs?.colspan ?? 1, rowspan: attrs?.rowspan ?? 1,
       colwidth: attrs?.colwidth?.some(Boolean) ? attrs.colwidth : null,
       align: attrs?.align ?? (table.align as (string | null)[] | undefined)?.[j] ?? null,
-      content: attrs ? cell.children?.map(clean) : [clean({ type: "paragraph", children: cell.children })],
+      content: content.map(clean),
     };
   }));
 }

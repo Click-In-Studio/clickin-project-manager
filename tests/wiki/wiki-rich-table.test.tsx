@@ -77,6 +77,13 @@ describe("富表格的同方言往返", () => {
       expect(checkFidelity(source, canonical), canonical).toMatchObject({ lossy: false });
     });
   }
+  it("唯一空段落等价于空格，多空段不被吞", () => {
+    for (const html of ["<table><tr><th></th><th>乙</th></tr></table>", "<table><tr><td><p></p></td></tr></table>", "<table><tr><td><p></p><p></p></td></tr></table>"]) {
+      const source = normalizeTableHtml(html);
+      expect(checkFidelity(html, md(editor(source))).lossy).toBe(false);
+    }
+    expect(checkFidelity(table("&nbsp;\n\n&nbsp;"), table("&nbsp;")).lossy).toBe(true);
+  });
   it("跨行合并与表头保留", () => {
     const source = htmlTableToMarkdown('<table><tr><th rowspan="2">甲</th><td>乙</td></tr><tr><td>丙</td></tr></table>')!;
     expect(source).toContain("header=true rowspan=2");
