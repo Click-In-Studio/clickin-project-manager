@@ -1,42 +1,66 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import { BASE_PATH } from "@/lib/base-path";
 
-type ShareToken = {
+const EXPIRY_OPTIONS = [
+  { label: "7 天", days: 7 },
+  { label: "30 天", days: 30 },
+  { label: "90 天", days: 90 },
+  { label: "1 年", days: 365 },
+];
+
+type ShareLink = {
+  id: string;
   token: string;
-  label: string | null;
+  allowDownload: boolean;
   oneTime: boolean;
-  expiresAt: string | null;
-  usedAt: string | null;
-  revokedAt: string | null;
+  note: string | null;
+  expiresAt: string;
   createdAt: string;
+  revokedAt: string | null;
+  redeemedAt: string | null;
+  status: "active" | "redeemed" | "expired" | "revoked";
 };
 
 interface Props {
   productionId: string;
   assetId: string;
+  assetName: string;
+  userName: string;
+  canCreateLink: boolean;
+  onClose: () => void;
 }
 
-function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("zh-CN", { month: "short", day: "numeric", year: "numeric" });
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleString("zh-CN", {
+    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
 }
 
-function tokenStatus(t: ShareToken): { label: string; color: string } {
-  if (t.revokedAt) return { label: "已撤销", color: "text-red-400" };
-  if (t.expiresAt && new Date(t.expiresAt) < new Date()) return { label: "已过期", color: "text-zinc-500" };
-  if (t.oneTime && t.usedAt) return { label: "已使用", color: "text-amber-400" };
-  return { label: "有效", color: "text-emerald-400" };
+function statusOf(link: ShareLink): { label: string; color: string; usable: boolean; revocable: boolean } {
+  if (link.status === "revoked") return { label: "已撤销", color: "text-red-500", usable: false, revocable: false };
+  if (link.status === "expired") {
+    return { label: "已过期", color: "text-zinc-400", usable: false, revocable: false };
+  }
+  if (link.status === "redeemed") {
+    return { label: "已兑换", color: "text-amber-600", usable: false, revocable: true };
+  }
+  return { label: "有效", color: "text-emerald-600", usable: true, revocable: true };
 }
 
-export default function AssetSharePanel({ productionId, assetId }: Props) {
-  const [tokens, setTokens] = useState<ShareToken[]>([]);
+export default function AssetSharePanel({
+  productionId, assetId, assetName, userName, canCreateLink, onClose,
+}: Props) {
+  const [links, setLinks] = useState<ShareLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [type, setType] = useState<"time_limited" | "one_time">("time_limited");
+  const [oneTime, setOneTime] = useState(false);
+  const [allowDownload, setAllowDownload] = useState(false);
   const [expiresInDays, setExpiresInDays] = useState(30);
-  const [label, setLabel] = useState("");
+  const [note, setNote] = useState("");
+  const [generated, setGenerated] = useState<ShareLink | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,154 +69,194 @@ export default function AssetSharePanel({ productionId, assetId }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(base);
-      if (res.ok) setTokens((await res.json()).tokens);
+      const response = await fetch(base);
+      const body = await response.json() as { links?: ShareLink[]; error?: string };
+      if (!response.ok) throw new Error(body.error ?? "加载失败");
+      setLinks(body.links ?? []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "加载失败");
     } finally {
       setLoading(false);
     }
   }, [base]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
+
+  function shareUrl(link: ShareLink): string {
+    return `${window.location.origin}${BASE_PATH}/share/${link.token}`;
+  }
+
+  async function copy(link: ShareLink, withIntro = false) {
+    const url = shareUrl(link);
+    const value = withIntro ? `${userName}向你分享了《${assetName}》，链接：${url}` : url;
+    await navigator.clipboard.writeText(value);
+    const key = `${link.id}:${withIntro ? "intro" : "url"}`;
+    setCopied(key);
+    setTimeout(() => setCopied(current => current === key ? null : current), 2000);
+  }
 
   async function create() {
     setCreating(true);
     setError(null);
     try {
-      const res = await fetch(base, {
+      const response = await fetch(base, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type,
-          expiresInDays: type === "time_limited" ? expiresInDays : null,
-          label: label.trim() || null,
-        }),
+        body: JSON.stringify({ expiresInDays, allowDownload, oneTime, note: note.trim() || null }),
       });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError((j as { error?: string }).error ?? "创建失败");
-        return;
-      }
-      setLabel("");
+      const body = await response.json() as { link?: ShareLink; error?: string };
+      if (!response.ok || !body.link) throw new Error(body.error ?? "生成失败");
+      setGenerated(body.link);
+      setNote("");
       await load();
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "生成失败");
     } finally {
       setCreating(false);
     }
   }
 
-  async function revoke(token: string) {
-    await fetch(`${base}/${encodeURIComponent(token)}`, { method: "DELETE" });
+  async function revoke(link: ShareLink) {
+    const response = await fetch(`${base}/${link.id}`, { method: "DELETE" });
+    const body = await response.json().catch(() => ({})) as { error?: string };
+    if (!response.ok) {
+      setError(body.error ?? "撤销失败");
+      return;
+    }
+    if (generated?.id === link.id) setGenerated(null);
     await load();
   }
 
-  function copyLink(token: string) {
-    const url = `${window.location.origin}${BASE_PATH}/share/${token}`;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(token);
-      setTimeout(() => setCopied(null), 2000);
-    });
-  }
-
-  const activeTokens = tokens.filter(t => !t.revokedAt);
-  const revokedTokens = tokens.filter(t => t.revokedAt);
-
   return (
-    <div className="space-y-4">
-      {/* Create form */}
-      <div className="rounded-xl border border-zinc-200 p-4 space-y-3">
-        <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">创建分享链接</p>
-
-        <div className="flex gap-2">
-          {(["time_limited", "one_time"] as const).map(t => (
-            <button key={t} onClick={() => setType(t)}
-              className={`flex-1 rounded-lg py-1.5 text-xs font-medium transition-colors ${
-                type === t ? "bg-zinc-800 text-white" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
-              }`}>
-              {t === "time_limited" ? "限时链接" : "一次性链接"}
-            </button>
-          ))}
-        </div>
-
-        {type === "time_limited" && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-500">有效期</span>
-            {[7, 30, 90, 365].map(d => (
-              <button key={d} onClick={() => setExpiresInDays(d)}
-                className={`rounded px-2 py-0.5 text-xs transition-colors ${
-                  expiresInDays === d ? "bg-zinc-800 text-white" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
-                }`}>
-                {d < 30 ? `${d}天` : d < 365 ? `${d/30}个月` : "1年"}
-              </button>
-            ))}
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={event => { if (event.target === event.currentTarget) onClose(); }}
+    >
+      <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-zinc-100 px-5 pb-4 pt-5">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-zinc-800">对外分享</p>
+            <p className="mt-0.5 max-w-[360px] truncate text-xs text-zinc-400">{assetName}</p>
           </div>
-        )}
-
-        <input
-          type="text" placeholder="备注（可选）" value={label}
-          onChange={e => setLabel(e.target.value)}
-          className="w-full rounded-lg border border-zinc-200 px-3 py-1.5 text-sm outline-none focus:border-zinc-400"
-        />
-
-        {error && <p className="text-xs text-red-500">{error}</p>}
-
-        <button onClick={create} disabled={creating}
-          className="w-full rounded-lg bg-zinc-800 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 transition-colors">
-          {creating ? "生成中…" : "生成链接"}
-        </button>
-      </div>
-
-      {/* Token list */}
-      {loading ? (
-        <div className="flex justify-center py-4">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-200 border-t-zinc-500" />
+          <button onClick={onClose} className="text-lg leading-none text-zinc-400 transition-colors hover:text-zinc-600">×</button>
         </div>
-      ) : (
-        <div className="space-y-2">
-          {activeTokens.map(t => {
-            const { label: statusLabel, color } = tokenStatus(t);
-            return (
-              <div key={t.token} className="flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className={`text-xs font-medium ${color}`}>{statusLabel}</span>
-                    {t.oneTime && <span className="text-xs text-zinc-400">· 一次性</span>}
-                    {t.label && <span className="text-xs text-zinc-400 truncate">· {t.label}</span>}
-                  </div>
-                  <p className="text-xs text-zinc-400 mt-0.5">
-                    {t.expiresAt ? `到期 ${formatDate(t.expiresAt)}` : "无到期时间"}
-                    {t.usedAt ? ` · 已使用 ${formatDate(t.usedAt)}` : ""}
-                  </p>
+
+        <div className="space-y-5 overflow-y-auto px-5 py-4">
+          {canCreateLink ? (
+          <div className="space-y-4 rounded-xl border border-zinc-200 p-4">
+            <div>
+              <p className="mb-2 text-xs font-medium text-zinc-500">访问方式</p>
+              <div className="flex overflow-hidden rounded-xl border border-zinc-200 text-xs">
+                <button onClick={() => setOneTime(false)}
+                  className={`flex-1 py-2 font-medium transition-colors ${!oneTime ? "bg-zinc-800 text-white" : "bg-white text-zinc-500 hover:bg-zinc-50"}`}>
+                  限时链接
+                </button>
+                <button onClick={() => setOneTime(true)}
+                  className={`flex-1 py-2 font-medium transition-colors ${oneTime ? "bg-zinc-800 text-white" : "bg-white text-zinc-500 hover:bg-zinc-50"}`}>
+                  单次访问
+                </button>
+              </div>
+              {oneTime && (
+                <p className="mt-2 text-xs leading-5 text-zinc-400">
+                  首次打开后仅限那台浏览器使用；闲置 30 分钟失效，最长 8 小时。
+                </p>
+              )}
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-medium text-zinc-500">分享能力</p>
+              <div className="flex overflow-hidden rounded-xl border border-zinc-200 text-xs">
+                <button onClick={() => setAllowDownload(false)}
+                  className={`flex-1 py-2 font-medium transition-colors ${!allowDownload ? "bg-zinc-800 text-white" : "bg-white text-zinc-500 hover:bg-zinc-50"}`}>
+                  仅查看
+                </button>
+                <button onClick={() => setAllowDownload(true)}
+                  className={`flex-1 py-2 font-medium transition-colors ${allowDownload ? "bg-zinc-800 text-white" : "bg-white text-zinc-500 hover:bg-zinc-50"}`}>
+                  可下载
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-medium text-zinc-500">链接有效期</p>
+              <OverflowSafeSelect value={expiresInDays} onChange={event => setExpiresInDays(Number(event.target.value))}
+                className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 outline-none focus:border-zinc-400">
+                {EXPIRY_OPTIONS.map(option => <option key={option.days} value={option.days}>{option.label}</option>)}
+              </OverflowSafeSelect>
+            </div>
+
+            <input value={note} onChange={event => setNote(event.target.value)} maxLength={120}
+              placeholder="备注，例如：发给剧场技术部（可选）"
+              className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-zinc-400" />
+
+            <button onClick={create} disabled={creating}
+              className="w-full rounded-xl bg-zinc-800 py-2.5 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50">
+              {creating ? "生成中…" : "生成链接"}
+            </button>
+
+            {generated && (
+              <div className="space-y-2 rounded-xl bg-zinc-50 p-3">
+                <p className="truncate text-xs text-zinc-600">{shareUrl(generated)}</p>
+                <div className="flex gap-2">
+                  <button onClick={() => copy(generated)} className="flex-1 rounded-lg border border-zinc-200 bg-white py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50">
+                    {copied === `${generated.id}:url` ? "已复制" : "复制链接"}
+                  </button>
+                  <button onClick={() => copy(generated, true)} className="flex-1 rounded-lg bg-zinc-800 py-2 text-xs font-medium text-white hover:bg-zinc-700">
+                    {copied === `${generated.id}:intro` ? "已复制" : "复制带简介"}
+                  </button>
                 </div>
-                <button onClick={() => copyLink(t.token)}
-                  className="shrink-0 rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100 transition-colors">
-                  {copied === t.token ? "已复制" : "复制链接"}
-                </button>
-                <button onClick={() => revoke(t.token)}
-                  className="shrink-0 rounded px-2 py-1 text-xs text-red-400 hover:bg-red-50 transition-colors">
-                  撤销
-                </button>
               </div>
-            );
-          })}
-
-          {activeTokens.length === 0 && (
-            <p className="text-center text-xs text-zinc-400 py-3">暂无有效的分享链接</p>
+            )}
+          </div>
+          ) : (
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-xs leading-5 text-zinc-500">
+              项目当前已关闭对外分享。已有链接均已失效，你仍可以在下方逐条撤销。
+            </div>
           )}
 
-          {revokedTokens.length > 0 && (
-            <details className="text-xs text-zinc-400">
-              <summary className="cursor-pointer select-none py-1">已撤销 / 过期（{revokedTokens.length}）</summary>
-              <div className="mt-1 space-y-1 pl-2">
-                {revokedTokens.map(t => (
-                  <div key={t.token} className="flex items-center gap-2 text-zinc-400">
-                    <span className="flex-1 truncate">{t.label ?? t.token.slice(0, 12) + "…"}</span>
-                    <span>{formatDate(t.revokedAt)}</span>
-                  </div>
-                ))}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+
+          <div>
+            <p className="mb-2 text-xs font-medium text-zinc-500">已生成的链接</p>
+            {loading ? (
+              <div className="flex justify-center py-5"><div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-200 border-t-zinc-500" /></div>
+            ) : links.length === 0 ? (
+              <p className="py-4 text-center text-xs text-zinc-400">还没有分享链接</p>
+            ) : (
+              <div className="space-y-2">
+                {links.map(link => {
+                  const status = statusOf(link);
+                  return (
+                    <div key={link.id} className="rounded-xl border border-zinc-200 px-3 py-2.5">
+                      <div className="flex items-start gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                            <span className={`font-medium ${status.color}`}>{status.label}</span>
+                            <span className="text-zinc-400">· {link.oneTime ? "单次访问" : "限时链接"}</span>
+                            <span className="text-zinc-400">· {link.allowDownload ? "可下载" : "仅查看"}</span>
+                          </div>
+                          {link.note && <p className="mt-1 truncate text-xs text-zinc-600">{link.note}</p>}
+                          <p className="mt-1 text-xs text-zinc-400">有效至 {formatDate(link.expiresAt)}</p>
+                        </div>
+                        <div className="flex shrink-0 gap-1">
+                          {status.usable && (
+                            <button onClick={() => copy(link)} className="rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100">
+                              {copied === `${link.id}:url` ? "已复制" : "复制"}
+                            </button>
+                          )}
+                          {status.revocable && (
+                            <button onClick={() => revoke(link)} className="rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50">撤销</button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            </details>
-          )}
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

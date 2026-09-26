@@ -205,8 +205,21 @@ export async function mountHostSidePermitted(
   return hasGrant(permCtx.userId, productionId, "script", "*", "mounts", "create");
 }
 
-/** 分享令牌规则（论证全文见 git 史）："令牌含下载 ⟺ 发令牌者持有 file@view"；
- *  项目出口由 policy.share_token_enabled 把守，两者串联；admin/owner 旁路在顶端。 */
+/** 管理某资产的对外链接。策略关闭后仍允许查看和撤销已有链接。 */
+export async function canManageShareLinks(
+  permCtx: GrantActor,
+  productionId: string,
+  asset: Pick<Asset, "id">,
+): Promise<{ allowed: boolean; downloadable: boolean }> {
+  const allowed = await hasEffectiveGrant(permCtx, productionId, "asset", asset.id, "shares", "create")
+    && await canViewAsset(permCtx, productionId, asset, "meta");
+  if (!allowed) return { allowed: false, downloadable: false };
+  const downloadable = await canViewAsset(permCtx, productionId, asset, "file");
+  return { allowed: true, downloadable };
+}
+
+/** 分享链接创建规则："链接含下载 ⟺ 创建者持有 file@view"；项目出口策略与
+ *  shares@create 资格串联；admin/owner 沿用全域门旁路。 */
 export async function canCreateShareToken(
   permCtx: GrantActor,
   productionId: string,
@@ -216,9 +229,5 @@ export async function canCreateShareToken(
   if (!await isPolicyOn(productionId, "policy.share_token_enabled")) {
     return { allowed: false, downloadable: false };
   }
-  const allowed = await hasGrant(permCtx.userId, productionId, "asset", asset.id, "shares", "create")
-    && await canViewAsset(permCtx, productionId, asset, "meta");
-  if (!allowed) return { allowed: false, downloadable: false };
-  const downloadable = await canViewAsset(permCtx, productionId, asset, "file");
-  return { allowed: true, downloadable };
+  return canManageShareLinks(permCtx, productionId, asset);
 }

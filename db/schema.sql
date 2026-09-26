@@ -1134,12 +1134,45 @@ CREATE TABLE IF NOT EXISTS asset_file (
 
 CREATE INDEX IF NOT EXISTS asset_file_asset_idx ON asset_file(asset_id);
 
+-- 对外链接的 bearer token 只寻址本表，不编码 asset / production id。普通链接
+-- 每次兑现都查 revoked/expiry/policy；单次链接先兑换成浏览器会话，避免媒体 Range
+-- 请求把“一次”误解成一次 HTTP 请求。
+CREATE TABLE IF NOT EXISTS asset_share_link (
+  id                      TEXT        PRIMARY KEY,
+  token                   TEXT        NOT NULL UNIQUE,
+  asset_id                TEXT        NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+  production_id           TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  allow_download          BOOLEAN     NOT NULL DEFAULT false,
+  one_time                BOOLEAN     NOT NULL DEFAULT false,
+  note                    TEXT,
+  expires_at              TIMESTAMPTZ NOT NULL,
+  created_by              UUID        REFERENCES app_user(id) ON DELETE SET NULL,
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+  revoked_at              TIMESTAMPTZ,
+  redeemed_at             TIMESTAMPTZ,
+  session_secret_hash     TEXT,
+  session_last_seen_at    TIMESTAMPTZ,
+  session_expires_at      TIMESTAMPTZ,
+  CONSTRAINT asset_share_link_session_shape CHECK (
+    (redeemed_at IS NULL AND session_secret_hash IS NULL
+      AND session_last_seen_at IS NULL AND session_expires_at IS NULL)
+    OR
+    (one_time = true AND redeemed_at IS NOT NULL AND session_secret_hash IS NOT NULL
+      AND session_last_seen_at IS NOT NULL AND session_expires_at IS NOT NULL)
+  )
+);
+
+CREATE INDEX IF NOT EXISTS asset_share_link_asset_idx
+  ON asset_share_link(asset_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS asset_share_link_production_idx
+  ON asset_share_link(production_id, created_at DESC);
+
 -- asset_mount 已随 node 树统一（#420）演化为 node_mount（asset_id → node_id、
 -- 化石列清理、六个 mount_type 值退役），定义见 node 表区段。
 -- asset_version_rel（资产文件按版本 pin）已随版本退役删除
 -- （migrate-version-retire.sql）：文件解析一律 latest-wins。
--- asset_share_token 化石表已删（migrate-node-tree.sql）：分享 token 实现早已
--- 换成无状态 HMAC（lib/asset/share-token.ts），该表全代码零读写。
+-- asset_share_token 化石表已删（migrate-node-tree.sql）；现行有状态链接使用上面的
+-- asset_share_link，不复活旧 UUID 表。
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- node 树（epic #420）：一棵树承载组织与权限，异构边承载消费关系

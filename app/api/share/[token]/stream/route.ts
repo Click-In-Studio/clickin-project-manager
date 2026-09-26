@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { verifyShareToken } from "@/lib/asset/share-token";
+import { getAssetShareLinkAccess, SHARE_SESSION_COOKIE, touchAssetShareSession } from "@/lib/asset/share-link-db";
 import { getAsset, getLatestAssetFile } from "@/lib/asset/db";
 import { getR2Stream } from "@/lib/r2";
 import { isPolicyOn } from "@/lib/perm/policy-db";
@@ -9,22 +9,21 @@ type Ctx = { params: Promise<{ token: string }> };
 export async function GET(req: NextRequest, ctx: Ctx) {
   const { token } = await ctx.params;
 
-  const payload = verifyShareToken(token);
-  if (!payload) return new Response("链接无效或已过期", { status: 403 });
+  const access = await getAssetShareLinkAccess(token, req.cookies.get(SHARE_SESSION_COOKIE)?.value);
+  if (access.kind !== "valid") return new Response("链接无效或已过期", { status: 403 });
 
-  // asset 提前到取流之前查：出口判定必须在碰 R2 之前，否则关掉出口后仍会产生
-  // 一次对象存储读取（既是流量也是信息泄漏——存在性可被探测）。
-  const asset = await getAsset(payload.aid);
-  if (!asset) return new Response("文件不存在", { status: 404 });
-
-  // #236 出口开关：**兑现端也要读**。令牌是签名载荷不是库里的行，撤不掉；
-  // 只改发放端等于「关出口」半截生效——已发出去的链接照样能用。两处同读，
-  // 关掉即刻停发新链接 + 已发链接同时失效（形状 C 天然追溯）。
-  if (!await isPolicyOn(asset.productionId, "policy.share_token_enabled")) {
+  // 每次取流都兑现链接行；撤销、到期、单次会话超时与项目总开关即时生效。
+  if (!await isPolicyOn(access.link.productionId, "policy.share_token_enabled")) {
     return new Response("链接无效或已过期", { status: 403 });
   }
+  await touchAssetShareSession(access.link);
 
-  const file = await getLatestAssetFile(payload.aid);
+  // asset 在碰 R2 前查，避免无效链接产生对象存储读取与存在性探测。
+  const asset = await getAsset(access.link.assetId);
+  if (!asset || asset.productionId !== access.link.productionId)
+    return new Response("文件不存在", { status: 404 });
+
+  const file = await getLatestAssetFile(access.link.assetId);
   if (!file?.r2Key) return new Response("文件不存在", { status: 404 });
 
   const range = req.headers.get("range");
@@ -39,7 +38,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   headers.set("Accept-Ranges", "bytes");
   headers.set("Cache-Control", "private, no-store");
 
-  if (payload.dl) {
+  if (access.link.allowDownload) {
     headers.set("Content-Disposition", `attachment; filename="${encodeURIComponent(fileName)}"`);
   } else {
     headers.set("Content-Disposition", "inline");

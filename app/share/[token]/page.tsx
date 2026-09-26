@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 
 type AssetInfo = {
@@ -13,6 +13,7 @@ type AssetInfo = {
   storageType: string;
   expiresAt: string | null;
   allowDownload: boolean;
+  oneTime: boolean;
 };
 
 function formatSize(bytes: number): string {
@@ -37,24 +38,86 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
   const [token, setToken] = useState<string | null>(null);
   const [info, setInfo] = useState<AssetInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [requiresRedemption, setRequiresRedemption] = useState(false);
+  const [redeeming, setRedeeming] = useState(false);
 
   useEffect(() => {
     params.then(p => setToken(p.token));
   }, [params]);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!token) return;
-    fetch(`${BASE_PATH}/api/share/${token}`)
-      .then(r => r.ok ? r.json() : r.json().then((j: { error?: string }) => { throw new Error(j.error ?? "加载失败"); }))
-      .then(setInfo)
-      .catch(e => setError(String(e).replace(/^Error:\s*/, "")));
+    try {
+      const response = await fetch(`${BASE_PATH}/api/share/${token}`);
+      const body = await response.json() as (AssetInfo & { requiresRedemption?: false }) | {
+        requiresRedemption: true; error?: string;
+      };
+      if (!response.ok) throw new Error("error" in body ? body.error ?? "加载失败" : "加载失败");
+      if (body.requiresRedemption === true) {
+        setRequiresRedemption(true);
+        setInfo(null);
+      } else {
+        setRequiresRedemption(false);
+        setInfo(body);
+      }
+    } catch (loadError) {
+      setError(String(loadError).replace(/^Error:\s*/, ""));
+    }
   }, [token]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!token || !info?.oneTime) return;
+    const heartbeat = async () => {
+      if (document.visibilityState !== "visible") return;
+      const response = await fetch(`${BASE_PATH}/api/share/${token}/redeem`, { method: "POST" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: string };
+        setInfo(null);
+        setError(body.error ?? "本次访问已结束");
+      }
+    };
+    const timer = window.setInterval(() => { void heartbeat(); }, 5 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [info?.oneTime, token]);
+
+  async function redeem() {
+    if (!token) return;
+    setRedeeming(true);
+    setError(null);
+    try {
+      const response = await fetch(`${BASE_PATH}/api/share/${token}/redeem`, { method: "POST" });
+      const body = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "打开失败");
+      await load();
+    } catch (redeemError) {
+      setError(String(redeemError).replace(/^Error:\s*/, ""));
+    } finally {
+      setRedeeming(false);
+    }
+  }
 
   if (error) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 p-6 text-center">
         <p className="text-2xl font-semibold text-zinc-800 mb-2">链接无效</p>
         <p className="text-sm text-zinc-400">{error}</p>
+      </div>
+    );
+  }
+
+  if (requiresRedemption && token) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-950 p-6 text-center text-white">
+        <p className="mb-2 text-2xl font-semibold">这是一个单次访问链接</p>
+        <p className="mb-6 max-w-sm text-sm leading-6 text-zinc-400">
+          打开后，这个链接只能在当前浏览器继续使用；闲置 30 分钟失效，最长可使用 8 小时。
+        </p>
+        <button onClick={redeem} disabled={redeeming}
+          className="rounded-xl bg-white px-6 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-100 disabled:opacity-50">
+          {redeeming ? "正在打开…" : "打开文件"}
+        </button>
       </div>
     );
   }

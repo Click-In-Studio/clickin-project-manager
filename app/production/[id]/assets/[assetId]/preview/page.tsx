@@ -2,7 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import type { Metadata } from "next";
 import { getSession } from "@/lib/account/session";
-import { canViewAsset } from "@/lib/asset/perm";
+import { canCreateShareToken, canManageShareLinks, canViewAsset } from "@/lib/asset/perm";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getAsset } from "@/lib/asset/db";
 import AssetPreviewClient from "@/components/assets/AssetPreviewClient";
@@ -37,6 +37,10 @@ export default async function AssetPreviewPage({
   if (!asset || asset.productionId !== id) notFound();
   if (!(await canViewAsset(access.permCtx, id, asset, "meta")))
     redirect(`/unauthorized?resource=${encodeURIComponent(`node:asset/${assetId}@view`)}&id=${id}`);
+  const [manageShareCap, createShareCap] = await Promise.all([
+    canManageShareLinks(access.permCtx, id, asset),
+    canCreateShareToken(access.permCtx, id, asset),
+  ]);
 
   return (
     <AssetPreviewClient
@@ -48,6 +52,8 @@ export default async function AssetPreviewPage({
       storageType={asset.storageType}
       feishuUrl={asset.feishuUrl}
       userName={session.name}
+      canManageExternalShare={manageShareCap.allowed}
+      canCreateExternalShare={createShareCap.allowed}
     />
   );
 }
