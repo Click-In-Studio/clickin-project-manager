@@ -3,9 +3,9 @@
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { BASE_PATH } from "@/lib/base-path";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import { nextNavPendingHref } from "@/lib/nav-pending";
+import { hasUnseenChangelog, markChangelogSeen, readSeenChangelogVersion } from "@/lib/help/changelog-seen";
 import { AiTargetContext, nextAiTargetState, type AiTargetState, type ReportAiTarget } from "../agent/ai-target";
 import SearchBar from "./SearchBar";
 import PageActivationGate from "../perm/PageActivationGate";
@@ -18,7 +18,7 @@ import {
   ProductionToolbarStageContext,
 } from "./ProductionTopMenu";
 import type { Production, ShellSession } from "./app-shell/types";
-import { CREATION_NAV, PRODUCTION_NAV, ADMIN_NAV_GROUPS, OVERVIEW_NAV, PRODUCTION_TOP_MENU_LABELS } from "./app-shell/nav-config";
+import { CREATION_NAV, PRODUCTION_NAV, PRODUCTION_OVERVIEW_NAV, ADMIN_NAV_GROUPS, OVERVIEW_NAV, PRODUCTION_TOP_MENU_LABELS } from "./app-shell/nav-config";
 import { firstContentChar } from "./app-shell/first-content-char";
 import { extractProductionId, extractCurrentWikiId, extractCurrentAssetId, extractModule, extractAdminModule } from "./app-shell/route";
 import { NavPendingContext, type NavPendingBus } from "./app-shell/nav-pending";
@@ -30,6 +30,7 @@ import UserMenu from "./app-shell/UserMenu";
 import BottomDrawer from "./app-shell/BottomDrawer";
 import MobileAiAction from "./app-shell/MobileAiAction";
 import MobileTab from "./app-shell/MobileTab";
+import MobileMeDrawer from "./app-shell/MobileMeDrawer";
 import ProjectSwitcher from "./app-shell/ProjectSwitcher";
 import { useShellBadges } from "./app-shell/use-shell-badges";
 import { useProductionToolbarStage } from "./app-shell/use-production-toolbar-stage";
@@ -53,7 +54,7 @@ interface AppShellProps {
 
 const SCROLLBAR_ACTIVITY_HIDE_DELAY_MS = 700;
 
-type DrawerType = "overview" | "creation" | "production" | "admin" | "me";
+type DrawerType = "overview" | "project-overview" | "creation" | "production" | "admin" | "me";
 
 export default function AppShell({ session, productions, canCreateProduction = false, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0, helpRoutes = {}, latestChangelogVersion = null }: AppShellProps) {
   const pathname = usePathname();
@@ -65,6 +66,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
   }, []);
   const [aiPopoutOpen, setAiPopoutOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState<DrawerType | null>(null);
+  const [changelogNew, setChangelogNew] = useState(false);
   const { unreadCount, pendingTasks, unreadReports, cueWarnings } = useShellBadges({
     session, pathname, initialUnreadCount, initialPendingTasks, initialUnreadReports,
   });
@@ -81,6 +83,10 @@ export default function AppShell({ session, productions, canCreateProduction = f
     handleProductionSearchOpenChange,
     productionToolbarContext,
   } = useProductionToolbarStage({ pathname });
+
+  useEffect(() => {
+    setChangelogNew(hasUnseenChangelog(latestChangelogVersion, readSeenChangelogVersion()));
+  }, [latestChangelogVersion]);
 
   // 侧栏在途项（见 NavPendingContext）。归约规则连同连点竞态的说明
   // 见 lib/nav-pending.ts。
@@ -242,6 +248,9 @@ export default function AppShell({ session, productions, canCreateProduction = f
     );
   const isCreationActive = CREATION_NAV.some((item) => isCreationItemActive(item.path));
   const isProductionNavActive = PRODUCTION_NAV.some((item) => isModuleActive(item.path));
+  const isProductionOverviewItemActive = (item: (typeof PRODUCTION_OVERVIEW_NAV)[number]) =>
+    item.activeModules.some((module) => module === activeModule);
+  const isProductionOverviewActive = PRODUCTION_OVERVIEW_NAV.some(isProductionOverviewItemActive);
   const isOverviewActive = OVERVIEW_NAV.some((item) => pathname.startsWith(item.path));
 
   const closeDrawer = () => setDrawerOpen(null);
@@ -264,7 +273,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
   const avatarSymbol = (
     <span className="relative">
       <UserAvatarContent src={avatarSrc} initial={userInitial} compact />
-      {unreadCount > 0 && (
+      {(unreadCount > 0 || changelogNew) && (
         <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#c0392b] border border-[var(--paper)]" />
       )}
     </span>
@@ -495,17 +504,18 @@ export default function AppShell({ session, productions, canCreateProduction = f
               {productionId ? (
                 <>
                   <NavGroup label="项目总览" color="overview" folded={productionSidebarContentFolded} first />
-                  <NavItem href={`/production/${productionId}`} symbol="⌂" label="我的工作" hint="今天与我有关" active={activeModule === ""} folded={productionSidebarContentFolded} />
-                  <NavItem
-                    href={navHref("notifications")}
-                    symbol="◉"
-                    label="我的通知"
-                    hint="项目公告 · 个人通知"
-                    active={isModuleActive("notifications") || isModuleActive("announcements")}
-                    badge={unreadCount}
-                    folded={productionSidebarContentFolded}
-                  />
-                  <NavItem href={navHref("access-requests")} symbol="◑" label="资源申请" hint="权限申请 · 待审批" active={isModuleActive("access-requests")} folded={productionSidebarContentFolded} />
+                  {PRODUCTION_OVERVIEW_NAV.map((item) => (
+                    <NavItem
+                      key={item.path || "home"}
+                      href={item.path ? navHref(item.path) : `/production/${productionId}`}
+                      symbol={item.symbol}
+                      label={item.label}
+                      hint={item.hint}
+                      active={isProductionOverviewItemActive(item)}
+                      badge={item.path === "notifications" ? unreadCount : undefined}
+                      folded={productionSidebarContentFolded}
+                    />
+                  ))}
 
                   <NavGroup label="创作侧" color="script" folded={productionSidebarContentFolded} />
                   {CREATION_NAV.map((item) => (
@@ -589,11 +599,10 @@ export default function AppShell({ session, productions, canCreateProduction = f
             /* Production mode */
             <>
               <MobileTab
-                label="今日"
+                label="概览"
                 symbol="⌂"
-                active={activeModule === ""}
-                href={`/production/${productionId}`}
-                onClick={closeAiPopout}
+                active={isProductionOverviewActive || drawerOpen === "project-overview"}
+                onClick={() => toggleDrawer("project-overview")}
               />
               <MobileTab
                 label="创作"
@@ -660,6 +669,27 @@ export default function AppShell({ session, productions, canCreateProduction = f
               label={item.label}
               hint={item.hint}
               active={pathname.startsWith(item.path)}
+              onClick={closeDrawer}
+            />
+          ))}
+        </div>
+      </BottomDrawer>
+
+      {/* 项目总览 drawer */}
+      <BottomDrawer open={drawerOpen === "project-overview"} onClose={closeDrawer}>
+        <div className="px-3.5 pb-4">
+          <p className="px-2.5 pt-1 pb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[#667676]">
+            项目总览
+          </p>
+          {productionId && PRODUCTION_OVERVIEW_NAV.map((item) => (
+            <NavItem
+              key={item.path || "home"}
+              href={item.path ? navHref(item.path) : `/production/${productionId}`}
+              symbol={item.symbol}
+              label={item.label}
+              hint={item.hint}
+              active={isProductionOverviewItemActive(item)}
+              badge={item.path === "notifications" ? unreadCount : undefined}
               onClick={closeDrawer}
             />
           ))}
@@ -737,82 +767,26 @@ export default function AppShell({ session, productions, canCreateProduction = f
         </div>
       </BottomDrawer>
 
-      {/* 我 drawer */}
-      <BottomDrawer open={drawerOpen === "me"} onClose={closeDrawer}>
-        <div className="pb-4">
-          {/* 用户概要 */}
-          <div className="flex items-center gap-3 px-5 pt-1 pb-3">
-            <span className="w-10 h-10 rounded-full bg-[#182a2a] overflow-hidden shrink-0 flex items-center justify-center">
-              <UserAvatarContent src={avatarSrc} initial={userInitial} />
-            </span>
-            <span className="text-[14px] font-bold text-[#182a2a]">{session.name}</span>
-          </div>
-          <div className="mx-5 border-t border-[var(--line)]" />
-
-          {/* 账户 */}
-          <div className="px-3.5 pt-1 flex flex-col gap-0.5">
-            <NavItem
-              href={accountHref("profile")}
-              symbol="人"
-              label="个人信息"
-              hint="头像 · 姓名 · 简介"
-              active={pathname === "/account" && searchParams.get("tab") !== "security" && searchParams.get("tab") !== "preferences"}
-              onClick={closeDrawer}
-            />
-            <NavItem
-              href={accountHref("security")}
-              symbol="盾"
-              label="账号安全中心"
-              hint="登录方式 · 绑定身份"
-              active={pathname === "/account" && searchParams.get("tab") === "security"}
-              onClick={closeDrawer}
-            />
-          </div>
-
-          {/* 偏好 */}
-          <div className="mx-5 my-1.5 border-t border-[var(--line)]" />
-          <div className="px-3.5 flex flex-col gap-0.5">
-            <NavItem
-              href={accountHref("preferences")}
-              symbol="调"
-              label="功能与设置"
-              hint="通知 · 消息提醒"
-              active={pathname === "/account" && searchParams.get("tab") === "preferences"}
-              onClick={closeDrawer}
-            />
-          </div>
-
-          {/* 配置中心 */}
-          {currentProduction?.canAdmin && productionId && (
-            <>
-              <div className="mx-5 my-1.5 border-t border-[var(--line)]" />
-              <div className="px-3.5 flex flex-col gap-0.5">
-                <NavItem
-                  href={`/production/${productionId}/admin`}
-                  symbol="⚙"
-                  label="配置中心"
-                  hint={currentProduction.name}
-                  active={isAdminMode}
-                  onClick={closeDrawer}
-                />
-              </div>
-            </>
-          )}
-
-          {/* 退出 */}
-          <div className="mx-5 my-2 border-t border-[var(--line)]" />
-          <div className="px-5">
-            <form action={`${BASE_PATH}/api/auth/logout`} method="post">
-              <button
-                type="submit"
-                className="w-full text-left flex items-center gap-2 py-2.5 text-sm text-[#c0392b]"
-              >
-                退出登录
-              </button>
-            </form>
-          </div>
-        </div>
-      </BottomDrawer>
+      <MobileMeDrawer
+        open={drawerOpen === "me"}
+        onClose={closeDrawer}
+        name={session.name}
+        avatarSrc={avatarSrc}
+        userInitial={userInitial}
+        pathname={pathname}
+        accountTab={searchParams.get("tab")}
+        accountHref={accountHref}
+        helpRoutes={helpRoutes}
+        latestChangelogVersion={latestChangelogVersion}
+        changelogNew={changelogNew}
+        onChangelogSeen={() => {
+          if (latestChangelogVersion) markChangelogSeen(latestChangelogVersion);
+          setChangelogNew(false);
+        }}
+        adminHref={currentProduction?.canAdmin && productionId ? `/production/${productionId}/admin` : null}
+        adminName={currentProduction?.name ?? null}
+        adminActive={isAdminMode}
+      />
 
       {/* AI 助手浮动 popout（对应左侧剧本页折叠导航的浮出样式，宽得多）——
           项目视图外只看得到个人会话，项目视图内只看得到该项目会话，范围
