@@ -1,7 +1,9 @@
 -- migrate:up
 -- #427：只撤销盘点开始前、资产与壳均不存在的有效实例授权；保留原行作审计。
 -- 通配票、已撤销/过期行和仍有实体（含跨项目错配）的行都不在本次清洗范围。
--- 线上运行用 options 设置 clickin.asset_cleanup_digest，快照后候选变化即中止。
+-- 人工线上清洗必须走 run-asset-orphan-cleanup.sh，强制传入快照摘要，候选变化即中止。
+-- 标准 CI/CD dbmate 无人工快照，允许省略摘要并按固定日期及实体不存在的保守谓词执行。
+-- manual 沿用现有撤销原因约束；本次清洗来源由迁移版本、完整快照和执行回执识别。
 SET LOCAL TIME ZONE 'UTC';
 SET LOCAL lock_timeout = '3s';
 SET LOCAL statement_timeout = '15s';

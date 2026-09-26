@@ -215,6 +215,7 @@ export async function deleteAsset(assetId: string): Promise<{ r2Keys: string[] }
     );
     if (deleted.rows[0]) {
       // 多态 resource_id 没有外键级联；保留审计行，但收回已删除资产的全部实例授权。
+      // 沿用现有 manual 原因，表示用户删除操作触发的收回；当前字段不区分删除与逐条撤销。
       await client.query(
         `UPDATE production_member_grant SET is_revoked = true, revoked_reason = 'manual'
          WHERE production_id = $1 AND resource_type = 'asset' AND resource_id = $2
