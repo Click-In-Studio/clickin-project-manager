@@ -13,6 +13,14 @@ import RundownEntryEditor from "./RundownEntryEditor";
 import { minutesOfIso, fmtMin } from "./date";
 import { TASK_STATUS_LABELS } from "./labels";
 import { readPref, writePref } from "./prefs";
+import {
+  RUNDOWN_HEADER_HEIGHT,
+  RUNDOWN_LANE_MIN_WIDTH,
+  RUNDOWN_LOCATION_HEIGHT,
+  RUNDOWN_TIME_WIDTH,
+  rundownGridColumns,
+  rundownPinnedLeft,
+} from "./rundown-layout";
 import type { RundownColumn, ServerUserGroup, ServerRundownColumn, ServerRundownPlacement, RundownEntrySelection, RundownDragEntry } from "./rundown-types";
 import type { Props } from "./types";
 
@@ -25,13 +33,6 @@ const ITEM_TONE: Record<string, { bg: string; border: string }> = {
   notes:  { bg: "#eee5f0", border: "#cdb9d3" },
   custom: { bg: "#dce9e9", border: "rgba(47,102,112,.28)" },
 };
-
-// 泳道各处（grid、sticky left/top、插入入口）必须共用同一套尺寸，否则横向滚动后
-// 固定列会与表头、事项块错位。这里保留动态计算，静态外观交给 CSS Module。
-const RUNDOWN_TIME_WIDTH = 72;
-const RUNDOWN_LANE_MIN_WIDTH = 132;
-const RUNDOWN_LOCATION_HEIGHT = 28;
-const RUNDOWN_HEADER_HEIGHT = 44;
 
 export default function TimetableView({ productionId, events, departments, members }: Props) {
   const timedEvents = useMemo(
@@ -734,7 +735,7 @@ export default function TimetableView({ productionId, events, departments, membe
         <div className={styles.rundownMatrixWrap}>
           <div style={{
             display: "grid",
-            gridTemplateColumns: `${RUNDOWN_TIME_WIDTH}px repeat(${lanes.length}, minmax(${RUNDOWN_LANE_MIN_WIDTH}px, 1fr))`,
+            gridTemplateColumns: rundownGridColumns(lanes),
             gridTemplateRows: `${hasLocationRow ? `${RUNDOWN_LOCATION_HEIGHT}px ` : ""}${RUNDOWN_HEADER_HEIGHT}px repeat(${slots.length}, 38px)`,
             minWidth: RUNDOWN_TIME_WIDTH + lanes.length * RUNDOWN_LANE_MIN_WIDTH,
             position: "relative",
@@ -784,7 +785,7 @@ export default function TimetableView({ productionId, events, departments, membe
                   title={editMode ? "长按拖动调整顺序；双击编辑人员组" : lane.name}
                   style={{
                     gridColumn: i + 2, gridRow: headerRow, position: "sticky", top: hasLocationRow ? RUNDOWN_LOCATION_HEIGHT : 0,
-                    left: lane.pinned ? RUNDOWN_TIME_WIDTH + pinnedIndex * RUNDOWN_LANE_MIN_WIDTH : undefined, zIndex: lane.pinned ? 24 : 14,
+                    left: lane.pinned ? rundownPinnedLeft(pinnedIndex) : undefined, zIndex: lane.pinned ? 24 : 14,
                     padding: "7px 8px", borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)",
                     background: lane.pinned ? "#294340" : "var(--ink)", color: "#fff", display: "flex", flexDirection: "column",
                     cursor: editMode ? "grab" : "default",
@@ -842,7 +843,7 @@ export default function TimetableView({ productionId, events, departments, membe
                   style={{
                   gridColumn: `${pl.start} / span ${pl.span}`,
                   gridRow: `${rowStart} / span ${rowSpan}`,
-                  position: sticky ? "sticky" : undefined, left: sticky ? RUNDOWN_TIME_WIDTH + pinnedIndex * RUNDOWN_LANE_MIN_WIDTH : undefined,
+                  position: sticky ? "sticky" : undefined, left: sticky ? rundownPinnedLeft(pinnedIndex) : undefined,
                   zIndex: sticky ? 9 : 4, minWidth: 0, margin: 2, padding: "7px 8px",
                   border: `1px solid ${selected ? "#2463d4" : tone.border}`, borderRadius: 7,
                   outline: selected ? "2px solid rgba(36,99,212,.24)" : undefined,
@@ -891,7 +892,7 @@ export default function TimetableView({ productionId, events, departments, membe
                   style={{
                     gridColumn: `${pl.start} / span ${pl.span}`,
                     gridRow: `${rowStart} / span ${rowSpan}`,
-                    position: sticky ? "sticky" : undefined, left: sticky ? RUNDOWN_TIME_WIDTH + pinnedIndex * RUNDOWN_LANE_MIN_WIDTH : undefined,
+                    position: sticky ? "sticky" : undefined, left: sticky ? rundownPinnedLeft(pinnedIndex) : undefined,
                     zIndex: sticky ? 9 : 4, minWidth: 0, margin: 2, padding: "7px 8px",
                     border: `1px ${selected ? "solid" : "dashed"} ${selected ? "#2463d4" : tone.border}`, borderRadius: 7,
                     outline: selected ? "2px solid rgba(36,99,212,.24)" : undefined,
