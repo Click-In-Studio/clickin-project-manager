@@ -24,6 +24,6 @@ export default function MobileTab({
       {label}
     </>
   );
-  if (href) return <Link href={href} className={cls}>{inner}</Link>;
+  if (href) return <Link href={href} onClick={onClick} className={cls}>{inner}</Link>;
   return <button onClick={onClick} className={cls}>{inner}</button>;
 }

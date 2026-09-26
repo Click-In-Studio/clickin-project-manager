@@ -708,6 +708,28 @@ span[data-stage-inline] {
   }
 }
 
+/* 手机 / 窄窗口里的 AI 是独立工作面：覆盖顶栏、正文和底栏；关闭后原页面仍在。 */
+@media (max-width: 1023px) {
+  .agent-mobile-full {
+    inset: 0 !important;
+    z-index: 60 !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: 100dvh !important;
+    border-left: 0 !important;
+    box-shadow: none !important;
+    overscroll-behavior: contain;
+  }
+
+  .agent-mobile-header {
+    padding-top: max(0.75rem, env(safe-area-inset-top)) !important;
+  }
+
+  .agent-mobile-composer {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom)) !important;
+  }
+}
+
 @media print {
   /* 纸张尺寸不在这里定：版式是每个演出自配的（lib/script-page.ts 有四种，
      将来 #338 变成可编辑数据），硬编码 A4 会让 letter / 双排版式打出来对不上纸。

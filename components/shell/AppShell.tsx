@@ -28,6 +28,7 @@ import NavItem from "./app-shell/NavItem";
 import NavGroup from "./app-shell/NavGroup";
 import UserMenu from "./app-shell/UserMenu";
 import BottomDrawer from "./app-shell/BottomDrawer";
+import MobileAiAction from "./app-shell/MobileAiAction";
 import MobileTab from "./app-shell/MobileTab";
 import ProjectSwitcher from "./app-shell/ProjectSwitcher";
 import { useShellBadges } from "./app-shell/use-shell-badges";
@@ -244,8 +245,19 @@ export default function AppShell({ session, productions, canCreateProduction = f
   const isOverviewActive = OVERVIEW_NAV.some((item) => pathname.startsWith(item.path));
 
   const closeDrawer = () => setDrawerOpen(null);
-  const toggleDrawer = (type: DrawerType) =>
+  const closeAiPopout = () => setAiPopoutOpen(false);
+  const toggleAiPopout = () => {
+    closeDrawer();
+    setAiPopoutOpen((open) => !open);
+  };
+  const openAiPopout = () => {
+    closeDrawer();
+    setAiPopoutOpen(true);
+  };
+  const toggleDrawer = (type: DrawerType) => {
+    closeAiPopout();
     setDrawerOpen((d) => (d === type ? null : type));
+  };
 
   const userInitial = firstContentChar(session.name);
   const avatarSrc = userAvatarSrc(session.userId, session.avatarUrl);
@@ -341,7 +353,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
           <button
             type="button"
             data-ai-toggle
-            onClick={() => setAiPopoutOpen((v) => !v)}
+            onClick={toggleAiPopout}
             aria-label="AI 助手"
             aria-expanded={aiPopoutOpen}
             className={`relative ${productionHeaderStage >= 2 ? "hidden" : "hidden lg:flex"} w-9 h-9 rounded-full border ${aiPopoutOpen ? "border-[var(--ink)]" : "border-[var(--line)]"} bg-[var(--surface)] items-center justify-center text-[#667676] hover:bg-[var(--paper)] transition-colors text-[10px] font-bold tracking-tight shrink-0`}
@@ -556,6 +568,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                 symbol="←"
                 active={false}
                 href={`/production/${productionId}`}
+                onClick={closeAiPopout}
               />
               <MobileTab
                 label="配置菜单"
@@ -563,7 +576,8 @@ export default function AppShell({ session, productions, canCreateProduction = f
                 active={drawerOpen === "admin"}
                 onClick={() => toggleDrawer("admin")}
               />
-              <div className="flex-1" />
+              {aiEntryVisible && <MobileAiAction open={aiPopoutOpen} onClick={toggleAiPopout} />}
+              <div aria-hidden="true" className="flex-1" />
               <MobileTab
                 label="我"
                 symbol={avatarSymbol}
@@ -579,6 +593,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                 symbol="⌂"
                 active={activeModule === ""}
                 href={`/production/${productionId}`}
+                onClick={closeAiPopout}
               />
               <MobileTab
                 label="创作"
@@ -586,6 +601,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                 active={isCreationActive || drawerOpen === "creation"}
                 onClick={() => toggleDrawer("creation")}
               />
+              {aiEntryVisible && <MobileAiAction open={aiPopoutOpen} onClick={toggleAiPopout} />}
               <MobileTab
                 label="制作"
                 symbol="◇"
@@ -603,13 +619,15 @@ export default function AppShell({ session, productions, canCreateProduction = f
         ) : (
           /* Outside production */
           <>
-            <MobileTab label="今日" symbol="⌂" active={isHome} href="/" />
+            <MobileTab label="今日" symbol="⌂" active={isHome} href="/" onClick={closeAiPopout} />
             <MobileTab
               label="项目"
               symbol="◈"
               active={pathname.startsWith("/my/projects")}
               href="/my/projects"
+              onClick={closeAiPopout}
             />
+            {aiEntryVisible && <MobileAiAction open={aiPopoutOpen} onClick={toggleAiPopout} />}
             <MobileTab
               label="概览"
               symbol="≡"
@@ -804,7 +822,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
       <AgentPopout
         open={aiPopoutOpen}
         onClose={() => setAiPopoutOpen(false)}
-        onRequestOpen={() => setAiPopoutOpen(true)}
+        onRequestOpen={openAiPopout}
         productionId={productionId}
         productionName={currentProduction?.name ?? null}
         currentWikiId={currentWikiId}
