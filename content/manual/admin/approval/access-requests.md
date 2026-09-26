@@ -7,7 +7,7 @@ who: 所有成员都能发起申请；审批人按申请自动确定
 tier: all
 platform: [desktop, mobile]
 related: [admin/approval/flow-templates, admin/security/permission-center, start/notifications/notifications]
-updated: 2026-09-24
+updated: 2026-09-27
 ---
 
 ## 这是什么
@@ -17,6 +17,8 @@ updated: 2026-09-24
 入口：项目内左侧栏「资源申请」；或者在被拦住的地方直接点「申请访问」。
 
 页面顶部三个数字：待我审批、我的进行中、已批准。两个页签：**我的申请**、**待审批**；有权限的人还能看到「流程设置」。
+
+手机上申请与审批按卡片排列，点一张卡片展开详情。长列表随整页自然滚动，页面底部会避开导航栏；筛选和展开内容不会被截在面板里。
 
 ![资源申请](/manual/admin/access-requests.png)
 

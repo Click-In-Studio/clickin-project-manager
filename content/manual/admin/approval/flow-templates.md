@@ -5,9 +5,9 @@ summary: 不用默认阶梯，自己画一条审批路径：几个节点、每�
 routes: [access-requests]
 who: 项目所有者与制作人
 tier: all
-platform: [desktop]
+platform: [desktop, mobile]
 related: [admin/approval/access-requests, admin/security/permission-center]
-updated: 2026-09-18
+updated: 2026-09-27
 ---
 
 ## 这是什么
@@ -28,6 +28,9 @@ updated: 2026-09-18
 3. 拖动或用箭头调整顺序；「删除节点」。
 4. 「保存新模版」是草稿。「发布」后即刻对新申请生效（其他已发布的模版会转回草稿）。
 5. 「转回草稿」让项目回到默认阶梯。
+
+> [!📱]
+> 手机上模版清单在流程图上方，点节点后在卡片内展开设置。还没有模版时，提示会完整换行显示；点「新建模版」即可开始。
 
 ## 注意事项
 

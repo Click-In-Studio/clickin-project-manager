@@ -794,7 +794,7 @@ export default function ProductionTasksClient({
       </div>
 
       {/* ── Panel（原型排版）：taskToolbar + 三栏（保留现有设计）── */}
-      <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column" }}>
+      <section className={styles.responsiveContentPanel} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
         {/* segmented（原型：surface-2 槽 + ink 选中块）+ 筛选下拉（长列表友好，左栏已撤） */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
