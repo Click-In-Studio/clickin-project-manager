@@ -6,7 +6,7 @@ routes: [/]
 tier: all
 platform: [desktop, mobile]
 related: [start/interface/glossary, start/notifications/notifications]
-updated: 2026-09-23
+updated: 2026-09-26
 ---
 
 ## 这是什么
@@ -68,6 +68,8 @@ updated: 2026-09-23
 ### 手机 / 窄窗口
 
 左侧栏收起，改为底部四个标签：项目外是 **今日 / 项目 / 概览 / 我**，项目内是 **今日 / 创作 / 制作 / 我**。点「创作」「制作」展开对应的一组菜单。
+
+四个标签中间的圆形 **AI** 按钮打开全屏对话；点右上角的「✕」就回到刚才的内容和位置。免费档项目里不出现这个按钮，四个标签仍然等宽排列；离开项目回到平台页面后，可以继续使用个人 AI 助手。
 
 ![手机宽度下的项目首页与底部标签](/manual/start/mobile-tabs.png)
 

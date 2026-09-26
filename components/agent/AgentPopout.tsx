@@ -584,12 +584,13 @@ export default function AgentPopout({
     <div
       ref={panelRef}
       aria-hidden={!open}
-      className={`fixed right-0 top-16 bottom-0 z-40 hidden w-[440px] max-w-[92vw] flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-[-18px_0_55px_rgba(24,42,42,.18)] transition-transform duration-200 ease-out lg:flex ${
+      inert={!open}
+      className={`agent-mobile-full fixed right-0 top-16 bottom-0 z-40 flex w-[440px] max-w-[92vw] flex-col overflow-hidden border-l border-[var(--line)] bg-[var(--surface)] shadow-[-18px_0_55px_rgba(24,42,42,.18)] transition-transform duration-200 ease-out ${
         open ? "translate-x-0" : "pointer-events-none translate-x-full"
       }`}
     >
       {/* 会话选择——放在 popout 最顶上 */}
-      <div className="relative shrink-0 border-b border-[var(--line)] p-3">
+      <div className="agent-mobile-header relative shrink-0 border-b border-[var(--line)] p-3">
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -650,7 +651,7 @@ export default function AgentPopout({
                   <span className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--success)]" />
                 )}
                 <span className="min-w-0 flex-1 truncate text-[var(--ink)]">{s.title}</span>
-                <span className="hidden shrink-0 gap-1 group-hover:flex">
+                <span className="flex shrink-0 gap-1 opacity-70 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                   <button
                     onClick={(e) => { e.stopPropagation(); renameSession(s.key, s.title); }}
                     className="text-[var(--muted)] hover:text-[var(--ink)]"
@@ -931,7 +932,7 @@ export default function AgentPopout({
       )}
 
       {/* 输入区 */}
-      <div className="shrink-0 border-t border-[var(--line)] p-3">
+      <div className="agent-mobile-composer shrink-0 border-t border-[var(--line)] p-3">
         <div className="flex items-end gap-2">
           <textarea
             ref={textareaRef}
@@ -980,7 +981,7 @@ export default function AgentPopout({
       {prefsOpen && createPortal(
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/30" onClick={() => !prefsBusy && setPrefsOpen(false)}>
           <div
-            className="w-[520px] max-w-[92vw] rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 shadow-xl"
+            className="max-h-[calc(100dvh-2rem)] w-[520px] max-w-[92vw] overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-sm font-semibold text-[var(--ink)]">AI 偏好（个人指令）</p>
