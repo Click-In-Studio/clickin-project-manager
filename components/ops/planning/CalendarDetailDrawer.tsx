@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import styles from "@/components/ops/planning.module.css";
@@ -16,11 +16,12 @@ export type CalendarSelection =
   | { kind: "task"; value: PlanningTask }
   | { kind: "milestone"; value: PlanningMilestone };
 
-export default function CalendarDetailDrawer({ productionId, selection, canEdit, onSaved, onClose }: {
+export default function CalendarDetailDrawer({ productionId, selection, canEdit, onSaved, onBack, onClose }: {
   productionId: string;
   selection: CalendarSelection;
   canEdit: boolean;
   onSaved: (selection: CalendarSelection) => void;
+  onBack?: () => void;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -44,6 +45,11 @@ export default function CalendarDetailDrawer({ productionId, selection, canEdit,
   const [editEnd, setEditEnd] = useState(isoToDatetimeLocal(ownEnd));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
 
   async function save() {
     if (!isEvent && !isTask) return;
@@ -78,7 +84,18 @@ export default function CalendarDetailDrawer({ productionId, selection, canEdit,
   }
 
   return (
-    <aside className={styles.detailDrawer} aria-label={`${title}详情`}>
+    <aside
+      className={styles.detailDrawer}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${title}详情`}
+      onKeyDown={event => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          onClose();
+        }
+      }}
+    >
       <div style={{ minHeight: 94, padding: "20px 22px", borderBottom: "1px solid var(--line)", display: "flex", gap: 14 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ margin: 0, color: "var(--muted)", fontSize: 9, fontWeight: 700, letterSpacing: ".13em", textTransform: "uppercase" }}>
@@ -87,10 +104,13 @@ export default function CalendarDetailDrawer({ productionId, selection, canEdit,
           <h2 style={{ margin: "6px 0 0", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 22, fontWeight: 500, lineHeight: 1.3 }}>{title}</h2>
         </div>
         <div style={{ display: "flex", gap: 7, flexShrink: 0 }}>
+          {onBack && !editing && (
+            <button type="button" onClick={onBack} className={styles.drawerTextButton}>返回当天</button>
+          )}
           {canEdit && !editing && (
             <button type="button" onClick={() => setEditing(true)} className={styles.drawerTextButton}>编辑</button>
           )}
-          <button type="button" aria-label="关闭详情" onClick={onClose} style={{ width: 31, height: 31, border: "1px solid var(--line)", borderRadius: "50%", background: "transparent", color: "var(--muted)", fontSize: 18, cursor: "pointer" }}>×</button>
+          <button ref={closeButtonRef} type="button" aria-label="关闭详情" onClick={onClose} className={styles.drawerCloseButton}>×</button>
         </div>
       </div>
       <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 15 }}>
