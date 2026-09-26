@@ -3,6 +3,9 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Extension, type Editor } from "@tiptap/core";
+import { preserveMarkdownSource } from "@/lib/editor/table-source";
+import type { Node as PmNode } from "@tiptap/pm/model";
+import { normalizeTableHtml } from "@/lib/editor/table-html";
 import { Markdown } from "tiptap-markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Mention } from "@tiptap/extension-mention";
@@ -440,6 +443,7 @@ export default function SmartTextarea({
   const [slashPickerMode, setSlashPickerMode] = useState<SlashPickerMode | null>(null);
   const dropRef = useRef<DropState>(null);
   const lastEmittedRef = useRef(value);
+  const sourceDocRef = useRef<PmNode | null>(null);
 
   // Keep mutable refs so suggestion callbacks always see latest values
   const memberMentionRef = useRef(memberMention);
@@ -757,7 +761,7 @@ export default function SmartTextarea({
     immediatelyRender: false,
     editable: !readOnly,
     extensions,
-    content: normalizeWikiDialect(value),
+    content: normalizeTableHtml(normalizeWikiDialect(value)),
     autofocus: autoFocus,
     editorProps: {
       attributes: {
@@ -890,6 +894,7 @@ export default function SmartTextarea({
       } catch { /* selection 在非常规位置时忽略 */ }
     },
     onCreate: ({ editor }) => {
+      sourceDocRef.current = editor.state.doc;
       if (onInitialRoundTripRef.current) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onInitialRoundTripRef.current((editor.storage as any).markdown.getMarkdown());
@@ -901,7 +906,11 @@ export default function SmartTextarea({
       if (transaction.getMeta("wikiLabelRefresh")) return;
       if (readOnly) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const text: string = (editor.storage as any).markdown.getMarkdown();
+      const markdownStorage = (editor.storage as any).markdown;
+      const text: string = sourceDocRef.current
+        ? preserveMarkdownSource(lastEmittedRef.current, sourceDocRef.current, editor.state.doc, content => markdownStorage.serializer.serialize(content))
+        : markdownStorage.getMarkdown();
+      sourceDocRef.current = editor.state.doc;
       if (text !== lastEmittedRef.current) {
         lastEmittedRef.current = text;
         onChange(text);
@@ -948,9 +957,10 @@ export default function SmartTextarea({
       return;
     }
     lastEmittedRef.current = value;
-    const newContent = normalizeWikiDialect(value);
+    const newContent = normalizeTableHtml(normalizeWikiDialect(value));
     const { from, to } = editor.state.selection;
     editor.commands.setContent(newContent, { emitUpdate: false });
+    sourceDocRef.current = editor.state.doc;
     // 协作合并回灌时保留本端选区（钳到新文档尺寸内）
     const max = editor.state.doc.content.size;
     editor.commands.setTextSelection({ from: Math.min(from, max), to: Math.min(to, max) });
@@ -966,7 +976,8 @@ export default function SmartTextarea({
       if (pending == null || editor.isDestroyed) return;
       if (pending === lastEmittedRef.current) return;
       lastEmittedRef.current = pending;
-      editor.commands.setContent(normalizeWikiDialect(pending), { emitUpdate: false });
+      editor.commands.setContent(normalizeTableHtml(normalizeWikiDialect(pending)), { emitUpdate: false });
+      sourceDocRef.current = editor.state.doc;
     };
     document.addEventListener("dragend", flush);
     return () => document.removeEventListener("dragend", flush);

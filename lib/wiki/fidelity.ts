@@ -1,3 +1,5 @@
+import { normalizeTableHtml } from "../editor/table-html";
+import { transformRichTables, type MarkdownNode, type TableCell } from "../editor/table-dialect";
 // 保真检测 —— 判断「用富文本打开再保存」会不会弄丢正文里的东西。
 //
 // ## 为什么不比字面
@@ -39,6 +41,7 @@ import remarkGfm from "remark-gfm";
 import { REMARK_CJK_PLUGINS } from "../editor/remark-cjk-friendly";
 import { canonicalizeInlineStyleTags } from "../editor/inline-style-dialect";
 import { diffLines } from "diff";
+import { parseCalloutMarker } from "../editor/tiptap-callout";
 
 /** mdast 节点（只声明我们用得到的字段） */
 type MdNode = {
@@ -63,11 +66,17 @@ function collapse(s: string): string {
  * 一起丢，比较就永远相等，保真锁形同虚设。
  */
 export function contentSignature(markdown: string): string[] {
+  markdown = normalizeTableHtml(markdown);
   // CJK 侧翼规则与编辑器 / 只读侧同源（#674）：不挂的话 `甲**乙**丙` 两侧签名不一致
   const tree = unified().use(remarkParse).use(remarkGfm).use([...REMARK_CJK_PLUGINS]).parse(markdown) as unknown as MdNode;
+  transformRichTables(tree as unknown as MarkdownNode, markdown);
   const out: string[] = [];
 
   const walk = (node: MdNode) => {
+    if (node.type === "richTable" || node.type === "table") {
+      out.push(`table:${JSON.stringify(tableSignature(node as unknown as MarkdownNode))}`);
+      return;
+    }
     switch (node.type) {
       case "text":
       case "inlineCode": {
@@ -105,6 +114,41 @@ export function contentSignature(markdown: string): string[] {
 
   walk(tree);
   return out;
+}
+
+/** 格子顺序与块结构参与比较，交换两格或丢跨度不能再被多重集掩盖。 */
+function tableSignature(table: MarkdownNode): unknown {
+  const clean = (node: MarkdownNode): unknown => {
+    if (node.type === "richTable" || node.type === "table") return tableSignature(node);
+    if (node.type === "blockquote") {
+      const first = node.children?.[0];
+      const text = first?.children?.[0];
+      const callout = text?.type === "text" ? parseCalloutMarker(text.value ?? "") : null;
+      if (callout) {
+        const rest = (text!.value ?? "").slice(callout.length).replace(/^\n/, "");
+        const inline = [...(rest ? [{ ...text!, value: rest }] : []), ...(first!.children?.slice(1) ?? [])];
+        const blocks = [...(inline.length ? [{ ...first!, children: inline }] : []), ...(node.children?.slice(1) ?? [])];
+        return { type: "callout", emoji: callout.emoji, color: callout.color, children: blocks.map(clean) };
+      }
+    }
+    const out: Record<string, unknown> = { type: node.type };
+    for (const key of ["value", "url", "alt", "lang", "depth", "ordered", "start", "checked"]) {
+      const value = node[key];
+      if (value != null) out[key] = key === "value" && node.type !== "code" && typeof value === "string" ? collapse(value) : value;
+    }
+    if (node.children) out.children = node.children.map(clean);
+    return out;
+  };
+  return (table.children ?? []).map((row, i) => (row.children ?? []).map((cell, j) => {
+    const attrs = cell.tableCell as TableCell | undefined;
+    return {
+      header: attrs?.header ?? i === 0,
+      colspan: attrs?.colspan ?? 1, rowspan: attrs?.rowspan ?? 1,
+      colwidth: attrs?.colwidth?.some(Boolean) ? attrs.colwidth : null,
+      align: attrs?.align ?? (table.align as (string | null)[] | undefined)?.[j] ?? null,
+      content: attrs ? cell.children?.map(clean) : [clean({ type: "paragraph", children: cell.children })],
+    };
+  }));
 }
 
 export type FidelityDiff = {

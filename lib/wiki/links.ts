@@ -1,3 +1,5 @@
+import { markdownOutsideCode } from "../editor/markdown-code";
+import { normalizeTableHtml } from "../editor/table-html";
 import { getPool } from "../pg";
 import { canPublishAsset } from "../asset/perm";
 import { uid } from "../asset/db";
@@ -27,11 +29,10 @@ const WIKI_TOKEN_RE = /\[#wiki:([0-9a-fA-F-]{36})\]/g;
 const CM_HREF_LEGACY_RE = /\(\/__cm__([a-z_.]+):([^):?&\s]+)/g;
 // code fence / 行内码里的链接语法是"关于语法的文档"不是真引用（MindWeave
 // protectCodeSpans 同款教训）——提取前剥除代码上下文
-const CODE_SPAN_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
 
 /** 正文 → 引用边（全 kind；block.<mode> 归一为 block，wiki id 归一小写）。 */
 export function extractMentionEdges(body: string): MentionEdge[] {
-  const stripped = body.replace(CODE_SPAN_RE, "");
+  const stripped = markdownOutsideCode(normalizeTableHtml(body));
   const seen = new Set<string>();
   const out: MentionEdge[] = [];
   const add = (entityType: string, entityId: string) => {
@@ -63,7 +64,7 @@ const EMBED_ASSET_LEGACY_RE = /!\[[^\]\n]*\]\(\/__cm__asset:([^):?&\s]+)/g;
 
 /** 正文 → 嵌入的 asset id 集合（代码上下文剥除，与 extractMentionEdges 同规）。 */
 export function extractEmbedAssetIds(body: string): string[] {
-  const stripped = body.replace(CODE_SPAN_RE, "");
+  const stripped = markdownOutsideCode(normalizeTableHtml(body));
   const seen = new Set<string>();
   for (const m of stripped.matchAll(EMBED_ASSET_RE)) seen.add(m[1]);
   for (const m of stripped.matchAll(EMBED_ASSET_LEGACY_RE)) seen.add(m[1]);

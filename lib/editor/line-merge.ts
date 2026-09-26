@@ -9,6 +9,8 @@
  * 与已采纳 hunk 重叠的对侧 hunk 丢弃。
  */
 import { diffArrays } from "diff";
+import { tableMergeUnits, mergeIndependentTableCells } from "./table-merge";
+import { richTableRanges } from "./table-dialect";
 
 type Hunk = {
   baseStart: number;   // base 行号（0-based，含）
@@ -55,14 +57,24 @@ export function mergeLines(base: string, mine: string, theirs: string): string {
   if (base === mine) return theirs;
   if (base === theirs) return mine;
 
-  const baseLines = base.split("\n");
-  const mineHunks = toHunks(baseLines, mine.split("\n"));
-  const theirHunks = toHunks(baseLines, theirs.split("\n"));
+  const baseLines = tableMergeUnits(base);
+  const mineHunks = toHunks(baseLines, tableMergeUnits(mine));
+  const theirHunks = toHunks(baseLines, tableMergeUnits(theirs));
 
   // mine 优先：theirs 中与任一 mine hunk 重叠的丢弃
   const kept: Array<Hunk & { side: "mine" | "theirs" }> = mineHunks.map(h => ({ ...h, side: "mine" as const }));
   for (const th of theirHunks) {
-    if (!mineHunks.some(mh => overlaps(mh, th))) kept.push({ ...th, side: "theirs" });
+    const collisions = kept.filter(mh => mh.side === "mine" && overlaps(mh, th));
+    if (!collisions.length) kept.push({ ...th, side: "theirs" });
+    else if ([...baseLines.slice(th.baseStart, th.baseEnd), ...th.lines, ...collisions.flatMap(h => h.lines)].some(s => richTableRanges(s).length)) {
+      const mh = collisions[0];
+      const merged = collisions.length === 1 && mh.baseStart === th.baseStart && mh.baseEnd === th.baseEnd
+        ? mergeIndependentTableCells(baseLines.slice(mh.baseStart, mh.baseEnd).join("\n"), mh.lines.join("\n"), th.lines.join("\n")) : null;
+      if (merged != null) mh.lines = [merged];
+      else if (mh.lines.join("\n") !== th.lines.join("\n")) {
+        mh.lines = [...mh.lines, "", "表格同时被修改，以下保留另一份内容，请核对后取舍：", "", ...th.lines];
+      }
+    }
   }
   kept.sort((a, b) => a.baseStart - b.baseStart || a.baseEnd - b.baseEnd
     // 同锚点纯插入按 mine 先（稳定且偏向保存者）

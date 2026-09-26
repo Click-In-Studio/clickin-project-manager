@@ -1,3 +1,5 @@
+import { mapMarkdownOutsideCode } from "../../editor/markdown-code";
+import { normalizeTableHtml } from "@/lib/editor/table-html";
 // wiki.* 项目工具——production.* 族的一部分（门 = 成员资格 + 实例级可见性，
 // 复用 production-tools.ts 的 resolveProductionActor/DENIED_NOT_MEMBER）。
 // 语法方言声明见 ./wiki-link-syntax（教会模型别瞎发明 [[标题]] 语法）。
@@ -171,10 +173,10 @@ function resolveBodyLinksForDisplay(body: string, titleMap: Map<string, string |
     const title = titleMap.get(lower);
     return title ? `[[${title}]]` : "[[已删除的文档]]";
   };
-  return body
+  return mapMarkdownOutsideCode(body, segment => segment
     .replace(WIKI_MD_LINK_RE, (m, id) => sub(m, id))
     .replace(WIKI_MD_LINK_V1_RE, (m, id) => sub(m, id))
-    .replace(WIKI_TOKEN_RE, (m, id) => sub(m, id));
+    .replace(WIKI_TOKEN_RE, (m, id) => sub(m, id)));
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -201,7 +203,7 @@ export async function wikiRead(userId: string, productionId: string, wikiId: str
 
   const targets = extractWikiLinkTargets(doc.body);
   const titleMap = await resolveLinkTitles(targets, productionId);
-  const body = resolveBodyLinksForDisplay(doc.body, titleMap, new Set(targets));
+  const body = resolveBodyLinksForDisplay(normalizeTableHtml(doc.body), titleMap, new Set(targets));
   const shell = await getNodeByWikiId(wikiId);
 
   const lines = [

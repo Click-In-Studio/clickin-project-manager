@@ -882,3 +882,19 @@ span[data-stage-inline] {
     cursor: not-allowed;
   }
 }
+
+/* 富表格保留列宽，宽表在阅读区内滚动；格内块仍沿用文档排版。 */
+.wiki-table-scroll {
+  overflow-x: auto;
+  margin-block: 1em;
+}
+.wiki-table-scroll > table { margin-block: 0; }
+.wiki-rich-table { table-layout: fixed; }
+.wiki-rich-table :is(td, th) {
+  vertical-align: top;
+  border: 1px solid var(--color-zinc-200);
+  padding: 0.5em;
+  overflow-wrap: anywhere;
+}
+.wiki-rich-table :is(td, th) > :first-child { margin-top: 0; }
+.wiki-rich-table :is(td, th) > :last-child { margin-bottom: 0; }

@@ -1,3 +1,5 @@
+import { mapMarkdownOutsideCode, markdownOutsideCode } from "../../editor/markdown-code";
+import { richTableProblems } from "../../editor/table-dialect";
 // 正文方言校验 + [[标题]] 反解（#333 T2 / P1）。
 //
 // 为什么需要反解而不是一律拒绝：wiki_read 给模型看的正文里，id 链接被换成
@@ -16,8 +18,6 @@
 import { parseCanonicalOpenTag, TEXT_BG_COLORS, TEXT_FG_COLORS } from "../../editor/inline-style-dialect";
 import { CONTENT_MENTION_KINDS } from "../../editor/mention-types";
 
-// 与 lib/wiki/links.ts CODE_SPAN_RE 同构（单捕获组 → split 后奇数下标是代码段）
-const CODE_SPAN_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
 
 /** 显示形态 [[标题]]。标题里不含方括号与换行（显示转换生成的形态即如此）。 */
 const DISPLAY_LINK_RE = /\[\[([^[\]\n]+)\]\]/g;
@@ -85,17 +85,11 @@ const BLOCK_ANCHOR_RE = /\^([A-Za-z0-9_-]{2,32})[ \t]*$/gm;
 
 /** 对非代码段应用变换，代码段原样保留。 */
 function mapNonCode(body: string, fn: (seg: string) => string): string {
-  return body
-    .split(CODE_SPAN_RE)
-    .map((seg, i) => (i % 2 === 1 ? seg : fn(seg)))
-    .join("");
+  return mapMarkdownOutsideCode(body, fn);
 }
 
 function nonCodeText(body: string): string {
-  return body
-    .split(CODE_SPAN_RE)
-    .filter((_seg, i) => i % 2 === 0)
-    .join("\n");
+  return markdownOutsideCode(body);
 }
 
 /** 收集正文（非代码段）里出现的全部 [[标题]]，供调用方查库建映射。 */
@@ -149,6 +143,7 @@ export function restoreAndCheckBody(
     }),
   );
 
+  problems.push(...richTableProblems(restored));
   const scannable = nonCodeText(restored);
   if (LEGACY_TOKEN_RE.test(scannable)) {
     problems.push("正文含已退役的裸 token 形态 [#wiki:<uuid>]，请改用 [#](/__cm__/wiki/<uuid>)。");
