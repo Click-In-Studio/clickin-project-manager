@@ -460,13 +460,9 @@ export default function EventsClient({
                 <Fragment key={n}>
                   {i > 0 && <i className={responsive.flowArrow}>→</i>}
                   <div className={responsive.flowCard}>
-                    <span style={{
-                      width: 32, height: 32, borderRadius: "50%", gridRow: "1 / 3",
-                      display: "grid", placeItems: "center",
-                      background: "var(--ink)", color: "#fff", fontSize: 10,
-                    }}>{n}</span>
-                    <b style={{ fontSize: 11, color: "var(--ink)", wordBreak: "keep-all" }}>{t}</b>
-                    <small style={{ color: "var(--muted)", fontSize: 9, marginTop: 3, lineHeight: 1.45 }}>{s}</small>
+                    <span className={responsive.flowNumber}>{n}</span>
+                    <b className={responsive.flowTitle}>{t}</b>
+                    <small className={responsive.flowDescription}>{s}</small>
                   </div>
                 </Fragment>
               ))}
