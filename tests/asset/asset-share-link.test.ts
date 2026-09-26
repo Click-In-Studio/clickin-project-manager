@@ -148,11 +148,19 @@ describe("分享管理路由权限与闭环", () => {
     const listed = await listResponse.json() as { links: { id: string }[] };
     expect(listed.links.map(link => link.id)).toContain(created.link.id);
 
-    const deleted = await manageDELETE(
-      manageReq("DELETE", ownerId),
-      { params: Promise.resolve({ id: prodId, assetId, linkId: created.link.id }) },
-    );
-    expect(deleted.status).toBe(200);
+    // 归档只冻结新增写入，不得锁死安全收口；旧链接仍可列出并逐条撤销。
+    await getPool().query("UPDATE production SET archived_at = now() WHERE id = $1", [prodId]);
+    try {
+      const listedWhileArchived = await manageGET(manageReq("GET", ownerId), manageCtx());
+      expect(listedWhileArchived.status).toBe(200);
+      const deleted = await manageDELETE(
+        manageReq("DELETE", ownerId),
+        { params: Promise.resolve({ id: prodId, assetId, linkId: created.link.id }) },
+      );
+      expect(deleted.status).toBe(200);
+    } finally {
+      await getPool().query("UPDATE production SET archived_at = NULL WHERE id = $1", [prodId]);
+    }
     expect((await getAssetShareLinkAccess(created.link.token)).kind).toBe("invalid");
   });
 });

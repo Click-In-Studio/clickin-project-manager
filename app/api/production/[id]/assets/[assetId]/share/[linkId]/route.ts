@@ -14,7 +14,6 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
-  if (access.isArchived) return Response.json({ error: "项目已归档" }, { status: 403 });
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) {
     return Response.json({ error: "资产不存在" }, { status: 404 });
