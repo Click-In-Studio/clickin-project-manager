@@ -15,7 +15,11 @@ import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Markdown } from "tiptap-markdown";
 import { Callout } from "@/lib/editor/tiptap-callout";
 import { Column, ColumnGroup } from "@/lib/editor/tiptap-columns";
-import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor/editor-slash-commands";
+import {
+  SLASH_COMMANDS,
+  searchSlashCommands,
+  type SlashCommand,
+} from "@/lib/editor/editor-slash-commands";
 import { TURN_INTO } from "@/lib/editor/editor-block-ops";
 import { BLOCK_TYPES } from "@/lib/editor/editor-block-types";
 
@@ -35,6 +39,11 @@ function makeEditor(content: string) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const md = (e: Editor) => (e.storage as any).markdown.getMarkdown() as string;
+type EditorSlashCommand = Extract<SlashCommand, { kind: "editor" }>;
+const EDITOR_COMMANDS = SLASH_COMMANDS.filter(
+  (command): command is EditorSlashCommand => command.kind === "editor",
+);
+const PICKER_COMMANDS = SLASH_COMMANDS.filter(command => command.kind === "picker");
 
 describe("searchSlashCommands", () => {
   it("空查询给全表——slash 菜单是发现入口，不是搜索框", () => {
@@ -50,7 +59,7 @@ describe("searchSlashCommands", () => {
 
   it("中文子串命中", () => {
     expect(searchSlashCommands("分栏").map(c => c.id)).toContain("columns");
-    expect(searchSlashCommands("标题").map(c => c.id)).toEqual(["h2", "h3"]);
+    expect(searchSlashCommands("标题").map(c => c.id)).toEqual(["h1", "h2", "h3"]);
   });
 
   it("拼音命中（复用成员补全那套 pinyin-pro）", () => {
@@ -62,14 +71,33 @@ describe("searchSlashCommands", () => {
     expect(searchSlashCommands("zzzz")).toEqual([]);
   });
 
+  it("引用与嵌入是二级面板指令；无 production 语境时可整组拿掉", () => {
+    expect(PICKER_COMMANDS.map(command => command.id)).toEqual([
+      "referencePicker", "embedAssetPicker",
+    ]);
+    expect(searchSlashCommands("yinyong").map(command => command.id)).toContain("referencePicker");
+    expect(searchSlashCommands("sucai").map(command => command.id)).toContain("embedAssetPicker");
+    expect(searchSlashCommands("", { includePickers: false }).every(command => command.kind === "editor")).toBe(true);
+  });
+
   it("id 不重复（菜单按 id 做 key，重了会静默丢项）", () => {
     expect(new Set(SLASH_COMMANDS.map(c => c.id)).size).toBe(SLASH_COMMANDS.length);
+  });
+
+  it("菜单按文字、列表、内容块、布局、外部内容排列", () => {
+    expect(SLASH_COMMANDS.map(command => command.id)).toEqual([
+      "h1", "h2", "h3",
+      "bulletList", "orderedList", "taskList",
+      "blockquote", "callout", "codeBlock",
+      "horizontalRule", "table", "columns",
+      "referencePicker", "embedAssetPicker",
+    ]);
   });
 });
 
 describe("插入菜单与转换菜单共用同一张展示定式表", () => {
   it("两边都从 BLOCK_TYPES 取图标与名字，没有本地硬写", () => {
-    for (const c of SLASH_COMMANDS) {
+    for (const c of EDITOR_COMMANDS) {
       expect(c.label).toBe(BLOCK_TYPES[c.id].label);
       expect(c.icon).toBe(BLOCK_TYPES[c.id].icon);
       expect(c.hint).toBe(BLOCK_TYPES[c.id].hint);
@@ -84,7 +112,7 @@ describe("插入菜单与转换菜单共用同一张展示定式表", () => {
   // 长得不一样，会让人以为是两个东西
   it("同一个 id 在两个菜单里字面相同", () => {
     const turnById = new Map(TURN_INTO.map(o => [o.id, o]));
-    const shared = SLASH_COMMANDS.filter(c => turnById.has(c.id));
+    const shared = EDITOR_COMMANDS.filter(c => turnById.has(c.id));
     expect(shared.length).toBeGreaterThan(0);
     for (const c of shared) {
       const o = turnById.get(c.id)!;
@@ -93,13 +121,13 @@ describe("插入菜单与转换菜单共用同一张展示定式表", () => {
   });
 
   it("两边的 id 都在定式表里（新增类型不许绕过它）", () => {
-    for (const id of [...SLASH_COMMANDS.map(c => c.id), ...TURN_INTO.map(o => o.id)]) {
+    for (const id of [...EDITOR_COMMANDS.map(c => c.id), ...TURN_INTO.map(o => o.id)]) {
       expect(BLOCK_TYPES[id]).toBeDefined();
     }
   });
 
   it("各自独有的 id 是有理由的，不是漏配", () => {
-    const slashIds = new Set<string>(SLASH_COMMANDS.map(c => c.id));
+    const slashIds = new Set<string>(EDITOR_COMMANDS.map(c => c.id));
     const turnIds = new Set<string>(TURN_INTO.map(o => o.id));
     // 「插入一个段落」没有意义——你本来就在段落里
     expect(turnIds.has("paragraph")).toBe(true);
@@ -116,7 +144,7 @@ describe("指令落地形态 roundtrip", () => {
   /** 在 "foo" 段落末尾跑指令，返回序列化结果 */
   function runCommand(id: string): string {
     const editor = makeEditor("foo");
-    const cmd = SLASH_COMMANDS.find(c => c.id === id)!;
+    const cmd = EDITOR_COMMANDS.find(c => c.id === id)!;
     const end = editor.state.doc.content.size - 1;
     editor.commands.setTextSelection(end);
     cmd.run(editor, { from: end, to: end }); // 空 range=查询串已被用户删净的等价情形
@@ -133,7 +161,7 @@ describe("指令落地形态 roundtrip", () => {
     return out;
   }
 
-  it.each(SLASH_COMMANDS.map(c => [c.id, c.label]))(
+  it.each(EDITOR_COMMANDS.map(c => [c.id, c.label]))(
     "%s（%s）落地形态可逐字往返",
     (id) => {
       const produced = runCommand(id as string);
@@ -149,7 +177,8 @@ describe("指令落地形态 roundtrip", () => {
     expect(roundtrip(bad)).not.toBe(bad);
   });
 
-  it("h2 / h3 落标准 ATX 标题", () => {
+  it("h1 / h2 / h3 落标准 ATX 标题", () => {
+    expect(runCommand("h1")).toBe("# foo");
     expect(runCommand("h2")).toBe("## foo");
     expect(runCommand("h3")).toBe("### foo");
   });

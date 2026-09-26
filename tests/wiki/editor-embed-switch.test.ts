@@ -15,6 +15,7 @@ import {
   chipMenuItems, mentionToEmbedTx, embedToMentionTx, embedToMentionReason,
   type EmbedCheck,
 } from "@/lib/editor/editor-embed-switch";
+import { insertReferenceSearchResult } from "@/components/editor/ReferencePicker";
 
 function makeEditor(md: string) {
   return new Editor({
@@ -127,6 +128,50 @@ describe("嵌入 → 引用", () => {
   });
 });
 
+describe("slash 二级面板落地", () => {
+  it("引用结果落既有 contentMention 方言，编辑期标签不写进 markdown", () => {
+    const e = makeEditor("");
+    expect(insertReferenceSearchResult(e, {
+      kind: "wiki", id: "00000000-0000-4000-8000-000000000692", label: "灯光设计",
+    }, "reference")).toBe(true);
+    expect(md(e)).toContain("[#](/__cm__/wiki/00000000-0000-4000-8000-000000000692)");
+    const chip = e.state.doc.nodeAt(firstPos(e, "contentMention"))!;
+    expect(chip.attrs.label).toBe("灯光设计");
+    expect(chip.attrs.kind).toBe("wiki");
+    e.destroy();
+  });
+
+  it("嵌入素材落既有 image 方言；非素材结果拒绝落地", () => {
+    const e = makeEditor("");
+    expect(insertReferenceSearchResult(e, {
+      kind: "asset", id: "ast_692", label: "舞台总图",
+    }, "embed")).toBe(true);
+    expect(md(e)).toBe("![舞台总图](/__cm__/asset/ast_692)");
+
+    const before = md(e);
+    expect(insertReferenceSearchResult(e, {
+      kind: "scene", id: "scene_1", label: "#1 开场",
+    }, "embed")).toBe(false);
+    expect(md(e)).toBe(before);
+    e.destroy();
+  });
+
+  it("段落中间打开 slash 面板后插入块，不吞前后正文", () => {
+    const e = makeEditor("前文后文");
+    e.commands.setTextSelection(3); // paragraph 起点 1；光标夹在「前文｜后文」
+    expect(insertReferenceSearchResult(e, {
+      kind: "asset", id: "ast_middle", label: "中间素材",
+    }, "embed")).toBe(true);
+    const out = md(e);
+    expect(out).toContain("前文");
+    expect(out).toContain("![中间素材](/__cm__/asset/ast_middle)");
+    expect(out).toContain("后文");
+    expect(out.indexOf("前文")).toBeLessThan(out.indexOf("![中间素材]"));
+    expect(out.indexOf("![中间素材]")).toBeLessThan(out.indexOf("后文"));
+    e.destroy();
+  });
+});
+
 describe("chip 悬浮条的项表：各 kind 同一套、灰掉必有原因", () => {
   const CHECKS: EmbedCheck[] = ["unknown", "checking", "yes", "no", "failed"];
 
@@ -172,6 +217,14 @@ describe("接线棘轮", () => {
     expect(src).toContain("navigateToMention(pid, node.attrs as ContentMentionAttrs)");
     // 旧的内联跳转逻辑不许残留（两处各写一份就会各自漂）
     expect(src.match(/mention-resolve`/g)?.length ?? 0).toBe(1);
+  });
+
+  it("SmartTextarea：slash picker 先删查询串，再打开独立二级面板", () => {
+    const src = readFileSync("components/editor/SmartTextarea.tsx", "utf8");
+    expect(src).toContain("command.kind === \"editor\"");
+    expect(src).toContain("deleteRange(range)");
+    expect(src).toContain("setSlashPickerMode(command.picker)");
+    expect(src).toMatch(/<ReferencePicker[\s\S]*mode=\{slashPickerMode\}/);
   });
 
   it("MentionChipMenu：项表来自 chipMenuItems，灰化用 aria-disabled + title", () => {

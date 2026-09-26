@@ -121,6 +121,7 @@ function option(id: BlockTypeId, run: TurnIntoOption["run"]): TurnIntoOption {
 
 export const TURN_INTO: TurnIntoOption[] = [
   option("paragraph", (e, p) => e.chain().focus().setTextSelection(p).setParagraph().run()),
+  option("h1", (e, p) => e.chain().focus().setTextSelection(p).setHeading({ level: 1 }).run()),
   option("h2", (e, p) => e.chain().focus().setTextSelection(p).setHeading({ level: 2 }).run()),
   option("h3", (e, p) => e.chain().focus().setTextSelection(p).setHeading({ level: 3 }).run()),
   option("bulletList", (e, p) => e.chain().focus().setTextSelection(p).toggleBulletList().run()),
@@ -341,6 +342,9 @@ export const FORMAT_ACTIONS: FormatAction[] = [
   format("paragraph",
     e => { e.chain().setParagraph().run(); },
     e => e.isActive("paragraph")),
+  format("h1",
+    e => { e.chain().setHeading({ level: 1 }).run(); },
+    e => e.isActive("heading", { level: 1 })),
   format("h2",
     e => { e.chain().setHeading({ level: 2 }).run(); },
     e => e.isActive("heading", { level: 2 })),

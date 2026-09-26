@@ -18,6 +18,7 @@ import {
   turnInto, canTurnInto, isColumnGroup, changeColumnCount, equalizeColumns,
   findColumnGroup, selectColumnGroup,
   findCallout, setCalloutColor, setCalloutEmoji,
+  FORMAT_ACTIONS, currentFormat,
 } from "@/lib/editor/editor-block-ops";
 import { ColumnEditing, isEmptyColumn } from "@/lib/editor/tiptap-column-editing";
 
@@ -165,11 +166,11 @@ describe("移动 / 复制 / 删除", () => {
 });
 
 describe("转换类型", () => {
-  it("段落转二级标题", () => {
+  it("段落可转一级标题", () => {
     const e = makeEditor("甲\n\n乙");
     selectTopBlock(e, 0);
-    expect(turnInto(e, "h2")).toBe(true);
-    expect(md(e)).toBe("## 甲\n\n乙");
+    expect(turnInto(e, "h1")).toBe(true);
+    expect(md(e)).toBe("# 甲\n\n乙");
     e.destroy();
   });
 
@@ -221,6 +222,18 @@ describe("转换类型", () => {
     const e = makeEditor("甲");
     selectTopBlock(e, 0);
     expect(turnInto(e, "nope")).toBe(false);
+    e.destroy();
+  });
+});
+
+describe("段落格式菜单", () => {
+  it("一级标题可选，并能识别当前一级标题", () => {
+    expect(FORMAT_ACTIONS.map(action => action.id).slice(0, 4)).toEqual([
+      "paragraph", "h1", "h2", "h3",
+    ]);
+    const e = makeEditor("# 甲");
+    e.commands.setTextSelection(2);
+    expect(currentFormat(e).id).toBe("h1");
     e.destroy();
   });
 });

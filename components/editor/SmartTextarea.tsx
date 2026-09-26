@@ -38,7 +38,11 @@ import { ColumnEditing } from "@/lib/editor/tiptap-column-editing";
 import { ColumnResize } from "@/lib/editor/tiptap-column-resize";
 import { TableKeymap } from "@/lib/editor/tiptap-table-keymap";
 import { MarkdownTable } from "@/lib/editor/tiptap-table-markdown";
-import { SLASH_COMMANDS, searchSlashCommands } from "@/lib/editor/editor-slash-commands";
+import {
+  SLASH_COMMANDS,
+  searchSlashCommands,
+  type SlashPickerMode,
+} from "@/lib/editor/editor-slash-commands";
 import { DROP_INDICATOR_OPTIONS } from "@/lib/editor/editor-drop-indicator";
 import { readDragRef, dragRefMentionAttrs } from "@/lib/editor/editor-drop-payload";
 import { navigateToMention } from "@/lib/editor/mention-navigate";
@@ -52,6 +56,7 @@ import TaskSyncMenu from "@/components/editor/TaskSyncMenu";
 import MentionChipMenu from "@/components/editor/MentionChipMenu";
 import TableTools from "@/components/editor/TableTools";
 import BlockTypeIcon from "@/components/editor/BlockTypeIcon";
+import ReferencePicker from "@/components/editor/ReferencePicker";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -68,7 +73,7 @@ export type DropPlugin = {
   hideWhenEmpty?: boolean;
   search: (query: string) => Promise<DropItem[]> | DropItem[];
   renderItem: (item: DropItem, active: boolean) => React.ReactNode;
-  format: (item: DropItem) => string;
+  format?: (item: DropItem) => string;
   onPick?: (item: DropItem) => void;
   toNode?: (item: DropItem) => Record<string, unknown>;
 };
@@ -178,16 +183,15 @@ export function wikiLinkDropPlugin(productionId: string): DropPlugin {
   };
 }
 
-// ── Factory: /slash 布局指令 ──────────────────────────────────────────────────
-// 语法大纲 §6.2 的第四个指令源。与前三个的差异**只有两处**：候选从哪来
-// （静态表，不是网络查询）、选中后干什么（跑编辑器命令，不是插引用节点）。
-// 框架本身零改动——这正是「四者是同一个框架的四个注册项」的验证。
+// ── Factory: /slash 指令 ──────────────────────────────────────────────────────
+// 语法大纲 §6.2 的第四个指令源。第一层候选来自静态表；布局项立即执行，引用类
+// 项打开二级搜索面板。没有 production 语境的小编辑框只展示布局项。
 
-export function slashCommandPlugin(): DropPlugin {
+export function slashCommandPlugin(includePickers = false): DropPlugin {
   return {
     trigger: "/",
     hideWhenEmpty: true,
-    search: (query) => searchSlashCommands(query).map(c => ({
+    search: (query) => searchSlashCommands(query, { includePickers }).map(c => ({
       id: c.id, label: c.label, secondary: c.hint,
     })),
     renderItem: (item, active) => {
@@ -202,8 +206,6 @@ export function slashCommandPlugin(): DropPlugin {
     },
     // 指令不落文本形态：选中即执行命令，查询串被 deleteRange 吃掉（§6.1——
     // 「查询」与「结果」的关系，不是「简写」与「展开」）
-    format: () => "",
-    toNode: (item) => ({ id: item.id }),
   };
 }
 
@@ -435,6 +437,7 @@ export default function SmartTextarea({
   onCursorChangeRef.current = onCursorChange;
   const lastCursorRef = useRef<{ blockIndex: number; offset: number } | null>(null);
   const [drop, setDrop] = useState<DropState>(null);
+  const [slashPickerMode, setSlashPickerMode] = useState<SlashPickerMode | null>(null);
   const dropRef = useRef<DropState>(null);
   const lastEmittedRef = useRef(value);
 
@@ -465,7 +468,7 @@ export default function SmartTextarea({
   }
   // 布局指令源随富文本能力走：markdown 面才有分栏/表格/callout 可插
   if (markdown && !readOnly) {
-    derivedPlugins.push(slashCommandPlugin());
+    derivedPlugins.push(slashCommandPlugin(!!contentMention));
   }
   const allPlugins = [...derivedPlugins, ...extraPlugins];
   allPluginsRef.current = allPlugins;
@@ -651,13 +654,20 @@ export default function SmartTextarea({
       },
     });
 
-    // 指令面：选中即执行命令，查询串（`/fenlan`）由命令自己的 deleteRange 吃掉，
-    // 正文不留痕迹。这与前三个触发器插入节点是同一个位置的不同动作
+    // 指令面：布局项选中即执行命令；引用类项先删查询串，再打开二级搜索面板。
+    // 两类都不把 `/查询串` 留进正文。
     const slashTriggerCfg = SlashTrigger.configure({
       suggestion: {
         ...makeSuggestion("/", hasSlashPlugin),
         command: ({ editor, range, props }: { editor: Editor; range: { from: number; to: number }; props: { id: string } }) => {
-          SLASH_COMMANDS.find(c => c.id === props.id)?.run(editor, range);
+          const command = SLASH_COMMANDS.find(c => c.id === props.id);
+          if (!command) return;
+          if (command.kind === "editor") {
+            command.run(editor, range);
+            return;
+          }
+          editor.chain().focus().deleteRange(range).run();
+          setSlashPickerMode(command.picker);
         },
       },
     });
@@ -1054,12 +1064,23 @@ export default function SmartTextarea({
       {markdown && !readOnly && <TextBubbleMenu editor={editor} />}
       {/* 任务项同步浮条（#670）：与 TextBubbleMenu 靠选区判据互斥；补全菜单开着时让位 */}
       {markdown && taskSync && !readOnly && contentMention && (
-        <TaskSyncMenu editor={editor} productionId={contentMention.productionId} hidden={!!drop && !dropHidden} />
+        <TaskSyncMenu editor={editor} productionId={contentMention.productionId} hidden={(!!drop && !dropHidden) || !!slashPickerMode} />
       )}
       {/* 引用 chip 悬浮条（#692）：「打开 ｜ 转为嵌入」。只在有 productionId 语境的
           可编辑面出现——「打开」要经 mention-resolve，「转为嵌入」要查素材类型 */}
       {markdown && !readOnly && contentMention && (
-        <MentionChipMenu editor={editor} productionId={contentMention.productionId} hidden={!!drop && !dropHidden} />
+        <MentionChipMenu editor={editor} productionId={contentMention.productionId} hidden={(!!drop && !dropHidden) || !!slashPickerMode} />
+      )}
+      {slashPickerMode && editor && contentMention && (
+        <ReferencePicker
+          editor={editor}
+          productionId={contentMention.productionId}
+          mode={slashPickerMode}
+          onClose={() => {
+            setSlashPickerMode(null);
+            editor.commands.focus();
+          }}
+        />
       )}
       {/* 高亮块图标：点块左上角的表情换（#525）。不随 blockTools 门控——小框里也能有高亮块 */}
       {markdown && !readOnly && <CalloutEmojiPicker editor={editor} />}
