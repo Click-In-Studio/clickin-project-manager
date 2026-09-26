@@ -864,6 +864,17 @@
   gap: 18px;
 }
 
+/* 任务、报告、资源申请共用：桌面端限定工作区并内部滚动，手机端自然撑开。 */
+.responsiveContentPanel {
+  height: calc(100vh - 320px);
+  min-height: 460px;
+}
+
+.responsiveContentPanelFlow {
+  height: auto;
+  min-height: 980px;
+}
+
 /* Panel card */
 .panel {
   background: var(--surface);
@@ -1479,6 +1490,23 @@
   padding: 14px 16px 18px;
 }
 
+/* 卡片预览不是完整文档页：收紧 Markdown 字号与段落节奏，避免展开后密度突变。 */
+.mobileReportMarkdown {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.mobileReportMarkdown :global(h1) { margin: 0 0 10px; font-size: 18px; line-height: 1.35; }
+.mobileReportMarkdown :global(h2) { margin: 14px 0 8px; font-size: 16px; line-height: 1.4; }
+.mobileReportMarkdown :global(h3),
+.mobileReportMarkdown :global(h4) { margin: 12px 0 6px; font-size: 14px; line-height: 1.45; }
+.mobileReportMarkdown :global(p),
+.mobileReportMarkdown :global(ul),
+.mobileReportMarkdown :global(ol) { margin-top: 0; margin-bottom: 9px; font-size: 12px; line-height: 1.65; }
+.mobileReportMarkdown :global(li) { margin-block: 2px; font-size: 12px; line-height: 1.65; }
+.mobileReportMarkdown :global(.wiki-callout) { font-size: 12px; line-height: 1.65; }
+
 /* Mobile announcement cards */
 .mobileCardList {
   display: flex;
@@ -1597,17 +1625,31 @@
 }
 
 @media (min-width: 768px) and (max-width: 1180px) {
-  .reportMobile { display: block; }
+  .reportMobile {
+    display: block;
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: 24px;
+  }
   .reportDesktop { display: none; }
 }
 
 @media (max-width: 767px) {
   .workspace {
-    padding: 20px 14px 80px;
+    padding: 20px 14px calc(80px + env(safe-area-inset-bottom));
   }
 
   .splitLayout {
     display: none;
+  }
+
+  .responsiveContentPanel,
+  .responsiveContentPanelFlow {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    padding: 16px 14px calc(24px + env(safe-area-inset-bottom)) !important;
   }
 }
 
@@ -2011,10 +2053,20 @@
   .approvalNodePeople { grid-column: 1 / 3; }
 }
 
-@media (max-width: 680px) {
-  .approvalDesignerGrid { display: flex; flex-direction: column; overflow: visible; }
+@media (max-width: 767px) {
+  .approvalDesigner { flex: none; }
+  .approvalDesignerGrid { display: flex; min-height: 0; flex: none; flex-direction: column; overflow: visible; }
   .approvalTemplateShelf { border-right: 0; border-bottom: 1px solid var(--line); }
   .approvalTemplateList { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); overflow-x: auto; }
+  .approvalTemplateEmpty {
+    grid-column: 1 / -1;
+    width: min(100%, 34rem);
+    margin: 8px 0;
+    font-size: 13px;
+    line-height: 1.7;
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
   .approvalFlowCanvas { overflow: visible; padding: 16px 12px 22px; }
   .approvalFlowStageRow,
   .approvalFlowNodeWrap { grid-template-columns: 28px minmax(0, 1fr); gap: 7px; }

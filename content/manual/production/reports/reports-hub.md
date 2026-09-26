@@ -7,7 +7,7 @@ who: 所有成员可读已发布的报告；草稿只有编辑者可见
 tier: all
 platform: [desktop, mobile]
 related: [production/events/event-reports, start/notifications/notifications]
-updated: 2026-09-18
+updated: 2026-09-27
 ---
 
 ## 这是什么
@@ -28,6 +28,9 @@ updated: 2026-09-18
 ### 读
 
 选中一份，右边显示标题、事件、发布日期、正文、各部门 Notes。「阅读完整报告 →」进独立页面。
+
+> [!📱]
+> 手机上报告按卡片排列，关系和发布状态可以横向滑动筛选。点卡片后直接在原位展开正文；长标题、段落和列表会按手机阅读密度显示，继续向下滚动即可查看后面的报告。
 
 ### 回复与补 Notes
 

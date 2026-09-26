@@ -11,6 +11,7 @@ import { isReportViewer } from "@/lib/ops/event-permissions";
 import PageHeader from "@/components/ui/PageHeader";
 import ProductionReportsClient from "@/components/ops/ProductionReportsClient";
 import PageActivationGate from "@/components/perm/PageActivationGate";
+import styles from "@/components/ui/my-pages.module.css";
 
 
 export default async function ProductionReportsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -32,7 +33,7 @@ export default async function ProductionReportsPage({ params }: { params: Promis
 
   return (
     <>
-      <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+      <div className={styles.workspace} style={{ minHeight: "100vh", background: "var(--paper)" }}>
         <PageHeader eyebrow="Reports" title="报告" side="stage" />
         <ProductionReportsClient
           productionId={productionId}

@@ -109,7 +109,7 @@ export default function ProductionReportsClient({
       </div>
 
       {/* ── Panel（原型排版）：内部维持现有分栏 ── */}
-      <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column" }}>
+      <section className={styles.responsiveContentPanel} style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, display: "flex", flexDirection: "column" }}>
       {/* ── Mobile: filter chips + accordion ── */}
       <div className={`${styles.mobileOnly} ${styles.reportMobile}`}>
         <div className={styles.mobileTaskFilterBar}>
@@ -191,7 +191,7 @@ export default function ProductionReportsClient({
                       )}
                       {r.body && (
                         <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginBottom: 14 }}>
-                          <WikiMarkdown content={r.body} productionId={productionId} />
+                          <WikiMarkdown className={styles.mobileReportMarkdown} content={r.body} productionId={productionId} />
                         </div>
                       )}
                       <Link

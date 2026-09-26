@@ -407,7 +407,7 @@ export default function ApprovalFlowDesigner({ productionId }: { productionId: s
               </button>
             ))}
             {templates.length === 0 && (
-              <p className={styles.approvalDesignerHint}>
+              <p className={`${styles.approvalDesignerHint} ${styles.approvalTemplateEmpty}`}>
                 还没有模版。新建并发布后，新资源申请将按模版流转；在此之前走默认阶梯（直属上级 → 资源治理链 → Owner）。
               </p>
             )}
