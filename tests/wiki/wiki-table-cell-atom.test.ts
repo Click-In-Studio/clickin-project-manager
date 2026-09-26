@@ -3,8 +3,8 @@
 // 保存后不得丢。四面：
 //   ① 编辑器：真 tiptap + tiptap-markdown 往返（chip 独占 / 文字+chip / 空格 / 图片独占）
 //   ② 反证：换回 TableKit 自带的 table 节点仍丢——护栏活着；上游修了这条会红，提示撤 override
-//   ③ 降级分支：合并单元格 / 多块单元格仍委托上游写 HTML，行为不变
-//   ④ 接线：SmartTextarea 关掉 TableKit 的 table、挂 MarkdownTable；上游内部方法名静态护栏
+//   ③ 富表格分支：合并单元格 / 多块单元格写出具名容器
+//   ④ 接线：SmartTextarea 关掉 TableKit 的 table、挂 MarkdownTable；上游判空逻辑静态护栏
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { Editor } from "@tiptap/core";
@@ -81,13 +81,13 @@ describe("反证：TableKit 原装 table 节点仍把独占一格的原子节点
   });
 });
 
-describe("降级 HTML 分支委托上游，行为不变", () => {
+describe("复杂表格使用具名容器", () => {
   const MERGED = '<table><tr><th colspan="2">a</th></tr><tr><td>b</td><td>c</td></tr></table>';
-  it("合并单元格：两种装配写出同一份 HTML", () => {
+  it("合并单元格：跨度保留且稳定往返", () => {
     const fixed = getMarkdown(makeEditor(MERGED));
-    expect(fixed).toContain("<table");
-    expect(fixed).toContain('colspan="2"');
-    expect(fixed).toBe(getMarkdown(makeEditor(MERGED, { fixed: false })));
+    expect(fixed).toContain(":::table");
+    expect(fixed).toContain("colspan=2");
+    expect(getMarkdown(makeEditor(fixed))).toBe(fixed);
   });
   it("isMarkdownSerializable：无表头行 / 合并 / 多块单元格都判 false", () => {
     const doc = (html: string) => makeEditor(html).state.doc.firstChild!;
@@ -110,10 +110,9 @@ describe("接线", () => {
     expect(src).toMatch(/TableKit\.configure\(\{ table: false \}\), MarkdownTable\.configure\(/);
     expect(src).not.toMatch(/TableKit\.configure\(\{ table: \{/);
   });
-  it("静态护栏：上游仍按 textContent.trim() 判空、serializer 仍有 serializeNode（降级分支靠它）", () => {
-    // 前一条红了 = 上游修好，撤 MarkdownTable；后一条红了 = 降级分支拿不到内置实现，得自己写 HTML
+  it("静态护栏：上游仍按 textContent.trim() 判空", () => {
+    // 上游修好后可移除原子节点判空覆盖，保留富表格容器。
     const src = readFileSync("node_modules/tiptap-markdown/dist/tiptap-markdown.es.js", "utf8");
     expect(src).toContain("if (cellContent.textContent.trim()) {");
-    expect(src).toMatch(/\n  serializeNode\(node\) \{/);
   });
 });

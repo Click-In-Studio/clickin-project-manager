@@ -22,6 +22,7 @@ function paragraphText(node: MdastNode): string | null {
 export function transformColumns(root: MdastNode) {
   const kids = root.children;
   if (!kids) return;
+  kids.forEach(transformColumns);
   let i = 0;
   while (i < kids.length) {
     const text = paragraphText(kids[i]);

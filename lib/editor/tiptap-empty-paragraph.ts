@@ -19,6 +19,7 @@
 //
 // 只在**会丢**的位置写：段落是父块的独生子时父块自己的形态就撑着位置
 // （`- ` / `> ` / 空文档 = 空串），不写；表格单元格由 `|` 撑着，也不写。
+import { TABLE_MARKER_RE } from "./table-dialect";
 import Paragraph from "@tiptap/extension-paragraph";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
@@ -85,7 +86,11 @@ export const MarkdownParagraph = Paragraph.extend({
         serialize(state: SerializerState, node: PMNode, parent: PMNode) {
           const held = state.inTable || parent.childCount === 1;
           // 非空 / 位置有父块撑着：prosemirror-markdown 默认段落序列化
-          if (held || !isVisuallyEmptyParagraph(node)) state.renderInline(node);
+          if (held || !isVisuallyEmptyParagraph(node)) {
+            // 字面 marker 段落必须转义，避免重开时变成表格结构。
+            if (TABLE_MARKER_RE.test(node.textContent) && node.childCount === 1 && node.firstChild?.isText && !node.firstChild.marks.length) state.write("\\");
+            state.renderInline(node);
+          }
           else state.write(EMPTY_PARAGRAPH_MD);
           state.closeBlock(node);
         },

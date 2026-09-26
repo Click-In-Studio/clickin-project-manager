@@ -13,6 +13,8 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
+import remarkTables from "@/lib/editor/remark-tables";
+import { normalizeTableHtml } from "@/lib/editor/table-html";
 import remarkColumns from "@/lib/editor/remark-columns";
 import remarkInlineStyle from "@/lib/editor/remark-inline-style";
 import { REMARK_CJK_PLUGINS } from "@/lib/editor/remark-cjk-friendly";
@@ -52,7 +54,7 @@ export function preprocessRawWikilinks(md: string): { text: string; titles: stri
   // 自己的空 parts 去"还原"本函数的占位符，把每段代码块直接替换成空串——正文里
   // 的代码会在渲染时被整个吞掉。
   // 历史版本正文（wiki_revision 不迁移）与回滚场景的 v1 形态兼容。
-  const normalized = normalizeWikiDialect(md);
+  const normalized = normalizeTableHtml(normalizeWikiDialect(md));
   // 码内的 [[]] 是语法示例，换占位保护（MindWeave protectCodeSpans 同款）
   const parts: string[] = [];
   let t = normalized.replace(RAW_CODE_RE, m => { parts.push(m); return `\u0000C${parts.length - 1}\u0000`; });
@@ -224,7 +226,7 @@ export type MentionMember = { userId: string; name: string; avatarUrl?: string |
 const BLOCK_ELEMENTS = [
   "h1", "h2", "h3", "h4", "h5", "h6",
   "ul", "ol", "li", "blockquote", "pre", "hr",
-  "table", "thead", "tbody", "tr", "th", "td",
+  "table", "thead", "tbody", "tr", "th", "td", "colgroup", "col",
 ];
 
 export default function WikiMarkdown({
@@ -281,12 +283,12 @@ export default function WikiMarkdown({
   // 收集正文中全部 content mention，批量 resolve 一次
   const mentionAttrs = useMemo(() => {
     const seen = new Map<string, ContentMentionAttrs>();
-    for (const m of content.matchAll(/\]\((\/__cm__[^)]+)\)/g)) {
+    for (const m of processed.matchAll(/\]\((\/__cm__[^)]+)\)/g)) {
       const attrs = decodeMentionHref(m[1]);
       if (attrs) seen.set(attrsKey(attrs), attrs);
     }
     return [...seen.values()];
-  }, [content]);
+  }, [processed]);
 
   const [resolved, setResolved] = useState<Map<string, Resolved>>(new Map());
   const [resolveFailed, setResolveFailed] = useState(false);
@@ -331,9 +333,10 @@ export default function WikiMarkdown({
         // remarkInlineStyle：字色 / 底色 / 下划线的 HTML 子集方言（#524）——只配对
         // 三种 canonical 标签，不挂 rehype-raw，其余 HTML 照旧显示为文字
         // REMARK_CJK_PLUGINS：紧贴中文的加粗 / 删除线也算定界符，与编辑器同源（#674）
-        remarkPlugins={[remarkGfm, ...REMARK_CJK_PLUGINS, remarkBreaks, remarkColumns, remarkInlineStyle]}
+        remarkPlugins={[remarkGfm, ...REMARK_CJK_PLUGINS, remarkTables, remarkBreaks, remarkColumns, remarkInlineStyle]}
         {...(inline ? { disallowedElements: BLOCK_ELEMENTS, unwrapDisallowed: true } : {})}
         components={{
+          table: ({ children, className, style }) => <div className="wiki-table-scroll"><table className={className} style={style}>{children}</table></div>,
           ...(inline ? { p: ({ children }: { children?: ReactNode }) => <>{children}</> } : {}),
           blockquote: ({ children }) => {
             const callout = splitCalloutChildren(children);

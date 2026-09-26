@@ -129,6 +129,7 @@ export const ColumnGroup = Node.create({
         parse: {
           updateDOM(element: HTMLElement) {
             promoteColumnFences(element);
+            element.querySelectorAll<HTMLElement>("td, th").forEach(promoteColumnFences);
           },
         },
       },

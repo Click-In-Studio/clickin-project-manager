@@ -12,11 +12,13 @@
 //   ① 单元格「有内容」的判定改为：任一非文本子节点，或文本非空白；
 //   ② 单元格首块是块级原子（图片）时按它自己的 serializer 写出，但吞掉它的
 //      closeBlock——表格行内不能换行。
-// 合并单元格 / 多块单元格降级 HTML 的分支原样委托给内置实现（serializeNode
-// 是 tiptap-markdown 的内部方法，测试里有静态护栏盯着）。
+// 复杂表格（#526）改写具名容器，单元格使用同一 Markdown serializer。
+// HTML 仅用于剪贴板 DOM，不再作为复杂表格的存储回退。
 //
 // 零 node 依赖，可进客户端包。
 import type { Editor } from "@tiptap/core";
+import type MarkdownIt from "markdown-it";
+import { installTableContainers, serializeTableContainer } from "./tiptap-rich-table";
 import { Table } from "@tiptap/extension-table";
 import type { Node as PmNode } from "@tiptap/pm/model";
 
@@ -31,15 +33,11 @@ type TableMdState = {
   closeBlock(node: PmNode): void;
 };
 
-type UpstreamSerialize = (state: TableMdState, node: PmNode, parent: PmNode) => void;
-
-type MdStorage = {
-  markdown?: { serializer?: { serializeNode?: (ext: { name: string; options: object }) => UpstreamSerialize | undefined } };
-};
-
-/** 照抄上游：首行全 th、无合并、每格单块，才写 GFM 表格；否则整表降级 HTML */
+/** GFM 不能保留的网格、宽度、块内容转入富表格容器。 */
 function hasSpan(cell: PmNode): boolean {
-  return cell.attrs.colspan > 1 || cell.attrs.rowspan > 1;
+  return cell.attrs.colspan > 1 || cell.attrs.rowspan > 1
+    || cell.attrs.colwidth?.some(Boolean) || !!cell.attrs.align
+    || (cell.firstChild?.type.name !== "paragraph" && cell.firstChild?.type.name !== "image");
 }
 export function isMarkdownSerializable(table: PmNode): boolean {
   const rows: PmNode[] = [];
@@ -60,22 +58,17 @@ export function hasRenderableInline(p: PmNode): boolean {
   return has;
 }
 
-/** 取 tiptap-markdown 内置 table spec（按名字查、绑 editor），用于降级 HTML 分支 */
-function upstreamTableSerialize(editor: Editor): UpstreamSerialize | undefined {
-  return (editor.storage as MdStorage).markdown?.serializer?.serializeNode?.({ name: "table", options: {} });
-}
-
 export const MarkdownTable = Table.extend({
   addStorage() {
     return {
       ...this.parent?.(),
       markdown: {
-        serialize(this: { editor: Editor }, state: TableMdState, node: PmNode, parent: PmNode) {
+        serialize(this: { editor: Editor }, state: TableMdState, node: PmNode) {
           if (!isMarkdownSerializable(node)) {
-            const upstream = upstreamTableSerialize(this.editor);
-            if (upstream) { upstream(state, node, parent); return; }
-            // 找不到内置实现（上游改了内部结构）：至少不吞内容，写成占位并让测试红
-            state.write("[table]");
+            // 按行 write，保留父级引用/列表的缩进；不把整表压进一行。
+            for (const line of serializeTableContainer(this.editor, node).split("\n")) {
+              state.write(line + "\n");
+            }
             state.closeBlock(node);
             return;
           }
@@ -107,7 +100,9 @@ export const MarkdownTable = Table.extend({
           state.inTable = false;
         },
         parse: {
-          // markdown-it 负责
+          setup(this: { editor: Editor }, md: MarkdownIt) {
+            installTableContainers(md, this.editor);
+          },
         },
       },
     };
