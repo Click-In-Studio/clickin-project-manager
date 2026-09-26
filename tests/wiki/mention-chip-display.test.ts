@@ -160,14 +160,21 @@ describe("渲染点不得退回内部 kind 名（#689 静态棘轮）", () => {
 
 // ── 客户端安全 ────────────────────────────────────────────────────────────────
 //
-// mention-display 被 tiptap 的 renderHTML（客户端）和 mention-resolve 路由（服务端）
-// 同时 import。哪天有人图省事从这里引一下 `getPool` 或 `node:fs`，pg / fs 就会被
-// 打进浏览器包 —— 整站 500 含 `/login`，而 tsc 与 vitest 都不报（§13.3 的 #538 事故）。
+// 下列模块都被客户端组件直接 import。哪天有人图省事从这里引一下 `getPool` 或
+// `node:fs`，pg / fs 就会被打进浏览器包 —— 整站 500 含 `/login`，而 tsc 与
+// vitest 都不报（§13.3 的 #538 事故）。
 //
 // §13.3 的「客户端只从 `*-types.ts` / `*-score.ts` 拿」是**命名约定**，靠名字认不出
 // `mention-display.ts`。照 tests/ops/approval-timeline 的先例，把它变成会红的测试：
-// 顺着相对 import 走一遍闭包，整条链上不许出现 node 内建或 pg。
+// 顺着仓库内 import 走一遍闭包，整条链上不许出现 node 内建或 pg。
 const FORBIDDEN_IMPORT = /^(node:|fs$|path$|pg$)|\/pg$|@\/lib\/pg$/;
+
+const CLIENT_SAFE_ENTRIES = [
+  "lib/editor/mention-display.ts",
+  "lib/editor/editor-drop-payload.ts",
+  "lib/editor/editor-embed-switch.ts",
+  "lib/editor/mention-navigate.ts",
+];
 
 function importClosure(entry: string): string[] {
   const seen = new Set<string>();
@@ -180,6 +187,11 @@ function importClosure(entry: string): string[] {
     const src = readFileSync(rel, "utf-8");
     for (const [, spec] of src.matchAll(/from\s+"([^"]+)"/g)) {
       if (FORBIDDEN_IMPORT.test(spec)) { bad.push(`${rel} → ${spec}`); continue; }
+      if (spec.startsWith("@/")) {
+        const resolved = spec.slice(2);
+        stack.push(resolved.endsWith(".ts") ? resolved : `${resolved}.ts`);
+        continue;
+      }
       if (!spec.startsWith(".")) continue; // 第三方包不追（tiptap 等本就进浏览器）
       const dir = rel.slice(0, rel.lastIndexOf("/"));
       const resolved = `${dir}/${spec.slice(2)}`.replace(/\/\.\//g, "/");
@@ -191,8 +203,8 @@ function importClosure(entry: string): string[] {
   return bad;
 }
 
-describe("客户端安全：引用显示层不得把 pg / fs 拖进浏览器包", () => {
-  it("lib/editor/mention-display.ts 的 import 闭包干净", () => {
-    expect(importClosure("lib/editor/mention-display.ts")).toEqual([]);
+describe("客户端安全：编辑器共享模块不得把 pg / fs 拖进浏览器包", () => {
+  it.each(CLIENT_SAFE_ENTRIES)("%s 的 import 闭包干净", (entry) => {
+    expect(importClosure(entry)).toEqual([]);
   });
 });
