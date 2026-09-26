@@ -60,7 +60,7 @@ export default async function DramaturgyInspirationDocPage({
   // 成员判定与侧栏渲染同源：都在**全量**上算子树，再各自过枚举面（#357）。
   // 侧栏＝枚举面，正文＝内容面（canViewWiki）——两个门，别混。
   const rootId = treeConfig.enabled ? treeConfig.rootNodeId : null;
-  const { subtree, nodes, moveIn } = await listDramaturgyTreeFor(actor, productionId, rootId);
+  const { subtree, nodes, assetActions, moveIn } = await listDramaturgyTreeFor(actor, productionId, rootId);
   // 越界不是 404：工作区内的内链（[[…]]、反链）会指向子树外的文档，文档也可能
   // 在「文档」模块里被移出子树、或根锚点压根还没懒建。回落到通用 wiki 路由，
   // 别把人弹飞。别名同理——它是否在本工作区看位置，不看目标。
@@ -79,8 +79,7 @@ export default async function DramaturgyInspirationDocPage({
     return (
       <DramaturgyInspirationShell productionId={productionId} productionName={productionName}>
         <WikiShell
-          myUserId={session.userId}
-          canManageAssets={access.permCtx.isAdmin || access.permCtx.isOwner}
+          assetActions={assetActions}
           productionId={productionId}
           nodes={nodes}
           moveInCandidates={moveIn}
@@ -119,8 +118,7 @@ export default async function DramaturgyInspirationDocPage({
     <>
       <DramaturgyInspirationShell productionId={productionId} productionName={productionName}>
         <WikiShell
-          myUserId={session.userId}
-          canManageAssets={access.permCtx.isAdmin || access.permCtx.isOwner}
+          assetActions={assetActions}
           productionId={productionId}
           nodes={nodes}
           moveInCandidates={moveIn}

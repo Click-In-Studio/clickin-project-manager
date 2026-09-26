@@ -23,7 +23,7 @@ import type { NodeEntry } from "@/lib/node/db";
 import type { NodeMoveInCandidate } from "@/lib/node/dramaturgy";
 import { useReportAiTarget } from "@/components/agent/ai-target";
 import { aiTargetForNode } from "@/lib/node/ai-target";
-import { treeMenuItems, type TreeMenuKey } from "@/lib/node/tree-menu";
+import { treeMenuItems, type TreeMenuKey, type AssetTreeActions } from "@/lib/node/tree-menu";
 
 type DropZone = "before" | "after" | "inside";
 
@@ -40,8 +40,7 @@ export default function WikiShell({
   navigationBasePath,
   rootParentId,
   rootAnchor,
-  myUserId,
-  canManageAssets = false,
+  assetActions = {},
   children,
 }: {
   productionId: string;
@@ -58,11 +57,8 @@ export default function WikiShell({
   rootParentId?: string;
   /** 根锚点尚未懒建时的落位声明——服务端过完 create 门后解析成真正的 parentId。 */
   rootAnchor?: "dramaturgy";
-  /** 当前用户 id：树内资产删除的灰化判据（本人上传 ∨ canManageAssets 才亮）。
-   *  只是 UI 灰化，权限权威在服务端 DELETE 门。 */
-  myUserId?: string;
-  /** admin/owner 旁路（资产删除不灰）。 */
-  canManageAssets?: boolean;
+  /** 服务端逐键算出的资产操作权限。 */
+  assetActions?: AssetTreeActions;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -847,7 +843,7 @@ export default function WikiShell({
           {(() => {
             const it = byId.get(menu.id);
             if (!it) return null;
-            return treeMenuItems(it, { canCreate, myUserId, canManageAssets }).map(mi => {
+            return treeMenuItems(it, { canCreate, assetActions }).map(mi => {
               const disabled = mi.disabledReason !== undefined;
               // 灰化用 aria-disabled 而非 disabled：disabled 的按钮不冒鼠标事件，
               // title 里的原因用户读不到——灰掉却不说为什么，跟消失没两样。

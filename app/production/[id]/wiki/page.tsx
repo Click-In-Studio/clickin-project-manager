@@ -28,7 +28,7 @@ export default async function WikiLibraryPage({ params }: { params: Promise<{ id
 
   // 树＝枚举面（#357）+ 软链接别名（#358）。枚举集是含根的连通子树，投影到
   // parent_id 上不会有断链；别名另有自己的判定式，两者都收在 listWikiTreeFor 里。
-  const [{ nodes }, canCreate] = await Promise.all([
+  const [{ nodes, assetActions }, canCreate] = await Promise.all([
     listNodeTreeFor(actor, productionId),
     hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"),
   ]);
@@ -37,7 +37,7 @@ export default async function WikiLibraryPage({ params }: { params: Promise<{ id
     <>
       <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
         <PageHeader eyebrow="Wiki" title="知识库" side="stage" />
-        <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} myUserId={session.userId} canManageAssets={access.permCtx.isAdmin || access.permCtx.isOwner}>
+        <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} assetActions={assetActions}>
           <div className="rounded-xl border border-dashed border-zinc-200 bg-white/60 px-8 flex items-center justify-center">
             <p className="text-sm text-zinc-400">
               {nodes.length > 0 ? (

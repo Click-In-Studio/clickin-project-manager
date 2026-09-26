@@ -40,15 +40,14 @@ export default async function DramaturgyInspirationPage({
   // 子树成员在**全量**上算，再过枚举面（#357）；软链接别名按位置算成员（#358）。
   // 枚举集是含根的连通子树，所以过滤后的结果照样连通——#352 那次「父不可见、
   // 子可见 → 整篇消失」的断链根因已在判定层消解。
-  const { nodes, moveIn } = await listDramaturgyTreeFor(actor, productionId, rootId);
+  const { nodes, assetActions, moveIn } = await listDramaturgyTreeFor(actor, productionId, rootId);
   const routeBase = `/production/${productionId}/dramaturgy/inspiration`;
 
   return (
     <>
       <DramaturgyInspirationShell productionId={productionId} productionName={productionName}>
         <WikiShell
-          myUserId={session.userId}
-          canManageAssets={access.permCtx.isAdmin || access.permCtx.isOwner}
+          assetActions={assetActions}
           productionId={productionId}
           nodes={nodes}
           moveInCandidates={moveIn}

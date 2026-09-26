@@ -20,24 +20,24 @@ export type TreeMenuItem = {
   disabledReason?: string;
 };
 
+export type AssetTreeActions = Record<string, { rename: boolean; delete: boolean }>;
+
 export type TreeMenuCtx = {
   /** node:wiki/*@create——新建/链接/副本的粗门。 */
   canCreate: boolean;
-  /** 资产 meta/delete 的灰化判据：本人上传 ∨ canManageAssets。 */
-  myUserId?: string;
-  canManageAssets?: boolean;
+  /** 服务端按 meta@edit / *@delete 分别查出的资产实例权限。 */
+  assetActions?: AssetTreeActions;
 };
 
 export const TREE_MENU_ORDER: readonly TreeMenuKey[] =
   ["rename", "resetTitle", "duplicate", "move", "link", "delete"];
 
 export function treeMenuItems(it: NodeEntry, ctx: TreeMenuCtx): TreeMenuItem[] {
-  const ownsAsset = it.kind === "asset"
-    && (ctx.canManageAssets === true || (ctx.myUserId != null && it.createdBy === ctx.myUserId));
+  const assetActions = it.assetId ? ctx.assetActions?.[it.assetId] : undefined;
 
   const rename: TreeMenuItem = { key: "rename", label: "重命名" };
   if (it.kind === "folder") rename.disabledReason = "目录改名暂未开放";
-  else if (it.kind === "asset" && !ownsAsset) rename.disabledReason = "仅上传者或管理员可重命名";
+  else if (it.kind === "asset" && !assetActions?.rename) rename.disabledReason = "没有重命名该资产的权限";
 
   const resetTitle: TreeMenuItem = { key: "resetTitle", label: "改回目标标题" };
   if (it.kind !== "link") resetTitle.disabledReason = "仅链接可用：链接可以有自己的别名";
@@ -59,7 +59,7 @@ export function treeMenuItems(it: NodeEntry, ctx: TreeMenuCtx): TreeMenuItem[] {
   const del: TreeMenuItem = { key: "delete", label: it.kind === "link" ? "移除链接" : "删除", danger: true };
   if (it.isAnchor) del.disabledReason = "系统目录，不可删除";
   else if (it.kind === "folder") del.disabledReason = "目录不可删除";
-  else if (it.kind === "asset" && !ownsAsset) del.disabledReason = "仅上传者或管理员可删除";
+  else if (it.kind === "asset" && !assetActions?.delete) del.disabledReason = "没有删除该资产的权限";
 
   return [rename, resetTitle, duplicate, move, link, del];
 }

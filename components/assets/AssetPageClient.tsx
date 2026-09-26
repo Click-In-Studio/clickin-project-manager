@@ -147,7 +147,8 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
 
   async function handleDownload(assetId: string) {
     const r = await fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}/download-url${versionId ? `?v=${versionId}` : ""}`);
-    const j = await r.json() as { url?: string; feishuUrl?: string };
+    const j = await r.json() as { url?: string; feishuUrl?: string; error?: string };
+    if (!r.ok) { alert(j.error ?? "下载失败"); return; }
     if (j.url) window.open(j.url, "_blank");
     else if (j.feishuUrl) window.open(j.feishuUrl, "_blank");
   }
