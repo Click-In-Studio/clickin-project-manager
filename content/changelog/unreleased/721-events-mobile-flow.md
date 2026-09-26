@@ -2,7 +2,7 @@
 kind: improved
 title: 事件页三步流程在手机上更紧凑
 page: production/events/events-overview
-pr: 718
+pr: 721
 order: 1
 ---
 
