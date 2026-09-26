@@ -34,6 +34,7 @@ export type QuestionInfo = {
 export type Bubble =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; streaming?: boolean }
+  | { kind: "thinking"; text: string; streaming?: boolean }
   // input/result：调用参数与结果（relay 超限时为 {truncated, preview} 包裹），
   // 供气泡点开看详情；历史回放只有 result 文本，input 恒缺席。
   | { kind: "tool"; name: string; id?: string; done: boolean; input?: unknown; result?: unknown; isError?: boolean }
@@ -44,6 +45,7 @@ export type Bubble =
 
 export type StreamLine =
   | { type: "delta"; text: string }
+  | { type: "thinking"; text: string }
   | { type: "final"; text: string; fallback?: boolean }
   | { type: "aborted"; text: string }
   | { type: "error"; error: string }
@@ -75,8 +77,24 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
   const next = [...prev];
   const last = next[next.length - 1];
   switch (line.type) {
-    case "delta": {
+    case "thinking": {
       if (last?.kind === "assistant" && last.streaming) {
+        next[next.length - 1] = { kind: "assistant", text: last.text };
+      }
+      const current = next[next.length - 1];
+      if (current?.kind === "thinking" && current.streaming) {
+        next[next.length - 1] = { kind: "thinking", text: line.text, streaming: true };
+      } else {
+        next.push({ kind: "thinking", text: line.text, streaming: true });
+      }
+      return next;
+    }
+    case "delta": {
+      if (last?.kind === "thinking" && last.streaming) {
+        next[next.length - 1] = { kind: "thinking", text: last.text };
+      }
+      const current = next[next.length - 1];
+      if (current?.kind === "assistant" && current.streaming) {
         next[next.length - 1] = { kind: "assistant", text: line.text, streaming: true };
       } else {
         next.push({ kind: "assistant", text: line.text, streaming: true });
@@ -87,6 +105,8 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
       // Current streaming segment (if any) is settled by this tool call.
       if (last?.kind === "assistant" && last.streaming) {
         next[next.length - 1] = { kind: "assistant", text: last.text };
+      } else if (last?.kind === "thinking" && last.streaming) {
+        next[next.length - 1] = { kind: "thinking", text: last.text };
       }
       next.push({ kind: "tool", name: line.name || "工具", id: line.id, done: false, ...(line.input !== undefined ? { input: line.input } : {}) });
       return next;
@@ -134,6 +154,9 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
       };
       if (last?.kind === "assistant" && last.streaming) {
         next[next.length - 1] = { kind: "assistant", text: line.text || last.text };
+      } else if (last?.kind === "thinking" && last.streaming) {
+        next[next.length - 1] = { kind: "thinking", text: last.text };
+        if (line.text) next.push({ kind: "assistant", text: line.text });
       } else if (line.text) {
         // 只有服务端标记为 fallback 的 final（chat.history 兜底，可能是
         // 上一轮已渲染的旧文本）才做去重；正常 final 即使与上一条回复
@@ -188,6 +211,8 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
     case "aborted": {
       if (last?.kind === "assistant" && last.streaming) {
         next[next.length - 1] = { kind: "assistant", text: last.text };
+      } else if (last?.kind === "thinking" && last.streaming) {
+        next[next.length - 1] = { kind: "thinking", text: last.text };
       }
       next.push({ kind: "notice", text: "已中止" });
       return next;
@@ -195,6 +220,8 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
     case "error": {
       if (last?.kind === "assistant" && last.streaming) {
         next[next.length - 1] = { kind: "assistant", text: last.text };
+      } else if (last?.kind === "thinking" && last.streaming) {
+        next[next.length - 1] = { kind: "thinking", text: last.text };
       }
       next.push({ kind: "notice", text: line.error || "出错了" });
       return next;

@@ -35,6 +35,15 @@ function assistantText(message: AgentMessage): string | null {
     .join("");
 }
 
+function assistantThinking(message: AgentMessage): string | null {
+  if (message.role !== "assistant") return null;
+  return message.content
+    .filter((c): c is { type: "thinking"; thinking: string; redacted?: boolean } => c.type === "thinking")
+    .filter((c) => !c.redacted)
+    .map((c) => c.thinking)
+    .join("");
+}
+
 /** 工具结果给前端看的形态：文本块拼成字符串（与 gateway 时代 toolResult 为文本一致）。 */
 function toolResultForClient(result: unknown): unknown {
   const r = result as { content?: Array<{ type?: string; text?: string }> } | undefined;
@@ -52,6 +61,7 @@ function toolResultForClient(result: unknown): unknown {
 export function createStreamLineAdapter(emit: (line: StreamLine) => void): (event: AgentHarnessEvent) => void {
   let segmentText = "";
   let lastDelta: string | null = null;
+  let lastThinking: string | null = null;
 
   const pushDelta = (text: string) => {
     if (!text || text === lastDelta) return;
@@ -60,15 +70,25 @@ export function createStreamLineAdapter(emit: (line: StreamLine) => void): (even
     emit({ type: "delta", text });
   };
 
+  const pushThinking = (text: string) => {
+    if (!text || text === lastThinking) return;
+    lastThinking = text;
+    emit({ type: "thinking", text });
+  };
+
   return (event) => {
     switch (event.type) {
       case "message_update": {
+        const thinking = assistantThinking(event.message);
+        if (thinking !== null) pushThinking(thinking);
         const text = assistantText(event.message);
         if (text !== null) pushDelta(text);
         return;
       }
       case "message_end": {
         // 流末权威值（provider 的 done 消息可能比最后一次 update 多几个字）
+        const thinking = assistantThinking(event.message);
+        if (thinking !== null) pushThinking(thinking);
         const text = assistantText(event.message);
         if (text !== null) pushDelta(text);
         return;
@@ -77,6 +97,7 @@ export function createStreamLineAdapter(emit: (line: StreamLine) => void): (even
         emit({ type: "tool", name: event.toolName, id: event.toolCallId, ...(event.args !== undefined ? { input: boundPayload(event.args) } : {}) });
         segmentText = "";
         lastDelta = null;
+        lastThinking = null;
         return;
       }
       case "tool_execution_end": {

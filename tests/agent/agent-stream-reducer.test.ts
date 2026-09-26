@@ -21,6 +21,35 @@ describe("applyStreamLine", () => {
     expect(b[1]).toEqual({ kind: "assistant", text: "你好", streaming: true });
   });
 
+  it("thinking 累计更新为独立气泡，正文开始时将其收尾", () => {
+    let b: Bubble[] = [];
+    b = applyStreamLine(b, { type: "thinking", text: "先找" });
+    b = applyStreamLine(b, { type: "thinking", text: "先找资料" });
+    expect(b).toEqual([{ kind: "thinking", text: "先找资料", streaming: true }]);
+    b = applyStreamLine(b, { type: "delta", text: "找到了" });
+    expect(b).toEqual([
+      { kind: "thinking", text: "先找资料" },
+      { kind: "assistant", text: "找到了", streaming: true },
+    ]);
+  });
+
+  it("thinking 在异常交错时先收尾已有的正文气泡", () => {
+    const b = applyStreamLine(
+      [{ kind: "assistant", text: "先给出一部分", streaming: true }],
+      { type: "thinking", text: "重新判断" },
+    );
+    expect(b).toEqual([
+      { kind: "assistant", text: "先给出一部分" },
+      { kind: "thinking", text: "重新判断", streaming: true },
+    ]);
+  });
+
+  it("只有 thinking 的回复也会在 final 时收尾", () => {
+    let b: Bubble[] = [{ kind: "thinking", text: "正在判断", streaming: true }];
+    b = applyStreamLine(b, { type: "final", text: "" });
+    expect(b).toEqual([{ kind: "thinking", text: "正在判断" }]);
+  });
+
   it("final settles the streaming bubble in place", () => {
     let b: Bubble[] = [{ kind: "assistant", text: "部分", streaming: true }];
     b = applyStreamLine(b, { type: "final", text: "完整回复" });

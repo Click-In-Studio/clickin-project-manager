@@ -21,12 +21,12 @@ import { exposedName } from "@/lib/agent/runtime/tools";
 const USAGE = { input: 7, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 const base = () => ({ role: "assistant" as const, api: CHAT_MODEL.api, provider: CHAT_MODEL.provider, model: CHAT_MODEL.id, usage: USAGE, timestamp: Date.now() });
 
-type Step = { text: string } | { calls: ToolCall[] } | { hang: true };
+type Step = { text: string; thinking?: string } | { calls: ToolCall[] } | { hang: true };
 /** 脚本化假模型；记录每次调用看到的上下文（系统提示、消息、工具名）。 */
 function scripted(script: Step[]) {
-  const seen: Array<{ systemPrompt?: string; messages: unknown[]; tools: string[] }> = [];
+  const seen: Array<{ systemPrompt?: string; messages: unknown[]; tools: string[]; reasoning?: string }> = [];
   const streamFn: StreamFn = (_model, context, options) => {
-    seen.push({ systemPrompt: context.systemPrompt, messages: context.messages, tools: (context.tools ?? []).map((t) => t.name) });
+    seen.push({ systemPrompt: context.systemPrompt, messages: context.messages, tools: (context.tools ?? []).map((t) => t.name), reasoning: options?.reasoning });
     const next = script.shift();
     if (!next) throw new Error("script exhausted");
     const stream = createAssistantMessageEventStream();
@@ -39,12 +39,22 @@ function scripted(script: Step[]) {
     }
     queueMicrotask(() => {
       const final: AssistantMessage = "text" in next
-        ? { ...base(), content: [{ type: "text", text: next.text }], stopReason: "stop" }
+        ? { ...base(), content: [...(next.thinking ? [{ type: "thinking" as const, thinking: next.thinking }] : []), { type: "text", text: next.text }], stopReason: "stop" }
         : { ...base(), content: next.calls, stopReason: "toolUse" };
       stream.push({ type: "start", partial: { ...final, content: [] } });
       if ("text" in next) {
-        stream.push({ type: "text_start", contentIndex: 0, partial: { ...final, content: [{ type: "text", text: "" }] } });
-        for (const ch of next.text) stream.push({ type: "text_delta", contentIndex: 0, delta: ch });
+        const textIndex = next.thinking ? 1 : 0;
+        if (next.thinking) {
+          stream.push({ type: "thinking_start", contentIndex: 0, partial: { ...final, content: [{ type: "thinking", thinking: "" }] } });
+          let accumulated = "";
+          for (const ch of next.thinking) {
+            accumulated += ch;
+            stream.push({ type: "thinking_delta", contentIndex: 0, delta: ch, partial: { ...final, content: [{ type: "thinking", thinking: accumulated }] } });
+          }
+          stream.push({ type: "thinking_end", contentIndex: 0, content: next.thinking, partial: { ...final, content: [{ type: "thinking", thinking: next.thinking }] } });
+        }
+        stream.push({ type: "text_start", contentIndex: textIndex, partial: { ...final, content: [...(next.thinking ? [{ type: "thinking" as const, thinking: next.thinking }] : []), { type: "text", text: "" }] } });
+        for (const ch of next.text) stream.push({ type: "text_delta", contentIndex: textIndex, delta: ch });
       }
       stream.push({ type: "done", reason: final.stopReason as "stop" | "toolUse", message: final });
     });
@@ -134,11 +144,32 @@ describe("agent-runtime service", () => {
     expect(seen[0].tools).toContain(exposedName("production.info"));
     expect(seen[0].tools).not.toContain(exposedName("production.wiki_read"));
     expect(seen[0].tools.every((t) => t.startsWith("clickin__"))).toBe(true);
+    expect(seen[0].reasoning).toBe("low");
 
     const list = await listSessions(userId);
     expect(list.find((s) => s.key === key)).toMatchObject({ title: "你好", status: "done" });
     // delta 行已清理，只剩终态
     expect((await readEventsSince(key, 0)).map((r) => r.line.type)).not.toContain("delta");
+  });
+
+  it("thinking 写入 transcript、历史可恢复，run 结束后累计事件被清理", async () => {
+    const { streamFn } = scripted([{ thinking: "先检查已有信息", text: "可以开始" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = newKey();
+
+    await startRun({ sessionId: key, userId, message: "开始吧" });
+    await collectUntilTerminal(key);
+    await waitForIdle(key);
+
+    expect(await getHistory(key)).toEqual([
+      { role: "user", content: "开始吧" },
+      { role: "thinking", content: "先检查已有信息" },
+      { role: "assistant", content: "可以开始" },
+    ]);
+    const retainedTypes = (await readEventsSince(key, 0)).map((r) => r.line.type);
+    expect(retainedTypes).not.toContain("thinking");
+    expect(retainedTypes).not.toContain("delta");
+    expect(retainedTypes).toContain("final");
   });
 
   it("只读工具直接执行（真 my.productions），写工具过审批门：deny 带理由 → 模型收到理由", async () => {
