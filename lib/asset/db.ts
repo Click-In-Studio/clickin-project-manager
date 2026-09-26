@@ -210,7 +210,18 @@ export async function deleteAsset(assetId: string): Promise<{ r2Keys: string[] }
       `SELECT r2_key, thumbnail_r2_key, metadata->>'sidecarKey' AS sidecar_key
        FROM asset_file WHERE asset_id = $1 FOR UPDATE`, [assetId]
     );
-    await client.query(`DELETE FROM asset WHERE id = $1`, [assetId]);
+    const deleted = await client.query<{ production_id: string }>(
+      `DELETE FROM asset WHERE id = $1 RETURNING production_id`, [assetId],
+    );
+    if (deleted.rows[0]) {
+      // 多态 resource_id 没有外键级联；保留审计行，但收回已删除资产的全部实例授权。
+      await client.query(
+        `UPDATE production_member_grant SET is_revoked = true, revoked_reason = 'manual'
+         WHERE production_id = $1 AND resource_type = 'asset' AND resource_id = $2
+           AND NOT is_revoked`,
+        [deleted.rows[0].production_id, assetId],
+      );
+    }
     await client.query("COMMIT");
     return {
       r2Keys: filesRes.rows.flatMap(r =>
