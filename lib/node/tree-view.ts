@@ -7,14 +7,31 @@ import {
   type NodeMoveInCandidate,
 } from "./dramaturgy";
 import { getDramaturgyTreeConfig } from "./anchors";
-import type { GrantActor } from "../perm/grant-check";
+import { listEffectiveGrantedResourceIds, type GrantActor } from "../perm/grant-check";
+import type { AssetTreeActions } from "./tree-menu";
 
 // ─── 目录树的唯一取数口（#357 枚举面 + #358 link，node 化后单数组四 kind）─────
 //
 // 树的节点集 = 可枚举的非 link 节点 ∪ 可枚举的 link。页面/路由一律走这一个
 // 函数——两个消费方各自拼一遍就会各自决定 link 怎么过门（#357 症状① 成因）。
 
-export type NodeTree = { nodes: NodeEntry[] };
+export type NodeTree = { nodes: NodeEntry[]; assetActions: AssetTreeActions };
+
+/** 菜单与资产 PATCH / DELETE 逐键同源；两个集合查询，避免逐节点查库。 */
+async function assetActionsFor(actor: GrantActor, productionId: string, nodes: NodeEntry[]): Promise<AssetTreeActions> {
+  const assets = nodes.filter(n => n.kind === "asset" && n.assetId);
+  if (assets.length === 0) return {};
+  const [edit, del] = await Promise.all([
+    listEffectiveGrantedResourceIds(actor, productionId, "asset", "meta", "edit"),
+    listEffectiveGrantedResourceIds(actor, productionId, "asset", "*", "delete"),
+  ]);
+  const editable = new Set(edit.ids);
+  const deletable = new Set(del.ids);
+  return Object.fromEntries(assets.map(n => [n.assetId!, {
+    rename: edit.wildcard || editable.has(n.assetId!),
+    delete: del.wildcard || deletable.has(n.assetId!),
+  }]));
+}
 
 export async function listNodeTreeFor(actor: GrantActor, productionId: string): Promise<NodeTree> {
   const [all, enumerable] = await Promise.all([
@@ -27,7 +44,7 @@ export async function listNodeTreeFor(actor: GrantActor, productionId: string): 
   const visibleLinks = await filterEnumerableLinkEntries(actor, productionId, links, enumerable);
   const nodes = [...visiblePlain, ...visibleLinks].sort((x, y) =>
     (x.sortKey ?? "￿").localeCompare(y.sortKey ?? "￿") || x.createdAt.localeCompare(y.createdAt));
-  return { nodes };
+  return { nodes, assetActions: await assetActionsFor(actor, productionId, nodes) };
 }
 
 /**
@@ -53,6 +70,7 @@ export async function listDramaturgyTreeFor(
   return {
     subtree,
     nodes,
+    assetActions: await assetActionsFor(actor, productionId, nodes),
     moveIn: listDramaturgyMoveInCandidates(all, subtree, rootId, { enumerable, editable }, visibleLinks),
   };
 }

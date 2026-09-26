@@ -21,7 +21,7 @@ const asset = node({ kind: "asset", assetId: "a1", createdBy: "u1" });
 const link = node({ kind: "link", linkTargetId: "nd_w" });
 const folder = node({ kind: "folder" });
 const anchor = node({ kind: "folder", isAnchor: true });
-const full = { canCreate: true, myUserId: "u1", canManageAssets: false };
+const full = { canCreate: true, assetActions: { a1: { rename: true, delete: true } } };
 
 describe("统一：每种 kind 的项表 key 序列完全一致", () => {
   it.each([["wiki", wiki], ["asset", asset], ["link", link], ["folder", folder], ["anchor", anchor]] as const)(
@@ -41,17 +41,19 @@ describe("可用集：按 kind 的能力面", () => {
     expect(enabled(wiki)).toEqual(["rename", "duplicate", "move", "link", "delete"]);
     expect(reasons(wiki).resetTitle).toBeTruthy();
   });
-  it("asset（本人上传）：重命名 / 移动 / 链接 / 删除；副本灰", () => {
+  it("asset（持重命名与删除权）：重命名 / 移动 / 链接 / 删除；副本灰", () => {
     expect(enabled(asset)).toEqual(["rename", "move", "link", "delete"]);
     expect(reasons(asset).duplicate).toBeTruthy();
   });
-  it("asset（他人上传、非管理）：重命名与删除一起灰，原因说的是权限不是不支持", () => {
-    const ctx = { canCreate: true, myUserId: "u2", canManageAssets: false };
+  it("资产只持单枚键时，重命名与删除分别开关；创建者身份不代替授权", () => {
+    const ctx = { canCreate: true };
     expect(enabled(asset, ctx)).toEqual(["move", "link"]);
-    expect(reasons(asset, ctx).rename).toMatch(/上传者|管理员/);
-    expect(reasons(asset, ctx).delete).toMatch(/上传者|管理员/);
-    // 管理员旁路：重新亮起
-    expect(enabled(asset, { ...ctx, canManageAssets: true })).toEqual(["rename", "move", "link", "delete"]);
+    expect(reasons(asset, ctx).rename).toMatch(/权限/);
+    expect(reasons(asset, ctx).delete).toMatch(/权限/);
+    expect(enabled(asset, { ...ctx, assetActions: { a1: { rename: true, delete: false } } }))
+      .toEqual(["rename", "move", "link"]);
+    expect(enabled(asset, { ...ctx, assetActions: { a1: { rename: false, delete: true } } }))
+      .toEqual(["move", "link", "delete"]);
   });
   it("link：重命名 / 移动 / 移除链接；带别名时「改回目标标题」亮、无别名时灰", () => {
     expect(enabled(link)).toEqual(["rename", "move", "delete"]);
@@ -63,7 +65,7 @@ describe("可用集：按 kind 的能力面", () => {
     expect(reasons(anchor).delete).toMatch(/系统目录/);
   });
   it("无 create 权限：副本与链接一起灰，原因是权限；其余不受影响", () => {
-    const ctx = { canCreate: false, myUserId: "u1" };
+    const ctx = { ...full, canCreate: false };
     expect(enabled(wiki, ctx)).toEqual(["rename", "move", "delete"]);
     expect(reasons(wiki, ctx).duplicate).toMatch(/权限/);
     expect(reasons(wiki, ctx).link).toMatch(/权限/);
@@ -81,7 +83,7 @@ describe("每个灰项都有原因；每个原因都不是空串", () => {
 describe("接线棘轮：WikiShell 的 ⋯ 菜单真的从项表渲染，且灰化不靠 disabled 属性", () => {
   const src = readFileSync("components/wiki/WikiShell.tsx", "utf8");
   it("渲染走 treeMenuItems，不再按 kind 条件渲染菜单项", () => {
-    expect(src).toMatch(/treeMenuItems\(it, \{ canCreate, myUserId, canManageAssets \}\)/);
+    expect(src).toMatch(/treeMenuItems\(it, \{ canCreate, assetActions \}\)/);
   });
   it("灰化用 aria-disabled（disabled 的按钮不冒鼠标事件，title 里的原因读不到）", () => {
     const menu = src.slice(src.indexOf("treeMenuItems(it,"), src.indexOf("document.body,"));

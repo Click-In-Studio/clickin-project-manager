@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getAsset, resolveAssetFile } from "@/lib/asset/db";
+import { canViewAsset } from "@/lib/asset/perm";
 import { presignedGet } from "@/lib/r2";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string; assetId: string }> }) {
@@ -13,6 +14,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
 
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });
+
+  // 文件读取门先于两种存储分支；能预览不代表有下载操作权限。
+  if (!await canViewAsset(access.permCtx, id, asset, "file"))
+    return Response.json({ error: "权限不足" }, { status: 403 });
 
   if (asset.storageType === "feishu_link") {
     return Response.json({ url: asset.feishuUrl });

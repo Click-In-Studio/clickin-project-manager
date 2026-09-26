@@ -7,7 +7,7 @@ who: 所有成员可看自己有权限的资产；上传需要资产上传权限
 tier: all
 platform: [desktop, mobile]
 related: [production/assets/preview, production/assets/share, production/wiki/tree]
-updated: 2026-09-18
+updated: 2026-09-26
 ---
 
 ## 这是什么
@@ -44,7 +44,7 @@ updated: 2026-09-18
 
 ## 注意事项
 
-- 删除只有上传者和管理员能做，不可恢复。
+- 在知识库树里，文件的「重命名」「删除」分别按你获得的权限显示为可用或灰色；鼠标停在灰色选项上可以查看原因。上传者的权限也可能被调整。删除不可恢复。
 - 存储占用算历史版本。用「新版本」比另传一份省空间，也不会让别人挂错文件。
 
 ## 常见问题
