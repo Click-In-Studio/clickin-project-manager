@@ -1,0 +1,187 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 89;
+  background: rgba(20, 31, 30, .12);
+}
+
+.drawer {
+  position: fixed;
+  z-index: 90;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  width: min(430px, calc(100vw - 32px));
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: -15px 0 52px rgba(24, 42, 42, .17);
+  animation: drawer-in .18s ease-out;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 22px 22px 0;
+}
+
+.header p {
+  margin: 0;
+  color: var(--stage);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .14em;
+}
+
+.header h2 {
+  margin: 5px 0 0;
+  color: var(--ink);
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: 23px;
+  font-weight: 500;
+}
+
+.closeButton {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.lead {
+  margin: 12px 22px 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.fields {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 15px;
+  overflow-y: auto;
+  padding: 20px 22px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.field input,
+.field textarea,
+.field select {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 10px 11px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.field textarea { resize: vertical; }
+.field small { font-size: 9px; font-weight: 400; }
+.field input:focus,
+.field textarea:focus,
+.field select:focus { outline: 2px solid color-mix(in srgb, var(--stage) 22%, transparent); border-color: var(--stage); }
+
+.footer {
+  border-top: 1px solid var(--line);
+  padding: 14px 22px 18px;
+}
+
+.footerButtons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.primaryButton,
+.secondaryButton,
+.actionButtons button,
+.rejectConfirm button {
+  min-height: 36px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primaryButton { background: var(--ink); color: #fff; }
+.secondaryButton { background: transparent; color: var(--ink); }
+.primaryButton:disabled,
+.secondaryButton:disabled,
+.actionButtons button:disabled,
+.rejectConfirm button:disabled { opacity: .55; cursor: wait; }
+
+.error,
+.actionError {
+  color: var(--danger, #a33);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.error { margin: 0 0 10px; }
+
+.approvalActions { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.actionButtons,
+.rejectConfirm { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.actionButtons button { min-height: 30px; padding: 5px 9px; background: var(--surface); color: var(--ink); }
+.actionButtons button:last-child { background: var(--ink); color: #fff; }
+.rejectConfirm span { color: var(--muted); font-size: 9px; }
+.rejectConfirm button { min-height: 28px; padding: 4px 8px; border-color: var(--line); background: var(--surface); color: var(--ink); }
+.rejectConfirm button:last-child { border-color: var(--danger, #a33); color: var(--danger, #a33); }
+.actionError { max-width: 220px; text-align: right; }
+
+@keyframes drawer-in {
+  from { transform: translateX(18px); opacity: 0; }
+}
+
+@media (max-width: 640px) {
+  .backdrop { background: rgba(20, 31, 30, .28); }
+  .drawer {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-height: min(88dvh, 720px);
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 16px 16px 0 0;
+    animation-name: sheet-in;
+  }
+  .header { padding-top: 18px; }
+  .footer { padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+  .primaryButton,
+  .secondaryButton { min-height: 44px; }
+}
+
+@keyframes sheet-in {
+  from { transform: translateY(18px); opacity: 0; }
+}

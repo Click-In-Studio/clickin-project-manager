@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
 import PageHeader from "@/components/ui/PageHeader";
+import {
+  ExpenseApprovalActions, ExpenseCreateButton,
+  type ExpenseCategoryOption,
+} from "@/components/ops/FinanceExpenseActions";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
@@ -46,10 +50,11 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
   if (!access) redirect(`/unauthorized?id=${id}`);
   const actor = toActor(session, access.permCtx);
 
-  const [canBudget, canAllExpenses, canCategories] = await Promise.all([
+  const [canBudget, canAllExpenses, canCategories, canCreateExpense] = await Promise.all([
     hasEffectiveGrant(actor, id, "finance", "*", "budget", "view"),
     hasEffectiveGrant(actor, id, "finance", "*", "expenses", "view"),
     hasEffectiveGrant(actor, id, "finance", "*", "categories", "view"),
+    hasEffectiveGrant(actor, id, "finance", "*", "expenses", "create"),
   ]);
 
   const [categories, options, expenses] = await Promise.all([
@@ -80,24 +85,48 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
     </div>
   );
 
-  const expenseRow = (e: (typeof expenses)[number]) => (
+  const expenseRow = (e: (typeof expenses)[number], approval = false) => (
     <div key={e.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, padding: "12px 0", borderTop: "1px solid var(--line)" }}>
       <span>
         <b style={{ display: "block", fontSize: 11, color: "var(--ink)" }}>{e.title}</b>
         <small style={{ color: "var(--muted)", fontSize: 9 }}>
           {e.categoryName ?? "未归类"} · {STATUS_LABEL[e.status]}
-          {canAllExpenses && e.submitterName ? ` · ${e.submitterName}` : ""}
+          {(canAllExpenses || approval) && e.submitterName ? ` · ${e.submitterName}` : ""}
         </small>
+        {approval && e.note && (
+          <small style={{ display: "block", marginTop: 5, color: "var(--muted)", fontSize: 10, lineHeight: 1.5 }}>
+            {e.note}
+          </small>
+        )}
       </span>
-      <b style={{ color: "var(--stage)", fontSize: 11 }}>{fmtCny(toCents(e.amount))}</b>
+      <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+        <b style={{ color: "var(--stage)", fontSize: 11 }}>{fmtCny(toCents(e.amount))}</b>
+        {approval && !access.isArchived && (
+          <ExpenseApprovalActions
+            productionId={id}
+            expenseId={e.id}
+            canFinalize={e.canFinalize}
+          />
+        )}
+      </span>
     </div>
   );
 
   const twoUp = canBudget || canCategories;
+  const expenseCategoryOptions: ExpenseCategoryOption[] = canBudget
+    ? categories.map(({ id: categoryId, name: categoryName, deptName }) => ({ id: categoryId, name: categoryName, deptName }))
+    : options;
 
   return (
     <div style={{ padding: PAD, minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader eyebrow="Finance" title="财务" side="stage" />
+      <PageHeader
+        eyebrow="Finance"
+        title="财务"
+        side="stage"
+        actions={canCreateExpense && !access.isArchived ? (
+          <ExpenseCreateButton productionId={id} categories={expenseCategoryOptions} />
+        ) : undefined}
+      />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
         <p style={{ margin: 0, color: "var(--muted)", fontSize: 12 }}>预算 · 支出 · 关联</p>
       </div>
@@ -120,7 +149,7 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
           <p style={{ margin: "0 0 10px", fontSize: 12, fontWeight: 700, color: "var(--stage)" }}>
             待你审批 · {pendingMine.length} 笔
           </p>
-          {pendingMine.map(expenseRow)}
+          {pendingMine.map(e => expenseRow(e, true))}
         </div>
       )}
 
@@ -170,7 +199,7 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
           {expenses.length === 0
             ? empty(canAllExpenses ? "还没有支出记录" : "你还没有提交过报销",
                     "提交后会按审批阶梯逐级流转")
-            : expenses.slice(0, 12).map(expenseRow)}
+            : expenses.slice(0, 12).map(e => expenseRow(e))}
         </section>
       </div>
     </div>

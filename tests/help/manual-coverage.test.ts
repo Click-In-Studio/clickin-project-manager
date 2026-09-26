@@ -42,9 +42,9 @@ const EXTRA_ROUTES = new Set([
  * 只减不增：往这里加条目 = 侧栏新增了功能却没写手册，请同 PR 补页。
  */
 const MISSING_ALLOWED = new Set<string>([
-  // #535 制作（后半）：财务 / 物料页目前只有查看、没有录入界面（#309 / #310），
+  // #535 制作（后半）：物料页目前只有查看、没有录入界面（#310），
   // 等写入口落地再写手册页，届时一并从这里划掉
-  "finance", "materials",
+  "materials",
 ]);
 
 /** `_TEMPLATE.md` 的四个固定小节；内容 issue 的验收标准之一是「按模板写」。 */
