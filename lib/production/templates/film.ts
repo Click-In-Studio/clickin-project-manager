@@ -21,7 +21,7 @@
 import type { ProductionTemplate } from "../production-template";
 import {
   PRODUCER_KEYS, SCENE_VIEW, CHARACTER_VIEW, SCRIPT_READ, SCRIPT_EDIT,
-  STRUCTURE_EDIT, SCHEDULE_ADMIN, ASSET_LIST_VIEW, ASSET_FILE_VIEW,
+  STRUCTURE_EDIT, SCHEDULE_ADMIN, ASSET_FILE_VIEW,
   ASSET_UPLOAD, ASSET_NEW_VERSION, policiesFromAnswers,
 } from "./shared";
 
@@ -40,8 +40,8 @@ const FILM_BASELINE: readonly string[] = [
   "node:wiki/*@create",
 ];
 
-/** 素材列表可见 + 文件本体可取。分两枚是有意的：很多岗位只需要知道「有这个素材」。 */
-const ASSET_READ = [ASSET_LIST_VIEW, ASSET_FILE_VIEW];
+/** 文件原件下载独立于读取；内容可见由分享、公开和挂载决定。 */
+const ASSET_READ = [ASSET_FILE_VIEW];
 
 /** 现场统筹（制片 / 执行制片共用的事件面）。 */
 const PRODUCTION_OFFICE: readonly string[] = [
@@ -71,12 +71,12 @@ const FILM_DEPT_TREE = [
 /** 部门静态行只给素材面——剧本与场次的读权按岗位给（部门里未必人人该读）。
  *  伞语义：美术组那一行下传给置景 / 道具 / 服装 / 化妆。 */
 const FILM_DEPT_PERMISSIONS: Record<string, readonly string[]> = {
-  制作组: [ASSET_LIST_VIEW, ASSET_UPLOAD],
+  制作组: [ASSET_UPLOAD],
   导演组: [...ASSET_READ],
   摄影组: [...ASSET_READ, ASSET_UPLOAD],
-  灯光组: [ASSET_LIST_VIEW, ASSET_UPLOAD],
+  灯光组: [ASSET_UPLOAD],
   录音组: [...ASSET_READ, ASSET_UPLOAD],
-  美术组: [ASSET_LIST_VIEW, ASSET_UPLOAD],
+  美术组: [ASSET_UPLOAD],
   后期组: [...ASSET_READ, ASSET_UPLOAD, ASSET_NEW_VERSION],
   // 演员组：基线即全部（角色与剧本的读权在「演员」这个 role 上，不在部门）
 };
@@ -93,7 +93,7 @@ const FILM_ROLES = [
 const FILM_ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   制作人: PRODUCER_KEYS,
 
-  制片: [...PRODUCTION_OFFICE, ...SCHEDULE_ADMIN, ...SCRIPT_READ, ...SCENE_VIEW, ASSET_LIST_VIEW],
+  制片: [...PRODUCTION_OFFICE, ...SCHEDULE_ADMIN, ...SCRIPT_READ, ...SCENE_VIEW],
   执行制片: [...PRODUCTION_OFFICE, ...SCRIPT_READ, ...SCENE_VIEW],
 
   导演: [
@@ -104,11 +104,11 @@ const FILM_ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "node:dept/*/notes@create",
     "node:task/*@view",
   ],
-  副导演: [...SCRIPT_READ, ...SCENE_VIEW, ...CHARACTER_VIEW, ASSET_LIST_VIEW, "node:task/*@view"],
+  副导演: [...SCRIPT_READ, ...SCENE_VIEW, ...CHARACTER_VIEW, "node:task/*@view"],
   // 结构与正文都归编剧（影视没有戏剧构作这个岗）
   编剧: [...SCRIPT_READ, ...SCRIPT_EDIT, ...STRUCTURE_EDIT, ...SCENE_VIEW, ...CHARACTER_VIEW],
   // 场记记的是「这一条拍成了什么」
-  场记: [...SCRIPT_READ, ...SCENE_VIEW, "node:scene/*/stage_notes@edit", ASSET_LIST_VIEW],
+  场记: [...SCRIPT_READ, ...SCENE_VIEW, "node:scene/*/stage_notes@edit"],
 
   // 各部门的指导岗要读剧本与场次；组员不读，走部门素材面
   摄影指导: [...SCRIPT_READ, ...SCENE_VIEW, ...ASSET_READ],

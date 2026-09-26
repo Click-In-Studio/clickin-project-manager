@@ -102,12 +102,13 @@ describe("invariance verification", () => {
       "node:script/*/blocks@view",
       "node:scene/*/meta@view",
       "node:character/*/meta@view",
-      "node:asset/*/meta@view",
       "node:member/*/meta@view",
       "node:announcement/*@view",
     ]) {
       expect(keys).toContain(need);
     }
+    // #427：资产内容随公开/分享/挂载读取，基线不再发旧能力票。
+    expect(keys).not.toContain("node:asset/*/meta@view");
   });
 });
 

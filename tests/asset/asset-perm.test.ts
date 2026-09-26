@@ -9,8 +9,7 @@ import type { PermissionContext } from "@/lib/perm/permissions";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 
-// 批D：隐私/公开模型判定
-// 可见 = publication@view（越隐私）∨ 能力票 ∧ (is_public ∨ ∃挂载:宿主可见)
+// #427：正文可见 = 个人正文授权 ∨ 公开 ∨ 部门分享 ∨ 挂载让渡；列出不投内容票。
 
 async function newUser(): Promise<string> {
   const res = await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id");
@@ -71,17 +70,30 @@ afterAll(async () => {
   await cleanupProduction(prodId).catch(() => {});
 });
 
-describe("能力票∧结构合取", () => {
-  it("能力票 + is_public → 可见", async () => {
+describe("资产正文与下载", () => {
+  it("公开资产可阅读，无需旧 meta 能力票", async () => {
     expect(await canViewAsset(ctxOf(member), prodId, { id: publicAssetId }, "meta")).toBe(true);
+    expect(await canViewAsset(ctxOf(outsider), prodId, { id: publicAssetId }, "meta")).toBe(true);
   });
 
   it("能力票单独不越隐私（未挂载私有 → 不可见）", async () => {
     expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId }, "meta")).toBe(false);
   });
 
-  it("无能力票即使公开也不可见", async () => {
-    expect(await canViewAsset(ctxOf(outsider), prodId, { id: publicAssetId }, "meta")).toBe(false);
+  it("旧 meta 能力票不授予隐私正文；预览与下载分开", async () => {
+    expect(await canViewAsset(ctxOf(member), prodId, { id: publicAssetId }, "file")).toBe(true);
+    expect(await canViewAsset(ctxOf(outsider), prodId, { id: publicAssetId }, "file")).toBe(false);
+  });
+
+  it("实例正文 *@view 不隐含 file@view 下载权", async () => {
+    await giveTicket(outsider, prodId, "*", "view", privateAssetId);
+    expect(await canViewAsset(ctxOf(outsider), prodId, { id: privateAssetId }, "meta")).toBe(true);
+    expect(await canViewAsset(ctxOf(outsider), prodId, { id: privateAssetId }, "file")).toBe(false);
+    await getPool().query(
+      `UPDATE production_member_grant SET is_revoked=true,revoked_reason='manual'
+       WHERE production_id=$1 AND user_id=$2 AND resource_id=$3 AND resource_sub='*' AND permission_level='view'`,
+      [prodId, outsider, privateAssetId],
+    );
   });
 
   it("publication@view 显式通配越隐私（无需能力票的 file 面也可）", async () => {
@@ -93,12 +105,11 @@ describe("能力票∧结构合取", () => {
   });
 });
 
-describe("结构让渡（#420：node 可枚举 ≡ 原 production 根共享区）", () => {
-  it("置 listable 后能力票持有者可见；关掉回到隐私", async () => {
+describe("目录可列出与正文正交", () => {
+  it("listable 只列标题，不把私有正文交给持旧能力票者", async () => {
     await getPool().query(
       `UPDATE node SET listable = true WHERE asset_id = $1`, [privateAssetId]);
-    expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId }, "meta")).toBe(true);
-    // 无能力票者依然不可见（让渡不豁免能力票）
+    expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId }, "meta")).toBe(false);
     expect(await canViewAsset(ctxOf(outsider), prodId, { id: privateAssetId }, "meta")).toBe(false);
 
     await getPool().query(
@@ -154,7 +165,7 @@ describe("双门与分享规则", () => {
 
 // 本块放文件末尾：给 member 发 script 票会改变后续挂载判定，不得污染前面的用例。
 describe("挂载让渡（script 通道）与 node_mount CRUD", () => {
-  it("block 挂载：宿主域票 ∧ 能力票才让渡；撤挂即收缩", async () => {
+  it("block 挂载：可看宿主即能播放所挂音频，不要求旧 asset 票；撤挂即收缩", async () => {
     const node = await getNodeByAssetId(privateAssetId);
     expect(node).not.toBeNull();
     const mount = await addNodeMount({
@@ -162,7 +173,7 @@ describe("挂载让渡（script 通道）与 node_mount CRUD", () => {
       mountType: "block", mountId: shortId(), createdBy: uploader,
     });
 
-    // 挂上了，但 member 只有 asset 能力票、无 script blocks@view → 让渡不成立
+    // 挂上了，但 member 还看不到宿主。
     expect(await canViewAsset(ctxOf(member), prodId, { id: privateAssetId }, "meta")).toBe(false);
 
     await getPool().query(
@@ -174,8 +185,13 @@ describe("挂载让渡（script 通道）与 node_mount CRUD", () => {
     // 集合式同源不分叉
     const set = await filterVisibleAssets(ctxOf(member), prodId, [{ id: privateAssetId }]);
     expect(set.map(a => a.id)).toContain(privateAssetId);
-    // 宿主域票不豁免能力票（outsider 无 asset 票）
-    expect(await canViewAsset(ctxOf(outsider), prodId, { id: privateAssetId }, "meta")).toBe(false);
+    // outsider 没有旧 asset 票；只有宿主票仍能阅读/播放，下载单独控制。
+    await getPool().query(
+      `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES ($1, $2, 'script', '*', 'blocks', 'view', 'auto')`, [prodId, outsider],
+    );
+    expect(await canViewAsset(ctxOf(outsider), prodId, { id: privateAssetId }, "meta")).toBe(true);
+    expect(await canViewAsset(ctxOf(outsider), prodId, { id: privateAssetId }, "file")).toBe(false);
 
     // CRUD 读面
     expect((await getNodeMount(mount.id))?.mountType).toBe("block");

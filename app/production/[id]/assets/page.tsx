@@ -4,11 +4,12 @@ export const metadata: Metadata = { title: "Assets" };
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getActiveVersionId } from "@/lib/script/version-db";
 import AssetPageClient from "@/components/assets/AssetPageClient";
 import PageActivationGate from "@/components/perm/PageActivationGate";
+import { listActiveProductionMembers } from "@/lib/perm/member-db";
+import { listEventDepartments } from "@/lib/ops/event-db";
 
 export default async function AssetsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -18,11 +19,9 @@ export default async function AssetsPage({ params }: { params: Promise<{ id: str
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  // 批D：能力票（meta@view 实例或通配）
-  if (!await hasAnyEffectiveGrant(access.permCtx, id, "asset", ["meta"], "view"))
-    redirect(`/unauthorized?resource=node%3Aasset%2F*%2Fmeta%40view&id=${id}`);
-
-  const versionId = await getActiveVersionId(id);
+  const [versionId, members, allDepts] = await Promise.all([
+    getActiveVersionId(id), listActiveProductionMembers(id), listEventDepartments(id),
+  ]);
 
   return (
     <>
@@ -30,8 +29,9 @@ export default async function AssetsPage({ params }: { params: Promise<{ id: str
         productionId={id}
         versionId={versionId}
         myUserId={session.userId}
-        isAdmin={access.permCtx.isAdmin || access.permCtx.isOwner}
         userName={session.name}
+        members={members.map(m => ({ userId: m.userId, name: m.name }))}
+        departments={allDepts.filter(d => d.kind === "dept").map(d => ({ id: d.id, name: d.name }))}
       />
       <PageActivationGate productionId={id} scope="assets" />
     </>

@@ -80,5 +80,10 @@ describe("assetSizeStats", () => {
     expect(stats.sizeByAsset.has(bare)).toBe(false);
     expect(stats.unknownFiles).toBeGreaterThanOrEqual(1);
     expect(stats.totalBytes).toBeGreaterThanOrEqual(3500);
+    // 工作台只汇总当前成员可读的资产，不能从总量推断隐藏文件。
+    const visibleOnly = await assetSizeStats(prodId, [a.asset.id]);
+    expect(visibleOnly.totalBytes).toBe(3500);
+    expect(visibleOnly.unknownFiles).toBe(1);
+    expect((await assetSizeStats(prodId, [])).totalBytes).toBe(0);
   });
 });

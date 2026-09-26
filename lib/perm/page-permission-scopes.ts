@@ -41,8 +41,7 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:scene/*/meta@view",
     // 批E：角色目录门票（characters 页的 redirect 门）
     "node:character/*/meta@view",
-    // 批D：附件门票（assets 页 redirect 门 = meta@view；file@view = 下载/原件）
-    "node:asset/*/meta@view",
+    // #427：资产页对成员开放；file@view 只用于原件下载。
     "node:asset/*/file@view",
     // 批F：通讯录门票。contacts 页没有自己的 PageActivationGate，全靠 base
     // 这一层——挂在 AppShell 上，进任何页面都能激活。
@@ -188,6 +187,7 @@ export const PAGE_PERMISSION_SCOPES = {
     // 查 asset/<id>/meta@edit。与上面那枚同源的洞——此前没有任何角色/部门持有它，
     // 故一直没人撞上；音乐类的「音乐制作」要做素材整理，需要它可激活。
     "node:asset/*/meta@edit",
+    "node:asset/*/grants@edit",
     "node:asset/*/shares@create",
   ]),
 } as const;

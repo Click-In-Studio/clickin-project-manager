@@ -239,9 +239,9 @@ const SHAPE_C: PolicyKeyDef[] = [
   },
   {
     key: "policy.asset_public_enabled", shape: "C", values: ON_OFF, defaultValue: POLICY_ON,
-    label: "允许素材免挂载对全组可见",
-    help: "asset.is_public 只**免除挂载要求**，可见仍需能力票（meta|file@view），"
-      + "受众上限是本项目持票成员——**不是对外公开**。",
+    label: "允许素材对全组公开",
+    help: "开启后，设为公开的素材对本项目所有成员可读。"
+      + "原件下载仍单独受 file@view 控制，不会生成对外分享链接。",
   },
   {
     key: "policy.wiki_public_enabled", shape: "C", values: ON_OFF, defaultValue: POLICY_ON,

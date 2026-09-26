@@ -2,9 +2,11 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { filterVisibleAssets } from "@/lib/asset/perm";
-import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { listExplicitAssetDownloadIds } from "@/lib/asset/share-db";
+import { hasEffectiveGrant, listEffectiveGrantedResourceIds, toActor } from "@/lib/perm/grant-check";
+import { isPolicyOn } from "@/lib/perm/policy-db";
 import { createAsset, listAssets, assetTreePaths, assetSizeStats, type AssetType } from "@/lib/asset/db";
-import { canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
+import { canPlaceNodeUnder, canWriteNodeContainer, listEnumerableNodeIds } from "@/lib/node/perm";
 import { listNodeLibrary } from "@/lib/node/db";
 import { resolveDefaultLanding, readLandingContext } from "@/lib/node/landing";
 import { isAssetType } from "@/lib/asset/types";
@@ -20,7 +22,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
 
   const assets = await listAssets(id);
-  // 批D：可见性过滤（能力票∧结构 ∨ publication@view）
+  // #427：与单点读同源，个人正文授权/公开/部门分享/挂载并集。
   const visible = await filterVisibleAssets(access.permCtx, id, assets);
   // #420：附带壳节点树面（nodeId + listable=「对全员列出」面板数据源，原 production
   // mount 语义）。一次集合查询，避免 N+1。
@@ -32,11 +34,30 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   // 工作台读面（#420 第二批 PR-C）：树内位置 + 占用统计。逻辑在 lib/asset/db.ts
   //（assetTreePaths 纯函数 / assetSizeStats 聚合），路由只做拼装。
-  const [library, sizes] = await Promise.all([
+  const [library, sizes, enumerable] = await Promise.all([
     listNodeLibrary(id),
-    assetSizeStats(id),
+    assetSizeStats(id, visible.map(a => a.id)),
+    listEnumerableNodeIds(access.permCtx, id),
   ]);
   const treePaths = assetTreePaths(library);
+  const actor = access.permCtx;
+  const [metaEdit, assetDelete, fileCreate, fileView, pubView, grantsEdit,
+    pubCreate, pubDelete, externalShare, productionMounts, shareTokenOn] = await Promise.all([
+    listEffectiveGrantedResourceIds(actor, id, "asset", "meta", "edit"),
+    listEffectiveGrantedResourceIds(actor, id, "asset", "*", "delete"),
+    listEffectiveGrantedResourceIds(actor, id, "asset", "file", "create"),
+    actor.isOwner ? Promise.resolve({ wildcard: true, ids: [] as string[] })
+      : listExplicitAssetDownloadIds(actor.userId, id),
+    listEffectiveGrantedResourceIds(actor, id, "asset", "publication", "view"),
+    listEffectiveGrantedResourceIds(actor, id, "asset", "grants", "edit"),
+    listEffectiveGrantedResourceIds(actor, id, "asset", "publication", "create"),
+    listEffectiveGrantedResourceIds(actor, id, "asset", "publication", "delete"),
+    listEffectiveGrantedResourceIds(actor, id, "asset", "shares", "create"),
+    hasEffectiveGrant(actor, id, "production", "*", "mounts", "create"),
+    isPolicyOn(id, "policy.share_token_enabled"),
+  ]);
+  const has = (grant: { wildcard: boolean; ids: string[] }, assetId: string) =>
+    grant.wildcard || grant.ids.includes(assetId);
 
   return Response.json({
     assets: visible.map(a => {
@@ -45,8 +66,21 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         ...a,
         nodeId: node?.id ?? null,
         listable: node?.listable ?? false,
-        treePath: treePaths.get(a.id) ?? [],
+        treePath: node && (enumerable.wildcard || enumerable.ids.has(node.id))
+          ? treePaths.get(a.id) ?? [] : [],
         sizeBytes: sizes.sizeByAsset.get(a.id) ?? null,
+        actions: {
+          metaEdit: has(metaEdit, a.id),
+          delete: has(assetDelete, a.id),
+          addVersion: has(fileCreate, a.id),
+          download: has(pubView, a.id) || has(fileView, a.id),
+          share: has(grantsEdit, a.id),
+          unmount: has(grantsEdit, a.id) || has(pubDelete, a.id),
+          externalShare: actor.isOwner
+            || (shareTokenOn && has(externalShare, a.id)),
+          listableOn: has(grantsEdit, a.id) || (productionMounts && has(pubCreate, a.id)),
+          listableOff: has(grantsEdit, a.id) || (productionMounts && has(pubDelete, a.id)),
+        },
       };
     }),
     stats: { totalBytes: sizes.totalBytes, unknownFiles: sizes.unknownFiles },
