@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { buildArchiveTree, flattenTree, allDirPaths } from "@/lib/asset/archive-view";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
-import AssetShareModal from "./AssetShareModal";
+import AssetSharePanel from "./AssetSharePanel";
 
 const WaveformPlayer = lazy(() => import("./WaveformPlayer"));
 const VideoPlayer = lazy(() => import("./VideoPlayer"));
@@ -20,6 +20,8 @@ interface Props {
   storageType: string;
   feishuUrl: string | null;
   userName: string;
+  canManageExternalShare: boolean;
+  canCreateExternalShare: boolean;
   /** embedded：内嵌在知识库 shell 主区（#420 第二批）——卡片外壳、去掉整页
    *  导航（返回/Asset 列表），其余（下载/分享/预览体）同一份。 */
   variant?: "page" | "embedded";
@@ -162,6 +164,7 @@ export function metaInfoLine(meta: MetaEnvelope | null, fileSize: number | null)
 
 export default function AssetPreviewClient({
   productionId, assetId, versionId, fileName, mimeType, storageType, feishuUrl, userName,
+  canManageExternalShare, canCreateExternalShare,
   variant = "page",
 }: Props) {
   const embedded = variant === "embedded";
@@ -348,7 +351,9 @@ export default function AssetPreviewClient({
           )}
           <button
             onClick={() => setShareOpen(true)}
-            className={`text-xs transition-colors ${t.dim}`}
+            disabled={!canManageExternalShare}
+            title={canManageExternalShare ? "管理对外链接" : "需要对外分享资格"}
+            className={`text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${t.dim}`}
           >
             分享
           </button>
@@ -363,12 +368,13 @@ export default function AssetPreviewClient({
         </div>
       </div>
 
-      {shareOpen && (
-        <AssetShareModal
+      {shareOpen && canManageExternalShare && (
+        <AssetSharePanel
           productionId={productionId}
           assetId={assetId}
           assetName={fileName}
           userName={userName}
+          canCreateLink={canCreateExternalShare}
           onClose={() => setShareOpen(false)}
         />
       )}

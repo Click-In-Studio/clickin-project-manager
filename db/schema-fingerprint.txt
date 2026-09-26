@@ -196,6 +196,21 @@ COL|asset_file|id|text|text|NO|
 COL|asset_file|metadata|jsonb|jsonb|YES|
 COL|asset_file|r2_key|text|text|YES|
 COL|asset_file|thumbnail_r2_key|text|text|YES|
+COL|asset_share_link|allow_download|boolean|bool|NO|false
+COL|asset_share_link|asset_id|text|text|NO|
+COL|asset_share_link|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|asset_share_link|created_by|uuid|uuid|YES|
+COL|asset_share_link|expires_at|timestamp with time zone|timestamptz|NO|
+COL|asset_share_link|id|text|text|NO|
+COL|asset_share_link|note|text|text|YES|
+COL|asset_share_link|one_time|boolean|bool|NO|false
+COL|asset_share_link|production_id|text|text|NO|
+COL|asset_share_link|redeemed_at|timestamp with time zone|timestamptz|YES|
+COL|asset_share_link|revoked_at|timestamp with time zone|timestamptz|YES|
+COL|asset_share_link|session_expires_at|timestamp with time zone|timestamptz|YES|
+COL|asset_share_link|session_last_seen_at|timestamp with time zone|timestamptz|YES|
+COL|asset_share_link|session_secret_hash|text|text|YES|
+COL|asset_share_link|token|text|text|NO|
 COL|asset|asset_type|text|text|NO|'reference'::text
 COL|asset|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|asset|feishu_url|text|text|YES|
@@ -1037,6 +1052,12 @@ CON|approval_request|approval_request_type_check|CHECK ((type = ANY (ARRAY['reso
 CON|approval_request|approval_resource_fields_required|CHECK (((type <> 'resource_access'::text) OR ((resource_type IS NOT NULL) AND (permission_level IS NOT NULL))))
 CON|asset_file|asset_file_asset_id_fkey|FOREIGN KEY (asset_id) REFERENCES asset(id) ON DELETE CASCADE
 CON|asset_file|asset_file_pkey|PRIMARY KEY (id)
+CON|asset_share_link|asset_share_link_asset_id_fkey|FOREIGN KEY (asset_id) REFERENCES asset(id) ON DELETE CASCADE
+CON|asset_share_link|asset_share_link_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id) ON DELETE SET NULL
+CON|asset_share_link|asset_share_link_pkey|PRIMARY KEY (id)
+CON|asset_share_link|asset_share_link_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|asset_share_link|asset_share_link_session_shape|CHECK ((((redeemed_at IS NULL) AND (session_secret_hash IS NULL) AND (session_last_seen_at IS NULL) AND (session_expires_at IS NULL)) OR ((one_time = true) AND (redeemed_at IS NOT NULL) AND (session_secret_hash IS NOT NULL) AND (session_last_seen_at IS NOT NULL) AND (session_expires_at IS NOT NULL))))
+CON|asset_share_link|asset_share_link_token_key|UNIQUE (token)
 CON|asset|asset_pkey|PRIMARY KEY (id)
 CON|asset|asset_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|asset|asset_uploader_user_id_fkey|FOREIGN KEY (uploader_user_id) REFERENCES app_user(id)
@@ -1481,6 +1502,10 @@ IDX|approval_request|approval_request_production_status_idx|CREATE INDEX approva
 IDX|approval_request|approval_request_subject_idx|CREATE INDEX approval_request_subject_idx ON public.approval_request USING btree (subject_id, production_id)
 IDX|asset_file|asset_file_asset_idx|CREATE INDEX asset_file_asset_idx ON public.asset_file USING btree (asset_id)
 IDX|asset_file|asset_file_pkey|CREATE UNIQUE INDEX asset_file_pkey ON public.asset_file USING btree (id)
+IDX|asset_share_link|asset_share_link_asset_idx|CREATE INDEX asset_share_link_asset_idx ON public.asset_share_link USING btree (asset_id, created_at DESC)
+IDX|asset_share_link|asset_share_link_pkey|CREATE UNIQUE INDEX asset_share_link_pkey ON public.asset_share_link USING btree (id)
+IDX|asset_share_link|asset_share_link_production_idx|CREATE INDEX asset_share_link_production_idx ON public.asset_share_link USING btree (production_id, created_at DESC)
+IDX|asset_share_link|asset_share_link_token_key|CREATE UNIQUE INDEX asset_share_link_token_key ON public.asset_share_link USING btree (token)
 IDX|asset|asset_pkey|CREATE UNIQUE INDEX asset_pkey ON public.asset USING btree (id)
 IDX|asset|asset_production_idx|CREATE INDEX asset_production_idx ON public.asset USING btree (production_id, created_at DESC)
 IDX|asset|asset_uploader_idx|CREATE INDEX asset_uploader_idx ON public.asset USING btree (uploader_user_id)

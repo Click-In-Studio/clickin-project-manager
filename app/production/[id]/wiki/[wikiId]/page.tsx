@@ -11,7 +11,7 @@ import { listProductionMembers } from "@/lib/perm/member-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getWiki } from "@/lib/wiki/content";
 import { getAsset } from "@/lib/asset/db";
-import { canViewAsset } from "@/lib/asset/perm";
+import { canCreateShareToken, canManageShareLinks, canViewAsset } from "@/lib/asset/perm";
 import AssetPreviewClient from "@/components/assets/AssetPreviewClient";
 import { listBacklinks, listUnlinkedReferences, listEntityRefsForWiki } from "@/lib/wiki/links";
 import { canViewWiki, canEditWiki, canShareWiki } from "@/lib/wiki/perm";
@@ -59,7 +59,11 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
       listNodeTreeFor(actor, productionId),
       hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"),
     ]);
-    const canView = await canViewAsset(access.permCtx, productionId, asset, "meta");
+    const [canView, manageShareCap, createShareCap] = await Promise.all([
+      canViewAsset(access.permCtx, productionId, asset, "meta"),
+      canManageShareLinks(access.permCtx, productionId, asset),
+      canCreateShareToken(access.permCtx, productionId, asset),
+    ]);
     return (
       <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
         <PageHeader eyebrow="Wiki" title="知识库" side="stage" />
@@ -74,6 +78,8 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
               storageType={asset.storageType}
               feishuUrl={asset.feishuUrl}
               userName={session.name}
+              canManageExternalShare={manageShareCap.allowed}
+              canCreateExternalShare={createShareCap.allowed}
               variant="embedded"
             />
           ) : (

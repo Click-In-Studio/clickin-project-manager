@@ -76,8 +76,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
           download: has(pubView, a.id) || has(fileView, a.id),
           share: has(grantsEdit, a.id),
           unmount: has(grantsEdit, a.id) || has(pubDelete, a.id),
-          externalShare: actor.isOwner
-            || (shareTokenOn && has(externalShare, a.id)),
+          externalShare: actor.isOwner || has(externalShare, a.id),
+          externalShareCreate: actor.isOwner || (shareTokenOn && has(externalShare, a.id)),
           listableOn: has(grantsEdit, a.id) || (productionMounts && has(pubCreate, a.id)),
           listableOff: has(grantsEdit, a.id) || (productionMounts && has(pubDelete, a.id)),
         },

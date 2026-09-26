@@ -5,7 +5,7 @@ import PageHeader, { PRIMARY_BTN } from "@/components/ui/PageHeader";
 import Link from "next/link";
 import AssetUploadPanel from "./AssetUploadPanel";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
-import AssetShareModal from "./AssetShareModal";
+import AssetSharePanel from "./AssetSharePanel";
 import AssetAccessModal from "./AssetAccessModal";
 import { BASE_PATH } from "@/lib/base-path";
 import { useRouter } from "next/navigation";
@@ -21,7 +21,8 @@ type AssetListItem = Asset & {
   treePath: string[]; sizeBytes: number | null;
   actions: {
     metaEdit: boolean; delete: boolean; addVersion: boolean; download: boolean;
-    share: boolean; unmount: boolean; externalShare: boolean; listableOn: boolean; listableOff: boolean;
+    share: boolean; unmount: boolean; externalShare: boolean; externalShareCreate: boolean;
+    listableOn: boolean; listableOff: boolean;
   };
 };
 
@@ -55,7 +56,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<Asset | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [shareTarget, setShareTarget] = useState<Asset | null>(null);
+  const [shareTarget, setShareTarget] = useState<AssetListItem | null>(null);
   const [accessTarget, setAccessTarget] = useState<Asset | null>(null);
   const [editTarget, setEditTarget] = useState<Asset | null>(null);
   const [editName, setEditName] = useState("");
@@ -500,11 +501,12 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
       )}
 
       {shareTarget && (
-        <AssetShareModal
+        <AssetSharePanel
           productionId={productionId}
           assetId={shareTarget.id}
           assetName={shareTarget.name ?? shareTarget.fileName}
           userName={userName}
+          canCreateLink={shareTarget.actions.externalShareCreate}
           onClose={() => setShareTarget(null)}
         />
       )}
