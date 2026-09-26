@@ -93,6 +93,12 @@ export default function QuickCreateModal({ productionId, date, departments, even
       aria-modal="true"
       aria-label={`${date} 快捷新建`}
       onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
+      onKeyDown={e => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onClose();
+        }
+      }}
       style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(7,29,32,.34)", display: "grid", placeItems: "center", padding: 18 }}
     >
       <form onSubmit={submit} style={{ width: "min(520px, 100%)", maxHeight: "calc(100vh - 36px)", overflowY: "auto", borderRadius: 14, border: "1px solid var(--line)", background: "var(--surface)", boxShadow: "0 22px 70px rgba(7,29,32,.24)", padding: 22 }}>
