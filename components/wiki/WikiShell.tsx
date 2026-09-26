@@ -16,6 +16,7 @@ import { useAgentMutation } from "@/lib/agent/agent-mutations";
 import { BASE_PATH } from "@/lib/base-path";
 import TreePickerModal from "@/components/ui/TreePickerModal";
 import AssetUploadPanel from "@/components/assets/AssetUploadPanel";
+import { treeDragRef, writeDragRef } from "@/lib/editor/editor-drop-payload";
 import AdminModal from "@/components/ui/AdminModal";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
 import type { NodeEntry } from "@/lib/node/db";
@@ -704,14 +705,10 @@ export default function WikiShell({
                   onDragStart={e => {
                     setDragId(item.id);
                     e.dataTransfer.effectAllowed = "copyMove";
-                    // 拖进编辑器成为双向链接：引用永远锚**真实 wiki 目标**（#358 ⑦）。
-                    const refWikiId = item.kind === "wiki" ? item.wikiId
-                      : item.kind === "link" ? item.targetWikiId : null;
-                    if (refWikiId) {
-                      const label = item.displayTitle ?? "（无标题）";
-                      e.dataTransfer.setData("application/x-clickin-wiki", JSON.stringify({ id: refWikiId, label }));
-                      e.dataTransfer.setData("text/plain", `[#](/__cm__/wiki/${refWikiId})`);
-                    }
+                    // 拖进编辑器成为引用 chip（文档 = 双向链接，素材 = 素材引用；#692）。
+                    // 载荷形状与编辑器落点同源：lib/editor/editor-drop-payload
+                    const ref = treeDragRef(item);
+                    if (ref) writeDragRef(e.dataTransfer, ref);
                   }}
                   onDragEnd={() => { setDragId(null); setDropHint(null); }}
                   onDragOver={e => {
