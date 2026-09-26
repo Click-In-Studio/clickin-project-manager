@@ -51,7 +51,7 @@ const PDF_X_BUCKET = 10;
 // 实测催生（2026-09-07 用户本地测试）：没有它，用户不在资产预览页时 AI 对
 // "帮我读那个 pdf"是死路——文件明明在库里，AI 却没有任何入口找到它。
 // 与 wiki_tree（全树含 [文件] 行）互补：树给结构、这里给平铺+按名过滤。
-// 可见性口径＝filterVisibleAssets（能力票∧结构面∧is_public 合取，与资产
+// 可见性口径＝filterVisibleAssets（个人授权、公开、部门分享、挂载让渡的并集，与资产
 // 列表页同源）。
 
 export async function assetList(

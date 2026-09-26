@@ -6,7 +6,9 @@ import Link from "next/link";
 import AssetUploadPanel from "./AssetUploadPanel";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import AssetShareModal from "./AssetShareModal";
+import AssetAccessModal from "./AssetAccessModal";
 import { BASE_PATH } from "@/lib/base-path";
+import { useRouter } from "next/navigation";
 import type { Asset } from "@/lib/asset/db";
 import type { NodeMount } from "@/lib/node/mount";
 import { ASSET_TYPE_LABELS, type AssetType } from "@/lib/asset/types";
@@ -17,6 +19,10 @@ import ChevronIcon from "@/components/ui/ChevronIcon";
 type AssetListItem = Asset & {
   nodeId: string | null; listable: boolean;
   treePath: string[]; sizeBytes: number | null;
+  actions: {
+    metaEdit: boolean; delete: boolean; addVersion: boolean; download: boolean;
+    share: boolean; unmount: boolean; externalShare: boolean; listableOn: boolean; listableOff: boolean;
+  };
 };
 
 function formatBytes(n: number): string {
@@ -31,11 +37,13 @@ interface Props {
   productionId: string;
   versionId: string | null;
   myUserId: string;
-  isAdmin: boolean;
   userName: string;
+  members: { userId: string; name: string }[];
+  departments: { id: string; name: string }[];
 }
 
-export default function AssetPageClient({ productionId, versionId, myUserId, isAdmin, userName }: Props) {
+export default function AssetPageClient({ productionId, versionId, myUserId, userName, members, departments }: Props) {
+  const router = useRouter();
   const [assets, setAssets] = useState<AssetListItem[]>([]);
   const [stats, setStats] = useState<{ totalBytes: number; unknownFiles: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,6 +56,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
   const [uploadTarget, setUploadTarget] = useState<Asset | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [shareTarget, setShareTarget] = useState<Asset | null>(null);
+  const [accessTarget, setAccessTarget] = useState<Asset | null>(null);
   const [editTarget, setEditTarget] = useState<Asset | null>(null);
   const [editName, setEditName] = useState("");
   const [editType, setEditType] = useState<AssetType>("reference");
@@ -66,6 +75,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
     });
     if (!r.ok) { alert((await r.json()).error ?? "操作失败"); return; }
     setAssets(p => p.map(x => x.id === a.id ? { ...x, listable } : x));
+    router.refresh();
   }
 
   const load = useCallback(() => {
@@ -214,11 +224,11 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
         </p>
       )}
 
-      {/* 对全员列出（#420：原「项目全局」挂载 ≡ 节点可枚举/listable，树面开关） */}
+      {/* 目录列出只披露标题；内容访问由分享、公开、挂载判定。 */}
       <div style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", padding: "16px 20px", marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
           <p className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">对全员列出</p>
-          {isAdmin && (
+          {assets.some(a => a.actions.listableOn) && (
             <button onClick={() => setSharePickOpen(v => !v)}
               className="inline-flex min-h-8 items-center rounded-lg border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-600 shadow-sm transition-colors hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-900">
               {sharePickOpen ? "完成" : "+ 添加"}
@@ -235,9 +245,9 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
                 <Link href={`/production/${productionId}/assets/${a.id}/preview`} className="hover:text-zinc-900 truncate max-w-[160px]">
                   {a.name ?? a.fileName}
                 </Link>
-                {isAdmin && (
-                  <button onClick={() => setAssetListable(a, false)} className="text-zinc-300 hover:text-red-400 leading-none">×</button>
-                )}
+                <button onClick={() => setAssetListable(a, false)} disabled={!a.actions.listableOff}
+                  title={a.actions.listableOff ? "停止在目录中列出" : "需要该资产的分享管理权"}
+                  className="text-zinc-300 hover:text-red-400 leading-none disabled:cursor-not-allowed disabled:opacity-40">×</button>
               </span>
             ))}
           </div>
@@ -248,7 +258,9 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
               <p className="px-3 py-2 text-xs text-zinc-400">没有可添加的资产</p>
             ) : assets.filter(a => !a.listable && a.nodeId).map(a => (
               <button key={a.id} onClick={() => setAssetListable(a, true)}
-                className="block w-full px-3 py-1.5 text-left text-xs text-zinc-600 hover:bg-zinc-50 truncate">
+                disabled={!a.actions.listableOn}
+                title={a.actions.listableOn ? "在目录中列出" : "需要该资产的分享管理权"}
+                className="block w-full px-3 py-1.5 text-left text-xs text-zinc-600 hover:bg-zinc-50 truncate disabled:cursor-not-allowed disabled:opacity-40">
                 {a.name ?? a.fileName}
               </button>
             ))}
@@ -287,8 +299,6 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {displayedAssets.map(a => {
-            const isOwner = a.uploaderUserId === myUserId;
-            const canEdit = isOwner || isAdmin;
             const isExp = expanded === a.id;
 
             return (
@@ -339,28 +349,30 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
 
                   {/* Actions */}
                   <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-                    {(["下载", "分享"] as const).map(label => (
-                      <button key={label}
-                        onClick={() => label === "下载" ? handleDownload(a.id) : setShareTarget(a)}
-                        style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "var(--muted)", background: "none", border: 0, cursor: "pointer" }}>
-                        {label}
-                      </button>
-                    ))}
-                    {canEdit && (
+                    <button onClick={() => handleDownload(a.id)} disabled={!a.actions.download}
+                      title={a.actions.download ? "下载原件" : "需要原件下载权"}
+                      className="rounded px-2 py-1 text-[11px] text-zinc-500 disabled:cursor-not-allowed disabled:opacity-40">下载</button>
+                    <button onClick={() => setAccessTarget(a)} disabled={!a.actions.share}
+                      title={a.actions.share ? "站内分享" : "需要该资产的授权管理权"}
+                      className="rounded px-2 py-1 text-[11px] text-zinc-500 disabled:cursor-not-allowed disabled:opacity-40">站内分享</button>
+                    <button onClick={() => setShareTarget(a)} disabled={!a.actions.externalShare}
+                      title={a.actions.externalShare ? "生成对外链接" : "需要对外分享资格且项目允许对外链接"}
+                      className="rounded px-2 py-1 text-[11px] text-zinc-500 disabled:cursor-not-allowed disabled:opacity-40">对外链接</button>
+                    {a.actions.metaEdit && (
                       <button
                         onClick={() => openEdit(a)}
                         style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "var(--muted)", background: "none", border: 0, cursor: "pointer" }}>
                         编辑
                       </button>
                     )}
-                    {canEdit && (
+                    {a.actions.addVersion && (
                       <button
                         onClick={() => { setUploadTarget(a); setView("upload-new-version"); }}
                         style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "var(--muted)", background: "none", border: 0, cursor: "pointer" }}>
                         新版本
                       </button>
                     )}
-                    {canEdit && (
+                    {a.actions.delete && (
                       <button
                         onClick={() => handleDeleteAsset(a.id)}
                         disabled={deletingId === a.id}
@@ -388,7 +400,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
                         {(mounts[a.id] ?? []).map(m => (
                           <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                             <p style={{ fontSize: 11, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mountLabel(m)}</p>
-                            {canEdit && (
+                            {(a.actions.unmount || m.createdBy === myUserId) && (
                               <button
                                 onClick={() => handleDeleteMount(a.id, m.id)}
                                 style={{ flexShrink: 0, fontSize: 10, color: "#dc2626", background: "none", border: 0, cursor: "pointer" }}>
@@ -495,6 +507,12 @@ export default function AssetPageClient({ productionId, versionId, myUserId, isA
           userName={userName}
           onClose={() => setShareTarget(null)}
         />
+      )}
+      {accessTarget && (
+        <AssetAccessModal productionId={productionId} assetId={accessTarget.id}
+          assetName={accessTarget.name ?? accessTarget.fileName}
+          members={members} departments={departments}
+          onClose={() => { setAccessTarget(null); load(); }} />
       )}
     </div>
   );

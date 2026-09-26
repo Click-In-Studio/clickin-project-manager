@@ -8,13 +8,12 @@ import { isNodeAnchor } from "./anchors";
 //   本地可枚举(u, X) ⟺
 //     kind∈{folder,wiki,asset}: X.listable ∨ 部门分享命中
 //       ∨ (kind='wiki' 且 u 持 wiki/<wiki_id> meta@view 行（含通配）)
+//       ∨ (kind='asset' 且 u 持 asset/<asset_id> meta@view 实例行)
 //     kind='link': 不进本谓词——父可枚举 ∧ 目标**本地**可枚举（lib/node/link.ts）
 //
 // 拍板记录（#420）：
-//   · asset 节点**无 grant 析取项**（2026-09-04 拍板 6「漂移一不接受」）：持某资产
-//     实例 meta@view 票不使它进树——定向分享的私有资产靠链接/publication 直达，
-//     行为与迁移前全等。资产进树的途径：listable（原 production mount 语义）、
-//     部门分享，或**自己是创建者**（下条）。
+//   · #427：资产实例 meta@view 进入枚举面，与 wiki 对齐；旧 asset/*/meta@view
+//     通配能力票不让全库私有节点进树。父链仍是必经条件。
 //   · **创建者析取项**（2026-09-05 拍板，拍板 6 的精化）：asset 节点对其
 //     created_by 本人可枚举——自己看不到自己刚上传的私有资产是反直觉的，且与
 //     wiki 侧不对称（wiki 创建者行集的 meta@view 经 grant 析取天然进树）。按
@@ -37,11 +36,12 @@ import { isNodeAnchor } from "./anchors";
  * 本地可枚举谓词，SQL 片段**只写这一份**。两个读者：下面的递归 CTE 与
  * localEnumerableNodeIds（#358 link 判定的第二合取项）。
  * 参数位固定：$1=production_id、$2=wiki meta@view 内容 id 数组、$3=user_id、
- * $4=wiki meta@view 通配布尔。表别名固定 `n`。
+ * $4=wiki meta@view 通配布尔，$5=asset meta@view 实例 id 数组。表别名固定 `n`。
  */
 const LOCAL_ENUMERABLE_PRED = `(
      (n.kind <> 'link' AND n.listable)
   OR (n.kind = 'wiki' AND ($4 OR n.wiki_id::text = ANY($2::text[])))
+  OR (n.kind = 'asset' AND n.asset_id = ANY($5::text[]))
   OR (n.kind = 'asset' AND n.created_by = $3::uuid)
   OR (n.kind <> 'link' AND EXISTS (
         SELECT 1 FROM node_dept_share ns
@@ -55,6 +55,7 @@ export async function listEnumerableNodeIds(
 ): Promise<{ wildcard: boolean; ids: Set<string> }> {
   if (actor.isAdmin || actor.isOwner) return { wildcard: true, ids: new Set() };
   const granted = await listGrantedResourceIds(actor.userId, productionId, "wiki", "meta", "view");
+  const assetGranted = await listGrantedResourceIds(actor.userId, productionId, "asset", "meta", "view", true);
   const ids = granted.wildcard ? [] : [...granted.ids];
   const { rows } = await getPool().query<{ id: string }>(
     `WITH RECURSIVE local AS (
@@ -68,7 +69,7 @@ export async function listEnumerableNodeIds(
        WHERE e.depth < 100 AND c.ok
      )
      SELECT DISTINCT id FROM enumerable`,
-    [productionId, ids, actor.userId, granted.wildcard],
+    [productionId, ids, actor.userId, granted.wildcard, assetGranted.ids],
   );
   return { wildcard: false, ids: new Set(rows.map(r => r.id)) };
 }
@@ -93,11 +94,12 @@ export async function localEnumerableNodeIds(
   if (candidateIds.length === 0) return new Set();
   if (actor.isAdmin || actor.isOwner) return new Set(candidateIds);
   const granted = await listGrantedResourceIds(actor.userId, productionId, "wiki", "meta", "view");
+  const assetGranted = await listGrantedResourceIds(actor.userId, productionId, "asset", "meta", "view", true);
   const ids = granted.wildcard ? [] : [...granted.ids];
   const { rows } = await getPool().query<{ id: string }>(
     `SELECT n.id FROM node n
-     WHERE n.production_id = $1 AND n.id = ANY($5::text[]) AND ${LOCAL_ENUMERABLE_PRED}`,
-    [productionId, ids, actor.userId, granted.wildcard, candidateIds],
+     WHERE n.production_id = $1 AND n.id = ANY($6::text[]) AND ${LOCAL_ENUMERABLE_PRED}`,
+    [productionId, ids, actor.userId, granted.wildcard, assetGranted.ids, candidateIds],
   );
   return new Set(rows.map(r => r.id));
 }

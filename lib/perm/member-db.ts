@@ -28,6 +28,17 @@ export async function listProductionMembers(
   return res.rows.map(r => ({ userId: r.user_id, name: r.name ?? "", avatarUrl: r.avatar_url, isAdmin: r.is_super_admin ?? false }));
 }
 
+/** 站内授权选择器只展示可实际领取授权的 active 成员。 */
+export async function listActiveProductionMembers(productionId: string): Promise<{ userId: string; name: string }[]> {
+  const { rows } = await getPool().query<{ user_id: string; name: string | null }>(
+    `SELECT pm.user_id, up.name FROM production_member pm
+     LEFT JOIN user_profile up ON up.user_id = pm.user_id
+     WHERE pm.production_id = $1 AND pm.status = 'active'
+     ORDER BY up.name NULLS LAST`, [productionId],
+  );
+  return rows.map(r => ({ userId: r.user_id, name: r.name ?? "" }));
+}
+
 /**
  * 入组写点（邀请接受 / 直接加人都走这里）。
  *

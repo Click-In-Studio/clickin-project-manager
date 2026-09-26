@@ -48,8 +48,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (listable !== undefined) {
     if (node.kind !== "asset" || !node.assetId)
       return Response.json({ error: "该节点的可枚举性不在本路由管理" }, { status: 400 });
-    const permitted = await canPublishAsset(access.permCtx, productionId, node.assetId, listable ? "create" : "delete")
-      && await hasEffectiveGrant(actor, productionId, "production", "*", "mounts", "create");
+    // 新分享面只需该资产 grants@edit；旧单向发布键仍需原生产域宿主门。
+    const permitted = await hasEffectiveGrant(actor, productionId, "asset", node.assetId, "grants", "edit")
+      || (await canPublishAsset(access.permCtx, productionId, node.assetId, listable ? "create" : "delete")
+        && await hasEffectiveGrant(actor, productionId, "production", "*", "mounts", "create"));
     if (!permitted) return Response.json({ error: "权限不足" }, { status: 403 });
     await setNodeListable(nodeId, productionId, listable);
     if (!movingPosition) return Response.json({ node: await getNode(nodeId, productionId) });

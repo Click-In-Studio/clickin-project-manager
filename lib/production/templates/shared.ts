@@ -37,7 +37,6 @@ export const PRODUCER_KEYS: readonly string[] = [
 export const OPEN_BASELINE: readonly string[] = [
   "node:announcement/*@view",
   "node:asset/*/file@view",
-  "node:asset/*/meta@view",
   "node:asset/*/shares@create",
   "node:character/*/biography@view",
   "node:character/*/gender@view",
@@ -98,8 +97,7 @@ export const SCRIPT_READ: readonly string[] = [
   "node:script/*/comments@create",
 ];
 
-/** 素材列表可见（`meta`）与文件本体可取（`file`）是两枚键，收紧型模版按需分别给。 */
-export const ASSET_LIST_VIEW = "node:asset/*/meta@view";
+/** #427：目录列出随 node 结构，资产正文随公开/分享/挂载；文件原件下载仍单独给。 */
 export const ASSET_FILE_VIEW = "node:asset/*/file@view";
 /** 建素材条目 / 给已有素材回传新版本 / 改素材元数据——**三道不同的门**，别混用。 */
 export const ASSET_UPLOAD = "node:asset/*@create";

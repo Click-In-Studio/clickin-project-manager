@@ -504,7 +504,7 @@ describe("routes", () => {
 });
 
 describe("asset 节点创建者析取（2026-09-05 拍板：拍板 6 的精化）", () => {
-  it("私有资产：上传者本人可枚举，别人不可（定向分享不进树原样成立）", async () => {
+  it("私有资产：上传者和实例分享对象可枚举，未分享者不可", async () => {
     const { createAsset } = await import("@/lib/asset/db");
     const a = await createAsset({
       productionId: prodId, uploaderUserId: creator, assetType: "reference",
@@ -515,12 +515,12 @@ describe("asset 节点创建者析取（2026-09-05 拍板：拍板 6 的精化�
     expect(await canEnumerateNode(actorOf(creator), prodId, a.nodeId)).toBe(true);
     // 其他成员：不进树（listable=false，无部门分享）
     expect(await canEnumerateNode(actorOf(member), prodId, a.nodeId)).toBe(false);
-    // 拍板 6 保留：给 member 发实例 meta@view 票也不进树
+    // #427：实例阅读分享与 wiki 一样让目标节点进树，仍受父链约束。
     await getPool().query(
       `INSERT INTO production_member_grant (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
        VALUES ($1, $2, 'asset', $3, 'meta', 'view', 'auto')`,
       [prodId, member, a.asset.id],
     );
-    expect(await canEnumerateNode(actorOf(member), prodId, a.nodeId)).toBe(false);
+    expect(await canEnumerateNode(actorOf(member), prodId, a.nodeId)).toBe(true);
   });
 });

@@ -2,7 +2,6 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import type { Metadata } from "next";
 import { getSession } from "@/lib/account/session";
-import { hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
 import { canViewAsset } from "@/lib/asset/perm";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getAsset } from "@/lib/asset/db";
@@ -34,15 +33,10 @@ export default async function AssetPreviewPage({
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  // 批D：实例可见判定（能力票∧结构 ∨ publication@view），asset 加载后判
-  if (!await hasAnyEffectiveGrant(access.permCtx, id, "asset", ["meta"], "view"))
-    redirect(`/unauthorized?resource=node%3Aasset%2F*%2Fmeta%40view&id=${id}`);
-
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) notFound();
-  // 批D：实例级可见（能力票∧结构 ∨ publication@view）
   if (!(await canViewAsset(access.permCtx, id, asset, "meta")))
-    redirect(`/unauthorized?resource=node%3Aasset%2F*%2Fmeta%40view&id=${id}`);
+    redirect(`/unauthorized?resource=${encodeURIComponent(`node:asset/${assetId}@view`)}&id=${id}`);
 
   return (
     <AssetPreviewClient

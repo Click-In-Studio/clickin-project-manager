@@ -1,27 +1,15 @@
 import { getPool } from "../pg";
-import { hasGrant, listGrantedResourceIds } from "../perm/grant-check";
+import { hasEffectiveGrant, hasGrant, listGrantedResourceIds } from "../perm/grant-check";
 import { type GrantActor } from "../perm/grant-check";
 import { isPolicyOn } from "../perm/policy-db";
 import { canEditWiki, listVisibleWikiIds } from "../wiki/perm";
-import { listEnumerableNodeIds } from "../node/perm";
 import { mountConcededNodeIds, SCENE_MOUNT_TYPES } from "../node/host-visibility";
+import { hasExplicitAssetDownloadGrant } from "./share-db";
 import type { Asset } from "./db";
 
-// ─── asset 可见性判定（批D 隐私/公开模型，#420 node 化）─────────────────────
-//
-// 可见 = publication@view（越隐私：实例授权/显式通配，保留段）
-//      ∨ 能力票（meta|file@view，通配=能力不是 any 实例票）
-//        ∧ (node.is_public ∨ node 可枚举 ∨ ∃挂载边: 宿主可见)   ← 结构让渡
-//
-// #420 变化：
-//   · is_public 迁到 node 上（asset 列已删）；语义不变——只免除结构面要求、
-//     仍需能力票（比 wiki 的「无条件全员可见」窄一档）。
-//   · 原 production mount「根共享区」通道 → **node 可枚举**（树上 listable 链通
-//     ⇒ 让渡成立）。语义等价：production mount ≡ 可枚举 node（#420 定谳）。
-//   · 挂载让渡通道保留（2026-09-04 拍板 5）：**可见与可枚举是两个概念**——
-//     挂载边等价于分享（内容面），不投枚举票（树面）。宿主可见 ⇒ 资产可读，
-//     如同 wiki 被分享后父链不可枚举也看不到位置但能读。
-//   · 'embed' 边（原 'wiki' mount）：文档可见 ⇒ 正文里的图可见。
+// ─── asset 内容面：个人正文授权 ∨ 全组公开 ∨ 部门分享 ∨ 挂载让渡 ──────────
+// 目录可枚举独立判定。旧 meta/file@view 通配能力票不再参与内容读取；
+// publication@view 是存量显式越隐私授权，保持原行含义。file@view 只控制下载。
 
 export type AssetFace = "meta" | "file";
 
@@ -36,7 +24,7 @@ async function anyMountHostVisible(
 ): Promise<boolean> {
   const conceded = await mountConcededNodeIds(permCtx, productionId, { nodeIds: [nodeId] });
   if (conceded.has(nodeId)) return true;
-  // embed 边：批量走 listVisibleWikiIds（与 structurallyVisibleAssetIds 同一实现，
+  // embed 边：批量走 listVisibleWikiIds（与 mountedAssetIds 同一实现，
   // 天然不分叉）
   const embedMounts = (await getPool().query<{ mount_id: string }>(
     `SELECT mount_id FROM node_mount
@@ -52,13 +40,29 @@ async function anyMountHostVisible(
 
 type AssetNodeBits = { nodeId: string; isPublic: boolean };
 
-async function assetNodeBits(assetIds: string[]): Promise<Map<string, AssetNodeBits>> {
+async function assetNodeBits(productionId: string, assetIds: string[]): Promise<Map<string, AssetNodeBits>> {
   if (assetIds.length === 0) return new Map();
   const { rows } = await getPool().query<{ asset_id: string; id: string; is_public: boolean }>(
-    `SELECT asset_id, id, is_public FROM node WHERE asset_id = ANY($1::text[])`,
-    [assetIds],
+    `SELECT asset_id, id, is_public FROM node
+     WHERE asset_id = ANY($1::text[]) AND production_id = $2`,
+    [assetIds, productionId],
   );
   return new Map(rows.map(r => [r.asset_id, { nodeId: r.id, isPublic: r.is_public }]));
+}
+
+async function departmentSharedAssetIds(
+  actor: GrantActor, productionId: string, assetIds: string[],
+): Promise<Set<string>> {
+  if (assetIds.length === 0) return new Set();
+  const { rows } = await getPool().query<{ asset_id: string }>(
+    `SELECT DISTINCT n.asset_id FROM node n
+     JOIN node_dept_share ns ON ns.node_id = n.id
+     JOIN production_dept_member pdm ON pdm.dept_id = ns.dept_id
+     WHERE n.production_id = $1 AND n.asset_id = ANY($2::text[])
+       AND pdm.production_id = $1 AND pdm.user_id = $3`,
+    [productionId, assetIds, actor.userId],
+  );
+  return new Set(rows.map(r => r.asset_id));
 }
 
 /** face="meta"=条目/预览可见；face="file"=下载/原件。 */
@@ -69,18 +73,20 @@ export async function canViewAsset(
   face: AssetFace,
 ): Promise<boolean> {
   if (permCtx.isAdmin || permCtx.isOwner) return true;
-  if (await hasGrant(permCtx.userId, productionId, "asset", asset.id, "publication", "view")) return true;
-  if (!await hasGrant(permCtx.userId, productionId, "asset", asset.id, face, "view")) return false;
-  const bits = (await assetNodeBits([asset.id])).get(asset.id);
-  // #236 policy.asset_public_enabled：关掉后 is_public 让渡失效（形状 C 天然追溯）
+  // 旧 publication@view 是明确的全内容授权，含原件；不能误作旧能力票收回。
+  if (await hasEffectiveGrant(permCtx, productionId, "asset", asset.id, "publication", "view")) return true;
+  // 下载独立控制，能预览不代表能发下载链接。
+  if (face === "file" && !await hasExplicitAssetDownloadGrant(permCtx.userId, productionId, asset.id))
+    return false;
+  if (await hasEffectiveGrant(permCtx, productionId, "asset", asset.id, "*", "view")) return true;
+  const bits = (await assetNodeBits(productionId, [asset.id])).get(asset.id);
+  // #236 策略关掉只否决公开推导，不否决已有行、部门分享或挂载。
   if (bits?.isPublic && await isPolicyOn(productionId, "policy.asset_public_enabled")) return true;
-  // node 可枚举 ⇒ 结构让渡（原 production 根共享区通道的树化形态）
   if (bits) {
-    const e = await listEnumerableNodeIds(permCtx, productionId);
-    if (e.wildcard || e.ids.has(bits.nodeId)) return true;
+    if ((await departmentSharedAssetIds(permCtx, productionId, [asset.id])).has(asset.id)) return true;
     return anyMountHostVisible(permCtx, productionId, bits.nodeId);
   }
-  // 无壳（1:1 不变量破损）⇒ 挂载边无处可挂，结构面不成立
+  // 无壳时个人授权仍有效，结构性通道无处可挂。
   return false;
 }
 
@@ -94,23 +100,20 @@ export async function canViewAssetById(
   return canViewAsset(permCtx, productionId, { id: assetId }, face);
 }
 
-/** 结构面集合式：该用户经「可枚举 ∨ 挂载让渡」可见的 asset id 集合（不含授权面、
- *  不含 is_public——那两条在 filterVisibleAssets 合取）。 */
-async function structurallyVisibleAssetIds(
+/** 挂载让渡的集合式实现；目录可枚举性不投内容票。 */
+async function mountedAssetIds(
   permCtx: GrantActor,
   productionId: string,
 ): Promise<Set<string>> {
   // 挂载让渡：共享核集合式（与单点 anyMountHostVisible 同一实现，不分叉）
   const conceded = await mountConcededNodeIds(permCtx, productionId, { kind: "asset" });
   const visible = new Set<string>();
-  // 可枚举通道（原 production 根共享区）：一次集合式对撞 asset 节点
-  const e = await listEnumerableNodeIds(permCtx, productionId);
   const assetNodes = (await getPool().query<{ asset_id: string; id: string }>(
     `SELECT asset_id, id FROM node WHERE production_id = $1 AND asset_id IS NOT NULL`,
     [productionId],
   )).rows;
   for (const n of assetNodes) {
-    if (conceded.has(n.id) || e.wildcard || e.ids.has(n.id)) visible.add(n.asset_id);
+    if (conceded.has(n.id)) visible.add(n.asset_id);
   }
   // embed 边（与 canViewAsset 的 embed 分支同源——列表与单实例不得分叉，批D 教训）
   const embedMounts = (await getPool().query<{ asset_id: string; mount_id: string }>(
@@ -135,32 +138,33 @@ export async function filterVisibleAssets<T extends Pick<Asset, "id">>(
   assets: T[],
 ): Promise<T[]> {
   if (permCtx.isAdmin || permCtx.isOwner || assets.length === 0) return assets;
-  const [meta, pub, structIds, bits] = await Promise.all([
-    listGrantedResourceIds(permCtx.userId, productionId, "asset", "meta", "view"),
+  const [direct, pub, mountIds, deptIds, bits] = await Promise.all([
+    listGrantedResourceIds(permCtx.userId, productionId, "asset", "*", "view"),
     listGrantedResourceIds(permCtx.userId, productionId, "asset", "publication", "view"),
-    structurallyVisibleAssetIds(permCtx, productionId),
-    assetNodeBits(assets.map(a => a.id)),
+    mountedAssetIds(permCtx, productionId),
+    departmentSharedAssetIds(permCtx, productionId, assets.map(a => a.id)),
+    assetNodeBits(productionId, assets.map(a => a.id)),
   ]);
-  const metaIds = new Set(meta.ids);
+  const directIds = new Set(direct.ids);
   const pubIds = new Set(pub.ids);
   const publicOn = await isPolicyOn(productionId, "policy.asset_public_enabled");
   return assets.filter(a =>
-    pub.wildcard || pubIds.has(a.id)
-    || ((meta.wildcard || metaIds.has(a.id))
-        && ((bits.get(a.id)?.isPublic === true && publicOn) || structIds.has(a.id))));
+    pub.wildcard || pubIds.has(a.id) || direct.wildcard || directIds.has(a.id)
+    || (bits.get(a.id)?.isPublic === true && publicOn)
+    || mountIds.has(a.id) || deptIds.has(a.id));
 }
 
 // ─── 双门（挂载=两域各自的一等动作）─────────────────────────────────────────
 
-/** asset 侧门：挂载/解除 = 该 asset 的发布面动作 */
+/** 站内分享走 grants@edit；存量单向发布键仅兼容其原有挂载/撤挂动作。 */
 export async function canPublishAsset(
   permCtx: GrantActor,
   productionId: string,
   assetId: string,
   verb: "create" | "delete",
 ): Promise<boolean> {
-  if (permCtx.isAdmin || permCtx.isOwner) return true;
-  return hasGrant(permCtx.userId, productionId, "asset", assetId, "publication", verb);
+  return await hasEffectiveGrant(permCtx, productionId, "asset", assetId, "grants", "edit")
+    || hasEffectiveGrant(permCtx, productionId, "asset", assetId, "publication", verb);
 }
 
 /** 上传字节的门（presign 家族共用），按目标分叉成两把钥匙：

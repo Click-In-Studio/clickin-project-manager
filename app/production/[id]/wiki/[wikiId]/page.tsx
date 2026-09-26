@@ -81,7 +81,7 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
               <p className="text-lg font-bold text-zinc-800 mb-1">{asset.name ?? asset.fileName}</p>
               <p className="text-sm text-zinc-400 mb-6">你没有这个资产的查看权限</p>
               <Link
-                href={`/unauthorized?resource=${encodeURIComponent("node:asset/*/meta@view")}&id=${productionId}`}
+                href={`/unauthorized?resource=${encodeURIComponent(`node:asset/${asset.id}@view`)}&id=${productionId}`}
                 className="inline-block rounded-lg border border-zinc-800 bg-zinc-800 px-4 py-2 text-xs font-bold text-white"
               >
                 申请访问

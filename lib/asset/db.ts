@@ -326,7 +326,7 @@ export function assetTreePaths(
  *  口径：**全部** asset_file 行（含暂不可达的历史版本，与 #428 回收联动，修完
  *  趋同）；file_size 为 NULL 的存量行不计入字节、计入 unknownFiles。未来计费/
  *  limit 消费方注意这不是「可回收后的活跃占用」。 */
-export async function assetSizeStats(productionId: string): Promise<{
+export async function assetSizeStats(productionId: string, assetIds?: string[]): Promise<{
   sizeByAsset: Map<string, number>;
   totalBytes: number;
   unknownFiles: number;
@@ -335,8 +335,9 @@ export async function assetSizeStats(productionId: string): Promise<{
     `SELECT af.asset_id, sum(af.file_size)::bigint::text AS bytes,
             count(*) FILTER (WHERE af.file_size IS NULL)::text AS unknown
      FROM asset_file af JOIN asset a ON a.id = af.asset_id
-     WHERE a.production_id = $1 GROUP BY af.asset_id`,
-    [productionId],
+     WHERE a.production_id = $1 AND ($2::text[] IS NULL OR af.asset_id = ANY($2::text[]))
+     GROUP BY af.asset_id`,
+    [productionId, assetIds ?? null],
   );
   const sizeByAsset = new Map<string, number>();
   let totalBytes = 0, unknownFiles = 0;

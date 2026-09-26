@@ -163,6 +163,23 @@ describe("硬不变量：边不投枚举票", () => {
 });
 
 describe("asset 侧随共享核补上的 event 通道", () => {
+  it("cue 音频：只持 cue_list 的 cues@view 就能预览所挂资产", async () => {
+    const a = await createAsset({
+      productionId: prodId, uploaderUserId: author, assetType: "recording",
+      fileName: "cue-audio.wav", mimeType: "audio/wav", storageType: "r2", isPublic: false,
+    });
+    expect(await canViewAsset(ctxOf(cueViewer), prodId, { id: a.asset.id }, "meta")).toBe(false);
+    const mount = await addNodeMount({
+      nodeId: a.nodeId, productionId: prodId, mountType: "cue",
+      mountId: cueStableId, createdBy: author,
+    });
+    expect(await canViewAsset(ctxOf(cueViewer), prodId, { id: a.asset.id }, "meta")).toBe(true);
+    expect(await canViewAsset(ctxOf(cueViewer), prodId, { id: a.asset.id }, "file")).toBe(false);
+    expect((await filterVisibleAssets(ctxOf(cueViewer), prodId, [{ id: a.asset.id }]))).toHaveLength(1);
+    await removeNodeMount(mount.id);
+    expect(await canViewAsset(ctxOf(cueViewer), prodId, { id: a.asset.id }, "meta")).toBe(false);
+  });
+
   it("私有资产挂到 event：能力票 ∧ event 域票 ⇒ 可见；缺任一不可见", async () => {
     const a = await createAsset({
       productionId: prodId, uploaderUserId: author, assetType: "reference",

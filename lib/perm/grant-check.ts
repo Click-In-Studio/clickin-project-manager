@@ -140,6 +140,7 @@ export async function listGrantedResourceIds(
   resourceType: string,
   resourceSub: string,
   verb: GrantVerb,
+  includeIdsWithWildcard = false,
 ): Promise<{ wildcard: boolean; ids: string[] }> {
   const subMatch = isReservedSub(resourceSub)
     ? "resource_sub = $4"
@@ -156,7 +157,10 @@ export async function listGrantedResourceIds(
     [productionId, userId, resourceType, resourceSub, verb],
   );
   const ids = rows.map((r) => r.resource_id);
-  if (ids.includes("*")) return { wildcard: true, ids: [] };
+  if (ids.includes("*")) return {
+    wildcard: true,
+    ids: includeIdsWithWildcard ? ids.filter(id => id !== "*") : [],
+  };
   return { wildcard: false, ids };
 }
 
