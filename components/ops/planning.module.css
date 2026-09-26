@@ -268,10 +268,209 @@
   from { transform: translateX(18px); opacity: 0; }
 }
 
+.timetablePanel {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+}
+
+.timetableHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 14px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.timetableTitleBlock { min-width: 0; }
+
+.timetableEyebrow {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.timetableTitle {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.timetableMeta {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.timetableActions {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  gap: 6px;
+  margin-left: auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.timetableSecondaryAction,
+.timetableEditAction {
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  padding: 7px 11px;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.timetableSecondaryAction {
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.timetableEditActionActive {
+  color: #fff;
+  background: var(--ink);
+}
+
+.timetableAlert {
+  margin: 0 0 12px;
+  padding: 8px 11px;
+  border-radius: 8px;
+  color: #8c2f22;
+  background: #fdecea;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.timetableAlertClose {
+  margin-left: 10px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.rundownControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, .8fr);
+  gap: 9px;
+  margin-bottom: 12px;
+  min-width: 0;
+}
+
+.rundownControlCard {
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  box-sizing: border-box;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper);
+}
+
+.rundownControlLabel {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.rundownControlSelect {
+  width: 100%;
+  min-width: 0;
+  min-height: 25px;
+  border: 0;
+  padding: 2px 0;
+  color: var(--ink);
+  background: transparent;
+  outline: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.timetableEmpty {
+  margin: 0;
+  padding: 36px 0;
+  color: var(--muted);
+  text-align: center;
+  font-size: 12px;
+}
+
+.timetableEmptyState {
+  padding: 36px 18px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.timetableEmptyState p { margin: 0; font-size: 12px; }
+
+.timetableEmptyAction {
+  display: inline-flex;
+  margin-top: 12px;
+  padding: 8px 13px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  color: #fff;
+  background: var(--ink);
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.rundownMatrixWrap {
+  width: 100%;
+  min-width: 0;
+  max-height: 690px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #f7f7f3;
+  isolation: isolate;
+}
+
+.rundownTimeHeading { font-size: 11px; line-height: 1.15; }
+.rundownTimeHint { margin-top: 2px; color: #b9c8c4; font-size: 8px; line-height: 1.15; }
+
+.rundownLocationLabel,
+.rundownLaneTitle {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rundownLocationLabel { font-size: 10px; line-height: 19px; }
+.rundownLaneTitle { font-size: 12px; line-height: 28px; }
+
+.rundownEntry { overflow: visible; }
+
 .columnMenuButton {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 6px;
+  right: 6px;
   width: 24px;
   height: 24px;
   display: grid;
@@ -327,7 +526,7 @@
 .firstInsertButton {
   top: auto;
   bottom: 0;
-  height: 58px;
+  height: 44px;
 }
 
 .insertColumnGlyph {
@@ -612,7 +811,16 @@
   .detailDrawer { animation: none; }
 }
 
+@media (max-width: 900px) {
+  .rundownControls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rundownControlPrimary { grid-column: 1 / -1; }
+}
+
 @media (max-width: 760px) {
+  .timetablePanel { padding: 14px; }
+  .timetableHeader { gap: 10px; margin-bottom: 12px; }
+  .timetableActions { width: 100%; margin-left: 0; justify-content: flex-start; }
+  .rundownMatrixWrap { max-height: min(690px, calc(100vh - 190px)); }
   .planningViewTabs { gap: 5px; }
   .planningTabHint { display: none; }
   .calendarPanel { padding: 14px 10px; }
@@ -629,6 +837,16 @@
   .drawerTimeGrid { grid-template-columns: 1fr; }
 }
 
+@media (max-width: 520px) {
+  .rundownControls { grid-template-columns: minmax(0, 1fr); }
+  .rundownControlPrimary { grid-column: auto; }
+}
+
 @media (max-width: 420px) {
+  .timetablePanel { padding: 11px; }
+  .timetableTitle { font-size: 18px; }
+  .timetableActions { gap: 5px; }
+  .timetableSecondaryAction,
+  .timetableEditAction { padding-inline: 9px; }
   .calendarCell { height: 82px; }
 }

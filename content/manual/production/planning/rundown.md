@@ -5,9 +5,9 @@ summary: 一场排练或演出当天的现场执行表：按人员组、按 15 �
 routes: [planning]
 who: 所有成员可看；编辑需要事件编辑权限
 tier: all
-platform: [desktop]
+platform: [desktop, mobile]
 related: [production/events/event-detail, production/planning/calendar]
-updated: 2026-09-18
+updated: 2026-09-27
 ---
 
 ## 这是什么
@@ -23,6 +23,8 @@ updated: 2026-09-18
 - **列视图 / 全员视图**：按人员组分列，或者所有人合成一列看总流程。
 - **关注成员**：只看某些人的列，比如只看自己。
 - 事项块颜色和状态（待处理 / 待确认 / 进行中 / 完成）一目了然。
+
+> [!📱] 窄窗口里，「日期 / 事件」会先占一整行，「列视图」和「关注成员」排在下一行；手机上三项依次单列显示。执行表本身可以横向滚动，时间列和表头会留在视野内。
 
 ### 编辑
 
