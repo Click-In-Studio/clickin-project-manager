@@ -15,14 +15,14 @@ async function guard(req: NextRequest, ctx: Ctx) {
   if (!session) return { err: Response.json({ error: "未登录" }, { status: 401 }) };
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return { err: Response.json({ error: "无权访问" }, { status: 403 }) };
+  if (!await hasEffectiveGrant(access.permCtx, id, "asset", assetId, "grants", "edit"))
+    return { err: Response.json({ error: "权限不足（分享面）" }, { status: 403 }) };
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id)
     return { err: Response.json({ error: "资产不存在" }, { status: 404 }) };
   const shell = await getNodeByAssetId(assetId);
   if (!shell || shell.productionId !== id)
     return { err: Response.json({ error: "资产节点不存在" }, { status: 404 }) };
-  if (!await hasEffectiveGrant(access.permCtx, id, "asset", assetId, "grants", "edit"))
-    return { err: Response.json({ error: "权限不足（分享面）" }, { status: 403 }) };
   return { id, assetId, session, access, shell };
 }
 
