@@ -3,18 +3,27 @@
 import { diffArrays } from "diff";
 import { Fragment, type Node as PmNode } from "@tiptap/pm/model";
 import { parseMarkdownTree, transformRichTables } from "./table-dialect";
+import { EMPTY_PARAGRAPH_MD, isVisuallyEmptyParagraph } from "./tiptap-empty-paragraph";
+import { checkFidelity } from "../wiki/fidelity";
 
 type Serialize = (content: Fragment) => string;
 export function preserveMarkdownSource(source: string, before: PmNode, after: PmNode, serialize: Serialize): string {
   const previous: string[] = [];
   const next: string[] = [];
-  before.forEach(n => previous.push(serialize(Fragment.from(n)).trimEnd()));
-  after.forEach(n => next.push(serialize(Fragment.from(n)).trimEnd()));
+  // 单独序列化空段会误以为它是独生块，必须保留真实文档里的父级上下文。
+  const block = (n: PmNode, parent: PmNode) => parent.childCount > 1 && isVisuallyEmptyParagraph(n)
+    ? EMPTY_PARAGRAPH_MD : serialize(Fragment.from(n)).trimEnd();
+  before.forEach(n => previous.push(block(n, before)));
+  after.forEach(n => next.push(block(n, after)));
   if (previous.length === next.length && previous.every((s, i) => s === next[i])) return source;
   const tree = parseMarkdownTree(source);
   transformRichTables(tree, source);
   const blocks = tree.children ?? [];
   if (blocks.length !== previous.length || blocks.some(b => b.position?.start.offset == null || b.position.end.offset == null)) {
+    return serialize(after.content);
+  }
+  // 数量相同不等于逐块对应：一段多图会拆块，分栏又会合块，增减可能刚好抵消。
+  if (blocks.some((b, i) => checkFidelity(source.slice(b.position!.start.offset!, b.position!.end.offset!), previous[i]).lossy)) {
     return serialize(after.content);
   }
   const patches: { start: number; end: number; replacement: string }[] = [];

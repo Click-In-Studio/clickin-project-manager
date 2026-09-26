@@ -144,6 +144,22 @@ describe("富表格的同方言往返", () => {
 });
 
 describe("可视化编辑的源码保留", () => {
+  it("拆块与合块数量恰好抵消时不套用错误源码范围", () => {
+    const source = "![A](a)![B](b)![C](c)![D](d)![E](e)\n\n:::cols\n\n左\n\n---\n\n右\n\n:::";
+    const before = editor(source);
+    const after = editor(source.replace("![C]", "![改C]"));
+    const result = preserveMarkdownSource(source, before.state.doc, after.state.doc, n => storage(after).serializer.serialize(n));
+    expect(result).toBe(md(after));
+    expect(editor(result).getJSON()).toEqual(after.getJSON());
+  });
+  it("新增空段落不会因逐块序列化丢失", () => {
+    const source = "甲\n\n乙";
+    const before = editor(source);
+    const after = editor("甲\n\n&nbsp;\n\n乙");
+    const result = preserveMarkdownSource(source, before.state.doc, after.state.doc, n => storage(after).serializer.serialize(n));
+    expect(result).toBe("甲\n\n&nbsp;\n\n乙");
+    expect(editor(result).state.doc.toJSON()).toEqual(after.state.doc.toJSON());
+  });
   it("只改正文时保留历史 HTML 和非标准列表书写", () => {
     const source = `* 原文\n\n${legacy}\n\n末尾`;
     const before = editor(normalizeTableHtml(source));
