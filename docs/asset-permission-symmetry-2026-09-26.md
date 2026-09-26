@@ -73,3 +73,15 @@
 回滚准备：迁移前记录代码版本、迁移版本和被影响行的完整快照；dev 先演练失败回滚及恢复后的权限矩阵。数据回填按仓库规定声明不可逆 down，恢复使用审阅过的补偿方案或维护窗口内备份恢复，不伪造一条能还原用户后续改动的 down。未经验证，不承诺只回退代码即可恢复旧授权边界。
 
 上述是实施与验收约束，不是已经可在线运行的转换 SQL。最终键映射、逐项目差异清单和补偿脚本须在写入授权前完成并提交审阅。
+
+
+只读盘点脚本：[scripts/admin/audit-asset-permissions.sql](../scripts/admin/audit-asset-permissions.sql)，已在本机验证。使用显式 `REPEATABLE READ READ ONLY` 事务及 15 秒语句超时；只查询统计，不清理任何数据。
+
+授权后的只读执行命令（分别保存结果，结果文件留本机）：
+
+```sh
+ssh click-in-dev 'sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d script_editor' < scripts/admin/audit-asset-permissions.sql > /tmp/asset-permission-dev-audit.txt
+ssh click-in-prod 'sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d script_editor' < scripts/admin/audit-asset-permissions.sql > /tmp/asset-permission-prod-audit.txt
+```
+
+首轮只读授权仅覆盖盘点、比对及出具方案；不包含部署、授权增删、模板区间调整或策略/公开设置修改。

@@ -23,6 +23,7 @@ async function assetActionsFor(actor: GrantActor, productionId: string, nodes: N
   if (assets.length === 0) return {};
   const [edit, del] = await Promise.all([
     listEffectiveGrantedResourceIds(actor, productionId, "asset", "meta", "edit"),
+    // DELETE /assets/[assetId] 同样只认 *@delete；meta@delete 不代表删除整个资产。
     listEffectiveGrantedResourceIds(actor, productionId, "asset", "*", "delete"),
   ]);
   const editable = new Set(edit.ids);
