@@ -22,12 +22,13 @@ export type BlockTypeMeta = {
 
 export const BLOCK_TYPES = {
   paragraph: { label: "正文", icon: "¶", hint: "普通文本" },
+  h1: { label: "一级标题", icon: "H1", hint: "# 标题" },
   h2: { label: "二级标题", icon: "H2", hint: "## 标题" },
   h3: { label: "三级标题", icon: "H3", hint: "### 标题" },
   bulletList: { label: "无序列表", icon: "≡", hint: "- 条目" },
   orderedList: { label: "有序列表", icon: "1.", hint: "1. 条目" },
   taskList: { label: "任务列表", icon: "☑", hint: "- [ ] 待办" },
-  blockquote: { label: "引用", icon: "“", hint: "> 引用" },
+  blockquote: { label: "引用块", icon: "“", hint: "> 引用" },
   callout: { label: "高亮块", icon: "💡", hint: "> [!💡]" },
   columns: { label: "两栏分栏", icon: "◫", hint: ":::cols" },
   table: { label: "表格", icon: "⊞", hint: "3×3 带表头" },
