@@ -285,7 +285,9 @@ export default function AgentPopout({
       clearInterval(watchdog);
       setStreaming(false);
       setBubbles((prev) =>
-        prev.map((b) => (b.kind === "assistant" && b.streaming ? { kind: "assistant", text: b.text } : b))
+        prev.map((b) =>
+          (b.kind === "assistant" || b.kind === "thinking") && b.streaming ? { kind: b.kind, text: b.text } : b
+        )
       );
       refreshSessions();
     }
@@ -300,7 +302,7 @@ export default function AgentPopout({
       const res = await fetch(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`);
       if (res.ok) {
         const data = (await res.json()) as {
-          messages: ({ role: "user" | "assistant"; content: string } | { role: "tool"; name: string; id?: string; result?: string })[];
+          messages: ({ role: "user" | "assistant" | "thinking"; content: string } | { role: "tool"; name: string; id?: string; result?: string })[];
         };
         if (activeKeyRef.current !== key) return;
         setBubbles(
@@ -705,6 +707,20 @@ export default function AgentPopout({
               </div>
             );
           }
+          if (b.kind === "thinking") {
+            return (
+              <div key={i} className="flex justify-start">
+                <details className="group max-w-[92%] rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-2 text-xs text-zinc-600">
+                  <summary className="cursor-pointer list-none font-medium text-zinc-500 [&::-webkit-details-marker]:hidden">
+                    <span className="inline-block transition-transform group-open:rotate-90">›</span>{" "}
+                    思考过程
+                    {b.streaming && <span className="ml-1 inline-block h-2.5 w-1 animate-pulse bg-zinc-400" />}
+                  </summary>
+                  <div className="mt-2 whitespace-pre-wrap border-t border-zinc-200 pt-2">{b.text}</div>
+                </details>
+              </div>
+            );
+          }
           if (b.kind === "tool") {
             return (
               <div key={i} className="flex justify-start">
@@ -826,6 +842,7 @@ export default function AgentPopout({
             const last = bubbles[bubbles.length - 1];
             const activelyRendering =
               (last?.kind === "assistant" && last.streaming) ||
+              (last?.kind === "thinking" && last.streaming) ||
               (last?.kind === "tool" && !last.done) ||
               (last?.kind === "approval" && !last.decision) ||
               (last?.kind === "question" && !last.status);

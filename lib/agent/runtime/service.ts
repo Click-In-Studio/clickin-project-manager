@@ -27,7 +27,7 @@ import type { AgentMessage } from "../../../vendor/openclaw/packages/agent-core/
 import type { ToolCall } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import type { StreamFn } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import { PgSessionStorage } from "./pg-session-storage";
-import { EventPublisher, pruneDeltas } from "./events";
+import { EventPublisher, pruneStreamingUpdates } from "./events";
 import { createStreamLineAdapter } from "./stream-lines";
 import { buildTools, bareName, exposedName, type RuntimeToolDef, type RunHandle } from "./tools";
 import { describeMutation, type MutationRecord } from "./mutation-audit";
@@ -262,6 +262,7 @@ async function execute(input: ExecuteInput): Promise<void> {
       resolveDeferredTool: ({ toolCall }) => toolByName.get(toolCall.name),
       systemPrompt: buildSystemPrompt(inject),
       model: CHAT_MODEL,
+      thinkingLevel: "low",
       getApiKeyAndHeaders: async () => ({ apiKey: runtimeOverrides.apiKey ?? deepseekApiKey() }),
       runtime: runtimeOverrides.streamFn
         ? { streamSimple: runtimeOverrides.streamFn, completeSimple: llmRuntime().completeSimple }
@@ -429,7 +430,7 @@ async function execute(input: ExecuteInput): Promise<void> {
       [runId, status, error, usage.input, usage.output, usage.cacheRead],
     );
     await recordUsage(userId, productionId, usage, input.paidFrom).catch(() => {});
-    await pruneDeltas(sessionId, runId).catch(() => {});
+    await pruneStreamingUpdates(sessionId, runId).catch(() => {});
     // 定时任务收尾：写回摘要、按汇报调整任务、通知创建者（附本 run 的写审计改动清单）
     if (schedule) await finishScheduledRun({ scheduleId: schedule.id, runId, sessionId, status, error, lastAssistant, report: scheduleReport });
     // episodic 上报（与插件 agent_end 同款字段）
@@ -735,11 +736,18 @@ export async function getHistory(sessionId: string): Promise<ChatTranscriptEntry
       const result = textOf(m.content).slice(0, TOOL_PAYLOAD_MAX_CHARS);
       entries.push({ role: "tool", name: m.toolName, id: m.toolCallId || undefined, ...(result ? { result } : {}) });
     } else if (m.role === "assistant") {
+      const thinking = thinkingOf(m.content);
+      if (thinking) entries.push({ role: "thinking", content: thinking });
       const t = textOf(m.content);
       if (t) entries.push({ role: "assistant", content: t });
     }
   }
   return entries;
+}
+
+function thinkingOf(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  return content.filter((c) => c?.type === "thinking" && !c.redacted).map((c) => String(c.thinking ?? "")).join("");
 }
 
 function textOf(content: unknown): string {

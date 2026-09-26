@@ -41,7 +41,7 @@ function deepseekModel(id: string, reasoning: boolean): Model {
   };
 }
 
-export const CHAT_MODEL: Model = deepseekModel(process.env.AGENT_CHAT_MODEL ?? "deepseek-v4-flash", false);
+export const CHAT_MODEL: Model = deepseekModel(process.env.AGENT_CHAT_MODEL ?? "deepseek-v4-flash", true);
 export const COMPACTION_MODEL: Model = deepseekModel(process.env.AGENT_COMPACTION_MODEL ?? "deepseek-v4-pro", true);
 
 export function deepseekApiKey(): string {

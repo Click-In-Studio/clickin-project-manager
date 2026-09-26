@@ -77,6 +77,49 @@ describe("判据④：harness 事件 → StreamLine → 现有 reducer", () => {
     expect(bubbles).toEqual([{ kind: "assistant", text: "你好世界" }]);
   });
 
+  it("thinking 与正文分流：两者都是累计值，thinking 在正文开始时定格", async () => {
+    const streamFn: StreamFn = () => {
+      const stream = createAssistantMessageEventStream();
+      queueMicrotask(() => {
+        const thought = "先计算";
+        const answer = "391";
+        stream.push({ type: "start", partial: { ...base(), content: [], stopReason: "stop" } });
+        stream.push({
+          type: "thinking_start", contentIndex: 0,
+          partial: { ...base(), content: [{ type: "thinking", thinking: "" }], stopReason: "stop" },
+        });
+        let accumulated = "";
+        for (const ch of thought) {
+          accumulated += ch;
+          stream.push({
+            type: "thinking_delta", contentIndex: 0, delta: ch,
+            partial: { ...base(), content: [{ type: "thinking", thinking: accumulated }], stopReason: "stop" },
+          });
+        }
+        stream.push({
+          type: "thinking_end", contentIndex: 0, content: thought,
+          partial: { ...base(), content: [{ type: "thinking", thinking: thought }], stopReason: "stop" },
+        });
+        stream.push({
+          type: "text_start", contentIndex: 1,
+          partial: { ...base(), content: [{ type: "thinking", thinking: thought }, { type: "text", text: "" }], stopReason: "stop" },
+        });
+        for (const ch of answer) stream.push({ type: "text_delta", contentIndex: 1, delta: ch });
+        stream.push({
+          type: "done", reason: "stop",
+          message: { ...base(), content: [{ type: "thinking", thinking: thought }, { type: "text", text: answer }], stopReason: "stop" },
+        });
+      });
+      return stream;
+    };
+    const { lines, bubbles } = await collect(streamFn, [], "算一下");
+    expect(lines.filter((l) => l.type === "thinking").map((l) => l.text)).toEqual(["先", "先计", "先计算"]);
+    expect(bubbles).toEqual([
+      { kind: "thinking", text: "先计算" },
+      { kind: "assistant", text: "391" },
+    ]);
+  });
+
   it("工具调用一轮：tool → tool-result → tool-end → 新段 delta → final；气泡与 gateway 时代一致", async () => {
     const call: ToolCall = { type: "toolCall", id: "c1", name: "echo", arguments: { q: "hi" } };
     const { lines, bubbles } = await collect(scriptedStream([{ calls: [call] }, { text: "结果是 echoed hi" }]), [echo], "回显 hi");

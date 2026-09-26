@@ -1,7 +1,7 @@
 // 事件分发（#367 §4.4 ③ 观看者与执行者解耦）。
 //
 // 执行侧：StreamLine 逐条落 agent_event（seq 单调）+ pg_notify('agent_events',
-// '<sessionId>:<seq>')。delta 行做时间窗合并（累计值语义，合并无损），其余行立即落。
+// '<sessionId>:<seq>')。正文/thinking 累计行做时间窗合并（最后一个胜出），其余行立即落。
 // 观看侧：LISTEN agent_events，收到通知按 (session_id, seq > cursor) 取行推给
 // SSE；断线重连 since=seq 直接重放。哪个进程在执行 run 对观看者不可见。
 
@@ -19,7 +19,7 @@ export interface EventRow {
 
 /** 执行侧发布器：一个 run 一个实例。 */
 export class EventPublisher {
-  private pendingDelta: StreamLine | null = null;
+  private pendingUpdate: Extract<StreamLine, { type: "delta" | "thinking" }> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private chain: Promise<void> = Promise.resolve();
 
@@ -29,26 +29,27 @@ export class EventPublisher {
     private readonly pool: Pool = getPool(),
   ) {}
 
-  /** 非 delta 行立即入队（保序）；delta 合并到时间窗末尾（最后一个胜出）。 */
+  /** 非累计行立即入队；同类累计行合并到时间窗末尾。类型切换时先冲出前一种，保证顺序。 */
   publish(line: StreamLine): void {
-    if (line.type === "delta") {
-      this.pendingDelta = line;
-      if (!this.timer) this.timer = setTimeout(() => this.flushDelta(), DELTA_COALESCE_MS);
+    if (line.type === "delta" || line.type === "thinking") {
+      if (this.pendingUpdate && this.pendingUpdate.type !== line.type) this.flushUpdate();
+      this.pendingUpdate = line;
+      if (!this.timer) this.timer = setTimeout(() => this.flushUpdate(), DELTA_COALESCE_MS);
       return;
     }
-    // 非 delta 行到达前先把挂着的 delta 冲出去，保证顺序（例如 delta → tool）
-    this.flushDelta();
+    // 非累计行到达前先把挂着的更新冲出去，保证顺序（例如 thinking → delta → tool）
+    this.flushUpdate();
     this.enqueue(line);
   }
 
-  private flushDelta(): void {
+  private flushUpdate(): void {
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    if (!this.pendingDelta) return;
-    const line = this.pendingDelta;
-    this.pendingDelta = null;
+    if (!this.pendingUpdate) return;
+    const line = this.pendingUpdate;
+    this.pendingUpdate = null;
     this.enqueue(line);
   }
 
@@ -72,7 +73,7 @@ export class EventPublisher {
 
   /** 等全部行落库（run 收尾时调用，保证 final 行先于 run 状态更新可见）。 */
   async drain(): Promise<void> {
-    this.flushDelta();
+    this.flushUpdate();
     await this.chain;
   }
 }
@@ -85,10 +86,10 @@ export async function readEventsSince(sessionId: string, afterSeq: number, pool:
   return r.rows.map((row) => ({ seq: Number(row.seq), line: row.line }));
 }
 
-/** run 结束后清理 delta 行（终态与工具/审批行保留，作为重连重放与审计材料）。 */
-export async function pruneDeltas(sessionId: string, runId: string, pool: Pool = getPool()): Promise<void> {
+/** run 结束后清理累计流行（完整正文/thinking 已在 transcript；终态与工具/审批行继续保留）。 */
+export async function pruneStreamingUpdates(sessionId: string, runId: string, pool: Pool = getPool()): Promise<void> {
   await pool.query(
-    `DELETE FROM agent_event WHERE session_id = $1 AND run_id = $2 AND line->>'type' = 'delta'`,
+    `DELETE FROM agent_event WHERE session_id = $1 AND run_id = $2 AND line->>'type' IN ('delta', 'thinking')`,
     [sessionId, runId],
   );
 }
