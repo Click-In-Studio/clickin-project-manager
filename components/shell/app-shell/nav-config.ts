@@ -16,6 +16,12 @@ export const PRODUCTION_NAV = [
   { label: "资产工作台", hint: "上传 · 清单 · 文件治理", path: "assets", symbol: "资" },
 ] as const;
 
+export const PRODUCTION_OVERVIEW_NAV = [
+  { label: "我的工作", hint: "今天与我有关", path: "", symbol: "⌂", activeModules: [""] },
+  { label: "我的通知", hint: "项目公告 · 个人通知", path: "notifications", symbol: "◉", activeModules: ["notifications", "announcements"] },
+  { label: "资源申请", hint: "权限申请 · 待审批", path: "access-requests", symbol: "◑", activeModules: ["access-requests"] },
+] as const;
+
 // feature 标的是**付费档位**依赖（#280），不是权限：带 feature 的项在档位没开通该功能
 // 的项目里整条不出现在菜单里。权限维度（canAdmin）管的是能不能进管理面板本身，两者正交。
 export const ADMIN_NAV_GROUPS: { title: string | null; items: { label: string; hint: string; path: string; feature?: "advancedPerms" }[] }[] = [
