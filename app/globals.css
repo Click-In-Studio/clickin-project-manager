@@ -111,6 +111,13 @@ body {
   padding-left: max(0.625rem, env(safe-area-inset-left));
 }
 
+/* 手机竖屏优先把顶栏宽度留给项目切换器和页面工具；横屏仍保留项目标志。 */
+@media (max-width: 639px) and (orientation: portrait) {
+  .app-shell-brand-link {
+    display: none;
+  }
+}
+
 .app-shell-bottom-nav {
   padding-right: 0;
   padding-right: env(safe-area-inset-right);

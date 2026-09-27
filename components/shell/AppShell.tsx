@@ -292,7 +292,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
         ref={topbarRef}
         className={`app-shell-topbar shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center z-50 ${productionHeaderStage >= 2 ? "app-shell-topbar-compact gap-2" : "gap-5"}`}>
         {/* Brand / production icon */}
-        <Link href="/" className="flex items-center gap-2.5 shrink-0">
+        <Link href="/" className="app-shell-brand-link flex items-center gap-2.5 shrink-0">
           <span className="w-8 h-8 rounded-full bg-[#182a2a] overflow-hidden flex items-center justify-center select-none shrink-0">
             {productionId && currentProduction ? (
               currentProduction.avatarUrl ? (
