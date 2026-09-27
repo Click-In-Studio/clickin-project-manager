@@ -216,6 +216,27 @@ describe("agent approval/questions routes：runner 分支（ap_/aq_）", () => {
     expect(await approvalAllowsReexecute(key, toolCallId)).toBe(false);
   });
 
+  it("原写确认超时后，不借已完成的权限激活记录复活调用", async () => {
+    const toolCallId = `c_expired_write_${shortId()}`;
+    const activation = await createApproval({
+      runId, sessionId: key, toolCallId, tool: "clickin__production-scene_propose_update",
+      args: { permissions: ["node:scene/*/synopsis@edit"] },
+      card: { purpose: "permission-activation", title: "激活权限", description: "激活并继续", severity: "info" },
+    });
+    await resolveApproval(activation.id, "allow-once", userId);
+    await markApprovalExecuted(activation.id);
+    const write = await createApproval({
+      runId, sessionId: key, toolCallId, tool: "clickin__production-scene_propose_update", args: {},
+      card: { title: "修改构作", description: "执行修改", severity: "warning" },
+    });
+    await getPool().query(
+      "UPDATE agent_approval SET expires_at = now() - interval '1 second' WHERE id = $1",
+      [write.id],
+    );
+
+    expect(await approvalAllowsReexecute(key, toolCallId)).toBe(false);
+  });
+
   it("GET/POST /questions：runner 会话的待答列表；路人与伪造 aq_ id 统一 404；主人回答后落表", async () => {
     const { GET, POST } = await import("@/app/api/agent/questions/route");
     const q = await createOrReuseQuestion({

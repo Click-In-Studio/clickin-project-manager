@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getPool } from "@/lib/pg";
-import { activatePendingPermissions } from "@/lib/perm/permission-activation-db";
+import { ACTIVATABLE_NODE_KEYS, activatePendingPermissions } from "@/lib/perm/permission-activation-db";
 import { addProductionMember } from "@/lib/perm/member-db";
+import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { cleanupProduction, makeProduction, shortId } from "../_support/factories";
 
@@ -34,6 +35,19 @@ afterAll(async () => {
 });
 
 describe("权限激活共享落行入口", () => {
+  it("激活目录严格等于页面 scopes 中全部 node 键的去重并集", () => {
+    const expected = [
+      ...new Set(
+        Object.values(PAGE_PERMISSION_SCOPES).flatMap((scope) =>
+          [...scope].filter((key) => key.startsWith("node:")),
+        ),
+      ),
+    ];
+    expect(ACTIVATABLE_NODE_KEYS).toEqual(expected);
+    expect(new Set(ACTIVATABLE_NODE_KEYS).size).toBe(ACTIVATABLE_NODE_KEYS.length);
+    expect(ACTIVATABLE_NODE_KEYS.every((key) => key.startsWith("node:"))).toBe(true);
+  });
+
   it("只接受激活面目录内的键，并按区间资格幂等落行", async () => {
     const first = await activatePendingPermissions(memberId, prodId, ["node:scene/*/synopsis@edit"]);
     expect(first).toEqual({ ok: true, confirmed: 1 });
