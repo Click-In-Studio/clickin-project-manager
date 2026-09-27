@@ -19,6 +19,8 @@ import { toolLabel } from "@/lib/agent/agent-tool-labels";
 import { dispatchAgentMutation } from "@/lib/agent/agent-mutations";
 import WikiProposalPreviewModal from "@/components/agent/WikiProposalPreviewModal";
 import ChevronIcon from "@/components/ui/ChevronIcon";
+import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
+import { useShortcutLabel } from "@/components/ui/shortcut-label";
 
 /** 按语境（个人 / 某个制作）分桶持久化最后一次活跃会话，重开 popout 时恢复。 */
 function lastSessionStorageKey(productionId: string | null): string {
@@ -89,6 +91,7 @@ export default function AgentPopout({
   activeKeyRef.current = activeKey;
   const pathname = usePathname();
   const router = useRouter();
+  const submitKey = useShortcutLabel("Mod+Enter");
 
   // 页面感知（「主动就位、被动发言」）：pageKey/label 来自 allowlist 注册表
   // （lib/agent/agent-page-context.ts），不在表里的页面什么都不附带。建议 chip 点击
@@ -965,14 +968,15 @@ export default function AgentPopout({
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            enterKeyHint="enter"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              if (isMultilineSubmitShortcut(e)) {
                 e.preventDefault();
                 send();
               }
             }}
             rows={1}
-            placeholder={streaming ? "回复中，输入消息将注入本轮…" : "输入消息，Enter 发送"}
+            placeholder={streaming ? "回复中，输入消息将注入本轮…" : `输入消息，${submitKey} 发送`}
             className="max-h-40 flex-1 resize-none overflow-y-auto rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none"
           />
           {streaming ? (

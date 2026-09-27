@@ -7,6 +7,7 @@ import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import SmartText from "@/components/ui/SmartText";
 import { BASE_PATH } from "@/lib/base-path";
 import type { EventReportNote, EventDepartment } from "@/lib/ops/event-db";
+import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
 
 export default function DeptNotesList({
   reportId, eventId, productionId, departments, members,
@@ -138,7 +139,7 @@ export default function DeptNotesList({
             contentMention={{ productionId, versionId }}
             rows={2}
             placeholder="写 note… 输入 @ 可提及成员"
-            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); addNote(); } }}
+            onKeyDown={e => { if (isMultilineSubmitShortcut(e)) { e.preventDefault(); void addNote(); } }}
             className="w-full rounded-lg border border-zinc-200 px-3 py-1.5 text-sm focus:outline-none focus:border-zinc-400 resize-none"
           />
         </div>

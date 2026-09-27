@@ -770,6 +770,7 @@ export default function SmartTextarea({
           ? `prose prose-zinc max-w-none focus:outline-none px-3 py-2 smart-textarea-content${blockTools ? " smart-textarea-blocktools" : ""}`
           : "outline-none smart-textarea-content",
         style: readOnly ? "" : `min-height:${editorMinHeight}`,
+        enterkeyhint: "enter",
       },
       // 飞书粘贴归一化（junk 清理/代码块/checklist/@提及映射，lib/editor/feishu-paste）。
       // 只认飞书来源标记，其他粘贴源原样放行；失败也放行——宁可少归一化不拦粘贴

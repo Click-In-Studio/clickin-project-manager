@@ -2,6 +2,7 @@
 
 import React, { useLayoutEffect, useRef, useState } from "react";
 import type { ScriptTextLayoutMode } from "@/lib/script/script-types";
+import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
 
 export default function BlockStageComment({
   value,
@@ -152,6 +153,7 @@ export default function BlockStageComment({
           data-stage-comment-body="true"
           ref={textareaRef}
           autoFocus
+          enterKeyHint="enter"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => {
@@ -162,7 +164,7 @@ export default function BlockStageComment({
             commit();
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commit(); }
+            if (isMultilineSubmitShortcut(e)) { e.preventDefault(); commit(); }
             if (e.key === "Escape") {
               e.preventDefault();
               skipBlurCommitRef.current = true;

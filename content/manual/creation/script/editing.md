@@ -7,7 +7,7 @@ who: 有剧本编辑权限的成员（页面右上角显示「可编辑」）
 tier: all
 platform: [desktop, mobile]
 related: [creation/script/reading, creation/script/discussion, creation/dramaturgy/characters]
-updated: 2026-09-18
+updated: 2026-09-27
 ---
 
 ## 这是什么
@@ -34,6 +34,8 @@ updated: 2026-09-18
 | 演员提示 | 挂在一句台词下面的小字（语气、动作） | 块菜单「添加演员提示 / 补充舞台提示」 |
 
 鼠标停在一块上，右上角出现快捷按钮：**歌词 / 舞台 / 附件 / 评论**，再往左的小三角是完整菜单（「更多操作」）。
+
+编辑演员提示、补充舞台提示等多行小框时，Enter 用来换行；离开输入框会自动保存，使用实体键盘也可以按 ⌘/Ctrl+Enter 保存。
 
 台词里选中文字可以**粗体**（⌘/Ctrl+B）、**下划线**（⌘/Ctrl+U）。
 
