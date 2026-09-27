@@ -80,6 +80,55 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* App Shell 先用 100dvh 完成 SSR，hydration 后由唯一的 Visual Viewport
+   接线点写入真实像素高度。背景铺满屏幕，交互内容再分别消费安全区。 */
+.app-shell-frame,
+.app-shell-bottom-drawer {
+  height: 100vh;
+  height: var(--app-visual-viewport-height, 100dvh);
+}
+
+.app-shell-bottom-drawer {
+  top: 0;
+  top: var(--app-visual-viewport-offset-top, 0px);
+}
+
+.app-shell-topbar {
+  height: 4rem;
+  height: calc(4rem + env(safe-area-inset-top));
+  padding-top: 0;
+  padding-top: env(safe-area-inset-top);
+  padding-right: 1.25rem;
+  padding-right: max(1.25rem, env(safe-area-inset-right));
+  padding-left: 1.25rem;
+  padding-left: max(1.25rem, env(safe-area-inset-left));
+}
+
+.app-shell-topbar.app-shell-topbar-compact {
+  padding-right: 0.625rem;
+  padding-right: max(0.625rem, env(safe-area-inset-right));
+  padding-left: 0.625rem;
+  padding-left: max(0.625rem, env(safe-area-inset-left));
+}
+
+.app-shell-bottom-nav {
+  padding-right: 0;
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: 0;
+  padding-left: env(safe-area-inset-left);
+}
+
+.app-shell-bottom-drawer-surface {
+  padding-right: 0;
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: 0;
+  padding-left: env(safe-area-inset-left);
+}
+
 /* ── 路由切换骨架屏（配合各段 loading.tsx） ──────────────────────────────── */
 
 @keyframes skeleton-in {
@@ -694,8 +743,22 @@ span[data-stage-inline] {
 
 /* Side panels stay above the bottom nav wherever that nav is visible. */
 @media (max-width: 1023px) {
+  /* iOS Safari 的 Visual Viewport 在地址栏或键盘改变后可能相对布局视口发生
+     位移。壳既要采用它的高度，也要移动到它的实际起点。 */
+  .app-shell-frame {
+    position: fixed;
+    top: 0;
+    top: var(--app-visual-viewport-offset-top, 0px);
+    right: 0;
+    left: 0;
+  }
+
   .panel-mobile-full {
-    bottom: 4rem !important;
+    top: calc(var(--app-visual-viewport-offset-top, 0px) + 4rem + env(safe-area-inset-top)) !important;
+    bottom: auto !important;
+    height: calc(var(--app-visual-viewport-height, 100dvh) - 8rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    padding-right: env(safe-area-inset-right);
+    padding-left: env(safe-area-inset-left);
   }
 }
 
@@ -711,11 +774,14 @@ span[data-stage-inline] {
 /* 手机 / 窄窗口里的 AI 是独立工作面：覆盖顶栏、正文和底栏；关闭后原页面仍在。 */
 @media (max-width: 1023px) {
   .agent-mobile-full {
-    inset: 0 !important;
+    inset: 0 0 auto !important;
+    top: var(--app-visual-viewport-offset-top, 0px) !important;
     z-index: 60 !important;
     width: 100% !important;
     max-width: none !important;
-    height: 100dvh !important;
+    height: var(--app-visual-viewport-height, 100dvh) !important;
+    padding-right: env(safe-area-inset-right);
+    padding-left: env(safe-area-inset-left);
     border-left: 0 !important;
     box-shadow: none !important;
     overscroll-behavior: contain;
