@@ -12,6 +12,7 @@ import SmartTextarea from "../editor/SmartTextarea";
 import SmartText from "../ui/SmartText";
 import type { ProductionEvent, EventReport, EventReportNote, EventDepartment, ReportReply } from "@/lib/ops/event-db";
 import MountPointAssets from "@/components/assets/MountPointAssets";
+import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
 
 const REPORT_TYPE_LABELS: Record<string, string> = {
   rehearsal: "排练记录", performance: "演出记录", meeting: "会议纪要", custom: "其他",
@@ -286,7 +287,7 @@ function ReplyForm({
         rows={2}
         placeholder={placeholder}
         autoFocus
-        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
+        onKeyDown={e => { if (isMultilineSubmitShortcut(e)) { e.preventDefault(); void submit(); } }}
       />
       <div className="flex gap-2">
         <button onClick={submit} disabled={submitting || !content.trim()}

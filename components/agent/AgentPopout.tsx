@@ -19,6 +19,8 @@ import { toolLabel } from "@/lib/agent/agent-tool-labels";
 import { dispatchAgentMutation } from "@/lib/agent/agent-mutations";
 import WikiProposalPreviewModal from "@/components/agent/WikiProposalPreviewModal";
 import ChevronIcon from "@/components/ui/ChevronIcon";
+import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
+import { useShortcutLabel } from "@/components/ui/shortcut-label";
 
 /** 按语境（个人 / 某个制作）分桶持久化最后一次活跃会话，重开 popout 时恢复。 */
 function lastSessionStorageKey(productionId: string | null): string {
@@ -40,6 +42,15 @@ type GatewayStatus =
   | { state: "connected" }
   | { state: "pairing_required"; requestId?: string }
   | { state: "error"; error: string };
+
+const MOBILE_VIEWPORT_QUERY = "(max-width: 639px)";
+const subscribeMobileViewport = (onChange: () => void) => {
+  const media = window.matchMedia(MOBILE_VIEWPORT_QUERY);
+  media.addEventListener("change", onChange);
+  return () => media.removeEventListener("change", onChange);
+};
+const getMobileViewportSnapshot = () => window.matchMedia(MOBILE_VIEWPORT_QUERY).matches;
+const getServerMobileViewportSnapshot = () => false;
 
 // AI 助手浮动 popout——退休 /agent 独立页面（components/AgentChatClient 原逻辑
 // 迁移至此，改为 AppShell 内挂载）。会话范围由所在语境决定，不再有「个人/关联
@@ -89,6 +100,12 @@ export default function AgentPopout({
   activeKeyRef.current = activeKey;
   const pathname = usePathname();
   const router = useRouter();
+  const submitKey = useShortcutLabel("Mod+Enter");
+  const isMobileViewport = useSyncExternalStore(
+    subscribeMobileViewport,
+    getMobileViewportSnapshot,
+    getServerMobileViewportSnapshot,
+  );
 
   // 页面感知（「主动就位、被动发言」）：pageKey/label 来自 allowlist 注册表
   // （lib/agent/agent-page-context.ts），不在表里的页面什么都不附带。建议 chip 点击
@@ -965,14 +982,17 @@ export default function AgentPopout({
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            enterKeyHint="enter"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              if (isMultilineSubmitShortcut(e)) {
                 e.preventDefault();
                 send();
               }
             }}
             rows={1}
-            placeholder={streaming ? "回复中，输入消息将注入本轮…" : "输入消息，Enter 发送"}
+            placeholder={streaming
+              ? "回复中，输入消息将注入本轮…"
+              : isMobileViewport ? "输入消息…" : `输入消息，${submitKey} 发送`}
             className="max-h-40 flex-1 resize-none overflow-y-auto rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none"
           />
           {streaming ? (

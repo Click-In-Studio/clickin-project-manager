@@ -20,6 +20,37 @@ export function getTextAfterCursor(div: HTMLDivElement): string {
   return tmp.innerText;
 }
 
+function getTextAndLineBreakLength(root: Node): number {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ALL, {
+    acceptNode(node) {
+      if (node.nodeType === Node.TEXT_NODE) return NodeFilter.FILTER_ACCEPT;
+      if (node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName === "BR") {
+        return NodeFilter.FILTER_ACCEPT;
+      }
+      return NodeFilter.FILTER_SKIP;
+    },
+  });
+  let length = 0;
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    length += node.nodeType === Node.TEXT_NODE ? (node as Text).length : 1;
+  }
+  return length;
+}
+
+export function getCollapsedCursorTextOffset(div: HTMLDivElement): number | null {
+  const sel = window.getSelection();
+  if (!sel?.rangeCount || !sel.isCollapsed) return null;
+  const source = sel.getRangeAt(0);
+  if (!div.contains(source.startContainer) && source.startContainer !== div) return null;
+  const range = document.createRange();
+  range.setStart(div, 0);
+  range.setEnd(source.startContainer, source.startOffset);
+  const tmp = document.createElement("div");
+  tmp.appendChild(range.cloneContents());
+  return getTextAndLineBreakLength(tmp);
+}
+
 export function isAtStart(div: HTMLDivElement): boolean {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
@@ -132,6 +163,23 @@ export function setCursorAtTextOffset(div: HTMLDivElement, target: number) {
     }
   }
   setCursorAtEnd(div);
+}
+
+export function insertLineBreakAtTextOffset(div: HTMLDivElement, target?: number | null): boolean {
+  if (target === null) setCursorAtEnd(div);
+  else if (target !== undefined) setCursorAtTextOffset(div, target);
+  const sel = window.getSelection();
+  if (!sel?.rangeCount) return false;
+  const range = sel.getRangeAt(0);
+  if (!div.contains(range.startContainer) && range.startContainer !== div) return false;
+  range.deleteContents();
+  const br = document.createElement("br");
+  range.insertNode(br);
+  range.setStartAfter(br);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  return true;
 }
 
 export function getEditableElementForRange(range: Range): HTMLElement | null {

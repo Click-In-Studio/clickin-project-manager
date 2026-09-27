@@ -9,6 +9,7 @@ import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, PRODUCTION_TOOLBA
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
 import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib/script/character-perms-shared";
+import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
 
 const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
 
@@ -409,13 +410,14 @@ function TextCell({
       return (
         <textarea
           autoFocus
+          enterKeyHint="enter"
           value={draft}
           rows={4}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
             if (e.key === "Escape") { e.preventDefault(); cancel(); }
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) commit();
+            if (isMultilineSubmitShortcut(e)) { e.preventDefault(); commit(); }
           }}
           className="w-full resize-none rounded border border-[var(--line)] px-2 py-1.5 text-sm outline-none focus:border-zinc-400"
           style={{ minWidth: 200 }}

@@ -8,6 +8,7 @@ import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import { parseDuration, formatDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
 import ChevronIcon from "@/components/ui/ChevronIcon";
+import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
 
 export type TableColumnDef = {
   key: string;
@@ -134,6 +135,7 @@ function MetaCell({
       return (
         <textarea
           autoFocus
+          enterKeyHint="enter"
           ref={(el) => { textareaRef.current = el; resizeTextarea(el); }}
           value={draft}
           onChange={(e) => { setDraft(e.target.value); resizeTextarea(e.currentTarget); }}
@@ -142,19 +144,9 @@ function MetaCell({
           onCompositionEnd={() => setIsComposing(false)}
           onKeyDown={(e) => {
             if (isComposing) return;
-            if (e.key === "Enter" && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); commit(); }
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            if (isMultilineSubmitShortcut(e)) {
               e.preventDefault();
-              const textarea = textareaRef.current;
-              if (textarea) {
-                const start = textarea.selectionStart;
-                const end = textarea.selectionEnd;
-                const next = draft.slice(0, start) + "\n" + draft.slice(end);
-                setDraft(next);
-                requestAnimationFrame(() => {
-                  textarea.selectionStart = textarea.selectionEnd = start + 1;
-                });
-              }
+              void commit();
             }
             if (e.key === "Escape") { setDraft(value); setEditing(false); }
           }}

@@ -6,6 +6,7 @@ import MountPointAssets from "@/components/assets/MountPointAssets";
 import SmartTextarea from "@/components/editor/SmartTextarea";
 import SmartText from "@/components/ui/SmartText";
 import { useShortcutLabel } from "@/components/ui/shortcut-label";
+import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import { BASE_PATH } from "@/lib/base-path";
 import { postCueComment, patchCueComment, deleteCueComment } from "@/lib/ops/cue-client";
@@ -232,7 +233,7 @@ export default function CueCommentsPanel({
                 <SmartTextarea value={replyText} onChange={setReplyText}
                   memberMention={{ members, onMentionsChange: setReplyMentions }}
                   placeholder={`回复… (${submitKey} 发布)`} rows={2} autoFocus
-                  onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitReply(); }}
+                  onKeyDown={e => { if (isMultilineSubmitShortcut(e)) { e.preventDefault(); void submitReply(); } }}
                   className={taClass} />
                 <div className="mt-1 flex items-center justify-between">
                   <CommentAssetPicker productionId={productionId} selected={pendingReplyAssets} onSelect={setPendingReplyAssets} />
@@ -254,7 +255,7 @@ export default function CueCommentsPanel({
         <SmartTextarea value={newText} onChange={setNewText}
           memberMention={{ members, onMentionsChange: setNewMentions }}
           placeholder={`添加评论… (${submitKey} 发布)`} rows={3}
-          onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitNew(); }}
+          onKeyDown={e => { if (isMultilineSubmitShortcut(e)) { e.preventDefault(); void submitNew(); } }}
           className={taClass} />
         <div className="mt-2 flex items-center justify-between">
           <CommentAssetPicker productionId={productionId} selected={pendingNewAssets} onSelect={setPendingNewAssets} />
