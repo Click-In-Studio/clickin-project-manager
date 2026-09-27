@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
@@ -29,6 +29,13 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: { template: "%s | Backstage", default: "Backstage" },
   description: "演出项目管理",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-visual",
 };
 
 export default async function RootLayout({

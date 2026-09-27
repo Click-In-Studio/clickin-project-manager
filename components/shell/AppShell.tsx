@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import { nextNavPendingHref } from "@/lib/nav-pending";
@@ -35,6 +35,7 @@ import ProjectSwitcher from "./app-shell/ProjectSwitcher";
 import { useShellBadges } from "./app-shell/use-shell-badges";
 import { useProductionToolbarStage } from "./app-shell/use-production-toolbar-stage";
 import { useSidebarFold } from "./app-shell/use-sidebar-fold";
+import { useVisualViewportCssVariables } from "./app-shell/use-visual-viewport";
 
 interface AppShellProps {
   session: ShellSession | null;
@@ -57,6 +58,7 @@ const SCROLLBAR_ACTIVITY_HIDE_DELAY_MS = 700;
 type DrawerType = "overview" | "project-overview" | "creation" | "production" | "admin" | "me";
 
 export default function AppShell({ session, productions, canCreateProduction = false, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0, helpRoutes = {}, latestChangelogVersion = null }: AppShellProps) {
+  const shellRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const searchParams = useSearchParams();
   // 页面显式上报的「当前对象」（#476 follow-up）——见 components/agent/ai-target.tsx
@@ -177,6 +179,8 @@ export default function AppShell({ session, productions, canCreateProduction = f
   // 所以按末段判定，不另起顶层前缀——那会让 extractProductionId 之类
   // 按 /production/<id>/ 解析上下文的地方全部失效。
   const isPrintRoute = pathname.endsWith("/print") || pathname.includes("/print/");
+  const appShellActive = !!session && !pathname.startsWith("/login") && !pathname.startsWith("/help") && !isPrintRoute;
+  useVisualViewportCssVariables(shellRef, appShellActive);
   // /help 使用手册（#531）同理：公开帮助中心自带顶栏，不背产品侧栏
   if (!session || pathname.startsWith("/login") || pathname.startsWith("/help") || isPrintRoute) {
     return <>{children}</>;
@@ -283,11 +287,11 @@ export default function AppShell({ session, productions, canCreateProduction = f
     <ProductionToolbarStageContext.Provider value={productionToolbarStage}>
     <ProductionToolbarContext.Provider value={productionToolbarContext}>
     <NavPendingContext.Provider value={navPendingBus}>
-    <div className="h-screen flex flex-col overflow-hidden bg-[var(--paper)]">
+    <div ref={shellRef} className="app-shell-frame flex flex-col overflow-hidden bg-[var(--paper)]">
       {/* Topbar */}
       <header
         ref={topbarRef}
-        className={`h-16 shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center z-50 ${productionHeaderStage >= 2 ? "gap-2 px-2.5" : "gap-5 px-5"}`}>
+        className={`app-shell-topbar shrink-0 bg-[var(--surface)] border-b border-[var(--line)] flex items-center z-50 ${productionHeaderStage >= 2 ? "app-shell-topbar-compact gap-2" : "gap-5"}`}>
         {/* Brand / production icon */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
           <span className="w-8 h-8 rounded-full bg-[#182a2a] overflow-hidden flex items-center justify-center select-none shrink-0">
@@ -559,7 +563,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
         {/* 剧本页原浮动折叠按钮已移除——统一走侧栏顶部 sidebarControls（v3） */}
 
         {/* Workspace */}
-        <main id="workspace-scroll" className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
+        <main id="workspace-scroll" className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
           <AiTargetContext.Provider value={reportAiTarget}>{children}</AiTargetContext.Provider>
         </main>
       </div>
@@ -568,7 +572,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
       {productionId && <PageActivationGate key={productionId} productionId={productionId} scope="base" />}
 
       {/* Mobile bottom nav */}
-      <nav className="lg:hidden shrink-0 bg-[var(--surface)] border-t border-[var(--line)] flex z-40 safe-area-bottom">
+      <nav className="app-shell-bottom-nav lg:hidden shrink-0 bg-[var(--surface)] border-t border-[var(--line)] flex z-40">
         {productionId ? (
           isAdminMode ? (
             /* Admin mode */

@@ -6,7 +6,7 @@ routes: [/]
 tier: all
 platform: [desktop, mobile]
 related: [start/interface/glossary, start/notifications/notifications]
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 ## 这是什么
@@ -72,6 +72,8 @@ updated: 2026-09-26
 点「我」可以打开个人信息、账号安全中心、功能与设置、本页帮助、使用手册、更新日志、报告问题，以及管理员可见的配置中心。
 
 四个标签中间的圆形 **AI** 按钮打开全屏对话；点右上角的「✕」就回到刚才的内容和位置。免费档项目里不出现这个按钮，四个标签仍然等宽排列；离开项目回到平台页面后，可以继续使用个人 AI 助手。
+
+手机浏览器的地址栏展开、收起或切换横竖屏时，顶栏、底部标签和抽屉会自动留在当前可操作区域内。
 
 ![手机宽度下的项目首页与底部标签](/manual/start/mobile-tabs.png)
 
