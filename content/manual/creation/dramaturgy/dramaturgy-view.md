@@ -7,7 +7,7 @@ who: 看：有构作查看权限的成员；改：各字段分别授权（简介
 tier: all
 platform: [desktop, mobile]
 related: [creation/dramaturgy/characters, creation/script/reading, creation/dramaturgy/inspiration]
-updated: 2026-09-23
+updated: 2026-09-27
 ---
 
 ## 这是什么
@@ -15,6 +15,8 @@ updated: 2026-09-23
 「构作」是从**段落**（场）这一层看整部戏。剧本是一句一句的台词，构作是一场一场的骨架：这场叫什么、讲什么、人物在追求什么、用哪首曲子、大概多长。
 
 左侧栏「创作 → 构作」进入，顶部有三个页签：**构作视图**、**角色**、**灵感文档**。本页讲第一个。
+
+窗口较窄时，三个页签会收进顶部的「构作视图」下拉。选择一项即可前往对应页面；点下拉外的任意位置，菜单会立即收起。
 
 每个段落有这些字段：
 
