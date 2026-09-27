@@ -7,7 +7,7 @@ who: 所有成员可看；新建独立任务需要任务创建权限，部门 PO
 tier: all
 platform: [desktop, mobile]
 related: [production/tasks/task-detail, production/events/event-detail, production/planning/gantt]
-updated: 2026-09-18
+updated: 2026-09-27
 ---
 
 ## 这是什么
@@ -56,6 +56,9 @@ updated: 2026-09-18
 ### 处理
 
 点任务行打开详情抽屉，可以改状态、指派、写说明；「打开完整详情页」看依赖和绑定。
+
+> [!📱]
+> 手机上筛选条件排在任务卡片上方，状态可以横向滑动。点任务卡片展开处理；任务很多时随整页向下滚动，底部内容不会被导航栏挡住。
 
 ## 注意事项
 

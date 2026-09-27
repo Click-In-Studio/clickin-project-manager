@@ -874,7 +874,7 @@ export default function AccessRequestsClient({ productionId, productionName, can
   }
 
   return (
-    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+    <div className={styles.workspace} style={{ minHeight: "100vh", background: "var(--paper)" }}>
       {/* Header（v3 统一页头） */}
       <PageHeader
         eyebrow={productionName}
@@ -919,10 +919,8 @@ export default function AccessRequestsClient({ productionId, productionName, can
       </div>
 
       {/* ── Panel（通知页同款）：tab + 分栏 ── */}
-      <section style={{
+      <section className={`${styles.responsiveContentPanel} ${tab === "flows" ? styles.responsiveContentPanelFlow : ""}`} style={{
         background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22,
-        height: tab === "flows" ? "auto" : "calc(100vh - 320px)",
-        minHeight: tab === "flows" ? 980 : 460,
         display: "flex", flexDirection: "column",
       }}>
       {/* Tab strip */}

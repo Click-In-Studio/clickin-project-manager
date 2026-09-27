@@ -10,6 +10,7 @@ import { getProductionName } from "@/lib/production/production-db";
 import { listProductionTechReqs, listMyTechReqsFull } from "@/lib/ops/event-db";
 import ProductionTasksClient from "@/components/ops/ProductionTasksClient";
 import PageHeader from "@/components/ui/PageHeader";
+import styles from "@/components/ui/my-pages.module.css";
 
 
 export default async function ProductionTasksPage({ params, searchParams }: {
@@ -57,7 +58,7 @@ export default async function ProductionTasksPage({ params, searchParams }: {
         }));
 
   return (
-    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+    <div className={styles.workspace} style={{ minHeight: "100vh", background: "var(--paper)" }}>
       <PageHeader eyebrow="Tasks" title="任务" side="stage" />
       <ProductionTasksClient productionId={productionId} initialTasks={tasks} initialEventFilter={eventFilter} currentUserId={session.userId} />
     </div>
