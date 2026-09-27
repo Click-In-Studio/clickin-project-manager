@@ -34,6 +34,12 @@ describe("#730 多行输入的换行与提交", () => {
     }
   });
 
+  it("Agent 只在桌面端提示实体键盘提交快捷键", () => {
+    const agentPopout = readFileSync("components/agent/AgentPopout.tsx", "utf8");
+
+    expect(agentPopout).toContain('isMobileViewport ? "输入消息…" : `输入消息，${submitKey} 发送`');
+  });
+
   it("富文本多行面提示软键盘 Enter 为换行，剧本正文仍保留结构化 Enter", () => {
     const smartTextarea = readFileSync("components/editor/SmartTextarea.tsx", "utf8");
     const scriptBlock = readFileSync("components/script/script-editor/ScriptBlock.tsx", "utf8");
