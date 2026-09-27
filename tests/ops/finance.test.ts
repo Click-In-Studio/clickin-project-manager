@@ -18,7 +18,9 @@ import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { addProductionMember } from "@/lib/perm/member-db";
-import { classifyApprovalNode, buildApprovalLadder } from "@/lib/approval/approval-routing";
+import {
+  buildApprovalCandidateLadder, buildApprovalLadder, classifyApprovalNode,
+} from "@/lib/approval/approval-routing";
 import {
   approveExpense, cancelExpense, createBudgetCategory, deleteBudgetCategory,
   escalateExpiredExpenses, FinanceError, getExpense, listBudgetCategories, listExpenses,
@@ -127,6 +129,175 @@ describe("2 & 3. 审批人由阶梯算出，科目归属部门自动成为一级
     expect((await listPendingExpenses(strangerId, prodId)).some(x => x.id === e.id)).toBe(false);
     // 提交人自己也不在待办里（阶梯会去掉本人）
     expect((await listPendingExpenses(submitterId, prodId)).some(x => x.id === e.id)).toBe(false);
+  });
+});
+
+describe("#714 唯一审批候选人可以自批", () => {
+  async function makeUser(name: string) {
+    return (await upsertFeishuUser(
+      `test-open-${shortId()}`, `${name}${shortId()}`, null, false,
+    )).userId;
+  }
+
+  it("owner 是唯一候选人时提交即通过，并明确记录自批审计", async () => {
+    const soleOwner = await makeUser("单人owner");
+    const { prodId: soloProd } = await makeProduction(soleOwner);
+    try {
+      const target = {
+        productionId: soloProd, subjectId: soleOwner,
+        resourceType: "finance", resourceId: "*", resourceSub: "expenses",
+        permissionLevel: "edit",
+      };
+      expect(await buildApprovalLadder(target)).toEqual([]);
+      expect((await buildApprovalCandidateLadder(target)).flatMap(s => s.approverIds))
+        .toEqual([soleOwner]);
+
+      const expense = await submitExpense({
+        productionId: soloProd, categoryId: null, title: "单人项目支出",
+        amount: "66.00", submittedBy: soleOwner,
+      });
+      expect(expense.status).toBe("approved");
+      expect(expense.currentStage).toBeNull();
+      expect(expense.currentApproverIds).toEqual([]);
+      expect(expense.resolvedBy).toBe(soleOwner);
+      expect(expense.resolvedAt).not.toBeNull();
+
+      const { rows: [audit] } = await getPool().query<{ entry: Record<string, unknown> }>(
+        "SELECT escalation_chain -> 0 AS entry FROM production_expense WHERE id = $1",
+        [expense.id],
+      );
+      expect(audit.entry).toMatchObject({
+        phase: "self_approval", action: "approved", actorId: soleOwner,
+        approverIds: [soleOwner], approvalReason: "sole_approver",
+      });
+    } finally {
+      await cleanupProduction(soloProd).catch(() => {});
+    }
+  });
+
+  it("项目有普通成员但 owner 仍是唯一候选人时照样自批", async () => {
+    const soleOwner = await makeUser("唯一审批owner");
+    const ordinary = await makeUser("普通成员");
+    const { prodId: soloProd } = await makeProduction(soleOwner);
+    try {
+      await addProductionMember(soloProd, ordinary);
+      const expense = await submitExpense({
+        productionId: soloProd, categoryId: null, title: "有成员但无人审批",
+        amount: "77.00", submittedBy: soleOwner,
+      });
+      expect(expense.status).toBe("approved");
+      expect(expense.resolvedBy).toBe(soleOwner);
+    } finally {
+      await cleanupProduction(soloProd).catch(() => {});
+    }
+  });
+
+  it("owner 与另一位制作人提交时互相审批，不触发自批", async () => {
+    const self = await makeUser("owner提交人");
+    const producer = await makeUser("另一制作人");
+    const { prodId: routedProd } = await makeProduction(self);
+    try {
+      await addProductionMember(routedProd, producer);
+      await getPool().query(
+        "UPDATE production_member SET roles = ARRAY['制作人'] WHERE production_id = $1 AND user_id = $2",
+        [routedProd, producer],
+      );
+      const expense = await submitExpense({
+        productionId: routedProd, categoryId: null, title: "应交他人审批",
+        amount: "88.00", submittedBy: self,
+      });
+      expect(expense.status).toBe("pending");
+      expect(expense.currentStage).toBe("producer");
+      expect(expense.currentApproverIds).toEqual([producer]);
+      expect(expense.resolvedBy).toBeNull();
+
+      const producerExpense = await submitExpense({
+        productionId: routedProd, categoryId: null, title: "制作人交owner审批",
+        amount: "89.00", submittedBy: producer,
+      });
+      expect(producerExpense.status).toBe("pending");
+      expect(producerExpense.currentStage).toBe("owner");
+      expect(producerExpense.currentApproverIds).toEqual([self]);
+    } finally {
+      await cleanupProduction(routedProd).catch(() => {});
+    }
+  });
+
+  it("owner 同时是科目部门 POC、仍无其他候选人时只记一次自批", async () => {
+    const soleOwner = await makeUser("owner兼POC");
+    const { prodId: soloProd } = await makeProduction(soleOwner);
+    try {
+      const { rows: [{ id: soloDept }] } = await getPool().query<{ id: string }>(
+        "INSERT INTO production_dept (production_id, name) VALUES ($1, $2) RETURNING id",
+        [soloProd, `单人部门${shortId()}`],
+      );
+      await getPool().query(
+        `INSERT INTO production_dept_member (production_id, dept_id, user_id, is_poc)
+         VALUES ($1, $2, $3, true)`,
+        [soloProd, soloDept, soleOwner],
+      );
+      const category = await createBudgetCategory({
+        productionId: soloProd, name: `单人科目${shortId()}`, amount: "100.00",
+        deptId: soloDept, createdBy: soleOwner,
+      });
+      const expense = await submitExpense({
+        productionId: soloProd, categoryId: category.id, title: "POC也是本人",
+        amount: "9.00", submittedBy: soleOwner,
+      });
+      expect(expense.status).toBe("approved");
+      expect((await listBudgetCategories(soloProd)).find(c => c.id === category.id)?.spent)
+        .toBe("9.00");
+    } finally {
+      await cleanupProduction(soloProd).catch(() => {});
+    }
+  });
+
+  it("审批期间其他候选人退出后，超时重算为仅本人并自动通过", async () => {
+    const self = await makeUser("变更场owner");
+    const producer = await makeUser("将退出的制作人");
+    const { prodId: routedProd } = await makeProduction(self);
+    try {
+      await addProductionMember(routedProd, producer);
+      await getPool().query(
+        "UPDATE production_member SET roles = ARRAY['制作人'] WHERE production_id = $1 AND user_id = $2",
+        [routedProd, producer],
+      );
+      const expense = await submitExpense({
+        productionId: routedProd, categoryId: null, title: "审批期间换人",
+        amount: "10.00", submittedBy: self,
+      });
+      expect(expense.status).toBe("pending");
+
+      await getPool().query(
+        `UPDATE production_member SET roles = '{}'
+          WHERE production_id = $1 AND user_id = $2`,
+        [routedProd, producer],
+      );
+      await getPool().query(
+        `UPDATE production_expense
+            SET escalation_chain = jsonb_set(
+                  escalation_chain,
+                  ARRAY[(jsonb_array_length(escalation_chain) - 1)::text, 'notifiedAt'],
+                  to_jsonb((now() - interval '48 hours')::text))
+          WHERE id = $1`,
+        [expense.id],
+      );
+      await escalateExpiredExpenses();
+
+      const after = (await getExpense(expense.id, routedProd))!;
+      expect(after.status).toBe("approved");
+      expect(after.resolvedBy).toBe(self);
+      const { rows: [audit] } = await getPool().query<{ entry: Record<string, unknown> }>(
+        "SELECT escalation_chain -> -1 AS entry FROM production_expense WHERE id = $1",
+        [expense.id],
+      );
+      expect(audit.entry).toMatchObject({
+        phase: "self_approval", action: "approved", bySystem: true,
+        approverIds: [self], approvalReason: "sole_approver",
+      });
+    } finally {
+      await cleanupProduction(routedProd).catch(() => {});
+    }
   });
 });
 

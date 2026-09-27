@@ -102,7 +102,7 @@ export function ExpenseCreateButton({ productionId, categories }: {
                 <button type="button" className={styles.closeButton} onClick={close} aria-label="关闭报销单">×</button>
               </header>
 
-              <p className={styles.lead}>填写实际垫付的费用。提交后会自动交给当前审批人处理。</p>
+              <p className={styles.lead}>填写实际垫付的费用。提交后会按项目安排审批；只有你自己可以审批时会直接通过。</p>
 
               <div className={styles.fields}>
                 <label className={styles.field}>

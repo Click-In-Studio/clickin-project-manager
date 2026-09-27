@@ -127,6 +127,23 @@ const MAX_ANCESTOR_LEVELS = 8;
  * 前面级已通知过的人不会在后面级重复出现（重复只会让升级空转）。
  */
 export async function buildApprovalLadder(t: ApprovalTarget): Promise<ApprovalStage[]> {
+  return buildApprovalLadderWithSubjectPolicy(t, true);
+}
+
+/**
+ * 算审批候选人时保留申请人本人。
+ *
+ * 只用于需要区分「没有候选人」与「唯一候选人就是本人」的业务规则；返回值不能直接
+ * 写进普通审批待办。常规审批仍只调用 buildApprovalLadder，继续保证申请人不能自批。
+ */
+export async function buildApprovalCandidateLadder(t: ApprovalTarget): Promise<ApprovalStage[]> {
+  return buildApprovalLadderWithSubjectPolicy(t, false);
+}
+
+async function buildApprovalLadderWithSubjectPolicy(
+  t: ApprovalTarget,
+  excludeSubject: boolean,
+): Promise<ApprovalStage[]> {
   const cls = classifyApprovalNode(t.resourceType, t.resourceSub, t.permissionLevel);
   const ownerId = await findProductionOwner(t.productionId);
 
@@ -135,7 +152,7 @@ export async function buildApprovalLadder(t: ApprovalTarget): Promise<ApprovalSt
 
   // SENSITIVE：跳过整条链，直达 owner（制作人也不能代批）。
   if (cls === "sensitive") {
-    return ownerId && ownerId !== t.subjectId
+    return ownerId && (!excludeSubject || ownerId !== t.subjectId)
       ? [{ stage: "owner", depth: 0, approverIds: [ownerId], canFinalize: true }]
       : [];
   }
@@ -176,12 +193,12 @@ export async function buildApprovalLadder(t: ApprovalTarget): Promise<ApprovalSt
   // ⑥ Owner 兜底
   raw.push({ stage: "owner", depth: 0, approverIds: ownerId ? [ownerId] : [], canFinalize: true });
 
-  return dedupeLadder(raw, t.subjectId);
+  return dedupeLadder(raw, excludeSubject ? t.subjectId : null);
 }
 
 /** 去掉申请人本人、跨级去重、丢掉空级。 */
-function dedupeLadder(ladder: ApprovalStage[], subjectId: string): ApprovalStage[] {
-  const seen = new Set<string>([subjectId]);
+function dedupeLadder(ladder: ApprovalStage[], subjectId: string | null): ApprovalStage[] {
+  const seen = new Set<string>(subjectId ? [subjectId] : []);
   const out: ApprovalStage[] = [];
   for (const s of ladder) {
     const ids = [...new Set(s.approverIds)].filter((id) => !seen.has(id));
