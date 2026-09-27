@@ -2058,9 +2058,9 @@
   .approvalDesignerGrid { display: flex; min-height: 0; flex: none; flex-direction: column; overflow: visible; }
   .approvalTemplateShelf { border-right: 0; border-bottom: 1px solid var(--line); }
   .approvalTemplateList { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); overflow-x: auto; }
+  .approvalTemplateListEmpty { display: block; overflow-x: visible; }
   .approvalTemplateEmpty {
-    grid-column: 1 / -1;
-    width: min(100%, 34rem);
+    width: 100%;
     margin: 8px 0;
     font-size: 13px;
     line-height: 1.7;

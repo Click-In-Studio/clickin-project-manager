@@ -45,8 +45,11 @@ describe("移动内容面板响应式契约", () => {
   it("手机底部留出导航与安全区，流程空态可正常换行", () => {
     expect(css).toContain("calc(80px + env(safe-area-inset-bottom))");
     expect(css).toContain("calc(24px + env(safe-area-inset-bottom))");
+    expect(flowDesigner).toContain("styles.approvalTemplateListEmpty");
     expect(flowDesigner).toContain("styles.approvalTemplateEmpty");
     expect(css).toMatch(/\.approvalDesignerGrid \{ display: flex; min-height: 0; flex: none;/);
+    expect(css).toMatch(/\.approvalTemplateListEmpty \{ display: block; overflow-x: visible; \}/);
+    expect(css).toMatch(/\.approvalTemplateEmpty \{[\s\S]*?width: 100%;/);
     expect(css).toMatch(/\.approvalTemplateEmpty \{[\s\S]*?font-size: 13px;[\s\S]*?line-height: 1\.7;[\s\S]*?overflow-wrap: anywhere;/);
   });
 
