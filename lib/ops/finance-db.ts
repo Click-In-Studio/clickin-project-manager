@@ -622,16 +622,18 @@ export async function escalateExpiredExpenses(): Promise<{ escalated: number }> 
     if (!next) {
       if (!isSoleCandidate(candidateLadder, row.submitted_by)) continue;
       const actedAt = new Date().toISOString();
+      // resolved_by 记唯一审批人；真正的触发方由链条的 bySystem 区分，不能因超时触发
+      // 就把同一种「提交人自批」终局写成无人批准。
       await pool.query(
         `UPDATE production_expense
-            SET status = 'approved', resolved_at = now(), resolved_by = NULL,
+            SET status = 'approved', resolved_at = now(), resolved_by = $4,
                 current_stage = NULL, current_approver_ids = '{}',
                 escalation_chain = escalation_chain || $2::jsonb, updated_at = now()
           WHERE id = $1 AND status = 'pending'
             AND current_stage IS NOT DISTINCT FROM $3`,
         [
           row.id, JSON.stringify([selfApprovalEntry(row.submitted_by, actedAt, true)]),
-          row.current_stage,
+          row.current_stage, row.submitted_by,
         ],
       );
       continue;

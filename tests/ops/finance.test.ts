@@ -286,7 +286,7 @@ describe("#714 唯一审批候选人可以自批", () => {
 
       const after = (await getExpense(expense.id, routedProd))!;
       expect(after.status).toBe("approved");
-      expect(after.resolvedBy).toBeNull();
+      expect(after.resolvedBy).toBe(self);
       const { rows: [audit] } = await getPool().query<{ entry: Record<string, unknown> }>(
         "SELECT escalation_chain -> -1 AS entry FROM production_expense WHERE id = $1",
         [expense.id],
