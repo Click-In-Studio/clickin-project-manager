@@ -7,6 +7,8 @@ export type ApprovalInfo = {
   description: string;
   severity: "info" | "warning" | "critical";
   allowedDecisions: string[];
+  /** 权限激活卡复用审批生命周期，但按钮与完成态使用激活语义。 */
+  purpose?: "tool-execution" | "permission-activation";
   // 关联的 MCP 工具调用 id——同一字段名/来源同 client.ts 的 ApprovalRequest，
   // 已经随 relay 原样 JSON 序列化过来了，这里补声明才能让前端读它（如
   // WikiProposalPreviewModal 按它拉取完整提议详情）。

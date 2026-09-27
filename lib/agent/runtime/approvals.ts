@@ -29,6 +29,7 @@ export interface ApprovalCard {
   title: string;
   description: string;
   severity: ApprovalInfo["severity"];
+  purpose?: ApprovalInfo["purpose"];
 }
 
 export async function createApproval(
@@ -40,15 +41,17 @@ export async function createApproval(
   const existing = await pool.query<{ id: string; preview: ApprovalCard; expires_at: Date }>(
     `SELECT id, preview, expires_at FROM agent_approval
      WHERE session_id = $1 AND tool_call_id = $2 AND expires_at > now()
+       AND COALESCE(preview->>'purpose', 'tool-execution') = $3
        AND (status = 'pending' OR (status = 'allowed' AND executed_at IS NULL))`,
-    [input.sessionId, input.toolCallId],
+    [input.sessionId, input.toolCallId, input.card.purpose ?? "tool-execution"],
   );
   if (existing.rows[0]) {
     const row = existing.rows[0];
     return {
       id: row.id, expiresAt: row.expires_at, reused: true,
       info: { id: row.id, title: row.preview.title ?? input.card.title, description: row.preview.description ?? input.card.description,
-        severity: row.preview.severity ?? input.card.severity, allowedDecisions: ["allow-once", "deny"], toolCallId: input.toolCallId },
+        severity: row.preview.severity ?? input.card.severity, allowedDecisions: ["allow-once", "deny"],
+        purpose: row.preview.purpose ?? input.card.purpose, toolCallId: input.toolCallId },
     };
   }
   const id = newApprovalId();
@@ -65,17 +68,35 @@ export async function createApproval(
     description: input.card.description.slice(0, 512),
     severity: input.card.severity,
     allowedDecisions: ["allow-once", "deny"],
+    purpose: input.card.purpose,
     toolCallId: input.toolCallId,
   };
   return { id, info, expiresAt, reused: false };
 }
 
 /** 某个工具调用能否在恢复时重跑：待答审批（还没执行）或已批未执行 → 可以；
- *  已开始执行（executed_at 有值）→ 副作用未知，不能。 */
+ * 权限激活已经完成、但原写确认尚未创建时也可恢复——激活幂等且原工具还没执行。
+ * 原写确认一旦存在：pending / 已批未执行走前两支恢复；拒绝 / 超时 / 取消代表这次
+ * 调用已经终结，已执行则副作用未知，这四种都不能再借激活记录复活。因此下面的
+ * NOT EXISTS 刻意看全部写确认行，不加 expires_at 过滤。 */
 export async function approvalAllowsReexecute(sessionId: string, toolCallId: string, pool: Pool = getPool()): Promise<boolean> {
   const r = await pool.query(
-    `SELECT 1 FROM agent_approval WHERE session_id = $1 AND tool_call_id = $2 AND expires_at > now()
-       AND (status = 'pending' OR (status = 'allowed' AND executed_at IS NULL))`,
+    `SELECT 1 FROM agent_approval a
+     WHERE a.session_id = $1 AND a.tool_call_id = $2 AND a.expires_at > now()
+       AND (
+         a.status = 'pending'
+         OR (a.status = 'allowed' AND a.executed_at IS NULL)
+         OR (
+           COALESCE(a.preview->>'purpose', 'tool-execution') = 'permission-activation'
+           AND a.status = 'allowed' AND a.executed_at IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM agent_approval write_gate
+             WHERE write_gate.session_id = a.session_id
+               AND write_gate.tool_call_id = a.tool_call_id
+               AND COALESCE(write_gate.preview->>'purpose', 'tool-execution') = 'tool-execution'
+           )
+         )
+       )`,
     [sessionId, toolCallId],
   );
   return (r.rowCount ?? 0) > 0;

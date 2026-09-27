@@ -22,7 +22,7 @@ let prodId: string;
 let versionId: string;
 let ownerId: string;
 let writerId: string;   // 成员 + script/*/blocks@view + @edit
-let viewerId: string;   // 成员 + 仅 view
+let viewerId: string;   // 成员 + view；blocks@edit 在角色区间内但尚未激活
 let outsiderId: string;
 let chId: string;       // 章节标记
 let charWang: string;
@@ -66,6 +66,19 @@ beforeAll(async () => {
   await grant(writerId, "script", "*", "blocks", "view");
   await grant(writerId, "script", "*", "blocks", "edit");
   await grant(viewerId, "script", "*", "blocks", "view");
+  const pendingRoleId = `role_${shortId()}`;
+  await getPool().query(
+    "INSERT INTO production_role (id, production_id, name) VALUES ($1, $2, '待激活编剧')",
+    [pendingRoleId, prodId],
+  );
+  await getPool().query(
+    "INSERT INTO production_role_permission (role_id, permission_key) VALUES ($1, 'node:script/*/blocks@edit')",
+    [pendingRoleId],
+  );
+  await getPool().query(
+    "INSERT INTO production_member_role (production_id, user_id, role_id) VALUES ($1, $2, $3)",
+    [prodId, viewerId, pendingRoleId],
+  );
 
   chId = await makeScene(prodId, versionId, { number: "1", name: "第一章" });
   charWang = await makeCharacter(prodId, versionId, { name: "老王" });
@@ -110,8 +123,10 @@ describe("权限门（安全边界在工具内）", () => {
     const denied = await previewScriptProposal(viewerId, prodId, REWRITE, args);
     expect(denied.hasPermission).toBe(false);
     expect(denied.notes.join("\n")).toMatch(/[🔓📝⛔]/u);
+    expect(denied.selfConfirmKeys).toEqual(["node:script/*/blocks@edit"]);
     const ok = await previewScriptProposal(writerId, prodId, REWRITE, args);
     expect(ok.hasPermission).toBe(true);
+    expect(ok.selfConfirmKeys).toEqual([]);
     expect(ok.notes.join("\n")).toContain("修改 1 块");
   });
 

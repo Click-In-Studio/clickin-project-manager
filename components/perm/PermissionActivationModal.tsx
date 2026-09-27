@@ -1,6 +1,6 @@
 "use client";
 import { useEffect } from "react";
-import { permissionLabel, permissionGroupLabel } from "@/lib/perm/permission-labels";
+import { groupPermissionLabels, permissionLabel } from "@/lib/perm/permission-labels";
 
 type Props = {
   pending: string[];
@@ -10,18 +10,6 @@ type Props = {
   title?: string;
   subtitle?: string;
 };
-
-/** Groups permission keys by their category label (e.g. "部门管理") */
-function groupByCategory(perms: string[]): { label: string; perms: string[] }[] {
-  const map = new Map<string, string[]>();
-  for (const p of perms) {
-    const label = permissionGroupLabel(p);
-    const existing = map.get(label);
-    if (existing) existing.push(p);
-    else map.set(label, [p]);
-  }
-  return Array.from(map.entries()).map(([label, ps]) => ({ label, perms: ps }));
-}
 
 export default function PermissionActivationModal({
   pending,
@@ -39,7 +27,7 @@ export default function PermissionActivationModal({
     return () => document.removeEventListener("keydown", handler);
   }, [onDismiss]);
 
-  const groups = groupByCategory(pending);
+  const groups = groupPermissionLabels(pending);
 
   return (
     <div
@@ -120,7 +108,7 @@ export default function PermissionActivationModal({
                     {g.label}
                   </div>
                   <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.7 }}>
-                    {g.perms.map(permissionLabel).join("、")}
+                    {g.permissions.map(permissionLabel).join("、")}
                   </div>
                 </div>
                 <div style={{
@@ -129,7 +117,7 @@ export default function PermissionActivationModal({
                   background: "var(--line)", borderRadius: 999,
                   padding: "2px 8px", marginTop: 1,
                 }}>
-                  {g.perms.length} 项
+                  {g.permissions.length} 项
                 </div>
               </div>
             ))}

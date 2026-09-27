@@ -20,7 +20,7 @@ export function pageKeyOfMessage(message: string): string | null {
 
 /** 待答审批卡（attach 时补发——网关时代没有这条恢复路径，卡片刷新即丢）。 */
 async function pendingApprovalLines(sessionId: string): Promise<StreamLine[]> {
-  const r = await getPool().query<{ id: string; tool_call_id: string; preview: { title?: string; description?: string; severity?: ApprovalInfo["severity"] } }>(
+  const r = await getPool().query<{ id: string; tool_call_id: string; preview: { title?: string; description?: string; severity?: ApprovalInfo["severity"]; purpose?: ApprovalInfo["purpose"] } }>(
     `SELECT id, tool_call_id, preview FROM agent_approval WHERE session_id = $1 AND status = 'pending' AND expires_at > now() ORDER BY created_at`,
     [sessionId],
   );
@@ -32,6 +32,7 @@ async function pendingApprovalLines(sessionId: string): Promise<StreamLine[]> {
       description: (row.preview.description ?? "").slice(0, 512),
       severity: row.preview.severity ?? "warning",
       allowedDecisions: ["allow-once", "deny"],
+      purpose: row.preview.purpose,
       toolCallId: row.tool_call_id,
     },
   }));

@@ -158,6 +158,18 @@ export function permissionCategories(perms: string[]): string[] {
   return result;
 }
 
+/** 权限激活类界面的统一分组：页面 modal 与 AI inline 卡共用同一份标签和顺序。 */
+export function groupPermissionLabels(perms: readonly string[]): Array<{ label: string; permissions: string[] }> {
+  const groups = new Map<string, string[]>();
+  for (const permission of perms) {
+    const label = permissionGroupLabel(permission);
+    const existing = groups.get(label);
+    if (existing) existing.push(permission);
+    else groups.set(label, [permission]);
+  }
+  return [...groups.entries()].map(([label, permissions]) => ({ label, permissions }));
+}
+
 // 比 grant-template 的 parseNodeKey 宽：type / verb 位允许通配（区间键语法），
 // 动词不限闭集——这里只做展示，不做判定，遇到未知动词照样拼出人话。
 const LABEL_KEY_RE = /^node:([a-z_*]+)\/([^/@]+)(?:\/([^@]+))?@([a-z_*]+)$/;
