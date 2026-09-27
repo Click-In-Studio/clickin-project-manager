@@ -96,6 +96,14 @@ function mobileNav(): HTMLElement {
     .find((nav) => nav.classList.contains("lg:hidden"))!;
 }
 
+function buttonWithText(root: ParentNode, text: string): HTMLButtonElement {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>("button"))
+    .find((button) => {
+      const content = button.textContent?.trim();
+      return content === text || content?.includes(text);
+    })!;
+}
+
 describe("#702 手机 AI 入口", () => {
   it("用固定宽度圆形按钮表达独立操作，打开态可被辅助技术识别", () => {
     const onClick = vi.fn();
@@ -146,5 +154,46 @@ describe("#702 手机 AI 入口", () => {
     expect(container.querySelector("[data-agent-popout]")?.getAttribute("data-open")).toBe("false");
     act(() => mobileNav().querySelector<HTMLButtonElement>("button[data-ai-toggle]")!.click());
     expect(container.querySelector("[data-agent-popout]")?.getAttribute("data-open")).toBe("true");
+  });
+});
+
+describe("手机导航入口完整性", () => {
+  it("项目内用概览抽屉收纳我的工作、我的通知与资源申请", () => {
+    navigation.pathname = "/production/pro1";
+    act(() => root.render(
+      <AppShell session={session} productions={productions}>
+        <div>正文</div>
+      </AppShell>,
+    ));
+
+    const overview = buttonWithText(mobileNav(), "⌂概览");
+    act(() => overview.click());
+
+    const links = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"));
+    expect(links.find((link) => link.textContent?.includes("我的工作"))?.getAttribute("href")).toBe("/production/pro1");
+    expect(links.find((link) => link.textContent?.includes("我的通知"))?.getAttribute("href")).toBe("/production/pro1/notifications");
+    expect(links.find((link) => link.textContent?.includes("资源申请"))?.getAttribute("href")).toBe("/production/pro1/access-requests");
+  });
+
+  it("我抽屉补齐桌面头像菜单里的全部帮助入口", () => {
+    navigation.pathname = "/production/pro1";
+    act(() => root.render(
+      <AppShell
+        session={session}
+        productions={productions}
+        helpRoutes={{ "": "start/interface/navigation" }}
+        latestChangelogVersion="v0.1.1"
+      >
+        <div>正文</div>
+      </AppShell>,
+    ));
+
+    act(() => buttonWithText(mobileNav(), "我").click());
+
+    const links = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"));
+    expect(links.find((link) => link.textContent?.includes("本页帮助"))?.getAttribute("href")).toBe("/help/start/interface/navigation");
+    expect(links.find((link) => link.textContent?.includes("使用手册"))?.getAttribute("href")).toBe("/help");
+    expect(links.find((link) => link.textContent?.includes("更新日志"))?.getAttribute("href")).toBe("/help/changelog");
+    expect(buttonWithText(container, "报告问题")).toBeTruthy();
   });
 });
