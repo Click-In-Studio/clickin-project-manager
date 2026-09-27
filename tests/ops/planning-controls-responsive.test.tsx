@@ -31,12 +31,16 @@ describe("计划页移动端控制区", () => {
   });
 
   it("760px 以下压缩卡片并让粒度与图例在 319px 宽度内分行", () => {
-    const mobileRules = css.slice(css.indexOf("@media (max-width: 760px)"), css.indexOf("@media (max-width: 520px)"));
+    const mobileStart = css.indexOf("@media (max-width: 760px)");
+    const mobileEnd = css.indexOf("@media (max-width: 520px)");
+    expect(mobileStart).toBeGreaterThan(-1);
+    expect(mobileEnd).toBeGreaterThan(mobileStart);
+    const mobileRules = css.slice(mobileStart, mobileEnd);
     expect(mobileRules).toMatch(/\.planningViewTab \{[^}]*min-height: 44px;[^}]*padding: 7px 6px;/);
     expect(mobileRules).toMatch(/\.ganttPanel \{ padding: 14px 10px; \}/);
     expect(mobileRules).toMatch(/\.ganttControls \{[^}]*width: 100%;[^}]*flex-shrink: 1;/);
     expect(mobileRules).toMatch(/\.ganttScale \{[^}]*width: 100%;[^}]*box-sizing: border-box;/);
-    expect(mobileRules).toMatch(/\.ganttScaleButton \{[^}]*min-height: 36px;[^}]*flex: 1 1 0;/);
+    expect(mobileRules).toMatch(/\.ganttScaleButton \{[^}]*min-height: 44px;[^}]*flex: 1 1 0;/);
     expect(mobileRules).toMatch(/\.ganttLegend \{[^}]*width: 100%;[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*display: grid;/);
   });
 

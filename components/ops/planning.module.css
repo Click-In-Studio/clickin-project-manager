@@ -1007,7 +1007,7 @@
   .ganttDescription { margin-top: 3px; font-size: 10px; line-height: 1.45; }
   .ganttControls { width: 100%; margin-left: 0; gap: 8px; flex-shrink: 1; }
   .ganttScale { width: 100%; box-sizing: border-box; }
-  .ganttScaleButton { min-width: 0; min-height: 36px; padding: 3px 8px; flex: 1 1 0; font-size: 11px; }
+  .ganttScaleButton { min-width: 0; min-height: 44px; padding: 3px 8px; flex: 1 1 0; font-size: 11px; }
   .ganttLegend { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; display: grid; font-size: 10px; }
   .timetablePanel { padding: 14px; }
   .timetableHeader { gap: 10px; margin-bottom: 12px; }
