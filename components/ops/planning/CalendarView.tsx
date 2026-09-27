@@ -166,7 +166,9 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
             .filter(({ phase }) => phaseCoversDate(phase, date));
           const shownEntries = entries.slice(0, 3);
           const hidden = Math.max(0, entries.length - 3);
-          const hiddenOnMobile = Math.max(0, entries.length - 2);
+          // 手机格高保持紧凑：日期之外只预算 1 条阶段、1 条事项和一行「+N 项」。
+          // 完整事项仍由日期抽屉承载，避免密集日期把 chip 压扁或推出格子。
+          const hiddenOnMobile = Math.max(0, entries.length - 1);
           return (
             <div
               key={date}
@@ -217,7 +219,7 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
                   <button
                     key={`${entry.kind}-${entry.value.id}`}
                     type="button"
-                    className={`${styles.calendarChip} ${index >= 2 ? styles.calendarMobileHidden : ""}`}
+                    className={`${styles.calendarChip} ${index >= 1 ? styles.calendarMobileHidden : ""}`}
                     title={meta.title}
                     onClick={event => { event.stopPropagation(); openDetail(entry, event.currentTarget, date); }}
                     style={meta.tone}
@@ -238,7 +240,8 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
         })}
       </div>
       <p className={styles.calendarHint}>
-        桌面端点击日期空白处可快捷新建；移动端点击日期查看当天事项，并使用右下角“＋”新建。绑定事件的任务随事件显示，不单独占格。
+        <span className={styles.calendarHintDesktop}>桌面端点击日期空白处可快捷新建；移动端点击日期查看当天事项，并使用右下角“＋”新建。绑定事件的任务随事件显示，不单独占格。</span>
+        <span className={styles.calendarHintMobile}>点日期查看当天事项；点右下角“＋”新建。</span>
       </p>
 
       <button

@@ -2,10 +2,14 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CalendarView from "@/components/ops/planning/CalendarView";
+import styles from "@/components/ops/planning.module.css";
 import type { Props } from "@/components/ops/planning/types";
+
+const calendarCss = readFileSync("components/ops/planning.module.css", "utf8");
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("next/link", () => ({
@@ -117,7 +121,7 @@ describe("CalendarView responsive interactions", () => {
     expect(dateButton("2031-04-12").getAttribute("aria-label")).toContain("4 项");
     expect(dateButton("2031-04-13").getAttribute("aria-label")).toContain("暂无事项");
 
-    const more = [...container.querySelectorAll<HTMLButtonElement>("button")]
+    const more = [...container.querySelectorAll<HTMLButtonElement>(`button.${styles.calendarHiddenDesktop}`)]
       .find(button => button.textContent?.trim() === "+1 项")!;
     await act(async () => more.click());
 
@@ -196,5 +200,51 @@ describe("CalendarView responsive interactions", () => {
     await act(async () => eventTypeSelect.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     expect(eventTypeSelect.getAttribute("aria-expanded")).toBe("false");
     expect(container.querySelector('[role="dialog"][aria-label$=" 快捷新建"]')).toBe(createDialog);
+  });
+
+  it("密集日期在手机端只预算一条阶段、一条事项和 +N 摘要", async () => {
+    mobile = true;
+    const denseProps: Props = {
+      ...props,
+      phases: ["全项目筹备", "舞美进场", "技术合成"].map((name, index) => ({
+        id: `phase-${index}`,
+        name,
+        deptId: null,
+        deptName: null,
+        startDate: "2031-04-12",
+        endDate: "2031-04-15",
+        milestoneIds: [],
+      })),
+    };
+
+    await act(async () => {
+      root.render(<CalendarView {...denseProps} />);
+      await Promise.resolve();
+    });
+
+    const cell = container.querySelector<HTMLElement>('[data-calendar-date="2031-04-12"]')!;
+    const phaseRows = [...cell.querySelectorAll<HTMLElement>('[title*="2031-04-12 ~ 2031-04-15"]')];
+    expect(phaseRows).toHaveLength(3);
+    expect(phaseRows[0].classList.contains(styles.calendarPhaseMobileExtra)).toBe(false);
+    expect(phaseRows.slice(1).every(row => row.classList.contains(styles.calendarPhaseMobileExtra))).toBe(true);
+
+    const entryRows = [...cell.querySelectorAll<HTMLButtonElement>('button[title]')]
+      .filter(button => button.title !== "查看或操作当天事项");
+    expect(entryRows).toHaveLength(3);
+    expect(entryRows[0].classList.contains(styles.calendarMobileHidden)).toBe(false);
+    expect(entryRows.slice(1).every(row => row.classList.contains(styles.calendarMobileHidden))).toBe(true);
+
+    const mobileMore = [...cell.querySelectorAll<HTMLButtonElement>("button")]
+      .find(button => button.textContent?.trim() === "+3 项")!;
+    expect(mobileMore.classList.contains(styles.calendarHiddenMobile)).toBe(true);
+    await act(async () => mobileMore.click());
+    expect(container.querySelector('[aria-labelledby="calendar-day-drawer-title"]')?.textContent).toContain("舞台清场");
+  });
+
+  it("319、332、380px 共用紧凑格高，底部手机提示为浮动新建按钮留出整列空间", () => {
+    expect(calendarCss).toMatch(/@media \(max-width: 760px\)[\s\S]*?\.calendarMobileHidden, \.calendarPhaseMobileExtra,[\s\S]*?display: none;/);
+    expect(calendarCss).toMatch(/@media \(max-width: 380px\)[\s\S]*?\.calendarCell \{ height: 84px; padding: 3px 2px; gap: 2px; \}/);
+    expect(calendarCss).toMatch(/\.calendarHint \{ width: calc\(100% - 72px\); min-height: 54px;/);
+    expect(calendarCss).toContain(".calendarHintMobile { display: inline; }");
   });
 });

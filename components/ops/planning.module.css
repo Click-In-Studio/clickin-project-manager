@@ -89,7 +89,8 @@
 .ganttLegendDone { border: 1px solid #b9b5dd; background: #e8e6f7; }
 
 .calendarHiddenMobile,
-.calendarFloatingCreate { display: none; }
+.calendarFloatingCreate,
+.calendarHintMobile { display: none; }
 
 .calendarPanel {
   background: var(--surface);
@@ -154,7 +155,7 @@
   border-bottom: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   cursor: pointer;
   transition: background-color .14s ease, box-shadow .14s ease;
 }
@@ -183,6 +184,7 @@
   color: var(--muted);
   font-size: 10px;
   font-weight: 700;
+  flex-shrink: 0;
   cursor: pointer;
 }
 
@@ -191,13 +193,13 @@
 
 .calendarChip {
   width: 100%;
-  min-height: 23px;
+  min-height: 22px;
   /* cell 是定高 flex 列：不设 flex-shrink:0 的话，装不下时 chip 会被压到 min-height、
      标题在自己的 overflow:hidden 里被切成半截字——溢出该由 shownEntries 预算控制 */
   flex-shrink: 0;
   border: 1px solid transparent;
   border-radius: 5px;
-  padding: 5px;
+  padding: 4px 5px;
   display: flex;
   align-items: center;
   text-align: left;
@@ -221,6 +223,8 @@
   background: transparent;
   color: var(--muted);
   font-size: 10px;
+  line-height: 1.2;
+  flex-shrink: 0;
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
@@ -1036,9 +1040,10 @@
   .calendarChip { min-height: 21px; padding: 3px 4px; font-size: 10px; }
   .calendarChipTitle { max-width: 6em; }
   .calendarChipType { display: none; }
-  .calendarMobileHidden, .calendarHiddenDesktop { display: none; }
+  .calendarMobileHidden, .calendarPhaseMobileExtra, .calendarHiddenDesktop, .calendarHintDesktop { display: none; }
   .calendarHiddenMobile { display: inline; font-size: 10px; }
-  .calendarHint { padding-right: 58px; font-size: 11px; }
+  .calendarHint { width: calc(100% - 72px); min-height: 54px; font-size: 11px; }
+  .calendarHintMobile { display: inline; }
   .calendarFloatingCreate {
     position: fixed;
     z-index: 70;
@@ -1079,4 +1084,11 @@
   .timetableEditAction { padding-inline: 9px; }
   .calendarCell { height: 86px; }
   .calendarLegend { gap: 7px 11px; }
+}
+
+@media (max-width: 380px) {
+  .calendarCell { height: 84px; padding: 3px 2px; gap: 2px; }
+  .calendarDateButton { min-width: 23px; min-height: 23px; }
+  .calendarChip { min-height: 19px; padding: 2px 3px; }
+  .calendarHiddenMobile { font-size: 9px; }
 }
