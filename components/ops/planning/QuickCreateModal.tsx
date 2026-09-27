@@ -94,7 +94,7 @@ export default function QuickCreateModal({ productionId, date, departments, even
       aria-label={`${date} 快捷新建`}
       onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
       onKeyDown={e => {
-        if (e.key === "Escape") {
+        if (e.key === "Escape" && !e.defaultPrevented) {
           e.stopPropagation();
           onClose();
         }

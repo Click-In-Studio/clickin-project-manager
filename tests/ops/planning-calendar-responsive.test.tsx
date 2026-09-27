@@ -2,7 +2,7 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CalendarView from "@/components/ops/planning/CalendarView";
 import type { Props } from "@/components/ops/planning/types";
@@ -52,6 +52,13 @@ describe("CalendarView responsive interactions", () => {
   let container: HTMLDivElement;
   let root: Root;
   let mobile = false;
+
+  beforeAll(() => {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+  });
 
   beforeEach(() => {
     window.localStorage.clear();
@@ -136,5 +143,22 @@ describe("CalendarView responsive interactions", () => {
     await act(async () => createDialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     expect(container.querySelector('[aria-label="2031-04-13 快捷新建"]')).toBeNull();
     expect(document.activeElement).toBe(floatingCreate);
+  });
+
+  it("快捷新建的下拉框先消费 Escape，不会连带关闭弹窗", async () => {
+    mobile = true;
+    await render();
+
+    const floatingCreate = container.querySelector<HTMLButtonElement>('button[aria-label^="在"][aria-label$="快捷新建事件或任务"]')!;
+    await act(async () => floatingCreate.click());
+
+    const createDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label$=" 快捷新建"]')!;
+    const eventTypeSelect = createDialog.querySelector<HTMLButtonElement>('[role="combobox"]')!;
+    await act(async () => eventTypeSelect.click());
+    expect(eventTypeSelect.getAttribute("aria-expanded")).toBe("true");
+
+    await act(async () => eventTypeSelect.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(eventTypeSelect.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector('[role="dialog"][aria-label$=" 快捷新建"]')).toBe(createDialog);
   });
 });
