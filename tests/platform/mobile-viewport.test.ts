@@ -4,9 +4,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   deriveAppViewportState,
+  ensureEditableTargetVisible,
   isEditableTarget,
   useAppViewportState,
   writeAppViewportCssVariables,
@@ -93,6 +94,86 @@ describe("#727 手机编辑态", () => {
     expect(isEditableTarget(editor)).toBe(true);
   });
 
+  it("键盘稳定后只把越界的小型编辑控件滚进可见视口", () => {
+    const shell = document.createElement("div");
+    shell.className = "app-shell-frame";
+    const scrollContainer = document.createElement("div");
+    const input = document.createElement("input");
+    scrollContainer.style.overflowY = "auto";
+    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 480 });
+    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 960 });
+    scrollContainer.appendChild(input);
+    shell.appendChild(scrollContainer);
+    document.body.appendChild(shell);
+    vi.spyOn(shell, "getBoundingClientRect").mockReturnValue({
+      top: 0,
+      bottom: 480,
+      height: 480,
+      left: 0,
+      right: 390,
+      width: 390,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(scrollContainer, "getBoundingClientRect").mockReturnValue({
+      top: 64,
+      bottom: 480,
+      height: 416,
+      left: 0,
+      right: 390,
+      width: 390,
+      x: 0,
+      y: 120,
+      toJSON: () => ({}),
+    });
+
+    const getBoundingClientRect = vi.spyOn(input, "getBoundingClientRect").mockReturnValue({
+      top: 500,
+      bottom: 536,
+      height: 36,
+      left: 0,
+      right: 200,
+      width: 200,
+      x: 0,
+      y: 500,
+      toJSON: () => ({}),
+    });
+    // 即使 Safari 报出的 offsetTop 会让 500..536 看似仍处于 120..600 内，
+    // 实际收缩后的壳只到 480；判断必须采用同坐标系的壳矩形。
+    expect(ensureEditableTargetVisible(input, { height: 480, offsetTop: 120 })).toBe(true);
+    expect(scrollContainer.scrollTop).toBe(68);
+
+    getBoundingClientRect.mockReturnValue({
+      top: 180,
+      bottom: 216,
+      height: 36,
+      left: 0,
+      right: 200,
+      width: 200,
+      x: 0,
+      y: 180,
+      toJSON: () => ({}),
+    });
+    expect(ensureEditableTargetVisible(input, { height: 480, offsetTop: 120 })).toBe(false);
+    expect(scrollContainer.scrollTop).toBe(68);
+
+    getBoundingClientRect.mockReturnValue({
+      top: 120,
+      bottom: 720,
+      height: 600,
+      left: 0,
+      right: 200,
+      width: 200,
+      x: 0,
+      y: 120,
+      toJSON: () => ({}),
+    });
+    expect(ensureEditableTargetVisible(input, { height: 480, offsetTop: 120 })).toBe(false);
+    expect(scrollContainer.scrollTop).toBe(68);
+    shell.remove();
+  });
+
   it("唯一 hook 卸载时清理 Visual Viewport 订阅与根节点状态", () => {
     class FakeVisualViewport extends EventTarget {
       height = 844;
@@ -139,6 +220,7 @@ describe("#727 手机编辑态", () => {
 
     expect(css).toContain('html[data-app-keyboard-open="true"] .app-shell-bottom-nav');
     expect(css).toContain('html[data-app-keyboard-open="true"] .app-mobile-input-overlay');
+    expect(css).toMatch(/\[contenteditable\]:not\(\[contenteditable="false"\]\) \{\s+font-size: 16px !important;/);
     expect(agent).toContain("app-mobile-input-overlay fixed inset-0");
     expect(agent).toContain("min-h-0 flex-1");
     expect(drawer).toContain("app-mobile-input-surface");

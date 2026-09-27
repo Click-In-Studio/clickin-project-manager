@@ -743,6 +743,16 @@ span[data-stage-inline] {
 
 /* Side panels stay above the bottom nav wherever that nav is visible. */
 @media (max-width: 1023px) {
+  /* iOS Safari 会在聚焦小于 16px 的编辑控件时自动放大页面。移动端统一使用
+     可读字号下限，避免焦点改变 viewport scale；不禁用用户手动缩放。 */
+  input,
+  textarea,
+  select,
+  [contenteditable]:not([contenteditable="false"]) {
+    font-size: 16px !important;
+    scroll-margin-block: 12px;
+  }
+
   /* iOS Safari 的 Visual Viewport 在地址栏或键盘改变后可能相对布局视口发生
      位移。壳既要采用它的高度，也要移动到它的实际起点。 */
   .app-shell-frame {

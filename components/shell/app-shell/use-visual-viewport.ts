@@ -24,6 +24,47 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   return editable.getAttribute("contenteditable") !== "false";
 }
 
+export function ensureEditableTargetVisible(
+  target: Element | null,
+  viewport: AppViewportSnapshot,
+  padding = 12,
+): boolean {
+  if (!(target instanceof HTMLElement) || !isEditableTarget(target)) return false;
+  let scrollContainer: HTMLElement | null = target.parentElement;
+  while (scrollContainer && scrollContainer !== document.documentElement) {
+    const overflowY = window.getComputedStyle(scrollContainer).overflowY;
+    if (/^(auto|scroll)$/.test(overflowY) && scrollContainer.scrollHeight > scrollContainer.clientHeight) break;
+    scrollContainer = scrollContainer.parentElement;
+  }
+  if (!scrollContainer || scrollContainer === document.documentElement) return false;
+
+  const rect = target.getBoundingClientRect();
+  const containerRect = scrollContainer.getBoundingClientRect();
+  // Safari 在键盘平移 Visual Viewport 时，不同版本对 client rect 是否已包含
+  // offsetTop 的处理并不一致。不要混用两种坐标：优先拿实际承载工作面的矩形，
+  // 与目标、滚动容器的 client rect 在同一坐标系内求交。
+  const viewportSurface = target.closest<HTMLElement>(
+    ".app-mobile-input-overlay, .agent-mobile-full, .app-shell-frame",
+  );
+  const surfaceRect = viewportSurface?.getBoundingClientRect();
+  const viewportTop = surfaceRect?.top ?? viewport.offsetTop;
+  const viewportBottom = surfaceRect?.bottom ?? viewport.offsetTop + viewport.height;
+  const visibleTop = Math.max(viewportTop, containerRect.top) + padding;
+  const visibleBottom = Math.min(viewportBottom, containerRect.bottom) - padding;
+
+  // 富文本根节点可能比整个视口还高；这类编辑器应按光标自行定位，不能把
+  // 整个 contenteditable 根节点滚进视口，否则会直接跳到长文档边界。
+  if (visibleBottom <= visibleTop || rect.height >= visibleBottom - visibleTop) return false;
+  if (rect.top >= visibleTop && rect.bottom <= visibleBottom) return false;
+
+  // 只移动离焦点最近的业务滚动面；scrollIntoView 会继续滚动外层页面，和
+  // Safari 的 Visual Viewport 自动平移叠加后会出现二次跳动。
+  scrollContainer.scrollTop += rect.top < visibleTop
+    ? rect.top - visibleTop
+    : rect.bottom - visibleBottom;
+  return true;
+}
+
 export function deriveAppViewportState(
   viewport: AppViewportSnapshot,
   layoutHeight: number,
@@ -82,13 +123,21 @@ export function useAppViewportState(active: boolean) {
         focusBaselineHeight = editing ? Math.max(viewport?.height ?? 0, window.innerHeight) : null;
         resetBaseline = false;
       }
-      writeAppViewportCssVariables(
+      const state = writeAppViewportCssVariables(
         target,
         viewport ?? { height: window.innerHeight, offsetTop: 0 },
         window.innerHeight,
         editing,
         focusBaselineHeight,
       );
+      if (state.keyboardOpen) {
+        // CSS 变量写入后读取布局，并在同一帧只校正所属业务滚动面。键盘动画
+        // 后不再追加第二帧的整页 scrollIntoView，避免可见的二次跳动。
+        ensureEditableTargetVisible(
+          document.activeElement,
+          viewport ?? { height: window.innerHeight, offsetTop: 0 },
+        );
+      }
     };
     const scheduleWrite = () => {
       if (animationFrame) return;
@@ -96,8 +145,17 @@ export function useAppViewportState(active: boolean) {
     };
     const handleFocusIn = (event: FocusEvent) => {
       if (!isEditableTarget(event.target)) return;
+      if (focusFrame) {
+        window.cancelAnimationFrame(focusFrame);
+        focusFrame = 0;
+      }
+      const wasEditing = editing;
       editing = true;
-      focusBaselineHeight = Math.max(viewport?.height ?? 0, window.innerHeight);
+      // 键盘打开后切换输入框仍属于同一轮编辑，必须保留聚焦前高度；否则会
+      // 把当前已缩小的视口误当成新基线，短暂恢复底栏并漏掉焦点定位。
+      if (!wasEditing || focusBaselineHeight === null) {
+        focusBaselineHeight = Math.max(viewport?.height ?? 0, window.innerHeight);
+      }
       scheduleWrite();
     };
     const handleFocusOut = () => {
