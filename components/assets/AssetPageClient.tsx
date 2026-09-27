@@ -479,7 +479,9 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
                   value={editType}
                   onChange={e => setEditType(e.target.value as AssetType)}
                   style={{ width: "100%", borderRadius: 8, border: "1px solid var(--line)", background: "white", padding: "7px 12px", fontSize: 13, outline: "none", color: "var(--ink)" }}>
-                  {(Object.entries(ASSET_TYPE_LABELS) as [AssetType, string][]).map(([v, l]) => (
+                  {(Object.entries(ASSET_TYPE_LABELS) as [AssetType, string][])
+                    .filter(([v]) => v !== "financial_document")
+                    .map(([v, l]) => (
                     <option key={v} value={v}>{l}</option>
                   ))}
                 </select>

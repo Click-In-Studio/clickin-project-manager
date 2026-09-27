@@ -42,6 +42,7 @@ let uploader: string;    // 创建者行集（含 file@create），无通配 cre
 let stranger: string;    // 成员，无任何 asset 授权
 let outsider: string;    // 非成员
 let assetId: string;
+let singleAssetId: string;
 let feishuAssetId: string;
 let foreignAssetId: string;   // 另一个演出里的资产
 
@@ -89,6 +90,14 @@ beforeAll(async () => {
     storageType: "r2", r2Key: "assets/t456_v1/design.pdf", fileSize: 1000,
   });
   assetId = created.asset.id;
+
+  const single = await createAsset({
+    productionId: prodId, uploaderUserId: uploader, assetType: "financial_document",
+    fileName: "原始票据.pdf", mimeType: "application/pdf",
+    storageType: "r2", r2Key: "assets/t456_single/invoice.pdf", fileSize: 100,
+    fileVersionPolicy: "single",
+  });
+  singleAssetId = single.asset.id;
 
   const feishu = await createAsset({
     productionId: prodId, uploaderUserId: uploader, assetType: "reference",
@@ -179,6 +188,19 @@ describe("追加版本注册", () => {
       jsonReq(uploader, { storageType: "r2", r2Key: "assets/t456_x/a.pdf", fileName: "a.pdf" }),
       ctxFor(prodId, feishuAssetId));
     expect(res.status).toBe(400);
+  });
+
+  it("single-file asset 由服务端拒绝追加版本 → 409", async () => {
+    const res = await filesPOST(
+      jsonReq(uploader, {
+        storageType: "r2", r2Key: "assets/t456_single/replacement.pdf",
+        fileName: "替换票据.pdf", mimeType: "application/pdf", fileSize: 10,
+      }),
+      ctxFor(prodId, singleAssetId),
+    );
+    expect(res.status).toBe(409);
+    expect(await fileCount(singleAssetId)).toBe(1);
+    expect(headMock).not.toHaveBeenCalled();
   });
 });
 

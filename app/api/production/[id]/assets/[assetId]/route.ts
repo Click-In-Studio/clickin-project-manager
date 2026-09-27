@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import type { PermissionContext } from "@/lib/perm/permissions";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
-import { getAsset, updateAsset, deleteAsset } from "@/lib/asset/db";
+import { AssetInUseError, getAsset, updateAsset, deleteAsset } from "@/lib/asset/db";
 import { isAssetType } from "@/lib/asset/types";
 import { canViewAsset } from "@/lib/asset/perm";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
@@ -31,6 +31,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });
   if (!await canViewAsset(permCtx, id, asset, "meta"))
     return Response.json({ error: "权限不足" }, { status: 403 });
+  if (asset.assetType === "financial_document")
+    return Response.json({ error: "财务凭证只能从报销入口管理" }, { status: 403 });
   return Response.json({ asset });
 }
 
@@ -41,15 +43,18 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const asset = await getAsset(assetId);
   if (!asset || asset.productionId !== id) return Response.json({ error: "不存在" }, { status: 404 });
-
   // 批D：rename/change_type = meta@edit（创建者行集承担 own 语义）
   if (!await hasEffectiveGrant(permCtx, id, "asset", assetId, "meta", "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
+  if (asset.assetType === "financial_document")
+    return Response.json({ error: "财务凭证只能从报销入口管理" }, { status: 403 });
 
   const body = (await req.json()) as { assetType?: unknown; name?: unknown; fileName?: unknown };
   // asset_type 列无 CHECK 约束，白名单只在 TS 层——这里必须运行时校验，否则任意串入库
   if (body.assetType !== undefined && !isAssetType(body.assetType))
     return Response.json({ error: "无效的资产类型" }, { status: 400 });
+  if (body.assetType === "financial_document")
+    return Response.json({ error: "财务凭证只能从报销入口管理" }, { status: 400 });
   if (body.name !== undefined && body.name !== null && typeof body.name !== "string")
     return Response.json({ error: "无效的显示名称" }, { status: 400 });
   if (body.fileName !== undefined && (typeof body.fileName !== "string" || !body.fileName.trim()))
@@ -74,8 +79,17 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   // 批D：delete = 实例 delete 行（创建者行集/delete_any 通配承担）
   if (!await hasEffectiveGrant(permCtx, id, "asset", assetId, "*", "delete"))
     return Response.json({ error: "权限不足" }, { status: 403 });
+  if (asset.assetType === "financial_document")
+    return Response.json({ error: "财务凭证只能从报销入口管理" }, { status: 403 });
 
-  const { r2Keys } = await deleteAsset(assetId);
+  let r2Keys: string[];
+  try {
+    ({ r2Keys } = await deleteAsset(assetId));
+  } catch (error) {
+    if (error instanceof AssetInUseError)
+      return Response.json({ error: error.message }, { status: 409 });
+    throw error;
+  }
   await Promise.allSettled(r2Keys.map(k => deleteR2Object(k)));
   return Response.json({ ok: true });
 }

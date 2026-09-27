@@ -1112,6 +1112,9 @@ CREATE TABLE IF NOT EXISTS asset (
   -- 留在内容面判定：asset 的 public 只免除结构面要求、仍需能力票（lib/asset/perm）
   storage_type      TEXT NOT NULL DEFAULT 'r2',
   feishu_url        TEXT,
+  file_version_policy TEXT NOT NULL DEFAULT 'append'
+                      CONSTRAINT asset_file_version_policy_check
+                        CHECK (file_version_policy IN ('append', 'single')),
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   name              TEXT
 );
@@ -1490,6 +1493,8 @@ CREATE TABLE IF NOT EXISTS production_expense (
   amount        NUMERIC(14,2) NOT NULL CHECK (amount >= 0),
   currency      TEXT          NOT NULL DEFAULT 'CNY',
   note          TEXT          NOT NULL DEFAULT '',
+  invoice_requirement TEXT    CHECK (invoice_requirement IN ('required', 'waived')),
+  invoice_waiver_reason TEXT  NOT NULL DEFAULT '',
   submitted_by  UUID          NOT NULL REFERENCES app_user(id),
   status        TEXT          NOT NULL DEFAULT 'pending'
                 CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
@@ -1502,13 +1507,31 @@ CREATE TABLE IF NOT EXISTS production_expense (
   resolved_at   TIMESTAMPTZ,
   resolved_by   UUID          REFERENCES app_user(id),
   created_at    TIMESTAMPTZ   NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ   NOT NULL DEFAULT now()
+  updated_at    TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  CONSTRAINT production_expense_invoice_waiver_reason_check
+    CHECK (invoice_requirement <> 'waived' OR btrim(invoice_waiver_reason) <> '')
 );
 
 CREATE INDEX IF NOT EXISTS pe_production_idx ON production_expense (production_id);
 CREATE INDEX IF NOT EXISTS pe_category_idx   ON production_expense (category_id) WHERE category_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS pe_approver_idx   ON production_expense USING GIN (current_approver_ids);
 CREATE INDEX IF NOT EXISTS pe_pending_idx    ON production_expense (production_id, status) WHERE status = 'pending';
+
+CREATE TABLE IF NOT EXISTS production_expense_document (
+  id            TEXT        PRIMARY KEY,
+  expense_id    UUID        NOT NULL REFERENCES production_expense(id) ON DELETE CASCADE,
+  asset_file_id TEXT        NOT NULL REFERENCES asset_file(id) ON DELETE RESTRICT,
+  document_kind TEXT        NOT NULL
+                CHECK (document_kind IN ('invoice', 'receipt', 'other')),
+  created_by    UUID        NOT NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (expense_id, asset_file_id)
+);
+
+CREATE INDEX IF NOT EXISTS production_expense_document_expense_idx
+  ON production_expense_document(expense_id, created_at);
+CREATE INDEX IF NOT EXISTS production_expense_document_file_idx
+  ON production_expense_document(asset_file_id);
 
 -- ── 物料台账（add-material-ledger.sql）─────────────────────────────────────────
 -- 实体物（道具/服装/设备/布景），与 asset（数字资产：文件/R2/飞书链接）不是一回事。

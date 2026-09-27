@@ -4,7 +4,7 @@
 
 export const ASSET_TYPES = [
   "drafting", "planogram", "demo", "rehearsal_video", "reference",
-  "material", "clip", "qlab", "score", "recording",
+  "material", "clip", "qlab", "score", "recording", "financial_document",
 ] as const;
 
 export type AssetType = (typeof ASSET_TYPES)[number];
@@ -13,6 +13,7 @@ export const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   drafting: "图纸", planogram: "平面图", demo: "Demo",
   rehearsal_video: "排练视频", reference: "Reference", material: "素材",
   clip: "片段", qlab: "QLab", score: "乐谱", recording: "录音",
+  financial_document: "财务凭证",
 };
 
 export function isAssetType(v: unknown): v is AssetType {

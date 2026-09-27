@@ -15,12 +15,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   const { permCtx } = access;
 
-  const body = await req.json() as { fileName?: string; mimeType?: string; assetId?: string };
+  const body = await req.json() as { fileName?: string; mimeType?: string; assetId?: string; purpose?: string };
   if (!body.fileName || !body.mimeType)
     return Response.json({ error: "缺少 fileName 或 mimeType" }, { status: 400 });
   // #456：assetId 非空＝为该资产传新版本，门是它身上的 file@create（与注册端点
   // 同门）；缺省＝新建资产，门不变。
-  if (!await canUploadAssetBytes(permCtx, id, body.assetId ?? null))
+  const purpose = body.purpose === "expense_document" ? body.purpose : null;
+  if (purpose && access.isArchived)
+    return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
+  if (!await canUploadAssetBytes(permCtx, id, body.assetId ?? null, purpose))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const fileId = `af_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
