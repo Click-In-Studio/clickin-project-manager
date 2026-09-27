@@ -96,6 +96,37 @@
 
 .flowArrow { align-self: center; color: var(--muted); font-style: normal; }
 
+.eventCardActions {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.eventCardActionButton {
+  min-width: 0;
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--paper);
+  color: var(--script);
+  font-size: 9px;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.eventCardActionArrow {
+  flex: 0 0 auto;
+  margin-left: 3px;
+}
+
 .metricGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -152,8 +183,16 @@
   .flowNumber { width: 22px; height: 22px; font-size: 9px; }
   .flowTitle { font-size: clamp(10px, 3vw, 12px); }
   .flowDescription { margin-top: 2px; font-size: 10px; line-height: 1.35; }
+  .eventCardActions { grid-column: 1 / -1; gap: 4px; flex-wrap: nowrap; }
+  .eventCardActionButton { padding-inline: 5px; }
+  .eventCardActionArrow { margin-left: 1px; font-size: .85em; }
   .metricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
   .metricCard { padding: 12px 14px; }
   .metricValue { font-size: clamp(17px, 5vw, 21px); }
   .taskTopActions { margin-top: -4px; }
+}
+
+@media (max-width: 360px) {
+  .eventCardActions { gap: 2px; }
+  .eventCardActionButton { padding-inline: 3px; font-size: 8.5px; }
 }

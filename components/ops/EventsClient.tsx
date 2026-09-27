@@ -2,7 +2,7 @@
 
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
-import { useState, Fragment, type CSSProperties } from "react";
+import { useState, Fragment } from "react";
 import Link from "next/link";
 import type React from "react";
 import { BASE_PATH } from "@/lib/base-path";
@@ -94,7 +94,7 @@ function EventCard({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-      display: "grid", gridTemplateColumns: "58px 1fr auto", gap: 16,
+      display: "grid", gridTemplateColumns: "58px 1fr auto", columnGap: 16, rowGap: 0,
       padding: "18px 10px", borderTop: first ? 0 : "1px solid var(--line)",
       borderRadius: 9, background: hovered ? "var(--paper)" : "transparent",
       cursor: "pointer", transition: "background .14s ease",
@@ -132,22 +132,6 @@ function EventCard({
         <p style={{ margin: 0, color: "var(--muted)", fontSize: 10 }}>
           {[event.startTime && fmtDateTimeSmart(event.startTime), event.location].filter(Boolean).join(" · ")}
         </p>
-        {/* inlineActions（原型：paper 底 script 色边框小按钮） */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-          <button onClick={e => stopAndGo(e, detailHref)} style={INLINE_ACTION_BTN}>
-            事件详情 <span style={{ marginLeft: 3 }}>→</span>
-          </button>
-          {canViewFull && (
-            <button onClick={e => stopAndGo(e, `/production/${productionId}/events/${event.id}/callsheet`)} style={INLINE_ACTION_BTN}>
-              执行流程 <span style={{ marginLeft: 3 }}>→</span>
-            </button>
-          )}
-          {taskCount > 0 && (
-            <button onClick={e => stopAndGo(e, `/production/${productionId}/tasks?event=${event.id}`)} style={INLINE_ACTION_BTN}>
-              {taskCount} 个任务 <span style={{ marginLeft: 3 }}>→</span>
-            </button>
-          )}
-        </div>
       </div>
 
       {/* 右列：eventStatus 丸 + 关注 */}
@@ -177,14 +161,26 @@ function EventCard({
           </button>
         )}
       </div>
+
+      {/* inlineActions（原型：paper 底 script 色边框小按钮） */}
+      <div className={responsive.eventCardActions}>
+        <button className={responsive.eventCardActionButton} onClick={e => stopAndGo(e, detailHref)}>
+          事件详情<span className={responsive.eventCardActionArrow} aria-hidden="true">→</span>
+        </button>
+        {canViewFull && (
+          <button className={responsive.eventCardActionButton} onClick={e => stopAndGo(e, `/production/${productionId}/events/${event.id}/callsheet`)}>
+            执行流程<span className={responsive.eventCardActionArrow} aria-hidden="true">→</span>
+          </button>
+        )}
+        {taskCount > 0 && (
+          <button className={responsive.eventCardActionButton} onClick={e => stopAndGo(e, `/production/${productionId}/tasks?event=${event.id}`)}>
+            {taskCount} 个任务<span className={responsive.eventCardActionArrow} aria-hidden="true">→</span>
+          </button>
+        )}
+      </div>
     </article>
   );
 }
-
-const INLINE_ACTION_BTN: CSSProperties = {
-  minHeight: 28, padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 7,
-  background: "var(--paper)", color: "var(--script)", fontSize: 9, cursor: "pointer",
-};
 
 // ─── Create event modal ──────────────────────────────────────────────────────
 
