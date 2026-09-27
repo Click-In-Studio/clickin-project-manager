@@ -56,14 +56,14 @@ export default async function MaterialsPage({ params }: { params: Promise<{ id: 
         </div>
       ) : (
         <>
-          <div className={responsive.metricGrid}>
+          <div className={`${responsive.metricGrid} ${responsive.materialMetricGrid}`}>
             {[{ label: "物料总数", value: String(materials.length), color: null as string | null },
               ...statusCards,
               ...(noStatus ? [{ label: "未设状态", value: String(noStatus), color: null as string | null }] : []),
             ].map(card => (
-              <div key={card.label} className={responsive.metricCard}>
-                <strong className={responsive.metricValue} style={{ color: card.color ?? "var(--ink)" }}>{card.value}</strong>
-                <span className={responsive.metricLabel}>{card.label}</span>
+              <div key={card.label} className={`${responsive.metricCard} ${responsive.materialMetricCard}`}>
+                <strong className={`${responsive.metricValue} ${responsive.materialMetricValue}`} style={{ color: card.color ?? "var(--ink)" }}>{card.value}</strong>
+                <span className={`${responsive.metricLabel} ${responsive.materialMetricLabel}`}>{card.label}</span>
               </div>
             ))}
           </div>
