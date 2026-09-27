@@ -192,11 +192,13 @@ export default function PhaseManageModal({
 
   return (
     <div
+      className="app-mobile-input-overlay"
       role="presentation"
       onMouseDown={onClose}
       style={{ position: "fixed", zIndex: 80, inset: 0, background: "rgba(18,28,27,.65)", display: "grid", placeItems: "center", padding: 20 }}
     >
       <div
+        className="app-mobile-input-surface"
         role="dialog"
         aria-label="管理阶段"
         onMouseDown={e => e.stopPropagation()}

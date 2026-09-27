@@ -12,6 +12,7 @@ export default function AdminModal({
 }) {
   return (
     <div
+      className="app-mobile-input-overlay"
       onClick={onClose}
       style={{
         position: "fixed", inset: 0, background: "rgba(24,42,42,.4)", zIndex: 90,
@@ -19,6 +20,7 @@ export default function AdminModal({
       }}
     >
       <div
+        className="app-mobile-input-surface"
         onClick={e => e.stopPropagation()}
         style={{ background: "var(--surface)", borderRadius: 13, padding: "24px 28px", width, maxWidth: "92vw" }}
       >

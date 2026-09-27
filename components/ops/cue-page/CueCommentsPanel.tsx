@@ -169,7 +169,7 @@ export default function CueCommentsPanel({
 
   return (
     <div
-      className="fixed inset-0 sm:top-[108px] sm:right-0 sm:bottom-0 sm:left-auto sm:w-80 z-50 flex flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl"
+      className="app-mobile-input-overlay fixed inset-0 sm:top-[108px] sm:right-0 sm:bottom-0 sm:left-auto sm:w-80 z-50 flex flex-col border-l border-[var(--line)] bg-[var(--surface)] shadow-xl"
       onClick={e => e.stopPropagation()}
     >
       <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-4 py-3">
@@ -177,7 +177,7 @@ export default function CueCommentsPanel({
         <button onClick={onClose} className="text-lg leading-none text-zinc-300 hover:text-zinc-500">×</button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 space-y-4">
         {/* Cue-level assets */}
         {/* #420：挂载锚稳定 cue_id，修订分辨路径退役 */}
         <MountPointAssets

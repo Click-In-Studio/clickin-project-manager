@@ -84,6 +84,7 @@ export default function NewProductionModal({ onClose, onCreated }: Props) {
 
   return (
     <div
+      className="app-mobile-input-overlay"
       role="presentation"
       style={{
         position: "fixed", inset: 0, zIndex: 200,
@@ -94,6 +95,7 @@ export default function NewProductionModal({ onClose, onCreated }: Props) {
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <section
+        className="app-mobile-input-surface"
         role="dialog"
         aria-modal="true"
         aria-labelledby="new-prod-title"

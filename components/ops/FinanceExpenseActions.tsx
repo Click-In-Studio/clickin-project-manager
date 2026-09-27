@@ -88,11 +88,11 @@ export function ExpenseCreateButton({ productionId, categories }: {
       </button>
       {open && (
         <div
-          className={styles.backdrop}
+          className={`app-mobile-input-overlay ${styles.backdrop}`}
           role="presentation"
           onMouseDown={event => { if (event.target === event.currentTarget) close(); }}
         >
-          <aside className={styles.drawer} role="dialog" aria-modal="true" aria-labelledby="expense-create-title">
+          <aside className={`app-mobile-input-overlay app-mobile-input-surface ${styles.drawer}`} role="dialog" aria-modal="true" aria-labelledby="expense-create-title">
             <form onSubmit={submit} className={styles.form}>
               <header className={styles.header}>
                 <div>

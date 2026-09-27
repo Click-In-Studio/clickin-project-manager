@@ -170,6 +170,7 @@ export default function AccessRequestModal({
 
   return (
     <div
+      className="app-mobile-input-overlay"
       role="presentation"
       style={{
         position: "fixed", inset: 0, zIndex: 300,
@@ -180,6 +181,7 @@ export default function AccessRequestModal({
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <section
+        className="app-mobile-input-surface"
         role="dialog"
         aria-modal="true"
         aria-labelledby="access-req-title"

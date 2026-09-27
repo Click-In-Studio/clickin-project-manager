@@ -143,9 +143,9 @@ export default function ScheduleItemModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30"
+    <div className="app-mobile-input-overlay fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 flex flex-col gap-3 max-h-[90vh] overflow-y-auto">
+      <div className="app-mobile-input-surface bg-white rounded-2xl shadow-xl w-full max-w-md p-5 flex flex-col gap-3 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-zinc-800">{isEdit ? "编辑流程项" : "添加流程项"}</h3>
           <button onClick={onClose} className="text-zinc-400 hover:text-zinc-600 text-lg leading-none">&times;</button>

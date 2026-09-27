@@ -85,7 +85,7 @@ export default function CalendarDetailDrawer({ productionId, selection, canEdit,
 
   return (
     <aside
-      className={styles.detailDrawer}
+      className={`app-mobile-input-overlay app-mobile-input-surface ${styles.detailDrawer}`}
       role="dialog"
       aria-modal="true"
       aria-label={`${title}详情`}
