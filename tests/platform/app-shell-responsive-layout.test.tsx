@@ -90,3 +90,19 @@ describe("#554 AppShell 固定导航防穿透契约", () => {
     }
   });
 });
+
+describe("#354 配置中心窄屏顶栏", () => {
+  const source = readFileSync("components/shell/AppShell.tsx", "utf8");
+
+  it("窄屏隐藏重复的顶栏返回入口，桌面恢复显示", () => {
+    expect(source).toMatch(
+      /href=\{`\/production\/\$\{productionId\}`\}[\s\S]*?className="[^"]*hidden[^"]*lg:inline-flex[^"]*"[\s\S]*?返回项目/,
+    );
+  });
+
+  it("手机配置中心保留底部返回入口", () => {
+    expect(source).toMatch(
+      /\/\* Admin mode \*\/[\s\S]*?label="返回"[\s\S]*?href=\{`\/production\/\$\{productionId\}`\}/,
+    );
+  });
+});

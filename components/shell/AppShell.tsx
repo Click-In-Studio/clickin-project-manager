@@ -318,7 +318,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
         {isAdminMode && productionId && (
           <Link
             href={`/production/${productionId}`}
-            className="inline-flex h-9 shrink-0 items-center rounded-[9px] border border-[var(--line)] bg-[var(--surface)] px-3 text-[11px] font-semibold text-[var(--stage)] transition-colors hover:border-[var(--stage)] hover:bg-[var(--paper)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--stage)]/30"
+            className="hidden h-9 shrink-0 items-center rounded-[9px] border border-[var(--line)] bg-[var(--surface)] px-3 text-[11px] font-semibold text-[var(--stage)] transition-colors hover:border-[var(--stage)] hover:bg-[var(--paper)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--stage)]/30 lg:inline-flex"
           >
             <span aria-hidden="true" className="mr-1.5">←</span>
             返回项目
