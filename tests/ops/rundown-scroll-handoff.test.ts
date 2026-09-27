@@ -83,6 +83,28 @@ describe("Rundown 滚动边界交接状态机", () => {
     expect(arrivesAgain.action).toBe("stop");
   });
 
+  it("亚像素边界误差保留交接，真正离开边界才重置", () => {
+    const bottom = advanceScrollHandoff(
+      beginScrollGesture(initialScrollHandoffState()),
+      "down",
+      2,
+      { ...METRICS, scrollTop: 599.25 },
+    );
+    expect(bottom.action).toBe("stop");
+
+    const subpixelEdge = syncScrollBoundary(finish(bottom.state), { ...METRICS, scrollTop: 599.25 });
+    expect(subpixelEdge.armedBoundary).toBe("bottom");
+    expect(advanceScrollHandoff(
+      beginScrollGesture(subpixelEdge),
+      "down",
+      1,
+      { ...METRICS, scrollTop: 599.25 },
+    ).action).toBe("outer");
+
+    const leftEdge = syncScrollBoundary(finish(bottom.state), { ...METRICS, scrollTop: 598.75 });
+    expect(leftEdge.armedBoundary).toBeNull();
+  });
+
   it("顶部遵循同样的首次停住、第二次交接规则", () => {
     const first = advanceScrollHandoff(
       beginScrollGesture(initialScrollHandoffState()),

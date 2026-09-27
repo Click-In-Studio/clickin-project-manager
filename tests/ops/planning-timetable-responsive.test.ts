@@ -44,7 +44,7 @@ describe("执行日程响应式密度", () => {
 
   it("滚动容器建立独立层叠上下文，拖拽缩放入口不再被事项裁切", () => {
     expect(css).toMatch(/\.rundownMatrixWrap\s*\{[\s\S]*?overflow: auto;[\s\S]*?isolation: isolate;/);
-    expect(css).not.toMatch(/\.rundownMatrixWrap\s*\{[\s\S]*?overscroll-behavior:\s*contain/);
+    expect(css).not.toMatch(/\.rundownMatrixWrap\s*\{[^}]*overscroll-behavior:\s*contain/);
     expect(css).toContain(".rundownColumnHeader:focus-within");
     expect(source).toContain("className={styles.rundownEntry}");
     expect(css).toContain(".rundownEntry { overflow: visible; }");
