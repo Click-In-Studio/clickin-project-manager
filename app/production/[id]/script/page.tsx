@@ -11,6 +11,7 @@ import { getProductionPermissionContext } from "@/lib/perm/permission-context-db
 import { getProductionName } from "@/lib/production/production-db";
 import { getMasterScriptViewId } from "@/lib/script/script-view-db";
 import { getActiveVersionId } from "@/lib/script/version-db";
+import { loadScriptWindowBootstrap } from "@/lib/script/script-window-db";
 import ScriptEditor from "@/components/script/ScriptEditor";
 import PageActivationGate from "@/components/perm/PageActivationGate";
 
@@ -49,6 +50,20 @@ export default async function ProductionScriptPage({
       hasEffectiveGrant(access.permCtx, id, "script", "*", "rehearsal_marks", "create"),
     ]);
 
+  // 恢复位置在首窗查询前解析：避免先下发开头 240 块，hydration 后再跳到上次位置。
+  // hash 不会随 HTTP 请求到服务端，block 深链仍由客户端在 hydration 后提到最高优先级。
+  const savedPosition = cookieStore.get(`script_pos_${id}`)?.value;
+  let initialWindowStart = 0;
+  if (savedPosition) {
+    const decoded = decodeURIComponent(savedPosition);
+    const colonAt = decoded.lastIndexOf(":");
+    const savedIndex = colonAt > 0 ? Number(decoded.slice(colonAt + 1)) : NaN;
+    if (Number.isFinite(savedIndex)) initialWindowStart = Math.max(0, Math.floor(savedIndex) - 80);
+  }
+  const initialWindow = activeVersionId
+    ? await loadScriptWindowBootstrap(id, activeVersionId, initialWindowStart, 240)
+    : null;
+
   return (
     <>
       <ScriptEditor
@@ -60,6 +75,7 @@ export default async function ProductionScriptPage({
         canEditRehearsalMark={canEditRehearsalMark}
         initialSearchQuery={q}
         initialVersionId={activeVersionId}
+        initialWindow={initialWindow}
       />
       <PageActivationGate productionId={id} scope="script" />
     </>

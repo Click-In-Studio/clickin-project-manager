@@ -21,7 +21,7 @@ import type { SceneDetail } from "@/lib/script/script-scene-character-db";
 import { formatDuration, parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
 import { isTextBlock, sameCharacters, shouldHideCharacterLabel, shouldShowCharacterGap, shouldShowSceneEndGap } from "@/lib/script/script-block-layout";
-import { uid, makeBlock, makeMarkerBlock, isBlockEmptyForDelete, isEmptyTextBlock, mergeServerBlocks, expandLegacyMarkersToBlocks, normalizeScriptBlockStream, normalizeScriptMarkerInvariants, insertMarkerWithEmptyBlockIfNeeded, findTocSceneBlockIndex, findSceneMarkerBlockIndex, mergeDirtyRanges, markerChangeFromOperations } from "@/lib/script/script-block-stream";
+import { uid, makeBlock, makeMarkerBlock, isBlockEmptyForDelete, isEmptyTextBlock, mergeServerBlocks, expandLegacyMarkersToBlocks, normalizeScriptBlockStream, normalizeScriptMarkerInvariants, insertMarkerWithEmptyBlockIfNeeded, findTocSceneBlockIndex, findSceneMarkerBlockIndex, mergeDirtyRanges, markerChangeFromOperations, sameBlocks } from "@/lib/script/script-block-stream";
 import { sameDragTarget, resolveDragTarget, getDragInsertIndex, type DragTarget } from "@/lib/script/script-drag-target";
 import { buildEmptyScriptCleanupRemovalPlan, isOnlyTextBlockInMarkerSegment, analyzeEmptyScriptCleanup, type EmptyScriptCleanupTarget } from "@/lib/script/script-empty-cleanup";
 import { publishScriptFocus } from "@/lib/script/script-focus";
@@ -37,6 +37,7 @@ import { updateEstimatedPageMap, type EstimatedPageMapCache } from "@/lib/script
 import { computeLyricFromTags, sceneDetailDeleteBlockedMessage, markerBlockDramaturgyDeleteBlockedKind, markerDetailFields, markerExpectedDuration, toSceneDetail, syncSceneDetailsWithScenes, sameSceneRows, type SceneMetaFields, type MarkerDetailDeleteBlockedKind, type NonEmptyDramaturgyMarker, type MarkerDetailField } from "@/lib/script/script-scene-details";
 import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script/script-selection";
 import { DEFAULT_SCRIPT_CONFIG, type Block, type BlockType, type Character, type Scene, type ScriptState, type ScriptConfig } from "@/lib/script/script-types";
+import { manifestEntryToSkeleton, type ScriptWindowBootstrap } from "@/lib/script/script-window-types";
 import BlockGap from "./script-editor/BlockGap";
 import CharacterPanel from "./script-editor/CharacterPanel";
 import CommentsPanel, { preloadCommentsPanel } from "./script-editor/CommentsPanelLazy";
@@ -56,7 +57,7 @@ import { useScriptSearch } from "./script-editor/use-script-search";
 import { useDragCountBadge } from "./script-editor/use-drag-count-badge";
 import { useReorderLock } from "./script-editor/use-reorder-lock";
 import {
-  fetchScriptState, loadScriptEnvelope, patchScript, putScriptConfig,
+  fetchScriptState, fetchScriptWindow, fetchScriptWindowBootstrap, searchScriptWindow, fetchScriptPageMap, loadScriptEnvelope, patchScript, putScriptConfig,
   fetchTagGroups, fetchBlockTags, fetchSceneDetails,
   createScene, renameScene, deleteScene, patchSceneMetadata,
 } from "@/lib/script/script-client";
@@ -96,6 +97,26 @@ const SYNC_MAX_WAIT_MS = 5000;
 
 const REHEARSAL_SWITCH_OPTICAL_OFFSET_STYLE: React.CSSProperties = { position: "relative", left: "3%" };
 
+function bootstrapBlocks(bootstrap: ScriptWindowBootstrap | null | undefined): Block[] {
+  if (!bootstrap) return [makeBlock()];
+  const blocks = bootstrap.manifest.map(manifestEntryToSkeleton);
+  bootstrap.window.blocks.forEach((block, offset) => {
+    const index = bootstrap.window.start + offset;
+    if (index >= 0 && index < blocks.length) blocks[index] = block;
+  });
+  return blocks;
+}
+
+function tagsToMap(tags: readonly BlockTagValue[]): Map<string, BlockTagValue[]> {
+  const map = new Map<string, BlockTagValue[]>();
+  for (const tag of tags) {
+    const values = map.get(tag.blockId) ?? [];
+    values.push(tag);
+    map.set(tag.blockId, values);
+  }
+  return map;
+}
+
 // ─── ScriptEditor ─────────────────────────────────────────────────────────────
 
 export default function ScriptEditor({
@@ -108,6 +129,7 @@ export default function ScriptEditor({
   canEditRehearsalMark = true,
   initialSearchQuery,
   initialVersionId = null,
+  initialWindow = null,
 }: {
   scriptId?: string;
   productionId?: string;
@@ -123,6 +145,7 @@ export default function ScriptEditor({
   /** 服务端解析好的活跃版本（#641）：不给的话首帧是 null，首个请求不带 ?v=，
    *  回包的 versionId 一 set 就把加载 effect 的依赖改了——整本剧本要再拉一遍。 */
   initialVersionId?: string | null;
+  initialWindow?: ScriptWindowBootstrap | null;
 }) {
   const toolbarStage = useProductionToolbarStage();
   const effectiveScriptId = productionId ?? scriptId;
@@ -142,15 +165,31 @@ export default function ScriptEditor({
   const effectiveCanEditRehearsalMark = canEditRehearsalMark && !isLockedMode;
 
   const canEdit = canEditText || canEditMetadata || effectiveCanEditRehearsalMark;
-  const [characters, setCharacters] = useState<Character[]>([]);
+  const initialBlocksRef = useRef<Block[] | null>(null);
+  if (initialBlocksRef.current === null) initialBlocksRef.current = bootstrapBlocks(initialWindow);
+  const [characters, setCharacters] = useState<Character[]>(() => initialWindow?.characters ?? []);
+  const remoteScriptSearch = useCallback((query: string, exact: boolean, signal: AbortSignal) => (
+    activeVersionId
+      ? searchScriptWindow(effectiveScriptId, activeVersionId, query, exact, signal)
+      : Promise.resolve(null)
+  ), [activeVersionId, effectiveScriptId]);
+
   const {
     focusedCharacterIds, pendingAggregateFocusPrompt,
     toggleCharacterFocus, clearCharacterFocus,
     confirmAggregateFocusPrompt, addAllAggregateFocusPrompt, cancelAggregateFocusPrompt, togglePendingAggregateFocus,
   } = useCharacterFocus({ effectiveScriptId, characters });
-  const [scenes, setScenes] = useState<Scene[]>([]);
+  const [scenes, setScenes] = useState<Scene[]>(() => initialWindow?.scenes ?? []);
   const [sceneDetails, setSceneDetails] = useState<SceneDetail[]>([]);
-  const [blocks, setBlocks] = useState<Block[]>([makeBlock()]);
+  const [blocks, setBlocks] = useState<Block[]>(() => initialBlocksRef.current!);
+  const [loadedBlockIds, setLoadedBlockIds] = useState<Set<string>>(
+    () => new Set(initialWindow?.window.blocks.map((block) => block.id) ?? []),
+  );
+  const loadedBlockIdsRef = useRef(loadedBlockIds);
+  useLayoutEffect(() => { loadedBlockIdsRef.current = loadedBlockIds; }, [loadedBlockIds]);
+  const manifestBlockIdsRef = useRef(new Set(initialWindow?.manifest.map((entry) => entry.id) ?? []));
+  const orderRevisionRef = useRef(initialWindow?.orderRevision ?? "");
+  const applyWindowBootstrapRef = useRef<(bootstrap: ScriptWindowBootstrap) => void>(() => {});
   const [rehearsalLabels, setRehearsalLabels] = useState(() => buildMarkerLabelIndex(blocks));
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const focusedIdRef = useRef<string | null>(null);
@@ -226,13 +265,16 @@ export default function ScriptEditor({
   const [charEditTokens, setCharEditTokens] = useState<Record<string, number>>({});
 
   // ── Block tags ───────────────────────────────────────────────────────────────
-  const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
-  const [blockTagMap, setBlockTagMap] = useState<Map<string, BlockTagValue[]>>(new Map());
+  const [tagGroups, setTagGroups] = useState<TagGroup[]>(() => initialWindow?.tagGroups ?? []);
+  const [blockTagMap, setBlockTagMap] = useState<Map<string, BlockTagValue[]>>(
+    () => tagsToMap(initialWindow?.window.tags ?? []),
+  );
   const blockTagMapRef = useRef<Map<string, BlockTagValue[]>>(new Map());
   const tagClipboardRef = useRef<BlockTagValue[] | null>(null);
 
   // ── Script config (page layout, stage delimiters) ─────────────────────────
-  const [scriptConfig, setScriptConfig] = useState<ScriptConfig>(DEFAULT_SCRIPT_CONFIG);
+  const [scriptConfig, setScriptConfig] = useState<ScriptConfig>(() => initialWindow?.config ?? DEFAULT_SCRIPT_CONFIG);
+  const [serverPageMap, setServerPageMap] = useState<Record<string, number> | null>(() => initialWindow?.pageMap ?? null);
   const canAddRehearsalMark = effectiveCanEditRehearsalMark && scriptConfig.useRehearsalMarks;
   const scriptConfigRef = useRef(scriptConfig);
   useEffect(() => { scriptConfigRef.current = scriptConfig; }, [scriptConfig]);
@@ -344,6 +386,8 @@ export default function ScriptEditor({
     [openingChapterSceneId, openingChapterVisible, scenes]
   );
   const pageMap = useMemo(() => {
+    // 分窗模式下正文尚未全在客户端，不能拿空骨架重新估页；服务端 page_map 是统一口径。
+    if (serverPageMap) return serverPageMap;
     const cache = updateEstimatedPageMap(
       pageMapCacheRef.current,
       ownedBlocks,
@@ -359,8 +403,19 @@ export default function ScriptEditor({
     pageMapCacheRef.current = cache;
     pageMapDirtyRef.current = null;
     return cache.pageMap;
-  }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode, scriptConfig.templateId]);
+  }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode, scriptConfig.templateId, serverPageMap]);
   const reloadScriptState = useCallback(async () => {
+    if (initialWindow && activeVersionId) {
+      const bootstrap = await fetchScriptWindowBootstrap(
+        effectiveScriptId,
+        activeVersionId,
+        windowRangeRef.current.start,
+        INITIAL_WINDOW_SIZE,
+      );
+      if (!bootstrap) throw new Error("Failed to reload script window");
+      applyWindowBootstrapRef.current(bootstrap);
+      return;
+    }
     const serverState = await fetchScriptState(effectiveScriptId, activeVersionId);
     if (!serverState) throw new Error("Failed to reload script state");
     const expandedBlocks = expandLegacyMarkersToBlocks(serverState.blocks, serverState.scenes);
@@ -373,7 +428,7 @@ export default function ScriptEditor({
     setScriptConfig(normalized.config);
     setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
     syncedStateRef.current = { ...serverState, blocks: normalized.blocks, scenes: normalized.scenes, config: normalized.config };
-  }, [activeVersionId, effectiveScriptId, markOwnershipDirty]);
+  }, [activeVersionId, effectiveScriptId, initialWindow, markOwnershipDirty]);
   // AI 写剧本（scope "script" 的 mutation 信号）落库后整体重载——最粗但最稳的粒度：
   // reloadScriptState 会重置 syncedStateRef，编辑器后续 diff 以新服务端状态为基准，
   // 不会把 AI 的改动当作"本地被删的内容"再冲掉。
@@ -542,6 +597,7 @@ export default function ScriptEditor({
     }).filter((range): range is MarkerOwnershipRange => range !== null));
   }, [markPageMapDirty]);
   useEffect(() => () => {
+    windowRequestRef.current?.abort();
     if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
     if (windowRangeFrameRef.current !== null) cancelAnimationFrame(windowRangeFrameRef.current);
     pendingWindowRangeRef.current = null;
@@ -722,13 +778,27 @@ export default function ScriptEditor({
   const measuredHeightsRef = useRef<Map<string, number>>(new Map());
   const measuredHeightTotalRef = useRef(0);
   const cumulativeHRef = useRef<number[]>([0]); // indexed 0..blocks.length
-  const [windowRange, setWindowRange] = useState(() => ({ start: 0, end: Math.min(INITIAL_WINDOW_SIZE, blocks.length) }));
+  const [windowRange, setWindowRange] = useState(() => initialWindow
+    ? {
+        start: initialWindow.window.start,
+        end: Math.min(blocks.length, initialWindow.window.start + initialWindow.window.blocks.length),
+      }
+    : { start: 0, end: Math.min(INITIAL_WINDOW_SIZE, blocks.length) });
   const windowRangeRef = useRef(windowRange);
   useLayoutEffect(() => { windowRangeRef.current = windowRange; }, [windowRange]);
   const pendingWindowRangeRef = useRef<{ start: number; end: number } | null>(null);
   const [spacerH, setSpacerH] = useState({ top: 0, bot: 0 });
   const pendingVirtualScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
   const pendingVirtualWindowRefreshRef = useRef(false);
+  const windowRequestRef = useRef<AbortController | null>(null);
+  const windowRequestGenerationRef = useRef(0);
+  const [windowLoadSlow, setWindowLoadSlow] = useState(false);
+  const [windowLoadFailed, setWindowLoadFailed] = useState(false);
+  const [windowRetryToken, setWindowRetryToken] = useState(0);
+  const [explicitLoadTargetIndex, setExplicitLoadTargetIndex] = useState<number | null>(null);
+  const deferredWindowNavigateRef = useRef<
+    { id: string; align: ScrollLogicalPosition; viewportTopRatio?: number } | null
+  >(null);
   // Pending navigation: set before windowRange update, consumed by useLayoutEffect after DOM commit
   const pendingNavigateRef = useRef<
     { kind: 'block'; id: string; align: ScrollLogicalPosition; viewportTopRatio?: number } | { kind: 'scene'; id: string } | null
@@ -957,7 +1027,7 @@ export default function ScriptEditor({
   }, [applyWindowRange, blockAtOffset, updateActiveSceneFromScroll, isReorderLockedRef]);
 
   type LoadState = "loading" | "ready" | "not-found" | "error";
-  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadState, setLoadState] = useState<LoadState>(initialWindow ? "ready" : "loading");
   const [loadError, setLoadError] = useState<string>("");
 
   // Keep scrollLockedRef in sync
@@ -1010,6 +1080,8 @@ export default function ScriptEditor({
       if (suppressProgrammaticScrollRef.current) return;
       postNavCorrectionRef.current = null;
       pendingNavigateRef.current = null;
+      deferredWindowNavigateRef.current = null;
+      setExplicitLoadTargetIndex(null);
       setScrollLocked(false);
     };
     const onScroll = () => {
@@ -1286,6 +1358,19 @@ export default function ScriptEditor({
   ) => {
     if (idx < 0 || idx >= blocksRef.current.length) return;
     const block = blocksRef.current[idx];
+    const targetAreaReady = !initialWindow || blocksRef.current
+      .slice(idx, Math.min(blocksRef.current.length, idx + 20))
+      .every((candidate) => (
+        isMarkerBlock(candidate)
+        || !manifestBlockIdsRef.current.has(candidate.id)
+        || loadedBlockIdsRef.current.has(candidate.id)
+      ));
+    if (!targetAreaReady) {
+      // 显式跳转不先把用户扔进空白窗口：保留当前画面，目标段到齐后再一次定位。
+      deferredWindowNavigateRef.current = { id: block.id, align, viewportTopRatio };
+      setExplicitLoadTargetIndex(idx);
+      return;
+    }
     pendingNavigateRef.current = { kind: 'block', id: block.id, align, viewportTopRatio };
     const windowSize = Math.min(INITIAL_WINDOW_SIZE, blocksRef.current.length);
     let start = Math.max(0, idx - Math.floor(windowSize / 2));
@@ -1306,7 +1391,17 @@ export default function ScriptEditor({
         window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
       });
     }
-  }, [applyWindowRange, getBlockScrollElement, updateActiveSceneFromScroll]);
+  }, [applyWindowRange, getBlockScrollElement, initialWindow, updateActiveSceneFromScroll]);
+
+  useLayoutEffect(() => {
+    const deferred = deferredWindowNavigateRef.current;
+    if (!deferred || !loadedBlockIds.has(deferred.id)) return;
+    const index = blockIndexByIdRef.current.get(deferred.id);
+    if (index === undefined) return;
+    deferredWindowNavigateRef.current = null;
+    setExplicitLoadTargetIndex(null);
+    scrollToBlockIdx(index, deferred.align, deferred.viewportTopRatio);
+  }, [loadedBlockIds, scrollToBlockIdx]);
 
   const openMobileBlockMenu = useCallback((blockId: string, blockIndex: number, textOffset: number | null = null) => {
     setMobileBatchAction(null);
@@ -1371,10 +1466,17 @@ export default function ScriptEditor({
 
   // ── Server sync ─────────────────────────────────────────────────────────────
 
-  const syncedStateRef = useRef<ScriptState | null>(null);
+  const syncedStateRef = useRef<ScriptState | null>(initialWindow ? {
+    blocks: initialBlocksRef.current!,
+    characters: initialWindow.characters,
+    scenes: initialWindow.scenes,
+    config: initialWindow.config,
+  } : null);
   // Mirrors the tag state that was last successfully pushed to the server.
   // Used to diff tag changes and embed them in block ops.
-  const syncedBlockTagMapRef = useRef<Map<string, BlockTagValue[]>>(new Map());
+  const syncedBlockTagMapRef = useRef<Map<string, BlockTagValue[]>>(
+    tagsToMap(initialWindow?.window.tags ?? []),
+  );
   // Tags registered by inheritTags() that must be included in the NEXT insert op
   // for the corresponding blockId.  Written synchronously from the event handler;
   // consumed by pushPatchRef when the insert op is found.
@@ -1387,6 +1489,8 @@ export default function ScriptEditor({
   // 输入若恰好撞锁，没有下一个击键就再也不落库）；已卸载则不再重排。
   const deferredSyncRef = useRef(false);
   const syncUnmountedRef = useRef(false);
+  const syncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [syncWaitingForNetwork, setSyncWaitingForNetwork] = useState(false);
   const pendingMovedBlockIdsRef = useRef<Set<string>>(new Set());
 
   // Stable ref to the push function so the debounce closure never goes stale.
@@ -1400,6 +1504,65 @@ export default function ScriptEditor({
     };
     pushPatchRef.current(curr);
   }, { wait: SYNC_DEBOUNCE_MS, maxWait: SYNC_MAX_WAIT_MS }));
+
+  const applyWindowBootstrap = useCallback((bootstrap: ScriptWindowBootstrap) => {
+    const previous = blocksRef.current;
+    const previousBaseline = syncedStateRef.current;
+    const previousIndex = new Map(previous.map((block) => [block.id, block]));
+    const previousBaselineById = new Map((previousBaseline?.blocks ?? []).map((block) => [block.id, block]));
+    const nextBaseline = bootstrapBlocks(bootstrap);
+    const nextBlocks = [...nextBaseline];
+    const nextIndexById = new Map(nextBlocks.map((block, index) => [block.id, index]));
+    const nextLoaded = new Set(bootstrap.window.blocks.map((block) => block.id));
+
+    // 远端刷新不能盖掉本地尚未保存的块；其余旧窗口安静卸载，重新进入时按需再取。
+    for (const [id, localBlock] of previousIndex) {
+      const oldBaseline = previousBaselineById.get(id);
+      const nextIndex = nextIndexById.get(id);
+      if (nextIndex === undefined || !oldBaseline || sameBlocks([localBlock], [oldBaseline])) continue;
+      nextBlocks[nextIndex] = localBlock;
+      nextLoaded.add(id);
+    }
+
+    const currentTags = blockTagMapRef.current;
+    const previousSyncedTags = syncedBlockTagMapRef.current;
+    const serverTags = tagsToMap(bootstrap.window.tags);
+    const nextTags = new Map(serverTags);
+    const nextSyncedTags = new Map(serverTags);
+    for (const [id, localTags] of currentTags) {
+      const baselineTags = previousSyncedTags.get(id) ?? [];
+      if (JSON.stringify(localTags) !== JSON.stringify(baselineTags)) nextTags.set(id, localTags);
+    }
+
+    requestVirtualWindowRefresh();
+    orderRevisionRef.current = bootstrap.orderRevision;
+    manifestBlockIdsRef.current = new Set(bootstrap.manifest.map((entry) => entry.id));
+    loadedBlockIdsRef.current = nextLoaded;
+    blocksRef.current = nextBlocks;
+    blockIndexByIdRef.current = nextIndexById;
+    blockTagMapRef.current = nextTags;
+    syncedBlockTagMapRef.current = nextSyncedTags;
+    syncedStateRef.current = {
+      blocks: nextBaseline,
+      characters: bootstrap.characters,
+      scenes: bootstrap.scenes,
+      config: bootstrap.config,
+    };
+    setBlocks(nextBlocks);
+    setLoadedBlockIds(nextLoaded);
+    setBlockTagMap(nextTags);
+    setTagGroups(bootstrap.tagGroups);
+    setCharacters(bootstrap.characters);
+    setScenes(bootstrap.scenes);
+    setSceneDetails((current) => syncSceneDetailsWithScenes(current, bootstrap.scenes));
+    setScriptConfig(bootstrap.config);
+    setServerPageMap(bootstrap.pageMap);
+    setRehearsalLabels(buildMarkerLabelIndex(nextBlocks));
+    markOwnershipDirty("full");
+    const end = Math.min(nextBlocks.length, bootstrap.window.start + Math.max(1, bootstrap.window.blocks.length));
+    applyWindowRange({ start: bootstrap.window.start, end }, true, true, true);
+  }, [applyWindowRange, markOwnershipDirty, requestVirtualWindowRefresh]);
+  useLayoutEffect(() => { applyWindowBootstrapRef.current = applyWindowBootstrap; }, [applyWindowBootstrap]);
 
   useEffect(() => {
     pushPatchRef.current = async (curr: ScriptState) => {
@@ -1476,11 +1639,42 @@ export default function ScriptEditor({
           return;
         }
         const body = await patchScript(effectiveScriptId, activeVersionId, patch);
+        if (!body) throw new Error("script patch failed");
         if (body) {
+          if (syncRetryTimerRef.current !== null) {
+            clearTimeout(syncRetryTimerRef.current);
+            syncRetryTimerRef.current = null;
+          }
+          setSyncWaitingForNetwork(false);
           serverSeqRef.current = body.serverSeq;
-          syncedStateRef.current = curr;
-          // Advance the synced tag baseline so the next diff starts fresh.
-          syncedBlockTagMapRef.current = new Map(currTagMap);
+          const baselineById = new Map((syncedStateRef.current?.blocks ?? []).map((block) => [block.id, block]));
+          const structureChanged = patch.blockOps.some((op) => {
+            if (op.op === "insert" || op.op === "delete" || op.op === "reorder") return true;
+            const previous = baselineById.get(op.block.id);
+            return !previous || previous.type !== op.block.type || isMarkerBlock(previous) || isMarkerBlock(op.block);
+          });
+          if (initialWindow && activeVersionId && structureChanged) {
+            const bootstrap = await fetchScriptWindowBootstrap(
+              effectiveScriptId,
+              activeVersionId,
+              windowRangeRef.current.start,
+              INITIAL_WINDOW_SIZE,
+            );
+            if (bootstrap) applyWindowBootstrap(bootstrap);
+            else {
+              syncedStateRef.current = curr;
+              syncedBlockTagMapRef.current = new Map(currTagMap);
+            }
+          } else {
+            syncedStateRef.current = curr;
+            // Advance the synced tag baseline so the next diff starts fresh.
+            syncedBlockTagMapRef.current = new Map(currTagMap);
+            if (initialWindow && activeVersionId && patch.blockOps.length > 0) {
+              void fetchScriptPageMap(effectiveScriptId, activeVersionId).then((nextPageMap) => {
+                if (nextPageMap) setServerPageMap(nextPageMap);
+              });
+            }
+          }
           // Any pending inserts that were consumed above are already deleted;
           // clear whatever might remain (orphaned entries for blocks that were
           // deleted before the sync fired).
@@ -1488,7 +1682,13 @@ export default function ScriptEditor({
           for (const id of movedIdsForPatch) pendingMovedBlockIdsRef.current.delete(id);
         }
       } catch {
-        // Sync failure is non-fatal — will retry on next state change.
+        // 弱网下保留本地内容并明确标记未同步；即使用户不再敲字也会自动重试。
+        setSyncWaitingForNetwork(true);
+        if (syncRetryTimerRef.current !== null) clearTimeout(syncRetryTimerRef.current);
+        syncRetryTimerRef.current = setTimeout(() => {
+          syncRetryTimerRef.current = null;
+          if (!syncUnmountedRef.current) syncDebounce.trigger();
+        }, 2000);
       } finally {
         isSyncingRef.current = false;
         const waiters = syncIdleWaitersRef.current;
@@ -1497,9 +1697,12 @@ export default function ScriptEditor({
         if (deferredSyncRef.current) { deferredSyncRef.current = false; if (!syncUnmountedRef.current) syncDebounce.trigger(); }
       }
     };
-  }, [effectiveScriptId, activeVersionId, canEdit, loadState, syncDebounce]);
+  }, [effectiveScriptId, activeVersionId, applyWindowBootstrap, canEdit, initialWindow, loadState, syncDebounce]);
 
   useEffect(() => {
+    if (initialWindow && initialWindow.versionId === activeVersionId) {
+      return;
+    }
     setLoadState("loading");
     setLoadError("");
     const placeholderBlock = makeBlock();
@@ -1600,7 +1803,145 @@ export default function ScriptEditor({
     };
     void load();
     return () => { cancelled = true; };
-  }, [effectiveScriptId, productionId, activeVersionId, applyWindowRange, markOwnershipDirty, syncSpacerHeights]);
+  }, [effectiveScriptId, productionId, activeVersionId, initialWindow, applyWindowRange, markOwnershipDirty, syncSpacerHeights]);
+
+  // 分窗正文：当前视口优先，前后各留一段缓冲。请求切换时取消旧网络工作；即使浏览器
+  // 来不及真正取消，generation 也保证旧响应不能夺回视口或覆盖新结构。
+  useEffect(() => {
+    if (!initialWindow || loadState !== "ready" || !activeVersionId) return;
+    const desiredStart = explicitLoadTargetIndex === null
+      ? Math.max(0, windowRange.start - 80)
+      : Math.max(0, explicitLoadTargetIndex - Math.floor(INITIAL_WINDOW_SIZE / 2));
+    const desiredEnd = explicitLoadTargetIndex === null
+      ? Math.min(blocksRef.current.length, windowRange.end + 80)
+      : Math.min(blocksRef.current.length, desiredStart + INITIAL_WINDOW_SIZE);
+    let missingIndex = -1;
+    let visibleMissing = false;
+    for (let index = desiredStart; index < desiredEnd; index++) {
+      const id = blocksRef.current[index]?.id;
+      if (!id || !manifestBlockIdsRef.current.has(id) || loadedBlockIdsRef.current.has(id) || isMarkerBlock(blocksRef.current[index])) continue;
+      if (missingIndex < 0) missingIndex = index;
+      if (explicitLoadTargetIndex !== null || (index >= windowRange.start && index < windowRange.end)) visibleMissing = true;
+    }
+    if (missingIndex < 0) {
+      setWindowLoadSlow(false);
+      return;
+    }
+
+    windowRequestRef.current?.abort();
+    const controller = new AbortController();
+    windowRequestRef.current = controller;
+    const generation = ++windowRequestGenerationRef.current;
+    setWindowLoadSlow(false);
+    setWindowLoadFailed(false);
+    const requestStart = Math.max(0, missingIndex - 40);
+    const requestLimit = Math.min(480, Math.max(240, desiredEnd - requestStart));
+    const slowTimer = visibleMissing
+      ? window.setTimeout(() => setWindowLoadSlow(true), 700)
+      : null;
+
+    void fetchScriptWindow(
+      effectiveScriptId,
+      activeVersionId,
+      requestStart,
+      requestLimit,
+      orderRevisionRef.current,
+      controller.signal,
+    ).then(async ({ status, body }) => {
+      if (controller.signal.aborted || generation !== windowRequestGenerationRef.current) return;
+      if (status === 409) {
+        // 结构变更会让绝对索引失效，但弱网下整页刷新会把已有画面也清空；原地重取轻量骨架。
+        const bootstrap = await fetchScriptWindowBootstrap(
+          effectiveScriptId,
+          activeVersionId,
+          windowRangeRef.current.start,
+          INITIAL_WINDOW_SIZE,
+        );
+        if (!controller.signal.aborted && generation === windowRequestGenerationRef.current && bootstrap) {
+          applyWindowBootstrapRef.current(bootstrap);
+        } else if (!controller.signal.aborted && visibleMissing) {
+          setWindowLoadFailed(true);
+        }
+        return;
+      }
+      if (!body) {
+        if (visibleMissing) setWindowLoadFailed(true);
+        return;
+      }
+      if (body.orderRevision !== orderRevisionRef.current) return;
+
+      const current = blocksRef.current;
+      const baseline = syncedStateRef.current;
+      if (!baseline) return;
+      const nextBlocks = [...current];
+      const nextBaselineBlocks = [...baseline.blocks];
+      for (let offset = 0; offset < body.window.blocks.length; offset++) {
+        const index = body.window.start + offset;
+        const serverBlock = body.window.blocks[offset];
+        if (nextBlocks[index]?.id !== serverBlock.id || nextBaselineBlocks[index]?.id !== serverBlock.id) {
+          const bootstrap = await fetchScriptWindowBootstrap(
+            effectiveScriptId,
+            activeVersionId,
+            windowRangeRef.current.start,
+            INITIAL_WINDOW_SIZE,
+          );
+          if (!controller.signal.aborted && generation === windowRequestGenerationRef.current && bootstrap) {
+            applyWindowBootstrapRef.current(bootstrap);
+          } else if (!controller.signal.aborted && visibleMissing) {
+            setWindowLoadFailed(true);
+          }
+          return;
+        }
+        const locallyDirty = !sameBlocks([nextBlocks[index]], [nextBaselineBlocks[index]]);
+        nextBaselineBlocks[index] = serverBlock;
+        if (!locallyDirty) nextBlocks[index] = serverBlock;
+      }
+
+      const nextTagMap = new Map(blockTagMapRef.current);
+      const nextSyncedTagMap = new Map(syncedBlockTagMapRef.current);
+      const tagsFromServer = tagsToMap(body.window.tags);
+      for (const block of body.window.blocks) {
+        const localTags = nextTagMap.get(block.id) ?? [];
+        const baselineTags = nextSyncedTagMap.get(block.id) ?? [];
+        const serverTags = tagsFromServer.get(block.id) ?? [];
+        if (JSON.stringify(localTags) === JSON.stringify(baselineTags)) {
+          if (serverTags.length > 0) nextTagMap.set(block.id, serverTags);
+          else nextTagMap.delete(block.id);
+        }
+        if (serverTags.length > 0) nextSyncedTagMap.set(block.id, serverTags);
+        else nextSyncedTagMap.delete(block.id);
+      }
+
+      if (body.window.start < windowRange.end && body.window.start + body.window.blocks.length > windowRange.start) {
+        requestVirtualWindowRefresh();
+      }
+      blocksRef.current = nextBlocks;
+      syncedStateRef.current = { ...baseline, blocks: nextBaselineBlocks };
+      blockTagMapRef.current = nextTagMap;
+      syncedBlockTagMapRef.current = nextSyncedTagMap;
+      const nextLoaded = new Set(loadedBlockIdsRef.current);
+      body.window.blocks.forEach((block) => nextLoaded.add(block.id));
+      loadedBlockIdsRef.current = nextLoaded;
+      setBlocks(nextBlocks);
+      setBlockTagMap(nextTagMap);
+      setLoadedBlockIds(nextLoaded);
+      setWindowLoadSlow(false);
+      setWindowLoadFailed(false);
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+      if (generation === windowRequestGenerationRef.current && visibleMissing) {
+        setWindowLoadSlow(false);
+        setWindowLoadFailed(true);
+      }
+    }).finally(() => {
+      if (slowTimer !== null) window.clearTimeout(slowTimer);
+    });
+
+    return () => {
+      controller.abort();
+      if (slowTimer !== null) window.clearTimeout(slowTimer);
+    };
+  }, [activeVersionId, effectiveScriptId, explicitLoadTargetIndex, initialWindow, loadState, requestVirtualWindowRefresh, windowRange, windowRetryToken]);
 
   useEffect(() => {
     if (!productionId || !activeVersionId || loadState !== "ready") return;
@@ -1722,6 +2063,18 @@ export default function ScriptEditor({
         // nothing to fetch — the server state equals what we already synced.
         if (seq <= serverSeqRef.current) return;
         try {
+          if (initialWindow && activeVersionId) {
+            const bootstrap = await fetchScriptWindowBootstrap(
+              effectiveScriptId,
+              activeVersionId,
+              windowRangeRef.current.start,
+              INITIAL_WINDOW_SIZE,
+            );
+            if (!bootstrap || seq <= serverSeqRef.current) return;
+            serverSeqRef.current = seq;
+            applyWindowBootstrap(bootstrap);
+            return;
+          }
           const serverState = await fetchScriptState(effectiveScriptId, activeVersionId);
           if (!serverState) return;
 
@@ -1885,7 +2238,7 @@ export default function ScriptEditor({
         presenceLayoutTimerRef.current = null;
       }
     };
-  }, [effectiveScriptId, loadState, clientId, activeVersionId, markOwnershipDirty, requestVirtualWindowRefresh, resetToolbarMeasurement, setToolbarMeasureTick, streamVisible, presenceCountRef, presenceLayoutTimerRef, setPresenceMap]);
+  }, [effectiveScriptId, loadState, clientId, activeVersionId, applyWindowBootstrap, initialWindow, markOwnershipDirty, requestVirtualWindowRefresh, resetToolbarMeasurement, setToolbarMeasureTick, streamVisible, presenceCountRef, presenceLayoutTimerRef, setPresenceMap]);
 
   const [meUserId, setMeUserId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
@@ -1936,6 +2289,9 @@ export default function ScriptEditor({
   // also trigger the debounced sync and embed tags in the block op.
   }, [blocks, characters, scenes, blockTagMap, loadState, syncDebounce]);
   useEffect(() => () => { syncUnmountedRef.current = true; syncDebounce.cancel(); }, [syncDebounce]);
+  useEffect(() => () => {
+    if (syncRetryTimerRef.current !== null) clearTimeout(syncRetryTimerRef.current);
+  }, []);
 
   const flushPendingPatch = useCallback(async () => {
     syncDebounce.cancel();
@@ -2223,9 +2579,17 @@ export default function ScriptEditor({
 
   const {
     searchOpen, setSearchOpen, searchQuery, setSearchQuery, searchExact, setSearchExact,
-    searchCurrentPage, setSearchCurrentPage, searchIdx, setSearchIdx, searchMatches,
+    searchCurrentPage, setSearchCurrentPage, searchIdx, setSearchIdx, searchMatches, searchPending,
     jumpTarget, setJumpTarget, jumpValue, setJumpValue, jumpToLine, jumpToPage,
-  } = useScriptSearch({ blocks, pageMap, focusedId, loadState, initialSearchQuery, scrollToBlockIdx });
+  } = useScriptSearch({
+    blocks,
+    pageMap,
+    focusedId,
+    loadState,
+    initialSearchQuery,
+    scrollToBlockIdx,
+    remoteSearch: initialWindow && activeVersionId ? remoteScriptSearch : undefined,
+  });
 
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -4244,7 +4608,11 @@ export default function ScriptEditor({
               className="h-7 w-48 rounded border border-zinc-200 px-2 text-sm text-zinc-700 outline-none placeholder:text-zinc-300 focus:border-zinc-400"
             />
             <span className="shrink-0 text-xs text-zinc-400">
-              {searchMatches.length > 0 ? `${searchIdx + 1} / ${searchMatches.length}` : searchQuery.trim() ? "无结果" : ""}
+              {searchPending
+                ? "正在搜索…"
+                : searchMatches.length > 0
+                  ? `${searchIdx + 1} / ${searchMatches.length}`
+                  : searchQuery.trim() ? "无结果" : ""}
             </span>
             <button
               onClick={() => setSearchIdx(i => i <= 0 ? searchMatches.length - 1 : i - 1)}
@@ -4313,6 +4681,32 @@ export default function ScriptEditor({
           </div>
         )}
       </header>
+
+      {(explicitLoadTargetIndex !== null || windowLoadSlow || windowLoadFailed) && (
+        <div
+          role="status"
+          className={`fixed left-1/2 top-16 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border border-zinc-200/80 bg-white/90 px-3 py-1 text-xs text-zinc-500 shadow-sm backdrop-blur${windowLoadFailed ? "" : " pointer-events-none"}`}
+        >
+          {windowLoadFailed ? "此处暂时没有加载出来" : windowLoadSlow ? "网络较慢，仍在加载…" : "正在前往…"}
+          {windowLoadFailed && (
+            <button
+              type="button"
+              onClick={() => setWindowRetryToken((token) => token + 1)}
+              className="font-medium text-zinc-700 underline underline-offset-2"
+            >
+              重试
+            </button>
+          )}
+        </div>
+      )}
+      {syncWaitingForNetwork && (
+        <div
+          role="status"
+          className="fixed right-4 top-16 z-30 rounded-full border border-amber-200 bg-amber-50/95 px-3 py-1 text-xs text-amber-800 shadow-sm"
+        >
+          等待网络，修改尚未同步
+        </div>
+      )}
 
       {edgeDragNotice && (
         <div
@@ -4538,6 +4932,22 @@ export default function ScriptEditor({
               />,
               ...blocks.slice(safeWindowStart, safeWindowEnd).flatMap((block, wIdx) => {
             const bIdx = safeWindowStart + wIdx;
+            if (!isMarkerBlock(block) && manifestBlockIdsRef.current.has(block.id) && !loadedBlockIds.has(block.id)) {
+              return [
+                <div
+                  key={block.id}
+                  id={`block-${block.id}`}
+                  data-vitem={block.id}
+                  data-bwrap={block.id}
+                  aria-label="正在加载剧本内容"
+                  className="min-h-20 animate-pulse rounded-md px-4 py-3"
+                >
+                  <div className="mb-2 h-2 w-20 rounded bg-zinc-200/65" />
+                  <div className="mb-2 h-2 w-4/5 rounded bg-zinc-200/55" />
+                  <div className="h-2 w-3/5 rounded bg-zinc-200/45" />
+                </div>,
+              ];
+            }
             const prev = bIdx > 0 ? blocks[bIdx - 1] : null;
             const hasInsertionGap = hasScriptInsertionGapBefore(blocks, bIdx, sceneParentIdById);
             const showSceneEndGap = isLockedMode && shouldShowSceneEndGap(prev, block);

@@ -19,6 +19,8 @@ import { getPool } from "@/lib/pg";
 import { GET as getScript, PATCH as patchScript } from "@/app/api/script/[id]/route";
 import { GET as getBlockTags, PATCH as patchBlockTags } from "@/app/api/script/[id]/block-tags/route";
 import { GET as getPages } from "@/app/api/script/[id]/pages/route";
+import { GET as getScriptWindow } from "@/app/api/script/[id]/window/route";
+import { GET as searchScriptWindow } from "@/app/api/script/[id]/window-search/route";
 
 let prodId: string;
 let versionId: string;
@@ -80,10 +82,18 @@ afterAll(async () => {
 });
 
 describe("owner 非成员、零 grant 行", () => {
+  it("未登录：新增分窗与搜索路由均为 401", async () => {
+    const anonymous = new NextRequest(`http://localhost/api/script/${prodId}/window?v=${versionId}`);
+    expect((await getScriptWindow(anonymous, ctx())).status).toBe(401);
+    expect((await searchScriptWindow(new NextRequest(`http://localhost/api/script/${prodId}/window-search?v=${versionId}&q=x`), ctx())).status).toBe(401);
+  });
+
   it("读门：GET script / block-tags / pages 全过", async () => {
     expect((await getScript(req(`?v=${versionId}`, ownerId, "GET"), ctx())).status).toBe(200);
     expect((await getBlockTags(req("/block-tags", ownerId, "GET"), ctx())).status).toBe(200);
     expect((await getPages(req("/pages", ownerId, "GET"), ctx())).status).not.toBe(403);
+    expect((await getScriptWindow(req(`/window?v=${versionId}&start=0&limit=2`, ownerId, "GET"), ctx())).status).toBe(200);
+    expect((await searchScriptWindow(req(`/window-search?v=${versionId}&q=x`, ownerId, "GET"), ctx())).status).toBe(200);
   });
   it("写门：PATCH 逐键循环（blocks@edit + character@edit）全过", async () => {
     expect((await patchScript(req(`?v=${versionId}`, ownerId, "PATCH", insertBlock()), ctx())).status).toBe(200);
@@ -95,12 +105,16 @@ describe("普通成员只持单枚键", () => {
   it("零行：读门 403", async () => {
     expect((await getScript(req(`?v=${versionId}`, memberId, "GET"), ctx())).status).toBe(403);
     expect((await getBlockTags(req("/block-tags", memberId, "GET"), ctx())).status).toBe(403);
+    expect((await getScriptWindow(req(`/window?v=${versionId}`, memberId, "GET"), ctx())).status).toBe(403);
+    expect((await searchScriptWindow(req(`/window-search?v=${versionId}&q=x`, memberId, "GET"), ctx())).status).toBe(403);
   });
 
   it("持 blocks@view：读门过、block-tags 写门 403、PATCH 插块 403", async () => {
     await giveRow(memberId, "script", "blocks", "view");
     expect((await getScript(req(`?v=${versionId}`, memberId, "GET"), ctx())).status).toBe(200);
     expect((await getBlockTags(req("/block-tags", memberId, "GET"), ctx())).status).toBe(200);
+    expect((await getScriptWindow(req(`/window?v=${versionId}`, memberId, "GET"), ctx())).status).toBe(200);
+    expect((await searchScriptWindow(req(`/window-search?v=${versionId}&q=x`, memberId, "GET"), ctx())).status).toBe(200);
     expect((await patchBlockTags(req("/block-tags", memberId, "PATCH", { blockId: "x", groupId: "g", optionId: null }), ctx())).status).toBe(403);
     const res = await patchScript(req(`?v=${versionId}`, memberId, "PATCH", insertBlock()), ctx());
     expect(res.status).toBe(403);

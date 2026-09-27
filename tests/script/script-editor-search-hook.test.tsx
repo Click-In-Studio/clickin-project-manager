@@ -25,8 +25,13 @@ type Snapshot = ReturnType<typeof useScriptSearch>;
 const seen: Snapshot[] = [];
 const latest = () => seen[seen.length - 1];
 const scrollToBlockIdx = vi.fn();
-function Probe({ focusedId, loadState, initialSearchQuery }: { focusedId: string | null; loadState: string; initialSearchQuery?: string }) {
-  seen.push(useScriptSearch({ blocks, pageMap, focusedId, loadState, initialSearchQuery, scrollToBlockIdx }));
+function Probe({ focusedId, loadState, initialSearchQuery, remoteSearch }: {
+  focusedId: string | null;
+  loadState: string;
+  initialSearchQuery?: string;
+  remoteSearch?: (query: string, exact: boolean, signal: AbortSignal) => Promise<Array<{ id: string; index: number }> | null>;
+}) {
+  seen.push(useScriptSearch({ blocks, pageMap, focusedId, loadState, initialSearchQuery, scrollToBlockIdx, remoteSearch }));
   return null;
 }
 
@@ -39,9 +44,9 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
 });
-afterEach(() => { act(() => root.unmount()); container.remove(); });
-function render(p: { focusedId?: string | null; loadState?: string; initialSearchQuery?: string } = {}) {
-  act(() => root.render(<Probe focusedId={p.focusedId ?? null} loadState={p.loadState ?? "ready"} initialSearchQuery={p.initialSearchQuery} />));
+afterEach(() => { vi.useRealTimers(); act(() => root.unmount()); container.remove(); });
+function render(p: { focusedId?: string | null; loadState?: string; initialSearchQuery?: string; remoteSearch?: Parameters<typeof Probe>[0]["remoteSearch"] } = {}) {
+  act(() => root.render(<Probe focusedId={p.focusedId ?? null} loadState={p.loadState ?? "ready"} initialSearchQuery={p.initialSearchQuery} remoteSearch={p.remoteSearch} />));
 }
 function search(q: string) {
   act(() => { latest().setSearchOpen(true); latest().setSearchQuery(q); latest().setSearchIdx(0); });
@@ -56,6 +61,23 @@ describe("useScriptSearch — 命中", () => {
     expect(latest().searchMatches).toEqual([1, 2, 5]);
     act(() => latest().setSearchExact(true));
     expect(latest().searchMatches).toEqual([2]);
+  });
+
+  it("分窗模式走远端索引，等待时保留旧结果并按绝对索引跳转", async () => {
+    vi.useFakeTimers();
+    const remoteSearch = vi.fn(async () => [{ id: "b4", index: 5 }]);
+    render({ remoteSearch });
+    search("hamlet");
+    expect(latest().searchPending).toBe(true);
+    await act(async () => {
+      vi.advanceTimersByTime(160);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(remoteSearch).toHaveBeenCalledWith("hamlet", false, expect.any(AbortSignal));
+    expect(latest().searchMatches).toEqual([5]);
+    expect(scrollToBlockIdx).toHaveBeenLastCalledWith(5, "center");
+    vi.useRealTimers();
   });
 
   it("「仅当前页」按焦点块所在页过滤；无焦点时不过滤", () => {

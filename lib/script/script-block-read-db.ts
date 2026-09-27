@@ -87,6 +87,21 @@ export async function loadVersionBlocks(versionId: string): Promise<LoadedVersio
   return assembleVersionBlocks(res.rows);
 }
 
+/** 按绝对序位装一个连续窗口；用于编辑器正文懒加载。 */
+export async function loadVersionBlockRange(
+  versionId: string,
+  start: number,
+  limit: number,
+): Promise<LoadedVersionBlocks> {
+  const safeStart = Number.isFinite(start) ? Math.max(0, Math.floor(start)) : 0;
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(480, Math.floor(limit))) : 240;
+  const res = await getPool().query<BlockRow>(
+    `${VERSION_BLOCK_ROWS_SQL} ORDER BY sv.sort_key OFFSET $2 LIMIT $3`,
+    [versionId, safeStart, safeLimit],
+  );
+  return assembleVersionBlocks(res.rows);
+}
+
 /** 按 block id 定点装块（含正文与角色挂载）。审计快照等只看少数行的读者用（#461）。 */
 export async function loadVersionBlocksByIds(versionId: string, blockIds: string[]): Promise<Block[]> {
   if (blockIds.length === 0) return [];

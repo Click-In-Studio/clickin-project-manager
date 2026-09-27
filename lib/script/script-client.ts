@@ -7,6 +7,7 @@ import { BASE_PATH } from "@/lib/base-path";
 import type { ScriptConfig, ScriptState } from "@/lib/script/script-types";
 import type { TagGroup, BlockTagValue } from "./script-block-tag-db";
 import type { SceneDetail } from "./script-scene-character-db";
+import type { ScriptWindowBootstrap, ScriptWindowResponse } from "./script-window-types";
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 
@@ -34,6 +35,70 @@ export async function loadScriptEnvelope(
   const url = productionId ? `${BASE_PATH}/api/production/${productionId}${v}` : `${BASE_PATH}/api/script/${scriptId}${v}`;
   const r = await fetch(url);
   return { status: r.status, ok: r.ok, body: await r.json() };
+}
+
+/** 按绝对序位读取正文窗口；409 表示结构 revision 已变化，调用方应重装骨架。 */
+export async function fetchScriptWindow(
+  scriptId: string,
+  versionId: string,
+  start: number,
+  limit: number,
+  orderRevision: string,
+  signal?: AbortSignal,
+): Promise<{ status: number; body: ScriptWindowResponse | null }> {
+  const params = new URLSearchParams({
+    v: versionId,
+    start: String(start),
+    limit: String(limit),
+    orderRevision,
+  });
+  const response = await fetch(`${BASE_PATH}/api/script/${scriptId}/window?${params}`, { signal });
+  return {
+    status: response.status,
+    body: response.ok ? await response.json() as ScriptWindowResponse : null,
+  };
+}
+
+export async function fetchScriptWindowBootstrap(
+  scriptId: string,
+  versionId: string,
+  start: number,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<ScriptWindowBootstrap | null> {
+  const params = new URLSearchParams({
+    v: versionId,
+    start: String(start),
+    limit: String(limit),
+    bootstrap: "1",
+  });
+  const response = await fetch(`${BASE_PATH}/api/script/${scriptId}/window?${params}`, { signal });
+  return response.ok ? await response.json() as ScriptWindowBootstrap : null;
+}
+
+export async function searchScriptWindow(
+  scriptId: string,
+  versionId: string,
+  query: string,
+  exact: boolean,
+  signal?: AbortSignal,
+): Promise<Array<{ id: string; index: number }> | null> {
+  const params = new URLSearchParams({ v: versionId, q: query });
+  if (exact) params.set("exact", "1");
+  const response = await fetch(`${BASE_PATH}/api/script/${scriptId}/window-search?${params}`, { signal });
+  if (!response.ok) return null;
+  const body = await response.json() as { matches?: Array<{ id: string; index: number }> };
+  return body.matches ?? [];
+}
+
+export async function fetchScriptPageMap(
+  scriptId: string,
+  versionId: string,
+): Promise<Record<string, number> | null> {
+  const response = await fetch(`${BASE_PATH}/api/script/${scriptId}/pages${versionQuery(versionId)}`);
+  if (!response.ok) return null;
+  const body = await response.json() as { pageMap?: Record<string, number> };
+  return body.pageMap ?? {};
 }
 
 /** 增量 PATCH；ok 时回服务端序号，否则 null。 */
