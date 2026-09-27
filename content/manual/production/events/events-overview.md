@@ -7,7 +7,7 @@ who: 所有成员可看已发布的事件；新建需要事件创建权限
 tier: all
 platform: [desktop, mobile]
 related: [production/events/event-detail, production/events/publish-callsheet, production/planning/calendar]
-updated: 2026-09-19
+updated: 2026-09-27
 ---
 
 ## 这是什么
@@ -30,6 +30,8 @@ updated: 2026-09-19
 | 已取消 | 取消了，保留记录 |
 
 页面顶部画着事件的三步：**定义事件**（类型、时间、地点、人员）→ **确认任务**（负责人、截止、通知对象）→ **发布与追踪**（站内通知、确认、执行）。
+
+> [!📱] 在手机和窄窗口中，这三步会紧凑地排在同一行，从左到右阅读即可。
 
 ## 怎么操作
 
