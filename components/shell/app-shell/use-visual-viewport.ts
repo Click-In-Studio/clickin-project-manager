@@ -1,70 +1,148 @@
 "use client";
 
-import { useEffect, type RefObject } from "react";
+import { useEffect } from "react";
 
 type AppViewportSnapshot = {
   height: number;
   offsetTop: number;
 };
 
+export type AppViewportState = {
+  visibleHeight: number;
+  bottomInset: number;
+  editing: boolean;
+  keyboardOpen: boolean;
+};
+
+export function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  const editable = target.closest("input, textarea, [contenteditable]");
+  if (!editable) return false;
+  if (editable instanceof HTMLInputElement) {
+    return !["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"].includes(editable.type);
+  }
+  return editable.getAttribute("contenteditable") !== "false";
+}
+
+export function deriveAppViewportState(
+  viewport: AppViewportSnapshot,
+  layoutHeight: number,
+  editing: boolean,
+  focusBaselineHeight: number | null,
+): AppViewportState {
+  const visibleHeight = Math.min(viewport.height, layoutHeight);
+  return {
+    visibleHeight,
+    bottomInset: Math.max(0, layoutHeight - viewport.height - viewport.offsetTop),
+    editing,
+    keyboardOpen: editing && focusBaselineHeight !== null && visibleHeight < focusBaselineHeight,
+  };
+}
+
 export function writeAppViewportCssVariables(
   target: HTMLElement,
   viewport: AppViewportSnapshot,
   layoutHeight: number,
+  editing = false,
+  focusBaselineHeight: number | null = null,
 ) {
   // 部分 Android WebView / 厂商浏览器会暴露 VisualViewport，却仍返回收起浏览器栏
   // 后的大高度；innerHeight 在这些实现里反而是当前可见高度。两者取小，宁可留下
   // 少量可滚动空间，也不能把底栏放到屏幕外并被 body 的 overflow-hidden 截断。
-  const visibleHeight = Math.min(viewport.height, layoutHeight);
-  const bottomInset = Math.max(0, layoutHeight - viewport.height - viewport.offsetTop);
-  target.style.setProperty("--app-visual-viewport-height", `${visibleHeight}px`);
+  const state = deriveAppViewportState(viewport, layoutHeight, editing, focusBaselineHeight);
+  target.style.setProperty("--app-visual-viewport-height", `${state.visibleHeight}px`);
   target.style.setProperty("--app-visual-viewport-offset-top", `${viewport.offsetTop}px`);
-  target.style.setProperty("--app-visual-viewport-bottom-inset", `${bottomInset}px`);
+  target.style.setProperty("--app-visual-viewport-bottom-inset", `${state.bottomInset}px`);
+  target.dataset.appEditing = state.editing ? "true" : "false";
+  target.dataset.appKeyboardOpen = state.keyboardOpen ? "true" : "false";
+  return state;
 }
 
 /**
  * 移动端可见视口的唯一浏览器接线点。
  *
  * CSS 的 100dvh 负责 SSR 首屏；hydration 后用 Visual Viewport 的真实像素值
- * 覆盖它，兼容动态地址栏实现不完整的浏览器。这里只发布几何量，不判断软键盘
- * 或编辑态；输入法行为由 #727 在同一入口上归约。
+ * 覆盖它。编辑焦点与聚焦前高度也在这里归约，业务组件只消费根节点状态，
+ * 不再各自判断软键盘或注册第二套视口监听。
  */
-export function useVisualViewportCssVariables(targetRef: RefObject<HTMLElement | null>, active: boolean) {
+export function useAppViewportState(active: boolean) {
   useEffect(() => {
     if (!active) return;
-    const target = targetRef.current;
-    if (!target) return;
-
+    const target = document.documentElement;
     const viewport = window.visualViewport;
     let animationFrame = 0;
+    let focusFrame = 0;
+    let editing = isEditableTarget(document.activeElement);
+    let focusBaselineHeight = editing ? Math.max(viewport?.height ?? 0, window.innerHeight) : null;
+    let resetBaseline = false;
 
     const write = () => {
       animationFrame = 0;
+      if (resetBaseline) {
+        focusBaselineHeight = editing ? Math.max(viewport?.height ?? 0, window.innerHeight) : null;
+        resetBaseline = false;
+      }
       writeAppViewportCssVariables(
         target,
         viewport ?? { height: window.innerHeight, offsetTop: 0 },
         window.innerHeight,
+        editing,
+        focusBaselineHeight,
       );
     };
     const scheduleWrite = () => {
       if (animationFrame) return;
       animationFrame = window.requestAnimationFrame(write);
     };
+    const handleFocusIn = (event: FocusEvent) => {
+      if (!isEditableTarget(event.target)) return;
+      editing = true;
+      focusBaselineHeight = Math.max(viewport?.height ?? 0, window.innerHeight);
+      scheduleWrite();
+    };
+    const handleFocusOut = () => {
+      if (focusFrame) window.cancelAnimationFrame(focusFrame);
+      focusFrame = window.requestAnimationFrame(() => {
+        focusFrame = 0;
+        editing = isEditableTarget(document.activeElement);
+        if (!editing) focusBaselineHeight = null;
+        scheduleWrite();
+      });
+    };
+    const handleGeometryReset = () => {
+      resetBaseline = true;
+      scheduleWrite();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") handleGeometryReset();
+    };
 
     write();
     viewport?.addEventListener("resize", scheduleWrite);
     viewport?.addEventListener("scroll", scheduleWrite);
     window.addEventListener("resize", scheduleWrite);
-    window.addEventListener("pageshow", scheduleWrite);
-    document.addEventListener("visibilitychange", scheduleWrite);
+    window.addEventListener("pageshow", handleGeometryReset);
+    window.addEventListener("orientationchange", handleGeometryReset);
+    document.addEventListener("focusin", handleFocusIn);
+    document.addEventListener("focusout", handleFocusOut);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
+      if (focusFrame) window.cancelAnimationFrame(focusFrame);
       viewport?.removeEventListener("resize", scheduleWrite);
       viewport?.removeEventListener("scroll", scheduleWrite);
       window.removeEventListener("resize", scheduleWrite);
-      window.removeEventListener("pageshow", scheduleWrite);
-      document.removeEventListener("visibilitychange", scheduleWrite);
+      window.removeEventListener("pageshow", handleGeometryReset);
+      window.removeEventListener("orientationchange", handleGeometryReset);
+      document.removeEventListener("focusin", handleFocusIn);
+      document.removeEventListener("focusout", handleFocusOut);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      target.style.removeProperty("--app-visual-viewport-height");
+      target.style.removeProperty("--app-visual-viewport-offset-top");
+      target.style.removeProperty("--app-visual-viewport-bottom-inset");
+      delete target.dataset.appEditing;
+      delete target.dataset.appKeyboardOpen;
     };
-  }, [active, targetRef]);
+  }, [active]);
 }

@@ -24,7 +24,7 @@ export default function CalendarDayDrawer({ date, entries, onSelect, onClose }: 
 
   return (
     <aside
-      className={`${styles.detailDrawer} ${styles.calendarDayDrawer}`}
+      className={`app-mobile-input-overlay app-mobile-input-surface ${styles.detailDrawer} ${styles.calendarDayDrawer}`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="calendar-day-drawer-title"

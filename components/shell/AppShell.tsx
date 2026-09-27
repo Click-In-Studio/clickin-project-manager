@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import { nextNavPendingHref } from "@/lib/nav-pending";
@@ -35,7 +35,7 @@ import ProjectSwitcher from "./app-shell/ProjectSwitcher";
 import { useShellBadges } from "./app-shell/use-shell-badges";
 import { useProductionToolbarStage } from "./app-shell/use-production-toolbar-stage";
 import { useSidebarFold } from "./app-shell/use-sidebar-fold";
-import { useVisualViewportCssVariables } from "./app-shell/use-visual-viewport";
+import { useAppViewportState } from "./app-shell/use-visual-viewport";
 
 interface AppShellProps {
   session: ShellSession | null;
@@ -58,7 +58,6 @@ const SCROLLBAR_ACTIVITY_HIDE_DELAY_MS = 700;
 type DrawerType = "overview" | "project-overview" | "creation" | "production" | "admin" | "me";
 
 export default function AppShell({ session, productions, canCreateProduction = false, children, initialUnreadCount = 0, initialPendingTasks = 0, initialUnreadReports = 0, helpRoutes = {}, latestChangelogVersion = null }: AppShellProps) {
-  const shellRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const searchParams = useSearchParams();
   // 页面显式上报的「当前对象」（#476 follow-up）——见 components/agent/ai-target.tsx
@@ -180,7 +179,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
   // 按 /production/<id>/ 解析上下文的地方全部失效。
   const isPrintRoute = pathname.endsWith("/print") || pathname.includes("/print/");
   const appShellActive = !!session && !pathname.startsWith("/login") && !pathname.startsWith("/help") && !isPrintRoute;
-  useVisualViewportCssVariables(shellRef, appShellActive);
+  useAppViewportState(appShellActive);
   // /help 使用手册（#531）同理：公开帮助中心自带顶栏，不背产品侧栏
   if (!session || pathname.startsWith("/login") || pathname.startsWith("/help") || isPrintRoute) {
     return <>{children}</>;
@@ -287,7 +286,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
     <ProductionToolbarStageContext.Provider value={productionToolbarStage}>
     <ProductionToolbarContext.Provider value={productionToolbarContext}>
     <NavPendingContext.Provider value={navPendingBus}>
-    <div ref={shellRef} className="app-shell-frame flex flex-col overflow-hidden bg-[var(--paper)]">
+    <div className="app-shell-frame flex flex-col overflow-hidden bg-[var(--paper)]">
       {/* Topbar */}
       <header
         ref={topbarRef}

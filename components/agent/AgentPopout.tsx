@@ -678,7 +678,7 @@ export default function AgentPopout({
       {statusBanner}
 
       {/* 聊天区 */}
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
+      <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         {loadingHistory && <p className="text-center text-sm text-zinc-400">加载中…</p>}
         {!loadingHistory && bubbles.length === 0 && (
           <div className="flex h-full items-center justify-center px-6 text-center">
@@ -1006,9 +1006,9 @@ export default function AgentPopout({
           fixed 子孙的 containing block——不传送的话这个 modal 会被困在 440px
           侧栏里看不全（WikiProposalPreviewModal 同款问题同款修法）。 */}
       {prefsOpen && createPortal(
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30" onClick={() => !prefsBusy && setPrefsOpen(false)}>
+        <div className="app-mobile-input-overlay fixed inset-0 z-50 grid place-items-center bg-black/30" onClick={() => !prefsBusy && setPrefsOpen(false)}>
           <div
-            className="max-h-[calc(100dvh-2rem)] w-[520px] max-w-[92vw] overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 shadow-xl"
+            className="app-mobile-input-surface max-h-[calc(100dvh-2rem)] w-[520px] max-w-[92vw] overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-sm font-semibold text-[var(--ink)]">AI 偏好（个人指令）</p>

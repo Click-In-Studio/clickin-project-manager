@@ -760,6 +760,34 @@ span[data-stage-inline] {
     padding-right: env(safe-area-inset-right);
     padding-left: env(safe-area-inset-left);
   }
+
+  html[data-app-keyboard-open="true"] .app-shell-bottom-nav {
+    display: none;
+  }
+
+  html[data-app-keyboard-open="true"] .panel-mobile-full {
+    height: calc(var(--app-visual-viewport-height, 100dvh) - 4rem - env(safe-area-inset-top)) !important;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  html[data-app-keyboard-open="true"] .app-shell-bottom-drawer-surface {
+    max-height: 100%;
+  }
+
+  /* Portal 到 body 的输入弹窗不继承 App Shell 的定位上下文，只消费 html 上
+     的同一组视口变量；业务组件只标记工作面，不各自监听键盘。 */
+  html[data-app-keyboard-open="true"] .app-mobile-input-overlay {
+    top: var(--app-visual-viewport-offset-top, 0px) !important;
+    bottom: auto !important;
+    height: var(--app-visual-viewport-height, 100dvh) !important;
+  }
+
+  html[data-app-keyboard-open="true"] .app-mobile-input-surface {
+    max-height: calc(100% - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 
 /* Side panels fill the available content width on phones. */
@@ -793,6 +821,10 @@ span[data-stage-inline] {
 
   .agent-mobile-composer {
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom)) !important;
+  }
+
+  html[data-app-keyboard-open="true"] .agent-mobile-composer {
+    padding-bottom: 0.75rem !important;
   }
 }
 

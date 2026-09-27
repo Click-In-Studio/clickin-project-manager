@@ -20,12 +20,12 @@ export default function ScriptDialog({
 }) {
   return (
     <div
-      className={overlayClassName}
+      className={`app-mobile-input-overlay ${overlayClassName}`}
       role="dialog"
       aria-modal="true"
       onClick={onClose}
     >
-      <div className={panelClassName} onClick={(event) => event.stopPropagation()}>
+      <div className={`app-mobile-input-surface ${panelClassName}`} onClick={(event) => event.stopPropagation()}>
         {children}
       </div>
     </div>

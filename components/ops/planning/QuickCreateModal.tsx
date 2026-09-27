@@ -89,6 +89,7 @@ export default function QuickCreateModal({ productionId, date, departments, even
 
   return (
     <div
+      className="app-mobile-input-overlay"
       role="dialog"
       aria-modal="true"
       aria-label={`${date} 快捷新建`}
@@ -101,7 +102,7 @@ export default function QuickCreateModal({ productionId, date, departments, even
       }}
       style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(7,29,32,.34)", display: "grid", placeItems: "center", padding: 18 }}
     >
-      <form onSubmit={submit} style={{ width: "min(520px, 100%)", maxHeight: "calc(100vh - 36px)", overflowY: "auto", borderRadius: 14, border: "1px solid var(--line)", background: "var(--surface)", boxShadow: "0 22px 70px rgba(7,29,32,.24)", padding: 22 }}>
+      <form className="app-mobile-input-surface" onSubmit={submit} style={{ width: "min(520px, 100%)", maxHeight: "calc(100vh - 36px)", overflowY: "auto", borderRadius: 14, border: "1px solid var(--line)", background: "var(--surface)", boxShadow: "0 22px 70px rgba(7,29,32,.24)", padding: 22 }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 18 }}>
           <div>
             <p style={{ margin: 0, color: "var(--muted)", fontSize: 10, fontWeight: 700, letterSpacing: ".12em" }}>{date}</p>

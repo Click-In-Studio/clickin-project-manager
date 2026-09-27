@@ -2,8 +2,17 @@
 
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vitest";
-import { writeAppViewportCssVariables } from "@/components/shell/app-shell/use-visual-viewport";
+import {
+  deriveAppViewportState,
+  isEditableTarget,
+  useAppViewportState,
+  writeAppViewportCssVariables,
+} from "@/components/shell/app-shell/use-visual-viewport";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function sourceFiles(root: string): string[] {
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
@@ -48,7 +57,7 @@ describe("#726 移动端可见视口", () => {
 
     expect(layout).toContain('viewportFit: "cover"');
     expect(layout).toContain('interactiveWidget: "resizes-visual"');
-    expect(shell).toContain("useVisualViewportCssVariables(shellRef, appShellActive)");
+    expect(shell).toContain("useAppViewportState(appShellActive)");
     expect(shell).toContain('className="app-shell-frame flex flex-col');
     expect(drawer).toContain('className="app-shell-bottom-drawer fixed');
     expect(css).toContain("height: var(--app-visual-viewport-height, 100dvh)");
@@ -56,5 +65,83 @@ describe("#726 移动端可见视口", () => {
     expect(css).toMatch(/height: 4rem;\s+height: calc\(4rem \+ env\(safe-area-inset-top\)\)/);
     expect(css).toMatch(/padding-right: 1\.25rem;\s+padding-right: max\(1\.25rem, env\(safe-area-inset-right\)\)/);
     expect(css).toContain("padding-bottom: env(safe-area-inset-bottom)");
+  });
+});
+
+describe("#727 手机编辑态", () => {
+  it("只有可编辑焦点且可见高度低于聚焦基线时判定键盘打开", () => {
+    expect(deriveAppViewportState({ height: 844, offsetTop: 0 }, 844, false, null).keyboardOpen).toBe(false);
+    expect(deriveAppViewportState({ height: 844, offsetTop: 0 }, 844, true, 844).keyboardOpen).toBe(false);
+    expect(deriveAppViewportState({ height: 480, offsetTop: 44 }, 844, true, 844)).toMatchObject({
+      visibleHeight: 480,
+      editing: true,
+      keyboardOpen: true,
+    });
+  });
+
+  it("只把会唤起文本编辑的控件视为编辑目标", () => {
+    const text = document.createElement("input");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    const textarea = document.createElement("textarea");
+    const editor = document.createElement("div");
+    editor.setAttribute("contenteditable", "true");
+
+    expect(isEditableTarget(text)).toBe(true);
+    expect(isEditableTarget(checkbox)).toBe(false);
+    expect(isEditableTarget(textarea)).toBe(true);
+    expect(isEditableTarget(editor)).toBe(true);
+  });
+
+  it("唯一 hook 卸载时清理 Visual Viewport 订阅与根节点状态", () => {
+    class FakeVisualViewport extends EventTarget {
+      height = 844;
+      offsetTop = 0;
+      counts = new Map<string, number>();
+      override addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: AddEventListenerOptions | boolean) {
+        super.addEventListener(type, listener, options);
+        this.counts.set(type, (this.counts.get(type) ?? 0) + 1);
+      }
+      override removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: EventListenerOptions | boolean) {
+        super.removeEventListener(type, listener, options);
+        this.counts.set(type, (this.counts.get(type) ?? 0) - 1);
+      }
+    }
+    const viewport = new FakeVisualViewport();
+    const originalViewport = Object.getOwnPropertyDescriptor(window, "visualViewport");
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: viewport });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 844 });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    function Probe() { useAppViewportState(true); return null; }
+
+    act(() => root.render(createElement(Probe)));
+    expect(viewport.counts).toEqual(new Map([["resize", 1], ["scroll", 1]]));
+    expect(document.documentElement.dataset.appKeyboardOpen).toBe("false");
+
+    act(() => root.unmount());
+    expect(viewport.counts).toEqual(new Map([["resize", 0], ["scroll", 0]]));
+    expect(document.documentElement.dataset.appKeyboardOpen).toBeUndefined();
+    expect(document.documentElement.style.getPropertyValue("--app-visual-viewport-height")).toBe("");
+    container.remove();
+    if (originalViewport) Object.defineProperty(window, "visualViewport", originalViewport);
+    else delete (window as { visualViewport?: VisualViewport }).visualViewport;
+    if (originalInnerHeight) Object.defineProperty(window, "innerHeight", originalInnerHeight);
+  });
+
+  it("底栏、抽屉、模态框和 AI 工作面消费同一编辑态", () => {
+    const css = readFileSync("app/globals.css", "utf8");
+    const agent = readFileSync("components/agent/AgentPopout.tsx", "utf8");
+    const drawer = readFileSync("components/shell/app-shell/BottomDrawer.tsx", "utf8");
+    const modal = readFileSync("components/ui/AdminModal.tsx", "utf8");
+
+    expect(css).toContain('html[data-app-keyboard-open="true"] .app-shell-bottom-nav');
+    expect(css).toContain('html[data-app-keyboard-open="true"] .app-mobile-input-overlay');
+    expect(agent).toContain("app-mobile-input-overlay fixed inset-0");
+    expect(agent).toContain("min-h-0 flex-1");
+    expect(drawer).toContain("app-mobile-input-surface");
+    expect(modal).toContain("app-mobile-input-overlay");
   });
 });
