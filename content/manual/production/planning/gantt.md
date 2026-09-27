@@ -5,9 +5,9 @@ summary: 所有任务按时间铺成条形，看谁挤在同一周；拖动条�
 routes: [planning]
 who: 所有成员可看；拖动改期需要任务编辑权限
 tier: all
-platform: [desktop]
+platform: [desktop, mobile]
 related: [production/planning/calendar, production/tasks/tasks, production/planning/phases]
-updated: 2026-09-18
+updated: 2026-09-27
 ---
 
 ## 这是什么
@@ -21,6 +21,9 @@ updated: 2026-09-18
 - 顶部切换刻度：日 / 月 / 季 / 年。
 - **拖动条形**改期。拖过之后这个时间就固定成任务自己的了，不再跟着事件走。
 - 点条形进任务详情。
+
+> [!📱]
+> 手机上，刻度会单独占一行，状态颜色会分成两列显示；四种刻度和四种状态都保留。
 
 ## 注意事项
 
