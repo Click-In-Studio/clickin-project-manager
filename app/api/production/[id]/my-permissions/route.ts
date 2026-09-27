@@ -17,22 +17,12 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 
-import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
 import {
   parseNodeKey,
   canAccessNodesBatch,
-  selfConfirmTemplateNodes,
   type NodeKeyParts,
 } from "@/lib/perm/grant-template";
-
-// 激活面节点目录：各页面 scope 中声明的全部树节点键（去重）
-const NODE_KEYS: readonly string[] = [
-  ...new Set(
-    Object.values(PAGE_PERMISSION_SCOPES).flatMap((s) =>
-      [...s].filter((k) => k.startsWith("node:")),
-    ),
-  ),
-];
+import { ACTIVATABLE_NODE_KEYS, activatePendingPermissions } from "@/lib/perm/permission-activation-db";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -48,7 +38,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   // 终局（批G G-2）：原子键退役——激活面只余树节点键管道。
   // 批量判定：目录 40+ 键，逐键 canAccessNode 等于 160+ 次串行往返，且这条
   // GET 挂在 AppShell 上、每进一次演出就跑一遍。
-  const parsed = NODE_KEYS
+  const parsed = ACTIVATABLE_NODE_KEYS
     .map((key) => ({ key, node: parseNodeKey(key) }))
     .filter((e): e is { key: string; node: NodeKeyParts } => e.node !== null);
   const results = await canAccessNodesBatch(permCtx, productionId, parsed.map((e) => e.node));
@@ -70,33 +60,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
-  const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
-  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
-  if (access.isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-
   const body = await req.json() as { permissions?: unknown };
-  if (!Array.isArray(body.permissions) || body.permissions.length === 0) {
-    return Response.json({ error: "permissions 为必填数组" }, { status: 400 });
-  }
-
-  const nodeConfirm: NodeKeyParts[] = [];
-  for (const raw of body.permissions) {
-    if (typeof raw !== "string" || !raw.startsWith("node:")) {
-      return Response.json({ error: `无效的权限值: ${raw}` }, { status: 400 });
-    }
-    // 树节点键：目录内 + 模板资格双重校验（selfConfirmTemplateNodes 内部防伪造；
-    // SENSITIVE/ROOT 由 isSensitiveNode/isRootNode 在管道内拒绝）
-    const node = parseNodeKey(raw);
-    if (!node || !NODE_KEYS.includes(raw)) {
-      return Response.json({ error: `无效的权限值: ${raw}` }, { status: 400 });
-    }
-    nodeConfirm.push(node);
-  }
-
-  let nodeConfirmed = 0;
-  if (nodeConfirm.length > 0) {
-    nodeConfirmed = await selfConfirmTemplateNodes(session.userId, productionId, nodeConfirm);
-  }
-  return Response.json({ ok: true, confirmed: nodeConfirmed });
+  const result = await activatePendingPermissions(session.userId, productionId, body.permissions);
+  if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
+  return Response.json({ ok: true, confirmed: result.confirmed });
 }
-

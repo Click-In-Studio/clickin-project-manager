@@ -5,6 +5,7 @@
 
 import type { ApprovalCard } from "./approvals";
 import { toolLabel as toolLabelOf } from "@/lib/agent/agent-tool-labels";
+import { groupPermissionLabels, permissionLabel } from "@/lib/perm/permission-labels";
 
 const str = (v: unknown, cap: number): string =>
   typeof v === "string" ? (v.length > cap ? `${v.slice(0, cap)}…` : v) : String(v ?? "（无）");
@@ -41,6 +42,26 @@ function dramaturgyLines(headline: string, items: string[], extra?: { hasPermiss
 
 const summaryLine = (params: Record<string, unknown>) => `📝 摘要：${str(params.summary, 100)}`;
 const count = (v: unknown) => (Array.isArray(v) ? v.length : 0);
+
+/** AI 调用专用权限激活卡：生命周期走 approval，权限人话与页面激活 modal 同源。 */
+export function permissionActivationCard(keys: readonly string[]): ApprovalCard {
+  const uniqueKeys = [...new Set(keys)];
+  const groups = groupPermissionLabels(uniqueKeys);
+  const CAP = 8;
+  const items = groups.flatMap((group) =>
+    group.permissions.map((permission) => `${group.label} · ${permissionLabel(permission)}`),
+  );
+  return {
+    purpose: "permission-activation",
+    severity: "info",
+    title: `激活 ${uniqueKeys.length} 项权限并继续？`,
+    description: lines([
+      "AI 完成本次操作需要先激活你已有资格使用的权限：",
+      ...items.slice(0, CAP).map((item) => `• ${item}`),
+      items.length > CAP ? `…还有 ${items.length - CAP} 项` : null,
+    ]),
+  };
+}
 
 /** bareTool = 去掉 clickin__ 前缀的暴露名（production-wiki_propose_create 等）。 */
 export function approvalCard(bareTool: string, params: Record<string, unknown>, extra?: { hasPermission?: boolean; notes?: string[] }): ApprovalCard {

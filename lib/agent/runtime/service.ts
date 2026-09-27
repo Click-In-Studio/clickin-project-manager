@@ -35,7 +35,7 @@ import { getSchedule, finishScheduledRun, type ScheduleReport } from "./schedule
 import { tieredToolNames } from "./tool-tiers";
 import { recallFamilies } from "./tool-index";
 import { recentlyUsedToolNames } from "./used-tools";
-import { approvalCard } from "./cards";
+import { approvalCard, permissionActivationCard } from "./cards";
 import { createApproval, awaitApproval, markApprovalExecuted, approvalAllowsReexecute } from "./approvals";
 import { buildSystemPrompt, recallBlock } from "./prompt";
 import { repairAndClassify } from "./resume";
@@ -45,6 +45,7 @@ import {
   RUNNER_OWNER, HEARTBEAT_INTERVAL_MS, ORPHAN_AFTER_MS,
 } from "./config";
 import { creditsFromUsd, RUN_CREDIT_HARD_CAP } from "@/lib/account/plan";
+import { activatePendingPermissions } from "@/lib/perm/permission-activation-db";
 
 /** 成本硬顶中止的落库前缀（机器可判）与下一回合的注入说明（导入实测反馈①：
  *  裸 abort 让 agent 只能瞎猜中止原因）。 */
@@ -574,7 +575,16 @@ async function unattendedGate(g: GateInput, allowedTools: string[]): Promise<Gat
 }
 
 /** 写工具的预检（与执行共用同一份规划/校验）：wiki 方言校验+预持久化、构作规划错误。返回 block 或卡片素材。 */
-async function preflight(g: GateInput): Promise<{ block?: boolean; reason?: string; hasPermission?: boolean; preview: Record<string, unknown>; notes?: string[] }> {
+type PreflightResult = {
+  block?: boolean;
+  reason?: string;
+  hasPermission?: boolean;
+  preview: Record<string, unknown>;
+  notes?: string[];
+  selfConfirmKeys?: string[];
+};
+
+async function preflight(g: GateInput): Promise<PreflightResult> {
   const bare = bareName(g.tool.name);
   let hasPermission: boolean | undefined;
   const preview: Record<string, unknown> = {};
@@ -603,6 +613,7 @@ async function preflight(g: GateInput): Promise<{ block?: boolean; reason?: stri
   // 构作族六个写工具：与执行同一份规划做预览——参数/业务规则错误（如删除方式要用户
   // 二选一）直接 block 回模型、不弹卡；权限三态写进卡片 notes（一个工具横跨多把钥匙）
   let notes: string[] | undefined;
+  let selfConfirmKeys: string[] | undefined;
   const { DRAMATURGY_PROPOSE_TOOLS, previewDramaturgyProposal } = await import("@/lib/agent/tools/dramaturgy-tools");
   if (DRAMATURGY_PROPOSE_TOOLS.has(bare) && g.productionId) {
     try {
@@ -610,6 +621,7 @@ async function preflight(g: GateInput): Promise<{ block?: boolean; reason?: stri
       if (p.error) return { block: true, reason: `${p.error}（未提交给用户确认）`, preview };
       hasPermission = p.hasPermission;
       notes = p.notes;
+      selfConfirmKeys = p.selfConfirmKeys;
     } catch (err) {
       console.error("[agent-runtime] dramaturgy preview failed (card without permission info):", err);
     }
@@ -624,6 +636,7 @@ async function preflight(g: GateInput): Promise<{ block?: boolean; reason?: stri
       if (p.error) return { block: true, reason: `${p.error}（未提交给用户确认）`, preview };
       hasPermission = p.hasPermission;
       notes = p.notes;
+      selfConfirmKeys = p.selfConfirmKeys;
     } catch (err) {
       console.error("[agent-runtime] script write preview failed (card without permission info):", err);
     }
@@ -640,13 +653,25 @@ async function preflight(g: GateInput): Promise<{ block?: boolean; reason?: stri
       console.error("[agent-runtime] asset write preview failed (card without permission info):", err);
     }
   }
-  return { hasPermission, preview, notes };
+  return { hasPermission, preview, notes, selfConfirmKeys };
 }
 
 async function approvalGate(g: GateInput): Promise<GateResult> {
   const bare = bareName(g.tool.name);
-  const pre = await preflight(g);
+  let pre = await preflight(g);
   if (pre.block) return { block: true, reason: pre.reason };
+
+  // 构作/剧本写工具命中 🔓：先用 inline 卡确认激活，再重新预检恰好一次。
+  // 普通写确认放在它之后，避免把一次尚未获权的调用先标成 executed 再重放。
+  if (g.productionId && pre.selfConfirmKeys?.length) {
+    const activation = await permissionActivationGate(g, pre.selfConfirmKeys);
+    if (activation?.block) return activation;
+    pre = await preflight(g);
+    if (pre.block) return { block: true, reason: pre.reason };
+    if (pre.selfConfirmKeys?.length) {
+      return { block: true, reason: "权限激活后仍未生效，本次调用未执行。请刷新后重试。" };
+    }
+  }
   const { hasPermission, preview, notes } = pre;
 
   const card = approvalCard(bare, g.args, { hasPermission, notes });
@@ -671,6 +696,53 @@ async function approvalGate(g: GateInput): Promise<GateResult> {
     ? "确认请求超时未处理，本次调用未执行。"
     : `Denied by user${outcome.reason ? `\n用户拒绝理由：${outcome.reason}` : ""}`;
   return { block: true, reason };
+}
+
+async function permissionActivationGate(g: GateInput, rawKeys: string[]): Promise<GateResult> {
+  if (!g.productionId) return { block: true, reason: "权限激活需要关联制作。" };
+  const keys = [...new Set(rawKeys)];
+  const card = permissionActivationCard(keys);
+  const { id, info, reused } = await createApproval({
+    runId: g.runId,
+    sessionId: g.sessionId,
+    toolCallId: g.toolCallId,
+    tool: g.tool.name,
+    args: { permissions: keys, requestedByTool: g.tool.mcpName },
+    card,
+    preview: { permissions: keys },
+  });
+  await getPool().query(`UPDATE agent_run SET status = 'awaiting_approval' WHERE id = $1`, [g.runId]);
+  if (!reused) g.publisher.publish({ type: "approval", approval: info });
+
+  const outcome = await awaitApproval(id, g.signal, undefined, { isDetached: g.isDetached });
+  if (outcome.kind === "detached") return { block: true, reason: "本进程已脱离，权限确认由下一个进程接管" };
+  await getPool().query(`UPDATE agent_run SET status = 'running' WHERE id = $1 AND status = 'awaiting_approval'`, [g.runId]);
+  if (outcome.kind !== "allowed") {
+    const decision = outcome.kind === "expired" ? "timeout" : "deny";
+    g.publisher.publish({ type: "approval-resolved", id, decision });
+    return {
+      block: true,
+      reason: outcome.kind === "expired"
+        ? "权限激活确认已超时，本次调用未执行。"
+        : `用户暂未激活权限${outcome.reason ? `\n用户理由：${outcome.reason}` : ""}`,
+    };
+  }
+
+  const result = await activatePendingPermissions(g.userId, g.productionId, keys);
+  await markApprovalExecuted(id);
+  if (!result.ok) {
+    g.publisher.publish({ type: "approval-resolved", id, decision: "activation-failed" });
+    return { block: true, reason: `权限激活失败：${result.error}。本次调用未执行。` };
+  }
+  g.publisher.publish({ type: "approval-resolved", id, decision: outcome.decision });
+  g.publisher.publish({
+    type: "mutation",
+    scope: "permissions",
+    action: "updated",
+    productionId: g.productionId,
+    tool: g.tool.mcpName,
+  });
+  return undefined;
 }
 
 function str(v: unknown): string | undefined {

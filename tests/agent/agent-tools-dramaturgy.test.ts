@@ -10,7 +10,7 @@ import {
   runDramaturgyProposal, previewDramaturgyProposal, DRAMATURGY_PROPOSE_TOOLS,
   DENIED_SCENE_VIEW, DENIED_CHARACTER_VIEW,
 } from "@/lib/agent/tools/dramaturgy-tools";
-import { approvalCard } from "@/lib/agent/runtime/cards";
+import { approvalCard, permissionActivationCard } from "@/lib/agent/runtime/cards";
 import { buildTools, bareName } from "@/lib/agent/runtime/tools";
 
 // 构作族的核心保证：一个写工具横跨多把钥匙 → ①权限查询工具给出三态；②写工具按 REST
@@ -272,5 +272,17 @@ describe("注册表与卡片", () => {
     const ok = approvalCard("production-character_propose_delete", { charIds: ["c1"], summary: "去重" }, { hasPermission: true, notes: ["小李"] });
     expect(ok.severity).toBe("warning");
     expect(ok.description).toContain("权限齐全");
+  });
+
+  it("权限激活卡与页面激活面共用人话标签，并去重", () => {
+    const card = permissionActivationCard([
+      "node:scene/*/synopsis@edit",
+      "node:scene/*/synopsis@edit",
+      "node:character/*@edit",
+    ]);
+    expect(card).toMatchObject({ purpose: "permission-activation", severity: "info" });
+    expect(card.title).toContain("2 项");
+    expect(card.description).toContain("章节/段落 · 编辑章节/段落梗概");
+    expect(card.description).toContain("角色 · 编辑角色");
   });
 });

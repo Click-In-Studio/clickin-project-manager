@@ -433,20 +433,23 @@ export async function runScriptProposal(userId: string, productionId: string, ba
   return plan.run();
 }
 
-export type ScriptWritePreview = { hasPermission: boolean; notes: string[]; error?: string };
+export type ScriptWritePreview = { hasPermission: boolean; notes: string[]; selfConfirmKeys: string[]; error?: string };
 
 /** 确认卡片用的预览：与执行同一份规划与判定，只看不做。 */
 export async function previewScriptProposal(userId: string, productionId: string, bareTool: string, args: Record<string, unknown>): Promise<ScriptWritePreview> {
   const planner = PLANNERS[bareTool];
-  if (!planner) return { hasPermission: false, notes: [], error: `未知的剧本写工具：${bareTool}` };
+  if (!planner) return { hasPermission: false, notes: [], selfConfirmKeys: [], error: `未知的剧本写工具：${bareTool}` };
   const ctx = await writePrelude(userId, productionId);
-  if (typeof ctx === "string") return { hasPermission: false, notes: [], error: ctx };
+  if (typeof ctx === "string") return { hasPermission: false, notes: [], selfConfirmKeys: [], error: ctx };
   const plan = await planner(ctx, productionId, args ?? {});
-  if ("error" in plan) return { hasPermission: false, notes: [], error: plan.error };
+  if ("error" in plan) return { hasPermission: false, notes: [], selfConfirmKeys: [], error: plan.error };
   const checks = await checkNodes(ctx.actor, productionId, plan.wants);
   const blocked = checks.filter((c) => !c.result.allowed);
   return {
     hasPermission: blocked.length === 0,
     notes: [...plan.notes, ...blocked.map((c) => describeBlockedKey(c, productionId))],
+    selfConfirmKeys: blocked
+      .filter((c) => !c.result.allowed && c.result.reason === "needs_self_confirm")
+      .map((c) => c.key),
   };
 }

@@ -729,6 +729,7 @@ export default function AgentPopout({
             );
           }
           if (b.kind === "approval") {
+            const isPermissionActivation = b.approval.purpose === "permission-activation";
             const severityStyle =
               b.approval.severity === "critical"
                 ? "border-red-300 bg-red-50"
@@ -738,19 +739,21 @@ export default function AgentPopout({
             // 按钮由后端的 allowedDecisions 驱动，恒为 allow-once / deny（"始终允许"
             // 需要持久化那一半，没做就不给按钮，见 lib/agent/runtime/approvals.ts）
             const decisionLabel: Record<string, string> = {
-              "allow-once": "允许一次",
-              deny: "拒绝",
+              "allow-once": isPermissionActivation ? "激活并继续" : "允许一次",
+              deny: isPermissionActivation ? "暂不激活" : "拒绝",
             };
             return (
               <div key={i} className="flex justify-start">
                 <div className={`max-w-[92%] rounded-xl border px-3.5 py-3 text-sm ${severityStyle}`}>
-                  <p className="font-medium text-zinc-800">⚠ 需要确认：{b.approval.title}</p>
+                  <p className="font-medium text-zinc-800">
+                    {isPermissionActivation ? "🔓 权限确认：" : "⚠ 需要确认："}{b.approval.title}
+                  </p>
                   {b.approval.description && (
                     <p className="mt-1 whitespace-pre-wrap break-words text-xs text-zinc-600">{b.approval.description}</p>
                   )}
                   {/* 不是所有 approval 都对应一个 wiki proposal（未来会有别的写工具）——
                       按钮始终渲染，找不到详情让 modal 自己兜底，省一次预探测往返。 */}
-                  {b.approval.toolCallId && productionId && (
+                  {!isPermissionActivation && b.approval.toolCallId && productionId && (
                     <button
                       onClick={() => setPreviewToolCallId(b.approval.toolCallId!)}
                       className="mt-1.5 text-[11px] font-medium text-zinc-500 underline hover:text-zinc-800"
@@ -760,7 +763,11 @@ export default function AgentPopout({
                   )}
                   {b.decision ? (
                     <p className="mt-2 text-xs font-medium text-zinc-600">
-                      {b.decision.startsWith("allow") ? "✓ 已允许" : b.decision === "deny" ? "✕ 已拒绝" : `已处理（${b.decision}）`}
+                      {b.decision.startsWith("allow")
+                        ? isPermissionActivation ? "✓ 已激活" : "✓ 已允许"
+                        : b.decision === "deny"
+                          ? isPermissionActivation ? "暂未激活" : "✕ 已拒绝"
+                          : b.decision === "activation-failed" ? "激活失败" : `已处理（${b.decision}）`}
                     </p>
                   ) : denyingId === b.approval.id ? (
                     <div className="mt-2 space-y-2">
@@ -797,8 +804,11 @@ export default function AgentPopout({
                           disabled={b.resolving}
                           onClick={() => {
                             if (d === "deny") {
-                              setDenyingId(b.approval.id);
-                              setDenyReason("");
+                              if (isPermissionActivation) decideApproval(b.approval.id, "deny");
+                              else {
+                                setDenyingId(b.approval.id);
+                                setDenyReason("");
+                              }
                             } else {
                               decideApproval(b.approval.id, d);
                             }

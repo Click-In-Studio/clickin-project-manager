@@ -2,8 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import type { AssistantMessage, StreamFn, ToolCall } from "../../vendor/openclaw/packages/llm-core/src/types";
 import { getPool } from "@/lib/pg";
-import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
+import { makeProduction, cleanupProduction, makeScene, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
+import { addProductionMember } from "@/lib/perm/member-db";
 import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
 import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent/chat/stream-reducer";
 import {
@@ -76,12 +77,38 @@ async function collectUntilTerminal(sessionId: string, timeoutMs = 10_000): Prom
 
 describe("agent-runtime service", () => {
   let userId: string;
+  let pendingUserId: string;
+  let denyingUserId: string;
   let prodId: string;
+  let pendingSceneId: string;
   const sessions: string[] = [];
 
   beforeAll(async () => {
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-svc-${shortId()}`, null, false));
-    ({ prodId } = await makeProduction(userId));
+    ({ userId: pendingUserId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-perm-${shortId()}`, null, false));
+    ({ userId: denyingUserId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-deny-${shortId()}`, null, false));
+    const made = await makeProduction(userId);
+    prodId = made.prodId;
+    pendingSceneId = await makeScene(prodId, made.versionId, { number: "1", name: "待改场次" });
+    await addProductionMember(prodId, pendingUserId);
+    await addProductionMember(prodId, denyingUserId);
+    const roleId = `role_${shortId()}`;
+    await getPool().query(
+      "INSERT INTO production_role (id, production_id, name) VALUES ($1, $2, '待激活构作')",
+      [roleId, prodId],
+    );
+    await getPool().query(
+      "INSERT INTO production_role_permission (role_id, permission_key) VALUES ($1, 'node:scene/*/synopsis@edit')",
+      [roleId],
+    );
+    await getPool().query(
+      "INSERT INTO production_member_role (production_id, user_id, role_id) VALUES ($1, $2, $3)",
+      [prodId, pendingUserId, roleId],
+    );
+    await getPool().query(
+      "INSERT INTO production_member_role (production_id, user_id, role_id) VALUES ($1, $2, $3)",
+      [prodId, denyingUserId, roleId],
+    );
     runtimeOverrides.apiKey = "test-key";
   });
 
@@ -246,6 +273,103 @@ describe("agent-runtime service", () => {
     const approval = await getPool().query<{ status: string; executed_at: Date | null }>(`SELECT status, executed_at FROM agent_approval WHERE id = $1`, [approvalId]);
     expect(approval.rows[0].status).toBe("allowed");
     expect(approval.rows[0].executed_at).not.toBeNull();
+  });
+
+  it("写工具命中 🔓：inline 激活 → 权限 mutation → 原写确认 → 执行", async () => {
+    const writeCall: ToolCall = {
+      type: "toolCall",
+      id: "c_activate_permission",
+      name: exposedName("production.scene_propose_update"),
+      arguments: { updates: [{ sceneId: pendingSceneId, synopsis: "激活后写入" }], summary: "补充梗概" },
+    };
+    const { streamFn } = scripted([{ calls: [writeCall] }, { text: "已完成" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = createNewSessionKey(pendingUserId, prodId);
+    sessions.push(key);
+    await startRun({ sessionId: key, userId: pendingUserId, message: "帮我修改这场的构作梗概" });
+
+    let activation: Extract<StreamLine, { type: "approval" }> | undefined;
+    for (let i = 0; i < 200 && !activation; i++) {
+      activation = (await readEventsSince(key, 0)).map((r) => r.line).find(
+        (line): line is Extract<StreamLine, { type: "approval" }> =>
+          line.type === "approval" && line.approval?.purpose === "permission-activation",
+      );
+      if (!activation) await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(activation?.approval?.description).toContain("编辑章节/段落梗概");
+    await resolveApproval(activation!.approval!.id, "allow-once", pendingUserId);
+
+    let writeApproval: Extract<StreamLine, { type: "approval" }> | undefined;
+    for (let i = 0; i < 200 && !writeApproval; i++) {
+      writeApproval = (await readEventsSince(key, 0)).map((r) => r.line).find(
+        (line): line is Extract<StreamLine, { type: "approval" }> =>
+          line.type === "approval" && line.approval?.purpose !== "permission-activation",
+      );
+      if (!writeApproval) await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(writeApproval?.approval?.id).not.toBe(activation?.approval?.id);
+    const interim = (await readEventsSince(key, 0)).map((r) => r.line);
+    expect(interim).toContainEqual(expect.objectContaining({
+      type: "mutation", scope: "permissions", action: "updated", productionId: prodId,
+    }));
+    const grant = await getPool().query(
+      `SELECT 1 FROM production_member_grant
+       WHERE production_id = $1 AND user_id = $2 AND resource_type = 'scene'
+         AND resource_id = '*' AND resource_sub = 'synopsis' AND permission_level = 'edit' AND is_revoked = false`,
+      [prodId, pendingUserId],
+    );
+    expect(grant.rowCount).toBe(1);
+
+    await resolveApproval(writeApproval!.approval!.id, "allow-once", pendingUserId);
+    const lines = await collectUntilTerminal(key);
+    await waitForIdle(key);
+    expect(lines.filter((line) => line.type === "approval")).toHaveLength(2);
+    expect(lines).toContainEqual(expect.objectContaining({ type: "mutation", scope: "scene", action: "updated" }));
+    const scene = await getPool().query<{ synopsis: string }>(
+      "SELECT synopsis FROM scene_version WHERE scene_id = $1 AND version_id = (SELECT active_version_id FROM production WHERE id = $2)",
+      [pendingSceneId, prodId],
+    );
+    expect(scene.rows[0]?.synopsis).toBe("激活后写入");
+  });
+
+  it("权限激活选择暂不激活：不落 grant、不出现写确认、不执行", async () => {
+    const writeCall: ToolCall = {
+      type: "toolCall",
+      id: "c_deny_activation",
+      name: exposedName("production.scene_propose_update"),
+      arguments: { updates: [{ sceneId: pendingSceneId, synopsis: "不应写入" }], summary: "测试拒绝激活" },
+    };
+    const { streamFn, seen } = scripted([{ calls: [writeCall] }, { text: "没有修改" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = createNewSessionKey(denyingUserId, prodId);
+    sessions.push(key);
+    await startRun({ sessionId: key, userId: denyingUserId, message: "修改构作梗概" });
+
+    let activation: Extract<StreamLine, { type: "approval" }> | undefined;
+    for (let i = 0; i < 200 && !activation; i++) {
+      activation = (await readEventsSince(key, 0)).map((r) => r.line).find(
+        (line): line is Extract<StreamLine, { type: "approval" }> =>
+          line.type === "approval" && line.approval?.purpose === "permission-activation",
+      );
+      if (!activation) await new Promise((r) => setTimeout(r, 25));
+    }
+    await resolveApproval(activation!.approval!.id, "deny", denyingUserId);
+    const lines = await collectUntilTerminal(key);
+    await waitForIdle(key);
+
+    expect(lines.filter((line) => line.type === "approval")).toHaveLength(1);
+    expect(lines.some((line) => line.type === "mutation")).toBe(false);
+    expect(seen[1].messages.some((message) => JSON.stringify(message).includes("用户暂未激活权限"))).toBe(true);
+    const grants = await getPool().query(
+      "SELECT 1 FROM production_member_grant WHERE production_id = $1 AND user_id = $2 AND grant_source = 'self_confirmed' AND is_revoked = false",
+      [prodId, denyingUserId],
+    );
+    expect(grants.rowCount).toBe(0);
+    const scene = await getPool().query<{ synopsis: string }>(
+      "SELECT synopsis FROM scene_version WHERE scene_id = $1 AND version_id = (SELECT active_version_id FROM production WHERE id = $2)",
+      [pendingSceneId, prodId],
+    );
+    expect(scene.rows[0]?.synopsis).toBe("激活后写入");
   });
 
   it("abort：模型调用进行中被中止 → aborted 行、run=aborted、会话空闲", async () => {
