@@ -12,6 +12,7 @@ export function uid(prefix: string): string {
 export type { AssetType } from "./types";
 import type { AssetType } from "./types";
 export type StorageType = "r2" | "feishu_link";
+export type FileVersionPolicy = "append" | "single";
 
 // is_public 已随 #420 迁到 node 壳上（asset 列已删）——语义不变：只免除结构面
 // 要求、仍需能力票（lib/asset/perm.ts）。
@@ -24,6 +25,7 @@ export type Asset = {
   fileName: string;
   mimeType: string | null;
   storageType: StorageType;
+  fileVersionPolicy: FileVersionPolicy;
   feishuUrl: string | null;
   createdAt: string;
 };
@@ -44,7 +46,7 @@ export type AssetFile = {
 export type AssetRow = {
   id: string; production_id: string; uploader_user_id: string;
   asset_type: string; name: string | null; file_name: string; mime_type: string | null;
-  storage_type: string; feishu_url: string | null;
+  storage_type: string; feishu_url: string | null; file_version_policy: string;
   created_at: Date;
 };
 export function rowToAsset(r: AssetRow): Asset {
@@ -52,7 +54,8 @@ export function rowToAsset(r: AssetRow): Asset {
     id: r.id, productionId: r.production_id, uploaderUserId: r.uploader_user_id,
     assetType: r.asset_type as AssetType, name: r.name, fileName: r.file_name, mimeType: r.mime_type,
     storageType: r.storage_type as StorageType,
-    feishuUrl: r.feishu_url, createdAt: r.created_at.toISOString(),
+    feishuUrl: r.feishu_url, fileVersionPolicy: r.file_version_policy as FileVersionPolicy,
+    createdAt: r.created_at.toISOString(),
   };
 }
 
@@ -91,6 +94,10 @@ export async function createAsset(params: {
   /** 树可枚举性。缺省 false＝私有（原「无 production mount」语义）；true＝
    *  全员可枚举（原「项目全局」共享区语义）。 */
   listable?: boolean;
+  /** 文件集合策略。single 资产只允许 createAsset 同事务创建的这一行文件。 */
+  fileVersionPolicy?: FileVersionPolicy;
+  /** 财务凭证等上下文资产不从通用 asset 权限面暴露。 */
+  grantUploader?: boolean;
 }): Promise<{ asset: Asset; file: AssetFile; nodeId: string }> {
   const assetId = uid("ast");
   const fileId = uid("af");
@@ -100,11 +107,11 @@ export async function createAsset(params: {
     await client.query("BEGIN");
     await client.query(
       `INSERT INTO asset (id, production_id, uploader_user_id, asset_type, name, file_name, mime_type,
-         storage_type, feishu_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+         storage_type, feishu_url, file_version_policy)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [assetId, params.productionId, params.uploaderUserId, params.assetType, params.name ?? null,
        params.fileName, params.mimeType,
-       params.storageType, params.feishuUrl ?? null]
+       params.storageType, params.feishuUrl ?? null, params.fileVersionPolicy ?? "append"]
     );
     // 壳节点与内容行同事务（1:1 不变量不许有窗口）；父缺省=「资产」根懒建
     const parentId = params.nodeParentId ?? await ensureAssetsRootAnchor(params.productionId, client);
@@ -112,39 +119,43 @@ export async function createAsset(params: {
       productionId: params.productionId, kind: "asset",
       parentId, sortKey: null, assetId,
       listable: params.listable ?? false, isPublic: params.isPublic ?? false,
-      createdBy: params.uploaderUserId,
+      // 上下文资产的真实上传者仍在 asset.uploader_user_id；node.created_by 置空，
+      // 避免 node 枚举面的“创建者析取”把财务凭证带进普通资产树。
+      createdBy: params.grantUploader === false ? null : params.uploaderUserId,
     }, client);
     // 创建者行集（批D，定式 C-5/§0.9）：uploader 十行 + person 归属。
     // own 键（rename/overwrite/mount/…）已退役，由此行集承担；存续按 §0.6 person 覆盖。
     // #236：uploader 行集先过策略开关。asset 无外部归属信号，其 grants@edit 由 M-14
     // 存在性子句强制保留、不在词汇表里；可配的是 *@delete / publication@c,d / shares@create。
-    const uploaderRows = await policyFilteredRows(
-      params.productionId, "asset", "uploader",
-      [["meta", "view"], ["file", "view"],
-       ["publication", "view"], ["publication", "create"], ["publication", "delete"],
-       ["meta", "edit"], ["file", "create"],
-       ["*", "delete"], ["shares", "create"], ["grants", "edit"]],
-      client,
-    );
-    await client.query(
-      `INSERT INTO production_member_grant
-         (production_id, user_id, resource_type, resource_id, resource_sub,
-          permission_level, grant_source, confirmed_by)
-       SELECT $1, $2, 'asset', $3, s.sub, s.verb, 'self_confirmed', $2
-       FROM UNNEST($4::text[], $5::text[]) AS s(sub, verb)
-       ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
-         WHERE is_revoked = false
-       DO NOTHING`,
-      [params.productionId, params.uploaderUserId, assetId,
-       uploaderRows.map((r) => r[0]), uploaderRows.map((r) => r[1])],
-    );
-    await client.query(
-      `INSERT INTO resource_person_manage
-         (production_id, user_id, resource_type, resource_id, resource_sub, established_by)
-       VALUES ($1, $2, 'asset', $3, '*', $2)
-       ON CONFLICT DO NOTHING`,
-      [params.productionId, params.uploaderUserId, assetId],
-    );
+    if (params.grantUploader !== false) {
+      const uploaderRows = await policyFilteredRows(
+        params.productionId, "asset", "uploader",
+        [["meta", "view"], ["file", "view"],
+         ["publication", "view"], ["publication", "create"], ["publication", "delete"],
+         ["meta", "edit"], ["file", "create"],
+         ["*", "delete"], ["shares", "create"], ["grants", "edit"]],
+        client,
+      );
+      await client.query(
+        `INSERT INTO production_member_grant
+           (production_id, user_id, resource_type, resource_id, resource_sub,
+            permission_level, grant_source, confirmed_by)
+         SELECT $1, $2, 'asset', $3, s.sub, s.verb, 'self_confirmed', $2
+         FROM UNNEST($4::text[], $5::text[]) AS s(sub, verb)
+         ON CONFLICT (production_id, user_id, resource_type, resource_id, resource_sub, permission_level)
+           WHERE is_revoked = false
+         DO NOTHING`,
+        [params.productionId, params.uploaderUserId, assetId,
+         uploaderRows.map((r) => r[0]), uploaderRows.map((r) => r[1])],
+      );
+      await client.query(
+        `INSERT INTO resource_person_manage
+           (production_id, user_id, resource_type, resource_id, resource_sub, established_by)
+         VALUES ($1, $2, 'asset', $3, '*', $2)
+         ON CONFLICT DO NOTHING`,
+        [params.productionId, params.uploaderUserId, assetId],
+      );
+    }
     const fileRes = await client.query<AssetFileRow>(
       `INSERT INTO asset_file (id, asset_id, r2_key, thumbnail_r2_key, file_size)
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
@@ -173,7 +184,9 @@ export async function getAssetFile(fileId: string): Promise<AssetFile | null> {
 
 export async function listAssets(productionId: string): Promise<Asset[]> {
   const res = await getPool().query<AssetRow>(
-    `SELECT * FROM asset WHERE production_id = $1 ORDER BY created_at DESC`,
+    `SELECT * FROM asset
+      WHERE production_id = $1 AND asset_type <> 'financial_document'
+      ORDER BY created_at DESC`,
     [productionId]
   );
   return res.rows.map(rowToAsset);
@@ -210,6 +223,16 @@ export async function deleteAsset(assetId: string): Promise<{ r2Keys: string[] }
       `SELECT r2_key, thumbnail_r2_key, metadata->>'sidecarKey' AS sidecar_key
        FROM asset_file WHERE asset_id = $1 FOR UPDATE`, [assetId]
     );
+    const linked = await client.query<{ exists: boolean }>(
+      `SELECT EXISTS(
+         SELECT 1 FROM production_expense_document d
+         JOIN asset_file af ON af.id = d.asset_file_id
+         WHERE af.asset_id = $1
+       ) AS exists`,
+      [assetId],
+    );
+    if (linked.rows[0].exists)
+      throw new AssetInUseError("该凭证已关联报销，不能从资产入口删除");
     const deleted = await client.query<{ production_id: string }>(
       `DELETE FROM asset WHERE id = $1 RETURNING production_id`, [assetId],
     );
@@ -236,6 +259,8 @@ export async function deleteAsset(assetId: string): Promise<{ r2Keys: string[] }
     client.release();
   }
 }
+
+export class AssetInUseError extends Error {}
 
 // ─── Asset file resolution ────────────────────────────────────────────────────
 
@@ -276,6 +301,12 @@ export async function addUniversalAssetFile(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const locked = await client.query<{ file_version_policy: FileVersionPolicy }>(
+      `SELECT file_version_policy FROM asset WHERE id = $1 FOR UPDATE`, [assetId],
+    );
+    if (!locked.rows[0]) throw new Error(`asset not found: ${assetId}`);
+    if (locked.rows[0].file_version_policy === "single")
+      throw new AssetFilePolicyError("该资产不支持上传新版本");
     const res = await client.query<AssetFileRow>(
       `INSERT INTO asset_file (id, asset_id, r2_key, thumbnail_r2_key, file_size)
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
@@ -296,6 +327,8 @@ export async function addUniversalAssetFile(
     client.release();
   }
 }
+
+export class AssetFilePolicyError extends Error {}
 
 // ─── 工作台读面（#420 第二批 PR-C）────────────────────────────────────────────
 

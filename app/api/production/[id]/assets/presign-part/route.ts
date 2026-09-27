@@ -34,7 +34,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   // #456：assetId 非空＝为该资产传新版本，门是它身上的 file@create（与注册端点
   // 同门）；缺省＝新建资产，门不变。
-  if (!await canUploadAssetBytes(permCtx, id, sp.get("assetId")))
+  const purpose = sp.get("purpose") === "expense_document" ? "expense_document" : null;
+  if (purpose && access.isArchived)
+    return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
+  if (!await canUploadAssetBytes(permCtx, id, sp.get("assetId"), purpose))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   // 1-hour expiry — enough for a single 64 MB chunk at 1 MB/s worst-case

@@ -10,7 +10,7 @@
  *   7. 金额用 NUMERIC，过 API 不丢精度
  *   8. 删科目不连坐删支出（已发生的钱不因整理科目表而消失）
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { PATCH as patchCategory } from "@/app/api/production/[id]/finance/categories/[categoryId]/route";
@@ -23,11 +23,24 @@ import {
 } from "@/lib/approval/approval-routing";
 import {
   approveExpense, cancelExpense, createBudgetCategory, deleteBudgetCategory,
+  addExpenseDocument,
   escalateExpiredExpenses, FinanceError, getExpense, listBudgetCategories, listExpenses,
   listPendingExpenses, rejectExpense, submitExpense, updateBudgetCategory,
   listBudgetCategoryOptions,
 } from "@/lib/ops/finance-db";
+import {
+  addUniversalAssetFile, AssetFilePolicyError, AssetInUseError, createAsset, deleteAsset,
+} from "@/lib/asset/db";
 import { GET as getExpenses } from "@/app/api/production/[id]/finance/expenses/route";
+import {
+  DELETE as deleteExpenseDocument, GET as getExpenseDocument,
+} from "@/app/api/production/[id]/finance/expense-documents/[assetId]/route";
+import { POST as appendExpenseDocument } from "@/app/api/production/[id]/finance/expenses/[expenseId]/documents/route";
+
+vi.mock("@/lib/r2", () => ({
+  presignedGet: vi.fn(() => "https://files.example/signed"),
+  deleteR2Object: vi.fn(async () => {}),
+}));
 
 let prodId: string;
 let ownerId: string, submitterId: string, deptPocId: string, strangerId: string;
@@ -403,6 +416,218 @@ describe("8. 删科目不连坐删支出", () => {
     expect(after).not.toBeNull();
     expect(after!.categoryId).toBeNull();
     expect(after!.amount).toBe("1200.00");
+  });
+});
+
+describe("#713 报销凭证", () => {
+  async function makeDocument(uploaderUserId = submitterId, fileName = `票据${shortId()}.pdf`) {
+    return createAsset({
+      productionId: prodId,
+      uploaderUserId,
+      assetType: "financial_document",
+      fileName,
+      mimeType: "application/pdf",
+      storageType: "r2",
+      r2Key: `assets/${shortId()}/${fileName}`,
+      listable: false,
+      fileVersionPolicy: "single",
+      grantUploader: false,
+    });
+  }
+
+  it("同一笔报销可以固定关联发票、收据和其他依据", async () => {
+    const invoice = await makeDocument();
+    const receipt = await makeDocument(submitterId, `收据${shortId()}.jpg`);
+    const other = await makeDocument(submitterId, `订单${shortId()}.png`);
+    const expense = await submitExpense({
+      productionId: prodId,
+      categoryId: null,
+      title: "混合凭证",
+      amount: "123.45",
+      submittedBy: submitterId,
+      invoiceRequirement: "required",
+      documents: [
+        { assetFileId: invoice.file.id, kind: "invoice" },
+        { assetFileId: receipt.file.id, kind: "receipt" },
+        { assetFileId: other.file.id, kind: "other" },
+      ],
+    });
+
+    expect(expense.invoiceState).toBe("provided");
+    expect(expense.documents.map(document => document.kind)).toEqual(["invoice", "receipt", "other"]);
+    expect(expense.documents.map(document => document.assetFileId)).toEqual([
+      invoice.file.id, receipt.file.id, other.file.id,
+    ]);
+  });
+
+  it("只有收据或零凭证时保持待补票；明确无票时保存原因", async () => {
+    const receipt = await makeDocument(submitterId, `收据${shortId()}.jpg`);
+    const receiptOnly = await submitExpense({
+      productionId: prodId, categoryId: null, title: "只有收据", amount: "20.00",
+      submittedBy: submitterId, invoiceRequirement: "required",
+      documents: [{ assetFileId: receipt.file.id, kind: "receipt" }],
+    });
+    expect(receiptOnly.invoiceState).toBe("pending");
+
+    const noDocument = await submitExpense({
+      productionId: prodId, categoryId: null, title: "稍后补票", amount: "21.00",
+      submittedBy: submitterId, invoiceRequirement: "required", documents: [],
+    });
+    expect(noDocument.invoiceState).toBe("pending");
+    expect(noDocument.documents).toEqual([]);
+
+    const waived = await submitExpense({
+      productionId: prodId, categoryId: null, title: "个人卖家", amount: "22.00",
+      submittedBy: submitterId, invoiceRequirement: "waived",
+      invoiceWaiverReason: "个人卖家无法开票", documents: [],
+    });
+    expect(waived.invoiceState).toBe("waived");
+    expect(waived.invoiceWaiverReason).toBe("个人卖家无法开票");
+  });
+
+  it("不能绑定他人暂存的凭证，也不能给 single asset 追加版本", async () => {
+    const foreign = await makeDocument(ownerId);
+    await expect(submitExpense({
+      productionId: prodId, categoryId: null, title: "冒用凭证", amount: "10.00",
+      submittedBy: submitterId, invoiceRequirement: "required",
+      documents: [{ assetFileId: foreign.file.id, kind: "invoice" }],
+    })).rejects.toMatchObject({ reason: "invalid_document" });
+
+    await expect(addUniversalAssetFile(
+      foreign.asset.id, `assets/${shortId()}/replacement.pdf`, null, 10,
+    )).rejects.toBeInstanceOf(AssetFilePolicyError);
+  });
+
+  it("已关联报销的凭证不能从通用资产删除", async () => {
+    const document = await makeDocument();
+    await submitExpense({
+      productionId: prodId, categoryId: null, title: "删除保护", amount: "11.00",
+      submittedBy: submitterId, invoiceRequirement: "required",
+      documents: [{ assetFileId: document.file.id, kind: "invoice" }],
+    });
+    await expect(deleteAsset(document.asset.id)).rejects.toBeInstanceOf(AssetInUseError);
+  });
+});
+
+describe("#713 财务凭证上下文访问", () => {
+  function req(userId?: string, method = "GET", download = false) {
+    const request = new NextRequest(`http://localhost/api/x${download ? "?download=1" : ""}`, { method });
+    if (userId) request.cookies.set(SESSION_COOKIE, createSession({
+      userId, name: "测试", avatarUrl: null, isAdmin: false,
+    }));
+    return request;
+  }
+
+  it("未登录是 401，非项目成员是 403", async () => {
+    const missingCtx = { params: Promise.resolve({ id: prodId, assetId: "missing" }) };
+    expect((await getExpenseDocument(req(), missingCtx)).status).toBe(401);
+
+    const outsider = (await upsertFeishuUser(
+      `test-open-${shortId()}`, `非成员${shortId()}`, null, false,
+    )).userId;
+    expect((await getExpenseDocument(req(outsider), missingCtx)).status).toBe(403);
+  });
+
+  it("只有报销上下文的人能预览：提交人和当前审批人可见，普通成员不可见", async () => {
+    const category = await makeCategory("凭证上下文");
+    const document = await createAsset({
+      productionId: prodId, uploaderUserId: submitterId, assetType: "financial_document",
+      fileName: "上下文票据.pdf", mimeType: "application/pdf", storageType: "r2",
+      r2Key: `assets/${shortId()}/context.pdf`, fileVersionPolicy: "single", grantUploader: false,
+    });
+    const expense = await submitExpense({
+      productionId: prodId, categoryId: category.id, title: "上下文访问", amount: "12.00",
+      submittedBy: submitterId, invoiceRequirement: "required",
+      documents: [{ assetFileId: document.file.id, kind: "invoice" }],
+    });
+    const ctx = () => ({ params: Promise.resolve({ id: prodId, assetId: document.asset.id }) });
+
+    expect((await getExpenseDocument(req(submitterId), ctx())).status).toBe(200);
+    expect(expense.currentApproverIds).toContain(deptPocId);
+    expect((await getExpenseDocument(req(deptPocId), ctx())).status).toBe(200);
+    expect((await getExpenseDocument(req(strangerId), ctx())).status).toBe(403);
+
+    await rejectExpense(expense.id, prodId, deptPocId);
+    // 审批上下文结束后不遗留永久 asset grant。
+    expect((await getExpenseDocument(req(deptPocId), ctx())).status).toBe(403);
+  });
+
+  it("提交前上传者可以预览和删除暂存凭证", async () => {
+    const document = await createAsset({
+      productionId: prodId, uploaderUserId: submitterId, assetType: "financial_document",
+      fileName: "待删除票据.pdf", mimeType: "application/pdf", storageType: "r2",
+      r2Key: `assets/${shortId()}/staged.pdf`, fileVersionPolicy: "single", grantUploader: false,
+    });
+    const ctx = () => ({ params: Promise.resolve({ id: prodId, assetId: document.asset.id }) });
+    expect((await getExpenseDocument(req(submitterId), ctx())).status).toBe(200);
+    // 全项目支出查看资格也不能旁路查看尚未提交的暂存文件。
+    expect((await getExpenseDocument(req(ownerId), ctx())).status).toBe(403);
+    expect((await deleteExpenseDocument(req(submitterId, "DELETE"), ctx())).status).toBe(200);
+  });
+});
+
+describe("#713 提交后补票", () => {
+  function postReq(userId: string | null, body: unknown) {
+    const request = new NextRequest("http://localhost/api/x", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (userId) request.cookies.set(SESSION_COOKIE, createSession({
+      userId, name: "测试", avatarUrl: null, isAdmin: false,
+    }));
+    return request;
+  }
+
+  async function stagedDocument() {
+    return createAsset({
+      productionId: prodId, uploaderUserId: submitterId, assetType: "financial_document",
+      fileName: `补票${shortId()}.pdf`, mimeType: "application/pdf", storageType: "r2",
+      r2Key: `assets/${shortId()}/supplement.pdf`, fileVersionPolicy: "single", grantUploader: false,
+    });
+  }
+
+  it("提交人可给待审批报销追加凭证；未登录、非成员和其他成员不能", async () => {
+    const expense = await submitExpense({
+      productionId: prodId, categoryId: null, title: "待补票 API", amount: "15.00",
+      submittedBy: submitterId, invoiceRequirement: "required", documents: [],
+    });
+    const document = await stagedDocument();
+    const body = { assetFileId: document.file.id, kind: "invoice" };
+    const ctx = () => ({ params: Promise.resolve({ id: prodId, expenseId: expense.id }) });
+
+    expect((await appendExpenseDocument(postReq(null, body), ctx())).status).toBe(401);
+    const outsider = (await upsertFeishuUser(
+      `test-open-${shortId()}`, `补票非成员${shortId()}`, null, false,
+    )).userId;
+    expect((await appendExpenseDocument(postReq(outsider, body), ctx())).status).toBe(403);
+    expect((await appendExpenseDocument(postReq(strangerId, body), ctx())).status).toBe(403);
+    expect((await appendExpenseDocument(postReq(submitterId, body), ctx())).status).toBe(201);
+    expect((await getExpense(expense.id, prodId))!.invoiceState).toBe("provided");
+  });
+
+  it("已批准但待补票的报销仍可追加；驳回后不可追加", async () => {
+    const approved = await submitExpense({
+      productionId: prodId, categoryId: null, title: "批准后补票", amount: "16.00",
+      submittedBy: submitterId, invoiceRequirement: "required", documents: [],
+    });
+    await approveExpense(approved.id, prodId, approved.currentApproverIds[0]);
+    const approvedDocument = await stagedDocument();
+    expect((await addExpenseDocument({
+      expenseId: approved.id, productionId: prodId, submittedBy: submitterId,
+      assetFileId: approvedDocument.file.id, kind: "invoice",
+    })).invoiceState).toBe("provided");
+
+    const rejected = await submitExpense({
+      productionId: prodId, categoryId: null, title: "驳回后不能补", amount: "17.00",
+      submittedBy: submitterId, invoiceRequirement: "required", documents: [],
+    });
+    await rejectExpense(rejected.id, prodId, rejected.currentApproverIds[0]);
+    const rejectedDocument = await stagedDocument();
+    await expect(addExpenseDocument({
+      expenseId: rejected.id, productionId: prodId, submittedBy: submitterId,
+      assetFileId: rejectedDocument.file.id, kind: "invoice",
+    })).rejects.toMatchObject({ reason: "not_pending" });
   });
 });
 

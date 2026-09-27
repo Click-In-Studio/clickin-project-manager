@@ -72,7 +72,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         actions: {
           metaEdit: has(metaEdit, a.id),
           delete: has(assetDelete, a.id),
-          addVersion: has(fileCreate, a.id),
+          addVersion: a.fileVersionPolicy === "append" && has(fileCreate, a.id),
           download: has(pubView, a.id) || has(fileView, a.id),
           share: has(grantsEdit, a.id),
           unmount: has(grantsEdit, a.id) || has(pubDelete, a.id),
@@ -94,10 +94,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "权限不足" }, { status: 403 });
-  // 批D：上传 = asset/*@create（原为裸门，按名义键收紧，与批A GET 补门先例一致）
-  if (!await hasEffectiveGrant(access.permCtx, id, "asset", "*", "*", "create"))
-    return Response.json({ error: "权限不足" }, { status: 403 });
-
   const ct = req.headers.get("content-type") ?? "";
 
   // ── JSON body: feishu link OR pre-uploaded R2 registration ─────────────────
@@ -127,10 +123,18 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       /** 缺省落点上下文（#420 收官）：挂载面板上传带宿主、正文嵌图带 doc-sibling。
        *  显式 parentNodeId 优先；解析结果门不过回退资产根。 */
       landing?: unknown;
+      purpose?: string;
     };
 
+    const expenseDocument = body.purpose === "expense_document";
+    const uploadAllowed = expenseDocument
+      ? !access.isArchived && await hasEffectiveGrant(
+          access.permCtx, id, "finance", "*", "expenses", "create")
+      : await hasEffectiveGrant(access.permCtx, id, "asset", "*", "*", "create");
+    if (!uploadAllowed) return Response.json({ error: "权限不足" }, { status: 403 });
+
     // 指定落点 → 落位双门（与 wiki POST 同门：无权移入就不许在此新建）
-    let parentNodeId = body.parentNodeId?.trim() || null;
+    let parentNodeId = expenseDocument ? null : body.parentNodeId?.trim() || null;
     if (parentNodeId) {
       const actor = toActor(session, access.permCtx);
       if (!await canPlaceNodeUnder(actor, id, parentNodeId))
@@ -150,11 +154,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         }
       }
     }
-    const listable = body.listable === true;
+    const listable = expenseDocument ? false : body.listable === true;
 
     // asset_type 列无 CHECK 约束，白名单只在 TS 层——运行时校验防任意串入库
     if (body.assetType !== undefined && !isAssetType(body.assetType))
       return Response.json({ error: "无效的资产类型" }, { status: 400 });
+    if (!expenseDocument && body.assetType === "financial_document")
+      return Response.json({ error: "财务凭证只能从报销入口上传" }, { status: 400 });
 
     if (body.storageType === "r2-multipart") {
       if (!body.r2Key || !body.fileId || !body.fileName || !body.uploadId || !Array.isArray(body.parts))
@@ -168,11 +174,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       const mimeType = body.mimeType ?? "application/octet-stream";
       const { asset, file } = await createAsset({
         productionId: id, uploaderUserId: session.userId,
-        assetType: body.assetType ?? "reference", name: body.name ?? null,
+        assetType: expenseDocument ? "financial_document" : body.assetType ?? "reference",
+        name: expenseDocument ? null : body.name ?? null,
         fileName: body.fileName, mimeType,
         storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: null,
         fileSize: body.fileSize ?? null,
         nodeParentId: parentNodeId, listable,
+        fileVersionPolicy: expenseDocument ? "single" : "append",
+        grantUploader: !expenseDocument,
       });
       // 缩略图/文档解析预热是异步任务（heavy-worker）——上传路径不再同步跑 sharp
       await enqueueAssetPostProcess({ assetFileId: file.id, r2Key: body.r2Key, mimeType, fileName: body.fileName, fileSize: body.fileSize ?? null });
@@ -186,16 +195,22 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       const mimeType = body.mimeType ?? "application/octet-stream";
       const { asset, file } = await createAsset({
         productionId: id, uploaderUserId: session.userId,
-        assetType: body.assetType ?? "reference", name: body.name ?? null,
+        assetType: expenseDocument ? "financial_document" : body.assetType ?? "reference",
+        name: expenseDocument ? null : body.name ?? null,
         fileName: body.fileName, mimeType,
         storageType: "r2", r2Key: body.r2Key, thumbnailR2Key: null,
         fileSize: body.fileSize ?? null,
         nodeParentId: parentNodeId, listable,
+        fileVersionPolicy: expenseDocument ? "single" : "append",
+        grantUploader: !expenseDocument,
       });
       // 同上：后置处理异步化
       await enqueueAssetPostProcess({ assetFileId: file.id, r2Key: body.r2Key, mimeType, fileName: body.fileName, fileSize: body.fileSize ?? null });
       return Response.json({ asset, file }, { status: 201 });
     }
+
+    if (expenseDocument)
+      return Response.json({ error: "财务凭证必须上传文件" }, { status: 400 });
 
     // feishu_link
     if (!body.feishuUrl || !body.fileName)

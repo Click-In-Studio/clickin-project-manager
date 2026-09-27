@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import PageHeader from "@/components/ui/PageHeader";
 import {
-  ExpenseApprovalActions, ExpenseCreateButton,
+  ExpenseAddDocumentButton, ExpenseApprovalActions, ExpenseCreateButton, ExpenseDocumentLinks,
   type ExpenseCategoryOption,
 } from "@/components/ops/FinanceExpenseActions";
 import { redirect, notFound } from "next/navigation";
@@ -93,6 +93,18 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
           {e.categoryName ?? "未归类"} · {STATUS_LABEL[e.status]}
           {(canAllExpenses || approval) && e.submitterName ? ` · ${e.submitterName}` : ""}
         </small>
+        <small style={{ display: "block", marginTop: 4, color: e.invoiceState === "pending" ? "#b45309" : "var(--muted)", fontSize: 9 }}>
+          {e.invoiceState === "provided" && `已附发票 · ${e.documents.length} 份凭证`}
+          {e.invoiceState === "pending" && `待补发票${e.documents.length > 0 ? ` · 已有 ${e.documents.length} 份其他凭证` : ""}`}
+          {e.invoiceState === "waived" && `无需发票 · ${e.invoiceWaiverReason}`}
+          {e.invoiceState === "legacy" && "历史报销未记录发票要求"}
+        </small>
+        <ExpenseDocumentLinks productionId={id} documents={e.documents} />
+        {e.invoiceState === "pending"
+          && e.submittedBy === session.userId
+          && (e.status === "pending" || e.status === "approved") && (
+          <ExpenseAddDocumentButton productionId={id} expenseId={e.id} />
+        )}
         {approval && e.note && (
           <small style={{ display: "block", marginTop: 5, color: "var(--muted)", fontSize: 10, lineHeight: 1.5 }}>
             {e.note}

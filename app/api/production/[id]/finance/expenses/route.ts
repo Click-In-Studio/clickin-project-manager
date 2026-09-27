@@ -5,6 +5,7 @@ import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import {
   AMOUNT_RE,
   FinanceError, getBudgetCategory, listExpenses, submitExpense,
+  type ExpenseDocumentKind,
 } from "@/lib/ops/finance-db";
 import { readJsonObject } from "@/lib/request-json";
 
@@ -63,16 +64,42 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (categoryId && !(await getBudgetCategory(categoryId, productionId)))
     return Response.json({ error: "预算科目不存在" }, { status: 400 });
 
+  const invoiceRequirement = body.invoiceRequirement;
+  if (invoiceRequirement !== "required" && invoiceRequirement !== "waived")
+    return Response.json({ error: "请选择是否需要发票" }, { status: 400 });
+  const invoiceWaiverReason = typeof body.invoiceWaiverReason === "string"
+    ? body.invoiceWaiverReason.trim() : "";
+  if (invoiceRequirement === "waived" && !invoiceWaiverReason)
+    return Response.json({ error: "请填写无发票原因" }, { status: 400 });
+
+  if (!Array.isArray(body.documents))
+    return Response.json({ error: "凭证列表格式不正确" }, { status: 400 });
+  const documents: { assetFileId: string; kind: ExpenseDocumentKind }[] = [];
+  for (const value of body.documents) {
+    if (!value || typeof value !== "object")
+      return Response.json({ error: "凭证列表格式不正确" }, { status: 400 });
+    const document = value as Record<string, unknown>;
+    const kind = document.kind;
+    if (typeof document.assetFileId !== "string"
+        || (kind !== "invoice" && kind !== "receipt" && kind !== "other"))
+      return Response.json({ error: "凭证类型或文件无效" }, { status: 400 });
+    documents.push({ assetFileId: document.assetFileId, kind });
+  }
+
   try {
     const expense = await submitExpense({
       productionId, categoryId, title, amount,
       currency: typeof body.currency === "string" ? body.currency : "CNY",
       note: typeof body.note === "string" ? body.note : "",
       submittedBy: session.userId,
+      invoiceRequirement,
+      invoiceWaiverReason,
+      documents,
     });
     return Response.json({ expense }, { status: 201 });
   } catch (e) {
-    if (e instanceof FinanceError) return Response.json({ error: e.message }, { status: 409 });
+    if (e instanceof FinanceError)
+      return Response.json({ error: e.message }, { status: e.reason === "invalid_document" ? 400 : 409 });
     throw e;
   }
 }

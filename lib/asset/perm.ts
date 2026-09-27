@@ -180,8 +180,13 @@ export async function canUploadAssetBytes(
   permCtx: GrantActor,
   productionId: string,
   targetAssetId?: string | null,
+  purpose?: "expense_document" | null,
 ): Promise<boolean> {
   if (permCtx.isAdmin || permCtx.isOwner) return true;
+  if (purpose === "expense_document") {
+    if (targetAssetId) return false;
+    return hasEffectiveGrant(permCtx, productionId, "finance", "*", "expenses", "create");
+  }
   if (targetAssetId)
     return hasGrant(permCtx.userId, productionId, "asset", targetAssetId, "file", "create");
   return hasGrant(permCtx.userId, productionId, "asset", "*", "*", "create");

@@ -19,7 +19,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const { permCtx } = access;
   // 与 presign / relay-part 同一把上传门（#605：此前错挂 script/*/blocks@view）。
   // 探针发生在选定目标之前，没有 assetId，按通配 create 判。
-  if (!await canUploadAssetBytes(permCtx, id, null))
+  const purpose = new URL(req.url).searchParams.get("purpose") === "expense_document"
+    ? "expense_document" : null;
+  if (purpose && access.isArchived)
+    return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
+  if (!await canUploadAssetBytes(permCtx, id, null, purpose))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const { url } = presignedPut(PROBE_R2_KEY, "application/octet-stream", 120);

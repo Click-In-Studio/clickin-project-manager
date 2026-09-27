@@ -11,8 +11,22 @@ vi.mock("@/components/ui/OverflowSafeSelect", () => ({
     <select {...props}>{children}</select>
   ),
 }));
+const uploadCounter = vi.hoisted(() => ({ value: 0 }));
+vi.mock("@/components/assets/AssetUploadPanel", () => ({
+  default: ({ onUploaded }: { onUploaded: (result: Record<string, unknown>) => void }) => (
+    <button type="button" onClick={() => {
+      uploadCounter.value += 1;
+      onUploaded({
+        assetId: `ast_${uploadCounter.value}`, fileId: `af_${uploadCounter.value}`, fileName: `票据${uploadCounter.value}.pdf`,
+        name: null, assetType: "financial_document", storageType: "r2",
+      });
+    }}>上传测试凭证</button>
+  ),
+}));
 
-import { ExpenseApprovalActions, ExpenseCreateButton } from "@/components/ops/FinanceExpenseActions";
+import {
+  ExpenseAddDocumentButton, ExpenseApprovalActions, ExpenseCreateButton,
+} from "@/components/ops/FinanceExpenseActions";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -29,6 +43,7 @@ let root: Root;
 beforeEach(() => {
   refresh.mockReset();
   fetchMock.mockReset();
+  uploadCounter.value = 0;
   (globalThis as { fetch: unknown }).fetch = fetchMock;
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -77,6 +92,8 @@ describe("报销填单", () => {
       title: "合成排练打车",
       amount: "999999999999.99",
       categoryId: null,
+      invoiceRequirement: "required",
+      documents: [],
     });
     expect(typeof JSON.parse(String(init?.body)).amount).toBe("string");
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -97,6 +114,27 @@ describe("报销填单", () => {
     expect(container.querySelector("[role=dialog]")).not.toBeNull();
     expect(container.querySelector("[role=alert]")?.textContent).toContain("找不到这笔支出的审批人");
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("可以连续添加多份凭证并随报销一次提交", async () => {
+    fetchMock.mockImplementation(() => jsonResponse({ expense: { id: "exp_docs" } }, 201));
+    await act(async () => root.render(<ExpenseCreateButton productionId="prod_1" categories={[]} />));
+    await act(async () => button("＋ 新建报销").click());
+    await act(async () => button("上传测试凭证").click());
+    await act(async () => button("上传测试凭证").click());
+
+    const inputs = [...container.querySelectorAll<HTMLInputElement>("input")];
+    await act(async () => {
+      inputValue(inputs[0], "两张发票");
+      inputValue(inputs[1], "88.00");
+      container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.documents).toEqual([
+      { assetFileId: "af_1", kind: "invoice" },
+      { assetFileId: "af_2", kind: "invoice" },
+    ]);
   });
 });
 
@@ -123,5 +161,25 @@ describe("报销审批", () => {
     expect(container.textContent).toContain("确认驳回？");
     await act(async () => button("确认驳回").click());
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ action: "reject" });
+  });
+});
+
+describe("报销补票", () => {
+  it("上传完成后把具体 asset_file 追加到原报销并刷新", async () => {
+    fetchMock.mockImplementation(() => jsonResponse({ expense: { id: "exp_1", invoiceState: "provided" } }, 201));
+    await act(async () => root.render(
+      <ExpenseAddDocumentButton productionId="prod_1" expenseId="exp_1" />,
+    ));
+
+    await act(async () => button("补充凭证").click());
+    await act(async () => button("上传测试凭证").click());
+    await act(async () => { await Promise.resolve(); });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain("/finance/expenses/exp_1/documents");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      assetFileId: "af_1", kind: "invoice",
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

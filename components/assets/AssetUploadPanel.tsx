@@ -105,6 +105,7 @@ type UploadMode = "file" | "feishu";
 
 export type UploadResult = {
   assetId: string;
+  fileId: string;
   name: string | null;
   fileName: string;
   assetType: AssetType;
@@ -138,6 +139,9 @@ interface Props {
    *  面板同时收敛成「只选文件」——类型/落点/显示名都是资产级属性，不该在传第二
    *  个版本时被顺手改掉。 */
   targetAssetId?: string;
+  /** 财务凭证复用字节通道，但由 finance 门创建 private single-file asset。 */
+  purpose?: "expense_document";
+  onBusyChange?: (busy: boolean) => void;
 }
 
 function formatSize(bytes: number): string {
@@ -147,10 +151,11 @@ function formatSize(bytes: number): string {
 
 export default function AssetUploadPanel({
   productionId, onUploaded, onCancel, placement, choosePlacement, landing,
-  allowMarkdownAsWiki, onUploadedWiki, targetAssetId,
+  allowMarkdownAsWiki, onUploadedWiki, targetAssetId, purpose, onBusyChange,
 }: Props) {
   // 追加版本模式：注册端点分叉 + 面板收敛（见 Props.targetAssetId）
   const versionMode = !!targetAssetId;
+  const expenseDocumentMode = purpose === "expense_document";
   // id null＝服务端缺省（「资产」根锚点懒建）——与列表里挑真「资产」行等价，
   // 名字必须与树里锚点同名，别造第二个称谓
   const [placeTarget, setPlaceTarget] = useState<{ id: string | null; label: string }>({ id: null, label: "资产" });
@@ -240,6 +245,7 @@ export default function AssetUploadPanel({
   async function handleSubmit() {
     setError(null);
     setLoading(true);
+    onBusyChange?.(true);
     setProgress(null);
     setTransferMode("direct");
     try {
@@ -269,7 +275,7 @@ export default function AssetUploadPanel({
         return;
       }
 
-      if (mode === "feishu" && !versionMode) {
+      if (mode === "feishu" && !versionMode && !expenseDocumentMode) {
         if (!feishuUrl.trim() || !feishuName.trim()) {
           setError("请填写飞书链接和文件名");
           return;
@@ -291,8 +297,8 @@ export default function AssetUploadPanel({
           setError((j as { error?: string }).error ?? `上传失败 (${res.status})`);
           return;
         }
-        const j = await res.json() as { asset: { id: string; name: string | null; fileName: string; assetType: AssetType; storageType: "r2" | "feishu_link" } };
-        onUploaded({ assetId: j.asset.id, name: j.asset.name, fileName: j.asset.fileName, assetType: j.asset.assetType, storageType: j.asset.storageType });
+        const j = await res.json() as { asset: { id: string; name: string | null; fileName: string; assetType: AssetType; storageType: "r2" | "feishu_link" }; file: { id: string } };
+        onUploaded({ assetId: j.asset.id, fileId: j.file.id, name: j.asset.name, fileName: j.asset.fileName, assetType: j.asset.assetType, storageType: j.asset.storageType });
         return;
       }
 
@@ -313,9 +319,12 @@ export default function AssetUploadPanel({
             fileName: file.name, mimeType, fileSize: file.size,
             name: name.trim() || null, assetType,
             ...placementFields,
+            ...(purpose ? { purpose } : {}),
           };
       // presign 家族的门按目标分叉（file@create vs 通配 create），带上目标资产
-      const presignScope = versionMode ? { assetId: targetAssetId } : {};
+      const presignScope = versionMode
+        ? { assetId: targetAssetId }
+        : purpose ? { purpose } : {};
 
       let r2Key: string, fileId: string;
 
@@ -385,8 +394,8 @@ export default function AssetUploadPanel({
             setError((j as { error?: string }).error ?? `注册失败 (${regRes.status})`);
             return;
           }
-          const regJ = await regRes.json() as { asset: { id: string; name: string | null; fileName: string; assetType: AssetType; storageType: "r2" | "feishu_link" } };
-          onUploaded({ assetId: regJ.asset.id, name: regJ.asset.name, fileName: regJ.asset.fileName, assetType: regJ.asset.assetType, storageType: regJ.asset.storageType });
+          const regJ = await regRes.json() as { asset: { id: string; name: string | null; fileName: string; assetType: AssetType; storageType: "r2" | "feishu_link" }; file: { id: string } };
+          onUploaded({ assetId: regJ.asset.id, fileId: regJ.file.id, name: regJ.asset.name, fileName: regJ.asset.fileName, assetType: regJ.asset.assetType, storageType: regJ.asset.storageType });
           return;
         }
 
@@ -433,7 +442,7 @@ export default function AssetUploadPanel({
           if (file.size >= MULTIPART_THRESHOLD) saveChunkBytes(bytes);
         };
         if (file.size >= PROBE_FILE_MIN && storedChunk < PROBE_STORED_MAX) {
-          const probePresignRes = await fetch(`${base}/presign-probe`);
+          const probePresignRes = await fetch(`${base}/presign-probe${purpose ? `?purpose=${purpose}` : ""}`);
           if (probePresignRes.ok) {
             const { uploadUrl } = await probePresignRes.json() as { uploadUrl: string };
             chunkBytes = await runUploadProbe(uploadUrl);
@@ -462,6 +471,7 @@ export default function AssetUploadPanel({
             `${base}/presign-part?r2Key=${encodeURIComponent(mp.r2Key)}`
             + `&uploadId=${encodeURIComponent(mp.uploadId)}&partNumber=${partNumber}`
             + (versionMode ? `&assetId=${encodeURIComponent(targetAssetId)}` : "")
+            + (purpose ? `&purpose=${purpose}` : "")
           );
           if (!res.ok) throw new Error(`presign-part ${partNumber} 失败 (${res.status})`);
           return ((await res.json()) as { uploadUrl: string }).uploadUrl;
@@ -494,7 +504,8 @@ export default function AssetUploadPanel({
               + `?r2Key=${encodeURIComponent(mp.r2Key)}`
               + `&uploadId=${encodeURIComponent(mp.uploadId)}`
               + `&partNumber=${partNumber}`
-              + (versionMode ? `&assetId=${encodeURIComponent(targetAssetId)}` : "");
+              + (versionMode ? `&assetId=${encodeURIComponent(targetAssetId)}` : "")
+              + (purpose ? `&purpose=${purpose}` : "");
             return new Promise<void>((resolve, reject) => {
               const xhr = new XMLHttpRequest();
               xhr.upload.addEventListener("progress", e => { if (e.lengthComputable) onProgress(e.loaded); });
@@ -636,8 +647,8 @@ export default function AssetUploadPanel({
           setError((j as { error?: string }).error ?? `注册失败 (${regRes.status})`);
           return;
         }
-        const regJ = await regRes.json() as { asset: { id: string; name: string | null; fileName: string; assetType: AssetType; storageType: "r2" | "feishu_link" } };
-        onUploaded({ assetId: regJ.asset.id, name: regJ.asset.name, fileName: regJ.asset.fileName, assetType: regJ.asset.assetType, storageType: regJ.asset.storageType });
+        const regJ = await regRes.json() as { asset: { id: string; name: string | null; fileName: string; assetType: AssetType; storageType: "r2" | "feishu_link" }; file: { id: string } };
+        onUploaded({ assetId: regJ.asset.id, fileId: regJ.file.id, name: regJ.asset.name, fileName: regJ.asset.fileName, assetType: regJ.asset.assetType, storageType: regJ.asset.storageType });
       }
     } catch (e) {
       if (e instanceof ChunkSizeAbortError) {
@@ -647,6 +658,7 @@ export default function AssetUploadPanel({
       }
     } finally {
       setLoading(false);
+      onBusyChange?.(false);
       setProgress(null);
     }
   }
@@ -654,10 +666,10 @@ export default function AssetUploadPanel({
   return (
     <div className="space-y-4">
       {/* Mode toggle（追加版本模式无飞书分支：版本文件必须是 R2 字节） */}
-      {!versionMode && (
+      {!versionMode && !expenseDocumentMode && (
       <div className="flex rounded-lg overflow-hidden border border-zinc-200 text-xs">
         {(["file", "feishu"] as UploadMode[]).map(m => (
-          <button key={m} onClick={() => setMode(m)}
+          <button type="button" key={m} onClick={() => setMode(m)}
             className={`flex-1 py-2 font-medium transition-colors ${
               mode === m ? "bg-zinc-800 text-white" : "bg-white text-zinc-500 hover:bg-zinc-50"
             }`}>
@@ -741,7 +753,7 @@ export default function AssetUploadPanel({
       )}
 
       {/* Display name（资产级，追加版本不改） */}
-      {!versionMode && (
+      {!versionMode && !expenseDocumentMode && (
       <div>
         <label className="block text-xs text-zinc-400 mb-1.5">显示名称（可选，留空则使用文件名）</label>
         <input
@@ -755,14 +767,16 @@ export default function AssetUploadPanel({
       )}
 
       {/* Asset type（同上：资产级） */}
-      {!versionMode && (
+      {!versionMode && !expenseDocumentMode && (
       <div>
         <label className="block text-xs text-zinc-400 mb-1.5">类型</label>
         <OverflowSafeSelect
           value={assetType}
           onChange={e => setAssetType(e.target.value as AssetType)}
           className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400 bg-white">
-          {(Object.entries(ASSET_TYPE_LABELS) as [AssetType, string][]).map(([v, l]) => (
+          {(Object.entries(ASSET_TYPE_LABELS) as [AssetType, string][])
+            .filter(([v]) => v !== "financial_document")
+            .map(([v, l]) => (
             <option key={v} value={v}>{l}</option>
           ))}
         </OverflowSafeSelect>
@@ -806,12 +820,12 @@ export default function AssetUploadPanel({
 
       <div className="flex gap-2 pt-1">
         {onCancel && (
-          <button onClick={onCancel} disabled={loading}
+          <button type="button" onClick={onCancel} disabled={loading}
             className="flex-1 rounded-lg border border-zinc-200 py-2 text-sm text-zinc-500 hover:bg-zinc-50 transition-colors">
             取消
           </button>
         )}
-        <button onClick={handleSubmit} disabled={loading}
+        <button type="button" onClick={handleSubmit} disabled={loading}
           className="flex-1 rounded-lg bg-zinc-800 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 transition-colors">
           {loading
             ? progress !== null && progress < 100

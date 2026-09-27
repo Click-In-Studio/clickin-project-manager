@@ -41,7 +41,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   // #457：此前查的是 script/*/blocks@view（剧本台词的**查看**权）——与 presign
   // 家族三条路由完全不同源，且不认 assetId，#456 的「传新版本」门在中继路径上是
   // 漏的。中继写的是和 presign-part 同一批字节，门必须同一把。
-  if (!await canUploadAssetBytes(permCtx, id, sp.get("assetId")))
+  const purpose = sp.get("purpose") === "expense_document" ? "expense_document" : null;
+  if (purpose && access.isArchived)
+    return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
+  if (!await canUploadAssetBytes(permCtx, id, sp.get("assetId"), purpose))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   // ── Size guard (before reading body) ──────────────────────────────────────

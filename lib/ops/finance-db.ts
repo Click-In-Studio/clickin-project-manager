@@ -24,6 +24,7 @@
 
 import { getPool } from "../pg";
 import type { PoolClient } from "pg";
+import { uid } from "../asset/db";
 import {
   buildApprovalCandidateLadder, buildApprovalLadder, DEFAULT_APPROVAL_TTL_HOURS, nextStage,
   type ApprovalStage, type StagePosition,
@@ -48,6 +49,18 @@ export type BudgetCategory = {
 };
 
 export type ExpenseStatus = "pending" | "approved" | "rejected" | "cancelled";
+export type InvoiceRequirement = "required" | "waived";
+export type ExpenseDocumentKind = "invoice" | "receipt" | "other";
+
+export type ExpenseDocument = {
+  id: string;
+  assetId: string;
+  assetFileId: string;
+  kind: ExpenseDocumentKind;
+  fileName: string;
+  mimeType: string | null;
+  createdAt: string;
+};
 
 export type Expense = {
   id: string;
@@ -58,6 +71,10 @@ export type Expense = {
   amount: string;
   currency: string;
   note: string;
+  invoiceRequirement: InvoiceRequirement | null;
+  invoiceWaiverReason: string;
+  invoiceState: "provided" | "pending" | "waived" | "legacy";
+  documents: ExpenseDocument[];
   submittedBy: string;
   submitterName: string | null;
   status: ExpenseStatus;
@@ -81,7 +98,7 @@ export const AMOUNT_RE = /^\d{1,12}(\.\d{1,2})?$/;
 
 export class FinanceError extends Error {
   constructor(
-    readonly reason: "duplicate_name" | "no_approver" | "conflict" | "not_pending" | "forward_only",
+    readonly reason: "duplicate_name" | "no_approver" | "conflict" | "not_pending" | "forward_only" | "invalid_document",
     message: string,
   ) { super(message); }
 }
@@ -275,6 +292,8 @@ export async function deleteBudgetCategory(id: string, productionId: string): Pr
 type ExpenseRow = {
   id: string; production_id: string; category_id: string | null; category_name: string | null;
   title: string; amount: string; currency: string; note: string;
+  invoice_requirement: InvoiceRequirement | null; invoice_waiver_reason: string;
+  documents: ExpenseDocument[];
   submitted_by: string; submitter_name: string | null; status: ExpenseStatus;
   current_stage: string | null; current_stage_depth: number; current_approver_ids: string[];
   escalation_chain: { canFinalize?: boolean }[];
@@ -283,10 +302,19 @@ type ExpenseRow = {
 
 function rowToExpense(r: ExpenseRow): Expense {
   const last = r.escalation_chain[r.escalation_chain.length - 1];
+  const invoiceState = r.invoice_requirement === null
+    ? "legacy"
+    : r.invoice_requirement === "waived"
+      ? "waived"
+      : r.documents.some(document => document.kind === "invoice") ? "provided" : "pending";
   return {
     id: r.id, productionId: r.production_id,
     categoryId: r.category_id, categoryName: r.category_name,
     title: r.title, amount: r.amount, currency: r.currency, note: r.note,
+    invoiceRequirement: r.invoice_requirement,
+    invoiceWaiverReason: r.invoice_waiver_reason,
+    invoiceState,
+    documents: r.documents,
     submittedBy: r.submitted_by, submitterName: r.submitter_name,
     status: r.status,
     currentStage: r.current_stage,
@@ -301,6 +329,22 @@ function rowToExpense(r: ExpenseRow): Expense {
 const EXPENSE_QUERY = `
   SELECT e.id, e.production_id, e.category_id, c.name AS category_name,
          e.title, e.amount::text AS amount, e.currency, e.note,
+         e.invoice_requirement, e.invoice_waiver_reason,
+         COALESCE((
+           SELECT jsonb_agg(jsonb_build_object(
+             'id', d.id,
+             'assetId', a.id,
+             'assetFileId', af.id,
+             'kind', d.document_kind,
+             'fileName', a.file_name,
+             'mimeType', a.mime_type,
+             'createdAt', d.created_at
+           ) ORDER BY d.created_at)
+             FROM production_expense_document d
+             JOIN asset_file af ON af.id = d.asset_file_id
+             JOIN asset a ON a.id = af.asset_id
+            WHERE d.expense_id = e.id
+         ), '[]'::jsonb) AS documents,
          e.submitted_by,
          COALESCE(NULLIF(up.display_name, ''), up.name) AS submitter_name,
          e.status, e.current_stage, e.current_stage_depth, e.current_approver_ids,
@@ -414,9 +458,36 @@ function withoutSubject(ladder: ApprovalStage[], subjectId: string): ApprovalSta
     .filter(stage => stage.approverIds.length > 0);
 }
 
+async function lockOwnedExpenseDocumentFiles(
+  client: PoolClient,
+  productionId: string,
+  uploaderUserId: string,
+  fileIds: string[],
+): Promise<void> {
+  if (fileIds.length === 0) return;
+  const files = await client.query<{ id: string }>(
+    `SELECT af.id
+       FROM asset_file af
+       JOIN asset a ON a.id = af.asset_id
+      WHERE af.id = ANY($1::text[])
+        AND a.production_id = $2
+        AND a.uploader_user_id = $3
+        AND a.asset_type = 'financial_document'
+        AND a.file_version_policy = 'single'
+        AND a.storage_type = 'r2'
+      FOR UPDATE OF af, a`,
+    [fileIds, productionId, uploaderUserId],
+  );
+  if (files.rows.length !== fileIds.length)
+    throw new FinanceError("invalid_document", "凭证不存在、已失效或不属于当前提交人");
+}
+
 export async function submitExpense(params: {
   productionId: string; categoryId: string | null; title: string;
   amount: string; currency?: string; note?: string; submittedBy: string;
+  invoiceRequirement?: InvoiceRequirement;
+  invoiceWaiverReason?: string;
+  documents?: { assetFileId: string; kind: ExpenseDocumentKind }[];
 }): Promise<Expense> {
   const candidateLadder = await buildApprovalCandidateLadder(
     expenseTarget(params.productionId, params.submittedBy, params.categoryId),
@@ -433,23 +504,108 @@ export async function submitExpense(params: {
     ? [selfApprovalEntry(params.submittedBy, actedAt)]
     : [chainEntry(first!)];
 
-  const res = await getPool().query<{ id: string }>(
-    `INSERT INTO production_expense
-       (production_id, category_id, title, amount, currency, note, submitted_by,
-        status, current_stage, current_stage_depth, current_approver_ids, escalation_chain,
-        resolved_at, resolved_by)
-     VALUES ($1,$2,$3,$4::numeric,$5,$6,$7,$8,$9,$10,$11::uuid[],$12::jsonb,$13,$14)
-     RETURNING id`,
-    [
-      params.productionId, params.categoryId, params.title.trim(), params.amount,
-      params.currency ?? "CNY", params.note ?? "", params.submittedBy,
-      status, first?.stage ?? null, first?.depth ?? 0, first?.approverIds ?? [], JSON.stringify(chain),
-      selfApproved ? actedAt : null, selfApproved ? params.submittedBy : null,
-    ],
-  );
-  const created = await getExpense(res.rows[0].id, params.productionId);
-  if (!created) throw new Error(`expense not found after create: ${res.rows[0].id}`);
+  const invoiceRequirement = params.invoiceRequirement ?? "required";
+  const waiverReason = invoiceRequirement === "waived" ? params.invoiceWaiverReason?.trim() ?? "" : "";
+  if (invoiceRequirement === "waived" && !waiverReason)
+    throw new FinanceError("invalid_document", "请选择无发票原因");
+
+  const documents = params.documents ?? [];
+  const uniqueFileIds = [...new Set(documents.map(document => document.assetFileId))];
+  if (uniqueFileIds.length !== documents.length)
+    throw new FinanceError("invalid_document", "同一份凭证不能重复添加");
+
+  const client = await getPool().connect();
+  let expenseId: string | null = null;
+  try {
+    await client.query("BEGIN");
+    await lockOwnedExpenseDocumentFiles(
+      client, params.productionId, params.submittedBy, uniqueFileIds,
+    );
+
+    const res = await client.query<{ id: string }>(
+      `INSERT INTO production_expense
+         (production_id, category_id, title, amount, currency, note,
+          invoice_requirement, invoice_waiver_reason, submitted_by,
+          status, current_stage, current_stage_depth, current_approver_ids, escalation_chain,
+          resolved_at, resolved_by)
+       VALUES ($1,$2,$3,$4::numeric,$5,$6,$7,$8,$9,$10,$11,$12,$13::uuid[],$14::jsonb,$15,$16)
+       RETURNING id`,
+      [
+        params.productionId, params.categoryId, params.title.trim(), params.amount,
+        params.currency ?? "CNY", params.note ?? "", invoiceRequirement, waiverReason,
+        params.submittedBy, status, first?.stage ?? null, first?.depth ?? 0,
+        first?.approverIds ?? [], JSON.stringify(chain),
+        selfApproved ? actedAt : null, selfApproved ? params.submittedBy : null,
+      ],
+    );
+    expenseId = res.rows[0].id;
+    for (const document of documents) {
+      await client.query(
+        `INSERT INTO production_expense_document
+           (id, expense_id, asset_file_id, document_kind, created_by)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [uid("edoc"), expenseId, document.assetFileId, document.kind, params.submittedBy],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  if (!expenseId) throw new Error("expense insert returned no id");
+  const created = await getExpense(expenseId, params.productionId);
+  if (!created) throw new Error(`expense not found after create: ${expenseId}`);
   return created;
+}
+
+/**
+ * 待补票只允许追加不可变证据，不允许覆盖或移除审批时已经存在的文件。
+ * pending 与 approved 都可补：后者覆盖“先批后补票”，不改动原审批结论。
+ */
+export async function addExpenseDocument(params: {
+  expenseId: string;
+  productionId: string;
+  submittedBy: string;
+  assetFileId: string;
+  kind: ExpenseDocumentKind;
+}): Promise<Expense> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const expense = await client.query<{ status: ExpenseStatus; submitted_by: string }>(
+      `SELECT status, submitted_by FROM production_expense
+        WHERE id = $1 AND production_id = $2 FOR UPDATE`,
+      [params.expenseId, params.productionId],
+    );
+    const row = expense.rows[0];
+    if (!row || row.submitted_by !== params.submittedBy)
+      throw new FinanceError("invalid_document", "只能为自己提交的报销补充凭证");
+    if (row.status !== "pending" && row.status !== "approved")
+      throw new FinanceError("not_pending", "已驳回或撤回的报销不能补充凭证");
+
+    await lockOwnedExpenseDocumentFiles(
+      client, params.productionId, params.submittedBy, [params.assetFileId],
+    );
+    await client.query(
+      `INSERT INTO production_expense_document
+         (id, expense_id, asset_file_id, document_kind, created_by)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [uid("edoc"), params.expenseId, params.assetFileId, params.kind, params.submittedBy],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    if (error instanceof Error && error.message.includes("production_expense_document_expense_id_asset_file_id_key"))
+      throw new FinanceError("invalid_document", "这份凭证已经添加过了");
+    throw error;
+  } finally {
+    client.release();
+  }
+  const updated = await getExpense(params.expenseId, params.productionId);
+  if (!updated) throw new Error(`expense not found after adding document: ${params.expenseId}`);
+  return updated;
 }
 
 function positionOf(e: { currentStage: string | null; }, depth: number): StagePosition | null {

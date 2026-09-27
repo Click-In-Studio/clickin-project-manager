@@ -62,7 +62,7 @@ describe("AssetUploadPanel 追加版本模式", () => {
     vi.unstubAllGlobals();
   });
 
-  async function uploadOnce(props: { targetAssetId?: string }) {
+  async function uploadOnce(props: { targetAssetId?: string; purpose?: "expense_document" }) {
     const onUploaded = vi.fn();
     await act(async () => {
       root.render(
@@ -115,5 +115,18 @@ describe("AssetUploadPanel 追加版本模式", () => {
     expect(register.url).toMatch(/\/assets$/);
     expect(register.body?.assetType).toBe("reference");
     expect(container.querySelector("select")).not.toBeNull();
+  });
+
+  it("财务凭证模式复用上传通道，但固定传 purpose 并收起通用资产字段", async () => {
+    const { onUploaded } = await uploadOnce({ purpose: "expense_document" });
+
+    const presign = calls.find(c => c.url.includes("/presign"))!;
+    expect(presign.body?.purpose).toBe("expense_document");
+    const register = calls.find(c => !c.url.includes("/presign"))!;
+    expect(register.body?.purpose).toBe("expense_document");
+    expect(onUploaded).toHaveBeenCalledWith(expect.objectContaining({ fileId: "af_new" }));
+    expect(container.querySelector("select")).toBeNull();
+    expect(container.textContent).not.toContain("显示名称");
+    expect(container.textContent).not.toContain("飞书链接");
   });
 });
