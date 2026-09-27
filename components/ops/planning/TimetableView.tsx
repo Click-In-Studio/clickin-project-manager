@@ -13,6 +13,14 @@ import RundownEntryEditor from "./RundownEntryEditor";
 import { minutesOfIso, fmtMin } from "./date";
 import { TASK_STATUS_LABELS } from "./labels";
 import { readPref, writePref } from "./prefs";
+import {
+  RUNDOWN_HEADER_HEIGHT,
+  RUNDOWN_LANE_MIN_WIDTH,
+  RUNDOWN_LOCATION_HEIGHT,
+  RUNDOWN_TIME_WIDTH,
+  rundownGridColumns,
+  rundownPinnedLeft,
+} from "./rundown-layout";
 import type { RundownColumn, ServerUserGroup, ServerRundownColumn, ServerRundownPlacement, RundownEntrySelection, RundownDragEntry } from "./rundown-types";
 import type { Props } from "./types";
 
@@ -646,26 +654,26 @@ export default function TimetableView({ productionId, events, departments, membe
     : [];
 
   return (
-    <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22 }}>
+    <section className={styles.timetablePanel}>
       {/* timetableHeader */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={{ minWidth: 0 }}>
-          <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>
+      <div className={styles.timetableHeader}>
+        <div className={styles.timetableTitleBlock}>
+          <p className={styles.timetableEyebrow}>
             {event?.startTime ? fmtDate(event.startTime) : "Rundown"}
           </p>
-          <h2 style={{ margin: "5px 0 0", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>
+          <h2 className={styles.timetableTitle}>
             Rundown / 现场执行表
           </h2>
-          <small style={{ display: "block", marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+          <small className={styles.timetableMeta}>
             {event ? [event.location, "15 分钟粒度"].filter(Boolean).join(" · ") : "选择事件查看执行表"}
           </small>
         </div>
         {event && (
-          <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexShrink: 0, alignItems: "center", flexWrap: "wrap" }}>
+          <div className={styles.timetableActions}>
             <Badge tone="blue">{items.length} 个条目</Badge>
             {eventTasks.length > 0 && <Badge tone="green">{eventTasks.length} 个任务</Badge>}
-            {editMode && <button type="button" onClick={() => addColumn("location")} style={{ border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface)", color: "var(--ink)", padding: "7px 12px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>＋ 新增地点列</button>}
-            <button type="button" onClick={() => { setEditMode(value => { const next = !value; if (next) setViewMode("custom"); else { setEditingColumnId(null); setSelectedEntry(null); } return next; }); }} style={{ border: "1px solid var(--ink)", borderRadius: 8, background: editMode ? "var(--ink)" : "transparent", color: editMode ? "#fff" : "var(--ink)", padding: "7px 12px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>{editMode ? "完成编辑" : "编辑执行表"}</button>
+            {editMode && <button type="button" onClick={() => addColumn("location")} className={styles.timetableSecondaryAction}>＋ 新增地点列</button>}
+            <button type="button" onClick={() => { setEditMode(value => { const next = !value; if (next) setViewMode("custom"); else { setEditingColumnId(null); setSelectedEntry(null); } return next; }); }} className={`${styles.timetableEditAction} ${editMode ? styles.timetableEditActionActive : ""}`}>{editMode ? "完成编辑" : "编辑执行表"}</button>
           </div>
         )}
       </div>
@@ -673,24 +681,17 @@ export default function TimetableView({ productionId, events, departments, membe
       {/* 版面保存失败要看得见——原来存 localStorage 不会失败，现在会（权限不足、
           归档项目、并发改动），静默吞掉的话 organizer 以为排好了其实没存上 */}
       {layoutError && (
-        <p role="alert" style={{
-          margin: "0 0 12px", padding: "8px 11px", borderRadius: 8,
-          background: "#fdecea", color: "#8c2f22", fontSize: 11, fontWeight: 600,
-        }}>
+        <p role="alert" className={styles.timetableAlert}>
           {layoutError}
-          <button type="button" onClick={() => setLayoutError(null)} style={{ marginLeft: 10, border: 0, background: "transparent", color: "inherit", cursor: "pointer", fontWeight: 700 }}>×</button>
+          <button type="button" onClick={() => setLayoutError(null)} className={styles.timetableAlertClose}>×</button>
         </p>
       )}
 
       {/* rundownControls（原型：三格卡片行——事件选择 / 工作流筛选 / 当前人说明） */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(210px, 1.25fr) minmax(190px, 1fr) minmax(190px, .8fr)",
-        gap: 10, marginBottom: 14,
-      }}>
-        <label style={CONTROL_CARD}>
-          <span style={CONTROL_LABEL}>日期 / 事件</span>
-          <OverflowSafeSelect value={eventId} onChange={e => { setEventId(e.target.value); setPersonFilter("all"); }} style={CONTROL_SELECT}>
+      <div className={styles.rundownControls}>
+        <label className={`${styles.rundownControlCard} ${styles.rundownControlPrimary}`}>
+          <span className={styles.rundownControlLabel}>日期 / 事件</span>
+          <OverflowSafeSelect value={eventId} onChange={e => { setEventId(e.target.value); setPersonFilter("all"); }} className={styles.rundownControlSelect}>
             {timedEvents.map(e => (
               <option key={e.id} value={e.id}>
                 {e.startTime ? `${fmtDate(e.startTime)} · ` : ""}{e.title}
@@ -698,16 +699,16 @@ export default function TimetableView({ productionId, events, departments, membe
             ))}
           </OverflowSafeSelect>
         </label>
-        <label style={CONTROL_CARD}>
-          <span style={CONTROL_LABEL}>列视图</span>
-          <OverflowSafeSelect value={viewMode} onChange={e => setViewMode(e.target.value as "all" | "custom")} style={CONTROL_SELECT}>
+        <label className={styles.rundownControlCard}>
+          <span className={styles.rundownControlLabel}>列视图</span>
+          <OverflowSafeSelect value={viewMode} onChange={e => setViewMode(e.target.value as "all" | "custom")} className={styles.rundownControlSelect}>
             <option value="all">全员视图</option>
             <option value="custom">自定义关注列</option>
           </OverflowSafeSelect>
         </label>
-        <label style={CONTROL_CARD}>
-          <span style={CONTROL_LABEL}>关注成员</span>
-          <OverflowSafeSelect value={personFilter} onChange={e => setPersonFilter(e.target.value)} style={CONTROL_SELECT}>
+        <label className={styles.rundownControlCard}>
+          <span className={styles.rundownControlLabel}>关注成员</span>
+          <OverflowSafeSelect value={personFilter} onChange={e => setPersonFilter(e.target.value)} className={styles.rundownControlSelect}>
             <option value="all">全部成员</option>
             {people.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </OverflowSafeSelect>
@@ -716,38 +717,38 @@ export default function TimetableView({ productionId, events, departments, membe
 
       {/* 泳道矩阵 */}
       {!event ? (
-        <p style={{ margin: 0, padding: "36px 0", textAlign: "center", fontSize: 12, color: "var(--muted)" }}>暂无带时间的事件。</p>
+        <p className={styles.timetableEmpty}>暂无带时间的事件。</p>
       ) : loading ? (
-        <p style={{ margin: 0, padding: "36px 0", textAlign: "center", fontSize: 12, color: "var(--muted)" }}>加载中…</p>
+        <p className={styles.timetableEmpty}>加载中…</p>
       ) : items.length === 0 && eventTasks.length === 0 ? (
-        <div style={{ padding: "36px 18px", textAlign: "center", color: "var(--muted)" }}>
-          <p style={{ margin: 0, fontSize: 12 }}>这个事件还没有执行流程。</p>
+        <div className={styles.timetableEmptyState}>
+          <p>这个事件还没有执行流程。</p>
           <Link
             href={`/production/${productionId}/events/${event.id}`}
-            style={{ display: "inline-flex", marginTop: 12, border: "1px solid var(--ink)", borderRadius: 8, padding: "8px 13px", background: "var(--ink)", color: "#fff", textDecoration: "none", fontSize: 11, fontWeight: 700 }}
+            className={styles.timetableEmptyAction}
           >
             ＋ 前往事件详情添加第一项
           </Link>
         </div>
       ) : (
         /* 原型 rundownMatrixWrap：690px 限高滚动容器 + 38px 横纹底 + sticky 表头/时间列 */
-        <div style={{ maxHeight: 690, overflow: "auto", border: "1px solid var(--line)", borderRadius: 11, background: "#f7f7f3" }}>
+        <div className={styles.rundownMatrixWrap}>
           <div style={{
             display: "grid",
-            gridTemplateColumns: `86px repeat(${lanes.length}, minmax(145px, 1fr))`,
-            gridTemplateRows: `${hasLocationRow ? "34px " : ""}58px repeat(${slots.length}, 38px)`,
-            minWidth: 86 + lanes.length * 150,
+            gridTemplateColumns: rundownGridColumns(lanes),
+            gridTemplateRows: `${hasLocationRow ? `${RUNDOWN_LOCATION_HEIGHT}px ` : ""}${RUNDOWN_HEADER_HEIGHT}px repeat(${slots.length}, 38px)`,
+            minWidth: RUNDOWN_TIME_WIDTH + lanes.length * RUNDOWN_LANE_MIN_WIDTH,
             position: "relative",
             background: "repeating-linear-gradient(to bottom, transparent 0, transparent 37px, rgba(122,139,134,.18) 37px, rgba(122,139,134,.18) 38px)",
           }}>
             {/* 角格（sticky 双向） */}
             <div style={{
               gridColumn: 1, gridRow: hasLocationRow ? "1 / span 2" : 1, position: "sticky", top: 0, left: 0, zIndex: 30,
-              padding: 10, borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)",
+              padding: "7px 8px", borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)",
               background: "var(--ink)", color: "#fff", display: "flex", flexDirection: "column",
             }}>
-              <b style={{ fontSize: 10 }}>时间</b>
-              <small style={{ marginTop: 4, color: "#b9c8c4", fontSize: 8 }}>15 分钟粒度</small>
+              <b className={styles.rundownTimeHeading}>时间</b>
+              <small className={styles.rundownTimeHint}>15 分钟</small>
               {editMode && <button type="button" className={styles.firstInsertButton} aria-label="在第一列前插入人员组" onClick={() => addColumn("people", 0)}><span className={styles.insertColumnGlyph} aria-hidden="true">+</span></button>}
             </div>
             {hasLocationRow && locationSegments.map(segment => (
@@ -755,12 +756,12 @@ export default function TimetableView({ productionId, events, departments, membe
                 key={segment.key}
                 style={{
                   gridColumn: `${segment.start} / span ${segment.span}`, gridRow: 1, position: "sticky", top: 0, zIndex: 16,
-                  borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)", padding: "5px 9px",
+                  borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)", padding: "4px 8px",
                   background: segment.label ? "#d9e4e1" : "#edf0ed", color: "var(--ink)", overflow: "hidden",
                 }}
                 title={segment.label ? `这一列的事项在：${segment.label}` : "这一列的事项没有填地点"}
               >
-                <b style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 9 }}>
+                <b className={styles.rundownLocationLabel}>
                   {segment.label || "未填地点"}
                 </b>
               </div>
@@ -783,14 +784,14 @@ export default function TimetableView({ productionId, events, departments, membe
                   }}
                   title={editMode ? "长按拖动调整顺序；双击编辑人员组" : lane.name}
                   style={{
-                    gridColumn: i + 2, gridRow: headerRow, position: "sticky", top: hasLocationRow ? 34 : 0,
-                    left: lane.pinned ? 86 + pinnedIndex * 150 : undefined, zIndex: lane.pinned ? 24 : 14,
-                    padding: 10, borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)",
+                    gridColumn: i + 2, gridRow: headerRow, position: "sticky", top: hasLocationRow ? RUNDOWN_LOCATION_HEIGHT : 0,
+                    left: lane.pinned ? rundownPinnedLeft(pinnedIndex) : undefined, zIndex: lane.pinned ? 24 : 14,
+                    padding: "7px 8px", borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)",
                     background: lane.pinned ? "#294340" : "var(--ink)", color: "#fff", display: "flex", flexDirection: "column",
                     cursor: editMode ? "grab" : "default",
                   }}
                 >
-                  <b style={{ paddingRight: editMode ? 22 : 0, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{lane.pinned ? "▣ " : ""}{lane.name}</b>
+                  <b className={styles.rundownLaneTitle} style={{ paddingRight: editMode ? 28 : 0 }}>{lane.pinned ? "▣ " : ""}{lane.name}</b>
                   {editMode && <>
                     <button type="button" draggable={false} className={styles.columnMenuButton} aria-label={`编辑人员组 ${lane.name}`} aria-expanded={editingColumnId === lane.id} onClick={event => { event.stopPropagation(); setSelectedEntry(null); setEditingColumnId(current => current === lane.id ? null : lane.id); }}><span aria-hidden="true">⌄</span></button>
                     <button type="button" draggable={false} className={styles.insertColumnButton} aria-label={`在 ${lane.name} 右侧插入人员组`} onClick={event => { event.stopPropagation(); addColumn("people", i + 1); }}><span className={styles.insertColumnGlyph} aria-hidden="true">+</span></button>
@@ -842,13 +843,13 @@ export default function TimetableView({ productionId, events, departments, membe
                   style={{
                   gridColumn: `${pl.start} / span ${pl.span}`,
                   gridRow: `${rowStart} / span ${rowSpan}`,
-                  position: sticky ? "sticky" : undefined, left: sticky ? 86 + pinnedIndex * 150 : undefined,
-                  zIndex: sticky ? 9 : 4, minWidth: 0, margin: 2, padding: "7px 8px", overflow: "hidden",
+                  position: sticky ? "sticky" : undefined, left: sticky ? rundownPinnedLeft(pinnedIndex) : undefined,
+                  zIndex: sticky ? 9 : 4, minWidth: 0, margin: 2, padding: "7px 8px",
                   border: `1px solid ${selected ? "#2463d4" : tone.border}`, borderRadius: 7,
                   outline: selected ? "2px solid rgba(36,99,212,.24)" : undefined,
                   background: entryColors[entryKey(selection)] ?? tone.bg, boxShadow: "0 2px 6px rgba(24,42,42,.06)",
                   cursor: editMode ? "move" : "default", userSelect: "none",
-                }}>
+                }} className={styles.rundownEntry}>
                   <b style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", fontSize: 9, whiteSpace: "nowrap", color: "var(--ink)" }}>
                     {it.title}
                   </b>
@@ -891,13 +892,14 @@ export default function TimetableView({ productionId, events, departments, membe
                   style={{
                     gridColumn: `${pl.start} / span ${pl.span}`,
                     gridRow: `${rowStart} / span ${rowSpan}`,
-                    position: sticky ? "sticky" : undefined, left: sticky ? 86 + pinnedIndex * 150 : undefined,
-                    zIndex: sticky ? 9 : 4, minWidth: 0, margin: 2, padding: "7px 8px", overflow: "hidden",
+                    position: sticky ? "sticky" : undefined, left: sticky ? rundownPinnedLeft(pinnedIndex) : undefined,
+                    zIndex: sticky ? 9 : 4, minWidth: 0, margin: 2, padding: "7px 8px",
                     border: `1px ${selected ? "solid" : "dashed"} ${selected ? "#2463d4" : tone.border}`, borderRadius: 7,
                     outline: selected ? "2px solid rgba(36,99,212,.24)" : undefined,
                     background: entryColors[entryKey(selection)] ?? tone.bg, boxShadow: "0 2px 6px rgba(24,42,42,.06)",
                     textDecoration: "none", display: "block", cursor: editMode ? "move" : "pointer", userSelect: "none",
                   }}
+                  className={styles.rundownEntry}
                 >
                   <b style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", fontSize: 9, whiteSpace: "nowrap", color: "var(--ink)" }}>
                     任务 · {t.title || "（未命名）"}
@@ -956,14 +958,3 @@ export default function TimetableView({ productionId, events, departments, membe
     </section>
   );
 }
-
-const CONTROL_CARD: React.CSSProperties = {
-  minWidth: 0, minHeight: 58, padding: "9px 11px",
-  border: "1px solid var(--line)", borderRadius: 9, background: "var(--paper)",
-  display: "flex", flexDirection: "column", gap: 5,
-};
-const CONTROL_LABEL: React.CSSProperties = { color: "var(--muted)", fontSize: 8, fontWeight: 700 };
-const CONTROL_SELECT: React.CSSProperties = {
-  width: "100%", border: 0, background: "transparent", color: "var(--ink)",
-  outline: 0, fontSize: 10, fontWeight: 700,
-};
