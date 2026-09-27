@@ -10,16 +10,15 @@ const source = readFileSync("components/ops/planning/TimetableView.tsx", "utf8")
 const css = readFileSync("components/ops/planning.module.css", "utf8");
 
 describe("执行日程响应式密度", () => {
-  it("控件组在中窄屏变为主项跨列的两列，手机变为单列", () => {
+  it("控件组在窄屏保持主项跨列、次项并排的两列布局", () => {
     expect(source).toContain("styles.rundownControls");
     expect(source).toContain("styles.rundownControlPrimary");
     expect(css).toContain("grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, .8fr)");
-    expect(css).toContain("@media (max-width: 900px)");
+    expect(css).toContain("@media (max-width: 520px)");
     expect(css).toContain(".rundownControls { grid-template-columns: repeat(2, minmax(0, 1fr)); }");
     expect(css).toContain(".rundownControlPrimary { grid-column: 1 / -1; }");
-    expect(css).toContain("@media (max-width: 520px)");
-    expect(css).toContain(".rundownControls { grid-template-columns: minmax(0, 1fr); }");
-    expect(css).toContain(".rundownControlPrimary { grid-column: auto; }");
+    expect(css).not.toContain(".rundownControls { grid-template-columns: minmax(0, 1fr); }");
+    expect(css).not.toContain(".rundownControlPrimary { grid-column: auto; }");
   });
 
   it("控件允许收缩，并提升标签与选择值的字号", () => {
