@@ -76,7 +76,7 @@ import { useMobileBlockMenus } from "./script-editor/use-mobile-block-menus";
 import { useDisplaySettings } from "./script-editor/use-display-settings";
 import { useScriptToolbarFold } from "./script-editor/use-script-toolbar-fold";
 import { useWorkspaceWidth } from "./script-editor/use-workspace-width";
-import { setCursorAtStart, setCursorAtEnd, setCursorAtTextOffset, getEditableElementForRange, isTextEditingTarget, isFormEditingTarget, getTextLength } from "./script-editor/dom-cursor";
+import { insertLineBreakAtTextOffset, setCursorAtStart, setCursorAtEnd, setCursorAtTextOffset, getEditableElementForRange, isTextEditingTarget, isFormEditingTarget, getTextLength } from "./script-editor/dom-cursor";
 import { getScrollEl, getScrollMetrics, scrollContainerBy, scrollElementIntoView, estimateVirtualScrollAnchor, measureScriptTocNumberWidths, clearTimeoutMap, markProgrammaticScroll } from "./script-editor/dom-scroll";
 import { replaceInlineStageDelimiters, toggleInlineTag, wrapSelectionAsInlineStageCue } from "./script-editor/inline-stage";
 import { EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS, REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS, presenceColor } from "./script-editor/presence";
@@ -492,6 +492,7 @@ export default function ScriptEditor({
   }, [reorderNoticeTimer, reorderUnlockFrame, presenceLayoutTimerRef, presenceTimerRef]);
 
   const taRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const mobileBlockMenuCaretRef = useRef<{ blockId: string; textOffset: number | null } | null>(null);
   const pendingFocus = useRef<{ id: string; textOffset?: number; atEnd?: boolean } | null>(null);
   const pendingCharOpen = useRef<string | null>(null);
   const draggingBlockId = useRef<string | null>(null);
@@ -1307,9 +1308,10 @@ export default function ScriptEditor({
     }
   }, [applyWindowRange, getBlockScrollElement, updateActiveSceneFromScroll]);
 
-  const openMobileBlockMenu = useCallback((blockId: string, blockIndex: number) => {
+  const openMobileBlockMenu = useCallback((blockId: string, blockIndex: number, textOffset: number | null = null) => {
     setMobileBatchAction(null);
     setMobileInsertMenuOpen(false);
+    mobileBlockMenuCaretRef.current = { blockId, textOffset };
     scrollToBlockIdx(blockIndex, "start", 0.2);
     setMobileBlockMenuBlockId(blockId);
   }, [scrollToBlockIdx, setMobileBatchAction, setMobileBlockMenuBlockId, setMobileInsertMenuOpen]);
@@ -1982,6 +1984,19 @@ export default function ScriptEditor({
     if (el) taRefs.current.set(id, el);
     else taRefs.current.delete(id);
   }, []);
+
+  const insertMobileBlockLineBreak = useCallback((blockId: string) => {
+    if (isLockedMode) return;
+    const el = taRefs.current.get(blockId);
+    if (!el) return;
+    const savedCaret = mobileBlockMenuCaretRef.current;
+    const textOffset = savedCaret?.blockId === blockId ? savedCaret.textOffset : null;
+    closeMobileBlockMenu();
+    el.focus();
+    if (!insertLineBreakAtTextOffset(el, textOffset)) return;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    mobileBlockMenuCaretRef.current = null;
+  }, [closeMobileBlockMenu, isLockedMode]);
 
   const openCharSelector = useCallback((id: string) => {
     setCharEditTokens((prev) => ({ ...prev, [id]: (prev[id] ?? 0) + 1 }));
@@ -5054,8 +5069,8 @@ export default function ScriptEditor({
                   onTagChange={(groupId, optionId, value, del) => handleTagChange(block.id, groupId, optionId, value, del)}
                   onTagCopyClick={() => handleTagCopy(block.id)}
                   onTagPasteClick={() => handleTagPaste(block.id)}
-                  onMobileMenuOpen={() => {
-                    openMobileBlockMenu(block.id, bIdx);
+                  onMobileMenuOpen={(caretOffset) => {
+                    openMobileBlockMenu(block.id, bIdx, caretOffset);
                   }}
                 />
               </div>
@@ -5940,6 +5955,14 @@ export default function ScriptEditor({
                     className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
                   >
                     {isStageBlock ? "转为台词" : "转为舞台提示"}
+                  </button>
+                )}
+                {!isMarker && !isBatchMode && canEditText && (
+                  <button
+                    onClick={() => insertMobileBlockLineBreak(mobileBlockMenuBlockId)}
+                    className="w-full px-5 py-3.5 text-left text-[15px] text-zinc-700 border-t border-zinc-100"
+                  >
+                    块内换行
                   </button>
                 )}
                 {!isMarker && !isBatchMode && (

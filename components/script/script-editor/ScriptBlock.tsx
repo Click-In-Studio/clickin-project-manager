@@ -15,7 +15,7 @@ import SceneLabel from "./SceneLabel";
 import TagPicker from "./TagPicker";
 import { buildCommentBlockCaption, type RemotePresence, type Comment, type BlockAssetBubbleItem } from "./comments";
 import { COMPACT_STAGE_COMMENT_EDITOR_WIDTH_RATIO, LINE_INDEX_GUTTER_OFFSET_REM, LINE_INDEX_CONTROL_MIN_WIDTH_REM } from "./constants";
-import { isAtStart, isOnFirstLine, isOnLastLine, getHtmlSplit } from "./dom-cursor";
+import { getCollapsedCursorTextOffset, insertLineBreakAtTextOffset, isAtStart, isOnFirstLine, isOnLastLine, getHtmlSplit } from "./dom-cursor";
 import { sanitizePasteHtml, htmlToMd, toggleInlineTag, wrapSelectionAsInlineStageCue, applyInlineStageStyling } from "./inline-stage";
 
 export const COMPACT_STAGE_CONTROL_THRESHOLD_REM = 1.9;
@@ -201,7 +201,7 @@ export default function ScriptBlock({
   onTagCopyClick?: () => void;
   onTagPasteClick?: () => void;
   onCharacterChangeFocus?: () => void;
-  onMobileMenuOpen?: () => void;
+  onMobileMenuOpen?: (caretOffset: number | null) => void;
   contentPlaceholder?: string;
 }) {
   const blockRootRef = useRef<HTMLDivElement | null>(null);
@@ -215,6 +215,7 @@ export default function ScriptBlock({
   const latestBlockRef = useRef(block);
   const latestStageDelimRef = useRef({ open: stageDelimOpen, close: stageDelimClose });
   const composingRef = useRef(false);
+  const mobileMenuCaretOffsetRef = useRef<number | null>(null);
   const compactControlLayoutActiveRef = useRef(false);
   const [charSelectorOpen, setCharSelectorOpen] = useState(false);
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
@@ -440,18 +441,7 @@ export default function ScriptBlock({
     }
     if (e.key === "Enter" && e.shiftKey) {
       e.preventDefault();
-      const sel = window.getSelection();
-      if (sel?.rangeCount) {
-        const range = sel.getRangeAt(0);
-        range.deleteContents();
-        const br = document.createElement("br");
-        range.insertNode(br);
-        range.setStartAfter(br);
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
-        syncContent();
-      }
+      if (insertLineBreakAtTextOffset(div)) syncContent();
       return;
     }
     if (e.key === "Enter" && !e.shiftKey) {
@@ -751,13 +741,18 @@ export default function ScriptBlock({
               data-script-block-bar="true"
               onDragStart={onDragStartBlock}
               onDragEnd={onDragEndBlock}
+              onPointerDown={() => {
+                mobileMenuCaretOffsetRef.current = getCollapsedCursorTextOffset(divRef.current!);
+              }}
               onMouseDown={(e) => {
                 if (e.shiftKey) e.preventDefault();
                 e.stopPropagation();
               }}
               onClick={(e) => {
                 onToggleSelected(e);
-                if (window.matchMedia("(max-width: 639px)").matches) onMobileMenuOpen?.();
+                if (window.matchMedia("(max-width: 639px)").matches) {
+                  onMobileMenuOpen?.(mobileMenuCaretOffsetRef.current);
+                }
               }}
               className={`absolute left-0 top-[calc(50%-2px)] h-[max(1.5rem,calc(100%-3rem))] w-4 -translate-y-1/2 select-none rounded outline-none transition-all focus:outline-none focus-visible:outline-none sm:opacity-0 sm:group-hover:opacity-100 ${
                 isReorderLocked

@@ -37,9 +37,12 @@ describe("#730 多行输入的换行与提交", () => {
   it("富文本多行面提示软键盘 Enter 为换行，剧本正文仍保留结构化 Enter", () => {
     const smartTextarea = readFileSync("components/editor/SmartTextarea.tsx", "utf8");
     const scriptBlock = readFileSync("components/script/script-editor/ScriptBlock.tsx", "utf8");
+    const scriptEditor = readFileSync("components/script/ScriptEditor.tsx", "utf8");
 
     expect(smartTextarea).toContain('enterkeyhint: "enter"');
     expect(scriptBlock).toContain('if (e.key === "Enter" && !e.shiftKey)');
     expect(scriptBlock).toContain('if (e.key === "Enter" && e.shiftKey)');
+    expect(scriptEditor).toContain("块内换行");
+    expect(scriptEditor).toContain("insertMobileBlockLineBreak");
   });
 });
