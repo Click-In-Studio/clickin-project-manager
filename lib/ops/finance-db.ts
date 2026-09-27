@@ -25,7 +25,7 @@
 import { getPool } from "../pg";
 import type { PoolClient } from "pg";
 import {
-  buildApprovalLadder, DEFAULT_APPROVAL_TTL_HOURS, nextStage,
+  buildApprovalCandidateLadder, buildApprovalLadder, DEFAULT_APPROVAL_TTL_HOURS, nextStage,
   type ApprovalStage, type StagePosition,
 } from "../approval/approval-routing";
 
@@ -393,26 +393,58 @@ function chainEntry(stage: ApprovalStage) {
   };
 }
 
+function selfApprovalEntry(submitterId: string, actedAt: string, bySystem = false) {
+  return {
+    phase: "self_approval", depth: 0,
+    approverIds: [submitterId], canFinalize: true,
+    notifiedAt: actedAt,
+    action: "approved", ...(bySystem ? { bySystem: true } : { actorId: submitterId }), actedAt,
+    approvalReason: "sole_approver",
+  };
+}
+
+function isSoleCandidate(ladder: ApprovalStage[], subjectId: string): boolean {
+  const ids = new Set(ladder.flatMap(stage => stage.approverIds));
+  return ids.size === 1 && ids.has(subjectId);
+}
+
+function withoutSubject(ladder: ApprovalStage[], subjectId: string): ApprovalStage[] {
+  return ladder
+    .map(stage => ({ ...stage, approverIds: stage.approverIds.filter(id => id !== subjectId) }))
+    .filter(stage => stage.approverIds.length > 0);
+}
+
 export async function submitExpense(params: {
   productionId: string; categoryId: string | null; title: string;
   amount: string; currency?: string; note?: string; submittedBy: string;
 }): Promise<Expense> {
-  const ladder = await buildApprovalLadder(
+  const candidateLadder = await buildApprovalCandidateLadder(
     expenseTarget(params.productionId, params.submittedBy, params.categoryId),
   );
+  const selfApproved = isSoleCandidate(candidateLadder, params.submittedBy);
+  const ladder = withoutSubject(candidateLadder, params.submittedBy);
   const first = ladder[0];
-  if (!first) throw new FinanceError("no_approver", "找不到这笔支出的审批人，请联系制作人");
+  if (!first && !selfApproved)
+    throw new FinanceError("no_approver", "找不到这笔支出的审批人，请联系制作人");
+
+  const actedAt = new Date().toISOString();
+  const status: ExpenseStatus = selfApproved ? "approved" : "pending";
+  const chain = selfApproved
+    ? [selfApprovalEntry(params.submittedBy, actedAt)]
+    : [chainEntry(first!)];
 
   const res = await getPool().query<{ id: string }>(
     `INSERT INTO production_expense
        (production_id, category_id, title, amount, currency, note, submitted_by,
-        status, current_stage, current_stage_depth, current_approver_ids, escalation_chain)
-     VALUES ($1,$2,$3,$4::numeric,$5,$6,$7,'pending',$8,$9,$10::uuid[],$11::jsonb)
+        status, current_stage, current_stage_depth, current_approver_ids, escalation_chain,
+        resolved_at, resolved_by)
+     VALUES ($1,$2,$3,$4::numeric,$5,$6,$7,$8,$9,$10,$11::uuid[],$12::jsonb,$13,$14)
      RETURNING id`,
     [
       params.productionId, params.categoryId, params.title.trim(), params.amount,
       params.currency ?? "CNY", params.note ?? "", params.submittedBy,
-      first.stage, first.depth, first.approverIds, JSON.stringify([chainEntry(first)]),
+      status, first?.stage ?? null, first?.depth ?? 0, first?.approverIds ?? [], JSON.stringify(chain),
+      selfApproved ? actedAt : null, selfApproved ? params.submittedBy : null,
     ],
   );
   const created = await getExpense(res.rows[0].id, params.productionId);
@@ -558,7 +590,8 @@ export async function isExpenseApprover(
  *    全部缺行，整条升级链自 Phase 7 起是死的）。缺配置 = 按列默认值计时，
  *    不是「不升级」。
  *
- * 已在链顶（owner）的不再升级——只等人处理。
+ * 已在链顶且仍有他人可处理时不再升级；若人员变化后只剩提交人自己，则按提交时的
+ * 同一规则自动自批，避免原待办永久挂起。
  */
 export async function escalateExpiredExpenses(): Promise<{ escalated: number }> {
   const pool = getPool();
@@ -578,14 +611,31 @@ export async function escalateExpiredExpenses(): Promise<{ escalated: number }> 
 
   let escalated = 0;
   for (const row of rows) {
-    const ladder = await buildApprovalLadder(
+    const candidateLadder = await buildApprovalCandidateLadder(
       expenseTarget(row.production_id, row.submitted_by, row.category_id),
     );
+    const ladder = withoutSubject(candidateLadder, row.submitted_by);
     const next = nextStage(
       ladder,
       positionOf({ currentStage: row.current_stage }, row.current_stage_depth),
     );
-    if (!next) continue;   // 已在链顶，只等人处理
+    if (!next) {
+      if (!isSoleCandidate(candidateLadder, row.submitted_by)) continue;
+      const actedAt = new Date().toISOString();
+      await pool.query(
+        `UPDATE production_expense
+            SET status = 'approved', resolved_at = now(), resolved_by = NULL,
+                current_stage = NULL, current_approver_ids = '{}',
+                escalation_chain = escalation_chain || $2::jsonb, updated_at = now()
+          WHERE id = $1 AND status = 'pending'
+            AND current_stage IS NOT DISTINCT FROM $3`,
+        [
+          row.id, JSON.stringify([selfApprovalEntry(row.submitted_by, actedAt, true)]),
+          row.current_stage,
+        ],
+      );
+      continue;
+    }
 
     const moved = await pool.query<{ id: string }>(
       `UPDATE production_expense
