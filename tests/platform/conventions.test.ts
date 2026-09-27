@@ -344,7 +344,7 @@ describe("components/ 按域分目录，不回退成平铺", () => {
 // 瘦身不在 #487 范围。
 
 const MONOLITH_LINE_CEILING: Record<string, number> = {
-  "components/script/ScriptEditor.tsx": 6067, // #647 评论面板懒加载补加载态（+9）：壳搬进 CommentsPanelLazy，这里加空闲预热
+  "components/script/ScriptEditor.tsx": 6076, // #730 手机块菜单补块内换行（+9）：保存光标、菜单动作与恢复输入
   "components/ops/EventDetailClient.tsx": 421,
   "components/ops/CuePage.tsx": 1451, // #655 失效的 Cue 面板跨表列出（+2）：表名标签与表名索引
   "components/ops/PlanningClient.tsx": 98,
