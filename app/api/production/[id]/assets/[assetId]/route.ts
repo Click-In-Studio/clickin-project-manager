@@ -32,7 +32,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!await canViewAsset(permCtx, id, asset, "meta"))
     return Response.json({ error: "权限不足" }, { status: 403 });
   if (asset.assetType === "financial_document")
-    return Response.json({ error: "财务凭证只能从报销入口管理" }, { status: 409 });
+    return Response.json({ error: "财务凭证只能从报销入口管理" }, { status: 403 });
   return Response.json({ asset });
 }
 
@@ -47,7 +47,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!await hasEffectiveGrant(permCtx, id, "asset", assetId, "meta", "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
   if (asset.assetType === "financial_document")
-    return Response.json({ error: "财务凭证只能从报销入口管理" }, { status: 409 });
+    return Response.json({ error: "财务凭证只能从报销入口管理" }, { status: 403 });
 
   const body = (await req.json()) as { assetType?: unknown; name?: unknown; fileName?: unknown };
   // asset_type 列无 CHECK 约束，白名单只在 TS 层——这里必须运行时校验，否则任意串入库
@@ -80,7 +80,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   if (!await hasEffectiveGrant(permCtx, id, "asset", assetId, "*", "delete"))
     return Response.json({ error: "权限不足" }, { status: 403 });
   if (asset.assetType === "financial_document")
-    return Response.json({ error: "财务凭证只能从报销入口管理" }, { status: 409 });
+    return Response.json({ error: "财务凭证只能从报销入口管理" }, { status: 403 });
 
   let r2Keys: string[];
   try {

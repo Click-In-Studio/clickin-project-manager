@@ -19,7 +19,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
   if (!await canViewAsset(access.permCtx, id, asset, "file"))
     return Response.json({ error: "权限不足" }, { status: 403 });
   if (asset.assetType === "financial_document")
-    return Response.json({ error: "财务凭证请从报销单下载" }, { status: 409 });
+    return Response.json({ error: "财务凭证请从报销单下载" }, { status: 403 });
 
   if (asset.storageType === "feishu_link") {
     return Response.json({ url: asset.feishuUrl });

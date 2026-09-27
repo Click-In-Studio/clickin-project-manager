@@ -14,6 +14,13 @@ vi.mock("@/lib/job/asset-jobs", () => ({ enqueueAssetPostProcess: vi.fn(async ()
 
 import { POST as createAssetRoute } from "@/app/api/production/[id]/assets/route";
 import { POST as presignRoute } from "@/app/api/production/[id]/assets/presign/route";
+import {
+  DELETE as deleteAssetRoute,
+  GET as getAssetRoute,
+  PATCH as patchAssetRoute,
+} from "@/app/api/production/[id]/assets/[assetId]/route";
+import { GET as downloadAssetRoute } from "@/app/api/production/[id]/assets/[assetId]/download-url/route";
+import { GET as previewAssetRoute } from "@/app/api/production/[id]/assets/[assetId]/preview-url/route";
 
 let prodId: string;
 let ownerId: string;
@@ -33,6 +40,19 @@ function request(userId: string | null, body: unknown) {
 }
 
 const ctx = () => ({ params: Promise.resolve({ id: prodId }) });
+const assetCtx = (assetId: string) => ({ params: Promise.resolve({ id: prodId, assetId }) });
+
+function assetRequest(userId: string, method: "GET" | "PATCH" | "DELETE", body?: unknown) {
+  const req = new NextRequest("http://localhost/api/assets/id", {
+    method,
+    headers: body === undefined ? undefined : { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  req.cookies.set(SESSION_COOKIE, createSession({
+    userId, name: "测试", avatarUrl: null, isAdmin: false,
+  }));
+  return req;
+}
 
 beforeAll(async () => {
   ({ prodId } = await makeProduction());
@@ -119,6 +139,13 @@ describe("财务凭证上传用途", () => {
     );
     expect(count).toBe("0");
     expect((await listAssets(prodId)).map(asset => asset.id)).not.toContain(body.asset.id);
+
+    const routeCtx = assetCtx(body.asset.id);
+    expect((await getAssetRoute(assetRequest(ownerId, "GET"), routeCtx)).status).toBe(403);
+    expect((await patchAssetRoute(assetRequest(ownerId, "PATCH", { name: "改名" }), routeCtx)).status).toBe(403);
+    expect((await deleteAssetRoute(assetRequest(ownerId, "DELETE"), routeCtx)).status).toBe(403);
+    expect((await downloadAssetRoute(assetRequest(ownerId, "GET"), routeCtx)).status).toBe(403);
+    expect((await previewAssetRoute(assetRequest(ownerId, "GET"), routeCtx)).status).toBe(403);
   });
 
   it("通用上传入口不能伪造 financial_document 类型", async () => {

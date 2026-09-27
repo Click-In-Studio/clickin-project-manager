@@ -29,7 +29,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
     if (!await canViewAsset(access.permCtx, id, asset, "meta"))
       return Response.json({ error: "权限不足" }, { status: 403 });
     if (asset.assetType === "financial_document")
-      return Response.json({ error: "财务凭证请从报销单查看" }, { status: 409 });
+      return Response.json({ error: "财务凭证请从报销单查看" }, { status: 403 });
 
     const previewType = getPreviewType(asset.mimeType);
     if (!previewType) return Response.json({ error: "不支持预览" }, { status: 400 });
