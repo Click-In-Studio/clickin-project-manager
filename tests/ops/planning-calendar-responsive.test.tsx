@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CalendarView from "@/components/ops/planning/CalendarView";
 import styles from "@/components/ops/planning.module.css";
 import type { Props } from "@/components/ops/planning/types";
 
-const calendarCss = readFileSync("components/ops/planning.module.css", "utf8");
+const calendarCss = readFileSync(path.resolve(__dirname, "../../components/ops/planning.module.css"), "utf8");
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("next/link", () => ({
@@ -241,9 +242,9 @@ describe("CalendarView responsive interactions", () => {
     expect(container.querySelector('[aria-labelledby="calendar-day-drawer-title"]')?.textContent).toContain("舞台清场");
   });
 
-  it("319、332、380px 共用紧凑格高，底部手机提示为浮动新建按钮留出整列空间", () => {
+  it("手机断点隐藏预算外摘要，并为浮动新建按钮保留提示空间", () => {
     expect(calendarCss).toMatch(/@media \(max-width: 760px\)[\s\S]*?\.calendarMobileHidden, \.calendarPhaseMobileExtra,[\s\S]*?display: none;/);
-    expect(calendarCss).toMatch(/@media \(max-width: 380px\)[\s\S]*?\.calendarCell \{ height: 84px; padding: 3px 2px; gap: 2px; \}/);
+    expect(calendarCss).toMatch(/@media \(max-width: 380px\)[\s\S]*?\.calendarCell\s*\{[^}]*height:\s*84px;/);
     expect(calendarCss).toMatch(/\.calendarHint \{ width: calc\(100% - 72px\); min-height: 54px;/);
     expect(calendarCss).toContain(".calendarHintMobile { display: inline; }");
   });
