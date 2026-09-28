@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import ProductionTopMenu, {
   PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
   PRODUCTION_TOOLBAR_STAGE,
@@ -32,6 +33,19 @@ export function DramaturgyWorkspaceHeading({
   const { stage } = useProductionToolbar();
   const compact = stage >= PRODUCTION_TOOLBAR_STAGE.primaryShort;
   const activeSection = SECTIONS.find((section) => section.id === active) ?? SECTIONS[0];
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const workspaceMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!workspaceMenuOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || workspaceMenuRef.current?.contains(target)) return;
+      setWorkspaceMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [workspaceMenuOpen]);
 
   return (
     <>
@@ -45,24 +59,38 @@ export function DramaturgyWorkspaceHeading({
       </div>
       <ProductionTopMenuDivider />
       {compact ? (
-        <details className="group relative shrink-0">
-          <summary className="flex h-8 cursor-pointer list-none items-center gap-1 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2.5 text-[11px] font-semibold text-[var(--ink)] shadow-sm [&::-webkit-details-marker]:hidden">
+        <div ref={workspaceMenuRef} className="relative shrink-0">
+          <button
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={workspaceMenuOpen}
+            onClick={() => setWorkspaceMenuOpen((open) => !open)}
+            className="flex h-8 cursor-pointer items-center gap-1 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2.5 text-[11px] font-semibold text-[var(--ink)] shadow-sm"
+          >
             <span>{activeSection.label}</span>
-            <span aria-hidden="true" className="text-[10px] text-[var(--muted)] transition-transform group-open:rotate-180">⌄</span>
-          </summary>
-          <nav aria-label="构作工作区" className="absolute left-0 top-full z-50 mt-2 w-32 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md">
-            {SECTIONS.map((section) => (
-              <Link
-                key={section.id}
-                href={`/production/${productionId}/${section.path}`}
-                aria-current={active === section.id ? "page" : undefined}
-                className={`block px-3 py-2 text-xs ${active === section.id ? "bg-[var(--surface-2)] font-semibold text-[var(--ink)]" : "text-[var(--muted)] hover:bg-[var(--surface-2)]"}`}
-              >
-                {section.label}
-              </Link>
-            ))}
-          </nav>
-        </details>
+            <span
+              aria-hidden="true"
+              className={`text-[10px] text-[var(--muted)] transition-transform ${workspaceMenuOpen ? "rotate-180" : ""}`}
+            >
+              ⌄
+            </span>
+          </button>
+          {workspaceMenuOpen && (
+            <nav aria-label="构作工作区" className="absolute left-0 top-full z-50 mt-2 w-32 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md">
+              {SECTIONS.map((section) => (
+                <Link
+                  key={section.id}
+                  href={`/production/${productionId}/${section.path}`}
+                  aria-current={active === section.id ? "page" : undefined}
+                  onClick={() => setWorkspaceMenuOpen(false)}
+                  className={`block px-3 py-2 text-xs ${active === section.id ? "bg-[var(--surface-2)] font-semibold text-[var(--ink)]" : "text-[var(--muted)] hover:bg-[var(--surface-2)]"}`}
+                >
+                  {section.label}
+                </Link>
+              ))}
+            </nav>
+          )}
+        </div>
       ) : (
         <nav
           aria-label="构作工作区"
