@@ -1035,13 +1035,13 @@
   .calendarLegend { width: 100%; flex-wrap: wrap; gap: 8px 14px; font-size: 12px; }
   .calendarLegend i { width: 9px; height: 9px; }
   .calendarWeek span { padding: 9px 2px; font-size: 12px; }
-  .calendarCell { height: 90px; padding: 4px 3px; gap: 3px; }
-  .calendarDateButton { min-width: 25px; min-height: 25px; margin: -2px 0 0 -2px; font-size: 12px; }
-  .calendarChip { min-height: 21px; padding: 3px 4px; font-size: 10px; }
+  .calendarCell { height: 90px; padding: 3px 2px; gap: 2px; }
+  .calendarDateButton { min-width: 22px; min-height: 22px; margin: -1px 0 0 -1px; font-size: 11px; }
+  .calendarChip { min-height: 18px; padding: 2px 3px; font-size: 9px; }
   .calendarChipTitle { max-width: 6em; }
   .calendarChipType { display: none; }
-  .calendarMobileHidden, .calendarPhaseMobileExtra, .calendarHiddenDesktop, .calendarHintDesktop { display: none; }
-  .calendarHiddenMobile { display: inline; font-size: 10px; }
+  .calendarMobileHidden, .calendarHiddenDesktop, .calendarHintDesktop { display: none; }
+  .calendarHiddenMobile { display: inline; font-size: 9px; line-height: 10px; }
   .calendarHint { width: calc(100% - 72px); min-height: 54px; font-size: 11px; }
   .calendarHintMobile { display: inline; }
   .calendarFloatingCreate {
@@ -1087,8 +1087,5 @@
 }
 
 @media (max-width: 380px) {
-  .calendarCell { height: 84px; padding: 3px 2px; gap: 2px; }
-  .calendarDateButton { min-width: 23px; min-height: 23px; }
-  .calendarChip { min-height: 19px; padding: 2px 3px; }
-  .calendarHiddenMobile { font-size: 9px; }
+  .calendarCell { height: 84px; }
 }

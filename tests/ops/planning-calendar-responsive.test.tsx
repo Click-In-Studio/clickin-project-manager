@@ -154,7 +154,7 @@ describe("CalendarView responsive interactions", () => {
     const day = container.querySelector<HTMLElement>('[data-calendar-date="2031-04-12"]')!;
     expect(day.querySelectorAll('[aria-label^="查看 "][aria-label$=" 个阶段"]')).toHaveLength(1);
     expect(day.querySelector('[aria-label="查看 3 个阶段"]')).not.toBeNull();
-    expect(day.textContent).toContain("+1 项");
+    expect(day.textContent).toContain("+2 项");
     expect(day.textContent).not.toContain("灯光排练");
 
     await act(async () => day.querySelector<HTMLButtonElement>('[aria-label="查看 3 个阶段"]')!.click());
@@ -224,14 +224,11 @@ describe("CalendarView responsive interactions", () => {
     });
 
     const cell = container.querySelector<HTMLElement>('[data-calendar-date="2031-04-12"]')!;
-    const phaseRows = [...cell.querySelectorAll<HTMLElement>('[title*="2031-04-12 ~ 2031-04-15"]')];
-    expect(phaseRows).toHaveLength(3);
-    expect(phaseRows[0].classList.contains(styles.calendarPhaseMobileExtra)).toBe(false);
-    expect(phaseRows.slice(1).every(row => row.classList.contains(styles.calendarPhaseMobileExtra))).toBe(true);
+    expect(cell.querySelectorAll('[aria-label="查看 3 个阶段"]')).toHaveLength(1);
 
     const entryRows = [...cell.querySelectorAll<HTMLButtonElement>('button[title]')]
-      .filter(button => button.title !== "查看或操作当天事项");
-    expect(entryRows).toHaveLength(3);
+      .filter(button => button.title !== "查看或操作当天事项" && !button.getAttribute("aria-label")?.includes("个阶段"));
+    expect(entryRows).toHaveLength(2);
     expect(entryRows[0].classList.contains(styles.calendarMobileHidden)).toBe(false);
     expect(entryRows.slice(1).every(row => row.classList.contains(styles.calendarMobileHidden))).toBe(true);
 
@@ -239,11 +236,16 @@ describe("CalendarView responsive interactions", () => {
       .find(button => button.textContent?.trim() === "+3 项")!;
     expect(mobileMore.classList.contains(styles.calendarHiddenMobile)).toBe(true);
     await act(async () => mobileMore.click());
-    expect(container.querySelector('[aria-labelledby="calendar-day-drawer-title"]')?.textContent).toContain("舞台清场");
+    const drawer = container.querySelector('[aria-labelledby="calendar-day-drawer-title"]')!;
+    expect(drawer.textContent).toContain("全项目筹备");
+    expect(drawer.textContent).toContain("舞美进场");
+    expect(drawer.textContent).toContain("技术合成");
+    expect(drawer.textContent).toContain("舞台清场");
   });
 
-  it("手机断点隐藏预算外摘要，并为浮动新建按钮保留提示空间", () => {
-    expect(calendarCss).toMatch(/@media \(max-width: 760px\)[\s\S]*?\.calendarMobileHidden, \.calendarPhaseMobileExtra,[\s\S]*?display: none;/);
+  it("手机断点统一压缩格内预算，并为浮动新建按钮保留提示空间", () => {
+    expect(calendarCss).toMatch(/@media \(max-width: 760px\)[\s\S]*?\.calendarCell \{ height: 90px; padding: 3px 2px; gap: 2px; \}/);
+    expect(calendarCss).toMatch(/\.calendarMobileHidden, \.calendarHiddenDesktop, \.calendarHintDesktop \{ display: none; \}/);
     expect(calendarCss).toMatch(/@media \(max-width: 380px\)[\s\S]*?\.calendarCell\s*\{[^}]*height:\s*84px;/);
     expect(calendarCss).toMatch(/\.calendarHint \{ width: calc\(100% - 72px\); min-height: 54px;/);
     expect(calendarCss).toContain(".calendarHintMobile { display: inline; }");

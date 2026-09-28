@@ -164,8 +164,11 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
           const coveredPhases = phases
             .map((phase, index) => ({ phase, index }))
             .filter(({ phase }) => phaseCoversDate(phase, date));
-          const shownEntries = entries.slice(0, 3);
-          const hidden = Math.max(0, entries.length - 3);
+          const phaseUsesChip = coveredPhases.length > 1
+            || (coveredPhases.length === 1 && coveredPhases[0].phase.startDate === date);
+          const desktopEntryLimit = phaseUsesChip ? 2 : 3;
+          const shownEntries = entries.slice(0, desktopEntryLimit);
+          const hidden = Math.max(0, entries.length - desktopEntryLimit);
           // 手机格高保持紧凑：日期之外只预算 1 条阶段、1 条事项和一行「+N 项」。
           // 完整事项仍由日期抽屉承载，避免密集日期把 chip 压扁或推出格子。
           const hiddenOnMobile = Math.max(0, entries.length - 1);
