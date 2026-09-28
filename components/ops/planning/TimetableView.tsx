@@ -21,6 +21,7 @@ import {
   rundownGridColumns,
   rundownPinnedLeft,
 } from "./rundown-layout";
+import { installRundownScrollHandoff } from "./rundown-scroll-handoff";
 import type { RundownColumn, ServerUserGroup, ServerRundownColumn, ServerRundownPlacement, RundownEntrySelection, RundownDragEntry } from "./rundown-types";
 import type { Props } from "./types";
 
@@ -62,6 +63,11 @@ export default function TimetableView({ productionId, events, departments, membe
   const dragColumnId = useRef<string | null>(null);
   const dragEntryRef = useRef<RundownDragEntry | null>(null);
   const resizeRef = useRef<{ selection: RundownEntrySelection; edge: "start" | "end"; startY: number; startIso: string; endIso: string; nextStart: string; nextEnd: string } | null>(null);
+  const rundownScrollCleanupRef = useRef<(() => void) | null>(null);
+  const bindRundownScroll = useCallback((element: HTMLDivElement | null) => {
+    rundownScrollCleanupRef.current?.();
+    rundownScrollCleanupRef.current = element ? installRundownScrollHandoff(element) : null;
+  }, []);
 
   useEffect(() => {
     try {
@@ -732,7 +738,7 @@ export default function TimetableView({ productionId, events, departments, membe
         </div>
       ) : (
         /* 原型 rundownMatrixWrap：690px 限高滚动容器 + 38px 横纹底 + sticky 表头/时间列 */
-        <div className={styles.rundownMatrixWrap}>
+        <div ref={bindRundownScroll} className={styles.rundownMatrixWrap}>
           <div style={{
             display: "grid",
             gridTemplateColumns: rundownGridColumns(lanes),

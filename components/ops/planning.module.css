@@ -622,7 +622,6 @@
   min-width: 0;
   max-height: 690px;
   overflow: auto;
-  overscroll-behavior: contain;
   border: 1px solid var(--line);
   border-radius: 11px;
   background: #f7f7f3;
