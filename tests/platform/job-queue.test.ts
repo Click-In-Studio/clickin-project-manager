@@ -54,6 +54,15 @@ describe("queue 模式（JOB_WORKER=1：enqueue 只入队）", () => {
     expect(row.attempts).toBe(0);
   });
 
+  it("runAfter 未到的任务不能被认领", async () => {
+    const future = new Date(Date.now() + 60_000);
+    const row = await makeJob({ kind: `tq_${shortId()}`, payload: {}, runAfter: future });
+    expect(row.runAfter.getTime()).toBe(future.getTime());
+    expect(await claimJobById(row.id, OWNER)).toBeNull();
+    await getPool().query(`UPDATE job SET run_after = now() WHERE id = $1`, [row.id]);
+    expect((await claimJobById(row.id, OWNER))?.id).toBe(row.id);
+  });
+
   it("dedupe：同 key 的在途任务合流；终局后同 key 可再入队", async () => {
     const kind = `tq_${shortId()}`;
     const key = `dedupe_${shortId()}`;

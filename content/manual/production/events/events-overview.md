@@ -7,7 +7,7 @@ who: 所有成员可看已发布的事件；新建需要事件创建权限
 tier: all
 platform: [desktop, mobile]
 related: [production/events/event-detail, production/events/publish-callsheet, production/planning/calendar]
-updated: 2026-09-27
+updated: 2026-09-28
 ---
 
 ## 这是什么
@@ -50,7 +50,7 @@ updated: 2026-09-27
 
 ## 注意事项
 
-- 通知只在**发布那一刻**发一次。之后改时间、地点、流程，或者取消，系统都不会再通知——所以先在草稿里排好再发；发布后有大改动，在群里说一声，或者撤回重新发布。
+- 已发布的事件如果改了时间、地点或被取消，参加和关注的人会在 5 分钟内收到一条合并通知；有 Call Time 的人需要重新确认。流程等其他内容的修改不会另发通知。
 - 一个事件只能有一个日期。连排三天就是三个事件，用「项目日历」看整体。
 
 ## 常见问题

@@ -329,16 +329,43 @@ export async function markNotificationActed(
 }
 
 /**
- * Clear confirmed_at on all call times for an event (used when a call is modified
- * after dispatch, requiring re-confirmation from all recipients).
+ * 失效某事件旧的 Call Time 确认通知；改期时同时清空 confirmed_at。
+ * 两步必须同事务，否则中途失败会留下“确认已清空但旧按钮仍可点”的半态。
  */
-export async function invalidateCallTimeConfirmations(
+export async function prepareEventChangeCallTimes(
   eventId: string,
+  invalidateConfirmations: boolean,
 ): Promise<void> {
-  await getPool().query(
-    `UPDATE event_call_time SET confirmed_at = NULL WHERE event_id = $1`,
-    [eventId],
-  );
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    if (invalidateConfirmations) {
+      await client.query(
+        `UPDATE event_call_time SET confirmed_at = NULL WHERE event_id = $1`,
+        [eventId],
+      );
+    }
+    await client.query(
+      `UPDATE user_notification un
+       SET expired_at = now()
+       WHERE un.entity_type = 'call_time'
+         AND un.expired_at IS NULL
+         AND un.acted_at IS NULL
+         AND EXISTS (
+           SELECT 1 FROM event_call_time ect
+           WHERE ect.id = un.entity_id
+             AND ect.event_id = $1
+             AND ect.user_id = un.user_id
+         )`,
+      [eventId],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function confirmCallTime(

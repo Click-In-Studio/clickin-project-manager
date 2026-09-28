@@ -6,6 +6,7 @@ import { getProductionPermissionContext } from "@/lib/perm/permission-context-db
 import { getVersion } from "@/lib/script/version-db";
 import { getProductionEvent, updateProductionEvent, deleteProductionEvent, setEventStageManagers, completeAllEventTechReqs } from "@/lib/ops/event-db";
 import { maybeSendLatePublishDailyCall, dispatchEventPublishNotifications } from "@/lib/notify/notify";
+import { scheduleEventChangeNotification } from "@/lib/notify/event-change";
 
 type Ctx = { params: Promise<{ id: string; eventId: string }> };
 
@@ -80,7 +81,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "版本不存在" }, { status: 404 });
   }
 
-  await updateProductionEvent(eventId, productionId, {
+  const updatedEvent = await updateProductionEvent(eventId, productionId, {
     title: body.title?.trim(),
     eventType: body.eventType,
     location: body.location,
@@ -103,6 +104,23 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     void maybeSendLatePublishDailyCall(eventId).catch((e: unknown) =>
       console.error("[notify] late-publish daily call error:", e),
     );
+  }
+  if (updatedEvent && existing.status === "published") {
+    const scheduleChanged =
+      existing.startTime !== updatedEvent.startTime ||
+      existing.endTime !== updatedEvent.endTime ||
+      existing.location !== updatedEvent.location;
+    const shouldNotifyChange =
+      updatedEvent.status === "cancelled" ||
+      (updatedEvent.status === "published" && scheduleChanged);
+    if (shouldNotifyChange) {
+      await scheduleEventChangeNotification(eventId, {
+        status: "published",
+        startTime: existing.startTime,
+        endTime: existing.endTime,
+        location: existing.location,
+      }).catch((e: unknown) => console.error("[notify] event-change enqueue error:", e));
+    }
   }
   if (body.stageManagers !== undefined) {
     await setEventStageManagers(eventId, body.stageManagers, productionId, session.userId);
