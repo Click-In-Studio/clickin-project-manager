@@ -2,6 +2,7 @@
 kind: fixed
 title: 财务页恢复正常，资产分享链接也能正常创建和使用
 page: production/finance/expenses
+pr: 756
 order: 1
 ---
 
