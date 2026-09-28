@@ -12,13 +12,13 @@
 SELECT NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_role') AS missing_app_role \gset
 \if :missing_app_role
   \echo '应用角色不存在：' :app_role
-  SELECT 'ACL_GUARD_FAILED'::integer;
+  DO $$ BEGIN RAISE EXCEPTION 'ACL guard failed: missing app role'; END $$;
 \endif
 
 SELECT NOT has_schema_privilege(:'app_role', 'public', 'USAGE') AS missing_schema_usage \gset
 \if :missing_schema_usage
   \echo '应用角色缺少 public schema USAGE：' :app_role
-  SELECT 'ACL_GUARD_FAILED'::integer;
+  DO $$ BEGIN RAISE EXCEPTION 'ACL guard failed: missing schema usage'; END $$;
 \endif
 
 CREATE TEMP TABLE acl_missing_object(kind text, object_name text, missing_privileges text);
@@ -74,7 +74,7 @@ TABLE acl_missing_object;
 SELECT EXISTS (SELECT 1 FROM acl_missing_object) AS has_missing_objects \gset
 \if :has_missing_objects
   \echo '应用角色存在对象 ACL 缺口：' :app_role
-  SELECT 'ACL_GUARD_FAILED'::integer;
+  DO $$ BEGIN RAISE EXCEPTION 'ACL guard failed: missing object privileges'; END $$;
 \endif
 
 WITH expected(objtype, privilege_type) AS (
@@ -100,7 +100,7 @@ SELECT EXISTS (SELECT 1 FROM missing) AS missing_default_privileges \gset
 
 \if :missing_default_privileges
   \echo '应用角色缺少未来对象默认 ACL；owner=' :owner_role ' app=' :app_role
-  SELECT 'ACL_GUARD_FAILED'::integer;
+  DO $$ BEGIN RAISE EXCEPTION 'ACL guard failed: missing default privileges'; END $$;
 \endif
 
 \echo '应用角色 ACL 完整；owner=' :owner_role ' app=' :app_role
