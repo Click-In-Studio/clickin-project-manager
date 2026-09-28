@@ -284,6 +284,24 @@ export async function getBlockTagsForProduction(productionId: string): Promise<B
   }));
 }
 
+/** 分窗加载只取当前窗口的标签；权限仍由调用路由按 production 判定。 */
+export async function getBlockTagsByIds(productionId: string, blockIds: string[]): Promise<BlockTagValue[]> {
+  if (blockIds.length === 0) return [];
+  const res = await getPool().query<BlockTagRow>(
+    `SELECT bt.block_id, bt.group_id, bt.option_id, bt.value
+     FROM block_tag bt
+     JOIN tag_group tg ON tg.id = bt.group_id
+     WHERE tg.production_id = $1 AND bt.block_id = ANY($2::text[])`,
+    [productionId, blockIds],
+  );
+  return res.rows.map((r) => ({
+    blockId: r.block_id,
+    groupId: r.group_id,
+    optionId: r.option_id,
+    value: r.value != null ? Number(r.value) : null,
+  }));
+}
+
 export async function upsertBlockTag(
   blockId: string,
   groupId: string,

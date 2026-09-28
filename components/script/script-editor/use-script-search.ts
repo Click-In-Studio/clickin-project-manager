@@ -9,19 +9,22 @@ import { stripHtmlText } from "@/lib/script/script-block-stream";
  * 顶栏搜索框（含「精确 / 仅当前页」开关与命中游标）与跳行 / 跳页。
  * 从 ScriptEditor 主函数体原样搬出（#487 S4）。
  */
-export function useScriptSearch({ blocks, pageMap, focusedId, loadState, initialSearchQuery, scrollToBlockIdx }: {
+export function useScriptSearch({ blocks, pageMap, focusedId, loadState, initialSearchQuery, scrollToBlockIdx, remoteSearch }: {
   blocks: Block[];
   pageMap: Record<string, number>;
   focusedId: string | null;
   loadState: string;
   initialSearchQuery: string | undefined;
   scrollToBlockIdx: (idx: number, align?: ScrollLogicalPosition) => void;
+  remoteSearch?: (query: string, exact: boolean, signal: AbortSignal) => Promise<Array<{ id: string; index: number }> | null>;
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchExact, setSearchExact] = useState(false);
   const [searchCurrentPage, setSearchCurrentPage] = useState(false);
   const [searchIdx, setSearchIdx] = useState(0);
+  const [remoteMatches, setRemoteMatches] = useState<Array<{ id: string; index: number }>>([]);
+  const [searchPending, setSearchPending] = useState(false);
 
   // initialSearchQueryRef — consumed after load (see effect below, after loadState declaration)
   const initialSearchQueryRef = useRef(initialSearchQuery);
@@ -43,8 +46,36 @@ export function useScriptSearch({ blocks, pageMap, focusedId, loadState, initial
   // ── Search matches (computed from blocks + pageMap) ─────────────────────────
   const currentPageNum = focusedId ? pageMap[focusedId] : undefined;
 
+  useEffect(() => {
+    if (!remoteSearch) return;
+    const query = searchQuery.trim();
+    if (!searchOpen || !query) {
+      setRemoteMatches([]);
+      setSearchPending(false);
+      return;
+    }
+    const controller = new AbortController();
+    setSearchPending(true);
+    const timer = window.setTimeout(() => {
+      void remoteSearch(query, searchExact, controller.signal).then((matches) => {
+        if (!controller.signal.aborted && matches) setRemoteMatches(matches);
+      }).finally(() => {
+        if (!controller.signal.aborted) setSearchPending(false);
+      });
+    }, 160);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [remoteSearch, searchExact, searchOpen, searchQuery]);
+
   const searchMatches = useMemo<number[]>(() => {
     if (!searchOpen || !searchQuery.trim()) return [];
+    if (remoteSearch) {
+      return remoteMatches
+        .filter((match) => !searchCurrentPage || currentPageNum === undefined || pageMap[match.id] === currentPageNum)
+        .map((match) => match.index);
+    }
     const q = searchExact ? searchQuery : searchQuery.toLowerCase();
     return blocks.reduce<number[]>((acc, block, idx) => {
       if (!isTextBlock(block)) return acc;
@@ -55,7 +86,7 @@ export function useScriptSearch({ blocks, pageMap, focusedId, loadState, initial
       acc.push(idx);
       return acc;
     }, []);
-  }, [searchOpen, searchQuery, searchExact, searchCurrentPage, blocks, pageMap, currentPageNum]);
+  }, [searchOpen, searchQuery, searchExact, searchCurrentPage, blocks, pageMap, currentPageNum, remoteMatches, remoteSearch]);
 
   // Scroll to focused search result
   useEffect(() => {
@@ -86,7 +117,7 @@ export function useScriptSearch({ blocks, pageMap, focusedId, loadState, initial
 
   return {
     searchOpen, setSearchOpen, searchQuery, setSearchQuery, searchExact, setSearchExact,
-    searchCurrentPage, setSearchCurrentPage, searchIdx, setSearchIdx, searchMatches,
+    searchCurrentPage, setSearchCurrentPage, searchIdx, setSearchIdx, searchMatches, searchPending,
     jumpTarget, setJumpTarget, jumpValue, setJumpValue, jumpToLine, jumpToPage,
   };
 }

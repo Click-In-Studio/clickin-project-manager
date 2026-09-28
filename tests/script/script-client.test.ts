@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { BASE_PATH } from "@/lib/base-path";
 import {
   fetchScriptState, loadScriptEnvelope, patchScript, putScriptConfig,
+  fetchScriptWindow, fetchScriptWindowBootstrap, searchScriptWindow,
   fetchTagGroups, fetchBlockTags, fetchSceneDetails,
   createScene, renameScene, deleteScene, patchSceneMetadata,
   fetchScriptComments, postScriptComment, patchScriptComment, deleteScriptComment,
@@ -52,6 +53,23 @@ describe("剧本状态", () => {
     respond(200);
     expect(await putScriptConfig(S, null, { useRehearsalMarks: true } as never)).toBe(true);
     expect(lastCall()).toEqual([`${BASE_PATH}/api/script/${S}/config`, expect.objectContaining({ method: "PUT", body: JSON.stringify({ useRehearsalMarks: true }) })]);
+  });
+
+  it("分窗、bootstrap 与远端搜索携带版本和取消信号", async () => {
+    const signal = new AbortController().signal;
+    respond(200, { orderRevision: "3", totalCount: 10, window: { start: 2, blocks: [], tags: [] } });
+    expect((await fetchScriptWindow(S, V, 2, 240, "3", signal)).status).toBe(200);
+    expect(lastCall()[0]).toContain(`/api/script/${S}/window?`);
+    expect(lastCall()[0]).toContain("orderRevision=3");
+    expect(lastCall()[1]).toMatchObject({ signal });
+
+    respond(200, { versionId: V, manifest: [] });
+    expect(await fetchScriptWindowBootstrap(S, V, 4, 240, signal)).toMatchObject({ versionId: V });
+    expect(lastCall()[0]).toContain("bootstrap=1");
+
+    respond(200, { matches: [{ id: "b", index: 7 }] });
+    expect(await searchScriptWindow(S, V, "台词", true, signal)).toEqual([{ id: "b", index: 7 }]);
+    expect(lastCall()[0]).toContain("exact=1");
   });
 });
 
