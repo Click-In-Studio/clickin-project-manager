@@ -4,7 +4,7 @@ import { getProductionPermissionContext } from "@/lib/perm/permission-context-db
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getAsset } from "@/lib/asset/db";
 import { getNodeByAssetId, setNodePublic, setNodeListable, setNodeDeptShares, listNodeDeptShares } from "@/lib/node/db";
-import { listAssetSharePeople, addAssetSharePerson, removeAssetSharePerson } from "@/lib/asset/share-db";
+import { listAssetSharePeople, addAssetSharePerson, removeAssetSharePerson, type AssetShareLevel } from "@/lib/asset/share-db";
 import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 
 type Ctx = { params: Promise<{ id: string; assetId: string }> };
@@ -43,7 +43,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   if (g.access!.isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   const body = await req.json() as {
     isPublic?: boolean; listable?: boolean; deptIds?: string[];
-    addPerson?: { userId: string; canDownload?: boolean };
+    addPerson?: { userId: string; level: AssetShareLevel };
     removePersonUserId?: string;
   };
   if (body.isPublic !== undefined && typeof body.isPublic !== "boolean")
@@ -53,7 +53,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   if (body.deptIds !== undefined && (!Array.isArray(body.deptIds) || !body.deptIds.every(x => typeof x === "string")))
     return Response.json({ error: "无效的部门列表" }, { status: 400 });
   if (body.addPerson && (typeof body.addPerson.userId !== "string"
-      || (body.addPerson.canDownload !== undefined && typeof body.addPerson.canDownload !== "boolean")))
+      || !["view", "download", "manage"].includes(body.addPerson.level)))
     return Response.json({ error: "无效的分享对象" }, { status: 400 });
   if (body.removePersonUserId !== undefined && typeof body.removePersonUserId !== "string")
     return Response.json({ error: "无效的移除对象" }, { status: 400 });
@@ -68,9 +68,10 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   if (body.addPerson) {
     const result = await addAssetSharePerson(g.assetId!, g.id!, {
       userId: body.addPerson.userId,
-      canDownload: body.addPerson.canDownload === true,
+      level: body.addPerson.level,
       confirmedBy: g.session!.userId,
     });
+    if (result === "invalid_level") return Response.json({ error: "无效的分享级别" }, { status: 400 });
     if (result === "not_member") return Response.json({ error: "对方不是本项目成员" }, { status: 400 });
   }
   if (body.removePersonUserId) {

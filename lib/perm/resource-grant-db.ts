@@ -120,6 +120,16 @@ export const WIKI_LEVEL_ROW_SETS: Record<WikiLevel, ReadonlyArray<readonly [stri
   manage: [["meta", "view"], ["*", "view"], ["*", "edit"], ["*", "delete"], ["grants", "edit"]],
 };
 
+// asset 个人分享（#761）：预览 < 下载 < 管理。shares@create 是跨项目边界的
+// 外发资格，不属于 manage；创建外链时另与项目出口策略串联。
+export type AssetLevel = "view" | "download" | "manage";
+export const ASSET_LEVEL_ROW_SETS: Record<AssetLevel, ReadonlyArray<readonly [string, string]>> = {
+  view:     [["meta", "view"], ["*", "view"]],
+  download: [["meta", "view"], ["*", "view"], ["file", "view"]],
+  manage:   [["meta", "view"], ["*", "view"], ["file", "view"],
+             ["meta", "edit"], ["file", "create"], ["*", "delete"], ["grants", "edit"]],
+};
+
 export type TaskLevel = "view" | "edit" | "assign" | "manage";
 export const TASK_LEVEL_ROW_SETS: Record<TaskLevel, ReadonlyArray<readonly [string, string]>> = {
   view:   [["*", "view"]],

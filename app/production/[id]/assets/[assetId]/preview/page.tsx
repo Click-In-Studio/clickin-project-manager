@@ -37,9 +37,10 @@ export default async function AssetPreviewPage({
   if (!asset || asset.productionId !== id) notFound();
   if (!(await canViewAsset(access.permCtx, id, asset, "meta")))
     redirect(`/unauthorized?resource=${encodeURIComponent(`node:asset/${assetId}@view`)}&id=${id}`);
-  const [manageShareCap, createShareCap] = await Promise.all([
+  const [manageShareCap, createShareCap, canDownload] = await Promise.all([
     canManageShareLinks(access.permCtx, id, asset),
     canCreateShareToken(access.permCtx, id, asset),
+    canViewAsset(access.permCtx, id, asset, "file"),
   ]);
 
   return (
@@ -54,6 +55,7 @@ export default async function AssetPreviewPage({
       userName={session.name}
       canManageExternalShare={manageShareCap.allowed}
       canCreateExternalShare={createShareCap.allowed}
+      canDownload={canDownload}
     />
   );
 }

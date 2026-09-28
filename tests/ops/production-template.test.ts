@@ -18,7 +18,7 @@ import { MUSIC_TEMPLATE } from "@/lib/production/templates/music";
 import { FILM_TEMPLATE } from "@/lib/production/templates/film";
 import { SOLO_TEMPLATE } from "@/lib/production/templates/solo";
 import { PERFORMANCE_TEMPLATE } from "@/lib/production/templates/performance";
-import { policiesFromAnswers, MOUNT_ATTACH, ASSET_UPLOAD } from "@/lib/production/templates/shared";
+import { policiesFromAnswers, MOUNT_ATTACH, ASSET_UPLOAD, OPEN_BASELINE } from "@/lib/production/templates/shared";
 import { PRODUCTION_TYPES } from "@/lib/production/production-types";
 import { POLICY_KEYS } from "@/lib/perm/policy-keys";
 
@@ -70,6 +70,12 @@ describe("① 棘轮：仓库内的模版常量", () => {
       expect(t.roles.names, `${t.key}`).toContain("制作人");
       expect(t.roles.permissions["制作人"], `${t.key}`).toContain("node:*/*@*");
     }
+  });
+
+  it("开放基线不再把原件下载和对外分享资格发给全员", () => {
+    expect(OPEN_BASELINE).not.toContain("node:asset/*/file@view");
+    expect(OPEN_BASELINE).not.toContain("node:asset/*/shares@create");
+    expect(MUSIC_TEMPLATE.roles.permissions["宣发"]).toContain("node:asset/*/shares@create");
   });
 
   it("空模版真的是空的，但守住 M-14(c) 的下限", () => {

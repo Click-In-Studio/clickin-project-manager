@@ -9,7 +9,7 @@ import type { Asset } from "./db";
 
 // ─── asset 内容面：个人正文授权 ∨ 全组公开 ∨ 部门分享 ∨ 挂载让渡 ──────────
 // 目录可枚举独立判定。旧 meta/file@view 通配能力票不再参与内容读取；
-// publication@view 是存量显式越隐私授权，保持原行含义。file@view 只控制下载。
+// publication@view 是存量显式越隐私授权，只保留正文含义。file@view 单独控制下载。
 
 export type AssetFace = "meta" | "file";
 
@@ -73,11 +73,11 @@ export async function canViewAsset(
   face: AssetFace,
 ): Promise<boolean> {
   if (permCtx.isAdmin || permCtx.isOwner) return true;
-  // 旧 publication@view 是明确的全内容授权，含原件；不能误作旧能力票收回。
-  if (await hasEffectiveGrant(permCtx, productionId, "asset", asset.id, "publication", "view")) return true;
   // 下载独立控制，能预览不代表能发下载链接。
   if (face === "file" && !await hasExplicitAssetDownloadGrant(permCtx.userId, productionId, asset.id))
     return false;
+  // 存量 publication@view 只保留内容读取含义；原件仍必须另持 file@view。
+  if (await hasEffectiveGrant(permCtx, productionId, "asset", asset.id, "publication", "view")) return true;
   if (await hasEffectiveGrant(permCtx, productionId, "asset", asset.id, "*", "view")) return true;
   const bits = (await assetNodeBits(productionId, [asset.id])).get(asset.id);
   // #236 策略关掉只否决公开推导，不否决已有行、部门分享或挂载。
@@ -210,21 +210,20 @@ export async function mountHostSidePermitted(
   return hasGrant(permCtx.userId, productionId, "script", "*", "mounts", "create");
 }
 
-/** 管理某资产的对外链接。策略关闭后仍允许查看和撤销已有链接。 */
+/** 管理某资产的对外链接。属于资产管理面；策略关闭后仍允许查看和撤销。 */
 export async function canManageShareLinks(
   permCtx: GrantActor,
   productionId: string,
   asset: Pick<Asset, "id">,
 ): Promise<{ allowed: boolean; downloadable: boolean }> {
-  const allowed = await hasEffectiveGrant(permCtx, productionId, "asset", asset.id, "shares", "create")
+  const allowed = await hasEffectiveGrant(permCtx, productionId, "asset", asset.id, "grants", "edit")
     && await canViewAsset(permCtx, productionId, asset, "meta");
   if (!allowed) return { allowed: false, downloadable: false };
   const downloadable = await canViewAsset(permCtx, productionId, asset, "file");
   return { allowed: true, downloadable };
 }
 
-/** 分享链接创建规则："链接含下载 ⟺ 创建者持有 file@view"；项目出口策略与
- *  shares@create 资格串联；admin/owner 沿用全域门旁路。 */
+/** 分享链接创建规则：资产管理 ∧ 外发资格 ∧ 项目出口策略。 */
 export async function canCreateShareToken(
   permCtx: GrantActor,
   productionId: string,
@@ -234,5 +233,10 @@ export async function canCreateShareToken(
   if (!await isPolicyOn(productionId, "policy.share_token_enabled")) {
     return { allowed: false, downloadable: false };
   }
-  return canManageShareLinks(permCtx, productionId, asset);
+  const managed = await canManageShareLinks(permCtx, productionId, asset);
+  if (!managed.allowed) return managed;
+  const canExport = await hasEffectiveGrant(
+    permCtx, productionId, "asset", asset.id, "shares", "create",
+  );
+  return { allowed: canExport, downloadable: canExport && managed.downloadable };
 }

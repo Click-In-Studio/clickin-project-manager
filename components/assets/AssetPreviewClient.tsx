@@ -22,6 +22,7 @@ interface Props {
   userName: string;
   canManageExternalShare: boolean;
   canCreateExternalShare: boolean;
+  canDownload: boolean;
   /** embedded：内嵌在知识库 shell 主区（#420 第二批）——卡片外壳、去掉整页
    *  导航（返回/Asset 列表），其余（下载/分享/预览体）同一份。 */
   variant?: "page" | "embedded";
@@ -164,7 +165,7 @@ export function metaInfoLine(meta: MetaEnvelope | null, fileSize: number | null)
 
 export default function AssetPreviewClient({
   productionId, assetId, versionId, fileName, mimeType, storageType, feishuUrl, userName,
-  canManageExternalShare, canCreateExternalShare,
+  canManageExternalShare, canCreateExternalShare, canDownload,
   variant = "page",
 }: Props) {
   const embedded = variant === "embedded";
@@ -277,14 +278,20 @@ export default function AssetPreviewClient({
   }, [productionId, assetId, storageType]);
 
   useEffect(() => {
-    // Feishu links: open directly
+    // 飞书链接没有站内受控预览；只有原件访问者能取得外链。
     if (storageType === "feishu_link" && feishuUrl) {
-      window.location.href = feishuUrl;
+      if (canDownload) setDownloadUrl(feishuUrl);
+      setError("飞书链接不支持站内预览");
+      setLoading(false);
       return;
     }
 
     if (!previewType) {
-      // Not previewable — fetch download URL and trigger download
+      if (!canDownload) {
+        setError("该格式暂不支持预览");
+        setLoading(false);
+        return;
+      }
       const qs = versionId ? `?v=${versionId}` : "";
       fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}/download-url${qs}`)
         .then(r => r.json())
@@ -306,7 +313,14 @@ export default function AssetPreviewClient({
         setLoading(false);
       })
       .catch(() => { setError("加载失败"); setLoading(false); });
-  }, [productionId, assetId, versionId, storageType, feishuUrl, previewType]);
+
+    if (canDownload) {
+      fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}/download-url${qs}`)
+        .then(r => r.json())
+        .then((j: { url?: string }) => setDownloadUrl(j.url ?? null))
+        .catch(() => {});
+    }
+  }, [productionId, assetId, versionId, storageType, feishuUrl, previewType, canDownload]);
 
   const backHref = `${BASE_PATH}/production/${productionId}/assets`;
 
@@ -331,16 +345,7 @@ export default function AssetPreviewClient({
           {infoLine && <p className={`text-[10px] truncate max-w-[50vw] ${t.faint}`}>{infoLine}</p>}
         </div>
         <div className="flex items-center gap-3">
-          {url && (
-            <a
-              href={url}
-              download={fileName}
-              className={`text-xs transition-colors ${t.dim}`}
-            >
-              下载
-            </a>
-          )}
-          {downloadUrl && !url && (
+          {downloadUrl && (
             <a
               href={downloadUrl}
               download={fileName}

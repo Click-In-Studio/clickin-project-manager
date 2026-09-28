@@ -36,8 +36,6 @@ export const PRODUCER_KEYS: readonly string[] = [
  */
 export const OPEN_BASELINE: readonly string[] = [
   "node:announcement/*@view",
-  "node:asset/*/file@view",
-  "node:asset/*/shares@create",
   "node:character/*/biography@view",
   "node:character/*/gender@view",
   "node:character/*/members@view",

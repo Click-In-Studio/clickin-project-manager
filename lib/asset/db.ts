@@ -123,19 +123,20 @@ export async function createAsset(params: {
       // 避免 node 枚举面的“创建者析取”把财务凭证带进普通资产树。
       createdBy: params.grantUploader === false ? null : params.uploaderUserId,
     }, client);
-    // 创建者行集（批D，定式 C-5/§0.9）：uploader 十行 + person 归属。
+    // 创建者行集（批D，定式 C-5/§0.9）：uploader 八行 + person 归属。
     // own 键（rename/overwrite/mount/…）已退役，由此行集承担；存续按 §0.6 person 覆盖。
     // #236：uploader 行集先过策略开关。asset 无外部归属信号，其 grants@edit 由 M-14
-    // 存在性子句强制保留、不在词汇表里；可配的是 *@delete / publication@c,d / shares@create。
+    // 存在性子句强制保留、不在词汇表里。publication 旧路径停止新发：预览、下载、
+    // 管理各由明确原子行承担；存量 publication 行按 expand/contract 留给 N-1。
     if (params.grantUploader !== false) {
-      const uploaderRows = await policyFilteredRows(
+      const uploaderRows = (await policyFilteredRows(
         params.productionId, "asset", "uploader",
-        [["meta", "view"], ["file", "view"],
-         ["publication", "view"], ["publication", "create"], ["publication", "delete"],
+        [["meta", "view"], ["*", "view"], ["file", "view"],
          ["meta", "edit"], ["file", "create"],
          ["*", "delete"], ["shares", "create"], ["grants", "edit"]],
         client,
-      );
+      // expand 阶段仍登记旧策略键供 N-1 读取，但本版本写点不再被其反向补回旧行。
+      )).filter(([sub]) => sub !== "publication");
       await client.query(
         `INSERT INTO production_member_grant
            (production_id, user_id, resource_type, resource_id, resource_sub,

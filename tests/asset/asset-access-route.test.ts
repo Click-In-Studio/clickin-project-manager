@@ -48,21 +48,37 @@ describe("资产站内分享路由", () => {
     expect((await PUT(request(outsider), ctx())).status).toBe(403);
   });
 
-  it("上传者可分享阅读；移除时保留收件人的其他直接授权", async () => {
+  it("上传者可按预览、下载、管理三级分享，并可精确降级", async () => {
     expect((await GET(request(member), ctx())).status).toBe(200);
     const add = await PUT(request(member, "PUT", {
-      addPerson: { userId: recipient, canDownload: false },
+      addPerson: { userId: recipient, level: "manage" },
     }), ctx());
     expect(add.status).toBe(200);
     const shared = await GET(request(member), ctx());
-    expect((await shared.json()).people).toContainEqual({ userId: recipient, canDownload: false, removable: true });
+    expect((await shared.json()).people).toContainEqual({ userId: recipient, level: "manage", removable: true });
     const recipientAccess = await getProductionPermissionContext(recipient, false, prodId);
     expect(await canViewAsset(recipientAccess!.permCtx, prodId, { id: assetId }, "meta")).toBe(true);
-    expect(await canViewAsset(recipientAccess!.permCtx, prodId, { id: assetId }, "file")).toBe(false);
+    expect(await canViewAsset(recipientAccess!.permCtx, prodId, { id: assetId }, "file")).toBe(true);
+
+    const downgrade = await PUT(request(member, "PUT", {
+      addPerson: { userId: recipient, level: "view" },
+    }), ctx());
+    expect(downgrade.status).toBe(200);
+    const downgraded = await GET(request(member), ctx());
+    expect((await downgraded.json()).people).toContainEqual({ userId: recipient, level: "view", removable: true });
+    const rowsAfterDowngrade = await getPool().query<{ resource_sub: string; permission_level: string }>(
+      `SELECT resource_sub,permission_level FROM production_member_grant
+       WHERE production_id=$1 AND user_id=$2 AND resource_id=$3 AND NOT is_revoked
+       ORDER BY resource_sub,permission_level`, [prodId, recipient, assetId],
+    );
+    expect(rowsAfterDowngrade.rows).toEqual([
+      { resource_sub: "*", permission_level: "view" },
+      { resource_sub: "meta", permission_level: "view" },
+    ]);
     await getPool().query(
       `INSERT INTO production_member_grant
        (production_id,user_id,resource_type,resource_id,resource_sub,permission_level,grant_source)
-       VALUES ($1,$2,'asset',$3,'meta','edit','direct')`, [prodId, recipient, assetId],
+       VALUES ($1,$2,'asset',$3,'shares','create','direct')`, [prodId, recipient, assetId],
     );
     expect((await PUT(request(member, "PUT", { removePersonUserId: recipient }), ctx())).status).toBe(200);
     const { rows } = await getPool().query<{ resource_sub: string; permission_level: string }>(
@@ -70,7 +86,13 @@ describe("资产站内分享路由", () => {
        WHERE production_id=$1 AND user_id=$2 AND resource_id=$3 AND NOT is_revoked`,
       [prodId, recipient, assetId],
     );
-    expect(rows).toEqual([{ resource_sub: "meta", permission_level: "edit" }]);
+    expect(rows).toEqual([{ resource_sub: "shares", permission_level: "create" }]);
+  });
+
+  it("拒绝未知分享档位", async () => {
+    expect((await PUT(request(member, "PUT", {
+      addPerson: { userId: recipient, level: "owner" },
+    }), ctx())).status).toBe(400);
   });
 
   it("只持读取单键不得管理分享", async () => {
@@ -78,11 +100,6 @@ describe("资产站内分享路由", () => {
       `UPDATE production_member_grant SET is_revoked=true,revoked_reason='manual'
        WHERE production_id=$1 AND user_id=$2 AND resource_id=$3 AND resource_sub='grants'`,
       [prodId, member, assetId],
-    );
-    await getPool().query(
-      `INSERT INTO production_member_grant
-       (production_id,user_id,resource_type,resource_id,resource_sub,permission_level,grant_source)
-       VALUES ($1,$2,'asset',$3,'*','view','direct')`, [prodId, member, assetId],
     );
     expect((await GET(request(member), ctx())).status).toBe(403);
     expect((await PUT(request(member, "PUT", { isPublic: true }), ctx())).status).toBe(403);

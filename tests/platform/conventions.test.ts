@@ -417,7 +417,7 @@ const DB_FILE_CEILING = 1000;
  */
 const DB_FILE_GRANDFATHERED: Record<string, number> = {
   "lib/ops/event-db.ts": 3256, // #670 deleteTaskByProduction 清文档引用边（+3）
-  "lib/perm/resource-grant-db.ts": 1023,
+  "lib/perm/resource-grant-db.ts": 1033, // #761 asset 三级分享进入伪级别行集唯一事实源（+10）
 };
 
 describe("lib/db.ts 分家不回退", () => {

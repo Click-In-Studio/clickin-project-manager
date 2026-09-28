@@ -198,9 +198,11 @@ const ASSET_UPLOADER: PolicyKeyDef[] = [
   a("asset", "uploader", "*", "delete", POLICY_ON,
     "上传者可删除自己上传的素材",
     "关掉后删除归制作人。"),
+  // #761 expand-contract：当前写点不再发行 publication 行，但词汇暂留供存量配置与
+  // N-1 代码读取；删键要等不再支持 N-1 的后续 contract。
   ...aMany("asset", "uploader", [["publication", "create"], ["publication", "delete"]], POLICY_ON,
     (_s, v) => v === "create" ? "上传者可把素材挂到项目内其他资源上" : "上传者可解除自己素材的挂载",
-    "挂载是**项目内**可见性让渡，不是对外分享。"),
+    "兼容旧版本；当前版本的挂载管理统一由资产管理权限承担。"),
   a("asset", "uploader", "shares", "create", POLICY_ON,
     "上传者可为自己的素材生成对外分享链接",
     "**这是资格，不是开关**——项目层是否允许对外分享由 policy.share_token_enabled 决定，"

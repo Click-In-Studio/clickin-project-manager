@@ -8,7 +8,7 @@ import DropdownPicker from "@/components/ui/DropdownPicker";
 
 type ShareState = {
   isPublic: boolean; listable: boolean; deptIds: string[];
-  people: { userId: string; canDownload: boolean; removable: boolean }[];
+  people: { userId: string; level: "view" | "download" | "manage"; removable: boolean }[];
 };
 
 export default function AssetAccessModal({ productionId, assetId, assetName, members, departments, onClose }: {
@@ -20,7 +20,7 @@ export default function AssetAccessModal({ productionId, assetId, assetName, mem
   const router = useRouter();
   const [share, setShare] = useState<ShareState | null>(null);
   const [addUser, setAddUser] = useState("");
-  const [allowDownload, setAllowDownload] = useState(false);
+  const [shareLevel, setShareLevel] = useState<"view" | "download" | "manage">("view");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const api = `${BASE_PATH}/api/production/${productionId}/assets/${assetId}/access`;
@@ -91,18 +91,29 @@ export default function AssetAccessModal({ productionId, assetId, assetName, mem
               <button type="button" className="rounded-lg bg-zinc-800 px-3 py-2 text-xs text-white disabled:opacity-50"
                 disabled={!addUser || saving}
                 onClick={async () => {
-                  if (await update({ addPerson: { userId: addUser, canDownload: allowDownload } })) setAddUser("");
+                  if (await update({ addPerson: { userId: addUser, level: shareLevel } })) setAddUser("");
                 }}>添加</button>
             </div>
-            <label className="mt-2 flex items-center gap-2 text-xs text-zinc-500">
-              <input type="checkbox" checked={allowDownload} onChange={e => setAllowDownload(e.target.checked)} />
-              同时允许下载原件
-            </label>
+            <div className="mt-2 flex items-center gap-2 text-xs text-zinc-500">
+              <span>权限档位</span>
+              <div className="w-32">
+                <DropdownPicker
+                  items={[
+                    { id: "view", label: "可预览" },
+                    { id: "download", label: "可下载" },
+                    { id: "manage", label: "可管理" },
+                  ]}
+                  value={shareLevel}
+                  placeholder="可预览"
+                  onChange={id => setShareLevel((id ?? "view") as typeof shareLevel)}
+                />
+              </div>
+            </div>
             <ul className="mt-3 space-y-1">
               {share.people.map(p => (
                 <li key={p.userId} className="flex items-center justify-between rounded-lg bg-zinc-50 px-2.5 py-1.5">
                   <span>{members.find(m => m.userId === p.userId)?.name ?? "项目成员"}
-                    <span className="text-xs text-zinc-400"> · {p.canDownload ? "可下载" : "可阅读"}</span></span>
+                    <span className="text-xs text-zinc-400"> · {{ view: "可预览", download: "可下载", manage: "可管理" }[p.level]}</span></span>
                   <button type="button" disabled={saving || !p.removable}
                     title={p.removable ? "移除个人分享" : "此人的访问来自已有授权，不能在这里移除"}
                     className="text-xs text-red-600 disabled:opacity-50"

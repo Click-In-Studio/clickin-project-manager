@@ -83,12 +83,13 @@ export const MUSIC_ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   // 录音 / 混音 / 母带：零行——职能是素材的产出与迭代，走制作组部门区间
   // （与剧场的执行族同理：给部门，不给人）
 
-  // 对外物料与通告归宣发；对外分享链接的资格已在基线（shares@create），
-  // 项目层是否放行由 policy.share_token_enabled 串联
+  // 对外物料与通告归宣发；外发资格只给宣发，不再进入全员基线。真正创建链接
+  // 还要同时持具体资产的 grants@edit，并经过项目出口策略。
   宣发: [
     "node:announcement/*@create",
     "node:announcement/*@edit",
     "node:announcement/*@delete",
+    "node:asset/*/shares@create",
   ],
 
   // 歌手 / 乐手：零行（基线即全部）
