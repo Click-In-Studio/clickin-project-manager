@@ -100,3 +100,12 @@ registerJobHandler("image_thumbnail", {
     return { thumbKey };
   },
 });
+
+// ── event_change_notify：已发布活动的取消 / 时间地点变更，5 分钟合流后派发 ──
+
+registerJobHandler("event_change_notify", {
+  async run(payload) {
+    const { dispatchEventChangeNotification } = await import("@/lib/notify/event-change");
+    return dispatchEventChangeNotification(payload);
+  },
+});

@@ -26,7 +26,7 @@ export const NOTIFICATION_CONFIG = {
   // ── Event ─────────────────────────────────────────────────────────────────
   event_publish: {
     label: "活动发布通知",
-    description: "你参与或关注的活动发布或状态变更时通知",
+    description: "你参与或关注的活动发布、取消或时间地点变更时通知",
     externalChannel: "dm" as const,
     defaultExternalEnabled: true,
   },

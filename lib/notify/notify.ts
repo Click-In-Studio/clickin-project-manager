@@ -262,7 +262,7 @@ export async function notifyTaskAssigned(params: {
 export async function dispatchEventPublishNotifications(eventId: string): Promise<void> {
   const pool = getPool();
 
-  const [eventRes, callsRes] = await Promise.all([
+  const [eventRes, callsRes, participantsRes] = await Promise.all([
     pool.query<{ title: string; description: string | null; production_id: string; start_time: string | null }>(
       `SELECT title, description, production_id, start_time FROM production_event WHERE id = $1`,
       [eventId],
@@ -271,10 +271,14 @@ export async function dispatchEventPublishNotifications(eventId: string): Promis
       `SELECT id, user_id, call_at, name, notes FROM event_call_time WHERE event_id = $1 ORDER BY call_at`,
       [eventId],
     ),
+    pool.query<{ user_id: string }>(
+      `SELECT user_id FROM event_participant WHERE event_id = $1`,
+      [eventId],
+    ),
   ]);
 
   const event = eventRes.rows[0];
-  if (!event || !callsRes.rows.length) return;
+  if (!event) return;
 
   const prodNameRes = await pool.query<{ name: string }>(`SELECT name FROM production WHERE id = $1`, [event.production_id]);
   const productionName = prodNameRes.rows[0]?.name ?? "后台";
@@ -400,6 +404,33 @@ export async function dispatchEventPublishNotifications(eventId: string): Promis
         return {
           text: `Event 已发布 — ${event.title}，你的 Call 时间：${callTimeStr}，查看：${actionUrl}`,
           title: `Event 已发布 — ${event.title}`,
+          primaryUrl: actionUrl,
+        };
+      },
+    });
+  }
+
+  // event_participant 同时承载 participant 与 follower。没有 Call Time 的人也应收到
+  // 发布告知；已有 Call Time 的人上面已经收到带 RSVP 的一条，不能再重复发。
+  const infoRecipients = [...new Set(participantsRes.rows.map((row) => row.user_id))]
+    .filter((userId) => !seen.has(userId));
+  if (infoRecipients.length) {
+    const viewHref = `${SERVER_URL}/production/${event.production_id}/events/${eventId}`;
+    await notifyUsers({
+      userIds: infoRecipients,
+      kind: "event_publish",
+      productionId: event.production_id,
+      entityType: "event",
+      entityId: eventId,
+      title: `活动已发布 — ${event.title}`,
+      body: "你参加或关注的活动已经发布。",
+      viewHref,
+      category: "info",
+      buildExternalMessage: async (_userId, target) => {
+        const actionUrl = target.adapter.buildActionUrl(viewHref);
+        return {
+          text: `活动已发布 — ${event.title}，查看：${actionUrl}`,
+          title: `${productionName}通知`,
           primaryUrl: actionUrl,
         };
       },

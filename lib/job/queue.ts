@@ -7,8 +7,8 @@
 //   调用方代码不变。
 // - 双模式：waitForJob(id, timeoutMs) 短等（LISTEN + 轮询兜底），到点返回 null，
 //   调用方转后台语义（doc 工具会告诉模型"解析完成后自动通知"）。
-// - 无 worker 形态（本地 dev / 测试 / 未配 JOB_WORKER 的部署）：enqueue 原地执行
-//   handler——与历史同步行为一致，一条代码路径两种部署（同 AGENT_RUNNER_URL 模式）。
+// - 无 worker 形态（本地 dev / 测试 / 未配 JOB_WORKER 的部署）：到期任务原地执行
+//   handler；延迟任务由进程内 timer 唤醒——一条代码路径两种部署（同 AGENT_RUNNER_URL 模式）。
 // - 重试：认领时 attempts+1；失败非终局则退避重排（30s×attempts），attempts 用尽或
 //   TerminalJobError（解析类确定性失败）→ failed。租约过期由 sweep 收回。
 
@@ -76,6 +76,26 @@ export interface EnqueueInput {
   dedupeKey?: string;
   priority?: number;
   maxAttempts?: number;
+  /** 延迟到这个时刻后才允许 worker 认领。 */
+  runAfter?: Date;
+}
+
+async function kickInlineJob(row: Raw): Promise<void> {
+  const delay = Math.max(0, new Date(row.run_after).getTime() - Date.now());
+  const run = async () => {
+    const { executeJobInline } = await import("./run");
+    await executeJobInline(row.id);
+  };
+  if (delay === 0) {
+    await run();
+    return;
+  }
+  // 本地 dev / 测试没有 heavy-worker：用进程内 timer 保持延迟语义。生产由持久化
+  // job 行 + heavy-worker 消费；unref 避免这个开发兜底阻止进程退出。
+  const timer = setTimeout(() => void run().catch((err) => {
+    console.error(`[job] inline delayed job ${row.id} failed:`, err);
+  }), delay);
+  timer.unref();
 }
 
 export async function enqueueJob(input: EnqueueInput): Promise<JobRow> {
@@ -85,15 +105,18 @@ export async function enqueueJob(input: EnqueueInput): Promise<JobRow> {
       `SELECT ${COLS} FROM job WHERE dedupe_key = $1 AND status IN ('queued','running') LIMIT 1`,
       [input.dedupeKey],
     );
-    if (existing.rows[0]) return toRow(existing.rows[0]);
+    if (existing.rows[0]) {
+      if (!jobWorkerEnabled() && existing.rows[0].status === "queued") void kickInlineJob(existing.rows[0]);
+      return toRow(existing.rows[0]);
+    }
   }
   const id = newJobId();
   let row: Raw;
   try {
     const r = await pool.query<Raw>(
-      `INSERT INTO job (id, kind, payload, dedupe_key, priority, max_attempts)
-       VALUES ($1, $2, $3::jsonb, $4, $5, $6) RETURNING ${COLS}`,
-      [id, input.kind, JSON.stringify(input.payload), input.dedupeKey ?? null, input.priority ?? 0, input.maxAttempts ?? 3],
+      `INSERT INTO job (id, kind, payload, dedupe_key, priority, max_attempts, run_after)
+       VALUES ($1, $2, $3::jsonb, $4, $5, $6, COALESCE($7, now())) RETURNING ${COLS}`,
+      [id, input.kind, JSON.stringify(input.payload), input.dedupeKey ?? null, input.priority ?? 0, input.maxAttempts ?? 3, input.runAfter ?? null],
     );
     row = r.rows[0];
   } catch (err) {
@@ -103,16 +126,17 @@ export async function enqueueJob(input: EnqueueInput): Promise<JobRow> {
         `SELECT ${COLS} FROM job WHERE dedupe_key = $1 AND status IN ('queued','running') LIMIT 1`,
         [input.dedupeKey],
       );
-      if (again.rows[0]) return toRow(again.rows[0]);
+      if (again.rows[0]) {
+        if (!jobWorkerEnabled() && again.rows[0].status === "queued") void kickInlineJob(again.rows[0]);
+        return toRow(again.rows[0]);
+      }
     }
     throw err;
   }
   if (jobWorkerEnabled()) {
     await pool.query(`SELECT pg_notify($1, $2)`, [JOB_NEW_CHANNEL, id]).catch(() => {});
   } else {
-    // 无 worker 形态：原地跑完再返回（与历史同步行为一致；dev/测试专用路径）
-    const { executeJobInline } = await import("./run");
-    await executeJobInline(id);
+    await kickInlineJob(row);
   }
   const fresh = await getJob(id);
   return fresh ?? toRow(row);
@@ -160,7 +184,7 @@ export async function claimJobById(id: string, owner: string): Promise<JobRow | 
   const r = await getPool().query<Raw>(
     `UPDATE job SET status = 'running', lease_owner = $2, lease_until = now() + ($3::int * interval '1 millisecond'),
                     attempts = attempts + 1, started_at = COALESCE(started_at, now())
-     WHERE id = $1 AND status = 'queued' RETURNING ${COLS}`,
+     WHERE id = $1 AND status = 'queued' AND run_after <= now() RETURNING ${COLS}`,
     [id, owner, LEASE_MS],
   );
   return r.rows[0] ? toRow(r.rows[0]) : null;

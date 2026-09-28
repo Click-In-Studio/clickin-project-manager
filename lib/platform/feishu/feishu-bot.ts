@@ -73,6 +73,15 @@ function makeCard(title: string, template: string, bodyMd: string, url: string, 
   };
 }
 
+export function buildEventChangeCard(
+  title: string,
+  body: string,
+  url: string,
+  needsConfirm: boolean,
+): object {
+  return makeCard(title, needsConfirm ? "orange" : "red", body, url, needsConfirm ? "确认新安排" : "查看活动");
+}
+
 // ─── Weekly call ──────────────────────────────────────────────────────────────
 
 export function buildWeeklyCallCard(entries: WeeklyCallEntry[], pageUrl: string): object {
