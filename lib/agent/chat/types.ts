@@ -11,7 +11,7 @@ export interface ChatSessionSummary {
 export const TOOL_PAYLOAD_MAX_CHARS = 16_000;
 
 export type ChatTranscriptEntry =
-  | { role: "user"; content: string }
+  | { role: "user"; content: string; attachments?: Array<{ id: string; fileName: string; mimeType: string; mediaKind: string | null }> }
   | { role: "assistant"; content: string }
   | { role: "thinking"; content: string }
   // result：toolResult 历史条目自身的文本内容（调用结果）。参数在

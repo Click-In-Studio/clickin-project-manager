@@ -34,7 +34,7 @@ export type QuestionInfo = {
 };
 
 export type Bubble =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; attachments?: Array<{ id: string; fileName: string; mimeType: string; mediaKind: string | null }> }
   | { kind: "assistant"; text: string; streaming?: boolean }
   | { kind: "thinking"; text: string; streaming?: boolean }
   // input/result：调用参数与结果（relay 超限时为 {truncated, preview} 包裹），

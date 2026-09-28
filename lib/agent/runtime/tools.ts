@@ -164,6 +164,40 @@ export const DEFS: Def[] = [
     },
   },
   {
+    mcpName: "my.attachment_read",
+    description:
+      "读取当前会话中用户随消息附带的临时文件（EN: read attached uploaded file）。attachmentId 来自 <clickin-attachment-context>。" +
+      "纯文本直接读取；docx/pdf 默认先给结构概览，可用 mode=read + ranges 分段读、mode=search + query 检索；图片/音频默认读取预检 digest，只有确实需要识别文字时才对图片或扫描 PDF 用 mode=ocr。附件只在当前会话有效。",
+    parameters: Type.Object({
+      attachmentId: Type.String({ description: "临时附件 id" }),
+      mode: Type.Optional(Type.Union([Type.Literal("preflight"), Type.Literal("outline"), Type.Literal("read"), Type.Literal("search"), Type.Literal("ocr")])),
+      ranges: Type.Optional(Type.Array(Type.Object({
+        from: Type.Integer({ minimum: 0 }),
+        to: Type.Integer({ minimum: 0 }),
+      }), { minItems: 1 })),
+      query: Type.Optional(Type.String()),
+      pages: Type.Optional(Type.Array(Type.Integer({ minimum: 1 }), { minItems: 1 })),
+      tier: Type.Optional(Type.Union([Type.Literal("fast"), Type.Literal("full")])),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+    }),
+    readOnly: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/attachment-tools")).readSessionAttachment(
+      ctx.userId,
+      ctx.productionId,
+      ctx.run?.sessionId ?? null,
+      {
+        attachmentId: String(args.attachmentId),
+        mode: args.mode as "preflight" | "outline" | "read" | "search" | "ocr" | undefined,
+        ranges: Array.isArray(args.ranges) ? (args.ranges as Array<{ from: number; to: number }>).map((r) => ({ from: Number(r.from), to: Number(r.to) })) : undefined,
+        query: typeof args.query === "string" ? args.query : undefined,
+        pages: Array.isArray(args.pages) ? args.pages.map(Number) : undefined,
+        tier: args.tier === "full" ? "full" : args.tier === "fast" ? "fast" : undefined,
+        limit: typeof args.limit === "number" ? args.limit : undefined,
+      },
+      ctx.run?.signal,
+    ),
+  },
+  {
     mcpName: "my.update_instructions",
     description: "【个人设置】全量替换当前用户的个人 AI 指令（即 <clickin-instructions> 里「用户的个人指令」段），需要人工在聊天栏确认。content 是替换后的完整内容——先基于注入块里的现行内容整合修改，不要只传增量；传空字符串表示清空。仅影响该用户自己的会话。",
     parameters: Type.Object({ content: Type.String({ description: `替换后的完整个人指令（Markdown，≤${INSTRUCTIONS_MAX_LEN} 字符；空串=清空）` }) }),
