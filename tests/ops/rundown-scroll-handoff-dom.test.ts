@@ -23,6 +23,27 @@ describe("Rundown 滚动边界交接事件接线", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  it("短表的首次纵向手势不拦截外层页面", () => {
+    const element = document.createElement("div");
+    Object.defineProperties(element, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+    const cleanup = installRundownScrollHandoff(element);
+
+    const wheel = new WheelEvent("wheel", { deltaY: 30, cancelable: true });
+    element.dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(false);
+
+    element.dispatchEvent(touchEvent("touchstart", 50, 100));
+    const touchMove = touchEvent("touchmove", 50, 70);
+    element.dispatchEvent(touchMove);
+    expect(touchMove.defaultPrevented).toBe(false);
+
+    cleanup();
+  });
+
   it("鼠标滚轮和触控板在首次顶部手势停住，下一手势放行外层", () => {
     const element = document.createElement("div");
     setScrollMetrics(element, 0);

@@ -62,6 +62,11 @@ export function advanceScrollHandoff(
   distance: number,
   metrics: ScrollMetrics,
 ): { state: ScrollHandoffState; action: ScrollHandoffAction; boundary: ScrollBoundary | null } {
+  // 短表没有内部纵向滚动可交接，不能凭“同时位于上下边界”吞掉页面的首次手势。
+  if (maxScrollTop(metrics) <= EDGE_EPSILON) {
+    return { state: initialScrollHandoffState(), action: "outer", boundary: null };
+  }
+
   const boundary: ScrollBoundary = direction === "up" ? "top" : "bottom";
   const reversed = state.gestureDirection !== null && state.gestureDirection !== direction;
   const current = reversed ? initialScrollHandoffState() : syncScrollBoundary(state, metrics);

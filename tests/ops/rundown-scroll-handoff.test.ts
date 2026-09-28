@@ -15,6 +15,19 @@ function finish(state: ScrollHandoffState): ScrollHandoffState {
 }
 
 describe("Rundown 滚动边界交接状态机", () => {
+  it("内部没有纵向滚动范围时立即交给外层", () => {
+    const result = advanceScrollHandoff(
+      beginScrollGesture(initialScrollHandoffState()),
+      "down",
+      30,
+      { scrollTop: 0, scrollHeight: 400, clientHeight: 400 },
+    );
+
+    expect(result.action).toBe("outer");
+    expect(result.boundary).toBeNull();
+    expect(result.state).toEqual(initialScrollHandoffState());
+  });
+
   it("内部仍可滚动时只滚内部，首次到底停在边界", () => {
     let state = beginScrollGesture(initialScrollHandoffState());
     const inside = advanceScrollHandoff(state, "down", 80, METRICS);
