@@ -419,13 +419,12 @@ export const POLICY_QUESTIONS: readonly PolicyQuestion[] = [
     ],
   },
   {
-    id: "uploader_powers", group: "素材与对外", title: "上传者对自己上传的素材有哪些处置权？",
+    id: "uploader_powers", group: "素材与对外", title: "上传者对自己上传的素材有哪些额外处置权？",
     answers: [
       {
-        id: "full", label: "完整（删除、挂载、对外分享）",
+        id: "full", label: "删除和对外分享",
         values: all([
-          "asset.uploader:*@delete", "asset.uploader:publication@create",
-          "asset.uploader:publication@delete", "asset.uploader:shares@create",
+          "asset.uploader:*@delete", "asset.uploader:shares@create",
         ], ON),
         disposition: [ACTOR("上传者")],
       },
@@ -433,21 +432,17 @@ export const POLICY_QUESTIONS: readonly PolicyQuestion[] = [
         id: "no_delete", label: "不含删除",
         values: {
           "asset.uploader:*@delete": OFF,
-          "asset.uploader:publication@create": ON,
-          "asset.uploader:publication@delete": ON,
           "asset.uploader:shares@create": ON,
         },
-        disposition: [ACTOR("上传者（挂载与分享）"), SCOPE("被授予素材删除权的角色 / 部门成员"), FALLBACK],
+        disposition: [ACTOR("上传者（对外分享）"), SCOPE("被授予素材删除权的角色 / 部门成员"), FALLBACK],
       },
       {
         id: "no_share", label: "不含对外分享",
         values: {
           "asset.uploader:*@delete": ON,
-          "asset.uploader:publication@create": ON,
-          "asset.uploader:publication@delete": ON,
           "asset.uploader:shares@create": OFF,
         },
-        disposition: [ACTOR("上传者（删除与挂载）"), SCOPE("被授予分享权的角色 / 部门成员"), FALLBACK],
+        disposition: [ACTOR("上传者（删除）"), SCOPE("被授予外发资格的角色 / 部门成员"), FALLBACK],
       },
     ],
   },

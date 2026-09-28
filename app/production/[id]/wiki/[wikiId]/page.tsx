@@ -59,8 +59,9 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
       listNodeTreeFor(actor, productionId),
       hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"),
     ]);
-    const [canView, manageShareCap, createShareCap] = await Promise.all([
+    const [canView, canDownload, manageShareCap, createShareCap] = await Promise.all([
       canViewAsset(access.permCtx, productionId, asset, "meta"),
+      canViewAsset(access.permCtx, productionId, asset, "file"),
       canManageShareLinks(access.permCtx, productionId, asset),
       canCreateShareToken(access.permCtx, productionId, asset),
     ]);
@@ -80,6 +81,7 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
               userName={session.name}
               canManageExternalShare={manageShareCap.allowed}
               canCreateExternalShare={createShareCap.allowed}
+              canDownload={canDownload}
               variant="embedded"
             />
           ) : (

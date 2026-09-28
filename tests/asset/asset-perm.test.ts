@@ -96,12 +96,20 @@ describe("资产正文与下载", () => {
     );
   });
 
-  it("publication@view 显式通配越隐私（无需能力票的 file 面也可）", async () => {
-    expect(await canViewAsset(ctxOf(librarian), prodId, { id: privateAssetId }, "file")).toBe(true);
+  it("存量 publication@view 只越过隐私读取，不再替代 file@view", async () => {
+    expect(await canViewAsset(ctxOf(librarian), prodId, { id: privateAssetId }, "meta")).toBe(true);
+    expect(await canViewAsset(ctxOf(librarian), prodId, { id: privateAssetId }, "file")).toBe(false);
   });
 
-  it("创建者行集：uploader 自见隐私资产（实例 publication@view）", async () => {
+  it("创建者行集：uploader 持实例正文票，自见隐私资产", async () => {
     expect(await canViewAsset(ctxOf(uploader), prodId, { id: privateAssetId }, "meta")).toBe(true);
+    const legacy = await getPool().query(
+      `SELECT 1 FROM production_member_grant
+       WHERE production_id=$1 AND user_id=$2 AND resource_type='asset' AND resource_id=$3
+         AND resource_sub='publication' AND NOT is_revoked`,
+      [prodId, uploader, privateAssetId],
+    );
+    expect(legacy.rows).toHaveLength(0);
   });
 });
 
@@ -137,7 +145,7 @@ describe("双门与分享规则", () => {
     expect(await canPublishAsset(ctxOf(member), prodId, privateAssetId, "create")).toBe(false);
   });
 
-  it("share 令牌：项目出口开着时——无 shares@create → 不允许；有票但无 file@view → 不可含下载", async () => {
+  it("share 令牌：必须同时持管理权、外发资格和项目出口", async () => {
     // #236：policy.share_token_enabled **默认关**（出口是全系统唯一把访问权发到权限
     // 系统之外的动作）。本例测的是**能力票规则**，与项目开关串联，故先把出口打开。
     await setPolicies(prodId, { "policy.share_token_enabled": POLICY_ON }, uploader);
@@ -148,8 +156,12 @@ describe("双门与分享规则", () => {
     await giveTicket(metaOnly, prodId, "meta", "view");
     await giveTicket(metaOnly, prodId, "shares", "create");
     const cap = await canCreateShareToken(ctxOf(metaOnly), prodId, { id: publicAssetId });
-    expect(cap.allowed).toBe(true);
-    expect(cap.downloadable).toBe(false);  // 不能分享自己没有的 file@view
+    expect(cap.allowed).toBe(false); // 能看且能外发，但不是该资产管理者
+
+    await giveTicket(metaOnly, prodId, "grants", "edit", publicAssetId);
+    const managed = await canCreateShareToken(ctxOf(metaOnly), prodId, { id: publicAssetId });
+    expect(managed.allowed).toBe(true);
+    expect(managed.downloadable).toBe(false);
 
     const full = await canCreateShareToken(ctxOf(uploader), prodId, { id: publicAssetId });
     expect(full.allowed).toBe(true);

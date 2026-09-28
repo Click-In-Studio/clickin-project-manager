@@ -41,16 +41,23 @@ let prodId: string;
 let ownerId: string;
 let outsiderId: string;
 let singleKeyId: string;
+let managerId: string;
 let assetId: string;
 
 const manageCtx = () => ({ params: Promise.resolve({ id: prodId, assetId }) });
 
 beforeAll(async () => {
-  [ownerId, outsiderId, singleKeyId] = await Promise.all([newUser(), newUser(), newUser()]);
+  [ownerId, outsiderId, singleKeyId, managerId] = await Promise.all([
+    newUser(), newUser(), newUser(), newUser(),
+  ]);
   ({ prodId } = await makeProduction(ownerId));
   await getPool().query(
     "INSERT INTO production_member (production_id, user_id, roles) VALUES ($1, $2, '{}')",
     [prodId, singleKeyId],
+  );
+  await getPool().query(
+    "INSERT INTO production_member (production_id, user_id, roles) VALUES ($1, $2, '{}')",
+    [prodId, managerId],
   );
   const created = await createAsset({
     productionId: prodId,
@@ -68,12 +75,21 @@ beforeAll(async () => {
      VALUES ($1, $2, 'asset', $3, 'shares', 'create', 'auto')`,
     [prodId, singleKeyId, assetId],
   );
+  await getPool().query(
+    `INSERT INTO production_member_grant
+       (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+     VALUES ($1, $2, 'asset', $3, '*', 'view', 'direct'),
+            ($1, $2, 'asset', $3, 'grants', 'edit', 'direct')`,
+    [prodId, managerId, assetId],
+  );
   await setPolicies(prodId, { "policy.share_token_enabled": POLICY_ON }, ownerId);
 });
 
 afterAll(async () => {
   await cleanupProduction(prodId).catch(() => {});
-  await getPool().query("DELETE FROM app_user WHERE id = ANY($1)", [[ownerId, outsiderId, singleKeyId]]).catch(() => {});
+  await getPool().query(
+    "DELETE FROM app_user WHERE id = ANY($1)", [[ownerId, outsiderId, singleKeyId, managerId]],
+  ).catch(() => {});
 });
 
 describe("分享链接数据状态机", () => {
@@ -130,6 +146,24 @@ describe("分享管理路由权限与闭环", () => {
     expect((await manageDELETE(manageReq("DELETE", null), deleteCtx)).status).toBe(401);
     expect((await manageDELETE(manageReq("DELETE", outsiderId), deleteCtx)).status).toBe(403);
     expect((await manageDELETE(manageReq("DELETE", singleKeyId), deleteCtx)).status).toBe(403);
+  });
+
+  it("资产管理者可列出和撤销链接，但没有外发资格时不能创建", async () => {
+    expect((await manageGET(manageReq("GET", managerId), manageCtx())).status).toBe(200);
+    expect((await managePOST(manageReq("POST", managerId, {}), manageCtx())).status).toBe(403);
+    const missing = await manageDELETE(
+      manageReq("DELETE", managerId),
+      { params: Promise.resolve({ id: prodId, assetId, linkId: "asl_missing" }) },
+    );
+    expect(missing.status).toBe(404);
+
+    await getPool().query(
+      `INSERT INTO production_member_grant
+        (production_id,user_id,resource_type,resource_id,resource_sub,permission_level,grant_source)
+       VALUES ($1,$2,'asset',$3,'shares','create','direct')`,
+      [prodId, managerId, assetId],
+    );
+    expect((await managePOST(manageReq("POST", managerId, {}), manageCtx())).status).toBe(201);
   });
 
   it("创建、列出与撤销走同一个有状态链接", async () => {

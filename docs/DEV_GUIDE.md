@@ -1006,6 +1006,7 @@ dev 环境（main 自动发）上 `unreleased/` 有条目时页面顶部多一�
 - **权限与等级正交**（PR #312）：权限（grant 树，owner / 制作人定）决定视图里**看得到什么内容**，不动菜单结构；等级（`user_plan` / `production_plan`，付费维度）决定**菜单栏里有没有这一项**。代码里分开传（`perms` vs `planXxx`），不得合并成一个布尔；菜单藏了 URL 直达也要挡（服务端 redirect）。`lib/account/plan.ts` 有 pg import，不可入客户端包。用户等级只在建项目一处被消费；功能跟项目走。
 - **成员三态**（PR #329）：`production_member.status ∈ active / suspended / exited`。新增成员查询必须选口径：访问判定 / 指派候选 / 通知收件人 → `active`；名册 / 通讯录 / **席位** → `<> 'exited'`（suspended 占席位，为随时原样复职预留）。邀请路径用 `occupiesSeat` 挡座位，不能用 `alreadyMember`。`supervisor_id` 是纯路由字段不携带权限。
 - **wiki 可见性**：wiki 名字不敏感、内容敏感——无权观看者可见标题 + 点击进权限申请是常态；可枚举性是节点自身属性且 `E(子) ⊆ E(父)`；不可枚举 = 树里看不到但经链接仍可达；容器写门 = 直接父的 `*@edit`，系统锚点豁免。判定式在 `lib/wiki/perm.ts` 注释里。
+- **asset 可见性与 wiki 同形**（#761）：目录可枚举只暴露标题；公开、部门分享、个人分享或可见宿主的挂载让渡正文预览，挂载边不投 grant 且不授予枚举或下载。个人分享固定为预览（`meta/*@view`）< 下载（再加 `file@view`）< 管理（再加写面与 `grants@edit`）；对外链接的查看/撤销属于管理面，创建还须额外持 `shares@create` 并经过项目出口策略。
 - **页码单一口径 = 服务端估算轨 `page_map`**（PR #400）：客户端 DOM 实测不可作共享真相（字体可被浏览器覆盖）；AI / 搜索 / @提及 / 编辑器分页线全组同数。mention 存的是 `[#block.page:<blockId>]` 稳定锚点不是页码。「定稿时刻上传实测覆盖」挂 #401，页码体系与 A 页挂 #349。
 - **头像缓存契约三处联动**（PR #419）：presign 生成版本化 key `avatar-<ts>` → `lib/asset/avatar-url.ts` 派生 `?v=` → GET 路由回 `immutable`；改一处必须同改。成员 API 返回的 `avatarUrl` 是 DB 裸值，渲染必须走 helper。裸 `<img>` 是架构决定（standalone VPS 下 `next/image` = 在自己服务器实时 sharp），`no-img-element` 已全局关闭。
 - **元数据信封挂 `asset_file` 不挂 `asset`**（#85）：文件行不可变 ⇒ `(fileId, parserVersion)` 键永不失效；版本契约是唯一失效通道——新增分析器忘 bump `BROKER_VERSION` = 存量 unsupported 永不重算。broker 判定：magic 主判 → 扩展名破同门 → 声明 mime 不参与。

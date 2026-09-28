@@ -165,6 +165,7 @@ describe("embed mount derivation", () => {
     const ok = await previewUrlGET(
       makeReq("GET", `/api/production/${prodId}/assets/${assetId}/preview-url`, uploader), ctx);
     expect(ok.status).toBe(200);
+    expect((await ok.json()).url).toBe(`/api/production/${prodId}/assets/${assetId}/stream`);
   });
 
   it("嵌入同时照落 asset 引用边（边表不区分 ! 前缀，行为保真）", async () => {

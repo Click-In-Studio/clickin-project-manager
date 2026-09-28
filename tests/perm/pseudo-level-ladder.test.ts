@@ -10,11 +10,12 @@
  *
  * 两条性质：
  *
- *   ① **单一事实源**：六张表只在 lib/perm/resource-grant-db.ts 定义一次；
+ *   ① **单一事实源**：七张表只在 lib/perm/resource-grant-db.ts 定义一次；
  *      lib/approval/approval-routing.ts 的 LEVEL_ROW_SETS_BY_TYPE 直接引用它们，
  *      不得自建映射。授权发行与「上级有没有这个权限」共用同一份（M-12）。
  *
- *   ② **阶梯自洽**：`view ⊆ edit ⊆ manage`（按行集包含），且 manage 含 grants@edit。
+ *   ② **阶梯自洽**：通常是 `view ⊆ edit ⊆ manage`；asset 按产品语义是
+ *      `view ⊆ download ⊆ manage`（均按行集包含），且 manage 含 grants@edit。
  *      这是 deriveNodePseudoLevel 那三段顺序判断（grants@edit ⇒ manage、
  *      editSubs@edit ⇒ edit、viewSubs@view ⇒ view）能成立的前提：若某个类型的
  *      edit 档不含 view 档的行，一个只被授了 edit 档的人反解出来仍是 edit（没问题），
@@ -30,7 +31,7 @@ import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import {
   CUE_LIST_LEVEL_ROW_SETS, EVENT_LEVEL_ROW_SETS, TASK_LEVEL_ROW_SETS,
-  REPORT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS, WIKI_LEVEL_ROW_SETS,
+  REPORT_LEVEL_ROW_SETS, NOTE_LEVEL_ROW_SETS, WIKI_LEVEL_ROW_SETS, ASSET_LEVEL_ROW_SETS,
 } from "@/lib/perm/resource-grant-db";
 
 type RowSet = ReadonlyArray<readonly [string, string]>;
@@ -43,26 +44,28 @@ const ALL: Record<string, Sets> = {
   report: REPORT_LEVEL_ROW_SETS as unknown as Sets,
   note: NOTE_LEVEL_ROW_SETS as unknown as Sets,
   wiki: WIKI_LEVEL_ROW_SETS as unknown as Sets,
+  asset: ASSET_LEVEL_ROW_SETS as unknown as Sets,
 };
 
 const rowId = (r: readonly [string, string]): string => `${r[0]}@${r[1]}`;
 const idsOf = (rows: RowSet): Set<string> => new Set(rows.map(rowId));
 
 describe("伪级别阶梯自洽（张力 2）", () => {
-  it("每个类型都有 view / edit / manage 三档", () => {
+  it("每个类型都有 view / 中间档 / manage 三档", () => {
     for (const [type, sets] of Object.entries(ALL)) {
-      for (const lvl of ["view", "edit", "manage"]) {
+      for (const lvl of ["view", type === "asset" ? "download" : "edit", "manage"]) {
         expect(sets[lvl], `${type} 缺 ${lvl} 档`).toBeDefined();
       }
     }
   });
 
-  it("view ⊆ edit ⊆ manage（行集包含，非等级蕴含）", () => {
+  it("view ⊆ 中间档 ⊆ manage（行集包含，非等级蕴含）", () => {
     const bad: string[] = [];
     for (const [type, sets] of Object.entries(ALL)) {
-      const [v, e, m] = [idsOf(sets.view), idsOf(sets.edit), idsOf(sets.manage)];
-      for (const id of v) if (!e.has(id)) bad.push(`${type}: view 的 ${id} 不在 edit 档里`);
-      for (const id of e) if (!m.has(id)) bad.push(`${type}: edit 的 ${id} 不在 manage 档里`);
+      const middleName = type === "asset" ? "download" : "edit";
+      const [v, middle, m] = [idsOf(sets.view), idsOf(sets[middleName]), idsOf(sets.manage)];
+      for (const id of v) if (!middle.has(id)) bad.push(`${type}: view 的 ${id} 不在 ${middleName} 档里`);
+      for (const id of middle) if (!m.has(id)) bad.push(`${type}: ${middleName} 的 ${id} 不在 manage 档里`);
     }
     expect(bad).toEqual([]);
   });
@@ -88,7 +91,7 @@ describe("伪级别阶梯自洽（张力 2）", () => {
 });
 
 describe("单一事实源（张力 2 的真正危险：翻译表分叉）", () => {
-  it("六张 *_LEVEL_ROW_SETS 只在 lib/perm/resource-grant-db.ts 定义", () => {
+  it("七张 *_LEVEL_ROW_SETS 只在 lib/perm/resource-grant-db.ts 定义", () => {
     const offenders: string[] = [];
     const walk = (dir: string): void => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
