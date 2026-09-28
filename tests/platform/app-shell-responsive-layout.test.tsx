@@ -91,6 +91,21 @@ describe("#554 AppShell 固定导航防穿透契约", () => {
   });
 });
 
+describe("浏览器批注 2 手机竖屏顶栏", () => {
+  const shellSource = readFileSync("components/shell/AppShell.tsx", "utf8");
+  const globalCss = readFileSync("app/globals.css", "utf8");
+
+  it("给圆形项目标志单独的响应式布局钩子", () => {
+    expect(shellSource).toContain('className="app-shell-brand-link flex items-center gap-2.5 shrink-0"');
+  });
+
+  it("只在手机竖屏隐藏整个标志链接并释放其 flex 占位", () => {
+    expect(globalCss).toMatch(
+      /@media \(max-width: 639px\) and \(orientation: portrait\) \{\s*\.app-shell-brand-link \{\s*display: none;\s*\}\s*\}/,
+    );
+  });
+});
+
 describe("#354 配置中心窄屏顶栏", () => {
   const source = readFileSync("components/shell/AppShell.tsx", "utf8");
 
