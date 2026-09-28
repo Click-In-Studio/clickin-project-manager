@@ -125,6 +125,16 @@ jobs:
       - name: Schema consistency check
         run: npm run db:check
 
+      # 生产拓扑是 postgres 持有对象、script_editor 只拿 DML。CI 的容器角色本身是
+      # superuser/owner，因此另造一个无登录应用角色，验证对账 SQL、默认 ACL 与硬闸。
+      - name: App role ACL invariant
+        run: |
+          psql -v ON_ERROR_STOP=1 -c "CREATE ROLE ci_app_role NOLOGIN"
+          psql -v ON_ERROR_STOP=1 -v owner_role=script_editor -v app_role=ci_app_role -f db/app-role-acl.sql
+          psql -v ON_ERROR_STOP=1 -c "CREATE TABLE acl_default_privilege_probe (id text PRIMARY KEY)"
+          psql -v ON_ERROR_STOP=1 -v owner_role=script_editor -v app_role=ci_app_role -f db/check-app-role-acl.sql
+          psql -v ON_ERROR_STOP=1 -c "DROP TABLE acl_default_privilege_probe"
+
       - name: Write test .env.local
         run: |
           cat > .env.local <<'EOF'
@@ -276,4 +286,3 @@ jobs:
       - name: Stop dev server
         if: always() && steps.relevant.outputs.run == 'true'
         run: pkill -f "next dev" || true
-

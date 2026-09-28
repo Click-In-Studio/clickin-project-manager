@@ -120,7 +120,7 @@ jobs:
           # 服务器上不装任何东西。二进制来自 npm 的平台包（runner 是 linux-x64）。
           mkdir -p .next/standalone/db .next/standalone/bin
           cp -r db/migrations .next/standalone/db/
-          cp db/fingerprint.sql db/schema-fingerprint.txt .next/standalone/db/
+          cp db/fingerprint.sql db/schema-fingerprint.txt db/app-role-acl.sql db/check-app-role-acl.sql .next/standalone/db/
           cp node_modules/@dbmate/linux-x64/bin/dbmate .next/standalone/bin/dbmate
           chmod +x .next/standalone/bin/dbmate
           tar -czf /tmp/deploy_bundle.tar.gz -C .next/standalone .
@@ -167,6 +167,7 @@ jobs:
             rm -rf /tmp/deploy-db && mkdir -p /tmp/deploy-db &&
             cp -r ${{ env.RELEASE_DIR }}/db/migrations /tmp/deploy-db/migrations &&
             cp ${{ env.RELEASE_DIR }}/db/fingerprint.sql ${{ env.RELEASE_DIR }}/db/schema-fingerprint.txt /tmp/deploy-db/ &&
+            cp ${{ env.RELEASE_DIR }}/db/app-role-acl.sql ${{ env.RELEASE_DIR }}/db/check-app-role-acl.sql /tmp/deploy-db/ &&
             cp ${{ env.RELEASE_DIR }}/bin/dbmate /tmp/deploy-db/dbmate &&
             chmod -R a+rX /tmp/deploy-db
           " < /dev/null
@@ -178,7 +179,9 @@ jobs:
       #       让 dbmate 在它上面重放 baseline 不是我们要的（新机器空库才允许从 baseline 起）。
       # 闸二：有 pending 才备份（备份文件保留最近 5 份）。
       # 闸三：up 之后 status 必须 0 pending，否则红——不再有「跳过了也不知道」。
-      # 闸四：线上结构指纹必须逐行等于仓库的 db/schema-fingerprint.txt，不等即红：
+      # 闸四：应用角色对现有对象与未来对象的 ACL 必须完整；先幂等对账再独立复核，
+      #       防止恢复库或环境初始化遗漏让新表上线即 42501。
+      # 闸五：线上结构指纹必须逐行等于仓库的 db/schema-fingerprint.txt，不等即红：
       #       「删了没删掉 / 记了没执行 / schema.sql 忘同步」全在这里现形。
       #       此时代码还没切换，老代码跑在新 schema 上（expand / contract 保证可行），
       #       红了就停在这里排查，不会发出去一个和库不匹配的版本。
@@ -227,6 +230,12 @@ jobs:
           echo "── status（after）：必须 0 pending"
           ssh prod "$DBMATE status --exit-code" < /dev/null \
             || { echo "::error::dbmate up 之后仍有 pending migration"; exit 1; }
+
+          echo "── 应用角色 ACL 对账与校验"
+          ssh prod "$PSQL -v ON_ERROR_STOP=1 -f /tmp/deploy-db/app-role-acl.sql" < /dev/null \
+            || { echo "::error::应用角色 ACL 对账失败"; exit 1; }
+          ssh prod "$PSQL -v ON_ERROR_STOP=1 -f /tmp/deploy-db/check-app-role-acl.sql" < /dev/null \
+            || { echo "::error::应用角色 ACL 不完整"; exit 1; }
 
           echo "── 结构指纹校验"
           ssh prod "$PSQL -f /tmp/deploy-db/fingerprint.sql" < /dev/null > /tmp/prod-fingerprint.txt
