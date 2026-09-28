@@ -3,6 +3,8 @@
 import { useEffect, useRef } from "react";
 import styles from "@/components/ops/planning.module.css";
 import type { CalendarSelection } from "./CalendarDetailDrawer";
+import { phaseRangeLabel } from "./phase";
+import type { PlanningPhase } from "./types";
 
 function entryLabel(entry: CalendarSelection) {
   if (entry.kind === "event") return { type: "事件", title: entry.value.title };
@@ -10,8 +12,9 @@ function entryLabel(entry: CalendarSelection) {
   return { type: "里程碑", title: entry.value.name };
 }
 
-export default function CalendarDayDrawer({ date, entries, onSelect, onClose }: {
+export default function CalendarDayDrawer({ date, phases, entries, onSelect, onClose }: {
   date: string;
+  phases: PlanningPhase[];
   entries: CalendarSelection[];
   onSelect: (entry: CalendarSelection) => void;
   onClose: () => void;
@@ -38,12 +41,12 @@ export default function CalendarDayDrawer({ date, entries, onSelect, onClose }: 
       <header className={styles.calendarDayDrawerHeader}>
         <div>
           <p className={styles.calendarDayDrawerDate}>{date}</p>
-          <h2 id="calendar-day-drawer-title" className={styles.calendarDayDrawerTitle}>当天事项</h2>
+          <h2 id="calendar-day-drawer-title" className={styles.calendarDayDrawerTitle}>当天安排</h2>
         </div>
         <button
           ref={closeButtonRef}
           type="button"
-          aria-label="关闭当天事项"
+          aria-label="关闭当天安排"
           onClick={onClose}
           className={styles.drawerCloseButton}
         >
@@ -52,26 +55,49 @@ export default function CalendarDayDrawer({ date, entries, onSelect, onClose }: 
       </header>
 
       <div className={styles.calendarDayDrawerBody}>
-        {entries.length === 0 ? (
+        {phases.length === 0 && entries.length === 0 ? (
           <div className={styles.calendarDayEmpty}>
-            <b>当天暂无事项</b>
+            <b>当天暂无安排</b>
             <span>可使用右下角“＋”快速新建事件或任务。</span>
           </div>
         ) : (
-          <ul className={styles.calendarDayList}>
-            {entries.map(entry => {
-              const label = entryLabel(entry);
-              return (
-                <li key={`${entry.kind}-${entry.value.id}`}>
-                  <button type="button" onClick={() => onSelect(entry)} className={styles.calendarDayItem}>
-                    <span className={`${styles.calendarDayType} ${styles[`calendarDayType${entry.kind}`]}`}>{label.type}</span>
-                    <span className={styles.calendarDayItemTitle}>{label.title}</span>
-                    <span aria-hidden="true" className={styles.calendarDayItemArrow}>›</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <div className={styles.calendarDaySections}>
+            {phases.length > 0 && (
+              <section aria-labelledby="calendar-day-phases-title">
+                <h3 id="calendar-day-phases-title" className={styles.calendarDaySectionTitle}>阶段</h3>
+                <ul className={styles.calendarDayList}>
+                  {phases.map(phase => (
+                    <li key={phase.id} className={`${styles.calendarDayItem} ${styles.calendarDayPhaseItem}`}>
+                      <span className={`${styles.calendarDayType} ${styles.calendarDayTypephase}`}>阶段</span>
+                      <span className={styles.calendarDayItemTitle}>
+                        <b>{phase.name}</b>
+                        <small>{phase.deptName ?? "全项目"} · {phaseRangeLabel(phase)}</small>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {entries.length > 0 && (
+              <section aria-labelledby="calendar-day-entries-title">
+                <h3 id="calendar-day-entries-title" className={styles.calendarDaySectionTitle}>事项</h3>
+                <ul className={styles.calendarDayList}>
+                  {entries.map(entry => {
+                    const label = entryLabel(entry);
+                    return (
+                      <li key={`${entry.kind}-${entry.value.id}`}>
+                        <button type="button" onClick={() => onSelect(entry)} className={styles.calendarDayItem}>
+                          <span className={`${styles.calendarDayType} ${styles[`calendarDayType${entry.kind}`]}`}>{label.type}</span>
+                          <span className={styles.calendarDayItemTitle}>{label.title}</span>
+                          <span aria-hidden="true" className={styles.calendarDayItemArrow}>›</span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
+          </div>
         )}
       </div>
     </aside>

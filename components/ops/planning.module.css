@@ -394,6 +394,8 @@
 .calendarDayEmpty { min-height: 180px; display: grid; place-content: center; gap: 7px; color: var(--muted); text-align: center; }
 .calendarDayEmpty b { color: var(--ink); font-size: 14px; }
 .calendarDayEmpty span { font-size: 11px; line-height: 1.6; }
+.calendarDaySections { display: flex; flex-direction: column; gap: 18px; }
+.calendarDaySectionTitle { margin: 0 0 8px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .08em; }
 .calendarDayList { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; list-style: none; }
 .calendarDayItem { width: 100%; min-height: 50px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: var(--ink); display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; }
 .calendarDayItem:hover,
@@ -402,7 +404,13 @@
 .calendarDayTypeevent { background: var(--script-soft); color: var(--script); }
 .calendarDayTypetask { background: #f2e3d6; color: var(--stage); }
 .calendarDayTypemilestone { background: var(--ink); color: #fff; }
+.calendarDayTypephase { background: rgba(47,102,112,.16); color: #2f6670; }
 .calendarDayItemTitle { min-width: 0; flex: 1; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.calendarDayPhaseItem { cursor: default; }
+.calendarDayPhaseItem .calendarDayItemTitle { display: flex; flex-direction: column; gap: 3px; }
+.calendarDayPhaseItem .calendarDayItemTitle b,
+.calendarDayPhaseItem .calendarDayItemTitle small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.calendarDayPhaseItem .calendarDayItemTitle small { color: var(--muted); font-size: 10px; font-weight: 400; }
 .calendarDayItemArrow { color: var(--muted); font-size: 19px; }
 
 .drawerTextButton,
