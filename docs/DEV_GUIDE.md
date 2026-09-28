@@ -423,7 +423,7 @@ if (!await hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"))
 - **`db/schema.sql`** — 主库的完整规范 schema：手写、可读、幂等。它是「全部 migration 跑完之后」的快照，也是新库的快速建库脚本。
 - **`db/migrations/`** — dbmate 迁移目录，一支一个文件 `<YYYYMMDDHHMMSS>_<name>.sql`。库怎么从上一版走到这一版，只看这里。第一支 `20260919000000_baseline.sql` 是接管时 schema.sql 的冻结拷贝。
 - **`db/schema-fingerprint.txt`** — 由 `db/fingerprint.sql` 从 schema.sql 建出的空库算出的结构指纹（列 / 约束 / 索引 / 枚举 / 自有函数 / 触发器，一行一对象）。CI 与 CD 都拿它比对，**生成不手改**。
-- **`db/bootstrap-roles.sql`** — 新环境一次性引导：应用角色 `script_editor` 与默认权限。schema.sql 从不含 GRANT。
+- **`db/bootstrap-roles.sql`** — 新环境一次性创建应用角色；它与每次 CD 都复用 `db/app-role-acl.sql` 对账现有对象和默认权限，`db/check-app-role-acl.sql` 在切换 release 前硬校验。schema.sql 从不含 GRANT。
 - **`db/legacy/`** — dbmate 接管前的 144 支历史迁移，只读，见其 README。不要往里加文件，不要引用它写新东西。
 
 ### 6.3 Schema 演进（dbmate）
@@ -473,7 +473,7 @@ ALTER TABLE production DROP COLUMN IF EXISTS new_col;
 - 因此任何时刻 N-1 版本的代码都能跑在 N 版本的 schema 上，`rollback.sh` 切软链就是完整回退，不需要 reverse migration。
 - 改列类型、改 NOT NULL 同理：先加新列双写，再切读，最后删旧列，三个版本。
 
-**CD 自动执行**：发布时 `dbmate up` 应用全部 pending（单事务、失败整体回滚并中止部署），随后核对线上指纹。无需任何手动操作。
+**CD 自动执行**：发布时 `dbmate up` 应用全部 pending（单事务、失败整体回滚并中止部署），随后对账并校验应用角色 ACL、核对线上指纹。无需任何手动操作。
 
 > ⚠️ **严禁在应用代码（`lib/`、`app/`）中执行任何 DDL（`ALTER TABLE`、`CREATE TABLE`、`DROP`、`TRUNCATE` 等）。**
 > 应用 DB 用户（`script_editor`）以 `GRANT` 方式获得 DML 权限，**不是表的 owner**，执行 DDL 会报 `must be owner of table`（42501），请求 500。所有 schema 变更必须通过 `db/migrations/` 由 CD 以 `postgres` 用户身份执行。`conventions.test.ts` 静态扫描守着这条（§11.5 ①）。也不要在服务器上手跑 SQL 改结构——下一次发布的指纹校验会把手改的差异报成红。

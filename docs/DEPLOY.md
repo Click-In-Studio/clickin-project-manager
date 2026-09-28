@@ -286,7 +286,7 @@ push 到 `main`（dev）或 tag（prod）后 GitHub Actions 自动完成：
 
 1. `npm ci` + `npm run build`（standalone 模式）
 2. 打包产物，上传到服务器 `releases/<run>-<sha>/`
-3. `dbmate up` 应用 `db/migrations/` 里所有 pending（记账在库里的 `schema_migrations`；有 pending 先 `pg_dump` 到 `shared/backups/`），随后核对线上结构指纹 == `db/schema-fingerprint.txt`，不等即部署失败
+3. `dbmate up` 应用 `db/migrations/` 里所有 pending（记账在库里的 `schema_migrations`；有 pending 先 `pg_dump` 到 `shared/backups/`），随后对账并校验 `script_editor` 对现有对象与未来对象的 ACL，再核对线上结构指纹 == `db/schema-fingerprint.txt`；任一不等即部署失败
 4. 切换 `current` symlink → 新 release
 5. `pm2 reload` 热重启
 6. 清理旧 releases（保留最新 5 个）

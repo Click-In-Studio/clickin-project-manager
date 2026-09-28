@@ -7,8 +7,8 @@
 --     postgres；应用用户 script_editor 只拿 DML（这也是「应用代码禁 DDL」的物理保证，
 --     见 DEV_GUIDE §6）。
 --   · 结构指纹（db/fingerprint.sql）刻意不含 GRANT / owner，本文件不影响指纹。
---   · 线上靠的是 ALTER DEFAULT PRIVILEGES：以后 migration 新建的表自动带授权，
---     不用每张表再 GRANT 一次。没有这一步，新表上线即 42501 permission denied。
+--   · 现有对象与默认权限的对账收在 app-role-acl.sql；首次引导和每次 CD 共用，
+--     不靠某次人工执行永久正确。没有默认权限，新表上线即 42501 permission denied。
 --
 -- 幂等：可重复执行。
 
@@ -24,12 +24,4 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'script_editor') \ge
 
 \connect script_editor
 
-GRANT USAGE ON SCHEMA public TO script_editor;
-GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public TO script_editor;
-GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO script_editor;
-
--- 以后由 postgres 建的表 / 序列自动授权（与线上 pg_default_acl 现状一致）
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLES TO script_editor;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
-  GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO script_editor;
+\ir app-role-acl.sql
