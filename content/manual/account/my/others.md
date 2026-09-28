@@ -7,7 +7,7 @@ who: 所有成员
 tier: all
 platform: [desktop, mobile]
 related: [admin/publish/announcements, start/notifications/notifications, production/reports/reports-hub, start/join/new-production]
-updated: 2026-09-18
+updated: 2026-09-28
 ---
 
 ## 这是什么
@@ -24,7 +24,14 @@ updated: 2026-09-18
 
 ## 怎么操作
 
-见各页。
+「我的项目」默认按你自己的顺序显示。要调整时：
+
+1. 保持在「进行中」，并清除搜索与角色筛选。
+2. 点右上角「调整顺序」。
+3. 拖动项目左侧的手柄；用键盘时，聚焦手柄后按上、下方向键。
+4. 每次移动都会自动保存，点「完成排序」回到项目卡片。
+
+调整后的顺序只影响你自己，也会同步到顶部的项目切换菜单。
 
 ## 注意事项
 

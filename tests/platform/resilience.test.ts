@@ -10,12 +10,13 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
-import { createProduction, deleteProduction, getProductionName, archiveProduction, unarchiveProduction, isProductionArchived } from "@/lib/production/production-db";
+import { createProduction, deleteProduction, getProductionName, archiveProduction, unarchiveProduction, isProductionArchived, placeProductionForUser } from "@/lib/production/production-db";
 import { createCueList, deleteCueList, getCueList } from "@/lib/ops/cue-list-db";
 import { createCue, getCue, deleteCue, updateCue, listCues } from "@/lib/ops/cue-db";
 import { listProductionEvents } from "@/lib/ops/event-db";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { TEST_USER, TEST_OWNER } from "../_support/helpers";
+import { getPool } from "@/lib/pg";
 
 const BASE_PROD = "test-res-prod";
 const BASE_CL   = "test-res-cl";
@@ -190,9 +191,18 @@ describe("archive idempotency", () => {
 
 describe("cascade delete", () => {
   it("deleting a production removes its cue lists and cues", async () => {
+    await placeProductionForUser(TEST_OWNER, CAS_PROD, { anchorId: BASE_PROD, side: "before" });
+    const before = await getPool().query(
+      "SELECT 1 FROM user_production_order WHERE production_id = $1", [CAS_PROD],
+    );
+    expect(before.rows).toHaveLength(1);
     await deleteProduction(CAS_PROD);
     // If cascade is set, the cue is gone too
     expect(await getCue(CAS_CUE, CAS_CL)).toBeNull();
+    const after = await getPool().query(
+      "SELECT 1 FROM user_production_order WHERE production_id = $1", [CAS_PROD],
+    );
+    expect(after.rows).toHaveLength(0);
   });
 });
 

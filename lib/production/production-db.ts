@@ -7,7 +7,9 @@
  * 项目模版是代码常量（production-template.ts），版本与本子各有自己的数据层
  * （script/version-db、script/script-view-db）——建项目只是按顺序调它们。
  */
+import { randomBytes } from "node:crypto";
 import { getPool } from "../pg";
+import { initialKeys, keyStrictlyBetween } from "../lex-order";
 import { usesRehearsalMarksByDefault } from "../script/script-types";
 import { normalizeProductionTier, type ProductionTier } from "../account/plan";
 import { createInitialVersion } from "../script/version-db";
@@ -105,7 +107,6 @@ export type ProductionListEntry = {
   name: string;
   createdAt: string;
   archivedAt: string | null;
-  sortOrder: number;
   description: string;
   avatarUrl: string | null;
   type: string | null;
@@ -118,7 +119,6 @@ type ProductionRow = {
   name: string;
   created_at: Date;
   archived_at: Date | null;
-  sort_order: number;
   description: string;
   avatar_url: string | null;
   type: string | null;
@@ -132,7 +132,6 @@ function mapProductionRow(r: ProductionRow): ProductionListEntry {
     name: r.name,
     createdAt: r.created_at.toISOString(),
     archivedAt: r.archived_at?.toISOString() ?? null,
-    sortOrder: r.sort_order,
     description: r.description,
     avatarUrl: r.avatar_url ?? null,
     type: r.type ?? null,
@@ -141,15 +140,17 @@ function mapProductionRow(r: ProductionRow): ProductionListEntry {
   };
 }
 
-const PROD_COLS = "id, name, created_at, archived_at, sort_order, description, avatar_url, type, type_label, language";
-const PROD_COLS_P = "p.id, p.name, p.created_at, p.archived_at, p.sort_order, p.description, p.avatar_url, p.type, p.type_label, p.language";
+const PROD_COLS_P = "p.id, p.name, p.created_at, p.archived_at, p.description, p.avatar_url, p.type, p.type_label, p.language";
 
 export async function listProductions(opts: { userId: string; isAdmin: boolean }): Promise<ProductionListEntry[]> {
-  const orderBy = "CASE WHEN archived_at IS NULL THEN 0 ELSE 1 END, sort_order ASC, created_at ASC";
+  const orderBy = "CASE WHEN p.archived_at IS NULL THEN 0 ELSE 1 END, upo.sort_key ASC NULLS LAST, p.created_at ASC, p.id ASC";
   let res;
   if (opts.isAdmin) {
     res = await getPool().query<ProductionRow>(
-      `SELECT ${PROD_COLS} FROM production ORDER BY ${orderBy}`
+      `SELECT ${PROD_COLS_P} FROM production p
+       LEFT JOIN user_production_order upo ON upo.production_id = p.id AND upo.user_id = $1
+       ORDER BY ${orderBy}`,
+      [opts.userId],
     );
   } else {
     // owner 单列一条可见路径：owner 不必是成员（getProductionPermissionContext 就是
@@ -158,6 +159,7 @@ export async function listProductions(opts: { userId: string; isAdmin: boolean }
     res = await getPool().query<ProductionRow>(
       `SELECT ${PROD_COLS_P} FROM production p
        LEFT JOIN production_member pm ON pm.production_id = p.id AND pm.user_id = $1
+       LEFT JOIN user_production_order upo ON upo.production_id = p.id AND upo.user_id = $1
        WHERE pm.user_id IS NOT NULL OR p.owner_id = $1
        ORDER BY ${orderBy}`,
       [opts.userId]
@@ -168,7 +170,7 @@ export async function listProductions(opts: { userId: string; isAdmin: boolean }
 
 export type MyProductionEntry = {
   id: string; name: string; createdAt: string; archivedAt: string | null;
-  sortOrder: number; roles: string[]; firstTag: string | null; avatarUrl: string | null;
+  roles: string[]; firstTag: string | null; avatarUrl: string | null;
   isOwner: boolean;
   hasAdminPerm: boolean; // true if FK-backed role 区间含治理域节点键（ADMIN_PANEL_NODE_PREFIXES）
   planTier: ProductionTier; // 项目付费档位（#280）：无 production_plan 行 = free
@@ -178,14 +180,14 @@ export async function listMyProductionsWithRoles(
   userId: string, isAdmin: boolean,
   adminPanelPrefixes: readonly string[],
 ): Promise<MyProductionEntry[]> {
-  const orderBy = "CASE WHEN p.archived_at IS NULL THEN 0 ELSE 1 END, p.sort_order ASC, p.created_at ASC";
+  const orderBy = "CASE WHEN p.archived_at IS NULL THEN 0 ELSE 1 END, upo.sort_key ASC NULLS LAST, p.created_at ASC, p.id ASC";
   const res = await getPool().query<{
     id: string; name: string; created_at: Date; archived_at: Date | null;
-    sort_order: number; roles: string[] | null; first_tag: string | null;
+    roles: string[] | null; first_tag: string | null;
     avatar_url: string | null; is_owner: boolean; has_admin_perm: boolean;
     plan_tier: string | null;
   }>(
-    `SELECT p.id, p.name, p.created_at, p.archived_at, p.sort_order, p.avatar_url,
+    `SELECT p.id, p.name, p.created_at, p.archived_at, p.avatar_url,
             pm.roles, ppl.tier AS plan_tier,
             (
               SELECT pmt.name
@@ -208,6 +210,7 @@ export async function listMyProductionsWithRoles(
      LEFT JOIN production_member pm
             ON pm.production_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
      LEFT JOIN production_plan ppl ON ppl.production_id = p.id
+     LEFT JOIN user_production_order upo ON upo.production_id = p.id AND upo.user_id = $1
      -- 在职口径（#141）：退出/被停用之后这个项目就不该再出现在「我的项目」里，
      -- 否则点进去只会撞 403。owner 分支不受影响。
      WHERE ($2 OR pm.user_id IS NOT NULL OR p.owner_id = $1)
@@ -218,7 +221,6 @@ export async function listMyProductionsWithRoles(
     id: r.id, name: r.name,
     createdAt: r.created_at.toISOString(),
     archivedAt: r.archived_at?.toISOString() ?? null,
-    sortOrder: r.sort_order,
     roles: r.roles ?? [],
     firstTag: r.first_tag ?? null,
     avatarUrl: r.avatar_url ?? null,
@@ -228,18 +230,83 @@ export async function listMyProductionsWithRoles(
   }));
 }
 
-export async function updateProductionSortOrders(orderedIds: string[]): Promise<void> {
-  if (orderedIds.length === 0) return;
-  const pool = getPool();
-  const client = await pool.connect();
+export type ProductionPlacement = { anchorId: string; side: "before" | "after" };
+
+export class ProductionOrderConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProductionOrderConflictError";
+  }
+}
+
+type OrderedProductionRow = { id: string; sort_key: string | null };
+
+function newUserProductionOrderId(): string {
+  return `upo_${Date.now().toString(36)}${randomBytes(4).toString("hex")}`;
+}
+
+/**
+ * 个人项目顺序：调用方只给相对锚点，服务端在完整的活跃项目集合上分配 lex key。
+ * 锁 app_user 行串行化同一用户的拖拽；首次排序 / 新加入项目 / key 间隙耗尽时才重铺。
+ */
+export async function placeProductionForUser(
+  userId: string,
+  productionId: string,
+  place: ProductionPlacement,
+): Promise<void> {
+  if (productionId === place.anchorId) throw new ProductionOrderConflictError("项目不能以自己为锚点");
+  const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    await client.query(
-      `UPDATE production SET sort_order = v.sort_order
-       FROM (SELECT UNNEST($1::text[]) AS id, UNNEST($2::int[]) AS sort_order) AS v
-       WHERE production.id = v.id`,
-      [orderedIds, orderedIds.map((_, i) => i + 1)]
+    await client.query("SELECT id FROM app_user WHERE id = $1 FOR UPDATE", [userId]);
+    const { rows } = await client.query<OrderedProductionRow>(
+      `SELECT p.id, upo.sort_key
+       FROM production p
+       LEFT JOIN production_member pm
+         ON pm.production_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
+       LEFT JOIN user_production_order upo
+         ON upo.production_id = p.id AND upo.user_id = $1
+       WHERE p.archived_at IS NULL AND (pm.user_id IS NOT NULL OR p.owner_id = $1)
+       ORDER BY upo.sort_key ASC NULLS LAST, p.created_at ASC, p.id ASC`,
+      [userId],
     );
+    if (!rows.some(row => row.id === productionId) || !rows.some(row => row.id === place.anchorId)) {
+      throw new ProductionOrderConflictError("项目列表已变化，请刷新后重试");
+    }
+
+    const writeKeys = async (ordered: Array<{ id: string; sortKey: string }>) => {
+      for (const row of ordered) {
+        await client.query(
+          `INSERT INTO user_production_order (id, user_id, production_id, sort_key)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (user_id, production_id) DO UPDATE
+             SET sort_key = EXCLUDED.sort_key, updated_at = now()`,
+          [newUserProductionOrderId(), userId, row.id, row.sortKey],
+        );
+      }
+    };
+
+    let keyed = rows;
+    if (rows.some(row => row.sort_key === null)) {
+      const keys = initialKeys(rows.length);
+      await writeKeys(rows.map((row, index) => ({ id: row.id, sortKey: keys[index] })));
+      keyed = rows.map((row, index) => ({ ...row, sort_key: keys[index] }));
+    }
+
+    const withoutMoved = keyed.filter(row => row.id !== productionId);
+    const anchorIndex = withoutMoved.findIndex(row => row.id === place.anchorId);
+    const slot = place.side === "before" ? anchorIndex : anchorIndex + 1;
+    const prev = slot > 0 ? withoutMoved[slot - 1].sort_key : null;
+    const next = slot < withoutMoved.length ? withoutMoved[slot].sort_key : null;
+    const nextKey = keyStrictlyBetween(prev, next);
+    if (nextKey !== null) {
+      await writeKeys([{ id: productionId, sortKey: nextKey }]);
+    } else {
+      const finalOrder = [...withoutMoved];
+      finalOrder.splice(slot, 0, keyed.find(row => row.id === productionId)!);
+      const keys = initialKeys(finalOrder.length);
+      await writeKeys(finalOrder.map((row, index) => ({ id: row.id, sortKey: keys[index] })));
+    }
     await client.query("COMMIT");
   } catch (e) {
     await client.query("ROLLBACK");
