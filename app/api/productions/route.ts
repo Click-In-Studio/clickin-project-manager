@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { createProduction, listProductions, updateProductionSortOrders, ProductionQuotaError } from "@/lib/production/production-db";
+import { createProduction, listProductions, placeProductionForUser, ProductionOrderConflictError, ProductionQuotaError } from "@/lib/production/production-db";
 import { getSession } from "@/lib/account/session";
 import { getUserTier, countOwnedActiveProductions, USER_TIERS } from "@/lib/account/plan";
 
@@ -132,21 +132,29 @@ export async function POST(req: NextRequest) {
 // 复数版 DELETE，前端无任何调用点，是漏删的旧路由——两条门判定不同的删项目路径本身就是隐患，
 // 已移除。要删项目请走 /api/production/[id]。
 
-// 排序写的是 production.sort_order —— 一个全局列，任何人重排都会改所有人看到的顺序。
-// 语义不成立，应迁到 per-user 排序表，见 #279。在那之前保持 isAdmin 门（=当前无人能过，
-// 前端也没有调用点），不放开：放开等于把「改所有人的顺序」开放给所有人。
 export async function PATCH(req: NextRequest) {
   const session = getSession(req.cookies);
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
-  if (!session.isAdmin) return Response.json({ error: "权限不足" }, { status: 403 });
-
-  const { orderedIds } = (await req.json()) as { orderedIds?: string[] };
-  if (!Array.isArray(orderedIds)) return Response.json({ error: "缺少 orderedIds" }, { status: 400 });
+  const body = (await req.json()) as {
+    productionId?: unknown;
+    place?: { anchorId?: unknown; side?: unknown };
+  };
+  if (typeof body.productionId !== "string"
+      || typeof body.place?.anchorId !== "string"
+      || (body.place.side !== "before" && body.place.side !== "after")) {
+    return Response.json({ error: "productionId 与 place 必须是有效的相对位置" }, { status: 400 });
+  }
 
   try {
-    await updateProductionSortOrders(orderedIds);
+    await placeProductionForUser(session.userId, body.productionId, {
+      anchorId: body.place.anchorId,
+      side: body.place.side,
+    });
     return Response.json({ ok: true });
   } catch (err) {
+    if (err instanceof ProductionOrderConflictError) {
+      return Response.json({ error: err.message }, { status: 409 });
+    }
     console.error("[productions] sort error:", err);
     return Response.json({ error: "排序失败" }, { status: 500 });
   }

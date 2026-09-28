@@ -95,6 +95,20 @@ CREATE TABLE IF NOT EXISTS production (
   watermark_enabled BOOLEAN NOT NULL DEFAULT false
 );
 
+-- 项目列表顺序是个人偏好，不是 production 属性。客户端只提交相对锚点，服务端用
+-- lib/lex-order.ts 分配定宽 key；未有偏好行的项目稳定排在已有偏好之后。
+CREATE TABLE IF NOT EXISTS user_production_order (
+  id            TEXT PRIMARY KEY,
+  user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  production_id TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  sort_key      TEXT NOT NULL CHECK (sort_key ~ '^[0-9a-z]{10}$'),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, production_id)
+);
+
+CREATE INDEX IF NOT EXISTS user_production_order_user_sort_idx
+  ON user_production_order(user_id, sort_key);
+
 -- ── Versions ──────────────────────────────────────────────────────────────────
 
 -- 版本退役 Phase B（migrate-version-retire.sql）：name/description/tags/status

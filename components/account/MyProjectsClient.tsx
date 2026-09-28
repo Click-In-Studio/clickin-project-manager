@@ -9,6 +9,7 @@ import { BASE_PATH } from "@/lib/base-path";
 import { productionAvatarSrc } from "@/lib/asset/avatar-url";
 import styles from "@/components/ui/my-pages.module.css";
 import NewProductionModal from "@/components/account/NewProductionModal";
+import ProjectOrderEditor from "@/components/account/ProjectOrderEditor";
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -41,6 +42,7 @@ export default function MyProjectsClient(
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"active" | "archived" | "all">("active");
   const [showCreate, setShowCreate] = useState(false);
+  const [ordering, setOrdering] = useState(false);
 
   useEffect(() => {
     fetch(`${BASE_PATH}/api/my/projects`)
@@ -94,6 +96,11 @@ export default function MyProjectsClient(
 
   const activeCount = projects.filter(p => !p.archivedAt).length;
   const archivedCount = projects.filter(p => p.archivedAt).length;
+  const orderDisabledReason = activeCount < 2
+    ? "至少有两个进行中的项目才能排序"
+    : search || roleFilter !== "all" || statusFilter !== "active"
+      ? "请先清除搜索，并切回“进行中 / 所有角色”后再排序"
+      : null;
 
   if (loading) {
     return (
@@ -115,7 +122,25 @@ export default function MyProjectsClient(
           <p className={styles.eyebrow}>Platform · 项目</p>
           <h1 className={styles.pageTitle}>我的项目</h1>
         </div>
-        {canCreate && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            type="button"
+            aria-disabled={(!ordering && !!orderDisabledReason) || undefined}
+            title={!ordering ? orderDisabledReason ?? undefined : undefined}
+            onClick={() => {
+              if (!ordering && orderDisabledReason) return;
+              setOrdering(value => !value);
+            }}
+            style={{
+              border: "1px solid var(--line)", borderRadius: 9, padding: "9px 16px",
+              background: "var(--surface)", color: "var(--ink)", fontSize: 12,
+              fontWeight: 700, cursor: !ordering && orderDisabledReason ? "not-allowed" : "pointer",
+              opacity: !ordering && orderDisabledReason ? 0.5 : 1,
+            }}
+          >
+            {ordering ? "完成排序" : "调整顺序"}
+          </button>
+        {canCreate && !ordering && (
           <button
             onClick={() => setShowCreate(true)}
             style={{
@@ -127,6 +152,7 @@ export default function MyProjectsClient(
             + 新建项目
           </button>
         )}
+        </div>
       </div>
 
       {showCreate && (
@@ -138,6 +164,7 @@ export default function MyProjectsClient(
         />
       )}
 
+      {!ordering && <>
       {/* Toolbar: search + filters */}
       <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
         {/* Search */}
@@ -191,8 +218,18 @@ export default function MyProjectsClient(
         )}
       </div>
 
+      </>}
+
       {/* Project grid */}
-      {filtered.length === 0 ? (
+      {ordering ? (
+        <ProjectOrderEditor
+          projects={projects.filter(project => !project.archivedAt)}
+          onOrderChange={active => setProjects([
+            ...active,
+            ...projects.filter(project => project.archivedAt),
+          ])}
+        />
+      ) : filtered.length === 0 ? (
         <div className={styles.emptyState} style={{ paddingTop: 60 }}>
           {search || roleFilter !== "all" ? "无匹配项目" : statusFilter === "archived" ? "暂无已归档项目" : "暂无进行中项目"}
           <small>{search && "尝试调整搜索关键词"}</small>

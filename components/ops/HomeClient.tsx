@@ -17,7 +17,7 @@ function daysUntil(dateStr: string): number {
   return Math.round((new Date(dateStr).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-type Production = { id: string; name: string; createdAt: string; archivedAt: string | null; sortOrder: number };
+type Production = { id: string; name: string; createdAt: string; archivedAt: string | null };
 
 type Props = {
   productions: Production[];

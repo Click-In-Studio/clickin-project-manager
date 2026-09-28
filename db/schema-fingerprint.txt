@@ -910,6 +910,11 @@ COL|user_platform_identity|label|text|text|YES|
 COL|user_platform_identity|platform_id|text|text|NO|
 COL|user_platform_identity|platform_user_id|text|text|NO|
 COL|user_platform_identity|user_id|uuid|uuid|NO|
+COL|user_production_order|id|text|text|NO|
+COL|user_production_order|production_id|text|text|NO|
+COL|user_production_order|sort_key|text|text|NO|
+COL|user_production_order|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|user_production_order|user_id|uuid|uuid|NO|
 COL|user_profile|avatar_url|text|text|YES|
 COL|user_profile|bio|text|text|YES|
 COL|user_profile|created_at|timestamp with time zone|timestamptz|NO|now()
@@ -1435,6 +1440,11 @@ CON|user_plan|user_plan_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(i
 CON|user_platform_identity|user_platform_identity_pkey|PRIMARY KEY (id)
 CON|user_platform_identity|user_platform_identity_platform_id_platform_user_id_key|UNIQUE (platform_id, platform_user_id)
 CON|user_platform_identity|user_platform_identity_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|user_production_order|user_production_order_pkey|PRIMARY KEY (id)
+CON|user_production_order|user_production_order_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|user_production_order|user_production_order_sort_key_check|CHECK ((sort_key ~ '^[0-9a-z]{10}$'::text))
+CON|user_production_order|user_production_order_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|user_production_order|user_production_order_user_id_production_id_key|UNIQUE (user_id, production_id)
 CON|user_profile|user_profile_pkey|PRIMARY KEY (user_id)
 CON|user_profile|user_profile_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
 CON|version|version_parent_version_id_fkey|FOREIGN KEY (parent_version_id) REFERENCES version(id) ON DELETE SET NULL
@@ -1755,6 +1765,9 @@ IDX|user_platform_identity|upi_primary_email_uniq|CREATE UNIQUE INDEX upi_primar
 IDX|user_platform_identity|upi_user_id_idx|CREATE INDEX upi_user_id_idx ON public.user_platform_identity USING btree (user_id)
 IDX|user_platform_identity|user_platform_identity_pkey|CREATE UNIQUE INDEX user_platform_identity_pkey ON public.user_platform_identity USING btree (id)
 IDX|user_platform_identity|user_platform_identity_platform_id_platform_user_id_key|CREATE UNIQUE INDEX user_platform_identity_platform_id_platform_user_id_key ON public.user_platform_identity USING btree (platform_id, platform_user_id)
+IDX|user_production_order|user_production_order_pkey|CREATE UNIQUE INDEX user_production_order_pkey ON public.user_production_order USING btree (id)
+IDX|user_production_order|user_production_order_user_id_production_id_key|CREATE UNIQUE INDEX user_production_order_user_id_production_id_key ON public.user_production_order USING btree (user_id, production_id)
+IDX|user_production_order|user_production_order_user_sort_idx|CREATE INDEX user_production_order_user_sort_idx ON public.user_production_order USING btree (user_id, sort_key)
 IDX|user_profile|user_profile_pkey|CREATE UNIQUE INDEX user_profile_pkey ON public.user_profile USING btree (user_id)
 IDX|version|version_pkey|CREATE UNIQUE INDEX version_pkey ON public.version USING btree (id)
 IDX|version|version_production_idx|CREATE INDEX version_production_idx ON public.version USING btree (production_id, created_at)
