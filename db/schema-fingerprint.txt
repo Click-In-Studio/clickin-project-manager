@@ -743,7 +743,6 @@ COL|production|name|text|text|NO|
 COL|production|owner_id|uuid|uuid|NO|
 COL|production|page_map|jsonb|jsonb|NO|'{}'::jsonb
 COL|production|script_config|jsonb|jsonb|NO|'{}'::jsonb
-COL|production|sort_order|integer|int4|NO|0
 COL|production|type_label|text|text|YES|
 COL|production|type|text|text|YES|
 COL|production|watermark_enabled|boolean|bool|NO|false

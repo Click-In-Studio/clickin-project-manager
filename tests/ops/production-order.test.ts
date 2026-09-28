@@ -32,7 +32,7 @@ describe("per-user 项目排序", () => {
     return rows.map(row => row.id).filter(id => productionIds.includes(id));
   }
 
-  it("schema 使用独立的 lex key 表，production 旧列仍保留供下一发布 contract", async () => {
+  it("schema 使用独立的 lex key 表，production 旧排序列已退役", async () => {
     const { rows } = await getPool().query<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns
        WHERE table_name = 'user_production_order' ORDER BY ordinal_position`,
@@ -44,7 +44,7 @@ describe("per-user 项目排序", () => {
       `SELECT 1 FROM information_schema.columns
        WHERE table_name = 'production' AND column_name = 'sort_order'`,
     );
-    expect(old.rows).toHaveLength(1);
+    expect(old.rows).toHaveLength(0);
   });
 
   it("owner 的排序只影响自己，另一成员保持原默认顺序", async () => {
