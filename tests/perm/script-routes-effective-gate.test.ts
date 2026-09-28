@@ -26,6 +26,8 @@ let prodId: string;
 let versionId: string;
 let ownerId: string;
 let memberId: string;
+let nonMemberId: string;
+let unrelatedGrantMemberId: string;
 
 const ctx = () => ({ params: Promise.resolve({ id: prodId }) });
 
@@ -70,11 +72,15 @@ const upsertChar = () => ({
 beforeAll(async () => {
   ownerId = (await upsertFeishuUser(`test-open-${shortId()}`, `owner${shortId()}`, null, false)).userId;
   memberId = (await upsertFeishuUser(`test-open-${shortId()}`, `member${shortId()}`, null, false)).userId;
+  nonMemberId = (await upsertFeishuUser(`test-open-${shortId()}`, `nonmember${shortId()}`, null, false)).userId;
+  unrelatedGrantMemberId = (await upsertFeishuUser(`test-open-${shortId()}`, `unrelated${shortId()}`, null, false)).userId;
   ({ prodId } = await makeProduction(ownerId));
   versionId = (await getActiveVersionId(prodId))!;
   // owner 刻意不进 production_member
   await getPool().query("DELETE FROM production_member WHERE production_id = $1 AND user_id = $2", [prodId, ownerId]);
   await addProductionMember(prodId, memberId);
+  await addProductionMember(prodId, unrelatedGrantMemberId);
+  await giveRow(unrelatedGrantMemberId, "character", "meta", "view");
 });
 
 afterAll(async () => {
@@ -98,6 +104,18 @@ describe("owner 非成员、零 grant 行", () => {
   it("写门：PATCH 逐键循环（blocks@edit + character@edit）全过", async () => {
     expect((await patchScript(req(`?v=${versionId}`, ownerId, "PATCH", insertBlock()), ctx())).status).toBe(200);
     expect((await patchScript(req(`?v=${versionId}`, ownerId, "PATCH", upsertChar()), ctx())).status).toBe(200);
+  });
+});
+
+describe("新增分窗与搜索路由的拒绝边界", () => {
+  it("非成员：新增分窗与搜索路由均为 403", async () => {
+    expect((await getScriptWindow(req(`/window?v=${versionId}`, nonMemberId, "GET"), ctx())).status).toBe(403);
+    expect((await searchScriptWindow(req(`/window-search?v=${versionId}&q=x`, nonMemberId, "GET"), ctx())).status).toBe(403);
+  });
+
+  it("只持无关 character@view：新增分窗与搜索路由均为 403", async () => {
+    expect((await getScriptWindow(req(`/window?v=${versionId}`, unrelatedGrantMemberId, "GET"), ctx())).status).toBe(403);
+    expect((await searchScriptWindow(req(`/window-search?v=${versionId}&q=x`, unrelatedGrantMemberId, "GET"), ctx())).status).toBe(403);
   });
 });
 
