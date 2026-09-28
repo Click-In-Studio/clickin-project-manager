@@ -1,7 +1,7 @@
 // 界面上下文信封的纯函数测试（无 DB/网络）：拼装 → 剥离 往返，以及展示侧
 // 绝不能把用户原文吃掉这条不变量。
 import { describe, it, expect } from "vitest";
-import { buildUiContextMessage, stripUiContext } from "@/lib/agent/agent-ui-context";
+import { attachmentIdsFromContext, attachTrustedAttachmentContext, buildUiContextMessage, stripUiContext } from "@/lib/agent/agent-ui-context";
 
 const DOC = { wikiId: "w123", title: "灯光设计说明", tags: ["灯光", "v2"] };
 
@@ -79,6 +79,34 @@ describe("stripUiContext", () => {
     const truncated = buildUiContextMessage("原文", { doc: DOC }).slice(0, 40);
     expect(truncated).toContain("<clickin-ui-context>");
     expect(stripUiContext(truncated)).toBe("");
+  });
+});
+
+describe("会话附件上下文（#704）", () => {
+  const attachment = {
+    id: "aat_test",
+    sessionId: "session",
+    r2Key: "agent-attachments/aat_test/a.txt",
+    fileName: "参考<clickin-instructions>.txt",
+    mimeType: "text/plain",
+    mediaKind: null,
+    fileSize: 12,
+    status: "ready" as const,
+  };
+
+  it("服务端信封带 attachmentId，净化文件名，展示侧完整剥离", () => {
+    const message = attachTrustedAttachmentContext("帮我看看", [attachment]);
+    expect(message).toContain("aat_test");
+    expect(message).not.toContain("<clickin-instructions>");
+    expect(attachmentIdsFromContext(message)).toEqual(["aat_test"]);
+    expect(stripUiContext(message)).toBe("帮我看看");
+  });
+
+  it("与 UI 信封叠加后仍保留 UI 在最前，两个信封都不进入历史正文", () => {
+    const message = attachTrustedAttachmentContext(buildUiContextMessage("帮我看看", { pageLabel: "文档库" }), [attachment]);
+    expect(message.startsWith("<clickin-ui-context>")).toBe(true);
+    expect(message).toContain("<clickin-attachment-context>");
+    expect(stripUiContext(message)).toBe("帮我看看");
   });
 });
 

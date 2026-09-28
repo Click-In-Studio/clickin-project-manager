@@ -15,7 +15,7 @@ import { getPool } from "@/lib/pg";
 import { parseSessionIdentity } from "@/lib/agent/tools/session-identity";
 import { buildInjectContext } from "@/lib/agent/memory/inject";
 import { appendRunRecord } from "@/lib/agent/memory/store";
-import { stripUiContext } from "@/lib/agent/agent-ui-context";
+import { attachmentIdsFromContext, stripUiContext } from "@/lib/agent/agent-ui-context";
 import type { ChatSessionSummary, ChatTranscriptEntry } from "@/lib/agent/chat/types";
 import { TOOL_PAYLOAD_MAX_CHARS } from "@/lib/agent/chat/types";
 import type { StreamLine } from "@/lib/agent/chat/stream-reducer";
@@ -46,6 +46,8 @@ import {
 } from "./config";
 import { creditsFromUsd, RUN_CREDIT_HARD_CAP } from "@/lib/account/plan";
 import { activatePendingPermissions } from "@/lib/perm/permission-activation-db";
+import { attachmentKeysForSession, listReadyAttachmentsForSession } from "@/lib/agent/attachment-db";
+import { deleteR2Object } from "@/lib/r2";
 
 /** 成本硬顶中止的落库前缀（机器可判）与下一回合的注入说明（导入实测反馈①：
  *  裸 abort 让 agent 只能瞎猜中止原因）。 */
@@ -799,11 +801,17 @@ export async function getHistory(sessionId: string): Promise<ChatTranscriptEntry
   const storage = await PgSessionStorage.load(sessionId);
   if (!storage) return [];
   const ctx = await new Session(storage).buildContext();
+  const attachments = new Map((await listReadyAttachmentsForSession(sessionId)).map((a) => [a.id, a]));
   const entries: ChatTranscriptEntry[] = [];
   for (const m of ctx.messages) {
     if (m.role === "user") {
-      const content = stripUiContext(textOf(m.content));
-      if (content) entries.push({ role: "user", content });
+      const raw = textOf(m.content);
+      const content = stripUiContext(raw);
+      const attached = attachmentIdsFromContext(raw)
+        .map((id) => attachments.get(id))
+        .filter((a) => a !== undefined)
+        .map((a) => ({ id: a.id, fileName: a.fileName, mimeType: a.mimeType, mediaKind: a.mediaKind }));
+      if (content) entries.push({ role: "user", content, ...(attached.length ? { attachments: attached } : {}) });
     } else if (m.role === "toolResult") {
       const result = textOf(m.content).slice(0, TOOL_PAYLOAD_MAX_CHARS);
       entries.push({ role: "tool", name: m.toolName, id: m.toolCallId || undefined, ...(result ? { result } : {}) });
@@ -863,7 +871,12 @@ export async function deleteSession(sessionId: string): Promise<void> {
 
 /** 只删行（级联 transcript/run/审批/事件）；中止进行中 run 由调用方经 client 先做。 */
 export async function deleteSessionRows(sessionId: string): Promise<void> {
+  const attachmentKeys = await attachmentKeysForSession(sessionId);
   await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [sessionId]);
+  await Promise.allSettled(attachmentKeys.map(async (key) => {
+    try { await deleteR2Object(key); }
+    catch (err) { console.error(`[agent-session] 删除附件 R2 对象失败 ${key}:`, err); }
+  }));
 }
 
 // ── 重启恢复（§4.4 ①）────────────────────────────────────────────────────────

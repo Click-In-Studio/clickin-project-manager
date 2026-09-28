@@ -18,7 +18,7 @@ import { getWiki } from "@/lib/wiki/content";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 import { TransientReadError } from "@/lib/asset/byte-source";
-import { loadParsedDocx, loadParsedPdf } from "@/lib/doc-extract/load";
+import { loadParsedDocx, loadParsedPdf, type DocFileRef } from "@/lib/doc-extract/load";
 import { presignedGet } from "@/lib/r2";
 import { ocrPages, type OcrPage, type OcrTier } from "@/lib/mmp/ocr";
 import { recordMmpUsage } from "@/lib/mmp/usage-db";
@@ -128,7 +128,15 @@ async function loadDoc(
   if (typeof got === "string") return got;
   const { asset, file } = got;
 
-  const name = asset.fileName ?? "";
+  return loadDocFile(
+    { fileId: file.id, r2Key: file.r2Key, fileSize: file.fileSize, fileName: asset.fileName ?? "" },
+    opts,
+  );
+}
+
+async function loadDocFile(file: DocFileRef, opts: DocToolOpts = {}): Promise<Loaded | string> {
+  const name = file.fileName;
+
   const lower = name.toLowerCase();
   const kind = lower.endsWith(".docx") ? "docx" : lower.endsWith(".pdf") ? "pdf" : null;
   if (!kind) {
@@ -138,16 +146,15 @@ async function loadDoc(
   }
   // 解析在 heavy-worker 进程做（lib/doc-extract/load.ts 双模式装载）：
   // 快路径命中缓存/IR 或短等内完成；慢路径转后台，worker 终局后插话唤醒本会话。
-  const ref = { fileId: file.id, r2Key: file.r2Key, fileSize: file.fileSize, fileName: name };
   const loadOpts = { notifySessionId: opts.sessionId ?? null };
   try {
     if (kind === "docx") {
-      const r = await loadParsedDocx(ref, loadOpts);
+      const r = await loadParsedDocx(file, loadOpts);
       if (r.status === "ok") return { kind, doc: r.doc, fileName: name };
       if (r.status === "failed") return `docx 解析失败：${r.error}`;
       return pendingMsg(name);
     }
-    const r = await loadParsedPdf(ref, loadOpts);
+    const r = await loadParsedPdf(file, loadOpts);
     if (r.status === "ok") return { kind, doc: r.doc, fileName: name };
     if (r.status === "failed") return `pdf 解析失败：${r.error}`;
     return pendingMsg(name);
@@ -155,6 +162,27 @@ async function loadDoc(
     if (e instanceof TransientReadError) return TRANSIENT_MSG;
     throw e;
   }
+}
+
+/** #704 会话附件复用同一套文档解析，但所有权门由 attachment-tools 在调用前完成。 */
+export async function attachmentDocRead(
+  file: DocFileRef,
+  input: { mode?: "outline" | "read" | "search"; ranges?: Array<{ from: number; to: number }>; query?: string; limit?: number },
+  opts: DocToolOpts = {},
+): Promise<string> {
+  const loaded = await loadDocFile(file, opts);
+  if (typeof loaded === "string") return neutralizeInjectionTags(loaded);
+  if (input.mode === "search") {
+    const query = input.query?.trim() ?? "";
+    if (!query) return "query 不能为空。";
+    return searchLoaded(loaded, query, input.limit);
+  }
+  if (input.mode === "read") {
+    const ranges = input.ranges ?? [];
+    if (!ranges.length) return "ranges 不能为空（docx 用块号，pdf 用 1 起页序）。";
+    return loaded.kind === "docx" ? docxRead(loaded.doc, ranges) : pdfRead(loaded.doc, ranges);
+  }
+  return loaded.kind === "docx" ? docxOutline(loaded.doc, loaded.fileName) : pdfOutline(loaded.doc, loaded.fileName);
 }
 
 function pendingMsg(fileName: string): string {
@@ -440,7 +468,11 @@ export async function docSearch(
   if (typeof loaded === "string") return neutralizeInjectionTags(loaded); // 错误消息可含用户可控文件名/标题
   const q = opts.query.trim();
   if (!q) return "搜索词不能为空。";
-  const limit = Math.max(1, Math.min(SEARCH_MAX_LIMIT, opts.limit ?? SEARCH_DEFAULT_LIMIT));
+  return searchLoaded(loaded, q, opts.limit);
+}
+
+function searchLoaded(loaded: Loaded, q: string, requestedLimit?: number): string {
+  const limit = Math.max(1, Math.min(SEARCH_MAX_LIMIT, requestedLimit ?? SEARCH_DEFAULT_LIMIT));
   const qLower = q.toLowerCase();
 
   const hits: string[] = [];
@@ -509,9 +541,29 @@ export async function docPageOcr(
   if (typeof got === "string") return neutralizeInjectionTags(got);
   const { asset, file } = got;
   const name = asset.fileName ?? "";
+  return attachmentFileOcr(
+    userId,
+    productionId,
+    { fileId: file.id, r2Key: file.r2Key, fileSize: file.fileSize, fileName: name },
+    asset.mimeType,
+    pages,
+    opts,
+  );
+}
+
+/** #704 会话附件 OCR；附件所有权在 attachment-tools 中校验。 */
+export async function attachmentFileOcr(
+  userId: string,
+  productionId: string | null,
+  file: DocFileRef,
+  declaredMime: string | null,
+  pages: number[],
+  opts: DocPageOcrOpts = {},
+): Promise<string> {
+  const name = file.fileName;
   const ext = name.toLowerCase().split(".").pop() ?? "";
-  const mime = OCR_MIME_BY_EXT[ext] ?? (asset.mimeType && Object.values(OCR_MIME_BY_EXT).includes(asset.mimeType) ? asset.mimeType : null);
-  if (!mime) return neutralizeInjectionTags(`该资产（${name || "无文件名"}）不是 pdf / png / jpeg / tiff / webp，无法做 OCR。`);
+  const mime = OCR_MIME_BY_EXT[ext] ?? (declaredMime && Object.values(OCR_MIME_BY_EXT).includes(declaredMime) ? declaredMime : null);
+  if (!mime) return neutralizeInjectionTags(`该文件（${name || "无文件名"}）不是 pdf / png / jpeg / tiff / webp，无法做 OCR。`);
 
   const tier: OcrTier = opts.tier === "full" ? "gpu" : "gpu-fast";
   let wanted = [...new Set(pages.map((p) => Math.floor(p)).filter((p) => Number.isFinite(p) && p >= 1))].sort((a, b) => a - b);
@@ -523,7 +575,7 @@ export async function docPageOcr(
   let imageNote = "";
   if (mime === "application/pdf") {
     const parsed = await loadParsedPdf(
-      { fileId: file.id, r2Key: file.r2Key, fileSize: file.fileSize, fileName: name },
+      file,
       { notifySessionId: opts.sessionId ?? null },
     ).catch(() => null);
     if (parsed?.status === "ok") {
@@ -542,7 +594,7 @@ export async function docPageOcr(
   if (truncated.length) wanted = wanted.slice(0, cap);
 
   const url = presignedGet(file.r2Key, OCR_URL_TTL_SEC, { contentType: mime });
-  const out = await ocrPages({ fileId: file.id, url, pages: wanted, tier }, { signal: opts.signal });
+  const out = await ocrPages({ fileId: file.fileId, url, pages: wanted, tier }, { signal: opts.signal });
   if (out.status === "error") {
     if (out.unavailable) {
       return `⚠ OCR 服务当前不可用（${out.code}）：本次没有识别到任何内容，不要把这当作页面为空。` +

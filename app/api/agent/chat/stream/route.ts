@@ -2,7 +2,8 @@ import { type NextRequest, NextResponse } from "next/server";
 import { productionIdOfSessionKey } from "@/lib/agent/tools/session-identity";
 import { requireProductionFeature } from "@/lib/account/plan";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent/chat/http";
-import { neutralizeInboundMessage } from "@/lib/agent/agent-ui-context";
+import { attachTrustedAttachmentContext, neutralizeInboundMessage } from "@/lib/agent/agent-ui-context";
+import { AGENT_ATTACHMENT_MAX_PER_MESSAGE, getReadyAttachments } from "@/lib/agent/attachment-db";
 import { createRunnerStreamResponse, pageKeyOfMessage } from "@/lib/agent/runtime/dispatch";
 import { startRun, steerRun } from "@/lib/agent/runtime/client";
 
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest) {
   const auth = requireUser(req.cookies);
   if (auth instanceof NextResponse) return auth;
 
-  let body: { message?: unknown; sessionKey?: unknown; steer?: unknown };
+  let body: { message?: unknown; sessionKey?: unknown; steer?: unknown; attachmentIds?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -34,12 +35,20 @@ export async function POST(req: NextRequest) {
   }
   // 服务端净化注入分隔符（真边界，客户端 buildUiContextMessage 的净化不可信）：
   // 中和用户消息里伪造/闭合 <clickin-…> 包裹块的企图，保留合法 ui-context 信封。
-  const message = neutralizeInboundMessage(rawMessage);
   if (!sessionKey || typeof sessionKey !== "string") {
     return NextResponse.json({ error: "缺少 sessionKey" }, { status: 400 });
   }
   const denied = requireOwnership(sessionKey, auth.userId);
   if (denied) return denied;
+  const attachmentIds = body.attachmentIds === undefined ? [] : body.attachmentIds;
+  if (!Array.isArray(attachmentIds) || attachmentIds.length > AGENT_ATTACHMENT_MAX_PER_MESSAGE || attachmentIds.some((id) => typeof id !== "string")) {
+    return NextResponse.json({ error: `attachmentIds 非法（每条最多 ${AGENT_ATTACHMENT_MAX_PER_MESSAGE} 个）` }, { status: 400 });
+  }
+  const attachments = await getReadyAttachments(attachmentIds as string[], sessionKey, auth.userId);
+  if (attachments.length !== attachmentIds.length) {
+    return NextResponse.json({ error: "附件不存在、尚未上传完成或不属于该会话" }, { status: 400 });
+  }
+  const message = attachTrustedAttachmentContext(neutralizeInboundMessage(rawMessage), attachments);
 
   // 项目档位功能门（#280）：签发时已拦（sessions POST），这里对存量已签发的
   // production 会话兜底——降级后旧 sessionKey 不能继续产生 AI 消耗。

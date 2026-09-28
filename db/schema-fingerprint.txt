@@ -117,6 +117,16 @@ COL|agent_schedule|schedule|jsonb|jsonb|NO|
 COL|agent_schedule|status|text|text|NO|'active'::text
 COL|agent_schedule|updated_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_schedule|user_id|uuid|uuid|NO|
+COL|agent_session_attachment|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_session_attachment|file_name|text|text|NO|
+COL|agent_session_attachment|file_size|bigint|int8|NO|
+COL|agent_session_attachment|id|text|text|NO|
+COL|agent_session_attachment|media_kind|text|text|YES|
+COL|agent_session_attachment|mime_type|text|text|NO|
+COL|agent_session_attachment|r2_key|text|text|NO|
+COL|agent_session_attachment|ready_at|timestamp with time zone|timestamptz|YES|
+COL|agent_session_attachment|session_id|text|text|NO|
+COL|agent_session_attachment|status|text|text|NO|'pending'::text
 COL|agent_session_entry|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_session_entry|entry_id|text|text|NO|
 COL|agent_session_entry|parent_id|text|text|YES|
@@ -1029,6 +1039,12 @@ CON|agent_schedule|agent_schedule_pkey|PRIMARY KEY (id)
 CON|agent_schedule|agent_schedule_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|agent_schedule|agent_schedule_status_check|CHECK ((status = ANY (ARRAY['active'::text, 'paused'::text, 'done'::text])))
 CON|agent_schedule|agent_schedule_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|agent_session_attachment|agent_session_attachment_file_size_check|CHECK ((file_size >= 0))
+CON|agent_session_attachment|agent_session_attachment_media_kind_check|CHECK ((media_kind ~ '^[a-z][a-z0-9_-]*$'::text))
+CON|agent_session_attachment|agent_session_attachment_pkey|PRIMARY KEY (id)
+CON|agent_session_attachment|agent_session_attachment_r2_key_key|UNIQUE (r2_key)
+CON|agent_session_attachment|agent_session_attachment_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
+CON|agent_session_attachment|agent_session_attachment_status_check|CHECK ((status = ANY (ARRAY['pending'::text, 'ready'::text])))
 CON|agent_session_entry|agent_session_entry_pkey|PRIMARY KEY (session_id, seq)
 CON|agent_session_entry|agent_session_entry_session_id_entry_id_key|UNIQUE (session_id, entry_id)
 CON|agent_session_entry|agent_session_entry_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
@@ -1505,6 +1521,9 @@ IDX|agent_run|agent_run_session_idx|CREATE INDEX agent_run_session_idx ON public
 IDX|agent_schedule|agent_schedule_due_idx|CREATE INDEX agent_schedule_due_idx ON public.agent_schedule USING btree (next_fire_at) WHERE (status = 'active'::text)
 IDX|agent_schedule|agent_schedule_pkey|CREATE UNIQUE INDEX agent_schedule_pkey ON public.agent_schedule USING btree (id)
 IDX|agent_schedule|agent_schedule_user_idx|CREATE INDEX agent_schedule_user_idx ON public.agent_schedule USING btree (user_id, created_at DESC)
+IDX|agent_session_attachment|agent_session_attachment_pkey|CREATE UNIQUE INDEX agent_session_attachment_pkey ON public.agent_session_attachment USING btree (id)
+IDX|agent_session_attachment|agent_session_attachment_r2_key_key|CREATE UNIQUE INDEX agent_session_attachment_r2_key_key ON public.agent_session_attachment USING btree (r2_key)
+IDX|agent_session_attachment|agent_session_attachment_session_idx|CREATE INDEX agent_session_attachment_session_idx ON public.agent_session_attachment USING btree (session_id, created_at)
 IDX|agent_session_entry|agent_session_entry_pkey|CREATE UNIQUE INDEX agent_session_entry_pkey ON public.agent_session_entry USING btree (session_id, seq)
 IDX|agent_session_entry|agent_session_entry_session_id_entry_id_key|CREATE UNIQUE INDEX agent_session_entry_session_id_entry_id_key ON public.agent_session_entry USING btree (session_id, entry_id)
 IDX|agent_session|agent_session_pkey|CREATE UNIQUE INDEX agent_session_pkey ON public.agent_session USING btree (id)
