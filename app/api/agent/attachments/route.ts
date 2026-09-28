@@ -14,12 +14,13 @@ import { deleteR2Object, headR2Object, presignedPut } from "@/lib/r2";
 
 export const runtime = "nodejs";
 
-async function requireSessionScope(sessionKey: string, userId: string, isAdmin: boolean): Promise<Response | null> {
+async function requireSessionScope(sessionKey: string, userId: string): Promise<Response | null> {
   const denied = requireOwnership(sessionKey, userId);
   if (denied) return denied;
   const productionId = productionIdOfSessionKey(sessionKey);
   if (!productionId) return null;
-  const access = await getProductionPermissionContext(userId, isAdmin, productionId);
+  // session.isAdmin 是退役死字段；成员门不依赖平台管理员旁路。
+  const access = await getProductionPermissionContext(userId, false, productionId);
   if (!access) return NextResponse.json({ error: "你不是该制作的成员" }, { status: 403 });
   return requireProductionFeature(productionId, "ai");
 }
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "附件大小不能超过 50 MB" }, { status: 400 });
   }
   try {
-    const scopeDeny = await requireSessionScope(body.sessionKey, auth.userId, auth.isAdmin);
+    const scopeDeny = await requireSessionScope(body.sessionKey, auth.userId);
     if (scopeDeny) return scopeDeny;
     const attachment = await createPendingAttachment({
       sessionId: body.sessionKey,
