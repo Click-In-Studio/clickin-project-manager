@@ -85,7 +85,6 @@ CREATE TABLE IF NOT EXISTS production (
   page_map          JSONB NOT NULL DEFAULT '{}',
   active_version_id TEXT,   -- FK to version(id) added below
   master_view_id    TEXT,   -- FK to script_view(id) added below；主本（页码坐标来源）
-  sort_order        INTEGER NOT NULL DEFAULT 0,
   description       TEXT NOT NULL DEFAULT '',
   avatar_url        TEXT,
   type              TEXT,
