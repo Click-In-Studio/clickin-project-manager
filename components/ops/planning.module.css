@@ -1,3 +1,9 @@
+.planningShell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
 .planningViewTabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -8,14 +14,79 @@
   min-width: 0;
   min-height: 62px;
   padding: 12px 15px;
+  border: 1px solid var(--line);
   border-radius: 10px;
+  background: var(--surface);
   display: flex;
   flex-direction: column;
+  color: var(--ink);
   text-align: left;
   cursor: pointer;
 }
 
-.planningTabHint { font-size: 9px; margin-top: 4px; line-height: 1.35; }
+.planningViewTab[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); }
+.planningTabLabel { color: var(--ink); font-size: 12px; }
+.planningViewTab[aria-pressed="true"] .planningTabLabel { color: #fff; }
+.planningTabHint { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+.planningViewTab[aria-pressed="true"] .planningTabHint { color: #b9c8c4; }
+
+.ganttPanel {
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+}
+
+.ganttHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.ganttHeading { min-width: 0; }
+.ganttEyebrow { margin: 0; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+.ganttTitle { margin: 5px 0 0; color: var(--ink); font-family: Georgia, "Noto Serif SC", serif; font-size: 20px; font-weight: 500; }
+.ganttDescription { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+
+.ganttControls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.ganttScale {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.ganttScaleButton {
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 10px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ganttScaleButton[aria-pressed="true"] { color: #fff; background: var(--ink); }
+
+.ganttLegend { display: flex; gap: 12px; color: var(--muted); font-size: 9px; }
+.ganttLegend span { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.ganttLegend i { width: 7px; height: 7px; box-sizing: border-box; border-radius: 2px; }
+.ganttLegendInProgress { background: var(--script); }
+.ganttLegendPending { border: 1px solid #9ccfc0; background: #d2f0e8; }
+.ganttLegendBlocked { border: 1px solid #d8a893; background: #f5dfd8; }
+.ganttLegendDone { border: 1px solid #b9b5dd; background: #e8e6f7; }
 
 .calendarHiddenMobile,
 .calendarFloatingCreate { display: none; }
@@ -925,12 +996,23 @@
 }
 
 @media (max-width: 760px) {
+  .planningShell { gap: 12px; }
+  .planningViewTabs { gap: 4px; }
+  .planningViewTab { min-height: 44px; padding: 7px 6px; border-radius: 8px; justify-content: center; text-align: center; }
+  .planningTabLabel { font-size: 11px; line-height: 1.25; }
+  .planningTabHint { display: none; }
+  .ganttPanel { padding: 14px 10px; }
+  .ganttHeader { gap: 10px; margin-bottom: 12px; }
+  .ganttTitle { margin-top: 3px; font-size: 18px; }
+  .ganttDescription { margin-top: 3px; font-size: 10px; line-height: 1.45; }
+  .ganttControls { width: 100%; margin-left: 0; gap: 8px; flex-shrink: 1; }
+  .ganttScale { width: 100%; box-sizing: border-box; }
+  .ganttScaleButton { min-width: 0; min-height: 44px; padding: 3px 8px; flex: 1 1 0; font-size: 11px; }
+  .ganttLegend { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; display: grid; font-size: 10px; }
   .timetablePanel { padding: 14px; }
   .timetableHeader { gap: 10px; margin-bottom: 12px; }
   .timetableActions { width: 100%; margin-left: 0; justify-content: flex-start; }
   .rundownMatrixWrap { max-height: min(690px, calc(100vh - 190px)); }
-  .planningViewTabs { gap: 5px; }
-  .planningTabHint { display: none; }
   .calendarPanel { padding: 14px 10px; }
   .calendarHeader { flex-direction: column; gap: 10px; margin-bottom: 12px; }
   .calendarYear { font-size: 11px; }

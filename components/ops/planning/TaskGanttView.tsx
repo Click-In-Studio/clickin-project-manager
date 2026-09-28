@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import styles from "@/components/ops/planning.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 import { todayCSTStr } from "@/lib/tz";
 import { DAY_MS, floorToMonday, cstAxisDateFromIso, dateOnlyAxisMs, addDaysIso } from "./date";
@@ -180,41 +181,37 @@ export default function TaskGanttView({ productionId, tasks, milestones, phases 
   }
 
   return (
-    <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22 }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginBottom: 18, flexWrap: "wrap" }}>
-        <div style={{ minWidth: 0 }}>
-          <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>
+    <section className={styles.ganttPanel}>
+      <div className={styles.ganttHeader}>
+        <div className={styles.ganttHeading}>
+          <p className={styles.ganttEyebrow}>
             {labels[0]} — {labels[labels.length - 1]}
           </p>
-          <h2 style={{ margin: "5px 0 0", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>
+          <h2 className={styles.ganttTitle}>
             任务甘特图
           </h2>
-          <small style={{ display: "block", marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+          <small className={styles.ganttDescription}>
             时间为有效起止（自身 → 绑定日程 → 事件）；拖动条形改期，拖动即固化为任务自身时间。
           </small>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14, flexShrink: 0, flexWrap: "wrap" }}>
-          <div style={{ display: "flex", gap: 2, border: "1px solid var(--line)", borderRadius: 8, padding: 2 }} aria-label="时间轴粒度">
+        <div className={styles.ganttControls}>
+          <div className={styles.ganttScale} aria-label="时间轴粒度">
             {([["day", "日"], ["month", "月"], ["quarter", "季"], ["year", "年"]] as const).map(([value, label]) => (
               <button
                 key={value}
                 aria-pressed={scale === value}
                 onClick={() => setScale(value)}
-                style={{
-                  border: 0, borderRadius: 6, padding: "3px 10px", fontSize: 10, fontWeight: 700, cursor: "pointer",
-                  background: scale === value ? "var(--ink)" : "transparent",
-                  color: scale === value ? "#fff" : "var(--muted)",
-                }}
+                className={styles.ganttScaleButton}
               >
                 {label}
               </button>
             ))}
           </div>
-          <div style={{ display: "flex", gap: 12, color: "var(--muted)", fontSize: 9 }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 5 }}><i style={{ width: 7, height: 7, borderRadius: 2, background: "var(--script)" }} />进行中</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 5 }}><i style={{ width: 7, height: 7, borderRadius: 2, background: "#d2f0e8", border: "1px solid #9ccfc0" }} />待处理</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 5 }}><i style={{ width: 7, height: 7, borderRadius: 2, background: "#f5dfd8", border: "1px solid #d8a893" }} />受阻</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 5 }}><i style={{ width: 7, height: 7, borderRadius: 2, background: "#e8e6f7", border: "1px solid #b9b5dd" }} />完成</span>
+          <div className={styles.ganttLegend} aria-label="任务状态图例">
+            <span><i className={styles.ganttLegendInProgress} />进行中</span>
+            <span><i className={styles.ganttLegendPending} />待处理</span>
+            <span><i className={styles.ganttLegendBlocked} />受阻</span>
+            <span><i className={styles.ganttLegendDone} />完成</span>
           </div>
         </div>
       </div>

@@ -42,7 +42,7 @@ export default function PlanningClient(props: Props) {
     || (phasePerm.deptPocEnabled && phasePerm.pocDeptIds.length > 0);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+    <div className={styles.planningShell}>
       {showPhaseManage && (
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <button
@@ -68,13 +68,9 @@ export default function PlanningClient(props: Props) {
             aria-pressed={mode === id}
             onClick={() => setMode(id)}
             className={styles.planningViewTab}
-            style={{
-              border: `1px solid ${mode === id ? "var(--ink)" : "var(--line)"}`,
-              background: mode === id ? "var(--ink)" : "var(--surface)",
-            }}
           >
-            <b style={{ fontSize: 12, color: mode === id ? "#fff" : "var(--ink)" }}>{label}</b>
-            <small className={styles.planningTabHint} style={{ color: mode === id ? "#b9c8c4" : "var(--muted)" }}>{hint}</small>
+            <b className={styles.planningTabLabel}>{label}</b>
+            <small className={styles.planningTabHint}>{hint}</small>
           </button>
         ))}
       </div>
