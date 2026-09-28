@@ -26,6 +26,18 @@ function event(id: string, title: string, day: number) {
   } as Props["events"][number];
 }
 
+function phase(id: string, name: string, deptName: string | null = null) {
+  return {
+    id,
+    name,
+    deptId: deptName ? `${id}-dept` : null,
+    deptName,
+    startDate: "2031-04-09",
+    endDate: "2031-04-15",
+    milestoneIds: [],
+  } as Props["phases"][number];
+}
+
 const props: Props = {
   productionId: "production-calendar",
   events: [
@@ -124,15 +136,39 @@ describe("CalendarView responsive interactions", () => {
     expect(container.querySelector('[aria-labelledby="calendar-day-drawer-title"]')).not.toBeNull();
   });
 
+  it("多个重叠阶段只占一行，点开后在当天抽屉列全且不吞事项提示", async () => {
+    await act(async () => {
+      root.render(<CalendarView {...props} phases={[
+        phase("phase-light", "灯光排练", "灯光组"),
+        phase("phase-sound", "音响联排", "音响组"),
+        phase("phase-costume", "服装检查", "服装组"),
+      ]} />);
+      await Promise.resolve();
+    });
+
+    const day = container.querySelector<HTMLElement>('[data-calendar-date="2031-04-12"]')!;
+    expect(day.querySelectorAll('[aria-label^="查看 "][aria-label$=" 个阶段"]')).toHaveLength(1);
+    expect(day.querySelector('[aria-label="查看 3 个阶段"]')).not.toBeNull();
+    expect(day.textContent).toContain("+1 项");
+    expect(day.textContent).not.toContain("灯光排练");
+
+    await act(async () => day.querySelector<HTMLButtonElement>('[aria-label="查看 3 个阶段"]')!.click());
+    const drawer = container.querySelector<HTMLElement>('[aria-labelledby="calendar-day-drawer-title"]')!;
+    expect(drawer.textContent).toContain("灯光排练");
+    expect(drawer.textContent).toContain("音响联排");
+    expect(drawer.textContent).toContain("服装检查");
+    expect(drawer.textContent).toContain("舞台清场");
+  });
+
   it("移动端日期只展开当天列表，空态关闭后常驻加号沿用所选日期新建", async () => {
     mobile = true;
     await render();
 
     await act(async () => dateButton("2031-04-13").click());
-    expect(container.textContent).toContain("当天暂无事项");
+    expect(container.textContent).toContain("当天暂无安排");
     expect(container.querySelector('[aria-label="2031-04-13 快捷新建"]')).toBeNull();
 
-    const closeDay = container.querySelector<HTMLButtonElement>('[aria-label="关闭当天事项"]')!;
+    const closeDay = container.querySelector<HTMLButtonElement>('[aria-label="关闭当天安排"]')!;
     await act(async () => closeDay.click());
 
     const floatingCreate = container.querySelector<HTMLButtonElement>('[aria-label="在2031-04-13快捷新建事件或任务"]')!;

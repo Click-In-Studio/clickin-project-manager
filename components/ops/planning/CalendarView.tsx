@@ -10,7 +10,7 @@ import QuickCreateModal from "./QuickCreateModal";
 import { ymd } from "./date";
 import { PHASE_TONES, phaseTone, phaseRangeLabel, phaseCoversDate } from "./phase";
 import { readPref, writePref } from "./prefs";
-import type { PlanningMilestone, PlanningTask, Props } from "./types";
+import type { PlanningMilestone, PlanningPhase, PlanningTask, Props } from "./types";
 
 type DayEntries = { events: ProductionEvent[]; tasks: PlanningTask[]; milestones: PlanningMilestone[] };
 
@@ -27,6 +27,10 @@ function entryMeta(entry: CalendarSelection) {
   if (entry.kind === "event") return { title: entry.value.title, type: "事件", tone: { background: "var(--script-soft)", color: "var(--script)" } };
   if (entry.kind === "task") return { title: entry.value.title, type: "任务", tone: { background: "#f2e3d6", color: "var(--stage)" } };
   return { title: entry.value.name, type: "里程碑", tone: { background: "var(--ink)", color: "#fff" } };
+}
+
+function phaseLabel(phase: PlanningPhase) {
+  return phase.deptName ? `${phase.name}（${phase.deptName}）` : phase.name;
 }
 
 export default function CalendarView({ productionId, events, tasks, milestones, phases, departments, editableEventIds, editableTaskIds }: Props) {
@@ -85,6 +89,7 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
 
   const todayStr = ymd(today);
   const expandedEntries = toSelections(expandedDate ? byDate.get(expandedDate) : undefined);
+  const expandedPhases = expandedDate ? phases.filter(phase => phaseCoversDate(phase, expandedDate)) : [];
 
   const move = (delta: number) => {
     const next = new Date(Date.UTC(year, month + delta, 1));
@@ -156,6 +161,9 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
           const date = ymd(dateValue);
           const inMonth = dateValue.getUTCMonth() === month;
           const entries = toSelections(byDate.get(date));
+          const coveredPhases = phases
+            .map((phase, index) => ({ phase, index }))
+            .filter(({ phase }) => phaseCoversDate(phase, date));
           const shownEntries = entries.slice(0, 3);
           const hidden = Math.max(0, entries.length - 3);
           const hiddenOnMobile = Math.max(0, entries.length - 2);
@@ -173,24 +181,36 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
               <button
                 type="button"
                 className={styles.calendarDateButton}
-                aria-label={`${date}，${entries.length ? `${entries.length} 项` : "暂无事项"}`}
+                aria-label={`${date}，${entries.length ? `${entries.length} 项` : "暂无事项"}${coveredPhases.length ? `，${coveredPhases.length} 个阶段` : ""}`}
                 title="查看或操作当天事项"
                 onClick={event => { event.stopPropagation(); activateDate(date, event.currentTarget); }}
               >
                 {dateValue.getUTCDate()}
               </button>
-              {phases.map((phase, index) => {
-                if (!phaseCoversDate(phase, date)) return null;
+              {coveredPhases.length === 1 && (() => {
+                const { phase, index } = coveredPhases[0];
                 const tone = phaseTone(index);
-                const label = phase.deptName ? `${phase.name}（${phase.deptName}）` : phase.name;
+                const label = phaseLabel(phase);
                 return date === phase.startDate ? (
-                  <span key={phase.id} title={`${label} · ${phaseRangeLabel(phase)}`} className={`${styles.calendarChip} ${styles.calendarPhaseChip}`} style={{ background: tone.bg, color: tone.solid }}>
+                  <span title={`${label} · ${phaseRangeLabel(phase)}`} className={`${styles.calendarChip} ${styles.calendarPhaseChip}`} style={{ background: tone.bg, color: tone.solid }}>
                     <span className={styles.calendarChipTitle}>▸ {label}</span>
                   </span>
                 ) : (
-                  <i key={phase.id} title={`${label} · ${phaseRangeLabel(phase)}`} className={styles.calendarPhaseBar} style={{ background: tone.solid }} />
+                  <i title={`${label} · ${phaseRangeLabel(phase)}`} className={styles.calendarPhaseBar} style={{ background: tone.solid }} />
                 );
-              })}
+              })()}
+              {coveredPhases.length > 1 && (
+                <button
+                  type="button"
+                  className={`${styles.calendarChip} ${styles.calendarPhaseChip}`}
+                  style={{ background: PHASE_TONES[0].bg, color: PHASE_TONES[0].solid }}
+                  title={coveredPhases.map(({ phase }) => `${phaseLabel(phase)} · ${phaseRangeLabel(phase)}`).join("\n")}
+                  aria-label={`查看 ${coveredPhases.length} 个阶段`}
+                  onClick={event => { event.stopPropagation(); openDay(date, event.currentTarget); }}
+                >
+                  <span className={styles.calendarChipTitle}>▸ {coveredPhases.length} 个阶段</span>
+                </button>
+              )}
               {shownEntries.map((entry, index) => {
                 const meta = entryMeta(entry);
                 return (
@@ -235,7 +255,7 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
       {(expandedDate || selection) && (
         <button type="button" tabIndex={-1} className={styles.drawerBackdrop} aria-label="关闭日历弹层" onClick={selection ? closeDetail : closeDay} />
       )}
-      {expandedDate && <CalendarDayDrawer date={expandedDate} entries={expandedEntries} onSelect={openDetailFromDay} onClose={closeDay} />}
+      {expandedDate && <CalendarDayDrawer date={expandedDate} phases={expandedPhases} entries={expandedEntries} onSelect={openDetailFromDay} onClose={closeDay} />}
       {selection && (
         <CalendarDetailDrawer
           key={`${selection.kind}-${selection.value.id}`}
