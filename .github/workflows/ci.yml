@@ -133,6 +133,13 @@ jobs:
           psql -v ON_ERROR_STOP=1 -v owner_role=script_editor -v app_role=ci_app_role -f db/app-role-acl.sql
           psql -v ON_ERROR_STOP=1 -c "CREATE TABLE acl_default_privilege_probe (id text PRIMARY KEY)"
           psql -v ON_ERROR_STOP=1 -v owner_role=script_editor -v app_role=ci_app_role -f db/check-app-role-acl.sql
+          psql -v ON_ERROR_STOP=1 -c "REVOKE SELECT ON TABLE acl_default_privilege_probe FROM ci_app_role"
+          if psql -v ON_ERROR_STOP=1 -v owner_role=script_editor -v app_role=ci_app_role -f db/check-app-role-acl.sql; then
+            echo "::error::ACL 硬闸没有拦住缺失的 SELECT 权限"
+            exit 1
+          fi
+          psql -v ON_ERROR_STOP=1 -v owner_role=script_editor -v app_role=ci_app_role -f db/app-role-acl.sql
+          psql -v ON_ERROR_STOP=1 -v owner_role=script_editor -v app_role=ci_app_role -f db/check-app-role-acl.sql
           psql -v ON_ERROR_STOP=1 -c "DROP TABLE acl_default_privilege_probe"
 
       - name: Write test .env.local
