@@ -1,6 +1,6 @@
 ---
 kind: fixed
-title: 文档里 # 引用的标签不再显示成「#block」「#scene」，场次带场名、台词带说话人和摘要
+title: "文档里 # 引用的标签不再显示成「#block」「#scene」，场次带场名、台词带说话人和摘要"
 page: production/wiki/editor
 pr: 697
 ---
