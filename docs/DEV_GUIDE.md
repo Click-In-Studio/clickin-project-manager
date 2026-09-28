@@ -271,6 +271,7 @@ npm run dev
 3. **开 Pull Request** → 关联对应 Issue；PR 标题用 [Conventional Commits](https://www.conventionalcommits.org/) 格式（`feat:`、`fix:`、`docs:` 等）
 4. **CI 自动触发**：
    - `lint-and-typecheck`：TypeScript 类型检查 + ESLint
+   - `production-build`：Next standalone + agent-runner + heavy-worker 三个生产入口
    - `unit-test`：Vitest 单元测试（含 migration 测试与 `npm run db:check`）
    - `print-consistency`：跨平台分页 golden 比对
 5. **自动请求 Review**：CODEOWNERS（`.github/CODEOWNERS`）配置 `* @kevin-wang-2 @Click-In-Studio/reviewer`，PR 创建后自动 request review；AI review 每 PR 出 findings，逐条判定真伪再修，误报回复不改
@@ -295,8 +296,9 @@ tag 名 = `content/changelog/` 版本目录名，形态由 `lib/help/changelog.t
 
 ### 发版与 hotfix（#558）
 
-- push `main` → 自动发 **dev**（`app-dev.clickinmusical.com`）；push tag `v*` → 自动发 **prod**（`app.clickinmusical.com`）。发 prod = `npm run changelog:release -- <tag>` → 编辑 commit → `git tag <tag> && git push origin <tag>`。
+- push `main` → 自动发 **dev**（`app-dev.clickinmusical.com`）；push tag `v*` → 自动发 **prod**（`app.clickinmusical.com`）。发 prod = `npm run changelog:release -- <tag>` → 编辑 commit → `git tag <tag> && git push origin <tag>`。tag CD 先在 tag 指向的精确 SHA 上跑 typecheck、lint、schema / migration、全量 Vitest 与三条直跑脚本；全部通过后 deploy job 才开始 production build、SSH、线上迁移和激活。任何验证失败都只留下失败的 tag run，不接触生产环境。
 - **hotfix 从被修的 tag 切分支，不从 main**（main 领先 tag 一大截，从 main 发等于把未发的全推上去）：`git switch -c hotfix/<n> v0.1.2-260924` → 改 → 补 `content/changelog/<tag>/`（只含本次修复）并 commit → 在**changelog 那个 commit** 上打 `v0.1.2-260924-hot1` 推 tag → PR 回 main。顺序不能反：prod CD 会检查 tag 所在 commit 有没有 `content/changelog/<tag>/_index.md`（#569），先打 tag 再补 changelog 会直接部署失败（#684 踩过）。
+- **失败 tag 不静默移动**：只有 tag validation 失败且 deploy job 从未开始时，才可显式删除本地与远端失败 tag，在修正 commit 上重建同名 tag；deploy 一旦开始，无论最终成败，该 tag 都视为发布审计记录，不得改指向，修复必须创建下一个 hotfix tag。
 - 详见 [DEPLOY.md](./DEPLOY.md)。
 
 ### 叠 PR（stacked PR）
@@ -305,7 +307,7 @@ tag 名 = `content/changelog/` 版本目录名，形态由 `lib/help/changelog.t
 
 ### 特别注意
 
-- CI 通过与否不强制阻断合并（无 required status checks），但 CI 红灯时不应合并
+- `lint-and-typecheck`、`production-build`、`unit-test`、`print-consistency`、`migration-check`、`changelog-check` 都应配置为 required status checks；新增 job 后同步仓库分支保护，不能只在文档里宣称门禁存在
 - 改了用户可感知行为的 PR 必须同步手册页与更新日志碎片（§12.5、§12.8），PR 模板里有勾选项
 - **`.github/workflows/` 文件（CI/CD pipeline）属于基础设施，不在普通功能开发范围内。** CODEOWNERS 对该目录配置了独立规则，任何改动必须由仓库 owner（`@kevin-wang-2`）审批，不得作为日常 feature PR 的一部分附带修改。
 
@@ -703,10 +705,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
 ```bash
 npm test                             # 跑全部测试（vitest run，约 5 分钟）
-npm test -- tests/perm               # 只跑一个域（推送前仍要跑全量，见 §11.5 ⑤）
+npm test -- tests/perm               # 只跑一个直接受影响域
 npm test -- --reporter=verbose       # 显示每条测试名称
 TEST_SEED=1234567890 npm test        # 用固定 seed 复现 CI 失败
 ```
+
+**推送前采用影响面验证，不把全量 CI 搬到本地 hook。** 每次至少跑本次新增 / 修改的回归用例与直接受影响域；修 bug 时先验证目标用例能在修复前准确变红、修复后变绿。动 schema / migration、权限模型、`tests/_support` / Vitest 配置、跨域公共模块，或无法清楚说明影响范围时，本地再跑全量 `npm test`。PR CI 始终跑全量测试，作为合并门禁；Git hook 只可作个人便利工具，不是团队真相。
+
+production build 不列为每次本地 push 的默认动作：`next build` 会覆盖 `.next/` 的 dev 缓存，且三个运行入口共享 `lib/` / `vendor/`，按路径做“部分 build”容易漏依赖。PR CI 并行完整构建 Next standalone、agent-runner、heavy-worker；涉及客户端 import 边界时，本地仍按 §13.3 起 dev 请求 `/login` 做针对性验证。
 
 ### 11.2 目录结构
 
@@ -837,7 +843,7 @@ const res = await listCueListsHandler(req(`/api/production/${prodId}/cuelists`, 
 
 #### ⑤ 静态棘轮跨域读原文
 
-不少棘轮按路径 `readFileSync` 读源码原文断言接线（`tests/wiki/wiki-node-id-guard.test.ts` 读 `app-shell/route.ts`、`tests/agent/ai-target-context.test.tsx` 读 `AppShell.tsx`、activation-scope-coverage、tool-catalog 同源……）。**拆分 / 搬移源文件前先 `grep -rn "readFileSync(" tests/` 找出读它的棘轮**，改指新文件并追加「原文件必须从新位置接线」的断言；推送前跑**全量** `npm test`，只跑改动所在域会假绿（PR #488 事故）。
+不少棘轮按路径 `readFileSync` 读源码原文断言接线（`tests/wiki/wiki-node-id-guard.test.ts` 读 `app-shell/route.ts`、`tests/agent/ai-target-context.test.tsx` 读 `AppShell.tsx`、activation-scope-coverage、tool-catalog 同源……）。**拆分 / 搬移源文件前先 `grep -rn "readFileSync(" tests/` 找出读它的棘轮**，改指新文件并追加「原文件必须从新位置接线」的断言；这类跨域影响说不清的改动推送前跑全量 `npm test`，只跑改动所在域会假绿（PR #488 事故）。
 
 ### 11.6 覆盖范围约定
 
@@ -980,7 +986,7 @@ content/changelog/
 |---|---|---|
 | 功能 PR | 作者 | 复制 `_TEMPLATE.md` 到 `unreleased/<PR号>-<两三个词>.md`。没写又没打豁免标签，`pr-automation` 会留一条提醒评论（软提醒不红；补上自动删） |
 | 发版 | 打 tag 的人 | `npm run changelog:release -- <tag>`：建 `<tag>/_index.md`、`git mv` 碎片进去。**然后人来编辑**：重排、合并、删太细的、补 summary。commit 后再 `git tag` |
-| tag 部署 | CD | `deploy.yml` 闸：`content/changelog/<tag>/_index.md` 不存在、或 `unreleased/` 还有条目 → 红。与 schema 指纹同一个逻辑：不许发一个没交代的版本 |
+| tag 部署 | CD | `deploy.yml` 先检查 changelog，再在 tag 的精确 SHA 上跑 typecheck、lint、schema / migration、全量测试与直跑脚本；全部通过才进入 build 和生产部署。任一项失败都不接触生产环境 |
 
 dev 环境（main 自动发）上 `unreleased/` 有条目时页面顶部多一段「即将发布」，测试同学用它知道 dev 上有什么新东西；prod 上发版已卷走，不显示。纯内部版本用 `--allow-empty`，页面显示「这一版没有你能感知到的改动」。
 

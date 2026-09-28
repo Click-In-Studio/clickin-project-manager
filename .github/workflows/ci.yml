@@ -27,6 +27,36 @@ jobs:
       - name: Lint
         run: npm run lint
 
+  # tsc / Vitest 都不会构建客户端 bundle；生产构建单独并行跑，不把本地开发者的
+  # 每次 push 卡在 build 上。三个运行入口共享 lib/ 与 vendor/，统一构建，避免按
+  # 路径猜影响面后漏掉跨入口依赖。
+  production-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (standalone)
+        run: npm run build
+        env:
+          SKIP_ENV_VALIDATION: '1'
+
+      - name: Bundle agent-runner
+        run: npm run build:runner
+
+      - name: Bundle heavy-worker
+        run: npm run build:worker
+
   unit-test:
     runs-on: ubuntu-latest
     env:

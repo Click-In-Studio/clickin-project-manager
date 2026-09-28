@@ -64,7 +64,7 @@
 
 - `lib/` `components/` `tests/` 同一套域名；新文件进域目录，`lib/` 根白名单、`components/` 根不放文件；域下最多一层组件族目录；不加 barrel `index.ts`。
 - 行数棘轮撞线：如实上调记账值 + 注释说明；**不压行、不拆注释、不顺手删无关死代码凑数**。
-- 搬 / 拆源文件前 `grep -rn "readFileSync(" tests/` 找静态棘轮；推送前跑**全量** `npm test`。
+- 搬 / 拆源文件前 `grep -rn "readFileSync(" tests/` 找静态棘轮。推送前至少跑本次新增 / 修改的回归用例与直接受影响域；动 schema / migration、权限模型、测试基建、跨域公共模块，或影响面说不清时才本地跑全量 `npm test`；PR CI 对所有改动跑全量（§11.1）。
 - 新查询函数写进 `lib/<域>/*-db.ts`；`lib/db.ts` 总仓已拆完删除（#486），不得重建。
 
 ## 6. 测试（§11）
@@ -88,6 +88,7 @@
 - 叠 PR：前一个合并后**删分支**，否则下一层合进分支不进 main。
 - tag 三种形态：里程碑 `v<M>.<m>.<p>`、日常 `-yymmdd`、hotfix `<被修 tag>-hot<n>`；日期版排在同号里程碑**之后**（§4「版本号」）。
 - hotfix 从被修的 tag 切分支，不从 main；先 commit `content/changelog/<tag>/`（只含本次修复），再在那个 commit 上打 `<被修 tag>-hot<n>` 发 prod——反了 CD 直接红。
+- tag CD 先在 tag 的精确 SHA 上跑 typecheck、lint、schema / migration、全量测试与直跑脚本，全部通过后才允许 build、SSH、迁移与激活生产；本地 hook 不算发布门禁。验证失败且 deploy 从未开始的 tag 可显式删除后在修正 commit 重建；deploy 一旦开始，tag 不得移动，修复走新 hotfix tag（§4）。
 - 已定位的 bug 直接 `gh issue create`（现象 / 根因 / 要做 / 定级）；孤儿组件、半成品、feature 方向先问。
 - 报风险前先查可达性（后端门 → 前端调用点 → 组件是否被渲染 → setState 是否被调用过）。
 

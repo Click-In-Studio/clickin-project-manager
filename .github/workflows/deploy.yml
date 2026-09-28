@@ -24,7 +24,114 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # tag 是生产发布指令：先在 tag 指向的精确 SHA 上重跑完整门禁。这个 job 不持有
+  # 部署 secrets，也不接触服务器；任一步失败，deploy job 都不会开始。
+  tag-validation:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: script_editor_test
+      PGUSER: script_editor
+      PGPASSWORD: testpassword
+
+    services:
+      postgres:
+        image: pgvector/pgvector:0.6.0-pg16
+        env:
+          POSTGRES_USER: script_editor
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: script_editor_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4.2.2
+
+      - name: Check changelog for release
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [ ! -f "content/changelog/$TAG/_index.md" ]; then
+            echo "::error::没有 content/changelog/$TAG/_index.md——先 npm run changelog:release -- $TAG，编辑后 commit，再打 tag（#569）"
+            exit 1
+          fi
+          LEFT=$(find content/changelog/unreleased -maxdepth 1 -type f -name '*.md' ! -name '_*' | wc -l | tr -d ' ')
+          if [ "$LEFT" != "0" ]; then
+            echo "::error::content/changelog/unreleased/ 还有 $LEFT 条没卷进 $TAG——这个 tag 会把它们一起发出去，请先 npm run changelog:release"
+            find content/changelog/unreleased -maxdepth 1 -type f -name '*.md' ! -name '_*' -print
+            exit 1
+          fi
+          COUNT=$(find "content/changelog/$TAG" -maxdepth 1 -type f -name '*.md' ! -name '_*' | wc -l | tr -d ' ')
+          echo "changelog $TAG 就绪：$COUNT 条"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Apply migrations
+        run: npm run db -- up
+
+      - name: Schema consistency check
+        run: npm run db:check
+
+      - name: App role ACL invariant
+        run: |
+          psql -v ON_ERROR_STOP=1 -c "CREATE ROLE ci_app_role NOLOGIN"
+          psql -v ON_ERROR_STOP=1 -v owner_role=script_editor -v app_role=ci_app_role -f db/app-role-acl.sql
+          psql -v ON_ERROR_STOP=1 -c "CREATE TABLE acl_default_privilege_probe (id text PRIMARY KEY)"
+          psql -v ON_ERROR_STOP=1 -v owner_role=script_editor -v app_role=ci_app_role -f db/check-app-role-acl.sql
+          psql -v ON_ERROR_STOP=1 -c "REVOKE SELECT ON TABLE acl_default_privilege_probe FROM ci_app_role"
+          if psql -v ON_ERROR_STOP=1 -v owner_role=script_editor -v app_role=ci_app_role -f db/check-app-role-acl.sql; then
+            echo "::error::ACL 硬闸没有拦住缺失的 SELECT 权限"
+            exit 1
+          fi
+          psql -v ON_ERROR_STOP=1 -v owner_role=script_editor -v app_role=ci_app_role -f db/app-role-acl.sql
+          psql -v ON_ERROR_STOP=1 -v owner_role=script_editor -v app_role=ci_app_role -f db/check-app-role-acl.sql
+          psql -v ON_ERROR_STOP=1 -c "DROP TABLE acl_default_privilege_probe"
+
+      - name: Write test .env.local
+        run: |
+          cat > .env.local <<'EOF'
+          PGHOST=localhost
+          PGPORT=5432
+          PGDATABASE=script_editor_test
+          PGUSER=script_editor
+          PGPASSWORD=testpassword
+          EOF
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run marker / selection scripts
+        run: |
+          npm run test:markers
+          npm run test:markers:db
+          npm run test:selection
+
   deploy:
+    needs: tag-validation
+    # main 的 tag-validation 按设计 skipped；tag 则只有全量验证成功才允许部署。
+    if: >-
+      always() &&
+      (github.ref_type != 'tag' || needs.tag-validation.result == 'success')
     runs-on: ubuntu-latest
     env:
       TARGET: ${{ github.ref_type == 'tag' && 'prod' || 'dev' }}
@@ -35,27 +142,6 @@ jobs:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4.2.2
-
-      # ── 1b. 更新日志闸（#569）───────────────────────────────────────────────
-      # tag 发布 = 给用户一个版本，必须有对应的 content/changelog/<tag>/_index.md，
-      # 且 unreleased/ 已清空（这个 commit 里合并的改动都得卷进这一版）。
-      # 与「schema 指纹不等即红」同一个逻辑：不许发一个没交代的版本。
-      # 流程：npm run changelog:release -- <tag> → 编辑 → commit → git tag <tag>。
-      - name: Check changelog for release
-        if: github.ref_type == 'tag'
-        run: |
-          TAG="${{ github.ref_name }}"
-          if [ ! -f "content/changelog/$TAG/_index.md" ]; then
-            echo "::error::没有 content/changelog/$TAG/_index.md——先 npm run changelog:release -- $TAG，编辑后 commit，再打 tag（#569）"
-            exit 1
-          fi
-          LEFT=$(ls content/changelog/unreleased/*.md 2>/dev/null | grep -v '/_' | wc -l | tr -d ' ')
-          if [ "$LEFT" != "0" ]; then
-            echo "::error::content/changelog/unreleased/ 还有 $LEFT 条没卷进 $TAG——这个 tag 会把它们一起发出去，请先 npm run changelog:release"
-            ls content/changelog/unreleased/*.md
-            exit 1
-          fi
-          echo "changelog $TAG 就绪：$(ls content/changelog/$TAG/*.md | grep -vc '/_') 条"
 
       # ── 2. Setup Node ────────────────────────────────────────────────────────
       - name: Setup Node.js
