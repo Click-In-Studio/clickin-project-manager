@@ -80,6 +80,8 @@ export interface EnqueueInput {
   runAfter?: Date;
 }
 
+const inlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 async function kickInlineJob(row: Raw): Promise<void> {
   const delay = Math.max(0, new Date(row.run_after).getTime() - Date.now());
   const run = async () => {
@@ -90,11 +92,16 @@ async function kickInlineJob(row: Raw): Promise<void> {
     await run();
     return;
   }
+  if (inlineTimers.has(row.id)) return;
   // 本地 dev / 测试没有 heavy-worker：用进程内 timer 保持延迟语义。生产由持久化
-  // job 行 + heavy-worker 消费；unref 避免这个开发兜底阻止进程退出。
-  const timer = setTimeout(() => void run().catch((err) => {
-    console.error(`[job] inline delayed job ${row.id} failed:`, err);
-  }), delay);
+  // job 行 + heavy-worker 消费；同一行只挂一个 timer，unref 避免开发兜底阻止进程退出。
+  const timer = setTimeout(() => {
+    inlineTimers.delete(row.id);
+    void run().catch((err) => {
+      console.error(`[job] inline delayed job ${row.id} failed:`, err);
+    });
+  }, delay);
+  inlineTimers.set(row.id, timer);
   timer.unref();
 }
 

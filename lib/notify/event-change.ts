@@ -9,7 +9,7 @@ import {
   getOptedOutUsers, resolveDeliveryPolicy, shouldDeliverExternal,
 } from "./notification-prefs";
 import {
-  expireNotificationsByEntity, invalidateCallTimeConfirmations,
+  prepareEventChangeCallTimes,
   type NotificationAction,
 } from "./inbox-db";
 import { notifyUser } from "./notify";
@@ -136,17 +136,7 @@ export async function dispatchEventChangeNotification(
   );
   if (!recipients.rows.length) return { sent: 0 };
 
-  const callRows = recipients.rows.filter((row) => row.call_time_id);
-  if (cancelled) {
-    await Promise.all(callRows.map((row) =>
-      expireNotificationsByEntity("call_time", row.call_time_id!, row.user_id).catch(() => {}),
-    ));
-  } else {
-    await invalidateCallTimeConfirmations(payload.eventId);
-    await Promise.all(callRows.map((row) =>
-      expireNotificationsByEntity("call_time", row.call_time_id!, row.user_id).catch(() => {}),
-    ));
-  }
+  await prepareEventChangeCallTimes(payload.eventId, !cancelled);
 
   const userIds = recipients.rows.map((row) => row.user_id);
   const [targets, optedOut] = await Promise.all([

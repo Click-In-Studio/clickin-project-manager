@@ -175,6 +175,31 @@ describe("已发布活动变更通知（#547）", () => {
     expect(calls.rows.every((row) => row.confirmed_at === null)).toBe(true);
   });
 
+  it("改期时旧 Call Time 动作统一失效，再生成一份可操作的新确认", async () => {
+    const { eventId } = await makeEvent("published");
+    await dispatchEventPublishNotifications(eventId);
+    await getPool().query(
+      `UPDATE production_event SET location = '二号排练厅' WHERE id = $1`,
+      [eventId],
+    );
+    await dispatchEventChangeNotification({ eventId, before: baseline() });
+
+    const actionRows = await getPool().query<{ title: string; expired_at: Date | null }>(
+      `SELECT title, expired_at FROM user_notification
+       WHERE action_required = true
+         AND entity_id IN (SELECT id FROM event_call_time WHERE event_id = $1)`,
+      [eventId],
+    );
+    expect(actionRows.rows.filter((row) => row.title.includes("已发布")))
+      .toHaveLength(2);
+    expect(actionRows.rows.filter((row) => row.title.includes("已发布"))
+      .every((row) => row.expired_at !== null)).toBe(true);
+    expect(actionRows.rows.filter((row) => row.title.includes("安排有变")))
+      .toHaveLength(2);
+    expect(actionRows.rows.filter((row) => row.title.includes("安排有变"))
+      .every((row) => row.expired_at === null)).toBe(true);
+  });
+
   it.each(["completed", "draft"] as const)("当前状态为 %s 时零通知", async (status) => {
     const { eventId } = await makeEvent(status);
     const result = await dispatchEventChangeNotification({ eventId, before: baseline() });
