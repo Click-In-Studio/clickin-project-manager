@@ -37,7 +37,7 @@ import { updateEstimatedPageMap, type EstimatedPageMapCache } from "@/lib/script
 import { computeLyricFromTags, sceneDetailDeleteBlockedMessage, markerBlockDramaturgyDeleteBlockedKind, markerDetailFields, markerExpectedDuration, toSceneDetail, syncSceneDetailsWithScenes, sameSceneRows, type SceneMetaFields, type MarkerDetailDeleteBlockedKind, type NonEmptyDramaturgyMarker, type MarkerDetailField } from "@/lib/script/script-scene-details";
 import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script/script-selection";
 import { DEFAULT_SCRIPT_CONFIG, type Block, type BlockType, type Character, type Scene, type ScriptState, type ScriptConfig } from "@/lib/script/script-types";
-import { manifestEntryToSkeleton, type ScriptWindowBootstrap } from "@/lib/script/script-window-types";
+import { manifestEntryToSkeleton, type ScriptWindowBootstrap, type ScriptWindowResponse } from "@/lib/script/script-window-types";
 import BlockGap from "./script-editor/BlockGap";
 import CharacterPanel from "./script-editor/CharacterPanel";
 import CommentsPanel, { preloadCommentsPanel } from "./script-editor/CommentsPanelLazy";
@@ -76,6 +76,7 @@ import { useSceneDetailDialog } from "./script-editor/use-scene-detail-dialog";
 import { useMobileBlockMenus } from "./script-editor/use-mobile-block-menus";
 import { useDisplaySettings } from "./script-editor/use-display-settings";
 import { useScriptToolbarFold } from "./script-editor/use-script-toolbar-fold";
+import { useScriptWindowPrefetch, type ScriptWindowRequest } from "./script-editor/use-script-window-prefetch";
 import { useWorkspaceWidth } from "./script-editor/use-workspace-width";
 import { insertLineBreakAtTextOffset, setCursorAtStart, setCursorAtEnd, setCursorAtTextOffset, getEditableElementForRange, isTextEditingTarget, isFormEditingTarget, getTextLength } from "./script-editor/dom-cursor";
 import { getScrollEl, getScrollMetrics, scrollContainerBy, scrollElementIntoView, estimateVirtualScrollAnchor, measureScriptTocNumberWidths, clearTimeoutMap, markProgrammaticScroll } from "./script-editor/dom-scroll";
@@ -597,7 +598,7 @@ export default function ScriptEditor({
     }).filter((range): range is MarkerOwnershipRange => range !== null));
   }, [markPageMapDirty]);
   useEffect(() => () => {
-    windowRequestRef.current?.abort();
+    windowRequestRef.current?.controller.abort();
     if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
     if (windowRangeFrameRef.current !== null) cancelAnimationFrame(windowRangeFrameRef.current);
     pendingWindowRangeRef.current = null;
@@ -790,7 +791,7 @@ export default function ScriptEditor({
   const [spacerH, setSpacerH] = useState({ top: 0, bot: 0 });
   const pendingVirtualScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
   const pendingVirtualWindowRefreshRef = useRef(false);
-  const windowRequestRef = useRef<AbortController | null>(null);
+  const windowRequestRef = useRef<ScriptWindowRequest | null>(null);
   const windowRequestGenerationRef = useRef(0);
   const [windowLoadSlow, setWindowLoadSlow] = useState(false);
   const [windowLoadFailed, setWindowLoadFailed] = useState(false);
@@ -1568,6 +1569,11 @@ export default function ScriptEditor({
     pushPatchRef.current = async (curr: ScriptState) => {
       if (!canEdit || loadState !== "ready" || syncedStateRef.current === null) return;
       if (isSyncingRef.current) { deferredSyncRef.current = true; return; }
+      // 正文预取永远给写入让路；可见缺块属于用户正在等待的前台请求，不在这里取消。
+      if (windowRequestRef.current?.priority === "background") {
+        windowRequestRef.current.controller.abort();
+        windowRequestRef.current = null;
+      }
       isSyncingRef.current = true;
       try {
         const seq = ++clientSeqRef.current;
@@ -1805,6 +1811,53 @@ export default function ScriptEditor({
     return () => { cancelled = true; };
   }, [effectiveScriptId, productionId, activeVersionId, initialWindow, applyWindowRange, markOwnershipDirty, syncSpacerHeights]);
 
+  const mergeScriptWindow = useCallback((body: ScriptWindowResponse): boolean => {
+    const current = blocksRef.current;
+    const baseline = syncedStateRef.current;
+    if (!baseline) return false;
+    const nextBlocks = [...current];
+    const nextBaselineBlocks = [...baseline.blocks];
+    for (let offset = 0; offset < body.window.blocks.length; offset++) {
+      const index = body.window.start + offset;
+      const serverBlock = body.window.blocks[offset];
+      if (nextBlocks[index]?.id !== serverBlock.id || nextBaselineBlocks[index]?.id !== serverBlock.id) return false;
+      const locallyDirty = !sameBlocks([nextBlocks[index]], [nextBaselineBlocks[index]]);
+      nextBaselineBlocks[index] = serverBlock;
+      if (!locallyDirty) nextBlocks[index] = serverBlock;
+    }
+
+    const nextTagMap = new Map(blockTagMapRef.current);
+    const nextSyncedTagMap = new Map(syncedBlockTagMapRef.current);
+    const tagsFromServer = tagsToMap(body.window.tags);
+    for (const block of body.window.blocks) {
+      const localTags = nextTagMap.get(block.id) ?? [];
+      const baselineTags = nextSyncedTagMap.get(block.id) ?? [];
+      const serverTags = tagsFromServer.get(block.id) ?? [];
+      if (JSON.stringify(localTags) === JSON.stringify(baselineTags)) {
+        if (serverTags.length > 0) nextTagMap.set(block.id, serverTags);
+        else nextTagMap.delete(block.id);
+      }
+      if (serverTags.length > 0) nextSyncedTagMap.set(block.id, serverTags);
+      else nextSyncedTagMap.delete(block.id);
+    }
+
+    const currentRange = windowRangeRef.current;
+    if (body.window.start < currentRange.end && body.window.start + body.window.blocks.length > currentRange.start) {
+      requestVirtualWindowRefresh();
+    }
+    blocksRef.current = nextBlocks;
+    syncedStateRef.current = { ...baseline, blocks: nextBaselineBlocks };
+    blockTagMapRef.current = nextTagMap;
+    syncedBlockTagMapRef.current = nextSyncedTagMap;
+    const nextLoaded = new Set(loadedBlockIdsRef.current);
+    body.window.blocks.forEach((block) => nextLoaded.add(block.id));
+    loadedBlockIdsRef.current = nextLoaded;
+    setBlocks(nextBlocks);
+    setBlockTagMap(nextTagMap);
+    setLoadedBlockIds(nextLoaded);
+    return true;
+  }, [requestVirtualWindowRefresh]);
+
   // 分窗正文：当前视口优先，前后各留一段缓冲。请求切换时取消旧网络工作；即使浏览器
   // 来不及真正取消，generation 也保证旧响应不能夺回视口或覆盖新结构。
   useEffect(() => {
@@ -1828,9 +1881,9 @@ export default function ScriptEditor({
       return;
     }
 
-    windowRequestRef.current?.abort();
+    windowRequestRef.current?.controller.abort();
     const controller = new AbortController();
-    windowRequestRef.current = controller;
+    windowRequestRef.current = { controller, priority: "foreground" };
     const generation = ++windowRequestGenerationRef.current;
     setWindowLoadSlow(false);
     setWindowLoadFailed(false);
@@ -1856,6 +1909,7 @@ export default function ScriptEditor({
           activeVersionId,
           windowRangeRef.current.start,
           INITIAL_WINDOW_SIZE,
+          controller.signal,
         );
         if (!controller.signal.aborted && generation === windowRequestGenerationRef.current && bootstrap) {
           applyWindowBootstrapRef.current(bootstrap);
@@ -1870,61 +1924,21 @@ export default function ScriptEditor({
       }
       if (body.orderRevision !== orderRevisionRef.current) return;
 
-      const current = blocksRef.current;
-      const baseline = syncedStateRef.current;
-      if (!baseline) return;
-      const nextBlocks = [...current];
-      const nextBaselineBlocks = [...baseline.blocks];
-      for (let offset = 0; offset < body.window.blocks.length; offset++) {
-        const index = body.window.start + offset;
-        const serverBlock = body.window.blocks[offset];
-        if (nextBlocks[index]?.id !== serverBlock.id || nextBaselineBlocks[index]?.id !== serverBlock.id) {
-          const bootstrap = await fetchScriptWindowBootstrap(
-            effectiveScriptId,
-            activeVersionId,
-            windowRangeRef.current.start,
-            INITIAL_WINDOW_SIZE,
-          );
-          if (!controller.signal.aborted && generation === windowRequestGenerationRef.current && bootstrap) {
-            applyWindowBootstrapRef.current(bootstrap);
-          } else if (!controller.signal.aborted && visibleMissing) {
-            setWindowLoadFailed(true);
-          }
-          return;
+      if (!mergeScriptWindow(body)) {
+        const bootstrap = await fetchScriptWindowBootstrap(
+          effectiveScriptId,
+          activeVersionId,
+          windowRangeRef.current.start,
+          INITIAL_WINDOW_SIZE,
+          controller.signal,
+        );
+        if (!controller.signal.aborted && generation === windowRequestGenerationRef.current && bootstrap) {
+          applyWindowBootstrapRef.current(bootstrap);
+        } else if (!controller.signal.aborted && visibleMissing) {
+          setWindowLoadFailed(true);
         }
-        const locallyDirty = !sameBlocks([nextBlocks[index]], [nextBaselineBlocks[index]]);
-        nextBaselineBlocks[index] = serverBlock;
-        if (!locallyDirty) nextBlocks[index] = serverBlock;
+        return;
       }
-
-      const nextTagMap = new Map(blockTagMapRef.current);
-      const nextSyncedTagMap = new Map(syncedBlockTagMapRef.current);
-      const tagsFromServer = tagsToMap(body.window.tags);
-      for (const block of body.window.blocks) {
-        const localTags = nextTagMap.get(block.id) ?? [];
-        const baselineTags = nextSyncedTagMap.get(block.id) ?? [];
-        const serverTags = tagsFromServer.get(block.id) ?? [];
-        if (JSON.stringify(localTags) === JSON.stringify(baselineTags)) {
-          if (serverTags.length > 0) nextTagMap.set(block.id, serverTags);
-          else nextTagMap.delete(block.id);
-        }
-        if (serverTags.length > 0) nextSyncedTagMap.set(block.id, serverTags);
-        else nextSyncedTagMap.delete(block.id);
-      }
-
-      if (body.window.start < windowRange.end && body.window.start + body.window.blocks.length > windowRange.start) {
-        requestVirtualWindowRefresh();
-      }
-      blocksRef.current = nextBlocks;
-      syncedStateRef.current = { ...baseline, blocks: nextBaselineBlocks };
-      blockTagMapRef.current = nextTagMap;
-      syncedBlockTagMapRef.current = nextSyncedTagMap;
-      const nextLoaded = new Set(loadedBlockIdsRef.current);
-      body.window.blocks.forEach((block) => nextLoaded.add(block.id));
-      loadedBlockIdsRef.current = nextLoaded;
-      setBlocks(nextBlocks);
-      setBlockTagMap(nextTagMap);
-      setLoadedBlockIds(nextLoaded);
       setWindowLoadSlow(false);
       setWindowLoadFailed(false);
     }).catch((error: unknown) => {
@@ -1935,13 +1949,34 @@ export default function ScriptEditor({
       }
     }).finally(() => {
       if (slowTimer !== null) window.clearTimeout(slowTimer);
+      if (windowRequestRef.current?.controller === controller) windowRequestRef.current = null;
     });
 
     return () => {
       controller.abort();
       if (slowTimer !== null) window.clearTimeout(slowTimer);
     };
-  }, [activeVersionId, effectiveScriptId, explicitLoadTargetIndex, initialWindow, loadState, requestVirtualWindowRefresh, windowRange, windowRetryToken]);
+  }, [activeVersionId, effectiveScriptId, explicitLoadTargetIndex, initialWindow, loadState, mergeScriptWindow, windowRange, windowRetryToken]);
+
+  // 用户停留后从当前视窗向外补齐；与前台缺块共用请求槽，滚动、跳转和保存可随时插队。
+  useScriptWindowPrefetch({
+    enabled: Boolean(initialWindow) && loadState === "ready",
+    scriptId: effectiveScriptId,
+    versionId: activeVersionId,
+    syncWaitingForNetwork,
+    initialWindowSize: INITIAL_WINDOW_SIZE,
+    blocksRef,
+    viewportRange: windowRange,
+    windowRangeRef,
+    manifestBlockIdsRef,
+    loadedBlockIdsRef,
+    requestRef: windowRequestRef,
+    requestGenerationRef: windowRequestGenerationRef,
+    orderRevisionRef,
+    isSyncingRef,
+    mergeWindow: mergeScriptWindow,
+    applyBootstrap: applyWindowBootstrap,
+  });
 
   useEffect(() => {
     if (!productionId || !activeVersionId || loadState !== "ready") return;
