@@ -276,13 +276,13 @@ npm run changelog:release -- v0.1.2-260924     # 卷 unreleased/，编辑后 com
 git tag v0.1.2-260924 && git push origin v0.1.2-260924   # 从 main 上已验证的 commit 打 tag
 ```
 
-hotfix：从被修的 tag 拉分支（**不从 main**——main 领先 tag 一大截），修复后在该 commit 打 `<被修 tag>-hot<n>` 发 prod，再补 `content/changelog/<新 tag>/` 并 PR 回 main（migration 按版本号逐支判断 pending，hotfix 分支上时间戳更早的也能正常上）。两台机 nginx 站点块都要有 `proxy_set_header X-Forwarded-Proto $scheme;`（应用侧对非回环 host 一律按 https，不信这个头，#591）。
+hotfix：从被修的 tag 拉分支（**不从 main**——main 领先 tag 一大截），修复并先补 `content/changelog/<新 tag>/`，在该 commit 打 `<被修 tag>-hot<n>` 发 prod，再 PR 回 main（migration 按版本号逐支判断 pending，hotfix 分支上时间戳更早的也能正常上）。两台机 nginx 站点块都要有 `proxy_set_header X-Forwarded-Proto $scheme;`（应用侧对非回环 host 一律按 https，不信这个头，#591）。
 
 dev 与 prod 互不阻塞、同一环境串行（workflow `concurrency`）。
 
 ## 日常发版
 
-push 到 `main`（dev）或 tag（prod）后 GitHub Actions 自动完成：
+push 到 `main`（dev）或 tag（prod）后 GitHub Actions 自动完成。tag 发布先在 tag 指向的精确 SHA 上运行 changelog、typecheck、lint、schema / migration、全量测试与直跑脚本门禁；全部通过后才进入以下步骤，失败不会读取生产 secrets、SSH、上传或迁移：
 
 1. `npm ci` + `npm run build`（standalone 模式）
 2. 打包产物，上传到服务器 `releases/<run>-<sha>/`
@@ -292,6 +292,8 @@ push 到 `main`（dev）或 tag（prod）后 GitHub Actions 自动完成：
 6. 清理旧 releases（保留最新 5 个）
 
 **无需任何手动操作**。
+
+tag validation 失败但 deploy job 从未开始时，可以显式删除本地与远端失败 tag，修正后在新 commit 上重建同名 tag；deploy 一旦开始，该 tag 就是发布审计记录，不得移动，后续修复必须创建新的 hotfix tag。
 
 ## 回滚
 
