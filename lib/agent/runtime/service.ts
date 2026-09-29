@@ -357,7 +357,7 @@ async function execute(input: ExecuteInput): Promise<void> {
       },
     });
 
-    // 额度门与 run 建立之后、基础模型第一次推理之前自动预检。MMP 的 digest 进入本轮
+    // 额度门与 run 建立之后、基础模型第一次推理之前自动预检。MMP 的 agent context 进入本轮
     // 用户消息并随 transcript 保存；附件 id 与原件仍保留，后续可显式读取。
     if (message !== undefined && input.attachmentIds?.length) {
       message = await withAttachmentPreflight(

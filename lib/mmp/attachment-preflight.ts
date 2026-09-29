@@ -2,7 +2,8 @@
 //
 // MMP 2.0 自己用 purpose + Content-Type 选择唯一能力，并由任务端生成可直接交给
 // base model 的 agent_context。宿主不维护模态枚举、不解释 digest，也不根据任务 id
-// 推断能力；新图片、视频等预检上线后只需出现在 MMP registry 中。
+// 推断能力；PDF、视频等专属预检上线后只需出现在 MMP registry 中。MMP registry
+// 不应让图片 triage 接受 PDF；没有 PDF triage 时，PDF 留给既有结构化阅读或 OCR。
 
 import {
   MmpError,

@@ -26,7 +26,8 @@ const capability = (
 });
 
 const AUDIO_TRIAGE = capability("triage.audio", "triage", ["audio/*"]);
-const IMAGE_TRIAGE = capability("triage.image", "triage", ["image/*", "application/pdf"]);
+const IMAGE_TRIAGE = capability("triage.image", "triage", ["image/*"]);
+const PDF_TRIAGE = capability("triage.pdf", "triage", ["application/pdf"]);
 const OCR = capability("ocr.structured", "ocr", ["image/*", "application/pdf"], "none");
 
 function registry(capabilities: Capability[] = [AUDIO_TRIAGE, IMAGE_TRIAGE, OCR]): CapabilitiesResponse {
@@ -68,7 +69,7 @@ describe("MMP 2.0 自动预检能力发现", () => {
     expect(resolveTriageCapability(available, "audio/mp4")?.id).toBe("triage.audio");
     expect(resolveTriageCapability(available, "video/mp4")).toBeNull();
     expect(resolveTriageCapability(available, "image/webp")?.id).toBe("triage.image");
-    expect(resolveTriageCapability(available, "application/pdf")?.id).toBe("triage.image");
+    expect(resolveTriageCapability(available, "application/pdf")).toBeNull();
     expect(resolveTriageCapability(available, "text/plain")).toBeNull();
   });
 
@@ -90,18 +91,25 @@ describe("MMP 2.0 自动预检能力发现", () => {
     expect(job?.media).toMatchObject({ get: { url: expect.stringContaining("attachments/audio.mp4") }, content_type: "video/mp4" });
   });
 
-  it("图片与 PDF 无需宿主增加映射即可进入图片预检", async () => {
+  it("当前只预检图片，PDF 没有专属 triage 时不误入图片通道", async () => {
     const { client, calls } = fakeClient();
     const results = await preflightAttachments([
       { attachmentId: "i1", mimeType: "image/png", r2Key: "i" },
       { attachmentId: "p1", mimeType: "application/pdf", r2Key: "p" },
     ], { client });
-    expect(Object.values(results).map((result) => result.status === "ok" && result.capabilityId)).toEqual([
-      "triage.image", "triage.image",
-    ]);
+    expect(Object.values(results).map((result) => result.status === "ok" && result.capabilityId)).toEqual(["triage.image"]);
     expect(calls.filter((call) => call.url.endsWith("/jobs")).map((call) => call.body?.type)).toEqual([
-      "triage.image", "triage.image",
+      "triage.image",
     ]);
+  });
+
+  it("未来 MMP 注册 PDF triage 后无需宿主映射即可自动接入", async () => {
+    const { client, calls } = fakeClient([AUDIO_TRIAGE, IMAGE_TRIAGE, PDF_TRIAGE, OCR]);
+    const results = await preflightAttachments([
+      { attachmentId: "p1", mimeType: "application/pdf", r2Key: "p" },
+    ], { client });
+    expect(results.p1).toMatchObject({ status: "ok", capabilityId: "triage.pdf" });
+    expect(calls.find((call) => call.url.endsWith("/jobs"))?.body?.type).toBe("triage.pdf");
   });
 
   it("同一条消息共享一次 registry discovery，不匹配的普通附件不注入伪预检", async () => {
