@@ -1,6 +1,7 @@
 ---
 kind: fixed
 title: 删除资产或财务凭证后，原文件会一并清除
+pr: 774
 order: 1
 ---
 
