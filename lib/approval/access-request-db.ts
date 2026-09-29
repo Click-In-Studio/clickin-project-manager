@@ -481,7 +481,13 @@ export type AccessRequestFlowView = {
          */
         remaining: { stage: ApprovalStageName; depth: number; approverIds: string[] }[];
       };
-  viewerActions: { canApprove: boolean; canReject: boolean; canEscalate: boolean };
+  viewerActions: {
+    canApprove: boolean;
+    canReject: boolean;
+    canEscalate: boolean;
+    /** 只有申请人本人能撤回仍在审批中的申请。 */
+    canCancel: boolean;
+  };
 };
 
 /**
@@ -556,14 +562,24 @@ export async function getAccessRequestFlow(
     flow = { mode: "ladder", remaining };
   }
 
-  let viewerActions = { canApprove: false, canReject: false, canEscalate: false };
+  let viewerActions = {
+    canApprove: false,
+    canReject: false,
+    canEscalate: false,
+    canCancel: pending && viewerId === row.subject_id,
+  };
   if (pending) {
     const auth = await authorizeApprovalAction(row, viewerId);
     if (auth.authorized) {
       const canEscalate = snapshot
         ? !(row.current_approver_ids ?? []).includes((await findProductionOwner(row.production_id)) ?? "")
         : nextStage(await buildApprovalLadder(target), currentPositionOf(row)) !== null;
-      viewerActions = { canApprove: auth.canFinalize, canReject: true, canEscalate };
+      viewerActions = {
+        canApprove: auth.canFinalize,
+        canReject: true,
+        canEscalate,
+        canCancel: viewerActions.canCancel,
+      };
     }
   }
 

@@ -55,7 +55,11 @@ beforeEach(() => {
   fetchMock.mockImplementation((url) => {
     if (url.endsWith("/pending-approvals")) return jsonRes({ approvals: pending });
     if (url.endsWith("/access-requests")) return jsonRes({ requests: [] });
-    if (url.endsWith("/flow")) return jsonRes({ error: "nope" }, 404);
+    if (url.endsWith("/flow")) return jsonRes({
+      request: pending[0] ?? request(),
+      flow: { mode: "ladder", remaining: [] },
+      viewerActions: { canApprove: true, canReject: true, canEscalate: true, canCancel: false },
+    });
     throw new Error(`unexpected fetch ${url}`);
   });
   (globalThis as { fetch: unknown }).fetch = fetchMock;
@@ -78,12 +82,13 @@ const postCalls = (suffix: string) =>
   fetchMock.mock.calls.filter(([url, init]) => init?.method === "POST" && url.endsWith(suffix));
 
 /** 挂载 → 切到「待审批」→ 在桌面列表里选中这条申请（列表项带申请人前缀，手机卡片不带）。 */
-async function mountAndSelect() {
+async function mountAndSelect(expectApprove = true) {
   await act(async () => { root.render(<AccessRequestsClient productionId="prod_test" productionName="测试演出" canManageFlows={false} />); });
   await act(async () => { await Promise.resolve(); });
   await act(async () => { buttons().find((b) => b.textContent?.startsWith("待审批"))!.click(); });
   await act(async () => { buttons().find((b) => b.textContent?.includes("李四 · Cue表"))!.click(); });
-  expect(detailButton("批准")).toBeDefined();
+  await act(async () => { await Promise.resolve(); });
+  if (expectApprove) expect(detailButton("批准")).toBeDefined();
 }
 
 /** 让 approve 请求挂起，返回 resolve 句柄。 */
@@ -165,5 +170,31 @@ describe("AccessRequestsClient — 审批动作的在途态与结果反馈（#59
     expect(container.textContent).toContain("网络错误");
     expect(detailButton("拒绝")!.disabled).toBe(false);
     expect(detailButton("拒绝")!.textContent).toBe("拒绝");
+  });
+
+  it("详情动作只认实例接口：列表说可终局、接口只准转交时不显示批准或拒绝", async () => {
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url, init) => {
+      if (url.endsWith("/flow")) return jsonRes({
+        request: request({ canFinalize: true }),
+        flow: { mode: "ladder", remaining: [] },
+        viewerActions: { canApprove: false, canReject: false, canEscalate: true, canCancel: false },
+      });
+      return base(url, init);
+    });
+
+    await mountAndSelect(false);
+    expect(detailButton("批准")).toBeUndefined();
+    expect(detailButton("拒绝")).toBeUndefined();
+    expect(detailButton("向上转交")).toBeDefined();
+  });
+
+  it("手机详情使用独立对话层，并提供可达的返回入口", async () => {
+    await mountAndSelect();
+    const drawer = container.querySelector('[role="dialog"][aria-label="审批详情"]');
+    expect(drawer).not.toBeNull();
+    const back = drawer!.querySelector<HTMLButtonElement>('button[aria-label="返回审批列表"]')!;
+    await act(async () => { back.click(); });
+    expect(container.querySelector('[role="dialog"][aria-label="审批详情"]')).toBeNull();
   });
 });

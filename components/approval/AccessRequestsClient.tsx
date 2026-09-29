@@ -151,9 +151,9 @@ function dotColorOf(state: TimelineNodeState): string {
   return "var(--success, #4b7f65)";
 }
 
-function ApprovalFlow({ req, compact = false }: {
+function ApprovalFlow({ req, view }: {
   req: ApprovalRequest;
-  compact?: boolean;
+  view?: AccessRequestFlowView | null;
 }) {
   const isPending = req.status === "pending_supervisor" || req.status === "pending_resource";
   // 时间线的组装逻辑（含超时、撤回、被顶掉、存量无链等降级分支）在 lib/approval/approval-timeline.ts，
@@ -164,9 +164,9 @@ function ApprovalFlow({ req, compact = false }: {
   const personOf = (userId: string) => req.people[userId];
 
   return (
-    <section style={{ borderTop: "1px solid var(--line)", paddingTop: compact ? 14 : 18 }}>
+    <section style={{ borderTop: "1px solid var(--line)", paddingTop: 18 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-        <h3 style={{ margin: 0, fontSize: 12, fontWeight: 700, color: "var(--ink)" }}>审批流程</h3>
+        <h3 style={{ margin: 0, fontSize: 12, fontWeight: 700, color: "var(--ink)" }}>审批记录</h3>
         <span style={{ fontSize: 9, fontWeight: 700, color: "var(--stage)", background: "#f2e4d9", borderRadius: 999, padding: "3px 8px" }}>
           审批
         </span>
@@ -183,9 +183,9 @@ function ApprovalFlow({ req, compact = false }: {
                   width: 9, height: 9, marginTop: 4, borderRadius: "50%", flexShrink: 0,
                   background: dotColor, boxShadow: node.state === "current" ? "0 0 0 4px #f2e4d9" : "none",
                 }} />
-                {!isLast && <span style={{ width: 1, flex: 1, minHeight: compact ? 42 : 50, background: "var(--line)", marginTop: 5 }} />}
+                {!isLast && <span style={{ width: 1, flex: 1, minHeight: 50, background: "var(--line)", marginTop: 5 }} />}
               </div>
-              <div style={{ paddingBottom: isLast ? 0 : compact ? 13 : 17, minWidth: 0 }}>
+              <div style={{ paddingBottom: isLast ? 0 : 17, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", letterSpacing: ".08em" }}>{node.kind}</span>
                   <b style={{ fontSize: 12, color: "var(--ink)" }}>{node.title}</b>
@@ -237,7 +237,7 @@ function ApprovalFlow({ req, compact = false }: {
         })}
       </div>
 
-      {isPending && <FlowForecast req={req} compact={compact} />}
+      {isPending && <FlowForecast req={req} view={view} />}
     </section>
   );
 }
@@ -256,24 +256,8 @@ const FLOW_NODE_STATE_LABELS: Record<string, string> = {
  * **真实**剩余阶梯——空级已剔除、敏感项已分流。此前用 STAGE_ORDER 裸切片
  * 会列出引擎永远不会走的节点（#405 review），实例接口就是那条的正解数据源。
  */
-function FlowForecast({ req, compact = false }: { req: ApprovalRequest; compact?: boolean }) {
+function FlowForecast({ req, view }: { req: ApprovalRequest; view?: AccessRequestFlowView | null }) {
   const snapshot = req.flowSnapshot;
-  const [view, setView] = useState<AccessRequestFlowView | null>(null);
-  const wantFetch = !compact;
-
-  useEffect(() => {
-    if (!wantFetch) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`/api/production/${req.productionId}/access-requests/${req.id}/flow`);
-        if (!res.ok) return;
-        const data = (await res.json()) as AccessRequestFlowView;
-        if (!cancelled) setView(data);
-      } catch { /* 预测取不到就退回定性说明，不打扰主流程 */ }
-    })();
-    return () => { cancelled = true; };
-  }, [req.id, req.productionId, wantFetch]);
 
   const nameOf = (userId: string) =>
     view?.request.people[userId]?.name ?? req.people[userId]?.name ?? "成员";
@@ -311,7 +295,7 @@ function FlowForecast({ req, compact = false }: { req: ApprovalRequest; compact?
   return (
     <div className={styles.approvalRouteForecast}>
       <div>
-        <b>{remaining ? (remaining.length > 0 ? "可能的后续升级路径" : "已在升级链最后一级") : "后续升级路径"}</b>
+        <b>后续升级路径</b>
         <span>动态升级链 · 非强制逐级审批</span>
       </div>
       {remaining && remaining.length > 0 && (
@@ -535,20 +519,18 @@ type Acting = { reqId: string; kind: ActionKind } | null;
  * 外观，只加 disabled 的话深底白字纹丝不动，网络慢时看起来像「点了没反应」。
  * `busy` 是本按钮的动作在途，`disabled` 是同一条申请上任一动作在途（兄弟按钮一起锁）。
  */
-function ActionButton({ label, busy, disabled, primary, small, onClick }: {
+function ActionButton({ label, busy, disabled, primary, onClick }: {
   label: string;
   busy: boolean;
   disabled: boolean;
   primary?: boolean;
-  small?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       style={{
         ...(primary ? PRIMARY_BTN : SECONDARY_BTN),
-        fontSize: small ? 12 : 13,
-        ...(small ? { padding: "7px 12px" } : {}),
+        fontSize: 13,
         ...(disabled ? { opacity: 0.55, cursor: busy ? "wait" : "not-allowed" } : {}),
       }}
       disabled={disabled}
@@ -562,9 +544,23 @@ function ActionButton({ label, busy, disabled, primary, small, onClick }: {
 
 // ─── RequestDetail ────────────────────────────────────────────────────────────
 
-function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel, acting }: {
+function RequestDetail({
+  req,
+  view,
+  loading,
+  loadError,
+  actionError,
+  onApprove,
+  onReject,
+  onEscalate,
+  onCancel,
+  acting,
+}: {
   req: ApprovalRequest;
-  canAct?: boolean;
+  view: AccessRequestFlowView | null;
+  loading: boolean;
+  loadError: string | null;
+  actionError: string | null;
   onApprove?: () => void;
   onReject?: () => void;
   onEscalate?: () => void;
@@ -572,20 +568,35 @@ function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel,
   /** 本条申请上在途的动作；null = 没有请求在途。 */
   acting: ActionKind | null;
 }) {
-  const label = resourceLabel(req);
-  const isPending = req.status === "pending_supervisor" || req.status === "pending_resource";
-  // #140：canFinalize === false = 我是直属上级但本人没有这个权限，只能向上转交
-  const forwardOnly = canAct && req.canFinalize === false;
-  const ttlLabel = req.requestedExpiresAt
-    ? `至 ${fmtDate(req.requestedExpiresAt)}`
-    : displayTtlLabel(req.ttlDurationLabel);
+  // 详情接口回的是同一实例的最新快照；列表只负责定位，不能拿列表里的 canFinalize
+  // 推断动作。批准 / 拒绝 / 转交 / 撤回全部以 viewerActions 为唯一真相。
+  const detail = view?.request ?? req;
+  const label = resourceLabel(detail);
+  const ttlLabel = detail.requestedExpiresAt
+    ? `至 ${fmtDate(detail.requestedExpiresAt)}`
+    : displayTtlLabel(detail.ttlDurationLabel);
+  const timeline = useMemo(() => buildApprovalTimeline(detail), [detail]);
+  const currentNode = timeline.find((node) => node.state === "current");
+  const businessFields = [
+    resourceLabel(detail),
+    detail.resourceId && detail.resourceId !== "*" ? `资源 ${detail.resourceId}` : "全部资源",
+    detail.resourceSub && detail.resourceSub !== "*" ? `范围 ${detail.resourceSub}` : null,
+    ttlLabel || "长期有效",
+  ].filter(Boolean).join(" · ");
+  const actions = view?.viewerActions ?? {
+    canApprove: false,
+    canReject: false,
+    canEscalate: false,
+    canCancel: false,
+  };
+  const hasAction = Object.values(actions).some(Boolean);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <article className={styles.approvalDetail} data-approval-detail>
       {/* Meta badges */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <StatusBadge status={req.status} />
-        {req.grantType === "ttl" && (
+      <div className={styles.approvalDetailBadges}>
+        <StatusBadge status={detail.status} />
+        {detail.grantType === "ttl" && (
           <span style={{
             fontSize: 11, padding: "2px 8px", borderRadius: 999, fontWeight: 600,
             background: "var(--surface-2)", color: "var(--muted)",
@@ -600,62 +611,68 @@ function RequestDetail({ req, canAct, onApprove, onReject, onEscalate, onCancel,
         fontSize: "clamp(18px, 2vw, 22px)", fontWeight: 500, color: "var(--ink)", lineHeight: 1.3,
       }}>
         {label}
-        {req.resourceId && req.resourceId !== "*" && (
+        {detail.resourceId && detail.resourceId !== "*" && (
           <span style={{ fontSize: 14, fontWeight: 400, color: "var(--muted)", marginLeft: 6 }}>
-            （{req.resourceId}）
+            （{detail.resourceId}）
           </span>
         )}
       </h2>
 
-      {req.subjectName && (
-        <p style={{ margin: "-8px 0 0", fontSize: 12, color: "var(--muted)" }}>
-          申请人：<b style={{ color: "var(--ink)" }}>{req.subjectName}</b>
-        </p>
-      )}
-
-      <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
-        申请于 {fmtDate(req.createdAt)}
-        {ttlLabel && <span style={{ marginLeft: 8 }}>· 时效 {ttlLabel}</span>}
-      </p>
+      <dl className={styles.approvalDetailFields}>
+        <div>
+          <dt>申请人</dt>
+          <dd>{detail.subjectName || detail.people[detail.subjectId]?.name || "项目成员"}</dd>
+        </div>
+        <div>
+          <dt>提交时间</dt>
+          <dd>{fmtDate(detail.createdAt)}</dd>
+        </div>
+        <div>
+          <dt>业务字段</dt>
+          <dd>{businessFields}</dd>
+        </div>
+        <div>
+          <dt>当前节点</dt>
+          <dd>{currentNode?.title ?? (detail.resolvedAt ? `已于 ${fmtDate(detail.resolvedAt)}结束` : "等待流程信息")}</dd>
+        </div>
+      </dl>
 
       {/* Note */}
-      {req.note && (
+      {detail.note && (
         <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16 }}>
           <p style={{ margin: "0 0 6px", fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>申请理由</p>
-          <p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.6 }}>{req.note}</p>
+          <p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.6 }}>{detail.note}</p>
         </div>
       )}
 
-      <ApprovalFlow req={req} />
+      {loading && <p className={styles.approvalDetailLoading}>正在核对流程与可执行操作…</p>}
+      {loadError && <p className={styles.approvalDetailError}>{loadError}</p>}
+
+      <ApprovalFlow req={detail} view={view} />
 
       {/* Actions */}
-      {isPending && (
-        <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-          {forwardOnly && (
-            <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", lineHeight: 1.6 }}>
-              你本人尚未持有该权限，无法批准，只能向上转交给下一级审批人。
-            </p>
-          )}
-          <div style={{ display: "flex", gap: 8 }}>
-            {canAct ? (
-              <>
-                {forwardOnly ? (
-                  <ActionButton primary label="向上转交" busy={acting === "escalate"} disabled={acting !== null} onClick={() => onEscalate?.()} />
-                ) : (
-                  <ActionButton primary label="批准" busy={acting === "approve"} disabled={acting !== null} onClick={() => onApprove?.()} />
-                )}
-                <ActionButton label="拒绝" busy={acting === "reject"} disabled={acting !== null} onClick={() => onReject?.()} />
-                {!forwardOnly && (
-                  <ActionButton label="向上转交" busy={acting === "escalate"} disabled={acting !== null} onClick={() => onEscalate?.()} />
-                )}
-              </>
-            ) : (
+      {!loading && hasAction && (
+        <div className={styles.approvalDetailActions}>
+          <p>当前可执行操作</p>
+          <div>
+            {actions.canApprove && (
+              <ActionButton primary label="批准" busy={acting === "approve"} disabled={acting !== null} onClick={() => onApprove?.()} />
+            )}
+            {actions.canReject && (
+              <ActionButton label="拒绝" busy={acting === "reject"} disabled={acting !== null} onClick={() => onReject?.()} />
+            )}
+            {actions.canEscalate && (
+              <ActionButton primary={!actions.canApprove} label="向上转交" busy={acting === "escalate"} disabled={acting !== null} onClick={() => onEscalate?.()} />
+            )}
+            {actions.canCancel && (
               <ActionButton label="撤回申请" busy={acting === "cancel"} disabled={acting !== null} onClick={() => onCancel?.()} />
             )}
           </div>
+          {actionError && <p className={styles.approvalDetailError}>{actionError}</p>}
         </div>
       )}
-    </div>
+      {!loading && !hasAction && actionError && <p className={styles.approvalDetailError}>{actionError}</p>}
+    </article>
   );
 }
 
@@ -680,8 +697,11 @@ export default function AccessRequestsClient({ productionId, productionName, can
   const [acting, setActing]                   = useState<Acting>(null);
   const [actionError, setActionError]         = useState<string | null>(null);
   const [rightPanel, setRightPanel]           = useState<RightPanel>(null);
+  const [detailView, setDetailView]           = useState<AccessRequestFlowView | null>(null);
+  const [detailLoading, setDetailLoading]     = useState(false);
+  const [detailError, setDetailError]         = useState<string | null>(null);
 
-  // Mobile accordion
+  // 手机申请表单仍在列表页内展开；审批详情使用独立抽屉。
   const [mobileExpanded, setMobileExpanded] = useState<string | null>(null);
 
   const fetchMine = useCallback(async () => {
@@ -719,6 +739,38 @@ export default function AccessRequestsClient({ productionId, productionName, can
     if (updated) setRightPanel({ type: "detail", req: updated, canAct: rightPanel.canAct });
   }, [myRequests, pendingApprovals]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 列表 DTO 只负责定位申请；详情、后续路径与动作资格统一从实例接口取，避免
+  // 「待审批列表里有我」被误当成此刻仍能批准/转交的凭据。
+  const selectedDetailId = rightPanel?.type === "detail" ? rightPanel.req.id : null;
+  useEffect(() => {
+    if (!selectedDetailId) {
+      setDetailView(null);
+      setDetailError(null);
+      setDetailLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setDetailView(null);
+    setDetailError(null);
+    setDetailLoading(true);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/production/${productionId}/access-requests/${selectedDetailId}/flow`);
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error ?? "详情加载失败");
+        }
+        const data = (await res.json()) as AccessRequestFlowView;
+        if (!cancelled) setDetailView(data);
+      } catch (error) {
+        if (!cancelled) setDetailError(error instanceof Error ? error.message : "详情加载失败");
+      } finally {
+        if (!cancelled) setDetailLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [productionId, selectedDetailId]);
+
   /**
    * 四个审批动作共用的请求壳（#593）。
    * - 成功：服务端回的申请若已到终态（批准 / 拒绝 / 撤回），先写回右侧面板再重拉列表。
@@ -746,6 +798,13 @@ export default function AccessRequestsClient({ productionId, productionName, can
         if (panel?.type !== "detail" || panel.req.id !== reqId) return panel;
         return settled ? { ...panel, req: fresh } : null;
       });
+      if (settled && fresh) {
+        setDetailView((current) => current ? {
+          ...current,
+          request: fresh,
+          viewerActions: { canApprove: false, canReject: false, canEscalate: false, canCancel: false },
+        } : current);
+      }
       await Promise.all([fetchMine(), fetchPending()]);
     } catch {
       setActionError("网络错误，请重试");
@@ -765,10 +824,12 @@ export default function AccessRequestsClient({ productionId, productionName, can
   const isLoading   = tab === "mine" ? loadingMine : tab === "pending" ? loadingPending : false;
 
   function selectRequest(req: ApprovalRequest, canAct: boolean) {
+    setActionError(null);
     setRightPanel({ type: "detail", req, canAct });
   }
 
   function openForm() {
+    setActionError(null);
     setRightPanel({ type: "form" });
   }
 
@@ -815,8 +876,6 @@ export default function AccessRequestsClient({ productionId, productionName, can
 
   // ── Mobile card ────────────────────────────────────────────────────────────
   function renderMobileCard(req: ApprovalRequest, canAct: boolean) {
-    const isExpanded = mobileExpanded === req.id;
-    const cardActing = acting?.reqId === req.id ? acting.kind : null;
     const col = statusColor(req.status);
     const cardMod = col === "amber" ? styles.warn : col === "red" ? styles.danger : col === "green" ? styles.info : "";
 
@@ -824,51 +883,20 @@ export default function AccessRequestsClient({ productionId, productionName, can
       <div key={req.id} className={`${styles.mobileCard} ${cardMod}`}>
         <button
           className={styles.mobileCardBtn}
-          onClick={() => setMobileExpanded(isExpanded ? null : req.id)}
+          aria-label={`查看${resourceLabel(req)}详情`}
+          onClick={() => selectRequest(req, canAct)}
         >
           <div className={styles.mobileCardHeader}>
             <span className={styles.mobileCardProduction}>{STATUS_LABELS[req.status]}</span>
             <span className={styles.mobileCardTime}>{fmtDate(req.createdAt)}</span>
           </div>
-          <p className={`${styles.mobileCardTitle} ${isExpanded ? "" : styles.mobileCardTitleClamp}`}>
+          <p className={`${styles.mobileCardTitle} ${styles.mobileCardTitleClamp}`}>
             {resourceLabel(req)}
           </p>
-          {!isExpanded && req.note && (
+          {req.note && (
             <p className={styles.mobileCardPreview}>{req.note}</p>
           )}
         </button>
-        {isExpanded && (
-          <div className={styles.mobileCardDetail}>
-            {req.note && (
-              <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--ink)", lineHeight: 1.6 }}>{req.note}</p>
-            )}
-            {req.canFinalize === false && canAct && (
-              <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--muted)", lineHeight: 1.6 }}>
-                你本人尚未持有该权限，只能向上转交。
-              </p>
-            )}
-            <ApprovalFlow req={req} compact />
-            {actionError && acting?.reqId !== req.id && (
-              <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--danger, #ef4444)" }}>{actionError}</p>
-            )}
-            {(req.status === "pending_supervisor" || req.status === "pending_resource") && (
-              <div style={{ display: "flex", gap: 8 }}>
-                {canAct ? (
-                  <>
-                    {req.canFinalize === false ? (
-                      <ActionButton primary small label="向上转交" busy={cardActing === "escalate"} disabled={cardActing !== null} onClick={() => void handleEscalate(req.id)} />
-                    ) : (
-                      <ActionButton primary small label="批准" busy={cardActing === "approve"} disabled={cardActing !== null} onClick={() => void handleApprove(req.id)} />
-                    )}
-                    <ActionButton small label="拒绝" busy={cardActing === "reject"} disabled={cardActing !== null} onClick={() => void handleReject(req.id)} />
-                  </>
-                ) : (
-                  <ActionButton small label="撤回申请" busy={cardActing === "cancel"} disabled={cardActing !== null} onClick={() => void handleCancel(req.id)} />
-                )}
-              </div>
-            )}
-          </div>
-        )}
       </div>
     );
   }
@@ -986,6 +1014,30 @@ export default function AccessRequestsClient({ productionId, productionName, can
             {currentList.map((req) => renderMobileCard(req, tab === "pending"))}
           </div>
         )}
+        {rightPanel?.type === "detail" && (
+          <div className={styles.approvalDetailDrawer} role="dialog" aria-modal="true" aria-label="审批详情">
+            <header className={styles.approvalDetailDrawerHeader}>
+              <button type="button" onClick={() => setRightPanel(null)} aria-label="返回审批列表">
+                ← 返回
+              </button>
+              <span>审批详情</span>
+            </header>
+            <div className={styles.approvalDetailDrawerBody}>
+              <RequestDetail
+                req={rightPanel.req}
+                view={detailView}
+                loading={detailLoading}
+                loadError={detailError}
+                actionError={actionError}
+                acting={acting?.reqId === rightPanel.req.id ? acting.kind : null}
+                onApprove={() => void handleApprove(rightPanel.req.id)}
+                onReject={() => void handleReject(rightPanel.req.id)}
+                onEscalate={() => void handleEscalate(rightPanel.req.id)}
+                onCancel={() => void handleCancel(rightPanel.req.id)}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Desktop ── */}
@@ -1035,16 +1087,16 @@ export default function AccessRequestsClient({ productionId, productionName, can
               <>
                 <RequestDetail
                   req={rightPanel.req}
-                  canAct={rightPanel.canAct}
+                  view={detailView}
+                  loading={detailLoading}
+                  loadError={detailError}
+                  actionError={actionError}
                   acting={acting?.reqId === rightPanel.req.id ? acting.kind : null}
                   onApprove={() => void handleApprove(rightPanel.req.id)}
                   onReject={() => void handleReject(rightPanel.req.id)}
                   onEscalate={() => void handleEscalate(rightPanel.req.id)}
                   onCancel={() => void handleCancel(rightPanel.req.id)}
                 />
-                {actionError && (
-                  <p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--danger, #ef4444)" }}>{actionError}</p>
-                )}
               </>
             ) : (
               <div style={{ paddingTop: 60, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>

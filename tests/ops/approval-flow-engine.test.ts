@@ -247,13 +247,18 @@ describe("模版流端到端", () => {
     // 预测里的人不在审计链上，withApprovalPeople 收不到——people 映射必须补齐，
     // 否则前端只能显示裸 ID（AI review #412）
     expect(view.view.request.people[U_PROC]?.name).toBe("引擎处理人");
-    expect(view.view.viewerActions).toMatchObject({ canApprove: true, canReject: true, canEscalate: true });
+    expect(view.view.viewerActions).toEqual({ canApprove: true, canReject: true, canEscalate: true, canCancel: false });
 
     // 申请人可见但无动作
     const subjectView = await getAccessRequestFlow(req.id, U_SUBJECT, false);
     expect(subjectView.ok).toBe(true);
     if (!subjectView.ok) return;
-    expect(subjectView.view.viewerActions.canApprove).toBe(false);
+    expect(subjectView.view.viewerActions).toEqual({
+      canApprove: false,
+      canReject: false,
+      canEscalate: false,
+      canCancel: true,
+    });
     await rejectAccessRequest(req.id, U_APPROVER);
   });
 });
