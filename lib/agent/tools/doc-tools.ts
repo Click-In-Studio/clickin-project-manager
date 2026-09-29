@@ -21,6 +21,7 @@ import { TransientReadError } from "@/lib/asset/byte-source";
 import { loadParsedDocx, loadParsedPdf, type DocFileRef } from "@/lib/doc-extract/load";
 import { presignedGet } from "@/lib/r2";
 import { ocrPages, type OcrPage, type OcrTier } from "@/lib/mmp/ocr";
+import { preflightAttachment } from "@/lib/mmp/attachment-preflight";
 import { recordMmpUsage } from "@/lib/mmp/usage-db";
 import type { Asset, AssetFile } from "@/lib/asset/db";
 import type { DocxDoc, DocxItem, DocxParagraph } from "@/lib/doc-extract/docx";
@@ -84,6 +85,22 @@ export async function assetList(
     ? `共 ${matched.length} 个资产（显示前 ${LIST_CAP}，用 query 过滤）：`
     : `共 ${matched.length} 个资产：`;
   return neutralizeInjectionTags([head, ...lines].join("\n"));
+}
+
+/** MMP 自行发现适用于该资产模态的 triage；供上下文提到既有资产时显式调用。 */
+export async function assetPreflight(
+  userId: string, productionId: string, assetId: string, signal?: AbortSignal,
+): Promise<string> {
+  const got = await resolveReadableAsset(userId, productionId, assetId);
+  if (typeof got === "string") return neutralizeInjectionTags(got);
+  const { asset, file } = got;
+  const outcome = await preflightAttachment({
+    attachmentId: file.id,
+    fileName: asset.fileName ?? "",
+    mimeType: asset.mimeType ?? "application/octet-stream",
+    r2Key: file.r2Key,
+  }, { signal, usage: { userId, productionId } });
+  return neutralizeInjectionTags(outcome.renderedDigest);
 }
 
 // ─── 装载（权限门 + 格式分派）───────────────────────────────────────────────

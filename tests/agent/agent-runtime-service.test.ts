@@ -14,6 +14,7 @@ import { readEventsSince, subscribeSessionEvents } from "@/lib/agent/runtime/eve
 import { resolveApproval, approvalSession } from "@/lib/agent/runtime/approvals";
 import { CHAT_MODEL } from "@/lib/agent/runtime/config";
 import { exposedName } from "@/lib/agent/runtime/tools";
+import { createPendingAttachment, markAttachmentReady } from "@/lib/agent/attachment-db";
 
 // #367 S2：run 服务端到端（真 DB、假模型、真 harness、真工具函数）。
 // 覆盖：事件落表+NOTIFY、历史投影、会话列表、审批门（deny 带理由 / allow）、
@@ -177,6 +178,54 @@ describe("agent-runtime service", () => {
     expect(list.find((s) => s.key === key)).toMatchObject({ title: "你好", status: "done" });
     // delta 行已清理，只剩终态
     expect((await readEventsSince(key, 0)).map((r) => r.line.type)).not.toContain("delta");
+  });
+
+  it("媒体附件在首次模型调用前按 MMP registry 自动预检，digest 与原件引用同时进入消息", async () => {
+    const { streamFn, seen } = scripted([{ text: "已听到" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = newKey();
+    const pending = await createPendingAttachment({
+      sessionId: key, userId, fileName: "录音.mp4", mimeType: "video/mp4", mediaKind: "audio", fileSize: 12,
+    });
+    await markAttachmentReady(pending.id, key, userId, 12);
+    const oldUrl = process.env.MMP_BASE_URL;
+    const oldFetch = globalThis.fetch;
+    process.env.MMP_BASE_URL = "https://mmp.test";
+    globalThis.fetch = (async (url: string) => {
+      if (url.endsWith("/capabilities")) {
+        return Response.json({ protocol_version: "1.1", capabilities: [{ nodes: ["test-node"], capability: {
+          id: "triage.audio", modal: "audio", tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }],
+          input: { media: "required" }, output_schema: "urn:mmp:protocol:1:digest",
+        } }] });
+      }
+      const source = { tier: "cpu", engine: "test", engine_version: "1", generated_at: "2026-09-29T00:00:00Z", degraded: false, params: {} };
+      return Response.json({
+        job_id: "test-node-1", type: "triage.audio", status: "done", media_id: "sha256:runtime-audio", cached: false, source,
+        timings_ms: { vad: 3, tagging: 4, asr: 5 },
+        result: { media_id: "sha256:runtime-audio", kind: "audio", duration_sec: 1, timeline_unit: "sec",
+          segments: [{ start: 0, end: 1, label_status: "ok", labels: [{ tag: "Speech", score: 0.9 }], asr: { text: "帮我记下来", lang: "zh", confidence: 0.9 } }],
+          tools: { vad: "ok", tagging: "ok", asr: "ok" }, gaps: [], capabilities_available: [], source },
+      });
+    }) as typeof globalThis.fetch;
+    try {
+      await startRun({ sessionId: key, userId, message: "听一下", attachmentIds: [pending.id] });
+      await collectUntilTerminal(key);
+      await waitForIdle(key);
+      const firstContext = JSON.stringify(seen[0].messages);
+      expect(firstContext).toContain("帮我记下来");
+      expect(firstContext).toContain(pending.id);
+      expect(await getHistory(key)).toEqual([
+        { role: "user", content: "听一下", attachments: [{ id: pending.id, fileName: "录音.mp4", mimeType: "video/mp4", mediaKind: "audio" }] },
+        { role: "assistant", content: "已听到" },
+      ]);
+      const mmp = await getPool().query<{ tokens: number }>(
+        `SELECT tokens FROM ai_usage WHERE user_id = $1 AND model = 'mmp:triage.audio@cpu' ORDER BY created_at DESC LIMIT 1`, [userId],
+      );
+      expect(mmp.rows[0]?.tokens).toBe(12);
+    } finally {
+      globalThis.fetch = oldFetch;
+      if (oldUrl === undefined) delete process.env.MMP_BASE_URL; else process.env.MMP_BASE_URL = oldUrl;
+    }
   });
 
   it("thinking 写入 transcript、历史可恢复，run 结束后累计事件被清理", async () => {

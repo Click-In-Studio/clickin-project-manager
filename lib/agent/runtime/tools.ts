@@ -167,7 +167,7 @@ export const DEFS: Def[] = [
     mcpName: "my.attachment_read",
     description:
       "读取当前会话中用户随消息附带的临时文件（EN: read attached uploaded file）。attachmentId 来自 <clickin-attachment-context>。" +
-      "纯文本直接读取；docx/pdf 默认先给结构概览，可用 mode=read + ranges 分段读、mode=search + query 检索；图片/音频默认读取预检 digest，只有确实需要识别文字时才对图片或扫描 PDF 用 mode=ocr。附件只在当前会话有效。",
+      "纯文本直接读取；docx/pdf 默认先给结构概览，可用 mode=read + ranges 分段读、mode=search + query 检索；媒体文件会按 MMP 当前公布的 triage 能力读取预检 digest，只有确实需要识别文字时才对图片或扫描 PDF 用 mode=ocr。附件只在当前会话有效。",
     parameters: Type.Object({
       attachmentId: Type.String({ description: "临时附件 id" }),
       mode: Type.Optional(Type.Union([Type.Literal("preflight"), Type.Literal("outline"), Type.Literal("read"), Type.Literal("search"), Type.Literal("ocr")])),
@@ -680,6 +680,19 @@ export const DEFS: Def[] = [
       ctx.userId, ctx.productionId, String(args.assetId),
       (args.pages as unknown[]).map(Number),
       { tier: args.tier === "full" ? "full" : "fast", sessionId: ctx.run?.sessionId ?? null, signal: ctx.run?.signal },
+    ),
+  },
+  {
+    mcpName: "production.asset_preflight",
+    description:
+      "对制作资产执行 MMP 当前公布的自动预检能力（EN: triage inspect audio image video asset）。" +
+      "适合用户从资产库或当前文件上下文提到音频、图片等媒体时先获取任务无关摘要，再判断是否需要更深入处理；能力与支持模态由 MMP 动态决定。",
+    parameters: Type.Object({
+      assetId: Type.String({ description: "资产 id（来自当前文件上下文、production.asset_list 或 production.wiki_tree）" }),
+    }),
+    readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/doc-tools")).assetPreflight(
+      ctx.userId, ctx.productionId, String(args.assetId), ctx.run?.signal,
     ),
   },
   {

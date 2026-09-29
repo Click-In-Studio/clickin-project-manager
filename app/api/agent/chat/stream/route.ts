@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { productionIdOfSessionKey } from "@/lib/agent/tools/session-identity";
 import { requireProductionFeature } from "@/lib/account/plan";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent/chat/http";
-import { attachTrustedAttachmentContext, neutralizeInboundMessage } from "@/lib/agent/agent-ui-context";
+import { neutralizeInboundMessage } from "@/lib/agent/agent-ui-context";
 import { AGENT_ATTACHMENT_MAX_PER_MESSAGE, getReadyAttachments } from "@/lib/agent/attachment-db";
 import { createRunnerStreamResponse, pageKeyOfMessage } from "@/lib/agent/runtime/dispatch";
 import { startRun, steerRun } from "@/lib/agent/runtime/client";
@@ -48,8 +48,6 @@ export async function POST(req: NextRequest) {
   if (attachments.length !== attachmentIds.length) {
     return NextResponse.json({ error: "附件不存在、尚未上传完成或不属于该会话" }, { status: 400 });
   }
-  const message = attachTrustedAttachmentContext(neutralizeInboundMessage(rawMessage), attachments);
-
   // 项目档位功能门（#280）：签发时已拦（sessions POST），这里对存量已签发的
   // production 会话兜底——降级后旧 sessionKey 不能继续产生 AI 消耗。
   const prodId = productionIdOfSessionKey(sessionKey);
@@ -58,12 +56,14 @@ export async function POST(req: NextRequest) {
     if (planDeny) return planDeny;
   }
 
+  const message = neutralizeInboundMessage(rawMessage);
+
   // steer：会话已有 run 在跑，把这条消息插进去。回复走已经打开的那条流，所以这里
   // 返回纯 JSON 而不是第二条流——每次 steer 多开一条没人读的流会把浏览器的同域
   // 连接池耗光、整页静默（网关时代线上调过的教训）。
   if (steer === true) {
     try {
-      const steered = await steerRun(sessionKey, message);
+      const steered = await steerRun(sessionKey, message, attachmentIds as string[]);
       if (!steered) return NextResponse.json({ error: "本轮回复已结束，请重新发送" }, { status: 409 });
       return NextResponse.json({ ok: true, runId: steered.runId });
     } catch (err) {
@@ -71,7 +71,13 @@ export async function POST(req: NextRequest) {
     }
   }
   return createRunnerStreamResponse(req, sessionKey, {
-    startRun: () => startRun({ sessionId: sessionKey, userId: auth.userId, message, pageKey: pageKeyOfMessage(message) }),
+    startRun: () => startRun({
+      sessionId: sessionKey,
+      userId: auth.userId,
+      message,
+      attachmentIds: attachmentIds as string[],
+      pageKey: pageKeyOfMessage(message),
+    }),
   });
 }
 

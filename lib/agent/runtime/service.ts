@@ -15,7 +15,7 @@ import { getPool } from "@/lib/pg";
 import { parseSessionIdentity } from "@/lib/agent/tools/session-identity";
 import { buildInjectContext } from "@/lib/agent/memory/inject";
 import { appendRunRecord } from "@/lib/agent/memory/store";
-import { attachmentIdsFromContext, stripUiContext } from "@/lib/agent/agent-ui-context";
+import { attachmentIdsFromContext, attachTrustedAttachmentContext, stripUiContext } from "@/lib/agent/agent-ui-context";
 import type { ChatSessionSummary, ChatTranscriptEntry } from "@/lib/agent/chat/types";
 import { TOOL_PAYLOAD_MAX_CHARS } from "@/lib/agent/chat/types";
 import type { StreamLine } from "@/lib/agent/chat/stream-reducer";
@@ -46,8 +46,9 @@ import {
 } from "./config";
 import { creditsFromUsd, RUN_CREDIT_HARD_CAP } from "@/lib/account/plan";
 import { activatePendingPermissions } from "@/lib/perm/permission-activation-db";
-import { attachmentKeysForSession, listReadyAttachmentsForSession } from "@/lib/agent/attachment-db";
+import { attachmentKeysForSession, getReadyAttachments, listReadyAttachmentsForSession } from "@/lib/agent/attachment-db";
 import { deleteR2Object } from "@/lib/r2";
+import { preflightAttachments } from "@/lib/mmp/attachment-preflight";
 
 /** 成本硬顶中止的落库前缀（机器可判）与下一回合的注入说明（导入实测反馈①：
  *  裸 abort 让 agent 只能瞎猜中止原因）。 */
@@ -100,6 +101,7 @@ export interface StartRunInput {
   sessionId: string;
   userId: string;
   message: string;
+  attachmentIds?: string[];
   pageKey?: string | null;
   /** 定时任务触发的 run（无人值守：写不弹卡按 allowed_tools 判、ask_user 不可用、收尾通知创建者） */
   scheduleId?: string | null;
@@ -122,16 +124,49 @@ export async function startRun(input: StartRunInput): Promise<{ runId: string }>
      VALUES ($1, $2, 'running', $3, now(), $4, $5, $6)`,
     [runId, input.sessionId, RUNNER_OWNER, input.pageKey ?? null, CHAT_MODEL.id, input.scheduleId ?? null],
   );
-  void execute({ storage, runId, userId: input.userId, message: input.message, pageKey: input.pageKey ?? null, paidFrom, scheduleId: input.scheduleId ?? null });
+  void execute({
+    storage, runId, userId: input.userId, message: input.message, attachmentIds: input.attachmentIds,
+    pageKey: input.pageKey ?? null, paidFrom, scheduleId: input.scheduleId ?? null,
+  });
   return { runId };
 }
 
 /** 中途插话：交给进行中 run 的 steer 队列（agent-core 在下一次模型调用前注入）。 */
-export async function steerRun(sessionId: string, message: string): Promise<{ runId: string } | null> {
+export async function steerRun(
+  sessionId: string, message: string, attachmentIds: string[] = [],
+): Promise<{ runId: string } | null> {
   const run = active.get(sessionId);
   if (!run) return null;
-  await run.harness.steer(message);
+  const identity = parseSessionIdentity(sessionId);
+  if (!identity) throw Object.assign(new Error("无权访问该会话"), { status: 403 });
+  const enriched = await withAttachmentPreflight(
+    message, attachmentIds, sessionId, identity.userId, identity.productionId ?? null, run.abort.signal,
+  );
+  await run.harness.steer(enriched);
   return { runId: run.runId };
+}
+
+async function withAttachmentPreflight(
+  message: string,
+  attachmentIds: string[],
+  sessionId: string,
+  userId: string,
+  productionId: string | null,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (!attachmentIds.length) return message;
+  const attachments = await getReadyAttachments(attachmentIds, sessionId, userId);
+  if (attachments.length !== attachmentIds.length) {
+    throw Object.assign(new Error("附件不存在、尚未上传完成或不属于该会话"), { status: 400 });
+  }
+  const preflights = await preflightAttachments(attachments.map((attachment) => ({
+    mediaKind: attachment.mediaKind,
+    attachmentId: attachment.id,
+    fileName: attachment.fileName,
+    mimeType: attachment.mimeType,
+    r2Key: attachment.r2Key,
+  })), { signal, usage: { userId, productionId } });
+  return attachTrustedAttachmentContext(message, attachments, preflights);
 }
 
 export async function abortRun(sessionId: string): Promise<boolean> {
@@ -148,6 +183,7 @@ interface ExecuteInput {
   userId: string;
   /** undefined = 恢复模式：不追加用户消息，从 transcript 续跑 */
   message?: string;
+  attachmentIds?: string[];
   /** 发起本轮时的页面（温层工具面依据）；恢复模式从 agent_run.page_key 读回 */
   pageKey?: string | null;
   /** 本轮由谁买单（run 开始时定死，run 内不切换）；恢复模式无此判定，按 quota 记 */
@@ -199,7 +235,8 @@ async function execute(input: ExecuteInput): Promise<void> {
   // compaction 单列：它用的是 v4-pro（3 倍单价）、不走 message_end，混进 chat_*
   // 会让「这轮对话花了多少 token」失真。
   const usage = { input: 0, output: 0, cacheRead: 0, usd: 0, compactionUsd: 0, compactionTokens: 0 };
-  const lastUser: string | null = input.message ?? null;
+  let message = input.message;
+  let lastUser: string | null = message ?? null;
   let lastAssistant: string | null = null;
   let status: "completed" | "aborted" | "failed" = "completed";
   let error: string | null = null;
@@ -218,7 +255,7 @@ async function execute(input: ExecuteInput): Promise<void> {
     // 工具召回（tool-index：词法+向量）先算——提示块与工具面共用同一份命中。
     // 恢复模式没有本轮 prompt，用 transcript 最后一条用户消息做召回输入。
     const transcript = await session.buildContext().then((c) => c.messages);
-    const recallPrompt = input.message ?? lastUserText(transcript);
+    const recallPrompt = message ?? lastUserText(transcript);
     // 留存最近几轮用过的工具（有淘汰窗口，见 used-tools.ts）；不认识的名字丢掉
     const used = recentlyUsedToolNames(transcript)
       .map((n) => toolByName.get(n)?.mcpName)
@@ -230,7 +267,7 @@ async function execute(input: ExecuteInput): Promise<void> {
       : [];
     const recalled = families.flatMap((f) => f.tools.map((t) => t.name));
 
-    const inject = await buildInjectContext(userId, sessionId, input.message, { toolFamilies: families });
+    const inject = await buildInjectContext(userId, sessionId, message, { toolFamilies: families });
     const recall = recallBlock(inject.recall);
     const dialectDelivered = inject.dialectDelivered;
 
@@ -281,6 +318,15 @@ async function execute(input: ExecuteInput): Promise<void> {
         void harness.abort().catch(() => {});
       },
     });
+
+    // 额度门与 run 建立之后、基础模型第一次推理之前自动预检。MMP 的 digest 进入本轮
+    // 用户消息并随 transcript 保存；附件 id 与原件仍保留，后续可显式读取。
+    if (message !== undefined && input.attachmentIds?.length) {
+      message = await withAttachmentPreflight(
+        message, input.attachmentIds, sessionId, userId, productionId, abort.signal,
+      );
+      lastUser = message;
+    }
 
     // 召回临时插入：送模型的消息列表里，最后一条用户消息前插一条 user 消息。
     // 不进 session（下一轮不再带，与 prependContext 语义一致）。
@@ -353,8 +399,8 @@ async function execute(input: ExecuteInput): Promise<void> {
       }
     });
 
-    if (input.message !== undefined) {
-      await harness.prompt(input.message);
+    if (message !== undefined) {
+      await harness.prompt(message);
     } else {
       const decision = await repairAndClassify(session, toolByName, {
         signal: abort.signal,

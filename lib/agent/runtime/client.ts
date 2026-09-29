@@ -13,6 +13,7 @@ export interface StartRunRequest {
   sessionId: string;
   userId: string;
   message: string;
+  attachmentIds?: string[];
   pageKey?: string | null;
 }
 
@@ -21,13 +22,13 @@ function runnerUrl(): string | null {
   return url ? url.replace(/\/$/, "") : null;
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function post<T>(path: string, body: unknown, timeoutMs = 10_000): Promise<T> {
   const base = runnerUrl()!;
   const res = await fetch(`${base}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) throw Object.assign(new Error(data.error || `agent-runner ${path} failed (${res.status})`), { status: res.status });
@@ -39,9 +40,11 @@ export async function startRun(input: StartRunRequest): Promise<{ runId: string 
   return post<{ runId: string }>("/runs", input);
 }
 
-export async function steerRun(sessionId: string, message: string): Promise<{ runId: string } | null> {
-  if (!runnerUrl()) return service.steerRun(sessionId, message);
-  const r = await post<{ runId: string | null }>("/runs/steer", { sessionId, message });
+export async function steerRun(
+  sessionId: string, message: string, attachmentIds: string[] = [],
+): Promise<{ runId: string } | null> {
+  if (!runnerUrl()) return service.steerRun(sessionId, message, attachmentIds);
+  const r = await post<{ runId: string | null }>("/runs/steer", { sessionId, message, attachmentIds }, 150_000);
   return r.runId ? { runId: r.runId } : null;
 }
 
