@@ -55,6 +55,23 @@ describe("tool-index（fake embedding）", () => {
     expect(personal.every((h) => !h.name.startsWith("production."))).toBe(true);
   });
 
+  it("run-local 动态目录与静态工具共用 RAG 和 find_tools，按 capability 族只带两个资源入口", async () => {
+    const description = "把哼唱或器乐旋律转成音高序列";
+    const extra = [
+      { name: "mmp.attachment.pitch_transcribe", family: "mmp.pitch_transcribe", scope: "personal" as const,
+        oneliner: description, triggers: [description], en: "pitch transcribe", examples: [description] },
+      { name: "mmp.asset.pitch_transcribe", family: "mmp.pitch_transcribe", scope: "production" as const,
+        oneliner: description, triggers: [description], en: "pitch transcribe", examples: [description] },
+    ];
+    const families = await recallFamilies(description, { hasProduction: true, extraCatalog: extra });
+    expect(families.find((family) => family.family === "mmp.pitch_transcribe")?.tools.map((tool) => tool.name)).toEqual([
+      "mmp.attachment.pitch_transcribe", "mmp.asset.pitch_transcribe",
+    ]);
+    const found = await searchTools(description, { hasProduction: false, extraCatalog: extra });
+    expect(found.map((hit) => hit.name)).toContain("mmp.attachment.pitch_transcribe");
+    expect(found.map((hit) => hit.name)).not.toContain("mmp.asset.pitch_transcribe");
+  });
+
   it("阈值可由 env 覆盖（默认 0.5）", () => {
     expect(TOOL_VECTOR_THRESHOLD).toBeGreaterThan(0);
   });

@@ -114,7 +114,7 @@ export interface DocToolOpts {
 }
 
 /** 权限门 + 取文件行：doc_* 与 doc_page_ocr 共用（口径 = asset meta face，与预览同门）。 */
-async function resolveReadableAsset(
+export async function resolveReadableAsset(
   userId: string, productionId: string, assetId: string,
 ): Promise<{ asset: Asset; file: AssetFile & { r2Key: string } } | string> {
   const resolved = await resolveProductionActor(userId, productionId);

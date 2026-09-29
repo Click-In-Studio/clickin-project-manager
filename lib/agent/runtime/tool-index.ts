@@ -57,9 +57,9 @@ function docTexts(entry: ToolCatalogEntry): string[] {
 }
 
 /** 文档侧向量：先查缓存表，缺的批量嵌入后回写。任何失败 → 该批无向量（词法仍在）。 */
-async function loadDocs(): Promise<Doc[]> {
+async function loadDocsFor(entries: readonly ToolCatalogEntry[]): Promise<Doc[]> {
   const all: Doc[] = [];
-  for (const e of TOOL_CATALOG) for (const text of docTexts(e)) all.push({ name: e.name, text, hash: hashOf(text), vec: null });
+  for (const e of entries) for (const text of docTexts(e)) all.push({ name: e.name, text, hash: hashOf(text), vec: null });
   if (embeddingMode() === "none") return all;
   try {
     const pool = getPool();
@@ -91,7 +91,7 @@ async function loadDocs(): Promise<Doc[]> {
 
 async function ensureDocs(): Promise<Doc[]> {
   if (docs) return docs;
-  if (!docsPromise) docsPromise = loadDocs().then((d) => (docs = d)).finally(() => { docsPromise = null; });
+  if (!docsPromise) docsPromise = loadDocsFor(TOOL_CATALOG).then((d) => (docs = d)).finally(() => { docsPromise = null; });
   return docsPromise;
 }
 
@@ -133,11 +133,22 @@ async function queryVector(prompt: string, userId: string | null): Promise<numbe
 }
 
 /** 全量打分（不截断、不设阈值），供召回与搜索各自裁剪。 */
-export async function scoreTools(prompt: string, opts: { hasProduction: boolean; userId?: string | null }): Promise<ToolHit[]> {
-  const [allDocs, qvec] = await Promise.all([ensureDocs(), queryVector(prompt, opts.userId ?? null)]);
+export async function scoreTools(prompt: string, opts: {
+  hasProduction: boolean;
+  userId?: string | null;
+  extraCatalog?: readonly ToolCatalogEntry[];
+}): Promise<ToolHit[]> {
+  const extra = opts.extraCatalog ?? [];
+  const [staticDocs, extraDocs, qvec] = await Promise.all([
+    ensureDocs(),
+    extra.length ? loadDocsFor(extra) : Promise.resolve([]),
+    queryVector(prompt, opts.userId ?? null),
+  ]);
+  const catalog = [...TOOL_CATALOG, ...extra];
+  const allDocs = [...staticDocs, ...extraDocs];
   const promptTokens = new Set(bigramTokens(prompt));
   const hits: ToolHit[] = [];
-  for (const entry of TOOL_CATALOG) {
+  for (const entry of catalog) {
     if (entry.scope === "production" && !opts.hasProduction) continue;
     let lexical = 0;
     for (const t of entry.triggers) lexical = Math.max(lexical, lexicalScore(t, promptTokens));
@@ -159,9 +170,14 @@ export async function scoreTools(prompt: string, opts: { hasProduction: boolean;
 }
 
 /** 主动召回（族粒度）：族内任一工具 词法 ≥ 0.72 或 向量 ≥ 阈值 → 整族入面；按族分取前 N 族。 */
-export async function recallFamilies(prompt: string, opts: { hasProduction: boolean; userId?: string | null }): Promise<FamilyHit[]> {
+export async function recallFamilies(prompt: string, opts: {
+  hasProduction: boolean;
+  userId?: string | null;
+  extraCatalog?: readonly ToolCatalogEntry[];
+}): Promise<FamilyHit[]> {
   if (!prompt.trim()) return [];
   const hits = await scoreTools(prompt, opts);
+  const catalog = [...TOOL_CATALOG, ...(opts.extraCatalog ?? [])];
   const byFamily = new Map<string, FamilyHit>();
   for (const h of hits) {
     const passes = h.lexical >= TOOL_RECALL_THRESHOLD || (h.vector !== null && h.vector >= TOOL_VECTOR_THRESHOLD);
@@ -171,7 +187,7 @@ export async function recallFamilies(prompt: string, opts: { hasProduction: bool
       label: TOOL_FAMILIES[h.family]?.label ?? h.family,
       score: h.score,
       top: h,
-      tools: TOOL_CATALOG.filter((e) => e.family === h.family && (opts.hasProduction || e.scope !== "production"))
+      tools: catalog.filter((e) => e.family === h.family && (opts.hasProduction || e.scope !== "production"))
         .map((e) => ({ name: e.name, oneliner: e.oneliner })),
     });
   }
@@ -179,7 +195,12 @@ export async function recallFamilies(prompt: string, opts: { hasProduction: bool
 }
 
 /** find_tools 兜底：不设阈值，按分取前 N（模型自己判断哪个对）。 */
-export async function searchTools(query: string, opts: { hasProduction: boolean; userId?: string | null; limit?: number }): Promise<ToolHit[]> {
+export async function searchTools(query: string, opts: {
+  hasProduction: boolean;
+  userId?: string | null;
+  limit?: number;
+  extraCatalog?: readonly ToolCatalogEntry[];
+}): Promise<ToolHit[]> {
   const hits = await scoreTools(query, opts);
   return hits.filter((h) => h.score > 0).slice(0, opts.limit ?? 5);
 }

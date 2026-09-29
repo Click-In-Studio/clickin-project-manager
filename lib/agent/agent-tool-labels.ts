@@ -76,5 +76,10 @@ export const TOOL_LABELS: Record<string, string> = {
 export function toolLabel(name: string): string {
   const bare = (name.startsWith(MCP_TOOL_PREFIX) ? name.slice(MCP_TOOL_PREFIX.length) : name)
     .replace(/\./g, "-");
+  const dynamicMmp = /^mmp-(attachment|asset)-(.+)$/.exec(bare);
+  if (dynamicMmp) {
+    const target = dynamicMmp[1] === "attachment" ? "会话附件" : "项目资产";
+    return `媒体处理（${target}）：${dynamicMmp[2].replace(/_/g, " ")}`;
+  }
   return TOOL_LABELS[bare] ?? bare;
 }

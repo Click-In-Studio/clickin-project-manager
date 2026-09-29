@@ -14,6 +14,7 @@
 
 import { MmpError, media, type MmpClient } from "@mmp/client";
 import { getMmpClient } from "./client";
+import { clearMmpMediaCacheForTests, mmpMediaHandle, rememberMmpMediaId } from "./media-cache";
 
 export type OcrTier = "gpu-fast" | "gpu";
 export type OcrFlag = "low_confidence" | "coverage_anomaly" | "empty";
@@ -60,16 +61,6 @@ const POLL_WAIT_SEC = 30;
 /** 缺 timings 时的估算（#618 首版兜底）：快档 1 s/页、慢档 6 s/页。 */
 const ESTIMATE_MS_PER_PAGE: Record<OcrTier, number> = { "gpu-fast": 1000, gpu: 6000 };
 
-/** 文件行 → media_id（内容 hash）。文件行不可变，键即文件行 id；进程重启丢了也只是多下载一次。 */
-const mediaIdByFile = new Map<string, string>();
-const MEDIA_ID_CAP = 500;
-
-function rememberMediaId(fileId: string, mediaId: string): void {
-  mediaIdByFile.delete(fileId);
-  mediaIdByFile.set(fileId, mediaId);
-  while (mediaIdByFile.size > MEDIA_ID_CAP) mediaIdByFile.delete(mediaIdByFile.keys().next().value!);
-}
-
 /** 可计费推理毫秒：render（PDF 栅格化）+ ocr。键名是引擎私有的，#618 切标准键。 */
 export function billableMsOf(timings: Record<string, number> | undefined, tier: OcrTier, pageCount: number): { ms: number; estimated: boolean } {
   if (timings && (typeof timings.ocr === "number" || typeof timings.render === "number")) {
@@ -93,15 +84,14 @@ export async function ocrPages(
   const client = opts.client === undefined ? getMmpClient() : opts.client;
   if (!client) return { status: "error", code: "not_configured", message: "MMP 服务未配置", unavailable: true };
 
-  const known = mediaIdByFile.get(input.fileId);
-  const handle = known ? media.refOr(known, media.get(input.url)) : media.get(input.url);
+  const handle = mmpMediaHandle(input.fileId, media.get(input.url));
   const pages = [...new Set(input.pages.map((p) => Math.floor(p)).filter((p) => p >= 1))].sort((a, b) => a - b);
   try {
     const done = await client.run(
       { type: "ocr.structured", media: handle, tier: input.tier, params: { pages, lang: input.lang ?? "ch" } },
       { pollWaitSec: POLL_WAIT_SEC, timeoutMs: RUN_TIMEOUT_MS, signal: opts.signal },
     );
-    rememberMediaId(input.fileId, done.media_id);
+    rememberMmpMediaId(input.fileId, done.media_id);
     const result = (done.result ?? {}) as {
       page_count?: number;
       pages?: OcrPage[];
@@ -133,6 +123,4 @@ export async function ocrPages(
 }
 
 /** 测试用：清 media_id 缓存。 */
-export function clearMmpMediaCacheForTests(): void {
-  mediaIdByFile.clear();
-}
+export { clearMmpMediaCacheForTests };
