@@ -2,7 +2,7 @@
 kind: improved
 title: 窄窗口里的项目顶栏更紧凑
 page: start/interface/navigation
-pr: 788
+pr: 789
 order: 1
 ---
 
