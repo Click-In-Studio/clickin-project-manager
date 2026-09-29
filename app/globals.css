@@ -116,6 +116,18 @@ body {
   .app-shell-brand-link {
     display: none;
   }
+
+  .app-shell-topbar.app-shell-topbar-compact {
+    column-gap: 0.375rem;
+    padding-right: 0.375rem;
+    padding-right: max(0.375rem, env(safe-area-inset-right));
+    padding-left: 0.375rem;
+    padding-left: max(0.375rem, env(safe-area-inset-left));
+  }
+
+  .app-shell-topbar-actions {
+    gap: 0.375rem;
+  }
 }
 
 .app-shell-bottom-nav {

@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import Link from "next/link";
-import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, ProductionOverflowSubmenuButton, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, useProductionToolbar } from "@/components/shell/ProductionTopMenu";
+import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, ProductionOverflowSubmenuButton, ProductionTopMenuContext, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, useProductionToolbar } from "@/components/shell/ProductionTopMenu";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import { useVisibleEventSource } from "@/hooks/useVisibleEventSource";
@@ -660,12 +660,7 @@ export default function CuePage({
 
       {/* ── Top bar ── */}
       <ProductionTopMenu onClick={e => e.stopPropagation()} overflow={cueOverflow}>
-        <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
-          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
-            {productionName}
-          </span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Cue</span>
-        </div>
+        <ProductionTopMenuContext productionName={productionName} label="Cue" />
         <ProductionTopMenuDivider />
         <div className="relative -ml-1 shrink-0">
           <button

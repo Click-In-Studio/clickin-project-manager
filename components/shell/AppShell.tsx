@@ -351,7 +351,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
         )}
 
         {/* Right actions */}
-        <div className={`${hasProductionTopMenu ? "-ml-2" : "ml-auto"} flex shrink-0 items-center gap-3`}>
+        <div className={`app-shell-topbar-actions ${hasProductionTopMenu ? "-ml-2" : "ml-auto"} flex shrink-0 items-center gap-3`}>
           {/* Search bar: only when inside a production */}
           <SearchBar
             key={pathname}
