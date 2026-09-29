@@ -20,8 +20,7 @@ import { dispatchAgentMutation } from "@/lib/agent/agent-mutations";
 import WikiProposalPreviewModal from "@/components/agent/WikiProposalPreviewModal";
 import VoiceRecordButton from "@/components/agent/VoiceRecordButton";
 import ChevronIcon from "@/components/ui/ChevronIcon";
-import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
-import { useShortcutLabel } from "@/components/ui/shortcut-label";
+import { isAgentChatSubmitShortcut } from "@/components/ui/multiline-keyboard";
 
 /** 按语境（个人 / 某个制作）分桶持久化最后一次活跃会话，重开 popout 时恢复。 */
 function lastSessionStorageKey(productionId: string | null): string {
@@ -109,7 +108,6 @@ export default function AgentPopout({
   activeKeyRef.current = activeKey;
   const pathname = usePathname();
   const router = useRouter();
-  const submitKey = useShortcutLabel("Mod+Enter");
   const isMobileViewport = useSyncExternalStore(
     subscribeMobileViewport,
     getMobileViewportSnapshot,
@@ -1174,7 +1172,7 @@ export default function AgentPopout({
             onChange={(e) => setInput(e.target.value)}
             enterKeyHint="enter"
             onKeyDown={(e) => {
-              if (isMultilineSubmitShortcut(e)) {
+              if (isAgentChatSubmitShortcut(e, isMobileViewport)) {
                 e.preventDefault();
                 send();
               }
@@ -1182,7 +1180,7 @@ export default function AgentPopout({
             rows={1}
             placeholder={streaming
               ? "回复中，输入消息将注入本轮…"
-              : isMobileViewport ? "输入消息…" : `输入消息，${submitKey} 发送`}
+              : isMobileViewport ? "输入消息…" : "输入消息，Enter 发送"}
             className="max-h-40 flex-1 resize-none overflow-y-auto rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none"
           />
           {streaming ? (
