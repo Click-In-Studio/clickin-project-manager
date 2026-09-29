@@ -3,12 +3,15 @@ import type { Capability } from "@mmp/client";
 
 const mocks = vi.hoisted(() => ({
   getAttachment: vi.fn(),
+  getAnyAttachment: vi.fn(),
   resolveAsset: vi.fn(),
   run: vi.fn(),
 }));
 
 vi.mock("@/lib/agent/attachment-db", () => ({
   getReadyAttachmentForSession: mocks.getAttachment,
+  getAttachmentForSession: mocks.getAnyAttachment,
+  recordAttachmentAccess: vi.fn(),
 }));
 vi.mock("@/lib/agent/tools/doc-tools", () => ({
   resolveReadableAsset: mocks.resolveAsset,
@@ -29,6 +32,7 @@ const capability: Capability = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getAnyAttachment.mockResolvedValue(null);
   mocks.run.mockResolvedValue("ok");
 });
 

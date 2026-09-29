@@ -88,6 +88,7 @@ function makeTool(
           ? args.params as Record<string, unknown>
           : undefined,
         signal: ctx.run?.signal,
+        runId: ctx.run?.runId,
       };
       if (target === "attachment") {
         const out = await (await import("@/lib/agent/tools/mmp-capability-tools")).runAttachmentCapability(

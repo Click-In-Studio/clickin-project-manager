@@ -7,6 +7,7 @@
 
 import { gzipSync, gunzipSync } from "node:zlib";
 import { getR2Object, putR2Object } from "@/lib/r2";
+import { putAttachmentDerivedObject, registerAttachmentDerivedObject } from "@/lib/agent/attachment-db";
 
 export type DocKind = "pdf" | "docx";
 
@@ -16,13 +17,20 @@ export function docIrR2Key(kind: DocKind, fileId: string, version: number): stri
 
 export async function storeDocIr(kind: DocKind, fileId: string, version: number, doc: unknown): Promise<string> {
   const key = docIrR2Key(kind, fileId, version);
-  await putR2Object(key, gzipSync(Buffer.from(JSON.stringify(doc), "utf8")), "application/gzip");
+  const body = gzipSync(Buffer.from(JSON.stringify(doc), "utf8"));
+  const storedAsAttachment = await putAttachmentDerivedObject({
+    attachmentId: fileId, kind: "doc_ir", r2Key: key, body, mimeType: "application/gzip",
+  });
+  if (!storedAsAttachment) await putR2Object(key, body, "application/gzip");
   return key;
 }
 
 export async function loadDocIr<T>(kind: DocKind, fileId: string, version: number): Promise<T | null> {
   const obj = await getR2Object(docIrR2Key(kind, fileId, version));
   if (!obj) return null;
+  await registerAttachmentDerivedObject({
+    attachmentId: fileId, kind: "doc_ir", r2Key: docIrR2Key(kind, fileId, version), byteSize: obj.body.byteLength,
+  });
   try {
     return JSON.parse(gunzipSync(obj.body).toString("utf8")) as T;
   } catch {

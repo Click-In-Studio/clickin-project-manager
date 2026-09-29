@@ -26,6 +26,7 @@ const ORPHAN_SCAN_MS = Number(process.env.AGENT_ORPHAN_SCAN_MS ?? 30_000);
 async function main() {
   const service = await import("../lib/agent/runtime/service");
   const { RUNNER_OWNER } = await import("../lib/agent/runtime/config");
+  const { attachmentGcMetrics, runAttachmentGcBatch } = await import("../lib/agent/attachment-db");
 
   let draining = false;
 
@@ -44,7 +45,10 @@ async function main() {
   const server = http.createServer(async (req, res) => {
     try {
       if (req.method === "GET" && req.url === "/health") {
-        return send(res, 200, { ok: true, owner: RUNNER_OWNER, active: service.__internal.active.size, draining });
+        return send(res, 200, {
+          ok: true, owner: RUNNER_OWNER, active: service.__internal.active.size, draining,
+          attachmentGc: await attachmentGcMetrics(),
+        });
       }
       if (req.method !== "POST") return send(res, 405, { error: "method not allowed" });
       if (draining) return send(res, 503, { error: "runner draining" }); // §4.4 ②：排水期不接新 run
@@ -107,12 +111,23 @@ async function main() {
   };
   const tickTimer = setInterval(tick, SCHEDULE_TICK_MS);
 
+  const attachmentGc = async () => {
+    if (draining) return;
+    try {
+      const result = await runAttachmentGcBatch();
+      if (result.deleted || result.failed) console.log(`[agent-attachment] gc deleted=${result.deleted} failed=${result.failed}`);
+    } catch (err) { console.error("[agent-attachment] gc tick failed:", err); }
+  };
+  await attachmentGc();
+  const attachmentGcTimer = setInterval(attachmentGc, 60_000);
+
   // §4.4 ②：SIGTERM → 不接新 run、等进行中的到自然停点、超时才退（超时的由下一个进程按 ① 恢复）
   const shutdown = async (signal: string) => {
     if (draining) return;
     draining = true;
     clearInterval(scanTimer);
     clearInterval(tickTimer);
+    clearInterval(attachmentGcTimer);
     console.log(`[agent-runner] ${signal}: draining ${service.__internal.active.size} active run(s), up to ${DRAIN_TIMEOUT_MS}ms`);
     server.close();
     await service.drain(DRAIN_TIMEOUT_MS);

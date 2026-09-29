@@ -13,6 +13,19 @@ COL|agent_approval|session_id|text|text|NO|
 COL|agent_approval|status|text|text|NO|'pending'::text
 COL|agent_approval|tool_call_id|text|text|NO|
 COL|agent_approval|tool|text|text|NO|
+COL|agent_attachment_object|attachment_id|text|text|YES|
+COL|agent_attachment_object|attempts|integer|int4|NO|0
+COL|agent_attachment_object|byte_size|bigint|int8|NO|
+COL|agent_attachment_object|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_attachment_object|deleted_at|timestamp with time zone|timestamptz|YES|
+COL|agent_attachment_object|id|text|text|NO|
+COL|agent_attachment_object|kind|text|text|NO|
+COL|agent_attachment_object|last_error|text|text|YES|
+COL|agent_attachment_object|next_attempt_at|timestamp with time zone|timestamptz|YES|
+COL|agent_attachment_object|r2_key|text|text|NO|
+COL|agent_attachment_object|session_id|text|text|NO|
+COL|agent_attachment_object|status|text|text|NO|'reserved'::text
+COL|agent_attachment_object|user_id|uuid|uuid|NO|
 COL|agent_event|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_event|line|jsonb|jsonb|NO|
 COL|agent_event|run_id|text|text|YES|
@@ -81,6 +94,10 @@ COL|agent_question|run_id|text|text|NO|
 COL|agent_question|session_id|text|text|NO|
 COL|agent_question|status|text|text|NO|'pending'::text
 COL|agent_question|tool_call_id|text|text|NO|
+COL|agent_run_attachment_access|access_kind|text|text|NO|
+COL|agent_run_attachment_access|attachment_id|text|text|NO|
+COL|agent_run_attachment_access|run_id|text|text|NO|
+COL|agent_run_attachment_access|succeeded_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_run|cache_read_tokens|integer|int4|NO|0
 COL|agent_run|ended_at|timestamp with time zone|timestamptz|YES|
 COL|agent_run|error|text|text|YES|
@@ -117,14 +134,20 @@ COL|agent_schedule|schedule|jsonb|jsonb|NO|
 COL|agent_schedule|status|text|text|NO|'active'::text
 COL|agent_schedule|updated_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_schedule|user_id|uuid|uuid|NO|
+COL|agent_session_attachment|absolute_expires_at|timestamp with time zone|timestamptz|NO|(now() + '30 days'::interval)
 COL|agent_session_attachment|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_session_attachment|deleted_at|timestamp with time zone|timestamptz|YES|
+COL|agent_session_attachment|expires_at|timestamp with time zone|timestamptz|NO|(now() + '02:00:00'::interval)
 COL|agent_session_attachment|file_name|text|text|NO|
 COL|agent_session_attachment|file_size|bigint|int8|NO|
 COL|agent_session_attachment|id|text|text|NO|
+COL|agent_session_attachment|last_referenced_at|timestamp with time zone|timestamptz|YES|
 COL|agent_session_attachment|media_kind|text|text|YES|
 COL|agent_session_attachment|mime_type|text|text|NO|
+COL|agent_session_attachment|promoted_asset_id|text|text|YES|
 COL|agent_session_attachment|r2_key|text|text|NO|
 COL|agent_session_attachment|ready_at|timestamp with time zone|timestamptz|YES|
+COL|agent_session_attachment|release_until|timestamp with time zone|timestamptz|YES|
 COL|agent_session_attachment|session_id|text|text|NO|
 COL|agent_session_attachment|status|text|text|NO|'pending'::text
 COL|agent_session_entry|created_at|timestamp with time zone|timestamptz|NO|now()
@@ -1001,6 +1024,13 @@ CON|agent_approval|agent_approval_resolved_by_fkey|FOREIGN KEY (resolved_by) REF
 CON|agent_approval|agent_approval_run_id_fkey|FOREIGN KEY (run_id) REFERENCES agent_run(id) ON DELETE CASCADE
 CON|agent_approval|agent_approval_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
 CON|agent_approval|agent_approval_status_check|CHECK ((status = ANY (ARRAY['pending'::text, 'allowed'::text, 'denied'::text, 'expired'::text, 'cancelled'::text])))
+CON|agent_attachment_object|agent_attachment_object_attachment_id_fkey|FOREIGN KEY (attachment_id) REFERENCES agent_session_attachment(id) ON DELETE SET NULL
+CON|agent_attachment_object|agent_attachment_object_attempts_check|CHECK ((attempts >= 0))
+CON|agent_attachment_object|agent_attachment_object_byte_size_check|CHECK ((byte_size >= 0))
+CON|agent_attachment_object|agent_attachment_object_kind_check|CHECK ((kind = ANY (ARRAY['original'::text, 'doc_ir'::text, 'mmp_result'::text])))
+CON|agent_attachment_object|agent_attachment_object_pkey|PRIMARY KEY (id)
+CON|agent_attachment_object|agent_attachment_object_r2_key_key|UNIQUE (r2_key)
+CON|agent_attachment_object|agent_attachment_object_status_check|CHECK ((status = ANY (ARRAY['reserved'::text, 'present'::text, 'delete_pending'::text, 'deleting'::text, 'deleted'::text, 'transferred'::text])))
 CON|agent_event|agent_event_pkey|PRIMARY KEY (session_id, seq)
 CON|agent_event|agent_event_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
 CON|agent_instructions|agent_instructions_pkey|PRIMARY KEY (scope_type, scope_id)
@@ -1029,6 +1059,10 @@ CON|agent_question|agent_question_pkey|PRIMARY KEY (id)
 CON|agent_question|agent_question_run_id_fkey|FOREIGN KEY (run_id) REFERENCES agent_run(id) ON DELETE CASCADE
 CON|agent_question|agent_question_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
 CON|agent_question|agent_question_status_check|CHECK ((status = ANY (ARRAY['pending'::text, 'answered'::text, 'cancelled'::text, 'expired'::text])))
+CON|agent_run_attachment_access|agent_run_attachment_access_access_kind_check|CHECK ((access_kind = ANY (ARRAY['attached'::text, 'preflight'::text, 'read'::text, 'mmp_capability'::text])))
+CON|agent_run_attachment_access|agent_run_attachment_access_attachment_id_fkey|FOREIGN KEY (attachment_id) REFERENCES agent_session_attachment(id) ON DELETE CASCADE
+CON|agent_run_attachment_access|agent_run_attachment_access_pkey|PRIMARY KEY (run_id, attachment_id, access_kind)
+CON|agent_run_attachment_access|agent_run_attachment_access_run_id_fkey|FOREIGN KEY (run_id) REFERENCES agent_run(id) ON DELETE CASCADE
 CON|agent_run|agent_run_pkey|PRIMARY KEY (id)
 CON|agent_run|agent_run_schedule_id_fkey|FOREIGN KEY (schedule_id) REFERENCES agent_schedule(id) ON DELETE SET NULL
 CON|agent_run|agent_run_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
@@ -1042,9 +1076,10 @@ CON|agent_schedule|agent_schedule_user_id_fkey|FOREIGN KEY (user_id) REFERENCES 
 CON|agent_session_attachment|agent_session_attachment_file_size_check|CHECK ((file_size >= 0))
 CON|agent_session_attachment|agent_session_attachment_media_kind_check|CHECK ((media_kind ~ '^[a-z][a-z0-9_-]*$'::text))
 CON|agent_session_attachment|agent_session_attachment_pkey|PRIMARY KEY (id)
+CON|agent_session_attachment|agent_session_attachment_promoted_asset_id_fkey|FOREIGN KEY (promoted_asset_id) REFERENCES asset(id) ON DELETE SET NULL
 CON|agent_session_attachment|agent_session_attachment_r2_key_key|UNIQUE (r2_key)
 CON|agent_session_attachment|agent_session_attachment_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
-CON|agent_session_attachment|agent_session_attachment_status_check|CHECK ((status = ANY (ARRAY['pending'::text, 'ready'::text])))
+CON|agent_session_attachment|agent_session_attachment_status_check|CHECK ((status = ANY (ARRAY['pending'::text, 'ready'::text, 'released'::text, 'deleting'::text, 'expired'::text, 'promoted'::text])))
 CON|agent_session_entry|agent_session_entry_pkey|PRIMARY KEY (session_id, seq)
 CON|agent_session_entry|agent_session_entry_session_id_entry_id_key|UNIQUE (session_id, entry_id)
 CON|agent_session_entry|agent_session_entry_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
@@ -1497,6 +1532,11 @@ EXT|vector
 IDX|agent_approval|agent_approval_pending_idx|CREATE INDEX agent_approval_pending_idx ON public.agent_approval USING btree (status, expires_at) WHERE (status = 'pending'::text)
 IDX|agent_approval|agent_approval_pkey|CREATE UNIQUE INDEX agent_approval_pkey ON public.agent_approval USING btree (id)
 IDX|agent_approval|agent_approval_run_idx|CREATE INDEX agent_approval_run_idx ON public.agent_approval USING btree (run_id)
+IDX|agent_attachment_object|agent_attachment_object_gc_idx|CREATE INDEX agent_attachment_object_gc_idx ON public.agent_attachment_object USING btree (next_attempt_at, created_at) WHERE (status = 'delete_pending'::text)
+IDX|agent_attachment_object|agent_attachment_object_original_idx|CREATE UNIQUE INDEX agent_attachment_object_original_idx ON public.agent_attachment_object USING btree (attachment_id) WHERE ((kind = 'original'::text) AND (attachment_id IS NOT NULL))
+IDX|agent_attachment_object|agent_attachment_object_pkey|CREATE UNIQUE INDEX agent_attachment_object_pkey ON public.agent_attachment_object USING btree (id)
+IDX|agent_attachment_object|agent_attachment_object_r2_key_key|CREATE UNIQUE INDEX agent_attachment_object_r2_key_key ON public.agent_attachment_object USING btree (r2_key)
+IDX|agent_attachment_object|agent_attachment_object_user_quota_idx|CREATE INDEX agent_attachment_object_user_quota_idx ON public.agent_attachment_object USING btree (user_id, status)
 IDX|agent_event|agent_event_pkey|CREATE UNIQUE INDEX agent_event_pkey ON public.agent_event USING btree (session_id, seq)
 IDX|agent_instructions|agent_instructions_pkey|CREATE UNIQUE INDEX agent_instructions_pkey ON public.agent_instructions USING btree (scope_type, scope_id)
 IDX|agent_memory_chunk|agent_memory_chunk_embedding_idx|CREATE INDEX agent_memory_chunk_embedding_idx ON public.agent_memory_chunk USING hnsw (embedding vector_cosine_ops)
@@ -1514,6 +1554,7 @@ IDX|agent_mutation|agent_mutation_schedule_idx|CREATE INDEX agent_mutation_sched
 IDX|agent_mutation|agent_mutation_user_idx|CREATE INDEX agent_mutation_user_idx ON public.agent_mutation USING btree (user_id, created_at DESC)
 IDX|agent_question|agent_question_pending_idx|CREATE INDEX agent_question_pending_idx ON public.agent_question USING btree (status, expires_at) WHERE (status = 'pending'::text)
 IDX|agent_question|agent_question_pkey|CREATE UNIQUE INDEX agent_question_pkey ON public.agent_question USING btree (id)
+IDX|agent_run_attachment_access|agent_run_attachment_access_pkey|CREATE UNIQUE INDEX agent_run_attachment_access_pkey ON public.agent_run_attachment_access USING btree (run_id, attachment_id, access_kind)
 IDX|agent_run|agent_run_active_idx|CREATE INDEX agent_run_active_idx ON public.agent_run USING btree (status, heartbeat_at) WHERE (status = ANY (ARRAY['running'::text, 'awaiting_approval'::text, 'awaiting_answer'::text]))
 IDX|agent_run|agent_run_pkey|CREATE UNIQUE INDEX agent_run_pkey ON public.agent_run USING btree (id)
 IDX|agent_run|agent_run_schedule_idx|CREATE INDEX agent_run_schedule_idx ON public.agent_run USING btree (schedule_id, started_at DESC) WHERE (schedule_id IS NOT NULL)
@@ -1521,6 +1562,7 @@ IDX|agent_run|agent_run_session_idx|CREATE INDEX agent_run_session_idx ON public
 IDX|agent_schedule|agent_schedule_due_idx|CREATE INDEX agent_schedule_due_idx ON public.agent_schedule USING btree (next_fire_at) WHERE (status = 'active'::text)
 IDX|agent_schedule|agent_schedule_pkey|CREATE UNIQUE INDEX agent_schedule_pkey ON public.agent_schedule USING btree (id)
 IDX|agent_schedule|agent_schedule_user_idx|CREATE INDEX agent_schedule_user_idx ON public.agent_schedule USING btree (user_id, created_at DESC)
+IDX|agent_session_attachment|agent_session_attachment_expiry_idx|CREATE INDEX agent_session_attachment_expiry_idx ON public.agent_session_attachment USING btree (expires_at) WHERE (status = ANY (ARRAY['pending'::text, 'ready'::text, 'released'::text]))
 IDX|agent_session_attachment|agent_session_attachment_pkey|CREATE UNIQUE INDEX agent_session_attachment_pkey ON public.agent_session_attachment USING btree (id)
 IDX|agent_session_attachment|agent_session_attachment_r2_key_key|CREATE UNIQUE INDEX agent_session_attachment_r2_key_key ON public.agent_session_attachment USING btree (r2_key)
 IDX|agent_session_attachment|agent_session_attachment_session_idx|CREATE INDEX agent_session_attachment_session_idx ON public.agent_session_attachment USING btree (session_id, created_at)

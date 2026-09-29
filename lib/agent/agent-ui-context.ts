@@ -125,7 +125,7 @@ export function attachTrustedAttachmentContext(
     const preflight = preflights[a.id];
     if (preflight) lines.push(neutralizeInjectionTags(preflight.contextText));
   }
-  lines.push("预检只用于判断下一步；原件仍可通过 my.attachment_read 按 attachmentId 读取。", ATTACH_CLOSE);
+  lines.push("这些是会过期的临时内容，不是制作资产。预检只用于判断下一步；原件仍可通过 my.attachment_read 按 attachmentId 读取。", ATTACH_CLOSE);
   const block = lines.join("\n") + "\n";
   const ui = LEADING_BLOCK_RE.exec(message);
   return ui ? message.slice(0, ui[0].length) + block + message.slice(ui[0].length) : block + message;

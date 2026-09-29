@@ -47,11 +47,16 @@ import {
 } from "./config";
 import { creditsFromUsd, RUN_CREDIT_HARD_CAP } from "@/lib/account/plan";
 import { activatePendingPermissions } from "@/lib/perm/permission-activation-db";
-import { attachmentKeysForSession, getReadyAttachments, listReadyAttachmentsForSession } from "@/lib/agent/attachment-db";
-import { deleteR2Object } from "@/lib/r2";
+import {
+  getReadyAttachments,
+  listAttachmentsForSession,
+  recordAttachmentAccess,
+  scheduleSessionAttachmentDeletionInTx,
+} from "@/lib/agent/attachment-db";
 import { preflightAttachments } from "@/lib/mmp/attachment-preflight";
 import { buildMmpToolSurface } from "./mmp-tools";
 import { focusedMmpToolNames, mmpAttachmentToolNamesFor } from "./mmp-tool-focus";
+import { buildAttachmentLifecycleBlock } from "@/lib/agent/attachment-lifecycle";
 
 /** 成本硬顶中止的落库前缀（机器可判）与下一回合的注入说明（导入实测反馈①：
  *  裸 abort 让 agent 只能瞎猜中止原因）。 */
@@ -152,7 +157,7 @@ export async function steerRun(
   // steer 的 HTTP 请求只负责入队，不能同步等待最长两分钟的外部预检；队列仍保证多次
   // 插话按到达顺序进入 harness，并在各自进入下一次模型调用前拿到 agent context。
   run.enqueueSteer(async () => withAttachmentPreflight(
-    message, attachmentIds, sessionId, identity.userId, identity.productionId ?? null, run.abort.signal,
+    message, attachmentIds, sessionId, identity.userId, identity.productionId ?? null, run.runId, run.abort.signal,
   ).then(async (prepared) => {
     await run.warmAttachments(attachmentIds);
     return prepared;
@@ -166,6 +171,7 @@ async function withAttachmentPreflight(
   sessionId: string,
   userId: string,
   productionId: string | null,
+  runId: string,
   signal?: AbortSignal,
 ): Promise<string> {
   if (!attachmentIds.length) return message;
@@ -173,12 +179,15 @@ async function withAttachmentPreflight(
   if (attachments.length !== attachmentIds.length) {
     throw Object.assign(new Error("附件不存在、尚未上传完成或不属于该会话"), { status: 400 });
   }
+  // 显式随消息附带本身就是真引用；预检若失败也不能把它误判为“从未发送”。
+  await recordAttachmentAccess(runId, attachmentIds, "attached");
   const preflights = await preflightAttachments(attachments.map((attachment) => ({
     attachmentId: attachment.id,
     mediaKind: attachment.mediaKind,
     mimeType: attachment.mimeType,
     r2Key: attachment.r2Key,
   })), { signal, usage: { userId, productionId } });
+  await recordAttachmentAccess(runId, attachmentIds, "preflight");
   return attachTrustedAttachmentContext(message, attachments, preflights);
 }
 
@@ -314,6 +323,7 @@ async function execute(input: ExecuteInput): Promise<void> {
     const inject = await buildInjectContext(userId, sessionId, message, { toolFamilies: families });
     const recall = recallBlock(inject.recall);
     const dialectDelivered = inject.dialectDelivered;
+    const attachmentLifecycle = await buildAttachmentLifecycleBlock({ sessionId, userId, productionId });
 
     // 上一回合若因成本硬顶被掐（错误带机器可判前缀），本回合开头注入说明——
     // 否则 agent 只看到悬空工具调用的"状态未知"，不知道该缩小批次续作
@@ -341,7 +351,7 @@ async function execute(input: ExecuteInput): Promise<void> {
     });
     const tiers = tieredToolNames({
       hasProduction: !!productionId, pageKey: input.pageKey ?? null, prompt: recallPrompt, recalled, used,
-      extraWarm: mmpWarm,
+      extraWarm: [...mmpWarm, ...attachmentLifecycle.toolNames],
       available: tools.map((t) => t.mcpName),
     });
     const activeToolNames = new Set(tiers.active.map(exposedName));
@@ -420,14 +430,14 @@ async function execute(input: ExecuteInput): Promise<void> {
     // 用户消息并随 transcript 保存；附件 id 与原件仍保留，后续可显式读取。
     if (message !== undefined && input.attachmentIds?.length) {
       message = await withAttachmentPreflight(
-        message, input.attachmentIds, sessionId, userId, productionId, abort.signal,
+        message, input.attachmentIds, sessionId, userId, productionId, runId, abort.signal,
       );
       lastUser = message;
     }
 
     // 召回临时插入：送模型的消息列表里，最后一条用户消息前插一条 user 消息。
     // 不进 session（下一轮不再带，与 prependContext 语义一致）。
-    const injectedNote = [priorCapNote, recall].filter(Boolean).join("\n\n");
+    const injectedNote = [priorCapNote, recall, attachmentLifecycle.text].filter(Boolean).join("\n\n");
     if (injectedNote) {
       harness.on("context", ({ messages }) => {
         const idx = findLastUserIndex(messages);
@@ -446,6 +456,9 @@ async function execute(input: ExecuteInput): Promise<void> {
       const g: GateInput = { runId, sessionId, userId, productionId, tool, toolCallId: event.toolCallId, args: event.input, publisher, signal: abort.signal, isDetached: () => detached };
       if (schedule) return unattendedGate(g, schedule.allowedTools);
       if (tool.readOnly) return undefined;
+      // 仅限带短恢复宽限期的附件释放：交互会话可直行；无人值守仍由上面的
+      // unattended 交集门缺省拒绝，重启恢复也不会把它当 readOnly 盲重放。
+      if (tool.reversibleNoConfirm) return undefined;
       // 自写域（Def.selfScribe）：AI 工作记录类工具免卡直行——目标自证/权限
       // 照查/审计照报都在工具内，见 tools.ts 的 selfScribe 注释
       if (tool.selfScribe) return undefined;
@@ -958,7 +971,7 @@ export async function getHistory(sessionId: string): Promise<ChatTranscriptEntry
   const storage = await PgSessionStorage.load(sessionId);
   if (!storage) return [];
   const ctx = await new Session(storage).buildContext();
-  const attachments = new Map((await listReadyAttachmentsForSession(sessionId)).map((a) => [a.id, a]));
+  const attachments = new Map((await listAttachmentsForSession(sessionId)).map((a) => [a.id, a]));
   const entries: ChatTranscriptEntry[] = [];
   for (const m of ctx.messages) {
     if (m.role === "user") {
@@ -967,7 +980,12 @@ export async function getHistory(sessionId: string): Promise<ChatTranscriptEntry
       const attached = attachmentIdsFromContext(raw)
         .map((id) => attachments.get(id))
         .filter((a) => a !== undefined)
-        .map((a) => ({ id: a.id, fileName: a.fileName, mimeType: a.mimeType, mediaKind: a.mediaKind }));
+        .map((a) => ({
+          id: a.id, fileName: a.fileName, mimeType: a.mimeType, mediaKind: a.mediaKind,
+          ...(a.status !== "ready" ? { status: a.status } : {}),
+          ...(a.releaseUntil ? { releaseUntil: a.releaseUntil } : {}),
+          ...(a.promotedAssetId ? { promotedAssetId: a.promotedAssetId } : {}),
+        }));
       if (content) entries.push({ role: "user", content, ...(attached.length ? { attachments: attached } : {}) });
     } else if (m.role === "toolResult") {
       const result = textOf(m.content).slice(0, TOOL_PAYLOAD_MAX_CHARS);
@@ -1028,12 +1046,16 @@ export async function deleteSession(sessionId: string): Promise<void> {
 
 /** 只删行（级联 transcript/run/审批/事件）；中止进行中 run 由调用方经 client 先做。 */
 export async function deleteSessionRows(sessionId: string): Promise<void> {
-  const attachmentKeys = await attachmentKeysForSession(sessionId);
-  await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [sessionId]);
-  await Promise.allSettled(attachmentKeys.map(async (key) => {
-    try { await deleteR2Object(key); }
-    catch (err) { console.error(`[agent-session] 删除附件 R2 对象失败 ${key}:`, err); }
-  }));
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await scheduleSessionAttachmentDeletionInTx(client, sessionId);
+    await client.query(`DELETE FROM agent_session WHERE id = $1`, [sessionId]);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally { client.release(); }
 }
 
 // ── 重启恢复（§4.4 ①）────────────────────────────────────────────────────────

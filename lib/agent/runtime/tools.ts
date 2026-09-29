@@ -72,6 +72,8 @@ export interface RuntimeToolDef extends RuntimeTool {
   unattended?: "allow" | "deny";
   /** 自写域（#47 导入日志）：交互会话免确认卡；约束见 Def.selfScribe 注释 */
   selfScribe?: true;
+  /** 可在短宽限期内由用户恢复的低风险写；只跳过交互确认，不开放无人值守。 */
+  reversibleNoConfirm?: true;
 }
 
 const text = (t: string): AgentToolResult<unknown> => ({ content: [{ type: "text", text: t }], details: undefined });
@@ -117,6 +119,7 @@ type Def = {
    * unattended 交集门）。
    */
   selfScribe?: true;
+  reversibleNoConfirm?: true;
 };
 
 const wikiIdOf = (args: Record<string, unknown>): string[] => (typeof args.wikiId === "string" && args.wikiId ? [args.wikiId] : []);
@@ -197,8 +200,21 @@ export const DEFS: Def[] = [
         tier: args.tier === "full" ? "full" : args.tier === "fast" ? "fast" : undefined,
         limit: typeof args.limit === "number" ? args.limit : undefined,
       },
+      ctx.run?.runId,
       ctx.run?.signal,
     ),
+  },
+  {
+    mcpName: "my.attachment_release",
+    description: "释放当前会话中本轮已经成功处理、且确认不再需要的临时附件。释放后有 24 小时恢复期；不要释放仍可能在后续步骤使用的附件。",
+    parameters: Type.Object({ attachmentId: Type.String({ description: "本轮已成功处理的临时附件 id" }) }),
+    readOnly: false,
+    reversibleNoConfirm: true,
+    mutates: (args) => ({ scope: "attachment", action: "updated", ids: [String(args.attachmentId)] }),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/attachment-tools")).releaseSessionAttachment({
+      userId: ctx.userId, sessionId: ctx.run?.sessionId ?? null, runId: ctx.run?.runId ?? null,
+      attachmentId: String(args.attachmentId),
+    }),
   },
   {
     mcpName: "my.update_instructions",
@@ -228,6 +244,25 @@ export const DEFS: Def[] = [
   prodTool("production.contact_list",
     "列出当前对话关联制作的全部成员：姓名、用户 id、职位、部门（含是否负责人）、标签。需要用户 id 的工具（如 wiki_set_grant 的分享对象）从这里取。不含邮箱/电话——联系方式是敏感信息，只有本人经 users.query_sensitive 确认后才能读取。",
     async (uid, pid) => (await import("@/lib/agent/tools/production-tools")).productionContactList(uid, pid)),
+  {
+    mcpName: "production.attachment_save_as_asset",
+    description: "把当前会话临时附件原件存为当前制作的私有资产（默认 Reference、资产库根目录）。复用原对象，不重复上传；需要用户确认和 asset */*@create 权限。",
+    parameters: Type.Object({
+      attachmentId: Type.String({ description: "临时附件 id" }),
+      assetType: Type.Optional(Type.String({ description: "资产类型；省略时为 reference，不能是 financial_document" })),
+      name: Type.Optional(Type.String({ description: "可选资产显示名" })),
+      summary: Type.String({ description: "为什么要把该临时附件长期保存为资产" }),
+    }),
+    readOnly: false,
+    needsProduction: true,
+    mutates: () => ({ scope: "asset", action: "created" }),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/attachment-tools")).saveSessionAttachmentAsAsset({
+      userId: ctx.userId, productionId: ctx.productionId, sessionId: ctx.run?.sessionId ?? null,
+      attachmentId: String(args.attachmentId),
+      assetType: typeof args.assetType === "string" ? args.assetType : undefined,
+      name: typeof args.name === "string" ? args.name : undefined,
+    }),
+  },
   prodTool("production.department_list",
     "列出当前对话关联制作的部门/用户组树（树状缩进，含部门 id、负责人、成员数）。需要部门 id 的工具（如 wiki_set_grant 的 deptIds）从这里取。",
     async (uid, pid) => (await import("@/lib/agent/tools/production-tools")).productionDepartmentList(uid, pid)),
@@ -1046,6 +1081,7 @@ export function buildTools(ctx: ToolContext): RuntimeToolDef[] {
     mutates: d.mutates,
     unattended: d.unattended,
     selfScribe: d.selfScribe,
+    reversibleNoConfirm: d.reversibleNoConfirm,
     execute: async (toolCallId, params) => {
       if (d.needsProduction && !ctx.productionId) return text(NO_PRODUCTION);
       const args = (params ?? {}) as Record<string, unknown>;

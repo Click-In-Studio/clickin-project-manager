@@ -20,6 +20,18 @@ export async function register() {
             .catch((err) => console.error("[agent-runtime] schedule tick failed:", err));
         }, SCHEDULE_TICK_MS).unref();
       }
+      const attachmentGlobal = globalThis as { __agentAttachmentGcTick?: boolean };
+      if (!attachmentGlobal.__agentAttachmentGcTick) {
+        attachmentGlobal.__agentAttachmentGcTick = true;
+        const { runAttachmentGcBatch } = await import("./lib/agent/attachment-db");
+        const tickAttachmentGc = () => runAttachmentGcBatch()
+          .then((result) => {
+            if (result.deleted || result.failed) console.log(`[agent-attachment] gc deleted=${result.deleted} failed=${result.failed}`);
+          })
+          .catch((err) => console.error("[agent-attachment] gc tick failed:", err));
+        void tickAttachmentGc();
+        setInterval(tickAttachmentGc, 60_000).unref();
+      }
     }
   }
 }
