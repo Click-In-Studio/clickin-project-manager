@@ -58,10 +58,8 @@ export async function readSessionAttachment(
       fileName: attachment.fileName,
       mimeType: attachment.mimeType,
       r2Key: attachment.r2Key,
-    }, { signal });
-    return preflight.status === "ok"
-      ? preflight.renderedDigest
-      : neutralizeInjectionTags(`《${attachment.fileName}》${preflight.reason}`);
+    }, { signal, usage: { userId, productionId } });
+    return neutralizeInjectionTags(preflight.renderedDigest);
   }
   if (mediaKind === "image") {
     return attachmentFileOcr(userId, productionId, ref, attachment.mimeType, [1], {

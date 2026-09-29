@@ -5,7 +5,6 @@ import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
 import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { cleanupProduction, makeProduction, setProductionTier, shortId } from "../_support/factories";
-import { preflightAttachment } from "@/lib/mmp/attachment-preflight";
 
 const { presignMock, headMock, deleteMock } = vi.hoisted(() => ({
   presignMock: vi.fn(),
@@ -111,15 +110,4 @@ describe("会话临时附件路由（#704）", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "附件不存在、尚未上传完成或不属于该会话" });
   });
-});
-
-it("预检插口接受尚未实现的 video 模态并显式降级", async () => {
-  const out = await preflightAttachment({
-    mediaKind: "video",
-    attachmentId: "aat_video",
-    fileName: "reference.mp4",
-    mimeType: "video/mp4",
-    r2Key: "agent-attachments/aat_video/reference.mp4",
-  });
-  expect(out).toEqual({ status: "unavailable", reason: expect.stringContaining("video") });
 });

@@ -53,13 +53,15 @@ async function main() {
       if (req.url === "/runs") {
         const sessionId = str("sessionId"); const userId = str("userId"); const message = str("message");
         if (!sessionId || !userId || !message) return send(res, 400, { error: "missing fields" });
-        const r = await service.startRun({ sessionId, userId, message, pageKey: str("pageKey") ?? null });
+        const attachmentIds = Array.isArray(body.attachmentIds) ? body.attachmentIds.filter((id): id is string => typeof id === "string") : [];
+        const r = await service.startRun({ sessionId, userId, message, attachmentIds, pageKey: str("pageKey") ?? null });
         return send(res, 200, r);
       }
       if (req.url === "/runs/steer") {
         const sessionId = str("sessionId"); const message = str("message");
         if (!sessionId || !message) return send(res, 400, { error: "missing fields" });
-        const r = await service.steerRun(sessionId, message);
+        const attachmentIds = Array.isArray(body.attachmentIds) ? body.attachmentIds.filter((id): id is string => typeof id === "string") : [];
+        const r = await service.steerRun(sessionId, message, attachmentIds);
         return send(res, 200, { runId: r?.runId ?? null });
       }
       if (req.url === "/runs/abort") {

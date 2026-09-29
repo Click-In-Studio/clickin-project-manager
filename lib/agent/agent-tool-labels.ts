@@ -54,6 +54,7 @@ export const TOOL_LABELS: Record<string, string> = {
   "production-doc_read": "读文档内容",
   "production-doc_search": "搜索文档内容",
   "production-doc_page_ocr": "识别扫描页文字",
+  "production-asset_preflight": "预检资产媒体",
   "production-asset_list": "列出资产文件",
   "production-asset_propose_rename": "提议资产改名",
   "production-asset_propose_move": "提议移动资产",

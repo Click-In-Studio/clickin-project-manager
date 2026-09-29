@@ -13,6 +13,7 @@ export interface StartRunRequest {
   sessionId: string;
   userId: string;
   message: string;
+  attachmentIds?: string[];
   pageKey?: string | null;
 }
 
@@ -39,9 +40,11 @@ export async function startRun(input: StartRunRequest): Promise<{ runId: string 
   return post<{ runId: string }>("/runs", input);
 }
 
-export async function steerRun(sessionId: string, message: string): Promise<{ runId: string } | null> {
-  if (!runnerUrl()) return service.steerRun(sessionId, message);
-  const r = await post<{ runId: string | null }>("/runs/steer", { sessionId, message });
+export async function steerRun(
+  sessionId: string, message: string, attachmentIds: string[] = [],
+): Promise<{ runId: string } | null> {
+  if (!runnerUrl()) return service.steerRun(sessionId, message, attachmentIds);
+  const r = await post<{ runId: string | null }>("/runs/steer", { sessionId, message, attachmentIds });
   return r.runId ? { runId: r.runId } : null;
 }
 

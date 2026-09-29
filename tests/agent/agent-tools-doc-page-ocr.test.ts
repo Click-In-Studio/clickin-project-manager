@@ -7,7 +7,7 @@ import { makeProduction, cleanupProduction, shortId } from "../_support/factorie
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { addProductionMember } from "@/lib/perm/member-db";
 import { createAsset } from "@/lib/asset/db";
-import { docPageOcr, DENIED_ASSET_VIEW } from "@/lib/agent/tools/doc-tools";
+import { assetPreflight, docPageOcr, DENIED_ASSET_VIEW } from "@/lib/agent/tools/doc-tools";
 import { DENIED_NOT_MEMBER } from "@/lib/agent/tools/production-tools";
 import { DEFS } from "@/lib/agent/runtime/tools";
 import { TOOL_CATALOG } from "@/lib/agent/tools/tool-catalog";
@@ -104,6 +104,25 @@ describe("doc_page_ocr：门", () => {
     expect(out).toContain("OCR 服务当前不可用");
     expect(out).toContain("not_configured");
     expect(out).toContain("不要把这当作页面为空");
+  });
+});
+
+describe("asset_preflight：既有资产复用自动预检", () => {
+  it("与资产预览同门；服务未配置时明确保留原件", async () => {
+    delete process.env.MMP_BASE_URL;
+    const assetId = await makeAsset("recording.m4a", "audio/mp4");
+    expect(await assetPreflight(outsiderId, prodId, assetId)).toBe(DENIED_NOT_MEMBER);
+    expect(await assetPreflight(memberId, prodId, assetId)).toBe(DENIED_ASSET_VIEW);
+    const out = await assetPreflight(ownerId, prodId, assetId);
+    expect(out).toContain("[mmp:digest unavailable]");
+    expect(out).toContain("not_configured");
+  });
+
+  it("DEFS / catalog / labels 三处都有，且为 production.doc 只读工具", () => {
+    const def = DEFS.find((d) => d.mcpName === "production.asset_preflight");
+    expect(def).toMatchObject({ readOnly: true, needsProduction: true });
+    expect(TOOL_CATALOG.find((c) => c.name === "production.asset_preflight")?.family).toBe("production.doc");
+    expect(TOOL_LABELS["production-asset_preflight"]).toBeTruthy();
   });
 });
 

@@ -14,6 +14,7 @@ import { readEventsSince, subscribeSessionEvents } from "@/lib/agent/runtime/eve
 import { resolveApproval, approvalSession } from "@/lib/agent/runtime/approvals";
 import { CHAT_MODEL } from "@/lib/agent/runtime/config";
 import { exposedName } from "@/lib/agent/runtime/tools";
+import { createPendingAttachment, markAttachmentReady } from "@/lib/agent/attachment-db";
 
 // #367 S2：run 服务端到端（真 DB、假模型、真 harness、真工具函数）。
 // 覆盖：事件落表+NOTIFY、历史投影、会话列表、审批门（deny 带理由 / allow）、
@@ -22,7 +23,7 @@ import { exposedName } from "@/lib/agent/runtime/tools";
 const USAGE = { input: 7, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 const base = () => ({ role: "assistant" as const, api: CHAT_MODEL.api, provider: CHAT_MODEL.provider, model: CHAT_MODEL.id, usage: USAGE, timestamp: Date.now() });
 
-type Step = { text: string; thinking?: string } | { calls: ToolCall[] } | { hang: true };
+type Step = { text: string; thinking?: string; wait?: Promise<void> } | { calls: ToolCall[] } | { hang: true };
 /** 脚本化假模型；记录每次调用看到的上下文（系统提示、消息、工具名）。 */
 function scripted(script: Step[]) {
   const seen: Array<{ systemPrompt?: string; messages: unknown[]; tools: string[]; reasoning?: string }> = [];
@@ -38,7 +39,8 @@ function scripted(script: Step[]) {
       });
       return stream;
     }
-    queueMicrotask(() => {
+    queueMicrotask(async () => {
+      if ("text" in next && next.wait) await next.wait;
       const final: AssistantMessage = "text" in next
         ? { ...base(), content: [...(next.thinking ? [{ type: "thinking" as const, thinking: next.thinking }] : []), { type: "text", text: next.text }], stopReason: "stop" }
         : { ...base(), content: next.calls, stopReason: "toolUse" };
@@ -177,6 +179,54 @@ describe("agent-runtime service", () => {
     expect(list.find((s) => s.key === key)).toMatchObject({ title: "你好", status: "done" });
     // delta 行已清理，只剩终态
     expect((await readEventsSince(key, 0)).map((r) => r.line.type)).not.toContain("delta");
+  });
+
+  it("媒体附件在首次模型调用前按 MMP registry 自动预检，digest 与原件引用同时进入消息", async () => {
+    const { streamFn, seen } = scripted([{ text: "已听到" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = newKey();
+    const pending = await createPendingAttachment({
+      sessionId: key, userId, fileName: "录音.mp4", mimeType: "video/mp4", mediaKind: "audio", fileSize: 12,
+    });
+    await markAttachmentReady(pending.id, key, userId, 12);
+    const oldUrl = process.env.MMP_BASE_URL;
+    const oldFetch = globalThis.fetch;
+    process.env.MMP_BASE_URL = "https://mmp.test";
+    globalThis.fetch = (async (url: string) => {
+      if (url.endsWith("/capabilities")) {
+        return Response.json({ protocol_version: "1.1", capabilities: [{ nodes: ["test-node"], capability: {
+          id: "triage.audio", modal: "audio", tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }],
+          input: { media: "required" }, output_schema: "urn:mmp:protocol:1:digest",
+        } }] });
+      }
+      const source = { tier: "cpu", engine: "test", engine_version: "1", generated_at: "2026-09-29T00:00:00Z", degraded: false, params: {} };
+      return Response.json({
+        job_id: "test-node-1", type: "triage.audio", status: "done", media_id: "sha256:runtime-audio", cached: false, source,
+        timings_ms: { vad: 3, tagging: 4, asr: 5 },
+        result: { media_id: "sha256:runtime-audio", kind: "audio", duration_sec: 1, timeline_unit: "sec",
+          segments: [{ start: 0, end: 1, label_status: "ok", labels: [{ tag: "Speech", score: 0.9 }], asr: { text: "帮我记下来", lang: "zh", confidence: 0.9 } }],
+          tools: { vad: "ok", tagging: "ok", asr: "ok" }, gaps: [], capabilities_available: [], source },
+      });
+    }) as typeof globalThis.fetch;
+    try {
+      await startRun({ sessionId: key, userId, message: "听一下", attachmentIds: [pending.id] });
+      await collectUntilTerminal(key);
+      await waitForIdle(key);
+      const firstContext = JSON.stringify(seen[0].messages);
+      expect(firstContext).toContain("帮我记下来");
+      expect(firstContext).toContain(pending.id);
+      expect(await getHistory(key)).toEqual([
+        { role: "user", content: "听一下", attachments: [{ id: pending.id, fileName: "录音.mp4", mimeType: "video/mp4", mediaKind: "audio" }] },
+        { role: "assistant", content: "已听到" },
+      ]);
+      const mmp = await getPool().query<{ tokens: number }>(
+        `SELECT tokens FROM ai_usage WHERE user_id = $1 AND model = 'mmp:triage.audio@cpu' ORDER BY created_at DESC LIMIT 1`, [userId],
+      );
+      expect(mmp.rows[0]?.tokens).toBe(12);
+    } finally {
+      globalThis.fetch = oldFetch;
+      if (oldUrl === undefined) delete process.env.MMP_BASE_URL; else process.env.MMP_BASE_URL = oldUrl;
+    }
   });
 
   it("thinking 写入 transcript、历史可恢复，run 结束后累计事件被清理", async () => {
@@ -402,6 +452,63 @@ describe("agent-runtime service", () => {
     const texts = seen.flatMap((s) => s.messages).map((m) => JSON.stringify(m));
     // steer 若赶上了第二次调用会出现在上下文；赶不上（run 已结束）则 steerRun 返回 null
     if (steered) expect(texts.some((t) => t.includes("补一句"))).toBe(true);
+  });
+
+  it("带附件 steer 立即确认入队，MMP 预检异步完成后才把 digest 注入下一次模型调用", async () => {
+    let releaseFirst!: () => void;
+    const firstWait = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let releaseCapabilities!: () => void;
+    const capabilityWait = new Promise<void>((resolve) => { releaseCapabilities = resolve; });
+    const { streamFn, seen } = scripted([{ text: "第一轮", wait: firstWait }, { text: "收到附件插话" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = newKey();
+    const pending = await createPendingAttachment({
+      sessionId: key, userId, fileName: "补充.m4a", mimeType: "audio/mp4", mediaKind: "audio", fileSize: 12,
+    });
+    await markAttachmentReady(pending.id, key, userId, 12);
+    const oldUrl = process.env.MMP_BASE_URL;
+    const oldFetch = globalThis.fetch;
+    process.env.MMP_BASE_URL = "https://mmp-runtime-steer.test";
+    let jobs = 0;
+    globalThis.fetch = (async (url: string) => {
+      if (url.endsWith("/capabilities")) {
+        await capabilityWait;
+        return Response.json({ protocol_version: "1.1", capabilities: [{ nodes: ["test-node"], capability: {
+          id: "triage.audio", modal: "audio", tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }],
+          input: { media: "required" }, output_schema: "urn:mmp:protocol:1:digest",
+        } }] });
+      }
+      jobs++;
+      const source = { tier: "cpu", engine: "test", engine_version: "1", generated_at: "2026-09-29T00:00:00Z", degraded: false, params: {} };
+      return Response.json({
+        job_id: "test-node-steer", type: "triage.audio", status: "done", media_id: "sha256:steer-audio", cached: true, source,
+        result: { media_id: "sha256:steer-audio", kind: "audio", duration_sec: 1, timeline_unit: "sec",
+          segments: [{ start: 0, end: 1, label_status: "ok", labels: [{ tag: "Speech", score: 0.9 }], asr: { text: "这是补充说明", lang: "zh", confidence: 0.9 } }],
+          tools: { vad: "ok", tagging: "ok", asr: "ok" }, gaps: [], capabilities_available: [], source },
+      });
+    }) as typeof globalThis.fetch;
+    try {
+      await startRun({ sessionId: key, userId, message: "先回答" });
+      for (let i = 0; i < 100 && seen.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+      const queued = await Promise.race([
+        steerRun(key, "再听这个", [pending.id]),
+        new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 100)),
+      ]);
+      expect(queued).not.toBe("timeout");
+      expect(jobs).toBe(0);
+      releaseCapabilities();
+      for (let i = 0; i < 100 && jobs === 0; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+      releaseFirst();
+      await collectUntilTerminal(key);
+      await waitForIdle(key);
+      expect(JSON.stringify(seen[1]?.messages)).toContain("这是补充说明");
+      expect(JSON.stringify(seen[1]?.messages)).toContain(pending.id);
+    } finally {
+      releaseCapabilities();
+      releaseFirst();
+      globalThis.fetch = oldFetch;
+      if (oldUrl === undefined) delete process.env.MMP_BASE_URL; else process.env.MMP_BASE_URL = oldUrl;
+    }
   });
 
   it("孤儿接管：心跳过期的 running run 被新执行者接管并从 transcript 续跑", async () => {
