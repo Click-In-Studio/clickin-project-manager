@@ -18,6 +18,7 @@ import { derivePageKey, pageLabelFor, pageSuggestionsFor } from "@/lib/agent/age
 import { toolLabel } from "@/lib/agent/agent-tool-labels";
 import { dispatchAgentMutation } from "@/lib/agent/agent-mutations";
 import WikiProposalPreviewModal from "@/components/agent/WikiProposalPreviewModal";
+import VoiceRecordButton from "@/components/agent/VoiceRecordButton";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
 import { useShortcutLabel } from "@/components/ui/shortcut-label";
@@ -98,6 +99,8 @@ export default function AgentPopout({
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [voiceRetryFile, setVoiceRetryFile] = useState<File | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -179,6 +182,7 @@ export default function AgentPopout({
   useEffect(() => {
     setAttachments([]);
     setAttachmentError(null);
+    setVoiceRetryFile(null);
   }, [activeKey]);
 
   // 附带当前文档 chip：换文档/离开文档页时重取标题+tag、默认重新勾选附带。
@@ -421,62 +425,84 @@ export default function AgentPopout({
     setBubbles([]);
   }, [productionId]);
 
+  const ensureSession = useCallback(async (): Promise<string | null> => {
+    const current = activeKeyRef.current;
+    if (current) return current;
+    const res = await fetch("/api/agent/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(productionId ? { productionId } : {}),
+    });
+    if (!res.ok) return null;
+    const { key } = (await res.json()) as { key: string };
+    activeKeyRef.current = key;
+    setActiveKey(key);
+    return key;
+  }, [productionId]);
+
+  const uploadOneAttachment = useCallback(async (
+    key: string,
+    file: File,
+    mediaKindOverride?: string,
+  ): Promise<ChatAttachment> => {
+    const mimeType = file.type || "application/octet-stream";
+    const presign = await fetch("/api/agent/attachments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionKey: key,
+        fileName: file.name,
+        mimeType,
+        mediaKind: mediaKindOverride ?? /^(audio|image|video)\//.exec(mimeType)?.[1] ?? null,
+        fileSize: file.size,
+      }),
+    });
+    const prepared = (await presign.json().catch(() => ({}))) as {
+      error?: string;
+      uploadUrl?: string;
+      contentType?: string;
+      attachment?: ChatAttachment;
+    };
+    if (!presign.ok || !prepared.uploadUrl || !prepared.attachment) {
+      throw new Error(prepared.error || `《${file.name}》准备上传失败`);
+    }
+    const removePrepared = () => fetch(
+      `/api/agent/attachments?sessionKey=${encodeURIComponent(key)}&attachmentId=${encodeURIComponent(prepared.attachment!.id)}`,
+      { method: "DELETE" },
+    ).catch(() => {});
+    const put = await fetch(prepared.uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": prepared.contentType || mimeType },
+      body: file,
+    });
+    if (!put.ok) { await removePrepared(); throw new Error(`《${file.name}》上传失败`); }
+    const complete = await fetch("/api/agent/attachments", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionKey: key, attachmentId: prepared.attachment.id }),
+    });
+    const done = (await complete.json().catch(() => ({}))) as { error?: string; attachment?: ChatAttachment };
+    if (!complete.ok || !done.attachment) {
+      await removePrepared();
+      throw new Error(done.error || `《${file.name}》登记失败`);
+    }
+    return done.attachment;
+  }, []);
+
   const uploadAttachments = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
     if (attachments.length + files.length > 8) {
       setAttachmentError("每条消息最多附带 8 个文件");
       return;
     }
-    let key = activeKey;
-    if (!key) {
-      const sessionRes = await fetch("/api/agent/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(productionId ? { productionId } : {}),
-      });
-      if (!sessionRes.ok) { setAttachmentError("新建对话失败"); return; }
-      ({ key } = (await sessionRes.json()) as { key: string });
-      setActiveKey(key);
-    }
+    const key = await ensureSession();
+    if (!key) { setAttachmentError("新建对话失败"); return; }
     setAttachmentBusy(true);
     setAttachmentError(null);
     try {
       for (const file of Array.from(files)) {
-        const mimeType = file.type || "application/octet-stream";
-        const presign = await fetch("/api/agent/attachments", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionKey: key,
-            fileName: file.name,
-            mimeType,
-            mediaKind: /^(audio|image|video)\//.exec(mimeType)?.[1] ?? null,
-            fileSize: file.size,
-          }),
-        });
-        const prepared = (await presign.json().catch(() => ({}))) as {
-          error?: string;
-          uploadUrl?: string;
-          contentType?: string;
-          attachment?: ChatAttachment;
-        };
-        if (!presign.ok || !prepared.uploadUrl || !prepared.attachment) throw new Error(prepared.error || `《${file.name}》准备上传失败`);
-        const put = await fetch(prepared.uploadUrl, { method: "PUT", headers: { "Content-Type": prepared.contentType || mimeType }, body: file });
-        if (!put.ok) {
-          await fetch(`/api/agent/attachments?sessionKey=${encodeURIComponent(key)}&attachmentId=${encodeURIComponent(prepared.attachment.id)}`, { method: "DELETE" }).catch(() => {});
-          throw new Error(`《${file.name}》上传失败`);
-        }
-        const complete = await fetch("/api/agent/attachments", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionKey: key, attachmentId: prepared.attachment.id }),
-        });
-        const done = (await complete.json().catch(() => ({}))) as { error?: string; attachment?: ChatAttachment };
-        if (!complete.ok || !done.attachment) {
-          await fetch(`/api/agent/attachments?sessionKey=${encodeURIComponent(key)}&attachmentId=${encodeURIComponent(prepared.attachment.id)}`, { method: "DELETE" }).catch(() => {});
-          throw new Error(done.error || `《${file.name}》登记失败`);
-        }
-        setAttachments((prev) => [...prev, done.attachment!]);
+        const uploaded = await uploadOneAttachment(key, file);
+        setAttachments((prev) => [...prev, uploaded]);
       }
     } catch (err) {
       setAttachmentError(err instanceof Error ? err.message : "附件上传失败");
@@ -484,7 +510,7 @@ export default function AgentPopout({
       setAttachmentBusy(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  }, [activeKey, attachments.length, productionId]);
+  }, [attachments.length, ensureSession, uploadOneAttachment]);
 
   const removeAttachment = useCallback(async (attachment: ChatAttachment) => {
     setAttachments((prev) => prev.filter((a) => a.id !== attachment.id));
@@ -492,26 +518,12 @@ export default function AgentPopout({
     await fetch(`/api/agent/attachments?sessionKey=${encodeURIComponent(activeKey)}&attachmentId=${encodeURIComponent(attachment.id)}`, { method: "DELETE" }).catch(() => {});
   }, [activeKey]);
 
-  const send = useCallback(async () => {
-    const raw = input.trim();
-    if (!raw && attachments.length === 0) return;
-    let key = activeKey;
-    if (!key) {
-      const res = await fetch("/api/agent/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(productionId ? { productionId } : {}),
-      });
-      if (!res.ok) return;
-      ({ key } = (await res.json()) as { key: string });
-      setActiveKey(key);
-    }
-    const visibleText = raw || "请查看附件。";
-    setInput("");
+  const dispatchMessage = useCallback(async (key: string, raw: string, selectedAttachments: ChatAttachment[]): Promise<boolean> => {
+    const visibleText = raw || (selectedAttachments.some((item) => item.mediaKind === "audio") ? "请听一下这段语音。" : "请查看附件。");
     setBubbles((prev) => [...prev, {
       kind: "user",
       text: visibleText,
-      ...(attachments.length ? { attachments: attachments.map(({ id, fileName, mimeType, mediaKind }) => ({ id, fileName, mimeType, mediaKind })) } : {}),
+      ...(selectedAttachments.length ? { attachments: selectedAttachments.map(({ id, fileName, mimeType, mediaKind }) => ({ id, fileName, mimeType, mediaKind })) } : {}),
     }]);
 
     // 附带界面状态：页面只带一个中文页面名；文档只带标题/tag/id 这几个指针
@@ -533,18 +545,59 @@ export default function AgentPopout({
     const res = await fetch("/api/agent/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionKey: key, message, attachmentIds: attachments.map((a) => a.id), steer: streaming || undefined }),
+      body: JSON.stringify({ sessionKey: key, message, attachmentIds: selectedAttachments.map((a) => a.id), steer: streaming || undefined }),
     });
-    if (res.ok) setAttachments([]);
     if (streaming) {
       const out = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
       if (!res.ok || !out?.ok) {
         setBubbles((prev) => [...prev, { kind: "notice", text: out?.error || "消息注入失败，请等本轮结束后重发" }]);
+        return false;
       }
     } else {
       consumeStream(res, key);
     }
-  }, [input, attachments, activeKey, streaming, consumeStream, productionId, docAttached, currentWikiId, currentDocTitle, currentDocTags, assetAttached, currentAssetId, currentAssetName, pageAttached, pageLabel, focusAttached, scriptFocusActive]);
+    return res.ok;
+  }, [streaming, consumeStream, docAttached, currentWikiId, currentDocTitle, currentDocTags, assetAttached, currentAssetId, currentAssetName, pageAttached, pageLabel, focusAttached, scriptFocusActive]);
+
+  const send = useCallback(async () => {
+    const raw = input.trim();
+    if (!raw && attachments.length === 0) return;
+    const key = await ensureSession();
+    if (!key) return;
+    const selectedAttachments = attachments;
+    setInput("");
+    if (await dispatchMessage(key, raw, selectedAttachments)) {
+      const sentIds = new Set(selectedAttachments.map((item) => item.id));
+      setAttachments((prev) => prev.filter((item) => !sentIds.has(item.id)));
+    }
+  }, [input, attachments, ensureSession, dispatchMessage]);
+
+  const sendVoiceFile = useCallback(async (file: File) => {
+    setVoiceBusy(true);
+    setVoiceRetryFile(null);
+    setAttachmentError(null);
+    let uploaded: ChatAttachment | null = null;
+    try {
+      const key = await ensureSession();
+      if (!key) throw new Error("新建对话失败");
+      // Safari 可能把纯音频录音声明为 video/mp4；真实 MIME 原样保存，但模态由录音入口钉死为 audio。
+      uploaded = await uploadOneAttachment(key, file, "audio");
+      if (!await dispatchMessage(key, "", [uploaded])) {
+        setAttachments((prev) => [...prev, uploaded!]);
+        setAttachmentError("语音已上传但发送失败，可点击发送重试");
+      }
+    } catch (error) {
+      if (uploaded) {
+        setAttachments((prev) => [...prev, uploaded!]);
+        setAttachmentError("语音已上传但发送失败，可点击发送重试");
+      } else {
+        setVoiceRetryFile(file);
+        setAttachmentError(error instanceof Error ? `${error.message}；录音已保留，可重试` : "语音上传失败；录音已保留，可重试");
+      }
+    } finally {
+      setVoiceBusy(false);
+    }
+  }, [dispatchMessage, ensureSession, uploadOneAttachment]);
 
   const abort = useCallback(async () => {
     if (!activeKey) return;
@@ -1071,7 +1124,7 @@ export default function AgentPopout({
 
       {/* 输入区 */}
       <div className="agent-mobile-composer shrink-0 border-t border-[var(--line)] p-3">
-        {(attachments.length > 0 || attachmentBusy || attachmentError) && (
+        {(attachments.length > 0 || attachmentBusy || voiceBusy || voiceRetryFile || attachmentError) && (
           <div className="mb-2 flex flex-wrap items-center gap-1.5">
             {attachments.map((attachment) => (
               <span key={attachment.id} className="flex max-w-full items-center gap-1 rounded-full border border-[var(--line)] bg-[var(--paper)] px-2 py-1 text-[11px] text-[var(--ink)]">
@@ -1080,6 +1133,14 @@ export default function AgentPopout({
               </span>
             ))}
             {attachmentBusy && <span className="text-[11px] text-[var(--muted)]">正在上传…</span>}
+            {voiceBusy && <span className="text-[11px] text-[var(--muted)]">正在上传并发送语音…</span>}
+            {voiceRetryFile && (
+              <span className="flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
+                <span>🎤 录音待重试</span>
+                <button type="button" disabled={voiceBusy} onClick={() => void sendVoiceFile(voiceRetryFile)} className="font-medium underline disabled:opacity-40">重试</button>
+                <button type="button" disabled={voiceBusy} onClick={() => { setVoiceRetryFile(null); setAttachmentError(null); }} title="放弃这段录音" className="disabled:opacity-40">✕</button>
+              </span>
+            )}
             {attachmentError && <span className="text-[11px] text-[var(--danger)]">{attachmentError}</span>}
           </div>
         )}
@@ -1094,13 +1155,19 @@ export default function AgentPopout({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={attachmentBusy || attachments.length >= 8}
+            disabled={attachmentBusy || voiceBusy || attachments.length >= 8}
             title="附带临时文件（单个不超过 50 MB）"
             aria-label="附带文件"
             className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-lg border border-zinc-300 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
           >
             📎
           </button>
+          <VoiceRecordButton
+            disabled={attachmentBusy || voiceBusy}
+            cancelKey={`${open ? "open" : "closed"}:${activeKey ?? "none"}`}
+            onRecorded={sendVoiceFile}
+            onError={setAttachmentError}
+          />
           <textarea
             ref={textareaRef}
             value={input}
@@ -1128,7 +1195,7 @@ export default function AgentPopout({
           ) : null}
           <button
             onClick={send}
-            disabled={(!input.trim() && attachments.length === 0) || attachmentBusy}
+            disabled={(!input.trim() && attachments.length === 0) || attachmentBusy || voiceBusy}
             className="shrink-0 rounded-lg bg-zinc-900 px-3 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
           >
             发送
