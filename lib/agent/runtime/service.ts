@@ -26,6 +26,7 @@ import type { ExecutionEnv, PromptTemplate, Skill } from "../../../vendor/opencl
 import type { AgentMessage } from "../../../vendor/openclaw/packages/agent-core/src/types";
 import type { ToolCall } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import type { StreamFn } from "../../../vendor/openclaw/packages/llm-core/src/types";
+import type { MmpClient } from "@mmp/client";
 import { PgSessionStorage } from "./pg-session-storage";
 import { EventPublisher, pruneStreamingUpdates } from "./events";
 import { createStreamLineAdapter } from "./stream-lines";
@@ -49,6 +50,8 @@ import { activatePendingPermissions } from "@/lib/perm/permission-activation-db"
 import { attachmentKeysForSession, getReadyAttachments, listReadyAttachmentsForSession } from "@/lib/agent/attachment-db";
 import { deleteR2Object } from "@/lib/r2";
 import { preflightAttachments } from "@/lib/mmp/attachment-preflight";
+import { buildMmpToolSurface } from "./mmp-tools";
+import { focusedMmpToolNames, mmpAttachmentToolNamesFor } from "./mmp-tool-focus";
 
 /** 成本硬顶中止的落库前缀（机器可判）与下一回合的注入说明（导入实测反馈①：
  *  裸 abort 让 agent 只能瞎猜中止原因）。 */
@@ -67,15 +70,16 @@ const NO_ENV = {} as ExecutionEnv;
 type Harness = CoreAgentHarness<Skill, PromptTemplate, RuntimeToolDef>;
 type ActiveRun = {
   runId: string;
-  harness: Harness;
   abort: AbortController;
+  abortHarness: () => Promise<void>;
   detach: () => void;
-  enqueueSteer: (buildMessage: () => Promise<string>) => void;
+  enqueueSteer: (buildMessage: () => Promise<string>, afterCurrentTurn: boolean) => void;
+  warmAttachments: (attachmentIds: string[]) => Promise<void>;
 };
 const active = new Map<string, ActiveRun>(); // sessionId → 进行中的 run（同会话单执行者）
 
-/** 测试注入点：替换模型流（默认真 DeepSeek）。 */
-export const runtimeOverrides: { streamFn?: StreamFn; apiKey?: string } = {};
+/** 测试注入点：替换模型流（默认真 DeepSeek）和 MMP registry client。 */
+export const runtimeOverrides: { streamFn?: StreamFn; apiKey?: string; mmpClient?: MmpClient | null } = {};
 
 export class SessionBusyError extends Error {
   status = 409;
@@ -149,7 +153,10 @@ export async function steerRun(
   // 插话按到达顺序进入 harness，并在各自进入下一次模型调用前拿到 agent context。
   run.enqueueSteer(async () => withAttachmentPreflight(
     message, attachmentIds, sessionId, identity.userId, identity.productionId ?? null, run.abort.signal,
-  ));
+  ).then(async (prepared) => {
+    await run.warmAttachments(attachmentIds);
+    return prepared;
+  }), attachmentIds.length > 0);
   return { runId: run.runId };
 }
 
@@ -179,7 +186,7 @@ export async function abortRun(sessionId: string): Promise<boolean> {
   const run = active.get(sessionId);
   if (!run) return false;
   run.abort.abort();
-  await run.harness.abort();
+  await run.abortHarness();
   return true;
 }
 
@@ -212,6 +219,12 @@ async function execute(input: ExecuteInput): Promise<void> {
   // 脱离（§4.4 ②）：本地停手但不留痕——不写 transcript、不发 aborted 行、不改 run 终态，
   // 下一个进程按孤儿接管续跑
   let detached = false;
+  const pendingSteers: Array<{ buildMessage: () => Promise<string>; afterCurrentTurn: boolean }> = [];
+  let abortHarness = async () => {};
+  let enqueueSteerImpl = (buildMessage: () => Promise<string>, afterCurrentTurn: boolean) => {
+    pendingSteers.push({ buildMessage, afterCurrentTurn });
+  };
+  let warmAttachmentsImpl = async (_attachmentIds: string[]) => {};
   const publisher = {
     publish: (line: StreamLine) => { if (!detached) rawPublisher.publish(line); },
     drain: () => rawPublisher.drain(),
@@ -235,8 +248,22 @@ async function execute(input: ExecuteInput): Promise<void> {
         }
       : {}),
   };
-  const tools = buildTools({ userId, productionId, run: runHandle });
-  const toolByName = new Map(tools.map((t) => [t.name, t]));
+  active.set(sessionId, {
+    runId,
+    abort,
+    abortHarness: () => abortHarness(),
+    enqueueSteer: (buildMessage, afterCurrentTurn) => enqueueSteerImpl(buildMessage, afterCurrentTurn),
+    warmAttachments: (attachmentIds) => warmAttachmentsImpl(attachmentIds),
+    detach: () => {
+      if (detached) return;
+      detached = true;
+      storage.detach();
+      abort.abort();
+      void abortHarness().catch(() => {});
+    },
+  });
+  let tools = buildTools({ userId, productionId, run: runHandle });
+  let toolByName = new Map(tools.map((t) => [t.name, t]));
   // usd 与 token 并行累计：token 是账本原貌，usd 是限流口径（见 billing.ts）。
   // compaction 单列：它用的是 v4-pro（3 倍单价）、不走 message_end，混进 chat_*
   // 会让「这轮对话花了多少 token」失真。
@@ -257,6 +284,14 @@ async function execute(input: ExecuteInput): Promise<void> {
   let releaseSteerReady = () => {};
 
   try {
+    const mmpSurface = await buildMmpToolSurface(
+      { userId, productionId, run: runHandle },
+      { client: runtimeOverrides.mmpClient },
+    );
+    runHandle.runtimeToolCatalog = mmpSurface.catalog;
+    tools = [...tools, ...mmpSurface.tools];
+    toolByName = new Map(tools.map((t) => [t.name, t]));
+
     // 注入链：与插件 before_prompt_build 同一份后端组装（instructions/memory/knowledge
     // 进 system prompt；recall 逐轮临时插入，不落 transcript）
     // 工具召回（tool-index：词法+向量）先算——提示块与工具面共用同一份命中。
@@ -270,7 +305,9 @@ async function execute(input: ExecuteInput): Promise<void> {
     // 无人值守：汇报工具 + 任务授权的写工具必须在面上（闭包会把 id 供给入口一起带来）
     if (schedule) used.push("schedule.finish", ...schedule.allowedTools);
     const families = recallPrompt
-      ? await recallFamilies(stripUiContext(recallPrompt), { hasProduction: !!productionId, userId })
+      ? await recallFamilies(stripUiContext(recallPrompt), {
+          hasProduction: !!productionId, userId, extraCatalog: mmpSurface.catalog,
+        })
       : [];
     const recalled = families.flatMap((f) => f.tools.map((t) => t.name));
 
@@ -293,17 +330,27 @@ async function execute(input: ExecuteInput): Promise<void> {
     })();
 
     // 工具三层（#333）：热 ∪ 温(页面) ∪ 召回命中 ∪ 闭包。
+    const mmpWarm = await focusedMmpToolNames({
+      messages: transcript,
+      currentMessage: message,
+      currentAttachmentIds: input.attachmentIds,
+      sessionId,
+      userId,
+      productionId,
+      capabilities: mmpSurface.capabilities,
+    });
     const tiers = tieredToolNames({
       hasProduction: !!productionId, pageKey: input.pageKey ?? null, prompt: recallPrompt, recalled, used,
+      extraWarm: mmpWarm,
       available: tools.map((t) => t.mcpName),
     });
-    const activeToolNames = tiers.active.map(exposedName);
+    const activeToolNames = new Set(tiers.active.map(exposedName));
 
     const harness = new CoreAgentHarness({
       env: NO_ENV,
       session,
       tools,
-      activeToolNames,
+      activeToolNames: [...activeToolNames],
       // 冷层兜底闭环（补丁 #4）：模型按名调了不在本轮工具面里的工具（find_tools 搜到的，
       // 或它记得的）→ 从注册表临时加载。权限/制作语境仍在工具内部判定，分层≠权限。
       resolveDeferredTool: ({ toolCall }) => toolByName.get(toolCall.name),
@@ -315,7 +362,9 @@ async function execute(input: ExecuteInput): Promise<void> {
         ? { streamSimple: runtimeOverrides.streamFn, completeSimple: llmRuntime().completeSimple }
         : { streamSimple: llmRuntime().streamSimple, completeSimple: llmRuntime().completeSimple },
     });
+    abortHarness = async () => { await harness.abort(); };
     let steerTail = Promise.resolve();
+    let currentTurnDone = Promise.resolve();
     let steerReadyReleased = false;
     const steerReady = new Promise<void>((resolve) => { releaseSteerReady = resolve; });
     const markSteerReady = () => {
@@ -330,32 +379,42 @@ async function execute(input: ExecuteInput): Promise<void> {
         if (pending === steerTail) return;
       }
     };
-    active.set(sessionId, {
-      runId, harness, abort,
-      enqueueSteer: (buildMessage) => {
+    enqueueSteerImpl = (buildMessage, afterCurrentTurn) => {
         steerTail = steerTail.then(async () => {
           const steeredMessage = await buildMessage();
           await steerReady;
-          try {
-            await harness.steer(steeredMessage);
-          } catch (err) {
-            // 预检比当前模型回合慢时 harness 已回 idle；仍在同一 agent_run 内补起一轮，
-            // 不能让已经向客户端确认入队的插话静默丢失。
-            if ((err as { code?: string })?.code !== "invalid_state") throw err;
-            await harness.prompt(steeredMessage);
+          if (!afterCurrentTurn) {
+            try {
+              await harness.steer(steeredMessage);
+              return;
+            } catch (err) {
+              if ((err as { code?: string })?.code !== "invalid_state") throw err;
+            }
           }
+          await currentTurnDone;
+          if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
+          // 附件预检可能跨过当前 agent loop 最后一次取 steer 队列的时点。附件插话
+          // 固定串行开启同一 agent_run 的下一模型轮次，避免“接收成功但静默丢失”；
+          // 无附件插话仍走 Harness 原生 steer，保留当前工具循环内的即时介入语义。
+          const nextTurn = harness.prompt(steeredMessage);
+          currentTurnDone = nextTurn.then(() => {}, () => {});
+          await nextTurn;
         }).catch((err) => {
           if (!abort.signal.aborted) console.error(`[agent-runtime] steer ${runId} failed:`, err);
         });
-      },
-      detach: () => {
-        if (detached) return;
-        detached = true;
-        storage.detach();
-        abort.abort();
-        void harness.abort().catch(() => {});
-      },
-    });
+      };
+    warmAttachmentsImpl = async (attachmentIds) => {
+        if (!attachmentIds.length || !mmpSurface.capabilities.length) return;
+        const attachments = await getReadyAttachments(attachmentIds, sessionId, userId);
+        for (const name of mmpAttachmentToolNamesFor(mmpSurface.capabilities, attachments)) {
+          activeToolNames.add(exposedName(name));
+        }
+        await harness.setTools(tools, [...activeToolNames]);
+      };
+    for (const pending of pendingSteers.splice(0)) {
+      enqueueSteerImpl(pending.buildMessage, pending.afterCurrentTurn);
+    }
+    if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
 
     // 额度门与 run 建立之后、基础模型第一次推理之前自动预检。MMP 的 agent context 进入本轮
     // 用户消息并随 transcript 保存；附件 id 与原件仍保留，后续可显式读取。
@@ -432,13 +491,14 @@ async function execute(input: ExecuteInput): Promise<void> {
           publisher.publish({ type: "error", error: "本次任务消耗异常偏高，已自动中止。请把问题拆小后重试。" });
           costCapAborted = true;
           abort.abort();
-          void active.get(sessionId)?.harness.abort().catch(() => {});
+          void active.get(sessionId)?.abortHarness().catch(() => {});
         }
       }
     });
 
     if (message !== undefined) {
       const turn = harness.prompt(message);
+      currentTurnDone = turn.then(() => {}, () => {});
       markSteerReady();
       await turn;
     } else {
@@ -480,6 +540,7 @@ async function execute(input: ExecuteInput): Promise<void> {
           }
         }
         const turn = harness.continueTurn();
+        currentTurnDone = turn.then(() => {}, () => {});
         markSteerReady();
         await turn;
       } else {
@@ -497,8 +558,12 @@ async function execute(input: ExecuteInput): Promise<void> {
   } catch (err) {
     status = abort.signal.aborted ? "aborted" : "failed";
     error = err instanceof Error ? err.message : String(err);
-    publisher.publish({ type: "error", error: error || "Agent run did not complete" });
-    console.error(`[agent-runtime] run ${runId} failed:`, err);
+    if (status === "aborted") {
+      publisher.publish({ type: "aborted", text: "" });
+    } else {
+      publisher.publish({ type: "error", error: error || "Agent run did not complete" });
+      console.error(`[agent-runtime] run ${runId} failed:`, err);
+    }
   } finally {
     // 初始化 / 恢复在进入 harness 前失败时，释放可能已排队的 steer，避免悬空 Promise。
     releaseSteerReady();

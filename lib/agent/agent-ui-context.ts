@@ -138,6 +138,12 @@ export function attachmentIdsFromContext(message: string): string[] {
   return block ? [...block.matchAll(/attachmentId: ([a-z0-9_]+)/g)].map((m) => m[1]) : [];
 }
 
+/** 从服务端认可的 UI context 信封取当前资产 id；只认消息开头的系统信封。 */
+export function assetIdsFromContext(message: string): string[] {
+  const block = LEADING_BLOCK_RE.exec(message)?.[0];
+  return block ? [...block.matchAll(/资产 id: ([a-z0-9_]+)/g)].map((m) => m[1]) : [];
+}
+
 /** 剥掉开头的信封，还原用户实际打的字（展示用）。 */
 export function stripUiContext(text: string): string {
   const stripped = text.replace(LEADING_BLOCK_RE, "").replace(LEADING_ATTACHMENT_RE, "");

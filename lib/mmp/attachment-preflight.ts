@@ -15,6 +15,7 @@ import {
 } from "@mmp/client";
 import { presignedGet } from "@/lib/r2";
 import { getMmpClient } from "./client";
+import { clearMmpMediaCacheForTests, mmpMediaHandle, rememberMmpMediaId } from "./media-cache";
 
 export type AttachmentPreflightOutcome =
   | { status: "ok"; contextText: string; capabilityId: string }
@@ -32,15 +33,6 @@ export type PreflightInput = {
 
 const RUN_TIMEOUT_MS = 2 * 60_000;
 const POLL_WAIT_SEC = 30;
-const MEDIA_ID_CAP = 500;
-const mediaIdByFile = new Map<string, string>();
-
-function rememberMediaId(fileId: string, mediaId: string): void {
-  mediaIdByFile.delete(fileId);
-  mediaIdByFile.set(fileId, mediaId);
-  while (mediaIdByFile.size > MEDIA_ID_CAP) mediaIdByFile.delete(mediaIdByFile.keys().next().value!);
-}
-
 /** MMP 不可用时由宿主生成的最小上下文；不冒充任务端的 agent_context。 */
 export function renderPreflightUnavailable(code: string): string {
   return `⚠ Click-In 未获得 MMP 媒体预检结果（${code}）；不能据此判断附件内容，原件仍可通过附件工具读取。`;
@@ -97,13 +89,12 @@ export async function preflightAttachment(
     }
 
     const source = media.get(presignedGet(input.r2Key, 15 * 60), undefined, input.mimeType);
-    const knownMediaId = mediaIdByFile.get(input.attachmentId);
-    const handle = knownMediaId ? media.refOr(knownMediaId, source) : source;
+    const handle = mmpMediaHandle(input.attachmentId, source);
     const done = await client.run(
       { type: capability.id, media: handle, priority: "interactive" },
       { pollWaitSec: POLL_WAIT_SEC, timeoutMs: RUN_TIMEOUT_MS, signal: opts.signal },
     );
-    rememberMediaId(input.attachmentId, done.media_id);
+    rememberMmpMediaId(input.attachmentId, done.media_id);
     if (!done.agent_context?.text) throw new Error(`${capability.id} 完成但没有 agent_context`);
 
     if (opts.usage && !done.cached) {
@@ -171,5 +162,5 @@ export async function preflightAttachments(
 
 /** 测试用：避免不同用例之间复用 media_id。 */
 export function clearAttachmentPreflightCacheForTests(): void {
-  mediaIdByFile.clear();
+  clearMmpMediaCacheForTests();
 }

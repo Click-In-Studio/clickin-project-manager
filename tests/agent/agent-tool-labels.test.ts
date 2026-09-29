@@ -36,6 +36,8 @@ describe("agent tool labels", () => {
     expect(toolLabel("production.wiki_read")).toBe("阅读文档");
     expect(toolLabel("clickin__future-tool")).toBe("future-tool"); // 未配置 → 去前缀原名
     expect(toolLabel("exec")).toBe("exec");
+    expect(toolLabel("clickin__mmp-attachment-pitch_transcribe")).toBe("媒体处理（会话附件）：pitch transcribe");
+    expect(toolLabel("mmp.asset.triage.audio")).toBe("媒体处理（项目资产）：triage-audio");
   });
 });
 

@@ -112,11 +112,14 @@ describe("agent-runtime service", () => {
       [prodId, denyingUserId, roleId],
     );
     runtimeOverrides.apiKey = "test-key";
+    // 与 MMP 无关的 runtime 用例不碰 .env.local 指向的真实服务；媒体用例单独开启。
+    runtimeOverrides.mmpClient = null;
   });
 
   afterAll(async () => {
     delete runtimeOverrides.streamFn;
     delete runtimeOverrides.apiKey;
+    delete runtimeOverrides.mmpClient;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
     await cleanupProduction(prodId).catch(() => {});
   });
@@ -192,6 +195,7 @@ describe("agent-runtime service", () => {
     const oldUrl = process.env.MMP_BASE_URL;
     const oldFetch = globalThis.fetch;
     process.env.MMP_BASE_URL = "https://mmp.test";
+    runtimeOverrides.mmpClient = undefined;
     globalThis.fetch = (async (url: string) => {
       if (url.endsWith("/capabilities")) {
         return Response.json({ protocol_version: "2.0", capabilities: [{ nodes: ["test-node"], capability: {
@@ -218,6 +222,9 @@ describe("agent-runtime service", () => {
       const firstContext = JSON.stringify(seen[0].messages);
       expect(firstContext).toContain("帮我记下来");
       expect(firstContext).toContain(pending.id);
+      // registry 生成的一级工具确实进入本 run；近期附件只温启附件入口，不顺带暴露资产入口。
+      expect(seen[0].tools).toContain(exposedName("mmp.attachment.triage.audio"));
+      expect(seen[0].tools).not.toContain(exposedName("mmp.asset.triage.audio"));
       expect(await getHistory(key)).toEqual([
         { role: "user", content: "听一下", attachments: [{ id: pending.id, fileName: "录音.mp4", mimeType: "video/mp4", mediaKind: "audio" }] },
         { role: "assistant", content: "已听到" },
@@ -228,6 +235,7 @@ describe("agent-runtime service", () => {
       expect(mmp.rows[0]?.tokens).toBe(12);
     } finally {
       globalThis.fetch = oldFetch;
+      runtimeOverrides.mmpClient = null;
       if (oldUrl === undefined) delete process.env.MMP_BASE_URL; else process.env.MMP_BASE_URL = oldUrl;
     }
   });
@@ -472,6 +480,7 @@ describe("agent-runtime service", () => {
     const oldUrl = process.env.MMP_BASE_URL;
     const oldFetch = globalThis.fetch;
     process.env.MMP_BASE_URL = "https://mmp-runtime-steer.test";
+    runtimeOverrides.mmpClient = undefined;
     let jobs = 0;
     globalThis.fetch = (async (url: string) => {
       if (url.endsWith("/capabilities")) {
@@ -513,6 +522,7 @@ describe("agent-runtime service", () => {
       releaseCapabilities();
       releaseFirst();
       globalThis.fetch = oldFetch;
+      runtimeOverrides.mmpClient = null;
       if (oldUrl === undefined) delete process.env.MMP_BASE_URL; else process.env.MMP_BASE_URL = oldUrl;
     }
   });
@@ -547,9 +557,11 @@ describe("ask_user（#290）：提问 → 卡片 → 回答 → 工具结果", (
   beforeAll(async () => {
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-ask-${shortId()}`, null, false));
     runtimeOverrides.apiKey = "test-key";
+    runtimeOverrides.mmpClient = null;
   });
   afterAll(async () => {
     delete runtimeOverrides.streamFn;
+    delete runtimeOverrides.mmpClient;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
   });
 
@@ -610,9 +622,11 @@ describe("§4.4 排水/脱离：等待态 run 交给下一个进程，不留痕�
   beforeAll(async () => {
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-detach-${shortId()}`, null, false));
     runtimeOverrides.apiKey = "test-key";
+    runtimeOverrides.mmpClient = null;
   });
   afterAll(async () => {
     delete runtimeOverrides.streamFn;
+    delete runtimeOverrides.mmpClient;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
   });
 
@@ -701,9 +715,11 @@ describe("冷层兜底：find_tools 搜到 → 按名直接调（resolveDeferred
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-deferred-${shortId()}`, null, false));
     ({ prodId } = await makeProduction(userId));
     runtimeOverrides.apiKey = "test-key";
+    runtimeOverrides.mmpClient = null;
   });
   afterAll(async () => {
     delete runtimeOverrides.streamFn;
+    delete runtimeOverrides.mmpClient;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
     await cleanupProduction(prodId).catch(() => {});
   });

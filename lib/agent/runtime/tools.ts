@@ -22,6 +22,7 @@ import type { RuntimeTool } from "./resume";
 import type { MutationRecord } from "./mutation-audit";
 import type { ScheduleReport } from "./schedules";
 import { registerUnattendedAllowed } from "./schedules";
+import type { ToolCatalogEntry } from "@/lib/agent/tools/tool-catalog";
 
 export const TOOL_PREFIX = "clickin__";
 
@@ -51,6 +52,8 @@ export interface RunHandle {
   setScheduleReport?: (report: ScheduleReport) => void;
   /** 写审计落行后回报给 run（service 把账本 id/摘要挂到 mutation 行上） */
   noteMutations?: (toolCallId: string, records: MutationRecord[]) => void;
+  /** 本 agent_run 从外部 registry 生成的检索目录；find_tools 与主动召回共用。 */
+  runtimeToolCatalog?: ToolCatalogEntry[];
 }
 
 /** 写工具成功后的变更信号（前端 lib/agent/agent-mutations.ts 派发给页面订阅者决定怎么刷） */
@@ -942,7 +945,12 @@ export const DEFS: Def[] = [
     readOnly: true,
     execute: async (ctx, args) => {
       const { searchTools } = await import("./tool-index");
-      const hits = await searchTools(String(args.query ?? ""), { hasProduction: !!ctx.productionId, userId: ctx.userId, limit: 5 });
+      const hits = await searchTools(String(args.query ?? ""), {
+        hasProduction: !!ctx.productionId,
+        userId: ctx.userId,
+        limit: 5,
+        extraCatalog: ctx.run?.runtimeToolCatalog,
+      });
       if (hits.length === 0) return "没有找到相关工具。请基于现有信息回答，或在回复里说明这件事目前没有工具支持。";
       const lines = hits.map((h) => `- ${exposedName(h.name)}：${h.oneliner}`);
       return `找到以下工具（直接按名调用即可，无需其他步骤）：\n${lines.join("\n")}`;

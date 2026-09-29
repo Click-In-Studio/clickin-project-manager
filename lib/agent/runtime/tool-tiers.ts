@@ -134,6 +134,8 @@ export interface TierInput {
   /** 本会话最近几轮调用过的工具（used-tools.ts 有淘汰窗口）：话题有连续性，用过的
    *  就留在面上，不让模型下一轮问"刚才那个工具呢" */
   used?: string[];
+  /** run-local 温层（如最近附件/资产匹配的 MMP capability）。 */
+  extraWarm?: string[];
   prompt: string | null;
   /** 全部可用工具的 MCP 名（注册表）——结果只会是它的子集 */
   available: readonly string[];
@@ -153,7 +155,10 @@ export function tieredToolNames(input: TierInput): TierResult {
   }
   try {
     const hot = (input.hasProduction ? HOT_PRODUCTION : HOT_PERSONAL).filter((n) => available.has(n));
-    const warm = (input.pageKey ? WARM_BY_PAGE[input.pageKey] ?? [] : []).filter((n) => available.has(n));
+    const warm = [
+      ...(input.pageKey ? WARM_BY_PAGE[input.pageKey] ?? [] : []),
+      ...(input.extraWarm ?? []),
+    ].filter((n) => available.has(n));
     const recalled = (input.recalled
       ?? (input.prompt ? toolRecall(input.prompt, { hasProduction: input.hasProduction }).map((h) => h.name) : [])
     ).filter((n) => available.has(n));
