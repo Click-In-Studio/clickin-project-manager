@@ -59,10 +59,10 @@ describe("事件卡片操作区的响应式布局", () => {
     expect(declarations(css, ".eventCardActionArrow")).toMatchObject({ "margin-left": "3px" });
   });
 
-  it("手机端先收紧箭头、按钮内边距与间距，并保持单行", () => {
+  it("手机端从内容列延伸到状态列，不侵入日期列", () => {
     const mobile = blockAfter(css, "@media (max-width: 640px)");
     expect(declarations(mobile, ".eventCardActions")).toMatchObject({
-      "grid-column": "1 / -1",
+      "grid-column": "2 / 4",
       gap: "4px",
       "flex-wrap": "nowrap",
     });
