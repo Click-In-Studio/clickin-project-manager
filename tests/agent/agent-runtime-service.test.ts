@@ -196,7 +196,7 @@ describe("agent-runtime service", () => {
       if (url.endsWith("/capabilities")) {
         return Response.json({ protocol_version: "2.0", capabilities: [{ nodes: ["test-node"], capability: {
           id: "triage.audio", purpose: "triage", tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }],
-          input: { media: { presence: "required", accepts: ["audio/*", "video/*"] } },
+          input: { media: { presence: "required", accepts: ["audio/*"] } },
           output: { schema: "urn:mmp:protocol:2:digest", agent_context: "required" },
         } }] });
       }
@@ -478,7 +478,7 @@ describe("agent-runtime service", () => {
         await capabilityWait;
         return Response.json({ protocol_version: "2.0", capabilities: [{ nodes: ["test-node"], capability: {
           id: "triage.audio", purpose: "triage", tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }],
-          input: { media: { presence: "required", accepts: ["audio/*", "video/*"] } },
+          input: { media: { presence: "required", accepts: ["audio/*"] } },
           output: { schema: "urn:mmp:protocol:2:digest", agent_context: "required" },
         } }] });
       }

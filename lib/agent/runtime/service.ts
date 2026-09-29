@@ -168,6 +168,7 @@ async function withAttachmentPreflight(
   }
   const preflights = await preflightAttachments(attachments.map((attachment) => ({
     attachmentId: attachment.id,
+    mediaKind: attachment.mediaKind,
     mimeType: attachment.mimeType,
     r2Key: attachment.r2Key,
   })), { signal, usage: { userId, productionId } });

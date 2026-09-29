@@ -37,6 +37,7 @@ export async function readSessionAttachment(
   if (input.mode === "preflight") {
     const preflight = await preflightAttachment({
       attachmentId: attachment.id,
+      mediaKind: attachment.mediaKind,
       mimeType: attachment.mimeType,
       r2Key: attachment.r2Key,
     }, { signal, usage: { userId, productionId } });
@@ -64,6 +65,7 @@ export async function readSessionAttachment(
   if (mediaKind && input.mode !== "ocr") {
     const preflight = await preflightAttachment({
       attachmentId: attachment.id,
+      mediaKind: attachment.mediaKind,
       mimeType: attachment.mimeType,
       r2Key: attachment.r2Key,
     }, { signal, usage: { userId, productionId } });

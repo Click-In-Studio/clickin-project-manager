@@ -22,7 +22,9 @@ export type AttachmentPreflightOutcome =
 export type PreflightInput = {
   /** 稳定文件行 id，用于进程内复用 MMP media_id。 */
   attachmentId: string;
-  /** 能力发现只看真实 Content-Type；MMP 节点仍会嗅探实际字节。 */
+  /** 上传入口确认的媒体种类；Safari 录音可能把容器声明成 video/mp4。 */
+  mediaKind?: string | null;
+  /** 浏览器 / 资产记录的原始 Content-Type；媒体句柄原样保留，节点仍会嗅探实际字节。 */
   mimeType: string;
   r2Key: string;
 };
@@ -56,6 +58,18 @@ export function resolveTriageCapability(
   }
 }
 
+/**
+ * 能力发现使用媒体的语义 Content-Type；媒体句柄仍保留浏览器给出的原始 MIME。
+ * mediaKind 是上传入口的开放字符串，不在这里枚举 audio/image/video 或映射任务 id。
+ */
+export function capabilityContentType(input: Pick<PreflightInput, "mediaKind" | "mimeType">): string {
+  const kind = input.mediaKind?.trim().toLowerCase();
+  const bare = input.mimeType.split(";", 1)[0].trim().toLowerCase();
+  if (!kind || !/^[a-z][a-z0-9!#$&^_.+-]*$/.test(kind)) return bare;
+  const slash = bare.indexOf("/");
+  return slash > 0 ? `${kind}${bare.slice(slash)}` : bare;
+}
+
 function unavailable(code: string, reason: string): AttachmentPreflightOutcome {
   return { status: "unavailable", reason, contextText: renderPreflightUnavailable(code) };
 }
@@ -75,9 +89,10 @@ export async function preflightAttachment(
 
   try {
     const registry = opts.registry ?? await client.capabilities();
-    const capability = opts.capability ?? resolveTriageCapability(registry, input.mimeType);
+    const discoveryType = capabilityContentType(input);
+    const capability = opts.capability ?? resolveTriageCapability(registry, discoveryType);
     if (!capability) {
-      return unavailable("unsupported_type", `MMP 当前没有匹配 ${input.mimeType} 的自动预检能力；原件仍可用。`);
+      return unavailable("unsupported_type", `MMP 当前没有匹配 ${discoveryType} 的自动预检能力；原件仍可用。`);
     }
 
     const source = media.get(presignedGet(input.r2Key, 15 * 60), undefined, input.mimeType);
@@ -132,7 +147,7 @@ export async function preflightAttachments(
     const pairs = await Promise.all(inputs.map(async (input) => {
       let capability: Capability | null;
       try {
-        capability = resolveTriageCapability(registry, input.mimeType);
+        capability = resolveTriageCapability(registry, capabilityContentType(input));
       } catch (error) {
         const code = error instanceof MmpError ? error.code : "unexpected";
         return [input.attachmentId, unavailable(code, `MMP 能力解析失败（${code}）；原件仍可用。`)] as const;

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { MmpClient, type CapabilitiesResponse, type Capability } from "@mmp/client";
 import {
+  capabilityContentType,
   clearAttachmentPreflightCacheForTests,
   preflightAttachment,
   preflightAttachments,
@@ -24,7 +25,7 @@ const capability = (
   output: { schema: "urn:mmp:protocol:2:digest", agent_context: agentContext },
 });
 
-const AUDIO_TRIAGE = capability("triage.audio", "triage", ["audio/*", "video/*"]);
+const AUDIO_TRIAGE = capability("triage.audio", "triage", ["audio/*"]);
 const IMAGE_TRIAGE = capability("triage.image", "triage", ["image/*", "application/pdf"]);
 const OCR = capability("ocr.structured", "ocr", ["image/*", "application/pdf"], "none");
 
@@ -65,16 +66,22 @@ describe("MMP 2.0 自动预检能力发现", () => {
   it("只用 purpose + Content-Type 解析唯一能力，不解释任务 id 或本地模态", () => {
     const available = registry();
     expect(resolveTriageCapability(available, "audio/mp4")?.id).toBe("triage.audio");
-    expect(resolveTriageCapability(available, "video/mp4")?.id).toBe("triage.audio");
+    expect(resolveTriageCapability(available, "video/mp4")).toBeNull();
     expect(resolveTriageCapability(available, "image/webp")?.id).toBe("triage.image");
     expect(resolveTriageCapability(available, "application/pdf")?.id).toBe("triage.image");
     expect(resolveTriageCapability(available, "text/plain")).toBeNull();
   });
 
+  it("只纠正上传入口已确认的语义 MIME，不在宿主映射任务", () => {
+    expect(capabilityContentType({ mediaKind: "audio", mimeType: "video/mp4" })).toBe("audio/mp4");
+    expect(capabilityContentType({ mediaKind: "image", mimeType: "image/png; charset=binary" })).toBe("image/png");
+    expect(capabilityContentType({ mediaKind: null, mimeType: "application/pdf" })).toBe("application/pdf");
+  });
+
   it("Safari video/mp4 录音由 MMP 选中音频预检，并原样透传 agent_context", async () => {
     const { client, calls } = fakeClient();
     const result = await preflightAttachment({
-      attachmentId: "aat_audio", mimeType: "video/mp4", r2Key: "attachments/audio.mp4",
+      attachmentId: "aat_audio", mediaKind: "audio", mimeType: "video/mp4", r2Key: "attachments/audio.mp4",
     }, { client });
     expect(result).toMatchObject({ status: "ok", capabilityId: "triage.audio" });
     expect(result.contextText).toBe("[mmp:agent-context start]\ntriage.audio：测试内容\n[mmp:agent-context end]");
