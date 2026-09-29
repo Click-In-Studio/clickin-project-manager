@@ -65,7 +65,13 @@ import { usdOfUsage } from "./billing";
 const NO_ENV = {} as ExecutionEnv;
 
 type Harness = CoreAgentHarness<Skill, PromptTemplate, RuntimeToolDef>;
-type ActiveRun = { runId: string; harness: Harness; abort: AbortController; detach: () => void };
+type ActiveRun = {
+  runId: string;
+  harness: Harness;
+  abort: AbortController;
+  detach: () => void;
+  enqueueSteer: (buildMessage: () => Promise<string>) => void;
+};
 const active = new Map<string, ActiveRun>(); // sessionId → 进行中的 run（同会话单执行者）
 
 /** 测试注入点：替换模型流（默认真 DeepSeek）。 */
@@ -139,10 +145,11 @@ export async function steerRun(
   if (!run) return null;
   const identity = parseSessionIdentity(sessionId);
   if (!identity) throw Object.assign(new Error("无权访问该会话"), { status: 403 });
-  const enriched = await withAttachmentPreflight(
+  // steer 的 HTTP 请求只负责入队，不能同步等待最长两分钟的外部预检；队列仍保证多次
+  // 插话按到达顺序进入 harness，并在各自进入下一次模型调用前拿到 digest。
+  run.enqueueSteer(async () => withAttachmentPreflight(
     message, attachmentIds, sessionId, identity.userId, identity.productionId ?? null, run.abort.signal,
-  );
-  await run.harness.steer(enriched);
+  ));
   return { runId: run.runId };
 }
 
@@ -248,6 +255,7 @@ async function execute(input: ExecuteInput): Promise<void> {
   const heartbeat = setInterval(() => {
     void pool.query(`UPDATE agent_run SET heartbeat_at = now() WHERE id = $1`, [runId]).catch(() => {});
   }, HEARTBEAT_INTERVAL_MS);
+  let releaseSteerReady = () => {};
 
   try {
     // 注入链：与插件 before_prompt_build 同一份后端组装（instructions/memory/knowledge
@@ -308,8 +316,39 @@ async function execute(input: ExecuteInput): Promise<void> {
         ? { streamSimple: runtimeOverrides.streamFn, completeSimple: llmRuntime().completeSimple }
         : { streamSimple: llmRuntime().streamSimple, completeSimple: llmRuntime().completeSimple },
     });
+    let steerTail = Promise.resolve();
+    let steerReadyReleased = false;
+    const steerReady = new Promise<void>((resolve) => { releaseSteerReady = resolve; });
+    const markSteerReady = () => {
+      if (steerReadyReleased) return;
+      steerReadyReleased = true;
+      releaseSteerReady();
+    };
+    const drainSteers = async () => {
+      for (;;) {
+        const pending = steerTail;
+        await pending;
+        if (pending === steerTail) return;
+      }
+    };
     active.set(sessionId, {
       runId, harness, abort,
+      enqueueSteer: (buildMessage) => {
+        steerTail = steerTail.then(async () => {
+          const steeredMessage = await buildMessage();
+          await steerReady;
+          try {
+            await harness.steer(steeredMessage);
+          } catch (err) {
+            // 预检比当前模型回合慢时 harness 已回 idle；仍在同一 agent_run 内补起一轮，
+            // 不能让已经向客户端确认入队的插话静默丢失。
+            if ((err as { code?: string })?.code !== "invalid_state") throw err;
+            await harness.prompt(steeredMessage);
+          }
+        }).catch((err) => {
+          if (!abort.signal.aborted) console.error(`[agent-runtime] steer ${runId} failed:`, err);
+        });
+      },
       detach: () => {
         if (detached) return;
         detached = true;
@@ -400,7 +439,9 @@ async function execute(input: ExecuteInput): Promise<void> {
     });
 
     if (message !== undefined) {
-      await harness.prompt(message);
+      const turn = harness.prompt(message);
+      markSteerReady();
+      await turn;
     } else {
       const decision = await repairAndClassify(session, toolByName, {
         signal: abort.signal,
@@ -439,11 +480,15 @@ async function execute(input: ExecuteInput): Promise<void> {
             publisher.publish({ type: "tool-end", id: call.id });
           }
         }
-        await harness.continueTurn();
+        const turn = harness.continueTurn();
+        markSteerReady();
+        await turn;
       } else {
+        markSteerReady();
         publisher.publish({ type: "final", text: "" });
       }
     }
+    await drainSteers();
     if (abort.signal.aborted) status = "aborted";
 
     // 自动压缩（agent-core 的 compact() 是手动的；触发由这里驱动，摘要用 pro）
@@ -456,6 +501,8 @@ async function execute(input: ExecuteInput): Promise<void> {
     publisher.publish({ type: "error", error: error || "Agent run did not complete" });
     console.error(`[agent-runtime] run ${runId} failed:`, err);
   } finally {
+    // 初始化 / 恢复在进入 harness 前失败时，释放可能已排队的 steer，避免悬空 Promise。
+    releaseSteerReady();
     clearInterval(heartbeat);
     toolArgs.clear(); // 中止/脱离时可能没有对应的 end 事件
     if (costCapAborted && status !== "failed") {
