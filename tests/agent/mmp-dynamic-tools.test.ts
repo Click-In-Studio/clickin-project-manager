@@ -75,8 +75,10 @@ describe("MMP 动态一级工具", () => {
 
   it("长 capability id 的暴露名仍不超过 64 字符且保持稳定", () => {
     const a = mmpCapabilityToolName("attachment", `very_long_${"x".repeat(64)}`);
+    const b = mmpCapabilityToolName("attachment", `very_long_${"x".repeat(63)}y`);
     expect(`clickin__${a.replace(/[^A-Za-z0-9_-]/g, "-")}`.length).toBeLessThanOrEqual(64);
     expect(mmpCapabilityToolName("attachment", `very_long_${"x".repeat(64)}`)).toBe(a);
+    expect(b).not.toBe(a);
   });
 
   it("registry discovery 失败只撤下动态能力面", async () => {

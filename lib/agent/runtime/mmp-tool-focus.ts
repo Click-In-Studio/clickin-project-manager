@@ -91,13 +91,12 @@ export async function focusedMmpToolNames(args: {
     ...userTexts.flatMap(assetIdsFromContext),
     ...successfulAssetCalls(recent),
   ])].slice(-FOCUS_RESOURCE_CAP);
-  const assetTypes: string[] = [];
-  if (args.productionId) {
-    for (const assetId of assetIds) {
-      const got = await resolveReadableAsset(args.userId, args.productionId, assetId);
-      if (typeof got !== "string") assetTypes.push(got.asset.mimeType ?? "application/octet-stream");
-    }
-  }
+  const assetTypes = args.productionId
+    ? (await Promise.all(assetIds.map(async (assetId) => {
+        const got = await resolveReadableAsset(args.userId, args.productionId!, assetId);
+        return typeof got === "string" ? null : got.asset.mimeType ?? "application/octet-stream";
+      }))).filter((contentType): contentType is string => contentType !== null)
+    : [];
 
   return [...new Set([
     ...matchingNames(args.capabilities, attachmentTypes, "attachment"),

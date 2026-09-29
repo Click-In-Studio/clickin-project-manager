@@ -76,6 +76,8 @@ function makeTool(
     label: `${description}（${target === "attachment" ? "附件" : "资产"}）`,
     description: `${description}。处理${target === "attachment" ? "当前会话临时附件" : "当前制作资产"}；接受 ${accepts}；可用档位：${tiers}。`,
     parameters: paramsSchema(capability, target === "attachment" ? "attachmentId" : "assetId"),
+    // readOnly 在本仓表示“不修改 Click-In 业务状态、无需确认卡”；与 OCR/预检一样，
+    // 外部计算和用量记账仍属于读取成本，不把媒体处理误报成业务写操作。
     readOnly: true,
     execute: async (_toolCallId, raw) => {
       const args = (raw ?? {}) as Record<string, unknown>;
