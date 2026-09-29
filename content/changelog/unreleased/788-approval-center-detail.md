@@ -2,7 +2,7 @@
 kind: improved
 title: 审批详情补齐记录与当前可执行操作
 page: admin/approval/access-requests
-pr: 786
+pr: 788
 order: 1
 ---
 
