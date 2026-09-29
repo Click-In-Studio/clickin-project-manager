@@ -166,26 +166,29 @@ export async function putR2Object(key: string, body: Buffer, mimeType: string): 
 export async function deleteR2Object(key: string): Promise<void> {
   const { dateStr, amzDate } = dateParts();
   const scope = `${dateStr}/${region}/s3/aws4_request`;
-  const signedHeaders = "host;x-amz-date";
+  const payloadHash = sha256hex("");
+  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
   const canonical = [
     "DELETE",
     `/${r2Bucket}/${key}`,
     "",
-    `host:${host}\nx-amz-date:${amzDate}\n`,
+    `host:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`,
     signedHeaders,
-    sha256hex(""),
+    payloadHash,
   ].join("\n");
   const sig = crypto
     .createHmac("sha256", getSigningKey(dateStr))
     .update(`AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${sha256hex(canonical)}`)
     .digest("hex");
-  await fetch(`${endpoint}/${r2Bucket}/${key}`, {
+  const res = await fetch(`${endpoint}/${r2Bucket}/${key}`, {
     method: "DELETE",
     headers: {
       Authorization: `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${sig}`,
+      "X-Amz-Content-Sha256": payloadHash,
       "X-Amz-Date": amzDate,
     },
   });
+  if (!res.ok) throw new Error(`R2 DELETE failed: ${res.status}`);
 }
 
 /** Initiate a multipart upload. Returns the uploadId. */
@@ -355,14 +358,15 @@ export async function completeMultipartUpload(
 export async function headR2Object(key: string): Promise<{ size: number | null; contentType: string | null } | null> {
   const { dateStr, amzDate } = dateParts();
   const scope = `${dateStr}/${region}/s3/aws4_request`;
-  const signedHeaders = "host;x-amz-date";
+  const payloadHash = sha256hex("");
+  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
   const canonical = [
     "HEAD",
     `/${r2Bucket}/${key}`,
     "",
-    `host:${host}\nx-amz-date:${amzDate}\n`,
+    `host:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`,
     signedHeaders,
-    sha256hex(""),
+    payloadHash,
   ].join("\n");
   const sig = crypto
     .createHmac("sha256", getSigningKey(dateStr))
@@ -372,6 +376,7 @@ export async function headR2Object(key: string): Promise<{ size: number | null; 
     method: "HEAD",
     headers: {
       Authorization: `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${sig}`,
+      "X-Amz-Content-Sha256": payloadHash,
       "X-Amz-Date": amzDate,
     },
   });
