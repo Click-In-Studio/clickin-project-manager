@@ -96,11 +96,10 @@ export async function assetPreflight(
   const { asset, file } = got;
   const outcome = await preflightAttachment({
     attachmentId: file.id,
-    fileName: asset.fileName ?? "",
     mimeType: asset.mimeType ?? "application/octet-stream",
     r2Key: file.r2Key,
   }, { signal, usage: { userId, productionId } });
-  return neutralizeInjectionTags(outcome.renderedDigest);
+  return neutralizeInjectionTags(outcome.contextText);
 }
 
 // ─── 装载（权限门 + 格式分派）───────────────────────────────────────────────

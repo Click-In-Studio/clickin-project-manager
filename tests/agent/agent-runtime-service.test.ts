@@ -181,7 +181,7 @@ describe("agent-runtime service", () => {
     expect((await readEventsSince(key, 0)).map((r) => r.line.type)).not.toContain("delta");
   });
 
-  it("媒体附件在首次模型调用前按 MMP registry 自动预检，digest 与原件引用同时进入消息", async () => {
+  it("媒体附件在首次模型调用前按 MMP registry 自动预检，agent context 与原件引用同时进入消息", async () => {
     const { streamFn, seen } = scripted([{ text: "已听到" }]);
     runtimeOverrides.streamFn = streamFn;
     const key = newKey();
@@ -194,9 +194,10 @@ describe("agent-runtime service", () => {
     process.env.MMP_BASE_URL = "https://mmp.test";
     globalThis.fetch = (async (url: string) => {
       if (url.endsWith("/capabilities")) {
-        return Response.json({ protocol_version: "1.1", capabilities: [{ nodes: ["test-node"], capability: {
-          id: "triage.audio", modal: "audio", tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }],
-          input: { media: "required" }, output_schema: "urn:mmp:protocol:1:digest",
+        return Response.json({ protocol_version: "2.0", capabilities: [{ nodes: ["test-node"], capability: {
+          id: "triage.audio", purpose: "triage", tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }],
+          input: { media: { presence: "required", accepts: ["audio/*", "video/*"] } },
+          output: { schema: "urn:mmp:protocol:2:digest", agent_context: "required" },
         } }] });
       }
       const source = { tier: "cpu", engine: "test", engine_version: "1", generated_at: "2026-09-29T00:00:00Z", degraded: false, params: {} };
@@ -206,6 +207,8 @@ describe("agent-runtime service", () => {
         result: { media_id: "sha256:runtime-audio", kind: "audio", duration_sec: 1, timeline_unit: "sec",
           segments: [{ start: 0, end: 1, label_status: "ok", labels: [{ tag: "Speech", score: 0.9 }], asr: { text: "帮我记下来", lang: "zh", confidence: 0.9 } }],
           tools: { vad: "ok", tagging: "ok", asr: "ok" }, gaps: [], capabilities_available: [], source },
+        agent_context: { format: "mmp-agent-context-v1", content_type: "text/plain; charset=utf-8",
+          text: "[mmp:agent-context start]\n语音：帮我记下来\n[mmp:agent-context end]" },
       });
     }) as typeof globalThis.fetch;
     try {
@@ -454,7 +457,7 @@ describe("agent-runtime service", () => {
     if (steered) expect(texts.some((t) => t.includes("补一句"))).toBe(true);
   });
 
-  it("带附件 steer 立即确认入队，MMP 预检异步完成后才把 digest 注入下一次模型调用", async () => {
+  it("带附件 steer 立即确认入队，MMP 预检异步完成后才把 agent context 注入下一次模型调用", async () => {
     let releaseFirst!: () => void;
     const firstWait = new Promise<void>((resolve) => { releaseFirst = resolve; });
     let releaseCapabilities!: () => void;
@@ -473,9 +476,10 @@ describe("agent-runtime service", () => {
     globalThis.fetch = (async (url: string) => {
       if (url.endsWith("/capabilities")) {
         await capabilityWait;
-        return Response.json({ protocol_version: "1.1", capabilities: [{ nodes: ["test-node"], capability: {
-          id: "triage.audio", modal: "audio", tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }],
-          input: { media: "required" }, output_schema: "urn:mmp:protocol:1:digest",
+        return Response.json({ protocol_version: "2.0", capabilities: [{ nodes: ["test-node"], capability: {
+          id: "triage.audio", purpose: "triage", tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }],
+          input: { media: { presence: "required", accepts: ["audio/*", "video/*"] } },
+          output: { schema: "urn:mmp:protocol:2:digest", agent_context: "required" },
         } }] });
       }
       jobs++;
@@ -485,6 +489,8 @@ describe("agent-runtime service", () => {
         result: { media_id: "sha256:steer-audio", kind: "audio", duration_sec: 1, timeline_unit: "sec",
           segments: [{ start: 0, end: 1, label_status: "ok", labels: [{ tag: "Speech", score: 0.9 }], asr: { text: "这是补充说明", lang: "zh", confidence: 0.9 } }],
           tools: { vad: "ok", tagging: "ok", asr: "ok" }, gaps: [], capabilities_available: [], source },
+        agent_context: { format: "mmp-agent-context-v1", content_type: "text/plain; charset=utf-8",
+          text: "[mmp:agent-context start]\n语音：这是补充说明\n[mmp:agent-context end]" },
       });
     }) as typeof globalThis.fetch;
     try {

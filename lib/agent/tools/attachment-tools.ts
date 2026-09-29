@@ -32,6 +32,16 @@ export async function readSessionAttachment(
     fileSize: attachment.fileSize,
     fileName: attachment.fileName,
   };
+  // preflight 是通用 MMP 入口：不要先按宿主认识的文件种类分流。MMP 2.0
+  // 会用 purpose + Content-Type 决定当前和未来的媒体能力。
+  if (input.mode === "preflight") {
+    const preflight = await preflightAttachment({
+      attachmentId: attachment.id,
+      mimeType: attachment.mimeType,
+      r2Key: attachment.r2Key,
+    }, { signal, usage: { userId, productionId } });
+    return neutralizeInjectionTags(preflight.contextText);
+  }
   if (lower.endsWith(".docx") || lower.endsWith(".pdf")) {
     if (input.mode === "ocr") {
       return attachmentFileOcr(userId, productionId, ref, attachment.mimeType, input.pages ?? [1], {
@@ -53,13 +63,11 @@ export async function readSessionAttachment(
         : (/\.(mp4|webm|mov|mkv)$/.test(lower)) ? "video" : null);
   if (mediaKind && input.mode !== "ocr") {
     const preflight = await preflightAttachment({
-      mediaKind,
       attachmentId: attachment.id,
-      fileName: attachment.fileName,
       mimeType: attachment.mimeType,
       r2Key: attachment.r2Key,
     }, { signal, usage: { userId, productionId } });
-    return neutralizeInjectionTags(preflight.renderedDigest);
+    return neutralizeInjectionTags(preflight.contextText);
   }
   if (mediaKind === "image") {
     return attachmentFileOcr(userId, productionId, ref, attachment.mimeType, [1], {
