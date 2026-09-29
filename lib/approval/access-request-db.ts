@@ -562,11 +562,12 @@ export async function getAccessRequestFlow(
     flow = { mode: "ladder", remaining };
   }
 
+  const canCancel = pending && viewerId === row.subject_id;
   let viewerActions = {
     canApprove: false,
     canReject: false,
     canEscalate: false,
-    canCancel: pending && viewerId === row.subject_id,
+    canCancel,
   };
   if (pending) {
     const auth = await authorizeApprovalAction(row, viewerId);
@@ -578,7 +579,7 @@ export async function getAccessRequestFlow(
         canApprove: auth.canFinalize,
         canReject: true,
         canEscalate,
-        canCancel: viewerActions.canCancel,
+        canCancel,
       };
     }
   }
