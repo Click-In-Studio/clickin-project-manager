@@ -6,18 +6,20 @@
  */
 import { getPool } from "../pg";
 import type {
-  ApprovalCenterBusinessType,
   ApprovalCenterItem,
   ApprovalCenterListParams,
   ApprovalCenterPage,
   ApprovalCenterStatus,
 } from "./approval-center-types";
-import { ApprovalCenterQueryError } from "./approval-center-types";
+import {
+  APPROVAL_CENTER_BUSINESS_TYPES,
+  ApprovalCenterQueryError,
+} from "./approval-center-types";
 
 type ApprovalCenterRow = {
   source: "approval_request" | "expense";
   source_id: string;
-  business_type: ApprovalCenterBusinessType;
+  business_type: string;
   production_id: string;
   production_name: string;
   applicant_id: string;
@@ -71,11 +73,14 @@ function escapeLike(value: string): string {
 }
 
 function rowToItem(row: ApprovalCenterRow): ApprovalCenterItem {
+  if (!(APPROVAL_CENTER_BUSINESS_TYPES as readonly string[]).includes(row.business_type)) {
+    throw new Error(`unsupported approval center business type: ${row.business_type}`);
+  }
   return {
     id: `${row.source}:${row.source_id}`,
     sourceId: row.source_id,
     source: row.source,
-    businessType: row.business_type,
+    businessType: row.business_type as ApprovalCenterItem["businessType"],
     production: { id: row.production_id, name: row.production_name },
     applicant: { id: row.applicant_id, name: row.applicant_name },
     title: row.title,
@@ -94,7 +99,13 @@ const UNIFIED_APPROVAL_QUERY = `
     SELECT
       'approval_request'::text AS source,
       ar.id::text AS source_id,
-      CASE WHEN ar.type = 'atomic_permission' THEN 'resource_access' ELSE ar.type END AS business_type,
+      CASE ar.type
+        WHEN 'atomic_permission' THEN 'resource_access'
+        WHEN 'resource_access' THEN 'resource_access'
+        WHEN 'member_exit' THEN 'member_exit'
+        WHEN 'owner_transfer' THEN 'owner_transfer'
+        ELSE '__unsupported__:' || ar.type
+      END AS business_type,
       ar.production_id,
       p.name AS production_name,
       ar.subject_id AS applicant_id,
