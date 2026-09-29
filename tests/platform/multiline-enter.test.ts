@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
+import { isAgentChatSubmitShortcut, isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
 
 describe("#730 多行输入的换行与提交", () => {
   it("普通 Enter 保留给换行，只有非输入法组合态的 Mod+Enter 提交", () => {
@@ -19,7 +19,6 @@ describe("#730 多行输入的换行与提交", () => {
 
   it("所有带提交动作的多行工作面消费同一快捷键规则", () => {
     const files = [
-      "components/agent/AgentPopout.tsx",
       "components/ops/ReportViewClient.tsx",
       "components/ops/event-detail/DeptNotesList.tsx",
       "components/ops/cue-page/CueCommentsPanel.tsx",
@@ -34,10 +33,19 @@ describe("#730 多行输入的换行与提交", () => {
     }
   });
 
-  it("Agent 只在桌面端提示实体键盘提交快捷键", () => {
-    const agentPopout = readFileSync("components/agent/AgentPopout.tsx", "utf8");
+  it("Agent 桌面端 Enter 发送、Shift+Enter 换行，手机端 Enter 换行", () => {
+    const enter = { key: "Enter", metaKey: false, ctrlKey: false };
+    expect(isAgentChatSubmitShortcut(enter, false)).toBe(true);
+    expect(isAgentChatSubmitShortcut({ ...enter, shiftKey: true }, false)).toBe(false);
+    expect(isAgentChatSubmitShortcut({ ...enter, nativeEvent: { isComposing: true } }, false)).toBe(false);
+    expect(isAgentChatSubmitShortcut(enter, true)).toBe(false);
+    expect(isAgentChatSubmitShortcut({ ...enter, shiftKey: true }, true)).toBe(false);
+    expect(isAgentChatSubmitShortcut({ ...enter, metaKey: true }, true)).toBe(true);
+    expect(isAgentChatSubmitShortcut({ ...enter, ctrlKey: true }, true)).toBe(true);
 
-    expect(agentPopout).toContain('isMobileViewport ? "输入消息…" : `输入消息，${submitKey} 发送`');
+    const agentPopout = readFileSync("components/agent/AgentPopout.tsx", "utf8");
+    expect(agentPopout).toContain("isAgentChatSubmitShortcut(e, isMobileViewport)");
+    expect(agentPopout).toContain('isMobileViewport ? "输入消息…" : "输入消息，Enter 发送"');
   });
 
   it("富文本多行面提示软键盘 Enter 为换行，剧本正文仍保留结构化 Enter", () => {
