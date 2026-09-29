@@ -1,5 +1,5 @@
 ---
-kind: fix
+kind: fixed
 title: AI 会在回复前自动预检音频等媒体附件
 page: ai/assistant/chat
 pr: 776
