@@ -146,7 +146,7 @@ export async function steerRun(
   const identity = parseSessionIdentity(sessionId);
   if (!identity) throw Object.assign(new Error("无权访问该会话"), { status: 403 });
   // steer 的 HTTP 请求只负责入队，不能同步等待最长两分钟的外部预检；队列仍保证多次
-  // 插话按到达顺序进入 harness，并在各自进入下一次模型调用前拿到 digest。
+  // 插话按到达顺序进入 harness，并在各自进入下一次模型调用前拿到 agent context。
   run.enqueueSteer(async () => withAttachmentPreflight(
     message, attachmentIds, sessionId, identity.userId, identity.productionId ?? null, run.abort.signal,
   ));
@@ -167,9 +167,8 @@ async function withAttachmentPreflight(
     throw Object.assign(new Error("附件不存在、尚未上传完成或不属于该会话"), { status: 400 });
   }
   const preflights = await preflightAttachments(attachments.map((attachment) => ({
-    mediaKind: attachment.mediaKind,
     attachmentId: attachment.id,
-    fileName: attachment.fileName,
+    mediaKind: attachment.mediaKind,
     mimeType: attachment.mimeType,
     r2Key: attachment.r2Key,
   })), { signal, usage: { userId, productionId } });
@@ -358,7 +357,7 @@ async function execute(input: ExecuteInput): Promise<void> {
       },
     });
 
-    // 额度门与 run 建立之后、基础模型第一次推理之前自动预检。MMP 的 digest 进入本轮
+    // 额度门与 run 建立之后、基础模型第一次推理之前自动预检。MMP 的 agent context 进入本轮
     // 用户消息并随 transcript 保存；附件 id 与原件仍保留，后续可显式读取。
     if (message !== undefined && input.attachmentIds?.length) {
       message = await withAttachmentPreflight(

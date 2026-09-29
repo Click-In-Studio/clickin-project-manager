@@ -114,7 +114,7 @@ describe("asset_preflight：既有资产复用自动预检", () => {
     expect(await assetPreflight(outsiderId, prodId, assetId)).toBe(DENIED_NOT_MEMBER);
     expect(await assetPreflight(memberId, prodId, assetId)).toBe(DENIED_ASSET_VIEW);
     const out = await assetPreflight(ownerId, prodId, assetId);
-    expect(out).toContain("[mmp:digest unavailable]");
+    expect(out).toContain("Click-In 未获得 MMP 媒体预检结果");
     expect(out).toContain("not_configured");
   });
 

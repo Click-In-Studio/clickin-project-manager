@@ -167,7 +167,7 @@ export const DEFS: Def[] = [
     mcpName: "my.attachment_read",
     description:
       "读取当前会话中用户随消息附带的临时文件（EN: read attached uploaded file）。attachmentId 来自 <clickin-attachment-context>。" +
-      "纯文本直接读取；docx/pdf 默认先给结构概览，可用 mode=read + ranges 分段读、mode=search + query 检索；媒体文件会按 MMP 当前公布的 triage 能力读取预检 digest，只有确实需要识别文字时才对图片或扫描 PDF 用 mode=ocr。附件只在当前会话有效。",
+      "纯文本直接读取；docx/pdf 默认先给结构概览，可用 mode=read + ranges 分段读、mode=search + query 检索；媒体文件会按 MMP 当前公布的 triage 能力读取预检上下文，只有确实需要识别文字时才对图片或扫描 PDF 用 mode=ocr。附件只在当前会话有效。",
     parameters: Type.Object({
       attachmentId: Type.String({ description: "临时附件 id" }),
       mode: Type.Optional(Type.Union([Type.Literal("preflight"), Type.Literal("outline"), Type.Literal("read"), Type.Literal("search"), Type.Literal("ocr")])),
