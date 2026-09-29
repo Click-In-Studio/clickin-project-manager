@@ -49,7 +49,7 @@ export default function BoundedTimePicker({ label, value, onChange }: { label: s
 
   return (
     <div ref={rootRef} className={styles.timeField}>
-      <span style={{ display: "block", marginBottom: 5, fontSize: 11, color: "var(--muted)" }}>{label}</span>
+      <span style={{ display: "block", marginBottom: 3, fontSize: 11, color: "var(--muted)" }}>{label}</span>
       <button type="button" className={styles.timeButton} aria-expanded={open} onClick={() => setOpen(v => !v)}>
         <span>{hour}:{minute}</span><span aria-hidden>⌄</span>
       </button>

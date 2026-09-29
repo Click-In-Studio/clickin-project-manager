@@ -131,8 +131,10 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
     <section className={styles.calendarPanel}>
       <div className={styles.calendarHeader}>
         <div className={styles.calendarHeading}>
-          <p className={styles.calendarYear}>{year} 年</p>
-          <h2 className={styles.calendarTitle}>项目日历</h2>
+          <div className={styles.calendarTitleRow}>
+            <h2 className={styles.calendarTitle}>项目日历</h2>
+            <span className={styles.calendarYear}>{year} 年</span>
+          </div>
           <small className={styles.calendarDescription}>月历统一展示事件、任务、里程碑与阶段；点击事项查看详情。</small>
         </div>
         <div className={styles.calendarControls}>

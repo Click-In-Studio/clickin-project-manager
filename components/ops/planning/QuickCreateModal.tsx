@@ -21,6 +21,7 @@ export default function QuickCreateModal({ productionId, date, departments, even
 }) {
   const router = useRouter();
   const [kind, setKind] = useState<QuickCreateKind>("event");
+  const [selectedDate, setSelectedDate] = useState(date);
   const [title, setTitle] = useState("");
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("11:00");
@@ -34,18 +35,22 @@ export default function QuickCreateModal({ productionId, date, departments, even
   const fieldStyle: React.CSSProperties = {
     width: "100%", boxSizing: "border-box", border: "1px solid var(--line)",
     borderRadius: 8, background: "var(--paper)", color: "var(--ink)",
-    padding: "9px 10px", fontSize: 12,
+    padding: "7px 9px", fontSize: 12,
   };
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
+    if (!selectedDate) {
+      setError("请选择日期");
+      return;
+    }
     setSaving(true);
     setError(null);
-    // date 是 CST 日历格子的日期，startTime/endTime 是 CST 时刻——按 CST 解析，
+    // selectedDate 是 CST 日历日期，startTime/endTime 是 CST 时刻——按 CST 解析，
     // 不能交给 new Date() 按浏览器本地时区猜
-    const start = dateTimeToIso(date, startTime);
-    const end = dateTimeToIso(date, endTime);
+    const start = dateTimeToIso(selectedDate, startTime);
+    const end = dateTimeToIso(selectedDate, endTime);
     if (end <= start) {
       setError("结束时间必须晚于开始时间");
       setSaving(false);
@@ -92,7 +97,7 @@ export default function QuickCreateModal({ productionId, date, departments, even
       className="app-mobile-input-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label={`${date} 快捷新建`}
+      aria-label={`${selectedDate || date} 快捷新建`}
       onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
       onKeyDown={e => {
         if (e.key === "Escape" && !e.defaultPrevented) {
@@ -103,16 +108,26 @@ export default function QuickCreateModal({ productionId, date, departments, even
       style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(7,29,32,.34)", display: "grid", placeItems: "center", padding: 18 }}
     >
       <form className="app-mobile-input-surface" onSubmit={submit} style={{ width: "min(520px, 100%)", maxHeight: "calc(100vh - 36px)", overflowY: "auto", borderRadius: 14, border: "1px solid var(--line)", background: "var(--surface)", boxShadow: "0 22px 70px rgba(7,29,32,.24)", padding: 22 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 18 }}>
-          <div>
-            <p style={{ margin: 0, color: "var(--muted)", fontSize: 10, fontWeight: 700, letterSpacing: ".12em" }}>{date}</p>
-            <h2 style={{ margin: "5px 0 0", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 22, fontWeight: 500 }}>快捷新建</h2>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h2 style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 22, fontWeight: 500 }}>快捷新建</h2>
+            <label style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 160px)", alignItems: "center", gap: 8, marginTop: 8, width: "fit-content", maxWidth: "100%", color: "var(--muted)", fontSize: 11 }}>
+              日期
+              <input
+                type="date"
+                required
+                aria-label="新建日期"
+                value={selectedDate}
+                onChange={event => setSelectedDate(event.target.value)}
+                style={{ ...fieldStyle, background: "var(--surface)" }}
+              />
+            </label>
           </div>
           <button type="button" onClick={onClose} aria-label="关闭" style={{ marginLeft: "auto", border: 0, background: "transparent", color: "var(--muted)", fontSize: 22, cursor: "pointer" }}>×</button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginBottom: 14 }}>
-          {([['event', '事件', '创建后按实际流程添加日程'], ['task', '任务', '同步进入任务与甘特']] as const).map(([value, label, hint]) => {
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginBottom: 10 }}>
+          {([['event', '事件'], ['task', '任务']] as const).map(([value, label]) => {
             const active = kind === value;
             return (
               <button key={value} type="button" onClick={() => {
@@ -120,32 +135,31 @@ export default function QuickCreateModal({ productionId, date, departments, even
                 // event（多选）切到 task（单选）时把已选收敛成一个，
                 // 否则会带着一串选中项进来但只有一个生效
                 if (value === "task") setDepartmentIds(current => current.size > 1 ? new Set([[...current][0]]) : current);
-              }} style={{ border: `1px solid ${active ? "var(--ink)" : "var(--line)"}`, borderRadius: 9, padding: "10px 11px", background: active ? "var(--ink)" : "var(--paper)", color: active ? "#fff" : "var(--ink)", textAlign: "left", cursor: "pointer" }}>
+              }} style={{ minHeight: 34, border: `1px solid ${active ? "var(--ink)" : "var(--line)"}`, borderRadius: 9, padding: "6px 10px", background: active ? "var(--ink)" : "var(--paper)", color: active ? "#fff" : "var(--ink)", textAlign: "center", cursor: "pointer" }}>
                 <b style={{ display: "block", fontSize: 12 }}>{label}</b>
-                <small style={{ display: "block", marginTop: 3, color: active ? "#bdcbc7" : "var(--muted)", fontSize: 9 }}>{hint}</small>
               </button>
             );
           })}
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <label style={{ fontSize: 11, color: "var(--muted)" }}>标题
-            <input autoFocus value={title} onChange={e => setTitle(e.target.value)} placeholder={kind === "event" ? "例如：第三场合成排练" : "例如：确认无线麦频点"} style={{ ...fieldStyle, display: "block", marginTop: 5 }} />
+            <input autoFocus value={title} onChange={e => setTitle(e.target.value)} placeholder={kind === "event" ? "例如：第三场合成排练" : "例如：确认无线麦频点"} style={{ ...fieldStyle, display: "block", marginTop: 3 }} />
           </label>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <BoundedTimePicker label="开始时间" value={startTime} onChange={setStartTime} />
             <BoundedTimePicker label="结束时间" value={endTime} onChange={setEndTime} />
           </div>
           {kind === "event" && (
             <label style={{ fontSize: 11, color: "var(--muted)" }}>事件类型
-              <OverflowSafeSelect value={eventType} onChange={e => setEventType(e.target.value)} style={{ ...fieldStyle, display: "block", marginTop: 5 }}>
+              <OverflowSafeSelect value={eventType} onChange={e => setEventType(e.target.value)} style={{ ...fieldStyle, display: "block", marginTop: 3 }}>
                 <option value="rehearsal">排练</option><option value="meeting">会议</option><option value="performance">演出</option><option value="custom">其他</option>
               </OverflowSafeSelect>
             </label>
           )}
           {kind === "task" && (
             <label style={{ fontSize: 11, color: "var(--muted)" }}>关联事件（可选）
-              <OverflowSafeSelect value={taskEventId} onChange={e => setTaskEventId(e.target.value)} style={{ ...fieldStyle, display: "block", marginTop: 5 }}>
+              <OverflowSafeSelect value={taskEventId} onChange={e => setTaskEventId(e.target.value)} style={{ ...fieldStyle, display: "block", marginTop: 3 }}>
                 <option value="">不关联，建立独立任务</option>
                 {events.filter(event => event.status !== "cancelled").map(event => (
                   <option key={event.id} value={event.id}>{event.startTime ? `${fmtDate(event.startTime)} · ` : ""}{event.title}</option>
@@ -190,7 +204,7 @@ export default function QuickCreateModal({ productionId, date, departments, even
           </div>}
         </div>
         {error && <p style={{ margin: "12px 0 0", color: "var(--danger)", fontSize: 11 }}>{error}</p>}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
           <button type="button" onClick={onClose} style={{ border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", padding: "8px 14px", cursor: "pointer" }}>取消</button>
           <button type="submit" disabled={saving || !title.trim()} style={{ border: "1px solid var(--ink)", borderRadius: 8, background: "var(--ink)", color: "#fff", padding: "8px 14px", cursor: "pointer", opacity: saving || !title.trim() ? .5 : 1 }}>{saving ? "创建中…" : `创建${kind === "event" ? "事件" : "任务"}`}</button>
         </div>
