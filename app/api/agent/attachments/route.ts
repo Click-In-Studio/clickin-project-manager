@@ -11,7 +11,6 @@ import {
   markAttachmentReady,
   listAttachmentsForSession,
   restoreReleasedAttachment,
-  runAttachmentGcBatch,
   scheduleAttachmentDeletion,
 } from "@/lib/agent/attachment-db";
 import { headR2Object, presignedPut } from "@/lib/r2";
@@ -26,6 +25,8 @@ export async function GET(req: NextRequest) {
   const denied = requireOwnership(sessionKey, auth.userId);
   if (denied) return denied;
   try {
+    const scopeDeny = await requireSessionScope(sessionKey, auth.userId);
+    if (scopeDeny) return scopeDeny;
     const [usage, attachments] = await Promise.all([
       getAttachmentUsage(auth.userId, sessionKey), listAttachmentsForSession(sessionKey),
     ]);
@@ -111,7 +112,6 @@ export async function PATCH(req: NextRequest) {
     if (!head || head.size == null) return NextResponse.json({ error: "附件上传未完成" }, { status: 409 });
     if (head.size > AGENT_ATTACHMENT_MAX_BYTES) {
       await scheduleAttachmentDeletion(body.attachmentId, body.sessionKey, auth.userId);
-      await runAttachmentGcBatch(1);
       return NextResponse.json({ error: "附件实际大小超过 50 MB" }, { status: 413 });
     }
     let attachment;
@@ -120,7 +120,6 @@ export async function PATCH(req: NextRequest) {
     } catch (err) {
       if ((err as { status?: number }).status === 413) {
         await scheduleAttachmentDeletion(body.attachmentId, body.sessionKey, auth.userId);
-        await runAttachmentGcBatch(1);
       }
       throw err;
     }
@@ -141,7 +140,6 @@ export async function DELETE(req: NextRequest) {
   if (denied) return denied;
   try {
     await scheduleAttachmentDeletion(attachmentId, sessionKey, auth.userId);
-    await runAttachmentGcBatch(1);
     return NextResponse.json({ ok: true });
   } catch (err) {
     return toErrorResponse(err);

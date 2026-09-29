@@ -5,6 +5,7 @@ import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
 import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { cleanupProduction, makeProduction, setProductionTier, shortId } from "../_support/factories";
+import { runAttachmentGcBatch } from "@/lib/agent/attachment-db";
 
 const { presignMock, headMock, deleteMock } = vi.hoisted(() => ({
   presignMock: vi.fn(),
@@ -56,12 +57,17 @@ afterAll(async () => {
 
 describe("会话临时附件路由（#704）", () => {
   it("未登录 401；他人的 session key 与非成员项目会话均 403", async () => {
-    const { POST } = await import("@/app/api/agent/attachments/route");
+    const { GET, POST } = await import("@/app/api/agent/attachments/route");
     const personal = createNewSessionKey(userId);
     expect((await POST(new NextRequest("http://localhost/api/agent/attachments", { method: "POST" }))).status).toBe(401);
+    expect((await GET(new NextRequest(`http://localhost/api/agent/attachments?sessionKey=${encodeURIComponent(personal)}`))).status).toBe(401);
     expect((await POST(req("POST", { sessionKey: personal, fileName: "x.txt", mimeType: "text/plain", fileSize: 1 }, outsiderCookie))).status).toBe(403);
     const productionKey = createNewSessionKey(outsiderId, prodId);
     expect((await POST(req("POST", { sessionKey: productionKey, fileName: "x.txt", mimeType: "text/plain", fileSize: 1 }, outsiderCookie))).status).toBe(403);
+    const getAsOutsider = new NextRequest(`http://localhost/api/agent/attachments?sessionKey=${encodeURIComponent(productionKey)}`, {
+      headers: { cookie: outsiderCookie },
+    });
+    expect((await GET(getAsOutsider)).status).toBe(403);
   });
 
   it("mediaKind 与 MIME 正交：Safari video/mp4 录音可登记为 audio，并在 HEAD 后 ready", async () => {
@@ -105,6 +111,8 @@ describe("会话临时附件路由（#704）", () => {
       method: "DELETE", headers: { cookie },
     });
     expect((await DELETE(delReq)).status).toBe(200);
+    expect(deleteMock).not.toHaveBeenCalled();
+    await runAttachmentGcBatch(1);
     expect(deleteMock).toHaveBeenCalledWith(first.attachment.r2Key);
   });
 
@@ -119,6 +127,7 @@ describe("会话临时附件路由（#704）", () => {
       { method: "DELETE", headers: { cookie } },
     ));
     expect(response.status).toBe(200);
+    await runAttachmentGcBatch(1);
     const row = await getPool().query<{ status: string; attempts: number; last_error: string | null }>(
       `SELECT status, attempts, last_error FROM agent_attachment_object WHERE attachment_id = $1`, [first.attachment.id],
     );
