@@ -60,4 +60,17 @@ describe("MMP 动态能力权限壳", () => {
     expect(mocks.resolveAsset).toHaveBeenCalledWith("u1", "p1", "asset_private");
     expect(mocks.run).not.toHaveBeenCalled();
   });
+
+  it("资产通过预览权限门后，用服务端解析出的文件行执行同一 capability", async () => {
+    mocks.resolveAsset.mockResolvedValue({
+      asset: { id: "asset_1", mimeType: "audio/flac" },
+      file: { id: "file_1", r2Key: "assets/file_1/a.flac" },
+    });
+    await expect(runAssetCapability("u1", "p1", "asset_1", { capability })).resolves.toBe("ok");
+    expect(mocks.run).toHaveBeenCalledWith(expect.objectContaining({
+      file: { fileId: "file_1", r2Key: "assets/file_1/a.flac", mimeType: "audio/flac" },
+      userId: "u1",
+      productionId: "p1",
+    }), expect.anything());
+  });
 });

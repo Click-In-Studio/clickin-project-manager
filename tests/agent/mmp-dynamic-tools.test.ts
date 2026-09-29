@@ -1,8 +1,14 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Capability, MmpClient } from "@mmp/client";
 import { buildMmpToolSurface, mmpCapabilityToolName } from "@/lib/agent/runtime/mmp-tools";
 import { runMmpCapability, MMP_RESULT_MAX_CHARS } from "@/lib/mmp/capability-runner";
 import { clearMmpMediaCacheForTests } from "@/lib/mmp/media-cache";
+
+const bridgeMocks = vi.hoisted(() => ({ attachment: vi.fn(), asset: vi.fn() }));
+vi.mock("@/lib/agent/tools/mmp-capability-tools", () => ({
+  runAttachmentCapability: bridgeMocks.attachment,
+  runAssetCapability: bridgeMocks.asset,
+}));
 
 const CAPABILITY: Capability = {
   id: "pitch_transcribe",
@@ -31,7 +37,12 @@ function registryClient(capabilities = [CAPABILITY]): MmpClient {
   return { capabilities: async () => registry(capabilities) } as unknown as MmpClient;
 }
 
-beforeEach(() => clearMmpMediaCacheForTests());
+beforeEach(() => {
+  clearMmpMediaCacheForTests();
+  vi.clearAllMocks();
+  bridgeMocks.attachment.mockResolvedValue("附件能力已完成");
+  bridgeMocks.asset.mockResolvedValue("资产能力已完成");
+});
 
 describe("MMP 动态一级工具", () => {
   it("每个 capability 生成直接工具；个人会话只给附件入口，制作会话再给资产入口", async () => {
@@ -42,12 +53,24 @@ describe("MMP 动态一级工具", () => {
     expect(schema.properties.tier.enum).toEqual(["gpu-fast", "gpu"]);
     expect(schema.properties.params.properties).toBeDefined();
     expect(schema.properties).not.toHaveProperty("mediaId");
+    await expect(personal.tools[0].execute("call-1", {
+      attachmentId: "att_1", tier: "gpu-fast", params: { start: 1 },
+    }, new AbortController().signal)).resolves.toMatchObject({
+      content: [{ type: "text", text: "附件能力已完成" }],
+    });
+    expect(bridgeMocks.attachment).toHaveBeenCalledWith(
+      "u", null, null, "att_1", expect.objectContaining({ capability: CAPABILITY, tier: "gpu-fast", params: { start: 1 } }),
+    );
 
     const production = await buildMmpToolSurface({ userId: "u", productionId: "p" }, { client: registryClient() });
     expect(production.tools.map((tool) => tool.mcpName)).toEqual([
       "mmp.attachment.pitch_transcribe",
       "mmp.asset.pitch_transcribe",
     ]);
+    await production.tools[1].execute("call-2", { assetId: "asset_1" }, new AbortController().signal);
+    expect(bridgeMocks.asset).toHaveBeenCalledWith(
+      "u", "p", "asset_1", expect.objectContaining({ capability: CAPABILITY }),
+    );
   });
 
   it("长 capability id 的暴露名仍不超过 64 字符且保持稳定", () => {
