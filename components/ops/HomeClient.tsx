@@ -94,7 +94,7 @@ export default function HomeClient({ productions, myCallTimes, myPendingReqs, my
               <div className={styles.progressHeroMetrics}>
                 <div className={`${styles.progressMetricCard} ${days !== null && days <= 7 && days >= 0 ? styles.progressMetricUrgent : ""}`}>
                   <strong>{milestoneLabel}</strong>
-                  <span>{milestoneSubLabel}</span>
+                  <span title={milestoneSubLabel}>{milestoneSubLabel}</span>
                   {days !== null && days <= 7 && days >= 0 && <small>临近节点</small>}
                 </div>
                 <Link
