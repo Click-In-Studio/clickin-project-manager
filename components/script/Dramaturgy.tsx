@@ -21,8 +21,7 @@ import ProductionTopMenu, {
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
 import type { SceneFieldPerms } from "@/lib/script/scene-field-perms-shared";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
-
-type SceneViewMode = "list" | "table";
+import { useListTableViewPreference } from "./use-list-table-view-preference";
 
 type Props = {
   productionId: string;
@@ -52,11 +51,7 @@ export default function Dramaturgy({
 }: Props) {
   const { stage: toolbarStage, closeOverflow, overflowOpen } = useProductionToolbar();
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
-  const [sceneViewMode, setSceneViewMode] = useState<SceneViewMode>("list");
-
-  useEffect(() => {
-    setSceneViewMode(window.innerWidth > 1920 ? "table" : "list");
-  }, []);
+  const [sceneViewMode, setSceneViewMode] = useListTableViewPreference("dramaturgy");
 
   // AI 写工具改了场次（lib/agent/runtime/tools.ts 的 scene mutates）→ 重拉一次。列表模式
   // 的 ScenesManager 自己订阅 markers SSE 会刷，但表格模式用的是这里的 scenes state。

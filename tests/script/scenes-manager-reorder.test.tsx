@@ -12,6 +12,10 @@ import ScenesManager from "@/components/script/ScenesManager";
 import { ALL_SCENE_FIELD_PERMS } from "@/lib/script/scene-field-perms-shared";
 import type { MarkerProjection } from "@/lib/script/script-marker-domain";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 class FakeEventSource {
@@ -146,5 +150,29 @@ describe("构作列表拖动排序的落点", () => {
     await dropOn("第二章", BOTTOM_EDGE);
     expect(putCalls()).toHaveLength(1);
     expect(JSON.parse(String(putCalls()[0][1]?.body))).toMatchObject({ markerId: "c1", beforeMarkerId: null });
+  });
+
+  it("窄屏元数据输入初始约一行、可纵向扩展，失焦仍保存", async () => {
+    await act(async () => {
+      row("第一章").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const synopsis = container.querySelector<HTMLTextAreaElement>("textarea");
+    expect(synopsis).not.toBeNull();
+    expect(synopsis?.rows).toBe(2);
+    expect(synopsis?.className).toContain("h-8");
+    expect(synopsis?.className).toContain("resize-y");
+    expect(synopsis?.className).toContain("sm:h-auto");
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(synopsis, "新的场次简介");
+      synopsis!.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "新的场次简介" }));
+    });
+    await act(async () => {
+      synopsis!.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+
+    const patchCall = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "PATCH");
+    expect(patchCall?.[0]).toBe("/api/production/p1/scenes/c1");
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({ synopsis: "新的场次简介", versionId: "v1" });
   });
 });
