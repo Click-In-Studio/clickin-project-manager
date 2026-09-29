@@ -39,6 +39,7 @@ describe("#730 多行输入的换行与提交", () => {
     expect(isAgentChatSubmitShortcut({ ...enter, shiftKey: true }, false)).toBe(false);
     expect(isAgentChatSubmitShortcut({ ...enter, nativeEvent: { isComposing: true } }, false)).toBe(false);
     expect(isAgentChatSubmitShortcut(enter, true)).toBe(false);
+    expect(isAgentChatSubmitShortcut({ ...enter, shiftKey: true }, true)).toBe(false);
     expect(isAgentChatSubmitShortcut({ ...enter, metaKey: true }, true)).toBe(true);
     expect(isAgentChatSubmitShortcut({ ...enter, ctrlKey: true }, true)).toBe(true);
 
