@@ -17,23 +17,35 @@ import { createAsset, getAsset, listAssets, resolveAssetFile } from "@/lib/asset
 import { canUploadAssetBytes } from "@/lib/asset/perm";
 import { POST as filesPOST } from "@/app/api/production/[id]/assets/[assetId]/files/route";
 import { POST as presignPOST } from "@/app/api/production/[id]/assets/presign/route";
+import { POST as multipartPOST } from "@/app/api/production/[id]/assets/presign-multipart/route";
+import { GET as partGET } from "@/app/api/production/[id]/assets/presign-part/route";
+import { POST as relayPOST } from "@/app/api/production/[id]/assets/relay-part/route";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 
 // R2 只替换本 PR 用到的三个出入口，其余导出（签名等纯函数）保持真身
-const { headMock, listPartsMock, completeMock } = vi.hoisted(() => ({
-  headMock: vi.fn(), listPartsMock: vi.fn(), completeMock: vi.fn(),
+const { headMock, listPartsMock, completeMock, presignMock, createMultipartMock, partMock, relayMock } = vi.hoisted(() => ({
+  headMock: vi.fn(), listPartsMock: vi.fn(), completeMock: vi.fn(), presignMock: vi.fn(),
+  createMultipartMock: vi.fn(), partMock: vi.fn(), relayMock: vi.fn(),
 }));
 vi.mock("@/lib/r2", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/r2")>(),
   headR2Object: headMock,
   listMultipartParts: listPartsMock,
   completeMultipartUpload: completeMock,
+  presignedPut: presignMock,
+  createMultipartUpload: createMultipartMock,
+  presignedUploadPart: partMock,
+  uploadPartRelay: relayMock,
 }));
 
 beforeEach(() => {
   headMock.mockReset().mockResolvedValue({ size: 2048, contentType: null });
   listPartsMock.mockReset().mockResolvedValue([{ partNumber: 1, eTag: "e1" }]);
   completeMock.mockReset().mockResolvedValue(undefined);
+  presignMock.mockReset().mockReturnValue({ url: "https://r2.example/put", contentType: "application/pdf" });
+  createMultipartMock.mockReset().mockResolvedValue("up-1");
+  partMock.mockReset().mockReturnValue("https://r2.example/part");
+  relayMock.mockReset().mockResolvedValue("etag-1");
 });
 
 let prodId: string;
@@ -199,8 +211,64 @@ describe("追加版本注册", () => {
       ctxFor(prodId, singleAssetId),
     );
     expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "asset_file_policy_single" });
     expect(await fileCount(singleAssetId)).toBe(1);
     expect(headMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("single-file 数据库不变量", () => {
+  it("数据库拒绝给 single asset 直接插入第二个文件", async () => {
+    await expect(getPool().query(
+      `INSERT INTO asset_file (id, asset_id, r2_key, file_size)
+       VALUES ($1, $2, $3, 1)`,
+      [`af_direct_${Date.now().toString(36)}`, singleAssetId, "assets/t740_direct/x.pdf"],
+    )).rejects.toMatchObject({ constraint: "asset_single_file_policy_guard" });
+    expect(await fileCount(singleAssetId)).toBe(1);
+  });
+
+  it("策略创建后不可从 single 改回 append", async () => {
+    await expect(getPool().query(
+      `UPDATE asset SET file_version_policy = 'append' WHERE id = $1`, [singleAssetId],
+    )).rejects.toMatchObject({ constraint: "asset_file_version_policy_immutable" });
+    expect((await getAsset(singleAssetId))?.fileVersionPolicy).toBe("single");
+  });
+
+  it("两个并发直写只能有一个成为 single asset 的首文件", async () => {
+    const empty = await createAsset({
+      productionId: prodId, uploaderUserId: uploader, assetType: "reference",
+      fileName: "并发凭证.pdf", mimeType: "application/pdf", storageType: "r2",
+      r2Key: "assets/t740_race/original.pdf", fileVersionPolicy: "single",
+    });
+    await getPool().query(`DELETE FROM asset_file WHERE asset_id = $1`, [empty.asset.id]);
+
+    const results = await Promise.allSettled([
+      getPool().query(
+        `INSERT INTO asset_file (id, asset_id, r2_key) VALUES ($1, $2, $3)`,
+        [`af_race_a_${Date.now().toString(36)}`, empty.asset.id, "assets/t740_race/a.pdf"],
+      ),
+      getPool().query(
+        `INSERT INTO asset_file (id, asset_id, r2_key) VALUES ($1, $2, $3)`,
+        [`af_race_b_${Date.now().toString(36)}`, empty.asset.id, "assets/t740_race/b.pdf"],
+      ),
+    ]);
+    expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter(result => result.status === "rejected")).toHaveLength(1);
+    expect(await fileCount(empty.asset.id)).toBe(1);
+  });
+
+  it("financial_document 在数据库层必须使用 single，类型也必须来自词汇表", async () => {
+    await expect(createAsset({
+      productionId: prodId, uploaderUserId: uploader, assetType: "financial_document",
+      fileName: "错误策略.pdf", mimeType: "application/pdf", storageType: "r2",
+      r2Key: "assets/t740_bad_policy/x.pdf",
+    })).rejects.toMatchObject({ constraint: "asset_financial_document_single_policy_check" });
+    await expect(getPool().query(
+      `UPDATE asset SET asset_type = 'unknown_type' WHERE id = $1`, [assetId],
+    )).rejects.toMatchObject({ constraint: "asset_type_check" });
+    await expect(getPool().query(
+      `UPDATE asset SET asset_type = 'reference' WHERE id = $1`, [singleAssetId],
+    )).rejects.toMatchObject({ constraint: "asset_financial_document_type_immutable" });
   });
 });
 
@@ -346,5 +414,42 @@ describe("presign 的门按目标分叉（#456 接线的前置）", () => {
     const res = await presignPOST(
       presignReq(stranger, { fileName: "v2.pdf", mimeType: "application/pdf", assetId }), pctx());
     expect(res.status).toBe(403);
+  });
+
+  it("single 目标在所有字节入口都于写 R2 前返回稳定 409", async () => {
+    const direct = await presignPOST(
+      presignReq(uploader, {
+        fileName: "replacement.pdf", mimeType: "application/pdf", assetId: singleAssetId,
+      }), pctx());
+
+    const multipart = await multipartPOST(
+      presignReq(uploader, {
+        fileName: "replacement.pdf", mimeType: "application/pdf", fileSize: 100,
+        assetId: singleAssetId,
+      }), pctx());
+
+    const query = new URLSearchParams({
+      r2Key: "assets/t740_part/x.pdf", uploadId: "up-1", partNumber: "1",
+      assetId: singleAssetId,
+    });
+    const partReq = new NextRequest(`http://localhost/api/presign-part?${query}`, {
+      headers: { Cookie: cookieFor(uploader) },
+    });
+    const part = await partGET(partReq, pctx());
+    const relayReq = new NextRequest(`http://localhost/api/relay-part?${query}`, {
+      method: "POST",
+      headers: { Cookie: cookieFor(uploader), "Content-Type": "application/octet-stream" },
+      body: new Uint8Array([1]),
+    });
+    const relay = await relayPOST(relayReq, pctx());
+
+    for (const response of [direct, multipart, part, relay]) {
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: "asset_file_policy_single" });
+    }
+    expect(presignMock).not.toHaveBeenCalled();
+    expect(createMultipartMock).not.toHaveBeenCalled();
+    expect(partMock).not.toHaveBeenCalled();
+    expect(relayMock).not.toHaveBeenCalled();
   });
 });

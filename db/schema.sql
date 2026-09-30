@@ -1118,7 +1118,12 @@ CREATE TABLE IF NOT EXISTS asset (
   id                TEXT PRIMARY KEY,
   production_id     TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   uploader_user_id  UUID NOT NULL REFERENCES app_user(id),
-  asset_type        TEXT NOT NULL DEFAULT 'reference',
+  asset_type        TEXT NOT NULL DEFAULT 'reference'
+                    CONSTRAINT asset_type_check
+                      CHECK (asset_type IN (
+                        'drafting', 'planogram', 'demo', 'rehearsal_video', 'reference',
+                        'material', 'clip', 'qlab', 'score', 'recording', 'financial_document'
+                      )),
   file_name         TEXT NOT NULL,
   mime_type         TEXT,
   -- is_public 已随 #420 迁入 node.is_public（两个 public 位并存必漂移）。语义差
@@ -1127,7 +1132,9 @@ CREATE TABLE IF NOT EXISTS asset (
   feishu_url        TEXT,
   file_version_policy TEXT NOT NULL DEFAULT 'append'
                       CONSTRAINT asset_file_version_policy_check
-                        CHECK (file_version_policy IN ('append', 'single')),
+                        CHECK (file_version_policy IN ('append', 'single'))
+                      CONSTRAINT asset_financial_document_single_policy_check
+                        CHECK (asset_type <> 'financial_document' OR file_version_policy = 'single'),
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   name              TEXT
 );
@@ -1149,6 +1156,69 @@ CREATE TABLE IF NOT EXISTS asset_file (
 );
 
 CREATE INDEX IF NOT EXISTS asset_file_asset_idx ON asset_file(asset_id);
+
+-- 文件版本策略在创建时由服务端业务语境写定，之后不可切换。single 的子行约束
+-- 需要跨表读取父策略，故以触发器兜底；父行锁同时封住两个直接 INSERT 的并发窗口。
+CREATE OR REPLACE FUNCTION prevent_asset_file_policy_update()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.file_version_policy IS DISTINCT FROM OLD.file_version_policy THEN
+    RAISE EXCEPTION 'asset file version policy is immutable'
+      USING ERRCODE = '23514', CONSTRAINT = 'asset_file_version_policy_immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER asset_file_version_policy_immutable
+BEFORE UPDATE OF file_version_policy ON asset
+FOR EACH ROW EXECUTE FUNCTION prevent_asset_file_policy_update();
+
+CREATE OR REPLACE FUNCTION prevent_asset_system_type_update()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF (OLD.asset_type = 'financial_document') IS DISTINCT FROM
+     (NEW.asset_type = 'financial_document') THEN
+    RAISE EXCEPTION 'financial_document is a creation-only system asset type'
+      USING ERRCODE = '23514', CONSTRAINT = 'asset_financial_document_type_immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER asset_financial_document_type_immutable
+BEFORE UPDATE OF asset_type ON asset
+FOR EACH ROW EXECUTE FUNCTION prevent_asset_system_type_update();
+
+CREATE OR REPLACE FUNCTION enforce_asset_single_file_policy()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  parent_policy TEXT;
+BEGIN
+  -- 锁父行使两个并发 INSERT 串行；FK 继续负责不存在的 asset_id。
+  SELECT file_version_policy INTO parent_policy
+    FROM asset
+   WHERE id = NEW.asset_id
+   FOR UPDATE;
+
+  IF parent_policy = 'single'
+     AND EXISTS (SELECT 1 FROM asset_file WHERE asset_id = NEW.asset_id) THEN
+    RAISE EXCEPTION 'single-file asset already has a file'
+      USING ERRCODE = '23514', CONSTRAINT = 'asset_single_file_policy_guard';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER asset_single_file_policy_guard
+BEFORE INSERT ON asset_file
+FOR EACH ROW EXECUTE FUNCTION enforce_asset_single_file_policy();
 
 -- 对外链接的 bearer token 只寻址本表，不编码 asset / production id。普通链接
 -- 每次兑现都查 revoked/expiry/policy；单次链接先兑换成浏览器会话，避免媒体 Range

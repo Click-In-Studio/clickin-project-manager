@@ -2,6 +2,11 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getAsset, addUniversalAssetFile, AssetFilePolicyError } from "@/lib/asset/db";
+import {
+  ASSET_FILE_POLICY_SINGLE_CODE,
+  assetVersionUploadError,
+  assetVersionUploadErrorResponse,
+} from "@/lib/asset/file-policy";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { completeMultipartUpload, listMultipartParts, headR2Object } from "@/lib/r2";
 import { enqueueAssetPostProcess } from "@/lib/job/asset-jobs";
@@ -29,9 +34,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   // 批D：overwrite（新版本文件）= file@create（创建者行集承担 own 语义）
   if (!await hasEffectiveGrant(access.permCtx, id, "asset", assetId, "file", "create"))
     return Response.json({ error: "权限不足" }, { status: 403 });
-  if (asset.storageType !== "r2") return Response.json({ error: "非 R2 文件，无法上传新版本" }, { status: 400 });
-  if (asset.fileVersionPolicy === "single")
-    return Response.json({ error: "该资产不支持上传新版本" }, { status: 409 });
+  const targetError = assetVersionUploadError(asset, id);
+  if (targetError) return assetVersionUploadErrorResponse(targetError);
 
   const ct = req.headers.get("content-type") ?? "";
   if (!ct.includes("application/json"))
@@ -88,7 +92,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       { fileName: body.fileName, mimeType });
   } catch (error) {
     if (error instanceof AssetFilePolicyError)
-      return Response.json({ error: error.message }, { status: 409 });
+      return Response.json({ error: error.message, code: ASSET_FILE_POLICY_SINGLE_CODE }, { status: 409 });
     throw error;
   }
   // 缩略图/文档解析预热是异步任务（heavy-worker）——上传路径不再同步跑 sharp
