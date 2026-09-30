@@ -26,7 +26,7 @@ describe("multipart 上传取消", () => {
       const path = String(url);
       if (init?.method === "DELETE") return new Response(null, { status: 204 });
       if (path.includes("/presign-multipart")) return new Response(JSON.stringify({
-        uploadId: "up_765", r2Key: "assets/af_765/file.mov", fileId: "af_765",
+        uploadId: "up_765", r2Key: "assets/af_765/file.mov", fileId: "af_765", abortToken: "abort_765",
       }), { status: 200, headers: { "Content-Type": "application/json" } });
       if (path.includes("/presign-part")) return new Response(JSON.stringify({ uploadUrl: "https://r2.example/part" }), {
         status: 200, headers: { "Content-Type": "application/json" },
@@ -60,6 +60,7 @@ describe("multipart 上传取消", () => {
     expect(JSON.parse(String(rollback![1]?.body))).toEqual({
       r2Key: "assets/af_765/file.mov",
       uploadId: "up_765",
+      abortToken: "abort_765",
     });
   });
 });

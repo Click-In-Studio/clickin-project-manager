@@ -229,7 +229,7 @@ export async function runAssetFileUpload(input: AssetFileUploadInput, control: U
     control.setProgress(0);
   }
 
-  let multipart: { uploadId: string; r2Key: string; fileId: string } | null = null;
+  let multipart: { uploadId: string; r2Key: string; fileId: string; abortToken: string } | null = null;
   try {
     const multipartResponse = await fetch(`${base}/presign-multipart`, {
       method: "POST",
@@ -238,7 +238,9 @@ export async function runAssetFileUpload(input: AssetFileUploadInput, control: U
       signal: control.signal,
     });
     if (!multipartResponse.ok) throw await responseError(multipartResponse, "分段初始化失败");
-    multipart = await multipartResponse.json() as { uploadId: string; r2Key: string; fileId: string };
+    multipart = await multipartResponse.json() as {
+      uploadId: string; r2Key: string; fileId: string; abortToken: string;
+    };
 
     const storedChunk = loadStoredChunkBytes();
     let chunkBytes = storedChunk;
@@ -404,6 +406,7 @@ export async function runAssetFileUpload(input: AssetFileUploadInput, control: U
         body: JSON.stringify({
           r2Key: multipart.r2Key,
           uploadId: multipart.uploadId,
+          abortToken: multipart.abortToken,
           ...presignScope,
         }),
       }).catch(() => {});

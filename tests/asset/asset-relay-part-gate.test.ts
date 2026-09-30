@@ -13,6 +13,7 @@ import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createAsset } from "@/lib/asset/db";
 import { POST as relayPOST } from "@/app/api/production/[id]/assets/relay-part/route";
 import { DELETE as abortDELETE } from "@/app/api/production/[id]/assets/presign-multipart/route";
+import { createMultipartAbortToken } from "@/lib/asset/upload-abort-token";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 
 const { relayMock, abortMock } = vi.hoisted(() => ({ relayMock: vi.fn(), abortMock: vi.fn() }));
@@ -158,7 +159,18 @@ describe("relay-part 的门（#457）", () => {
 });
 
 describe("multipart rollback（#765）", () => {
-  function abortReq(userId: string, body: Record<string, unknown>) {
+  function abortBody(userId: string, overrides: Record<string, unknown> = {}) {
+    const r2Key = "assets/t765_abort/x.pdf";
+    const uploadId = "up-1";
+    return {
+      r2Key,
+      uploadId,
+      abortToken: createMultipartAbortToken({ productionId: prodId, userId, r2Key, uploadId }),
+      ...overrides,
+    };
+  }
+
+  function abortReq(userId: string, body: Record<string, unknown> = abortBody(userId)) {
     return new NextRequest("http://localhost/api/presign-multipart", {
       method: "DELETE",
       headers: { Cookie: cookieFor(userId), "Content-Type": "application/json" },
@@ -166,18 +178,33 @@ describe("multipart rollback（#765）", () => {
     });
   }
 
-  it("缺少参数 400；无上传票 403", async () => {
+  it("未登录 401；缺少参数 400", async () => {
+    const noCookie = new NextRequest("http://localhost/api/presign-multipart", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(abortBody(wildcard)),
+    });
+    expect((await abortDELETE(noCookie, ctx())).status).toBe(401);
     expect((await abortDELETE(abortReq(wildcard, { uploadId: "up-1" }), ctx())).status).toBe(400);
-    expect((await abortDELETE(abortReq(stranger, {
-      r2Key: "assets/t765_abort/x.pdf", uploadId: "up-1",
-    }), ctx())).status).toBe(403);
+  });
+
+  it("非成员、无上传票和只有单枚无关键都 403", async () => {
+    expect((await abortDELETE(abortReq(outsider), ctx())).status).toBe(403);
+    expect((await abortDELETE(abortReq(stranger), ctx())).status).toBe(403);
+    expect((await abortDELETE(abortReq(scriptOnly), ctx())).status).toBe(403);
     expect(abortMock).not.toHaveBeenCalled();
   });
 
-  it("与上传共用权限门，放行后终止指定 multipart", async () => {
-    const response = await abortDELETE(abortReq(wildcard, {
-      r2Key: "assets/t765_abort/x.pdf", uploadId: "up-1",
-    }), ctx());
+  it("清理凭证绑定项目、用户、r2Key 和 uploadId", async () => {
+    const wrongUserToken = abortBody(uploader).abortToken;
+    expect((await abortDELETE(abortReq(wildcard, abortBody(wildcard, {
+      abortToken: wrongUserToken,
+    })), ctx())).status).toBe(403);
+    expect(abortMock).not.toHaveBeenCalled();
+  });
+
+  it("上传门和清理凭证都通过后终止指定 multipart", async () => {
+    const response = await abortDELETE(abortReq(wildcard), ctx());
     expect(response.status).toBe(204);
     expect(abortMock).toHaveBeenCalledWith("assets/t765_abort/x.pdf", "up-1");
   });
