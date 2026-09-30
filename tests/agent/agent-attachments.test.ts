@@ -5,6 +5,7 @@ import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
 import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { cleanupProduction, makeProduction, setProductionTier, shortId } from "../_support/factories";
+import { runAttachmentGcBatch } from "@/lib/agent/attachment-db";
 
 const { presignMock, headMock, deleteMock } = vi.hoisted(() => ({
   presignMock: vi.fn(),
@@ -49,18 +50,24 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
+  await getPool().query(`DELETE FROM agent_attachment_object WHERE session_id = ANY($1::text[])`, [sessions]).catch(() => {});
   for (const key of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [key]).catch(() => {});
   await cleanupProduction(prodId).catch(() => {});
 });
 
 describe("会话临时附件路由（#704）", () => {
   it("未登录 401；他人的 session key 与非成员项目会话均 403", async () => {
-    const { POST } = await import("@/app/api/agent/attachments/route");
+    const { GET, POST } = await import("@/app/api/agent/attachments/route");
     const personal = createNewSessionKey(userId);
     expect((await POST(new NextRequest("http://localhost/api/agent/attachments", { method: "POST" }))).status).toBe(401);
+    expect((await GET(new NextRequest(`http://localhost/api/agent/attachments?sessionKey=${encodeURIComponent(personal)}`))).status).toBe(401);
     expect((await POST(req("POST", { sessionKey: personal, fileName: "x.txt", mimeType: "text/plain", fileSize: 1 }, outsiderCookie))).status).toBe(403);
     const productionKey = createNewSessionKey(outsiderId, prodId);
     expect((await POST(req("POST", { sessionKey: productionKey, fileName: "x.txt", mimeType: "text/plain", fileSize: 1 }, outsiderCookie))).status).toBe(403);
+    const getAsOutsider = new NextRequest(`http://localhost/api/agent/attachments?sessionKey=${encodeURIComponent(productionKey)}`, {
+      headers: { cookie: outsiderCookie },
+    });
+    expect((await GET(getAsOutsider)).status).toBe(403);
   });
 
   it("mediaKind 与 MIME 正交：Safari video/mp4 录音可登记为 audio，并在 HEAD 后 ready", async () => {
@@ -82,6 +89,19 @@ describe("会话临时附件路由（#704）", () => {
     expect((await completed.json()).attachment).toMatchObject({ mediaKind: "audio", status: "ready" });
   });
 
+  it("上传完成后按 R2 HEAD 实际大小校准预占", async () => {
+    const key = createNewSessionKey(userId);
+    sessions.push(key);
+    headMock.mockResolvedValueOnce({ size: 9, contentType: "text/plain" });
+    const { POST, PATCH } = await import("@/app/api/agent/attachments/route");
+    const prepared = await (await POST(req("POST", {
+      sessionKey: key, fileName: "calibrate.txt", mimeType: "text/plain", fileSize: 12,
+    }))).json();
+    const completed = await PATCH(req("PATCH", { sessionKey: key, attachmentId: prepared.attachment.id }));
+    expect(completed.status).toBe(200);
+    expect((await completed.json()).attachment.fileSize).toBe(9);
+  });
+
   it("删除附件同时清理 R2 原件", async () => {
     const key = createNewSessionKey(userId);
     sessions.push(key);
@@ -91,7 +111,27 @@ describe("会话临时附件路由（#704）", () => {
       method: "DELETE", headers: { cookie },
     });
     expect((await DELETE(delReq)).status).toBe(200);
+    expect(deleteMock).not.toHaveBeenCalled();
+    await runAttachmentGcBatch(1);
     expect(deleteMock).toHaveBeenCalledWith(first.attachment.r2Key);
+  });
+
+  it("R2 暂时删除失败时保留可重试对象状态", async () => {
+    const key = createNewSessionKey(userId);
+    sessions.push(key);
+    const { POST, DELETE } = await import("@/app/api/agent/attachments/route");
+    const first = await (await POST(req("POST", { sessionKey: key, fileName: "retry.txt", mimeType: "text/plain", fileSize: 12 }))).json();
+    deleteMock.mockRejectedValueOnce(new Error("temporary R2 failure"));
+    const response = await DELETE(new NextRequest(
+      `http://localhost/api/agent/attachments?sessionKey=${encodeURIComponent(key)}&attachmentId=${first.attachment.id}`,
+      { method: "DELETE", headers: { cookie } },
+    ));
+    expect(response.status).toBe(200);
+    await runAttachmentGcBatch(1);
+    const row = await getPool().query<{ status: string; attempts: number; last_error: string | null }>(
+      `SELECT status, attempts, last_error FROM agent_attachment_object WHERE attachment_id = $1`, [first.attachment.id],
+    );
+    expect(row.rows[0]).toMatchObject({ status: "delete_pending", attempts: 1, last_error: "temporary R2 failure" });
   });
 
   it("附件不能跨会话绑定到消息", async () => {

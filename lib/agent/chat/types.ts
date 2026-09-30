@@ -10,8 +10,18 @@ export interface ChatSessionSummary {
 // 大小闸与 getChatHistory 的历史截断共用，防止两处各写字面量后静默漂移。
 export const TOOL_PAYLOAD_MAX_CHARS = 16_000;
 
+export type ChatAttachment = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  mediaKind: string | null;
+  status?: "pending" | "ready" | "released" | "deleting" | "expired" | "promoted";
+  releaseUntil?: string | null;
+  promotedAssetId?: string | null;
+};
+
 export type ChatTranscriptEntry =
-  | { role: "user"; content: string; attachments?: Array<{ id: string; fileName: string; mimeType: string; mediaKind: string | null }> }
+  | { role: "user"; content: string; attachments?: ChatAttachment[] }
   | { role: "assistant"; content: string }
   | { role: "thinking"; content: string }
   // result：toolResult 历史条目自身的文本内容（调用结果）。参数在

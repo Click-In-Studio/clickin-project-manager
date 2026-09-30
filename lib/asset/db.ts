@@ -3,6 +3,7 @@ import { policyFilteredRows } from "../perm/policy-db";
 import { insertNode } from "../node/db";
 import { ensureAssetsRootAnchor } from "../node/anchors";
 import type { MetadataEnvelope } from "./metadata";
+import type { PoolClient } from "pg";
 
 let _seq = 0;
 export function uid(prefix: string): string {
@@ -75,7 +76,7 @@ function rowToAssetFile(r: AssetFileRow): AssetFile {
 
 // ─── Asset CRUD ───────────────────────────────────────────────────────────────
 
-export async function createAsset(params: {
+export type CreateAssetParams = {
   productionId: string;
   uploaderUserId: string;
   assetType: AssetType;
@@ -98,17 +99,23 @@ export async function createAsset(params: {
   fileVersionPolicy?: FileVersionPolicy;
   /** 财务凭证等上下文资产不从通用 asset 权限面暴露。 */
   grantUploader?: boolean;
-}): Promise<{ asset: Asset; file: AssetFile; nodeId: string }> {
+};
+
+export async function createAsset(
+  params: CreateAssetParams,
+  transactionClient?: PoolClient,
+): Promise<{ asset: Asset; file: AssetFile; nodeId: string }> {
   const assetId = uid("ast");
   const fileId = uid("af");
-  const client = await getPool().connect();
+  const client = transactionClient ?? await getPool().connect();
+  const ownsTransaction = !transactionClient;
   let nodeId: string;
   try {
-    await client.query("BEGIN");
-    await client.query(
+    if (ownsTransaction) await client.query("BEGIN");
+    const assetRes = await client.query<AssetRow>(
       `INSERT INTO asset (id, production_id, uploader_user_id, asset_type, name, file_name, mime_type,
          storage_type, feishu_url, file_version_policy)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [assetId, params.productionId, params.uploaderUserId, params.assetType, params.name ?? null,
        params.fileName, params.mimeType,
        params.storageType, params.feishuUrl ?? null, params.fileVersionPolicy ?? "append"]
@@ -162,14 +169,13 @@ export async function createAsset(params: {
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
       [fileId, assetId, params.r2Key ?? null, params.thumbnailR2Key ?? null, params.fileSize ?? null]
     );
-    await client.query("COMMIT");
-    const assetRes = await getPool().query<AssetRow>(`SELECT * FROM asset WHERE id = $1`, [assetId]);
+    if (ownsTransaction) await client.query("COMMIT");
     return { asset: rowToAsset(assetRes.rows[0]), file: rowToAssetFile(fileRes.rows[0]), nodeId };
   } catch (err) {
-    await client.query("ROLLBACK");
+    if (ownsTransaction) await client.query("ROLLBACK");
     throw err;
   } finally {
-    client.release();
+    if (ownsTransaction) client.release();
   }
 }
 

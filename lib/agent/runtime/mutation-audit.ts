@@ -163,6 +163,38 @@ const READERS: Record<string, ScopeReader> = {
     },
     listIds: async ({ productionId }) => (await listCharacters(productionId)).map((c) => c.id),
   },
+  attachment: {
+    read: async (ids, { userId }) => {
+      const rows = await getPool().query<{
+        id: string; file_name: string; status: string; expires_at: Date; release_until: Date | null; promoted_asset_id: string | null;
+      }>(
+        `SELECT a.id, a.file_name, a.status, a.expires_at, a.release_until, a.promoted_asset_id
+         FROM agent_session_attachment a JOIN agent_session s ON s.id = a.session_id
+         WHERE a.id = ANY($1::text[]) AND s.user_id = $2`, [ids, userId],
+      );
+      return new Map(rows.rows.map((row) => [row.id, {
+        label: row.file_name, status: row.status, expiresAt: row.expires_at.toISOString(),
+        releaseUntil: row.release_until?.toISOString() ?? null, promotedAssetId: row.promoted_asset_id,
+      }]));
+    },
+  },
+  asset: {
+    read: async (ids, { productionId }) => {
+      if (!productionId || ids.length === 0) return new Map();
+      const rows = await getPool().query<{ id: string; file_name: string; asset_type: string; name: string | null }>(
+        `SELECT id, file_name, asset_type, name FROM asset WHERE production_id = $1 AND id = ANY($2::text[])`,
+        [productionId, ids],
+      );
+      return new Map(rows.rows.map((row) => [row.id, {
+        label: row.name ?? row.file_name, fileName: row.file_name, assetType: row.asset_type, name: row.name,
+      }]));
+    },
+    listIds: async ({ productionId }) => {
+      if (!productionId) return [];
+      const rows = await getPool().query<{ id: string }>(`SELECT id FROM asset WHERE production_id = $1`, [productionId]);
+      return rows.rows.map((row) => row.id);
+    },
+  },
   "instructions.personal": {
     read: async (ids) => {
       const { getAgentInstructions } = await import("@/lib/agent/agent-instructions");

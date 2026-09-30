@@ -35,7 +35,11 @@ type SessionSummary = {
   status?: "running" | "done" | "failed" | "killed" | "timeout";
 };
 
-type ChatAttachment = { id: string; fileName: string; mimeType: string; mediaKind: string | null; fileSize: number };
+type ChatAttachment = {
+  id: string; fileName: string; mimeType: string; mediaKind: string | null; fileSize?: number;
+  status?: "pending" | "ready" | "released" | "deleting" | "expired" | "promoted";
+  releaseUntil?: string | null; promotedAssetId?: string | null;
+};
 
 type GatewayStatus =
   | { state: "unconfigured" }
@@ -320,6 +324,19 @@ export default function AgentPopout({
           (b.kind === "assistant" || b.kind === "thinking") && b.streaming ? { kind: b.kind, text: b.text } : b
         )
       );
+      // 释放/资产化由工具在服务端改状态；流结束后用附件表刷新历史 chip，避免
+      // 用户必须关掉再打开会话才看见「待释放 / 已存为资产」。
+      fetch(`/api/agent/attachments?sessionKey=${encodeURIComponent(streamKey)}`)
+        .then((statusRes) => statusRes.ok ? statusRes.json() : null)
+        .then((data: { attachments?: ChatAttachment[] } | null) => {
+          if (activeKeyRef.current !== streamKey || !data?.attachments) return;
+          const byId = new Map(data.attachments.map((item) => [item.id, item]));
+          setBubbles((prev) => prev.map((bubble) => bubble.kind !== "user" ? bubble : {
+            ...bubble,
+            attachments: bubble.attachments?.map((item) => ({ ...item, ...byId.get(item.id) })),
+          }));
+        })
+        .catch(() => {});
       refreshSessions();
     }
   }, [refreshSessions, router]);
@@ -514,6 +531,32 @@ export default function AgentPopout({
     setAttachments((prev) => prev.filter((a) => a.id !== attachment.id));
     if (!activeKey) return;
     await fetch(`/api/agent/attachments?sessionKey=${encodeURIComponent(activeKey)}&attachmentId=${encodeURIComponent(attachment.id)}`, { method: "DELETE" }).catch(() => {});
+  }, [activeKey]);
+
+  const updateHistoricalAttachment = useCallback(async (attachment: ChatAttachment, action: "restore" | "delete") => {
+    if (!activeKey) return;
+    const res = await fetch(
+      action === "delete"
+        ? `/api/agent/attachments?sessionKey=${encodeURIComponent(activeKey)}&attachmentId=${encodeURIComponent(attachment.id)}`
+        : "/api/agent/attachments",
+      action === "delete" ? { method: "DELETE" } : {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionKey: activeKey, attachmentId: attachment.id, action: "restore" }),
+      },
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      setAttachmentError(body.error || "附件操作失败");
+      return;
+    }
+    setBubbles((prev) => prev.map((bubble) => bubble.kind !== "user" ? bubble : {
+      ...bubble,
+      attachments: bubble.attachments?.map((item) => item.id !== attachment.id ? item : {
+        ...item,
+        status: action === "restore" ? "ready" : "deleting",
+        releaseUntil: action === "restore" ? null : item.releaseUntil,
+      }),
+    }));
   }, [activeKey]);
 
   const dispatchMessage = useCallback(async (key: string, raw: string, selectedAttachments: ChatAttachment[]): Promise<boolean> => {
@@ -851,8 +894,15 @@ export default function AgentPopout({
                 <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-zinc-900 px-3.5 py-2 text-sm text-white">
                   {b.text}
                   {b.attachments?.map((attachment) => (
-                    <div key={attachment.id} className="mt-1.5 max-w-full truncate rounded-md bg-white/10 px-2 py-1 text-[11px] text-zinc-200">
-                      📎 {attachment.fileName}
+                    <div key={attachment.id} className="mt-1.5 flex max-w-full items-center gap-1 rounded-md bg-white/10 px-2 py-1 text-[11px] text-zinc-200">
+                      <span className="min-w-0 flex-1 truncate">📎 {attachment.fileName}</span>
+                      {attachment.status === "released" && <>
+                        <span className="shrink-0 text-amber-200">待释放</span>
+                        <button type="button" className="shrink-0 underline" onClick={() => void updateHistoricalAttachment(attachment, "restore")}>恢复</button>
+                      </>}
+                      {(attachment.status === "deleting" || attachment.status === "expired") && <span className="shrink-0 text-zinc-400">已过期</span>}
+                      {attachment.status === "promoted" && <span className="shrink-0 text-emerald-200">已存为资产</span>}
+                      {(!attachment.status || attachment.status === "ready") && <button type="button" className="shrink-0 text-zinc-300 hover:text-white" title="立即删除" onClick={() => void updateHistoricalAttachment(attachment, "delete")}>✕</button>}
                     </div>
                   ))}
                 </div>
@@ -1154,7 +1204,7 @@ export default function AgentPopout({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={attachmentBusy || voiceBusy || attachments.length >= 8}
-            title="附带临时文件（单个不超过 50 MB）"
+            title="附带临时文件（单个 50 MB；每条 8 个；对话 1 GiB/128 个；个人 5 GiB/512 个）"
             aria-label="附带文件"
             className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-lg border border-zinc-300 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
           >
@@ -1199,6 +1249,7 @@ export default function AgentPopout({
             发送
           </button>
         </div>
+        <p className="mt-1 text-[10px] text-[var(--muted)]">临时附件：单个 50 MB · 每条 8 个 · 当前对话 1 GiB/128 个 · 个人 5 GiB/512 个</p>
       </div>
 
       {previewToolCallId && productionId && (

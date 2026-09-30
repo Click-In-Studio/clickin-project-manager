@@ -6,13 +6,38 @@ import { requireProductionFeature } from "@/lib/account/plan";
 import {
   AGENT_ATTACHMENT_MAX_BYTES,
   createPendingAttachment,
-  deleteAttachment,
+  getAttachmentUsage,
   getAttachmentUploadRecord,
   markAttachmentReady,
+  listAttachmentsForSession,
+  restoreReleasedAttachment,
+  scheduleAttachmentDeletion,
 } from "@/lib/agent/attachment-db";
-import { deleteR2Object, headR2Object, presignedPut } from "@/lib/r2";
+import { headR2Object, presignedPut } from "@/lib/r2";
 
 export const runtime = "nodejs";
+
+export async function GET(req: NextRequest) {
+  const auth = requireUser(req.cookies);
+  if (auth instanceof NextResponse) return auth;
+  const sessionKey = req.nextUrl.searchParams.get("sessionKey");
+  if (!sessionKey) return NextResponse.json({ error: "缺少 sessionKey" }, { status: 400 });
+  const denied = requireOwnership(sessionKey, auth.userId);
+  if (denied) return denied;
+  try {
+    const scopeDeny = await requireSessionScope(sessionKey, auth.userId);
+    if (scopeDeny) return scopeDeny;
+    const [usage, attachments] = await Promise.all([
+      getAttachmentUsage(auth.userId, sessionKey), listAttachmentsForSession(sessionKey),
+    ]);
+    return NextResponse.json({
+      usage,
+      attachments: attachments.map(({ id, fileName, mimeType, mediaKind, fileSize, status, expiresAt, releaseUntil, promotedAssetId }) =>
+        ({ id, fileName, mimeType, mediaKind, fileSize, status, expiresAt, releaseUntil, promotedAssetId })),
+    });
+  }
+  catch (err) { return toErrorResponse(err); }
+}
 
 async function requireSessionScope(sessionKey: string, userId: string): Promise<Response | null> {
   const denied = requireOwnership(sessionKey, userId);
@@ -56,7 +81,7 @@ export async function POST(req: NextRequest) {
       const { url, contentType } = presignedPut(attachment.r2Key, attachment.mimeType, 3600);
       return NextResponse.json({ attachment, uploadUrl: url, contentType }, { status: 201 });
     } catch (err) {
-      await deleteAttachment(attachment.id, attachment.sessionId, auth.userId).catch(() => {});
+      await scheduleAttachmentDeletion(attachment.id, attachment.sessionId, auth.userId).catch(() => {});
       throw err;
     }
   } catch (err) {
@@ -67,7 +92,7 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const auth = requireUser(req.cookies);
   if (auth instanceof NextResponse) return auth;
-  let body: { sessionKey?: unknown; attachmentId?: unknown };
+  let body: { sessionKey?: unknown; attachmentId?: unknown; action?: unknown };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }); }
   if (typeof body.sessionKey !== "string" || typeof body.attachmentId !== "string") {
@@ -76,15 +101,28 @@ export async function PATCH(req: NextRequest) {
   const denied = requireOwnership(body.sessionKey, auth.userId);
   if (denied) return denied;
   try {
+    if (body.action === "restore") {
+      const attachment = await restoreReleasedAttachment(body.attachmentId, body.sessionKey, auth.userId);
+      if (!attachment) return NextResponse.json({ error: "附件已不能恢复" }, { status: 409 });
+      return NextResponse.json({ attachment });
+    }
     const record = await getAttachmentUploadRecord(body.attachmentId, body.sessionKey, auth.userId);
     if (!record) return NextResponse.json({ error: "附件不存在" }, { status: 404 });
     const head = await headR2Object(record.r2Key);
     if (!head || head.size == null) return NextResponse.json({ error: "附件上传未完成" }, { status: 409 });
-    if (head.size > AGENT_ATTACHMENT_MAX_BYTES || head.size !== record.fileSize) {
-      await deleteR2Object(record.r2Key).catch(() => {});
-      return NextResponse.json({ error: "附件大小与上传声明不一致" }, { status: 409 });
+    if (head.size > AGENT_ATTACHMENT_MAX_BYTES) {
+      await scheduleAttachmentDeletion(body.attachmentId, body.sessionKey, auth.userId);
+      return NextResponse.json({ error: "附件实际大小超过 50 MB" }, { status: 413 });
     }
-    const attachment = await markAttachmentReady(body.attachmentId, body.sessionKey, auth.userId, head.size);
+    let attachment;
+    try {
+      attachment = await markAttachmentReady(body.attachmentId, body.sessionKey, auth.userId, head.size);
+    } catch (err) {
+      if ((err as { status?: number }).status === 413) {
+        await scheduleAttachmentDeletion(body.attachmentId, body.sessionKey, auth.userId);
+      }
+      throw err;
+    }
     if (!attachment) return NextResponse.json({ error: "附件不存在" }, { status: 404 });
     return NextResponse.json({ attachment });
   } catch (err) {
@@ -101,8 +139,7 @@ export async function DELETE(req: NextRequest) {
   const denied = requireOwnership(sessionKey, auth.userId);
   if (denied) return denied;
   try {
-    const r2Key = await deleteAttachment(attachmentId, sessionKey, auth.userId);
-    if (r2Key) await deleteR2Object(r2Key).catch((err) => console.error(`[agent-attachment] 删除 R2 对象失败 ${r2Key}:`, err));
+    await scheduleAttachmentDeletion(attachmentId, sessionKey, auth.userId);
     return NextResponse.json({ ok: true });
   } catch (err) {
     return toErrorResponse(err);
