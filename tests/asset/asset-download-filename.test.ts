@@ -25,8 +25,13 @@ describe("资产下载文件名（#799）", () => {
     const contentDisposition = attachmentContentDisposition("中文文件.pdf");
     const url = presignedGet("assets/af_test/____.pdf", 3600, { contentDisposition });
     const parsed = new URL(url);
+    const query = url.split("?")[1];
 
     expect(parsed.searchParams.get("response-content-disposition")).toBe(contentDisposition);
-    expect(url.split("?")[1]).not.toContain("+");
+    // filename* 自身的 %E4... 在查询串里必须恰好编码一层为 %25E4...；
+    // R2 解查询参数后才会把原始 %E4... 放进 Content-Disposition。
+    expect(query).toContain("filename%2A%3DUTF-8%27%27%25E4%25B8%25AD");
+    expect(query).not.toContain("%2525E4");
+    expect(query).not.toContain("+");
   });
 });

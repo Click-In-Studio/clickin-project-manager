@@ -59,7 +59,7 @@ export function thumbnailR2Key(assetFileId: string): string {
 
 /** Presigned GET URL.
  *  opts.inline=true  → adds response-content-disposition=inline (browser displays, doesn't download)
- *  opts.contentDisposition → overrides Content-Disposition (download filename etc.)
+ *  opts.contentDisposition → overrides Content-Disposition (download filename etc.); takes precedence over inline
  *  opts.contentType  → overrides Content-Type in the response (useful for inline PDF/video preview)
  *  opts.cacheWindow  → 签名时间戳向下取整到该秒数窗口，同一窗口内对同一 key 生成的
  *                      URL 字节级相同（浏览器缓存才能命中）；有效期自动放宽为 2×窗口，
