@@ -317,11 +317,16 @@ describe("#714 唯一审批候选人可以自批", () => {
 describe("4. 当前级不能终局时是转发", () => {
   it("canFinalize=false 的级 approve 之后仍是 pending，只是换了一级", async () => {
     const cat = await makeCategory("转发场");
-    // 给报销人安一个上级——上级没有财务权，所以 canFinalize=false
+    // 两级上级都在 supervisor stage：并发锁必须同时押 stage + depth，不能只押 stage。
     await getPool().query(
       `UPDATE production_member SET supervisor_id = $3
         WHERE production_id = $1 AND user_id = $2`,
       [prodId, submitterId, strangerId],
+    );
+    await getPool().query(
+      `UPDATE production_member SET supervisor_id = $3
+        WHERE production_id = $1 AND user_id = $2`,
+      [prodId, strangerId, deptPocId],
     );
     const e = await submitExpense({
       productionId: prodId, categoryId: cat.id, title: "转发用",
@@ -335,12 +340,36 @@ describe("4. 当前级不能终局时是转发", () => {
 
     const after = (await getExpense(e.id, prodId))!;
     expect(after.status).toBe("pending");          // 没通过，只是往上递了
-    expect(after.currentStage).not.toBe("supervisor");
+    expect(after.currentStage).toBe("supervisor");
+    expect(after.currentApproverIds).toContain(deptPocId);
     expect(after.currentApproverIds).not.toContain(strangerId);
+    expect(await approveExpense(e.id, prodId, strangerId)).toEqual({
+      ok: false,
+      reason: "conflict",
+    });
+
+    const { rows: [audit] } = await getPool().query<{
+      previous: Record<string, unknown>;
+      current: Record<string, unknown>;
+    }>(
+      `SELECT escalation_chain -> 0 AS previous, escalation_chain -> 1 AS current
+         FROM production_expense WHERE id = $1`,
+      [e.id],
+    );
+    expect(audit.previous).toMatchObject({
+      action: "escalated",
+      actorId: strangerId,
+      escalationReason: "forwarded",
+    });
+    expect(audit.current).not.toHaveProperty("action");
 
     await getPool().query(
       `UPDATE production_member SET supervisor_id = NULL WHERE production_id = $1 AND user_id = $2`,
       [prodId, submitterId],
+    );
+    await getPool().query(
+      `UPDATE production_member SET supervisor_id = NULL WHERE production_id = $1 AND user_id = $2`,
+      [prodId, strangerId],
     );
   });
 });
