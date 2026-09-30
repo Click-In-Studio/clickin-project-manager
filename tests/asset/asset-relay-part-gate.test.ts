@@ -12,15 +12,20 @@ import { getPool } from "@/lib/pg";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createAsset } from "@/lib/asset/db";
 import { POST as relayPOST } from "@/app/api/production/[id]/assets/relay-part/route";
+import { DELETE as abortDELETE } from "@/app/api/production/[id]/assets/presign-multipart/route";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 
-const { relayMock } = vi.hoisted(() => ({ relayMock: vi.fn() }));
+const { relayMock, abortMock } = vi.hoisted(() => ({ relayMock: vi.fn(), abortMock: vi.fn() }));
 vi.mock("@/lib/r2", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/r2")>(),
   uploadPartRelay: relayMock,
+  abortMultipartUpload: abortMock,
 }));
 
-beforeEach(() => { relayMock.mockReset().mockResolvedValue("etag-1"); });
+beforeEach(() => {
+  relayMock.mockReset().mockResolvedValue("etag-1");
+  abortMock.mockReset().mockResolvedValue(undefined);
+});
 
 let prodId: string;
 let uploader: string;    // 创建者行集（含 file@create），无通配 create
@@ -149,5 +154,31 @@ describe("relay-part 的门（#457）", () => {
       method: "POST", headers: { Cookie: cookieFor(wildcard) },
     });
     expect((await relayPOST(bad, ctx())).status).toBe(400);
+  });
+});
+
+describe("multipart rollback（#765）", () => {
+  function abortReq(userId: string, body: Record<string, unknown>) {
+    return new NextRequest("http://localhost/api/presign-multipart", {
+      method: "DELETE",
+      headers: { Cookie: cookieFor(userId), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("缺少参数 400；无上传票 403", async () => {
+    expect((await abortDELETE(abortReq(wildcard, { uploadId: "up-1" }), ctx())).status).toBe(400);
+    expect((await abortDELETE(abortReq(stranger, {
+      r2Key: "assets/t765_abort/x.pdf", uploadId: "up-1",
+    }), ctx())).status).toBe(403);
+    expect(abortMock).not.toHaveBeenCalled();
+  });
+
+  it("与上传共用权限门，放行后终止指定 multipart", async () => {
+    const response = await abortDELETE(abortReq(wildcard, {
+      r2Key: "assets/t765_abort/x.pdf", uploadId: "up-1",
+    }), ctx());
+    expect(response.status).toBe(204);
+    expect(abortMock).toHaveBeenCalledWith("assets/t765_abort/x.pdf", "up-1");
   });
 });

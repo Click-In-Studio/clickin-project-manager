@@ -99,7 +99,7 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
           {e.invoiceState === "waived" && `无需发票 · ${e.invoiceWaiverReason}`}
           {e.invoiceState === "legacy" && "历史报销未记录发票要求"}
         </small>
-        <ExpenseDocumentLinks productionId={id} documents={e.documents} />
+        <ExpenseDocumentLinks productionId={id} expenseId={e.id} documents={e.documents} />
         {e.invoiceState === "pending"
           && e.submittedBy === session.userId
           && (e.status === "pending" || e.status === "approved") && (

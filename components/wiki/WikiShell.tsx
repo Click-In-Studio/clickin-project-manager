@@ -939,6 +939,12 @@ export default function WikiShell({
               productionId={productionId}
               placement={{ parentNodeId: uploadUnder === "" ? null : uploadUnder }}
               allowMarkdownAsWiki
+              detachOnStart
+              onTaskStarted={() => {
+                const u = uploadUnder;
+                setUploadUnder(null);
+                if (u) setExpanded(prev => new Set([...prev, u]));
+              }}
               onUploadedWiki={({ wikiId }) => {
                 const u = uploadUnder;
                 setUploadUnder(null);
