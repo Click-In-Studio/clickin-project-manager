@@ -644,8 +644,10 @@ export async function approveExpense(
              current_stage = NULL, current_approver_ids = '{}', updated_at = now()
        WHERE id = $1 AND production_id = $2 AND status = 'pending'
          AND current_stage IS NOT DISTINCT FROM $4
+         AND current_stage_depth = $5
+         AND current_approver_ids @> ARRAY[$3]::uuid[]
        RETURNING id`,
-      [expenseId, productionId, actorId, e.current_stage],
+      [expenseId, productionId, actorId, e.current_stage, e.current_stage_depth],
     );
     if (!upd.rows[0]) return { ok: false, reason: "conflict" };
     return { ok: true, forwarded: false };
@@ -663,8 +665,11 @@ export async function approveExpense(
          SET status = 'approved', resolved_at = now(), resolved_by = $3,
              current_stage = NULL, current_approver_ids = '{}', updated_at = now()
        WHERE id = $1 AND production_id = $2 AND status = 'pending'
+         AND current_stage IS NOT DISTINCT FROM $4
+         AND current_stage_depth = $5
+         AND current_approver_ids @> ARRAY[$3]::uuid[]
        RETURNING id`,
-      [expenseId, productionId, actorId],
+      [expenseId, productionId, actorId, e.current_stage, e.current_stage_depth],
     );
     return upd.rows[0] ? { ok: true, forwarded: false } : { ok: false, reason: "conflict" };
   }
@@ -673,14 +678,30 @@ export async function approveExpense(
     `UPDATE production_expense
        SET current_stage = $3, current_stage_depth = $4,
            current_approver_ids = $5::uuid[],
-           escalation_chain = escalation_chain || $6::jsonb,
+           escalation_chain =
+             CASE WHEN jsonb_array_length(escalation_chain) > 0
+                  THEN jsonb_set(
+                         escalation_chain,
+                         ARRAY[(jsonb_array_length(escalation_chain) - 1)::text],
+                         (escalation_chain -> -1) || $9::jsonb)
+                  ELSE escalation_chain
+             END || $6::jsonb,
            updated_at = now()
      WHERE id = $1 AND production_id = $2 AND status = 'pending'
        AND current_stage IS NOT DISTINCT FROM $7
+       AND current_stage_depth = $8
+       AND current_approver_ids @> ARRAY[$10]::uuid[]
      RETURNING id`,
     [
       expenseId, productionId, next.stage, next.depth, next.approverIds,
-      JSON.stringify([chainEntry(next)]), e.current_stage,
+      JSON.stringify([chainEntry(next)]), e.current_stage, e.current_stage_depth,
+      JSON.stringify({
+        action: "escalated",
+        actorId,
+        actedAt: new Date().toISOString(),
+        escalationReason: "forwarded",
+      }),
+      actorId,
     ],
   );
   if (!upd.rows[0]) return { ok: false, reason: "conflict" };
@@ -695,6 +716,7 @@ export async function rejectExpense(
        SET status = 'rejected', resolved_at = now(), resolved_by = $3,
            current_stage = NULL, current_approver_ids = '{}', updated_at = now()
      WHERE id = $1 AND production_id = $2 AND status = 'pending'
+       AND current_approver_ids @> ARRAY[$3]::uuid[]
      RETURNING id`,
     [expenseId, productionId, actorId],
   );

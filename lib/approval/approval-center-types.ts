@@ -11,8 +11,6 @@ export type ApprovalCenterView = (typeof APPROVAL_CENTER_VIEWS)[number];
 
 export const APPROVAL_CENTER_BUSINESS_TYPES = [
   "resource_access",
-  "member_exit",
-  "owner_transfer",
   "expense",
 ] as const;
 export type ApprovalCenterBusinessType = (typeof APPROVAL_CENTER_BUSINESS_TYPES)[number];

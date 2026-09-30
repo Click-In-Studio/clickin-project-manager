@@ -10,6 +10,7 @@ import { listApprovalCenterItems } from "@/lib/approval/approval-center-db";
 import type { ApprovalCenterListParams } from "@/lib/approval/approval-center-types";
 import { GET as approvalCenterHandler } from "@/app/api/my/approval-center/route";
 import { getPool } from "@/lib/pg";
+import { approveExpense } from "@/lib/ops/finance-db";
 import { cleanupProduction, makeProduction, shortId } from "../_support/factories";
 
 let viewerId: string;
@@ -28,7 +29,8 @@ function options(overrides: Partial<ApprovalCenterListParams> = {}): ApprovalCen
 async function insertApproval(params: {
   productionId: string;
   subjectId: string;
-  type: "resource_access" | "member_exit" | "owner_transfer";
+  /** member_exit 仅用于验证 schema 遗留行不会冒充已接入业务。 */
+  type: "resource_access" | "member_exit";
   status: "pending_supervisor" | "pending_resource" | "approved" | "rejected" | "cancelled";
   createdAt: string;
   currentApproverIds?: string[];
@@ -119,10 +121,10 @@ beforeAll(async () => {
     escalationChain: [{ approverIds: [viewerId], canFinalize: true }],
     note: "申请查看排练文档",
   });
-  ids.processedExit = await insertApproval({
+  ids.processedAccess = await insertApproval({
     productionId: prodA,
     subjectId: applicantA,
-    type: "member_exit",
+    type: "resource_access",
     status: "approved",
     createdAt: "2026-02-10T08:00:00.000Z",
     escalationChain: [{
@@ -146,10 +148,10 @@ beforeAll(async () => {
       nodes: [{ id: "cc", type: "cc", title: "知会", state: "done", deliveredTo: [viewerId] }],
     },
   });
-  ids.submittedTransfer = await insertApproval({
+  ids.submittedAccess = await insertApproval({
     productionId: prodA,
     subjectId: viewerId,
-    type: "owner_transfer",
+    type: "resource_access",
     status: "cancelled",
     createdAt: "2026-04-10T08:00:00.000Z",
   });
@@ -185,6 +187,14 @@ beforeAll(async () => {
     createdAt: "2026-07-10T08:00:00.000Z",
     currentApproverIds: [outsiderId],
   });
+  ids.legacyExit = await insertApproval({
+    productionId: prodA,
+    subjectId: applicantA,
+    type: "member_exit",
+    status: "pending_resource",
+    createdAt: "2026-07-11T08:00:00.000Z",
+    currentApproverIds: [viewerId],
+  });
 });
 
 afterAll(async () => {
@@ -203,7 +213,7 @@ describe("审批中心读模型", () => {
     const processed = await listApprovalCenterItems(viewerId, options({ view: "processed" }));
     expect(processed.items.map((item) => item.sourceId)).toEqual([
       ids.processedExpense,
-      ids.processedExit,
+      ids.processedAccess,
     ]);
 
     const cc = await listApprovalCenterItems(viewerId, options({ view: "cc" }));
@@ -212,7 +222,7 @@ describe("审批中心读模型", () => {
     const submitted = await listApprovalCenterItems(viewerId, options({ view: "submitted" }));
     expect(submitted.items.map((item) => item.sourceId)).toEqual([
       ids.submittedExpense,
-      ids.submittedTransfer,
+      ids.submittedAccess,
     ]);
   });
 
@@ -220,6 +230,7 @@ describe("审批中心读模型", () => {
     const pending = await listApprovalCenterItems(viewerId, options({ view: "pending" }));
     expect(new Set(pending.items.map((item) => item.production.id))).toEqual(new Set([prodA, prodB]));
     expect(pending.items.map((item) => item.sourceId)).not.toContain(ids.unrelated);
+    expect(pending.items.map((item) => item.sourceId)).not.toContain(ids.legacyExit);
 
     const outsider = await listApprovalCenterItems(outsiderId, options({ view: "pending" }));
     expect(outsider.items.map((item) => item.sourceId)).toEqual([ids.unrelated]);
@@ -240,17 +251,40 @@ describe("审批中心读模型", () => {
       kind: "expense", amount: "123.45", currency: "CNY",
     });
 
-    const transferOnly = await listApprovalCenterItems(viewerId, options({
-      view: "submitted", businessTypes: ["owner_transfer"], statuses: ["cancelled"],
+    const cancelledAccess = await listApprovalCenterItems(viewerId, options({
+      view: "submitted", businessTypes: ["resource_access"], statuses: ["cancelled"],
     }));
-    expect(transferOnly.items.map((item) => item.sourceId)).toEqual([ids.submittedTransfer]);
+    expect(cancelledAccess.items.map((item) => item.sourceId)).toEqual([ids.submittedAccess]);
+  });
+
+  it("费用转发在同一条链上留下处理人事实", async () => {
+    const expenseId = await insertExpense({
+      productionId: prodA,
+      submittedBy: applicantB,
+      title: "待转发费用",
+      status: "pending",
+      createdAt: "2026-08-10T08:00:00.000Z",
+      currentApproverIds: [viewerId],
+      escalationChain: [{ approverIds: [viewerId], canFinalize: false }],
+    });
+
+    try {
+      await expect(approveExpense(expenseId, prodA, viewerId)).resolves.toEqual({
+        ok: true,
+        forwarded: true,
+      });
+      const processed = await listApprovalCenterItems(viewerId, options({ view: "processed" }));
+      expect(processed.items.map((item) => item.sourceId)).toContain(expenseId);
+    } finally {
+      await getPool().query("DELETE FROM production_expense WHERE id = $1", [expenseId]);
+    }
   });
 
   it("按稳定顺序游标分页，且游标不能跨排序方向复用", async () => {
     const first = await listApprovalCenterItems(viewerId, options({
       view: "submitted", sort: "oldest", limit: 1,
     }));
-    expect(first.items[0].sourceId).toBe(ids.submittedTransfer);
+    expect(first.items[0].sourceId).toBe(ids.submittedAccess);
     expect(first.nextCursor).toBeTruthy();
 
     const second = await listApprovalCenterItems(viewerId, options({
@@ -283,6 +317,9 @@ describe("GET /api/my/approval-center", () => {
     ))).status).toBe(400);
     expect((await approvalCenterHandler(request(
       "/api/my/approval-center?from=2026-07-01&to=2026-06-01", viewerId,
+    ))).status).toBe(400);
+    expect((await approvalCenterHandler(request(
+      "/api/my/approval-center?type=member_exit", viewerId,
     ))).status).toBe(400);
   });
 

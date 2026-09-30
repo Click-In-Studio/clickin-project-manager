@@ -1,8 +1,9 @@
 /**
  * 审批中心跨业务只读投影。
  *
- * 真相源仍是各业务表：权限/退出/转移来自 approval_request，费用来自
- * production_expense。这里不推进流程、不重算审批人，也不读取通知表。
+ * 真相源仍是各业务表：资源访问来自 approval_request，费用来自 production_expense。
+ * 成员退出与 Owner 转移尚无同形的持久参与事实，接入前分别由 #797 / #796 跟踪。
+ * 这里不推进流程、不重算审批人，也不读取通知表。
  */
 import { getPool } from "../pg";
 import type {
@@ -102,24 +103,18 @@ const UNIFIED_APPROVAL_QUERY = `
       CASE ar.type
         WHEN 'atomic_permission' THEN 'resource_access'
         WHEN 'resource_access' THEN 'resource_access'
-        WHEN 'member_exit' THEN 'member_exit'
-        WHEN 'owner_transfer' THEN 'owner_transfer'
         ELSE '__unsupported__:' || ar.type
       END AS business_type,
       ar.production_id,
       p.name AS production_name,
       ar.subject_id AS applicant_id,
       COALESCE(NULLIF(up.display_name, ''), NULLIF(up.name, ''), '成员') AS applicant_name,
-      CASE ar.type
-        WHEN 'member_exit' THEN '成员退出申请'
-        WHEN 'owner_transfer' THEN '所有者转移申请'
-        ELSE '权限申请'
-      END AS title,
+      '权限申请'::text AS title,
       ar.note,
       CASE WHEN ar.status IN ('pending_supervisor', 'pending_resource') THEN 'pending' ELSE ar.status END AS status,
       ar.status AS source_status,
       CASE WHEN ar.status IN ('pending_supervisor', 'pending_resource')
-                  AND $1::uuid = ANY(ar.current_approver_ids)
+                  AND ar.current_approver_ids @> ARRAY[$1]::uuid[]
            THEN COALESCE((ar.escalation_chain -> -1 ->> 'canFinalize')::boolean, true)
            ELSE false END AS can_finalize_for_viewer,
       ar.created_at,
@@ -138,7 +133,7 @@ const UNIFIED_APPROVAL_QUERY = `
       ar.flow_snapshot,
       ar.subject_id = $1::uuid AS submitted_by_viewer,
       ar.status IN ('pending_supervisor', 'pending_resource')
-        AND $1::uuid = ANY(ar.current_approver_ids) AS pending_for_viewer,
+        AND ar.current_approver_ids @> ARRAY[$1]::uuid[] AS pending_for_viewer,
       EXISTS (
         SELECT 1
           FROM jsonb_array_elements(ar.escalation_chain) AS entry
@@ -156,16 +151,13 @@ const UNIFIED_APPROVAL_QUERY = `
                ? ($1::text)
       ) AS cc_for_viewer,
       concat_ws(
-        ' ', p.name, up.display_name, up.name, ar.note, ar.resource_type, ar.resource_id, ar.resource_sub,
-        CASE ar.type
-          WHEN 'member_exit' THEN '成员退出申请'
-          WHEN 'owner_transfer' THEN '所有者转移申请'
-          ELSE '权限申请'
-        END
+        ' ', p.name, up.display_name, up.name, ar.note, ar.resource_type, ar.resource_id,
+        ar.resource_sub, '权限申请'
       ) AS search_text
     FROM approval_request ar
     JOIN production p ON p.id = ar.production_id
     LEFT JOIN user_profile up ON up.user_id = ar.subject_id
+    WHERE ar.type IN ('resource_access', 'atomic_permission')
 
     UNION ALL
 
@@ -181,7 +173,7 @@ const UNIFIED_APPROVAL_QUERY = `
       NULLIF(e.note, '') AS note,
       e.status,
       e.status AS source_status,
-      CASE WHEN e.status = 'pending' AND $1::uuid = ANY(e.current_approver_ids)
+      CASE WHEN e.status = 'pending' AND e.current_approver_ids @> ARRAY[$1]::uuid[]
            THEN COALESCE((e.escalation_chain -> -1 ->> 'canFinalize')::boolean, true)
            ELSE false END AS can_finalize_for_viewer,
       e.created_at,
@@ -197,7 +189,8 @@ const UNIFIED_APPROVAL_QUERY = `
       e.escalation_chain,
       NULL::jsonb AS flow_snapshot,
       e.submitted_by = $1::uuid AS submitted_by_viewer,
-      e.status = 'pending' AND $1::uuid = ANY(e.current_approver_ids) AS pending_for_viewer,
+      e.status = 'pending'
+        AND e.current_approver_ids @> ARRAY[$1]::uuid[] AS pending_for_viewer,
       (
         e.resolved_by = $1::uuid
         OR EXISTS (
