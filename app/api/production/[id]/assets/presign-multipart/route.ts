@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { canUploadAssetBytes } from "@/lib/asset/perm";
+import { assetVersionUploadErrorResponse, getAssetVersionUploadError } from "@/lib/asset/file-policy";
 import { abortMultipartUpload, createMultipartUpload, presignedUploadPart, assetR2Key } from "@/lib/r2";
 import { createMultipartAbortToken, verifyMultipartAbortToken } from "@/lib/asset/upload-abort-token";
 
@@ -26,6 +27,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   if (!await canUploadAssetBytes(permCtx, id, body.assetId ?? null, purpose))
     return Response.json({ error: "权限不足" }, { status: 403 });
+  const targetError = await getAssetVersionUploadError(id, body.assetId);
+  if (targetError) return assetVersionUploadErrorResponse(targetError);
 
   // Dynamic expiry: assume 1 MB/s worst-case speed, 3× safety factor, clamp 1h–12h
   const fileMB = (body.fileSize ?? 0) / (1024 * 1024);

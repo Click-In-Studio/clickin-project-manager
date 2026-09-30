@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { canUploadAssetBytes } from "@/lib/asset/perm";
+import { assetVersionUploadErrorResponse, getAssetVersionUploadError } from "@/lib/asset/file-policy";
 import { uploadPartRelay } from "@/lib/r2";
 
 // Max part size the relay will accept (matches client PART_SIZE + headroom)
@@ -44,8 +45,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const purpose = sp.get("purpose") === "expense_document" ? "expense_document" : null;
   if (purpose && access.isArchived)
     return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
-  if (!await canUploadAssetBytes(permCtx, id, sp.get("assetId"), purpose))
+  const assetId = sp.get("assetId");
+  if (!await canUploadAssetBytes(permCtx, id, assetId, purpose))
     return Response.json({ error: "权限不足" }, { status: 403 });
+  const targetError = await getAssetVersionUploadError(id, assetId);
+  if (targetError) return assetVersionUploadErrorResponse(targetError);
 
   // ── Size guard (before reading body) ──────────────────────────────────────
   const clHeader = req.headers.get("content-length");

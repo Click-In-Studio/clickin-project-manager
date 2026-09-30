@@ -1123,8 +1123,10 @@ CON|asset_share_link|asset_share_link_production_id_fkey|FOREIGN KEY (production
 CON|asset_share_link|asset_share_link_session_shape|CHECK ((((redeemed_at IS NULL) AND (session_secret_hash IS NULL) AND (session_last_seen_at IS NULL) AND (session_expires_at IS NULL)) OR ((one_time = true) AND (redeemed_at IS NOT NULL) AND (session_secret_hash IS NOT NULL) AND (session_last_seen_at IS NOT NULL) AND (session_expires_at IS NOT NULL))))
 CON|asset_share_link|asset_share_link_token_key|UNIQUE (token)
 CON|asset|asset_file_version_policy_check|CHECK ((file_version_policy = ANY (ARRAY['append'::text, 'single'::text])))
+CON|asset|asset_financial_document_single_policy_check|CHECK (((asset_type <> 'financial_document'::text) OR (file_version_policy = 'single'::text)))
 CON|asset|asset_pkey|PRIMARY KEY (id)
 CON|asset|asset_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|asset|asset_type_check|CHECK ((asset_type = ANY (ARRAY['drafting'::text, 'planogram'::text, 'demo'::text, 'rehearsal_video'::text, 'reference'::text, 'material'::text, 'clip'::text, 'qlab'::text, 'score'::text, 'recording'::text, 'financial_document'::text])))
 CON|asset|asset_uploader_user_id_fkey|FOREIGN KEY (uploader_user_id) REFERENCES app_user(id)
 CON|avatar_upload_audit|avatar_upload_audit_kind_check|CHECK ((kind = ANY (ARRAY['user'::text, 'production'::text])))
 CON|avatar_upload_audit|avatar_upload_audit_pkey|PRIMARY KEY (id)
@@ -1529,6 +1531,9 @@ CON|wiki|wiki_production_id_fkey|FOREIGN KEY (production_id) REFERENCES producti
 ENUM|block_type|dialogue,stage,lyric,chapter_marker,scene_marker,rehearsal_marker
 EXT|pg_trgm
 EXT|vector
+FUNC|enforce_asset_single_file_policy()|365c9d113202e7d2a055ccb9782be865
+FUNC|prevent_asset_file_policy_update()|06b12c6c7eda98384a49a622c9d8ae47
+FUNC|prevent_asset_system_type_update()|2be0c19cb12a90ce4db9422036311e83
 IDX|agent_approval|agent_approval_pending_idx|CREATE INDEX agent_approval_pending_idx ON public.agent_approval USING btree (status, expires_at) WHERE (status = 'pending'::text)
 IDX|agent_approval|agent_approval_pkey|CREATE UNIQUE INDEX agent_approval_pkey ON public.agent_approval USING btree (id)
 IDX|agent_approval|agent_approval_run_idx|CREATE INDEX agent_approval_run_idx ON public.agent_approval USING btree (run_id)
@@ -1855,3 +1860,6 @@ SEQ|production_member_status_audit_id_seq
 SEQ|production_policy_audit_id_seq
 SEQ|registration_code_redemption_id_seq
 SEQ|wiki_collab_outbox_id_seq
+TRG|asset_file|asset_single_file_policy_guard|CREATE TRIGGER asset_single_file_policy_guard BEFORE INSERT ON public.asset_file FOR EACH ROW EXECUTE FUNCTION enforce_asset_single_file_policy()
+TRG|asset|asset_file_version_policy_immutable|CREATE TRIGGER asset_file_version_policy_immutable BEFORE UPDATE OF file_version_policy ON public.asset FOR EACH ROW EXECUTE FUNCTION prevent_asset_file_policy_update()
+TRG|asset|asset_financial_document_type_immutable|CREATE TRIGGER asset_financial_document_type_immutable BEFORE UPDATE OF asset_type ON public.asset FOR EACH ROW EXECUTE FUNCTION prevent_asset_system_type_update()
