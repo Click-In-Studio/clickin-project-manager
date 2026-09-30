@@ -83,9 +83,9 @@ function EventCard({
     go(href);
   };
 
-  // 原型 eventList article：grid 58px / 1fr / auto
   return (
     <article
+      className={responsive.eventCard}
       role="link"
       tabIndex={0}
       aria-label={`查看事件：${event.title}`}
@@ -94,64 +94,58 @@ function EventCard({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-      display: "grid", gridTemplateColumns: "58px 1fr auto", columnGap: 16, rowGap: 0,
-      padding: "18px 10px", borderTop: first ? 0 : "1px solid var(--line)",
-      borderRadius: 9, background: hovered ? "var(--paper)" : "transparent",
-      cursor: "pointer", transition: "background .14s ease",
-    }}>
-      {/* 日期盒（54×59 边框盒 + serif 22px） */}
-      <time style={{
-        width: 54, height: 59, border: "1px solid var(--line)", borderRadius: 9,
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-      }}>
-        {event.startTime ? (
-          <>
-            <b style={{ fontFamily: "Georgia, serif", fontSize: 22, fontWeight: 500, color: "var(--ink)" }}>
-              {new Date(event.startTime).getDate()}
-            </b>
-            <small style={{ color: "var(--muted)", fontSize: 9 }}>
-              {new Date(event.startTime).getMonth() + 1} 月
-            </small>
-          </>
-        ) : (
-          <small style={{ color: "var(--muted)", fontSize: 9 }}>待定</small>
-        )}
-      </time>
+        borderTop: first ? 0 : "1px solid var(--line)",
+        background: hovered ? "var(--paper)" : "transparent",
+      }}
+    >
+      {/* 左列：日期与类型共用一条固定层级。 */}
+      <div className={responsive.eventDateColumn}>
+        <time className={responsive.eventDateBox}>
+          {event.startTime ? (
+            <>
+              <b className={responsive.eventDateDay}>{new Date(event.startTime).getDate()}</b>
+              <small className={responsive.eventDateMonth}>
+                {new Date(event.startTime).getMonth() + 1} 月
+              </small>
+            </>
+          ) : (
+            <small className={responsive.eventDateMonth}>待定</small>
+          )}
+        </time>
+        <Badge tone={typeTone}>{EVENT_TYPE_LABELS[event.eventType] ?? event.eventType}</Badge>
+      </div>
 
-      {/* 中列：Badge 行 → serif 标题 → 时间地点 → inlineActions */}
-      <div style={{ minWidth: 0 }}>
-        <div style={{ display: "flex", gap: 6 }}>
-          <Badge tone={typeTone}>{EVENT_TYPE_LABELS[event.eventType] ?? event.eventType}</Badge>
-          {event.status === "draft" && <Badge>草稿</Badge>}
-        </div>
-        <h3 style={{ margin: "8px 0 3px", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, lineHeight: 1.3 }}>
+      {/* 中列：草稿提示 → 标题 → 时间地点。 */}
+      <div className={responsive.eventContent}>
+        {event.status === "draft" && (
+          <div className={responsive.eventContentBadges}><Badge>草稿</Badge></div>
+        )}
+        <h3 className={responsive.eventTitle}>
           <Link href={detailHref} style={{ color: "inherit", textDecoration: "none" }}>
             {event.title}
           </Link>
         </h3>
-        <p style={{ margin: 0, color: "var(--muted)", fontSize: 10 }}>
+        <p className={responsive.eventMeta}>
           {[event.startTime && fmtDateTimeSmart(event.startTime), event.location].filter(Boolean).join(" · ")}
         </p>
       </div>
 
       {/* 右列：eventStatus 丸 + 关注 */}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-        <span style={{
-          width: "fit-content", padding: "5px 8px", borderRadius: 999,
+      <div className={responsive.eventStatusColumn}>
+        <span className={responsive.eventStatusPill} style={{
           ...(STATUS_COLORS[event.status] ?? STATUS_COLORS.draft),
           border: `1px solid ${event.status === "published" ? "#bfdbfe" : event.status === "completed" ? "#bbf7d0" : event.status === "cancelled" ? "#fecdd3" : "var(--line)"}`,
-          fontSize: 9, fontWeight: 700,
         }}>
           {statusText}
         </span>
         {role === "participant" ? (
-          <span style={{ fontSize: 10, color: "var(--muted)" }}>已参与</span>
+          <span className={responsive.eventParticipation}>已参与</span>
         ) : (
           <button
+            className={responsive.eventFollowButton}
             onClick={toggle}
             disabled={busy}
             style={{
-              fontSize: 10, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--line)", cursor: "pointer",
               opacity: busy ? 0.5 : 1, transition: "all .1s",
               background: role === "follower" ? "var(--script-soft)" : "var(--paper)",
               color: role === "follower" ? "var(--script)" : "var(--muted)",
@@ -430,7 +424,7 @@ export default function EventsClient({
   }
 
   return (
-    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+    <div className={responsive.eventPage}>
       {/* Page header（v3 统一页头） */}
       <PageHeader
         eyebrow="Events"
@@ -492,16 +486,12 @@ export default function EventsClient({
             </section>
           )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(430px, 100%), 1fr))", gap: 16, alignItems: "start" }}>
+          <div className={responsive.eventGroupGrid}>
             {([
               { key: "upcoming", eyebrow: "Upcoming", title: "即将发生", items: upcoming },
               { key: "past", eyebrow: "Past", title: "已过去", items: past },
             ] as const).map(group => (
-              <section key={group.key} style={{
-                background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13,
-                padding: 22, height: "calc(100vh - 320px)", minHeight: 460,
-                display: "flex", flexDirection: "column",
-              }}>
+              <section key={group.key} className={responsive.eventGroup}>
                 <div style={{ display: "flex", alignItems: "end", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
                   <div>
                     <p style={{ margin: "0 0 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>{group.eyebrow}</p>

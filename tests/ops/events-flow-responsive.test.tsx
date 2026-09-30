@@ -85,4 +85,15 @@ describe("事件页三步流程的窄屏布局", () => {
       "line-height": "1.35",
     });
   });
+
+  it("在 360px 以下改成三条横行，避免极窄屏继续压缩三列", () => {
+    const narrow = blockAfter(css, "@media (max-width: 360px)");
+    expect(declarations(narrow, ".flowExplainer")).toMatchObject({
+      "grid-template-columns": "1fr",
+    });
+    expect(declarations(narrow, ".flowCard")).toMatchObject({
+      "min-height": "0",
+      padding: "9px 10px",
+    });
+  });
 });
