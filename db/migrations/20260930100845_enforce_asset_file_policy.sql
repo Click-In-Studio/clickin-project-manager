@@ -5,9 +5,14 @@ ALTER TABLE asset
     CHECK (asset_type IN (
       'drafting', 'planogram', 'demo', 'rehearsal_video', 'reference',
       'material', 'clip', 'qlab', 'score', 'recording', 'financial_document'
-    )),
+    )) NOT VALID,
   ADD CONSTRAINT asset_financial_document_single_policy_check
-    CHECK (asset_type <> 'financial_document' OR file_version_policy = 'single');
+    CHECK (asset_type <> 'financial_document' OR file_version_policy = 'single') NOT VALID;
+
+-- ADD NOT VALID 只短暂取强锁；存量扫描在较弱的 SHARE UPDATE EXCLUSIVE 锁下完成。
+-- 若出现旧 API 之外写入的脏值，部署应明确失败，不能静默改写资产业务语义。
+ALTER TABLE asset VALIDATE CONSTRAINT asset_type_check;
+ALTER TABLE asset VALIDATE CONSTRAINT asset_financial_document_single_policy_check;
 
 CREATE FUNCTION prevent_asset_file_policy_update()
 RETURNS trigger
