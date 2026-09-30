@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import styles from "@/components/ops/planning.module.css";
 import { BASE_PATH } from "@/lib/base-path";
@@ -9,6 +9,7 @@ import { DAY_MS, floorToMonday, cstAxisDateFromIso, dateOnlyAxisMs, addDaysIso }
 import { TASK_STATUS_LABELS } from "./labels";
 import { phaseTone, phaseRangeLabel } from "./phase";
 import { readPref, writePref } from "./prefs";
+import { clampGanttLabelWidth, ganttLabelWidthBounds, parseGanttLabelWidth } from "./gantt-layout";
 import type { PlanningTask, Props } from "./types";
 
 type GanttScale = "day" | "month" | "quarter" | "year";
@@ -26,7 +27,13 @@ export default function TaskGanttView({ productionId, tasks, milestones, phases 
   const router = useRouter();
   const [scale, setScale] = useState<GanttScale>("month");
   const [scaleRestored, setScaleRestored] = useState(false);
+  const ganttViewportRef = useRef<HTMLDivElement>(null);
+  const savedLabelWidthRef = useRef<number | null>(null);
+  const labelResizeRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+  const [ganttVisibleWidth, setGanttVisibleWidth] = useState(0);
+  const [labelWidth, setLabelWidth] = useState<number | null>(null);
   const [localTasks, setLocalTasks] = useState<PlanningTask[]>(tasks);
+  const hasGanttRows = localTasks.some(task => task.effectiveStartTime) || phases.length > 0;
   useEffect(() => { setLocalTasks(tasks); }, [tasks]);
 
   useEffect(() => {
@@ -39,6 +46,76 @@ export default function TaskGanttView({ productionId, tasks, milestones, phases 
     if (!scaleRestored) return;
     writePref(`planning-gantt-scale:${productionId}`, scale);
   }, [productionId, scale, scaleRestored]);
+
+  useEffect(() => {
+    const viewport = ganttViewportRef.current;
+    if (!viewport) return;
+    setLabelWidth(null);
+    savedLabelWidthRef.current = parseGanttLabelWidth(readPref(`planning-gantt-label-width:${productionId}`));
+
+    const syncWidth = () => {
+      const visibleWidth = viewport.clientWidth || viewport.getBoundingClientRect().width;
+      if (visibleWidth <= 0) return;
+      setGanttVisibleWidth(visibleWidth);
+      const bounds = ganttLabelWidthBounds(visibleWidth);
+      setLabelWidth(savedLabelWidthRef.current === null
+        ? bounds.initial
+        : clampGanttLabelWidth(savedLabelWidthRef.current, visibleWidth));
+    };
+
+    syncWidth();
+    const observer = new ResizeObserver(syncWidth);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [productionId, hasGanttRows]);
+
+  const labelBounds = ganttLabelWidthBounds(ganttVisibleWidth || 640);
+
+  function startLabelResize(e: React.PointerEvent<HTMLDivElement>) {
+    if (labelWidth === null) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    labelResizeRef.current = { pointerId: e.pointerId, startX: e.clientX, startWidth: labelWidth };
+  }
+
+  function moveLabelResize(e: React.PointerEvent<HTMLDivElement>) {
+    const resize = labelResizeRef.current;
+    if (!resize || resize.pointerId !== e.pointerId || ganttVisibleWidth <= 0) return;
+    setLabelWidth(clampGanttLabelWidth(resize.startWidth + e.clientX - resize.startX, ganttVisibleWidth));
+  }
+
+  function finishLabelResize(e: React.PointerEvent<HTMLDivElement>) {
+    const resize = labelResizeRef.current;
+    if (!resize || resize.pointerId !== e.pointerId) return;
+    labelResizeRef.current = null;
+    const next = clampGanttLabelWidth(resize.startWidth + e.clientX - resize.startX, ganttVisibleWidth);
+    savedLabelWidthRef.current = next;
+    setLabelWidth(next);
+    writePref(`planning-gantt-label-width:${productionId}`, String(next));
+  }
+
+  function cancelLabelResize() {
+    const resize = labelResizeRef.current;
+    if (!resize) return;
+    labelResizeRef.current = null;
+    setLabelWidth(resize.startWidth);
+  }
+
+  function changeLabelWidthFromKeyboard(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (labelWidth === null || ganttVisibleWidth <= 0) return;
+    let next: number | null = null;
+    const step = e.shiftKey ? 24 : 8;
+    if (e.key === "ArrowLeft") next = labelWidth - step;
+    if (e.key === "ArrowRight") next = labelWidth + step;
+    if (e.key === "Home") next = labelBounds.min;
+    if (e.key === "End") next = labelBounds.max;
+    if (next === null) return;
+    e.preventDefault();
+    const clamped = clampGanttLabelWidth(next, ganttVisibleWidth);
+    savedLabelWidthRef.current = clamped;
+    setLabelWidth(clamped);
+    writePref(`planning-gantt-label-width:${productionId}`, String(clamped));
+  }
 
   const timedTasks = useMemo(
     () => localTasks
@@ -221,10 +298,29 @@ export default function TaskGanttView({ productionId, tasks, milestones, phases 
           暂无阶段或带时间的任务。在任务上设置起止时间，或绑定带时间的日程/事件后此处生成时间条。
         </p>
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <div style={{ minWidth: 640 }}>
+        <div ref={ganttViewportRef} className={styles.ganttViewport}>
+          <div
+            className={styles.ganttMatrix}
+            style={{ "--gantt-label-column-width": labelWidth === null ? "clamp(96px, 33cqw, 240px)" : `${labelWidth}px` } as CSSProperties}
+          >
+            <div
+              className={styles.ganttLabelResizeHandle}
+              role="separator"
+              aria-label="调整名称列宽度"
+              aria-orientation="vertical"
+              aria-valuemin={labelBounds.min}
+              aria-valuemax={labelBounds.max}
+              aria-valuenow={labelWidth ?? labelBounds.initial}
+              tabIndex={0}
+              title="拖动调整名称列宽度；也可用左右方向键"
+              onPointerDown={startLabelResize}
+              onPointerMove={moveLabelResize}
+              onPointerUp={finishLabelResize}
+              onPointerCancel={cancelLabelResize}
+              onKeyDown={changeLabelWidthFromKeyboard}
+            />
             {/* 轴表头 + 里程碑标记条 */}
-            <div style={{ display: "grid", gridTemplateColumns: "200px 1fr" }}>
+            <div className={`${styles.ganttGridRow} ${styles.ganttHeaderRow}`}>
               <span />
               <div style={{ position: "relative", display: "grid", gridTemplateColumns: `repeat(${labels.length}, 1fr)`, minHeight: 34 }}>
                 {labels.map(l => (
@@ -256,7 +352,7 @@ export default function TaskGanttView({ productionId, tasks, milestones, phases 
               const open = eMs === null;
               const label = p.deptName ? `${p.name}（${p.deptName}）` : p.name;
               return (
-                <div key={p.id} style={{ display: "grid", gridTemplateColumns: "200px 1fr", minHeight: 34, borderTop: "1px solid var(--line)" }}>
+                <div key={p.id} className={`${styles.ganttGridRow} ${styles.ganttPhaseRow}`}>
                   <div style={{ padding: "6px 10px 6px 0", minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center", gap: 2 }}>
                     <b style={{ fontSize: 11, color: tone.solid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {p.name}
@@ -304,7 +400,7 @@ export default function TaskGanttView({ productionId, tasks, milestones, phases 
               const dur = Math.max(1, Math.round((endMs - startMs) / DAY_MS));
               const context = t.eventTitle ?? t.departmentName;
               return (
-                <div key={t.id} style={{ display: "grid", gridTemplateColumns: "200px 1fr", minHeight: 48, borderTop: "1px solid var(--line)" }}>
+                <div key={t.id} className={`${styles.ganttGridRow} ${styles.ganttTaskRow}`}>
                   <button
                     onClick={() => router.push(`/production/${productionId}/tasks/${t.id}`)}
                     style={{ border: 0, background: "transparent", padding: "6px 10px 6px 0", textAlign: "left", cursor: "pointer", minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center", gap: 2 }}

@@ -68,6 +68,7 @@
 }
 
 .ganttScaleButton {
+  min-height: 30px;
   border: 0;
   border-radius: 6px;
   padding: 3px 10px;
@@ -76,6 +77,7 @@
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 .ganttScaleButton[aria-pressed="true"] { color: #fff; background: var(--ink); }
@@ -87,6 +89,60 @@
 .ganttLegendPending { border: 1px solid #9ccfc0; background: #d2f0e8; }
 .ganttLegendBlocked { border: 1px solid #d8a893; background: #f5dfd8; }
 .ganttLegendDone { border: 1px solid #b9b5dd; background: #e8e6f7; }
+
+.ganttViewport {
+  width: 100%;
+  overflow-x: auto;
+  container-type: inline-size;
+}
+
+.ganttMatrix {
+  position: relative;
+  min-width: 640px;
+}
+
+.ganttGridRow {
+  display: grid;
+  grid-template-columns: var(--gantt-label-column-width) minmax(0, 1fr);
+}
+
+.ganttHeaderRow { min-height: 34px; }
+.ganttPhaseRow { min-height: 34px; border-top: 1px solid var(--line); }
+.ganttTaskRow { min-height: 48px; border-top: 1px solid var(--line); }
+
+.ganttLabelResizeHandle {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  left: var(--gantt-label-column-width);
+  width: 24px;
+  padding: 0;
+  border: 0;
+  transform: translateX(-50%);
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.ganttLabelResizeHandle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: color-mix(in srgb, var(--line) 80%, var(--ink));
+  transition: width .12s, background-color .12s;
+}
+
+.ganttLabelResizeHandle:hover::before,
+.ganttLabelResizeHandle:focus-visible::before {
+  width: 3px;
+  background: var(--script);
+}
+
+.ganttLabelResizeHandle:focus-visible { outline: 2px solid color-mix(in srgb, var(--script) 35%, transparent); outline-offset: -2px; }
 
 .calendarHiddenMobile,
 .calendarFloatingCreate,
@@ -1013,7 +1069,7 @@
   .ganttDescription { margin-top: 3px; font-size: 10px; line-height: 1.45; }
   .ganttControls { width: 100%; margin-left: 0; gap: 8px; flex-shrink: 1; }
   .ganttScale { width: 100%; box-sizing: border-box; }
-  .ganttScaleButton { min-width: 0; min-height: 44px; padding: 3px 8px; flex: 1 1 0; font-size: 11px; }
+  .ganttScaleButton { min-width: 0; min-height: 38px; padding: 2px 8px; flex: 1 1 0; font-size: 11px; }
   .ganttLegend { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; display: grid; font-size: 10px; }
   .timetablePanel { padding: 14px; }
   .timetableHeader { gap: 10px; margin-bottom: 12px; }

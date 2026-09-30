@@ -28,6 +28,9 @@ describe("计划页移动端控制区", () => {
     expect(ganttView).toContain("className={styles.ganttControls}");
     expect(ganttView).toContain("className={styles.ganttScaleButton}");
     expect(ganttView).toContain("className={styles.ganttLegend}");
+    expect(ganttView).toContain('role="separator"');
+    expect(ganttView).toContain('aria-label="调整名称列宽度"');
+    expect(ganttView.match(/styles\.ganttGridRow/g)).toHaveLength(3);
   });
 
   it("760px 以下压缩卡片并让粒度与图例在 319px 宽度内分行", () => {
@@ -40,7 +43,7 @@ describe("计划页移动端控制区", () => {
     expect(mobileRules).toMatch(/\.ganttPanel \{ padding: 14px 10px; \}/);
     expect(mobileRules).toMatch(/\.ganttControls \{[^}]*width: 100%;[^}]*flex-shrink: 1;/);
     expect(mobileRules).toMatch(/\.ganttScale \{[^}]*width: 100%;[^}]*box-sizing: border-box;/);
-    expect(mobileRules).toMatch(/\.ganttScaleButton \{[^}]*min-height: 44px;[^}]*flex: 1 1 0;/);
+    expect(mobileRules).toMatch(/\.ganttScaleButton \{[^}]*min-height: 38px;[^}]*padding: 2px 8px;[^}]*flex: 1 1 0;/);
     expect(mobileRules).toMatch(/\.ganttLegend \{[^}]*width: 100%;[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*display: grid;/);
   });
 
@@ -50,5 +53,8 @@ describe("计划页移动端控制区", () => {
     expect(desktopRules).toMatch(/\.ganttPanel \{[^}]*padding: 22px;/);
     expect(desktopRules).toMatch(/\.ganttControls \{[^}]*margin-left: auto;[^}]*flex-shrink: 0;/);
     expect(desktopRules).toMatch(/\.ganttLegend \{ display: flex; gap: 12px;/);
+    expect(desktopRules).toMatch(/\.ganttScaleButton \{[^}]*min-height: 30px;/);
+    expect(desktopRules).toMatch(/\.ganttGridRow \{[^}]*grid-template-columns: var\(--gantt-label-column-width\) minmax\(0, 1fr\);/);
+    expect(desktopRules).toMatch(/\.ganttLabelResizeHandle \{[^}]*width: 24px;[^}]*touch-action: none;/);
   });
 });
