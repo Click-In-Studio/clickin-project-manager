@@ -37,8 +37,11 @@ import {
 } from "@/app/api/production/[id]/finance/expense-documents/[assetId]/route";
 import { POST as appendExpenseDocument } from "@/app/api/production/[id]/finance/expenses/[expenseId]/documents/route";
 
+const { presignedGetMock } = vi.hoisted(() => ({
+  presignedGetMock: vi.fn(() => "https://files.example/signed"),
+}));
 vi.mock("@/lib/r2", () => ({
-  presignedGet: vi.fn(() => "https://files.example/signed"),
+  presignedGet: presignedGetMock,
   deleteR2Object: vi.fn(async () => {}),
 }));
 
@@ -592,6 +595,22 @@ describe("#713 财务凭证上下文访问", () => {
     // 全项目支出查看资格也不能旁路查看尚未提交的暂存文件。
     expect((await getExpenseDocument(req(ownerId), ctx())).status).toBe(403);
     expect((await deleteExpenseDocument(req(submitterId, "DELETE"), ctx())).status).toBe(200);
+  });
+
+  it("下载凭证时用原文件名覆盖 R2 对象键文件名", async () => {
+    const document = await createAsset({
+      productionId: prodId, uploaderUserId: submitterId, assetType: "financial_document",
+      fileName: "中文票据.pdf", mimeType: "application/pdf", storageType: "r2",
+      r2Key: `assets/${shortId()}/____.pdf`, fileVersionPolicy: "single", grantUploader: false,
+    });
+    const ctx = () => ({ params: Promise.resolve({ id: prodId, assetId: document.asset.id }) });
+
+    presignedGetMock.mockClear();
+    expect((await getExpenseDocument(req(submitterId, "GET", true), ctx())).status).toBe(200);
+    expect(presignedGetMock).toHaveBeenCalledWith(document.file.r2Key, 300, {
+      contentDisposition:
+        "attachment; filename=\"____.pdf\"; filename*=UTF-8''%E4%B8%AD%E6%96%87%E7%A5%A8%E6%8D%AE.pdf",
+    });
   });
 });
 

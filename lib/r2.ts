@@ -59,6 +59,7 @@ export function thumbnailR2Key(assetFileId: string): string {
 
 /** Presigned GET URL.
  *  opts.inline=true  → adds response-content-disposition=inline (browser displays, doesn't download)
+ *  opts.contentDisposition → overrides Content-Disposition (download filename etc.)
  *  opts.contentType  → overrides Content-Type in the response (useful for inline PDF/video preview)
  *  opts.cacheWindow  → 签名时间戳向下取整到该秒数窗口，同一窗口内对同一 key 生成的
  *                      URL 字节级相同（浏览器缓存才能命中）；有效期自动放宽为 2×窗口，
@@ -69,7 +70,13 @@ export function thumbnailR2Key(assetFileId: string): string {
 export function presignedGet(
   key: string,
   expiresIn = 3600,
-  opts?: { inline?: boolean; contentType?: string; cacheWindow?: number; cacheControl?: string },
+  opts?: {
+    inline?: boolean;
+    contentDisposition?: string;
+    contentType?: string;
+    cacheWindow?: number;
+    cacheControl?: string;
+  },
 ): string {
   let signTime = new Date();
   if (opts?.cacheWindow) {
@@ -86,7 +93,11 @@ export function presignedGet(
     "X-Amz-Expires":      String(expiresIn),
     "X-Amz-SignedHeaders": "host",
   };
-  if (opts?.inline)       baseParams["response-content-disposition"] = "inline";
+  if (opts?.contentDisposition) {
+    baseParams["response-content-disposition"] = opts.contentDisposition;
+  } else if (opts?.inline) {
+    baseParams["response-content-disposition"] = "inline";
+  }
   if (opts?.contentType)  baseParams["response-content-type"] = opts.contentType;
   if (opts?.cacheControl) baseParams["response-cache-control"] = opts.cacheControl;
 
