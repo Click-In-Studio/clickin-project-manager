@@ -72,6 +72,7 @@ describe("DramaturgyWorkspaceHeading compact menu", () => {
   it("opens and closes when the trigger is clicked repeatedly", () => {
     expect(trigger().getAttribute("aria-expanded")).toBe("false");
     expect(menu()).toBeNull();
+    expect(trigger().querySelector("svg")?.classList.contains("self-center")).toBe(true);
 
     click(trigger());
     expect(trigger().getAttribute("aria-expanded")).toBe("true");

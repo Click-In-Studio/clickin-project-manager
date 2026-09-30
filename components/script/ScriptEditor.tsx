@@ -7,7 +7,7 @@ import MarkerDeleteDialog, { type MarkerDeleteDialogState } from "@/components/s
 import ModeSwitch from "@/components/script/ModeSwitch";
 import ScriptDialog, { SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS, SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS } from "@/components/script/ScriptDialog";
 import TagGroupEditor from "@/components/script/TagGroupEditor";
-import ProductionTopMenu, { ProductionOverflowSubmenuButton, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, useProductionToolbarStage } from "@/components/shell/ProductionTopMenu";
+import ProductionTopMenu, { ProductionOverflowSubmenuButton, ProductionTopMenuContext, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, useProductionToolbarStage } from "@/components/shell/ProductionTopMenu";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import PageSkeleton from "@/components/ui/PageSkeleton";
 import Kbd from "@/components/ui/Kbd";
@@ -4131,12 +4131,7 @@ export default function ScriptEditor({
             <>
           {productionName && (
             <>
-              <div className="flex shrink-0 flex-col" style={{ lineHeight: 1.2 }}>
-                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--script)", whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {productionName}
-                </span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>剧本</span>
-              </div>
+              <ProductionTopMenuContext productionName={productionName} label="剧本" />
               <ProductionTopMenuDivider />
             </>
           )}

@@ -113,19 +113,19 @@ export default function ProjectSwitcher({
         onMouseEnter={() => setBtnHovered(true)}
         onMouseLeave={() => setBtnHovered(false)}
         style={{
-          height: compact ? 38 : 44,
-          padding: compact ? "6px 9px" : "8px 12px",
+          height: compact ? 36 : 44,
+          padding: compact ? "5px 7px" : "8px 12px",
           display: "flex",
           alignItems: "center",
-          gap: compact ? 6 : 10,
+          gap: compact ? 4 : 10,
           border: `1px solid ${btnHovered || open ? "var(--ink)" : "var(--line)"}`,
           borderRadius: 10,
           background: "var(--paper)",
           cursor: "pointer",
           textAlign: "left",
-          minWidth: compact ? 112 : 180,
-          width: compact ? "clamp(112px, 31vw, 148px)" : undefined,
-          maxWidth: compact ? 148 : 280,
+          minWidth: compact ? 88 : 180,
+          width: compact ? "clamp(88px, 28vw, 132px)" : undefined,
+          maxWidth: compact ? 132 : 280,
           transition: "border-color .12s",
         }}
       >
@@ -176,10 +176,12 @@ export default function ProjectSwitcher({
         <div style={{
           position: "absolute",
           zIndex: 40,
-          top: "calc(100% + 10px)",
+          top: compact ? "calc(100% + 6px)" : "calc(100% + 10px)",
           left: 0,
-          minWidth: 270,
-          padding: 8,
+          width: compact ? "min(244px, calc(100vw - 12px))" : undefined,
+          minWidth: compact ? 0 : 270,
+          maxWidth: compact ? "calc(100vw - 12px)" : undefined,
+          padding: compact ? 6 : 8,
           border: "1px solid var(--line)",
           borderRadius: 13,
           background: "var(--surface)",
@@ -189,7 +191,7 @@ export default function ProjectSwitcher({
           <div style={{
             position: "absolute",
             top: -5,
-            left: 20,
+            left: compact ? 14 : 20,
             width: 9,
             height: 9,
             transform: "rotate(45deg)",
@@ -206,8 +208,8 @@ export default function ProjectSwitcher({
             onMouseEnter={() => setHoveredItem("__home__")}
             onMouseLeave={() => setHoveredItem(null)}
             style={{
-              width: "100%", minHeight: 44, padding: "7px 9px",
-              display: "flex", alignItems: "center", gap: 10,
+              width: "100%", minHeight: compact ? 40 : 44, padding: compact ? "5px 7px" : "7px 9px",
+              display: "flex", alignItems: "center", gap: compact ? 8 : 10,
               border: 0, borderRadius: 9,
               background: !currentProductionId || hoveredItem === "__home__" ? "var(--paper)" : "transparent",
               textAlign: "left", cursor: isPending ? "default" : "pointer",
@@ -215,7 +217,7 @@ export default function ProjectSwitcher({
             }}
           >
             <span style={{
-              width: 31, height: 31, display: "grid", placeItems: "center", flexShrink: 0,
+              width: compact ? 28 : 31, height: compact ? 28 : 31, display: "grid", placeItems: "center", flexShrink: 0,
               borderRadius: "50%", background: "var(--ink)", color: "#fff", fontSize: 13,
             }}>
               ⌂
@@ -247,8 +249,8 @@ export default function ProjectSwitcher({
               onMouseEnter={() => setHoveredItem(p.id)}
               onMouseLeave={() => setHoveredItem(null)}
               style={{
-                width: "100%", minHeight: 49, padding: "7px 9px",
-                display: "flex", alignItems: "center", gap: 10,
+                width: "100%", minHeight: compact ? 44 : 49, padding: compact ? "5px 7px" : "7px 9px",
+                display: "flex", alignItems: "center", gap: compact ? 8 : 10,
                 border: 0, borderRadius: 9,
                 background: p.id === currentProductionId || hoveredItem === p.id ? "var(--paper)" : "transparent",
                 textAlign: "left", cursor: isPending ? "default" : "pointer",
@@ -256,7 +258,7 @@ export default function ProjectSwitcher({
               }}
             >
               <span style={{
-                width: 34, height: 34, display: "grid", placeItems: "center", flexShrink: 0,
+                width: compact ? 31 : 34, height: compact ? 31 : 34, display: "grid", placeItems: "center", flexShrink: 0,
                 borderRadius: 9, overflow: "hidden",
                 background: "var(--script-soft)", color: "var(--script)",
                 fontFamily: "Georgia, serif", fontSize: 14, fontWeight: 700,

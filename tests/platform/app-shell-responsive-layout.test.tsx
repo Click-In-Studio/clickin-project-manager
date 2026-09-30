@@ -14,6 +14,8 @@ vi.mock("@/components/account/NewProductionModal", () => ({ default: () => null 
 
 import ProjectSwitcher from "@/components/shell/app-shell/ProjectSwitcher";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 const production: Production = {
   id: "p1",
   name: "很长的演出项目名称",
@@ -67,11 +69,24 @@ describe("#554 项目切换器窄屏收紧", () => {
 
   it("最窄阶段限制宽度并缩小高度和间距", () => {
     const button = renderSwitcher(true);
-    expect(button.style.height).toBe("38px");
-    expect(button.style.padding).toBe("6px 9px");
-    expect(button.style.minWidth).toBe("112px");
-    expect(button.style.maxWidth).toBe("148px");
-    expect(button.style.width).toBe("clamp(112px, 31vw, 148px)");
+    expect(button.style.height).toBe("36px");
+    expect(button.style.padding).toBe("5px 7px");
+    expect(button.style.minWidth).toBe("88px");
+    expect(button.style.maxWidth).toBe("132px");
+    expect(button.style.width).toBe("clamp(88px, 28vw, 132px)");
+  });
+
+  it("最窄阶段同步收紧展开区，且原生按钮与链接语义不变", () => {
+    const button = renderSwitcher(true);
+    expect(button.tagName).toBe("BUTTON");
+
+    act(() => button.click());
+    const home = container.querySelector<HTMLAnchorElement>('a[href="/"]')!;
+    const popover = home.parentElement!;
+    expect(popover.style.width).toMatch(/^min\(244px, .*100vw\)$/);
+    expect(popover.style.maxWidth).toContain("100vw");
+    expect(popover.style.padding).toBe("6px");
+    expect(home.tagName).toBe("A");
   });
 });
 
@@ -101,8 +116,14 @@ describe("浏览器批注 2 手机竖屏顶栏", () => {
 
   it("只在手机竖屏隐藏整个标志链接并释放其 flex 占位", () => {
     expect(globalCss).toMatch(
-      /@media \(max-width: 639px\) and \(orientation: portrait\) \{\s*\.app-shell-brand-link \{\s*display: none;\s*\}\s*\}/,
+      /@media \(max-width: 639px\) and \(orientation: portrait\) \{\s*\.app-shell-brand-link \{\s*display: none;\s*\}/,
     );
+  });
+
+  it("手机竖屏同步压缩顶栏左右留白、列间距和右侧操作间距", () => {
+    expect(globalCss).toMatch(/\.app-shell-topbar\.app-shell-topbar-compact \{[\s\S]*?column-gap: 0\.375rem;[\s\S]*?padding-right: max\(0\.375rem,[\s\S]*?padding-left: max\(0\.375rem,/);
+    expect(globalCss).toMatch(/\.app-shell-topbar-actions \{\s*gap: 0\.375rem;\s*\}/);
+    expect(shellSource).toContain("app-shell-topbar-actions");
   });
 });
 
@@ -119,5 +140,16 @@ describe("#354 配置中心窄屏顶栏", () => {
     expect(source).toMatch(
       /\/\* Admin mode \*\/[\s\S]*?label="返回"[\s\S]*?href=\{`\/production\/\$\{productionId\}`\}/,
     );
+  });
+});
+
+describe("共享项目工具栏入口契约", () => {
+  const source = readFileSync("components/shell/AppShell.tsx", "utf8");
+
+  it("搜索、AI、个人中心和 overflow 入口仍挂在同一顶栏", () => {
+    expect(source).toContain("<SearchBar");
+    expect(source).toContain("data-ai-toggle");
+    expect(source).toContain("<UserMenu");
+    expect(source).toContain('aria-label="更多工具"');
   });
 });

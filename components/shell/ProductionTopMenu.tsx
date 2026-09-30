@@ -203,6 +203,37 @@ export function ProductionTopMenuDivider() {
   );
 }
 
+export function ProductionTopMenuContext({
+  productionName,
+  label,
+}: {
+  productionName: string;
+  label: string;
+}) {
+  const { stage } = useProductionToolbar();
+  const compact = stage >= PRODUCTION_TOOLBAR_STAGE.primaryShort;
+
+  return (
+    <div
+      data-production-top-menu-context={label}
+      className={`flex shrink-0 ${compact ? "items-center" : "flex-col"}`}
+      style={{ lineHeight: 1.2 }}
+    >
+      {!compact && (
+        <span className="max-w-40 truncate whitespace-nowrap text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--script)]">
+          {productionName}
+        </span>
+      )}
+      <span className={compact
+        ? "inline-flex h-7 items-center rounded-md border border-[var(--line)] bg-[var(--surface)] px-2 text-xs font-semibold text-[var(--ink)] shadow-sm"
+        : "text-xs font-semibold text-[var(--ink)]"
+      }>
+        {label}
+      </span>
+    </div>
+  );
+}
+
 type Props = {
   children: ReactNode | ((portaled: boolean) => ReactNode);
   overflow?: ReactNode;

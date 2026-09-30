@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import ProductionTopMenu, {
   PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
   PRODUCTION_TOOLBAR_STAGE,
@@ -68,12 +69,11 @@ export function DramaturgyWorkspaceHeading({
             className="flex h-8 cursor-pointer items-center gap-1 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2.5 text-[11px] font-semibold text-[var(--ink)] shadow-sm"
           >
             <span>{activeSection.label}</span>
-            <span
-              aria-hidden="true"
-              className={`text-[10px] text-[var(--muted)] transition-transform ${workspaceMenuOpen ? "rotate-180" : ""}`}
-            >
-              ⌄
-            </span>
+            <ChevronIcon
+              direction={workspaceMenuOpen ? "up" : "down"}
+              size={12}
+              className="shrink-0 self-center text-[var(--muted)]"
+            />
           </button>
           {workspaceMenuOpen && (
             <nav aria-label="构作工作区" className="absolute left-0 top-full z-50 mt-2 w-32 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md">
