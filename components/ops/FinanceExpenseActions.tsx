@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import { PRIMARY_BTN } from "@/components/ui/PageHeader";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
-import AssetUploadPanel, { type UploadResult } from "@/components/assets/AssetUploadPanel";
+import AssetUploadPanel from "@/components/assets/AssetUploadPanel";
+import { useAssetUploadManager } from "@/components/assets/asset-upload-manager";
 import styles from "./finance-expense-actions.module.css";
 
 export type ExpenseCategoryOption = {
@@ -27,6 +28,7 @@ export type ExpenseDocumentView = {
 };
 
 type StagedDocument = ExpenseDocumentView;
+type PendingDocument = { taskId: string; fileName: string; kind: DocumentKind };
 
 const DOCUMENT_KIND_LABEL: Record<DocumentKind, string> = {
   invoice: "发票",
@@ -44,6 +46,7 @@ export function ExpenseCreateButton({ productionId, categories }: {
   categories: ExpenseCategoryOption[];
 }) {
   const router = useRouter();
+  const uploadManager = useAssetUploadManager();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
@@ -52,7 +55,7 @@ export function ExpenseCreateButton({ productionId, categories }: {
   const [invoiceRequirement, setInvoiceRequirement] = useState<"required" | "waived">("required");
   const [invoiceWaiverReason, setInvoiceWaiverReason] = useState("");
   const [documents, setDocuments] = useState<StagedDocument[]>([]);
-  const [uploading, setUploading] = useState(false);
+  const [pendingDocuments, setPendingDocuments] = useState<PendingDocument[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,7 +68,7 @@ export function ExpenseCreateButton({ productionId, categories }: {
     setInvoiceRequirement("required");
     setInvoiceWaiverReason("");
     setDocuments([]);
-    setUploading(false);
+    setPendingDocuments([]);
     setError(null);
   }, []);
 
@@ -76,10 +79,40 @@ export function ExpenseCreateButton({ productionId, categories }: {
   }, [productionId]);
 
   const close = useCallback(() => {
-    if (saving || uploading) return;
+    if (saving) return;
+    for (const pending of pendingDocuments) {
+      const task = uploadManager?.tasks.find(item => item.id === pending.taskId);
+      if (task?.result) void discardDocument(task.result.assetId);
+      uploadManager?.dismissTask(pending.taskId);
+    }
     for (const document of documents) void discardDocument(document.assetId);
     resetForm();
-  }, [discardDocument, documents, resetForm, saving, uploading]);
+  }, [discardDocument, documents, pendingDocuments, resetForm, saving, uploadManager]);
+
+  const pendingTasks = pendingDocuments.map(pending => ({
+    pending,
+    task: uploadManager?.tasks.find(task => task.id === pending.taskId),
+  }));
+  const uploading = pendingDocuments.length > 0;
+
+  useEffect(() => {
+    const completed = pendingTasks.filter(item => item.task?.status === "complete" && item.task.result);
+    if (completed.length === 0) return;
+    setDocuments(current => [
+      ...current,
+      ...completed.map(({ pending, task }) => ({
+        id: task!.result!.fileId,
+        assetId: task!.result!.assetId,
+        assetFileId: task!.result!.fileId,
+        kind: pending.kind,
+        fileName: task!.result!.fileName,
+        mimeType: null,
+      })),
+    ]);
+    const completedIds = new Set(completed.map(item => item.pending.taskId));
+    setPendingDocuments(current => current.filter(item => !completedIds.has(item.taskId)));
+    for (const id of completedIds) uploadManager?.dismissTask(id);
+  }, [pendingTasks, uploadManager]);
 
   useEffect(() => {
     if (!open) return;
@@ -140,7 +173,7 @@ export function ExpenseCreateButton({ productionId, categories }: {
                   <p>REIMBURSEMENT</p>
                   <h2 id="expense-create-title">新建报销</h2>
                 </div>
-                <button type="button" className={styles.closeButton} disabled={saving || uploading} onClick={close} aria-label="关闭报销单">×</button>
+                <button type="button" className={styles.closeButton} disabled={saving} onClick={close} aria-label="关闭报销单">×</button>
               </header>
 
               <p className={styles.lead}>填写实际垫付的费用。提交后会按项目安排审批；只有你自己可以审批时会直接通过。</p>
@@ -210,13 +243,49 @@ export function ExpenseCreateButton({ productionId, categories }: {
                       }}>移除</button>
                     </div>
                   ))}
+                  {pendingTasks.map(({ pending, task }) => (
+                    <div key={pending.taskId} className={styles.documentRow}>
+                      <span title={pending.fileName}>{pending.fileName}</span>
+                      <OverflowSafeSelect
+                        aria-label={`${pending.fileName}的凭证类型`}
+                        value={pending.kind}
+                        onChange={event => setPendingDocuments(current => current.map(item =>
+                          item.taskId === pending.taskId ? { ...item, kind: event.target.value as DocumentKind } : item))}
+                      >
+                        {Object.entries(DOCUMENT_KIND_LABEL).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </OverflowSafeSelect>
+                      <span>{task?.status === "failed" ? task.error ?? "上传失败"
+                        : task?.status === "cancelled" ? "已取消"
+                        : `上传中 ${task?.progress ?? 0}%`}</span>
+                      {task?.status === "failed" ? (
+                        <button type="button" onClick={() => uploadManager?.retryTask(pending.taskId)}>重试</button>
+                      ) : task?.status === "cancelled" ? (
+                        <button type="button" onClick={() => {
+                          uploadManager?.dismissTask(pending.taskId);
+                          setPendingDocuments(current => current.filter(item => item.taskId !== pending.taskId));
+                        }}>移除</button>
+                      ) : (
+                        <button type="button" onClick={() => {
+                          uploadManager?.dismissTask(pending.taskId);
+                          setPendingDocuments(current => current.filter(item => item.taskId !== pending.taskId));
+                        }}>取消</button>
+                      )}
+                    </div>
+                  ))}
                   <div className={styles.documentUploader}>
                     <AssetUploadPanel
-                      key={`expense-document-${documents.length}`}
                       productionId={productionId}
                       purpose="expense_document"
-                      onBusyChange={setUploading}
-                      onUploaded={(result: UploadResult) => setDocuments(current => [...current, {
+                      taskTarget={{ kind: "asset" }}
+                      detachOnStart
+                      onTaskStarted={task => setPendingDocuments(current => [...current, {
+                        taskId: task.id,
+                        fileName: task.fileName,
+                        kind: "invoice",
+                      }])}
+                      onUploaded={result => setDocuments(current => [...current, {
                         id: result.fileId,
                         assetId: result.assetId,
                         assetFileId: result.fileId,
@@ -269,7 +338,7 @@ export function ExpenseCreateButton({ productionId, categories }: {
               <div className={styles.footer}>
                 {error && <p role="alert" className={styles.error}>{error}</p>}
                 <div className={styles.footerButtons}>
-                  <button type="button" className={styles.secondaryButton} disabled={saving || uploading} onClick={close}>取消</button>
+                  <button type="button" className={styles.secondaryButton} disabled={saving} onClick={close}>取消</button>
                   <button type="submit" className={styles.primaryButton} disabled={saving || uploading}>
                     {saving ? "提交中…" : uploading ? "票据上传中…" : "提交报销"}
                   </button>
@@ -295,11 +364,17 @@ async function openExpenseDocument(productionId: string, assetId: string, downlo
   if (data.url) window.open(data.url, "_blank", "noopener,noreferrer");
 }
 
-export function ExpenseDocumentLinks({ productionId, documents }: {
+export function ExpenseDocumentLinks({ productionId, expenseId, documents }: {
   productionId: string;
+  expenseId: string;
   documents: ExpenseDocumentView[];
 }) {
-  if (documents.length === 0) return null;
+  const uploadManager = useAssetUploadManager();
+  const pending = (uploadManager?.tasks ?? []).filter(task =>
+    task.productionId === productionId && task.target.kind === "expense" && task.target.expenseId === expenseId,
+  ).filter(task => task.status !== "complete" || !task.result
+    || !documents.some(document => document.assetFileId === task.result!.fileId));
+  if (documents.length === 0 && pending.length === 0) return null;
   return (
     <div className={styles.documentLinks}>
       {documents.map(document => (
@@ -309,6 +384,24 @@ export function ExpenseDocumentLinks({ productionId, documents }: {
             {document.fileName}
           </button>
           <button type="button" onClick={() => void openExpenseDocument(productionId, document.assetId, true)}>下载</button>
+        </span>
+      ))}
+      {pending.map(task => (
+        <span key={task.id}>
+          <b>{DOCUMENT_KIND_LABEL[task.target.kind === "expense" ? task.target.documentKind : "other"]}</b>
+          <span>{task.fileName}</span>
+          <span>{task.status === "failed" ? task.error ?? "上传失败"
+            : task.status === "binding" ? "正在关联"
+            : task.status === "complete" ? "已关联"
+            : task.status === "cancelled" ? "已取消"
+            : `上传中 ${task.progress ?? 0}%`}</span>
+          {task.status === "failed" ? (
+            <button type="button" onClick={() => uploadManager?.retryTask(task.id)}>重试</button>
+          ) : task.status === "complete" || task.status === "cancelled" ? (
+            <button type="button" onClick={() => uploadManager?.dismissTask(task.id)}>移除</button>
+          ) : (
+            <button type="button" onClick={() => uploadManager?.cancelTask(task.id)}>取消</button>
+          )}
         </span>
       ))}
     </div>
@@ -322,46 +415,36 @@ export function ExpenseAddDocumentButton({ productionId, expenseId }: {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<DocumentKind>("invoice");
-  const [uploading, setUploading] = useState(false);
-  const [attaching, setAttaching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const busy = uploading || attaching;
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) setOpen(false);
+      if (event.key === "Escape") setOpen(false);
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [busy, open]);
+  }, [open]);
 
-  async function attach(result: UploadResult) {
-    setAttaching(true);
+  async function attachFallback(result: { assetId: string; fileId: string }) {
     setError(null);
-    try {
-      const response = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/finance/expenses/${expenseId}/documents`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ assetFileId: result.fileId, kind }),
-        },
-      );
-      if (!response.ok) {
-        await fetch(
-          `${BASE_PATH}/api/production/${productionId}/finance/expense-documents/${result.assetId}`,
-          { method: "DELETE" },
-        ).catch(() => {});
-        throw new Error(await responseError(response, "补充凭证失败"));
-      }
-      setOpen(false);
-      router.refresh();
-    } catch (attachError) {
-      setError(attachError instanceof Error ? attachError.message : "补充凭证失败");
-    } finally {
-      setAttaching(false);
+    const response = await fetch(
+      `${BASE_PATH}/api/production/${productionId}/finance/expenses/${expenseId}/documents`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assetFileId: result.fileId, kind }),
+      },
+    );
+    if (!response.ok) {
+      await fetch(`${BASE_PATH}/api/production/${productionId}/finance/expense-documents/${result.assetId}`, {
+        method: "DELETE",
+      }).catch(() => {});
+      setError(await responseError(response, "补充凭证失败"));
+      return;
     }
+    setOpen(false);
+    router.refresh();
   }
 
   return (
@@ -371,12 +454,12 @@ export function ExpenseAddDocumentButton({ productionId, expenseId }: {
       </button>
       {open && (
         <div className={`app-mobile-input-overlay ${styles.backdrop}`} role="presentation"
-          onMouseDown={event => { if (event.target === event.currentTarget && !busy) setOpen(false); }}>
+          onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false); }}>
           <aside className={`app-mobile-input-overlay app-mobile-input-surface ${styles.documentDrawer}`}
             role="dialog" aria-modal="true" aria-labelledby={`expense-document-${expenseId}`}>
             <header className={styles.header}>
               <div><p>DOCUMENT</p><h2 id={`expense-document-${expenseId}`}>补充报销凭证</h2></div>
-              <button type="button" className={styles.closeButton} disabled={busy}
+              <button type="button" className={styles.closeButton}
                 onClick={() => setOpen(false)} aria-label="关闭补充凭证">×</button>
             </header>
             <div className={styles.documentAddBody}>
@@ -391,10 +474,11 @@ export function ExpenseAddDocumentButton({ productionId, expenseId }: {
               <AssetUploadPanel
                 productionId={productionId}
                 purpose="expense_document"
-                onBusyChange={setUploading}
-                onUploaded={result => void attach(result)}
+                taskTarget={{ kind: "expense", expenseId, documentKind: kind }}
+                detachOnStart
+                onTaskStarted={() => setOpen(false)}
+                onUploaded={result => void attachFallback(result)}
               />
-              {attaching && <p className={styles.documentAddHint}>正在关联到报销单…</p>}
               {error && <p role="alert" className={styles.error}>{error}</p>}
             </div>
           </aside>

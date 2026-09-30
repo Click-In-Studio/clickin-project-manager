@@ -8,109 +8,16 @@ import { ASSET_TYPE_LABELS } from "@/lib/asset/types";
 import { BASE_PATH } from "@/lib/base-path";
 import TreePickerModal from "@/components/ui/TreePickerModal";
 import type { NodeEntry } from "@/lib/node/db";
-
-// R2 single PUT max is 5 GiB; use multipart for anything above 50 MB
-const MULTIPART_THRESHOLD = 50 * 1024 * 1024;
-// Files above this should be transferred by other means (rsync, rclone, etc.)
-const MAX_BROWSER_UPLOAD = 50 * 1024 * 1024 * 1024; // 50 GB
-
-// S3/R2 multipart rule: ALL non-trailing parts MUST be exactly the same size.
-// Chunk size is therefore chosen once at upload start and never changes mid-upload.
-// Available sizes (bytes); adaptive logic moves between these levels across uploads.
-const CHUNK_SIZES = [5, 16, 32, 64, 128].map(n => n << 20);
-const CHUNK_DEFAULT_IDX = CHUNK_SIZES.length - 1; // 128 MB — start at max, downgrade on failure
-// Probe: run a 512 KB test upload to estimate bandwidth when the stored chunk
-// size is low and the file is large enough to benefit from a bigger chunk.
-const PROBE_BYTES             = 512 * 1024;
-const PROBE_FILE_MIN          = MULTIPART_THRESHOLD; // only probe for multipart files
-const PROBE_STORED_MAX        = 32 << 20;            // skip probe if stored >= 32 MB
-const PROBE_TARGET_SECONDS    = 15;                  // aim for ~15 s per chunk
-// localStorage key / TTL for persisted chunk size
-const CHUNK_LS_KEY  = "upload_chunk_bytes_v1";
-const CHUNK_LS_TTL  = 60 * 60 * 1000; // 1 hour
-// Failure thresholds — either triggers an abort + chunk-size downgrade
-const MAX_CONSECUTIVE_PART_FAILURES = 5;
-const MAX_TOTAL_RETRIES             = 20;
-// 单 PUT（<50MB）连续失败这么多次后降级到 multipart+relay（#457）
-const SINGLE_PUT_ATTEMPTS           = 3;
-
-function loadStoredChunkBytes(): number {
-  try {
-    const raw = localStorage.getItem(CHUNK_LS_KEY);
-    if (!raw) return CHUNK_SIZES[CHUNK_DEFAULT_IDX];
-    const { bytes, updatedAt } = JSON.parse(raw) as { bytes: number; updatedAt: number };
-    if (Date.now() - updatedAt > CHUNK_LS_TTL) return CHUNK_SIZES[CHUNK_DEFAULT_IDX];
-    return CHUNK_SIZES.includes(bytes) ? bytes : CHUNK_SIZES[CHUNK_DEFAULT_IDX];
-  } catch { return CHUNK_SIZES[CHUNK_DEFAULT_IDX]; }
-}
-
-function saveChunkBytes(bytes: number): void {
-  try { localStorage.setItem(CHUNK_LS_KEY, JSON.stringify({ bytes, updatedAt: Date.now() })); } catch { /* ignore */ }
-}
-
-function chunkBytesUp(current: number): number {
-  const idx = CHUNK_SIZES.indexOf(current);
-  return idx >= 0 && idx < CHUNK_SIZES.length - 1 ? CHUNK_SIZES[idx + 1] : current;
-}
-
-function chunkBytesDown(current: number): number {
-  const idx = CHUNK_SIZES.indexOf(current);
-  return idx > 0 ? CHUNK_SIZES[idx - 1] : current;
-}
-
-async function runUploadProbe(presignUrl: string): Promise<number> {
-  const buf = new Uint8Array(PROBE_BYTES);
-  crypto.getRandomValues(buf);
-  const blob = new Blob([buf]);
-  const t0 = performance.now();
-  try {
-    const res = await fetch(presignUrl, {
-      method: "PUT", body: blob,
-      headers: { "Content-Type": "application/octet-stream" },
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!res.ok) throw new Error("probe failed");
-    const bw = PROBE_BYTES / ((performance.now() - t0) / 1000); // bytes/s
-    const target = bw * PROBE_TARGET_SECONDS;
-    const idx = CHUNK_SIZES.reduce((best, sz, i) => sz <= target ? i : best, 0);
-    return CHUNK_SIZES[idx];
-  } catch { return CHUNK_SIZES[CHUNK_DEFAULT_IDX]; }
-}
-
-class ChunkSizeAbortError extends Error {
-  constructor() { super("ChunkSizeAbort"); }
-}
-
-// Adaptive upload levels — only concurrency changes; chunk size is fixed per upload.
-//
-// Direct path (client → R2): starts at level 0, promotes after PROMOTE_AFTER
-// consecutive fully-successful batches, demotes on any batch failure.
-// Reaching level 0 with another failure → switch to relay.
-const DIRECT_LEVELS: readonly { concurrency: number }[] = [
-  { concurrency: 1 },  // level 0 — start / degraded
-  { concurrency: 3 },  // level 1 — stable
-  { concurrency: 6 },  // level 2 — fast
-  { concurrency: 8 },  // level 3 — max throughput
-];
-// Relay path (client → server → R2): starts at level 0; only concurrency shrinks.
-const RELAY_LEVELS: readonly { concurrency: number }[] = [
-  { concurrency: 1 },  // relay level 0
-  { concurrency: 1 },  // relay level 1 — degraded (placeholder for future tuning)
-];
-const PROMOTE_AFTER     = 2;     // consecutive fully-successful batches to level up
-const RETRY_DELAY_MS    = 1500;  // pause before retry after a direct failure
-const RELAY_BUSY_MS     = 3000;  // pause on relay 503
+import type { UploadResult } from "@/lib/asset/upload-types";
+import { MAX_BROWSER_UPLOAD, runAssetFileUpload, type UploadControl } from "@/lib/asset/upload-client";
+import {
+  useAssetUploadManager,
+  type UploadTaskTarget,
+} from "./asset-upload-manager";
 
 type UploadMode = "file" | "feishu";
 
-export type UploadResult = {
-  assetId: string;
-  fileId: string;
-  name: string | null;
-  fileName: string;
-  assetType: AssetType;
-  storageType: "r2" | "feishu_link";
-};
+export type { UploadResult } from "@/lib/asset/upload-types";
 
 /** parentNodeId null＝资产根（树顶层入口的上传落这里，别落成树根散件）。 */
 export type UploadPlacement = { parentNodeId: string | null; listable?: boolean };
@@ -142,6 +49,11 @@ interface Props {
   /** 财务凭证复用字节通道，但由 finance 门创建 private single-file asset。 */
   purpose?: "expense_document";
   onBusyChange?: (busy: boolean) => void;
+  /** 上传完成后的宿主动作。传入后由 AppShell 上传任务在页面切换后继续收尾。 */
+  taskTarget?: UploadTaskTarget;
+  /** 任务进入全局队列后立即交还界面；适用于普通资产和已有宿主挂载。 */
+  detachOnStart?: boolean;
+  onTaskStarted?: (task: { id: string; fileName: string }) => void;
 }
 
 function formatSize(bytes: number): string {
@@ -152,7 +64,9 @@ function formatSize(bytes: number): string {
 export default function AssetUploadPanel({
   productionId, onUploaded, onCancel, placement, choosePlacement, landing,
   allowMarkdownAsWiki, onUploadedWiki, targetAssetId, purpose, onBusyChange,
+  taskTarget, detachOnStart, onTaskStarted,
 }: Props) {
+  const uploadManager = useAssetUploadManager();
   // 追加版本模式：注册端点分叉 + 面板收敛（见 Props.targetAssetId）
   const versionMode = !!targetAssetId;
   const expenseDocumentMode = purpose === "expense_document";
@@ -302,360 +216,74 @@ export default function AssetUploadPanel({
         return;
       }
 
-      // ── Direct R2 upload via presigned URL ───────────────────────────────
-      if (!file) { setError("请选择文件"); return; }
+      if (!file) {
+        setError("请选择要上传的文件");
+        return;
+      }
       if (file.size > MAX_BROWSER_UPLOAD) {
         setError(`文件超过 50 GB 限制（${formatSize(file.size)}），请使用 rclone / rsync 等工具直传 R2`);
         return;
       }
 
-      const mimeType = file.type || "application/octet-stream";
-      // 追加版本：注册打该资产的 files 端点，且只带文件级字段——name/assetType/
-      // 落点是资产级属性，传新版本不动它们（服务端也不认这些字段）
-      const registerUrl = versionMode ? `${base}/${targetAssetId}/files` : base;
-      const assetMeta = versionMode
-        ? { fileName: file.name, mimeType, fileSize: file.size }
-        : {
-            fileName: file.name, mimeType, fileSize: file.size,
-            name: name.trim() || null, assetType,
-            ...placementFields,
-            ...(purpose ? { purpose } : {}),
-          };
-      // presign 家族的门按目标分叉（file@create vs 通配 create），带上目标资产
-      const presignScope = versionMode
-        ? { assetId: targetAssetId }
-        : purpose ? { purpose } : {};
-
-      let r2Key: string, fileId: string;
-
-      // #457：单 PUT 打的是 R2 直连。直连不通的网络（relay 当初就是为这类环境做的）
-      // 下它必败，而 multipart 分支反倒能靠自适应降级走中继传上去——「大文件传得上、
-      // 小文件传不上」。这里让单 PUT 重试若干次后落到 multipart+relay：小文件整个
-      // 是一个 part（S3/R2 的「非尾部 part ≥5MB」对唯一那个 part 不适用），
-      // relay-part 的 60MB 帽正好盖住 50MB 阈值以下的文件。
-      //
-      // 保留单 PUT 作首选而不是无条件走 multipart：后者要给**每个**小文件多付
-      // create + complete 两次往返，为少数不通的网络给所有人加常态开销不划算。
-      let goMultipart = file.size >= MULTIPART_THRESHOLD;
-
-      if (!goMultipart) {
-        // ── Single presigned PUT ────────────────────────────────────────────
-        const presignRes = await fetch(`${base}/presign`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileName: file.name, mimeType, ...presignScope }),
-        });
-        // presign 走的是同源的 next，不是 R2 直连——它失败不是「直连不通」，
-        // 降级救不了，照旧直接报错
-        if (!presignRes.ok) {
-          const j = await presignRes.json().catch(() => ({}));
-          setError((j as { error?: string }).error ?? `预签名失败 (${presignRes.status})`);
-          return;
-        }
-        const presign = await presignRes.json() as { uploadUrl: string; r2Key: string; fileId: string; contentType: string };
-
-        const putOnce = () => new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.upload.addEventListener("progress", e => {
-            if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
-          });
-          xhr.addEventListener("load", () => {
-            xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`R2 上传失败 (${xhr.status})`));
-          });
-          xhr.addEventListener("error", () => reject(new Error("网络错误")));
-          xhr.open("PUT", presign.uploadUrl);
-          xhr.setRequestHeader("Content-Type", presign.contentType);
-          xhr.send(file);
-        });
-
-        let putOk = false;
-        for (let attempt = 0; attempt < SINGLE_PUT_ATTEMPTS && !putOk; attempt++) {
-          try {
-            await putOnce();
-            putOk = true;
-          } catch {
-            setProgress(0);   // 重试从头传，进度条别停在半截
-            if (attempt < SINGLE_PUT_ATTEMPTS - 1)
-              await new Promise<void>(r => setTimeout(r, RETRY_DELAY_MS));
-          }
-        }
-
-        if (putOk) {
-          setProgress(100);
-          r2Key = presign.r2Key; fileId = presign.fileId;
-
-          const regRes = await fetch(registerUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ storageType: "r2", r2Key, fileId, ...assetMeta }),
-          });
-          if (!regRes.ok) {
-            const j = await regRes.json().catch(() => ({}));
-            setError((j as { error?: string }).error ?? `注册失败 (${regRes.status})`);
-            return;
-          }
-          const regJ = await regRes.json() as { asset: { id: string; name: string | null; fileName: string; assetType: AssetType; storageType: "r2" | "feishu_link" }; file: { id: string } };
-          onUploaded({ assetId: regJ.asset.id, fileId: regJ.file.id, name: regJ.asset.name, fileName: regJ.asset.fileName, assetType: regJ.asset.assetType, storageType: regJ.asset.storageType });
-          return;
-        }
-
-        // 直连打不通 → 降级。presign 出来的 r2Key 从未被写入，也没有任何 DB 行
-        // 引用它，弃置无害；multipart 会另发一个 fileId。
-        goMultipart = true;
-        setProgress(0);
-      }
-
-      if (goMultipart) {
-        // ── Adaptive multipart upload ────────────────────────────────────────
-        // Chunk size and concurrency are co-scheduled via DIRECT_LEVELS /
-        // RELAY_LEVELS. Each iteration:
-        //   - Build a batch of `concurrency` segments starting at nextOffset
-        //   - Promise.allSettled — commit only the leading contiguous successes
-        //   - Full batch success → promote (level up); any failure → demote
-        //   - Direct level 0 + failure → switch to relay
-        // Orphaned R2 parts (non-leading successes from a failed batch) are
-        // never referenced in CompleteMultipartUpload and are discarded by R2.
-
-        const mpRes = await fetch(`${base}/presign-multipart`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          // No partCount — adaptive caller fetches per-part URLs on demand
-          body: JSON.stringify({ fileName: file.name, mimeType, fileSize: file.size, ...presignScope }),
-        });
-        if (!mpRes.ok) {
-          const j = await mpRes.json().catch(() => ({}));
-          setError((j as { error?: string }).error ?? `分段初始化失败 (${mpRes.status})`);
-          return;
-        }
-        const mp = await mpRes.json() as { uploadId: string; r2Key: string; fileId: string };
-        r2Key = mp.r2Key; fileId = mp.fileId;
-
-        // ── Determine chunk size for this upload ────────────────────────────
-        // Chunk size is fixed once chosen — the S3/R2 InvalidPart rule requires
-        // all non-trailing parts to be exactly the same size.
-        const storedChunk = loadStoredChunkBytes();
-        let chunkBytes = storedChunk;
-        // #457：分片大小的学习值只该由「真的分了片」的上传来动。降级进来的小文件
-        // 整个是一个 part，传成传败都和分片大小无关——让它写学习值，等于用一个
-        // 200KB 文件的成败去调下一次大文件的分片，是纯噪声。
-        const persistChunkLearning = (bytes: number) => {
-          if (file.size >= MULTIPART_THRESHOLD) saveChunkBytes(bytes);
+      const execute = (control: UploadControl) => {
+        const effectiveControl = detachOnStart ? control : {
+          ...control,
+          setProgress(value: number | null) {
+            setProgress(value);
+            control.setProgress(value);
+          },
+          setTransferMode(value: "direct" | "relay") {
+            setTransferMode(value);
+            control.setTransferMode(value);
+          },
         };
-        if (file.size >= PROBE_FILE_MIN && storedChunk < PROBE_STORED_MAX) {
-          const probePresignRes = await fetch(`${base}/presign-probe${purpose ? `?purpose=${purpose}` : ""}`);
-          if (probePresignRes.ok) {
-            const { uploadUrl } = await probePresignRes.json() as { uploadUrl: string };
-            chunkBytes = await runUploadProbe(uploadUrl);
-          }
-        }
-
-        // ── Adaptive state ──────────────────────────────────────────────────
-        // ETags are collected server-side via listMultipartParts — the browser
-        // cannot read the ETag response header from cross-origin R2 requests
-        // (Access-Control-Expose-Headers does not include ETag on this bucket).
-        let uploadedBytes = 0;
-        let useRelay  = false;
-        let directLvl = 0;
-        let relayLvl  = 0;
-        let goodBatches = 0;            // consecutive fully-successful batches
-        let consecutivePartFailures = 0;
-        let totalRetries = 0;
-        let nextOffset  = 0;
-        let nextPart    = 1;
-
-        const pause = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
-
-        // On-demand presigned URL for direct upload
-        const presignPart = async (partNumber: number): Promise<string> => {
-          const res = await fetch(
-            `${base}/presign-part?r2Key=${encodeURIComponent(mp.r2Key)}`
-            + `&uploadId=${encodeURIComponent(mp.uploadId)}&partNumber=${partNumber}`
-            + (versionMode ? `&assetId=${encodeURIComponent(targetAssetId)}` : "")
-            + (purpose ? `&purpose=${purpose}` : "")
-          );
-          if (!res.ok) throw new Error(`presign-part ${partNumber} 失败 (${res.status})`);
-          return ((await res.json()) as { uploadUrl: string }).uploadUrl;
-        };
-
-        // Upload one chunk; resolves on success, updates progress
-        const uploadOnePart = (partNumber: number, offset: number, chunkBytes: number): Promise<void> => {
-          const chunk = file.slice(offset, Math.min(offset + chunkBytes, file.size));
-          let tracked = 0;
-
-          const onProgress = (loaded: number) => {
-            uploadedBytes += loaded - tracked;
-            tracked = loaded;
-            setProgress(Math.round(uploadedBytes / file.size * 100));
-          };
-          const onSuccess = () => {
-            // Reconcile: ensure chunk.size bytes are counted
-            uploadedBytes += chunk.size - tracked;
-            tracked = chunk.size;
-            setProgress(Math.round(uploadedBytes / file.size * 100));
-          };
-          const onFail = () => {
-            uploadedBytes -= tracked;
-            tracked = 0;
-            setProgress(Math.round(Math.max(0, uploadedBytes) / file.size * 100));
-          };
-
-          if (useRelay) {
-            const relayUrl = `${base}/relay-part`
-              + `?r2Key=${encodeURIComponent(mp.r2Key)}`
-              + `&uploadId=${encodeURIComponent(mp.uploadId)}`
-              + `&partNumber=${partNumber}`
-              + (versionMode ? `&assetId=${encodeURIComponent(targetAssetId)}` : "")
-              + (purpose ? `&purpose=${purpose}` : "");
-            return new Promise<void>((resolve, reject) => {
-              const xhr = new XMLHttpRequest();
-              xhr.upload.addEventListener("progress", e => { if (e.lengthComputable) onProgress(e.loaded); });
-              xhr.addEventListener("load", () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                  onSuccess();
-                  resolve();
-                } else {
-                  onFail();
-                  const err = new Error(`中继 part ${partNumber} 失败 (${xhr.status})`);
-                  if (xhr.status === 503) (err as Error & { relay503?: boolean }).relay503 = true;
-                  reject(err);
-                }
-              });
-              xhr.addEventListener("error", () => { onFail(); reject(new Error(`中继 part ${partNumber} 网络错误`)); });
-              xhr.open("POST", relayUrl);
-              xhr.setRequestHeader("Content-Type", "application/octet-stream");
-              xhr.send(chunk);
-            });
-          } else {
-            return presignPart(partNumber).then(uploadUrl =>
-              new Promise<void>((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                xhr.upload.addEventListener("progress", e => { if (e.lengthComputable) onProgress(e.loaded); });
-                xhr.addEventListener("load", () => {
-                  if (xhr.status >= 200 && xhr.status < 300) {
-                    onSuccess();
-                    resolve();
-                  } else {
-                    onFail();
-                    reject(new Error(`直传 part ${partNumber} 失败 (${xhr.status})`));
-                  }
-                });
-                xhr.addEventListener("error", () => { onFail(); reject(new Error(`直传 part ${partNumber} 网络错误`)); });
-                xhr.open("PUT", uploadUrl);
-                xhr.send(chunk);
-              })
-            );
-          }
-        };
-
-        // ── Main adaptive loop ──────────────────────────────────────────────
-        while (nextOffset < file.size) {
-          const { concurrency } = (useRelay ? RELAY_LEVELS : DIRECT_LEVELS)[
-            useRelay ? relayLvl : directLvl
-          ];
-
-          // Build batch segments starting from nextOffset
-          const batch: { partNumber: number; offset: number }[] = [];
+        return runAssetFileUpload(
           {
-            let off = nextOffset;
-            for (let i = 0; i < concurrency && off < file.size; i++) {
-              batch.push({ partNumber: nextPart + i, offset: off });
-              off += Math.min(chunkBytes, file.size - off);
-            }
-          }
+            productionId,
+            file,
+            name: name.trim() || null,
+            assetType,
+            placementFields,
+            targetAssetId,
+            purpose,
+          },
+          effectiveControl,
+        );
+      };
 
-          const results = await Promise.allSettled(
-            batch.map(({ partNumber, offset }) => uploadOnePart(partNumber, offset, chunkBytes))
-          );
-
-          // Count leading (front-contiguous) successes only
-          let nCommitted = 0;
-          for (; nCommitted < results.length; nCommitted++) {
-            if (results[nCommitted].status !== "fulfilled") break;
-          }
-          const anyFailed = nCommitted < batch.length;
-
-          // Advance past committed parts
-          if (nCommitted > 0) {
-            const last = batch[nCommitted - 1];
-            nextOffset = last.offset + Math.min(chunkBytes, file.size - last.offset);
-            nextPart  += nCommitted;
-          }
-
-          if (!anyFailed) {
-            consecutivePartFailures = 0;
-            // Full batch success — maybe promote
-            goodBatches++;
-            if (!useRelay && goodBatches >= PROMOTE_AFTER && directLvl < DIRECT_LEVELS.length - 1) {
-              directLvl++;
-              goodBatches = 0;
-            }
-          } else {
-            goodBatches = 0;
-            consecutivePartFailures++;
-            totalRetries++;
-
-            // Abort if failures suggest the chunk size itself is the problem
-            if (consecutivePartFailures >= MAX_CONSECUTIVE_PART_FAILURES || totalRetries >= MAX_TOTAL_RETRIES) {
-              persistChunkLearning(chunkBytesDown(chunkBytes));
-              throw new ChunkSizeAbortError();
-            }
-
-            const failErr = (results[nCommitted] as PromiseRejectedResult).reason as Error & { relay503?: boolean };
-
-            if (useRelay && failErr?.relay503) {
-              // Relay slot busy — wait, retry at same level
-              await pause(RELAY_BUSY_MS);
-            } else if (!useRelay) {
-              if (directLvl > 0) {
-                directLvl--;            // shrink concurrency on direct path
-                await pause(RETRY_DELAY_MS);
-              } else {
-                useRelay = true;        // direct exhausted → relay
-                setTransferMode("relay");
-                await pause(RETRY_DELAY_MS);
-              }
-            } else {
-              // Relay non-503 failure — shrink relay concurrency
-              if (relayLvl < RELAY_LEVELS.length - 1) {
-                relayLvl++;
-                await pause(RETRY_DELAY_MS);
-              } else {
-                throw new Error("上传持续失败，服务器中转也无法完成，请检查网络后重试");
-              }
-            }
-          }
-        }
-
-        setProgress(100);
-        // Save chunk size learning: zero retries → try upgrading next time
-        persistChunkLearning(totalRetries === 0 ? chunkBytesUp(chunkBytes) : chunkBytes);
-
-        const regRes = await fetch(registerUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            storageType: "r2-multipart",
-            uploadId: mp.uploadId, r2Key, fileId,
-            // ETags collected server-side via listMultipartParts; parts: [] passes
-            // the Array.isArray guard while carrying no data.
-            parts: [],
-            ...assetMeta,
-          }),
+      if (uploadManager) {
+        const task = uploadManager.startTask({
+          productionId,
+          fileName: file.name,
+          target: taskTarget,
+          executor: execute,
         });
-        if (!regRes.ok) {
-          const j = await regRes.json().catch(() => ({}));
-          setError((j as { error?: string }).error ?? `注册失败 (${regRes.status})`);
+        onTaskStarted?.({ id: task.id, fileName: file.name });
+        if (detachOnStart) {
+          setFile(null);
+          if (fileRef.current) fileRef.current.value = "";
+          setName("");
           return;
         }
-        const regJ = await regRes.json() as { asset: { id: string; name: string | null; fileName: string; assetType: AssetType; storageType: "r2" | "feishu_link" }; file: { id: string } };
-        onUploaded({ assetId: regJ.asset.id, fileId: regJ.file.id, name: regJ.asset.name, fileName: regJ.asset.fileName, assetType: regJ.asset.assetType, storageType: regJ.asset.storageType });
+        const outcome = await task.outcome;
+        if (!outcome.ok) {
+          setError(outcome.error);
+          return;
+        }
+        onUploaded(outcome.result);
+        return;
       }
+
+      const controller = new AbortController();
+      const result = await execute({
+        signal: controller.signal,
+        setProgress,
+        setTransferMode,
+        setProcessing: () => setProgress(100),
+      });
+      onUploaded(result);
     } catch (e) {
-      if (e instanceof ChunkSizeAbortError) {
-        setError("网络环境不稳定，已自动降低分片大小，请重试");
-      } else {
-        setError(String(e));
-      }
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
       onBusyChange?.(false);

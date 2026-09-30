@@ -226,6 +226,36 @@ export async function createMultipartUpload(key: string, mimeType: string): Prom
   return match[1];
 }
 
+/** Abort an unfinished multipart upload and discard all uploaded parts. */
+export async function abortMultipartUpload(key: string, uploadId: string): Promise<void> {
+  const { dateStr, amzDate } = dateParts();
+  const scope = `${dateStr}/${region}/s3/aws4_request`;
+  const emptyHash = sha256hex("");
+  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
+  const query = canonicalQuery({ uploadId });
+  const canonical = [
+    "DELETE",
+    `/${r2Bucket}/${key}`,
+    query,
+    `host:${host}\nx-amz-content-sha256:${emptyHash}\nx-amz-date:${amzDate}\n`,
+    signedHeaders,
+    emptyHash,
+  ].join("\n");
+  const sig = crypto
+    .createHmac("sha256", getSigningKey(dateStr))
+    .update(`AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${sha256hex(canonical)}`)
+    .digest("hex");
+  const res = await fetch(`${endpoint}/${r2Bucket}/${key}?${query}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${sig}`,
+      "X-Amz-Content-Sha256": emptyHash,
+      "X-Amz-Date": amzDate,
+    },
+  });
+  if (!res.ok) throw new Error(`AbortMultipartUpload failed: ${res.status} ${await res.text()}`);
+}
+
 /** Generate a presigned URL for a single UploadPart request. Client PUTs the chunk directly. */
 export function presignedUploadPart(key: string, uploadId: string, partNumber: number, expiresIn = 3600): string {
   const { dateStr, amzDate } = dateParts();

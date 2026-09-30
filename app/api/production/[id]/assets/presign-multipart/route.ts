@@ -2,7 +2,8 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { canUploadAssetBytes } from "@/lib/asset/perm";
-import { createMultipartUpload, presignedUploadPart, assetR2Key } from "@/lib/r2";
+import { abortMultipartUpload, createMultipartUpload, presignedUploadPart, assetR2Key } from "@/lib/r2";
+import { createMultipartAbortToken, verifyMultipartAbortToken } from "@/lib/asset/upload-abort-token";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -34,6 +35,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const r2Key = assetR2Key(fileId, body.fileName);
 
   const uploadId = await createMultipartUpload(r2Key, body.mimeType);
+  const abortToken = createMultipartAbortToken({
+    productionId: id,
+    userId: session.userId,
+    r2Key,
+    uploadId,
+  });
 
   // parts only generated when partCount is provided (legacy callers); adaptive
   // callers omit partCount and fetch per-part URLs via /presign-part instead.
@@ -44,5 +51,33 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       }))
     : [];
 
-  return Response.json({ uploadId, r2Key, fileId, parts });
+  return Response.json({ uploadId, r2Key, fileId, parts, abortToken });
+}
+
+export async function DELETE(req: NextRequest, ctx: Ctx) {
+  const { id } = await ctx.params;
+  const session = getSession(req.cookies);
+  if (!session) return Response.json({ error: "未登录" }, { status: 401 });
+
+  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  const body = await req.json() as {
+    r2Key?: string; uploadId?: string; abortToken?: string; assetId?: string; purpose?: string;
+  };
+  if (!body.r2Key?.startsWith("assets/") || !body.uploadId || !body.abortToken)
+    return Response.json({ error: "缺少或无效的 r2Key / uploadId / abortToken" }, { status: 400 });
+
+  const purpose = body.purpose === "expense_document" ? body.purpose : null;
+  if (!await canUploadAssetBytes(access.permCtx, id, body.assetId ?? null, purpose))
+    return Response.json({ error: "权限不足" }, { status: 403 });
+  if (!verifyMultipartAbortToken(body.abortToken, {
+    productionId: id,
+    userId: session.userId,
+    r2Key: body.r2Key,
+    uploadId: body.uploadId,
+  })) return Response.json({ error: "上传清理凭证无效" }, { status: 403 });
+
+  // 这是对 POST 已创建的未完成上传做补偿清理；即使项目随后归档，也应允许回滚。
+  await abortMultipartUpload(body.r2Key, body.uploadId);
+  return new Response(null, { status: 204 });
 }

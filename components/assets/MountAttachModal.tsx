@@ -1,13 +1,14 @@
 "use client";
 
 // 挂载点四动作模态（#420 第二批 PR-B）：挂载资产 / 上传资产 / 挂载文档 / 新建文档。
-// 资产两 tab 复用 AssetSelectPanel/AssetUploadPanel（上传完自动转到选择 tab 预选，
-// 与 AssetMountModal 同款流转）；文档两 tab 见 WikiMountPanels。
+// 资产两 tab 复用 AssetSelectPanel/AssetUploadPanel；上传文件即确认挂载，
+// 后台任务完成上传后自动收尾，不再让用户二次选择确认。文档两 tab 见 WikiMountPanels。
 // AssetMountModal 本身不动——CommentAssetPicker 等纯资产场景继续用它。
 import { useState } from "react";
 import AssetUploadPanel, { type UploadResult } from "./AssetUploadPanel";
 import AssetSelectPanel, { type MountContext } from "./AssetSelectPanel";
 import { WikiSelectPanel, WikiCreatePanel } from "@/components/wiki/WikiMountPanels";
+import { BASE_PATH } from "@/lib/base-path";
 
 type Tab = "asset-select" | "asset-upload" | "wiki-select" | "wiki-create";
 
@@ -27,11 +28,18 @@ interface Props {
 
 export default function MountAttachModal({ productionId, mountCtx, onDone, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("asset-select");
-  const [uploadedAssetId, setUploadedAssetId] = useState<string | null>(null);
 
-  function handleUploadDone(result: UploadResult) {
-    setUploadedAssetId(result.assetId);
-    setTab("asset-select");
+  async function handleUploadDone(result: UploadResult) {
+    const response = await fetch(`${BASE_PATH}/api/production/${productionId}/assets/${result.assetId}/mounts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mountType: mountCtx.mountType,
+        mountId: mountCtx.mountId,
+        mountAuxId: mountCtx.mountAuxId ?? null,
+      }),
+    });
+    if (response.ok) onDone();
   }
 
   return (
@@ -62,14 +70,16 @@ export default function MountAttachModal({ productionId, mountCtx, onDone, onClo
           <AssetUploadPanel
             productionId={productionId}
             landing={{ kind: "mount", mountType: mountCtx.mountType, mountId: mountCtx.mountId }}
-            onUploaded={handleUploadDone}
+            taskTarget={{ kind: "mount", ...mountCtx }}
+            detachOnStart
+            onTaskStarted={onClose}
+            onUploaded={result => void handleUploadDone(result)}
             onCancel={() => setTab("asset-select")}
           />
         ) : tab === "asset-select" ? (
           <AssetSelectPanel
             productionId={productionId}
             mountCtx={mountCtx}
-            preSelectedId={uploadedAssetId}
             onMounted={() => onDone()}
             onCancel={onClose}
           />

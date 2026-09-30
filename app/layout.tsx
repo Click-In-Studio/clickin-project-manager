@@ -10,6 +10,7 @@ import { getUserTier, PRODUCTION_TIERS } from "@/lib/account/plan";
 import ManualSaveNotice from "@/components/shell/ManualSaveNotice";
 import FontRetry from "@/components/print/FontRetry";
 import AppShell from "@/components/shell/AppShell";
+import { AssetUploadManagerProvider } from "@/components/assets/asset-upload-manager";
 import { loadManual, manualRouteIndex } from "@/lib/help/manual";
 import { loadChangelog, latestChangelogVersion } from "@/lib/help/changelog";
 // 剧本字体的 @font-face（生成文件，见 scripts/fonts/build-fonts.py）；先于 globals.css 引入
@@ -89,9 +90,11 @@ export default async function RootLayout({
       <body className="h-full overflow-hidden">
         <FontRetry />
         <ManualSaveNotice />
-        <AppShell session={shellSession} productions={productions} canCreateProduction={canCreateProduction} initialUnreadCount={unreadNotificationCount} initialPendingTasks={pendingTaskCount} initialUnreadReports={unreadReportCount} helpRoutes={helpRoutes} latestChangelogVersion={latestRelease}>
-          {children}
-        </AppShell>
+        <AssetUploadManagerProvider>
+          <AppShell session={shellSession} productions={productions} canCreateProduction={canCreateProduction} initialUnreadCount={unreadNotificationCount} initialPendingTasks={pendingTaskCount} initialUnreadReports={unreadReportCount} helpRoutes={helpRoutes} latestChangelogVersion={latestRelease}>
+            {children}
+          </AppShell>
+        </AssetUploadManagerProvider>
       </body>
     </html>
   );

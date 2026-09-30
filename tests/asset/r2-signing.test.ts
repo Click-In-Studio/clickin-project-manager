@@ -55,4 +55,19 @@ describe("R2 Authorization header 签名", () => {
     const { deleteR2Object } = await import("@/lib/r2");
     await expect(deleteR2Object("assets/af_test/file.pdf")).resolves.toBeUndefined();
   });
+
+  it("终止 multipart 时把 uploadId 签入查询串", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { abortMultipartUpload } = await import("@/lib/r2");
+
+    await expect(abortMultipartUpload("assets/af_test/file.pdf", "upload id/+"))
+      .resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(init.method).toBe("DELETE");
+    expect(url).toContain("uploadId=upload%20id%2F%2B");
+    expect(headers.get("authorization")).toContain("SignedHeaders=host;x-amz-content-sha256;x-amz-date");
+  });
 });

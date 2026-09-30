@@ -92,6 +92,13 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
   }, [productionId]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const reload = (event: Event) => {
+      if ((event as CustomEvent<{ productionId?: string }>).detail?.productionId === productionId) load();
+    };
+    window.addEventListener("asset-upload-complete", reload);
+    return () => window.removeEventListener("asset-upload-complete", reload);
+  }, [load, productionId]);
 
   async function loadMounts(assetId: string) {
     if (mounts[assetId] || loadingMounts[assetId]) return;
@@ -196,6 +203,8 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
         <AssetUploadPanel
           productionId={productionId}
           targetAssetId={uploadTarget.id}
+          detachOnStart
+          onTaskStarted={() => { setView("all"); setUploadTarget(null); }}
           onUploaded={() => { setView("all"); setUploadTarget(null); load(); }}
           onCancel={() => { setView("all"); setUploadTarget(null); }}
         />
@@ -437,6 +446,8 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
               productionId={productionId}
               choosePlacement
               allowMarkdownAsWiki
+              detachOnStart
+              onTaskStarted={() => setShowUploadModal(false)}
               onUploadedWiki={({ wikiId }) => {
                 setShowUploadModal(false);
                 window.location.href = `${BASE_PATH}/production/${productionId}/wiki/${wikiId}`;
