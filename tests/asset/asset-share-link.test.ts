@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createAsset } from "@/lib/asset/db";
@@ -15,8 +15,15 @@ import { POLICY_OFF, POLICY_ON } from "@/lib/perm/policy-keys";
 import { GET as manageGET, POST as managePOST } from "@/app/api/production/[id]/assets/[assetId]/share/route";
 import { DELETE as manageDELETE } from "@/app/api/production/[id]/assets/[assetId]/share/[linkId]/route";
 import { GET as publicGET } from "@/app/api/share/[token]/route";
+import { GET as streamGET } from "@/app/api/share/[token]/stream/route";
 import { POST as redeemPOST } from "@/app/api/share/[token]/redeem/route";
 import { cleanupProduction, makeProduction } from "../_support/factories";
+
+const { streamMock } = vi.hoisted(() => ({ streamMock: vi.fn() }));
+vi.mock("@/lib/r2", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/r2")>(),
+  getR2Stream: streamMock,
+}));
 
 async function newUser(): Promise<string> {
   const result = await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id");
@@ -63,9 +70,10 @@ beforeAll(async () => {
     productionId: prodId,
     uploaderUserId: ownerId,
     assetType: "reference",
-    fileName: "share.pdf",
+    fileName: "分享文件.pdf",
     mimeType: "application/pdf",
     storageType: "r2",
+    r2Key: "assets/test/____.pdf",
     isPublic: false,
   });
   assetId = created.asset.id;
@@ -129,6 +137,28 @@ describe("分享链接数据状态机", () => {
       [link.id],
     );
     expect((await getAssetShareLinkAccess(link.token, redeemed.sessionSecret)).kind).toBe("invalid");
+  });
+});
+
+describe("分享链接下载文件名", () => {
+  it("允许下载时用 RFC 5987 返回中文文件名", async () => {
+    const link = await createAssetShareLink({
+      productionId: prodId, assetId, createdBy: ownerId,
+      expiresInDays: 7, allowDownload: true, oneTime: false,
+    });
+    streamMock.mockResolvedValueOnce(new Response("pdf", {
+      headers: { "content-type": "application/pdf", "content-length": "3" },
+    }));
+
+    const response = await streamGET(
+      new NextRequest(`http://localhost/api/share/${link.token}/stream`),
+      { params: Promise.resolve({ token: link.token }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toBe(
+      "attachment; filename=\"____.pdf\"; filename*=UTF-8''%E5%88%86%E4%BA%AB%E6%96%87%E4%BB%B6.pdf",
+    );
   });
 });
 

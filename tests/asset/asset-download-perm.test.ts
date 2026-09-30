@@ -6,7 +6,10 @@ import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { GET } from "@/app/api/production/[id]/assets/[assetId]/download-url/route";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 
-vi.mock("@/lib/r2", () => ({ presignedGet: vi.fn(() => "https://files.example/download") }));
+const { presignedGetMock } = vi.hoisted(() => ({
+  presignedGetMock: vi.fn(() => "https://files.example/download"),
+}));
+vi.mock("@/lib/r2", () => ({ presignedGet: presignedGetMock }));
 
 let prodId: string;
 let otherProdId: string;
@@ -69,5 +72,14 @@ describe.each([0,1])("下载授权（存储分支 %i）", index => {
   it("非成员 owner 可下载；跨项目资产 404", async () => {
     expect((await download(owner, assets[index])).status).toBe(200);
     expect((await download(owner, assets[index], otherProdId)).status).toBe(404);
+  });
+});
+
+it("R2 下载用原文件名覆盖对象键文件名", async () => {
+  presignedGetMock.mockClear();
+  expect((await download(downloader, assets[0])).status).toBe(200);
+  expect(presignedGetMock).toHaveBeenCalledWith("test/download.pdf", 3600, {
+    contentDisposition:
+      "attachment; filename=\"____.pdf\"; filename*=UTF-8''%E4%B8%8B%E8%BD%BD%E6%B5%8B%E8%AF%95.pdf",
   });
 });

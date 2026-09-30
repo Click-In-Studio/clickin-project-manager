@@ -3,6 +3,7 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getAsset, resolveAssetFile } from "@/lib/asset/db";
 import { canViewAsset } from "@/lib/asset/perm";
+import { attachmentContentDisposition } from "@/lib/asset/content-disposition";
 import { presignedGet } from "@/lib/r2";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string; assetId: string }> }) {
@@ -28,6 +29,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
   const file = await resolveAssetFile(assetId);
   if (!file?.r2Key) return Response.json({ error: "文件不存在" }, { status: 404 });
 
-  const url = presignedGet(file.r2Key, 3600);
+  const url = presignedGet(file.r2Key, 3600, {
+    contentDisposition: attachmentContentDisposition(asset.fileName),
+  });
   return Response.json({ url, expiresIn: 3600 });
 }

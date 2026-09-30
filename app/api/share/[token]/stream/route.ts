@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getAssetShareLinkAccess, SHARE_SESSION_COOKIE, touchAssetShareSession } from "@/lib/asset/share-link-db";
 import { getAsset, getLatestAssetFile } from "@/lib/asset/db";
+import { attachmentContentDisposition } from "@/lib/asset/content-disposition";
 import { getR2Stream } from "@/lib/r2";
 import { isPolicyOn } from "@/lib/perm/policy-db";
 
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   headers.set("Cache-Control", "private, no-store");
 
   if (access.link.allowDownload) {
-    headers.set("Content-Disposition", `attachment; filename="${encodeURIComponent(fileName)}"`);
+    headers.set("Content-Disposition", attachmentContentDisposition(fileName));
   } else {
     headers.set("Content-Disposition", "inline");
   }

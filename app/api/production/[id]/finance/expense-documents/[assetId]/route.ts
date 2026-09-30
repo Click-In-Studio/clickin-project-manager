@@ -4,6 +4,7 @@ import { getProductionPermissionContext } from "@/lib/perm/permission-context-db
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getFinancialDocumentAsset } from "@/lib/ops/finance-document-db";
 import { deleteAsset, AssetInUseError } from "@/lib/asset/db";
+import { attachmentContentDisposition } from "@/lib/asset/content-disposition";
 import { deleteR2Object, presignedGet } from "@/lib/r2";
 
 type Ctx = { params: Promise<{ id: string; assetId: string }> };
@@ -40,7 +41,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const kind = previewType(document.mimeType);
   if (!download && !kind) return Response.json({ error: "该文件请下载后查看" }, { status: 400 });
   const expiresIn = 300;
-  const url = presignedGet(document.r2Key, expiresIn, download ? undefined : {
+  const url = presignedGet(document.r2Key, expiresIn, download ? {
+    contentDisposition: attachmentContentDisposition(document.fileName),
+  } : {
     inline: true,
     contentType: document.mimeType ?? undefined,
     cacheWindow: expiresIn,
