@@ -67,6 +67,21 @@ function inputValue(input: HTMLInputElement, value: string) {
 }
 
 describe("报销填单", () => {
+  it("空白内容也能保存为服务端草稿", async () => {
+    fetchMock.mockImplementation(() => jsonResponse({ expense: { id: "exp_draft" } }, 201));
+    await act(async () => root.render(<ExpenseCreateButton productionId="prod_1" categories={[]} />));
+    await act(async () => button("＋ 新建报销").click());
+    const submitEvent = new Event("submit", { bubbles: true, cancelable: true });
+    Object.defineProperty(submitEvent, "submitter", { value: button("保存草稿") });
+    await act(async () => container.querySelector("form")!.dispatchEvent(submitEvent));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      intent: "draft", title: "", amount: "", documents: [],
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("金额始终以字符串原样提交，成功后关闭并刷新服务端列表", async () => {
     fetchMock.mockImplementation(() => jsonResponse({ expense: { id: "exp_1" } }, 201));
     await act(async () => root.render(
@@ -142,25 +157,35 @@ describe("报销审批", () => {
   it("不能终局时显示“向上转交”，成功后刷新待办", async () => {
     fetchMock.mockImplementation(() => jsonResponse({ forwarded: true }));
     await act(async () => root.render(
-      <ExpenseApprovalActions productionId="prod_1" expenseId="exp_1" canFinalize={false} />,
+      <ExpenseApprovalActions productionId="prod_1" expenseId="exp_1" canFinalize={false} mutationSeq={0} />,
     ));
 
     await act(async () => button("向上转交").click());
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ action: "approve" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      action: "approve", comment: "", expectedMutationSeq: 0,
+    });
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("驳回需要二次确认", async () => {
     fetchMock.mockImplementation(() => jsonResponse({ expense: { status: "rejected" } }));
     await act(async () => root.render(
-      <ExpenseApprovalActions productionId="prod_1" expenseId="exp_1" canFinalize />,
+      <ExpenseApprovalActions productionId="prod_1" expenseId="exp_1" canFinalize mutationSeq={0} />,
     ));
 
     await act(async () => button("驳回").click());
     expect(fetchMock).not.toHaveBeenCalled();
     expect(container.textContent).toContain("确认驳回？");
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    await act(async () => {
+      setter.call(textarea, "票据抬头不符");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
     await act(async () => button("确认驳回").click());
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ action: "reject" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      action: "reject", comment: "票据抬头不符", expectedMutationSeq: 0,
+    });
   });
 });
 
@@ -168,7 +193,7 @@ describe("报销补票", () => {
   it("上传完成后把具体 asset_file 追加到原报销并刷新", async () => {
     fetchMock.mockImplementation(() => jsonResponse({ expense: { id: "exp_1", invoiceState: "provided" } }, 201));
     await act(async () => root.render(
-      <ExpenseAddDocumentButton productionId="prod_1" expenseId="exp_1" />,
+      <ExpenseAddDocumentButton productionId="prod_1" expenseId="exp_1" mutationSeq={0} />,
     ));
 
     await act(async () => button("补充凭证").click());
@@ -178,7 +203,7 @@ describe("报销补票", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toContain("/finance/expenses/exp_1/documents");
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
-      assetFileId: "af_1", kind: "invoice",
+      assetFileId: "af_1", kind: "invoice", expectedMutationSeq: 0,
     });
     expect(refresh).toHaveBeenCalledTimes(1);
   });

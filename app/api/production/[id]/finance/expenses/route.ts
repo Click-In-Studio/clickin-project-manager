@@ -4,7 +4,7 @@ import { getProductionPermissionContext } from "@/lib/perm/permission-context-db
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import {
   AMOUNT_RE,
-  FinanceError, getBudgetCategory, listExpenses, submitExpense,
+  createExpenseDraft, FinanceError, getBudgetCategory, listExpenses, submitExpense,
   type ExpenseDocumentKind,
 } from "@/lib/ops/finance-db";
 import { readJsonObject } from "@/lib/request-json";
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 }
 
 /**
- * POST — 提一笔支出，立刻进审批。
+ * POST — 新建草稿，或兼容填单页的一次性创建并提交。
  *
  * 审批人由 lib/approval/approval-routing 的阶梯算出（与权限申请同一个函数），这里不自己挑人。
  */
@@ -55,21 +55,25 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!parsedBody.ok) return parsedBody.response;
   const body = parsedBody.value;
   const title = typeof body.title === "string" ? body.title.trim() : "";
-  if (!title) return Response.json({ error: "事由不能为空" }, { status: 400 });
-  const amount = typeof body.amount === "string" ? body.amount : String(body.amount ?? "");
-  if (!AMOUNT_RE.test(amount))
+  const amount = typeof body.amount === "string" && body.amount ? body.amount : null;
+  const intent = body.intent === "draft" ? "draft" : "submit";
+  if (intent === "submit" && !title)
+    return Response.json({ error: "事由不能为空" }, { status: 400 });
+  if (amount && !AMOUNT_RE.test(amount))
     return Response.json({ error: "金额必须是最多两位小数的非负数" }, { status: 400 });
+  if (intent === "submit" && !amount)
+    return Response.json({ error: "金额不能为空" }, { status: 400 });
 
   const categoryId = typeof body.categoryId === "string" && body.categoryId ? body.categoryId : null;
   if (categoryId && !(await getBudgetCategory(categoryId, productionId)))
     return Response.json({ error: "预算科目不存在" }, { status: 400 });
 
   const invoiceRequirement = body.invoiceRequirement;
-  if (invoiceRequirement !== "required" && invoiceRequirement !== "waived")
+  if (intent === "submit" && invoiceRequirement !== "required" && invoiceRequirement !== "waived")
     return Response.json({ error: "请选择是否需要发票" }, { status: 400 });
   const invoiceWaiverReason = typeof body.invoiceWaiverReason === "string"
     ? body.invoiceWaiverReason.trim() : "";
-  if (invoiceRequirement === "waived" && !invoiceWaiverReason)
+  if (intent === "submit" && invoiceRequirement === "waived" && !invoiceWaiverReason)
     return Response.json({ error: "请填写无发票原因" }, { status: 400 });
 
   if (!Array.isArray(body.documents))
@@ -87,15 +91,20 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
 
   try {
-    const expense = await submitExpense({
+    const parsedInvoiceRequirement: "required" | "waived" | null =
+      invoiceRequirement === "required" || invoiceRequirement === "waived" ? invoiceRequirement : null;
+    const common = {
       productionId, categoryId, title, amount,
       currency: typeof body.currency === "string" ? body.currency : "CNY",
       note: typeof body.note === "string" ? body.note : "",
       submittedBy: session.userId,
-      invoiceRequirement,
+      invoiceRequirement: parsedInvoiceRequirement,
       invoiceWaiverReason,
       documents,
-    });
+    };
+    const expense = intent === "draft"
+      ? await createExpenseDraft(common)
+      : await submitExpense({ ...common, amount: amount!, invoiceRequirement: common.invoiceRequirement! });
     return Response.json({ expense }, { status: 201 });
   } catch (e) {
     if (e instanceof FinanceError)

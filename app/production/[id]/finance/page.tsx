@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import PageHeader from "@/components/ui/PageHeader";
 import {
-  ExpenseAddDocumentButton, ExpenseApprovalActions, ExpenseCreateButton, ExpenseDocumentLinks,
+  ExpenseAddDocumentButton, ExpenseApprovalActions, ExpenseCreateButton, ExpenseDetailButton,
+  ExpenseDocumentLinks,
   type ExpenseCategoryOption,
 } from "@/components/ops/FinanceExpenseActions";
 import { redirect, notFound } from "next/navigation";
@@ -22,7 +23,7 @@ const PAD = "24px clamp(18px, 3vw, 52px) 60px";
 const CARD = { background: "white", borderRadius: 12, border: "1px solid var(--line)" } as const;
 
 const STATUS_LABEL: Record<ExpenseStatus, string> = {
-  pending: "待审批", approved: "已入账", rejected: "已驳回", cancelled: "已撤回",
+  draft: "草稿", pending: "待审批", approved: "已批准", rejected: "已驳回", withdrawn: "已撤回",
 };
 
 /**
@@ -103,7 +104,7 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
         {e.invoiceState === "pending"
           && e.submittedBy === session.userId
           && (e.status === "pending" || e.status === "approved") && (
-          <ExpenseAddDocumentButton productionId={id} expenseId={e.id} />
+          <ExpenseAddDocumentButton productionId={id} expenseId={e.id} mutationSeq={e.mutationSeq} invoiceOnly />
         )}
         {approval && e.note && (
           <small style={{ display: "block", marginTop: 5, color: "var(--muted)", fontSize: 10, lineHeight: 1.5 }}>
@@ -112,14 +113,24 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
         )}
       </span>
       <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-        <b style={{ color: "var(--stage)", fontSize: 11 }}>{fmtCny(toCents(e.amount))}</b>
+        <b style={{ color: "var(--stage)", fontSize: 11 }}>
+          {e.amount === null ? "金额未填写" : fmtCny(toCents(e.amount))}
+        </b>
         {approval && !access.isArchived && (
           <ExpenseApprovalActions
             productionId={id}
             expenseId={e.id}
             canFinalize={e.canFinalize}
+            mutationSeq={e.mutationSeq}
           />
         )}
+        <ExpenseDetailButton
+          productionId={id}
+          expenseId={e.id}
+          actorId={session.userId}
+          categories={expenseCategoryOptions}
+          archived={access.isArchived}
+        />
       </span>
     </div>
   );
