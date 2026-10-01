@@ -1,7 +1,8 @@
 /**
- * 一人项目 / 其他——**空模版**。
+ * 一人项目 / 其他——**空组织模版**。
  *
- * 没有部门、没有基线、没有 cue 类型、没有声明行，角色只有一个。一个人自己干活的项目
+ * 没有部门、没有基线、没有 cue 类型、没有声明行，角色只有一个；
+ * 仍会有每个项目都需要的通用费用科目。一个人自己干活的项目
  * 不需要任何组织脚手架，硬塞一套只会让他先花十分钟删掉。
  *
  * ## 为什么不能真的「零角色」
@@ -20,6 +21,7 @@
  * 换模版，只需要在配置中心加配置。
  */
 import type { ProductionTemplate } from "../production-template";
+import { COMMON_EXPENSE_CATEGORIES } from "../template-seeders/finance";
 import { PRODUCER_KEYS, policiesFromAnswers } from "./shared";
 
 export const SOLO_TEMPLATE: ProductionTemplate = {
@@ -51,4 +53,5 @@ export const SOLO_TEMPLATE: ProductionTemplate = {
     task_ownership: "dept",
   }),
   approval: { ttlHours: 24 },
+  expenseCategories: COMMON_EXPENSE_CATEGORIES,
 };

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import PageHeader from "@/components/ui/PageHeader";
+import Link from "next/link";
+import PageHeader, { SECONDARY_BTN } from "@/components/ui/PageHeader";
 import {
   ExpenseAddDocumentButton, ExpenseApprovalActions, ExpenseCreateButton, ExpenseDetailButton,
   ExpenseDocumentLinks,
@@ -11,11 +12,13 @@ import { getSession } from "@/lib/account/session";
 import { getProductionName } from "@/lib/production/production-db";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
+import { canAccessNode } from "@/lib/perm/grant-template";
 import {
   listBudgetCategories, listBudgetCategoryOptions, listExpenses, type ExpenseStatus,
 } from "@/lib/ops/finance-db";
-import { fmtCny, pctCents, pctUsed, sumCents, toCents } from "@/lib/money";
+import { fmtCny, pctUsed, sumCents, toCents } from "@/lib/money";
 import responsive from "@/components/ops/responsive.module.css";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export const metadata: Metadata = { title: "财务" };
 
@@ -51,12 +54,16 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
   if (!access) redirect(`/unauthorized?id=${id}`);
   const actor = toActor(session, access.permCtx);
 
-  const [canBudget, canAllExpenses, canCategories, canCreateExpense] = await Promise.all([
+  const [canBudget, canAllExpenses, canCategories, canCreateExpense, categoryConfig, budgetConfig] = await Promise.all([
     hasEffectiveGrant(actor, id, "finance", "*", "budget", "view"),
     hasEffectiveGrant(actor, id, "finance", "*", "expenses", "view"),
     hasEffectiveGrant(actor, id, "finance", "*", "categories", "view"),
     hasEffectiveGrant(actor, id, "finance", "*", "expenses", "create"),
+    canAccessNode(actor, id, "finance", "*", "categories", "edit"),
+    canAccessNode(actor, id, "finance", "*", "budget", "edit"),
   ]);
+  const canFinanceConfig = categoryConfig.allowed || categoryConfig.reason === "needs_self_confirm"
+    || budgetConfig.allowed || budgetConfig.reason === "needs_self_confirm";
 
   const [categories, options, expenses] = await Promise.all([
     canBudget ? listBudgetCategories(id) : Promise.resolve([]),
@@ -67,13 +74,13 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
       : listExpenses(id, { submittedBy: session.userId, pendingFor: session.userId }),
   ]);
 
-  const budgetCents = sumCents(categories.map(c => c.amount));
+  const budgetCents = sumCents(categories.flatMap(c => c.amount === null ? [] : [c.amount]));
   const spentCents = sumCents(categories.map(c => c.spent));
   const summary: [string, string][] = [
-    [fmtCny(budgetCents), "总预算"],
-    [fmtCny(spentCents), "已使用"],
-    [fmtCny(budgetCents - spentCents), "可用余额"],
-    [`${pctCents(spentCents, budgetCents)}%`, "预算执行率"],
+    [fmtCny(budgetCents), "已设置额度"],
+    [fmtCny(spentCents), "实际支出"],
+    [String(categories.filter(c => c.amount === null).length), "无上限预算项"],
+    [String(categories.filter(c => c.amount !== null && toCents(c.spent) > toCents(c.amount)).length), "超预算项"],
   ];
 
   const pendingMine = expenses.filter(
@@ -146,9 +153,10 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
         eyebrow="Finance"
         title="财务"
         side="stage"
-        actions={canCreateExpense && !access.isArchived ? (
-          <ExpenseCreateButton productionId={id} categories={expenseCategoryOptions} />
-        ) : undefined}
+        actions={<>
+          {canFinanceConfig && <Link href={`/production/${id}/admin/finance`} style={SECONDARY_BTN}>管理预算</Link>}
+          {canCreateExpense && !access.isArchived && <ExpenseCreateButton productionId={id} categories={expenseCategoryOptions} />}
+        </>}
       />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
         <p style={{ margin: 0, color: "var(--muted)", fontSize: 12 }}>预算 · 支出 · 关联</p>
@@ -190,10 +198,14 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
                 <div key={item.id} style={{ padding: "12px 0", borderTop: "1px solid var(--line)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11 }}>
                     <b>{item.name}{item.deptName ? <span style={{ marginLeft: 6, color: "var(--muted)", fontWeight: 400 }}>{item.deptName}</span> : null}</b>
-                    <span style={{ color: "var(--muted)" }}>{fmtCny(toCents(item.spent))} / {fmtCny(toCents(item.amount))}</span>
+                    <span style={{ color: item.amount !== null && toCents(item.spent) > toCents(item.amount) ? "#a33" : "var(--muted)" }}>
+                      {fmtCny(toCents(item.spent))} / {item.amount === null ? "无上限" : fmtCny(toCents(item.amount))}
+                      {item.amount !== null && toCents(item.spent) > toCents(item.amount)
+                        ? ` · 超出 ${fmtCny(toCents(item.spent) - toCents(item.amount))}` : ""}
+                    </span>
                   </div>
                   <div style={{ height: 6, marginTop: 9, borderRadius: 999, background: "var(--surface-2)", overflow: "hidden" }}>
-                    <div style={{ width: `${Math.min(100, pctUsed(item.spent, item.amount))}%`, height: "100%", borderRadius: 999, background: "var(--stage)" }} />
+                    <div style={{ width: `${item.amount === null ? 0 : Math.min(100, pctUsed(item.spent, item.amount))}%`, height: "100%", borderRadius: 999, background: "var(--stage)" }} />
                   </div>
                 </div>
               ))}
@@ -225,6 +237,7 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
             : expenses.slice(0, 12).map(e => expenseRow(e))}
         </section>
       </div>
+      <PageActivationGate productionId={id} scope="finance" />
     </div>
   );
 }

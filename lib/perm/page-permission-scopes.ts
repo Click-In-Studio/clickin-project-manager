@@ -76,6 +76,23 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:ai/*/usage/members@view",
   ]),
 
+  // 财务页与配置中心共用的完整激活面。制作人的 node:*/*@*、财务部门区间或
+  // 个人 allow 都只是资格；这些真实被路由消费的键必须能在页面上自确认成 grant。
+  // 配置中心的入口仍只看 categories@edit / budget@edit，不能因本目录包含 view/create
+  // 就把进入条件放宽。
+  finance: new Set<Permission>([
+    "node:finance/*/categories@view",
+    "node:finance/*/categories@create",
+    "node:finance/*/categories@edit",
+    "node:finance/*/categories@delete",
+    "node:finance/*/budget@view",
+    "node:finance/*/budget@create",
+    "node:finance/*/budget@edit",
+    "node:finance/*/budget@delete",
+    "node:finance/*/expenses@view",
+    "node:finance/*/expenses@create",
+  ]),
+
   // 批E-2：剧本页写面。blocks 写是一把总钥匙（requiredPermissions 对 insert /
   // update / delete 统一给 blocks@edit）；标签组的 picker 也在剧本页内。
   // imports 是保留段（'*' 不覆盖），必须显式列出才可自确认。

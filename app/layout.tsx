@@ -61,6 +61,7 @@ export default async function RootLayout({
     // canAdmin: FK-backed path (hasAdminPerm), owner, system admin,
     // or fallback text-role path for pre-migration productions.
     canAdmin: session!.isAdmin || p.isOwner || p.hasAdminPerm,
+    canFinanceConfig: session!.isAdmin || p.isOwner || p.hasFinanceConfigPerm,
     // 档位开关（#280）：付费维度，与 canAdmin 那条权限维度正交——权限决定视图里
     // 能看到什么内容，档位决定菜单里有没有这一项。lib/account/plan.ts 的常量表不能进客户端
     // 包，所以在这里解析成布尔值下发。

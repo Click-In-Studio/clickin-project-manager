@@ -40,7 +40,7 @@ const EMPTY: ProductionTemplate = {
   key: "test-empty", label: "测试空模版",
   roles: { names: [], baseline: [], permissions: {} }, deptTree: [], deptPermissions: {},
   cueTemplateTypes: [], cueDeclarations: [], policies: {},
-  approval: { ttlHours: 24 },
+  approval: { ttlHours: 24 }, expenseCategories: [],
 };
 
 describe("① 棘轮：仓库内的模版常量", () => {
@@ -78,7 +78,7 @@ describe("① 棘轮：仓库内的模版常量", () => {
     expect(MUSIC_TEMPLATE.roles.permissions["宣发"]).toContain("node:asset/*/shares@create");
   });
 
-  it("空模版真的是空的，但守住 M-14(c) 的下限", () => {
+  it("一人项目不带组织脚手架，但守住 M-14(c) 与通用科目下限", () => {
     expect(SOLO_TEMPLATE.deptTree).toEqual([]);
     expect(SOLO_TEMPLATE.deptPermissions).toEqual({});
     expect(SOLO_TEMPLATE.cueTemplateTypes).toEqual([]);
@@ -87,6 +87,8 @@ describe("① 棘轮：仓库内的模版常量", () => {
     // 下限是这一个角色：owner 是代码旁路，不能拿它充当不依赖旁路的兜底持有者
     expect(SOLO_TEMPLATE.roles.names).toEqual(["制作人"]);
     expect(SOLO_TEMPLATE.roles.permissions["制作人"]).toContain("node:*/*@*");
+    // 组织脚手架为空，但财务科目是每个项目都需要的基础数据。
+    expect(SOLO_TEMPLATE.expenseCategories).toContain("交通费");
     // 「一人项目」与「其他」是两个类型、同一套模版；「不指定」不指向它（懒得选 ≠ 要空项目）
     expect(resolveTemplate("solo").key).toBe(SOLO_TEMPLATE.key);
     expect(resolveTemplate("other").key).toBe(SOLO_TEMPLATE.key);
@@ -261,6 +263,11 @@ describe("② 反例：每一类校验都必须真的会红", () => {
     expect(bad({ approval: { ttlHours: 0 } }).join()).toMatch(/720/);
     expect(bad({ approval: { ttlHours: 721 } }).join()).toMatch(/720/);
   });
+
+  it("费用科目不能重名或留空", () => {
+    expect(bad({ expenseCategories: ["交通费", "交通费"] }).join()).toMatch(/重复/);
+    expect(bad({ expenseCategories: [" "] }).join()).toMatch(/为空/);
+  });
 });
 
 describe("③ 应用：建项目走模版", () => {
@@ -276,13 +283,18 @@ describe("③ 应用：建项目走模版", () => {
 
   it("默认模版（戏剧类）灌出完整初始状态", async () => {
     const pool = getPool();
-    const [roles, cueTypes, policies, approval, depts] = await Promise.all([
+    const [roles, cueTypes, policies, approval, depts, categories, budgetItems] = await Promise.all([
       pool.query("SELECT 1 FROM production_role WHERE production_id = $1", [prodId]),
       pool.query("SELECT 1 FROM production_cue_template_type WHERE production_id = $1", [prodId]),
       pool.query("SELECT 1 FROM production_policy WHERE production_id = $1", [prodId]),
       pool.query<{ ttl_hours: number }>(
         "SELECT ttl_hours FROM production_approval_config WHERE production_id = $1", [prodId]),
       pool.query("SELECT 1 FROM production_dept WHERE production_id = $1", [prodId]),
+      pool.query<{ name: string }>(
+        "SELECT name FROM production_expense_category WHERE production_id = $1 ORDER BY sort_order, name",
+        [prodId],
+      ),
+      pool.query("SELECT 1 FROM production_budget_item WHERE production_id = $1", [prodId]),
     ]);
     expect(roles.rowCount).toBe(THEATRE_TEMPLATE.roles.names.length);
     expect(cueTypes.rowCount).toBe(THEATRE_TEMPLATE.cueTemplateTypes.length);
@@ -290,6 +302,8 @@ describe("③ 应用：建项目走模版", () => {
     expect(policies.rowCount).toBe(POLICY_KEYS.length);
     expect(approval.rows[0].ttl_hours).toBe(24);
     expect(depts.rowCount).toBe(countDepts(THEATRE_TEMPLATE.deptTree));
+    expect(categories.rows.map(row => row.name)).toEqual([...THEATRE_TEMPLATE.expenseCategories]);
+    expect(budgetItems.rowCount).toBe(0);
   });
 
   it("每个角色拿到 基线 ∪ 自己的键；无角色成员拿到零", async () => {
@@ -392,8 +406,9 @@ describe("③ 应用：建项目走模版", () => {
         pool.query("SELECT 1 FROM production_dept WHERE production_id = $1", [id]),
         pool.query("SELECT 1 FROM production_dept_permission WHERE production_id = $1", [id]),
         pool.query("SELECT 1 FROM dept_cue_list_template WHERE production_id = $1", [id]),
+        pool.query("SELECT 1 FROM production_expense_category WHERE production_id = $1", [id]),
       ]);
-      expect(counts.map(c => c.rowCount)).toEqual([2, 1, 1]);
+      expect(counts.map(c => c.rowCount)).toEqual([2, 1, 1, 0]);
     } finally {
       await cleanupProduction(id).catch(() => {});
     }

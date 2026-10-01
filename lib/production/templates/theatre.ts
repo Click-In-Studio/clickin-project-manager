@@ -14,6 +14,7 @@ import type { ProductionTemplate } from "../production-template";
 import {
   OPEN_BASELINE, PRODUCER_KEYS, REHEARSAL_MARKS, ASSET_UPLOAD, MOUNT_ATTACH, own, see,
 } from "./shared";
+import { THEATRE_EXPENSE_CATEGORIES } from "../template-seeders/finance";
 
 /** 五大组（组织树，区间宿主 + cue 类型归属）。 */
 const DEPT_TREE = [
@@ -286,4 +287,5 @@ export const THEATRE_TEMPLATE: ProductionTemplate = {
   cueDeclarations: CUE_DECLARATIONS,
   policies: {},
   approval: { ttlHours: 24 },
+  expenseCategories: THEATRE_EXPENSE_CATEGORIES,
 };

@@ -218,7 +218,10 @@ export default function AppShell({ session, productions, canCreateProduction = f
   // （react-hooks/rules-of-hooks）。六组菜单过一遍 filter，每次渲染重算的代价可以忽略。
   const planAdvancedPerms = currentProduction?.planAdvancedPerms ?? false;
   const adminNavGroups = ADMIN_NAV_GROUPS
-    .map((g) => ({ ...g, items: g.items.filter((it) => !it.feature || planAdvancedPerms) }))
+    .map((g) => ({ ...g, items: g.items.filter((it) =>
+      (!it.feature || planAdvancedPerms)
+      && (it.scope === "finance" ? currentProduction?.canFinanceConfig : currentProduction?.canAdmin)
+    ) }))
     .filter((g) => g.items.length > 0);
 
   function navHref(path: string) {
@@ -385,7 +388,8 @@ export default function AppShell({ session, productions, canCreateProduction = f
             helpRoutes={helpRoutes}
             latestChangelogVersion={latestChangelogVersion}
             accountHref={accountHref}
-            adminHref={currentProduction?.canAdmin && productionId ? `/production/${productionId}/admin` : null}
+            adminHref={(currentProduction?.canAdmin || currentProduction?.canFinanceConfig) && productionId
+              ? `/production/${productionId}/admin${currentProduction.canAdmin ? "" : "/finance"}` : null}
             adminName={currentProduction?.name ?? null}
             hidden={productionHeaderStage >= 2}
           />
@@ -786,7 +790,8 @@ export default function AppShell({ session, productions, canCreateProduction = f
           if (latestChangelogVersion) markChangelogSeen(latestChangelogVersion);
           setChangelogNew(false);
         }}
-        adminHref={currentProduction?.canAdmin && productionId ? `/production/${productionId}/admin` : null}
+        adminHref={(currentProduction?.canAdmin || currentProduction?.canFinanceConfig) && productionId
+          ? `/production/${productionId}/admin${currentProduction.canAdmin ? "" : "/finance"}` : null}
         adminName={currentProduction?.name ?? null}
         adminActive={isAdminMode}
       />

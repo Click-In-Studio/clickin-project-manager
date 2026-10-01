@@ -9,6 +9,7 @@
  * 人员进出部门时区间自动伸缩）。例外是场记与 DIT，它们有明确的**内容**职责。
  */
 import type { ProductionTemplate } from "../production-template";
+import { MUSIC_VIDEO_EXPENSE_CATEGORIES } from "../template-seeders/finance";
 import { OPEN_BASELINE, ASSET_UPLOAD, ASSET_NEW_VERSION, policiesFromAnswers } from "./shared";
 import {
   MUSIC_DEPT_TREE, MUSIC_DEPT_PERMISSIONS, MUSIC_ROLES, MUSIC_ROLE_PERMISSIONS,
@@ -59,4 +60,5 @@ export const MUSIC_VIDEO_TEMPLATE: ProductionTemplate = {
     uploader_powers: "no_share",
   }),
   approval: { ttlHours: 24 },
+  expenseCategories: MUSIC_VIDEO_EXPENSE_CATEGORIES,
 };

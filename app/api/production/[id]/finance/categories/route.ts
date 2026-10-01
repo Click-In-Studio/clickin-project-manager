@@ -42,8 +42,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const body = parsedBody.value;
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return Response.json({ error: "科目名不能为空" }, { status: 400 });
-  const amount = typeof body.amount === "string" ? body.amount : String(body.amount ?? "0");
-  if (!AMOUNT_RE.test(amount))
+  const amount = body.amount === null || body.amount === "" || body.amount === undefined
+    ? null : String(body.amount);
+  if (amount !== null && !AMOUNT_RE.test(amount))
     return Response.json({ error: "金额必须是最多两位小数的非负数" }, { status: 400 });
 
   const deptId = typeof body.deptId === "string" && body.deptId ? body.deptId : null;

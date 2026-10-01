@@ -18,6 +18,7 @@
  * 减法的落点。
  */
 import type { ProductionTemplate } from "../production-template";
+import { RADIO_DRAMA_EXPENSE_CATEGORIES } from "../template-seeders/finance";
 import {
   OPEN_BASELINE, PRODUCER_KEYS, STRUCTURE_EDIT, SCRIPT_EDIT, REHEARSAL_MARKS,
   SCHEDULE_ADMIN, ASSET_UPLOAD, ASSET_NEW_VERSION, MOUNT_ATTACH, policiesFromAnswers,
@@ -153,4 +154,5 @@ export const RADIO_DRAMA_TEMPLATE: ProductionTemplate = {
    *  发布权归监督（不像音乐类那样把发布放给创建者）。 */
   policies: policiesFromAnswers({ share_token: "yes" }),
   approval: { ttlHours: 24 },
+  expenseCategories: RADIO_DRAMA_EXPENSE_CATEGORIES,
 };

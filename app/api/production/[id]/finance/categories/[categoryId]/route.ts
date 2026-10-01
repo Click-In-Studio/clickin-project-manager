@@ -30,7 +30,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   // 少了这道，PATCH {name:"   "} 会静静落成一个空名科目，而 POST 明明是拦的
   if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim()))
     return Response.json({ error: "科目名不能为空" }, { status: 400 });
-  if (body.amount !== undefined && !AMOUNT_RE.test(String(body.amount)))
+  if (body.amount !== undefined && body.amount !== null && body.amount !== "" && !AMOUNT_RE.test(String(body.amount)))
     return Response.json({ error: "金额必须是最多两位小数的非负数" }, { status: 400 });
   if (typeof body.deptId === "string" && body.deptId && !(await getEventDepartment(body.deptId, productionId)))
     return Response.json({ error: "部门不存在" }, { status: 400 });
@@ -38,7 +38,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
     const category = await updateBudgetCategory(categoryId, productionId, session.userId, {
       name: typeof body.name === "string" ? body.name : undefined,
-      amount: body.amount !== undefined ? String(body.amount) : undefined,
+      amount: body.amount === null || body.amount === "" ? null
+        : body.amount !== undefined ? String(body.amount) : undefined,
       deptId: body.deptId === null || typeof body.deptId === "string"
         ? (body.deptId || null) as string | null : undefined,
       orderIndex: typeof body.orderIndex === "number" ? body.orderIndex : undefined,

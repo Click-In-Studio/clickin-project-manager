@@ -19,6 +19,7 @@
  * 把剧本按场拆成多个 script（产品层），或让演员走申请流（把这枚从模版里删掉即可）。
  */
 import type { ProductionTemplate } from "../production-template";
+import { FILM_EXPENSE_CATEGORIES } from "../template-seeders/finance";
 import {
   PRODUCER_KEYS, SCENE_VIEW, CHARACTER_VIEW, SCRIPT_READ, SCRIPT_EDIT,
   STRUCTURE_EDIT, SCHEDULE_ADMIN, ASSET_FILE_VIEW,
@@ -166,4 +167,5 @@ export const FILM_TEMPLATE: ProductionTemplate = {
   cueDeclarations: [],
   policies: FILM_POLICIES,
   approval: { ttlHours: 24 },
+  expenseCategories: FILM_EXPENSE_CATEGORIES,
 };
