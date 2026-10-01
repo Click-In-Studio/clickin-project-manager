@@ -31,16 +31,18 @@ describe("项目首页里程碑完整内容入口", () => {
     expect(trigger.textContent).toBe(label);
     expect(trigger.getAttribute("aria-label")).toContain(label);
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector<HTMLElement>('[role="region"]')?.hidden).toBe(true);
 
     act(() => trigger.click());
     const panel = container.querySelector<HTMLElement>('[role="region"]')!;
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.getAttribute("aria-controls")).toBe(panel.id);
+    expect(panel.hidden).toBe(false);
     expect(panel.textContent).toBe(label);
 
     act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    expect(container.querySelector('[role="region"]')).toBeNull();
+    expect(panel.hidden).toBe(true);
     expect(document.activeElement).toBe(trigger);
   });
 });

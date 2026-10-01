@@ -43,11 +43,15 @@ export default function MetricCardDisclosure({ label }: { label: string }) {
       >
         {label}
       </button>
-      {open && (
-        <div id={panelId} role="region" aria-label="完整里程碑" className={styles.progressMetricDisclosurePanel}>
-          {label}
-        </div>
-      )}
+      <div
+        id={panelId}
+        role="region"
+        aria-label="完整里程碑"
+        className={styles.progressMetricDisclosurePanel}
+        hidden={!open}
+      >
+        {label}
+      </div>
     </div>
   );
 }
