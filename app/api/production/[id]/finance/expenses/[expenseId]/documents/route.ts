@@ -37,7 +37,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ expense }, { status: 201 });
   } catch (error) {
     if (error instanceof FinanceError) {
-      const status = error.reason === "stale" || error.reason === "invalid_state" ? 409 : 403;
+      const status = error.reason === "stale" || error.reason === "conflict" || error.reason === "invalid_state"
+        ? 409 : error.reason === "invalid_document" ? 403 : 400;
       return Response.json({ error: error.message }, { status });
     }
     throw error;
@@ -64,12 +65,19 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
       assetFileId, expectedMutationSeq,
     });
     // DB 关系已安全解除后沿用通用资产删除；R2 失败账本化由 #428 统一收口。
-    const { r2Keys } = await deleteAsset(result.assetId);
-    await Promise.allSettled(r2Keys.map(key => deleteR2Object(key)));
+    try {
+      const { r2Keys } = await deleteAsset(result.assetId);
+      await Promise.allSettled(r2Keys.map(key => deleteR2Object(key)));
+    } catch (cleanupError) {
+      // 报销关系已经成功提交；资产仍是私有孤儿，不能把成功移除伪装成失败。
+      // #428 的回收账会统一兜底，先保留可检索日志。
+      console.error("[expense-document] detached but asset cleanup failed", cleanupError);
+    }
     return Response.json({ expense: result.expense });
   } catch (error) {
     if (error instanceof FinanceError) {
-      const status = error.reason === "stale" || error.reason === "invalid_state" ? 409 : 403;
+      const status = error.reason === "stale" || error.reason === "conflict" || error.reason === "invalid_state"
+        ? 409 : error.reason === "invalid_document" ? 403 : 400;
       return Response.json({ error: error.message }, { status });
     }
     throw error;

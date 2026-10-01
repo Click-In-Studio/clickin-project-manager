@@ -51,6 +51,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
   if (access.isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
+  const current = await getExpense(expenseId, productionId);
+  if (!current) return Response.json({ error: "报销不存在" }, { status: 404 });
+  if (current.submittedBy !== session.userId)
+    return Response.json({ error: "只能修改自己的报销草稿" }, { status: 403 });
   const parsed = await readJsonObject(req);
   if (!parsed.ok) return parsed.response;
   const body = parsed.value;
@@ -109,11 +113,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   if (action === "withdraw") {
     // 撤回是提交人自己的动作，与审批资格无关
+    if (expense.submittedBy !== session.userId)
+      return Response.json({ error: "只能撤回自己的报销" }, { status: 403 });
     const res = await withdrawExpense(expenseId, productionId, session.userId, expectedMutationSeq);
     if (!res.ok) return Response.json({ error: "报销已被处理或内容已变化，请刷新" }, { status: 409 });
     return Response.json({ expense: await getExpense(expenseId, productionId) });
   }
   if (action === "reopen") {
+    if (expense.submittedBy !== session.userId)
+      return Response.json({ error: "只能重新编辑自己的报销" }, { status: 403 });
     try {
       return Response.json({ expense: await reopenExpense(
         expenseId, productionId, session.userId, expectedMutationSeq,
@@ -124,6 +132,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
   }
   if (action === "submit") {
+    if (expense.submittedBy !== session.userId)
+      return Response.json({ error: "只能提交自己的报销草稿" }, { status: 403 });
     try {
       return Response.json({ expense: await submitExpenseDraft(
         expenseId, productionId, session.userId, expectedMutationSeq,

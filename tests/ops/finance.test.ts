@@ -35,11 +35,15 @@ import { GET as getExpenses } from "@/app/api/production/[id]/finance/expenses/r
 import {
   GET as getExpenseDetailRoute,
   PATCH as patchExpenseDetailRoute,
+  POST as actExpenseDetailRoute,
 } from "@/app/api/production/[id]/finance/expenses/[expenseId]/route";
 import {
-  DELETE as deleteExpenseDocument, GET as getExpenseDocument,
+  DELETE as deleteStagedExpenseDocument, GET as getExpenseDocument,
 } from "@/app/api/production/[id]/finance/expense-documents/[assetId]/route";
-import { POST as appendExpenseDocument } from "@/app/api/production/[id]/finance/expenses/[expenseId]/documents/route";
+import {
+  DELETE as removeExpenseDocumentRoute,
+  POST as appendExpenseDocument,
+} from "@/app/api/production/[id]/finance/expenses/[expenseId]/documents/route";
 
 const { presignedGetMock } = vi.hoisted(() => ({
   presignedGetMock: vi.fn(() => "https://files.example/signed"),
@@ -464,7 +468,7 @@ describe("#735 草稿与重提生命周期", () => {
 });
 
 describe("#735 报销详情端点权限与归档门", () => {
-  function detailReq(method: "GET" | "PATCH", userId?: string, body?: unknown) {
+  function detailReq(method: "GET" | "PATCH" | "POST", userId?: string, body?: unknown) {
     const request = new NextRequest("http://localhost/api/x", {
       method,
       headers: body ? { "content-type": "application/json" } : undefined,
@@ -487,6 +491,17 @@ describe("#735 报销详情端点权限与归档门", () => {
     )).userId;
     expect((await getExpenseDetailRoute(detailReq("GET", outsider), ctx())).status).toBe(403);
     expect((await getExpenseDetailRoute(detailReq("GET", strangerId), ctx())).status).toBe(403);
+    const patchBody = {
+      expectedMutationSeq: draft.mutationSeq,
+      title: "越权修改", amount: "1.00", categoryId: null, note: "",
+      invoiceRequirement: "required", invoiceWaiverReason: "",
+    };
+    expect((await patchExpenseDetailRoute(detailReq("PATCH", undefined, patchBody), ctx())).status).toBe(401);
+    expect((await patchExpenseDetailRoute(detailReq("PATCH", outsider, patchBody), ctx())).status).toBe(403);
+    expect((await patchExpenseDetailRoute(detailReq("PATCH", strangerId, patchBody), ctx())).status).toBe(403);
+    expect((await actExpenseDetailRoute(detailReq("POST", strangerId, {
+      action: "submit", expectedMutationSeq: draft.mutationSeq,
+    }), ctx())).status).toBe(403);
     const ownerResponse = await getExpenseDetailRoute(detailReq("GET", submitterId), ctx());
     expect(ownerResponse.status).toBe(200);
     expect((await ownerResponse.json() as { expense: { events: unknown[] } }).expense.events).toHaveLength(1);
@@ -699,7 +714,7 @@ describe("#713 财务凭证上下文访问", () => {
     expect((await getExpenseDocument(req(submitterId), ctx())).status).toBe(200);
     // 全项目支出查看资格也不能旁路查看尚未提交的暂存文件。
     expect((await getExpenseDocument(req(ownerId), ctx())).status).toBe(403);
-    expect((await deleteExpenseDocument(req(submitterId, "DELETE"), ctx())).status).toBe(200);
+    expect((await deleteStagedExpenseDocument(req(submitterId, "DELETE"), ctx())).status).toBe(200);
   });
 
   it("下载凭证时用原文件名覆盖 R2 对象键文件名", async () => {
@@ -720,9 +735,9 @@ describe("#713 财务凭证上下文访问", () => {
 });
 
 describe("#713 提交后补票", () => {
-  function postReq(userId: string | null, body: unknown) {
+  function postReq(userId: string | null, body: unknown, method: "POST" | "DELETE" = "POST") {
     const request = new NextRequest("http://localhost/api/x", {
-      method: "POST",
+      method,
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -731,6 +746,23 @@ describe("#713 提交后补票", () => {
     }));
     return request;
   }
+
+  it("草稿移除凭证：未登录、非成员和其他成员均不能操作，提交人可以", async () => {
+    const document = await stagedDocument();
+    const draft = await createExpenseDraft({
+      productionId: prodId, categoryId: null, submittedBy: submitterId,
+      documents: [{ assetFileId: document.file.id, kind: "invoice" }],
+    });
+    const body = { assetFileId: document.file.id, expectedMutationSeq: draft.mutationSeq };
+    const ctx = () => ({ params: Promise.resolve({ id: prodId, expenseId: draft.id }) });
+    expect((await removeExpenseDocumentRoute(postReq(null, body, "DELETE"), ctx())).status).toBe(401);
+    const outsider = (await upsertFeishuUser(
+      `test-open-${shortId()}`, `删凭证非成员${shortId()}`, null, false,
+    )).userId;
+    expect((await removeExpenseDocumentRoute(postReq(outsider, body, "DELETE"), ctx())).status).toBe(403);
+    expect((await removeExpenseDocumentRoute(postReq(strangerId, body, "DELETE"), ctx())).status).toBe(403);
+    expect((await removeExpenseDocumentRoute(postReq(submitterId, body, "DELETE"), ctx())).status).toBe(200);
+  });
 
   async function stagedDocument() {
     return createAsset({
