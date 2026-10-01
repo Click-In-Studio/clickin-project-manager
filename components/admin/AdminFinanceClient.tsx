@@ -5,7 +5,7 @@ import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHead
 import AdminModal from "@/components/ui/AdminModal";
 import type { BudgetCategory, ExpenseCategory } from "@/lib/ops/finance-db";
 import {
-  CURRENCY_CODES, convertToBaseAmount, formatMoney, isCurrencyCode,
+  CURRENCY_CODES, convertToBaseAmount, formatCurrencyLabel, formatMoney, isCurrencyCode,
   type CurrencyCode,
 } from "@/lib/money";
 
@@ -104,7 +104,7 @@ export default function AdminFinanceClient({ productionId, productionName, baseC
             ? { ...item, currency: saved, baseCurrency: saved } : item));
         } catch (e) { setError(e instanceof Error ? e.message : "本位币保存失败"); }
       }}>
-        {CURRENCY_CODES.map(code => <option key={code} value={code}>{code}</option>)}
+        {CURRENCY_CODES.map(code => <option key={code} value={code}>{formatCurrencyLabel(code)}</option>)}
       </select>
     </section>
     {tab === "items" ? <div style={{ display: "grid", gap: 18 }}>
@@ -179,10 +179,10 @@ function ItemModal({ value, baseCurrency, categories, depts, busy, onClose, onSa
   }); }} style={{ display: "grid", gap: 12 }}>
     <label>费用科目<select style={FIELD} value={categoryId} onChange={e => setCategoryId(e.target.value)} disabled={!!value} required>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
     <label>负责部门<select style={FIELD} value={deptId} onChange={e => setDeptId(e.target.value)}><option value="">项目公共</option>{depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
-    <label>预算币种<select style={FIELD} value={currency} onChange={e => setCurrency(e.target.value as CurrencyCode)}>{CURRENCY_CODES.map(code => <option key={code}>{code}</option>)}</select></label>
-    <label>预算上限（{currency}）<input style={FIELD} inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="留空表示无上限" /></label>
+    <label>预算币种<select style={FIELD} value={currency} onChange={e => setCurrency(e.target.value as CurrencyCode)}>{CURRENCY_CODES.map(code => <option key={code}>{formatCurrencyLabel(code)}</option>)}</select></label>
+    <label>预算上限 · {formatCurrencyLabel(currency)}<input style={FIELD} inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="留空表示无上限" /></label>
     {amount && currency !== baseCurrency && <>
-      <label>人工汇率<span style={{ display: "block", color: "var(--muted)", fontSize: 10 }}>1 {currency} = 多少 {baseCurrency}</span><input style={FIELD} inputMode="decimal" value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} required /></label>
+      <label>人工汇率<span style={{ display: "block", color: "var(--muted)", fontSize: 10 }}>1 {formatCurrencyLabel(currency)} = 多少 {formatCurrencyLabel(baseCurrency)}</span><input style={FIELD} inputMode="decimal" value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} required /></label>
       <label>汇率日期<input style={FIELD} type="date" value={exchangeRateDate} onChange={e => setExchangeRateDate(e.target.value)} required /></label>
       <label>汇率来源<input style={FIELD} value={exchangeRateSource} onChange={e => setExchangeRateSource(e.target.value)} placeholder="例如：信用卡账单、银行结算单" maxLength={200} required /></label>
       <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>折算后：{converted ? formatMoney(converted, baseCurrency) : "请填写有效汇率"}</p>

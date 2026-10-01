@@ -13,7 +13,7 @@ import {
 import { buildExpenseRecognitionCandidates } from "@/lib/ops/expense-recognition-candidates";
 import type { ExpenseDocumentRecognition } from "@/lib/ops/expense-recognition-types";
 import {
-  CURRENCY_CODES, convertToBaseAmount, currencyMinorUnits, formatMoney, isCurrencyCode,
+  CURRENCY_CODES, convertToBaseAmount, currencyMinorUnits, formatCurrencyLabel, formatMoney, isCurrencyCode,
   type CurrencyCode,
 } from "@/lib/money";
 import styles from "./finance-expense-actions.module.css";
@@ -72,7 +72,7 @@ function ExchangeRateFields({ amount, currency, baseCurrency, exchangeRate, exch
     <label className={styles.field}><span>人工汇率</span>
       <input inputMode="decimal" value={exchangeRate} disabled={disabled} required={!disabled}
         onChange={event => onRate(event.target.value)} />
-      <small>1 {currency} = 多少 {baseCurrency}</small>
+      <small>1 {formatCurrencyLabel(currency)} = 多少 {formatCurrencyLabel(baseCurrency)}</small>
     </label>
     <label className={styles.field}><span>汇率日期</span>
       <input type="date" value={exchangeRateDate} disabled={disabled} required={!disabled}
@@ -416,7 +416,7 @@ export function ExpenseCreateButton({ productionId, baseCurrency, categories }: 
 
                 <div className={styles.fieldGroup}>
                   <label className={styles.field}>
-                    <span>金额（{currency}）</span>
+                    <span>金额 · {formatCurrencyLabel(currency)}</span>
                     <input
                       required
                       inputMode="decimal"
@@ -427,7 +427,7 @@ export function ExpenseCreateButton({ productionId, baseCurrency, categories }: 
                     />
                     <small>{currencyMinorUnits(currency)} 位小数</small>
                   </label>
-                  <RecognitionFieldSuggestion label={`${recognitionCandidates.currencies[0] ?? currency} ${recognitionCandidates.amount ?? ""}`}
+                  <RecognitionFieldSuggestion label={`${isCurrencyCode(recognitionCandidates.currencies[0]) ? formatCurrencyLabel(recognitionCandidates.currencies[0]) : formatCurrencyLabel(currency)} ${recognitionCandidates.amount ?? ""}`}
                     value={recognitionCandidates.amount} currentValue={amount}
                     onApply={() => {
                       setAmount(recognitionCandidates.amount!);
@@ -437,7 +437,7 @@ export function ExpenseCreateButton({ productionId, baseCurrency, categories }: 
 
                 <label className={styles.field}><span>币种</span>
                   <OverflowSafeSelect value={currency} onChange={event => setCurrency(event.target.value as CurrencyCode)}>
-                    {CURRENCY_CODES.map(code => <option key={code} value={code}>{code}</option>)}
+                    {CURRENCY_CODES.map(code => <option key={code} value={code}>{formatCurrencyLabel(code)}</option>)}
                   </OverflowSafeSelect>
                 </label>
 
@@ -1087,11 +1087,11 @@ export function ExpenseDetailButton({
                     <input value={title} disabled={!editable} onChange={event => setTitle(event.target.value)} />
                   </label>
                   <div className={styles.fieldGroup}>
-                    <label className={styles.field}><span>金额（{currency}）</span>
+                    <label className={styles.field}><span>金额 · {formatCurrencyLabel(currency)}</span>
                       <input inputMode="decimal" value={amount} disabled={!editable}
                         onChange={event => setAmount(event.target.value)} />
                     </label>
-                    {editable && <RecognitionFieldSuggestion label={`${recognitionCandidates.currencies[0] ?? currency} ${recognitionCandidates.amount ?? ""}`}
+                    {editable && <RecognitionFieldSuggestion label={`${isCurrencyCode(recognitionCandidates.currencies[0]) ? formatCurrencyLabel(recognitionCandidates.currencies[0]) : formatCurrencyLabel(currency)} ${recognitionCandidates.amount ?? ""}`}
                       value={recognitionCandidates.amount} currentValue={amount}
                       onApply={() => {
                         setAmount(recognitionCandidates.amount!);
@@ -1101,7 +1101,7 @@ export function ExpenseDetailButton({
                   <label className={styles.field}><span>币种</span>
                     <OverflowSafeSelect value={currency} disabled={!editable}
                       onChange={event => setCurrency(event.target.value as CurrencyCode)}>
-                      {CURRENCY_CODES.map(code => <option key={code} value={code}>{code}</option>)}
+                      {CURRENCY_CODES.map(code => <option key={code} value={code}>{formatCurrencyLabel(code)}</option>)}
                     </OverflowSafeSelect>
                   </label>
                   {currency !== baseCurrency && (editable
@@ -1111,7 +1111,7 @@ export function ExpenseDetailButton({
                         onRate={setExchangeRate} onDate={setExchangeRateDate} onSource={setExchangeRateSource} />
                     : <p>折算：{detail.baseAmount && isCurrencyCode(detail.baseCurrency)
                         ? formatMoney(detail.baseAmount, detail.baseCurrency) : "尚未确认"}
-                        {detail.exchangeRate ? ` · 1 ${currency} = ${detail.exchangeRate} ${detail.baseCurrency}` : ""}
+                        {detail.exchangeRate && isCurrencyCode(detail.baseCurrency) ? ` · 1 ${formatCurrencyLabel(currency)} = ${detail.exchangeRate} ${formatCurrencyLabel(detail.baseCurrency)}` : ""}
                         {detail.exchangeRateDate ? ` · ${detail.exchangeRateDate}` : ""}
                         {detail.exchangeRateSource ? ` · ${detail.exchangeRateSource}` : ""}</p>)}
                   <div className={styles.fieldGroup}>

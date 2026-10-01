@@ -6,6 +6,7 @@ import type {
   ExpenseDocumentRecognition,
 } from "@/lib/ops/expense-recognition-types";
 import { buildExpenseRecognitionCandidates } from "@/lib/ops/expense-recognition-candidates";
+import { formatCurrencyLabel, isCurrencyCode } from "@/lib/money";
 import styles from "./expense-recognition-suggestions.module.css";
 
 export type RecognizableExpenseDocument = {
@@ -24,6 +25,10 @@ const STATUS_TEXT: Record<ExpenseDocumentRecognition["status"], string> = {
 };
 const CONFIDENCE_TEXT = { high: "高", medium: "中", low: "低" } as const;
 const SOURCE_TEXT = { pdf_text: "PDF 文本层", ocr: "MMP OCR", pdf_text_ocr: "PDF 文本层 + MMP OCR" } as const;
+
+function displayCurrency(value: string | null | undefined): string {
+  return isCurrencyCode(value) ? formatCurrencyLabel(value) : value ?? "币种未知";
+}
 
 export function recognitionStatusText(recognition: ExpenseDocumentRecognition | null): string {
   return recognition ? STATUS_TEXT[recognition.status] : "等待识别";
@@ -112,7 +117,7 @@ export function ExpenseRecognitionSuggestions({
                   {result.merchant.value && <span title={result.merchant.evidence ?? undefined}>商户：{result.merchant.value} · 置信度{CONFIDENCE_TEXT[result.merchant.confidence]}</span>}
                   {result.occurredOn.value && <span title={result.occurredOn.evidence ?? undefined}>日期：{result.occurredOn.value} · 置信度{CONFIDENCE_TEXT[result.occurredOn.confidence]}</span>}
                   {result.documentNumber.value && <span title={result.documentNumber.evidence ?? undefined}>号码：{result.documentNumber.value} · 置信度{CONFIDENCE_TEXT[result.documentNumber.confidence]}</span>}
-                  {result.totalAmount.value && <span title={result.totalAmount.evidence ?? undefined}>含税金额：{result.currency.value ?? "币种未知"} {result.totalAmount.value} · 置信度{CONFIDENCE_TEXT[result.totalAmount.confidence]}</span>}
+                  {result.totalAmount.value && <span title={result.totalAmount.evidence ?? undefined}>含税金额：{displayCurrency(result.currency.value)} {result.totalAmount.value} · 置信度{CONFIDENCE_TEXT[result.totalAmount.confidence]}</span>}
                   {result.taxAmount.value && <span title={result.taxAmount.evidence ?? undefined}>税额：{result.taxAmount.value} · 置信度{CONFIDENCE_TEXT[result.taxAmount.confidence]}</span>}
                   {[result.merchant, result.occurredOn, result.totalAmount].some(field => field.confidence === "low")
                     && <small>部分字段置信度较低，请对照原件</small>}
@@ -122,14 +127,14 @@ export function ExpenseRecognitionSuggestions({
               {aggregate.mixedTypes && <p className={styles.warning}>发票与收据可能对应同一笔消费，未自动合计金额。</p>}
               {aggregate.mixedTypes && aggregate.totalsByType.map(total => (
                 <p key={total.type} className={styles.groupTotal}>
-                  {total.type === "invoice" ? "发票" : total.type === "receipt" ? "收据" : "其他凭证"}候选合计：{aggregate.currencies[0] ?? ""} {total.amount}
+                  {total.type === "invoice" ? "发票" : total.type === "receipt" ? "收据" : "其他凭证"}候选合计：{displayCurrency(aggregate.currencies[0])} {total.amount}
                 </p>
               ))}
               {aggregate.currencies.length > 1 && <p className={styles.warning}>凭证币种不一致，未自动合计金额。</p>}
               {aggregate.merchantConflict && <p className={styles.warning}>多份凭证的商户不一致，请逐份核对。</p>}
               {aggregate.dateConflict && <p className={styles.warning}>多份凭证的日期不一致，请逐份核对。</p>}
               {current.amount && aggregate.amount && current.amount !== aggregate.amount && (
-                <p className={styles.warning}>票面合计 {aggregate.currencies[0] ?? ""} {aggregate.amount} 与当前报销金额 {current.amount} 不一致。</p>
+                <p className={styles.warning}>票面合计 {displayCurrency(aggregate.currencies[0])} {aggregate.amount} 与当前报销金额 {current.amount} 不一致。</p>
               )}
               {aggregate.currencies.some(currency => currency !== baseCurrency) && (
                 <p className={styles.warning}>识别到非本位币，请人工确认汇率、日期、来源和折算结果。</p>
@@ -153,7 +158,7 @@ export function ExpenseRecognitionSuggestions({
       {noticeResult && (
         <div className={styles.notice} role="status" aria-live="polite">
           <span>
-            识别完成{noticeResult.totalAmount.value ? `：${noticeResult.currency.value ?? ""} ${noticeResult.totalAmount.value}` : ""}
+            识别完成{noticeResult.totalAmount.value ? `：${displayCurrency(noticeResult.currency.value)} ${noticeResult.totalAmount.value}` : ""}
             {noticeResult.merchant.value ? ` · ${noticeResult.merchant.value}` : ""}
           </span>
           <button type="button" onClick={() => {

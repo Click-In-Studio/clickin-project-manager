@@ -87,6 +87,6 @@ describe("凭证识别建议", () => {
       />,
     ));
     expect([...container.querySelectorAll("button")].some(button => button.textContent?.includes("收起"))).toBe(true);
-    expect(container.textContent).toContain("票面合计 CNY 88.50 与当前报销金额 100.00 不一致");
+    expect(container.textContent).toContain("票面合计 人民币（CNY） 88.50 与当前报销金额 100.00 不一致");
   });
 });

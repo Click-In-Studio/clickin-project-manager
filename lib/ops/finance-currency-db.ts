@@ -1,7 +1,7 @@
 import type { PoolClient } from "pg";
 import { getPool } from "../pg";
 import {
-  convertToBaseAmount, isCurrencyCode, isExchangeRate, isMoneyAmount, normalizeMoneyAmount,
+  convertToBaseAmount, formatCurrencyLabel, isCurrencyCode, isExchangeRate, isMoneyAmount, normalizeMoneyAmount,
   type CurrencyCode,
 } from "../money";
 import { FinanceError, isExpenseDate } from "./expense-read-db";
@@ -53,7 +53,7 @@ export async function buildCurrencySnapshot(
   const normalizedAmount = normalizeMoneyAmount(amount, input.currency);
   if ((!options.fromStorage && !isMoneyAmount(amount, input.currency))
       || !isMoneyAmount(normalizedAmount, input.currency))
-    throw new FinanceError("invalid_state", `金额小数位不符合 ${input.currency} 的规则`);
+    throw new FinanceError("invalid_state", `金额小数位不符合${formatCurrencyLabel(input.currency)}的规则`);
   const baseCurrency = await lockedBaseCurrency(client, productionId);
   if (input.currency === baseCurrency) {
     return {
@@ -88,7 +88,7 @@ export async function validateDraftCurrency(
 }> {
   if (!isCurrencyCode(currency)) throw new FinanceError("invalid_state", "请选择有效币种");
   if (amount && !isMoneyAmount(amount, currency))
-    throw new FinanceError("invalid_state", `金额小数位不符合 ${currency} 的规则`);
+    throw new FinanceError("invalid_state", `金额小数位不符合${formatCurrencyLabel(currency)}的规则`);
   const exchangeRate = input.exchangeRate?.trim() || null;
   const exchangeRateDate = input.exchangeRateDate?.trim() || null;
   const exchangeRateSource = input.exchangeRateSource?.trim() || null;

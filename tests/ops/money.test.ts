@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  convertToBaseAmount, fmtCny, formatMoney, isMoneyAmount, pctCents, pctUsed, sumCents, toCents,
+  convertToBaseAmount, fmtCny, formatCurrencyLabel, formatMoney, isMoneyAmount, pctCents, pctUsed, sumCents, toCents,
 } from "@/lib/money";
 
 describe("1. 为什么不能用 Number 算钱", () => {
@@ -37,9 +37,10 @@ describe("5. 多币种与人工汇率", () => {
     expect(convertToBaseAmount("1.234", "19.995", "JPY")).toBe("25");
   });
 
-  it("展示显式带币种代码并保留规定小数位", () => {
-    expect(formatMoney("1234", "JPY")).toBe("JPY 1,234");
-    expect(formatMoney("1.2", "KWD")).toBe("KWD 1.200");
+  it("展示中文币种名、ISO 代码和规定小数位", () => {
+    expect(formatCurrencyLabel("CNY")).toBe("人民币（CNY）");
+    expect(formatMoney("1234", "JPY")).toBe("日元（JPY） 1,234");
+    expect(formatMoney("1.2", "KWD")).toBe("科威特第纳尔（KWD） 1.200");
   });
 });
 

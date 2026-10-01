@@ -29,6 +29,10 @@ export const CURRENCY_MINOR_UNITS = {
 export type CurrencyCode = keyof typeof CURRENCY_MINOR_UNITS;
 export const CURRENCY_CODES = Object.keys(CURRENCY_MINOR_UNITS) as CurrencyCode[];
 
+const CURRENCY_DISPLAY_NAMES = typeof Intl.DisplayNames === "function"
+  ? new Intl.DisplayNames(["zh-CN"], { type: "currency", fallback: "code" })
+  : null;
+
 const ZERO = BigInt(0);
 const TEN = BigInt(10);
 const HUNDRED = BigInt(100);
@@ -45,6 +49,16 @@ export function isCurrencyCode(value: unknown): value is CurrencyCode {
 
 export function currencyMinorUnits(currency: CurrencyCode): number {
   return CURRENCY_MINOR_UNITS[currency];
+}
+
+export function currencyDisplayName(currency: CurrencyCode): string {
+  return CURRENCY_DISPLAY_NAMES?.of(currency) ?? currency;
+}
+
+/** 给填写人看中文名，ISO 代码保留作跨票据、银行账单核对。 */
+export function formatCurrencyLabel(currency: CurrencyCode): string {
+  const name = currencyDisplayName(currency);
+  return name === currency ? currency : `${name}（${currency}）`;
 }
 
 /** NUMERIC(18,3) 的统一入口：最多 15 位整数，且小数位必须符合币种。 */
@@ -95,12 +109,12 @@ export function sumMoney(amounts: string[], currency: CurrencyCode): bigint {
 export function formatMoney(amount: string, currency: CurrencyCode): string {
   const scale = currencyMinorUnits(currency);
   const units = parseScaled(amount, scale);
-  if (units === null) return `${currency} ${amount}`;
+  if (units === null) return `${formatCurrencyLabel(currency)} ${amount}`;
   const normalized = scaledToDecimal(units, scale);
   const negative = normalized.startsWith("-");
   const [integer, fraction] = (negative ? normalized.slice(1) : normalized).split(".");
   const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${negative ? "-" : ""}${currency} ${grouped}${fraction === undefined ? "" : `.${fraction}`}`;
+  return `${negative ? "-" : ""}${formatCurrencyLabel(currency)} ${grouped}${fraction === undefined ? "" : `.${fraction}`}`;
 }
 
 export function formatMinorUnits(units: bigint, currency: CurrencyCode): string {

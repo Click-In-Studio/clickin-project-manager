@@ -196,7 +196,7 @@ describe("报销填单", () => {
 
     const amountInput = container.querySelector<HTMLInputElement>('input[placeholder="0.00"]')!;
     const amountGroup = amountInput.closest("div")!;
-    expect(amountGroup.textContent).toContain("识别建议：CNY 88.50");
+    expect(amountGroup.textContent).toContain("识别建议：人民币（CNY） 88.50");
     expect(amountGroup.textContent).not.toContain("某某商店");
 
     await act(async () => amountGroup.querySelector<HTMLButtonElement>("button")!.click());
