@@ -1575,6 +1575,8 @@ CREATE TABLE IF NOT EXISTS production_expense (
   title         TEXT          NOT NULL DEFAULT '',
   amount        NUMERIC(14,2) CHECK (amount >= 0),
   currency      TEXT          NOT NULL DEFAULT 'CNY',
+  merchant      TEXT          NOT NULL DEFAULT '',
+  occurred_on   DATE,
   note          TEXT          NOT NULL DEFAULT '',
   invoice_requirement TEXT    CHECK (invoice_requirement IN ('required', 'waived')),
   invoice_waiver_reason TEXT  NOT NULL DEFAULT '',
@@ -1619,6 +1621,25 @@ CREATE INDEX IF NOT EXISTS production_expense_document_expense_idx
   ON production_expense_document(expense_id, created_at);
 CREATE INDEX IF NOT EXISTS production_expense_document_file_idx
   ON production_expense_document(asset_file_id);
+
+CREATE TABLE IF NOT EXISTS expense_document_recognition (
+  asset_file_id TEXT PRIMARY KEY REFERENCES asset_file(id) ON DELETE CASCADE,
+  status        TEXT NOT NULL
+                CHECK (status IN ('queued', 'processing', 'succeeded', 'failed', 'unavailable')),
+  source_kind   TEXT
+                CHECK (source_kind IS NULL OR source_kind IN ('pdf_text', 'ocr', 'pdf_text_ocr')),
+  result        JSONB,
+  parser_version TEXT NOT NULL,
+  model_version  TEXT NOT NULL,
+  last_error     TEXT,
+  attempts       INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  started_at     TIMESTAMPTZ,
+  finished_at    TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT expense_document_recognition_result_check
+    CHECK ((status = 'succeeded') = (result IS NOT NULL))
+);
 
 CREATE TABLE IF NOT EXISTS production_expense_event (
   id            TEXT        PRIMARY KEY,

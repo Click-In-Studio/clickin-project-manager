@@ -450,6 +450,18 @@ COL|event_schedule_item|title|text|text|NO|
 COL|event_stage_manager|event_id|text|text|NO|
 COL|event_stage_manager|name|text|text|NO|
 COL|event_stage_manager|user_id|uuid|uuid|NO|
+COL|expense_document_recognition|asset_file_id|text|text|NO|
+COL|expense_document_recognition|attempts|integer|int4|NO|0
+COL|expense_document_recognition|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|expense_document_recognition|finished_at|timestamp with time zone|timestamptz|YES|
+COL|expense_document_recognition|last_error|text|text|YES|
+COL|expense_document_recognition|model_version|text|text|NO|
+COL|expense_document_recognition|parser_version|text|text|NO|
+COL|expense_document_recognition|result|jsonb|jsonb|YES|
+COL|expense_document_recognition|source_kind|text|text|YES|
+COL|expense_document_recognition|started_at|timestamp with time zone|timestamptz|YES|
+COL|expense_document_recognition|status|text|text|NO|
+COL|expense_document_recognition|updated_at|timestamp with time zone|timestamptz|NO|now()
 COL|feishu_user|avatar_url|text|text|YES|
 COL|feishu_user|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|feishu_user|email|text|text|YES|
@@ -635,8 +647,10 @@ COL|production_expense|escalation_chain|jsonb|jsonb|NO|'[]'::jsonb
 COL|production_expense|id|uuid|uuid|NO|gen_random_uuid()
 COL|production_expense|invoice_requirement|text|text|YES|
 COL|production_expense|invoice_waiver_reason|text|text|NO|''::text
+COL|production_expense|merchant|text|text|NO|''::text
 COL|production_expense|mutation_seq|bigint|int8|NO|0
 COL|production_expense|note|text|text|NO|''::text
+COL|production_expense|occurred_on|date|date|YES|
 COL|production_expense|production_id|text|text|NO|
 COL|production_expense|resolved_at|timestamp with time zone|timestamptz|YES|
 COL|production_expense|resolved_by|uuid|uuid|YES|
@@ -1239,6 +1253,12 @@ CON|event_schedule_item|event_schedule_item_target_scene_id_fkey|FOREIGN KEY (ta
 CON|event_stage_manager|event_stage_manager_event_id_fkey|FOREIGN KEY (event_id) REFERENCES production_event(id) ON DELETE CASCADE
 CON|event_stage_manager|event_stage_manager_pkey|PRIMARY KEY (event_id, user_id)
 CON|event_stage_manager|event_stage_manager_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|expense_document_recognition|expense_document_recognition_asset_file_id_fkey|FOREIGN KEY (asset_file_id) REFERENCES asset_file(id) ON DELETE CASCADE
+CON|expense_document_recognition|expense_document_recognition_attempts_check|CHECK ((attempts >= 0))
+CON|expense_document_recognition|expense_document_recognition_pkey|PRIMARY KEY (asset_file_id)
+CON|expense_document_recognition|expense_document_recognition_result_check|CHECK (((status = 'succeeded'::text) = (result IS NOT NULL)))
+CON|expense_document_recognition|expense_document_recognition_source_kind_check|CHECK (((source_kind IS NULL) OR (source_kind = ANY (ARRAY['pdf_text'::text, 'ocr'::text, 'pdf_text_ocr'::text]))))
+CON|expense_document_recognition|expense_document_recognition_status_check|CHECK ((status = ANY (ARRAY['queued'::text, 'processing'::text, 'succeeded'::text, 'failed'::text, 'unavailable'::text])))
 CON|feishu_user|feishu_user_pkey|PRIMARY KEY (open_id)
 CON|feishu_user|feishu_user_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
 CON|feishu_user|feishu_user_user_id_key|UNIQUE (user_id)
@@ -1687,6 +1707,7 @@ IDX|event_schedule_item|event_schedule_item_event_idx|CREATE INDEX event_schedul
 IDX|event_schedule_item|event_schedule_item_pkey|CREATE UNIQUE INDEX event_schedule_item_pkey ON public.event_schedule_item USING btree (id)
 IDX|event_stage_manager|event_stage_manager_event_idx|CREATE INDEX event_stage_manager_event_idx ON public.event_stage_manager USING btree (event_id)
 IDX|event_stage_manager|event_stage_manager_pkey|CREATE UNIQUE INDEX event_stage_manager_pkey ON public.event_stage_manager USING btree (event_id, user_id)
+IDX|expense_document_recognition|expense_document_recognition_pkey|CREATE UNIQUE INDEX expense_document_recognition_pkey ON public.expense_document_recognition USING btree (asset_file_id)
 IDX|feishu_user|feishu_user_pkey|CREATE UNIQUE INDEX feishu_user_pkey ON public.feishu_user USING btree (open_id)
 IDX|feishu_user|feishu_user_user_id_key|CREATE UNIQUE INDEX feishu_user_user_id_key ON public.feishu_user USING btree (user_id)
 IDX|job|job_claim_idx|CREATE INDEX job_claim_idx ON public.job USING btree (priority DESC, created_at) WHERE (status = 'queued'::text)

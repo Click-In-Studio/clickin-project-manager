@@ -23,6 +23,10 @@ vi.mock("@/components/assets/AssetUploadPanel", () => ({
     }}>上传测试凭证</button>
   ),
 }));
+vi.mock("@/components/ops/ExpenseRecognitionSuggestions", () => ({
+  ExpenseRecognitionSuggestions: () => null,
+  recognitionStatusText: () => "等待识别",
+}));
 
 import {
   ExpenseAddDocumentButton, ExpenseApprovalActions, ExpenseCreateButton,

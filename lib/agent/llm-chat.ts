@@ -70,8 +70,18 @@ type ProviderConfig = {
   defaultModel: string;
 };
 
+export function configuredLlmModel(): { provider: "openai" | "deepseek"; model: string } {
+  const provider = process.env.LLM_PROVIDER === "deepseek" ? "deepseek" : "openai";
+  return {
+    provider,
+    model: provider === "deepseek"
+      ? process.env.DEEPSEEK_MODEL ?? "deepseek-chat"
+      : process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+  };
+}
+
 function getProviderConfig(): ProviderConfig {
-  const provider = process.env.LLM_PROVIDER ?? "openai";
+  const { provider, model } = configuredLlmModel();
 
   if (provider === "deepseek") {
     const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -79,7 +89,7 @@ function getProviderConfig(): ProviderConfig {
     return {
       baseUrl:      "https://api.deepseek.com/v1",
       apiKey,
-      defaultModel: process.env.DEEPSEEK_MODEL ?? "deepseek-chat",
+      defaultModel: model,
     };
   }
 
@@ -89,7 +99,7 @@ function getProviderConfig(): ProviderConfig {
   return {
     baseUrl:      "https://api.openai.com/v1",
     apiKey,
-    defaultModel: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+    defaultModel: model,
   };
 }
 

@@ -78,6 +78,8 @@ export interface EnqueueInput {
   maxAttempts?: number;
   /** 延迟到这个时刻后才允许 worker 认领。 */
   runAfter?: Date;
+  /** 无独立 worker 时也只入队并后台执行；上传等请求不能等待重任务。 */
+  detachedInline?: boolean;
 }
 
 const inlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -113,7 +115,11 @@ export async function enqueueJob(input: EnqueueInput): Promise<JobRow> {
       [input.dedupeKey],
     );
     if (existing.rows[0]) {
-      if (!jobWorkerEnabled() && existing.rows[0].status === "queued") void kickInlineJob(existing.rows[0]);
+      if (!jobWorkerEnabled() && existing.rows[0].status === "queued") {
+        const kicked = kickInlineJob(existing.rows[0]);
+        if (input.detachedInline) void kicked.catch(err => console.error(`[job] detached inline job ${existing.rows[0].id} failed:`, err));
+        else await kicked;
+      }
       return toRow(existing.rows[0]);
     }
   }
@@ -134,7 +140,11 @@ export async function enqueueJob(input: EnqueueInput): Promise<JobRow> {
         [input.dedupeKey],
       );
       if (again.rows[0]) {
-        if (!jobWorkerEnabled() && again.rows[0].status === "queued") void kickInlineJob(again.rows[0]);
+        if (!jobWorkerEnabled() && again.rows[0].status === "queued") {
+          const kicked = kickInlineJob(again.rows[0]);
+          if (input.detachedInline) void kicked.catch(err => console.error(`[job] detached inline job ${again.rows[0].id} failed:`, err));
+          else await kicked;
+        }
         return toRow(again.rows[0]);
       }
     }
@@ -143,7 +153,9 @@ export async function enqueueJob(input: EnqueueInput): Promise<JobRow> {
   if (jobWorkerEnabled()) {
     await pool.query(`SELECT pg_notify($1, $2)`, [JOB_NEW_CHANNEL, id]).catch(() => {});
   } else {
-    await kickInlineJob(row);
+    const kicked = kickInlineJob(row);
+    if (input.detachedInline) void kicked.catch(err => console.error(`[job] detached inline job ${id} failed:`, err));
+    else await kicked;
   }
   const fresh = await getJob(id);
   return fresh ?? toRow(row);

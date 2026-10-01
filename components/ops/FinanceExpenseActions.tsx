@@ -7,6 +7,10 @@ import { PRIMARY_BTN } from "@/components/ui/PageHeader";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import AssetUploadPanel from "@/components/assets/AssetUploadPanel";
 import { useAssetUploadManager } from "@/components/assets/asset-upload-manager";
+import {
+  ExpenseRecognitionSuggestions, recognitionStatusText,
+} from "./ExpenseRecognitionSuggestions";
+import type { ExpenseDocumentRecognition } from "@/lib/ops/expense-recognition-types";
 import styles from "./finance-expense-actions.module.css";
 
 export type ExpenseCategoryOption = {
@@ -25,6 +29,7 @@ export type ExpenseDocumentView = {
   kind: DocumentKind;
   fileName: string;
   mimeType: string | null;
+  recognition: ExpenseDocumentRecognition | null;
 };
 
 type StagedDocument = ExpenseDocumentView;
@@ -50,6 +55,8 @@ export function ExpenseCreateButton({ productionId, categories }: {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
+  const [merchant, setMerchant] = useState("");
+  const [occurredOn, setOccurredOn] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [note, setNote] = useState("");
   const [invoiceRequirement, setInvoiceRequirement] = useState<"required" | "waived">("required");
@@ -63,6 +70,8 @@ export function ExpenseCreateButton({ productionId, categories }: {
     setOpen(false);
     setTitle("");
     setAmount("");
+    setMerchant("");
+    setOccurredOn("");
     setCategoryId("");
     setNote("");
     setInvoiceRequirement("required");
@@ -94,6 +103,20 @@ export function ExpenseCreateButton({ productionId, categories }: {
     task: uploadManager?.tasks.find(task => task.id === pending.taskId),
   }));
   const uploading = pendingDocuments.length > 0;
+  const updateRecognition = useCallback((assetFileId: string, recognition: ExpenseDocumentRecognition | null) => {
+    setDocuments(current => current.map(document => document.assetFileId === assetFileId
+      ? { ...document, recognition } : document));
+  }, []);
+  const retryRecognition = useCallback(async (assetId: string) => {
+    const response = await fetch(
+      `${BASE_PATH}/api/production/${productionId}/finance/expense-documents/${assetId}/recognition`,
+      { method: "POST" },
+    );
+    if (!response.ok) return;
+    const data = await response.json() as { recognition: ExpenseDocumentRecognition | null };
+    setDocuments(current => current.map(document => document.assetId === assetId
+      ? { ...document, recognition: data.recognition } : document));
+  }, [productionId]);
 
   useEffect(() => {
     const completed = pendingTasks.filter(item => item.task?.status === "complete" && item.task.result);
@@ -107,6 +130,7 @@ export function ExpenseCreateButton({ productionId, categories }: {
         kind: pending.kind,
         fileName: task!.result!.fileName,
         mimeType: null,
+        recognition: null,
       })),
     ]);
     const completedIds = new Set(completed.map(item => item.pending.taskId));
@@ -138,6 +162,8 @@ export function ExpenseCreateButton({ productionId, categories }: {
           intent,
           title: title.trim(),
           amount: amount.trim(),
+          merchant: merchant.trim(),
+          occurredOn: occurredOn || null,
           categoryId: categoryId || null,
           note: note.trim(),
           invoiceRequirement,
@@ -229,7 +255,10 @@ export function ExpenseCreateButton({ productionId, categories }: {
                   </div>
                   {documents.map(document => (
                     <div key={document.assetFileId} className={styles.documentRow}>
-                      <span title={document.fileName}>{document.fileName}</span>
+                      <span className={styles.documentName} title={document.fileName}>
+                        <span>{document.fileName}</span>
+                        <small>{recognitionStatusText(document.recognition)}</small>
+                      </span>
                       <OverflowSafeSelect
                         aria-label={`${document.fileName}的凭证类型`}
                         value={document.kind}
@@ -298,9 +327,24 @@ export function ExpenseCreateButton({ productionId, categories }: {
                         kind: "invoice",
                         fileName: result.fileName,
                         mimeType: null,
+                        recognition: null,
                       }])}
                     />
                   </div>
+                  <ExpenseRecognitionSuggestions
+                    productionId={productionId}
+                    documents={documents}
+                    current={{ amount, merchant, occurredOn }}
+                    onRecognition={updateRecognition}
+                    onApply={(field, value) => {
+                      if (field === "amount") setAmount(value);
+                      else if (field === "merchant") setMerchant(value);
+                      else setOccurredOn(value);
+                    }}
+                    onDocumentType={(assetFileId, kind) => setDocuments(current => current.map(document =>
+                      document.assetFileId === assetFileId ? { ...document, kind } : document))}
+                    onRetry={assetId => { void retryRecognition(assetId); }}
+                  />
                 </section>
 
                 <label className={styles.field}>
@@ -316,6 +360,17 @@ export function ExpenseCreateButton({ productionId, categories }: {
                     placeholder="0.00"
                   />
                   <small>最多两位小数</small>
+                </label>
+
+                <label className={styles.field}>
+                  <span>商户或销售方（可选）</span>
+                  <input value={merchant} onChange={event => setMerchant(event.target.value)}
+                    placeholder="例如：上海某某文化有限公司" />
+                </label>
+
+                <label className={styles.field}>
+                  <span>发生或开票日期（可选）</span>
+                  <input type="date" value={occurredOn} onChange={event => setOccurredOn(event.target.value)} />
                 </label>
 
                 <label className={styles.field}>
@@ -395,6 +450,7 @@ export function ExpenseDocumentLinks({ productionId, expenseId, documents }: {
             {document.fileName}
           </button>
           <button type="button" onClick={() => void openExpenseDocument(productionId, document.assetId, true)}>下载</button>
+          <small>{recognitionStatusText(document.recognition)}</small>
         </span>
       ))}
       {pending.map(task => (
@@ -584,6 +640,8 @@ type ExpenseDetailView = {
   title: string;
   amount: string | null;
   currency: string;
+  merchant: string;
+  occurredOn: string | null;
   categoryId: string | null;
   categoryName: string | null;
   note: string;
@@ -654,6 +712,8 @@ export function ExpenseDetailButton({
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
+  const [merchant, setMerchant] = useState("");
+  const [occurredOn, setOccurredOn] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [note, setNote] = useState("");
   const [invoiceRequirement, setInvoiceRequirement] = useState<"required" | "waived" | "">("");
@@ -663,6 +723,8 @@ export function ExpenseDetailButton({
     setDetail(expense);
     setTitle(expense.title);
     setAmount(expense.amount ?? "");
+    setMerchant(expense.merchant);
+    setOccurredOn(expense.occurredOn ?? "");
     setCategoryId(expense.categoryId ?? "");
     setNote(expense.note);
     setInvoiceRequirement(expense.invoiceRequirement ?? "");
@@ -715,6 +777,7 @@ export function ExpenseDetailButton({
           body: JSON.stringify({
             expectedMutationSeq: detail.mutationSeq,
             title: title.trim(), amount: amount.trim(), categoryId: categoryId || null,
+            merchant: merchant.trim(), occurredOn: occurredOn || null,
             note: note.trim(), invoiceRequirement: invoiceRequirement || null,
             invoiceWaiverReason: invoiceRequirement === "waived" ? invoiceWaiverReason.trim() : "",
           }),
@@ -781,6 +844,28 @@ export function ExpenseDetailButton({
     }
   }
 
+  const updateDocumentRecognition = useCallback((assetFileId: string, recognition: ExpenseDocumentRecognition | null) => {
+    setDetail(current => current ? {
+      ...current,
+      documents: current.documents.map(document => document.assetFileId === assetFileId
+        ? { ...document, recognition } : document),
+    } : current);
+  }, []);
+
+  const retryDocumentRecognition = useCallback(async (assetId: string) => {
+    const response = await fetch(
+      `${BASE_PATH}/api/production/${productionId}/finance/expense-documents/${assetId}/recognition`,
+      { method: "POST" },
+    );
+    if (!response.ok) return;
+    const data = await response.json() as { recognition: ExpenseDocumentRecognition | null };
+    setDetail(current => current ? {
+      ...current,
+      documents: current.documents.map(document => document.assetId === assetId
+        ? { ...document, recognition: data.recognition } : document),
+    } : current);
+  }, [productionId]);
+
   const mine = detail?.submittedBy === actorId;
   const editable = !!detail && detail.status === "draft" && mine && !archived;
   const canSupplement = !!detail && mine && !archived
@@ -818,6 +903,14 @@ export function ExpenseDetailButton({
                     <input inputMode="decimal" value={amount} disabled={!editable}
                       onChange={event => setAmount(event.target.value)} />
                   </label>
+                  <label className={styles.field}><span>商户或销售方</span>
+                    <input value={merchant} disabled={!editable}
+                      onChange={event => setMerchant(event.target.value)} />
+                  </label>
+                  <label className={styles.field}><span>发生或开票日期</span>
+                    <input type="date" value={occurredOn} disabled={!editable}
+                      onChange={event => setOccurredOn(event.target.value)} />
+                  </label>
                   <label className={styles.field}><span>预算科目</span>
                     <OverflowSafeSelect value={categoryId} disabled={!editable}
                       onChange={event => setCategoryId(event.target.value)}>
@@ -845,6 +938,18 @@ export function ExpenseDetailButton({
                     <h3>凭证</h3>
                     <ExpenseDocumentLinks productionId={productionId} expenseId={expenseId}
                       documents={detail.documents} />
+                    <ExpenseRecognitionSuggestions
+                      productionId={productionId}
+                      documents={detail.documents}
+                      current={{ amount, merchant, occurredOn }}
+                      onRecognition={updateDocumentRecognition}
+                      onApply={editable ? (field, value) => {
+                        if (field === "amount") setAmount(value);
+                        else if (field === "merchant") setMerchant(value);
+                        else setOccurredOn(value);
+                      } : undefined}
+                      onRetry={editable ? assetId => { void retryDocumentRecognition(assetId); } : undefined}
+                    />
                     {editable && detail.documents.map(document => (
                       <button key={document.id} type="button" disabled={busy}
                         onClick={() => void removeDocument(document)}>移除 {document.fileName}</button>

@@ -125,6 +125,8 @@ export async function createExpenseDraft(params: {
   title?: string;
   amount?: string | null;
   currency?: string;
+  merchant?: string;
+  occurredOn?: string | null;
   note?: string;
   submittedBy: string;
   invoiceRequirement?: InvoiceRequirement | null;
@@ -144,13 +146,14 @@ export async function createExpenseDraft(params: {
     await lockOwnedExpenseDocumentFiles(client, params.productionId, params.submittedBy, uniqueFileIds);
     const { rows } = await client.query<{ id: string }>(
       `INSERT INTO production_expense
-         (production_id, category_id, title, amount, currency, note,
+         (production_id, category_id, title, amount, currency, merchant, occurred_on, note,
           invoice_requirement, invoice_waiver_reason, submitted_by, status)
-       VALUES ($1,$2,$3,$4::numeric,$5,$6,$7,$8,$9,'draft')
+       VALUES ($1,$2,$3,$4::numeric,$5,$6,$7::date,$8,$9,$10,$11,'draft')
        RETURNING id`,
       [
         params.productionId, params.categoryId, params.title?.trim() ?? "", params.amount ?? null,
-        params.currency ?? "CNY", params.note ?? "", params.invoiceRequirement ?? null,
+        params.currency ?? "CNY", params.merchant?.trim() ?? "", params.occurredOn ?? null,
+        params.note ?? "", params.invoiceRequirement ?? null,
         params.invoiceRequirement === "waived" ? params.invoiceWaiverReason?.trim() ?? "" : "",
         params.submittedBy,
       ],
@@ -187,6 +190,7 @@ export async function createExpenseDraft(params: {
 export async function submitExpense(params: {
   productionId: string; categoryId: string | null; title: string;
   amount: string; currency?: string; note?: string; submittedBy: string;
+  merchant?: string; occurredOn?: string | null;
   invoiceRequirement?: InvoiceRequirement;
   invoiceWaiverReason?: string;
   documents?: { assetFileId: string; kind: ExpenseDocumentKind }[];
@@ -218,15 +222,16 @@ export async function submitExpense(params: {
 
     const res = await client.query<{ id: string }>(
       `INSERT INTO production_expense
-         (production_id, category_id, title, amount, currency, note,
+         (production_id, category_id, title, amount, currency, merchant, occurred_on, note,
           invoice_requirement, invoice_waiver_reason, submitted_by,
           status, current_stage, current_stage_depth, current_approver_ids, escalation_chain,
           resolved_at, resolved_by, submitted_at)
-       VALUES ($1,$2,$3,$4::numeric,$5,$6,$7,$8,$9,$10,$11,$12,$13::uuid[],$14::jsonb,$15,$16,now())
+       VALUES ($1,$2,$3,$4::numeric,$5,$6,$7::date,$8,$9,$10,$11,$12,$13,$14,$15::uuid[],$16::jsonb,$17,$18,now())
        RETURNING id`,
       [
         params.productionId, params.categoryId, params.title.trim(), params.amount,
-        params.currency ?? "CNY", params.note ?? "", invoiceRequirement, waiverReason,
+        params.currency ?? "CNY", params.merchant?.trim() ?? "", params.occurredOn ?? null,
+        params.note ?? "", invoiceRequirement, waiverReason,
         params.submittedBy, plan.status, plan.first?.stage ?? null, plan.first?.depth ?? 0,
         plan.first?.approverIds ?? [], JSON.stringify(plan.chain),
         plan.selfApproved ? plan.actedAt : null, plan.selfApproved ? params.submittedBy : null,
@@ -248,6 +253,7 @@ export async function submitExpense(params: {
       mutationSeq: 0,
       details: {
         title: params.title.trim(), amount: params.amount, currency: params.currency ?? "CNY",
+        merchant: params.merchant?.trim() ?? "", occurredOn: params.occurredOn ?? null,
         categoryId: params.categoryId, evidenceAssetFileIds: uniqueFileIds,
       },
     });
@@ -282,6 +288,8 @@ export async function updateExpenseDraft(params: {
   title: string;
   amount: string | null;
   currency?: string;
+  merchant?: string;
+  occurredOn?: string | null;
   note: string;
   invoiceRequirement: InvoiceRequirement | null;
   invoiceWaiverReason: string;
@@ -293,15 +301,17 @@ export async function updateExpenseDraft(params: {
     await client.query("BEGIN");
     const updated = await client.query<{ mutation_seq: string }>(
       `UPDATE production_expense
-          SET category_id = $5, title = $6, amount = $7::numeric, currency = $8, note = $9,
-              invoice_requirement = $10, invoice_waiver_reason = $11,
+          SET category_id = $5, title = $6, amount = $7::numeric, currency = $8,
+              merchant = $9, occurred_on = $10::date, note = $11,
+              invoice_requirement = $12, invoice_waiver_reason = $13,
               mutation_seq = mutation_seq + 1, updated_at = now()
         WHERE id = $1 AND production_id = $2 AND submitted_by = $3
           AND status = 'draft' AND mutation_seq = $4
         RETURNING mutation_seq`,
       [
         params.expenseId, params.productionId, params.actorId, params.expectedMutationSeq,
-        params.categoryId, params.title.trim(), params.amount, params.currency ?? "CNY", params.note,
+        params.categoryId, params.title.trim(), params.amount, params.currency ?? "CNY",
+        params.merchant?.trim() ?? "", params.occurredOn ?? null, params.note,
         params.invoiceRequirement,
         params.invoiceRequirement === "waived" ? params.invoiceWaiverReason.trim() : "",
       ],
@@ -322,7 +332,7 @@ export async function updateExpenseDraft(params: {
       type: "draft_saved",
       actorId: params.actorId,
       mutationSeq,
-      details: { fields: ["title", "amount", "currency", "categoryId", "note", "invoiceRequirement"] },
+      details: { fields: ["title", "amount", "currency", "merchant", "occurredOn", "categoryId", "note", "invoiceRequirement"] },
     });
     await client.query("COMMIT");
   } catch (error) {
@@ -386,10 +396,12 @@ export async function submitExpenseDraft(
     await client.query("BEGIN");
     const locked = await client.query<{
       status: ExpenseStatus; submitted_by: string; category_id: string | null; title: string;
-      amount: string | null; currency: string; invoice_requirement: InvoiceRequirement | null;
+      amount: string | null; currency: string; merchant: string; occurred_on: string | null;
+      invoice_requirement: InvoiceRequirement | null;
       invoice_waiver_reason: string; mutation_seq: string;
     }>(
       `SELECT status, submitted_by, category_id, title, amount::text AS amount, currency,
+              merchant, occurred_on::text AS occurred_on,
               invoice_requirement, invoice_waiver_reason, mutation_seq
          FROM production_expense
         WHERE id = $1 AND production_id = $2 FOR UPDATE`,
@@ -435,6 +447,7 @@ export async function submitExpenseDraft(
       mutationSeq: expectedMutationSeq,
       details: {
         title: row.title, amount: row.amount, currency: row.currency,
+        merchant: row.merchant, occurredOn: row.occurred_on,
         categoryId: row.category_id, evidenceAssetFileIds,
       },
     });
@@ -972,4 +985,3 @@ export async function escalateExpiredExpenses(): Promise<{ escalated: number }> 
   }
   return { escalated };
 }
-

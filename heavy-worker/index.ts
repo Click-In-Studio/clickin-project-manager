@@ -29,7 +29,7 @@ const SWEEP_MS = Number(process.env.JOB_SWEEP_MS ?? 60_000);
 const DRAIN_TIMEOUT_MS = Number(process.env.HEAVY_WORKER_DRAIN_MS ?? 300_000);
 const MAX_CONCURRENT = Number(process.env.HEAVY_WORKER_CONCURRENCY ?? 2);
 /** 单种类并发上限：解析是纯 CPU 单线程重活，多开只会互相拖慢 + 内存叠加。 */
-const KIND_LIMITS: Record<string, number> = { doc_parse: 1 };
+const KIND_LIMITS: Record<string, number> = { doc_parse: 1, expense_document_recognition: 2 };
 
 const OWNER = `hw:${hostname()}:${process.pid}`;
 

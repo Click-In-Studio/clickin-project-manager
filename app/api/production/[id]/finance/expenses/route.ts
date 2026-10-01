@@ -4,7 +4,7 @@ import { getProductionPermissionContext } from "@/lib/perm/permission-context-db
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import {
   AMOUNT_RE,
-  createExpenseDraft, FinanceError, getBudgetCategory, listExpenses, submitExpense,
+  createExpenseDraft, FinanceError, getBudgetCategory, isExpenseDate, listExpenses, submitExpense,
   type ExpenseDocumentKind,
 } from "@/lib/ops/finance-db";
 import { readJsonObject } from "@/lib/request-json";
@@ -63,6 +63,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "金额必须是最多两位小数的非负数" }, { status: 400 });
   if (intent === "submit" && !amount)
     return Response.json({ error: "金额不能为空" }, { status: 400 });
+  const occurredOn = typeof body.occurredOn === "string" && body.occurredOn ? body.occurredOn : null;
+  if (occurredOn && !isExpenseDate(occurredOn))
+    return Response.json({ error: "发生日期无效" }, { status: 400 });
 
   const categoryId = typeof body.categoryId === "string" && body.categoryId ? body.categoryId : null;
   if (categoryId && !(await getBudgetCategory(categoryId, productionId)))
@@ -96,6 +99,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const common = {
       productionId, categoryId, title, amount,
       currency: typeof body.currency === "string" ? body.currency : "CNY",
+      merchant: typeof body.merchant === "string" ? body.merchant : "",
+      occurredOn,
       note: typeof body.note === "string" ? body.note : "",
       submittedBy: session.userId,
       invoiceRequirement: parsedInvoiceRequirement,

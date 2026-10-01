@@ -184,7 +184,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         grantUploader: !expenseDocument,
       });
       // 缩略图/文档解析预热是异步任务（heavy-worker）——上传路径不再同步跑 sharp
-      await enqueueAssetPostProcess({ assetFileId: file.id, r2Key: body.r2Key, mimeType, fileName: body.fileName, fileSize: body.fileSize ?? null });
+      await enqueueAssetPostProcess({ assetFileId: file.id, r2Key: body.r2Key, mimeType, fileName: body.fileName, fileSize: body.fileSize ?? null, expenseDocument });
       return Response.json({ asset, file }, { status: 201 });
     }
 
@@ -205,7 +205,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         grantUploader: !expenseDocument,
       });
       // 同上：后置处理异步化
-      await enqueueAssetPostProcess({ assetFileId: file.id, r2Key: body.r2Key, mimeType, fileName: body.fileName, fileSize: body.fileSize ?? null });
+      await enqueueAssetPostProcess({ assetFileId: file.id, r2Key: body.r2Key, mimeType, fileName: body.fileName, fileSize: body.fileSize ?? null, expenseDocument });
       return Response.json({ asset, file }, { status: 201 });
     }
 

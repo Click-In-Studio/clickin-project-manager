@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
-import { listAssets } from "@/lib/asset/db";
+import { createAsset, listAssets } from "@/lib/asset/db";
 import { listEnumerableNodeIds } from "@/lib/node/perm";
 import { cleanupProduction, makeProduction, shortId } from "../_support/factories";
 
@@ -10,7 +10,10 @@ vi.mock("@/lib/r2", async importOriginal => ({
   ...await importOriginal<typeof import("@/lib/r2")>(),
   presignedPut: vi.fn(() => ({ url: "https://r2.example/put", contentType: "application/pdf" })),
 }));
-vi.mock("@/lib/job/asset-jobs", () => ({ enqueueAssetPostProcess: vi.fn(async () => {}) }));
+vi.mock("@/lib/job/asset-jobs", () => ({
+  enqueueAssetPostProcess: vi.fn(async () => {}),
+  enqueueExpenseDocumentRecognition: vi.fn(async () => {}),
+}));
 
 import { POST as createAssetRoute } from "@/app/api/production/[id]/assets/route";
 import { POST as presignRoute } from "@/app/api/production/[id]/assets/presign/route";
@@ -21,11 +24,15 @@ import {
 } from "@/app/api/production/[id]/assets/[assetId]/route";
 import { GET as downloadAssetRoute } from "@/app/api/production/[id]/assets/[assetId]/download-url/route";
 import { GET as previewAssetRoute } from "@/app/api/production/[id]/assets/[assetId]/preview-url/route";
+import {
+  GET as getRecognitionRoute, POST as retryRecognitionRoute,
+} from "@/app/api/production/[id]/finance/expense-documents/[assetId]/recognition/route";
 
 let prodId: string;
 let ownerId: string;
 let financeOnlyId: string;
 let outsiderId: string;
+let viewOnlyId: string;
 
 function request(userId: string | null, body: unknown) {
   const req = new NextRequest("http://localhost/api/assets", {
@@ -65,9 +72,22 @@ beforeAll(async () => {
   outsiderId = (await getPool().query<{ id: string }>(
     "INSERT INTO app_user DEFAULT VALUES RETURNING id",
   )).rows[0].id;
+  viewOnlyId = (await getPool().query<{ id: string }>(
+    "INSERT INTO app_user DEFAULT VALUES RETURNING id",
+  )).rows[0].id;
   await getPool().query(
     `INSERT INTO production_member (production_id, user_id, roles) VALUES ($1, $2, '{}')`,
     [prodId, financeOnlyId],
+  );
+  await getPool().query(
+    `INSERT INTO production_member (production_id, user_id, roles) VALUES ($1, $2, '{}')`,
+    [prodId, viewOnlyId],
+  );
+  await getPool().query(
+    `INSERT INTO production_member_grant
+       (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+     VALUES ($1, $2, 'finance', '*', 'expenses', 'view', 'auto')`,
+    [prodId, viewOnlyId],
   );
   await getPool().query(
     `INSERT INTO production_member_grant
@@ -153,5 +173,32 @@ describe("财务凭证上传用途", () => {
       ...uploadBody(), assetType: "financial_document",
     }), ctx());
     expect(response.status).toBe(400);
+  });
+
+  it("识别状态只对凭证上下文开放；重试还要求 expenses@create", async () => {
+    const uploaded = await createAsset({
+      productionId: prodId,
+      uploaderUserId: viewOnlyId,
+      assetType: "financial_document",
+      fileName: "receipt.jpg",
+      mimeType: "image/jpeg",
+      storageType: "r2",
+      r2Key: `assets/${shortId()}/receipt.jpg`,
+      fileVersionPolicy: "single",
+      grantUploader: false,
+    });
+    const recognitionCtx = { params: Promise.resolve({ id: prodId, assetId: uploaded.asset.id }) };
+    const makeRecognitionRequest = (userId: string | null, method: "GET" | "POST") => {
+      const req = new NextRequest("http://localhost/api/recognition", { method });
+      if (userId) req.cookies.set(SESSION_COOKIE, createSession({
+        userId, name: "测试", avatarUrl: null, isAdmin: false,
+      }));
+      return req;
+    };
+
+    expect((await getRecognitionRoute(makeRecognitionRequest(null, "GET"), recognitionCtx)).status).toBe(401);
+    expect((await getRecognitionRoute(makeRecognitionRequest(outsiderId, "GET"), recognitionCtx)).status).toBe(403);
+    expect((await getRecognitionRoute(makeRecognitionRequest(viewOnlyId, "GET"), recognitionCtx)).status).toBe(200);
+    expect((await retryRecognitionRoute(makeRecognitionRequest(viewOnlyId, "POST"), recognitionCtx)).status).toBe(403);
   });
 });

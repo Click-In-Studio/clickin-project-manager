@@ -180,6 +180,21 @@ describe("inline 形态（JOB_WORKER 未设：enqueue 原地执行）", () => {
     expect(row.error).toBe("网络抖了");
   });
 
+  it("detachedInline 只等待入队，不等待重任务完成", async () => {
+    const kind = `ti_detached_${shortId()}`;
+    let release!: () => void;
+    let markStarted!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { markStarted = resolve; });
+    registerJobHandler(kind, { run: async () => { markStarted(); await gate; return { ok: true }; } });
+
+    const row = await makeJob({ kind, payload: {}, detachedInline: true });
+    await started;
+    expect((await getJob(row.id))?.status).toBe("running");
+    release();
+    expect((await waitForJob(row.id, 8_000))?.status).toBe("done");
+  });
+
   it("未注册的种类 → failed（未知任务类型）", async () => {
     const row = await makeJob({ kind: `ti_missing_${shortId()}`, payload: {} });
     expect(row.status).toBe("failed");

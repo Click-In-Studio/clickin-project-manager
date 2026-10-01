@@ -144,6 +144,10 @@
   white-space: nowrap;
 }
 
+.documentName { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.documentName > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.documentName small { color: var(--muted); font-size: 8px; }
+
 .documentRow select,
 .documentRow button {
   min-height: 30px;
