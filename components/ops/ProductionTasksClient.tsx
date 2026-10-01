@@ -13,7 +13,11 @@ import type { PickerMember, PickerDept } from "@/components/perm/MemberPickerMod
 import DropdownPicker, { type DropdownPickerItem } from "@/components/ui/DropdownPicker";
 import styles from "@/components/ui/my-pages.module.css";
 import responsive from "@/components/ops/responsive.module.css";
-import { TASK_STATUS_LABELS } from "@/lib/ops/task-types";
+import {
+  TASK_STATUS_LABELS,
+  taskMatchesStatusFilter,
+  type TaskStatusFilter,
+} from "@/lib/ops/task-types";
 
 const STATUS_LABEL = TASK_STATUS_LABELS;
 
@@ -61,11 +65,11 @@ function relationLabel(t: ProductionTechReqEntry): string {
   return t.departmentName ? `${base} · ${t.departmentName}` : base;
 }
 
-type StatusFilter = "active" | "awaiting" | "pending" | "in_progress" | "done";
+type StatusFilter = TaskStatusFilter;
 
 const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
   active: "进行中任务",
-  awaiting: TASK_STATUS_LABELS.awaiting,
+  awaiting: "待我确认",
   pending: TASK_STATUS_LABELS.pending,
   in_progress: TASK_STATUS_LABELS.in_progress,
   done: "已完成", // 筛选器用完成时态，与状态词「完成」刻意不同
@@ -484,6 +488,7 @@ export default function ProductionTasksClient({
   initialTasks,
   initialEventFilter,
   currentUserId,
+  pocTaskIds,
 }: {
   productionId: string;
   initialTasks: ProductionTechReqEntry[];
@@ -491,10 +496,13 @@ export default function ProductionTasksClient({
   initialEventFilter?: string;
   /** "我的"scope 判定（assignee 含本人） */
   currentUserId?: string;
+  /** 当前用户是责任主体有效 POC 的 task；与可见性正交，只供「待我确认」筛选。 */
+  pocTaskIds: string[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tasks, setTasks] = useState(initialTasks);
+  const pocTaskIdSet = new Set(pocTaskIds);
   // router.refresh() 后服务端重投喂（新建任务落库）→ 本地列表跟进
   useEffect(() => { setTasks(initialTasks); }, [initialTasks]);
   const [createOpen, setCreateOpen] = useState(false);
@@ -698,8 +706,7 @@ export default function ProductionTasksClient({
     if (scope === "event" && !t.eventId) return false;  // 仅看关联事件的
     if (selectedEvent === "__standalone" ? t.eventId != null : (selectedEvent !== "all" && t.eventId !== selectedEvent)) return false;
     if (selectedDept !== "all" && t.departmentId !== selectedDept) return false;
-    if (statusFilter === "active") return t.status !== "done" || completingIds.has(t.id);
-    return t.status === statusFilter;
+    return taskMatchesStatusFilter(t, statusFilter, pocTaskIdSet, completingIds.has(t.id));
   });
 
   // 摘要统计（原型 taskSummary：待处理 / 进行中 / 已阻塞 / 完成度）
@@ -737,7 +744,7 @@ export default function ProductionTasksClient({
     return tasks.filter(t => {
       if (eventId === "__standalone" ? t.eventId != null : (eventId !== "all" && t.eventId !== eventId)) return false;
       if (deptId !== "all" && t.departmentId !== deptId) return false;
-      return sf === "active" ? t.status !== "done" : t.status === sf;
+      return taskMatchesStatusFilter(t, sf, pocTaskIdSet);
     }).length;
   }
 

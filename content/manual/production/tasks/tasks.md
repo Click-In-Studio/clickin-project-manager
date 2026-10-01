@@ -7,7 +7,7 @@ who: 所有成员可看；新建独立任务需要任务创建权限，部门 PO
 tier: all
 platform: [desktop, mobile]
 related: [production/tasks/task-detail, production/events/event-detail, production/planning/gantt]
-updated: 2026-09-27
+updated: 2026-10-01
 ---
 
 ## 这是什么
@@ -39,7 +39,7 @@ updated: 2026-09-27
 
 - **我的任务 / 全部**：只看指派给我的，还是全项目。
 - **关联事件**：某一场事件的、或者独立任务。
-- **部门**、**状态**下拉。
+- **部门**、**状态**下拉。其中「待我确认」只列轮到你以责任部门或用户组 POC 身份确认的任务；其他人待确认的任务仍可在「进行中任务」或「全部」范围里查看。
 - 「在日历中查看」跳到项目日历。
 
 ### 新建

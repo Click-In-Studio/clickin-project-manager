@@ -27,7 +27,10 @@ import {
 import { canAssignTechReq, canEditTechReq, canViewTechReq, canEnterEvent } from "@/lib/ops/event-permissions";
 import { createEventGroup, deleteEventGroup, EventGroupError } from "@/lib/ops/event-group-db";
 import { freezeEventGroups, unfreezeEventGroups } from "@/lib/ops/event-group-freeze";
-import { isTaskPoc, taskSubjectOf, parseTaskSubject, resolveSubjectPatch } from "@/lib/ops/task-poc";
+import {
+  isTaskPoc, taskSubjectOf, parseTaskSubject, resolveSubjectPatch,
+} from "@/lib/ops/task-poc";
+import { listTaskPocIdsForUser } from "@/lib/ops/task-poc-db";
 import { toActor } from "@/lib/perm/grant-check";
 import type { PermissionContext } from "@/lib/perm/permissions";
 
@@ -275,6 +278,30 @@ describe("6. 绑组 task 出现在组 POC 的「与我相关」里", () => {
 
     // 非 POC 的组员不在「与我相关」里（与部门那支一致：只认 POC 与 assignee）
     expect((await listMyTechReqsFull(runnerId)).some(t => t.id === task.id)).toBe(false);
+  });
+
+  it("集合查询在冻结后认快照 POC，不跟随部门现任 POC 漂移", async () => {
+    const task = await makeGroupTask("awaiting");
+    await freezeEventGroups(eventId, organizerId);
+    try {
+      await getPool().query(
+        `UPDATE production_dept_member SET is_poc = (user_id = $3)
+          WHERE production_id = $1 AND dept_id = $2`,
+        [prodId, deptId, deptNewbieId],
+      );
+
+      expect(await listTaskPocIdsForUser(deptPocId, prodId)).toContain(task.id);
+      expect(await listTaskPocIdsForUser(deptNewbieId, prodId)).not.toContain(task.id);
+      expect((await listMyTechReqsFull(deptPocId)).some(t => t.id === task.id)).toBe(true);
+      expect((await listMyTechReqsFull(deptNewbieId)).some(t => t.id === task.id)).toBe(false);
+    } finally {
+      await getPool().query(
+        `UPDATE production_dept_member SET is_poc = (user_id = $3)
+          WHERE production_id = $1 AND dept_id = $2`,
+        [prodId, deptId, deptPocId],
+      );
+      await unfreezeEventGroups(eventId);
+    }
   });
 });
 
