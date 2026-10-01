@@ -17,6 +17,9 @@ import { PATCH as patchCategory } from "@/app/api/production/[id]/finance/catego
 import { GET as getExpenseCategories, POST as postExpenseCategory } from "@/app/api/production/[id]/finance/expense-categories/route";
 import { DELETE as deleteExpenseCategoryRoute } from "@/app/api/production/[id]/finance/expense-categories/[categoryId]/route";
 import { GET as getBudgetItems, POST as postBudgetItem } from "@/app/api/production/[id]/finance/budget-items/route";
+import {
+  DELETE as deleteBudgetItemRoute, PATCH as patchBudgetItemRoute,
+} from "@/app/api/production/[id]/finance/budget-items/[budgetItemId]/route";
 import { getPool } from "@/lib/pg";
 import { listMyProductionsWithRoles } from "@/lib/production/production-db";
 import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/perm/permissions";
@@ -29,7 +32,7 @@ import {
 import {
   approveExpense, withdrawExpense, createBudgetCategory, deleteBudgetCategory,
   addExpenseDocument, createExpenseDraft,
-  escalateExpiredExpenses, FinanceError, getExpense, getExpenseDetail, listBudgetCategories, listExpenses,
+  escalateExpiredExpenses, FinanceError, getBudgetCategory, getExpense, getExpenseDetail, listBudgetCategories, listExpenses,
   listPendingExpenses, rejectExpense, submitExpense, updateBudgetCategory,
   listBudgetCategoryOptions, reopenExpense, submitExpenseDraft, updateExpenseDraft,
 } from "@/lib/ops/finance-db";
@@ -1117,6 +1120,42 @@ describe("14. 财务配置端点以 edit 为入口门，动作仍逐键校验", 
     const category = await createBudgetCategory({ productionId: prodId, name: `无删除权${shortId()}`, amount: null, createdBy: ownerId });
     expect((await deleteExpenseCategoryRoute(req(financeEditorId, "DELETE"), { params: Promise.resolve({ id: prodId, categoryId: category.categoryId }) }))?.status).toBe(403);
     expect((await postBudgetItem(req(financeEditorId, "POST", { categoryId: category.categoryId, amount: null }), ctx())).status).toBe(403);
+    expect((await deleteBudgetItemRoute(req(financeEditorId, "DELETE"), {
+      params: Promise.resolve({ id: prodId, budgetItemId: `bi_missing_${shortId()}` }),
+    })).status).toBe(403);
+  });
+
+  it("新建省略 amount 默认无上限，PATCH 省略 amount 不改原值", async () => {
+    const source = await createBudgetCategory({
+      productionId: prodId, name: `省略金额${shortId()}`, amount: "123.00", deptId, createdBy: ownerId,
+    });
+    const created = await postBudgetItem(req(ownerId, "POST", { categoryId: source.categoryId }), ctx());
+    expect(created.status).toBe(201);
+    const createdBody = await created.json() as { item: { id: string; amount: string | null } };
+    expect(createdBody.item.amount).toBeNull();
+
+    const patched = await patchBudgetItemRoute(req(ownerId, "PATCH", { notes: "只改备注" }), {
+      params: Promise.resolve({ id: prodId, budgetItemId: source.id }),
+    });
+    expect(patched.status).toBe(200);
+    const patchedBody = await patched.json() as { item: { amount: string | null; notes: string } };
+    expect(patchedBody.item).toMatchObject({ amount: "123.00", notes: "只改备注" });
+  });
+
+  it("归档项目不能删除预算项", async () => {
+    const item = await createBudgetCategory({
+      productionId: prodId, name: `归档删除${shortId()}`, amount: null, createdBy: ownerId,
+    });
+    await getPool().query("UPDATE production SET archived_at = now() WHERE id = $1", [prodId]);
+    try {
+      const response = await deleteBudgetItemRoute(req(ownerId, "DELETE"), {
+        params: Promise.resolve({ id: prodId, budgetItemId: item.id }),
+      });
+      expect(response.status).toBe(403);
+      expect(await getBudgetCategory(item.id, prodId)).not.toBeNull();
+    } finally {
+      await getPool().query("UPDATE production SET archived_at = NULL WHERE id = $1", [prodId]);
+    }
   });
 
   it("制作人的通配资格能显示财务配置入口，不依赖枚举新键", async () => {

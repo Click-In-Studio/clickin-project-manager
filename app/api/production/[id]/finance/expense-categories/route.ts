@@ -14,6 +14,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  // 配置页以 edit 的「已授权或可自确认」作为准入，页面先渲染才能弹出
+  // PageActivationGate。这里只读列表故与页面同源放行；所有写动作仍只认 hasEffectiveGrant。
   const entry = await canAccessNode(toActor(session, access.permCtx), id, "finance", "*", "categories", "edit");
   if (!entry.allowed && entry.reason !== "needs_self_confirm")
     return Response.json({ error: "权限不足" }, { status: 403 });

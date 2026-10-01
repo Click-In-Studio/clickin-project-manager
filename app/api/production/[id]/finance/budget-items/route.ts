@@ -14,6 +14,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
+  // 配置页以 edit 的「已授权或可自确认」作为准入，页面先渲染才能弹出
+  // PageActivationGate。这里只读列表故与页面同源放行；所有写动作仍只认 hasEffectiveGrant。
   const entry = await canAccessNode(toActor(session, access.permCtx), id, "finance", "*", "budget", "edit");
   if (!entry.allowed && entry.reason !== "needs_self_confirm")
     return Response.json({ error: "权限不足" }, { status: 403 });
@@ -33,7 +35,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!parsed.ok) return parsed.response;
   const body = parsed.value;
   const categoryId = typeof body.categoryId === "string" ? body.categoryId : "";
-  const amount = body.amount === null || body.amount === "" ? null : String(body.amount ?? "");
+  const amount = body.amount === undefined || body.amount === null || body.amount === ""
+    ? null : String(body.amount);
   if (!categoryId) return Response.json({ error: "请选择费用科目" }, { status: 400 });
   if (amount !== null && !AMOUNT_RE.test(amount)) return Response.json({ error: "预算金额格式不正确" }, { status: 400 });
   try {
