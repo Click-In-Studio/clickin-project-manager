@@ -61,7 +61,7 @@ export function ExpenseRecognitionSuggestions({
   onDocumentType?: (assetFileId: string, value: "invoice" | "receipt" | "other") => void;
   onRetry?: (assetId: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [noticeFileId, setNoticeFileId] = useState<string | null>(null);
   const seenSucceeded = useRef(new Set<string>());
   const documentsRef = useRef(documents);

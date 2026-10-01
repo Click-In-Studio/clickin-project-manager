@@ -104,7 +104,7 @@ registerJobHandler("image_thumbnail", {
 // ── expense_document_recognition：PDF 文本层 / OCR → LLM 结构化候选 ────────
 
 registerJobHandler("expense_document_recognition", {
-  async run(payload, job) {
+  async run(payload) {
     const assetFileId = typeof payload.assetFileId === "string" ? payload.assetFileId : "";
     if (!assetFileId) throw new TerminalJobError("expense_document_recognition payload 缺少 assetFileId");
     const {
@@ -112,9 +112,9 @@ registerJobHandler("expense_document_recognition", {
       markExpenseDocumentRecognitionProcessing,
     } = await import("@/lib/ops/expense-recognition-db");
     const { getFinancialDocumentFile } = await import("@/lib/ops/finance-document-db");
-    const {
-      recognizeExpenseDocument, RecognitionInputError, RecognitionUnavailableError,
-    } = await import("@/lib/ops/expense-document-recognition");
+    const { recognizeExpenseDocument, RecognitionUnavailableError } = await import(
+      "@/lib/ops/expense-document-recognition"
+    );
     const file = await getFinancialDocumentFile(assetFileId);
     if (!file) {
       await failExpenseDocumentRecognition(assetFileId, "failed", "财务凭证文件不存在");
@@ -131,13 +131,8 @@ registerJobHandler("expense_document_recognition", {
         await failExpenseDocumentRecognition(assetFileId, "unavailable", message);
         return { assetFileId, unavailable: true };
       }
-      if (error instanceof RecognitionInputError) {
-        await failExpenseDocumentRecognition(assetFileId, "failed", message);
-        throw new TerminalJobError(message);
-      }
-      const exhausted = job.attempts >= job.maxAttempts;
-      await failExpenseDocumentRecognition(assetFileId, exhausted ? "failed" : "queued", message);
-      throw error;
+      await failExpenseDocumentRecognition(assetFileId, "failed", message);
+      throw new TerminalJobError(message);
     }
   },
 });

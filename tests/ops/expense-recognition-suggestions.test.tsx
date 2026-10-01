@@ -72,6 +72,8 @@ describe("凭证识别建议", () => {
     const notice = container.querySelector<HTMLElement>("[role=status]");
     expect(notice?.textContent).toContain("识别完成");
     expect(container.querySelector("[aria-modal=true]")).toBeNull();
+    expect(container.textContent).toContain("来源：PDF 文本层");
+    expect([...container.querySelectorAll("button")].some(button => button.textContent?.includes("收起"))).toBe(true);
     await act(async () => {
       [...notice!.querySelectorAll("button")].find(button => button.textContent === "填入")!.click();
     });
@@ -83,7 +85,7 @@ describe("凭证识别建议", () => {
     expect(typeApplied).toHaveBeenCalledWith("af_1", "receipt");
   });
 
-  it("已有金额冲突时只展开建议，不覆盖输入", async () => {
+  it("已有金额冲突时默认展开建议且不覆盖输入", async () => {
     const applied = vi.fn();
     await act(async () => root.render(
       <ExpenseRecognitionSuggestions
@@ -94,10 +96,7 @@ describe("凭证识别建议", () => {
         onApply={applied}
       />,
     ));
-    await act(async () => {
-      const toggle = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("查看"));
-      toggle!.click();
-    });
+    expect([...container.querySelectorAll("button")].some(button => button.textContent?.includes("收起"))).toBe(true);
     expect(container.textContent).toContain("票面合计 ¥88.50 与当前报销金额 ¥100.00 不一致");
     expect(applied).not.toHaveBeenCalled();
   });
