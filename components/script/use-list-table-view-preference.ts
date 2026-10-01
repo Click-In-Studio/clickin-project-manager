@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useState } from "react";
 
 export type ListTableViewMode = "list" | "table";
 export type ListTableViewScope = "dramaturgy" | "characters";
@@ -12,19 +12,25 @@ export function listTableViewStorageKey(scope: ListTableViewScope) {
 }
 
 export function useListTableViewPreference(scope: ListTableViewScope) {
-  const [view, setViewState] = useState<ListTableViewMode>("table");
+  const [preference, setPreference] = useState<{
+    scope: ListTableViewScope;
+    view: ListTableViewMode | null;
+  }>({ scope, view: null });
+  const view = preference.scope === scope ? preference.view : null;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    let next: ListTableViewMode = "table";
     try {
       const stored = window.localStorage.getItem(listTableViewStorageKey(scope));
-      if (stored === "list" || stored === "table") setViewState(stored);
+      if (stored === "list" || stored === "table") next = stored;
     } catch {
-      // localStorage 被浏览器策略禁用时，仍保持首次进入默认表格。
+      // localStorage 被浏览器策略禁用时使用默认表格。
     }
+    setPreference({ scope, view: next });
   }, [scope]);
 
   const setView = useCallback((next: ListTableViewMode) => {
-    setViewState(next);
+    setPreference({ scope, view: next });
     try {
       window.localStorage.setItem(listTableViewStorageKey(scope), next);
     } catch {

@@ -268,7 +268,7 @@ export default function Dramaturgy({
       </div>
     </>
   ) : null;
-  const primaryOverflow = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
+  const primaryOverflow = sceneViewMode !== null && toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
     <ListTableViewToggleOverflow value={sceneViewMode} onChange={setSceneViewMode} />
   ) : null;
   const toolbarOverflow = secondaryOverflow || primaryOverflow ? (
@@ -288,7 +288,9 @@ export default function Dramaturgy({
           active="overview"
         />
         <ProductionTopMenuDivider />
-        <ListTableViewToggle value={sceneViewMode} onChange={setSceneViewMode} />
+        {sceneViewMode !== null && (
+          <ListTableViewToggle value={sceneViewMode} onChange={setSceneViewMode} />
+        )}
 
         {sceneViewMode === "table" && (
           <>
@@ -336,7 +338,7 @@ export default function Dramaturgy({
 
       {/* ── Scrollable content ── */}
       <div className="flex-1 overflow-y-auto" style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
-        {sceneViewMode === "list" ? (
+        {sceneViewMode === null ? null : sceneViewMode === "list" ? (
           <ScenesManager
             key={versionId ?? ""}
             productionId={productionId}

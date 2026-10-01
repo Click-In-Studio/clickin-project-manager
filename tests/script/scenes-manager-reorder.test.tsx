@@ -159,7 +159,7 @@ describe("构作列表拖动排序的落点", () => {
     const synopsis = container.querySelector<HTMLTextAreaElement>("textarea");
     expect(synopsis).not.toBeNull();
     expect(synopsis?.rows).toBe(2);
-    expect(synopsis?.className).toContain("h-8");
+    expect(synopsis?.className).toContain("h-10");
     expect(synopsis?.className).toContain("resize-y");
     expect(synopsis?.className).toContain("sm:h-auto");
 

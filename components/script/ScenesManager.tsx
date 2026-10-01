@@ -71,7 +71,7 @@ function MetaField({
             onBlur={commit}
             disabled={saving}
             rows={2}
-            className="h-8 w-full resize-y rounded border border-zinc-200 px-2 py-1.5 text-xs leading-relaxed outline-none focus:border-zinc-400 disabled:opacity-50 placeholder:text-zinc-300 sm:h-auto"
+            className="h-10 w-full resize-y rounded border border-zinc-200 px-2 py-1.5 text-xs leading-relaxed outline-none focus:border-zinc-400 disabled:opacity-50 placeholder:text-zinc-300 sm:h-auto"
             placeholder="—"
           />
         ) : (

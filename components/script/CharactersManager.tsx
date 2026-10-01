@@ -893,7 +893,7 @@ export default function CharactersManager({ productionId, productionName, initia
     <div className={PRODUCTION_PAGE_SCROLL_ROOT_CLASS}>
       {/* Frozen toolbar */}
       <ProductionTopMenu
-        overflow={toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
+        overflow={view !== null && toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
           <ListTableViewToggleOverflow value={view} onChange={setView} />
         ) : null}
       >
@@ -903,11 +903,11 @@ export default function CharactersManager({ productionId, productionName, initia
           active="characters"
         />
         <ProductionTopMenuDivider />
-        <ListTableViewToggle value={view} onChange={setView} />
+        {view !== null && <ListTableViewToggle value={view} onChange={setView} />}
       </ProductionTopMenu>
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto" style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
-        {view === "table" ? tableView : card}
+        {view === null ? null : view === "table" ? tableView : card}
       </div>
     </div>
   );
