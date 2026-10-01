@@ -173,6 +173,7 @@ export type MyProductionEntry = {
   roles: string[]; firstTag: string | null; avatarUrl: string | null;
   isOwner: boolean;
   hasAdminPerm: boolean; // true if FK-backed role 区间含治理域节点键（ADMIN_PANEL_NODE_PREFIXES）
+  hasFinanceConfigPerm?: boolean;
   planTier: ProductionTier; // 项目付费档位（#280）：无 production_plan 行 = free
 };
 
@@ -184,7 +185,7 @@ export async function listMyProductionsWithRoles(
   const res = await getPool().query<{
     id: string; name: string; created_at: Date; archived_at: Date | null;
     roles: string[] | null; first_tag: string | null;
-    avatar_url: string | null; is_owner: boolean; has_admin_perm: boolean;
+    avatar_url: string | null; is_owner: boolean; has_admin_perm: boolean; has_finance_config_perm: boolean;
     plan_tier: string | null;
   }>(
     `SELECT p.id, p.name, p.created_at, p.archived_at, p.avatar_url,
@@ -205,7 +206,24 @@ export async function listMyProductionsWithRoles(
               WHERE pmr.production_id = p.id
                 AND pmr.user_id = $1
                 AND prp.permission_key LIKE ANY($3::text[])
-            ) AS has_admin_perm
+            ) AS has_admin_perm,
+            (
+              EXISTS (
+                SELECT 1 FROM production_member_role pmr
+                JOIN production_role_permission prp ON prp.role_id = pmr.role_id
+                WHERE pmr.production_id = p.id AND pmr.user_id = $1
+                  AND prp.permission_key IN ('node:finance/*/categories@edit', 'node:finance/*/budget@edit')
+              ) OR EXISTS (
+                SELECT 1 FROM production_member_permission pmp
+                WHERE pmp.production_id = p.id AND pmp.user_id = $1 AND pmp.granted
+                  AND pmp.permission IN ('node:finance/*/categories@edit', 'node:finance/*/budget@edit')
+              ) OR EXISTS (
+                SELECT 1 FROM production_dept_member pdm
+                JOIN production_dept_permission pdp ON pdp.dept_id = pdm.dept_id
+                WHERE pdm.production_id = p.id AND pdm.user_id = $1
+                  AND pdp.permission_key IN ('node:finance/*/categories@edit', 'node:finance/*/budget@edit')
+              )
+            ) AS has_finance_config_perm
      FROM production p
      LEFT JOIN production_member pm
             ON pm.production_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
@@ -226,6 +244,7 @@ export async function listMyProductionsWithRoles(
     avatarUrl: r.avatar_url ?? null,
     isOwner: r.is_owner,
     hasAdminPerm: r.has_admin_perm,
+    hasFinanceConfigPerm: r.has_finance_config_perm,
     planTier: normalizeProductionTier(r.plan_tier),
   }));
 }

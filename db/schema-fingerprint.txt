@@ -580,6 +580,18 @@ COL|production_budget_category|notes|text|text|NO|''::text
 COL|production_budget_category|order_index|integer|int4|NO|0
 COL|production_budget_category|production_id|text|text|NO|
 COL|production_budget_category|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_budget_item|amount|numeric|numeric|YES|
+COL|production_budget_item|category_id|text|text|NO|
+COL|production_budget_item|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_budget_item|created_by|uuid|uuid|NO|
+COL|production_budget_item|currency|text|text|NO|'CNY'::text
+COL|production_budget_item|dept_id|uuid|uuid|YES|
+COL|production_budget_item|id|text|text|NO|
+COL|production_budget_item|legacy_category_id|uuid|uuid|YES|
+COL|production_budget_item|notes|text|text|NO|''::text
+COL|production_budget_item|production_id|text|text|NO|
+COL|production_budget_item|sort_order|integer|int4|NO|0
+COL|production_budget_item|updated_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_cue_template_type|abbr_hint|text|text|YES|
 COL|production_cue_template_type|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_cue_template_type|creator_roles|ARRAY|_text|NO|'{}'::text[]
@@ -622,6 +634,14 @@ COL|production_event|status|text|text|NO|'draft'::text
 COL|production_event|title|text|text|NO|
 COL|production_event|updated_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_event|version_id|text|text|YES|
+COL|production_expense_category|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_expense_category|created_by|uuid|uuid|NO|
+COL|production_expense_category|description|text|text|NO|''::text
+COL|production_expense_category|id|text|text|NO|
+COL|production_expense_category|name|text|text|NO|
+COL|production_expense_category|production_id|text|text|NO|
+COL|production_expense_category|sort_order|integer|int4|NO|0
+COL|production_expense_category|updated_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_expense_document|asset_file_id|text|text|NO|
 COL|production_expense_document|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_expense_document|created_by|uuid|uuid|NO|
@@ -637,6 +657,7 @@ COL|production_expense_event|expense_id|uuid|uuid|NO|
 COL|production_expense_event|id|text|text|NO|
 COL|production_expense_event|mutation_seq|bigint|int8|NO|
 COL|production_expense|amount|numeric|numeric|YES|
+COL|production_expense|budget_item_id|text|text|YES|
 COL|production_expense|category_id|uuid|uuid|YES|
 COL|production_expense|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_expense|currency|text|text|NO|'CNY'::text
@@ -1318,6 +1339,15 @@ CON|production_budget_category|production_budget_category_created_by_fkey|FOREIG
 CON|production_budget_category|production_budget_category_dept_id_fkey|FOREIGN KEY (dept_id) REFERENCES production_dept(id) ON DELETE SET NULL
 CON|production_budget_category|production_budget_category_pkey|PRIMARY KEY (id)
 CON|production_budget_category|production_budget_category_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_budget_item|production_budget_item_amount_check|CHECK (((amount IS NULL) OR (amount >= (0)::numeric)))
+CON|production_budget_item|production_budget_item_category_id_production_id_fkey|FOREIGN KEY (category_id, production_id) REFERENCES production_expense_category(id, production_id) ON DELETE CASCADE
+CON|production_budget_item|production_budget_item_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|production_budget_item|production_budget_item_dept_id_production_id_fkey|FOREIGN KEY (dept_id, production_id) REFERENCES production_dept(id, production_id) ON DELETE RESTRICT
+CON|production_budget_item|production_budget_item_id_production_id_key|UNIQUE (id, production_id)
+CON|production_budget_item|production_budget_item_legacy_category_id_fkey|FOREIGN KEY (legacy_category_id) REFERENCES production_budget_category(id) ON DELETE RESTRICT
+CON|production_budget_item|production_budget_item_legacy_category_id_key|UNIQUE (legacy_category_id)
+CON|production_budget_item|production_budget_item_pkey|PRIMARY KEY (id)
+CON|production_budget_item|production_budget_item_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|production_cue_template_type|production_cue_template_type_pkey|PRIMARY KEY (id)
 CON|production_cue_template_type|production_cue_template_type_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|production_cue_template_type|production_cue_template_type_production_id_key_key|UNIQUE (production_id, key)
@@ -1340,6 +1370,11 @@ CON|production_event|production_event_production_id_fkey|FOREIGN KEY (production
 CON|production_event|production_event_report_doc_node_id_fkey|FOREIGN KEY (report_doc_node_id) REFERENCES node(id) ON DELETE SET NULL
 CON|production_event|production_event_status_check|CHECK ((status = ANY (ARRAY['draft'::text, 'published'::text, 'completed'::text, 'cancelled'::text])))
 CON|production_event|production_event_version_id_fkey|FOREIGN KEY (version_id) REFERENCES version(id) ON DELETE SET NULL
+CON|production_expense_category|production_expense_category_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|production_expense_category|production_expense_category_id_production_id_key|UNIQUE (id, production_id)
+CON|production_expense_category|production_expense_category_pkey|PRIMARY KEY (id)
+CON|production_expense_category|production_expense_category_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_expense_category|production_expense_category_production_id_name_key|UNIQUE (production_id, name)
 CON|production_expense_document|production_expense_document_asset_file_id_fkey|FOREIGN KEY (asset_file_id) REFERENCES asset_file(id) ON DELETE RESTRICT
 CON|production_expense_document|production_expense_document_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
 CON|production_expense_document|production_expense_document_document_kind_check|CHECK ((document_kind = ANY (ARRAY['invoice'::text, 'receipt'::text, 'other'::text])))
@@ -1351,6 +1386,7 @@ CON|production_expense_event|production_expense_event_event_type_check|CHECK ((e
 CON|production_expense_event|production_expense_event_expense_id_fkey|FOREIGN KEY (expense_id) REFERENCES production_expense(id) ON DELETE CASCADE
 CON|production_expense_event|production_expense_event_pkey|PRIMARY KEY (id)
 CON|production_expense|production_expense_amount_check|CHECK ((amount >= (0)::numeric))
+CON|production_expense|production_expense_budget_item_id_fkey|FOREIGN KEY (budget_item_id) REFERENCES production_budget_item(id) ON DELETE SET NULL
 CON|production_expense|production_expense_category_id_fkey|FOREIGN KEY (category_id) REFERENCES production_budget_category(id) ON DELETE SET NULL
 CON|production_expense|production_expense_current_stage_check|CHECK (((current_stage IS NULL) OR (current_stage = ANY (ARRAY['supervisor'::text, 'holder'::text, 'dept_poc'::text, 'ancestor_poc'::text, 'producer'::text, 'owner'::text]))))
 CON|production_expense|production_expense_invoice_requirement_check|CHECK ((invoice_requirement = ANY (ARRAY['required'::text, 'waived'::text])))
@@ -1745,6 +1781,12 @@ IDX|production_approval_config|production_approval_config_pkey|CREATE UNIQUE IND
 IDX|production_budget_category|pbc_name_idx|CREATE UNIQUE INDEX pbc_name_idx ON public.production_budget_category USING btree (production_id, name)
 IDX|production_budget_category|pbc_production_idx|CREATE INDEX pbc_production_idx ON public.production_budget_category USING btree (production_id)
 IDX|production_budget_category|production_budget_category_pkey|CREATE UNIQUE INDEX production_budget_category_pkey ON public.production_budget_category USING btree (id)
+IDX|production_budget_item|production_budget_item_dept_unique_idx|CREATE UNIQUE INDEX production_budget_item_dept_unique_idx ON public.production_budget_item USING btree (production_id, category_id, dept_id) WHERE (dept_id IS NOT NULL)
+IDX|production_budget_item|production_budget_item_id_production_id_key|CREATE UNIQUE INDEX production_budget_item_id_production_id_key ON public.production_budget_item USING btree (id, production_id)
+IDX|production_budget_item|production_budget_item_legacy_category_id_key|CREATE UNIQUE INDEX production_budget_item_legacy_category_id_key ON public.production_budget_item USING btree (legacy_category_id)
+IDX|production_budget_item|production_budget_item_pkey|CREATE UNIQUE INDEX production_budget_item_pkey ON public.production_budget_item USING btree (id)
+IDX|production_budget_item|production_budget_item_production_idx|CREATE INDEX production_budget_item_production_idx ON public.production_budget_item USING btree (production_id, dept_id, sort_order, id)
+IDX|production_budget_item|production_budget_item_public_unique_idx|CREATE UNIQUE INDEX production_budget_item_public_unique_idx ON public.production_budget_item USING btree (production_id, category_id) WHERE (dept_id IS NULL)
 IDX|production_cue_template_type|production_cue_template_type_pkey|CREATE UNIQUE INDEX production_cue_template_type_pkey ON public.production_cue_template_type USING btree (id)
 IDX|production_cue_template_type|production_cue_template_type_prod_idx|CREATE INDEX production_cue_template_type_prod_idx ON public.production_cue_template_type USING btree (production_id, display_order)
 IDX|production_cue_template_type|production_cue_template_type_production_id_key_key|CREATE UNIQUE INDEX production_cue_template_type_production_id_key_key ON public.production_cue_template_type USING btree (production_id, key)
@@ -1755,12 +1797,17 @@ IDX|production_dept_member|production_dept_member_user_id_dept_id_key|CREATE UNI
 IDX|production_dept_permission|production_dept_permission_dept_id_permission_key_key|CREATE UNIQUE INDEX production_dept_permission_dept_id_permission_key_key ON public.production_dept_permission USING btree (dept_id, permission_key)
 IDX|production_dept_permission|production_dept_permission_pkey|CREATE UNIQUE INDEX production_dept_permission_pkey ON public.production_dept_permission USING btree (id)
 IDX|production_dept_permission|production_dept_permission_prod_idx|CREATE INDEX production_dept_permission_prod_idx ON public.production_dept_permission USING btree (production_id, dept_id)
+IDX|production_dept|production_dept_id_production_idx|CREATE UNIQUE INDEX production_dept_id_production_idx ON public.production_dept USING btree (id, production_id)
 IDX|production_dept|production_dept_name_unique_idx|CREATE UNIQUE INDEX production_dept_name_unique_idx ON public.production_dept USING btree (production_id, name, COALESCE((parent_id)::text, ''::text))
 IDX|production_dept|production_dept_parent_idx|CREATE INDEX production_dept_parent_idx ON public.production_dept USING btree (parent_id)
 IDX|production_dept|production_dept_pkey|CREATE UNIQUE INDEX production_dept_pkey ON public.production_dept USING btree (id)
 IDX|production_dept|production_dept_production_idx|CREATE INDEX production_dept_production_idx ON public.production_dept USING btree (production_id, display_order)
 IDX|production_event|production_event_pkey|CREATE UNIQUE INDEX production_event_pkey ON public.production_event USING btree (id)
 IDX|production_event|production_event_production_idx|CREATE INDEX production_event_production_idx ON public.production_event USING btree (production_id, start_time)
+IDX|production_expense_category|production_expense_category_id_production_id_key|CREATE UNIQUE INDEX production_expense_category_id_production_id_key ON public.production_expense_category USING btree (id, production_id)
+IDX|production_expense_category|production_expense_category_pkey|CREATE UNIQUE INDEX production_expense_category_pkey ON public.production_expense_category USING btree (id)
+IDX|production_expense_category|production_expense_category_production_id_name_key|CREATE UNIQUE INDEX production_expense_category_production_id_name_key ON public.production_expense_category USING btree (production_id, name)
+IDX|production_expense_category|production_expense_category_production_idx|CREATE INDEX production_expense_category_production_idx ON public.production_expense_category USING btree (production_id, sort_order, name)
 IDX|production_expense_document|production_expense_document_expense_id_asset_file_id_key|CREATE UNIQUE INDEX production_expense_document_expense_id_asset_file_id_key ON public.production_expense_document USING btree (expense_id, asset_file_id)
 IDX|production_expense_document|production_expense_document_expense_idx|CREATE INDEX production_expense_document_expense_idx ON public.production_expense_document USING btree (expense_id, created_at)
 IDX|production_expense_document|production_expense_document_file_idx|CREATE INDEX production_expense_document_file_idx ON public.production_expense_document USING btree (asset_file_id)
@@ -1768,6 +1815,7 @@ IDX|production_expense_document|production_expense_document_pkey|CREATE UNIQUE I
 IDX|production_expense_event|production_expense_event_expense_idx|CREATE INDEX production_expense_event_expense_idx ON public.production_expense_event USING btree (expense_id, created_at, id)
 IDX|production_expense_event|production_expense_event_pkey|CREATE UNIQUE INDEX production_expense_event_pkey ON public.production_expense_event USING btree (id)
 IDX|production_expense|pe_approver_idx|CREATE INDEX pe_approver_idx ON public.production_expense USING gin (current_approver_ids)
+IDX|production_expense|pe_budget_item_idx|CREATE INDEX pe_budget_item_idx ON public.production_expense USING btree (budget_item_id) WHERE (budget_item_id IS NOT NULL)
 IDX|production_expense|pe_category_idx|CREATE INDEX pe_category_idx ON public.production_expense USING btree (category_id) WHERE (category_id IS NOT NULL)
 IDX|production_expense|pe_pending_idx|CREATE INDEX pe_pending_idx ON public.production_expense USING btree (production_id, status) WHERE (status = 'pending'::text)
 IDX|production_expense|pe_production_idx|CREATE INDEX pe_production_idx ON public.production_expense USING btree (production_id)

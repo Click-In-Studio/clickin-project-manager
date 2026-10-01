@@ -146,9 +146,9 @@ export async function createExpenseDraft(params: {
     await lockOwnedExpenseDocumentFiles(client, params.productionId, params.submittedBy, uniqueFileIds);
     const { rows } = await client.query<{ id: string }>(
       `INSERT INTO production_expense
-         (production_id, category_id, title, amount, currency, merchant, occurred_on, note,
+         (production_id, budget_item_id, category_id, title, amount, currency, merchant, occurred_on, note,
           invoice_requirement, invoice_waiver_reason, submitted_by, status)
-       VALUES ($1,$2,$3,$4::numeric,$5,$6,$7::date,$8,$9,$10,$11,'draft')
+       VALUES ($1,$2,(SELECT legacy_category_id FROM production_budget_item WHERE id = $2),$3,$4::numeric,$5,$6,$7::date,$8,$9,$10,$11,'draft')
        RETURNING id`,
       [
         params.productionId, params.categoryId, params.title?.trim() ?? "", params.amount ?? null,
@@ -222,11 +222,11 @@ export async function submitExpense(params: {
 
     const res = await client.query<{ id: string }>(
       `INSERT INTO production_expense
-         (production_id, category_id, title, amount, currency, merchant, occurred_on, note,
+         (production_id, budget_item_id, category_id, title, amount, currency, merchant, occurred_on, note,
           invoice_requirement, invoice_waiver_reason, submitted_by,
           status, current_stage, current_stage_depth, current_approver_ids, escalation_chain,
           resolved_at, resolved_by, submitted_at)
-       VALUES ($1,$2,$3,$4::numeric,$5,$6,$7::date,$8,$9,$10,$11,$12,$13,$14,$15::uuid[],$16::jsonb,$17,$18,now())
+       VALUES ($1,$2,(SELECT legacy_category_id FROM production_budget_item WHERE id = $2),$3,$4::numeric,$5,$6,$7::date,$8,$9,$10,$11,$12,$13,$14,$15::uuid[],$16::jsonb,$17,$18,now())
        RETURNING id`,
       [
         params.productionId, params.categoryId, params.title.trim(), params.amount,
@@ -301,7 +301,9 @@ export async function updateExpenseDraft(params: {
     await client.query("BEGIN");
     const updated = await client.query<{ mutation_seq: string }>(
       `UPDATE production_expense
-          SET category_id = $5, title = $6, amount = $7::numeric, currency = $8,
+          SET budget_item_id = $5,
+              category_id = (SELECT legacy_category_id FROM production_budget_item WHERE id = $5),
+              title = $6, amount = $7::numeric, currency = $8,
               merchant = $9, occurred_on = $10::date, note = $11,
               invoice_requirement = $12, invoice_waiver_reason = $13,
               mutation_seq = mutation_seq + 1, updated_at = now()
@@ -400,7 +402,7 @@ export async function submitExpenseDraft(
       invoice_requirement: InvoiceRequirement | null;
       invoice_waiver_reason: string; mutation_seq: string;
     }>(
-      `SELECT status, submitted_by, category_id, title, amount::text AS amount, currency,
+      `SELECT status, submitted_by, budget_item_id AS category_id, title, amount::text AS amount, currency,
               merchant, occurred_on::text AS occurred_on,
               invoice_requirement, invoice_waiver_reason, mutation_seq
          FROM production_expense
@@ -635,7 +637,7 @@ export async function approveExpense(
       escalation_chain: { canFinalize?: boolean }[]; mutation_seq: string;
     }>(
       `SELECT status, current_stage, current_stage_depth, current_approver_ids,
-              submitted_by, category_id, escalation_chain, mutation_seq
+              submitted_by, budget_item_id AS category_id, escalation_chain, mutation_seq
          FROM production_expense
         WHERE id = $1 AND production_id = $2 FOR UPDATE`,
       [expenseId, productionId],
@@ -863,7 +865,7 @@ export async function escalateExpiredExpenses(): Promise<{ escalated: number }> 
     id: string; production_id: string; submitted_by: string; category_id: string | null;
     current_stage: string | null; current_stage_depth: number;
   }>(
-    `SELECT e.id, e.production_id, e.submitted_by, e.category_id,
+    `SELECT e.id, e.production_id, e.submitted_by, e.budget_item_id AS category_id,
             e.current_stage, e.current_stage_depth
        FROM production_expense e
        LEFT JOIN production_approval_config pac ON pac.production_id = e.production_id

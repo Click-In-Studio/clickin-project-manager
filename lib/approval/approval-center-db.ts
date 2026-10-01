@@ -180,7 +180,7 @@ const UNIFIED_APPROVAL_QUERY = `
       e.resolved_at,
       jsonb_build_object(
         'kind', 'expense',
-        'categoryId', e.category_id,
+        'categoryId', e.budget_item_id,
         'categoryName', c.name,
         'amount', e.amount::text,
         'currency', e.currency
@@ -202,7 +202,8 @@ const UNIFIED_APPROVAL_QUERY = `
       concat_ws(' ', p.name, up.display_name, up.name, e.title, e.note, c.name) AS search_text
     FROM production_expense e
     JOIN production p ON p.id = e.production_id
-    LEFT JOIN production_budget_category c ON c.id = e.category_id
+    LEFT JOIN production_budget_item bi ON bi.id = e.budget_item_id
+    LEFT JOIN production_expense_category c ON c.id = bi.category_id
     LEFT JOIN user_profile up ON up.user_id = e.submitted_by
     WHERE e.status <> 'draft'
   )`;

@@ -24,11 +24,17 @@ export const PRODUCTION_OVERVIEW_NAV = [
 
 // feature 标的是**付费档位**依赖（#280），不是权限：带 feature 的项在档位没开通该功能
 // 的项目里整条不出现在菜单里。权限维度（canAdmin）管的是能不能进管理面板本身，两者正交。
-export const ADMIN_NAV_GROUPS: { title: string | null; items: { label: string; hint: string; path: string; feature?: "advancedPerms" }[] }[] = [
+export const ADMIN_NAV_GROUPS: { title: string | null; items: { label: string; hint: string; path: string; feature?: "advancedPerms"; scope?: "admin" | "finance" }[] }[] = [
   {
     title: null,
     items: [
       { label: "项目概览", hint: "基础数据 · 一览", path: "" },
+    ],
+  },
+  {
+    title: "业务配置",
+    items: [
+      { label: "财务设置", hint: "费用科目 · 部门预算", path: "finance", scope: "finance" },
     ],
   },
   {

@@ -504,6 +504,9 @@ CREATE INDEX IF NOT EXISTS production_dept_production_idx
 CREATE INDEX IF NOT EXISTS production_dept_parent_idx
   ON production_dept (parent_id);
 
+CREATE UNIQUE INDEX IF NOT EXISTS production_dept_id_production_idx
+  ON production_dept (id, production_id);
+
 CREATE TABLE IF NOT EXISTS production_dept_member (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id   TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
@@ -1568,10 +1571,58 @@ CREATE TABLE IF NOT EXISTS production_budget_category (
 CREATE UNIQUE INDEX IF NOT EXISTS pbc_name_idx ON production_budget_category (production_id, name);
 CREATE INDEX IF NOT EXISTS pbc_production_idx ON production_budget_category (production_id);
 
+-- 费用科目与部门预算项。production_budget_category 暂留作 N-1 回退镜像，
+-- 新代码的业务真相只读写下面两表。
+CREATE TABLE IF NOT EXISTS production_expense_category (
+  id            TEXT        PRIMARY KEY,
+  production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  name          TEXT        NOT NULL,
+  description   TEXT        NOT NULL DEFAULT '',
+  sort_order    INTEGER     NOT NULL DEFAULT 0,
+  created_by    UUID        NOT NULL REFERENCES app_user(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (id, production_id),
+  UNIQUE (production_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS production_expense_category_production_idx
+  ON production_expense_category (production_id, sort_order, name);
+
+CREATE TABLE IF NOT EXISTS production_budget_item (
+  id                 TEXT          PRIMARY KEY,
+  production_id      TEXT          NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  category_id        TEXT          NOT NULL,
+  dept_id            UUID,
+  amount             NUMERIC(14,2) CHECK (amount IS NULL OR amount >= 0),
+  currency           TEXT          NOT NULL DEFAULT 'CNY',
+  notes              TEXT          NOT NULL DEFAULT '',
+  sort_order         INTEGER       NOT NULL DEFAULT 0,
+  legacy_category_id UUID          UNIQUE REFERENCES production_budget_category(id) ON DELETE RESTRICT,
+  created_by         UUID          NOT NULL REFERENCES app_user(id),
+  created_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  UNIQUE (id, production_id),
+  FOREIGN KEY (category_id, production_id)
+    REFERENCES production_expense_category(id, production_id) ON DELETE CASCADE,
+  FOREIGN KEY (dept_id, production_id)
+    REFERENCES production_dept(id, production_id) ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS production_budget_item_dept_unique_idx
+  ON production_budget_item (production_id, category_id, dept_id)
+  WHERE dept_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS production_budget_item_public_unique_idx
+  ON production_budget_item (production_id, category_id)
+  WHERE dept_id IS NULL;
+CREATE INDEX IF NOT EXISTS production_budget_item_production_idx
+  ON production_budget_item (production_id, dept_id, sort_order, id);
+
 CREATE TABLE IF NOT EXISTS production_expense (
   id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id TEXT          NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   category_id   UUID          REFERENCES production_budget_category(id) ON DELETE SET NULL,
+  budget_item_id TEXT         REFERENCES production_budget_item(id) ON DELETE SET NULL,
   title         TEXT          NOT NULL DEFAULT '',
   amount        NUMERIC(14,2) CHECK (amount >= 0),
   currency      TEXT          NOT NULL DEFAULT 'CNY',
@@ -1603,6 +1654,7 @@ CREATE TABLE IF NOT EXISTS production_expense (
 
 CREATE INDEX IF NOT EXISTS pe_production_idx ON production_expense (production_id);
 CREATE INDEX IF NOT EXISTS pe_category_idx   ON production_expense (category_id) WHERE category_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS pe_budget_item_idx ON production_expense (budget_item_id) WHERE budget_item_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS pe_approver_idx   ON production_expense USING GIN (current_approver_ids);
 CREATE INDEX IF NOT EXISTS pe_pending_idx    ON production_expense (production_id, status) WHERE status = 'pending';
 

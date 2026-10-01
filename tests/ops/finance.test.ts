@@ -14,6 +14,9 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { PATCH as patchCategory } from "@/app/api/production/[id]/finance/categories/[categoryId]/route";
+import { GET as getExpenseCategories, POST as postExpenseCategory } from "@/app/api/production/[id]/finance/expense-categories/route";
+import { DELETE as deleteExpenseCategoryRoute } from "@/app/api/production/[id]/finance/expense-categories/[categoryId]/route";
+import { GET as getBudgetItems, POST as postBudgetItem } from "@/app/api/production/[id]/finance/budget-items/route";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
@@ -55,6 +58,7 @@ vi.mock("@/lib/r2", () => ({
 
 let prodId: string;
 let ownerId: string, submitterId: string, deptPocId: string, strangerId: string;
+let financeEditorId: string, outsiderId: string;
 let deptId: string;
 
 beforeAll(async () => {
@@ -62,9 +66,17 @@ beforeAll(async () => {
   submitterId = (await upsertFeishuUser(`test-open-${shortId()}`, `报销人${shortId()}`, null, false)).userId;
   deptPocId   = (await upsertFeishuUser(`test-open-${shortId()}`, `舞美POC${shortId()}`, null, false)).userId;
   strangerId  = (await upsertFeishuUser(`test-open-${shortId()}`, `财务路人${shortId()}`, null, false)).userId;
+  financeEditorId = (await upsertFeishuUser(`test-open-${shortId()}`, `财务配置员${shortId()}`, null, false)).userId;
+  outsiderId = (await upsertFeishuUser(`test-open-${shortId()}`, `项目外人员${shortId()}`, null, false)).userId;
 
   ({ prodId } = await makeProduction(ownerId));
-  for (const u of [submitterId, deptPocId, strangerId]) await addProductionMember(prodId, u);
+  for (const u of [submitterId, deptPocId, strangerId, financeEditorId]) await addProductionMember(prodId, u);
+  await getPool().query(
+    `INSERT INTO production_member_permission (production_id, user_id, permission, granted)
+     VALUES ($1,$2,'node:finance/*/categories@edit',true),
+            ($1,$2,'node:finance/*/budget@edit',true)`,
+    [prodId, financeEditorId],
+  );
 
   ({ rows: [{ id: deptId }] } = await getPool().query<{ id: string }>(
     `INSERT INTO production_dept (production_id, name) VALUES ($1, $2) RETURNING id`,
@@ -1068,5 +1080,33 @@ describe("13. 支出列表端点不再一刀切 403", () => {
     const body = await res.json() as { scope: string; expenses: unknown[] };
     expect(body.scope).toBe("all");
     expect(body.expenses.length).toBeGreaterThan(0);
+  });
+});
+
+describe("14. 财务配置端点以 edit 为入口门，动作仍逐键校验", () => {
+  function req(userId?: string, method = "GET", body?: unknown) {
+    const r = new NextRequest("http://localhost/api/x", {
+      method, body: body === undefined ? undefined : JSON.stringify(body),
+      headers: body === undefined ? undefined : { "content-type": "application/json" },
+    });
+    if (userId) r.cookies.set(SESSION_COOKIE, createSession({ userId, name: "测试", avatarUrl: null, isAdmin: false }));
+    return r;
+  }
+  const ctx = () => ({ params: Promise.resolve({ id: prodId }) });
+
+  it("未登录 401，非成员 403", async () => {
+    expect((await getExpenseCategories(req(), ctx())).status).toBe(401);
+    expect((await getBudgetItems(req(), ctx())).status).toBe(401);
+    expect((await getExpenseCategories(req(outsiderId), ctx())).status).toBe(403);
+    expect((await getBudgetItems(req(outsiderId), ctx())).status).toBe(403);
+  });
+
+  it("只有 edit 可以进入列表，但不能借 edit 新增或删除", async () => {
+    expect((await getExpenseCategories(req(financeEditorId), ctx())).status).toBe(200);
+    expect((await getBudgetItems(req(financeEditorId), ctx())).status).toBe(200);
+    expect((await postExpenseCategory(req(financeEditorId, "POST", { name: `无创建权${shortId()}` }), ctx())).status).toBe(403);
+    const category = await createBudgetCategory({ productionId: prodId, name: `无删除权${shortId()}`, amount: null, createdBy: ownerId });
+    expect((await deleteExpenseCategoryRoute(req(financeEditorId, "DELETE"), { params: Promise.resolve({ id: prodId, categoryId: category.categoryId }) }))?.status).toBe(403);
+    expect((await postBudgetItem(req(financeEditorId, "POST", { categoryId: category.categoryId, amount: null }), ctx())).status).toBe(403);
   });
 });

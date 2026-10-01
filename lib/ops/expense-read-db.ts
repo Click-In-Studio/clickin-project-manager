@@ -144,7 +144,7 @@ function rowToExpense(r: ExpenseRow): Expense {
 }
 
 const EXPENSE_QUERY = `
-  SELECT e.id, e.production_id, e.category_id, c.name AS category_name,
+  SELECT e.id, e.production_id, e.budget_item_id AS category_id, c.name AS category_name,
          e.title, e.amount::text AS amount, e.currency, e.merchant,
          e.occurred_on::text AS occurred_on, e.note,
          e.invoice_requirement, e.invoice_waiver_reason,
@@ -181,7 +181,8 @@ const EXPENSE_QUERY = `
          e.escalation_chain, e.resolved_at, e.resolved_by, e.mutation_seq,
          e.submitted_at, e.created_at
     FROM production_expense e
-    LEFT JOIN production_budget_category c ON c.id = e.category_id
+    LEFT JOIN production_budget_item bi ON bi.id = e.budget_item_id
+    LEFT JOIN production_expense_category c ON c.id = bi.category_id
     LEFT JOIN user_profile up ON up.user_id = e.submitted_by`;
 
 /**
