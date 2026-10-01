@@ -210,7 +210,8 @@ describe("报销审批", () => {
   it("不能终局时显示“向上转交”，成功后刷新待办", async () => {
     fetchMock.mockImplementation(() => jsonResponse({ forwarded: true }));
     await act(async () => root.render(
-      <ExpenseApprovalActions productionId="prod_1" expenseId="exp_1" canFinalize={false} mutationSeq={0} />,
+      <ExpenseApprovalActions productionId="prod_1" expenseId="exp_1" canFinalize={false} mutationSeq={0}
+        currentBudgetItemId={null} categories={[]} />,
     ));
 
     await act(async () => button("向上转交").click());
@@ -223,7 +224,8 @@ describe("报销审批", () => {
   it("驳回需要二次确认", async () => {
     fetchMock.mockImplementation(() => jsonResponse({ expense: { status: "rejected" } }));
     await act(async () => root.render(
-      <ExpenseApprovalActions productionId="prod_1" expenseId="exp_1" canFinalize mutationSeq={0} />,
+      <ExpenseApprovalActions productionId="prod_1" expenseId="exp_1" canFinalize mutationSeq={0}
+        currentBudgetItemId={null} categories={[]} />,
     ));
 
     await act(async () => button("驳回").click());
@@ -239,6 +241,33 @@ describe("报销审批", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
       action: "reject", comment: "票据抬头不符", expectedMutationSeq: 0,
     });
+  });
+
+  it("当前审批人可以选择预算项并触发重新路由", async () => {
+    fetchMock.mockImplementation(() => jsonResponse({ expense: { status: "pending" } }));
+    await act(async () => root.render(
+      <ExpenseApprovalActions productionId="prod_1" expenseId="exp_1" canFinalize mutationSeq={7}
+        currentBudgetItemId="bi_old" categories={[
+          { id: "bi_old", name: "搭建费", deptName: "舞美" },
+          { id: "bi_new", name: "设备租赁费", deptName: "音响" },
+        ]} />,
+    ));
+
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="调整预算项"]')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
+    await act(async () => {
+      setter.call(select, "bi_new");
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => button("重新归类").click());
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      action: "reclassify",
+      budgetItemId: "bi_new",
+      comment: "",
+      expectedMutationSeq: 7,
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });
 

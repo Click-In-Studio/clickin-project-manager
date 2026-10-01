@@ -79,7 +79,7 @@ async function lockOwnedExpenseDocumentFiles(
     throw new FinanceError("invalid_document", "凭证不存在、已失效或不属于当前提交人");
 }
 
-async function buildExpenseSubmissionPlan(
+export async function buildExpenseSubmissionPlan(
   productionId: string,
   submittedBy: string,
   categoryId: string | null,

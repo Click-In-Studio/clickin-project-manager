@@ -6,9 +6,11 @@ import { randomBytes } from "node:crypto";
 import { getPool } from "../pg";
 import type { PoolClient } from "pg";
 import { FinanceError } from "./expense-read-db";
+import { reclassifyPendingExpensesForBudgetItemDeletion } from "./expense-reclassification-db";
 
 export * from "./expense-read-db";
 export * from "./expense-db";
+export * from "./expense-reclassification-db";
 
 export type BudgetCategory = {
   id: string;
@@ -335,16 +337,24 @@ export async function updateBudgetCategory(
   return getBudgetCategory(id, productionId);
 }
 
-/** 删除预算项；历史报销保留并变为未归类，待审批报销留给 #810 处理。 */
-export async function deleteBudgetCategory(id: string, productionId: string): Promise<void> {
+/** 删除预算项；历史报销保留并变为未归类，待审批报销先从未归类路径重新路由。 */
+export async function deleteBudgetCategory(
+  id: string,
+  productionId: string,
+  actorId: string,
+): Promise<void> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    // 与审批人主动归类共用“目标预算项 → expense”的锁序，阻止删除和归类交错。
     const item = await client.query<{ legacy_category_id: string | null }>(
       "SELECT legacy_category_id FROM production_budget_item WHERE id = $1 AND production_id = $2 FOR UPDATE",
       [id, productionId],
     );
     if (!item.rows[0]) { await client.query("ROLLBACK"); return; }
+    await reclassifyPendingExpensesForBudgetItemDeletion(client, {
+      productionId, budgetItemId: id, actorId,
+    });
     await client.query(
       `DELETE FROM resource_dept_manage
         WHERE production_id = $1 AND resource_type = 'finance' AND resource_id = $2`,

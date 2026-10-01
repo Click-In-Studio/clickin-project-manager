@@ -5,7 +5,7 @@ import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import {
   AMOUNT_RE, approveExpense, FinanceError, getBudgetCategory, getExpense, getExpenseDetail,
   hasExpenseParticipation, isExpenseApprover, rejectExpense, reopenExpense,
-  isExpenseDate, submitExpenseDraft, updateExpenseDraft, withdrawExpense,
+  isExpenseDate, reclassifyExpense, submitExpenseDraft, updateExpenseDraft, withdrawExpense,
   type InvoiceRequirement,
 } from "@/lib/ops/finance-db";
 import { readJsonObject } from "@/lib/request-json";
@@ -108,7 +108,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!parsedBody.ok) return parsedBody.response;
   const body = parsedBody.value;
   const action = body.action;
-  if (!["approve", "reject", "withdraw", "reopen", "submit"].includes(String(action)))
+  if (!["approve", "reject", "withdraw", "reopen", "submit", "reclassify"].includes(String(action)))
     return Response.json({ error: "action 无效" }, { status: 400 });
   const expectedMutationSeq = body.expectedMutationSeq;
   if (typeof expectedMutationSeq !== "number"
@@ -151,6 +151,29 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   if (!await isExpenseApprover(expenseId, productionId, session.userId))
     return Response.json({ error: "你不是这笔支出当前级的审批人" }, { status: 403 });
+
+  if (action === "reclassify") {
+    if (typeof body.budgetItemId !== "string" || !body.budgetItemId)
+      return Response.json({ error: "请选择预算项" }, { status: 400 });
+    try {
+      const res = await reclassifyExpense({
+        expenseId,
+        productionId,
+        actorId: session.userId,
+        budgetItemId: body.budgetItemId,
+        expectedMutationSeq,
+      });
+      if (!res.ok)
+        return Response.json({ error: "报销已被处理或内容已变化，请刷新" }, { status: 409 });
+      return Response.json({
+        expense: await getExpense(expenseId, productionId),
+        selfApproved: res.selfApproved,
+      });
+    } catch (error) {
+      if (error instanceof FinanceError) return financeErrorResponse(error);
+      throw error;
+    }
+  }
 
   if (action === "reject") {
     try {

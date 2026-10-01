@@ -129,6 +129,8 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
             expenseId={e.id}
             canFinalize={e.canFinalize}
             mutationSeq={e.mutationSeq}
+            currentBudgetItemId={e.categoryId}
+            categories={expenseCategoryOptions}
           />
         )}
         <ExpenseDetailButton

@@ -1698,7 +1698,7 @@ CREATE TABLE IF NOT EXISTS production_expense_event (
   expense_id    UUID        NOT NULL REFERENCES production_expense(id) ON DELETE CASCADE,
   event_type    TEXT        NOT NULL CHECK (event_type IN (
                   'draft_created', 'draft_saved', 'submitted', 'forwarded',
-                  'approved', 'rejected', 'withdrawn', 'reopened',
+                  'approved', 'rejected', 'withdrawn', 'reopened', 'reclassified',
                   'document_added', 'document_removed', 'post_approval_document_added'
                 )),
   actor_id      UUID        REFERENCES app_user(id),
