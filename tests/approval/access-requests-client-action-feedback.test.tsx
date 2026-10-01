@@ -158,6 +158,25 @@ describe("AccessRequestsClient — 审批动作的在途态与结果反馈（#59
     expect(detailButton("批准")!.disabled).toBe(false);
   });
 
+  it("服务端拒绝且申请已被他人处理：刷新待办后关闭旧详情，不保留失效动作", async () => {
+    await mountAndSelect();
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url, init) => {
+      if (url.endsWith("/approve") && init?.method === "POST") {
+        pending = [];
+        return jsonRes({ error: "申请已被他人处理" }, 409);
+      }
+      return base(url, init);
+    });
+
+    await act(async () => { detailButton("批准")!.click(); });
+    expect(container.textContent).toContain("暂无待审批申请");
+    expect(detailPane()).toBeNull();
+    expect(detailButton("批准")).toBeUndefined();
+    expect(detailButton("拒绝")).toBeUndefined();
+    expect(detailButton("向上转交")).toBeUndefined();
+  });
+
   it("网络错误（fetch 拒绝）：写「网络错误」并恢复按钮，不成为未处理 rejection", async () => {
     await mountAndSelect();
     const base = fetchMock.getMockImplementation()!;

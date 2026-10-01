@@ -700,6 +700,7 @@ export default function AccessRequestsClient({ productionId, productionName, can
   const [detailView, setDetailView]           = useState<AccessRequestFlowView | null>(null);
   const [detailLoading, setDetailLoading]     = useState(false);
   const [detailError, setDetailError]         = useState<string | null>(null);
+  const [detailRevision, setDetailRevision]   = useState(0);
 
   // 手机申请表单仍在列表页内展开；审批详情使用独立抽屉。
   const [mobileExpanded, setMobileExpanded] = useState<string | null>(null);
@@ -708,9 +709,10 @@ export default function AccessRequestsClient({ productionId, productionName, can
     setLoadingMine(true);
     try {
       const res = await fetch(`/api/production/${productionId}/access-requests`);
-      if (!res.ok) return;
+      if (!res.ok) return null;
       const data = (await res.json()) as { requests: ApprovalRequest[] };
       setMyRequests(data.requests);
+      return data.requests;
     } finally {
       setLoadingMine(false);
     }
@@ -720,9 +722,10 @@ export default function AccessRequestsClient({ productionId, productionName, can
     setLoadingPending(true);
     try {
       const res = await fetch(`/api/production/${productionId}/pending-approvals`);
-      if (!res.ok) return;
+      if (!res.ok) return null;
       const data = (await res.json()) as { approvals: ApprovalRequest[] };
       setPendingApprovals(data.approvals);
+      return data.approvals;
     } finally {
       setLoadingPending(false);
     }
@@ -769,7 +772,7 @@ export default function AccessRequestsClient({ productionId, productionName, can
       }
     })();
     return () => { cancelled = true; };
-  }, [productionId, selectedDetailId]);
+  }, [productionId, selectedDetailId, detailRevision]);
 
   /**
    * 四个审批动作共用的请求壳（#593）。
@@ -778,8 +781,9 @@ export default function AccessRequestsClient({ productionId, productionName, can
    *   才替换——不写回的话面板会一直停在旧快照：状态仍「等待…」、「批准」按钮又能点，
    *   再点一次得 409「已被他人处理」。仍在等待（转交到下一级、多级流程走到别人手里）
    *   则关掉面板，免得对着一条已经不归自己管的申请再点出 403。
-   * - 失败（非 2xx / 网络错误）：原因写进 actionError 并重拉待办——过期自动结束的申请
-   *   已不在待办里，不重拉它会继续留在列表上，点一次错一次。
+   * - 服务端明确拒绝（非 2xx）：原因写进 actionError，并刷新两类列表。若申请已经从当前
+   *   列表消失则关闭旧详情；若仍存在则重取 /flow，不能继续展示拒绝前的 viewerActions。
+   * - 网络错误：保留详情和原动作，允许用户重试；网络失败本身不能证明资格已经失效。
    */
   async function runAction(reqId: string, kind: ActionKind, fallback: string) {
     setActing({ reqId, kind });
@@ -789,7 +793,19 @@ export default function AccessRequestsClient({ productionId, productionName, can
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         setActionError(data.error ?? fallback);
-        await fetchPending();
+        const [freshMine, freshPending] = await Promise.all([
+          fetchMine().catch(() => null),
+          fetchPending().catch(() => null),
+        ]);
+        setRightPanel((panel) => {
+          if (panel?.type !== "detail" || panel.req.id !== reqId) return panel;
+          const refreshed = panel.canAct ? freshPending : freshMine;
+          if (!refreshed) return panel;
+          const updated = refreshed.find((request) => request.id === reqId);
+          return updated ? { ...panel, req: updated } : null;
+        });
+        // 即使记录仍在列表中，也必须重新核对实例级动作资格；列表 DTO 不能代替 /flow。
+        setDetailRevision((revision) => revision + 1);
         return;
       }
       const { request: fresh } = (await res.json().catch(() => ({}))) as { request?: ApprovalRequest };
