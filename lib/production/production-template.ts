@@ -57,6 +57,9 @@ import {
 } from "./template-seeders/cue";
 import { policySeeder, type PolicyPayload } from "./template-seeders/policy";
 import { approvalSeeder, type ApprovalPayload } from "./template-seeders/approval";
+import {
+  expenseCategoriesSeeder, type ExpenseCategoriesPayload,
+} from "./template-seeders/finance";
 
 // ─── seeder 契约 ──────────────────────────────────────────────────────────────
 
@@ -124,6 +127,8 @@ export type ProductionTemplate = {
   policies: PolicyPayload;
   /** ⑦ 审批 TTL。 */
   approval: ApprovalPayload;
+  /** ⑧ 费用科目字典；不预建部门预算项。 */
+  expenseCategories: ExpenseCategoriesPayload;
 };
 
 /**
@@ -138,6 +143,7 @@ const SEEDERS: readonly BoundSeeder[] = [
   bind(cueDeclarationsSeeder, (t) => t.cueDeclarations),
   bind(policySeeder, (t) => t.policies),
   bind(approvalSeeder, (t) => t.approval),
+  bind(expenseCategoriesSeeder, (t) => t.expenseCategories),
 ];
 
 // ─── 模版清单 ─────────────────────────────────────────────────────────────────

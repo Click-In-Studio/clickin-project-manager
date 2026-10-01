@@ -59,6 +59,47 @@ SELECT 'ec_' || replace(id::text, '-', ''), production_id, name, '', order_index
        created_by, created_at, updated_at
   FROM production_budget_category;
 
+-- 科目与本迁移同时首次上线：在同一事务内给全部存量项目补齐当期项目模版的默认科目。
+-- 已有旧预算分类若同名则原样保留；只补科目字典，不凭空创建部门预算项。
+WITH common(name, sort_order) AS (
+  VALUES
+    ('交通费', 0), ('餐饮费', 1), ('住宿费', 2), ('打印费', 3), ('运输物流费', 4),
+    ('设备租赁费', 5), ('场地租赁费', 6), ('耗材采购费', 7),
+    ('临时劳务费', 8), ('宣传推广费', 9)
+), additions(template_key, name, sort_order) AS (
+  VALUES
+    ('theatre', '搭建费', 10), ('theatre', '服化制作费', 11), ('theatre', '道具制作费', 12),
+    ('performance', '搭建费', 10), ('performance', '舞台制作费', 11),
+    ('film', '置景制作费', 10), ('film', '后期制作费', 11),
+    ('music_video', '置景制作费', 10), ('music_video', '后期制作费', 11),
+    ('music', '录音棚租赁费', 10), ('music', '乐手劳务费', 11), ('music', '混音母带费', 12),
+    ('radio_drama', '录音棚租赁费', 10), ('radio_drama', '配音劳务费', 11), ('radio_drama', '后期制作费', 12)
+), productions_with_template AS (
+  SELECT p.*,
+         CASE
+           WHEN p.type IN ('gala', 'music_festival', 'concert') THEN 'performance'
+           WHEN p.type = 'album' THEN 'music'
+           WHEN p.type IN ('radio_drama', 'audiobook') THEN 'radio_drama'
+           WHEN p.type IN ('music_video', 'commercial') THEN 'music_video'
+           WHEN p.type IN ('short_film', 'film', 'tv_drama') THEN 'film'
+           WHEN p.type IN ('solo', 'other') THEN 'solo'
+           ELSE 'theatre'
+         END AS template_key
+    FROM production p
+), defaults AS (
+  SELECT p.id AS production_id, p.owner_id AS created_by, c.name, c.sort_order
+    FROM productions_with_template p CROSS JOIN common c
+  UNION ALL
+  SELECT p.id, p.owner_id, a.name, a.sort_order
+    FROM productions_with_template p
+    JOIN additions a ON a.template_key = p.template_key
+)
+INSERT INTO production_expense_category
+  (id, production_id, name, sort_order, created_by)
+SELECT 'ec_' || md5(production_id || chr(31) || name), production_id, name, sort_order, created_by
+  FROM defaults
+ON CONFLICT (production_id, name) DO NOTHING;
+
 INSERT INTO production_budget_item
   (id, production_id, category_id, dept_id, amount, currency, notes, sort_order,
    legacy_category_id, created_by, created_at, updated_at)

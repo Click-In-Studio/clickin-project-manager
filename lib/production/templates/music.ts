@@ -20,6 +20,7 @@
  * 建类型 + 配声明行即可（机制与剧场完全一样，零代码）。
  */
 import type { ProductionTemplate } from "../production-template";
+import { MUSIC_EXPENSE_CATEGORIES } from "../template-seeders/finance";
 import {
   OPEN_BASELINE, PRODUCER_KEYS, STRUCTURE_EDIT, SCRIPT_EDIT, SCHEDULE_ADMIN,
   ASSET_UPLOAD, ASSET_NEW_VERSION, ASSET_META_EDIT, MOUNT_ATTACH,
@@ -123,4 +124,5 @@ export const MUSIC_TEMPLATE: ProductionTemplate = {
   cueDeclarations: [],
   policies: MUSIC_POLICIES,
   approval: { ttlHours: 24 },
+  expenseCategories: MUSIC_EXPENSE_CATEGORIES,
 };

@@ -50,4 +50,25 @@ describe("invariance verification", () => {
     expect(result.rows[0]).toMatchObject({ name: snapshot!.categoryName, amount: null, legacy_category_id: snapshot!.legacyCategoryId });
     expect(result.rows[0].budget_item_id).toMatch(/^bi_/);
   });
+
+  it.skipIf(!snapshot)("同一原子迁移为存量项目补齐默认科目，不额外生成预算项", async () => {
+    const categories = await getPool().query<{ name: string }>(
+      `SELECT name FROM production_expense_category
+       WHERE production_id=$1 ORDER BY sort_order, name`,
+      [snapshot!.productionId],
+    );
+    expect(categories.rows.map(row => row.name)).toEqual(expect.arrayContaining([
+      "交通费", "餐饮费", "住宿费", "打印费", "运输物流费",
+      "设备租赁费", "场地租赁费", "耗材采购费", "临时劳务费", "宣传推广费",
+      "搭建费", "服化制作费", "道具制作费", snapshot!.categoryName,
+    ]));
+    const budgetItems = await getPool().query<{ category_name: string }>(
+      `SELECT c.name AS category_name
+       FROM production_budget_item bi
+       JOIN production_expense_category c ON c.id=bi.category_id
+       WHERE bi.production_id=$1`,
+      [snapshot!.productionId],
+    );
+    expect(budgetItems.rows).toEqual([{ category_name: snapshot!.categoryName }]);
+  });
 });

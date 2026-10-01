@@ -23,6 +23,7 @@
  * 这不是欠账，是有意不做。
  */
 import type { ProductionTemplate } from "../production-template";
+import { PERFORMANCE_EXPENSE_CATEGORIES } from "../template-seeders/finance";
 import {
   OPEN_BASELINE, PRODUCER_KEYS, SCRIPT_EDIT, STRUCTURE_EDIT, REHEARSAL_MARKS,
   ASSET_UPLOAD, MOUNT_ATTACH, own, see,
@@ -168,4 +169,5 @@ export const PERFORMANCE_TEMPLATE: ProductionTemplate = {
   // 与戏剧类同档（全默认）：同样是多人现场协作，发布归舞监、事件不由创建者删。
   policies: {},
   approval: { ttlHours: 24 },
+  expenseCategories: PERFORMANCE_EXPENSE_CATEGORIES,
 };
