@@ -8,6 +8,7 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getProductionName } from "@/lib/production/production-db";
 import { listProductionTechReqs, listMyTechReqsFull } from "@/lib/ops/event-db";
+import { listTaskPocIdsForUser } from "@/lib/ops/task-poc";
 import ProductionTasksClient from "@/components/ops/ProductionTasksClient";
 import PageHeader from "@/components/ui/PageHeader";
 import styles from "@/components/ui/my-pages.module.css";
@@ -32,9 +33,10 @@ export default async function ProductionTasksPage({ params, searchParams }: {
 
   const canViewAll = await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "task", "*", "*", "view");
 
-  const tasks = canViewAll
-    ? await listProductionTechReqs(productionId)
-    : (await listMyTechReqsFull(session.userId))
+  const [tasks, pocTaskIds] = await Promise.all([
+    canViewAll
+      ? listProductionTechReqs(productionId)
+      : listMyTechReqsFull(session.userId).then(items => items
         .filter(t => t.productionId === productionId)
         .map(t => ({
           id: t.id,
@@ -55,12 +57,20 @@ export default async function ProductionTasksPage({ params, searchParams }: {
           phases: [] as { id: string; name: string; startDate: string; endDate: string | null }[],
           isBlocked: false,
           assignees: t.assignees,
-        }));
+        }))),
+    listTaskPocIdsForUser(session.userId, productionId),
+  ]);
 
   return (
     <div className={styles.workspace} style={{ minHeight: "100vh", background: "var(--paper)" }}>
       <PageHeader eyebrow="Tasks" title="任务" side="stage" />
-      <ProductionTasksClient productionId={productionId} initialTasks={tasks} initialEventFilter={eventFilter} currentUserId={session.userId} />
+      <ProductionTasksClient
+        productionId={productionId}
+        initialTasks={tasks}
+        initialEventFilter={eventFilter}
+        currentUserId={session.userId}
+        pocTaskIds={pocTaskIds}
+      />
     </div>
   );
 }

@@ -16,7 +16,9 @@ import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { addProductionMember } from "@/lib/perm/member-db";
-import { isTaskPoc, isSubjectPoc, isDeptSubjectPoc, taskSubjectOf } from "@/lib/ops/task-poc";
+import {
+  isTaskPoc, isSubjectPoc, isDeptSubjectPoc, listTaskPocIdsForUser, taskSubjectOf,
+} from "@/lib/ops/task-poc";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. 静态棘轮：不许绕过收敛入口
@@ -136,5 +138,18 @@ describe("isTaskPoc / isSubjectPoc", () => {
     // 作用域并进判定后，这条防线不再依赖调用方的自觉。
     expect(await isDeptSubjectPoc(prodId, deptId, pocId)).toBe(true);
     expect(await isDeptSubjectPoc(otherProdId, deptId, pocId)).toBe(false);
+  });
+
+  it("集合查询只把责任部门的 POC 标成 task POC", async () => {
+    const taskId = `tr_${shortId()}`;
+    await getPool().query(
+      `INSERT INTO task (id, production_id, title, department_id, status)
+       VALUES ($1, $2, '待确认集合查询', $3, 'awaiting')`,
+      [taskId, prodId, deptId],
+    );
+
+    expect(await listTaskPocIdsForUser(pocId, prodId)).toContain(taskId);
+    expect(await listTaskPocIdsForUser(memberId, prodId)).not.toContain(taskId);
+    expect(await listTaskPocIdsForUser(pocId, otherProdId)).not.toContain(taskId);
   });
 });

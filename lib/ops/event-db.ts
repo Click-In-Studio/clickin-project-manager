@@ -1,7 +1,7 @@
 import { getPool } from "../pg";
 import { policyFilteredRows } from "../perm/policy-db";
 import { writeEventGrants, writeReportGrants, writeTechReqGrants, writeWikiGrants } from "../perm/resource-grant-db";
-import { taskSubjectOf } from "./task-poc";
+import { listTaskPocIdsForUser, taskSubjectOf } from "./task-poc";
 import { ensureReportTreeAnchors } from "../node/anchors";
 import { insertNode, placeNodeUnder, tailSortKey } from "../node/db";
 import { registerNodeReferenceResolver } from "../node/mount";
@@ -2376,6 +2376,7 @@ export type MyTechReqFullEntry = {
 
 /** All tech reqs relevant to the user as POC or assignee, with full details for the personal page. */
 export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullEntry[]> {
+  const pocTaskIds = await listTaskPocIdsForUser(userId);
   const res = await getPool().query<{
     id: string; title: string; description: string; status: string;
     department_id: string | null; department_name: string | null;
@@ -2403,7 +2404,7 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
          (SELECT MAX(esi.end_time) FROM task_schedule_item tsi
           JOIN event_schedule_item esi ON esi.id = tsi.item_id WHERE tsi.task_id = t.id),
          pe.end_time) AS effective_end_time,
-       (edm_poc.user_id IS NOT NULL OR grp_poc.am IS NOT NULL) AS am_poc,
+       t.id = ANY($2::text[]) AS am_poc,
        (
          SELECT json_agg(json_build_object('userId', eta2.user_id, 'name', eta2.name)
                 ORDER BY eta2.name)
@@ -2422,29 +2423,16 @@ export async function listMyTechReqsFull(userId: string): Promise<MyTechReqFullE
      JOIN production p ON p.id = t.production_id
      LEFT JOIN production_dept ed ON ed.id = t.department_id
      LEFT JOIN event_group eg ON eg.id = t.group_id
-     LEFT JOIN production_dept_member edm_poc
-       ON edm_poc.dept_id = t.department_id
-       AND edm_poc.user_id = $1 AND edm_poc.is_poc = true
-     -- 责任主体是用户组时，「我是不是 POC」要解析组的当前定义（user 型直接比对，
-     -- dept 型看该部门现任 POC）。少了这段，绑组 task 会从组 POC 的任务页消失。
-     LEFT JOIN LATERAL (
-       SELECT 1 AS am
-       WHERE eg.id IS NOT NULL
-         AND (eg.poc_user_id = $1
-              OR EXISTS (SELECT 1 FROM production_dept_member pdm
-                          WHERE pdm.dept_id = eg.poc_dept_id
-                            AND pdm.user_id = $1 AND pdm.is_poc = true))
-     ) grp_poc ON true
      LEFT JOIN task_assignee eta
        ON eta.task_id = t.id AND eta.user_id = $1
      WHERE (t.event_id IS NULL OR pe.status != 'cancelled')
        AND (
-         (t.status = 'awaiting' AND (edm_poc.user_id IS NOT NULL OR grp_poc.am IS NOT NULL))
+         (t.status = 'awaiting' AND t.id = ANY($2::text[]))
          OR (t.status != 'awaiting'
-             AND (eta.user_id IS NOT NULL OR edm_poc.user_id IS NOT NULL OR grp_poc.am IS NOT NULL))
+             AND (eta.user_id IS NOT NULL OR t.id = ANY($2::text[])))
        )
      ORDER BY pe.start_time NULLS LAST, t.created_at`,
-    [userId]
+    [userId, pocTaskIds]
   );
   return res.rows.map(r => ({
     id: r.id,
