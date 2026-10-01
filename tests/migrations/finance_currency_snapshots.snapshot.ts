@@ -8,6 +8,12 @@ export type FinanceCurrencySnapshot = { productionId: string; budgetItemId: stri
 export const createPreMigrationData: MigrationHook<FinanceCurrencySnapshot>["createPreMigrationData"] = async ({ pool, faker, testOwner }) => {
   const productionId = `t${faker.string.alphanumeric(7).toLowerCase()}`;
   await pool.query("INSERT INTO production (id, name, owner_id) VALUES ($1,$2,$3)", [productionId, "币种快照迁移", testOwner]);
+  const viewId = `sv_${faker.string.alphanumeric(10).toLowerCase()}`;
+  await pool.query(
+    "INSERT INTO script_view (id, production_id, name) VALUES ($1,$2,'标准本')",
+    [viewId, productionId],
+  );
+  await pool.query("UPDATE production SET master_view_id = $1 WHERE id = $2", [viewId, productionId]);
   const legacy = await pool.query<{ id: string }>(
     `INSERT INTO production_budget_category (production_id, name, amount, currency, created_by)
      VALUES ($1,'差旅费',123.45,'CNY',$2) RETURNING id`,
