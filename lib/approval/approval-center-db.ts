@@ -171,7 +171,7 @@ const UNIFIED_APPROVAL_QUERY = `
       COALESCE(NULLIF(up.display_name, ''), NULLIF(up.name, ''), '成员') AS applicant_name,
       e.title,
       NULLIF(e.note, '') AS note,
-      e.status,
+      CASE WHEN e.status = 'withdrawn' THEN 'cancelled' ELSE e.status END AS status,
       e.status AS source_status,
       CASE WHEN e.status = 'pending' AND e.current_approver_ids @> ARRAY[$1]::uuid[]
            THEN COALESCE((e.escalation_chain -> -1 ->> 'canFinalize')::boolean, true)
@@ -191,14 +191,12 @@ const UNIFIED_APPROVAL_QUERY = `
       e.submitted_by = $1::uuid AS submitted_by_viewer,
       e.status = 'pending'
         AND e.current_approver_ids @> ARRAY[$1]::uuid[] AS pending_for_viewer,
-      (
-        e.resolved_by = $1::uuid
-        OR EXISTS (
-          SELECT 1
-            FROM jsonb_array_elements(e.escalation_chain) AS entry
-           WHERE entry ->> 'actorId' = $1::text
-             AND entry ->> 'action' IN ('approved', 'rejected', 'escalated')
-        )
+      EXISTS (
+        SELECT 1
+          FROM production_expense_event ev
+         WHERE ev.expense_id = e.id
+           AND ev.actor_id = $1::uuid
+           AND ev.event_type IN ('approved', 'rejected', 'forwarded')
       ) AS processed_by_viewer,
       false AS cc_for_viewer,
       concat_ws(' ', p.name, up.display_name, up.name, e.title, e.note, c.name) AS search_text
@@ -206,12 +204,13 @@ const UNIFIED_APPROVAL_QUERY = `
     JOIN production p ON p.id = e.production_id
     LEFT JOIN production_budget_category c ON c.id = e.category_id
     LEFT JOIN user_profile up ON up.user_id = e.submitted_by
+    WHERE e.status <> 'draft'
   )`;
 
 /**
  * 列出当前用户真实参与的审批实例。四个视图均从业务事实推导：
  * - pending: current_approver_ids
- * - processed: escalation_chain 中当前用户的实际动作
+ * - processed: 各业务持久事件中当前用户的实际动作（权限申请仍读其链内事实）
  * - cc: flow_snapshot 的 deliveredTo（绝不读 user_notification）
  * - submitted: subject_id / submitted_by
  */

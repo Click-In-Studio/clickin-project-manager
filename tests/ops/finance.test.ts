@@ -22,16 +22,20 @@ import {
   buildApprovalCandidateLadder, buildApprovalLadder, classifyApprovalNode,
 } from "@/lib/approval/approval-routing";
 import {
-  approveExpense, cancelExpense, createBudgetCategory, deleteBudgetCategory,
-  addExpenseDocument,
-  escalateExpiredExpenses, FinanceError, getExpense, listBudgetCategories, listExpenses,
+  approveExpense, withdrawExpense, createBudgetCategory, deleteBudgetCategory,
+  addExpenseDocument, createExpenseDraft,
+  escalateExpiredExpenses, FinanceError, getExpense, getExpenseDetail, listBudgetCategories, listExpenses,
   listPendingExpenses, rejectExpense, submitExpense, updateBudgetCategory,
-  listBudgetCategoryOptions,
+  listBudgetCategoryOptions, reopenExpense, submitExpenseDraft, updateExpenseDraft,
 } from "@/lib/ops/finance-db";
 import {
   addUniversalAssetFile, AssetFilePolicyError, AssetInUseError, createAsset, deleteAsset,
 } from "@/lib/asset/db";
 import { GET as getExpenses } from "@/app/api/production/[id]/finance/expenses/route";
+import {
+  GET as getExpenseDetailRoute,
+  PATCH as patchExpenseDetailRoute,
+} from "@/app/api/production/[id]/finance/expenses/[expenseId]/route";
 import {
   DELETE as deleteExpenseDocument, GET as getExpenseDocument,
 } from "@/app/api/production/[id]/finance/expense-documents/[assetId]/route";
@@ -389,7 +393,7 @@ describe("5. first-action-wins", () => {
     expect((await getExpense(e.id, prodId))!.status).toBe("approved");
 
     expect(await approveExpense(e.id, prodId, approverId)).toEqual({ ok: false, reason: "not_pending" });
-    expect((await rejectExpense(e.id, prodId, approverId)).ok).toBe(false);
+    expect((await rejectExpense(e.id, prodId, approverId, { comment: "不能重复处理" })).ok).toBe(false);
   });
 });
 
@@ -400,10 +404,111 @@ describe("6. 撤回只有提交人自己", () => {
       productionId: prodId, categoryId: cat.id, title: "要撤的",
       amount: "300.00", submittedBy: submitterId,
     });
-    expect((await cancelExpense(e.id, prodId, ownerId)).ok).toBe(false);
-    expect((await cancelExpense(e.id, prodId, submitterId)).ok).toBe(true);
-    expect((await getExpense(e.id, prodId))!.status).toBe("cancelled");
-    expect((await cancelExpense(e.id, prodId, submitterId)).ok).toBe(false);
+    expect((await withdrawExpense(e.id, prodId, ownerId)).ok).toBe(false);
+    expect((await withdrawExpense(e.id, prodId, submitterId)).ok).toBe(true);
+    expect((await getExpense(e.id, prodId))!.status).toBe("withdrawn");
+    expect((await withdrawExpense(e.id, prodId, submitterId)).ok).toBe(false);
+  });
+});
+
+describe("#735 草稿与重提生命周期", () => {
+  it("不完整草稿可保存；旧序号不能覆盖新内容；补齐后提交", async () => {
+    const draft = await createExpenseDraft({
+      productionId: prodId, categoryId: null, submittedBy: submitterId,
+    });
+    expect(draft).toMatchObject({ status: "draft", title: "", amount: null, mutationSeq: 0 });
+
+    const saved = await updateExpenseDraft({
+      expenseId: draft.id, productionId: prodId, actorId: submitterId,
+      expectedMutationSeq: 0, categoryId: null, title: "补齐后的草稿", amount: "31.20",
+      note: "第一次保存", invoiceRequirement: "required", invoiceWaiverReason: "",
+    });
+    expect(saved.mutationSeq).toBe(1);
+    await expect(updateExpenseDraft({
+      expenseId: draft.id, productionId: prodId, actorId: submitterId,
+      expectedMutationSeq: 0, categoryId: null, title: "旧页面覆盖", amount: "99.00",
+      note: "", invoiceRequirement: "required", invoiceWaiverReason: "",
+    })).rejects.toMatchObject({ reason: "stale" });
+
+    const submitted = await submitExpenseDraft(draft.id, prodId, submitterId, 1);
+    expect(submitted.status).toBe("pending");
+    expect(submitted.submittedAt).not.toBeNull();
+    expect((await getExpenseDetail(draft.id, prodId))!.events.map(event => event.type)).toEqual([
+      "draft_created", "draft_saved", "submitted",
+    ]);
+  });
+
+  it("撤回后在同一笔报销上重开、编辑并重新提交", async () => {
+    const submitted = await submitExpense({
+      productionId: prodId, categoryId: null, title: "需要修改", amount: "40.00",
+      submittedBy: submitterId, invoiceRequirement: "required",
+    });
+    expect((await withdrawExpense(
+      submitted.id, prodId, submitterId, submitted.mutationSeq,
+    )).ok).toBe(true);
+    const withdrawn = (await getExpense(submitted.id, prodId))!;
+    const reopened = await reopenExpense(submitted.id, prodId, submitterId, withdrawn.mutationSeq);
+    const saved = await updateExpenseDraft({
+      expenseId: submitted.id, productionId: prodId, actorId: submitterId,
+      expectedMutationSeq: reopened.mutationSeq, categoryId: null, title: "修改后重提",
+      amount: "41.00", note: "", invoiceRequirement: "required", invoiceWaiverReason: "",
+    });
+    const resubmitted = await submitExpenseDraft(
+      submitted.id, prodId, submitterId, saved.mutationSeq,
+    );
+    expect(resubmitted).toMatchObject({ id: submitted.id, status: "pending", title: "修改后重提" });
+    expect((await getExpenseDetail(submitted.id, prodId))!.events.map(event => event.type)).toEqual([
+      "submitted", "withdrawn", "reopened", "draft_saved", "submitted",
+    ]);
+  });
+});
+
+describe("#735 报销详情端点权限与归档门", () => {
+  function detailReq(method: "GET" | "PATCH", userId?: string, body?: unknown) {
+    const request = new NextRequest("http://localhost/api/x", {
+      method,
+      headers: body ? { "content-type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (userId) request.cookies.set(SESSION_COOKIE, createSession({
+      userId, name: "测试", avatarUrl: null, isAdmin: false,
+    }));
+    return request;
+  }
+
+  it("未登录 401；非成员与只有基础资格但未参与的人均为 403", async () => {
+    const draft = await createExpenseDraft({
+      productionId: prodId, categoryId: null, submittedBy: submitterId, title: "权限测试",
+    });
+    const ctx = () => ({ params: Promise.resolve({ id: prodId, expenseId: draft.id }) });
+    expect((await getExpenseDetailRoute(detailReq("GET"), ctx())).status).toBe(401);
+    const outsider = (await upsertFeishuUser(
+      `test-open-${shortId()}`, `详情非成员${shortId()}`, null, false,
+    )).userId;
+    expect((await getExpenseDetailRoute(detailReq("GET", outsider), ctx())).status).toBe(403);
+    expect((await getExpenseDetailRoute(detailReq("GET", strangerId), ctx())).status).toBe(403);
+    const ownerResponse = await getExpenseDetailRoute(detailReq("GET", submitterId), ctx());
+    expect(ownerResponse.status).toBe(200);
+    expect((await ownerResponse.json() as { expense: { events: unknown[] } }).expense.events).toHaveLength(1);
+  });
+
+  it("归档项目详情仍可读，但草稿不可写", async () => {
+    const draft = await createExpenseDraft({
+      productionId: prodId, categoryId: null, submittedBy: submitterId, title: "归档只读",
+    });
+    const ctx = () => ({ params: Promise.resolve({ id: prodId, expenseId: draft.id }) });
+    await getPool().query("UPDATE production SET archived_at = now() WHERE id = $1", [prodId]);
+    try {
+      expect((await getExpenseDetailRoute(detailReq("GET", submitterId), ctx())).status).toBe(200);
+      const response = await patchExpenseDetailRoute(detailReq("PATCH", submitterId, {
+        expectedMutationSeq: draft.mutationSeq,
+        title: "不应写入", amount: "1.00", categoryId: null, note: "",
+        invoiceRequirement: "required", invoiceWaiverReason: "",
+      }), ctx());
+      expect(response.status).toBe(403);
+    } finally {
+      await getPool().query("UPDATE production SET archived_at = NULL WHERE id = $1", [prodId]);
+    }
   });
 });
 
@@ -579,7 +684,7 @@ describe("#713 财务凭证上下文访问", () => {
     expect((await getExpenseDocument(req(deptPocId), ctx())).status).toBe(200);
     expect((await getExpenseDocument(req(strangerId), ctx())).status).toBe(403);
 
-    await rejectExpense(expense.id, prodId, deptPocId);
+    await rejectExpense(expense.id, prodId, deptPocId, { comment: "凭证不合要求" });
     // 审批上下文结束后不遗留永久 asset grant。
     expect((await getExpenseDocument(req(deptPocId), ctx())).status).toBe(403);
   });
@@ -641,7 +746,7 @@ describe("#713 提交后补票", () => {
       submittedBy: submitterId, invoiceRequirement: "required", documents: [],
     });
     const document = await stagedDocument();
-    const body = { assetFileId: document.file.id, kind: "invoice" };
+    const body = { assetFileId: document.file.id, kind: "invoice", expectedMutationSeq: expense.mutationSeq };
     const ctx = () => ({ params: Promise.resolve({ id: prodId, expenseId: expense.id }) });
 
     expect((await appendExpenseDocument(postReq(null, body), ctx())).status).toBe(401);
@@ -654,28 +759,58 @@ describe("#713 提交后补票", () => {
     expect((await getExpense(expense.id, prodId))!.invoiceState).toBe("provided");
   });
 
+  it("待审批补票推进序号，旧页面不能再批准", async () => {
+    const expense = await submitExpense({
+      productionId: prodId, categoryId: null, title: "补票与审批竞态", amount: "15.50",
+      submittedBy: submitterId, invoiceRequirement: "required", documents: [],
+    });
+    const document = await stagedDocument();
+    const supplemented = await addExpenseDocument({
+      expenseId: expense.id, productionId: prodId, submittedBy: submitterId,
+      assetFileId: document.file.id, kind: "invoice", expectedMutationSeq: expense.mutationSeq,
+    });
+    expect(supplemented.mutationSeq).toBe(expense.mutationSeq + 1);
+    await expect(approveExpense(
+      expense.id, prodId, expense.currentApproverIds[0],
+      { expectedMutationSeq: expense.mutationSeq },
+    )).resolves.toEqual({ ok: false, reason: "conflict" });
+  });
+
   it("已批准但待补票的报销仍可追加；驳回后不可追加", async () => {
     const approved = await submitExpense({
       productionId: prodId, categoryId: null, title: "批准后补票", amount: "16.00",
       submittedBy: submitterId, invoiceRequirement: "required", documents: [],
     });
     await approveExpense(approved.id, prodId, approved.currentApproverIds[0]);
+    const approvedAfterDecision = (await getExpense(approved.id, prodId))!;
     const approvedDocument = await stagedDocument();
     expect((await addExpenseDocument({
       expenseId: approved.id, productionId: prodId, submittedBy: submitterId,
       assetFileId: approvedDocument.file.id, kind: "invoice",
+      expectedMutationSeq: approvedAfterDecision.mutationSeq,
     })).invoiceState).toBe("provided");
+    const detail = (await getExpenseDetail(approved.id, prodId))!;
+    const approval = detail.events.find(event => event.type === "approved")!;
+    const supplement = detail.events.find(event => event.type === "post_approval_document_added")!;
+    expect(approval.details.evidenceAssetFileIds).toEqual([]);
+    expect(supplement.details).toMatchObject({
+      assetFileId: approvedDocument.file.id,
+      approvalBasis: "after_approval",
+    });
+    expect(detail.status).toBe("approved");
 
     const rejected = await submitExpense({
       productionId: prodId, categoryId: null, title: "驳回后不能补", amount: "17.00",
       submittedBy: submitterId, invoiceRequirement: "required", documents: [],
     });
-    await rejectExpense(rejected.id, prodId, rejected.currentApproverIds[0]);
+    await rejectExpense(rejected.id, prodId, rejected.currentApproverIds[0], { comment: "不予报销" });
+    const rejectedAfterDecision = (await getExpense(rejected.id, prodId))!;
     const rejectedDocument = await stagedDocument();
     await expect(addExpenseDocument({
       expenseId: rejected.id, productionId: prodId, submittedBy: submitterId,
       assetFileId: rejectedDocument.file.id, kind: "invoice",
-    })).rejects.toMatchObject({ reason: "not_pending" });
+      expectedMutationSeq: rejectedAfterDecision.mutationSeq,
+    })).rejects.toMatchObject({ reason: "invalid_state" });
   });
 });
 

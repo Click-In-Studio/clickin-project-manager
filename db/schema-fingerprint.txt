@@ -616,7 +616,15 @@ COL|production_expense_document|created_by|uuid|uuid|NO|
 COL|production_expense_document|document_kind|text|text|NO|
 COL|production_expense_document|expense_id|uuid|uuid|NO|
 COL|production_expense_document|id|text|text|NO|
-COL|production_expense|amount|numeric|numeric|NO|
+COL|production_expense_event|actor_id|uuid|uuid|YES|
+COL|production_expense_event|comment|text|text|YES|
+COL|production_expense_event|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_expense_event|details|jsonb|jsonb|NO|'{}'::jsonb
+COL|production_expense_event|event_type|text|text|NO|
+COL|production_expense_event|expense_id|uuid|uuid|NO|
+COL|production_expense_event|id|text|text|NO|
+COL|production_expense_event|mutation_seq|bigint|int8|NO|
+COL|production_expense|amount|numeric|numeric|YES|
 COL|production_expense|category_id|uuid|uuid|YES|
 COL|production_expense|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_expense|currency|text|text|NO|'CNY'::text
@@ -627,13 +635,15 @@ COL|production_expense|escalation_chain|jsonb|jsonb|NO|'[]'::jsonb
 COL|production_expense|id|uuid|uuid|NO|gen_random_uuid()
 COL|production_expense|invoice_requirement|text|text|YES|
 COL|production_expense|invoice_waiver_reason|text|text|NO|''::text
+COL|production_expense|mutation_seq|bigint|int8|NO|0
 COL|production_expense|note|text|text|NO|''::text
 COL|production_expense|production_id|text|text|NO|
 COL|production_expense|resolved_at|timestamp with time zone|timestamptz|YES|
 COL|production_expense|resolved_by|uuid|uuid|YES|
-COL|production_expense|status|text|text|NO|'pending'::text
+COL|production_expense|status|text|text|NO|'draft'::text
+COL|production_expense|submitted_at|timestamp with time zone|timestamptz|YES|
 COL|production_expense|submitted_by|uuid|uuid|NO|
-COL|production_expense|title|text|text|NO|
+COL|production_expense|title|text|text|NO|''::text
 COL|production_expense|updated_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_invite_claim|claimed_at|timestamp with time zone|timestamptz|YES|
 COL|production_invite_claim|claimed_by|uuid|uuid|YES|
@@ -1316,16 +1326,21 @@ CON|production_expense_document|production_expense_document_document_kind_check|
 CON|production_expense_document|production_expense_document_expense_id_asset_file_id_key|UNIQUE (expense_id, asset_file_id)
 CON|production_expense_document|production_expense_document_expense_id_fkey|FOREIGN KEY (expense_id) REFERENCES production_expense(id) ON DELETE CASCADE
 CON|production_expense_document|production_expense_document_pkey|PRIMARY KEY (id)
+CON|production_expense_event|production_expense_event_actor_id_fkey|FOREIGN KEY (actor_id) REFERENCES app_user(id)
+CON|production_expense_event|production_expense_event_event_type_check|CHECK ((event_type = ANY (ARRAY['draft_created'::text, 'draft_saved'::text, 'submitted'::text, 'forwarded'::text, 'approved'::text, 'rejected'::text, 'withdrawn'::text, 'reopened'::text, 'document_added'::text, 'document_removed'::text, 'post_approval_document_added'::text])))
+CON|production_expense_event|production_expense_event_expense_id_fkey|FOREIGN KEY (expense_id) REFERENCES production_expense(id) ON DELETE CASCADE
+CON|production_expense_event|production_expense_event_pkey|PRIMARY KEY (id)
 CON|production_expense|production_expense_amount_check|CHECK ((amount >= (0)::numeric))
 CON|production_expense|production_expense_category_id_fkey|FOREIGN KEY (category_id) REFERENCES production_budget_category(id) ON DELETE SET NULL
 CON|production_expense|production_expense_current_stage_check|CHECK (((current_stage IS NULL) OR (current_stage = ANY (ARRAY['supervisor'::text, 'holder'::text, 'dept_poc'::text, 'ancestor_poc'::text, 'producer'::text, 'owner'::text]))))
 CON|production_expense|production_expense_invoice_requirement_check|CHECK ((invoice_requirement = ANY (ARRAY['required'::text, 'waived'::text])))
-CON|production_expense|production_expense_invoice_waiver_reason_check|CHECK (((invoice_requirement <> 'waived'::text) OR (btrim(invoice_waiver_reason) <> ''::text)))
+CON|production_expense|production_expense_invoice_waiver_reason_check|CHECK (((status = 'draft'::text) OR (invoice_requirement <> 'waived'::text) OR (btrim(invoice_waiver_reason) <> ''::text)))
 CON|production_expense|production_expense_pkey|PRIMARY KEY (id)
 CON|production_expense|production_expense_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|production_expense|production_expense_resolved_by_fkey|FOREIGN KEY (resolved_by) REFERENCES app_user(id)
-CON|production_expense|production_expense_status_check|CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text, 'cancelled'::text])))
+CON|production_expense|production_expense_status_check|CHECK ((status = ANY (ARRAY['draft'::text, 'pending'::text, 'approved'::text, 'rejected'::text, 'withdrawn'::text])))
 CON|production_expense|production_expense_submitted_by_fkey|FOREIGN KEY (submitted_by) REFERENCES app_user(id)
+CON|production_expense|production_expense_submitted_content_check|CHECK (((status = 'draft'::text) OR ((btrim(title) <> ''::text) AND (amount IS NOT NULL) AND (submitted_at IS NOT NULL))))
 CON|production_invite_claim|production_invite_claim_claimed_by_fkey|FOREIGN KEY (claimed_by) REFERENCES app_user(id) ON DELETE SET NULL
 CON|production_invite_claim|production_invite_claim_pkey|PRIMARY KEY (id)
 CON|production_invite_claim|production_invite_claim_token_fkey|FOREIGN KEY (token) REFERENCES production_invite(token) ON DELETE CASCADE
@@ -1729,6 +1744,8 @@ IDX|production_expense_document|production_expense_document_expense_id_asset_fil
 IDX|production_expense_document|production_expense_document_expense_idx|CREATE INDEX production_expense_document_expense_idx ON public.production_expense_document USING btree (expense_id, created_at)
 IDX|production_expense_document|production_expense_document_file_idx|CREATE INDEX production_expense_document_file_idx ON public.production_expense_document USING btree (asset_file_id)
 IDX|production_expense_document|production_expense_document_pkey|CREATE UNIQUE INDEX production_expense_document_pkey ON public.production_expense_document USING btree (id)
+IDX|production_expense_event|production_expense_event_expense_idx|CREATE INDEX production_expense_event_expense_idx ON public.production_expense_event USING btree (expense_id, created_at, id)
+IDX|production_expense_event|production_expense_event_pkey|CREATE UNIQUE INDEX production_expense_event_pkey ON public.production_expense_event USING btree (id)
 IDX|production_expense|pe_approver_idx|CREATE INDEX pe_approver_idx ON public.production_expense USING gin (current_approver_ids)
 IDX|production_expense|pe_category_idx|CREATE INDEX pe_category_idx ON public.production_expense USING btree (category_id) WHERE (category_id IS NOT NULL)
 IDX|production_expense|pe_pending_idx|CREATE INDEX pe_pending_idx ON public.production_expense USING btree (production_id, status) WHERE (status = 'pending'::text)

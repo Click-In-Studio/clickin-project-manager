@@ -71,7 +71,7 @@ async function insertExpense(params: {
   productionId: string;
   submittedBy: string;
   title: string;
-  status: "pending" | "approved" | "rejected" | "cancelled";
+  status: "pending" | "approved" | "rejected" | "withdrawn";
   createdAt: string;
   currentApproverIds?: string[];
   escalationChain?: unknown[];
@@ -80,10 +80,11 @@ async function insertExpense(params: {
   const { rows } = await getPool().query<{ id: string }>(
     `INSERT INTO production_expense
        (production_id, title, amount, currency, note, submitted_by, status,
-        current_approver_ids, escalation_chain, created_at, updated_at, resolved_at, resolved_by)
+        current_approver_ids, escalation_chain, created_at, updated_at, submitted_at,
+        resolved_at, resolved_by)
      VALUES ($1, $2, 123.45, 'CNY', '舞台餐费', $3, $4, $5::uuid[], $6::jsonb,
-             $7::timestamptz, $7::timestamptz,
-             CASE WHEN $4 IN ('approved', 'rejected', 'cancelled')
+             $7::timestamptz, $7::timestamptz, $7::timestamptz,
+             CASE WHEN $4 IN ('approved', 'rejected', 'withdrawn')
                   THEN $7::timestamptz + interval '1 hour' ELSE NULL END,
              $8)
      RETURNING id`,
@@ -98,6 +99,14 @@ async function insertExpense(params: {
       params.resolvedBy ?? null,
     ],
   );
+  if (params.resolvedBy) {
+    await getPool().query(
+      `INSERT INTO production_expense_event
+         (id, expense_id, event_type, actor_id, mutation_seq, created_at)
+       VALUES ($1, $2, $3, $4, 0, $5::timestamptz + interval '1 hour')`,
+      [`eevt_${shortId()}`, rows[0].id, params.status, params.resolvedBy, params.createdAt],
+    );
+  }
   return rows[0].id;
 }
 

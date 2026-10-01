@@ -1572,15 +1572,15 @@ CREATE TABLE IF NOT EXISTS production_expense (
   id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id TEXT          NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   category_id   UUID          REFERENCES production_budget_category(id) ON DELETE SET NULL,
-  title         TEXT          NOT NULL,
-  amount        NUMERIC(14,2) NOT NULL CHECK (amount >= 0),
+  title         TEXT          NOT NULL DEFAULT '',
+  amount        NUMERIC(14,2) CHECK (amount >= 0),
   currency      TEXT          NOT NULL DEFAULT 'CNY',
   note          TEXT          NOT NULL DEFAULT '',
   invoice_requirement TEXT    CHECK (invoice_requirement IN ('required', 'waived')),
   invoice_waiver_reason TEXT  NOT NULL DEFAULT '',
   submitted_by  UUID          NOT NULL REFERENCES app_user(id),
-  status        TEXT          NOT NULL DEFAULT 'pending'
-                CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+  status        TEXT          NOT NULL DEFAULT 'draft'
+                CHECK (status IN ('draft', 'pending', 'approved', 'rejected', 'withdrawn')),
   current_stage        TEXT    NULL CHECK (current_stage IS NULL OR current_stage IN (
                          'supervisor', 'holder', 'dept_poc', 'ancestor_poc', 'producer', 'owner'
                        )),
@@ -1589,10 +1589,14 @@ CREATE TABLE IF NOT EXISTS production_expense (
   escalation_chain     JSONB   NOT NULL DEFAULT '[]',
   resolved_at   TIMESTAMPTZ,
   resolved_by   UUID          REFERENCES app_user(id),
+  mutation_seq  BIGINT        NOT NULL DEFAULT 0,
+  submitted_at  TIMESTAMPTZ,
   created_at    TIMESTAMPTZ   NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  CONSTRAINT production_expense_submitted_content_check
+    CHECK (status = 'draft' OR (btrim(title) <> '' AND amount IS NOT NULL AND submitted_at IS NOT NULL)),
   CONSTRAINT production_expense_invoice_waiver_reason_check
-    CHECK (invoice_requirement <> 'waived' OR btrim(invoice_waiver_reason) <> '')
+    CHECK (status = 'draft' OR invoice_requirement <> 'waived' OR btrim(invoice_waiver_reason) <> '')
 );
 
 CREATE INDEX IF NOT EXISTS pe_production_idx ON production_expense (production_id);
@@ -1615,6 +1619,24 @@ CREATE INDEX IF NOT EXISTS production_expense_document_expense_idx
   ON production_expense_document(expense_id, created_at);
 CREATE INDEX IF NOT EXISTS production_expense_document_file_idx
   ON production_expense_document(asset_file_id);
+
+CREATE TABLE IF NOT EXISTS production_expense_event (
+  id            TEXT        PRIMARY KEY,
+  expense_id    UUID        NOT NULL REFERENCES production_expense(id) ON DELETE CASCADE,
+  event_type    TEXT        NOT NULL CHECK (event_type IN (
+                  'draft_created', 'draft_saved', 'submitted', 'forwarded',
+                  'approved', 'rejected', 'withdrawn', 'reopened',
+                  'document_added', 'document_removed', 'post_approval_document_added'
+                )),
+  actor_id      UUID        REFERENCES app_user(id),
+  comment       TEXT,
+  mutation_seq  BIGINT      NOT NULL,
+  details       JSONB       NOT NULL DEFAULT '{}'::jsonb,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS production_expense_event_expense_idx
+  ON production_expense_event(expense_id, created_at, id);
 
 -- ── 物料台账（add-material-ledger.sql）─────────────────────────────────────────
 -- 实体物（道具/服装/设备/布景），与 asset（数字资产：文件/R2/飞书链接）不是一回事。

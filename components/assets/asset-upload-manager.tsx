@@ -26,7 +26,12 @@ export type UploadTaskTarget =
       mountAuxId?: string | null;
       label: string;
     }
-  | { kind: "expense"; expenseId: string; documentKind: "invoice" | "receipt" | "other" };
+  | {
+      kind: "expense";
+      expenseId: string;
+      documentKind: "invoice" | "receipt" | "other";
+      expectedMutationSeq: number;
+    };
 
 export type UploadTask = {
   id: string;
@@ -112,7 +117,11 @@ async function bindResult(task: UploadTask, result: UploadResult, signal: AbortS
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assetFileId: result.fileId, kind: task.target.documentKind }),
+      body: JSON.stringify({
+        assetFileId: result.fileId,
+        kind: task.target.documentKind,
+        expectedMutationSeq: task.target.expectedMutationSeq,
+      }),
       signal,
     },
   );

@@ -254,6 +254,19 @@
 .approvalActions { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
 .actionButtons,
 .rejectConfirm { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.actionButtons input,
+.rejectConfirm textarea {
+  box-sizing: border-box;
+  max-width: 190px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 10px;
+}
+.rejectConfirm textarea { resize: vertical; }
 .actionButtons button { min-height: 30px; padding: 5px 9px; background: var(--surface); color: var(--ink); }
 .actionButtons button:last-child { background: var(--ink); color: #fff; }
 .rejectConfirm span { color: var(--muted); font-size: 9px; }
