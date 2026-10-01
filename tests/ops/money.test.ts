@@ -5,11 +5,13 @@
  * 浮点做法的失败摆出来——它不是假想，而是 NUMERIC(14,2) 合法范围内的真实取值。
  */
 import { describe, it, expect } from "vitest";
-import { toCents, sumCents, fmtCny, pctUsed, pctCents } from "@/lib/money";
+import {
+  convertToBaseAmount, fmtCny, formatMoney, isMoneyAmount, pctCents, pctUsed, sumCents, toCents,
+} from "@/lib/money";
 
 describe("1. 为什么不能用 Number 算钱", () => {
-  it("NUMERIC(14,2) 的上限值过 Number 会丢掉一分，过 toCents 不会", () => {
-    const top = "99999999999999.99";           // 12 位整数 + 2 位小数，AMOUNT_RE 允许
+  it("大额金额过 Number 会丢掉一分，过 toCents 不会", () => {
+    const top = "99999999999999.99";
     expect(Math.round(Number(top) * 100)).toBe(9999999999999998);  // ← 少了一分
     expect(toCents(top)).toBe(BigInt("9999999999999999"));         // ← 分毫不差
   });
@@ -19,6 +21,25 @@ describe("1. 为什么不能用 Number 算钱", () => {
     expect(fmtCny(sumCents(parts))).toBe("¥1");
     // 浮点写法在这里会得到 0.9999999999999999
     expect(Array.from({ length: 10 }, () => 0.1).reduce((a, b) => a + b)).not.toBe(1);
+  });
+});
+
+describe("5. 多币种与人工汇率", () => {
+  it("按 ISO 4217 小数位校验 JPY 与三位小数币种", () => {
+    expect(isMoneyAmount("123", "JPY")).toBe(true);
+    expect(isMoneyAmount("123.1", "JPY")).toBe(false);
+    expect(isMoneyAmount("1.234", "KWD")).toBe(true);
+    expect(isMoneyAmount("1.2345", "KWD")).toBe(false);
+  });
+
+  it("字符串乘法按本位币小数位四舍五入，不经过 Number", () => {
+    expect(convertToBaseAmount("100.00", "7.123456", "CNY")).toBe("712.35");
+    expect(convertToBaseAmount("1.234", "19.995", "JPY")).toBe("25");
+  });
+
+  it("展示显式带币种代码并保留规定小数位", () => {
+    expect(formatMoney("1234", "JPY")).toBe("JPY 1,234");
+    expect(formatMoney("1.2", "KWD")).toBe("KWD 1.200");
   });
 });
 

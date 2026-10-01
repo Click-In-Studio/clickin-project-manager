@@ -6,6 +6,7 @@
  * 这里不推进流程、不重算审批人，也不读取通知表。
  */
 import { getPool } from "../pg";
+import { isCurrencyCode, normalizeMoneyAmount } from "../money";
 import type {
   ApprovalCenterItem,
   ApprovalCenterListParams,
@@ -77,6 +78,9 @@ function rowToItem(row: ApprovalCenterRow): ApprovalCenterItem {
   if (!(APPROVAL_CENTER_BUSINESS_TYPES as readonly string[]).includes(row.business_type)) {
     throw new Error(`unsupported approval center business type: ${row.business_type}`);
   }
+  const detail = row.detail.kind === "expense" && isCurrencyCode(row.detail.currency)
+    ? { ...row.detail, amount: normalizeMoneyAmount(row.detail.amount, row.detail.currency) }
+    : row.detail;
   return {
     id: `${row.source}:${row.source_id}`,
     sourceId: row.source_id,
@@ -91,7 +95,7 @@ function rowToItem(row: ApprovalCenterRow): ApprovalCenterItem {
     canFinalizeForViewer: row.can_finalize_for_viewer,
     createdAt: row.created_at.toISOString(),
     resolvedAt: row.resolved_at?.toISOString() ?? null,
-    detail: row.detail,
+    detail,
   };
 }
 

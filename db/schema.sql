@@ -91,7 +91,9 @@ CREATE TABLE IF NOT EXISTS production (
   type_label        TEXT,
   language          TEXT,
   owner_id          UUID NOT NULL REFERENCES app_user(id),
-  watermark_enabled BOOLEAN NOT NULL DEFAULT false
+  watermark_enabled BOOLEAN NOT NULL DEFAULT false,
+  base_currency     TEXT NOT NULL DEFAULT 'CNY',
+  CONSTRAINT production_base_currency_format_check CHECK (base_currency ~ '^[A-Z]{3}$')
 );
 
 -- 项目列表顺序是个人偏好，不是 production 属性。客户端只提交相对锚点，服务端用
@@ -1558,7 +1560,7 @@ CREATE TABLE IF NOT EXISTS production_budget_category (
   id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   production_id TEXT          NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   name          TEXT          NOT NULL,
-  amount        NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (amount >= 0),
+  amount        NUMERIC(18,3) NOT NULL DEFAULT 0 CHECK (amount >= 0),
   currency      TEXT          NOT NULL DEFAULT 'CNY',
   dept_id       UUID          REFERENCES production_dept(id) ON DELETE SET NULL,
   order_index   INTEGER       NOT NULL DEFAULT 0,
@@ -1594,8 +1596,13 @@ CREATE TABLE IF NOT EXISTS production_budget_item (
   production_id      TEXT          NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   category_id        TEXT          NOT NULL,
   dept_id            UUID,
-  amount             NUMERIC(14,2) CHECK (amount IS NULL OR amount >= 0),
+  amount             NUMERIC(18,3) CHECK (amount IS NULL OR amount >= 0),
   currency           TEXT          NOT NULL DEFAULT 'CNY',
+  base_currency      TEXT          NOT NULL DEFAULT 'CNY',
+  base_amount        NUMERIC(18,3),
+  exchange_rate      NUMERIC(24,12),
+  exchange_rate_date DATE,
+  exchange_rate_source TEXT,
   notes              TEXT          NOT NULL DEFAULT '',
   sort_order         INTEGER       NOT NULL DEFAULT 0,
   legacy_category_id UUID          UNIQUE REFERENCES production_budget_category(id) ON DELETE RESTRICT,
@@ -1606,7 +1613,20 @@ CREATE TABLE IF NOT EXISTS production_budget_item (
   FOREIGN KEY (category_id, production_id)
     REFERENCES production_expense_category(id, production_id) ON DELETE CASCADE,
   FOREIGN KEY (dept_id, production_id)
-    REFERENCES production_dept(id, production_id) ON DELETE RESTRICT
+    REFERENCES production_dept(id, production_id) ON DELETE RESTRICT,
+  CONSTRAINT production_budget_item_currency_format_check
+    CHECK (currency ~ '^[A-Z]{3}$' AND base_currency ~ '^[A-Z]{3}$'),
+  CONSTRAINT production_budget_item_currency_snapshot_check CHECK (
+    (amount IS NULL AND base_amount IS NULL AND exchange_rate IS NULL
+      AND exchange_rate_date IS NULL AND exchange_rate_source IS NULL)
+    OR
+    (amount IS NOT NULL AND currency = base_currency AND base_amount = amount
+      AND exchange_rate IS NULL AND exchange_rate_date IS NULL AND exchange_rate_source IS NULL)
+    OR
+    (amount IS NOT NULL AND currency <> base_currency AND base_amount IS NOT NULL
+      AND base_amount >= 0 AND exchange_rate > 0 AND exchange_rate_date IS NOT NULL
+      AND btrim(exchange_rate_source) <> '')
+  )
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS production_budget_item_dept_unique_idx
@@ -1624,8 +1644,13 @@ CREATE TABLE IF NOT EXISTS production_expense (
   category_id   UUID          REFERENCES production_budget_category(id) ON DELETE SET NULL,
   budget_item_id TEXT         REFERENCES production_budget_item(id) ON DELETE SET NULL,
   title         TEXT          NOT NULL DEFAULT '',
-  amount        NUMERIC(14,2) CHECK (amount >= 0),
+  amount        NUMERIC(18,3) CHECK (amount >= 0),
   currency      TEXT          NOT NULL DEFAULT 'CNY',
+  base_currency TEXT          NOT NULL DEFAULT 'CNY',
+  base_amount   NUMERIC(18,3),
+  exchange_rate NUMERIC(24,12),
+  exchange_rate_date DATE,
+  exchange_rate_source TEXT,
   merchant      TEXT          NOT NULL DEFAULT '',
   occurred_on   DATE,
   note          TEXT          NOT NULL DEFAULT '',
@@ -1649,7 +1674,22 @@ CREATE TABLE IF NOT EXISTS production_expense (
   CONSTRAINT production_expense_submitted_content_check
     CHECK (status = 'draft' OR (btrim(title) <> '' AND amount IS NOT NULL AND submitted_at IS NOT NULL)),
   CONSTRAINT production_expense_invoice_waiver_reason_check
-    CHECK (status = 'draft' OR invoice_requirement <> 'waived' OR btrim(invoice_waiver_reason) <> '')
+    CHECK (status = 'draft' OR invoice_requirement <> 'waived' OR btrim(invoice_waiver_reason) <> ''),
+  CONSTRAINT production_expense_currency_format_check
+    CHECK (currency ~ '^[A-Z]{3}$' AND base_currency ~ '^[A-Z]{3}$'),
+  CONSTRAINT production_expense_currency_snapshot_check CHECK (
+    (status = 'draft' AND base_amount IS NULL
+      AND (exchange_rate IS NULL OR exchange_rate > 0)
+      AND (exchange_rate_source IS NULL OR btrim(exchange_rate_source) <> ''))
+    OR
+    (status <> 'draft' AND amount IS NOT NULL AND currency = base_currency
+      AND base_amount = amount AND exchange_rate IS NULL
+      AND exchange_rate_date IS NULL AND exchange_rate_source IS NULL)
+    OR
+    (status <> 'draft' AND amount IS NOT NULL AND currency <> base_currency
+      AND base_amount IS NOT NULL AND base_amount >= 0 AND exchange_rate > 0
+      AND exchange_rate_date IS NOT NULL AND btrim(exchange_rate_source) <> '')
+  )
 );
 
 CREATE INDEX IF NOT EXISTS pe_production_idx ON production_expense (production_id);
@@ -1657,6 +1697,64 @@ CREATE INDEX IF NOT EXISTS pe_category_idx   ON production_expense (category_id)
 CREATE INDEX IF NOT EXISTS pe_budget_item_idx ON production_expense (budget_item_id) WHERE budget_item_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS pe_approver_idx   ON production_expense USING GIN (current_approver_ids);
 CREATE INDEX IF NOT EXISTS pe_pending_idx    ON production_expense (production_id, status) WHERE status = 'pending';
+
+-- expand 阶段兼容 N-1：旧代码不写新增快照列，同本位币金额可由数据库确定性补齐。
+CREATE OR REPLACE FUNCTION fill_budget_currency_snapshot_compat()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  project_base_currency TEXT;
+BEGIN
+  SELECT base_currency INTO project_base_currency FROM production WHERE id = NEW.production_id;
+  IF NEW.amount IS NULL THEN
+    NEW.base_currency := project_base_currency;
+    NEW.base_amount := NULL;
+    NEW.exchange_rate := NULL;
+    NEW.exchange_rate_date := NULL;
+    NEW.exchange_rate_source := NULL;
+  ELSIF NEW.currency = project_base_currency AND NEW.exchange_rate IS NULL THEN
+    NEW.base_currency := project_base_currency;
+    NEW.base_amount := NEW.amount;
+    NEW.exchange_rate_date := NULL;
+    NEW.exchange_rate_source := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER production_budget_item_currency_snapshot_compat
+BEFORE INSERT OR UPDATE OF amount, currency, base_currency, base_amount,
+  exchange_rate, exchange_rate_date, exchange_rate_source
+ON production_budget_item
+FOR EACH ROW EXECUTE FUNCTION fill_budget_currency_snapshot_compat();
+
+CREATE OR REPLACE FUNCTION fill_expense_currency_snapshot_compat()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  project_base_currency TEXT;
+BEGIN
+  SELECT base_currency INTO project_base_currency FROM production WHERE id = NEW.production_id;
+  IF NEW.status = 'draft' THEN
+    NEW.base_amount := NULL;
+    IF NEW.currency = project_base_currency AND NEW.exchange_rate IS NULL THEN
+      NEW.base_currency := project_base_currency;
+      NEW.exchange_rate_date := NULL;
+      NEW.exchange_rate_source := NULL;
+    END IF;
+  ELSIF NEW.currency = project_base_currency AND NEW.exchange_rate IS NULL THEN
+    NEW.base_currency := project_base_currency;
+    NEW.base_amount := NEW.amount;
+    NEW.exchange_rate_date := NULL;
+    NEW.exchange_rate_source := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER production_expense_currency_snapshot_compat
+BEFORE INSERT OR UPDATE OF amount, currency, status, base_currency, base_amount,
+  exchange_rate, exchange_rate_date, exchange_rate_source
+ON production_expense
+FOR EACH ROW EXECUTE FUNCTION fill_expense_currency_snapshot_compat();
 
 CREATE TABLE IF NOT EXISTS production_expense_document (
   id            TEXT        PRIMARY KEY,

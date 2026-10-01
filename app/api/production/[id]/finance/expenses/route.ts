@@ -3,7 +3,6 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import {
-  AMOUNT_RE,
   createExpenseDraft, FinanceError, getBudgetCategory, isExpenseDate, listExpenses, submitExpense,
   type ExpenseDocumentKind,
 } from "@/lib/ops/finance-db";
@@ -59,8 +58,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const intent = body.intent === "draft" ? "draft" : "submit";
   if (intent === "submit" && !title)
     return Response.json({ error: "事由不能为空" }, { status: 400 });
-  if (amount && !AMOUNT_RE.test(amount))
-    return Response.json({ error: "金额必须是最多两位小数的非负数" }, { status: 400 });
   if (intent === "submit" && !amount)
     return Response.json({ error: "金额不能为空" }, { status: 400 });
   const occurredOn = typeof body.occurredOn === "string" && body.occurredOn ? body.occurredOn : null;
@@ -99,6 +96,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const common = {
       productionId, categoryId, title, amount,
       currency: typeof body.currency === "string" ? body.currency : "CNY",
+      exchangeRate: typeof body.exchangeRate === "string" ? body.exchangeRate : null,
+      exchangeRateDate: typeof body.exchangeRateDate === "string" ? body.exchangeRateDate : null,
+      exchangeRateSource: typeof body.exchangeRateSource === "string" ? body.exchangeRateSource : null,
       merchant: typeof body.merchant === "string" ? body.merchant : "",
       occurredOn,
       note: typeof body.note === "string" ? body.note : "",
@@ -113,7 +113,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ expense }, { status: 201 });
   } catch (e) {
     if (e instanceof FinanceError)
-      return Response.json({ error: e.message }, { status: e.reason === "invalid_document" ? 400 : 409 });
+      return Response.json({ error: e.message }, { status: e.reason === "invalid_document" ? 403 : 400 });
     throw e;
   }
 }

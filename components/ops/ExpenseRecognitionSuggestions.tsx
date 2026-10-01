@@ -31,12 +31,14 @@ export function recognitionStatusText(recognition: ExpenseDocumentRecognition | 
 
 export function ExpenseRecognitionSuggestions({
   productionId,
+  baseCurrency,
   documents,
   current,
   onRecognition,
   onRetry,
 }: {
   productionId: string;
+  baseCurrency: string;
   documents: RecognizableExpenseDocument[];
   current: { amount: string; merchant: string; occurredOn: string };
   onRecognition: (assetFileId: string, recognition: ExpenseDocumentRecognition | null) => void;
@@ -120,17 +122,17 @@ export function ExpenseRecognitionSuggestions({
               {aggregate.mixedTypes && <p className={styles.warning}>发票与收据可能对应同一笔消费，未自动合计金额。</p>}
               {aggregate.mixedTypes && aggregate.totalsByType.map(total => (
                 <p key={total.type} className={styles.groupTotal}>
-                  {total.type === "invoice" ? "发票" : total.type === "receipt" ? "收据" : "其他凭证"}候选合计：¥{total.amount}
+                  {total.type === "invoice" ? "发票" : total.type === "receipt" ? "收据" : "其他凭证"}候选合计：{aggregate.currencies[0] ?? ""} {total.amount}
                 </p>
               ))}
               {aggregate.currencies.length > 1 && <p className={styles.warning}>凭证币种不一致，未自动合计金额。</p>}
               {aggregate.merchantConflict && <p className={styles.warning}>多份凭证的商户不一致，请逐份核对。</p>}
               {aggregate.dateConflict && <p className={styles.warning}>多份凭证的日期不一致，请逐份核对。</p>}
               {current.amount && aggregate.amount && current.amount !== aggregate.amount && (
-                <p className={styles.warning}>票面合计 ¥{aggregate.amount} 与当前报销金额 ¥{current.amount} 不一致。</p>
+                <p className={styles.warning}>票面合计 {aggregate.currencies[0] ?? ""} {aggregate.amount} 与当前报销金额 {current.amount} 不一致。</p>
               )}
-              {aggregate.currencies.some(currency => currency !== "CNY") && (
-                <p className={styles.warning}>非 CNY 凭证暂不支持自动写入金额，也不会换算汇率。</p>
+              {aggregate.currencies.some(currency => currency !== baseCurrency) && (
+                <p className={styles.warning}>识别到非本位币，请人工确认汇率、日期、来源和折算结果。</p>
               )}
             </div>
           )}

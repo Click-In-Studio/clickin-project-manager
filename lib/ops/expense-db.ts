@@ -1,7 +1,6 @@
 /** 报销草稿、凭证、审批和超时升级状态机。 */
 
 import { getPool } from "../pg";
-import type { PoolClient } from "pg";
 import { uid } from "../asset/db";
 import {
   buildApprovalCandidateLadder, buildApprovalLadder, DEFAULT_APPROVAL_TTL_HOURS, nextStage,
@@ -11,9 +10,12 @@ import {
   isApprovalCommentTooLong, normalizeApprovalComment,
 } from "../approval/approval-stages";
 import {
-  AMOUNT_RE, FinanceError, appendExpenseEvent, getExpense,
+  FinanceError, appendExpenseEvent, getExpense,
   type Expense, type ExpenseDocumentKind, type ExpenseStatus, type InvoiceRequirement,
 } from "./expense-read-db";
+import { buildCurrencySnapshot, validateDraftCurrency } from "./finance-currency-db";
+import { lockOwnedExpenseDocumentFiles } from "./expense-document-db";
+export { addExpenseDocument, removeExpenseDocument } from "./expense-document-db";
 
 function expenseTarget(productionId: string, submitterId: string, categoryId: string | null) {
   return {
@@ -55,30 +57,6 @@ function withoutSubject(ladder: ApprovalStage[], subjectId: string): ApprovalSta
     .filter(stage => stage.approverIds.length > 0);
 }
 
-async function lockOwnedExpenseDocumentFiles(
-  client: PoolClient,
-  productionId: string,
-  uploaderUserId: string,
-  fileIds: string[],
-): Promise<void> {
-  if (fileIds.length === 0) return;
-  const files = await client.query<{ id: string }>(
-    `SELECT af.id
-       FROM asset_file af
-       JOIN asset a ON a.id = af.asset_id
-      WHERE af.id = ANY($1::text[])
-        AND a.production_id = $2
-        AND a.uploader_user_id = $3
-        AND a.asset_type = 'financial_document'
-        AND a.file_version_policy = 'single'
-        AND a.storage_type = 'r2'
-      FOR UPDATE OF af, a`,
-    [fileIds, productionId, uploaderUserId],
-  );
-  if (files.rows.length !== fileIds.length)
-    throw new FinanceError("invalid_document", "凭证不存在、已失效或不属于当前提交人");
-}
-
 export async function buildExpenseSubmissionPlan(
   productionId: string,
   submittedBy: string,
@@ -111,8 +89,7 @@ function validateSubmittedExpense(params: {
   invoiceWaiverReason: string;
 }): void {
   if (!params.title.trim()) throw new FinanceError("invalid_state", "事由不能为空");
-  if (!params.amount || !AMOUNT_RE.test(params.amount))
-    throw new FinanceError("invalid_state", "金额必须是最多两位小数的非负数");
+  if (!params.amount) throw new FinanceError("invalid_state", "请填写金额");
   if (params.invoiceRequirement !== "required" && params.invoiceRequirement !== "waived")
     throw new FinanceError("invalid_state", "请选择是否需要发票");
   if (params.invoiceRequirement === "waived" && !params.invoiceWaiverReason.trim())
@@ -125,6 +102,9 @@ export async function createExpenseDraft(params: {
   title?: string;
   amount?: string | null;
   currency?: string;
+  exchangeRate?: string | null;
+  exchangeRateDate?: string | null;
+  exchangeRateSource?: string | null;
   merchant?: string;
   occurredOn?: string | null;
   note?: string;
@@ -133,8 +113,6 @@ export async function createExpenseDraft(params: {
   invoiceWaiverReason?: string;
   documents?: { assetFileId: string; kind: ExpenseDocumentKind }[];
 }): Promise<Expense> {
-  if (params.amount && !AMOUNT_RE.test(params.amount))
-    throw new FinanceError("invalid_state", "金额必须是最多两位小数的非负数");
   const documents = params.documents ?? [];
   const uniqueFileIds = [...new Set(documents.map(document => document.assetFileId))];
   if (uniqueFileIds.length !== documents.length)
@@ -143,17 +121,24 @@ export async function createExpenseDraft(params: {
   let expenseId: string | null = null;
   try {
     await client.query("BEGIN");
+    const draftCurrency = await validateDraftCurrency(
+      client, params.productionId, params.amount ?? null, params.currency ?? "CNY", params,
+    );
     await lockOwnedExpenseDocumentFiles(client, params.productionId, params.submittedBy, uniqueFileIds);
     const { rows } = await client.query<{ id: string }>(
       `INSERT INTO production_expense
-         (production_id, budget_item_id, category_id, title, amount, currency, merchant, occurred_on, note,
+         (production_id, budget_item_id, category_id, title, amount, currency, base_currency,
+          exchange_rate, exchange_rate_date, exchange_rate_source, merchant, occurred_on, note,
           invoice_requirement, invoice_waiver_reason, submitted_by, status)
-       VALUES ($1,$2,(SELECT legacy_category_id FROM production_budget_item WHERE id = $2),$3,$4::numeric,$5,$6,$7::date,$8,$9,$10,$11,'draft')
+       VALUES ($1,$2,(SELECT legacy_category_id FROM production_budget_item WHERE id = $2),$3,$4::numeric,$5,$6,
+              $7::numeric,$8::date,$9,$10,$11::date,$12,$13,$14,$15,'draft')
        RETURNING id`,
       [
         params.productionId, params.categoryId, params.title?.trim() ?? "", params.amount ?? null,
-        params.currency ?? "CNY", params.merchant?.trim() ?? "", params.occurredOn ?? null,
-        params.note ?? "", params.invoiceRequirement ?? null,
+        draftCurrency.currency, draftCurrency.baseCurrency, draftCurrency.exchangeRate,
+        draftCurrency.exchangeRateDate, draftCurrency.exchangeRateSource,
+        params.merchant?.trim() ?? "", params.occurredOn ?? null, params.note ?? "",
+        params.invoiceRequirement ?? null,
         params.invoiceRequirement === "waived" ? params.invoiceWaiverReason?.trim() ?? "" : "",
         params.submittedBy,
       ],
@@ -190,6 +175,7 @@ export async function createExpenseDraft(params: {
 export async function submitExpense(params: {
   productionId: string; categoryId: string | null; title: string;
   amount: string; currency?: string; note?: string; submittedBy: string;
+  exchangeRate?: string | null; exchangeRateDate?: string | null; exchangeRateSource?: string | null;
   merchant?: string; occurredOn?: string | null;
   invoiceRequirement?: InvoiceRequirement;
   invoiceWaiverReason?: string;
@@ -216,23 +202,33 @@ export async function submitExpense(params: {
   let expenseId: string | null = null;
   try {
     await client.query("BEGIN");
+    const snapshot = await buildCurrencySnapshot(client, params.productionId, params.amount, {
+      currency: params.currency ?? "CNY",
+      exchangeRate: params.exchangeRate,
+      exchangeRateDate: params.exchangeRateDate,
+      exchangeRateSource: params.exchangeRateSource,
+    });
     await lockOwnedExpenseDocumentFiles(
       client, params.productionId, params.submittedBy, uniqueFileIds,
     );
 
     const res = await client.query<{ id: string }>(
       `INSERT INTO production_expense
-         (production_id, budget_item_id, category_id, title, amount, currency, merchant, occurred_on, note,
+         (production_id, budget_item_id, category_id, title, amount, currency, base_currency, base_amount,
+          exchange_rate, exchange_rate_date, exchange_rate_source, merchant, occurred_on, note,
           invoice_requirement, invoice_waiver_reason, submitted_by,
           status, current_stage, current_stage_depth, current_approver_ids, escalation_chain,
           resolved_at, resolved_by, submitted_at)
-       VALUES ($1,$2,(SELECT legacy_category_id FROM production_budget_item WHERE id = $2),$3,$4::numeric,$5,$6,$7::date,$8,$9,$10,$11,$12,$13,$14,$15::uuid[],$16::jsonb,$17,$18,now())
+       VALUES ($1,$2,(SELECT legacy_category_id FROM production_budget_item WHERE id = $2),$3,$4::numeric,$5,$6,$7::numeric,
+              $8::numeric,$9::date,$10,$11,$12::date,$13,$14,$15,$16,$17,$18,$19,$20::uuid[],$21::jsonb,$22,$23,now())
        RETURNING id`,
       [
         params.productionId, params.categoryId, params.title.trim(), params.amount,
-        params.currency ?? "CNY", params.merchant?.trim() ?? "", params.occurredOn ?? null,
-        params.note ?? "", invoiceRequirement, waiverReason,
-        params.submittedBy, plan.status, plan.first?.stage ?? null, plan.first?.depth ?? 0,
+        snapshot.currency, snapshot.baseCurrency, snapshot.baseAmount, snapshot.exchangeRate,
+        snapshot.exchangeRateDate, snapshot.exchangeRateSource,
+        params.merchant?.trim() ?? "", params.occurredOn ?? null, params.note ?? "",
+        invoiceRequirement, waiverReason, params.submittedBy, plan.status,
+        plan.first?.stage ?? null, plan.first?.depth ?? 0,
         plan.first?.approverIds ?? [], JSON.stringify(plan.chain),
         plan.selfApproved ? plan.actedAt : null, plan.selfApproved ? params.submittedBy : null,
       ],
@@ -252,7 +248,10 @@ export async function submitExpense(params: {
       actorId: params.submittedBy,
       mutationSeq: 0,
       details: {
-        title: params.title.trim(), amount: params.amount, currency: params.currency ?? "CNY",
+        title: params.title.trim(), amount: params.amount, currency: snapshot.currency,
+        baseCurrency: snapshot.baseCurrency, baseAmount: snapshot.baseAmount,
+        exchangeRate: snapshot.exchangeRate, exchangeRateDate: snapshot.exchangeRateDate,
+        exchangeRateSource: snapshot.exchangeRateSource,
         merchant: params.merchant?.trim() ?? "", occurredOn: params.occurredOn ?? null,
         categoryId: params.categoryId, evidenceAssetFileIds: uniqueFileIds,
       },
@@ -288,31 +287,39 @@ export async function updateExpenseDraft(params: {
   title: string;
   amount: string | null;
   currency?: string;
+  exchangeRate?: string | null;
+  exchangeRateDate?: string | null;
+  exchangeRateSource?: string | null;
   merchant?: string;
   occurredOn?: string | null;
   note: string;
   invoiceRequirement: InvoiceRequirement | null;
   invoiceWaiverReason: string;
 }): Promise<Expense> {
-  if (params.amount && !AMOUNT_RE.test(params.amount))
-    throw new FinanceError("invalid_state", "金额必须是最多两位小数的非负数");
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const draftCurrency = await validateDraftCurrency(
+      client, params.productionId, params.amount, params.currency ?? "CNY", params,
+    );
     const updated = await client.query<{ mutation_seq: string }>(
       `UPDATE production_expense
           SET budget_item_id = $5,
               category_id = (SELECT legacy_category_id FROM production_budget_item WHERE id = $5),
-              title = $6, amount = $7::numeric, currency = $8,
-              merchant = $9, occurred_on = $10::date, note = $11,
-              invoice_requirement = $12, invoice_waiver_reason = $13,
+              title = $6, amount = $7::numeric, currency = $8, base_currency = $9,
+              base_amount = NULL, exchange_rate = $10::numeric,
+              exchange_rate_date = $11::date, exchange_rate_source = $12,
+              merchant = $13, occurred_on = $14::date, note = $15,
+              invoice_requirement = $16, invoice_waiver_reason = $17,
               mutation_seq = mutation_seq + 1, updated_at = now()
         WHERE id = $1 AND production_id = $2 AND submitted_by = $3
           AND status = 'draft' AND mutation_seq = $4
         RETURNING mutation_seq`,
       [
         params.expenseId, params.productionId, params.actorId, params.expectedMutationSeq,
-        params.categoryId, params.title.trim(), params.amount, params.currency ?? "CNY",
+        params.categoryId, params.title.trim(), params.amount, draftCurrency.currency,
+        draftCurrency.baseCurrency, draftCurrency.exchangeRate,
+        draftCurrency.exchangeRateDate, draftCurrency.exchangeRateSource,
         params.merchant?.trim() ?? "", params.occurredOn ?? null, params.note,
         params.invoiceRequirement,
         params.invoiceRequirement === "waived" ? params.invoiceWaiverReason.trim() : "",
@@ -334,7 +341,7 @@ export async function updateExpenseDraft(params: {
       type: "draft_saved",
       actorId: params.actorId,
       mutationSeq,
-      details: { fields: ["title", "amount", "currency", "merchant", "occurredOn", "categoryId", "note", "invoiceRequirement"] },
+      details: { fields: ["title", "amount", "currency", "exchangeRate", "merchant", "occurredOn", "categoryId", "note", "invoiceRequirement"] },
     });
     await client.query("COMMIT");
   } catch (error) {
@@ -362,6 +369,7 @@ export async function reopenExpense(
           SET status = 'draft', current_stage = NULL, current_stage_depth = 0,
               current_approver_ids = '{}', escalation_chain = '[]'::jsonb,
               resolved_at = NULL, resolved_by = NULL,
+              base_amount = NULL,
               mutation_seq = mutation_seq + 1, updated_at = now()
         WHERE id = $1 AND production_id = $2 AND submitted_by = $3
           AND status IN ('rejected', 'withdrawn') AND mutation_seq = $4
@@ -399,10 +407,12 @@ export async function submitExpenseDraft(
     const locked = await client.query<{
       status: ExpenseStatus; submitted_by: string; category_id: string | null; title: string;
       amount: string | null; currency: string; merchant: string; occurred_on: string | null;
+      exchange_rate: string | null; exchange_rate_date: string | null; exchange_rate_source: string | null;
       invoice_requirement: InvoiceRequirement | null;
       invoice_waiver_reason: string; mutation_seq: string;
     }>(
       `SELECT status, submitted_by, budget_item_id AS category_id, title, amount::text AS amount, currency,
+              exchange_rate::text, exchange_rate_date::text, exchange_rate_source,
               merchant, occurred_on::text AS occurred_on,
               invoice_requirement, invoice_waiver_reason, mutation_seq
          FROM production_expense
@@ -421,6 +431,12 @@ export async function submitExpenseDraft(
       invoiceRequirement: row.invoice_requirement,
       invoiceWaiverReason: row.invoice_waiver_reason,
     });
+    const snapshot = await buildCurrencySnapshot(client, productionId, row.amount!, {
+      currency: row.currency,
+      exchangeRate: row.exchange_rate,
+      exchangeRateDate: row.exchange_rate_date,
+      exchangeRateSource: row.exchange_rate_source,
+    }, { fromStorage: true });
     const plan = await buildExpenseSubmissionPlan(productionId, actorId, row.category_id);
     const evidence = await client.query<{ asset_file_id: string }>(
       `SELECT asset_file_id FROM production_expense_document
@@ -431,14 +447,18 @@ export async function submitExpenseDraft(
       `UPDATE production_expense
           SET status = $5, current_stage = $6, current_stage_depth = $7,
               current_approver_ids = $8::uuid[], escalation_chain = $9::jsonb,
-              resolved_at = $10, resolved_by = $11, submitted_at = now(), updated_at = now()
+              resolved_at = $10, resolved_by = $11,
+              base_currency = $12, base_amount = $13::numeric, exchange_rate = $14::numeric,
+              exchange_rate_date = $15::date, exchange_rate_source = $16,
+              submitted_at = now(), updated_at = now()
         WHERE id = $1 AND production_id = $2 AND submitted_by = $3
           AND status = 'draft' AND mutation_seq = $4`,
       [
         expenseId, productionId, actorId, expectedMutationSeq, plan.status,
         plan.first?.stage ?? null, plan.first?.depth ?? 0, plan.first?.approverIds ?? [],
         JSON.stringify(plan.chain), plan.selfApproved ? plan.actedAt : null,
-        plan.selfApproved ? actorId : null,
+        plan.selfApproved ? actorId : null, snapshot.baseCurrency, snapshot.baseAmount,
+        snapshot.exchangeRate, snapshot.exchangeRateDate, snapshot.exchangeRateSource,
       ],
     );
     const evidenceAssetFileIds = evidence.rows.map(item => item.asset_file_id);
@@ -449,6 +469,9 @@ export async function submitExpenseDraft(
       mutationSeq: expectedMutationSeq,
       details: {
         title: row.title, amount: row.amount, currency: row.currency,
+        baseCurrency: snapshot.baseCurrency, baseAmount: snapshot.baseAmount,
+        exchangeRate: snapshot.exchangeRate, exchangeRateDate: snapshot.exchangeRateDate,
+        exchangeRateSource: snapshot.exchangeRateSource,
         merchant: row.merchant, occurredOn: row.occurred_on,
         categoryId: row.category_id, evidenceAssetFileIds,
       },
@@ -472,143 +495,6 @@ export async function submitExpenseDraft(
   const expense = await getExpense(expenseId, productionId);
   if (!expense) throw new Error(`expense not found after submit: ${expenseId}`);
   return expense;
-}
-
-/**
- * 待补票只允许追加不可变证据，不允许覆盖或移除审批时已经存在的文件。
- * pending 与 approved 都可补：后者覆盖“先批后补票”，不改动原审批结论。
- */
-export async function addExpenseDocument(params: {
-  expenseId: string;
-  productionId: string;
-  submittedBy: string;
-  assetFileId: string;
-  kind: ExpenseDocumentKind;
-  expectedMutationSeq: number;
-}): Promise<Expense> {
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const expense = await client.query<{
-      status: ExpenseStatus; submitted_by: string; mutation_seq: string;
-      invoice_requirement: InvoiceRequirement | null; has_invoice: boolean;
-    }>(
-      `SELECT e.status, e.submitted_by, e.mutation_seq, e.invoice_requirement,
-              EXISTS (
-                SELECT 1 FROM production_expense_document d
-                 WHERE d.expense_id = e.id AND d.document_kind = 'invoice'
-              ) AS has_invoice
-         FROM production_expense e
-        WHERE e.id = $1 AND e.production_id = $2 FOR UPDATE`,
-      [params.expenseId, params.productionId],
-    );
-    const row = expense.rows[0];
-    if (!row || row.submitted_by !== params.submittedBy)
-      throw new FinanceError("invalid_document", "只能为自己提交的报销补充凭证");
-    if (Number(row.mutation_seq) !== params.expectedMutationSeq)
-      throw new FinanceError("stale", "报销内容已变化，请刷新后重试");
-    if (row.status !== "draft") {
-      if (row.status !== "pending" && row.status !== "approved")
-        throw new FinanceError("invalid_state", "请先进入编辑状态再补充凭证");
-      if (row.invoice_requirement !== "required" || row.has_invoice || params.kind !== "invoice")
-        throw new FinanceError("invalid_state", "审批开始后只能为待补发票的报销追加缺失发票");
-    }
-
-    await lockOwnedExpenseDocumentFiles(
-      client, params.productionId, params.submittedBy, [params.assetFileId],
-    );
-    await client.query(
-      `INSERT INTO production_expense_document
-         (id, expense_id, asset_file_id, document_kind, created_by, created_at)
-       VALUES ($1,$2,$3,$4,$5,clock_timestamp())`,
-      [uid("edoc"), params.expenseId, params.assetFileId, params.kind, params.submittedBy],
-    );
-    const mutationSeq = params.expectedMutationSeq + 1;
-    await client.query(
-      `UPDATE production_expense
-          SET mutation_seq = $3, updated_at = now()
-        WHERE id = $1 AND production_id = $2`,
-      [params.expenseId, params.productionId, mutationSeq],
-    );
-    await appendExpenseEvent(client, {
-      expenseId: params.expenseId,
-      type: row.status === "approved" ? "post_approval_document_added" : "document_added",
-      actorId: params.submittedBy,
-      mutationSeq,
-      details: {
-        assetFileId: params.assetFileId,
-        kind: params.kind,
-        approvalBasis: row.status === "approved" ? "after_approval" : "current",
-      },
-    });
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    if (error instanceof Error && error.message.includes("production_expense_document_expense_id_asset_file_id_key"))
-      throw new FinanceError("invalid_document", "这份凭证已经添加过了");
-    throw error;
-  } finally {
-    client.release();
-  }
-  const updated = await getExpense(params.expenseId, params.productionId);
-  if (!updated) throw new Error(`expense not found after adding document: ${params.expenseId}`);
-  return updated;
-}
-
-export async function removeExpenseDocument(params: {
-  expenseId: string;
-  productionId: string;
-  submittedBy: string;
-  assetFileId: string;
-  expectedMutationSeq: number;
-}): Promise<{ expense: Expense; assetId: string }> {
-  const client = await getPool().connect();
-  let assetId = "";
-  try {
-    await client.query("BEGIN");
-    const expense = await client.query<{ status: ExpenseStatus; submitted_by: string; mutation_seq: string }>(
-      `SELECT status, submitted_by, mutation_seq FROM production_expense
-        WHERE id = $1 AND production_id = $2 FOR UPDATE`,
-      [params.expenseId, params.productionId],
-    );
-    const row = expense.rows[0];
-    if (!row || row.submitted_by !== params.submittedBy)
-      throw new FinanceError("invalid_document", "只能修改自己的报销草稿");
-    if (row.status !== "draft")
-      throw new FinanceError("invalid_state", "提交后不能移除、替换或重新分类凭证");
-    if (Number(row.mutation_seq) !== params.expectedMutationSeq)
-      throw new FinanceError("stale", "草稿已在其他页面更新，请刷新后重试");
-    const removed = await client.query<{ asset_id: string }>(
-      `DELETE FROM production_expense_document d
-        USING asset_file af
-        WHERE d.expense_id = $1 AND d.asset_file_id = $2 AND af.id = d.asset_file_id
-        RETURNING af.asset_id`,
-      [params.expenseId, params.assetFileId],
-    );
-    if (!removed.rows[0]) throw new FinanceError("invalid_document", "凭证不存在");
-    assetId = removed.rows[0].asset_id;
-    const mutationSeq = params.expectedMutationSeq + 1;
-    await client.query(
-      "UPDATE production_expense SET mutation_seq = $2, updated_at = now() WHERE id = $1",
-      [params.expenseId, mutationSeq],
-    );
-    await appendExpenseEvent(client, {
-      expenseId: params.expenseId,
-      type: "document_removed",
-      actorId: params.submittedBy,
-      mutationSeq,
-      details: { assetFileId: params.assetFileId },
-    });
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
-  const expense = await getExpense(params.expenseId, params.productionId);
-  if (!expense || !assetId) throw new Error(`expense not found after document removal: ${params.expenseId}`);
-  return { expense, assetId };
 }
 
 function positionOf(e: { currentStage: string | null; }, depth: number): StagePosition | null {

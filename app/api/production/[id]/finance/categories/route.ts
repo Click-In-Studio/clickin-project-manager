@@ -3,12 +3,10 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getEventDepartment } from "@/lib/ops/event-db";
-import { AMOUNT_RE, createBudgetCategory, FinanceError, listBudgetCategories } from "@/lib/ops/finance-db";
+import { createBudgetCategory, FinanceError, listBudgetCategories } from "@/lib/ops/finance-db";
 import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string }> };
-
-/** 金额只接受「最多两位小数的非负数」字符串——不过 JS number，避免精度丢失。 */
 
 /**
  * GET — 预算科目（含各科目已批准支出的合计）。
@@ -44,8 +42,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!name) return Response.json({ error: "科目名不能为空" }, { status: 400 });
   const amount = body.amount === null || body.amount === "" || body.amount === undefined
     ? null : String(body.amount);
-  if (amount !== null && !AMOUNT_RE.test(amount))
-    return Response.json({ error: "金额必须是最多两位小数的非负数" }, { status: 400 });
 
   const deptId = typeof body.deptId === "string" && body.deptId ? body.deptId : null;
   if (deptId && !(await getEventDepartment(deptId, productionId)))
@@ -55,6 +51,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const category = await createBudgetCategory({
       productionId, name, amount,
       currency: typeof body.currency === "string" ? body.currency : "CNY",
+      exchangeRate: typeof body.exchangeRate === "string" ? body.exchangeRate : null,
+      exchangeRateDate: typeof body.exchangeRateDate === "string" ? body.exchangeRateDate : null,
+      exchangeRateSource: typeof body.exchangeRateSource === "string" ? body.exchangeRateSource : null,
       deptId,
       orderIndex: typeof body.orderIndex === "number" ? body.orderIndex : 0,
       notes: typeof body.notes === "string" ? body.notes : "",
@@ -62,7 +61,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     });
     return Response.json({ category }, { status: 201 });
   } catch (e) {
-    if (e instanceof FinanceError) return Response.json({ error: e.message }, { status: 409 });
+    if (e instanceof FinanceError) return Response.json({ error: e.message }, { status: e.reason === "duplicate_name" ? 409 : 400 });
     throw e;
   }
 }

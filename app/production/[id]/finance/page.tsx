@@ -14,9 +14,9 @@ import { getProductionPermissionContext } from "@/lib/perm/permission-context-db
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { canAccessNode } from "@/lib/perm/grant-template";
 import {
-  listBudgetCategories, listBudgetCategoryOptions, listExpenses, type ExpenseStatus,
+  getProductionBaseCurrency, listBudgetCategories, listBudgetCategoryOptions, listExpenses, type ExpenseStatus,
 } from "@/lib/ops/finance-db";
-import { fmtCny, pctUsed, sumCents, toCents } from "@/lib/money";
+import { formatMinorUnits, formatMoney, isCurrencyCode, pctMoney, sumMoney, toMinorUnits } from "@/lib/money";
 import responsive from "@/components/ops/responsive.module.css";
 import PageActivationGate from "@/components/perm/PageActivationGate";
 
@@ -49,6 +49,7 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const name = await getProductionName(id);
   if (!name) notFound();
+  const baseCurrency = await getProductionBaseCurrency(id);
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
@@ -74,13 +75,13 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
       : listExpenses(id, { submittedBy: session.userId, pendingFor: session.userId }),
   ]);
 
-  const budgetCents = sumCents(categories.flatMap(c => c.amount === null ? [] : [c.amount]));
-  const spentCents = sumCents(categories.map(c => c.spent));
+  const budgetCents = sumMoney(categories.flatMap(c => c.baseAmount === null ? [] : [c.baseAmount]), baseCurrency);
+  const spentCents = sumMoney(categories.map(c => c.spent), baseCurrency);
   const summary: [string, string][] = [
-    [fmtCny(budgetCents), "已设置额度"],
-    [fmtCny(spentCents), "实际支出"],
+    [formatMinorUnits(budgetCents, baseCurrency), "已设置额度"],
+    [formatMinorUnits(spentCents, baseCurrency), "实际支出"],
     [String(categories.filter(c => c.amount === null).length), "无上限预算项"],
-    [String(categories.filter(c => c.amount !== null && toCents(c.spent) > toCents(c.amount)).length), "超预算项"],
+    [String(categories.filter(c => c.baseAmount !== null && toMinorUnits(c.spent, baseCurrency) > toMinorUnits(c.baseAmount, baseCurrency)).length), "超预算项"],
   ];
 
   const pendingMine = expenses.filter(
@@ -121,7 +122,9 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
       </span>
       <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
         <b style={{ color: "var(--stage)", fontSize: 11 }}>
-          {e.amount === null ? "金额未填写" : fmtCny(toCents(e.amount))}
+          {e.amount === null || !isCurrencyCode(e.currency) ? "金额未填写" : formatMoney(e.amount, e.currency)}
+          {e.baseAmount && isCurrencyCode(e.baseCurrency) && e.currency !== e.baseCurrency
+            ? <small style={{ display: "block", color: "var(--muted)" }}>折合 {formatMoney(e.baseAmount, e.baseCurrency)}</small> : null}
         </b>
         {approval && !access.isArchived && (
           <ExpenseApprovalActions
@@ -137,6 +140,7 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
           productionId={id}
           expenseId={e.id}
           actorId={session.userId}
+          baseCurrency={baseCurrency}
           categories={expenseCategoryOptions}
           archived={access.isArchived}
         />
@@ -157,7 +161,7 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
         side="stage"
         actions={<>
           {canFinanceConfig && <Link href={`/production/${id}/admin/finance`} style={SECONDARY_BTN}>管理预算</Link>}
-          {canCreateExpense && !access.isArchived && <ExpenseCreateButton productionId={id} categories={expenseCategoryOptions} />}
+          {canCreateExpense && !access.isArchived && <ExpenseCreateButton productionId={id} baseCurrency={baseCurrency} categories={expenseCategoryOptions} />}
         </>}
       />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
@@ -200,14 +204,14 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
                 <div key={item.id} style={{ padding: "12px 0", borderTop: "1px solid var(--line)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11 }}>
                     <b>{item.name}{item.deptName ? <span style={{ marginLeft: 6, color: "var(--muted)", fontWeight: 400 }}>{item.deptName}</span> : null}</b>
-                    <span style={{ color: item.amount !== null && toCents(item.spent) > toCents(item.amount) ? "#a33" : "var(--muted)" }}>
-                      {fmtCny(toCents(item.spent))} / {item.amount === null ? "无上限" : fmtCny(toCents(item.amount))}
-                      {item.amount !== null && toCents(item.spent) > toCents(item.amount)
-                        ? ` · 超出 ${fmtCny(toCents(item.spent) - toCents(item.amount))}` : ""}
+                    <span style={{ color: item.baseAmount !== null && toMinorUnits(item.spent, baseCurrency) > toMinorUnits(item.baseAmount, baseCurrency) ? "#a33" : "var(--muted)" }}>
+                      {formatMoney(item.spent, baseCurrency)} / {item.baseAmount === null ? "无上限" : formatMoney(item.baseAmount, baseCurrency)}
+                      {item.baseAmount !== null && toMinorUnits(item.spent, baseCurrency) > toMinorUnits(item.baseAmount, baseCurrency)
+                        ? ` · 超出 ${formatMinorUnits(toMinorUnits(item.spent, baseCurrency) - toMinorUnits(item.baseAmount, baseCurrency), baseCurrency)}` : ""}
                     </span>
                   </div>
                   <div style={{ height: 6, marginTop: 9, borderRadius: 999, background: "var(--surface-2)", overflow: "hidden" }}>
-                    <div style={{ width: `${item.amount === null ? 0 : Math.min(100, pctUsed(item.spent, item.amount))}%`, height: "100%", borderRadius: 999, background: "var(--stage)" }} />
+                    <div style={{ width: `${item.baseAmount === null ? 0 : Math.min(100, pctMoney(item.spent, item.baseAmount, baseCurrency))}%`, height: "100%", borderRadius: 999, background: "var(--stage)" }} />
                   </div>
                 </div>
               ))}

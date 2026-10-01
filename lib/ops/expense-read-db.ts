@@ -5,6 +5,7 @@ import type { PoolClient } from "pg";
 import { uid } from "../asset/db";
 import { expenseRecognitionVersions } from "./expense-document-recognition";
 import type { ExpenseDocumentRecognition } from "./expense-recognition-types";
+import { isCurrencyCode, normalizeMoneyAmount } from "../money";
 
 export type ExpenseStatus = "draft" | "pending" | "approved" | "rejected" | "withdrawn";
 export type InvoiceRequirement = "required" | "waived";
@@ -29,6 +30,11 @@ export type Expense = {
   title: string;
   amount: string | null;
   currency: string;
+  baseCurrency: string;
+  baseAmount: string | null;
+  exchangeRate: string | null;
+  exchangeRateDate: string | null;
+  exchangeRateSource: string | null;
   merchant: string;
   occurredOn: string | null;
   note: string;
@@ -68,15 +74,6 @@ export type ExpenseEvent = {
 
 export type ExpenseDetail = Expense & { events: ExpenseEvent[] };
 
-/**
- * 金额的线格式：最多 12 位整数 + 最多两位小数，非负。
- *
- * 放在这里而不是各路由各写一份——三个入口（建科目 / 改科目 / 建支出）本来就抄了三遍，
- * 抄本之间一旦漂移，就会出现「这个口能存、那个口存不进」的怪事，而两边都不报错。
- * 与 NUMERIC(14,2) 对齐：12 位整数 + 2 位小数 = 14。
- */
-export const AMOUNT_RE = /^\d{1,12}(\.\d{1,2})?$/;
-
 export function isExpenseDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T00:00:00Z`);
@@ -96,6 +93,8 @@ export class FinanceError extends Error {
 type ExpenseRow = {
   id: string; production_id: string; category_id: string | null; category_name: string | null;
   title: string; amount: string | null; currency: string; merchant: string; occurred_on: string | null; note: string;
+  base_currency: string; base_amount: string | null; exchange_rate: string | null;
+  exchange_rate_date: string | null; exchange_rate_source: string | null;
   invoice_requirement: InvoiceRequirement | null; invoice_waiver_reason: string;
   documents: ExpenseDocument[];
   submitted_by: string; submitter_name: string | null; status: ExpenseStatus;
@@ -106,6 +105,8 @@ type ExpenseRow = {
 };
 
 function rowToExpense(r: ExpenseRow): Expense {
+  const currency = isCurrencyCode(r.currency) ? r.currency : "CNY";
+  const baseCurrency = isCurrencyCode(r.base_currency) ? r.base_currency : "CNY";
   const versions = expenseRecognitionVersions();
   const documents = r.documents.map(document => ({
     ...document,
@@ -124,7 +125,11 @@ function rowToExpense(r: ExpenseRow): Expense {
   return {
     id: r.id, productionId: r.production_id,
     categoryId: r.category_id, categoryName: r.category_name,
-    title: r.title, amount: r.amount, currency: r.currency,
+    title: r.title, amount: r.amount === null ? null : normalizeMoneyAmount(r.amount, currency), currency: r.currency,
+    baseCurrency: r.base_currency,
+    baseAmount: r.base_amount === null ? null : normalizeMoneyAmount(r.base_amount, baseCurrency),
+    exchangeRate: r.exchange_rate, exchangeRateDate: r.exchange_rate_date,
+    exchangeRateSource: r.exchange_rate_source,
     merchant: r.merchant, occurredOn: r.occurred_on, note: r.note,
     invoiceRequirement: r.invoice_requirement,
     invoiceWaiverReason: r.invoice_waiver_reason,
@@ -145,7 +150,10 @@ function rowToExpense(r: ExpenseRow): Expense {
 
 const EXPENSE_QUERY = `
   SELECT e.id, e.production_id, e.budget_item_id AS category_id, c.name AS category_name,
-         e.title, e.amount::text AS amount, e.currency, e.merchant,
+         e.title, e.amount::text AS amount, e.currency,
+         e.base_currency, e.base_amount::text AS base_amount,
+         e.exchange_rate::text AS exchange_rate, e.exchange_rate_date::text AS exchange_rate_date,
+         e.exchange_rate_source, e.merchant,
          e.occurred_on::text AS occurred_on, e.note,
          e.invoice_requirement, e.invoice_waiver_reason,
          COALESCE((

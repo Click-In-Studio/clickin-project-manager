@@ -5,12 +5,17 @@
 import { randomBytes } from "node:crypto";
 import { getPool } from "../pg";
 import type { PoolClient } from "pg";
+import { isCurrencyCode, normalizeMoneyAmount } from "../money";
 import { FinanceError } from "./expense-read-db";
 import { reclassifyPendingExpensesForBudgetItemDeletion } from "./expense-reclassification-db";
+import {
+  buildCurrencySnapshot, validateDraftCurrency,
+} from "./finance-currency-db";
 
 export * from "./expense-read-db";
 export * from "./expense-db";
 export * from "./expense-reclassification-db";
+export * from "./finance-currency-db";
 
 export type BudgetCategory = {
   id: string;
@@ -20,6 +25,11 @@ export type BudgetCategory = {
   /** 字符串而非 number：NUMERIC(14,2) 过 JS number 会丢精度 */
   amount: string | null;
   currency: string;
+  baseCurrency: string;
+  baseAmount: string | null;
+  exchangeRate: string | null;
+  exchangeRateDate: string | null;
+  exchangeRateSource: string | null;
   deptId: string | null;
   deptName: string | null;
   orderIndex: number;
@@ -43,25 +53,36 @@ const newBudgetItemId = () => `bi_${Date.now().toString(36)}${randomBytes(4).toS
 
 type CategoryRow = {
   id: string; production_id: string; category_id: string; name: string; amount: string | null; currency: string;
+  base_currency: string; base_amount: string | null; exchange_rate: string | null;
+  exchange_rate_date: string | null; exchange_rate_source: string | null;
   dept_id: string | null; dept_name: string | null; order_index: number; notes: string;
   spent: string; created_at: Date; legacy_category_id: string | null;
 };
 
 function rowToCategory(r: CategoryRow): BudgetCategory {
+  const currency = isCurrencyCode(r.currency) ? r.currency : "CNY";
+  const baseCurrency = isCurrencyCode(r.base_currency) ? r.base_currency : "CNY";
   return {
     id: r.id, productionId: r.production_id, categoryId: r.category_id, name: r.name,
-    amount: r.amount, currency: r.currency,
+    amount: r.amount === null ? null : normalizeMoneyAmount(r.amount, currency), currency: r.currency,
+    baseCurrency: r.base_currency,
+    baseAmount: r.base_amount === null ? null : normalizeMoneyAmount(r.base_amount, baseCurrency),
+    exchangeRate: r.exchange_rate, exchangeRateDate: r.exchange_rate_date,
+    exchangeRateSource: r.exchange_rate_source,
     deptId: r.dept_id, deptName: r.dept_name,
     orderIndex: r.order_index, notes: r.notes,
-    spent: r.spent, createdAt: r.created_at.toISOString(), legacyCategoryId: r.legacy_category_id,
+    spent: normalizeMoneyAmount(r.spent, baseCurrency), createdAt: r.created_at.toISOString(), legacyCategoryId: r.legacy_category_id,
   };
 }
 
 const CATEGORY_QUERY = `
   SELECT bi.id, bi.production_id, bi.category_id, c.name, bi.amount::text AS amount, bi.currency,
+         bi.base_currency, bi.base_amount::text AS base_amount,
+         bi.exchange_rate::text AS exchange_rate, bi.exchange_rate_date::text AS exchange_rate_date,
+         bi.exchange_rate_source,
          bi.dept_id, d.name AS dept_name, bi.sort_order AS order_index, bi.notes, bi.created_at,
          bi.legacy_category_id,
-         COALESCE((SELECT SUM(e.amount) FROM production_expense e
+         COALESCE((SELECT SUM(e.base_amount) FROM production_expense e
                     WHERE e.budget_item_id = bi.id AND e.status = 'approved'), 0)::text AS spent
     FROM production_budget_item bi
     JOIN production_expense_category c ON c.id = bi.category_id
@@ -218,6 +239,7 @@ async function syncCategoryDeptManage(
 
 export async function createBudgetItem(params: {
   productionId: string; categoryId: string; amount?: string | null; currency?: string;
+  exchangeRate?: string | null; exchangeRateDate?: string | null; exchangeRateSource?: string | null;
   deptId?: string | null; orderIndex?: number; notes?: string; createdBy: string;
 }): Promise<BudgetCategory> {
   const client = await getPool().connect();
@@ -233,6 +255,18 @@ export async function createBudgetItem(params: {
     );
     if (!labels.rows[0] || (params.deptId && !labels.rows[0].dept_name))
       throw new FinanceError("conflict", "费用科目或部门不存在");
+    const requestedCurrency = params.currency ?? "CNY";
+    const snapshot = params.amount == null
+      ? null
+      : await buildCurrencySnapshot(client, params.productionId, params.amount, {
+          currency: requestedCurrency,
+          exchangeRate: params.exchangeRate,
+          exchangeRateDate: params.exchangeRateDate,
+          exchangeRateSource: params.exchangeRateSource,
+        });
+    const draftCurrency = snapshot ?? await validateDraftCurrency(
+      client, params.productionId, null, requestedCurrency,
+    );
     const legacy = await client.query<{ id: string }>(
       `INSERT INTO production_budget_category
          (production_id, name, amount, currency, dept_id, order_index, notes, created_by)
@@ -240,16 +274,21 @@ export async function createBudgetItem(params: {
       [
         params.productionId,
         `${labels.rows[0].category_name} · ${labels.rows[0].dept_name ?? "项目公共"} · ${id.slice(-6)}`,
-        params.amount ?? "0", params.currency ?? "CNY",
+        params.amount ?? "0", draftCurrency.currency,
         params.deptId ?? null, params.orderIndex ?? 0, params.notes ?? "", params.createdBy,
       ],
     );
     await client.query(
       `INSERT INTO production_budget_item
-         (id, production_id, category_id, dept_id, amount, currency, notes, sort_order, legacy_category_id, created_by)
-       VALUES ($1,$2,$3,$4,$5::numeric,$6,$7,$8,$9,$10)`,
+         (id, production_id, category_id, dept_id, amount, currency, base_currency, base_amount,
+          exchange_rate, exchange_rate_date, exchange_rate_source,
+          notes, sort_order, legacy_category_id, created_by)
+       VALUES ($1,$2,$3,$4,$5::numeric,$6,$7,$8::numeric,$9::numeric,$10::date,$11,$12,$13,$14,$15)`,
       [id, params.productionId, params.categoryId, params.deptId ?? null, params.amount ?? null,
-       params.currency ?? "CNY", params.notes ?? "", params.orderIndex ?? 0, legacy.rows[0].id, params.createdBy],
+       draftCurrency.currency, draftCurrency.baseCurrency, snapshot?.baseAmount ?? null,
+       snapshot?.exchangeRate ?? null, snapshot?.exchangeRateDate ?? null,
+       snapshot?.exchangeRateSource ?? null, params.notes ?? "", params.orderIndex ?? 0,
+       legacy.rows[0].id, params.createdBy],
     );
     await syncCategoryDeptManage(
       client, params.productionId, id, params.deptId ?? null, params.createdBy,
@@ -271,6 +310,7 @@ export async function createBudgetItem(params: {
 /** 兼容既有调用：同时建立费用科目和它的第一个预算项。 */
 export async function createBudgetCategory(params: {
   productionId: string; name: string; amount: string | null; currency?: string;
+  exchangeRate?: string | null; exchangeRateDate?: string | null; exchangeRateSource?: string | null;
   deptId?: string | null; orderIndex?: number; notes?: string; createdBy: string;
 }): Promise<BudgetCategory> {
   const category = await createExpenseCategory({
@@ -287,22 +327,59 @@ export async function createBudgetCategory(params: {
 
 export async function updateBudgetCategory(
   id: string, productionId: string, actorId: string,
-  fields: { name?: string; amount?: string | null; deptId?: string | null; orderIndex?: number; notes?: string },
+  fields: {
+    name?: string; amount?: string | null; currency?: string;
+    exchangeRate?: string | null; exchangeRateDate?: string | null; exchangeRateSource?: string | null;
+    deptId?: string | null; orderIndex?: number; notes?: string;
+  },
 ): Promise<BudgetCategory | null> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const current = await client.query<{
+      amount: string | null; currency: string; exchange_rate: string | null;
+      exchange_rate_date: string | null; exchange_rate_source: string | null;
+      legacy_category_id: string; category_id: string; dept_id: string | null;
+    }>(
+      `SELECT amount::text, currency, exchange_rate::text, exchange_rate_date::text,
+              exchange_rate_source, legacy_category_id, category_id, dept_id
+         FROM production_budget_item
+        WHERE id = $1 AND production_id = $2 FOR UPDATE`,
+      [id, productionId],
+    );
+    const row = current.rows[0];
+    if (!row) { await client.query("ROLLBACK"); return null; }
     const sets: string[] = ["updated_at = now()"];
     const vals: unknown[] = [id, productionId];
-    if (fields.amount     !== undefined) sets.push(`amount      = $${vals.push(fields.amount)}::numeric`);
+    const moneyChanged = fields.amount !== undefined || fields.currency !== undefined
+      || fields.exchangeRate !== undefined || fields.exchangeRateDate !== undefined
+      || fields.exchangeRateSource !== undefined;
+    if (moneyChanged) {
+      const amount = fields.amount !== undefined ? fields.amount : row.amount;
+      const currency = fields.currency ?? row.currency;
+      const snapshot = amount === null ? null : await buildCurrencySnapshot(client, productionId, amount, {
+        currency,
+        exchangeRate: fields.exchangeRate !== undefined ? fields.exchangeRate : row.exchange_rate,
+        exchangeRateDate: fields.exchangeRateDate !== undefined ? fields.exchangeRateDate : row.exchange_rate_date,
+        exchangeRateSource: fields.exchangeRateSource !== undefined ? fields.exchangeRateSource : row.exchange_rate_source,
+      });
+      const draftCurrency = snapshot ?? await validateDraftCurrency(client, productionId, null, currency);
+      sets.push(`amount = $${vals.push(amount)}::numeric`);
+      sets.push(`currency = $${vals.push(draftCurrency.currency)}`);
+      sets.push(`base_currency = $${vals.push(draftCurrency.baseCurrency)}`);
+      sets.push(`base_amount = $${vals.push(snapshot?.baseAmount ?? null)}::numeric`);
+      sets.push(`exchange_rate = $${vals.push(snapshot?.exchangeRate ?? null)}::numeric`);
+      sets.push(`exchange_rate_date = $${vals.push(snapshot?.exchangeRateDate ?? null)}::date`);
+      sets.push(`exchange_rate_source = $${vals.push(snapshot?.exchangeRateSource ?? null)}`);
+    }
     if (fields.deptId     !== undefined) sets.push(`dept_id     = $${vals.push(fields.deptId)}`);
     if (fields.orderIndex !== undefined) sets.push(`sort_order = $${vals.push(fields.orderIndex)}`);
     if (fields.notes      !== undefined) sets.push(`notes       = $${vals.push(fields.notes)}`);
 
-    const res = await client.query<{ id: string; legacy_category_id: string; category_id: string; dept_id: string | null }>(
+    const res = await client.query<{ id: string; legacy_category_id: string; category_id: string; dept_id: string | null; amount: string | null; currency: string }>(
       `UPDATE production_budget_item SET ${sets.join(", ")}
         WHERE id = $1 AND production_id = $2
-        RETURNING id, legacy_category_id, category_id, dept_id`,
+        RETURNING id, legacy_category_id, category_id, dept_id, amount::text, currency`,
       vals,
     );
     if (!res.rows[0]) { await client.query("ROLLBACK"); return null; }
@@ -314,7 +391,10 @@ export async function updateBudgetCategory(
     }
     const legacySets = ["updated_at = now()"];
     const legacyValues: unknown[] = [res.rows[0].legacy_category_id];
-    if (fields.amount !== undefined) legacySets.push(`amount = $${legacyValues.push(fields.amount ?? "0")}::numeric`);
+    if (moneyChanged) {
+      legacySets.push(`amount = $${legacyValues.push(res.rows[0].amount ?? "0")}::numeric`);
+      legacySets.push(`currency = $${legacyValues.push(res.rows[0].currency)}`);
+    }
     if (fields.deptId !== undefined) legacySets.push(`dept_id = $${legacyValues.push(fields.deptId)}`);
     if (fields.orderIndex !== undefined) legacySets.push(`order_index = $${legacyValues.push(fields.orderIndex)}`);
     if (fields.notes !== undefined) legacySets.push(`notes = $${legacyValues.push(fields.notes)}`);
