@@ -9,7 +9,7 @@ import { BASE_PATH } from "@/lib/base-path";
 import PageHeader, { PRIMARY_BTN } from "@/components/ui/PageHeader";
 import Badge, { type BadgeTone } from "@/components/ui/Badge";
 import type { ProductionEvent, EventDepartment } from "@/lib/ops/event-db";
-import { fmtDateTimeSmart, datetimeLocalToIso, dateTimeToIso } from "@/lib/tz";
+import { fmtDateTimeSmart, datetimeLocalToIso, dateTimeToIso, isoCSTDateStr } from "@/lib/tz";
 import responsive from "@/components/ops/responsive.module.css";
 
 // ─── Shared constants ────────────────────────────────────────────────────────
@@ -75,6 +75,9 @@ function EventCard({
     event.eventType === "performance" ? "red" :
     event.eventType === "rehearsal" ? "blue" : "neutral";
   const statusText = STATUS_LABELS[event.status] ?? event.status;
+  const eventDateParts = event.startTime
+    ? isoCSTDateStr(event.startTime).split("-").map(Number)
+    : null;
 
   const go = (href: string) => { window.location.href = `${BASE_PATH}${href}`; };
   const stopAndGo = (e: React.MouseEvent, href: string) => {
@@ -101,11 +104,11 @@ function EventCard({
       {/* 左列：日期与类型共用一条固定层级。 */}
       <div className={responsive.eventDateColumn}>
         <time className={responsive.eventDateBox}>
-          {event.startTime ? (
+          {eventDateParts ? (
             <>
-              <b className={responsive.eventDateDay}>{new Date(event.startTime).getDate()}</b>
+              <b className={responsive.eventDateDay}>{eventDateParts[2]}</b>
               <small className={responsive.eventDateMonth}>
-                {new Date(event.startTime).getMonth() + 1} 月
+                {eventDateParts[1]} 月
               </small>
             </>
           ) : (

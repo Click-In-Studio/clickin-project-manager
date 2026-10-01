@@ -6,7 +6,7 @@ import styles from "@/components/ops/planning.module.css";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import { BASE_PATH } from "@/lib/base-path";
 import type { ProductionEvent } from "@/lib/ops/event-db";
-import { dateTimeToIso } from "@/lib/tz";
+import { dateTimeToIso, fmtDate } from "@/lib/tz";
 import BoundedTimePicker from "./BoundedTimePicker";
 import type { PlanningDept } from "./types";
 
@@ -148,7 +148,7 @@ export default function QuickCreateModal({ productionId, date, departments, even
               <OverflowSafeSelect value={taskEventId} onChange={e => setTaskEventId(e.target.value)} style={{ ...fieldStyle, display: "block", marginTop: 5 }}>
                 <option value="">不关联，建立独立任务</option>
                 {events.filter(event => event.status !== "cancelled").map(event => (
-                  <option key={event.id} value={event.id}>{event.startTime ? `${new Date(event.startTime).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })} · ` : ""}{event.title}</option>
+                  <option key={event.id} value={event.id}>{event.startTime ? `${fmtDate(event.startTime)} · ` : ""}{event.title}</option>
                 ))}
               </OverflowSafeSelect>
             </label>
