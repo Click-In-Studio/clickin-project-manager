@@ -17,8 +17,9 @@ import { makeProduction, cleanupProduction, shortId } from "../_support/factorie
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { addProductionMember } from "@/lib/perm/member-db";
 import {
-  isTaskPoc, isSubjectPoc, isDeptSubjectPoc, listTaskPocIdsForUser, taskSubjectOf,
+  isTaskPoc, isSubjectPoc, isDeptSubjectPoc, taskSubjectOf,
 } from "@/lib/ops/task-poc";
+import { listTaskPocIdsForUser } from "@/lib/ops/task-poc-db";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. 静态棘轮：不许绕过收敛入口

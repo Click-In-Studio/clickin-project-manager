@@ -1,7 +1,8 @@
 import { getPool } from "../pg";
 import { policyFilteredRows } from "../perm/policy-db";
 import { writeEventGrants, writeReportGrants, writeTechReqGrants, writeWikiGrants } from "../perm/resource-grant-db";
-import { listTaskPocIdsForUser, taskSubjectOf } from "./task-poc";
+import { taskSubjectOf } from "./task-poc";
+import { listTaskPocIdsForUser } from "./task-poc-db";
 import { ensureReportTreeAnchors } from "../node/anchors";
 import { insertNode, placeNodeUnder, tailSortKey } from "../node/db";
 import { registerNodeReferenceResolver } from "../node/mount";

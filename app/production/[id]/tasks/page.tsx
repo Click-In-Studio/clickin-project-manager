@@ -8,7 +8,7 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getProductionName } from "@/lib/production/production-db";
 import { listProductionTechReqs, listMyTechReqsFull } from "@/lib/ops/event-db";
-import { listTaskPocIdsForUser } from "@/lib/ops/task-poc";
+import { listTaskPocIdsForUser } from "@/lib/ops/task-poc-db";
 import ProductionTasksClient from "@/components/ops/ProductionTasksClient";
 import PageHeader from "@/components/ui/PageHeader";
 import styles from "@/components/ui/my-pages.module.css";

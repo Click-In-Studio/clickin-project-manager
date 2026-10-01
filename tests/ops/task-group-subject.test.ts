@@ -28,8 +28,9 @@ import { canAssignTechReq, canEditTechReq, canViewTechReq, canEnterEvent } from 
 import { createEventGroup, deleteEventGroup, EventGroupError } from "@/lib/ops/event-group-db";
 import { freezeEventGroups, unfreezeEventGroups } from "@/lib/ops/event-group-freeze";
 import {
-  isTaskPoc, listTaskPocIdsForUser, taskSubjectOf, parseTaskSubject, resolveSubjectPatch,
+  isTaskPoc, taskSubjectOf, parseTaskSubject, resolveSubjectPatch,
 } from "@/lib/ops/task-poc";
+import { listTaskPocIdsForUser } from "@/lib/ops/task-poc-db";
 import { toActor } from "@/lib/perm/grant-check";
 import type { PermissionContext } from "@/lib/perm/permissions";
 
