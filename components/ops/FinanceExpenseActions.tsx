@@ -12,6 +12,10 @@ import {
 } from "./ExpenseRecognitionSuggestions";
 import { buildExpenseRecognitionCandidates } from "@/lib/ops/expense-recognition-candidates";
 import type { ExpenseDocumentRecognition } from "@/lib/ops/expense-recognition-types";
+import {
+  CURRENCY_CODES, convertToBaseAmount, currencyMinorUnits, formatCurrencyLabel, formatMoney, isCurrencyCode,
+  type CurrencyCode,
+} from "@/lib/money";
 import styles from "./finance-expense-actions.module.css";
 
 export type ExpenseCategoryOption = {
@@ -57,13 +61,39 @@ function RecognitionFieldSuggestion({ label, value, currentValue, onApply }: {
   );
 }
 
+function ExchangeRateFields({ amount, currency, baseCurrency, exchangeRate, exchangeRateDate,
+  exchangeRateSource, disabled, onRate, onDate, onSource }: {
+  amount: string; currency: CurrencyCode; baseCurrency: CurrencyCode;
+  exchangeRate: string; exchangeRateDate: string; exchangeRateSource: string; disabled: boolean;
+  onRate: (value: string) => void; onDate: (value: string) => void; onSource: (value: string) => void;
+}) {
+  const converted = amount ? convertToBaseAmount(amount, exchangeRate, baseCurrency) : null;
+  return <div className={styles.fieldGroup}>
+    <label className={styles.field}><span>人工汇率</span>
+      <input inputMode="decimal" value={exchangeRate} disabled={disabled} required={!disabled}
+        onChange={event => onRate(event.target.value)} />
+      <small>1 {formatCurrencyLabel(currency)} = 多少 {formatCurrencyLabel(baseCurrency)}</small>
+    </label>
+    <label className={styles.field}><span>汇率日期</span>
+      <input type="date" value={exchangeRateDate} disabled={disabled} required={!disabled}
+        onChange={event => onDate(event.target.value)} />
+    </label>
+    <label className={styles.field}><span>汇率来源</span>
+      <input value={exchangeRateSource} disabled={disabled} required={!disabled} maxLength={200}
+        onChange={event => onSource(event.target.value)} placeholder="例如：信用卡账单、银行结算单" />
+    </label>
+    <small>折算结果：{converted ? formatMoney(converted, baseCurrency) : "请填写有效汇率"}</small>
+  </div>;
+}
+
 async function responseError(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({})) as { error?: string };
   return data.error ?? fallback;
 }
 
-export function ExpenseCreateButton({ productionId, categories }: {
+export function ExpenseCreateButton({ productionId, baseCurrency, categories }: {
   productionId: string;
+  baseCurrency: CurrencyCode;
   categories: ExpenseCategoryOption[];
 }) {
   const router = useRouter();
@@ -71,6 +101,10 @@ export function ExpenseCreateButton({ productionId, categories }: {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState<CurrencyCode>(baseCurrency);
+  const [exchangeRate, setExchangeRate] = useState("");
+  const [exchangeRateDate, setExchangeRateDate] = useState("");
+  const [exchangeRateSource, setExchangeRateSource] = useState("");
   const [merchant, setMerchant] = useState("");
   const [occurredOn, setOccurredOn] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -86,6 +120,10 @@ export function ExpenseCreateButton({ productionId, categories }: {
     setOpen(false);
     setTitle("");
     setAmount("");
+    setCurrency(baseCurrency);
+    setExchangeRate("");
+    setExchangeRateDate("");
+    setExchangeRateSource("");
     setMerchant("");
     setOccurredOn("");
     setCategoryId("");
@@ -95,7 +133,7 @@ export function ExpenseCreateButton({ productionId, categories }: {
     setDocuments([]);
     setPendingDocuments([]);
     setError(null);
-  }, []);
+  }, [baseCurrency]);
 
   const discardDocument = useCallback(async (assetId: string) => {
     await fetch(`${BASE_PATH}/api/production/${productionId}/finance/expense-documents/${assetId}`, {
@@ -179,6 +217,10 @@ export function ExpenseCreateButton({ productionId, categories }: {
           intent,
           title: title.trim(),
           amount: amount.trim(),
+          currency,
+          exchangeRate: currency === baseCurrency ? null : exchangeRate.trim(),
+          exchangeRateDate: currency === baseCurrency ? null : exchangeRateDate,
+          exchangeRateSource: currency === baseCurrency ? null : exchangeRateSource.trim(),
           merchant: merchant.trim(),
           occurredOn: occurredOn || null,
           categoryId: categoryId || null,
@@ -364,6 +406,7 @@ export function ExpenseCreateButton({ productionId, categories }: {
                   </div>
                   <ExpenseRecognitionSuggestions
                     productionId={productionId}
+                    baseCurrency={baseCurrency}
                     documents={documents}
                     current={{ amount, merchant, occurredOn }}
                     onRecognition={updateRecognition}
@@ -373,23 +416,35 @@ export function ExpenseCreateButton({ productionId, categories }: {
 
                 <div className={styles.fieldGroup}>
                   <label className={styles.field}>
-                    <span>金额（元）</span>
+                    <span>金额 · {formatCurrencyLabel(currency)}</span>
                     <input
                       required
                       inputMode="decimal"
                       autoComplete="off"
-                      pattern="[0-9]{1,12}([.][0-9]{1,2})?"
-                      title="请输入最多两位小数的金额"
                       value={amount}
                       onChange={event => setAmount(event.target.value)}
                       placeholder="0.00"
                     />
-                    <small>最多两位小数</small>
+                    <small>{currencyMinorUnits(currency)} 位小数</small>
                   </label>
-                  <RecognitionFieldSuggestion label={`¥${recognitionCandidates.amount ?? ""}`}
+                  <RecognitionFieldSuggestion label={`${isCurrencyCode(recognitionCandidates.currencies[0]) ? formatCurrencyLabel(recognitionCandidates.currencies[0]) : formatCurrencyLabel(currency)} ${recognitionCandidates.amount ?? ""}`}
                     value={recognitionCandidates.amount} currentValue={amount}
-                    onApply={() => setAmount(recognitionCandidates.amount!)} />
+                    onApply={() => {
+                      setAmount(recognitionCandidates.amount!);
+                      if (isCurrencyCode(recognitionCandidates.currencies[0])) setCurrency(recognitionCandidates.currencies[0]);
+                    }} />
                 </div>
+
+                <label className={styles.field}><span>币种</span>
+                  <OverflowSafeSelect value={currency} onChange={event => setCurrency(event.target.value as CurrencyCode)}>
+                    {CURRENCY_CODES.map(code => <option key={code} value={code}>{formatCurrencyLabel(code)}</option>)}
+                  </OverflowSafeSelect>
+                </label>
+
+                {currency !== baseCurrency && <ExchangeRateFields amount={amount} currency={currency}
+                  baseCurrency={baseCurrency} exchangeRate={exchangeRate} exchangeRateDate={exchangeRateDate}
+                  exchangeRateSource={exchangeRateSource} disabled={false}
+                  onRate={setExchangeRate} onDate={setExchangeRateDate} onSource={setExchangeRateSource} />}
 
                 <div className={styles.fieldGroup}>
                   <label className={styles.field}>
@@ -709,6 +764,11 @@ type ExpenseDetailView = {
   title: string;
   amount: string | null;
   currency: string;
+  baseCurrency: string;
+  baseAmount: string | null;
+  exchangeRate: string | null;
+  exchangeRateDate: string | null;
+  exchangeRateSource: string | null;
   merchant: string;
   occurredOn: string | null;
   categoryId: string | null;
@@ -786,11 +846,12 @@ function reclassificationEventText(details: Record<string, unknown>): string | n
 }
 
 export function ExpenseDetailButton({
-  productionId, expenseId, actorId, categories, archived,
+  productionId, expenseId, actorId, baseCurrency, categories, archived,
 }: {
   productionId: string;
   expenseId: string;
   actorId: string;
+  baseCurrency: CurrencyCode;
   categories: ExpenseCategoryOption[];
   archived: boolean;
 }) {
@@ -803,6 +864,10 @@ export function ExpenseDetailButton({
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState<CurrencyCode>(baseCurrency);
+  const [exchangeRate, setExchangeRate] = useState("");
+  const [exchangeRateDate, setExchangeRateDate] = useState("");
+  const [exchangeRateSource, setExchangeRateSource] = useState("");
   const [merchant, setMerchant] = useState("");
   const [occurredOn, setOccurredOn] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -814,13 +879,17 @@ export function ExpenseDetailButton({
     setDetail(expense);
     setTitle(expense.title);
     setAmount(expense.amount ?? "");
+    setCurrency(isCurrencyCode(expense.currency) ? expense.currency : baseCurrency);
+    setExchangeRate(expense.exchangeRate ?? "");
+    setExchangeRateDate(expense.exchangeRateDate ?? "");
+    setExchangeRateSource(expense.exchangeRateSource ?? "");
     setMerchant(expense.merchant);
     setOccurredOn(expense.occurredOn ?? "");
     setCategoryId(expense.categoryId ?? "");
     setNote(expense.note);
     setInvoiceRequirement(expense.invoiceRequirement ?? "");
     setInvoiceWaiverReason(expense.invoiceWaiverReason);
-  }, []);
+  }, [baseCurrency]);
 
   const loadDetail = useCallback(async (withLoading: boolean) => {
     if (withLoading) setLoading(true);
@@ -868,6 +937,9 @@ export function ExpenseDetailButton({
           body: JSON.stringify({
             expectedMutationSeq: detail.mutationSeq,
             title: title.trim(), amount: amount.trim(), categoryId: categoryId || null,
+            currency, exchangeRate: currency === baseCurrency ? null : exchangeRate.trim(),
+            exchangeRateDate: currency === baseCurrency ? null : exchangeRateDate,
+            exchangeRateSource: currency === baseCurrency ? null : exchangeRateSource.trim(),
             merchant: merchant.trim(), occurredOn: occurredOn || null,
             note: note.trim(), invoiceRequirement: invoiceRequirement || null,
             invoiceWaiverReason: invoiceRequirement === "waived" ? invoiceWaiverReason.trim() : "",
@@ -890,12 +962,35 @@ export function ExpenseDetailButton({
     setBusy(true);
     setError(null);
     try {
+      let expectedMutationSeq = detail.mutationSeq;
+      if (action === "submit" && editable) {
+        const saveResponse = await fetch(
+          `${BASE_PATH}/api/production/${productionId}/finance/expenses/${expenseId}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expectedMutationSeq,
+              title: title.trim(), amount: amount.trim(), categoryId: categoryId || null,
+              currency, exchangeRate: currency === baseCurrency ? null : exchangeRate.trim(),
+              exchangeRateDate: currency === baseCurrency ? null : exchangeRateDate,
+              exchangeRateSource: currency === baseCurrency ? null : exchangeRateSource.trim(),
+              merchant: merchant.trim(), occurredOn: occurredOn || null, note: note.trim(),
+              invoiceRequirement: invoiceRequirement || null,
+              invoiceWaiverReason: invoiceRequirement === "waived" ? invoiceWaiverReason.trim() : "",
+            }),
+          },
+        );
+        if (!saveResponse.ok) throw new Error(await responseError(saveResponse, "草稿保存失败"));
+        const saved = await saveResponse.json() as { expense: ExpenseDetailView };
+        expectedMutationSeq = saved.expense.mutationSeq;
+      }
       const response = await fetch(
         `${BASE_PATH}/api/production/${productionId}/finance/expenses/${expenseId}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action, expectedMutationSeq: detail.mutationSeq }),
+          body: JSON.stringify({ action, expectedMutationSeq }),
         },
       );
       if (!response.ok) throw new Error(await responseError(response, "报销操作失败"));
@@ -992,14 +1087,33 @@ export function ExpenseDetailButton({
                     <input value={title} disabled={!editable} onChange={event => setTitle(event.target.value)} />
                   </label>
                   <div className={styles.fieldGroup}>
-                    <label className={styles.field}><span>金额</span>
+                    <label className={styles.field}><span>金额 · {formatCurrencyLabel(currency)}</span>
                       <input inputMode="decimal" value={amount} disabled={!editable}
                         onChange={event => setAmount(event.target.value)} />
                     </label>
-                    {editable && <RecognitionFieldSuggestion label={`¥${recognitionCandidates.amount ?? ""}`}
+                    {editable && <RecognitionFieldSuggestion label={`${isCurrencyCode(recognitionCandidates.currencies[0]) ? formatCurrencyLabel(recognitionCandidates.currencies[0]) : formatCurrencyLabel(currency)} ${recognitionCandidates.amount ?? ""}`}
                       value={recognitionCandidates.amount} currentValue={amount}
-                      onApply={() => setAmount(recognitionCandidates.amount!)} />}
+                      onApply={() => {
+                        setAmount(recognitionCandidates.amount!);
+                        if (isCurrencyCode(recognitionCandidates.currencies[0])) setCurrency(recognitionCandidates.currencies[0]);
+                      }} />}
                   </div>
+                  <label className={styles.field}><span>币种</span>
+                    <OverflowSafeSelect value={currency} disabled={!editable}
+                      onChange={event => setCurrency(event.target.value as CurrencyCode)}>
+                      {CURRENCY_CODES.map(code => <option key={code} value={code}>{formatCurrencyLabel(code)}</option>)}
+                    </OverflowSafeSelect>
+                  </label>
+                  {currency !== baseCurrency && (editable
+                    ? <ExchangeRateFields amount={amount} currency={currency} baseCurrency={baseCurrency}
+                        exchangeRate={exchangeRate} exchangeRateDate={exchangeRateDate}
+                        exchangeRateSource={exchangeRateSource} disabled={false}
+                        onRate={setExchangeRate} onDate={setExchangeRateDate} onSource={setExchangeRateSource} />
+                    : <p>折算：{detail.baseAmount && isCurrencyCode(detail.baseCurrency)
+                        ? formatMoney(detail.baseAmount, detail.baseCurrency) : "尚未确认"}
+                        {detail.exchangeRate && isCurrencyCode(detail.baseCurrency) ? ` · 1 ${formatCurrencyLabel(currency)} = ${detail.exchangeRate} ${formatCurrencyLabel(detail.baseCurrency)}` : ""}
+                        {detail.exchangeRateDate ? ` · ${detail.exchangeRateDate}` : ""}
+                        {detail.exchangeRateSource ? ` · ${detail.exchangeRateSource}` : ""}</p>)}
                   <div className={styles.fieldGroup}>
                     <label className={styles.field}><span>商户或销售方</span>
                       <input value={merchant} disabled={!editable}
@@ -1047,6 +1161,7 @@ export function ExpenseDetailButton({
                       documents={detail.documents} />
                     <ExpenseRecognitionSuggestions
                       productionId={productionId}
+                      baseCurrency={baseCurrency}
                       documents={detail.documents}
                       current={{ amount, merchant, occurredOn }}
                       onRecognition={updateDocumentRecognition}

@@ -581,11 +581,16 @@ COL|production_budget_category|order_index|integer|int4|NO|0
 COL|production_budget_category|production_id|text|text|NO|
 COL|production_budget_category|updated_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_budget_item|amount|numeric|numeric|YES|
+COL|production_budget_item|base_amount|numeric|numeric|YES|
+COL|production_budget_item|base_currency|text|text|NO|'CNY'::text
 COL|production_budget_item|category_id|text|text|NO|
 COL|production_budget_item|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_budget_item|created_by|uuid|uuid|NO|
 COL|production_budget_item|currency|text|text|NO|'CNY'::text
 COL|production_budget_item|dept_id|uuid|uuid|YES|
+COL|production_budget_item|exchange_rate_date|date|date|YES|
+COL|production_budget_item|exchange_rate_source|text|text|YES|
+COL|production_budget_item|exchange_rate|numeric|numeric|YES|
 COL|production_budget_item|id|text|text|NO|
 COL|production_budget_item|legacy_category_id|uuid|uuid|YES|
 COL|production_budget_item|notes|text|text|NO|''::text
@@ -657,6 +662,8 @@ COL|production_expense_event|expense_id|uuid|uuid|NO|
 COL|production_expense_event|id|text|text|NO|
 COL|production_expense_event|mutation_seq|bigint|int8|NO|
 COL|production_expense|amount|numeric|numeric|YES|
+COL|production_expense|base_amount|numeric|numeric|YES|
+COL|production_expense|base_currency|text|text|NO|'CNY'::text
 COL|production_expense|budget_item_id|text|text|YES|
 COL|production_expense|category_id|uuid|uuid|YES|
 COL|production_expense|created_at|timestamp with time zone|timestamptz|NO|now()
@@ -665,6 +672,9 @@ COL|production_expense|current_approver_ids|ARRAY|_uuid|NO|'{}'::uuid[]
 COL|production_expense|current_stage_depth|integer|int4|NO|0
 COL|production_expense|current_stage|text|text|YES|
 COL|production_expense|escalation_chain|jsonb|jsonb|NO|'[]'::jsonb
+COL|production_expense|exchange_rate_date|date|date|YES|
+COL|production_expense|exchange_rate_source|text|text|YES|
+COL|production_expense|exchange_rate|numeric|numeric|YES|
 COL|production_expense|id|uuid|uuid|NO|gen_random_uuid()
 COL|production_expense|invoice_requirement|text|text|YES|
 COL|production_expense|invoice_waiver_reason|text|text|NO|''::text
@@ -812,6 +822,7 @@ COL|production_role|production_id|text|text|NO|
 COL|production|active_version_id|text|text|YES|
 COL|production|archived_at|timestamp with time zone|timestamptz|YES|
 COL|production|avatar_url|text|text|YES|
+COL|production|base_currency|text|text|NO|'CNY'::text
 COL|production|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|production|description|text|text|NO|''::text
 COL|production|id|text|text|NO|
@@ -1342,6 +1353,8 @@ CON|production_budget_category|production_budget_category_production_id_fkey|FOR
 CON|production_budget_item|production_budget_item_amount_check|CHECK (((amount IS NULL) OR (amount >= (0)::numeric)))
 CON|production_budget_item|production_budget_item_category_id_production_id_fkey|FOREIGN KEY (category_id, production_id) REFERENCES production_expense_category(id, production_id) ON DELETE CASCADE
 CON|production_budget_item|production_budget_item_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|production_budget_item|production_budget_item_currency_format_check|CHECK (((currency ~ '^[A-Z]{3}$'::text) AND (base_currency ~ '^[A-Z]{3}$'::text)))
+CON|production_budget_item|production_budget_item_currency_snapshot_check|CHECK ((((amount IS NULL) AND (base_amount IS NULL) AND (exchange_rate IS NULL) AND (exchange_rate_date IS NULL) AND (exchange_rate_source IS NULL)) OR ((amount IS NOT NULL) AND (currency = base_currency) AND (base_amount = amount) AND (exchange_rate IS NULL) AND (exchange_rate_date IS NULL) AND (exchange_rate_source IS NULL)) OR ((amount IS NOT NULL) AND (currency <> base_currency) AND (base_amount IS NOT NULL) AND (base_amount >= (0)::numeric) AND (exchange_rate > (0)::numeric) AND (exchange_rate_date IS NOT NULL) AND (btrim(exchange_rate_source) <> ''::text))))
 CON|production_budget_item|production_budget_item_dept_id_production_id_fkey|FOREIGN KEY (dept_id, production_id) REFERENCES production_dept(id, production_id) ON DELETE RESTRICT
 CON|production_budget_item|production_budget_item_id_production_id_key|UNIQUE (id, production_id)
 CON|production_budget_item|production_budget_item_legacy_category_id_fkey|FOREIGN KEY (legacy_category_id) REFERENCES production_budget_category(id) ON DELETE RESTRICT
@@ -1388,6 +1401,8 @@ CON|production_expense_event|production_expense_event_pkey|PRIMARY KEY (id)
 CON|production_expense|production_expense_amount_check|CHECK ((amount >= (0)::numeric))
 CON|production_expense|production_expense_budget_item_id_fkey|FOREIGN KEY (budget_item_id) REFERENCES production_budget_item(id) ON DELETE SET NULL
 CON|production_expense|production_expense_category_id_fkey|FOREIGN KEY (category_id) REFERENCES production_budget_category(id) ON DELETE SET NULL
+CON|production_expense|production_expense_currency_format_check|CHECK (((currency ~ '^[A-Z]{3}$'::text) AND (base_currency ~ '^[A-Z]{3}$'::text)))
+CON|production_expense|production_expense_currency_snapshot_check|CHECK ((((status = 'draft'::text) AND (base_amount IS NULL) AND ((exchange_rate IS NULL) OR (exchange_rate > (0)::numeric)) AND ((exchange_rate_source IS NULL) OR (btrim(exchange_rate_source) <> ''::text))) OR ((status <> 'draft'::text) AND (amount IS NOT NULL) AND (currency = base_currency) AND (base_amount = amount) AND (exchange_rate IS NULL) AND (exchange_rate_date IS NULL) AND (exchange_rate_source IS NULL)) OR ((status <> 'draft'::text) AND (amount IS NOT NULL) AND (currency <> base_currency) AND (base_amount IS NOT NULL) AND (base_amount >= (0)::numeric) AND (exchange_rate > (0)::numeric) AND (exchange_rate_date IS NOT NULL) AND (btrim(exchange_rate_source) <> ''::text))))
 CON|production_expense|production_expense_current_stage_check|CHECK (((current_stage IS NULL) OR (current_stage = ANY (ARRAY['supervisor'::text, 'holder'::text, 'dept_poc'::text, 'ancestor_poc'::text, 'producer'::text, 'owner'::text]))))
 CON|production_expense|production_expense_invoice_requirement_check|CHECK ((invoice_requirement = ANY (ARRAY['required'::text, 'waived'::text])))
 CON|production_expense|production_expense_invoice_waiver_reason_check|CHECK (((status = 'draft'::text) OR (invoice_requirement <> 'waived'::text) OR (btrim(invoice_waiver_reason) <> ''::text)))
@@ -1472,6 +1487,7 @@ CON|production_role|production_role_pkey|PRIMARY KEY (id)
 CON|production_role|production_role_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|production_role|production_role_production_id_name_key|UNIQUE (production_id, name)
 CON|production|production_active_version_id_fkey|FOREIGN KEY (active_version_id) REFERENCES version(id)
+CON|production|production_base_currency_format_check|CHECK ((base_currency ~ '^[A-Z]{3}$'::text))
 CON|production|production_master_view_id_fkey|FOREIGN KEY (master_view_id, id) REFERENCES script_view(id, production_id)
 CON|production|production_owner_id_fkey|FOREIGN KEY (owner_id) REFERENCES app_user(id)
 CON|production|production_pkey|PRIMARY KEY (id)
@@ -1603,6 +1619,8 @@ ENUM|block_type|dialogue,stage,lyric,chapter_marker,scene_marker,rehearsal_marke
 EXT|pg_trgm
 EXT|vector
 FUNC|enforce_asset_single_file_policy()|365c9d113202e7d2a055ccb9782be865
+FUNC|fill_budget_currency_snapshot_compat()|87e692b953ac4b2f97ada09b05bb9e66
+FUNC|fill_expense_currency_snapshot_compat()|463153b17f4c256806deb30ff1afe2b2
 FUNC|prevent_asset_file_policy_update()|06b12c6c7eda98384a49a622c9d8ae47
 FUNC|prevent_asset_system_type_update()|2be0c19cb12a90ce4db9422036311e83
 IDX|agent_approval|agent_approval_pending_idx|CREATE INDEX agent_approval_pending_idx ON public.agent_approval USING btree (status, expires_at) WHERE (status = 'pending'::text)
@@ -1949,3 +1967,5 @@ SEQ|wiki_collab_outbox_id_seq
 TRG|asset_file|asset_single_file_policy_guard|CREATE TRIGGER asset_single_file_policy_guard BEFORE INSERT ON public.asset_file FOR EACH ROW EXECUTE FUNCTION enforce_asset_single_file_policy()
 TRG|asset|asset_file_version_policy_immutable|CREATE TRIGGER asset_file_version_policy_immutable BEFORE UPDATE OF file_version_policy ON public.asset FOR EACH ROW EXECUTE FUNCTION prevent_asset_file_policy_update()
 TRG|asset|asset_financial_document_type_immutable|CREATE TRIGGER asset_financial_document_type_immutable BEFORE UPDATE OF asset_type ON public.asset FOR EACH ROW EXECUTE FUNCTION prevent_asset_system_type_update()
+TRG|production_budget_item|production_budget_item_currency_snapshot_compat|CREATE TRIGGER production_budget_item_currency_snapshot_compat BEFORE INSERT OR UPDATE OF amount, currency, base_currency, base_amount, exchange_rate, exchange_rate_date, exchange_rate_source ON public.production_budget_item FOR EACH ROW EXECUTE FUNCTION fill_budget_currency_snapshot_compat()
+TRG|production_expense|production_expense_currency_snapshot_compat|CREATE TRIGGER production_expense_currency_snapshot_compat BEFORE INSERT OR UPDATE OF amount, currency, status, base_currency, base_amount, exchange_rate, exchange_rate_date, exchange_rate_source ON public.production_expense FOR EACH ROW EXECUTE FUNCTION fill_expense_currency_snapshot_compat()

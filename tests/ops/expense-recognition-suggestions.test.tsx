@@ -55,6 +55,7 @@ describe("凭证识别建议", () => {
     const render = () => root.render(
       <ExpenseRecognitionSuggestions
         productionId="prod_1"
+        baseCurrency="CNY"
         documents={[{
           assetId: "ast_1", assetFileId: "af_1", fileName: "收据.pdf",
           recognition: currentRecognition,
@@ -79,12 +80,13 @@ describe("凭证识别建议", () => {
     await act(async () => root.render(
       <ExpenseRecognitionSuggestions
         productionId="prod_1"
+        baseCurrency="CNY"
         documents={[{ assetId: "ast_1", assetFileId: "af_1", fileName: "发票.pdf", recognition }]}
         current={{ amount: "100.00", merchant: "", occurredOn: "" }}
         onRecognition={() => {}}
       />,
     ));
     expect([...container.querySelectorAll("button")].some(button => button.textContent?.includes("收起"))).toBe(true);
-    expect(container.textContent).toContain("票面合计 ¥88.50 与当前报销金额 ¥100.00 不一致");
+    expect(container.textContent).toContain("票面合计 人民币（CNY） 88.50 与当前报销金额 100.00 不一致");
   });
 });

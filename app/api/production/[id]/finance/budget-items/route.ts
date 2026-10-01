@@ -3,7 +3,7 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { canAccessNode } from "@/lib/perm/grant-template";
-import { AMOUNT_RE, createBudgetItem, FinanceError, listBudgetCategories } from "@/lib/ops/finance-db";
+import { createBudgetItem, FinanceError, listBudgetCategories } from "@/lib/ops/finance-db";
 import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -38,16 +38,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const amount = body.amount === undefined || body.amount === null || body.amount === ""
     ? null : String(body.amount);
   if (!categoryId) return Response.json({ error: "请选择费用科目" }, { status: 400 });
-  if (amount !== null && !AMOUNT_RE.test(amount)) return Response.json({ error: "预算金额格式不正确" }, { status: 400 });
   try {
     const item = await createBudgetItem({
       productionId: id, categoryId, amount,
+      currency: typeof body.currency === "string" ? body.currency : "CNY",
+      exchangeRate: typeof body.exchangeRate === "string" ? body.exchangeRate : null,
+      exchangeRateDate: typeof body.exchangeRateDate === "string" ? body.exchangeRateDate : null,
+      exchangeRateSource: typeof body.exchangeRateSource === "string" ? body.exchangeRateSource : null,
       deptId: typeof body.deptId === "string" && body.deptId ? body.deptId : null,
       notes: typeof body.notes === "string" ? body.notes : "", createdBy: session.userId,
     });
     return Response.json({ item }, { status: 201 });
   } catch (error) {
-    if (error instanceof FinanceError) return Response.json({ error: error.message }, { status: 409 });
+    if (error instanceof FinanceError) return Response.json({ error: error.message }, { status: error.reason === "duplicate_name" ? 409 : 400 });
     throw error;
   }
 }

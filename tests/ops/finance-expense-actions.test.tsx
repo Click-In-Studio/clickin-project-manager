@@ -97,7 +97,7 @@ function inputValue(input: HTMLInputElement, value: string) {
 describe("报销填单", () => {
   it("空白内容也能保存为服务端草稿", async () => {
     fetchMock.mockImplementation(() => jsonResponse({ expense: { id: "exp_draft" } }, 201));
-    await act(async () => root.render(<ExpenseCreateButton productionId="prod_1" categories={[]} />));
+    await act(async () => root.render(<ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} />));
     await act(async () => button("＋ 新建报销").click());
     const submitEvent = new Event("submit", { bubbles: true, cancelable: true });
     Object.defineProperty(submitEvent, "submitter", { value: button("保存草稿") });
@@ -115,6 +115,7 @@ describe("报销填单", () => {
     await act(async () => root.render(
       <ExpenseCreateButton
         productionId="prod_1"
+        baseCurrency="CNY"
         categories={[{ id: "cat_1", name: "交通", deptName: "制作组" }]}
       />,
     ));
@@ -145,7 +146,7 @@ describe("报销填单", () => {
 
   it("服务端拒绝时保留表单并显示原因", async () => {
     fetchMock.mockImplementation(() => jsonResponse({ error: "找不到这笔支出的审批人，请联系制作人" }, 409));
-    await act(async () => root.render(<ExpenseCreateButton productionId="prod_1" categories={[]} />));
+    await act(async () => root.render(<ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} />));
     await act(async () => button("＋ 新建报销").click());
     const inputs = [...container.querySelectorAll<HTMLInputElement>("input")];
     await act(async () => {
@@ -161,7 +162,7 @@ describe("报销填单", () => {
 
   it("可以连续添加多份凭证并随报销一次提交", async () => {
     fetchMock.mockImplementation(() => jsonResponse({ expense: { id: "exp_docs" } }, 201));
-    await act(async () => root.render(<ExpenseCreateButton productionId="prod_1" categories={[]} />));
+    await act(async () => root.render(<ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} />));
     await act(async () => button("＋ 新建报销").click());
     await act(async () => button("上传测试凭证").click());
     await act(async () => button("上传测试凭证").click());
@@ -181,7 +182,7 @@ describe("报销填单", () => {
   });
 
   it("把识别候选贴在对应输入框下，采用后只更新该字段", async () => {
-    await act(async () => root.render(<ExpenseCreateButton productionId="prod_1" categories={[]} />));
+    await act(async () => root.render(<ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} />));
     await act(async () => button("＋ 新建报销").click());
     await act(async () => button("上传测试凭证").click());
     await act(async () => button("完成识别").click());
@@ -195,7 +196,7 @@ describe("报销填单", () => {
 
     const amountInput = container.querySelector<HTMLInputElement>('input[placeholder="0.00"]')!;
     const amountGroup = amountInput.closest("div")!;
-    expect(amountGroup.textContent).toContain("识别建议：¥88.50");
+    expect(amountGroup.textContent).toContain("识别建议：人民币（CNY） 88.50");
     expect(amountGroup.textContent).not.toContain("某某商店");
 
     await act(async () => amountGroup.querySelector<HTMLButtonElement>("button")!.click());
