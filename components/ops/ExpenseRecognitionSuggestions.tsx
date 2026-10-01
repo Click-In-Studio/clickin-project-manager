@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import type {
-  ExpenseDocumentRecognition, ExpenseRecognitionResult,
+  ExpenseDocumentRecognition,
 } from "@/lib/ops/expense-recognition-types";
+import { buildExpenseRecognitionCandidates } from "@/lib/ops/expense-recognition-candidates";
 import styles from "./expense-recognition-suggestions.module.css";
 
 export type RecognizableExpenseDocument = {
@@ -13,8 +14,6 @@ export type RecognizableExpenseDocument = {
   fileName: string;
   recognition: ExpenseDocumentRecognition | null;
 };
-
-type ApplyField = "amount" | "merchant" | "occurredOn";
 
 const STATUS_TEXT: Record<ExpenseDocumentRecognition["status"], string> = {
   queued: "等待识别",
@@ -30,35 +29,17 @@ export function recognitionStatusText(recognition: ExpenseDocumentRecognition | 
   return recognition ? STATUS_TEXT[recognition.status] : "等待识别";
 }
 
-function cents(value: string): number | null {
-  if (!/^\d{1,12}(\.\d{1,2})?$/.test(value)) return null;
-  const [whole, fraction = ""] = value.split(".");
-  return Number(whole) * 100 + Number((fraction + "00").slice(0, 2));
-}
-
-function amountFromCents(value: number): string {
-  return `${Math.floor(value / 100)}.${String(value % 100).padStart(2, "0")}`;
-}
-
-function uniqueValues(results: ExpenseRecognitionResult[], field: "merchant" | "occurredOn" | "currency") {
-  return [...new Set(results.map(result => result[field].value).filter((value): value is string => !!value))];
-}
-
 export function ExpenseRecognitionSuggestions({
   productionId,
   documents,
   current,
   onRecognition,
-  onApply,
-  onDocumentType,
   onRetry,
 }: {
   productionId: string;
   documents: RecognizableExpenseDocument[];
   current: { amount: string; merchant: string; occurredOn: string };
   onRecognition: (assetFileId: string, recognition: ExpenseDocumentRecognition | null) => void;
-  onApply?: (field: ApplyField, value: string) => void;
-  onDocumentType?: (assetFileId: string, value: "invoice" | "receipt" | "other") => void;
   onRetry?: (assetId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -102,49 +83,11 @@ export function ExpenseRecognitionSuggestions({
       document,
       result: document.recognition!.result!,
     }));
-  const aggregate = (() => {
-    const results = successful.map(item => item.result);
-    const currencies = uniqueValues(results, "currency");
-    const merchants = uniqueValues(results, "merchant");
-    const dates = uniqueValues(results, "occurredOn");
-    const types = new Set(results.map(result => result.documentType.value).filter(Boolean));
-    const totals = results.map(result => result.totalAmount.value).filter((value): value is string => !!value);
-    const totalCents = totals.map(cents);
-    const canTotal = totals.length === results.length && totalCents.every((value): value is number => value !== null)
-      && currencies.length === 1 && currencies[0] === "CNY" && types.size <= 1;
-    const totalsByType = [...types].map(type => {
-      const values = successful.filter(item => item.result.documentType.value === type
-        && item.result.currency.value === "CNY")
-        .map(item => item.result.totalAmount.value).filter((value): value is string => !!value)
-        .map(cents).filter((value): value is number => value !== null);
-      return values.length ? {
-        type,
-        amount: amountFromCents(values.reduce((sum, value) => sum + value, 0)),
-      } : null;
-    }).filter((value): value is { type: string; amount: string } => value !== null);
-    return {
-      amount: canTotal ? amountFromCents(totalCents.reduce((sum, value) => sum + value, 0)) : null,
-      merchant: merchants.length === 1 ? merchants[0] : null,
-      occurredOn: dates.length === 1 ? dates[0] : null,
-      currencies,
-      mixedTypes: types.size > 1,
-      merchantConflict: merchants.length > 1,
-      dateConflict: dates.length > 1,
-      totalsByType,
-    };
-  })();
+  const aggregate = buildExpenseRecognitionCandidates(documents);
 
   if (documents.length === 0) return null;
   const noticeDocument = documents.find(document => document.assetFileId === noticeFileId);
   const noticeResult = noticeDocument?.recognition?.result;
-  const hasConflict = !!noticeResult && (
-    documents.length > 1
-    || (!!noticeResult.currency.value && noticeResult.currency.value !== "CNY")
-    || (!!current.amount && !!noticeResult.totalAmount.value && current.amount !== noticeResult.totalAmount.value)
-    || (!!current.merchant && !!noticeResult.merchant.value && current.merchant !== noticeResult.merchant.value)
-    || (!!current.occurredOn && !!noticeResult.occurredOn.value && current.occurredOn !== noticeResult.occurredOn.value)
-  );
-
   return (
     <>
       {successful.length > 0 && (
@@ -163,10 +106,6 @@ export function ExpenseRecognitionSuggestions({
                   )}
                   <span>
                     {result.documentType.value === "invoice" ? "发票" : result.documentType.value === "receipt" ? "收据" : "其他凭证"}
-                    {onDocumentType && <button type="button" onClick={() => onDocumentType(
-                      document.assetFileId,
-                      result.documentType.value as "invoice" | "receipt" | "other",
-                    )}>采用类型</button>}
                   </span>
                   {result.merchant.value && <span title={result.merchant.evidence ?? undefined}>商户：{result.merchant.value} · 置信度{CONFIDENCE_TEXT[result.merchant.confidence]}</span>}
                   {result.occurredOn.value && <span title={result.occurredOn.evidence ?? undefined}>日期：{result.occurredOn.value} · 置信度{CONFIDENCE_TEXT[result.occurredOn.confidence]}</span>}
@@ -193,13 +132,6 @@ export function ExpenseRecognitionSuggestions({
               {aggregate.currencies.some(currency => currency !== "CNY") && (
                 <p className={styles.warning}>非 CNY 凭证暂不支持自动写入金额，也不会换算汇率。</p>
               )}
-              {onApply && (
-                <div className={styles.applyRows}>
-                  {aggregate.merchant && <span>商户：{aggregate.merchant}<button type="button" onClick={() => onApply("merchant", aggregate.merchant!)}>采用</button></span>}
-                  {aggregate.occurredOn && <span>发生日期：{aggregate.occurredOn}<button type="button" onClick={() => onApply("occurredOn", aggregate.occurredOn!)}>采用</button></span>}
-                  {aggregate.amount && <span>凭证合计：¥{aggregate.amount}<button type="button" onClick={() => onApply("amount", aggregate.amount!)}>采用</button></span>}
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -223,18 +155,9 @@ export function ExpenseRecognitionSuggestions({
             {noticeResult.merchant.value ? ` · ${noticeResult.merchant.value}` : ""}
           </span>
           <button type="button" onClick={() => {
-            if (!hasConflict && onApply) {
-              if (noticeResult.merchant.value) onApply("merchant", noticeResult.merchant.value);
-              if (noticeResult.occurredOn.value) onApply("occurredOn", noticeResult.occurredOn.value);
-              if (noticeResult.currency.value === "CNY" && noticeResult.totalAmount.value)
-                onApply("amount", noticeResult.totalAmount.value);
-              if (noticeDocument && onDocumentType)
-                onDocumentType(noticeDocument.assetFileId, noticeResult.documentType.value as "invoice" | "receipt" | "other");
-            } else {
-              setExpanded(true);
-            }
+            setExpanded(true);
             setNoticeFileId(null);
-          }}>{hasConflict ? "查看建议" : "填入"}</button>
+          }}>查看识别结果</button>
           <button type="button" className={styles.dismiss} aria-label="不使用识别建议"
             onClick={() => setNoticeFileId(null)}>×</button>
         </div>

@@ -10,6 +10,7 @@ import { useAssetUploadManager } from "@/components/assets/asset-upload-manager"
 import {
   ExpenseRecognitionSuggestions, recognitionStatusText,
 } from "./ExpenseRecognitionSuggestions";
+import { buildExpenseRecognitionCandidates } from "@/lib/ops/expense-recognition-candidates";
 import type { ExpenseDocumentRecognition } from "@/lib/ops/expense-recognition-types";
 import styles from "./finance-expense-actions.module.css";
 
@@ -40,6 +41,21 @@ const DOCUMENT_KIND_LABEL: Record<DocumentKind, string> = {
   receipt: "收据",
   other: "其他依据",
 };
+
+function RecognitionFieldSuggestion({ label, value, currentValue, onApply }: {
+  label: string;
+  value: string | null;
+  currentValue: string;
+  onApply: () => void;
+}) {
+  if (!value || value === currentValue) return null;
+  return (
+    <div className={styles.recognitionFieldSuggestion}>
+      <span>识别建议：{label}</span>
+      <button type="button" onClick={onApply}>采用</button>
+    </div>
+  );
+}
 
 async function responseError(response: Response, fallback: string) {
   const data = await response.json().catch(() => ({})) as { error?: string };
@@ -102,6 +118,7 @@ export function ExpenseCreateButton({ productionId, categories }: {
     pending,
     task: uploadManager?.tasks.find(task => task.id === pending.taskId),
   }));
+  const recognitionCandidates = buildExpenseRecognitionCandidates(documents);
   const uploading = pendingDocuments.length > 0;
   const updateRecognition = useCallback((assetFileId: string, recognition: ExpenseDocumentRecognition | null) => {
     setDocuments(current => current.map(document => document.assetFileId === assetFileId
@@ -259,18 +276,32 @@ export function ExpenseCreateButton({ productionId, categories }: {
                         <span>{document.fileName}</span>
                         <small>{recognitionStatusText(document.recognition)}</small>
                       </span>
-                      <OverflowSafeSelect
-                        aria-label={`${document.fileName}的凭证类型`}
-                        value={document.kind}
-                        onChange={event => setDocuments(current => current.map(item =>
-                          item.assetFileId === document.assetFileId
-                            ? { ...item, kind: event.target.value as DocumentKind }
-                            : item))}
-                      >
-                        {Object.entries(DOCUMENT_KIND_LABEL).map(([value, label]) => (
-                          <option key={value} value={value}>{label}</option>
-                        ))}
-                      </OverflowSafeSelect>
+                      <div className={styles.documentKindField}>
+                        <OverflowSafeSelect
+                          aria-label={`${document.fileName}的凭证类型`}
+                          value={document.kind}
+                          onChange={event => setDocuments(current => current.map(item =>
+                            item.assetFileId === document.assetFileId
+                              ? { ...item, kind: event.target.value as DocumentKind }
+                              : item))}
+                        >
+                          {Object.entries(DOCUMENT_KIND_LABEL).map(([value, label]) => (
+                            <option key={value} value={value}>{label}</option>
+                          ))}
+                        </OverflowSafeSelect>
+                        <RecognitionFieldSuggestion
+                          label={DOCUMENT_KIND_LABEL[
+                            document.recognition?.result?.documentType.value as DocumentKind
+                          ] ?? "其他依据"}
+                          value={document.recognition?.status === "succeeded"
+                            ? document.recognition.result?.documentType.value ?? null : null}
+                          currentValue={document.kind}
+                          onApply={() => setDocuments(current => current.map(item =>
+                            item.assetFileId === document.assetFileId
+                              ? { ...item, kind: document.recognition!.result!.documentType.value as DocumentKind }
+                              : item))}
+                        />
+                      </div>
                       <button type="button" onClick={() => void openExpenseDocument(productionId, document.assetId, false)}>预览</button>
                       <button type="button" onClick={() => {
                         setDocuments(current => current.filter(item => item.assetFileId !== document.assetFileId));
@@ -336,42 +367,50 @@ export function ExpenseCreateButton({ productionId, categories }: {
                     documents={documents}
                     current={{ amount, merchant, occurredOn }}
                     onRecognition={updateRecognition}
-                    onApply={(field, value) => {
-                      if (field === "amount") setAmount(value);
-                      else if (field === "merchant") setMerchant(value);
-                      else setOccurredOn(value);
-                    }}
-                    onDocumentType={(assetFileId, kind) => setDocuments(current => current.map(document =>
-                      document.assetFileId === assetFileId ? { ...document, kind } : document))}
                     onRetry={assetId => { void retryRecognition(assetId); }}
                   />
                 </section>
 
-                <label className={styles.field}>
-                  <span>金额（元）</span>
-                  <input
-                    required
-                    inputMode="decimal"
-                    autoComplete="off"
-                    pattern="[0-9]{1,12}([.][0-9]{1,2})?"
-                    title="请输入最多两位小数的金额"
-                    value={amount}
-                    onChange={event => setAmount(event.target.value)}
-                    placeholder="0.00"
-                  />
-                  <small>最多两位小数</small>
-                </label>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.field}>
+                    <span>金额（元）</span>
+                    <input
+                      required
+                      inputMode="decimal"
+                      autoComplete="off"
+                      pattern="[0-9]{1,12}([.][0-9]{1,2})?"
+                      title="请输入最多两位小数的金额"
+                      value={amount}
+                      onChange={event => setAmount(event.target.value)}
+                      placeholder="0.00"
+                    />
+                    <small>最多两位小数</small>
+                  </label>
+                  <RecognitionFieldSuggestion label={`¥${recognitionCandidates.amount ?? ""}`}
+                    value={recognitionCandidates.amount} currentValue={amount}
+                    onApply={() => setAmount(recognitionCandidates.amount!)} />
+                </div>
 
-                <label className={styles.field}>
-                  <span>商户或销售方（可选）</span>
-                  <input value={merchant} onChange={event => setMerchant(event.target.value)}
-                    placeholder="例如：上海某某文化有限公司" />
-                </label>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.field}>
+                    <span>商户或销售方（可选）</span>
+                    <input value={merchant} onChange={event => setMerchant(event.target.value)}
+                      placeholder="例如：上海某某文化有限公司" />
+                  </label>
+                  <RecognitionFieldSuggestion label={recognitionCandidates.merchant ?? ""}
+                    value={recognitionCandidates.merchant} currentValue={merchant}
+                    onApply={() => setMerchant(recognitionCandidates.merchant!)} />
+                </div>
 
-                <label className={styles.field}>
-                  <span>发生或开票日期（可选）</span>
-                  <input type="date" value={occurredOn} onChange={event => setOccurredOn(event.target.value)} />
-                </label>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.field}>
+                    <span>发生或开票日期（可选）</span>
+                    <input type="date" value={occurredOn} onChange={event => setOccurredOn(event.target.value)} />
+                  </label>
+                  <RecognitionFieldSuggestion label={recognitionCandidates.occurredOn ?? ""}
+                    value={recognitionCandidates.occurredOn} currentValue={occurredOn}
+                    onApply={() => setOccurredOn(recognitionCandidates.occurredOn!)} />
+                </div>
 
                 <label className={styles.field}>
                   <span>预算科目</span>
@@ -871,6 +910,7 @@ export function ExpenseDetailButton({
   const canSupplement = !!detail && mine && !archived
     && detail.invoiceState === "pending"
     && (detail.status === "draft" || detail.status === "pending" || detail.status === "approved");
+  const recognitionCandidates = buildExpenseRecognitionCandidates(detail?.documents ?? []);
 
   return (
     <>
@@ -899,18 +939,33 @@ export function ExpenseDetailButton({
                   <label className={styles.field}><span>事由</span>
                     <input value={title} disabled={!editable} onChange={event => setTitle(event.target.value)} />
                   </label>
-                  <label className={styles.field}><span>金额</span>
-                    <input inputMode="decimal" value={amount} disabled={!editable}
-                      onChange={event => setAmount(event.target.value)} />
-                  </label>
-                  <label className={styles.field}><span>商户或销售方</span>
-                    <input value={merchant} disabled={!editable}
-                      onChange={event => setMerchant(event.target.value)} />
-                  </label>
-                  <label className={styles.field}><span>发生或开票日期</span>
-                    <input type="date" value={occurredOn} disabled={!editable}
-                      onChange={event => setOccurredOn(event.target.value)} />
-                  </label>
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.field}><span>金额</span>
+                      <input inputMode="decimal" value={amount} disabled={!editable}
+                        onChange={event => setAmount(event.target.value)} />
+                    </label>
+                    {editable && <RecognitionFieldSuggestion label={`¥${recognitionCandidates.amount ?? ""}`}
+                      value={recognitionCandidates.amount} currentValue={amount}
+                      onApply={() => setAmount(recognitionCandidates.amount!)} />}
+                  </div>
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.field}><span>商户或销售方</span>
+                      <input value={merchant} disabled={!editable}
+                        onChange={event => setMerchant(event.target.value)} />
+                    </label>
+                    {editable && <RecognitionFieldSuggestion label={recognitionCandidates.merchant ?? ""}
+                      value={recognitionCandidates.merchant} currentValue={merchant}
+                      onApply={() => setMerchant(recognitionCandidates.merchant!)} />}
+                  </div>
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.field}><span>发生或开票日期</span>
+                      <input type="date" value={occurredOn} disabled={!editable}
+                        onChange={event => setOccurredOn(event.target.value)} />
+                    </label>
+                    {editable && <RecognitionFieldSuggestion label={recognitionCandidates.occurredOn ?? ""}
+                      value={recognitionCandidates.occurredOn} currentValue={occurredOn}
+                      onApply={() => setOccurredOn(recognitionCandidates.occurredOn!)} />}
+                  </div>
                   <label className={styles.field}><span>预算科目</span>
                     <OverflowSafeSelect value={categoryId} disabled={!editable}
                       onChange={event => setCategoryId(event.target.value)}>
@@ -943,11 +998,6 @@ export function ExpenseDetailButton({
                       documents={detail.documents}
                       current={{ amount, merchant, occurredOn }}
                       onRecognition={updateDocumentRecognition}
-                      onApply={editable ? (field, value) => {
-                        if (field === "amount") setAmount(value);
-                        else if (field === "merchant") setMerchant(value);
-                        else setOccurredOn(value);
-                      } : undefined}
                       onRetry={editable ? assetId => { void retryDocumentRecognition(assetId); } : undefined}
                     />
                     {editable && detail.documents.map(document => (

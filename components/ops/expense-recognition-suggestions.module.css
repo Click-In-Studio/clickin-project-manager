@@ -41,10 +41,7 @@
 .warning { margin: 0; line-height: 1.45; }
 .groupTotal { margin: 0; color: var(--ink); font-size: 9px; font-weight: 700; }
 
-.applyRows { display: flex; flex-direction: column; gap: 6px; }
-.applyRows span,
 .failures span { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink); font-size: 9px; }
-.applyRows button,
 .failures button,
 .notice button {
   border: 0;
