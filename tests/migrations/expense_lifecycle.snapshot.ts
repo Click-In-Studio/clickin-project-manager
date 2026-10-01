@@ -20,6 +20,16 @@ export const createPreMigrationData: MigrationHook<ExpenseLifecycleSnapshot>["cr
       `INSERT INTO production (id, name, owner_id) VALUES ($1, $2, $3)`,
       [productionId, `报销生命周期迁移-${faker.string.alphanumeric(5)}`, testOwner],
     );
+    // 本 hook 运行在 main 的完整旧 schema 上；裸建 production 也必须满足存量全局不变量。
+    const masterViewId = `sv_expmig_${faker.string.alphanumeric(8).toLowerCase()}`;
+    await pool.query(
+      `INSERT INTO script_view (id, production_id, name) VALUES ($1, $2, '标准本')`,
+      [masterViewId, productionId],
+    );
+    await pool.query(
+      `UPDATE production SET master_view_id = $1 WHERE id = $2`,
+      [masterViewId, productionId],
+    );
     const createdAt = "2026-01-02T03:04:05.000Z";
     const approvedAt = "2026-01-03T04:05:06.000Z";
     const cancelled = await pool.query<{ id: string }>(

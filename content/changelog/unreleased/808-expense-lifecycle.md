@@ -1,5 +1,5 @@
 ---
-kind: added
+kind: new
 title: 报销支持草稿、修改重提和完整处理记录
 page: production/finance/expenses
 pr: 808
