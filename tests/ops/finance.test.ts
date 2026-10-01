@@ -31,10 +31,11 @@ import {
 } from "@/lib/approval/approval-routing";
 import {
   approveExpense, withdrawExpense, createBudgetCategory, deleteBudgetCategory,
-  addExpenseDocument, createExpenseDraft,
+  addExpenseDocument, confirmExpenseSettlement, createExpenseDraft,
   escalateExpiredExpenses, FinanceError, getBudgetCategory, getExpense, getExpenseDetail, listBudgetCategories, listExpenses,
   listPendingExpenses, rejectExpense, submitExpense, updateBudgetCategory,
-  listBudgetCategoryOptions, reclassifyExpense, reopenExpense, submitExpenseDraft, updateExpenseDraft,
+  listBudgetCategoryOptions, reclassifyExpense, reopenExpense, reopenExpenseSettlement,
+  submitExpenseDraft, updateExpenseDraft,
 } from "@/lib/ops/finance-db";
 import {
   addUniversalAssetFile, AssetFilePolicyError, AssetInUseError, createAsset, deleteAsset,
@@ -685,6 +686,117 @@ describe("6. 撤回只有提交人自己", () => {
     expect((await withdrawExpense(e.id, prodId, submitterId)).ok).toBe(true);
     expect((await getExpense(e.id, prodId))!.status).toBe("withdrawn");
     expect((await withdrawExpense(e.id, prodId, submitterId)).ok).toBe(false);
+  });
+});
+
+describe("#739 线下结清确认", () => {
+  function actionReq(userId: string | null, body: unknown) {
+    const request = new NextRequest("http://localhost/api/x", {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+    });
+    if (userId) request.cookies.set(SESSION_COOKIE, createSession({
+      userId, name: "测试", avatarUrl: null, isAdmin: false,
+    }));
+    return request;
+  }
+
+  const actionCtx = (expenseId: string) => ({
+    params: Promise.resolve({ id: prodId, expenseId }),
+  });
+
+  async function approveFully(expense: Awaited<ReturnType<typeof submitExpense>>) {
+    let current = expense;
+    for (let step = 0; step < 10 && current.status === "pending"; step += 1) {
+      await approveExpense(current.id, prodId, current.currentApproverIds[0]);
+      current = (await getExpense(current.id, prodId))!;
+    }
+    expect(current.status).toBe("approved");
+    return current;
+  }
+
+  it("只允许已批准报销确认结清，重复动作 first-action-wins，恢复只纠正记录", async () => {
+    const pending = await submitExpense({
+      productionId: prodId, categoryId: null, title: `仍待批${shortId()}`,
+      amount: "12.00", submittedBy: submitterId,
+    });
+    expect(await confirmExpenseSettlement({
+      expenseId: pending.id, productionId: prodId, actorId: ownerId,
+      expectedMutationSeq: pending.mutationSeq,
+    })).toEqual({ ok: false });
+
+    const approved = await submitExpense({
+      productionId: prodId, categoryId: null, title: `结清测试${shortId()}`,
+      amount: "23.00", submittedBy: submitterId,
+    });
+    const before = await approveFully(approved);
+
+    expect(await confirmExpenseSettlement({
+      expenseId: approved.id, productionId: prodId, actorId: ownerId,
+      expectedMutationSeq: before.mutationSeq,
+    })).toEqual({ ok: true, submittedBy: submitterId });
+    const settled = (await getExpense(approved.id, prodId))!;
+    expect(settled).toMatchObject({ settledBy: ownerId, mutationSeq: before.mutationSeq + 1 });
+    expect(settled.settledAt).not.toBeNull();
+    expect(await confirmExpenseSettlement({
+      expenseId: approved.id, productionId: prodId, actorId: ownerId,
+      expectedMutationSeq: before.mutationSeq,
+    })).toEqual({ ok: false });
+
+    expect(await reopenExpenseSettlement({
+      expenseId: approved.id, productionId: prodId, actorId: ownerId,
+      expectedMutationSeq: settled.mutationSeq,
+    })).toEqual({ ok: true, submittedBy: submitterId });
+    const reopened = (await getExpenseDetail(approved.id, prodId))!;
+    expect(reopened).toMatchObject({ settledAt: null, settledBy: null, mutationSeq: settled.mutationSeq + 1 });
+    expect(reopened.events.slice(-2).map(event => event.type)).toEqual([
+      "settled", "settlement_reopened",
+    ]);
+  });
+
+  it("结清资格与审批资格分离，并在成功后通知提交人", async () => {
+    const category = await makeCategory("结清权限");
+    const expense = await submitExpense({
+      productionId: prodId, categoryId: category.id, title: `路由结清${shortId()}`,
+      amount: "31.00", submittedBy: submitterId,
+    });
+    const approver = expense.currentApproverIds[0];
+    const approved = await approveFully(expense);
+
+    expect((await actExpenseDetailRoute(actionReq(null, {
+      action: "settle", expectedMutationSeq: approved.mutationSeq,
+    }), actionCtx(expense.id))).status).toBe(401);
+    expect((await actExpenseDetailRoute(actionReq(outsiderId, {
+      action: "settle", expectedMutationSeq: approved.mutationSeq,
+    }), actionCtx(expense.id))).status).toBe(403);
+    expect((await actExpenseDetailRoute(actionReq(approver, {
+      action: "settle", expectedMutationSeq: approved.mutationSeq,
+    }), actionCtx(expense.id))).status).toBe(403);
+
+    await getPool().query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub,
+          permission_level, grant_source, confirmed_by)
+       VALUES ($1,$2,'finance','*','settlement','edit','direct',$2)`,
+      [prodId, financeEditorId],
+    );
+    const response = await actExpenseDetailRoute(actionReq(financeEditorId, {
+      action: "settle", expectedMutationSeq: approved.mutationSeq,
+    }), actionCtx(expense.id));
+    expect(response.status).toBe(200);
+    expect((await response.json() as { expense: { settledBy: string } }).expense.settledBy)
+      .toBe(financeEditorId);
+    const notification = await getPool().query<{ title: string }>(
+      `SELECT title FROM user_notification
+        WHERE user_id = $1 AND kind = 'expense_settlement' AND entity_id = $2`,
+      [submitterId, expense.id],
+    );
+    expect(notification.rows.map(row => row.title)).toContain("你的报销已确认线下结清");
+
+    expect((await actExpenseDetailRoute(actionReq(financeEditorId, {
+      action: "settle", expectedMutationSeq: approved.mutationSeq,
+    }), actionCtx(expense.id))).status).toBe(409);
   });
 });
 

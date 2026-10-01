@@ -3,12 +3,13 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import {
-  approveExpense, FinanceError, getBudgetCategory, getExpense, getExpenseDetail,
+  approveExpense, confirmExpenseSettlement, FinanceError, getBudgetCategory, getExpense, getExpenseDetail,
   hasExpenseParticipation, isExpenseApprover, rejectExpense, reopenExpense,
-  isExpenseDate, reclassifyExpense, submitExpenseDraft, updateExpenseDraft, withdrawExpense,
+  isExpenseDate, reclassifyExpense, reopenExpenseSettlement, submitExpenseDraft, updateExpenseDraft, withdrawExpense,
   type InvoiceRequirement,
 } from "@/lib/ops/finance-db";
 import { readJsonObject } from "@/lib/request-json";
+import { notifyUser } from "@/lib/notify/notify";
 
 type Ctx = { params: Promise<{ id: string; expenseId: string }> };
 
@@ -109,7 +110,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!parsedBody.ok) return parsedBody.response;
   const body = parsedBody.value;
   const action = body.action;
-  if (!["approve", "reject", "withdraw", "reopen", "submit", "reclassify"].includes(String(action)))
+  if (!["approve", "reject", "withdraw", "reopen", "submit", "reclassify", "settle", "reopen_settlement"].includes(String(action)))
     return Response.json({ error: "action 无效" }, { status: 400 });
   const expectedMutationSeq = body.expectedMutationSeq;
   if (typeof expectedMutationSeq !== "number"
@@ -148,6 +149,38 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error instanceof FinanceError) return financeErrorResponse(error);
       throw error;
     }
+  }
+
+  if (action === "settle" || action === "reopen_settlement") {
+    const canSettle = await hasEffectiveGrant(
+      toActor(session, access.permCtx), productionId, "finance", "*", "settlement", "edit",
+    );
+    if (!canSettle)
+      return Response.json({ error: "没有确认报销结清的资格" }, { status: 403 });
+    const result = action === "settle"
+      ? await confirmExpenseSettlement({
+          expenseId, productionId, actorId: session.userId, expectedMutationSeq,
+        })
+      : await reopenExpenseSettlement({
+          expenseId, productionId, actorId: session.userId, expectedMutationSeq,
+        });
+    if (!result.ok)
+      return Response.json({ error: "结清状态已被处理或内容已变化，请刷新" }, { status: 409 });
+    const fresh = await getExpense(expenseId, productionId);
+    if (result.submittedBy && result.submittedBy !== session.userId) {
+      await notifyUser({
+        userId: result.submittedBy,
+        kind: "expense_settlement",
+        productionId,
+        entityType: "expense",
+        entityId: expenseId,
+        title: action === "settle" ? "你的报销已确认线下结清" : "你的报销已恢复为待结清",
+        body: fresh?.title ?? expense.title,
+        viewHref: `/production/${productionId}/finance`,
+        category: "info",
+      });
+    }
+    return Response.json({ expense: fresh });
   }
 
   if (!await isExpenseApprover(expenseId, productionId, session.userId))

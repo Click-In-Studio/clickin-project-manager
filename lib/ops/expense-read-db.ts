@@ -51,6 +51,9 @@ export type Expense = {
   canFinalize: boolean;
   resolvedAt: string | null;
   resolvedBy: string | null;
+  settledAt: string | null;
+  settledBy: string | null;
+  settledByName: string | null;
   mutationSeq: number;
   submittedAt: string | null;
   createdAt: string;
@@ -59,7 +62,8 @@ export type Expense = {
 export type ExpenseEventType =
   | "draft_created" | "draft_saved" | "submitted" | "forwarded"
   | "approved" | "rejected" | "withdrawn" | "reopened" | "reclassified"
-  | "document_added" | "document_removed" | "post_approval_document_added";
+  | "document_added" | "document_removed" | "post_approval_document_added"
+  | "settled" | "settlement_reopened";
 
 export type ExpenseEvent = {
   id: string;
@@ -101,6 +105,7 @@ type ExpenseRow = {
   current_stage: string | null; current_stage_depth: number; current_approver_ids: string[];
   escalation_chain: { canFinalize?: boolean }[];
   resolved_at: Date | null; resolved_by: string | null; mutation_seq: string;
+  settled_at: Date | null; settled_by: string | null; settled_by_name: string | null;
   submitted_at: Date | null; created_at: Date;
 };
 
@@ -142,6 +147,9 @@ function rowToExpense(r: ExpenseRow): Expense {
     canFinalize: last?.canFinalize ?? true,
     resolvedAt: r.resolved_at?.toISOString() ?? null,
     resolvedBy: r.resolved_by,
+    settledAt: r.settled_at?.toISOString() ?? null,
+    settledBy: r.settled_by,
+    settledByName: r.settled_by_name,
     mutationSeq: Number(r.mutation_seq),
     submittedAt: r.submitted_at?.toISOString() ?? null,
     createdAt: r.created_at.toISOString(),
@@ -187,11 +195,14 @@ const EXPENSE_QUERY = `
          COALESCE(NULLIF(up.display_name, ''), up.name) AS submitter_name,
          e.status, e.current_stage, e.current_stage_depth, e.current_approver_ids,
          e.escalation_chain, e.resolved_at, e.resolved_by, e.mutation_seq,
+         e.settled_at, e.settled_by,
+         COALESCE(NULLIF(settler.display_name, ''), settler.name) AS settled_by_name,
          e.submitted_at, e.created_at
     FROM production_expense e
     LEFT JOIN production_budget_item bi ON bi.id = e.budget_item_id
     LEFT JOIN production_expense_category c ON c.id = bi.category_id
-    LEFT JOIN user_profile up ON up.user_id = e.submitted_by`;
+    LEFT JOIN user_profile up ON up.user_id = e.submitted_by
+    LEFT JOIN user_profile settler ON settler.user_id = e.settled_by`;
 
 /**
  * 支出列表。不给 filter = 全项目（需要 expenses@view）。

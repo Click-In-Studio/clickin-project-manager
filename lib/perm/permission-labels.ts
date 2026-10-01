@@ -53,6 +53,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   "node:asset/*/file@create": "上传数字资产新版本",
   "node:asset/*/shares@create": "分享数字资产",
   "node:finance/*/expenses@create": "登记支出",
+  "node:finance/*/settlement@edit": "确认报销线下结清",
   // ── 项目 / 部门 ──
   "node:production/*/mounts@view": "查看项目挂载的资产",
   "node:dept/*/notes@create": "添加部门备注",
@@ -339,6 +340,7 @@ export const SUB_LABELS: Record<string, string> = {
   budget: "部门预算",
   categories: "费用科目",
   expenses: "支出",
+  settlement: "报销结清",
   contact: "联系方式",
   cues: "Cue 行",
   "cues/comments": "Cue 评论",

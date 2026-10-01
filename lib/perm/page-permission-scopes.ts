@@ -91,6 +91,7 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:finance/*/budget@delete",
     "node:finance/*/expenses@view",
     "node:finance/*/expenses@create",
+    "node:finance/*/settlement@edit",
   ]),
 
   // 批E-2：剧本页写面。blocks 写是一把总钥匙（requiredPermissions 对 insert /

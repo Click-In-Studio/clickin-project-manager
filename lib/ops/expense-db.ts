@@ -665,6 +665,92 @@ export async function rejectExpense(
   }
 }
 
+/**
+ * 确认线下已结清。这里只记录剧组的协作确认，不发起、验证或描述任何真实资金流。
+ */
+export async function confirmExpenseSettlement(params: {
+  expenseId: string;
+  productionId: string;
+  actorId: string;
+  expectedMutationSeq: number;
+}): Promise<{ ok: boolean; submittedBy?: string }> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const updated = await client.query<{ mutation_seq: string; submitted_by: string }>(
+      `UPDATE production_expense
+          SET settled_at = clock_timestamp(), settled_by = $3,
+              mutation_seq = mutation_seq + 1, updated_at = now()
+        WHERE id = $1 AND production_id = $2
+          AND status = 'approved' AND settled_at IS NULL
+          AND mutation_seq = $4
+        RETURNING mutation_seq, submitted_by`,
+      [params.expenseId, params.productionId, params.actorId, params.expectedMutationSeq],
+    );
+    const row = updated.rows[0];
+    if (!row) {
+      await client.query("ROLLBACK");
+      return { ok: false };
+    }
+    await appendExpenseEvent(client, {
+      expenseId: params.expenseId,
+      type: "settled",
+      actorId: params.actorId,
+      mutationSeq: Number(row.mutation_seq),
+      details: { meaning: "offline_settlement_confirmed" },
+    });
+    await client.query("COMMIT");
+    return { ok: true, submittedBy: row.submitted_by };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** 恢复为待结清只纠正系统记录，不表示任何真实款项被撤回。 */
+export async function reopenExpenseSettlement(params: {
+  expenseId: string;
+  productionId: string;
+  actorId: string;
+  expectedMutationSeq: number;
+}): Promise<{ ok: boolean; submittedBy?: string }> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const updated = await client.query<{ mutation_seq: string; submitted_by: string }>(
+      `UPDATE production_expense
+          SET settled_at = NULL, settled_by = NULL,
+              mutation_seq = mutation_seq + 1, updated_at = now()
+        WHERE id = $1 AND production_id = $2
+          AND status = 'approved' AND settled_at IS NOT NULL
+          AND mutation_seq = $3
+        RETURNING mutation_seq, submitted_by`,
+      [params.expenseId, params.productionId, params.expectedMutationSeq],
+    );
+    const row = updated.rows[0];
+    if (!row) {
+      await client.query("ROLLBACK");
+      return { ok: false };
+    }
+    await appendExpenseEvent(client, {
+      expenseId: params.expenseId,
+      type: "settlement_reopened",
+      actorId: params.actorId,
+      mutationSeq: Number(row.mutation_seq),
+      details: { meaning: "record_correction_only" },
+    });
+    await client.query("COMMIT");
+    return { ok: true, submittedBy: row.submitted_by };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 /** 撤回：只有提交人自己，且还在 pending。 */
 export async function withdrawExpense(
   expenseId: string, productionId: string, actorId: string, expectedMutationSeq?: number,

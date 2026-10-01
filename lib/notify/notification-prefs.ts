@@ -130,6 +130,12 @@ export const NOTIFICATION_CONFIG = {
     externalChannel: "dm" as const,
     defaultExternalEnabled: true,
   },
+  expense_settlement: {
+    label: "报销结清状态",
+    description: "你提交的报销被确认结清或恢复为待结清时通知",
+    externalChannel: null,
+    defaultExternalEnabled: false,
+  },
   // 模版流 cc 节点（prB）：知会不索动作，与待审批分开订阅——抄送量大且无需处理，
   // 混进 pending 类型会让人把真待办也关掉。
   approval_request_cc: {

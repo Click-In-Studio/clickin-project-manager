@@ -685,6 +685,8 @@ COL|production_expense|occurred_on|date|date|YES|
 COL|production_expense|production_id|text|text|NO|
 COL|production_expense|resolved_at|timestamp with time zone|timestamptz|YES|
 COL|production_expense|resolved_by|uuid|uuid|YES|
+COL|production_expense|settled_at|timestamp with time zone|timestamptz|YES|
+COL|production_expense|settled_by|uuid|uuid|YES|
 COL|production_expense|status|text|text|NO|'draft'::text
 COL|production_expense|submitted_at|timestamp with time zone|timestamptz|YES|
 COL|production_expense|submitted_by|uuid|uuid|NO|
@@ -1395,7 +1397,7 @@ CON|production_expense_document|production_expense_document_expense_id_asset_fil
 CON|production_expense_document|production_expense_document_expense_id_fkey|FOREIGN KEY (expense_id) REFERENCES production_expense(id) ON DELETE CASCADE
 CON|production_expense_document|production_expense_document_pkey|PRIMARY KEY (id)
 CON|production_expense_event|production_expense_event_actor_id_fkey|FOREIGN KEY (actor_id) REFERENCES app_user(id)
-CON|production_expense_event|production_expense_event_event_type_check|CHECK ((event_type = ANY (ARRAY['draft_created'::text, 'draft_saved'::text, 'submitted'::text, 'forwarded'::text, 'approved'::text, 'rejected'::text, 'withdrawn'::text, 'reopened'::text, 'reclassified'::text, 'document_added'::text, 'document_removed'::text, 'post_approval_document_added'::text])))
+CON|production_expense_event|production_expense_event_event_type_check|CHECK ((event_type = ANY (ARRAY['draft_created'::text, 'draft_saved'::text, 'submitted'::text, 'forwarded'::text, 'approved'::text, 'rejected'::text, 'withdrawn'::text, 'reopened'::text, 'reclassified'::text, 'document_added'::text, 'document_removed'::text, 'post_approval_document_added'::text, 'settled'::text, 'settlement_reopened'::text])))
 CON|production_expense_event|production_expense_event_expense_id_fkey|FOREIGN KEY (expense_id) REFERENCES production_expense(id) ON DELETE CASCADE
 CON|production_expense_event|production_expense_event_pkey|PRIMARY KEY (id)
 CON|production_expense|production_expense_amount_check|CHECK ((amount >= (0)::numeric))
@@ -1409,6 +1411,8 @@ CON|production_expense|production_expense_invoice_waiver_reason_check|CHECK (((s
 CON|production_expense|production_expense_pkey|PRIMARY KEY (id)
 CON|production_expense|production_expense_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|production_expense|production_expense_resolved_by_fkey|FOREIGN KEY (resolved_by) REFERENCES app_user(id)
+CON|production_expense|production_expense_settled_by_fkey|FOREIGN KEY (settled_by) REFERENCES app_user(id)
+CON|production_expense|production_expense_settlement_check|CHECK ((((settled_at IS NULL) AND (settled_by IS NULL)) OR ((status = 'approved'::text) AND (settled_at IS NOT NULL) AND (settled_by IS NOT NULL))))
 CON|production_expense|production_expense_status_check|CHECK ((status = ANY (ARRAY['draft'::text, 'pending'::text, 'approved'::text, 'rejected'::text, 'withdrawn'::text])))
 CON|production_expense|production_expense_submitted_by_fkey|FOREIGN KEY (submitted_by) REFERENCES app_user(id)
 CON|production_expense|production_expense_submitted_content_check|CHECK (((status = 'draft'::text) OR ((btrim(title) <> ''::text) AND (amount IS NOT NULL) AND (submitted_at IS NOT NULL))))
