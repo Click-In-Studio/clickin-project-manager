@@ -34,7 +34,7 @@ import {
   addExpenseDocument, createExpenseDraft,
   escalateExpiredExpenses, FinanceError, getBudgetCategory, getExpense, getExpenseDetail, listBudgetCategories, listExpenses,
   listPendingExpenses, rejectExpense, submitExpense, updateBudgetCategory,
-  listBudgetCategoryOptions, reopenExpense, submitExpenseDraft, updateExpenseDraft,
+  listBudgetCategoryOptions, reclassifyExpense, reopenExpense, submitExpenseDraft, updateExpenseDraft,
 } from "@/lib/ops/finance-db";
 import {
   addUniversalAssetFile, AssetFilePolicyError, AssetInUseError, createAsset, deleteAsset,
@@ -64,7 +64,7 @@ vi.mock("@/lib/r2", () => ({
 let prodId: string;
 let ownerId: string, submitterId: string, deptPocId: string, strangerId: string;
 let financeEditorId: string, producerId: string, outsiderId: string;
-let deptId: string;
+let deptId: string, otherDeptId: string, otherDeptPocId: string;
 
 beforeAll(async () => {
   ownerId     = (await upsertFeishuUser(`test-open-${shortId()}`, `财务owner${shortId()}`, null, false)).userId;
@@ -74,9 +74,11 @@ beforeAll(async () => {
   financeEditorId = (await upsertFeishuUser(`test-open-${shortId()}`, `财务配置员${shortId()}`, null, false)).userId;
   producerId = (await upsertFeishuUser(`test-open-${shortId()}`, `制作人${shortId()}`, null, false)).userId;
   outsiderId = (await upsertFeishuUser(`test-open-${shortId()}`, `项目外人员${shortId()}`, null, false)).userId;
+  otherDeptPocId = (await upsertFeishuUser(`test-open-${shortId()}`, `音响POC${shortId()}`, null, false)).userId;
 
   ({ prodId } = await makeProduction(ownerId));
-  for (const u of [submitterId, deptPocId, strangerId, financeEditorId, producerId]) await addProductionMember(prodId, u);
+  for (const u of [submitterId, deptPocId, strangerId, financeEditorId, producerId, otherDeptPocId])
+    await addProductionMember(prodId, u);
   await getPool().query(
     `INSERT INTO production_member_permission (production_id, user_id, permission, granted)
      VALUES ($1,$2,'node:finance/*/categories@edit',true),
@@ -97,6 +99,14 @@ beforeAll(async () => {
   await getPool().query(
     `INSERT INTO production_dept_member (production_id, dept_id, user_id, is_poc) VALUES ($1,$2,$3,true)`,
     [prodId, deptId, deptPocId],
+  );
+  ({ rows: [{ id: otherDeptId }] } = await getPool().query<{ id: string }>(
+    `INSERT INTO production_dept (production_id, name) VALUES ($1, $2) RETURNING id`,
+    [prodId, `音响${shortId()}`],
+  ));
+  await getPool().query(
+    `INSERT INTO production_dept_member (production_id, dept_id, user_id, is_poc) VALUES ($1,$2,$3,true)`,
+    [prodId, otherDeptId, otherDeptPocId],
   );
 });
 
@@ -177,6 +187,245 @@ describe("2 & 3. 审批人由阶梯算出，科目归属部门自动成为一级
     expect((await listPendingExpenses(strangerId, prodId)).some(x => x.id === e.id)).toBe(false);
     // 提交人自己也不在待办里（阶梯会去掉本人）
     expect((await listPendingExpenses(submitterId, prodId)).some(x => x.id === e.id)).toBe(false);
+  });
+});
+
+describe("#810 预算项归类与重新路由", () => {
+  const actionCtx = (expenseId: string) => ({ params: Promise.resolve({ id: prodId, expenseId }) });
+  function actionReq(userId: string | null, body: unknown) {
+    const request = new NextRequest("http://localhost/api/x", {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+    });
+    if (userId) request.cookies.set(SESSION_COOKIE, createSession({
+      userId, name: "测试", avatarUrl: null, isAdmin: false,
+    }));
+    return request;
+  }
+
+  it("当前审批人改预算项后从新部门首级重启，并让旧页面动作冲突", async () => {
+    const from = await makeCategory("舞美重路由");
+    const to = await createBudgetCategory({
+      productionId: prodId, name: `音响重路由${shortId()}`, amount: "0",
+      deptId: otherDeptId, createdBy: ownerId,
+    });
+    const expense = await submitExpense({
+      productionId: prodId, categoryId: from.id, title: "改到音响",
+      amount: "120.00", submittedBy: submitterId,
+    });
+    const oldApprover = expense.currentApproverIds[0];
+
+    expect(await reclassifyExpense({
+      expenseId: expense.id,
+      productionId: prodId,
+      actorId: oldApprover,
+      budgetItemId: to.id,
+      expectedMutationSeq: expense.mutationSeq,
+    })).toEqual({ ok: true, selfApproved: false });
+
+    const after = (await getExpense(expense.id, prodId))!;
+    expect(after.categoryId).toBe(to.id);
+    expect(after.currentStage).toBe("dept_poc");
+    expect(after.currentApproverIds).toContain(otherDeptPocId);
+    expect(after.mutationSeq).toBe(expense.mutationSeq + 1);
+    expect(await approveExpense(expense.id, prodId, oldApprover, {
+      expectedMutationSeq: expense.mutationSeq,
+    })).toEqual({ ok: false, reason: "conflict" });
+
+    const detail = await getExpenseDetail(expense.id, prodId);
+    expect(detail?.events.at(-1)).toMatchObject({
+      type: "reclassified",
+      actorId: oldApprover,
+      mutationSeq: expense.mutationSeq + 1,
+      details: {
+        reason: "approver_reclassified",
+        fromBudgetItem: { id: from.id },
+        toBudgetItem: { id: to.id },
+        route: { stage: "dept_poc", selfApproved: false },
+      },
+    });
+  });
+
+  it("两名当前审批人并发归类只有一个成功", async () => {
+    await getPool().query(
+      `INSERT INTO production_dept_member (production_id, dept_id, user_id, is_poc)
+       VALUES ($1,$2,$3,true)`,
+      [prodId, deptId, strangerId],
+    );
+    try {
+      const from = await makeCategory("并发归类");
+      const toDept = await createBudgetCategory({
+        productionId: prodId, name: `并发音响${shortId()}`, amount: "0",
+        deptId: otherDeptId, createdBy: ownerId,
+      });
+      const toPublic = await createBudgetCategory({
+        productionId: prodId, name: `并发公共${shortId()}`, amount: null, createdBy: ownerId,
+      });
+      const expense = await submitExpense({
+        productionId: prodId, categoryId: from.id, title: "并发调整",
+        amount: "15.00", submittedBy: submitterId,
+      });
+      expect(expense.currentApproverIds).toEqual(expect.arrayContaining([deptPocId, strangerId]));
+
+      const results = await Promise.all([
+        reclassifyExpense({
+          expenseId: expense.id, productionId: prodId, actorId: deptPocId,
+          budgetItemId: toDept.id, expectedMutationSeq: expense.mutationSeq,
+        }),
+        reclassifyExpense({
+          expenseId: expense.id, productionId: prodId, actorId: strangerId,
+          budgetItemId: toPublic.id, expectedMutationSeq: expense.mutationSeq,
+        }),
+      ]);
+      expect(results.filter(result => result.ok)).toHaveLength(1);
+      expect(results.filter(result => !result.ok)).toHaveLength(1);
+      const detail = await getExpenseDetail(expense.id, prodId);
+      expect(detail?.events.filter(event => event.type === "reclassified")).toHaveLength(1);
+    } finally {
+      await getPool().query(
+        "DELETE FROM production_dept_member WHERE production_id=$1 AND dept_id=$2 AND user_id=$3",
+        [prodId, deptId, strangerId],
+      );
+    }
+  });
+
+  it("未登录、非成员和只持不相关单键者都不能归类", async () => {
+    const from = await makeCategory("归类门");
+    const to = await createBudgetCategory({
+      productionId: prodId, name: `归类门目标${shortId()}`, amount: null,
+      deptId: otherDeptId, createdBy: ownerId,
+    });
+    const expense = await submitExpense({
+      productionId: prodId, categoryId: from.id, title: "门测试",
+      amount: "10.00", submittedBy: submitterId,
+    });
+    const body = {
+      action: "reclassify", budgetItemId: to.id, expectedMutationSeq: expense.mutationSeq,
+    };
+    expect((await actExpenseDetailRoute(actionReq(null, body), actionCtx(expense.id))).status).toBe(401);
+    expect((await actExpenseDetailRoute(actionReq(outsiderId, body), actionCtx(expense.id))).status).toBe(403);
+    await getPool().query(
+      `INSERT INTO production_member_permission (production_id, user_id, permission, granted)
+       VALUES ($1,$2,'node:finance/*/budget@view',true)
+       ON CONFLICT (production_id, user_id, permission) DO UPDATE SET granted=true`,
+      [prodId, strangerId],
+    );
+    expect((await actExpenseDetailRoute(actionReq(strangerId, body), actionCtx(expense.id))).status).toBe(403);
+  });
+
+  it("跨项目或已删除预算项被拒绝且原分类和审批链不变", async () => {
+    const from = await makeCategory("非法目标");
+    const expense = await submitExpense({
+      productionId: prodId, categoryId: from.id, title: "非法目标",
+      amount: "11.00", submittedBy: submitterId,
+    });
+    const { prodId: otherProductionId } = await makeProduction(ownerId);
+    try {
+      const foreign = await createBudgetCategory({
+        productionId: otherProductionId, name: `外项目${shortId()}`, amount: null, createdBy: ownerId,
+      });
+      const deleted = await createBudgetCategory({
+        productionId: prodId, name: `已删除${shortId()}`, amount: null, createdBy: ownerId,
+      });
+      await deleteBudgetCategory(deleted.id, prodId, ownerId);
+      for (const budgetItemId of [foreign.id, deleted.id]) {
+        await expect(reclassifyExpense({
+          expenseId: expense.id,
+          productionId: prodId,
+          actorId: expense.currentApproverIds[0],
+          budgetItemId,
+          expectedMutationSeq: expense.mutationSeq,
+        })).rejects.toMatchObject({ reason: "invalid_state" });
+      }
+      const after = (await getExpense(expense.id, prodId))!;
+      expect(after).toMatchObject({
+        categoryId: from.id,
+        currentStage: expense.currentStage,
+        currentApproverIds: expense.currentApproverIds,
+        mutationSeq: expense.mutationSeq,
+      });
+    } finally {
+      await cleanupProduction(otherProductionId).catch(() => {});
+    }
+  });
+
+  it("删除预算项把待审批报销改为未归类并从首级重路由", async () => {
+    const item = await makeCategory("删除重路由");
+    const expense = await submitExpense({
+      productionId: prodId, categoryId: item.id, title: "删除中的预算项",
+      amount: "12.00", submittedBy: submitterId,
+    });
+    await deleteBudgetCategory(item.id, prodId, ownerId);
+
+    const after = (await getExpense(expense.id, prodId))!;
+    expect(after.categoryId).toBeNull();
+    expect(after.status).toBe("pending");
+    expect(after.mutationSeq).toBe(expense.mutationSeq + 1);
+    expect(after.currentApproverIds).not.toContain(deptPocId);
+    const detail = await getExpenseDetail(expense.id, prodId);
+    expect(detail?.events.at(-1)).toMatchObject({
+      type: "reclassified",
+      actorId: ownerId,
+      details: {
+        reason: "budget_item_deleted",
+        fromBudgetItem: { id: item.id },
+        toBudgetItem: null,
+      },
+    });
+  });
+
+  it("重路由后仅提交人一个候选人时自动批准并留下两条审计", async () => {
+    const soleOwner = (await upsertFeishuUser(
+      `test-open-${shortId()}`, `重路由自批${shortId()}`, null, false,
+    )).userId;
+    const poc = (await upsertFeishuUser(
+      `test-open-${shortId()}`, `重路由POC${shortId()}`, null, false,
+    )).userId;
+    const { prodId: soloProd } = await makeProduction(soleOwner);
+    try {
+      await addProductionMember(soloProd, poc);
+      const { rows: [{ id: soloDept }] } = await getPool().query<{ id: string }>(
+        "INSERT INTO production_dept (production_id, name) VALUES ($1,$2) RETURNING id",
+        [soloProd, `临时部门${shortId()}`],
+      );
+      await getPool().query(
+        `INSERT INTO production_dept_member (production_id, dept_id, user_id, is_poc)
+         VALUES ($1,$2,$3,true)`,
+        [soloProd, soloDept, poc],
+      );
+      const assigned = await createBudgetCategory({
+        productionId: soloProd, name: `有POC${shortId()}`, amount: null,
+        deptId: soloDept, createdBy: soleOwner,
+      });
+      const publicItem = await createBudgetCategory({
+        productionId: soloProd, name: `公共${shortId()}`, amount: null, createdBy: soleOwner,
+      });
+      const expense = await submitExpense({
+        productionId: soloProd, categoryId: assigned.id, title: "归类后自批",
+        amount: "13.00", submittedBy: soleOwner,
+      });
+      expect(expense).toMatchObject({ status: "pending", currentApproverIds: [poc] });
+
+      expect(await reclassifyExpense({
+        expenseId: expense.id,
+        productionId: soloProd,
+        actorId: poc,
+        budgetItemId: publicItem.id,
+        expectedMutationSeq: expense.mutationSeq,
+      })).toEqual({ ok: true, selfApproved: true });
+      const detail = await getExpenseDetail(expense.id, soloProd);
+      expect(detail).toMatchObject({
+        status: "approved", categoryId: publicItem.id,
+        currentStage: null, currentApproverIds: [], resolvedBy: soleOwner,
+      });
+      expect(detail?.events.slice(-2).map(event => event.type)).toEqual(["reclassified", "approved"]);
+      expect(detail?.events.at(-1)?.details).toMatchObject({
+        reason: "sole_approver", trigger: "approver_reclassified",
+      });
+    } finally {
+      await cleanupProduction(soloProd).catch(() => {});
+    }
   });
 });
 
@@ -587,7 +836,7 @@ describe("8. 删科目不连坐删支出", () => {
       productionId: prodId, categoryId: cat.id, title: "已发生的钱",
       amount: "1200.00", submittedBy: submitterId,
     });
-    await deleteBudgetCategory(cat.id, prodId);
+    await deleteBudgetCategory(cat.id, prodId, ownerId);
 
     const after = await getExpense(e.id, prodId);
     expect(after).not.toBeNull();

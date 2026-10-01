@@ -1382,7 +1382,7 @@ CON|production_expense_document|production_expense_document_expense_id_asset_fil
 CON|production_expense_document|production_expense_document_expense_id_fkey|FOREIGN KEY (expense_id) REFERENCES production_expense(id) ON DELETE CASCADE
 CON|production_expense_document|production_expense_document_pkey|PRIMARY KEY (id)
 CON|production_expense_event|production_expense_event_actor_id_fkey|FOREIGN KEY (actor_id) REFERENCES app_user(id)
-CON|production_expense_event|production_expense_event_event_type_check|CHECK ((event_type = ANY (ARRAY['draft_created'::text, 'draft_saved'::text, 'submitted'::text, 'forwarded'::text, 'approved'::text, 'rejected'::text, 'withdrawn'::text, 'reopened'::text, 'document_added'::text, 'document_removed'::text, 'post_approval_document_added'::text])))
+CON|production_expense_event|production_expense_event_event_type_check|CHECK ((event_type = ANY (ARRAY['draft_created'::text, 'draft_saved'::text, 'submitted'::text, 'forwarded'::text, 'approved'::text, 'rejected'::text, 'withdrawn'::text, 'reopened'::text, 'reclassified'::text, 'document_added'::text, 'document_removed'::text, 'post_approval_document_added'::text])))
 CON|production_expense_event|production_expense_event_expense_id_fkey|FOREIGN KEY (expense_id) REFERENCES production_expense(id) ON DELETE CASCADE
 CON|production_expense_event|production_expense_event_pkey|PRIMARY KEY (id)
 CON|production_expense|production_expense_amount_check|CHECK ((amount >= (0)::numeric))

@@ -52,7 +52,7 @@ export type Expense = {
 
 export type ExpenseEventType =
   | "draft_created" | "draft_saved" | "submitted" | "forwarded"
-  | "approved" | "rejected" | "withdrawn" | "reopened"
+  | "approved" | "rejected" | "withdrawn" | "reopened" | "reclassified"
   | "document_added" | "document_removed" | "post_approval_document_added";
 
 export type ExpenseEvent = {

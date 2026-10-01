@@ -41,7 +41,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "权限不足" }, { status: 403 });
   if (!await getBudgetCategory(budgetItemId, id)) return Response.json({ error: "预算项不存在" }, { status: 404 });
   try {
-    await deleteBudgetCategory(budgetItemId, id);
+    await deleteBudgetCategory(budgetItemId, id, session.userId);
     return Response.json({ ok: true });
   } catch (error) {
     if (error instanceof FinanceError) return Response.json({ error: error.message }, { status: 409 });

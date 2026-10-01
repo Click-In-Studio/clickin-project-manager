@@ -20,7 +20,7 @@ export type ExpenseCategoryOption = {
   deptName: string | null;
 };
 
-type ExpenseAction = "approve" | "reject";
+type ExpenseAction = "approve" | "reject" | "reclassify";
 type DocumentKind = "invoice" | "receipt" | "other";
 
 export type ExpenseDocumentView = {
@@ -603,17 +603,24 @@ export function ExpenseAddDocumentButton({ productionId, expenseId, mutationSeq,
   );
 }
 
-export function ExpenseApprovalActions({ productionId, expenseId, canFinalize, mutationSeq }: {
+export function ExpenseApprovalActions({
+  productionId, expenseId, canFinalize, mutationSeq, currentBudgetItemId, categories,
+}: {
   productionId: string;
   expenseId: string;
   canFinalize: boolean;
   mutationSeq: number;
+  currentBudgetItemId: string | null;
+  categories: ExpenseCategoryOption[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<ExpenseAction | null>(null);
   const [confirmReject, setConfirmReject] = useState(false);
   const [comment, setComment] = useState("");
+  const [budgetItemId, setBudgetItemId] = useState(currentBudgetItemId ?? "");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => setBudgetItemId(currentBudgetItemId ?? ""), [currentBudgetItemId]);
 
   async function act(action: ExpenseAction) {
     if (busy) return;
@@ -623,7 +630,12 @@ export function ExpenseApprovalActions({ productionId, expenseId, canFinalize, m
       const response = await fetch(`${BASE_PATH}/api/production/${productionId}/finance/expenses/${expenseId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, comment: comment.trim(), expectedMutationSeq: mutationSeq }),
+        body: JSON.stringify({
+          action,
+          comment: comment.trim(),
+          expectedMutationSeq: mutationSeq,
+          ...(action === "reclassify" ? { budgetItemId } : {}),
+        }),
       });
       if (!response.ok) throw new Error(await responseError(response, "这笔报销处理失败"));
       router.refresh();
@@ -637,6 +649,24 @@ export function ExpenseApprovalActions({ productionId, expenseId, canFinalize, m
 
   return (
     <div className={styles.approvalActions}>
+      {categories.length > 0 && (
+        <div className={styles.reclassifyControls}>
+          <OverflowSafeSelect aria-label="调整预算项" value={budgetItemId}
+            disabled={busy !== null} onChange={event => setBudgetItemId(event.target.value)}>
+            <option value="">选择预算项</option>
+            {categories.map(category => (
+              <option key={category.id} value={category.id}>
+                {category.deptName ?? "项目公共"} · {category.name}
+              </option>
+            ))}
+          </OverflowSafeSelect>
+          <button type="button"
+            disabled={busy !== null || !budgetItemId || budgetItemId === currentBudgetItemId}
+            onClick={() => act("reclassify")}>
+            {busy === "reclassify" ? "调整中…" : currentBudgetItemId ? "重新归类" : "归类"}
+          </button>
+        </div>
+      )}
       {confirmReject ? (
         <div className={styles.rejectConfirm}>
           <span>确认驳回？</span>
@@ -728,10 +758,32 @@ const EVENT_LABEL: Record<string, string> = {
   rejected: "驳回报销",
   withdrawn: "撤回报销",
   reopened: "重新进入编辑",
+  reclassified: "调整预算项并重新路由",
   document_added: "补充凭证",
   document_removed: "移除草稿凭证",
   post_approval_document_added: "审批后补充发票",
 };
+
+function reclassificationEventText(details: Record<string, unknown>): string | null {
+  const labelOf = (value: unknown) => {
+    if (value === null) return "未归类";
+    if (typeof value !== "object" || !value) return null;
+    const label = (value as { label?: unknown }).label;
+    return typeof label === "string" ? label : null;
+  };
+  const from = labelOf(details.fromBudgetItem);
+  const to = labelOf(details.toBudgetItem);
+  if (!from || !to) return null;
+  const route = typeof details.route === "object" && details.route
+    ? details.route as { stage?: unknown; selfApproved?: unknown }
+    : null;
+  const result = route?.selfApproved === true
+    ? "已按唯一候选人规则自动批准"
+    : typeof route?.stage === "string"
+      ? `重新从${APPROVAL_STAGE_LABEL[route.stage] ?? route.stage}开始审批`
+      : "已重新计算审批路径";
+  return `${from} → ${to}；${result}`;
+}
 
 export function ExpenseDetailButton({
   productionId, expenseId, actorId, categories, archived,
@@ -1018,6 +1070,9 @@ export function ExpenseDetailButton({
                         <span><b>{EVENT_LABEL[event.type] ?? event.type}</b><br />
                           <small>{event.actorName ?? (event.actorId ? "成员" : "系统")} · {new Date(event.createdAt).toLocaleString("zh-CN")}</small>
                           {event.comment && <><br /><small>{event.comment}</small></>}
+                          {event.type === "reclassified" && reclassificationEventText(event.details) && (
+                            <><br /><small>{reclassificationEventText(event.details)}</small></>
+                          )}
                           {event.type === "post_approval_document_added" && <><br /><small>不属于原审批依据</small></>}
                         </span>
                       </div>

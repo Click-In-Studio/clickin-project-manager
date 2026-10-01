@@ -66,6 +66,6 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
 
   // 挂在它上面的支出 category_id 置空（ON DELETE SET NULL），不连坐删——
   // 已发生的钱不该因为科目表被整理而消失
-  await deleteBudgetCategory(categoryId, productionId);
+  await deleteBudgetCategory(categoryId, productionId, session.userId);
   return Response.json({ ok: true });
 }

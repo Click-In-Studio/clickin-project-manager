@@ -298,6 +298,32 @@
 .error { margin: 0 0 10px; }
 
 .approvalActions { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.reclassifyControls { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.reclassifyControls select {
+  box-sizing: border-box;
+  max-width: 210px;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 5px 7px;
+  font: inherit;
+  font-size: 10px;
+}
+.reclassifyControls button {
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.reclassifyControls button:disabled { opacity: .55; cursor: not-allowed; }
 .actionButtons,
 .rejectConfirm { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .actionButtons input,
@@ -325,6 +351,8 @@
 }
 
 @media (max-width: 640px) {
+  .reclassifyControls { flex-direction: column; align-items: stretch; }
+  .reclassifyControls select { max-width: 150px; }
   .backdrop { background: rgba(20, 31, 30, .28); }
   .drawer {
     top: auto;
