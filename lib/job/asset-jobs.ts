@@ -16,6 +16,31 @@ export interface AssetPostProcessInput {
   mimeType: string;
   fileName: string;
   fileSize: number | null;
+  /** 财务凭证走专用识别链，不做通用文档 IR 预热。 */
+  expenseDocument?: boolean;
+}
+
+export async function enqueueExpenseDocumentRecognition(assetFileId: string, force = false): Promise<void> {
+  const { expenseRecognitionVersions } = await import("@/lib/ops/expense-document-recognition");
+  const { queueExpenseDocumentRecognitionRow } = await import("@/lib/ops/expense-recognition-db");
+  const versions = expenseRecognitionVersions();
+  await queueExpenseDocumentRecognitionRow(assetFileId, versions, force);
+  try {
+    await enqueueJob({
+      kind: "expense_document_recognition",
+      dedupeKey: `expense_document_recognition:${assetFileId}:${versions.parserVersion}:${versions.modelVersion}`,
+      payload: { assetFileId },
+      maxAttempts: 3,
+      detachedInline: true,
+    });
+  } catch (error) {
+    const { failExpenseDocumentRecognition } = await import("@/lib/ops/expense-recognition-db");
+    await failExpenseDocumentRecognition(
+      assetFileId, "unavailable",
+      `识别任务暂时无法启动：${error instanceof Error ? error.message : String(error)}`,
+    ).catch(() => {});
+    throw error;
+  }
 }
 
 /**
@@ -31,6 +56,11 @@ export async function enqueueAssetPostProcess(input: AssetPostProcessInput): Pro
         dedupeKey: `image_thumbnail:${input.assetFileId}`,
         payload: { assetFileId: input.assetFileId, r2Key: input.r2Key, thumbKey: thumbnailR2Key(input.assetFileId) },
       }).catch((err) => console.error(`[asset-jobs] thumbnail enqueue failed for ${input.assetFileId}:`, err));
+    }
+    if (input.expenseDocument) {
+      await enqueueExpenseDocumentRecognition(input.assetFileId).catch((err) =>
+        console.error(`[asset-jobs] expense recognition enqueue failed for ${input.assetFileId}:`, err));
+      return;
     }
     const lower = input.fileName.toLowerCase();
     const fileKind = lower.endsWith(".pdf") ? "pdf" : lower.endsWith(".docx") ? "docx" : null;

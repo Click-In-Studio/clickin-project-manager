@@ -425,9 +425,10 @@ describe("#735 草稿与重提生命周期", () => {
     const saved = await updateExpenseDraft({
       expenseId: draft.id, productionId: prodId, actorId: submitterId,
       expectedMutationSeq: 0, categoryId: null, title: "补齐后的草稿", amount: "31.20",
+      merchant: "某某商店", occurredOn: "2026-09-30",
       note: "第一次保存", invoiceRequirement: "required", invoiceWaiverReason: "",
     });
-    expect(saved.mutationSeq).toBe(1);
+    expect(saved).toMatchObject({ mutationSeq: 1, merchant: "某某商店", occurredOn: "2026-09-30" });
     await expect(updateExpenseDraft({
       expenseId: draft.id, productionId: prodId, actorId: submitterId,
       expectedMutationSeq: 0, categoryId: null, title: "旧页面覆盖", amount: "99.00",

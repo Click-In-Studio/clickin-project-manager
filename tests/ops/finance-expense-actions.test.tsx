@@ -23,6 +23,34 @@ vi.mock("@/components/assets/AssetUploadPanel", () => ({
     }}>上传测试凭证</button>
   ),
 }));
+vi.mock("@/components/ops/ExpenseRecognitionSuggestions", () => ({
+  ExpenseRecognitionSuggestions: ({ documents, onRecognition }: {
+    documents: Array<{ assetFileId: string }>;
+    onRecognition: (assetFileId: string, recognition: unknown) => void;
+  }) => documents[0] ? (
+    <button type="button" onClick={() => onRecognition(documents[0].assetFileId, {
+      status: "succeeded",
+      sourceKind: "pdf_text",
+      parserVersion: "p1",
+      modelVersion: "m1",
+      outdated: false,
+      lastError: null,
+      attempts: 1,
+      updatedAt: "2026-10-01T00:00:00.000Z",
+      result: {
+        documentType: { value: "receipt", confidence: "high", evidence: "收据" },
+        merchant: { value: "某某商店", confidence: "high", evidence: "销售方" },
+        occurredOn: { value: "2026-09-30", confidence: "high", evidence: "日期" },
+        documentNumber: { value: null, confidence: "low", evidence: null },
+        totalAmount: { value: "88.50", confidence: "high", evidence: "合计" },
+        taxAmount: { value: null, confidence: "low", evidence: null },
+        currency: { value: "CNY", confidence: "high", evidence: "人民币" },
+        warnings: [],
+      },
+    })}>完成识别</button>
+  ) : null,
+  recognitionStatusText: () => "等待识别",
+}));
 
 import {
   ExpenseAddDocumentButton, ExpenseApprovalActions, ExpenseCreateButton,
@@ -150,6 +178,31 @@ describe("报销填单", () => {
       { assetFileId: "af_1", kind: "invoice" },
       { assetFileId: "af_2", kind: "invoice" },
     ]);
+  });
+
+  it("把识别候选贴在对应输入框下，采用后只更新该字段", async () => {
+    await act(async () => root.render(<ExpenseCreateButton productionId="prod_1" categories={[]} />));
+    await act(async () => button("＋ 新建报销").click());
+    await act(async () => button("上传测试凭证").click());
+    await act(async () => button("完成识别").click());
+
+    const kindSelect = container.querySelector<HTMLSelectElement>('select[aria-label="票据1.pdf的凭证类型"]')!;
+    const kindGroup = kindSelect.closest("div")!;
+    expect(kindGroup.textContent).toContain("识别建议：收据");
+    await act(async () => kindGroup.querySelector<HTMLButtonElement>("button")!.click());
+    expect(kindSelect.value).toBe("receipt");
+    expect(kindGroup.textContent).not.toContain("识别建议");
+
+    const amountInput = container.querySelector<HTMLInputElement>('input[placeholder="0.00"]')!;
+    const amountGroup = amountInput.closest("div")!;
+    expect(amountGroup.textContent).toContain("识别建议：¥88.50");
+    expect(amountGroup.textContent).not.toContain("某某商店");
+
+    await act(async () => amountGroup.querySelector<HTMLButtonElement>("button")!.click());
+    expect(amountInput.value).toBe("88.50");
+    expect(amountGroup.textContent).not.toContain("识别建议");
+    expect(container.textContent).toContain("识别建议：某某商店");
+    expect(container.textContent).toContain("识别建议：2026-09-30");
   });
 });
 

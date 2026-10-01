@@ -3,6 +3,8 @@
 import { getPool } from "../pg";
 import type { PoolClient } from "pg";
 import { uid } from "../asset/db";
+import { expenseRecognitionVersions } from "./expense-document-recognition";
+import type { ExpenseDocumentRecognition } from "./expense-recognition-types";
 
 export type ExpenseStatus = "draft" | "pending" | "approved" | "rejected" | "withdrawn";
 export type InvoiceRequirement = "required" | "waived";
@@ -16,6 +18,7 @@ export type ExpenseDocument = {
   fileName: string;
   mimeType: string | null;
   createdAt: string;
+  recognition: ExpenseDocumentRecognition | null;
 };
 
 export type Expense = {
@@ -26,6 +29,8 @@ export type Expense = {
   title: string;
   amount: string | null;
   currency: string;
+  merchant: string;
+  occurredOn: string | null;
   note: string;
   invoiceRequirement: InvoiceRequirement | null;
   invoiceWaiverReason: string;
@@ -72,6 +77,12 @@ export type ExpenseDetail = Expense & { events: ExpenseEvent[] };
  */
 export const AMOUNT_RE = /^\d{1,12}(\.\d{1,2})?$/;
 
+export function isExpenseDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
 export class FinanceError extends Error {
   constructor(
     readonly reason: "duplicate_name" | "no_approver" | "conflict" | "not_pending" | "forward_only"
@@ -84,7 +95,7 @@ export class FinanceError extends Error {
 
 type ExpenseRow = {
   id: string; production_id: string; category_id: string | null; category_name: string | null;
-  title: string; amount: string | null; currency: string; note: string;
+  title: string; amount: string | null; currency: string; merchant: string; occurred_on: string | null; note: string;
   invoice_requirement: InvoiceRequirement | null; invoice_waiver_reason: string;
   documents: ExpenseDocument[];
   submitted_by: string; submitter_name: string | null; status: ExpenseStatus;
@@ -95,20 +106,30 @@ type ExpenseRow = {
 };
 
 function rowToExpense(r: ExpenseRow): Expense {
+  const versions = expenseRecognitionVersions();
+  const documents = r.documents.map(document => ({
+    ...document,
+    recognition: document.recognition ? {
+      ...document.recognition,
+      outdated: document.recognition.parserVersion !== versions.parserVersion
+        || document.recognition.modelVersion !== versions.modelVersion,
+    } : null,
+  }));
   const last = r.escalation_chain[r.escalation_chain.length - 1];
   const invoiceState = r.invoice_requirement === null
     ? "legacy"
     : r.invoice_requirement === "waived"
       ? "waived"
-      : r.documents.some(document => document.kind === "invoice") ? "provided" : "pending";
+      : documents.some(document => document.kind === "invoice") ? "provided" : "pending";
   return {
     id: r.id, productionId: r.production_id,
     categoryId: r.category_id, categoryName: r.category_name,
-    title: r.title, amount: r.amount, currency: r.currency, note: r.note,
+    title: r.title, amount: r.amount, currency: r.currency,
+    merchant: r.merchant, occurredOn: r.occurred_on, note: r.note,
     invoiceRequirement: r.invoice_requirement,
     invoiceWaiverReason: r.invoice_waiver_reason,
     invoiceState,
-    documents: r.documents,
+    documents,
     submittedBy: r.submitted_by, submitterName: r.submitter_name,
     status: r.status,
     currentStage: r.current_stage,
@@ -124,7 +145,8 @@ function rowToExpense(r: ExpenseRow): Expense {
 
 const EXPENSE_QUERY = `
   SELECT e.id, e.production_id, e.category_id, c.name AS category_name,
-         e.title, e.amount::text AS amount, e.currency, e.note,
+         e.title, e.amount::text AS amount, e.currency, e.merchant,
+         e.occurred_on::text AS occurred_on, e.note,
          e.invoice_requirement, e.invoice_waiver_reason,
          COALESCE((
            SELECT jsonb_agg(jsonb_build_object(
@@ -134,11 +156,23 @@ const EXPENSE_QUERY = `
              'kind', d.document_kind,
              'fileName', a.file_name,
              'mimeType', a.mime_type,
-             'createdAt', d.created_at
+             'createdAt', d.created_at,
+             'recognition', CASE WHEN r.asset_file_id IS NULL THEN NULL ELSE jsonb_build_object(
+               'status', r.status,
+               'sourceKind', r.source_kind,
+               'result', r.result,
+               'parserVersion', r.parser_version,
+               'modelVersion', r.model_version,
+               'outdated', false,
+               'lastError', r.last_error,
+               'attempts', r.attempts,
+               'updatedAt', r.updated_at
+             ) END
            ) ORDER BY d.created_at)
              FROM production_expense_document d
              JOIN asset_file af ON af.id = d.asset_file_id
              JOIN asset a ON a.id = af.asset_id
+             LEFT JOIN expense_document_recognition r ON r.asset_file_id = af.id
             WHERE d.expense_id = e.id
          ), '[]'::jsonb) AS documents,
          e.submitted_by,

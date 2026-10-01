@@ -101,6 +101,42 @@ registerJobHandler("image_thumbnail", {
   },
 });
 
+// ── expense_document_recognition：PDF 文本层 / OCR → LLM 结构化候选 ────────
+
+registerJobHandler("expense_document_recognition", {
+  async run(payload) {
+    const assetFileId = typeof payload.assetFileId === "string" ? payload.assetFileId : "";
+    if (!assetFileId) throw new TerminalJobError("expense_document_recognition payload 缺少 assetFileId");
+    const {
+      failExpenseDocumentRecognition, finishExpenseDocumentRecognition,
+      markExpenseDocumentRecognitionProcessing,
+    } = await import("@/lib/ops/expense-recognition-db");
+    const { getFinancialDocumentFile } = await import("@/lib/ops/finance-document-db");
+    const { recognizeExpenseDocument, RecognitionUnavailableError } = await import(
+      "@/lib/ops/expense-document-recognition"
+    );
+    const file = await getFinancialDocumentFile(assetFileId);
+    if (!file) {
+      await failExpenseDocumentRecognition(assetFileId, "failed", "财务凭证文件不存在");
+      throw new TerminalJobError("财务凭证文件不存在");
+    }
+    await markExpenseDocumentRecognitionProcessing(assetFileId);
+    try {
+      const recognized = await recognizeExpenseDocument(file);
+      await finishExpenseDocumentRecognition(assetFileId, recognized.sourceKind, recognized.result);
+      return { assetFileId, sourceKind: recognized.sourceKind };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof RecognitionUnavailableError) {
+        await failExpenseDocumentRecognition(assetFileId, "unavailable", message);
+        return { assetFileId, unavailable: true };
+      }
+      await failExpenseDocumentRecognition(assetFileId, "failed", message);
+      throw new TerminalJobError(message);
+    }
+  },
+});
+
 // ── event_change_notify：已发布活动的取消 / 时间地点变更，5 分钟合流后派发 ──
 
 registerJobHandler("event_change_notify", {

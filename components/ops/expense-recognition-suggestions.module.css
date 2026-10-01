@@ -1,0 +1,82 @@
+.summary {
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
+}
+
+.summaryToggle {
+  border: 0;
+  background: transparent;
+  color: var(--stage);
+  padding: 0;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  border-radius: 8px;
+  background: var(--paper);
+  padding: 10px;
+}
+
+.documentResult {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.documentResult b { color: var(--ink); font-size: 10px; }
+.documentResult button { border: 0; background: transparent; color: var(--stage); padding: 0 3px; font: inherit; font-weight: 700; cursor: pointer; }
+.documentResult small,
+.warning { color: var(--danger, #a33); font-size: 9px; }
+.warning { margin: 0; line-height: 1.45; }
+.groupTotal { margin: 0; color: var(--ink); font-size: 9px; font-weight: 700; }
+
+.failures span { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink); font-size: 9px; }
+.failures button,
+.notice button {
+  border: 0;
+  background: transparent;
+  color: var(--stage);
+  padding: 3px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.failures { display: flex; flex-direction: column; gap: 5px; border-top: 1px solid var(--line); padding-top: 8px; }
+
+.notice {
+  position: absolute;
+  right: 22px;
+  bottom: 76px;
+  left: 22px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--stage) 38%, var(--line));
+  border-radius: 9px;
+  background: var(--ink);
+  box-shadow: 0 9px 28px rgba(24, 42, 42, .24);
+  color: #fff;
+  padding: 10px 12px;
+  font-size: 10px;
+}
+
+.notice span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notice button { color: #fff; white-space: nowrap; }
+.notice .dismiss { color: rgba(255, 255, 255, .72); font-size: 16px; line-height: 1; }
+
+@media (max-width: 640px) {
+  .notice { right: 14px; bottom: calc(82px + env(safe-area-inset-bottom)); left: 14px; }
+}

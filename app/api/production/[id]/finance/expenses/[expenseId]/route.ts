@@ -5,7 +5,7 @@ import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import {
   AMOUNT_RE, approveExpense, FinanceError, getBudgetCategory, getExpense, getExpenseDetail,
   hasExpenseParticipation, isExpenseApprover, rejectExpense, reopenExpense,
-  submitExpenseDraft, updateExpenseDraft, withdrawExpense,
+  isExpenseDate, submitExpenseDraft, updateExpenseDraft, withdrawExpense,
   type InvoiceRequirement,
 } from "@/lib/ops/finance-db";
 import { readJsonObject } from "@/lib/request-json";
@@ -62,6 +62,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const amount = typeof body.amount === "string" && body.amount ? body.amount : null;
   if (amount && !AMOUNT_RE.test(amount))
     return Response.json({ error: "金额必须是最多两位小数的非负数" }, { status: 400 });
+  const occurredOn = typeof body.occurredOn === "string" && body.occurredOn ? body.occurredOn : null;
+  if (occurredOn && !isExpenseDate(occurredOn))
+    return Response.json({ error: "发生日期无效" }, { status: 400 });
   const categoryId = typeof body.categoryId === "string" && body.categoryId ? body.categoryId : null;
   if (categoryId && !(await getBudgetCategory(categoryId, productionId)))
     return Response.json({ error: "预算科目不存在" }, { status: 400 });
@@ -76,6 +79,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       expectedMutationSeq: body.expectedMutationSeq,
       categoryId, title, amount,
       currency: typeof body.currency === "string" ? body.currency : "CNY",
+      merchant: typeof body.merchant === "string" ? body.merchant : "",
+      occurredOn,
       note: typeof body.note === "string" ? body.note : "",
       invoiceRequirement,
       invoiceWaiverReason: typeof body.invoiceWaiverReason === "string" ? body.invoiceWaiverReason : "",

@@ -85,6 +85,34 @@
   font-weight: 700;
 }
 
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.recognitionFieldSuggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--stage) 8%, var(--paper));
+  color: var(--ink);
+  padding: 6px 9px;
+  font-size: 9px;
+}
+
+.recognitionFieldSuggestion button {
+  border: 0;
+  background: transparent;
+  color: var(--stage);
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .field input,
 .field textarea,
 .field select {
@@ -143,6 +171,24 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.documentKindField {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.documentKindField .recognitionFieldSuggestion {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 7px;
+}
+
+.documentName { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.documentName > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.documentName small { color: var(--muted); font-size: 8px; }
 
 .documentRow select,
 .documentRow button {
