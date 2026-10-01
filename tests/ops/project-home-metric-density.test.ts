@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const workspaceHome = readFileSync("components/ops/HomeClient.tsx", "utf8");
 const productionHome = readFileSync("components/ops/ProductionHomeClient.tsx", "utf8");
+const disclosure = readFileSync("components/ops/MetricCardDisclosure.tsx", "utf8");
 const css = readFileSync("components/ops/home.module.css", "utf8");
 
 function blockAfter(source: string, marker: string): string {
@@ -82,14 +83,15 @@ describe("项目首页指标卡密度与配色", () => {
       expect(component).toMatch(/styles from ["'][^"']*home\.module\.css["']/);
       expect(component).toContain("styles.progressHeroMetrics");
       expect(component).toContain("styles.progressMetricCard");
-      expect(component).toContain("title={milestoneSubLabel}");
+      expect(component).toContain("<MetricCardDisclosure label={milestoneSubLabel} />");
     }
+    expect(disclosure).toContain('className={styles.progressMetricLabel}');
   });
 
   it("三种卡面都以高不透明度浅色为主，并达到正文对比度基线", () => {
     const heroDarkEdge = rgba("#223e3d");
     const card = declarations(css, ".progressMetricCard");
-    const label = declarations(css, ".progressMetricCard span");
+    const label = declarations(css, ".progressMetricLabel");
     const small = declarations(css, ".progressMetricCard small");
     const variants = [
       { card, strong: card.color },
@@ -118,7 +120,7 @@ describe("项目首页指标卡密度与配色", () => {
 
     const grid = declarations(mobile, ".progressHeroMetrics");
     const card = declarations(mobile, ".progressMetricCard");
-    const label = declarations(mobile, ".progressMetricCard span");
+    const label = declarations(mobile, ".progressMetricLabel");
 
     expect(grid["grid-template-columns"]).toBe("repeat(3, minmax(0, 1fr))");
     expect(px(grid.gap)).toBeLessThanOrEqual(6);

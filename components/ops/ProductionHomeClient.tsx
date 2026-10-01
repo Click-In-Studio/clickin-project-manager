@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, UnreadReportEntry } from "@/lib/ops/event-db";
 import { BASE_PATH } from "@/lib/base-path";
 import { fmtCallAt } from "@/lib/tz";
+import MetricCardDisclosure from "@/components/ops/MetricCardDisclosure";
 import styles from "@/components/ops/home.module.css";
 
 const REQ_STATUS_LABEL: Record<string, string> = {
@@ -121,7 +122,7 @@ function ProjectProgressHero({
         {/* 里程碑倒计时 */}
         <div className={`${styles.progressMetricCard} ${days !== null && days <= 7 ? styles.progressMetricUrgent : ""}`}>
           <strong>{milestoneLabel}</strong>
-          <span title={milestoneSubLabel}>{milestoneSubLabel}</span>
+          <MetricCardDisclosure label={milestoneSubLabel} />
           {days !== null && days <= 7 && days >= 0 && <small>临近节点</small>}
         </div>
 
@@ -131,7 +132,7 @@ function ProjectProgressHero({
           className={`${styles.progressMetricCard} ${styles.progressMetricLink} ${awaitingReqs.length > 0 ? styles.progressMetricActive : ""}`}
         >
           <strong>{awaitingReqs.length}</strong>
-          <span>待处理通知</span>
+          <span className={styles.progressMetricLabel}>待处理通知</span>
           {awaitingReqs.length > 0 && <small>需要你的确认</small>}
         </Link>
 
@@ -141,7 +142,7 @@ function ProjectProgressHero({
           className={`${styles.progressMetricCard} ${styles.progressMetricLink} ${cueWarningCount > 0 ? styles.progressMetricWarn : ""}`}
         >
           <strong>{cueWarningCount}</strong>
-          <span>Cue 风险提示</span>
+          <span className={styles.progressMetricLabel}>Cue 风险提示</span>
           {cueWarningCount > 0 && <small>有待处理风险</small>}
         </Link>
       </div>
