@@ -94,6 +94,7 @@ describe("事件选择器 CST 日期", () => {
           date="2026-09-11"
           departments={[]}
           events={[event()]}
+          onCreated={vi.fn()}
           onClose={vi.fn()}
         />,
       );

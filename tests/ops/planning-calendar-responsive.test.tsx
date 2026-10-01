@@ -9,6 +9,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import CalendarView from "@/components/ops/planning/CalendarView";
 import styles from "@/components/ops/planning.module.css";
 import type { Props } from "@/components/ops/planning/types";
+import { todayCSTStr } from "@/lib/tz";
 
 const calendarCss = readFileSync(path.resolve(__dirname, "../../components/ops/planning.module.css"), "utf8");
 
@@ -114,6 +115,15 @@ describe("CalendarView responsive interactions", () => {
     return container.querySelector<HTMLButtonElement>(`[aria-label^="${date}，"]`)!;
   }
 
+  async function setInput(input: HTMLInputElement, value: string) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    await act(async () => {
+      setter?.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
   it("标明 0、1、2、3+ 条事项，并从桌面 +N 展开全部事项再进入详情", async () => {
     await render();
 
@@ -184,6 +194,49 @@ describe("CalendarView responsive interactions", () => {
     await act(async () => createDialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     expect(container.querySelector('[aria-label="2031-04-13 快捷新建"]')).toBeNull();
     expect(document.activeElement).toBe(floatingCreate);
+  });
+
+  it("没有选过日期时，常驻加号默认使用 CST 今天", async () => {
+    mobile = true;
+    await render();
+
+    const today = todayCSTStr();
+    const floatingCreate = container.querySelector<HTMLButtonElement>(`[aria-label="在${today}快捷新建事件或任务"]`)!;
+    expect(floatingCreate).not.toBeNull();
+    await act(async () => floatingCreate.click());
+    expect(container.querySelector(`[aria-label="${today} 快捷新建"]`)).not.toBeNull();
+  });
+
+  it("跨月创建后切到目标月份并展开新事项", async () => {
+    const createdEvent = {
+      ...event("created-cross-month", "跨月合成排练", 6),
+      productionId: "production-calendar",
+      eventType: "rehearsal",
+      startTime: "2031-05-06T01:00:00.000Z",
+      endTime: "2031-05-06T03:00:00.000Z",
+      stageManagers: [],
+      chatId: null,
+      versionId: null,
+      createdBy: "test-user",
+      createdAt: "2031-04-01T00:00:00.000Z",
+      updatedAt: "2031-04-01T00:00:00.000Z",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ event: createdEvent }) })));
+    await render();
+
+    await act(async () => dateButton("2031-04-10").click());
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label$=" 快捷新建"]')!;
+    await setInput(dialog.querySelector<HTMLInputElement>('[aria-label="新建日期"]')!, "2031-05-06");
+    await setInput(dialog.querySelector<HTMLInputElement>('input[placeholder^="例如：第三场"]')!, "跨月合成排练");
+    await act(async () => {
+      dialog.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[aria-label="当前月份 5月"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="跨月合成排练详情"]')).not.toBeNull();
+    expect(container.querySelector('[data-calendar-date="2031-05-06"]')?.classList.contains(styles.calendarCellSelected)).toBe(true);
   });
 
   it("快捷新建的下拉框先消费 Escape，不会连带关闭弹窗", async () => {

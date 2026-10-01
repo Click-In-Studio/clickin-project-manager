@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import QuickCreateModal from "@/components/ops/planning/QuickCreateModal";
+import QuickCreateModal, { type QuickCreateResult } from "@/components/ops/planning/QuickCreateModal";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -15,12 +15,35 @@ describe("项目日历快捷新建", () => {
   let container: HTMLDivElement;
   let root: Root;
   let fetchMock: ReturnType<typeof vi.fn>;
+  let onCreated = vi.fn<(result: QuickCreateResult) => void>();
   let onClose = vi.fn<() => void>();
 
   beforeEach(async () => {
     refresh.mockClear();
-    fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) }));
+    fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        event: {
+          id: "created-event",
+          productionId: "production-calendar",
+          title: "合成排练",
+          eventType: "rehearsal",
+          location: "",
+          startTime: "2031-04-12T02:15:00.000Z",
+          endTime: "2031-04-12T04:45:00.000Z",
+          status: "draft",
+          description: "",
+          stageManagers: [],
+          chatId: null,
+          versionId: null,
+          createdBy: "test-user",
+          createdAt: "2031-04-01T00:00:00.000Z",
+          updatedAt: "2031-04-01T00:00:00.000Z",
+        },
+      }),
+    }));
     vi.stubGlobal("fetch", fetchMock);
+    onCreated = vi.fn<(result: QuickCreateResult) => void>();
     onClose = vi.fn<() => void>();
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -32,6 +55,7 @@ describe("项目日历快捷新建", () => {
           date="2031-04-10"
           departments={[]}
           events={[]}
+          onCreated={onCreated}
           onClose={onClose}
         />,
       );
@@ -91,11 +115,35 @@ describe("项目日历快捷新建", () => {
       startTime: "2031-04-12T02:15:00.000Z",
       endTime: "2031-04-12T04:45:00.000Z",
     });
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onCreated).toHaveBeenCalledWith({
+      date: "2031-04-12",
+      selection: expect.objectContaining({
+        kind: "event",
+        value: expect.objectContaining({ id: "created-event", title: "合成排练" }),
+      }),
+    });
+    expect(onClose).not.toHaveBeenCalled();
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("任务路径也使用修改后的 CST 日期和起止时间", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        task: {
+          id: "created-task",
+          title: "确认无线麦频点",
+          status: "todo",
+          departmentId: null,
+          eventId: null,
+          startTime: "2031-04-12T16:30:00.000Z",
+          endTime: "2031-04-12T17:45:00.000Z",
+          effectiveStartTime: "2031-04-12T16:30:00.000Z",
+          effectiveEndTime: "2031-04-12T17:45:00.000Z",
+          description: "由项目日历快捷创建。",
+        },
+      }),
+    });
     const taskButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
       .find(button => button.textContent === "任务")!;
     await act(async () => taskButton.click());
@@ -115,6 +163,13 @@ describe("项目日历快捷新建", () => {
       departmentId: null,
       eventId: null,
       description: "由项目日历快捷创建。",
+    });
+    expect(onCreated).toHaveBeenCalledWith({
+      date: "2031-04-13",
+      selection: expect.objectContaining({
+        kind: "task",
+        value: expect.objectContaining({ id: "created-task", isBlocked: false }),
+      }),
     });
   });
 

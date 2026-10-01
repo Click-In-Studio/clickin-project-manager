@@ -8,15 +8,21 @@ import { BASE_PATH } from "@/lib/base-path";
 import type { ProductionEvent } from "@/lib/ops/event-db";
 import { dateTimeToIso, fmtDate } from "@/lib/tz";
 import BoundedTimePicker from "./BoundedTimePicker";
-import type { PlanningDept } from "./types";
+import type { CalendarSelection } from "./CalendarDetailDrawer";
+import type { PlanningDept, PlanningTask } from "./types";
 
 export type QuickCreateKind = "event" | "task";
+export type QuickCreateResult = {
+  date: string;
+  selection: Extract<CalendarSelection, { kind: "event" | "task" }>;
+};
 
-export default function QuickCreateModal({ productionId, date, departments, events, onClose }: {
+export default function QuickCreateModal({ productionId, date, departments, events, onCreated, onClose }: {
   productionId: string;
   date: string;
   departments: PlanningDept[];
   events: ProductionEvent[];
+  onCreated: (result: QuickCreateResult) => void;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -57,6 +63,7 @@ export default function QuickCreateModal({ productionId, date, departments, even
       return;
     }
     try {
+      let selection: QuickCreateResult["selection"];
       if (kind === "event") {
         const eventRes = await fetch(`${BASE_PATH}/api/production/${productionId}/events`, {
           method: "POST",
@@ -65,8 +72,10 @@ export default function QuickCreateModal({ productionId, date, departments, even
         });
         const eventData = await eventRes.json().catch(() => ({}));
         if (!eventRes.ok) throw new Error(eventData.error ?? "事件创建失败");
-
+        if (!eventData.event) throw new Error("事件创建成功，但未能读取新事件");
+        selection = { kind: "event", value: eventData.event as ProductionEvent };
       } else {
+        const departmentId = allMembers ? null : [...departmentIds][0] ?? null;
         const taskRes = await fetch(`${BASE_PATH}/api/production/${productionId}/tasks`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -75,15 +84,25 @@ export default function QuickCreateModal({ productionId, date, departments, even
             startTime: start,
             endTime: end,
             // 选择器在 task 模式下已是单选，这里取到的就是用户选的那一个
-            departmentId: allMembers ? null : [...departmentIds][0] ?? null,
+            departmentId,
             eventId: taskEventId || null,
             description: "由项目日历快捷创建。",
           }),
         });
         const taskData = await taskRes.json().catch(() => ({}));
         if (!taskRes.ok) throw new Error(taskData.error ?? "任务创建失败");
+        if (!taskData.task) throw new Error("任务创建成功，但未能读取新任务");
+        selection = {
+          kind: "task",
+          value: {
+            ...taskData.task,
+            departmentName: departments.find(department => department.id === departmentId)?.name ?? null,
+            eventTitle: events.find(event => event.id === (taskEventId || null))?.title ?? null,
+            isBlocked: false,
+          } as PlanningTask,
+        };
       }
-      onClose();
+      onCreated({ date: selectedDate, selection });
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建失败");
