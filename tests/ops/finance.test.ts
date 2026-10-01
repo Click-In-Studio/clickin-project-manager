@@ -18,6 +18,8 @@ import { GET as getExpenseCategories, POST as postExpenseCategory } from "@/app/
 import { DELETE as deleteExpenseCategoryRoute } from "@/app/api/production/[id]/finance/expense-categories/[categoryId]/route";
 import { GET as getBudgetItems, POST as postBudgetItem } from "@/app/api/production/[id]/finance/budget-items/route";
 import { getPool } from "@/lib/pg";
+import { listMyProductionsWithRoles } from "@/lib/production/production-db";
+import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/perm/permissions";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { addProductionMember } from "@/lib/perm/member-db";
@@ -58,7 +60,7 @@ vi.mock("@/lib/r2", () => ({
 
 let prodId: string;
 let ownerId: string, submitterId: string, deptPocId: string, strangerId: string;
-let financeEditorId: string, outsiderId: string;
+let financeEditorId: string, producerId: string, outsiderId: string;
 let deptId: string;
 
 beforeAll(async () => {
@@ -67,15 +69,22 @@ beforeAll(async () => {
   deptPocId   = (await upsertFeishuUser(`test-open-${shortId()}`, `舞美POC${shortId()}`, null, false)).userId;
   strangerId  = (await upsertFeishuUser(`test-open-${shortId()}`, `财务路人${shortId()}`, null, false)).userId;
   financeEditorId = (await upsertFeishuUser(`test-open-${shortId()}`, `财务配置员${shortId()}`, null, false)).userId;
+  producerId = (await upsertFeishuUser(`test-open-${shortId()}`, `制作人${shortId()}`, null, false)).userId;
   outsiderId = (await upsertFeishuUser(`test-open-${shortId()}`, `项目外人员${shortId()}`, null, false)).userId;
 
   ({ prodId } = await makeProduction(ownerId));
-  for (const u of [submitterId, deptPocId, strangerId, financeEditorId]) await addProductionMember(prodId, u);
+  for (const u of [submitterId, deptPocId, strangerId, financeEditorId, producerId]) await addProductionMember(prodId, u);
   await getPool().query(
     `INSERT INTO production_member_permission (production_id, user_id, permission, granted)
      VALUES ($1,$2,'node:finance/*/categories@edit',true),
             ($1,$2,'node:finance/*/budget@edit',true)`,
     [prodId, financeEditorId],
+  );
+  await getPool().query(
+    `INSERT INTO production_member_role (production_id, user_id, role_id)
+     SELECT $1, $2, id FROM production_role
+      WHERE production_id = $1 AND name = '制作人'`,
+    [prodId, producerId],
   );
 
   ({ rows: [{ id: deptId }] } = await getPool().query<{ id: string }>(
@@ -1108,5 +1117,27 @@ describe("14. 财务配置端点以 edit 为入口门，动作仍逐键校验", 
     const category = await createBudgetCategory({ productionId: prodId, name: `无删除权${shortId()}`, amount: null, createdBy: ownerId });
     expect((await deleteExpenseCategoryRoute(req(financeEditorId, "DELETE"), { params: Promise.resolve({ id: prodId, categoryId: category.categoryId }) }))?.status).toBe(403);
     expect((await postBudgetItem(req(financeEditorId, "POST", { categoryId: category.categoryId, amount: null }), ctx())).status).toBe(403);
+  });
+
+  it("制作人的通配资格能显示财务配置入口，不依赖枚举新键", async () => {
+    const entries = await listMyProductionsWithRoles(producerId, false, [...ADMIN_PANEL_NODE_PREFIXES]);
+    expect(entries.find(entry => entry.id === prodId)?.hasFinanceConfigPerm).toBe(true);
+  });
+
+  it("一个 edit 面被个人 deny 时，另一个 edit 面仍可作为入口资格", async () => {
+    await getPool().query(
+      `UPDATE production_member_permission SET granted = false
+        WHERE production_id = $1 AND user_id = $2
+          AND permission = 'node:finance/*/categories@edit'`,
+      [prodId, financeEditorId],
+    );
+    const entries = await listMyProductionsWithRoles(financeEditorId, false, [...ADMIN_PANEL_NODE_PREFIXES]);
+    expect(entries.find(entry => entry.id === prodId)?.hasFinanceConfigPerm).toBe(true);
+    await getPool().query(
+      `UPDATE production_member_permission SET granted = true
+        WHERE production_id = $1 AND user_id = $2
+          AND permission = 'node:finance/*/categories@edit'`,
+      [prodId, financeEditorId],
+    );
   });
 });

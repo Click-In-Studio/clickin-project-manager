@@ -9,6 +9,7 @@ import { getProductionName } from "@/lib/production/production-db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import { listBudgetCategories, listExpenseCategories } from "@/lib/ops/finance-db";
 import AdminFinanceClient from "@/components/admin/AdminFinanceClient";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export const metadata: Metadata = { title: "财务设置" };
 
@@ -35,7 +36,10 @@ export default async function AdminFinancePage({ params }: { params: Promise<{ i
     hasEffectiveGrant(actor, id, "finance", "*", "budget", "create"),
     hasEffectiveGrant(actor, id, "finance", "*", "budget", "delete"),
   ]);
-  return <AdminFinanceClient productionId={id} productionName={name ?? ""} initialCategories={categories}
-    initialItems={items} depts={depts.filter(d => d.kind === "dept").map(d => ({ id: d.id, name: d.name }))}
-    caps={{ categoryEdit, categoryCreate, categoryDelete, budgetEdit, budgetCreate, budgetDelete }} />;
+  return <>
+    <AdminFinanceClient productionId={id} productionName={name ?? ""} initialCategories={categories}
+      initialItems={items} depts={depts.filter(d => d.kind === "dept").map(d => ({ id: d.id, name: d.name }))}
+      caps={{ categoryEdit, categoryCreate, categoryDelete, budgetEdit, budgetCreate, budgetDelete }} />
+    <PageActivationGate productionId={id} scope="finance" />
+  </>;
 }

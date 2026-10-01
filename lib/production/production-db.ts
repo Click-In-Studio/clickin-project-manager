@@ -14,6 +14,49 @@ import { usesRehearsalMarksByDefault } from "../script/script-types";
 import { normalizeProductionTier, type ProductionTier } from "../account/plan";
 import { createInitialVersion } from "../script/version-db";
 import { createMasterScriptView } from "../script/script-view-db";
+import { nodeKeyCandidates } from "../perm/grant-template";
+
+const FINANCE_CATEGORY_EDIT_KEYS = nodeKeyCandidates({
+  resourceType: "finance", resourceId: "*", resourceSub: "categories", verb: "edit",
+});
+const FINANCE_BUDGET_EDIT_KEYS = nodeKeyCandidates({
+  resourceType: "finance", resourceId: "*", resourceSub: "budget", verb: "edit",
+});
+
+/** 与 canAccessNode 的区间 2-5 步同形；grant 行在列表查询里单独作为第 1 步处理。 */
+function financeConfigEligibilitySql(keysParam: "$4" | "$5"): string {
+  return `(
+    NOT EXISTS (
+      SELECT 1 FROM production_member_permission denied
+      WHERE denied.production_id = p.id AND denied.user_id = $1 AND NOT denied.granted
+        AND denied.permission = ANY(${keysParam}::text[])
+    ) AND (
+      EXISTS (
+        SELECT 1 FROM production_member_role pmr
+        JOIN production_role_permission prp ON prp.role_id = pmr.role_id
+        WHERE pmr.production_id = p.id AND pmr.user_id = $1
+          AND prp.permission_key = ANY(${keysParam}::text[])
+      ) OR EXISTS (
+        SELECT 1 FROM production_member_permission allowed
+        WHERE allowed.production_id = p.id AND allowed.user_id = $1 AND allowed.granted
+          AND allowed.permission = ANY(${keysParam}::text[])
+      ) OR EXISTS (
+        WITH RECURSIVE chain AS (
+          SELECT pd.id, pd.parent_id
+          FROM production_dept_member pdm
+          JOIN production_dept pd ON pd.id = pdm.dept_id
+          WHERE pdm.production_id = p.id AND pdm.user_id = $1
+          UNION
+          SELECT parent.id, parent.parent_id
+          FROM production_dept parent JOIN chain child ON parent.id = child.parent_id
+        )
+        SELECT 1 FROM production_dept_permission pdp
+        JOIN chain ON chain.id = pdp.dept_id
+        WHERE pdp.production_id = p.id AND pdp.permission_key = ANY(${keysParam}::text[])
+      )
+    )
+  )`;
+}
 
 /** 建项目配额超限（事务内硬上限命中）。路由层捕获后转 403。 */
 export class ProductionQuotaError extends Error {
@@ -209,20 +252,14 @@ export async function listMyProductionsWithRoles(
             ) AS has_admin_perm,
             (
               EXISTS (
-                SELECT 1 FROM production_member_role pmr
-                JOIN production_role_permission prp ON prp.role_id = pmr.role_id
-                WHERE pmr.production_id = p.id AND pmr.user_id = $1
-                  AND prp.permission_key IN ('node:finance/*/categories@edit', 'node:finance/*/budget@edit')
-              ) OR EXISTS (
-                SELECT 1 FROM production_member_permission pmp
-                WHERE pmp.production_id = p.id AND pmp.user_id = $1 AND pmp.granted
-                  AND pmp.permission IN ('node:finance/*/categories@edit', 'node:finance/*/budget@edit')
-              ) OR EXISTS (
-                SELECT 1 FROM production_dept_member pdm
-                JOIN production_dept_permission pdp ON pdp.dept_id = pdm.dept_id
-                WHERE pdm.production_id = p.id AND pdm.user_id = $1
-                  AND pdp.permission_key IN ('node:finance/*/categories@edit', 'node:finance/*/budget@edit')
-              )
+                SELECT 1 FROM production_member_grant pmg
+                WHERE pmg.production_id = p.id AND pmg.user_id = $1
+                  AND pmg.resource_type = 'finance' AND pmg.resource_id = '*'
+                  AND pmg.resource_sub IN ('categories', 'budget', '*')
+                  AND pmg.permission_level = 'edit' AND NOT pmg.is_revoked
+                  AND (pmg.expires_at IS NULL OR pmg.expires_at > now())
+              ) OR ${financeConfigEligibilitySql("$4")}
+                OR ${financeConfigEligibilitySql("$5")}
             ) AS has_finance_config_perm
      FROM production p
      LEFT JOIN production_member pm
@@ -233,7 +270,7 @@ export async function listMyProductionsWithRoles(
      -- 否则点进去只会撞 403。owner 分支不受影响。
      WHERE ($2 OR pm.user_id IS NOT NULL OR p.owner_id = $1)
      ORDER BY ${orderBy}`,
-    [userId, isAdmin, adminPanelPrefixes.map((p) => `${p}%`)],
+    [userId, isAdmin, adminPanelPrefixes.map((p) => `${p}%`), FINANCE_CATEGORY_EDIT_KEYS, FINANCE_BUDGET_EDIT_KEYS],
   );
   return res.rows.map(r => ({
     id: r.id, name: r.name,

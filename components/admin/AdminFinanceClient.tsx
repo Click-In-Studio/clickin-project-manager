@@ -79,8 +79,8 @@ export default function AdminFinanceClient({ productionId, productionName, initi
     } catch (e) { setError(e instanceof Error ? e.message : "排序失败"); }
   }
 
-  return <main style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", maxWidth: 1120 }}>
-    <PageHeader eyebrow={`${productionName} · 业务配置`} title="财务设置" side="stage"
+  return <main style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+    <PageHeader eyebrow={productionName} title="财务设置" side="stage"
       actions={(tab === "items" ? caps.budgetCreate : caps.categoryCreate) ? <button style={PRIMARY_BTN} onClick={() => setModal({ kind: tab === "items" ? "item" : "category" })}>新增{tab === "items" ? "预算项" : "费用科目"}</button> : null} />
     <div style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--line)", marginBottom: 20 }}>
       {([['items', '预算项'], ['categories', '费用科目']] as const).map(([key, label]) => <button key={key} onClick={() => setTab(key)} style={{ border: 0, borderBottom: tab === key ? "2px solid var(--stage)" : "2px solid transparent", padding: "10px 16px", background: "transparent", color: tab === key ? "var(--ink)" : "var(--muted)", fontWeight: 700, cursor: "pointer" }}>{label}</button>)}

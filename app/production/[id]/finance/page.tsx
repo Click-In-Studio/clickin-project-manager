@@ -18,6 +18,7 @@ import {
 } from "@/lib/ops/finance-db";
 import { fmtCny, pctUsed, sumCents, toCents } from "@/lib/money";
 import responsive from "@/components/ops/responsive.module.css";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export const metadata: Metadata = { title: "财务" };
 
@@ -236,6 +237,7 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
             : expenses.slice(0, 12).map(e => expenseRow(e))}
         </section>
       </div>
+      <PageActivationGate productionId={id} scope="finance" />
     </div>
   );
 }
