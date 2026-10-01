@@ -8,8 +8,9 @@ import { presignedGet } from "@/lib/r2";
 import type {
   ExpenseRecognitionResult, RecognitionCandidate, RecognitionConfidence, RecognitionSourceKind,
 } from "./expense-recognition-types";
+import { CN_DIGITAL_INVOICE_RULES_VERSION, parseCnDigitalInvoice } from "./cn-digital-invoice";
 
-export const EXPENSE_RECOGNITION_PARSER_VERSION = `expense-document-v1/pdf-${PDF_EXTRACTOR_VERSION}`;
+export const EXPENSE_RECOGNITION_PARSER_VERSION = `expense-document-v2/pdf-${PDF_EXTRACTOR_VERSION}`;
 const MAX_SOURCE_CHARS = 40_000;
 const MAX_OCR_PAGES = 12;
 
@@ -17,7 +18,7 @@ export function expenseRecognitionVersions(): { parserVersion: string; modelVers
   const llm = configuredLlmModel();
   return {
     parserVersion: EXPENSE_RECOGNITION_PARSER_VERSION,
-    modelVersion: `${llm.provider}:${llm.model}`,
+    modelVersion: `rules:${CN_DIGITAL_INVOICE_RULES_VERSION}|llm:${llm.provider}:${llm.model}`,
   };
 }
 
@@ -144,7 +145,10 @@ async function runOcr(file: RecognitionFile, pages: number[]): Promise<Extract<O
 }
 
 async function sourceFor(file: RecognitionFile): Promise<{
-  text: string; sourceKind: RecognitionSourceKind; warnings: string[];
+  text: string;
+  sourceKind: RecognitionSourceKind;
+  warnings: string[];
+  deterministicResult?: ExpenseRecognitionResult;
 }> {
   const lower = file.fileName.toLowerCase();
   const pdf = file.mimeType === "application/pdf" || lower.endsWith(".pdf");
@@ -173,7 +177,13 @@ async function sourceFor(file: RecognitionFile): Promise<{
   const direct = pdfText(doc);
   const warnings = direct.truncated ? ["PDF 文本较长，仅使用前 40000 个字符"] : [];
   if (direct.deficientPages.length === 0) {
-    return { text: direct.text, sourceKind: "pdf_text", warnings };
+    const deterministicResult = parseCnDigitalInvoice(doc);
+    return {
+      text: direct.text,
+      sourceKind: "pdf_text",
+      warnings,
+      ...(deterministicResult ? { deterministicResult } : {}),
+    };
   }
   let ocr: Extract<OcrOutcome, { status: "ok" }>;
   try {
@@ -214,6 +224,13 @@ export async function recognizeExpenseDocument(file: RecognitionFile): Promise<{
 }> {
   const source = await sourceFor(file);
   if (!source.text.trim()) throw new RecognitionInputError("凭证中没有可识别的文字，请手动填写");
+  if (source.deterministicResult) {
+    source.deterministicResult.warnings = [
+      ...source.warnings,
+      ...source.deterministicResult.warnings,
+    ];
+    return { result: source.deterministicResult, sourceKind: source.sourceKind };
+  }
   let response: string;
   try {
     response = await chat([
