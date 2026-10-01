@@ -120,6 +120,43 @@ describe("事件列表信息层级与响应式布局", () => {
     expect(pastCard.querySelector("time")?.nextElementSibling?.textContent).toBe("演出");
   });
 
+  it("跨 UTC/CST 日期边界时日期盒与时间文案保持同一天", async () => {
+    const previousTimezone = process.env.TZ;
+    process.env.TZ = "UTC";
+    try {
+      const boundary = event({
+        id: "cst-boundary",
+        title: "跨日排练",
+        startTime: "2026-09-10T16:30:00.000Z",
+        endTime: "2026-09-10T18:30:00.000Z",
+      });
+      expect(new Date(boundary.startTime!).getDate()).toBe(10);
+
+      await act(async () => {
+        root.render(
+          <EventsClient
+            productionId="responsive-events"
+            initialEvents={[boundary]}
+            canCreate
+            canViewFull
+            myParticipations={[]}
+            currentUserId="viewer"
+            departments={[]}
+            taskCounts={{}}
+          />,
+        );
+      });
+
+      const card = container.querySelector<HTMLElement>('[aria-label="查看事件：跨日排练"]')!;
+      expect(card.querySelector("time b")?.textContent).toBe("11");
+      expect(card.querySelector("time small")?.textContent).toContain("9 月");
+      expect(card.textContent).toContain("9月11日 00:30");
+    } finally {
+      if (previousTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTimezone;
+    }
+  });
+
   it("桌面端保持日期、内容、状态三列，右列内容居中", () => {
     expect(declarations(css, ".eventCard")).toMatchObject({
       display: "grid",

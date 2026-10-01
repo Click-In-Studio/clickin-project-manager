@@ -19,7 +19,7 @@ import DropdownPicker from "@/components/ui/DropdownPicker";
 import styles from "@/components/ui/my-pages.module.css";
 import responsive from "@/components/ops/responsive.module.css";
 import type { EventTechReq, EventScheduleItem, ProductionEvent, TaskDependencyRef } from "@/lib/ops/event-db";
-import { fmtTime, fmtDateTime } from "@/lib/tz";
+import { fmtDate, fmtTime, fmtDateTime } from "@/lib/tz";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
 import { TASK_STATUS_LABELS } from "@/lib/ops/task-types";
 
@@ -765,7 +765,7 @@ export default function ReqDetailClient({
                       items={(() => {
                         const items = attachableEvents.map(ev => ({
                           id: ev.id,
-                          label: `${ev.startTime ? `${new Date(ev.startTime).getMonth() + 1}/${new Date(ev.startTime).getDate()} · ` : ""}${ev.title}`,
+                          label: `${ev.startTime ? `${fmtDate(ev.startTime)} · ` : ""}${ev.title}`,
                           sublabel: ev.requiresPocDept ? "POC 路径（需任务绑定你负责的部门）" : undefined,
                           disabled: ev.requiresPocDept && !isPocOfDept,
                         }));

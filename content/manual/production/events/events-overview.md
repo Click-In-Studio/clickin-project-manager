@@ -7,7 +7,7 @@ who: 所有成员可看已发布的事件；新建需要事件创建权限
 tier: all
 platform: [desktop, mobile]
 related: [production/events/event-detail, production/events/publish-callsheet, production/planning/calendar]
-updated: 2026-09-30
+updated: 2026-10-01
 ---
 
 ## 这是什么
@@ -16,7 +16,7 @@ updated: 2026-09-30
 
 四种类型：**排练 / 演出 / 会议 / 其他**。
 
-「制作 → 事件」列表分「即将发生」和「已过去」两段。每张卡片左侧是日期和事件类型，中间是标题、时间地点，右侧是状态与「已参与 / 关注」。在手机上，「事件详情」「执行流程」和任务入口从中间内容列排到右侧状态列，日期列保持独立。
+「制作 → 事件」列表分「即将发生」和「已过去」两段。每张卡片左侧是日期和事件类型，中间是标题、时间地点，右侧是状态与「已参与 / 关注」。日期和时间统一按北京时间（UTC+8）显示。在手机上，「事件详情」「执行流程」和任务入口从中间内容列排到右侧状态列，日期列保持独立。
 
 ![事件列表](/manual/production/events.png)
 
