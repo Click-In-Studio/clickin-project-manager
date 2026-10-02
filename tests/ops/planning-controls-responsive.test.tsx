@@ -19,12 +19,21 @@ async function mountGanttScale(width: number) {
       :root { --line: #ccd4d1; --muted: #66736f; --surface: #fff; --ink: #172523; }
       ${css}
     </style>
-    <div class="ganttControls">
-      <div class="ganttScale" aria-label="时间轴粒度">
-        <button class="ganttScaleButton" aria-pressed="false">日</button>
-        <button class="ganttScaleButton" aria-pressed="true">月</button>
-        <button class="ganttScaleButton" aria-pressed="false">季</button>
-        <button class="ganttScaleButton" aria-pressed="false">年</button>
+    <div class="ganttHeader">
+      <div class="ganttHeading"><h2 class="ganttTitle">任务甘特图</h2></div>
+      <div class="ganttControls">
+        <div class="ganttScale" aria-label="时间轴粒度">
+          <button class="ganttScaleButton" aria-pressed="false">日</button>
+          <button class="ganttScaleButton" aria-pressed="true">月</button>
+          <button class="ganttScaleButton" aria-pressed="false">季</button>
+          <button class="ganttScaleButton" aria-pressed="false">年</button>
+        </div>
+        <div class="ganttLegend" aria-label="任务状态图例">
+          <span><i class="ganttLegendInProgress"></i>进行中</span>
+          <span><i class="ganttLegendPending"></i>待处理</span>
+          <span><i class="ganttLegendBlocked"></i>受阻</span>
+          <span><i class="ganttLegendDone"></i>完成</span>
+        </div>
       </div>
     </div>
   `);
@@ -102,6 +111,8 @@ describe("甘特时间轴粒度控件真实浏览器布局", () => {
       await mountGanttScale(width);
       const metrics = await page.locator(".ganttScale").evaluate((scale) => {
         const buttons = [...scale.querySelectorAll<HTMLButtonElement>(".ganttScaleButton")];
+        const headingBounds = document.querySelector(".ganttHeading")!.getBoundingClientRect();
+        const legendBounds = document.querySelector(".ganttLegend")!.getBoundingClientRect();
         const buttonMetrics = buttons.map(button => {
           const bounds = button.getBoundingClientRect();
           const range = document.createRange();
@@ -110,6 +121,8 @@ describe("甘特时间轴粒度控件真实浏览器布局", () => {
           return {
             width: bounds.width,
             height: bounds.height,
+            top: bounds.top,
+            bottom: bounds.bottom,
             centerOffset: Math.abs((textBounds.top + textBounds.bottom) / 2 - (bounds.top + bounds.bottom) / 2),
           };
         });
@@ -120,6 +133,8 @@ describe("甘特时间轴粒度控件真实浏览器布局", () => {
           documentWidth: document.documentElement.scrollWidth,
           scaleHeight: scale.getBoundingClientRect().height,
           buttonMetrics,
+          headingBottom: headingBounds.bottom,
+          legendTop: legendBounds.top,
           selectedBackground: getComputedStyle(selected).backgroundColor,
           selectedVisualBackground: selectedVisual.backgroundColor,
           selectedVisualHeight: Number.parseFloat(selectedVisual.height),
@@ -133,6 +148,8 @@ describe("甘特时间轴粒度控件真实浏览器布局", () => {
         expect(metrics.scaleHeight).toBe(34);
         expect(metrics.buttonMetrics.every(button => button.height >= 44)).toBe(true);
         expect(Math.max(...metrics.buttonMetrics.map(button => button.width)) - Math.min(...metrics.buttonMetrics.map(button => button.width))).toBeLessThanOrEqual(0.5);
+        expect(Math.min(...metrics.buttonMetrics.map(button => button.top))).toBeGreaterThanOrEqual(metrics.headingBottom);
+        expect(Math.max(...metrics.buttonMetrics.map(button => button.bottom))).toBeLessThanOrEqual(metrics.legendTop);
         expect(metrics.selectedBackground).toBe("rgba(0, 0, 0, 0)");
         expect(metrics.selectedVisualBackground).toBe("rgb(23, 37, 35)");
         expect(metrics.selectedVisualHeight).toBe(30);
