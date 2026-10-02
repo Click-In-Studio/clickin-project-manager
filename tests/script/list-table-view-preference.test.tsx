@@ -5,6 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import CharactersManager from "@/components/script/CharactersManager";
+import Dramaturgy from "@/components/script/Dramaturgy";
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "@/components/script/ListTableViewToggle";
 import {
   listTableViewStorageKey,
@@ -15,6 +17,12 @@ import {
   PRODUCTION_TOOLBAR_STAGE,
   ProductionToolbarContext,
 } from "@/components/shell/ProductionTopMenu";
+import { NO_CHARACTER_PERMS } from "@/lib/script/character-perms-shared";
+import { NO_SCENE_FIELD_PERMS } from "@/lib/script/scene-field-perms-shared";
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/production/p1/dramaturgy",
+}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -74,6 +82,34 @@ describe("构作与角色的列表 / 表格偏好", () => {
 
     await renderProbe("dramaturgy");
     expect(container.querySelector("output")?.textContent).toBe("list");
+  });
+
+  it("两个消费页面的服务端首屏都有稳定骨架，不会在偏好恢复前输出空白正文", () => {
+    const dramaturgyHtml = renderToString(
+      <Dramaturgy
+        productionId="p1"
+        productionName="测试演出"
+        versionId={null}
+        initialScenes={[]}
+        openingChapterMarkerId={null}
+        canEdit={false}
+        fieldPerms={NO_SCENE_FIELD_PERMS}
+      />,
+    );
+    const charactersHtml = renderToString(
+      <CharactersManager
+        productionId="p1"
+        productionName="测试演出"
+        initialCharacters={[]}
+        perms={NO_CHARACTER_PERMS}
+      />,
+    );
+
+    for (const html of [dramaturgyHtml, charactersHtml]) {
+      expect(html).toContain('role="status"');
+      expect(html).toContain("正在打开");
+      expect(html).toContain('aria-busy="true"');
+    }
   });
 
   it("构作与角色分别记忆，已有选择在再次进入时恢复", async () => {

@@ -10,6 +10,7 @@ import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableVie
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
 import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib/script/character-perms-shared";
 import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
+import PageSkeleton from "@/components/ui/PageSkeleton";
 import { useListTableViewPreference } from "./use-list-table-view-preference";
 
 const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
@@ -906,8 +907,11 @@ export default function CharactersManager({ productionId, productionName, initia
         {view !== null && <ListTableViewToggle value={view} onChange={setView} />}
       </ProductionTopMenu>
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto" style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
-        {view === null ? null : view === "table" ? tableView : card}
+      <div
+        className="flex-1 overflow-y-auto"
+        style={view === null ? undefined : { padding: "24px clamp(18px, 3vw, 52px) 60px" }}
+      >
+        {view === null ? <PageSkeleton instant /> : view === "table" ? tableView : card}
       </div>
     </div>
   );

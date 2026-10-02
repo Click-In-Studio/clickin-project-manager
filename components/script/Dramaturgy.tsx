@@ -21,6 +21,7 @@ import ProductionTopMenu, {
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
 import type { SceneFieldPerms } from "@/lib/script/scene-field-perms-shared";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
+import PageSkeleton from "@/components/ui/PageSkeleton";
 import { useListTableViewPreference } from "./use-list-table-view-preference";
 
 type Props = {
@@ -337,8 +338,11 @@ export default function Dramaturgy({
       </ProductionTopMenu>
 
       {/* ── Scrollable content ── */}
-      <div className="flex-1 overflow-y-auto" style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
-        {sceneViewMode === null ? null : sceneViewMode === "list" ? (
+      <div
+        className="flex-1 overflow-y-auto"
+        style={sceneViewMode === null ? undefined : { padding: "24px clamp(18px, 3vw, 52px) 60px" }}
+      >
+        {sceneViewMode === null ? <PageSkeleton instant /> : sceneViewMode === "list" ? (
           <ScenesManager
             key={versionId ?? ""}
             productionId={productionId}
