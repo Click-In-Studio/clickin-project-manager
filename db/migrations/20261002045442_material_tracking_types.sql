@@ -177,6 +177,7 @@ DECLARE
   available_quantity NUMERIC(18,3);
   reversed_event production_material_stock_movement%ROWTYPE;
 BEGIN
+  -- 同一批次串行校验；并发签出不能同时读到同一份余额。
   SELECT confirmed_quantity INTO lot_quantity
     FROM production_material_stock_lot
    WHERE id = NEW.lot_id AND production_id = NEW.production_id
