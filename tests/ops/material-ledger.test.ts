@@ -1,5 +1,5 @@
 /**
- * 物料台账的语义锁。
+ * 物料定义、确认入库批次与追加式库存流水的语义锁。
  *
  *   1. 状态是**列表不是状态机**：任何状态可改到任何状态，不校验流转
  *   2. 状态列表 = 系统预设 ∪ 本剧组自定义；系统预设删不掉；跨剧组的自定义状态不能用
@@ -20,8 +20,10 @@ import { createEventGroup } from "@/lib/ops/event-group-db";
 import { resolveSubjectPatch } from "@/lib/ops/task-poc";
 import { canCreateMaterial, canWriteMaterial } from "@/lib/ops/material-perm";
 import {
+  appendMaterialStockMovement, createMaterialStockLot,
   createMaterial, createMaterialStatus, deleteMaterial, deleteMaterialStatus,
-  getMaterial, listMaterials, listMaterialStatuses, MaterialError, updateMaterial,
+  getMaterial, listMaterials, listMaterialStatuses, listMaterialStockLots,
+  listMaterialStockMovements, MaterialError, updateMaterial,
 } from "@/lib/ops/material-db";
 
 let prodId: string, otherProdId: string;
@@ -200,19 +202,144 @@ describe("6. 编号在剧组内唯一", () => {
 });
 
 describe("列表与删除", () => {
-  it("只列本剧组的；删掉就没了", async () => {
+  it("只列本剧组的；已有库存历史后不能硬删", async () => {
     const m = await createMaterial({
       productionId: prodId, code: `Z-${shortId()}`, name: "待删", subject: null, createdBy: ownerId,
     });
     expect((await listMaterials(prodId)).some(x => x.id === m.id)).toBe(true);
     expect((await listMaterials(otherProdId)).some(x => x.id === m.id)).toBe(false);
 
-    await deleteMaterial(m.id, prodId);
-    expect(await getMaterial(m.id, prodId)).toBeNull();
+    await expect(deleteMaterial(m.id, prodId)).rejects.toMatchObject({ reason: "has_history" });
+    expect(await getMaterial(m.id, prodId)).not.toBeNull();
   });
 });
 
-describe("7. PATCH 的名字校验与 POST 对称", () => {
+describe("7. 确认入库批次与追加式流水", () => {
+  it("同一物料可同时有待到货、在库、签出和维护数量，且查询口径明确", async () => {
+    const m = await createMaterial({
+      productionId: prodId, code: `L-${shortId()}`, name: "无线话筒",
+      subject: null, location: "设备库", quantity: 10, createdBy: ownerId,
+    });
+    const [receivedLot] = await listMaterialStockLots(m.id, prodId);
+    await appendMaterialStockMovement({
+      productionId: prodId, lotId: receivedLot.id, fromBucket: "in_stock",
+      toBucket: "checked_out", quantity: 4, createdBy: ownerId,
+    });
+    await appendMaterialStockMovement({
+      productionId: prodId, lotId: receivedLot.id, fromBucket: "in_stock",
+      toBucket: "maintenance", quantity: 2, createdBy: ownerId,
+    });
+    await createMaterialStockLot({
+      productionId: prodId, materialId: m.id, confirmedQuantity: 3,
+      location: "供应商待发", createdBy: ownerId,
+    });
+
+    const current = await getMaterial(m.id, prodId);
+    expect(current).toMatchObject({
+      expectedQuantity: 3,
+      inStockQuantity: 4,
+      availableQuantity: 4,
+      checkedOutQuantity: 4,
+      maintenanceQuantity: 2,
+      heldQuantity: 10,
+      exitedQuantity: 0,
+    });
+  });
+
+  it("签出默认仍占用数量；返还流水只减少对应签出量", async () => {
+    const m = await createMaterial({
+      productionId: prodId, code: `C-${shortId()}`, name: "黑色胶带",
+      subject: null, quantity: 5, createdBy: ownerId,
+    });
+    const [lot] = await listMaterialStockLots(m.id, prodId);
+    const checkout = await appendMaterialStockMovement({
+      productionId: prodId, lotId: lot.id, fromBucket: "in_stock",
+      toBucket: "checked_out", quantity: 5, note: "演出签出", createdBy: ownerId,
+    });
+    await appendMaterialStockMovement({
+      productionId: prodId, lotId: lot.id, fromBucket: "checked_out",
+      toBucket: "in_stock", quantity: 3, note: "返还三卷", createdBy: ownerId,
+    });
+    expect(await getMaterial(m.id, prodId)).toMatchObject({
+      inStockQuantity: 3, checkedOutQuantity: 2, heldQuantity: 5,
+    });
+    expect((await listMaterialStockMovements(lot.id, prodId)).map(x => x.id))
+      .toContain(checkout.id);
+  });
+
+  it("拒绝负库存，且并发扣减不会丢失更新", async () => {
+    const m = await createMaterial({
+      productionId: prodId, code: `Q-${shortId()}`, name: "并发测试设备",
+      subject: null, quantity: 5, createdBy: ownerId,
+    });
+    const [lot] = await listMaterialStockLots(m.id, prodId);
+    const move = () => appendMaterialStockMovement({
+      productionId: prodId, lotId: lot.id, fromBucket: "in_stock",
+      toBucket: "checked_out", quantity: 4, createdBy: ownerId,
+    });
+    const results = await Promise.allSettled([move(), move()]);
+    expect(results.filter(x => x.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter(x => x.status === "rejected")).toHaveLength(1);
+    expect(await getMaterial(m.id, prodId)).toMatchObject({
+      inStockQuantity: 1, checkedOutQuantity: 4,
+    });
+  });
+
+  it("流水不可 UPDATE/DELETE；错误通过一条精确反向流水冲销", async () => {
+    const m = await createMaterial({
+      productionId: prodId, code: `R-${shortId()}`, name: "冲销测试",
+      subject: null, quantity: 2, createdBy: ownerId,
+    });
+    const [lot] = await listMaterialStockLots(m.id, prodId);
+    const wrong = await appendMaterialStockMovement({
+      productionId: prodId, lotId: lot.id, fromBucket: "in_stock",
+      toBucket: "maintenance", quantity: 1, createdBy: ownerId,
+    });
+    await expect(getPool().query(
+      "UPDATE production_material_stock_movement SET note='篡改' WHERE id=$1", [wrong.id],
+    )).rejects.toThrow(/append-only/);
+    await expect(getPool().query(
+      "DELETE FROM production_material_stock_movement WHERE id=$1", [wrong.id],
+    )).rejects.toThrow(/append-only/);
+    await expect(appendMaterialStockMovement({
+      productionId: prodId, lotId: lot.id, fromBucket: "maintenance",
+      toBucket: "in_stock", quantity: 1, reversesEventId:
+        (await listMaterialStockMovements(lot.id, prodId))[0].id,
+      createdBy: ownerId,
+    })).rejects.toMatchObject({ reason: "bad_reversal" });
+    await appendMaterialStockMovement({
+      productionId: prodId, lotId: lot.id, fromBucket: "maintenance",
+      toBucket: "in_stock", quantity: 1, reversesEventId: wrong.id,
+      note: "冲销误操作", createdBy: ownerId,
+    });
+    expect(await getMaterial(m.id, prodId)).toMatchObject({
+      inStockQuantity: 2, maintenanceQuantity: 0,
+    });
+
+    await appendMaterialStockMovement({
+      productionId: prodId, lotId: lot.id, fromBucket: "in_stock",
+      toBucket: "maintenance", quantity: 1, createdBy: ownerId,
+    });
+    await expect(appendMaterialStockMovement({
+      productionId: prodId, lotId: lot.id, fromBucket: "maintenance",
+      toBucket: "in_stock", quantity: 1, reversesEventId: wrong.id,
+      createdBy: ownerId,
+    })).rejects.toThrow(/material_stock_movement_single_reversal/);
+  });
+
+  it("定义更新不能绕过流水覆盖数量或库位", async () => {
+    const m = await createMaterial({
+      productionId: prodId, code: `W-${shortId()}`, name: "禁止覆盖写",
+      subject: null, quantity: 2, createdBy: ownerId,
+    });
+    await expect(updateMaterial(m.id, prodId, { quantity: 9 }))
+      .rejects.toMatchObject({ reason: "inventory_requires_movement" });
+    await expect(updateMaterial(m.id, prodId, { location: "未知新库位" }))
+      .rejects.toMatchObject({ reason: "inventory_requires_movement" });
+  });
+});
+
+describe("8. PATCH 的名字校验与 POST 对称", () => {
   // 与财务预算科目同一处毛病、同一处修法：db 层 trim 之后空串照落，
   // 拦截点只能在路由。见 tests/finance.test.ts 的同名 describe。
   function req(userId: string, body: unknown) {
@@ -260,7 +387,7 @@ describe("7. PATCH 的名字校验与 POST 对称", () => {
  * 注意所有用例都用非 owner 的人——owner 在 hasEffectiveGrant 里直接旁路，
  * 拿他测等于什么都没测（这个坑记在 feedback_owner_bypass）。
  */
-describe("8. 责任方的 POC 管自己那一摊", () => {
+describe("9. 责任方的 POC 管自己那一摊", () => {
   let deptB: string, pocA: string, pocB: string, stranger: string;
   const actor = (userId: string) => ({ userId, isAdmin: false, isOwner: false });
 
@@ -338,7 +465,7 @@ describe("8. 责任方的 POC 管自己那一摊", () => {
  * 状态表的 CRUD 不在此列——状态没有「责任方」，它是剧组级的一张小字典，
  * 只是碰巧共用 material 这个域键。故按**动词**筛，且放过 statuses/ 那一支。
  */
-describe("9. 判定收敛", () => {
+describe("10. 判定收敛", () => {
   it("物料写点不直接对 material 域调 hasEffectiveGrant", async () => {
     const { readFileSync, readdirSync } = await import("fs");
     const { join } = await import("path");
