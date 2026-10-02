@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import { PRIMARY_BTN } from "@/components/ui/PageHeader";
@@ -8,7 +9,6 @@ import {
   PRODUCTION_MODULE_ACTION_CLASS,
   PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS,
 } from "@/components/shell/ProductionModuleTopMenu";
-import { useProductionToolbar } from "@/components/shell/ProductionTopMenu";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import AssetUploadPanel from "@/components/assets/AssetUploadPanel";
 import { useAssetUploadManager } from "@/components/assets/asset-upload-manager";
@@ -103,7 +103,6 @@ export function ExpenseCreateButton({ productionId, baseCurrency, categories, tr
   triggerVariant?: "default" | "toolbar" | "short" | "overflow";
 }) {
   const router = useRouter();
-  const { closeOverflow } = useProductionToolbar();
   const uploadManager = useAssetUploadManager();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -262,14 +261,11 @@ export function ExpenseCreateButton({ productionId, baseCurrency, categories, tr
         className={triggerVariant === "overflow"
           ? PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS
           : triggerVariant === "default" ? undefined : PRODUCTION_MODULE_ACTION_CLASS}
-        onClick={() => {
-          if (triggerVariant === "overflow") closeOverflow();
-          setOpen(true);
-        }}
+        onClick={() => setOpen(true)}
       >
         {triggerVariant === "short" ? "＋" : triggerVariant === "overflow" ? "新建报销" : "＋ 新建报销"}
       </button>
-      {open && (
+      {open && typeof document !== "undefined" && createPortal((
         <div
           className={`app-mobile-input-overlay ${styles.backdrop}`}
           role="presentation"
@@ -525,7 +521,7 @@ export function ExpenseCreateButton({ productionId, baseCurrency, categories, tr
             </form>
           </aside>
         </div>
-      )}
+      ), document.body)}
     </>
   );
 }

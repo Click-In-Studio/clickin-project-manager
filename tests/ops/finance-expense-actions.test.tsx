@@ -3,6 +3,13 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import ProductionModuleTopMenu from "@/components/shell/ProductionModuleTopMenu";
+import {
+  PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID,
+  PRODUCTION_TOP_MENU_SLOT_ID,
+  PRODUCTION_TOOLBAR_STAGE,
+  ProductionToolbarContext,
+} from "@/components/shell/ProductionTopMenu";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
@@ -84,7 +91,7 @@ afterEach(() => {
 });
 
 function button(label: string) {
-  return [...container.querySelectorAll<HTMLButtonElement>("button")]
+  return [...document.querySelectorAll<HTMLButtonElement>("button")]
     .find(item => item.textContent?.trim() === label)!;
 }
 
@@ -95,13 +102,56 @@ function inputValue(input: HTMLInputElement, value: string) {
 }
 
 describe("报销填单", () => {
+  it("从最窄顶部栏的更多菜单打开后，菜单关闭但报销表单仍可见可操作", async () => {
+    const toolbarSlot = document.createElement("div");
+    toolbarSlot.id = PRODUCTION_TOP_MENU_SLOT_ID;
+    const overflowMenu = document.createElement("div");
+    const overflowSlot = document.createElement("div");
+    overflowSlot.id = PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID;
+    overflowMenu.appendChild(overflowSlot);
+    document.body.append(toolbarSlot, overflowMenu);
+
+    const closeOverflow = vi.fn(() => overflowMenu.classList.add("hidden"));
+    await act(async () => root.render(
+      <ProductionToolbarContext.Provider value={{
+        stage: PRODUCTION_TOOLBAR_STAGE.primaryStored,
+        closeOverflow,
+        overflowOpen: true,
+        hasStoredControls: true,
+        setHasStoredControls: () => {},
+      }}>
+        <ProductionModuleTopMenu
+          productionName="海边的剧"
+          label="财务"
+          primaryAction={<ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} triggerVariant="toolbar" />}
+          primaryShortAction={<ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} triggerVariant="short" />}
+          primaryOverflowAction={<ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} triggerVariant="overflow" />}
+        />
+      </ProductionToolbarContext.Provider>,
+    ));
+
+    await act(async () => button("新建报销").click());
+
+    expect(closeOverflow).toHaveBeenCalledTimes(1);
+    expect(overflowMenu.classList.contains("hidden")).toBe(true);
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.closest(".hidden")).toBeNull();
+    const titleInput = dialog!.querySelector<HTMLInputElement>('input[placeholder="例如：合成排练交通费"]')!;
+    await act(async () => inputValue(titleInput, "窄屏报销"));
+    expect(titleInput.value).toBe("窄屏报销");
+
+    toolbarSlot.remove();
+    overflowMenu.remove();
+  });
+
   it("空白内容也能保存为服务端草稿", async () => {
     fetchMock.mockImplementation(() => jsonResponse({ expense: { id: "exp_draft" } }, 201));
     await act(async () => root.render(<ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} />));
     await act(async () => button("＋ 新建报销").click());
     const submitEvent = new Event("submit", { bubbles: true, cancelable: true });
     Object.defineProperty(submitEvent, "submitter", { value: button("保存草稿") });
-    await act(async () => container.querySelector("form")!.dispatchEvent(submitEvent));
+    await act(async () => document.querySelector("form")!.dispatchEvent(submitEvent));
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
@@ -121,13 +171,13 @@ describe("报销填单", () => {
     ));
 
     await act(async () => button("＋ 新建报销").click());
-    const inputs = [...container.querySelectorAll<HTMLInputElement>("input")];
+    const inputs = [...document.querySelectorAll<HTMLInputElement>("input")];
     await act(async () => {
       inputValue(inputs[0], "合成排练打车");
       inputValue(inputs[1], "999999999999.99");
     });
     await act(async () => {
-      container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      document.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -141,22 +191,22 @@ describe("报销填单", () => {
     });
     expect(typeof JSON.parse(String(init?.body)).amount).toBe("string");
     expect(refresh).toHaveBeenCalledTimes(1);
-    expect(container.querySelector("[role=dialog]")).toBeNull();
+    expect(document.querySelector("[role=dialog]")).toBeNull();
   });
 
   it("服务端拒绝时保留表单并显示原因", async () => {
     fetchMock.mockImplementation(() => jsonResponse({ error: "找不到这笔支出的审批人，请联系制作人" }, 409));
     await act(async () => root.render(<ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} />));
     await act(async () => button("＋ 新建报销").click());
-    const inputs = [...container.querySelectorAll<HTMLInputElement>("input")];
+    const inputs = [...document.querySelectorAll<HTMLInputElement>("input")];
     await act(async () => {
       inputValue(inputs[0], "交通费");
       inputValue(inputs[1], "12.30");
-      container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      document.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     });
 
-    expect(container.querySelector("[role=dialog]")).not.toBeNull();
-    expect(container.querySelector("[role=alert]")?.textContent).toContain("找不到这笔支出的审批人");
+    expect(document.querySelector("[role=dialog]")).not.toBeNull();
+    expect(document.querySelector("[role=alert]")?.textContent).toContain("找不到这笔支出的审批人");
     expect(refresh).not.toHaveBeenCalled();
   });
 
@@ -167,11 +217,11 @@ describe("报销填单", () => {
     await act(async () => button("上传测试凭证").click());
     await act(async () => button("上传测试凭证").click());
 
-    const inputs = [...container.querySelectorAll<HTMLInputElement>("input")];
+    const inputs = [...document.querySelectorAll<HTMLInputElement>("input")];
     await act(async () => {
       inputValue(inputs[0], "两张发票");
       inputValue(inputs[1], "88.00");
-      container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      document.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     });
 
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
@@ -187,14 +237,14 @@ describe("报销填单", () => {
     await act(async () => button("上传测试凭证").click());
     await act(async () => button("完成识别").click());
 
-    const kindSelect = container.querySelector<HTMLSelectElement>('select[aria-label="票据1.pdf的凭证类型"]')!;
+    const kindSelect = document.querySelector<HTMLSelectElement>('select[aria-label="票据1.pdf的凭证类型"]')!;
     const kindGroup = kindSelect.closest("div")!;
     expect(kindGroup.textContent).toContain("识别建议：收据");
     await act(async () => kindGroup.querySelector<HTMLButtonElement>("button")!.click());
     expect(kindSelect.value).toBe("receipt");
     expect(kindGroup.textContent).not.toContain("识别建议");
 
-    const amountInput = container.querySelector<HTMLInputElement>('input[placeholder="0.00"]')!;
+    const amountInput = document.querySelector<HTMLInputElement>('input[placeholder="0.00"]')!;
     const amountGroup = amountInput.closest("div")!;
     expect(amountGroup.textContent).toContain("识别建议：人民币（CNY） 88.50");
     expect(amountGroup.textContent).not.toContain("某某商店");
@@ -202,8 +252,8 @@ describe("报销填单", () => {
     await act(async () => amountGroup.querySelector<HTMLButtonElement>("button")!.click());
     expect(amountInput.value).toBe("88.50");
     expect(amountGroup.textContent).not.toContain("识别建议");
-    expect(container.textContent).toContain("识别建议：某某商店");
-    expect(container.textContent).toContain("识别建议：2026-09-30");
+    expect(document.body.textContent).toContain("识别建议：某某商店");
+    expect(document.body.textContent).toContain("识别建议：2026-09-30");
   });
 });
 
