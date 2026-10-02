@@ -431,9 +431,11 @@ async function insertMaterialMovement(client: QueryClient, params: {
       createdBy: r.created_by, createdAt: r.created_at.toISOString(),
     };
   } catch (e) {
-    if (e instanceof Error && e.message.includes("material_stock_nonnegative"))
+    const constraint = e && typeof e === "object" && "constraint" in e
+      ? String(e.constraint) : "";
+    if (constraint === "material_stock_nonnegative")
       throw new MaterialError("negative_stock", "该批次在来源状态下的数量不足");
-    if (e instanceof Error && e.message.includes("material_stock_exact_reversal"))
+    if (constraint === "material_stock_exact_reversal")
       throw new MaterialError("bad_reversal", "冲销流水必须与原流水数量和方向完全相反");
     throw e;
   }

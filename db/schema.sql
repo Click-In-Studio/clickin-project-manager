@@ -1868,8 +1868,8 @@ CREATE INDEX IF NOT EXISTS production_material_production_idx
 CREATE INDEX IF NOT EXISTS production_material_status_idx
   ON production_material (status_id) WHERE status_id IS NOT NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS production_material_id_production_unique_idx
-  ON production_material (id, production_id);
+ALTER TABLE production_material
+  ADD CONSTRAINT production_material_id_production_unique UNIQUE (id, production_id);
 
 -- 确认会入库的实物批次。confirmed_quantity 是这批货的原始事实；当前分布由下方
 -- 追加式流水推导，不在任何“当前数量”列上做覆盖更新。

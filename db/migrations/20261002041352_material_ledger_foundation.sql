@@ -1,8 +1,8 @@
 -- migrate:up
 
 -- 物料本体只描述“是什么”；确认会入库的数量从批次开始，之后所有变化只记追加流水。
-CREATE UNIQUE INDEX production_material_id_production_unique_idx
-  ON production_material (id, production_id);
+ALTER TABLE production_material
+  ADD CONSTRAINT production_material_id_production_unique UNIQUE (id, production_id);
 
 CREATE TABLE production_material_stock_lot (
   id                 TEXT          PRIMARY KEY,

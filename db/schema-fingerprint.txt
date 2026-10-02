@@ -1462,6 +1462,7 @@ CON|production_material|material_owner_single|CHECK ((num_nonnulls(department_id
 CON|production_material|production_material_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
 CON|production_material|production_material_department_id_fkey|FOREIGN KEY (department_id) REFERENCES production_dept(id) ON DELETE SET NULL
 CON|production_material|production_material_group_id_fkey|FOREIGN KEY (group_id) REFERENCES event_group(id) ON DELETE SET NULL
+CON|production_material|production_material_id_production_unique|UNIQUE (id, production_id)
 CON|production_material|production_material_pkey|PRIMARY KEY (id)
 CON|production_material|production_material_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|production_material|production_material_status_id_fkey|FOREIGN KEY (status_id) REFERENCES production_material_status(id) ON DELETE SET NULL
@@ -1889,7 +1890,7 @@ IDX|production_material_stock_movement|material_stock_movement_single_reversal|C
 IDX|production_material_stock_movement|production_material_stock_movement_lot_idx|CREATE INDEX production_material_stock_movement_lot_idx ON public.production_material_stock_movement USING btree (lot_id, created_at, id)
 IDX|production_material_stock_movement|production_material_stock_movement_pkey|CREATE UNIQUE INDEX production_material_stock_movement_pkey ON public.production_material_stock_movement USING btree (id)
 IDX|production_material|production_material_code_idx|CREATE UNIQUE INDEX production_material_code_idx ON public.production_material USING btree (production_id, code)
-IDX|production_material|production_material_id_production_unique_idx|CREATE UNIQUE INDEX production_material_id_production_unique_idx ON public.production_material USING btree (id, production_id)
+IDX|production_material|production_material_id_production_unique|CREATE UNIQUE INDEX production_material_id_production_unique ON public.production_material USING btree (id, production_id)
 IDX|production_material|production_material_pkey|CREATE UNIQUE INDEX production_material_pkey ON public.production_material USING btree (id)
 IDX|production_material|production_material_production_idx|CREATE INDEX production_material_production_idx ON public.production_material USING btree (production_id)
 IDX|production_material|production_material_status_idx|CREATE INDEX production_material_status_idx ON public.production_material USING btree (status_id) WHERE (status_id IS NOT NULL)

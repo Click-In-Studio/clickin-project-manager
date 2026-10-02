@@ -301,6 +301,12 @@ describe("7. 确认入库批次与追加式流水", () => {
     await expect(getPool().query(
       "DELETE FROM production_material_stock_movement WHERE id=$1", [wrong.id],
     )).rejects.toThrow(/append-only/);
+    await expect(appendMaterialStockMovement({
+      productionId: prodId, lotId: lot.id, fromBucket: "maintenance",
+      toBucket: "in_stock", quantity: 1, reversesEventId:
+        (await listMaterialStockMovements(lot.id, prodId))[0].id,
+      createdBy: ownerId,
+    })).rejects.toMatchObject({ reason: "bad_reversal" });
     await appendMaterialStockMovement({
       productionId: prodId, lotId: lot.id, fromBucket: "maintenance",
       toBucket: "in_stock", quantity: 1, reversesEventId: wrong.id,
@@ -309,6 +315,16 @@ describe("7. 确认入库批次与追加式流水", () => {
     expect(await getMaterial(m.id, prodId)).toMatchObject({
       inStockQuantity: 2, maintenanceQuantity: 0,
     });
+
+    await appendMaterialStockMovement({
+      productionId: prodId, lotId: lot.id, fromBucket: "in_stock",
+      toBucket: "maintenance", quantity: 1, createdBy: ownerId,
+    });
+    await expect(appendMaterialStockMovement({
+      productionId: prodId, lotId: lot.id, fromBucket: "maintenance",
+      toBucket: "in_stock", quantity: 1, reversesEventId: wrong.id,
+      createdBy: ownerId,
+    })).rejects.toThrow(/material_stock_movement_single_reversal/);
   });
 
   it("定义更新不能绕过流水覆盖数量或库位", async () => {
