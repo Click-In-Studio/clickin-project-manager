@@ -5,16 +5,14 @@ import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { canCreateMaterial } from "@/lib/ops/material-perm";
 import { parseTaskSubject } from "@/lib/ops/task-poc";
 import {
-  createMaterial, listMaterials, listMaterialStatuses, MaterialError,
+  createMaterial, listMaterials, MaterialError,
 } from "@/lib/ops/material-db";
 import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 /**
- * GET — 物料台账 + 可用状态列表。
- *
- * 一次返回两样：台账要渲染状态色块，分开两个请求没意义。
+ * GET — 物料台账及流水派生数量。
  * 读门 `material/*@view` 在全员基线里（同 milestone / announcement 那一档的参考
  * 信息——剧组里道具在哪本来就是公开的）。
  */
@@ -27,11 +25,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "material", "*", "*", "view"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const [materials, statuses] = await Promise.all([
-    listMaterials(productionId),
-    listMaterialStatuses(productionId),
-  ]);
-  return Response.json({ materials, statuses });
+  return Response.json({ materials: await listMaterials(productionId) });
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
@@ -44,6 +38,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const parsedBody = await readJsonObject(req);
   if (!parsedBody.ok) return parsedBody.response;
   const body = parsedBody.value;
+  if (body.statusId !== undefined)
+    return Response.json({ error: "物料状态由流转记录决定" }, { status: 400 });
   const code = typeof body.code === "string" ? body.code.trim() : "";
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!code) return Response.json({ error: "编号不能为空" }, { status: 400 });
@@ -64,7 +60,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       productionId, code, name,
       category: typeof body.category === "string" ? body.category : "",
       subject: parsed.subject,
-      statusId: typeof body.statusId === "string" ? body.statusId : null,
       location: typeof body.location === "string" ? body.location : "",
       quantity: typeof body.quantity === "number" ? body.quantity : 1,
       notes: typeof body.notes === "string" ? body.notes : "",

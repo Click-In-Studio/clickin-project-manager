@@ -6,7 +6,7 @@ import { getSession } from "@/lib/account/session";
 import { getProductionName } from "@/lib/production/production-db";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
-import { listMaterials, listMaterialStatuses } from "@/lib/ops/material-db";
+import { listMaterials } from "@/lib/ops/material-db";
 import responsive from "@/components/ops/responsive.module.css";
 
 export const metadata: Metadata = { title: "实体物料" };
@@ -30,17 +30,15 @@ export default async function MaterialsPage({ params }: { params: Promise<{ id: 
   if (!await hasEffectiveGrant(actor, id, "material", "*", "*", "view"))
     redirect(`/unauthorized?resource=node%3Amaterial%2F*%40view&id=${id}`);
 
-  const [materials, statuses] = await Promise.all([listMaterials(id), listMaterialStatuses(id)]);
-
-  // 状态是**自由列表不是状态机**（db/add-material-ledger.sql 的立意）——「可用 / 使用中 /
-  // 需处理」这种归类需要知道每个状态的语义，而剧组可以自己加状态、改名字。所以这里
-  // 不猜语义，按实际状态逐个计数：总数 + 每个在用状态一张卡。剧组加了状态，卡就跟着多。
-  const byStatus = new Map<string, number>();
-  for (const m of materials) byStatus.set(m.statusId ?? "", (byStatus.get(m.statusId ?? "") ?? 0) + 1);
-  const statusCards = statuses
-    .filter(s => byStatus.has(s.id))
-    .map(s => ({ label: s.name, value: String(byStatus.get(s.id)), color: s.color }));
-  const noStatus = byStatus.get("") ?? 0;
+  const materials = await listMaterials(id);
+  // 统计物料种类，不把卷、台、米等不同单位相加；同一物料可分布在多个状态。
+  const statusCards = [
+    ["有待到货", "expectedQuantity"], ["有在库", "inStockQuantity"],
+    ["有签出", "checkedOutQuantity"], ["有维修", "maintenanceQuantity"],
+    ["有退出", "exitedQuantity"],
+    ["有取消", "cancelledQuantity"],
+  ].map(([label, key]) => ({ label, value: String(materials.filter(m =>
+    Number(m[key as keyof typeof m]) > 0).length), color: null as string | null }));
 
   return (
     <div style={{ padding: PAD, minHeight: "100vh", background: "var(--paper)" }}>
@@ -59,7 +57,6 @@ export default async function MaterialsPage({ params }: { params: Promise<{ id: 
           <div className={`${responsive.metricGrid} ${responsive.materialMetricGrid}`}>
             {[{ label: "物料总数", value: String(materials.length), color: null as string | null },
               ...statusCards,
-              ...(noStatus ? [{ label: "未设状态", value: String(noStatus), color: null as string | null }] : []),
             ].map(card => (
               <div key={card.label} className={`${responsive.metricCard} ${responsive.materialMetricCard}`}>
                 <strong className={`${responsive.metricValue} ${responsive.materialMetricValue}`} style={{ color: card.color ?? "var(--ink)" }}>{card.value}</strong>
@@ -71,7 +68,7 @@ export default async function MaterialsPage({ params }: { params: Promise<{ id: 
           <div style={{ overflowX: "auto", ...CARD }}>
             <div style={{ minWidth: 720 }}>
               <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 12, padding: "10px 16px", borderBottom: "1px solid var(--line)", color: "var(--muted)", fontSize: 9, fontWeight: 700, letterSpacing: ".08em" }}>
-                <span>编号</span><span>名称</span><span>分类</span><span>负责方</span><span>状态</span><span>位置</span>
+                <span>编号</span><span>名称</span><span>分类</span><span>负责方</span><span>库存数量</span><span>登记库位</span>
               </div>
               {materials.map(item => (
                 <div key={item.id} style={{ display: "grid", gridTemplateColumns: COLS, gap: 12, alignItems: "center", padding: "14px 16px", borderBottom: "1px solid var(--line)", fontSize: 11 }}>
@@ -80,8 +77,11 @@ export default async function MaterialsPage({ params }: { params: Promise<{ id: 
                   <span>{item.category || "—"}</span>
                   {/* 责任方是部门**或**用户组（二选一，见 lib/ops/task-poc.ts 的 TaskSubject） */}
                   <span>{item.departmentName ?? item.groupName ?? "—"}</span>
-                  {/* 颜色取状态自己带的那个，不靠名字里有没有「待」「制作」去猜 */}
-                  <span style={{ color: item.statusColor ?? "var(--muted)" }}>{item.statusName ?? "—"}</span>
+                  <span>在库 {item.inStockQuantity}{item.unit} · 签出 {item.checkedOutQuantity}{item.unit}
+                    {item.expectedQuantity > 0 && ` · 待到货 ${item.expectedQuantity}${item.unit}`}
+                    {item.maintenanceQuantity > 0 && ` · 维修 ${item.maintenanceQuantity}${item.unit}`}
+                    {item.exitedQuantity > 0 && ` · 退出 ${item.exitedQuantity}${item.unit}`}
+                    {item.cancelledQuantity > 0 && ` · 取消 ${item.cancelledQuantity}${item.unit}`}</span>
                   <span style={{ color: "var(--muted)" }}>{item.location || "—"}</span>
                 </div>
               ))}

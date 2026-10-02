@@ -11,9 +11,14 @@ export const DEFAULT_MATERIAL_UNITS = [
 ] as const;
 
 export const MATERIAL_STOCK_BUCKETS = [
-  "expected", "in_stock", "checked_out", "maintenance", "exited",
+  "expected", "in_stock", "checked_out", "maintenance", "exited", "cancelled", "adjustment",
 ] as const;
 export type MaterialStockBucket = typeof MATERIAL_STOCK_BUCKETS[number];
+
+/** 校正桶仅用于数量差额，允许负余额，不代表真实物料状态。 */
+export const MATERIAL_EXIT_REASONS = ["lost", "sold", "scrapped", "returned_to_source", "other"] as const;
+export type MaterialExitReason = typeof MATERIAL_EXIT_REASONS[number];
+export type MaterialCustodian = { kind: "user" | "dept" | "group" | "event"; id: string };
 
 /** 批次来源是当时事实的文字快照，不关联联系人或供应商主数据。 */
 export const MATERIAL_SOURCE_TYPES = [
@@ -28,7 +33,7 @@ export type MaterialSourceExceptionKind = typeof MATERIAL_SOURCE_EXCEPTION_KINDS
 
 export const MATERIAL_SOURCE_STATUSES = [
   "not_arrived", "partially_arrived", "fully_arrived",
-  "partially_returned", "fully_returned", "exception_open",
+  "partially_returned", "fully_returned", "exception_open", "cancelled",
 ] as const;
 export type MaterialSourceStatus = typeof MATERIAL_SOURCE_STATUSES[number];
 
@@ -51,17 +56,22 @@ export function isMaterialSourceExceptionKind(
 
 export function deriveMaterialSourceStatus(facts: {
   confirmedQuantity: number;
+  cancelledQuantity?: number;
   arrivedQuantity: number;
   returnDueQuantity: number | null;
   returnedQuantity: number;
   openExceptionQuantity: number;
 }): MaterialSourceStatus {
   if (facts.openExceptionQuantity > 0) return "exception_open";
-  if (facts.returnDueQuantity !== null && facts.returnedQuantity >= facts.returnDueQuantity)
+  const effectiveQuantity = facts.confirmedQuantity - (facts.cancelledQuantity ?? 0);
+  if (effectiveQuantity <= 0) return "cancelled";
+  const due = facts.returnDueQuantity === null ? null
+    : Math.min(facts.returnDueQuantity, effectiveQuantity);
+  if (due !== null && facts.returnedQuantity >= due)
     return "fully_returned";
   if (facts.returnedQuantity > 0) return "partially_returned";
   if (facts.arrivedQuantity <= 0) return "not_arrived";
-  if (facts.arrivedQuantity < facts.confirmedQuantity) return "partially_arrived";
+  if (facts.arrivedQuantity < effectiveQuantity) return "partially_arrived";
   return "fully_arrived";
 }
 

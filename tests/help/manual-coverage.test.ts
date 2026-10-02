@@ -44,7 +44,6 @@ const EXTRA_ROUTES = new Set([
 const MISSING_ALLOWED = new Set<string>([
   // #535 制作（后半）：物料页目前只有查看、没有录入界面（#310），
   // 等写入口落地再写手册页，届时一并从这里划掉
-  "materials",
 ]);
 
 /** `_TEMPLATE.md` 的四个固定小节；内容 issue 的验收标准之一是「按模板写」。 */
