@@ -7,7 +7,7 @@ who: 项目所有者与制作人
 tier: all
 platform: [desktop, mobile]
 related: [admin/approval/access-requests, admin/security/permission-center]
-updated: 2026-09-27
+updated: 2026-09-30
 ---
 
 ## 这是什么
@@ -30,7 +30,7 @@ updated: 2026-09-27
 5. 「转回草稿」让项目回到默认阶梯。
 
 > [!📱]
-> 手机上模版清单在流程图上方，点节点后在卡片内展开设置。还没有模版时，提示会完整换行显示；点「新建模版」即可开始。
+> 手机上模版清单在流程图上方，点节点后在卡片内展开设置。还没有模版时，提示会完整换行显示；选择模版，或点「新建模版」开始设计。
 
 ## 注意事项
 

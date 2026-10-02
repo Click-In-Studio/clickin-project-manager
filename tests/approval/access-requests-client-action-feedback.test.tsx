@@ -55,7 +55,11 @@ beforeEach(() => {
   fetchMock.mockImplementation((url) => {
     if (url.endsWith("/pending-approvals")) return jsonRes({ approvals: pending });
     if (url.endsWith("/access-requests")) return jsonRes({ requests: [] });
-    if (url.endsWith("/flow")) return jsonRes({ error: "nope" }, 404);
+    if (url.endsWith("/flow")) return jsonRes({
+      request: pending[0] ?? request(),
+      flow: { mode: "ladder", remaining: [] },
+      viewerActions: { canApprove: true, canReject: true, canEscalate: true, canCancel: false },
+    });
     throw new Error(`unexpected fetch ${url}`);
   });
   (globalThis as { fetch: unknown }).fetch = fetchMock;
@@ -78,12 +82,13 @@ const postCalls = (suffix: string) =>
   fetchMock.mock.calls.filter(([url, init]) => init?.method === "POST" && url.endsWith(suffix));
 
 /** 挂载 → 切到「待审批」→ 在桌面列表里选中这条申请（列表项带申请人前缀，手机卡片不带）。 */
-async function mountAndSelect() {
+async function mountAndSelect(expectApprove = true) {
   await act(async () => { root.render(<AccessRequestsClient productionId="prod_test" productionName="测试演出" canManageFlows={false} />); });
   await act(async () => { await Promise.resolve(); });
   await act(async () => { buttons().find((b) => b.textContent?.startsWith("待审批"))!.click(); });
   await act(async () => { buttons().find((b) => b.textContent?.includes("李四 · Cue表"))!.click(); });
-  expect(detailButton("批准")).toBeDefined();
+  await act(async () => { await Promise.resolve(); });
+  if (expectApprove) expect(detailButton("批准")).toBeDefined();
 }
 
 /** 让 approve 请求挂起，返回 resolve 句柄。 */
@@ -124,6 +129,48 @@ describe("AccessRequestsClient — 审批动作的在途态与结果反馈（#59
     expect(container.textContent).toContain("暂无待审批申请");
   });
 
+  it("批准 A 等待期间切到 B：A 的回包不覆盖 B，且全局串行动作不会提前解锁", async () => {
+    const first = request();
+    const second = request({ id: "ar_2", subjectId: "u_second", subjectName: "赵六" });
+    pending = [first, second];
+    let resolveApprove!: (value: unknown) => void;
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url, init) => {
+      if (url.endsWith("/ar_1/approve") && init?.method === "POST") {
+        return new Promise((resolve) => { resolveApprove = resolve; });
+      }
+      if (url.endsWith("/ar_1/flow")) return jsonRes({
+        request: first,
+        flow: { mode: "ladder", remaining: [] },
+        viewerActions: { canApprove: true, canReject: true, canEscalate: true, canCancel: false },
+      });
+      if (url.endsWith("/ar_2/flow")) return jsonRes({
+        request: second,
+        flow: { mode: "ladder", remaining: [] },
+        viewerActions: { canApprove: true, canReject: true, canEscalate: true, canCancel: false },
+      });
+      return base(url, init);
+    });
+
+    await mountAndSelect();
+    await act(async () => { detailButton("批准")!.click(); });
+    await act(async () => { buttons().find((button) => button.textContent?.includes("赵六 ·"))!.click(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(detailPane()?.textContent).toContain("赵六");
+    expect(detailButton("批准")!.disabled).toBe(true);
+
+    pending = [second];
+    await act(async () => {
+      resolveApprove({ ok: true, status: 200, json: () => Promise.resolve({
+        request: request({ status: "approved", resolvedAt: NOW, resolvedBy: "u_me", grantedAt: NOW, canFinalize: null }),
+      }) });
+    });
+
+    expect(detailPane()?.textContent).toContain("赵六");
+    expect(detailPane()?.textContent).not.toContain("李四");
+    expect(detailButton("批准")!.disabled).toBe(false);
+  });
+
   it("转交到下一级：申请仍在等待但已不归我管，面板关掉而不是留着「批准」可点", async () => {
     await mountAndSelect();
     const base = fetchMock.getMockImplementation()!;
@@ -153,6 +200,25 @@ describe("AccessRequestsClient — 审批动作的在途态与结果反馈（#59
     expect(detailButton("批准")!.disabled).toBe(false);
   });
 
+  it("服务端拒绝且申请已被他人处理：刷新待办后关闭旧详情，不保留失效动作", async () => {
+    await mountAndSelect();
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url, init) => {
+      if (url.endsWith("/approve") && init?.method === "POST") {
+        pending = [];
+        return jsonRes({ error: "申请已被他人处理" }, 409);
+      }
+      return base(url, init);
+    });
+
+    await act(async () => { detailButton("批准")!.click(); });
+    expect(container.textContent).toContain("暂无待审批申请");
+    expect(detailPane()).toBeNull();
+    expect(detailButton("批准")).toBeUndefined();
+    expect(detailButton("拒绝")).toBeUndefined();
+    expect(detailButton("向上转交")).toBeUndefined();
+  });
+
   it("网络错误（fetch 拒绝）：写「网络错误」并恢复按钮，不成为未处理 rejection", async () => {
     await mountAndSelect();
     const base = fetchMock.getMockImplementation()!;
@@ -165,5 +231,31 @@ describe("AccessRequestsClient — 审批动作的在途态与结果反馈（#59
     expect(container.textContent).toContain("网络错误");
     expect(detailButton("拒绝")!.disabled).toBe(false);
     expect(detailButton("拒绝")!.textContent).toBe("拒绝");
+  });
+
+  it("详情动作只认实例接口：列表说可终局、接口只准转交时不显示批准或拒绝", async () => {
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url, init) => {
+      if (url.endsWith("/flow")) return jsonRes({
+        request: request({ canFinalize: true }),
+        flow: { mode: "ladder", remaining: [] },
+        viewerActions: { canApprove: false, canReject: false, canEscalate: true, canCancel: false },
+      });
+      return base(url, init);
+    });
+
+    await mountAndSelect(false);
+    expect(detailButton("批准")).toBeUndefined();
+    expect(detailButton("拒绝")).toBeUndefined();
+    expect(detailButton("向上转交")).toBeDefined();
+  });
+
+  it("手机详情使用独立对话层，并提供可达的返回入口", async () => {
+    await mountAndSelect();
+    const drawer = container.querySelector('[role="dialog"][aria-label="审批详情"]');
+    expect(drawer).not.toBeNull();
+    const back = drawer!.querySelector<HTMLButtonElement>('button[aria-label="返回审批列表"]')!;
+    await act(async () => { back.click(); });
+    expect(container.querySelector('[role="dialog"][aria-label="审批详情"]')).toBeNull();
   });
 });

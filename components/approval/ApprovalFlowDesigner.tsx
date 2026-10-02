@@ -416,7 +416,7 @@ export default function ApprovalFlowDesigner({ productionId }: { productionId: s
 
         <section className={styles.approvalFlowCanvas}>
           {!selectedTemplate ? (
-            <p className={styles.approvalDesignerHint}>选择左侧模版，或「新建模版」开始设计。</p>
+            <p className={styles.approvalDesignerHint}>选择模版，或「新建模版」开始设计。</p>
           ) : (
             <>
               <div className={styles.approvalFlowCanvasTopline}>
