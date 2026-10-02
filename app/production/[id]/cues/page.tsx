@@ -49,7 +49,6 @@ export default async function CuesPage({
   return (
     <CuePage
       productionId={id}
-      productionName={name}
       blocks={production.state.blocks}
       characters={production.state.characters}
       scenes={production.state.scenes}

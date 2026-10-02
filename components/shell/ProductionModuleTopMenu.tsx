@@ -6,6 +6,7 @@ import ProductionTopMenu, {
   PRODUCTION_TOOLBAR_STAGE,
   ProductionTopMenuContext,
   ProductionTopMenuDivider,
+  type ProductionTopMenuSide,
   useProductionToolbar,
 } from "./ProductionTopMenu";
 
@@ -26,16 +27,16 @@ export const PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS =
  * 表达，不再各页另写媒体查询或宽度判断。
  */
 export default function ProductionModuleTopMenu({
-  productionName,
   label,
+  side = "stage",
   primaryAction,
   primaryShortAction,
   primaryOverflowAction,
   secondaryActions,
   secondaryOverflowActions,
 }: {
-  productionName: string;
   label: string;
+  side?: Extract<ProductionTopMenuSide, "overview" | "stage">;
   primaryAction?: ReactNode;
   primaryShortAction?: ReactNode;
   primaryOverflowAction?: ReactNode;
@@ -64,7 +65,7 @@ export default function ProductionModuleTopMenu({
 
   return (
     <ProductionTopMenu overflow={overflow}>
-      <ProductionTopMenuContext productionName={productionName} label={label} side="stage" />
+      <ProductionTopMenuContext label={label} side={side} />
       {(visiblePrimary || visibleSecondary) && <ProductionTopMenuDivider />}
       {(visiblePrimary || visibleSecondary) && (
         <div

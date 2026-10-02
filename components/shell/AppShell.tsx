@@ -344,10 +344,8 @@ export default function AppShell({ session, productions, canCreateProduction = f
             className="flex h-full min-w-0 flex-1 items-center"
           >
             <ProductionTopMenuContext
-              productionName={currentProduction?.name ?? ""}
               label={productionTopMenuLabel ?? ""}
-              side={isCreationActive ? "script" : "stage"}
-              stage={productionToolbarStage}
+              side={isCreationActive ? "script" : isProductionOverviewActive ? "overview" : "stage"}
               placeholder
             />
           </div>

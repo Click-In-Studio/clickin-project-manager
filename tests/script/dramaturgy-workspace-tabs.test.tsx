@@ -45,7 +45,6 @@ describe("DramaturgyWorkspaceHeading compact menu", () => {
       }}>
         <DramaturgyWorkspaceHeading
           productionId="demo-misty-harbor"
-          productionName="雾港"
           active="overview"
         />
       </ProductionToolbarContext.Provider>,

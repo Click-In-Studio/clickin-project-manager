@@ -31,6 +31,7 @@ export const PRODUCTION_TOOLBAR_STAGE = {
 } as const;
 
 export type ProductionToolbarStage = typeof PRODUCTION_TOOLBAR_STAGE[keyof typeof PRODUCTION_TOOLBAR_STAGE];
+export type ProductionTopMenuSide = "overview" | "script" | "stage";
 
 export const ProductionToolbarStageContext = createContext<ProductionToolbarStage>(PRODUCTION_TOOLBAR_STAGE.full);
 
@@ -204,38 +205,29 @@ export function ProductionTopMenuDivider() {
 }
 
 export function ProductionTopMenuContext({
-  productionName,
   label,
-  side = "script",
-  stage: stageOverride,
+  side = "overview",
   placeholder = false,
 }: {
-  productionName: string;
   label: string;
-  side?: "script" | "stage";
-  stage?: ProductionToolbarStage;
+  side?: ProductionTopMenuSide;
   placeholder?: boolean;
 }) {
-  const toolbar = useProductionToolbar();
-  const stage = stageOverride ?? toolbar.stage;
-  const compact = stage >= PRODUCTION_TOOLBAR_STAGE.primaryShort;
+  const toneClass = side === "script"
+    ? "border-[#bfd4d6] bg-[#edf5f5] text-[#2f6670]"
+    : side === "stage"
+      ? "border-[#e3c9b9] bg-[#f8eee7] text-[#a55c32]"
+      : "border-[#cbd2cf] bg-[var(--surface-2)] text-[#667676]";
 
   return (
     <div
       data-production-top-menu-context={label}
+      data-production-top-menu-side={side}
       data-production-top-menu-placeholder={placeholder ? "true" : undefined}
-      className={`flex shrink-0 ${compact ? "items-center" : "flex-col"}`}
+      className="flex shrink-0 items-center"
       style={{ lineHeight: 1.2 }}
     >
-      {!compact && (
-        <span className={`max-w-40 truncate whitespace-nowrap text-[9px] font-bold uppercase tracking-[0.12em] ${side === "stage" ? "text-[var(--stage)]" : "text-[var(--script)]"}`}>
-          {productionName}
-        </span>
-      )}
-      <span className={compact
-        ? "inline-flex h-7 items-center rounded-md border border-[var(--line)] bg-[var(--surface)] px-2 text-xs font-semibold text-[var(--ink)] shadow-sm"
-        : "text-xs font-semibold text-[var(--ink)]"
-      }>
+      <span className={`inline-flex h-7 items-center rounded-md border px-2 text-xs font-semibold shadow-sm ${toneClass}`}>
         {label}
       </span>
     </div>

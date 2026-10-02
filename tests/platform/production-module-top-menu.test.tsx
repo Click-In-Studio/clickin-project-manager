@@ -45,7 +45,6 @@ function renderAt(stage: number) {
       setHasStoredControls: () => {},
     }}>
       <ProductionModuleTopMenu
-        productionName="海边的剧"
         label="财务"
         primaryAction={<button>新建报销</button>}
         primaryShortAction={<button aria-label="新建报销">＋</button>}
@@ -58,9 +57,12 @@ function renderAt(stage: number) {
 }
 
 describe("制作侧共享顶部栏操作收缩", () => {
-  it("宽屏显示项目、模块、主操作与次操作", () => {
+  it("宽屏只显示带制作侧配色的模块名、主操作与次操作", () => {
     renderAt(PRODUCTION_TOOLBAR_STAGE.full);
-    expect(toolbarSlot.textContent).toContain("海边的剧财务");
+    expect(toolbarSlot.textContent).not.toContain("海边的剧");
+    expect(toolbarSlot.textContent).toContain("财务");
+    expect(toolbarSlot.querySelector('[data-production-top-menu-side="stage"]')?.lastElementChild?.className)
+      .toContain("bg-[#f8eee7]");
     expect(toolbarSlot.textContent).toContain("新建报销");
     expect(toolbarSlot.textContent).toContain("管理预算");
     expect(overflowSlot.textContent).toBe("");

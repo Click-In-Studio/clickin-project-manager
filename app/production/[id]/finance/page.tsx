@@ -166,7 +166,6 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
   return (
     <div style={{ padding: PAD, minHeight: "100vh", background: "var(--paper)" }}>
       <ProductionModuleTopMenu
-        productionName={name}
         label="财务"
         secondaryActions={canFinanceConfig
           ? <Link href={`/production/${id}/admin/finance`} className={PRODUCTION_MODULE_SECONDARY_ACTION_CLASS}>管理预算</Link>

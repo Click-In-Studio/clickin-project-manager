@@ -89,7 +89,7 @@ beforeEach(async () => {
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(<ApprovalCenterClient productionId="prod_1" productionName="测试项目" actorId="user_1" archived={false} />);
+    root.render(<ApprovalCenterClient productionId="prod_1" actorId="user_1" archived={false} />);
   });
 });
 

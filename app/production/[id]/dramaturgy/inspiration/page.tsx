@@ -45,7 +45,7 @@ export default async function DramaturgyInspirationPage({
 
   return (
     <>
-      <DramaturgyInspirationShell productionId={productionId} productionName={productionName}>
+      <DramaturgyInspirationShell productionId={productionId}>
         <WikiShell
           assetActions={assetActions}
           productionId={productionId}

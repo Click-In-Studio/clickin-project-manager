@@ -17,7 +17,6 @@ const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
 
 type Props = {
   productionId: string;
-  productionName: string;
   initialCharacters: CharacterDetail[];
   /** 逐动作权限（create / edit / delete 是三条不同的路由门，见 lib/script/character-perms） */
   perms: CharacterPerms;
@@ -726,7 +725,7 @@ function AddCharacterForm({
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
-export default function CharactersManager({ productionId, productionName, initialCharacters, perms, embedded, versionId, initialExpandedId }: Props) {
+export default function CharactersManager({ productionId, initialCharacters, perms, embedded, versionId, initialExpandedId }: Props) {
   const canCreate = perms.create;
   const { stage: toolbarStage } = useProductionToolbar();
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
@@ -900,7 +899,6 @@ export default function CharactersManager({ productionId, productionName, initia
       >
         <DramaturgyWorkspaceHeading
           productionId={productionId}
-          productionName={productionName}
           active="characters"
         />
         <ProductionTopMenuDivider />

@@ -99,7 +99,6 @@ describe("构作与角色的列表 / 表格偏好", () => {
     const charactersHtml = renderToString(
       <CharactersManager
         productionId="p1"
-        productionName="测试演出"
         initialCharacters={[]}
         perms={NO_CHARACTER_PERMS}
       />,

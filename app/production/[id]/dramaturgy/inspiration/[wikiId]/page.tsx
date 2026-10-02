@@ -77,7 +77,7 @@ export default async function DramaturgyInspirationDocPage({
   if (!canView) {
     const applyResource = `node:wiki/${docId}@view`;
     return (
-      <DramaturgyInspirationShell productionId={productionId} productionName={productionName}>
+      <DramaturgyInspirationShell productionId={productionId}>
         <WikiShell
           assetActions={assetActions}
           productionId={productionId}
@@ -116,7 +116,7 @@ export default async function DramaturgyInspirationDocPage({
 
   return (
     <>
-      <DramaturgyInspirationShell productionId={productionId} productionName={productionName}>
+      <DramaturgyInspirationShell productionId={productionId}>
         <WikiShell
           assetActions={assetActions}
           productionId={productionId}
