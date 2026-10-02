@@ -713,6 +713,25 @@ COL|production_invite|revoked_at|timestamp with time zone|timestamptz|YES|
 COL|production_invite|target_user_id|uuid|uuid|YES|
 COL|production_invite|token|uuid|uuid|NO|gen_random_uuid()
 COL|production_invite|used_count|integer|int4|NO|0
+COL|production_material_source_exception|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_material_source_exception|created_by|uuid|uuid|NO|
+COL|production_material_source_exception|id|text|text|NO|
+COL|production_material_source_exception|kind|text|text|NO|
+COL|production_material_source_exception|lot_id|text|text|NO|
+COL|production_material_source_exception|note|text|text|NO|''::text
+COL|production_material_source_exception|occurred_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_material_source_exception|production_id|text|text|NO|
+COL|production_material_source_exception|quantity|numeric|numeric|NO|
+COL|production_material_source_exception|resolves_exception_id|text|text|YES|
+COL|production_material_source_exception|source_return_id|text|text|YES|
+COL|production_material_source_return|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|production_material_source_return|created_by|uuid|uuid|NO|
+COL|production_material_source_return|id|text|text|NO|
+COL|production_material_source_return|lot_id|text|text|NO|
+COL|production_material_source_return|movement_id|text|text|NO|
+COL|production_material_source_return|note|text|text|NO|''::text
+COL|production_material_source_return|production_id|text|text|NO|
+COL|production_material_source_return|returned_at|timestamp with time zone|timestamptz|NO|
 COL|production_material_status|color|text|text|YES|
 COL|production_material_status|id|uuid|uuid|NO|gen_random_uuid()
 COL|production_material_status|is_system|boolean|bool|NO|false
@@ -722,16 +741,24 @@ COL|production_material_status|production_id|text|text|YES|
 COL|production_material_stock_lot|confirmed_quantity|numeric|numeric|NO|
 COL|production_material_stock_lot|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_material_stock_lot|created_by|uuid|uuid|NO|
+COL|production_material_stock_lot|expected_arrival_at|timestamp with time zone|timestamptz|YES|
 COL|production_material_stock_lot|id|text|text|NO|
 COL|production_material_stock_lot|location|text|text|NO|''::text
 COL|production_material_stock_lot|material_id|uuid|uuid|NO|
 COL|production_material_stock_lot|production_id|text|text|NO|
+COL|production_material_stock_lot|return_due_at|timestamp with time zone|timestamptz|YES|
+COL|production_material_stock_lot|return_due_quantity|numeric|numeric|YES|
+COL|production_material_stock_lot|source_label|text|text|NO|''::text
+COL|production_material_stock_lot|source_note|text|text|NO|''::text
+COL|production_material_stock_lot|source_reference|text|text|NO|''::text
+COL|production_material_stock_lot|source_type|text|text|NO|'existing'::text
 COL|production_material_stock_movement|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_material_stock_movement|created_by|uuid|uuid|NO|
 COL|production_material_stock_movement|from_bucket|text|text|NO|
 COL|production_material_stock_movement|id|text|text|NO|
 COL|production_material_stock_movement|lot_id|text|text|NO|
 COL|production_material_stock_movement|note|text|text|NO|''::text
+COL|production_material_stock_movement|occurred_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_material_stock_movement|production_id|text|text|NO|
 COL|production_material_stock_movement|quantity|numeric|numeric|NO|
 COL|production_material_stock_movement|return_of_movement_id|text|text|YES|
@@ -1444,10 +1471,28 @@ CON|production_invite|production_invite_kind_check|CHECK ((kind = ANY (ARRAY['st
 CON|production_invite|production_invite_pkey|PRIMARY KEY (token)
 CON|production_invite|production_invite_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|production_invite|production_invite_target_user_id_fkey|FOREIGN KEY (target_user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|production_material_source_exception|material_source_exception_lot_fk|FOREIGN KEY (lot_id, production_id) REFERENCES production_material_stock_lot(id, production_id) ON DELETE RESTRICT
+CON|production_material_source_exception|material_source_exception_not_self|CHECK (((resolves_exception_id IS NULL) OR (resolves_exception_id <> id)))
+CON|production_material_source_exception|production_material_source_exception_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|production_material_source_exception|production_material_source_exception_kind_check|CHECK ((kind = ANY (ARRAY['lost'::text, 'damaged'::text, 'short'::text])))
+CON|production_material_source_exception|production_material_source_exception_pkey|PRIMARY KEY (id)
+CON|production_material_source_exception|production_material_source_exception_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_material_source_exception|production_material_source_exception_quantity_check|CHECK ((quantity > (0)::numeric))
+CON|production_material_source_exception|production_material_source_exception_resolves_exception_id_fkey|FOREIGN KEY (resolves_exception_id) REFERENCES production_material_source_exception(id) ON DELETE CASCADE
+CON|production_material_source_exception|production_material_source_exception_resolves_exception_id_key|UNIQUE (resolves_exception_id)
+CON|production_material_source_exception|production_material_source_exception_source_return_id_fkey|FOREIGN KEY (source_return_id) REFERENCES production_material_source_return(id) ON DELETE CASCADE
+CON|production_material_source_return|material_source_return_lot_fk|FOREIGN KEY (lot_id, production_id) REFERENCES production_material_stock_lot(id, production_id) ON DELETE RESTRICT
+CON|production_material_source_return|production_material_source_return_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|production_material_source_return|production_material_source_return_movement_id_fkey|FOREIGN KEY (movement_id) REFERENCES production_material_stock_movement(id) ON DELETE CASCADE
+CON|production_material_source_return|production_material_source_return_movement_id_key|UNIQUE (movement_id)
+CON|production_material_source_return|production_material_source_return_pkey|PRIMARY KEY (id)
+CON|production_material_source_return|production_material_source_return_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|production_material_status|production_material_status_pkey|PRIMARY KEY (id)
 CON|production_material_status|production_material_status_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|production_material_stock_lot|material_stock_lot_id_production_unique|UNIQUE (id, production_id)
 CON|production_material_stock_lot|material_stock_lot_material_fk|FOREIGN KEY (material_id, production_id) REFERENCES production_material(id, production_id) ON DELETE RESTRICT
+CON|production_material_stock_lot|material_stock_lot_return_obligation_check|CHECK ((((source_type = ANY (ARRAY['rented'::text, 'borrowed'::text])) AND (btrim(source_label) <> ''::text) AND (return_due_at IS NOT NULL) AND (return_due_quantity IS NOT NULL) AND (return_due_quantity > (0)::numeric) AND (return_due_quantity <= confirmed_quantity)) OR ((source_type <> ALL (ARRAY['rented'::text, 'borrowed'::text])) AND (return_due_at IS NULL) AND (return_due_quantity IS NULL))))
+CON|production_material_stock_lot|material_stock_lot_source_type_check|CHECK ((source_type = ANY (ARRAY['existing'::text, 'purchased'::text, 'produced'::text, 'rented'::text, 'borrowed'::text])))
 CON|production_material_stock_lot|production_material_stock_lot_confirmed_quantity_check|CHECK ((confirmed_quantity > (0)::numeric))
 CON|production_material_stock_lot|production_material_stock_lot_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
 CON|production_material_stock_lot|production_material_stock_lot_pkey|PRIMARY KEY (id)
@@ -1664,7 +1709,9 @@ ENUM|block_type|dialogue,stage,lyric,chapter_marker,scene_marker,rehearsal_marke
 EXT|pg_trgm
 EXT|vector
 FUNC|enforce_asset_single_file_policy()|365c9d113202e7d2a055ccb9782be865
-FUNC|enforce_material_stock_lot_type()|99cf28c156e1b86f0209250754d709b7
+FUNC|enforce_material_source_exception()|dec4f79949751cbf719b18890db4c041
+FUNC|enforce_material_source_return()|ec63e9e2cc78b5966e2aa406a56a9720
+FUNC|enforce_material_stock_lot_type()|7a1cc4f08a36c87cd6882ec9dd0e2598
 FUNC|enforce_material_stock_movement()|3aa936637d6e6c7e97655630c69cdb37
 FUNC|fill_budget_currency_snapshot_compat()|87e692b953ac4b2f97ada09b05bb9e66
 FUNC|fill_expense_currency_snapshot_compat()|463153b17f4c256806deb30ff1afe2b2
@@ -1892,6 +1939,12 @@ IDX|production_invite_claim|production_invite_claim_token_idx|CREATE INDEX produ
 IDX|production_invite_claim|production_invite_claim_token_name_key|CREATE UNIQUE INDEX production_invite_claim_token_name_key ON public.production_invite_claim USING btree (token, name)
 IDX|production_invite|production_invite_pkey|CREATE UNIQUE INDEX production_invite_pkey ON public.production_invite USING btree (token)
 IDX|production_invite|production_invite_prod_idx|CREATE INDEX production_invite_prod_idx ON public.production_invite USING btree (production_id, created_at DESC)
+IDX|production_material_source_exception|production_material_source_exception_lot_idx|CREATE INDEX production_material_source_exception_lot_idx ON public.production_material_source_exception USING btree (production_id, lot_id, occurred_at, id)
+IDX|production_material_source_exception|production_material_source_exception_pkey|CREATE UNIQUE INDEX production_material_source_exception_pkey ON public.production_material_source_exception USING btree (id)
+IDX|production_material_source_exception|production_material_source_exception_resolves_exception_id_key|CREATE UNIQUE INDEX production_material_source_exception_resolves_exception_id_key ON public.production_material_source_exception USING btree (resolves_exception_id)
+IDX|production_material_source_return|production_material_source_return_lot_idx|CREATE INDEX production_material_source_return_lot_idx ON public.production_material_source_return USING btree (production_id, lot_id, returned_at, id)
+IDX|production_material_source_return|production_material_source_return_movement_id_key|CREATE UNIQUE INDEX production_material_source_return_movement_id_key ON public.production_material_source_return USING btree (movement_id)
+IDX|production_material_source_return|production_material_source_return_pkey|CREATE UNIQUE INDEX production_material_source_return_pkey ON public.production_material_source_return USING btree (id)
 IDX|production_material_status|pms_prod_name_idx|CREATE UNIQUE INDEX pms_prod_name_idx ON public.production_material_status USING btree (production_id, name) WHERE (production_id IS NOT NULL)
 IDX|production_material_status|pms_system_name_idx|CREATE UNIQUE INDEX pms_system_name_idx ON public.production_material_status USING btree (name) WHERE (production_id IS NULL)
 IDX|production_material_status|production_material_status_pkey|CREATE UNIQUE INDEX production_material_status_pkey ON public.production_material_status USING btree (id)
@@ -2026,6 +2079,10 @@ TRG|asset|asset_file_version_policy_immutable|CREATE TRIGGER asset_file_version_
 TRG|asset|asset_financial_document_type_immutable|CREATE TRIGGER asset_financial_document_type_immutable BEFORE UPDATE OF asset_type ON public.asset FOR EACH ROW EXECUTE FUNCTION prevent_asset_system_type_update()
 TRG|production_budget_item|production_budget_item_currency_snapshot_compat|CREATE TRIGGER production_budget_item_currency_snapshot_compat BEFORE INSERT OR UPDATE OF amount, currency, base_currency, base_amount, exchange_rate, exchange_rate_date, exchange_rate_source ON public.production_budget_item FOR EACH ROW EXECUTE FUNCTION fill_budget_currency_snapshot_compat()
 TRG|production_expense|production_expense_currency_snapshot_compat|CREATE TRIGGER production_expense_currency_snapshot_compat BEFORE INSERT OR UPDATE OF amount, currency, status, base_currency, base_amount, exchange_rate, exchange_rate_date, exchange_rate_source ON public.production_expense FOR EACH ROW EXECUTE FUNCTION fill_expense_currency_snapshot_compat()
+TRG|production_material_source_exception|production_material_source_exception_guard|CREATE TRIGGER production_material_source_exception_guard BEFORE INSERT ON public.production_material_source_exception FOR EACH ROW EXECUTE FUNCTION enforce_material_source_exception()
+TRG|production_material_source_exception|production_material_source_exception_immutable|CREATE TRIGGER production_material_source_exception_immutable BEFORE DELETE OR UPDATE ON public.production_material_source_exception FOR EACH ROW EXECUTE FUNCTION reject_material_stock_history_change()
+TRG|production_material_source_return|production_material_source_return_guard|CREATE TRIGGER production_material_source_return_guard BEFORE INSERT ON public.production_material_source_return FOR EACH ROW EXECUTE FUNCTION enforce_material_source_return()
+TRG|production_material_source_return|production_material_source_return_immutable|CREATE TRIGGER production_material_source_return_immutable BEFORE DELETE OR UPDATE ON public.production_material_source_return FOR EACH ROW EXECUTE FUNCTION reject_material_stock_history_change()
 TRG|production_material_stock_lot|production_material_stock_lot_immutable|CREATE TRIGGER production_material_stock_lot_immutable BEFORE DELETE OR UPDATE ON public.production_material_stock_lot FOR EACH ROW EXECUTE FUNCTION reject_material_stock_history_change()
 TRG|production_material_stock_lot|production_material_stock_lot_type_guard|CREATE TRIGGER production_material_stock_lot_type_guard BEFORE INSERT ON public.production_material_stock_lot FOR EACH ROW EXECUTE FUNCTION enforce_material_stock_lot_type()
 TRG|production_material_stock_movement|production_material_stock_movement_guard|CREATE TRIGGER production_material_stock_movement_guard BEFORE INSERT ON public.production_material_stock_movement FOR EACH ROW EXECUTE FUNCTION enforce_material_stock_movement()
