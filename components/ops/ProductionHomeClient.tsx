@@ -133,7 +133,6 @@ function ProjectProgressHero({
         >
           <strong>{awaitingReqs.length}</strong>
           <span className={styles.progressMetricLabel}>待处理通知</span>
-          {awaitingReqs.length > 0 && <small>需要你的确认</small>}
         </Link>
 
         {/* Cue 风险 */}
@@ -143,7 +142,6 @@ function ProjectProgressHero({
         >
           <strong>{cueWarningCount}</strong>
           <span className={styles.progressMetricLabel}>Cue 风险提示</span>
-          {cueWarningCount > 0 && <small>有待处理风险</small>}
         </Link>
       </div>
     </section>
