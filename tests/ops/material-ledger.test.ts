@@ -258,7 +258,8 @@ describe("7. 确认入库批次与追加式流水", () => {
     });
     await appendMaterialStockMovement({
       productionId: prodId, lotId: lot.id, fromBucket: "checked_out",
-      toBucket: "in_stock", quantity: 3, note: "返还三卷", createdBy: ownerId,
+      toBucket: "in_stock", quantity: 3, returnOfMovementId: checkout.id,
+      note: "返还三卷", createdBy: ownerId,
     });
     expect(await getMaterial(m.id, prodId)).toMatchObject({
       inStockQuantity: 3, checkedOutQuantity: 2, heldQuantity: 5,
