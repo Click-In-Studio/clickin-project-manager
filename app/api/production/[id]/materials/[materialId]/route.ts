@@ -25,6 +25,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const parsedBody = await readJsonObject(req);
   if (!parsedBody.ok) return parsedBody.response;
   const body = parsedBody.value;
+  if (body.statusId !== undefined)
+    return Response.json({ error: "物料状态由流转记录决定" }, { status: 400 });
   if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim()))
     return Response.json({ error: "名称不能为空" }, { status: 400 });
   if (body.quantity !== undefined && (typeof body.quantity !== "number" || body.quantity < 0))
@@ -40,8 +42,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       code: typeof body.code === "string" ? body.code : undefined,
       name: typeof body.name === "string" ? body.name : undefined,
       category: typeof body.category === "string" ? body.category : undefined,
-      statusId: body.statusId === null || typeof body.statusId === "string"
-        ? body.statusId as string | null : undefined,
       location: typeof body.location === "string" ? body.location : undefined,
       quantity: typeof body.quantity === "number" ? body.quantity : undefined,
       notes: typeof body.notes === "string" ? body.notes : undefined,

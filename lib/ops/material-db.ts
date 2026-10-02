@@ -13,7 +13,7 @@
  * 入库的批次；production_material_stock_movement 是不可改写的数量流水。当前库存只能
  * 从批次和流水推导，不能覆盖写一个 quantity/当前桶位值。
  *
- * status_id 是 #820 接管状态机前的旧页面展示字段，不参与库存计算。
+ * 状态完全由数量流水派生，不读取旧自由状态字典。
  */
 
 import { randomBytes } from "node:crypto";
@@ -23,16 +23,8 @@ import { subjectColumns, type TaskSubject } from "./task-poc";
 import {
   deriveMaterialSourceStatus, isMaterialSourceType, isMaterialTrackingStrategy,
   quantityFitsScale, type MaterialSourceStatus, type MaterialSourceType,
-  type MaterialStockBucket, type MaterialTrackingStrategy,
+  type MaterialStockBucket, type MaterialTrackingStrategy, type MaterialExitReason, type MaterialCustodian,
 } from "./material-types";
-
-export type MaterialStatus = {
-  id: string;
-  name: string;
-  color: string | null;
-  orderIndex: number;
-  isSystem: boolean;
-};
 
 export type Material = {
   id: string;
@@ -48,10 +40,7 @@ export type Material = {
   departmentName: string | null;
   groupId: string | null;
   groupName: string | null;
-  statusId: string | null;
-  statusName: string | null;
-  statusColor: string | null;
-  /** 各批次登记库位的汇总，仅供 #820 前旧页面展示。 */
+  /** 各批次初始登记库位，不与责任方或签出去向混用。 */
   location: string;
   expectedQuantity: number;
   heldQuantity: number;
@@ -60,6 +49,7 @@ export type Material = {
   checkedOutQuantity: number;
   maintenanceQuantity: number;
   exitedQuantity: number;
+  cancelledQuantity: number;
   /** 仅 consumable 有业务含义：有效签出减去有效返还。 */
   netConsumedQuantity: number;
   notes: string;
@@ -70,7 +60,7 @@ export type Material = {
 
 export class MaterialError extends Error {
   constructor(readonly reason:
-    | "duplicate_code" | "bad_subject" | "bad_status" | "bad_quantity"
+    | "duplicate_code" | "bad_subject" | "bad_quantity" | "bad_transition" | "bad_use" | "reason_required"
     | "bad_tracking" | "bad_unit" | "bad_precision" | "tracking_has_history"
     | "has_history" | "negative_stock" | "bad_reversal" | "bad_return"
     | "return_required" | "return_overflow" | "inventory_requires_movement"
@@ -105,6 +95,7 @@ export type MaterialStockLot = {
   checkedOutQuantity: number;
   maintenanceQuantity: number;
   exitedQuantity: number;
+  cancelledQuantity: number;
   /** 逐件载体恒有单一当前桶；批量载体同时分布于多桶时为 null。 */
   currentBucket: MaterialStockBucket | null;
   createdBy: string;
@@ -124,6 +115,21 @@ export type MaterialStockMovement = {
   occurredAt: string;
   createdBy: string;
   createdAt: string;
+  operation: string;
+  reason: string;
+  exitReason: MaterialExitReason | null;
+  fromLocation: string;
+  toLocation: string;
+  eventId: string | null;
+  eventTitle: string;
+  taskId: string | null;
+  taskTitle: string;
+  custodian: MaterialCustodian | null;
+  custodianLabel: string;
+  sourceBefore: number | null;
+  sourceAfter: number | null;
+  targetBefore: number | null;
+  targetAfter: number | null;
 };
 
 export type MaterialMovementInput = {
@@ -137,6 +143,15 @@ export type MaterialMovementInput = {
   note?: string;
   occurredAt?: Date;
   createdBy: string;
+  reason?: string;
+  exitReason?: MaterialExitReason | null;
+  fromLocation?: string;
+  toLocation?: string;
+  eventId?: string | null;
+  taskId?: string | null;
+  custodian?: MaterialCustodian | null;
+  /** 外部经手去向只保存文字，不创建联系人。 */
+  custodianLabel?: string;
 };
 
 export type MaterialCheckout = {
@@ -144,8 +159,13 @@ export type MaterialCheckout = {
   lotId: string;
   checkedOutQuantity: number;
   returnedQuantity: number;
+  settledQuantity: number;
   outstandingQuantity: number;
   createdAt: string;
+  eventId: string | null;
+  eventTitle: string;
+  taskId: string | null;
+  taskTitle: string;
 };
 
 const newLotId = () => `ml_${Date.now().toString(36)}${randomBytes(4).toString("hex")}`;
@@ -166,7 +186,7 @@ function dbConstraint(error: unknown): string {
     ? String(error.constraint) : "";
 }
 
-function currentLotBucket(values: Record<MaterialStockBucket, number>): MaterialStockBucket | null {
+function currentLotBucket(values: Partial<Record<MaterialStockBucket, number>>): MaterialStockBucket | null {
   const occupied = (Object.entries(values) as [MaterialStockBucket, number][])
     .filter(([, quantity]) => quantity > 0);
   return occupied.length === 1 ? occupied[0][0] : null;
@@ -229,50 +249,6 @@ function normalizeMaterialSource(
   };
 }
 
-// ─── 状态定义 ─────────────────────────────────────────────────────────────────
-
-/** 系统预设 + 该剧组自定义，按 order_index 排。 */
-export async function listMaterialStatuses(productionId: string): Promise<MaterialStatus[]> {
-  const res = await getPool().query<{
-    id: string; name: string; color: string | null; order_index: number; is_system: boolean;
-  }>(
-    `SELECT id, name, color, order_index, is_system
-       FROM production_material_status
-      WHERE production_id IS NULL OR production_id = $1
-      ORDER BY is_system DESC, order_index, name`,
-    [productionId],
-  );
-  return res.rows.map(r => ({
-    id: r.id, name: r.name, color: r.color, orderIndex: r.order_index, isSystem: r.is_system,
-  }));
-}
-
-export async function createMaterialStatus(
-  productionId: string, name: string, color: string | null, orderIndex: number,
-): Promise<MaterialStatus> {
-  const res = await getPool().query<{
-    id: string; name: string; color: string | null; order_index: number; is_system: boolean;
-  }>(
-    `INSERT INTO production_material_status (production_id, name, color, order_index)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id, name, color, order_index, is_system`,
-    [productionId, name.trim(), color, orderIndex],
-  );
-  const r = res.rows[0];
-  return { id: r.id, name: r.name, color: r.color, orderIndex: r.order_index, isSystem: r.is_system };
-}
-
-/**
- * 删一个剧组自定义状态。系统预设删不掉（`production_id = $2` 保证）。
- * 引用它的台账行 status_id 会被 ON DELETE SET NULL 置空，不连坐删物料。
- */
-export async function deleteMaterialStatus(statusId: string, productionId: string): Promise<void> {
-  await getPool().query(
-    "DELETE FROM production_material_status WHERE id = $1 AND production_id = $2",
-    [statusId, productionId],
-  );
-}
-
 // ─── 台账 ─────────────────────────────────────────────────────────────────────
 
 const MATERIAL_SELECT = `
@@ -280,9 +256,8 @@ const MATERIAL_SELECT = `
   m.tracking_strategy, m.unit, m.quantity_scale,
   m.department_id, d.name AS department_name,
   m.group_id, g.name AS group_name,
-  m.status_id, s.name AS status_name, s.color AS status_color,
   stock.location, stock.expected_quantity, stock.in_stock_quantity,
-  stock.checked_out_quantity, stock.maintenance_quantity, stock.exited_quantity,
+  stock.checked_out_quantity, stock.maintenance_quantity, stock.exited_quantity, stock.cancelled_quantity,
   CASE WHEN m.tracking_strategy = 'consumable'
        THEN consumption.net_consumed_quantity ELSE '0' END AS net_consumed_quantity,
   m.notes, m.created_by, m.created_at, m.updated_at`;
@@ -292,10 +267,9 @@ type MaterialRow = {
   tracking_strategy: MaterialTrackingStrategy; unit: string; quantity_scale: number;
   department_id: string | null; department_name: string | null;
   group_id: string | null; group_name: string | null;
-  status_id: string | null; status_name: string | null; status_color: string | null;
   location: string; expected_quantity: string; in_stock_quantity: string;
   checked_out_quantity: string; maintenance_quantity: string; exited_quantity: string;
-  net_consumed_quantity: string;
+  net_consumed_quantity: string; cancelled_quantity: string;
   notes: string;
   created_by: string; created_at: Date; updated_at: Date;
 };
@@ -312,12 +286,12 @@ function rowToMaterial(r: MaterialRow): Material {
     trackingStrategy: r.tracking_strategy, unit: r.unit, quantityScale: r.quantity_scale,
     departmentId: r.department_id, departmentName: r.department_name,
     groupId: r.group_id, groupName: r.group_name,
-    statusId: r.status_id, statusName: r.status_name, statusColor: r.status_color,
     location: r.location,
     expectedQuantity,
     heldQuantity: inStockQuantity + checkedOutQuantity + maintenanceQuantity,
     availableQuantity: inStockQuantity,
     inStockQuantity, checkedOutQuantity, maintenanceQuantity, exitedQuantity,
+    cancelledQuantity: Number(r.cancelled_quantity),
     netConsumedQuantity,
     notes: r.notes,
     createdBy: r.created_by,
@@ -330,7 +304,6 @@ const MATERIAL_FROM = `
   FROM production_material m
   LEFT JOIN production_dept d ON d.id = m.department_id
   LEFT JOIN event_group g     ON g.id = m.group_id
-  LEFT JOIN production_material_status s ON s.id = m.status_id
   LEFT JOIN LATERAL (
     SELECT
       COALESCE(string_agg(DISTINCT NULLIF(l.location, ''), '、'), '') AS location,
@@ -338,7 +311,8 @@ const MATERIAL_FROM = `
       COALESCE(SUM(mv.in_stock_delta), 0)::text AS in_stock_quantity,
       COALESCE(SUM(mv.checked_out_delta), 0)::text AS checked_out_quantity,
       COALESCE(SUM(mv.maintenance_delta), 0)::text AS maintenance_quantity,
-      COALESCE(SUM(mv.exited_delta), 0)::text AS exited_quantity
+      COALESCE(SUM(mv.exited_delta), 0)::text AS exited_quantity,
+      COALESCE(SUM(mv.cancelled_delta), 0)::text AS cancelled_quantity
     FROM production_material_stock_lot l
     LEFT JOIN LATERAL (
       SELECT
@@ -351,7 +325,9 @@ const MATERIAL_FROM = `
         COALESCE(SUM(CASE WHEN sm.to_bucket = 'maintenance' THEN sm.quantity ELSE 0 END), 0)
           - COALESCE(SUM(CASE WHEN sm.from_bucket = 'maintenance' THEN sm.quantity ELSE 0 END), 0) AS maintenance_delta,
         COALESCE(SUM(CASE WHEN sm.to_bucket = 'exited' THEN sm.quantity ELSE 0 END), 0)
-          - COALESCE(SUM(CASE WHEN sm.from_bucket = 'exited' THEN sm.quantity ELSE 0 END), 0) AS exited_delta
+          - COALESCE(SUM(CASE WHEN sm.from_bucket = 'exited' THEN sm.quantity ELSE 0 END), 0) AS exited_delta,
+        COALESCE(SUM(CASE WHEN sm.to_bucket = 'cancelled' THEN sm.quantity ELSE 0 END), 0)
+          - COALESCE(SUM(CASE WHEN sm.from_bucket = 'cancelled' THEN sm.quantity ELSE 0 END), 0) AS cancelled_delta
       FROM production_material_stock_movement sm
       WHERE sm.lot_id = l.id
     ) mv ON true
@@ -373,6 +349,7 @@ const MATERIAL_FROM = `
       FROM production_material_stock_movement r
       LEFT JOIN production_material_stock_movement rr ON rr.reverses_event_id = r.id
       WHERE r.return_of_movement_id = c.id
+        AND r.to_bucket = 'in_stock'
     ) ret ON true
     WHERE cl.material_id = m.id AND cl.production_id = m.production_id
   ) consumption ON true`;
@@ -396,17 +373,6 @@ export async function getMaterial(id: string, productionId: string): Promise<Mat
   return res.rows[0] ? rowToMaterial(res.rows[0]) : null;
 }
 
-/** 状态必须属于本剧组（或系统预设）——跨剧组的自定义状态不能用。 */
-async function assertStatusUsable(productionId: string, statusId: string | null): Promise<void> {
-  if (!statusId) return;
-  const { rows } = await getPool().query(
-    `SELECT 1 FROM production_material_status
-      WHERE id = $1 AND (production_id IS NULL OR production_id = $2)`,
-    [statusId, productionId],
-  );
-  if (!rows.length) throw new MaterialError("bad_status", "状态不存在");
-}
-
 export async function createMaterial(params: {
   productionId: string;
   code: string;
@@ -416,7 +382,6 @@ export async function createMaterial(params: {
   unit?: string;
   quantityScale?: number;
   subject: TaskSubject | null;
-  statusId?: string | null;
   location?: string;
   quantity?: number;
   notes?: string;
@@ -429,7 +394,6 @@ export async function createMaterial(params: {
   returnDueAt?: Date | null;
   returnDueQuantity?: number | null;
 }): Promise<Material> {
-  await assertStatusUsable(params.productionId, params.statusId ?? null);
   const quantity = params.quantity ?? 1;
   if (!Number.isFinite(quantity) || quantity <= 0)
     throw new MaterialError("bad_quantity", "确认入库数量必须大于 0");
@@ -450,13 +414,13 @@ export async function createMaterial(params: {
     const res = await client.query<{ id: string }>(
       `INSERT INTO production_material
          (production_id, code, name, category, tracking_strategy, unit, quantity_scale,
-          department_id, group_id, status_id, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+          department_id, group_id, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING id`,
       [
         params.productionId, params.code.trim(), params.name.trim(), params.category ?? "",
         trackingStrategy, unit, quantityScale, cols.departmentId, cols.groupId,
-        params.statusId ?? null, params.notes ?? "", params.createdBy,
+        params.notes ?? "", params.createdBy,
       ],
     );
     const lotQuantities = trackingStrategy === "serialized"
@@ -505,7 +469,7 @@ export async function updateMaterial(
   fields: {
     code?: string; name?: string; category?: string;
     trackingStrategy?: MaterialTrackingStrategy; unit?: string; quantityScale?: number;
-    statusId?: string | null; location?: string; quantity?: number; notes?: string;
+    location?: string; quantity?: number; notes?: string;
     subjectCols?: { departmentId: string | null; groupId: string | null } | null;
   },
 ): Promise<Material | null> {
@@ -518,7 +482,6 @@ export async function updateMaterial(
   if (fields.quantityScale !== undefined
       && (!Number.isInteger(fields.quantityScale) || fields.quantityScale < 0 || fields.quantityScale > 3))
     throw new MaterialError("bad_precision", "数量精度无效");
-  if (fields.statusId !== undefined) await assertStatusUsable(productionId, fields.statusId);
 
   const sets: string[] = ["updated_at = now()"];
   const vals: unknown[] = [id, productionId];
@@ -530,7 +493,6 @@ export async function updateMaterial(
   if (fields.unit !== undefined) sets.push(`unit = $${vals.push(fields.unit.trim())}`);
   if (fields.quantityScale !== undefined)
     sets.push(`quantity_scale = $${vals.push(fields.quantityScale)}`);
-  if (fields.statusId !== undefined) sets.push(`status_id = $${vals.push(fields.statusId)}`);
   if (fields.notes    !== undefined) sets.push(`notes     = $${vals.push(fields.notes)}`);
   if (fields.subjectCols) {
     sets.push(`department_id = $${vals.push(fields.subjectCols.departmentId)}`);
@@ -622,6 +584,7 @@ async function insertMaterialLot(client: QueryClient, params: {
       openSourceExceptionQuantity: 0, sourceStatus: "not_arrived",
       expectedQuantity: Number(r.confirmed_quantity), inStockQuantity: 0,
       checkedOutQuantity: 0, maintenanceQuantity: 0, exitedQuantity: 0,
+      cancelledQuantity: 0,
       currentBucket: "expected",
       createdBy: r.created_by, createdAt: r.created_at.toISOString(),
     };
@@ -651,38 +614,44 @@ async function insertMaterialMovement(
   if (Number.isNaN(occurredAt.getTime()))
     throw new MaterialError("bad_quantity", "流水发生时间无效");
   try {
-    const { rows } = await client.query<{
-      id: string; production_id: string; lot_id: string;
-      from_bucket: MaterialStockBucket; to_bucket: MaterialStockBucket; quantity: string;
-      reverses_event_id: string | null; return_of_movement_id: string | null;
-      note: string; occurred_at: Date; created_by: string; created_at: Date;
-    }>(
+    const { rows } = await client.query<MovementRow>(
        `INSERT INTO production_material_stock_movement
          (id, production_id, lot_id, from_bucket, to_bucket, quantity,
-          reverses_event_id, return_of_movement_id, note, occurred_at, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-       RETURNING id, production_id, lot_id, from_bucket, to_bucket, quantity::text,
-                 reverses_event_id, return_of_movement_id, note, occurred_at,
-                 created_by, created_at`,
+          reverses_event_id, return_of_movement_id, note, occurred_at, created_by,
+          reason, exit_reason, from_location, to_location, event_id, task_id,
+          custodian_kind, custodian_id, custodian_label)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+       RETURNING *`,
       [newMovementId(), params.productionId, params.lotId, params.fromBucket,
         params.toBucket, params.quantity, params.reversesEventId ?? null,
-        params.returnOfMovementId ?? null, params.note ?? "", occurredAt, params.createdBy],
+        params.returnOfMovementId ?? null, params.note ?? "", occurredAt, params.createdBy,
+        params.reason ?? "", params.exitReason ?? null, params.fromLocation ?? "",
+        params.toLocation ?? "", params.eventId ?? null, params.taskId ?? null,
+        params.custodian?.kind ?? null, params.custodian?.id ?? null, params.custodianLabel ?? ""],
     );
-    const r = rows[0];
-    return {
-      id: r.id, productionId: r.production_id, lotId: r.lot_id,
-      fromBucket: r.from_bucket, toBucket: r.to_bucket, quantity: Number(r.quantity),
-      reversesEventId: r.reverses_event_id, note: r.note,
-      returnOfMovementId: r.return_of_movement_id,
-      occurredAt: r.occurred_at.toISOString(),
-      createdBy: r.created_by, createdAt: r.created_at.toISOString(),
-    };
+    return rowToMovement(rows[0]);
   } catch (e) {
     const constraint = dbConstraint(e);
+    if (constraint === "material_lifecycle_transition")
+      throw new MaterialError("bad_transition", "不允许该物料状态流转");
+    if (constraint === "material_source_return_overflow")
+      throw new MaterialError("source_return_overflow", "取消或退出不能超过未取消的租借归还义务");
+    if (constraint === "material_source_return_movement")
+      throw new MaterialError("bad_source_return", "退还来源方必须同时登记归还事实");
+    if (constraint === "material_lifecycle_use" || constraint === "material_lifecycle_custodian")
+      throw new MaterialError("bad_use", "用途或经手对象不属于本项目，或与原签出不符");
+    if (constraint === "material_lifecycle_reason")
+      throw new MaterialError("reason_required", "流转必须填写原因；退出必须选择退出原因");
+    if (constraint === "material_lifecycle_reversal")
+      throw new MaterialError("bad_reversal", "冲销必须填写原因，且不能冲销已有结清记录的签出或再次冲销");
     if (constraint === "material_stock_nonnegative")
       throw new MaterialError("negative_stock", "该批次在来源状态下的数量不足");
     if (constraint === "material_stock_exact_reversal")
       throw new MaterialError("bad_reversal", "冲销流水必须与原流水数量和方向完全相反");
+    if (constraint === "material_stock_movement_single_reference")
+      throw new MaterialError("bad_reversal", "冲销与原签出引用不能同时填写");
+    if (constraint === "material_stock_movement_single_reversal")
+      throw new MaterialError("bad_reversal", "这条流水已被冲销");
     if (constraint === "material_quantity_scale")
       throw new MaterialError("bad_precision", "数量超出该物料允许的小数位数");
     if (constraint === "material_serialized_movement_quantity")
@@ -698,11 +667,7 @@ async function insertMaterialMovement(
 }
 
 /** 唯一库存写点：追加一次桶间移动；数据库会锁定批次并拒绝负库存。 */
-export async function appendMaterialStockMovement(params: {
-  productionId: string; lotId: string; fromBucket: MaterialStockBucket;
-  toBucket: MaterialStockBucket; quantity: number; reversesEventId?: string | null;
-  returnOfMovementId?: string | null; note?: string; occurredAt?: Date; createdBy: string;
-}): Promise<MaterialStockMovement> {
+export async function appendMaterialStockMovement(params: MaterialMovementInput): Promise<MaterialStockMovement> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -711,6 +676,8 @@ export async function appendMaterialStockMovement(params: {
     return movement;
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
+    if (dbConstraint(e) === "material_source_return_movement")
+      throw new MaterialError("bad_source_return", "退还来源方必须同时登记归还事实");
     throw e;
   } finally {
     client.release();
@@ -738,7 +705,7 @@ export async function listMaterialStockLots(
   const { rows } = await getPool().query<{
     id: string; production_id: string; material_id: string; confirmed_quantity: string;
     expected_quantity: string; in_stock_quantity: string; checked_out_quantity: string;
-    maintenance_quantity: string; exited_quantity: string;
+    maintenance_quantity: string; exited_quantity: string; cancelled_quantity: string;
     source_type: MaterialSourceType; source_label: string; source_reference: string;
     source_note: string; expected_arrival_at: Date | null; return_due_at: Date | null;
     return_due_quantity: string | null; arrived_quantity: string;
@@ -752,6 +719,7 @@ export async function listMaterialStockLots(
             mv.checked_out_delta::text AS checked_out_quantity,
             mv.maintenance_delta::text AS maintenance_quantity,
             mv.exited_delta::text AS exited_quantity,
+            mv.cancelled_delta::text AS cancelled_quantity,
             l.source_type, l.source_label, l.source_reference, l.source_note,
             l.expected_arrival_at, l.return_due_at, l.return_due_quantity::text,
             arrival.quantity::text AS arrived_quantity,
@@ -772,7 +740,9 @@ export async function listMaterialStockLots(
            COALESCE(SUM(CASE WHEN sm.to_bucket='maintenance' THEN sm.quantity ELSE 0 END), 0)
              - COALESCE(SUM(CASE WHEN sm.from_bucket='maintenance' THEN sm.quantity ELSE 0 END), 0) AS maintenance_delta,
            COALESCE(SUM(CASE WHEN sm.to_bucket='exited' THEN sm.quantity ELSE 0 END), 0)
-             - COALESCE(SUM(CASE WHEN sm.from_bucket='exited' THEN sm.quantity ELSE 0 END), 0) AS exited_delta
+             - COALESCE(SUM(CASE WHEN sm.from_bucket='exited' THEN sm.quantity ELSE 0 END), 0) AS exited_delta,
+           COALESCE(SUM(CASE WHEN sm.to_bucket='cancelled' THEN sm.quantity ELSE 0 END), 0)
+             - COALESCE(SUM(CASE WHEN sm.from_bucket='cancelled' THEN sm.quantity ELSE 0 END), 0) AS cancelled_delta
            FROM production_material_stock_movement sm WHERE sm.lot_id=l.id
        ) mv ON true
        LEFT JOIN LATERAL (
@@ -827,6 +797,7 @@ export async function listMaterialStockLots(
       expected: Number(r.expected_quantity), in_stock: Number(r.in_stock_quantity),
       checked_out: Number(r.checked_out_quantity), maintenance: Number(r.maintenance_quantity),
       exited: Number(r.exited_quantity),
+      cancelled: Number(r.cancelled_quantity),
     };
     const confirmedQuantity = Number(r.confirmed_quantity);
     const arrivedQuantity = Number(r.arrived_quantity);
@@ -847,57 +818,77 @@ export async function listMaterialStockLots(
       actualReturnedToSourceAt: r.actual_returned_to_source_at?.toISOString() ?? null,
       openSourceExceptionQuantity,
       sourceStatus: deriveMaterialSourceStatus({
-        confirmedQuantity, arrivedQuantity, returnDueQuantity,
+        confirmedQuantity, cancelledQuantity: quantities.cancelled, arrivedQuantity, returnDueQuantity,
         returnedQuantity: returnedToSourceQuantity,
         openExceptionQuantity: openSourceExceptionQuantity,
       }),
       expectedQuantity: quantities.expected, inStockQuantity: quantities.in_stock,
       checkedOutQuantity: quantities.checked_out, maintenanceQuantity: quantities.maintenance,
-      exitedQuantity: quantities.exited, currentBucket: currentLotBucket(quantities),
+      exitedQuantity: quantities.exited, cancelledQuantity: quantities.cancelled, currentBucket: currentLotBucket(quantities),
       createdBy: r.created_by, createdAt: r.created_at.toISOString(),
     };
   });
 }
 
-export async function listMaterialStockMovements(
-  lotId: string, productionId: string,
-): Promise<MaterialStockMovement[]> {
-  const { rows } = await getPool().query<{
-    id: string; production_id: string; lot_id: string;
-    from_bucket: MaterialStockBucket; to_bucket: MaterialStockBucket; quantity: string;
-    reverses_event_id: string | null; return_of_movement_id: string | null;
-    note: string; occurred_at: Date; created_by: string; created_at: Date;
-  }>(
-    `SELECT id, production_id, lot_id, from_bucket, to_bucket, quantity::text,
-            reverses_event_id, return_of_movement_id, note, occurred_at,
-            created_by, created_at
-       FROM production_material_stock_movement
-      WHERE lot_id = $1 AND production_id = $2
-      ORDER BY created_at, id`,
-    [lotId, productionId],
-  );
-  return rows.map(r => ({
+type MovementRow = {
+  id: string; production_id: string; lot_id: string;
+  from_bucket: MaterialStockBucket; to_bucket: MaterialStockBucket; quantity: string;
+  reverses_event_id: string | null; return_of_movement_id: string | null;
+  note: string; occurred_at: Date; created_by: string; created_at: Date;
+  operation: string; reason: string; exit_reason: MaterialExitReason | null;
+  from_location: string; to_location: string;
+  event_id: string | null; event_title: string; task_id: string | null; task_title: string;
+  custodian_kind: MaterialCustodian["kind"] | null; custodian_id: string | null; custodian_label: string;
+  source_before: string | null; source_after: string | null; target_before: string | null; target_after: string | null;
+};
+
+function rowToMovement(r: MovementRow): MaterialStockMovement {
+  return {
     id: r.id, productionId: r.production_id, lotId: r.lot_id,
     fromBucket: r.from_bucket, toBucket: r.to_bucket, quantity: Number(r.quantity),
     reversesEventId: r.reverses_event_id, returnOfMovementId: r.return_of_movement_id,
     note: r.note, occurredAt: r.occurred_at.toISOString(),
     createdBy: r.created_by, createdAt: r.created_at.toISOString(),
-  }));
+    operation: r.operation, reason: r.reason, exitReason: r.exit_reason,
+    fromLocation: r.from_location, toLocation: r.to_location,
+    eventId: r.event_id, eventTitle: r.event_title, taskId: r.task_id, taskTitle: r.task_title,
+    custodian: r.custodian_kind && r.custodian_id ? { kind: r.custodian_kind, id: r.custodian_id } : null,
+    custodianLabel: r.custodian_label,
+    sourceBefore: r.source_before === null ? null : Number(r.source_before),
+    sourceAfter: r.source_after === null ? null : Number(r.source_after),
+    targetBefore: r.target_before === null ? null : Number(r.target_before),
+    targetAfter: r.target_after === null ? null : Number(r.target_after),
+  };
+}
+
+export async function listMaterialStockMovements(
+  lotId: string, productionId: string,
+): Promise<MaterialStockMovement[]> {
+  const { rows } = await getPool().query<MovementRow>(
+    `SELECT *
+       FROM production_material_stock_movement
+      WHERE lot_id = $1 AND production_id = $2
+      ORDER BY created_at, id`,
+    [lotId, productionId],
+  );
+  return rows.map(rowToMovement);
 }
 
 /** 原始签出及其有效返还；纠错流水会从对应数量中抵消。 */
 export async function listMaterialCheckouts(
-  materialId: string, productionId: string,
+  materialId: string | null, productionId: string, use?: { eventId?: string; taskId?: string },
 ): Promise<MaterialCheckout[]> {
   const { rows } = await getPool().query<{
     movement_id: string; lot_id: string; checked_out_quantity: string;
-    returned_quantity: string; outstanding_quantity: string; created_at: Date;
+    returned_quantity: string; settled_quantity: string; outstanding_quantity: string; created_at: Date;
+    event_id: string | null; event_title: string; task_id: string | null; task_title: string;
   }>(
     `SELECT c.id AS movement_id, c.lot_id, c.quantity::text AS checked_out_quantity,
             COALESCE(ret.returned_quantity, 0)::text AS returned_quantity,
+            COALESCE(ret.settled_quantity, 0)::text AS settled_quantity,
             (c.quantity - COALESCE(cr.quantity, 0)
-              - COALESCE(ret.returned_quantity, 0))::text AS outstanding_quantity,
-            c.created_at
+              - COALESCE(ret.settled_quantity, 0))::text AS outstanding_quantity,
+            c.created_at, c.event_id, c.event_title, c.task_id, c.task_title
        FROM production_material_stock_lot l
        JOIN production_material_stock_movement c
          ON c.lot_id = l.id
@@ -905,21 +896,25 @@ export async function listMaterialCheckouts(
         AND c.reverses_event_id IS NULL AND c.return_of_movement_id IS NULL
        LEFT JOIN production_material_stock_movement cr ON cr.reverses_event_id = c.id
        LEFT JOIN LATERAL (
-         SELECT COALESCE(SUM(r.quantity), 0) - COALESCE(SUM(rr.quantity), 0)
-           AS returned_quantity
+         SELECT COALESCE(SUM(r.quantity) FILTER (WHERE r.to_bucket='in_stock'), 0)
+           - COALESCE(SUM(rr.quantity) FILTER (WHERE r.to_bucket='in_stock'), 0) AS returned_quantity,
+           COALESCE(SUM(r.quantity), 0) - COALESCE(SUM(rr.quantity), 0) AS settled_quantity
            FROM production_material_stock_movement r
            LEFT JOIN production_material_stock_movement rr ON rr.reverses_event_id = r.id
           WHERE r.return_of_movement_id = c.id
        ) ret ON true
-      WHERE l.material_id = $1 AND l.production_id = $2
+      WHERE ($1::uuid IS NULL OR l.material_id = $1) AND l.production_id = $2
+        AND ($3::text IS NULL OR c.event_id=$3) AND ($4::text IS NULL OR c.task_id=$4)
       ORDER BY c.created_at, c.id`,
-    [materialId, productionId],
+    [materialId, productionId, use?.eventId ?? null, use?.taskId ?? null],
   );
   return rows.map(r => ({
     movementId: r.movement_id, lotId: r.lot_id,
     checkedOutQuantity: Number(r.checked_out_quantity),
     returnedQuantity: Number(r.returned_quantity),
+    settledQuantity: Number(r.settled_quantity),
     outstandingQuantity: Number(r.outstanding_quantity),
     createdAt: r.created_at.toISOString(),
+    eventId: r.event_id, eventTitle: r.event_title, taskId: r.task_id, taskTitle: r.task_title,
   }));
 }
