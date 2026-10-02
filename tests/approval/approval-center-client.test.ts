@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const source = readFileSync("components/approval/ApprovalCenterClient.tsx", "utf8");
+const styles = readFileSync("components/ui/my-pages.module.css", "utf8");
 
 describe("项目审批中心客户端契约", () => {
   it("关系主视图与业务类型筛选正交，默认由项目级资源提供数据", () => {
@@ -30,12 +31,45 @@ describe("项目审批中心客户端契约", () => {
 
   it("列表、筛选、手机元信息和费用详情使用统一字号层级", () => {
     for (const className of [
-      "approvalCenterPrimaryTabs", "approvalCenterTypeFilters", "approvalCenterSearch",
-      "approvalCenterListTitle", "approvalCenterListMeta", "mobileCardProduction", "mobileCardTime",
+      "approvalCenterSummary", "approvalCenterFilters", "approvalCenterSearch",
+      "approvalCenterListTitle", "approvalCenterListMeta", "approvalCenterListNote",
       "approvalDetailTitle", "approvalDetailSection",
     ]) {
       expect(source).toContain(`styles.${className}`);
     }
     expect(source).toContain("`${styles.badge} ${");
+  });
+
+  it("桌面使用队列、列表、详情三栏，业务分类只显示真实计数或当前选择", () => {
+    for (const className of [
+      "approvalCenterDesktopLayout", "approvalCenterNav", "approvalCenterMiddle",
+      "approvalCenterDetailPane", "approvalCenterQueueList", "approvalCenterCategoryList",
+    ]) {
+      expect(source).toContain(`styles.${className}`);
+    }
+    expect(source).toContain("const visibleTypes = TYPES.filter");
+    expect(source).toContain("typeCounts[option.id]");
+  });
+
+  it("搜索、时间、状态和排序筛选全部传给统一读接口", () => {
+    for (const queryKey of ["q", "from", "status", "sort"]) {
+      expect(source).toContain(`params.set(\"${queryKey}\"`);
+    }
+    for (const label of ["时间筛选", "状态筛选", "排序方式"]) {
+      expect(source).toContain(`aria-label=\"${label}\"`);
+    }
+  });
+
+  it("手机按队列、列表、详情逐级导航，主视图页签保持单行", () => {
+    expect(source).toContain('type MobileLevel = "queues" | "items" | "detail"');
+    expect(source).toContain("approvalCenterMobileQueues");
+    expect(source).toContain("approvalCenterMobileItems");
+    expect(styles).toMatch(/\.approvalCenterMobileTabs button\s*\{[\s\S]*?white-space:\s*nowrap/);
+  });
+
+  it("456px 保持统计块紧凑横排，319–360px 改为三条横行并收紧留白", () => {
+    expect(styles).toContain("@media (min-width: 361px) and (max-width: 500px)");
+    expect(styles).toMatch(/@media \(max-width: 360px\)[\s\S]*?\.approvalCenterSummary\s*\{\s*grid-template-columns:\s*1fr/);
+    expect(styles).toMatch(/@media \(max-width: 360px\)[\s\S]*?\.approvalCenterSummary > div\s*\{[\s\S]*?min-height:\s*46px/);
   });
 });
