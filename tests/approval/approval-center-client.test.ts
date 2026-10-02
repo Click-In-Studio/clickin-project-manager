@@ -27,4 +27,15 @@ describe("项目审批中心客户端契约", () => {
     expect(source).not.toContain("ApprovalFlowDesigner");
     expect(existsSync("app/production/[id]/admin/approval-flows/page.tsx")).toBe(true);
   });
+
+  it("列表、筛选、手机元信息和费用详情使用统一字号层级", () => {
+    for (const className of [
+      "approvalCenterPrimaryTabs", "approvalCenterTypeFilters", "approvalCenterSearch",
+      "approvalCenterListTitle", "approvalCenterListMeta", "mobileCardProduction", "mobileCardTime",
+      "approvalDetailTitle", "approvalDetailSection",
+    ]) {
+      expect(source).toContain(`styles.${className}`);
+    }
+    expect(source).toContain("`${styles.badge} ${");
+  });
 });

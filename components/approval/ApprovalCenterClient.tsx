@@ -87,13 +87,13 @@ function ExpenseDetail({
   return (
     <article className={styles.approvalDetail} data-approval-detail>
       <div className={styles.approvalDetailBadges}>
-        <span className={detail.status === "approved" ? styles.badgeGreen
-          : detail.status === "rejected" ? styles.badgeRed : styles.badgeAmber}>
+        <span className={`${styles.badge} ${detail.status === "approved" ? styles.badgeGreen
+          : detail.status === "rejected" ? styles.badgeRed : styles.badgeAmber}`}>
           {EXPENSE_STATUS_LABEL[detail.status]}
         </span>
-        <span style={{ fontSize: 11, color: "var(--muted)" }}>费用报销</span>
+        <span className={styles.approvalDetailType}>费用报销</span>
       </div>
-      <h2 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: "var(--ink)" }}>{detail.title}</h2>
+      <h2 className={styles.approvalDetailTitle}>{detail.title}</h2>
       <dl className={styles.approvalDetailFields}>
         <div><dt>申请人</dt><dd>{detail.submitterName ?? "项目成员"}</dd></div>
         <div><dt>金额</dt><dd>{detail.amount && isCurrencyCode(detail.currency)
@@ -103,15 +103,15 @@ function ExpenseDetail({
           ? EXPENSE_STAGE_LABEL[detail.currentStage] ?? detail.currentStage
           : detail.status === "pending" ? "等待流程信息" : "流程已结束"}</dd></div>
       </dl>
-      {detail.note && <section style={{ borderTop: "1px solid var(--line)", paddingTop: 16 }}>
-        <small style={{ color: "var(--muted)" }}>报销说明</small>
-        <p style={{ lineHeight: 1.6 }}>{detail.note}</p>
+      {detail.note && <section className={styles.approvalDetailSection}>
+        <small>报销说明</small>
+        <p>{detail.note}</p>
       </section>}
       <ExpenseDocumentLinks productionId={productionId} expenseId={detail.id} documents={detail.documents} />
-      <section style={{ borderTop: "1px solid var(--line)", paddingTop: 16 }}>
-        <h3 style={{ fontSize: 12 }}>处理记录</h3>
+      <section className={styles.approvalDetailSection}>
+        <h3>处理记录</h3>
         {detail.events.map(event => (
-          <p key={event.id} style={{ fontSize: 11, color: "var(--muted)" }}>
+          <p key={event.id} className={styles.approvalDetailEvent}>
             {event.actorName ?? "系统"} · {EXPENSE_EVENT_LABEL[event.type] ?? event.type} · {fmtDate(event.createdAt)}
             {event.comment ? ` · ${event.comment}` : ""}
           </p>
@@ -277,33 +277,26 @@ export default function ApprovalCenterClient({
         background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13,
         padding: 22, display: "flex", flexDirection: "column",
       }}>
-        <div style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--line)", overflowX: "auto" }}>
+        <div className={styles.approvalCenterPrimaryTabs}>
           {VIEWS.map(option => <button key={option.id} type="button"
-            onClick={() => { setView(option.id); setSelection(null); }} style={{
-              background: "none", border: "none", whiteSpace: "nowrap", padding: "9px 14px",
-              borderBottom: view === option.id ? "2px solid var(--ink)" : "2px solid transparent",
-              color: view === option.id ? "var(--ink)" : "var(--muted)",
-              fontWeight: view === option.id ? 650 : 400, cursor: "pointer",
-            }}>{option.label}{viewCounts[option.id] ? ` (${viewCounts[option.id]})` : ""}</button>)}
+            aria-pressed={view === option.id}
+            onClick={() => { setView(option.id); setSelection(null); }}>
+            {option.label}{viewCounts[option.id] ? ` (${viewCounts[option.id]})` : ""}
+          </button>)}
         </div>
-        <div style={{ display: "flex", gap: 8, padding: "14px 0", overflowX: "auto" }}>
+        <div className={styles.approvalCenterTypeFilters}>
           {TYPES.map(option => <button key={option.id} type="button"
-            onClick={() => { setBusinessType(option.id); setSelection(null); }} style={{
-              border: "1px solid var(--line)", borderRadius: 999, padding: "5px 12px", whiteSpace: "nowrap",
-              background: businessType === option.id ? "var(--ink)" : "transparent",
-              color: businessType === option.id ? "white" : "var(--muted)", cursor: "pointer",
-            }}>{option.label}{option.id === "all"
+            aria-pressed={businessType === option.id}
+            onClick={() => { setBusinessType(option.id); setSelection(null); }}>
+            {option.label}{option.id === "all"
               ? allTypeCount > 0 ? ` (${allTypeCount})` : ""
-              : typeCounts[option.id] ? ` (${typeCounts[option.id]})` : ""}</button>)}
+              : typeCounts[option.id] ? ` (${typeCounts[option.id]})` : ""}
+          </button>)}
         </div>
-        <form onSubmit={event => { event.preventDefault(); setQuery(searchDraft.trim()); }} style={{
-          display: "flex", gap: 8, marginBottom: 14,
-        }}>
+        <form className={styles.approvalCenterSearch}
+          onSubmit={event => { event.preventDefault(); setQuery(searchDraft.trim()); }}>
           <input aria-label="搜索审批" value={searchDraft} onChange={event => setSearchDraft(event.target.value)}
-            placeholder="搜索申请人、标题或事由" maxLength={100} style={{
-              flex: 1, minWidth: 0, border: "1px solid var(--line)", borderRadius: 8,
-              background: "var(--paper)", padding: "8px 10px",
-            }} />
+            placeholder="搜索申请人、标题或事由" maxLength={100} />
           <button type="submit">搜索</button>
           {query && <button type="button" onClick={() => { setSearchDraft(""); setQuery(""); }}>清除</button>}
         </form>
@@ -311,16 +304,17 @@ export default function ApprovalCenterClient({
         <div className={styles.desktopOnly} style={{ flex: 1, minHeight: 0 }}>
           <div className={styles.splitLayout} style={{ height: "100%", minHeight: 0 }}>
             <div className={`${styles.splitPane} ${styles.splitList}`}>
-              {loading ? <p>加载中…</p> : listError ? <p role="alert">{listError}</p>
-                : items.length === 0 ? <p>{currentEmpty}</p> : items.map(item => (
+              {loading ? <p className={styles.approvalCenterEmpty}>加载中…</p>
+                : listError ? <p className={styles.approvalDetailError} role="alert">{listError}</p>
+                  : items.length === 0 ? <p className={styles.approvalCenterEmpty}>{currentEmpty}</p> : items.map(item => (
                   <button key={item.id} type="button" onClick={() => chooseItem(item)} style={{
                     width: "100%", padding: "12px 14px", textAlign: "left", borderRadius: 10,
                     border: selection && selection.kind !== "form" && selection.item.id === item.id
                       ? "1px solid var(--ink)" : "1px solid transparent",
                     background: "transparent", cursor: "pointer",
                   }}>
-                    <b style={{ display: "block", fontSize: 13 }}>{itemTitle(item)}</b>
-                    <small style={{ color: "var(--muted)" }}>{item.applicant.name} · {STATUS_LABEL[item.status]} · {fmtDate(item.createdAt)}</small>
+                    <b className={styles.approvalCenterListTitle}>{itemTitle(item)}</b>
+                    <small className={styles.approvalCenterListMeta}>{item.applicant.name} · {STATUS_LABEL[item.status]} · {fmtDate(item.createdAt)}</small>
                   </button>
                 ))}
             </div>
@@ -337,7 +331,10 @@ export default function ApprovalCenterClient({
                 : <div className={styles.mobileCardList}>{items.map(item => (
                   <div key={item.id} className={styles.mobileCard}>
                     <button className={styles.mobileCardBtn} type="button" onClick={() => chooseItem(item)}>
-                      <div className={styles.mobileCardHeader}><span>{item.applicant.name}</span><span>{fmtDate(item.createdAt)}</span></div>
+                      <div className={styles.mobileCardHeader}>
+                        <span className={styles.mobileCardProduction}>{item.applicant.name}</span>
+                        <span className={styles.mobileCardTime}>{fmtDate(item.createdAt)}</span>
+                      </div>
                       <p className={styles.mobileCardTitle}>{itemTitle(item)}</p>
                       <p className={styles.mobileCardPreview}>{STATUS_LABEL[item.status]}{item.note ? ` · ${item.note}` : ""}</p>
                     </button>
