@@ -184,6 +184,7 @@ button.progressMetricLabel {
   cursor: pointer;
 }
 
+/* 让里程碑卡整面响应同一个展开按钮，伪元素只负责扩大点击与聚焦区域。 */
 button.progressMetricLabel::before {
   content: "";
   position: absolute;
