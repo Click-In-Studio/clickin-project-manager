@@ -659,7 +659,7 @@ export function ExpenseAddDocumentButton({ productionId, expenseId, mutationSeq,
 }
 
 export function ExpenseApprovalActions({
-  productionId, expenseId, canFinalize, mutationSeq, currentBudgetItemId, categories,
+  productionId, expenseId, canFinalize, mutationSeq, currentBudgetItemId, categories, onUpdated,
 }: {
   productionId: string;
   expenseId: string;
@@ -667,6 +667,7 @@ export function ExpenseApprovalActions({
   mutationSeq: number;
   currentBudgetItemId: string | null;
   categories: ExpenseCategoryOption[];
+  onUpdated?: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<ExpenseAction | null>(null);
@@ -693,6 +694,7 @@ export function ExpenseApprovalActions({
         }),
       });
       if (!response.ok) throw new Error(await responseError(response, "这笔报销处理失败"));
+      onUpdated?.();
       router.refresh();
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "这笔报销处理失败");
@@ -759,7 +761,7 @@ export function ExpenseApprovalActions({
   );
 }
 
-type ExpenseDetailView = {
+export type ExpenseDetailView = {
   id: string;
   title: string;
   amount: string | null;

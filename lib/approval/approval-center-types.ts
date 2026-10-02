@@ -1,5 +1,5 @@
 /**
- * 审批中心的跨业务只读契约。
+ * 项目审批中心的跨业务只读契约。
  *
  * 这个文件刻意不依赖 pg / Node API，后续 UI 可以只导入 DTO 与筛选类型，不会把
  * 服务端依赖带进客户端 bundle。状态机仍分别属于 approval_request 与
@@ -45,7 +45,6 @@ export type ApprovalCenterItem = {
   sourceId: string;
   source: "approval_request" | "expense";
   businessType: ApprovalCenterBusinessType;
-  production: { id: string; name: string };
   applicant: { id: string; name: string };
   title: string;
   note: string | null;
@@ -72,6 +71,9 @@ export type ApprovalCenterListParams = {
 
 export type ApprovalCenterPage = {
   items: ApprovalCenterItem[];
+  total: number;
+  viewCounts: Record<ApprovalCenterView, number>;
+  businessTypeCounts: Record<ApprovalCenterBusinessType, number>;
   nextCursor: string | null;
 };
 
@@ -104,7 +106,7 @@ export function parseApprovalCenterListParams(searchParams: URLSearchParams): Ap
     throw new ApprovalCenterQueryError("view 参数无效");
   }
 
-  const sortRaw = searchParams.get("sort") ?? "newest";
+  const sortRaw = searchParams.get("sort") ?? (viewRaw === "pending" ? "oldest" : "newest");
   if (!(APPROVAL_CENTER_SORTS as readonly string[]).includes(sortRaw)) {
     throw new ApprovalCenterQueryError("sort 参数无效");
   }

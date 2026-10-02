@@ -158,7 +158,7 @@ describe("#702 手机 AI 入口", () => {
 });
 
 describe("手机导航入口完整性", () => {
-  it("项目内用概览抽屉收纳我的工作、我的通知与资源申请", () => {
+  it("项目内用概览抽屉收纳我的工作、我的通知与审批", () => {
     navigation.pathname = "/production/pro1";
     act(() => root.render(
       <AppShell session={session} productions={productions}>
@@ -172,7 +172,7 @@ describe("手机导航入口完整性", () => {
     const links = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"));
     expect(links.find((link) => link.textContent?.includes("我的工作"))?.getAttribute("href")).toBe("/production/pro1");
     expect(links.find((link) => link.textContent?.includes("我的通知"))?.getAttribute("href")).toBe("/production/pro1/notifications");
-    expect(links.find((link) => link.textContent?.includes("资源申请"))?.getAttribute("href")).toBe("/production/pro1/access-requests");
+    expect(links.find((link) => link.textContent?.includes("审批"))?.getAttribute("href")).toBe("/production/pro1/access-requests");
   });
 
   it("我抽屉补齐桌面头像菜单里的全部帮助入口", () => {

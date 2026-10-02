@@ -220,7 +220,11 @@ export default function AppShell({ session, productions, canCreateProduction = f
   const adminNavGroups = ADMIN_NAV_GROUPS
     .map((g) => ({ ...g, items: g.items.filter((it) =>
       (!it.feature || planAdvancedPerms)
-      && (it.scope === "finance" ? currentProduction?.canFinanceConfig : currentProduction?.canAdmin)
+      && (it.scope === "finance"
+        ? currentProduction?.canFinanceConfig
+        : it.scope === "approvalFlows"
+          ? currentProduction?.canManageApprovalFlows
+          : currentProduction?.canAdmin)
     ) }))
     .filter((g) => g.items.length > 0);
 

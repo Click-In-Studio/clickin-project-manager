@@ -864,7 +864,7 @@
   gap: 18px;
 }
 
-/* 任务、报告、资源申请共用：桌面端限定工作区并内部滚动，手机端自然撑开。 */
+/* 任务、报告、审批中心共用：桌面端限定工作区并内部滚动，手机端自然撑开。 */
 .responsiveContentPanel {
   height: calc(100vh - 320px);
   min-height: 460px;

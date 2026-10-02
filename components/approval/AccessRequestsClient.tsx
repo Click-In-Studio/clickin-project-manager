@@ -349,7 +349,7 @@ function ApprovalFlowPreview() {
 
 // ─── RequestForm ──────────────────────────────────────────────────────────────
 
-function RequestForm({ productionId, onSubmitted, onClose }: {
+export function RequestForm({ productionId, onSubmitted, onClose }: {
   productionId: string;
   onSubmitted: () => void;
   onClose: () => void;
@@ -510,7 +510,7 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
 
 // ─── 动作按钮 ─────────────────────────────────────────────────────────────────
 
-type ActionKind = "approve" | "reject" | "escalate" | "cancel";
+export type ActionKind = "approve" | "reject" | "escalate" | "cancel";
 /** 在途动作：哪条申请、哪个动作。null = 没有请求在途。 */
 type Acting = { reqId: string; kind: ActionKind } | null;
 type ActionError = { reqId: string; message: string } | null;
@@ -545,7 +545,7 @@ function ActionButton({ label, busy, disabled, primary, onClick }: {
 
 // ─── RequestDetail ────────────────────────────────────────────────────────────
 
-function RequestDetail({
+export function RequestDetail({
   req,
   view,
   loading,
@@ -593,6 +593,8 @@ function RequestDetail({
     canCancel: false,
   };
   const hasAction = Object.values(actions).some(Boolean);
+  const activeTemplateNode = detail.flowSnapshot?.nodes[detail.flowSnapshot.cursor];
+  const approveLabel = activeTemplateNode?.type === "processing" ? "确认已处理" : "批准";
 
   return (
     <article className={styles.approvalDetail} data-approval-detail>
@@ -659,7 +661,7 @@ function RequestDetail({
           <p>当前可执行操作</p>
           <div>
             {actions.canApprove && (
-              <ActionButton primary label="批准" busy={acting === "approve"} disabled={actionLocked} onClick={() => onApprove?.()} />
+              <ActionButton primary label={approveLabel} busy={acting === "approve"} disabled={actionLocked} onClick={() => onApprove?.()} />
             )}
             {actions.canReject && (
               <ActionButton label="拒绝" busy={acting === "reject"} disabled={actionLocked} onClick={() => onReject?.()} />
