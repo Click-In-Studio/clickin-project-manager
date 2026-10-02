@@ -513,6 +513,7 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
 type ActionKind = "approve" | "reject" | "escalate" | "cancel";
 /** 在途动作：哪条申请、哪个动作。null = 没有请求在途。 */
 type Acting = { reqId: string; kind: ActionKind } | null;
+type ActionError = { reqId: string; message: string } | null;
 
 /**
  * #593：审批动作按钮。请求在途时按钮灰掉并写「处理中…」——PRIMARY_BTN 没有 disabled
@@ -550,6 +551,7 @@ function RequestDetail({
   loading,
   loadError,
   actionError,
+  actionLocked,
   onApprove,
   onReject,
   onEscalate,
@@ -561,6 +563,7 @@ function RequestDetail({
   loading: boolean;
   loadError: string | null;
   actionError: string | null;
+  actionLocked: boolean;
   onApprove?: () => void;
   onReject?: () => void;
   onEscalate?: () => void;
@@ -656,16 +659,16 @@ function RequestDetail({
           <p>当前可执行操作</p>
           <div>
             {actions.canApprove && (
-              <ActionButton primary label="批准" busy={acting === "approve"} disabled={acting !== null} onClick={() => onApprove?.()} />
+              <ActionButton primary label="批准" busy={acting === "approve"} disabled={actionLocked} onClick={() => onApprove?.()} />
             )}
             {actions.canReject && (
-              <ActionButton label="拒绝" busy={acting === "reject"} disabled={acting !== null} onClick={() => onReject?.()} />
+              <ActionButton label="拒绝" busy={acting === "reject"} disabled={actionLocked} onClick={() => onReject?.()} />
             )}
             {actions.canEscalate && (
-              <ActionButton primary={!actions.canApprove} label="向上转交" busy={acting === "escalate"} disabled={acting !== null} onClick={() => onEscalate?.()} />
+              <ActionButton primary={!actions.canApprove} label="向上转交" busy={acting === "escalate"} disabled={actionLocked} onClick={() => onEscalate?.()} />
             )}
             {actions.canCancel && (
-              <ActionButton label="撤回申请" busy={acting === "cancel"} disabled={acting !== null} onClick={() => onCancel?.()} />
+              <ActionButton label="撤回申请" busy={acting === "cancel"} disabled={actionLocked} onClick={() => onCancel?.()} />
             )}
           </div>
           {actionError && <p className={styles.approvalDetailError}>{actionError}</p>}
@@ -695,7 +698,7 @@ export default function AccessRequestsClient({ productionId, productionName, can
   const [loadingMine, setLoadingMine]         = useState(true);
   const [loadingPending, setLoadingPending]   = useState(true);
   const [acting, setActing]                   = useState<Acting>(null);
-  const [actionError, setActionError]         = useState<string | null>(null);
+  const [actionError, setActionError]         = useState<ActionError>(null);
   const [rightPanel, setRightPanel]           = useState<RightPanel>(null);
   const [detailView, setDetailView]           = useState<AccessRequestFlowView | null>(null);
   const [detailLoading, setDetailLoading]     = useState(false);
@@ -792,7 +795,7 @@ export default function AccessRequestsClient({ productionId, productionName, can
       const res = await fetch(`/api/production/${productionId}/access-requests/${reqId}/${kind}`, { method: "POST" });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
-        setActionError(data.error ?? fallback);
+        setActionError({ reqId, message: data.error ?? fallback });
         const [freshMine, freshPending] = await Promise.all([
           fetchMine().catch(() => null),
           fetchPending().catch(() => null),
@@ -815,7 +818,7 @@ export default function AccessRequestsClient({ productionId, productionName, can
         return settled ? { ...panel, req: fresh } : null;
       });
       if (settled && fresh) {
-        setDetailView((current) => current ? {
+        setDetailView((current) => current?.request.id === reqId ? {
           ...current,
           request: fresh,
           viewerActions: { canApprove: false, canReject: false, canEscalate: false, canCancel: false },
@@ -823,9 +826,9 @@ export default function AccessRequestsClient({ productionId, productionName, can
       }
       await Promise.all([fetchMine(), fetchPending()]);
     } catch {
-      setActionError("网络错误，请重试");
+      setActionError({ reqId, message: "网络错误，请重试" });
     } finally {
-      setActing(null);
+      setActing((current) => current?.reqId === reqId && current.kind === kind ? null : current);
     }
   }
 
@@ -1044,7 +1047,8 @@ export default function AccessRequestsClient({ productionId, productionName, can
                 view={detailView}
                 loading={detailLoading}
                 loadError={detailError}
-                actionError={actionError}
+                actionError={actionError?.reqId === rightPanel.req.id ? actionError.message : null}
+                actionLocked={acting !== null}
                 acting={acting?.reqId === rightPanel.req.id ? acting.kind : null}
                 onApprove={() => void handleApprove(rightPanel.req.id)}
                 onReject={() => void handleReject(rightPanel.req.id)}
@@ -1106,7 +1110,8 @@ export default function AccessRequestsClient({ productionId, productionName, can
                   view={detailView}
                   loading={detailLoading}
                   loadError={detailError}
-                  actionError={actionError}
+                  actionError={actionError?.reqId === rightPanel.req.id ? actionError.message : null}
+                  actionLocked={acting !== null}
                   acting={acting?.reqId === rightPanel.req.id ? acting.kind : null}
                   onApprove={() => void handleApprove(rightPanel.req.id)}
                   onReject={() => void handleReject(rightPanel.req.id)}

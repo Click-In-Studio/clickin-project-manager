@@ -129,6 +129,48 @@ describe("AccessRequestsClient — 审批动作的在途态与结果反馈（#59
     expect(container.textContent).toContain("暂无待审批申请");
   });
 
+  it("批准 A 等待期间切到 B：A 的回包不覆盖 B，且全局串行动作不会提前解锁", async () => {
+    const first = request();
+    const second = request({ id: "ar_2", subjectId: "u_second", subjectName: "赵六" });
+    pending = [first, second];
+    let resolveApprove!: (value: unknown) => void;
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url, init) => {
+      if (url.endsWith("/ar_1/approve") && init?.method === "POST") {
+        return new Promise((resolve) => { resolveApprove = resolve; });
+      }
+      if (url.endsWith("/ar_1/flow")) return jsonRes({
+        request: first,
+        flow: { mode: "ladder", remaining: [] },
+        viewerActions: { canApprove: true, canReject: true, canEscalate: true, canCancel: false },
+      });
+      if (url.endsWith("/ar_2/flow")) return jsonRes({
+        request: second,
+        flow: { mode: "ladder", remaining: [] },
+        viewerActions: { canApprove: true, canReject: true, canEscalate: true, canCancel: false },
+      });
+      return base(url, init);
+    });
+
+    await mountAndSelect();
+    await act(async () => { detailButton("批准")!.click(); });
+    await act(async () => { buttons().find((button) => button.textContent?.includes("赵六 ·"))!.click(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(detailPane()?.textContent).toContain("赵六");
+    expect(detailButton("批准")!.disabled).toBe(true);
+
+    pending = [second];
+    await act(async () => {
+      resolveApprove({ ok: true, status: 200, json: () => Promise.resolve({
+        request: request({ status: "approved", resolvedAt: NOW, resolvedBy: "u_me", grantedAt: NOW, canFinalize: null }),
+      }) });
+    });
+
+    expect(detailPane()?.textContent).toContain("赵六");
+    expect(detailPane()?.textContent).not.toContain("李四");
+    expect(detailButton("批准")!.disabled).toBe(false);
+  });
+
   it("转交到下一级：申请仍在等待但已不归我管，面板关掉而不是留着「批准」可点", async () => {
     await mountAndSelect();
     const base = fetchMock.getMockImplementation()!;
