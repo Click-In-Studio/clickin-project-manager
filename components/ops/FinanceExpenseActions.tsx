@@ -784,6 +784,9 @@ type ExpenseDetailView = {
   currentStage: string | null;
   currentApproverIds: string[];
   canFinalize: boolean;
+  settledAt: string | null;
+  settledBy: string | null;
+  settledByName: string | null;
   mutationSeq: number;
   events: {
     id: string;
@@ -822,6 +825,8 @@ const EVENT_LABEL: Record<string, string> = {
   document_added: "补充凭证",
   document_removed: "移除草稿凭证",
   post_approval_document_added: "审批后补充发票",
+  settled: "确认线下已结清",
+  settlement_reopened: "恢复为待结清",
 };
 
 function reclassificationEventText(details: Record<string, unknown>): string | null {
@@ -845,8 +850,60 @@ function reclassificationEventText(details: Record<string, unknown>): string | n
   return `${from} → ${to}；${result}`;
 }
 
+export function ExpenseSettlementAction({
+  productionId, expenseId, settled, mutationSeq, onUpdated,
+}: {
+  productionId: string;
+  expenseId: string;
+  settled: boolean;
+  mutationSeq: number;
+  onUpdated?: (expense: ExpenseDetailView) => void;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function act() {
+    const confirmed = window.confirm(settled
+      ? "这只会纠正系统记录，不代表任何款项被撤回。确定恢复为待结清？"
+      : "这只记录剧组已在线下处理，不会发起或验证支付。确定标记为已结清？");
+    if (!confirmed) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `${BASE_PATH}/api/production/${productionId}/finance/expenses/${expenseId}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: settled ? "reopen_settlement" : "settle",
+            expectedMutationSeq: mutationSeq,
+          }),
+        },
+      );
+      if (!response.ok) throw new Error(await responseError(response, "结清状态更新失败"));
+      const data = await response.json() as { expense: ExpenseDetailView };
+      onUpdated?.(data.expense);
+      router.refresh();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "结清状态更新失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <span>
+    <button type="button" className={settled ? styles.secondaryButton : styles.primaryButton}
+      disabled={busy} onClick={() => void act()}>
+      {busy ? "处理中…" : settled ? "恢复待结清" : "标记已结清"}
+    </button>
+    {error && <small role="alert" className={styles.actionError}>{error}</small>}
+  </span>;
+}
+
 export function ExpenseDetailButton({
-  productionId, expenseId, actorId, baseCurrency, categories, archived,
+  productionId, expenseId, actorId, baseCurrency, categories, archived, canSettle,
 }: {
   productionId: string;
   expenseId: string;
@@ -854,6 +911,7 @@ export function ExpenseDetailButton({
   baseCurrency: CurrencyCode;
   categories: ExpenseCategoryOption[];
   archived: boolean;
+  canSettle: boolean;
 }) {
   const router = useRouter();
   const uploadManager = useAssetUploadManager();
@@ -1081,7 +1139,14 @@ export function ExpenseDetailButton({
                     <p>当前审批节点：{APPROVAL_STAGE_LABEL[detail.currentStage] ?? detail.currentStage}</p>
                   )}
                   {detail.status === "approved" && (
-                    <p className={styles.actionError}>已批准内容保持只读；金额、科目或事由有误时请联系财务负责人处理，不要重复提交同一笔费用。本单会保留原审批记录。</p>
+                    <>
+                      <p><b>{detail.settledAt ? "已结清" : "待结清"}</b>
+                        {detail.settledAt
+                          ? ` · ${detail.settledByName ?? "项目成员"}于${new Date(detail.settledAt).toLocaleString("zh-CN")}确认`
+                          : ""}
+                      </p>
+                      <p className={styles.actionError}>结清仅表示剧组确认线下已经处理，不代表系统发起或验证了支付。已批准内容保持只读；金额、科目或事由有误时请联系财务负责人处理。</p>
+                    </>
                   )}
                   <label className={styles.field}><span>事由</span>
                     <input value={title} disabled={!editable} onChange={event => setTitle(event.target.value)} />
@@ -1208,6 +1273,11 @@ export function ExpenseDetailButton({
                     {mine && (detail.status === "rejected" || detail.status === "withdrawn") && !archived && (
                       <button type="button" className={styles.primaryButton} disabled={busy}
                         onClick={() => void act("reopen")}>编辑并重新提交</button>
+                    )}
+                    {canSettle && detail.status === "approved" && !archived && (
+                      <ExpenseSettlementAction productionId={productionId} expenseId={expenseId}
+                        settled={detail.settledAt !== null} mutationSeq={detail.mutationSeq}
+                        onUpdated={applyDetail} />
                     )}
                   </div>
                 </footer>

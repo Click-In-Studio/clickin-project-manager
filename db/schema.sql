@@ -1667,6 +1667,8 @@ CREATE TABLE IF NOT EXISTS production_expense (
   escalation_chain     JSONB   NOT NULL DEFAULT '[]',
   resolved_at   TIMESTAMPTZ,
   resolved_by   UUID          REFERENCES app_user(id),
+  settled_at    TIMESTAMPTZ,
+  settled_by    UUID          REFERENCES app_user(id),
   mutation_seq  BIGINT        NOT NULL DEFAULT 0,
   submitted_at  TIMESTAMPTZ,
   created_at    TIMESTAMPTZ   NOT NULL DEFAULT now(),
@@ -1675,6 +1677,10 @@ CREATE TABLE IF NOT EXISTS production_expense (
     CHECK (status = 'draft' OR (btrim(title) <> '' AND amount IS NOT NULL AND submitted_at IS NOT NULL)),
   CONSTRAINT production_expense_invoice_waiver_reason_check
     CHECK (status = 'draft' OR invoice_requirement <> 'waived' OR btrim(invoice_waiver_reason) <> ''),
+  CONSTRAINT production_expense_settlement_check CHECK (
+    (settled_at IS NULL AND settled_by IS NULL)
+    OR (status = 'approved' AND settled_at IS NOT NULL AND settled_by IS NOT NULL)
+  ),
   CONSTRAINT production_expense_currency_format_check
     CHECK (currency ~ '^[A-Z]{3}$' AND base_currency ~ '^[A-Z]{3}$'),
   CONSTRAINT production_expense_currency_snapshot_check CHECK (
@@ -1797,7 +1803,8 @@ CREATE TABLE IF NOT EXISTS production_expense_event (
   event_type    TEXT        NOT NULL CHECK (event_type IN (
                   'draft_created', 'draft_saved', 'submitted', 'forwarded',
                   'approved', 'rejected', 'withdrawn', 'reopened', 'reclassified',
-                  'document_added', 'document_removed', 'post_approval_document_added'
+                  'document_added', 'document_removed', 'post_approval_document_added',
+                  'settled', 'settlement_reopened'
                 )),
   actor_id      UUID        REFERENCES app_user(id),
   comment       TEXT,

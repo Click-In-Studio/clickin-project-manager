@@ -53,7 +53,7 @@ vi.mock("@/components/ops/ExpenseRecognitionSuggestions", () => ({
 }));
 
 import {
-  ExpenseAddDocumentButton, ExpenseApprovalActions, ExpenseCreateButton,
+  ExpenseAddDocumentButton, ExpenseApprovalActions, ExpenseCreateButton, ExpenseSettlementAction,
 } from "@/components/ops/FinanceExpenseActions";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -269,6 +269,41 @@ describe("报销审批", () => {
       expectedMutationSeq: 7,
     });
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("报销结清确认", () => {
+  it("确认文案明确不发起支付，并提交当前 mutationSeq", async () => {
+    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fetchMock.mockImplementation(() => jsonResponse({ expense: { settledAt: "2026-10-01T00:00:00.000Z" } }));
+    await act(async () => root.render(
+      <ExpenseSettlementAction productionId="prod_1" expenseId="exp_1"
+        settled={false} mutationSeq={4} />,
+    ));
+
+    await act(async () => button("标记已结清").click());
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("不会发起或验证支付"));
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      action: "settle", expectedMutationSeq: 4,
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    confirmMock.mockRestore();
+  });
+
+  it("恢复待结清明确只是纠正记录", async () => {
+    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fetchMock.mockImplementation(() => jsonResponse({ expense: { settledAt: null } }));
+    await act(async () => root.render(
+      <ExpenseSettlementAction productionId="prod_1" expenseId="exp_1"
+        settled mutationSeq={5} />,
+    ));
+
+    await act(async () => button("恢复待结清").click());
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("不代表任何款项被撤回"));
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      action: "reopen_settlement", expectedMutationSeq: 5,
+    });
+    confirmMock.mockRestore();
   });
 });
 

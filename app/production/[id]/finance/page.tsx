@@ -3,7 +3,7 @@ import Link from "next/link";
 import PageHeader, { SECONDARY_BTN } from "@/components/ui/PageHeader";
 import {
   ExpenseAddDocumentButton, ExpenseApprovalActions, ExpenseCreateButton, ExpenseDetailButton,
-  ExpenseDocumentLinks,
+  ExpenseDocumentLinks, ExpenseSettlementAction,
   type ExpenseCategoryOption,
 } from "@/components/ops/FinanceExpenseActions";
 import { redirect, notFound } from "next/navigation";
@@ -55,11 +55,12 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
   if (!access) redirect(`/unauthorized?id=${id}`);
   const actor = toActor(session, access.permCtx);
 
-  const [canBudget, canAllExpenses, canCategories, canCreateExpense, categoryConfig, budgetConfig] = await Promise.all([
+  const [canBudget, canAllExpenses, canCategories, canCreateExpense, canSettle, categoryConfig, budgetConfig] = await Promise.all([
     hasEffectiveGrant(actor, id, "finance", "*", "budget", "view"),
     hasEffectiveGrant(actor, id, "finance", "*", "expenses", "view"),
     hasEffectiveGrant(actor, id, "finance", "*", "categories", "view"),
     hasEffectiveGrant(actor, id, "finance", "*", "expenses", "create"),
+    hasEffectiveGrant(actor, id, "finance", "*", "settlement", "edit"),
     canAccessNode(actor, id, "finance", "*", "categories", "edit"),
     canAccessNode(actor, id, "finance", "*", "budget", "edit"),
   ]);
@@ -79,7 +80,7 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
   const spentCents = sumMoney(categories.map(c => c.spent), baseCurrency);
   const summary: [string, string][] = [
     [formatMinorUnits(budgetCents, baseCurrency), "已设置额度"],
-    [formatMinorUnits(spentCents, baseCurrency), "实际支出"],
+    [formatMinorUnits(spentCents, baseCurrency), "已批准支出"],
     [String(categories.filter(c => c.amount === null).length), "无上限预算项"],
     [String(categories.filter(c => c.baseAmount !== null && toMinorUnits(c.spent, baseCurrency) > toMinorUnits(c.baseAmount, baseCurrency)).length), "超预算项"],
   ];
@@ -100,6 +101,7 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
         <b style={{ display: "block", fontSize: 11, color: "var(--ink)" }}>{e.title}</b>
         <small style={{ color: "var(--muted)", fontSize: 9 }}>
           {e.categoryName ?? "未归类"} · {STATUS_LABEL[e.status]}
+          {e.status === "approved" ? ` · ${e.settledAt ? "已结清" : "待结清"}` : ""}
           {(canAllExpenses || approval) && e.submitterName ? ` · ${e.submitterName}` : ""}
         </small>
         <small style={{ display: "block", marginTop: 4, color: e.invoiceState === "pending" ? "#b45309" : "var(--muted)", fontSize: 9 }}>
@@ -136,6 +138,10 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
             categories={expenseCategoryOptions}
           />
         )}
+        {canSettle && e.status === "approved" && !access.isArchived && (
+          <ExpenseSettlementAction productionId={id} expenseId={e.id}
+            settled={e.settledAt !== null} mutationSeq={e.mutationSeq} />
+        )}
         <ExpenseDetailButton
           productionId={id}
           expenseId={e.id}
@@ -143,6 +149,7 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
           baseCurrency={baseCurrency}
           categories={expenseCategoryOptions}
           archived={access.isArchived}
+          canSettle={canSettle}
         />
       </span>
     </div>
