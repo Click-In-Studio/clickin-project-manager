@@ -159,34 +159,35 @@
   display: flex;
   align-items: flex-start;
   gap: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 .calendarHeading { min-width: 0; }
-.calendarYear { margin: 0; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
-.calendarTitle { margin: 5px 0 0; color: var(--ink); font-family: Georgia, "Noto Serif SC", serif; font-size: 20px; font-weight: 500; }
+.calendarTitleRow { display: flex; align-items: center; gap: 8px; }
+.calendarYear { margin: 0; padding: 2px 7px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 9px; font-weight: 700; line-height: 1.55; letter-spacing: .06em; white-space: nowrap; }
+.calendarTitle { margin: 0; color: var(--ink); font-family: Georgia, "Noto Serif SC", serif; font-size: 20px; font-weight: 500; }
 .calendarDescription { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); line-height: 1.5; }
 .calendarControls { margin-left: auto; display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
 .calendarNavGroup,
 .calendarPager { display: flex; align-items: center; }
-.calendarNavGroup { gap: 8px; }
-.calendarPager { gap: 4px; }
+.calendarNavGroup { gap: 6px; }
+.calendarPager { gap: 3px; }
 .calendarTodayButton,
 .calendarNavButton,
 .calendarMonthLabel {
-  height: 28px;
+  height: 26px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface);
   color: var(--ink);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
 }
 .calendarTodayButton,
 .calendarNavButton { cursor: pointer; }
-.calendarTodayButton { padding: 0 11px; }
-.calendarNavButton { width: 28px; color: var(--muted); font-size: 16px; line-height: 1; }
-.calendarMonthLabel { min-width: 52px; display: inline-flex; align-items: center; justify-content: center; }
+.calendarTodayButton { padding: 0 9px; }
+.calendarNavButton { width: 26px; color: var(--muted); font-size: 14px; line-height: 1; }
+.calendarMonthLabel { min-width: 48px; display: inline-flex; align-items: center; justify-content: center; }
 .calendarTodayButton:hover,
 .calendarTodayButton:focus-visible,
 .calendarNavButton:hover,
@@ -306,7 +307,7 @@
 
 .timeButton {
   width: 100%;
-  min-height: 42px;
+  min-height: 34px;
   box-sizing: border-box;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1076,18 +1077,18 @@
   .timetableActions { width: 100%; margin-left: 0; justify-content: flex-start; }
   .rundownMatrixWrap { max-height: min(690px, calc(100vh - 190px)); }
   .calendarPanel { padding: 14px 10px; }
-  .calendarHeader { flex-direction: column; gap: 10px; margin-bottom: 12px; }
-  .calendarYear { font-size: 11px; }
-  .calendarTitle { font-size: 22px; }
+  .calendarHeader { flex-direction: column; gap: 8px; margin-bottom: 10px; }
+  .calendarYear { font-size: 9px; }
+  .calendarTitle { font-size: 20px; }
   .calendarDescription { max-width: 42ch; font-size: 12px; }
   .calendarControls { width: 100%; margin-left: 0; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
   .calendarNavGroup { width: 100%; justify-content: space-between; }
   .calendarTodayButton,
   .calendarNavButton,
-  .calendarMonthLabel { height: 36px; font-size: 13px; }
-  .calendarTodayButton { padding: 0 14px; }
-  .calendarNavButton { width: 36px; font-size: 20px; }
-  .calendarMonthLabel { min-width: 58px; }
+  .calendarMonthLabel { height: 30px; font-size: 11px; }
+  .calendarTodayButton { padding: 0 10px; }
+  .calendarNavButton { width: 30px; font-size: 17px; }
+  .calendarMonthLabel { min-width: 52px; }
   .calendarLegend { width: 100%; flex-wrap: wrap; gap: 8px 14px; font-size: 12px; }
   .calendarLegend i { width: 9px; height: 9px; }
   .calendarWeek span { padding: 9px 2px; font-size: 12px; }

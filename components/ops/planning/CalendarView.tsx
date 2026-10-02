@@ -6,7 +6,7 @@ import type { ProductionEvent } from "@/lib/ops/event-db";
 import { isoCSTDateStr, todayCSTStr } from "@/lib/tz";
 import CalendarDayDrawer from "./CalendarDayDrawer";
 import CalendarDetailDrawer, { type CalendarSelection } from "./CalendarDetailDrawer";
-import QuickCreateModal from "./QuickCreateModal";
+import QuickCreateModal, { type QuickCreateResult } from "./QuickCreateModal";
 import { ymd } from "./date";
 import { PHASE_TONES, phaseTone, phaseRangeLabel, phaseCoversDate } from "./phase";
 import { readPref, writePref } from "./prefs";
@@ -99,6 +99,16 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
   const rememberTrigger = (trigger: HTMLElement) => { lastTriggerRef.current = trigger; };
   const restoreTrigger = () => window.requestAnimationFrame(() => lastTriggerRef.current?.focus());
   const closeQuickCreate = () => { setQuickCreateDate(null); restoreTrigger(); };
+  const showCreatedEntry = ({ date, selection: createdSelection }: QuickCreateResult) => {
+    const [createdYear, createdMonth] = date.split("-").map(Number);
+    setQuickCreateDate(null);
+    setSelectedDate(date);
+    setExpandedDate(null);
+    setReturnToDate(null);
+    setYear(createdYear);
+    setMonth(createdMonth - 1);
+    setSelection(createdSelection);
+  };
   const closeDay = () => { setExpandedDate(null); restoreTrigger(); };
   const closeDetail = () => { setSelection(null); setReturnToDate(null); restoreTrigger(); };
   const openDay = (date: string, trigger: HTMLElement) => {
@@ -131,8 +141,10 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
     <section className={styles.calendarPanel}>
       <div className={styles.calendarHeader}>
         <div className={styles.calendarHeading}>
-          <p className={styles.calendarYear}>{year} 年</p>
-          <h2 className={styles.calendarTitle}>项目日历</h2>
+          <div className={styles.calendarTitleRow}>
+            <h2 className={styles.calendarTitle}>项目日历</h2>
+            <span className={styles.calendarYear}>{year} 年</span>
+          </div>
           <small className={styles.calendarDescription}>月历统一展示事件、任务、里程碑与阶段；点击事项查看详情。</small>
         </div>
         <div className={styles.calendarControls}>
@@ -257,7 +269,7 @@ export default function CalendarView({ productionId, events, tasks, milestones, 
         ＋
       </button>
 
-      {quickCreateDate && <QuickCreateModal productionId={productionId} date={quickCreateDate} departments={departments} events={events} onClose={closeQuickCreate} />}
+      {quickCreateDate && <QuickCreateModal productionId={productionId} date={quickCreateDate} departments={departments} events={events} onCreated={showCreatedEntry} onClose={closeQuickCreate} />}
       {(expandedDate || selection) && (
         <button type="button" tabIndex={-1} className={styles.drawerBackdrop} aria-label="关闭日历弹层" onClick={selection ? closeDetail : closeDay} />
       )}
