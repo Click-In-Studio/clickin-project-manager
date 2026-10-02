@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import PageHeader, { PRIMARY_BTN } from "@/components/ui/PageHeader";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import styles from "@/components/ui/my-pages.module.css";
@@ -49,6 +49,13 @@ const TIME_RANGES = [
 
 type TimeRange = (typeof TIME_RANGES)[number]["id"];
 type MobileLevel = "queues" | "items" | "detail";
+
+const DEFAULT_SORT_BY_VIEW: Record<ApprovalCenterView, ApprovalCenterSort> = {
+  pending: "oldest",
+  processed: "newest",
+  cc: "newest",
+  submitted: "newest",
+};
 
 const STATUS_LABEL: Record<ApprovalCenterItem["status"], string> = {
   pending: "处理中", approved: "已批准", rejected: "已拒绝", cancelled: "已撤回",
@@ -166,7 +173,7 @@ export default function ApprovalCenterClient({
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"all" | ApprovalCenterStatus>("all");
   const [timeRange, setTimeRange] = useState<TimeRange>("all");
-  const [sort, setSort] = useState<ApprovalCenterSort>("oldest");
+  const [sortByView, setSortByView] = useState(DEFAULT_SORT_BY_VIEW);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
@@ -177,8 +184,11 @@ export default function ApprovalCenterClient({
   const [acting, setActing] = useState<ActionKind | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [mobileLevel, setMobileLevel] = useState<MobileLevel>("queues");
+  const listRequestSeq = useRef(0);
+  const sort = sortByView[view];
 
   const loadItems = useCallback(async () => {
+    const requestSeq = ++listRequestSeq.current;
     setLoading(true);
     setListError(null);
     try {
@@ -197,6 +207,7 @@ export default function ApprovalCenterClient({
       const response = await fetch(makeUrl());
       const data = await response.json().catch(() => ({})) as ApprovalCenterPage & { error?: string };
       if (!response.ok) throw new Error(data.error ?? "审批列表加载失败");
+      if (requestSeq !== listRequestSeq.current) return;
       setItems(data.items);
       setViewCounts(data.viewCounts);
       setAllTypeCount(data.businessTypeCounts.resource_access + data.businessTypeCounts.expense);
@@ -204,13 +215,17 @@ export default function ApprovalCenterClient({
       setSelection(current => current && current.kind !== "form"
         && !data.items.some(item => item.id === current.item.id) ? null : current);
     } catch (loadError) {
+      if (requestSeq !== listRequestSeq.current) return;
       setListError(loadError instanceof Error ? loadError.message : "审批列表加载失败");
     } finally {
-      setLoading(false);
+      if (requestSeq === listRequestSeq.current) setLoading(false);
     }
   }, [businessType, productionId, query, sort, status, timeRange, view]);
 
-  useEffect(() => { void loadItems(); }, [loadItems]);
+  useEffect(() => {
+    void loadItems();
+    return () => { listRequestSeq.current += 1; };
+  }, [loadItems]);
 
   const loadSelectedDetail = useCallback(async (selected: Exclude<Selection, { kind: "form" } | null>) => {
     setDetailLoading(true);
@@ -349,7 +364,10 @@ export default function ApprovalCenterClient({
         </label>
         <label>排序
           <OverflowSafeSelect aria-label="排序方式" value={sort}
-            onChange={event => setSort(event.target.value as ApprovalCenterSort)}>
+            onChange={event => setSortByView(current => ({
+              ...current,
+              [view]: event.target.value as ApprovalCenterSort,
+            }))}>
             <option value="oldest">最早优先</option>
             <option value="newest">最新优先</option>
           </OverflowSafeSelect>

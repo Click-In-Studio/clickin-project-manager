@@ -58,7 +58,15 @@ describe("项目审批中心客户端契约", () => {
     for (const label of ["时间筛选", "状态筛选", "排序方式"]) {
       expect(source).toContain(`aria-label=\"${label}\"`);
     }
+    expect(source).toContain("const DEFAULT_SORT_BY_VIEW");
+    expect(source).toContain("setSortByView(current");
     expect(source).not.toContain("setSort(nextView");
+  });
+
+  it("只允许最新列表请求更新筛选结果", () => {
+    expect(source).toContain("const listRequestSeq = useRef(0)");
+    expect(source).toContain("requestSeq !== listRequestSeq.current");
+    expect(source).toContain("requestSeq === listRequestSeq.current");
   });
 
   it("手机按队列、列表、详情逐级导航，主视图页签保持单行", () => {
