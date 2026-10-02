@@ -58,6 +58,7 @@ describe("项目审批中心客户端契约", () => {
     for (const label of ["时间筛选", "状态筛选", "排序方式"]) {
       expect(source).toContain(`aria-label=\"${label}\"`);
     }
+    expect(source).not.toContain("setSort(nextView");
   });
 
   it("手机按队列、列表、详情逐级导航，主视图页签保持单行", () => {

@@ -251,7 +251,6 @@ export default function ApprovalCenterClient({
 
   function chooseView(nextView: ApprovalCenterView, advanceMobile = false) {
     setView(nextView);
-    setSort(nextView === "pending" ? "oldest" : "newest");
     setSelection(null);
     if (advanceMobile) setMobileLevel("items");
   }
