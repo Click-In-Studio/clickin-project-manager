@@ -1,9 +1,52 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { chromium, type Browser, type Page } from "playwright";
 
 const planningClient = readFileSync("components/ops/PlanningClient.tsx", "utf8");
 const ganttView = readFileSync("components/ops/planning/TaskGanttView.tsx", "utf8");
 const css = readFileSync("components/ops/planning.module.css", "utf8");
+const acceptanceWidths = [319, 360, 571, 1118];
+
+let browser: Browser;
+let page: Page;
+
+async function mountGanttScale(width: number) {
+  await page.setViewportSize({ width, height: 480 });
+  await page.setContent(`
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 100%; }
+      :root { --line: #ccd4d1; --muted: #66736f; --surface: #fff; --ink: #172523; }
+      ${css}
+    </style>
+    <div class="ganttHeader">
+      <div class="ganttHeading"><h2 class="ganttTitle">任务甘特图</h2></div>
+      <div class="ganttControls">
+        <div class="ganttScale" aria-label="时间轴粒度">
+          <button class="ganttScaleButton" aria-pressed="false">日</button>
+          <button class="ganttScaleButton" aria-pressed="true">月</button>
+          <button class="ganttScaleButton" aria-pressed="false">季</button>
+          <button class="ganttScaleButton" aria-pressed="false">年</button>
+        </div>
+        <div class="ganttLegend" aria-label="任务状态图例">
+          <span><i class="ganttLegendInProgress"></i>进行中</span>
+          <span><i class="ganttLegendPending"></i>待处理</span>
+          <span><i class="ganttLegendBlocked"></i>受阻</span>
+          <span><i class="ganttLegendDone"></i>完成</span>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+beforeAll(async () => {
+  browser = await chromium.launch({ channel: "chrome", headless: true });
+  page = await browser.newPage();
+}, 30_000);
+
+afterAll(async () => {
+  await browser?.close();
+});
 
 describe("计划页移动端控制区", () => {
   it("主视图页签保留三个完整入口，并把响应式外观交给语义 class", () => {
@@ -33,7 +76,7 @@ describe("计划页移动端控制区", () => {
     expect(ganttView.match(/styles\.ganttGridRow/g)).toHaveLength(3);
   });
 
-  it("760px 以下压缩卡片并让粒度与图例在 319px 宽度内分行", () => {
+  it("760px 以下压缩卡片，粒度控件四等分收紧视觉高度并保留触控面", () => {
     const mobileStart = css.indexOf("@media (max-width: 760px)");
     const mobileEnd = css.indexOf("@media (max-width: 520px)");
     expect(mobileStart).toBeGreaterThan(-1);
@@ -42,8 +85,11 @@ describe("计划页移动端控制区", () => {
     expect(mobileRules).toMatch(/\.planningViewTab \{[^}]*min-height: 44px;[^}]*padding: 7px 6px;/);
     expect(mobileRules).toMatch(/\.ganttPanel \{ padding: 14px 10px; \}/);
     expect(mobileRules).toMatch(/\.ganttControls \{[^}]*width: 100%;[^}]*flex-shrink: 1;/);
-    expect(mobileRules).toMatch(/\.ganttScale \{[^}]*width: 100%;[^}]*box-sizing: border-box;/);
-    expect(mobileRules).toMatch(/\.ganttScaleButton \{[^}]*min-height: 38px;[^}]*padding: 2px 8px;[^}]*flex: 1 1 0;/);
+    expect(mobileRules).toMatch(/\.ganttScale \{[^}]*width: 100%;[^}]*height: 34px;[^}]*box-sizing: border-box;[^}]*padding: 1px;[^}]*overflow: visible;/);
+    expect(mobileRules).toMatch(/\.ganttScaleButton \{[^}]*min-width: 0;[^}]*min-height: 44px;[^}]*margin-block: -6px;[^}]*padding: 7px 8px;[^}]*align-items: center;[^}]*justify-content: center;[^}]*flex: 1 1 0;[^}]*line-height: 1;/);
+    expect(mobileRules).toMatch(/\.ganttScaleButton::before \{[^}]*inset: 7px 0;[^}]*border-radius: 5px;/);
+    expect(mobileRules).toMatch(/\.ganttScaleButton\[aria-pressed="true"\] \{ background: transparent; \}/);
+    expect(mobileRules).toMatch(/\.ganttScaleButton\[aria-pressed="true"\]::before \{ background: var\(--ink\); \}/);
     expect(mobileRules).toMatch(/\.ganttLegend \{[^}]*width: 100%;[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*display: grid;/);
   });
 
@@ -57,4 +103,59 @@ describe("计划页移动端控制区", () => {
     expect(desktopRules).toMatch(/\.ganttGridRow \{[^}]*grid-template-columns: var\(--gantt-label-column-width\) minmax\(0, 1fr\);/);
     expect(desktopRules).toMatch(/\.ganttLabelResizeHandle \{[^}]*width: 24px;[^}]*touch-action: none;/);
   });
+});
+
+describe("甘特时间轴粒度控件真实浏览器布局", () => {
+  for (const width of acceptanceWidths) {
+    it(`${width}px 不溢出且文字与选中态对齐`, async () => {
+      await mountGanttScale(width);
+      const metrics = await page.locator(".ganttScale").evaluate((scale) => {
+        const buttons = [...scale.querySelectorAll<HTMLButtonElement>(".ganttScaleButton")];
+        const headingBounds = document.querySelector(".ganttHeading")!.getBoundingClientRect();
+        const legendBounds = document.querySelector(".ganttLegend")!.getBoundingClientRect();
+        const buttonMetrics = buttons.map(button => {
+          const bounds = button.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(button);
+          const textBounds = range.getBoundingClientRect();
+          return {
+            width: bounds.width,
+            height: bounds.height,
+            top: bounds.top,
+            bottom: bounds.bottom,
+            centerOffset: Math.abs((textBounds.top + textBounds.bottom) / 2 - (bounds.top + bounds.bottom) / 2),
+          };
+        });
+        const selected = buttons[1];
+        const selectedVisual = getComputedStyle(selected, "::before");
+        return {
+          viewportWidth: window.innerWidth,
+          documentWidth: document.documentElement.scrollWidth,
+          scaleHeight: scale.getBoundingClientRect().height,
+          buttonMetrics,
+          headingBottom: headingBounds.bottom,
+          legendTop: legendBounds.top,
+          selectedBackground: getComputedStyle(selected).backgroundColor,
+          selectedVisualBackground: selectedVisual.backgroundColor,
+          selectedVisualHeight: Number.parseFloat(selectedVisual.height),
+        };
+      });
+
+      expect(metrics.documentWidth).toBeLessThanOrEqual(metrics.viewportWidth);
+      for (const button of metrics.buttonMetrics) expect(button.centerOffset).toBeLessThanOrEqual(0.5);
+
+      if (width <= 760) {
+        expect(metrics.scaleHeight).toBe(34);
+        expect(metrics.buttonMetrics.every(button => button.height >= 44)).toBe(true);
+        expect(Math.max(...metrics.buttonMetrics.map(button => button.width)) - Math.min(...metrics.buttonMetrics.map(button => button.width))).toBeLessThanOrEqual(0.5);
+        expect(Math.min(...metrics.buttonMetrics.map(button => button.top))).toBeGreaterThanOrEqual(metrics.headingBottom);
+        expect(Math.max(...metrics.buttonMetrics.map(button => button.bottom))).toBeLessThanOrEqual(metrics.legendTop);
+        expect(metrics.selectedBackground).toBe("rgba(0, 0, 0, 0)");
+        expect(metrics.selectedVisualBackground).toBe("rgb(23, 37, 35)");
+        expect(metrics.selectedVisualHeight).toBe(30);
+      } else {
+        expect(metrics.buttonMetrics.every(button => button.height === 30)).toBe(true);
+      }
+    });
+  }
 });
