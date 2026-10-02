@@ -96,13 +96,7 @@ const BADGE_CLASS: Record<StatusColor, string> = {
 function StatusBadge({ status }: { status: ApprovalRequest["status"] }) {
   const col = statusColor(status);
   return (
-    <span
-      className={BADGE_CLASS[col]}
-      style={col === "muted" ? {
-        fontSize: 11, padding: "2px 8px", borderRadius: 999, fontWeight: 600,
-        background: "var(--surface-2)", color: "var(--muted)",
-      } : { fontSize: 11, padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}
-    >
+    <span className={`${styles.badge} ${BADGE_CLASS[col]}`}>
       {STATUS_LABELS[status]}
     </span>
   );
@@ -349,7 +343,7 @@ function ApprovalFlowPreview() {
 
 // ─── RequestForm ──────────────────────────────────────────────────────────────
 
-function RequestForm({ productionId, onSubmitted, onClose }: {
+export function RequestForm({ productionId, onSubmitted, onClose }: {
   productionId: string;
   onSubmitted: () => void;
   onClose: () => void;
@@ -510,7 +504,7 @@ function RequestForm({ productionId, onSubmitted, onClose }: {
 
 // ─── 动作按钮 ─────────────────────────────────────────────────────────────────
 
-type ActionKind = "approve" | "reject" | "escalate" | "cancel";
+export type ActionKind = "approve" | "reject" | "escalate" | "cancel";
 /** 在途动作：哪条申请、哪个动作。null = 没有请求在途。 */
 type Acting = { reqId: string; kind: ActionKind } | null;
 type ActionError = { reqId: string; message: string } | null;
@@ -545,7 +539,7 @@ function ActionButton({ label, busy, disabled, primary, onClick }: {
 
 // ─── RequestDetail ────────────────────────────────────────────────────────────
 
-function RequestDetail({
+export function RequestDetail({
   req,
   view,
   loading,
@@ -593,6 +587,8 @@ function RequestDetail({
     canCancel: false,
   };
   const hasAction = Object.values(actions).some(Boolean);
+  const activeTemplateNode = detail.flowSnapshot?.nodes[detail.flowSnapshot.cursor];
+  const approveLabel = activeTemplateNode?.type === "processing" ? "确认已处理" : "批准";
 
   return (
     <article className={styles.approvalDetail} data-approval-detail>
@@ -600,19 +596,12 @@ function RequestDetail({
       <div className={styles.approvalDetailBadges}>
         <StatusBadge status={detail.status} />
         {detail.grantType === "ttl" && (
-          <span style={{
-            fontSize: 11, padding: "2px 8px", borderRadius: 999, fontWeight: 600,
-            background: "var(--surface-2)", color: "var(--muted)",
-          }}>临时权限{ttlLabel ? ` · ${ttlLabel}` : ""}</span>
+          <span className={styles.badge}>临时权限{ttlLabel ? ` · ${ttlLabel}` : ""}</span>
         )}
       </div>
 
       {/* Title */}
-      <h2 style={{
-        margin: 0,
-        fontFamily: 'Georgia, "Noto Serif SC", serif',
-        fontSize: "clamp(18px, 2vw, 22px)", fontWeight: 500, color: "var(--ink)", lineHeight: 1.3,
-      }}>
+      <h2 className={styles.approvalDetailTitle}>
         {label}
         {detail.resourceId && detail.resourceId !== "*" && (
           <span style={{ fontSize: 14, fontWeight: 400, color: "var(--muted)", marginLeft: 6 }}>
@@ -659,7 +648,7 @@ function RequestDetail({
           <p>当前可执行操作</p>
           <div>
             {actions.canApprove && (
-              <ActionButton primary label="批准" busy={acting === "approve"} disabled={actionLocked} onClick={() => onApprove?.()} />
+              <ActionButton primary label={approveLabel} busy={acting === "approve"} disabled={actionLocked} onClick={() => onApprove?.()} />
             )}
             {actions.canReject && (
               <ActionButton label="拒绝" busy={acting === "reject"} disabled={actionLocked} onClick={() => onReject?.()} />

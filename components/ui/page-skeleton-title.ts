@@ -14,7 +14,7 @@ import { ADMIN_NAV_GROUPS, CREATION_NAV, OVERVIEW_NAV, PRODUCTION_NAV } from "@/
 export const EXTRA_PRODUCTION_TITLES: Record<string, string> = {
   "": "我的工作",
   notifications: "我的通知",
-  "access-requests": "资源申请",
+  "access-requests": "审批中心",
   announcements: "项目公告",
   characters: "构作",
   cuelists: "Cue 表设置",

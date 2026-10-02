@@ -1,5 +1,5 @@
 /**
- * 审批中心统一读模型：跨 approval_request / production_expense 的参与者隔离、
+ * 项目审批中心统一读模型：跨 approval_request / production_expense 的参与者隔离、
  * 四种视图、筛选排序分页与 API 参数门。
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -8,7 +8,7 @@ import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { listApprovalCenterItems } from "@/lib/approval/approval-center-db";
 import type { ApprovalCenterListParams } from "@/lib/approval/approval-center-types";
-import { GET as approvalCenterHandler } from "@/app/api/my/approval-center/route";
+import { GET as approvalCenterHandler } from "@/app/api/production/[id]/approval-items/route";
 import { getPool } from "@/lib/pg";
 import { approveExpense } from "@/lib/ops/finance-db";
 import { cleanupProduction, makeProduction, shortId } from "../_support/factories";
@@ -119,6 +119,11 @@ beforeAll(async () => {
   ({ prodId: prodB } = await makeProduction(applicantB));
   await getPool().query("UPDATE production SET name = '雾港项目甲' WHERE id = $1", [prodA]);
   await getPool().query("UPDATE production SET name = '灯塔项目乙' WHERE id = $1", [prodB]);
+  await getPool().query(
+    `INSERT INTO production_member (production_id, user_id, roles)
+     VALUES ($1, $3, '{}'), ($2, $3, '{}')`,
+    [prodA, prodB, viewerId],
+  );
 
   ids.pendingAccess = await insertApproval({
     productionId: prodA,
@@ -180,6 +185,13 @@ beforeAll(async () => {
     status: "rejected",
     createdAt: "2026-06-10T08:00:00.000Z",
   });
+  ids.submittedExpenseOlder = await insertExpense({
+    productionId: prodB,
+    submittedBy: viewerId,
+    title: "早期交通费",
+    status: "withdrawn",
+    createdAt: "2026-04-20T08:00:00.000Z",
+  });
   ids.processedExpense = await insertExpense({
     productionId: prodB,
     submittedBy: applicantB,
@@ -213,41 +225,44 @@ afterAll(async () => {
 
 describe("审批中心读模型", () => {
   it("四种视图分别读取业务事实，不使用通知记录", async () => {
-    const pending = await listApprovalCenterItems(viewerId, options({ view: "pending" }));
-    expect(pending.items.map((item) => item.sourceId).sort()).toEqual(
-      [ids.pendingAccess, ids.pendingExpense].sort(),
-    );
-    expect(pending.items.find((item) => item.sourceId === ids.pendingExpense)?.canFinalizeForViewer).toBe(false);
+    const pendingA = await listApprovalCenterItems(viewerId, prodA, options({ view: "pending" }));
+    expect(pendingA.items.map((item) => item.sourceId)).toEqual([ids.pendingAccess]);
+    expect(pendingA.viewCounts).toMatchObject({ pending: 1, processed: 1, submitted: 1 });
+    expect(pendingA.businessTypeCounts).toEqual({ resource_access: 1, expense: 0 });
+    const pendingB = await listApprovalCenterItems(viewerId, prodB, options({ view: "pending" }));
+    expect(pendingB.items.map((item) => item.sourceId)).toEqual([ids.pendingExpense]);
+    expect(pendingB.items[0].canFinalizeForViewer).toBe(false);
 
-    const processed = await listApprovalCenterItems(viewerId, options({ view: "processed" }));
-    expect(processed.items.map((item) => item.sourceId)).toEqual([
-      ids.processedExpense,
-      ids.processedAccess,
-    ]);
+    const processedA = await listApprovalCenterItems(viewerId, prodA, options({ view: "processed" }));
+    expect(processedA.items.map((item) => item.sourceId)).toEqual([ids.processedAccess]);
+    const processedB = await listApprovalCenterItems(viewerId, prodB, options({ view: "processed" }));
+    expect(processedB.items.map((item) => item.sourceId)).toEqual([ids.processedExpense]);
 
-    const cc = await listApprovalCenterItems(viewerId, options({ view: "cc" }));
+    const cc = await listApprovalCenterItems(viewerId, prodB, options({ view: "cc" }));
     expect(cc.items.map((item) => item.sourceId)).toEqual([ids.ccAccess]);
 
-    const submitted = await listApprovalCenterItems(viewerId, options({ view: "submitted" }));
-    expect(submitted.items.map((item) => item.sourceId)).toEqual([
+    const submittedA = await listApprovalCenterItems(viewerId, prodA, options({ view: "submitted" }));
+    expect(submittedA.items.map((item) => item.sourceId)).toEqual([ids.submittedAccess]);
+    const submittedB = await listApprovalCenterItems(viewerId, prodB, options({ view: "submitted" }));
+    expect(submittedB.items.map((item) => item.sourceId)).toEqual([
       ids.submittedExpense,
-      ids.submittedAccess,
+      ids.submittedExpenseOlder,
     ]);
   });
 
-  it("跨项目只返回当前用户实际参与的项目与实例", async () => {
-    const pending = await listApprovalCenterItems(viewerId, options({ view: "pending" }));
-    expect(new Set(pending.items.map((item) => item.production.id))).toEqual(new Set([prodA, prodB]));
-    expect(pending.items.map((item) => item.sourceId)).not.toContain(ids.unrelated);
+  it("按项目隔离实例，且未接入类型不会冒充审批项", async () => {
+    const pending = await listApprovalCenterItems(viewerId, prodA, options({ view: "pending" }));
+    expect(pending.items.map((item) => item.sourceId)).toEqual([ids.pendingAccess]);
+    expect(pending.items.map((item) => item.sourceId)).not.toContain(ids.pendingExpense);
     expect(pending.items.map((item) => item.sourceId)).not.toContain(ids.legacyExit);
 
-    const outsider = await listApprovalCenterItems(outsiderId, options({ view: "pending" }));
+    const outsider = await listApprovalCenterItems(outsiderId, prodA, options({ view: "pending" }));
     expect(outsider.items.map((item) => item.sourceId)).toEqual([ids.unrelated]);
     expect(outsider.items.map((item) => item.sourceId)).not.toContain(ids.pendingAccess);
   });
 
   it("支持业务类型、状态、时间和搜索筛选", async () => {
-    const expenseOnly = await listApprovalCenterItems(viewerId, options({
+    const expenseOnly = await listApprovalCenterItems(viewerId, prodB, options({
       view: "submitted",
       businessTypes: ["expense"],
       statuses: ["rejected"],
@@ -260,7 +275,7 @@ describe("审批中心读模型", () => {
       kind: "expense", amount: "123.45", currency: "CNY",
     });
 
-    const cancelledAccess = await listApprovalCenterItems(viewerId, options({
+    const cancelledAccess = await listApprovalCenterItems(viewerId, prodA, options({
       view: "submitted", businessTypes: ["resource_access"], statuses: ["cancelled"],
     }));
     expect(cancelledAccess.items.map((item) => item.sourceId)).toEqual([ids.submittedAccess]);
@@ -282,7 +297,7 @@ describe("审批中心读模型", () => {
         ok: true,
         forwarded: true,
       });
-      const processed = await listApprovalCenterItems(viewerId, options({ view: "processed" }));
+      const processed = await listApprovalCenterItems(viewerId, prodA, options({ view: "processed" }));
       expect(processed.items.map((item) => item.sourceId)).toContain(expenseId);
     } finally {
       await getPool().query("DELETE FROM production_expense WHERE id = $1", [expenseId]);
@@ -290,25 +305,25 @@ describe("审批中心读模型", () => {
   });
 
   it("按稳定顺序游标分页，且游标不能跨排序方向复用", async () => {
-    const first = await listApprovalCenterItems(viewerId, options({
+    const first = await listApprovalCenterItems(viewerId, prodB, options({
       view: "submitted", sort: "oldest", limit: 1,
     }));
-    expect(first.items[0].sourceId).toBe(ids.submittedAccess);
+    expect(first.items[0].sourceId).toBe(ids.submittedExpenseOlder);
     expect(first.nextCursor).toBeTruthy();
 
-    const second = await listApprovalCenterItems(viewerId, options({
+    const second = await listApprovalCenterItems(viewerId, prodB, options({
       view: "submitted", sort: "oldest", limit: 1, cursor: first.nextCursor!,
     }));
     expect(second.items.map((item) => item.sourceId)).toEqual([ids.submittedExpense]);
     expect(second.nextCursor).toBeNull();
 
-    await expect(listApprovalCenterItems(viewerId, options({
+    await expect(listApprovalCenterItems(viewerId, prodB, options({
       view: "submitted", sort: "newest", cursor: first.nextCursor!,
     }))).rejects.toThrow("cursor 与 sort 不匹配");
   });
 });
 
-describe("GET /api/my/approval-center", () => {
+describe("GET /api/production/:id/approval-items", () => {
   function request(path: string, userId?: string): NextRequest {
     const req = new NextRequest(`http://localhost${path}`);
     if (userId) {
@@ -320,26 +335,33 @@ describe("GET /api/my/approval-center", () => {
   }
 
   it("未登录返回 401，非法筛选返回 400", async () => {
-    expect((await approvalCenterHandler(request("/api/my/approval-center"))).status).toBe(401);
+    const ctx = { params: Promise.resolve({ id: prodA }) };
+    expect((await approvalCenterHandler(request(`/api/production/${prodA}/approval-items`), ctx)).status).toBe(401);
     expect((await approvalCenterHandler(request(
-      "/api/my/approval-center?view=unknown", viewerId,
-    ))).status).toBe(400);
+      `/api/production/${prodA}/approval-items?view=unknown`, viewerId,
+    ), ctx)).status).toBe(400);
     expect((await approvalCenterHandler(request(
-      "/api/my/approval-center?from=2026-07-01&to=2026-06-01", viewerId,
-    ))).status).toBe(400);
+      `/api/production/${prodA}/approval-items?from=2026-07-01&to=2026-06-01`, viewerId,
+    ), ctx)).status).toBe(400);
     expect((await approvalCenterHandler(request(
-      "/api/my/approval-center?type=member_exit", viewerId,
-    ))).status).toBe(400);
+      `/api/production/${prodA}/approval-items?type=member_exit`, viewerId,
+    ), ctx)).status).toBe(400);
   });
 
-  it("返回统一 DTO，并接受重复筛选参数", async () => {
+  it("拒绝非成员，并只返回当前项目的统一 DTO", async () => {
+    const ctx = { params: Promise.resolve({ id: prodA }) };
+    const denied = await approvalCenterHandler(request(
+      `/api/production/${prodA}/approval-items`, outsiderId,
+    ), ctx);
+    expect(denied.status).toBe(403);
+
     const response = await approvalCenterHandler(request(
-      "/api/my/approval-center?view=pending&type=resource_access&type=expense&sort=oldest",
+      `/api/production/${prodA}/approval-items?view=pending&type=resource_access&type=expense&sort=oldest`,
       viewerId,
-    ));
+    ), ctx);
     expect(response.status).toBe(200);
     const body = await response.json() as { items: Array<{ sourceId: string }>; nextCursor: string | null };
-    expect(body.items.map((item) => item.sourceId)).toEqual([ids.pendingAccess, ids.pendingExpense]);
+    expect(body.items.map((item) => item.sourceId)).toEqual([ids.pendingAccess]);
     expect(body.nextCursor).toBeNull();
   });
 });

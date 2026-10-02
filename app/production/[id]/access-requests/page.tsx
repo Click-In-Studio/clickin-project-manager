@@ -4,9 +4,9 @@ import { redirect, notFound } from "next/navigation";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getProductionName } from "@/lib/production/production-db";
-import AccessRequestsClient from "@/components/approval/AccessRequestsClient";
+import ApprovalCenterClient from "@/components/approval/ApprovalCenterClient";
 
-export const metadata: Metadata = { title: "资源申请" };
+export const metadata: Metadata = { title: "审批中心" };
 
 export default async function AccessRequestsPage({ params }: { params: Promise<{ id: string }> }) {
   const cookieStore = await cookies();
@@ -20,13 +20,12 @@ export default async function AccessRequestsPage({ params }: { params: Promise<{
   ]);
   if (!access) notFound();
 
-  // 流程设置是 owner 面（模版决定「谁能批准权限」，属权限的权限——缺口文档 P0-10）；
-  // 门在 SSR 算，与 API 侧 requireGrantGate 空 OR 链同源。
   return (
-    <AccessRequestsClient
+    <ApprovalCenterClient
       productionId={id}
       productionName={productionName ?? ""}
-      canManageFlows={access.permCtx.isOwner || access.permCtx.isAdmin}
+      actorId={session.userId}
+      archived={access.isArchived}
     />
   );
 }

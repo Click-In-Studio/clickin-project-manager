@@ -2,12 +2,12 @@
 title: 审批流程模版
 order: 2
 summary: 不用默认阶梯，自己画一条审批路径：几个节点、每个节点谁批、或签还是会签、要不要抄送、超时多久
-routes: [access-requests]
-who: 项目所有者与制作人
+routes: [admin/approval-flows]
+who: 项目所有者
 tier: all
 platform: [desktop, mobile]
 related: [admin/approval/access-requests, admin/security/permission-center]
-updated: 2026-09-30
+updated: 2026-10-02
 ---
 
 ## 这是什么
@@ -18,7 +18,7 @@ updated: 2026-09-30
 
 ## 怎么操作
 
-1. 「资源申请 → 流程设置」→「新建模版」，起名。
+1. 「管理项目 → 安全设置 → 访问审批流程」→「新建模版」，起名。
 2. 流程是一串节点：开头「发起」和结尾「结束」是固定的，中间「在选中节点后添加」审批节点。每个节点点开设置：
    - **处理人**：直属上级审批（按届时组织关系解析）、指定成员（至少一位）、指定角色（至少一个）。
    - **通过方式**：任一人通过（或签）；会签则要全部通过。
