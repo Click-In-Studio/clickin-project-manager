@@ -19,7 +19,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
 
   const { id } = await ctx.params;
-  const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
+  const access = await getProductionPermissionContext(session.userId, false, id);
   if (!access) return Response.json({ error: "无权限" }, { status: 403 });
 
   try {

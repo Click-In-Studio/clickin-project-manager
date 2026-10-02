@@ -97,6 +97,7 @@ function rowToItem(row: ApprovalCenterRow): ApprovalCenterItem {
   };
 }
 
+// 参数契约：$1 始终是当前用户，$2 始终是当前项目；所有追加筛选从 $3 开始。
 const UNIFIED_APPROVAL_QUERY = `
   WITH unified AS (
     SELECT
