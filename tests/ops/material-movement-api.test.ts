@@ -50,7 +50,7 @@ describe("物料流转 API", () => {
   it("非法状态、用途、缺原因和超过库存稳定 400，失败完全不留流水", async () => {
     const { lot, ctx, body } = await fixture();
     for (const change of [
-      { toBucket: "expected" }, { quantity: 6 }, { eventId: "不存在" },
+      { toBucket: "expected" }, { toBucket: "in_stock" }, { quantity: 6 }, { eventId: "不存在" },
       { toBucket: "maintenance" }, { toBucket: "exited", exitReason: "随意状态", reason: "退出" },
       { reversesEventId: "x", returnOfMovementId: "y" }, { quantity: "2" },
       { occurredAt: { toString: "bad" } }, { custodian: { kind: { toString: "bad" }, id: "x" } },
@@ -85,6 +85,9 @@ describe("物料流转 API", () => {
   it("定义接口拒绝旧状态覆盖；字典查询与旧页面读取没有留下双轨", async () => {
     const { material, ctx } = await fixture();
     expect((await PATCH(req({ statusId: "旧状态" }, ownerId, "PATCH"), ctx)).status).toBe(400);
+    expect((await PATCH(req({ quantity: 99 }, ownerId, "PATCH"), ctx)).status).toBe(400);
+    expect((await PATCH(req({ location: "伪造的新库位" }, ownerId, "PATCH"), ctx)).status).toBe(400);
+    expect(await getMaterial(material.id, prodId)).toMatchObject({ inStockQuantity: 5, checkedOutQuantity: 0, location: "" });
     expect(await getMaterial(material.id, prodId)).not.toHaveProperty("statusId");
     for (const file of ["lib/ops/material-db.ts", "app/production/[id]/materials/page.tsx", "app/api/production/[id]/materials/route.ts", "scripts/seed-local-demo.ts"])
       expect(readFileSync(file, "utf8")).not.toMatch(/production_material_status|listMaterialStatuses|statusName|statusColor/);

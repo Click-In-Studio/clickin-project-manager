@@ -49,6 +49,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const lot = (await listMaterialStockLots(materialId, productionId)).find(l => l.id === b.lotId);
   if (!lot) return Response.json({ error: "物料批次不存在" }, { status: 404 });
   try {
+    // 经手对象与签出用途正交：custodian.kind=event 不等于 eventId 用途关联。
     if (b.exitReason === "returned_to_source" && b.reversesEventId == null
         && ["rented", "borrowed"].includes(lot.sourceType)) {
       if (b.fromBucket !== "in_stock" || b.toBucket !== "exited" || b.returnOfMovementId != null || b.eventId != null || b.taskId != null) return bad();
