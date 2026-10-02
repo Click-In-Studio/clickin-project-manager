@@ -8,7 +8,6 @@ import { getProductionPermissionContext } from "@/lib/perm/permission-context-db
 import { getProductionName } from "@/lib/production/production-db";
 import { listProductionReports } from "@/lib/ops/event-db";
 import { isReportViewer } from "@/lib/ops/event-permissions";
-import PageHeader from "@/components/ui/PageHeader";
 import ProductionReportsClient from "@/components/ops/ProductionReportsClient";
 import PageActivationGate from "@/components/perm/PageActivationGate";
 import styles from "@/components/ui/my-pages.module.css";
@@ -34,7 +33,6 @@ export default async function ProductionReportsPage({ params }: { params: Promis
   return (
     <>
       <div className={styles.workspace} style={{ minHeight: "100vh", background: "var(--paper)" }}>
-        <PageHeader eyebrow="Reports" title="报告" side="stage" />
         <ProductionReportsClient
           productionId={productionId}
           reports={reports}

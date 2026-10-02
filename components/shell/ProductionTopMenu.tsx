@@ -206,21 +206,29 @@ export function ProductionTopMenuDivider() {
 export function ProductionTopMenuContext({
   productionName,
   label,
+  side = "script",
+  stage: stageOverride,
+  placeholder = false,
 }: {
   productionName: string;
   label: string;
+  side?: "script" | "stage";
+  stage?: ProductionToolbarStage;
+  placeholder?: boolean;
 }) {
-  const { stage } = useProductionToolbar();
+  const toolbar = useProductionToolbar();
+  const stage = stageOverride ?? toolbar.stage;
   const compact = stage >= PRODUCTION_TOOLBAR_STAGE.primaryShort;
 
   return (
     <div
       data-production-top-menu-context={label}
+      data-production-top-menu-placeholder={placeholder ? "true" : undefined}
       className={`flex shrink-0 ${compact ? "items-center" : "flex-col"}`}
       style={{ lineHeight: 1.2 }}
     >
       {!compact && (
-        <span className="max-w-40 truncate whitespace-nowrap text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--script)]">
+        <span className={`max-w-40 truncate whitespace-nowrap text-[9px] font-bold uppercase tracking-[0.12em] ${side === "stage" ? "text-[var(--stage)]" : "text-[var(--script)]"}`}>
           {productionName}
         </span>
       )}

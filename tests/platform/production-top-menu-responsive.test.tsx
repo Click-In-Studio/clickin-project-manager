@@ -8,6 +8,7 @@ import {
   ProductionToolbarContext,
   ProductionTopMenuContext,
 } from "@/components/shell/ProductionTopMenu";
+import { PRODUCTION_TOP_MENU_LABELS } from "@/components/shell/app-shell/nav-config";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -25,7 +26,7 @@ afterEach(() => {
   container.remove();
 });
 
-function renderContext(label: "剧本" | "Cue", stage: number) {
+function renderContext(label: string, stage: number, side: "script" | "stage" = "script") {
   act(() => root.render(
     <ProductionToolbarContext.Provider value={{
       stage: stage as (typeof PRODUCTION_TOOLBAR_STAGE)[keyof typeof PRODUCTION_TOOLBAR_STAGE],
@@ -34,7 +35,7 @@ function renderContext(label: "剧本" | "Cue", stage: number) {
       hasStoredControls: false,
       setHasStoredControls: () => {},
     }}>
-      <ProductionTopMenuContext productionName="一个很长的项目名称" label={label} />
+      <ProductionTopMenuContext productionName="一个很长的项目名称" label={label} side={side} />
     </ProductionToolbarContext.Provider>,
   ));
   return container.querySelector<HTMLElement>(`[data-production-top-menu-context="${label}"]`)!;
@@ -53,5 +54,30 @@ describe("共享项目工具栏上下文", () => {
     expect(context.textContent).toBe(label);
     expect(context.className).not.toContain("flex-col");
     expect(context.lastElementChild?.className).toContain("border");
+  });
+
+  it("项目总览与制作侧全部路由都有明确的顶部栏标签", () => {
+    const expected = {
+      "": "我的工作",
+      notifications: "我的通知",
+      announcements: "我的通知",
+      "access-requests": "审批",
+      contacts: "人员",
+      planning: "计划与日程",
+      events: "事件",
+      tasks: "任务",
+      reports: "报告",
+      wiki: "知识库",
+      finance: "财务",
+      materials: "物料",
+      assets: "资产工作台",
+    };
+    expect(PRODUCTION_TOP_MENU_LABELS).toMatchObject(expected);
+
+    for (const label of new Set(Object.values(expected))) {
+      const context = renderContext(label, PRODUCTION_TOOLBAR_STAGE.primaryShort, "stage");
+      expect(context.textContent).toBe(label);
+      expect(context.lastElementChild?.className).toContain("border");
+    }
   });
 });

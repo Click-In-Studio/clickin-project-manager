@@ -1,6 +1,5 @@
 "use client";
 
-import PageHeader from "@/components/ui/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import type { MemberWithRoles } from "@/lib/perm/member-db";
@@ -116,8 +115,6 @@ export default function ContactsClient({
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader eyebrow="People" title="人员" side="stage" />
-
       <div style={{ background: "var(--surface)", borderRadius: 13, border: "1px solid var(--line)", padding: 22, minHeight: "calc(100vh - 280px)" }}>
         {sorted.length === 0 ? (
           <div style={{ padding: "48px 0", textAlign: "center" }}>

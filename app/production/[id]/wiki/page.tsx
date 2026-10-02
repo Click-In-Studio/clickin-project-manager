@@ -8,7 +8,6 @@ import { getProductionPermissionContext } from "@/lib/perm/permission-context-db
 import { getProductionName } from "@/lib/production/production-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { listNodeTreeFor } from "@/lib/node/tree-view";
-import PageHeader from "@/components/ui/PageHeader";
 import PageActivationGate from "@/components/perm/PageActivationGate";
 import WikiShell from "@/components/wiki/WikiShell";
 
@@ -36,7 +35,6 @@ export default async function WikiLibraryPage({ params }: { params: Promise<{ id
   return (
     <>
       <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-        <PageHeader eyebrow="Wiki" title="知识库" side="stage" />
         <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} assetActions={assetActions}>
           <div className="rounded-xl border border-dashed border-zinc-200 bg-white/60 px-8 flex items-center justify-center">
             <p className="text-sm text-zinc-400">

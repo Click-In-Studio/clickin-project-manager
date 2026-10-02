@@ -6,6 +6,7 @@ import {
   extractModule,
   extractAdminModule,
 } from "@/components/shell/app-shell/route";
+import { PRODUCTION_TOP_MENU_LABELS } from "@/components/shell/app-shell/nav-config";
 
 /**
  * AppShell 从 pathname 推导「当前项目 / 模块 / 附带对象」的纯函数（#487 A1 从
@@ -61,9 +62,31 @@ describe("extractModule", () => {
     expect(extractModule(`/production/${P}/admin/roles`, P)).toBe("admin");
   });
   it("events 下的需求 / 报告子页归到 tasks / reports 高亮", () => {
+    expect(extractModule(`/production/${P}/events/e1/reqs`, P)).toBe("tasks");
     expect(extractModule(`/production/${P}/events/e1/reqs/r1`, P)).toBe("tasks");
+    expect(extractModule(`/production/${P}/events/e1/reports`, P)).toBe("reports");
     expect(extractModule(`/production/${P}/events/e1/reports/rp1`, P)).toBe("reports");
     expect(extractModule(`/production/${P}/events/e1`, P)).toBe("events");
+  });
+
+  it.each([
+    [`/production/${P}`, "我的工作"],
+    [`/production/${P}/notifications`, "我的通知"],
+    [`/production/${P}/announcements`, "我的通知"],
+    [`/production/${P}/access-requests`, "审批"],
+    [`/production/${P}/contacts`, "人员"],
+    [`/production/${P}/planning`, "计划与日程"],
+    [`/production/${P}/events/e1/callsheet`, "事件"],
+    [`/production/${P}/tasks/t1`, "任务"],
+    [`/production/${P}/events/e1/reqs`, "任务"],
+    [`/production/${P}/reports/r1`, "报告"],
+    [`/production/${P}/events/e1/reports/r1`, "报告"],
+    [`/production/${P}/wiki/w1`, "知识库"],
+    [`/production/${P}/finance`, "财务"],
+    [`/production/${P}/materials`, "物料"],
+    [`/production/${P}/assets/a1/preview`, "资产工作台"],
+  ])("%s 的顶部栏标签是 %s", (pathname, label) => {
+    expect(PRODUCTION_TOP_MENU_LABELS[extractModule(pathname, P)]).toBe(label);
   });
 });
 

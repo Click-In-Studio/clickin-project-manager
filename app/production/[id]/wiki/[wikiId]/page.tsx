@@ -18,7 +18,6 @@ import { canViewWiki, canEditWiki, canShareWiki } from "@/lib/wiki/perm";
 import { listNodeTreeFor } from "@/lib/node/tree-view";
 import { getNode } from "@/lib/node/db";
 import { listEventDepartments } from "@/lib/ops/event-db";
-import PageHeader from "@/components/ui/PageHeader";
 import PageActivationGate from "@/components/perm/PageActivationGate";
 import WikiShell from "@/components/wiki/WikiShell";
 import WikiDocClient from "@/components/wiki/WikiDocClient";
@@ -67,7 +66,6 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
     ]);
     return (
       <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-        <PageHeader eyebrow="Wiki" title="知识库" side="stage" />
         <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} selectedId={wikiId} assetActions={assetActions}>
           {canView ? (
             <AssetPreviewClient
@@ -119,7 +117,6 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
     const applyResource = `node:wiki/${docId}@view`;
     return (
       <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-        <PageHeader eyebrow="Wiki" title="知识库" side="stage" />
         <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} selectedId={wikiId} assetActions={assetActions}>
           <div className="rounded-xl border border-zinc-200 bg-white px-8 flex flex-col items-center justify-center text-center">
             <p className="text-lg font-bold text-zinc-800 mb-1">[[{wiki.title ?? "（无标题）"}]]</p>
@@ -149,7 +146,6 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
   return (
     <>
       <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-        <PageHeader eyebrow="Wiki" title="知识库" side="stage" />
         <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} selectedId={wikiId} assetActions={assetActions}>
           <WikiDocClient
             productionId={productionId}

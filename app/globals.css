@@ -708,7 +708,7 @@ span[data-stage-inline] {
   font-family: var(--font-stage);
 }
 
-#production-page-toolbar-slot[data-toolbar-ready="true"] > [data-production-top-menu-placeholder],
+#production-page-toolbar-slot[data-toolbar-ready="true"] > [data-production-top-menu-placeholder="true"],
 #production-page-toolbar-slot[data-search-open="true"] .production-top-menu-right,
 #production-top-toolbar-overflow[data-search-open="true"] {
   display: none;
