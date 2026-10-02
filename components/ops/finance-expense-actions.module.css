@@ -351,8 +351,15 @@
 }
 
 @media (max-width: 640px) {
-  .reclassifyControls { flex-direction: column; align-items: stretch; }
-  .reclassifyControls select { max-width: 150px; }
+  .approvalActions { width: 100%; align-items: stretch; }
+  .reclassifyControls { width: 100%; flex-direction: column; align-items: stretch; }
+  .reclassifyControls select { width: 100%; max-width: none; }
+  .actionButtons,
+  .rejectConfirm { flex-wrap: wrap; justify-content: flex-start; }
+  .actionButtons input,
+  .rejectConfirm textarea { width: 100%; max-width: none; flex: 1 1 100%; }
+  .documentLinks span { min-width: 0; flex-wrap: wrap; }
+  .documentLinks button { max-width: 100%; }
   .backdrop { background: rgba(20, 31, 30, .28); }
   .drawer {
     top: auto;

@@ -25,9 +25,6 @@ import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export const metadata: Metadata = { title: "财务" };
 
-const PAD = "24px clamp(18px, 3vw, 52px) 60px";
-const CARD = { background: "white", borderRadius: 12, border: "1px solid var(--line)" } as const;
-
 const STATUS_LABEL: Record<ExpenseStatus, string> = {
   draft: "草稿", pending: "待审批", approved: "已批准", rejected: "已驳回", withdrawn: "已撤回",
 };
@@ -99,15 +96,15 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
   );
 
   const expenseRow = (e: (typeof expenses)[number], approval = false) => (
-    <div key={e.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, padding: "12px 0", borderTop: "1px solid var(--line)" }}>
-      <span>
-        <b style={{ display: "block", fontSize: 11, color: "var(--ink)" }}>{e.title}</b>
-        <small style={{ color: "var(--muted)", fontSize: 9 }}>
+    <div key={e.id} className={responsive.financeExpenseRow}>
+      <span className={responsive.financeExpenseDetails}>
+        <b className={responsive.financeExpenseTitle}>{e.title}</b>
+        <small className={responsive.financeExpenseMeta}>
           {e.categoryName ?? "未归类"} · {STATUS_LABEL[e.status]}
           {e.status === "approved" ? ` · ${e.settledAt ? "已结清" : "待结清"}` : ""}
           {(canAllExpenses || approval) && e.submitterName ? ` · ${e.submitterName}` : ""}
         </small>
-        <small style={{ display: "block", marginTop: 4, color: e.invoiceState === "pending" ? "#b45309" : "var(--muted)", fontSize: 9 }}>
+        <small className={responsive.financeExpenseInvoice} data-pending={e.invoiceState === "pending" || undefined}>
           {e.invoiceState === "provided" && `已附发票 · ${e.documents.length} 份凭证`}
           {e.invoiceState === "pending" && `待补发票${e.documents.length > 0 ? ` · 已有 ${e.documents.length} 份其他凭证` : ""}`}
           {e.invoiceState === "waived" && `无需发票 · ${e.invoiceWaiverReason}`}
@@ -120,16 +117,16 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
           <ExpenseAddDocumentButton productionId={id} expenseId={e.id} mutationSeq={e.mutationSeq} invoiceOnly />
         )}
         {approval && e.note && (
-          <small style={{ display: "block", marginTop: 5, color: "var(--muted)", fontSize: 10, lineHeight: 1.5 }}>
+          <small className={responsive.financeExpenseNote}>
             {e.note}
           </small>
         )}
       </span>
-      <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-        <b style={{ color: "var(--stage)", fontSize: 11 }}>
+      <span className={responsive.financeExpenseActions}>
+        <b className={responsive.financeExpenseAmount}>
           {e.amount === null || !isCurrencyCode(e.currency) ? "金额未填写" : formatMoney(e.amount, e.currency)}
           {e.baseAmount && isCurrencyCode(e.baseCurrency) && e.currency !== e.baseCurrency
-            ? <small style={{ display: "block", color: "var(--muted)" }}>折合 {formatMoney(e.baseAmount, e.baseCurrency)}</small> : null}
+            ? <small className={responsive.financeExpenseBaseAmount}>折合 {formatMoney(e.baseAmount, e.baseCurrency)}</small> : null}
         </b>
         {approval && !access.isArchived && (
           <ExpenseApprovalActions
@@ -164,7 +161,7 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
     : options;
 
   return (
-    <div style={{ padding: PAD, minHeight: "100vh", background: "var(--paper)" }}>
+    <div className={responsive.financePage}>
       <ProductionModuleTopMenu
         productionName={name}
         label="财务"
@@ -184,15 +181,15 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
           ? <ExpenseCreateButton productionId={id} baseCurrency={baseCurrency} categories={expenseCategoryOptions} triggerVariant="overflow" />
           : null}
       />
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
-        <p style={{ margin: 0, color: "var(--muted)", fontSize: 12 }}>预算 · 支出 · 关联</p>
+      <div className={responsive.financeIntro}>
+        <p>预算 · 支出 · 关联</p>
       </div>
 
       {canBudget && (
-        <div className={responsive.metricGrid}>
+        <div className={`${responsive.metricGrid} ${responsive.financeMetricGrid}`}>
           {summary.map(([value, label]) => (
-            <div key={label} className={responsive.metricCard}>
-              <strong className={responsive.metricValue}>{value}</strong>
+            <div key={label} className={`${responsive.metricCard} ${responsive.financeMetricCard}`}>
+              <strong className={`${responsive.metricValue} ${responsive.financeMetricValue}`}>{value}</strong>
               <span className={responsive.metricLabel}>{label}</span>
             </div>
           ))}
@@ -202,36 +199,32 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
       {/* 待我审批：单独一条横幅置顶。混在下面的列表里，POC 得自己从一堆单子里认出
           哪几笔在等他——那正是「阶梯把他算进去了但他不知道」的另一种形态。 */}
       {pendingMine.length > 0 && (
-        <div style={{ ...CARD, borderColor: "var(--stage)", padding: "14px 18px", marginBottom: 16 }}>
-          <p style={{ margin: "0 0 10px", fontSize: 12, fontWeight: 700, color: "var(--stage)" }}>
+        <div className={`${responsive.financePanel} ${responsive.financePendingPanel}`}>
+          <p className={responsive.financePendingTitle}>
             待你审批 · {pendingMine.length} 笔
           </p>
           {pendingMine.map(e => expenseRow(e, true))}
         </div>
       )}
 
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: twoUp ? "minmax(0, 1.15fr) minmax(300px, .85fr)" : "minmax(0, 1fr)",
-        gap: 16,
-      }}>
+      <div className={`${responsive.financeColumns} ${twoUp ? responsive.financeColumnsTwoUp : ""}`}>
         {canBudget && (
-          <section style={{ ...CARD, padding: 20 }}>
-            <p style={{ margin: "0 0 16px", fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>预算分类</p>
+          <section className={responsive.financePanel}>
+            <p className={responsive.financePanelTitle}>预算分类</p>
             {categories.length === 0
               ? empty("还没有预算科目", "建好科目后，支出就能挂到对应科目上")
               : categories.map(item => (
-                <div key={item.id} style={{ padding: "12px 0", borderTop: "1px solid var(--line)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11 }}>
-                    <b>{item.name}{item.deptName ? <span style={{ marginLeft: 6, color: "var(--muted)", fontWeight: 400 }}>{item.deptName}</span> : null}</b>
-                    <span style={{ color: item.baseAmount !== null && toMinorUnits(item.spent, baseCurrency) > toMinorUnits(item.baseAmount, baseCurrency) ? "#a33" : "var(--muted)" }}>
+                <div key={item.id} className={responsive.financeCategoryRow}>
+                  <div className={responsive.financeCategorySummary}>
+                    <b className={responsive.financeCategoryName}>{item.name}{item.deptName ? <span>{item.deptName}</span> : null}</b>
+                    <span className={responsive.financeCategoryAmount} data-over-budget={item.baseAmount !== null && toMinorUnits(item.spent, baseCurrency) > toMinorUnits(item.baseAmount, baseCurrency) || undefined}>
                       {formatMoney(item.spent, baseCurrency)} / {item.baseAmount === null ? "无上限" : formatMoney(item.baseAmount, baseCurrency)}
                       {item.baseAmount !== null && toMinorUnits(item.spent, baseCurrency) > toMinorUnits(item.baseAmount, baseCurrency)
                         ? ` · 超出 ${formatMinorUnits(toMinorUnits(item.spent, baseCurrency) - toMinorUnits(item.baseAmount, baseCurrency), baseCurrency)}` : ""}
                     </span>
                   </div>
-                  <div style={{ height: 6, marginTop: 9, borderRadius: 999, background: "var(--surface-2)", overflow: "hidden" }}>
-                    <div style={{ width: `${item.baseAmount === null ? 0 : Math.min(100, pctMoney(item.spent, item.baseAmount, baseCurrency))}%`, height: "100%", borderRadius: 999, background: "var(--stage)" }} />
+                  <div className={responsive.financeCategoryProgress}>
+                    <div style={{ width: `${item.baseAmount === null ? 0 : Math.min(100, pctMoney(item.spent, item.baseAmount, baseCurrency))}%` }} />
                   </div>
                 </div>
               ))}
@@ -240,21 +233,21 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
 
         {/* 没有额度面但有科目面：只列名字。报销时要选科目，看得见名字就够了 */}
         {!canBudget && canCategories && (
-          <section style={{ ...CARD, padding: 20 }}>
-            <p style={{ margin: "0 0 16px", fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>预算科目</p>
+          <section className={responsive.financePanel}>
+            <p className={responsive.financePanelTitle}>预算科目</p>
             {options.length === 0
               ? empty("还没有预算科目", "报销时可以先不选科目，由审批人归类")
               : options.map(o => (
-                <div key={o.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "12px 0", borderTop: "1px solid var(--line)", fontSize: 11 }}>
-                  <b style={{ color: "var(--ink)" }}>{o.name}</b>
-                  <span style={{ color: "var(--muted)" }}>{o.deptName ?? "—"}</span>
+                <div key={o.id} className={`${responsive.financeCategoryRow} ${responsive.financeCategorySummary}`}>
+                  <b className={responsive.financeCategoryName}>{o.name}</b>
+                  <span className={responsive.financeCategoryAmount}>{o.deptName ?? "—"}</span>
                 </div>
               ))}
           </section>
         )}
 
-        <section style={{ ...CARD, padding: 20 }}>
-          <p style={{ margin: "0 0 16px", fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>
+        <section className={responsive.financePanel}>
+          <p className={responsive.financePanelTitle}>
             {canAllExpenses ? "近期支出" : "我的报销"}
           </p>
           {expenses.length === 0
