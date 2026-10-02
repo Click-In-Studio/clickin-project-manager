@@ -10,6 +10,8 @@ import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableVie
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
 import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib/script/character-perms-shared";
 import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
+import PageSkeleton from "@/components/ui/PageSkeleton";
+import { useListTableViewPreference } from "./use-list-table-view-preference";
 
 const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
 
@@ -390,12 +392,14 @@ function TextCell({
   multiline,
   readOnly,
   placeholder = "—",
+  textClassName = "text-sm",
 }: {
   value: string;
   onSave: (v: string) => void;
   multiline?: boolean;
   readOnly?: boolean;
   placeholder?: string;
+  textClassName?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -419,7 +423,7 @@ function TextCell({
             if (e.key === "Escape") { e.preventDefault(); cancel(); }
             if (isMultilineSubmitShortcut(e)) { e.preventDefault(); commit(); }
           }}
-          className="w-full resize-none rounded border border-[var(--line)] px-2 py-1.5 text-sm outline-none focus:border-zinc-400"
+          className={`w-full resize-none rounded border border-[var(--line)] px-2 py-1.5 outline-none focus:border-zinc-400 ${textClassName}`}
           style={{ minWidth: 200 }}
         />
       );
@@ -439,7 +443,7 @@ function TextCell({
   return (
     <div
       onDoubleClick={() => !readOnly && setEditing(true)}
-      className={`text-sm leading-relaxed min-h-[1.25em] whitespace-pre-wrap ${value ? "text-zinc-700" : "text-zinc-300"} ${!readOnly ? "cursor-text" : ""}`}
+      className={`${textClassName} leading-relaxed min-h-[1.25em] whitespace-pre-wrap ${value ? "text-zinc-700" : "text-zinc-300"} ${!readOnly ? "cursor-text" : ""}`}
     >
       {value || placeholder}
     </div>
@@ -587,6 +591,7 @@ function CharacterTableRow({
             multiline
             readOnly={!canEdit}
             placeholder={canEdit ? "双击添加人物小传…" : "—"}
+            textClassName="text-[13px]"
           />
         )}
       </td>
@@ -673,7 +678,7 @@ function AddCharacterForm({
           onChange={(e) => { setDraft(e.target.value); setError(null); }}
           onKeyDown={(e) => e.key === "Enter" && !isAggregate && add()}
           placeholder="新角色名…"
-          className="min-w-0 flex-1 text-sm text-zinc-800 outline-none placeholder:text-zinc-300"
+          className="min-w-0 flex-1 text-xs text-zinc-800 outline-none placeholder:text-xs placeholder:text-zinc-300"
         />
         <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none shrink-0">
           <input
@@ -726,10 +731,9 @@ export default function CharactersManager({ productionId, productionName, initia
   const { stage: toolbarStage } = useProductionToolbar();
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
   const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId ?? null);
-  const [view, setView] = useState<"list" | "table">("list");
+  const [view, setView] = useListTableViewPreference("characters");
 
   useEffect(() => {
-    setView(window.innerWidth > 1920 ? "table" : "list");
     if (!embedded) window.scrollTo(0, 0);
   }, [embedded]);
 
@@ -819,7 +823,7 @@ export default function CharactersManager({ productionId, productionName, initia
                 <th className="px-4 py-3 font-medium" style={{ width: 140 }}>姓名</th>
                 <th className="px-4 py-3 font-medium" style={{ width: 80 }}>性别</th>
                 <th className="px-4 py-3 font-medium" style={{ width: 240 }}>角色属性</th>
-                <th className="px-4 py-3 font-medium">人物小传</th>
+                <th className="px-4 py-3 text-[13px] font-medium">人物小传</th>
                 <th className="px-4 py-3" style={{ width: 64 }} />
               </tr>
             </thead>
@@ -890,7 +894,7 @@ export default function CharactersManager({ productionId, productionName, initia
     <div className={PRODUCTION_PAGE_SCROLL_ROOT_CLASS}>
       {/* Frozen toolbar */}
       <ProductionTopMenu
-        overflow={toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
+        overflow={view !== null && toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
           <ListTableViewToggleOverflow value={view} onChange={setView} />
         ) : null}
       >
@@ -900,11 +904,14 @@ export default function CharactersManager({ productionId, productionName, initia
           active="characters"
         />
         <ProductionTopMenuDivider />
-        <ListTableViewToggle value={view} onChange={setView} />
+        {view !== null && <ListTableViewToggle value={view} onChange={setView} />}
       </ProductionTopMenu>
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto" style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
-        {view === "table" ? tableView : card}
+      <div
+        className="flex-1 overflow-y-auto"
+        style={view === null ? undefined : { padding: "24px clamp(18px, 3vw, 52px) 60px" }}
+      >
+        {view === null ? <PageSkeleton instant /> : view === "table" ? tableView : card}
       </div>
     </div>
   );

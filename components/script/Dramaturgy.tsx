@@ -21,8 +21,8 @@ import ProductionTopMenu, {
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
 import type { SceneFieldPerms } from "@/lib/script/scene-field-perms-shared";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
-
-type SceneViewMode = "list" | "table";
+import PageSkeleton from "@/components/ui/PageSkeleton";
+import { useListTableViewPreference } from "./use-list-table-view-preference";
 
 type Props = {
   productionId: string;
@@ -52,11 +52,7 @@ export default function Dramaturgy({
 }: Props) {
   const { stage: toolbarStage, closeOverflow, overflowOpen } = useProductionToolbar();
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
-  const [sceneViewMode, setSceneViewMode] = useState<SceneViewMode>("list");
-
-  useEffect(() => {
-    setSceneViewMode(window.innerWidth > 1920 ? "table" : "list");
-  }, []);
+  const [sceneViewMode, setSceneViewMode] = useListTableViewPreference("dramaturgy");
 
   // AI 写工具改了场次（lib/agent/runtime/tools.ts 的 scene mutates）→ 重拉一次。列表模式
   // 的 ScenesManager 自己订阅 markers SSE 会刷，但表格模式用的是这里的 scenes state。
@@ -273,7 +269,7 @@ export default function Dramaturgy({
       </div>
     </>
   ) : null;
-  const primaryOverflow = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
+  const primaryOverflow = sceneViewMode !== null && toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
     <ListTableViewToggleOverflow value={sceneViewMode} onChange={setSceneViewMode} />
   ) : null;
   const toolbarOverflow = secondaryOverflow || primaryOverflow ? (
@@ -293,7 +289,9 @@ export default function Dramaturgy({
           active="overview"
         />
         <ProductionTopMenuDivider />
-        <ListTableViewToggle value={sceneViewMode} onChange={setSceneViewMode} />
+        {sceneViewMode !== null && (
+          <ListTableViewToggle value={sceneViewMode} onChange={setSceneViewMode} />
+        )}
 
         {sceneViewMode === "table" && (
           <>
@@ -340,8 +338,11 @@ export default function Dramaturgy({
       </ProductionTopMenu>
 
       {/* ── Scrollable content ── */}
-      <div className="flex-1 overflow-y-auto" style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
-        {sceneViewMode === "list" ? (
+      <div
+        className="flex-1 overflow-y-auto"
+        style={sceneViewMode === null ? undefined : { padding: "24px clamp(18px, 3vw, 52px) 60px" }}
+      >
+        {sceneViewMode === null ? <PageSkeleton instant /> : sceneViewMode === "list" ? (
           <ScenesManager
             key={versionId ?? ""}
             productionId={productionId}
