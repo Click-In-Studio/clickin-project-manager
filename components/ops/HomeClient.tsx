@@ -6,6 +6,7 @@ import { useState } from "react";
 import { fmtCallAt, isoCSTDateStr, todayCSTStr as tzTodayCSTStr } from "@/lib/tz";
 import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, UnreadReportEntry } from "@/lib/ops/event-db";
 import type { UpcomingMilestoneEntry } from "@/lib/ops/milestone-db";
+import MetricCardDisclosure from "./MetricCardDisclosure";
 import styles from "./home.module.css";
 
 function cstDateStr(iso: string): string { return isoCSTDateStr(iso); }
@@ -94,7 +95,7 @@ export default function HomeClient({ productions, myCallTimes, myPendingReqs, my
               <div className={styles.progressHeroMetrics}>
                 <div className={`${styles.progressMetricCard} ${days !== null && days <= 7 && days >= 0 ? styles.progressMetricUrgent : ""}`}>
                   <strong>{milestoneLabel}</strong>
-                  <span>{milestoneSubLabel}</span>
+                  <MetricCardDisclosure label={milestoneSubLabel} />
                   {days !== null && days <= 7 && days >= 0 && <small>临近节点</small>}
                 </div>
                 <Link
@@ -102,12 +103,12 @@ export default function HomeClient({ productions, myCallTimes, myPendingReqs, my
                   className={`${styles.progressMetricCard} ${styles.progressMetricLink} ${myAwaitingReqs.length > 0 ? styles.progressMetricActive : ""}`}
                 >
                   <strong>{myAwaitingReqs.length}</strong>
-                  <span>待处理通知</span>
+                  <span className={styles.progressMetricLabel}>待处理通知</span>
                   {myAwaitingReqs.length > 0 && <small>跨项目汇总</small>}
                 </Link>
                 <div className={`${styles.progressMetricCard} ${totalCueWarnings > 0 ? styles.progressMetricWarn : ""}`}>
                   <strong>{totalCueWarnings}</strong>
-                  <span>Cue 风险提示</span>
+                  <span className={styles.progressMetricLabel}>Cue 风险提示</span>
                   {totalCueWarnings > 0 && <small>跨项目汇总</small>}
                 </div>
               </div>

@@ -119,20 +119,22 @@
   z-index: 1;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 7px;
   align-content: center;
 }
 
 .progressMetricCard {
-  min-height: 100px;
-  padding: 14px;
+  min-width: 0;
+  min-height: 92px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  border: 1px solid rgba(255,255,255,.13);
+  border: 1px solid rgba(255,255,255,.72);
   border-radius: 11px;
-  background: rgba(255,255,255,.06);
-  color: #fff;
+  background: rgba(250,252,251,.9);
+  box-shadow: inset 0 0 0 1px rgba(20,43,43,.06);
+  color: #203b39;
   text-decoration: none;
 }
 
@@ -142,50 +144,99 @@
 }
 
 .progressMetricLink:hover {
-  border-color: rgba(255,255,255,.35);
-  background: rgba(255,255,255,.1);
+  border-color: rgba(255,255,255,.95);
+  background: rgba(255,255,255,.98);
 }
 
 .progressMetricCard strong {
+  max-width: 100%;
   font-family: Georgia, serif;
   font-size: 28px;
   font-weight: 500;
   line-height: 1;
 }
 
-.progressMetricCard span {
-  margin-top: 7px;
+.progressMetricLabel {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin-top: 5px;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  appearance: none;
+  font-family: inherit;
   font-size: 10px;
   font-weight: 700;
-  color: #c3d0cc;
+  line-height: 1.25;
+  color: #36534f;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.progressMetricLabel {
+  cursor: pointer;
+}
+
+button.progressMetricLabel:focus-visible {
+  outline: 2px solid #36534f;
+  outline-offset: 2px;
+}
+
+.progressMetricDisclosure {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.progressMetricDisclosurePanel {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 6px);
+  left: -6px;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 40px));
+  border: 1px solid rgba(54,83,79,.42);
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(20,43,43,.18);
+  color: #203b39;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.45;
+  white-space: normal;
 }
 
 .progressMetricCard small {
   margin-top: auto;
   font-size: 8px;
-  color: #9fb4af;
+  line-height: 1.2;
+  color: #526b67;
 }
 
 .progressMetricUrgent {
-  border-color: rgba(246,194,106,.5);
-  background: rgba(246,194,106,.1);
+  border-color: rgba(212,153,53,.72);
+  background: rgba(255,248,232,.94);
 }
 
 .progressMetricUrgent strong {
-  color: #f6c26a;
+  color: #83500f;
 }
 
 .progressMetricActive {
-  border-color: rgba(160,188,200,.4);
+  border-color: rgba(87,127,137,.66);
 }
 
 .progressMetricWarn {
-  border-color: rgba(220,100,100,.4);
-  background: rgba(220,100,100,.08);
+  border-color: rgba(177,71,71,.65);
+  background: rgba(255,242,240,.94);
 }
 
 .progressMetricWarn strong {
-  color: #f08080;
+  color: #963737;
 }
 
 /* Dashboard 2-column layout */
@@ -682,5 +733,33 @@
   }
   .progressHeroMetrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .progressMetricCard {
+    min-height: 80px;
+    padding: 9px 8px;
+  }
+  .progressMetricCard strong {
+    font-size: clamp(22px, 7vw, 27px);
+  }
+  .progressMetricLabel {
+    margin-top: 4px;
+    font-size: clamp(8px, 2.8vw, 10px);
+  }
+  .progressMetricCard small {
+    font-size: 8px;
+  }
+}
+
+@media (max-width: 360px) {
+  .workspace {
+    padding-inline: 12px;
+  }
+  .progressHero {
+    padding: 16px;
+  }
+  .progressMetricCard {
+    min-height: 76px;
+    padding: 8px 7px;
   }
 }
