@@ -6,6 +6,7 @@ import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import type { MemberWithRoles } from "@/lib/perm/member-db";
 import { ROLE_GROUPS } from "@/lib/perm/roles";
 import { isInactiveMember, memberStatusLabel } from "@/lib/perm/member-status-shared";
+import styles from "./contacts.module.css";
 
 const ROLE_ORDER = ROLE_GROUPS.flatMap((g) => g.roles);
 
@@ -51,49 +52,42 @@ function MemberCard({ member }: { member: MemberWithRoles }) {
 
   // v3 纯展示卡：小圆头像 + 名字 + 角色/标签徽章（无编辑入口）
   return (
-    <div style={{
-      background: "white", border: "1px solid var(--line)", borderRadius: 10,
-      padding: "14px 12px", display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
-      textAlign: "center",
-    }}>
-      <div style={{
-        width: 52, height: 52, borderRadius: "50%", overflow: "hidden", flexShrink: 0,
-        background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
+    <div className={styles.memberCard}>
+      <div className={styles.avatar}>
         {photo ? (
-          <img src={photo} alt={member.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <img src={photo} alt={member.name} className={styles.avatarImage} />
         ) : (
-          <span style={{ fontSize: 18, fontWeight: 500, color: "var(--muted)" }}>{member.name[0]}</span>
+          <span className={styles.avatarFallback}>{member.name[0]}</span>
         )}
       </div>
 
-      <div style={{ minWidth: 0, width: "100%" }}>
-        <p style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {member.name}
+      <div className={styles.memberDetails}>
+        <p className={styles.memberName}>
+          <span className={styles.memberNameText}>{member.name}</span>
           {isInactiveMember(member.status) && (
-            <span style={{ marginLeft: 4, borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 600, background: "var(--danger-soft)", color: "var(--danger)", fontFamily: "system-ui, sans-serif", verticalAlign: 2 }}>{memberStatusLabel(member.status, member.statusSource ?? null)}</span>
+            <span className={styles.statusBadge}>{memberStatusLabel(member.status, member.statusSource ?? null)}</span>
           )}
         </p>
         {member.roles.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 3, justifyContent: "center", marginTop: 6 }}>
+          <div className={`${styles.badgeRow} ${styles.roleRow}`}>
             {member.roles.map((r) => (
-              <span key={r} style={{ borderRadius: 999, padding: "2px 7px", fontSize: 9, fontWeight: 700, ...roleTone(r) }}>
+              <span key={r} className={styles.badge} style={roleTone(r)}>
                 {r}
               </span>
             ))}
           </div>
         )}
         {member.tags.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 3, justifyContent: "center", marginTop: 4 }}>
+          <div className={`${styles.badgeRow} ${styles.tagRow}`}>
             {member.tags.map((t) => (
-              <span key={t} style={{ borderRadius: 999, background: "var(--script-soft)", padding: "2px 7px", fontSize: 9, fontWeight: 700, color: "var(--script)" }}>
+              <span key={t} className={`${styles.badge} ${styles.tagBadge}`}>
                 {t}
               </span>
             ))}
           </div>
         )}
         {member.email && (
-          <p style={{ margin: "6px 0 0", fontSize: 10, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <p className={styles.email} title={member.email}>
             {member.email}
           </p>
         )}
@@ -115,16 +109,16 @@ export default function ContactsClient({
   const sorted = sortByFirstRole(initialMembers);
 
   return (
-    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+    <div className={styles.page}>
       <PageHeader eyebrow="People" title="人员" side="stage" />
 
-      <div style={{ background: "var(--surface)", borderRadius: 13, border: "1px solid var(--line)", padding: 22, minHeight: "calc(100vh - 280px)" }}>
+      <div className={styles.panel}>
         {sorted.length === 0 ? (
-          <div style={{ padding: "48px 0", textAlign: "center" }}>
-            <p style={{ fontSize: 13, color: "var(--muted)" }}>暂无人员</p>
+          <div className={styles.emptyState}>
+            <p>暂无人员</p>
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8">
+          <div className={styles.memberGrid}>
             {sorted.map((m) => (
               <MemberCard key={m.userId} member={m} />
             ))}
