@@ -135,6 +135,12 @@ describe("退还来源方与异常", () => {
   });
 
   it("非租借批次不能登记对外归还，累计归还不得超过应还数量", async () => {
+    await expect(createMaterial({
+      productionId: prodId, code: `NO-DUE-${shortId()}`, name: "缺应还时间",
+      quantity: 1, sourceType: "rented", sourceLabel: "设备仓",
+      subject: null, createdBy: ownerId,
+    })).rejects.toMatchObject({ reason: "bad_source" });
+
     const owned = await createMaterial({
       productionId: prodId, code: `OWN-${shortId()}`, name: "自有箱",
       quantity: 2, subject: null, createdBy: ownerId,
@@ -147,7 +153,7 @@ describe("退还来源方与异常", () => {
     const rented = await createMaterial({
       productionId: prodId, code: `CAP-${shortId()}`, name: "租赁线缆",
       quantity: 3, sourceType: "rented", sourceLabel: "线缆库",
-      returnDueQuantity: 2,
+      returnDueQuantity: 2, returnDueAt: new Date("2026-12-02T12:00:00+08:00"),
       subject: null, createdBy: ownerId,
     });
     const [rentedLot] = await listMaterialStockLots(rented.id, prodId);
@@ -157,6 +163,22 @@ describe("退还来源方与异常", () => {
     await expect(recordMaterialSourceReturn({
       productionId: prodId, lotId: rentedLot.id, quantity: 1, createdBy: ownerId,
     })).rejects.toMatchObject({ reason: "source_return_overflow" });
+    await expect(recordMaterialSourceException({
+      productionId: prodId, lotId: rentedLot.id,
+      input: { kind: "lost", quantity: 1 }, createdBy: ownerId,
+    })).rejects.toMatchObject({ reason: "bad_source_exception" });
+
+    const damaged = await createMaterial({
+      productionId: prodId, code: `DMG-${shortId()}`, name: "租赁调音台",
+      quantity: 3, sourceType: "rented", sourceLabel: "音响中心",
+      returnDueAt: new Date("2026-12-04T12:00:00+08:00"),
+      subject: null, createdBy: ownerId,
+    });
+    const [damagedLot] = await listMaterialStockLots(damaged.id, prodId);
+    await expect(recordMaterialSourceReturn({
+      productionId: prodId, lotId: damagedLot.id, quantity: 1,
+      exceptions: [{ kind: "damaged", quantity: 2 }], createdBy: ownerId,
+    })).rejects.toMatchObject({ reason: "bad_source_exception" });
   });
 
   it("项目级读模型可查询到期但未退清事实", async () => {
@@ -182,7 +204,8 @@ describe("退还来源方与异常", () => {
     const material = await createMaterial({
       productionId: prodId, code: `RACE-${shortId()}`, name: "租赁配重",
       quantity: 4, sourceType: "rented", sourceLabel: "舞台设备中心",
-      returnDueQuantity: 3, subject: null, createdBy: ownerId,
+      returnDueQuantity: 3, returnDueAt: new Date("2026-12-03T12:00:00+08:00"),
+      subject: null, createdBy: ownerId,
     });
     const [lot] = await listMaterialStockLots(material.id, prodId);
     const results = await Promise.allSettled([1, 2].map(() => recordMaterialSourceReturn({

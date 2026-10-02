@@ -1906,6 +1906,7 @@ CREATE TABLE IF NOT EXISTS production_material_stock_lot (
   CONSTRAINT material_stock_lot_return_obligation_check CHECK (
     (source_type IN ('rented', 'borrowed')
       AND btrim(source_label) <> ''
+      AND return_due_at IS NOT NULL
       AND return_due_quantity IS NOT NULL
       AND return_due_quantity > 0
       AND return_due_quantity <= confirmed_quantity)
@@ -2153,6 +2154,7 @@ DECLARE
   lot_source_type TEXT;
   due_quantity NUMERIC(18,3);
   returned_quantity NUMERIC(18,3);
+  open_missing_quantity NUMERIC(18,3);
   movement_record production_material_stock_movement%ROWTYPE;
 BEGIN
   SELECT source_type, return_due_quantity
@@ -2197,7 +2199,28 @@ BEGIN
        SELECT 1 FROM production_material_stock_movement reverse_movement
         WHERE reverse_movement.reverses_event_id = m.id
      );
-  IF returned_quantity + movement_record.quantity > due_quantity THEN
+  SELECT COALESCE(SUM(e.quantity), 0)
+    INTO open_missing_quantity
+    FROM production_material_source_exception e
+   WHERE e.lot_id = NEW.lot_id
+     AND e.production_id = NEW.production_id
+     AND e.kind IN ('lost', 'short')
+     AND e.resolves_exception_id IS NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM production_material_source_exception resolution
+        WHERE resolution.resolves_exception_id = e.id
+     )
+     AND (e.source_return_id IS NULL OR EXISTS (
+       SELECT 1
+         FROM production_material_source_return esr
+         JOIN production_material_stock_movement em ON em.id = esr.movement_id
+        WHERE esr.id = e.source_return_id
+          AND NOT EXISTS (
+            SELECT 1 FROM production_material_stock_movement er
+             WHERE er.reverses_event_id = em.id
+          )
+     ));
+  IF returned_quantity + open_missing_quantity + movement_record.quantity > due_quantity THEN
     RAISE EXCEPTION 'source return exceeds due quantity'
       USING ERRCODE = '23514', CONSTRAINT = 'material_source_return_overflow';
   END IF;
@@ -2219,6 +2242,9 @@ DECLARE
   material_scale SMALLINT;
   due_quantity NUMERIC(18,3);
   return_lot_id TEXT;
+  return_quantity NUMERIC(18,3);
+  returned_quantity NUMERIC(18,3);
+  open_exception_quantity NUMERIC(18,3);
   original_exception production_material_source_exception%ROWTYPE;
 BEGIN
   SELECT l.source_type, m.tracking_strategy, m.quantity_scale, l.return_due_quantity
@@ -2249,9 +2275,15 @@ BEGIN
   END IF;
 
   IF NEW.source_return_id IS NOT NULL THEN
-    SELECT lot_id INTO return_lot_id
-      FROM production_material_source_return
-     WHERE id = NEW.source_return_id AND production_id = NEW.production_id;
+    SELECT sr.lot_id, movement.quantity
+      INTO return_lot_id, return_quantity
+      FROM production_material_source_return sr
+      JOIN production_material_stock_movement movement ON movement.id = sr.movement_id
+     WHERE sr.id = NEW.source_return_id AND sr.production_id = NEW.production_id
+       AND NOT EXISTS (
+         SELECT 1 FROM production_material_stock_movement reverse_movement
+          WHERE reverse_movement.reverses_event_id = movement.id
+       );
     IF NOT FOUND OR return_lot_id <> NEW.lot_id THEN
       RAISE EXCEPTION 'source exception return does not belong to lot'
         USING ERRCODE = '23514', CONSTRAINT = 'material_source_exception_return';
@@ -2272,6 +2304,57 @@ BEGIN
        OR NEW.source_return_id IS NOT NULL THEN
       RAISE EXCEPTION 'invalid source exception resolution'
         USING ERRCODE = '23514', CONSTRAINT = 'material_source_exception_resolution';
+    END IF;
+  ELSIF NEW.kind IN ('lost', 'short') THEN
+    SELECT COALESCE(SUM(movement.quantity), 0)
+      INTO returned_quantity
+      FROM production_material_source_return sr
+      JOIN production_material_stock_movement movement ON movement.id = sr.movement_id
+     WHERE sr.lot_id = NEW.lot_id
+       AND sr.production_id = NEW.production_id
+       AND NOT EXISTS (
+         SELECT 1 FROM production_material_stock_movement reverse_movement
+          WHERE reverse_movement.reverses_event_id = movement.id
+       );
+    SELECT COALESCE(SUM(e.quantity), 0)
+      INTO open_exception_quantity
+      FROM production_material_source_exception e
+     WHERE e.lot_id = NEW.lot_id
+       AND e.production_id = NEW.production_id
+       AND e.kind IN ('lost', 'short')
+       AND e.resolves_exception_id IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM production_material_source_exception resolution
+          WHERE resolution.resolves_exception_id = e.id
+       )
+       AND (e.source_return_id IS NULL OR EXISTS (
+         SELECT 1
+           FROM production_material_source_return esr
+           JOIN production_material_stock_movement em ON em.id = esr.movement_id
+          WHERE esr.id = e.source_return_id
+            AND NOT EXISTS (
+              SELECT 1 FROM production_material_stock_movement er
+               WHERE er.reverses_event_id = em.id
+            )
+       ));
+    IF returned_quantity + open_exception_quantity + NEW.quantity > due_quantity THEN
+      RAISE EXCEPTION 'open missing quantity exceeds source obligation'
+        USING ERRCODE = '23514', CONSTRAINT = 'material_source_exception_quantity';
+    END IF;
+  ELSIF NEW.kind = 'damaged' AND NEW.source_return_id IS NOT NULL THEN
+    SELECT COALESCE(SUM(e.quantity), 0)
+      INTO open_exception_quantity
+      FROM production_material_source_exception e
+     WHERE e.source_return_id = NEW.source_return_id
+       AND e.kind = 'damaged'
+       AND e.resolves_exception_id IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM production_material_source_exception resolution
+          WHERE resolution.resolves_exception_id = e.id
+       );
+    IF open_exception_quantity + NEW.quantity > return_quantity THEN
+      RAISE EXCEPTION 'damaged quantity exceeds linked source return'
+        USING ERRCODE = '23514', CONSTRAINT = 'material_source_exception_quantity';
     END IF;
   END IF;
   RETURN NEW;

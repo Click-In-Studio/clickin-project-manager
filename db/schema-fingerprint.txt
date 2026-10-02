@@ -1491,7 +1491,7 @@ CON|production_material_status|production_material_status_pkey|PRIMARY KEY (id)
 CON|production_material_status|production_material_status_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|production_material_stock_lot|material_stock_lot_id_production_unique|UNIQUE (id, production_id)
 CON|production_material_stock_lot|material_stock_lot_material_fk|FOREIGN KEY (material_id, production_id) REFERENCES production_material(id, production_id) ON DELETE RESTRICT
-CON|production_material_stock_lot|material_stock_lot_return_obligation_check|CHECK ((((source_type = ANY (ARRAY['rented'::text, 'borrowed'::text])) AND (btrim(source_label) <> ''::text) AND (return_due_quantity IS NOT NULL) AND (return_due_quantity > (0)::numeric) AND (return_due_quantity <= confirmed_quantity)) OR ((source_type <> ALL (ARRAY['rented'::text, 'borrowed'::text])) AND (return_due_at IS NULL) AND (return_due_quantity IS NULL))))
+CON|production_material_stock_lot|material_stock_lot_return_obligation_check|CHECK ((((source_type = ANY (ARRAY['rented'::text, 'borrowed'::text])) AND (btrim(source_label) <> ''::text) AND (return_due_at IS NOT NULL) AND (return_due_quantity IS NOT NULL) AND (return_due_quantity > (0)::numeric) AND (return_due_quantity <= confirmed_quantity)) OR ((source_type <> ALL (ARRAY['rented'::text, 'borrowed'::text])) AND (return_due_at IS NULL) AND (return_due_quantity IS NULL))))
 CON|production_material_stock_lot|material_stock_lot_source_type_check|CHECK ((source_type = ANY (ARRAY['existing'::text, 'purchased'::text, 'produced'::text, 'rented'::text, 'borrowed'::text])))
 CON|production_material_stock_lot|production_material_stock_lot_confirmed_quantity_check|CHECK ((confirmed_quantity > (0)::numeric))
 CON|production_material_stock_lot|production_material_stock_lot_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
@@ -1709,8 +1709,8 @@ ENUM|block_type|dialogue,stage,lyric,chapter_marker,scene_marker,rehearsal_marke
 EXT|pg_trgm
 EXT|vector
 FUNC|enforce_asset_single_file_policy()|365c9d113202e7d2a055ccb9782be865
-FUNC|enforce_material_source_exception()|8ba6ed9c768d60160beac13ec97f415b
-FUNC|enforce_material_source_return()|e62525c1ca9242502c58323d29562a4c
+FUNC|enforce_material_source_exception()|dec4f79949751cbf719b18890db4c041
+FUNC|enforce_material_source_return()|ec63e9e2cc78b5966e2aa406a56a9720
 FUNC|enforce_material_stock_lot_type()|7a1cc4f08a36c87cd6882ec9dd0e2598
 FUNC|enforce_material_stock_movement()|3aa936637d6e6c7e97655630c69cdb37
 FUNC|fill_budget_currency_snapshot_compat()|87e692b953ac4b2f97ada09b05bb9e66

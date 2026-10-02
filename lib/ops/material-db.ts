@@ -213,6 +213,8 @@ function normalizeMaterialSource(
     : (input.returnDueQuantity ?? null);
   if (needsReturn && !sourceLabel)
     throw new MaterialError("bad_source", "租赁或借用批次必须填写来源文字");
+  if (needsReturn && returnDueAt === null)
+    throw new MaterialError("bad_source", "租赁或借用批次必须填写应还时间");
   if (needsReturn && (!Number.isFinite(returnDueQuantity)
       || returnDueQuantity! <= 0 || returnDueQuantity! > confirmedQuantity
       || !quantityFitsScale(returnDueQuantity!, quantityScale)))
