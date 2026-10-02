@@ -2,7 +2,7 @@
 title: 物料库存按实际流转展示
 kind: improved
 page: production/materials/materials
-pr: 820
+pr: 834
 order: 1
 ---
 
