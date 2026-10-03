@@ -52,6 +52,9 @@ describe("发布门禁 workflow", () => {
     const activation = section(deployJob, "      - name: Activate release", "      # ── 10.");
 
     expect(migration).toContain('if [ "$PENDING" -gt 0 ]');
+    expect(migration).toContain("STOP_FAILED=0");
+    expect(migration).toContain('pm2 stop "$APP" || STOP_FAILED=1');
+    expect(migration).toContain('exit "$STOP_FAILED"');
     expect(migration).toContain('pm2 stop "$APP"');
     expect(migration.indexOf('pm2 stop "$APP"')).toBeLessThan(migration.indexOf('ssh prod "$DBMATE up"'));
     expect(migration).toContain("MIGRATION FAILED — 服务保持停止");

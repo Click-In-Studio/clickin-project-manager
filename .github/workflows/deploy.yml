@@ -308,10 +308,13 @@ jobs:
 
             echo "Found $PENDING pending migration(s) — stopping database client processes..."
             if ! ssh prod '
-              set -e
+              STOP_FAILED=0
               for APP in production-manager agent-runner heavy-worker; do
-                if pm2 describe "$APP" >/dev/null 2>&1; then pm2 stop "$APP"; fi
+                if pm2 describe "$APP" >/dev/null 2>&1; then
+                  pm2 stop "$APP" || STOP_FAILED=1
+                fi
               done
+              exit "$STOP_FAILED"
             ' < /dev/null; then
               echo "::error::停止数据库客户端进程失败；尝试恢复旧版本"
               restart_old_release || true

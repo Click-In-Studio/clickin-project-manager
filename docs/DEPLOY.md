@@ -293,6 +293,8 @@ push 到 `main`（dev）或 tag（prod）后 GitHub Actions 自动完成。tag �
 
 **无需任何手动操作**。
 
+健康检查失败会停止三个进程，即使本次是没有 migration 的纯代码发布也不会让未通过检查的版本继续对外服务。纯代码发布可以按下节切回上一 release；含 migration 的发布保持停机并按数据库状态前向修复或恢复备份。
+
 tag validation 失败但 deploy job 从未开始时，可以显式删除本地与远端失败 tag，修正后在新 commit 上重建同名 tag；deploy 一旦开始，该 tag 就是发布审计记录，不得移动，后续修复必须创建新的 hotfix tag。
 
 ## 回滚

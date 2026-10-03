@@ -6,7 +6,7 @@ routes: [/]
 tier: all
 platform: [desktop, mobile]
 related: [start/interface/glossary, start/notifications/notifications]
-updated: 2026-10-02
+updated: 2026-10-03
 ---
 
 ## 这是什么
@@ -95,3 +95,6 @@ updated: 2026-10-02
 
 **怎么切换到另一个项目？**
 顶栏的项目名旁边有下拉箭头，点开选另一个；要回首页就选「平台首页」。宽窗口和手机横屏也可以点左上角标志回首页，再从「我的项目」里选。
+
+**更新期间暂时打不开怎么办？**
+涉及数据调整的系统更新会短暂停止访问，避免切换期间提交的操作显示成功、实际却没有保存。稍等片刻后刷新页面即可；仍打不开时再通过「报告问题」反馈。
