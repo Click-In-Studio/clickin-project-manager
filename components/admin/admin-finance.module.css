@@ -1,0 +1,95 @@
+.page {
+  min-height: 100vh;
+  padding: 24px clamp(18px, 3vw, 52px) 60px;
+  background: var(--paper);
+}
+
+.currencyCard {
+  margin-bottom: 20px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+}
+
+.entryRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 11px 13px;
+}
+
+.budgetInfo,
+.categoryInfo {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px 12px;
+}
+
+.entryTitle,
+.entryAmount,
+.entryMeta,
+.categoryCopy {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.entryTitle {
+  font-size: 13px;
+}
+
+.entryAmount {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.entryMeta {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.categoryCopy p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.entryActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 680px) {
+  .page {
+    padding: 20px 14px 80px;
+  }
+
+  .entryRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .entryActions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 360px) {
+  .budgetInfo,
+  .categoryInfo {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .entryAmount,
+  .entryMeta {
+    text-align: left;
+  }
+}
