@@ -8,6 +8,7 @@ import {
   CURRENCY_CODES, convertToBaseAmount, formatCurrencyLabel, formatMoney, isCurrencyCode,
   type CurrencyCode,
 } from "@/lib/money";
+import styles from "./admin-finance.module.css";
 
 type Caps = { categoryEdit: boolean; categoryCreate: boolean; categoryDelete: boolean; budgetEdit: boolean; budgetCreate: boolean; budgetDelete: boolean };
 type Dept = { id: string; name: string };
@@ -84,14 +85,14 @@ export default function AdminFinanceClient({ productionId, productionName, baseC
     } catch (e) { setError(e instanceof Error ? e.message : "排序失败"); }
   }
 
-  return <main style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+  return <main className={styles.page}>
     <PageHeader eyebrow={productionName} title="财务设置" side="stage"
       actions={(tab === "items" ? caps.budgetCreate : caps.categoryCreate) ? <button style={PRIMARY_BTN} onClick={() => setModal({ kind: tab === "items" ? "item" : "category" })}>新增{tab === "items" ? "预算项" : "费用科目"}</button> : null} />
     <div style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--line)", marginBottom: 20 }}>
       {([['items', '预算项'], ['categories', '费用科目']] as const).map(([key, label]) => <button key={key} onClick={() => setTab(key)} style={{ border: 0, borderBottom: tab === key ? "2px solid var(--stage)" : "2px solid transparent", padding: "10px 16px", background: "transparent", color: tab === key ? "var(--ink)" : "var(--muted)", fontWeight: 700, cursor: "pointer" }}>{label}</button>)}
     </div>
     {error && <p style={{ color: "#a33", fontSize: 12 }}>{error}</p>}
-    <section style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 16, marginBottom: 20, background: "white" }}>
+    <section className={styles.currencyCard}>
       <strong style={{ display: "block", fontSize: 13, marginBottom: 5 }}>项目记账本位币</strong>
       <p style={{ margin: "0 0 10px", color: "var(--muted)", fontSize: 11 }}>所有预算汇总都会折算成这个币种。出现预算额度或已提交报销后不可修改。</p>
       <select style={{ ...FIELD, width: 180 }} value={baseCurrency} disabled={!caps.budgetEdit || busy} onChange={async event => {
@@ -112,23 +113,31 @@ export default function AdminFinanceClient({ productionId, productionName, baseC
       {groups.map(([key, group]) => <section key={key}>
         <h2 style={{ fontSize: 12, margin: "0 0 8px", color: "var(--muted)" }}>{group.name}</h2>
         <div style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden", background: "white" }}>
-          {group.items.map((item, index) => <div key={item.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "13px 15px", borderTop: group.items[0] === item ? 0 : "1px solid var(--line)" }}>
-            <strong style={{ flex: 1, fontSize: 13 }}>{item.name}</strong>
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>{item.amount === null ? "无上限" : moneyLabel(item)}</span>
-            {caps.budgetEdit && <><button style={SECONDARY_BTN} disabled={index === 0 || busy} onClick={() => moveItem(group.items, index, -1)}>上移</button><button style={SECONDARY_BTN} disabled={index === group.items.length - 1 || busy} onClick={() => moveItem(group.items, index, 1)}>下移</button></>}
-            {caps.budgetEdit && <button style={SECONDARY_BTN} onClick={() => setModal({ kind: "item", value: item })}>编辑</button>}
-            {caps.budgetDelete && <button style={SECONDARY_BTN} onClick={() => removeItem(item)}>删除</button>}
+          {group.items.map((item, index) => <div key={item.id} className={styles.entryRow} style={{ borderTop: group.items[0] === item ? 0 : "1px solid var(--line)" }}>
+            <div className={styles.budgetInfo}>
+              <strong className={styles.entryTitle}>{item.name}</strong>
+              <span className={styles.entryAmount}>{item.amount === null ? "无上限" : moneyLabel(item)}</span>
+            </div>
+            <div className={styles.entryActions}>
+              {caps.budgetEdit && <><button style={SECONDARY_BTN} disabled={index === 0 || busy} onClick={() => moveItem(group.items, index, -1)}>上移</button><button style={SECONDARY_BTN} disabled={index === group.items.length - 1 || busy} onClick={() => moveItem(group.items, index, 1)}>下移</button></>}
+              {caps.budgetEdit && <button style={SECONDARY_BTN} onClick={() => setModal({ kind: "item", value: item })}>编辑</button>}
+              {caps.budgetDelete && <button style={SECONDARY_BTN} onClick={() => removeItem(item)}>删除</button>}
+            </div>
           </div>)}
         </div>
       </section>)}
     </div> : <div style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden", background: "white" }}>
       {categories.length === 0 && <Empty text="还没有费用科目" />}
-      {categories.map((category, index) => <div key={category.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "13px 15px", borderTop: categories[0] === category ? 0 : "1px solid var(--line)" }}>
-        <div style={{ flex: 1 }}><strong style={{ fontSize: 13 }}>{category.name}</strong>{category.description && <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--muted)" }}>{category.description}</p>}</div>
-        <span style={{ fontSize: 11, color: "var(--muted)" }}>{category.budgetItemCount} 个预算项</span>
-        {caps.categoryEdit && <><button style={SECONDARY_BTN} disabled={index === 0 || busy} onClick={() => moveCategory(index, -1)}>上移</button><button style={SECONDARY_BTN} disabled={index === categories.length - 1 || busy} onClick={() => moveCategory(index, 1)}>下移</button></>}
-        {caps.categoryEdit && <button style={SECONDARY_BTN} onClick={() => setModal({ kind: "category", value: category })}>编辑</button>}
-        {caps.categoryDelete && <button style={SECONDARY_BTN} onClick={() => removeCategory(category)}>删除</button>}
+      {categories.map((category, index) => <div key={category.id} className={styles.entryRow} style={{ borderTop: categories[0] === category ? 0 : "1px solid var(--line)" }}>
+        <div className={styles.categoryInfo}>
+          <div className={styles.categoryCopy}><strong className={styles.entryTitle}>{category.name}</strong>{category.description && <p>{category.description}</p>}</div>
+          <span className={styles.entryMeta}>{category.budgetItemCount} 个预算项</span>
+        </div>
+        <div className={styles.entryActions}>
+          {caps.categoryEdit && <><button style={SECONDARY_BTN} disabled={index === 0 || busy} onClick={() => moveCategory(index, -1)}>上移</button><button style={SECONDARY_BTN} disabled={index === categories.length - 1 || busy} onClick={() => moveCategory(index, 1)}>下移</button></>}
+          {caps.categoryEdit && <button style={SECONDARY_BTN} onClick={() => setModal({ kind: "category", value: category })}>编辑</button>}
+          {caps.categoryDelete && <button style={SECONDARY_BTN} onClick={() => removeCategory(category)}>删除</button>}
+        </div>
       </div>)}
     </div>}
     {modal?.kind === "category" && <CategoryModal value={modal.value} busy={busy} onClose={() => setModal(null)} onSave={async body => {
