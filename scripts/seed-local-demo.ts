@@ -584,16 +584,16 @@ async function main() {
   await createUserNotification({ userId: user.id, productionId: PRODUCTION_ID, kind: "script_update", entityType: "version", entityId: versionId, title: "排练稿 V1 已更新", body: "第二场结尾与终曲歌词已调整。", viewHref: `/production/${PRODUCTION_ID}/script?v=${versionId}`, category: "action" });
 
   // ── 物料台账 ────────────────────────────────────────────────────────────────
-  const demoMaterials: [string, string, string, number, string][] = [
-    ["PR-014", "旧式黄铜航海罗盘", "道具", 0, "A-03"],
-    ["CS-021", "林澈第二场深蓝风衣", "服装", 1, "C-12"],
-    ["EQ-008", "手持船笛效果器", "设备", 2, "主剧场"],
-    ["SC-005", "灯塔栏杆模块", "布景", 3, "制作工坊"],
-    ["PR-019", "无署名旧信件（8 份）", "道具", 0, "A-07"],
+  const demoMaterials: [string, string, number, string][] = [
+    ["旧式黄铜航海罗盘", "道具", 0, "A-03"],
+    ["林澈第二场深蓝风衣", "服装", 1, "C-12"],
+    ["手持船笛效果器", "设备", 2, "主剧场"],
+    ["灯塔栏杆模块", "布景", 3, "制作工坊"],
+    ["无署名旧信件（8 份）", "道具", 0, "A-07"],
   ];
-  for (const [code, mName, category, deptIdx, location] of demoMaterials) {
+  for (const [mName, category, deptIdx, location] of demoMaterials) {
     await createMaterial({
-      productionId: PRODUCTION_ID, code, name: mName, category,
+      productionId: PRODUCTION_ID, name: mName, category,
       subject: { kind: "dept", id: deptRows[deptIdx].id },
       location, quantity: 1, createdBy: user.id,
     });

@@ -39,7 +39,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   try {
     const material = await updateMaterial(materialId, productionId, {
-      code: typeof body.code === "string" ? body.code : undefined,
       name: typeof body.name === "string" ? body.name : undefined,
       category: typeof body.category === "string" ? body.category : undefined,
       location: typeof body.location === "string" ? body.location : undefined,

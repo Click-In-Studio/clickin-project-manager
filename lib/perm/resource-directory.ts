@@ -16,8 +16,14 @@ export const RESOURCE_DIRECTORY_QUERIES: Record<string, string> = {
   asset: "SELECT id, COALESCE(name, file_name) AS label FROM asset WHERE production_id = $1 ORDER BY created_at DESC",
   milestone: "SELECT id, COALESCE(name, id) AS label FROM milestone WHERE production_id = $1 ORDER BY end_date",
   phase: "SELECT id, COALESCE(name, id) AS label FROM phase WHERE production_id = $1 ORDER BY start_date, sort_order",
-  material: `SELECT id::text AS id, (code || ' ' || name) AS label FROM production_material
-             WHERE production_id = $1 ORDER BY category, code`,
+  material: `SELECT material.id, (identifier.display_value || ' ' || material.name) AS label
+             FROM production_material material
+             JOIN production_material_identifier identifier
+               ON identifier.production_id=material.production_id
+              AND identifier.material_id=material.id
+              AND identifier.kind='material_number'
+             WHERE material.production_id = $1
+             ORDER BY material.category, identifier.serial_number`,
   // 权限键的 id 位指向预算科目——「只能看/管舞美那一档预算」是真实需求
   finance: `SELECT id::text AS id, name AS label FROM production_budget_category
             WHERE production_id = $1 ORDER BY order_index, name`,

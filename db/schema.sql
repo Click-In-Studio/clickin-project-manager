@@ -1822,9 +1822,8 @@ CREATE INDEX IF NOT EXISTS production_expense_event_expense_idx
 --（部门 | 用户组，二选一）。
 
 CREATE TABLE IF NOT EXISTS production_material (
-  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  id            TEXT        PRIMARY KEY,
   production_id TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  code          TEXT        NOT NULL,
   name          TEXT        NOT NULL,
   category      TEXT        NOT NULL DEFAULT '',
   tracking_strategy TEXT    NOT NULL DEFAULT 'bulk_returnable',
@@ -1845,8 +1844,6 @@ CREATE TABLE IF NOT EXISTS production_material (
     CHECK (tracking_strategy <> 'serialized' OR quantity_scale = 0)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS production_material_code_idx
-  ON production_material (production_id, code);
 CREATE INDEX IF NOT EXISTS production_material_production_idx
   ON production_material (production_id);
 
@@ -1858,7 +1855,7 @@ ALTER TABLE production_material
 CREATE TABLE IF NOT EXISTS production_material_stock_lot (
   id                 TEXT          PRIMARY KEY,
   production_id      TEXT          NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  material_id        UUID          NOT NULL,
+  material_id        TEXT          NOT NULL,
   confirmed_quantity NUMERIC(18,3) NOT NULL CHECK (confirmed_quantity > 0),
   location           TEXT          NOT NULL DEFAULT '',
   source_type        TEXT          NOT NULL DEFAULT 'existing',
@@ -1874,6 +1871,8 @@ CREATE TABLE IF NOT EXISTS production_material_stock_lot (
     FOREIGN KEY (material_id, production_id)
     REFERENCES production_material(id, production_id) ON DELETE RESTRICT,
   CONSTRAINT material_stock_lot_id_production_unique UNIQUE (id, production_id),
+  CONSTRAINT material_stock_lot_id_production_material_unique
+    UNIQUE (id, production_id, material_id),
   CONSTRAINT material_stock_lot_source_type_check
     CHECK (source_type IN ('existing', 'purchased', 'produced', 'rented', 'borrowed')),
   CONSTRAINT material_stock_lot_return_obligation_check CHECK (
@@ -1892,6 +1891,75 @@ CREATE TABLE IF NOT EXISTS production_material_stock_lot (
 
 CREATE INDEX IF NOT EXISTS production_material_stock_lot_material_idx
   ON production_material_stock_lot (production_id, material_id, created_at);
+
+-- 展示编号与实物/批次码由事务计数器分配；计数器更新和业务 INSERT 同事务，
+-- 回滚不会消耗号码。物料号按项目、实物/批次号按项目 + 物料分别递增。
+CREATE TABLE IF NOT EXISTS production_material_number_counter (
+  production_id TEXT PRIMARY KEY REFERENCES production(id) ON DELETE CASCADE,
+  last_value    BIGINT NOT NULL CHECK (last_value > 0)
+);
+
+CREATE TABLE IF NOT EXISTS production_material_stock_code_counter (
+  production_id TEXT   NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  material_id   TEXT   NOT NULL,
+  code_kind     TEXT   NOT NULL CHECK (code_kind IN ('serialized', 'batch')),
+  last_value    BIGINT NOT NULL CHECK (last_value > 0),
+  PRIMARY KEY (production_id, material_id, code_kind),
+  FOREIGN KEY (material_id, production_id)
+    REFERENCES production_material(id, production_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS production_material_identifier (
+  id               TEXT        PRIMARY KEY,
+  production_id    TEXT        NOT NULL REFERENCES production(id) ON DELETE CASCADE,
+  material_id      TEXT        NOT NULL,
+  lot_id           TEXT,
+  kind             TEXT        NOT NULL CHECK (kind IN ('material_number', 'internal_code', 'external')),
+  external_type    TEXT        CHECK (external_type IN ('manufacturer_serial', 'source_asset', 'existing_barcode', 'other')),
+  external_label   TEXT        NOT NULL DEFAULT '',
+  display_value    TEXT        NOT NULL CHECK (btrim(display_value) <> '' AND length(display_value) <= 128),
+  normalized_value TEXT        NOT NULL CHECK (btrim(normalized_value) <> '' AND length(normalized_value) <= 128),
+  serial_number    BIGINT      CHECK (serial_number > 0),
+  token            TEXT        UNIQUE,
+  is_active        BOOLEAN     NOT NULL DEFAULT true,
+  retired_at       TIMESTAMPTZ,
+  retired_by       UUID        REFERENCES app_user(id),
+  retired_reason   TEXT        NOT NULL DEFAULT '',
+  created_by       UUID        NOT NULL REFERENCES app_user(id),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT material_identifier_material_fk
+    FOREIGN KEY (material_id, production_id)
+    REFERENCES production_material(id, production_id) ON DELETE RESTRICT,
+  CONSTRAINT material_identifier_lot_fk
+    FOREIGN KEY (lot_id, production_id, material_id)
+    REFERENCES production_material_stock_lot(id, production_id, material_id) ON DELETE RESTRICT,
+  CONSTRAINT material_identifier_shape CHECK (
+    (kind = 'material_number' AND lot_id IS NULL AND external_type IS NULL
+      AND external_label = '' AND serial_number IS NOT NULL AND token IS NULL)
+    OR
+    (kind = 'internal_code' AND lot_id IS NOT NULL AND external_type IS NULL
+      AND external_label = '' AND serial_number IS NOT NULL AND token IS NOT NULL)
+    OR
+    (kind = 'external' AND lot_id IS NOT NULL AND external_type IS NOT NULL
+      AND serial_number IS NULL AND token IS NULL
+      AND (external_type = 'other') = (btrim(external_label) <> ''))
+  ),
+  CONSTRAINT material_identifier_retired_shape CHECK (
+    (is_active AND retired_at IS NULL AND retired_by IS NULL AND retired_reason = '')
+    OR
+    (NOT is_active AND retired_at IS NOT NULL AND retired_by IS NOT NULL AND btrim(retired_reason) <> '')
+  ),
+  UNIQUE (production_id, normalized_value)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS material_identifier_material_number_idx
+  ON production_material_identifier(production_id, material_id)
+  WHERE kind = 'material_number';
+CREATE UNIQUE INDEX IF NOT EXISTS material_identifier_lot_internal_idx
+  ON production_material_identifier(production_id, lot_id)
+  WHERE kind = 'internal_code' AND is_active;
+CREATE INDEX IF NOT EXISTS material_identifier_lot_idx
+  ON production_material_identifier(production_id, lot_id, created_at);
 
 CREATE TABLE IF NOT EXISTS production_material_stock_movement (
   id                TEXT          PRIMARY KEY,
