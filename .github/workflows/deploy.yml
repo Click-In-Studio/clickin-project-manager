@@ -389,11 +389,8 @@ jobs:
               STOP_FAILED=0
               for APP in production-manager agent-runner heavy-worker; do
                 if pm2 describe "$APP" >/dev/null 2>&1; then
-                  if [ "$SCHEMA_CHANGED" = "true" ]; then
-                    pm2 delete "$APP" || STOP_FAILED=1
-                  else
-                    pm2 stop "$APP" || STOP_FAILED=1
-                  fi
+                  # 候选配置已经载入 PM2，不能只 stop 后留下可被 bare pm2 start 误拉起的坏定义。
+                  pm2 delete "$APP" || STOP_FAILED=1
                 fi
               done
               if [ "$SCHEMA_CHANGED" = "false" ] && [ -n "$PREVIOUS_RELEASE" ] && [ -d "$PREVIOUS_RELEASE" ]; then
@@ -418,6 +415,7 @@ jobs:
             fi
 
             for ATTEMPT in $(seq 1 30); do
+              # 端口必须与 deploy/ecosystem.config.js 的三个进程定义同步。
               # runner / worker 只监听 127.0.0.1，不对外暴露；Web /health 经过 nginx，必须鉴权。
               # secret 通过 stdin 传给 curl config，不能出现在同机其他进程可读的 argv 中。
               if printf 'header = "Authorization: Bearer %s"\n' "$HEALTH_SECRET" |

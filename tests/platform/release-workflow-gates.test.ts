@@ -76,8 +76,8 @@ describe("发布门禁 workflow", () => {
     expect(activation).toContain("http://127.0.0.1:3102/health");
     expect(activation).toContain("http://127.0.0.1:3103/health");
     expect(activation).toContain("--max-time 3");
-    expect(activation).toContain('pm2 stop "$APP" || STOP_FAILED=1');
     expect(activation).toContain('pm2 delete "$APP" || STOP_FAILED=1');
+    expect(activation).not.toContain('pm2 stop "$APP" || STOP_FAILED=1');
     expect(activation).toContain("::error::一个或多个数据库客户端进程停止或移除失败");
     expect(activation.indexOf('cp "$NEW_ECOSYSTEM"')).toBeGreaterThan(activation.indexOf("http://127.0.0.1:3103/health"));
   });

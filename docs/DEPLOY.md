@@ -293,7 +293,7 @@ push 到 `main`（dev）或 tag（prod）后 GitHub Actions 自动完成。tag �
 
 **无需任何手动操作**。
 
-健康检查失败会停止三个进程，即使本次是没有 migration 的纯代码发布也不会让未通过检查的版本继续对外服务。纯代码发布会把 `current` 还原到上一 release，确认后可按下节重新启动；含 migration 的发布会删除三个 PM2 注册项并移除 `current`，避免按进程名或旧软链误启动不兼容代码，并保持停机等待前向修复或恢复备份。
+健康检查失败会停止三个进程并删除候选 PM2 注册项，即使本次是没有 migration 的纯代码发布也不会让未通过检查的版本继续对外服务。纯代码发布会把 `current` 还原到上一 release，确认后须使用 `shared/ecosystem.config.js` 中已验证的定义重新启动；含 migration 的发布还会移除 `current`，避免按进程名或旧软链误启动不兼容代码，并保持停机等待前向修复或恢复备份。
 
 tag validation 失败但 deploy job 从未开始时，可以显式删除本地与远端失败 tag，修正后在新 commit 上重建同名 tag；deploy 一旦开始，该 tag 就是发布审计记录，不得移动，后续修复必须创建新的 hotfix tag。
 
