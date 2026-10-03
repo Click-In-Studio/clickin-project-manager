@@ -287,7 +287,7 @@ push 到 `main`（dev）或 tag（prod）后 GitHub Actions 自动完成。tag �
 1. `npm ci` + `npm run build`（standalone 模式）
 2. 打包产物，上传到服务器 `releases/<run>-<sha>/`
 3. 只读检查 pending；有 pending 时先停止 Web、Agent runner、heavy worker 并删除对应 PM2 注册项，再 `pg_dump` 到 `shared/backups/`
-4. `dbmate up` 应用所有 pending，随后对账并校验 `script_editor` ACL，再核对线上结构指纹；任一不等都保持停机，禁止旧代码在新 schema 上继续写
+4. 移除 `current` 后由 `dbmate up` 应用所有 pending，随后对账并校验 `script_editor` ACL，再核对线上结构指纹；任一不等都保持停机，禁止旧代码在迁移开始后继续写
 5. 切换 `current` symlink → 新 release，启动三个进程并探测 `3001/health`（含数据库）、`3102/health`、`3103/health`
 6. 三个入口全部健康后清理旧 releases（保留最新 5 个）
 

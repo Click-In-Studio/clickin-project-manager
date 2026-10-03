@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const root = path.resolve(__dirname, "../..");
 const ci = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
 const deploy = fs.readFileSync(path.join(root, ".github/workflows/deploy.yml"), "utf8");
+const ecosystem = fs.readFileSync(path.join(root, "deploy/ecosystem.config.js"), "utf8");
 
 function section(source: string, start: string, end?: string): string {
   const startAt = source.indexOf(start);
@@ -57,8 +58,8 @@ describe("发布门禁 workflow", () => {
     expect(migration).toContain('exit "$STOP_FAILED"');
     expect(migration).toContain('pm2 delete "$APP"');
     expect(migration.indexOf('pm2 delete "$APP"')).toBeLessThan(migration.indexOf('ssh prod "$DBMATE up"'));
-    expect(migration.indexOf('ssh prod "$DBMATE up"')).toBeLessThan(
-      migration.indexOf("unlink /var/www/production-manager/current"),
+    expect(migration.indexOf("unlink /var/www/production-manager/current")).toBeLessThan(
+      migration.indexOf('ssh prod "$DBMATE up"'),
     );
     expect(migration).toContain("MIGRATION FAILED — 服务保持停止");
     expect(migration).not.toContain("该支已整体回滚");
@@ -69,12 +70,13 @@ describe("发布门禁 workflow", () => {
     expect(activation).not.toContain("scp deploy/ecosystem.config.js");
     expect(activation).toContain('ln -snf "$PREVIOUS_RELEASE"');
     expect(activation).toContain("unlink /var/www/production-manager/current");
-    expect(activation).toContain("http://127.0.0.1:3001/health");
+    const healthPorts = [...ecosystem.matchAll(/^\s+(?:PORT|AGENT_RUNNER_PORT|HEAVY_WORKER_PORT):\s*(\d+),$/gm)]
+      .map((match) => match[1]);
+    expect(healthPorts).toHaveLength(3);
+    for (const port of healthPorts) expect(activation).toContain(`http://127.0.0.1:${port}/health`);
     expect(activation).toContain('header = "Authorization: Bearer %s"');
     expect(activation).toContain('curl -fsS --max-time 3 --config -');
     expect(activation).not.toContain('-H "Authorization: Bearer $HEALTH_SECRET"');
-    expect(activation).toContain("http://127.0.0.1:3102/health");
-    expect(activation).toContain("http://127.0.0.1:3103/health");
     expect(activation).toContain("--max-time 3");
     expect(activation).toContain('pm2 delete "$APP" || STOP_FAILED=1');
     expect(activation).not.toContain('pm2 stop "$APP" || STOP_FAILED=1');

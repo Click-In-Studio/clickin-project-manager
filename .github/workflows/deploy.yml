@@ -338,12 +338,12 @@ jobs:
             fi
             echo "Backup saved to $SHARED/backups/$BACKUP"
 
+            # 从这一刻起进入 migration 失败关闭区：先移除旧代码入口，再开始可能分支提交的迁移。
+            # 即使 dbmate 中途失败，shared 中的旧配置也不能借 current 拉起旧代码。
+            ssh prod "unlink /var/www/production-manager/current 2>/dev/null || true" < /dev/null
             echo "── dbmate up"
             ssh prod "$DBMATE up" < /dev/null \
               || { echo "::error::MIGRATION FAILED — 服务保持停止；逐支核对 schema_migrations 后前向修复或恢复 $SHARED/backups/$BACKUP"; exit 1; }
-            # migration 前已经从 PM2 删除旧进程注册；schema 变化后再移除旧代码入口。
-            # 后续 ACL / 指纹失败时，按进程名 restart 和按 current 启动都会失败。
-            ssh prod "unlink /var/www/production-manager/current 2>/dev/null || true" < /dev/null
             echo "SCHEMA_CHANGED=true" >> "$GITHUB_ENV"
           else
             echo "No pending migrations — process stop and backup skipped."
