@@ -1,0 +1,141 @@
+.pageContent {
+  padding: 24px clamp(18px, 3vw, 52px) 60px;
+}
+
+.card {
+  margin-bottom: 20px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+}
+
+.dangerCard {
+  border-color: #fca5a5;
+}
+
+.cardHeader {
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.dangerHeader {
+  background: #fff5f5;
+}
+
+.settingRow {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.lastRow {
+  border-bottom: 0;
+}
+
+.rowLabel {
+  min-width: 0;
+  padding-top: 1px;
+  overflow-wrap: anywhere;
+}
+
+.rowContent {
+  min-width: 0;
+}
+
+.basicInfoInlineField,
+.typeControls,
+.avatarField {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.typeControls {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.avatarField {
+  align-items: center;
+  gap: 14px;
+}
+
+.avatarControls {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.basicInfoSelect {
+  min-width: 130px;
+  flex: none;
+}
+
+.basicInfoSaveRow {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 600px) {
+  .pageContent {
+    padding: 20px 12px 60px;
+  }
+
+  .basicInfoCard .cardHeader {
+    padding-inline: 16px;
+  }
+
+  .settingRow.basicInfoRow {
+    display: block;
+    padding: 16px;
+  }
+
+  .basicInfoRow .rowLabel {
+    padding-top: 0;
+    margin-bottom: 12px;
+  }
+
+  .basicInfoInlineField,
+  .typeControls {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .basicInfoInput,
+  .basicInfoSelect,
+  .basicInfoButton {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none;
+    font-size: 16px !important;
+  }
+
+  .basicInfoInput,
+  .basicInfoSelect {
+    padding-block: 10px !important;
+  }
+
+  .basicInfoButton {
+    min-height: 42px;
+    padding: 9px 14px !important;
+  }
+
+  .avatarControls {
+    flex: 1;
+  }
+
+  .avatarButton {
+    white-space: normal !important;
+  }
+
+  .basicInfoSaveRow {
+    justify-content: stretch;
+  }
+}

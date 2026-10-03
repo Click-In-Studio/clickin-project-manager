@@ -7,7 +7,7 @@ who: 各项分别授权，通常是制作人；兑换升级码只有项目所有
 tier: all
 platform: [desktop, mobile]
 related: [start/join/new-production, admin/org/members]
-updated: 2026-09-18
+updated: 2026-10-03
 ---
 
 ## 这是什么
@@ -25,6 +25,9 @@ updated: 2026-09-18
 - **语言**：展示用。
 
 每项单独「保存」。没有对应权限的项按钮是灰的。
+
+> [!📱]
+> 手机上每项会先显示名称和说明，再显示完整宽度的输入区与「保存」按钮；项目类型的选择和自定义名称也会分行显示。
 
 ### 安全：页面水印
 
