@@ -5,6 +5,7 @@ import PageHeader, { SECONDARY_BTN } from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import { BASE_PATH } from "@/lib/base-path";
 import type { PrivateAssetRow } from "@/lib/asset/review-db";
+import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
 
 type Props = {
   productionId: string;
@@ -70,25 +71,14 @@ export default function AdminAssetReviewClient({ productionId, productionName, i
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
       <PageHeader eyebrow={productionName} title="数字资产审查" side="stage" />
 
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
-        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
-        background: "var(--line)", marginBottom: 18,
-      }}>
-        {[
-          [String(assets.length), "隐私资产", "未公开（is_public = false）"],
-          [String(grantTotal), "实例授权", "指向隐私资产的有效授权"],
-          [String(assets.filter(a => a.mountCount === 0 && a.grants.length === 0).length), "零触达", "无挂载且无授权"],
-        ].map(([num, label, hint]) => (
-          <div key={label} style={{ minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13, background: "var(--surface)" }}>
-            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
-            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
-              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
-              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
-            </p>
-          </div>
-        ))}
-      </div>
+      <AdminMetricGrid
+        columns={3}
+        items={[
+          { value: String(assets.length), label: "隐私资产", hint: "未公开（is_public = false）" },
+          { value: String(grantTotal), label: "实例授权", hint: "指向隐私资产的有效授权" },
+          { value: String(assets.filter(a => a.mountCount === 0 && a.grants.length === 0).length), label: "零触达", hint: "无挂载且无授权" },
+        ]}
+      />
 
       <p style={{ margin: "0 0 14px", fontSize: 11, color: "var(--danger)", fontWeight: 700 }}>
         ⚠ 本页为越隐私合规审查：以下为成员未公开的数字资产，仅限合规用途查看与处置。

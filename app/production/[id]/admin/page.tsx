@@ -6,23 +6,7 @@ import { getProductionMeta, getAdminOverviewStats } from "@/lib/production/produ
 import { getPool } from "@/lib/pg";
 import { notFound } from "next/navigation";
 import PageHeader from "@/components/ui/PageHeader";
-
-const CARD: React.CSSProperties = {
-  minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13,
-  background: "var(--surface)",
-};
-
-function StatCard({ num, label, hint }: { num: string; label: string; hint: string }) {
-  return (
-    <div style={CARD}>
-      <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
-      <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
-        <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
-        <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
-      </p>
-    </div>
-  );
-}
+import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -59,17 +43,17 @@ export default async function AdminOverviewPage({ params }: { params: Promise<{ 
       <PageHeader eyebrow={meta.name} title="项目概览" side="stage" />
 
       {/* ── 基础统计 ── */}
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 1,
-        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
-        background: "var(--line)", marginBottom: 18,
-      }}>
-        <StatCard num={String(stats.memberCount)} label="项目成员" hint={stats.suspendedCount > 0 ? `含 ${stats.suspendedCount} 名已停用` : "全部在职"} />
-        <StatCard num={String(stats.deptCount)} label="部门" hint={`另有 ${stats.groupCount} 个用户组`} />
-        <StatCard num={String(stats.roleCount)} label="角色" hint="在用职称" />
-        <StatCard num={String(stats.milestoneCount)} label="里程碑" hint="阶段节点" />
-        <StatCard num={String(stats.announcementCount)} label="公告" hint="累计发布" />
-      </div>
+      <AdminMetricGrid
+        columns={5}
+        responsive="overview"
+        items={[
+          { value: String(stats.memberCount), label: "项目成员", hint: stats.suspendedCount > 0 ? `含 ${stats.suspendedCount} 名已停用` : "全部在职" },
+          { value: String(stats.deptCount), label: "部门", hint: `另有 ${stats.groupCount} 个用户组` },
+          { value: String(stats.roleCount), label: "角色", hint: "在用职称" },
+          { value: String(stats.milestoneCount), label: "里程碑", hint: "阶段节点" },
+          { value: String(stats.announcementCount), label: "公告", hint: "累计发布" },
+        ]}
+      />
 
       {/* ── 项目信息 ── */}
       <section style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22 }}>

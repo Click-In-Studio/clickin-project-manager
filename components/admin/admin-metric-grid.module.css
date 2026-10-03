@@ -1,0 +1,114 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(var(--admin-metric-columns), minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: 18px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--line);
+}
+
+.card {
+  min-width: 0;
+  min-height: 92px;
+  padding: 17px 19px;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 13px;
+  background: var(--surface);
+}
+
+.value {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: 28px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy {
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.label,
+.hint {
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.hint {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.policyTabs {
+  width: min(360px, 100%);
+  margin-bottom: 14px;
+  padding: 4px;
+  display: flex;
+  gap: 4px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.policyTab {
+  min-width: 0;
+  padding: 7px 12px;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .overview,
+  .standard,
+  .permission {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .standard,
+  .permission {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .overview .card {
+    min-height: 76px;
+    padding: 10px 12px;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: center;
+    gap: 5px;
+  }
+
+  .overview .value {
+    font-size: 25px;
+  }
+
+  .policyTabs {
+    padding-inline: 2px;
+    gap: 2px;
+  }
+
+  .policyTab {
+    padding-inline: 4px;
+    font-size: 11px;
+  }
+}

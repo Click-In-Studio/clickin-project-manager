@@ -13,6 +13,7 @@ import styles from "@/components/ui/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberStatus } from "@/lib/perm/member-status-shared";
 import { MEMBER_STATUS_LABEL } from "@/lib/perm/member-status-shared";
+import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
 
 type Dept = { id: string; name: string; parentId: string | null; kind: "dept" | "group"; displayOrder: number; memberUserIds: string[] };
 type Role = { id: string; name: string; permissions: string[] };
@@ -295,27 +296,20 @@ export default function AdminPermissionCenterClient({
       <PageHeader eyebrow={productionName} title="权限中心" side="stage" />
 
       {/* 摘要 */}
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 1,
-        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
-        background: "var(--line)", marginBottom: 18,
-      }}>
-        {[
-          [String(deptKeyCount), "部门权限行",
-            deptInstanceCount > 0 ? `另有 ${deptInstanceCount} 条实例行由别处在管` : "免审批区间"],
-          [String(roles.reduce((n, r) => n + r.permissions.length, 0)), "角色权限键", `${roles.length} 个角色`],
-          [String(overrideCount), "人事 override", "个人 allow / deny"],
-          [String(approverTypeCount), "类型配了审批人", "未配则落制作人 → 所有者"],
-        ].map(([num, label, hint]) => (
-          <div key={label} style={{ minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13, background: "var(--surface)" }}>
-            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
-            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
-              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
-              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
-            </p>
-          </div>
-        ))}
-      </div>
+      <AdminMetricGrid
+        columns={4}
+        responsive="permission"
+        items={[
+          {
+            value: String(deptKeyCount),
+            label: "部门权限行",
+            hint: deptInstanceCount > 0 ? `另有 ${deptInstanceCount} 条实例行由别处在管` : "免审批区间",
+          },
+          { value: String(roles.reduce((n, r) => n + r.permissions.length, 0)), label: "角色权限键", hint: `${roles.length} 个角色` },
+          { value: String(overrideCount), label: "人事 override", hint: "个人 allow / deny" },
+          { value: String(approverTypeCount), label: "类型配了审批人", hint: "未配则落制作人 → 所有者" },
+        ]}
+      />
 
       {/* segmented */}
       <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface-2)", borderRadius: 10, width: 360, marginBottom: 14 }}>

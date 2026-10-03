@@ -5,9 +5,9 @@ summary: 部门权限、角色权限、人事权限、资源审批人——四�
 routes: [admin/permissions]
 who: 项目所有者与制作人（专业档项目）
 tier: pro
-platform: [desktop]
+platform: [desktop, mobile]
 related: [admin/security/policies, admin/security/templates, admin/approval/access-requests, admin/compliance/audit]
-updated: 2026-09-18
+updated: 2026-10-03
 ---
 
 ## 这是什么
@@ -21,6 +21,8 @@ Backstage 的权限有几层叠加。一个成员能做某件事，只要下面�
 5. 资源自己的分享面：文档、Cue 表、资产各自的「分享给谁」。
 
 权限中心管前四层的**默认值**。免费档项目没有这一页，用模版默认值。
+
+> [!📱] 中等宽度下，顶部摘要按两栏排列；最窄的手机窗口里改为单列。
 
 ![权限中心](/manual/admin/permissions.png)
 

@@ -7,7 +7,7 @@ who: 有部门管理权限的管理员
 tier: all
 platform: [desktop, mobile]
 related: [admin/org/members, admin/security/permission-center, production/tasks/tasks]
-updated: 2026-09-18
+updated: 2026-10-03
 ---
 
 ## 这是什么
@@ -22,6 +22,8 @@ updated: 2026-09-18
 ## 怎么操作
 
 「成员与部门 →「部门」页签，左侧是树，点一个右侧是详情。
+
+> [!📱] 最窄的手机窗口里，顶部成员、部门、用户组和 POC 摘要会改为单列，数字与说明保持横向阅读。
 
 - **新建**：「＋ 新建部门 / 用户组」，填名称、选上级（或顶级）、选类型。
 - **子部门**：详情里「＋ 添加子部门」。

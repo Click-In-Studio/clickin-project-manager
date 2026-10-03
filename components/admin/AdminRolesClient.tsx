@@ -10,6 +10,7 @@ import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberStatus } from "@/lib/perm/member-status-shared";
 import { isInactiveMember } from "@/lib/perm/member-status-shared";
+import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
 
 type Role = { id: string; name: string };
 
@@ -177,25 +178,14 @@ export default function AdminRolesClient({
       <PageHeader eyebrow={productionName} title="角色管理" side="stage" />
 
       {/* 摘要 */}
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
-        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
-        background: "var(--line)", marginBottom: 18,
-      }}>
-        {[
-          [String(roles.length), "角色", "含系统角色"],
-          [String(members.filter(m => m.roles.length > 0).length), "已指派成员", `共 ${members.length} 名成员`],
-          [String(members.filter(m => m.roles.length === 0).length), "未指派", "无角色成员"],
-        ].map(([num, label, hint]) => (
-          <div key={label} style={{ minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13, background: "var(--surface)" }}>
-            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
-            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
-              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
-              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
-            </p>
-          </div>
-        ))}
-      </div>
+      <AdminMetricGrid
+        columns={3}
+        items={[
+          { value: String(roles.length), label: "角色", hint: "含系统角色" },
+          { value: String(members.filter(m => m.roles.length > 0).length), label: "已指派成员", hint: `共 ${members.length} 名成员` },
+          { value: String(members.filter(m => m.roles.length === 0).length), label: "未指派", hint: "无角色成员" },
+        ]}
+      />
 
       {error && <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--danger)", fontWeight: 700 }}>{error}</p>}
 

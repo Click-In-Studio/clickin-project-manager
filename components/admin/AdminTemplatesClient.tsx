@@ -9,6 +9,7 @@ import AdminModal from "@/components/ui/AdminModal";
 import TreePickerModal from "@/components/ui/TreePickerModal";
 import styles from "@/components/ui/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
+import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
 
 type Row = { deptId: string; template: string; canCreate: boolean; permissions: string[] };
 type Dept = { id: string; name: string; parentId: string | null; kind: "dept" | "group" };
@@ -129,25 +130,14 @@ export default function AdminTemplatesClient({ productionId, productionName, dep
       <PageHeader eyebrow={productionName} title="权限模版" side="stage" />
 
       {/* 摘要 */}
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
-        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
-        background: "var(--line)", marginBottom: 18,
-      }}>
-        {[
-          [String(types.length + orphanTemplates.length), "Cue 表模版", "类型总数"],
-          [String(rows.length), "声明行", "部门 × 模版"],
-          [String(rows.filter(r => r.canCreate).length), "可建声明", "can_create 行"],
-        ].map(([num, label, hint]) => (
-          <div key={label} style={{ minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13, background: "var(--surface)" }}>
-            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
-            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
-              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
-              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
-            </p>
-          </div>
-        ))}
-      </div>
+      <AdminMetricGrid
+        columns={3}
+        items={[
+          { value: String(types.length + orphanTemplates.length), label: "Cue 表模版", hint: "类型总数" },
+          { value: String(rows.length), label: "声明行", hint: "部门 × 模版" },
+          { value: String(rows.filter(r => r.canCreate).length), label: "可建声明", hint: "can_create 行" },
+        ]}
+      />
 
       {error && <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--danger)", fontWeight: 700 }}>{error}</p>}
 
