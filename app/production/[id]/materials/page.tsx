@@ -70,7 +70,7 @@ export default async function MaterialsPage({ params }: { params: Promise<{ id: 
               </div>
               {materials.map(item => (
                 <div key={item.id} style={{ display: "grid", gridTemplateColumns: COLS, gap: 12, alignItems: "center", padding: "14px 16px", borderBottom: "1px solid var(--line)", fontSize: 11 }}>
-                  <code style={{ color: "var(--stage)" }}>{item.code}</code>
+                  <code style={{ color: "var(--stage)" }}>{item.number}</code>
                   <b style={{ color: "var(--ink)" }}>{item.name}</b>
                   <span>{item.category || "—"}</span>
                   {/* 责任方是部门**或**用户组（二选一，见 lib/ops/task-poc.ts 的 TaskSubject） */}

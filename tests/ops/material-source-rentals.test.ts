@@ -28,7 +28,7 @@ afterAll(async () => {
 describe("批次来源快照与到货", () => {
   it("同一物料可以同时持有既有、租赁和借用批次", async () => {
     const material = await createMaterial({
-      productionId: prodId, code: `MIX-${shortId()}`, name: "无线话筒",
+      productionId: prodId, name: "无线话筒",
       trackingStrategy: "bulk_returnable", quantity: 2,
       subject: null, createdBy: ownerId,
     });
@@ -48,7 +48,7 @@ describe("批次来源快照与到货", () => {
 
   it("实际到货数量和时间由有效流水派生", async () => {
     const material = await createMaterial({
-      productionId: prodId, code: `ARR-${shortId()}`, name: "折叠椅",
+      productionId: prodId, name: "折叠椅",
       quantity: 1, subject: null, createdBy: ownerId,
     });
     const lot = await createMaterialStockLot({
@@ -78,7 +78,7 @@ describe("批次来源快照与到货", () => {
 describe("退还来源方与异常", () => {
   it("租来 10、退还 9、遗失 1 时保持异常，解决并归还后才退清", async () => {
     const material = await createMaterial({
-      productionId: prodId, code: `RENT-${shortId()}`, name: "演出灯具",
+      productionId: prodId, name: "演出灯具",
       quantity: 10, sourceType: "rented", sourceLabel: "灯光租赁仓",
       sourceReference: "LEASE-77", returnDueAt: new Date("2026-10-20T18:00:00+08:00"),
       subject: null, createdBy: ownerId,
@@ -115,7 +115,7 @@ describe("退还来源方与异常", () => {
 
   it("内部签出返库不会被误记为退还来源方", async () => {
     const material = await createMaterial({
-      productionId: prodId, code: `INNER-${shortId()}`, name: "租赁桌椅",
+      productionId: prodId, name: "租赁桌椅",
       quantity: 5, sourceType: "borrowed", sourceLabel: "社区礼堂",
       returnDueAt: new Date("2026-12-01T12:00:00+08:00"),
       subject: null, createdBy: ownerId,
@@ -136,13 +136,13 @@ describe("退还来源方与异常", () => {
 
   it("非租借批次不能登记对外归还，累计归还不得超过应还数量", async () => {
     await expect(createMaterial({
-      productionId: prodId, code: `NO-DUE-${shortId()}`, name: "缺应还时间",
+      productionId: prodId, name: "缺应还时间",
       quantity: 1, sourceType: "rented", sourceLabel: "设备仓",
       subject: null, createdBy: ownerId,
     })).rejects.toMatchObject({ reason: "bad_source" });
 
     const owned = await createMaterial({
-      productionId: prodId, code: `OWN-${shortId()}`, name: "自有箱",
+      productionId: prodId, name: "自有箱",
       quantity: 2, subject: null, createdBy: ownerId,
     });
     const [ownedLot] = await listMaterialStockLots(owned.id, prodId);
@@ -151,7 +151,7 @@ describe("退还来源方与异常", () => {
     })).rejects.toMatchObject({ reason: "bad_source" });
 
     const rented = await createMaterial({
-      productionId: prodId, code: `CAP-${shortId()}`, name: "租赁线缆",
+      productionId: prodId, name: "租赁线缆",
       quantity: 3, sourceType: "rented", sourceLabel: "线缆库",
       returnDueQuantity: 2, returnDueAt: new Date("2026-12-02T12:00:00+08:00"),
       subject: null, createdBy: ownerId,
@@ -169,7 +169,7 @@ describe("退还来源方与异常", () => {
     })).rejects.toMatchObject({ reason: "bad_source_exception" });
 
     const damaged = await createMaterial({
-      productionId: prodId, code: `DMG-${shortId()}`, name: "租赁调音台",
+      productionId: prodId, name: "租赁调音台",
       quantity: 3, sourceType: "rented", sourceLabel: "音响中心",
       returnDueAt: new Date("2026-12-04T12:00:00+08:00"),
       subject: null, createdBy: ownerId,
@@ -183,7 +183,7 @@ describe("退还来源方与异常", () => {
 
   it("项目级读模型可查询到期但未退清事实", async () => {
     const material = await createMaterial({
-      productionId: prodId, code: `DUE-${shortId()}`, name: "借用投影仪",
+      productionId: prodId, name: "借用投影仪",
       trackingStrategy: "serialized", quantity: 1,
       sourceType: "borrowed", sourceLabel: "校团委",
       returnDueAt: new Date("2020-01-01T00:00:00Z"),
@@ -202,7 +202,7 @@ describe("退还来源方与异常", () => {
 
   it("并发退还按批次串行校验，不会突破应还数量", async () => {
     const material = await createMaterial({
-      productionId: prodId, code: `RACE-${shortId()}`, name: "租赁配重",
+      productionId: prodId, name: "租赁配重",
       quantity: 4, sourceType: "rented", sourceLabel: "舞台设备中心",
       returnDueQuantity: 3, returnDueAt: new Date("2026-12-03T12:00:00+08:00"),
       subject: null, createdBy: ownerId,

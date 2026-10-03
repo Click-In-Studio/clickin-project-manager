@@ -50,7 +50,7 @@ export type MaterialSourceReturn = {
 export type MaterialSourceObligation = {
   lotId: string;
   materialId: string;
-  materialCode: string;
+  materialNumber: string;
   materialName: string;
   sourceType: Extract<MaterialSourceType, "rented" | "borrowed">;
   sourceLabel: string;
@@ -349,14 +349,15 @@ export async function listMaterialSourceObligations(
   productionId: string,
 ): Promise<MaterialSourceObligation[]> {
   const { rows } = await getPool().query<{
-    lot_id: string; material_id: string; material_code: string; material_name: string;
+    lot_id: string; material_id: string; material_number: string; material_name: string;
     source_type: Extract<MaterialSourceType, "rented" | "borrowed">;
     source_label: string; source_reference: string; confirmed_quantity: string;
     arrived_quantity: string; return_due_at: Date | null; return_due_quantity: string;
     returned_quantity: string; open_exception_quantity: string;
     actual_arrival_at: Date | null; actual_returned_at: Date | null; cancelled_quantity: string;
   }>(
-    `SELECT lot.id AS lot_id, lot.material_id, material.code AS material_code,
+    `SELECT lot.id AS lot_id, lot.material_id,
+            identifier.display_value AS material_number,
             material.name AS material_name, lot.source_type, lot.source_label,
             lot.source_reference, lot.confirmed_quantity::text,
             arrival.quantity::text AS arrived_quantity,
@@ -369,6 +370,10 @@ export async function listMaterialSourceObligations(
        FROM production_material_stock_lot lot
        JOIN production_material material
          ON material.id=lot.material_id AND material.production_id=lot.production_id
+       JOIN production_material_identifier identifier
+         ON identifier.production_id=material.production_id
+        AND identifier.material_id=material.id
+        AND identifier.kind='material_number'
        LEFT JOIN LATERAL (
          SELECT COALESCE(SUM(m.quantity), 0) AS quantity, MAX(m.occurred_at) AS actual_at
            FROM production_material_stock_movement m
@@ -407,7 +412,7 @@ export async function listMaterialSourceObligations(
             ))
        ) exception ON true
       WHERE lot.production_id=$1 AND lot.source_type IN ('rented','borrowed')
-      ORDER BY lot.return_due_at NULLS LAST, material.code, lot.id`,
+      ORDER BY lot.return_due_at NULLS LAST, identifier.serial_number, lot.id`,
     [productionId],
   );
   const now = Date.now();
@@ -420,7 +425,7 @@ export async function listMaterialSourceObligations(
     const outstandingQuantity = Math.max(0, returnDueQuantity - returnedQuantity);
     return {
       lotId: row.lot_id, materialId: row.material_id,
-      materialCode: row.material_code, materialName: row.material_name,
+      materialNumber: row.material_number, materialName: row.material_name,
       sourceType: row.source_type, sourceLabel: row.source_label,
       sourceReference: row.source_reference, confirmedQuantity, arrivedQuantity,
       returnDueAt: row.return_due_at?.toISOString() ?? null,

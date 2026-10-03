@@ -22,7 +22,7 @@ afterAll(async () => {
 });
 
 async function fixture(strategy: "serialized" | "bulk_returnable" | "consumable" = "bulk_returnable", quantity = 10) {
-  const material = await createMaterial({ productionId: prodId, code: `LC-${shortId()}`,
+  const material = await createMaterial({ productionId: prodId,
     name: "设备或耗材", trackingStrategy: strategy, quantity, subject: null,
     location: "仓库 A", createdBy: ownerId });
   const [lot] = await listMaterialStockLots(material.id, prodId);

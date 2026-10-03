@@ -57,22 +57,21 @@ describe("integrity verification", () => {
 describe("invariance verification", () => {
   it.skipIf(!snapshot)("旧物料事实转换为一个已收货批次且定义字段不丢失", async () => {
     const result = await getPool().query<{
-      code: string; name: string; category: string; notes: string; created_by: string;
+      name: string; category: string; notes: string; created_by: string;
       lot_id: string; confirmed_quantity: string; location: string;
       from_bucket: string; to_bucket: string; moved_quantity: string;
     }>(
-      `SELECT m.code, m.name, m.category, m.notes, m.created_by,
+      `SELECT m.name, m.category, m.notes, m.created_by,
               l.id AS lot_id, l.confirmed_quantity::text, l.location,
               sm.from_bucket, sm.to_bucket, sm.quantity::text AS moved_quantity
          FROM production_material m
          JOIN production_material_stock_lot l ON l.material_id=m.id
          JOIN production_material_stock_movement sm ON sm.lot_id=l.id
-        WHERE m.id=$1 AND m.production_id=$2`,
-      [snapshot!.materialId, snapshot!.productionId],
+        WHERE l.id=$1 AND m.production_id=$2`,
+      [`ml_${snapshot!.materialId.replaceAll("-", "")}`, snapshot!.productionId],
     );
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0]).toMatchObject({
-      code: snapshot!.code,
       name: snapshot!.name,
       category: snapshot!.category,
       notes: snapshot!.notes,

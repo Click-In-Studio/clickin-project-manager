@@ -40,9 +40,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const body = parsedBody.value;
   if (body.statusId !== undefined)
     return Response.json({ error: "物料状态由流转记录决定" }, { status: 400 });
-  const code = typeof body.code === "string" ? body.code.trim() : "";
   const name = typeof body.name === "string" ? body.name.trim() : "";
-  if (!code) return Response.json({ error: "编号不能为空" }, { status: 400 });
   if (!name) return Response.json({ error: "名称不能为空" }, { status: 400 });
   if (body.quantity !== undefined && (typeof body.quantity !== "number" || body.quantity < 0))
     return Response.json({ error: "数量必须是不小于 0 的数字" }, { status: 400 });
@@ -57,7 +55,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   try {
     const material = await createMaterial({
-      productionId, code, name,
+      productionId, name,
       category: typeof body.category === "string" ? body.category : "",
       subject: parsed.subject,
       location: typeof body.location === "string" ? body.location : "",

@@ -19,6 +19,10 @@
 import { randomBytes } from "node:crypto";
 import type { PoolClient } from "pg";
 import { getPool } from "../pg";
+import {
+  createMaterialNumberInTx,
+  createMaterialStockCodeInTx,
+} from "./material-identifier-db";
 import { subjectColumns, type TaskSubject } from "./task-poc";
 import {
   deriveMaterialSourceStatus, isMaterialSourceType, isMaterialTrackingStrategy,
@@ -29,7 +33,7 @@ import {
 export type Material = {
   id: string;
   productionId: string;
-  code: string;
+  number: string;
   name: string;
   category: string;
   trackingStrategy: MaterialTrackingStrategy;
@@ -60,7 +64,7 @@ export type Material = {
 
 export class MaterialError extends Error {
   constructor(readonly reason:
-    | "duplicate_code" | "bad_subject" | "bad_quantity" | "bad_transition" | "bad_use" | "reason_required"
+    | "bad_subject" | "bad_quantity" | "bad_transition" | "bad_use" | "reason_required"
     | "bad_tracking" | "bad_unit" | "bad_precision" | "tracking_has_history"
     | "has_history" | "negative_stock" | "bad_reversal" | "bad_return"
     | "return_required" | "return_overflow" | "inventory_requires_movement"
@@ -169,6 +173,7 @@ export type MaterialCheckout = {
 };
 
 const newLotId = () => `ml_${Date.now().toString(36)}${randomBytes(4).toString("hex")}`;
+const newMaterialId = () => `mt_${Date.now().toString(36)}${randomBytes(4).toString("hex")}`;
 const newMovementId = () => `mm_${Date.now().toString(36)}${randomBytes(4).toString("hex")}`;
 
 export type MaterialSourceInput = {
@@ -252,7 +257,7 @@ function normalizeMaterialSource(
 // ─── 台账 ─────────────────────────────────────────────────────────────────────
 
 const MATERIAL_SELECT = `
-  m.id, m.production_id, m.code, m.name, m.category,
+  m.id, m.production_id, material_number.display_value AS number, m.name, m.category,
   m.tracking_strategy, m.unit, m.quantity_scale,
   m.department_id, d.name AS department_name,
   m.group_id, g.name AS group_name,
@@ -263,7 +268,7 @@ const MATERIAL_SELECT = `
   m.notes, m.created_by, m.created_at, m.updated_at`;
 
 type MaterialRow = {
-  id: string; production_id: string; code: string; name: string; category: string;
+  id: string; production_id: string; number: string; name: string; category: string;
   tracking_strategy: MaterialTrackingStrategy; unit: string; quantity_scale: number;
   department_id: string | null; department_name: string | null;
   group_id: string | null; group_name: string | null;
@@ -282,7 +287,7 @@ function rowToMaterial(r: MaterialRow): Material {
   const exitedQuantity = Number(r.exited_quantity);
   const netConsumedQuantity = Number(r.net_consumed_quantity);
   return {
-    id: r.id, productionId: r.production_id, code: r.code, name: r.name, category: r.category,
+    id: r.id, productionId: r.production_id, number: r.number, name: r.name, category: r.category,
     trackingStrategy: r.tracking_strategy, unit: r.unit, quantityScale: r.quantity_scale,
     departmentId: r.department_id, departmentName: r.department_name,
     groupId: r.group_id, groupName: r.group_name,
@@ -302,6 +307,10 @@ function rowToMaterial(r: MaterialRow): Material {
 
 const MATERIAL_FROM = `
   FROM production_material m
+  JOIN production_material_identifier material_number
+    ON material_number.production_id = m.production_id
+   AND material_number.material_id = m.id
+   AND material_number.kind = 'material_number'
   LEFT JOIN production_dept d ON d.id = m.department_id
   LEFT JOIN event_group g     ON g.id = m.group_id
   LEFT JOIN LATERAL (
@@ -358,7 +367,7 @@ export async function listMaterials(productionId: string): Promise<Material[]> {
   const res = await getPool().query<MaterialRow>(
     `SELECT ${MATERIAL_SELECT} ${MATERIAL_FROM}
       WHERE m.production_id = $1
-      ORDER BY m.category, m.code`,
+      ORDER BY m.category, material_number.serial_number`,
     [productionId],
   );
   return res.rows.map(rowToMaterial);
@@ -375,7 +384,6 @@ export async function getMaterial(id: string, productionId: string): Promise<Mat
 
 export async function createMaterial(params: {
   productionId: string;
-  code: string;
   name: string;
   category?: string;
   trackingStrategy?: MaterialTrackingStrategy;
@@ -411,18 +419,22 @@ export async function createMaterial(params: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const materialId = newMaterialId();
     const res = await client.query<{ id: string }>(
       `INSERT INTO production_material
-         (production_id, code, name, category, tracking_strategy, unit, quantity_scale,
+         (id, production_id, name, category, tracking_strategy, unit, quantity_scale,
           department_id, group_id, notes, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING id`,
       [
-        params.productionId, params.code.trim(), params.name.trim(), params.category ?? "",
+        materialId, params.productionId, params.name.trim(), params.category ?? "",
         trackingStrategy, unit, quantityScale, cols.departmentId, cols.groupId,
         params.notes ?? "", params.createdBy,
       ],
     );
+    await createMaterialNumberInTx(client, {
+      productionId: params.productionId, materialId, createdBy: params.createdBy,
+    });
     const lotQuantities = trackingStrategy === "serialized"
       ? Array.from({ length: quantity }, () => 1)
       : [quantity];
@@ -448,8 +460,6 @@ export async function createMaterial(params: {
     return created;
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
-    if (e instanceof Error && e.message.includes("production_material_code_idx"))
-      throw new MaterialError("duplicate_code", "该编号在本项目里已存在");
     throw e;
   } finally {
     client.release();
@@ -467,7 +477,7 @@ export async function updateMaterial(
   id: string,
   productionId: string,
   fields: {
-    code?: string; name?: string; category?: string;
+    name?: string; category?: string;
     trackingStrategy?: MaterialTrackingStrategy; unit?: string; quantityScale?: number;
     location?: string; quantity?: number; notes?: string;
     subjectCols?: { departmentId: string | null; groupId: string | null } | null;
@@ -485,7 +495,6 @@ export async function updateMaterial(
 
   const sets: string[] = ["updated_at = now()"];
   const vals: unknown[] = [id, productionId];
-  if (fields.code     !== undefined) sets.push(`code      = $${vals.push(fields.code.trim())}`);
   if (fields.name     !== undefined) sets.push(`name      = $${vals.push(fields.name.trim())}`);
   if (fields.category !== undefined) sets.push(`category  = $${vals.push(fields.category)}`);
   if (fields.trackingStrategy !== undefined)
@@ -507,8 +516,6 @@ export async function updateMaterial(
     );
     if (!res.rows[0]) return null;
   } catch (e) {
-    if (e instanceof Error && e.message.includes("production_material_code_idx"))
-      throw new MaterialError("duplicate_code", "该编号在本项目里已存在");
     if (dbConstraint(e) === "material_tracking_has_history")
       throw new MaterialError("tracking_has_history", "已有库存事实后不能修改跟踪策略、单位或精度");
     if (dbConstraint(e) === "production_material_serialized_scale_check")
@@ -533,15 +540,17 @@ export async function deleteMaterial(id: string, productionId: string): Promise<
 
 type QueryClient = Pick<PoolClient, "query">;
 
-async function insertMaterialLot(client: QueryClient, params: {
+async function insertMaterialLot(client: PoolClient, params: {
   productionId: string; materialId: string; confirmedQuantity: number;
   location?: string; createdBy: string;
 } & MaterialSourceInput): Promise<MaterialStockLot> {
   if (!Number.isFinite(params.confirmedQuantity) || params.confirmedQuantity <= 0)
     throw new MaterialError("bad_quantity", "确认入库数量必须大于 0");
   try {
-    const material = await client.query<{ quantity_scale: number }>(
-      `SELECT quantity_scale FROM production_material
+    const material = await client.query<{
+      quantity_scale: number; tracking_strategy: MaterialTrackingStrategy;
+    }>(
+      `SELECT quantity_scale, tracking_strategy FROM production_material
         WHERE id=$1 AND production_id=$2`,
       [params.materialId, params.productionId],
     );
@@ -571,6 +580,13 @@ async function insertMaterialLot(client: QueryClient, params: {
         source.returnDueAt, source.returnDueQuantity],
     );
     const r = rows[0];
+    await createMaterialStockCodeInTx(client, {
+      productionId: params.productionId,
+      materialId: params.materialId,
+      lotId: r.id,
+      trackingStrategy: material.rows[0].tracking_strategy,
+      createdBy: params.createdBy,
+    });
     return {
       id: r.id, productionId: r.production_id, materialId: r.material_id,
       confirmedQuantity: Number(r.confirmed_quantity), location: r.location,
@@ -602,7 +618,18 @@ export async function createMaterialStockLot(params: {
   productionId: string; materialId: string; confirmedQuantity: number;
   location?: string; createdBy: string;
 } & MaterialSourceInput): Promise<MaterialStockLot> {
-  return insertMaterialLot(getPool(), params);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const lot = await insertMaterialLot(client, params);
+    await client.query("COMMIT");
+    return lot;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function insertMaterialMovement(
@@ -903,7 +930,7 @@ export async function listMaterialCheckouts(
            LEFT JOIN production_material_stock_movement rr ON rr.reverses_event_id = r.id
           WHERE r.return_of_movement_id = c.id
        ) ret ON true
-      WHERE ($1::uuid IS NULL OR l.material_id = $1) AND l.production_id = $2
+      WHERE ($1::text IS NULL OR l.material_id = $1) AND l.production_id = $2
         AND ($3::text IS NULL OR c.event_id=$3) AND ($4::text IS NULL OR c.task_id=$4)
       ORDER BY c.created_at, c.id`,
     [materialId, productionId, use?.eventId ?? null, use?.taskId ?? null],
