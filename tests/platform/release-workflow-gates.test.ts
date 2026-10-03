@@ -36,6 +36,26 @@ describe("发布门禁 workflow", () => {
     expect(buildJob).toContain("run: npm run build:worker\n");
   });
 
+  it("migration 护栏只检查 PR 从分叉点起引入的改动", () => {
+    const unitTestJob = section(ci, "  unit-test:", "  print-consistency:");
+    const migrationGuard = section(
+      unitTestJob,
+      "      - name: Forbid touching merged migrations",
+      "      - name: Apply base-branch migrations",
+    );
+
+    expect(migrationGuard).toContain(
+      "git diff origin/$GITHUB_BASE_REF...HEAD --name-only --diff-filter=MDR",
+    );
+    expect(migrationGuard).not.toContain(
+      "git diff origin/$GITHUB_BASE_REF HEAD --name-only --diff-filter=MDR",
+    );
+    expect(unitTestJob).toContain(
+      "uses: actions/checkout@v4.2.2\n        with:\n          fetch-depth: 0",
+    );
+    expect(unitTestJob).toContain('git fetch origin "$GITHUB_BASE_REF"');
+  });
+
   it("tag 在部署前完成全量验证", () => {
     const validationJob = section(deploy, "  tag-validation:", "  deploy:");
     const deployJob = section(deploy, "  deploy:");

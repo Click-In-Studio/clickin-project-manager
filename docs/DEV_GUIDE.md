@@ -484,7 +484,7 @@ ALTER TABLE production DROP COLUMN IF EXISTS new_col;
 
 ### 6.4 Migration 文件的修改规则
 
-Migration 文件一经合并到 `main`，**不得修改、改名或删除**，CI 硬拦（`Forbid touching merged migrations`）。dbmate 以文件名里的版本号记账，改内容不会触发重新执行，改动会静默丢失。
+Migration 文件一经合并到 `main`，**不得修改、改名或删除**，CI 硬拦（`Forbid touching merged migrations`）。护栏获取完整提交历史，以 PR 与目标分支的分叉点为基准，只检查 PR 自身引入的改动；目标分支在分叉后新增、旧分支尚未同步的 migration 不算 PR 删除。dbmate 以文件名里的版本号记账，改内容不会触发重新执行，改动会静默丢失。
 
 ```
 ❌ 错误：直接修改 db/migrations/20260919120000_add_something.sql
