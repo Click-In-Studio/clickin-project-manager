@@ -404,7 +404,7 @@ jobs:
                 echo "schema 已变化或没有上一 release；已移除 current，进程保持停止" >&2
               fi
               if [ "$STOP_FAILED" -ne 0 ]; then
-                echo "一个或多个数据库客户端进程停止或移除失败，必须立即人工核对 PM2" >&2
+                echo "::error::一个或多个数据库客户端进程停止或移除失败，必须立即人工核对 PM2" >&2
                 return 1
               fi
               return 0
