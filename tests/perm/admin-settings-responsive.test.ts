@@ -1,13 +1,50 @@
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
+import AdminSettingsClient, { type SettingsPerms } from "@/components/admin/AdminSettingsClient";
 
-const component = readFileSync("components/admin/AdminSettingsClient.tsx", "utf8");
 const css = readFileSync("components/admin/admin-settings.module.css", "utf8");
 const acceptanceWidths = [319, 375, 453, 768, 1280] as const;
+const allPerms: SettingsPerms = {
+  canRename: true,
+  canChangeAvatar: true,
+  canEditDescription: true,
+  canChangeType: true,
+  canChangeLanguage: true,
+  canArchive: true,
+  canDelete: true,
+  canImportScript: true,
+  canImportScenes: true,
+  canManageTags: true,
+  canToggleWatermark: true,
+  canEditAiInstructions: true,
+  canSeeAiUsage: true,
+  canSeeAiUsageMembers: true,
+};
 
 let browser: Browser;
 let page: Page;
+
+function renderSettings(perms: SettingsPerms = allPerms) {
+  const markup = renderToStaticMarkup(createElement(AdminSettingsClient, {
+    productionId: "test-production",
+    initialMeta: {
+      name: "一个很长的项目名称用于检查窄屏布局",
+      description: "项目简介",
+      avatarUrl: null,
+      type: "other",
+      typeLabel: "自定义类型名称",
+      language: "普通话",
+      watermarkEnabled: false,
+    },
+    isArchived: false,
+    perms,
+  }));
+  // 浏览器验收直接加载源码 CSS；将 Vite 生成的 `_local_hash` 类名还原为源码类名。
+  return markup.replace(/\b_([A-Za-z][A-Za-z0-9]*)_[a-z0-9]+\b/g, "$1");
+}
 
 async function mountBasicInfo(width: number) {
   await page.setViewportSize({ width, height: 900 });
@@ -23,63 +60,8 @@ async function mountBasicInfo(width: number) {
         --muted: #66736f;
       }
       ${css}
-      .fixtureInput {
-        min-width: 0;
-        flex: 1;
-        padding: 7px 11px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        font-size: 13px;
-      }
-      .fixtureButton {
-        flex-shrink: 0;
-        padding: 7px 14px;
-        border: 0;
-        border-radius: 7px;
-        font-size: 12px;
-        white-space: nowrap;
-      }
     </style>
-    <main class="pageContent">
-      <section class="card basicInfoCard">
-        <header class="cardHeader">基本信息</header>
-        <div class="settingRow basicInfoRow">
-          <div class="rowLabel"><strong>项目名称</strong><p>显示于项目列表、配置中心标题栏</p></div>
-          <div class="rowContent">
-            <div class="basicInfoInlineField">
-              <input class="fixtureInput basicInfoInput" value="一个很长的项目名称用于检查窄屏布局" />
-              <button class="fixtureButton basicInfoButton">保存</button>
-            </div>
-          </div>
-        </div>
-        <div class="settingRow basicInfoRow">
-          <div class="rowLabel"><strong>项目头像</strong><p>展示于项目列表和顶栏，JPG / PNG / WebP，最大 5 MB</p></div>
-          <div class="rowContent">
-            <div class="avatarField">
-              <div style="width:56px;height:56px;flex-shrink:0"></div>
-              <div class="avatarControls"><button class="fixtureButton basicInfoButton avatarButton">更换头像</button></div>
-            </div>
-          </div>
-        </div>
-        <div class="settingRow basicInfoRow">
-          <div class="rowLabel"><strong>项目简介</strong><p>在项目首页展示，简短介绍背景或特色</p></div>
-          <div class="rowContent">
-            <textarea class="fixtureInput basicInfoInput">项目简介</textarea>
-            <div class="basicInfoSaveRow"><button class="fixtureButton basicInfoButton">保存</button></div>
-          </div>
-        </div>
-        <div class="settingRow basicInfoRow">
-          <div class="rowLabel"><strong>项目类型</strong><p>未来将绑定模版与导航别称</p></div>
-          <div class="rowContent">
-            <div class="typeControls">
-              <button role="combobox" class="fixtureInput basicInfoSelect">其他</button>
-              <input class="fixtureInput basicInfoInput" value="自定义类型名称" />
-              <button class="fixtureButton basicInfoButton">保存</button>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
+    ${renderSettings()}
   `);
 }
 
@@ -93,15 +75,18 @@ afterAll(async () => {
 });
 
 describe("项目信息基本资料响应式布局", () => {
-  it("响应式样式只挂到基本信息行，保存与权限逻辑仍由原组件负责", () => {
-    expect(component).toContain('<Card title="基本信息" basicInfo>');
-    expect(component.match(/<Row[^>]*mobileStack/g)?.length).toBe(5);
-    expect(component).toContain("!perms.canRename");
-    expect(component).toContain("!perms.canChangeAvatar");
-    expect(component).toContain("!perms.canEditDescription");
-    expect(component).toContain("!perms.canChangeType");
-    expect(component).toContain("nameSave.save({ name: name.trim() })");
-    expect(component).toContain("typeSave.save({ type: type || null");
+  it("真实组件只给五个基本信息行挂移动布局，权限不足时仍显示原锁定提示", async () => {
+    await mountBasicInfo(375);
+    await expect.poll(() => page.locator(".basicInfoRow").count()).toBe(5);
+    expect(await page.locator(".settingRow:not(.basicInfoRow)").count()).toBeGreaterThan(0);
+
+    const lockedMarkup = renderSettings(Object.fromEntries(
+      Object.keys(allPerms).map((key) => [key, false]),
+    ) as SettingsPerms);
+    expect(lockedMarkup).toContain("需要 production:rename 权限");
+    expect(lockedMarkup).toContain("需要 production:change_avatar 权限");
+    expect(lockedMarkup).toContain("需要 production:edit_description 权限");
+    expect(lockedMarkup).toContain("需要 production:change_type 权限");
   });
 
   for (const width of acceptanceWidths) {
@@ -120,8 +105,9 @@ describe("项目信息基本资料响应式布局", () => {
             rowLeft: rowBounds.left,
             rowRight: rowBounds.right,
             fontSize: Number.parseFloat(getComputedStyle(control).fontSize),
+            visible: bounds.width > 0 && bounds.height > 0,
           };
-        });
+        }).filter((control) => control.visible);
         return {
           viewportWidth,
           documentWidth: document.documentElement.scrollWidth,
