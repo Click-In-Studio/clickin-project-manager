@@ -3,7 +3,8 @@ name: PR Automation
 on:
   pull_request:
     # labeled / unlabeled 是给 changelog-check 的：打上 chore 标签就该撤掉提醒
-    types: [opened, synchronize, labeled, unlabeled]
+    # edited / reopened 让 base 改回 main 或人工重开后，按当前 PR diff 重算提醒。
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -84,12 +85,12 @@ jobs:
               MARKER,
               '## ⚠️ 此 PR 包含数据库 Migration（dbmate）',
               '',
-              '以下文件将在合并后由 CD 以 `dbmate up` **自动执行**（单事务，失败整体回滚、部署中止）：',
+              '以下文件将在合并后由 CD 停止数据库客户端进程，再以 `dbmate up` **自动执行**（每支 migration 各自事务；失败后服务保持停止）：',
               fileList,
               '',
               '**Reviewer 检查项（DEV_GUIDE §6）：**',
               '- [ ] `-- migrate:up` / `-- migrate:down` 两段齐全；只加不删的写真 down，删列删表的 down 写 `RAISE EXCEPTION`',
-              '- [ ] expand / contract：本 PR 若删列 / 删表 / 改类型，当前线上（N-1）代码在新 schema 上仍能跑；删除应放在停用代码的下一个版本',
+              '- [ ] 旧代码路径与废弃 schema 同批删除；没有保留“SQL 不报错但写入不再进入新业务真相”的 N-1 假兼容路径',
               '- [ ] DDL 已同步进 `db/schema.sql`，且 `npm run db:check -- --update` 重生成了 `db/schema-fingerprint.txt`（CI 的 Schema consistency check 绿）',
               '- [ ] 破坏性 / 数据迁移带 `tests/migrations/<name>.migration.test.ts` 三层测试 + `<name>.snapshot.ts` hook（name = ' + names.map(n => '`' + n + '`').join(', ') + '）',
               '- [ ] 迁移里若引用权限键 / 角色名等应用词汇，与 `lib/` 常量一致',
@@ -290,7 +291,7 @@ jobs:
               '- All DB writes use transactions (`client.query("BEGIN")` ... `COMMIT`).',
               '- Schema changes (§6): one dbmate file `db/migrations/<YYYYMMDDHHMMSS>_<name>.sql` with `-- migrate:up` / `-- migrate:down`; the SAME PR must also edit `db/schema.sql` (hand-written full snapshot) and regenerate `db/schema-fingerprint.txt` via `npm run db:check -- --update` (never hand-edited). `down` is a real reverse only for add-column / add-table / add-index; drop / rename / type change / data backfill write `DO $$ BEGIN RAISE EXCEPTION \'irreversible\'; END $$;`. Migrations already merged to main are never modified, renamed or deleted. Nothing new goes into `db/legacy/`.',
               '- Destructive or data migrations (§6.6) ship `tests/migrations/<name>.migration.test.ts` (schema / integrity / invariance layers; invariance may be omitted only for a pure DROP with no data transformation) and, for data migrations, a `tests/migrations/<name>.snapshot.ts` hook that creates data unconditionally (a data predicate is always false on the empty CI db). Never turn an invariance test into an unconditional skip / todo.',
-              '- Expand / contract (§6.3): the version that stops reading or writing a column / table does not drop it; the drop lands in the next version, so N-1 code runs on the N schema.',
+              '- Destructive migrations (§6.3) use fail-closed deployment: CD stops all DB client processes before backup and migration, so retired code and schema may be removed together. Flag compatibility shims that merely keep old SQL successful while the new model ignores those writes. Zero-downtime expand/contract requires explicit semantic compatibility for old reads, old writes, new writes, and code rollback.',
               '- New tables use `TEXT PRIMARY KEY` with an app-side short id, not `UUID DEFAULT gen_random_uuid()` (§13.1).',
               '- No raw DDL (`ALTER TABLE`, `CREATE INDEX`, `DROP TABLE`) in `lib/` or `app/` -- DDL belongs in `db/migrations/` only.',
               '- New query functions go in `lib/<domain>/*-db.ts`, never into `lib/db.ts` (being split, #486). Every new exported function in `lib/<domain>/*-db.ts` must have a corresponding test in `tests/` — normally `tests/<domain>/`; a few finer lib/ domains fold into a coarser tests/ domain (`lib/editor/`→`tests/wiki/`, `lib/approval/` and `lib/production/`→`tests/ops/`), see §11.2.',
