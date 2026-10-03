@@ -515,7 +515,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                 </div>
                 <div className={styles.profileEditor}>
                   <div className={styles.formGrid}>
-                    <label>
+                    <label className={styles.profileNameField}>
                       <span>真名</span>
                       <input
                         type="text"
@@ -525,7 +525,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                         required
                       />
                     </label>
-                    <label>
+                    <label className={styles.compactField}>
                       <span>显示名</span>
                       <input
                         type="text"
@@ -534,17 +534,17 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                         placeholder="如：林淼 · 舞监"
                       />
                     </label>
-                    <label className={styles.fullField}>
+                    <label className={`${styles.fullField} ${styles.compactField}`}>
                       <span>简介</span>
                       <textarea
                         value={bio}
                         onChange={e => setBio(e.target.value)}
                         placeholder="制作人 / 舞台监督，负责跨部门排练协调与现场执行。"
-                        rows={3}
+                        rows={2}
                       />
                     </label>
                     {channelOptions.length > 0 && (
-                      <label>
+                      <label className={styles.compactField}>
                         <span>主要通道</span>
                         <OverflowSafeSelect
                           value={preferredPlatform}
@@ -749,7 +749,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                       </b>
                       <span>{em.platformUserId}</span>
                     </div>
-                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <div className={styles.identityActions}>
                       {!em.isPrimary && (
                         <button type="button" className={styles.outlineButton} style={{ fontSize: 12 }}
                           onClick={() => handleSetPrimary(em.id)}>
@@ -764,13 +764,13 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                   </div>
                 ))}
 
-                <div className={styles.row} style={{ flexWrap: "wrap" }}>
+                <div className={`${styles.row} ${styles.bindRow}`}>
                   <span className={styles.rowIcon}>+</span>
                   <div className={styles.rowInfo}>
                     <b>{hasEmail ? "绑定新邮箱" : "邮箱"}</b>
                     <span>{hasEmail ? "可绑定多个邮箱，均可用于登录" : "绑定后可使用邮箱验证码登录"}</span>
                   </div>
-                  <form onSubmit={handleBindEmail} className={styles.bindForm} style={{ margin: 0 }}>
+                  <form onSubmit={handleBindEmail} className={styles.bindForm}>
                     <input
                       type="email"
                       value={bindEmail}
@@ -876,9 +876,9 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                     <span>{planInfo ? planInfo.label : "普通用户（可参与受邀项目，暂不可创建项目）"}</span>
                   </div>
                 </div>
-                <form onSubmit={handleRedeem} className={styles.formGrid} style={{ marginTop: 14 }}>
-                  <label>
-                    兑换码
+                <form onSubmit={handleRedeem} className={styles.redeemForm}>
+                  <label className={styles.redeemField}>
+                    <span>兑换码</span>
                     <input
                       value={redeemCode}
                       onChange={e => setRedeemCode(e.target.value)}
@@ -886,13 +886,13 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                       disabled={redeemBusy}
                     />
                   </label>
-                  <div>
+                  <div className={styles.redeemAction}>
                     <button type="submit" className={styles.primaryButton} disabled={redeemBusy || !redeemCode.trim()}>
                       {redeemBusy ? "兑换中…" : "兑换"}
                     </button>
                   </div>
                   {redeemMsg && (
-                    <p style={{ margin: 0, fontSize: 12, color: redeemMsg.ok ? "var(--ok, #2c7a4b)" : "var(--danger, #b3261e)" }}>
+                    <p className={`${styles.redeemMessage} ${redeemMsg.ok ? styles.statusOk : styles.statusErr}`}>
                       {redeemMsg.text}
                     </p>
                   )}

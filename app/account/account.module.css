@@ -288,6 +288,11 @@
   gap: 7px;
 }
 
+.profileNameField,
+.compactField {
+  min-width: 0;
+}
+
 .formGrid label > span {
   font-size: 11px;
   font-weight: 700;
@@ -521,6 +526,7 @@
 
 .row > .rowInfo {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
@@ -761,13 +767,15 @@
 }
 
 .bindForm {
+  min-width: 0;
   display: flex;
   gap: 8px;
-  margin-top: 14px;
+  margin: 0;
 }
 
 .bindInput {
   flex: 1;
+  min-width: 0;
   min-height: 40px;
   padding: 9px 12px;
   border: 1px solid #ced8d5;
@@ -784,7 +792,67 @@
   box-shadow: 0 0 0 3px rgba(47,102,112,.1);
 }
 
+.bindRow {
+  flex-wrap: wrap;
+}
+
+.identityActions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.redeemForm {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.redeemField {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.redeemField > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.redeemField input {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px solid #ced8d5;
+  border-radius: 8px;
+  box-sizing: border-box;
+  background: #fbfcfa;
+  color: var(--ink);
+  font-size: 13px;
+  outline: 0;
+}
+
+.redeemField input:focus {
+  border-color: var(--script);
+  box-shadow: 0 0 0 3px rgba(47,102,112,.1);
+}
+
+.redeemMessage {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+}
+
 @media (max-width: 820px) {
+  .shell {
+    scroll-padding-bottom: calc(40vh + env(safe-area-inset-bottom));
+  }
+
   .topbar {
     grid-template-columns: 1fr auto;
   }
@@ -812,20 +880,29 @@
   .sidebarNav {
     padding: 4px;
     display: flex;
-    overflow-x: auto;
     border: 1px solid var(--line);
     border-radius: 10px;
     background: var(--surface);
   }
 
   .sidebarNav > button {
-    width: auto;
-    flex: 0 0 auto;
+    width: 0;
+    min-width: 0;
+    flex: 1 1 0;
+    justify-content: center;
     white-space: nowrap;
   }
 
   .navActive {
     box-shadow: none !important;
+  }
+
+  .pageHeader {
+    display: none;
+  }
+
+  .card:first-child {
+    margin-top: 0;
   }
 }
 
@@ -844,11 +921,155 @@
     grid-template-columns: 1fr;
   }
 
+  .layout {
+    width: calc(100% - 20px);
+    padding-top: 14px;
+    padding-bottom: calc(40px + env(safe-area-inset-bottom));
+    gap: 12px;
+  }
+
+  .sidebarNav > button {
+    min-height: 38px;
+    padding: 7px 6px;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .card {
+    margin-top: 12px;
+    padding: 16px;
+  }
+
+  .cardTitle {
+    margin-bottom: 14px;
+  }
+
+  .cardTitle h2 {
+    font-size: 17px;
+  }
+
+  .cardTitle p {
+    margin-top: 4px;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
   .avatarEditor {
     grid-row: 1;
+    flex-direction: row;
+    justify-content: center;
+    gap: 8px;
+    text-align: left;
+  }
+
+  .avatarEditor > span,
+  .avatarImg {
+    width: 68px;
+    height: 68px;
+    border-width: 4px;
+  }
+
+  .avatarEditor > span {
+    font-size: 26px;
+  }
+
+  .avatarHint {
+    font-size: 10px;
+    line-height: 1.35;
+    text-align: left;
+  }
+
+  .formGrid {
+    gap: 12px;
+  }
+
+  .profileNameField {
+    margin-bottom: 4px;
+  }
+
+  .compactField {
+    gap: 4px !important;
+  }
+
+  .compactField input,
+  .compactField textarea,
+  .compactField [role="combobox"] {
+    min-height: 36px;
+    padding: 6px 10px;
+    line-height: 1.35;
+  }
+
+  .compactField textarea {
+    min-height: 58px;
   }
 
   .fullField {
     grid-column: auto;
+  }
+
+  .actions {
+    margin-top: 12px;
+  }
+
+  .row {
+    min-height: 56px;
+    padding: 10px 0;
+    gap: 10px;
+  }
+
+  .bindRow {
+    row-gap: 8px;
+  }
+
+  .bindForm {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+  }
+
+  .bindInput {
+    min-height: 36px;
+    padding: 6px 9px;
+    line-height: 1.35;
+  }
+
+  .bindForm .outlineButton {
+    padding: 7px 10px;
+  }
+
+  .identityActions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .redeemForm {
+    margin-top: 10px;
+    gap: 6px;
+  }
+
+  .redeemField {
+    gap: 4px;
+  }
+
+  .redeemField input {
+    min-height: 36px;
+    padding: 6px 9px;
+    line-height: 1.35;
+  }
+
+  .redeemAction .primaryButton {
+    min-width: 72px;
+    padding: 8px 12px;
+  }
+
+  .prefRow {
+    padding: 10px 0;
+  }
+}
+
+@media (max-width: 360px) {
+  .sidebarNav > button > span {
+    display: none;
   }
 }
