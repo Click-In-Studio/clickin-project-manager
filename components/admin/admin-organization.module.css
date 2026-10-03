@@ -1,0 +1,206 @@
+.panel {
+  height: calc(100vh - 320px);
+  min-height: 460px;
+}
+
+.mobileWorkspace {
+  min-width: 0;
+}
+
+.mobileStepHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -14px -14px 16px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 14px;
+  background: var(--surface);
+}
+
+.mobileBackButton {
+  min-height: 40px;
+  border: 0;
+  padding: 8px 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mobileDetail {
+  min-width: 0;
+}
+
+.mobileSearch {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 10px 11px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.mobileGroup + .mobileGroup {
+  margin-top: 16px;
+}
+
+.mobileGroupLabel {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.mobileDeptTree {
+  display: flex;
+  flex-direction: column;
+}
+
+.mobileListRow {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 54px;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 9px 4px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.mobileListRow:first-of-type {
+  border-top: 1px solid var(--line);
+}
+
+.mobileListRow:focus-visible {
+  outline: 2px solid var(--stage);
+  outline-offset: -2px;
+}
+
+.mobileListCopy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mobileListCopy b,
+.mobileListCopy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobileListCopy b {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.mobileListCopy b[data-inactive="true"] {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.mobileListCopy small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.mobilePoc {
+  flex-shrink: 0;
+  color: var(--stage);
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mobileChevron {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.mobileTreeMark {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.mobileEmpty {
+  margin: 0;
+  padding: 32px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.detailTitle,
+.detailTitleRow,
+.deptMemberRow {
+  min-width: 0;
+}
+
+.renameInput {
+  min-width: 0;
+}
+
+.deptMemberName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .panel {
+    height: auto;
+    min-height: 0;
+    padding: 14px !important;
+  }
+
+  .detailIdentity,
+  .detailTitle,
+  .detailTitleRow,
+  .deptMemberRow {
+    flex-wrap: wrap;
+  }
+
+  .detailTitle {
+    row-gap: 6px !important;
+  }
+
+  .renameInput {
+    width: 100%;
+    flex-basis: 100%;
+    box-sizing: border-box;
+  }
+
+  .deptMemberRow > button {
+    min-height: 34px;
+  }
+}
+
+@media (max-width: 360px) {
+  .mobileListRow {
+    gap: 8px;
+    padding-inline: 2px;
+  }
+
+  .mobilePoc {
+    max-width: 34px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}

@@ -7,14 +7,14 @@ who: 有成员管理权限的管理员
 tier: all
 platform: [desktop, mobile]
 related: [admin/org/invite, admin/org/departments, start/join/leave-project]
-updated: 2026-09-18
+updated: 2026-10-03
 ---
 
 ## 这是什么
 
 「配置中心 → 成员与部门」有两个页签：**成员**和**部门**。本页讲成员。顶部四个数字：项目成员（含席位余量，「9 / 10 · 余 1 席」）、部门、用户组、POC。
 
-左侧按部门列出所有成员，点一个人右侧是详情。
+电脑端左侧按部门列出所有成员，点一个人后在右侧查看详情。手机端先显示成员列表，点成员进入详情；点顶部的「返回成员列表」继续选择其他人。
 
 ![成员与部门](/manual/admin/organization.png)
 
