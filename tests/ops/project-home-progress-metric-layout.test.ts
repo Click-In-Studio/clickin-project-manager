@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 
 const homeCss = readFileSync(path.resolve(__dirname, "../../components/ops/home.module.css"), "utf8");
-const viewportWidths = [319, 360, 571, 1118];
+const viewportWidths = [319, 360, 385, 571, 765, 1118];
 
 let browser: Browser;
 let page: Page;
@@ -177,5 +177,36 @@ describe("项目首页进展指标卡真实浏览器布局", () => {
     expect(desktop.height).toBeGreaterThan(mobile.height);
     expect(desktop.scrollHeight).toBeLessThanOrEqual(desktop.height);
     expect(Number.parseFloat(desktop.declaredHeight)).toBeCloseTo(desktop.height, 2);
+  });
+
+  it("765px 下指标区收至原来的约五分之七，Hero 收至原来的约八分之七", async () => {
+    await mountProgressMetrics(765);
+    const metrics = await page.locator(".progressHero").evaluate(hero => {
+      const heroStyle = getComputedStyle(hero);
+      const heroBounds = hero.getBoundingClientRect();
+      const grid = hero.querySelector<HTMLElement>(".progressHeroMetrics")!;
+      const gridBounds = grid.getBoundingClientRect();
+      const firstCard = grid.querySelector<HTMLElement>(".progressMetricCard")!;
+      const number = firstCard.querySelector<HTMLElement>("strong")!;
+      const label = firstCard.querySelector<HTMLElement>(".progressMetricLabel")!;
+      const legacyInnerWidth = heroBounds.width
+        - Number.parseFloat(heroStyle.paddingLeft)
+        - Number.parseFloat(heroStyle.paddingRight)
+        - 20;
+      const legacyGridWidth = legacyInnerWidth * 1.3 / 2;
+
+      return {
+        heroHeight: heroBounds.height,
+        gridWidth: gridBounds.width,
+        legacyGridWidth,
+        numberSize: Number.parseFloat(getComputedStyle(number).fontSize),
+        labelSize: Number.parseFloat(getComputedStyle(label).fontSize),
+      };
+    });
+
+    expect(metrics.gridWidth / metrics.legacyGridWidth).toBeCloseTo(5 / 7, 1);
+    expect(metrics.heroHeight / 200).toBeCloseTo(7 / 8, 2);
+    expect(metrics.numberSize).toBeGreaterThan(28);
+    expect(metrics.labelSize).toBeGreaterThan(10);
   });
 });
