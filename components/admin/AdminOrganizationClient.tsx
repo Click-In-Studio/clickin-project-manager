@@ -17,6 +17,7 @@ import type { MemberTag } from "@/lib/perm/member-db";
 import type { MemberStatus, MemberStatusSource } from "@/lib/perm/member-status-shared";
 import { memberStatusLabel } from "@/lib/perm/member-status-shared";
 import { isInactiveMember } from "@/lib/perm/member-status-shared";
+import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
 
 type Member = {
   userId: string;
@@ -268,33 +269,22 @@ export default function AdminOrganizationClient({
       />
 
       {/* 摘要 */}
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 1,
-        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
-        background: "var(--line)", marginBottom: 18,
-      }}>
-        {[
-          [
-            `${seats.used} / ${seats.limit}`,
-            "项目成员",
-            seatTileHint ?? (members.some(m => m.status !== "active")
+      <AdminMetricGrid
+        columns={4}
+        items={[
+          {
+            value: `${seats.used} / ${seats.limit}`,
+            label: "项目成员",
+            hint: seatTileHint ?? (members.some(m => m.status !== "active")
               ? `含 ${members.filter(m => m.status !== "active").length} 名不在职`
               : "全部在职"),
-            SEAT_TONE_COLOR[seatTone(seats)],
-          ],
-          [String(depts.filter(d => d.kind === "dept").length), "部门", "组织架构"],
-          [String(depts.filter(d => d.kind === "group").length), "用户组", "仅供选人"],
-          [String(pocCount), "POC", "部门联络人次"],
-        ].map(([num, label, hint, hintColor]) => (
-          <div key={label} style={{ minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13, background: "var(--surface)" }}>
-            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)", whiteSpace: "nowrap" }}>{num}</span>
-            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
-              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
-              <small style={{ marginTop: 3, color: hintColor ?? "var(--muted)", fontSize: 9 }}>{hint}</small>
-            </p>
-          </div>
-        ))}
-      </div>
+            hintColor: SEAT_TONE_COLOR[seatTone(seats)],
+          },
+          { value: String(depts.filter(d => d.kind === "dept").length), label: "部门", hint: "组织架构" },
+          { value: String(depts.filter(d => d.kind === "group").length), label: "用户组", hint: "仅供选人" },
+          { value: String(pocCount), label: "POC", hint: "部门联络人次" },
+        ]}
+      />
 
       {/* segmented */}
       <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface-2)", borderRadius: 10, width: 280, marginBottom: 14 }}>

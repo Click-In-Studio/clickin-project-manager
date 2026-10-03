@@ -5,9 +5,9 @@ summary: 项目里的隐私资产（不对全员列出的文件）都被授权�
 routes: [admin/asset-review]
 who: 项目所有者与制作人
 tier: all
-platform: [desktop]
+platform: [desktop, mobile]
 related: [production/assets/upload, production/wiki/sharing, admin/compliance/audit]
-updated: 2026-09-18
+updated: 2026-10-03
 ---
 
 ## 这是什么
@@ -22,6 +22,8 @@ updated: 2026-09-18
 1. 「配置中心 → 数字资产审查」。
 2. 逐个看资产下面的授权：给了谁、什么来源（审批 / 直接授予 / 自确认 / 指派）。
 3. 不该有的点「撤销」→ 确认。
+
+> [!📱] 最窄的手机窗口里，隐私资产、实例授权和零触达三项摘要改为单列。
 
 ## 注意事项
 

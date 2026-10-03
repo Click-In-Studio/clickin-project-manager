@@ -5,9 +5,9 @@ summary: 二十道设置题：事件创建者能不能发布、部门收到任�
 routes: [admin/policies]
 who: 项目所有者与制作人（专业档项目）
 tier: pro
-platform: [desktop]
+platform: [desktop, mobile]
 related: [admin/security/permission-center, production/events/events-overview, production/tasks/tasks]
-updated: 2026-09-18
+updated: 2026-10-03
 ---
 
 ## 这是什么
@@ -30,6 +30,8 @@ updated: 2026-09-18
 - **素材与对外**（4 题）：是否允许生成对外分享链接、上传者的处置权、素材能否免挂载全组可见、文档能否设为全项目公开。
 
 改完「保存」，页面提示「已偏离默认」的项数。
+
+> [!📱] 最窄的手机窗口里，顶部摘要改为单列；「常用设置」「高级（逐项）」「改动记录」会收紧间距并保持在一行内。
 
 ### 高级（逐项）
 

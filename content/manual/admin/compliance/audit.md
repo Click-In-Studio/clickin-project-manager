@@ -5,9 +5,9 @@ summary: 每一条授权的来龙去脉：给了谁、什么权限、谁给的�
 routes: [admin/audit]
 who: 项目所有者与制作人
 tier: all
-platform: [desktop]
+platform: [desktop, mobile]
 related: [admin/security/permission-center, admin/approval/access-requests]
-updated: 2026-09-26
+updated: 2026-10-03
 ---
 
 ## 这是什么
@@ -30,6 +30,8 @@ updated: 2026-09-26
 - 每行末尾「撤销」——立即收回这一条。被撤销的行保留，状态变「已撤销」。
 - 删除资产后，该资产的单独授权会变为「已撤销」，历史流水仍可查看。项目范围的授权不受影响。
 - 分页浏览；顶部数字是流水总数和当前页内的有效 / 撤销数。
+
+> [!📱] 最窄的手机窗口里，这三项顶部摘要改为单列，数字、标题和说明保持横向阅读。
 
 ## 注意事项
 

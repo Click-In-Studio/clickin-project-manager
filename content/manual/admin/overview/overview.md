@@ -7,7 +7,7 @@ who: 项目所有者、制作人，以及被授了管理面权限的成员
 tier: all
 platform: [desktop, mobile]
 related: [admin/settings/producer, start/join/join-project]
-updated: 2026-09-27
+updated: 2026-10-03
 ---
 
 ## 这是什么
@@ -23,6 +23,8 @@ updated: 2026-09-27
 ### 项目概览
 
 第一页是概览：成员数、部门数、角色数、里程碑数、公告数，下面是项目信息（名称、所有者、类型、语言、创建时间、状态、简介）。
+
+> [!📱] 手机上这五项摘要仍按两栏排列，卡片会收紧上下留白，向下滚动即可看全。
 
 ### 菜单
 
