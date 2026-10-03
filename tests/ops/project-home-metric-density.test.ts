@@ -172,6 +172,21 @@ describe("项目首页指标卡密度与配色", () => {
     expect(declarations(css, ".progressMetricDisclosure").position).toBe("static");
   });
 
+  it("681 至 900 像素下收紧 Hero 与指标区，同时放大指标文字", () => {
+    const tablet = blockAfter(css, "@media (min-width: 681px) and (max-width: 900px)");
+    const hero = declarations(tablet, ".progressHero");
+    const card = declarations(tablet, ".progressMetricCard");
+    const strong = declarations(tablet, ".progressMetricCard strong");
+    const label = declarations(tablet, ".progressMetricLabel");
+
+    expect(px(hero["min-height"])).toBe(175);
+    expect(hero["grid-template-columns"]).toBe("minmax(0, 1fr) minmax(0, 300px)");
+    expect(px(hero.gap)).toBe(18);
+    expect(px(card["min-height"])).toBe(100);
+    expect(px(strong["font-size"])).toBe(32);
+    expect(px(label["font-size"])).toBe(11);
+  });
+
   it("571 与 1118 像素下卡片依内容伸展而不是固定高度", () => {
     const desktopCard = declarations(css, ".progressMetricCard");
     const mobileCard = declarations(blockAfter(css, "@media (max-width: 680px)"), ".progressMetricCard");

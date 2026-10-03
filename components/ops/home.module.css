@@ -736,6 +736,25 @@ button.progressMetricLabel:focus-visible::before {
   margin-top: 5px;
 }
 
+@media (min-width: 681px) and (max-width: 900px) {
+  .progressHero {
+    min-height: 175px;
+    padding-block: 20px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 300px);
+    gap: 18px;
+  }
+  .progressMetricCard {
+    min-height: 100px;
+    padding: 12px 10px;
+  }
+  .progressMetricCard strong {
+    font-size: 32px;
+  }
+  .progressMetricLabel {
+    font-size: 11px;
+  }
+}
+
 @media (max-width: 680px) {
   .workspace {
     padding: 20px 14px 80px;
