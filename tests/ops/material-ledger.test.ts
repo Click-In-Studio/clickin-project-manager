@@ -21,7 +21,7 @@ import {
   appendMaterialStockMovement, createMaterialStockLot,
   createMaterial, deleteMaterial,
   getMaterial, listMaterials, listMaterialStockLots,
-  listMaterialStockMovements, MaterialError, updateMaterial,
+  listMaterialStockMovements, updateMaterial,
 } from "@/lib/ops/material-db";
 
 let prodId: string, otherProdId: string;

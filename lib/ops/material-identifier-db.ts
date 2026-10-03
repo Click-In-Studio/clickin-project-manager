@@ -228,7 +228,17 @@ export async function retireMaterialIdentifier(params: {
                 retired_reason, created_at`,
     [params.identifierId, params.productionId, params.retiredBy, params.reason.trim()],
   );
-  if (!rows[0]) throw new MaterialIdentifierError("not_found", "标识不存在、已失效或不可失效");
+  if (!rows[0]) {
+    const existing = await getPool().query<{ kind: MaterialIdentifierKind; is_active: boolean }>(
+      `SELECT kind, is_active FROM production_material_identifier
+        WHERE id=$1 AND production_id=$2`,
+      [params.identifierId, params.productionId],
+    );
+    if (!existing.rows[0]) throw new MaterialIdentifierError("not_found", "标识不存在");
+    if (existing.rows[0].kind === "material_number")
+      throw new MaterialIdentifierError("bad_code", "物料编号不可失效");
+    throw new MaterialIdentifierError("inactive", "标识已经失效");
+  }
   return rowToIdentifier(rows[0]);
 }
 
@@ -257,13 +267,15 @@ export async function replaceMaterialStockIdentifier(params: {
            ON material.id=identifier.material_id
           AND material.production_id=identifier.production_id
         WHERE identifier.production_id=$1 AND identifier.id=$2
-          AND identifier.kind='internal_code' AND identifier.is_active
         FOR UPDATE OF identifier`,
       [params.productionId, params.identifierId],
     );
     const row = current.rows[0];
-    if (!row || !row.lot_id)
-      throw new MaterialIdentifierError("not_found", "有效内部码不存在");
+    if (!row) throw new MaterialIdentifierError("not_found", "标识不存在");
+    if (row.kind !== "internal_code" || !row.lot_id)
+      throw new MaterialIdentifierError("bad_code", "只有内部码可以换码");
+    if (!row.is_active)
+      throw new MaterialIdentifierError("inactive", "内部码已经失效");
     const retired = await client.query<IdentifierRow>(
       `UPDATE production_material_identifier
           SET is_active=false, retired_at=now(), retired_by=$3, retired_reason=$4

@@ -14,6 +14,12 @@ import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string; identifierId: string }> };
 
+function identifierErrorResponse(error: MaterialIdentifierError) {
+  const status = error.reason === "bad_code" ? 400
+    : error.reason === "not_found" ? 404 : 409;
+  return Response.json({ error: error.message, reason: error.reason }, { status });
+}
+
 async function writableContext(req: NextRequest, ctx: Ctx) {
   const { id: productionId, identifierId } = await ctx.params;
   const session = getSession(req.cookies);
@@ -47,8 +53,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
       reason: parsed.value.reason,
     }) });
   } catch (error) {
-    if (error instanceof MaterialIdentifierError)
-      return Response.json({ error: error.message, reason: error.reason }, { status: 400 });
+    if (error instanceof MaterialIdentifierError) return identifierErrorResponse(error);
     throw error;
   }
 }
@@ -68,8 +73,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       reason: parsed.value.reason,
     }));
   } catch (error) {
-    if (error instanceof MaterialIdentifierError)
-      return Response.json({ error: error.message, reason: error.reason }, { status: 400 });
+    if (error instanceof MaterialIdentifierError) return identifierErrorResponse(error);
     throw error;
   }
 }

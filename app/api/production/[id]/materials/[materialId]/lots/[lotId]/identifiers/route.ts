@@ -66,8 +66,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     });
     return Response.json({ identifier }, { status: 201 });
   } catch (error) {
-    if (error instanceof MaterialIdentifierError)
-      return Response.json({ error: error.message, reason: error.reason }, { status: 409 });
+    if (error instanceof MaterialIdentifierError) {
+      const status = error.reason === "bad_code" ? 400
+        : error.reason === "not_found" ? 404 : 409;
+      return Response.json({ error: error.message, reason: error.reason }, { status });
+    }
     throw error;
   }
 }

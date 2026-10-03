@@ -156,6 +156,10 @@ describe("物料标识 API 权限与结果", () => {
       request("http://localhost/api/identifier", "DELETE", { reason: "换码" }, ownerId),
       retireCtx,
     ))!.status).toBe(200);
+    expect((await retireIdentifier(
+      request("http://localhost/api/identifier", "DELETE", { reason: "重复失效" }, ownerId),
+      retireCtx,
+    ))!.status).toBe(409);
     const inactive = await resolveIdentifier(
       request("http://localhost/api/resolve", "POST", { code: value }, viewerId),
       productionCtx(),
