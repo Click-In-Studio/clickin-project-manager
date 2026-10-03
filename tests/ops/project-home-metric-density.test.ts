@@ -88,6 +88,17 @@ describe("项目首页指标卡密度与配色", () => {
     expect(disclosure).toContain('className={styles.progressMetricLabel}');
   });
 
+  it("项目首页只保留指标本身，并维持通知与 Cue 的整卡跳转", () => {
+    expect(productionHome).not.toContain("需要你的确认");
+    expect(productionHome).not.toContain("有待处理风险");
+    expect(productionHome).toContain("待处理通知");
+    expect(productionHome).toContain("Cue 风险提示");
+    expect(productionHome).toContain('href={`/production/${productionId}/notifications`}');
+    expect(productionHome).toContain('href={`/production/${productionId}/cues`}');
+    expect(productionHome).toContain("<MetricCardDisclosure label={milestoneSubLabel} />");
+    expect(productionHome).toContain("<small>临近节点</small>");
+  });
+
   it("三种卡面都以高不透明度浅色为主，并达到正文对比度基线", () => {
     const heroDarkEdge = rgba("#223e3d");
     const card = declarations(css, ".progressMetricCard");
@@ -116,28 +127,58 @@ describe("项目首页指标卡密度与配色", () => {
   });
 
   it("手机宽度保留三列并收紧卡片内部密度", () => {
+    const desktopGrid = declarations(css, ".progressHeroMetrics");
+    const desktopCard = declarations(css, ".progressMetricCard");
+    const desktopStrong = declarations(css, ".progressMetricCard strong");
     const mobile = blockAfter(css, "@media (max-width: 680px)");
 
     const grid = declarations(mobile, ".progressHeroMetrics");
     const card = declarations(mobile, ".progressMetricCard");
     const label = declarations(mobile, ".progressMetricLabel");
 
+    expect(desktopGrid["grid-template-columns"]).toBe("repeat(3, minmax(0, 1fr))");
+    expect(desktopGrid["align-items"]).toBe("stretch");
+    expect(desktopCard.height).toBeUndefined();
+    expect(desktopCard["min-height"]).toContain("clamp(");
+    expect(desktopCard.padding).toContain("clamp(");
+    expect(desktopStrong["font-size"]).toContain("clamp(");
     expect(grid["grid-template-columns"]).toBe("repeat(3, minmax(0, 1fr))");
     expect(px(grid.gap)).toBeLessThanOrEqual(6);
     expect(px(card["min-height"])).toBeGreaterThanOrEqual(44);
     expect(px(card["min-height"])).toBeLessThanOrEqual(80);
     expect(card.padding.split(" ").map(px).every(value => value <= 9)).toBe(true);
-    expect(px(label["margin-top"])).toBeLessThanOrEqual(4);
+    expect(label["font-size"]).toContain("clamp(");
   });
 
-  it("极窄屏继续释放水平空间，同时保持整卡点击高度", () => {
+  it("319 与 360 像素下同步收紧容器、卡片和字号，并保持整卡点击", () => {
     const narrow = blockAfter(css, "@media (max-width: 360px)");
 
     const hero = declarations(narrow, ".progressHero");
+    const grid = declarations(narrow, ".progressHeroMetrics");
     const card = declarations(narrow, ".progressMetricCard");
+    const strong = declarations(narrow, ".progressMetricCard strong");
+    const label = declarations(narrow, ".progressMetricLabel");
 
-    expect(px(hero.padding)).toBeLessThanOrEqual(16);
+    expect(px(hero.padding)).toBeLessThanOrEqual(14);
+    expect(px(hero["border-radius"])).toBeLessThanOrEqual(12);
+    expect(px(grid.gap)).toBeLessThanOrEqual(4);
     expect(px(card["min-height"])).toBeGreaterThanOrEqual(44);
-    expect(card.padding.split(" ").map(px).every(value => value <= 8)).toBe(true);
+    expect(card.padding.split(" ").map(px).every(value => value <= 7)).toBe(true);
+    expect(px(card["border-radius"])).toBeLessThanOrEqual(8);
+    expect(strong["font-size"]).toContain("clamp(");
+    expect(label["font-size"]).toContain("clamp(");
+    expect(css).toContain("button.progressMetricLabel::before");
+    expect(declarations(css, "button.progressMetricLabel::before").inset).toBe("0");
+    expect(declarations(css, ".progressMetricDisclosure").position).toBe("static");
+  });
+
+  it("571 与 1118 像素下卡片依内容伸展而不是固定高度", () => {
+    const desktopCard = declarations(css, ".progressMetricCard");
+    const mobileCard = declarations(blockAfter(css, "@media (max-width: 680px)"), ".progressMetricCard");
+
+    expect(desktopCard.height).toBeUndefined();
+    expect(mobileCard.height).toBeUndefined();
+    expect(desktopCard["justify-content"]).toBe("center");
+    expect(px(mobileCard["min-height"])).toBeLessThan(92);
   });
 });

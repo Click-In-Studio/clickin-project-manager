@@ -19,7 +19,8 @@
 - 所有 schema 变更走 `db/migrations/<YYYYMMDDHHMMSS>_<snake_name>.sql`（`npm run db -- new <name>`），`-- migrate:up` / `-- migrate:down` 两段。
 - **同一 PR 必须同步**：`db/schema.sql`（手写完整快照）+ `npm run db:check -- --update` 重生成的 `db/schema-fingerprint.txt`。CI 三方比对不等即红。
 - `migrate:down`：只加列 / 加表 / 加索引写真 down；删列 / 删表 / 改类型 / 数据回填写 `DO $$ BEGIN RAISE EXCEPTION 'irreversible'; END $$;`。
-- **expand / contract**：代码停止读写某列的版本不删列，删列放再下一个版本；N-1 代码必须能跑在 N schema 上。
+- **migration 默认停机发布**：CD 只要发现 pending migration，就先停止 Web、Agent runner 与 heavy worker，再备份、迁移、切代码并启动；因此停用旧路径与删列 / 删表可在同一版本完成，不为 N-1 保留无业务语义的旧写路径。
+- 只有明确立项做零停机发布时才用 expand / contract；兼容证明必须覆盖旧读、旧写、新写与代码回滚后的**业务语义**，仅证明旧 SQL 不报错不算兼容。
 - 破坏性 / 数据迁移必须附 `tests/migrations/<name>.migration.test.ts`（schema / integrity / invariance 三层）+ `<name>.snapshot.ts` hook；`global-setup` 按名自动发现，**不要改 global-setup**；数据回填的 hook 无条件造数（数据谓词在空库恒 false 会静默跳过）。
 - 新表 PK 一律 `TEXT PRIMARY KEY` + 应用侧 short id（带随机尾）；不再用 `UUID DEFAULT gen_random_uuid()`（§13.1）。
 - ❌ 修改 / 改名 / 删除已合并到 main 的 migration（CI 硬拦；修正另开一支）

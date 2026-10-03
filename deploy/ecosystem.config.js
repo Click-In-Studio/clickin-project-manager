@@ -1,5 +1,5 @@
-// pm2 进程定义——CD 每次发布把本文件复制到服务器 shared/ecosystem.config.js 后
-// `pm2 reload <file> --update-env`（deploy.yml「Activate release」）。
+// pm2 进程定义——CD 把本文件随 release 上传并用于 `pm2 startOrReload`；三个入口
+// 全部健康后才覆盖服务器 shared/ecosystem.config.js（deploy.yml「Activate release」）。
 // 之前这份配置只存在于服务器上（手工维护）；收进仓库后增删进程走 PR。
 //
 // 开关类 env（AGENT_RUNTIME / AGENT_RUNNER_URL / 各类 key）一律放 shared/.env.local，

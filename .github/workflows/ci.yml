@@ -3,6 +3,9 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    # 依赖 PR 的前序分支合并并删除后，GitHub 会把后续 PR 的 base 改回 main；
+    # base 变化属于 edited，必须重新验证新的 main merge ref。
+    types: [opened, synchronize, reopened, edited]
 
 jobs:
   lint-and-typecheck:
@@ -88,6 +91,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4.4.0
         with:
@@ -107,7 +112,7 @@ jobs:
       #
       # NORMAL PATH：空库 dbmate up 到最新（只有 baseline + 已合并的几支，秒级）。
       - name: Fetch base branch
-        run: git fetch --depth=1 origin $GITHUB_BASE_REF
+        run: git fetch origin "$GITHUB_BASE_REF"
 
       - name: Detect migrations in this PR
         id: migrations
@@ -129,9 +134,11 @@ jobs:
 
       # 已合并的 migration 文件一经上 main 不得改动（dbmate 只按文件名记账，改内容
       # 不会重跑，改动会静默丢失；也是 dbmate 没有 checksum 的补位）。改名 / 删除同禁。
+      # 用三点 diff 只看 PR 从分叉点起引入的改动，避免把 base 后续新增、旧分支尚未
+      # 同步的 migration 误判为 PR 删除。
       - name: Forbid touching merged migrations
         run: |
-          TOUCHED=$(git diff origin/$GITHUB_BASE_REF HEAD --name-only --diff-filter=MDR -- 'db/migrations/*.sql')
+          TOUCHED=$(git diff origin/$GITHUB_BASE_REF...HEAD --name-only --diff-filter=MDR -- 'db/migrations/*.sql')
           if [ -n "$TOUCHED" ]; then
             echo "::error::已合并的 migration 文件不得修改 / 改名 / 删除（新开一支 migration 修正）："
             echo "$TOUCHED"

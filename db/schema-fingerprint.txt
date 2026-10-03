@@ -732,12 +732,6 @@ COL|production_material_source_return|movement_id|text|text|NO|
 COL|production_material_source_return|note|text|text|NO|''::text
 COL|production_material_source_return|production_id|text|text|NO|
 COL|production_material_source_return|returned_at|timestamp with time zone|timestamptz|NO|
-COL|production_material_status|color|text|text|YES|
-COL|production_material_status|id|uuid|uuid|NO|gen_random_uuid()
-COL|production_material_status|is_system|boolean|bool|NO|false
-COL|production_material_status|name|text|text|NO|
-COL|production_material_status|order_index|integer|int4|NO|0
-COL|production_material_status|production_id|text|text|YES|
 COL|production_material_stock_lot|confirmed_quantity|numeric|numeric|NO|
 COL|production_material_stock_lot|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_material_stock_lot|created_by|uuid|uuid|NO|
@@ -791,7 +785,6 @@ COL|production_material|name|text|text|NO|
 COL|production_material|notes|text|text|NO|''::text
 COL|production_material|production_id|text|text|NO|
 COL|production_material|quantity_scale|smallint|int2|NO|0
-COL|production_material|status_id|uuid|uuid|YES|
 COL|production_material|tracking_strategy|text|text|NO|'bulk_returnable'::text
 COL|production_material|unit|text|text|NO|'件'::text
 COL|production_material|updated_at|timestamp with time zone|timestamptz|NO|now()
@@ -1503,8 +1496,6 @@ CON|production_material_source_return|production_material_source_return_movement
 CON|production_material_source_return|production_material_source_return_movement_id_key|UNIQUE (movement_id)
 CON|production_material_source_return|production_material_source_return_pkey|PRIMARY KEY (id)
 CON|production_material_source_return|production_material_source_return_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
-CON|production_material_status|production_material_status_pkey|PRIMARY KEY (id)
-CON|production_material_status|production_material_status_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|production_material_stock_lot|material_stock_lot_id_production_unique|UNIQUE (id, production_id)
 CON|production_material_stock_lot|material_stock_lot_material_fk|FOREIGN KEY (material_id, production_id) REFERENCES production_material(id, production_id) ON DELETE RESTRICT
 CON|production_material_stock_lot|material_stock_lot_return_obligation_check|CHECK ((((source_type = ANY (ARRAY['rented'::text, 'borrowed'::text])) AND (btrim(source_label) <> ''::text) AND (return_due_at IS NOT NULL) AND (return_due_quantity IS NOT NULL) AND (return_due_quantity > (0)::numeric) AND (return_due_quantity <= confirmed_quantity)) OR ((source_type <> ALL (ARRAY['rented'::text, 'borrowed'::text])) AND (return_due_at IS NULL) AND (return_due_quantity IS NULL))))
@@ -1538,7 +1529,6 @@ CON|production_material|production_material_pkey|PRIMARY KEY (id)
 CON|production_material|production_material_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|production_material|production_material_quantity_scale_check|CHECK (((quantity_scale >= 0) AND (quantity_scale <= 3)))
 CON|production_material|production_material_serialized_scale_check|CHECK (((tracking_strategy <> 'serialized'::text) OR (quantity_scale = 0)))
-CON|production_material|production_material_status_id_fkey|FOREIGN KEY (status_id) REFERENCES production_material_status(id) ON DELETE SET NULL
 CON|production_material|production_material_tracking_strategy_check|CHECK ((tracking_strategy = ANY (ARRAY['serialized'::text, 'bulk_returnable'::text, 'consumable'::text])))
 CON|production_material|production_material_unit_check|CHECK ((btrim(unit) <> ''::text))
 CON|production_member_grant|production_member_grant_approval_id_fkey|FOREIGN KEY (approval_id) REFERENCES approval_request(id)
@@ -1968,9 +1958,6 @@ IDX|production_material_source_exception|production_material_source_exception_re
 IDX|production_material_source_return|production_material_source_return_lot_idx|CREATE INDEX production_material_source_return_lot_idx ON public.production_material_source_return USING btree (production_id, lot_id, returned_at, id)
 IDX|production_material_source_return|production_material_source_return_movement_id_key|CREATE UNIQUE INDEX production_material_source_return_movement_id_key ON public.production_material_source_return USING btree (movement_id)
 IDX|production_material_source_return|production_material_source_return_pkey|CREATE UNIQUE INDEX production_material_source_return_pkey ON public.production_material_source_return USING btree (id)
-IDX|production_material_status|pms_prod_name_idx|CREATE UNIQUE INDEX pms_prod_name_idx ON public.production_material_status USING btree (production_id, name) WHERE (production_id IS NOT NULL)
-IDX|production_material_status|pms_system_name_idx|CREATE UNIQUE INDEX pms_system_name_idx ON public.production_material_status USING btree (name) WHERE (production_id IS NULL)
-IDX|production_material_status|production_material_status_pkey|CREATE UNIQUE INDEX production_material_status_pkey ON public.production_material_status USING btree (id)
 IDX|production_material_stock_lot|material_stock_lot_id_production_unique|CREATE UNIQUE INDEX material_stock_lot_id_production_unique ON public.production_material_stock_lot USING btree (id, production_id)
 IDX|production_material_stock_lot|production_material_stock_lot_material_idx|CREATE INDEX production_material_stock_lot_material_idx ON public.production_material_stock_lot USING btree (production_id, material_id, created_at)
 IDX|production_material_stock_lot|production_material_stock_lot_pkey|CREATE UNIQUE INDEX production_material_stock_lot_pkey ON public.production_material_stock_lot USING btree (id)
@@ -1984,7 +1971,6 @@ IDX|production_material|production_material_code_idx|CREATE UNIQUE INDEX product
 IDX|production_material|production_material_id_production_unique|CREATE UNIQUE INDEX production_material_id_production_unique ON public.production_material USING btree (id, production_id)
 IDX|production_material|production_material_pkey|CREATE UNIQUE INDEX production_material_pkey ON public.production_material USING btree (id)
 IDX|production_material|production_material_production_idx|CREATE INDEX production_material_production_idx ON public.production_material USING btree (production_id)
-IDX|production_material|production_material_status_idx|CREATE INDEX production_material_status_idx ON public.production_material USING btree (status_id) WHERE (status_id IS NOT NULL)
 IDX|production_member_grant|production_member_grant_active_unique_idx|CREATE UNIQUE INDEX production_member_grant_active_unique_idx ON public.production_member_grant USING btree (production_id, user_id, resource_type, resource_id, resource_sub, permission_level) WHERE (is_revoked = false)
 IDX|production_member_grant|production_member_grant_lookup_idx|CREATE INDEX production_member_grant_lookup_idx ON public.production_member_grant USING btree (production_id, resource_type, resource_id, resource_sub, user_id) WHERE (is_revoked = false)
 IDX|production_member_grant|production_member_grant_pkey|CREATE UNIQUE INDEX production_member_grant_pkey ON public.production_member_grant USING btree (id)
