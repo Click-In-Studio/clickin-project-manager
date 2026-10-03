@@ -8,8 +8,8 @@ import ProductionModuleTopMenu, {
 import Link from "next/link";
 import AssetUploadPanel from "./AssetUploadPanel";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
-import AssetSharePanel from "./AssetSharePanel";
-import AssetAccessModal from "./AssetAccessModal";
+import AssetShareModal from "./AssetShareModal";
+import styles from "./assets-page.module.css";
 import { BASE_PATH } from "@/lib/base-path";
 import { useRouter } from "next/navigation";
 import type { Asset } from "@/lib/asset/db";
@@ -60,7 +60,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
   const [uploadTarget, setUploadTarget] = useState<Asset | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [shareTarget, setShareTarget] = useState<AssetListItem | null>(null);
-  const [accessTarget, setAccessTarget] = useState<Asset | null>(null);
+  const [moreTargetId, setMoreTargetId] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<Asset | null>(null);
   const [editName, setEditName] = useState("");
   const [editType, setEditType] = useState<AssetType>("reference");
@@ -154,7 +154,12 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
     if (!confirm("确认删除此 Asset？相关挂载点也会一并删除。")) return;
     setDeletingId(assetId);
     try {
-      await fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}`, { method: "DELETE" });
+      const response = await fetch(`${BASE_PATH}/api/production/${productionId}/assets/${assetId}`, { method: "DELETE" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: string };
+        alert(body.error ?? "删除失败");
+        return;
+      }
       setAssets(p => p.filter(a => a.id !== assetId));
     } finally {
       setDeletingId(null);
@@ -216,7 +221,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
   );
 
   return (
-    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+    <div className={styles.page}>
       <ProductionModuleTopMenu
         label="资产工作台"
         primaryAction={<button type="button" onClick={() => setShowUploadModal(true)} className={PRODUCTION_MODULE_ACTION_CLASS}>＋ 上传新 Asset</button>}
@@ -277,18 +282,19 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
       </div>
 
       {/* Filter + Search */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+      <div className={styles.filterBar}>
         <input
           type="text"
           placeholder="搜索文件名或类型…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          style={{ flex: 1, borderRadius: 8, border: "1px solid var(--line)", background: "var(--surface)", padding: "7px 12px", fontSize: 13, outline: "none", color: "var(--ink)" }}
+          className={styles.searchInput}
         />
-        <div style={{ display: "flex", borderRadius: 8, border: "1px solid var(--line)", overflow: "hidden", fontSize: 12 }}>
+        <div className={styles.filterTabs}>
           {(["all", "mine"] as const).map(f => (
             <button key={f} onClick={() => setFilter(f)}
-              style={{ padding: "7px 16px", fontWeight: 600, cursor: "pointer", border: 0, transition: "all .1s",
+              className={styles.filterTab}
+              style={{
                 background: filter === f ? "var(--ink)" : "white",
                 color: filter === f ? "#fff" : "var(--muted)" }}>
               {f === "all" ? "全部" : "我的上传"}
@@ -305,16 +311,16 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
       ) : displayedAssets.length === 0 ? (
         <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "var(--muted)" }}>暂无数字资产</p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div className={styles.assetList}>
           {displayedAssets.map(a => {
             const isExp = expanded === a.id;
 
             return (
-              <div key={a.id} style={{ background: "white", borderRadius: 12, border: "1px solid var(--line)", overflow: "hidden" }}>
+              <div key={a.id} className={`${styles.assetCard} ${isExp ? styles.assetCardExpanded : ""}`}>
                 {/* Main row */}
-                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px" }}>
+                <div className={styles.assetRow}>
                   {/* Thumb / icon */}
-                  <div style={{ width: 40, height: 40, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--paper)", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", overflow: "hidden" }}>
+                  <div className={styles.assetThumb}>
                     {a.storageType === "feishu_link" ? (
                       <span>飞</span>
                     ) : a.mimeType?.startsWith("image/") ? (
@@ -329,69 +335,93 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
                     )}
                   </div>
 
-                  <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className={styles.assetInfo}>
                     <Link
                       href={`/production/${productionId}/assets/${a.id}/preview${versionId ? `?v=${versionId}` : ""}`}
-                      style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--ink)", textDecoration: "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                      className={styles.assetName}
                     >
                       {a.name ?? a.fileName}
                     </Link>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" }}>
-                      {a.name && <span style={{ fontSize: 10, color: "var(--muted)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.fileName}</span>}
-                      <span style={{ fontSize: 10, color: "var(--muted)" }}>{ASSET_TYPE_LABELS[a.assetType]}</span>
+                    <div className={styles.assetMeta}>
+                      {a.name && <span className={styles.fileName}>{a.fileName}</span>}
+                      <span>{ASSET_TYPE_LABELS[a.assetType]}</span>
                       {a.sizeBytes != null && a.sizeBytes > 0 && (
-                        <span style={{ fontSize: 10, color: "var(--muted)" }}>{formatBytes(a.sizeBytes)}</span>
+                        <span>{formatBytes(a.sizeBytes)}</span>
+                      )}
+                      {a.storageType === "feishu_link" && (
+                        <span className={styles.sourceTag}>飞书</span>
                       )}
                       {a.nodeId && (
                         <Link href={`/production/${productionId}/wiki/${a.nodeId}`}
                           title="在知识库中查看"
-                          style={{ fontSize: 10, color: "var(--muted)", textDecoration: "none", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          className={styles.treePath}>
                           📁 {[...a.treePath, ""].join(" / ")}{a.name ?? a.fileName}
                         </Link>
-                      )}
-                      {a.storageType === "feishu_link" && (
-                        <span style={{ borderRadius: 4, padding: "1px 5px", fontSize: 9, background: "#eff6ff", color: "#3b82f6", fontWeight: 600 }}>飞书</span>
                       )}
                     </div>
                   </div>
 
                   {/* Actions */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-                    <button onClick={() => handleDownload(a.id)} disabled={!a.actions.download}
+                  <div className={styles.actionBar}>
+                    <button onClick={() => { if (a.actions.download) void handleDownload(a.id); }}
+                      aria-disabled={!a.actions.download}
                       title={a.actions.download ? "下载原件" : "需要原件下载权"}
-                      className="rounded px-2 py-1 text-[11px] text-zinc-500 disabled:cursor-not-allowed disabled:opacity-40">下载</button>
-                    <button onClick={() => setAccessTarget(a)} disabled={!a.actions.share}
-                      title={a.actions.share ? "站内分享" : "需要该资产的授权管理权"}
-                      className="rounded px-2 py-1 text-[11px] text-zinc-500 disabled:cursor-not-allowed disabled:opacity-40">站内分享</button>
-                    <button onClick={() => setShareTarget(a)} disabled={!a.actions.externalShare}
-                      title={a.actions.externalShare ? "生成对外链接" : "需要对外分享资格且项目允许对外链接"}
-                      className="rounded px-2 py-1 text-[11px] text-zinc-500 disabled:cursor-not-allowed disabled:opacity-40">对外链接</button>
-                    {a.actions.metaEdit && (
-                      <button
-                        onClick={() => openEdit(a)}
-                        style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "var(--muted)", background: "none", border: 0, cursor: "pointer" }}>
-                        编辑
-                      </button>
-                    )}
-                    {a.actions.addVersion && (
-                      <button
-                        onClick={() => { setUploadTarget(a); setView("upload-new-version"); }}
-                        style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "var(--muted)", background: "none", border: 0, cursor: "pointer" }}>
-                        新版本
-                      </button>
-                    )}
-                    {a.actions.delete && (
-                      <button
-                        onClick={() => handleDeleteAsset(a.id)}
-                        disabled={deletingId === a.id}
-                        style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "#dc2626", background: "none", border: 0, cursor: "pointer", opacity: deletingId === a.id ? 0.5 : 1 }}>
-                        删除
-                      </button>
-                    )}
+                      className={styles.actionButton}>下载</button>
+                    <button onClick={() => { if (a.actions.metaEdit) openEdit(a); }}
+                      aria-disabled={!a.actions.metaEdit}
+                      title={a.actions.metaEdit ? "编辑资产信息" : "需要资产元数据编辑权"}
+                      className={styles.actionButton}>编辑</button>
+                    <button onClick={() => { if (a.actions.delete && deletingId !== a.id) void handleDeleteAsset(a.id); }}
+                      aria-disabled={!a.actions.delete || deletingId === a.id}
+                      title={a.actions.delete ? (deletingId === a.id ? "删除中…" : "删除资产") : "需要资产删除权"}
+                      className={`${styles.actionButton} ${styles.dangerAction}`}>删除</button>
+                    <button onClick={() => { if (a.actions.share || a.actions.externalShare) setShareTarget(a); }}
+                      aria-disabled={!a.actions.share && !a.actions.externalShare}
+                      title={a.actions.share || a.actions.externalShare ? "分享" : "需要站内分享管理权或对外分享资格"}
+                      className={styles.actionButton}>分享</button>
+                    <button
+                      onClick={() => {
+                        if (!a.actions.addVersion) return;
+                        setUploadTarget(a);
+                        setView("upload-new-version");
+                      }}
+                      aria-disabled={!a.actions.addVersion}
+                      title={a.actions.addVersion ? "上传新版本" : (a.fileVersionPolicy !== "append" ? "此资产不支持追加新版本" : "需要文件版本创建权")}
+                      className={`${styles.actionButton} ${styles.desktopSecondary}`}>
+                      新版本
+                    </button>
                     <button onClick={() => toggleExpand(a.id)}
-                      style={{ borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "var(--muted)", background: "none", border: 0, cursor: "pointer" }}>
+                      title={isExp ? "收起关联详情" : "查看关联详情"}
+                      className={`${styles.actionButton} ${styles.desktopSecondary}`}>
                       <ChevronIcon direction={isExp ? "up" : "down"} size={12} />
                     </button>
+                    <div className={styles.moreWrap}
+                      onBlur={event => {
+                        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMoreTargetId(null);
+                      }}>
+                      <button type="button" onClick={() => setMoreTargetId(current => current === a.id ? null : a.id)}
+                        aria-expanded={moreTargetId === a.id}
+                        aria-label={`更多操作：${a.name ?? a.fileName}`}
+                        className={styles.actionButton}>更多</button>
+                      {moreTargetId === a.id && (
+                        <div className={styles.moreMenu} role="menu">
+                          <button type="button" role="menuitem"
+                            aria-disabled={!a.actions.addVersion}
+                            title={a.actions.addVersion ? "上传新版本" : (a.fileVersionPolicy !== "append" ? "此资产不支持追加新版本" : "需要文件版本创建权")}
+                            className={styles.moreMenuButton}
+                            onClick={() => {
+                              if (!a.actions.addVersion) return;
+                              setMoreTargetId(null);
+                              setUploadTarget(a);
+                              setView("upload-new-version");
+                            }}>新版本</button>
+                          <button type="button" role="menuitem" className={styles.moreMenuButton}
+                            onClick={() => { setMoreTargetId(null); toggleExpand(a.id); }}>
+                            {isExp ? "收起关联详情" : "查看关联详情"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -512,20 +542,18 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
       )}
 
       {shareTarget && (
-        <AssetSharePanel
+        <AssetShareModal
           productionId={productionId}
           assetId={shareTarget.id}
           assetName={shareTarget.name ?? shareTarget.fileName}
           userName={userName}
-          canCreateLink={shareTarget.actions.externalShareCreate}
-          onClose={() => setShareTarget(null)}
+          members={members}
+          departments={departments}
+          canShareInternally={shareTarget.actions.share}
+          canManageExternalShare={shareTarget.actions.externalShare}
+          canCreateExternalShare={shareTarget.actions.externalShareCreate}
+          onClose={() => { setShareTarget(null); load(); }}
         />
-      )}
-      {accessTarget && (
-        <AssetAccessModal productionId={productionId} assetId={accessTarget.id}
-          assetName={accessTarget.name ?? accessTarget.fileName}
-          members={members} departments={departments}
-          onClose={() => { setAccessTarget(null); load(); }} />
       )}
     </div>
   );

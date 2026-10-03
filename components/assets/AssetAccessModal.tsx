@@ -51,7 +51,7 @@ export default function AssetAccessModal({ productionId, assetId, assetName, mem
   }
 
   return (
-    <AdminModal title={`站内分享「${assetName}」`} onClose={onClose}>
+    <AdminModal title={`对内分享「${assetName}」`} onClose={onClose}>
       {!share ? <p className="text-sm text-zinc-500">加载中…</p> : (
         <div className="space-y-4 text-sm text-zinc-700">
           <label className="flex items-center gap-2">
