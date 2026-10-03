@@ -57,6 +57,9 @@ describe("发布门禁 workflow", () => {
     expect(migration).toContain('exit "$STOP_FAILED"');
     expect(migration).toContain('pm2 stop "$APP"');
     expect(migration.indexOf('pm2 stop "$APP"')).toBeLessThan(migration.indexOf('ssh prod "$DBMATE up"'));
+    expect(migration.indexOf('ssh prod "$DBMATE up"')).toBeLessThan(
+      migration.indexOf("unlink /var/www/production-manager/current"),
+    );
     expect(migration).toContain("MIGRATION FAILED — 服务保持停止");
     expect(migration).not.toContain("该支已整体回滚");
 

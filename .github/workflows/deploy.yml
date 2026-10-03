@@ -341,6 +341,9 @@ jobs:
             echo "── dbmate up"
             ssh prod "$DBMATE up" < /dev/null \
               || { echo "::error::MIGRATION FAILED — 服务保持停止；逐支核对 schema_migrations 后前向修复或恢复 $SHARED/backups/$BACKUP"; exit 1; }
+            # schema 已经变化，立即移除仍指向旧代码的 current；后续 ACL / 指纹失败时，
+            # 人工误跑 pm2 restart 也只能启动失败，不能让旧代码重新写新 schema。
+            ssh prod "unlink /var/www/production-manager/current 2>/dev/null || true" < /dev/null
             echo "SCHEMA_CHANGED=true" >> "$GITHUB_ENV"
           else
             echo "No pending migrations — process stop and backup skipped."
@@ -414,7 +417,11 @@ jobs:
               if curl -fsS --max-time 3 -H "Authorization: Bearer $HEALTH_SECRET" http://127.0.0.1:3001/health >/dev/null &&
                  curl -fsS --max-time 3 http://127.0.0.1:3102/health >/dev/null &&
                  curl -fsS --max-time 3 http://127.0.0.1:3103/health >/dev/null; then
-                cp "$NEW_ECOSYSTEM" /var/www/production-manager/shared/ecosystem.config.js
+                if ! cp "$NEW_ECOSYSTEM" /var/www/production-manager/shared/ecosystem.config.js; then
+                  echo "保存已验证的 PM2 配置失败" >&2
+                  fail_activation || true
+                  exit 1
+                fi
                 echo "三个生产进程健康"
                 exit 0
               fi
