@@ -196,10 +196,14 @@ export function ProductionOverflowSubmenuButton({
 }
 
 export function ProductionTopMenuDivider() {
+  const { stage } = useProductionToolbar();
+  const compact = stage >= PRODUCTION_TOOLBAR_STAGE.primaryShort;
+
   return (
     <div
       aria-hidden="true"
-      className="mx-3 h-7 w-px shrink-0 bg-[var(--line)]"
+      data-production-top-menu-divider="true"
+      className={`${compact ? "mx-2" : "mx-3"} h-7 w-px shrink-0 bg-[var(--line)]`}
     />
   );
 }
@@ -249,7 +253,7 @@ export default function ProductionTopMenu({
   fallbackClassName = "gap-0 px-4",
   onClick,
 }: Props) {
-  const { setHasStoredControls } = useProductionToolbar();
+  const { setHasStoredControls, stage } = useProductionToolbar();
   const hasOverflow = overflow !== null && overflow !== undefined;
   const [targets, setTargets] = useState<{
     bar: HTMLElement | null;
@@ -279,6 +283,7 @@ export default function ProductionTopMenu({
       ref={barRef}
       onClick={onClick}
       data-production-top-menu-root="true"
+      data-production-toolbar-stage={stage}
       className={`relative flex flex-nowrap items-center ${
         portaled
           ? "h-full w-full min-w-0 gap-0 px-0"

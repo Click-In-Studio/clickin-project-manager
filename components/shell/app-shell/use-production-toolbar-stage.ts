@@ -12,7 +12,7 @@ import {
   type ProductionHeaderStage,
   productionHeaderStageForWidth,
   adjacentProductionToolbarStage,
-  productionTopbarContentWidth,
+  productionTopbarOverflow,
 } from "./toolbar-stage";
 
 const PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX = 16;
@@ -69,7 +69,7 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
     const overflowTarget = topbar.querySelector(`#${PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID}`);
     if (!!overflowTarget?.childElementCount !== productionToolbarHasStoredControlsRef.current) return;
 
-    const overflow = productionTopbarContentWidth(topbar) - topbar.clientWidth;
+    const overflow = productionTopbarOverflow(topbar);
     if (overflow > 1 && current < PRODUCTION_TOOLBAR_STAGE.lowPriorityStored) {
       productionToolbarRequiredWidthRef.current[current] = topbar.clientWidth + overflow;
       setProductionToolbarStage(adjacentProductionToolbarStage(current, 1));

@@ -260,7 +260,9 @@ export function ExpenseCreateButton({ productionId, baseCurrency, categories, tr
         style={triggerVariant === "default" ? PRIMARY_BTN : undefined}
         className={triggerVariant === "overflow"
           ? PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS
-          : triggerVariant === "default" ? undefined : PRODUCTION_MODULE_ACTION_CLASS}
+          : triggerVariant === "default" ? undefined
+            : triggerVariant === "toolbar" ? `${PRODUCTION_MODULE_ACTION_CLASS} pl-2.5 pr-3`
+              : PRODUCTION_MODULE_ACTION_CLASS}
         onClick={() => setOpen(true)}
       >
         {triggerVariant === "short" ? "＋" : triggerVariant === "overflow" ? "新建报销" : "＋ 新建报销"}

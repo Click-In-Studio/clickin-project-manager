@@ -1,8 +1,12 @@
+// @vitest-environment jsdom
+
 import { describe, it, expect } from "vitest";
 import { PRODUCTION_TOOLBAR_STAGE } from "@/components/shell/ProductionTopMenu";
 import {
+  PRODUCTION_TOOLBAR_MIN_CLEARANCE_PX,
   productionHeaderStageForWidth,
   adjacentProductionToolbarStage,
+  productionTopbarOverflow,
 } from "@/components/shell/app-shell/toolbar-stage";
 
 /**
@@ -35,5 +39,47 @@ describe("adjacentProductionToolbarStage", () => {
   it("两端夹住：最宽再退 / 最窄再进都原地不动", () => {
     expect(adjacentProductionToolbarStage(S.full, -1)).toBe(S.full);
     expect(adjacentProductionToolbarStage(S.lowPriorityStored, 1)).toBe(S.lowPriorityStored);
+  });
+});
+
+describe("productionTopbarOverflow", () => {
+  function rect(left: number, right: number): DOMRect {
+    return {
+      x: left, y: 0, left, right, top: 0, bottom: 32,
+      width: right - left, height: 32, toJSON: () => ({}),
+    };
+  }
+
+  function toolbarWithGap(gap: number) {
+    const topbar = document.createElement("header");
+    const slot = document.createElement("div");
+    slot.id = "production-page-toolbar-slot";
+    const root = document.createElement("div");
+    root.dataset.productionTopMenuRoot = "true";
+    const context = document.createElement("span");
+    const actions = document.createElement("div");
+    context.getBoundingClientRect = () => rect(100, 140);
+    actions.getBoundingClientRect = () => rect(180, 240);
+    root.append(context, actions);
+    slot.append(root);
+    const globalActions = document.createElement("div");
+    globalActions.getBoundingClientRect = () => rect(240 + gap, 300 + gap);
+    topbar.append(slot, globalActions);
+    Object.defineProperty(topbar, "clientWidth", { configurable: true, value: 400 });
+    return topbar;
+  }
+
+  it("搜索 / 更多与页面动作少于 6px 时，即使总宽未溢出也继续收缩", () => {
+    expect(productionTopbarOverflow(toolbarWithGap(-2))).toBe(
+      PRODUCTION_TOOLBAR_MIN_CLEARANCE_PX + 2,
+    );
+    expect(productionTopbarOverflow(toolbarWithGap(0))).toBe(
+      PRODUCTION_TOOLBAR_MIN_CLEARANCE_PX,
+    );
+  });
+
+  it("保留至少 6px 可见间距后不额外触发收缩", () => {
+    expect(productionTopbarOverflow(toolbarWithGap(PRODUCTION_TOOLBAR_MIN_CLEARANCE_PX))).toBe(0);
+    expect(productionTopbarOverflow(toolbarWithGap(12))).toBeLessThanOrEqual(0);
   });
 });
