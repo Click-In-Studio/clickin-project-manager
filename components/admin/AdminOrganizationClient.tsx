@@ -686,7 +686,7 @@ function MemberDetail({
       {/* 上级 */}
       <div style={{ marginBottom: 16 }}>
         <p style={SECTION_LABEL}>汇报上级</p>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div className={organizationStyles.detailActionRow} style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, color: "var(--ink)" }}>{m.supervisorName ?? "（无）"}</span>
           {caps.editMember && (
             <>
@@ -766,8 +766,8 @@ function MemberDetail({
       {caps.viewContact && (
         <div style={{ marginBottom: 16 }}>
           <p style={SECTION_LABEL}>联系方式</p>
-          <p style={{ margin: "0 0 3px", fontSize: 13, color: "var(--ink)" }}>邮箱：{m.email ?? "（未登记）"}</p>
-          <p style={{ margin: 0, fontSize: 13, color: "var(--ink)" }}>电话：{m.phone ?? "（未登记）"}</p>
+          <p className={organizationStyles.detailContact} style={{ margin: "0 0 3px", fontSize: 13, color: "var(--ink)" }}>邮箱：{m.email ?? "（未登记）"}</p>
+          <p className={organizationStyles.detailContact} style={{ margin: 0, fontSize: 13, color: "var(--ink)" }}>电话：{m.phone ?? "（未登记）"}</p>
         </div>
       )}
 
@@ -880,7 +880,7 @@ function DeptDetail({
           </>
         ) : (
           <>
-            <h2 style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)" }}>{dept.name}</h2>
+            <h2 className={organizationStyles.detailTitle} style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)" }}>{dept.name}</h2>
             {dept.kind === "group" ? <Badge tone="amber">用户组</Badge> : <Badge tone="blue">部门</Badge>}
             {caps.deptStructure && (
               <button style={{ ...SECONDARY_BTN, padding: "4px 10px", fontSize: 11 }} onClick={() => setRenaming(true)}>改名</button>
@@ -894,7 +894,7 @@ function DeptDetail({
         <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 18 }}>
           <div>
             <p style={SECTION_LABEL}>上级部门</p>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className={organizationStyles.detailActionRow} style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 13, color: "var(--ink)" }}>{parentDept?.name ?? "（顶级）"}</span>
               <button
                 style={{ ...SECONDARY_BTN, padding: "3px 10px", fontSize: 10 }}

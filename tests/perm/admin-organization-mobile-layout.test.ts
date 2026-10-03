@@ -48,6 +48,20 @@ async function mountOrganization(width: number) {
             <span class="mobileListCopy"><b>刘杰熙</b><small>乐手 · 作曲 · 制作人 · 制作助理</small></span>
             <span class="mobilePoc">★ POC</span><span class="mobileChevron">›</span>
           </button>
+          <div class="detailIdentity" style="display:flex;align-items:center;gap:14px">
+            <span style="width:52px;height:52px;flex-shrink:0"></span>
+            <div style="min-width:0">
+              <h2 class="detailTitle" style="display:flex;align-items:center;gap:10px">averyveryveryveryveryverylongmembernamewithoutbreaks <span>在职</span></h2>
+              <p>舞台监督</p>
+            </div>
+          </div>
+          <p class="detailContact" data-kind="contact">邮箱：averyveryveryveryveryverylonglocalpart@example-with-long-domain.test</p>
+          <div class="detailActionRow" style="display:flex;align-items:center;gap:10px">
+            <span>averyveryveryveryveryverylongsupervisornamewithoutbreaks</span><button>更换</button><button>清除</button>
+          </div>
+          <div class="detailTitleRow" style="display:flex;align-items:center;gap:10px">
+            <h2 class="detailTitle">averyveryveryveryveryverylongdepartmentnamewithoutbreaks</h2><span>部门</span><button>改名</button>
+          </div>
           <div class="detailTitleRow" style="display:flex;align-items:center;gap:10px">
             <input class="renameInput" value="这是一个较长的部门名称">
             <button>保存</button><button>取消</button>

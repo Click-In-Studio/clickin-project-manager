@@ -148,8 +148,19 @@
 
 .detailTitle,
 .detailTitleRow,
-.deptMemberRow {
+.deptMemberRow,
+.detailActionRow {
   min-width: 0;
+}
+
+.detailTitle,
+.detailContact {
+  overflow-wrap: anywhere;
+}
+
+.detailActionRow > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .renameInput {
@@ -173,7 +184,8 @@
   .detailIdentity,
   .detailTitle,
   .detailTitleRow,
-  .deptMemberRow {
+  .deptMemberRow,
+  .detailActionRow {
     flex-wrap: wrap;
   }
 
