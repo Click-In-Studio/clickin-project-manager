@@ -1,0 +1,159 @@
+.page {
+  min-height: 100vh;
+  padding: 24px clamp(18px, 3vw, 52px) 60px;
+  background: var(--paper);
+}
+
+.mobileBack {
+  display: none;
+}
+
+.dangerCard,
+.transferCard {
+  overflow: hidden;
+  margin-bottom: 18px;
+  border: 1px solid var(--danger);
+  border-radius: 13px;
+  background: var(--surface);
+}
+
+.transferCard {
+  padding: 22px;
+}
+
+.dangerHeader {
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--line);
+  background: #fff5f5;
+}
+
+.dangerHeader p {
+  margin: 0;
+  color: #dc2626;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.dangerRow {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dangerRow:last-child {
+  border-bottom: 0;
+}
+
+.dangerLabel {
+  padding-top: 1px;
+}
+
+.dangerLabel p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dangerLabel small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.dangerControl {
+  min-width: 0;
+}
+
+.deleteConfirmRow {
+  display: flex;
+  gap: 8px;
+}
+
+.transferControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 1023px) {
+  .mobileBack {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 14px;
+    padding: 7px 9px;
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .mobileBack:hover {
+    background: var(--surface);
+    color: var(--ink);
+  }
+
+  /* 仅危险操作页把“返回项目”移到正文上方；配置菜单、AI、个人中心仍留在底栏。 */
+  :global(.app-shell-frame):has(.page) :global(.app-shell-bottom-nav) > a:first-child {
+    display: none;
+  }
+}
+
+@media (max-width: 639px) {
+  .page {
+    padding: 14px 14px calc(78px + env(safe-area-inset-bottom));
+  }
+
+  .dangerCard,
+  .transferCard {
+    margin-bottom: 14px;
+    border-radius: 11px;
+  }
+
+  .transferCard {
+    padding: 16px;
+  }
+
+  .dangerHeader {
+    padding: 12px 16px;
+  }
+
+  .dangerRow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .transferControls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ownerPicker,
+  .ownerConfirmInput,
+  .ownerConfirmButton {
+    width: 100%;
+    min-width: 0 !important;
+    box-sizing: border-box;
+  }
+
+  .deleteConfirmRow {
+    flex-direction: column;
+  }
+
+  .deleteConfirmRow input,
+  .deleteConfirmRow button {
+    width: 100%;
+    box-sizing: border-box;
+  }
+}

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = { title: "危险操作" };
 
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
@@ -14,6 +15,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import TransferOwnerCard from "@/components/admin/TransferOwnerCard";
 import AdminDangerSection from "@/components/admin/AdminDangerSection";
+import styles from "@/components/admin/admin-danger.module.css";
 
 export default async function DangerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -45,7 +47,11 @@ export default async function DangerPage({ params }: { params: Promise<{ id: str
   ]);
 
   return (
-    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+    <div className={styles.page}>
+      <Link href={`/production/${id}`} className={styles.mobileBack}>
+        <span aria-hidden="true">←</span>
+        返回项目
+      </Link>
       <PageHeader eyebrow={name ?? ""} title="危险操作" side="stage" />
       {canTransfer && (
         <TransferOwnerCard
