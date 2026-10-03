@@ -8,6 +8,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import announcementStyles from "@/components/admin/admin-announcements.module.css";
 
 vi.mock("@/components/wiki/WikiMarkdown", () => ({
   default: ({ content }: { content: string }) => <div>{content}</div>,
@@ -152,6 +153,16 @@ describe("AdminAnnouncementsClient — 发布按钮的保存中态（#659）", (
 });
 
 describe("AdminAnnouncementsClient — 响应式改造后的交互回归", () => {
+  it("真实组件接入共享指标与公告响应式结构", async () => {
+    await mountExistingAnnouncements();
+
+    expect(container.querySelector('[data-admin-metric-grid="standard"]')).toBeTruthy();
+    expect(container.querySelector(`.${announcementStyles.workspace}`)).toBeTruthy();
+    expect(container.querySelector(`.${announcementStyles.listPane}`)).toBeTruthy();
+    expect(container.querySelector(`.${announcementStyles.detailPane}`)).toBeTruthy();
+    expect(container.querySelectorAll(`.${announcementStyles.listDate}`)).toHaveLength(2);
+  });
+
   it("选择公告后保留选中态，并可进入编辑、保存再返回详情", async () => {
     await mountExistingAnnouncements();
     const listButton = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))

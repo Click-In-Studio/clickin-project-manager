@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 
-const component = readFileSync("components/admin/AdminAnnouncementsClient.tsx", "utf8");
 const css = readFileSync("components/admin/admin-announcements.module.css", "utf8");
 const acceptanceWidths = [319, 385, 768, 1200] as const;
 
@@ -75,16 +74,9 @@ afterAll(async () => {
   await browser?.close();
 });
 
-describe("公告管理响应式结构", () => {
-  it("复用 admin 摘要指标，并只给公告工作区增加页面级响应式样式", () => {
-    expect(component).toContain("<AdminMetricGrid");
-    expect(component).toContain("columns={3}");
-    expect(component).toContain("styles.workspace");
-    expect(component).toContain("styles.listPane");
-    expect(component).toContain("styles.detailPane");
-    expect(component).not.toContain('gridTemplateColumns: "repeat(3, 1fr)"');
-  });
-
+// 这里只验证 CSS 在真实 Chrome 中的几何表现；真实组件与这些 CSS Module
+// class 的接线由 admin-announcements-form-saving.test.tsx 挂载组件后直接断言。
+describe("公告管理响应式 CSS 浏览器几何", () => {
   for (const width of acceptanceWidths) {
     it(`${width}px 下列表、选中态、日期和详情保持可读且不横向溢出`, async () => {
       await mountWorkspace(width);
