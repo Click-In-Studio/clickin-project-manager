@@ -16,6 +16,7 @@ import {
 } from "./toolbar-stage";
 
 const PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX = 16;
+const PRODUCTION_TOOLBAR_OVERFLOW_EPSILON_PX = 0.5;
 
 /**
  * 项目头部 / 顶栏工具栏的折叠阶段：按视口宽度定头部阶段，按顶栏内容是否溢出逐级收纳
@@ -70,7 +71,8 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
     if (!!overflowTarget?.childElementCount !== productionToolbarHasStoredControlsRef.current) return;
 
     const overflow = productionTopbarOverflow(topbar);
-    if (overflow > 1 && current < PRODUCTION_TOOLBAR_STAGE.lowPriorityStored) {
+    if (overflow > PRODUCTION_TOOLBAR_OVERFLOW_EPSILON_PX
+      && current < PRODUCTION_TOOLBAR_STAGE.lowPriorityStored) {
       productionToolbarRequiredWidthRef.current[current] = topbar.clientWidth + overflow;
       setProductionToolbarStage(adjacentProductionToolbarStage(current, 1));
       return;
