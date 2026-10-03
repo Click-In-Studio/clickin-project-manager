@@ -11,6 +11,7 @@ import InviteModal from "@/components/admin/InviteModal";
 import { SEAT_TONE_COLOR, seatHint, seatTone } from "@/lib/account/seat-ui";
 import TreePickerModal from "@/components/ui/TreePickerModal";
 import styles from "@/components/ui/my-pages.module.css";
+import organizationStyles from "@/components/admin/admin-organization.module.css";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import { BASE_PATH } from "@/lib/base-path";
 import type { MemberTag } from "@/lib/perm/member-db";
@@ -98,6 +99,7 @@ export default function AdminOrganizationClient({
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(initialDepts[0]?.id ?? null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -252,7 +254,7 @@ export default function AdminOrganizationClient({
   });
 
   return (
-    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+    <div className={styles.workspace} style={{ minHeight: "100vh", background: "var(--paper)" }}>
       <PageHeader
         eyebrow={productionName}
         title="成员与部门"
@@ -288,8 +290,8 @@ export default function AdminOrganizationClient({
 
       {/* segmented */}
       <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface-2)", borderRadius: 10, width: 280, marginBottom: 14 }}>
-        <button style={segBtn(tab === "members")} onClick={() => setTab("members")}>成员</button>
-        <button style={segBtn(tab === "depts")} onClick={() => setTab("depts")}>部门</button>
+        <button style={segBtn(tab === "members")} onClick={() => { setTab("members"); setMobileDetailOpen(false); }}>成员</button>
+        <button style={segBtn(tab === "depts")} onClick={() => { setTab("depts"); setMobileDetailOpen(false); }}>部门</button>
       </div>
 
       {error && (
@@ -297,9 +299,9 @@ export default function AdminOrganizationClient({
       )}
 
       {/* Panel */}
-      <section style={{
+      <section className={organizationStyles.panel} style={{
         background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22,
-        height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column",
+        display: "flex", flexDirection: "column",
       }}>
         <div className={styles.desktopOnly} style={{ flex: 1, minHeight: 0 }}>
           <div className={styles.splitLayout} style={{ height: "100%", minHeight: 0 }}>
@@ -435,6 +437,114 @@ export default function AdminOrganizationClient({
             </div>
           </div>
         </div>
+
+        <div className={`${styles.mobileOnly} ${organizationStyles.mobileWorkspace}`} data-testid="organization-mobile-workspace">
+          {mobileDetailOpen ? (
+            <>
+              <div className={organizationStyles.mobileStepHeader}>
+                <button
+                  type="button"
+                  className={organizationStyles.mobileBackButton}
+                  onClick={() => setMobileDetailOpen(false)}
+                >
+                  ← 返回{tab === "members" ? "成员" : "部门"}列表
+                </button>
+              </div>
+              <div className={organizationStyles.mobileDetail} data-testid="organization-mobile-detail">
+                {tab === "members" ? (
+                  selected ? (
+                    <MemberDetail
+                      key={selected.userId}
+                      member={selected}
+                      depts={depts}
+                      allMembers={members}
+                      tags={tags}
+                      roleNames={roleNames}
+                      caps={caps}
+                      busy={busy}
+                      isSelf={selected.userId === currentUserId}
+                      onPatch={patchMember}
+                      onAction={memberAction}
+                      onSaveDeptMembers={saveDeptMembers}
+                    />
+                  ) : <p className={organizationStyles.mobileEmpty}>该成员已不在列表中</p>
+                ) : selectedDept ? (
+                  <DeptDetail
+                    key={selectedDept.id}
+                    dept={selectedDept}
+                    depts={depts}
+                    members={members}
+                    caps={caps}
+                    busy={busy}
+                    descendants={descendants}
+                    onPatch={patchDept}
+                    onSaveMembers={saveDeptMembers}
+                    onDelete={deleteDept}
+                    onCreateChild={createDept}
+                  />
+                ) : <p className={organizationStyles.mobileEmpty}>该部门已不在列表中</p>}
+              </div>
+            </>
+          ) : tab === "members" ? (
+            <div data-testid="organization-mobile-member-list">
+              <input
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder="搜索姓名 / 角色"
+                aria-label="搜索成员"
+                className={organizationStyles.mobileSearch}
+              />
+              {grouped.map(({ dept, members: groupMembers }) => (
+                <div key={dept?.id ?? "__none"} className={organizationStyles.mobileGroup}>
+                  <p className={organizationStyles.mobileGroupLabel}>{dept?.name ?? "未分配部门"}</p>
+                  {groupMembers.map(member => (
+                    <button
+                      key={member.userId}
+                      type="button"
+                      className={organizationStyles.mobileListRow}
+                      aria-label={`查看成员：${member.name || "未命名"}`}
+                      onClick={() => { setSelectedUserId(member.userId); setMobileDetailOpen(true); }}
+                    >
+                      <Avatar m={member} size={34} />
+                      <span className={organizationStyles.mobileListCopy}>
+                        <b data-inactive={isInactiveMember(member.status) ? "true" : undefined}>{member.name || "（未命名）"}</b>
+                        <small>{member.roles.join(" · ") || "无角色"}</small>
+                      </span>
+                      {dept && dept.pocUserIds.includes(member.userId) && <span className={organizationStyles.mobilePoc}>★ POC</span>}
+                      <span className={organizationStyles.mobileChevron} aria-hidden="true">›</span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+              {grouped.length === 0 && <p className={organizationStyles.mobileEmpty}>无匹配成员</p>}
+            </div>
+          ) : (
+            <div data-testid="organization-mobile-dept-list">
+              <div className={organizationStyles.mobileDeptTree}>
+                {deptTree.map(({ dept, depth }) => (
+                  <button
+                    key={dept.id}
+                    type="button"
+                    className={organizationStyles.mobileListRow}
+                    style={{ paddingLeft: 12 + depth * 16 }}
+                    aria-label={`查看${dept.kind === "group" ? "用户组" : "部门"}：${dept.name}`}
+                    onClick={() => { setSelectedDeptId(dept.id); setMobileDetailOpen(true); }}
+                  >
+                    <span className={organizationStyles.mobileTreeMark} aria-hidden="true">{depth > 0 ? "└" : "▪"}</span>
+                    <span className={organizationStyles.mobileListCopy}>
+                      <b>{dept.name}</b>
+                      <small>{dept.memberUserIds.length} 名成员</small>
+                    </span>
+                    {dept.kind === "group" && <Badge tone="amber">组</Badge>}
+                    <span className={organizationStyles.mobileChevron} aria-hidden="true">›</span>
+                  </button>
+                ))}
+              </div>
+              {deptTree.length === 0 && <p className={organizationStyles.mobileEmpty}>暂无部门或用户组</p>}
+              {caps.deptStructure && <NewDeptForm depts={depts} busy={busy} onCreate={createDept} />}
+            </div>
+          )}
+        </div>
       </section>
 
       {/* 邀请（#156：邮件邀请 + 邀请链接；批量在数据迁移页） */}
@@ -498,10 +608,10 @@ function MemberDetail({
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
+      <div className={organizationStyles.detailIdentity} style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
         <Avatar m={m} size={52} />
         <div style={{ minWidth: 0 }}>
-          <h2 style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)", display: "flex", alignItems: "center", gap: 10 }}>
+          <h2 className={organizationStyles.detailTitle} style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)", display: "flex", alignItems: "center", gap: 10 }}>
             {m.name || "（未命名）"}
             {m.status === "active"
               ? <Badge tone="green">在职</Badge>
@@ -576,7 +686,7 @@ function MemberDetail({
       {/* 上级 */}
       <div style={{ marginBottom: 16 }}>
         <p style={SECTION_LABEL}>汇报上级</p>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div className={organizationStyles.detailActionRow} style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, color: "var(--ink)" }}>{m.supervisorName ?? "（无）"}</span>
           {caps.editMember && (
             <>
@@ -656,8 +766,8 @@ function MemberDetail({
       {caps.viewContact && (
         <div style={{ marginBottom: 16 }}>
           <p style={SECTION_LABEL}>联系方式</p>
-          <p style={{ margin: "0 0 3px", fontSize: 13, color: "var(--ink)" }}>邮箱：{m.email ?? "（未登记）"}</p>
-          <p style={{ margin: 0, fontSize: 13, color: "var(--ink)" }}>电话：{m.phone ?? "（未登记）"}</p>
+          <p className={organizationStyles.detailContact} style={{ margin: "0 0 3px", fontSize: 13, color: "var(--ink)" }}>邮箱：{m.email ?? "（未登记）"}</p>
+          <p className={organizationStyles.detailContact} style={{ margin: 0, fontSize: 13, color: "var(--ink)" }}>电话：{m.phone ?? "（未登记）"}</p>
         </div>
       )}
 
@@ -751,12 +861,13 @@ function DeptDetail({
   return (
     <div>
       {/* 标题/改名 */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+      <div className={organizationStyles.detailTitleRow} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
         {renaming ? (
           <>
             <input
               value={nameDraft}
               onChange={e => setNameDraft(e.target.value)}
+              className={organizationStyles.renameInput}
               style={{ fontSize: 17, fontFamily: 'Georgia, "Noto Serif SC", serif', padding: "5px 9px", border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)" }}
             />
             <button
@@ -769,7 +880,7 @@ function DeptDetail({
           </>
         ) : (
           <>
-            <h2 style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)" }}>{dept.name}</h2>
+            <h2 className={organizationStyles.detailTitle} style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)" }}>{dept.name}</h2>
             {dept.kind === "group" ? <Badge tone="amber">用户组</Badge> : <Badge tone="blue">部门</Badge>}
             {caps.deptStructure && (
               <button style={{ ...SECONDARY_BTN, padding: "4px 10px", fontSize: 11 }} onClick={() => setRenaming(true)}>改名</button>
@@ -783,7 +894,7 @@ function DeptDetail({
         <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 18 }}>
           <div>
             <p style={SECTION_LABEL}>上级部门</p>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className={organizationStyles.detailActionRow} style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 13, color: "var(--ink)" }}>{parentDept?.name ?? "（顶级）"}</span>
               <button
                 style={{ ...SECONDARY_BTN, padding: "3px 10px", fontSize: 10 }}
@@ -886,9 +997,9 @@ function DeptDetail({
           if (!m) return null;
           const isPoc = dept.pocUserIds.includes(uid);
           return (
-            <div key={uid} style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
+            <div key={uid} className={organizationStyles.deptMemberRow} style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
               <Avatar m={m} size={26} />
-              <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{m.name || "（未命名）"}</span>
+              <span className={organizationStyles.deptMemberName} style={{ flex: 1, fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{m.name || "（未命名）"}</span>
               {isPoc && <Badge tone="amber">POC</Badge>}
               {caps.deptPoc && (
                 <button
