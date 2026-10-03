@@ -3,6 +3,9 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    # 依赖 PR 的前序分支合并并删除后，GitHub 会把后续 PR 的 base 改回 main；
+    # base 变化属于 edited，必须重新验证新的 main merge ref。
+    types: [opened, synchronize, reopened, edited]
 
 jobs:
   lint-and-typecheck:
