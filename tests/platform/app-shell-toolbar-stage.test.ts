@@ -5,6 +5,7 @@ import { PRODUCTION_TOOLBAR_STAGE } from "@/components/shell/ProductionTopMenu";
 import {
   PRODUCTION_TOOLBAR_MIN_CLEARANCE_PX,
   productionHeaderStageForWidth,
+  productionTopbarActionsMarginClass,
   adjacentProductionToolbarStage,
   productionTopbarOverflow,
 } from "@/components/shell/app-shell/toolbar-stage";
@@ -22,6 +23,12 @@ describe("productionHeaderStageForWidth", () => {
     expect(productionHeaderStageForWidth(1024)).toBe(1);
     expect(productionHeaderStageForWidth(1023)).toBe(2);
     expect(productionHeaderStageForWidth(0)).toBe(2);
+  });
+
+  it("紧凑制作顶栏不再用负外边距抵消父级 gap", () => {
+    expect(productionTopbarActionsMarginClass(true, 2)).toBe("ml-0");
+    expect(productionTopbarActionsMarginClass(true, 1)).toBe("-ml-2");
+    expect(productionTopbarActionsMarginClass(false, 2)).toBe("ml-auto");
   });
 });
 

@@ -37,9 +37,4 @@ describe("项目模块标题只在共享顶部栏出现", () => {
     expect(readFileSync("components/wiki/WikiDocClient.tsx", "utf8")).toContain("value={title}");
     expect(readFileSync("components/assets/AssetPreviewClient.tsx", "utf8")).toContain("{fileName}");
   });
-
-  it("紧凑顶栏取消会抵消父级 gap 的负外边距", () => {
-    const shell = readFileSync("components/shell/AppShell.tsx", "utf8");
-    expect(shell).toContain('productionHeaderStage >= 2 ? "ml-0" : "-ml-2"');
-  });
 });

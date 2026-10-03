@@ -23,6 +23,14 @@ export function productionHeaderStageForWidth(width: number): ProductionHeaderSt
   return 2;
 }
 
+export function productionTopbarActionsMarginClass(
+  hasProductionTopMenu: boolean,
+  headerStage: ProductionHeaderStage,
+): "ml-auto" | "ml-0" | "-ml-2" {
+  if (!hasProductionTopMenu) return "ml-auto";
+  return headerStage >= 2 ? "ml-0" : "-ml-2";
+}
+
 export function adjacentProductionToolbarStage(
   stage: ProductionToolbarStage,
   direction: -1 | 1,
