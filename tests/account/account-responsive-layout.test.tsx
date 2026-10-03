@@ -50,6 +50,7 @@ describe("个人中心窄屏布局", () => {
     expect(phone).toMatch(/\.redeemForm\s*{[^}]*gap:\s*6px;/);
     expect(css).toMatch(/\.bindInput\s*{[^}]*min-width:\s*0;/);
     expect(css).toMatch(/\.redeemField input\s*{[^}]*min-width:\s*0;/);
+    expect(css).toMatch(/\.row\s*>\s*\.rowInfo span\s*{[^}]*overflow-wrap:\s*anywhere;/);
   });
 
   it("手机与平板输入控件保持 16px，聚焦时不会触发 iOS Safari 自动放大", () => {
