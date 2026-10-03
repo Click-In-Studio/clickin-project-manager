@@ -53,10 +53,10 @@ describe("发布门禁 workflow", () => {
 
     expect(migration).toContain('if [ "$PENDING" -gt 0 ]');
     expect(migration).toContain("STOP_FAILED=0");
-    expect(migration).toContain('pm2 stop "$APP" || STOP_FAILED=1');
+    expect(migration).toContain('pm2 delete "$APP" || STOP_FAILED=1');
     expect(migration).toContain('exit "$STOP_FAILED"');
-    expect(migration).toContain('pm2 stop "$APP"');
-    expect(migration.indexOf('pm2 stop "$APP"')).toBeLessThan(migration.indexOf('ssh prod "$DBMATE up"'));
+    expect(migration).toContain('pm2 delete "$APP"');
+    expect(migration.indexOf('pm2 delete "$APP"')).toBeLessThan(migration.indexOf('ssh prod "$DBMATE up"'));
     expect(migration.indexOf('ssh prod "$DBMATE up"')).toBeLessThan(
       migration.indexOf("unlink /var/www/production-manager/current"),
     );
@@ -75,6 +75,7 @@ describe("发布门禁 workflow", () => {
     expect(activation).toContain("http://127.0.0.1:3103/health");
     expect(activation).toContain("--max-time 3");
     expect(activation).toContain('pm2 stop "$APP" || STOP_FAILED=1');
+    expect(activation).toContain('pm2 delete "$APP" || STOP_FAILED=1');
     expect(activation.indexOf('cp "$NEW_ECOSYSTEM"')).toBeGreaterThan(activation.indexOf("http://127.0.0.1:3103/health"));
   });
 });

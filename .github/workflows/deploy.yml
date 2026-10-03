@@ -308,17 +308,17 @@ jobs:
               " < /dev/null
             }
 
-            echo "Found $PENDING pending migration(s) — stopping database client processes..."
+            echo "Found $PENDING pending migration(s) — removing database client processes from PM2..."
             if ! ssh prod '
               STOP_FAILED=0
               for APP in production-manager agent-runner heavy-worker; do
                 if pm2 describe "$APP" >/dev/null 2>&1; then
-                  pm2 stop "$APP" || STOP_FAILED=1
+                  pm2 delete "$APP" || STOP_FAILED=1
                 fi
               done
               exit "$STOP_FAILED"
             ' < /dev/null; then
-              echo "::error::停止数据库客户端进程失败；尝试恢复旧版本"
+              echo "::error::停止并移除数据库客户端进程失败；尝试恢复旧版本"
               restart_old_release || true
               exit 1
             fi
@@ -341,8 +341,8 @@ jobs:
             echo "── dbmate up"
             ssh prod "$DBMATE up" < /dev/null \
               || { echo "::error::MIGRATION FAILED — 服务保持停止；逐支核对 schema_migrations 后前向修复或恢复 $SHARED/backups/$BACKUP"; exit 1; }
-            # schema 已经变化，立即移除仍指向旧代码的 current；后续 ACL / 指纹失败时，
-            # 人工误跑 pm2 restart 也只能启动失败，不能让旧代码重新写新 schema。
+            # migration 前已经从 PM2 删除旧进程注册；schema 变化后再移除旧代码入口。
+            # 后续 ACL / 指纹失败时，按进程名 restart 和按 current 启动都会失败。
             ssh prod "unlink /var/www/production-manager/current 2>/dev/null || true" < /dev/null
             echo "SCHEMA_CHANGED=true" >> "$GITHUB_ENV"
           else
@@ -389,7 +389,11 @@ jobs:
               STOP_FAILED=0
               for APP in production-manager agent-runner heavy-worker; do
                 if pm2 describe "$APP" >/dev/null 2>&1; then
-                  pm2 stop "$APP" || STOP_FAILED=1
+                  if [ "$SCHEMA_CHANGED" = "true" ]; then
+                    pm2 delete "$APP" || STOP_FAILED=1
+                  else
+                    pm2 stop "$APP" || STOP_FAILED=1
+                  fi
                 fi
               done
               if [ "$SCHEMA_CHANGED" = "false" ] && [ -n "$PREVIOUS_RELEASE" ] && [ -d "$PREVIOUS_RELEASE" ]; then
@@ -400,7 +404,7 @@ jobs:
                 echo "schema 已变化或没有上一 release；已移除 current，进程保持停止" >&2
               fi
               if [ "$STOP_FAILED" -ne 0 ]; then
-                echo "一个或多个数据库客户端进程停止失败，必须立即人工核对 PM2" >&2
+                echo "一个或多个数据库客户端进程停止或移除失败，必须立即人工核对 PM2" >&2
                 return 1
               fi
               return 0
