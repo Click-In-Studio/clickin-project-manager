@@ -1,6 +1,8 @@
 "use client";
 
 import PageHeader, { PRIMARY_BTN } from "@/components/ui/PageHeader";
+import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
+import styles from "@/components/admin/admin-announcements.module.css";
 
 import { useState, useCallback, useEffect } from "react";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
@@ -315,7 +317,7 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
   });
 
   return (
-    <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+    <div className={styles.page}>
       <PageHeader
         eyebrow={productionName}
         title="公告管理"
@@ -326,41 +328,22 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
       />
 
       {/* ── 摘要 ── */}
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
-        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
-        background: "var(--line)", marginBottom: 18,
-      }}>
-        {[
-          [String(announcements.length), "全部公告", "本项目累计"],
-          [String(announcements.filter(a => a.isPinned).length), "置顶", "重点公告"],
-          [String(recent30Count), "近 30 天", "最近发布"],
-        ].map(([num, label, hint]) => (
-          <div key={label} style={{ minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13, background: "var(--surface)" }}>
-            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
-            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
-              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
-              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
-            </p>
-          </div>
-        ))}
-      </div>
+      <AdminMetricGrid
+        columns={3}
+        items={[
+          { value: String(announcements.length), label: "全部公告", hint: "本项目累计" },
+          { value: String(announcements.filter(a => a.isPinned).length), label: "置顶", hint: "重点公告" },
+          { value: String(recent30Count), label: "近 30 天", hint: "最近发布" },
+        ]}
+      />
 
       {/* ── Panel（定高分栏）── */}
-      <section style={{
-        background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22,
-        height: "calc(100vh - 320px)", minHeight: 460, display: "flex", minWidth: 0,
-      }}>
+      <section className={styles.workspace}>
 
       {/* ── 左侧列表 ── */}
-      <div style={{
-        width: 280, flexShrink: 0,
-        borderRight: "1px solid var(--line)",
-        display: "flex", flexDirection: "column",
-        overflowY: "auto",
-      }}>
+      <div className={styles.listPane}>
         {/* List */}
-        <div style={{ flex: 1, paddingRight: 12 }}>
+        <div className={styles.list}>
           {sorted.length === 0 && (
             <p style={{ fontSize: 13, color: "var(--muted)", padding: "24px 8px", textAlign: "center" }}>暂无公告</p>
           )}
@@ -369,9 +352,11 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
             return (
               <button
                 key={a.id}
+                type="button"
                 onClick={() => handleSelect(a.id)}
+                aria-pressed={isActive}
+                className={`${styles.listItem} ${isActive ? styles.listItemActive : ""}`}
                 style={{
-                  width: "100%", textAlign: "left", padding: "11px 12px", borderRadius: 8,
                   border: `1px solid ${isActive ? "var(--ink)" : "transparent"}`,
                   background: isActive ? "var(--ink)" : "transparent",
                   cursor: "pointer", transition: "all .1s", marginBottom: 2,
@@ -379,7 +364,7 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
                 onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "var(--surface-2)"; }}
                 onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <div className={styles.listMeta}>
                   {a.isPinned && (
                     <span style={{
                       fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 999,
@@ -389,14 +374,11 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
                       置顶
                     </span>
                   )}
-                  <span style={{ fontSize: 10, color: isActive ? "rgba(255,255,255,.5)" : "var(--muted)", marginLeft: "auto" }}>
+                  <span className={styles.listDate} style={{ color: isActive ? "rgba(255,255,255,.5)" : "var(--muted)" }}>
                     {formatDate(a.createdAt)}
                   </span>
                 </div>
-                <p style={{
-                  fontSize: 13, fontWeight: 600, color: isActive ? "white" : "var(--ink)",
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", margin: 0,
-                }}>
+                <p className={styles.listTitle} style={{ color: isActive ? "white" : "var(--ink)" }}>
                   {a.title}
                 </p>
               </button>
@@ -406,7 +388,7 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
       </div>
 
       {/* ── 右侧内容区 ── */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "4px 4px 4px 22px", minWidth: 0 }}>
+      <div className={styles.detailPane}>
         {/* Empty state */}
         {!mode && (
           <div style={{ paddingTop: 80, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
@@ -425,7 +407,7 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
 
         {/* New */}
         {mode?.kind === "new" && (
-          <div style={{ maxWidth: 680 }}>
+          <div className={styles.detailContent}>
             <p style={{ fontSize: 12, fontWeight: 700, color: "var(--stage)", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 16 }}>新建公告</p>
             <AnnouncementForm
               initial={{ title: "", content: "", isPinned: false }}
@@ -438,7 +420,7 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
 
         {/* Edit */}
         {mode?.kind === "edit" && selected && (
-          <div style={{ maxWidth: 680 }}>
+          <div className={styles.detailContent}>
             <p style={{ fontSize: 12, fontWeight: 700, color: "var(--stage)", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 16 }}>编辑公告</p>
             <AnnouncementForm
               initial={{ title: selected.title, content: selected.content, isPinned: selected.isPinned }}
@@ -451,9 +433,9 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
 
         {/* View */}
         {mode?.kind === "view" && selected && (
-          <div style={{ maxWidth: 680 }}>
+          <div className={styles.detailContent}>
             {/* Meta bar */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+            <div className={styles.detailMeta}>
               {selected.isPinned && (
                 <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "var(--ink)", color: "white" }}>
                   置顶
@@ -465,7 +447,7 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
               </span>
 
               {/* Actions */}
-              <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+              <div className={styles.detailActions}>
                 {canEdit && (
                   <>
                     <button
@@ -495,10 +477,9 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
             </div>
 
             {/* Title */}
-            <h2 style={{
+            <h2 className={styles.detailTitle} style={{
               fontFamily: 'Georgia, "Noto Serif SC", serif',
-              fontSize: "clamp(20px, 2vw, 26px)", fontWeight: 500,
-              color: "var(--ink)", lineHeight: 1.3, marginBottom: 20,
+              fontWeight: 500, color: "var(--ink)",
             }}>
               {selected.title}
             </h2>
