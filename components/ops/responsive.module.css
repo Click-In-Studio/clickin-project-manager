@@ -260,6 +260,117 @@
 
 .metricLabel { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 
+/* 财务页：桌面双列，窄屏按预算 → 支出的阅读顺序纵向排列。 */
+.financePage {
+  min-width: 0;
+  min-height: 100vh;
+  overflow-x: clip;
+  padding: 24px clamp(18px, 3vw, 52px) 60px;
+  background: var(--paper);
+}
+
+.financeIntro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.financeIntro p { margin: 0; color: var(--muted); font-size: 12px; }
+.financeMetricGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.financeMetricCard { display: flex; min-height: 86px; flex-direction: column; justify-content: center; }
+.financeMetricValue { min-width: 0; overflow-wrap: anywhere; }
+
+.financePanel {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.financePendingPanel {
+  margin-bottom: 16px;
+  padding: 14px 18px;
+  border-color: var(--stage);
+}
+
+.financePendingTitle,
+.financePanelTitle {
+  margin: 0 0 16px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.financePendingTitle { margin-bottom: 10px; color: var(--stage); font-size: 12px; }
+
+.financeColumns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.financeColumnsTwoUp { grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr); }
+
+.financeCategoryRow {
+  min-width: 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.financeCategorySummary {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+}
+
+.financeCategoryName { min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
+.financeCategoryName span { margin-left: 6px; color: var(--muted); font-weight: 400; }
+.financeCategoryAmount { min-width: 0; color: var(--muted); text-align: right; overflow-wrap: anywhere; }
+.financeCategoryAmount[data-over-budget] { color: #a33; }
+
+.financeCategoryProgress {
+  height: 6px;
+  margin-top: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.financeCategoryProgress > div { height: 100%; border-radius: 999px; background: var(--stage); }
+
+.financeExpenseRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.financeExpenseDetails { min-width: 0; }
+.financeExpenseTitle { display: block; color: var(--ink); font-size: 11px; overflow-wrap: anywhere; }
+.financeExpenseMeta { color: var(--muted); font-size: 9px; line-height: 1.45; overflow-wrap: anywhere; }
+.financeExpenseInvoice { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.45; overflow-wrap: anywhere; }
+.financeExpenseInvoice[data-pending] { color: #b45309; }
+.financeExpenseNote { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+
+.financeExpenseActions {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.financeExpenseAmount { max-width: 100%; color: var(--stage); font-size: 11px; text-align: right; overflow-wrap: anywhere; }
+.financeExpenseBaseAmount { display: block; color: var(--muted); }
+
 /* 物料状态数是动态的：只给物料页叠加密度规则，避免财务等共用 metric 原语的页面被带着改。 */
 .materialMetricGrid { align-items: stretch; }
 
@@ -310,11 +421,29 @@
   .metricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
   .metricCard { padding: 12px 14px; }
   .metricValue { font-size: clamp(17px, 5vw, 21px); }
+  .financePage { padding: 20px 14px 80px; }
+  .financeMetricCard { min-height: 72px; padding: 11px 12px; }
+  .financeMetricValue { font-size: clamp(16px, 5.2vw, 20px); line-height: 1.2; }
+  .financePanel { padding: 14px; }
+  .financePendingPanel { padding: 13px 14px; }
   .materialMetricGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .materialMetricCard { min-height: 54px; padding: 8px 7px; border-radius: 10px; }
   .materialMetricValue { font-size: clamp(23px, 7vw, 27px); line-height: 1; }
   .materialMetricLabel { margin-top: 5px; font-size: clamp(9px, 2.8vw, 10px); line-height: 1.2; overflow-wrap: anywhere; }
   .taskTopActions { margin-top: -4px; }
+}
+
+@media (max-width: 700px) {
+  .financeColumnsTwoUp { grid-template-columns: minmax(0, 1fr); }
+  .financeExpenseRow { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .financeExpenseActions { flex-direction: row; align-items: center; justify-content: flex-start; flex-wrap: wrap; }
+  .financeExpenseAmount { flex: 1 1 100%; text-align: left; }
+}
+
+@media (max-width: 480px) {
+  .financeCategorySummary { flex-direction: column; gap: 5px; }
+  .financeCategoryName span { display: block; margin: 2px 0 0; }
+  .financeCategoryAmount { text-align: left; }
 }
 
 @media (max-width: 360px) {
