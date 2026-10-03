@@ -161,6 +161,8 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
         return;
       }
       setAssets(p => p.filter(a => a.id !== assetId));
+    } catch {
+      alert("网络错误，删除没有成功，请检查连接后重试");
     } finally {
       setDeletingId(null);
     }

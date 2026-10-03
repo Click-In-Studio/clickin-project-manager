@@ -156,6 +156,37 @@ describe("资产工作台响应式信息与动作", () => {
     expect(versionActions[1].title).toBe("需要文件版本创建权");
     expect(button(container, "查看关联详情")).toBeTruthy();
   });
+
+  it("删除接口报错或弱网断开时保留资产并给出反馈", async () => {
+    const deletable = { ...asset, actions: { ...asset.actions, delete: true } };
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockReset();
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        assets: [deletable], stats: { totalBytes: deletable.sizeBytes, unknownFiles: 0 },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "资产仍被引用" }), {
+        status: 409, headers: { "Content-Type": "application/json" },
+      }))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const alertMock = vi.fn();
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    vi.stubGlobal("alert", alertMock);
+
+    await act(async () => {
+      root.render(<AssetPageClient productionId="production-1" versionId={null}
+        myUserId="viewer-1" userName="查看者" members={[]} departments={[]} />);
+    });
+    await act(async () => {});
+
+    await click(button(container, "删除"));
+    expect(container.textContent).toContain(deletable.name);
+    expect(alertMock).toHaveBeenLastCalledWith("资产仍被引用");
+
+    await click(button(container, "删除"));
+    expect(container.textContent).toContain(deletable.name);
+    expect(alertMock).toHaveBeenLastCalledWith("网络错误，删除没有成功，请检查连接后重试");
+  });
 });
 
 describe("统一分享入口", () => {
