@@ -70,7 +70,9 @@ describe("发布门禁 workflow", () => {
     expect(activation).toContain('ln -snf "$PREVIOUS_RELEASE"');
     expect(activation).toContain("unlink /var/www/production-manager/current");
     expect(activation).toContain("http://127.0.0.1:3001/health");
-    expect(activation).toContain('Authorization: Bearer $HEALTH_SECRET');
+    expect(activation).toContain('header = "Authorization: Bearer %s"');
+    expect(activation).toContain('curl -fsS --max-time 3 --config -');
+    expect(activation).not.toContain('-H "Authorization: Bearer $HEALTH_SECRET"');
     expect(activation).toContain("http://127.0.0.1:3102/health");
     expect(activation).toContain("http://127.0.0.1:3103/health");
     expect(activation).toContain("--max-time 3");
