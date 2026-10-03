@@ -418,9 +418,11 @@ jobs:
             fi
 
             for ATTEMPT in $(seq 1 30); do
+              # runner / worker 只监听 127.0.0.1，不对外暴露；Web /health 经过 nginx，必须鉴权。
               if curl -fsS --max-time 3 -H "Authorization: Bearer $HEALTH_SECRET" http://127.0.0.1:3001/health >/dev/null &&
                  curl -fsS --max-time 3 http://127.0.0.1:3102/health >/dev/null &&
                  curl -fsS --max-time 3 http://127.0.0.1:3103/health >/dev/null; then
+                # 已验证配置也是成功激活的一部分；落盘失败会造成下次恢复使用旧进程定义，必须失败关闭。
                 if ! cp "$NEW_ECOSYSTEM" /var/www/production-manager/shared/ecosystem.config.js; then
                   echo "保存已验证的 PM2 配置失败" >&2
                   fail_activation || true

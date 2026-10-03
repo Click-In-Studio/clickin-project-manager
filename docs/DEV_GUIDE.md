@@ -469,7 +469,7 @@ ALTER TABLE production DROP COLUMN IF EXISTS new_col;
 - 删列 / 删表 / 改类型 / 数据回填：down 写 `DO $$ BEGIN RAISE EXCEPTION 'irreversible'; END $$;`——不要假装能逆。这类变更的回退靠 CD 发布前自动做的 `shared/backups/pre_migration_*.pgdump`。
 - 一支文件默认整段一个事务；`CREATE INDEX CONCURRENTLY` 之类不能进事务的，段头写 `-- migrate:up transaction:false`。
 
-**破坏性 migration：默认停机、失败关闭**
+**migration：默认停机、失败关闭**
 
 - CD 先只读检查 pending migration；只要有 pending，就停止 Web、Agent runner 与 heavy worker，确认旧进程不再读写数据库后才备份并执行 `dbmate up`。迁移、指纹与 ACL 全部通过后才切换代码并重新启动。
 - 因为旧代码不会与新 schema 并行运行，停用旧路径与删列 / 删表 / 改类型可以在同一版本完成。不要为了避免旧 SQL 报错而保留已经失去业务语义的列或写路径：一次成功但被新模型忽略的旧写，比事务报错回滚更危险。
