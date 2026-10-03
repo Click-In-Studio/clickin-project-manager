@@ -5,14 +5,16 @@ summary: 转让所有者、归档、删除——三个不可轻做的操作
 routes: [admin/danger]
 who: 项目所有者（归档另有权限可授）
 tier: all
-platform: [desktop]
+platform: [desktop, mobile]
 related: [start/join/new-production, start/join/leave-project, admin/settings/producer]
-updated: 2026-09-18
+updated: 2026-10-03
 ---
 
 ## 这是什么
 
 「配置中心 → 危险操作」三件事，从轻到重：归档、转让、删除。
+
+手机上进入本页后，用页面上方的「返回项目」回到项目工作区；底部导航继续保留配置菜单和个人入口。
 
 ## 怎么操作
 

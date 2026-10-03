@@ -13,6 +13,7 @@ import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { productionAvatarSrc } from "@/lib/asset/avatar-url";
 import { PRODUCTION_TYPES } from "@/lib/production/production-types";
+import dangerStyles from "@/components/admin/admin-danger.module.css";
 
 // ── Primitives ────────────────────────────────────────────────────────────────
 
@@ -651,6 +652,22 @@ export function DataCard({ productionId, perms }: { productionId: string; perms:
 // 危险区域 card
 // ─────────────────────────────────────────────────────────────────────────────
 
+function DangerRow({ title, hint, children }: {
+  title: string;
+  hint: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={dangerStyles.dangerRow}>
+      <div className={dangerStyles.dangerLabel}>
+        <p>{title}</p>
+        <small>{hint}</small>
+      </div>
+      <div className={dangerStyles.dangerControl}>{children}</div>
+    </div>
+  );
+}
+
 export function DangerCard({ productionId, productionName, isArchived, perms }: {
   productionId: string;
   productionName: string;
@@ -693,9 +710,12 @@ export function DangerCard({ productionId, productionName, isArchived, perms }: 
   const inputBlur = (e: React.FocusEvent<HTMLInputElement>) => { e.currentTarget.style.borderColor = "var(--line)"; };
 
   return (
-    <Card title="危险区域" danger>
+    <div className={dangerStyles.dangerCard}>
+      <div className={dangerStyles.dangerHeader}>
+        <p>危险区域</p>
+      </div>
       {/* Archive */}
-      <Row title={currentArchived ? "取消归档" : "归档项目"} hint={currentArchived ? "恢复项目为活跃状态，成员可继续编辑" : "标记为归档，成员只读，不再出现于常用列表"}>
+      <DangerRow title={currentArchived ? "取消归档" : "归档项目"} hint={currentArchived ? "恢复项目为活跃状态，成员可继续编辑" : "标记为归档，成员只读，不再出现于常用列表"}>
         {!perms.canArchive ? (
           <LockedNotice reason="需要 production:archive 权限" />
         ) : (
@@ -710,10 +730,10 @@ export function DangerCard({ productionId, productionName, isArchived, perms }: 
             {archiveMsg && <p style={{ marginTop: 6, fontSize: 12, color: "#16a34a" }}>{archiveMsg}</p>}
           </div>
         )}
-      </Row>
+      </DangerRow>
 
       {/* Delete */}
-      <Row title="删除项目" hint="彻底删除项目及所有数据，不可撤销" last>
+      <DangerRow title="删除项目" hint="彻底删除项目及所有数据，不可撤销">
         {!perms.canDelete ? (
           <LockedNotice reason="仅项目所有者可删除（production:delete）" />
         ) : (
@@ -721,7 +741,7 @@ export function DangerCard({ productionId, productionName, isArchived, perms }: 
             <p style={{ fontSize: 12, color: "var(--muted)" }}>
               输入项目名称 <strong style={{ color: "var(--ink)" }}>「{productionName}」</strong> 以确认：
             </p>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className={dangerStyles.deleteConfirmRow}>
               <input
                 value={deleteInput}
                 onChange={e => setDeleteInput(e.target.value)}
@@ -739,7 +759,7 @@ export function DangerCard({ productionId, productionName, isArchived, perms }: 
             </div>
           </div>
         )}
-      </Row>
-    </Card>
+      </DangerRow>
+    </div>
   );
 }
