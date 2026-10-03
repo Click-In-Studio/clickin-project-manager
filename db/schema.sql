@@ -1818,32 +1818,8 @@ CREATE INDEX IF NOT EXISTS production_expense_event_expense_idx
 
 -- ── 物料台账（add-material-ledger.sql）─────────────────────────────────────────
 -- 实体物（道具/服装/设备/布景），与 asset（数字资产：文件/R2/飞书链接）不是一回事。
--- 状态只做列表不做状态机：任何状态可改到任何状态，等真实用法跑出规则再加约束——
--- 反过来（先定死再放开）是破坏性的。状态列表可配置，照 production_member_tag 的
--- 范式：production_id 为 NULL 是系统预设，非 NULL 是剧组自定义。
--- 责任方复用 task 的主体抽象（部门 | 用户组，二选一）。
-
-CREATE TABLE IF NOT EXISTS production_material_status (
-  id            UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
-  production_id TEXT    REFERENCES production(id) ON DELETE CASCADE NULL,
-  name          TEXT    NOT NULL,
-  color         TEXT,
-  order_index   INTEGER NOT NULL DEFAULT 0,
-  is_system     BOOLEAN NOT NULL DEFAULT false
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS pms_system_name_idx
-  ON production_material_status (name) WHERE production_id IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS pms_prod_name_idx
-  ON production_material_status (production_id, name) WHERE production_id IS NOT NULL;
-
-INSERT INTO production_material_status (production_id, name, color, order_index, is_system) VALUES
-  (NULL, '已入库', '#3f6b48', 1, true),
-  (NULL, '制作中', '#b45309', 2, true),
-  (NULL, '使用中', '#315f66', 3, true),
-  (NULL, '待修整', '#8c4654', 4, true),
-  (NULL, '已报废', '#6b7280', 5, true)
-ON CONFLICT (name) WHERE production_id IS NULL DO NOTHING;
+-- 当前状态与数量由确认入库批次及追加式流水派生；责任方复用 task 的主体抽象
+--（部门 | 用户组，二选一）。
 
 CREATE TABLE IF NOT EXISTS production_material (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1856,7 +1832,6 @@ CREATE TABLE IF NOT EXISTS production_material (
   quantity_scale SMALLINT   NOT NULL DEFAULT 0,
   department_id UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
   group_id      UUID        REFERENCES event_group(id)     ON DELETE SET NULL,
-  status_id     UUID        REFERENCES production_material_status(id) ON DELETE SET NULL,
   notes         TEXT        NOT NULL DEFAULT '',
   created_by    UUID        NOT NULL REFERENCES app_user(id),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1874,8 +1849,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS production_material_code_idx
   ON production_material (production_id, code);
 CREATE INDEX IF NOT EXISTS production_material_production_idx
   ON production_material (production_id);
-CREATE INDEX IF NOT EXISTS production_material_status_idx
-  ON production_material (status_id) WHERE status_id IS NOT NULL;
 
 ALTER TABLE production_material
   ADD CONSTRAINT production_material_id_production_unique UNIQUE (id, production_id);
