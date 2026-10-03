@@ -1,0 +1,197 @@
+.page {
+  min-height: 100vh;
+  padding: 24px clamp(18px, 3vw, 52px) 60px;
+  background: var(--paper);
+}
+
+.inviteCard {
+  margin-bottom: 18px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+}
+
+.modeSwitch {
+  display: flex;
+  max-width: 360px;
+  margin-bottom: 12px;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+
+.sheetUrlRow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.sheetUrlInput {
+  min-width: 0;
+  flex: 1;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.sheetParseButton {
+  flex-shrink: 0;
+}
+
+.emailTextarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+}
+
+.dataRow {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+  padding: 18px 24px;
+}
+
+.dataLabel {
+  padding-top: 1px;
+}
+
+.dataTitle {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dataHint {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.importList {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.importItem {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.importCopy {
+  min-width: 0;
+  flex: 1;
+}
+
+.importTitle {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.importDescription {
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.importLink {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 13px;
+  border: 1px solid var(--ink);
+  border-radius: 7px;
+  background: white;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.importLink:hover {
+  background: var(--ink);
+  color: white;
+}
+
+.lockedNotice {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: 20px 12px 80px;
+  }
+
+  .inviteCard {
+    padding: 18px 16px;
+  }
+
+  .modeSwitch {
+    max-width: none;
+  }
+
+  .sheetUrlRow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sheetUrlInput {
+    width: 100%;
+    padding: 7.5px 10px;
+    font-size: 16px;
+  }
+
+  .sheetParseButton {
+    width: 100%;
+    min-height: 40px;
+  }
+
+  .emailTextarea {
+    padding: 8.5px 10px;
+    font-size: 16px;
+  }
+
+  .dataRow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 15px 14px 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .importItem {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 11px 12px 12px;
+  }
+
+  .importLink {
+    width: 100%;
+    min-height: 40px;
+  }
+}
