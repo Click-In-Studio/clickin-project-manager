@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import PageHeader, { PRIMARY_BTN } from "@/components/ui/PageHeader";
+import ProductionModuleTopMenu, {
+  PRODUCTION_MODULE_ACTION_CLASS,
+  PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS,
+} from "@/components/shell/ProductionModuleTopMenu";
 import Link from "next/link";
 import AssetUploadPanel from "./AssetUploadPanel";
 import RelatedWikiChips from "@/components/wiki/RelatedWikiChips";
@@ -36,6 +39,7 @@ type View = "all" | "upload-new-version";
 
 interface Props {
   productionId: string;
+  productionName: string;
   versionId: string | null;
   myUserId: string;
   userName: string;
@@ -43,7 +47,7 @@ interface Props {
   departments: { id: string; name: string }[];
 }
 
-export default function AssetPageClient({ productionId, versionId, myUserId, userName, members, departments }: Props) {
+export default function AssetPageClient({ productionId, productionName, versionId, myUserId, userName, members, departments }: Props) {
   const router = useRouter();
   const [assets, setAssets] = useState<AssetListItem[]>([]);
   const [stats, setStats] = useState<{ totalBytes: number; unknownFiles: number } | null>(null);
@@ -214,16 +218,12 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      {/* Page header（v3 统一页头） */}
-      <PageHeader
-        eyebrow="Assets"
-        title="资产工作台"
-        side="script"
-        actions={
-          <button onClick={() => setShowUploadModal(true)} style={PRIMARY_BTN}>
-            ＋ 上传新 Asset
-          </button>
-        }
+      <ProductionModuleTopMenu
+        productionName={productionName}
+        label="资产工作台"
+        primaryAction={<button type="button" onClick={() => setShowUploadModal(true)} className={PRODUCTION_MODULE_ACTION_CLASS}>＋ 上传新 Asset</button>}
+        primaryShortAction={<button type="button" aria-label="上传新 Asset" onClick={() => setShowUploadModal(true)} className={PRODUCTION_MODULE_ACTION_CLASS}>＋</button>}
+        primaryOverflowAction={<button type="button" onClick={() => setShowUploadModal(true)} className={PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS}>上传新 Asset</button>}
       />
 
       {/* 存储占用（#429：现查不物化；含历史版本文件，口径见 #428） */}

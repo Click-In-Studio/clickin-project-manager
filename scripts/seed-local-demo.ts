@@ -22,7 +22,7 @@ import {
 import { createWiki } from "../lib/wiki/content";
 import { createAsset } from "../lib/asset/db";
 import { createUserNotification } from "../lib/notify/inbox-db";
-import { createMaterial, listMaterialStatuses } from "../lib/ops/material-db";
+import { createMaterial } from "../lib/ops/material-db";
 import { approveExpense, createBudgetCategory, submitExpense } from "../lib/ops/finance-db";
 import { createPhase } from "../lib/ops/phase-db";
 
@@ -584,22 +584,18 @@ async function main() {
   await createUserNotification({ userId: user.id, productionId: PRODUCTION_ID, kind: "script_update", entityType: "version", entityId: versionId, title: "排练稿 V1 已更新", body: "第二场结尾与终曲歌词已调整。", viewHref: `/production/${PRODUCTION_ID}/script?v=${versionId}`, category: "action" });
 
   // ── 物料台账 ────────────────────────────────────────────────────────────────
-  // 状态按 order_index 取，不写状态名：系统预设可能改名，剧组也能加自己的状态
-  // （db/add-material-ledger.sql 的立意是「自由列表不是状态机」）。
-  const statuses = await listMaterialStatuses(PRODUCTION_ID);
-  const st = (i: number) => statuses[i % statuses.length]?.id ?? null;
-  const demoMaterials: [string, string, string, number, number, string][] = [
-    ["PR-014", "旧式黄铜航海罗盘", "道具", 0, 0, "A-03"],
-    ["CS-021", "林澈第二场深蓝风衣", "服装", 3, 1, "C-12"],
-    ["EQ-008", "手持船笛效果器", "设备", 2, 2, "主剧场"],
-    ["SC-005", "灯塔栏杆模块", "布景", 1, 3, "制作工坊"],
-    ["PR-019", "无署名旧信件（8 份）", "道具", 0, 0, "A-07"],
+  const demoMaterials: [string, string, string, number, string][] = [
+    ["PR-014", "旧式黄铜航海罗盘", "道具", 0, "A-03"],
+    ["CS-021", "林澈第二场深蓝风衣", "服装", 1, "C-12"],
+    ["EQ-008", "手持船笛效果器", "设备", 2, "主剧场"],
+    ["SC-005", "灯塔栏杆模块", "布景", 3, "制作工坊"],
+    ["PR-019", "无署名旧信件（8 份）", "道具", 0, "A-07"],
   ];
-  for (const [code, mName, category, statusIdx, deptIdx, location] of demoMaterials) {
+  for (const [code, mName, category, deptIdx, location] of demoMaterials) {
     await createMaterial({
       productionId: PRODUCTION_ID, code, name: mName, category,
       subject: { kind: "dept", id: deptRows[deptIdx].id },
-      statusId: st(statusIdx), location, quantity: 1, createdBy: user.id,
+      location, quantity: 1, createdBy: user.id,
     });
   }
 

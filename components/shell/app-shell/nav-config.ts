@@ -87,9 +87,22 @@ export const OVERVIEW_NAV = [
 ] as const;
 
 export const PRODUCTION_TOP_MENU_LABELS: Record<string, string> = {
+  "": "我的工作",
+  notifications: "我的通知",
+  announcements: "我的通知",
+  "access-requests": "审批",
   script: "剧本",
   dramaturgy: "构作",
   characters: "构作",
   cues: "Cue",
   cuelists: "Cue 表设置",
+  contacts: "人员",
+  planning: "计划与日程",
+  events: "事件",
+  tasks: "任务",
+  reports: "报告",
+  wiki: "知识库",
+  finance: "财务",
+  materials: "物料",
+  assets: "资产工作台",
 };

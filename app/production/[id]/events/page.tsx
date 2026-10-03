@@ -43,6 +43,7 @@ export default async function EventsPage({ params }: { params: Promise<{ id: str
     <>
       <EventsClient
         productionId={id}
+        productionName={name}
         initialEvents={events}
         canCreate={canCreate}
         canViewFull={canViewFull}

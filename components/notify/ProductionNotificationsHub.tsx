@@ -1,6 +1,5 @@
 "use client";
 
-import PageHeader from "@/components/ui/PageHeader";
 import MyNotificationsClient from "@/components/notify/MyNotificationsClient";
 import ProductionAnnouncementsClient from "@/components/notify/ProductionAnnouncementsClient";
 import styles from "@/components/ui/my-pages.module.css";
@@ -26,21 +25,8 @@ export default function ProductionNotificationsHub({
   announcements,
   announcementReadIds,
 }: Props) {
-  const unreadAnnouncements = announcements.filter((item) => !announcementReadIds.includes(item.id)).length;
-
   return (
     <div className={styles.notificationHubWorkspace}>
-      <PageHeader
-        eyebrow={productionName}
-        title={
-          <span className={styles.notificationHubTitle}>
-            我的通知
-            {unreadAnnouncements > 0 && <em>{unreadAnnouncements} 条公告未读</em>}
-          </span>
-        }
-        side="stage"
-      />
-
       <div className={styles.notificationHub}>
         <ProductionAnnouncementsClient
           compact

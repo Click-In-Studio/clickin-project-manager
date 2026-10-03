@@ -1,6 +1,5 @@
 "use client";
 
-import PageHeader from "@/components/ui/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import type { MemberWithRoles } from "@/lib/perm/member-db";
@@ -110,8 +109,6 @@ export default function ContactsClient({
 
   return (
     <div className={styles.page}>
-      <PageHeader eyebrow="People" title="人员" side="stage" />
-
       <div className={styles.panel}>
         {sorted.length === 0 ? (
           <div className={styles.emptyState}>

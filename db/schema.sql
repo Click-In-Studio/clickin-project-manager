@@ -1818,32 +1818,8 @@ CREATE INDEX IF NOT EXISTS production_expense_event_expense_idx
 
 -- ── 物料台账（add-material-ledger.sql）─────────────────────────────────────────
 -- 实体物（道具/服装/设备/布景），与 asset（数字资产：文件/R2/飞书链接）不是一回事。
--- 状态只做列表不做状态机：任何状态可改到任何状态，等真实用法跑出规则再加约束——
--- 反过来（先定死再放开）是破坏性的。状态列表可配置，照 production_member_tag 的
--- 范式：production_id 为 NULL 是系统预设，非 NULL 是剧组自定义。
--- 责任方复用 task 的主体抽象（部门 | 用户组，二选一）。
-
-CREATE TABLE IF NOT EXISTS production_material_status (
-  id            UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
-  production_id TEXT    REFERENCES production(id) ON DELETE CASCADE NULL,
-  name          TEXT    NOT NULL,
-  color         TEXT,
-  order_index   INTEGER NOT NULL DEFAULT 0,
-  is_system     BOOLEAN NOT NULL DEFAULT false
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS pms_system_name_idx
-  ON production_material_status (name) WHERE production_id IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS pms_prod_name_idx
-  ON production_material_status (production_id, name) WHERE production_id IS NOT NULL;
-
-INSERT INTO production_material_status (production_id, name, color, order_index, is_system) VALUES
-  (NULL, '已入库', '#3f6b48', 1, true),
-  (NULL, '制作中', '#b45309', 2, true),
-  (NULL, '使用中', '#315f66', 3, true),
-  (NULL, '待修整', '#8c4654', 4, true),
-  (NULL, '已报废', '#6b7280', 5, true)
-ON CONFLICT (name) WHERE production_id IS NULL DO NOTHING;
+-- 当前状态与数量由确认入库批次及追加式流水派生；责任方复用 task 的主体抽象
+--（部门 | 用户组，二选一）。
 
 CREATE TABLE IF NOT EXISTS production_material (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1856,7 +1832,6 @@ CREATE TABLE IF NOT EXISTS production_material (
   quantity_scale SMALLINT   NOT NULL DEFAULT 0,
   department_id UUID        REFERENCES production_dept(id) ON DELETE SET NULL,
   group_id      UUID        REFERENCES event_group(id)     ON DELETE SET NULL,
-  status_id     UUID        REFERENCES production_material_status(id) ON DELETE SET NULL,
   notes         TEXT        NOT NULL DEFAULT '',
   created_by    UUID        NOT NULL REFERENCES app_user(id),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1874,8 +1849,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS production_material_code_idx
   ON production_material (production_id, code);
 CREATE INDEX IF NOT EXISTS production_material_production_idx
   ON production_material (production_id);
-CREATE INDEX IF NOT EXISTS production_material_status_idx
-  ON production_material (status_id) WHERE status_id IS NOT NULL;
 
 ALTER TABLE production_material
   ADD CONSTRAINT production_material_id_production_unique UNIQUE (id, production_id);
@@ -1924,11 +1897,28 @@ CREATE TABLE IF NOT EXISTS production_material_stock_movement (
   id                TEXT          PRIMARY KEY,
   production_id     TEXT          NOT NULL REFERENCES production(id) ON DELETE CASCADE,
   lot_id            TEXT          NOT NULL,
-  from_bucket       TEXT          NOT NULL CHECK (from_bucket IN ('expected', 'in_stock', 'checked_out', 'maintenance', 'exited')),
-  to_bucket         TEXT          NOT NULL CHECK (to_bucket IN ('expected', 'in_stock', 'checked_out', 'maintenance', 'exited')),
+  from_bucket       TEXT          NOT NULL CHECK (from_bucket IN ('expected','in_stock','checked_out','maintenance','exited','cancelled','adjustment')),
+  to_bucket         TEXT          NOT NULL CHECK (to_bucket IN ('expected','in_stock','checked_out','maintenance','exited','cancelled','adjustment')),
   quantity          NUMERIC(18,3) NOT NULL CHECK (quantity > 0),
   reverses_event_id TEXT          REFERENCES production_material_stock_movement(id) ON DELETE RESTRICT,
   return_of_movement_id TEXT      REFERENCES production_material_stock_movement(id) ON DELETE RESTRICT,
+  operation         TEXT NOT NULL DEFAULT '',
+  reason            TEXT NOT NULL DEFAULT '',
+  exit_reason       TEXT CHECK (exit_reason IN ('lost','sold','scrapped','returned_to_source','other')),
+  from_location     TEXT NOT NULL DEFAULT '',
+  to_location       TEXT NOT NULL DEFAULT '',
+  event_id          TEXT,
+  event_title       TEXT NOT NULL DEFAULT '',
+  task_id           TEXT,
+  task_title        TEXT NOT NULL DEFAULT '',
+  custodian_kind    TEXT CHECK (custodian_kind IN ('user','dept','group','event')),
+  custodian_id      TEXT,
+  custodian_label   TEXT NOT NULL DEFAULT '',
+  source_before     NUMERIC(18,3),
+  source_after      NUMERIC(18,3),
+  target_before     NUMERIC(18,3),
+  target_after      NUMERIC(18,3),
+  CONSTRAINT material_custodian_pair CHECK ((custodian_kind IS NULL) = (custodian_id IS NULL)),
   note              TEXT          NOT NULL DEFAULT '',
   occurred_at       TIMESTAMPTZ   NOT NULL DEFAULT now(),
   created_by        UUID          NOT NULL REFERENCES app_user(id),
@@ -2084,7 +2074,7 @@ BEGIN
     FROM production_material_stock_movement
    WHERE lot_id = NEW.lot_id;
 
-  IF available_quantity < NEW.quantity THEN
+  IF NEW.from_bucket <> 'adjustment' AND available_quantity < NEW.quantity THEN
     RAISE EXCEPTION 'material stock would become negative'
       USING ERRCODE = '23514', CONSTRAINT = 'material_stock_nonnegative';
   END IF;
@@ -2103,7 +2093,7 @@ BEGIN
     END IF;
   END IF;
 
-  IF NEW.from_bucket = 'checked_out' AND NEW.to_bucket = 'in_stock'
+  IF NEW.from_bucket = 'checked_out' AND NEW.to_bucket IN ('in_stock','maintenance','exited')
      AND NEW.reverses_event_id IS NULL AND NEW.return_of_movement_id IS NULL THEN
     RAISE EXCEPTION 'material return must reference its checkout'
       USING ERRCODE = '23514', CONSTRAINT = 'material_stock_return_reference_required';
@@ -2120,7 +2110,7 @@ BEGIN
        OR checkout_event.reverses_event_id IS NOT NULL
        OR checkout_event.return_of_movement_id IS NOT NULL
        OR NEW.from_bucket <> 'checked_out'
-       OR NEW.to_bucket <> 'in_stock'
+       OR NEW.to_bucket NOT IN ('in_stock','maintenance','exited')
        OR EXISTS (
          SELECT 1 FROM production_material_stock_movement
           WHERE reverses_event_id = checkout_event.id
@@ -2147,6 +2137,215 @@ DROP TRIGGER IF EXISTS production_material_stock_movement_guard ON production_ma
 CREATE TRIGGER production_material_stock_movement_guard
 BEFORE INSERT ON production_material_stock_movement
 FOR EACH ROW EXECUTE FUNCTION enforce_material_stock_movement();
+
+CREATE OR REPLACE FUNCTION enforce_material_lifecycle() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  lot production_material_stock_lot%ROWTYPE;
+  strategy TEXT;
+  original production_material_stock_movement%ROWTYPE;
+  task_event TEXT;
+  label TEXT;
+BEGIN
+  SELECT * INTO lot FROM production_material_stock_lot
+    WHERE id=NEW.lot_id AND production_id=NEW.production_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'material stock lot not found' USING ERRCODE='23503';
+  END IF;
+  SELECT tracking_strategy INTO strategy FROM production_material WHERE id=lot.material_id;
+
+  IF NEW.reverses_event_id IS NOT NULL THEN
+    NEW.operation := 'reversal';
+    SELECT * INTO original FROM production_material_stock_movement WHERE id=NEW.reverses_event_id;
+    IF original.reverses_event_id IS NOT NULL OR btrim(NEW.reason)='' OR EXISTS (
+      SELECT 1 FROM production_material_stock_movement r
+      WHERE r.return_of_movement_id=original.id AND NOT EXISTS (
+        SELECT 1 FROM production_material_stock_movement rv WHERE rv.reverses_event_id=r.id
+      )
+    ) THEN
+      RAISE EXCEPTION 'reversal requires reason and unreconciled original'
+        USING ERRCODE='23514', CONSTRAINT='material_lifecycle_reversal';
+    END IF;
+    NEW.event_id:=original.event_id; NEW.event_title:=original.event_title;
+    NEW.task_id:=original.task_id; NEW.task_title:=original.task_title;
+    NEW.custodian_kind:=original.custodian_kind; NEW.custodian_id:=original.custodian_id;
+    NEW.custodian_label:=original.custodian_label;
+    NEW.from_location:=original.to_location; NEW.to_location:=original.from_location;
+    NEW.exit_reason:=original.exit_reason;
+  ELSE
+    NEW.operation := CASE
+      WHEN NEW.from_bucket='expected' AND NEW.to_bucket='in_stock' THEN 'receipt'
+      WHEN NEW.from_bucket='expected' AND NEW.to_bucket='cancelled' THEN 'cancel'
+      WHEN NEW.from_bucket='in_stock' AND NEW.to_bucket='checked_out' THEN 'checkout'
+      WHEN NEW.from_bucket='checked_out' AND NEW.to_bucket='in_stock' THEN 'return'
+      WHEN NEW.from_bucket IN ('in_stock','checked_out') AND NEW.to_bucket='maintenance' THEN 'maintenance'
+      WHEN NEW.from_bucket='maintenance' AND NEW.to_bucket='in_stock' THEN 'repair'
+      WHEN NEW.from_bucket IN ('in_stock','checked_out','maintenance') AND NEW.to_bucket='exited' THEN 'exit'
+      WHEN NEW.from_bucket='adjustment' AND NEW.to_bucket='in_stock' THEN 'adjustment'
+      WHEN NEW.from_bucket='in_stock' AND NEW.to_bucket='adjustment' THEN 'adjustment'
+      ELSE NULL END;
+    IF NEW.operation IS NULL OR (strategy='consumable' AND NEW.operation IN ('maintenance','repair'))
+       OR (strategy='serialized' AND NEW.operation='adjustment') THEN
+      RAISE EXCEPTION 'illegal material transition'
+        USING ERRCODE='23514', CONSTRAINT='material_lifecycle_transition';
+    END IF;
+    IF NEW.operation IN ('exit','cancel','maintenance','adjustment') AND btrim(NEW.reason)='' THEN
+      RAISE EXCEPTION 'material movement requires reason'
+        USING ERRCODE='23514', CONSTRAINT='material_lifecycle_reason';
+    END IF;
+    IF (NEW.operation='exit') <> (NEW.exit_reason IS NOT NULL) THEN
+      RAISE EXCEPTION 'exit reason only valid for exit'
+        USING ERRCODE='23514', CONSTRAINT='material_lifecycle_reason';
+    END IF;
+    IF NEW.exit_reason='returned_to_source' AND NEW.from_bucket<>'in_stock' THEN
+      RAISE EXCEPTION 'source return must be in stock'
+        USING ERRCODE='23514', CONSTRAINT='material_lifecycle_transition';
+    END IF;
+
+    IF NEW.return_of_movement_id IS NOT NULL THEN
+      SELECT * INTO original FROM production_material_stock_movement WHERE id=NEW.return_of_movement_id;
+      IF (NEW.event_id IS NOT NULL AND NEW.event_id IS DISTINCT FROM original.event_id)
+         OR (NEW.task_id IS NOT NULL AND NEW.task_id IS DISTINCT FROM original.task_id) THEN
+        RAISE EXCEPTION 'return use must match checkout'
+          USING ERRCODE='23514', CONSTRAINT='material_lifecycle_use';
+      END IF;
+      NEW.event_id:=original.event_id; NEW.event_title:=original.event_title;
+      NEW.task_id:=original.task_id; NEW.task_title:=original.task_title;
+      IF NEW.from_location='' THEN NEW.from_location:=original.to_location; END IF;
+      IF NEW.to_location='' AND NEW.to_bucket='in_stock' THEN NEW.to_location:=original.from_location; END IF;
+    ELSIF NEW.event_id IS NOT NULL OR NEW.task_id IS NOT NULL THEN
+      IF NEW.operation<>'checkout' THEN
+        RAISE EXCEPTION 'use links belong to checkout'
+          USING ERRCODE='23514', CONSTRAINT='material_lifecycle_use';
+      END IF;
+      IF NEW.event_id IS NOT NULL THEN
+        SELECT title INTO label FROM production_event WHERE id=NEW.event_id AND production_id=NEW.production_id FOR SHARE;
+        IF NOT FOUND THEN
+          RAISE EXCEPTION 'invalid event use' USING ERRCODE='23514', CONSTRAINT='material_lifecycle_use';
+        END IF;
+        NEW.event_title:=label;
+      END IF;
+      IF NEW.task_id IS NOT NULL THEN
+        SELECT title,event_id INTO label,task_event FROM task WHERE id=NEW.task_id AND production_id=NEW.production_id FOR SHARE;
+        IF NOT FOUND OR (task_event IS NOT NULL AND NEW.event_id IS NOT NULL AND task_event<>NEW.event_id) THEN
+          RAISE EXCEPTION 'invalid task use' USING ERRCODE='23514', CONSTRAINT='material_lifecycle_use';
+        END IF;
+        NEW.task_title:=label;
+      END IF;
+    END IF;
+
+    IF NEW.custodian_kind IS NOT NULL THEN
+      CASE NEW.custodian_kind
+        WHEN 'user' THEN SELECT COALESCE(NULLIF(p.display_name,''),p.name,'') INTO label FROM production_member m
+          LEFT JOIN user_profile p ON p.user_id=m.user_id
+          WHERE m.production_id=NEW.production_id AND m.user_id::text=NEW.custodian_id AND m.status='active';
+        WHEN 'dept' THEN SELECT name INTO label FROM production_dept
+          WHERE production_id=NEW.production_id AND id::text=NEW.custodian_id;
+        WHEN 'group' THEN SELECT name INTO label FROM event_group
+          WHERE production_id=NEW.production_id AND id::text=NEW.custodian_id;
+        WHEN 'event' THEN SELECT title INTO label FROM production_event
+          WHERE production_id=NEW.production_id AND id=NEW.custodian_id;
+        ELSE RAISE EXCEPTION 'invalid custodian' USING ERRCODE='23514', CONSTRAINT='material_lifecycle_custodian';
+      END CASE;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'invalid custodian' USING ERRCODE='23514', CONSTRAINT='material_lifecycle_custodian';
+      END IF;
+      NEW.custodian_label:=label;
+    END IF;
+  END IF;
+
+  SELECT (CASE WHEN NEW.from_bucket='expected' THEN lot.confirmed_quantity ELSE 0 END)
+    + COALESCE(SUM(CASE WHEN to_bucket=NEW.from_bucket THEN quantity WHEN from_bucket=NEW.from_bucket THEN -quantity ELSE 0 END),0),
+    (CASE WHEN NEW.to_bucket='expected' THEN lot.confirmed_quantity ELSE 0 END)
+    + COALESCE(SUM(CASE WHEN to_bucket=NEW.to_bucket THEN quantity WHEN from_bucket=NEW.to_bucket THEN -quantity ELSE 0 END),0)
+    INTO NEW.source_before,NEW.target_before FROM production_material_stock_movement WHERE lot_id=NEW.lot_id;
+  NEW.source_after:=NEW.source_before-NEW.quantity;
+  NEW.target_after:=NEW.target_before+NEW.quantity;
+  IF NEW.operation='receipt' AND NEW.to_location='' THEN NEW.to_location:=lot.location; END IF;
+  IF NEW.exit_reason='returned_to_source' AND NEW.to_location='' THEN NEW.to_location:=lot.source_label; END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER production_material_a_lifecycle_guard
+  BEFORE INSERT ON production_material_stock_movement
+  FOR EACH ROW EXECUTE FUNCTION enforce_material_lifecycle();
+
+CREATE INDEX material_stock_use_event_idx ON production_material_stock_movement(production_id,event_id)
+  WHERE event_id IS NOT NULL;
+CREATE INDEX material_stock_use_task_idx ON production_material_stock_movement(production_id,task_id)
+  WHERE task_id IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION enforce_material_effective_obligation() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  lot production_material_stock_lot%ROWTYPE;
+  cancelled NUMERIC(18,3);
+  returned NUMERIC(18,3);
+  missing NUMERIC(18,3);
+  extra NUMERIC(18,3) := 0;
+  movement production_material_stock_movement%ROWTYPE;
+BEGIN
+  SELECT * INTO lot FROM production_material_stock_lot WHERE id=NEW.lot_id FOR UPDATE;
+  IF lot.return_due_quantity IS NULL THEN RETURN NEW; END IF;
+  SELECT COALESCE(SUM(CASE WHEN to_bucket='cancelled' THEN quantity
+    WHEN from_bucket='cancelled' THEN -quantity ELSE 0 END),0)
+    INTO cancelled FROM production_material_stock_movement WHERE lot_id=lot.id;
+  SELECT COALESCE(SUM(m.quantity),0) INTO returned FROM production_material_source_return sr
+    JOIN production_material_stock_movement m ON m.id=sr.movement_id
+    WHERE sr.lot_id=lot.id AND NOT EXISTS (SELECT 1 FROM production_material_stock_movement rv WHERE rv.reverses_event_id=m.id);
+  SELECT COALESCE(SUM(e.quantity),0) INTO missing FROM production_material_source_exception e
+    WHERE e.lot_id=lot.id AND e.kind IN ('lost','short') AND e.resolves_exception_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM production_material_source_exception r WHERE r.resolves_exception_id=e.id)
+      AND (e.source_return_id IS NULL OR EXISTS (
+        SELECT 1 FROM production_material_source_return sr WHERE sr.id=e.source_return_id
+          AND NOT EXISTS (SELECT 1 FROM production_material_stock_movement rv WHERE rv.reverses_event_id=sr.movement_id)));
+  IF TG_TABLE_NAME='production_material_stock_movement' THEN
+    IF NEW.to_bucket='cancelled' THEN cancelled:=cancelled+NEW.quantity;
+    ELSIF NEW.from_bucket='cancelled' THEN cancelled:=cancelled-NEW.quantity;
+    ELSE RETURN NEW; END IF;
+  ELSIF TG_TABLE_NAME='production_material_source_return' THEN
+    SELECT * INTO movement FROM production_material_stock_movement WHERE id=NEW.movement_id;
+    IF movement.operation<>'' AND movement.exit_reason IS DISTINCT FROM 'returned_to_source' THEN
+      RAISE EXCEPTION 'invalid source return reason' USING ERRCODE='23514', CONSTRAINT='material_source_return_movement';
+    END IF;
+    extra:=movement.quantity;
+  ELSE
+    IF NEW.resolves_exception_id IS NOT NULL OR NEW.kind='damaged' THEN RETURN NEW; END IF;
+    extra:=NEW.quantity;
+  END IF;
+  IF returned+missing+extra>LEAST(lot.return_due_quantity,lot.confirmed_quantity-cancelled) THEN
+    IF TG_TABLE_NAME='production_material_source_exception' THEN
+      RAISE EXCEPTION 'source exception exceeds uncancelled quantity'
+        USING ERRCODE='23514', CONSTRAINT='material_source_exception_quantity';
+    END IF;
+    RAISE EXCEPTION 'source obligation exceeds uncancelled quantity'
+      USING ERRCODE='23514', CONSTRAINT='material_source_return_overflow';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER material_effective_obligation_guard BEFORE INSERT ON production_material_stock_movement
+  FOR EACH ROW EXECUTE FUNCTION enforce_material_effective_obligation();
+CREATE TRIGGER material_effective_obligation_guard BEFORE INSERT ON production_material_source_return
+  FOR EACH ROW EXECUTE FUNCTION enforce_material_effective_obligation();
+CREATE TRIGGER material_effective_obligation_guard BEFORE INSERT ON production_material_source_exception
+  FOR EACH ROW EXECUTE FUNCTION enforce_material_effective_obligation();
+
+CREATE OR REPLACE FUNCTION enforce_material_source_exit_pair() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.exit_reason='returned_to_source' AND NEW.reverses_event_id IS NULL
+    AND EXISTS (SELECT 1 FROM production_material_stock_lot WHERE id=NEW.lot_id AND source_type IN ('rented','borrowed'))
+    AND NOT EXISTS (SELECT 1 FROM production_material_source_return WHERE movement_id=NEW.id) THEN
+    RAISE EXCEPTION 'source exit requires source return ledger'
+      USING ERRCODE='23514', CONSTRAINT='material_source_return_movement';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE CONSTRAINT TRIGGER material_source_exit_pair_guard AFTER INSERT ON production_material_stock_movement
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION enforce_material_source_exit_pair();
 
 CREATE OR REPLACE FUNCTION enforce_material_source_return() RETURNS trigger
 LANGUAGE plpgsql AS $$

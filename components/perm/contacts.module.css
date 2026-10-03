@@ -67,12 +67,13 @@
   display: flex;
   min-width: 0;
   margin: 0;
-  align-items: baseline;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 2px;
   color: var(--ink);
   font-family: Georgia, "Noto Serif SC", serif;
-  font-size: clamp(13px, 1.65vw, 17px);
+  font-size: clamp(13px, 1.65vw, 16px);
   font-weight: 500;
   line-height: 1.25;
   white-space: nowrap;
@@ -92,6 +93,7 @@
   font-family: system-ui, sans-serif;
   font-size: 9px;
   font-weight: 600;
+  line-height: 1.25;
 }
 
 .badgeRow {

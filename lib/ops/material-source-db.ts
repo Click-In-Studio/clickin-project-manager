@@ -9,6 +9,7 @@ import {
 import {
   deriveMaterialSourceStatus, isMaterialSourceExceptionKind,
   type MaterialSourceExceptionKind, type MaterialSourceStatus, type MaterialSourceType,
+  type MaterialCustodian,
 } from "./material-types";
 
 export type MaterialSourceExceptionInput = {
@@ -161,6 +162,11 @@ export async function recordMaterialSourceReturn(params: {
   quantity: number;
   returnedAt?: Date;
   note?: string;
+  reason?: string;
+  fromLocation?: string;
+  toLocation?: string;
+  custodian?: MaterialCustodian | null;
+  custodianLabel?: string;
   exceptions?: MaterialSourceExceptionInput[];
   createdBy: string;
 }): Promise<MaterialSourceReturn> {
@@ -173,6 +179,9 @@ export async function recordMaterialSourceReturn(params: {
     const movement = await appendMaterialStockMovementInTx(client, {
       productionId: params.productionId, lotId: params.lotId,
       fromBucket: "in_stock", toBucket: "exited", quantity: params.quantity,
+      reason: params.reason ?? "退还来源方", exitReason: "returned_to_source",
+      fromLocation: params.fromLocation, toLocation: params.toLocation,
+      custodian: params.custodian, custodianLabel: params.custodianLabel,
       occurredAt: returnedAt, note: params.note ?? "退还来源方", createdBy: params.createdBy,
     });
     const id = newSourceReturnId();
@@ -345,13 +354,14 @@ export async function listMaterialSourceObligations(
     source_label: string; source_reference: string; confirmed_quantity: string;
     arrived_quantity: string; return_due_at: Date | null; return_due_quantity: string;
     returned_quantity: string; open_exception_quantity: string;
-    actual_arrival_at: Date | null; actual_returned_at: Date | null;
+    actual_arrival_at: Date | null; actual_returned_at: Date | null; cancelled_quantity: string;
   }>(
     `SELECT lot.id AS lot_id, lot.material_id, material.code AS material_code,
             material.name AS material_name, lot.source_type, lot.source_label,
             lot.source_reference, lot.confirmed_quantity::text,
             arrival.quantity::text AS arrived_quantity,
-            lot.return_due_at, lot.return_due_quantity::text,
+            lot.return_due_at, LEAST(lot.return_due_quantity, lot.confirmed_quantity-cancelled.quantity)::text AS return_due_quantity,
+            cancelled.quantity::text AS cancelled_quantity,
             returned.quantity::text AS returned_quantity,
             exception.open_quantity::text AS open_exception_quantity,
             arrival.actual_at AS actual_arrival_at,
@@ -368,6 +378,11 @@ export async function listMaterialSourceObligations(
             AND NOT EXISTS (SELECT 1 FROM production_material_stock_movement reverse_movement
                              WHERE reverse_movement.reverses_event_id=m.id)
        ) arrival ON true
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(CASE WHEN m.to_bucket='cancelled' THEN m.quantity
+           WHEN m.from_bucket='cancelled' THEN -m.quantity ELSE 0 END),0) AS quantity
+           FROM production_material_stock_movement m WHERE m.lot_id=lot.id
+       ) cancelled ON true
        LEFT JOIN LATERAL (
          SELECT COALESCE(SUM(m.quantity), 0) AS quantity, MAX(sr.returned_at) AS actual_at
            FROM production_material_source_return sr
@@ -413,7 +428,7 @@ export async function listMaterialSourceObligations(
       actualArrivalAt: row.actual_arrival_at?.toISOString() ?? null,
       actualReturnedAt: row.actual_returned_at?.toISOString() ?? null,
       status: deriveMaterialSourceStatus({
-        confirmedQuantity, arrivedQuantity, returnDueQuantity,
+        confirmedQuantity, cancelledQuantity: Number(row.cancelled_quantity), arrivedQuantity, returnDueQuantity,
         returnedQuantity, openExceptionQuantity,
       }),
       isOverdue: row.return_due_at !== null

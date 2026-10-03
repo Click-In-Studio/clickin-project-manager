@@ -32,8 +32,8 @@ export function extractModule(pathname: string, productionId: string): string {
   const rest = pathname.slice(base.length + 1);
   const first = rest.split("/")[0];
   if (first === "events") {
-    if (rest.includes("/reqs/")) return "tasks";
-    if (rest.includes("/reports/")) return "reports";
+    if (/\/reqs(?:\/|$)/.test(rest)) return "tasks";
+    if (/\/reports(?:\/|$)/.test(rest)) return "reports";
   }
   return first;
 }

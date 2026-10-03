@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import PageHeader from "@/components/ui/PageHeader";
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
@@ -98,7 +97,6 @@ export default async function PlanningPage({ params }: { params: Promise<{ id: s
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader eyebrow={`Planning · ${name}`} title="计划与日程" side="stage" />
       <PlanningClient
         productionId={id}
         events={events}
