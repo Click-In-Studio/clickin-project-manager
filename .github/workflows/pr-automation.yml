@@ -3,7 +3,8 @@ name: PR Automation
 on:
   pull_request:
     # labeled / unlabeled 是给 changelog-check 的：打上 chore 标签就该撤掉提醒
-    types: [opened, synchronize, labeled, unlabeled]
+    # edited / reopened 让 base 改回 main 或人工重开后，按当前 PR diff 重算提醒。
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   workflow_dispatch:
     inputs:
       pr_number:

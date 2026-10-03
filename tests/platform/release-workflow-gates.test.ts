@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const root = path.resolve(__dirname, "../..");
 const ci = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+const prAutomation = fs.readFileSync(path.join(root, ".github/workflows/pr-automation.yml"), "utf8");
 const deploy = fs.readFileSync(path.join(root, ".github/workflows/deploy.yml"), "utf8");
 const ecosystem = fs.readFileSync(path.join(root, "deploy/ecosystem.config.js"), "utf8");
 
@@ -16,6 +17,17 @@ function section(source: string, start: string, end?: string): string {
 }
 
 describe("发布门禁 workflow", () => {
+  it("依赖 PR 改回 main 后重跑正式门禁并重算 diff 提醒", () => {
+    const ciTrigger = section(ci, "on:\n", "jobs:");
+    const automationTrigger = section(prAutomation, "on:\n", "jobs:");
+
+    expect(ciTrigger).toContain("branches: [main]");
+    expect(ciTrigger).toContain("types: [opened, synchronize, reopened, edited]");
+    expect(automationTrigger).toContain(
+      "types: [opened, synchronize, reopened, edited, labeled, unlabeled]",
+    );
+  });
+
   it("PR CI 构建三个生产运行入口", () => {
     const buildJob = section(ci, "  production-build:", "  unit-test:");
 
