@@ -2,7 +2,7 @@
 kind: fixed
 title: 手机打开数据迁移时，识别表格和导入入口不再挤出屏幕
 page: admin/settings/migration
-pr: 841
+pr: 854
 order: 1
 ---
 
