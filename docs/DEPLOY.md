@@ -137,7 +137,7 @@ JOB_WORKER=1
 
 服务器环境配置完成后，push 到 `main` 即触发 CI/CD（`deploy.yml`）自动完成首次部署：构建、打包上传、应用 DB schema、创建 release 目录、启动 pm2。
 
-如果 pm2 进程尚未存在，CI 会在 `Activate release` 步骤里执行 `pm2 start`；若已存在则 `pm2 reload`。首次部署后执行：
+如果 pm2 进程尚未存在，CI 会在 `Activate release` 步骤里启动；若已存在且没有 pending migration，则滚动切换。首次部署后执行：
 
 ```bash
 ssh <server> "pm2 save"   # 持久化进程列表，开机自启
@@ -286,10 +286,10 @@ push 到 `main`（dev）或 tag（prod）后 GitHub Actions 自动完成。tag �
 
 1. `npm ci` + `npm run build`（standalone 模式）
 2. 打包产物，上传到服务器 `releases/<run>-<sha>/`
-3. `dbmate up` 应用 `db/migrations/` 里所有 pending（记账在库里的 `schema_migrations`；有 pending 先 `pg_dump` 到 `shared/backups/`），随后对账并校验 `script_editor` 对现有对象与未来对象的 ACL，再核对线上结构指纹 == `db/schema-fingerprint.txt`；任一不等即部署失败
-4. 切换 `current` symlink → 新 release
-5. `pm2 reload` 热重启
-6. 清理旧 releases（保留最新 5 个）
+3. 只读检查 pending；有 pending 时先停止 Web、Agent runner、heavy worker，再 `pg_dump` 到 `shared/backups/`
+4. `dbmate up` 应用所有 pending，随后对账并校验 `script_editor` ACL，再核对线上结构指纹；任一不等都保持停机，禁止旧代码在新 schema 上继续写
+5. 切换 `current` symlink → 新 release，启动三个进程并探测 `3001/login`、`3102/health`、`3103/health`
+6. 三个入口全部健康后清理旧 releases（保留最新 5 个）
 
 **无需任何手动操作**。
 
@@ -303,14 +303,14 @@ ssh <server> "bash /var/www/production-manager/shared/scripts/rollback.sh"
 ssh <server> "bash /var/www/production-manager/shared/scripts/rollback.sh 2"
 ```
 
-脚本将 `current` symlink 切到上一个（或第 N 个）release，并热重启 PM2。
+脚本只切 `current` symlink，不切数据库。它仅适用于没有 schema 变化的纯代码发布，或者已经逐项证明旧代码对当前 schema 与当前数据具备双向业务语义兼容的发布；“旧 SQL 不报错”不构成兼容证明。
 
-切代码不切库。这是安全的，因为 migration 遵守 expand / contract（DEV_GUIDE §6）：删列 / 删表永远晚于停用它的代码一个版本，所以上一版代码在当前 schema 上照常跑。真要回退 schema：
+含 migration 的发布默认不做代码软链回滚。migration 一旦开始，失败时保持停机：先用 `schema_migrations` 核对哪些文件已经提交，再前向修复。确需回到发布前状态时使用 CD 自动创建的备份；这会回退发布后的全部数据库写入，所以服务恢复前必须保持停止并明确核对恢复点：
 
 ```bash
-# 只加不删的那支（写了真 migrate:down）：
-ssh <server> "cd /var/www/production-manager/current && sudo -u postgres ./bin/dbmate --url 'postgres:///script_editor?host=/var/run/postgresql&sslmode=disable' --migrations-dir db/migrations --no-dump-schema down"
-# 破坏性 / 数据迁移：用发布前 CD 自动做的备份
+# 核对已提交到哪支 migration
+ssh <server> "cd /var/www/production-manager/current && sudo -u postgres ./bin/dbmate --url 'postgres:///script_editor?host=/var/run/postgresql&sslmode=disable' --migrations-dir db/migrations --no-dump-schema status"
+# 需要整体恢复时使用发布前备份
 ls -lt /var/www/production-manager/shared/backups/
 sudo -u postgres pg_restore -d script_editor --clean --if-exists <备份文件>
 ```

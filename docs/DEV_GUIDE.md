@@ -469,13 +469,15 @@ ALTER TABLE production DROP COLUMN IF EXISTS new_col;
 - 删列 / 删表 / 改类型 / 数据回填：down 写 `DO $$ BEGIN RAISE EXCEPTION 'irreversible'; END $$;`——不要假装能逆。这类变更的回退靠 CD 发布前自动做的 `shared/backups/pre_migration_*.pgdump`。
 - 一支文件默认整段一个事务；`CREATE INDEX CONCURRENTLY` 之类不能进事务的，段头写 `-- migrate:up transaction:false`。
 
-**expand / contract（回退能力的真正来源）**
+**破坏性 migration：默认停机、失败关闭**
 
-- 代码停止读写某列的那个版本**不删列**；删列放到再下一个版本。
-- 因此任何时刻 N-1 版本的代码都能跑在 N 版本的 schema 上，`rollback.sh` 切软链就是完整回退，不需要 reverse migration。
-- 改列类型、改 NOT NULL 同理：先加新列双写，再切读，最后删旧列，三个版本。
+- CD 先只读检查 pending migration；只要有 pending，就停止 Web、Agent runner 与 heavy worker，确认旧进程不再读写数据库后才备份并执行 `dbmate up`。迁移、指纹与 ACL 全部通过后才切换代码并重新启动。
+- 因为旧代码不会与新 schema 并行运行，停用旧路径与删列 / 删表 / 改类型可以在同一版本完成。不要为了避免旧 SQL 报错而保留已经失去业务语义的列或写路径：一次成功但被新模型忽略的旧写，比事务报错回滚更危险。
+- `dbmate` 按 migration 文件分别提交。开始执行 migration 后如果任一迁移、ACL 或指纹校验失败，服务保持停止，不能假设此前已成功的 migration 自动回滚，也不能启动可能已不兼容的旧代码；应核对 `schema_migrations` 后前向修复，或恢复发布前备份。
+- 没有 pending migration 的纯代码发布仍可直接切换。代码软链回滚也只适用于没有改变 schema，或已逐项证明目标旧代码与当前数据、schema 双向语义兼容的发布；其他发布走前向修复或备份恢复。
+- 只有业务明确要求零停机时才单独设计 expand / contract。验收必须覆盖旧读、旧写、新写以及代码回滚后的业务语义；“旧 SQL 不报错”不是兼容证明。
 
-**CD 自动执行**：发布时 `dbmate up` 应用全部 pending（单事务、失败整体回滚并中止部署），随后对账并校验应用角色 ACL、核对线上指纹。无需任何手动操作。
+**CD 自动执行**：发布时自动停写（有 pending 时）、备份、应用 migration、对账并校验应用角色 ACL、核对线上指纹，再启动新代码并探测三个进程。无需手动执行 SQL。
 
 > ⚠️ **严禁在应用代码（`lib/`、`app/`）中执行任何 DDL（`ALTER TABLE`、`CREATE TABLE`、`DROP`、`TRUNCATE` 等）。**
 > 应用 DB 用户（`script_editor`）以 `GRANT` 方式获得 DML 权限，**不是表的 owner**，执行 DDL 会报 `must be owner of table`（42501），请求 500。所有 schema 变更必须通过 `db/migrations/` 由 CD 以 `postgres` 用户身份执行。`conventions.test.ts` 静态扫描守着这条（§11.5 ①）。也不要在服务器上手跑 SQL 改结构——下一次发布的指纹校验会把手改的差异报成红。
@@ -562,7 +564,7 @@ it.skipIf(!snapshot)("someTable: every user_id resolves to original open_id", as
 - [ ] `db/schema.sql` 更新为迁移后的最终状态
 - [ ] `db/schema-fingerprint.txt` 由 `npm run db:check -- --update` 重新生成
 - [ ] 破坏性 / 数据迁移：`tests/migrations/<name>.migration.test.ts`（三层）+ `<name>.snapshot.ts`
-- [ ] expand / contract：删列 / 删表不与停用它的代码同一版本上线
+- [ ] 旧代码路径与废弃 schema 同批删除；没有留下只为 N-1 存活、却不再进入新业务真相的写路径
 - [ ] `npm test` 本地通过
 
 ---

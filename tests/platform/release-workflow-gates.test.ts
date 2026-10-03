@@ -45,4 +45,22 @@ describe("发布门禁 workflow", () => {
       deployJob.indexOf("Setup SSH"),
     );
   });
+
+  it("pending migration 先停数据库客户端，激活后验证三个入口", () => {
+    const deployJob = section(deploy, "  deploy:");
+    const migration = section(deployJob, "      - name: Run DB migrations", "      - name: Activate release");
+    const activation = section(deployJob, "      - name: Activate release", "      # ── 10.");
+
+    expect(migration).toContain('if [ "$PENDING" -gt 0 ]');
+    expect(migration).toContain('pm2 stop "$APP"');
+    expect(migration.indexOf('pm2 stop "$APP"')).toBeLessThan(migration.indexOf('ssh prod "$DBMATE up"'));
+    expect(migration).toContain("MIGRATION FAILED — 服务保持停止");
+    expect(migration).not.toContain("该支已整体回滚");
+
+    expect(activation).toContain("pm2 startOrReload");
+    expect(activation).toContain("http://127.0.0.1:3001/login");
+    expect(activation).toContain("http://127.0.0.1:3102/health");
+    expect(activation).toContain("http://127.0.0.1:3103/health");
+    expect(activation).toContain('for APP in production-manager agent-runner heavy-worker; do pm2 stop "$APP" || true; done');
+  });
 });
