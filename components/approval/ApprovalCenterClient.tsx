@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import PageHeader, { PRIMARY_BTN } from "@/components/ui/PageHeader";
+import ProductionModuleTopMenu, {
+  PRODUCTION_MODULE_ACTION_CLASS,
+  PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS,
+} from "@/components/shell/ProductionModuleTopMenu";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import styles from "@/components/ui/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
@@ -394,13 +397,22 @@ export default function ApprovalCenterClient({
     </div>
   );
 
+  const openRequestForm = () => {
+    setSelection({ kind: "form" });
+    setMobileLevel("detail");
+  };
+
   return (
     <div className={`${styles.workspace} ${styles.approvalCenterWorkspace}`}>
-      <PageHeader eyebrow={productionName} title="审批中心" side="stage"
-        actions={!archived ? <button type="button" style={PRIMARY_BTN} onClick={() => {
-          setSelection({ kind: "form" });
-          setMobileLevel("detail");
-        }}>申请资源权限</button> : null} />
+      {!archived && (
+        <ProductionModuleTopMenu
+          productionName={productionName}
+          label="审批"
+          primaryAction={<button type="button" className={PRODUCTION_MODULE_ACTION_CLASS} onClick={openRequestForm}>申请资源权限</button>}
+          primaryShortAction={<button type="button" aria-label="申请资源权限" className={PRODUCTION_MODULE_ACTION_CLASS} onClick={openRequestForm}>申请</button>}
+          primaryOverflowAction={<button type="button" className={PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS} onClick={openRequestForm}>申请资源权限</button>}
+        />
+      )}
 
       <div className={styles.approvalCenterSummary}>
         {summaryItems.map(([num, label, hint]) => <div key={label}>

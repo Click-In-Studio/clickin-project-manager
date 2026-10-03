@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import PageHeader, { SECONDARY_BTN } from "@/components/ui/PageHeader";
+import ProductionModuleTopMenu, {
+  PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS,
+  PRODUCTION_MODULE_SECONDARY_ACTION_CLASS,
+} from "@/components/shell/ProductionModuleTopMenu";
 import {
   ExpenseAddDocumentButton, ExpenseApprovalActions, ExpenseCreateButton, ExpenseDetailButton,
   ExpenseDocumentLinks, ExpenseSettlementAction,
@@ -162,14 +165,24 @@ export default async function FinancePage({ params }: { params: Promise<{ id: st
 
   return (
     <div style={{ padding: PAD, minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader
-        eyebrow="Finance"
-        title="财务"
-        side="stage"
-        actions={<>
-          {canFinanceConfig && <Link href={`/production/${id}/admin/finance`} style={SECONDARY_BTN}>管理预算</Link>}
-          {canCreateExpense && !access.isArchived && <ExpenseCreateButton productionId={id} baseCurrency={baseCurrency} categories={expenseCategoryOptions} />}
-        </>}
+      <ProductionModuleTopMenu
+        productionName={name}
+        label="财务"
+        secondaryActions={canFinanceConfig
+          ? <Link href={`/production/${id}/admin/finance`} className={PRODUCTION_MODULE_SECONDARY_ACTION_CLASS}>管理预算</Link>
+          : null}
+        secondaryOverflowActions={canFinanceConfig
+          ? <Link href={`/production/${id}/admin/finance`} className={PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS}>管理预算</Link>
+          : null}
+        primaryAction={canCreateExpense && !access.isArchived
+          ? <ExpenseCreateButton productionId={id} baseCurrency={baseCurrency} categories={expenseCategoryOptions} triggerVariant="toolbar" />
+          : null}
+        primaryShortAction={canCreateExpense && !access.isArchived
+          ? <ExpenseCreateButton productionId={id} baseCurrency={baseCurrency} categories={expenseCategoryOptions} triggerVariant="short" />
+          : null}
+        primaryOverflowAction={canCreateExpense && !access.isArchived
+          ? <ExpenseCreateButton productionId={id} baseCurrency={baseCurrency} categories={expenseCategoryOptions} triggerVariant="overflow" />
+          : null}
       />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
         <p style={{ margin: 0, color: "var(--muted)", fontSize: 12 }}>预算 · 支出 · 关联</p>

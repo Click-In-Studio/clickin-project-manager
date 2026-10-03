@@ -154,10 +154,8 @@ function ProjectProgressHero({
 
 export default function ProductionHomeClient({
   productionId,
-  productionName,
 }: {
   productionId: string;
-  productionName: string;
 }) {
   const router = useRouter();
   const [data, setData] = useState<MyWorkData | null>(null);
@@ -178,11 +176,6 @@ export default function ProductionHomeClient({
 
   return (
     <div className={styles.workspace}>
-      <div className={styles.pageHeader}>
-        <p className={styles.eyebrow}>{productionName}</p>
-        <h1 className={styles.pageTitle}>我的工作</h1>
-      </div>
-
       {isArchived && (
         <div style={{
           marginBottom: 18, borderRadius: 10,

@@ -1,9 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
 import { PRIMARY_BTN } from "@/components/ui/PageHeader";
+import {
+  PRODUCTION_MODULE_ACTION_CLASS,
+  PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS,
+} from "@/components/shell/ProductionModuleTopMenu";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import AssetUploadPanel from "@/components/assets/AssetUploadPanel";
 import { useAssetUploadManager } from "@/components/assets/asset-upload-manager";
@@ -91,10 +96,11 @@ async function responseError(response: Response, fallback: string) {
   return data.error ?? fallback;
 }
 
-export function ExpenseCreateButton({ productionId, baseCurrency, categories }: {
+export function ExpenseCreateButton({ productionId, baseCurrency, categories, triggerVariant = "default" }: {
   productionId: string;
   baseCurrency: CurrencyCode;
   categories: ExpenseCategoryOption[];
+  triggerVariant?: "default" | "toolbar" | "short" | "overflow";
 }) {
   const router = useRouter();
   const uploadManager = useAssetUploadManager();
@@ -248,10 +254,18 @@ export function ExpenseCreateButton({ productionId, baseCurrency, categories }: 
 
   return (
     <>
-      <button type="button" style={PRIMARY_BTN} onClick={() => setOpen(true)}>
-        ＋ 新建报销
+      <button
+        type="button"
+        aria-label={triggerVariant === "short" ? "新建报销" : undefined}
+        style={triggerVariant === "default" ? PRIMARY_BTN : undefined}
+        className={triggerVariant === "overflow"
+          ? PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS
+          : triggerVariant === "default" ? undefined : PRODUCTION_MODULE_ACTION_CLASS}
+        onClick={() => setOpen(true)}
+      >
+        {triggerVariant === "short" ? "＋" : triggerVariant === "overflow" ? "新建报销" : "＋ 新建报销"}
       </button>
-      {open && (
+      {open && typeof document !== "undefined" && createPortal((
         <div
           className={`app-mobile-input-overlay ${styles.backdrop}`}
           role="presentation"
@@ -507,7 +521,7 @@ export function ExpenseCreateButton({ productionId, baseCurrency, categories }: 
             </form>
           </aside>
         </div>
-      )}
+      ), document.body)}
     </>
   );
 }

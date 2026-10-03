@@ -14,6 +14,7 @@ import {
   PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID,
   PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID,
   PRODUCTION_TOP_MENU_SLOT_ID,
+  ProductionTopMenuContext,
   ProductionToolbarContext,
   ProductionToolbarStageContext,
 } from "./ProductionTopMenu";
@@ -200,7 +201,8 @@ export default function AppShell({ session, productions, canCreateProduction = f
   const currentAssetId = activeAiTarget
     ? (activeAiTarget.kind === "asset" ? activeAiTarget.id : null)
     : productionId ? extractCurrentAssetId(pathname, productionId) : null;
-  const hasProductionTopMenu = !!activeModule && ["script", "dramaturgy", "characters", "cues", "cuelists"].includes(activeModule);
+  const productionTopMenuLabel = activeModule === null ? null : PRODUCTION_TOP_MENU_LABELS[activeModule] ?? null;
+  const hasProductionTopMenu = productionTopMenuLabel !== null;
   const isHome = pathname === "/";
   const currentProduction = productionId
     ? productions.find((p) => p.id === productionId)
@@ -341,19 +343,13 @@ export default function AppShell({ session, productions, canCreateProduction = f
             data-search-open={productionSearchPath === pathname ? "true" : undefined}
             className="flex h-full min-w-0 flex-1 items-center"
           >
-            <div
-              data-production-top-menu-placeholder
-              aria-hidden="true"
-              className="flex shrink-0 flex-col"
-              style={{ lineHeight: 1.2 }}
-            >
-              <span className="max-w-40 truncate whitespace-nowrap text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--script)]">
-                {currentProduction?.name ?? ""}
-              </span>
-              <span className="text-xs font-semibold text-[var(--ink)]">
-                {PRODUCTION_TOP_MENU_LABELS[activeModule ?? ""]}
-              </span>
-            </div>
+            <ProductionTopMenuContext
+              productionName={currentProduction?.name ?? ""}
+              label={productionTopMenuLabel ?? ""}
+              side={isCreationActive ? "script" : "stage"}
+              stage={productionToolbarStage}
+              placeholder
+            />
           </div>
         )}
 

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 export const metadata: Metadata = { title: "Assets" };
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
@@ -10,6 +10,7 @@ import AssetPageClient from "@/components/assets/AssetPageClient";
 import PageActivationGate from "@/components/perm/PageActivationGate";
 import { listActiveProductionMembers } from "@/lib/perm/member-db";
 import { listEventDepartments } from "@/lib/ops/event-db";
+import { getProductionName } from "@/lib/production/production-db";
 
 export default async function AssetsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -19,14 +20,16 @@ export default async function AssetsPage({ params }: { params: Promise<{ id: str
 
   const access = await getProductionPermissionContext(session.userId, session.isAdmin, id);
   if (!access) redirect(`/unauthorized?id=${id}`);
-  const [versionId, members, allDepts] = await Promise.all([
-    getActiveVersionId(id), listActiveProductionMembers(id), listEventDepartments(id),
+  const [productionName, versionId, members, allDepts] = await Promise.all([
+    getProductionName(id), getActiveVersionId(id), listActiveProductionMembers(id), listEventDepartments(id),
   ]);
+  if (!productionName) notFound();
 
   return (
     <>
       <AssetPageClient
         productionId={id}
+        productionName={productionName}
         versionId={versionId}
         myUserId={session.userId}
         userName={session.name}

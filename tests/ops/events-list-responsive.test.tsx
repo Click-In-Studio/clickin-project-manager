@@ -94,6 +94,7 @@ describe("事件列表信息层级与响应式布局", () => {
       root.render(
         <EventsClient
           productionId="responsive-events"
+          productionName="测试项目"
           initialEvents={[past, upcoming]}
           canCreate
           canViewFull
@@ -136,6 +137,7 @@ describe("事件列表信息层级与响应式布局", () => {
         root.render(
           <EventsClient
             productionId="responsive-events"
+            productionName="测试项目"
             initialEvents={[boundary]}
             canCreate
             canViewFull

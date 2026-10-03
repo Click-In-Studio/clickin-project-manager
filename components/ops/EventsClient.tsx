@@ -6,7 +6,10 @@ import { useState, Fragment } from "react";
 import Link from "next/link";
 import type React from "react";
 import { BASE_PATH } from "@/lib/base-path";
-import PageHeader, { PRIMARY_BTN } from "@/components/ui/PageHeader";
+import ProductionModuleTopMenu, {
+  PRODUCTION_MODULE_ACTION_CLASS,
+  PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS,
+} from "@/components/shell/ProductionModuleTopMenu";
 import Badge, { type BadgeTone } from "@/components/ui/Badge";
 import type { ProductionEvent, EventDepartment } from "@/lib/ops/event-db";
 import { fmtDateTimeSmart, datetimeLocalToIso, dateTimeToIso, isoCSTDateStr } from "@/lib/tz";
@@ -384,6 +387,7 @@ function CreateEventModal({
 
 type Props = {
   productionId: string;
+  productionName: string;
   initialEvents: ProductionEvent[];
   canCreate: boolean;
   canViewFull: boolean;
@@ -394,7 +398,7 @@ type Props = {
 };
 
 export default function EventsClient({
-  productionId, initialEvents, canCreate, canViewFull,
+  productionId, productionName, initialEvents, canCreate, canViewFull,
   myParticipations, departments, taskCounts = {},
 }: Props) {
   const [events,      setEvents]      = useState(initialEvents);
@@ -428,17 +432,15 @@ export default function EventsClient({
 
   return (
     <div className={responsive.eventPage}>
-      {/* Page header（v3 统一页头） */}
-      <PageHeader
-        eyebrow="Events"
-        title="事件"
-        side="stage"
-        actions={canCreate && (
-          <button onClick={() => setShowCreate(true)} style={PRIMARY_BTN}>
-            ＋ 新建事件
-          </button>
-        )}
-      />
+      {canCreate && (
+        <ProductionModuleTopMenu
+          productionName={productionName}
+          label="事件"
+          primaryAction={<button type="button" onClick={() => setShowCreate(true)} className={PRODUCTION_MODULE_ACTION_CLASS}>＋ 新建事件</button>}
+          primaryShortAction={<button type="button" aria-label="新建事件" onClick={() => setShowCreate(true)} className={PRODUCTION_MODULE_ACTION_CLASS}>＋</button>}
+          primaryOverflowAction={<button type="button" onClick={() => setShowCreate(true)} className={PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS}>新建事件</button>}
+        />
+      )}
 
       {/* Content（日历模式已移除——项目日历归"计划与日程"面板） */}
       {(

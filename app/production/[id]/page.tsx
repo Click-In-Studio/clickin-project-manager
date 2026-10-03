@@ -24,5 +24,5 @@ export default async function ProductionDashboard({ params }: { params: Promise<
   if (!access) redirect(`/unauthorized?id=${id}`);
   if (!name) notFound();
 
-  return <ProductionHomeClient productionId={id} productionName={name} />;
+  return <ProductionHomeClient productionId={id} />;
 }
