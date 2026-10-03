@@ -4,6 +4,7 @@ import { chromium, type Browser, type Page } from "playwright";
 
 const bulkInvite = readFileSync("components/admin/BulkInviteCard.tsx", "utf8");
 const settingsClient = readFileSync("components/admin/AdminSettingsClient.tsx", "utf8");
+const migrationPage = readFileSync("app/production/[id]/admin/migration/page.tsx", "utf8");
 const css = readFileSync("components/admin/admin-migration.module.css", "utf8");
 const acceptanceWidths = [319, 371, 768, 1180] as const;
 
@@ -73,6 +74,30 @@ describe("数据迁移页响应式布局", () => {
     expect(bulkInvite).toContain("onClick={send}");
     expect(settingsClient).toContain("/import-script");
     expect(settingsClient).toContain("/import-scenes");
+  });
+
+  it("真实页面与组件逐项接入浏览器验收所覆盖的响应式 class", () => {
+    expect(migrationPage).toContain("className={styles.page}");
+    for (const className of [
+      "inviteCard",
+      "modeSwitch",
+      "sheetUrlRow",
+      "sheetUrlInput",
+      "sheetParseButton",
+      "emailTextarea",
+    ]) {
+      expect(bulkInvite).toContain(`styles.${className}`);
+    }
+    for (const className of [
+      "dataRow",
+      "dataLabel",
+      "importList",
+      "importItem",
+      "importCopy",
+      "importLink",
+    ]) {
+      expect(settingsClient).toContain(`migrationStyles.${className}`);
+    }
   });
 
   for (const width of acceptanceWidths) {
