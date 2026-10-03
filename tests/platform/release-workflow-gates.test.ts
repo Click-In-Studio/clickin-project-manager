@@ -62,6 +62,8 @@ describe("发布门禁 workflow", () => {
 
     expect(activation).toContain("pm2 startOrReload");
     expect(activation).toContain("SCHEMA_CHANGED");
+    expect(activation).toContain('NEW_ECOSYSTEM="${{ env.RELEASE_DIR }}/ecosystem.config.js"');
+    expect(activation).not.toContain("scp deploy/ecosystem.config.js");
     expect(activation).toContain('ln -snf "$PREVIOUS_RELEASE"');
     expect(activation).toContain("unlink /var/www/production-manager/current");
     expect(activation).toContain("http://127.0.0.1:3001/health");
@@ -69,6 +71,7 @@ describe("发布门禁 workflow", () => {
     expect(activation).toContain("http://127.0.0.1:3102/health");
     expect(activation).toContain("http://127.0.0.1:3103/health");
     expect(activation).toContain("--max-time 3");
-    expect(activation).toContain('for APP in production-manager agent-runner heavy-worker; do pm2 stop "$APP" || true; done');
+    expect(activation).toContain('pm2 stop "$APP" || STOP_FAILED=1');
+    expect(activation.indexOf('cp "$NEW_ECOSYSTEM"')).toBeGreaterThan(activation.indexOf("http://127.0.0.1:3103/health"));
   });
 });

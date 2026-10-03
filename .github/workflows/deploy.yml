@@ -207,6 +207,7 @@ jobs:
           mkdir -p .next/standalone/db .next/standalone/bin
           cp -r db/migrations .next/standalone/db/
           cp db/fingerprint.sql db/schema-fingerprint.txt db/app-role-acl.sql db/check-app-role-acl.sql .next/standalone/db/
+          cp deploy/ecosystem.config.js .next/standalone/ecosystem.config.js
           cp node_modules/@dbmate/linux-x64/bin/dbmate .next/standalone/bin/dbmate
           chmod +x .next/standalone/bin/dbmate
           tar -czf /tmp/deploy_bundle.tar.gz -C .next/standalone .
@@ -366,11 +367,10 @@ jobs:
 
       # ── 9. Swap symlink, start PM2 & verify health ───────────────────────────
       # pm2 进程定义收在仓库 deploy/ecosystem.config.js（含 agent-runner），每次发布
-      # 覆盖到 shared/ 再 startOrReload：有 migration 时进程已停止，无 migration 时滚动切换。
-      # 三个入口全部健康才算激活；失败就停掉新进程，不让不完整版本继续接请求。
+      # 随 release 上传并直接用于 startOrReload；三个入口全部健康后才覆盖 shared/ 的已验证
+      # 副本。失败时 shared 仍是上一版配置，不会出现旧代码配新进程定义的半回滚。
       - name: Activate release
         run: |
-          scp deploy/ecosystem.config.js prod:/var/www/production-manager/shared/ecosystem.config.js
           ssh prod '
             set -e
             HEALTH_SECRET=$(node --env-file=/var/www/production-manager/shared/.env.local -e "process.stdout.write(process.env.INTERNAL_NOTIFY_SECRET || \"\")")
@@ -380,9 +380,15 @@ jobs:
             fi
             PREVIOUS_RELEASE=$(readlink -f /var/www/production-manager/current 2>/dev/null || true)
             SCHEMA_CHANGED="${{ env.SCHEMA_CHANGED }}"
+            NEW_ECOSYSTEM="${{ env.RELEASE_DIR }}/ecosystem.config.js"
 
             fail_activation() {
-              for APP in production-manager agent-runner heavy-worker; do pm2 stop "$APP" || true; done
+              STOP_FAILED=0
+              for APP in production-manager agent-runner heavy-worker; do
+                if pm2 describe "$APP" >/dev/null 2>&1; then
+                  pm2 stop "$APP" || STOP_FAILED=1
+                fi
+              done
               if [ "$SCHEMA_CHANGED" = "false" ] && [ -n "$PREVIOUS_RELEASE" ] && [ -d "$PREVIOUS_RELEASE" ]; then
                 ln -snf "$PREVIOUS_RELEASE" /var/www/production-manager/current
                 echo "已将 current 还原到 $PREVIOUS_RELEASE；进程保持停止" >&2
@@ -390,12 +396,17 @@ jobs:
                 unlink /var/www/production-manager/current 2>/dev/null || true
                 echo "schema 已变化或没有上一 release；已移除 current，进程保持停止" >&2
               fi
+              if [ "$STOP_FAILED" -ne 0 ]; then
+                echo "一个或多个数据库客户端进程停止失败，必须立即人工核对 PM2" >&2
+                return 1
+              fi
+              return 0
             }
 
             ln -snf ${{ env.RELEASE_DIR }} /var/www/production-manager/current
-            if ! pm2 startOrReload /var/www/production-manager/shared/ecosystem.config.js --update-env; then
+            if ! pm2 startOrReload "$NEW_ECOSYSTEM" --update-env; then
               echo "新版本进程启动失败，停止所有数据库客户端进程" >&2
-              fail_activation
+              fail_activation || true
               exit 1
             fi
 
@@ -403,6 +414,7 @@ jobs:
               if curl -fsS --max-time 3 -H "Authorization: Bearer $HEALTH_SECRET" http://127.0.0.1:3001/health >/dev/null &&
                  curl -fsS --max-time 3 http://127.0.0.1:3102/health >/dev/null &&
                  curl -fsS --max-time 3 http://127.0.0.1:3103/health >/dev/null; then
+                cp "$NEW_ECOSYSTEM" /var/www/production-manager/shared/ecosystem.config.js
                 echo "三个生产进程健康"
                 exit 0
               fi
@@ -410,7 +422,7 @@ jobs:
             done
 
             echo "新版本健康检查失败，停止所有数据库客户端进程" >&2
-            fail_activation
+            fail_activation || true
             exit 1
           ' < /dev/null
 
