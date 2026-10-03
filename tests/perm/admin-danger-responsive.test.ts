@@ -1,12 +1,47 @@
 import { readFileSync } from "node:fs";
+import { createElement, Fragment } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { vi } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
+import styles from "@/components/admin/admin-danger.module.css";
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
+import AdminDangerSection from "@/components/admin/AdminDangerSection";
+import TransferOwnerCard from "@/components/admin/TransferOwnerCard";
+
+const localClassNames = [
+  "page", "mobileBack", "dangerCard", "transferCard", "dangerHeader",
+  "dangerRow", "dangerLabel", "dangerControl", "deleteConfirmRow",
+  "transferControls", "ownerPicker", "ownerConfirmInput", "ownerConfirmButton",
+] as const;
+const classNames = Object.fromEntries(
+  localClassNames.map(name => [name, styles[name]]),
+) as Record<(typeof localClassNames)[number], string>;
 const css = readFileSync("components/admin/admin-danger.module.css", "utf8");
-const browserCss = css.replace(/:global\(([^)]+)\)/g, "$1");
+const browserCss = Object.entries(classNames).reduce(
+  (source, [localName, generatedName]) => source.replaceAll(`.${localName}`, `.${generatedName}`),
+  css.replace(/:global\(([^)]+)\)/g, "$1"),
+);
 const dangerPage = readFileSync("app/production/[id]/admin/danger/page.tsx", "utf8");
-const dangerCard = readFileSync("components/admin/AdminSettingsClient.tsx", "utf8");
-const transferCard = readFileSync("components/admin/TransferOwnerCard.tsx", "utf8");
+
+const dangerMarkup = renderToStaticMarkup(createElement(Fragment, null,
+  createElement(TransferOwnerCard, {
+    productionId: "prod_1",
+    currentOwnerName: "当前 Owner",
+    members: [],
+    depts: [],
+    ownerId: "owner_1",
+  }),
+  createElement(AdminDangerSection, {
+    productionId: "prod_1",
+    productionName: "测试项目",
+    isArchived: false,
+    canArchive: true,
+    canDelete: true,
+  }),
+));
 
 let browser: Browser;
 let page: Page;
@@ -29,28 +64,9 @@ async function mountDangerPage(width: number) {
     </style>
     <div class="app-shell-frame">
       <main>
-        <div class="page">
-          <a class="mobileBack" href="#project">← 返回项目</a>
-          <section class="transferCard">
-            <div class="transferControls">
-              <button class="ownerPicker">选择新 Owner…</button>
-              <input class="ownerConfirmInput" placeholder="输入姓名以确认">
-              <button class="ownerConfirmButton">确认转让</button>
-            </div>
-          </section>
-          <section class="dangerCard">
-            <div class="dangerHeader"><p>危险区域</p></div>
-            <div class="dangerRow">
-              <div class="dangerLabel"><p>归档项目</p><small>标记为归档，成员只读，不再出现于常用列表</small></div>
-              <div class="dangerControl"><button>归档</button></div>
-            </div>
-            <div class="dangerRow">
-              <div class="dangerLabel"><p>删除项目</p><small>彻底删除项目及所有数据，不可撤销</small></div>
-              <div class="dangerControl">
-                <div class="deleteConfirmRow"><input placeholder="项目名称"><button>确认删除</button></div>
-              </div>
-            </div>
-          </section>
+        <div class="${styles.page}">
+          <a class="${styles.mobileBack}" href="#project">← 返回项目</a>
+          ${dangerMarkup}
         </div>
       </main>
       <nav class="app-shell-bottom-nav"><a href="#project">返回</a><button>配置菜单</button><button>我</button></nav>
@@ -68,22 +84,19 @@ afterAll(async () => {
 });
 
 describe("危险操作页响应式布局", () => {
-  it("页面、危险区域和 Owner 转让使用独立样式钩子，不修改全局 AppShell", () => {
+  it("页面返回入口使用路由范围样式钩子，不修改全局 AppShell", () => {
     expect(dangerPage).toContain("className={styles.page}");
     expect(dangerPage).toContain("className={styles.mobileBack}");
-    expect(dangerCard).toContain("className={dangerStyles.dangerRow}");
-    expect(dangerCard).toContain("className={dangerStyles.deleteConfirmRow}");
-    expect(transferCard).toContain("className={styles.transferControls}");
   });
 
   for (const width of [319, 375, 768, 1280]) {
     it(`${width}px 下内容不横向溢出且返回入口落在正确位置`, async () => {
       await mountDangerPage(width);
-      const metrics = await page.locator(".page").evaluate((root) => {
-        const row = root.querySelector<HTMLElement>(".dangerRow")!;
-        const deleteRow = root.querySelector<HTMLElement>(".deleteConfirmRow")!;
-        const transfer = root.querySelector<HTMLElement>(".transferControls")!;
-        const back = root.querySelector<HTMLElement>(".mobileBack")!;
+      const metrics = await page.locator(`.${styles.page}`).evaluate((root, names) => {
+        const row = root.querySelector<HTMLElement>(`.${names.dangerRow}`)!;
+        const deleteRow = root.querySelector<HTMLElement>(`.${names.deleteConfirmRow}`)!;
+        const transfer = root.querySelector<HTMLElement>(`.${names.transferControls}`)!;
+        const back = root.querySelector<HTMLElement>(`.${names.mobileBack}`)!;
         return {
           columns: getComputedStyle(row).gridTemplateColumns.split(" ").length,
           deleteDirection: getComputedStyle(deleteRow).flexDirection,
@@ -92,7 +105,7 @@ describe("危险操作页响应式布局", () => {
           documentWidth: document.documentElement.scrollWidth,
           viewportWidth: window.innerWidth,
         };
-      });
+      }, classNames);
       const bottomBackVisible = await page.locator(".app-shell-bottom-nav > a").isVisible();
 
       expect(metrics.documentWidth).toBeLessThanOrEqual(metrics.viewportWidth);
