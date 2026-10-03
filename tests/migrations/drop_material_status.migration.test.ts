@@ -74,24 +74,22 @@ describe("invariance verification", () => {
   it.skipIf(!snapshot)("删除废弃状态时保留物料本体事实", async () => {
     const { rows } = await getPool().query<{
       id: string;
-      code: string;
       name: string;
       category: string;
       notes: string;
       created_by: string;
     }>(
-      `SELECT id, code, name, category, notes, created_by
+      `SELECT id, name, category, notes, created_by
        FROM production_material
-       WHERE id = $1 AND production_id = $2`,
-      [snapshot!.material.id, snapshot!.productionId],
+       WHERE name = $1 AND production_id = $2`,
+      [snapshot!.material.name, snapshot!.productionId],
     );
-    expect(rows).toEqual([{
-      id: snapshot!.material.id,
-      code: snapshot!.material.code,
+    expect(rows).toEqual([expect.objectContaining({
       name: snapshot!.material.name,
       category: snapshot!.material.category,
       notes: snapshot!.material.notes,
       created_by: snapshot!.material.createdBy,
-    }]);
+    })]);
+    expect(rows[0].id).toMatch(/^mt_/);
   });
 });

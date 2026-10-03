@@ -21,7 +21,7 @@ import {
   appendMaterialStockMovement, createMaterialStockLot,
   createMaterial, deleteMaterial,
   getMaterial, listMaterials, listMaterialStockLots,
-  listMaterialStockMovements, MaterialError, updateMaterial,
+  listMaterialStockMovements, updateMaterial,
 } from "@/lib/ops/material-db";
 
 let prodId: string, otherProdId: string;
@@ -57,7 +57,7 @@ afterAll(async () => {
 describe("4. 责任方：部门 | 用户组，二选一", () => {
   it("两种都存得住，且带出名称", async () => {
     const byDept = await createMaterial({
-      productionId: prodId, code: `D-${shortId()}`, name: "归部门的",
+      productionId: prodId, name: "归部门的",
       subject: { kind: "dept", id: deptId }, createdBy: ownerId,
     });
     expect(byDept.departmentId).toBe(deptId);
@@ -65,7 +65,7 @@ describe("4. 责任方：部门 | 用户组，二选一", () => {
     expect(byDept.groupId).toBeNull();
 
     const byGroup = await createMaterial({
-      productionId: prodId, code: `G-${shortId()}`, name: "归组的",
+      productionId: prodId, name: "归组的",
       subject: { kind: "group", id: groupId }, createdBy: ownerId,
     });
     expect(byGroup.groupId).toBe(groupId);
@@ -75,9 +75,10 @@ describe("4. 责任方：部门 | 用户组，二选一", () => {
 
   it("DB CHECK 挡住同时给两个", async () => {
     await expect(getPool().query(
-      `INSERT INTO production_material (production_id, code, name, department_id, group_id, created_by)
+      `INSERT INTO production_material
+         (id, production_id, name, department_id, group_id, created_by)
        VALUES ($1,$2,'两个责任方',$3,$4,$5)`,
-      [prodId, `B-${shortId()}`, deptId, groupId, ownerId],
+      [`mt_${shortId()}`, prodId, deptId, groupId, ownerId],
     )).rejects.toThrow(/material_owner_single/);
   });
 });
@@ -85,7 +86,7 @@ describe("4. 责任方：部门 | 用户组，二选一", () => {
 describe("5. 改责任方时每个字段只清自己那一支", () => {
   it("绑组的物料收到 departmentId:null，组绑定必须保留", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `K-${shortId()}`, name: "组负责的道具",
+      productionId: prodId, name: "组负责的道具",
       subject: { kind: "group", id: groupId }, createdBy: ownerId,
     });
     // 只知道部门的旧客户端会这么发——不能让它的沉默变成删除（同 task 那个坑）
@@ -99,7 +100,7 @@ describe("5. 改责任方时每个字段只清自己那一支", () => {
 
   it("显式发 groupId:null 才解绑", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `K2-${shortId()}`, name: "要解绑的",
+      productionId: prodId, name: "要解绑的",
       subject: { kind: "group", id: groupId }, createdBy: ownerId,
     });
     const patch = await resolveSubjectPatch(prodId, { groupId: null }, m);
@@ -108,32 +109,29 @@ describe("5. 改责任方时每个字段只清自己那一支", () => {
   });
 });
 
-describe("6. 编号在剧组内唯一", () => {
-  it("同剧组重复编号被拒；跨剧组同编号可以", async () => {
-    const code = `U-${shortId()}`;
-    await createMaterial({ productionId: prodId, code, name: "第一个", subject: null, createdBy: ownerId });
-    await expect(createMaterial({
-      productionId: prodId, code, name: "重号", subject: null, createdBy: ownerId,
-    })).rejects.toThrow(MaterialError);
-
-    // 别的剧组用同一个编号没问题
-    const other = await createMaterial({
-      productionId: otherProdId, code, name: "别家的", subject: null, createdBy: ownerId,
+describe("6. 编号由服务端按项目分配", () => {
+  it("同项目连续生成且不可由编辑接口改写；其他项目使用自己的序列", async () => {
+    const first = await createMaterial({
+      productionId: prodId, name: "第一种", subject: null, createdBy: ownerId,
     });
-    expect(other.code).toBe(code);
-  });
-
-  it("改编号撞车同样被拒", async () => {
-    const a = await createMaterial({ productionId: prodId, code: `A-${shortId()}`, name: "甲", subject: null, createdBy: ownerId });
-    const b = await createMaterial({ productionId: prodId, code: `B-${shortId()}`, name: "乙", subject: null, createdBy: ownerId });
-    await expect(updateMaterial(b.id, prodId, { code: a.code })).rejects.toThrow(MaterialError);
+    const second = await createMaterial({
+      productionId: prodId, name: "第二种", subject: null, createdBy: ownerId,
+    });
+    const other = await createMaterial({
+      productionId: otherProdId, name: "别的项目", subject: null, createdBy: ownerId,
+    });
+    expect(first.number).toMatch(/^M-\d{4,}-\d$/);
+    expect(second.number).not.toBe(first.number);
+    expect(other.number).toBe("M-0001-7");
+    expect(await updateMaterial(second.id, prodId, { name: "只改名称" }))
+      .toMatchObject({ number: second.number });
   });
 });
 
 describe("列表与删除", () => {
   it("只列本剧组的；已有库存历史后不能硬删", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `Z-${shortId()}`, name: "待删", subject: null, createdBy: ownerId,
+      productionId: prodId, name: "待删", subject: null, createdBy: ownerId,
     });
     expect((await listMaterials(prodId)).some(x => x.id === m.id)).toBe(true);
     expect((await listMaterials(otherProdId)).some(x => x.id === m.id)).toBe(false);
@@ -146,7 +144,7 @@ describe("列表与删除", () => {
 describe("7. 确认入库批次与追加式流水", () => {
   it("同一物料可同时有待到货、在库、签出和维护数量，且查询口径明确", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `L-${shortId()}`, name: "无线话筒",
+      productionId: prodId, name: "无线话筒",
       subject: null, location: "设备库", quantity: 10, createdBy: ownerId,
     });
     const [receivedLot] = await listMaterialStockLots(m.id, prodId);
@@ -177,7 +175,7 @@ describe("7. 确认入库批次与追加式流水", () => {
 
   it("签出默认仍占用数量；返还流水只减少对应签出量", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `C-${shortId()}`, name: "黑色胶带",
+      productionId: prodId, name: "黑色胶带",
       subject: null, quantity: 5, createdBy: ownerId,
     });
     const [lot] = await listMaterialStockLots(m.id, prodId);
@@ -199,7 +197,7 @@ describe("7. 确认入库批次与追加式流水", () => {
 
   it("拒绝负库存，且并发扣减不会丢失更新", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `Q-${shortId()}`, name: "并发测试设备",
+      productionId: prodId, name: "并发测试设备",
       subject: null, quantity: 5, createdBy: ownerId,
     });
     const [lot] = await listMaterialStockLots(m.id, prodId);
@@ -217,7 +215,7 @@ describe("7. 确认入库批次与追加式流水", () => {
 
   it("流水不可 UPDATE/DELETE；错误通过一条精确反向流水冲销", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `R-${shortId()}`, name: "冲销测试",
+      productionId: prodId, name: "冲销测试",
       subject: null, quantity: 2, createdBy: ownerId,
     });
     const [lot] = await listMaterialStockLots(m.id, prodId);
@@ -259,7 +257,7 @@ describe("7. 确认入库批次与追加式流水", () => {
 
   it("定义更新不能绕过流水覆盖数量或库位", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `W-${shortId()}`, name: "禁止覆盖写",
+      productionId: prodId, name: "禁止覆盖写",
       subject: null, quantity: 2, createdBy: ownerId,
     });
     await expect(updateMaterial(m.id, prodId, { quantity: 9 }))
@@ -285,7 +283,7 @@ describe("8. PATCH 的名字校验与 POST 对称", () => {
 
   it("name 为空串 / 纯空白都被拒，且物料名不变", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `M${shortId()}`, name: `改名物料${shortId()}`,
+      productionId: prodId, name: `改名物料${shortId()}`,
       subject: null, createdBy: ownerId,
     });
     const ctx = () => ({ params: Promise.resolve({ id: prodId, materialId: m.id }) });
@@ -299,7 +297,7 @@ describe("8. PATCH 的名字校验与 POST 对称", () => {
 
   it("正常改名仍然通得过", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `M${shortId()}`, name: `原名${shortId()}`,
+      productionId: prodId, name: `原名${shortId()}`,
       subject: null, createdBy: ownerId,
     });
     const ctx = () => ({ params: Promise.resolve({ id: prodId, materialId: m.id }) });
@@ -341,7 +339,7 @@ describe("9. 责任方的 POC 管自己那一摊", () => {
 
   it("挂在 A 部门的物料：A 的 POC 能改能删，B 的 POC 和路人都不能", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `M${shortId()}`, name: `A 部门的箱子${shortId()}`,
+      productionId: prodId, name: `A 部门的箱子${shortId()}`,
       subject: { kind: "dept", id: deptId }, createdBy: ownerId,
     });
     for (const verb of ["edit", "delete"] as const) {
@@ -353,7 +351,7 @@ describe("9. 责任方的 POC 管自己那一摊", () => {
 
   it("用户组做责任方时同样成立（组 POC ≠ 部门 POC，走的是同一个 isSubjectPoc）", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `M${shortId()}`, name: `组的物料${shortId()}`,
+      productionId: prodId, name: `组的物料${shortId()}`,
       subject: { kind: "group", id: groupId }, createdBy: ownerId,
     });
     // groupId 的 POC 是 deptId 这个部门 → 该部门的 POC 都算
@@ -363,7 +361,7 @@ describe("9. 责任方的 POC 管自己那一摊", () => {
 
   it("无责任方的物料谁都改不了——它属于台账公共部分，只有域级键能动", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `M${shortId()}`, name: `无主物料${shortId()}`,
+      productionId: prodId, name: `无主物料${shortId()}`,
       subject: null, createdBy: ownerId,
     });
     expect(await canWriteMaterial(actor(pocA), prodId, m, "edit")).toBe(false);
@@ -380,7 +378,7 @@ describe("9. 责任方的 POC 管自己那一摊", () => {
 
   it("owner 依然畅通（旁路在 hasEffectiveGrant 里，不该被这条判定挡住）", async () => {
     const m = await createMaterial({
-      productionId: prodId, code: `M${shortId()}`, name: `owner 测${shortId()}`,
+      productionId: prodId, name: `owner 测${shortId()}`,
       subject: { kind: "dept", id: deptB }, createdBy: ownerId,
     });
     expect(await canWriteMaterial(

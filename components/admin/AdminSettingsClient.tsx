@@ -5,6 +5,7 @@ import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import PageHeader from "@/components/ui/PageHeader";
 import AiInstructionsCard from "@/components/agent/AiInstructionsCard";
 import AiUsageCard from "@/components/agent/AiUsageCard";
+import styles from "@/components/admin/admin-settings.module.css";
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -12,11 +13,10 @@ import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { productionAvatarSrc } from "@/lib/asset/avatar-url";
 import { PRODUCTION_TYPES } from "@/lib/production/production-types";
+import dangerStyles from "@/components/admin/admin-danger.module.css";
 import migrationStyles from "@/components/admin/admin-migration.module.css";
 
 // ── Primitives ────────────────────────────────────────────────────────────────
-
-const LABEL_COL = 220;
 
 const INPUT: React.CSSProperties = {
   fontSize: 13, color: "var(--ink)",
@@ -41,44 +41,29 @@ function LockedNotice({ reason }: { reason: string }) {
 
 // ── Setting row: label left, control right ────────────────────────────────────
 
-function Row({ title, hint, last, children }: {
-  title: string; hint?: string; last?: boolean; children: React.ReactNode;
+function Row({ title, hint, last, mobileStack = false, children }: {
+  title: string; hint?: string; last?: boolean; mobileStack?: boolean; children: React.ReactNode;
 }) {
   return (
-    <div style={{
-      display: "grid",
-      gridTemplateColumns: `${LABEL_COL}px 1fr`,
-      gap: 24,
-      padding: "18px 24px",
-      borderBottom: last ? "none" : "1px solid var(--line)",
-      alignItems: "start",
-    }}>
-      <div style={{ paddingTop: 1 }}>
+    <div className={`${styles.settingRow} ${mobileStack ? styles.basicInfoRow : ""} ${last ? styles.lastRow : ""}`}>
+      <div className={styles.rowLabel}>
         <p style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{title}</p>
         {hint && <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>{hint}</p>}
       </div>
-      <div>{children}</div>
+      <div className={styles.rowContent}>{children}</div>
     </div>
   );
 }
 
 // ── Section wrapper ───────────────────────────────────────────────────────────
 
-function Card({ title, children, danger }: {
-  title?: string; children: React.ReactNode; danger?: boolean;
+function Card({ title, children, danger, basicInfo = false }: {
+  title?: string; children: React.ReactNode; danger?: boolean; basicInfo?: boolean;
 }) {
   return (
-    <div style={{
-      background: "white", borderRadius: 12, overflow: "hidden",
-      border: danger ? "1px solid #fca5a5" : "1px solid var(--line)",
-      marginBottom: 20,
-    }}>
+    <div className={`${styles.card} ${danger ? styles.dangerCard : ""} ${basicInfo ? styles.basicInfoCard : ""}`}>
       {title && (
-        <div style={{
-          padding: "14px 24px",
-          borderBottom: "1px solid var(--line)",
-          background: danger ? "#fff5f5" : "var(--surface)",
-        }}>
+        <div className={`${styles.cardHeader} ${danger ? styles.dangerHeader : ""}`}>
           <p style={{ fontSize: 11, fontWeight: 700, color: danger ? "#dc2626" : "var(--muted)", letterSpacing: ".07em", textTransform: "uppercase" }}>
             {title}
           </p>
@@ -91,11 +76,12 @@ function Card({ title, children, danger }: {
 
 // ── Save button with feedback ─────────────────────────────────────────────────
 
-function SaveBtn({ dirty, saving, saved, onClick }: {
+function SaveBtn({ dirty, saving, saved, onClick, mobileFullWidth = false }: {
   dirty: boolean; saving: boolean; saved: boolean; onClick: () => void;
+  mobileFullWidth?: boolean;
 }) {
   return (
-    <button onClick={onClick} disabled={!dirty || saving} style={BTN(dirty)}>
+    <button className={mobileFullWidth ? styles.basicInfoButton : undefined} onClick={onClick} disabled={!dirty || saving} style={BTN(dirty)}>
       {saved ? "已保存 ✓" : saving ? "保存中…" : "保存"}
     </button>
   );
@@ -181,7 +167,7 @@ export default function AdminSettingsClient({
 }) {
   return (
     <div style={{ overflowY: "auto", background: "var(--paper)", minHeight: "100%" }}>
-      <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
+      <div className={styles.pageContent}>
 
         {/* Page header（v3 统一页头） */}
         <PageHeader
@@ -306,28 +292,29 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
   const avatarSrc = productionAvatarSrc(productionId, avatarUrl, 512);
 
   return (
-    <Card title="基本信息">
+    <Card title="基本信息" basicInfo>
       {/* 项目名称 */}
-      <Row title="项目名称" hint="显示于项目列表、配置中心标题栏">
+      <Row title="项目名称" hint="显示于项目列表、配置中心标题栏" mobileStack>
         {!perms.canRename ? <LockedNotice reason="需要 production:rename 权限" /> : (
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className={styles.basicInfoInlineField}>
             <input
               value={name}
               onChange={e => { setName(e.target.value); nameSave.clearSaved(); }}
               onKeyDown={e => { if (e.key === "Enter" && nameDirty) nameSave.save({ name: name.trim() }); }}
               placeholder="项目名称"
-              style={{ ...INPUT, flex: 1, fontWeight: 500 }}
+              className={styles.basicInfoInput}
+              style={{ ...INPUT, flex: 1, minWidth: 0, fontWeight: 500 }}
               onFocus={inputFocus} onBlur={inputBlur}
             />
-            <SaveBtn dirty={nameDirty} saving={nameSave.saving} saved={nameSave.saved} onClick={() => nameSave.save({ name: name.trim() })} />
+            <SaveBtn mobileFullWidth dirty={nameDirty} saving={nameSave.saving} saved={nameSave.saved} onClick={() => nameSave.save({ name: name.trim() })} />
           </div>
         )}
       </Row>
 
       {/* 头像 */}
-      <Row title="项目头像" hint="展示于项目列表和顶栏，JPG / PNG / WebP，最大 5 MB">
+      <Row title="项目头像" hint="展示于项目列表和顶栏，JPG / PNG / WebP，最大 5 MB" mobileStack>
         {!perms.canChangeAvatar ? <LockedNotice reason="需要 production:change_avatar 权限" /> : (
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div className={styles.avatarField}>
             {/* Preview */}
             <div style={{
               width: 56, height: 56, borderRadius: 10, flexShrink: 0, overflow: "hidden",
@@ -347,7 +334,7 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
             </div>
 
             {/* Controls */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <div className={styles.avatarControls}>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -356,6 +343,7 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
                 onChange={e => { const f = e.target.files?.[0]; if (f) handleAvatarFile(f); }}
               />
               <button
+                className={`${styles.basicInfoButton} ${styles.avatarButton}`}
                 onClick={() => fileInputRef.current?.click()}
                 disabled={avatarUploading}
                 style={{ fontSize: 12, fontWeight: 600, padding: "6px 14px", borderRadius: 7, border: "1px solid var(--line)", background: "white", color: "var(--ink)", cursor: avatarUploading ? "default" : "pointer", transition: "all .15s" }}
@@ -375,7 +363,7 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
       </Row>
 
       {/* 简介 */}
-      <Row title="项目简介" hint="在项目首页展示，简短介绍背景或特色">
+      <Row title="项目简介" hint="在项目首页展示，简短介绍背景或特色" mobileStack>
         {!perms.canEditDescription ? <LockedNotice reason="需要 production:edit_description 权限" /> : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <textarea
@@ -383,24 +371,26 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
               onChange={e => { setDescription(e.target.value); descSave.clearSaved(); }}
               rows={3}
               placeholder="一两句话介绍这个项目…"
+              className={styles.basicInfoInput}
               style={{ ...INPUT, width: "100%", resize: "vertical", lineHeight: 1.6, fontFamily: "inherit" }}
               onFocus={inputFocus} onBlur={inputBlur}
             />
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <SaveBtn dirty={descDirty} saving={descSave.saving} saved={descSave.saved} onClick={() => descSave.save({ description })} />
+            <div className={styles.basicInfoSaveRow}>
+              <SaveBtn mobileFullWidth dirty={descDirty} saving={descSave.saving} saved={descSave.saved} onClick={() => descSave.save({ description })} />
             </div>
           </div>
         )}
       </Row>
 
       {/* 类型 */}
-      <Row title="项目类型" hint="未来将绑定模版与导航别称">
+      <Row title="项目类型" hint="未来将绑定模版与导航别称" mobileStack>
         {!perms.canChangeType ? <LockedNotice reason="需要 production:change_type 权限" /> : (
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div className={styles.typeControls}>
             <OverflowSafeSelect
               value={type}
               onChange={e => { setType(e.target.value); typeSave.clearSaved(); if (e.target.value !== "other") setTypeLabel(""); }}
-              style={{ ...SELECT_STYLE, minWidth: 130, flex: "none" }}
+              className={styles.basicInfoSelect}
+              style={SELECT_STYLE}
               onFocus={inputFocus} onBlur={inputBlur}
             >
               <option value="">— 未设置 —</option>
@@ -411,28 +401,30 @@ function BasicInfoCard({ productionId, initialMeta, perms }: {
                 value={typeLabel}
                 onChange={e => { setTypeLabel(e.target.value); typeSave.clearSaved(); }}
                 placeholder="自定义类型名称"
+                className={styles.basicInfoInput}
                 style={{ ...INPUT, flex: 1, minWidth: 100 }}
                 onFocus={inputFocus} onBlur={inputBlur}
               />
             )}
-            <SaveBtn dirty={typeDirty} saving={typeSave.saving} saved={typeSave.saved} onClick={() => typeSave.save({ type: type || null, typeLabel: type === "other" ? (typeLabel || null) : null })} />
+            <SaveBtn mobileFullWidth dirty={typeDirty} saving={typeSave.saving} saved={typeSave.saved} onClick={() => typeSave.save({ type: type || null, typeLabel: type === "other" ? (typeLabel || null) : null })} />
           </div>
         )}
       </Row>
 
       {/* 语言 */}
-      <Row title="语言" hint="项目主要语言，展示属性" last>
+      <Row title="语言" hint="项目主要语言，展示属性" last mobileStack>
         {!perms.canChangeLanguage ? <LockedNotice reason="需要 production:change_language 权限" /> : (
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className={styles.basicInfoInlineField}>
             <input
               value={language}
               onChange={e => { setLanguage(e.target.value); langSave.clearSaved(); }}
               onKeyDown={e => { if (e.key === "Enter" && langDirty) langSave.save({ language: language.trim() || null }); }}
               placeholder="普通话 / 英语"
-              style={{ ...INPUT, flex: 1 }}
+              className={styles.basicInfoInput}
+              style={{ ...INPUT, flex: 1, minWidth: 0 }}
               onFocus={inputFocus} onBlur={inputBlur}
             />
-            <SaveBtn dirty={langDirty} saving={langSave.saving} saved={langSave.saved} onClick={() => langSave.save({ language: language.trim() || null })} />
+            <SaveBtn mobileFullWidth dirty={langDirty} saving={langSave.saving} saved={langSave.saved} onClick={() => langSave.save({ language: language.trim() || null })} />
           </div>
         )}
       </Row>
@@ -663,6 +655,22 @@ export function DataCard({ productionId, perms }: { productionId: string; perms:
 // 危险区域 card
 // ─────────────────────────────────────────────────────────────────────────────
 
+function DangerRow({ title, hint, children }: {
+  title: string;
+  hint: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={dangerStyles.dangerRow}>
+      <div className={dangerStyles.dangerLabel}>
+        <p>{title}</p>
+        <small>{hint}</small>
+      </div>
+      <div className={dangerStyles.dangerControl}>{children}</div>
+    </div>
+  );
+}
+
 export function DangerCard({ productionId, productionName, isArchived, perms }: {
   productionId: string;
   productionName: string;
@@ -705,9 +713,12 @@ export function DangerCard({ productionId, productionName, isArchived, perms }: 
   const inputBlur = (e: React.FocusEvent<HTMLInputElement>) => { e.currentTarget.style.borderColor = "var(--line)"; };
 
   return (
-    <Card title="危险区域" danger>
+    <div className={dangerStyles.dangerCard}>
+      <div className={dangerStyles.dangerHeader}>
+        <p>危险区域</p>
+      </div>
       {/* Archive */}
-      <Row title={currentArchived ? "取消归档" : "归档项目"} hint={currentArchived ? "恢复项目为活跃状态，成员可继续编辑" : "标记为归档，成员只读，不再出现于常用列表"}>
+      <DangerRow title={currentArchived ? "取消归档" : "归档项目"} hint={currentArchived ? "恢复项目为活跃状态，成员可继续编辑" : "标记为归档，成员只读，不再出现于常用列表"}>
         {!perms.canArchive ? (
           <LockedNotice reason="需要 production:archive 权限" />
         ) : (
@@ -722,10 +733,10 @@ export function DangerCard({ productionId, productionName, isArchived, perms }: 
             {archiveMsg && <p style={{ marginTop: 6, fontSize: 12, color: "#16a34a" }}>{archiveMsg}</p>}
           </div>
         )}
-      </Row>
+      </DangerRow>
 
       {/* Delete */}
-      <Row title="删除项目" hint="彻底删除项目及所有数据，不可撤销" last>
+      <DangerRow title="删除项目" hint="彻底删除项目及所有数据，不可撤销">
         {!perms.canDelete ? (
           <LockedNotice reason="仅项目所有者可删除（production:delete）" />
         ) : (
@@ -733,7 +744,7 @@ export function DangerCard({ productionId, productionName, isArchived, perms }: 
             <p style={{ fontSize: 12, color: "var(--muted)" }}>
               输入项目名称 <strong style={{ color: "var(--ink)" }}>「{productionName}」</strong> 以确认：
             </p>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className={dangerStyles.deleteConfirmRow}>
               <input
                 value={deleteInput}
                 onChange={e => setDeleteInput(e.target.value)}
@@ -751,7 +762,7 @@ export function DangerCard({ productionId, productionName, isArchived, perms }: 
             </div>
           </div>
         )}
-      </Row>
-    </Card>
+      </DangerRow>
+    </div>
   );
 }

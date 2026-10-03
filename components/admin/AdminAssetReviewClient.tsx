@@ -5,6 +5,8 @@ import PageHeader, { SECONDARY_BTN } from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import { BASE_PATH } from "@/lib/base-path";
 import type { PrivateAssetRow } from "@/lib/asset/review-db";
+import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
+import styles from "./admin-asset-review.module.css";
 
 type Props = {
   productionId: string;
@@ -70,25 +72,14 @@ export default function AdminAssetReviewClient({ productionId, productionName, i
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
       <PageHeader eyebrow={productionName} title="数字资产审查" side="stage" />
 
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
-        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
-        background: "var(--line)", marginBottom: 18,
-      }}>
-        {[
-          [String(assets.length), "隐私资产", "未公开（is_public = false）"],
-          [String(grantTotal), "实例授权", "指向隐私资产的有效授权"],
-          [String(assets.filter(a => a.mountCount === 0 && a.grants.length === 0).length), "零触达", "无挂载且无授权"],
-        ].map(([num, label, hint]) => (
-          <div key={label} style={{ minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13, background: "var(--surface)" }}>
-            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
-            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
-              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
-              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
-            </p>
-          </div>
-        ))}
-      </div>
+      <AdminMetricGrid
+        columns={3}
+        items={[
+          { value: String(assets.length), label: "隐私资产", hint: "未公开（is_public = false）" },
+          { value: String(grantTotal), label: "实例授权", hint: "指向隐私资产的有效授权" },
+          { value: String(assets.filter(a => a.mountCount === 0 && a.grants.length === 0).length), label: "零触达", hint: "无挂载且无授权" },
+        ]}
+      />
 
       <p style={{ margin: "0 0 14px", fontSize: 11, color: "var(--danger)", fontWeight: 700 }}>
         ⚠ 本页为越隐私合规审查：以下为成员未公开的数字资产，仅限合规用途查看与处置。
@@ -101,36 +92,50 @@ export default function AdminAssetReviewClient({ productionId, productionName, i
           const open = expanded.has(a.id);
           return (
             <div key={a.id} style={{ borderBottom: "1px solid var(--line)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 0" }}>
+              <div className={styles.assetRow}>
                 <button
                   onClick={() => toggle(a.id)}
-                  style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", fontSize: 11, width: 18 }}
+                  className={styles.assetToggle}
+                  aria-label={`${open ? "收起" : "展开"}${a.name || a.fileName}的授权名单`}
+                  aria-expanded={open}
                 >
                   {open ? "▾" : "▸"}
                 </button>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div className={styles.assetDetails}>
+                  <p className={styles.assetName}>
                     {a.name || a.fileName}
                   </p>
-                  <p style={{ margin: "2px 0 0", fontSize: 10, color: "var(--muted)" }}>
+                  <p className={styles.fileMeta}>
                     {a.fileName} · 上传：{a.uploaderName || a.uploaderId.slice(0, 8)} · {fmtDate(a.createdAt)}
                   </p>
                 </div>
-                <Badge tone="neutral">{a.assetType}</Badge>
-                <Badge tone={a.mountCount > 0 ? "blue" : "neutral"}>挂载 {a.mountCount}</Badge>
-                <Badge tone={a.grants.length > 0 ? "amber" : "neutral"}>授权 {a.grants.length}</Badge>
-                {canEdit && (
-                  <button
-                    disabled={busy}
-                    onClick={() => makePublic(a)}
-                    style={{ ...SECONDARY_BTN, padding: "4px 10px", fontSize: 10 }}
-                  >
-                    设为公开
-                  </button>
-                )}
+                <div className={styles.assetActions}>
+                  <div className={`${styles.assetTypeRow} ${styles.badgeCell}`}>
+                    <Badge tone="neutral">{a.assetType}</Badge>
+                  </div>
+                  <div className={styles.assetCountRow}>
+                    <span className={styles.badgeCell}>
+                      <Badge tone={a.mountCount > 0 ? "blue" : "neutral"}>挂载 {a.mountCount}</Badge>
+                    </span>
+                    <span className={styles.badgeCell}>
+                      <Badge tone={a.grants.length > 0 ? "amber" : "neutral"}>授权 {a.grants.length}</Badge>
+                    </span>
+                  </div>
+                  {canEdit && (
+                    <div className={styles.publicActionRow}>
+                      <button
+                        disabled={busy}
+                        onClick={() => makePublic(a)}
+                        style={{ ...SECONDARY_BTN, padding: "4px 10px", fontSize: 10 }}
+                      >
+                        设为公开
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               {open && (
-                <div style={{ padding: "0 0 12px 28px" }}>
+                <div className={styles.grantList}>
                   <p style={{ margin: "0 0 6px", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--stage)" }}>
                     授权名单（{a.grants.length}）
                   </p>
@@ -138,18 +143,21 @@ export default function AdminAssetReviewClient({ productionId, productionName, i
                     <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>无实例授权（仅上传者/挂载宿主路径可见）</p>
                   )}
                   {a.grants.map(g => (
-                    <div key={g.grantId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)", minWidth: 80 }}>
+                    <div key={g.grantId} className={styles.grantRow}>
+                      <span className={styles.grantName}>
                         {g.userName || g.userId.slice(0, 8)}
                       </span>
-                      <code style={{ flex: 1, fontSize: 10, color: "var(--muted)" }}>
+                      <code className={styles.grantCode}>
                         {g.resourceSub === "*" ? "" : g.resourceSub + "@"}{g.permissionLevel}
                       </code>
-                      <Badge tone="neutral">{SOURCE_LABEL[g.grantSource] ?? g.grantSource}</Badge>
+                      <span className={styles.badgeCell}>
+                        <Badge tone="neutral">{SOURCE_LABEL[g.grantSource] ?? g.grantSource}</Badge>
+                      </span>
                       {canEdit && (
                         <button
                           disabled={busy}
                           onClick={() => revokeGrant(a, g.grantId)}
+                          className={styles.revokeButton}
                           style={{ ...SECONDARY_BTN, padding: "2px 8px", fontSize: 10, borderColor: "var(--danger)", color: "var(--danger)" }}
                         >
                           撤销

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import MemberPickerModal, { type PickerMember, type PickerDept } from "@/components/perm/MemberPickerModal";
+import styles from "@/components/admin/admin-danger.module.css";
 
 type Props = {
   productionId: string;
@@ -40,7 +41,7 @@ export default function TransferOwnerCard({ productionId, currentOwnerName, memb
   }
 
   return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--danger)", borderRadius: 13, padding: 22, marginBottom: 18 }}>
+    <div className={styles.transferCard}>
       <p style={{ margin: "0 0 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--danger)" }}>
         Root Operation
       </p>
@@ -50,10 +51,11 @@ export default function TransferOwnerCard({ productionId, currentOwnerName, memb
       <p style={{ margin: "0 0 14px", fontSize: 12, color: "var(--muted)", lineHeight: 1.6 }}>
         当前 Owner：{currentOwnerName ?? "（未设置）"}。转让后对方获得全部权限（代码旁路），你将失去 Owner 身份，此操作只能由新 Owner 逆转。
       </p>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <div className={styles.transferControls}>
         {/* 伪 select：点开人员 picker（单选+二次确认） */}
         <button
           onClick={() => setPickerOpen(true)}
+          className={styles.ownerPicker}
           style={{
             padding: "8px 10px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 8,
             background: "var(--paper)", color: "var(--ink)", minWidth: 160, cursor: "pointer",
@@ -83,6 +85,7 @@ export default function TransferOwnerCard({ productionId, currentOwnerName, memb
         )}
         {target && (
           <input
+            className={styles.ownerConfirmInput}
             value={confirmText}
             onChange={e => setConfirmText(e.target.value)}
             placeholder={`输入「${target.name}」以确认`}
@@ -90,6 +93,7 @@ export default function TransferOwnerCard({ productionId, currentOwnerName, memb
           />
         )}
         <button
+          className={styles.ownerConfirmButton}
           disabled={busy || !armed}
           onClick={transfer}
           style={{

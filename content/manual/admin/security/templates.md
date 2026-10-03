@@ -5,9 +5,9 @@ summary: 每种 Cue 表类型由哪些部门可以建、建出来之后各部门
 routes: [admin/templates]
 who: 项目所有者与制作人
 tier: all
-platform: [desktop]
+platform: [desktop, mobile]
 related: [creation/cues/cue-lists, admin/security/permission-center]
-updated: 2026-09-18
+updated: 2026-10-03
 ---
 
 ## 这是什么
@@ -24,6 +24,7 @@ Cue 表按**类型**分（灯光 LQ、追光 FQ、音效 SQ、音乐 MQ、多媒
 ## 怎么操作
 
 - 顶部数字：模版类型数、声明行数、可建声明数。
+- 最窄的手机窗口里，三项顶部摘要改为单列。
 - 选一个类型（灯光）看它的声明行：「灯光设计 · 可建 ✓ · @view @edit cues@create cues@delete grants@edit」「灯光部 · 不可建 · @view」。
 - 「＋ 添加声明行」选部门，勾「可建」，「添加键」选动作。「删除」去掉一行。
 - 「＋ 新建模版类型」加一种剧组自己的类型（比如「烟火」），给个简称提示。「删除类型」。

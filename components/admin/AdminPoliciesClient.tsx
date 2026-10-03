@@ -7,6 +7,8 @@ import PageHeader from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import styles from "@/components/ui/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
+import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
+import metricStyles from "@/components/admin/admin-metric-grid.module.css";
 
 /** 与 GET /api/production/[id]/policies 的返回对齐。 */
 type Disposition =
@@ -124,7 +126,7 @@ export default function AdminPoliciesClient({
   }
 
   const segBtn = (active: boolean): React.CSSProperties => ({
-    flex: 1, padding: "7px 0", borderRadius: 8, border: "none", cursor: "pointer",
+    flex: 1, borderRadius: 8, border: "none", cursor: "pointer",
     fontSize: 12, fontWeight: 700,
     background: active ? "var(--ink)" : "transparent",
     color: active ? "#fff" : "var(--muted)",
@@ -149,31 +151,20 @@ export default function AdminPoliciesClient({
       <PageHeader eyebrow={productionName} title="策略中心" side="stage" />
 
       {/* 摘要 */}
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
-        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
-        background: "var(--line)", marginBottom: 18,
-      }}>
-        {[
-          [String(changedCount), "已偏离默认", `共 ${policies.length} 项`],
-          [String(customCount), "自定义组合", `共 ${questions.length} 道设置题`],
-          [audit[0] ? audit[0].changedAt.slice(5, 10) : "—", "最近改动", audit.length ? `近 ${audit.length} 条记录` : "尚无改动"],
-        ].map(([num, label, hint]) => (
-          <div key={label} style={{ minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13, background: "var(--surface)" }}>
-            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
-            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
-              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
-              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
-            </p>
-          </div>
-        ))}
-      </div>
+      <AdminMetricGrid
+        columns={3}
+        items={[
+          { value: String(changedCount), label: "已偏离默认", hint: `共 ${policies.length} 项` },
+          { value: String(customCount), label: "自定义组合", hint: `共 ${questions.length} 道设置题` },
+          { value: audit[0] ? audit[0].changedAt.slice(5, 10) : "—", label: "最近改动", hint: audit.length ? `近 ${audit.length} 条记录` : "尚无改动" },
+        ]}
+      />
 
       {/* segmented */}
-      <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface-2)", borderRadius: 10, width: 360, marginBottom: 14 }}>
-        <button style={segBtn(tab === "simple")} onClick={() => setTab("simple")}>常用设置</button>
-        <button style={segBtn(tab === "advanced")} onClick={() => setTab("advanced")}>高级（逐项）</button>
-        <button style={segBtn(tab === "audit")} onClick={() => setTab("audit")}>改动记录</button>
+      <div className={metricStyles.policyTabs}>
+        <button className={metricStyles.policyTab} style={segBtn(tab === "simple")} onClick={() => setTab("simple")}>常用设置</button>
+        <button className={metricStyles.policyTab} style={segBtn(tab === "advanced")} onClick={() => setTab("advanced")}>高级（逐项）</button>
+        <button className={metricStyles.policyTab} style={segBtn(tab === "audit")} onClick={() => setTab("audit")}>改动记录</button>
       </div>
 
       <p style={{ margin: "0 0 12px", fontSize: 11, color: "var(--muted)", maxWidth: 760, lineHeight: 1.7 }}>

@@ -25,7 +25,7 @@ afterAll(async () => {
 describe("逐件跟踪", () => {
   it("数量 N 建成 N 个数量恒为 1 的独立实物载体", async () => {
     const material = await createMaterial({
-      productionId: prodId, code: `SER-${shortId()}`, name: "无线话筒",
+      productionId: prodId, name: "无线话筒",
       category: "设备", trackingStrategy: "serialized", unit: "台", quantityScale: 0,
       quantity: 3, subject: null, createdBy: ownerId,
     });
@@ -59,7 +59,7 @@ describe("逐件跟踪", () => {
 describe("批量返还与耗材", () => {
   it("一次签出可多次部分返还，累计返还不得超过原签出", async () => {
     const material = await createMaterial({
-      productionId: prodId, code: `RET-${shortId()}`, name: "折叠椅",
+      productionId: prodId, name: "折叠椅",
       trackingStrategy: "bulk_returnable", unit: "把", quantity: 15,
       subject: null, createdBy: ownerId,
     });
@@ -95,7 +95,7 @@ describe("批量返还与耗材", () => {
 
   it("返还不引用签出就不回补；耗材净消耗随已登记返还减少", async () => {
     const material = await createMaterial({
-      productionId: prodId, code: `CON-${shortId()}`, name: "黑色胶带",
+      productionId: prodId, name: "黑色胶带",
       trackingStrategy: "consumable", unit: "卷", quantity: 8,
       subject: null, createdBy: ownerId,
     });
@@ -129,7 +129,7 @@ describe("批量返还与耗材", () => {
 describe("单位、精度与策略切换", () => {
   it("精确十进制按物料精度校验，底层不锁死整数", async () => {
     const material = await createMaterial({
-      productionId: prodId, code: `DEC-${shortId()}`, name: "舞台绳",
+      productionId: prodId, name: "舞台绳",
       trackingStrategy: "bulk_returnable", unit: "米", quantityScale: 2,
       quantity: 12.25, subject: null, createdBy: ownerId,
     });
@@ -143,7 +143,7 @@ describe("单位、精度与策略切换", () => {
 
   it("有库存事实后不可修改策略、单位或精度；空定义可以修改", async () => {
     const material = await createMaterial({
-      productionId: prodId, code: `LOCK-${shortId()}`, name: "锁定类型",
+      productionId: prodId, name: "锁定类型",
       subject: null, createdBy: ownerId,
     });
     for (const patch of [
@@ -153,11 +153,19 @@ describe("单位、精度与策略切换", () => {
         .rejects.toMatchObject({ reason: "tracking_has_history" });
     }
 
+    const emptyId = `mt_${shortId()}`;
     const empty = await getPool().query<{ id: string }>(
       `INSERT INTO production_material
-         (production_id, code, name, category, created_by)
+         (id, production_id, name, category, created_by)
        VALUES ($1,$2,'空定义','设备',$3) RETURNING id`,
-      [prodId, `EMPTY-${shortId()}`, ownerId],
+      [emptyId, prodId, ownerId],
+    );
+    await getPool().query(
+      `INSERT INTO production_material_identifier
+         (id, production_id, material_id, kind, display_value, normalized_value,
+          serial_number, created_by)
+       VALUES ($1,$2,$3,'material_number',$4,$5,999999,$6)`,
+      [`mi_${shortId()}`, prodId, emptyId, `M-${shortId()}`, `M${shortId()}`, ownerId],
     );
     const updated = await updateMaterial(empty.rows[0].id, prodId, {
       trackingStrategy: "serialized", unit: "台", quantityScale: 0,

@@ -8,6 +8,7 @@ import Badge from "@/components/ui/Badge";
 import MemberPickerModal, { type PickerMember, type PickerDept } from "@/components/perm/MemberPickerModal";
 import { BASE_PATH } from "@/lib/base-path";
 import type { GrantLedgerRow } from "@/lib/perm/grant-audit-db";
+import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
 
 type Props = {
   productionId: string;
@@ -124,25 +125,14 @@ export default function AdminAuditClient({
       <PageHeader eyebrow={productionName} title="权限审计" side="stage" />
 
       {/* 摘要 */}
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1,
-        overflow: "hidden", border: "1px solid var(--line)", borderRadius: 14,
-        background: "var(--line)", marginBottom: 18,
-      }}>
-        {[
-          [String(total), "流水总数", "当前筛选"],
-          [String(activeCount), "有效", "本页内"],
-          [String(revokedCount), "已撤销", "本页内"],
-        ].map(([num, label, hint]) => (
-          <div key={label} style={{ minHeight: 92, padding: "17px 19px", display: "flex", alignItems: "center", gap: 13, background: "var(--surface)" }}>
-            <span style={{ fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 28, color: "var(--ink)" }}>{num}</span>
-            <p style={{ margin: 0, display: "flex", flexDirection: "column" }}>
-              <b style={{ fontSize: 11, color: "var(--ink)" }}>{label}</b>
-              <small style={{ marginTop: 3, color: "var(--muted)", fontSize: 9 }}>{hint}</small>
-            </p>
-          </div>
-        ))}
-      </div>
+      <AdminMetricGrid
+        columns={3}
+        items={[
+          { value: String(total), label: "流水总数", hint: "当前筛选" },
+          { value: String(activeCount), label: "有效", hint: "本页内" },
+          { value: String(revokedCount), label: "已撤销", hint: "本页内" },
+        ]}
+      />
 
       {/* 筛选条 */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>

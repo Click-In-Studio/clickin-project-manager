@@ -31,7 +31,7 @@ function req(body: unknown, userId?: string, method = "POST") {
   return request;
 }
 async function fixture(rented = false) {
-  const material = await createMaterial({ productionId: prodId, code: `API-${shortId()}`, name: "线缆",
+  const material = await createMaterial({ productionId: prodId, name: "线缆",
     quantity: 5, subject: null, createdBy: ownerId,
     ...(rented ? { sourceType: "rented" as const, sourceLabel: "设备仓", returnDueAt: new Date("2026-12-01T00:00:00Z") } : {}) });
   const [lot] = await listMaterialStockLots(material.id, prodId);

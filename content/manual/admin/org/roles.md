@@ -7,7 +7,7 @@ who: 有角色管理权限的管理员
 tier: all
 platform: [desktop, mobile]
 related: [admin/org/members, admin/security/permission-center, admin/settings/producer]
-updated: 2026-09-18
+updated: 2026-10-03
 ---
 
 ## 这是什么
@@ -26,6 +26,8 @@ updated: 2026-09-18
 - 「＋ 新建角色」填名称。
 - 选中一个角色：「改名」、看「已指派成员」、「指派角色」给成员（和成员详情里编辑角色是同一件事）、危险区「删除」。
 - 顶部数字：角色总数、已指派成员数、未指派（无角色）成员数。
+
+> [!📱] 最窄的手机窗口里，三项顶部摘要改为单列，不会把标题或说明挤成竖排。
 
 ## 注意事项
 
