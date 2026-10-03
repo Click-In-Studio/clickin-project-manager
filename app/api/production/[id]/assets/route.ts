@@ -42,7 +42,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const treePaths = assetTreePaths(library);
   const actor = access.permCtx;
   const [metaEdit, assetDelete, fileCreate, fileView, pubView, grantsEdit,
-    pubCreate, pubDelete, externalShare, productionMounts, shareTokenOn] = await Promise.all([
+    pubCreate, pubDelete, shareCreate, productionMounts, shareTokenOn] = await Promise.all([
     listEffectiveGrantedResourceIds(actor, id, "asset", "meta", "edit"),
     listEffectiveGrantedResourceIds(actor, id, "asset", "*", "delete"),
     listEffectiveGrantedResourceIds(actor, id, "asset", "file", "create"),
@@ -76,8 +76,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
           download: has(pubView, a.id) || has(fileView, a.id),
           share: has(grantsEdit, a.id),
           unmount: has(grantsEdit, a.id) || has(pubDelete, a.id),
-          externalShare: actor.isOwner || has(externalShare, a.id),
-          externalShareCreate: actor.isOwner || (shareTokenOn && has(externalShare, a.id)),
+          externalShare: actor.isOwner || has(grantsEdit, a.id),
+          externalShareCreate: actor.isOwner
+            || (shareTokenOn && has(grantsEdit, a.id) && has(shareCreate, a.id)),
           listableOn: has(grantsEdit, a.id) || (productionMounts && has(pubCreate, a.id)),
           listableOff: has(grantsEdit, a.id) || (productionMounts && has(pubDelete, a.id)),
         },

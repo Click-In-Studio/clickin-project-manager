@@ -14,6 +14,7 @@ import { setPolicies } from "@/lib/perm/policy-db";
 import { POLICY_OFF, POLICY_ON } from "@/lib/perm/policy-keys";
 import { GET as manageGET, POST as managePOST } from "@/app/api/production/[id]/assets/[assetId]/share/route";
 import { DELETE as manageDELETE } from "@/app/api/production/[id]/assets/[assetId]/share/[linkId]/route";
+import { GET as assetsGET } from "@/app/api/production/[id]/assets/route";
 import { GET as publicGET } from "@/app/api/share/[token]/route";
 import { GET as streamGET } from "@/app/api/share/[token]/stream/route";
 import { POST as redeemPOST } from "@/app/api/share/[token]/redeem/route";
@@ -163,6 +164,45 @@ describe("分享链接下载文件名", () => {
 });
 
 describe("分享管理路由权限与闭环", () => {
+  it("资产列表动作与分享链接后端门禁一致", async () => {
+    await getPool().query(
+      `INSERT INTO production_member_grant
+         (production_id, user_id, resource_type, resource_id, resource_sub, permission_level, grant_source)
+       VALUES ($1, $2, 'asset', $3, '*', 'view', 'direct')`,
+      [prodId, singleKeyId, assetId],
+    );
+    try {
+      const createOnly = await assetsGET(manageReq("GET", singleKeyId), {
+        params: Promise.resolve({ id: prodId }),
+      });
+      expect(createOnly.status).toBe(200);
+      const createOnlyBody = await createOnly.json() as {
+        assets: { id: string; actions: { externalShare: boolean; externalShareCreate: boolean } }[];
+      };
+      expect(createOnlyBody.assets.find(asset => asset.id === assetId)?.actions).toMatchObject({
+        externalShare: false,
+        externalShareCreate: false,
+      });
+
+      const manager = await assetsGET(manageReq("GET", managerId), {
+        params: Promise.resolve({ id: prodId }),
+      });
+      expect(manager.status).toBe(200);
+      const managerBody = await manager.json() as typeof createOnlyBody;
+      expect(managerBody.assets.find(asset => asset.id === assetId)?.actions).toMatchObject({
+        externalShare: true,
+        externalShareCreate: false,
+      });
+    } finally {
+      await getPool().query(
+        `DELETE FROM production_member_grant
+         WHERE production_id = $1 AND user_id = $2 AND resource_type = 'asset'
+           AND resource_id = $3 AND resource_sub = '*' AND permission_level = 'view'`,
+        [prodId, singleKeyId, assetId],
+      );
+    }
+  });
+
   it("未登录 401、非成员 403、只持 shares@create 单枚键仍 403", async () => {
     expect((await managePOST(manageReq("POST", null, {}), manageCtx())).status).toBe(401);
     expect((await managePOST(manageReq("POST", outsiderId, {}), manageCtx())).status).toBe(403);
