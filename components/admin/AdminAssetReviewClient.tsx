@@ -6,6 +6,7 @@ import Badge from "@/components/ui/Badge";
 import { BASE_PATH } from "@/lib/base-path";
 import type { PrivateAssetRow } from "@/lib/asset/review-db";
 import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
+import styles from "./admin-asset-review.module.css";
 
 type Props = {
   productionId: string;
@@ -91,36 +92,50 @@ export default function AdminAssetReviewClient({ productionId, productionName, i
           const open = expanded.has(a.id);
           return (
             <div key={a.id} style={{ borderBottom: "1px solid var(--line)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 0" }}>
+              <div className={styles.assetRow}>
                 <button
                   onClick={() => toggle(a.id)}
-                  style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", fontSize: 11, width: 18 }}
+                  className={styles.assetToggle}
+                  aria-label={`${open ? "收起" : "展开"}${a.name || a.fileName}的授权名单`}
+                  aria-expanded={open}
                 >
                   {open ? "▾" : "▸"}
                 </button>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div className={styles.assetDetails}>
+                  <p className={styles.assetName}>
                     {a.name || a.fileName}
                   </p>
-                  <p style={{ margin: "2px 0 0", fontSize: 10, color: "var(--muted)" }}>
+                  <p className={styles.fileMeta}>
                     {a.fileName} · 上传：{a.uploaderName || a.uploaderId.slice(0, 8)} · {fmtDate(a.createdAt)}
                   </p>
                 </div>
-                <Badge tone="neutral">{a.assetType}</Badge>
-                <Badge tone={a.mountCount > 0 ? "blue" : "neutral"}>挂载 {a.mountCount}</Badge>
-                <Badge tone={a.grants.length > 0 ? "amber" : "neutral"}>授权 {a.grants.length}</Badge>
-                {canEdit && (
-                  <button
-                    disabled={busy}
-                    onClick={() => makePublic(a)}
-                    style={{ ...SECONDARY_BTN, padding: "4px 10px", fontSize: 10 }}
-                  >
-                    设为公开
-                  </button>
-                )}
+                <div className={styles.assetActions}>
+                  <div className={`${styles.assetTypeRow} ${styles.badgeCell}`}>
+                    <Badge tone="neutral">{a.assetType}</Badge>
+                  </div>
+                  <div className={styles.assetCountRow}>
+                    <span className={styles.badgeCell}>
+                      <Badge tone={a.mountCount > 0 ? "blue" : "neutral"}>挂载 {a.mountCount}</Badge>
+                    </span>
+                    <span className={styles.badgeCell}>
+                      <Badge tone={a.grants.length > 0 ? "amber" : "neutral"}>授权 {a.grants.length}</Badge>
+                    </span>
+                  </div>
+                  {canEdit && (
+                    <div className={styles.publicActionRow}>
+                      <button
+                        disabled={busy}
+                        onClick={() => makePublic(a)}
+                        style={{ ...SECONDARY_BTN, padding: "4px 10px", fontSize: 10 }}
+                      >
+                        设为公开
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               {open && (
-                <div style={{ padding: "0 0 12px 28px" }}>
+                <div className={styles.grantList}>
                   <p style={{ margin: "0 0 6px", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--stage)" }}>
                     授权名单（{a.grants.length}）
                   </p>
@@ -128,18 +143,21 @@ export default function AdminAssetReviewClient({ productionId, productionName, i
                     <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>无实例授权（仅上传者/挂载宿主路径可见）</p>
                   )}
                   {a.grants.map(g => (
-                    <div key={g.grantId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)", minWidth: 80 }}>
+                    <div key={g.grantId} className={styles.grantRow}>
+                      <span className={styles.grantName}>
                         {g.userName || g.userId.slice(0, 8)}
                       </span>
-                      <code style={{ flex: 1, fontSize: 10, color: "var(--muted)" }}>
+                      <code className={styles.grantCode}>
                         {g.resourceSub === "*" ? "" : g.resourceSub + "@"}{g.permissionLevel}
                       </code>
-                      <Badge tone="neutral">{SOURCE_LABEL[g.grantSource] ?? g.grantSource}</Badge>
+                      <span className={styles.badgeCell}>
+                        <Badge tone="neutral">{SOURCE_LABEL[g.grantSource] ?? g.grantSource}</Badge>
+                      </span>
                       {canEdit && (
                         <button
                           disabled={busy}
                           onClick={() => revokeGrant(a, g.grantId)}
+                          className={styles.revokeButton}
                           style={{ ...SECONDARY_BTN, padding: "2px 8px", fontSize: 10, borderColor: "var(--danger)", color: "var(--danger)" }}
                         >
                           撤销
