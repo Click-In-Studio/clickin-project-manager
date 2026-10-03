@@ -159,10 +159,9 @@ type Selection = { kind: "request"; item: ApprovalCenterItem }
   | null;
 
 export default function ApprovalCenterClient({
-  productionId, productionName, actorId, archived,
+  productionId, actorId, archived,
 }: {
   productionId: string;
-  productionName: string;
   actorId: string;
   archived: boolean;
 }) {
@@ -406,8 +405,8 @@ export default function ApprovalCenterClient({
     <div className={`${styles.workspace} ${styles.approvalCenterWorkspace}`}>
       {!archived && (
         <ProductionModuleTopMenu
-          productionName={productionName}
           label="审批"
+          side="overview"
           primaryAction={<button type="button" className={PRODUCTION_MODULE_ACTION_CLASS} onClick={openRequestForm}>申请资源权限</button>}
           primaryShortAction={<button type="button" aria-label="申请资源权限" className={PRODUCTION_MODULE_ACTION_CLASS} onClick={openRequestForm}>申请</button>}
           primaryOverflowAction={<button type="button" className={PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS} onClick={openRequestForm}>申请资源权限</button>}

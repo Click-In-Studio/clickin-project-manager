@@ -39,7 +39,6 @@ type View = "all" | "upload-new-version";
 
 interface Props {
   productionId: string;
-  productionName: string;
   versionId: string | null;
   myUserId: string;
   userName: string;
@@ -47,7 +46,7 @@ interface Props {
   departments: { id: string; name: string }[];
 }
 
-export default function AssetPageClient({ productionId, productionName, versionId, myUserId, userName, members, departments }: Props) {
+export default function AssetPageClient({ productionId, versionId, myUserId, userName, members, departments }: Props) {
   const router = useRouter();
   const [assets, setAssets] = useState<AssetListItem[]>([]);
   const [stats, setStats] = useState<{ totalBytes: number; unknownFiles: number } | null>(null);
@@ -219,7 +218,6 @@ export default function AssetPageClient({ productionId, productionName, versionI
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
       <ProductionModuleTopMenu
-        productionName={productionName}
         label="资产工作台"
         primaryAction={<button type="button" onClick={() => setShowUploadModal(true)} className={PRODUCTION_MODULE_ACTION_CLASS}>＋ 上传新 Asset</button>}
         primaryShortAction={<button type="button" aria-label="上传新 Asset" onClick={() => setShowUploadModal(true)} className={PRODUCTION_MODULE_ACTION_CLASS}>＋</button>}

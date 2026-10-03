@@ -6,6 +6,7 @@ import ChevronIcon from "@/components/ui/ChevronIcon";
 import ProductionTopMenu, {
   PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
   PRODUCTION_TOOLBAR_STAGE,
+  ProductionTopMenuContext,
   ProductionTopMenuDivider,
   useProductionToolbar,
 } from "../shell/ProductionTopMenu";
@@ -24,11 +25,9 @@ const SECTIONS: readonly {
 
 export function DramaturgyWorkspaceHeading({
   productionId,
-  productionName,
   active,
 }: {
   productionId: string;
-  productionName: string;
   active: DramaturgyWorkspaceSection;
 }) {
   const { stage } = useProductionToolbar();
@@ -50,14 +49,7 @@ export function DramaturgyWorkspaceHeading({
 
   return (
     <>
-      <div className="flex shrink-0 items-center" style={{ lineHeight: 1.2 }}>
-        {!compact && (
-          <span className="mr-2 max-w-32 truncate whitespace-nowrap text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--script)]">
-            {productionName}
-          </span>
-        )}
-        <span className="rounded-md bg-[var(--script-soft)] px-2 py-1 text-xs font-semibold text-[var(--script)]">构作</span>
-      </div>
+      <ProductionTopMenuContext label="构作" side="script" />
       <ProductionTopMenuDivider />
       {compact ? (
         <div ref={workspaceMenuRef} className="relative shrink-0">
@@ -118,11 +110,9 @@ export function DramaturgyWorkspaceHeading({
 
 export function DramaturgyInspirationShell({
   productionId,
-  productionName,
   children,
 }: {
   productionId: string;
-  productionName: string;
   children: React.ReactNode;
 }) {
   return (
@@ -130,7 +120,6 @@ export function DramaturgyInspirationShell({
       <ProductionTopMenu>
         <DramaturgyWorkspaceHeading
           productionId={productionId}
-          productionName={productionName}
           active="inspiration"
         />
       </ProductionTopMenu>

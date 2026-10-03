@@ -121,7 +121,6 @@ describe("报销填单", () => {
         setHasStoredControls: () => {},
       }}>
         <ProductionModuleTopMenu
-          productionName="海边的剧"
           label="财务"
           primaryAction={<ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} triggerVariant="toolbar" />}
           primaryShortAction={<ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} triggerVariant="short" />}

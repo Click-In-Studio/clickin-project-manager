@@ -29,7 +29,6 @@ export default async function AssetsPage({ params }: { params: Promise<{ id: str
     <>
       <AssetPageClient
         productionId={id}
-        productionName={productionName}
         versionId={versionId}
         myUserId={session.userId}
         userName={session.name}

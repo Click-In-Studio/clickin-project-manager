@@ -25,7 +25,6 @@ export type DragStateRef = {
 
 export type Props = {
   productionId: string;
-  productionName: string;
   blocks: Block[];
   characters: Character[];
   scenes: Scene[];

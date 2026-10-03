@@ -387,7 +387,6 @@ function CreateEventModal({
 
 type Props = {
   productionId: string;
-  productionName: string;
   initialEvents: ProductionEvent[];
   canCreate: boolean;
   canViewFull: boolean;
@@ -398,7 +397,7 @@ type Props = {
 };
 
 export default function EventsClient({
-  productionId, productionName, initialEvents, canCreate, canViewFull,
+  productionId, initialEvents, canCreate, canViewFull,
   myParticipations, departments, taskCounts = {},
 }: Props) {
   const [events,      setEvents]      = useState(initialEvents);
@@ -434,7 +433,6 @@ export default function EventsClient({
     <div className={responsive.eventPage}>
       {canCreate && (
         <ProductionModuleTopMenu
-          productionName={productionName}
           label="事件"
           primaryAction={<button type="button" onClick={() => setShowCreate(true)} className={PRODUCTION_MODULE_ACTION_CLASS}>＋ 新建事件</button>}
           primaryShortAction={<button type="button" aria-label="新建事件" onClick={() => setShowCreate(true)} className={PRODUCTION_MODULE_ACTION_CLASS}>＋</button>}

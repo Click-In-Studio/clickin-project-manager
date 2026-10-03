@@ -45,7 +45,6 @@ export default async function CharactersPage({
     <>
       <CharactersManager
         productionId={id}
-        productionName={name}
         initialCharacters={characters}
         perms={perms}
         versionId={versionId}

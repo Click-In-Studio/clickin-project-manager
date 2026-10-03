@@ -36,7 +36,7 @@ import { useCueGuideLines } from "./cue-page/use-cue-guide-lines";
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function CuePage({
-  productionId, productionName, blocks: rawBlocks, characters, scenes,
+  productionId, blocks: rawBlocks, characters, scenes,
   cueLists, initialCues, editableListIds, manageListIds, myUserId, isAdmin, pageMap,
   versionId,
 }: Props) {
@@ -660,7 +660,7 @@ export default function CuePage({
 
       {/* ── Top bar ── */}
       <ProductionTopMenu onClick={e => e.stopPropagation()} overflow={cueOverflow}>
-        <ProductionTopMenuContext productionName={productionName} label="Cue" />
+        <ProductionTopMenuContext label="Cue" side="script" />
         <ProductionTopMenuDivider />
         <div className="relative -ml-1 shrink-0">
           <button

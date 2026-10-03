@@ -4131,7 +4131,7 @@ export default function ScriptEditor({
             <>
           {productionName && (
             <>
-              <ProductionTopMenuContext productionName={productionName} label="剧本" />
+              <ProductionTopMenuContext label="剧本" side="script" />
               <ProductionTopMenuDivider />
             </>
           )}

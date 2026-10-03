@@ -285,7 +285,6 @@ export default function Dramaturgy({
       <ProductionTopMenu overflow={toolbarOverflow}>
         <DramaturgyWorkspaceHeading
           productionId={productionId}
-          productionName={productionName}
           active="overview"
         />
         <ProductionTopMenuDivider />

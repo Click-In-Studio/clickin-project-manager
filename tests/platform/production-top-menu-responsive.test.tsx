@@ -26,7 +26,7 @@ afterEach(() => {
   container.remove();
 });
 
-function renderContext(label: string, stage: number, side: "script" | "stage" = "script") {
+function renderContext(label: string, stage: number, side: "overview" | "script" | "stage" = "script") {
   act(() => root.render(
     <ProductionToolbarContext.Provider value={{
       stage: stage as (typeof PRODUCTION_TOOLBAR_STAGE)[keyof typeof PRODUCTION_TOOLBAR_STAGE],
@@ -35,25 +35,32 @@ function renderContext(label: string, stage: number, side: "script" | "stage" = 
       hasStoredControls: false,
       setHasStoredControls: () => {},
     }}>
-      <ProductionTopMenuContext productionName="一个很长的项目名称" label={label} side={side} />
+      <ProductionTopMenuContext label={label} side={side} />
     </ProductionToolbarContext.Provider>,
   ));
   return container.querySelector<HTMLElement>(`[data-production-top-menu-context="${label}"]`)!;
 }
 
 describe("共享项目工具栏上下文", () => {
-  it.each(["剧本", "Cue"] as const)("桌面端 %s 保留项目名和页面名", (label) => {
-    const context = renderContext(label, PRODUCTION_TOOLBAR_STAGE.full);
-    expect(context.textContent).toBe(`一个很长的项目名称${label}`);
-    expect(context.className).toContain("flex-col");
-    expect(context.lastElementChild?.className).not.toContain("border");
-  });
-
-  it.each(["剧本", "Cue"] as const)("窄屏 %s 只保留带边框的页面标识", (label) => {
-    const context = renderContext(label, PRODUCTION_TOOLBAR_STAGE.primaryShort);
+  it.each([
+    ["剧本", PRODUCTION_TOOLBAR_STAGE.full],
+    ["Cue", PRODUCTION_TOOLBAR_STAGE.primaryShort],
+  ] as const)("宽窄阶段的 %s 都只保留带边框的模块标识", (label, stage) => {
+    const context = renderContext(label, stage);
     expect(context.textContent).toBe(label);
     expect(context.className).not.toContain("flex-col");
     expect(context.lastElementChild?.className).toContain("border");
+  });
+
+  it.each([
+    ["overview", "我的工作", "border-[#cbd2cf]", "bg-[var(--surface-2)]"],
+    ["script", "构作", "border-[#bfd4d6]", "bg-[#edf5f5]"],
+    ["stage", "人员", "border-[#e3c9b9]", "bg-[#f8eee7]"],
+  ] as const)("%s 类模块使用与侧边栏一致的色系", (side, label, border, background) => {
+    const context = renderContext(label, PRODUCTION_TOOLBAR_STAGE.full, side);
+    expect(context.dataset.productionTopMenuSide).toBe(side);
+    expect(context.lastElementChild?.className).toContain(border);
+    expect(context.lastElementChild?.className).toContain(background);
   });
 
   it("项目总览与制作侧全部路由都有明确的顶部栏标签", () => {
@@ -74,8 +81,13 @@ describe("共享项目工具栏上下文", () => {
     };
     expect(PRODUCTION_TOP_MENU_LABELS).toMatchObject(expected);
 
+    const overviewLabels = new Set(["我的工作", "我的通知", "审批"]);
     for (const label of new Set(Object.values(expected))) {
-      const context = renderContext(label, PRODUCTION_TOOLBAR_STAGE.primaryShort, "stage");
+      const context = renderContext(
+        label,
+        PRODUCTION_TOOLBAR_STAGE.primaryShort,
+        overviewLabels.has(label) ? "overview" : "stage",
+      );
       expect(context.textContent).toBe(label);
       expect(context.lastElementChild?.className).toContain("border");
     }
