@@ -207,6 +207,7 @@ jobs:
           mkdir -p .next/standalone/db .next/standalone/bin
           cp -r db/migrations .next/standalone/db/
           cp db/fingerprint.sql db/schema-fingerprint.txt db/app-role-acl.sql db/check-app-role-acl.sql .next/standalone/db/
+          cp deploy/ecosystem.config.js .next/standalone/ecosystem.config.js
           cp node_modules/@dbmate/linux-x64/bin/dbmate .next/standalone/bin/dbmate
           chmod +x .next/standalone/bin/dbmate
           tar -czf /tmp/deploy_bundle.tar.gz -C .next/standalone .
@@ -258,19 +259,20 @@ jobs:
             chmod -R a+rX /tmp/deploy-db
           " < /dev/null
 
-      # ── 8. DB migrations（dbmate，#561）──────────────────────────────────────
+      # ── 8. Stop DB clients & run migrations（dbmate，#561）───────────────────
       # 「已执行」的唯一真相是库里的 schema_migrations 表；shared/db-applied.txt 退役。
       #
       # 闸一：库里有表却没有 schema_migrations → 拒绝。这是接管前建的库没记 baseline，
       #       让 dbmate 在它上面重放 baseline 不是我们要的（新机器空库才允许从 baseline 起）。
-      # 闸二：有 pending 才备份（备份文件保留最近 5 份）。
-      # 闸三：up 之后 status 必须 0 pending，否则红——不再有「跳过了也不知道」。
+      # 闸二：有 pending 就先停 Web / runner / worker，杜绝旧代码在新 schema 上继续写；
+      #       随后备份（备份文件保留最近 5 份）。备份前失败可重启旧代码，migration
+      #       一旦开始后失败则保持停机，因为 dbmate 按文件提交，不能假设所有 pending 整体回滚。
+      # 闸三：up 之后 status 必须 0 pending，否则保持停机——不再有「跳过了也不知道」。
       # 闸四：应用角色对现有对象与未来对象的 ACL 必须完整；先幂等对账再独立复核，
       #       防止恢复库或环境初始化遗漏让新表上线即 42501。
       # 闸五：线上结构指纹必须逐行等于仓库的 db/schema-fingerprint.txt，不等即红：
       #       「删了没删掉 / 记了没执行 / schema.sql 忘同步」全在这里现形。
-      #       此时代码还没切换，老代码跑在新 schema 上（expand / contract 保证可行），
-      #       红了就停在这里排查，不会发出去一个和库不匹配的版本。
+      #       此时代码还没切换且旧进程已经停止；红了就保持停机排查，不允许旧写假成功。
       - name: Run DB migrations
         run: |
           SHARED="/var/www/production-manager/shared"
@@ -280,6 +282,7 @@ jobs:
           # 「仍有 pending」）。/tmp/deploy-db 里没有 .env，不存在即忽略。
           DBMATE="cd /tmp/deploy-db && sudo -u postgres ./dbmate --url '$URL' --migrations-dir /tmp/deploy-db/migrations --no-dump-schema"
           PSQL="sudo -u postgres psql -d script_editor -qAt"
+          echo "SCHEMA_CHANGED=false" >> "$GITHUB_ENV"
 
           TABLES=$(ssh prod "$PSQL -c \"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename <> 'schema_migrations'\"" < /dev/null)
           HAS_LEDGER=$(ssh prod "$PSQL -c \"SELECT to_regclass('public.schema_migrations') IS NOT NULL\"" < /dev/null)
@@ -296,21 +299,54 @@ jobs:
           PENDING=$(grep -c '^\[ \]' /tmp/status-before.txt || true)
 
           if [ "$PENDING" -gt 0 ]; then
+            restart_old_release() {
+              ssh prod "
+                if [ -L /var/www/production-manager/current ] &&
+                   [ -f /var/www/production-manager/shared/ecosystem.config.js ]; then
+                  pm2 startOrReload /var/www/production-manager/shared/ecosystem.config.js --update-env
+                fi
+              " < /dev/null
+            }
+
+            echo "Found $PENDING pending migration(s) — removing database client processes from PM2..."
+            if ! ssh prod '
+              STOP_FAILED=0
+              for APP in production-manager agent-runner heavy-worker; do
+                if pm2 describe "$APP" >/dev/null 2>&1; then
+                  pm2 delete "$APP" || STOP_FAILED=1
+                fi
+              done
+              exit "$STOP_FAILED"
+            ' < /dev/null; then
+              echo "::error::停止并移除数据库客户端进程失败；尝试恢复旧版本"
+              restart_old_release || true
+              exit 1
+            fi
+
             echo "Found $PENDING pending migration(s) — creating production DB backup..."
             BACKUP="pre_migration_${{ github.run_number }}_$(date +%Y%m%d_%H%M%S).pgdump"
-            ssh prod "
+            if ! ssh prod "
+              set -e
               mkdir -p $SHARED/backups &&
               sudo -u postgres pg_dump -d script_editor --format=custom --compress=9 > $SHARED/backups/$BACKUP &&
               ls -lh $SHARED/backups/$BACKUP &&
               ls -1t $SHARED/backups/*.pgdump 2>/dev/null | tail -n +6 | xargs -r rm -f
-            " < /dev/null
+            " < /dev/null; then
+              echo "::error::发布前备份失败，尚未执行 migration；尝试恢复旧版本"
+              restart_old_release || true
+              exit 1
+            fi
             echo "Backup saved to $SHARED/backups/$BACKUP"
 
+            # 从这一刻起进入 migration 失败关闭区：先移除旧代码入口，再开始可能分支提交的迁移。
+            # 即使 dbmate 中途失败，shared 中的旧配置也不能借 current 拉起旧代码。
+            ssh prod "unlink /var/www/production-manager/current 2>/dev/null || true" < /dev/null
             echo "── dbmate up"
             ssh prod "$DBMATE up" < /dev/null \
-              || { echo "::error::MIGRATION FAILED — 该支已整体回滚（单事务），部署中止；备份在 $SHARED/backups/$BACKUP"; exit 1; }
+              || { echo "::error::MIGRATION FAILED — 服务保持停止；逐支核对 schema_migrations 后前向修复或恢复 $SHARED/backups/$BACKUP"; exit 1; }
+            echo "SCHEMA_CHANGED=true" >> "$GITHUB_ENV"
           else
-            echo "No pending migrations — backup skipped."
+            echo "No pending migrations — process stop and backup skipped."
           fi
 
           echo "── status（after）：必须 0 pending"
@@ -332,16 +368,76 @@ jobs:
           fi
           echo "线上 schema 指纹一致（$(wc -l < /tmp/prod-fingerprint.txt) 行）"
 
-      # ── 9. Swap symlink & reload PM2 ─────────────────────────────────────────
+      # ── 9. Swap symlink, start PM2 & verify health ───────────────────────────
       # pm2 进程定义收在仓库 deploy/ecosystem.config.js（含 agent-runner），每次发布
-      # 覆盖到 shared/ 再 reload：文件里新出现的 app 会被拉起，已在跑的按各自模式换新。
+      # 随 release 上传并直接用于 startOrReload；三个入口全部健康后才覆盖 shared/ 的已验证
+      # 副本。失败时 shared 仍是上一版配置，不会出现旧代码配新进程定义的半回滚。
       - name: Activate release
         run: |
-          scp deploy/ecosystem.config.js prod:/var/www/production-manager/shared/ecosystem.config.js
-          ssh prod "
-            ln -snf ${{ env.RELEASE_DIR }} /var/www/production-manager/current &&
-            pm2 reload /var/www/production-manager/shared/ecosystem.config.js --update-env
-          " < /dev/null
+          ssh prod '
+            set -e
+            HEALTH_SECRET=$(node --env-file=/var/www/production-manager/shared/.env.local -e "process.stdout.write(process.env.INTERNAL_NOTIFY_SECRET || \"\")")
+            if [ -z "$HEALTH_SECRET" ]; then
+              echo "缺少 INTERNAL_NOTIFY_SECRET，无法执行 Web 数据库健康检查" >&2
+              exit 1
+            fi
+            PREVIOUS_RELEASE=$(readlink -f /var/www/production-manager/current 2>/dev/null || true)
+            SCHEMA_CHANGED="${{ env.SCHEMA_CHANGED }}"
+            NEW_ECOSYSTEM="${{ env.RELEASE_DIR }}/ecosystem.config.js"
+
+            fail_activation() {
+              STOP_FAILED=0
+              for APP in production-manager agent-runner heavy-worker; do
+                if pm2 describe "$APP" >/dev/null 2>&1; then
+                  # 候选配置已经载入 PM2，不能只 stop 后留下可被 bare pm2 start 误拉起的坏定义。
+                  pm2 delete "$APP" || STOP_FAILED=1
+                fi
+              done
+              if [ "$SCHEMA_CHANGED" = "false" ] && [ -n "$PREVIOUS_RELEASE" ] && [ -d "$PREVIOUS_RELEASE" ]; then
+                ln -snf "$PREVIOUS_RELEASE" /var/www/production-manager/current
+                echo "已将 current 还原到 $PREVIOUS_RELEASE；进程保持停止" >&2
+              else
+                unlink /var/www/production-manager/current 2>/dev/null || true
+                echo "schema 已变化或没有上一 release；已移除 current，进程保持停止" >&2
+              fi
+              if [ "$STOP_FAILED" -ne 0 ]; then
+                echo "::error::一个或多个数据库客户端进程停止或移除失败，必须立即人工核对 PM2" >&2
+                return 1
+              fi
+              return 0
+            }
+
+            ln -snf ${{ env.RELEASE_DIR }} /var/www/production-manager/current
+            if ! pm2 startOrReload "$NEW_ECOSYSTEM" --update-env; then
+              echo "新版本进程启动失败，停止所有数据库客户端进程" >&2
+              fail_activation || true
+              exit 1
+            fi
+
+            for ATTEMPT in $(seq 1 30); do
+              # 端口必须与 deploy/ecosystem.config.js 的三个进程定义同步。
+              # runner / worker 只监听 127.0.0.1，不对外暴露；Web /health 经过 nginx，必须鉴权。
+              # secret 通过 stdin 传给 curl config，不能出现在同机其他进程可读的 argv 中。
+              if printf 'header = "Authorization: Bearer %s"\n' "$HEALTH_SECRET" |
+                   curl -fsS --max-time 3 --config - http://127.0.0.1:3001/health >/dev/null &&
+                 curl -fsS --max-time 3 http://127.0.0.1:3102/health >/dev/null &&
+                 curl -fsS --max-time 3 http://127.0.0.1:3103/health >/dev/null; then
+                # 已验证配置也是成功激活的一部分；落盘失败会造成下次恢复使用旧进程定义，必须失败关闭。
+                if ! cp "$NEW_ECOSYSTEM" /var/www/production-manager/shared/ecosystem.config.js; then
+                  echo "保存已验证的 PM2 配置失败" >&2
+                  fail_activation || true
+                  exit 1
+                fi
+                echo "三个生产进程健康"
+                exit 0
+              fi
+              sleep 2
+            done
+
+            echo "新版本健康检查失败，停止所有数据库客户端进程" >&2
+            fail_activation || true
+            exit 1
+          ' < /dev/null
 
       # ── 10. Clean up old releases (keep latest 5) ────────────────────────────
       - name: Clean old releases

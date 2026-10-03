@@ -95,7 +95,7 @@ CD（`.github/workflows/deploy.yml`）已经把 runner 纳入发布，**代码�
 
 1. `npm run build:runner`：esbuild 把 `agent-runner/index.ts` + `lib/` + `vendor/` 打成单文件 `agent-runner.js` 放进 `.next/standalone/`，随 bundle 一起发；node_modules 用 standalone 追踪出来的那份（CD 会逐个核对 runner 的外部依赖都在，缺一个直接失败）。
 2. DDL：运行时五表已在 baseline 里（历史文件 `db/legacy/add-agent-runtime.sql`）；以后的 schema 变更走 `db/migrations/`，CD 以 dbmate 自动执行（记账在库里的 `schema_migrations`）。
-3. pm2 进程定义收在仓库 [`deploy/ecosystem.config.js`](../deploy/ecosystem.config.js)（`agent-runner` + `production-manager`），每次发布覆盖到 `shared/ecosystem.config.js` 再 `pm2 reload … --update-env`。**注意 reload 只更新 env，不更新 cwd/exec_mode 这类进程定义**——改了那些字段要在服务器上 `pm2 delete <app> && pm2 start ecosystem.config.js --only <app>` 一次；所以路径类配置一律走 env（如 `AGENT_WORKSPACE_DIR`）。runner 用 **cluster 模式单实例**：新进程 `ready` 后才向旧进程发 SIGTERM（fork 模式的 reload 等于 restart，排水期间没人接请求）；`kill_timeout` ≥ 排水上限。
+3. pm2 进程定义收在仓库 [`deploy/ecosystem.config.js`](../deploy/ecosystem.config.js)（`agent-runner` + `production-manager`），随 release 上传并用于 `pm2 startOrReload … --update-env`；三个入口全部健康后才覆盖 `shared/ecosystem.config.js`，失败回退不会把新配置留给旧代码。**注意 reload 只更新 env，不更新 cwd/exec_mode 这类进程定义**——改了那些字段要在服务器上 `pm2 delete <app> && pm2 start ecosystem.config.js --only <app>` 一次；所以路径类配置一律走 env（如 `AGENT_WORKSPACE_DIR`）。runner 用 **cluster 模式单实例**：新进程 `ready` 后才向旧进程发 SIGTERM（fork 模式的 reload 等于 restart，排水期间没人接请求）；`kill_timeout` ≥ 排水上限。
 
 **唯一的人工动作：服务器 `shared/.env.local` 有 `AGENT_RUNNER_URL=http://127.0.0.1:3102`**（已配；CD reload 带 `--update-env`）。
 
