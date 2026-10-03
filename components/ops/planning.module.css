@@ -1121,7 +1121,7 @@
   .calendarChipType { display: none; }
   .calendarMobileHidden, .calendarHiddenDesktop, .calendarHintDesktop { display: none; }
   .calendarHiddenMobile { display: inline; font-size: 9px; line-height: 10px; }
-  .calendarHint { width: calc(100% - 72px); min-height: 54px; font-size: 11px; }
+  .calendarHint { min-height: 54px; font-size: 11px; }
   .calendarHintMobile { display: inline; }
   .calendarFloatingCreate {
     position: fixed;

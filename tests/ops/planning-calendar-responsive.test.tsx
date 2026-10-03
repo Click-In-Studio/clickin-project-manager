@@ -300,7 +300,7 @@ describe("CalendarView responsive interactions", () => {
     expect(calendarCss).toMatch(/@media \(max-width: 760px\)[\s\S]*?\.calendarCell \{ height: 90px; padding: 3px 2px; gap: 2px; \}/);
     expect(calendarCss).toMatch(/\.calendarMobileHidden, \.calendarHiddenDesktop, \.calendarHintDesktop \{ display: none; \}/);
     expect(calendarCss).toMatch(/@media \(max-width: 380px\)[\s\S]*?\.calendarCell\s*\{[^}]*height:\s*84px;/);
-    expect(calendarCss).toMatch(/\.calendarHint \{ width: calc\(100% - 72px\); min-height: 54px;/);
+    expect(calendarCss).toMatch(/\.calendarHint \{ min-height: 54px; font-size: 11px; \}/);
     expect(calendarCss).toContain(".calendarHintMobile { display: inline; }");
   });
 });
