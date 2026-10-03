@@ -7,7 +7,7 @@ who: 每个人自己
 tier: all
 platform: [desktop, mobile]
 related: [start/notifications/notifications, start/join/new-production, ai/quota/quota]
-updated: 2026-09-18
+updated: 2026-10-03
 ---
 
 ## 这是什么
@@ -21,6 +21,9 @@ updated: 2026-09-18
 ## 怎么操作
 
 见各页。
+
+> [!📱]
+> 手机上兑换码输入框和「兑换」会紧凑排在同一行，不需要横向滚动。
 
 ## 注意事项
 
