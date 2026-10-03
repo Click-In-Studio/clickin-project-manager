@@ -5,9 +5,9 @@ summary: 项目开头把人和剧本一次性搬进来：批量邀请成员、�
 routes: [admin/migration]
 who: 有成员管理 / 导入权限的管理员
 tier: all
-platform: [desktop]
+platform: [desktop, mobile]
 related: [admin/org/invite, creation/script/import]
-updated: 2026-09-18
+updated: 2026-10-03
 ---
 
 ## 这是什么
@@ -26,6 +26,9 @@ updated: 2026-09-18
 - **导入构作**：从飞书表格导入场次、梗概、时长。
 
 点「前往 →」进导入向导，详见「创作 → 剧本 → 导入剧本与构作」。导入是覆盖式的，只在项目开头做。
+
+> [!📱]
+> 窄窗口里，飞书表格链接和「识别表格」会分成上下两行；导入剧本、导入构作的入口也会展开为整行按钮。键盘弹出后可以继续向下滚动到这些入口。
 
 ## 注意事项
 

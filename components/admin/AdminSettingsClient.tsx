@@ -12,6 +12,7 @@ import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import { productionAvatarSrc } from "@/lib/asset/avatar-url";
 import { PRODUCTION_TYPES } from "@/lib/production/production-types";
+import migrationStyles from "@/components/admin/admin-migration.module.css";
 
 // ── Primitives ────────────────────────────────────────────────────────────────
 
@@ -628,30 +629,32 @@ export function DataCard({ productionId, perms }: { productionId: string; perms:
   return (
     <Card title="数据">
       {/* 导入剧本 / 构作 */}
-      <Row title="导入数据" hint="跳转至专属导入页面" last>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className={migrationStyles.dataRow}>
+        <div className={migrationStyles.dataLabel}>
+          <p className={migrationStyles.dataTitle}>导入数据</p>
+          <p className={migrationStyles.dataHint}>跳转至专属导入页面</p>
+        </div>
+        <div className={migrationStyles.importList}>
           {importLinks.map(item => (
-            <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--paper)" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{item.label}</p>
-                <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>{item.desc}</p>
+            <div key={item.label} className={migrationStyles.importItem}>
+              <div className={migrationStyles.importCopy}>
+                <p className={migrationStyles.importTitle}>{item.label}</p>
+                <p className={migrationStyles.importDescription}>{item.desc}</p>
               </div>
               {item.can ? (
                 <Link
                   href={item.href}
-                  style={{ flexShrink: 0, fontSize: 12, fontWeight: 600, padding: "5px 13px", borderRadius: 7, border: "1px solid var(--ink)", color: "var(--ink)", background: "white", textDecoration: "none" }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "var(--ink)"; e.currentTarget.style.color = "white"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "white"; e.currentTarget.style.color = "var(--ink)"; }}
+                  className={migrationStyles.importLink}
                 >
                   前往 →
                 </Link>
               ) : (
-                <span style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>🔒 {item.lock}</span>
+                <span className={migrationStyles.lockedNotice}>🔒 {item.lock}</span>
               )}
             </div>
           ))}
         </div>
-      </Row>
+      </div>
     </Card>
   );
 }

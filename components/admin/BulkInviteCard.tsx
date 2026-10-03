@@ -6,6 +6,7 @@ import TreePickerModal from "@/components/ui/TreePickerModal";
 import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
 import { BASE_PATH } from "@/lib/base-path";
 import { SEAT_TONE_COLOR, seatHint, seatOverflowHint, seatTone, type SeatInfo } from "@/lib/account/seat-ui";
+import styles from "@/components/admin/admin-migration.module.css";
 
 type Dept = { id: string; name: string; parentId: string | null; kind: "dept" | "group" };
 
@@ -131,7 +132,7 @@ export default function BulkInviteCard({ productionId, roleNames, depts, seats }
   });
 
   return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22, marginBottom: 18 }}>
+    <div className={styles.inviteCard}>
       <p style={{ margin: "0 0 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)" }}>
         Bulk Invite
       </p>
@@ -141,7 +142,7 @@ export default function BulkInviteCard({ productionId, roleNames, depts, seats }
       {seatMsg && (
         <p style={{ margin: "0 0 10px", fontSize: 12, color: SEAT_TONE_COLOR[seatTone(seats)], fontWeight: 700 }}>{seatMsg}</p>
       )}
-      <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface-2)", borderRadius: 9, marginBottom: 12, maxWidth: 360 }}>
+      <div className={styles.modeSwitch}>
         <button style={segBtn(mode === "sheet")} onClick={() => setMode("sheet")}>飞书表格</button>
         <button style={segBtn(mode === "paste")} onClick={() => setMode("paste")}>粘贴邮箱</button>
       </div>
@@ -153,13 +154,13 @@ export default function BulkInviteCard({ productionId, roleNames, depts, seats }
             识别后按身份分发：已注册走站内通知（默认通道），未注册飞书用户发 bot 私信（有邮箱再补邮件），
             仅邮箱发邀请邮件；无任何渠道的可生成按名字认领的批量链接。
           </p>
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <div className={styles.sheetUrlRow}>
             <input
               value={wikiUrl} onChange={e => setWikiUrl(e.target.value)}
               placeholder="https://xxx.feishu.cn/wiki/…"
-              style={{ flex: 1, padding: "9px 11px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)" }}
+              className={styles.sheetUrlInput}
             />
-            <button style={SECONDARY_BTN} disabled={busy || !wikiUrl.trim()} onClick={parseSheet}>
+            <button className={styles.sheetParseButton} style={SECONDARY_BTN} disabled={busy || !wikiUrl.trim()} onClick={parseSheet}>
               {busy && !parsed ? "识别中…" : "识别表格"}
             </button>
           </div>
@@ -245,11 +246,7 @@ export default function BulkInviteCard({ productionId, roleNames, depts, seats }
         onChange={e => setRaw(e.target.value)}
         placeholder={"alice@example.com\nbob@example.com"}
         rows={5}
-        style={{
-          width: "100%", padding: "10px 12px", fontSize: 13, fontFamily: "ui-monospace, monospace",
-          border: "1px solid var(--line)", borderRadius: 8, background: "var(--paper)", color: "var(--ink)",
-          resize: "vertical", boxSizing: "border-box",
-        }}
+        className={styles.emailTextarea}
       />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", margin: "10px 0" }}>
         <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>预配：</span>
