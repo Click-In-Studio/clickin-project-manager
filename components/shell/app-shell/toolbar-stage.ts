@@ -13,12 +13,22 @@ const PRODUCTION_TOOLBAR_STAGES: readonly ProductionToolbarStage[] = [
   PRODUCTION_TOOLBAR_STAGE.lowPriorityStored,
 ];
 
+export const PRODUCTION_TOOLBAR_MIN_CLEARANCE_PX = 6;
+
 export type ProductionHeaderStage = 0 | 1 | 2;
 
 export function productionHeaderStageForWidth(width: number): ProductionHeaderStage {
   if (width >= 1280) return 0;
   if (width >= 1024) return 1;
   return 2;
+}
+
+export function productionTopbarActionsMarginClass(
+  hasProductionTopMenu: boolean,
+  headerStage: ProductionHeaderStage,
+): "ml-auto" | "ml-0" | "-ml-2" {
+  if (!hasProductionTopMenu) return "ml-auto";
+  return headerStage >= 2 ? "ml-0" : "-ml-2";
 }
 
 export function adjacentProductionToolbarStage(
@@ -84,4 +94,36 @@ export function productionTopbarContentWidth(topbar: HTMLElement): number {
   }
 
   return width + Math.max(0, visibleCount - 1) * gap;
+}
+
+function lastVisibleToolbarChild(slot: HTMLElement): HTMLElement | null {
+  const root = slot.querySelector<HTMLElement>("[data-production-top-menu-root]");
+  if (!root) return null;
+  const children = [...root.children].filter((child): child is HTMLElement => {
+    if (!(child instanceof HTMLElement)) return false;
+    const style = window.getComputedStyle(child);
+    return style.display !== "none" && style.position !== "absolute" && style.position !== "fixed";
+  });
+  return children.at(-1) ?? null;
+}
+
+/**
+ * 除内容总宽外，再守住页面工具与全局搜索 / 更多之间的可见间距。
+ * flex 子项的负 margin 会抵消父级 gap，却不会体现在 scrollWidth 中；只看总宽时，
+ * 两组控件已经贴住甚至交叉仍会被判断为“放得下”。
+ */
+export function productionTopbarOverflow(topbar: HTMLElement): number {
+  const contentOverflow = productionTopbarContentWidth(topbar) - topbar.clientWidth;
+  const slot = topbar.querySelector<HTMLElement>(`#${PRODUCTION_TOP_MENU_SLOT_ID}`);
+  const toolbarTail = slot ? lastVisibleToolbarChild(slot) : null;
+  const globalActions = slot?.nextElementSibling instanceof HTMLElement
+    ? slot.nextElementSibling
+    : null;
+  if (!toolbarTail || !globalActions || window.getComputedStyle(globalActions).display === "none") {
+    return contentOverflow;
+  }
+
+  const visibleGap = globalActions.getBoundingClientRect().left - toolbarTail.getBoundingClientRect().right;
+  const clearanceDeficit = PRODUCTION_TOOLBAR_MIN_CLEARANCE_PX - visibleGap;
+  return Math.max(contentOverflow, clearanceDeficit);
 }

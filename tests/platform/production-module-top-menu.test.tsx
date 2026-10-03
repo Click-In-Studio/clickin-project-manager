@@ -77,6 +77,9 @@ describe("制作侧共享顶部栏操作收缩", () => {
     renderAt(PRODUCTION_TOOLBAR_STAGE.primaryShort);
     expect(toolbarSlot.querySelector('[aria-label="新建报销"]')?.textContent).toBe("＋");
     expect(toolbarSlot.textContent).toContain("财务");
+    expect(toolbarSlot.querySelector('[data-production-top-menu-divider]')?.className).toContain("mx-2");
+    expect(toolbarSlot.querySelector('[data-production-top-menu-root]')?.getAttribute("data-production-toolbar-stage"))
+      .toBe(String(PRODUCTION_TOOLBAR_STAGE.primaryShort));
   });
 
   it("最窄阶段仍显示模块，全部页面操作可从更多到达", () => {

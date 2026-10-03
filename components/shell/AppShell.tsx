@@ -35,6 +35,7 @@ import MobileMeDrawer from "./app-shell/MobileMeDrawer";
 import ProjectSwitcher from "./app-shell/ProjectSwitcher";
 import { useShellBadges } from "./app-shell/use-shell-badges";
 import { useProductionToolbarStage } from "./app-shell/use-production-toolbar-stage";
+import { productionTopbarActionsMarginClass } from "./app-shell/toolbar-stage";
 import { useSidebarFold } from "./app-shell/use-sidebar-fold";
 import { useAppViewportState } from "./app-shell/use-visual-viewport";
 
@@ -352,7 +353,10 @@ export default function AppShell({ session, productions, canCreateProduction = f
         )}
 
         {/* Right actions */}
-        <div className={`app-shell-topbar-actions ${hasProductionTopMenu ? "-ml-2" : "ml-auto"} flex shrink-0 items-center gap-3`}>
+        <div className={`app-shell-topbar-actions ${productionTopbarActionsMarginClass(
+          hasProductionTopMenu,
+          productionHeaderStage,
+        )} flex shrink-0 items-center gap-3`}>
           {/* Search bar: only when inside a production */}
           <SearchBar
             key={pathname}

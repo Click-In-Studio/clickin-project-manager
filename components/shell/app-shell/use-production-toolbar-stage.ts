@@ -12,10 +12,11 @@ import {
   type ProductionHeaderStage,
   productionHeaderStageForWidth,
   adjacentProductionToolbarStage,
-  productionTopbarContentWidth,
+  productionTopbarOverflow,
 } from "./toolbar-stage";
 
 const PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX = 16;
+const PRODUCTION_TOOLBAR_OVERFLOW_EPSILON_PX = 0.5;
 
 /**
  * 项目头部 / 顶栏工具栏的折叠阶段：按视口宽度定头部阶段，按顶栏内容是否溢出逐级收纳
@@ -69,8 +70,9 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
     const overflowTarget = topbar.querySelector(`#${PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID}`);
     if (!!overflowTarget?.childElementCount !== productionToolbarHasStoredControlsRef.current) return;
 
-    const overflow = productionTopbarContentWidth(topbar) - topbar.clientWidth;
-    if (overflow > 1 && current < PRODUCTION_TOOLBAR_STAGE.lowPriorityStored) {
+    const overflow = productionTopbarOverflow(topbar);
+    if (overflow > PRODUCTION_TOOLBAR_OVERFLOW_EPSILON_PX
+      && current < PRODUCTION_TOOLBAR_STAGE.lowPriorityStored) {
       productionToolbarRequiredWidthRef.current[current] = topbar.clientWidth + overflow;
       setProductionToolbarStage(adjacentProductionToolbarStage(current, 1));
       return;

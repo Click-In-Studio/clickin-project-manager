@@ -102,6 +102,22 @@ function inputValue(input: HTMLInputElement, value: string) {
 }
 
 describe("报销填单", () => {
+  it("顶部栏完整按钮只收紧加号一侧，不影响短按钮与更多菜单", async () => {
+    await act(async () => root.render(
+      <div>
+        <ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} triggerVariant="toolbar" />
+        <ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} triggerVariant="short" />
+        <ExpenseCreateButton productionId="prod_1" baseCurrency="CNY" categories={[]} triggerVariant="overflow" />
+      </div>,
+    ));
+
+    const full = button("＋ 新建报销");
+    expect(full.className).toContain("pl-2.5");
+    expect(full.className).toContain("pr-3");
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="新建报销"]')?.className).not.toContain("pl-2.5");
+    expect(button("新建报销").className).not.toContain("pl-2.5");
+  });
+
   it("从最窄顶部栏的更多菜单打开后，菜单关闭但报销表单仍可见可操作", async () => {
     const toolbarSlot = document.createElement("div");
     toolbarSlot.id = PRODUCTION_TOP_MENU_SLOT_ID;
