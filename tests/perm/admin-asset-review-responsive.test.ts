@@ -1,10 +1,32 @@
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
+import AdminAssetReviewClient from "@/components/admin/AdminAssetReviewClient";
+import type { PrivateAssetRow } from "@/lib/asset/review-db";
 
-const component = readFileSync("components/admin/AdminAssetReviewClient.tsx", "utf8");
 const css = readFileSync("components/admin/admin-asset-review.module.css", "utf8");
 const acceptanceWidths = [319, 396, 441, 768, 1180] as const;
+const asset: PrivateAssetRow = {
+  id: "asset-review-responsive",
+  name: "第三幕技术合成与全体演员联合走台确认用的最终版舞台机械安全评估报告",
+  fileName: "stage-machinery-safety-assessment-final-version.pdf",
+  assetType: "PDF 文档",
+  mimeType: "application/pdf",
+  uploaderId: "00000000-0000-0000-0000-000000000099",
+  uploaderName: "亚历山大·汉密尔顿",
+  createdAt: "2026-10-03T08:00:00.000Z",
+  mountCount: 12,
+  grants: [{
+    grantId: "grant-review-responsive",
+    userId: "00000000-0000-0000-0000-000000000098",
+    userName: "审核员",
+    resourceSub: "publication",
+    permissionLevel: "view",
+    grantSource: "direct",
+  }],
+};
 
 let browser: Browser;
 let page: Page;
@@ -87,14 +109,22 @@ afterAll(async () => {
 });
 
 describe("数字资产审查响应式行", () => {
-  it("只重排行展示，保留文件信息和既有写动作", () => {
-    expect(component).toContain("{a.name || a.fileName}");
-    expect(component).toContain("{a.fileName} · 上传：{a.uploaderName || a.uploaderId.slice(0, 8)} · {fmtDate(a.createdAt)}");
-    expect(component).toContain('post({ action: "set_public", assetId: a.id })');
-    expect(component).toContain('post({ action: "revoke_grant", grantId })');
-    expect(component).toContain("{canEdit && (");
-    expect(component).not.toContain('textOverflow: "ellipsis"');
-    expect(component).not.toContain('whiteSpace: "nowrap"');
+  it("服务端首屏保留完整资产信息和既有操作入口", () => {
+    const markup = renderToStaticMarkup(createElement(AdminAssetReviewClient, {
+      productionId: "production-responsive",
+      productionName: "响应式测试项目",
+      initialAssets: [asset],
+      canEdit: true,
+    }));
+
+    expect(markup).toContain(asset.name);
+    expect(markup).toContain(asset.fileName);
+    expect(markup).toContain(`上传：${asset.uploaderName}`);
+    expect(markup).toContain("2026/10/3");
+    expect(markup).toContain(asset.assetType);
+    expect(markup).toContain("挂载 12");
+    expect(markup).toContain("授权 1");
+    expect(markup).toContain("设为公开");
   });
 
   for (const width of acceptanceWidths) {
