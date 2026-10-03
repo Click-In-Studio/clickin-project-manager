@@ -6,7 +6,7 @@ routes: [/]
 tier: all
 platform: [desktop, mobile]
 related: [start/interface/glossary, start/notifications/notifications]
-updated: 2026-10-02
+updated: 2026-10-03
 ---
 
 ## 这是什么

@@ -28,7 +28,12 @@ async function mountProgressMetrics(width: number) {
           <div class="progressMetricCard progressMetricUrgent">
             <strong>3 天</strong>
             <div class="progressMetricDisclosure">
-              <button type="button" class="progressMetricLabel">距「技术合成与全体演员联合走台确认」</button>
+              <button
+                type="button"
+                class="progressMetricLabel"
+                aria-expanded="false"
+                onclick="this.setAttribute('aria-expanded', String(this.nextElementSibling.hidden)); this.nextElementSibling.hidden = !this.nextElementSibling.hidden"
+              >距「技术合成与全体演员联合走台确认」</button>
               <div class="progressMetricDisclosurePanel" hidden>距「技术合成与全体演员联合走台确认」</div>
             </div>
             <small>临近节点</small>
@@ -107,6 +112,52 @@ describe("项目首页进展指标卡真实浏览器布局", () => {
 
     expect(target).toBe("BUTTON");
   });
+
+  for (const width of viewportWidths) {
+    it(`${width}px 下点击后完整里程碑不被裁剪且可命中`, async () => {
+      await mountProgressMetrics(width);
+      await page.locator(".progressMetricLabel").first().click();
+
+      const disclosure = await page.locator(".progressMetricDisclosurePanel").evaluate(panel => {
+        const bounds = panel.getBoundingClientRect();
+        const clippedBy: string[] = [];
+        let ancestor = panel.parentElement;
+
+        while (ancestor) {
+          const style = getComputedStyle(ancestor);
+          const ancestorBounds = ancestor.getBoundingClientRect();
+          if (["hidden", "clip", "auto", "scroll"].includes(style.overflowX)
+            && (bounds.left < ancestorBounds.left || bounds.right > ancestorBounds.right)) {
+            clippedBy.push(`${ancestor.className || ancestor.tagName}:x`);
+          }
+          if (["hidden", "clip", "auto", "scroll"].includes(style.overflowY)
+            && (bounds.top < ancestorBounds.top || bounds.bottom > ancestorBounds.bottom)) {
+            clippedBy.push(`${ancestor.className || ancestor.tagName}:y`);
+          }
+          ancestor = ancestor.parentElement;
+        }
+
+        const hit = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+        return {
+          hidden: (panel as HTMLElement).hidden,
+          clippedBy,
+          withinViewport: bounds.left >= 0
+            && bounds.top >= 0
+            && bounds.right <= window.innerWidth
+            && bounds.bottom <= window.innerHeight,
+          fullyRendered: panel.scrollWidth <= panel.clientWidth && panel.scrollHeight <= panel.clientHeight,
+          hitPanel: hit === panel || panel.contains(hit),
+        };
+      });
+
+      expect(disclosure.hidden).toBe(false);
+      expect(disclosure.clippedBy).toEqual([]);
+      expect(disclosure.withinViewport).toBe(true);
+      expect(disclosure.fullyRendered).toBe(true);
+      expect(disclosure.hitPanel).toBe(true);
+      expect(await page.locator(".progressMetricLabel").first().getAttribute("aria-expanded")).toBe("true");
+    });
+  }
 
   it("桌面卡片随字号增大，并且仍由内容决定最终高度", async () => {
     await mountProgressMetrics(571);
