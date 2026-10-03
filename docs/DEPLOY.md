@@ -288,12 +288,12 @@ push 到 `main`（dev）或 tag（prod）后 GitHub Actions 自动完成。tag �
 2. 打包产物，上传到服务器 `releases/<run>-<sha>/`
 3. 只读检查 pending；有 pending 时先停止 Web、Agent runner、heavy worker，再 `pg_dump` 到 `shared/backups/`
 4. `dbmate up` 应用所有 pending，随后对账并校验 `script_editor` ACL，再核对线上结构指纹；任一不等都保持停机，禁止旧代码在新 schema 上继续写
-5. 切换 `current` symlink → 新 release，启动三个进程并探测 `3001/login`、`3102/health`、`3103/health`
+5. 切换 `current` symlink → 新 release，启动三个进程并探测 `3001/health`（含数据库）、`3102/health`、`3103/health`
 6. 三个入口全部健康后清理旧 releases（保留最新 5 个）
 
 **无需任何手动操作**。
 
-健康检查失败会停止三个进程，即使本次是没有 migration 的纯代码发布也不会让未通过检查的版本继续对外服务。纯代码发布可以按下节切回上一 release；含 migration 的发布保持停机并按数据库状态前向修复或恢复备份。
+健康检查失败会停止三个进程，即使本次是没有 migration 的纯代码发布也不会让未通过检查的版本继续对外服务。纯代码发布会把 `current` 还原到上一 release，确认后可按下节重新启动；含 migration 的发布会移除 `current`，避免任何人误启动不兼容的旧代码，并保持停机等待前向修复或恢复备份。
 
 tag validation 失败但 deploy job 从未开始时，可以显式删除本地与远端失败 tag，修正后在新 commit 上重建同名 tag；deploy 一旦开始，该 tag 就是发布审计记录，不得移动，后续修复必须创建新的 hotfix tag。
 

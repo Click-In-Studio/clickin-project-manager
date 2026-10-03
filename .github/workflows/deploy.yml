@@ -281,6 +281,7 @@ jobs:
           # 「仍有 pending」）。/tmp/deploy-db 里没有 .env，不存在即忽略。
           DBMATE="cd /tmp/deploy-db && sudo -u postgres ./dbmate --url '$URL' --migrations-dir /tmp/deploy-db/migrations --no-dump-schema"
           PSQL="sudo -u postgres psql -d script_editor -qAt"
+          echo "SCHEMA_CHANGED=false" >> "$GITHUB_ENV"
 
           TABLES=$(ssh prod "$PSQL -c \"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename <> 'schema_migrations'\"" < /dev/null)
           HAS_LEDGER=$(ssh prod "$PSQL -c \"SELECT to_regclass('public.schema_migrations') IS NOT NULL\"" < /dev/null)
@@ -339,6 +340,7 @@ jobs:
             echo "── dbmate up"
             ssh prod "$DBMATE up" < /dev/null \
               || { echo "::error::MIGRATION FAILED — 服务保持停止；逐支核对 schema_migrations 后前向修复或恢复 $SHARED/backups/$BACKUP"; exit 1; }
+            echo "SCHEMA_CHANGED=true" >> "$GITHUB_ENV"
           else
             echo "No pending migrations — process stop and backup skipped."
           fi
@@ -371,17 +373,36 @@ jobs:
           scp deploy/ecosystem.config.js prod:/var/www/production-manager/shared/ecosystem.config.js
           ssh prod '
             set -e
+            HEALTH_SECRET=$(node --env-file=/var/www/production-manager/shared/.env.local -e "process.stdout.write(process.env.INTERNAL_NOTIFY_SECRET || \"\")")
+            if [ -z "$HEALTH_SECRET" ]; then
+              echo "缺少 INTERNAL_NOTIFY_SECRET，无法执行 Web 数据库健康检查" >&2
+              exit 1
+            fi
+            PREVIOUS_RELEASE=$(readlink -f /var/www/production-manager/current 2>/dev/null || true)
+            SCHEMA_CHANGED="${{ env.SCHEMA_CHANGED }}"
+
+            fail_activation() {
+              for APP in production-manager agent-runner heavy-worker; do pm2 stop "$APP" || true; done
+              if [ "$SCHEMA_CHANGED" = "false" ] && [ -n "$PREVIOUS_RELEASE" ] && [ -d "$PREVIOUS_RELEASE" ]; then
+                ln -snf "$PREVIOUS_RELEASE" /var/www/production-manager/current
+                echo "已将 current 还原到 $PREVIOUS_RELEASE；进程保持停止" >&2
+              else
+                unlink /var/www/production-manager/current 2>/dev/null || true
+                echo "schema 已变化或没有上一 release；已移除 current，进程保持停止" >&2
+              fi
+            }
+
             ln -snf ${{ env.RELEASE_DIR }} /var/www/production-manager/current
             if ! pm2 startOrReload /var/www/production-manager/shared/ecosystem.config.js --update-env; then
               echo "新版本进程启动失败，停止所有数据库客户端进程" >&2
-              for APP in production-manager agent-runner heavy-worker; do pm2 stop "$APP" || true; done
+              fail_activation
               exit 1
             fi
 
             for ATTEMPT in $(seq 1 30); do
-              if curl -fsS http://127.0.0.1:3001/login >/dev/null &&
-                 curl -fsS http://127.0.0.1:3102/health >/dev/null &&
-                 curl -fsS http://127.0.0.1:3103/health >/dev/null; then
+              if curl -fsS --max-time 3 -H "Authorization: Bearer $HEALTH_SECRET" http://127.0.0.1:3001/health >/dev/null &&
+                 curl -fsS --max-time 3 http://127.0.0.1:3102/health >/dev/null &&
+                 curl -fsS --max-time 3 http://127.0.0.1:3103/health >/dev/null; then
                 echo "三个生产进程健康"
                 exit 0
               fi
@@ -389,7 +410,7 @@ jobs:
             done
 
             echo "新版本健康检查失败，停止所有数据库客户端进程" >&2
-            for APP in production-manager agent-runner heavy-worker; do pm2 stop "$APP" || true; done
+            fail_activation
             exit 1
           ' < /dev/null
 
