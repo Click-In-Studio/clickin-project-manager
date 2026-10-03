@@ -7,7 +7,7 @@ who: 每个人自己
 tier: all
 platform: [desktop, mobile]
 related: [start/login/register-and-login, account/profile/profile]
-updated: 2026-09-18
+updated: 2026-10-03
 ---
 
 ## 这是什么
@@ -25,6 +25,9 @@ updated: 2026-09-18
 ### 绑定邮箱
 
 输入邮箱 →「发送链接」→ 到邮箱点确认链接。链接有时效，过期了重新发。
+
+> [!📱]
+> 手机上邮箱输入框和「发送链接」会保持在同一行，并随屏幕宽度收缩。
 
 ### 解绑邮箱
 
