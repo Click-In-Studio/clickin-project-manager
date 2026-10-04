@@ -54,6 +54,18 @@ export const PERMISSION_LABELS: Record<string, string> = {
   "node:asset/*/shares@create": "分享数字资产",
   "node:finance/*/expenses@create": "登记支出",
   "node:finance/*/settlement@edit": "确认报销线下结清",
+  // ── 实体物料 ──
+  "node:material/*/definition@create": "新建物料定义",
+  "node:material/*/definition@edit": "编辑物料定义",
+  "node:material/*/definition@delete": "删除物料定义",
+  "node:material/*/receipts@edit": "登记物料收货",
+  "node:material/*/circulation/checkouts@edit": "代他人登记物料签出",
+  "node:material/*/circulation/returns@edit": "代他人登记物料返还",
+  "node:material/*/maintenance@edit": "登记物料维修",
+  "node:material/*/sources@edit": "管理物料来源与归还义务",
+  "node:material/*/stock/adjustments@edit": "调整物料库存",
+  "node:material/*/stock/exits@edit": "登记物料永久退出",
+  "node:material/*/identifiers@edit": "管理物料编号与标签",
   // ── 项目 / 部门 ──
   "node:production/*/mounts@view": "查看项目挂载的资产",
   "node:dept/*/notes@create": "添加部门备注",

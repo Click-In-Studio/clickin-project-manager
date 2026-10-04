@@ -16,7 +16,7 @@ import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { addProductionMember } from "@/lib/perm/member-db";
 import { createEventGroup } from "@/lib/ops/event-group-db";
 import { resolveSubjectPatch } from "@/lib/ops/task-poc";
-import { canCreateMaterial, canWriteMaterial } from "@/lib/ops/material-perm";
+import { canCreateMaterial, canManageMaterialDefinition } from "@/lib/ops/material-perm";
 import {
   appendMaterialStockMovement, createMaterialStockLot,
   createMaterial, deleteMaterial,
@@ -343,9 +343,9 @@ describe("9. 责任方的 POC 管自己那一摊", () => {
       subject: { kind: "dept", id: deptId }, createdBy: ownerId,
     });
     for (const verb of ["edit", "delete"] as const) {
-      expect(await canWriteMaterial(actor(pocA), prodId, m, verb)).toBe(true);
-      expect(await canWriteMaterial(actor(pocB), prodId, m, verb)).toBe(false);
-      expect(await canWriteMaterial(actor(stranger), prodId, m, verb)).toBe(false);
+      expect(await canManageMaterialDefinition(actor(pocA), prodId, m, verb)).toBe(true);
+      expect(await canManageMaterialDefinition(actor(pocB), prodId, m, verb)).toBe(false);
+      expect(await canManageMaterialDefinition(actor(stranger), prodId, m, verb)).toBe(false);
     }
   });
 
@@ -355,8 +355,8 @@ describe("9. 责任方的 POC 管自己那一摊", () => {
       subject: { kind: "group", id: groupId }, createdBy: ownerId,
     });
     // groupId 的 POC 是 deptId 这个部门 → 该部门的 POC 都算
-    expect(await canWriteMaterial(actor(pocA), prodId, m, "edit")).toBe(true);
-    expect(await canWriteMaterial(actor(pocB), prodId, m, "edit")).toBe(false);
+    expect(await canManageMaterialDefinition(actor(pocA), prodId, m, "edit")).toBe(true);
+    expect(await canManageMaterialDefinition(actor(pocB), prodId, m, "edit")).toBe(false);
   });
 
   it("无责任方的物料谁都改不了——它属于台账公共部分，只有域级键能动", async () => {
@@ -364,8 +364,8 @@ describe("9. 责任方的 POC 管自己那一摊", () => {
       productionId: prodId, name: `无主物料${shortId()}`,
       subject: null, createdBy: ownerId,
     });
-    expect(await canWriteMaterial(actor(pocA), prodId, m, "edit")).toBe(false);
-    expect(await canWriteMaterial(actor(pocB), prodId, m, "edit")).toBe(false);
+    expect(await canManageMaterialDefinition(actor(pocA), prodId, m, "edit")).toBe(false);
+    expect(await canManageMaterialDefinition(actor(pocB), prodId, m, "edit")).toBe(false);
   });
 
   it("建物料：只能建到自己是 POC 的那一方名下，不能替别人建", async () => {
@@ -381,7 +381,7 @@ describe("9. 责任方的 POC 管自己那一摊", () => {
       productionId: prodId, name: `owner 测${shortId()}`,
       subject: { kind: "dept", id: deptB }, createdBy: ownerId,
     });
-    expect(await canWriteMaterial(
+    expect(await canManageMaterialDefinition(
       { userId: ownerId, isAdmin: false, isOwner: true }, prodId, m, "delete")).toBe(true);
   });
 });

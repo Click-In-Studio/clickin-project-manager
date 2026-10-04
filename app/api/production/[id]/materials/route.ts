@@ -8,6 +8,7 @@ import {
   createMaterial, listMaterials, MaterialError,
 } from "@/lib/ops/material-db";
 import { readJsonObject } from "@/lib/request-json";
+import { getMaterialCapabilities } from "@/lib/ops/material-capabilities";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -25,7 +26,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "material", "*", "*", "view"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  return Response.json({ materials: await listMaterials(productionId) });
+  const materials = await listMaterials(productionId);
+  return Response.json({
+    materials,
+    capabilities: await getMaterialCapabilities(
+      toActor(session, access.permCtx), productionId, access.isArchived, materials,
+    ),
+  });
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {

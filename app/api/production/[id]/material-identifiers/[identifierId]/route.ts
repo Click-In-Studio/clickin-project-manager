@@ -3,7 +3,7 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { toActor } from "@/lib/perm/grant-check";
 import { getMaterial } from "@/lib/ops/material-db";
-import { canWriteMaterial } from "@/lib/ops/material-perm";
+import { canManageMaterialIdentifiers } from "@/lib/ops/material-perm";
 import {
   getMaterialIdentifier,
   MaterialIdentifierError,
@@ -33,7 +33,7 @@ async function writableContext(req: NextRequest, ctx: Ctx) {
     return { response: Response.json({ error: "标识不存在" }, { status: 404 }) };
   const material = await getMaterial(identifier.materialId, productionId);
   if (!material) return { response: Response.json({ error: "物料不存在" }, { status: 404 }) };
-  if (!await canWriteMaterial(toActor(session, access.permCtx), productionId, material, "edit"))
+  if (!await canManageMaterialIdentifiers(toActor(session, access.permCtx), productionId, material.id))
     return { response: Response.json({ error: "权限不足" }, { status: 403 }) };
   return { productionId, identifierId, session };
 }

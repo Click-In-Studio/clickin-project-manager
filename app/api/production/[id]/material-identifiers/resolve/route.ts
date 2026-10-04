@@ -3,7 +3,7 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getMaterial } from "@/lib/ops/material-db";
-import { canWriteMaterial } from "@/lib/ops/material-perm";
+import { canManageMaterialIdentifiers } from "@/lib/ops/material-perm";
 import { resolveMaterialIdentifierByCode } from "@/lib/ops/material-identifier-db";
 import { readJsonObject } from "@/lib/request-json";
 
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const material = await getMaterial(result.identifier.materialId, productionId);
   if (!material) return Response.json({ status: "not_found", error: "物料不存在" }, { status: 404 });
   const permitted = body.action === "manage"
-    ? !access.isArchived && await canWriteMaterial(actor, productionId, material, "edit")
+    ? !access.isArchived && await canManageMaterialIdentifiers(actor, productionId, material.id)
     : await hasEffectiveGrant(actor, productionId, "material", "*", "*", "view");
   if (!permitted)
     return Response.json({ status: "forbidden", error: "无权执行本次动作" }, { status: 403 });

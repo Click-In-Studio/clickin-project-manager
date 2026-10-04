@@ -5,7 +5,7 @@ import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 
 // 批G G-1：制作人通配区间
-// node:*/*@* 主行 + 保留段显式四行 = 永久全集；RESERVED_TYPES 不被类型通配穿透
+// node:*/*@* 主行 + 全局 / 类型内保留段显式行 = 全集；治理面不被通配穿透
 
 async function newUser(): Promise<string> {
   const res = await getPool().query<{ id: string }>("INSERT INTO app_user DEFAULT VALUES RETURNING id");
@@ -63,9 +63,21 @@ describe("候选枚举", () => {
     // 保留段不被裸 '*' sub 覆盖：候选中不存在 sub 缺省的通配命中该查询
     expect(c.every(k => k.includes("publication") || !k.includes("node:*/*@"))).toBe(true);
   });
+
+  it("类型内保留段只阻断 material 的裸通配", () => {
+    const material = nodeKeyCandidates({
+      resourceType: "material", resourceId: "m1", resourceSub: "identifiers", verb: "edit",
+    });
+    expect(material).toContain("node:*/*/identifiers@*");
+    expect(material).not.toContain("node:*/*@*");
+    const other = nodeKeyCandidates({
+      resourceType: "asset", resourceId: "a1", resourceSub: "identifiers", verb: "edit",
+    });
+    expect(other).toContain("node:*/*@*");
+  });
 });
 
-describe("制作人五行区间 = 全集", () => {
+describe("制作人通配与显式治理区间 = 全集", () => {
   const actor = () => ({ userId: producer, isAdmin: false, isOwner: false });
 
   it("任意业务节点（含未来新增类型）区间命中 → 自确认", async () => {
@@ -86,6 +98,13 @@ describe("制作人五行区间 = 全集", () => {
       .toEqual({ allowed: false, reason: "needs_self_confirm", source: "role" });
     expect(await canAccessNode(actor(), prodId, "cue_list", "c1", "grants", "edit"))
       .toEqual({ allowed: false, reason: "needs_self_confirm", source: "role" });
+  });
+
+  it("物料治理段经制作人模版显式键命中", async () => {
+    for (const sub of ["stock/adjustments", "stock/exits", "identifiers"]) {
+      expect(await canAccessNode(actor(), prodId, "material", "m1", sub, "edit"))
+        .toEqual({ allowed: false, reason: "needs_self_confirm", source: "role" });
+    }
   });
 
   it("治理域不被通配穿透：sensitive → no_entry（区间无治理行）", async () => {

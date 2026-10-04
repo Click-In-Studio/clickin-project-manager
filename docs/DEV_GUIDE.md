@@ -327,8 +327,8 @@ verb ∈ { view, create, edit, delete }        # 闭集，永不扩充
 ```
 
 - **权限非线性**：行与行之间无蕴含（持有 edit 不意味着持有 view）。判定端零蕴含、零特判、零代码模板。
-- **通配**：`resource_id = '*'` 表示该类型全部实例；`sub = '*'` 表示全部子面。制作人模版发的是 `node:*/*@*`（永久全集，新增权限键零 migration）。
-- **保留段**（`RESERVED_SUBS`：`grants` `publication` `assignees` `imports`）**与保留类型**（`RESERVED_TYPES`：`production` `producer`）**不被 `*` 通配覆盖**，必须显式指名——它们是治理面与批量破坏性操作，不能随「全部」一起发出去。
+- **通配**：`resource_id = '*'` 表示该类型全部实例；`sub = '*'` 表示全部非保留子面。制作人模版发 `node:*/*@*`，并显式列出治理保留键。
+- **全局保留段**（`RESERVED_SUBS`：`grants` `publication` `assignees` `imports`）、**类型内保留段**（`RESERVED_SUBS_BY_TYPE`，例如物料的库存调整、永久退出和标识治理）与**保留类型**（`RESERVED_TYPES`：`production` `producer`）**不被 `*` 通配覆盖**，必须显式指名——它们是治理面与批量破坏性操作，不能随「全部」一起发出去。类型内保留段只影响指定资源类型，不能让别的类型同名子面意外失去通配语义。
 - 常用语义：`<type>/*/meta@view` = 目录可见（列表权）；`<type>/<id>/<sub>@view` = 看某个面的内容；`grants@edit` = 管理该资源的授权（旧 manage）；`publication@*` = 发布 / 提前看草稿。
 
 ### 5.2 区间三表与六步链（canAccessNode）
@@ -405,7 +405,7 @@ if (!await hasEffectiveGrant(actor, productionId, "wiki", "*", "*", "create"))
 
 ### 5.7 新增功能的权限检查清单
 
-1. 资源类型 / 子面 / 动词怎么落到树上？新 sub 若是治理面或批量破坏性操作，进 `RESERVED_SUBS`。
+1. 资源类型 / 子面 / 动词怎么落到树上？跨类型都保留的 sub 进 `RESERVED_SUBS`；只在单一资源类型内治理的 sub 进 `RESERVED_SUBS_BY_TYPE`。
 2. 路由用 `hasEffectiveGrant` 族或 `requireGrantGate`；写路由挡归档。
 3. 哪些角色默认有资格？→ 改 `lib/production/templates/*.ts`（各类型分别看）；存量项目要回填的写 migration（只放不收）。
 4. 门票键进 `PAGE_PERMISSION_SCOPES.base`，写面键进页面 scope。

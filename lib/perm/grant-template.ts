@@ -23,7 +23,7 @@
  * 运行时零读取。原 grant_template 表已退役（#163）。
  */
 import { getPool } from "../pg";
-import { hasGrant, isReservedSub, type GrantVerb } from "./grant-check";
+import { hasGrant, isReservedNode, type GrantVerb } from "./grant-check";
 
 export type NodeKeyParts = {
   resourceType: string;
@@ -72,7 +72,7 @@ export const RESERVED_TYPES: readonly string[] = ["production", "producer"];
 
 export function nodeKeyCandidates(n: NodeKeyParts): string[] {
   const ids = n.resourceId === "*" ? ["*"] : [n.resourceId, "*"];
-  const subs = n.resourceSub === "*" || isReservedSub(n.resourceSub)
+  const subs = n.resourceSub === "*" || isReservedNode(n.resourceType, n.resourceSub)
     ? [n.resourceSub]
     : [n.resourceSub, "*"];
   // 批G 通配区间：type / verb 位通配（仅区间键语法；动词闭集不变，'*' 是区间表达）。
@@ -324,7 +324,7 @@ export async function canAccessNodesBatch(
     grantRow: (n) => rows.some((r) =>
       r.resource_type === n.resourceType
       && (r.resource_id === n.resourceId || r.resource_id === "*")
-      && (isReservedSub(n.resourceSub)
+      && (isReservedNode(n.resourceType, n.resourceSub)
         ? r.resource_sub === n.resourceSub
         : r.resource_sub === n.resourceSub || r.resource_sub === "*")
       && r.permission_level === n.verb),
