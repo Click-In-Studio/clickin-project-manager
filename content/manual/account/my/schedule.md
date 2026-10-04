@@ -7,14 +7,14 @@ who: 所有成员
 tier: all
 platform: [desktop, mobile]
 related: [production/events/publish-callsheet, start/notifications/notifications]
-updated: 2026-09-18
+updated: 2026-10-04
 ---
 
 ## 这是什么
 
-项目外左侧栏「日程」是**你自己**的 Call 时间表，跨所有项目：什么时候在哪个项目的哪场排练几点到。它不是项目的完整日历（那在项目内「计划与日程」），只有跟你有关的。
+项目外的「日程」是**你自己**的 Call 时间表，跨所有项目：什么时候在哪个项目的哪场排练几点到。宽窗口从左侧栏进入；手机从底部「概览 → 日程」进入。它不是项目的完整日历（那在项目内「计划与日程」），只有跟你有关的。
 
-![本周日程](/manual/account/weekly-call.png)
+![宽窗口下的本周日程](/manual/account/weekly-call.png)
 
 ## 怎么操作
 

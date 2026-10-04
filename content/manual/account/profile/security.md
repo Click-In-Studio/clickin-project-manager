@@ -7,14 +7,16 @@ who: 每个人自己
 tier: all
 platform: [desktop, mobile]
 related: [start/login/register-and-login, account/profile/profile]
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 ## 这是什么
 
 一个账号可以有两种登录方式：**飞书**和**邮箱**。绑齐了用哪个登录都是同一个账号，通知也能选走哪条路。
 
-![账号安全中心](/manual/account/security.png)
+宽窗口点右上角头像 →「账号安全中心」；手机点底部「我 → 账号安全中心」。
+
+![宽窗口下的账号安全中心](/manual/account/security.png)
 
 ## 怎么操作
 

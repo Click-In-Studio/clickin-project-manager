@@ -7,12 +7,12 @@ who: 对这篇文档有「可管理」权限的成员（作者默认有）
 tier: all
 platform: [desktop, mobile]
 related: [production/wiki/tree, production/wiki/editor, production/assets/share]
-updated: 2026-09-18
+updated: 2026-10-04
 ---
 
 ## 这是什么
 
-每篇文档有自己的一组设置，顶部「分享」打开。两个维度：
+每篇文档有自己的一组设置，顶部「分享」打开。手机上顶部操作区可以左右滑动，滑到「分享」再点开。两个维度：
 
 1. **能不能读**：谁可以打开这篇。
 2. **目录里列不列出**：它在树里是不是对所有能看到父目录的人显示。
@@ -21,7 +21,7 @@ updated: 2026-09-18
 
 没有阅读权限的人打开一篇能列出的文档，看到的是这样，可以就地「申请访问」：
 
-![能在树里看到、但没有阅读权限](/manual/production/wiki-no-access.png)
+![宽窗口下：能在树里看到、但没有阅读权限](/manual/production/wiki-no-access.png)
 
 ## 怎么操作
 

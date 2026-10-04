@@ -7,14 +7,17 @@ who: 看：所有成员；改：有事件编辑权限的成员（页面顶部显
 tier: all
 platform: [desktop, mobile]
 related: [production/events/events-overview, production/events/publish-callsheet, production/tasks/task-detail]
-updated: 2026-09-18
+updated: 2026-10-04
 ---
 
 ## 这是什么
 
-点开一个事件，顶部是标题、状态、类型时间地点，然后一排页签：**基本信息 / 事件流程 / 技术提需 / 关联任务与里程碑 / Call Time / 发布 / 报告 / 发布报告**。右上角「关注」，还有「关注者视角」「Call Sheet」「技术需求」三个快捷入口。
+点开一个事件，顶部是标题、状态、类型时间地点，然后一排页签：**基本信息 / 事件流程 / 技术提需 / 关联任务与里程碑 / Call Time / 发布 / 报告 / 发布报告**。标题上方有「关注者视角」「Call Sheet」「技术需求」三个快捷入口，标题旁可关注事件。
 
-![事件详情](/manual/production/event-detail.png)
+![宽窗口下的事件详情](/manual/production/event-detail.png)
+
+> [!📱]
+> 手机从底部「制作 → 事件」进入后点事件。页签保持单行，左右滑动选择；不是把桌面端多栏压窄。关注、Call Sheet 和关注者视角仍在详情顶部，直接点按钮或链接。
 
 ## 怎么操作
 

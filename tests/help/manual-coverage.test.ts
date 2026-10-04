@@ -8,10 +8,8 @@ import { CREATION_NAV, PRODUCTION_NAV, ADMIN_NAV_GROUPS, OVERVIEW_NAV } from "@/
  * 使用手册覆盖棘轮（#531 / #523）：保证「一个功能一个 md」不烂尾。
  *
  * ① 产品内导航（nav-config 三组 + 我的面）的每个入口都要能映射到一篇手册页
- *    （frontmatter `routes`）。壳子阶段允许缺页，但缺的必须列在 MISSING_ALLOWED
- *    里；内容 issue（#532–#537）每合一批就从名单里划掉对应条目。
- * ② 名单不许有幽灵条目：一旦某路由有了手册页，还留在名单里就红——逼着名单只减不增。
- * ③ 仓库真实内容能被加载（frontmatter 齐、取值合法）、按模板写（四个固定小节）、
+ *    （frontmatter `routes`），不留临时缺页白名单。
+ * ② 仓库真实内容能被加载（frontmatter 齐、取值合法）、按模板写（四个固定小节）、
  *    互链 / related / 首页配置指向存在的页、图片存在于 public/。
  */
 
@@ -37,15 +35,6 @@ const EXTRA_ROUTES = new Set([
   "assets/upload", "assets/preview", "dramaturgy/inspiration",
 ]);
 
-/**
- * 壳子阶段的缺页名单。内容 issue 合并时把对应行删掉；名单清空后由 #538 删掉整个机制。
- * 只减不增：往这里加条目 = 侧栏新增了功能却没写手册，请同 PR 补页。
- */
-const MISSING_ALLOWED = new Set<string>([
-  // #535 制作（后半）：物料页目前只有查看、没有录入界面（#310），
-  // 等写入口落地再写手册页，届时一并从这里划掉
-]);
-
 /** `_TEMPLATE.md` 的四个固定小节；内容 issue 的验收标准之一是「按模板写」。 */
 const TEMPLATE_SECTIONS = ["这是什么", "怎么操作", "注意事项", "常见问题"];
 
@@ -54,20 +43,9 @@ const routeIndex = manualRouteIndex(manual);
 const slugs = new Set(manual.pages.map((p) => p.slug));
 
 describe("手册覆盖棘轮：导航入口 ↔ 手册页", () => {
-  it("nav-config 的每个入口都有手册页，或列在 MISSING_ALLOWED 里", () => {
-    const uncovered = navRoutes().filter((r) => !routeIndex.has(r) && !MISSING_ALLOWED.has(r));
-    expect(uncovered, "侧栏新增了功能却没有手册页：请在 content/manual 补页（frontmatter routes 写上该 path），或先把它列进 MISSING_ALLOWED 并开内容 issue").toEqual([]);
-  });
-
-  it("MISSING_ALLOWED 没有幽灵条目：已有手册页的路由必须从名单划掉", () => {
-    const ghosts = [...MISSING_ALLOWED].filter((r) => routeIndex.has(r));
-    expect(ghosts, "这些路由已有手册页，请从 MISSING_ALLOWED 删除").toEqual([]);
-  });
-
-  it("MISSING_ALLOWED 只含真实存在的导航入口（防止名单里留着已下线功能）", () => {
-    const nav = new Set(navRoutes());
-    const stale = [...MISSING_ALLOWED].filter((r) => !nav.has(r));
-    expect(stale).toEqual([]);
+  it("nav-config 的每个入口都有手册页", () => {
+    const uncovered = navRoutes().filter((r) => !routeIndex.has(r));
+    expect(uncovered, "导航新增了功能却没有手册页：请在同一 PR 里向 content/manual 补页，并在 frontmatter routes 写上该 path").toEqual([]);
   });
 
   it("frontmatter routes 只写已知路由（导航口径或 EXTRA_ROUTES），防拼写错误", () => {

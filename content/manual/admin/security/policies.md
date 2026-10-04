@@ -7,7 +7,7 @@ who: 项目所有者与制作人（专业档项目）
 tier: pro
 platform: [desktop, mobile]
 related: [admin/security/permission-center, production/events/events-overview, production/tasks/tasks]
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 ## 这是什么
@@ -16,7 +16,7 @@ updated: 2026-10-03
 
 这些是「默认自动授权」的开关。已经通过角色或部门被授权的人不受影响。
 
-![策略中心 · 常用设置](/manual/admin/policies.png)
+![宽窗口下的策略中心 · 常用设置](/manual/admin/policies.png)
 
 ## 怎么操作
 
