@@ -74,6 +74,7 @@ describe("doc_page_ocr：门", () => {
         job_id: "gpu-lab-02", type: "ocr.structured", status: "done", media_id: "sha256:img", cached: false,
         source: { tier: "gpu-fast", engine: "pp-ocrv6", engine_version: "1", generated_at: "2026-09-21T00:00:00Z", degraded: false, params: {} },
         result: { page_count: 1, pages: [{ page: 1, tier: "gpu-fast", text: "老周：信？什么信。", quality: { lines: 1, chars: 8, mean_score: 0.97 }, flags: ["low_confidence"] }], suggest_upgrade_pages: [1] },
+        usage: { served_from: "compute", tier: "gpu-fast", engine: "pp-ocrv6", compute_ms: 400, wasted_ms: 700 },
         timings_ms: { fetch: 900, render: 0, ocr: 400, total: 1300 },
       }), { status: 200, headers: { "content-type": "application/json" } });
     }) as typeof globalThis.fetch;

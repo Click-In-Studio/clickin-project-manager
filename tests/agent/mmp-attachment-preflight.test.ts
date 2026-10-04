@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MmpClient, type CapabilitiesResponse, type Capability } from "@mmp/client";
 import {
   capabilityContentType,
@@ -8,6 +8,9 @@ import {
   renderPreflightUnavailable,
   resolveTriageCapability,
 } from "@/lib/mmp/attachment-preflight";
+
+const usageMocks = vi.hoisted(() => ({ record: vi.fn() }));
+vi.mock("@/lib/mmp/usage-db", () => ({ recordMmpUsage: usageMocks.record }));
 
 type Call = { url: string; body: Record<string, unknown> | null };
 
@@ -51,6 +54,8 @@ function fakeClient(capabilities: Capability[] = [AUDIO_TRIAGE, IMAGE_TRIAGE, OC
     return Response.json({
       job_id: "test-node-01", type: task, status: "done", media_id: `sha256:${task}`, cached: false, source,
       result: { kind: task === "triage.audio" ? "audio" : "image" },
+      usage: { served_from: "compute", tier: "cpu", engine: `${task}-test`, compute_ms: 17, wasted_ms: 99 },
+      timings_ms: { vad: 3, tagging: 4, asr: 5 },
       agent_context: {
         format: "mmp-agent-context-v1",
         content_type: "text/plain; charset=utf-8",
@@ -61,7 +66,10 @@ function fakeClient(capabilities: Capability[] = [AUDIO_TRIAGE, IMAGE_TRIAGE, OC
   return { client: new MmpClient({ baseUrl: "https://mmp.test", fetch, retries: 0 }), calls };
 }
 
-beforeEach(() => clearAttachmentPreflightCacheForTests());
+beforeEach(() => {
+  clearAttachmentPreflightCacheForTests();
+  vi.clearAllMocks();
+});
 
 describe("MMP 2.0 自动预检能力发现", () => {
   it("只用 purpose + Content-Type 解析唯一能力，不解释任务 id 或本地模态", () => {
@@ -89,6 +97,16 @@ describe("MMP 2.0 自动预检能力发现", () => {
     const job = calls.find((call) => call.url.endsWith("/jobs"))?.body;
     expect(job?.type).toBe("triage.audio");
     expect(job?.media).toMatchObject({ get: { url: expect.stringContaining("attachments/audio.mp4") }, content_type: "video/mp4" });
+  });
+
+  it("预检记账只取 usage.compute_ms，不叠加 wasted_ms 或旧 timings", async () => {
+    const { client } = fakeClient();
+    await preflightAttachment({
+      attachmentId: "aat_usage", mediaKind: "audio", mimeType: "audio/mp4", r2Key: "attachments/usage.mp4",
+    }, { client, usage: { userId: "u1", productionId: null } });
+    expect(usageMocks.record).toHaveBeenCalledWith({
+      userId: "u1", productionId: null, type: "triage.audio", tier: "cpu", computeMs: 17,
+    });
   });
 
   it("当前只预检图片，PDF 没有专属 triage 时不误入图片通道", async () => {

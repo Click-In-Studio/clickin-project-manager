@@ -57,8 +57,8 @@ export function creditsFromEmbeddingTokens(tokens: number): number {
 
 /**
  * MMP 多模态感知服务（#453 / #618）的 GPU 档计价：自有卡按「每 GPU 小时成本」折算，
- * 按算力节点上报的**实际推理毫秒**计费（`timings_ms`，不含媒体下载、排队与引擎冷启动——
- * 用户不该为卡冷付钱）。$0.40/h 是 4090 级折旧 + 电按峰值利用率的保守估
+ * 按算力节点上报的**实际推理毫秒**计费（`usage.compute_ms`，不含媒体下载、排队、
+ * 引擎冷启动与失败回落的 `wasted_ms`——用户不该为卡冷或废弃计算付钱）。$0.40/h 是 4090 级折旧 + 电按峰值利用率的保守估
  * （同「按 peak 价记」纪律），一周真账后复核（#618）。cpu 档记 0 但照记行。
  */
 export const MMP_GPU_USD_PER_HOUR = 0.40;

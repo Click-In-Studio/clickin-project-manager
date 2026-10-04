@@ -16,6 +16,7 @@ import {
 import { presignedGet } from "@/lib/r2";
 import { getMmpClient } from "./client";
 import { clearMmpMediaCacheForTests, mmpMediaHandle, rememberMmpMediaId } from "./media-cache";
+import { billableMmpCompute, legacyComputeMs } from "./usage";
 
 export type AttachmentPreflightOutcome =
   | { status: "ok"; contextText: string; capabilityId: string }
@@ -98,15 +99,13 @@ export async function preflightAttachment(
     if (!done.agent_context?.text) throw new Error(`${capability.id} 完成但没有 agent_context`);
 
     if (opts.usage && !done.cached) {
-      const timings = done.timings_ms ?? (done.result as { timings_ms?: Record<string, number> } | undefined)?.timings_ms ?? {};
-      const computeMs = Object.entries(timings)
-        .filter(([key, value]) => !["total", "fetch", "download", "queue", "load"].includes(key) && Number.isFinite(value))
-        .reduce((sum, [, value]) => sum + Math.max(0, value), 0);
+      const timings = done.timings_ms ?? (done.result as { timings_ms?: Record<string, number> } | undefined)?.timings_ms;
+      const compute = billableMmpCompute(done, () => legacyComputeMs(timings));
       await (await import("./usage-db")).recordMmpUsage({
         ...opts.usage,
         type: capability.id,
-        tier: String(done.source?.tier ?? capability.tiers[0]?.tier ?? "cpu"),
-        computeMs,
+        tier: String(done.usage?.tier ?? done.source?.tier ?? capability.tiers[0]?.tier ?? "cpu"),
+        computeMs: compute.ms,
       });
     }
     return { status: "ok", contextText: done.agent_context.text, capabilityId: capability.id };
