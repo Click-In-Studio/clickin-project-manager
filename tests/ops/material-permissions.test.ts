@@ -7,6 +7,7 @@ import { getMaterialCapabilities } from "@/lib/ops/material-capabilities";
 import {
   canManageMaterialDefinition,
   canManageMaterialIdentifiers,
+  canPrintMaterialLabels,
   canManageMaterialSources,
   canRecordMaterialMovement,
 } from "@/lib/ops/material-perm";
@@ -58,6 +59,7 @@ describe("物料权限语义", () => {
     expect(await canRecordMaterialMovement(actor(memberId), productionId, material,
       { operation: "exit", returnedToSource: false })).toBe(false);
     expect(await canManageMaterialIdentifiers(actor(memberId), productionId, material.id)).toBe(false);
+    expect(await canPrintMaterialLabels(actor(memberId), productionId, material)).toBe(true);
   });
 
   it("责任方 POC 管定义和来源，但治理动作仍需显式键", async () => {
@@ -82,22 +84,29 @@ describe("物料权限语义", () => {
 
   it("批量能力由服务端按全局、责任方、物料和批次返回，归档时统一关闭写面", async () => {
     const [lot] = await listMaterialStockLots(material.id, productionId);
+    const otherMaterial = await createMaterial({
+      productionId, name: "同项目另一种物料", subject: null, createdBy: ownerId,
+    });
+    const [otherLot] = await listMaterialStockLots(otherMaterial.id, productionId);
     const open = await getMaterialCapabilities(
       actor(memberId), productionId, false, [material],
     );
-    expect(open.representableSubjects).toContainEqual({
+    expect(open.representableSubjects).toContainEqual(expect.objectContaining({
       kind: "dept", id: deptId, member: true, poc: false,
-    });
+    }));
     expect(open.byMaterial[material.id]).toMatchObject({
       editDefinition: false, confirmReceipt: true, checkoutSelf: true,
       checkoutForOthers: true, adjustStock: false, exitStock: false,
-      manageIdentifiers: false,
+      printLabels: true, manageIdentifiers: false,
     });
     expect(open.byLot[lot.id]).toMatchObject({ checkoutSelf: true, adjustStock: false });
+    expect(open.byLot).not.toHaveProperty(otherLot.id);
     const archived = await getMaterialCapabilities(
       actor(memberId), productionId, true, [material],
     );
-    expect(Object.values(archived.byMaterial[material.id]).every((allowed) => !allowed)).toBe(true);
+    expect(archived.byMaterial[material.id]).toMatchObject({
+      confirmReceipt: false, checkoutSelf: false, manageIdentifiers: false, printLabels: true,
+    });
   });
 
   it("退还来源方同时要求退出治理与来源管理；POC 获退出键后两条件齐备", async () => {

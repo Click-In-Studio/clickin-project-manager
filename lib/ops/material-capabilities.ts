@@ -47,6 +47,7 @@ function capabilities(
     adjustStock: enabled(explicit.adjustment),
     exitStock: enabled(explicit.exit),
     returnToSource: enabled(explicit.exit && (explicit.sources || relation.poc)),
+    printLabels: explicit.identifiers || relation.member,
     manageIdentifiers: enabled(explicit.identifiers),
   };
 }
@@ -68,12 +69,16 @@ export async function getMaterialCapabilities(
       (material.departmentId && r.kind === "dept" && r.id === material.departmentId)
       || (material.groupId && r.kind === "group" && r.id === material.groupId))
       ?? { member: false, poc: false };
-    return [material.id, capabilities(
+    const result = capabilities(
       explicitMap(access.slice((index + 1) * NAMES.length, (index + 2) * NAMES.length)),
       relation, archived,
-    )];
+    );
+    result.deleteDefinition = result.deleteDefinition
+      && !lots.some((lot) => lot.materialId === material.id);
+    return [material.id, result];
   }));
-  const byLot = Object.fromEntries(lots.map((lot) => {
+  const requestedMaterialIds = new Set(materials.map((material) => material.id));
+  const byLot = Object.fromEntries(lots.filter((lot) => requestedMaterialIds.has(lot.materialId)).map((lot) => {
     const material = byMaterial[lot.materialId];
     return [lot.id, {
       confirmReceipt: material.confirmReceipt && lot.expectedQuantity > 0,
@@ -87,7 +92,9 @@ export async function getMaterialCapabilities(
       adjustStock: material.adjustStock,
       exitStock: material.exitStock
         && (lot.inStockQuantity > 0 || lot.checkedOutQuantity > 0 || lot.maintenanceQuantity > 0),
-      returnToSource: material.returnToSource && lot.inStockQuantity > 0,
+      returnToSource: material.returnToSource && lot.inStockQuantity > 0
+        && (lot.sourceType === "rented" || lot.sourceType === "borrowed")
+        && lot.outstandingSourceReturnQuantity > 0,
     }];
   }));
   return { global, representableSubjects: relations, byMaterial, byLot };

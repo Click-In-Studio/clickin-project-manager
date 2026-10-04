@@ -168,6 +168,7 @@ export async function recordMaterialSourceReturn(params: {
   custodian?: MaterialCustodian | null;
   custodianLabel?: string;
   exceptions?: MaterialSourceExceptionInput[];
+  idempotencyKey?: string | null;
   createdBy: string;
 }): Promise<MaterialSourceReturn> {
   const returnedAt = params.returnedAt ?? new Date();
@@ -182,8 +183,29 @@ export async function recordMaterialSourceReturn(params: {
       reason: params.reason ?? "退还来源方", exitReason: "returned_to_source",
       fromLocation: params.fromLocation, toLocation: params.toLocation,
       custodian: params.custodian, custodianLabel: params.custodianLabel,
-      occurredAt: returnedAt, note: params.note ?? "退还来源方", createdBy: params.createdBy,
+      occurredAt: returnedAt, note: params.note ?? "退还来源方",
+      idempotencyKey: params.idempotencyKey, createdBy: params.createdBy,
     });
+    const replay = await client.query<{
+      id: string; production_id: string; lot_id: string; movement_id: string;
+      returned_at: Date; note: string; created_by: string; created_at: Date;
+    }>(
+      `SELECT id, production_id, lot_id, movement_id, returned_at, note, created_by, created_at
+         FROM production_material_source_return WHERE movement_id=$1`,
+      [movement.id],
+    );
+    if (replay.rows[0]) {
+      const row = replay.rows[0];
+      const exceptions = await listMaterialSourceExceptions(params.lotId, params.productionId);
+      await client.query("COMMIT");
+      return {
+        id: row.id, productionId: row.production_id, lotId: row.lot_id,
+        movementId: row.movement_id, quantity: movement.quantity,
+        returnedAt: row.returned_at.toISOString(), note: row.note,
+        isReversed: false, exceptions: exceptions.filter(issue => issue.sourceReturnId === row.id),
+        createdBy: row.created_by, createdAt: row.created_at.toISOString(),
+      };
+    }
     const id = newSourceReturnId();
     const { rows } = await client.query<{
       production_id: string; lot_id: string; movement_id: string;

@@ -55,9 +55,9 @@ export const PERMISSION_LABELS: Record<string, string> = {
   "node:finance/*/expenses@create": "登记支出",
   "node:finance/*/settlement@edit": "确认报销线下结清",
   // ── 实体物料 ──
-  "node:material/*/definition@create": "新建物料定义",
-  "node:material/*/definition@edit": "编辑物料定义",
-  "node:material/*/definition@delete": "删除物料定义",
+  "node:material/*/definition@create": "新建物料类型",
+  "node:material/*/definition@edit": "编辑物料类型",
+  "node:material/*/definition@delete": "删除物料类型",
   "node:material/*/receipts@edit": "登记物料收货",
   "node:material/*/circulation/checkouts@edit": "代他人登记物料签出",
   "node:material/*/circulation/returns@edit": "代他人登记物料返还",

@@ -13,7 +13,7 @@ try {
 }
 
 describe("schema verification", () => {
-  it("物料定义具有跟踪策略、固定单位和精度，流水具有返还引用", async () => {
+  it("物料类型具有跟踪策略、固定单位和精度，流水具有返还引用", async () => {
     const columns = await getPool().query<{ table_name: string; column_name: string }>(
       `SELECT table_name, column_name FROM information_schema.columns
         WHERE table_schema='public'

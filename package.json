@@ -37,6 +37,7 @@
     "@tiptap/starter-kit": "3.30.3",
     "@tiptap/suggestion": "3.30.3",
     "@types/pg": "^8.20.0",
+    "@zxing/browser": "^0.2.1",
     "bwip-js": "^4.11.4",
     "diff": "^9.0.0",
     "fast-xml-parser": "^5.11.1",

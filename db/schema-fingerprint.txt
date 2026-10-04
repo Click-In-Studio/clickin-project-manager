@@ -758,6 +758,9 @@ COL|production_material_stock_code_counter|production_id|text|text|NO|
 COL|production_material_stock_lot|confirmed_quantity|numeric|numeric|NO|
 COL|production_material_stock_lot|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_material_stock_lot|created_by|uuid|uuid|NO|
+COL|production_material_stock_lot|creation_received_now|boolean|bool|NO|false
+COL|production_material_stock_lot|creation_request_index|integer|int4|YES|
+COL|production_material_stock_lot|creation_request_key|text|text|YES|
 COL|production_material_stock_lot|expected_arrival_at|timestamp with time zone|timestamptz|YES|
 COL|production_material_stock_lot|id|text|text|NO|
 COL|production_material_stock_lot|location|text|text|NO|''::text
@@ -779,6 +782,7 @@ COL|production_material_stock_movement|event_title|text|text|NO|''::text
 COL|production_material_stock_movement|exit_reason|text|text|YES|
 COL|production_material_stock_movement|from_bucket|text|text|NO|
 COL|production_material_stock_movement|from_location|text|text|NO|''::text
+COL|production_material_stock_movement|idempotency_key|text|text|YES|
 COL|production_material_stock_movement|id|text|text|NO|
 COL|production_material_stock_movement|lot_id|text|text|NO|
 COL|production_material_stock_movement|note|text|text|NO|''::text
@@ -1541,6 +1545,7 @@ CON|production_material_stock_code_counter|production_material_stock_code_counte
 CON|production_material_stock_code_counter|production_material_stock_code_counter_last_value_check|CHECK ((last_value > 0))
 CON|production_material_stock_code_counter|production_material_stock_code_counter_pkey|PRIMARY KEY (production_id, material_id, code_kind)
 CON|production_material_stock_code_counter|production_material_stock_code_counter_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_material_stock_lot|material_stock_lot_creation_request_check|CHECK ((((creation_request_key IS NULL) AND (creation_request_index IS NULL)) OR ((creation_request_key IS NOT NULL) AND ((length(creation_request_key) >= 8) AND (length(creation_request_key) <= 112)) AND (creation_request_key !~ '[[:cntrl:]]'::text) AND (creation_request_index IS NOT NULL) AND (creation_request_index >= 0))))
 CON|production_material_stock_lot|material_stock_lot_id_production_material_unique|UNIQUE (id, production_id, material_id)
 CON|production_material_stock_lot|material_stock_lot_id_production_unique|UNIQUE (id, production_id)
 CON|production_material_stock_lot|material_stock_lot_material_fk|FOREIGN KEY (material_id, production_id) REFERENCES production_material(id, production_id) ON DELETE RESTRICT
@@ -1551,6 +1556,7 @@ CON|production_material_stock_lot|production_material_stock_lot_created_by_fkey|
 CON|production_material_stock_lot|production_material_stock_lot_pkey|PRIMARY KEY (id)
 CON|production_material_stock_lot|production_material_stock_lot_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|production_material_stock_movement|material_custodian_pair|CHECK (((custodian_kind IS NULL) = (custodian_id IS NULL)))
+CON|production_material_stock_movement|material_movement_idempotency_key_format|CHECK (((idempotency_key IS NULL) OR (((char_length(idempotency_key) >= 8) AND (char_length(idempotency_key) <= 128)) AND (idempotency_key !~ '[[:cntrl:]]'::text))))
 CON|production_material_stock_movement|material_source_exit_pair_guard|TRIGGER DEFERRABLE INITIALLY DEFERRED
 CON|production_material_stock_movement|material_stock_movement_distinct_buckets|CHECK ((from_bucket <> to_bucket))
 CON|production_material_stock_movement|material_stock_movement_lot_fk|FOREIGN KEY (lot_id, production_id) REFERENCES production_material_stock_lot(id, production_id) ON DELETE RESTRICT
@@ -2014,8 +2020,10 @@ IDX|production_material_source_return|production_material_source_return_pkey|CRE
 IDX|production_material_stock_code_counter|production_material_stock_code_counter_pkey|CREATE UNIQUE INDEX production_material_stock_code_counter_pkey ON public.production_material_stock_code_counter USING btree (production_id, material_id, code_kind)
 IDX|production_material_stock_lot|material_stock_lot_id_production_material_unique|CREATE UNIQUE INDEX material_stock_lot_id_production_material_unique ON public.production_material_stock_lot USING btree (id, production_id, material_id)
 IDX|production_material_stock_lot|material_stock_lot_id_production_unique|CREATE UNIQUE INDEX material_stock_lot_id_production_unique ON public.production_material_stock_lot USING btree (id, production_id)
+IDX|production_material_stock_lot|production_material_stock_lot_creation_request_unique|CREATE UNIQUE INDEX production_material_stock_lot_creation_request_unique ON public.production_material_stock_lot USING btree (production_id, created_by, creation_request_key, creation_request_index) WHERE (creation_request_key IS NOT NULL)
 IDX|production_material_stock_lot|production_material_stock_lot_material_idx|CREATE INDEX production_material_stock_lot_material_idx ON public.production_material_stock_lot USING btree (production_id, material_id, created_at)
 IDX|production_material_stock_lot|production_material_stock_lot_pkey|CREATE UNIQUE INDEX production_material_stock_lot_pkey ON public.production_material_stock_lot USING btree (id)
+IDX|production_material_stock_movement|material_movement_idempotency_idx|CREATE UNIQUE INDEX material_movement_idempotency_idx ON public.production_material_stock_movement USING btree (production_id, created_by, idempotency_key) WHERE (idempotency_key IS NOT NULL)
 IDX|production_material_stock_movement|material_stock_movement_single_reversal|CREATE UNIQUE INDEX material_stock_movement_single_reversal ON public.production_material_stock_movement USING btree (reverses_event_id)
 IDX|production_material_stock_movement|material_stock_use_event_idx|CREATE INDEX material_stock_use_event_idx ON public.production_material_stock_movement USING btree (production_id, event_id) WHERE (event_id IS NOT NULL)
 IDX|production_material_stock_movement|material_stock_use_task_idx|CREATE INDEX material_stock_use_task_idx ON public.production_material_stock_movement USING btree (production_id, task_id) WHERE (task_id IS NOT NULL)

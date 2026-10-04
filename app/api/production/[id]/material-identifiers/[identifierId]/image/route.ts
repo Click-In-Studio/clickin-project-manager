@@ -4,7 +4,7 @@ import { attachmentContentDisposition } from "@/lib/asset/content-disposition";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { toActor } from "@/lib/perm/grant-check";
 import { getMaterial } from "@/lib/ops/material-db";
-import { canManageMaterialIdentifiers } from "@/lib/ops/material-perm";
+import { canPrintMaterialLabels } from "@/lib/ops/material-perm";
 import { getMaterialIdentifierForImage } from "@/lib/ops/material-identifier-db";
 import {
   MATERIAL_LABEL_SIZES,
@@ -22,12 +22,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   const access = await getProductionPermissionContext(session.userId, false, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
-  if (access.isArchived) return Response.json({ error: "已归档的项目不可生成码图片" }, { status: 403 });
   const resolved = await getMaterialIdentifierForImage(productionId, identifierId);
   if (!resolved) return Response.json({ error: "标识不存在" }, { status: 404 });
   const material = await getMaterial(resolved.identifier.materialId, productionId);
   if (!material) return Response.json({ error: "物料不存在" }, { status: 404 });
-  if (!await canManageMaterialIdentifiers(toActor(session, access.permCtx), productionId, material.id))
+  if (!await canPrintMaterialLabels(toActor(session, access.permCtx), productionId, material))
     return Response.json({ error: "权限不足" }, { status: 403 });
   if (resolved.identifier.kind !== "internal_code")
     return Response.json({ error: "只有内部实物或批次码可以生成标签" }, { status: 400 });

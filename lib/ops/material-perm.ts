@@ -43,7 +43,7 @@ export async function canCreateMaterial(
     : false;
 }
 
-/** 改删定义：持具体定义键，或是物料当前责任方 POC。 */
+/** 改删物料类型：持具体 definition 键，或是物料当前责任方 POC。 */
 export async function canManageMaterialDefinition(
   actor: GrantActor,
   productionId: string,
@@ -62,6 +62,16 @@ export function canManageMaterialIdentifiers(
   actor: GrantActor, productionId: string, materialId: string,
 ): Promise<boolean> {
   return hasMaterialPermission(actor, productionId, materialId, "identifiers");
+}
+
+/** 查看与重打既有内部标签属于日常保管；改绑、换码、失效仍只认标识治理键。 */
+export async function canPrintMaterialLabels(
+  actor: GrantActor, productionId: string, material: MaterialRef,
+): Promise<boolean> {
+  if (await canManageMaterialIdentifiers(actor, productionId, material.id)) return true;
+  return (await getMaterialSubjectRelation(
+    productionId, actor.userId, taskSubjectOf(material),
+  )).member;
 }
 
 export type MaterialMovementGate =

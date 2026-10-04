@@ -1865,6 +1865,9 @@ CREATE TABLE IF NOT EXISTS production_material_stock_lot (
   expected_arrival_at TIMESTAMPTZ,
   return_due_at      TIMESTAMPTZ,
   return_due_quantity NUMERIC(18,3),
+  creation_request_key TEXT,
+  creation_request_index INTEGER,
+  creation_received_now BOOLEAN NOT NULL DEFAULT false,
   created_by         UUID          NOT NULL REFERENCES app_user(id),
   created_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
   CONSTRAINT material_stock_lot_material_fk
@@ -1875,6 +1878,15 @@ CREATE TABLE IF NOT EXISTS production_material_stock_lot (
     UNIQUE (id, production_id, material_id),
   CONSTRAINT material_stock_lot_source_type_check
     CHECK (source_type IN ('existing', 'purchased', 'produced', 'rented', 'borrowed')),
+  CONSTRAINT material_stock_lot_creation_request_check CHECK (
+    (creation_request_key IS NULL AND creation_request_index IS NULL)
+    OR
+    (creation_request_key IS NOT NULL
+      AND length(creation_request_key) BETWEEN 8 AND 112
+      AND creation_request_key !~ '[[:cntrl:]]'
+      AND creation_request_index IS NOT NULL
+      AND creation_request_index >= 0)
+  ),
   CONSTRAINT material_stock_lot_return_obligation_check CHECK (
     (source_type IN ('rented', 'borrowed')
       AND btrim(source_label) <> ''
@@ -1891,6 +1903,11 @@ CREATE TABLE IF NOT EXISTS production_material_stock_lot (
 
 CREATE INDEX IF NOT EXISTS production_material_stock_lot_material_idx
   ON production_material_stock_lot (production_id, material_id, created_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS production_material_stock_lot_creation_request_unique
+  ON production_material_stock_lot
+    (production_id, created_by, creation_request_key, creation_request_index)
+  WHERE creation_request_key IS NOT NULL;
 
 -- 展示编号与实物/批次码由事务计数器分配；计数器更新和业务 INSERT 同事务，
 -- 回滚不会消耗号码。物料号按项目、实物/批次号按项目 + 物料分别递增。
@@ -1990,7 +2007,14 @@ CREATE TABLE IF NOT EXISTS production_material_stock_movement (
   note              TEXT          NOT NULL DEFAULT '',
   occurred_at       TIMESTAMPTZ   NOT NULL DEFAULT now(),
   created_by        UUID          NOT NULL REFERENCES app_user(id),
+  idempotency_key   TEXT,
   created_at        TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  CONSTRAINT material_movement_idempotency_key_format CHECK (
+    idempotency_key IS NULL OR (
+      char_length(idempotency_key) BETWEEN 8 AND 128
+      AND idempotency_key !~ '[[:cntrl:]]'
+    )
+  ),
   CONSTRAINT material_stock_movement_distinct_buckets CHECK (from_bucket <> to_bucket),
   CONSTRAINT material_stock_movement_lot_fk
     FOREIGN KEY (lot_id, production_id)
@@ -2006,6 +2030,10 @@ CREATE INDEX IF NOT EXISTS production_material_stock_movement_lot_idx
 CREATE INDEX IF NOT EXISTS production_material_stock_movement_return_idx
   ON production_material_stock_movement (return_of_movement_id)
   WHERE return_of_movement_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS material_movement_idempotency_idx
+  ON production_material_stock_movement (production_id, created_by, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS production_material_source_return (
   id            TEXT        PRIMARY KEY,

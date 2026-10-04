@@ -9,14 +9,14 @@
  * **责任方复用 task 的主体抽象**（部门 | 用户组，二选一）。组自带 POC，所以
  * 「这批道具归谁负责」和「这条任务归谁负责」是同一套解析，见 lib/ops/task-poc.ts。
  *
- * production_material 只描述物料定义；production_material_stock_lot 记录已经确认会
+ * production_material 只描述物料类型；production_material_stock_lot 记录已经确认会
  * 入库的批次；production_material_stock_movement 是不可改写的数量流水。当前库存只能
  * 从批次和流水推导，不能覆盖写一个 quantity/当前桶位值。
  *
  * 状态完全由数量流水派生，不读取旧自由状态字典。
  */
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { PoolClient } from "pg";
 import { getPool } from "../pg";
 import {
@@ -29,6 +29,7 @@ import {
   quantityFitsScale, type MaterialSourceStatus, type MaterialSourceType,
   type MaterialStockBucket, type MaterialTrackingStrategy, type MaterialExitReason, type MaterialCustodian,
 } from "./material-types";
+import type { MaterialOverview, MaterialOverviewKey } from "./material-client-types";
 
 export type Material = {
   id: string;
@@ -56,6 +57,8 @@ export type Material = {
   cancelledQuantity: number;
   /** 仅 consumable 有业务含义：有效签出减去有效返还。 */
   netConsumedQuantity: number;
+  sourceSummary: string;
+  abnormalQuantity: number;
   notes: string;
   createdBy: string;
   createdAt: string;
@@ -147,6 +150,8 @@ export type MaterialMovementInput = {
   note?: string;
   occurredAt?: Date;
   createdBy: string;
+  /** 同一操作者在同一项目内的持久化重试键。 */
+  idempotencyKey?: string | null;
   reason?: string;
   exitReason?: MaterialExitReason | null;
   fromLocation?: string;
@@ -170,6 +175,8 @@ export type MaterialCheckout = {
   eventTitle: string;
   taskId: string | null;
   taskTitle: string;
+  custodian: MaterialCustodian | null;
+  custodianLabel: string;
 };
 
 const newLotId = () => `ml_${Date.now().toString(36)}${randomBytes(4).toString("hex")}`;
@@ -263,9 +270,11 @@ const MATERIAL_SELECT = `
   m.group_id, g.name AS group_name,
   stock.location, stock.expected_quantity, stock.in_stock_quantity,
   stock.checked_out_quantity, stock.maintenance_quantity, stock.exited_quantity, stock.cancelled_quantity,
+  stock.source_summary, stock.abnormal_quantity,
   CASE WHEN m.tracking_strategy = 'consumable'
        THEN consumption.net_consumed_quantity ELSE '0' END AS net_consumed_quantity,
-  m.notes, m.created_by, m.created_at, m.updated_at`;
+  m.notes, m.created_by, m.created_at,
+  GREATEST(m.updated_at, COALESCE(stock.latest_at, m.updated_at)) AS updated_at`;
 
 type MaterialRow = {
   id: string; production_id: string; number: string; name: string; category: string;
@@ -275,6 +284,7 @@ type MaterialRow = {
   location: string; expected_quantity: string; in_stock_quantity: string;
   checked_out_quantity: string; maintenance_quantity: string; exited_quantity: string;
   net_consumed_quantity: string; cancelled_quantity: string;
+  source_summary: string; abnormal_quantity: string;
   notes: string;
   created_by: string; created_at: Date; updated_at: Date;
 };
@@ -298,6 +308,8 @@ function rowToMaterial(r: MaterialRow): Material {
     inStockQuantity, checkedOutQuantity, maintenanceQuantity, exitedQuantity,
     cancelledQuantity: Number(r.cancelled_quantity),
     netConsumedQuantity,
+    sourceSummary: r.source_summary,
+    abnormalQuantity: Number(r.abnormal_quantity),
     notes: r.notes,
     createdBy: r.created_by,
     createdAt: r.created_at.toISOString(),
@@ -316,6 +328,12 @@ const MATERIAL_FROM = `
   LEFT JOIN LATERAL (
     SELECT
       COALESCE(string_agg(DISTINCT NULLIF(l.location, ''), '、'), '') AS location,
+      COALESCE(string_agg(DISTINCT CASE l.source_type
+        WHEN 'existing' THEN '已有' WHEN 'purchased' THEN '采购' WHEN 'produced' THEN '自制'
+        WHEN 'rented' THEN '租赁' WHEN 'borrowed' THEN '借用' END, '、'), '') AS source_summary,
+      COALESCE(SUM(source_exception.open_quantity), 0)::text AS abnormal_quantity,
+      MAX(GREATEST(l.created_at, COALESCE(mv.latest_at,l.created_at),
+                   COALESCE(source_exception.latest_at,l.created_at))) AS latest_at,
       COALESCE(SUM(l.confirmed_quantity + mv.expected_delta), 0)::text AS expected_quantity,
       COALESCE(SUM(mv.in_stock_delta), 0)::text AS in_stock_quantity,
       COALESCE(SUM(mv.checked_out_delta), 0)::text AS checked_out_quantity,
@@ -336,10 +354,18 @@ const MATERIAL_FROM = `
         COALESCE(SUM(CASE WHEN sm.to_bucket = 'exited' THEN sm.quantity ELSE 0 END), 0)
           - COALESCE(SUM(CASE WHEN sm.from_bucket = 'exited' THEN sm.quantity ELSE 0 END), 0) AS exited_delta,
         COALESCE(SUM(CASE WHEN sm.to_bucket = 'cancelled' THEN sm.quantity ELSE 0 END), 0)
-          - COALESCE(SUM(CASE WHEN sm.from_bucket = 'cancelled' THEN sm.quantity ELSE 0 END), 0) AS cancelled_delta
+          - COALESCE(SUM(CASE WHEN sm.from_bucket = 'cancelled' THEN sm.quantity ELSE 0 END), 0) AS cancelled_delta,
+        MAX(sm.created_at) AS latest_at
       FROM production_material_stock_movement sm
       WHERE sm.lot_id = l.id
     ) mv ON true
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(e.quantity),0) AS open_quantity, MAX(e.created_at) AS latest_at
+        FROM production_material_source_exception e
+       WHERE e.lot_id=l.id AND e.resolves_exception_id IS NULL
+         AND NOT EXISTS (SELECT 1 FROM production_material_source_exception resolution
+                          WHERE resolution.resolves_exception_id=e.id)
+    ) source_exception ON true
     WHERE l.material_id = m.id AND l.production_id = m.production_id
   ) stock ON true
   LEFT JOIN LATERAL (
@@ -373,6 +399,82 @@ export async function listMaterials(productionId: string): Promise<Material[]> {
   return res.rows.map(rowToMaterial);
 }
 
+/** 台账总览按实物/批次计数，不跨单位相加，也不把物料类型数冒充库存数。 */
+export async function getMaterialOverview(
+  productionId: string, now = new Date(),
+): Promise<MaterialOverview> {
+  const { rows } = await getPool().query<{
+    material_id: string; expected_quantity: string; checked_out_quantity: string;
+    maintenance_quantity: string; overdue_source_return: boolean; has_source_exception: boolean;
+  }>(
+    `SELECT l.material_id,
+            (l.confirmed_quantity + mv.expected_delta)::text AS expected_quantity,
+            mv.checked_out_delta::text AS checked_out_quantity,
+            mv.maintenance_delta::text AS maintenance_quantity,
+            (l.source_type IN ('rented','borrowed')
+              AND l.return_due_at < $2
+              AND LEAST(l.return_due_quantity, l.confirmed_quantity - mv.cancelled_delta)
+                  > source_return.returned_quantity) AS overdue_source_return,
+            source_exception.open_quantity > 0 AS has_source_exception
+       FROM production_material_stock_lot l
+       LEFT JOIN LATERAL (
+         SELECT
+           COALESCE(SUM(CASE WHEN sm.to_bucket='expected' THEN sm.quantity ELSE 0 END),0)
+             - COALESCE(SUM(CASE WHEN sm.from_bucket='expected' THEN sm.quantity ELSE 0 END),0) AS expected_delta,
+           COALESCE(SUM(CASE WHEN sm.to_bucket='checked_out' THEN sm.quantity ELSE 0 END),0)
+             - COALESCE(SUM(CASE WHEN sm.from_bucket='checked_out' THEN sm.quantity ELSE 0 END),0) AS checked_out_delta,
+           COALESCE(SUM(CASE WHEN sm.to_bucket='maintenance' THEN sm.quantity ELSE 0 END),0)
+             - COALESCE(SUM(CASE WHEN sm.from_bucket='maintenance' THEN sm.quantity ELSE 0 END),0) AS maintenance_delta,
+           COALESCE(SUM(CASE WHEN sm.to_bucket='cancelled' THEN sm.quantity ELSE 0 END),0)
+             - COALESCE(SUM(CASE WHEN sm.from_bucket='cancelled' THEN sm.quantity ELSE 0 END),0) AS cancelled_delta
+           FROM production_material_stock_movement sm WHERE sm.lot_id=l.id
+       ) mv ON true
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(rm.quantity),0) AS returned_quantity
+           FROM production_material_source_return sr
+           JOIN production_material_stock_movement rm ON rm.id=sr.movement_id
+          WHERE sr.lot_id=l.id AND sr.production_id=l.production_id
+            AND NOT EXISTS (SELECT 1 FROM production_material_stock_movement rr
+                             WHERE rr.reverses_event_id=rm.id)
+       ) source_return ON true
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(e.quantity),0) AS open_quantity
+           FROM production_material_source_exception e
+          WHERE e.lot_id=l.id AND e.production_id=l.production_id
+            AND e.resolves_exception_id IS NULL
+            AND NOT EXISTS (SELECT 1 FROM production_material_source_exception resolution
+                             WHERE resolution.resolves_exception_id=e.id)
+            AND (e.source_return_id IS NULL OR EXISTS (
+              SELECT 1 FROM production_material_source_return esr
+              JOIN production_material_stock_movement em ON em.id=esr.movement_id
+              WHERE esr.id=e.source_return_id
+                AND NOT EXISTS (SELECT 1 FROM production_material_stock_movement er
+                                 WHERE er.reverses_event_id=em.id)
+            ))
+       ) source_exception ON true
+      WHERE l.production_id=$1`,
+    [productionId, now],
+  );
+  const keys: MaterialOverviewKey[] = [
+    "pendingReceipt", "checkedOut", "maintenance", "overdueSourceReturn", "sourceException",
+  ];
+  const ids = Object.fromEntries(keys.map(key => [key, new Set<string>()])) as
+    Record<MaterialOverviewKey, Set<string>>;
+  const counts = Object.fromEntries(keys.map(key => [key, 0])) as Record<MaterialOverviewKey, number>;
+  for (const row of rows) {
+    const active: MaterialOverviewKey[] = [];
+    if (Number(row.expected_quantity) > 0) active.push("pendingReceipt");
+    if (Number(row.checked_out_quantity) > 0) active.push("checkedOut");
+    if (Number(row.maintenance_quantity) > 0) active.push("maintenance");
+    if (row.overdue_source_return) active.push("overdueSourceReturn");
+    if (row.has_source_exception) active.push("sourceException");
+    for (const key of active) { counts[key] += 1; ids[key].add(row.material_id); }
+  }
+  return Object.fromEntries(keys.map(key => [key, {
+    count: counts[key], materialIds: [...ids[key]],
+  }])) as MaterialOverview;
+}
+
 export async function getMaterial(id: string, productionId: string): Promise<Material | null> {
   const res = await getPool().query<MaterialRow>(
     `SELECT ${MATERIAL_SELECT} ${MATERIAL_FROM}
@@ -380,6 +482,51 @@ export async function getMaterial(id: string, productionId: string): Promise<Mat
     [id, productionId],
   );
   return res.rows[0] ? rowToMaterial(res.rows[0]) : null;
+}
+
+/** 只建立物料类型；实物/批次确认与实际入库必须分别走 lot 与 movement 写点。 */
+export async function createMaterialDefinition(params: {
+  productionId: string;
+  name: string;
+  category?: string;
+  trackingStrategy?: MaterialTrackingStrategy;
+  unit?: string;
+  quantityScale?: number;
+  subject: TaskSubject | null;
+  notes?: string;
+  createdBy: string;
+}): Promise<Material> {
+  const trackingStrategy = params.trackingStrategy ?? "bulk_returnable";
+  const unit = (params.unit ?? "件").trim();
+  const quantityScale = params.quantityScale ?? 0;
+  validateTrackingFields(trackingStrategy, unit, quantityScale);
+  const cols = subjectColumns(params.subject);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const materialId = newMaterialId();
+    await client.query(
+      `INSERT INTO production_material
+         (id, production_id, name, category, tracking_strategy, unit, quantity_scale,
+          department_id, group_id, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [materialId, params.productionId, params.name.trim(), params.category ?? "",
+        trackingStrategy, unit, quantityScale, cols.departmentId, cols.groupId,
+        params.notes ?? "", params.createdBy],
+    );
+    await createMaterialNumberInTx(client, {
+      productionId: params.productionId, materialId, createdBy: params.createdBy,
+    });
+    await client.query("COMMIT");
+    const created = await getMaterial(materialId, params.productionId);
+    if (!created) throw new Error(`material not found after create: ${materialId}`);
+    return created;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function createMaterial(params: {
@@ -543,6 +690,8 @@ type QueryClient = Pick<PoolClient, "query">;
 async function insertMaterialLot(client: PoolClient, params: {
   productionId: string; materialId: string; confirmedQuantity: number;
   location?: string; createdBy: string;
+  creationRequestKey?: string; creationRequestIndex?: number;
+  creationReceivedNow?: boolean;
 } & MaterialSourceInput): Promise<MaterialStockLot> {
   if (!Number.isFinite(params.confirmedQuantity) || params.confirmedQuantity <= 0)
     throw new MaterialError("bad_quantity", "确认入库数量必须大于 0");
@@ -568,8 +717,9 @@ async function insertMaterialLot(client: PoolClient, params: {
       `INSERT INTO production_material_stock_lot
          (id, production_id, material_id, confirmed_quantity, location, created_by,
           source_type, source_label, source_reference, source_note,
-          expected_arrival_at, return_due_at, return_due_quantity)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+          expected_arrival_at, return_due_at, return_due_quantity,
+          creation_request_key, creation_request_index, creation_received_now)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING id, production_id, material_id, confirmed_quantity::text,
                  location, source_type, source_label, source_reference, source_note,
                  expected_arrival_at, return_due_at, return_due_quantity::text,
@@ -577,7 +727,9 @@ async function insertMaterialLot(client: PoolClient, params: {
       [newLotId(), params.productionId, params.materialId, params.confirmedQuantity,
         params.location ?? "", params.createdBy, source.sourceType, source.sourceLabel,
         source.sourceReference, source.sourceNote, source.expectedArrivalAt,
-        source.returnDueAt, source.returnDueQuantity],
+        source.returnDueAt, source.returnDueQuantity,
+        params.creationRequestKey ?? null, params.creationRequestIndex ?? null,
+        params.creationReceivedNow ?? false],
     );
     const r = rows[0];
     await createMaterialStockCodeInTx(client, {
@@ -632,6 +784,142 @@ export async function createMaterialStockLot(params: {
   }
 }
 
+/** 确认一批库存载体；逐件跟踪时每件生成独立批次和内部码。 */
+export async function createMaterialStockLots(params: {
+  productionId: string; materialId: string; confirmedQuantity: number;
+  location?: string; createdBy: string; idempotencyKey: string;
+  receiveNow?: boolean; occurredAt?: Date;
+} & MaterialSourceInput): Promise<MaterialStockLot[]> {
+  const material = await getMaterial(params.materialId, params.productionId);
+  if (!material) throw new MaterialError("bad_source", "物料不存在");
+  if (!Number.isFinite(params.confirmedQuantity) || params.confirmedQuantity <= 0)
+    throw new MaterialError("bad_quantity", "确认数量必须大于 0");
+  if (material.trackingStrategy === "serialized" && !Number.isInteger(params.confirmedQuantity))
+    throw new MaterialError("bad_quantity", "逐件物料的数量必须是整数");
+  const idempotencyKey = params.idempotencyKey.trim();
+  if (idempotencyKey.length < 8 || idempotencyKey.length > 112 || /[\p{Cc}\p{Cf}]/u.test(idempotencyKey))
+    throw new MaterialError("bad_use", "幂等键格式无效");
+  const quantities = material.trackingStrategy === "serialized"
+    ? Array.from({ length: params.confirmedQuantity }, () => 1)
+    : [params.confirmedQuantity];
+  const requestSource = normalizeMaterialSource(
+    params, params.confirmedQuantity, material.quantityScale,
+  );
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`material-lots:${params.productionId}:${params.createdBy}:${idempotencyKey}`],
+    );
+    const replay = await client.query<{ id: string; material_id: string; confirmed_quantity: string; location: string; source_type: MaterialSourceType; source_label: string; source_reference: string; source_note: string; expected_arrival_at: Date | null; return_due_at: Date | null; return_due_quantity: string | null; creation_received_now: boolean }>(
+      `SELECT id, material_id, confirmed_quantity::text, location, source_type,
+              source_label, source_reference, source_note, expected_arrival_at,
+              return_due_at, return_due_quantity::text, creation_received_now
+         FROM production_material_stock_lot
+        WHERE production_id=$1 AND created_by=$2 AND creation_request_key=$3
+        ORDER BY creation_request_index`,
+      [params.productionId, params.createdBy, idempotencyKey],
+    );
+    if (replay.rows.length) {
+      const total = replay.rows.reduce((sum, row) => sum + Number(row.confirmed_quantity), 0);
+      const returnDueTotal = replay.rows.reduce((sum, row) => sum + Number(row.return_due_quantity ?? 0), 0);
+      const sameDate = (actual: Date | null, expected: Date | null | undefined) =>
+        actual?.getTime() === (expected ?? null)?.getTime();
+      if (replay.rows.some((row) => row.material_id !== params.materialId
+          || row.location !== (params.location ?? "") || row.source_type !== requestSource.sourceType
+          || row.source_label !== requestSource.sourceLabel
+          || row.source_reference !== requestSource.sourceReference
+          || row.source_note !== requestSource.sourceNote
+          || !sameDate(row.expected_arrival_at, requestSource.expectedArrivalAt)
+          || !sameDate(row.return_due_at, requestSource.returnDueAt)
+          || row.creation_received_now !== Boolean(params.receiveNow))
+          || returnDueTotal !== (requestSource.returnDueQuantity ?? 0)
+          || total !== params.confirmedQuantity)
+        throw new MaterialError("bad_use", "该幂等键已用于另一项物料操作");
+      await client.query("COMMIT");
+      const ids = new Set(replay.rows.map((row) => row.id));
+      return (await listMaterialStockLots(params.materialId, params.productionId))
+        .filter((lot) => ids.has(lot.id));
+    }
+    const lots: MaterialStockLot[] = [];
+    for (let index = 0; index < quantities.length; index += 1) {
+      const quantity = quantities[index];
+      const lot = await insertMaterialLot(client, {
+        ...params,
+        confirmedQuantity: quantity,
+        creationRequestKey: idempotencyKey,
+        creationRequestIndex: index,
+        creationReceivedNow: Boolean(params.receiveNow),
+        returnDueQuantity: params.returnDueQuantity === null || params.returnDueQuantity === undefined
+          ? params.returnDueQuantity
+          : material.trackingStrategy === "serialized" ? 1 : params.returnDueQuantity,
+      });
+      lots.push(lot);
+      if (params.receiveNow) {
+        await appendMaterialStockMovementInTx(client, {
+          productionId: params.productionId, lotId: lot.id,
+          fromBucket: "expected", toBucket: "in_stock", quantity,
+          reason: "确认并入库", toLocation: params.location ?? "",
+          occurredAt: params.occurredAt,
+          idempotencyKey: childIdempotencyKey(idempotencyKey, index, "receipt"),
+          createdBy: params.createdBy,
+        });
+      }
+    }
+    await client.query("COMMIT");
+    const ids = new Set(lots.map((lot) => lot.id));
+    return (await listMaterialStockLots(params.materialId, params.productionId))
+      .filter((lot) => ids.has(lot.id));
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function childIdempotencyKey(base: string, index: number, operation: string): string {
+  return `batch:${createHash("sha256").update(`${base}:${operation}:${index}`).digest("base64url")}`;
+}
+
+/** 多件逐件物料的原子流转写点；任一件失败则整批回滚。 */
+export async function appendMaterialStockMovements(params: {
+  productionId: string; movements: Omit<MaterialMovementInput,
+    "productionId" | "quantity" | "createdBy" | "idempotencyKey">[];
+  operation: "receipt" | "checkout" | "return" | "maintenance";
+  idempotencyKey: string; createdBy: string; occurredAt?: Date;
+}): Promise<MaterialStockMovement[]> {
+  const inputs = [...params.movements].sort((a, b) => a.lotId.localeCompare(b.lotId));
+  if (!inputs.length || inputs.length > 100
+      || inputs.some((movement) => !movement.lotId)
+      || new Set(inputs.map((movement) => movement.lotId)).size !== inputs.length)
+    throw new MaterialError("bad_use", "批量流转实物参数无效");
+  const idempotencyKey = params.idempotencyKey.trim();
+  if (idempotencyKey.length < 8 || idempotencyKey.length > 112 || /[\p{Cc}\p{Cf}]/u.test(idempotencyKey))
+    throw new MaterialError("bad_use", "幂等键格式无效");
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const results: MaterialStockMovement[] = [];
+    for (let index = 0; index < inputs.length; index += 1) {
+      results.push(await appendMaterialStockMovementInTx(client, {
+        ...inputs[index], productionId: params.productionId, quantity: 1,
+        occurredAt: params.occurredAt,
+        idempotencyKey: childIdempotencyKey(idempotencyKey, index, params.operation),
+        createdBy: params.createdBy,
+      }));
+    }
+    await client.query("COMMIT");
+    return results;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function insertMaterialMovement(
   client: QueryClient, params: MaterialMovementInput,
 ): Promise<MaterialStockMovement> {
@@ -646,15 +934,16 @@ async function insertMaterialMovement(
          (id, production_id, lot_id, from_bucket, to_bucket, quantity,
           reverses_event_id, return_of_movement_id, note, occurred_at, created_by,
           reason, exit_reason, from_location, to_location, event_id, task_id,
-          custodian_kind, custodian_id, custodian_label)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+          custodian_kind, custodian_id, custodian_label, idempotency_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        RETURNING *`,
       [newMovementId(), params.productionId, params.lotId, params.fromBucket,
         params.toBucket, params.quantity, params.reversesEventId ?? null,
         params.returnOfMovementId ?? null, params.note ?? "", occurredAt, params.createdBy,
         params.reason ?? "", params.exitReason ?? null, params.fromLocation ?? "",
         params.toLocation ?? "", params.eventId ?? null, params.taskId ?? null,
-        params.custodian?.kind ?? null, params.custodian?.id ?? null, params.custodianLabel ?? ""],
+        params.custodian?.kind ?? null, params.custodian?.id ?? null, params.custodianLabel ?? "",
+        params.idempotencyKey ?? null],
     );
     return rowToMovement(rows[0]);
   } catch (e) {
@@ -715,6 +1004,37 @@ export async function appendMaterialStockMovement(params: MaterialMovementInput)
 export async function appendMaterialStockMovementInTx(
   client: PoolClient, params: MaterialMovementInput,
 ): Promise<MaterialStockMovement> {
+  const idempotencyKey = params.idempotencyKey?.trim() || null;
+  if (idempotencyKey) {
+    if (idempotencyKey.length < 8 || idempotencyKey.length > 128 || /[\p{Cc}\p{Cf}]/u.test(idempotencyKey))
+      throw new MaterialError("bad_use", "幂等键格式无效");
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`material:${params.productionId}:${params.createdBy}:${idempotencyKey}`],
+    );
+    const replay = await client.query<MovementRow>(
+      `SELECT * FROM production_material_stock_movement
+        WHERE production_id=$1 AND created_by=$2 AND idempotency_key=$3`,
+      [params.productionId, params.createdBy, idempotencyKey],
+    );
+    if (replay.rows[0]) {
+      const row = replay.rows[0];
+      if (row.lot_id !== params.lotId || row.from_bucket !== params.fromBucket
+          || row.to_bucket !== params.toBucket || Number(row.quantity) !== params.quantity
+          || row.reverses_event_id !== (params.reversesEventId ?? null)
+          || row.return_of_movement_id !== (params.returnOfMovementId ?? null)
+          || row.reason !== (params.reason ?? "") || row.note !== (params.note ?? "")
+          || row.exit_reason !== (params.exitReason ?? null)
+          || row.from_location !== (params.fromLocation ?? "")
+          || (Boolean(params.toLocation) && row.to_location !== params.toLocation)
+          || row.event_id !== (params.eventId ?? null) || row.task_id !== (params.taskId ?? null)
+          || row.custodian_kind !== (params.custodian?.kind ?? null)
+          || row.custodian_id !== (params.custodian?.id ?? null)
+          || (!params.custodian && row.custodian_label !== (params.custodianLabel ?? "")))
+        throw new MaterialError("bad_use", "该幂等键已用于另一项物料操作");
+      return rowToMovement(row);
+    }
+  }
   // 锁必须是 INSERT 之前的独立语句：并发等待结束后，INSERT/触发器会拿到新快照，
   // 从而看见前一笔已提交流水，而不是基于等待前的余额继续扣减。
   const lock = await client.query(
@@ -723,7 +1043,7 @@ export async function appendMaterialStockMovementInTx(
     [params.lotId, params.productionId],
   );
   if (!lock.rowCount) throw new Error("material stock lot not found");
-  return insertMaterialMovement(client, params);
+  return insertMaterialMovement(client, { ...params, idempotencyKey });
 }
 
 export async function listMaterialStockLots(
@@ -921,13 +1241,15 @@ export async function listMaterialCheckouts(
     movement_id: string; lot_id: string; checked_out_quantity: string;
     returned_quantity: string; settled_quantity: string; outstanding_quantity: string; created_at: Date;
     event_id: string | null; event_title: string; task_id: string | null; task_title: string;
+    custodian_kind: MaterialCustodian["kind"] | null; custodian_id: string | null; custodian_label: string;
   }>(
     `SELECT c.id AS movement_id, c.lot_id, c.quantity::text AS checked_out_quantity,
             COALESCE(ret.returned_quantity, 0)::text AS returned_quantity,
             COALESCE(ret.settled_quantity, 0)::text AS settled_quantity,
             (c.quantity - COALESCE(cr.quantity, 0)
               - COALESCE(ret.settled_quantity, 0))::text AS outstanding_quantity,
-            c.created_at, c.event_id, c.event_title, c.task_id, c.task_title
+            c.created_at, c.event_id, c.event_title, c.task_id, c.task_title,
+            c.custodian_kind, c.custodian_id, c.custodian_label
        FROM production_material_stock_lot l
        JOIN production_material_stock_movement c
          ON c.lot_id = l.id
@@ -955,5 +1277,8 @@ export async function listMaterialCheckouts(
     outstandingQuantity: Number(r.outstanding_quantity),
     createdAt: r.created_at.toISOString(),
     eventId: r.event_id, eventTitle: r.event_title, taskId: r.task_id, taskTitle: r.task_title,
+    custodian: r.custodian_kind && r.custodian_id
+      ? { kind: r.custodian_kind, id: r.custodian_id } : null,
+    custodianLabel: r.custodian_label,
   }));
 }

@@ -19,6 +19,7 @@ import { addProductionMember } from "@/lib/perm/member-db";
 import { selfConfirmResourceGrant } from "@/lib/perm/resource-grant-db";
 import { createMaterial, listMaterialStockLots } from "@/lib/ops/material-db";
 import { listMaterialIdentifiers } from "@/lib/ops/material-identifier-db";
+import { getPool } from "@/lib/pg";
 import { cleanupProduction, makeProduction, shortId } from "../_support/factories";
 
 let prodId: string;
@@ -26,6 +27,7 @@ let ownerId: string;
 let outsiderId: string;
 let viewerId: string;
 let creatorId: string;
+let responsibleId: string;
 let materialId: string;
 let lotId: string;
 
@@ -33,16 +35,24 @@ beforeAll(async () => {
   const user = async (name: string) => (await upsertFeishuUser(
     `identifier-api-${shortId()}`, name, null, false,
   )).userId;
-  [ownerId, outsiderId, viewerId, creatorId] = await Promise.all([
-    user("编号 owner"), user("编号 outsider"), user("编号 viewer"), user("编号 creator"),
+  [ownerId, outsiderId, viewerId, creatorId, responsibleId] = await Promise.all([
+    user("编号 owner"), user("编号 outsider"), user("编号 viewer"), user("编号 creator"), user("编号责任成员"),
   ]);
   ({ prodId } = await makeProduction(ownerId));
-  for (const id of [ownerId, viewerId, creatorId]) await addProductionMember(prodId, id);
+  for (const id of [ownerId, viewerId, creatorId, responsibleId]) await addProductionMember(prodId, id);
   await selfConfirmResourceGrant(viewerId, prodId, "material", "*", "view");
   await selfConfirmResourceGrant(creatorId, prodId, "material", "*", "create");
+  const { rows: [department] } = await getPool().query<{ id: string }>(
+    "INSERT INTO production_dept (production_id,name) VALUES ($1,$2) RETURNING id",
+    [prodId, `编号责任方-${shortId()}`],
+  );
+  await getPool().query(
+    `INSERT INTO production_dept_member (production_id,dept_id,user_id,is_poc)
+     VALUES ($1,$2,$3,false)`, [prodId, department.id, responsibleId],
+  );
   const material = await createMaterial({
     productionId: prodId, name: "API 无线话筒", trackingStrategy: "serialized",
-    subject: null, createdBy: ownerId,
+    subject: { kind: "dept", id: department.id }, createdBy: ownerId,
   });
   materialId = material.id;
   lotId = (await listMaterialStockLots(materialId, prodId))[0].id;
@@ -167,8 +177,32 @@ describe("物料标识 API 权限与结果", () => {
     expect(await inactive.json()).toMatchObject({ status: "inactive" });
   });
 
+  it("责任方成员可查看和重打现有标签，但不能绑定或换码", async () => {
+    const internal = (await listMaterialIdentifiers(prodId, materialId, lotId))
+      .find(item => item.kind === "internal_code")!;
+    const imageCtx = { params: Promise.resolve({ id: prodId, identifierId: internal.id }) };
+    expect((await identifierImage(
+      request("http://localhost/api/image?type=code128&format=svg", "GET", undefined, responsibleId),
+      imageCtx,
+    )).status).toBe(200);
+    expect((await generateLabels(
+      request("http://localhost/api/labels", "POST", { identifierIds: [internal.id] }, responsibleId),
+      productionCtx(),
+    )).status).toBe(200);
+    expect((await addExternalIdentifier(
+      request("http://localhost/api/identifiers", "POST", {
+        type: "manufacturer_serial", value: `NO-${shortId()}`,
+      }, responsibleId), lotCtx(),
+    ))!.status).toBe(403);
+    const replaceCtx = { params: Promise.resolve({ id: prodId, identifierId: internal.id }) };
+    expect((await replaceIdentifier(
+      request("http://localhost/api/identifier", "POST", { reason: "无权限换码" }, responsibleId),
+      replaceCtx,
+    ))!.status).toBe(403);
+  });
+
   it("QR token 路由在登录和项目访问后返回同一实体", async () => {
-    const { rows: [row] } = await (await import("@/lib/pg")).getPool().query<{ token: string }>(
+    const { rows: [row] } = await getPool().query<{ token: string }>(
       `SELECT token FROM production_material_identifier
         WHERE production_id=$1 AND lot_id=$2 AND kind='internal_code'`,
       [prodId, lotId],
@@ -185,6 +219,13 @@ describe("物料标识 API 权限与结果", () => {
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ identifier: { lotId } });
+    const scannedQr = await resolveIdentifier(
+      request("http://localhost/api/resolve", "POST", {
+        code: `https://click-in.example/api/material-identifiers/scan/${row.token}`,
+      }, viewerId), productionCtx(),
+    );
+    expect(scannedQr.status).toBe(200);
+    expect(await scannedQr.json()).toMatchObject({ identifier: { lotId } });
   });
 
   it("多个内部码可生成带可读编号文件名的 ZIP 与打印页", async () => {

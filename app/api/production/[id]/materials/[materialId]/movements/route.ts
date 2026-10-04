@@ -52,6 +52,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const parsed = await readJsonObject(req);
   if (!parsed.ok) return parsed.response;
   const b = parsed.value;
+  const idempotencyKey = req.headers.get("Idempotency-Key")?.trim()
+    || (typeof b.idempotencyKey === "string" ? b.idempotencyKey.trim() : "");
+  if (idempotencyKey.length < 8 || idempotencyKey.length > 128)
+    return Response.json({ error: "缺少有效的幂等键" }, { status: 400 });
   const bad = () => Response.json({ error: "物料流转参数无效" }, { status: 400 });
   if (typeof b.lotId !== "string" || typeof b.quantity !== "number" || !Number.isFinite(b.quantity) || b.quantity <= 0
       || !(MATERIAL_STOCK_BUCKETS as readonly unknown[]).includes(b.fromBucket)
@@ -103,9 +107,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (b.fromBucket !== "in_stock" || b.toBucket !== "exited" || b.returnOfMovementId != null || b.eventId != null || b.taskId != null) return bad();
       const sourceReturn = await recordMaterialSourceReturn({ productionId, lotId: lot.id,
         quantity: b.quantity, returnedAt: occurredAt, note: b.note as string | undefined,
-        fromLocation: b.fromLocation as string | undefined, toLocation: b.toLocation as string | undefined,
+        fromLocation: b.fromLocation as string | undefined,
+        toLocation: typeof b.toLocation === "string" && b.toLocation ? b.toLocation : lot.sourceLabel,
         custodian, custodianLabel: b.custodianLabel as string | undefined, reason: b.reason as string | undefined,
-        createdBy: session.userId });
+        idempotencyKey, createdBy: session.userId });
       return Response.json({ sourceReturn }, { status: 201 });
     }
     const movement = await appendMaterialStockMovement({ productionId, lotId: lot.id,
@@ -116,7 +121,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       exitReason: b.exitReason as MaterialExitReason | null | undefined,
       fromLocation: b.fromLocation as string | undefined, toLocation: b.toLocation as string | undefined,
       eventId: b.eventId as string | null | undefined, taskId: b.taskId as string | null | undefined,
-      custodian, custodianLabel: b.custodianLabel as string | undefined, occurredAt, createdBy: session.userId });
+      custodian, custodianLabel: b.custodianLabel as string | undefined, occurredAt,
+      idempotencyKey, createdBy: session.userId });
     return Response.json({ movement }, { status: 201 });
   } catch (e) {
     if (e instanceof MaterialError) return Response.json({ error: e.message }, { status: 400 });
