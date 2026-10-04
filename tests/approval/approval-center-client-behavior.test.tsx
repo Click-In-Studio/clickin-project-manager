@@ -2,7 +2,7 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalCenterItem, ApprovalCenterPage } from "@/lib/approval/approval-center-types";
 
 import ApprovalCenterClient from "@/components/approval/ApprovalCenterClient";
@@ -78,6 +78,13 @@ async function changeSelect(select: HTMLSelectElement, value: string) {
   });
 }
 
+beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn(),
+  });
+});
+
 beforeEach(async () => {
   pendingRequests.length = 0;
   fetchMock.mockReset();
@@ -99,6 +106,32 @@ afterEach(async () => {
 });
 
 describe("审批中心筛选状态", () => {
+  it("手机筛选继续使用视口内的自定义下拉菜单", async () => {
+    const queueNav = container.querySelector<HTMLElement>('nav[aria-label="选择审批队列"]');
+    await act(async () => { queueNav?.querySelector<HTMLButtonElement>("button")?.click(); });
+
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 319 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 600 });
+    const timeTriggers = container.querySelectorAll<HTMLButtonElement>('[role="combobox"][aria-label="时间筛选"]');
+    const trigger = timeTriggers.item(timeTriggers.length - 1);
+    Object.defineProperty(trigger, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 12, right: 96, top: 120, bottom: 148, width: 84, height: 28, x: 12, y: 120, toJSON: () => ({}) }),
+    });
+
+    await act(async () => { trigger.click(); });
+    const menu = document.body.querySelector<HTMLElement>('[data-overflow-safe-select-menu][aria-label="时间筛选"]');
+    expect(menu).not.toBeNull();
+    expect(Number.parseFloat(menu!.style.left)).toBeGreaterThanOrEqual(10);
+    expect(Number.parseFloat(menu!.style.left) + Number.parseFloat(menu!.style.width)).toBeLessThanOrEqual(309);
+
+    const option = Array.from(menu!.querySelectorAll<HTMLButtonElement>('[role="option"]'))
+      .find(button => button.textContent?.includes("近 7 天"));
+    await act(async () => { option?.click(); });
+    expect(document.body.querySelector('[data-overflow-safe-select-menu][aria-label="时间筛选"]')).toBeNull();
+    expect(trigger.parentElement?.querySelector("select")?.value).toBe("7d");
+  });
+
   it("各队列使用自己的默认排序并保留各自的手动选择", async () => {
     expect(pendingRequests[0].url).toContain("view=pending");
     expect(pendingRequests[0].url).toContain("sort=oldest");
