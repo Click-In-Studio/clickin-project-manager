@@ -3,7 +3,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 
 const css = readFileSync("components/admin/admin-announcements.module.css", "utf8");
-const acceptanceWidths = [319, 385, 768, 1200] as const;
+const browserCss = css.replace(/:global\(([^)]+)\)/g, "$1");
+const wikiMarkdownSource = readFileSync("components/wiki/WikiMarkdown.tsx", "utf8");
+const acceptanceWidths = [319, 370, 651, 768, 1200] as const;
 
 let browser: Browser;
 let page: Page;
@@ -26,7 +28,9 @@ async function mountWorkspace(width: number) {
       .topbar { height: 64px; flex: 0 0 64px; }
       .shellWorkspace { min-height: 0; flex: 1; overflow: auto; }
       .bottomNav { height: 60px; flex: 0 0 60px; border-top: 1px solid var(--line); }
-      ${css}
+      .prose { font-size: 16px; line-height: 1.75; }
+      .prose p { margin-block: 1.25em; }
+      ${browserCss}
     </style>
     <div class="shell">
       <header class="topbar">配置中心</header>
@@ -53,8 +57,12 @@ async function mountWorkspace(width: number) {
                   <div class="detailActions"><button>置顶</button><button>编辑</button><button>删除</button></div>
                 </div>
                 <h2 class="detailTitle">技术合成与全体演员联合走台确认</h2>
-                ${Array.from({ length: 18 }, () => "<p>请各部门确认当日安排，并在进场前完成所需准备。</p>").join("")}
-                <div class="detailEnd">阅读状态</div>
+                <div class="detailDivider"></div>
+                <div class="prose detailBody">
+                  <p class="longChinese">请各部门确认技术合成当日安排并在进场前完成服装道具灯光音响及舞台机械所需准备所有成员到场后按照舞台监督通知依次完成联合走台</p>
+                  ${Array.from({ length: 17 }, () => "<p>请各部门确认当日安排，并在进场前完成所需准备。</p>").join("")}
+                </div>
+                <div class="readStatus"><div class="detailEnd">阅读状态</div></div>
               </div>
             </div>
           </section>
@@ -77,6 +85,11 @@ afterAll(async () => {
 // 这里只验证 CSS 在真实 Chrome 中的几何表现；真实组件与这些 CSS Module
 // class 的接线由 admin-announcements-form-saving.test.tsx 挂载组件后直接断言。
 describe("公告管理响应式 CSS 浏览器几何", () => {
+  it("真实 WikiMarkdown 会把公告正文样式类传到根节点", () => {
+    expect(wikiMarkdownSource).toContain('`prose prose-zinc max-w-none ${className}`');
+    expect(wikiMarkdownSource).toContain("<Wrapper className={wrapperClass}>");
+  });
+
   for (const width of acceptanceWidths) {
     it(`${width}px 下列表、选中态、日期和详情保持可读且不横向溢出`, async () => {
       await mountWorkspace(width);
@@ -115,9 +128,64 @@ describe("公告管理响应式 CSS 浏览器几何", () => {
       expect(metrics.listTitleWhiteSpace).toBe("nowrap");
       expect(metrics.listTitleHeight).toBeLessThan(24);
       expect(metrics.detailTitleWritingMode).toBe("horizontal-tb");
-      expect(metrics.detailTitleWidth).toBeGreaterThan(width <= 385 ? 240 : 300);
-      expect(metrics.detailWidth).toBeGreaterThan(width <= 385 ? 260 : 350);
+      expect(metrics.detailTitleWidth).toBeGreaterThan(width <= 370 ? 240 : 300);
+      expect(metrics.detailWidth).toBeGreaterThan(width <= 370 ? 260 : 350);
       expect(metrics.detailOverflowY).toBe(width <= 767 ? "visible" : "auto");
+    });
+  }
+
+  for (const width of acceptanceWidths) {
+    it(`${width}px 下详情正文行高、区块间距与中文换行符合断点要求`, async () => {
+      await mountWorkspace(width);
+      const metrics = await page.locator(".detailContent").evaluate(content => {
+        const meta = content.querySelector<HTMLElement>(".detailMeta")!;
+        const title = content.querySelector<HTMLElement>(".detailTitle")!;
+        const divider = content.querySelector<HTMLElement>(".detailDivider")!;
+        const body = content.querySelector<HTMLElement>(".detailBody")!;
+        const first = body.querySelector<HTMLElement>(".longChinese")!;
+        const second = first.nextElementSibling as HTMLElement;
+        const readStatus = content.querySelector<HTMLElement>(".readStatus")!;
+        const bodyStyle = getComputedStyle(body);
+        const firstStyle = getComputedStyle(first);
+        const contentBounds = content.getBoundingClientRect();
+        const firstBounds = first.getBoundingClientRect();
+        const secondBounds = second.getBoundingClientRect();
+        return {
+          metaMarginBottom: Number.parseFloat(getComputedStyle(meta).marginBottom),
+          titleMarginBottom: Number.parseFloat(getComputedStyle(title).marginBottom),
+          dividerMarginBottom: Number.parseFloat(getComputedStyle(divider).marginBottom),
+          bodyLineHeight: Number.parseFloat(bodyStyle.lineHeight),
+          paragraphMarginTop: Number.parseFloat(firstStyle.marginTop),
+          paragraphMarginBottom: Number.parseFloat(firstStyle.marginBottom),
+          readStatusMarginTop: Number.parseFloat(getComputedStyle(readStatus).marginTop),
+          readStatusPaddingTop: Number.parseFloat(getComputedStyle(readStatus).paddingTop),
+          firstLineCount: firstBounds.height / Number.parseFloat(firstStyle.lineHeight),
+          firstBottom: firstBounds.bottom,
+          secondTop: secondBounds.top,
+          contentLeft: contentBounds.left,
+          contentRight: contentBounds.right,
+          firstLeft: firstBounds.left,
+          firstRight: firstBounds.right,
+          bodyScrollWidth: body.scrollWidth,
+          bodyClientWidth: body.clientWidth,
+        };
+      });
+
+      const narrow = width <= 767;
+      expect(metrics.metaMarginBottom).toBeCloseTo(narrow ? 20 * 5 / 6 : 20, 1);
+      expect(metrics.titleMarginBottom).toBeCloseTo(narrow ? 20 * 5 / 6 : 20, 1);
+      expect(metrics.dividerMarginBottom).toBeCloseTo(narrow ? 22 * 5 / 6 : 22, 1);
+      expect(metrics.bodyLineHeight).toBeCloseTo(16 * (narrow ? 1.75 * 7 / 8 : 1.75), 1);
+      expect(metrics.paragraphMarginTop).toBeCloseTo(16 * (narrow ? 1.25 * 5 / 6 : 1.25), 1);
+      expect(metrics.paragraphMarginBottom).toBeCloseTo(16 * (narrow ? 1.25 * 5 / 6 : 1.25), 1);
+      expect(metrics.readStatusMarginTop).toBeCloseTo(narrow ? 32 * 5 / 6 : 32, 1);
+      expect(metrics.readStatusPaddingTop).toBeCloseTo(narrow ? 20 * 5 / 6 : 20, 1);
+      expect(metrics.firstLineCount).toBeGreaterThan(1.9);
+      expect(metrics.secondTop).toBeGreaterThanOrEqual(metrics.firstBottom);
+      expect(metrics.firstLeft).toBeGreaterThanOrEqual(metrics.contentLeft);
+      expect(metrics.firstRight).toBeLessThanOrEqual(metrics.contentRight + 0.5);
+      expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.bodyClientWidth);
+      if (narrow) expect(metrics.firstLeft).toBeGreaterThanOrEqual(10);
     });
   }
 
