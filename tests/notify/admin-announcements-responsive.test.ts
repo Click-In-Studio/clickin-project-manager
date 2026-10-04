@@ -4,6 +4,7 @@ import { chromium, type Browser, type Page } from "playwright";
 
 const css = readFileSync("components/admin/admin-announcements.module.css", "utf8");
 const browserCss = css.replace(/:global\(([^)]+)\)/g, "$1");
+const wikiMarkdownSource = readFileSync("components/wiki/WikiMarkdown.tsx", "utf8");
 const acceptanceWidths = [319, 370, 651, 768, 1200] as const;
 
 let browser: Browser;
@@ -84,6 +85,11 @@ afterAll(async () => {
 // 这里只验证 CSS 在真实 Chrome 中的几何表现；真实组件与这些 CSS Module
 // class 的接线由 admin-announcements-form-saving.test.tsx 挂载组件后直接断言。
 describe("公告管理响应式 CSS 浏览器几何", () => {
+  it("真实 WikiMarkdown 会把公告正文样式类传到根节点", () => {
+    expect(wikiMarkdownSource).toContain('`prose prose-zinc max-w-none ${className}`');
+    expect(wikiMarkdownSource).toContain("<Wrapper className={wrapperClass}>");
+  });
+
   for (const width of acceptanceWidths) {
     it(`${width}px 下列表、选中态、日期和详情保持可读且不横向溢出`, async () => {
       await mountWorkspace(width);
