@@ -51,7 +51,7 @@ async function mountMilestones(width: number) {
             <div class="milestoneCopy">
               <div class="titleLine">
                 <span class="currentLabel">当前</span>
-                <span class="milestoneName" title="这是一个非常非常长且需要明确截断的里程碑名称">这是一个非常非常长且需要明确截断的里程碑名称</span>
+                <span class="milestoneName" title="milestone-name-that-is-intentionally-long-enough-to-overflow-at-every-tested-font-width">milestone-name-that-is-intentionally-long-enough-to-overflow-at-every-tested-font-width</span>
               </div>
               <div class="metaLine">
                 <span class="milestoneDate">2026 年 10 月 24 日</span>
