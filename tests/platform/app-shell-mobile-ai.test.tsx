@@ -193,7 +193,93 @@ describe("手机导航入口完整性", () => {
     const links = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"));
     expect(links.find((link) => link.textContent?.includes("本页帮助"))?.getAttribute("href")).toBe("/help/start/interface/navigation");
     expect(links.find((link) => link.textContent?.includes("使用手册"))?.getAttribute("href")).toBe("/help");
-    expect(links.find((link) => link.textContent?.includes("更新日志"))?.getAttribute("href")).toBe("/help/changelog");
+    const changelogLink = links.find((link) => link.textContent?.includes("更新日志"));
+    expect(changelogLink?.getAttribute("href")).toBe("/help/changelog");
+    expect(changelogLink?.textContent).toContain("新");
+    expect(changelogLink?.querySelector('svg[data-me-menu-icon="changelog"]')).toBeTruthy();
     expect(buttonWithText(container, "报告问题")).toBeTruthy();
+  });
+
+  it("我抽屉的入口使用统一语义图标，不回退成单字占位符", () => {
+    navigation.pathname = "/production/pro1";
+    act(() => root.render(
+      <AppShell session={session} productions={productions}>
+        <div>正文</div>
+      </AppShell>,
+    ));
+
+    act(() => buttonWithText(mobileNav(), "我").click());
+
+    const icons = Array.from(container.querySelectorAll<SVGElement>("svg[data-me-menu-icon]"));
+    expect(icons.map((icon) => icon.getAttribute("data-me-menu-icon"))).toEqual([
+      "profile",
+      "security",
+      "preferences",
+      "help",
+      "manual",
+      "changelog",
+      "report",
+      "admin",
+    ]);
+    for (const icon of icons) {
+      expect(icon.getAttribute("viewBox")).toBe("0 0 24 24");
+      expect(icon.getAttribute("stroke-width")).toBe("1.7");
+      expect(icon.getAttribute("stroke-linecap")).toBe("round");
+      expect(icon.getAttribute("stroke-linejoin")).toBe("round");
+    }
+
+    const iconBoxes = icons.map((icon) => icon.parentElement?.textContent?.trim());
+    expect(iconBoxes).toEqual(Array(8).fill(""));
+  });
+
+  it.each([319, 370])("%dpx 宽度下保留全部入口、提示和固定图标盒", (width) => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+    navigation.pathname = "/production/pro1";
+    act(() => root.render(
+      <AppShell session={session} productions={productions}>
+        <div>正文</div>
+      </AppShell>,
+    ));
+
+    act(() => buttonWithText(mobileNav(), "我").click());
+
+    const drawer = container.querySelector<HTMLElement>(".app-shell-bottom-drawer")!;
+    expect(drawer).toBeTruthy();
+    expect(drawer.querySelectorAll("svg[data-me-menu-icon]")).toHaveLength(8);
+    expect(drawer.querySelectorAll(".h-\\[27px\\].w-\\[27px\\]")).toHaveLength(8);
+    for (const hint of [
+      "头像 · 姓名 · 简介",
+      "登录方式 · 绑定身份",
+      "通知 · 消息提醒",
+      "查看当前页面的操作说明",
+      "浏览全部功能说明",
+      "查看最近的功能变化",
+      "反馈异常或使用疑问",
+      "专业档项目",
+    ]) {
+      expect(drawer.textContent).toContain(hint);
+    }
+  });
+
+  it("桌面头像下拉仍保留原有入口与文字", () => {
+    navigation.pathname = "/production/pro1";
+    act(() => root.render(
+      <AppShell
+        session={session}
+        productions={productions}
+        helpRoutes={{ "": "start/interface/navigation" }}
+        latestChangelogVersion="v0.1.1"
+      >
+        <div>正文</div>
+      </AppShell>,
+    ));
+
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="个人中心"]')!.click());
+
+    const labels = ["个人信息", "账号安全中心", "功能与设置", "本页帮助", "使用手册", "更新日志", "报告问题", "配置中心"];
+    for (const label of labels) {
+      expect(container.textContent).toContain(label);
+    }
+    expect(container.querySelector("svg[data-me-menu-icon]")).toBeNull();
   });
 });

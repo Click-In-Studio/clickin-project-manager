@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import BugReportModal from "@/components/help/BugReportModal";
 import BottomDrawer from "./BottomDrawer";
 import NavItem from "./NavItem";
 import UserAvatarContent from "./UserAvatarContent";
 import { helpHrefFor } from "./help-link";
+import MeMenuIcon from "./MeMenuIcon";
 
 export default function MobileMeDrawer({
   open,
@@ -63,7 +64,7 @@ export default function MobileMeDrawer({
           <div className="flex flex-col gap-0.5 px-3.5 pt-1">
             <NavItem
               href={accountHref("profile")}
-              symbol="人"
+              symbol={<MeMenuIcon name="profile" />}
               label="个人信息"
               hint="头像 · 姓名 · 简介"
               active={pathname === "/account" && accountTab !== "security" && accountTab !== "preferences"}
@@ -71,7 +72,7 @@ export default function MobileMeDrawer({
             />
             <NavItem
               href={accountHref("security")}
-              symbol="盾"
+              symbol={<MeMenuIcon name="security" />}
               label="账号安全中心"
               hint="登录方式 · 绑定身份"
               active={pathname === "/account" && accountTab === "security"}
@@ -83,7 +84,7 @@ export default function MobileMeDrawer({
           <div className="flex flex-col gap-0.5 px-3.5">
             <NavItem
               href={accountHref("preferences")}
-              symbol="调"
+              symbol={<MeMenuIcon name="preferences" />}
               label="功能与设置"
               hint="通知 · 消息提醒"
               active={pathname === "/account" && accountTab === "preferences"}
@@ -93,27 +94,54 @@ export default function MobileMeDrawer({
 
           <DrawerDivider />
           <div className="flex flex-col gap-0.5 px-3.5">
-            <NavItem href={helpHref} symbol="?" label="本页帮助" hint="查看当前页面的操作说明" active={false} onClick={onClose} />
-            <NavItem href="/help" symbol="册" label="使用手册" hint="浏览全部功能说明" active={pathname === "/help"} onClick={onClose} />
+            <NavItem
+              href={helpHref}
+              symbol={<MeMenuIcon name="help" />}
+              label="本页帮助"
+              hint="查看当前页面的操作说明"
+              active={false}
+              onClick={onClose}
+            />
+            <NavItem
+              href="/help"
+              symbol={<MeMenuIcon name="manual" />}
+              label="使用手册"
+              hint="浏览全部功能说明"
+              active={pathname === "/help"}
+              onClick={onClose}
+            />
             <NavItem
               href="/help/changelog"
-              symbol={changelogNew ? "新" : "志"}
+              symbol={<MeMenuIcon name="changelog" />}
               label="更新日志"
               hint={changelogNew ? "有新版本内容可查看" : "查看最近的功能变化"}
               active={pathname === "/help/changelog"}
+              statusBadge={changelogNew ? "新" : undefined}
               onClick={() => {
                 onClose();
                 if (latestChangelogVersion) onChangelogSeen();
               }}
             />
-            <DrawerActionItem symbol="报" label="报告问题" hint="反馈异常或使用疑问" onClick={closeAndReport} />
+            <DrawerActionItem
+              symbol={<MeMenuIcon name="report" />}
+              label="报告问题"
+              hint="反馈异常或使用疑问"
+              onClick={closeAndReport}
+            />
           </div>
 
           {adminHref && (
             <>
               <DrawerDivider />
               <div className="flex flex-col gap-0.5 px-3.5">
-                <NavItem href={adminHref} symbol="⚙" label="配置中心" hint={adminName ?? "项目设置"} active={adminActive} onClick={onClose} />
+                <NavItem
+                  href={adminHref}
+                  symbol={<MeMenuIcon name="admin" />}
+                  label="配置中心"
+                  hint={adminName ?? "项目设置"}
+                  active={adminActive}
+                  onClick={onClose}
+                />
               </div>
             </>
           )}
@@ -139,7 +167,7 @@ function DrawerDivider() {
 }
 
 function DrawerActionItem({ symbol, label, hint, onClick }: {
-  symbol: string;
+  symbol: ReactNode;
   label: string;
   hint: string;
   onClick: () => void;
