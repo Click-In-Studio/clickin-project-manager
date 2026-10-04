@@ -28,8 +28,25 @@ export type GrantVerb = "view" | "create" | "edit" | "delete";
 // 海量 blocks，安全隐患大）→ 保留段，'*' 通配不覆盖、必须显式授予（批E2 用户定谳）
 export const RESERVED_SUBS: readonly string[] = ["grants", "publication", "assignees", "imports"];
 
+/**
+ * 仅在指定资源类型内保留的子面。
+ *
+ * 这些名字不能塞进 RESERVED_SUBS：例如未来别的资源也可能有 identifiers，不能因为
+ * material 的码治理而让全库同名子面都失去通配语义。#822 的三个物料治理面必须显式
+ * 授权，普通 material/* 与 node:* 通配都不穿透。
+ */
+export const RESERVED_SUBS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
+  material: ["stock/adjustments", "stock/exits", "identifiers"],
+};
+
 export function isReservedSub(sub: string): boolean {
   return RESERVED_SUBS.some((r) => sub === r || sub.startsWith(`${r}/`));
+}
+
+export function isReservedNode(resourceType: string, sub: string): boolean {
+  if (isReservedSub(sub)) return true;
+  return (RESERVED_SUBS_BY_TYPE[resourceType] ?? [])
+    .some((r) => sub === r || sub.startsWith(`${r}/`));
 }
 
 /**
@@ -47,7 +64,7 @@ export async function hasGrant(
   resourceSub: string,
   verb: GrantVerb,
 ): Promise<boolean> {
-  const subMatch = isReservedSub(resourceSub)
+  const subMatch = isReservedNode(resourceType, resourceSub)
     ? "rg.resource_sub = $5"
     : "rg.resource_sub IN ($5, '*')";
   const { rows } = await getPool().query<{ ok: boolean }>(
@@ -113,18 +130,19 @@ export async function hasAnyGrant(
   subs: readonly string[],
   verb: GrantVerb,
 ): Promise<boolean> {
+  const wildcardMayMatch = subs.some((sub) => !isReservedNode(resourceType, sub));
   const { rows } = await getPool().query<{ ok: boolean }>(
     `SELECT EXISTS (
        SELECT 1 FROM production_member_grant rg
        WHERE rg.production_id = $1
          AND rg.user_id = $2
          AND rg.resource_type = $3
-         AND rg.resource_sub = ANY($4)
+         AND (rg.resource_sub = ANY($4) OR ($6 AND rg.resource_sub = '*'))
          AND rg.permission_level = $5
          AND NOT rg.is_revoked
          AND (rg.expires_at IS NULL OR rg.expires_at > NOW())
      ) AS ok`,
-    [productionId, userId, resourceType, [...subs, "*"], verb],
+    [productionId, userId, resourceType, subs, verb, wildcardMayMatch],
   );
   return rows[0]?.ok ?? false;
 }
@@ -142,7 +160,7 @@ export async function listGrantedResourceIds(
   verb: GrantVerb,
   includeIdsWithWildcard = false,
 ): Promise<{ wildcard: boolean; ids: string[] }> {
-  const subMatch = isReservedSub(resourceSub)
+  const subMatch = isReservedNode(resourceType, resourceSub)
     ? "resource_sub = $4"
     : "resource_sub IN ($4, '*')";
   const { rows } = await getPool().query<{ resource_id: string }>(

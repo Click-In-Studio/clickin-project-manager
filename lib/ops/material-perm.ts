@@ -1,55 +1,121 @@
-/**
- * 物料的写权限判定——**单一入口**。
- *
- * ## 为什么不是一句 hasEffectiveGrant
- *
- * 物料的实例门原本只认 `material/<id>@edit`，那是个域级钥匙：给了某个部门，
- * 他就能改别人部门的服装。而「有的道具组统管、有的各部门自管自的」
- * （lib/production/templates/shared.ts 里 MATERIAL_ADMIN 的注释）——两种剧组用同一把钥匙
- * 表达不了。结果是这把钥匙谁都不敢发，物料台账等于只有制作人能写。
- *
- * 所以补一条上下文判定：**责任方的 POC 可以管自己那一摊**。
- * production_material 的 (department_id, group_id) 与 task 是同一对字段，
- * 直接复用 lib/ops/task-poc.ts 的 TaskSubject / isSubjectPoc——不新增概念。
- *
- * 于是两种剧组都表达得了：
- *   - 各部门自管：不发任何键，各 POC 天然管自己的
- *   - 道具组统管：单独给那个部门 MATERIAL_ADMIN
- *
- * ## 收敛
- *
- * 三个写点（POST / PATCH / DELETE）一律走这里，不再各写各的 hasEffectiveGrant。
- * tests/ops/material-ledger.test.ts 有棘轮盯着——绕过去的写法会红。
- */
+/** #822：物料事实写门的单一入口。关系授权不落 grant，治理动作只认显式键。 */
 
-import { hasEffectiveGrant } from "../perm/grant-check";
-import { isSubjectPoc, taskSubjectOf, type TaskSubject } from "./task-poc";
+import { hasEffectiveGrant, type GrantActor } from "../perm/grant-check";
+import { MATERIAL_PERMISSION_NODES, type MaterialPermissionName } from "./material-permission-types";
+import { getMaterialSubjectRelation } from "./material-perm-db";
+import { taskSubjectOf, type TaskSubject } from "./task-poc";
 
-type Actor = { userId: string; isAdmin: boolean; isOwner: boolean };
+type MaterialRef = {
+  id: string;
+  departmentId: string | null;
+  groupId: string | null;
+};
 
-/** 建物料：持域级 create，或**是你要挂的那个责任方的 POC**。 */
-export async function canCreateMaterial(
-  actor: Actor, productionId: string, subject: TaskSubject | null,
+async function hasMaterialPermission(
+  actor: GrantActor,
+  productionId: string,
+  materialId: string,
+  permission: MaterialPermissionName,
 ): Promise<boolean> {
-  if (await hasEffectiveGrant(actor, productionId, "material", "*", "*", "create")) return true;
-  // 无责任方的物料属于台账公共部分，只有域级 create 能建——否则任何 POC 都能
-  // 往公共区里塞东西，而谁都不负责
-  return subject ? isSubjectPoc(productionId, subject, actor.userId) : false;
+  const node = MATERIAL_PERMISSION_NODES[permission];
+  return hasEffectiveGrant(actor, productionId, "material", materialId, node.sub, node.verb);
 }
 
-/**
- * 改 / 删既有物料：持该实例的 edit/delete，或是**它当前责任方**的 POC。
- *
- * 用当前责任方而非改后的：换责任方等于把东西交出去，交出去这个动作得由现在的
- * 持有方发起。至于接收方是否愿意接——那是流程问题，不是权限问题。
- */
-export async function canWriteMaterial(
-  actor: Actor,
+async function canManageDaily(
+  actor: GrantActor,
   productionId: string,
-  material: { id: string; departmentId: string | null; groupId: string | null },
+  material: MaterialRef,
+  permission: "receipt" | "checkoutForOthers" | "returnForOthers" | "maintenance",
+): Promise<boolean> {
+  if (await hasMaterialPermission(actor, productionId, material.id, permission)) return true;
+  return (await getMaterialSubjectRelation(
+    productionId, actor.userId, taskSubjectOf(material),
+  )).member;
+}
+
+/** 建定义：持定义 create，或是候选责任方 POC；无责任方不能走关系旁路。 */
+export async function canCreateMaterial(
+  actor: GrantActor, productionId: string, subject: TaskSubject | null,
+): Promise<boolean> {
+  if (await hasMaterialPermission(actor, productionId, "*", "definitionCreate")) return true;
+  return subject
+    ? (await getMaterialSubjectRelation(productionId, actor.userId, subject)).poc
+    : false;
+}
+
+/** 改删定义：持具体定义键，或是物料当前责任方 POC。 */
+export async function canManageMaterialDefinition(
+  actor: GrantActor,
+  productionId: string,
+  material: MaterialRef,
   verb: "edit" | "delete",
 ): Promise<boolean> {
-  if (await hasEffectiveGrant(actor, productionId, "material", material.id, "*", verb)) return true;
-  const subject = taskSubjectOf(material);
-  return subject ? isSubjectPoc(productionId, subject, actor.userId) : false;
+  const permission = verb === "edit" ? "definitionEdit" : "definitionDelete";
+  if (await hasMaterialPermission(actor, productionId, material.id, permission)) return true;
+  return (await getMaterialSubjectRelation(
+    productionId, actor.userId, taskSubjectOf(material),
+  )).poc;
+}
+
+/** 标识关系影响贴标和寻址，只认显式治理键（owner 旁路由 hasEffectiveGrant 提供）。 */
+export function canManageMaterialIdentifiers(
+  actor: GrantActor, productionId: string, materialId: string,
+): Promise<boolean> {
+  return hasMaterialPermission(actor, productionId, materialId, "identifiers");
+}
+
+export type MaterialMovementGate =
+  | { operation: "receipt" | "cancel" | "repair" }
+  | { operation: "checkout"; custodianUserId: string | null }
+  | { operation: "return"; checkoutCustodianUserId: string | null }
+  | { operation: "maintenance"; checkoutCustodianUserId: string | null }
+  | { operation: "adjustment" }
+  | { operation: "exit"; returnedToSource: boolean }
+  | { operation: "reversal"; original: Exclude<MaterialMovementGate, { operation: "reversal" }> };
+
+/**
+ * 流转事实门：本人签出 / 本人返还 / 在自己保管期间报损不需代办键；
+ * 责任方成员可记本责任方日常事实；调整、永久退出与标识治理不走关系旁路。
+ */
+export async function canRecordMaterialMovement(
+  actor: GrantActor,
+  productionId: string,
+  material: MaterialRef,
+  gate: MaterialMovementGate,
+  allowSelf = true,
+): Promise<boolean> {
+  switch (gate.operation) {
+    case "receipt":
+    case "cancel":
+      return canManageDaily(actor, productionId, material, "receipt");
+    case "checkout":
+      if (allowSelf && gate.custodianUserId === actor.userId) return true;
+      return canManageDaily(actor, productionId, material, "checkoutForOthers");
+    case "return":
+      if (allowSelf && gate.checkoutCustodianUserId === actor.userId) return true;
+      return canManageDaily(actor, productionId, material, "returnForOthers");
+    case "maintenance":
+      if (allowSelf && gate.checkoutCustodianUserId === actor.userId) return true;
+      return canManageDaily(actor, productionId, material, "maintenance");
+    case "repair":
+      return canManageDaily(actor, productionId, material, "maintenance");
+    case "adjustment":
+      return hasMaterialPermission(actor, productionId, material.id, "adjustment");
+    case "exit":
+      if (!await hasMaterialPermission(actor, productionId, material.id, "exit")) return false;
+      return !gate.returnedToSource
+        || canManageMaterialSources(actor, productionId, material);
+    case "reversal":
+      return canRecordMaterialMovement(actor, productionId, material, gate.original, false);
+  }
+}
+
+/** 来源与归还义务：显式来源键，或责任方 POC。 */
+export async function canManageMaterialSources(
+  actor: GrantActor, productionId: string, material: MaterialRef,
+): Promise<boolean> {
+  if (await hasMaterialPermission(actor, productionId, material.id, "sources")) return true;
+  return (await getMaterialSubjectRelation(
+    productionId, actor.userId, taskSubjectOf(material),
+  )).poc;
 }

@@ -69,6 +69,21 @@ describe("物料流转 API", () => {
     expect(await getMaterial(material.id, prodId)).toMatchObject({ inStockQuantity: 4, checkedOutQuantity: 1 });
   });
 
+  it("普通项目成员可登记签出给自己并返还自己的物料", async () => {
+    const { material, lot, ctx, body } = await fixture();
+    const checkout = await POST(req({
+      ...body, custodian: { kind: "user", id: viewerId },
+    }, viewerId), ctx);
+    expect(checkout.status).toBe(201);
+    const movement = (await checkout.json()).movement;
+    const returned = await POST(req({
+      lotId: lot.id, fromBucket: "checked_out", toBucket: "in_stock",
+      quantity: 2, returnOfMovementId: movement.id,
+    }, viewerId), ctx);
+    expect(returned.status).toBe(201);
+    expect(await getMaterial(material.id, prodId)).toMatchObject({ inStockQuantity: 5, checkedOutQuantity: 0 });
+  });
+
   it("租借退还出口同时追加库存退出和来源账本，不会只有库存减少", async () => {
     const { material, lot, ctx } = await fixture(true);
     const response = await POST(req({ lotId: lot.id, fromBucket: "in_stock", toBucket: "exited", quantity: 2,

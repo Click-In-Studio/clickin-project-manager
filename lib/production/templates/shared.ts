@@ -1,3 +1,8 @@
+import {
+  MATERIAL_ADMIN_KEYS,
+  MATERIAL_GOVERNANCE_KEYS,
+} from "../../ops/material-permission-types";
+
 /**
  * 各套项目模版共用的零件。
  *
@@ -11,9 +16,9 @@
  */
 
 /**
- * 制作人的通配全集（批G G-1 终局）：主行 + 四保留段。**每套模版都必须带**——
+ * 制作人的通配全集（批G G-1 终局）：主行 + 全局保留段 + 各域治理保留段。**每套模版都必须带**——
  * 制作人是 M-14(c) 责任链上不可让渡的兜底持有者。
- * 类型通配不穿透治理域（RESERVED_TYPES = production / producer），故它不是治理键。
+ * 类型 / 子面通配不穿透治理域，故治理键必须在这里显式追加。
  */
 export const PRODUCER_KEYS: readonly string[] = [
   "node:*/*@*",
@@ -21,6 +26,7 @@ export const PRODUCER_KEYS: readonly string[] = [
   "node:*/*/grants@*",
   "node:*/*/imports@create",
   "node:*/*/publication@*",
+  ...MATERIAL_GOVERNANCE_KEYS,
 ];
 
 /**
@@ -168,11 +174,8 @@ export const SCRIPT_EDIT: readonly string[] = [
 // 补记（用户组批之后）：物料的写权限**不再只有这一条路**。lib/ops/material-perm.ts
 // 给了「责任方的 POC 管自己那一摊」的上下文判定，于是「各部门自管自的」剧组
 // 什么键都不用发。这组键现在的含义收窄成「**统管**」——道具组替全组管台账时才发。
-export const MATERIAL_ADMIN: readonly string[] = [
-  "node:material/*@create",
-  "node:material/*@edit",
-  "node:material/*@delete",
-];
+export const MATERIAL_ADMIN: readonly string[] = MATERIAL_ADMIN_KEYS;
+export const MATERIAL_GOVERNANCE: readonly string[] = MATERIAL_GOVERNANCE_KEYS;
 
 /** 通告与制作节点的管理（制作助理 / 制片 / 宣发一类的统筹位）。 */
 export const SCHEDULE_ADMIN: readonly string[] = [

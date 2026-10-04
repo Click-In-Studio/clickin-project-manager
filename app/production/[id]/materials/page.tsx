@@ -7,6 +7,7 @@ import { getProductionPermissionContext } from "@/lib/perm/permission-context-db
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { listMaterials } from "@/lib/ops/material-db";
 import responsive from "@/components/ops/responsive.module.css";
+import PageActivationGate from "@/components/perm/PageActivationGate";
 
 export const metadata: Metadata = { title: "实体物料" };
 
@@ -41,6 +42,7 @@ export default async function MaterialsPage({ params }: { params: Promise<{ id: 
 
   return (
     <div style={{ padding: PAD, minHeight: "100vh", background: "var(--paper)" }}>
+      <PageActivationGate productionId={id} scope="materials" />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
         <p style={{ margin: 0, color: "var(--muted)", fontSize: 12 }}>道具 · 服装 · 设备</p>
       </div>

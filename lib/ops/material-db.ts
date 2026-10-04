@@ -901,6 +901,18 @@ export async function listMaterialStockMovements(
   return rows.map(rowToMovement);
 }
 
+/** 权限门读取一条已存在流水；同时钉住 production 与 lot，防止跨项目引用。 */
+export async function getMaterialStockMovement(
+  movementId: string, lotId: string, productionId: string,
+): Promise<MaterialStockMovement | null> {
+  const { rows } = await getPool().query<MovementRow>(
+    `SELECT * FROM production_material_stock_movement
+      WHERE id=$1 AND lot_id=$2 AND production_id=$3`,
+    [movementId, lotId, productionId],
+  );
+  return rows[0] ? rowToMovement(rows[0]) : null;
+}
+
 /** 原始签出及其有效返还；纠错流水会从对应数量中抵消。 */
 export async function listMaterialCheckouts(
   materialId: string | null, productionId: string, use?: { eventId?: string; taskId?: string },

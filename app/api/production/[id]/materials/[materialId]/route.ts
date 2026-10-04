@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { toActor } from "@/lib/perm/grant-check";
-import { canWriteMaterial } from "@/lib/ops/material-perm";
+import { canManageMaterialDefinition } from "@/lib/ops/material-perm";
 import { resolveSubjectPatch } from "@/lib/ops/task-poc";
 import { deleteMaterial, getMaterial, MaterialError, updateMaterial } from "@/lib/ops/material-db";
 import { readJsonObject } from "@/lib/request-json";
@@ -19,7 +19,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const existing = await getMaterial(materialId, productionId);
   if (!existing) return Response.json({ error: "物料不存在" }, { status: 404 });
-  if (!await canWriteMaterial(toActor(session, access.permCtx), productionId, existing, "edit"))
+  if (!await canManageMaterialDefinition(toActor(session, access.permCtx), productionId, existing, "edit"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   const parsedBody = await readJsonObject(req);
@@ -63,7 +63,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
 
   const existing = await getMaterial(materialId, productionId);
   if (!existing) return Response.json({ error: "物料不存在" }, { status: 404 });
-  if (!await canWriteMaterial(toActor(session, access.permCtx), productionId, existing, "delete"))
+  if (!await canManageMaterialDefinition(toActor(session, access.permCtx), productionId, existing, "delete"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   await deleteMaterial(materialId, productionId);

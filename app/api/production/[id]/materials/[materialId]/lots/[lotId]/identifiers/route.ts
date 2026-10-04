@@ -3,7 +3,7 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getMaterial, listMaterialStockLots } from "@/lib/ops/material-db";
-import { canWriteMaterial } from "@/lib/ops/material-perm";
+import { canManageMaterialIdentifiers } from "@/lib/ops/material-perm";
 import {
   createExternalMaterialIdentifier,
   listMaterialIdentifiers,
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (current.access.isArchived)
     return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   const actor = toActor(current.session, current.access.permCtx);
-  if (!await canWriteMaterial(actor, current.productionId, current.material, "edit"))
+  if (!await canManageMaterialIdentifiers(actor, current.productionId, current.material.id))
     return Response.json({ error: "权限不足" }, { status: 403 });
   const parsed = await readJsonObject(req);
   if (!parsed.ok) return parsed.response;

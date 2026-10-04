@@ -3,7 +3,7 @@ import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { getMaterial } from "@/lib/ops/material-db";
-import { canWriteMaterial } from "@/lib/ops/material-perm";
+import { canManageMaterialIdentifiers } from "@/lib/ops/material-perm";
 import { resolveMaterialIdentifierByToken } from "@/lib/ops/material-identifier-db";
 
 type Ctx = { params: Promise<{ token: string }> };
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "扫码动作无效" }, { status: 400 });
   const permitted = action === "manage"
     ? !access.isArchived
-      && await canWriteMaterial(actor, result.identifier.productionId, material, "edit")
+      && await canManageMaterialIdentifiers(actor, result.identifier.productionId, material.id)
     : await hasEffectiveGrant(
         actor, result.identifier.productionId, "material", "*", "*", "view",
       );

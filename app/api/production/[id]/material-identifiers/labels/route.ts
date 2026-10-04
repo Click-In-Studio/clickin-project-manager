@@ -14,7 +14,7 @@ import {
   type MaterialLabelSize,
   type MaterialLabelSymbology,
 } from "@/lib/ops/material-label";
-import { canWriteMaterial } from "@/lib/ops/material-perm";
+import { canManageMaterialIdentifiers } from "@/lib/ops/material-perm";
 import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (!resolved || resolved.identifier.kind !== "internal_code")
       return Response.json({ identifierId, error: "内部码不存在" }, { status: 404 });
     const material = await getMaterial(resolved.identifier.materialId, productionId);
-    if (!material || !await canWriteMaterial(actor, productionId, material, "edit"))
+    if (!material || !await canManageMaterialIdentifiers(actor, productionId, material.id))
       return Response.json({ identifierId, error: "权限不足" }, { status: 403 });
     if (resolved.status !== "valid")
       return Response.json({ identifierId, status: resolved.status, error: resolved.status === "inactive" ? "该码已失效" : "对应实物或批次已不可用" }, { status: 409 });

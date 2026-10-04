@@ -35,7 +35,7 @@
 - **`session.isAdmin` / `permCtx.isAdmin` 恒 false，是死字段**：新门不得依赖它；「平台级特权」先问。`memberPermissions === null` 判空放在 owner 旁路之后（owner 可不是成员）。
 - **模版 ≠ 保证**：不因某键在模版里就跳过判定。**回填只放不收**：模版新增的键补给存量、裁剪的不回收；回填的是区间，键必须同时在 `PAGE_PERMISSION_SCOPES`。收紧裸门先问「存量项目谁还有资格路径」。
 - 前端写面开关与判定端**逐键同源**（粗门只配开外壳）；门票键进 `PAGE_PERMISSION_SCOPES.base`、写面键进页面 scope；任何客户端改权限动作后 `router.refresh()`。
-- 保留段 `grants / publication / assignees / imports` 与保留类型 `production / producer` 不被 `*` 覆盖。结构性可见（挂载让渡、引用边）永不物化 grant 行；语境不是权限；策略开关不得否决已有行。
+- 全局保留段 `grants / publication / assignees / imports`、类型内保留段（`RESERVED_SUBS_BY_TYPE`）与保留类型 `production / producer` 不被 `*` 覆盖。结构性可见（挂载让渡、引用边）永不物化 grant 行；语境不是权限；策略开关不得否决已有行。
 - asset 与 wiki 同形：枚举只露标题，公开 / 部门 / 个人 / 可见宿主挂载授预览；挂载不授枚举、下载或管理。个人档位是预览 < 下载 < 管理；对外链接查看/撤销属管理，创建另需 `shares@create` 与项目出口策略。
 - `ROLE_NAMES` 是默认模版不是白名单：在用的自定义角色不默认删。
 - 自动授权写点（业务触发的 grant 发行 / 收回）新增或修改，PR 描述里单独列出。

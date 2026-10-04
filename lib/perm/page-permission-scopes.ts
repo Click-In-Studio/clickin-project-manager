@@ -1,3 +1,5 @@
+import { MATERIAL_PERMISSION_KEYS } from "../ops/material-permission-types";
+
 type Permission = string;
 
 /**
@@ -93,6 +95,8 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:finance/*/expenses@create",
     "node:finance/*/settlement@edit",
   ]),
+
+  materials: new Set<Permission>(Object.values(MATERIAL_PERMISSION_KEYS)),
 
   // 批E-2：剧本页写面。blocks 写是一把总钥匙（requiredPermissions 对 insert /
   // update / delete 统一给 blocks@edit）；标签组的 picker 也在剧本页内。
