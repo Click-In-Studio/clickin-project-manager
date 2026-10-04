@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import PageHeader, { SECONDARY_BTN } from "@/components/ui/PageHeader";
+import { SECONDARY_BTN } from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import { BASE_PATH } from "@/lib/base-path";
 import type { PrivateAssetRow } from "@/lib/asset/review-db";
@@ -10,7 +10,6 @@ import styles from "./admin-asset-review.module.css";
 
 type Props = {
   productionId: string;
-  productionName: string;
   initialAssets: PrivateAssetRow[];
   canEdit: boolean;
 };
@@ -25,7 +24,7 @@ function fmtDate(iso: string) {
   return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-export default function AdminAssetReviewClient({ productionId, productionName, initialAssets, canEdit }: Props) {
+export default function AdminAssetReviewClient({ productionId, initialAssets, canEdit }: Props) {
   const [assets, setAssets] = useState<PrivateAssetRow[]>(initialAssets);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -70,8 +69,6 @@ export default function AdminAssetReviewClient({ productionId, productionName, i
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader eyebrow={productionName} title="数字资产审查" side="stage" />
-
       <AdminMetricGrid
         columns={3}
         items={[

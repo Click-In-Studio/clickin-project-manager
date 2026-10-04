@@ -4,7 +4,6 @@ export const metadata: Metadata = { title: "里程碑" };
 
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
-import { getProductionName } from "@/lib/production/production-db";
 import { listMilestones } from "@/lib/ops/milestone-db";
 import { getSession } from "@/lib/account/session";
 import { cookies } from "next/headers";
@@ -17,9 +16,8 @@ export default async function MilestonesPage({ params }: { params: Promise<{ id:
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
 
-  const [milestones, name, access] = await Promise.all([
+  const [milestones, access] = await Promise.all([
     listMilestones(id),
-    getProductionName(id),
     session
       ? getProductionPermissionContext(session.userId, session.isAdmin, id)
       : Promise.resolve(null),
@@ -30,7 +28,6 @@ export default async function MilestonesPage({ params }: { params: Promise<{ id:
   return (
     <AdminMilestonesClient
       productionId={id}
-      productionName={name ?? ""}
       initialMilestones={milestones.map(m => ({
         id: m.id,
         name: m.name,

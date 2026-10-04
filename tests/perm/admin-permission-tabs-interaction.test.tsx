@@ -34,7 +34,6 @@ async function mount() {
     root.render(
       <AdminPermissionCenterClient
         productionId="prod-tabs"
-        productionName="测试项目"
         depts={[]}
         initialDeptRows={{}}
         initialRoles={[]}

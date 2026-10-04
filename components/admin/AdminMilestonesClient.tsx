@@ -1,6 +1,5 @@
 "use client";
 
-import PageHeader from "@/components/ui/PageHeader";
 import styles from "./admin-milestones.module.css";
 
 import { useState, useCallback } from "react";
@@ -14,7 +13,6 @@ type Milestone = {
 };
 
 type Props = {
-  productionName: string;
   productionId: string;
   initialMilestones: Milestone[];
   canCreate: boolean;
@@ -33,7 +31,7 @@ function daysDiff(endDate: string, today: string): number {
   return Math.ceil((end.getTime() - now.getTime()) / 86400000);
 }
 
-export default function AdminMilestonesClient({ productionId, productionName, initialMilestones, canCreate, canManage, canDelete }: Props) {
+export default function AdminMilestonesClient({ productionId, initialMilestones, canCreate, canManage, canDelete }: Props) {
   const today = new Date().toISOString().slice(0, 10);
   const [milestones, setMilestones] = useState<Milestone[]>(initialMilestones);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -208,8 +206,6 @@ export default function AdminMilestonesClient({ productionId, productionName, in
   return (
     <div className={styles.page}>
       <div className={styles.pageContent}>
-        <PageHeader eyebrow={productionName} title="里程碑" side="stage" />
-
         {/* Add form */}
         {canCreate && (
           <div className={styles.addCard}>

@@ -11,7 +11,6 @@ import { getPool } from "@/lib/pg";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getProductionName } from "@/lib/production/production-db";
 import { listProductionMembersWithRoles } from "@/lib/perm/member-db";
-import PageHeader from "@/components/ui/PageHeader";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import TransferOwnerCard from "@/components/admin/TransferOwnerCard";
 import AdminDangerSection from "@/components/admin/AdminDangerSection";
@@ -52,7 +51,6 @@ export default async function DangerPage({ params }: { params: Promise<{ id: str
         <span aria-hidden="true">←</span>
         返回项目
       </Link>
-      <PageHeader eyebrow={name ?? ""} title="危险操作" side="stage" />
       {canTransfer && (
         <TransferOwnerCard
           productionId={id}

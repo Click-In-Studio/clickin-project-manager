@@ -51,7 +51,6 @@ async function mountNewForm() {
     root.render(
       <AdminAnnouncementsClient
         productionId="prod_test"
-        productionName="测试演出"
         recent30Count={0}
         initialAnnouncements={[]}
         canCreate
@@ -91,7 +90,6 @@ async function mountExistingAnnouncements() {
     root.render(
       <AdminAnnouncementsClient
         productionId="prod_test"
-        productionName="测试演出"
         recent30Count={2}
         initialAnnouncements={announcements}
         canCreate
