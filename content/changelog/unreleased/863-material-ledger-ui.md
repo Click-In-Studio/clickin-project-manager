@@ -2,7 +2,7 @@
 kind: new
 title: 物料台账支持日常登记和扫码操作
 page: production/materials/materials
-pr: 310
+pr: 863
 order: 3
 ---
 
