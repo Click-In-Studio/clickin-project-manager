@@ -60,4 +60,34 @@ describe("个人中心窄屏布局", () => {
     const accountMobile = between(css, "@media (max-width: 820px)");
     expect(accountMobile).not.toMatch(/font-size:\s*(?:[0-9]|1[0-5])px[^;]*;\s*\n?[^}]*\b(?:input|textarea|select)\b/);
   });
+
+  it("319px 的资料占位文字与主要通道保持 13px，显示名使用通用文案", () => {
+    expect(client).toContain('placeholder="请输入显示名"');
+    expect(client).not.toContain('placeholder="如：林淼 · 舞监"');
+
+    const baseControl = between(css, ".formGrid input,", ".formGrid input:focus");
+    expect(baseControl).toMatch(/font-size:\s*13px;/);
+    const phone = between(css, "@media (max-width: 580px)", "@media (max-width: 360px)");
+    expect(phone).toMatch(/\.compactField input::placeholder,[\s\S]*?\.compactField textarea::placeholder\s*{[^}]*font-size:\s*13px;/);
+  });
+
+  it("邮箱占位文字与身份标题同为 13px，两类身份使用同尺寸模版色图标", () => {
+    expect(client).toContain('<IdentityIcon platformId="feishu" />');
+    expect(client).toContain('<IdentityIcon platformId="email" />');
+    expect(client).not.toContain('<span className={styles.rowIcon}>书</span>');
+    expect(client).not.toContain('<span className={styles.rowIcon}>邮</span>');
+
+    expect(css).toMatch(/\.row > \.rowInfo b\s*{[^}]*font-size:\s*13px;/);
+    expect(css).toMatch(/\.bindInput::placeholder\s*{[^}]*font-size:\s*13px;/);
+    expect(css).toMatch(/\.identityGlyph\s*{[^}]*width:\s*21px;[^}]*height:\s*21px;[^}]*fill:\s*currentColor;/);
+    expect(css).toMatch(/\.rowIcon\s*{[^}]*background:\s*var\(--script-soft\);[^}]*color:\s*var\(--script\);/);
+  });
+
+  it("用可收缩列与断行规则守住从 319px 到桌面的横向布局", () => {
+    expect(css).toMatch(/\.layout\s*{[^}]*width:\s*min\(1160px, calc\(100% - 48px\)\);/);
+    expect(css).toMatch(/\.main\s*{[^}]*min-width:\s*0;/);
+    expect(css).toMatch(/\.profileNameField,[\s\S]*?\.compactField\s*{[^}]*min-width:\s*0;/);
+    expect(css).toMatch(/\.bindForm\s*{[^}]*min-width:\s*0;/);
+    expect(css).toMatch(/\.row > \.rowInfo span\s*{[^}]*overflow-wrap:\s*anywhere;/);
+  });
 });

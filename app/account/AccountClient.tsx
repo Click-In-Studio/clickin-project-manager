@@ -60,11 +60,6 @@ const PLATFORM_LABEL: Record<string, string> = {
   email: "邮箱",
 };
 
-const PLATFORM_ICON: Record<string, string> = {
-  feishu: "书",
-  email: "邮",
-};
-
 const PAGE_META: Record<Page, { eyebrow: string; title: string; description: string }> = {
   profile: { eyebrow: "ACCOUNT", title: "个人信息", description: "管理你的基础资料，以及在项目协作中向其他成员展示的信息。" },
   security: { eyebrow: "SECURITY", title: "账号安全中心", description: "管理登录账号的邮箱、飞书等身份，以及账号安全设置。" },
@@ -73,6 +68,27 @@ const PAGE_META: Record<Page, { eyebrow: string; title: string; description: str
 
 function initial(name: string) {
   return name.trim().charAt(0) || "?";
+}
+
+function IdentityIcon({ platformId }: { platformId: string }) {
+  if (platformId === "feishu") {
+    return (
+      <svg className={styles.identityGlyph} viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M11.2 11.1C8.8 7.9 5.7 6.2 2.8 6.4c.6 3.8 2.9 6.4 7.2 7.7l1.2-3Z" />
+        <path d="M12.8 11.1c2.4-3.2 5.5-4.9 8.4-4.7-.6 3.8-2.9 6.4-7.2 7.7l-1.2-3Z" />
+        <path d="M12 10.4 9.7 15l2.3 3.2 2.3-3.2-2.3-4.6Z" />
+      </svg>
+    );
+  }
+  if (platformId === "email") {
+    return (
+      <svg className={styles.identityGlyph} viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
+        <path d="m4.5 7 7.5 5.7L19.5 7" />
+      </svg>
+    );
+  }
+  return <span className={styles.identityFallback}>{platformId.slice(0, 1)}</span>;
 }
 
 
@@ -531,7 +547,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                         type="text"
                         value={displayName}
                         onChange={e => setDisplayName(e.target.value)}
-                        placeholder="如：林淼 · 舞监"
+                        placeholder="请输入显示名"
                       />
                     </label>
                     <label className={`${styles.fullField} ${styles.compactField}`}>
@@ -711,7 +727,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                 {identities.filter(id => id.platformId !== "email").map(id => (
                   <div key={id.id} className={styles.row}>
                     <span className={styles.rowIcon}>
-                      {PLATFORM_ICON[id.platformId] ?? id.platformId.slice(0, 1)}
+                      <IdentityIcon platformId={id.platformId} />
                     </span>
                     <div className={styles.rowInfo}>
                       <b>{PLATFORM_LABEL[id.platformId] ?? id.platformId}</b>
@@ -726,7 +742,9 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
 
                 {!hasFeishu && (
                   <div className={styles.row}>
-                    <span className={styles.rowIcon}>书</span>
+                    <span className={styles.rowIcon}>
+                      <IdentityIcon platformId="feishu" />
+                    </span>
                     <div className={styles.rowInfo}>
                       <b>飞书</b>
                       <span>绑定后可使用飞书账号登录</span>
@@ -739,7 +757,9 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
 
                 {emailIdentities.map(em => (
                   <div key={em.id} className={styles.row}>
-                    <span className={styles.rowIcon}>邮</span>
+                    <span className={styles.rowIcon}>
+                      <IdentityIcon platformId="email" />
+                    </span>
                     <div className={styles.rowInfo}>
                       <b>
                         邮箱
@@ -765,7 +785,9 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                 ))}
 
                 <div className={`${styles.row} ${styles.bindRow}`}>
-                  <span className={styles.rowIcon}>+</span>
+                  <span className={styles.rowIcon}>
+                    <IdentityIcon platformId="email" />
+                  </span>
                   <div className={styles.rowInfo}>
                     <b>{hasEmail ? "绑定新邮箱" : "邮箱"}</b>
                     <span>{hasEmail ? "可绑定多个邮箱，均可用于登录" : "绑定后可使用邮箱验证码登录"}</span>

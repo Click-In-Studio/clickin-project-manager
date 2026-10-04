@@ -7,7 +7,7 @@ who: 每个人自己
 tier: all
 platform: [desktop, mobile]
 related: [production/contacts/roster, start/notifications/notifications]
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 ## 这是什么
@@ -25,7 +25,7 @@ updated: 2026-10-03
 改完「保存更改」。
 
 > [!📱]
-> 手机上头像与更换按钮会排在同一行，资料输入区会改为单列；三个页签会始终同时显示，不需要左右滑动。
+> 手机上头像与更换按钮会排在同一行，资料输入区会改为单列；字段提示文字会保持清晰一致，三个页签会始终同时显示，不需要左右滑动。
 
 ## 注意事项
 
