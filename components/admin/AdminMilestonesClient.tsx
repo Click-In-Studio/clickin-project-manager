@@ -1,6 +1,7 @@
 "use client";
 
 import PageHeader from "@/components/ui/PageHeader";
+import styles from "./admin-milestones.module.css";
 
 import { useState, useCallback } from "react";
 import { BASE_PATH } from "@/lib/base-path";
@@ -110,65 +111,61 @@ export default function AdminMilestonesClient({ productionId, productionName, in
     return (
       <div
         key={m.id}
+        className={styles.milestoneRow}
         style={{
-          display: "flex", flexDirection: "column", gap: 0,
-          padding: "14px 16px",
-          borderRadius: 10,
           border: isCurrent
             ? "1.5px solid var(--ink)"
             : isPast ? "1px solid var(--line)" : "1px solid var(--line)",
           background: isCurrent ? "var(--ink)" : "var(--surface)",
           opacity: isPast ? 0.65 : 1,
-          transition: "box-shadow .15s",
         }}
       >
         {isEditing ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className={styles.editForm}>
             <input
+              className={`${styles.input} ${styles.editNameInput}`}
               value={editName}
               onChange={e => setEditName(e.target.value)}
               autoFocus
               onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") cancelEdit(); }}
-              style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", background: "var(--paper)", border: "1px solid var(--ink)", borderRadius: 6, padding: "6px 10px", outline: "none" }}
             />
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div className={styles.editFooter}>
               <input
+                className={`${styles.input} ${styles.editDateInput}`}
                 type="date"
                 value={editDate}
                 onChange={e => setEditDate(e.target.value)}
-                style={{ fontSize: 13, color: "var(--ink)", background: "var(--paper)", border: "1px solid var(--line)", borderRadius: 6, padding: "5px 10px", outline: "none" }}
               />
-              <div style={{ flex: 1 }} />
-              <button onClick={cancelEdit} style={{ fontSize: 12, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: "4px 8px" }}>取消</button>
+              <div className={styles.editSpacer} />
+              <button className={styles.cancelButton} onClick={cancelEdit}>取消</button>
               <button
+                className={styles.saveButton}
                 onClick={saveEdit}
                 disabled={!editName.trim() || !editDate || saving}
-                style={{ fontSize: 12, fontWeight: 600, color: "white", background: "var(--ink)", border: "none", borderRadius: 6, cursor: "pointer", padding: "5px 12px" }}
               >
                 {saving ? "保存中…" : "保存"}
               </button>
             </div>
           </div>
         ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+          <div className={styles.displayRow}>
+            <div className={styles.milestoneCopy}>
+              <div className={styles.titleLine}>
                 {isCurrent && (
-                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: "rgba(255,255,255,.7)", textTransform: "uppercase" }}>
+                  <span className={styles.currentLabel}>
                     当前
                   </span>
                 )}
-                <span style={{ fontSize: 14, fontWeight: 600, color: isCurrent ? "white" : "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span className={styles.milestoneName} style={{ color: isCurrent ? "white" : "var(--ink)" }} title={m.name}>
                   {m.name}
                 </span>
               </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: isCurrent ? "rgba(255,255,255,.6)" : "var(--muted)" }}>
+              <div className={styles.metaLine}>
+                <span className={styles.milestoneDate} style={{ color: isCurrent ? "rgba(255,255,255,.6)" : "var(--muted)" }}>
                   {formatDate(m.endDate)}
                 </span>
                 {!isPast && (
-                  <span style={{
-                    fontSize: 11, fontWeight: 600,
+                  <span className={styles.countdown} style={{
                     color: isCurrent
                       ? (diff <= 7 ? "#fbbf24" : "rgba(255,255,255,.55)")
                       : (diff <= 7 ? "var(--danger)" : "var(--muted)"),
@@ -178,11 +175,12 @@ export default function AdminMilestonesClient({ productionId, productionName, in
                 )}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+            <div className={styles.rowActions}>
               {canManage && (
                 <button
+                  className={styles.rowAction}
                   onClick={() => startEdit(m)}
-                  style={{ fontSize: 12, color: isCurrent ? "rgba(255,255,255,.7)" : "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: "4px 8px", borderRadius: 5 }}
+                  style={{ color: isCurrent ? "rgba(255,255,255,.7)" : "var(--muted)" }}
                   title="编辑"
                 >
                   编辑
@@ -190,8 +188,9 @@ export default function AdminMilestonesClient({ productionId, productionName, in
               )}
               {canDelete && (
                 <button
+                  className={`${styles.rowAction} ${styles.deleteAction}`}
                   onClick={() => deleteMilestone(m.id, m.name)}
-                  style={{ fontSize: 12, color: isCurrent ? "rgba(255,255,255,.5)" : "var(--danger)40", background: "none", border: "none", cursor: "pointer", padding: "4px 8px", borderRadius: 5 }}
+                  style={{ color: isCurrent ? "rgba(255,255,255,.5)" : "var(--danger)40" }}
                   title="删除"
                   onMouseEnter={e => (e.currentTarget.style.color = "var(--danger)")}
                   onMouseLeave={e => (e.currentTarget.style.color = isCurrent ? "rgba(255,255,255,.5)" : "var(--danger)40")}
@@ -207,47 +206,47 @@ export default function AdminMilestonesClient({ productionId, productionName, in
   };
 
   return (
-    <div style={{ overflowY: "auto", background: "var(--paper)", minHeight: "100%" }}>
-      <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px" }}>
+    <div className={styles.page}>
+      <div className={styles.pageContent}>
         <PageHeader eyebrow={productionName} title="里程碑" side="stage" />
 
         {/* Add form */}
         {canCreate && (
-          <div style={{ background: "var(--surface)", borderRadius: 13, border: "1px solid var(--line)", padding: 22, marginBottom: 18 }}>
-            <p style={{ margin: "0 0 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)" }}>New Milestone</p>
-            <h2 style={{ margin: "0 0 14px", fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 17, fontWeight: 500, color: "var(--ink)" }}>新增里程碑</h2>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div className={styles.addCard}>
+            <p className={styles.eyebrow}>New Milestone</p>
+            <h2 className={styles.addTitle}>新增里程碑</h2>
+            <div className={styles.addFields}>
               <input
+                className={`${styles.input} ${styles.newNameInput}`}
                 value={newName}
                 onChange={e => { setNewName(e.target.value); setAddError(null); }}
                 onKeyDown={e => { if (e.key === "Enter") addMilestone(); }}
                 placeholder="里程碑名称，例如「首演」「联排开始」"
-                style={{ flex: 1, minWidth: 160, fontSize: 13, color: "var(--ink)", background: "var(--paper)", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", outline: "none" }}
                 onFocus={e => { e.currentTarget.style.borderColor = "var(--ink)"; }}
                 onBlur={e => { e.currentTarget.style.borderColor = "var(--line)"; }}
               />
               <input
+                className={`${styles.input} ${styles.newDateInput}`}
                 type="date"
                 value={newDate}
                 onChange={e => { setNewDate(e.target.value); setAddError(null); }}
-                style={{ fontSize: 13, color: "var(--ink)", background: "var(--paper)", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", outline: "none" }}
                 onFocus={e => { e.currentTarget.style.borderColor = "var(--ink)"; }}
                 onBlur={e => { e.currentTarget.style.borderColor = "var(--line)"; }}
               />
               <button
+                className={styles.addButton}
                 onClick={addMilestone}
                 disabled={!newName.trim() || !newDate || adding}
                 style={{
-                  flexShrink: 0, fontSize: 13, fontWeight: 600, padding: "8px 16px", borderRadius: 8, border: "none",
                   background: newName.trim() && newDate ? "var(--ink)" : "var(--line)",
                   color: newName.trim() && newDate ? "white" : "var(--muted)",
-                  cursor: newName.trim() && newDate ? "pointer" : "default", transition: "all .15s",
+                  cursor: newName.trim() && newDate ? "pointer" : "default",
                 }}
               >
                 {adding ? "添加中…" : "添加"}
               </button>
             </div>
-            {addError && <p style={{ fontSize: 12, color: "var(--danger)", marginTop: 8 }}>{addError}</p>}
+            {addError && <p className={styles.addError}>{addError}</p>}
           </div>
         )}
 

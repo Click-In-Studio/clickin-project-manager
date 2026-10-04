@@ -7,7 +7,7 @@ who: 有里程碑管理权限的管理员
 tier: all
 platform: [desktop, mobile]
 related: [production/planning/phases, production/planning/calendar]
-updated: 2026-09-18
+updated: 2026-10-04
 ---
 
 ## 这是什么
@@ -19,6 +19,9 @@ updated: 2026-09-18
 1. 「配置中心 → 里程碑」。
 2. 「新增里程碑」：名称（首演、联排开始）、日期 →「添加」。
 3. 列表分「即将到来」和「已完成」（日期过了自动归到已完成），每条可以「编辑」「删除」。
+
+> [!📱]
+> 在手机上，「编辑」「删除」会紧凑地排在同一行；名称较长时会省略显示。
 
 ## 注意事项
 
