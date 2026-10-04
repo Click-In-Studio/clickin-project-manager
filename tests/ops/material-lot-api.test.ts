@@ -10,6 +10,7 @@ import { addProductionMember } from "@/lib/perm/member-db";
 import { selfConfirmResourceGrant } from "@/lib/perm/resource-grant-db";
 import { appendMaterialStockMovement, createMaterialDefinition, createMaterialStockLots, getMaterialOverview, listMaterialCheckouts, listMaterialStockLots } from "@/lib/ops/material-db";
 import { listMaterialIdentifiers } from "@/lib/ops/material-identifier-db";
+import { listMaterialSourceExceptions } from "@/lib/ops/material-source-db";
 import { getPool } from "@/lib/pg";
 import { cleanupProduction, makeProduction, shortId } from "../_support/factories";
 
@@ -179,6 +180,20 @@ describe("物料批次 API", () => {
   });
 
   it("来源异常路由对未登录、非成员和仅日常维护成员关闭，owner 可登记", async () => {
+    const existing = await createMaterialDefinition({
+      productionId, name: "自有灯具", subject: { kind: "dept", id: departmentId }, createdBy: ownerId,
+    });
+    const [existingLot] = await createMaterialStockLots({
+      productionId, materialId: existing.id, confirmedQuantity: 1, sourceType: "existing",
+      idempotencyKey: `test-existing-lot-${shortId()}`, createdBy: ownerId,
+    });
+    const hiddenSourceStateCtx = {
+      params: Promise.resolve({ id: productionId, materialId: existing.id, lotId: existingLot.id }),
+    };
+    expect((await POST_SOURCE_EXCEPTION(request(memberId, {
+      kind: "lost", quantity: 1, note: "不应先泄露来源状态",
+    }), hiddenSourceStateCtx)).status).toBe(403);
+
     const rented = await createMaterialDefinition({
       productionId, name: "租赁灯具", subject: { kind: "dept", id: departmentId }, createdBy: ownerId,
     });
@@ -193,7 +208,22 @@ describe("物料批次 API", () => {
     expect((await POST_SOURCE_EXCEPTION(exceptionRequest(outsiderId), exceptionCtx)).status).toBe(403);
     expect((await POST_SOURCE_EXCEPTION(exceptionRequest(viewerId), exceptionCtx)).status).toBe(403);
     expect((await POST_SOURCE_EXCEPTION(exceptionRequest(memberId), exceptionCtx)).status).toBe(403);
-    expect((await POST_SOURCE_EXCEPTION(exceptionRequest(ownerId), exceptionCtx)).status).toBe(201);
+    const key = `source-exception-${shortId()}`;
+    const first = await POST_SOURCE_EXCEPTION(request(ownerId, {
+      kind: "lost", quantity: 1, note: "清点少件",
+    }, key), exceptionCtx);
+    expect(first.status).toBe(201);
+    const firstBody = await first.json();
+    const replay = await POST_SOURCE_EXCEPTION(request(ownerId, {
+      kind: "lost", quantity: 1, note: "清点少件",
+    }, key), exceptionCtx);
+    expect(replay.status).toBe(201);
+    expect((await replay.json()).exception.id).toBe(firstBody.exception.id);
+    const conflictingReplay = await POST_SOURCE_EXCEPTION(request(ownerId, {
+      kind: "damaged", quantity: 1, note: "换参数复用同一键",
+    }, key), exceptionCtx);
+    expect(conflictingReplay.status).toBe(400);
+    expect(await listMaterialSourceExceptions(lot.id, productionId)).toHaveLength(1);
   });
 
   it("总览按实物或批次统计五类待办，并为筛选返回物料类型集合", async () => {

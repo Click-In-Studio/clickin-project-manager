@@ -266,12 +266,13 @@ function SourceExceptionDialog({ productionId, detail, onClose, onSaved }: {
   const lots = detail.lots.filter(lot => lot.sourceType === "rented" || lot.sourceType === "borrowed");
   const [lotId, setLotId] = useState(lots[0]?.id ?? ""); const [kind, setKind] = useState("lost");
   const [quantity, setQuantity] = useState("1"); const [note, setNote] = useState("");
+  const [idempotencyKey] = useState(() => `source-exception-${crypto.randomUUID()}`);
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
   async function save() {
     setBusy(true); setError("");
     try {
       const response = await fetch(`/api/production/${productionId}/materials/${detail.material.id}/lots/${lotId}/source-exceptions`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
         body: JSON.stringify({ kind, quantity: Number(quantity), note }),
       });
       const data = await response.json();

@@ -19,23 +19,27 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (access.isArchived) return Response.json({ error: "已归档的项目不可修改" }, { status: 403 });
   const material = await getMaterial(materialId, productionId);
   if (!material) return Response.json({ error: "物料不存在" }, { status: 404 });
+  if (!await canManageMaterialSources(toActor(session, access.permCtx), productionId, material))
+    return Response.json({ error: "权限不足" }, { status: 403 });
   const lot = (await listMaterialStockLots(materialId, productionId)).find(item => item.id === lotId);
   if (!lot) return Response.json({ error: "物料批次不存在" }, { status: 404 });
   if (lot.sourceType !== "rented" && lot.sourceType !== "borrowed")
     return Response.json({ error: "该批次没有对外归还义务" }, { status: 400 });
-  if (!await canManageMaterialSources(toActor(session, access.permCtx), productionId, material))
-    return Response.json({ error: "权限不足" }, { status: 403 });
   const parsed = await readJsonObject(req);
   if (!parsed.ok) return parsed.response;
   const body = parsed.value;
+  const idempotencyKey = req.headers.get("Idempotency-Key")?.trim()
+    || (typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() : "");
   if (!isMaterialSourceExceptionKind(body.kind) || typeof body.quantity !== "number"
       || !Number.isFinite(body.quantity) || body.quantity <= 0
+      || idempotencyKey.length < 8 || idempotencyKey.length > 128
+      || /[\p{Cc}\p{Cf}]/u.test(idempotencyKey)
       || (body.note !== undefined && typeof body.note !== "string"))
     return Response.json({ error: "来源异常参数无效" }, { status: 400 });
   try {
     const exception = await recordMaterialSourceException({
       productionId, lotId, input: { kind: body.kind, quantity: body.quantity, note: body.note },
-      createdBy: session.userId,
+      idempotencyKey, createdBy: session.userId,
     });
     return Response.json({ exception }, { status: 201 });
   } catch (error) {

@@ -122,6 +122,7 @@ async function insertSourceException(
     resolvesExceptionId?: string | null;
     occurredAt: Date;
     createdBy: string;
+    idempotencyKey?: string | null;
   },
 ): Promise<MaterialSourceException> {
   assertExceptionInput(params.input);
@@ -133,14 +134,14 @@ async function insertSourceException(
   }>(
     `INSERT INTO production_material_source_exception
        (id, production_id, lot_id, source_return_id, kind, quantity, note,
-        resolves_exception_id, occurred_at, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        resolves_exception_id, occurred_at, created_by, idempotency_key)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      RETURNING id, production_id, lot_id, source_return_id, kind, quantity::text,
                note, resolves_exception_id, occurred_at, created_by, created_at`,
     [newSourceExceptionId(), params.productionId, params.lotId,
       params.sourceReturnId ?? null, params.input.kind, params.input.quantity,
       params.input.note ?? "", params.resolvesExceptionId ?? null,
-      params.occurredAt, params.createdBy],
+      params.occurredAt, params.createdBy, params.idempotencyKey ?? null],
   );
   const row = rows[0];
   return {
@@ -248,13 +249,50 @@ export async function recordMaterialSourceException(params: {
   lotId: string;
   input: MaterialSourceExceptionInput;
   occurredAt?: Date;
+  idempotencyKey: string;
   createdBy: string;
 }): Promise<MaterialSourceException> {
+  const idempotencyKey = params.idempotencyKey.trim();
+  if (idempotencyKey.length < 8 || idempotencyKey.length > 128
+      || /[\p{Cc}\p{Cf}]/u.test(idempotencyKey))
+    throw new MaterialError("bad_use", "幂等键格式无效");
+  assertExceptionInput(params.input);
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`material-source-exception:${params.productionId}:${params.createdBy}:${idempotencyKey}`],
+    );
+    const replay = await client.query<{
+      id: string; production_id: string; lot_id: string; source_return_id: string | null;
+      kind: MaterialSourceExceptionKind; quantity: string; note: string;
+      resolves_exception_id: string | null; occurred_at: Date; created_by: string; created_at: Date;
+    }>(
+      `SELECT id, production_id, lot_id, source_return_id, kind, quantity::text,
+              note, resolves_exception_id, occurred_at, created_by, created_at
+         FROM production_material_source_exception
+        WHERE production_id=$1 AND created_by=$2 AND idempotency_key=$3`,
+      [params.productionId, params.createdBy, idempotencyKey],
+    );
+    if (replay.rows[0]) {
+      const row = replay.rows[0];
+      if (row.lot_id !== params.lotId || row.source_return_id !== null
+          || row.resolves_exception_id !== null || row.kind !== params.input.kind
+          || Number(row.quantity) !== params.input.quantity
+          || row.note !== (params.input.note ?? ""))
+        throw new MaterialError("bad_use", "该幂等键已用于另一项物料操作");
+      await client.query("COMMIT");
+      return {
+        id: row.id, productionId: row.production_id, lotId: row.lot_id,
+        sourceReturnId: row.source_return_id, kind: row.kind, quantity: Number(row.quantity),
+        note: row.note, resolvesExceptionId: row.resolves_exception_id,
+        isResolved: false, occurredAt: row.occurred_at.toISOString(),
+        createdBy: row.created_by, createdAt: row.created_at.toISOString(),
+      };
+    }
     const result = await insertSourceException(client, {
-      ...params, occurredAt: params.occurredAt ?? new Date(),
+      ...params, idempotencyKey, occurredAt: params.occurredAt ?? new Date(),
     });
     await client.query("COMMIT");
     return result;

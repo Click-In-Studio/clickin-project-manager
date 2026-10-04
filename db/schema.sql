@@ -2063,6 +2063,7 @@ CREATE TABLE IF NOT EXISTS production_material_source_exception (
   note                  TEXT          NOT NULL DEFAULT '',
   resolves_exception_id TEXT          UNIQUE
     REFERENCES production_material_source_exception(id) ON DELETE CASCADE,
+  idempotency_key       TEXT,
   occurred_at           TIMESTAMPTZ   NOT NULL DEFAULT now(),
   created_by            UUID          NOT NULL REFERENCES app_user(id),
   created_at            TIMESTAMPTZ   NOT NULL DEFAULT now(),
@@ -2070,11 +2071,21 @@ CREATE TABLE IF NOT EXISTS production_material_source_exception (
     FOREIGN KEY (lot_id, production_id)
     REFERENCES production_material_stock_lot(id, production_id) ON DELETE RESTRICT,
   CONSTRAINT material_source_exception_not_self
-    CHECK (resolves_exception_id IS NULL OR resolves_exception_id <> id)
+    CHECK (resolves_exception_id IS NULL OR resolves_exception_id <> id),
+  CONSTRAINT material_source_exception_idempotency_key_check CHECK (
+    idempotency_key IS NULL OR (
+      length(idempotency_key) BETWEEN 8 AND 128
+      AND idempotency_key !~ '[[:cntrl:]]'
+    )
+  )
 );
 
 CREATE INDEX IF NOT EXISTS production_material_source_exception_lot_idx
   ON production_material_source_exception (production_id, lot_id, occurred_at, id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS production_material_source_exception_idempotency_unique
+  ON production_material_source_exception (production_id, created_by, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION guard_material_tracking_change() RETURNS trigger
 LANGUAGE plpgsql AS $$

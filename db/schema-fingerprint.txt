@@ -734,6 +734,7 @@ COL|production_material_number_counter|last_value|bigint|int8|NO|
 COL|production_material_number_counter|production_id|text|text|NO|
 COL|production_material_source_exception|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|production_material_source_exception|created_by|uuid|uuid|NO|
+COL|production_material_source_exception|idempotency_key|text|text|YES|
 COL|production_material_source_exception|id|text|text|NO|
 COL|production_material_source_exception|kind|text|text|NO|
 COL|production_material_source_exception|lot_id|text|text|NO|
@@ -1524,6 +1525,7 @@ CON|production_material_identifier|production_material_identifier_token_key|UNIQ
 CON|production_material_number_counter|production_material_number_counter_last_value_check|CHECK ((last_value > 0))
 CON|production_material_number_counter|production_material_number_counter_pkey|PRIMARY KEY (production_id)
 CON|production_material_number_counter|production_material_number_counter_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|production_material_source_exception|material_source_exception_idempotency_key_check|CHECK (((idempotency_key IS NULL) OR (((length(idempotency_key) >= 8) AND (length(idempotency_key) <= 128)) AND (idempotency_key !~ '[[:cntrl:]]'::text))))
 CON|production_material_source_exception|material_source_exception_lot_fk|FOREIGN KEY (lot_id, production_id) REFERENCES production_material_stock_lot(id, production_id) ON DELETE RESTRICT
 CON|production_material_source_exception|material_source_exception_not_self|CHECK (((resolves_exception_id IS NULL) OR (resolves_exception_id <> id)))
 CON|production_material_source_exception|production_material_source_exception_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
@@ -2011,6 +2013,7 @@ IDX|production_material_identifier|production_material_identifie_production_id_n
 IDX|production_material_identifier|production_material_identifier_pkey|CREATE UNIQUE INDEX production_material_identifier_pkey ON public.production_material_identifier USING btree (id)
 IDX|production_material_identifier|production_material_identifier_token_key|CREATE UNIQUE INDEX production_material_identifier_token_key ON public.production_material_identifier USING btree (token)
 IDX|production_material_number_counter|production_material_number_counter_pkey|CREATE UNIQUE INDEX production_material_number_counter_pkey ON public.production_material_number_counter USING btree (production_id)
+IDX|production_material_source_exception|production_material_source_exception_idempotency_unique|CREATE UNIQUE INDEX production_material_source_exception_idempotency_unique ON public.production_material_source_exception USING btree (production_id, created_by, idempotency_key) WHERE (idempotency_key IS NOT NULL)
 IDX|production_material_source_exception|production_material_source_exception_lot_idx|CREATE INDEX production_material_source_exception_lot_idx ON public.production_material_source_exception USING btree (production_id, lot_id, occurred_at, id)
 IDX|production_material_source_exception|production_material_source_exception_pkey|CREATE UNIQUE INDEX production_material_source_exception_pkey ON public.production_material_source_exception USING btree (id)
 IDX|production_material_source_exception|production_material_source_exception_resolves_exception_id_key|CREATE UNIQUE INDEX production_material_source_exception_resolves_exception_id_key ON public.production_material_source_exception USING btree (resolves_exception_id)
