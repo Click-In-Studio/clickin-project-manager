@@ -13,6 +13,7 @@ import { presignedGet } from "@/lib/r2";
 import { getMmpClient } from "./client";
 import { mmpMediaHandle, rememberMmpMediaId } from "./media-cache";
 import { recordMmpUsage } from "./usage-db";
+import { billableMmpCompute, legacyComputeMs } from "./usage";
 
 const RUN_TIMEOUT_MS = 10 * 60_000;
 const POLL_WAIT_SEC = 30;
@@ -23,12 +24,6 @@ export type AuthorizedMmpFile = {
   r2Key: string;
   mimeType: string;
 };
-
-function computeMsOf(timings: Record<string, number> | undefined): number {
-  return Object.entries(timings ?? {})
-    .filter(([key, value]) => !["total", "fetch", "download", "queue", "load"].includes(key) && Number.isFinite(value))
-    .reduce((sum, [, value]) => sum + Math.max(0, value), 0);
-}
 
 function clipped(text: string): string {
   const safe = neutralizeInjectionTags(text.replace(/\u0000/g, "�"));
@@ -94,12 +89,13 @@ export async function runMmpCapability(
     rememberMmpMediaId(args.file.fileId, done.media_id);
     if (!done.cached) {
       const timings = done.timings_ms ?? (done.result as { timings_ms?: Record<string, number> } | undefined)?.timings_ms;
+      const compute = billableMmpCompute(done, () => legacyComputeMs(timings));
       await recordMmpUsage({
         userId: args.userId,
         productionId: args.productionId,
         type: current.id,
-        tier: String(done.source.tier),
-        computeMs: computeMsOf(timings),
+        tier: String(done.usage?.tier ?? done.source.tier),
+        computeMs: compute.ms,
       });
     }
     return renderResult(current, done);

@@ -1,6 +1,6 @@
 // #453 MMP 接入首例：ocr.structured 薄封装 + 计费真值（#618）。
-// 客户端用假 fetch 注入，不打真服务：钉 ①媒体句柄第二次起走 refOr；②计费取 render+ocr，
-// 不含 fetch / 冷启动，缓存命中 0；③缺 timings 按页估算并标记；④shouldFallback 类错误
+// 客户端用假 fetch 注入，不打真服务：钉 ①媒体句柄第二次起走 refOr；②计费只取
+// usage.compute_ms，不叠加 timings / wasted_ms，缓存命中 0；③缺 usage 按页估算并标记；④shouldFallback 类错误
 // → unavailable，bad_request → 非 unavailable；⑤未配置 → unavailable。
 
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
@@ -32,6 +32,7 @@ function doneBody(over: Partial<Record<string, unknown>> = {}) {
       pages: [{ page: 2, tier: "gpu-fast", text: "阿兰：你到底把信藏在哪儿了？", quality: { lines: 1, chars: 13, mean_score: 0.98 }, flags: [] }],
       suggest_upgrade_pages: [],
     },
+    usage: { served_from: "compute", tier: "gpu-fast", engine: "pp-ocrv6", compute_ms: 827, wasted_ms: 1234 },
     timings_ms: { fetch: 5000, render: 15, ocr: 812, total: 44452 },
     ...over,
   };
@@ -64,7 +65,7 @@ describe("ocrPages：媒体句柄与结果", () => {
     expect((calls[1].body?.params as { pages: number[]; lang: string })).toEqual({ pages: [2, 3], lang: "en" });
   });
 
-  it("计费真值 = render + ocr（不含 fetch 与冷启动）；cached → 0", async () => {
+  it("计费真值只取 usage.compute_ms，不叠加 timings 或 wasted_ms；cached → 0", async () => {
     const { client } = fakeClient(() => ({ status: 200, body: doneBody() }));
     const a = await ocrPages({ fileId: "f2", url: "u", pages: [2], tier: "gpu-fast" }, { client });
     expect(a.status === "ok" && a.computeMs).toBe(827);
@@ -76,13 +77,16 @@ describe("ocrPages：媒体句柄与结果", () => {
     expect(b.status === "ok" && b.computeMs).toBe(0);
   });
 
-  it("缺 timings_ms → 按页估算并标记 computeEstimated", async () => {
-    const { client } = fakeClient(() => ({ status: 200, body: doneBody({ timings_ms: undefined }) }));
+  it("缺 usage.compute_ms → 忽略旧 timings 并按页估算，标记 computeEstimated", async () => {
+    const { client } = fakeClient(() => ({ status: 200, body: doneBody({ usage: undefined }) }));
     const a = await ocrPages({ fileId: "f4", url: "u", pages: [2], tier: "gpu" }, { client });
     expect(a.status === "ok" && a.computeEstimated).toBe(true);
     expect(a.status === "ok" && a.computeMs).toBe(6000);
-    expect(billableMsOf({ total: 100 }, "gpu-fast", 3)).toEqual({ ms: 3000, estimated: true });
-    expect(billableMsOf({ render: 10, ocr: 20, fetch: 999 }, "gpu", 3)).toEqual({ ms: 30, estimated: false });
+    expect(billableMsOf({ job_id: "j1", type: "ocr.structured" }, "gpu-fast", 3)).toEqual({ ms: 3000, estimated: true });
+    expect(billableMsOf({
+      job_id: "j2", type: "ocr.structured",
+      usage: { served_from: "compute", tier: "gpu", engine: "ocr", compute_ms: 30, wasted_ms: 999 },
+    }, "gpu", 3)).toEqual({ ms: 30, estimated: false });
   });
 
   it("no_node → unavailable=true；bad_request → unavailable=false；未配置 → unavailable", async () => {

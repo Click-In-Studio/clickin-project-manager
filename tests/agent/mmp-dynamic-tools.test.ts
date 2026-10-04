@@ -5,10 +5,12 @@ import { runMmpCapability, MMP_RESULT_MAX_CHARS } from "@/lib/mmp/capability-run
 import { clearMmpMediaCacheForTests } from "@/lib/mmp/media-cache";
 
 const bridgeMocks = vi.hoisted(() => ({ attachment: vi.fn(), asset: vi.fn() }));
+const usageMocks = vi.hoisted(() => ({ record: vi.fn() }));
 vi.mock("@/lib/agent/tools/mmp-capability-tools", () => ({
   runAttachmentCapability: bridgeMocks.attachment,
   runAssetCapability: bridgeMocks.asset,
 }));
+vi.mock("@/lib/mmp/usage-db", () => ({ recordMmpUsage: usageMocks.record }));
 
 const CAPABILITY: Capability = {
   id: "pitch_transcribe",
@@ -149,6 +151,29 @@ describe("MMP 动态能力执行器", () => {
     expect(jobs[1].media).toMatchObject({
       ref: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       get: { url: expect.stringContaining("files/a.wav") },
+    });
+  });
+
+  it("动态能力记账优先使用 usage 的档位与 compute_ms，不叠加 wasted_ms 或旧 timings", async () => {
+    const client = {
+      capabilities: async () => registry(),
+      run: async () => ({
+        job_id: "n1-usage", type: CAPABILITY.id, status: "done" as const,
+        media_id: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        cached: false,
+        source: { tier: "gpu-fast" as const, engine: "pitch-old", engine_version: "1", generated_at: "2026-10-04T00:00:00Z", degraded: false },
+        usage: { served_from: "compute" as const, tier: "gpu" as const, engine: "pitch", compute_ms: 321, wasted_ms: 654 },
+        timings_ms: { infer: 999, total: 1000 },
+        result: { text: "ok" },
+      }),
+    } as unknown as MmpClient;
+    await runMmpCapability({
+      capability: CAPABILITY,
+      file: { fileId: "f-usage", r2Key: "files/usage.wav", mimeType: "audio/wav" },
+      userId: "u", productionId: null,
+    }, { client });
+    expect(usageMocks.record).toHaveBeenCalledWith({
+      userId: "u", productionId: null, type: CAPABILITY.id, tier: "gpu", computeMs: 321,
     });
   });
 });

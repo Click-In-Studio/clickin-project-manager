@@ -8,13 +8,13 @@
 //   那些页提 `tier: "gpu"`——服务不自动升级，升不升是我们（最终是模型）的决定；
 // - `shouldFallback` 的错误（节点离线 / 超时 / 背压）= 服务不可用，调用方显式标注降级，
 //   不静默吞；其余错误（bad_request / engine_failed）如实报错码；
-// - 计费真值取 `timings_ms` 的推理阶段（render + ocr），不含媒体下载（fetch）、排队与
-//   引擎冷启动（实测首次 total 44s 而 ocr 0.8s）。缺 timings 时按页数估算并标记，
-//   #618 等 MMP 标准化 `compute` 键后切过去。
+// - 计费真值取协议 `usage.compute_ms`，它不含媒体下载、排队与引擎冷启动，也不包含
+//   回落浪费的 `wasted_ms`。旧节点缺 usage 时按页数估算并打日志。
 
 import { MmpError, media, type MmpClient } from "@mmp/client";
 import { getMmpClient } from "./client";
 import { clearMmpMediaCacheForTests, mmpMediaHandle, rememberMmpMediaId } from "./media-cache";
+import { billableMmpCompute } from "./usage";
 
 export type OcrTier = "gpu-fast" | "gpu";
 export type OcrFlag = "low_confidence" | "coverage_anomaly" | "empty";
@@ -43,7 +43,7 @@ export type OcrOutcome =
       engine: string;
       /** 可计费推理毫秒（cached 时为 0）。 */
       computeMs: number;
-      /** timings 缺失、按页估算的（打日志，不该是常态）。 */
+      /** usage.compute_ms 缺失、按页估算的（打日志，不该是常态）。 */
       computeEstimated: boolean;
       mediaId: string;
     }
@@ -58,15 +58,15 @@ export type OcrOutcome =
 /** 冷启动实测 ~40s + 慢档 ~9s/页 × 单次页数上限，4 分钟盖得住；再长就是服务的问题。 */
 const RUN_TIMEOUT_MS = 4 * 60_000;
 const POLL_WAIT_SEC = 30;
-/** 缺 timings 时的估算（#618 首版兜底）：快档 1 s/页、慢档 6 s/页。 */
+/** 旧节点缺 usage.compute_ms 时的估算：快档 1 s/页、慢档 6 s/页。 */
 const ESTIMATE_MS_PER_PAGE: Record<OcrTier, number> = { "gpu-fast": 1000, gpu: 6000 };
 
-/** 可计费推理毫秒：render（PDF 栅格化）+ ocr。键名是引擎私有的，#618 切标准键。 */
-export function billableMsOf(timings: Record<string, number> | undefined, tier: OcrTier, pageCount: number): { ms: number; estimated: boolean } {
-  if (timings && (typeof timings.ocr === "number" || typeof timings.render === "number")) {
-    return { ms: Math.max(0, Math.round((timings.render ?? 0) + (timings.ocr ?? 0))), estimated: false };
-  }
-  return { ms: pageCount * ESTIMATE_MS_PER_PAGE[tier], estimated: true };
+export function billableMsOf(
+  done: Parameters<typeof billableMmpCompute>[0],
+  tier: OcrTier,
+  pageCount: number,
+): { ms: number; estimated: boolean } {
+  return billableMmpCompute(done, () => pageCount * ESTIMATE_MS_PER_PAGE[tier]);
 }
 
 export async function ocrPages(
@@ -96,19 +96,16 @@ export async function ocrPages(
       page_count?: number;
       pages?: OcrPage[];
       suggest_upgrade_pages?: number[];
-      timings_ms?: Record<string, number>;
     };
     const resultPages = Array.isArray(result.pages) ? result.pages : [];
-    const timings = done.timings_ms ?? result.timings_ms;
-    const billable = done.cached ? { ms: 0, estimated: false } : billableMsOf(timings, input.tier, resultPages.length);
-    if (billable.estimated) console.warn(`[mmp] ocr.structured 响应缺 timings_ms，按 ${resultPages.length} 页估算计费（job ${done.job_id}）`);
+    const billable = done.cached ? { ms: 0, estimated: false } : billableMsOf(done, input.tier, resultPages.length);
     return {
       status: "ok",
       pages: resultPages,
       pageCount: typeof result.page_count === "number" ? result.page_count : resultPages.length,
       suggestUpgradePages: Array.isArray(result.suggest_upgrade_pages) ? result.suggest_upgrade_pages : [],
       cached: done.cached,
-      tier: input.tier,
+      tier: (done.usage?.tier === "gpu" || done.usage?.tier === "gpu-fast") ? done.usage.tier : input.tier,
       engine: String((done.source as { engine?: string } | undefined)?.engine ?? ""),
       computeMs: billable.ms,
       computeEstimated: billable.estimated,

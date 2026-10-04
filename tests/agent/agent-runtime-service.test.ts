@@ -207,6 +207,7 @@ describe("agent-runtime service", () => {
       const source = { tier: "cpu", engine: "test", engine_version: "1", generated_at: "2026-09-29T00:00:00Z", degraded: false, params: {} };
       return Response.json({
         job_id: "test-node-1", type: "triage.audio", status: "done", media_id: "sha256:runtime-audio", cached: false, source,
+        usage: { served_from: "compute", tier: "cpu", engine: "test", compute_ms: 12, wasted_ms: 0 },
         timings_ms: { vad: 3, tagging: 4, asr: 5 },
         result: { media_id: "sha256:runtime-audio", kind: "audio", duration_sec: 1, timeline_unit: "sec",
           segments: [{ start: 0, end: 1, label_status: "ok", labels: [{ tag: "Speech", score: 0.9 }], asr: { text: "帮我记下来", lang: "zh", confidence: 0.9 } }],
