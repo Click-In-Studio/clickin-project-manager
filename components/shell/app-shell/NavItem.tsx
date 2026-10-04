@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useContext } from "react";
+import { useEffect, useContext, type ReactNode } from "react";
 import Link, { useLinkStatus } from "next/link";
 import { NavPendingContext } from "./nav-pending";
 
@@ -17,7 +17,7 @@ export default function NavItem({
   side,
 }: {
   href: string;
-  symbol: string;
+  symbol: ReactNode;
   label: string;
   hint: string;
   active: boolean;
@@ -82,7 +82,7 @@ export default function NavItem({
  * NavItem 的符号方块。单独拆出来只为一件事：useLinkStatus 必须在 <Link>
  * 后代里调用。在途时符号换成转圈，并把 href 上报给 NavPendingContext。
  */
-function NavItemSymbol({ href, symbol, side }: { href: string; symbol: string; side?: "script" | "stage" }) {
+function NavItemSymbol({ href, symbol, side }: { href: string; symbol: ReactNode; side?: "script" | "stage" }) {
   const { pending } = useLinkStatus();
   const { report } = useContext(NavPendingContext);
 
