@@ -7,7 +7,7 @@ who: 所有成员（项目会话需要专业档项目）
 tier: all
 platform: [desktop, mobile]
 related: [ai/assistant/what-it-is, ai/skills/skills, ai/automation/schedules]
-updated: 2026-09-29
+updated: 2026-10-04
 ---
 
 ## 这是什么
@@ -18,7 +18,7 @@ updated: 2026-09-29
 
 桌面端按 Enter 发送，Shift+Enter 换行。手机端按 Enter 换行，写好后点「发送」；使用外接键盘时也可以按 ⌘/Ctrl+Enter 发送。
 
-![AI 对话面板](/manual/ai/popout.png)
+![AI 对话内容：宽窗口放在右侧面板，手机占满屏幕](/manual/ai/popout.png)
 
 ## 怎么操作
 
@@ -103,4 +103,4 @@ AI 准备修改剧本或构作内容时，如果你已经有使用某项权限�
 ## 常见问题
 
 **面板里说「AI 网关未连接」？**
-服务那边的问题，等几分钟再试；一直这样就用右上角头像菜单的「报告问题」告诉我们。
+服务那边的问题，等几分钟再试；一直这样，宽窗口用右上角头像菜单的「报告问题」，手机用底部「我 → 报告问题」告诉我们。

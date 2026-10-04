@@ -7,7 +7,7 @@ who: 项目所有者与制作人（专业档项目）
 tier: pro
 platform: [desktop, mobile]
 related: [admin/security/policies, admin/security/templates, admin/approval/access-requests, admin/compliance/audit]
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 ## 这是什么
@@ -24,7 +24,7 @@ Backstage 的权限有几层叠加。一个成员能做某件事，只要下面�
 
 > [!📱] 中等宽度下，顶部摘要按两栏排列；最窄的手机窗口里改为单列。
 
-![权限中心](/manual/admin/permissions.png)
+![宽窗口下的权限中心](/manual/admin/permissions.png)
 
 ## 怎么操作
 

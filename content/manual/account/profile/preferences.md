@@ -7,12 +7,12 @@ who: 每个人自己
 tier: all
 platform: [desktop, mobile]
 related: [start/notifications/notifications, start/join/new-production, ai/quota/quota]
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 ## 这是什么
 
-右上角头像 →「功能与设置」，三个区块：
+宽窗口点右上角头像 →「功能与设置」；手机点底部「我 → 功能与设置」。页面有三个区块：
 
 1. **消息提醒**：每类通知要不要推送到飞书 / 邮件（收件箱始终有）。详见「入门 → 通知提醒」。
 2. **用户等级**：当前等级，和兑换码输入框——等级码升级到「创作者」可以建项目，AI 额度码补充额度。详见「入门 → 新建项目与档位」。

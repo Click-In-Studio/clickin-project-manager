@@ -7,16 +7,16 @@ who: 所有成员可读已发布的报告；草稿只有编辑者可见
 tier: all
 platform: [desktop, mobile]
 related: [production/events/event-reports, start/notifications/notifications]
-updated: 2026-09-27
+updated: 2026-10-04
 ---
 
 ## 这是什么
 
-报告是在事件里写的（见「事件报告」），「制作 → 报告」把一个项目的全部报告汇总；左侧栏项目外的「报告」则汇总你所有项目的。
+报告是在事件里写的（见「事件报告」）。项目内的「制作 → 报告」汇总这个项目的全部报告；项目外的「报告」汇总你所有项目的。手机上分别从底部「制作 → 报告」和「概览 → 报告」进入。
 
 页面左边是列表，右边是选中报告的内容。顶部四个数字：全部报告、已发布、草稿、提到我。
 
-![报告汇总](/manual/production/reports.png)
+![宽窗口下的报告汇总](/manual/production/reports.png)
 
 ## 怎么操作
 

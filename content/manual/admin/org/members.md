@@ -7,7 +7,7 @@ who: 有成员管理权限的管理员
 tier: all
 platform: [desktop, mobile]
 related: [admin/org/invite, admin/org/departments, start/join/leave-project]
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 ## 这是什么
@@ -16,7 +16,7 @@ updated: 2026-10-03
 
 电脑端左侧按部门列出所有成员，点一个人后在右侧查看详情。手机端先显示成员列表，点成员进入详情；点顶部的「返回成员列表」继续选择其他人。
 
-![成员与部门](/manual/admin/organization.png)
+![宽窗口下的成员与部门](/manual/admin/organization.png)
 
 ## 怎么操作
 

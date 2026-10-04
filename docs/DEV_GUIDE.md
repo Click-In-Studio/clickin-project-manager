@@ -931,7 +931,7 @@ updated: 2026-09-18               # 必填 YYYY-MM-DD
 
 ### 12.4 覆盖棘轮（`tests/help/manual-coverage.test.ts`）
 
-- nav-config 里每个入口必须映射到一篇手册页（`routes`），否则要列进 `MISSING_ALLOWED`。名单**只减不增**：往侧栏加新功能 = 同 PR 补手册页；内容 issue 合并时把对应路由从名单划掉；已有页的路由留在名单里会红。
+- nav-config 里每个入口必须直接映射到一篇手册页（`routes`）；不留缺页白名单。往导航加新功能时，同一 PR 补手册页。
 - `routes` 只能写已知路由（导航口径或测试里的 `EXTRA_ROUTES`）。
 - `related`、`_home.md`、正文互链必须指向存在的页；图片必须在 `public/manual/`。
 

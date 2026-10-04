@@ -7,7 +7,7 @@ who: 项目所有者与制作人
 tier: all
 platform: [desktop, mobile]
 related: [creation/cues/cue-lists, admin/security/permission-center]
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 ## 这是什么
@@ -19,7 +19,7 @@ Cue 表按**类型**分（灯光 LQ、追光 FQ、音效 SQ、音乐 MQ、多媒
 
 用「声明行」表达：一行 = 部门 × 模版类型 + 可建与否 + 一组权限键。每张同类型的 Cue 表创建时，这些键自动实例化成那张表的部门权限。
 
-![权限模版](/manual/admin/templates.png)
+![宽窗口下的权限模版](/manual/admin/templates.png)
 
 ## 怎么操作
 

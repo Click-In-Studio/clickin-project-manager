@@ -7,16 +7,16 @@ who: 所有成员可看名册；联系方式单独授权
 tier: all
 platform: [desktop, mobile]
 related: [start/join/join-project, start/interface/glossary]
-updated: 2026-10-02
+updated: 2026-10-04
 ---
 
 ## 这是什么
 
-「制作 → 人员」是这个项目的名册：每人一张卡，写着姓名、职位（灯光主管、制作统筹、乐手……）和管理员打的标签（正式、实习、外请……）。
+「制作 → 人员」是这个项目的名册：宽窗口从左侧栏进入，手机点底部「制作 → 人员」。每人一张卡，写着姓名、职位（灯光主管、制作统筹、乐手……）和管理员打的标签（正式、实习、外请……）。
 
 这里是**看**的地方。加人、分部门、改职位都在「配置中心 → 成员与部门」，由管理员操作。
 
-![人员名册](/manual/production/contacts.png)
+![宽窗口下的人员名册](/manual/production/contacts.png)
 
 ## 怎么操作
 

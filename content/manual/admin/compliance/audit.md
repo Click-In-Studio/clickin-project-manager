@@ -7,7 +7,7 @@ who: 项目所有者与制作人
 tier: all
 platform: [desktop, mobile]
 related: [admin/security/permission-center, admin/approval/access-requests]
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 ## 这是什么
@@ -22,7 +22,7 @@ updated: 2026-10-03
 | 指派 | 因为被指派了任务 / 事件而带来的 |
 | 系统 / 自动 / 迁移 | 系统生成、自动派发、历史数据迁入 |
 
-![权限审计](/manual/admin/audit.png)
+![宽窗口下的权限审计](/manual/admin/audit.png)
 
 ## 怎么操作
 
