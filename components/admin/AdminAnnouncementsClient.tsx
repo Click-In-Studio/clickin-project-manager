@@ -330,6 +330,7 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
       {/* ── 摘要 ── */}
       <AdminMetricGrid
         columns={3}
+        responsive="compactThree"
         items={[
           { value: String(announcements.length), label: "全部公告", hint: "本项目累计" },
           { value: String(announcements.filter(a => a.isPinned).length), label: "置顶", hint: "重点公告" },

@@ -60,6 +60,25 @@
   font-size: 9px;
 }
 
+.compactThree .copy,
+.compactThree .label,
+.compactThree .hint {
+  overflow: visible;
+}
+
+.compactThree .label,
+.compactThree .hint {
+  text-overflow: clip;
+}
+
+.compactThree .label {
+  font-size: 12px;
+}
+
+.compactThree .hint {
+  font-size: 10px;
+}
+
 .policyTabs {
   width: min(360px, 100%);
   margin-bottom: 14px;
@@ -82,6 +101,27 @@
   .permission {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .seatPriority {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .seatPriority .card:first-child {
+    min-height: 76px;
+    padding: 10px 12px;
+    grid-column: 1 / -1;
+  }
+
+  .seatPriority .card:first-child .value,
+  .seatPriority .card:first-child .label,
+  .seatPriority .card:first-child .hint {
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .allOrStacked {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 480px) {
@@ -100,6 +140,22 @@
 
   .overview .value {
     font-size: 25px;
+  }
+
+  .compactThree .card {
+    min-height: 76px;
+    padding: 8px 5px;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: center;
+    gap: 4px;
+  }
+
+  .compactThree .value {
+    font-size: 24px;
+  }
+
+  .compactThree .hint {
+    margin-top: 1px;
   }
 
   .policyTabs {

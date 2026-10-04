@@ -273,6 +273,7 @@ export default function AdminOrganizationClient({
       {/* 摘要 */}
       <AdminMetricGrid
         columns={4}
+        responsive="seatPriority"
         items={[
           {
             value: `${seats.used} / ${seats.limit}`,

@@ -156,7 +156,7 @@ describe("AdminAnnouncementsClient — 响应式改造后的交互回归", () =>
   it("真实组件接入共享指标与公告响应式结构", async () => {
     await mountExistingAnnouncements();
 
-    expect(container.querySelector('[data-admin-metric-grid="standard"]')).toBeTruthy();
+    expect(container.querySelector('[data-admin-metric-grid="compactThree"]')).toBeTruthy();
     expect(container.querySelector(`.${announcementStyles.workspace}`)).toBeTruthy();
     expect(container.querySelector(`.${announcementStyles.listPane}`)).toBeTruthy();
     expect(container.querySelector(`.${announcementStyles.detailPane}`)).toBeTruthy();
