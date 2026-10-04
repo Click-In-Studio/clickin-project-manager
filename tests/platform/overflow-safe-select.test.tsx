@@ -83,6 +83,25 @@ describe("OverflowSafeSelect", () => {
     expect(trigger.getAttribute("style")).toBeNull();
   });
 
+  it("allows a caller to scope menu and option layout without changing shared defaults", async () => {
+    await render(
+      <OverflowSafeSelect
+        aria-label="币种"
+        menuClassName="finance-currency-menu"
+        optionClassName="finance-currency-option"
+        value="cny"
+        onChange={() => {}}
+      >
+        <option value="cny">人民币（CNY）</option>
+      </OverflowSafeSelect>,
+    );
+
+    await openMenu();
+    const menu = document.body.querySelector<HTMLElement>("[data-overflow-safe-select-menu]")!;
+    expect(menu.className).toBe("finance-currency-menu");
+    expect(menu.querySelector<HTMLElement>('[role="option"]')?.className).toBe("finance-currency-option");
+  });
+
   // 原生 <select> 是 inline-block 收缩到内容；写死 width:100% 会让横排 flex 里的
   // 下拉撑满整行，flex-wrap 容器里更会独占一行（筛选条会从一行炸成四行）。
   it("does not force a width on callers that did not ask for one", async () => {

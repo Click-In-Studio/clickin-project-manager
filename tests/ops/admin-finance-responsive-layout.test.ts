@@ -4,7 +4,7 @@ import { chromium, type Browser, type Page } from "playwright";
 
 const component = readFileSync("components/admin/AdminFinanceClient.tsx", "utf8");
 const css = readFileSync("components/admin/admin-finance.module.css", "utf8");
-const acceptanceWidths = [319, 385, 768, 1280] as const;
+const acceptanceWidths = [319, 370, 680, 768, 1280] as const;
 
 let browser: Browser;
 let page: Page;
@@ -35,7 +35,16 @@ async function mountFinanceSettings(width: number) {
     </style>
     <main class="page">
       <header data-page-header>项目名称<br><strong>财务设置</strong></header>
-      <section class="currencyCard">项目记账本位币</section>
+      <nav class="tabs">
+        <button class="compactButton" style="padding: 4px 14px; line-height: 18px">预算项</button>
+        <button class="compactButton" style="padding: 4px 14px; line-height: 18px">费用科目</button>
+      </nav>
+      <section class="currencyCard">
+        <strong>项目记账本位币</strong>
+        <button class="ofs-trigger currencySelect" role="combobox" style="display: flex; width: 180px; max-width: 100%; padding: 4px 8px; line-height: 18px; overflow: hidden">
+          <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis">阿联酋迪拉姆超长币种名称（AED）</span><span>▾</span>
+        </button>
+      </section>
       <section>
         <div class="entryRow" data-kind="budget">
           <div class="budgetInfo">
@@ -43,7 +52,7 @@ async function mountFinanceSettings(width: number) {
             <span class="entryAmount">USD $123,456.78 → CNY ¥890,123.45</span>
           </div>
           <div class="entryActions">
-            <button disabled>上移</button><button>下移</button><button>编辑</button><button>删除</button>
+            <button class="compactButton" style="padding: 4px 12px; line-height: 18px" disabled>上移</button><button class="compactButton" style="padding: 4px 12px; line-height: 18px">下移</button><button class="compactButton" style="padding: 4px 12px; line-height: 18px">编辑</button><button class="compactButton" style="padding: 4px 12px; line-height: 18px">删除</button>
           </div>
         </div>
         <div class="entryRow" data-kind="category">
@@ -52,10 +61,13 @@ async function mountFinanceSettings(width: number) {
             <span class="entryMeta">12 个预算项</span>
           </div>
           <div class="entryActions">
-            <button>上移</button><button disabled>下移</button><button>编辑</button><button>删除</button>
+            <button class="compactButton" style="padding: 4px 12px; line-height: 18px">上移</button><button class="compactButton" style="padding: 4px 12px; line-height: 18px" disabled>下移</button><button class="compactButton" style="padding: 4px 12px; line-height: 18px">编辑</button><button class="compactButton" style="padding: 4px 12px; line-height: 18px">删除</button>
           </div>
         </div>
       </section>
+      <div class="currencyMenu" data-overflow-safe-select-menu role="listbox" style="position: fixed; left: 10px; top: 620px; width: min(220px, calc(100vw - 20px)); border: 1px solid var(--line)">
+        <button class="currencyOption" role="option" style="display: flex; width: 100%; border: 0"><span>这是一个用于验证极窄屏幕安全换行的超长币种名称（LONG）</span></button>
+      </div>
     </main>
   `);
 }
@@ -85,16 +97,36 @@ describe("后台财务设置响应式布局", () => {
     expect(component).toContain("onClick={() => removeItem(item)}");
     expect(component).toContain('onClick={() => setModal({ kind: "category", value: category })}');
     expect(component).toContain("onClick={() => removeCategory(category)}");
+    expect(component).toContain("<OverflowSafeSelect");
+    expect(component).toContain("menuClassName={styles.currencyMenu}");
+    expect(component).toContain("optionClassName={styles.currencyOption}");
+    expect(component.match(/<option key=\{code\} value=\{code\}>\{formatCurrencyLabel\(code\)\}<\/option>/g)).toHaveLength(2);
+
+    const buttons = [...component.matchAll(/<button\b[^>]*>/g)].map(match => match[0]);
+    expect(buttons.length).toBeGreaterThan(0);
+    expect(buttons.every(button => button.includes("className={styles.compactButton}"))).toBe(true);
   });
 
   for (const width of acceptanceWidths) {
-    it(`${width}px 下标题、币种和金额完整呈现，条目不造成页面横向溢出`, async () => {
+    it(`${width}px 下条目与币种菜单不造成横向溢出，紧凑按钮不互相挤压`, async () => {
       await mountFinanceSettings(width);
       const metrics = await page.locator(".page").evaluate(root => {
         const rows = [...root.querySelectorAll<HTMLElement>(".entryRow")];
+        const currencyTrigger = root.querySelector<HTMLElement>(".currencySelect")!;
+        const currencyMenu = root.querySelector<HTMLElement>(".currencyMenu")!;
+        const menuOption = currencyMenu.querySelector<HTMLElement>("[role=option]")!;
+        const triggerBounds = currencyTrigger.getBoundingClientRect();
+        const menuBounds = currencyMenu.getBoundingClientRect();
         return {
           documentWidth: document.documentElement.scrollWidth,
           viewportWidth: window.innerWidth,
+          currency: {
+            triggerLeft: triggerBounds.left,
+            triggerRight: triggerBounds.right,
+            menuLeft: menuBounds.left,
+            menuRight: menuBounds.right,
+            menuOptionFits: menuOption.scrollWidth <= menuOption.clientWidth,
+          },
           rows: rows.map(row => {
             const info = row.firstElementChild as HTMLElement;
             const actions = row.querySelector<HTMLElement>(".entryActions")!;
@@ -109,16 +141,29 @@ describe("后台财务设置响应式布局", () => {
               amountFits: [...row.querySelectorAll<HTMLElement>(".entryAmount, .entryMeta")]
                 .every(element => element.scrollWidth <= element.clientWidth),
               actionLabels: [...actions.querySelectorAll("button")].map(button => button.textContent),
+              buttonHeights: [...actions.querySelectorAll("button")].map(button => button.getBoundingClientRect().height),
+              buttonGaps: [...actions.querySelectorAll("button")].slice(1).map((button, index) => {
+                const previous = actions.querySelectorAll("button")[index]!.getBoundingClientRect();
+                const current = button.getBoundingClientRect();
+                return current.top === previous.top ? current.left - previous.right : current.top - previous.bottom;
+              }),
             };
           }),
         };
       });
 
       expect(metrics.documentWidth).toBeLessThanOrEqual(metrics.viewportWidth);
+      expect(metrics.currency.triggerLeft).toBeGreaterThanOrEqual(0);
+      expect(metrics.currency.triggerRight).toBeLessThanOrEqual(metrics.viewportWidth);
+      expect(metrics.currency.menuLeft).toBeGreaterThanOrEqual(0);
+      expect(metrics.currency.menuRight).toBeLessThanOrEqual(metrics.viewportWidth);
+      expect(metrics.currency.menuOptionFits).toBe(true);
       for (const row of metrics.rows) {
         expect(row.titleFits).toBe(true);
         expect(row.amountFits).toBe(true);
         expect(row.actionLabels).toEqual(["上移", "下移", "编辑", "删除"]);
+        expect(row.buttonHeights.every(height => height === 28)).toBe(true);
+        expect(row.buttonGaps.every(gap => gap >= 8)).toBe(true);
         if (width <= 680) {
           expect(row.columns).toBe(1);
           expect(row.actionsTop).toBeGreaterThanOrEqual(row.infoBottom);
@@ -129,15 +174,32 @@ describe("后台财务设置响应式布局", () => {
     });
   }
 
-  it("319px 将主信息自身上下排布，385px 保留标题与金额双列", async () => {
+  it("319px 将主信息自身上下排布，370px 保留标题与金额双列", async () => {
     await mountFinanceSettings(319);
     expect(await page.locator(".budgetInfo").evaluate(element => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(1);
-    await mountFinanceSettings(385);
+    await mountFinanceSettings(370);
     expect(await page.locator(".budgetInfo").evaluate(element => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(2);
   });
 
+  it("按钮视觉高度约为共享默认值的 5/7，同时保留约 40px 的纵向点击区域", async () => {
+    await mountFinanceSettings(370);
+    const dimensions = await page.locator(".entryActions .compactButton").first().evaluate(element => {
+      const visualHeight = element.getBoundingClientRect().height;
+      const hitArea = getComputedStyle(element, "::before");
+      return {
+        visualHeight,
+        hitHeight: visualHeight - Number.parseFloat(hitArea.top) - Number.parseFloat(hitArea.bottom),
+        lineHeight: getComputedStyle(element).lineHeight,
+      };
+    });
+    expect(dimensions.visualHeight).toBe(28);
+    expect(dimensions.visualHeight / 40).toBeCloseTo(5 / 7, 1);
+    expect(dimensions.hitHeight).toBeGreaterThanOrEqual(40);
+    expect(dimensions.lineHeight).toBe("18px");
+  });
+
   it("卡片留白按约定收紧，手机页头顶距与项目首页一致", async () => {
-    await mountFinanceSettings(385);
+    await mountFinanceSettings(370);
     const mobile = await page.locator(".page").evaluate(root => {
       const row = root.querySelector<HTMLElement>(".entryRow")!;
       const card = root.querySelector<HTMLElement>(".currencyCard")!;
