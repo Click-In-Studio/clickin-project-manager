@@ -1,0 +1,272 @@
+.page {
+  min-height: 100%;
+  overflow-y: auto;
+  background: var(--paper);
+}
+
+.pageContent {
+  padding: 24px clamp(18px, 3vw, 52px) 60px;
+}
+
+.addCard {
+  margin-bottom: 18px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: var(--stage);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.addTitle {
+  margin: 0 0 14px;
+  color: var(--ink);
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.addFields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.input {
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: none;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.newNameInput,
+.newDateInput {
+  height: 29px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.newNameInput {
+  min-width: 160px;
+  flex: 1;
+}
+
+.addButton {
+  flex-shrink: 0;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all .15s;
+}
+
+.addError {
+  margin-top: 8px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.milestoneRow {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 14px 16px;
+  border-radius: 10px;
+  transition: box-shadow .15s;
+}
+
+.displayRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.milestoneCopy {
+  min-width: 0;
+}
+
+.titleLine,
+.metaLine,
+.rowActions,
+.editFooter {
+  display: flex;
+  align-items: center;
+}
+
+.titleLine {
+  min-width: 0;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.currentLabel {
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, .7);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.milestoneName {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metaLine {
+  min-width: 0;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.milestoneDate {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.countdown {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.rowActions {
+  flex-shrink: 0;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.rowAction {
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.deleteAction:hover {
+  color: var(--danger) !important;
+}
+
+.editForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.editNameInput {
+  padding: 6px 10px;
+  border-color: var(--ink);
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.editFooter {
+  gap: 8px;
+}
+
+.editDateInput {
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.editSpacer {
+  flex: 1;
+}
+
+.cancelButton,
+.saveButton {
+  border: 0;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.cancelButton {
+  padding: 4px 8px;
+  background: none;
+  color: var(--muted);
+}
+
+.saveButton {
+  padding: 5px 12px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: white;
+  font-weight: 600;
+}
+
+@media (max-width: 480px) {
+  .pageContent {
+    padding: 20px 10px 52px;
+  }
+
+  .addCard {
+    padding: 16px 12px;
+  }
+
+  .addFields {
+    gap: 6px;
+  }
+
+  .newNameInput {
+    min-width: 100%;
+  }
+
+  .newDateInput {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .milestoneRow {
+    padding: 12px 10px;
+  }
+
+  .displayRow {
+    gap: 4px;
+  }
+
+  .titleLine,
+  .metaLine {
+    gap: 5px;
+  }
+
+  .rowActions {
+    gap: 0;
+  }
+
+  .rowAction {
+    padding: 4px;
+  }
+
+  .editFooter {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .editDateInput {
+    min-width: 0;
+    flex: 1 1 130px;
+  }
+}
