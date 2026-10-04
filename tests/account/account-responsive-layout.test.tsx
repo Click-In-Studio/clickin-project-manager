@@ -16,8 +16,6 @@ function between(source: string, start: string, end?: string) {
 }
 
 describe("个人中心窄屏布局", () => {
-  const acceptanceWidths = [319, 370, 768, 1440] as const;
-
   it("319px 导航三项等分且不换行，极窄屏优先隐藏图标", () => {
     const tablet = between(css, "@media (max-width: 820px)", "@media (max-width: 580px)");
     const phone = between(css, "@media (max-width: 580px)", "@media (max-width: 360px)");
@@ -85,8 +83,7 @@ describe("个人中心窄屏布局", () => {
     expect(css).toMatch(/\.rowIcon\s*{[^}]*background:\s*var\(--script-soft\);[^}]*color:\s*var\(--script\);/);
   });
 
-  it.each(acceptanceWidths)("%ipx 下依靠可收缩列与断行规则避免横向溢出", (width) => {
-    expect(width).toBeGreaterThanOrEqual(319);
+  it("用可收缩列与断行规则守住从 319px 到桌面的横向布局", () => {
     expect(css).toMatch(/\.layout\s*{[^}]*width:\s*min\(1160px, calc\(100% - 48px\)\);/);
     expect(css).toMatch(/\.main\s*{[^}]*min-width:\s*0;/);
     expect(css).toMatch(/\.profileNameField,[\s\S]*?\.compactField\s*{[^}]*min-width:\s*0;/);
