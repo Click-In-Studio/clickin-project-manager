@@ -1,0 +1,51 @@
+.tabList {
+  display: flex;
+  width: min(360px, 100%);
+  max-width: 100%;
+  box-sizing: border-box;
+  gap: 4px;
+  margin-bottom: 14px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  border-radius: 10px;
+  padding: 4px;
+  background: var(--surface-2);
+  scrollbar-width: thin;
+}
+
+.tab {
+  min-width: max-content;
+  flex: 1 0 auto;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  touch-action: manipulation;
+  white-space: nowrap;
+}
+
+.tab[aria-selected="true"] {
+  background: var(--ink);
+  color: #fff;
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--stage);
+  outline-offset: -2px;
+}
+
+@media (max-width: 480px) {
+  .tabList {
+    gap: 2px;
+    padding-inline: 2px;
+  }
+
+  .tab {
+    padding-inline: 5px;
+  }
+}

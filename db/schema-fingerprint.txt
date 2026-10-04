@@ -149,6 +149,11 @@ COL|agent_session_attachment|r2_key|text|text|NO|
 COL|agent_session_attachment|ready_at|timestamp with time zone|timestamptz|YES|
 COL|agent_session_attachment|release_until|timestamp with time zone|timestamptz|YES|
 COL|agent_session_attachment|session_id|text|text|NO|
+COL|agent_session_attachment|source_final_url|text|text|YES|
+COL|agent_session_attachment|source_kind|text|text|YES|
+COL|agent_session_attachment|source_run_id|text|text|YES|
+COL|agent_session_attachment|source_tool_call_id|text|text|YES|
+COL|agent_session_attachment|source_url|text|text|YES|
 COL|agent_session_attachment|status|text|text|NO|'pending'::text
 COL|agent_session_entry|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_session_entry|entry_id|text|text|NO|
@@ -1219,7 +1224,9 @@ CON|agent_session_attachment|agent_session_attachment_pkey|PRIMARY KEY (id)
 CON|agent_session_attachment|agent_session_attachment_promoted_asset_id_fkey|FOREIGN KEY (promoted_asset_id) REFERENCES asset(id) ON DELETE SET NULL
 CON|agent_session_attachment|agent_session_attachment_r2_key_key|UNIQUE (r2_key)
 CON|agent_session_attachment|agent_session_attachment_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
+CON|agent_session_attachment|agent_session_attachment_source_kind_check|CHECK (((source_kind IS NULL) OR (source_kind = 'web_fetch'::text)))
 CON|agent_session_attachment|agent_session_attachment_status_check|CHECK ((status = ANY (ARRAY['pending'::text, 'ready'::text, 'released'::text, 'deleting'::text, 'expired'::text, 'promoted'::text])))
+CON|agent_session_attachment|agent_session_attachment_web_fetch_source_check|CHECK (((source_kind IS NULL) OR ((source_run_id IS NOT NULL) AND (source_tool_call_id IS NOT NULL) AND (source_url IS NOT NULL) AND (source_final_url IS NOT NULL))))
 CON|agent_session_entry|agent_session_entry_pkey|PRIMARY KEY (session_id, seq)
 CON|agent_session_entry|agent_session_entry_session_id_entry_id_key|UNIQUE (session_id, entry_id)
 CON|agent_session_entry|agent_session_entry_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
@@ -1823,6 +1830,8 @@ IDX|agent_session_attachment|agent_session_attachment_expiry_idx|CREATE INDEX ag
 IDX|agent_session_attachment|agent_session_attachment_pkey|CREATE UNIQUE INDEX agent_session_attachment_pkey ON public.agent_session_attachment USING btree (id)
 IDX|agent_session_attachment|agent_session_attachment_r2_key_key|CREATE UNIQUE INDEX agent_session_attachment_r2_key_key ON public.agent_session_attachment USING btree (r2_key)
 IDX|agent_session_attachment|agent_session_attachment_session_idx|CREATE INDEX agent_session_attachment_session_idx ON public.agent_session_attachment USING btree (session_id, created_at)
+IDX|agent_session_attachment|agent_session_attachment_web_fetch_call_idx|CREATE UNIQUE INDEX agent_session_attachment_web_fetch_call_idx ON public.agent_session_attachment USING btree (source_run_id, source_tool_call_id) WHERE ((source_kind = 'web_fetch'::text) AND (status = ANY (ARRAY['pending'::text, 'ready'::text])))
+IDX|agent_session_attachment|agent_session_attachment_web_fetch_url_idx|CREATE UNIQUE INDEX agent_session_attachment_web_fetch_url_idx ON public.agent_session_attachment USING btree (source_run_id, source_final_url) WHERE ((source_kind = 'web_fetch'::text) AND (status = ANY (ARRAY['pending'::text, 'ready'::text])))
 IDX|agent_session_entry|agent_session_entry_pkey|CREATE UNIQUE INDEX agent_session_entry_pkey ON public.agent_session_entry USING btree (session_id, seq)
 IDX|agent_session_entry|agent_session_entry_session_id_entry_id_key|CREATE UNIQUE INDEX agent_session_entry_session_id_entry_id_key ON public.agent_session_entry USING btree (session_id, entry_id)
 IDX|agent_session|agent_session_pkey|CREATE UNIQUE INDEX agent_session_pkey ON public.agent_session USING btree (id)

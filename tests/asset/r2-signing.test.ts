@@ -56,6 +56,22 @@ describe("R2 Authorization header 签名", () => {
     await expect(deleteR2Object("assets/af_test/file.pdf")).resolves.toBeUndefined();
   });
 
+  it("服务端 PUT 可把 ReadableStream 原样交给 fetch，不先缓冲整个对象", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { putR2ObjectStream } = await import("@/lib/r2");
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode("stream-body")); controller.close(); },
+    });
+
+    await expect(putR2ObjectStream("agent-attachments/aat_test/file.pdf", body, "application/pdf"))
+      .resolves.toBeUndefined();
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit & { duplex?: string }];
+    expect(init).toMatchObject({ method: "PUT", duplex: "half", body });
+    expect(new Headers(init.headers).get("content-type")).toBe("application/pdf");
+  });
+
   it("终止 multipart 时把 uploadId 签入查询串", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);

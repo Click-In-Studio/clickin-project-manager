@@ -70,7 +70,7 @@ export const TOOL_LABELS: Record<string, string> = {
   "ask_user": "向用户提问",
   "find_tools": "搜索可用工具",
   "web-search": "联网搜索",
-  "web-fetch": "抓取网页",
+  "web-fetch": "抓取网页或文件",
 };
 
 /** 暴露名/原始名 → 中文显示名；没配的（未来新工具、gateway 内置工具）

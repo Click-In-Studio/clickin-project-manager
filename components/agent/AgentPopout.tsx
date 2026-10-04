@@ -39,6 +39,7 @@ type ChatAttachment = {
   id: string; fileName: string; mimeType: string; mediaKind: string | null; fileSize?: number;
   status?: "pending" | "ready" | "released" | "deleting" | "expired" | "promoted";
   releaseUntil?: string | null; promotedAssetId?: string | null;
+  sourceToolCallId?: string | null;
 };
 
 type GatewayStatus =
@@ -331,9 +332,16 @@ export default function AgentPopout({
         .then((data: { attachments?: ChatAttachment[] } | null) => {
           if (activeKeyRef.current !== streamKey || !data?.attachments) return;
           const byId = new Map(data.attachments.map((item) => [item.id, item]));
-          setBubbles((prev) => prev.map((bubble) => bubble.kind !== "user" ? bubble : {
-            ...bubble,
-            attachments: bubble.attachments?.map((item) => ({ ...item, ...byId.get(item.id) })),
+          setBubbles((prev) => prev.map((bubble) => {
+            if (bubble.kind === "user") return {
+              ...bubble,
+              attachments: bubble.attachments?.map((item) => ({ ...item, ...byId.get(item.id) })),
+            };
+            if (bubble.kind === "tool") return {
+              ...bubble,
+              attachments: data.attachments!.filter((item) => item.sourceToolCallId === bubble.id),
+            };
+            return bubble;
           }));
         })
         .catch(() => {});
@@ -350,13 +358,13 @@ export default function AgentPopout({
       const res = await fetch(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`);
       if (res.ok) {
         const data = (await res.json()) as {
-          messages: ({ role: "user" | "assistant" | "thinking"; content: string; attachments?: ChatAttachment[] } | { role: "tool"; name: string; id?: string; result?: string })[];
+          messages: ({ role: "user" | "assistant" | "thinking"; content: string; attachments?: ChatAttachment[] } | { role: "tool"; name: string; id?: string; result?: string; attachments?: ChatAttachment[] })[];
         };
         if (activeKeyRef.current !== key) return;
         setBubbles(
           data.messages.map((m) =>
             m.role === "tool"
-              ? { kind: "tool", name: m.name, id: m.id, done: true, ...(m.result ? { result: m.result } : {}) }
+              ? { kind: "tool", name: m.name, id: m.id, done: true, ...(m.result ? { result: m.result } : {}), ...(m.attachments?.length ? { attachments: m.attachments } : {}) }
               : { kind: m.role, text: m.content, ...(m.role === "user" && m.attachments?.length ? { attachments: m.attachments } : {}) }
           )
         );
@@ -549,13 +557,16 @@ export default function AgentPopout({
       setAttachmentError(body.error || "附件操作失败");
       return;
     }
-    setBubbles((prev) => prev.map((bubble) => bubble.kind !== "user" ? bubble : {
-      ...bubble,
-      attachments: bubble.attachments?.map((item) => item.id !== attachment.id ? item : {
-        ...item,
-        status: action === "restore" ? "ready" : "deleting",
-        releaseUntil: action === "restore" ? null : item.releaseUntil,
-      }),
+    setBubbles((prev) => prev.map((bubble) => {
+      if (bubble.kind !== "user" && bubble.kind !== "tool") return bubble;
+      return {
+        ...bubble,
+        attachments: bubble.attachments?.map((item) => item.id !== attachment.id ? item : {
+          ...item,
+          status: action === "restore" ? "ready" : "deleting",
+          releaseUntil: action === "restore" ? null : item.releaseUntil,
+        }),
+      };
     }));
   }, [activeKey]);
 
@@ -936,7 +947,21 @@ export default function AgentPopout({
           if (b.kind === "tool") {
             return (
               <div key={i} className="flex justify-start">
-                <ToolCallBubble name={b.name} done={b.done} isError={b.isError} input={b.input} result={b.result} />
+                <div className="max-w-[92%]">
+                  <ToolCallBubble name={b.name} done={b.done} isError={b.isError} input={b.input} result={b.result} />
+                  {b.attachments?.map((attachment) => (
+                    <div key={attachment.id} className="mt-1.5 flex max-w-full items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] text-zinc-600">
+                      <span className="min-w-0 flex-1 truncate">📎 {attachment.fileName}</span>
+                      {attachment.status === "released" && <>
+                        <span className="shrink-0 text-amber-700">待释放</span>
+                        <button type="button" className="shrink-0 underline" onClick={() => void updateHistoricalAttachment(attachment, "restore")}>恢复</button>
+                      </>}
+                      {(attachment.status === "deleting" || attachment.status === "expired") && <span className="shrink-0 text-zinc-400">已过期</span>}
+                      {attachment.status === "promoted" && <span className="shrink-0 text-emerald-700">已存为资产</span>}
+                      {(!attachment.status || attachment.status === "ready") && <button type="button" className="shrink-0 text-zinc-400 hover:text-zinc-700" title="立即删除" onClick={() => void updateHistoricalAttachment(attachment, "delete")}>✕</button>}
+                    </div>
+                  ))}
+                </div>
               </div>
             );
           }
