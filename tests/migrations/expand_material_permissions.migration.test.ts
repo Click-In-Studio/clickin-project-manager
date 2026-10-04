@@ -50,7 +50,8 @@ describe("expand material permissions migration", () => {
       "SELECT permission_key,source FROM production_dept_permission WHERE dept_id=$1",
       [snapshot!.deptId],
     );
-    for (const key of MATERIAL_ADMIN_KEYS.slice(1))
+    for (const key of Object.values(MATERIAL_PERMISSION_KEYS)
+      .filter((candidate) => candidate.endsWith("@edit")))
       expect(dept.rows).toContainEqual({ permission_key: key, source: "resource" });
     const member = await getPool().query<{ granted: boolean }>(
       "SELECT granted FROM production_member_permission WHERE production_id=$1 AND user_id=$2 AND permission=$3",
