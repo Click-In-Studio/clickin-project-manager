@@ -4,13 +4,20 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 
 const homeCss = readFileSync(path.resolve(__dirname, "../../components/ops/home.module.css"), "utf8");
-const viewportWidths = [319, 360, 385, 571, 765, 1118];
+const viewports = [
+  { width: 319, height: 727 },
+  { width: 370, height: 837 },
+  { width: 768, height: 837 },
+  { width: 877, height: 837 },
+  { width: 1119, height: 727 },
+  { width: 1440, height: 900 },
+];
 
 let browser: Browser;
 let page: Page;
 
-async function mountProgressMetrics(width: number) {
-  await page.setViewportSize({ width, height: 800 });
+async function mountProgressMetrics(width: number, height = 800) {
+  await page.setViewportSize({ width, height });
   await page.setContent(`
     <style>
       * { box-sizing: border-box; }
@@ -26,17 +33,16 @@ async function mountProgressMetrics(width: number) {
         </div>
         <div class="progressHeroMetrics">
           <div class="progressMetricCard progressMetricUrgent">
-            <strong>3 天</strong>
+            <strong class="progressMetricValue"><span>11</span><span class="progressMetricUnit">天</span></strong>
             <div class="progressMetricDisclosure">
               <button
                 type="button"
                 class="progressMetricLabel"
                 aria-expanded="false"
                 onclick="this.setAttribute('aria-expanded', String(this.nextElementSibling.hidden)); this.nextElementSibling.hidden = !this.nextElementSibling.hidden"
-              >距「技术合成与全体演员联合走台确认」</button>
+              >距「首演」</button>
               <div class="progressMetricDisclosurePanel" hidden>距「技术合成与全体演员联合走台确认」</div>
             </div>
-            <small>临近节点</small>
           </div>
           <a href="/notifications" class="progressMetricCard progressMetricLink progressMetricActive">
             <strong>12</strong>
@@ -62,9 +68,9 @@ afterAll(async () => {
 });
 
 describe("项目首页进展指标卡真实浏览器布局", () => {
-  for (const width of viewportWidths) {
-    it(`${width}px 下三卡同排同高且不重叠越界`, async () => {
-      await mountProgressMetrics(width);
+  for (const { width, height } of viewports) {
+    it(`${width}×${height} 下三卡同排同高且不重叠越界`, async () => {
+      await mountProgressMetrics(width, height);
       const metrics = await page.locator(".progressHeroMetrics").evaluate(grid => {
         const gridBounds = grid.getBoundingClientRect();
         const cards = [...grid.querySelectorAll<HTMLElement>(".progressMetricCard")];
@@ -96,7 +102,7 @@ describe("项目首页进展指标卡真实浏览器布局", () => {
       for (const card of metrics.cards) {
         expect(card.scrollWidth).toBeLessThanOrEqual(card.clientWidth);
       }
-      for (const card of metrics.cards.slice(1)) {
+      for (const card of metrics.cards) {
         expect(card.labelScrollWidth).toBeLessThanOrEqual(card.labelClientWidth);
       }
     });
@@ -113,9 +119,9 @@ describe("项目首页进展指标卡真实浏览器布局", () => {
     expect(target).toBe("BUTTON");
   });
 
-  for (const width of viewportWidths) {
-    it(`${width}px 下点击后完整里程碑不被裁剪且可命中`, async () => {
-      await mountProgressMetrics(width);
+  for (const { width, height } of viewports) {
+    it(`${width}×${height} 下点击后完整里程碑不被裁剪且可命中`, async () => {
+      await mountProgressMetrics(width, height);
       await page.locator(".progressMetricLabel").first().click();
 
       const disclosure = await page.locator(".progressMetricDisclosurePanel").evaluate(panel => {
@@ -160,12 +166,12 @@ describe("项目首页进展指标卡真实浏览器布局", () => {
   }
 
   it("桌面卡片随字号增大，并且仍由内容决定最终高度", async () => {
-    await mountProgressMetrics(571);
+    await mountProgressMetrics(370, 837);
     const mobile = await page.locator(".progressMetricCard").first().evaluate(card => ({
       height: card.getBoundingClientRect().height,
       fontSize: Number.parseFloat(getComputedStyle(card.querySelector("strong")!).fontSize),
     }));
-    await mountProgressMetrics(1118);
+    await mountProgressMetrics(1119, 727);
     const desktop = await page.locator(".progressMetricCard").first().evaluate(card => ({
       height: card.getBoundingClientRect().height,
       fontSize: Number.parseFloat(getComputedStyle(card.querySelector("strong")!).fontSize),
@@ -179,10 +185,9 @@ describe("项目首页进展指标卡真实浏览器布局", () => {
     expect(Number.parseFloat(desktop.declaredHeight)).toBeCloseTo(desktop.height, 2);
   });
 
-  it("765px 下指标区收至原来的约五分之七，Hero 收至原来的约八分之七", async () => {
-    await mountProgressMetrics(765);
+  it("768px 下指标区保持中宽布局，卡片高度收至约 84px", async () => {
+    await mountProgressMetrics(768, 837);
     const metrics = await page.locator(".progressHero").evaluate(hero => {
-      const heroBounds = hero.getBoundingClientRect();
       const grid = hero.querySelector<HTMLElement>(".progressHeroMetrics")!;
       const gridBounds = grid.getBoundingClientRect();
       const firstCard = grid.querySelector<HTMLElement>(".progressMetricCard")!;
@@ -190,7 +195,7 @@ describe("项目首页进展指标卡真实浏览器布局", () => {
       const label = firstCard.querySelector<HTMLElement>(".progressMetricLabel")!;
 
       return {
-        heroHeight: heroBounds.height,
+        cardHeight: firstCard.getBoundingClientRect().height,
         gridWidth: gridBounds.width,
         numberSize: Number.parseFloat(getComputedStyle(number).fontSize),
         labelSize: Number.parseFloat(getComputedStyle(label).fontSize),
@@ -198,8 +203,82 @@ describe("项目首页进展指标卡真实浏览器布局", () => {
     });
 
     expect(metrics.gridWidth).toBeCloseTo(300, 1);
-    expect(metrics.heroHeight).toBeCloseTo(175, 1);
+    expect(metrics.cardHeight).toBeCloseTo(84, 1);
     expect(metrics.numberSize).toBeCloseTo(32, 1);
     expect(metrics.labelSize).toBeCloseTo(11, 1);
   });
+
+  for (const { width, height, expectedHeight } of [
+    { width: 877, height: 837, expectedHeight: 84 },
+    { width: 1119, height: 727, expectedHeight: 84 },
+  ]) {
+    it(`${width}×${height} 下卡片高度约为调整前的五分之六`, async () => {
+      await mountProgressMetrics(width, height);
+      const cardHeights = await page.locator(".progressMetricCard").evaluateAll(cards => (
+        cards.map(card => card.getBoundingClientRect().height)
+      ));
+
+      expect(new Set(cardHeights).size).toBe(1);
+      expect(cardHeights[0]).toBeGreaterThanOrEqual(expectedHeight - 1);
+      expect(cardHeights[0]).toBeLessThanOrEqual(expectedHeight + 1);
+    });
+  }
+
+  it("数字与‘天’使用相同字号、行盒并按基线对齐", async () => {
+    await mountProgressMetrics(1119, 727);
+    const metrics = await page.locator(".progressMetricValue").evaluate(value => {
+      const [number, unit] = [...value.children] as HTMLElement[];
+      const valueStyle = getComputedStyle(value);
+      const numberStyle = getComputedStyle(number);
+      const unitStyle = getComputedStyle(unit);
+      return {
+        alignItems: valueStyle.alignItems,
+        numberFontSize: numberStyle.fontSize,
+        unitFontSize: unitStyle.fontSize,
+        numberLineHeight: numberStyle.lineHeight,
+        unitLineHeight: unitStyle.lineHeight,
+      };
+    });
+
+    expect(metrics.alignItems).toBe("baseline");
+    expect(metrics.unitFontSize).toBe(metrics.numberFontSize);
+    expect(metrics.unitLineHeight).toBe(metrics.numberLineHeight);
+  });
+
+  it("通知与 Cue 卡保持整卡链接点击区域", async () => {
+    await mountProgressMetrics(319, 727);
+    const hitTargets = await page.locator("a.progressMetricCard").evaluateAll(cards => cards.map(card => {
+      const bounds = card.getBoundingClientRect();
+      const hit = document.elementFromPoint(bounds.right - 5, bounds.bottom - 5);
+      return {
+        href: card.getAttribute("href"),
+        hitIsLink: hit === card || card.contains(hit),
+      };
+    }));
+
+    expect(hitTargets).toEqual([
+      { href: "/notifications", hitIsLink: true },
+      { href: "/cues", hitIsLink: true },
+    ]);
+  });
+
+  for (const { width, height } of [{ width: 319, height: 727 }, { width: 877, height: 837 }]) {
+    it(`${width}×${height} 下出现“临近节点”时三卡仍然等高且内容完整`, async () => {
+      await mountProgressMetrics(width, height);
+      await page.locator(".progressMetricCard").first().evaluate(card => {
+        const note = document.createElement("small");
+        note.textContent = "临近节点";
+        card.append(note);
+      });
+
+      const cards = await page.locator(".progressMetricCard").evaluateAll(elements => elements.map(card => ({
+        height: card.getBoundingClientRect().height,
+        clientHeight: card.clientHeight,
+        scrollHeight: card.scrollHeight,
+      })));
+
+      expect(new Set(cards.map(card => card.height)).size).toBe(1);
+      for (const card of cards) expect(card.scrollHeight).toBeLessThanOrEqual(card.clientHeight);
+    });
+  }
 });

@@ -7,6 +7,7 @@ import { fmtCallAt, isoCSTDateStr, todayCSTStr as tzTodayCSTStr } from "@/lib/tz
 import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, UnreadReportEntry } from "@/lib/ops/event-db";
 import type { UpcomingMilestoneEntry } from "@/lib/ops/milestone-db";
 import MetricCardDisclosure from "./MetricCardDisclosure";
+import MilestoneMetricValue from "./MilestoneMetricValue";
 import styles from "./home.module.css";
 
 function cstDateStr(iso: string): string { return isoCSTDateStr(iso); }
@@ -78,7 +79,6 @@ export default function HomeClient({ productions, myCallTimes, myPendingReqs, my
         {(() => {
           const next = upcomingMilestones[0] ?? null;
           const days = next ? daysUntil(next.endDate) : null;
-          const milestoneLabel = days === null ? "—" : days === 0 ? "今天" : days < 0 ? `已过 ${Math.abs(days)} 天` : `${days} 天`;
           const milestoneSubLabel = next ? `距「${next.name}」· ${next.productionName}` : "各项目暂无里程碑";
           return (
             <section className={styles.progressHero}>
@@ -94,7 +94,7 @@ export default function HomeClient({ productions, myCallTimes, myPendingReqs, my
               </div>
               <div className={styles.progressHeroMetrics}>
                 <div className={`${styles.progressMetricCard} ${days !== null && days <= 7 && days >= 0 ? styles.progressMetricUrgent : ""}`}>
-                  <strong>{milestoneLabel}</strong>
+                  <MilestoneMetricValue days={days} emptyLabel="—" />
                   <MetricCardDisclosure label={milestoneSubLabel} />
                   {days !== null && days <= 7 && days >= 0 && <small>临近节点</small>}
                 </div>
