@@ -49,6 +49,17 @@ describe("web.fetch", () => {
       } else if (req.url === "/untyped-binary") {
         res.writeHead(200); // 没有 content-type：只能靠嗅探
         res.end(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x00, 0x08]));
+      } else if (req.url === "/poster") {
+        const body = Buffer.concat([Buffer.from([0x89]), Buffer.from("PNG\r\n\x1a\nimage")]);
+        res.writeHead(200, {
+          "content-type": "application/octet-stream",
+          "content-length": String(body.byteLength),
+          "content-disposition": "attachment; filename*=UTF-8''%E6%B5%B7%E6%8A%A5.png",
+        });
+        res.end(body);
+      } else if (req.url === "/mislabelled.pdf") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end(Buffer.from("%PDF-1.7\nwhole-file"));
       } else if (req.url === "/dirty-text") {
         res.setHeader("content-type", "text/plain; charset=utf-8");
         res.end(Buffer.concat([Buffer.from("前\u0001后"), Buffer.from([0x00]), Buffer.from("\t保留\n换行"), Buffer.from([0xed, 0xa0, 0x80])]));
@@ -92,16 +103,35 @@ describe("web.fetch", () => {
     expect(hits).toEqual([`127.0.0.1:${port}/redirect-private`]); // localhost 那一跳从未到达服务器
   });
 
-  it("二进制不当文本读（#685）：PDF / 无 content-type 的二进制都回可读错误；文本里的 NUL 与控制字符被清掉", async () => {
+  it("没有附件落点时二进制仍不当文本读；文本里的 NUL 与控制字符被清掉", async () => {
     process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE = "1";
-    await expect(webFetch(`${base}/paper.pdf`)).rejects.toThrow(/PDF文件（application\/pdf，约 3\.0 MB）.*上传为项目资产/);
-    await expect(webFetch(`${base}/untyped-binary`)).rejects.toThrow("二进制文件（类型未知");
+    await expect(webFetch(`${base}/paper.pdf`)).rejects.toThrow(/PDF文件（application\/pdf，约 3\.0 MB）.*没有会话附件落点/);
+    await expect(webFetch(`${base}/untyped-binary`)).rejects.toThrow("二进制文件（application/zip");
     const dirty = await webFetch(`${base}/dirty-text`);
     expect(dirty.text).not.toContain("\u0000");
     expect(dirty.text).not.toContain("\u0001");
     expect(dirty.text).toContain("前后");
     expect(dirty.text).toContain("\t保留\n换行");
     expect(dirty.text.isWellFormed()).toBe(true);
+  });
+
+  it("二进制把同一条原文件流交给附件落点：保留最终 URL、文件名与嗅探 MIME，不拆 PDF 页", async () => {
+    process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE = "1";
+    const poster = await webFetch(`${base}/poster`, undefined, async (binary) => {
+      const bytes = Buffer.from(await new Response(binary.body).arrayBuffer());
+      return { ...binary, body: undefined, bytes };
+    });
+    expect(poster).toMatchObject({
+      fileName: "海报.png", mimeType: "image/png", contentLength: 13,
+      requestedUrl: `${base}/poster`, url: `${base}/poster`,
+    });
+    expect("bytes" in poster && poster.bytes.subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+    const pdf = await webFetch(`${base}/mislabelled.pdf`, undefined, async (binary) => {
+      const bytes = Buffer.from(await new Response(binary.body).arrayBuffer());
+      return { mimeType: binary.mimeType, chunks: [bytes] };
+    });
+    expect(pdf).toEqual({ mimeType: "application/pdf", chunks: [Buffer.from("%PDF-1.7\nwhole-file")] });
   });
 
   it("超长正文截断并标记；重定向跟随；404 报错", async () => {

@@ -39,7 +39,7 @@ export type Bubble =
   | { kind: "thinking"; text: string; streaming?: boolean }
   // input/result：调用参数与结果（relay 超限时为 {truncated, preview} 包裹），
   // 供气泡点开看详情；历史回放只有 result 文本，input 恒缺席。
-  | { kind: "tool"; name: string; id?: string; done: boolean; input?: unknown; result?: unknown; isError?: boolean }
+  | { kind: "tool"; name: string; id?: string; done: boolean; input?: unknown; result?: unknown; isError?: boolean; attachments?: import("./types").ChatAttachment[] }
   | { kind: "approval"; approval: ApprovalInfo; decision?: string; resolving?: boolean }
   // status：answered/cancelled/expired；未定 = 待答卡片
   | { kind: "question"; question: QuestionInfo; status?: string; resolving?: boolean }

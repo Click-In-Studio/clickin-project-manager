@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
@@ -14,6 +14,13 @@ import { buildAttachmentLifecycleBlock } from "@/lib/agent/attachment-lifecycle"
 import { deleteSessionRows } from "@/lib/agent/runtime/service";
 import { DEFS } from "@/lib/agent/runtime/tools";
 import { cleanupProduction, makeProduction, shortId } from "../_support/factories";
+import { saveWebFetchedAttachment } from "@/lib/agent/tools/web-fetch-tools";
+
+const putStreamMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/r2", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/r2")>(),
+  putR2ObjectStream: putStreamMock,
+}));
 
 let userId: string;
 let prodId: string;
@@ -22,6 +29,12 @@ const sessionIds: string[] = [];
 beforeAll(async () => {
   ({ userId } = await upsertFeishuUser(`lifecycle-open-${shortId()}`, `附件生命周期-${shortId()}`, null, false));
   ({ prodId } = await makeProduction(userId));
+});
+
+beforeEach(() => {
+  putStreamMock.mockReset().mockImplementation(async (_key: string, body: ReadableStream<Uint8Array>) => {
+    await new Response(body).arrayBuffer();
+  });
 });
 
 afterAll(async () => {
@@ -40,6 +53,63 @@ async function readyAttachment(productionId?: string) {
 }
 
 describe("附件生命周期（#772）", () => {
+  it("web.fetch 来源绑定当前 run/tool call，同一 run 的工具重放或最终 URL 重复时复用附件", async () => {
+    const sessionId = createNewSessionKey(userId);
+    const runId = `ar_web_fetch_${shortId()}`;
+    sessionIds.push(sessionId);
+    await getPool().query(
+      `INSERT INTO agent_session (id, user_id, production_id) VALUES ($1, $2, NULL)`,
+      [sessionId, userId],
+    );
+    await getPool().query(`INSERT INTO agent_run (id, session_id) VALUES ($1, $2)`, [runId, sessionId]);
+    const source = {
+      kind: "web_fetch" as const, runId, toolCallId: "tool_fetch_1",
+      url: "https://example.com/start", finalUrl: "https://cdn.example.com/paper.pdf",
+    };
+    const first = await createPendingAttachment({
+      sessionId, userId, fileName: "paper.pdf", mimeType: "application/pdf", fileSize: 123, source,
+    });
+    const replay = await createPendingAttachment({
+      sessionId, userId, fileName: "ignored.pdf", mimeType: "application/pdf", fileSize: 123, source,
+    });
+    const sameFinalUrl = await createPendingAttachment({
+      sessionId, userId, fileName: "ignored-again.pdf", mimeType: "application/pdf", fileSize: 123,
+      source: { ...source, toolCallId: "tool_fetch_2", url: "https://example.com/other" },
+    });
+    expect(replay.id).toBe(first.id);
+    expect(sameFinalUrl.id).toBe(first.id);
+    expect(first).toMatchObject({
+      sourceKind: "web_fetch", sourceRunId: runId, sourceToolCallId: "tool_fetch_1",
+      sourceUrl: source.url, sourceFinalUrl: source.finalUrl,
+    });
+  });
+
+  it("远端二进制流直接落入一个 ready 附件，工具重放不重复写 R2", async () => {
+    const sessionId = createNewSessionKey(userId);
+    const runId = `ar_web_stream_${shortId()}`;
+    sessionIds.push(sessionId);
+    await getPool().query(`INSERT INTO agent_session (id, user_id) VALUES ($1, $2)`, [sessionId, userId]);
+    await getPool().query(`INSERT INTO agent_run (id, session_id) VALUES ($1, $2)`, [runId, sessionId]);
+    const makeBinary = () => ({
+      requestedUrl: "https://example.com/paper",
+      url: "https://cdn.example.com/paper.pdf",
+      fileName: "paper.pdf",
+      mimeType: "application/pdf",
+      contentLength: 12,
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode("%PDF-stream")); controller.close(); } }),
+    });
+    const first = await saveWebFetchedAttachment({
+      userId, sessionId, runId, toolCallId: "tool_stream_1", binary: makeBinary(),
+    });
+    expect(first.attachment).toMatchObject({ status: "ready", fileSize: 11, sourceToolCallId: "tool_stream_1" });
+    expect(putStreamMock).toHaveBeenCalledTimes(1);
+    const replay = await saveWebFetchedAttachment({
+      userId, sessionId, runId, toolCallId: "tool_stream_1", binary: makeBinary(),
+    });
+    expect(replay).toMatchObject({ reused: true, attachment: { id: first.attachment.id } });
+    expect(putStreamMock).toHaveBeenCalledTimes(1);
+  });
+
   it("只有本轮成功处理过的附件可免确认释放，并可在宽限期恢复", async () => {
     const { sessionId, attachment } = await readyAttachment();
     const runId = `ar_lifecycle_${shortId()}`;
