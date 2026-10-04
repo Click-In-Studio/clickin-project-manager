@@ -7,6 +7,7 @@ import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, Unr
 import { BASE_PATH } from "@/lib/base-path";
 import { fmtCallAt } from "@/lib/tz";
 import MetricCardDisclosure from "@/components/ops/MetricCardDisclosure";
+import MilestoneMetricValue from "@/components/ops/MilestoneMetricValue";
 import styles from "@/components/ops/home.module.css";
 
 const REQ_STATUS_LABEL: Record<string, string> = {
@@ -76,13 +77,6 @@ function ProjectProgressHero({
   }, [pinnedAnnouncement?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const days = nextMilestone ? daysUntil(nextMilestone.endDate) : null;
 
-  const milestoneLabel = (() => {
-    if (days === null) return "暂无里程碑";
-    if (days < 0) return `已过 ${Math.abs(days)} 天`;
-    if (days === 0) return "今天";
-    return `${days} 天`;
-  })();
-
   const milestoneSubLabel = nextMilestone
     ? `距「${nextMilestone.name}」`
     : "尚未设置里程碑";
@@ -121,7 +115,7 @@ function ProjectProgressHero({
       <div className={styles.progressHeroMetrics}>
         {/* 里程碑倒计时 */}
         <div className={`${styles.progressMetricCard} ${days !== null && days <= 7 ? styles.progressMetricUrgent : ""}`}>
-          <strong>{milestoneLabel}</strong>
+          <MilestoneMetricValue days={days} emptyLabel="暂无里程碑" />
           <MetricCardDisclosure label={milestoneSubLabel} />
           {days !== null && days <= 7 && days >= 0 && <small>临近节点</small>}
         </div>

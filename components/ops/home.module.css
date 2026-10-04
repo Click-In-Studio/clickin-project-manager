@@ -127,8 +127,8 @@
 .progressMetricCard {
   position: relative;
   min-width: 0;
-  min-height: clamp(92px, 9vw, 116px);
-  padding: clamp(12px, 1.4vw, 18px);
+  min-height: clamp(80px, 7.5vw, 96px);
+  padding: clamp(10px, 1vw, 14px);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -157,7 +157,24 @@
   font-family: Georgia, serif;
   font-size: clamp(28px, 3vw, 40px);
   font-weight: 500;
-  line-height: .95;
+  line-height: 1;
+}
+
+.progressMetricValue {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .16em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.progressMetricValue > span {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.progressMetricUnit {
+  font-family: "Noto Serif SC", Georgia, serif;
 }
 
 .progressMetricLabel {
@@ -744,8 +761,8 @@ button.progressMetricLabel:focus-visible::before {
     gap: 18px;
   }
   .progressMetricCard {
-    min-height: 100px;
-    padding: 12px 10px;
+    min-height: 84px;
+    padding: 10px;
   }
   .progressMetricCard strong {
     font-size: 32px;

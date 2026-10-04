@@ -1,9 +1,13 @@
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import MilestoneMetricValue from "@/components/ops/MilestoneMetricValue";
 
 const workspaceHome = readFileSync("components/ops/HomeClient.tsx", "utf8");
 const productionHome = readFileSync("components/ops/ProductionHomeClient.tsx", "utf8");
 const disclosure = readFileSync("components/ops/MetricCardDisclosure.tsx", "utf8");
+const milestoneValue = readFileSync("components/ops/MilestoneMetricValue.tsx", "utf8");
 const css = readFileSync("components/ops/home.module.css", "utf8");
 
 function blockAfter(source: string, marker: string): string {
@@ -84,6 +88,7 @@ describe("项目首页指标卡密度与配色", () => {
       expect(component).toContain("styles.progressHeroMetrics");
       expect(component).toContain("styles.progressMetricCard");
       expect(component).toContain("<MetricCardDisclosure label={milestoneSubLabel} />");
+      expect(component).toContain("<MilestoneMetricValue");
     }
     expect(disclosure).toContain('className={styles.progressMetricLabel}');
   });
@@ -182,9 +187,34 @@ describe("项目首页指标卡密度与配色", () => {
     expect(px(hero["min-height"])).toBe(175);
     expect(hero["grid-template-columns"]).toBe("minmax(0, 1fr) minmax(0, 300px)");
     expect(px(hero.gap)).toBe(18);
-    expect(px(card["min-height"])).toBe(100);
+    expect(px(card["min-height"])).toBe(84);
     expect(px(strong["font-size"])).toBe(32);
     expect(px(label["font-size"])).toBe(11);
+  });
+
+  it("倒计时数字和单位共用字号与行盒并按基线对齐", () => {
+    const value = declarations(css, ".progressMetricValue");
+    const parts = declarations(css, ".progressMetricValue > span");
+
+    expect(milestoneValue).toContain("styles.progressMetricValue");
+    expect(milestoneValue).toContain("styles.progressMetricUnit");
+    expect(value.display).toBe("inline-flex");
+    expect(value["align-items"]).toBe("baseline");
+    expect(value["line-height"]).toBe("1");
+    expect(parts["font-size"]).toBe("inherit");
+    expect(parts["line-height"]).toBe("inherit");
+  });
+
+  it("倒计时组件保留空值、今天、已过和未来四种文案", () => {
+    const text = (days: number | null, emptyLabel = "暂无里程碑") => (
+      renderToStaticMarkup(createElement(MilestoneMetricValue, { days, emptyLabel }))
+        .replace(/<[^>]+>/g, "")
+    );
+
+    expect(text(null)).toBe("暂无里程碑");
+    expect(text(0)).toBe("今天");
+    expect(text(-3)).toBe("已过3天");
+    expect(text(11)).toBe("11天");
   });
 
   it("571 与 1118 像素下卡片依内容伸展而不是固定高度", () => {
