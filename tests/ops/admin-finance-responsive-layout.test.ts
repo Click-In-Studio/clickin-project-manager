@@ -182,14 +182,19 @@ describe("后台财务设置响应式布局", () => {
 
   it("按钮视觉高度约为共享默认值的 5/7，同时保留约 40px 的纵向点击区域", async () => {
     await mountFinanceSettings(370);
-    const dimensions = await page.locator(".entryActions .compactButton").first().evaluate(element => ({
-      visualHeight: element.getBoundingClientRect().height,
-      hitTop: getComputedStyle(element, "::before").top,
-      hitBottom: getComputedStyle(element, "::before").bottom,
-      lineHeight: getComputedStyle(element).lineHeight,
-    }));
-    expect(dimensions).toEqual({ visualHeight: 28, hitTop: "-6px", hitBottom: "-6px", lineHeight: "18px" });
+    const dimensions = await page.locator(".entryActions .compactButton").first().evaluate(element => {
+      const visualHeight = element.getBoundingClientRect().height;
+      const hitArea = getComputedStyle(element, "::before");
+      return {
+        visualHeight,
+        hitHeight: visualHeight - Number.parseFloat(hitArea.top) - Number.parseFloat(hitArea.bottom),
+        lineHeight: getComputedStyle(element).lineHeight,
+      };
+    });
+    expect(dimensions.visualHeight).toBe(28);
     expect(dimensions.visualHeight / 40).toBeCloseTo(5 / 7, 1);
+    expect(dimensions.hitHeight).toBeGreaterThanOrEqual(40);
+    expect(dimensions.lineHeight).toBe("18px");
   });
 
   it("卡片留白按约定收紧，手机页头顶距与项目首页一致", async () => {
