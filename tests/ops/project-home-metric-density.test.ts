@@ -1,5 +1,8 @@
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import MilestoneMetricValue from "@/components/ops/MilestoneMetricValue";
 
 const workspaceHome = readFileSync("components/ops/HomeClient.tsx", "utf8");
 const productionHome = readFileSync("components/ops/ProductionHomeClient.tsx", "utf8");
@@ -200,6 +203,18 @@ describe("项目首页指标卡密度与配色", () => {
     expect(value["line-height"]).toBe("1");
     expect(parts["font-size"]).toBe("inherit");
     expect(parts["line-height"]).toBe("inherit");
+  });
+
+  it("倒计时组件保留空值、今天、已过和未来四种文案", () => {
+    const text = (days: number | null, emptyLabel = "暂无里程碑") => (
+      renderToStaticMarkup(createElement(MilestoneMetricValue, { days, emptyLabel }))
+        .replace(/<[^>]+>/g, "")
+    );
+
+    expect(text(null)).toBe("暂无里程碑");
+    expect(text(0)).toBe("今天");
+    expect(text(-3)).toBe("已过3天");
+    expect(text(11)).toBe("11天");
   });
 
   it("571 与 1118 像素下卡片依内容伸展而不是固定高度", () => {
