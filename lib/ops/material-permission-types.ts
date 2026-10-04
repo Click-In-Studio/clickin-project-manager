@@ -56,5 +56,6 @@ export type MaterialCapabilities = {
   adjustStock: boolean;
   exitStock: boolean;
   returnToSource: boolean;
+  printLabels: boolean;
   manageIdentifiers: boolean;
 };

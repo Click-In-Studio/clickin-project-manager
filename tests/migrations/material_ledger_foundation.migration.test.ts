@@ -55,7 +55,7 @@ describe("integrity verification", () => {
 });
 
 describe("invariance verification", () => {
-  it.skipIf(!snapshot)("旧物料事实转换为一个已收货批次且定义字段不丢失", async () => {
+  it.skipIf(!snapshot)("旧物料事实转换为一个已收货批次且类型信息不丢失", async () => {
     const result = await getPool().query<{
       name: string; category: string; notes: string; created_by: string;
       lot_id: string; confirmed_quantity: string; location: string;

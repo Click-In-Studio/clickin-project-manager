@@ -14,7 +14,7 @@ import {
   type MaterialLabelSize,
   type MaterialLabelSymbology,
 } from "@/lib/ops/material-label";
-import { canManageMaterialIdentifiers } from "@/lib/ops/material-perm";
+import { canPrintMaterialLabels } from "@/lib/ops/material-perm";
 import { readJsonObject } from "@/lib/request-json";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -25,8 +25,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!session) return Response.json({ error: "未登录" }, { status: 401 });
   const access = await getProductionPermissionContext(session.userId, false, productionId);
   if (!access) return Response.json({ error: "无权访问" }, { status: 403 });
-  if (access.isArchived)
-    return Response.json({ error: "已归档的项目不可生成码图片" }, { status: 403 });
   const parsed = await readJsonObject(req);
   if (!parsed.ok) return parsed.response;
   const body = parsed.value;
@@ -51,7 +49,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (!resolved || resolved.identifier.kind !== "internal_code")
       return Response.json({ identifierId, error: "内部码不存在" }, { status: 404 });
     const material = await getMaterial(resolved.identifier.materialId, productionId);
-    if (!material || !await canManageMaterialIdentifiers(actor, productionId, material.id))
+    if (!material || !await canPrintMaterialLabels(actor, productionId, material))
       return Response.json({ identifierId, error: "权限不足" }, { status: 403 });
     if (resolved.status !== "valid")
       return Response.json({ identifierId, status: resolved.status, error: resolved.status === "inactive" ? "该码已失效" : "对应实物或批次已不可用" }, { status: 409 });

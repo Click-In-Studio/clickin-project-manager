@@ -37,8 +37,11 @@ beforeAll(async () => {
 afterAll(async () => { await cleanupProduction(prodId).catch(() => {}); });
 
 function req(body: unknown, userId?: string, method = "POST") {
+  const withIdempotency = method === "POST" && body && typeof body === "object" && !Array.isArray(body)
+    ? { idempotencyKey: `test-${shortId()}-${Date.now()}`, ...body as Record<string, unknown> }
+    : body;
   const request = new NextRequest("http://localhost/api/production/x/materials/x/movements", {
-    method, headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    method, headers: { "content-type": "application/json" }, body: JSON.stringify(withIdempotency),
   });
   if (userId) request.cookies.set(SESSION_COOKIE, createSession({ userId, name: "测试", avatarUrl: null, isAdmin: false }));
   return request;
@@ -82,6 +85,18 @@ describe("物料流转 API", () => {
     expect((await POST(req({ lotId: lot.id, fromBucket: "checked_out", toBucket: "in_stock",
       quantity: 1, returnOfMovementId: movement.id }, ownerId), ctx)).status).toBe(201);
     expect(await getMaterial(material.id, prodId)).toMatchObject({ inStockQuantity: 4, checkedOutQuantity: 1 });
+  });
+
+  it("同一幂等键重试返回同一流水，不重复扣减；换操作复用会被拒绝", async () => {
+    const { material, ctx, body } = await fixture();
+    const idempotencyKey = `retry-${shortId()}-${Date.now()}`;
+    const first = await POST(req({ ...body, idempotencyKey }, ownerId), ctx);
+    const replay = await POST(req({ ...body, idempotencyKey }, ownerId), ctx);
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(201);
+    expect((await replay.json()).movement.id).toBe((await first.json()).movement.id);
+    expect(await getMaterial(material.id, prodId)).toMatchObject({ inStockQuantity: 3, checkedOutQuantity: 2 });
+    expect((await POST(req({ ...body, quantity: 1, idempotencyKey }, ownerId), ctx)).status).toBe(400);
   });
 
   it("普通项目成员可登记签出给自己并返还自己的物料", async () => {
@@ -147,7 +162,20 @@ describe("物料流转 API", () => {
       .toMatchObject({ exitReason: "returned_to_source", toLocation: "设备仓", reason: "演出后退还" });
   });
 
-  it("定义接口拒绝旧状态覆盖；字典查询与旧页面读取没有留下双轨", async () => {
+  it("来源退还重试返回同一归还事实，不会重复结清义务", async () => {
+    const { material, lot, ctx } = await fixture(true);
+    const body = { lotId: lot.id, fromBucket: "in_stock", toBucket: "exited", quantity: 2,
+      exitReason: "returned_to_source", reason: "演出后退还", idempotencyKey: `return-${shortId()}-${Date.now()}` };
+    const first = await POST(req(body, ownerId), ctx);
+    const replay = await POST(req(body, ownerId), ctx);
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(201);
+    expect((await replay.json()).sourceReturn.id).toBe((await first.json()).sourceReturn.id);
+    expect((await listMaterialStockLots(material.id, prodId))[0])
+      .toMatchObject({ inStockQuantity: 3, returnedToSourceQuantity: 2 });
+  });
+
+  it("物料类型接口拒绝旧状态覆盖；字典查询与旧页面读取没有留下双轨", async () => {
     const { material, ctx } = await fixture();
     expect((await PATCH(req({ statusId: "旧状态" }, ownerId, "PATCH"), ctx)).status).toBe(400);
     expect((await PATCH(req({ quantity: 99 }, ownerId, "PATCH"), ctx)).status).toBe(400);

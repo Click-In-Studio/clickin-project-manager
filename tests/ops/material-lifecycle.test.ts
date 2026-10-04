@@ -103,7 +103,8 @@ describe("确定状态机", () => {
     await move({ ...base, fromBucket: "adjustment", toBucket: "in_stock", quantity: 1, reason: "盘点补记" });
     await expect(recordMaterialSourceReturn({ ...base, quantity: 5 }))
       .rejects.toMatchObject({ reason: "source_return_overflow" });
-    await expect(recordMaterialSourceException({ ...base, input: { kind: "lost", quantity: 5, note: "遗失" } }))
+    await expect(recordMaterialSourceException({ ...base, idempotencyKey: `exception-${shortId()}`,
+      input: { kind: "lost", quantity: 5, note: "遗失" } }))
       .rejects.toMatchObject({ reason: "bad_source_exception" });
     expect((await listMaterialStockLots(material.id, prodId)).find(l => l.id === lot.id))
       .toMatchObject({ inStockQuantity: 5, exitedQuantity: 0, returnedToSourceQuantity: 0 });

@@ -417,6 +417,7 @@ const DB_FILE_CEILING = 1000;
  */
 const DB_FILE_GRANDFATHERED: Record<string, number> = {
   "lib/ops/event-db.ts": 3256, // #670 deleteTaskByProduction 清文档引用边（+3）
+  "lib/ops/material-db.ts": 1284, // #310 物料台账批次创建、批量流转与总览读模型（+337）
   "lib/perm/resource-grant-db.ts": 1033, // #761 asset 三级分享进入伪级别行集唯一事实源（+10）
 };
 

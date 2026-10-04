@@ -4,9 +4,8 @@ import { getProductionPermissionContext } from "@/lib/perm/permission-context-db
 import { hasEffectiveGrant, toActor } from "@/lib/perm/grant-check";
 import { canCreateMaterial } from "@/lib/ops/material-perm";
 import { parseTaskSubject } from "@/lib/ops/task-poc";
-import {
-  createMaterial, listMaterials, MaterialError,
-} from "@/lib/ops/material-db";
+import { createMaterialDefinition, getMaterialOverview, listMaterials, MaterialError } from "@/lib/ops/material-db";
+import { isMaterialTrackingStrategy } from "@/lib/ops/material-types";
 import { readJsonObject } from "@/lib/request-json";
 import { getMaterialCapabilities } from "@/lib/ops/material-capabilities";
 
@@ -26,9 +25,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!await hasEffectiveGrant(toActor(session, access.permCtx), productionId, "material", "*", "*", "view"))
     return Response.json({ error: "权限不足" }, { status: 403 });
 
-  const materials = await listMaterials(productionId);
+  const [materials, overview] = await Promise.all([
+    listMaterials(productionId), getMaterialOverview(productionId),
+  ]);
   return Response.json({
-    materials,
+    materials, overview,
     capabilities: await getMaterialCapabilities(
       toActor(session, access.permCtx), productionId, access.isArchived, materials,
     ),
@@ -49,8 +50,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "物料状态由流转记录决定" }, { status: 400 });
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return Response.json({ error: "名称不能为空" }, { status: 400 });
-  if (body.quantity !== undefined && (typeof body.quantity !== "number" || body.quantity < 0))
-    return Response.json({ error: "数量必须是不小于 0 的数字" }, { status: 400 });
+  if (body.quantity !== undefined || body.location !== undefined)
+    return Response.json({ error: "数量和库位请在确认批次时登记" }, { status: 400 });
+  if (body.trackingStrategy !== undefined && !isMaterialTrackingStrategy(body.trackingStrategy))
+    return Response.json({ error: "跟踪方式无效" }, { status: 400 });
 
   // 责任方与 task 同口径：部门 | 用户组，二选一，且必须属于本 production
   const parsed = await parseTaskSubject(productionId, body);
@@ -61,12 +64,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return Response.json({ error: "权限不足" }, { status: 403 });
 
   try {
-    const material = await createMaterial({
+    const material = await createMaterialDefinition({
       productionId, name,
       category: typeof body.category === "string" ? body.category : "",
+      trackingStrategy: body.trackingStrategy,
+      unit: typeof body.unit === "string" ? body.unit : undefined,
+      quantityScale: typeof body.quantityScale === "number" ? body.quantityScale : undefined,
       subject: parsed.subject,
-      location: typeof body.location === "string" ? body.location : "",
-      quantity: typeof body.quantity === "number" ? body.quantity : 1,
       notes: typeof body.notes === "string" ? body.notes : "",
       createdBy: session.userId,
     });

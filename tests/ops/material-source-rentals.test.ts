@@ -165,7 +165,8 @@ describe("退还来源方与异常", () => {
     })).rejects.toMatchObject({ reason: "source_return_overflow" });
     await expect(recordMaterialSourceException({
       productionId: prodId, lotId: rentedLot.id,
-      input: { kind: "lost", quantity: 1 }, createdBy: ownerId,
+      input: { kind: "lost", quantity: 1 }, idempotencyKey: `exception-${shortId()}`,
+      createdBy: ownerId,
     })).rejects.toMatchObject({ reason: "bad_source_exception" });
 
     const damaged = await createMaterial({
@@ -194,7 +195,8 @@ describe("退还来源方与异常", () => {
       .toMatchObject({ outstandingQuantity: 1, isOverdue: true, status: "fully_arrived" });
     await recordMaterialSourceException({
       productionId: prodId, lotId: lot.id,
-      input: { kind: "damaged", quantity: 1 }, createdBy: ownerId,
+      input: { kind: "damaged", quantity: 1 }, idempotencyKey: `exception-${shortId()}`,
+      createdBy: ownerId,
     });
     expect((await listMaterialSourceObligations(prodId)).find(row => row.lotId === lot.id))
       .toMatchObject({ openExceptionQuantity: 1, status: "exception_open" });
