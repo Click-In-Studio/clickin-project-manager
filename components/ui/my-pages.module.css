@@ -2258,9 +2258,25 @@
   }
   .approvalCenterCategoryList small { min-width: 18px; padding-inline: 4px; }
   .approvalCenterFilters { padding: 0 0 10px; border-bottom: 0; }
-  .approvalCenterSearch { margin-bottom: 8px; }
-  .approvalCenterFilterRow { gap: 5px; }
-  .approvalCenterFilterRow [role="combobox"] { min-height: 30px; padding: 5px 6px; font-size: 9px; }
+  .approvalCenterSearch { align-items: center; margin-bottom: 8px; }
+  .approvalCenterSearch input {
+    /* 保留 16px 聚焦字号避免 iOS 自动放大，视觉上同步缩小控件与输入/占位文字。 */
+    min-height: 34px;
+    padding: 5px 9px;
+    zoom: .875;
+  }
+  .approvalCenterMobileTabs button { padding-inline: 8px; font-size: 11px; }
+  .approvalCenterFilterRow { gap: 4px; }
+  .approvalCenterFilterRow label { font-size: 10px; white-space: nowrap; }
+  .approvalCenterFilterRow [role="combobox"] {
+    max-width: 100%;
+    min-height: 28px;
+    gap: 2px;
+    padding: 4px;
+    overflow: hidden;
+    font-size: 10px;
+    white-space: nowrap;
+  }
   .approvalCenterList { padding: 0; overflow: visible; }
   .approvalCenterList > button {
     padding: 12px 4px;
@@ -2276,7 +2292,7 @@
   .approvalCenterSummary small { margin-top: 2px; line-height: 1.2; }
 }
 
-/* 批注 2 / 4：极窄屏改成三条横行并收紧上下留白；队列页签始终单行横向滚动。 */
+/* 批注 2 / 4–7：极窄屏收紧上下留白；页签可横向滚动，三个筛选器保持同排。 */
 @media (max-width: 360px) {
   .approvalCenterWorkspace { padding: 12px 10px calc(72px + env(safe-area-inset-bottom)); }
   .approvalCenterWorkspace .pageHeader { margin-bottom: 12px; }
@@ -2290,11 +2306,12 @@
   .approvalCenterSummary p { flex: 1; flex-direction: row; align-items: baseline; justify-content: space-between; gap: 8px; }
   .approvalCenterSummary small { margin-top: 0; text-align: right; }
   .approvalCenterPanel { padding: 9px 10px calc(16px + env(safe-area-inset-bottom)) !important; }
-  .approvalCenterMobileTabs button { padding-inline: 8px; font-size: 9px; }
+  .approvalCenterMobileTabs button { padding-inline: 6px; font-size: 11px; }
   .approvalCenterMobileQueues > button { padding-block: 10px; }
-  .approvalCenterFilterRow { grid-template-columns: 1fr; }
-  .approvalCenterFilterRow label { flex-direction: row; align-items: center; justify-content: space-between; }
-  .approvalCenterFilterRow [role="combobox"] { width: min(72%, 210px); }
+  .approvalCenterFilterRow {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 3px;
+  }
 }
 
 .approvalDetailFields {

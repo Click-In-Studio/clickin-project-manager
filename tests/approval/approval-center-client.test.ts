@@ -76,6 +76,22 @@ describe("项目审批中心客户端契约", () => {
     expect(styles).toMatch(/\.approvalCenterMobileTabs button\s*\{[\s\S]*?white-space:\s*nowrap/);
   });
 
+  it("批注 4–7：极窄屏保持三列筛选，并提高搜索、页签和筛选文字密度", () => {
+    const mobileStart = styles.indexOf("@media (max-width: 767px)", styles.indexOf("/* ── 审批中心"));
+    const narrowStart = styles.indexOf("@media (max-width: 360px)", mobileStart);
+    const mobileBlock = styles.slice(mobileStart, narrowStart);
+    const narrowBlock = styles.slice(narrowStart);
+
+    expect(mobileBlock).toMatch(/\.approvalCenterSearch input\s*\{[\s\S]*?min-height:\s*34px;[\s\S]*?zoom:\s*\.875/);
+    expect(mobileBlock).toContain("保留 16px 聚焦字号避免 iOS 自动放大");
+    expect(mobileBlock).toMatch(/\.approvalCenterMobileTabs button\s*\{[^}]*font-size:\s*11px/);
+    expect(mobileBlock).toMatch(/\.approvalCenterFilterRow label\s*\{[^}]*font-size:\s*10px;[^}]*white-space:\s*nowrap/);
+    expect(mobileBlock).toMatch(/\.approvalCenterFilterRow \[role="combobox"\]\s*\{[^}]*min-height:\s*28px;[^}]*font-size:\s*10px;[^}]*white-space:\s*nowrap/);
+
+    expect(narrowBlock).toMatch(/\.approvalCenterFilterRow\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+    expect(narrowBlock).not.toMatch(/\.approvalCenterFilterRow\s*\{[^}]*grid-template-columns:\s*1fr/);
+  });
+
   it("456px 保持统计块紧凑横排，319–360px 改为三条横行并收紧留白", () => {
     expect(styles).toContain("@media (min-width: 361px) and (max-width: 500px)");
     expect(styles).toMatch(/@media \(max-width: 360px\)[\s\S]*?\.approvalCenterSummary\s*\{\s*grid-template-columns:\s*1fr/);
