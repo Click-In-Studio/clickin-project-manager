@@ -12,7 +12,13 @@ export type AdminMetric = {
 type Props = {
   items: AdminMetric[];
   columns: number;
-  responsive?: "overview" | "standard" | "permission";
+  responsive?:
+    | "overview"
+    | "standard"
+    | "permission"
+    | "compactThree"
+    | "seatPriority"
+    | "allOrStacked";
 };
 
 export default function AdminMetricGrid({

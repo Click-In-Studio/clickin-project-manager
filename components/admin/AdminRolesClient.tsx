@@ -180,6 +180,7 @@ export default function AdminRolesClient({
       {/* 摘要 */}
       <AdminMetricGrid
         columns={3}
+        responsive="compactThree"
         items={[
           { value: String(roles.length), label: "角色", hint: "含系统角色" },
           { value: String(members.filter(m => m.roles.length > 0).length), label: "已指派成员", hint: `共 ${members.length} 名成员` },

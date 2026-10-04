@@ -132,6 +132,7 @@ export default function AdminTemplatesClient({ productionId, productionName, dep
       {/* 摘要 */}
       <AdminMetricGrid
         columns={3}
+        responsive="allOrStacked"
         items={[
           { value: String(types.length + orphanTemplates.length), label: "Cue 表模版", hint: "类型总数" },
           { value: String(rows.length), label: "声明行", hint: "部门 × 模版" },
