@@ -554,11 +554,33 @@
 .rowIcon {
   width: 36px;
   height: 36px;
+  flex: 0 0 36px;
   display: grid;
   place-items: center;
   border-radius: 8px;
   background: var(--script-soft);
   color: var(--script);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.identityGlyph {
+  width: 21px;
+  height: 21px;
+  display: block;
+  fill: currentColor;
+}
+
+.identityGlyph rect,
+.identityGlyph rect + path {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.identityFallback {
   font-size: 12px;
   font-weight: 700;
 }
@@ -788,6 +810,10 @@
   box-sizing: border-box;
 }
 
+.bindInput::placeholder {
+  font-size: 13px;
+}
+
 .bindInput:focus {
   border-color: var(--script);
   box-shadow: 0 0 0 3px rgba(47,102,112,.1);
@@ -1002,6 +1028,11 @@
 
   .compactField textarea {
     min-height: 58px;
+  }
+
+  .compactField input::placeholder,
+  .compactField textarea::placeholder {
+    font-size: 13px;
   }
 
   .fullField {
