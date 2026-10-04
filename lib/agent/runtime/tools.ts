@@ -54,6 +54,8 @@ export interface RunHandle {
   noteMutations?: (toolCallId: string, records: MutationRecord[]) => void;
   /** 本 agent_run 从外部 registry 生成的检索目录；find_tools 与主动召回共用。 */
   runtimeToolCatalog?: ToolCatalogEntry[];
+  /** run 中途出现新附件后，按 MIME 把匹配的动态 MMP 工具加入下一轮工具面。 */
+  warmAttachments?: (attachmentIds: string[]) => Promise<void>;
 }
 
 /** 写工具成功后的变更信号（前端 lib/agent/agent-mutations.ts 派发给页面订阅者决定怎么刷） */
@@ -957,13 +959,15 @@ export const DEFS: Def[] = [
             throw new WebToolError("当前运行没有会话上下文，无法保存远端文件附件。");
           }
           const { saveWebFetchedAttachment, formatSavedWebAttachment } = await import("@/lib/agent/tools/web-fetch-tools");
-          return formatSavedWebAttachment(await saveWebFetchedAttachment({
+          const saved = await saveWebFetchedAttachment({
             userId: ctx.userId,
             sessionId: ctx.run.sessionId,
             runId: ctx.run.runId,
             toolCallId,
             binary,
-          }));
+          });
+          await ctx.run.warmAttachments?.([saved.attachment.id]);
+          return formatSavedWebAttachment(saved);
         });
         return typeof result === "string" ? result : formatFetchedPage(result);
       } catch (err) {

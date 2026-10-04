@@ -249,6 +249,7 @@ async function execute(input: ExecuteInput): Promise<void> {
     },
     isDetached: () => detached,
     noteMutations: (toolCallId, records) => { audited.set(toolCallId, records); },
+    warmAttachments: (attachmentIds) => warmAttachmentsImpl(attachmentIds),
     pageKey: input.pageKey ?? null,
     ...(schedule
       ? {
