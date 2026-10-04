@@ -80,7 +80,8 @@ describe("权限中心顶部页签真实浏览器布局", () => {
   }
 
   it("空间比 319px 更窄时只在页签容器内部滚动，并能将选中项带入视野", async () => {
-    await mountTabs(240);
+    await mountTabs(319);
+    await page.locator(".tabList").evaluate(tabList => { tabList.style.width = "140px"; });
     const metrics = await page.locator(".tabList").evaluate((tabList) => {
       const lastTab = tabList.querySelectorAll<HTMLElement>(".tab").item(3);
       lastTab.setAttribute("aria-selected", "true");
