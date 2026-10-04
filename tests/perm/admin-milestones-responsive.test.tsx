@@ -92,12 +92,10 @@ describe("配置中心里程碑响应式布局", () => {
     it(`${width}px 下操作与信息保持同排且页面无横向溢出`, async () => {
       await mountMilestones(width);
       const metrics = await page.locator(".milestoneRow").evaluate(row => {
-        const bounds = (selector: string) => row.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
         const actionButtons = [...row.querySelectorAll<HTMLElement>(".rowAction")].map(button => button.getBoundingClientRect());
         const actions = row.querySelector<HTMLElement>(".rowActions")!;
         const name = row.querySelector<HTMLElement>(".milestoneName")!;
-        const date = bounds(".milestoneDate");
-        const countdown = bounds(".countdown");
+        const metaLine = row.querySelector<HTMLElement>(".metaLine")!;
         const rowBounds = row.getBoundingClientRect();
         const actionStyle = getComputedStyle(row.querySelector<HTMLElement>(".rowAction")!);
         return {
@@ -108,8 +106,7 @@ describe("配置中心里程碑响应式布局", () => {
           actionsRight: actions.getBoundingClientRect().right,
           actionGap: Number.parseFloat(getComputedStyle(actions).gap || "0"),
           actionPaddingLeft: Number.parseFloat(actionStyle.paddingLeft),
-          dateTop: date.top,
-          countdownTop: countdown.top,
+          metaFlexWrap: getComputedStyle(metaLine).flexWrap,
           nameWhiteSpace: getComputedStyle(name).whiteSpace,
           nameOverflow: getComputedStyle(name).overflow,
           nameTextOverflow: getComputedStyle(name).textOverflow,
@@ -122,7 +119,7 @@ describe("配置中心里程碑响应式布局", () => {
       expect(metrics.row.right).toBeLessThanOrEqual(metrics.viewportWidth);
       expect(metrics.actionTops[0]).toBe(metrics.actionTops[1]);
       expect(metrics.actionsRight).toBeLessThanOrEqual(metrics.row.right);
-      expect(Math.abs(metrics.dateTop - metrics.countdownTop)).toBeLessThan(1);
+      expect(metrics.metaFlexWrap).toBe("nowrap");
       expect(metrics.nameWhiteSpace).toBe("nowrap");
       expect(metrics.nameOverflow).toBe("hidden");
       expect(metrics.nameTextOverflow).toBe("ellipsis");
