@@ -2,7 +2,7 @@
 
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import PermissionKeyPicker, { type Vocabulary } from "@/components/perm/PermissionKeyPicker";
@@ -14,6 +14,7 @@ import { BASE_PATH } from "@/lib/base-path";
 import type { MemberStatus } from "@/lib/perm/member-status-shared";
 import { MEMBER_STATUS_LABEL } from "@/lib/perm/member-status-shared";
 import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
+import permissionStyles from "@/components/admin/admin-permission-center.module.css";
 
 type Dept = { id: string; name: string; parentId: string | null; kind: "dept" | "group"; displayOrder: number; memberUserIds: string[] };
 type Role = { id: string; name: string; permissions: string[] };
@@ -46,6 +47,7 @@ type Props = {
 };
 
 const PRODUCER = "制作人";
+type PermissionTab = "dept" | "role" | "override" | "approver";
 
 const SECTION_LABEL: React.CSSProperties = {
   margin: "0 0 8px", fontSize: 10, fontWeight: 700, letterSpacing: ".1em",
@@ -90,7 +92,12 @@ export default function AdminPermissionCenterClient({
     ...(caps.overrideView ? [["override", "人事权限"] as const] : []),
     ...(caps.approverView ? [["approver", "资源审批人"] as const] : []),
   ];
-  const [tab, setTab] = useState<"dept" | "role" | "override" | "approver">(tabs[0]?.[0] ?? "dept");
+  const [tab, setTab] = useState<PermissionTab>(tabs[0]?.[0] ?? "dept");
+  const tabRefs = useRef<Partial<Record<PermissionTab, HTMLButtonElement | null>>>({});
+
+  useEffect(() => {
+    tabRefs.current[tab]?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [tab]);
 
   const [deptRows, setDeptRows] = useState(initialDeptRows);
   const [roles, setRoles] = useState(initialRoles);
@@ -278,12 +285,19 @@ export default function AdminPermissionCenterClient({
     [deptRows],
   );
 
-  const segBtn = (active: boolean): React.CSSProperties => ({
-    flex: 1, padding: "7px 0", borderRadius: 8, border: "none", cursor: "pointer",
-    fontSize: 12, fontWeight: 700,
-    background: active ? "var(--ink)" : "transparent",
-    color: active ? "#fff" : "var(--muted)",
-  });
+  function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, current: PermissionTab) {
+    const currentIndex = tabs.findIndex(([key]) => key === current);
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabs.length;
+    if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = tabs.length - 1;
+    if (nextIndex === null || !tabs[nextIndex]) return;
+    event.preventDefault();
+    const next = tabs[nextIndex][0];
+    setTab(next);
+    tabRefs.current[next]?.focus();
+  }
 
   const listBtn = (active: boolean): React.CSSProperties => ({
     display: "flex", alignItems: "center", gap: 8, width: "100%",
@@ -312,18 +326,37 @@ export default function AdminPermissionCenterClient({
       />
 
       {/* segmented */}
-      <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface-2)", borderRadius: 10, width: 360, marginBottom: 14 }}>
+      <div className={permissionStyles.tabList} role="tablist" aria-label="权限类型">
         {tabs.map(([key, label]) => (
-          <button key={key} style={segBtn(tab === key)} onClick={() => setTab(key)}>{label}</button>
+          <button
+            key={key}
+            ref={node => { tabRefs.current[key] = node; }}
+            id={`permission-tab-${key}`}
+            className={permissionStyles.tab}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            aria-controls="permission-center-panel"
+            tabIndex={tab === key ? 0 : -1}
+            onClick={() => setTab(key)}
+            onKeyDown={event => handleTabKeyDown(event, key)}
+          >
+            {label}
+          </button>
         ))}
       </div>
 
       {error && <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--danger)", fontWeight: 700 }}>{error}</p>}
 
-      <section style={{
-        background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22,
-        height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column",
-      }}>
+      <section
+        id="permission-center-panel"
+        role="tabpanel"
+        aria-labelledby={`permission-tab-${tab}`}
+        style={{
+          background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: 22,
+          height: "calc(100vh - 320px)", minHeight: 460, display: "flex", flexDirection: "column",
+        }}
+      >
         <div className={styles.desktopOnly} style={{ flex: 1, minHeight: 0 }}>
           <div className={styles.splitLayout} style={{ height: "100%", minHeight: 0 }}>
             {/* ── 左栏 ── */}
