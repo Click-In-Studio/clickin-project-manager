@@ -173,6 +173,24 @@ export async function putR2Object(key: string, body: Buffer, mimeType: string): 
   if (!res.ok) throw new Error(`R2 PUT failed: ${res.status} ${await res.text()}`);
 }
 
+/** 从服务端把流直接写入 R2；调用方负责体积限制与读取中止。 */
+export async function putR2ObjectStream(
+  key: string,
+  body: ReadableStream<Uint8Array>,
+  mimeType: string,
+): Promise<void> {
+  const { url, contentType } = presignedPut(key, mimeType);
+  // Node 的 fetch 对流式请求体要求 duplex=half；DOM RequestInit 尚未声明该字段。
+  const init: RequestInit & { duplex: "half" } = {
+    method: "PUT",
+    headers: { "Content-Type": contentType },
+    body,
+    duplex: "half",
+  };
+  const res = await fetch(url, init);
+  if (!res.ok) throw new Error(`R2 PUT failed: ${res.status} ${await res.text()}`);
+}
+
 /** Delete an object from R2. */
 export async function deleteR2Object(key: string): Promise<void> {
   const { dateStr, amzDate } = dateParts();

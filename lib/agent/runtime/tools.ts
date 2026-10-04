@@ -945,13 +945,27 @@ export const DEFS: Def[] = [
   },
   {
     mcpName: "web.fetch",
-    description: "抓取一个公开网页并抽出正文文本（EN: web fetch page）。用于读搜索结果、用户给的链接；内网地址不可抓，正文超长会截断。",
+    description: "抓取公开 URL（EN: web fetch page or file）。网页抽出正文；PDF、图片、音视频、压缩包等原文件保存为当前会话临时附件并返回 attachmentId。内网地址不可抓，正文超长会截断。",
     parameters: Type.Object({ url: Type.String({ minLength: 1, description: "http/https 地址" }) }),
     readOnly: true,
-    execute: async (ctx, args) => {
+    execute: async (ctx, args, toolCallId) => {
       const { webFetch, formatFetchedPage, WebToolError } = await import("./web-tools");
       try {
-        return formatFetchedPage(await webFetch(String(args.url ?? ""), ctx.run?.signal));
+        const result = await webFetch(String(args.url ?? ""), ctx.run?.signal, async (binary) => {
+          if (!ctx.run?.sessionId || !ctx.run.runId) {
+            await binary.body.cancel().catch(() => {});
+            throw new WebToolError("当前运行没有会话上下文，无法保存远端文件附件。");
+          }
+          const { saveWebFetchedAttachment, formatSavedWebAttachment } = await import("@/lib/agent/tools/web-fetch-tools");
+          return formatSavedWebAttachment(await saveWebFetchedAttachment({
+            userId: ctx.userId,
+            sessionId: ctx.run.sessionId,
+            runId: ctx.run.runId,
+            toolCallId,
+            binary,
+          }));
+        });
+        return typeof result === "string" ? result : formatFetchedPage(result);
       } catch (err) {
         if (err instanceof WebToolError) return err.message;
         if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return "抓取超时";

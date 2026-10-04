@@ -16,12 +16,16 @@ export type AgentAttachment = {
   id: string; sessionId: string; r2Key: string; fileName: string; mimeType: string;
   mediaKind: string | null; fileSize: number; status: AgentAttachmentStatus;
   expiresAt?: string; absoluteExpiresAt?: string; releaseUntil?: string | null; promotedAssetId?: string | null;
+  sourceKind?: "web_fetch" | null; sourceRunId?: string | null; sourceToolCallId?: string | null;
+  sourceUrl?: string | null; sourceFinalUrl?: string | null;
 };
 
 type Row = {
   id: string; session_id: string; r2_key: string; file_name: string; mime_type: string;
   media_kind: string | null; file_size: string | number; status: AgentAttachmentStatus;
   expires_at: Date; absolute_expires_at: Date; release_until: Date | null; promoted_asset_id: string | null;
+  source_kind: "web_fetch" | null; source_run_id: string | null; source_tool_call_id: string | null;
+  source_url: string | null; source_final_url: string | null;
 };
 type UsageRow = { bytes: string | number; count: string | number };
 const ACTIVE_OBJECT_STATUSES = "('reserved', 'present', 'delete_pending', 'deleting')";
@@ -32,6 +36,8 @@ function mapRow(row: Row): AgentAttachment {
     mimeType: row.mime_type, mediaKind: row.media_kind, fileSize: Number(row.file_size), status: row.status,
     expiresAt: row.expires_at.toISOString(), absoluteExpiresAt: row.absolute_expires_at.toISOString(),
     releaseUntil: row.release_until?.toISOString() ?? null, promotedAssetId: row.promoted_asset_id,
+    sourceKind: row.source_kind, sourceRunId: row.source_run_id, sourceToolCallId: row.source_tool_call_id,
+    sourceUrl: row.source_url, sourceFinalUrl: row.source_final_url,
   };
 }
 
@@ -65,6 +71,9 @@ export async function getAttachmentUsage(userId: string, sessionId: string) {
 /** 附件可能先于第一条消息上传，因此在这里按已签发 session key 建空会话。 */
 export async function createPendingAttachment(input: {
   sessionId: string; userId: string; fileName: string; mimeType: string; mediaKind?: string | null; fileSize: number;
+  source?: {
+    kind: "web_fetch"; runId: string; toolCallId: string; url: string; finalUrl: string;
+  };
 }): Promise<AgentAttachment> {
   const identity = parseSessionIdentity(input.sessionId);
   if (!identity || identity.userId !== input.userId) throw Object.assign(new Error("无权访问该会话"), { status: 403 });
@@ -86,6 +95,26 @@ export async function createPendingAttachment(input: {
       throw Object.assign(new Error("无权访问该会话"), { status: 403 });
     }
     await lockUserQuota(client, input.userId);
+    if (input.source) {
+      const run = await client.query<{ ok: number }>(
+        `SELECT 1 AS ok FROM agent_run WHERE id = $1 AND session_id = $2`,
+        [input.source.runId, input.sessionId],
+      );
+      if (!run.rows[0]) throw Object.assign(new Error("运行上下文与会话不匹配"), { status: 403 });
+      const existing = await client.query<Row>(
+        `SELECT a.* FROM agent_session_attachment a
+         WHERE a.session_id = $1 AND a.source_kind = 'web_fetch'
+           AND a.source_run_id = $2 AND a.status IN ('pending', 'ready')
+           AND (a.source_tool_call_id = $3 OR a.source_final_url = $4)
+         ORDER BY CASE a.status WHEN 'ready' THEN 0 ELSE 1 END, a.created_at
+         LIMIT 1`,
+        [input.sessionId, input.source.runId, input.source.toolCallId, input.source.finalUrl],
+      );
+      if (existing.rows[0]) {
+        await client.query("COMMIT");
+        return mapRow(existing.rows[0]);
+      }
+    }
     const [sessionUsage, userUsage] = await Promise.all([
       quotaUsage(client, input.userId, input.sessionId), quotaUsage(client, input.userId),
     ]);
@@ -97,9 +126,13 @@ export async function createPendingAttachment(input: {
     }
     const inserted = await client.query<Row>(
       `INSERT INTO agent_session_attachment
-         (id, session_id, r2_key, file_name, mime_type, media_kind, file_size, expires_at, absolute_expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,now() + interval '2 hours',now() + interval '30 days') RETURNING *`,
-      [id, input.sessionId, r2Key, safeName, input.mimeType, input.mediaKind ?? null, input.fileSize],
+         (id, session_id, r2_key, file_name, mime_type, media_kind, file_size, expires_at, absolute_expires_at,
+          source_kind, source_run_id, source_tool_call_id, source_url, source_final_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,now() + interval '2 hours',now() + interval '30 days',$8,$9,$10,$11,$12)
+       RETURNING *`,
+      [id, input.sessionId, r2Key, safeName, input.mimeType, input.mediaKind ?? null, input.fileSize,
+        input.source?.kind ?? null, input.source?.runId ?? null, input.source?.toolCallId ?? null,
+        input.source?.url ?? null, input.source?.finalUrl ?? null],
     );
     await client.query(
       `INSERT INTO agent_attachment_object

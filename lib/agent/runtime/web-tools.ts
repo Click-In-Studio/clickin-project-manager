@@ -44,7 +44,27 @@ export function formatSearchHits(query: string, hits: SearchHit[]): string {
 
 export interface FetchedPage { url: string; title: string; text: string; truncated: boolean }
 
-export async function webFetch(rawUrl: string, signal?: AbortSignal): Promise<FetchedPage> {
+export interface FetchedBinary {
+  requestedUrl: string;
+  url: string;
+  fileName: string;
+  mimeType: string;
+  contentLength: number | null;
+  body: ReadableStream<Uint8Array>;
+}
+
+export async function webFetch(rawUrl: string, signal?: AbortSignal): Promise<FetchedPage>;
+export async function webFetch<T>(
+  rawUrl: string,
+  signal: AbortSignal | undefined,
+  onBinary: (binary: FetchedBinary) => Promise<T>,
+): Promise<FetchedPage | T>;
+
+export async function webFetch<T>(
+  rawUrl: string,
+  signal?: AbortSignal,
+  onBinary?: (binary: FetchedBinary) => Promise<T>,
+): Promise<FetchedPage | T> {
   let url: URL;
   try { url = new URL(rawUrl); } catch { throw new WebToolError("URL 不合法"); }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new WebToolError("只支持 http/https");
@@ -88,19 +108,35 @@ export async function webFetch(rawUrl: string, signal?: AbortSignal): Promise<Fe
     throw new WebToolError(`抓取失败：HTTP ${res.status}`);
   }
 
-  // 二进制（PDF / 图片 / 压缩包…）不当文本读（#685）：解码出来是满是 NUL 的乱码，模型读不了、
-  // 落库也会被 jsonb 拒。按 content-type 先分流，没有 content-type 的再嗅探正文。真正的
-  // 出路（存为项目资产、抽正文）是另一个 feature，这里只如实告诉模型。
-  const ctype = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-  if (ctype && !isTextualContentType(ctype)) {
-    await res.body?.cancel().catch(() => {});
-    throw new WebToolError(binaryRejection(ctype, res.headers.get("content-length")));
+  // 先读第一块做保守嗅探，再把同一条流交给文本抽取或附件落盘；PDF 始终是一整个原文件，
+  // 页面图/OCR 等由附件派生物账本管理，不在这里拆页（#690）。
+  const reader = res.body?.getReader();
+  const firstRead = reader ? await reader.read() : { done: true as const, value: undefined };
+  const first = firstRead.value ?? new Uint8Array();
+  const declaredType = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  const sniffedType = sniffBinaryMime(first.subarray(0, 8192));
+  const binary = Boolean(sniffedType || (declaredType && !isTextualContentType(declaredType)) || (!declaredType && looksBinary(first)));
+  if (binary) {
+    const mimeType = sniffedType ?? (declaredType || "application/octet-stream");
+    const contentLength = parseContentLength(res.headers.get("content-length"));
+    const body = replayStream(reader, first, firstRead.done);
+    if (!onBinary) {
+      await body.cancel().catch(() => {});
+      throw new WebToolError(binaryRejection(mimeType, res.headers.get("content-length")));
+    }
+    return onBinary({
+      requestedUrl: url.href,
+      url: current.href,
+      fileName: fetchedFileName(res.headers.get("content-disposition"), current, mimeType),
+      mimeType,
+      contentLength,
+      body,
+    });
   }
-  const body = await readCapped(res, WEB_FETCH_MAX_BYTES);
-  if (!ctype && looksBinary(body)) throw new WebToolError(binaryRejection("类型未知", res.headers.get("content-length")));
+  const body = await readCapped(reader, first, firstRead.done, WEB_FETCH_MAX_BYTES);
   let title = "";
   let text: string;
-  if (/html|xml/i.test(ctype) || /^\s*<(!doctype|html)/i.test(body.slice(0, 200))) {
+  if (/html|xml/i.test(declaredType) || /^\s*<(!doctype|html)/i.test(body.slice(0, 200))) {
     ({ title, text } = htmlToText(body));
   } else {
     text = body;
@@ -121,12 +157,75 @@ function binaryRejection(ctype: string, contentLength: string | null): string {
   const bytes = Number(contentLength);
   const size = Number.isFinite(bytes) && bytes > 0 ? `，约 ${(bytes / 1024 / 1024).toFixed(1)} MB` : "";
   const kind = ctype === "application/pdf" ? "PDF" : "二进制";
-  return `该链接是${kind}文件（${ctype}${size}），目前只能读网页正文，不能读 PDF / 图片 / 压缩包等文件。如需使用其内容，请让用户手动下载后上传为项目资产。`;
+  return `该链接是${kind}文件（${ctype}${size}），当前调用没有会话附件落点。`;
 }
 
-/** 无 content-type 时的嗅探：开头 8000 字符里出现 NUL 就当二进制。 */
-function looksBinary(body: string): boolean {
-  return body.slice(0, 8000).includes("\u0000");
+/** 无 content-type 时的兜底嗅探：前缀含 NUL 就当二进制。 */
+function looksBinary(body: Uint8Array): boolean {
+  return body.includes(0);
+}
+
+function sniffBinaryMime(body: Uint8Array): string | null {
+  const ascii = (start: number, length: number) => new TextDecoder("ascii").decode(body.subarray(start, start + length));
+  if (ascii(0, 5) === "%PDF-") return "application/pdf";
+  if (body.length >= 8 && body[0] === 0x89 && ascii(1, 3) === "PNG") return "image/png";
+  if (body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff) return "image/jpeg";
+  if (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a") return "image/gif";
+  if (body[0] === 0x50 && body[1] === 0x4b && [0x03, 0x05, 0x07].includes(body[2] ?? -1) && [0x04, 0x06, 0x08].includes(body[3] ?? -1)) return "application/zip";
+  if (body[0] === 0x1f && body[1] === 0x8b) return "application/gzip";
+  if (ascii(0, 4) === "RIFF" && ascii(8, 4) === "WEBP") return "image/webp";
+  if (ascii(0, 4) === "RIFF" && ascii(8, 4) === "WAVE") return "audio/wav";
+  if (ascii(4, 4) === "ftyp") return "video/mp4";
+  return null;
+}
+
+function parseContentLength(value: string | null): number | null {
+  if (!value || !/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function fetchedFileName(contentDisposition: string | null, url: URL, mimeType: string): string {
+  if (contentDisposition) {
+    const encoded = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(contentDisposition)?.[1];
+    if (encoded) {
+      try { return decodeURIComponent(encoded.replace(/^"|"$/g, "")); } catch { /* URL 文件名兜底 */ }
+    }
+    const plain = /filename\s*=\s*(?:"([^"]+)"|([^;]+))/i.exec(contentDisposition);
+    const value = (plain?.[1] ?? plain?.[2])?.trim();
+    if (value) return value;
+  }
+  const last = url.pathname.split("/").filter(Boolean).at(-1);
+  if (last) {
+    try { return decodeURIComponent(last); } catch { return last; }
+  }
+  const extension: Record<string, string> = {
+    "application/pdf": ".pdf", "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
+    "image/webp": ".webp", "application/zip": ".zip", "application/gzip": ".gz",
+    "audio/wav": ".wav", "video/mp4": ".mp4",
+  };
+  return `download${extension[mimeType] ?? ""}`;
+}
+
+function replayStream(
+  reader: ReadableStreamDefaultReader<Uint8Array> | undefined,
+  first: Uint8Array,
+  done: boolean,
+): ReadableStream<Uint8Array> {
+  let sentFirst = false;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (!sentFirst) {
+        sentFirst = true;
+        if (first.byteLength) { controller.enqueue(first); return; }
+      }
+      if (done || !reader) { controller.close(); return; }
+      const next = await reader.read();
+      if (next.done) controller.close();
+      else controller.enqueue(next.value);
+    },
+    async cancel(reason) { await reader?.cancel(reason).catch(() => {}); },
+  });
 }
 
 /**
@@ -178,11 +277,25 @@ function codePointOrReplacement(n: number): string {
 }
 
 /** 按字节上限读体。截断点落在多字节字符中间时那个字符会解成 �——正文只是给模型看的，best-effort。 */
-async function readCapped(res: { body: unknown }, max: number): Promise<string> {
-  const reader = (res.body as ReadableStream<Uint8Array> | null)?.getReader();
-  if (!reader) return "";
+async function readCapped(
+  reader: ReadableStreamDefaultReader<Uint8Array> | undefined,
+  first: Uint8Array,
+  doneAfterFirst: boolean,
+  max: number,
+): Promise<string> {
+  if (!reader) return new TextDecoder("utf-8", { fatal: false }).decode(first.subarray(0, max));
   const chunks: Uint8Array[] = [];
   let total = 0;
+  if (first.byteLength) {
+    const kept = first.subarray(0, max);
+    chunks.push(kept);
+    total = kept.byteLength;
+    if (first.byteLength > max) await reader.cancel().catch(() => {});
+  }
+  if (doneAfterFirst || total >= max) {
+    if (!doneAfterFirst) await reader.cancel().catch(() => {});
+    return new TextDecoder("utf-8", { fatal: false }).decode(Buffer.concat(chunks));
+  }
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;

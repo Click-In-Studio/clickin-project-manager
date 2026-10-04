@@ -52,6 +52,7 @@ import {
   listAttachmentsForSession,
   recordAttachmentAccess,
   scheduleSessionAttachmentDeletionInTx,
+  type AgentAttachment,
 } from "@/lib/agent/attachment-db";
 import { preflightAttachments } from "@/lib/mmp/attachment-preflight";
 import { buildMmpToolSurface } from "./mmp-tools";
@@ -980,16 +981,17 @@ export async function getHistory(sessionId: string): Promise<ChatTranscriptEntry
       const attached = attachmentIdsFromContext(raw)
         .map((id) => attachments.get(id))
         .filter((a) => a !== undefined)
-        .map((a) => ({
-          id: a.id, fileName: a.fileName, mimeType: a.mimeType, mediaKind: a.mediaKind,
-          ...(a.status !== "ready" ? { status: a.status } : {}),
-          ...(a.releaseUntil ? { releaseUntil: a.releaseUntil } : {}),
-          ...(a.promotedAssetId ? { promotedAssetId: a.promotedAssetId } : {}),
-        }));
+        .map(chatAttachment);
       if (content) entries.push({ role: "user", content, ...(attached.length ? { attachments: attached } : {}) });
     } else if (m.role === "toolResult") {
       const result = textOf(m.content).slice(0, TOOL_PAYLOAD_MAX_CHARS);
-      entries.push({ role: "tool", name: m.toolName, id: m.toolCallId || undefined, ...(result ? { result } : {}) });
+      const attached = [...attachments.values()]
+        .filter((a) => a.sourceKind === "web_fetch" && a.sourceToolCallId === m.toolCallId)
+        .map(chatAttachment);
+      entries.push({
+        role: "tool", name: m.toolName, id: m.toolCallId || undefined,
+        ...(result ? { result } : {}), ...(attached.length ? { attachments: attached } : {}),
+      });
     } else if (m.role === "assistant") {
       const thinking = thinkingOf(m.content);
       if (thinking) entries.push({ role: "thinking", content: thinking });
@@ -998,6 +1000,16 @@ export async function getHistory(sessionId: string): Promise<ChatTranscriptEntry
     }
   }
   return entries;
+}
+
+function chatAttachment(a: AgentAttachment): import("@/lib/agent/chat/types").ChatAttachment {
+  return {
+    id: a.id, fileName: a.fileName, mimeType: a.mimeType, mediaKind: a.mediaKind,
+    ...(a.status !== "ready" ? { status: a.status } : {}),
+    ...(a.releaseUntil ? { releaseUntil: a.releaseUntil } : {}),
+    ...(a.promotedAssetId ? { promotedAssetId: a.promotedAssetId } : {}),
+    ...(a.sourceToolCallId ? { sourceToolCallId: a.sourceToolCallId } : {}),
+  };
 }
 
 function thinkingOf(content: unknown): string {
