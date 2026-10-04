@@ -12,11 +12,24 @@ import { createMaterial, getMaterial, listMaterialStockLots, listMaterialStockMo
 import { cleanupProduction, makeProduction, shortId } from "../_support/factories";
 
 let prodId: string, ownerId: string, outsiderId: string, viewerId: string, creatorId: string;
+let responsiblePocId: string, responsibleDeptId: string;
 beforeAll(async () => {
   const user = async () => (await upsertFeishuUser(`test-open-${shortId()}`, "流转 API", null, false)).userId;
-  [ownerId, outsiderId, viewerId, creatorId] = await Promise.all([user(), user(), user(), user()]);
+  [ownerId, outsiderId, viewerId, creatorId, responsiblePocId] = await Promise.all([
+    user(), user(), user(), user(), user(),
+  ]);
   ({ prodId } = await makeProduction(ownerId));
-  for (const id of [ownerId, viewerId, creatorId]) await addProductionMember(prodId, id);
+  for (const id of [ownerId, viewerId, creatorId, responsiblePocId]) await addProductionMember(prodId, id);
+  const { rows } = await getPool().query<{ id: string }>(
+    "INSERT INTO production_dept (production_id,name) VALUES ($1,$2) RETURNING id",
+    [prodId, `流转责任方-${shortId()}`],
+  );
+  responsibleDeptId = rows[0].id;
+  await getPool().query(
+    `INSERT INTO production_dept_member (production_id,dept_id,user_id,is_poc)
+     VALUES ($1,$2,$3,true)`,
+    [prodId, responsibleDeptId, responsiblePocId],
+  );
   await getPool().query("DELETE FROM production_member_grant WHERE production_id=$1 AND user_id=ANY($2::uuid[])", [prodId, [viewerId, creatorId]]);
   await selfConfirmResourceGrant(viewerId, prodId, "material", "*", "view");
   await selfConfirmResourceGrant(creatorId, prodId, "material", "*", "create");
@@ -30,9 +43,11 @@ function req(body: unknown, userId?: string, method = "POST") {
   if (userId) request.cookies.set(SESSION_COOKIE, createSession({ userId, name: "测试", avatarUrl: null, isAdmin: false }));
   return request;
 }
-async function fixture(rented = false) {
+async function fixture(rented = false, responsible = false) {
   const material = await createMaterial({ productionId: prodId, name: "线缆",
-    quantity: 5, subject: null, createdBy: ownerId,
+    quantity: 5,
+    subject: responsible ? { kind: "dept", id: responsibleDeptId } : null,
+    createdBy: ownerId,
     ...(rented ? { sourceType: "rented" as const, sourceLabel: "设备仓", returnDueAt: new Date("2026-12-01T00:00:00Z") } : {}) });
   const [lot] = await listMaterialStockLots(material.id, prodId);
   const ctx = { params: Promise.resolve({ id: prodId, materialId: material.id }) };
@@ -82,6 +97,41 @@ describe("物料流转 API", () => {
     }, viewerId), ctx);
     expect(returned.status).toBe(201);
     expect(await getMaterial(material.id, prodId)).toMatchObject({ inStockQuantity: 5, checkedOutQuantity: 0 });
+  });
+
+  it("责任方 POC 可登记本组日常流转，但调整和永久退出分别要求显式治理键", async () => {
+    const { lot, ctx, body } = await fixture(false, true);
+    expect((await POST(req({
+      ...body, custodian: { kind: "user", id: creatorId },
+    }, responsiblePocId), ctx)).status).toBe(201);
+
+    const adjust = {
+      lotId: lot.id, fromBucket: "in_stock", toBucket: "adjustment",
+      quantity: 1, reason: "盘点校正",
+    };
+    expect((await POST(req(adjust, responsiblePocId), ctx)).status).toBe(403);
+    await getPool().query(
+      `INSERT INTO production_member_grant
+        (production_id,user_id,resource_type,resource_id,resource_sub,permission_level,
+         grant_source,confirmed_by)
+       VALUES ($1,$2,'material','*','stock/adjustments','edit','direct',$2)`,
+      [prodId, responsiblePocId],
+    );
+    expect((await POST(req(adjust, responsiblePocId), ctx)).status).toBe(201);
+
+    const exit = {
+      lotId: lot.id, fromBucket: "in_stock", toBucket: "exited",
+      quantity: 1, reason: "报废", exitReason: "scrapped",
+    };
+    expect((await POST(req(exit, responsiblePocId), ctx)).status).toBe(403);
+    await getPool().query(
+      `INSERT INTO production_member_grant
+        (production_id,user_id,resource_type,resource_id,resource_sub,permission_level,
+         grant_source,confirmed_by)
+       VALUES ($1,$2,'material','*','stock/exits','edit','direct',$2)`,
+      [prodId, responsiblePocId],
+    );
+    expect((await POST(req(exit, responsiblePocId), ctx)).status).toBe(201);
   });
 
   it("租借退还出口同时追加库存退出和来源账本，不会只有库存减少", async () => {
