@@ -29,6 +29,10 @@ type Props = NativeProps & {
   searchableAfter?: number;
   /** 浮层内容的安全高度上限；实际高度还会受视口剩余空间限制。 */
   menuMaxHeight?: number;
+  /** 仅为有特殊排版需求的调用方附加浮层样式，不改变共享默认外观。 */
+  menuClassName?: string;
+  /** 仅为有特殊排版需求的调用方附加选项样式，不改变共享默认外观。 */
+  optionClassName?: string;
 };
 
 type Item = {
@@ -96,6 +100,8 @@ export default function OverflowSafeSelect({
   style,
   searchableAfter = 8,
   menuMaxHeight = DEFAULT_MAX_HEIGHT,
+  menuClassName,
+  optionClassName,
   autoFocus,
   id,
   "aria-label": ariaLabel,
@@ -306,6 +312,7 @@ export default function OverflowSafeSelect({
           data-overflow-safe-select-menu
           role="listbox"
           aria-label={ariaLabel}
+          className={menuClassName}
           style={{
             position: "fixed",
             zIndex: Z_INDEX.selectMenu,
@@ -356,6 +363,7 @@ export default function OverflowSafeSelect({
                     ref={(node) => { optionRefs.current[index] = node; }}
                     type="button"
                     role="option"
+                    className={optionClassName}
                     aria-selected={selectedItem}
                     disabled={item.disabled}
                     onMouseEnter={() => setActiveIndex(index)}

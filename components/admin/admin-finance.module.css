@@ -12,6 +12,47 @@
   background: white;
 }
 
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.compactButton {
+  position: relative;
+  min-height: 28px;
+}
+
+.compactButton::before {
+  position: absolute;
+  inset: -6px 0;
+  content: "";
+}
+
+.currencySelect {
+  max-width: 100%;
+  font-size: 11px;
+}
+
+.currencyMenu {
+  max-width: calc(100vw - 20px);
+  font-size: 11px;
+}
+
+.currencyOption {
+  min-height: 28px;
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+  line-height: 18px;
+}
+
+.currencyOption > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .entryRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -77,6 +118,7 @@
   .entryActions {
     width: 100%;
     flex-wrap: wrap;
+    row-gap: 12px;
     justify-content: flex-start;
   }
 }

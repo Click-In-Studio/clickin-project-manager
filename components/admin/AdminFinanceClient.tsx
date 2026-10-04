@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
 import AdminModal from "@/components/ui/AdminModal";
+import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import type { BudgetCategory, ExpenseCategory } from "@/lib/ops/finance-db";
 import {
   CURRENCY_CODES, convertToBaseAmount, formatCurrencyLabel, formatMoney, isCurrencyCode,
@@ -14,6 +15,9 @@ type Caps = { categoryEdit: boolean; categoryCreate: boolean; categoryDelete: bo
 type Dept = { id: string; name: string };
 type Modal = { kind: "category"; value?: ExpenseCategory } | { kind: "item"; value?: BudgetCategory } | null;
 const FIELD = { width: "100%", border: "1px solid var(--line)", borderRadius: 8, padding: "9px 10px", background: "white", color: "var(--ink)" } as const;
+const COMPACT_PRIMARY_BTN = { ...PRIMARY_BTN, padding: "4px 12px", lineHeight: "18px" } as const;
+const COMPACT_SECONDARY_BTN = { ...SECONDARY_BTN, padding: "4px 12px", lineHeight: "18px" } as const;
+const COMPACT_CURRENCY_FIELD = { ...FIELD, padding: "4px 8px", minHeight: 28, fontSize: 11, lineHeight: "18px" } as const;
 
 export default function AdminFinanceClient({ productionId, productionName, baseCurrency: initialBaseCurrency, initialCategories, initialItems, depts, caps }: {
   productionId: string; productionName: string; baseCurrency: CurrencyCode; initialCategories: ExpenseCategory[]; initialItems: BudgetCategory[]; depts: Dept[]; caps: Caps;
@@ -87,15 +91,15 @@ export default function AdminFinanceClient({ productionId, productionName, baseC
 
   return <main className={styles.page}>
     <PageHeader eyebrow={productionName} title="财务设置" side="stage"
-      actions={(tab === "items" ? caps.budgetCreate : caps.categoryCreate) ? <button style={PRIMARY_BTN} onClick={() => setModal({ kind: tab === "items" ? "item" : "category" })}>新增{tab === "items" ? "预算项" : "费用科目"}</button> : null} />
-    <div style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--line)", marginBottom: 20 }}>
-      {([['items', '预算项'], ['categories', '费用科目']] as const).map(([key, label]) => <button key={key} onClick={() => setTab(key)} style={{ border: 0, borderBottom: tab === key ? "2px solid var(--stage)" : "2px solid transparent", padding: "10px 16px", background: "transparent", color: tab === key ? "var(--ink)" : "var(--muted)", fontWeight: 700, cursor: "pointer" }}>{label}</button>)}
+      actions={(tab === "items" ? caps.budgetCreate : caps.categoryCreate) ? <button className={styles.compactButton} style={COMPACT_PRIMARY_BTN} onClick={() => setModal({ kind: tab === "items" ? "item" : "category" })}>新增{tab === "items" ? "预算项" : "费用科目"}</button> : null} />
+    <div className={styles.tabs}>
+      {([['items', '预算项'], ['categories', '费用科目']] as const).map(([key, label]) => <button className={styles.compactButton} key={key} onClick={() => setTab(key)} style={{ border: 0, borderBottom: tab === key ? "2px solid var(--stage)" : "2px solid transparent", padding: "4px 14px", lineHeight: "18px", background: "transparent", color: tab === key ? "var(--ink)" : "var(--muted)", fontWeight: 700, cursor: "pointer" }}>{label}</button>)}
     </div>
     {error && <p style={{ color: "#a33", fontSize: 12 }}>{error}</p>}
     <section className={styles.currencyCard}>
       <strong style={{ display: "block", fontSize: 13, marginBottom: 5 }}>项目记账本位币</strong>
       <p style={{ margin: "0 0 10px", color: "var(--muted)", fontSize: 11 }}>所有预算汇总都会折算成这个币种。出现预算额度或已提交报销后不可修改。</p>
-      <select style={{ ...FIELD, width: 180 }} value={baseCurrency} disabled={!caps.budgetEdit || busy} onChange={async event => {
+      <OverflowSafeSelect className={styles.currencySelect} menuClassName={styles.currencyMenu} optionClassName={styles.currencyOption} aria-label="项目记账本位币" style={{ ...COMPACT_CURRENCY_FIELD, width: 180, maxWidth: "100%" }} value={baseCurrency} disabled={!caps.budgetEdit || busy} onChange={async event => {
         const next = event.target.value;
         try {
           const json = await request("settings", "PATCH", { baseCurrency: next });
@@ -106,7 +110,7 @@ export default function AdminFinanceClient({ productionId, productionName, baseC
         } catch (e) { setError(e instanceof Error ? e.message : "本位币保存失败"); }
       }}>
         {CURRENCY_CODES.map(code => <option key={code} value={code}>{formatCurrencyLabel(code)}</option>)}
-      </select>
+      </OverflowSafeSelect>
     </section>
     {tab === "items" ? <div style={{ display: "grid", gap: 18 }}>
       {groups.length === 0 && <Empty text="还没有预算项" />}
@@ -119,9 +123,9 @@ export default function AdminFinanceClient({ productionId, productionName, baseC
               <span className={styles.entryAmount}>{item.amount === null ? "无上限" : moneyLabel(item)}</span>
             </div>
             <div className={styles.entryActions}>
-              {caps.budgetEdit && <><button style={SECONDARY_BTN} disabled={index === 0 || busy} onClick={() => moveItem(group.items, index, -1)}>上移</button><button style={SECONDARY_BTN} disabled={index === group.items.length - 1 || busy} onClick={() => moveItem(group.items, index, 1)}>下移</button></>}
-              {caps.budgetEdit && <button style={SECONDARY_BTN} onClick={() => setModal({ kind: "item", value: item })}>编辑</button>}
-              {caps.budgetDelete && <button style={SECONDARY_BTN} onClick={() => removeItem(item)}>删除</button>}
+              {caps.budgetEdit && <><button className={styles.compactButton} style={COMPACT_SECONDARY_BTN} disabled={index === 0 || busy} onClick={() => moveItem(group.items, index, -1)}>上移</button><button className={styles.compactButton} style={COMPACT_SECONDARY_BTN} disabled={index === group.items.length - 1 || busy} onClick={() => moveItem(group.items, index, 1)}>下移</button></>}
+              {caps.budgetEdit && <button className={styles.compactButton} style={COMPACT_SECONDARY_BTN} onClick={() => setModal({ kind: "item", value: item })}>编辑</button>}
+              {caps.budgetDelete && <button className={styles.compactButton} style={COMPACT_SECONDARY_BTN} onClick={() => removeItem(item)}>删除</button>}
             </div>
           </div>)}
         </div>
@@ -134,9 +138,9 @@ export default function AdminFinanceClient({ productionId, productionName, baseC
           <span className={styles.entryMeta}>{category.budgetItemCount} 个预算项</span>
         </div>
         <div className={styles.entryActions}>
-          {caps.categoryEdit && <><button style={SECONDARY_BTN} disabled={index === 0 || busy} onClick={() => moveCategory(index, -1)}>上移</button><button style={SECONDARY_BTN} disabled={index === categories.length - 1 || busy} onClick={() => moveCategory(index, 1)}>下移</button></>}
-          {caps.categoryEdit && <button style={SECONDARY_BTN} onClick={() => setModal({ kind: "category", value: category })}>编辑</button>}
-          {caps.categoryDelete && <button style={SECONDARY_BTN} onClick={() => removeCategory(category)}>删除</button>}
+          {caps.categoryEdit && <><button className={styles.compactButton} style={COMPACT_SECONDARY_BTN} disabled={index === 0 || busy} onClick={() => moveCategory(index, -1)}>上移</button><button className={styles.compactButton} style={COMPACT_SECONDARY_BTN} disabled={index === categories.length - 1 || busy} onClick={() => moveCategory(index, 1)}>下移</button></>}
+          {caps.categoryEdit && <button className={styles.compactButton} style={COMPACT_SECONDARY_BTN} onClick={() => setModal({ kind: "category", value: category })}>编辑</button>}
+          {caps.categoryDelete && <button className={styles.compactButton} style={COMPACT_SECONDARY_BTN} onClick={() => removeCategory(category)}>删除</button>}
         </div>
       </div>)}
     </div>}
@@ -165,7 +169,7 @@ function CategoryModal({ value, busy, onClose, onSave }: { value?: ExpenseCatego
   return <AdminModal title={value ? "编辑费用科目" : "新增费用科目"} onClose={onClose}><form onSubmit={e => { e.preventDefault(); onSave({ name, description }); }} style={{ display: "grid", gap: 12 }}>
     <label>名称<input style={FIELD} value={name} onChange={e => setName(e.target.value)} required /></label>
     <label>说明<input style={FIELD} value={description} onChange={e => setDescription(e.target.value)} /></label>
-    <button style={PRIMARY_BTN} disabled={busy}>保存</button>
+    <button className={styles.compactButton} style={COMPACT_PRIMARY_BTN} disabled={busy}>保存</button>
   </form></AdminModal>;
 }
 function ItemModal({ value, baseCurrency, categories, depts, busy, onClose, onSave }: { value?: BudgetCategory; baseCurrency: CurrencyCode; categories: ExpenseCategory[]; depts: Dept[]; busy: boolean; onClose: () => void; onSave: (body: object) => void }) {
@@ -188,7 +192,7 @@ function ItemModal({ value, baseCurrency, categories, depts, busy, onClose, onSa
   }); }} style={{ display: "grid", gap: 12 }}>
     <label>费用科目<select style={FIELD} value={categoryId} onChange={e => setCategoryId(e.target.value)} disabled={!!value} required>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
     <label>负责部门<select style={FIELD} value={deptId} onChange={e => setDeptId(e.target.value)}><option value="">项目公共</option>{depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
-    <label>预算币种<select style={FIELD} value={currency} onChange={e => setCurrency(e.target.value as CurrencyCode)}>{CURRENCY_CODES.map(code => <option key={code}>{formatCurrencyLabel(code)}</option>)}</select></label>
+    <label>预算币种<OverflowSafeSelect className={styles.currencySelect} menuClassName={styles.currencyMenu} optionClassName={styles.currencyOption} aria-label="预算币种" style={COMPACT_CURRENCY_FIELD} value={currency} onChange={e => setCurrency(e.target.value as CurrencyCode)}>{CURRENCY_CODES.map(code => <option key={code}>{formatCurrencyLabel(code)}</option>)}</OverflowSafeSelect></label>
     <label>预算上限 · {formatCurrencyLabel(currency)}<input style={FIELD} inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="留空表示无上限" /></label>
     {amount && currency !== baseCurrency && <>
       <label>人工汇率<span style={{ display: "block", color: "var(--muted)", fontSize: 10 }}>1 {formatCurrencyLabel(currency)} = 多少 {formatCurrencyLabel(baseCurrency)}</span><input style={FIELD} inputMode="decimal" value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} required /></label>
@@ -197,6 +201,6 @@ function ItemModal({ value, baseCurrency, categories, depts, busy, onClose, onSa
       <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>折算后：{converted ? formatMoney(converted, baseCurrency) : "请填写有效汇率"}</p>
     </>}
     <label>备注<input style={FIELD} value={notes} onChange={e => setNotes(e.target.value)} /></label>
-    <button style={PRIMARY_BTN} disabled={busy || !categoryId}>保存</button>
+    <button className={styles.compactButton} style={COMPACT_PRIMARY_BTN} disabled={busy || !categoryId}>保存</button>
   </form></AdminModal>;
 }
