@@ -485,20 +485,21 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
             </h2>
 
             {/* Divider */}
-            <div style={{ height: 1, background: "var(--line)", marginBottom: 22 }} />
+            <div className={styles.detailDivider} />
 
             {/* Content */}
             {selected.content ? (
               <WikiMarkdown
                 content={selected.content}
                 productionId={productionId}
+                className={styles.detailBody}
               />
             ) : (
               <p style={{ color: "var(--muted)", fontSize: 13 }}>（无内容）</p>
             )}
 
             {/* Read status panel */}
-            <div style={{ marginTop: 32, borderTop: "1px solid var(--line)", paddingTop: 20 }}>
+            <div className={styles.readStatus}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
                 <p style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".06em", margin: 0 }}>
                   阅读状态

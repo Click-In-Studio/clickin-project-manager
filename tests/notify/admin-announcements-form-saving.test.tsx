@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import announcementStyles from "@/components/admin/admin-announcements.module.css";
 
 vi.mock("@/components/wiki/WikiMarkdown", () => ({
-  default: ({ content }: { content: string }) => <div>{content}</div>,
+  default: ({ content, className }: { content: string; className?: string }) => <div className={className}>{content}</div>,
 }));
 // 富文本编辑器（tiptap）与本测试无关，换成朴素 textarea
 vi.mock("@/components/editor/SmartTextarea", () => ({
@@ -171,6 +171,9 @@ describe("AdminAnnouncementsClient — 响应式改造后的交互回归", () =>
     await act(async () => { listButton.click(); });
     expect(listButton.getAttribute("aria-pressed")).toBe("true");
     expect(container.textContent).toContain("今晚七点集合。");
+    expect(container.querySelector(`.${announcementStyles.detailDivider}`)).toBeTruthy();
+    expect(container.querySelector(`.${announcementStyles.detailBody}`)).toBeTruthy();
+    expect(container.querySelector(`.${announcementStyles.readStatus}`)).toBeTruthy();
 
     await act(async () => { buttonByText("编辑").click(); });
     const input = container.querySelector<HTMLInputElement>('input[placeholder="公告标题…"]')!;
