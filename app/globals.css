@@ -1008,6 +1008,30 @@ span[data-stage-inline] {
   .ofs-trigger:disabled {
     cursor: not-allowed;
   }
+
+  /* 冻结单元格必须画不透明背景，横向滚动的内容才不会透过；行与冻结格
+     共用同一个变量，保证章节底色和 hover 高亮不会在冻结列处断开。 */
+  .scene-table-row {
+    --scene-table-row-bg: #fff;
+    background-color: var(--scene-table-row-bg);
+    transition: background-color 150ms ease;
+  }
+  .scene-table-row:hover {
+    --scene-table-row-bg: color-mix(in oklab, var(--color-zinc-100) 70%, white);
+  }
+  .scene-table-row.scene-table-row-chapter {
+    --scene-table-row-bg: color-mix(in oklab, var(--color-zinc-50) 70%, white);
+  }
+  .scene-table-row.scene-table-row-chapter:hover {
+    --scene-table-row-bg: var(--color-zinc-100);
+  }
+  .scene-table-frozen-cell {
+    background-color: var(--scene-table-row-bg, #fff);
+    transition: background-color 150ms ease;
+  }
+  .scene-table-frozen-header {
+    background-color: #fff;
+  }
 }
 
 /* 富表格保留列宽，宽表在阅读区内滚动；格内块仍沿用文档排版。 */

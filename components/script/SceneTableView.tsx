@@ -361,9 +361,6 @@ export default function SceneTableView({
       position: "sticky",
       left: frozenLayout.offsets.get(key) ?? 0,
       zIndex: header ? 30 : 5,
-      // Sticky cells must paint their own opaque layer; inheriting the row
-      // background lets horizontally-scrolling content show through them.
-      backgroundColor: "#fff",
       boxShadow: frozenLayout.lastKey === key ? "2px 0 5px rgba(24,42,42,.08)" : undefined,
     };
   };
@@ -547,11 +544,11 @@ export default function SceneTableView({
     const isExpanded = expandedAssets.has(scene.id);
     return (
       <React.Fragment key={scene.id}>
-        <tr className={`group border-b border-[var(--line)] transition-colors ${isChapter ? "bg-zinc-50/70 hover:bg-zinc-100" : "hover:bg-zinc-100/70"}`}>
+        <tr className={`scene-table-row group border-b border-[var(--line)] ${isChapter ? "scene-table-row-chapter" : ""}`}>
           {visibleColumns.map((col) => (
             <td
               key={col.key}
-              className="border-r border-zinc-100/90 px-3 py-2.5 align-top"
+              className={`border-r border-zinc-100/90 px-3 py-2.5 align-top ${frozenLayout.frozen.has(col.key) ? "scene-table-frozen-cell" : ""}`}
               style={{ width: viewConfig.columnWidths[col.key] ?? col.defaultWidth, ...frozenCell(col.key) }}
             >
               {renderCell(scene, col.key, isChapter, children)}
@@ -602,7 +599,7 @@ export default function SceneTableView({
             {visibleColumns.map((col) => (
               <th
                 key={col.key}
-                className="relative border-r border-zinc-100/90 px-3 py-3 text-xs font-medium text-zinc-500 select-none"
+                className={`relative border-r border-zinc-100/90 px-3 py-3 text-xs font-medium text-zinc-500 select-none ${frozenLayout.frozen.has(col.key) ? "scene-table-frozen-header" : ""}`}
                 style={{ width: viewConfig.columnWidths[col.key] ?? col.defaultWidth, ...frozenCell(col.key, true) }}
               >
                 <span className="truncate block">{col.label}</span>
