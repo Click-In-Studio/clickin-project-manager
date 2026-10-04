@@ -116,6 +116,7 @@ export default function MobileMeDrawer({
               label="更新日志"
               hint={changelogNew ? "有新版本内容可查看" : "查看最近的功能变化"}
               active={pathname === "/help/changelog"}
+              statusBadge={changelogNew ? "新" : undefined}
               onClick={() => {
                 onClose();
                 if (latestChangelogVersion) onChangelogSeen();

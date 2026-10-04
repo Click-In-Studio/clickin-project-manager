@@ -193,7 +193,10 @@ describe("手机导航入口完整性", () => {
     const links = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"));
     expect(links.find((link) => link.textContent?.includes("本页帮助"))?.getAttribute("href")).toBe("/help/start/interface/navigation");
     expect(links.find((link) => link.textContent?.includes("使用手册"))?.getAttribute("href")).toBe("/help");
-    expect(links.find((link) => link.textContent?.includes("更新日志"))?.getAttribute("href")).toBe("/help/changelog");
+    const changelogLink = links.find((link) => link.textContent?.includes("更新日志"));
+    expect(changelogLink?.getAttribute("href")).toBe("/help/changelog");
+    expect(changelogLink?.textContent).toContain("新");
+    expect(changelogLink?.querySelector('svg[data-me-menu-icon="changelog"]')).toBeTruthy();
     expect(buttonWithText(container, "报告问题")).toBeTruthy();
   });
 

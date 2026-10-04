@@ -12,6 +12,7 @@ export default function NavItem({
   active,
   badge,
   warningBadge,
+  statusBadge,
   onClick,
   folded,
   side,
@@ -25,6 +26,7 @@ export default function NavItem({
   side?: "script" | "stage";
   badge?: number;
   warningBadge?: number;
+  statusBadge?: string;
   onClick?: () => void;
   folded?: boolean;
 }) {
@@ -68,6 +70,11 @@ export default function NavItem({
             {warningBadge != null && warningBadge > 0 && (
               <span className="flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold leading-none text-white">
                 {warningBadge > 99 ? "99+" : warningBadge}
+              </span>
+            )}
+            {statusBadge && (
+              <span className="flex h-4 shrink-0 items-center justify-center rounded-full bg-[#c0392b] px-1.5 text-[9px] font-bold leading-none text-white">
+                {statusBadge}
               </span>
             )}
           </span>
