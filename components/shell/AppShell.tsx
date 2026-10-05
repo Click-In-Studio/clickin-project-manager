@@ -25,6 +25,7 @@ import { extractProductionId, extractCurrentWikiId, extractCurrentAssetId, extra
 import { NavPendingContext, type NavPendingBus } from "./app-shell/nav-pending";
 import UserAvatarContent from "./app-shell/UserAvatarContent";
 import ProdAvatarIcon from "./app-shell/ProdAvatarIcon";
+import NavigationIcon from "./app-shell/NavigationIcon";
 import NavItem from "./app-shell/NavItem";
 import NavGroup from "./app-shell/NavGroup";
 import UserMenu from "./app-shell/UserMenu";
@@ -486,10 +487,11 @@ export default function AppShell({ session, productions, canCreateProduction = f
                     <NavItem
                       key={item.path}
                       href={adminHref(item.path)}
-                      symbol={item.label.charAt(0)}
+                      symbol={<NavigationIcon name={item.icon} />}
                       label={item.label}
                       hint={item.hint}
                       active={activeAdminModule === item.path}
+                      folded={productionSidebarContentFolded}
                     />
                   ))}
                 </div>
@@ -500,13 +502,13 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <nav className="flex flex-col gap-0.5 flex-1">
               {!productionId && (
                 <div className="mt-1 flex flex-col gap-0.5">
-                  <NavItem href="/" symbol="⌂" label="我的工作" hint="今天与我有关" active={isHome} folded={productionSidebarContentFolded} />
-                  <NavItem href="/my/projects" symbol="◈" label="我的项目" hint={canCreateProduction ? "管理与新建项目" : "我参与的项目"} active={pathname.startsWith("/my/projects")} folded={productionSidebarContentFolded} />
-                  <NavItem href="/my/announcements" symbol="⊟" label="公告" hint="演出公告与风险提醒" active={pathname.startsWith("/my/announcements")} folded={productionSidebarContentFolded} />
-                  <NavItem href="/my/weekly-call" symbol="◷" label="日程" hint="完整 Weekly Call" active={pathname.startsWith("/my/weekly-call") || pathname.startsWith("/my/daily-call")} folded={productionSidebarContentFolded} />
-                  <NavItem href="/my/tasks" symbol="✓" label="任务" hint="需求 · 跟进 · 完成" active={pathname.startsWith("/my/tasks")} badge={pendingTasks} folded={productionSidebarContentFolded} />
-                  <NavItem href="/my/notifications" symbol="◉" label="通知提醒" hint="确认与告知" active={pathname.startsWith("/my/notifications")} badge={unreadCount} folded={productionSidebarContentFolded} />
-                  <NavItem href="/my/reports" symbol="≡" label="报告" hint="所有演出报告" active={pathname.startsWith("/my/reports")} badge={unreadReports} folded={productionSidebarContentFolded} />
+                  <NavItem href="/" symbol={<NavigationIcon name="home" />} label="我的工作" hint="今天与我有关" active={isHome} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/projects" symbol={<NavigationIcon name="projects" />} label="我的项目" hint={canCreateProduction ? "管理与新建项目" : "我参与的项目"} active={pathname.startsWith("/my/projects")} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/announcements" symbol={<NavigationIcon name="announcement" />} label="公告" hint="演出公告与风险提醒" active={pathname.startsWith("/my/announcements")} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/weekly-call" symbol={<NavigationIcon name="calendar" />} label="日程" hint="完整 Weekly Call" active={pathname.startsWith("/my/weekly-call") || pathname.startsWith("/my/daily-call")} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/tasks" symbol={<NavigationIcon name="task" />} label="任务" hint="需求 · 跟进 · 完成" active={pathname.startsWith("/my/tasks")} badge={pendingTasks} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/notifications" symbol={<NavigationIcon name="notification" />} label="通知提醒" hint="确认与告知" active={pathname.startsWith("/my/notifications")} badge={unreadCount} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/reports" symbol={<NavigationIcon name="report" />} label="报告" hint="所有演出报告" active={pathname.startsWith("/my/reports")} badge={unreadReports} folded={productionSidebarContentFolded} />
                 </div>
               )}
 
@@ -517,7 +519,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                     <NavItem
                       key={item.path || "home"}
                       href={item.path ? navHref(item.path) : `/production/${productionId}`}
-                      symbol={item.symbol}
+                      symbol={<NavigationIcon name={item.icon} />}
                       label={item.label}
                       hint={item.hint}
                       active={isProductionOverviewItemActive(item)}
@@ -531,7 +533,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                     <NavItem
                       key={item.path}
                       href={navHref(item.path)}
-                      symbol={item.symbol}
+                      symbol={<NavigationIcon name={item.icon} />}
                       label={item.label}
                       hint={item.hint}
                       side="script"
@@ -546,7 +548,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                     <NavItem
                       key={item.path}
                       href={navHref(item.path)}
-                      symbol={item.symbol}
+                      symbol={<NavigationIcon name={item.icon} />}
                       label={item.label}
                       hint={item.hint}
                       side="stage"
@@ -584,14 +586,14 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <>
               <MobileTab
                 label="返回"
-                symbol="←"
+                symbol={<NavigationIcon name="back" />}
                 active={false}
                 href={`/production/${productionId}`}
                 onClick={closeAiPopout}
               />
               <MobileTab
                 label="配置菜单"
-                symbol="⚙"
+                symbol={<NavigationIcon name="settings" />}
                 active={drawerOpen === "admin"}
                 onClick={() => toggleDrawer("admin")}
               />
@@ -609,20 +611,20 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <>
               <MobileTab
                 label="概览"
-                symbol="⌂"
+                symbol={<NavigationIcon name="overview" />}
                 active={isProductionOverviewActive || drawerOpen === "project-overview"}
                 onClick={() => toggleDrawer("project-overview")}
               />
               <MobileTab
                 label="创作"
-                symbol="✦"
+                symbol={<NavigationIcon name="creation" />}
                 active={isCreationActive || drawerOpen === "creation"}
                 onClick={() => toggleDrawer("creation")}
               />
               {aiEntryVisible && <MobileAiAction open={aiPopoutOpen} onClick={toggleAiPopout} />}
               <MobileTab
                 label="制作"
-                symbol="◇"
+                symbol={<NavigationIcon name="production" />}
                 active={isProductionNavActive || drawerOpen === "production"}
                 onClick={() => toggleDrawer("production")}
               />
@@ -637,10 +639,10 @@ export default function AppShell({ session, productions, canCreateProduction = f
         ) : (
           /* Outside production */
           <>
-            <MobileTab label="今日" symbol="⌂" active={isHome} href="/" onClick={closeAiPopout} />
+            <MobileTab label="今日" symbol={<NavigationIcon name="home" />} active={isHome} href="/" onClick={closeAiPopout} />
             <MobileTab
               label="项目"
-              symbol="◈"
+              symbol={<NavigationIcon name="projects" />}
               active={pathname.startsWith("/my/projects")}
               href="/my/projects"
               onClick={closeAiPopout}
@@ -648,7 +650,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             {aiEntryVisible && <MobileAiAction open={aiPopoutOpen} onClick={toggleAiPopout} />}
             <MobileTab
               label="概览"
-              symbol="≡"
+              symbol={<NavigationIcon name="overview" />}
               active={isOverviewActive || drawerOpen === "overview"}
               onClick={() => toggleDrawer("overview")}
             />
@@ -674,7 +676,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <NavItem
               key={item.path}
               href={item.path}
-              symbol={item.symbol}
+              symbol={<NavigationIcon name={item.icon} />}
               label={item.label}
               hint={item.hint}
               active={pathname.startsWith(item.path)}
@@ -694,7 +696,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <NavItem
               key={item.path || "home"}
               href={item.path ? navHref(item.path) : `/production/${productionId}`}
-              symbol={item.symbol}
+              symbol={<NavigationIcon name={item.icon} />}
               label={item.label}
               hint={item.hint}
               active={isProductionOverviewItemActive(item)}
@@ -716,7 +718,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <NavItem
               key={item.path}
               href={navHref(item.path)}
-              symbol={item.symbol}
+              symbol={<NavigationIcon name={item.icon} />}
               label={item.label}
               hint={item.hint}
               active={isCreationItemActive(item.path)}
@@ -737,7 +739,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <NavItem
               key={item.path}
               href={navHref(item.path)}
-              symbol={item.symbol}
+              symbol={<NavigationIcon name={item.icon} />}
               label={item.label}
               hint={item.hint}
               active={isModuleActive(item.path)}
@@ -764,7 +766,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                 <NavItem
                   key={item.path}
                   href={adminHref(item.path)}
-                  symbol={item.label.charAt(0)}
+                  symbol={<NavigationIcon name={item.icon} />}
                   label={item.label}
                   hint={item.hint}
                   active={activeAdminModule === item.path}

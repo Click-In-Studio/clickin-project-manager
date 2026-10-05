@@ -166,7 +166,7 @@ describe("手机导航入口完整性", () => {
       </AppShell>,
     ));
 
-    const overview = buttonWithText(mobileNav(), "⌂概览");
+    const overview = buttonWithText(mobileNav(), "概览");
     act(() => overview.click());
 
     const links = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"));
@@ -210,7 +210,7 @@ describe("手机导航入口完整性", () => {
 
     act(() => buttonWithText(mobileNav(), "我").click());
 
-    const icons = Array.from(container.querySelectorAll<SVGElement>("svg[data-me-menu-icon]"));
+    const icons = Array.from(container.querySelectorAll<SVGElement>(".app-shell-bottom-drawer svg[data-me-menu-icon]"));
     expect(icons.map((icon) => icon.getAttribute("data-me-menu-icon"))).toEqual([
       "profile",
       "security",
@@ -280,6 +280,6 @@ describe("手机导航入口完整性", () => {
     for (const label of labels) {
       expect(container.textContent).toContain(label);
     }
-    expect(container.querySelector("svg[data-me-menu-icon]")).toBeNull();
+    expect(container.querySelector('button[aria-label="个人中心"]')!.parentElement!.querySelector("svg[data-me-menu-icon]")).toBeNull();
   });
 });
