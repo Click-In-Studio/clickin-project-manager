@@ -565,7 +565,7 @@ export default function SceneTableView({
                 mountId={scene.id}
                 label={`${scene.number}${scene.name ? ` ${scene.name}` : ""}`}
                 /* 与 ScenesManager 同源：挂载查的是 mounts@create，不是字段写权限 */
-                canEdit={canMountScene(fieldPerms, scene.id)}
+                canEdit={canEdit && canMountScene(fieldPerms, scene.id)}
                 display="compact"
               />
               <div className="mt-2">

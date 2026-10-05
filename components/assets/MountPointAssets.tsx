@@ -134,7 +134,11 @@ export default function MountPointAssets({
   if (display === "compact") {
     if (loading) return null;
     return (
-      <div className="flex flex-wrap items-center gap-1 mt-1">
+      <div
+        data-dramaturgy-unsaved={showModal ? "true" : undefined}
+        data-dramaturgy-unsaved-message="请先完成或关闭附件关联窗口"
+        className="flex flex-wrap items-center gap-1 mt-1"
+      >
         {entries.map(e => (
           <span key={e.mount.id}
             className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-600">
@@ -179,7 +183,11 @@ export default function MountPointAssets({
 
   // panel display
   return (
-    <div className="mt-3">
+    <div
+      data-dramaturgy-unsaved={showModal ? "true" : undefined}
+      data-dramaturgy-unsaved-message="请先完成或关闭附件关联窗口"
+      className="mt-3"
+    >
       <div className="flex items-center justify-between mb-1.5">
         <p className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">附件</p>
         {canEdit && (

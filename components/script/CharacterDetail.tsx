@@ -1,10 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { CharacterDetail } from "@/lib/script/script-scene-character-db";
+import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib/script/character-perms-shared";
+import DramaturgyModePicker from "./DramaturgyModePicker";
+import { useDramaturgyWorkspaceMode } from "./use-dramaturgy-workspace-mode";
 
 const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
 
@@ -13,7 +16,7 @@ type Props = {
   productionName: string;
   character: CharacterDetail;
   allCharacters: CharacterDetail[];
-  canEdit: boolean;
+  perms: CharacterPerms;
   versionId?: string | null;
 };
 
@@ -30,12 +33,17 @@ function Field({
 }: {
   label: string;
   value: string;
-  onSave: (v: string) => void;
+  onSave: (v: string) => Promise<void>;
   multiline?: boolean;
   readOnly?: boolean;
 }) {
   const [draft, setDraft] = useState(value);
-  const commit = () => { if (draft !== value) onSave(draft); };
+  const [saving, setSaving] = useState(false);
+  const commit = async () => {
+    if (draft === value) return;
+    setSaving(true);
+    try { await onSave(draft); } catch { /* 保留草稿，由模式下拉提示失败。 */ } finally { setSaving(false); }
+  };
   const inputCls =
     "w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400 disabled:opacity-50 disabled:cursor-default";
   return (
@@ -51,6 +59,7 @@ function Field({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
+          disabled={saving}
           className={inputCls + " resize-none"}
         />
       ) : (
@@ -59,6 +68,7 @@ function Field({
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+          disabled={saving}
           className={inputCls}
         />
       )}
@@ -72,7 +82,7 @@ function RoleTypeField({
   readOnly,
 }: {
   value: string;
-  onSave: (v: string) => void;
+  onSave: (v: string) => Promise<void>;
   readOnly?: boolean;
 }) {
   return (
@@ -84,7 +94,7 @@ function RoleTypeField({
         {ROLE_TYPES.map((rt) => (
           <button
             key={rt}
-            onClick={() => !readOnly && onSave(value === rt ? "" : rt)}
+            onClick={() => { if (!readOnly) void onSave(value === rt ? "" : rt); }}
             disabled={readOnly}
             className={`rounded-lg px-3 py-1.5 text-sm transition-colors disabled:cursor-default ${
               value === rt
@@ -109,7 +119,7 @@ function AggregateMembersField({
   character: CharacterDetail;
   allCharacters: CharacterDetail[];
   canEdit: boolean;
-  onUpdateMembers: (ids: string[]) => void;
+  onUpdateMembers: (ids: string[]) => Promise<void>;
 }) {
   const [saving, setSaving] = useState(false);
   const candidates = allCharacters.filter((c) => !c.isAggregate && c.id !== character.id);
@@ -120,7 +130,7 @@ function AggregateMembersField({
       ? character.memberIds.filter((id) => id !== memberId)
       : [...character.memberIds, memberId];
     setSaving(true);
-    try { onUpdateMembers(next); } finally { setSaving(false); }
+    try { await onUpdateMembers(next); } catch { /* 顶栏显示失败，当前选择保持不变。 */ } finally { setSaving(false); }
   };
 
   return (
@@ -160,7 +170,7 @@ export default function CharacterDetailView({
   productionName,
   character: initial,
   allCharacters: initialAll,
-  canEdit,
+  perms,
   versionId,
 }: Props) {
   const router = useRouter();
@@ -170,16 +180,29 @@ export default function CharacterDetailView({
   const [deleting, setDeleting] = useState(false);
   const [confirmConvert, setConfirmConvert] = useState(false);
   const [converting, setConverting] = useState(false);
+  const canEdit = canEditCharacter(perms, initial.id);
+  const canDelete = canDeleteCharacter(perms, initial.id);
+  const workspaceMode = useDramaturgyWorkspaceMode(productionId, canEdit || canDelete);
+  const editMode = workspaceMode.mode === "edit";
+  const mayEdit = editMode && canEdit;
+  const mayDelete = editMode && canDelete;
 
-  const patch = async (body: Record<string, unknown>) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${character.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(versionId ? { ...body, versionId } : body),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
-  };
+  useEffect(() => {
+    if (!editMode) {
+      setConfirmConvert(false);
+      setConfirmDelete(false);
+    }
+  }, [editMode]);
+
+  const patch = (body: Record<string, unknown>) => workspaceMode.trackWrite((async () => {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${character.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(versionId ? { ...body, versionId } : body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
+    })());
 
   const saveName = async (name: string) => {
     const trimmed = name.trim();
@@ -213,14 +236,16 @@ export default function CharacterDetailView({
   const del = async () => {
     setDeleting(true);
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${character.id}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(versionId ? { versionId } : {}),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "删除失败");
-      router.push(`/production/${productionId}/characters`);
+      await workspaceMode.trackWrite((async () => {
+        const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${character.id}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(versionId ? { versionId } : {}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "删除失败");
+        router.push(`/production/${productionId}/characters`);
+      })());
     } finally {
       setDeleting(false);
     }
@@ -236,9 +261,18 @@ export default function CharacterDetailView({
           >
             ← 返回角色列表
           </Link>
-          <div className="text-right">
-            <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase">Character</p>
-            <p className="text-sm font-bold text-zinc-500">{productionName}</p>
+          <div className="flex items-center gap-3">
+            <DramaturgyModePicker
+              mode={workspaceMode.mode}
+              canEdit={canEdit || canDelete}
+              switching={workspaceMode.switching}
+              error={workspaceMode.error}
+              onChange={(mode) => { void workspaceMode.requestMode(mode); }}
+            />
+            <div className="text-right">
+              <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase">Character</p>
+              <p className="text-sm font-bold text-zinc-500">{productionName}</p>
+            </div>
           </div>
         </div>
 
@@ -250,7 +284,7 @@ export default function CharacterDetailView({
                 label="姓名"
                 value={character.name}
                 onSave={saveName}
-                readOnly={!canEdit}
+                readOnly={!mayEdit}
               />
             </div>
             {character.isAggregate && (
@@ -266,7 +300,7 @@ export default function CharacterDetailView({
             <AggregateMembersField
               character={character}
               allCharacters={allCharacters}
-              canEdit={canEdit}
+              canEdit={mayEdit}
               onUpdateMembers={updateMembers}
             />
           ) : (
@@ -275,27 +309,27 @@ export default function CharacterDetailView({
                 label="性别"
                 value={character.gender}
                 onSave={(v) => saveMeta({ gender: v })}
-                readOnly={!canEdit}
+                readOnly={!mayEdit}
               />
               <RoleTypeField
                 value={character.roleType}
                 onSave={(v) => saveMeta({ roleType: v })}
-                readOnly={!canEdit}
+                readOnly={!mayEdit}
               />
               <Field
                 label="人物小传"
                 value={character.biography}
                 onSave={(v) => saveMeta({ biography: v })}
                 multiline
-                readOnly={!canEdit}
+                readOnly={!mayEdit}
               />
             </>
           )}
 
-          {(
+          {(mayEdit || mayDelete) && (
             <div className="pt-2 border-t border-zinc-100 space-y-3">
               {/* 聚合类型切换 */}
-              {confirmConvert ? (
+              {mayEdit && (confirmConvert ? (
                 <div className="flex items-center gap-3">
                   <p className="text-sm text-zinc-500 flex-1">
                     {character.isAggregate
@@ -323,10 +357,10 @@ export default function CharacterDetailView({
                 >
                   {character.isAggregate ? "转为普通角色" : "转为聚合角色"}
                 </button>
-              )}
+              ))}
 
               {/* 删除 */}
-              {!confirmConvert && (
+              {mayDelete && !confirmConvert && (
                 confirmDelete ? (
                   <div className="flex items-center gap-3">
                     <p className="text-sm text-zinc-500 flex-1">确认删除角色「{character.name}」？</p>

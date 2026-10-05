@@ -29,6 +29,7 @@ type Props = {
   embedded?: boolean;
   versionId?: string | null;
   initialExpandedId?: string;
+  trackWrite?: <T>(operation: Promise<T>) => Promise<T>;
 };
 
 function isUpdatingResponse(payload: unknown): payload is { status: "updating" } {
@@ -57,7 +58,7 @@ function MetaField({
   const commit = async () => {
     if (draft === externalValue) return;
     setSaving(true);
-    try { await onSave(draft); } finally { setSaving(false); }
+    try { await onSave(draft); } catch { /* 保留草稿，由顶栏提示重试。 */ } finally { setSaving(false); }
   };
 
   return (
@@ -149,6 +150,13 @@ function SceneEditRow({
     : null;
 
   useEffect(() => {
+    if (!canEdit) {
+      setEditingName(false);
+      setMobileAction(null);
+    }
+  }, [canEdit]);
+
+  useEffect(() => {
     if (initialExpanded && rowRef.current) {
       rowRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
     }
@@ -158,10 +166,11 @@ function SceneEditRow({
   if (draftName !== scene.name && !editingName) setDraftName(scene.name);
 
   const commit = async (name: string) => {
-    setEditingName(false);
     if (name === scene.name) return;
     setSaving(true);
-    try { await onUpdate(name); } finally { setSaving(false); }
+    try { await onUpdate(name); setEditingName(false); }
+    catch { setEditingName(true); }
+    finally { setSaving(false); }
   };
 
   const del = async () => {
@@ -250,11 +259,11 @@ function SceneEditRow({
         </td>
         <td className="w-72 px-4 py-3 text-right hidden sm:table-cell">
           <div className="flex h-5 items-center justify-end gap-3">
-            {(fieldPerms.kind || canDelete) && (
+            {(canEdit && fieldPerms.kind || canDelete) && (
               <span className="inline-flex h-5 items-center">
                 <BoundaryActionMenu
                   conversionLabel={scene.kind === "scene" ? "转为章节" : "转为段落"}
-                  onConvert={fieldPerms.kind ? () => { void onConvert(); } : undefined}
+                  onConvert={canEdit && fieldPerms.kind ? () => { void onConvert(); } : undefined}
                   onDelete={canDelete ? () => { void del(); } : undefined}
                   deleting={deleting}
                 />
@@ -324,7 +333,7 @@ function SceneEditRow({
                 onSave={(v) => onPatchMeta({ stageNotes: v })}
               />
             </div>
-            {(fieldPerms.kind || canDelete) && (
+            {(canEdit && fieldPerms.kind || canDelete) && (
               <div className="sm:hidden mt-3 pt-3 border-t border-zinc-100 flex items-center gap-4">
                 {mobileAction === "convert" ? (
                   <>
@@ -342,7 +351,7 @@ function SceneEditRow({
                   </>
                 ) : (
                   <>
-                    {fieldPerms.kind && (
+                    {canEdit && fieldPerms.kind && (
                       <button type="button" onClick={() => setMobileAction("convert")} className="text-xs text-zinc-500 hover:text-zinc-700">转换类型</button>
                     )}
                     {canDelete && (
@@ -360,7 +369,7 @@ function SceneEditRow({
                 label={`${scene.number}${scene.name ? ` ${scene.name}` : ""}`}
                 /* 挂载有自己的钥匙（scene/<id>/mounts@create），不随字段写权限
                    下发——用 canEdit 这个粗门开合等于「入口亮着、点下去 403」 */
-                canEdit={canMountScene(fieldPerms, scene.id)}
+                canEdit={canEdit && canMountScene(fieldPerms, scene.id)}
                 display="compact"
               />
             </div>
@@ -432,7 +441,12 @@ function InsertSceneRow({
     <>
       <tr className={`group border-b border-zinc-50 ${prominent ? "h-32" : ""}`}>
         <td colSpan={colSpan} className={prominent ? "p-0" : "px-4 py-0"}>
-          <div ref={panelRef} className={`relative flex justify-center ${prominent ? "h-full" : ""}`}>
+          <div
+            ref={panelRef}
+            data-dramaturgy-unsaved={open ? "true" : undefined}
+            data-dramaturgy-unsaved-message="请先添加或取消正在填写的章节/段落"
+            className={`relative flex justify-center ${prominent ? "h-full" : ""}`}
+          >
             {!open ? (
               <button
                 onClick={() => setOpen(onAddScene ? "scene" : "chapter")}
@@ -493,13 +507,18 @@ function InsertSceneRow({
   );
 }
 
-export default function ScenesManager({ productionId, productionName, initialScenes, openingChapterMarkerId, canEdit, fieldPerms, embedded, canImport, versionId, initialExpandedId }: Props & { canImport?: boolean }) {
+export default function ScenesManager({ productionId, productionName, initialScenes, openingChapterMarkerId, canEdit, fieldPerms, embedded, canImport, versionId, initialExpandedId, trackWrite }: Props & { canImport?: boolean }) {
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
   const [dragging, setDragging] = useState<MarkerProjection | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; edge: "top" | "bottom"; beforeId: string | null } | null>(null);
   const currentVersionId = versionId ?? null;
   const [deleteDialog, setDeleteDialog] = useState<MarkerDeleteDialogState | null>(null);
   const [deleteDialogBusy, setDeleteDialogBusy] = useState(false);
+  const runWrite = trackWrite ?? (async <T,>(operation: Promise<T>) => operation);
+
+  useEffect(() => {
+    if (!canEdit) setDeleteDialog(null);
+  }, [canEdit]);
 
   const applyCanonicalPayload = (data: { scenes?: MarkerProjection[] }) => {
     if (data.scenes) setScenes(data.scenes);
@@ -539,13 +558,13 @@ export default function ScenesManager({ productionId, productionName, initialSce
     },
   );
 
-  const mutate = async (url: string, init: RequestInit) => {
-    let res = await fetch(url, init);
-    if (res.status === 202) res = await fetch(url, init);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "操作失败");
-    applyCanonicalPayload(data);
-  };
+  const mutate = (url: string, init: RequestInit) => runWrite((async () => {
+      let res = await fetch(url, init);
+      if (res.status === 202) res = await fetch(url, init);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "操作失败");
+      applyCanonicalPayload(data);
+    })());
 
   const update = async (id: string, name: string) => {
     await mutate(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
@@ -580,7 +599,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
     body: JSON.stringify({ ...(currentVersionId ? { versionId: currentVersionId } : {}), ...(operation ? { operation } : {}) }),
   });
 
-  const del = async (id: string) => {
+  const del = (id: string) => runWrite((async () => {
     let res = await deleteRequest(id);
     if (res.status === 202) res = await deleteRequest(id);
     const data = await res.json().catch(() => ({}));
@@ -596,21 +615,22 @@ export default function ScenesManager({ productionId, productionName, initialSce
       setDeleteDialog({ plan: null, message: data.error ?? "删除失败。" });
       return;
     }
-    applyCanonicalPayload(data);
-  };
+      applyCanonicalPayload(data);
+    })());
 
   const chooseDeleteOperation = async (operation: MarkerDeleteOperation) => {
     if (!deleteDialog) return;
     setDeleteDialogBusy(true);
     try {
-      const res = await deleteRequest(operation.markerId, operation.type);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || isUpdatingResponse(data)) {
-        setDeleteDialog({ plan: null, message: data.error ?? "删除失败。" });
-        return;
-      }
-      applyCanonicalPayload(data);
-      setDeleteDialog(null);
+      await runWrite((async () => {
+        const res = await deleteRequest(operation.markerId, operation.type);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "删除失败。");
+        applyCanonicalPayload(data);
+        setDeleteDialog(null);
+      })());
+    } catch (error) {
+      setDeleteDialog({ plan: null, message: error instanceof Error ? error.message : "删除失败。" });
     } finally {
       setDeleteDialogBusy(false);
     }
@@ -697,7 +717,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
         <div className="rounded-2xl bg-white shadow-sm overflow-hidden">
           {acts.length === 0 ? (
             <div>
-              {fieldPerms.create && (
+              {canEdit && fieldPerms.create && (
                 <table className="w-full">
                   <tbody>
                     <InsertSceneRow
@@ -710,7 +730,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                   </tbody>
                 </table>
               )}
-              {!fieldPerms.create && <p className="px-4 py-8 text-center text-sm text-zinc-300">暂无章节</p>}
+              {!(canEdit && fieldPerms.create) && <p className="px-4 py-8 text-center text-sm text-zinc-300">暂无章节</p>}
             </div>
           ) : (
             <table className="w-full table-auto sm:table-fixed">
@@ -723,7 +743,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                 </tr>
               </thead>
               <tbody>
-                {fieldPerms.create && (
+                {canEdit && fieldPerms.create && (
                   <InsertSceneRow
                     colSpan={colSpan}
                     onAddChapter={(name) => add(name, null, beforeMarker(acts[0]))}
@@ -743,7 +763,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         childScenes={children}
                         canEdit={canEdit}
                         fieldPerms={fieldPerms}
-                        canDelete={canDeleteScene(fieldPerms, act.id)}
+                        canDelete={canEdit && canDeleteScene(fieldPerms, act.id)}
                         productionId={productionId}
                         initialExpanded={act.id === initialExpandedId}
                         onUpdate={(name) => update(act.id, name)}
@@ -752,7 +772,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                         onPatchMeta={(fields) => patchMeta(act.id, fields)}
                         {...dragProps(act)}
                       />
-                      {fieldPerms.create && (
+                      {canEdit && fieldPerms.create && (
                         <InsertSceneRow
                           colSpan={colSpan}
                           onAddChapter={(name) => add(name, null, beforeMarker(children[0] ?? nextAct))}
@@ -767,7 +787,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                             marks={sub.rehearsalMarks}
                             canEdit={canEdit}
                             fieldPerms={fieldPerms}
-                            canDelete={canDeleteScene(fieldPerms, sub.id)}
+                            canDelete={canEdit && canDeleteScene(fieldPerms, sub.id)}
                             productionId={productionId}
                             initialExpanded={sub.id === initialExpandedId}
                             onUpdate={(name) => update(sub.id, name)}
@@ -776,7 +796,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
                             onPatchMeta={(fields) => patchMeta(sub.id, fields)}
                             {...dragProps(sub)}
                           />
-                          {fieldPerms.create && (
+                          {canEdit && fieldPerms.create && (
                             <InsertSceneRow
                               colSpan={colSpan}
                               onAddChapter={(name) => add(name, null, beforeMarker(children[childIndex + 1] ?? nextAct))}

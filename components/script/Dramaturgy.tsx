@@ -23,6 +23,8 @@ import type { SceneFieldPerms } from "@/lib/script/scene-field-perms-shared";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
 import PageSkeleton from "@/components/ui/PageSkeleton";
 import { useListTableViewPreference } from "./use-list-table-view-preference";
+import DramaturgyModePicker from "./DramaturgyModePicker";
+import { useDramaturgyWorkspaceMode } from "./use-dramaturgy-workspace-mode";
 
 type Props = {
   productionId: string;
@@ -53,6 +55,9 @@ export default function Dramaturgy({
   const { stage: toolbarStage, closeOverflow, overflowOpen } = useProductionToolbar();
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
   const [sceneViewMode, setSceneViewMode] = useListTableViewPreference("dramaturgy");
+  const workspaceMode = useDramaturgyWorkspaceMode(productionId, canEdit);
+  const contentEditable = workspaceMode.mode === "edit";
+  const trackWorkspaceWrite = workspaceMode.trackWrite;
 
   // AI 写工具改了场次（lib/agent/runtime/tools.ts 的 scene mutates）→ 重拉一次。列表模式
   // 的 ScenesManager 自己订阅 markers SSE 会刷，但表格模式用的是这里的 scenes state。
@@ -120,27 +125,27 @@ export default function Dramaturgy({
     })();
   }, [productionId, viewsLoaded]);
 
-  const handleUpdateScene = useCallback(async (sceneId: string, name: string) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${sceneId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(versionId ? { name, versionId } : { name }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
-    setScenes((prev) => prev.map((s) => s.id === sceneId ? { ...s, name } : s));
-  }, [productionId, versionId]);
+  const handleUpdateScene = useCallback((sceneId: string, name: string) => trackWorkspaceWrite((async () => {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${sceneId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(versionId ? { name, versionId } : { name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
+      setScenes((prev) => prev.map((s) => s.id === sceneId ? { ...s, name } : s));
+    })()), [productionId, trackWorkspaceWrite, versionId]);
 
-  const handlePatchMeta = useCallback(async (sceneId: string, fields: Partial<Pick<MarkerProjection, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">>) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${sceneId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(versionId ? { ...fields, versionId } : fields),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
-    setScenes((prev) => prev.map((s) => s.id === sceneId ? { ...s, ...fields } : s));
-  }, [productionId, versionId]);
+  const handlePatchMeta = useCallback((sceneId: string, fields: Partial<Pick<MarkerProjection, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">>) => trackWorkspaceWrite((async () => {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes/${sceneId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(versionId ? { ...fields, versionId } : fields),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
+      setScenes((prev) => prev.map((s) => s.id === sceneId ? { ...s, ...fields } : s));
+    })()), [productionId, trackWorkspaceWrite, versionId]);
 
   const handleConfigChange = (config: TableViewConfigData) => setTableConfig(config);
 
@@ -288,6 +293,14 @@ export default function Dramaturgy({
           active="overview"
         />
         <ProductionTopMenuDivider />
+        <DramaturgyModePicker
+          mode={workspaceMode.mode}
+          canEdit={canEdit}
+          switching={workspaceMode.switching}
+          error={workspaceMode.error}
+          onChange={(mode) => { void workspaceMode.requestMode(mode); }}
+        />
+        <ProductionTopMenuDivider />
         {sceneViewMode !== null && (
           <ListTableViewToggle value={sceneViewMode} onChange={setSceneViewMode} />
         )}
@@ -348,8 +361,9 @@ export default function Dramaturgy({
             productionName={productionName}
             initialScenes={scenes}
             openingChapterMarkerId={openingChapterMarkerId}
-            canEdit={canEdit}
+            canEdit={contentEditable}
             fieldPerms={fieldPerms}
+            trackWrite={trackWorkspaceWrite}
             versionId={versionId}
             initialExpandedId={initialSceneId}
             embedded
@@ -359,7 +373,7 @@ export default function Dramaturgy({
             key={versionId ?? ""}
             productionId={productionId}
             scenes={scenes}
-            canEdit={canEdit}
+            canEdit={contentEditable}
             fieldPerms={fieldPerms}
             viewConfig={tableConfig}
             onViewConfigChange={handleConfigChange}

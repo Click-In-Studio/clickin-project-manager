@@ -12,6 +12,8 @@ import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib
 import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
 import PageSkeleton from "@/components/ui/PageSkeleton";
 import { useListTableViewPreference } from "./use-list-table-view-preference";
+import DramaturgyModePicker from "./DramaturgyModePicker";
+import { useDramaturgyWorkspaceMode } from "./use-dramaturgy-workspace-mode";
 
 const ROLE_TYPES = ["演员", "肢体", "画外音"] as const;
 
@@ -38,12 +40,17 @@ function MetaField({
 }: {
   label: string;
   value: string;
-  onSave: (v: string) => void;
+  onSave: (v: string) => Promise<void>;
   multiline?: boolean;
   readOnly?: boolean;
 }) {
   const [draft, setDraft] = useState(value);
-  const commit = () => { if (draft !== value) onSave(draft); };
+  const [saving, setSaving] = useState(false);
+  const commit = async () => {
+    if (draft === value) return;
+    setSaving(true);
+    try { await onSave(draft); } catch { /* 保留草稿，由顶栏提示重试。 */ } finally { setSaving(false); }
+  };
   const cls = "w-full rounded border border-[var(--line)] bg-zinc-50 px-2 py-1 text-xs text-zinc-700 outline-none focus:border-zinc-400 resize-none disabled:opacity-50 disabled:cursor-default";
   return (
     <div className="space-y-0.5">
@@ -54,7 +61,7 @@ function MetaField({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
-          disabled={readOnly}
+          disabled={readOnly || saving}
           className={cls}
         />
       ) : (
@@ -63,7 +70,7 @@ function MetaField({
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-          disabled={readOnly}
+          disabled={readOnly || saving}
           className={cls}
         />
       )}
@@ -77,7 +84,7 @@ function RoleTypeField({
   readOnly,
 }: {
   value: string;
-  onSave: (v: string) => void;
+  onSave: (v: string) => Promise<void>;
   readOnly?: boolean;
 }) {
   return (
@@ -87,7 +94,7 @@ function RoleTypeField({
         {ROLE_TYPES.map((rt) => (
           <button
             key={rt}
-            onClick={() => !readOnly && onSave(value === rt ? "" : rt)}
+            onClick={() => { if (!readOnly) void onSave(value === rt ? "" : rt); }}
             disabled={readOnly}
             className={`rounded px-2 py-0.5 text-xs transition-colors disabled:cursor-default ${
               value === rt
@@ -190,6 +197,11 @@ function CharacterEditRow({
   const [confirmConvert, setConfirmConvert] = useState(false);
   const [converting, setConverting] = useState(false);
 
+  useEffect(() => {
+    if (!canEdit) { setEditing(false); setConfirmConvert(false); }
+    if (!canDelete) setConfirmDelete(false);
+  }, [canDelete, canEdit]);
+
   const convert = async () => {
     setConverting(true);
     try { await onConvert(!char.isAggregate); setConfirmConvert(false); }
@@ -200,7 +212,9 @@ function CharacterEditRow({
     const t = draft.trim();
     if (!t || t === char.name) { setDraft(char.name); setEditing(false); return; }
     setSaving(true);
-    try { await onRename(t); } finally { setSaving(false); setEditing(false); }
+    try { await onRename(t); setEditing(false); }
+    catch { setEditing(true); }
+    finally { setSaving(false); }
   };
 
   const del = async () => {
@@ -394,7 +408,7 @@ function TextCell({
   textClassName = "text-sm",
 }: {
   value: string;
-  onSave: (v: string) => void;
+  onSave: (v: string) => Promise<void>;
   multiline?: boolean;
   readOnly?: boolean;
   placeholder?: string;
@@ -402,10 +416,17 @@ function TextCell({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
 
-  const commit = () => { if (draft !== value) onSave(draft); setEditing(false); };
+  const commit = async () => {
+    if (draft === value) { setEditing(false); return; }
+    setSaving(true);
+    try { await onSave(draft); setEditing(false); }
+    catch { setEditing(true); }
+    finally { setSaving(false); }
+  };
   const cancel = () => { setDraft(value); setEditing(false); };
 
   if (editing) {
@@ -420,8 +441,9 @@ function TextCell({
           onBlur={commit}
           onKeyDown={(e) => {
             if (e.key === "Escape") { e.preventDefault(); cancel(); }
-            if (isMultilineSubmitShortcut(e)) { e.preventDefault(); commit(); }
+            if (isMultilineSubmitShortcut(e)) { e.preventDefault(); void commit(); }
           }}
+          disabled={saving}
           className={`w-full resize-none rounded border border-[var(--line)] px-2 py-1.5 outline-none focus:border-zinc-400 ${textClassName}`}
           style={{ minWidth: 200 }}
         />
@@ -433,7 +455,8 @@ function TextCell({
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
-        onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancel(); }}
+        onKeyDown={(e) => { if (e.key === "Enter") void commit(); if (e.key === "Escape") cancel(); }}
+        disabled={saving}
         className="w-full border-b border-zinc-400 text-sm text-zinc-800 outline-none"
       />
     );
@@ -475,13 +498,20 @@ function CharacterTableRow({
   const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    if (!canEdit) setEditingName(false);
+    if (!canDelete) setConfirmDelete(false);
+  }, [canDelete, canEdit]);
+
   useEffect(() => { if (!editingName) setNameDraft(char.name); }, [char.name, editingName]);
 
   const commitName = async () => {
     const t = nameDraft.trim();
     if (!t || t === char.name) { setNameDraft(char.name); setEditingName(false); return; }
     setSavingName(true);
-    try { await onRename(t); } finally { setSavingName(false); setEditingName(false); }
+    try { await onRename(t); setEditingName(false); }
+    catch { setEditingName(true); }
+    finally { setSavingName(false); }
   };
 
   const del = async () => {
@@ -626,11 +656,13 @@ function AddCharacterForm({
   allChars,
   onAdd,
   versionId,
+  trackWrite,
 }: {
   productionId: string;
   allChars: CharacterDetail[];
   onAdd: (char: CharacterDetail) => void;
   versionId?: string | null;
+  trackWrite: <T>(operation: Promise<T>) => Promise<T>;
 }) {
   const [draft, setDraft] = useState("");
   const [isAggregate, setIsAggregate] = useState(false);
@@ -651,26 +683,34 @@ function AddCharacterForm({
     setAdding(true);
     setError(null);
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(versionId
-          ? { name, isAggregate, memberIds: isAggregate ? memberIds : [], versionId }
-          : { name, isAggregate, memberIds: isAggregate ? memberIds : [] }),
-      });
-      const data = await res.json();
-      if (!res.ok || isUpdatingResponse(data)) { setError(data.error ?? "添加失败"); return; }
-      onAdd(data.char);
-      setDraft("");
-      setIsAggregate(false);
-      setMemberIds([]);
+      await trackWrite((async () => {
+        const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(versionId
+            ? { name, isAggregate, memberIds: isAggregate ? memberIds : [], versionId }
+            : { name, isAggregate, memberIds: isAggregate ? memberIds : [] }),
+        });
+        const data = await res.json();
+        if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "添加失败");
+        onAdd(data.char);
+        setDraft("");
+        setIsAggregate(false);
+        setMemberIds([]);
+      })());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "添加失败");
     } finally {
       setAdding(false);
     }
   };
 
   return (
-    <div className="border-t border-[var(--line)] px-4 py-3 space-y-2">
+    <div
+      data-dramaturgy-unsaved={draft || isAggregate || memberIds.length > 0 ? "true" : undefined}
+      data-dramaturgy-unsaved-message="请先添加或清空正在填写的角色"
+      className="border-t border-[var(--line)] px-4 py-3 space-y-2"
+    >
       <div className="flex items-center gap-3">
         <input
           value={draft}
@@ -726,11 +766,14 @@ function AddCharacterForm({
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
 export default function CharactersManager({ productionId, initialCharacters, perms, embedded, versionId, initialExpandedId }: Props) {
-  const canCreate = perms.create;
   const { stage: toolbarStage } = useProductionToolbar();
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
   const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId ?? null);
   const [view, setView] = useListTableViewPreference("characters");
+  const hasWritePermission = perms.any;
+  const workspaceMode = useDramaturgyWorkspaceMode(productionId, hasWritePermission);
+  const contentEditable = workspaceMode.mode === "edit";
+  const canCreate = contentEditable && perms.create;
 
   useEffect(() => {
     if (!embedded) window.scrollTo(0, 0);
@@ -745,61 +788,61 @@ export default function CharactersManager({ productionId, initialCharacters, per
       .catch(() => {});
   });
 
-  const rename = async (id: string, name: string) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(versionId ? { name, versionId } : { name }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || isUpdatingResponse(data)) return;
-    setCharacters((prev) => prev.map((c) => c.id === id ? { ...c, name } : c));
-  };
+  const rename = (id: string, name: string) => workspaceMode.trackWrite((async () => {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(versionId ? { name, versionId } : { name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
+      setCharacters((prev) => prev.map((c) => c.id === id ? { ...c, name } : c));
+    })());
 
-  const del = async (id: string) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(versionId ? { versionId } : {}),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || isUpdatingResponse(data)) return;
-    setCharacters((prev) => prev.filter((c) => c.id !== id));
-    if (expandedId === id) setExpandedId(null);
-  };
+  const del = (id: string) => workspaceMode.trackWrite((async () => {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(versionId ? { versionId } : {}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "删除失败");
+      setCharacters((prev) => prev.filter((c) => c.id !== id));
+      if (expandedId === id) setExpandedId(null);
+    })());
 
-  const patchMeta = async (id: string, fields: Partial<{ gender: string; biography: string; roleType: string }>) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(versionId ? { ...fields, versionId } : fields),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || isUpdatingResponse(data)) return;
-    setCharacters((prev) => prev.map((c) => c.id === id ? { ...c, ...fields } : c));
-  };
+  const patchMeta = (id: string, fields: Partial<{ gender: string; biography: string; roleType: string }>) => workspaceMode.trackWrite((async () => {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(versionId ? { ...fields, versionId } : fields),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
+      setCharacters((prev) => prev.map((c) => c.id === id ? { ...c, ...fields } : c));
+    })());
 
-  const updateMembers = async (id: string, memberIds: string[]) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(versionId ? { memberIds, versionId } : { memberIds }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || isUpdatingResponse(data)) return;
-    setCharacters((prev) => prev.map((c) => c.id === id ? { ...c, memberIds } : c));
-  };
+  const updateMembers = (id: string, memberIds: string[]) => workspaceMode.trackWrite((async () => {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(versionId ? { memberIds, versionId } : { memberIds }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
+      setCharacters((prev) => prev.map((c) => c.id === id ? { ...c, memberIds } : c));
+    })());
 
-  const convert = async (id: string, toAggregate: boolean) => {
-    const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(versionId ? { isAggregate: toAggregate, versionId } : { isAggregate: toAggregate }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || isUpdatingResponse(data)) return;
-    setCharacters((prev) => prev.map((c) => c.id === id ? { ...c, isAggregate: toAggregate, memberIds: [] } : c));
-  };
+  const convert = (id: string, toAggregate: boolean) => workspaceMode.trackWrite((async () => {
+      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/characters/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(versionId ? { isAggregate: toAggregate, versionId } : { isAggregate: toAggregate }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "更新失败");
+      setCharacters((prev) => prev.map((c) => c.id === id ? { ...c, isAggregate: toAggregate, memberIds: [] } : c));
+    })());
 
   const addForm = canCreate && (
     <AddCharacterForm
@@ -807,6 +850,7 @@ export default function CharactersManager({ productionId, initialCharacters, per
       allChars={characters}
       onAdd={(char) => setCharacters((prev) => [...prev, char])}
       versionId={versionId}
+      trackWrite={workspaceMode.trackWrite}
     />
   );
 
@@ -832,8 +876,8 @@ export default function CharactersManager({ productionId, initialCharacters, per
                   key={c.id}
                   char={c}
                   allChars={characters}
-                  canEdit={canEditCharacter(perms, c.id)}
-                  canDelete={canDeleteCharacter(perms, c.id)}
+                  canEdit={contentEditable && canEditCharacter(perms, c.id)}
+                  canDelete={contentEditable && canDeleteCharacter(perms, c.id)}
                   onRename={(name) => rename(c.id, name)}
                   onDelete={() => del(c.id)}
                   onPatchMeta={(fields) => patchMeta(c.id, fields)}
@@ -868,8 +912,8 @@ export default function CharactersManager({ productionId, initialCharacters, per
                 key={c.id}
                 char={c}
                 allChars={characters}
-                canEdit={canEditCharacter(perms, c.id)}
-                canDelete={canDeleteCharacter(perms, c.id)}
+                canEdit={contentEditable && canEditCharacter(perms, c.id)}
+                canDelete={contentEditable && canDeleteCharacter(perms, c.id)}
                 onRename={(name) => rename(c.id, name)}
                 onDelete={() => del(c.id)}
                 onPatchMeta={(fields) => patchMeta(c.id, fields)}
@@ -900,6 +944,14 @@ export default function CharactersManager({ productionId, initialCharacters, per
         <DramaturgyWorkspaceHeading
           productionId={productionId}
           active="characters"
+        />
+        <ProductionTopMenuDivider />
+        <DramaturgyModePicker
+          mode={workspaceMode.mode}
+          canEdit={hasWritePermission}
+          switching={workspaceMode.switching}
+          error={workspaceMode.error}
+          onChange={(mode) => { void workspaceMode.requestMode(mode); }}
         />
         <ProductionTopMenuDivider />
         {view !== null && <ListTableViewToggle value={view} onChange={setView} />}
