@@ -6,6 +6,7 @@ import { PAGE_PERMISSION_SCOPES, type PageScope } from "@/lib/perm/page-permissi
 
 const PAGE_TITLES: Record<PageScope, string> = {
   base:        "开通查看权限",
+  admin:       "激活管理权限",
   script:      "激活剧本权限",
   dramaturgy:  "激活构作权限",
   characters:  "激活角色权限",
@@ -18,6 +19,7 @@ const PAGE_TITLES: Record<PageScope, string> = {
 
 const PAGE_SUBTITLES: Record<PageScope, string> = {
   base:        "你在此项目中拥有以下查看权限，一键开通后即可访问相应内容：",
+  admin:       "你在此项目中拥有以下管理权限，进入前请一键激活：",
   script:      "你在此项目中拥有以下剧本相关权限，进入前请一键激活：",
   dramaturgy:  "你在此项目中拥有以下场次 / 构作相关权限，进入前请一键激活：",
   characters:  "你在此项目中拥有以下角色相关权限，进入前请一键激活：",
