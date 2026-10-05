@@ -19,7 +19,8 @@ import {
   ProductionToolbarStageContext,
 } from "./ProductionTopMenu";
 import type { Production, ShellSession } from "./app-shell/types";
-import { CREATION_NAV, PRODUCTION_NAV, PRODUCTION_OVERVIEW_NAV, ADMIN_NAV_GROUPS, OVERVIEW_NAV, PRODUCTION_TOP_MENU_LABELS } from "./app-shell/nav-config";
+import { CREATION_NAV, PRODUCTION_NAV, PRODUCTION_OVERVIEW_NAV, ADMIN_NAV_GROUPS, OVERVIEW_NAV, PRODUCTION_TOP_MENU_LABELS, PLATFORM_TOP_MENU_LABELS } from "./app-shell/nav-config";
+import { PlatformTopMenuTitle } from "./PlatformTopMenu";
 import { firstContentChar } from "./app-shell/first-content-char";
 import { extractProductionId, extractCurrentWikiId, extractCurrentAssetId, extractModule, extractAdminModule } from "./app-shell/route";
 import { NavPendingContext, type NavPendingBus } from "./app-shell/nav-pending";
@@ -204,6 +205,8 @@ export default function AppShell({ session, productions, canCreateProduction = f
     : productionId ? extractCurrentAssetId(pathname, productionId) : null;
   const productionTopMenuLabel = activeModule === null ? null : PRODUCTION_TOP_MENU_LABELS[activeModule] ?? null;
   const hasProductionTopMenu = productionTopMenuLabel !== null;
+  const platformTopMenuLabel = PLATFORM_TOP_MENU_LABELS[pathname] ?? null;
+  const hasTopMenu = hasProductionTopMenu || platformTopMenuLabel !== null;
   const isHome = pathname === "/";
   const currentProduction = productionId
     ? productions.find((p) => p.id === productionId)
@@ -328,13 +331,6 @@ export default function AppShell({ session, productions, canCreateProduction = f
           compact={productionHeaderStage >= 2}
         />
 
-        {isHome && (
-          <div className="flex shrink-0 flex-col gap-0.5">
-            <p className="m-0 text-[9px] font-bold tracking-[0.14em] text-[var(--muted)]">平台级</p>
-            <h1 className="m-0 whitespace-nowrap font-serif text-sm font-medium leading-tight text-[var(--ink)]">我的工作</h1>
-          </div>
-        )}
-
         {isAdminMode && productionId && (
           <Link
             href={`/production/${productionId}`}
@@ -345,23 +341,25 @@ export default function AppShell({ session, productions, canCreateProduction = f
           </Link>
         )}
 
-        {hasProductionTopMenu && (
+        {hasTopMenu && (
           <div
             id={PRODUCTION_TOP_MENU_SLOT_ID}
             data-search-open={productionSearchPath === pathname ? "true" : undefined}
             className="flex h-full min-w-0 flex-1 items-center"
           >
-            <ProductionTopMenuContext
+            {platformTopMenuLabel !== null ? (
+              <PlatformTopMenuTitle title={platformTopMenuLabel} placeholder />
+            ) : <ProductionTopMenuContext
               label={productionTopMenuLabel ?? ""}
               side={isCreationActive ? "script" : isProductionOverviewActive ? "overview" : "stage"}
               placeholder
-            />
+            />}
           </div>
         )}
 
         {/* Right actions */}
         <div className={`app-shell-topbar-actions ${productionTopbarActionsMarginClass(
-          hasProductionTopMenu,
+          hasTopMenu,
           productionHeaderStage,
         )} flex shrink-0 items-center gap-3`}>
           {/* Search bar: only when inside a production */}
@@ -403,7 +401,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             hidden={productionHeaderStage >= 2}
           />
 
-          {hasProductionTopMenu && (
+          {hasTopMenu && (
             <div
               ref={topOverflowRef}
               id="production-top-toolbar-overflow"

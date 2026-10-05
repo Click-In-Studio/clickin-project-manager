@@ -1,5 +1,7 @@
 "use client";
 
+import PlatformTopMenu from "@/components/shell/PlatformTopMenu";
+
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { MyScheduleEntry, WeeklyCallEvent } from "@/lib/ops/event-db";
@@ -112,10 +114,9 @@ export default function WeeklyCallClient({ token }: { token?: string } = {}) {
 
   return (
     <div className={styles.workspace}>
+      <PlatformTopMenu title={view === "week" ? "本周日程" : view === "month" ? "月历" : "日程表"} eyebrow="Platform · 日程" />
       <div className={styles.calendarHeader}>
-        <div className={styles.pageHeader} style={{ margin: 0 }}>
-          <p className={styles.eyebrow}>Platform · 日程</p>
-          <h1 className={styles.pageTitle}>{view === "week" ? "本周日程" : view === "month" ? "月历" : "日程表"}</h1>
+        <div>
           {rangeLabel && <p className={styles.calendarRange}>{rangeLabel} · UTC+8</p>}
           {view !== "week" && <p className={styles.calendarLegend}><b>Call</b> 高亮显示 · 事件、任务与流程项淡显</p>}
         </div>

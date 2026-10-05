@@ -836,28 +836,6 @@
   opacity: .8;
 }
 
-.pageHeader {
-  margin-bottom: 28px;
-}
-
-.eyebrow {
-  margin: 0 0 4px;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-}
-
-.pageTitle {
-  margin: 0;
-  font-family: Georgia, "Noto Serif SC", serif;
-  font-size: clamp(28px, 3vw, 42px);
-  font-weight: 500;
-  letter-spacing: -.04em;
-  color: var(--ink);
-}
-
 .contentStack {
   display: flex;
   flex-direction: column;
@@ -2225,7 +2203,6 @@
 }
 
 @media (max-width: 767px) {
-  .approvalCenterWorkspace .pageHeader { margin-bottom: 18px; }
   .approvalCenterSummary { margin-bottom: 12px; }
   .approvalCenterSummary > div {
     min-height: 66px;
@@ -2295,7 +2272,6 @@
 /* 批注 2 / 4–7：极窄屏收紧上下留白；页签可横向滚动，三个筛选器保持同排。 */
 @media (max-width: 360px) {
   .approvalCenterWorkspace { padding: 12px 10px calc(72px + env(safe-area-inset-bottom)); }
-  .approvalCenterWorkspace .pageHeader { margin-bottom: 12px; }
   .approvalCenterSummary { grid-template-columns: 1fr; margin-bottom: 9px; }
   .approvalCenterSummary > div {
     min-height: 46px;

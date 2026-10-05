@@ -16,6 +16,7 @@ import { getSession } from "@/lib/account/session";
 import { verifyCardToken } from "@/lib/notify/card-token";
 import { getPool } from "@/lib/pg";
 import SmartText from "@/components/ui/SmartText";
+import PlatformTopMenu from "@/components/shell/PlatformTopMenu";
 
 function fmtTime(iso: string): string {
   const d = new Date(new Date(iso).getTime() + 8 * 3_600_000);
@@ -138,9 +139,9 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
 
       {/* Eyebrow + nav link */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", margin: 0 }}>
+        {isTokenMode ? <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", margin: 0 }}>
           Daily Call Sheet · UTC+8
-        </p>
+        </p> : <PlatformTopMenu title={fmtDateFull(`${dateStr}T00:00:00+08:00`)} eyebrow="Daily Call Sheet · UTC+8" />}
         {!isTokenMode && (
           <Link href="/my/weekly-call" style={{ fontSize: 11, color: "var(--muted)", textDecoration: "none" }}>
             ← 本周日程
@@ -149,9 +150,9 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
       </div>
 
       {/* Date heading */}
-      <h1 style={{ fontSize: 24, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: "0 0 20px" }}>
+      {isTokenMode && <h1 style={{ fontSize: 24, fontWeight: 800, color: "var(--ink)", letterSpacing: "-.01em", margin: "0 0 20px" }}>
         {fmtDateFull(`${dateStr}T00:00:00+08:00`)}
-      </h1>
+      </h1>}
 
       {eventIds.length === 0 ? (
         <p style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", padding: "48px 0" }}>暂无 Call 安排</p>

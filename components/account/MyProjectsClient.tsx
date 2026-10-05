@@ -1,5 +1,8 @@
 "use client";
 
+import PlatformTopMenu from "@/components/shell/PlatformTopMenu";
+import { PRODUCTION_MODULE_ACTION_CLASS, PRODUCTION_MODULE_SECONDARY_ACTION_CLASS } from "@/components/shell/ProductionModuleTopMenu";
+
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useState, useEffect } from "react";
@@ -105,10 +108,7 @@ export default function MyProjectsClient(
   if (loading) {
     return (
       <div className={styles.workspace}>
-        <div className={styles.pageHeader}>
-          <p className={styles.eyebrow}>Platform · 项目</p>
-          <h1 className={styles.pageTitle}>我的项目</h1>
-        </div>
+        <PlatformTopMenu title="我的项目" eyebrow="Platform · 项目" />
         <div className={styles.emptyState}>加载中…</div>
       </div>
     );
@@ -116,44 +116,28 @@ export default function MyProjectsClient(
 
   return (
     <div className={styles.workspace}>
-      {/* Header row */}
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 28, gap: 16, flexWrap: "wrap" }}>
-        <div className={styles.pageHeader} style={{ margin: 0 }}>
-          <p className={styles.eyebrow}>Platform · 项目</p>
-          <h1 className={styles.pageTitle}>我的项目</h1>
-        </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button
-            type="button"
-            aria-disabled={(!ordering && !!orderDisabledReason) || undefined}
-            title={!ordering ? orderDisabledReason ?? undefined : undefined}
-            onClick={() => {
-              if (!ordering && orderDisabledReason) return;
-              setOrdering(value => !value);
-            }}
-            style={{
-              border: "1px solid var(--line)", borderRadius: 9, padding: "9px 16px",
-              background: "var(--surface)", color: "var(--ink)", fontSize: 12,
-              fontWeight: 700, cursor: !ordering && orderDisabledReason ? "not-allowed" : "pointer",
-              opacity: !ordering && orderDisabledReason ? 0.5 : 1,
-            }}
-          >
-            {ordering ? "完成排序" : "调整顺序"}
-          </button>
+      <PlatformTopMenu title="我的项目" eyebrow="Platform · 项目" actions={<>
+        <button
+          type="button"
+          aria-disabled={(!ordering && !!orderDisabledReason) || undefined}
+          title={!ordering ? orderDisabledReason ?? undefined : undefined}
+          onClick={() => {
+            if (!ordering && orderDisabledReason) return;
+            setOrdering(value => !value);
+          }}
+          className={`${PRODUCTION_MODULE_SECONDARY_ACTION_CLASS} aria-disabled:cursor-not-allowed aria-disabled:opacity-50`}
+        >
+          {ordering ? "完成排序" : "调整顺序"}
+        </button>
         {canCreate && !ordering && (
           <button
             onClick={() => setShowCreate(true)}
-            style={{
-              border: "1px solid var(--ink)", borderRadius: 9, padding: "10px 20px",
-              background: "var(--ink)", color: "#fff",
-              fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
-            }}
+            className={PRODUCTION_MODULE_ACTION_CLASS}
           >
             + 新建项目
           </button>
         )}
-        </div>
-      </div>
+      </>} />
 
       {showCreate && (
         <NewProductionModal
