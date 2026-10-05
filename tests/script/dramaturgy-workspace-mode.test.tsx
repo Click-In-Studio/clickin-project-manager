@@ -108,9 +108,14 @@ describe("构作工作区只读/编辑模式", () => {
     const input = host.querySelector("input")!;
     input.focus();
 
-    const switchPromise = click("只读");
+    const readButton = host.querySelector<HTMLButtonElement>('button[data-action="read"]')!;
+    act(() => { readButton.click(); });
     expect(save).toHaveBeenCalledWith("未保存草稿");
-    await act(async () => { rejectSave(new Error("网络中断，保存失败")); await switchPromise; });
+    await act(async () => {
+      rejectSave(new Error("网络中断，保存失败"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
     expect(text("mode")).toBe("edit");
     expect(text("error")).toContain("网络中断");
@@ -155,7 +160,7 @@ describe("构作工作区只读/编辑模式", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    const select = host.querySelector<HTMLSelectElement>('select[aria-label="页面模式"]')!;
+    const select = host.querySelector<HTMLSelectElement>("select")!;
     await act(async () => {
       select.value = "read";
       select.dispatchEvent(new Event("change", { bubbles: true }));
