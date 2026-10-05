@@ -65,4 +65,21 @@ describe("AdminActivationGate", () => {
     await act(async () => activate?.click());
     expect(mocks.confirm).toHaveBeenCalledWith(["node:member/*@create"]);
   });
+
+  it("没有待激活管理资格时不显示弹窗", async () => {
+    mocks.usePendingPermissions.mockReturnValue({
+      pending: [],
+      confirming: false,
+      confirm: mocks.confirm,
+    });
+
+    await act(async () => root.render(
+      <AdminActivationGate productionId="prod_no_admin_scope">
+        <div>配置中心内容</div>
+      </AdminActivationGate>,
+    ));
+
+    expect(container.textContent).toContain("配置中心内容");
+    expect(container.querySelector("[role=dialog]")).toBeNull();
+  });
 });
