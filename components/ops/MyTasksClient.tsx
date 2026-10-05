@@ -92,7 +92,7 @@ export default function MyTasksClient({ initialTasks }: { initialTasks: MyTechRe
 
   return (
     <div className={styles.workspace}>
-      <PlatformTopMenu title="我的任务" eyebrow="Platform · 任务" />
+      <PlatformTopMenu title="我的任务" />
 
       {/* ── 摘要统计（通知提醒同款语汇）── */}
       <div style={{

@@ -108,7 +108,7 @@ export default function MyProjectsClient(
   if (loading) {
     return (
       <div className={styles.workspace}>
-        <PlatformTopMenu title="我的项目" eyebrow="Platform · 项目" />
+        <PlatformTopMenu title="我的项目" />
         <div className={styles.emptyState}>加载中…</div>
       </div>
     );
@@ -116,7 +116,7 @@ export default function MyProjectsClient(
 
   return (
     <div className={styles.workspace}>
-      <PlatformTopMenu title="我的项目" eyebrow="Platform · 项目" actions={<>
+      <PlatformTopMenu title="我的项目" actions={<>
         <button
           type="button"
           aria-disabled={(!ordering && !!orderDisabledReason) || undefined}

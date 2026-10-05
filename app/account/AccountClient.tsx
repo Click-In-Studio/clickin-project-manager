@@ -61,10 +61,10 @@ const PLATFORM_LABEL: Record<string, string> = {
   email: "邮箱",
 };
 
-const PAGE_META: Record<Page, { eyebrow: string; title: string; description: string }> = {
-  profile: { eyebrow: "ACCOUNT", title: "个人信息", description: "管理你的基础资料，以及在项目协作中向其他成员展示的信息。" },
-  security: { eyebrow: "SECURITY", title: "账号安全中心", description: "管理登录账号的邮箱、飞书等身份，以及账号安全设置。" },
-  preferences: { eyebrow: "PREFERENCES", title: "功能与设置", description: "调整消息提醒方式，控制各类通知的开关。" },
+const PAGE_META: Record<Page, { title: string; description: string }> = {
+  profile: { title: "个人信息", description: "管理你的基础资料，以及在项目协作中向其他成员展示的信息。" },
+  security: { title: "账号安全中心", description: "管理登录账号的邮箱、飞书等身份，以及账号安全设置。" },
+  preferences: { title: "功能与设置", description: "调整消息提醒方式，控制各类通知的开关。" },
 };
 
 function initial(name: string) {
@@ -514,7 +514,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
         </aside>
 
         <main className={styles.main}>
-          <PlatformTopMenu title={PAGE_META[page].title} eyebrow={PAGE_META[page].eyebrow} />
+          <PlatformTopMenu title={PAGE_META[page].title} />
           <p className={styles.pageDescription}>{PAGE_META[page].description}</p>
 
           {/* ── 个人信息 ── */}

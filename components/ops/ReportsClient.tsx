@@ -58,7 +58,7 @@ export default function ReportsClient() {
   if (loading) {
     return (
       <div className={styles.workspace}>
-        <PlatformTopMenu title="报告" eyebrow="Platform · 报告" />
+        <PlatformTopMenu title="报告" />
         <div className={styles.emptyState}>加载中…</div>
       </div>
     );
@@ -66,7 +66,7 @@ export default function ReportsClient() {
 
   return (
     <div className={styles.workspace}>
-      <PlatformTopMenu title="报告" eyebrow="Platform · 报告" />
+      <PlatformTopMenu title="报告" />
 
       {reports.length === 0 ? (
         <div className={styles.emptyState}>

@@ -114,7 +114,7 @@ export default function WeeklyCallClient({ token }: { token?: string } = {}) {
 
   return (
     <div className={styles.workspace}>
-      <PlatformTopMenu title={view === "week" ? "本周日程" : view === "month" ? "月历" : "日程表"} eyebrow="Platform · 日程" />
+      <PlatformTopMenu title={view === "week" ? "本周日程" : view === "month" ? "月历" : "日程表"} />
       <div className={styles.calendarHeader}>
         <div>
           {rangeLabel && <p className={styles.calendarRange}>{rangeLabel} · UTC+8</p>}
