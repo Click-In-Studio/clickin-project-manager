@@ -78,6 +78,28 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:ai/*/usage/members@view",
   ]),
 
+  // 配置中心统一激活面。进入任一 /admin 页面时，把当前用户通过角色、部门或个人
+  // 区间持有的全部普通管理资格一次性落成 grant；不按「制作人」角色写死。
+  // production / producer 的 ROOT、SENSITIVE 面不在这里，仍只能走 owner 旁路、
+  // 审批或直发。公告、里程碑、阶段与联系方式已由 base 全局激活，不重复列入。
+  admin: new Set<Permission>([
+    "node:member/*@create",
+    "node:member/*@delete",
+    "node:member/*/roles@edit",
+    "node:member/*/overrides@edit",
+    "node:role/*@create",
+    "node:role/*/meta/name@edit",
+    "node:role/*@delete",
+    "node:role/*/grants@edit",
+    "node:dept/*@create",
+    "node:dept/*/members@create",
+    "node:dept/*/poc@create",
+    "node:dept/*/grants@view",
+    "node:dept/*/grants@edit",
+    "node:script/*/imports@create",
+    "node:dramaturgy/*/imports@create",
+  ]),
+
   // 财务页与配置中心共用的完整激活面。制作人的 node:*/*@*、财务部门区间或
   // 个人 allow 都只是资格；这些真实被路由消费的键必须能在页面上自确认成 grant。
   // 配置中心的入口仍只看 categories@edit / budget@edit，不能因本目录包含 view/create
@@ -97,7 +119,6 @@ export const PAGE_PERMISSION_SCOPES = {
   ]),
 
   materials: new Set<Permission>(Object.values(MATERIAL_PERMISSION_KEYS)),
-
   // 批E-2：剧本页写面。blocks 写是一把总钥匙（requiredPermissions 对 insert /
   // update / delete 统一给 blocks@edit）；标签组的 picker 也在剧本页内。
   // imports 是保留段（'*' 不覆盖），必须显式列出才可自确认。

@@ -9,12 +9,18 @@ import { cleanupProduction, makeProduction, shortId } from "../_support/factorie
 let prodId: string;
 let memberId: string;
 let outsiderId: string;
+let delegatedAdminId: string;
+let producerId: string;
 
 beforeAll(async () => {
   ({ prodId } = await makeProduction());
   memberId = (await upsertFeishuUser(`test-open-${shortId()}`, `待激活${shortId()}`, null, false)).userId;
   outsiderId = (await upsertFeishuUser(`test-open-${shortId()}`, `局外人${shortId()}`, null, false)).userId;
+  delegatedAdminId = (await upsertFeishuUser(`test-open-${shortId()}`, `人事管理员${shortId()}`, null, false)).userId;
+  producerId = (await upsertFeishuUser(`test-open-${shortId()}`, `制作人${shortId()}`, null, false)).userId;
   await addProductionMember(prodId, memberId);
+  await addProductionMember(prodId, delegatedAdminId);
+  await addProductionMember(prodId, producerId);
   const roleId = `role_${shortId()}`;
   await getPool().query(
     "INSERT INTO production_role (id, production_id, name) VALUES ($1, $2, '待激活权限')",
@@ -27,6 +33,27 @@ beforeAll(async () => {
   await getPool().query(
     "INSERT INTO production_member_role (production_id, user_id, role_id) VALUES ($1, $2, $3)",
     [prodId, memberId, roleId],
+  );
+  const delegatedRoleId = `role_${shortId()}`;
+  await getPool().query(
+    "INSERT INTO production_role (id, production_id, name) VALUES ($1, $2, '人事管理员')",
+    [delegatedRoleId, prodId],
+  );
+  await getPool().query(
+    "INSERT INTO production_role_permission (role_id, permission_key) VALUES ($1, 'node:member/*@create')",
+    [delegatedRoleId],
+  );
+  await getPool().query(
+    "INSERT INTO production_member_role (production_id, user_id, role_id) VALUES ($1, $2, $3)",
+    [prodId, delegatedAdminId, delegatedRoleId],
+  );
+  const producerRole = await getPool().query<{ id: string }>(
+    "SELECT id FROM production_role WHERE production_id = $1 AND name = '制作人'",
+    [prodId],
+  );
+  await getPool().query(
+    "INSERT INTO production_member_role (production_id, user_id, role_id) VALUES ($1, $2, $3)",
+    [prodId, producerId, producerRole.rows[0].id],
   );
 });
 
@@ -71,5 +98,38 @@ describe("权限激活共享落行入口", () => {
     expect(await activatePendingPermissions(memberId, prodId, ["node:scene/*/synopsis@edit"]))
       .toMatchObject({ ok: false, status: 403 });
     await getPool().query("UPDATE production SET archived_at = NULL WHERE id = $1", [prodId]);
+  });
+
+  it("进入配置中心时，制作人可一次激活全部普通管理权限（含邀请成员）", async () => {
+    const permissions = [...PAGE_PERMISSION_SCOPES.admin];
+    const result = await activatePendingPermissions(producerId, prodId, permissions);
+    expect(result).toEqual({ ok: true, confirmed: permissions.length });
+
+    const inviteGrant = await getPool().query(
+      `SELECT 1 FROM production_member_grant
+       WHERE production_id = $1 AND user_id = $2 AND resource_type = 'member'
+         AND resource_id = '*' AND resource_sub = '*' AND permission_level = 'create'
+         AND NOT is_revoked`,
+      [prodId, producerId],
+    );
+    expect(inviteGrant.rows).toHaveLength(1);
+  });
+
+  it("管理权限激活按实际资格收口，不依赖制作人角色也不扩大授权", async () => {
+    const result = await activatePendingPermissions(
+      delegatedAdminId,
+      prodId,
+      [...PAGE_PERMISSION_SCOPES.admin],
+    );
+    expect(result).toEqual({ ok: true, confirmed: 1 });
+
+    const grants = await getPool().query<{ key: string }>(
+      `SELECT resource_type || '/' || resource_id || '/' || resource_sub || '@' || permission_level AS key
+       FROM production_member_grant
+       WHERE production_id = $1 AND user_id = $2 AND NOT is_revoked
+       ORDER BY key`,
+      [prodId, delegatedAdminId],
+    );
+    expect(grants.rows.map((row) => row.key)).toEqual(["member/*/*@create"]);
   });
 });
