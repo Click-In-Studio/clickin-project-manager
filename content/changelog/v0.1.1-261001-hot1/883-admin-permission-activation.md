@@ -2,6 +2,7 @@
 kind: fixed
 title: 管理权限会在进入配置中心时完整激活
 page: admin/overview/overview
+pr: 885
 order: 1
 ---
 
