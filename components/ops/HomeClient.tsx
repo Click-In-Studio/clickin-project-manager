@@ -67,12 +67,6 @@ export default function HomeClient({ productions, myCallTimes, myPendingReqs, my
 
   return (
     <div className={styles.workspace}>
-      {/* Page header */}
-      <div className={styles.pageHeader}>
-        <p className={styles.eyebrow}>平台级</p>
-        <h1 className={styles.pageTitle}>我的工作</h1>
-      </div>
-
       <div className={styles.contentStack}>
 
         {/* 1. 项目进展 hero */}

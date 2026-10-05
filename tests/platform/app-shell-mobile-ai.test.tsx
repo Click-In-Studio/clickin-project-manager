@@ -67,6 +67,7 @@ vi.mock("@/components/shell/app-shell/use-sidebar-fold", () => ({
 }));
 
 import AppShell from "@/components/shell/AppShell";
+import HomeClient from "@/components/ops/HomeClient";
 import MobileAiAction from "@/components/shell/app-shell/MobileAiAction";
 import MobileTab from "@/components/shell/app-shell/MobileTab";
 
@@ -103,6 +104,33 @@ function buttonWithText(root: ParentNode, text: string): HTMLButtonElement {
       return content === text || content?.includes(text);
     })!;
 }
+
+describe("平台首页标题", () => {
+  it("标题完整显示在顶栏，正文直接从项目进展开始，离开首页后不残留", () => {
+    act(() => root.render(
+      <AppShell session={session} productions={productions}>
+        <HomeClient productions={[]} myCallTimes={[]} myPendingReqs={[]} myAwaitingReqs={[]}
+          myUnreadReports={[]} upcomingMilestones={[]} totalCueWarnings={0} />
+      </AppShell>,
+    ));
+
+    const header = container.querySelector("header")!;
+    expect(header.textContent).toContain("平台级");
+    expect(header.querySelector("h1")?.textContent).toBe("我的工作");
+    expect(container.querySelectorAll("h1")).toHaveLength(1);
+    const workspace = container.querySelector("#workspace-scroll")!;
+    expect(workspace.querySelector("h1")).toBeNull();
+    expect(workspace.querySelector("h2")?.textContent).toBe("项目风险与未确认事项");
+
+    navigation.pathname = "/production/pro1";
+    act(() => root.render(
+      <AppShell session={session} productions={productions}><div>项目正文</div></AppShell>,
+    ));
+    expect(header.textContent).not.toContain("平台级");
+    expect(header.querySelector("h1")).toBeNull();
+    expect(header.querySelector('[data-production-top-menu-context="我的工作"]')).toBeTruthy();
+  });
+});
 
 describe("#702 手机 AI 入口", () => {
   it("用固定宽度圆形按钮表达独立操作，打开态可被辅助技术识别", () => {
