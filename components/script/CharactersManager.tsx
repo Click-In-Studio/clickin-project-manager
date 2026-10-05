@@ -8,7 +8,7 @@ import ChevronIcon from "@/components/ui/ChevronIcon";
 import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, PRODUCTION_TOOLBAR_STAGE, ProductionTopMenuDivider, useProductionToolbar } from "../shell/ProductionTopMenu";
 import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
-import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib/script/character-perms-shared";
+import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib/script/character-perms-types";
 import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
 import PageSkeleton from "@/components/ui/PageSkeleton";
 import { useListTableViewPreference } from "./use-list-table-view-preference";

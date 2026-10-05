@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 import type { CharacterDetail } from "@/lib/script/script-scene-character-db";
-import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib/script/character-perms-shared";
+import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib/script/character-perms-types";
 import DramaturgyModePicker from "./DramaturgyModePicker";
 import { useDramaturgyWorkspaceMode } from "./use-dramaturgy-workspace-mode";
 

@@ -34,7 +34,7 @@ export default async function CharacterDetailPage({
 
   // 与列表页同源：详情页也保留 create/edit/delete 与实例级角色权限，不用粗门代替。
   const perms = await getCharacterPerms(
-    session.userId, id, access.permCtx.isAdmin || access.permCtx.isOwner,
+    session.userId, id, access.permCtx.isOwner,
   );
 
   const [name, versionId] = await Promise.all([

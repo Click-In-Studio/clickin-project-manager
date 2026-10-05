@@ -4,10 +4,16 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import CharacterDetailView from "@/components/script/CharacterDetail";
 import {
   dramaturgyWorkspaceModeStorageKey,
   useDramaturgyWorkspaceMode,
 } from "@/components/script/use-dramaturgy-workspace-mode";
+import { ALL_CHARACTER_PERMS } from "@/lib/script/character-perms-types";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -62,6 +68,7 @@ describe("构作工作区只读/编辑模式", () => {
     act(() => root.unmount());
     host.remove();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   const render = async (node: ReactNode) => {
@@ -115,6 +122,48 @@ describe("构作工作区只读/编辑模式", () => {
     await click("只读");
     expect(text("mode")).toBe("edit");
     expect(text("error")).toBe("请先处理草稿");
+  });
+
+  it("角色详情真实字段保存失败时不切只读，并保留输入", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: "角色保存失败" }),
+    }));
+    await render(
+      <CharacterDetailView
+        productionId="prod-a"
+        productionName="测试制作"
+        character={{
+          id: "char-a",
+          name: "旧名字",
+          isAggregate: false,
+          memberIds: [],
+          gender: "",
+          biography: "",
+          roleType: "",
+        }}
+        allCharacters={[]}
+        perms={ALL_CHARACTER_PERMS}
+      />,
+    );
+
+    const input = host.querySelector<HTMLInputElement>("input")!;
+    input.focus();
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      valueSetter.call(input, "未保存的新名字");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label="页面模式"]')!;
+    await act(async () => {
+      select.value = "read";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(host.querySelector("[role='alert']")?.textContent).toContain("角色保存失败"));
+
+    expect(host.querySelector('[role="combobox"][aria-label="页面模式"]')?.textContent).toContain("编辑");
+    expect((host.querySelector("input") as HTMLInputElement).value).toBe("未保存的新名字");
   });
 });
 

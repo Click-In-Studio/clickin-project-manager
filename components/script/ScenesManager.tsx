@@ -371,6 +371,7 @@ function SceneEditRow({
                    下发——用 canEdit 这个粗门开合等于「入口亮着、点下去 403」 */
                 canEdit={canEdit && canMountScene(fieldPerms, scene.id)}
                 display="compact"
+                unsavedGuardMessage="请先完成或关闭附件关联窗口"
               />
             </div>
             <div className="mt-3">

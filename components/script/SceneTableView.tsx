@@ -567,6 +567,7 @@ export default function SceneTableView({
                 /* 与 ScenesManager 同源：挂载查的是 mounts@create，不是字段写权限 */
                 canEdit={canEdit && canMountScene(fieldPerms, scene.id)}
                 display="compact"
+                unsavedGuardMessage="请先完成或关闭附件关联窗口"
               />
               <div className="mt-2">
                 {/* 只读反链展示（引用边）：手动关联入口已并入挂载面板（#420 去重） */}
