@@ -8,7 +8,7 @@ export default function InsertZone({ lineIndexWidth, onInsert }: { lineIndexWidt
     ? { paddingLeft: `calc(${lineIndexWidth} + ${LINE_INDEX_GUTTER_OFFSET_REM}rem)` }
     : undefined;
   return (
-    <div className="group flex h-5 items-center justify-center px-6" style={style}>
+    <div className="group hidden h-5 items-center justify-center px-6 sm:flex" style={style}>
       <button
         onClick={onInsert}
         title="插入新块"

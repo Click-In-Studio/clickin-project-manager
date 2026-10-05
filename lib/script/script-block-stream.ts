@@ -198,6 +198,18 @@ export function sameCharacterAnnotations(a: Record<string, string>, b: Record<st
   return aKeys.every((key) => a[key] === b[key]);
 }
 
+export function insertScriptBlockAt(
+  blocks: Block[],
+  requestedIndex: number,
+  newBlock: Block,
+): { blocks: Block[]; insertIndex: number; refId: string | null } {
+  const insertIndex = Math.max(0, Math.min(requestedIndex, blocks.length));
+  const refId = insertIndex > 0 ? (blocks[insertIndex - 1]?.id ?? null) : null;
+  const nextBlocks = [...blocks];
+  nextBlocks.splice(insertIndex, 0, newBlock);
+  return { blocks: nextBlocks, insertIndex, refId };
+}
+
 export function markerSegmentIsOpeningWithoutScene(blocks: Block[], markerIndex: number, openingChapterMarkerId: string | null): boolean {
   const marker = blocks[markerIndex];
   return !!openingChapterMarkerId && marker?.id === openingChapterMarkerId && !markerSegmentHasScene(blocks, markerIndex);

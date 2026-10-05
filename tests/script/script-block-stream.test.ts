@@ -3,7 +3,7 @@ import {
   makeBlock, makeMarkerBlock, isBlockEmptyForDelete, isEmptyTextBlock,
   mergeServerBlocks, stripHtmlText, expandLegacyMarkersToBlocks, sameBlocks, sameMarkerMeta,
   markerSegmentHasScene, insertMarkerWithEmptyBlockIfNeeded, findTocSceneBlockIndex,
-  findSceneMarkerBlockIndex, mergeDirtyRanges, markerChangeFromOperations,
+  insertScriptBlockAt, findSceneMarkerBlockIndex, mergeDirtyRanges, markerChangeFromOperations,
 } from "@/lib/script/script-block-stream";
 import { DEFAULT_SCRIPT_CONFIG, type Block, type Scene, type ScriptState } from "@/lib/script/script-types";
 
@@ -32,6 +32,39 @@ describe("空块判定", () => {
   it("marker 块永远不是空文本块", () => {
     expect(isEmptyTextBlock(marker("m", "scene_marker"))).toBe(false);
     expect(isEmptyTextBlock(text("a", ""))).toBe(true);
+  });
+});
+
+describe("insertScriptBlockAt", () => {
+  const chapter = marker("chapter", "chapter_marker", "chapter");
+  const scene = marker("scene", "scene_marker", "scene");
+  const first = text("first");
+  const last = text("last");
+  const blocks = [chapter, first, scene, last];
+
+  const insertionCases: Array<[string, number, string, string[], string | null]> = [
+    ["章边界", 0, "chapter", ["new", "chapter", "first", "scene", "last"], null],
+    ["普通块", 1, "first", ["chapter", "new", "first", "scene", "last"], "chapter"],
+    ["段边界", 2, "scene", ["chapter", "first", "new", "scene", "last"], "first"],
+  ];
+
+  it.each(insertionCases)("在%s目标前插入", (_label, requestedIndex, targetId, expectedIds, expectedRefId) => {
+    const result = insertScriptBlockAt(blocks, requestedIndex, text("new", ""));
+    expect(result.blocks.map((block) => block.id)).toEqual(expectedIds);
+    expect(result.blocks[result.insertIndex + 1]?.id).toBe(targetId);
+    expect(result.refId).toBe(expectedRefId);
+  });
+
+  it("末尾追加时继承末块，空剧本首块从索引 0 开始且没有继承来源", () => {
+    const appended = insertScriptBlockAt(blocks, 999, text("tail", ""));
+    expect(appended.insertIndex).toBe(blocks.length);
+    expect(appended.blocks.at(-1)?.id).toBe("tail");
+    expect(appended.refId).toBe("last");
+
+    const empty = insertScriptBlockAt([], 0, text("initial", ""));
+    expect(empty.insertIndex).toBe(0);
+    expect(empty.blocks.map((block) => block.id)).toEqual(["initial"]);
+    expect(empty.refId).toBe(null);
   });
 });
 
