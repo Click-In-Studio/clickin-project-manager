@@ -17,7 +17,7 @@ import {
   PRODUCTION_TOOLBAR_STAGE,
   ProductionToolbarContext,
 } from "@/components/shell/ProductionTopMenu";
-import { NO_CHARACTER_PERMS } from "@/lib/script/character-perms-shared";
+import { NO_CHARACTER_PERMS } from "@/lib/script/character-perms-types";
 import { NO_SCENE_FIELD_PERMS } from "@/lib/script/scene-field-perms-shared";
 
 vi.mock("next/navigation", () => ({

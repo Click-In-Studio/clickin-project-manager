@@ -7,7 +7,6 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
-import { getProductionName } from "@/lib/production/production-db";
 import { listPrivateAssets } from "@/lib/asset/review-db";
 import AdminAssetReviewClient from "@/components/admin/AdminAssetReviewClient";
 
@@ -29,15 +28,11 @@ export default async function AssetReviewPage({ params }: { params: Promise<{ id
   const canView = canEdit || canViewOnly;
   if (!canView) redirect(`/production/${id}/admin`);
 
-  const [name, assets] = await Promise.all([
-    getProductionName(id),
-    listPrivateAssets(id),
-  ]);
+  const assets = await listPrivateAssets(id);
 
   return (
     <AdminAssetReviewClient
       productionId={id}
-      productionName={name ?? ""}
       initialAssets={assets}
       canEdit={canEdit}
     />

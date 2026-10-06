@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import PageHeader, { SECONDARY_BTN } from "@/components/ui/PageHeader";
+import { SECONDARY_BTN } from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import PermissionKeyPicker, { type Vocabulary } from "@/components/perm/PermissionKeyPicker";
 import MemberPickerModal, { type PickerMember, type PickerDept } from "@/components/perm/MemberPickerModal";
@@ -14,7 +14,6 @@ type Member = PickerMember;
 
 type Props = {
   productionId: string;
-  productionName: string;
   producerRole: { id: string; permissions: string[] } | null;
   members: Member[];
   depts: PickerDept[];
@@ -36,7 +35,7 @@ const CARD: React.CSSProperties = {
 };
 
 export default function AdminProducerClient({
-  productionId, productionName, producerRole, members: initialMembers, depts, initialGovernance, vocabulary, isRoot,
+  productionId, producerRole, members: initialMembers, depts, initialGovernance, vocabulary, isRoot,
 }: Props) {
   const [members, setMembers] = useState<Member[]>(initialMembers);
   const [rolePerms, setRolePerms] = useState<string[]>(producerRole?.permissions ?? []);
@@ -113,8 +112,6 @@ export default function AdminProducerClient({
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader eyebrow={productionName} title="管理员设置" side="stage" />
-
       {!isRoot && (
         <p style={{ margin: "0 0 14px", fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>
           只读模式：管理员设置的变更（ROOT OPERATION）仅限项目所有者。

@@ -1,6 +1,6 @@
 /**
  * character 域门快照的 DB 层。纯层（类型 / 折行 / 谓词）在
- * lib/script/character-perms-shared.ts —— 客户端组件从那里 import，避免把 pg 拖进浏览器包。
+ * lib/script/character-perms-types.ts —— 客户端组件从那里 import，避免把 pg 拖进浏览器包。
  *
  * 判定端三条路由分别查三枚不同的键：
  *   POST   /api/production/[id]/characters          → character/*@create
@@ -11,9 +11,9 @@
  * 权限中心的键选择器又允许把 id 位指到具体角色（lib/perm/resource-directory.ts）。
  */
 import { getPool } from "../pg";
-import { characterPermsFromRows, ALL_CHARACTER_PERMS, type CharacterPerms } from "./character-perms-shared";
+import { characterPermsFromRows, ALL_CHARACTER_PERMS, type CharacterPerms } from "./character-perms-types";
 
-export * from "./character-perms-shared";
+export * from "./character-perms-types";
 
 type GrantRow = { resource_id: string; resource_sub: string; permission_level: string };
 

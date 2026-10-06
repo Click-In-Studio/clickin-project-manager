@@ -7,8 +7,6 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
-import { getProductionName } from "@/lib/production/production-db";
-import PageHeader from "@/components/ui/PageHeader";
 import AdminMigrationSection from "@/components/admin/AdminMigrationSection";
 import BulkInviteCard from "@/components/admin/BulkInviteCard";
 import { listProductionRolesWithPermissions } from "@/lib/perm/role-db";
@@ -34,8 +32,7 @@ export default async function MigrationPage({ params }: { params: Promise<{ id: 
   ]);
   if (!canImportScript && !canImportScenes && !canInvite) redirect(`/production/${id}/admin`);
 
-  const [name, roles, depts, seats] = await Promise.all([
-    getProductionName(id),
+  const [roles, depts, seats] = await Promise.all([
     canInvite ? listProductionRolesWithPermissions(id) : Promise.resolve([]),
     canInvite ? listProductionDepts(id) : Promise.resolve([]),
     canInvite ? getSeatUsage(id) : Promise.resolve(null),
@@ -43,7 +40,6 @@ export default async function MigrationPage({ params }: { params: Promise<{ id: 
 
   return (
     <div className={styles.page}>
-      <PageHeader eyebrow={name ?? ""} title="数据迁移" side="stage" />
       {canInvite && seats && (
         <BulkInviteCard
           productionId={id}

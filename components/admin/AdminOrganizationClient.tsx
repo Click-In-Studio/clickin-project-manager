@@ -3,7 +3,11 @@
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useMemo, useState } from "react";
-import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
+import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
+import ProductionModuleTopMenu, {
+  PRODUCTION_MODULE_ACTION_CLASS,
+  PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS,
+} from "@/components/shell/ProductionModuleTopMenu";
 import Badge from "@/components/ui/Badge";
 import AdminModal from "@/components/ui/AdminModal";
 import MemberPickerModal from "@/components/perm/MemberPickerModal";
@@ -57,7 +61,6 @@ type Caps = {
 
 type Props = {
   productionId: string;
-  productionName: string;
   initialMembers: Member[];
   initialDepts: Dept[];
   tags: MemberTag[];
@@ -90,7 +93,7 @@ function Avatar({ m, size }: { m: Member; size: number }) {
 }
 
 export default function AdminOrganizationClient({
-  productionId, productionName, initialMembers, initialDepts, tags, roleNames, seatLimit, caps, currentUserId,
+  productionId, initialMembers, initialDepts, tags, roleNames, seatLimit, caps, currentUserId,
 }: Props) {
   const [tab, setTab] = useState<"members" | "depts">("members");
   const [members, setMembers] = useState<Member[]>(initialMembers);
@@ -255,18 +258,35 @@ export default function AdminOrganizationClient({
 
   return (
     <div className={styles.workspace} style={{ minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader
-        eyebrow={productionName}
-        title="成员与部门"
-        side="stage"
-        actions={caps.invite ? (
-          // 满员置灰不消失，title 说原因（菜单/入口统一置灰定式）
+      <ProductionModuleTopMenu
+        label="成员与部门"
+        primaryAction={caps.invite ? (
           <button
-            style={{ ...PRIMARY_BTN, ...(seatsFull ? { opacity: .45, cursor: "not-allowed" } : {}) }}
+            type="button"
+            className={`${PRODUCTION_MODULE_ACTION_CLASS} disabled:cursor-not-allowed disabled:opacity-50`}
             disabled={seatsFull}
             title={seatsFull ? seatMsg ?? undefined : undefined}
             onClick={() => setInviteOpen(true)}
           >＋ 邀请成员</button>
+        ) : undefined}
+        primaryShortAction={caps.invite ? (
+          <button
+            type="button"
+            className={`${PRODUCTION_MODULE_ACTION_CLASS} disabled:cursor-not-allowed disabled:opacity-50`}
+            aria-label="邀请成员"
+            disabled={seatsFull}
+            title={seatsFull ? seatMsg ?? undefined : undefined}
+            onClick={() => setInviteOpen(true)}
+          >＋</button>
+        ) : undefined}
+        primaryOverflowAction={caps.invite ? (
+          <button
+            type="button"
+            className={`${PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS} disabled:cursor-not-allowed disabled:opacity-50`}
+            disabled={seatsFull}
+            title={seatsFull ? seatMsg ?? undefined : undefined}
+            onClick={() => setInviteOpen(true)}
+          >邀请成员</button>
         ) : undefined}
       />
 

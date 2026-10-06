@@ -4,7 +4,6 @@ export const metadata: Metadata = { title: "通知公告" };
 
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
-import { getProductionName } from "@/lib/production/production-db";
 import { listAnnouncements } from "@/lib/notify/announcement-db";
 import { getSession } from "@/lib/account/session";
 import { cookies } from "next/headers";
@@ -22,9 +21,8 @@ export default async function AnnouncementsPage({ params }: { params: Promise<{ 
   const cookieStore = await cookies();
   const session = getSession(cookieStore);
 
-  const [announcements, name, access] = await Promise.all([
+  const [announcements, access] = await Promise.all([
     listAnnouncements(id),
-    getProductionName(id),
     session
       ? getProductionPermissionContext(session.userId, session.isAdmin, id)
       : Promise.resolve(null),
@@ -35,7 +33,6 @@ export default async function AnnouncementsPage({ params }: { params: Promise<{ 
   return (
     <AdminAnnouncementsClient
       productionId={id}
-      productionName={name ?? ""}
       recent30Count={countRecent(announcements.map(a => a.createdAt))}
       initialAnnouncements={announcements.map(a => ({
         id: a.id,

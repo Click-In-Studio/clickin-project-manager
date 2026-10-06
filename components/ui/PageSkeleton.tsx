@@ -28,7 +28,10 @@ const ROWS: { title: number; hint: number; tail: number }[] = [
   { title: 120, hint: 104, tail: 48 },
 ];
 
-export default function PageSkeleton({ instant = false }: { instant?: boolean }) {
+export default function PageSkeleton({ instant = false, titleOnly = false }: {
+  instant?: boolean;
+  titleOnly?: boolean;
+}) {
   return (
     <div
       className={instant ? undefined : "skeleton-page"}
@@ -37,11 +40,11 @@ export default function PageSkeleton({ instant = false }: { instant?: boolean })
       aria-busy="true"
     >
       <PageSkeletonStatus />
-      {/* 页头占位：eyebrow + 大标题 + 场景动作区（对齐 PageHeader 语汇） */}
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 20, marginBottom: 22, flexWrap: "wrap" }}>
+      {/* 页头占位：平台页只有页名，项目内页仍保留模块分类与标题。 */}
+      <div data-page-skeleton-header style={{ display: "flex", alignItems: "flex-end", gap: 20, marginBottom: 22, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0 }}>
-          <div className="skeleton-bar" style={{ width: 68, height: 10, borderRadius: 4 }} />
-          <div className="skeleton-bar" style={{ width: 208, height: 34, marginTop: 9, borderRadius: 8 }} />
+          {!titleOnly && <div className="skeleton-bar" style={{ width: 68, height: 10, borderRadius: 4 }} />}
+          <div className="skeleton-bar" style={{ width: 208, height: 34, marginTop: titleOnly ? 0 : 9, borderRadius: 8 }} />
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexShrink: 0 }}>
           <div className="skeleton-bar" style={{ width: 92, height: 38, borderRadius: 8 }} />
