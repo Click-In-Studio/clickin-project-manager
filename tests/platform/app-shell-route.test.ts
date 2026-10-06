@@ -81,7 +81,7 @@ describe("extractModule", () => {
     [`/production/${P}/events/e1/reqs`, "任务"],
     [`/production/${P}/reports/r1`, "报告"],
     [`/production/${P}/events/e1/reports/r1`, "报告"],
-    [`/production/${P}/wiki/w1`, "知识库"],
+    [`/production/${P}/wiki/w1`, "云文档"],
     [`/production/${P}/finance`, "财务"],
     [`/production/${P}/materials`, "物料"],
     [`/production/${P}/assets/a1/preview`, "资产工作台"],

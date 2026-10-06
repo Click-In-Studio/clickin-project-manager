@@ -24,6 +24,7 @@ import type { NodeMoveInCandidate } from "@/lib/node/dramaturgy";
 import { useReportAiTarget } from "@/components/agent/ai-target";
 import { aiTargetForNode } from "@/lib/node/ai-target";
 import { treeMenuItems, type TreeMenuKey, type AssetTreeActions } from "@/lib/node/tree-menu";
+import NavigationIcon from "@/components/shell/app-shell/NavigationIcon";
 
 type DropZone = "before" | "after" | "inside";
 
@@ -593,38 +594,55 @@ export default function WikiShell({
   );
 
   return (
-    <div className="relative flex flex-col gap-3 items-start md:flex-row md:gap-6">
+    <div className="relative flex flex-col gap-3 items-start lg:flex-row lg:gap-4">
       <button
         type="button"
         onClick={() => setMobileTreeOpen(true)}
-        className="md:hidden inline-flex items-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm"
+        className="lg:hidden inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm"
         aria-expanded={mobileTreeOpen}
       >
-        ☰ 文档目录
+        <NavigationIcon name="knowledge" />
+        云文档
       </button>
-      {/* 手机抽屉：AppShell 顶栏 z-50、底部导航 z-40 都在同一个根层叠上下文里，
-          遮罩要压过它们才算把页面真的挡住；桌面侧栏是 sticky，不参与这套 z。 */}
+      {/* 手机/平板抽屉只覆盖工作区；panel-mobile-full 与 AppShell 共用
+          Visual Viewport 变量，不遮挡顶栏与底部导航。 */}
       {mobileTreeOpen && (
         <button
           type="button"
-          aria-label="关闭文档目录"
+          aria-label="关闭云文档"
           onClick={() => setMobileTreeOpen(false)}
-          className="md:hidden fixed inset-0 z-[60] bg-zinc-950/35"
+          className="lg:hidden panel-mobile-full fixed inset-x-0 z-[45] bg-zinc-950/35"
         />
       )}
-      <button
-        type="button"
-        onClick={() => setDesktopTreeCollapsed(v => !v)}
-        className="hidden md:inline-flex sticky top-4 z-10 h-9 shrink-0 items-center rounded-lg border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50"
-        aria-expanded={!desktopTreeCollapsed}
-        title={desktopTreeCollapsed ? "展开文档目录" : "收起文档目录"}
-      >
-        {desktopTreeCollapsed ? "目录 →" : "←"}
-      </button>
-      <aside className={`${desktopTreeCollapsed ? "md:hidden" : "md:flex"} ${mobileTreeOpen ? "translate-x-0" : "-translate-x-[110%]"} fixed left-3 top-3 bottom-3 z-[70] w-[min(300px,calc(100vw-24px))] flex flex-col rounded-xl border border-zinc-200 bg-white overflow-hidden shadow-2xl transition-transform md:translate-x-0 md:shadow-none md:w-[264px] md:shrink-0 md:sticky md:left-auto md:top-4 md:bottom-auto md:z-auto md:h-[calc(100vh-120px)]`}>
-        <div className="md:hidden flex items-center justify-between border-b border-zinc-200 px-3 py-2">
-          <b className="text-sm text-zinc-800">文档目录</b>
-          <button type="button" onClick={() => setMobileTreeOpen(false)} className="h-8 w-8 rounded-full text-lg text-zinc-500 hover:bg-zinc-100" aria-label="关闭目录">×</button>
+      {desktopTreeCollapsed && (
+        <button
+          type="button"
+          onClick={() => setDesktopTreeCollapsed(false)}
+          className="hidden lg:inline-flex sticky top-4 h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"
+          aria-expanded="false"
+          title="展开云文档"
+          aria-label="展开云文档"
+        >
+          <NavigationIcon name="knowledge" />
+        </button>
+      )}
+      <aside className={`${desktopTreeCollapsed ? "lg:hidden" : "lg:flex"} ${mobileTreeOpen ? "translate-x-0" : "-translate-x-[110%]"} panel-mobile-full fixed left-0 z-[46] w-[min(300px,calc(100vw-24px))] flex flex-col rounded-r-xl border border-zinc-200 bg-white overflow-hidden shadow-2xl transition-transform lg:translate-x-0 lg:shadow-none lg:w-[264px] lg:shrink-0 lg:sticky lg:left-auto lg:top-4 lg:bottom-auto lg:z-auto lg:h-[calc(100vh-120px)] lg:rounded-xl`}>
+        <div className="lg:hidden flex items-center justify-between border-b border-zinc-200 px-3 py-2">
+          <b className="flex items-center gap-1.5 text-sm text-zinc-800"><NavigationIcon name="knowledge" />云文档</b>
+          <button type="button" onClick={() => setMobileTreeOpen(false)} className="h-8 w-8 rounded-full text-lg text-zinc-500 hover:bg-zinc-100" aria-label="关闭云文档">×</button>
+        </div>
+        <div className="hidden lg:flex items-center justify-between border-b border-zinc-200 px-3 py-2">
+          <b className="flex items-center gap-1.5 text-sm text-zinc-800"><NavigationIcon name="knowledge" />云文档</b>
+          <button
+            type="button"
+            onClick={() => setDesktopTreeCollapsed(true)}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+            aria-label="收起云文档"
+            title="收起云文档"
+            aria-expanded="true"
+          >
+            ←
+          </button>
         </div>
         <div className="p-2.5 border-b border-zinc-200">
           <input
@@ -875,7 +893,7 @@ export default function WikiShell({
         const excludeRoot = it?.kind === "link" ? it.linkTargetId : movingId;
         return (
           <TreePickerModal
-            kicker="Wiki"
+            kicker="云文档"
             title={`移动「${it?.displayTitle ?? ""}」到…`}
             items={containerItemsFor(excludeRoot)}
             preselected={[]}
@@ -888,7 +906,7 @@ export default function WikiShell({
 
       {linkingId && (
         <TreePickerModal
-          kicker="Wiki"
+          kicker="云文档"
           title={`把「${byId.get(linkingId)?.displayTitle ?? ""}」链接到…`}
           items={containerItemsFor(linkingId)}
           preselected={[]}
@@ -966,7 +984,7 @@ export default function WikiShell({
 
       {linkUnder !== null && (
         <TreePickerModal
-          kicker="Wiki"
+          kicker="云文档"
           title="创建链接指向…"
           items={items
             .filter(n => n.kind === "wiki" || n.kind === "asset")
@@ -980,7 +998,7 @@ export default function WikiShell({
 
       {movingInPick && (
         <TreePickerModal
-          kicker="Wiki"
+          kicker="云文档"
           title="移入文档"
           items={moveInCandidates.map(c => ({
             id: c.id,
@@ -1004,7 +1022,7 @@ export default function WikiShell({
         const preferLink = c.parentId !== null;
         return (
           <AdminModal
-            kicker="Wiki"
+            kicker="云文档"
             title={`移入「${c.title ?? "（无标题）"}」`}
             onClose={() => setMovingIn(null)}
             width={420}

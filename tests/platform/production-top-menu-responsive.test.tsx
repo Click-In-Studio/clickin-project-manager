@@ -78,7 +78,7 @@ describe("共享项目工具栏上下文", () => {
       events: "事件",
       tasks: "任务",
       reports: "报告",
-      wiki: "知识库",
+      wiki: "云文档",
       finance: "财务",
       materials: "物料",
       assets: "资产工作台",

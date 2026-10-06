@@ -216,7 +216,7 @@ export default function ReportsTab({
 
       {mountPicking && (
         <TreePickerModal
-          kicker="Wiki"
+          kicker="云文档"
           title="挂载文档为报告"
           items={mountItems ?? []}
           preselected={[]}

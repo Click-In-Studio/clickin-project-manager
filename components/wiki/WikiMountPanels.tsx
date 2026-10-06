@@ -152,7 +152,7 @@ export function WikiCreatePanel({ productionId, mountCtx, onMounted, onCancel }:
         placeholder="新文档标题…" autoFocus
         className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-zinc-300"
       />
-      <p className="text-[10px] text-zinc-400 mb-3">文档将挂载到此处；事件类上下文自动归档进事件目录，其余暂落知识库顶层</p>
+      <p className="text-[10px] text-zinc-400 mb-3">文档将挂载到此处；事件类上下文自动归档进事件目录，其余暂放在云文档顶层</p>
       {error && <p className="text-xs text-red-500 mb-2">{error}</p>}
       <div className="flex justify-end gap-2">
         {onCancel && (

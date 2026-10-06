@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-export const metadata: Metadata = { title: "知识库" };
+export const metadata: Metadata = { title: "云文档" };
 
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
@@ -65,7 +65,7 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
       canCreateShareToken(access.permCtx, productionId, asset),
     ]);
     return (
-      <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+      <div style={{ padding: "16px clamp(12px, 1.8vw, 28px) 48px", minHeight: "100vh", background: "var(--paper)" }}>
         <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} selectedId={wikiId} assetActions={assetActions}>
           {canView ? (
             <AssetPreviewClient
@@ -116,7 +116,7 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
     // §4.1：标题=目录级信息（持有链接/id 即可见标题），内容过权限门 → 申请入口
     const applyResource = `node:wiki/${docId}@view`;
     return (
-      <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+      <div style={{ padding: "16px clamp(12px, 1.8vw, 28px) 48px", minHeight: "100vh", background: "var(--paper)" }}>
         <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} selectedId={wikiId} assetActions={assetActions}>
           <div className="rounded-xl border border-zinc-200 bg-white px-8 flex flex-col items-center justify-center text-center">
             <p className="text-lg font-bold text-zinc-800 mb-1">[[{wiki.title ?? "（无标题）"}]]</p>
@@ -145,7 +145,7 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
 
   return (
     <>
-      <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+      <div style={{ padding: "16px clamp(12px, 1.8vw, 28px) 48px", minHeight: "100vh", background: "var(--paper)" }}>
         <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} selectedId={wikiId} assetActions={assetActions}>
           <WikiDocClient
             productionId={productionId}

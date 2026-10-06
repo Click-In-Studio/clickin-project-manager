@@ -251,7 +251,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
           )}
         </div>
         {assets.filter(a => a.listable).length === 0 ? (
-          <p className="text-xs text-zinc-400">暂无对全员列出的资产（列出后全体成员能在知识库树看到条目；内容访问仍按权限）</p>
+          <p className="text-xs text-zinc-400">暂无对全员列出的资产（列出后全体成员能在云文档里看到条目；内容访问仍按权限）</p>
         ) : (
           <div className="flex flex-wrap items-center gap-1">
             {assets.filter(a => a.listable).map(a => (
@@ -355,7 +355,7 @@ export default function AssetPageClient({ productionId, versionId, myUserId, use
                       )}
                       {a.nodeId && (
                         <Link href={`/production/${productionId}/wiki/${a.nodeId}`}
-                          title="在知识库中查看"
+                          title="在云文档中查看"
                           className={styles.treePath}>
                           📁 {[...a.treePath, ""].join(" / ")}{a.name ?? a.fileName}
                         </Link>

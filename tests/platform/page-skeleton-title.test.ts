@@ -10,7 +10,7 @@ describe("pageTitleFor", () => {
     expect(pageTitleFor("/production/p1/")).toBe("我的工作");
     expect(pageTitleFor("/production/p1/script")).toBe("剧本");
     expect(pageTitleFor("/production/p1/events/ev_123/callsheet")).toBe("事件");
-    expect(pageTitleFor("/production/p1/wiki/nd_abcdef")).toBe("知识库");
+    expect(pageTitleFor("/production/p1/wiki/nd_abcdef")).toBe("云文档");
     expect(pageTitleFor("/production/p1/notifications")).toBe("我的通知");
     expect(pageTitleFor("/production/p1/characters")).toBe("构作");
   });
