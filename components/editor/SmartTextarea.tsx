@@ -601,6 +601,10 @@ export default function SmartTextarea({
     // 「同一时刻只可能有一种形态」天然保证。
     const base = StarterKit.configure({
       dropcursor: hasColumnTools ? false : { ...DROP_INDICATOR_OPTIONS },
+      // 标题本身就是完整的文末块；把正文 / H1 / H2 / H3 切到文末时不应为
+      // TrailingNode 凭空补一段。表格、分栏等结构块仍沿用默认补尾，保证光标
+      // 可以落到结构块之后继续输入。
+      trailingNode: { notAfter: ["heading"] },
       // 段落换成带空段落方言的版本（#576）：空行序列化成独占一行的 `&nbsp;`，
       // 否则相邻同类列表之间的空行一过 markdown 就没了、两个列表并成一个
       paragraph: false,

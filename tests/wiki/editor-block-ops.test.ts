@@ -10,7 +10,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { TableKit } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Markdown } from "tiptap-markdown";
-import { NodeSelection } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { Callout } from "@/lib/editor/tiptap-callout";
 import { Column, ColumnGroup } from "@/lib/editor/tiptap-columns";
 import {
@@ -22,10 +22,12 @@ import {
 } from "@/lib/editor/editor-block-ops";
 import { ColumnEditing, isEmptyColumn } from "@/lib/editor/tiptap-column-editing";
 
-function makeEditor(content: string) {
+function makeEditor(content: string, opts?: { headingsDoNotNeedTrailingParagraph?: boolean }) {
   return new Editor({
     extensions: [
-      StarterKit,
+      StarterKit.configure(opts?.headingsDoNotNeedTrailingParagraph
+        ? { trailingNode: { notAfter: ["heading"] } }
+        : {}),
       Markdown.configure({ transformCopiedText: true, breaks: true }),
       TableKit.configure({ table: { resizable: false } }),
       TaskList, TaskItem.configure({ nested: true }),
@@ -234,6 +236,33 @@ describe("段落格式菜单", () => {
     const e = makeEditor("# 甲");
     e.commands.setTextSelection(2);
     expect(currentFormat(e).id).toBe("h1");
+    e.destroy();
+  });
+
+  it("正文 / 标题切换保留多块文本选区，且文末不额外补空段", () => {
+    const e = makeEditor("甲\n\n乙", { headingsDoNotNeedTrailingParagraph: true });
+    const selection = TextSelection.create(e.state.doc, 1, e.state.doc.content.size - 1);
+    e.view.dispatch(e.state.tr.setSelection(selection));
+
+    FORMAT_ACTIONS.find(action => action.id === "h1")!.run(e);
+
+    expect(md(e)).toBe("# 甲\n\n# 乙");
+    expect(e.state.doc.childCount).toBe(2);
+    expect(e.state.doc.content.content.map(node => node.type.name)).toEqual(["heading", "heading"]);
+    expect(e.state.selection.eq(selection)).toBe(true);
+    e.destroy();
+  });
+
+  it("光标态切换文末标题也停在原位置", () => {
+    const e = makeEditor("末段", { headingsDoNotNeedTrailingParagraph: true });
+    const selection = TextSelection.create(e.state.doc, 2);
+    e.view.dispatch(e.state.tr.setSelection(selection));
+
+    FORMAT_ACTIONS.find(action => action.id === "h3")!.run(e);
+
+    expect(md(e)).toBe("### 末段");
+    expect(e.state.doc.childCount).toBe(1);
+    expect(e.state.selection.eq(selection)).toBe(true);
     e.destroy();
   });
 });
