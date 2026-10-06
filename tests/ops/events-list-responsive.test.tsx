@@ -15,11 +15,15 @@ vi.mock("next/link", () => ({
 }));
 
 const css = readFileSync("components/ops/responsive.module.css", "utf8");
+const component = readFileSync("components/ops/EventsClient.tsx", "utf8");
 
 function blockAfter(source: string, marker: string): string {
   const markerStart = source.indexOf(marker);
   if (markerStart < 0) throw new Error(`找不到样式块：${marker}`);
-  const openBrace = source.indexOf("{", markerStart + marker.length);
+  const braceInMarker = marker.lastIndexOf("{");
+  const openBrace = braceInMarker >= 0
+    ? markerStart + braceInMarker
+    : source.indexOf("{", markerStart + marker.length);
   if (openBrace < 0) throw new Error(`样式块缺少左花括号：${marker}`);
 
   let depth = 0;
@@ -169,10 +173,52 @@ describe("事件列表信息层级与响应式布局", () => {
     });
   });
 
+  it("分组滚动条贴近右边框，正文用滚动容器内间距避让", () => {
+    expect(component).toContain("className={responsive.eventGroupHeader}");
+    expect(component).toContain("responsive.eventGroupScroll} panel-scrollbar panel-scrollbar-area");
+    expect(component).not.toContain('style={{ flex: 1, minHeight: 0, overflowY: "auto" }}');
+    expect(declarations(css, ".eventGroup {")).toMatchObject({ padding: "22px 4px 22px 22px" });
+    expect(declarations(css, ".eventGroupHeader")).toMatchObject({ "padding-right": "18px" });
+    expect(declarations(css, ".eventGroupScroll")).toMatchObject({
+      "padding-right": "14px",
+      "overflow-y": "auto",
+      "overscroll-behavior": "contain",
+      "scrollbar-gutter": "stable",
+    });
+  });
+
+  it("约 768–900px 时分组随内容收缩，仅在事件较多时内部滚动", () => {
+    const tablet = blockAfter(css, "@media (max-width: 980px)");
+    expect(declarations(tablet, ".eventGroup {")).toMatchObject({ height: "auto", "min-height": "0" });
+    expect(declarations(tablet, ".eventGroupScroll")).toMatchObject({
+      flex: "none",
+      "max-height": "min(56vh, 460px)",
+    });
+  });
+
+  it("386px 手机宽度保持紧凑密度、短信息操作间距和可点击区域", () => {
+    const mobile = blockAfter(css, "@media (max-width: 640px)");
+    expect(declarations(mobile, ".eventPage")).toMatchObject({
+      "padding-bottom": "calc(60px + env(safe-area-inset-bottom))",
+    });
+    expect(declarations(mobile, ".eventGroup {")).toMatchObject({ padding: "16px 3px 16px 16px" });
+    expect(declarations(mobile, ".eventGroupScroll")).toMatchObject({
+      "max-height": "min(52vh, 420px)",
+      "padding-right": "9px",
+    });
+    expect(declarations(mobile, ".eventCardActions")).toMatchObject({
+      "grid-column": "2 / 4",
+      "margin-top": "6px",
+      "flex-wrap": "nowrap",
+    });
+    expect(declarations(mobile, ".eventCardActionButton")).toMatchObject({ "min-height": "32px" });
+  });
+
   it("319px 下收紧日期字号、外框和容器内边距", () => {
     const narrow = blockAfter(css, "@media (max-width: 320px)");
     expect(declarations(narrow, ".eventPage")).toMatchObject({ padding: "24px 10px 60px" });
-    expect(declarations(narrow, ".eventGroup")).toMatchObject({ padding: "14px" });
+    expect(declarations(narrow, ".eventGroup {")).toMatchObject({ padding: "14px 3px 14px 14px" });
+    expect(declarations(narrow, ".eventGroupScroll")).toMatchObject({ "padding-right": "7px" });
     expect(declarations(narrow, ".eventCard")).toMatchObject({
       "grid-template-columns": "48px minmax(0, 1fr) minmax(52px, auto)",
       "column-gap": "8px",
