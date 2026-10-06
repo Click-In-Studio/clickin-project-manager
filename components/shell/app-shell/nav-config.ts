@@ -78,6 +78,14 @@ export const ADMIN_NAV_GROUPS: { title: string | null; items: { label: string; h
   },
 ];
 
+export function adminTopMenuLabel(path: string): string | null {
+  for (const group of ADMIN_NAV_GROUPS) {
+    const item = group.items.find((candidate) => candidate.path === path);
+    if (item) return item.label;
+  }
+  return null;
+}
+
 export const OVERVIEW_NAV = [
   { label: "公告", hint: "演出公告与风险提醒", path: "/my/announcements", symbol: "⊟" },
   { label: "日程", hint: "完整 Weekly Call", path: "/my/weekly-call", symbol: "◷" },

@@ -102,7 +102,9 @@ describe("后台财务设置响应式布局", () => {
     expect(component).toContain("optionClassName={styles.currencyOption}");
     expect(component.match(/<option key=\{code\} value=\{code\}>\{formatCurrencyLabel\(code\)\}<\/option>/g)).toHaveLength(2);
 
-    const buttons = [...component.matchAll(/<button\b[^>]*>/g)].map(match => match[0]);
+    expect(component).toContain("PRODUCTION_MODULE_ACTION_CLASS");
+    const pageControls = component.slice(component.indexOf('<div className={styles.tabs}>'));
+    const buttons = [...pageControls.matchAll(/<button\b[^>]*>/g)].map(match => match[0]);
     expect(buttons.length).toBeGreaterThan(0);
     expect(buttons.every(button => button.includes("className={styles.compactButton}"))).toBe(true);
   });

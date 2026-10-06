@@ -7,7 +7,6 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
-import { getProductionName } from "@/lib/production/production-db";
 import { listProductionMembersWithRoles, listMemberTags } from "@/lib/perm/member-db";
 import { listProductionRolesWithPermissions } from "@/lib/perm/role-db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
@@ -38,8 +37,7 @@ export default async function OrganizationPage({ params }: { params: Promise<{ i
       hasEffectiveGrant(permCtx, id, "dept", "*", "poc", "create"),
     ]);
 
-  const [name, membersRaw, depts, tags, roles, seats] = await Promise.all([
-    getProductionName(id),
+  const [membersRaw, depts, tags, roles, seats] = await Promise.all([
     listProductionMembersWithRoles(id),
     listProductionDepts(id),
     listMemberTags(id),
@@ -65,7 +63,6 @@ export default async function OrganizationPage({ params }: { params: Promise<{ i
   return (
     <AdminOrganizationClient
       productionId={id}
-      productionName={name ?? ""}
       initialMembers={members}
       initialDepts={depts.map(d => ({
         id: d.id,
