@@ -1,5 +1,7 @@
 "use client";
 
+import PlatformTopMenu from "@/components/shell/PlatformTopMenu";
+
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
@@ -73,10 +75,7 @@ export default function AnnouncementsClient({ announcements, cueWarnings, initia
 
   return (
     <div className={styles.workspace}>
-      <div className={styles.pageHeader}>
-        <p className={styles.eyebrow}>Platform · 公告</p>
-        <h1 className={styles.pageTitle}>公告与风险提醒</h1>
-      </div>
+      <PlatformTopMenu title="公告与风险提醒" />
 
       {/* ── 摘要统计（通知提醒同款语汇）── */}
       <div style={{

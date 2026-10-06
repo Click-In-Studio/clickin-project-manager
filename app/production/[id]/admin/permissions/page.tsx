@@ -7,7 +7,6 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext, getAllPermissionOverrides } from "@/lib/perm/permission-context-db";
-import { getProductionName } from "@/lib/production/production-db";
 import { listProductionRolesWithPermissions } from "@/lib/perm/role-db";
 import { listProductionMembersWithRoles } from "@/lib/perm/member-db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
@@ -56,8 +55,7 @@ export default async function PermissionCenterPage({ params }: { params: Promise
 
   if (!deptView && !roleView && !overrideView && !approverView) redirect(`/production/${id}/admin`);
 
-  const [name, depts, deptRows, roles, membersRaw, overrides, vocabulary, approvers, delegableTypes] = await Promise.all([
-    getProductionName(id),
+  const [depts, deptRows, roles, membersRaw, overrides, vocabulary, approvers, delegableTypes] = await Promise.all([
     deptView ? listProductionDepts(id) : Promise.resolve([]),
     // 显式标注类型：Promise.all 对异构数组会把这一格塌成 {}，塌了之后
     // 下面传给 client 的 prop 类型就再也校验不到（改了数据形状 tsc 不会红）
@@ -73,7 +71,6 @@ export default async function PermissionCenterPage({ params }: { params: Promise
   return (
     <AdminPermissionCenterClient
       productionId={id}
-      productionName={name ?? ""}
       depts={depts.map(d => ({ id: d.id, name: d.name, parentId: d.parentId, kind: d.kind, displayOrder: d.displayOrder, memberUserIds: d.memberUserIds }))}
       initialDeptRows={deptRows}
       initialRoles={roles.map(r => ({ id: r.id, name: r.name, permissions: r.permissions }))}

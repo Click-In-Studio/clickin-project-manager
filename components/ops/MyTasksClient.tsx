@@ -1,5 +1,7 @@
 "use client";
 
+import PlatformTopMenu from "@/components/shell/PlatformTopMenu";
+
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useState } from "react";
@@ -90,10 +92,7 @@ export default function MyTasksClient({ initialTasks }: { initialTasks: MyTechRe
 
   return (
     <div className={styles.workspace}>
-      <div className={styles.pageHeader}>
-        <p className={styles.eyebrow}>Platform · 任务</p>
-        <h1 className={styles.pageTitle}>我的任务</h1>
-      </div>
+      <PlatformTopMenu title="我的任务" />
 
       {/* ── 摘要统计（通知提醒同款语汇）── */}
       <div style={{

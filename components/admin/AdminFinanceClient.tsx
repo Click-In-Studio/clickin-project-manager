@@ -1,7 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
+import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
+import ProductionModuleTopMenu, {
+  PRODUCTION_MODULE_ACTION_CLASS,
+  PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS,
+} from "@/components/shell/ProductionModuleTopMenu";
 import AdminModal from "@/components/ui/AdminModal";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import type { BudgetCategory, ExpenseCategory } from "@/lib/ops/finance-db";
@@ -19,8 +23,8 @@ const COMPACT_PRIMARY_BTN = { ...PRIMARY_BTN, padding: "4px 12px", lineHeight: "
 const COMPACT_SECONDARY_BTN = { ...SECONDARY_BTN, padding: "4px 12px", lineHeight: "18px" } as const;
 const COMPACT_CURRENCY_FIELD = { ...FIELD, padding: "4px 8px", minHeight: 28, fontSize: 11, lineHeight: "18px" } as const;
 
-export default function AdminFinanceClient({ productionId, productionName, baseCurrency: initialBaseCurrency, initialCategories, initialItems, depts, caps }: {
-  productionId: string; productionName: string; baseCurrency: CurrencyCode; initialCategories: ExpenseCategory[]; initialItems: BudgetCategory[]; depts: Dept[]; caps: Caps;
+export default function AdminFinanceClient({ productionId, baseCurrency: initialBaseCurrency, initialCategories, initialItems, depts, caps }: {
+  productionId: string; baseCurrency: CurrencyCode; initialCategories: ExpenseCategory[]; initialItems: BudgetCategory[]; depts: Dept[]; caps: Caps;
 }) {
   const [tab, setTab] = useState<"items" | "categories">("items");
   const [categories, setCategories] = useState(initialCategories);
@@ -89,9 +93,17 @@ export default function AdminFinanceClient({ productionId, productionName, baseC
     } catch (e) { setError(e instanceof Error ? e.message : "排序失败"); }
   }
 
+  const canCreateCurrent = tab === "items" ? caps.budgetCreate : caps.categoryCreate;
+  const createLabel = `新增${tab === "items" ? "预算项" : "费用科目"}`;
+  const openCreateModal = () => setModal({ kind: tab === "items" ? "item" : "category" });
+
   return <main className={styles.page}>
-    <PageHeader eyebrow={productionName} title="财务设置" side="stage"
-      actions={(tab === "items" ? caps.budgetCreate : caps.categoryCreate) ? <button className={styles.compactButton} style={COMPACT_PRIMARY_BTN} onClick={() => setModal({ kind: tab === "items" ? "item" : "category" })}>新增{tab === "items" ? "预算项" : "费用科目"}</button> : null} />
+    <ProductionModuleTopMenu
+      label="财务设置"
+      primaryAction={canCreateCurrent ? <button type="button" className={PRODUCTION_MODULE_ACTION_CLASS} onClick={openCreateModal}>＋ {createLabel}</button> : undefined}
+      primaryShortAction={canCreateCurrent ? <button type="button" className={PRODUCTION_MODULE_ACTION_CLASS} aria-label={createLabel} onClick={openCreateModal}>＋</button> : undefined}
+      primaryOverflowAction={canCreateCurrent ? <button type="button" className={PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS} onClick={openCreateModal}>{createLabel}</button> : undefined}
+    />
     <div className={styles.tabs}>
       {([['items', '预算项'], ['categories', '费用科目']] as const).map(([key, label]) => <button className={styles.compactButton} key={key} onClick={() => setTab(key)} style={{ border: 0, borderBottom: tab === key ? "2px solid var(--stage)" : "2px solid transparent", padding: "4px 14px", lineHeight: "18px", background: "transparent", color: tab === key ? "var(--ink)" : "var(--muted)", fontWeight: 700, cursor: "pointer" }}>{label}</button>)}
     </div>

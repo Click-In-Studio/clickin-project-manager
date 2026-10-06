@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import PageHeader from "@/components/ui/PageHeader";
+import PlatformTopMenu from "@/components/shell/PlatformTopMenu";
 import Link from "next/link";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import styles from "@/components/ui/my-pages.module.css";
@@ -568,10 +569,7 @@ export default function MyNotificationsClient({ productions = [], productionId, 
       {productionId ? (
         <PageHeader eyebrow="Notifications" title="通知提醒" side="stage" />
       ) : (
-        <div className={styles.pageHeader}>
-          <p className={styles.eyebrow}>Platform · 通知</p>
-          <h1 className={styles.pageTitle}>通知提醒</h1>
-        </div>
+        <PlatformTopMenu title="通知提醒" />
       )}
 
       {/* ── 摘要统计（原型 notificationSummary；Action Bar 横幅省略——与页头重复）── */}

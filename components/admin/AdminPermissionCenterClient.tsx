@@ -3,7 +3,6 @@
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import PageHeader from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import PermissionKeyPicker, { type Vocabulary } from "@/components/perm/PermissionKeyPicker";
 import DropdownPicker, { type DropdownPickerItem } from "@/components/ui/DropdownPicker";
@@ -33,7 +32,6 @@ type ApproverEntry = { resourceType: string; deptIds: string[]; userIds: string[
 
 type Props = {
   productionId: string;
-  productionName: string;
   depts: Dept[];
   initialDeptRows: Record<string, DeptPermissionView>;
   initialRoles: Role[];
@@ -83,7 +81,7 @@ function KeyRow({ nodeKey, tone, onRemove, extra }: {
 }
 
 export default function AdminPermissionCenterClient({
-  productionId, productionName, depts, initialDeptRows, initialRoles, members, initialOverrides, vocabulary,
+  productionId, depts, initialDeptRows, initialRoles, members, initialOverrides, vocabulary,
   initialApprovers, delegableTypes, nonDelegableTypes, caps,
 }: Props) {
   const tabs = [
@@ -307,8 +305,6 @@ export default function AdminPermissionCenterClient({
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader eyebrow={productionName} title="权限中心" side="stage" />
-
       {/* 摘要 */}
       <AdminMetricGrid
         columns={4}

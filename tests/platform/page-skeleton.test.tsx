@@ -53,15 +53,20 @@ describe("#652 PageSkeleton 表意「加载中」", () => {
     expect(container.querySelector("[role=status]")!.classList.contains("skeleton-page")).toBe(false);
   });
 
+  it("平台加载态只保留标题占位，不渲染分类小字占位", () => {
+    act(() => { root.render(<PageSkeleton titleOnly />); });
+    const titleGroup = container.querySelector("[data-page-skeleton-header] > div:first-child")!;
+    expect(titleGroup.querySelectorAll(".skeleton-bar")).toHaveLength(1);
+  });
+
   it("剧本页的客户端加载态渲染的是同一个骨架（静态断言）", () => {
     const src = readFileSync("components/script/ScriptEditor.tsx", "utf8");
     expect(src).toMatch(/loadState === "loading"\)\s*return <PageSkeleton instant \/>;/);
     expect(src).not.toContain("加载中...");
   });
 
-  it("两个路由段的 loading.tsx 仍用 PageSkeleton（静态断言）", () => {
-    for (const f of ["app/production/[id]/loading.tsx", "app/my/loading.tsx"]) {
-      expect(readFileSync(f, "utf8")).toContain("<PageSkeleton />");
-    }
+  it("项目与平台路由使用各自的页头占位形态（静态断言）", () => {
+    expect(readFileSync("app/production/[id]/loading.tsx", "utf8")).toContain("<PageSkeleton />");
+    expect(readFileSync("app/my/loading.tsx", "utf8")).toContain("<PageSkeleton titleOnly />");
   });
 });

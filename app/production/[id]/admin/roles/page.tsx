@@ -8,7 +8,6 @@ import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getPool } from "@/lib/pg";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
-import { getProductionName } from "@/lib/production/production-db";
 import { listProductionRolesWithPermissions } from "@/lib/perm/role-db";
 import { listProductionMembersWithRoles } from "@/lib/perm/member-db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
@@ -33,8 +32,7 @@ export default async function RolesPage({ params }: { params: Promise<{ id: stri
     hasEffectiveGrant(permCtx, id, "member", "*", "contact", "view"),
   ]);
 
-  const [name, roles, membersRaw, depts, ownerRes] = await Promise.all([
-    getProductionName(id),
+  const [roles, membersRaw, depts, ownerRes] = await Promise.all([
     listProductionRolesWithPermissions(id),
     listProductionMembersWithRoles(id),
     listProductionDepts(id),
@@ -63,7 +61,6 @@ export default async function RolesPage({ params }: { params: Promise<{ id: stri
   return (
     <AdminRolesClient
       productionId={id}
-      productionName={name ?? ""}
       initialRoles={roles.map(r => ({ id: r.id, name: r.name }))}
       members={members}
       depts={depts.map(d => ({ id: d.id, name: d.name, parentId: d.parentId, kind: d.kind, memberUserIds: d.memberUserIds }))}

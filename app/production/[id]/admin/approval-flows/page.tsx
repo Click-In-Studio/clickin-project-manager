@@ -4,8 +4,6 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { requireAdminAccess } from "@/lib/perm/admin-guard";
-import { getProductionName } from "@/lib/production/production-db";
-import PageHeader from "@/components/ui/PageHeader";
 import ApprovalFlowDesigner from "@/components/approval/ApprovalFlowDesigner";
 import styles from "@/components/ui/my-pages.module.css";
 
@@ -23,7 +21,6 @@ export default async function ApprovalFlowsPage({ params }: { params: Promise<{ 
 
   return (
     <div className={styles.workspace} style={{ minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader eyebrow={await getProductionName(id) ?? ""} title="访问审批流程" side="stage" />
       <section className={`${styles.responsiveContentPanel} ${styles.responsiveContentPanelFlow}`} style={{
         background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13,
         padding: 22, display: "flex", flexDirection: "column",

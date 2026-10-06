@@ -7,7 +7,6 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
-import { getProductionName } from "@/lib/production/production-db";
 import { listProductionMembersWithRoles } from "@/lib/perm/member-db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import { listGrantLedger } from "@/lib/perm/grant-audit-db";
@@ -32,8 +31,7 @@ export default async function AuditPage({ params }: { params: Promise<{ id: stri
   const canView = canRevoke || canViewOnly;
   if (!canView) redirect(`/production/${id}/admin`);
 
-  const [name, initial, members, depts] = await Promise.all([
-    getProductionName(id),
+  const [initial, members, depts] = await Promise.all([
     listGrantLedger(id, { limit: 15 }),
     listProductionMembersWithRoles(id),
     listProductionDepts(id),
@@ -42,7 +40,6 @@ export default async function AuditPage({ params }: { params: Promise<{ id: stri
   return (
     <AdminAuditClient
       productionId={id}
-      productionName={name ?? ""}
       initialRows={initial.rows}
       initialTotal={initial.total}
       members={members.map(m => ({

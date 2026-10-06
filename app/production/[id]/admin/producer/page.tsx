@@ -7,7 +7,6 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
-import { getProductionName } from "@/lib/production/production-db";
 import { listProductionRolesWithPermissions } from "@/lib/perm/role-db";
 import { listProductionMembersWithRoles } from "@/lib/perm/member-db";
 import { getPermissionVocabulary } from "@/lib/perm/perm-center-db";
@@ -33,8 +32,7 @@ export default async function ProducerPage({ params }: { params: Promise<{ id: s
   if (!canView) redirect(`/production/${id}/admin`);
   const canViewContact = await hasEffectiveGrant(permCtx, id, "member", "*", "contact", "view");
 
-  const [name, roles, members, depts, governance, vocabulary] = await Promise.all([
-    getProductionName(id),
+  const [roles, members, depts, governance, vocabulary] = await Promise.all([
     listProductionRolesWithPermissions(id),
     listProductionMembersWithRoles(id),
     listProductionDepts(id),
@@ -47,7 +45,6 @@ export default async function ProducerPage({ params }: { params: Promise<{ id: s
   return (
     <AdminProducerClient
       productionId={id}
-      productionName={name ?? ""}
       producerRole={producerRole ? { id: producerRole.id, permissions: producerRole.permissions } : null}
       members={members.map(m => ({
         userId: m.userId, name: m.name, avatarUrl: m.avatarUrl, photoUrl: m.photoUrl,

@@ -80,6 +80,14 @@ export const ADMIN_NAV_GROUPS: { title: string | null; items: AdminNavItem[] }[]
   },
 ];
 
+export function adminTopMenuLabel(path: string): string | null {
+  for (const group of ADMIN_NAV_GROUPS) {
+    const item = group.items.find((candidate) => candidate.path === path);
+    if (item) return item.label;
+  }
+  return null;
+}
+
 export const OVERVIEW_NAV = [
   { label: "公告", hint: "演出公告与风险提醒", path: "/my/announcements", icon: "announcement" },
   { label: "日程", hint: "完整 Weekly Call", path: "/my/weekly-call", icon: "calendar" },
@@ -107,4 +115,16 @@ export const PRODUCTION_TOP_MENU_LABELS: Record<string, string> = {
   finance: "财务",
   materials: "物料",
   assets: "资产工作台",
+};
+
+export const PLATFORM_TOP_MENU_LABELS: Record<string, string> = {
+  "/": "我的工作",
+  "/my/projects": "我的项目",
+  "/my/announcements": "公告与风险提醒",
+  "/my/weekly-call": "本周日程",
+  "/my/daily-call": "当日 Call Sheet",
+  "/my/tasks": "我的任务",
+  "/my/notifications": "通知提醒",
+  "/my/reports": "报告",
+  "/account": "个人中心",
 };

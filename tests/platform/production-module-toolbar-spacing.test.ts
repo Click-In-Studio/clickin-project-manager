@@ -7,8 +7,9 @@ const modules = [
   { name: "审批", full: "申请资源权限", short: "申请" },
   { name: "财务", full: "＋ 新建报销", short: "＋" },
   { name: "资产工作台", full: "＋ 上传新 Asset", short: "＋" },
+  { name: "成员与部门", full: "＋ 邀请成员", short: "＋" },
 ] as const;
-const acceptanceWidths = [319, 385, 645, 1440] as const;
+const acceptanceWidths = [319, 768, 810, 1024, 1280, 1440] as const;
 
 type ModuleCase = typeof modules[number];
 
@@ -190,7 +191,7 @@ describe("制作侧共享顶栏边界", () => {
             || metrics.actionText === moduleCase.short
             || (metrics.moreVisible && metrics.overflowActionText === moduleCase.full)).toBe(true);
         }
-        if (width === 645 || width === 1440) expect(metrics.actionText).toBe(moduleCase.full);
+        if (width === 1280 || width === 1440) expect(metrics.actionText).toBe(moduleCase.full);
       });
     }
   }

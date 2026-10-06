@@ -7,7 +7,6 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
-import { getProductionName } from "@/lib/production/production-db";
 import { listPolicies, listPolicyAudit } from "@/lib/perm/policy-db";
 import { POLICY_QUESTIONS, matchAnswer, QUESTION_COVERED_KEYS } from "@/lib/perm/policy-questions";
 import AdminPoliciesClient from "@/components/admin/AdminPoliciesClient";
@@ -33,8 +32,7 @@ export default async function PoliciesPage({ params }: { params: Promise<{ id: s
   // 「后果严不严重」；策略键按定义都是产品能力开关。
   const canEdit = await hasEffectiveGrant(permCtx, id, "production", "*", "config", "edit");
 
-  const [name, policies, audit] = await Promise.all([
-    getProductionName(id),
+  const [policies, audit] = await Promise.all([
     listPolicies(id),          // 顺带自愈补齐缺行（新加的键、本表上线前的演出）
     listPolicyAudit(id, 20),
   ]);
@@ -53,7 +51,6 @@ export default async function PoliciesPage({ params }: { params: Promise<{ id: s
   return (
     <AdminPoliciesClient
       productionId={id}
-      productionName={name ?? ""}
       initialPolicies={policies}
       initialQuestions={questions}
       advancedOnly={policies.filter((p) => !QUESTION_COVERED_KEYS.has(p.key)).map((p) => p.key)}
