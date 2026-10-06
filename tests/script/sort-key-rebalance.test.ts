@@ -4,7 +4,7 @@ import { makeProduction, cleanupProduction, makeScene } from "../_support/factor
 import { applyPatchToDB } from "@/lib/script/script-patch-db";
 import { loadProduction } from "@/lib/script/script-state-db";
 import { diffState, type ScriptPatch } from "@/lib/script/script-ops";
-import { initialKeys, keysBetween, keyStrictlyBetween } from "@/lib/lex-order";
+import { initialKeys, isValidKey, keysBetween, keyStrictlyBetween } from "@/lib/lex-order";
 import { getPool } from "@/lib/pg";
 import type { Block, ScriptState } from "@/lib/script/script-types";
 
@@ -111,6 +111,35 @@ describe("lex-order：严格取中", () => {
 });
 
 describe("applyPatchToDB：间隙耗尽自动重铺（#680）", () => {
+  it("遇到旧版变长 sort_key 时先重铺，再按 afterId 落到目标位置", async () => {
+    const local = await makeProduction();
+    try {
+      const first = await makeScene(local.prodId, local.versionId, { name: "旧键甲" });
+      const second = await makeScene(local.prodId, local.versionId, { name: "旧键乙" });
+      const before = (await loadProduction(local.prodId, local.versionId))!.state.blocks.map((block) => block.id);
+      const legacyKeys = before.map((_, index) => `${String.fromCharCode(97 + index)}0`);
+      await getPool().query(
+        `UPDATE script_version AS sv SET sort_key = u.sort_key
+         FROM unnest($1::text[], $2::text[]) AS u(block_id, sort_key)
+         WHERE sv.block_id = u.block_id AND sv.version_id = $3`,
+        [before, legacyKeys, local.versionId],
+      );
+      const anchor = before.indexOf(first) < before.indexOf(second) ? first : second;
+      const inserted = textBlock("旧键之间新增");
+      await applyPatchToDB(local.prodId, local.versionId, insertPatch(inserted, anchor));
+
+      const after = (await loadProduction(local.prodId, local.versionId))!.state.blocks.map((block) => block.id);
+      expect(after[after.indexOf(anchor) + 1]).toBe(inserted.id);
+      const storedKeys = await getPool().query<{ sort_key: string }>(
+        "SELECT sort_key FROM script_version WHERE version_id = $1 ORDER BY sort_key",
+        [local.versionId],
+      );
+      expect(storedKeys.rows.every((row) => isValidKey(row.sort_key))).toBe(true);
+    } finally {
+      await cleanupProduction(local.prodId).catch(() => {});
+    }
+  });
+
   it("逐批追加到段尾 70 次：顺序与插入序一致、key 唯一、归属仍在本段", async () => {
     const ids: string[] = [];
     let anchor = chA;

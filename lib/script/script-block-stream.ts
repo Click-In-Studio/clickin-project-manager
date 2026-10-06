@@ -198,6 +198,31 @@ export function sameCharacterAnnotations(a: Record<string, string>, b: Record<st
   return aKeys.every((key) => a[key] === b[key]);
 }
 
+export function insertScriptBlockAt(
+  blocks: Block[],
+  requestedIndex: number,
+  newBlock: Block,
+): { blocks: Block[]; insertIndex: number; refId: string | null } {
+  const boundedIndex = Math.max(0, Math.min(requestedIndex, blocks.length));
+  const previous = blocks[boundedIndex - 1] ?? null;
+  const target = blocks[boundedIndex] ?? null;
+  // Keep a chapter and its first child scene adjacent: a text row cannot own a
+  // chapter marker because chapter ids are not scene FK anchors.
+  const insertIndex = previous?.type === "chapter_marker" &&
+    target?.type === "scene_marker" &&
+    target.markerMeta?.parentMarkerId === previous.id
+    ? boundedIndex - 1
+    : boundedIndex;
+  const refBlock = blocks[insertIndex - 1] ?? null;
+  const refId = refBlock?.id ?? null;
+  const ownerMarkerId = refBlock
+    ? isMarkerBlock(refBlock) ? refBlock.id : refBlock.ownerMarkerId ?? null
+    : null;
+  const nextBlocks = [...blocks];
+  nextBlocks.splice(insertIndex, 0, { ...newBlock, ownerMarkerId });
+  return { blocks: nextBlocks, insertIndex, refId };
+}
+
 export function markerSegmentIsOpeningWithoutScene(blocks: Block[], markerIndex: number, openingChapterMarkerId: string | null): boolean {
   const marker = blocks[markerIndex];
   return !!openingChapterMarkerId && marker?.id === openingChapterMarkerId && !markerSegmentHasScene(blocks, markerIndex);

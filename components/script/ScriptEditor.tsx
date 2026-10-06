@@ -21,7 +21,7 @@ import type { SceneDetail } from "@/lib/script/script-scene-character-db";
 import { formatDuration, parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
 import { isTextBlock, sameCharacters, shouldHideCharacterLabel, shouldShowCharacterGap, shouldShowSceneEndGap } from "@/lib/script/script-block-layout";
-import { uid, makeBlock, makeMarkerBlock, isBlockEmptyForDelete, isEmptyTextBlock, mergeServerBlocks, expandLegacyMarkersToBlocks, normalizeScriptBlockStream, normalizeScriptMarkerInvariants, insertMarkerWithEmptyBlockIfNeeded, findTocSceneBlockIndex, findSceneMarkerBlockIndex, mergeDirtyRanges, markerChangeFromOperations, sameBlocks } from "@/lib/script/script-block-stream";
+import { uid, makeBlock, makeMarkerBlock, isBlockEmptyForDelete, isEmptyTextBlock, mergeServerBlocks, expandLegacyMarkersToBlocks, normalizeScriptBlockStream, normalizeScriptMarkerInvariants, insertMarkerWithEmptyBlockIfNeeded, insertScriptBlockAt, findTocSceneBlockIndex, findSceneMarkerBlockIndex, mergeDirtyRanges, markerChangeFromOperations, sameBlocks } from "@/lib/script/script-block-stream";
 import { sameDragTarget, resolveDragTarget, getDragInsertIndex, type DragTarget } from "@/lib/script/script-drag-target";
 import { buildEmptyScriptCleanupRemovalPlan, isOnlyTextBlockInMarkerSegment, analyzeEmptyScriptCleanup, type EmptyScriptCleanupTarget } from "@/lib/script/script-empty-cleanup";
 import { publishScriptFocus } from "@/lib/script/script-focus";
@@ -3634,22 +3634,19 @@ export default function ScriptEditor({
   }, [clearDragCountBadge, clearDragTarget, lockReorder, moveDraggedBlocks, setScriptDragging, unlockReorder, isLockedMode, isReorderLockedRef]);
 
   const insertBlockAt = useCallback((index: number) => {
-    if (isLockedMode) return;
+    if (isLockedMode || !canEditText) return;
     saveSnapshot();
     // Pre-generate the new block ID outside the updater (Strict Mode double-invocation fix).
     const newBlockId = uid();
     // refId must also be determined outside the updater; read it from blocksRef.
     const previousBlocks = blocksRef.current;
-    const insertIndex = Math.max(0, Math.min(index, previousBlocks.length));
-    const refId = insertIndex > 0 ? (previousBlocks[insertIndex - 1]?.id ?? null) : null;
     const newBlock: Block = {
       ...makeBlock(),
       id: newBlockId,  // use the pre-generated stable ID
       sceneId: null,
       rehearsalMark: null,
     };
-    const updated = [...previousBlocks];
-    updated.splice(insertIndex, 0, newBlock);
+    const { blocks: updated, insertIndex, refId } = insertScriptBlockAt(previousBlocks, index, newBlock);
     pendingCharOpen.current = newBlock.id;
     applyBlockStructureEdit(previousBlocks, updated, markerChangeFromOperations([{
       kind: "insert",
@@ -3659,7 +3656,7 @@ export default function ScriptEditor({
       afterType: newBlock.type,
     }]));
     if (refId) inheritTags(refId, newBlockId);
-  }, [applyBlockStructureEdit, saveSnapshot, inheritTags, isLockedMode]);
+  }, [applyBlockStructureEdit, canEditText, saveSnapshot, inheritTags, isLockedMode]);
 
   const addChar = (name: string) => {
     if (isLockedMode) return;
@@ -6250,13 +6247,24 @@ export default function ScriptEditor({
         const hasLyricCfg = tagGroups.some(g => !!g.lyricSplitAfterOptionId);
         const commentCount = commentsByBlockId.get(mobileBlockMenuBlockId)?.length ?? 0;
         const batchCount = selectedBlockIds.size;
-        const insertActions: Array<[string, () => void]> = [
+        const menuBlockIndex = blocks.findIndex((block) => block.id === menuBlock.id);
+        const blockInsertDisabledReason = canEditText
+          ? null
+          : baseCanEditText && isLockedMode
+            ? "排练模式下不可添加"
+            : "需要剧本文本编辑权限";
+        const insertActions: Array<{ label: string; action: () => void; disabledReason?: string | null }> = [
+          {
+            label: "添加新剧本块",
+            action: () => insertBlockAt(menuBlockIndex),
+            disabledReason: blockInsertDisabledReason,
+          },
           ...(canEditMetadata ? [
-            ["添加新章", () => addChapterBeforeBlock(menuBlock.id)] as [string, () => void],
-            ["添加新段", () => addSceneBeforeBlock(menuBlock.id)] as [string, () => void],
+            { label: "添加新章", action: () => addChapterBeforeBlock(menuBlock.id) },
+            { label: "添加新段", action: () => addSceneBeforeBlock(menuBlock.id) },
           ] : []),
           ...(canAddRehearsalMark ? [
-            ["添加新排练记号", () => addRehearsalBeforeBlock(menuBlock.id)] as [string, () => void],
+            { label: "添加新排练记号", action: () => addRehearsalBeforeBlock(menuBlock.id) },
           ] : []),
         ];
         const conversionActions: Array<[string, () => void]> = isMarker && canEditMetadata ? [
@@ -6282,6 +6290,7 @@ export default function ScriptEditor({
             <div
               data-script-selection-action="true"
               data-script-mobile-block-menu="true"
+              data-script-mobile-block-id={menuBlock.id}
               className="pointer-events-auto max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-[var(--surface)] border-t border-[var(--line)] shadow-2xl"
             >
               <div className="flex justify-center pt-3 pb-1">
@@ -6336,13 +6345,19 @@ export default function ScriptEditor({
                       <span>在块前添加</span>
                       <ChevronIcon size={16} className={`text-zinc-400 transition-transform ${mobileInsertMenuOpen ? "rotate-180" : ""}`} />
                     </button>
-                    {mobileInsertMenuOpen && insertActions.map(([label, action]) => (
+                    {mobileInsertMenuOpen && insertActions.map(({ label, action, disabledReason }) => (
                       <button
                         key={label}
-                        onClick={() => runAndClose(action)}
-                        className="w-full border-t border-zinc-100 bg-zinc-50 px-8 py-3 text-left text-[14px] text-zinc-600"
+                        type="button"
+                        onClick={() => { if (!disabledReason) runAndClose(action); }}
+                        aria-disabled={!!disabledReason}
+                        title={disabledReason ?? undefined}
+                        className={`flex w-full items-center justify-between gap-3 border-t border-zinc-100 bg-zinc-50 px-8 py-3 text-left text-[14px] ${
+                          disabledReason ? "cursor-not-allowed text-zinc-300" : "text-zinc-600"
+                        }`}
                       >
-                        {label}
+                        <span>{label}</span>
+                        {disabledReason && <span className="text-xs">{disabledReason}</span>}
                       </button>
                     ))}
                   </>
