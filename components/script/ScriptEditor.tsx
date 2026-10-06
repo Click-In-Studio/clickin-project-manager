@@ -6290,6 +6290,7 @@ export default function ScriptEditor({
             <div
               data-script-selection-action="true"
               data-script-mobile-block-menu="true"
+              data-script-mobile-block-id={menuBlock.id}
               className="pointer-events-auto max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-[var(--surface)] border-t border-[var(--line)] shadow-2xl"
             >
               <div className="flex justify-center pt-3 pb-1">

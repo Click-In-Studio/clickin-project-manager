@@ -203,10 +203,23 @@ export function insertScriptBlockAt(
   requestedIndex: number,
   newBlock: Block,
 ): { blocks: Block[]; insertIndex: number; refId: string | null } {
-  const insertIndex = Math.max(0, Math.min(requestedIndex, blocks.length));
-  const refId = insertIndex > 0 ? (blocks[insertIndex - 1]?.id ?? null) : null;
+  const boundedIndex = Math.max(0, Math.min(requestedIndex, blocks.length));
+  const previous = blocks[boundedIndex - 1] ?? null;
+  const target = blocks[boundedIndex] ?? null;
+  // Keep a chapter and its first child scene adjacent: a text row cannot own a
+  // chapter marker because chapter ids are not scene FK anchors.
+  const insertIndex = previous?.type === "chapter_marker" &&
+    target?.type === "scene_marker" &&
+    target.markerMeta?.parentMarkerId === previous.id
+    ? boundedIndex - 1
+    : boundedIndex;
+  const refBlock = blocks[insertIndex - 1] ?? null;
+  const refId = refBlock?.id ?? null;
+  const ownerMarkerId = refBlock
+    ? isMarkerBlock(refBlock) ? refBlock.id : refBlock.ownerMarkerId ?? null
+    : null;
   const nextBlocks = [...blocks];
-  nextBlocks.splice(insertIndex, 0, newBlock);
+  nextBlocks.splice(insertIndex, 0, { ...newBlock, ownerMarkerId });
   return { blocks: nextBlocks, insertIndex, refId };
 }
 

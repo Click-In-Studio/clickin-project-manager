@@ -4,7 +4,7 @@ import type { Block, BlockType, Character, Scene, MarkerMeta } from "./script-ty
 import { DEFAULT_SCRIPT_CONFIG } from "./script-types";
 import { handleBlockContentChanged, handleBlockDeleted } from "../ops/cue-db";
 import type { ScriptPatch, TagEntry } from "./script-ops";
-import { initialKeys, keyStrictlyBetween } from "../lex-order";
+import { initialKeys, isValidKey, keyStrictlyBetween } from "../lex-order";
 import { getMarkerChange, markerCacheUpdateBlockIds, markerHierarchyUpdateBlockIds, normalizeScriptMarkerInvariants, type MarkerChange } from "./script-marker-domain";
 import { cleanMarkerMeta, genBlockId, genSnapshotId, isChapterSceneMarkerType, isMarkerBlockType, toDbType } from "./script-row-model";
 import { deleteSnapshotRowsInTx, ensureSceneAnchorsInTx, insertSnapshotRowsInTx, snapshotRowFromBlock, updateSnapshotRowInTx, upsertCharacterRowsInTx, deleteCharacterRowsInTx } from "./script-row-tx";
@@ -109,10 +109,12 @@ async function allocateInsertKeyInTx(
   txBlocks: Array<{ snapshotId: string; lexKey: string }>,
   insertAt: number,
 ): Promise<string> {
-  const prevLexKey = insertAt > 0 ? txBlocks[insertAt - 1].lexKey : null;
-  const nextLexKey = insertAt < txBlocks.length ? txBlocks[insertAt].lexKey : null;
-  const between = keyStrictlyBetween(prevLexKey, nextLexKey);
-  if (between !== null) return between;
+  if (txBlocks.every((block) => isValidKey(block.lexKey))) {
+    const prevLexKey = insertAt > 0 ? txBlocks[insertAt - 1].lexKey : null;
+    const nextLexKey = insertAt < txBlocks.length ? txBlocks[insertAt].lexKey : null;
+    const between = keyStrictlyBetween(prevLexKey, nextLexKey);
+    if (between !== null) return between;
+  }
 
   const keys = initialKeys(txBlocks.length + 1);
   const snapshotIds: string[] = [];

@@ -36,10 +36,10 @@ describe("空块判定", () => {
 });
 
 describe("insertScriptBlockAt", () => {
-  const chapter = marker("chapter", "chapter_marker", "chapter");
-  const scene = marker("scene", "scene_marker", "scene");
-  const first = text("first");
-  const last = text("last");
+  const chapter = { ...marker("chapter", "chapter_marker", "chapter"), markerMeta: { parentMarkerId: null } };
+  const scene = { ...marker("scene", "scene_marker", "scene"), markerMeta: { parentMarkerId: "chapter" } };
+  const first = text("first", "x", { ownerMarkerId: "chapter" });
+  const last = text("last", "x", { ownerMarkerId: "scene" });
   const blocks = [chapter, first, scene, last];
 
   const insertionCases: Array<[string, number, string, string[], string | null]> = [
@@ -53,6 +53,19 @@ describe("insertScriptBlockAt", () => {
     expect(result.blocks.map((block) => block.id)).toEqual(expectedIds);
     expect(result.blocks[result.insertIndex + 1]?.id).toBe(targetId);
     expect(result.refId).toBe(expectedRefId);
+  });
+
+  it("父章与首个子段保持相邻，并把新增块放到父章之前", () => {
+    const result = insertScriptBlockAt([chapter, scene, last], 1, text("new", ""));
+    expect(result.insertIndex).toBe(0);
+    expect(result.blocks.map((block) => block.id)).toEqual(["new", "chapter", "scene", "last"]);
+    expect(result.blocks[0].ownerMarkerId).toBe(null);
+    expect(result.refId).toBe(null);
+  });
+
+  it("新增块显式继承插入点前一块的标记所有权", () => {
+    const result = insertScriptBlockAt(blocks, 2, text("new", ""));
+    expect(result.blocks[result.insertIndex].ownerMarkerId).toBe("chapter");
   });
 
   it("末尾追加时继承末块，空剧本首块从索引 0 开始且没有继承来源", () => {
