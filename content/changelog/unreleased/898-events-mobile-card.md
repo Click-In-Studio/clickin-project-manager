@@ -2,7 +2,7 @@
 kind: fixed
 title: 事件列表在手机上不再留下大片空白
 page: production/events/events-overview
-pr: 897
+pr: 898
 order: 1
 ---
 
