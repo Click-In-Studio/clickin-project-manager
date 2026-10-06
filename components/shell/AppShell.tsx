@@ -332,6 +332,13 @@ export default function AppShell({ session, productions, canCreateProduction = f
           compact={productionHeaderStage >= 2}
         />
 
+        {isHome && (
+          <div className="flex shrink-0 flex-col gap-0.5">
+            <p className="m-0 text-[9px] font-bold tracking-[0.14em] text-[var(--muted)]">平台级</p>
+            <h1 className="m-0 whitespace-nowrap font-serif text-sm font-medium leading-tight text-[var(--ink)]">我的工作</h1>
+          </div>
+        )}
+
         {isAdminMode && productionId && (
           <Link
             href={`/production/${productionId}`}

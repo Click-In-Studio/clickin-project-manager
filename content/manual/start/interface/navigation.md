@@ -6,7 +6,7 @@ routes: [/]
 tier: all
 platform: [desktop, mobile]
 related: [start/interface/glossary, start/notifications/notifications]
-updated: 2026-10-04
+updated: 2026-10-05
 ---
 
 ## 这是什么
@@ -18,6 +18,8 @@ updated: 2026-10-04
 ### 首页「我的工作」
 
 登录后落在这里。宽窗口和手机横屏可以随时点左上角的圆形标志回来；手机竖屏从项目切换里选「平台首页」。它把今天跟你有关的事汇总在一页：
+
+顶栏的项目切换旁显示「平台级 / 我的工作」，正文从项目风险与未确认事项开始。
 
 ![宽窗口下的首页「我的工作」](/manual/start/home.png)
 
