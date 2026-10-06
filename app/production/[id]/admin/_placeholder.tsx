@@ -1,20 +1,13 @@
-import PageHeader from "@/components/ui/PageHeader";
-
-// 管理后台占位页（v3 统一风格）：eyebrow=项目名，group 显示于空态 kicker。
+// 管理后台占位页：页面标题由 AppShell 按 ADMIN_NAV_GROUPS 放进全局顶部栏。
 export default function AdminPlaceholder({
-  productionName,
   group,
-  title,
   description,
 }: {
-  productionName: string;
   group: string;
-  title: string;
   description: string;
 }) {
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader eyebrow={productionName} title={title} side="stage" />
       <section style={{
         background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13,
         padding: "56px 32px", textAlign: "center",

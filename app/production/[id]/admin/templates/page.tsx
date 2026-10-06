@@ -7,7 +7,6 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getSession } from "@/lib/account/session";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
-import { getProductionName } from "@/lib/production/production-db";
 import { listProductionDepts } from "@/lib/perm/dept-db";
 import { listDeptCueTemplates, listCueTemplateTypes } from "@/lib/ops/cue-template-db";
 import AdminTemplatesClient from "@/components/admin/AdminTemplatesClient";
@@ -31,8 +30,7 @@ export default async function TemplatesPage({ params }: { params: Promise<{ id: 
   const canView = canEdit || canViewOnly || canManageTypes;
   if (!canView) redirect(`/production/${id}/admin`);
 
-  const [name, depts, templates, types] = await Promise.all([
-    getProductionName(id),
+  const [depts, templates, types] = await Promise.all([
     listProductionDepts(id),
     listDeptCueTemplates(id),
     listCueTemplateTypes(id),
@@ -41,7 +39,6 @@ export default async function TemplatesPage({ params }: { params: Promise<{ id: 
   return (
     <AdminTemplatesClient
       productionId={id}
-      productionName={name ?? ""}
       depts={depts.map(d => ({ id: d.id, name: d.name, parentId: d.parentId, kind: d.kind }))}
       initialRows={templates.map(t => ({
         deptId: t.deptId, template: t.template, canCreate: t.canCreate, permissions: t.permissions,

@@ -19,7 +19,16 @@ import {
   ProductionToolbarStageContext,
 } from "./ProductionTopMenu";
 import type { Production, ShellSession } from "./app-shell/types";
-import { CREATION_NAV, PRODUCTION_NAV, PRODUCTION_OVERVIEW_NAV, ADMIN_NAV_GROUPS, OVERVIEW_NAV, PRODUCTION_TOP_MENU_LABELS, PLATFORM_TOP_MENU_LABELS } from "./app-shell/nav-config";
+import {
+  CREATION_NAV,
+  PRODUCTION_NAV,
+  PRODUCTION_OVERVIEW_NAV,
+  ADMIN_NAV_GROUPS,
+  OVERVIEW_NAV,
+  PRODUCTION_TOP_MENU_LABELS,
+  PLATFORM_TOP_MENU_LABELS,
+  adminTopMenuLabel,
+} from "./app-shell/nav-config";
 import { PlatformTopMenuTitle } from "./PlatformTopMenu";
 import { firstContentChar } from "./app-shell/first-content-char";
 import { extractProductionId, extractCurrentWikiId, extractCurrentAssetId, extractModule, extractAdminModule } from "./app-shell/route";
@@ -203,10 +212,6 @@ export default function AppShell({ session, productions, canCreateProduction = f
   const currentAssetId = activeAiTarget
     ? (activeAiTarget.kind === "asset" ? activeAiTarget.id : null)
     : productionId ? extractCurrentAssetId(pathname, productionId) : null;
-  const productionTopMenuLabel = activeModule === null ? null : PRODUCTION_TOP_MENU_LABELS[activeModule] ?? null;
-  const hasProductionTopMenu = productionTopMenuLabel !== null;
-  const platformTopMenuLabel = PLATFORM_TOP_MENU_LABELS[pathname] ?? null;
-  const hasTopMenu = hasProductionTopMenu || platformTopMenuLabel !== null;
   const isHome = pathname === "/";
   const currentProduction = productionId
     ? productions.find((p) => p.id === productionId)
@@ -218,6 +223,14 @@ export default function AppShell({ session, productions, canCreateProduction = f
   const aiEntryVisible = productionId ? (currentProduction?.planAi ?? false) : true;
   const isAdminMode = !!(productionId && pathname.startsWith(`/production/${productionId}/admin`));
   const activeAdminModule = isAdminMode ? extractAdminModule(pathname, productionId!) : null;
+  const productionTopMenuLabel = activeModule === null
+    ? null
+    : isAdminMode
+      ? adminTopMenuLabel(activeAdminModule ?? "")
+      : PRODUCTION_TOP_MENU_LABELS[activeModule] ?? null;
+  const hasProductionTopMenu = productionTopMenuLabel !== null;
+  const platformTopMenuLabel = PLATFORM_TOP_MENU_LABELS[pathname] ?? null;
+  const hasTopMenu = hasProductionTopMenu || platformTopMenuLabel !== null;
   // 管理后台菜单的档位过滤（付费维度）：档位没开「高级权限配置」的项目，权限中心 /
   // 策略中心根本不出现在菜单里。整组被滤空时连组标题一起去掉。
   // 不用 useMemo：这一段在 `if (!session)` 的 early return 之后，包 hook 就成了条件调用

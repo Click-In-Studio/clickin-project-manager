@@ -8,7 +8,11 @@ import {
   ProductionToolbarContext,
   ProductionTopMenuContext,
 } from "@/components/shell/ProductionTopMenu";
-import { PRODUCTION_TOP_MENU_LABELS } from "@/components/shell/app-shell/nav-config";
+import {
+  ADMIN_NAV_GROUPS,
+  PRODUCTION_TOP_MENU_LABELS,
+  adminTopMenuLabel,
+} from "@/components/shell/app-shell/nav-config";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -91,5 +95,16 @@ describe("共享项目工具栏上下文", () => {
       expect(context.textContent).toBe(label);
       expect(context.lastElementChild?.className).toContain("border");
     }
+  });
+
+  it("配置中心全部导航项从同一份导航配置取得顶部栏标题", () => {
+    const adminItems = ADMIN_NAV_GROUPS.flatMap((group) => group.items);
+    expect(adminItems).toHaveLength(16);
+    for (const item of adminItems) {
+      expect(adminTopMenuLabel(item.path)).toBe(item.label);
+      const context = renderContext(item.label, PRODUCTION_TOOLBAR_STAGE.primaryStored, "stage");
+      expect(context.textContent).toBe(item.label);
+    }
+    expect(adminTopMenuLabel("unknown-admin-page")).toBeNull();
   });
 });

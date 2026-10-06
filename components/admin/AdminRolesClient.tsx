@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
+import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import AdminModal from "@/components/ui/AdminModal";
 import MemberPickerModal, { type PickerDept } from "@/components/perm/MemberPickerModal";
@@ -30,7 +30,6 @@ type Caps = { create: boolean; rename: boolean; remove: boolean; assign: boolean
 
 type Props = {
   productionId: string;
-  productionName: string;
   initialRoles: Role[];
   members: Member[];
   depts: PickerDept[];
@@ -62,7 +61,7 @@ function Avatar({ m, size }: { m: Member; size: number }) {
 }
 
 export default function AdminRolesClient({
-  productionId, productionName, initialRoles, members: initialMembers, depts, owner, caps,
+  productionId, initialRoles, members: initialMembers, depts, owner, caps,
 }: Props) {
   const [roles, setRoles] = useState<Role[]>(initialRoles);
   const [members, setMembers] = useState<Member[]>(initialMembers);
@@ -175,8 +174,6 @@ export default function AdminRolesClient({
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader eyebrow={productionName} title="角色管理" side="stage" />
-
       {/* 摘要 */}
       <AdminMetricGrid
         columns={3}
