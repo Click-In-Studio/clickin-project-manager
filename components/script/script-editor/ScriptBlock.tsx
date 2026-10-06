@@ -666,8 +666,7 @@ export default function ScriptBlock({
         </span>
       )}
 
-      {canEditText && (
-        <div
+      <div
           ref={leftControlsRef}
           onMouseEnter={unfoldCompactControls}
           style={compactControlHoverStyle}
@@ -675,7 +674,7 @@ export default function ScriptBlock({
         >
           <span />
 
-          {( /* `91a8ca` is my signature color (lighter version). ^v^ -- QPT */
+          {canEditText && ( /* `91a8ca` is my signature color (lighter version). ^v^ -- QPT */
             confirmDelete ? (
               <span
                 className="absolute left-0 bottom-0 z-10 hidden translate-x-5 items-center gap-2 rounded bg-white/90 px-1.5 py-0.5 shadow-sm sm:flex"
@@ -736,7 +735,7 @@ export default function ScriptBlock({
 
           {(
             <button
-              draggable={!isReorderLocked}
+              draggable={canEditText && !isReorderLocked}
               disabled={isReorderLocked}
               data-script-block-bar="true"
               onDragStart={onDragStartBlock}
@@ -754,7 +753,7 @@ export default function ScriptBlock({
                   onMobileMenuOpen?.(mobileMenuCaretOffsetRef.current);
                 }
               }}
-              className={`absolute left-0 top-[calc(50%-2px)] h-[max(1.5rem,calc(100%-3rem))] w-4 -translate-y-1/2 select-none rounded outline-none transition-all focus:outline-none focus-visible:outline-none sm:opacity-0 sm:group-hover:opacity-100 ${
+              className={`absolute left-0 top-[calc(50%-2px)] h-[max(1.5rem,calc(100%-3rem))] w-4 -translate-y-1/2 select-none rounded outline-none transition-all focus:outline-none focus-visible:outline-none sm:opacity-0 sm:group-hover:opacity-100 ${canEditText ? "" : "sm:hidden"} ${
                 isReorderLocked
                   ? "cursor-not-allowed text-zinc-200 opacity-40"
                   : `sm:cursor-grab active:cursor-grabbing ${
@@ -773,7 +772,6 @@ export default function ScriptBlock({
             </button>
           )}
         </div>
-      )}
 
       {/* Colored left bar showing a remote editor is active in this block */}
       {firstEditor && (
