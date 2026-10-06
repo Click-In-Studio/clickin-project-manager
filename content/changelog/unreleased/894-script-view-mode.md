@@ -1,5 +1,5 @@
 ---
-kind: added
+kind: new
 title: 剧本可在编辑与只读模式间切换
 page: creation/script/reading
 pr: 894
