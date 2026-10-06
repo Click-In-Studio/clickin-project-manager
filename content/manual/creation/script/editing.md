@@ -3,11 +3,11 @@ title: 编辑剧本
 order: 2
 summary: 台词、舞台提示、歌词、章节段落、排练记号、标签、附件——怎么写、怎么改、怎么挪
 routes: [script]
-who: 有剧本编辑权限的成员（页面右上角显示「可编辑」）
+who: 有剧本编辑权限、且顶栏当前选择「编辑」的成员
 tier: all
 platform: [desktop, mobile]
 related: [creation/script/reading, creation/script/discussion, creation/dramaturgy/characters]
-updated: 2026-10-04
+updated: 2026-10-06
 ---
 
 ## 这是什么
@@ -98,4 +98,4 @@ Mac 用 ⌘，Windows 用 Ctrl，效果一样。菜单和「关于 · 快捷键�
 没有版本切换。剧本只有一份最新的，改错了当场 ⌘/Ctrl+Z。
 
 **为什么我改不了台词，只能加评论？**
-两种可能：你只有查看权限（右上角是「只读」）；或者你自己开着「排练模式」，见「讨论与协作」页。
+打开顶栏模式下拉菜单检查：可能是你主动选了「只读」，也可能是当前账号只有查看权限（此时「编辑」不可选），或者你开着「排练模式」。评论和附件使用各自的权限，不会因为切到只读而一并关闭。
