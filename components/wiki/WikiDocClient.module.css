@@ -1,0 +1,150 @@
+.document {
+  --wiki-doc-inline-padding: 32px;
+  min-width: 0;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px var(--wiki-doc-inline-padding) 12px;
+}
+
+.toolbar {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.presence {
+  display: flex;
+  min-width: 0;
+  margin-right: auto;
+  align-items: center;
+  flex: 0 1 auto;
+  margin-left: 0;
+}
+
+.presence > * + * {
+  margin-left: -6px;
+}
+
+.actionButton,
+.modeButton {
+  display: inline-flex;
+  height: 36px;
+  min-height: 36px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d4d4d8;
+  background: #fff;
+  color: #52525b;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.actionButton {
+  border-radius: 8px;
+  padding: 0 14px;
+}
+
+.actionButton:hover,
+.modeButton:hover {
+  background: #fafafa;
+  color: #27272a;
+}
+
+.modeSwitch {
+  display: flex;
+  height: 36px;
+  flex: 0 0 auto;
+  align-items: stretch;
+}
+
+.modeButton {
+  padding: 0 10px;
+}
+
+.modeButton:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.modeButton:last-child {
+  margin-left: -1px;
+  border-radius: 0 8px 8px 0;
+}
+
+.modeButtonActive,
+.modeButtonActive:hover {
+  position: relative;
+  border-color: #27272a;
+  background: #27272a;
+  color: #fff;
+}
+
+.titleBlock,
+.titleInput,
+.tagsInput {
+  width: 100%;
+  min-width: 0;
+}
+
+.titleInput,
+.tagsInput {
+  display: block;
+}
+
+.canvas,
+.related {
+  padding-right: var(--wiki-doc-inline-padding);
+  padding-left: var(--wiki-doc-inline-padding);
+}
+
+.sourceEditor {
+  padding-right: 12px;
+  padding-left: 12px;
+}
+
+@media (max-width: 1023px) {
+  .document {
+    --wiki-doc-inline-padding: 24px;
+  }
+}
+
+@media (max-width: 640px) {
+  .document {
+    --wiki-doc-inline-padding: 16px;
+  }
+
+  .header {
+    gap: 14px;
+    padding-top: 16px;
+  }
+
+  .toolbar {
+    gap: 6px;
+  }
+
+  .actionButton {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .modeButton {
+    padding-right: 9px;
+    padding-left: 9px;
+  }
+
+  .sourceEditor,
+  .canvas :global(.smart-textarea-blocktools) {
+    padding-right: 0;
+    padding-left: 0;
+  }
+}
