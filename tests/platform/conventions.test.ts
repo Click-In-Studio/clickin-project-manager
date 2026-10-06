@@ -348,7 +348,7 @@ const MONOLITH_LINE_CEILING: Record<string, number> = {
   "components/ops/EventDetailClient.tsx": 421,
   "components/ops/CuePage.tsx": 1451, // #655 失效的 Cue 面板跨表列出（+2）：表名标签与表名索引
   "components/ops/PlanningClient.tsx": 98,
-  "components/shell/AppShell.tsx": 839, // #888 平台页标题统一接入顶栏（+7）
+  "components/shell/AppShell.tsx": 841, // #891 全量导航语义图标接线（+2）
 };
 
 const FAMILY_FILE_CEILING = { component: 800, module: 400 } as const;
