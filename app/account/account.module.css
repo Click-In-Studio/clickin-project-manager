@@ -209,32 +209,11 @@
   min-width: 0;
 }
 
-.pageHeader {
+.pageDescription {
+  max-width: 610px;
+  margin: 0;
   padding-bottom: 24px;
   border-bottom: 1px solid var(--line);
-}
-
-.pageHeader p {
-  margin: 0 0 8px;
-  color: var(--script);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-}
-
-.pageHeader h1 {
-  margin: 0;
-  font-family: Georgia, "Noto Serif SC", serif;
-  font-size: 34px;
-  font-weight: 500;
-  letter-spacing: -.02em;
-}
-
-.pageHeader > span {
-  max-width: 610px;
-  margin-top: 10px;
-  display: block;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.65;
@@ -924,7 +903,7 @@
     box-shadow: none !important;
   }
 
-  .pageHeader {
+  .pageDescription {
     display: none;
   }
 

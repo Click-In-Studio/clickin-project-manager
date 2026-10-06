@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { usePendingPermissions } from "@/hooks/usePendingPermissions";
 import PermissionActivationModal from "@/components/perm/PermissionActivationModal";
-
+import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
 
 type Props = {
   productionId: string;
@@ -11,12 +11,15 @@ type Props = {
 
 /**
  * Client gate for the admin panel.
- * On mount, checks if the user has any selfConfirmable ADMIN_PANEL_PERMISSIONS.
+ * On mount, checks if the user has any self-confirmable admin permissions.
  * If yes, shows a one-click activation modal before the user proceeds.
  * Does not block page render — the modal overlays the already-rendered content.
  */
 export default function AdminActivationGate({ productionId, children }: Props) {
-  const { pending, confirming, confirm } = usePendingPermissions(productionId, new Set<string>());
+  const { pending, confirming, confirm } = usePendingPermissions(
+    productionId,
+    PAGE_PERMISSION_SCOPES.admin,
+  );
   const [dismissed, setDismissed] = useState(false);
 
   const showModal = !dismissed && pending !== null && pending.length > 0;

@@ -1,6 +1,9 @@
 "use client";
 
-import PageHeader, { PRIMARY_BTN } from "@/components/ui/PageHeader";
+import ProductionModuleTopMenu, {
+  PRODUCTION_MODULE_ACTION_CLASS,
+  PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS,
+} from "@/components/shell/ProductionModuleTopMenu";
 import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
 import styles from "@/components/admin/admin-announcements.module.css";
 
@@ -34,7 +37,6 @@ type ReadStatus = {
 
 type Props = {
   productionId: string;
-  productionName: string;
   recent30Count: number;
   initialAnnouncements: Announcement[];
   canCreate: boolean;
@@ -222,7 +224,7 @@ function AnnouncementForm({
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
-export default function AdminAnnouncementsClient({ productionId, productionName, recent30Count, initialAnnouncements, canCreate, canEdit, canDelete }: Props) {
+export default function AdminAnnouncementsClient({ productionId, recent30Count, initialAnnouncements, canCreate, canEdit, canDelete }: Props) {
   const [announcements, setAnnouncements] = useState<Announcement[]>(initialAnnouncements);
   const [mode, setMode] = useState<Mode | null>(null);
   const [readStatus, setReadStatus] = useState<ReadStatus | null>(null);
@@ -318,12 +320,16 @@ export default function AdminAnnouncementsClient({ productionId, productionName,
 
   return (
     <div className={styles.page}>
-      <PageHeader
-        eyebrow={productionName}
-        title="公告管理"
-        side="stage"
-        actions={canCreate ? (
-          <button style={PRIMARY_BTN} onClick={handleNew}>＋ 新建公告</button>
+      <ProductionModuleTopMenu
+        label="公告管理"
+        primaryAction={canCreate ? (
+          <button type="button" className={PRODUCTION_MODULE_ACTION_CLASS} onClick={handleNew}>＋ 新建公告</button>
+        ) : undefined}
+        primaryShortAction={canCreate ? (
+          <button type="button" className={PRODUCTION_MODULE_ACTION_CLASS} aria-label="新建公告" onClick={handleNew}>＋</button>
+        ) : undefined}
+        primaryOverflowAction={canCreate ? (
+          <button type="button" className={PRODUCTION_MODULE_OVERFLOW_ACTION_CLASS} onClick={handleNew}>新建公告</button>
         ) : undefined}
       />
 

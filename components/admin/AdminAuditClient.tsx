@@ -3,7 +3,7 @@
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useMemo, useState } from "react";
-import PageHeader, { SECONDARY_BTN } from "@/components/ui/PageHeader";
+import { SECONDARY_BTN } from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import MemberPickerModal, { type PickerMember, type PickerDept } from "@/components/perm/MemberPickerModal";
 import { BASE_PATH } from "@/lib/base-path";
@@ -12,7 +12,6 @@ import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
 
 type Props = {
   productionId: string;
-  productionName: string;
   initialRows: GrantLedgerRow[];
   initialTotal: number;
   members: PickerMember[];
@@ -54,7 +53,7 @@ function nodeKey(r: GrantLedgerRow) {
 }
 
 export default function AdminAuditClient({
-  productionId, productionName, initialRows, initialTotal, members, depts, canRevoke,
+  productionId, initialRows, initialTotal, members, depts, canRevoke,
 }: Props) {
   const PAGE_SIZE = 15;
   const [rows, setRows] = useState<GrantLedgerRow[]>(initialRows);
@@ -122,8 +121,6 @@ export default function AdminAuditClient({
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader eyebrow={productionName} title="权限审计" side="stage" />
-
       {/* 摘要 */}
       <AdminMetricGrid
         columns={3}

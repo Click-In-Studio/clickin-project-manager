@@ -2,7 +2,7 @@
 
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
-import PageHeader from "@/components/ui/PageHeader";
+import ProductionModuleTopMenu from "@/components/shell/ProductionModuleTopMenu";
 import AiInstructionsCard from "@/components/agent/AiInstructionsCard";
 import AiUsageCard from "@/components/agent/AiUsageCard";
 import styles from "@/components/admin/admin-settings.module.css";
@@ -169,20 +169,14 @@ export default function AdminSettingsClient({
     <div style={{ overflowY: "auto", background: "var(--paper)", minHeight: "100%" }}>
       <div className={styles.pageContent}>
 
-        {/* Page header（v3 统一页头） */}
-        <PageHeader
-          eyebrow={initialMeta.name}
-          title={
-            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 12 }}>
-              项目信息
-              {isArchived && (
-                <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "var(--stage-soft)", color: "var(--stage)", fontFamily: "system-ui, sans-serif" }}>
-                  已归档
-                </span>
-              )}
-            </span>
-          }
-          side="stage"
+        <ProductionModuleTopMenu
+          label="项目信息"
+          secondaryActions={isArchived ? (
+            <span className="inline-flex h-7 items-center rounded-full bg-[var(--stage-soft)] px-2 text-[11px] font-bold text-[var(--stage)]">已归档</span>
+          ) : undefined}
+          secondaryOverflowActions={isArchived ? (
+            <span className="block px-3 py-2 text-sm text-zinc-600">项目已归档</span>
+          ) : undefined}
         />
 
         {/* ── 基本信息 ── */}

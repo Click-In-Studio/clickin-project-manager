@@ -3,7 +3,6 @@
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useMemo, useState } from "react";
-import PageHeader from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import styles from "@/components/ui/my-pages.module.css";
 import { BASE_PATH } from "@/lib/base-path";
@@ -35,7 +34,6 @@ type AuditRow = {
 
 type Props = {
   productionId: string;
-  productionName: string;
   initialPolicies: PolicyRow[];
   initialQuestions: Question[];
   advancedOnly: string[];
@@ -59,7 +57,7 @@ function dispositionText(ds: Disposition[]): string {
 const ADVANCED_GROUPS = ["常用设置涉及", "仅高级可配"] as const;
 
 export default function AdminPoliciesClient({
-  productionId, productionName, initialPolicies, initialQuestions,
+  productionId, initialPolicies, initialQuestions,
   advancedOnly, initialAudit, canEdit,
 }: Props) {
   const [tab, setTab] = useState<"simple" | "advanced" | "audit">("simple");
@@ -148,8 +146,6 @@ export default function AdminPoliciesClient({
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader eyebrow={productionName} title="策略中心" side="stage" />
-
       {/* 摘要 */}
       <AdminMetricGrid
         columns={3}

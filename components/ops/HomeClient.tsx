@@ -8,6 +8,7 @@ import type { MyCallTimeEntry, MyPendingTechReqEntry, MyPocAwaitingReqEntry, Unr
 import type { UpcomingMilestoneEntry } from "@/lib/ops/milestone-db";
 import MetricCardDisclosure from "./MetricCardDisclosure";
 import MilestoneMetricValue from "./MilestoneMetricValue";
+import PlatformTopMenu from "@/components/shell/PlatformTopMenu";
 import styles from "./home.module.css";
 
 function cstDateStr(iso: string): string { return isoCSTDateStr(iso); }
@@ -67,12 +68,7 @@ export default function HomeClient({ productions, myCallTimes, myPendingReqs, my
 
   return (
     <div className={styles.workspace}>
-      {/* Page header */}
-      <div className={styles.pageHeader}>
-        <p className={styles.eyebrow}>平台级</p>
-        <h1 className={styles.pageTitle}>我的工作</h1>
-      </div>
-
+      <PlatformTopMenu title="我的工作" />
       <div className={styles.contentStack}>
 
         {/* 1. 项目进展 hero */}

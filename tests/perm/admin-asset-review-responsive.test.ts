@@ -112,7 +112,6 @@ describe("数字资产审查响应式行", () => {
   it("服务端首屏保留完整资产信息和既有操作入口", () => {
     const markup = renderToStaticMarkup(createElement(AdminAssetReviewClient, {
       productionId: "production-responsive",
-      productionName: "响应式测试项目",
       initialAssets: [asset],
       canEdit: true,
     }));
