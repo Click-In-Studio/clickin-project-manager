@@ -122,6 +122,36 @@ describe("构作工作区只读/编辑模式", () => {
     expect((host.querySelector("input") as HTMLInputElement).value).toBe("未保存草稿");
   });
 
+  it("失焦保存已经失败后再切只读，仍保留编辑态和草稿", async () => {
+    const save = vi.fn()
+      .mockRejectedValueOnce(new Error("稍早的保存失败"))
+      .mockResolvedValue(undefined);
+    await render(<Harness save={save} />);
+    const input = host.querySelector("input")!;
+    input.focus();
+
+    await act(async () => {
+      input.blur();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(text("error")).toContain("稍早的保存失败");
+
+    await click("只读");
+    expect(text("mode")).toBe("edit");
+    expect(text("error")).toContain("稍早的保存失败");
+    expect((host.querySelector("input") as HTMLInputElement).value).toBe("未保存草稿");
+
+    input.focus();
+    await act(async () => {
+      input.blur();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await click("只读");
+    expect(text("mode")).toBe("read");
+  });
+
   it("新增表单仍有草稿时阻止切只读", async () => {
     await render(<Harness dirty />);
     await click("只读");
@@ -192,5 +222,17 @@ describe("模式门与原有细粒度权限相交", () => {
     expect(detail).toContain("canEditCharacter(perms, initial.id)");
     expect(detail).toContain("canDeleteCharacter(perms, initial.id)");
     expect(page).toContain("getCharacterPerms(");
+  });
+
+  it("窄屏阶段把模式入口收进更多菜单，详情页项目名允许收缩", () => {
+    const dramaturgy = readFileSync("components/script/Dramaturgy.tsx", "utf8");
+    const characters = readFileSync("components/script/CharactersManager.tsx", "utf8");
+    const detail = readFileSync("components/script/CharacterDetail.tsx", "utf8");
+    for (const source of [dramaturgy, characters]) {
+      expect(source).toContain("toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored");
+      expect(source).toContain("toolbarStage < PRODUCTION_TOOLBAR_STAGE.primaryStored");
+      expect(source).toContain("页面模式");
+    }
+    expect(detail).toContain('className="truncate text-sm font-bold text-zinc-500"');
   });
 });

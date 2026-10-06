@@ -20,7 +20,8 @@ export function useDramaturgyWorkspaceMode(productionId: string, hasWritePermiss
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pendingRef = useRef(new Set<Promise<unknown>>());
-  const failureRef = useRef<unknown>(null);
+  const writeSequenceRef = useRef(0);
+  const failureRef = useRef<{ sequence: number; error: unknown } | null>(null);
   const storageKey = dramaturgyWorkspaceModeStorageKey(productionId);
 
   useLayoutEffect(() => {
@@ -42,11 +43,15 @@ export function useDramaturgyWorkspaceMode(productionId: string, hasWritePermiss
   }, [storageKey]);
 
   const trackWrite = useCallback(<T,>(operation: Promise<T>): Promise<T> => {
+    const sequence = ++writeSequenceRef.current;
     const tracked = operation.then((value) => {
-      setError(null);
+      if (!failureRef.current || failureRef.current.sequence < sequence) {
+        failureRef.current = null;
+        setError(null);
+      }
       return value;
     }).catch((caught) => {
-      failureRef.current = caught;
+      failureRef.current = { sequence, error: caught };
       setError(messageOf(caught));
       throw caught;
     }).finally(() => {
@@ -68,7 +73,6 @@ export function useDramaturgyWorkspaceMode(productionId: string, hasWritePermiss
 
     setSwitching(true);
     setError(null);
-    failureRef.current = null;
     const active = document.activeElement;
     if (active instanceof HTMLElement) active.blur();
     await Promise.resolve();
@@ -77,7 +81,7 @@ export function useDramaturgyWorkspaceMode(productionId: string, hasWritePermiss
       await Promise.allSettled([...pendingRef.current]);
     }
     if (failureRef.current) {
-      setError(messageOf(failureRef.current));
+      setError(messageOf(failureRef.current.error));
       setSwitching(false);
       return;
     }

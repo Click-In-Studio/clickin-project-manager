@@ -277,8 +277,21 @@ export default function Dramaturgy({
   const primaryOverflow = sceneViewMode !== null && toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
     <ListTableViewToggleOverflow value={sceneViewMode} onChange={setSceneViewMode} />
   ) : null;
-  const toolbarOverflow = secondaryOverflow || primaryOverflow ? (
+  const modeOverflow = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
+    <div className="border-t border-[var(--line)] px-3 py-2">
+      <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--muted)]">页面模式</p>
+      <DramaturgyModePicker
+        mode={workspaceMode.mode}
+        canEdit={canEdit}
+        switching={workspaceMode.switching}
+        error={workspaceMode.error}
+        onChange={(mode) => { void workspaceMode.requestMode(mode); }}
+      />
+    </div>
+  ) : null;
+  const toolbarOverflow = modeOverflow || secondaryOverflow || primaryOverflow ? (
     <>
+      {modeOverflow}
       {secondaryOverflow}
       {primaryOverflow}
     </>
@@ -292,15 +305,19 @@ export default function Dramaturgy({
           productionId={productionId}
           active="overview"
         />
-        <ProductionTopMenuDivider />
-        <DramaturgyModePicker
-          mode={workspaceMode.mode}
-          canEdit={canEdit}
-          switching={workspaceMode.switching}
-          error={workspaceMode.error}
-          onChange={(mode) => { void workspaceMode.requestMode(mode); }}
-        />
-        <ProductionTopMenuDivider />
+        {toolbarStage < PRODUCTION_TOOLBAR_STAGE.primaryStored && (
+          <>
+            <ProductionTopMenuDivider />
+            <DramaturgyModePicker
+              mode={workspaceMode.mode}
+              canEdit={canEdit}
+              switching={workspaceMode.switching}
+              error={workspaceMode.error}
+              onChange={(mode) => { void workspaceMode.requestMode(mode); }}
+            />
+            <ProductionTopMenuDivider />
+          </>
+        )}
         {sceneViewMode !== null && (
           <ListTableViewToggle value={sceneViewMode} onChange={setSceneViewMode} />
         )}

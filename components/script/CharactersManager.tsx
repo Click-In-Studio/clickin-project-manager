@@ -774,6 +774,15 @@ export default function CharactersManager({ productionId, initialCharacters, per
   const workspaceMode = useDramaturgyWorkspaceMode(productionId, hasWritePermission);
   const contentEditable = workspaceMode.mode === "edit";
   const canCreate = contentEditable && perms.create;
+  const modePicker = (
+    <DramaturgyModePicker
+      mode={workspaceMode.mode}
+      canEdit={hasWritePermission}
+      switching={workspaceMode.switching}
+      error={workspaceMode.error}
+      onChange={(mode) => { void workspaceMode.requestMode(mode); }}
+    />
+  );
 
   useEffect(() => {
     if (!embedded) window.scrollTo(0, 0);
@@ -937,23 +946,27 @@ export default function CharactersManager({ productionId, initialCharacters, per
     <div className={PRODUCTION_PAGE_SCROLL_ROOT_CLASS}>
       {/* Frozen toolbar */}
       <ProductionTopMenu
-        overflow={view !== null && toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
-          <ListTableViewToggleOverflow value={view} onChange={setView} />
+        overflow={toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
+          <>
+            <div className="border-t border-[var(--line)] px-3 py-2">
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--muted)]">页面模式</p>
+              {modePicker}
+            </div>
+            {view !== null && <ListTableViewToggleOverflow value={view} onChange={setView} />}
+          </>
         ) : null}
       >
         <DramaturgyWorkspaceHeading
           productionId={productionId}
           active="characters"
         />
-        <ProductionTopMenuDivider />
-        <DramaturgyModePicker
-          mode={workspaceMode.mode}
-          canEdit={hasWritePermission}
-          switching={workspaceMode.switching}
-          error={workspaceMode.error}
-          onChange={(mode) => { void workspaceMode.requestMode(mode); }}
-        />
-        <ProductionTopMenuDivider />
+        {toolbarStage < PRODUCTION_TOOLBAR_STAGE.primaryStored && (
+          <>
+            <ProductionTopMenuDivider />
+            {modePicker}
+            <ProductionTopMenuDivider />
+          </>
+        )}
         {view !== null && <ListTableViewToggle value={view} onChange={setView} />}
       </ProductionTopMenu>
       {/* Scrollable content */}

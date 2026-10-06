@@ -261,7 +261,7 @@ export default function CharacterDetailView({
           >
             ← 返回角色列表
           </Link>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <DramaturgyModePicker
               mode={workspaceMode.mode}
               canEdit={canEdit || canDelete}
@@ -269,9 +269,9 @@ export default function CharacterDetailView({
               error={workspaceMode.error}
               onChange={(mode) => { void workspaceMode.requestMode(mode); }}
             />
-            <div className="text-right">
+            <div className="min-w-0 text-right">
               <p className="text-xs font-semibold tracking-widest text-zinc-300 uppercase">Character</p>
-              <p className="text-sm font-bold text-zinc-500">{productionName}</p>
+              <p className="truncate text-sm font-bold text-zinc-500">{productionName}</p>
             </div>
           </div>
         </div>
