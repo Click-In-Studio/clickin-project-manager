@@ -25,6 +25,10 @@ describe("productionHeaderStageForWidth", () => {
     expect(productionHeaderStageForWidth(0)).toBe(2);
   });
 
+  it("319 / 488 / 768 / 1280px 验收宽度进入预期的顶栏收纳阶段", () => {
+    expect([319, 488, 768, 1280].map(productionHeaderStageForWidth)).toEqual([2, 2, 2, 0]);
+  });
+
   it("紧凑制作顶栏不再用负外边距抵消父级 gap", () => {
     expect(productionTopbarActionsMarginClass(true, 2)).toBe("ml-0");
     expect(productionTopbarActionsMarginClass(true, 1)).toBe("-ml-2");

@@ -75,7 +75,7 @@ export default function AnnouncementsClient({ announcements, cueWarnings, initia
 
   return (
     <div className={styles.workspace}>
-      <PlatformTopMenu title="公告与风险提醒" eyebrow="Platform · 公告" />
+      <PlatformTopMenu title="公告与风险提醒" />
 
       {/* ── 摘要统计（通知提醒同款语汇）── */}
       <div style={{

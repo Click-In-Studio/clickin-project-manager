@@ -28,6 +28,7 @@ describe("个人中心窄屏布局", () => {
 
   it("标题由顶栏承载，正文只保留桌面说明", () => {
     expect(client).toContain('<PlatformTopMenu title={PAGE_META[page].title}');
+    expect(client).not.toContain("PAGE_META[page].eyebrow");
     expect(css).toMatch(/\.pageDescription\s*{[^}]*padding-bottom:\s*24px;/);
     const tablet = between(css, "@media (max-width: 820px)", "@media (max-width: 580px)");
     expect(tablet).toMatch(/\.pageDescription\s*{[^}]*display:\s*none;/);

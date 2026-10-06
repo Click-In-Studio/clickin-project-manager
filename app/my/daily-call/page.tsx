@@ -141,7 +141,7 @@ export default async function DailyCallPage({ searchParams }: Ctx) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         {isTokenMode ? <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--stage)", margin: 0 }}>
           Daily Call Sheet · UTC+8
-        </p> : <PlatformTopMenu title={fmtDateFull(`${dateStr}T00:00:00+08:00`)} eyebrow="Daily Call Sheet · UTC+8" />}
+        </p> : <PlatformTopMenu title={fmtDateFull(`${dateStr}T00:00:00+08:00`)} />}
         {!isTokenMode && (
           <Link href="/my/weekly-call" style={{ fontSize: 11, color: "var(--muted)", textDecoration: "none" }}>
             ← 本周日程

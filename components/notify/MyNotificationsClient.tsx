@@ -569,7 +569,7 @@ export default function MyNotificationsClient({ productions = [], productionId, 
       {productionId ? (
         <PageHeader eyebrow="Notifications" title="通知提醒" side="stage" />
       ) : (
-        <PlatformTopMenu title="通知提醒" eyebrow="Platform · 通知" />
+        <PlatformTopMenu title="通知提醒" />
       )}
 
       {/* ── 摘要统计（原型 notificationSummary；Action Bar 横幅省略——与页头重复）── */}

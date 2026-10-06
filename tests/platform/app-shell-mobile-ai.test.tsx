@@ -122,7 +122,7 @@ describe("平台首页标题", () => {
     ));
 
     const header = container.querySelector("header")!;
-    expect(header.textContent).toContain("平台级");
+    expect(header.textContent).not.toContain("平台级");
     expect(header.querySelector("h1")?.textContent).toBe("我的工作");
     expect(container.querySelectorAll("h1")).toHaveLength(1);
     const workspace = container.querySelector("#workspace-scroll")!;
@@ -140,6 +140,16 @@ describe("平台首页标题", () => {
 });
 
 describe("平台全量顶栏", () => {
+  it("换页加载占位也只显示页名", () => {
+    navigation.pathname = "/my/reports";
+    act(() => root.render(
+      <AppShell session={session} productions={productions}><div>加载中…</div></AppShell>,
+    ));
+    const placeholder = container.querySelector("header [data-production-top-menu-placeholder=true]")!;
+    expect(placeholder.textContent).toBe("报告");
+    expect(placeholder.querySelector("p")).toBeNull();
+  });
+
   it("项目加载结束后仍只有一个页名，窄屏操作进入更多并可关闭菜单", async () => {
     navigation.pathname = "/my/projects";
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => [] })));
@@ -174,6 +184,9 @@ describe("平台全量顶栏", () => {
     ));
     expect(container.querySelector("header h1")?.textContent).toBe(title);
     expect(container.querySelectorAll("h1")).toHaveLength(1);
+    expect(container.querySelector("header [data-production-top-menu-root] p")).toBeNull();
+    expect(container.querySelector("header")?.textContent).not.toContain("平台级");
+    expect(container.querySelector("header")?.textContent).not.toContain("Platform ·");
     expect(container.querySelector("#workspace-scroll h1")).toBeNull();
     act(() => root.render(
       <AppShell session={session} productions={productions}>
