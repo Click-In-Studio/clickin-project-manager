@@ -1,5 +1,7 @@
 "use client";
 
+import PlatformTopMenu from "@/components/shell/PlatformTopMenu";
+
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useState, useEffect } from "react";
@@ -56,10 +58,7 @@ export default function ReportsClient() {
   if (loading) {
     return (
       <div className={styles.workspace}>
-        <div className={styles.pageHeader}>
-          <p className={styles.eyebrow}>Platform · 报告</p>
-          <h1 className={styles.pageTitle}>报告</h1>
-        </div>
+        <PlatformTopMenu title="报告" eyebrow="Platform · 报告" />
         <div className={styles.emptyState}>加载中…</div>
       </div>
     );
@@ -67,10 +66,7 @@ export default function ReportsClient() {
 
   return (
     <div className={styles.workspace}>
-      <div className={styles.pageHeader}>
-        <p className={styles.eyebrow}>Platform · 报告</p>
-        <h1 className={styles.pageTitle}>报告</h1>
-      </div>
+      <PlatformTopMenu title="报告" eyebrow="Platform · 报告" />
 
       {reports.length === 0 ? (
         <div className={styles.emptyState}>

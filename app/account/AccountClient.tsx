@@ -10,6 +10,7 @@ import type { NotifPref } from "@/lib/notify/notification-prefs";
 import { ACCOUNT_RETURN_KEY, WORKSPACE_HOME, normalizeAccountReturnHref } from "@/lib/account/account-return";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import AiUsageCard from "@/components/agent/AiUsageCard";
+import PlatformTopMenu from "@/components/shell/PlatformTopMenu";
 
 type Identity = {
   id: string;
@@ -513,11 +514,8 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
         </aside>
 
         <main className={styles.main}>
-          <div className={styles.pageHeader}>
-            <p>{PAGE_META[page].eyebrow}</p>
-            <h1>{PAGE_META[page].title}</h1>
-            <span>{PAGE_META[page].description}</span>
-          </div>
+          <PlatformTopMenu title={PAGE_META[page].title} eyebrow={PAGE_META[page].eyebrow} />
+          <p className={styles.pageDescription}>{PAGE_META[page].description}</p>
 
           {/* ── 个人信息 ── */}
           {page === "profile" && (

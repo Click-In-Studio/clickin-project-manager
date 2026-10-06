@@ -68,6 +68,12 @@ vi.mock("@/components/shell/app-shell/use-sidebar-fold", () => ({
 
 import AppShell from "@/components/shell/AppShell";
 import HomeClient from "@/components/ops/HomeClient";
+import PlatformTopMenu from "@/components/shell/PlatformTopMenu";
+import { PLATFORM_TOP_MENU_LABELS } from "@/components/shell/app-shell/nav-config";
+import AnnouncementsClient from "@/components/notify/AnnouncementsClient";
+import MyTasksClient from "@/components/ops/MyTasksClient";
+import MyProjectsClient from "@/components/account/MyProjectsClient";
+import { ProductionToolbarContext } from "@/components/shell/ProductionTopMenu";
 import MobileAiAction from "@/components/shell/app-shell/MobileAiAction";
 import MobileTab from "@/components/shell/app-shell/MobileTab";
 
@@ -90,6 +96,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
 });
 
 function mobileNav(): HTMLElement {
@@ -129,6 +136,65 @@ describe("平台首页标题", () => {
     expect(header.textContent).not.toContain("平台级");
     expect(header.querySelector("h1")).toBeNull();
     expect(header.querySelector('[data-production-top-menu-context="我的工作"]')).toBeTruthy();
+  });
+});
+
+describe("平台全量顶栏", () => {
+  it("项目加载结束后仍只有一个页名，窄屏操作进入更多并可关闭菜单", async () => {
+    navigation.pathname = "/my/projects";
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => [] })));
+    const closeOverflow = vi.fn();
+    const setHasStoredControls = vi.fn();
+    await act(async () => root.render(
+      <AppShell session={session} productions={productions}>
+        <ProductionToolbarContext.Provider value={{ stage: 2, closeOverflow, overflowOpen: true,
+          hasStoredControls: true, setHasStoredControls }}>
+          <MyProjectsClient canCreate currentUserId={session.userId} />
+        </ProductionToolbarContext.Provider>
+      </AppShell>,
+    ));
+    expect(container.querySelector("header h1")?.textContent).toBe("我的项目");
+    expect(container.querySelectorAll("h1")).toHaveLength(1);
+    const overflow = container.querySelector("#production-page-toolbar-overflow-slot")!;
+    expect(overflow.textContent).toContain("调整顺序");
+    expect(overflow.textContent).toContain("新建项目");
+    expect(setHasStoredControls).toHaveBeenCalledWith(true);
+    act(() => buttonWithText(overflow, "新建项目").click());
+    expect(closeOverflow).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("项目名称");
+  });
+
+  it.each(Object.entries(PLATFORM_TOP_MENU_LABELS))("%s 的标题只有顶栏一处，换页后旧标题不残留", (pathname, title) => {
+    navigation.pathname = pathname;
+    act(() => root.render(
+      <AppShell session={session} productions={productions}>
+        <PlatformTopMenu title={title} />
+        <div>正文内容</div>
+      </AppShell>,
+    ));
+    expect(container.querySelector("header h1")?.textContent).toBe(title);
+    expect(container.querySelectorAll("h1")).toHaveLength(1);
+    expect(container.querySelector("#workspace-scroll h1")).toBeNull();
+    act(() => root.render(
+      <AppShell session={session} productions={productions}>
+        <PlatformTopMenu title="切换后的标题" />
+      </AppShell>,
+    ));
+    expect(container.querySelector("header h1")?.textContent).toBe("切换后的标题");
+  });
+
+  it.each(["公告", "任务"])("真实%s页面将标题挂到顶栏，正文不重复渲染", (page) => {
+    navigation.pathname = page === "公告" ? "/my/announcements" : "/my/tasks";
+    act(() => root.render(
+      <AppShell session={session} productions={productions}>
+        {page === "公告"
+          ? <AnnouncementsClient announcements={[]} cueWarnings={[]} initialReadIds={[]} />
+          : <MyTasksClient initialTasks={[]} />}
+      </AppShell>,
+    ));
+    expect(container.querySelector("header h1")?.textContent).toBe(page === "公告" ? "公告与风险提醒" : "我的任务");
+    expect(container.querySelectorAll("h1")).toHaveLength(1);
+    expect(container.querySelector("#workspace-scroll h1")).toBeNull();
   });
 });
 
