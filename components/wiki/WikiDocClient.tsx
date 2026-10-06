@@ -28,7 +28,7 @@ import type { WikiRef, WikiEntityRef } from "@/lib/wiki/links";
 import WikiEntityRefs from "@/components/wiki/WikiEntityRefs";
 import type { WikiPeer } from "@/lib/wiki/collab";
 import { applyPeerCursor, createCursorRelay, type WikiCursor } from "@/lib/wiki/collab-cursor";
-import { extractWikiOutline } from "@/lib/wiki/outline";
+import { extractWikiOutline } from "@/lib/wiki/outline-types";
 import { createSaveDebounce } from "@/lib/editor/save-debounce";
 import { mergeLines } from "@/lib/editor/line-merge";
 import type { Mention } from "@/lib/ops/event-db";

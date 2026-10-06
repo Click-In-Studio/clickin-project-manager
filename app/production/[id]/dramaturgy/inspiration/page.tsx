@@ -61,9 +61,9 @@ export default async function DramaturgyInspirationPage({
               {!treeConfig.enabled
                 ? "当前项目未启用构作灵感文档"
                 : nodes.length > 0
-                  ? <><span className="lg:hidden">在「云文档」里选择一篇灵感文档</span><span className="hidden lg:inline">从左侧选择一篇灵感文档</span></>
+                  ? <><span className="md:hidden">在「云文档」里选择一篇灵感文档</span><span className="hidden md:inline">从左侧选择一篇灵感文档</span></>
                   : canCreate
-                    ? <><span className="lg:hidden">还没有灵感文档，打开「云文档」新建一篇</span><span className="hidden lg:inline">还没有灵感文档，从左侧新建一篇</span></>
+                    ? <><span className="md:hidden">还没有灵感文档，打开「云文档」新建一篇</span><span className="hidden md:inline">还没有灵感文档，从左侧新建一篇</span></>
                     : "还没有你可见的灵感文档"}
             </p>
           </div>

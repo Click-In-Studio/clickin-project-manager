@@ -4,7 +4,7 @@ import { act, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WikiOutline from "@/components/wiki/WikiOutline";
-import { activeWikiOutlineId, extractWikiOutline } from "@/lib/wiki/outline";
+import { activeWikiOutlineId, extractWikiOutline } from "@/lib/wiki/outline-types";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -93,10 +93,10 @@ describe("云文档目录交互", () => {
     expect(content.querySelector("h1")?.id).toBe("doc-heading-新标题");
   });
 
-  it("源码模式点击目录会选中对应标题", () => {
+  it("源码模式点击目录会选中带格式的完整标题源码", () => {
     const source = document.createElement("textarea");
     source.dataset.wikiSourceEditor = "";
-    source.value = "开头\n## 目标\n正文";
+    source.value = "开头\n## **排练** [计划](https://example.com) ##\n正文";
     content.append(source);
     const contentRef = createRef<HTMLElement>();
     contentRef.current = content;
@@ -106,6 +106,27 @@ describe("云文档目录交互", () => {
     const outlineNav = host.querySelector<HTMLElement>('nav[aria-label="当前文档目录"]')!;
     act(() => outlineNav.querySelector<HTMLButtonElement>("button")!.click());
     expect(source.selectionStart).toBe(items[0].offset);
-    expect(source.selectionEnd).toBe(items[0].offset + items[0].text.length);
+    expect(source.selectionEnd).toBe(items[0].endOffset);
+    expect(source.value.slice(source.selectionStart, source.selectionEnd)).toBe("**排练** [计划](https://example.com)");
+  });
+
+  it("手机目录抽屉选择标题后关闭，桌面目录可收起并保留窄入口", () => {
+    content.innerHTML = "<h1>总览</h1>";
+    const contentRef = createRef<HTMLElement>();
+    contentRef.current = content;
+    act(() => root.render(<WikiOutline items={extractWikiOutline("# 总览")} contentRef={contentRef} />));
+
+    const openMobile = host.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')!;
+    act(() => openMobile.click());
+    expect(host.querySelector('button[aria-label="关闭目录"]')).not.toBeNull();
+    const mobileAside = host.querySelector<HTMLElement>("aside.fixed")!;
+    const mobileNav = mobileAside.querySelector<HTMLElement>('nav[aria-label="当前文档目录"]')!;
+    act(() => mobileNav.querySelector<HTMLButtonElement>("button")!.click());
+    expect(openMobile.getAttribute("aria-expanded")).toBe("false");
+    expect(mobileAside.className).toContain("translate-x-[110%]");
+
+    const collapse = host.querySelector<HTMLButtonElement>('button[aria-label="收起目录"]')!;
+    act(() => collapse.click());
+    expect(host.querySelector('button[aria-label="展开目录"]')).not.toBeNull();
   });
 });

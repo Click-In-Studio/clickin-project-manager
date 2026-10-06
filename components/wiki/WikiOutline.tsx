@@ -2,14 +2,14 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import NavigationIcon from "@/components/shell/app-shell/NavigationIcon";
-import type { WikiOutlineItem } from "@/lib/wiki/outline";
-import { activeWikiOutlineId } from "@/lib/wiki/outline";
+import type { WikiOutlineItem } from "@/lib/wiki/outline-types";
+import { activeWikiOutlineId } from "@/lib/wiki/outline-types";
 
 function scrollSourceTo(item: WikiOutlineItem, root: HTMLElement): boolean {
   const source = root.querySelector<HTMLTextAreaElement>("[data-wiki-source-editor]");
   if (!source) return false;
   source.focus();
-  source.setSelectionRange(item.offset, item.offset + item.text.length);
+  source.setSelectionRange(item.offset, item.endOffset);
   const progress = item.offset / Math.max(1, source.value.length);
   source.scrollTop = progress * Math.max(0, source.scrollHeight - source.clientHeight);
   source.scrollIntoView({ behavior: "smooth", block: "center" });

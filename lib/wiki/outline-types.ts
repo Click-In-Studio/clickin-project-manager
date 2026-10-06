@@ -4,8 +4,9 @@ export type WikiOutlineItem = {
   id: string;
   level: 1 | 2 | 3;
   text: string;
-  /** 标题在 markdown 中的字符位置，用于源码模式跳转。 */
+  /** 标题正文在 markdown 中的字符范围，用于源码模式跳转。 */
   offset: number;
+  endOffset: number;
 };
 
 function visibleHeadingText(source: string): string {
@@ -49,16 +50,19 @@ export function extractWikiOutline(markdown: string): WikiOutlineItem[] {
     if (!fencedBy) {
       const match = /^\s{0,3}(#{1,3})[\t ]+(.+?)\s*$/.exec(line);
       if (match) {
-        const text = visibleHeadingText(match[2].replace(/[\t ]+#+[\t ]*$/, ""));
+        const rawHeading = match[2].replace(/[\t ]+#+[\t ]*$/, "");
+        const text = visibleHeadingText(rawHeading);
         if (text) {
           const base = wikiHeadingAnchor(text);
           const count = (counts.get(base) ?? 0) + 1;
+          const headingOffset = offset + line.indexOf(match[2]);
           counts.set(base, count);
           items.push({
             id: count === 1 ? base : `${base}-${count}`,
             level: match[1].length as 1 | 2 | 3,
             text,
-            offset: offset + line.indexOf(match[2]),
+            offset: headingOffset,
+            endOffset: headingOffset + rawHeading.length,
           });
         }
       }
