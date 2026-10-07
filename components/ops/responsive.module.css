@@ -112,12 +112,30 @@
 .eventGroup {
   height: calc(100vh - 320px);
   min-height: 460px;
-  padding: 22px;
+  padding: 22px 4px 22px 22px;
   border: 1px solid var(--line);
   border-radius: 13px;
   display: flex;
   flex-direction: column;
   background: var(--surface);
+}
+
+.eventGroupHeader {
+  padding-right: 18px;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.eventGroupScroll {
+  flex: 1;
+  min-height: 0;
+  padding-right: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .eventCard {
@@ -401,6 +419,8 @@
   .flowNumber { width: 26px; height: 26px; }
   .flowTitle { font-size: 12px; }
   .flowDescription { font-size: 10px; line-height: 1.4; }
+  .eventGroup { height: auto; min-height: 0; }
+  .eventGroupScroll { flex: none; max-height: min(56vh, 460px); }
 }
 
 @media (max-width: 640px) {
@@ -414,9 +434,13 @@
   .flowNumber { width: 22px; height: 22px; font-size: 9px; }
   .flowTitle { font-size: clamp(10px, 3vw, 12px); }
   .flowDescription { margin-top: 2px; font-size: 10px; line-height: 1.35; }
+  .eventPage { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
+  .eventGroup { padding: 16px 3px 16px 16px; }
+  .eventGroupHeader { padding-right: 13px; }
+  .eventGroupScroll { max-height: min(52vh, 420px); padding-right: 9px; }
   .eventCard { grid-template-columns: 54px minmax(0, 1fr) minmax(58px, auto); column-gap: 10px; padding-inline: 6px; }
-  .eventCardActions { grid-column: 2 / 4; gap: 4px; flex-wrap: nowrap; }
-  .eventCardActionButton { padding-inline: 5px; }
+  .eventCardActions { grid-column: 2 / 4; gap: 4px; margin-top: 6px; flex-wrap: nowrap; }
+  .eventCardActionButton { min-height: 32px; padding-inline: 5px; }
   .eventCardActionArrow { margin-left: 1px; font-size: .85em; }
   .metricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
   .metricCard { padding: 12px 14px; }
@@ -454,8 +478,10 @@
 }
 
 @media (max-width: 320px) {
-  .eventPage { padding: 24px 10px 60px; }
-  .eventGroup { padding: 14px; }
+  .eventPage { padding: 24px 10px calc(60px + env(safe-area-inset-bottom)); }
+  .eventGroup { padding: 14px 3px 14px 14px; }
+  .eventGroupHeader { padding-right: 11px; }
+  .eventGroupScroll { padding-right: 7px; }
   .eventCard { grid-template-columns: 48px minmax(0, 1fr) minmax(52px, auto); column-gap: 8px; padding: 14px 4px; }
   .eventDateBox { width: 46px; height: 51px; border-radius: 8px; }
   .eventDateDay { font-size: 19px; }
