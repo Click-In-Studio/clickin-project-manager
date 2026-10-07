@@ -478,7 +478,7 @@
 }
 
 @media (max-width: 320px) {
-  .eventPage { padding: 24px 10px 60px; }
+  .eventPage { padding: 24px 10px calc(60px + env(safe-area-inset-bottom)); }
   .eventGroup { padding: 14px 3px 14px 14px; }
   .eventGroupHeader { padding-right: 11px; }
   .eventGroupScroll { padding-right: 7px; }

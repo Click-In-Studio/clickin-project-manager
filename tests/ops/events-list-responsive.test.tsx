@@ -216,7 +216,9 @@ describe("事件列表信息层级与响应式布局", () => {
 
   it("319px 下收紧日期字号、外框和容器内边距", () => {
     const narrow = blockAfter(css, "@media (max-width: 320px)");
-    expect(declarations(narrow, ".eventPage")).toMatchObject({ padding: "24px 10px 60px" });
+    expect(declarations(narrow, ".eventPage")).toMatchObject({
+      padding: "24px 10px calc(60px + env(safe-area-inset-bottom))",
+    });
     expect(declarations(narrow, ".eventGroup {")).toMatchObject({ padding: "14px 3px 14px 14px" });
     expect(declarations(narrow, ".eventGroupScroll")).toMatchObject({ "padding-right": "7px" });
     expect(declarations(narrow, ".eventCard")).toMatchObject({
