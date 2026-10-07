@@ -265,6 +265,16 @@ describe("段落格式菜单", () => {
     expect(e.state.selection.eq(selection)).toBe(true);
     e.destroy();
   });
+
+  it("非 wiki 编辑器仍保留默认尾段落行为", () => {
+    const e = makeEditor("末段");
+    e.commands.setTextSelection(2);
+
+    FORMAT_ACTIONS.find(action => action.id === "h3")!.run(e);
+
+    expect(e.state.doc.content.content.map(node => node.type.name)).toEqual(["heading", "paragraph"]);
+    e.destroy();
+  });
 });
 
 describe("分栏增删栏", () => {
