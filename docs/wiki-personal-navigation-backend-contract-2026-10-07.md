@@ -1,6 +1,6 @@
 # 云文档「置顶文档 / 最近访问」后端需求与决策契约（PR 5）
 
-> 状态：交由后端负责人评审并拍板，本文档 PR 不包含数据库、API 或前端实现。
+> 状态：后端契约已定稿，本文档 PR 不包含数据库、API 或前端实现。
 > 来源：知识库改版批注中的「云文档」导航需求；前端交付依赖本契约定稿。
 > 已核对当前仓库的 wiki 内容面、枚举面、node 软链接和 migration 规约。
 
@@ -13,7 +13,7 @@
 2. **最近访问**：当前用户最近真正打开并有权阅读的文档。
 
 这不是纯前端状态。数据需要跨设备、跨会话稳定存在，并严格服从当前项目和
-wiki 的权限边界。本 PR 先把业务语义、数据边界和 API 候选写清，避免前端用
+wiki 的权限边界。本 PR 把业务语义、数据边界和 API 契约写清，避免前端用
 `localStorage` 或临时 mock 固化错误契约。
 
 ## 2. 本 PR 的边界
@@ -21,8 +21,7 @@ wiki 的权限边界。本 PR 先把业务语义、数据边界和 API 候选写
 ### 2.1 包含
 
 - 明确置顶与最近访问的业务语义、隔离维度和权限要求。
-- 给出建议数据模型、接口契约和测试矩阵。
-- 列出必须由后端负责人确认的决策点。
+- 定稿数据模型、接口契约和测试矩阵。
 - 提供一段可直接交给 Coding Agent 执行的后端实现提示词。
 
 ### 2.2 不包含
@@ -40,8 +39,8 @@ wiki 的权限边界。本 PR 先把业务语义、数据边界和 API 候选写
 - wiki 正文读取权威判定为 `canViewWiki(actor, productionId, wikiId)`。
 - `listVisibleWikiIds` 是与单点内容面同源的集合式判定，可用于批量过滤，避免
   列表逐项调用 `canViewWiki` 形成 N+1 查询。
-- wiki 内容 id 是 UUID；node 壳和软链接使用 `nd_` id。同一路由段可能收到
-  node id，但个人状态应最终落到**真实 wiki id**，不能为同一文档产生多份记录。
+- wiki 内容 id 是 UUID；node 和软链接使用 `nd_` id。现有文档页面可从 link node
+  入口解析目标，个人状态应最终落到**真实 wiki id**，不能为同一文档产生多份记录。
 - 当前 `db/schema.sql` 中 `app_user.id` / `wiki.id` 为 UUID，`production.id` 为
   TEXT；实现 migration 时仍须以当时最新 schema 为准重新核对 FK 目标名称和类型。
 - wiki 的「内容可读」和「目录可枚举」是两个面。用户可能通过引用或挂载边读到
@@ -64,15 +63,14 @@ wiki 的权限边界。本 PR 先把业务语义、数据边界和 API 候选写
 
 - `user_id`：只能读写当前 session 用户自己的状态。
 - `production_id`：置顶和最近访问只在当前项目内展示，不跨项目聚合。
-- `canonical_wiki_id`：真实 wiki id。直接访问、node 壳入口和软链接入口最终都
-  归一到同一文档。
+- `canonical_wiki_id`：真实 wiki id。直接访问和软链接入口最终归一到同一文档。
 
 ### 4.2 置顶文档
 
 - 置顶是当前用户的显式操作，不携带或授予任何 wiki 权限。
 - 只有在用户当前通过 `canViewWiki` 后才能置顶。
 - 重复置顶、重复取消置顶必须幂等。
-- 建议默认按 `pinned_at DESC` 排序，即最后置顶的在前。
+- 按 `pinned_at DESC` 排序，即最后置顶的在前。
 - 本轮不包含手动拖拽排序；若后端认为现在就需要排序字段，应在评审中说明前端
   交互、并发和重排算法，否则不要为未来可能性预留无调用方字段。
 - 用户取消置顶后，可以保留该文档的最近访问时间；置顶和最近访问是两个正交状态。
@@ -83,56 +81,58 @@ wiki 的权限边界。本 PR 先把业务语义、数据边界和 API 候选写
 - 目录展开、树节点 hover、搜索结果出现、预取、打印页、分享页和权限申请页默认
   **不计入访问**。
 - 同一文档只出现一次；再次访问更新 `last_viewed_at`，不得追加重复记录。
-- 并发或乱序请求不得让时间倒退；建议写入使用数据库时间，或以
-  `GREATEST(existing, incoming)` 保证单调。
-- 返回数量由服务端限制，建议首版固定 20 条；前端不应先拉取全部历史再截断。
-- 本轮不要求定期物理删除第 21 条以后的记录。若后端选择保留全部状态并查询时
-  `LIMIT`，需确认数据量和索引足够；若选择写时裁剪，必须覆盖并发测试。
+- 并发或乱序请求不得让时间倒退；写入统一使用数据库 `now()`，冲突更新只能把
+  `last_viewed_at` 设为当前数据库时间。
+- 返回数量由服务端限制，首版固定 20 条；前端不应先拉取全部历史再截断。
+- 保留全部最近访问状态，读取时在权限过滤和排序之后 `LIMIT 20`，不做写时裁剪。
 
 ### 4.4 权限变化和删除
 
 - 每次读取个人导航列表时，都按**当前**内容面权限过滤。历史上访问过或置顶过，
   不代表现在仍能看到。
-- 权限被收回后，列表不返回 id、标题、时间或占位符。底层个人状态行可以保留，
-  也可以清理，由后端负责人按复杂度与隐私策略拍板；两种选择都不能影响返回结果。
-- 权限恢复后是否自动恢复旧置顶，取决于上一条的存储决策，必须在实现 PR 中写明。
+- 权限被收回后，列表不返回 id、标题、时间或占位符，但保留底层个人状态行。
+- 权限恢复后，旧置顶和最近访问自动恢复；wiki 被删除时状态仍随之永久删除。
 - wiki 删除时个人状态应随之删除；用户或项目删除也应级联清理。
 - 不存在、跨项目或不可读的目标，对置顶/访问写入统一失败关闭，不产生个人状态。
 
-## 5. 建议数据模型（待后端拍板）
+## 5. 数据模型
 
-推荐用一张当前态表表达两个正交状态，避免「置顶表 + 最近访问表」重复维护相同的
-唯一键、权限过滤和级联关系。建议名称仅供参考：
+采用一张当前态表表达两个正交状态，避免「置顶表 + 最近访问表」重复维护相同的
+唯一键、权限过滤和级联关系：
 
 ```sql
 CREATE TABLE wiki_user_state (
   id             TEXT PRIMARY KEY,
   user_id        UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  production_id  TEXT NOT NULL REFERENCES production(id) ON DELETE CASCADE,
-  wiki_id        UUID NOT NULL REFERENCES wiki(id) ON DELETE CASCADE,
+  production_id  TEXT NOT NULL,
+  wiki_id        UUID NOT NULL,
   pinned_at      TIMESTAMPTZ,
   last_viewed_at TIMESTAMPTZ,
-  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (user_id, production_id, wiki_id)
+  UNIQUE (user_id, production_id, wiki_id),
+  FOREIGN KEY (wiki_id, production_id)
+    REFERENCES wiki(id, production_id) ON DELETE CASCADE
 );
 ```
 
-需要配套考虑：
+实现 migration 时同时给 `wiki (id, production_id)` 增加可被复合外键引用的唯一约束。
+`wiki.id` 本身虽已全局唯一，复合外键仍负责在数据库层禁止把外项目 wiki 写进当前
+production 的个人状态。无需再增加一条重复的 `production_id` 外键；production 删除
+会先级联删除 wiki，再由复合外键级联删除个人状态。
+
+配套要求：
 
 - `(user_id, production_id, pinned_at DESC)` 的部分索引，条件为 `pinned_at IS NOT NULL`。
 - `(user_id, production_id, last_viewed_at DESC)` 的部分索引，条件为
   `last_viewed_at IS NOT NULL`。
-- 是否增加复合外键保证 `wiki_id` 与 `production_id` 同属一个项目。当前 `wiki`
-  若没有可被引用的 `(id, production_id)` 唯一约束，必须在库函数事务中强校验，
-  不能只信路由参数。
+- 使用上述复合外键保证 `wiki_id` 与 `production_id` 同属一个项目；写入前的应用层
+  检查用于返回正确错误，数据库约束是最终防线。
 - 取消置顶且从未访问的空状态行应删除，避免永久积累无语义记录。
 - short id 生成复用仓库现有应用侧惯例，不能新增数据库 UUID 默认值。
+- pin 与 visit 的并发 upsert 只能更新各自负责的时间列，不能用整行覆盖让 pin 清掉
+  `last_viewed_at`，或让 visit 恢复已经取消的 `pinned_at`。取消置顶后的空行清理必须
+  带 `pinned_at IS NULL AND last_viewed_at IS NULL` 谓词，使它与并发 visit 串行后仍正确。
 
-后端负责人若选择拆表、事件日志或其他模型，需要在实现 PR 中说明它如何更好地
-满足唯一性、幂等、权限过滤、级联删除和查询索引，不应只因「以后可能做统计」
-而引入尚无需求的事件流。
-
-## 6. 建议 API 契约（路径可调整，语义不可丢）
+## 6. API 契约
 
 ### 6.1 获取当前用户导航
 
@@ -140,7 +140,7 @@ CREATE TABLE wiki_user_state (
 GET /api/production/:productionId/wiki-personal
 ```
 
-建议响应：
+响应：
 
 ```json
 {
@@ -165,7 +165,8 @@ GET /api/production/:productionId/wiki-personal
 
 - 只返回当前用户、当前项目、当前仍通过内容面权限的真实 wiki 文档。
 - 同一文档可以同时出现在两个数组；前端分别表达两个分组。
-- 列表必须在服务端完成排序、过滤和数量限制。
+- 列表必须在服务端先完成当前权限过滤，再排序和限制数量；不能先取最近 20 条再过滤，
+  否则排在前面的撤权记录会挤掉仍可读文档。
 - 列表不返回正文、权限清单、node 软链接 id或不可读条目的占位信息。
 
 ### 6.2 设置置顶状态
@@ -177,36 +178,27 @@ Content-Type: application/json
 { "pinned": true }
 ```
 
-建议成功响应返回该文档最终状态；`true` / `false` 均幂等。目标既可以只接受真实
-wiki id，也可以兼容 `nd_` 路由段，但若兼容，服务端必须先按现有页面逻辑归一到
-真实 wiki id，不能把 node id 写入状态表。
+成功响应返回该文档最终状态；`true` / `false` 均幂等。接口只接受真实 wiki UUID。
+link 入口由文档页面现有服务端解析得到 canonical wiki id，再把该 id 交给
+客户端调用；个人状态接口不复制 node/link 解析逻辑，也绝不把 node id 写入状态表。
 
 ### 6.3 记录正文访问
-
-候选接口：
 
 ```http
 POST /api/production/:productionId/wiki/:wikiId/visit
 ```
 
-请求体为空，服务端使用当前用户和数据库时间进行幂等 upsert。后端负责人需要在
-评审中选择以下一种触发方式：
-
-1. 正文成功渲染后由客户端显式 POST；语义直观，但会多一次请求。
-2. 在既有正文读取 API 成功返回后记录；请求少，但必须避免预取、打印或后台读取
-   被误计为用户访问，也会把只读 GET 变成难以控制的隐式写路径。此方案原则上不
-   采用；若后端认为现有架构必须如此，需要在实现 PR 中明确说明例外理由和防误记措施。
-3. 由独立 server action 记录；需要证明错误处理和调用边界比 route 更清楚。
-
-默认推荐方案 1。记录失败不应阻断正文阅读，但客户端需要可观测地记录失败，不能
+请求体为空，服务端使用当前用户和数据库时间进行幂等 upsert。正文成功渲染后由
+客户端显式 POST；既有正文 GET、预取、打印页、分享页和后台读取均不隐式写访问状态。
+记录失败不应阻断正文阅读，但客户端需要可观测地记录失败，不能
 无限重试；是否向用户显示弱提示由前端 PR 决定。
 
 ### 6.4 错误与披露
 
 - 无 session：`401`。
 - 非当前项目成员或没有项目上下文：`403`。
-- 目标不存在、跨项目或不可读：沿用现有 wiki 路由的失败关闭约定，由后端负责人
-  在实现时确定 `403/404` 的精确口径并通过测试固定；响应不得泄露正文或额外元数据。
+- 目标不存在或属于其他项目：`404`；目标存在于当前项目但不可读：`403`。该口径
+  对齐现有 wiki 内容 API，并通过测试固定；响应不得泄露正文或额外元数据。
 - 请求体错误：在授权门之后返回 `400`，保持项目现有「先鉴权、后字段校验」规则。
 - 不允许客户端提交 `userId`、`productionId` 之外的归属字段、标题或时间戳作为真相。
 
@@ -215,27 +207,26 @@ POST /api/production/:productionId/wiki/:wikiId/visit
 1. route 先取 session，再用 `getProductionPermissionContext` 建立当前项目上下文。
 2. 不使用已退役的旧原子权限，不把 `isAdmin: true` 当测试通行证。
 3. pin / visit 写入前必须对归一后的真实 wiki id 调用 `canViewWiki`。
-4. 列表读取使用与 `canViewWiki` 同源的集合式判定；优先复用
-   `listVisibleWikiIds` 或抽取共享批量查询，不能复制一份会漂移的权限 SQL。
+4. 列表读取使用与 `canViewWiki` 同源的集合式判定。抽取可按候选 wiki id 集合过滤的
+   共享批量能力，个人状态查询先取得当前用户/项目的候选集，再批量过门、排序并限量；
+   不逐条调用 `canViewWiki` 形成 N+1，也不复制会漂移的权限 SQL。直接调用现有
+   `listVisibleWikiIds` 虽然语义正确，但会枚举整个项目的可见文档，不作为本接口的
+   最终实现。
 5. 不要求文档同时可枚举。可读但不在目录树中的文档仍可出现在用户自己的置顶或
    最近访问中；这不会反向使其在全局云文档树中可枚举。
 6. 个人状态不投权限票，不创建 grant，也不改变 node 的 `is_public` / `listable`。
 7. 所有写入必须绑定 session 用户；不能查询或修改其他用户的个人状态。
 
-## 8. 后端负责人必须拍板的事项
+## 8. 已拍板事项
 
-请在实现前逐项确认，并把结论留在实现 PR 描述或本文件的后续修订中：
-
-- [ ] 单表当前态是否采用；若不采用，替代模型和理由是什么？
-- [ ] 如何保证 `wiki_id` 与 `production_id` 同属一个项目？
-- [ ] 两个部分索引是否按建议落地；若调整，如何保证置顶 / 最近列表不会全表扫描？
-- [ ] 最近访问采用显式 POST、既有 GET 内写入还是 server action？
-- [ ] 最近访问首版上限是否为 20？查询时截断还是写时裁剪？
-- [ ] 权限丢失后保留还是删除底层个人状态；恢复权限后旧置顶是否恢复？
-- [ ] pin 接口只接收真实 wiki id，还是兼容 `nd_` 入口并归一？
-- [ ] 当前正在阅读的文档是否立即出现在最近访问首位？默认是。
-- [ ] 置顶默认是否按 `pinned_at DESC`；首版明确不做自定义排序？
-- [ ] 不存在 / 跨项目 / 不可读目标的 `403/404` 精确口径如何与现有 wiki API 对齐？
+- 单表当前态；`(wiki_id, production_id)` 复合外键保证项目归属。
+- 两个部分索引按 §5 落地。
+- 最近访问由客户端显式 POST；首版查询时截断为 20 条，不做写时裁剪。
+- 权限丢失时保留底层状态，恢复权限后旧状态恢复。
+- pin / visit 只接收真实 wiki UUID；页面沿用现有 node/link 解析得到 canonical id。
+- 当前成功打开的文档立即成为最近访问首项。
+- 置顶按 `pinned_at DESC`，首版不做自定义排序。
+- 不存在 / 跨项目返回 `404`，当前项目内不可读返回 `403`。
 
 ## 9. 实现 PR 的最低交付清单
 
@@ -243,7 +234,7 @@ POST /api/production/:productionId/wiki/:wikiId/visit
 
 - `db/migrations/<timestamp>_add_wiki_user_state.sql`
 - 同步的 `db/schema.sql` 与生成的 `db/schema-fingerprint.txt`
-- wiki 域个人状态数据访问模块，含 canonical wiki 归一和幂等写入
+- wiki 域个人状态数据访问模块，含 canonical wiki id 校验和幂等写入
 - 获取导航、置顶/取消置顶、记录访问的 API 或经评审确定的等价接口
 - API 测试和数据层测试
 - 如 migration 含数据回填或破坏性操作，按规约补 migration 三层测试与 snapshot；
@@ -298,9 +289,9 @@ docs/wiki-personal-navigation-backend-contract-2026-10-07.md，以及当前工�
 GITHUB_SETUP.md（若本机存在）。
 
 先做 Git 健康检查并 fetch 最新 origin/main；从最新 main 创建独立分支。不要实现
-前端侧栏、正文目录或响应式样式。先逐项回答契约文档 §8 的待决项；如果决定会改变
-契约中的业务语义、权限边界或前端响应结构，先用 3–8 行方案说明取舍并等待确认，
-不要擅自扩大范围。
+前端侧栏、正文目录或响应式样式。按契约文档 §8 的定案实现；如果发现定案与当前
+代码或 schema 冲突，需要改变业务语义、权限边界或前端响应结构，先用 3–8 行方案
+说明取舍并等待确认，不要擅自扩大范围。
 
 实现目标：
 1. 为当前用户、当前 production、canonical wiki 文档保存置顶时间与最近访问时间；
