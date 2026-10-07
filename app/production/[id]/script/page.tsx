@@ -14,6 +14,7 @@ import { getActiveVersionId } from "@/lib/script/version-db";
 import { loadScriptWindowBootstrap } from "@/lib/script/script-window-db";
 import ScriptEditor from "@/components/script/ScriptEditor";
 import PageActivationGate from "@/components/perm/PageActivationGate";
+import { DISPLAY_COOKIE, parseDisplayCookie } from "@/components/script/script-editor/display-settings";
 
 export default async function ProductionScriptPage({
   params,
@@ -73,6 +74,7 @@ export default async function ProductionScriptPage({
         canEditMetadata={sceneFieldPerms.any}
         canEditLayout={await hasEffectiveGrant(access.permCtx, id, "script_view", masterViewId ?? "*", "*", "edit")}
         canEditRehearsalMark={canEditRehearsalMark}
+        initialDisplay={parseDisplayCookie(cookieStore.get(DISPLAY_COOKIE)?.value)}
         initialSearchQuery={q}
         initialVersionId={activeVersionId}
         initialWindow={initialWindow}
