@@ -1,10 +1,11 @@
 "use client";
 
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
+import styles from "@/components/wiki/WikiDocClient.module.css";
 
 // wiki 文档库 W4（Notion 式改版）：有编辑权即默认可编辑（无 编辑/保存 切换），
 // 标题/正文/标签 就地编辑 + 防抖自动保存；文档操作（新建/移动/删除）归左侧栏
-// （WikiShell），本区只留 分享。无编辑权 → 只读渲染（WikiMarkdown）。
+// （WikiShell），正文页顶部只留内容级操作。无编辑权 → 只读渲染（WikiMarkdown）。
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -19,7 +20,7 @@ import WikiMarkdown from "@/components/wiki/WikiMarkdown";
 import WikiOutline from "@/components/wiki/WikiOutline";
 import AdminModal from "@/components/ui/AdminModal";
 import DropdownPicker from "@/components/ui/DropdownPicker";
-import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
+import { PRIMARY_BTN } from "@/components/ui/PageHeader";
 import { encodeAssetSrc } from "@/lib/editor/mention-types";
 import { collectWikilinkTitles, promoteWikilinks } from "@/lib/wiki/input-normalize";
 import { checkFidelity, lineDiff, type FidelityDiff, type DiffHunk } from "@/lib/wiki/fidelity";
@@ -462,119 +463,119 @@ export default function WikiDocClient({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-3 xl:flex-row xl:items-start">
-      <div className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white flex flex-col">
+      <div className={`${styles.document} min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white flex flex-col`}>
       {/* 标题区 */}
-      <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-6 pb-3">
-        <div className="flex flex-col sm:flex-row items-start gap-3">
-          <div className="flex-1 min-w-0">
-            {canEdit ? (
-              <input
-                value={title}
-                onChange={e => { setTitle(e.target.value); schedule(); }}
-                className="w-full text-2xl font-bold text-zinc-900 outline-none placeholder:text-zinc-300"
-                placeholder="无标题"
-              />
-            ) : (
-              <h1 className="text-2xl font-bold text-zinc-900 truncate">{wiki.title}</h1>
-            )}
-            <p className="mt-1.5 text-xs text-zinc-400">
-              {statusLabel}
-              {status === "error" && null}
-              {!canEdit && <span className="ml-2">· 只读</span>}
-            </p>
-            {canEdit ? (
-              <input
-                value={tagsInput}
-                onChange={e => { setTagsInput(e.target.value); schedule(); }}
-                placeholder="＃ 标签（空格分隔，自由手写）"
-                className="mt-2 w-full text-xs text-zinc-500 outline-none placeholder:text-zinc-300"
-              />
-            ) : wiki.tags.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {wiki.tags.map(t => (
-                  <span key={t} className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-600">#{t}</span>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="flex w-full sm:w-auto items-center gap-2 shrink-0 overflow-x-auto pb-1 sm:pb-0">
-            {/* 协作在场者（飞书式头像堆叠；tooltip 含光标行） */}
-            {peers.length > 0 && (
-              <div className="flex items-center -space-x-1.5 mr-1">
-                {peers.slice(0, 5).map(p => (
-                  <span
-                    key={p.clientId}
-                    title={`${p.userName}${p.blockIndex != null ? ` · 第 ${p.blockIndex + 1} 段` : " · 正在查看"}`}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-[11px] font-bold text-white overflow-hidden"
-                    style={{ background: p.color }}
-                  >
-                    {userAvatarSrc(p.userId, p.avatarUrl)
-                      ? <img src={userAvatarSrc(p.userId, p.avatarUrl) ?? undefined} alt={p.userName} className="h-full w-full object-cover" />
-                      : (p.userName || "?").slice(0, 1)}
-                  </span>
-                ))}
-                {peers.length > 5 && (
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-zinc-300 text-[10px] font-bold text-white">
-                    +{peers.length - 5}
-                  </span>
-                )}
-              </div>
-            )}
-            <div className="relative">
-              <button type="button" className="whitespace-nowrap" style={SECONDARY_BTN} onClick={() => setExportOpen(v => !v)}>导出</button>
-              {exportOpen && <div className="fixed inset-0 z-20" onClick={() => setExportOpen(false)} />}
-              {exportOpen && (
-                <div className="absolute right-0 top-full z-30 mt-1 w-40 rounded-lg border border-zinc-200 bg-white shadow-lg py-1">
-                  <button
-                    type="button"
-                    className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
-                    onClick={exportMarkdown}
-                  >
-                    Markdown（.md）
-                  </button>
-                  {/* 打印页现在是独立路由（#335）。新标签打开：wiki 是默认即编辑，
-                      同标签跳走会把编辑态一起带走。 */}
-                  <Link
-                    href={`/production/${productionId}/wiki/${wiki.id}/print`}
-                    target="_blank"
-                    rel="noopener"
-                    className="block w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
-                    onClick={() => setExportOpen(false)}
-                  >
-                    PDF（打印页）
-                  </Link>
-                </div>
+      <header className={styles.header}>
+        <div className={styles.toolbar} aria-label="文档操作栏">
+          {/* 协作在场者（飞书式头像堆叠；tooltip 含光标行） */}
+          {peers.length > 0 && (
+            <div className={styles.presence}>
+              {peers.slice(0, 5).map(p => (
+                <span
+                  key={p.clientId}
+                  title={`${p.userName}${p.blockIndex != null ? ` · 第 ${p.blockIndex + 1} 段` : " · 正在查看"}`}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-[11px] font-bold text-white overflow-hidden"
+                  style={{ background: p.color }}
+                >
+                  {userAvatarSrc(p.userId, p.avatarUrl)
+                    ? <img src={userAvatarSrc(p.userId, p.avatarUrl) ?? undefined} alt={p.userName} className="h-full w-full object-cover" />
+                    : (p.userName || "?").slice(0, 1)}
+                </span>
+              ))}
+              {peers.length > 5 && (
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-zinc-300 text-[10px] font-bold text-white">
+                  +{peers.length - 5}
+                </span>
               )}
             </div>
-            {canEdit && (
-              <div className="flex shrink-0 rounded-lg border border-zinc-200 overflow-hidden text-[11px] font-medium">
+          )}
+          <div className="relative shrink-0">
+            <button type="button" className={styles.actionButton} onClick={() => setExportOpen(v => !v)}>导出</button>
+            {exportOpen && <div className="fixed inset-0 z-20" onClick={() => setExportOpen(false)} />}
+            {exportOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-40 rounded-lg border border-zinc-200 bg-white shadow-lg py-1">
                 <button
                   type="button"
-                  onClick={() => switchMode("wysiwyg")}
-                  className={`px-2 py-1.5 ${editorMode === "wysiwyg" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:bg-zinc-50"}`}
-                  title="所见即所得编辑"
+                  className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
+                  onClick={exportMarkdown}
                 >
-                  富文本
+                  Markdown（.md）
                 </button>
-                <button
-                  type="button"
-                  onClick={() => switchMode("source")}
-                  className={`px-2 py-1.5 ${editorMode === "source" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:bg-zinc-50"}`}
-                  title="markdown 源码编辑"
+                {/* 打印页现在是独立路由（#335）。新标签打开：wiki 是默认即编辑，
+                    同标签跳走会把编辑态一起带走。 */}
+                <Link
+                  href={`/production/${productionId}/wiki/${wiki.id}/print`}
+                  target="_blank"
+                  rel="noopener"
+                  className="block w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50"
+                  onClick={() => setExportOpen(false)}
                 >
-                  源码
-                </button>
+                  PDF（打印页）
+                </Link>
               </div>
             )}
-            {canShare && (
-              <button type="button" className="whitespace-nowrap" style={SECONDARY_BTN} onClick={openShare}>分享</button>
-            )}
           </div>
+          {canEdit && (
+            <div className={styles.modeSwitch} aria-label="编辑模式">
+              <button
+                type="button"
+                onClick={() => switchMode("wysiwyg")}
+                className={`${styles.modeButton} ${editorMode === "wysiwyg" ? styles.modeButtonActive : ""}`}
+                title="所见即所得编辑"
+                aria-pressed={editorMode === "wysiwyg"}
+              >
+                富文本
+              </button>
+              <button
+                type="button"
+                onClick={() => switchMode("source")}
+                className={`${styles.modeButton} ${editorMode === "source" ? styles.modeButtonActive : ""}`}
+                title="markdown 源码编辑"
+                aria-pressed={editorMode === "source"}
+              >
+                源码
+              </button>
+            </div>
+          )}
+          {canShare && (
+            <button type="button" className={styles.actionButton} onClick={openShare}>分享</button>
+          )}
         </div>
-      </div>
+        <div className={styles.titleBlock}>
+          {canEdit ? (
+            <input
+              value={title}
+              onChange={e => { setTitle(e.target.value); schedule(); }}
+              className={`${styles.titleInput} text-2xl font-bold text-zinc-900 outline-none placeholder:text-zinc-300`}
+              placeholder="无标题"
+            />
+          ) : (
+            <h1 className="text-2xl font-bold text-zinc-900 truncate">{wiki.title}</h1>
+          )}
+          <p className="mt-1.5 text-xs text-zinc-400">
+            {statusLabel}
+            {status === "error" && null}
+            {!canEdit && <span className="ml-2">· 只读</span>}
+          </p>
+          {canEdit ? (
+            <input
+              value={tagsInput}
+              onChange={e => { setTagsInput(e.target.value); schedule(); }}
+              placeholder="＃ 标签（空格分隔，自由手写）"
+              className={`${styles.tagsInput} mt-2 text-xs text-zinc-500 outline-none placeholder:text-zinc-300`}
+            />
+          ) : wiki.tags.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {wiki.tags.map(t => (
+                <span key={t} className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-600">#{t}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      </header>
 
       {/* 正文：有编辑权即整页可写（Notion 式），防抖自动保存；富文本/源码双模 */}
-      <div ref={contentRef} className={`flex-1 flex flex-col ${canEdit ? "px-3 sm:px-5 pb-6" : "px-4 sm:px-6 lg:px-8 pb-6"}`}>
+      <div ref={contentRef} className={`${styles.canvas} flex-1 flex flex-col pb-6`}>
         {lossy && canEdit && (
           <div className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 print:hidden">
             <p>
@@ -607,7 +608,7 @@ export default function WikiDocClient({
               onChange={e => { setBody(e.target.value); schedule(); }}
               placeholder="markdown 源码…（可直接写 [[文档标题]]，保存时自动解析成正式链接；写不中就留作幻影）"
               spellCheck={false}
-              className="w-full flex-1 min-h-[360px] resize-none px-3 py-2 font-mono text-[13px] leading-relaxed text-zinc-800 outline-none bg-zinc-50/60 rounded-lg"
+              className={`${styles.sourceEditor} w-full flex-1 min-h-[360px] resize-none py-2 font-mono text-[13px] leading-relaxed text-zinc-800 outline-none bg-zinc-50/60 rounded-lg`}
             />
           ) : (
             <SmartTextarea
@@ -643,7 +644,7 @@ export default function WikiDocClient({
 
       {/* 链接图面板：标题级列出（§4.1） */}
       {(backlinks.length > 0 || unlinked.length > 0 || entityRefs.length > 0) && (
-        <div className="px-8 py-4 border-t border-zinc-100 space-y-3">
+        <div className={`${styles.related} py-4 border-t border-zinc-100 space-y-3`}>
           <WikiEntityRefs productionId={productionId} wikiId={wiki.id} refs={entityRefs} canEdit={canEdit} />
           {backlinks.length > 0 && (
             <div>

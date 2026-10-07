@@ -495,14 +495,14 @@ export default function EventsClient({
               { key: "past", eyebrow: "Past", title: "已过去", items: past },
             ] as const).map(group => (
               <section key={group.key} className={responsive.eventGroup}>
-                <div style={{ display: "flex", alignItems: "end", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+                <div className={responsive.eventGroupHeader}>
                   <div>
                     <p style={{ margin: "0 0 4px", fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--muted)" }}>{group.eyebrow}</p>
                     <h2 style={{ margin: 0, fontFamily: 'Georgia, "Noto Serif SC", serif', fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>{group.title}</h2>
                   </div>
                   <span style={{ color: "var(--muted)", fontSize: 10 }}>{group.items.length} 个事件</span>
                 </div>
-                <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+                <div className={`${responsive.eventGroupScroll} panel-scrollbar panel-scrollbar-area`}>
                   {group.items.length === 0 ? (
                     <p style={{ textAlign: "center", fontSize: 12, color: "var(--muted)", padding: "48px 0" }}>暂无{group.title}的事件</p>
                   ) : group.items.map((ev, i) => (

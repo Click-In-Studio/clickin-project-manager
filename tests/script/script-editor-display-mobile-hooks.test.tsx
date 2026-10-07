@@ -8,7 +8,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useDisplaySettings } from "@/components/script/script-editor/use-display-settings";
 import { useMobileBlockMenus } from "@/components/script/script-editor/use-mobile-block-menus";
-import { DEFAULT_DISPLAY, DISPLAY_COOKIE } from "@/components/script/script-editor/display-settings";
+import { DEFAULT_DISPLAY, DISPLAY_COOKIE, parseDisplayCookie } from "@/components/script/script-editor/display-settings";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 class NoopObserver { observe() {} disconnect() {} unobserve() {} }
@@ -36,8 +36,8 @@ type DisplaySnap = ReturnType<typeof useDisplaySettings>;
 const dseen: DisplaySnap[] = [];
 const dlatest = () => dseen[dseen.length - 1];
 const rect = { width: 0 };
-function DisplayProbe() {
-  const s = useDisplaySettings({ maxLineIndexText: "123" });
+function DisplayProbe({ initialDisplay = DEFAULT_DISPLAY }: { initialDisplay?: typeof DEFAULT_DISPLAY }) {
+  const s = useDisplaySettings({ maxLineIndexText: "123", initialDisplay });
   dseen.push(s);
   return (<>
     <span ref={s.lineIndexMeasureRef} />
@@ -61,8 +61,16 @@ describe("useDisplaySettings", () => {
     act(() => root.unmount());
     root = createRoot(container);
     dseen.length = 0;
-    act(() => root.render(<DisplayProbe />));
+    act(() => root.render(<DisplayProbe initialDisplay={parseDisplayCookie(cookie(DISPLAY_COOKIE))} />));
     expect(dlatest().display.pageBreaks).toBe(false);
+  });
+
+  it("服务端可用同一解析函数还原 cookie 初值", () => {
+    expect(parseDisplayCookie(encodeURIComponent(JSON.stringify({ pageBreaks: false })))).toEqual({
+      ...DEFAULT_DISPLAY,
+      pageBreaks: false,
+    });
+    expect(parseDisplayCookie("broken")).toBe(DEFAULT_DISPLAY);
   });
 
   it("行号开着按测量 span 给宽；关掉行号即清宽、样式为 undefined", () => {

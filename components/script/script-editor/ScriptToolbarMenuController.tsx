@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useAnchoredMenu, useProductionToolbar } from "@/components/shell/ProductionTopMenu";
 
-export type ScriptToolbarOpenMenu = "script" | "edit" | "display" | "export" | "scene" | "char" | "presence" | null;
+export type ScriptToolbarOpenMenu = "script" | "mode" | "edit" | "display" | "export" | "scene" | "char" | "presence" | null;
 export type ScriptToolbarMode = "full" | "short" | "compact";
 
 export type ScriptToolbarMenuControls = {
