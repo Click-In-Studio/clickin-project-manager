@@ -28,13 +28,26 @@ describe("云文档目录提取", () => {
   });
 
   it("为重复标题生成稳定且唯一的锚点", () => {
-    const items = extractWikiOutline("# 设计\n## 设计\n### 设计\n# !!!");
+    const items = extractWikiOutline("# 设计\n## 设计\n### 设计-2\n### 设计\n# !!!");
     expect(items.map(item => item.id)).toEqual([
       "doc-heading-设计",
       "doc-heading-设计-2",
+      "doc-heading-设计-2-2",
       "doc-heading-设计-3",
       "doc-heading-section",
     ]);
+    expect(new Set(items.map(item => item.id)).size).toBe(items.length);
+  });
+
+  it("长代码围栏不能被较短围栏提前关闭", () => {
+    const items = extractWikiOutline([
+      "````md",
+      "```",
+      "# 仍在代码中",
+      "````",
+      "# 正文标题",
+    ].join("\n"));
+    expect(items.map(item => item.text)).toEqual(["正文标题"]);
   });
 
   it("按阅读线高亮最近经过的标题", () => {

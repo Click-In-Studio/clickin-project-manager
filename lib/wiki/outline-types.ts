@@ -35,30 +35,43 @@ export function wikiHeadingAnchor(text: string): string {
 export function extractWikiOutline(markdown: string): WikiOutlineItem[] {
   const items: WikiOutlineItem[] = [];
   const counts = new Map<string, number>();
-  let fencedBy: "`" | "~" | null = null;
+  const usedIds = new Set<string>();
+  let fence: { marker: "`" | "~"; length: number } | null = null;
   let offset = 0;
 
   for (const line of markdown.split(/\n/)) {
-    const fence = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
-    if (fence) {
-      const marker = fence[1][0] as "`" | "~";
-      if (fencedBy === marker) fencedBy = null;
-      else if (!fencedBy) fencedBy = marker;
+    const fenceLine = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fenceLine && (!fence || (
+      fenceLine[1][0] === fence.marker
+      && fenceLine[1].length >= fence.length
+      && fenceLine[2].trim() === ""
+    ))) {
+      if (fence) fence = null;
+      else fence = {
+        marker: fenceLine[1][0] as "`" | "~",
+        length: fenceLine[1].length,
+      };
       offset += line.length + 1;
       continue;
     }
-    if (!fencedBy) {
+    if (!fence) {
       const match = /^\s{0,3}(#{1,3})[\t ]+(.+?)\s*$/.exec(line);
       if (match) {
         const rawHeading = match[2].replace(/[\t ]+#+[\t ]*$/, "");
         const text = visibleHeadingText(rawHeading);
         if (text) {
           const base = wikiHeadingAnchor(text);
-          const count = (counts.get(base) ?? 0) + 1;
+          let count = (counts.get(base) ?? 0) + 1;
+          let id = count === 1 ? base : `${base}-${count}`;
+          while (usedIds.has(id)) {
+            count += 1;
+            id = `${base}-${count}`;
+          }
           const headingOffset = offset + line.indexOf(match[2]);
           counts.set(base, count);
+          usedIds.add(id);
           items.push({
-            id: count === 1 ? base : `${base}-${count}`,
+            id,
             level: match[1].length as 1 | 2 | 3,
             text,
             offset: headingOffset,

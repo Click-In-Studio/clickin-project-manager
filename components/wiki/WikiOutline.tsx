@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import NavigationIcon from "@/components/shell/app-shell/NavigationIcon";
+import styles from "@/components/wiki/WikiOutline.module.css";
 import type { WikiOutlineItem } from "@/lib/wiki/outline-types";
 import { activeWikiOutlineId } from "@/lib/wiki/outline-types";
 
@@ -115,10 +116,10 @@ export default function WikiOutline({
           type="button"
           aria-label="关闭目录"
           onClick={() => setMobileOpen(false)}
-          className="xl:hidden panel-mobile-full fixed inset-x-0 z-[45] bg-zinc-950/35"
+          className={`${styles.mobileViewport} xl:hidden panel-mobile-full fixed inset-x-0 z-[45] bg-zinc-950/35`}
         />
       )}
-      <aside className={`${mobileOpen ? "translate-x-0" : "translate-x-[110%]"} panel-mobile-full fixed right-0 z-[46] flex w-[min(300px,calc(100vw-24px))] flex-col overflow-hidden rounded-l-xl border border-zinc-200 bg-white shadow-2xl transition-transform xl:hidden`}>
+      <aside className={`${styles.mobileViewport} ${styles.mobilePanel} ${mobileOpen ? "translate-x-0" : "translate-x-[110%]"} panel-mobile-full fixed right-0 z-[46] flex w-[min(300px,calc(100vw-24px))] flex-col overflow-hidden rounded-l-xl border border-zinc-200 bg-white shadow-2xl transition-transform xl:hidden`}>
         <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
           <span className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800"><NavigationIcon name="outline" />目录</span>
           <button type="button" onClick={() => setMobileOpen(false)} className="h-8 w-8 rounded-full text-lg text-zinc-500 hover:bg-zinc-100" aria-label="关闭目录">×</button>

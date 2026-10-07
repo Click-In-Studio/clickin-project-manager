@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 describe("云文档与文内目录的响应式边界", () => {
   const shell = readFileSync("components/wiki/WikiShell.tsx", "utf8");
   const outline = readFileSync("components/wiki/WikiOutline.tsx", "utf8");
+  const outlineCss = readFileSync("components/wiki/WikiOutline.module.css", "utf8");
   const docPage = readFileSync("app/production/[id]/wiki/[wikiId]/page.tsx", "utf8");
 
   it("手机与平板提供两个独立语义入口", () => {
@@ -18,6 +19,9 @@ describe("云文档与文内目录的响应式边界", () => {
     expect(shell).toMatch(/panel-mobile-full fixed left-0 z-\[46\]/);
     expect(outline).toMatch(/panel-mobile-full fixed inset-x-0 z-\[45\]/);
     expect(outline).toMatch(/panel-mobile-full fixed right-0 z-\[46\]/);
+    expect(outline).toContain("styles.mobileViewport");
+    expect(outlineCss).toContain("height: var(--app-visual-viewport-height, 100dvh)");
+    expect(outlineCss).toContain("top: var(--app-visual-viewport-offset-top, 0px)");
   });
 
   it("桌面展开宽度稳定，收起后只保留窄入口", () => {
