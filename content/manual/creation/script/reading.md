@@ -7,7 +7,7 @@ who: 有剧本查看权限的成员
 tier: all
 platform: [desktop, mobile]
 related: [creation/script/editing, creation/script/print, creation/dramaturgy/dramaturgy-view]
-updated: 2026-10-06
+updated: 2026-10-07
 ---
 
 ## 这是什么

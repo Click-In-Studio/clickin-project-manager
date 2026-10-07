@@ -7,7 +7,7 @@ who: 有剧本编辑权限、且顶栏当前选择「编辑」的成员
 tier: all
 platform: [desktop, mobile]
 related: [creation/script/reading, creation/script/discussion, creation/dramaturgy/characters]
-updated: 2026-10-06
+updated: 2026-10-07
 ---
 
 ## 这是什么
