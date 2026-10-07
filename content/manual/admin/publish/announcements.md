@@ -7,7 +7,7 @@ who: 有公告管理权限的管理员可发；所有成员可读
 tier: all
 platform: [desktop, mobile]
 related: [start/notifications/notifications, start/interface/navigation]
-updated: 2026-10-04
+updated: 2026-10-07
 ---
 
 ## 这是什么
@@ -44,7 +44,7 @@ updated: 2026-10-04
 ## 注意事项
 
 - 发布本身不推送，成员下次打开通知页看到；要确保人人看到就用「催读」。改错字用「编辑」，不会重复推送。
-- 内容支持 Markdown，但公告适合短——长的说明放知识库，公告里放链接。
+- 内容支持 Markdown，但公告适合短——长的说明放云文档，公告里放链接。
 
 ## 常见问题
 

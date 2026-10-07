@@ -7,7 +7,7 @@ import styles from "@/components/wiki/WikiDocClient.module.css";
 // 标题/正文/标签 就地编辑 + 防抖自动保存；文档操作（新建/移动/删除）归左侧栏
 // （WikiShell），正文页顶部只留内容级操作。无编辑权 → 只读渲染（WikiMarkdown）。
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BASE_PATH } from "@/lib/base-path";
@@ -17,6 +17,7 @@ import { userAvatarSrc } from "@/lib/asset/avatar-url";
 import { fmtDateTime } from "@/lib/tz";
 import SmartTextarea, { wikiLinkDropPlugin, type MentionMember } from "@/components/editor/SmartTextarea";
 import WikiMarkdown from "@/components/wiki/WikiMarkdown";
+import WikiOutline from "@/components/wiki/WikiOutline";
 import AdminModal from "@/components/ui/AdminModal";
 import DropdownPicker from "@/components/ui/DropdownPicker";
 import { PRIMARY_BTN } from "@/components/ui/PageHeader";
@@ -28,6 +29,7 @@ import type { WikiRef, WikiEntityRef } from "@/lib/wiki/links";
 import WikiEntityRefs from "@/components/wiki/WikiEntityRefs";
 import type { WikiPeer } from "@/lib/wiki/collab";
 import { applyPeerCursor, createCursorRelay, type WikiCursor } from "@/lib/wiki/collab-cursor";
+import { extractWikiOutline } from "@/lib/wiki/outline-types";
 import { createSaveDebounce } from "@/lib/editor/save-debounce";
 import { mergeLines } from "@/lib/editor/line-merge";
 import type { Mention } from "@/lib/ops/event-db";
@@ -456,9 +458,12 @@ export default function WikiDocClient({
     : status === "error" ? "保存失败（继续输入将重试）"
     : status === "saved" ? "已保存"
     : `更新于 ${fmtDateTime(wiki.updatedAt)}`;
+  const contentRef = useRef<HTMLDivElement>(null);
+  const outline = useMemo(() => extractWikiOutline(body), [body]);
 
   return (
-    <div className={`${styles.document} rounded-xl border border-zinc-200 bg-white flex flex-col`}>
+    <div className="flex min-w-0 flex-1 flex-col gap-3 xl:flex-row xl:items-start">
+      <div className={`${styles.document} min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white flex flex-col`}>
       {/* 标题区 */}
       <header className={styles.header}>
         <div className={styles.toolbar} aria-label="文档操作栏">
@@ -570,7 +575,7 @@ export default function WikiDocClient({
       </header>
 
       {/* 正文：有编辑权即整页可写（Notion 式），防抖自动保存；富文本/源码双模 */}
-      <div className={`${styles.canvas} flex-1 flex flex-col pb-6`}>
+      <div ref={contentRef} className={`${styles.canvas} flex-1 flex flex-col pb-6`}>
         {lossy && canEdit && (
           <div className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 print:hidden">
             <p>
@@ -598,6 +603,7 @@ export default function WikiDocClient({
         {canEdit ? (
           editorMode === "source" ? (
             <textarea
+              data-wiki-source-editor
               value={body}
               onChange={e => { setBody(e.target.value); schedule(); }}
               placeholder="markdown 源码…（可直接写 [[文档标题]]，保存时自动解析成正式链接；写不中就留作幻影）"
@@ -630,7 +636,7 @@ export default function WikiDocClient({
             />
           )
         ) : wiki.body.trim() ? (
-          <WikiMarkdown content={wiki.body} productionId={productionId} wikiRouteBase={navigationBasePath} />
+          <WikiMarkdown content={body} productionId={productionId} wikiRouteBase={navigationBasePath} />
         ) : (
           <p className="text-sm text-zinc-400">（空文档）</p>
         )}
@@ -792,6 +798,8 @@ export default function WikiDocClient({
           )}
         </AdminModal>
       )}
+      </div>
+      <WikiOutline items={outline} contentRef={contentRef} />
     </div>
   );
 }

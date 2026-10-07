@@ -4,7 +4,7 @@ import MeMenuIcon from "./MeMenuIcon";
 export type NavigationIconName =
   | "home" | "projects" | "announcement" | "notification" | "approval"
   | "person" | "calendar" | "task" | "report" | "dramaturgy" | "script"
-  | "cue" | "knowledge" | "finance" | "event" | "material" | "asset"
+  | "cue" | "knowledge" | "outline" | "finance" | "event" | "material" | "asset"
   | "overview" | "creation" | "production" | "settings" | "back"
   | "milestone" | "organization" | "roles" | "permissions" | "approval-flow"
   | "templates" | "policies" | "audit" | "asset-review" | "project-info"
@@ -41,6 +41,7 @@ const iconPaths: Record<Exclude<NavigationIconName, "person">, ReactNode> = {
   script: <><path d="M12 5C9 3 6 3 3 4v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1ZM12 5v15M6 8h3M6 12h3M15 8h3M15 12h3" /></>,
   cue: <><path d="M5 3v12M5 4h12l-3 3 3 3H5M3 19h18M5 17v4M9 18v2M13 17v4M17 18v2M21 17v4" /></>,
   knowledge: <><path d="M6 3h14v18H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3ZM3 18a3 3 0 0 1 3-3h14M12 3v8l3-2 3 2V3" /></>,
+  outline: <><path d="M9 5h11M9 12h11M9 19h11" /><path d="M4 5h1M4 12h1M4 19h1" /></>,
   finance: <><circle cx="12" cy="12" r="9" /><path d="m8 7 4 5 4-5M12 12v6M8 12h8M8 15h8" /></>,
   event: <><path d="M3 9h18v12H3V9ZM3 9 2 5l17-4 1 4L3 9ZM7 4l3 3M13 3l3 3M7 14h10" /></>,
   material: <><path d="m3 7 9-4 9 4v13H3V7ZM3 7l9 4 9-4M12 11v9M8 5l9 4M7 15h2" /></>,

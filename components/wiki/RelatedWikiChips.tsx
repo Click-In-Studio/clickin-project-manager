@@ -97,7 +97,7 @@ export default function RelatedWikiChips({
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2 mb-2">
-        <p className="mr-1 text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">相关 Wiki</p>
+        <p className="mr-1 text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">相关文档</p>
         {canEdit && (
           <>
             <button type="button" disabled={busy} onClick={() => setPicking(p => !p)}

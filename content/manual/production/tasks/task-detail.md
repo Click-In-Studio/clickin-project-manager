@@ -1,13 +1,13 @@
 ---
 title: 任务详情
 order: 2
-summary: 负责人、绑定的事件 / 日程 / 阶段、前置依赖、飞书群、相关 Wiki
+summary: 负责人、绑定的事件 / 日程 / 阶段、前置依赖、飞书群、相关文档
 routes: [tasks]
 who: 看：所有成员；改：负责人、部门 POC、有任务编辑权限的成员
 tier: all
 platform: [desktop, mobile]
 related: [production/tasks/tasks, production/planning/gantt, production/events/event-detail]
-updated: 2026-09-24
+updated: 2026-10-07
 ---
 
 ## 这是什么
@@ -40,9 +40,9 @@ updated: 2026-09-24
 
 给任务「创建飞书群」或绑定已有群，方便围绕这件事讨论。
 
-### 相关 Wiki
+### 相关文档
 
-关联栏最下面列出引用了这条任务的文档——通常是在知识库里把任务列表的某一行「同步任务」建出来的那篇。点标题就跳过去；没有文档引用时这一栏不显示。
+关联栏最下面列出引用了这条任务的文档——通常是在云文档里把任务列表的某一行「同步任务」建出来的那篇。点标题就跳过去；没有文档引用时这一栏不显示。
 
 ### 确认（待确认的任务）
 

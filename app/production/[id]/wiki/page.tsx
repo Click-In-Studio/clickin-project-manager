@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-export const metadata: Metadata = { title: "知识库" };
+export const metadata: Metadata = { title: "云文档" };
 
 import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
@@ -34,14 +34,14 @@ export default async function WikiLibraryPage({ params }: { params: Promise<{ id
 
   return (
     <>
-      <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
+      <div style={{ padding: "16px clamp(12px, 1.8vw, 28px) 48px", minHeight: "100vh", background: "var(--paper)" }}>
         <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} assetActions={assetActions}>
           <div className="rounded-xl border border-dashed border-zinc-200 bg-white/60 px-8 flex items-center justify-center">
             <p className="text-sm text-zinc-400">
               {nodes.length > 0 ? (
-                <><span className="md:hidden">在「文档目录」里选择一篇文档</span><span className="hidden md:inline">从左侧选择一篇文档</span></>
+                <><span className="lg:hidden">在「云文档」里选择一篇文档</span><span className="hidden lg:inline">从左侧选择一篇文档</span></>
               ) : canCreate ? (
-                <><span className="md:hidden">还没有文档，打开「文档目录」新建一篇</span><span className="hidden md:inline">还没有文档，从左侧新建一篇</span></>
+                <><span className="lg:hidden">还没有文档，打开「云文档」新建一篇</span><span className="hidden lg:inline">还没有文档，从左侧新建一篇</span></>
               ) : "还没有你可见的文档"}
             </p>
           </div>
