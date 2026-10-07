@@ -19,10 +19,18 @@ export const DEFAULT_DISPLAY: DisplaySettings = {
 };
 export const DISPLAY_COOKIE = "script_display";
 export const CHARACTER_FOCUS_STORAGE_PREFIX = "script_character_focus";
+export function parseDisplayCookie(raw: string | null | undefined): DisplaySettings {
+  if (!raw) return DEFAULT_DISPLAY;
+  try {
+    return { ...DEFAULT_DISPLAY, ...JSON.parse(decodeURIComponent(raw)) };
+  } catch {
+    return DEFAULT_DISPLAY;
+  }
+}
 export function readDisplayCookie(): DisplaySettings {
   try {
     const m = document.cookie.match(/(?:^|;\s*)script_display=([^;]*)/);
-    if (m) return { ...DEFAULT_DISPLAY, ...JSON.parse(decodeURIComponent(m[1])) };
+    return parseDisplayCookie(m?.[1]);
   } catch { /* ignore */ }
   return DEFAULT_DISPLAY;
 }
