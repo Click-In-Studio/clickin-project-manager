@@ -24,8 +24,9 @@ describe("手机端剧本块新增入口", () => {
   });
 
   it("无文本编辑权限或排练锁定时保持菜单项但禁止执行，并说明原因", () => {
-    expect(editor).toContain("if (isLockedMode || !canEditText) return;");
+    expect(editor).toContain("if (!canEditText) return;");
     expect(editor).toContain('"排练模式下不可添加"');
+    expect(editor).toContain('"只读模式下不可添加"');
     expect(editor).toContain('"需要剧本文本编辑权限"');
     expect(editor).toContain("aria-disabled={!!disabledReason}");
     expect(editor).toContain("if (!disabledReason) runAndClose(action)");
