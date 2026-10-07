@@ -344,11 +344,11 @@ describe("components/ 按域分目录，不回退成平铺", () => {
 // 瘦身不在 #487 范围。
 
 const MONOLITH_LINE_CEILING: Record<string, number> = {
-  "components/script/ScriptEditor.tsx": 6521, // #641 空闲补窗（+34）：前后台请求槽与保存插队接线；调度主体已拆 hook
+  "components/script/ScriptEditor.tsx": 6566, // #894 个人模式保存闭环与 #893 手机入口合并（+35）
   "components/ops/EventDetailClient.tsx": 421,
   "components/ops/CuePage.tsx": 1451, // #655 失效的 Cue 面板跨表列出（+2）：表名标签与表名索引
   "components/ops/PlanningClient.tsx": 98,
-  "components/shell/AppShell.tsx": 837, // #702 手机端 AI 入口与底栏表面互斥（+18）
+  "components/shell/AppShell.tsx": 841, // #891 全量导航语义图标接线（+2）
 };
 
 const FAMILY_FILE_CEILING = { component: 800, module: 400 } as const;

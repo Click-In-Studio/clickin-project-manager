@@ -19,12 +19,23 @@ import {
   ProductionToolbarStageContext,
 } from "./ProductionTopMenu";
 import type { Production, ShellSession } from "./app-shell/types";
-import { CREATION_NAV, PRODUCTION_NAV, PRODUCTION_OVERVIEW_NAV, ADMIN_NAV_GROUPS, OVERVIEW_NAV, PRODUCTION_TOP_MENU_LABELS } from "./app-shell/nav-config";
+import {
+  CREATION_NAV,
+  PRODUCTION_NAV,
+  PRODUCTION_OVERVIEW_NAV,
+  ADMIN_NAV_GROUPS,
+  OVERVIEW_NAV,
+  PRODUCTION_TOP_MENU_LABELS,
+  PLATFORM_TOP_MENU_LABELS,
+  adminTopMenuLabel,
+} from "./app-shell/nav-config";
+import { PlatformTopMenuTitle } from "./PlatformTopMenu";
 import { firstContentChar } from "./app-shell/first-content-char";
 import { extractProductionId, extractCurrentWikiId, extractCurrentAssetId, extractModule, extractAdminModule } from "./app-shell/route";
 import { NavPendingContext, type NavPendingBus } from "./app-shell/nav-pending";
 import UserAvatarContent from "./app-shell/UserAvatarContent";
 import ProdAvatarIcon from "./app-shell/ProdAvatarIcon";
+import NavigationIcon from "./app-shell/NavigationIcon";
 import NavItem from "./app-shell/NavItem";
 import NavGroup from "./app-shell/NavGroup";
 import UserMenu from "./app-shell/UserMenu";
@@ -202,8 +213,6 @@ export default function AppShell({ session, productions, canCreateProduction = f
   const currentAssetId = activeAiTarget
     ? (activeAiTarget.kind === "asset" ? activeAiTarget.id : null)
     : productionId ? extractCurrentAssetId(pathname, productionId) : null;
-  const productionTopMenuLabel = activeModule === null ? null : PRODUCTION_TOP_MENU_LABELS[activeModule] ?? null;
-  const hasProductionTopMenu = productionTopMenuLabel !== null;
   const isHome = pathname === "/";
   const currentProduction = productionId
     ? productions.find((p) => p.id === productionId)
@@ -215,6 +224,14 @@ export default function AppShell({ session, productions, canCreateProduction = f
   const aiEntryVisible = productionId ? (currentProduction?.planAi ?? false) : true;
   const isAdminMode = !!(productionId && pathname.startsWith(`/production/${productionId}/admin`));
   const activeAdminModule = isAdminMode ? extractAdminModule(pathname, productionId!) : null;
+  const productionTopMenuLabel = activeModule === null
+    ? null
+    : isAdminMode
+      ? adminTopMenuLabel(activeAdminModule ?? "")
+      : PRODUCTION_TOP_MENU_LABELS[activeModule] ?? null;
+  const hasProductionTopMenu = productionTopMenuLabel !== null;
+  const platformTopMenuLabel = PLATFORM_TOP_MENU_LABELS[pathname] ?? null;
+  const hasTopMenu = hasProductionTopMenu || platformTopMenuLabel !== null;
   // 管理后台菜单的档位过滤（付费维度）：档位没开「高级权限配置」的项目，权限中心 /
   // 策略中心根本不出现在菜单里。整组被滤空时连组标题一起去掉。
   // 不用 useMemo：这一段在 `if (!session)` 的 early return 之后，包 hook 就成了条件调用
@@ -338,23 +355,25 @@ export default function AppShell({ session, productions, canCreateProduction = f
           </Link>
         )}
 
-        {hasProductionTopMenu && (
+        {hasTopMenu && (
           <div
             id={PRODUCTION_TOP_MENU_SLOT_ID}
             data-search-open={productionSearchPath === pathname ? "true" : undefined}
             className="flex h-full min-w-0 flex-1 items-center"
           >
-            <ProductionTopMenuContext
+            {platformTopMenuLabel !== null ? (
+              <PlatformTopMenuTitle title={platformTopMenuLabel} placeholder />
+            ) : <ProductionTopMenuContext
               label={productionTopMenuLabel ?? ""}
               side={isCreationActive ? "script" : isProductionOverviewActive ? "overview" : "stage"}
               placeholder
-            />
+            />}
           </div>
         )}
 
         {/* Right actions */}
         <div className={`app-shell-topbar-actions ${productionTopbarActionsMarginClass(
-          hasProductionTopMenu,
+          hasTopMenu,
           productionHeaderStage,
         )} flex shrink-0 items-center gap-3`}>
           {/* Search bar: only when inside a production */}
@@ -396,7 +415,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             hidden={productionHeaderStage >= 2}
           />
 
-          {hasProductionTopMenu && (
+          {hasTopMenu && (
             <div
               ref={topOverflowRef}
               id="production-top-toolbar-overflow"
@@ -486,10 +505,11 @@ export default function AppShell({ session, productions, canCreateProduction = f
                     <NavItem
                       key={item.path}
                       href={adminHref(item.path)}
-                      symbol={item.label.charAt(0)}
+                      symbol={<NavigationIcon name={item.icon} />}
                       label={item.label}
                       hint={item.hint}
                       active={activeAdminModule === item.path}
+                      folded={productionSidebarContentFolded}
                     />
                   ))}
                 </div>
@@ -500,13 +520,13 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <nav className="flex flex-col gap-0.5 flex-1">
               {!productionId && (
                 <div className="mt-1 flex flex-col gap-0.5">
-                  <NavItem href="/" symbol="⌂" label="我的工作" hint="今天与我有关" active={isHome} folded={productionSidebarContentFolded} />
-                  <NavItem href="/my/projects" symbol="◈" label="我的项目" hint={canCreateProduction ? "管理与新建项目" : "我参与的项目"} active={pathname.startsWith("/my/projects")} folded={productionSidebarContentFolded} />
-                  <NavItem href="/my/announcements" symbol="⊟" label="公告" hint="演出公告与风险提醒" active={pathname.startsWith("/my/announcements")} folded={productionSidebarContentFolded} />
-                  <NavItem href="/my/weekly-call" symbol="◷" label="日程" hint="完整 Weekly Call" active={pathname.startsWith("/my/weekly-call") || pathname.startsWith("/my/daily-call")} folded={productionSidebarContentFolded} />
-                  <NavItem href="/my/tasks" symbol="✓" label="任务" hint="需求 · 跟进 · 完成" active={pathname.startsWith("/my/tasks")} badge={pendingTasks} folded={productionSidebarContentFolded} />
-                  <NavItem href="/my/notifications" symbol="◉" label="通知提醒" hint="确认与告知" active={pathname.startsWith("/my/notifications")} badge={unreadCount} folded={productionSidebarContentFolded} />
-                  <NavItem href="/my/reports" symbol="≡" label="报告" hint="所有演出报告" active={pathname.startsWith("/my/reports")} badge={unreadReports} folded={productionSidebarContentFolded} />
+                  <NavItem href="/" symbol={<NavigationIcon name="home" />} label="我的工作" hint="今天与我有关" active={isHome} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/projects" symbol={<NavigationIcon name="projects" />} label="我的项目" hint={canCreateProduction ? "管理与新建项目" : "我参与的项目"} active={pathname.startsWith("/my/projects")} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/announcements" symbol={<NavigationIcon name="announcement" />} label="公告" hint="演出公告与风险提醒" active={pathname.startsWith("/my/announcements")} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/weekly-call" symbol={<NavigationIcon name="calendar" />} label="日程" hint="完整 Weekly Call" active={pathname.startsWith("/my/weekly-call") || pathname.startsWith("/my/daily-call")} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/tasks" symbol={<NavigationIcon name="task" />} label="任务" hint="需求 · 跟进 · 完成" active={pathname.startsWith("/my/tasks")} badge={pendingTasks} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/notifications" symbol={<NavigationIcon name="notification" />} label="通知提醒" hint="确认与告知" active={pathname.startsWith("/my/notifications")} badge={unreadCount} folded={productionSidebarContentFolded} />
+                  <NavItem href="/my/reports" symbol={<NavigationIcon name="report" />} label="报告" hint="所有演出报告" active={pathname.startsWith("/my/reports")} badge={unreadReports} folded={productionSidebarContentFolded} />
                 </div>
               )}
 
@@ -517,7 +537,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                     <NavItem
                       key={item.path || "home"}
                       href={item.path ? navHref(item.path) : `/production/${productionId}`}
-                      symbol={item.symbol}
+                      symbol={<NavigationIcon name={item.icon} />}
                       label={item.label}
                       hint={item.hint}
                       active={isProductionOverviewItemActive(item)}
@@ -531,7 +551,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                     <NavItem
                       key={item.path}
                       href={navHref(item.path)}
-                      symbol={item.symbol}
+                      symbol={<NavigationIcon name={item.icon} />}
                       label={item.label}
                       hint={item.hint}
                       side="script"
@@ -546,7 +566,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                     <NavItem
                       key={item.path}
                       href={navHref(item.path)}
-                      symbol={item.symbol}
+                      symbol={<NavigationIcon name={item.icon} />}
                       label={item.label}
                       hint={item.hint}
                       side="stage"
@@ -584,14 +604,14 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <>
               <MobileTab
                 label="返回"
-                symbol="←"
+                symbol={<NavigationIcon name="back" />}
                 active={false}
                 href={`/production/${productionId}`}
                 onClick={closeAiPopout}
               />
               <MobileTab
                 label="配置菜单"
-                symbol="⚙"
+                symbol={<NavigationIcon name="settings" />}
                 active={drawerOpen === "admin"}
                 onClick={() => toggleDrawer("admin")}
               />
@@ -609,20 +629,20 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <>
               <MobileTab
                 label="概览"
-                symbol="⌂"
+                symbol={<NavigationIcon name="overview" />}
                 active={isProductionOverviewActive || drawerOpen === "project-overview"}
                 onClick={() => toggleDrawer("project-overview")}
               />
               <MobileTab
                 label="创作"
-                symbol="✦"
+                symbol={<NavigationIcon name="creation" />}
                 active={isCreationActive || drawerOpen === "creation"}
                 onClick={() => toggleDrawer("creation")}
               />
               {aiEntryVisible && <MobileAiAction open={aiPopoutOpen} onClick={toggleAiPopout} />}
               <MobileTab
                 label="制作"
-                symbol="◇"
+                symbol={<NavigationIcon name="production" />}
                 active={isProductionNavActive || drawerOpen === "production"}
                 onClick={() => toggleDrawer("production")}
               />
@@ -637,10 +657,10 @@ export default function AppShell({ session, productions, canCreateProduction = f
         ) : (
           /* Outside production */
           <>
-            <MobileTab label="今日" symbol="⌂" active={isHome} href="/" onClick={closeAiPopout} />
+            <MobileTab label="今日" symbol={<NavigationIcon name="home" />} active={isHome} href="/" onClick={closeAiPopout} />
             <MobileTab
               label="项目"
-              symbol="◈"
+              symbol={<NavigationIcon name="projects" />}
               active={pathname.startsWith("/my/projects")}
               href="/my/projects"
               onClick={closeAiPopout}
@@ -648,7 +668,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             {aiEntryVisible && <MobileAiAction open={aiPopoutOpen} onClick={toggleAiPopout} />}
             <MobileTab
               label="概览"
-              symbol="≡"
+              symbol={<NavigationIcon name="overview" />}
               active={isOverviewActive || drawerOpen === "overview"}
               onClick={() => toggleDrawer("overview")}
             />
@@ -674,7 +694,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <NavItem
               key={item.path}
               href={item.path}
-              symbol={item.symbol}
+              symbol={<NavigationIcon name={item.icon} />}
               label={item.label}
               hint={item.hint}
               active={pathname.startsWith(item.path)}
@@ -694,7 +714,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <NavItem
               key={item.path || "home"}
               href={item.path ? navHref(item.path) : `/production/${productionId}`}
-              symbol={item.symbol}
+              symbol={<NavigationIcon name={item.icon} />}
               label={item.label}
               hint={item.hint}
               active={isProductionOverviewItemActive(item)}
@@ -716,7 +736,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <NavItem
               key={item.path}
               href={navHref(item.path)}
-              symbol={item.symbol}
+              symbol={<NavigationIcon name={item.icon} />}
               label={item.label}
               hint={item.hint}
               active={isCreationItemActive(item.path)}
@@ -737,7 +757,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
             <NavItem
               key={item.path}
               href={navHref(item.path)}
-              symbol={item.symbol}
+              symbol={<NavigationIcon name={item.icon} />}
               label={item.label}
               hint={item.hint}
               active={isModuleActive(item.path)}
@@ -764,7 +784,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                 <NavItem
                   key={item.path}
                   href={adminHref(item.path)}
-                  symbol={item.label.charAt(0)}
+                  symbol={<NavigationIcon name={item.icon} />}
                   label={item.label}
                   hint={item.hint}
                   active={activeAdminModule === item.path}

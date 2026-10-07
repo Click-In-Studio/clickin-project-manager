@@ -33,11 +33,13 @@ interface Props {
   display?: "compact" | "panel";
   onNavigate?: () => void;
   onChange?: () => void;
+  /** 可选的未完成编辑保护；仅调用方显式接入时，打开关联弹窗才阻止模式切换。 */
+  unsavedGuardMessage?: string;
 }
 
 export default function MountPointAssets({
   productionId, mountType, mountId, mountAuxId,
-  label, canEdit = false, display = "panel", onNavigate, onChange,
+  label, canEdit = false, display = "panel", onNavigate, onChange, unsavedGuardMessage,
 }: Props) {
   const uploadManager = useAssetUploadManager();
   const [entries, setEntries] = useState<MountEntry[]>([]);
@@ -134,7 +136,11 @@ export default function MountPointAssets({
   if (display === "compact") {
     if (loading) return null;
     return (
-      <div className="flex flex-wrap items-center gap-1 mt-1">
+      <div
+        data-dramaturgy-unsaved={showModal && unsavedGuardMessage ? "true" : undefined}
+        data-dramaturgy-unsaved-message={unsavedGuardMessage}
+        className="flex flex-wrap items-center gap-1 mt-1"
+      >
         {entries.map(e => (
           <span key={e.mount.id}
             className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-600">
@@ -179,7 +185,11 @@ export default function MountPointAssets({
 
   // panel display
   return (
-    <div className="mt-3">
+    <div
+      data-dramaturgy-unsaved={showModal && unsavedGuardMessage ? "true" : undefined}
+      data-dramaturgy-unsaved-message={unsavedGuardMessage}
+      className="mt-3"
+    >
       <div className="flex items-center justify-between mb-1.5">
         <p className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">附件</p>
         {canEdit && (

@@ -49,7 +49,6 @@ describe("配置中心里程碑交互回归", () => {
       root.render(
         <AdminMilestonesClient
           productionId="production-responsive"
-          productionName="响应式测试项目"
           initialMilestones={[initialMilestone]}
           canCreate
           canManage

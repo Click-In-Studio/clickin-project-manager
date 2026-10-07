@@ -21,7 +21,7 @@ import type { SceneDetail } from "@/lib/script/script-scene-character-db";
 import { formatDuration, parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
 import { isTextBlock, sameCharacters, shouldHideCharacterLabel, shouldShowCharacterGap, shouldShowSceneEndGap } from "@/lib/script/script-block-layout";
-import { uid, makeBlock, makeMarkerBlock, isBlockEmptyForDelete, isEmptyTextBlock, mergeServerBlocks, expandLegacyMarkersToBlocks, normalizeScriptBlockStream, normalizeScriptMarkerInvariants, insertMarkerWithEmptyBlockIfNeeded, findTocSceneBlockIndex, findSceneMarkerBlockIndex, mergeDirtyRanges, markerChangeFromOperations, sameBlocks } from "@/lib/script/script-block-stream";
+import { uid, makeBlock, makeMarkerBlock, isBlockEmptyForDelete, isEmptyTextBlock, mergeServerBlocks, expandLegacyMarkersToBlocks, normalizeScriptBlockStream, normalizeScriptMarkerInvariants, insertMarkerWithEmptyBlockIfNeeded, insertScriptBlockAt, findTocSceneBlockIndex, findSceneMarkerBlockIndex, mergeDirtyRanges, markerChangeFromOperations, sameBlocks } from "@/lib/script/script-block-stream";
 import { sameDragTarget, resolveDragTarget, getDragInsertIndex, type DragTarget } from "@/lib/script/script-drag-target";
 import { buildEmptyScriptCleanupRemovalPlan, isOnlyTextBlockInMarkerSegment, analyzeEmptyScriptCleanup, type EmptyScriptCleanupTarget } from "@/lib/script/script-empty-cleanup";
 import { publishScriptFocus } from "@/lib/script/script-focus";
@@ -54,7 +54,7 @@ import SideBlockPanel from "./script-editor/SideBlockPanel";
 import TableOfContents from "./script-editor/TableOfContents";
 import { EMPTY_COMMENTS, EMPTY_BLOCK_ASSETS, buildCommentBlockCaption, findSideBlockPanelNavigationTargets, type RemotePresence } from "./script-editor/comments";
 import { SCRIPT_TOC_CENTER_EVENT, SCRIPT_EDITOR_MAX_WIDTH_PX, SCRIPT_BODY_HORIZONTAL_PADDING_REM, SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX, SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM, SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM, SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM, SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM, SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX, SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX, SCRIPT_SCENE_DETAIL_MODE_LABEL, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX, DISABLED_CHECKBOX_OPTION_CLASS, checkboxOptionClass, COMMENT_BUBBLE_MIN_WIDTH_PX, COMMENT_BUBBLE_GAP_REM, SIDE_PANEL_FALLBACK_WIDTH_PX, SCRIPT_SHORTCUTS } from "./script-editor/constants";
-import { readDisplayCookie, writeDisplayCookie, type DisplaySettings } from "./script-editor/display-settings";
+import { DEFAULT_DISPLAY, writeDisplayCookie, type DisplaySettings } from "./script-editor/display-settings";
 import { useScriptSearch } from "./script-editor/use-script-search";
 import { useDragCountBadge } from "./script-editor/use-drag-count-badge";
 import { useReorderLock } from "./script-editor/use-reorder-lock";
@@ -80,8 +80,9 @@ import { useDisplaySettings } from "./script-editor/use-display-settings";
 import { useScriptToolbarFold } from "./script-editor/use-script-toolbar-fold";
 import { useScriptWindowPrefetch, type ScriptWindowRequest } from "./script-editor/use-script-window-prefetch";
 import { useWorkspaceWidth } from "./script-editor/use-workspace-width";
-import { readScriptPersonalMode, type ScriptPersonalMode } from "./script-editor/personal-mode";
+import { useStoredScriptPersonalMode, type ScriptPersonalMode } from "./script-editor/personal-mode";
 import { useScriptPersonalModeTransition } from "./script-editor/use-script-personal-mode-transition";
+import { flushLatestScriptState } from "./script-editor/flush-latest-script-state";
 import { insertLineBreakAtTextOffset, setCursorAtStart, setCursorAtEnd, setCursorAtTextOffset, getEditableElementForRange, isTextEditingTarget, isFormEditingTarget, getTextLength } from "./script-editor/dom-cursor";
 import { getScrollEl, getScrollMetrics, scrollContainerBy, scrollElementIntoView, estimateVirtualScrollAnchor, measureScriptTocNumberWidths, clearTimeoutMap, markProgrammaticScroll } from "./script-editor/dom-scroll";
 import { replaceInlineStageDelimiters, toggleInlineTag, wrapSelectionAsInlineStageCue } from "./script-editor/inline-stage";
@@ -130,6 +131,7 @@ export default function ScriptEditor({
   canEditMetadata: canEditMetadataProp = true,
   canEditLayout = true,
   canEditRehearsalMark = true,
+  initialDisplay = DEFAULT_DISPLAY,
   initialSearchQuery,
   initialVersionId = null,
   initialWindow = null,
@@ -144,6 +146,7 @@ export default function ScriptEditor({
    *  「任一 scene 字段可改」的粗门，不能拿来当排版开关的依据。 */
   canEditLayout?: boolean;
   canEditRehearsalMark?: boolean;
+  initialDisplay?: DisplaySettings;
   initialSearchQuery?: string;
   /** 服务端解析好的活跃版本（#641）：不给的话首帧是 null，首个请求不带 ?v=，
    *  回包的 versionId 一 set 就把加载 effect 的依赖改了——整本剧本要再拉一遍。 */
@@ -161,9 +164,9 @@ export default function ScriptEditor({
   const baseCanEditMetadata = canEditMetadataProp;
   const baseCanEditTextLayout = canEditLayout;
   const baseCanEdit = baseCanEditText || baseCanEditMetadata || baseCanEditTextLayout || canEditRehearsalMark;
-  const [rehearsalMode, setRehearsalMode] = useState(() => readDisplayCookie().rehearsalMode);
-  const [personalMode, setPersonalMode] = useState<ScriptPersonalMode>(() => readScriptPersonalMode(effectiveScriptId));
-  const isContentLocked = !baseCanEdit || personalMode === "read" || rehearsalMode;
+  const [rehearsalMode, setRehearsalMode] = useState(initialDisplay.rehearsalMode);
+  const [personalMode, setPersonalMode, personalModeReady] = useStoredScriptPersonalMode(effectiveScriptId);
+  const isContentLocked = !personalModeReady || !baseCanEdit || personalMode === "read" || rehearsalMode;
   const canEditTextLayout = baseCanEditTextLayout && !isContentLocked;
   const canEditText = baseCanEditText && !isContentLocked;
   const canEditMetadata = baseCanEditMetadata && !isContentLocked;
@@ -286,6 +289,9 @@ export default function ScriptEditor({
   const [aboutOpen, setAboutOpen] = useState(false);
   const isMac = useIsMacLike(); // 「关于 · 快捷键」表格按平台显示 ⌘ / Ctrl（#542）
   const [pendingRehearsalMode, setPendingRehearsalMode] = useState<boolean | null>(null);
+  const [rehearsalModeSwitchPending, setRehearsalModeSwitchPending] = useState(false);
+  const [rehearsalModeSwitchError, setRehearsalModeSwitchError] = useState("");
+  const flushPendingPatchRef = useRef<() => Promise<boolean>>(async () => false);
   const pendingModeScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
   const [pendingStageDelimiterChange, setPendingStageDelimiterChange] =
     useState<PendingStageDelimiterChange | null>(null);
@@ -486,7 +492,7 @@ export default function ScriptEditor({
   const {
     display, setDisplay, toggleDisplay,
     lineIndexMeasureRef, lineIndexMinMeasureRef, lineIndexWidthStyle, markerLineIndexWidthStyle,
-  } = useDisplaySettings({ maxLineIndexText });
+  } = useDisplaySettings({ maxLineIndexText, initialDisplay });
 
   const {
     isReorderLocked, reorderNotice, isReorderLockedRef, reorderUnlockFrame, reorderNoticeTimer,
@@ -643,12 +649,20 @@ export default function ScriptEditor({
   }, [clearDragCountBadge]);
 
   const toggleRehearsalMode = useCallback(() => {
+    setRehearsalModeSwitchError("");
     setPendingRehearsalMode(!rehearsalMode);
     closeToolbarMenu();
   }, [closeToolbarMenu, rehearsalMode]);
 
-  const confirmRehearsalModeChange = useCallback(() => {
+  const confirmRehearsalModeChange = useCallback(async () => {
     if (pendingRehearsalMode === null) return;
+    setRehearsalModeSwitchError("");
+    setRehearsalModeSwitchPending(true);
+    if (pendingRehearsalMode && personalMode === "edit" && !await flushPendingPatchRef.current()) {
+      setRehearsalModeSwitchError("尚有内容未保存，已保留编辑模式，请稍后重试。");
+      setRehearsalModeSwitchPending(false);
+      return;
+    }
     const container = blocksContainerRef.current;
     if (container) {
       const { viewTop, viewBottom } = getScrollMetrics();
@@ -671,7 +685,8 @@ export default function ScriptEditor({
       return next;
     });
     setPendingRehearsalMode(null);
-  }, [closeToolbarMenu, pendingRehearsalMode, resetScriptInteractions, setDisplay]);
+    setRehearsalModeSwitchPending(false);
+  }, [closeToolbarMenu, pendingRehearsalMode, personalMode, resetScriptInteractions, setDisplay]);
 
   const showSelectionChangeNotice = useCallback((message: string) => {
     if (selectionChangeNoticeTimer.current !== null) clearTimeout(selectionChangeNoticeTimer.current);
@@ -1499,7 +1514,7 @@ export default function ScriptEditor({
   const pendingMovedBlockIdsRef = useRef<Set<string>>(new Set());
 
   // Stable ref to the push function so the debounce closure never goes stale.
-  const pushPatchRef = useRef<(curr: ScriptState) => void>(() => {});
+  const pushPatchRef = useRef<(curr: ScriptState) => Promise<boolean>>(async () => false);
   const [syncDebounce] = useState(() => createSaveDebounce(() => {
     const curr: ScriptState = {
       config: scriptConfigRef.current,
@@ -1507,7 +1522,7 @@ export default function ScriptEditor({
       characters: charactersRef.current,
       scenes: scenesRef.current,
     };
-    pushPatchRef.current(curr);
+    void pushPatchRef.current(curr);
   }, { wait: SYNC_DEBOUNCE_MS, maxWait: SYNC_MAX_WAIT_MS }));
 
   const applyWindowBootstrap = useCallback((bootstrap: ScriptWindowBootstrap) => {
@@ -1571,8 +1586,9 @@ export default function ScriptEditor({
 
   useEffect(() => {
     pushPatchRef.current = async (curr: ScriptState) => {
-      if (!canEdit || loadState !== "ready" || syncedStateRef.current === null) return;
-      if (isSyncingRef.current) { deferredSyncRef.current = true; return; }
+      if (!canEdit) return true;
+      if (loadState !== "ready" || syncedStateRef.current === null) return false;
+      if (isSyncingRef.current) { deferredSyncRef.current = true; return false; }
       // 正文预取永远给写入让路；可见缺块属于用户正在等待的前台请求，不在这里取消。
       if (windowRequestRef.current?.priority === "background") {
         windowRequestRef.current.controller.abort();
@@ -1646,7 +1662,7 @@ export default function ScriptEditor({
 
         if (!patch.blockOps.length && !patch.charOps.length && !patch.sceneOps.length) {
           for (const id of movedIdsForPatch) pendingMovedBlockIdsRef.current.delete(id);
-          return;
+          return true;
         }
         const body = await patchScript(effectiveScriptId, activeVersionId, patch);
         if (!body) throw new Error("script patch failed");
@@ -1691,6 +1707,7 @@ export default function ScriptEditor({
           pendingTagInsertsRef.current.clear();
           for (const id of movedIdsForPatch) pendingMovedBlockIdsRef.current.delete(id);
         }
+        return true;
       } catch {
         // 弱网下保留本地内容并明确标记未同步；即使用户不再敲字也会自动重试。
         setSyncWaitingForNetwork(true);
@@ -1699,6 +1716,7 @@ export default function ScriptEditor({
           syncRetryTimerRef.current = null;
           if (!syncUnmountedRef.current) syncDebounce.trigger();
         }, 2000);
+        return false;
       } finally {
         isSyncingRef.current = false;
         const waiters = syncIdleWaitersRef.current;
@@ -2342,21 +2360,25 @@ export default function ScriptEditor({
       deferredSyncRef.current = false;
       syncDebounce.cancel();
     }
-    const curr: ScriptState = {
+    const readCurrent = (): ScriptState => ({
       config: scriptConfigRef.current,
       blocks: normalizeScriptBlockStream(blocksRef.current),
       characters: charactersRef.current,
       scenes: scenesRef.current,
-    };
-    await pushPatchRef.current(curr);
-    const remaining = diffState(syncedStateRef.current, curr, 0);
-    const stateSynced = remaining.blockOps.length === 0 && remaining.charOps.length === 0 && remaining.sceneOps.length === 0;
-    const currentTags = [...blockTagMapRef.current.entries()].sort(([a], [b]) => a.localeCompare(b));
-    const syncedTags = [...syncedBlockTagMapRef.current.entries()].sort(([a], [b]) => a.localeCompare(b));
-    return stateSynced &&
-      pendingTagInsertsRef.current.size === 0 &&
-      JSON.stringify(currentTags) === JSON.stringify(syncedTags);
+    });
+    return flushLatestScriptState(readCurrent, pushPatchRef.current, (latest) => {
+      const remaining = diffState(syncedStateRef.current, latest, 0);
+      const stateSynced = remaining.blockOps.length === 0 && remaining.charOps.length === 0 && remaining.sceneOps.length === 0;
+      const currentTags = [...blockTagMapRef.current.entries()].sort(([a], [b]) => a.localeCompare(b));
+      const syncedTags = [...syncedBlockTagMapRef.current.entries()].sort(([a], [b]) => a.localeCompare(b));
+      return stateSynced &&
+        pendingTagInsertsRef.current.size === 0 &&
+        JSON.stringify(currentTags) === JSON.stringify(syncedTags);
+    });
   }, [syncDebounce]);
+  useLayoutEffect(() => {
+    flushPendingPatchRef.current = flushPendingPatch;
+  }, [flushPendingPatch]);
 
   const {
     error: modeSwitchError,
@@ -3658,22 +3680,19 @@ export default function ScriptEditor({
   }, [clearDragCountBadge, clearDragTarget, lockReorder, moveDraggedBlocks, setScriptDragging, unlockReorder, isContentLocked, isReorderLockedRef]);
 
   const insertBlockAt = useCallback((index: number) => {
-    if (isContentLocked) return;
+    if (!canEditText) return;
     saveSnapshot();
     // Pre-generate the new block ID outside the updater (Strict Mode double-invocation fix).
     const newBlockId = uid();
     // refId must also be determined outside the updater; read it from blocksRef.
     const previousBlocks = blocksRef.current;
-    const insertIndex = Math.max(0, Math.min(index, previousBlocks.length));
-    const refId = insertIndex > 0 ? (previousBlocks[insertIndex - 1]?.id ?? null) : null;
     const newBlock: Block = {
       ...makeBlock(),
       id: newBlockId,  // use the pre-generated stable ID
       sceneId: null,
       rehearsalMark: null,
     };
-    const updated = [...previousBlocks];
-    updated.splice(insertIndex, 0, newBlock);
+    const { blocks: updated, insertIndex, refId } = insertScriptBlockAt(previousBlocks, index, newBlock);
     pendingCharOpen.current = newBlock.id;
     applyBlockStructureEdit(previousBlocks, updated, markerChangeFromOperations([{
       kind: "insert",
@@ -3683,7 +3702,7 @@ export default function ScriptEditor({
       afterType: newBlock.type,
     }]));
     if (refId) inheritTags(refId, newBlockId);
-  }, [applyBlockStructureEdit, saveSnapshot, inheritTags, isContentLocked]);
+  }, [applyBlockStructureEdit, canEditText, saveSnapshot, inheritTags]);
 
   const addChar = (name: string) => {
     if (isContentLocked) return;
@@ -4030,7 +4049,7 @@ export default function ScriptEditor({
       ? ""
       : "absolute right-0 top-full"
   } ${toolbarCompact ? "" : "mt-2.5"} z-40 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`;
-  const effectivePersonalMode: ScriptPersonalMode = baseCanEdit ? personalMode : "read";
+  const effectivePersonalMode: ScriptPersonalMode = personalModeReady && baseCanEdit ? personalMode : "read";
   const personalModeLabel = effectivePersonalMode === "edit" ? "编辑" : "只读";
   const currentModeLabel = rehearsalMode ? "排练" : personalModeLabel;
   const selfPresence: RemotePresence | null = clientId
@@ -5694,8 +5713,14 @@ export default function ScriptEditor({
       {pendingRehearsalMode !== null && (
         <RehearsalModeDialog
           entering={pendingRehearsalMode}
-          onClose={() => setPendingRehearsalMode(null)}
-          onConfirm={confirmRehearsalModeChange}
+          pending={rehearsalModeSwitchPending}
+          error={rehearsalModeSwitchError}
+          onClose={() => {
+            if (rehearsalModeSwitchPending) return;
+            setPendingRehearsalMode(null);
+            setRehearsalModeSwitchError("");
+          }}
+          onConfirm={() => { void confirmRehearsalModeChange(); }}
         />
       )}
 
@@ -6255,13 +6280,26 @@ export default function ScriptEditor({
         const hasLyricCfg = tagGroups.some(g => !!g.lyricSplitAfterOptionId);
         const commentCount = commentsByBlockId.get(mobileBlockMenuBlockId)?.length ?? 0;
         const batchCount = selectedBlockIds.size;
-        const insertActions: Array<[string, () => void]> = [
+        const menuBlockIndex = blocks.findIndex((block) => block.id === menuBlock.id);
+        const blockInsertDisabledReason = canEditText
+          ? null
+          : !baseCanEditText
+            ? "需要剧本文本编辑权限"
+            : rehearsalMode
+              ? "排练模式下不可添加"
+              : "只读模式下不可添加";
+        const insertActions: Array<{ label: string; action: () => void; disabledReason?: string | null }> = [
+          {
+            label: "添加新剧本块",
+            action: () => insertBlockAt(menuBlockIndex),
+            disabledReason: blockInsertDisabledReason,
+          },
           ...(canEditMetadata ? [
-            ["添加新章", () => addChapterBeforeBlock(menuBlock.id)] as [string, () => void],
-            ["添加新段", () => addSceneBeforeBlock(menuBlock.id)] as [string, () => void],
+            { label: "添加新章", action: () => addChapterBeforeBlock(menuBlock.id) },
+            { label: "添加新段", action: () => addSceneBeforeBlock(menuBlock.id) },
           ] : []),
           ...(canAddRehearsalMark ? [
-            ["添加新排练记号", () => addRehearsalBeforeBlock(menuBlock.id)] as [string, () => void],
+            { label: "添加新排练记号", action: () => addRehearsalBeforeBlock(menuBlock.id) },
           ] : []),
         ];
         const conversionActions: Array<[string, () => void]> = isMarker && canEditMetadata ? [
@@ -6287,6 +6325,7 @@ export default function ScriptEditor({
             <div
               data-script-selection-action="true"
               data-script-mobile-block-menu="true"
+              data-script-mobile-block-id={menuBlock.id}
               className="pointer-events-auto max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-[var(--surface)] border-t border-[var(--line)] shadow-2xl"
             >
               <div className="flex justify-center pt-3 pb-1">
@@ -6341,13 +6380,19 @@ export default function ScriptEditor({
                       <span>在块前添加</span>
                       <ChevronIcon size={16} className={`text-zinc-400 transition-transform ${mobileInsertMenuOpen ? "rotate-180" : ""}`} />
                     </button>
-                    {mobileInsertMenuOpen && insertActions.map(([label, action]) => (
+                    {mobileInsertMenuOpen && insertActions.map(({ label, action, disabledReason }) => (
                       <button
                         key={label}
-                        onClick={() => runAndClose(action)}
-                        className="w-full border-t border-zinc-100 bg-zinc-50 px-8 py-3 text-left text-[14px] text-zinc-600"
+                        type="button"
+                        onClick={() => { if (!disabledReason) runAndClose(action); }}
+                        aria-disabled={!!disabledReason}
+                        title={disabledReason ?? undefined}
+                        className={`flex w-full items-center justify-between gap-3 border-t border-zinc-100 bg-zinc-50 px-8 py-3 text-left text-[14px] ${
+                          disabledReason ? "cursor-not-allowed text-zinc-300" : "text-zinc-600"
+                        }`}
                       >
-                        {label}
+                        <span>{label}</span>
+                        {disabledReason && <span className="text-xs">{disabledReason}</span>}
                       </button>
                     ))}
                   </>

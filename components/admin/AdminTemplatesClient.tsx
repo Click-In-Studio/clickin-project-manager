@@ -3,7 +3,7 @@
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useMemo, useState } from "react";
-import PageHeader, { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
+import { PRIMARY_BTN, SECONDARY_BTN } from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import AdminModal from "@/components/ui/AdminModal";
 import TreePickerModal from "@/components/ui/TreePickerModal";
@@ -17,7 +17,6 @@ type TemplateType = { id: string; key: string; abbrHint: string | null };
 
 type Props = {
   productionId: string;
-  productionName: string;
   depts: Dept[];
   initialRows: Row[];
   initialTypes: TemplateType[];
@@ -58,7 +57,7 @@ function RelKeyAdder({ busy, onAdd }: { busy: boolean; onAdd: (rel: string) => v
   );
 }
 
-export default function AdminTemplatesClient({ productionId, productionName, depts, initialRows, initialTypes, canEdit, canManageTypes }: Props) {
+export default function AdminTemplatesClient({ productionId, depts, initialRows, initialTypes, canEdit, canManageTypes }: Props) {
   const [rows, setRows] = useState<Row[]>(initialRows);
   const [types, setTypes] = useState<TemplateType[]>(initialTypes);
   const [selectedTemplate, setSelectedTemplate] = useState<string>(initialTypes[0]?.key ?? "");
@@ -127,8 +126,6 @@ export default function AdminTemplatesClient({ productionId, productionName, dep
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader eyebrow={productionName} title="权限模版" side="stage" />
-
       {/* 摘要 */}
       <AdminMetricGrid
         columns={3}

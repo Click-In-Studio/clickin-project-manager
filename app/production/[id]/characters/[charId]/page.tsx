@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/account/session";
-import { hasEffectiveGrant, hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
+import { hasAnyEffectiveGrant } from "@/lib/perm/grant-check";
+import { getCharacterPerms } from "@/lib/script/character-perms";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getCharacterById, listCharactersByVersion } from "@/lib/script/script-scene-character-db";
 import { getProductionName } from "@/lib/production/production-db";
@@ -31,8 +32,10 @@ export default async function CharacterDetailPage({
   if (!await hasAnyEffectiveGrant(access.permCtx, id, "character", ["meta"], "view"))
     redirect(`/unauthorized?resource=node%3Acharacter%2F*%2Fmeta%40view&id=${id}`);
 
-  // owner 旁路（#228 漏网）；域对齐 API 真相：character 编辑门是 character/*@edit（原 scene meta/name 为复制残留）
-  const canEdit = await hasEffectiveGrant(access.permCtx, id, "character", "*", "*", "edit");
+  // 与列表页同源：详情页也保留 create/edit/delete 与实例级角色权限，不用粗门代替。
+  const perms = await getCharacterPerms(
+    session.userId, id, access.permCtx.isOwner,
+  );
 
   const [name, versionId] = await Promise.all([
     getProductionName(id),
@@ -50,7 +53,7 @@ export default async function CharacterDetailPage({
       productionName={name}
       character={character}
       allCharacters={allCharacters}
-      canEdit={canEdit}
+      perms={perms}
       versionId={versionId}
     />
   );

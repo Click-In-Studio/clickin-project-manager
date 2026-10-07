@@ -5,7 +5,6 @@ import { requireAdminAccess } from "@/lib/perm/admin-guard";
 import { getProductionMeta, getAdminOverviewStats } from "@/lib/production/production-db";
 import { getPool } from "@/lib/pg";
 import { notFound } from "next/navigation";
-import PageHeader from "@/components/ui/PageHeader";
 import AdminMetricGrid from "@/components/admin/AdminMetricGrid";
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -40,8 +39,6 @@ export default async function AdminOverviewPage({ params }: { params: Promise<{ 
 
   return (
     <div style={{ padding: "24px clamp(18px, 3vw, 52px) 60px", minHeight: "100vh", background: "var(--paper)" }}>
-      <PageHeader eyebrow={meta.name} title="项目概览" side="stage" />
-
       {/* ── 基础统计 ── */}
       <AdminMetricGrid
         columns={5}
