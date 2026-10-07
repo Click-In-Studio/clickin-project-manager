@@ -1,19 +1,22 @@
 "use client";
 
 import { useState, useRef, useLayoutEffect, useCallback } from "react";
-import { readDisplayCookie, writeDisplayCookie, type DisplaySettings } from "./display-settings";
+import { DEFAULT_DISPLAY, writeDisplayCookie, type DisplaySettings } from "./display-settings";
 
 /**
  * 显示设置（cookie 持久化）+ 行号列宽度测量（按最长行号文本量两处 span）。
  * 从 ScriptEditor 主函数体原样搬出（#487 S4）。
  */
-export function useDisplaySettings({ maxLineIndexText }: { maxLineIndexText: string }) {
+export function useDisplaySettings({ maxLineIndexText, initialDisplay = DEFAULT_DISPLAY }: {
+  maxLineIndexText: string;
+  initialDisplay?: DisplaySettings;
+}) {
   const lineIndexMeasureRef = useRef<HTMLSpanElement | null>(null);
   const lineIndexMinMeasureRef = useRef<HTMLSpanElement | null>(null);
   const [lineIndexWidth, setLineIndexWidth] = useState(0);
   const [lineIndexMinWidth, setLineIndexMinWidth] = useState(0);
 
-  const [display, setDisplay] = useState<DisplaySettings>(readDisplayCookie);
+  const [display, setDisplay] = useState<DisplaySettings>(initialDisplay);
   useLayoutEffect(() => {
     if (!display.lineNumbers) {
       setLineIndexWidth(0);
