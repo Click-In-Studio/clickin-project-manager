@@ -617,6 +617,8 @@ export default function WikiDocClient({
               onChange={v => { setBody(v); schedule(); }}
               markdown
               frameless
+              className="wiki-markdown-editor"
+              allowHeadingAtDocumentEnd
               blockTools
               minHeight={360}
               placeholder="开始写作…（/ 插入块、[[ 引用文档、@ 提及成员、# 引用剧本内容）"

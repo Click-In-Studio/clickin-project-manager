@@ -208,6 +208,26 @@ body {
   line-height: 1.5;
 }
 
+/* Wiki 整页编辑器的标题节奏。必须由 WikiDocClient 的语境 class 收口；
+   SmartTextarea 也服务公告、报告、剧本评论等小框，不能用全局 .ProseMirror 标题规则。 */
+.wiki-markdown-editor .smart-textarea-content h1 {
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.wiki-markdown-editor .smart-textarea-content h2 {
+  margin-top: 1rem;
+  margin-bottom: 0.375rem;
+}
+.wiki-markdown-editor .smart-textarea-content h3 {
+  margin-top: 0.875rem;
+  margin-bottom: 0.25rem;
+}
+.wiki-markdown-editor .smart-textarea-content :is(h1, h2, h3) + :is(h1, h2, h3) {
+  margin-top: 0.5rem;
+}
+.wiki-markdown-editor .smart-textarea-content > *:first-child { margin-top: 0; }
+.wiki-markdown-editor .smart-textarea-content > *:last-child { margin-bottom: 0; }
+
 /* 行内样式方言（#524，lib/editor/inline-style-dialect）——编辑器 renderHTML 与
    只读渲染（remark-inline-style）共用 data-fg / data-bg 形态。每个枚举值一条，
    tests/wiki/wiki-inline-style.test.ts 逐个核对 */

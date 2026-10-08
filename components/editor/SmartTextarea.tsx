@@ -381,6 +381,9 @@ export interface SmartTextareaProps {
    *  180~360px 的小框既没有放手柄的地方，也用不到块级移动/分栏。
    *  浮动条不受此门控（它贴选区，不占版面），markdown 面一律有。 */
   blockTools?: boolean;
+  /** 允许标题作为文档末块，不由 TrailingNode 自动补空段。
+   *  仅给 wiki 整页编辑器：小型 SmartTextarea 仍保留默认的尾段落行为。 */
+  allowHeadingAtDocumentEnd?: boolean;
   /** 任务项同步（#670）：光标停在 `- [ ]` 任务项上出「同步任务」浮条，建 production
    *  任务并往该行写 task 引用。需要 contentMention.productionId；只给 wiki 整页
    *  （引用边落 wiki_entity_link 才有反向链接，别的面建了任务也回不到文档）。 */
@@ -418,6 +421,7 @@ export default function SmartTextarea({
   markdown = false,
   frameless = false,
   blockTools = false,
+  allowHeadingAtDocumentEnd = false,
   taskSync = false,
   plugins: extraPlugins = [],
   imageUpload,
@@ -601,6 +605,10 @@ export default function SmartTextarea({
     // 「同一时刻只可能有一种形态」天然保证。
     const base = StarterKit.configure({
       dropcursor: hasColumnTools ? false : { ...DROP_INDICATOR_OPTIONS },
+      // wiki 整页编辑器里标题本身就是完整的文末块；把正文切到 H1/H2/H3 时
+      // 不应由 TrailingNode 凭空补一段。其他 SmartTextarea 保留默认行为，表格、
+      // 分栏等结构块在两种语境下也仍会补尾，保证光标能落到结构块之后。
+      trailingNode: allowHeadingAtDocumentEnd ? { notAfter: ["heading"] } : {},
       // 段落换成带空段落方言的版本（#576）：空行序列化成独占一行的 `&nbsp;`，
       // 否则相邻同类列表之间的空行一过 markdown 就没了、两个列表并成一个
       paragraph: false,
@@ -751,7 +759,7 @@ export default function SmartTextarea({
       ...(hasImageUpload ? [UploadPlaceholder] : []),
       ...commonExts, wikiTriggerCfg, slashTriggerCfg, remoteCursorExt];
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markdown, remoteCursorExt, hasImageUpload, blockTools, hasColumnTools]);
+  }, [markdown, remoteCursorExt, hasImageUpload, blockTools, hasColumnTools, allowHeadingAtDocumentEnd]);
 
   const editorMinHeight = minHeight != null
     ? `${minHeight}px`
