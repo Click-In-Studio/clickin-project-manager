@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterAll,
+  afterEach,
+} from "vitest";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import type {
   StreamFn,
@@ -150,6 +158,10 @@ describe("持久子 Agent 基建", () => {
     runtimeOverrides.apiKey = "test-key";
     runtimeOverrides.mmpClient = null;
     runtimeOverrides.streamFn = model([]);
+  });
+  beforeEach(() => {
+    // 名额回收也会触发 drainer；每项用例及其收尾均使用假模型。
+    subagentRuntimeOverrides.streamFn = model([]);
   });
   afterEach(async () => {
     for (const parent of parents) await stopSubagent(parent.sessionId);
