@@ -78,6 +78,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
 export const GROUP_LABELS: Record<string, string> = {
   "*": "全部资源",
   ai: "AI 用量",
+  ai_instructions: "项目级 AI 指令",
   announcement: "公告",
   asset: "数字资产",
   character: "角色",

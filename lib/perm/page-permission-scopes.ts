@@ -98,6 +98,9 @@ export const PAGE_PERMISSION_SCOPES = {
     "node:dept/*/grants@edit",
     "node:script/*/imports@create",
     "node:dramaturgy/*/imports@create",
+    // #884：制作级 AI 指令卡位于配置中心；Agent 写工具复用同一枚 edit 门。
+    // 制作人通配区间或个人/角色区间都只给资格，进入配置中心后在这里落成 grant。
+    "node:ai_instructions/*@edit",
   ]),
 
   // 财务页与配置中心共用的完整激活面。制作人的 node:*/*@*、财务部门区间或
