@@ -1,161 +1,168 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import NavigationIcon from "@/components/shell/app-shell/NavigationIcon";
 import styles from "@/components/wiki/WikiOutline.module.css";
-import type { WikiOutlineItem } from "@/lib/wiki/outline-types";
-import { activeWikiOutlineId } from "@/lib/wiki/outline-types";
+import { activeWikiOutlineId, type WikiOutlineItem } from "@/lib/wiki/outline-types";
 
-function scrollSourceTo(item: WikiOutlineItem, root: HTMLElement): boolean {
-  const source = root.querySelector<HTMLTextAreaElement>("[data-wiki-source-editor]");
-  if (!source) return false;
-  source.focus();
-  source.setSelectionRange(item.offset, item.endOffset);
-  const progress = item.offset / Math.max(1, source.value.length);
-  source.scrollTop = progress * Math.max(0, source.scrollHeight - source.clientHeight);
-  source.scrollIntoView({ behavior: "smooth", block: "center" });
-  return true;
+/** 源码没有标题 DOM，以相同字体和宽度测量换行后的标题位置。 */
+function sourceHeadingPositions(items: WikiOutlineItem[], source: HTMLTextAreaElement) {
+  const mirror = document.createElement("div");
+  const css = getComputedStyle(source);
+  for (const property of ["font", "line-height", "letter-spacing", "padding", "box-sizing", "tab-size"]) {
+    mirror.style.setProperty(property, css.getPropertyValue(property));
+  }
+  Object.assign(mirror.style, {
+    position: "fixed", visibility: "hidden", width: `${source.clientWidth}px`,
+    whiteSpace: "pre-wrap", overflowWrap: "break-word", border: "none",
+  });
+  let offset = 0;
+  const markers = items.map(item => {
+    mirror.append(document.createTextNode(source.value.slice(offset, item.offset)));
+    const marker = mirror.appendChild(document.createElement("span"));
+    marker.textContent = source.value.slice(item.offset, item.endOffset);
+    offset = item.endOffset;
+    return marker;
+  });
+  document.body.append(mirror);
+  const top = mirror.getBoundingClientRect().top;
+  const positions = markers.map((marker, index) => ({
+    id: items[index].id, top: marker.getBoundingClientRect().top - top,
+  }));
+  mirror.remove();
+  return positions;
 }
 
-export default function WikiOutline({
-  items,
-  contentRef,
-}: {
+export default function WikiOutline({ items, contentRef }: {
   items: WikiOutlineItem[];
   contentRef: RefObject<HTMLElement | null>;
 }) {
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [desktopCollapsed, setDesktopCollapsed] = useState(false);
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  const entryRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const [activeId, setActiveId] = useState<string | null>(items[0]?.id ?? null);
   const headingRefs = useRef<HTMLElement[]>([]);
 
   useEffect(() => {
     const root = contentRef.current;
     if (!root) return;
-    const headings = Array.from(root.querySelectorAll<HTMLElement>("h1, h2, h3"));
-    headings.forEach((heading, index) => {
-      const item = items[index];
-      if (!item) return;
-      heading.id = item.id;
-      heading.dataset.wikiOutlineHeading = "true";
-      heading.classList.add("scroll-mt-24");
-    });
-    headingRefs.current = headings.slice(0, items.length);
-    setActiveId(current => items.some(item => item.id === current) ? current : items[0]?.id ?? null);
-
     const scroller = root.closest<HTMLElement>("#workspace-scroll");
     let frame = 0;
     const update = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const positions = headingRefs.current.map(heading => ({
-          id: heading.id,
-          top: heading.getBoundingClientRect().top,
-        }));
-        setActiveId(activeWikiOutlineId(positions));
+        if (!headingRefs.current.length) {
+          const source = root.querySelector<HTMLTextAreaElement>("[data-wiki-source-editor]");
+          if (source) setActiveId(activeWikiOutlineId(sourceHeadingPositions(items, source), source.scrollTop + 24));
+          else setActiveId(items[0]?.id ?? null);
+          return;
+        }
+        const atEnd = scroller && scroller.scrollHeight > scroller.clientHeight
+          && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+        setActiveId(atEnd ? headingRefs.current.at(-1)!.id : activeWikiOutlineId(headingRefs.current.map(heading => ({
+          id: heading.id, top: heading.getBoundingClientRect().top,
+        })), (scroller?.getBoundingClientRect().top ?? 0) + 24));
       });
     };
-    update();
+    const bindHeadings = () => {
+      headingRefs.current = Array.from(root.querySelectorAll<HTMLElement>("h1, h2, h3")).slice(0, items.length);
+      headingRefs.current.forEach((heading, index) => {
+        if (heading.id !== items[index].id) heading.id = items[index].id;
+        if (heading.dataset.wikiOutlineHeading !== "true") heading.dataset.wikiOutlineHeading = "true";
+      });
+      update();
+    };
+    bindHeadings();
+    // 编辑器延迟挂载、模式切换和标题编辑都会替换 DOM；不监听属性，避免锚点写入循环。
+    const observer = new MutationObserver(bindHeadings);
+    observer.observe(root, { childList: true, subtree: true, characterData: true });
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    resizeObserver?.observe(root);
     const target: HTMLElement | Window = scroller ?? window;
     target.addEventListener("scroll", update, { passive: true });
+    root.addEventListener("scroll", update, { passive: true, capture: true });
     window.addEventListener("resize", update);
     return () => {
+      observer.disconnect();
+      resizeObserver?.disconnect();
       cancelAnimationFrame(frame);
       target.removeEventListener("scroll", update);
+      root.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
     };
   }, [contentRef, items]);
 
   function jump(item: WikiOutlineItem) {
     setActiveId(item.id);
-    setMobileOpen(false);
     const root = contentRef.current;
-    const target = root?.ownerDocument.getElementById(item.id);
-    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-    else if (root) scrollSourceTo(item, root);
-    if (typeof history !== "undefined") history.replaceState(null, "", `#${item.id}`);
+    const target = headingRefs.current.find(heading => heading.id === item.id);
+    if (target) {
+      const scroller = root?.closest<HTMLElement>("#workspace-scroll");
+      if (scroller) scroller.scrollTo({
+        top: scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 24,
+        behavior: "instant",
+      });
+      else target.scrollIntoView({ behavior: "instant", block: "start" });
+    } else if (root) {
+      const source = root.querySelector<HTMLTextAreaElement>("[data-wiki-source-editor]");
+      if (source) {
+        source.focus({ preventScroll: true });
+        source.setSelectionRange(item.offset, item.endOffset);
+        const position = sourceHeadingPositions(items, source).find(heading => heading.id === item.id);
+        source.scrollTop = (position?.top ?? 0) - 24;
+        source.scrollIntoView({ behavior: "instant", block: "center" });
+      }
+    }
+    history.replaceState(null, "", `#${item.id}`);
   }
 
-  const list = (
-    <nav aria-label="当前文档目录" className="min-h-0 flex-1 overflow-y-auto px-2 py-2 panel-scrollbar">
-      {items.length === 0 ? (
-        <p className="px-2 py-3 text-xs leading-relaxed text-zinc-400">添加一级、二级或三级标题后，这里会实时生成目录。</p>
-      ) : items.map(item => (
-        <button
-          key={item.id}
-          type="button"
-          onClick={() => jump(item)}
-          aria-current={activeId === item.id ? "location" : undefined}
-          className={`block w-full rounded-md py-1.5 pr-2 text-left text-xs leading-snug transition-colors ${
-            activeId === item.id
-              ? "bg-sky-50 font-semibold text-sky-800"
-              : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800"
-          }`}
-          style={{ paddingLeft: 8 + (item.level - 1) * 12 }}
-        >
-          {item.text}
-        </button>
-      ))}
-    </nav>
-  );
+  function close() {
+    setOpen(false);
+    requestAnimationFrame(() => entryRef.current?.focus({ preventScroll: true }));
+  }
+
+  useEffect(() => {
+    if (open) panelRef.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !activeId) return;
+    const nav = panelRef.current?.querySelector("nav");
+    const current = nav?.querySelector<HTMLElement>('[aria-current="location"]');
+    if (!nav || !current) return;
+    const top = current.offsetTop;
+    if (top < nav.scrollTop) nav.scrollTop = top;
+    else if (top + current.offsetHeight > nav.scrollTop + nav.clientHeight) {
+      nav.scrollTop = top + current.offsetHeight - nav.clientHeight;
+    }
+  }, [activeId, open, items]);
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setMobileOpen(true)}
-        className="order-first xl:hidden inline-flex items-center gap-1.5 self-start rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm"
-        aria-expanded={mobileOpen}
-      >
-        <NavigationIcon name="outline" />
-        目录
+    <div className={styles.outline}>
+      <button ref={entryRef} type="button" onClick={() => setOpen(true)} className={styles.entry}
+        aria-label="展开目录" title="展开目录" aria-expanded={open} aria-controls={panelId} hidden={open}>
+        <NavigationIcon name="outline" /><span>目录</span>
       </button>
-
-      {mobileOpen && (
-        <button
-          type="button"
-          aria-label="关闭目录"
-          onClick={() => setMobileOpen(false)}
-          className={`${styles.mobileViewport} xl:hidden panel-mobile-full fixed inset-x-0 z-[45] bg-zinc-950/35`}
-        />
-      )}
-      <aside className={`${styles.mobileViewport} ${styles.mobilePanel} ${mobileOpen ? "translate-x-0" : "translate-x-[110%]"} panel-mobile-full fixed right-0 z-[46] flex w-[min(300px,calc(100vw-24px))] flex-col overflow-hidden rounded-l-xl border border-zinc-200 bg-white shadow-2xl transition-transform xl:hidden`}>
-        <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
-          <span className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800"><NavigationIcon name="outline" />目录</span>
-          <button type="button" onClick={() => setMobileOpen(false)} className="h-8 w-8 rounded-full text-lg text-zinc-500 hover:bg-zinc-100" aria-label="关闭目录">×</button>
+      <aside ref={panelRef} id={panelId} hidden={!open} className={`${styles.panel} panel-mobile-full`}
+        aria-label="正文目录"
+        onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); close(); } }}>
+        <div className={styles.header}>
+          <span>目录</span>
+          <button type="button" onClick={close} className={styles.close} aria-label="收起目录" title="收起目录">×</button>
         </div>
-        {list}
-      </aside>
-
-      {desktopCollapsed ? (
-        <button
-          type="button"
-          onClick={() => setDesktopCollapsed(false)}
-          className="hidden xl:inline-flex sticky top-4 h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"
-          title="展开目录"
-          aria-label="展开目录"
-          aria-expanded="false"
-        >
-          <NavigationIcon name="outline" />
-        </button>
-      ) : (
-        <aside className="hidden xl:flex sticky top-4 h-[calc(100vh-120px)] w-[208px] shrink-0 flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white">
-          <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
-            <span className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800"><NavigationIcon name="outline" />目录</span>
-            <button
-              type="button"
-              onClick={() => setDesktopCollapsed(true)}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
-              aria-label="收起目录"
-              title="收起目录"
-              aria-expanded="true"
-            >
-              →
+        <nav aria-label="当前文档目录" className={`${styles.list} panel-scrollbar`}>
+          {items.length === 0 ? (
+            <p className={styles.empty}>添加一级、二级或三级标题后，这里会实时生成目录。</p>
+          ) : items.map(item => (
+            <button key={item.id} type="button" onClick={() => jump(item)}
+              aria-current={activeId === item.id ? "location" : undefined} title={item.text}
+              className={styles.heading} style={{ paddingLeft: 6 + (item.level - 1) * 8 }}>
+              {item.text}
             </button>
-          </div>
-          {list}
-        </aside>
-      )}
-    </>
+          ))}
+        </nav>
+      </aside>
+    </div>
   );
 }

@@ -11,24 +11,24 @@ describe("云文档与文内目录的响应式边界", () => {
     expect(shell).toContain('<NavigationIcon name="knowledge" />');
     expect(shell).toContain("\n        云文档\n");
     expect(outline).toContain('<NavigationIcon name="outline" />');
-    expect(outline).toContain("\n        目录\n");
+    expect(outline).toContain('aria-label="展开目录"');
   });
 
-  it("两个抽屉都避开 AppShell 顶栏与底部导航", () => {
+  it("手机目录无正文遮罩，避开 AppShell 顶栏与底部导航", () => {
     expect(shell).toMatch(/panel-mobile-full fixed inset-x-0 z-\[45\]/);
     expect(shell).toMatch(/panel-mobile-full fixed left-0 z-\[46\]/);
-    expect(outline).toMatch(/panel-mobile-full fixed inset-x-0 z-\[45\]/);
-    expect(outline).toMatch(/panel-mobile-full fixed right-0 z-\[46\]/);
-    expect(outline).toContain("styles.mobileViewport");
+    expect(outline).toContain("panel-mobile-full");
     expect(outlineCss).toContain("height: var(--app-visual-viewport-height, 100dvh)");
-    expect(outlineCss).toContain("top: var(--app-visual-viewport-offset-top, 0px)");
+    expect(outlineCss).toContain("width: 34vw");
+    expect(outlineCss).toContain("overscroll-behavior: contain");
+    expect(outline).not.toContain("inset-x-0");
   });
 
   it("桌面展开宽度稳定，收起后只保留窄入口", () => {
     expect(shell).toContain("lg:w-[264px]");
     expect(shell).toContain("h-9 w-9 shrink-0");
-    expect(outline).toContain("w-[208px] shrink-0");
-    expect(outline).toContain("h-9 w-9 shrink-0");
+    expect(outlineCss).toContain("width: 208px");
+    expect(outlineCss).toContain("@media (min-width: 1024px)");
     expect(docPage).toContain('padding: "16px clamp(12px, 1.8vw, 28px) 48px"');
     expect(docPage).not.toContain("clamp(18px, 3vw, 52px)");
   });
