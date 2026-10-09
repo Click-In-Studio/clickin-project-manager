@@ -9,6 +9,8 @@ import { parseDuration, formatDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
+import { useSceneTableStructure } from "./use-scene-table-structure";
+import SceneTableActions, { SceneTableDeleteDialog } from "./SceneTableActions";
 
 export type TableColumnDef = {
   key: string;
@@ -89,6 +91,10 @@ export type SceneTableViewProps = {
   onViewConfigChange: (config: TableViewConfigData) => void;
   onUpdateScene: (sceneId: string, name: string) => Promise<void>;
   onPatchMeta: (sceneId: string, fields: Partial<Pick<MarkerProjection, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">>) => Promise<void>;
+  versionId: string | null;
+  openingChapterMarkerId: string | null;
+  onScenesChange: (scenes: MarkerProjection[]) => void;
+  trackWrite: <T,>(operation: Promise<T>) => Promise<T>;
 };
 
 function MetaCell({
@@ -326,12 +332,21 @@ export default function SceneTableView({
   onViewConfigChange,
   onUpdateScene,
   onPatchMeta,
+  versionId,
+  openingChapterMarkerId,
+  onScenesChange,
+  trackWrite,
 }: SceneTableViewProps) {
   const [expandedAssets, setExpandedAssets] = useState<Set<string>>(new Set());
   const [collapsedChapters, setCollapsedChapters] = useState<Set<string>>(new Set());
   const resizingRef = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
+  const structure = useSceneTableStructure({ productionId, versionId, scenes, openingChapterMarkerId, onScenesChange, trackWrite });
+  const [actionMarker, setActionMarker] = useState<MarkerProjection | "new" | null>(null);
+  const [dragging, setDragging] = useState<MarkerProjection | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; edge: "top" | "bottom"; beforeId: string | null } | null>(null);
+  const actionWidth = canEdit ? 88 : 0;
 
   useEffect(() => {
     return () => { resizeCleanupRef.current?.(); };
@@ -345,7 +360,7 @@ export default function SceneTableView({
   }, [viewConfig]);
   const frozenLayout = useMemo(() => {
     const frozen = new Set(viewConfig.frozenColumns);
-    let left = 0;
+    let left = actionWidth;
     const offsets = new Map<string, number>();
     for (const column of visibleColumns) {
       if (!frozen.has(column.key)) continue;
@@ -353,7 +368,7 @@ export default function SceneTableView({
       left += viewConfig.columnWidths[column.key] ?? column.defaultWidth;
     }
     return { frozen, offsets, lastKey: [...offsets.keys()].at(-1) ?? null };
-  }, [viewConfig.columnWidths, viewConfig.frozenColumns, visibleColumns]);
+  }, [actionWidth, viewConfig.columnWidths, viewConfig.frozenColumns, visibleColumns]);
 
   const frozenCell = (key: string, header = false): React.CSSProperties => {
     if (!frozenLayout.frozen.has(key)) return {};
@@ -544,12 +559,48 @@ export default function SceneTableView({
     const isExpanded = expandedAssets.has(scene.id);
     return (
       <React.Fragment key={scene.id}>
-        <tr className={`scene-table-row group border-b border-[var(--line)] ${isChapter ? "scene-table-row-chapter" : ""}`}>
+        <tr
+          data-scene-id={scene.id}
+          onDragOver={event => {
+            if (!dragging || !canEdit || !fieldPerms.structure || structure.busy) return;
+            const rect = event.currentTarget.getBoundingClientRect();
+            const edge = event.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+            const beforeId = structure.dropBefore(dragging, scene, edge);
+            if (beforeId === undefined) { setDropTarget(null); return; }
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            setDropTarget({ id: scene.id, edge, beforeId });
+          }}
+          onDrop={event => {
+            event.preventDefault();
+            if (dragging && canEdit && fieldPerms.structure && !structure.busy) {
+              const rect = event.currentTarget.getBoundingClientRect();
+              const edge = event.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+              const beforeId = structure.dropBefore(dragging, scene, edge);
+              if (beforeId !== undefined) void structure.reorder(dragging.id, beforeId).catch(() => {});
+            }
+            setDragging(null); setDropTarget(null);
+          }}
+          className={`scene-table-row group border-b border-[var(--line)] ${isChapter ? "scene-table-row-chapter" : ""} ${dragging?.id === scene.id ? "opacity-60" : ""}`}
+        >
+          {canEdit && (
+            <td className="scene-table-frozen-cell sticky left-0 z-10 px-2 py-1 align-top" style={{ width: actionWidth }}>
+              <div className="flex items-center gap-1">
+                <button type="button" draggable={fieldPerms.structure && scene.id !== openingChapterMarkerId && !structure.busy}
+                  aria-label={`拖动 ${scene.number} ${scene.name}`} aria-disabled={!fieldPerms.structure || scene.id === openingChapterMarkerId || structure.busy}
+                  title={!fieldPerms.structure ? "没有排序权限" : scene.id === openingChapterMarkerId ? "开场章节固定在最前面" : "拖动调整同级顺序；也可在行操作中上移/下移"}
+                  onDragStart={event => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", scene.id); setDragging(scene); }}
+                  onDragEnd={() => { setDragging(null); setDropTarget(null); }}
+                  className="h-8 w-8 shrink-0 cursor-grab rounded text-zinc-500 hover:bg-zinc-100 aria-disabled:cursor-default aria-disabled:opacity-30">⠿</button>
+                <button type="button" disabled={structure.busy} onClick={() => setActionMarker(scene)} aria-label={`${scene.number} ${scene.name} 行操作`} className="h-8 w-8 shrink-0 rounded text-zinc-600 hover:bg-zinc-100">⋯</button>
+              </div>
+            </td>
+          )}
           {visibleColumns.map((col) => (
             <td
               key={col.key}
               className={`border-r border-zinc-100/90 px-3 py-2.5 align-top ${frozenLayout.frozen.has(col.key) ? "scene-table-frozen-cell" : ""}`}
-              style={{ width: viewConfig.columnWidths[col.key] ?? col.defaultWidth, ...frozenCell(col.key) }}
+              style={{ width: viewConfig.columnWidths[col.key] ?? col.defaultWidth, ...frozenCell(col.key), ...(dropTarget?.id === scene.id ? { borderTop: dropTarget.edge === "top" ? "2px solid #2563eb" : undefined, borderBottom: dropTarget.edge === "bottom" ? "2px solid #2563eb" : undefined } : {}) }}
             >
               {renderCell(scene, col.key, isChapter, children)}
             </td>
@@ -558,7 +609,7 @@ export default function SceneTableView({
         </tr>
         {isExpanded && (
           <tr className="border-b border-[var(--line)] bg-zinc-50/30">
-            <td colSpan={visibleColumns.length + 1} className="px-4 py-3">
+            <td colSpan={visibleColumns.length + 1 + (canEdit ? 1 : 0)} className="px-4 py-3">
               <MountPointAssets
                 productionId={productionId}
                 mountType="scene"
@@ -585,10 +636,16 @@ export default function SceneTableView({
   };
 
   const totalWidth = visibleColumns.reduce(
-    (sum, col) => sum + (viewConfig.columnWidths[col.key] ?? col.defaultWidth), 0
+    (sum, col) => sum + (viewConfig.columnWidths[col.key] ?? col.defaultWidth), actionWidth
   );
 
   return (
+    <>
+      {canEdit && <div className="mb-2 flex items-center gap-3">
+        {fieldPerms.create && <button type="button" disabled={structure.busy} onClick={() => setActionMarker("new")} className="rounded border border-zinc-300 bg-white px-3 py-2 text-xs disabled:opacity-40">＋ 新增章节</button>}
+        {structure.busy && <span role="status" className="text-xs text-zinc-500">正在保存…</span>}
+      </div>}
+      {structure.error && <div role="alert" className="mb-2 flex items-center gap-2 text-xs text-red-700">{structure.error}<button type="button" disabled={structure.busy} onClick={structure.refreshWithNotice} className="underline">重试同步</button></div>}
     <div className="max-h-[calc(100dvh-9rem)] overflow-auto overscroll-contain rounded-2xl bg-white shadow-sm">
       <table
         ref={tableRef}
@@ -597,6 +654,7 @@ export default function SceneTableView({
       >
         <thead className="sticky top-0 z-20 bg-white shadow-[0_1px_0_var(--line)]">
           <tr className="border-b border-[var(--line)]">
+            {canEdit && <th className="scene-table-frozen-header sticky left-0 z-30 px-2 py-3 text-xs font-medium text-zinc-500" style={{ width: actionWidth }}>操作</th>}
             {visibleColumns.map((col) => (
               <th
                 key={col.key}
@@ -630,7 +688,7 @@ export default function SceneTableView({
           })}
           {acts.length === 0 && (
             <tr>
-              <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-center text-sm text-zinc-300">
+              <td colSpan={visibleColumns.length + 1 + (canEdit ? 1 : 0)} className="px-4 py-8 text-center text-sm text-zinc-300">
                 暂无章节
               </td>
             </tr>
@@ -638,5 +696,8 @@ export default function SceneTableView({
         </tbody>
       </table>
     </div>
+    {canEdit && actionMarker && <SceneTableActions key={actionMarker === "new" ? "new" : actionMarker.id} marker={actionMarker === "new" ? null : scenes.find(item => item.id === actionMarker.id) ?? actionMarker} scenes={scenes} fieldPerms={fieldPerms} structure={structure} onClose={() => setActionMarker(null)} />}
+    {canEdit && <SceneTableDeleteDialog structure={structure} />}
+    </>
   );
 }

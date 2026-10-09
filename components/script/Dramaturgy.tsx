@@ -396,6 +396,10 @@ export default function Dramaturgy({
             onViewConfigChange={handleConfigChange}
             onUpdateScene={handleUpdateScene}
             onPatchMeta={handlePatchMeta}
+            versionId={versionId}
+            openingChapterMarkerId={openingChapterMarkerId}
+            onScenesChange={setScenes}
+            trackWrite={trackWorkspaceWrite}
           />
         )}
       </div>
