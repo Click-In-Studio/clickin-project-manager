@@ -76,6 +76,7 @@ export function useSceneTableStructure({
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "操作失败";
       setError(message);
+      if (method === "DELETE" && deleteDialog) setDeleteDialog({ plan: null, message });
       // 请求可能已落库；先释放锁再对账，不把失败请求当作成功。
       busyRef.current = false;
       await refresh().catch(() => setError(`${message}；同步也失败，请重试同步`));

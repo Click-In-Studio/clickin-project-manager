@@ -127,6 +127,17 @@ describe("构作表格结构操作", () => {
     expect(row("s1").querySelectorAll("td")[1].style.borderTop).toContain("2px"); await fire(row("s1"), "drop");
     expect(JSON.parse(writes("PUT")[0][1].body)).toMatchObject({ markerId: "s2", beforeMarkerId: "s1" });
   });
+  it("松手位置重新判定，不采用上次悬停的边沿", async () => {
+    await fire(row("s1").querySelector("[draggable='true']")!, "dragstart");
+    await fire(row("s2"), "dragover", 110);
+    await fire(row("s2"), "drop", 135);
+    expect(JSON.parse(writes("PUT")[0][1].body)).toMatchObject({ markerId: "s1", beforeMarkerId: "c1" });
+  });
+  it("选择删除方式后服务端拒绝，错误在共享弹窗内显示", async () => {
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => !init?.method ? response(200, SCENES) : JSON.parse(String(init.body)).operation ? response(403, { error: "删除整段内容需要剧本编辑权限" }) : response(300, { plan: { status: "choice", options: [{ type: "whole", markerId: "c1" }], previewBlockIds: ["c1"] } }));
+    await openRow("c1"); await clickText("删除"); await clickText("确认删除"); await clickText("删除全部内容");
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("删除整段内容需要剧本编辑权限");
+  });
   it("开场章、跨章和原位落点不写入", async () => {
     expect(row("c0").querySelector("[draggable='true']")).toBeNull();
     await drag("c2", "c0"); await drag("s1", "s3"); await drag("s1", "s2");
