@@ -38,19 +38,20 @@ export function useSceneTableStructure({
         onScenesChange(data);
         writeBlockedRef.current = false;
         setWriteBlocked(false);
+        return true;
       }
+      return false;
     } catch (caught) {
-      if (sequence === readSequence.current) {
-        writeBlockedRef.current = true;
-        setWriteBlocked(true);
-      }
+      if (sequence !== readSequence.current) return false;
+      writeBlockedRef.current = true;
+      setWriteBlocked(true);
       throw caught;
     }
   }, [endpoint, onScenesChange, versionId]);
 
   const refreshWithNotice = useCallback(() => {
     if (busyRef.current) { refreshQueued.current = true; return; }
-    void refresh().then(() => { if (!writeBlockedRef.current) setError(null); })
+    void refresh().then((synced) => { if (synced) setError(null); })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "同步失败"));
   }, [refresh]);
   useEffect(() => {

@@ -119,6 +119,17 @@ describe("构作表格结构操作", () => {
     await submitName("恢复后的草稿");
     expect(writes("POST")).toHaveLength(2);
   });
+  it("晚到的旧同步不会清除新写入失败提示或覆盖状态", async () => {
+    let resolveOld!: (value: ReturnType<typeof response>) => void;
+    fetchMock.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
+    props = { ...props, versionId: "v2" }; await render();
+    await openRow("s1"); await clickText("在此段落后新增段落");
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => init?.method ? response(403, { error: "当前写入被拒绝" }) : response(200, SCENES));
+    await submitName("草稿");
+    await act(async () => resolveOld(response(200, [])));
+    expect(host.textContent).toContain("当前写入被拒绝");
+    expect(props.onScenesChange).toHaveBeenLastCalledWith(SCENES);
+  });
   it("逐动作和逐实例权限，字段修改权限不开放结构动作", async () => {
     props = { ...props, fieldPerms: { ...NO_SCENE_FIELD_PERMS, synopsis: true, any: true, deleteIds: ["s1"] } }; await render();
     await openRow("s1");
