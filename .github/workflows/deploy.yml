@@ -414,12 +414,29 @@ jobs:
               exit 1
             fi
 
+            check_web_health() {
+              # curl -f 不拒绝 307；必须同时验证精确状态码和健康 JSON，不能跟随登录跳转。
+              WEB_HEALTH=$(printf "header = \"Authorization: Bearer %s\"\n" "$HEALTH_SECRET" |
+                curl -fsS --max-time 3 --config - --write-out "\n%{http_code}" http://127.0.0.1:3001/health) &&
+                printf "%s" "$WEB_HEALTH" | node -e "
+                  let input = \"\";
+                  process.stdin.on(\"data\", chunk => input += chunk);
+                  process.stdin.on(\"end\", () => {
+                    const separator = input.lastIndexOf(\"\n\");
+                    try {
+                      const healthy = input.slice(separator + 1) === \"200\" &&
+                        JSON.parse(input.slice(0, separator)).ok === true;
+                      process.exit(healthy ? 0 : 1);
+                    } catch { process.exit(1); }
+                  });
+                "
+            }
+
             for ATTEMPT in $(seq 1 30); do
               # 端口必须与 deploy/ecosystem.config.js 的三个进程定义同步。
-              # runner / worker 只监听 127.0.0.1，不对外暴露；Web /health 经过 nginx，必须鉴权。
+              # runner / worker 只监听 127.0.0.1，不对外暴露；Web /health 必须鉴权。
               # secret 通过 stdin 传给 curl config，不能出现在同机其他进程可读的 argv 中。
-              if printf 'header = "Authorization: Bearer %s"\n' "$HEALTH_SECRET" |
-                   curl -fsS --max-time 3 --config - http://127.0.0.1:3001/health >/dev/null &&
+              if check_web_health &&
                  curl -fsS --max-time 3 http://127.0.0.1:3102/health >/dev/null &&
                  curl -fsS --max-time 3 http://127.0.0.1:3103/health >/dev/null; then
                 # 已验证配置也是成功激活的一部分；落盘失败会造成下次恢复使用旧进程定义，必须失败关闭。

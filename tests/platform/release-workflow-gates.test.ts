@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 const root = path.resolve(__dirname, "../..");
@@ -106,7 +107,7 @@ describe("发布门禁 workflow", () => {
       .map((match) => match[1]);
     expect(healthPorts).toHaveLength(3);
     for (const port of healthPorts) expect(activation).toContain(`http://127.0.0.1:${port}/health`);
-    expect(activation).toContain('header = "Authorization: Bearer %s"');
+    expect(activation).toContain('header = \\"Authorization: Bearer %s\\"');
     expect(activation).toContain('curl -fsS --max-time 3 --config -');
     expect(activation).not.toContain('-H "Authorization: Bearer $HEALTH_SECRET"');
     expect(activation).toContain("--max-time 3");
@@ -114,5 +115,35 @@ describe("发布门禁 workflow", () => {
     expect(activation).not.toContain('pm2 stop "$APP" || STOP_FAILED=1');
     expect(activation).toContain("::error::一个或多个数据库客户端进程停止或移除失败");
     expect(activation.indexOf('cp "$NEW_ECOSYSTEM"')).toBeGreaterThan(activation.indexOf("http://127.0.0.1:3103/health"));
+  });
+
+  it.each([
+    ["健康 JSON", '{"ok":true}\n200', 0, true],
+    ["登录重定向", '\n307', 0, false],
+    ["登录 HTML", '<html>登录</html>\n200', 0, false],
+    ["数据库不可读", '{"ok":false}\n503', 0, false],
+    ["路由不存在", '<html>404</html>\n404', 0, false],
+    ["不健康 JSON", '{"ok":false}\n200', 0, false],
+    ["字符串 true", '{"ok":"true"}\n200', 0, false],
+    ["网络失败", '{"ok":true}\n200', 7, false],
+  ])("Web 部署门禁实际执行：%s", (_label, fixture, curlStatus, healthy) => {
+    const activation = section(deploy, "      - name: Activate release", "      # ── 10.");
+    const check = section(activation, "            check_web_health() {", "            for ATTEMPT");
+    const result = spawnSync("bash", ["-c", `
+      curl() { cat >/dev/null; printf "%s" "$HEALTH_FIXTURE"; return "$HEALTH_CURL_STATUS"; }
+      ${check}
+      check_web_health
+    `], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HEALTH_SECRET: "test-health-secret",
+        HEALTH_FIXTURE: fixture,
+        HEALTH_CURL_STATUS: String(curlStatus),
+      },
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status === 0, result.stderr).toBe(healthy);
+    expect(result.stdout).not.toContain("test-health-secret");
   });
 });

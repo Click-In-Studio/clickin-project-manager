@@ -8,6 +8,7 @@ vi.mock("@/lib/pg", () => ({
 }));
 
 import { GET } from "@/app/health/route";
+import { proxy } from "@/proxy";
 
 describe("Web 健康检查", () => {
   const secret = "health-test-secret";
@@ -23,8 +24,22 @@ describe("Web 健康检查", () => {
   });
   beforeEach(() => query.mockReset());
 
-  const request = (authorization?: string) => new NextRequest("http://localhost/health", {
-    headers: authorization ? { Authorization: authorization } : {},
+  function request(authorization?: string) {
+    const req = new NextRequest("http://localhost/health", {
+      headers: authorization ? { Authorization: authorization } : {},
+    });
+    const response = proxy(req);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    return req;
+  }
+
+  it("只放行精确健康路径，其他同名前缀仍需登录", () => {
+    for (const pathname of ["/health-extra", "/health/private"]) {
+      const response = proxy(new NextRequest(`http://localhost${pathname}`));
+      expect(response.status).toBe(307);
+      expect(new URL(response.headers.get("location")!).pathname).toBe("/login");
+    }
   });
 
   it("拒绝没有内部密钥的请求", async () => {
