@@ -1,5 +1,5 @@
 ---
-kind: added
+kind: new
 title: AI 子助理可以分头研读长材料并保留阅读记录
 page: ai/assistant/chat
 pr: 909
