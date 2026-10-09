@@ -17,8 +17,10 @@ describe("云文档与文内目录的响应式边界", () => {
   it("手机目录无正文遮罩，避开 AppShell 顶栏与底部导航", () => {
     expect(shell).toMatch(/panel-mobile-full fixed inset-x-0 z-\[45\]/);
     expect(shell).toMatch(/panel-mobile-full fixed left-0 z-\[46\]/);
-    expect(outline).toContain("panel-mobile-full");
-    expect(outlineCss).toContain("height: var(--app-visual-viewport-height, 100dvh)");
+    expect(outline).not.toContain("panel-mobile-full");
+    expect(outlineCss).toContain("var(--app-visual-viewport-height, 100dvh) - 8rem");
+    expect(outlineCss).toContain("padding-right: env(safe-area-inset-right, 0px)");
+    expect(outlineCss).toContain("padding-left: env(safe-area-inset-left, 0px)");
     expect(outlineCss).toContain("width: 34vw");
     expect(outlineCss).toContain("overscroll-behavior: contain");
     expect(outline).not.toContain("inset-x-0");

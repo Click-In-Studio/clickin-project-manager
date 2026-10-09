@@ -57,6 +57,8 @@ describe("云文档目录提取", () => {
       { id: "c", top: 260 },
     ])).toBe("b");
     expect(activeWikiOutlineId([{ id: "a", top: 300 }])).toBe("a");
+    expect(activeWikiOutlineId([{ id: "a", top: -200 }, { id: "b", top: 88.15 }], 88)).toBe("b");
+    expect(activeWikiOutlineId([{ id: "a", top: -200 }, { id: "b", top: 90 }], 88)).toBe("a");
   });
 });
 

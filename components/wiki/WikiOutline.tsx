@@ -147,7 +147,7 @@ export default function WikiOutline({ items, contentRef }: {
         aria-label="展开目录" title="展开目录" aria-expanded={open} aria-controls={panelId} hidden={open}>
         <NavigationIcon name="outline" /><span>目录</span>
       </button>
-      <aside ref={panelRef} id={panelId} hidden={!open} className={`${styles.panel} panel-mobile-full`}
+      <aside ref={panelRef} id={panelId} hidden={!open} className={styles.panel}
         aria-label="正文目录"
         onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); close(); } }}>
         <div className={styles.header}>

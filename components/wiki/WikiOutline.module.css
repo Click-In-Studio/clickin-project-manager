@@ -25,8 +25,10 @@
 
 .panel {
   position: fixed;
-  top: var(--app-visual-viewport-offset-top, 0px);
-  height: var(--app-visual-viewport-height, 100dvh);
+  top: calc(var(--app-visual-viewport-offset-top, 0px) + 4rem + env(safe-area-inset-top, 0px));
+  height: calc(var(--app-visual-viewport-height, 100dvh) - 8rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
   right: 0;
   z-index: 44;
   display: flex;
@@ -83,6 +85,13 @@
 .heading[aria-current] { background: #e0f2fe; color: #075985; font-weight: 600; }
 .entry:focus-visible, .heading:focus-visible, .close:focus-visible { outline: 2px solid #0284c7; outline-offset: -2px; }
 .empty { padding: 8px; font-size: 12px; line-height: 1.6; color: #71717a; overflow-wrap: anywhere; }
+
+@media (max-width: 1023px) {
+  :global(html[data-app-keyboard-open="true"]) .panel {
+    height: calc(var(--app-visual-viewport-height, 100dvh) - 4rem - env(safe-area-inset-top, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
 
 @media (min-width: 1024px) {
   .outline { position: sticky; top: 16px; }
