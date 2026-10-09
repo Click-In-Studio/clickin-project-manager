@@ -97,6 +97,14 @@ describe("构作表格结构操作", () => {
     fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => init?.method ? response(202, { status: "updating" }) : response(200, SCENES));
     await submitName("仍未完成"); expect(writes("POST")).toHaveLength(1); expect(host.textContent).toContain("操作未完成");
   });
+  it("网络异常保留草稿并提示，重新对账的失败也显形", async () => {
+    await openRow("s1"); await clickText("在此段落后新增段落");
+    fetchMock.mockRejectedValue(new Error("网络已断开"));
+    await submitName("网络失败时的草稿");
+    expect(host.querySelector<HTMLInputElement>("form input")?.value).toBe("网络失败时的草稿");
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("网络已断开；同步也失败");
+    expect(writes("POST")).toHaveLength(1);
+  });
   it("逐动作和逐实例权限，字段修改权限不开放结构动作", async () => {
     props = { ...props, fieldPerms: { ...NO_SCENE_FIELD_PERMS, synopsis: true, any: true, deleteIds: ["s1"] } }; await render();
     await openRow("s1");
