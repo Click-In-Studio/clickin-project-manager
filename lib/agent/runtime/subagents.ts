@@ -247,10 +247,14 @@ async function execute(
     systemPrompt: SYSTEM,
     model: CHAT_MODEL,
     thinkingLevel: "low",
-    getApiKeyAndHeaders: async () => ({
-      apiKey:
-        (await import("./service")).runtimeOverrides.apiKey ?? deepseekApiKey(),
-    }),
+    getApiKeyAndHeaders: async () => {
+      // harness 在异步准备期间尚未建立自己的取消控制器，外部停止必须在请求前再检查。
+      if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
+      return {
+        apiKey:
+          (await import("./service")).runtimeOverrides.apiKey ?? deepseekApiKey(),
+      };
+    },
     runtime: {
       streamSimple:
         subagentRuntimeOverrides.streamFn ?? llmRuntime().streamSimple,

@@ -1,16 +1,27 @@
 import { getPool } from "@/lib/pg";
-export async function sessionRuntimeStatus(
+/** 最近一轮 id 同样是状态事实：快速完成的后台回复也必须触发历史刷新。 */
+export async function sessionRuntimeSnapshot(
   sessionId: string,
-): Promise<string | null> {
-  return (
-    (
-      await getPool().query<{ status: string }>(
-        `SELECT status FROM agent_run WHERE session_id=$1
-    AND status IN ('running','compacting','awaiting_approval','awaiting_answer') ORDER BY started_at DESC LIMIT 1`,
-        [sessionId],
-      )
-    ).rows[0]?.status ?? null
-  );
+): Promise<{ parentRunId: string | null; parentStatus: string | null }> {
+  const row = (
+    await getPool().query<{ id: string; status: string }>(
+      "SELECT id,status FROM agent_run WHERE session_id=$1 ORDER BY started_at DESC,id DESC LIMIT 1",
+      [sessionId],
+    )
+  ).rows[0];
+  return {
+    parentRunId: row?.id ?? null,
+    parentStatus:
+      row &&
+      [
+        "running",
+        "compacting",
+        "awaiting_approval",
+        "awaiting_answer",
+      ].includes(row.status)
+        ? row.status
+        : null,
+  };
 }
 
 export async function rootSessionIdentity(sessionId: string) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "@/components/ui/Markdown";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import type { SubagentView } from "@/lib/agent/runtime/subagent-types";
@@ -42,7 +42,7 @@ export default function SubagentPanel({
   onParentRun,
 }: {
   sessionKey: string;
-  onParentRun: () => void;
+  onParentRun: (status: "running" | "compacting" | "done") => Promise<boolean>;
 }) {
   const [children, setChildren] = useState<SubagentView[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -51,6 +51,38 @@ export default function SubagentPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const callback = useRef(onParentRun);
   callback.current = onParentRun;
+  const pendingParent = useRef<{
+    stamp: string;
+    status: "running" | "compacting" | "done";
+  } | null>(null);
+  const acknowledgedParent = useRef<string | null>(null);
+  const refreshingParent = useRef(false);
+  const refreshParent = useCallback(async function refreshPendingParent() {
+    const pending = pendingParent.current;
+    if (
+      !pending ||
+      pending.stamp === acknowledgedParent.current ||
+      refreshingParent.current
+    )
+      return;
+    refreshingParent.current = true;
+    const handle = callback.current;
+    try {
+      if (await handle(pending.status))
+        acknowledgedParent.current = pending.stamp;
+    } finally {
+      refreshingParent.current = false;
+      if (
+        pendingParent.current?.stamp !== pending.stamp ||
+        callback.current !== handle
+      )
+        void refreshPendingParent();
+    }
+  }, []);
+  // 主面板正在加载/接流时暂存最新事实，空闲后重试，不丢掉快速完成的后台回复。
+  useEffect(() => {
+    void refreshParent();
+  }, [onParentRun, refreshParent]);
   useEffect(() => {
     const events = new EventSource(
       `/api/agent/subagents/events?sessionKey=${encodeURIComponent(sessionKey)}`,
@@ -59,12 +91,28 @@ export default function SubagentPanel({
       const data = JSON.parse(event.data) as {
         subagents: SubagentView[];
         parentStatus: string | null;
+        parentRunId: string | null;
       };
       setChildren(data.subagents);
-      if (data.parentStatus) callback.current();
+      if (data.parentRunId) {
+        const status =
+          data.parentStatus === "compacting"
+            ? "compacting"
+            : data.parentStatus
+              ? "running"
+              : "done";
+        pendingParent.current = {
+          stamp: `${data.parentRunId}:${status}`,
+          status,
+        };
+        void refreshParent();
+      }
     };
-    return () => events.close();
-  }, [sessionKey]);
+    return () => {
+      events.onmessage = null;
+      events.close();
+    };
+  }, [sessionKey, refreshParent]);
   const read = async (id: string, cursor = 0) => {
     setBusy(id);
     setError(null);

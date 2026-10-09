@@ -404,21 +404,14 @@ export default function AgentPopout({
     }
   }, [consumeStream]);
 
-  const subagentAttachPending = useRef(false);
-  const onSubagentParentRun = useCallback(() => {
-    if (
-      !activeKey ||
-      streaming ||
-      loadingHistory ||
-      subagentAttachPending.current
-    )
-      return;
-    subagentAttachPending.current = true;
-    void openSession(activeKey, "running").finally(() => {
-      subagentAttachPending.current = false;
-    });
-  }, [activeKey, streaming, loadingHistory, openSession]);
-
+  const onSubagentParentRun = useCallback(
+    async (status: "running" | "compacting" | "done") => {
+      if (!activeKey || streaming || loadingHistory) return false;
+      await openSession(activeKey, status);
+      return true;
+    },
+    [activeKey, streaming, loadingHistory, openSession],
+  );
 
   // 深链打开指定会话：定时任务的通知带 ?agentSession=<key>（lib/agent/runtime/schedules.ts）。
   // 只认属于当前语境的 key；用完从 URL 摘掉，免得刷新/返回又触发。状态从会话列表现查

@@ -3,7 +3,7 @@ import { requireSubagentParent } from "@/lib/agent/runtime/subagent-route-auth";
 import { toErrorResponse } from "@/lib/agent/chat/http";
 import { listSubagents } from "@/lib/agent/runtime/subagent-db";
 import { subscribeSessionEvents } from "@/lib/agent/runtime/events";
-import { sessionRuntimeStatus } from "@/lib/agent/runtime/session-runtime-db";
+import { sessionRuntimeSnapshot } from "@/lib/agent/runtime/session-runtime-db";
 
 import { registerSSEKick } from "@/lib/sse-kick";
 import { registerSSEKeepalive } from "@/lib/sse-keepalive";
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
               );
               const data = {
                 subagents,
-                parentStatus: await sessionRuntimeStatus(auth.sessionKey),
+                ...(await sessionRuntimeSnapshot(auth.sessionKey)),
               };
               const next = JSON.stringify(data);
               if (next !== signature && !closed) {

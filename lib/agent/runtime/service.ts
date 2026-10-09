@@ -460,7 +460,11 @@ async function execute(input: ExecuteInput): Promise<void> {
       systemPrompt: buildSystemPrompt(inject),
       model: CHAT_MODEL,
       thinkingLevel: "low",
-      getApiKeyAndHeaders: async () => ({ apiKey: runtimeOverrides.apiKey ?? deepseekApiKey() }),
+      getApiKeyAndHeaders: async () => {
+        // 停止可能发生在 harness 异步准备、内部取消控制器尚未建立时。
+        if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
+        return { apiKey: runtimeOverrides.apiKey ?? deepseekApiKey() };
+      },
       runtime: runtimeOverrides.streamFn
         ? { streamSimple: runtimeOverrides.streamFn, completeSimple: llmRuntime().completeSimple }
         : { streamSimple: llmRuntime().streamSimple, completeSimple: llmRuntime().completeSimple },

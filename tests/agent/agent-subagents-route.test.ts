@@ -6,7 +6,10 @@ import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
 import { PgSessionStorage } from "@/lib/agent/runtime/pg-session-storage";
-import { queueSubagent } from "@/lib/agent/runtime/subagent-db";
+import {
+  queueSubagent,
+  signalSubagentState,
+} from "@/lib/agent/runtime/subagent-db";
 import { newRunId } from "@/lib/agent/runtime/ids";
 import { getPool } from "@/lib/pg";
 import { addProductionMember } from "@/lib/perm/member-db";
@@ -159,5 +162,52 @@ describe("子助理查看、轨迹、停止与状态流权限", () => {
     expect((await (await GET(req(owner))).json()).subagents[0].status).toBe(
       "stopped",
     );
+  });
+  it("新会话落库前可订阅空状态，首条消息后同一连接收到子任务", async () => {
+    const key = createNewSessionKey(owner);
+    const abort = new AbortController();
+    const response = await events(
+      req(owner, key, undefined, "GET", abort.signal),
+    );
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    try {
+      const first = await reader.read();
+      expect(new TextDecoder().decode(first.value)).toContain('"subagents":[]');
+      await PgSessionStorage.create({
+        id: key,
+        userId: owner,
+        productionId: null,
+      });
+      const runId = newRunId();
+      await getPool().query(
+        "INSERT INTO agent_run(id,session_id,status) VALUES($1,$2,'running')",
+        [runId, key],
+      );
+      const id = await queueSubagent({
+        parentSessionId: key,
+        parentRunId: runId,
+        task: "新会话研读",
+        message: "研读第一场",
+      });
+      await signalSubagentState(key);
+      const next = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("新会话状态未到达")), 2000),
+        ),
+      ]);
+      expect(new TextDecoder().decode(next.value)).toContain(id);
+    } finally {
+      abort.abort();
+      await reader.cancel();
+      await getPool().query("DELETE FROM agent_session WHERE id=$1", [key]);
+    }
+  });
+
+  it("尚未落库的项目会话同样检查当前成员资格", async () => {
+    const key = createNewSessionKey(outsider, prodId);
+    expect((await events(req(outsider, key))).status).toBe(403);
+    expect((await GET(req(outsider, key))).status).toBe(403);
   });
 });
