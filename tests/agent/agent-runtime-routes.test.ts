@@ -13,6 +13,8 @@ import { CHAT_MODEL } from "@/lib/agent/runtime/config";
 import { approvalAllowsReexecute, createApproval, markApprovalExecuted, resolveApproval } from "@/lib/agent/runtime/approvals";
 import { createOrReuseQuestion } from "@/lib/agent/runtime/questions";
 import { newApprovalId, newQuestionId, newRunId, newSessionId } from "@/lib/agent/runtime/ids";
+import { EventPublisher } from "@/lib/agent/runtime/events";
+import { PgSessionStorage } from "@/lib/agent/runtime/pg-session-storage";
 
 // #367 S2：路由分流的端到端——AGENT_RUNTIME=runner 时，同一套路由（stream/history/
 // sessions/abort/[key]）走自建运行时；SSE 帧格式与行协议与网关时代一致，前端零改动。
@@ -88,6 +90,32 @@ describe("agent routes（自建运行时）", () => {
     const l = await (await list(req("/api/agent/sessions"))).json();
     expect(l.gatewayStatus).toEqual({ state: "connected" }); // runner 模式不报网关横幅
     expect(l.sessions.find((s: { key: string }) => s.key === key)).toMatchObject({ title: "你好", status: "done" });
+  });
+
+  it("GET /chat/stream：重开 compacting 会话先恢复压缩状态，再等真实终态", async () => {
+    const key = createNewSessionKey(userId, prodId);
+    keys.push(key);
+    await PgSessionStorage.create({ id: key, userId, productionId: prodId });
+    const runId = newRunId();
+    await getPool().query(
+      `INSERT INTO agent_run (id, session_id, status, owner, heartbeat_at)
+       VALUES ($1, $2, 'compacting', 'route-test', now())`,
+      [runId, key],
+    );
+    const { GET } = await import("@/app/api/agent/chat/stream/route");
+    const res = await GET(req(`/api/agent/chat/stream?sessionKey=${encodeURIComponent(key)}`));
+    const publisher = new EventPublisher(key, runId);
+    setTimeout(() => {
+      publisher.publish({ type: "final", text: "" });
+      void publisher.drain().then(() => getPool().query(
+        `UPDATE agent_run SET status = 'completed', ended_at = now() WHERE id = $1`,
+        [runId],
+      ));
+    }, 20);
+
+    const lines = await readSse(res);
+    expect(lines).toContainEqual({ type: "compacting", active: true });
+    expect(lines.at(-1)).toEqual({ type: "final", text: "" });
   });
 
   it("所有权：他人的 sessionKey 被 403，不泄露存在性", async () => {

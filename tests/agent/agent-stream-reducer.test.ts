@@ -56,6 +56,34 @@ describe("applyStreamLine", () => {
     expect(b).toEqual([{ kind: "assistant", text: "完整回复" }]);
   });
 
+  it("compacting 不生成聊天消息，最终仍由 final 收口正文", () => {
+    const before: Bubble[] = [{ kind: "assistant", text: "正文完成", streaming: true }];
+    const compacting = applyStreamLine(before, { type: "compacting", active: true });
+    expect(compacting).toEqual([{ kind: "assistant", text: "正文完成", compactionPending: true }]);
+    expect(applyStreamLine(compacting, { type: "compacting", active: false })).toEqual(compacting);
+    expect(applyStreamLine(compacting, { type: "final", text: "正文完成" })).toEqual([
+      { kind: "assistant", text: "正文完成" },
+    ]);
+  });
+
+  it("compacting 后有 steer 时保留前段正文并新开回复气泡", () => {
+    let bubbles: Bubble[] = [{ kind: "assistant", text: "第一段", streaming: true }];
+    bubbles = applyStreamLine(bubbles, { type: "compacting", active: true });
+    bubbles = applyStreamLine(bubbles, { type: "compacting", active: false });
+    bubbles = applyStreamLine(bubbles, { type: "delta", text: "第二段" });
+    bubbles = applyStreamLine(bubbles, { type: "final", text: "第二段" });
+    expect(bubbles).toEqual([
+      { kind: "assistant", text: "第一段" },
+      { kind: "assistant", text: "第二段" },
+    ]);
+  });
+
+  it("重连恢复 compacting 时给历史末条加收口标记，final 不重复正文", () => {
+    const history: Bubble[] = [{ kind: "assistant", text: "历史正文" }];
+    const compacting = applyStreamLine(history, { type: "compacting", active: true });
+    expect(applyStreamLine(compacting, { type: "final", text: "历史正文" })).toEqual(history);
+  });
+
   it("fallback final identical to last assistant bubble is deduped", () => {
     const prev: Bubble[] = [
       { kind: "assistant", text: "上一轮的回复" },

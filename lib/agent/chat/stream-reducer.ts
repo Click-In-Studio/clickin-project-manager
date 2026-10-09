@@ -35,8 +35,8 @@ export type QuestionInfo = {
 
 export type Bubble =
   | { kind: "user"; text: string; attachments?: import("./types").ChatAttachment[] }
-  | { kind: "assistant"; text: string; streaming?: boolean }
-  | { kind: "thinking"; text: string; streaming?: boolean }
+  | { kind: "assistant"; text: string; streaming?: boolean; compactionPending?: boolean }
+  | { kind: "thinking"; text: string; streaming?: boolean; compactionPending?: boolean }
   // input/result：调用参数与结果（relay 超限时为 {truncated, preview} 包裹），
   // 供气泡点开看详情；历史回放只有 result 文本，input 恒缺席。
   | { kind: "tool"; name: string; id?: string; done: boolean; input?: unknown; result?: unknown; isError?: boolean; attachments?: import("./types").ChatAttachment[] }
@@ -60,6 +60,7 @@ export type StreamLine =
   | { type: "question-resolved"; id?: string; status?: string }
   | { type: "ping" }
   | { type: "session"; key?: string }
+  | { type: "compacting"; active: boolean }
   // 写工具成功后的变更信号（自建运行时 #367）：不进气泡，AgentPopout 派发给页面订阅者
   // 决定怎么刷（lib/agent/agent-mutations.ts）。与 tool-end 一样落 agent_event，断线重连可补。
   // auditIds/summary：写审计（agent_mutation）真的落了行才带——summary 是人话改动摘要，进气泡当 notice
@@ -80,7 +81,7 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
   const last = next[next.length - 1];
   switch (line.type) {
     case "thinking": {
-      if (last?.kind === "assistant" && last.streaming) {
+      if (last?.kind === "assistant" && (last.streaming || last.compactionPending)) {
         next[next.length - 1] = { kind: "assistant", text: last.text };
       }
       const current = next[next.length - 1];
@@ -92,8 +93,10 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
       return next;
     }
     case "delta": {
-      if (last?.kind === "thinking" && last.streaming) {
+      if (last?.kind === "thinking" && (last.streaming || last.compactionPending)) {
         next[next.length - 1] = { kind: "thinking", text: last.text };
+      } else if (last?.kind === "assistant" && last.compactionPending) {
+        next[next.length - 1] = { kind: "assistant", text: last.text };
       }
       const current = next[next.length - 1];
       if (current?.kind === "assistant" && current.streaming) {
@@ -105,12 +108,21 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
     }
     case "tool": {
       // Current streaming segment (if any) is settled by this tool call.
-      if (last?.kind === "assistant" && last.streaming) {
+      if (last?.kind === "assistant" && (last.streaming || last.compactionPending)) {
         next[next.length - 1] = { kind: "assistant", text: last.text };
-      } else if (last?.kind === "thinking" && last.streaming) {
+      } else if (last?.kind === "thinking" && (last.streaming || last.compactionPending)) {
         next[next.length - 1] = { kind: "thinking", text: last.text };
       }
       next.push({ kind: "tool", name: line.name || "工具", id: line.id, done: false, ...(line.input !== undefined ? { input: line.input } : {}) });
+      return next;
+    }
+    case "compacting": {
+      if (!line.active) return next;
+      if (last?.kind === "assistant") {
+        next[next.length - 1] = { kind: "assistant", text: last.text, compactionPending: true };
+      } else if (last?.kind === "thinking") {
+        next[next.length - 1] = { kind: "thinking", text: last.text, compactionPending: true };
+      }
       return next;
     }
     case "tool-result": {
@@ -154,9 +166,9 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
         );
         return interrupted ? [...list, { kind: "notice", text: "本轮回复以兜底方式收尾，内容可能不完整" }] : list;
       };
-      if (last?.kind === "assistant" && last.streaming) {
+      if (last?.kind === "assistant" && (last.streaming || last.compactionPending)) {
         next[next.length - 1] = { kind: "assistant", text: line.text || last.text };
-      } else if (last?.kind === "thinking" && last.streaming) {
+      } else if (last?.kind === "thinking" && (last.streaming || last.compactionPending)) {
         next[next.length - 1] = { kind: "thinking", text: last.text };
         if (line.text) next.push({ kind: "assistant", text: line.text });
       } else if (line.text) {
@@ -211,18 +223,18 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
       return next;
     }
     case "aborted": {
-      if (last?.kind === "assistant" && last.streaming) {
+      if (last?.kind === "assistant" && (last.streaming || last.compactionPending)) {
         next[next.length - 1] = { kind: "assistant", text: last.text };
-      } else if (last?.kind === "thinking" && last.streaming) {
+      } else if (last?.kind === "thinking" && (last.streaming || last.compactionPending)) {
         next[next.length - 1] = { kind: "thinking", text: last.text };
       }
       next.push({ kind: "notice", text: "已中止" });
       return next;
     }
     case "error": {
-      if (last?.kind === "assistant" && last.streaming) {
+      if (last?.kind === "assistant" && (last.streaming || last.compactionPending)) {
         next[next.length - 1] = { kind: "assistant", text: last.text };
-      } else if (last?.kind === "thinking" && last.streaming) {
+      } else if (last?.kind === "thinking" && (last.streaming || last.compactionPending)) {
         next[next.length - 1] = { kind: "thinking", text: last.text };
       }
       next.push({ kind: "notice", text: line.error || "出错了" });

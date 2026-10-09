@@ -102,6 +102,13 @@ export function createRunnerStreamResponse(
           const started = await options.startRun();
           send({ type: "session", key: sessionKey, runId: started.runId });
         } else {
+          const state = await currentRunStatus(sessionKey);
+          if (state === "compacting") send({ type: "compacting", active: true });
+          if (state === null) {
+            terminal = true;
+            finish({ type: "final", text: "", fallback: true });
+            return;
+          }
           for (const line of await pendingApprovalLines(sessionKey)) send(line);
         }
 
@@ -138,6 +145,17 @@ export function createRunnerStreamResponse(
 async function maxSeq(sessionId: string): Promise<number> {
   const r = await getPool().query<{ seq: string | null }>(`SELECT MAX(seq)::text AS seq FROM agent_event WHERE session_id = $1`, [sessionId]);
   return r.rows[0]?.seq ? Number(r.rows[0].seq) : 0;
+}
+
+async function currentRunStatus(sessionId: string): Promise<string | null> {
+  const r = await getPool().query<{ status: string }>(
+    `SELECT status FROM agent_run
+      WHERE session_id = $1
+        AND status IN ('running', 'compacting', 'awaiting_approval', 'awaiting_answer')
+      ORDER BY started_at DESC LIMIT 1`,
+    [sessionId],
+  );
+  return r.rows[0]?.status ?? null;
 }
 
 export { startRun };

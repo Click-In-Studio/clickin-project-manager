@@ -238,6 +238,12 @@ export class CoreAgentHarness<
   private steeringQueueMode: QueueMode;
   private followUpQueue: UserMessage[] = [];
   private followUpQueueMode: QueueMode;
+  /** 宿主持久化输入的 transcript 身份；消息落 transcript 后才能删除宿主队列。 */
+  private messagePersistence = new WeakMap<AgentMessage, {
+    entryId?: string;
+    metadata?: Record<string, unknown>;
+  }>();
+  private messageConsumed = new WeakMap<AgentMessage, () => void>();
   private resolveDeferredTool?: AgentHarnessOptions<TSkill, TPromptTemplate, TTool>["resolveDeferredTool"]; // 本地补丁 #4
   private nextTurnQueue: AgentMessage[] = [];
   private handlers = new Map<string, Set<AgentHarnessHandler>>();
@@ -537,8 +543,11 @@ export class CoreAgentHarness<
           thinkingLevel: nextTurnState.thinkingLevel,
         };
       },
-      getSteeringMessages: async () =>
-        this.drainQueuedMessages(this.steerQueue, this.steeringQueueMode),
+      getSteeringMessages: async () => {
+        const messages = await this.drainQueuedMessages(this.steerQueue, this.steeringQueueMode);
+        for (const message of messages) this.messageConsumed.get(message)?.();
+        return messages;
+      },
       getFollowUpMessages: async () =>
         this.drainQueuedMessages(this.followUpQueue, this.followUpQueueMode),
       // 本地补丁 #4：宿主可按名临时加载工具。agent-loop 只把它加进当前 context.tools，
@@ -595,7 +604,7 @@ export class CoreAgentHarness<
 
   private async handleAgentEvent(event: AgentEvent, signal?: AbortSignal): Promise<void> {
     if (event.type === "message_end") {
-      await this.session.appendMessage(event.message);
+      await this.session.appendMessage(event.message, this.messagePersistence.get(event.message));
       await this.emitAny(event, signal);
       return;
     }
@@ -644,10 +653,17 @@ export class CoreAgentHarness<
   private async executeTurn(
     turnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
     text: string,
-    options?: { images?: ImageContent[] },
+    options?: { images?: ImageContent[]; entryId?: string; metadata?: Record<string, unknown> },
   ): Promise<AssistantMessage> {
     let activeTurnState = turnState;
-    let messages: AgentMessage[] = [createUserMessage(text, options?.images)];
+    const userMessage = createUserMessage(text, options?.images);
+    if (options?.entryId || options?.metadata) {
+      this.messagePersistence.set(userMessage, {
+        ...(options.entryId ? { entryId: options.entryId } : {}),
+        ...(options.metadata ? { metadata: options.metadata } : {}),
+      });
+    }
+    let messages: AgentMessage[] = [userMessage];
     if (this.nextTurnQueue.length > 0) {
       const queuedMessages = this.nextTurnQueue.splice(0);
       try {
@@ -723,7 +739,10 @@ export class CoreAgentHarness<
     }
   }
 
-  async prompt(text: string, options?: { images?: ImageContent[] }): Promise<AssistantMessage> {
+  async prompt(
+    text: string,
+    options?: { images?: ImageContent[]; entryId?: string; metadata?: Record<string, unknown> },
+  ): Promise<AssistantMessage> {
     if (this.phase !== "idle") {
       throw new AgentHarnessError("busy", "AgentHarness is busy");
     }
@@ -874,11 +893,27 @@ export class CoreAgentHarness<
     }
   }
 
-  async steer(text: string, options?: { images?: ImageContent[] }): Promise<void> {
+  async steer(
+    text: string,
+    options?: {
+      images?: ImageContent[];
+      entryId?: string;
+      metadata?: Record<string, unknown>;
+      onConsumed?: () => void;
+    },
+  ): Promise<void> {
     if (this.phase === "idle") {
       throw new AgentHarnessError("invalid_state", "Cannot steer while idle");
     }
-    this.steerQueue.push(createUserMessage(text, options?.images));
+    const message = createUserMessage(text, options?.images);
+    if (options?.entryId || options?.metadata) {
+      this.messagePersistence.set(message, {
+        ...(options.entryId ? { entryId: options.entryId } : {}),
+        ...(options.metadata ? { metadata: options.metadata } : {}),
+      });
+    }
+    if (options?.onConsumed) this.messageConsumed.set(message, options.onConsumed);
+    this.steerQueue.push(message);
     await this.emitQueueUpdate();
   }
 

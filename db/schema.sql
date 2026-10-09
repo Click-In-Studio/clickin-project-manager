@@ -3561,7 +3561,7 @@ CREATE TABLE IF NOT EXISTS agent_run (
   id                TEXT        PRIMARY KEY,
   session_id        TEXT        NOT NULL REFERENCES agent_session(id) ON DELETE CASCADE,
   status            TEXT        NOT NULL DEFAULT 'queued'
-                      CHECK (status IN ('queued', 'running', 'awaiting_approval', 'awaiting_answer',
+                      CHECK (status IN ('queued', 'running', 'compacting', 'awaiting_approval', 'awaiting_answer',
                                         'completed', 'aborted', 'failed', 'interrupted')),
   -- 执行者租约（§4.4）：owner = runner 进程标识；heartbeat_at 每 5s 更新，
   -- 超 30s 无心跳视为孤儿，由存活的 runner 接管恢复。防两个进程同时跑同一 run。
@@ -3583,7 +3583,24 @@ CREATE INDEX IF NOT EXISTS agent_run_session_idx
 -- 孤儿扫描：启动/巡检时找 running 且心跳过期的 run
 CREATE INDEX IF NOT EXISTS agent_run_active_idx
   ON agent_run (status, heartbeat_at)
-  WHERE status IN ('running', 'awaiting_approval', 'awaiting_answer');
+  WHERE status IN ('running', 'compacting', 'awaiting_approval', 'awaiting_answer');
+
+-- ── inbox：上下文压缩期间收到的用户输入，先持久化再注入 harness ─────────────
+CREATE TABLE IF NOT EXISTS agent_session_inbox (
+  id              TEXT        PRIMARY KEY,
+  session_id      TEXT        NOT NULL REFERENCES agent_session(id) ON DELETE CASCADE,
+  claimed_run_id  TEXT        NULL REFERENCES agent_run(id) ON DELETE SET NULL,
+  message         TEXT        NOT NULL,
+  attachment_ids  JSONB       NOT NULL DEFAULT '[]'::jsonb,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (jsonb_typeof(attachment_ids) = 'array')
+);
+
+CREATE INDEX IF NOT EXISTS agent_session_inbox_pending_idx
+  ON agent_session_inbox (session_id, created_at, id);
+
+COMMENT ON TABLE agent_session_inbox IS
+  '进行中的 AI 会话收到的用户输入；以 inbox id 作为 transcript entry id，消费后删除。';
 
 CREATE TABLE IF NOT EXISTS agent_run_attachment_access (
   run_id          TEXT        NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
