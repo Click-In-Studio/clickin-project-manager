@@ -2960,6 +2960,11 @@ INSERT INTO resource_permission_level (resource_type, permission_level, sort_ord
   ('ai', 'view', 0)
 ON CONFLICT DO NOTHING;
 
+-- 制作级 AI 指令：设置页与 Agent 工具共用 edit 门（#884）。
+INSERT INTO resource_permission_level (resource_type, permission_level, sort_order) VALUES
+  ('ai_instructions', 'edit', 0)
+ON CONFLICT DO NOTHING;
+
 -- ── Resource Grant（Phase 1 #158，Phase 2c 修正）──────────────────────────────
 -- 所有实际资源权限的单一权威来源。
 

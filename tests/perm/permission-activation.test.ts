@@ -5,6 +5,9 @@ import { addProductionMember } from "@/lib/perm/member-db";
 import { PAGE_PERMISSION_SCOPES } from "@/lib/perm/page-permission-scopes";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { cleanupProduction, makeProduction, shortId } from "../_support/factories";
+import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
+import { hasEffectiveGrant } from "@/lib/perm/grant-check";
+import { canEditProductionInstructions } from "@/lib/agent/agent-instructions";
 
 let prodId: string;
 let memberId: string;
@@ -100,7 +103,7 @@ describe("权限激活共享落行入口", () => {
     await getPool().query("UPDATE production SET archived_at = NULL WHERE id = $1", [prodId]);
   });
 
-  it("进入配置中心时，制作人可一次激活全部普通管理权限（含邀请成员）", async () => {
+  it("进入配置中心时，制作人可一次激活全部普通管理权限（含邀请成员与制作级 AI 指令）", async () => {
     const permissions = [...PAGE_PERMISSION_SCOPES.admin];
     const result = await activatePendingPermissions(producerId, prodId, permissions);
     expect(result).toEqual({ ok: true, confirmed: permissions.length });
@@ -113,6 +116,24 @@ describe("权限激活共享落行入口", () => {
       [prodId, producerId],
     );
     expect(inviteGrant.rows).toHaveLength(1);
+
+    const instructionsGrant = await getPool().query(
+      `SELECT 1 FROM production_member_grant
+       WHERE production_id = $1 AND user_id = $2 AND resource_type = 'ai_instructions'
+         AND resource_id = '*' AND resource_sub = '*' AND permission_level = 'edit'
+         AND NOT is_revoked`,
+      [prodId, producerId],
+    );
+    expect(instructionsGrant.rows).toHaveLength(1);
+
+    // 设置页直接查 hasEffectiveGrant；REST 与 Agent 写工具共用
+    // canEditProductionInstructions。激活后两条消费门必须同时放行。
+    const access = await getProductionPermissionContext(producerId, false, prodId);
+    expect(access).not.toBeNull();
+    expect(await hasEffectiveGrant(
+      access!.permCtx, prodId, "ai_instructions", "*", "*", "edit",
+    )).toBe(true);
+    expect(await canEditProductionInstructions(producerId, prodId)).toBe(true);
   });
 
   it("管理权限激活按实际资格收口，不依赖制作人角色也不扩大授权", async () => {
