@@ -176,3 +176,146 @@ describe("构作列表拖动排序的落点", () => {
     expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({ synopsis: "新的场次简介", versionId: "v1" });
   });
 });
+
+
+describe("无效悬停不复用之前的落点", () => {
+  it("同级落点之后放回自身：不写入", async () => {
+    await dragFrom("第二章");
+    await act(async () => { fire(row("第一章"), "dragover", TOP_EDGE); });
+    await dropOn("第二章", TOP_EDGE);
+    expect(putCalls()).toHaveLength(0);
+  });
+
+  it("drop 必须按实际释放行重新计算，不使用上一行的落点", async () => {
+    await dragFrom("第二章");
+    await act(async () => { fire(row("第一章"), "dragover", TOP_EDGE); });
+    await act(async () => { fire(row("开场"), "drop", TOP_EDGE); });
+    expect(putCalls()).toHaveLength(0);
+  });
+
+  it("保存失败显示错误并重新读取真实顺序", async () => {
+    fetchMock.mockImplementation(async (_url, init) => (init as RequestInit | undefined)?.method === "PUT"
+      ? { ok: false, status: 500, json: async () => ({ error: "排序保存失败" }) }
+      : { ok: true, status: 200, json: async () => SCENES });
+    await dragFrom("第二章");
+    await dropOn("第一章", TOP_EDGE);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("排序保存失败");
+    expect(fetchMock.mock.calls.some(([, init]) => !(init as RequestInit | undefined)?.method)).toBe(true);
+  });
+});
+
+
+async function renderScenes(scenes: MarkerProjection[], canEdit = true, structure = true) {
+  await act(async () => {
+    root.render(<ScenesManager productionId="p1" productionName="演出" initialScenes={scenes} openingChapterMarkerId="c0" canEdit={canEdit} fieldPerms={{ ...ALL_SCENE_FIELD_PERMS, structure }} versionId="v1" key={`${canEdit}-${structure}-${scenes.length}`} />);
+  });
+}
+
+async function clickButton(label: string) {
+  const button = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+  if (!button) throw new Error(`没找到按钮 ${label}`);
+  await act(async () => { button.click(); });
+}
+
+const CHILDREN: MarkerProjection[] = [
+  SCENES[0], SCENES[1],
+  { ...chapter("s1", "1-1", "段落甲"), kind: "scene", parentId: "c1" },
+  { ...chapter("s2", "1-2", "段落乙"), kind: "scene", parentId: "c1" },
+  { ...chapter("s3", "1-3", "段落丙"), kind: "scene", parentId: "c1" },
+  SCENES[2],
+  { ...chapter("s4", "2-1", "段落丁"), kind: "scene", parentId: "c2" },
+];
+
+describe("层级、取消与触控排序", () => {
+  it("跨章 / 不同层级悬停会清掉旧落点，释放不写入", async () => {
+    await renderScenes(CHILDREN);
+    for (const target of ["第一章", "段落丁"]) {
+      await dragFrom("段落丙");
+      await act(async () => { fire(row("段落甲"), "dragover", TOP_EDGE); });
+      expect(row("段落甲").style.boxShadow).toContain("inset");
+      await dropOn(target, TOP_EDGE);
+      expect(row("段落甲").style.boxShadow).toBe("");
+      expect(putCalls()).toHaveLength(0);
+    }
+  });
+
+  it("章末段落下沿使用下一章边界，不改变父章", async () => {
+    await renderScenes(CHILDREN);
+    await dragFrom("段落甲");
+    await dropOn("段落丙", BOTTOM_EDGE);
+    expect(JSON.parse(String(putCalls()[0][1]?.body))).toMatchObject({ markerId: "s1", beforeMarkerId: "c2" });
+  });
+
+  it("展开详情后在详情区释放不沿用旧落点", async () => {
+    await renderScenes(CHILDREN);
+    const expand = row("段落乙").querySelector<HTMLButtonElement>('button[title="展开详情"]');
+    await act(async () => { expand!.click(); });
+    await dragFrom("段落丙");
+    await act(async () => { fire(row("段落甲"), "dragover", TOP_EDGE); });
+    const details = row("段落乙").nextElementSibling!;
+    await act(async () => { fire(details, "dragover", TOP_EDGE); fire(details, "drop", TOP_EDGE); });
+    expect(putCalls()).toHaveLength(0);
+    expect(row("段落甲").style.boxShadow).toBe("");
+  });
+
+  it("取消拖动清掉落点且不写入", async () => {
+    await dragFrom("第二章");
+    await act(async () => { fire(row("第一章"), "dragover", TOP_EDGE); });
+    await act(async () => { fire(row("第二章").querySelector('[draggable="true"]')!, "dragend"); });
+    expect(row("第一章").style.boxShadow).toBe("");
+    expect(putCalls()).toHaveLength(0);
+  });
+
+  it("无需拖拽即可上移，开场章不能被越过", async () => {
+    await clickButton("调整顺序：第一章");
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="上移：第一章"]')!.disabled).toBe(true);
+    await clickButton("调整顺序：第二章");
+    await clickButton("上移：第二章");
+    expect(JSON.parse(String(putCalls()[0][1]?.body))).toMatchObject({ markerId: "c2", beforeMarkerId: "c1" });
+  });
+
+  it("触控下移到章末仍使用下一章边界；末段按钮禁用", async () => {
+    await renderScenes(CHILDREN);
+    fetchMock.mockImplementation(async () => ({ ok: true, status: 200, json: async () => ({ scenes: CHILDREN }) }));
+    await clickButton("调整顺序：段落乙");
+    await clickButton("下移：段落乙");
+    expect(JSON.parse(String(putCalls()[0][1]?.body))).toMatchObject({ markerId: "s2", beforeMarkerId: "c2" });
+    await clickButton("调整顺序：段落丙");
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="下移：段落丙"]')!.disabled).toBe(true);
+  });
+
+  it("只读模式或无结构权限不显示排序入口", async () => {
+    await renderScenes(SCENES, false);
+    expect(container.querySelector('[draggable="true"]')).toBeNull();
+    await renderScenes(SCENES, true, false);
+    expect(container.querySelector('[draggable="true"]')).toBeNull();
+  });
+
+  it("直接采用服务端响应顺序，连续点击保存期间只发一次请求", async () => {
+    let resolvePut!: (value: unknown) => void;
+    fetchMock.mockImplementation((_url, init) => (init as RequestInit | undefined)?.method === "PUT"
+      ? new Promise((resolve) => { resolvePut = resolve; })
+      : Promise.resolve({ ok: true, status: 200, json: async () => SCENES }));
+    await clickButton("调整顺序：第二章");
+    await clickButton("上移：第二章");
+    await clickButton("上移：第二章");
+    expect(putCalls()).toHaveLength(1);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("正在保存");
+    await act(async () => { resolvePut({ ok: true, status: 200, json: async () => ({ scenes: [SCENES[0], SCENES[2], SCENES[1]] }) }); });
+    const names = [...container.querySelectorAll('tr[data-scene-sort-row]')].map(tr => tr.textContent);
+    expect(names[1]).toContain("第二章");
+    expect(names[2]).toContain("第一章");
+  });
+
+  it("写入和重读都失败时提示并暂停排序，重读成功才恢复", async () => {
+    fetchMock.mockImplementation(async () => { throw new Error("网络中断"); });
+    await clickButton("调整顺序：第二章");
+    await clickButton("上移：第二章");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("无法读取当前顺序");
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="调整顺序：第二章"]')!.disabled).toBe(true);
+    fetchMock.mockImplementation(async () => ({ ok: true, status: 200, json: async () => SCENES }));
+    await act(async () => { [...container.querySelectorAll('button')].find(button => button.textContent === "重试读取顺序")!.click(); });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="调整顺序：第二章"]')!.disabled).toBe(false);
+  });
+});
