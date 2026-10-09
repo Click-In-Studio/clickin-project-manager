@@ -22,6 +22,9 @@ CREATE TABLE agent_session_inbox (
 CREATE INDEX agent_session_inbox_pending_idx
   ON agent_session_inbox (session_id, created_at, id);
 
+COMMENT ON TABLE agent_session_inbox IS
+  '上下文压缩期间收到的用户输入；以 inbox id 作为 transcript entry id，消费后删除。';
+
 -- migrate:down
 
 DROP TABLE IF EXISTS agent_session_inbox;
