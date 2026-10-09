@@ -19,9 +19,18 @@ export async function createPreMigrationData(
 ): Promise<AddAiInstructionsPermissionLevelSnapshot> {
   const productionId = `t${faker.string.alphanumeric(7).toLowerCase()}`;
   const roleId = `role_${faker.string.alphanumeric(10).toLowerCase()}`;
+  const viewId = `sv_${faker.string.alphanumeric(10).toLowerCase()}`;
   await pool.query(
     "INSERT INTO production (id, name, owner_id) VALUES ($1, 'AI 指令词汇迁移工厂', $2)",
     [productionId, testOwner],
+  );
+  await pool.query(
+    "INSERT INTO script_view (id, production_id, name) VALUES ($1, $2, '标准本')",
+    [viewId, productionId],
+  );
+  await pool.query(
+    "UPDATE production SET master_view_id = $1 WHERE id = $2",
+    [viewId, productionId],
   );
   await pool.query(
     "INSERT INTO production_member (production_id, user_id) VALUES ($1, $2)",

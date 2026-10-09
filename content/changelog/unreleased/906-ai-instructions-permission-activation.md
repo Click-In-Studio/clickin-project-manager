@@ -1,7 +1,7 @@
 ---
 kind: fixed
 title: 项目级 AI 指令权限现在可以正常激活
-page: production/admin/settings
+page: ai/assistant/chat
 pr: 906
 order: 1
 ---
