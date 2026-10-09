@@ -406,9 +406,17 @@ export default function AgentPopout({
 
   const subagentAttachPending = useRef(false);
   const onSubagentParentRun = useCallback(() => {
-    if (!activeKey || streaming || loadingHistory || subagentAttachPending.current) return;
+    if (
+      !activeKey ||
+      streaming ||
+      loadingHistory ||
+      subagentAttachPending.current
+    )
+      return;
     subagentAttachPending.current = true;
-    void openSession(activeKey, "running").finally(() => { subagentAttachPending.current = false; });
+    void openSession(activeKey, "running").finally(() => {
+      subagentAttachPending.current = false;
+    });
   }, [activeKey, streaming, loadingHistory, openSession]);
 
 

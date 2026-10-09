@@ -19,7 +19,10 @@ export interface EventRow {
 
 /** 执行侧发布器：一个 run 一个实例。 */
 export class EventPublisher {
-  private pendingUpdate: Extract<StreamLine, { type: "delta" | "thinking" }> | null = null;
+  private pendingUpdate: Extract<
+    StreamLine,
+    { type: "delta" | "thinking" }
+  > | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private chain: Promise<void> = Promise.resolve();
 
@@ -32,9 +35,11 @@ export class EventPublisher {
   /** 非累计行立即入队；同类累计行合并到时间窗末尾。类型切换时先冲出前一种，保证顺序。 */
   publish(line: StreamLine): void {
     if (line.type === "delta" || line.type === "thinking") {
-      if (this.pendingUpdate && this.pendingUpdate.type !== line.type) this.flushUpdate();
+      if (this.pendingUpdate && this.pendingUpdate.type !== line.type)
+        this.flushUpdate();
       this.pendingUpdate = line;
-      if (!this.timer) this.timer = setTimeout(() => this.flushUpdate(), DELTA_COALESCE_MS);
+      if (!this.timer)
+        this.timer = setTimeout(() => this.flushUpdate(), DELTA_COALESCE_MS);
       return;
     }
     // 非累计行到达前先把挂着的更新冲出去，保证顺序（例如 thinking → delta → tool）
@@ -54,31 +59,36 @@ export class EventPublisher {
   }
 
   private enqueue(line: StreamLine): void {
-    this.chain = this.chain.then(() => this.write(line)).catch((err) => {
-      console.error("[agent-runtime] event write failed:", err);
-    });
+    this.chain = this.chain
+      .then(() => this.write(line))
+      .catch((err) => {
+        console.error("[agent-runtime] event write failed:", err);
+      });
   }
 
   private async write(line: StreamLine): Promise<void> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`agent-events:${this.sessionId}`]);
-    await client.query(
-      `WITH next AS (SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM agent_event WHERE session_id = $1),
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+        `agent-events:${this.sessionId}`,
+      ]);
+      await client.query(
+        `WITH next AS (SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM agent_event WHERE session_id = $1),
        ins AS (
          INSERT INTO agent_event (session_id, seq, run_id, line)
          SELECT $1, next.seq, $2, $3::jsonb FROM next RETURNING seq
        )
        SELECT pg_notify($4, $1 || ':' || ins.seq::text) FROM ins`,
-      [this.sessionId, this.runId, JSON.stringify(line), EVENT_CHANNEL],
-    );
+        [this.sessionId, this.runId, JSON.stringify(line), EVENT_CHANNEL],
+      );
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
-    } finally { client.release(); }
-
+    } finally {
+      client.release();
+    }
   }
 
   /** 等全部行落库（run 收尾时调用，保证 final 行先于 run 状态更新可见）。 */

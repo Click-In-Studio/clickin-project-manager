@@ -142,7 +142,9 @@ export interface StartRunInput {
 }
 
 /** 发起一轮（不等待完成）。同会话已有 run 在跑 → 抛 SessionBusyError（调用方转 steer）。 */
-export async function startRun(input: StartRunInput): Promise<{ runId: string }> {
+export async function startRun(
+  input: StartRunInput,
+): Promise<{ runId: string }> {
   if (active.has(input.sessionId)) throw new SessionBusyError();
   const storage = await ensureSession(input.sessionId, input.userId);
   // 额度门（#383）：只挡**新发起**的一轮。孤儿接管/审批后续跑不再判——那是
@@ -157,36 +159,79 @@ export async function startRun(input: StartRunInput): Promise<{ runId: string }>
   let inboxId: string;
   try {
     await client.query("BEGIN");
-    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.sessionId]);
-    const busy = await client.query(`SELECT 1 FROM agent_run WHERE session_id=$1
-      AND status IN ('running','compacting','awaiting_approval','awaiting_answer')`, [input.sessionId]);
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      input.sessionId,
+    ]);
+    const busy = await client.query(
+      `SELECT 1 FROM agent_run WHERE session_id=$1
+      AND status IN ('running','compacting','awaiting_approval','awaiting_answer')`,
+      [input.sessionId],
+    );
     if (busy.rowCount) throw new SessionBusyError();
-    await client.query(`INSERT INTO agent_run (id,session_id,status,owner,heartbeat_at,page_key,model,schedule_id,paid_from)
+    await client.query(
+      `INSERT INTO agent_run (id,session_id,status,owner,heartbeat_at,page_key,model,schedule_id,paid_from)
       VALUES($1,$2,'running',$3,now(),$4,$5,$6,$7)`,
-      [runId,input.sessionId,RUNNER_OWNER,input.pageKey??null,CHAT_MODEL.id,input.scheduleId??null,paidFrom]);
+      [
+        runId,
+        input.sessionId,
+        RUNNER_OWNER,
+        input.pageKey ?? null,
+        CHAT_MODEL.id,
+        input.scheduleId ?? null,
+        paidFrom,
+      ],
+    );
     inboxId = (await import("./ids")).newInboxId();
-    await client.query(`INSERT INTO agent_session_inbox(id,session_id,claimed_run_id,message,attachment_ids)
-      VALUES($1,$2,$3,$4,$5::jsonb)`, [inboxId,input.sessionId,runId,input.message,JSON.stringify(input.attachmentIds??[])]);
+    await client.query(
+      `INSERT INTO agent_session_inbox(id,session_id,claimed_run_id,message,attachment_ids)
+      VALUES($1,$2,$3,$4,$5::jsonb)`,
+      [
+        inboxId,
+        input.sessionId,
+        runId,
+        input.message,
+        JSON.stringify(input.attachmentIds ?? []),
+      ],
+    );
     await client.query("COMMIT");
-  } catch(error) { await client.query("ROLLBACK"); throw error; }
-  finally { client.release(); }
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
   await startExecution({
-    storage, runId, userId: input.userId, message: input.message, attachmentIds: input.attachmentIds, inboxEntryId: inboxId,
-    pageKey: input.pageKey ?? null, paidFrom, scheduleId: input.scheduleId ?? null,
+    storage,
+    runId,
+    userId: input.userId,
+    message: input.message,
+    attachmentIds: input.attachmentIds,
+    inboxEntryId: inboxId,
+    pageKey: input.pageKey ?? null,
+    paidFrom,
+    scheduleId: input.scheduleId ?? null,
   });
   return { runId };
 }
 
 /** 中途插话先持久入队，在模型轮次之间消费。 */
 export async function steerRun(
-  sessionId: string, message: string, attachmentIds: string[] = [],
+  sessionId: string,
+  message: string,
+  attachmentIds: string[] = [],
 ): Promise<{ runId: string } | null> {
   const run = active.get(sessionId);
   if (!run) return null;
   const identity = parseSessionIdentity(sessionId);
-  if (!identity) throw Object.assign(new Error("无权访问该会话"), { status: 403 });
+  if (!identity)
+    throw Object.assign(new Error("无权访问该会话"), { status: 403 });
   // 所有插话先落持久 inbox。模型循环在安全边界消费；压缩与普通执行共用一条队列。
-  await enqueueSessionInput({sessionId,runId:run.runId,message,attachmentIds});
+  await enqueueSessionInput({
+    sessionId,
+    runId: run.runId,
+    message,
+    attachmentIds,
+  });
 
   return { runId: run.runId };
 }
@@ -217,11 +262,18 @@ async function withAttachmentPreflight(
   return attachTrustedAttachmentContext(message, attachments, preflights);
 }
 
-export async function abortRun(sessionId: string): Promise<boolean> {
+export async function abortRun(
+  sessionId: string,
+  reason = "用户停止",
+): Promise<boolean> {
   const run = active.get(sessionId);
   run?.abort.abort();
-  await (await import("./subagents")).stopSubagent(sessionId);
-  await getPool().query("DELETE FROM agent_session_inbox WHERE session_id=$1",[sessionId]);
+  await (
+    await import("./subagents")
+  ).stopSubagent(sessionId, undefined, reason);
+  await getPool().query("DELETE FROM agent_session_inbox WHERE session_id=$1", [
+    sessionId,
+  ]);
   if (!run) return false;
   await run.abortHarness();
   return true;
@@ -248,10 +300,12 @@ interface ExecuteInput {
 /** 发起方等到本地执行槽建立，避免刚返回 runId 就收到插话 409。 */
 async function startExecution(input: ExecuteInput): Promise<void> {
   let ready!: () => void;
-  const started = new Promise<void>((resolve) => { ready = resolve; });
+  const started = new Promise<void>((resolve) => {
+    ready = resolve;
+  });
   const done = execute({ ...input, onReady: ready });
-  void done.catch((error) => console.error("[agent-runtime] 执行失败",error));
-  await Promise.race([started,done]);
+  void done.catch((error) => console.error("[agent-runtime] 执行失败", error));
+  await Promise.race([started, done]);
 }
 
 async function execute(input: ExecuteInput): Promise<void> {
@@ -502,7 +556,7 @@ async function execute(input: ExecuteInput): Promise<void> {
         taskCostTail = taskCostTail.then(async()=>{
           if (!(await (await import("./subagent-db")).addTaskCost(runId,dollars))) {
             costCapAborted=true;abort.abort();void active.get(sessionId)?.abortHarness();
-            await (await import("./subagents")).stopSubagent(sessionId);
+            await (await import("./subagents")).stopSubagent(sessionId,undefined,"任务成本硬顶触发");
           }
         });
         const t = event.message.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("");
@@ -590,7 +644,7 @@ async function execute(input: ExecuteInput): Promise<void> {
       usage.compactionUsd += compaction.usd;
       usage.compactionTokens += compaction.tokens;
       if (compaction.usd && !(await (await import("./subagent-db")).addTaskCost(runId,compaction.usd))) {
-        costCapAborted=true;abort.abort();await (await import("./subagents")).stopSubagent(sessionId);
+        costCapAborted=true;abort.abort();await (await import("./subagents")).stopSubagent(sessionId,undefined,"任务成本硬顶触发");
       }
       await reconcileConsumedInputs(sessionId);
       let queued = await pendingInputsForRun(sessionId, runId);

@@ -43,6 +43,8 @@ import {
 } from "@/lib/agent/runtime/subagent-db";
 import {
   runtimeOverrides,
+  startRun,
+  abortRun,
   waitForIdle,
   dispatchPendingSession,
   getHistory,
@@ -531,7 +533,7 @@ describe("持久子 Agent 基建", () => {
   });
   it("取消同批一个子任务保留其他通知，并关闭所有执行名额", async () => {
     const p = await parent();
-    const ids = [];
+    const ids: string[] = [];
     for (let i = 0; i < 2; i++)
       ids.push(
         await queueSubagent({
@@ -764,7 +766,7 @@ describe("持久子 Agent 基建", () => {
 
   it("跨主会话仍共用同一用户四个执行名额", async () => {
     const roots = [await parent(), await parent(), await parent()];
-    const ids = [];
+    const ids: string[] = [];
     for (const p of roots)
       for (let i = 0; i < 2; i++)
         ids.push(
@@ -821,5 +823,116 @@ describe("持久子 Agent 基建", () => {
         message: "递归",
       }),
     ).rejects.toThrow("交互主 Agent");
+  });
+  it("停止主任务同时停止子任务并清掉两侧待消费队列", async () => {
+    const sessionId = createNewSessionKey(userId, prodId);
+    runtimeOverrides.streamFn = model([], [], new Promise<void>(() => {}));
+    const { runId } = await startRun({
+      sessionId,
+      userId,
+      message: "研读全剧",
+    });
+    const p: RunHandle = {
+      runId,
+      sessionId,
+      signal: new AbortController().signal,
+      publish: () => {},
+      setStatus: async () => {},
+      isDetached: () => false,
+    };
+    parents.push(p);
+    subagentRuntimeOverrides.streamFn = model(
+      [],
+      [],
+      new Promise<void>(() => {}),
+    );
+    await spawnSubagent(p, { task: "核对第一场" });
+    expect(await abortRun(sessionId)).toBe(true);
+    await waitForIdle(sessionId);
+    expect((await listSubagents(sessionId))[0].status).toBe("stopped");
+    expect(
+      (
+        await getPool().query("SELECT status FROM agent_run WHERE id=$1", [
+          runId,
+        ])
+      ).rows[0].status,
+    ).toBe("aborted");
+    expect(
+      (
+        await getPool().query(
+          "SELECT id FROM agent_session_inbox WHERE session_id=$1",
+          [sessionId],
+        )
+      ).rowCount,
+    ).toBe(0);
+  });
+
+  it("孤儿中断在材料工具调用后时，只补读缺失结果，再继续模型轮次", async () => {
+    const p = await parent();
+    const id = await queueSubagent({
+      parentSessionId: p.sessionId,
+      parentRunId: p.runId,
+      task: "中断研读",
+      message: "研读",
+      sources: [
+        {
+          id: "scene-a",
+          title: "第一场",
+          locator: "第一场第2段",
+          content: "甲：我得照顾家里。",
+        },
+      ],
+    });
+    const job = (await claimSubagents()).find((r) => r.subagent_id === id)!;
+    const storage = (await PgSessionStorage.load(id))!;
+    await storage.appendEntry({
+      type: "message",
+      id: `ain_child_${job.id}`,
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      message: { role: "user", content: "研读", timestamp: Date.now() },
+    });
+    await storage.appendEntry({
+      type: "message",
+      id: `msg_${shortId()}`,
+      parentId: `ain_child_${job.id}`,
+      timestamp: new Date().toISOString(),
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "interrupted-read",
+            name: exposedName("material_read"),
+            arguments: { sourceId: "scene-a" },
+          },
+        ],
+        timestamp: Date.now(),
+        api: CHAT_MODEL.api,
+        model: CHAT_MODEL.id,
+        provider: CHAT_MODEL.provider,
+        usage,
+        stopReason: "toolUse",
+      },
+    });
+    await getPool().query(
+      "UPDATE agent_run SET owner='旧进程',heartbeat_at=now()-interval '5 minutes' WHERE id=$1",
+      [job.id],
+    );
+    const seen: Array<{ messages: unknown[]; tools: string[] }> = [];
+    subagentRuntimeOverrides.streamFn = model(["核对完成。"], seen);
+    await recoverSubagents();
+    await completed(p, id);
+    expect(seen).toHaveLength(1);
+    expect(JSON.stringify(seen[0].messages)).toContain("甲：我得照顾家里");
+    const trace = JSON.parse(await readSubagent(p.sessionId, id));
+    expect(
+      trace.entries.filter(
+        (e: { payload: { message?: { role: string } } }) =>
+          e.payload.message?.role === "toolResult",
+      ),
+    ).toHaveLength(1);
+    await recoverSubagents();
+    expect(seen).toHaveLength(1);
   });
 });

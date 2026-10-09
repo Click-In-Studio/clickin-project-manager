@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
     if (auth instanceof Response) return auth;
     const encoder = new TextEncoder();
     let cleanup = () => {};
+    let cancelled = false;
     const stream = new ReadableStream({
       async start(controller) {
         let closed = false;
@@ -82,6 +83,10 @@ export async function GET(req: NextRequest) {
           req.signal.removeEventListener("abort", finish);
         };
         req.signal.addEventListener("abort", finish, { once: true });
+        if (cancelled) {
+          cleanup();
+          return;
+        }
         if (req.signal.aborted) {
           finish();
           return;
@@ -89,6 +94,7 @@ export async function GET(req: NextRequest) {
         update();
       },
       cancel() {
+        cancelled = true;
         cleanup();
       },
     });

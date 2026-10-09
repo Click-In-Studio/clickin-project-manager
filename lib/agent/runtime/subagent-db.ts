@@ -389,6 +389,7 @@ export async function deliverSubagentNotifications(): Promise<string[]> {
 export async function cancelSubagents(
   parentSessionId: string,
   id?: string,
+  reason = "用户停止",
 ): Promise<string[]> {
   const client = await getPool().connect();
   try {
@@ -403,9 +404,9 @@ export async function cancelSubagents(
     );
     const ids = children.rows.map((r) => r.id);
     await client.query(
-      `UPDATE agent_run SET status='aborted',ended_at=now(),error='用户停止',notification_delivered=true
+      `UPDATE agent_run SET status='aborted',ended_at=now(),error=$2,notification_delivered=true
       WHERE subagent_id=ANY($1::text[]) AND status IN ('queued','running','compacting','awaiting_approval','awaiting_answer')`,
-      [ids],
+      [ids, reason],
     );
     // 同批其他子任务的通知继续保留，仅移除被停止的条目。
     await client.query(

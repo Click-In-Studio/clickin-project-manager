@@ -144,6 +144,15 @@ describe("子助理查看、轨迹、停止与状态流权限", () => {
     expect((await reader.read()).done).toBe(true);
     expect(countKickableStreams(prodId, owner)).toBe(0);
   });
+  it("首帧之前取消也会释放状态流注册", async () => {
+    const response = await events(req(owner));
+    await response.body!.cancel();
+    for (let i = 0; i < 30; i++) {
+      if (!countKickableStreams(prodId, owner)) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(countKickableStreams(prodId, owner)).toBe(0);
+  });
   it("所有者可停止排队项", async () => {
     expect((await POST(req(owner, parent, child, "POST"))).status).toBe(200);
     expect((await GET(req(owner))).status).toBe(200);

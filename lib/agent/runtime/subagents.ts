@@ -321,7 +321,7 @@ async function execute(
         abort.abort();
         void harness.abort();
         void (await import("./service"))
-          .abortRun(job.parent_session_id)
+          .abortRun(job.parent_session_id, "任务成本硬顶触发")
           .catch((e) => console.error("[subagent] 成本中止失败", e));
       }
     });
@@ -471,9 +471,10 @@ export async function readSubagent(
 export async function stopSubagent(
   parentSessionId: string,
   id?: string,
+  reason = "用户停止",
 ): Promise<void> {
   if (id) await db.ownSubagent(parentSessionId, id);
-  const ids = await db.cancelSubagents(parentSessionId, id);
+  const ids = await db.cancelSubagents(parentSessionId, id, reason);
   const jobs = [...active.values()].filter(
     (job) => job.parentId === parentSessionId && ids.includes(job.childId),
   );
