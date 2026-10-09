@@ -14,6 +14,8 @@ const TOKEN_ALLOWED_PREFIXES = ["/my/weekly-call", "/my/daily-call"];
 export function proxy(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl;
 
+  // 健康探测由路由校验内部 Bearer 密钥，不依赖用户登录，也不放行其他同名前缀。
+  if (pathname === "/health") return NextResponse.next();
   if (PUBLIC_PREFIXES.some(p => pathname.startsWith(p))) return NextResponse.next();
 
   const hasSession = req.cookies.has(SESSION_COOKIE);
