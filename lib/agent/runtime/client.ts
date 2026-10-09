@@ -60,3 +60,12 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 export { getHistory, listSessions, renameSession, isRunnerSession } from "./service";
+
+export async function stopSubagent(
+  sessionId: string,
+  subagentId: string,
+): Promise<void> {
+  if (!runnerUrl())
+    return (await import("./subagents")).stopSubagent(sessionId, subagentId);
+  await post("/subagents/stop", { sessionId, subagentId });
+}

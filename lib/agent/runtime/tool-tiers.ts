@@ -1,3 +1,4 @@
+import { SUBAGENT_TOOL_NAMES } from "./subagent-types";
 // 工具三层（#333 判据，#367 里一行代码的实现）：每轮送给模型的工具列表 =
 //   热层（按会话类型两张表） ∪ 温层（当前页面） ∪ 冷层召回命中（tool-catalog 中文 bigram）
 //   ∪ 依赖闭包（id 供给入口 / 知识节点由 knowledge 通道另送）
@@ -12,11 +13,13 @@ import { toolRecall } from "@/lib/agent/tools/tool-catalog";
 
 /** 个人会话热层：my.* 就是它的全部业务面（砍了等于空手）+ 提问 */
 const HOT_PERSONAL = [
+  ...SUBAGENT_TOOL_NAMES,
   "my.productions", "my.memory_search", "my.attachment_read", "my.call_times", "my.events", "my.milestones", "my.tech_reqs", "ask_user", "find_tools", "web.search", "web.fetch",
 ];
 
 /** 制作会话热层：范围锚点 + 语境锚（info/my_role/notifications）+ id 供给入口（成员/部门）+ 提问 */
 const HOT_PRODUCTION = [
+  ...SUBAGENT_TOOL_NAMES,
   "my.productions", "my.memory_search", "my.attachment_read", "my.call_times",
   "production.info", "production.my_role", "production.notifications",
   "production.contact_list", "production.department_list",

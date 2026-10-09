@@ -6,11 +6,12 @@
 // seq 用 max+1 即可；(session_id, seq) 与 (session_id, entry_id) 两条唯一约束是
 // 前提被打破时的最后防线（违约抛错而不是静默写坏树）。
 
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { getPool } from "@/lib/pg";
 import { BaseSessionStorage } from "../../../vendor/openclaw/packages/agent-core/src/harness/session/storage-base";
 import type {
   MessageEntry,
+  CustomMessageEntry,
   SessionMetadata,
   SessionTreeEntry,
 } from "../../../vendor/openclaw/packages/agent-core/src/harness/types";
@@ -77,19 +78,27 @@ export class PgSessionStorage extends BaseSessionStorage<PgSessionMetadata> {
     );
   }
 
-  private async persist(entry: SessionTreeEntry): Promise<void> {
+  private async persist(entry: SessionTreeEntry, executor: Pool | PoolClient = this.pool): Promise<void> {
     const meta = await this.getMetadata();
-    await this.pool.query(
+    await executor.query(
       `INSERT INTO agent_session_entry (session_id, seq, entry_id, parent_id, type, payload)
        SELECT $1, COALESCE(MAX(seq), 0) + 1, $2, $3, $4, $5::jsonb
        FROM agent_session_entry WHERE session_id = $1`,
       [meta.id, entry.id, entry.parentId, entry.type, JSON.stringify(entry)],
     );
     // 会话活跃时间：只有消息类条目算"最后一条消息"
-    await this.pool.query(
+    await executor.query(
       `UPDATE agent_session SET updated_at = now()${entry.type === "message" ? ", last_message_at = now()" : ""} WHERE id = $1`,
       [meta.id],
     );
+  }
+
+  /** 系统事件与 inbox 在同一连接提交，避免持锁期间再次向连接池借连接。
+   *  调用方 COMMIT 后才调用返回函数，把已提交条目装入内存上下文。 */
+  async persistSystemEvent(entry: CustomMessageEntry, client: PoolClient): Promise<() => void> {
+    if (this.detached) throw new Error("会话已脱离，不能追加系统事件");
+    await this.persist(entry, client);
+    return () => this.recordEntry(entry);
   }
 
   override async setLeafId(leafId: string | null): Promise<void> {

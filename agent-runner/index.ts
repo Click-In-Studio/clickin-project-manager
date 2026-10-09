@@ -68,6 +68,12 @@ async function main() {
         const r = await service.steerRun(sessionId, message, attachmentIds);
         return send(res, 200, { runId: r?.runId ?? null });
       }
+      if (req.url === "/subagents/stop") {
+        const sessionId=str("sessionId");const id=str("subagentId");
+        if(!sessionId || !id) return send(res,400,{error:"missing fields"});
+        await (await import("../lib/agent/runtime/subagents")).stopSubagent(sessionId,id);
+        return send(res,200,{ok:true});
+      }
       if (req.url === "/runs/abort") {
         const sessionId = str("sessionId");
         if (!sessionId) return send(res, 400, { error: "missing fields" });
@@ -89,6 +95,8 @@ async function main() {
   const scan = async () => {
     try {
       const n = await service.resumeOrphans();
+      await (await import("../lib/agent/runtime/subagents")).recoverSubagents();
+      await service.resumePendingInputs();
       if (n > 0) console.log(`[agent-runner] resumed ${n} orphan run(s)`);
     } catch (err) {
       console.error("[agent-runner] orphan scan failed:", err);

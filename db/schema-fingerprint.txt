@@ -98,20 +98,29 @@ COL|agent_run_attachment_access|access_kind|text|text|NO|
 COL|agent_run_attachment_access|attachment_id|text|text|NO|
 COL|agent_run_attachment_access|run_id|text|text|NO|
 COL|agent_run_attachment_access|succeeded_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_run|budget_run_id|text|text|YES|
 COL|agent_run|cache_read_tokens|integer|int4|NO|0
+COL|agent_run|delegation_key|text|text|YES|
 COL|agent_run|ended_at|timestamp with time zone|timestamptz|YES|
 COL|agent_run|error|text|text|YES|
+COL|agent_run|execution_started_at|timestamp with time zone|timestamptz|YES|
 COL|agent_run|heartbeat_at|timestamp with time zone|timestamptz|YES|
 COL|agent_run|id|text|text|NO|
+COL|agent_run|initial_message|text|text|YES|
 COL|agent_run|input_tokens|integer|int4|NO|0
 COL|agent_run|model|text|text|YES|
+COL|agent_run|notification_delivered|boolean|bool|NO|false
 COL|agent_run|output_tokens|integer|int4|NO|0
 COL|agent_run|owner|text|text|YES|
 COL|agent_run|page_key|text|text|YES|
+COL|agent_run|paid_from|text|text|YES|
+COL|agent_run|result|text|text|YES|
 COL|agent_run|schedule_id|text|text|YES|
 COL|agent_run|session_id|text|text|NO|
 COL|agent_run|started_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_run|status|text|text|NO|'queued'::text
+COL|agent_run|subagent_id|text|text|YES|
+COL|agent_run|task_credits|bigint|int8|NO|0
 COL|agent_schedule|allowed_tools|ARRAY|_text|NO|'{}'::text[]
 COL|agent_schedule|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_schedule|created_by_session_id|text|text|YES|
@@ -166,17 +175,29 @@ COL|agent_session_inbox|attachment_ids|jsonb|jsonb|NO|'[]'::jsonb
 COL|agent_session_inbox|claimed_run_id|text|text|YES|
 COL|agent_session_inbox|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_session_inbox|id|text|text|NO|
+COL|agent_session_inbox|kind|text|text|NO|'user_message'::text
 COL|agent_session_inbox|message|text|text|NO|
+COL|agent_session_inbox|payload|jsonb|jsonb|NO|'{}'::jsonb
 COL|agent_session_inbox|session_id|text|text|NO|
 COL|agent_session|archived_at|timestamp with time zone|timestamptz|YES|
 COL|agent_session|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_session|id|text|text|NO|
 COL|agent_session|last_message_at|timestamp with time zone|timestamptz|YES|
+COL|agent_session|parent_session_id|text|text|YES|
 COL|agent_session|production_id|text|text|YES|
 COL|agent_session|schedule_id|text|text|YES|
 COL|agent_session|title|text|text|YES|
 COL|agent_session|updated_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_session|user_id|uuid|uuid|NO|
+COL|agent_subagent_usage|id|text|text|NO|
+COL|agent_subagent_usage|run_id|text|text|NO|
+COL|agent_subagent|completion_criteria|text|text|NO|''::text
+COL|agent_subagent|context_request|text|text|YES|
+COL|agent_subagent|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_subagent|id|text|text|NO|
+COL|agent_subagent|sources|jsonb|jsonb|NO|'[]'::jsonb
+COL|agent_subagent|stopped|boolean|bool|NO|false
+COL|agent_subagent|task|text|text|NO|
 COL|ai_credit_grant|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|ai_credit_grant|credits|bigint|int8|NO|
 COL|ai_credit_grant|expires_at|timestamp with time zone|timestamptz|YES|
@@ -1214,10 +1235,14 @@ CON|agent_run_attachment_access|agent_run_attachment_access_access_kind_check|CH
 CON|agent_run_attachment_access|agent_run_attachment_access_attachment_id_fkey|FOREIGN KEY (attachment_id) REFERENCES agent_session_attachment(id) ON DELETE CASCADE
 CON|agent_run_attachment_access|agent_run_attachment_access_pkey|PRIMARY KEY (run_id, attachment_id, access_kind)
 CON|agent_run_attachment_access|agent_run_attachment_access_run_id_fkey|FOREIGN KEY (run_id) REFERENCES agent_run(id) ON DELETE CASCADE
+CON|agent_run|agent_run_budget_run_id_fkey|FOREIGN KEY (budget_run_id) REFERENCES agent_run(id) ON DELETE SET NULL
+CON|agent_run|agent_run_delegation_key_key|UNIQUE (delegation_key)
+CON|agent_run|agent_run_paid_from_check|CHECK ((paid_from = ANY (ARRAY['quota'::text, 'extra'::text, 'exempt'::text])))
 CON|agent_run|agent_run_pkey|PRIMARY KEY (id)
 CON|agent_run|agent_run_schedule_id_fkey|FOREIGN KEY (schedule_id) REFERENCES agent_schedule(id) ON DELETE SET NULL
 CON|agent_run|agent_run_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
 CON|agent_run|agent_run_status_check|CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'compacting'::text, 'awaiting_approval'::text, 'awaiting_answer'::text, 'completed'::text, 'aborted'::text, 'failed'::text, 'interrupted'::text])))
+CON|agent_run|agent_run_subagent_id_fkey|FOREIGN KEY (subagent_id) REFERENCES agent_subagent(id) ON DELETE CASCADE
 CON|agent_schedule|agent_schedule_created_by_session_id_fkey|FOREIGN KEY (created_by_session_id) REFERENCES agent_session(id) ON DELETE SET NULL
 CON|agent_schedule|agent_schedule_last_run_id_fkey|FOREIGN KEY (last_run_id) REFERENCES agent_run(id) ON DELETE SET NULL
 CON|agent_schedule|agent_schedule_pkey|PRIMARY KEY (id)
@@ -1238,12 +1263,19 @@ CON|agent_session_entry|agent_session_entry_session_id_entry_id_key|UNIQUE (sess
 CON|agent_session_entry|agent_session_entry_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
 CON|agent_session_inbox|agent_session_inbox_attachment_ids_check|CHECK ((jsonb_typeof(attachment_ids) = 'array'::text))
 CON|agent_session_inbox|agent_session_inbox_claimed_run_id_fkey|FOREIGN KEY (claimed_run_id) REFERENCES agent_run(id) ON DELETE SET NULL
+CON|agent_session_inbox|agent_session_inbox_kind_check|CHECK ((kind = ANY (ARRAY['user_message'::text, 'subagent_event'::text])))
 CON|agent_session_inbox|agent_session_inbox_pkey|PRIMARY KEY (id)
 CON|agent_session_inbox|agent_session_inbox_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
+CON|agent_session|agent_session_parent_session_id_fkey|FOREIGN KEY (parent_session_id) REFERENCES agent_session(id) ON DELETE CASCADE
 CON|agent_session|agent_session_pkey|PRIMARY KEY (id)
 CON|agent_session|agent_session_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|agent_session|agent_session_schedule_id_fkey|FOREIGN KEY (schedule_id) REFERENCES agent_schedule(id) ON DELETE SET NULL
 CON|agent_session|agent_session_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|agent_subagent_usage|agent_subagent_usage_pkey|PRIMARY KEY (id)
+CON|agent_subagent_usage|agent_subagent_usage_run_id_fkey|FOREIGN KEY (run_id) REFERENCES agent_run(id) ON DELETE CASCADE
+CON|agent_subagent|agent_subagent_id_fkey|FOREIGN KEY (id) REFERENCES agent_session(id) ON DELETE CASCADE
+CON|agent_subagent|agent_subagent_pkey|PRIMARY KEY (id)
+CON|agent_subagent|agent_subagent_sources_check|CHECK ((jsonb_typeof(sources) = 'array'::text))
 CON|ai_credit_grant|ai_credit_grant_credits_check|CHECK ((credits > 0))
 CON|ai_credit_grant|ai_credit_grant_pkey|PRIMARY KEY (id)
 CON|ai_credit_grant|ai_credit_grant_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
@@ -1830,9 +1862,12 @@ IDX|agent_question|agent_question_pending_idx|CREATE INDEX agent_question_pendin
 IDX|agent_question|agent_question_pkey|CREATE UNIQUE INDEX agent_question_pkey ON public.agent_question USING btree (id)
 IDX|agent_run_attachment_access|agent_run_attachment_access_pkey|CREATE UNIQUE INDEX agent_run_attachment_access_pkey ON public.agent_run_attachment_access USING btree (run_id, attachment_id, access_kind)
 IDX|agent_run|agent_run_active_idx|CREATE INDEX agent_run_active_idx ON public.agent_run USING btree (status, heartbeat_at) WHERE (status = ANY (ARRAY['running'::text, 'compacting'::text, 'awaiting_approval'::text, 'awaiting_answer'::text]))
+IDX|agent_run|agent_run_delegation_key_key|CREATE UNIQUE INDEX agent_run_delegation_key_key ON public.agent_run USING btree (delegation_key)
 IDX|agent_run|agent_run_pkey|CREATE UNIQUE INDEX agent_run_pkey ON public.agent_run USING btree (id)
 IDX|agent_run|agent_run_schedule_idx|CREATE INDEX agent_run_schedule_idx ON public.agent_run USING btree (schedule_id, started_at DESC) WHERE (schedule_id IS NOT NULL)
 IDX|agent_run|agent_run_session_idx|CREATE INDEX agent_run_session_idx ON public.agent_run USING btree (session_id, started_at DESC)
+IDX|agent_run|agent_run_single_writer_idx|CREATE UNIQUE INDEX agent_run_single_writer_idx ON public.agent_run USING btree (session_id) WHERE (status = ANY (ARRAY['running'::text, 'compacting'::text, 'awaiting_approval'::text, 'awaiting_answer'::text]))
+IDX|agent_run|agent_run_subagent_queue_idx|CREATE INDEX agent_run_subagent_queue_idx ON public.agent_run USING btree (started_at, id) WHERE ((subagent_id IS NOT NULL) AND (status = 'queued'::text))
 IDX|agent_schedule|agent_schedule_due_idx|CREATE INDEX agent_schedule_due_idx ON public.agent_schedule USING btree (next_fire_at) WHERE (status = 'active'::text)
 IDX|agent_schedule|agent_schedule_pkey|CREATE UNIQUE INDEX agent_schedule_pkey ON public.agent_schedule USING btree (id)
 IDX|agent_schedule|agent_schedule_user_idx|CREATE INDEX agent_schedule_user_idx ON public.agent_schedule USING btree (user_id, created_at DESC)
@@ -1846,10 +1881,13 @@ IDX|agent_session_entry|agent_session_entry_pkey|CREATE UNIQUE INDEX agent_sessi
 IDX|agent_session_entry|agent_session_entry_session_id_entry_id_key|CREATE UNIQUE INDEX agent_session_entry_session_id_entry_id_key ON public.agent_session_entry USING btree (session_id, entry_id)
 IDX|agent_session_inbox|agent_session_inbox_pending_idx|CREATE INDEX agent_session_inbox_pending_idx ON public.agent_session_inbox USING btree (session_id, created_at, id)
 IDX|agent_session_inbox|agent_session_inbox_pkey|CREATE UNIQUE INDEX agent_session_inbox_pkey ON public.agent_session_inbox USING btree (id)
+IDX|agent_session|agent_session_parent_idx|CREATE INDEX agent_session_parent_idx ON public.agent_session USING btree (parent_session_id) WHERE (parent_session_id IS NOT NULL)
 IDX|agent_session|agent_session_pkey|CREATE UNIQUE INDEX agent_session_pkey ON public.agent_session USING btree (id)
 IDX|agent_session|agent_session_production_idx|CREATE INDEX agent_session_production_idx ON public.agent_session USING btree (production_id) WHERE (production_id IS NOT NULL)
 IDX|agent_session|agent_session_schedule_idx|CREATE INDEX agent_session_schedule_idx ON public.agent_session USING btree (schedule_id) WHERE (schedule_id IS NOT NULL)
 IDX|agent_session|agent_session_user_idx|CREATE INDEX agent_session_user_idx ON public.agent_session USING btree (user_id, updated_at DESC)
+IDX|agent_subagent_usage|agent_subagent_usage_pkey|CREATE UNIQUE INDEX agent_subagent_usage_pkey ON public.agent_subagent_usage USING btree (id)
+IDX|agent_subagent|agent_subagent_pkey|CREATE UNIQUE INDEX agent_subagent_pkey ON public.agent_subagent USING btree (id)
 IDX|ai_credit_grant|ai_credit_grant_pkey|CREATE UNIQUE INDEX ai_credit_grant_pkey ON public.ai_credit_grant USING btree (id)
 IDX|ai_credit_grant|ai_credit_grant_user_idx|CREATE INDEX ai_credit_grant_user_idx ON public.ai_credit_grant USING btree (user_id, expires_at)
 IDX|ai_usage|ai_usage_created_idx|CREATE INDEX ai_usage_created_idx ON public.ai_usage USING btree (created_at)

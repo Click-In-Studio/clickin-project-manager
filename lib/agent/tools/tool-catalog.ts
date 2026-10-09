@@ -49,6 +49,7 @@ export const TOOL_FAMILIES: Record<string, { label: string }> = {
   "production.doc": { label: "上传文档解读" },
 };
 
+// subagent 协作工具只放热层，不参与召回（#908）；由 RUNTIME_ONLY_TOOLS 声明目录豁免。
 export const TOOL_CATALOG: ToolCatalogEntry[] = [
   // ── personal ──────────────────────────────────────────────────────────────
   { name: "my.call_times", family: "my.schedule", scope: "personal", oneliner: "查询自己近期的 Call/通告时间",
