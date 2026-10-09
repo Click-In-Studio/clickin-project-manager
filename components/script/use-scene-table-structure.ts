@@ -50,7 +50,8 @@ export function useSceneTableStructure({
 
   const refreshWithNotice = useCallback(() => {
     if (busyRef.current) { refreshQueued.current = true; return; }
-    void refresh().catch((caught) => setError(caught instanceof Error ? caught.message : "同步失败"));
+    void refresh().then(() => { if (!writeBlockedRef.current) setError(null); })
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "同步失败"));
   }, [refresh]);
   useEffect(() => {
     const sequence = readSequence;

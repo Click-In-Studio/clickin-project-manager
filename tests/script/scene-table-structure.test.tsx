@@ -113,7 +113,10 @@ describe("构作表格结构操作", () => {
     await submitName("不可继续写入");
     expect(writes("POST")).toHaveLength(1);
     fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => init?.method ? response(200, { scenes: SCENES }) : response(200, SCENES));
-    await clickText("重试同步"); await submitName("恢复后的草稿");
+    await clickText("重试同步");
+    expect(host.textContent).not.toContain("已暂停新增、删除和排序");
+    expect(host.textContent).not.toContain("同步也失败");
+    await submitName("恢复后的草稿");
     expect(writes("POST")).toHaveLength(2);
   });
   it("逐动作和逐实例权限，字段修改权限不开放结构动作", async () => {
