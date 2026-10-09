@@ -1,3 +1,5 @@
+import { SUBAGENT_DEFS } from "./subagent-tools";
+import { SUBAGENT_TOOL_NAMES } from "./subagent-types";
 // 进程内工具注册表（#367 S2）：**skills 的唯一事实源**（MCP 服务器已退役）。
 //
 // 底层函数在 lib/agent/tools/（my-tools / production-tools / wiki-tools /
@@ -93,7 +95,7 @@ export function bareName(exposed: string): string {
   return exposed.startsWith(TOOL_PREFIX) ? exposed.slice(TOOL_PREFIX.length) : exposed;
 }
 
-type Def = {
+export type ToolDefinition = {
   mcpName: string;
   description: string;
   parameters: TSchema;
@@ -133,17 +135,18 @@ const WIKI_MUTATES = {
 
 const NONE = Type.Object({});
 
-function myTool(mcpName: string, description: string, fn: (uid: string) => Promise<string>): Def {
+function myTool(mcpName: string, description: string, fn: (uid: string) => Promise<string>): ToolDefinition {
   return { mcpName, description: `${description}${MY_SCOPE_NOTE}`, parameters: NONE, readOnly: true, execute: (ctx) => fn(ctx.userId) };
 }
-function prodTool(mcpName: string, description: string, fn: (uid: string, pid: string) => Promise<string>): Def {
+function prodTool(mcpName: string, description: string, fn: (uid: string, pid: string) => Promise<string>): ToolDefinition {
   return { mcpName, description, parameters: NONE, readOnly: true, needsProduction: true, execute: (ctx) => fn(ctx.userId, ctx.productionId) };
 }
 
 const WIKI_ID = Type.String({ description: "文档 id（来自 wiki_tree/wiki_search 的结果）" });
 
 /** 导出仅供测试防漂移（selfScribe 不扩散等约束钉在 tests 里）。 */
-export const DEFS: Def[] = [
+export const DEFS: ToolDefinition[] = [
+  ...SUBAGENT_DEFS,
   // ── my.* ────────────────────────────────────────────────────────────────
   myTool("my.call_times", "查询当前用户自己的近期Call（时间、事件、地点、所属制作）（EN: my call times schedule）。",
     async (uid) => (await import("@/lib/agent/tools/my-tools")).myCallTimes(uid)),
@@ -1082,7 +1085,7 @@ async function proposalBody(productionId: string, toolCallId: string, userId: st
 
 export const TOOL_MCP_NAMES: readonly string[] = DEFS.map((d) => d.mcpName);
 /** 只存在于运行时、不进 tool-catalog 的工具（常驻热层，不走召回；schedule.finish 只在定时任务 run 里注入）：目录 = 注册表 − 这几个 */
-export const RUNTIME_ONLY_TOOLS: ReadonlySet<string> = new Set(["ask_user", "find_tools", "web.search", "web.fetch", "schedule.finish"]);
+export const RUNTIME_ONLY_TOOLS: ReadonlySet<string> = new Set(["ask_user", "find_tools", "web.search", "web.fetch", "schedule.finish", ...SUBAGENT_TOOL_NAMES]);
 /** 允许无人值守直接写的工具（注册表 unattended=allow）；定时任务的 allowed_tools 只能从这里选 */
 export const UNATTENDED_ALLOWED_TOOLS: ReadonlySet<string> = new Set(DEFS.filter((d) => d.unattended === "allow").map((d) => d.mcpName));
 registerUnattendedAllowed(UNATTENDED_ALLOWED_TOOLS);

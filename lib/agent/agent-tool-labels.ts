@@ -5,6 +5,12 @@
 const MCP_TOOL_PREFIX = "clickin__";
 
 export const TOOL_LABELS: Record<string, string> = {
+  "subagent-spawn": "委托子助理",
+  "subagent-list": "查看子助理状态",
+  "subagent-read": "核对子助理证据",
+  "subagent-send": "补充或追问子助理",
+  "subagent-wait": "等待子助理",
+  "subagent-stop": "停止子助理",
   "my-call_times": "查询我的 Call 时间",
   "my-tech_reqs": "查询我的技术需求",
   "my-events": "查询我关注的活动",

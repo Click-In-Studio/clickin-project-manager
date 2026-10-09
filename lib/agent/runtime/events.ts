@@ -60,7 +60,11 @@ export class EventPublisher {
   }
 
   private async write(line: StreamLine): Promise<void> {
-    await this.pool.query(
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`agent-events:${this.sessionId}`]);
+    await client.query(
       `WITH next AS (SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM agent_event WHERE session_id = $1),
        ins AS (
          INSERT INTO agent_event (session_id, seq, run_id, line)
@@ -69,6 +73,12 @@ export class EventPublisher {
        SELECT pg_notify($4, $1 || ':' || ins.seq::text) FROM ins`,
       [this.sessionId, this.runId, JSON.stringify(line), EVENT_CHANNEL],
     );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+
   }
 
   /** 等全部行落库（run 收尾时调用，保证 final 行先于 run 状态更新可见）。 */

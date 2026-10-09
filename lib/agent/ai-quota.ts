@@ -15,6 +15,7 @@
 //    对用户是最差结局。代价是最后一次会扣穿（负 credit），透支上限由
 //    RUN_CREDIT_HARD_CAP 封顶——那道闸防的是工具死循环，不是超支。
 
+import type { PoolClient } from "pg";
 import { getPool } from "@/lib/pg";
 import {
   aiLimitsForTier, getUserTier, getProductionPlan, newCreditGrantId, USER_TIERS,
@@ -190,12 +191,12 @@ export async function assertAiQuota(args: {
  * 按 expires_at 最早的先扣（NULL 最后）；最后一张可以扣成负数——那就是允许的
  * 那点透支，下次充值先填坑。
  */
-export async function chargeExtraCredits(ownerId: string, credits: number): Promise<void> {
+export async function chargeExtraCredits(ownerId: string, credits: number, transaction?: PoolClient): Promise<void> {
   if (credits <= 0) return;
-  const client = await getPool().connect();
+  const client = transaction ?? await getPool().connect();
   try {
     // 事务内 FOR UPDATE：并发两个 run 同时结算时不能重复吃掉同一张额度。
-    await client.query("BEGIN");
+    if (!transaction) await client.query("BEGIN");
     const { rows } = await client.query<{ id: string; remaining: string }>(
       `SELECT id, remaining::text FROM ai_credit_grant
        WHERE user_id = $1 AND (expires_at IS NULL OR expires_at > now())
@@ -213,12 +214,12 @@ export async function chargeExtraCredits(ownerId: string, credits: number): Prom
       await client.query("UPDATE ai_credit_grant SET remaining = remaining - $2 WHERE id = $1", [rows[i].id, take]);
       left -= take;
     }
-    await client.query("COMMIT");
+    if (!transaction) await client.query("COMMIT");
   } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
+    if (!transaction) await client.query("ROLLBACK").catch(() => {});
     throw e;
   } finally {
-    client.release();
+    if (!transaction) client.release();
   }
 }
 

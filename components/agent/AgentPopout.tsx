@@ -18,6 +18,7 @@ import { derivePageKey, pageLabelFor, pageSuggestionsFor } from "@/lib/agent/age
 import { toolLabel } from "@/lib/agent/agent-tool-labels";
 import { dispatchAgentMutation } from "@/lib/agent/agent-mutations";
 import WikiProposalPreviewModal from "@/components/agent/WikiProposalPreviewModal";
+import SubagentPanel from "@/components/agent/SubagentPanel";
 import VoiceRecordButton from "@/components/agent/VoiceRecordButton";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import { isAgentChatSubmitShortcut } from "@/components/ui/multiline-keyboard";
@@ -402,6 +403,14 @@ export default function AgentPopout({
       consumeStream(res, key);
     }
   }, [consumeStream]);
+
+  const subagentAttachPending = useRef(false);
+  const onSubagentParentRun = useCallback(() => {
+    if (!activeKey || streaming || loadingHistory || subagentAttachPending.current) return;
+    subagentAttachPending.current = true;
+    void openSession(activeKey, "running").finally(() => { subagentAttachPending.current = false; });
+  }, [activeKey, streaming, loadingHistory, openSession]);
+
 
   // 深链打开指定会话：定时任务的通知带 ?agentSession=<key>（lib/agent/runtime/schedules.ts）。
   // 只认属于当前语境的 key；用完从 URL 摘掉，免得刷新/返回又触发。状态从会话列表现查
@@ -901,6 +910,7 @@ export default function AgentPopout({
       </div>
 
       {statusBanner}
+      {activeKey && <SubagentPanel key={activeKey} sessionKey={activeKey} onParentRun={onSubagentParentRun} />}
 
       {/* 聊天区 */}
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">

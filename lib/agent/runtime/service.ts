@@ -40,6 +40,8 @@ import { approvalCard, permissionActivationCard } from "./cards";
 import { createApproval, awaitApproval, markApprovalExecuted, approvalAllowsReexecute } from "./approvals";
 import { buildSystemPrompt, recallBlock } from "./prompt";
 import { repairAndClassify } from "./resume";
+import { claimPendingSession, sessionsWithPendingInputs } from "./session-dispatch-db";
+import { runPaidFrom, setRunPaidFrom } from "./session-runtime-db";
 import { newRunId } from "./ids";
 import {
   enqueueSessionInput,
@@ -86,11 +88,8 @@ type ActiveRun = {
   abort: AbortController;
   abortHarness: () => Promise<void>;
   detach: () => void;
-  enqueueSteer: (buildMessage: () => Promise<string>, afterCurrentTurn: boolean) => void;
-  warmAttachments: (attachmentIds: string[]) => Promise<void>;
-  isCompacting: () => boolean;
-  waitForCompactionTransition: () => Promise<void>;
 };
+let draining = false;
 const active = new Map<string, ActiveRun>(); // sessionId → 进行中的 run（同会话单执行者）
 
 /** 测试注入点：替换模型流（默认真 DeepSeek）和 MMP registry client。 */
@@ -112,7 +111,10 @@ export class SessionBusyError extends Error {
 
 async function ensureSession(sessionId: string, userId: string): Promise<PgSessionStorage> {
   const existing = await PgSessionStorage.load(sessionId);
-  if (existing) return existing;
+  if (existing) {
+    if ((await existing.getMetadata()).userId !== userId) throw Object.assign(new Error("无权访问该会话"),{status:403});
+    return existing;
+  }
   const identity = parseSessionIdentity(sessionId);
   if (!identity || identity.userId !== userId) throw Object.assign(new Error("无权访问该会话"), { status: 403 });
   return PgSessionStorage.create({ id: sessionId, userId, productionId: identity.productionId ?? null });
@@ -151,19 +153,31 @@ export async function startRun(input: StartRunInput): Promise<{ runId: string }>
     productionId: (await storage.getMetadata()).productionId,
   });
   const runId = newRunId();
-  await getPool().query(
-    `INSERT INTO agent_run (id, session_id, status, owner, heartbeat_at, page_key, model, schedule_id)
-     VALUES ($1, $2, 'running', $3, now(), $4, $5, $6)`,
-    [runId, input.sessionId, RUNNER_OWNER, input.pageKey ?? null, CHAT_MODEL.id, input.scheduleId ?? null],
-  );
-  void execute({
-    storage, runId, userId: input.userId, message: input.message, attachmentIds: input.attachmentIds,
+  const client = await getPool().connect();
+  let inboxId: string;
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.sessionId]);
+    const busy = await client.query(`SELECT 1 FROM agent_run WHERE session_id=$1
+      AND status IN ('running','compacting','awaiting_approval','awaiting_answer')`, [input.sessionId]);
+    if (busy.rowCount) throw new SessionBusyError();
+    await client.query(`INSERT INTO agent_run (id,session_id,status,owner,heartbeat_at,page_key,model,schedule_id,paid_from)
+      VALUES($1,$2,'running',$3,now(),$4,$5,$6,$7)`,
+      [runId,input.sessionId,RUNNER_OWNER,input.pageKey??null,CHAT_MODEL.id,input.scheduleId??null,paidFrom]);
+    inboxId = (await import("./ids")).newInboxId();
+    await client.query(`INSERT INTO agent_session_inbox(id,session_id,claimed_run_id,message,attachment_ids)
+      VALUES($1,$2,$3,$4,$5::jsonb)`, [inboxId,input.sessionId,runId,input.message,JSON.stringify(input.attachmentIds??[])]);
+    await client.query("COMMIT");
+  } catch(error) { await client.query("ROLLBACK"); throw error; }
+  finally { client.release(); }
+  await startExecution({
+    storage, runId, userId: input.userId, message: input.message, attachmentIds: input.attachmentIds, inboxEntryId: inboxId,
     pageKey: input.pageKey ?? null, paidFrom, scheduleId: input.scheduleId ?? null,
   });
   return { runId };
 }
 
-/** 中途插话：交给进行中 run 的 steer 队列（agent-core 在下一次模型调用前注入）。 */
+/** 中途插话先持久入队，在模型轮次之间消费。 */
 export async function steerRun(
   sessionId: string, message: string, attachmentIds: string[] = [],
 ): Promise<{ runId: string } | null> {
@@ -171,21 +185,9 @@ export async function steerRun(
   if (!run) return null;
   const identity = parseSessionIdentity(sessionId);
   if (!identity) throw Object.assign(new Error("无权访问该会话"), { status: 403 });
-  if (run.isCompacting()) {
-    await run.waitForCompactionTransition();
-    const inboxId = await enqueueSessionInput({ sessionId, runId: run.runId, message, attachmentIds });
-    if (inboxId) return { runId: run.runId };
-    // 压缩恰好在事务锁内结束：回到普通 steer；消息尚未落库，不会重复。
-    if (active.get(sessionId) !== run) return null;
-  }
-  // steer 的 HTTP 请求只负责入队，不能同步等待最长两分钟的外部预检；队列仍保证多次
-  // 插话按到达顺序进入 harness，并在各自进入下一次模型调用前拿到 agent context。
-  run.enqueueSteer(async () => withAttachmentPreflight(
-    message, attachmentIds, sessionId, identity.userId, identity.productionId ?? null, run.runId, run.abort.signal,
-  ).then(async (prepared) => {
-    await run.warmAttachments(attachmentIds);
-    return prepared;
-  }), attachmentIds.length > 0);
+  // 所有插话先落持久 inbox。模型循环在安全边界消费；压缩与普通执行共用一条队列。
+  await enqueueSessionInput({sessionId,runId:run.runId,message,attachmentIds});
+
   return { runId: run.runId };
 }
 
@@ -217,14 +219,19 @@ async function withAttachmentPreflight(
 
 export async function abortRun(sessionId: string): Promise<boolean> {
   const run = active.get(sessionId);
+  run?.abort.abort();
+  await (await import("./subagents")).stopSubagent(sessionId);
+  await getPool().query("DELETE FROM agent_session_inbox WHERE session_id=$1",[sessionId]);
   if (!run) return false;
-  run.abort.abort();
   await run.abortHarness();
   return true;
 }
 
 interface ExecuteInput {
+  onReady?: () => void;
   storage: PgSessionStorage;
+  inboxEntryId?: string;
+  systemOnly?: boolean;
   runId: string;
   userId: string;
   /** undefined = 恢复模式：不追加用户消息，从 transcript 续跑 */
@@ -238,12 +245,22 @@ interface ExecuteInput {
   scheduleId?: string | null;
 }
 
+/** 发起方等到本地执行槽建立，避免刚返回 runId 就收到插话 409。 */
+async function startExecution(input: ExecuteInput): Promise<void> {
+  let ready!: () => void;
+  const started = new Promise<void>((resolve) => { ready = resolve; });
+  const done = execute({ ...input, onReady: ready });
+  void done.catch((error) => console.error("[agent-runtime] 执行失败",error));
+  await Promise.race([started,done]);
+}
+
 async function execute(input: ExecuteInput): Promise<void> {
   const { storage, runId, userId } = input;
   const meta = await storage.getMetadata();
   const sessionId = meta.id;
   const productionId = meta.productionId;
   const pool = getPool();
+  input.paidFrom ??= (await runPaidFrom(runId)) ?? undefined;
   // 无人值守（定时任务）：任务行没了（被删）就按普通只读 run 跑完，不再当无人值守
   const schedule = input.scheduleId ? await getSchedule(input.scheduleId) : null;
   let scheduleReport: ScheduleReport | null = null;
@@ -252,13 +269,7 @@ async function execute(input: ExecuteInput): Promise<void> {
   // 脱离（§4.4 ②）：本地停手但不留痕——不写 transcript、不发 aborted 行、不改 run 终态，
   // 下一个进程按孤儿接管续跑
   let detached = false;
-  let compacting = false;
-  let compactionTransition = Promise.resolve();
-  const pendingSteers: Array<{ buildMessage: () => Promise<string>; afterCurrentTurn: boolean }> = [];
   let abortHarness = async () => {};
-  let enqueueSteerImpl = (buildMessage: () => Promise<string>, afterCurrentTurn: boolean) => {
-    pendingSteers.push({ buildMessage, afterCurrentTurn });
-  };
   let warmAttachmentsImpl = async (_attachmentIds: string[]) => {};
   const publisher = {
     publish: (line: StreamLine) => { if (!detached) rawPublisher.publish(line); },
@@ -288,10 +299,6 @@ async function execute(input: ExecuteInput): Promise<void> {
     runId,
     abort,
     abortHarness: () => abortHarness(),
-    enqueueSteer: (buildMessage, afterCurrentTurn) => enqueueSteerImpl(buildMessage, afterCurrentTurn),
-    warmAttachments: (attachmentIds) => warmAttachmentsImpl(attachmentIds),
-    isCompacting: () => compacting,
-    waitForCompactionTransition: () => compactionTransition,
     detach: () => {
       if (detached) return;
       detached = true;
@@ -300,6 +307,7 @@ async function execute(input: ExecuteInput): Promise<void> {
       void abortHarness().catch(() => {});
     },
   });
+  input.onReady?.();
   let tools = buildTools({ userId, productionId, run: runHandle });
   let toolByName = new Map(tools.map((t) => [t.name, t]));
   // usd 与 token 并行累计：token 是账本原貌，usd 是限流口径（见 billing.ts）。
@@ -314,12 +322,12 @@ async function execute(input: ExecuteInput): Promise<void> {
   // 成本硬顶触发标记：中止发生在工具/流式中途，异常本身只是裸 AbortError——
   // 不记原因的话 agent 下回合只能瞎猜"是超数量还是超长度"（导入实测反馈①）
   let costCapAborted = false;
+  let taskCostTail = Promise.resolve();
 
   const toolArgs = new Map<string, Record<string, unknown>>(); // toolCallId → args（mutation 行用）
   const heartbeat = setInterval(() => {
     void pool.query(`UPDATE agent_run SET heartbeat_at = now() WHERE id = $1`, [runId]).catch(() => {});
   }, HEARTBEAT_INTERVAL_MS);
-  let releaseSteerReady = () => {};
 
   try {
     const mmpSurface = await buildMmpToolSurface(
@@ -329,6 +337,8 @@ async function execute(input: ExecuteInput): Promise<void> {
     runHandle.runtimeToolCatalog = mmpSurface.catalog;
     tools = [...tools, ...mmpSurface.tools];
     toolByName = new Map(tools.map((t) => [t.name, t]));
+
+    if (input.systemOnly && !(await (await import("./subagent-events-db")).appendSubagentEvents(storage,sessionId,runId))) return;
 
     // 注入链：与插件 before_prompt_build 同一份后端组装（instructions/memory/knowledge
     // 进 system prompt；recall 逐轮临时插入，不落 transcript）
@@ -402,46 +412,6 @@ async function execute(input: ExecuteInput): Promise<void> {
         : { streamSimple: llmRuntime().streamSimple, completeSimple: llmRuntime().completeSimple },
     });
     abortHarness = async () => { await harness.abort(); };
-    let steerTail = Promise.resolve();
-    let currentTurnDone = Promise.resolve();
-    let steerReadyReleased = false;
-    const steerReady = new Promise<void>((resolve) => { releaseSteerReady = resolve; });
-    const markSteerReady = () => {
-      if (steerReadyReleased) return;
-      steerReadyReleased = true;
-      releaseSteerReady();
-    };
-    const drainSteers = async () => {
-      for (;;) {
-        const pending = steerTail;
-        await pending;
-        if (pending === steerTail) return;
-      }
-    };
-    enqueueSteerImpl = (buildMessage, afterCurrentTurn) => {
-        steerTail = steerTail.then(async () => {
-          const steeredMessage = await buildMessage();
-          await steerReady;
-          if (!afterCurrentTurn) {
-            try {
-              await harness.steer(steeredMessage);
-              return;
-            } catch (err) {
-              if ((err as { code?: string })?.code !== "invalid_state") throw err;
-            }
-          }
-          await currentTurnDone;
-          if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
-          // 附件预检可能跨过当前 agent loop 最后一次取 steer 队列的时点。附件插话
-          // 固定串行开启同一 agent_run 的下一模型轮次，避免“接收成功但静默丢失”；
-          // 无附件插话仍走 Harness 原生 steer，保留当前工具循环内的即时介入语义。
-          const nextTurn = harness.prompt(steeredMessage);
-          currentTurnDone = nextTurn.then(() => {}, () => {});
-          await nextTurn;
-        }).catch((err) => {
-          if (!abort.signal.aborted) console.error(`[agent-runtime] steer ${runId} failed:`, err);
-        });
-      };
     warmAttachmentsImpl = async (attachmentIds) => {
         if (!attachmentIds.length || !mmpSurface.capabilities.length) return;
         const attachments = await getReadyAttachments(attachmentIds, sessionId, userId);
@@ -450,9 +420,6 @@ async function execute(input: ExecuteInput): Promise<void> {
         }
         await harness.setTools(tools, [...activeToolNames]);
       };
-    for (const pending of pendingSteers.splice(0)) {
-      enqueueSteerImpl(pending.buildMessage, pending.afterCurrentTurn);
-    }
     if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
 
     // 额度门与 run 建立之后、基础模型第一次推理之前自动预检。MMP 的 agent context 进入本轮
@@ -482,6 +449,8 @@ async function execute(input: ExecuteInput): Promise<void> {
     harness.on("tool_call", async (event) => {
       const tool = toolByName.get(event.toolName);
       if (!tool) return undefined;
+      await taskCostTail;
+      if (abort.signal.aborted) return { block: true, reason: "任务已停止" };
       const g: GateInput = { runId, sessionId, userId, productionId, tool, toolCallId: event.toolCallId, args: event.input, publisher, signal: abort.signal, isDetached: () => detached };
       if (schedule) return unattendedGate(g, schedule.allowedTools);
       if (tool.readOnly) return undefined;
@@ -528,7 +497,14 @@ async function execute(input: ExecuteInput): Promise<void> {
         usage.input += event.message.usage.input;
         usage.output += event.message.usage.output;
         usage.cacheRead += event.message.usage.cacheRead;
-        usage.usd += usdOfUsage(event.message.usage, CHAT_MODEL);
+        const dollars = usdOfUsage(event.message.usage, CHAT_MODEL);
+        usage.usd += dollars;
+        taskCostTail = taskCostTail.then(async()=>{
+          if (!(await (await import("./subagent-db")).addTaskCost(runId,dollars))) {
+            costCapAborted=true;abort.abort();void active.get(sessionId)?.abortHarness();
+            await (await import("./subagents")).stopSubagent(sessionId);
+          }
+        });
         const t = event.message.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("");
         if (t) lastAssistant = t.slice(0, 2000);
         // 防失控硬顶（#383）：额度判定在 run 开始处、run 内不打断，所以透支上限
@@ -546,9 +522,7 @@ async function execute(input: ExecuteInput): Promise<void> {
     });
 
     if (message !== undefined) {
-      const turn = harness.prompt(message);
-      currentTurnDone = turn.then(() => {}, () => {});
-      markSteerReady();
+      const turn = harness.prompt(message, input.inboxEntryId ? { entryId: input.inboxEntryId } : undefined);
       await turn;
     } else {
       const decision = await repairAndClassify(session, toolByName, {
@@ -589,24 +563,19 @@ async function execute(input: ExecuteInput): Promise<void> {
           }
         }
         const turn = harness.continueTurn();
-        currentTurnDone = turn.then(() => {}, () => {});
-        markSteerReady();
         await turn;
       } else {
-        markSteerReady();
         terminalLine = { type: "final", text: "" };
       }
     }
-    await drainSteers();
     if (abort.signal.aborted) status = "aborted";
+
+    await reconcileConsumedInputs(sessionId);
 
     // 自动压缩（agent-core 的 compact() 是手动的；触发由这里驱动，摘要用 pro）。
     // 压缩期间的新输入先落 inbox；压缩结束后用压缩后的上下文在同一 run 继续。
     for (;;) {
       const compaction = await maybeCompact(harness, session, abort.signal, async () => {
-        let finishTransition!: () => void;
-        compactionTransition = new Promise<void>((resolve) => { finishTransition = resolve; });
-        compacting = true;
         try {
           const transitioned = await pool.query(
             `UPDATE agent_run SET status = 'compacting' WHERE id = $1 AND status = 'running'`,
@@ -615,14 +584,14 @@ async function execute(input: ExecuteInput): Promise<void> {
           if (transitioned.rowCount !== 1) throw new Error("run 未能进入 compacting 状态");
           publisher.publish({ type: "compacting", active: true });
         } catch (error) {
-          compacting = false;
           throw error;
-        } finally {
-          finishTransition();
         }
       });
       usage.compactionUsd += compaction.usd;
       usage.compactionTokens += compaction.tokens;
+      if (compaction.usd && !(await (await import("./subagent-db")).addTaskCost(runId,compaction.usd))) {
+        costCapAborted=true;abort.abort();await (await import("./subagents")).stopSubagent(sessionId);
+      }
       await reconcileConsumedInputs(sessionId);
       let queued = await pendingInputsForRun(sessionId, runId);
       const preparedById = new Map<string, string>();
@@ -640,14 +609,17 @@ async function execute(input: ExecuteInput): Promise<void> {
           queued = finished.rows;
           if (finished.finished) break;
         }
-        compacting = false;
         publisher.publish({ type: "compacting", active: false });
       }
       if (abort.signal.aborted) {
         status = "aborted";
         break;
       }
-      if (queued.length === 0) break;
+      if (queued.length === 0) {
+        if (!(await (await import("./subagent-events-db")).appendSubagentEvents(storage,sessionId,runId))) break;
+        await harness.continueTurn();
+        continue;
+      }
 
       const preparedQueued: Array<{ id: string; message: string }> = [];
       for (const row of queued) {
@@ -662,7 +634,6 @@ async function execute(input: ExecuteInput): Promise<void> {
       const rest = preparedQueued.slice(1);
       lastUser = preparedQueued.at(-1)?.message ?? lastUser;
       const nextTurn = harness.prompt(first.message, { entryId: first.id });
-      currentTurnDone = nextTurn.then(() => {}, () => {});
       const queuedSteers = rest.map((item) => harness.steer(item.message, {
         entryId: item.id,
         onConsumed: () => { void reconcileConsumedInputs(sessionId); },
@@ -670,7 +641,6 @@ async function execute(input: ExecuteInput): Promise<void> {
       await Promise.all(queuedSteers);
       await nextTurn;
       await reconcileConsumedInputs(sessionId);
-      await drainSteers();
       if (abort.signal.aborted) status = "aborted";
       if (abort.signal.aborted) break;
     }
@@ -685,10 +655,15 @@ async function execute(input: ExecuteInput): Promise<void> {
       console.error(`[agent-runtime] run ${runId} failed:`, err);
     }
   } finally {
-    // 初始化 / 恢复在进入 harness 前失败时，释放可能已排队的 steer，避免悬空 Promise。
-    releaseSteerReady();
     clearInterval(heartbeat);
     toolArgs.clear(); // 中止/脱离时可能没有对应的 end 事件
+    try {
+      await taskCostTail;
+    } catch (err) {
+      status = "failed";
+      error = err instanceof Error ? err.message : String(err);
+      publisher.publish({ type: "error", error });
+    }
     if (costCapAborted && status !== "failed") {
       // 覆盖裸 AbortError：error 落库带机器可判前缀，下一个 run 开头据此注入提示。
       // status=failed 时不覆盖——那是与硬顶并发的无关失败，真实原因不能丢
@@ -724,6 +699,7 @@ async function execute(input: ExecuteInput): Promise<void> {
     // 最后才释放会话：run 行终态/记账/事件清理都落完，"空闲"才是真的空闲
     // （waitForIdle / sessionRunState / 下一条消息的 SessionBusy 判定都以此为准）
     active.delete(sessionId);
+    if (status !== "aborted" && !draining) await dispatchPendingSession(sessionId).catch((err)=>console.error("[agent-runtime] inbox 续跑失败",err));
   }
 }
 
@@ -1037,11 +1013,12 @@ function str(v: unknown): string | undefined {
  * v4-pro（3 倍单价）、一次就吃掉整个 transcript。这里把 completeSimple 包一层
  * 取 usage，不必改 vendor（compact 的 runtime 参数是现成的注入点）。
  */
-async function maybeCompact(
+export async function maybeCompact(
   harness: Harness,
   session: Session,
   signal: AbortSignal,
   onCompacting?: () => Promise<void>,
+  onUsage?: (cost: { usd: number; tokens: number }) => Promise<void>,
 ): Promise<CompactionCost> {
   const zero: CompactionCost = { usd: 0, tokens: 0, triggered: false };
   if (signal.aborted) return zero;
@@ -1056,6 +1033,7 @@ async function maybeCompact(
       if (msg.role === "assistant" && msg.usage) {
         cost.usd += usdOfUsage(msg.usage, COMPACTION_MODEL);
         cost.tokens += msg.usage.input + msg.usage.output + msg.usage.cacheRead;
+        await onUsage?.({usd:usdOfUsage(msg.usage, COMPACTION_MODEL),tokens:msg.usage.input+msg.usage.output+msg.usage.cacheRead});
       }
       return msg;
     },
@@ -1159,6 +1137,7 @@ export async function listSessions(userId: string): Promise<ChatSessionSummary[]
          WHERE e.session_id = s.id AND e.type = 'message' AND e.payload->'message'->>'role' IN ('user','assistant')
          ORDER BY e.seq DESC LIMIT 1) AS last_text
      FROM agent_session s WHERE s.user_id = $1 AND s.archived_at IS NULL
+       AND NOT EXISTS(SELECT 1 FROM agent_subagent c WHERE c.id=s.id)
      ORDER BY s.updated_at DESC LIMIT 100`,
     [userId],
   );
@@ -1182,6 +1161,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
 
 /** 只删行（级联 transcript/run/审批/事件）；中止进行中 run 由调用方经 client 先做。 */
 export async function deleteSessionRows(sessionId: string): Promise<void> {
+  await (await import("./subagents")).stopSubagent(sessionId);
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -1203,11 +1183,12 @@ export async function resumeOrphans(): Promise<number> {
     `UPDATE agent_run r SET owner = $1, heartbeat_at = now(), status = 'running'
      FROM agent_session s
      WHERE r.session_id = s.id
+       AND r.subagent_id IS NULL
        AND r.status IN ('running', 'compacting', 'awaiting_approval', 'awaiting_answer')
        AND (r.heartbeat_at IS NULL OR r.heartbeat_at < now() - ($2::int * interval '1 millisecond'))
-       AND (r.owner IS NULL OR r.owner <> $1)
+       AND NOT (r.session_id=ANY($3::text[]))
      RETURNING r.id, r.session_id, s.user_id, r.page_key, r.schedule_id`,
-    [RUNNER_OWNER, ORPHAN_AFTER_MS],
+    [RUNNER_OWNER, ORPHAN_AFTER_MS, [...active.keys()]],
   );
   for (const row of r.rows) {
     if (active.has(row.session_id)) continue;
@@ -1221,6 +1202,8 @@ export async function resumeOrphans(): Promise<number> {
 /** 排水（§4.4 ②）：不再接新 run，等进行中的到自然停点；等待态（审批/提问）的 run
  *  立即脱离交给下一个进程；超时仍没停的也脱离（下一个进程按 ① 恢复）。 */
 export async function drain(timeoutMs: number): Promise<void> {
+  draining = true;
+  const childDrain = (await import("./subagents")).drainSubagents(timeoutMs);
   const deadline = Date.now() + timeoutMs;
   const pool = getPool();
   while (active.size > 0 && Date.now() < deadline) {
@@ -1238,6 +1221,7 @@ export async function drain(timeoutMs: number): Promise<void> {
   for (const run of active.values()) run.detach();
   const settle = Date.now() + 5_000;
   while (active.size > 0 && Date.now() < settle) await new Promise((r) => setTimeout(r, 50));
+  await childDrain;
 }
 
 /** 测试用：脱离全部进行中 run（模拟进程消失但不留痕）。 */
@@ -1253,4 +1237,32 @@ export async function waitForIdle(sessionId: string, timeoutMs = 10_000): Promis
   while (active.has(sessionId) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
 }
 
+/** outbox 与运行中 inbox 的同一唤醒入口；busy 时只留队列，由 execute 安全消费。 */
+export async function dispatchPendingSession(sessionId: string): Promise<void> {
+  if (draining || active.has(sessionId)) return;
+  const storage = await PgSessionStorage.load(sessionId);
+  if (!storage) return;
+  const meta = await storage.getMetadata();
+  const runId = newRunId();
+  const rows = await claimPendingSession(sessionId, runId, RUNNER_OWNER, CHAT_MODEL.id);
+  if (!rows?.length) return;
+  const first = rows.find((r) => r.kind === "user_message");
+  // 系统唤醒是原任务的续跑；不会因为子任务已经消耗额度而丢掉交付。
+  const paidFrom = (await runPaidFrom(runId)) ?? await resolvePaidFrom(meta.userId, meta.productionId);
+  await setRunPaidFrom(runId, paidFrom);
+  await startExecution({
+    storage, runId, userId: meta.userId, paidFrom,
+    ...(first
+      ? { message: first.message, attachmentIds: first.attachment_ids, inboxEntryId: first.id }
+      : { systemOnly: true }),
+  });
+}
+
 export const __internal = { active, execute };
+
+/** 重启巡检补消费已接收输入，包含终态与 finally 之间的崩溃窗口。 */
+export async function resumePendingInputs(): Promise<void> {
+  for (const id of await sessionsWithPendingInputs()) {
+    await dispatchPendingSession(id).catch((error) => console.error("[agent-runtime] 待收输入恢复失败", error));
+  }
+}
