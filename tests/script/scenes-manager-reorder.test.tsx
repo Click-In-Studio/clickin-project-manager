@@ -227,6 +227,14 @@ const CHILDREN: MarkerProjection[] = [
 ];
 
 describe("层级、取消与触控排序", () => {
+  it("点击排序按钮不会同时展开详情", async () => {
+    await clickButton("调整顺序：第一章");
+    expect(row("第一章").querySelector('button[title="展开详情"]')).not.toBeNull();
+    expect(container.querySelector('textarea')).toBeNull();
+    await clickButton("调整顺序：第一章");
+    expect(row("第一章").querySelector('button[title="展开详情"]')).not.toBeNull();
+  });
+
   it("跨章 / 不同层级悬停会清掉旧落点，释放不写入", async () => {
     await renderScenes(CHILDREN);
     for (const target of ["第一章", "段落丁"]) {
