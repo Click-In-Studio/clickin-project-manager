@@ -6,20 +6,43 @@ export async function pendingEventsForRun(
   sessionId: string,
   runId: string,
 ): Promise<InboxRow[]> {
-  const result = await getPool().query<InboxRow>(
-    `UPDATE agent_session_inbox i SET claimed_run_id=$2
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      sessionId,
+    ]);
+    const user = await client.query(
+      `SELECT 1 FROM agent_session_inbox i WHERE i.session_id=$1
+      AND kind='user_message' AND NOT EXISTS(SELECT 1 FROM agent_session_entry e
+        WHERE e.session_id=i.session_id AND e.entry_id=i.id) LIMIT 1`,
+      [sessionId],
+    );
+    if (user.rowCount) {
+      await client.query("COMMIT");
+      return [];
+    }
+    const result = await client.query<InboxRow>(
+      `UPDATE agent_session_inbox i SET claimed_run_id=$2
     WHERE i.session_id=$1 AND i.kind='subagent_event' AND
       (i.claimed_run_id IS NULL OR i.claimed_run_id=$2 OR NOT EXISTS(
         SELECT 1 FROM agent_run r WHERE r.id=i.claimed_run_id
           AND r.status IN ('running','compacting','awaiting_approval','awaiting_answer')))
     RETURNING i.*`,
-    [sessionId, runId],
-  );
-  return result.rows.sort(
-    (a, b) =>
-      a.created_at.getTime() - b.created_at.getTime() ||
-      a.id.localeCompare(b.id),
-  );
+      [sessionId, runId],
+    );
+    await client.query("COMMIT");
+    return result.rows.sort(
+      (a, b) =>
+        a.created_at.getTime() - b.created_at.getTime() ||
+        a.id.localeCompare(b.id),
+    );
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /** 空闲唤醒与普通发起共用会话锁，并在库内认领输入。 */

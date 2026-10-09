@@ -59,6 +59,12 @@ import { grantExtraCredits, extraRemaining } from "@/lib/agent/ai-quota";
 import { creditsFromUsd } from "@/lib/account/plan";
 import { EventPublisher, readEventsSince } from "@/lib/agent/runtime/events";
 
+import { pendingEventsForRun } from "@/lib/agent/runtime/session-dispatch-db";
+import {
+  enqueueSessionInput,
+  reconcileConsumedInputs,
+} from "@/lib/agent/runtime/session-inbox";
+
 const usage = {
   input: 7,
   output: 3,
@@ -363,6 +369,16 @@ describe("持久子 Agent 基建", () => {
       [p.runId],
     );
     await dispatchPendingSession(p.sessionId);
+    // 子任务自身也会触发唤醒；另一调用方认领成功时，等持久消费事实而非本地槽快照。
+    await eventually(
+      async () =>
+        !!(
+          await getPool().query(
+            "SELECT 1 FROM agent_session_entry WHERE session_id=$1 AND type='custom_message'",
+            [p.sessionId],
+          )
+        ).rowCount,
+    );
     await waitForIdle(p.sessionId);
     const events = await getPool().query(
       "SELECT type,payload FROM agent_session_entry WHERE session_id=$1",
@@ -934,5 +950,65 @@ describe("持久子 Agent 基建", () => {
     ).toHaveLength(1);
     await recoverSubagents();
     expect(seen).toHaveLength(1);
+  });
+  it("同一安全边界已有用户消息时，系统通知保持排队，用户先被消费", async () => {
+    const p = await parent();
+    const id = await queueSubagent({
+      parentSessionId: p.sessionId,
+      parentRunId: p.runId,
+      task: "优先级核对",
+      message: "核对",
+    });
+    const child = (await listSubagents(p.sessionId))[0];
+    const eventId = `ain_${shortId()}`;
+    await getPool().query(
+      "INSERT INTO agent_session_inbox(id,session_id,message,kind,payload) VALUES($1,$2,'','subagent_event',$3)",
+      [
+        eventId,
+        p.sessionId,
+        JSON.stringify([
+          {
+            subagentId: id,
+            runId: child.runId,
+            budgetRunId: p.runId,
+            status: "completed",
+            summary: "旧轮次证据",
+            contextRequest: null,
+          },
+        ]),
+      ],
+    );
+    const userEntry = await enqueueSessionInput({
+      sessionId: p.sessionId,
+      runId: p.runId,
+      message: "请先核对我的补充",
+      attachmentIds: [],
+    });
+    expect(await pendingEventsForRun(p.sessionId, p.runId)).toEqual([]);
+    expect(
+      (
+        await getPool().query(
+          "SELECT claimed_run_id FROM agent_session_inbox WHERE id=$1",
+          [eventId],
+        )
+      ).rows[0].claimed_run_id,
+    ).toBeNull();
+    // 模拟用户消息已实际追加到 transcript 的安全消费点。
+    const storage = (await PgSessionStorage.load(p.sessionId))!;
+    await storage.appendEntry({
+      type: "message",
+      id: userEntry!,
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      message: {
+        role: "user",
+        content: "请先核对我的补充",
+        timestamp: Date.now(),
+      },
+    });
+    await reconcileConsumedInputs(p.sessionId);
+    expect(
+      (await pendingEventsForRun(p.sessionId, p.runId)).map((r) => r.id),
+    ).toEqual([eventId]);
   });
 });

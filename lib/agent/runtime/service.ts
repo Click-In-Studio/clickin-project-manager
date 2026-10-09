@@ -291,7 +291,7 @@ interface ExecuteInput {
   attachmentIds?: string[];
   /** 发起本轮时的页面（温层工具面依据）；恢复模式从 agent_run.page_key 读回 */
   pageKey?: string | null;
-  /** 本轮由谁买单（run 开始时定死，run 内不切换）；恢复模式无此判定，按 quota 记 */
+  /** 本轮由谁买单（run 开始时定死，run 内不切换）；恢复模式读取原轮次计费来源 */
   paidFrom?: PaidFrom;
   /** 定时任务触发的 run；恢复模式从 agent_run.schedule_id 读回 */
   scheduleId?: string | null;

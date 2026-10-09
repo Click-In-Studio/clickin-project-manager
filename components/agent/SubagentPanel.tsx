@@ -16,6 +16,10 @@ const STATUS: Record<string, string> = {
   interrupted: "执行中断",
   stopped: "已停止",
 };
+const CHILD_TOOL_LABELS: Record<string, string> = {
+  clickin__material_read: "阅读交接材料",
+  clickin__need_context: "请求补充资料",
+};
 type Trace = {
   view: SubagentView;
   entries: Array<{
@@ -187,7 +191,8 @@ export default function SubagentPanel({
                     className="min-w-0 border-t border-[var(--border)] pt-2"
                   >
                     <p className="mb-1 text-[var(--muted)]">
-                      {message?.toolName ??
+                      {(message?.toolName &&
+                        CHILD_TOOL_LABELS[message.toolName]) ??
                         (message?.role === "assistant" ? "子助理" : "交接内容")}
                     </p>
                     <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-sans">

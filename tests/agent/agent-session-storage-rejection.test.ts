@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getPool } from "@/lib/pg";
+import { getPool, poolConfigFromEnv } from "@/lib/pg";
+import { Pool } from "pg";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { PgSessionStorage } from "@/lib/agent/runtime/pg-session-storage";
 import type { MessageEntry } from "../../vendor/openclaw/packages/agent-core/src/harness/types";
@@ -76,4 +77,29 @@ describe("PgSessionStorage：落库被拒 → 改写为工具失败（#685）", 
     };
     await expect(storage.appendEntry(entry)).rejects.toMatchObject({ code: "22P05" });
   });
+  it("系统事件同连接落库，单连接池也能提交；回滚不污染内存上下文", async () => {
+    const key=`clickin:chat:test:${shortId()}`;
+    const pool=new Pool({...poolConfigFromEnv(),max:1,connectionTimeoutMillis:300});
+    const isolated=await PgSessionStorage.create({id:key,userId,productionId:null},pool);
+    const client=await pool.connect();
+    const entry={type:"custom_message" as const,id:`ain_${shortId()}`,parentId:null,timestamp:new Date().toISOString(),customType:"clickin_subagent_event",display:false,content:"子任务已完成"};
+    try {
+      await client.query("BEGIN");
+      await isolated.persistSystemEvent(entry,client);
+      expect(await isolated.getEntries()).toHaveLength(0);
+      await client.query("ROLLBACK");
+      expect((await client.query("SELECT entry_id FROM agent_session_entry WHERE session_id=$1",[key])).rowCount).toBe(0);
+      await client.query("BEGIN");
+      const recordCommitted=await isolated.persistSystemEvent(entry,client);
+      await client.query("COMMIT");
+      recordCommitted();
+      expect((await isolated.getEntries()).map((e)=>e.id)).toEqual([entry.id]);
+    } finally {
+      await client.query("ROLLBACK").catch(()=>{});
+      client.release();
+      await pool.end();
+      await getPool().query("DELETE FROM agent_session WHERE id=$1",[key]);
+    }
+  });
+
 });
