@@ -60,16 +60,19 @@ export default function WikiOutline({ items, contentRef }: {
         }
         const atEnd = scroller && scroller.scrollHeight > scroller.clientHeight
           && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
-        setActiveId(atEnd ? headingRefs.current.at(-1)!.id : activeWikiOutlineId(headingRefs.current.map(heading => ({
-          id: heading.id, top: heading.getBoundingClientRect().top,
+        setActiveId(atEnd ? items[headingRefs.current.length - 1].id : activeWikiOutlineId(headingRefs.current.map((heading, index) => ({
+          id: items[index].id, top: heading.getBoundingClientRect().top,
         })), (scroller?.getBoundingClientRect().top ?? 0) + 24));
       });
     };
     const bindHeadings = () => {
       headingRefs.current = Array.from(root.querySelectorAll<HTMLElement>("h1, h2, h3")).slice(0, items.length);
       headingRefs.current.forEach((heading, index) => {
-        if (heading.id !== items[index].id) heading.id = items[index].id;
-        if (heading.dataset.wikiOutlineHeading !== "true") heading.dataset.wikiOutlineHeading = "true";
+        // TipTap 管理编辑态 DOM，外部回写属性会触发它的 DOM observer；目录只用元素引用。
+        if (!heading.closest('[contenteditable="true"]')) {
+          if (heading.id !== items[index].id) heading.id = items[index].id;
+          if (heading.dataset.wikiOutlineHeading !== "true") heading.dataset.wikiOutlineHeading = "true";
+        }
       });
       update();
     };
@@ -96,7 +99,7 @@ export default function WikiOutline({ items, contentRef }: {
   function jump(item: WikiOutlineItem) {
     setActiveId(item.id);
     const root = contentRef.current;
-    const target = headingRefs.current.find(heading => heading.id === item.id);
+    const target = headingRefs.current[items.findIndex(heading => heading.id === item.id)];
     if (target) {
       const scroller = root?.closest<HTMLElement>("#workspace-scroll");
       if (scroller) scroller.scrollTo({

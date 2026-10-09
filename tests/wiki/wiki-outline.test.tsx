@@ -125,6 +125,17 @@ describe("云文档目录交互", () => {
     expect(source.value.slice(source.selectionStart, source.selectionEnd)).toBe("**排练** [计划](https://example.com)");
   });
 
+  it("编辑态跳转不回写编辑器标题 DOM，也不改变未保存文字", () => {
+    content.innerHTML = '<div contenteditable="true"><h1>未保存标题</h1><p>未保存正文</p></div>';
+    const contentRef = createRef<HTMLElement>();
+    contentRef.current = content;
+    const before = content.innerHTML;
+    act(() => root.render(<WikiOutline items={extractWikiOutline("# 未保存标题")} contentRef={contentRef} />));
+    act(() => host.querySelector<HTMLButtonElement>('nav button')!.click());
+    expect(content.innerHTML).toBe(before);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "instant", block: "start" });
+  });
+
   it("无标题展示提示，长文档完整保留长标题与层级", () => {
     const contentRef = createRef<HTMLElement>();
     contentRef.current = content;
