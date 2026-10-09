@@ -157,13 +157,17 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> {
     return entry.id;
   }
 
-  async appendMessage(message: AgentMessage): Promise<string> {
+  async appendMessage(
+    message: AgentMessage,
+    options: { entryId?: string; metadata?: Record<string, unknown> } = {},
+  ): Promise<string> {
     return this.appendTypedEntry({
       type: "message",
-      id: await this.storage.createEntryId(),
+      id: options.entryId ?? (await this.storage.createEntryId()),
       parentId: await this.getAppendParentId(),
       timestamp: new Date().toISOString(),
       message,
+      ...(options.metadata ? { metadata: options.metadata } : {}),
     } satisfies MessageEntry);
   }
 

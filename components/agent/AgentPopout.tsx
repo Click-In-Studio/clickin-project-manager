@@ -32,7 +32,7 @@ type SessionSummary = {
   title: string;
   lastMessagePreview?: string;
   updatedAt?: number;
-  status?: "running" | "done" | "failed" | "killed" | "timeout";
+  status?: "running" | "compacting" | "done" | "failed" | "killed" | "timeout";
 };
 
 type ChatAttachment = {
@@ -90,6 +90,7 @@ export default function AgentPopout({
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [compacting, setCompacting] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [previewToolCallId, setPreviewToolCallId] = useState<string | null>(null);
@@ -171,6 +172,7 @@ export default function AgentPopout({
     if (activeKey && !inScope(activeKey)) {
       setActiveKey(null);
       setBubbles([]);
+      setCompacting(false);
     }
   }, [productionId, activeKey, inScope]);
 
@@ -310,6 +312,11 @@ export default function AgentPopout({
               }
               continue;
             }
+            if (line.type === "compacting") {
+              setCompacting(line.active);
+              apply(line);
+              continue;
+            }
             if (line.type === "mutation") onMutation(line); // 派发刷新；带 summary 的再由 reducer 渲成 notice
             apply(line);
           } catch {
@@ -320,6 +327,7 @@ export default function AgentPopout({
     } finally {
       clearInterval(watchdog);
       setStreaming(false);
+      setCompacting(false);
       setBubbles((prev) =>
         prev.map((b) =>
           (b.kind === "assistant" || b.kind === "thinking") && b.streaming ? { kind: b.kind, text: b.text } : b
@@ -353,6 +361,7 @@ export default function AgentPopout({
     setPickerOpen(false);
     setActiveKey(key);
     setBubbles([]);
+    setCompacting(status === "compacting");
     setLoadingHistory(true);
     try {
       const res = await fetch(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`);
@@ -372,7 +381,7 @@ export default function AgentPopout({
     } finally {
       if (activeKeyRef.current === key) setLoadingHistory(false);
     }
-    if (status === "running") {
+    if (status === "running" || status === "compacting") {
       // 待答的 ask_user 问题卡片先恢复再接流：question.list 是真实事实来源，
       // 卡片看不见就等于 agent 在隐形卡死（run 阻塞在 waitAnswer 直到过期）。
       // 经 reducer 注入以复用按 id 去重——实时 question 事件再来也不会重卡。
@@ -446,6 +455,7 @@ export default function AgentPopout({
     const { key } = (await res.json()) as { key: string };
     setActiveKey(key);
     setBubbles([]);
+    setCompacting(false);
   }, [productionId]);
 
   const ensureSession = useCallback(async (): Promise<string | null> => {
@@ -758,6 +768,7 @@ export default function AgentPopout({
     if (activeKeyRef.current === key) {
       setActiveKey(null);
       setBubbles([]);
+      setCompacting(false);
     }
     refreshSessions();
   }, [refreshSessions]);
@@ -860,8 +871,11 @@ export default function AgentPopout({
                 }`}
                 onClick={() => openSession(s.key, s.status)}
               >
-                {s.status === "running" && (
-                  <span className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--success)]" />
+                {(s.status === "running" || s.status === "compacting") && (
+                  <span
+                    className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--success)]"
+                    title={s.status === "compacting" ? "正在整理上下文" : "回复中"}
+                  />
                 )}
                 <span className="min-w-0 flex-1 truncate text-[var(--ink)]">{s.title}</span>
                 <span className="flex shrink-0 gap-1 opacity-70 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
@@ -925,7 +939,7 @@ export default function AgentPopout({
               <div key={i} className="flex justify-start">
                 <div className="max-w-[92%] rounded-2xl rounded-bl-sm bg-zinc-100 px-3.5 py-2 text-sm">
                   <Markdown content={b.text} size="sm" />
-                  {b.streaming && <span className="inline-block h-3 w-1.5 animate-pulse bg-zinc-400" />}
+                  {b.streaming && !compacting && <span className="inline-block h-3 w-1.5 animate-pulse bg-zinc-400" />}
                 </div>
               </div>
             );
@@ -937,7 +951,7 @@ export default function AgentPopout({
                   <summary className="cursor-pointer list-none font-medium text-zinc-500 [&::-webkit-details-marker]:hidden">
                     <span className="inline-block transition-transform group-open:rotate-90">›</span>{" "}
                     思考过程
-                    {b.streaming && <span className="ml-1 inline-block h-2.5 w-1 animate-pulse bg-zinc-400" />}
+                    {b.streaming && !compacting && <span className="ml-1 inline-block h-2.5 w-1 animate-pulse bg-zinc-400" />}
                   </summary>
                   <div className="mt-2 whitespace-pre-wrap border-t border-zinc-200 pt-2">{b.text}</div>
                 </details>
@@ -1087,6 +1101,16 @@ export default function AgentPopout({
         {streaming &&
           (() => {
             const last = bubbles[bubbles.length - 1];
+            if (compacting) {
+              return (
+                <div className="flex justify-start">
+                  <div className="flex items-center gap-2 rounded-2xl rounded-bl-sm bg-zinc-100 px-4 py-3 text-xs text-zinc-500">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                    正在整理上下文…
+                  </div>
+                </div>
+              );
+            }
             const activelyRendering =
               (last?.kind === "assistant" && last.streaming) ||
               (last?.kind === "thinking" && last.streaming) ||
@@ -1254,7 +1278,7 @@ export default function AgentPopout({
             }}
             rows={1}
             placeholder={streaming
-              ? "回复中，输入消息将注入本轮…"
+              ? compacting ? "正在整理上下文，发送后将继续处理…" : "回复中，输入消息将注入本轮…"
               : isMobileViewport ? "输入消息…" : "输入消息，Enter 发送"}
             className="max-h-40 flex-1 resize-none overflow-y-auto rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none"
           />

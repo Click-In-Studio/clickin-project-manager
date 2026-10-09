@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
+import { CompactionError } from "../../vendor/openclaw/packages/agent-core/src/harness/types";
 import type { AssistantMessage, StreamFn, ToolCall } from "../../vendor/openclaw/packages/llm-core/src/types";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction, makeScene, shortId } from "../_support/factories";
@@ -120,6 +121,8 @@ describe("agent-runtime service", () => {
     delete runtimeOverrides.streamFn;
     delete runtimeOverrides.apiKey;
     delete runtimeOverrides.mmpClient;
+    delete runtimeOverrides.compactFn;
+    delete runtimeOverrides.shouldCompactFn;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
     await cleanupProduction(prodId).catch(() => {});
   });
@@ -144,6 +147,7 @@ describe("agent-runtime service", () => {
 
     const bubbles = lines.reduce<Bubble[]>((acc, l) => applyStreamLine(acc, l), []);
     expect(bubbles[bubbles.length - 1]).toEqual({ kind: "assistant", text: "你好，我是后台助手" });
+    expect(lines.some((line) => line.type === "compacting")).toBe(false);
     expect(notified.length).toBeGreaterThan(0); // NOTIFY 真的到了观看者
 
     const sess = await getPool().query<{ user_id: string; production_id: string | null }>(`SELECT user_id, production_id FROM agent_session WHERE id = $1`, [key]);
@@ -464,6 +468,97 @@ describe("agent-runtime service", () => {
     const texts = seen.flatMap((s) => s.messages).map((m) => JSON.stringify(m));
     // steer 若赶上了第二次调用会出现在上下文；赶不上（run 已结束）则 steerRun 返回 null
     if (steered) expect(texts.some((t) => t.includes("补一句"))).toBe(true);
+  });
+
+  it("压缩期间输入先持久化，压缩后作为 steer 消费，终态最后发出", async () => {
+    let compactStarted!: () => void;
+    const started = new Promise<void>((resolve) => { compactStarted = resolve; });
+    let finishCompact!: () => void;
+    const compactGate = new Promise<void>((resolve) => { finishCompact = resolve; });
+    let checks = 0;
+    runtimeOverrides.shouldCompactFn = () => checks++ === 0;
+    runtimeOverrides.compactFn = async (preparation) => {
+      compactStarted();
+      await compactGate;
+      return {
+        ok: true,
+        value: {
+          summary: "已压缩的旧上下文",
+          firstKeptEntryId: preparation.firstKeptEntryId,
+          tokensBefore: preparation.tokensBefore,
+        },
+      };
+    };
+    const { streamFn, seen } = scripted([{ text: "第一段正文" }, { text: "压缩后收到补充" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = newKey();
+
+    try {
+      await startRun({ sessionId: key, userId, message: `旧上下文${"很长".repeat(90_000)}` });
+      await started;
+      expect((await getPool().query(`SELECT status FROM agent_run WHERE session_id = $1`, [key])).rows[0].status).toBe("compacting");
+      expect((await readEventsSince(key, 0)).map((row) => row.line.type)).not.toContain("final");
+
+      expect(await steerRun(key, "压缩完成后继续处理这条")).toMatchObject({ runId: expect.any(String) });
+      expect((await getPool().query(`SELECT count(*)::int AS n FROM agent_session_inbox WHERE session_id = $1`, [key])).rows[0].n).toBe(1);
+      expect(await getHistory(key)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: "user", content: "压缩完成后继续处理这条" }),
+      ]));
+
+      finishCompact();
+      const lines = await collectUntilTerminal(key);
+      await waitForIdle(key);
+      const types = lines.map((line) => line.type);
+      expect(types.indexOf("delta")).toBeLessThan(types.indexOf("compacting"));
+      expect(types.indexOf("compacting")).toBeLessThan(types.lastIndexOf("final"));
+      expect(lines.filter((line) => line.type === "compacting")).toEqual([
+        { type: "compacting", active: true },
+        { type: "compacting", active: false },
+      ]);
+      expect(seen).toHaveLength(2);
+      expect(JSON.stringify(seen[1].messages)).toContain("压缩完成后继续处理这条");
+      expect((await getPool().query(`SELECT count(*)::int AS n FROM agent_session_inbox WHERE session_id = $1`, [key])).rows[0].n).toBe(0);
+      const persisted = await getPool().query<{ entry_id: string }>(
+        `SELECT entry_id FROM agent_session_entry
+          WHERE session_id = $1 AND payload->'message'->>'role' = 'user'
+            AND payload->'message'->'content'->0->>'text' LIKE '压缩完成后继续处理这条%'`,
+        [key],
+      );
+      expect(persisted.rows[0]?.entry_id).toMatch(/^ain_/);
+      expect((await getPool().query(
+        `SELECT count(*)::int AS n FROM agent_session_entry WHERE session_id = $1 AND type = 'compaction'`,
+        [key],
+      )).rows[0].n).toBe(1);
+    } finally {
+      finishCompact();
+      delete runtimeOverrides.compactFn;
+      delete runtimeOverrides.shouldCompactFn;
+    }
+  });
+
+  it("压缩失败会清掉 compacting 状态并按原正文正常收尾", async () => {
+    let checks = 0;
+    runtimeOverrides.shouldCompactFn = () => checks++ === 0;
+    runtimeOverrides.compactFn = async () => ({
+      ok: false,
+      error: new CompactionError("summarization_failed", "摘要服务暂时不可用"),
+    });
+    runtimeOverrides.streamFn = scripted([{ text: "正文仍然有效" }]).streamFn;
+    const key = newKey();
+    try {
+      const { runId } = await startRun({ sessionId: key, userId, message: `长会话${"内容".repeat(90_000)}` });
+      const lines = await collectUntilTerminal(key);
+      await waitForIdle(key);
+      expect(lines.filter((line) => line.type === "compacting")).toEqual([
+        { type: "compacting", active: true },
+        { type: "compacting", active: false },
+      ]);
+      expect(lines.at(-1)).toEqual({ type: "final", text: "正文仍然有效" });
+      expect((await getPool().query(`SELECT status FROM agent_run WHERE id = $1`, [runId])).rows[0].status).toBe("completed");
+    } finally {
+      delete runtimeOverrides.compactFn;
+      delete runtimeOverrides.shouldCompactFn;
+    }
   });
 
   it("带附件 steer 立即确认入队，MMP 预检异步完成后才把 agent context 注入下一次模型调用", async () => {

@@ -316,7 +316,7 @@ async function fireSchedule(row: ScheduleRow, startRun: StartRunFn, now: Date): 
   // overlap：上一次还在跑 → 跳过本次
   if (row.lastRunId) {
     const r = await getPool().query<{ status: string }>(`SELECT status FROM agent_run WHERE id = $1`, [row.lastRunId]);
-    if (r.rows[0] && ["running", "awaiting_approval", "awaiting_answer"].includes(r.rows[0].status)) {
+    if (r.rows[0] && ["running", "compacting", "awaiting_approval", "awaiting_answer"].includes(r.rows[0].status)) {
       console.log(`[agent-schedule] ${row.id} skipped: previous run ${row.lastRunId} still active`);
       await advance(row, now);
       return false;

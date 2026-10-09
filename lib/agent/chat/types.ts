@@ -3,7 +3,7 @@ export interface ChatSessionSummary {
   title: string;
   lastMessagePreview?: string;
   updatedAt?: number;
-  status?: "running" | "done" | "failed" | "killed" | "timeout";
+  status?: "running" | "compacting" | "done" | "failed" | "killed" | "timeout";
 }
 
 // 工具参数/结果对外透传（SSE 帧、历史 JSON）前的统一截断上限——relay 的

@@ -42,6 +42,13 @@ import { buildSystemPrompt, recallBlock } from "./prompt";
 import { repairAndClassify } from "./resume";
 import { newRunId } from "./ids";
 import {
+  enqueueSessionInput,
+  finishCompactionAndListInputs,
+  pendingInputsForSession,
+  pendingInputsForRun,
+  reconcileConsumedInputs,
+} from "./session-inbox";
+import {
   CHAT_MODEL, COMPACTION_MODEL, deepseekApiKey, llmRuntime,
   RUNNER_OWNER, HEARTBEAT_INTERVAL_MS, ORPHAN_AFTER_MS,
 } from "./config";
@@ -81,11 +88,20 @@ type ActiveRun = {
   detach: () => void;
   enqueueSteer: (buildMessage: () => Promise<string>, afterCurrentTurn: boolean) => void;
   warmAttachments: (attachmentIds: string[]) => Promise<void>;
+  isCompacting: () => boolean;
+  waitForCompactionTransition: () => Promise<void>;
 };
 const active = new Map<string, ActiveRun>(); // sessionId → 进行中的 run（同会话单执行者）
 
 /** 测试注入点：替换模型流（默认真 DeepSeek）和 MMP registry client。 */
-export const runtimeOverrides: { streamFn?: StreamFn; apiKey?: string; mmpClient?: MmpClient | null } = {};
+export const runtimeOverrides: {
+  streamFn?: StreamFn;
+  apiKey?: string;
+  mmpClient?: MmpClient | null;
+  /** 测试注入：不触网验证自动压缩的阶段与竞态。 */
+  compactFn?: typeof compact;
+  shouldCompactFn?: typeof shouldCompact;
+} = {};
 
 export class SessionBusyError extends Error {
   status = 409;
@@ -155,6 +171,13 @@ export async function steerRun(
   if (!run) return null;
   const identity = parseSessionIdentity(sessionId);
   if (!identity) throw Object.assign(new Error("无权访问该会话"), { status: 403 });
+  if (run.isCompacting()) {
+    await run.waitForCompactionTransition();
+    const inboxId = await enqueueSessionInput({ sessionId, runId: run.runId, message, attachmentIds });
+    if (inboxId) return { runId: run.runId };
+    // 压缩恰好在事务锁内结束：回到普通 steer；消息尚未落库，不会重复。
+    if (active.get(sessionId) !== run) return null;
+  }
   // steer 的 HTTP 请求只负责入队，不能同步等待最长两分钟的外部预检；队列仍保证多次
   // 插话按到达顺序进入 harness，并在各自进入下一次模型调用前拿到 agent context。
   run.enqueueSteer(async () => withAttachmentPreflight(
@@ -229,6 +252,8 @@ async function execute(input: ExecuteInput): Promise<void> {
   // 脱离（§4.4 ②）：本地停手但不留痕——不写 transcript、不发 aborted 行、不改 run 终态，
   // 下一个进程按孤儿接管续跑
   let detached = false;
+  let compacting = false;
+  let compactionTransition = Promise.resolve();
   const pendingSteers: Array<{ buildMessage: () => Promise<string>; afterCurrentTurn: boolean }> = [];
   let abortHarness = async () => {};
   let enqueueSteerImpl = (buildMessage: () => Promise<string>, afterCurrentTurn: boolean) => {
@@ -265,6 +290,8 @@ async function execute(input: ExecuteInput): Promise<void> {
     abortHarness: () => abortHarness(),
     enqueueSteer: (buildMessage, afterCurrentTurn) => enqueueSteerImpl(buildMessage, afterCurrentTurn),
     warmAttachments: (attachmentIds) => warmAttachmentsImpl(attachmentIds),
+    isCompacting: () => compacting,
+    waitForCompactionTransition: () => compactionTransition,
     detach: () => {
       if (detached) return;
       detached = true;
@@ -476,7 +503,14 @@ async function execute(input: ExecuteInput): Promise<void> {
     }
 
     // 事件 → 前端行协议 → agent_event/NOTIFY；顺带记账与 episodic 抽取
-    const adapter = createStreamLineAdapter((line) => publisher.publish(line));
+    let terminalLine: Extract<StreamLine, { type: "final" | "aborted" | "error" }> | null = null;
+    const adapter = createStreamLineAdapter((line) => {
+      if (line.type === "final" || line.type === "aborted" || line.type === "error") {
+        terminalLine = line;
+      } else {
+        publisher.publish(line);
+      }
+    });
     // 写工具成功 → mutation 行（tools.ts 的 mutates 声明）：跟在 tool-end 后面，同样落 agent_event
     harness.subscribe((event) => {
       adapter(event);
@@ -560,16 +594,87 @@ async function execute(input: ExecuteInput): Promise<void> {
         await turn;
       } else {
         markSteerReady();
-        publisher.publish({ type: "final", text: "" });
+        terminalLine = { type: "final", text: "" };
       }
     }
     await drainSteers();
     if (abort.signal.aborted) status = "aborted";
 
-    // 自动压缩（agent-core 的 compact() 是手动的；触发由这里驱动，摘要用 pro）
-    const compaction = await maybeCompact(harness, session, abort.signal);
-    usage.compactionUsd += compaction.usd;
-    usage.compactionTokens += compaction.tokens;
+    // 自动压缩（agent-core 的 compact() 是手动的；触发由这里驱动，摘要用 pro）。
+    // 压缩期间的新输入先落 inbox；压缩结束后用压缩后的上下文在同一 run 继续。
+    for (;;) {
+      const compaction = await maybeCompact(harness, session, abort.signal, async () => {
+        let finishTransition!: () => void;
+        compactionTransition = new Promise<void>((resolve) => { finishTransition = resolve; });
+        compacting = true;
+        try {
+          const transitioned = await pool.query(
+            `UPDATE agent_run SET status = 'compacting' WHERE id = $1 AND status = 'running'`,
+            [runId],
+          );
+          if (transitioned.rowCount !== 1) throw new Error("run 未能进入 compacting 状态");
+          publisher.publish({ type: "compacting", active: true });
+        } catch (error) {
+          compacting = false;
+          throw error;
+        } finally {
+          finishTransition();
+        }
+      });
+      usage.compactionUsd += compaction.usd;
+      usage.compactionTokens += compaction.tokens;
+      await reconcileConsumedInputs(sessionId);
+      let queued = await pendingInputsForRun(sessionId, runId);
+      const preparedById = new Map<string, string>();
+      if (compaction.triggered) {
+        // 预检可能耗时；期间新增的输入也必须纳入本批。只有在会话锁内确认
+        // “已预检集合 = 当前 inbox 集合”时才把状态切回 running。
+        for (;;) {
+          for (const row of queued) {
+            if (preparedById.has(row.id)) continue;
+            preparedById.set(row.id, await withAttachmentPreflight(
+              row.message, row.attachment_ids, sessionId, userId, productionId, runId, abort.signal,
+            ));
+          }
+          const finished = await finishCompactionAndListInputs(sessionId, runId, queued.map((row) => row.id));
+          queued = finished.rows;
+          if (finished.finished) break;
+        }
+        compacting = false;
+        publisher.publish({ type: "compacting", active: false });
+      }
+      if (abort.signal.aborted) {
+        status = "aborted";
+        break;
+      }
+      if (queued.length === 0) break;
+
+      const preparedQueued: Array<{ id: string; message: string }> = [];
+      for (const row of queued) {
+        preparedQueued.push({
+          id: row.id,
+          message: preparedById.get(row.id) ?? await withAttachmentPreflight(
+            row.message, row.attachment_ids, sessionId, userId, productionId, runId, abort.signal,
+          ),
+        });
+      }
+      const first = preparedQueued[0]!;
+      const rest = preparedQueued.slice(1);
+      lastUser = preparedQueued.at(-1)?.message ?? lastUser;
+      const nextTurn = harness.prompt(first.message, { entryId: first.id });
+      currentTurnDone = nextTurn.then(() => {}, () => {});
+      const queuedSteers = rest.map((item) => harness.steer(item.message, {
+        entryId: item.id,
+        onConsumed: () => { void reconcileConsumedInputs(sessionId); },
+      }));
+      await Promise.all(queuedSteers);
+      await nextTurn;
+      await reconcileConsumedInputs(sessionId);
+      await drainSteers();
+      if (abort.signal.aborted) status = "aborted";
+      if (abort.signal.aborted) break;
+    }
+    if (terminalLine) publisher.publish(terminalLine);
   } catch (err) {
     status = abort.signal.aborted ? "aborted" : "failed";
     error = err instanceof Error ? err.message : String(err);
@@ -932,13 +1037,18 @@ function str(v: unknown): string | undefined {
  * v4-pro（3 倍单价）、一次就吃掉整个 transcript。这里把 completeSimple 包一层
  * 取 usage，不必改 vendor（compact 的 runtime 参数是现成的注入点）。
  */
-async function maybeCompact(harness: Harness, session: Session, signal: AbortSignal): Promise<CompactionCost> {
-  const zero: CompactionCost = { usd: 0, tokens: 0 };
+async function maybeCompact(
+  harness: Harness,
+  session: Session,
+  signal: AbortSignal,
+  onCompacting?: () => Promise<void>,
+): Promise<CompactionCost> {
+  const zero: CompactionCost = { usd: 0, tokens: 0, triggered: false };
   if (signal.aborted) return zero;
   const ctx = await session.buildContext();
   const { tokens } = estimateContextTokens(ctx.messages);
-  if (!shouldCompact(tokens, CHAT_MODEL.contextWindow, DEFAULT_COMPACTION_SETTINGS)) return zero;
-  const cost: CompactionCost = { usd: 0, tokens: 0 };
+  if (!(runtimeOverrides.shouldCompactFn ?? shouldCompact)(tokens, CHAT_MODEL.contextWindow, DEFAULT_COMPACTION_SETTINGS)) return zero;
+  const cost: CompactionCost = { usd: 0, tokens: 0, triggered: true };
   const rt = llmRuntime();
   const tapped = {
     completeSimple: async (...args: Parameters<typeof rt.completeSimple>) => {
@@ -951,11 +1061,12 @@ async function maybeCompact(harness: Harness, session: Session, signal: AbortSig
     },
   };
   const off = harness.on("session_before_compact", async ({ preparation, signal: s }) => {
-    const result = await compact(preparation, COMPACTION_MODEL, runtimeOverrides.apiKey ?? deepseekApiKey(), undefined, "用中文写摘要", s, "low", undefined, tapped);
+    const result = await (runtimeOverrides.compactFn ?? compact)(preparation, COMPACTION_MODEL, runtimeOverrides.apiKey ?? deepseekApiKey(), undefined, "用中文写摘要", s, "low", undefined, tapped);
     if (!result.ok) throw result.error;
     return { compaction: result.value };
   });
   try {
+    await onCompacting?.();
     await harness.compact();
   } catch (err) {
     console.error("[agent-runtime] compaction failed (continuing):", err);
@@ -965,7 +1076,7 @@ async function maybeCompact(harness: Harness, session: Session, signal: AbortSig
   return cost;
 }
 
-type CompactionCost = { usd: number; tokens: number };
+type CompactionCost = { usd: number; tokens: number; triggered: boolean };
 
 // ── 历史与列表（前端契约同网关时代）────────────────────────────────────────────
 
@@ -1000,6 +1111,16 @@ export async function getHistory(sessionId: string): Promise<ChatTranscriptEntry
       if (t) entries.push({ role: "assistant", content: t });
     }
   }
+  for (const pending of await pendingInputsForSession(sessionId)) {
+    entries.push({
+      role: "user",
+      content: stripUiContext(pending.message),
+      attachments: pending.attachment_ids
+        .map((id) => attachments.get(id))
+        .filter((attachment): attachment is AgentAttachment => attachment !== undefined)
+        .map(chatAttachment),
+    });
+  }
   return entries;
 }
 
@@ -1025,10 +1146,12 @@ function textOf(content: unknown): string {
 }
 
 export async function listSessions(userId: string): Promise<ChatSessionSummary[]> {
-  const r = await getPool().query<{ id: string; title: string | null; updated_at: Date; first_user: string | null; last_text: string | null; active_run: boolean }>(
+  const r = await getPool().query<{ id: string; title: string | null; updated_at: Date; first_user: string | null; last_text: string | null; active_run: boolean; compacting_run: boolean }>(
     `SELECT s.id, s.title, s.updated_at,
        EXISTS (SELECT 1 FROM agent_run r WHERE r.session_id = s.id
-                 AND r.status IN ('running', 'awaiting_approval', 'awaiting_answer')) AS active_run,
+                 AND r.status IN ('running', 'compacting', 'awaiting_approval', 'awaiting_answer')) AS active_run,
+       EXISTS (SELECT 1 FROM agent_run r WHERE r.session_id = s.id
+                 AND r.status = 'compacting') AS compacting_run,
        (SELECT e.payload->'message'->'content'->0->>'text' FROM agent_session_entry e
          WHERE e.session_id = s.id AND e.type = 'message' AND e.payload->'message'->>'role' = 'user'
          ORDER BY e.seq LIMIT 1) AS first_user,
@@ -1044,7 +1167,7 @@ export async function listSessions(userId: string): Promise<ChatSessionSummary[]
     title: row.title || stripUiContext(row.first_user ?? "").trim().slice(0, 60) || "新对话",
     lastMessagePreview: row.last_text ? stripUiContext(row.last_text).slice(0, 120) : undefined,
     updatedAt: row.updated_at.getTime(),
-    status: row.active_run ? "running" : "done",
+    status: row.compacting_run ? "compacting" : row.active_run ? "running" : "done",
   }));
 }
 
@@ -1080,7 +1203,7 @@ export async function resumeOrphans(): Promise<number> {
     `UPDATE agent_run r SET owner = $1, heartbeat_at = now(), status = 'running'
      FROM agent_session s
      WHERE r.session_id = s.id
-       AND r.status IN ('running', 'awaiting_approval', 'awaiting_answer')
+       AND r.status IN ('running', 'compacting', 'awaiting_approval', 'awaiting_answer')
        AND (r.heartbeat_at IS NULL OR r.heartbeat_at < now() - ($2::int * interval '1 millisecond'))
        AND (r.owner IS NULL OR r.owner <> $1)
      RETURNING r.id, r.session_id, s.user_id, r.page_key, r.schedule_id`,

@@ -162,6 +162,12 @@ COL|agent_session_entry|payload|jsonb|jsonb|NO|
 COL|agent_session_entry|seq|integer|int4|NO|
 COL|agent_session_entry|session_id|text|text|NO|
 COL|agent_session_entry|type|text|text|NO|
+COL|agent_session_inbox|attachment_ids|jsonb|jsonb|NO|'[]'::jsonb
+COL|agent_session_inbox|claimed_run_id|text|text|YES|
+COL|agent_session_inbox|created_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_session_inbox|id|text|text|NO|
+COL|agent_session_inbox|message|text|text|NO|
+COL|agent_session_inbox|session_id|text|text|NO|
 COL|agent_session|archived_at|timestamp with time zone|timestamptz|YES|
 COL|agent_session|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_session|id|text|text|NO|
@@ -1211,7 +1217,7 @@ CON|agent_run_attachment_access|agent_run_attachment_access_run_id_fkey|FOREIGN 
 CON|agent_run|agent_run_pkey|PRIMARY KEY (id)
 CON|agent_run|agent_run_schedule_id_fkey|FOREIGN KEY (schedule_id) REFERENCES agent_schedule(id) ON DELETE SET NULL
 CON|agent_run|agent_run_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
-CON|agent_run|agent_run_status_check|CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'awaiting_approval'::text, 'awaiting_answer'::text, 'completed'::text, 'aborted'::text, 'failed'::text, 'interrupted'::text])))
+CON|agent_run|agent_run_status_check|CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'compacting'::text, 'awaiting_approval'::text, 'awaiting_answer'::text, 'completed'::text, 'aborted'::text, 'failed'::text, 'interrupted'::text])))
 CON|agent_schedule|agent_schedule_created_by_session_id_fkey|FOREIGN KEY (created_by_session_id) REFERENCES agent_session(id) ON DELETE SET NULL
 CON|agent_schedule|agent_schedule_last_run_id_fkey|FOREIGN KEY (last_run_id) REFERENCES agent_run(id) ON DELETE SET NULL
 CON|agent_schedule|agent_schedule_pkey|PRIMARY KEY (id)
@@ -1230,6 +1236,10 @@ CON|agent_session_attachment|agent_session_attachment_web_fetch_source_check|CHE
 CON|agent_session_entry|agent_session_entry_pkey|PRIMARY KEY (session_id, seq)
 CON|agent_session_entry|agent_session_entry_session_id_entry_id_key|UNIQUE (session_id, entry_id)
 CON|agent_session_entry|agent_session_entry_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
+CON|agent_session_inbox|agent_session_inbox_attachment_ids_check|CHECK ((jsonb_typeof(attachment_ids) = 'array'::text))
+CON|agent_session_inbox|agent_session_inbox_claimed_run_id_fkey|FOREIGN KEY (claimed_run_id) REFERENCES agent_run(id) ON DELETE SET NULL
+CON|agent_session_inbox|agent_session_inbox_pkey|PRIMARY KEY (id)
+CON|agent_session_inbox|agent_session_inbox_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
 CON|agent_session|agent_session_pkey|PRIMARY KEY (id)
 CON|agent_session|agent_session_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|agent_session|agent_session_schedule_id_fkey|FOREIGN KEY (schedule_id) REFERENCES agent_schedule(id) ON DELETE SET NULL
@@ -1819,7 +1829,7 @@ IDX|agent_mutation|agent_mutation_user_idx|CREATE INDEX agent_mutation_user_idx 
 IDX|agent_question|agent_question_pending_idx|CREATE INDEX agent_question_pending_idx ON public.agent_question USING btree (status, expires_at) WHERE (status = 'pending'::text)
 IDX|agent_question|agent_question_pkey|CREATE UNIQUE INDEX agent_question_pkey ON public.agent_question USING btree (id)
 IDX|agent_run_attachment_access|agent_run_attachment_access_pkey|CREATE UNIQUE INDEX agent_run_attachment_access_pkey ON public.agent_run_attachment_access USING btree (run_id, attachment_id, access_kind)
-IDX|agent_run|agent_run_active_idx|CREATE INDEX agent_run_active_idx ON public.agent_run USING btree (status, heartbeat_at) WHERE (status = ANY (ARRAY['running'::text, 'awaiting_approval'::text, 'awaiting_answer'::text]))
+IDX|agent_run|agent_run_active_idx|CREATE INDEX agent_run_active_idx ON public.agent_run USING btree (status, heartbeat_at) WHERE (status = ANY (ARRAY['running'::text, 'compacting'::text, 'awaiting_approval'::text, 'awaiting_answer'::text]))
 IDX|agent_run|agent_run_pkey|CREATE UNIQUE INDEX agent_run_pkey ON public.agent_run USING btree (id)
 IDX|agent_run|agent_run_schedule_idx|CREATE INDEX agent_run_schedule_idx ON public.agent_run USING btree (schedule_id, started_at DESC) WHERE (schedule_id IS NOT NULL)
 IDX|agent_run|agent_run_session_idx|CREATE INDEX agent_run_session_idx ON public.agent_run USING btree (session_id, started_at DESC)
@@ -1834,6 +1844,8 @@ IDX|agent_session_attachment|agent_session_attachment_web_fetch_call_idx|CREATE 
 IDX|agent_session_attachment|agent_session_attachment_web_fetch_url_idx|CREATE UNIQUE INDEX agent_session_attachment_web_fetch_url_idx ON public.agent_session_attachment USING btree (source_run_id, source_final_url) WHERE ((source_kind = 'web_fetch'::text) AND (status = ANY (ARRAY['pending'::text, 'ready'::text])))
 IDX|agent_session_entry|agent_session_entry_pkey|CREATE UNIQUE INDEX agent_session_entry_pkey ON public.agent_session_entry USING btree (session_id, seq)
 IDX|agent_session_entry|agent_session_entry_session_id_entry_id_key|CREATE UNIQUE INDEX agent_session_entry_session_id_entry_id_key ON public.agent_session_entry USING btree (session_id, entry_id)
+IDX|agent_session_inbox|agent_session_inbox_pending_idx|CREATE INDEX agent_session_inbox_pending_idx ON public.agent_session_inbox USING btree (session_id, created_at, id)
+IDX|agent_session_inbox|agent_session_inbox_pkey|CREATE UNIQUE INDEX agent_session_inbox_pkey ON public.agent_session_inbox USING btree (id)
 IDX|agent_session|agent_session_pkey|CREATE UNIQUE INDEX agent_session_pkey ON public.agent_session USING btree (id)
 IDX|agent_session|agent_session_production_idx|CREATE INDEX agent_session_production_idx ON public.agent_session USING btree (production_id) WHERE (production_id IS NOT NULL)
 IDX|agent_session|agent_session_schedule_idx|CREATE INDEX agent_session_schedule_idx ON public.agent_session USING btree (schedule_id) WHERE (schedule_id IS NOT NULL)
