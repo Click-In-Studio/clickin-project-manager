@@ -562,7 +562,7 @@ export default function SceneTableView({
         <tr
           data-scene-id={scene.id}
           onDragOver={event => {
-            if (!dragging || !canEdit || !fieldPerms.structure || structure.busy) return;
+            if (!dragging || !canEdit || !fieldPerms.structure || structure.busy || structure.writeBlocked) return;
             const rect = event.currentTarget.getBoundingClientRect();
             const edge = event.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
             const beforeId = structure.dropBefore(dragging, scene, edge);
@@ -573,7 +573,7 @@ export default function SceneTableView({
           }}
           onDrop={event => {
             event.preventDefault();
-            if (dragging && canEdit && fieldPerms.structure && !structure.busy) {
+            if (dragging && canEdit && fieldPerms.structure && !structure.busy && !structure.writeBlocked) {
               const rect = event.currentTarget.getBoundingClientRect();
               const edge = event.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
               const beforeId = structure.dropBefore(dragging, scene, edge);
@@ -586,13 +586,13 @@ export default function SceneTableView({
           {canEdit && (
             <td className="scene-table-frozen-cell sticky left-0 z-10 px-2 py-1 align-top" style={{ width: actionWidth }}>
               <div className="flex items-center gap-1">
-                <button type="button" draggable={fieldPerms.structure && scene.id !== openingChapterMarkerId && !structure.busy}
-                  aria-label={`拖动 ${scene.number} ${scene.name}`} aria-disabled={!fieldPerms.structure || scene.id === openingChapterMarkerId || structure.busy}
+                <button type="button" draggable={fieldPerms.structure && scene.id !== openingChapterMarkerId && !structure.busy && !structure.writeBlocked}
+                  aria-label={`拖动 ${scene.number} ${scene.name}`} aria-disabled={!fieldPerms.structure || scene.id === openingChapterMarkerId || structure.busy || structure.writeBlocked}
                   title={!fieldPerms.structure ? "没有排序权限" : scene.id === openingChapterMarkerId ? "开场章节固定在最前面" : "拖动调整同级顺序；也可在行操作中上移/下移"}
                   onDragStart={event => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", scene.id); setDragging(scene); }}
                   onDragEnd={() => { setDragging(null); setDropTarget(null); }}
                   className="h-8 w-8 shrink-0 cursor-grab rounded text-zinc-500 hover:bg-zinc-100 aria-disabled:cursor-default aria-disabled:opacity-30">⠿</button>
-                <button type="button" disabled={structure.busy} onClick={() => setActionMarker(scene)} aria-label={`${scene.number} ${scene.name} 行操作`} className="h-8 w-8 shrink-0 rounded text-zinc-600 hover:bg-zinc-100">⋯</button>
+                <button type="button" disabled={structure.busy || structure.writeBlocked} onClick={() => setActionMarker(scene)} aria-label={`${scene.number} ${scene.name} 行操作`} className="h-8 w-8 shrink-0 rounded text-zinc-600 hover:bg-zinc-100">⋯</button>
               </div>
             </td>
           )}
@@ -642,7 +642,8 @@ export default function SceneTableView({
   return (
     <>
       {canEdit && <div className="mb-2 flex items-center gap-3">
-        {fieldPerms.create && <button type="button" disabled={structure.busy} onClick={() => setActionMarker("new")} className="rounded border border-zinc-300 bg-white px-3 py-2 text-xs disabled:opacity-40">＋ 新增章节</button>}
+        {fieldPerms.create && <button type="button" disabled={structure.busy || structure.writeBlocked} onClick={() => setActionMarker("new")} className="rounded border border-zinc-300 bg-white px-3 py-2 text-xs disabled:opacity-40">＋ 新增章节</button>}
+        {structure.writeBlocked && <span role="status" className="text-xs text-red-700">结构状态未同步，已暂停新增、删除和排序</span>}
         {structure.busy && <span role="status" className="text-xs text-zinc-500">正在保存…</span>}
       </div>}
       {structure.error && <div role="alert" className="mb-2 flex items-center gap-2 text-xs text-red-700">{structure.error}<button type="button" disabled={structure.busy} onClick={structure.refreshWithNotice} className="underline">重试同步</button></div>}

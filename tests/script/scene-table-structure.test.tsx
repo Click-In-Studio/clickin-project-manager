@@ -105,6 +105,17 @@ describe("构作表格结构操作", () => {
     expect(host.querySelector('[role="dialog"]')?.textContent).toContain("网络已断开；同步也失败");
     expect(writes("POST")).toHaveLength(1);
   });
+  it("对账失败暂停结构写入，成功重试同步后恢复", async () => {
+    await openRow("s1"); await clickText("在此段落后新增段落");
+    fetchMock.mockRejectedValue(new Error("网络中断"));
+    await submitName("待恢复");
+    expect(host.textContent).toContain("已暂停新增、删除和排序");
+    await submitName("不可继续写入");
+    expect(writes("POST")).toHaveLength(1);
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => init?.method ? response(200, { scenes: SCENES }) : response(200, SCENES));
+    await clickText("重试同步"); await submitName("恢复后的草稿");
+    expect(writes("POST")).toHaveLength(2);
+  });
   it("逐动作和逐实例权限，字段修改权限不开放结构动作", async () => {
     props = { ...props, fieldPerms: { ...NO_SCENE_FIELD_PERMS, synopsis: true, any: true, deleteIds: ["s1"] } }; await render();
     await openRow("s1");

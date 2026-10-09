@@ -30,7 +30,7 @@ export default function SceneTableActions({ marker, scenes, fieldPerms, structur
   };
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!insert || !name.trim() || structure.busy) return;
+    if (!insert || !name.trim() || structure.busy || structure.writeBlocked) return;
     void perform(structure.add(name.trim(), insert.parentId, insert.beforeId));
   };
   const items: { label: string; reason: string | null; run: () => void }[] = [
@@ -84,7 +84,7 @@ export default function SceneTableActions({ marker, scenes, fieldPerms, structur
             </label>
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" disabled={structure.busy} onClick={close} className={SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS}>取消</button>
-              <button type="submit" disabled={structure.busy || !name.trim()} className={`${SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS} disabled:opacity-50`}>{structure.busy ? "添加中…" : "添加"}</button>
+              <button type="submit" disabled={structure.busy || structure.writeBlocked || !name.trim()} className={`${SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS} disabled:opacity-50`}>{structure.busy ? "添加中…" : "添加"}</button>
             </div>
           </form>
         ) : confirmDelete ? (
@@ -92,13 +92,13 @@ export default function SceneTableActions({ marker, scenes, fieldPerms, structur
             <p className="text-xs leading-6 text-zinc-500">将按现有章节和段落规则删除；有构作详情时会提示不可删除，有下属空段落时会询问保留方式。</p>
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" disabled={structure.busy} onClick={close} className={SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS}>取消</button>
-              <button type="button" disabled={structure.busy} onClick={() => { if (marker) void perform(structure.remove(marker.id)); }} className={SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS}>{structure.busy ? "删除中…" : "确认删除"}</button>
+              <button type="button" disabled={structure.busy || structure.writeBlocked} onClick={() => { if (marker) void perform(structure.remove(marker.id)); }} className={SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS}>{structure.busy ? "删除中…" : "确认删除"}</button>
             </div>
           </>
         ) : (
           <div className="flex flex-col gap-1">
             {items.map(item => {
-              const reason = structure.busy ? "请等待当前操作完成" : item.reason;
+              const reason = structure.busy ? "请等待当前操作完成" : structure.writeBlocked ? "请先重试同步" : item.reason;
               return <button key={item.label} type="button" aria-disabled={!!reason} title={reason ?? undefined} onClick={() => { if (!reason) item.run(); }} className={`rounded px-3 py-2 text-left text-sm ${reason ? "text-zinc-400" : "text-zinc-700 hover:bg-zinc-100"}`}>{item.label}{reason && <span className="mt-1 block text-[11px]">{reason}</span>}</button>;
             })}
           </div>

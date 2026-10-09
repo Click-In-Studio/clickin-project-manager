@@ -18,6 +18,8 @@ export function useSceneTableStructure({
   trackWrite: <T,>(operation: Promise<T>) => Promise<T>;
 }) {
   const [busy, setBusy] = useState(false);
+  const [writeBlocked, setWriteBlocked] = useState(false);
+  const writeBlockedRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<MarkerDeleteDialogState | null>(null);
   const busyRef = useRef(false);
@@ -27,10 +29,23 @@ export function useSceneTableStructure({
 
   const refresh = useCallback(async () => {
     const sequence = ++readSequence.current;
-    const response = await fetch(`${endpoint}${versionId ? `?versionId=${encodeURIComponent(versionId)}` : ""}`);
-    if (!response.ok || response.status === 202) throw new Error("未能同步章节和段落，请重试");
-    const data = await response.json() as MarkerProjection[];
-    if (sequence === readSequence.current && !busyRef.current) onScenesChange(data);
+    try {
+      const response = await fetch(`${endpoint}${versionId ? `?versionId=${encodeURIComponent(versionId)}` : ""}`);
+      if (!response.ok || response.status === 202) throw new Error("未能同步章节和段落，请重试");
+      const data = await response.json() as MarkerProjection[];
+      if (!Array.isArray(data)) throw new Error("服务端未返回章节和段落，请重试同步");
+      if (sequence === readSequence.current && !busyRef.current) {
+        onScenesChange(data);
+        writeBlockedRef.current = false;
+        setWriteBlocked(false);
+      }
+    } catch (caught) {
+      if (sequence === readSequence.current) {
+        writeBlockedRef.current = true;
+        setWriteBlocked(true);
+      }
+      throw caught;
+    }
   }, [endpoint, onScenesChange, versionId]);
 
   const refreshWithNotice = useCallback(() => {
@@ -49,6 +64,7 @@ export function useSceneTableStructure({
 
   const mutate = async (method: string, body: Record<string, unknown>, markerId?: string) => {
     if (busyRef.current) throw new Error("请等待当前操作完成");
+    if (writeBlockedRef.current) throw new Error("请先重试同步，确认当前章节和段落后再操作");
     busyRef.current = true;
     readSequence.current++;
     setBusy(true);
@@ -118,7 +134,7 @@ export function useSceneTableStructure({
   };
 
   return {
-    busy, error, deleteDialog, setDeleteDialog, refreshWithNotice, afterId, dropBefore, stepBefore,
+    busy, writeBlocked, error, deleteDialog, setDeleteDialog, refreshWithNotice, afterId, dropBefore, stepBefore,
     add: (name: string, parentId: string | null, beforeId: string | null) => mutate("POST", {
       name, parentId, ...(beforeId ? { insertBeforeSceneId: beforeId } : {}),
     }),
