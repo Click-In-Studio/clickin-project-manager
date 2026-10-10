@@ -177,6 +177,8 @@ export default function ApprovalCenterClient({
   const [timeRange, setTimeRange] = useState<TimeRange>("all");
   const [sortByView, setSortByView] = useState(DEFAULT_SORT_BY_VIEW);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [requestView, setRequestView] = useState<AccessRequestFlowView | null>(null);
@@ -187,14 +189,26 @@ export default function ApprovalCenterClient({
   const [actionError, setActionError] = useState<string | null>(null);
   const [mobileLevel, setMobileLevel] = useState<MobileLevel>("queues");
   const listRequestSeq = useRef(0);
+  const pageQuery = useRef("");
+  const pagination = useRef<{ cursor: string | null; busy: boolean }>({ cursor: null, busy: false });
   const sort = sortByView[view];
 
-  const loadItems = useCallback(async () => {
+  const loadItems = useCallback(async (cursor?: string) => {
+    if (cursor && (pagination.current.busy || cursor !== pagination.current.cursor)) return;
     const requestSeq = ++listRequestSeq.current;
-    setLoading(true);
+    pagination.current.busy = true;
+    if (cursor) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+      setLoadingMore(false);
+      setItems([]);
+      setNextCursor(null);
+      pagination.current.cursor = null;
+    }
     setListError(null);
     try {
-      const makeUrl = () => {
+      if (!cursor) {
         const params = new URLSearchParams({ view, limit: "100" });
         if (businessType !== "all") params.set("type", businessType);
         if (query) params.set("q", query);
@@ -204,27 +218,46 @@ export default function ApprovalCenterClient({
           params.set("from", new Date(Date.now() - range.days * 24 * 60 * 60 * 1000).toISOString());
         }
         params.set("sort", sort);
-        return `${BASE_PATH}/api/production/${productionId}/approval-items?${params}`;
-      };
-      const response = await fetch(makeUrl());
+        // 整轮续页沿用首批的筛选快照，尤其不能逐页移动相对时间的起点。
+        pageQuery.current = params.toString();
+      }
+      const params = new URLSearchParams(pageQuery.current);
+      if (cursor) params.set("cursor", cursor);
+      const response = await fetch(`${BASE_PATH}/api/production/${productionId}/approval-items?${params}`);
       const data = await response.json().catch(() => ({})) as ApprovalCenterPage & { error?: string };
       if (!response.ok) throw new Error(data.error ?? "审批列表加载失败");
       if (requestSeq !== listRequestSeq.current) return;
-      setItems(data.items);
+      setItems(current => {
+        if (!cursor) return data.items;
+        const seen = new Set(current.map(item => item.id));
+        const added = data.items.filter(item => {
+          if (seen.has(item.id)) return false;
+          seen.add(item.id);
+          return true;
+        });
+        return [...current, ...added];
+      });
+      setNextCursor(data.nextCursor);
+      pagination.current.cursor = data.nextCursor;
       setViewCounts(data.viewCounts);
       setAllTypeCount(data.businessTypeCounts.resource_access + data.businessTypeCounts.expense);
       setTypeCounts(data.businessTypeCounts);
-      setSelection(current => current && current.kind !== "form"
+      if (!cursor) setSelection(current => current && current.kind !== "form"
         && !data.items.some(item => item.id === current.item.id) ? null : current);
     } catch (loadError) {
       if (requestSeq !== listRequestSeq.current) return;
       setListError(loadError instanceof Error ? loadError.message : "审批列表加载失败");
     } finally {
-      if (requestSeq === listRequestSeq.current) setLoading(false);
+      if (requestSeq === listRequestSeq.current) {
+        pagination.current.busy = false;
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   }, [businessType, productionId, query, sort, status, timeRange, view]);
 
   useEffect(() => {
+    setSelection(current => current?.kind === "form" ? current : null);
     void loadItems();
     return () => { listRequestSeq.current += 1; };
   }, [loadItems]);
@@ -381,8 +414,7 @@ export default function ApprovalCenterClient({
   const list = (
     <div className={styles.approvalCenterList} aria-label="审批列表">
       {loading ? <p className={styles.approvalCenterEmpty}>加载中…</p>
-        : listError ? <p className={styles.approvalDetailError} role="alert">{listError}</p>
-          : items.length === 0 ? <p className={styles.approvalCenterEmpty}>{currentEmpty}</p> : items.map(item => (
+        : items.length === 0 && !listError ? <p className={styles.approvalCenterEmpty}>{currentEmpty}</p> : items.map(item => (
             <button key={item.id} type="button" onClick={() => chooseItem(item)}
               aria-current={selection && selection.kind !== "form" && selection.item.id === item.id ? "true" : undefined}>
               <span className={styles.approvalCenterListHeader}>
@@ -393,6 +425,16 @@ export default function ApprovalCenterClient({
               {item.note && <span className={styles.approvalCenterListNote}>{item.note}</span>}
             </button>
           ))}
+      {!loading && <div className={styles.approvalCenterPagination} aria-label="审批列表分页">
+        {listError && <p className={styles.approvalDetailError} role="alert">{listError}</p>}
+        {!listError || items.length > 0 ? <span aria-live="polite">
+          已加载 {items.length} / 共 {viewCounts[view] ?? 0} 条
+        </span> : null}
+        {(nextCursor || listError) ? <button type="button" disabled={loadingMore}
+          onClick={() => void loadItems(nextCursor ?? undefined)}>
+          {loadingMore ? "加载中…" : listError ? "重试加载" : "加载更多"}
+        </button> : items.length > 0 ? <span>已全部加载</span> : null}
+      </div>}
     </div>
   );
 
