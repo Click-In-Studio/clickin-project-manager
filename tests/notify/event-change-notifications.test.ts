@@ -14,10 +14,12 @@ import { dispatchEventPublishNotifications } from "@/lib/notify/notify";
 import { getJobHandlerDef } from "@/lib/job/handlers";
 import { cleanupProduction, makeProduction, shortId } from "../_support/factories";
 
-const OLD_START = "2026-10-10T02:00:00.000Z";
-const OLD_END = "2026-10-10T04:00:00.000Z";
-const NEW_START = "2026-10-10T03:00:00.000Z";
-const NEW_END = "2026-10-10T05:00:00.000Z";
+// 使用未来活动，避免真实读取路径将已过期的 published 活动自动完成。
+const EVENT_START_MS = Date.now() + 24 * 60 * 60_000;
+const OLD_START = new Date(EVENT_START_MS).toISOString();
+const OLD_END = new Date(EVENT_START_MS + 2 * 60 * 60_000).toISOString();
+const NEW_START = new Date(EVENT_START_MS + 60 * 60_000).toISOString();
+const NEW_END = new Date(EVENT_START_MS + 3 * 60 * 60_000).toISOString();
 
 let prodId: string;
 let ownerId: string;
