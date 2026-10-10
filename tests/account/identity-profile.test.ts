@@ -29,8 +29,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await getPool().query("DELETE FROM app_user WHERE id = $1", [userId]).catch(() => {});
+  // 先清掉引用创建者的 Q 表，再删除账号及其档案、身份。
   await cleanupProduction(prodId).catch(() => {});
+  await getPool().query("DELETE FROM app_user WHERE id = $1", [userId]);
 });
 
 describe("成员列表：无 feishu_user 行不丢行", () => {
