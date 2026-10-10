@@ -13,7 +13,6 @@
     "db:check": "tsx scripts/db-check.ts",
     "changelog:release": "tsx scripts/changelog-release.ts",
     "test": "vitest run",
-    "test:ui": "vitest run --config vitest.ui.config.ts",
     "test:markers": "tsx tests/script/marker-transitions.ts",
     "test:markers:db": "tsx tests/script/marker-db-integration.ts",
     "test:selection": "tsx tests/script/script-selection.ts",

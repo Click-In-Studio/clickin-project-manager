@@ -1,5 +1,6 @@
 import { faker } from "@faker-js/faker";
-import { expect } from "vitest";
+import { afterEach, beforeEach, expect, vi } from "vitest";
+import { createReactWarningCollector } from "./react-warning";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -47,4 +48,23 @@ if (testPathAtLoad) {
     "[tests/setup] testPath 在 setup 加载时不可用：faker 退化为 run 级共享种子，跨文件 id 序列将重叠",
   );
   faker.seed(seed);
+}
+
+// afterEach 再裁决：在 console.error 中直接 throw 会被 React 捕获，反而可能假绿。
+if (typeof document !== "undefined") {
+  let collector: ReturnType<typeof createReactWarningCollector>;
+  let errorSpy: { mockRestore(): void };
+  beforeEach(() => {
+    collector = createReactWarningCollector();
+    const originalError = console.error;
+    errorSpy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      collector.record(args);
+      originalError(...args);
+    });
+  });
+  // 默认 afterEach 逆序执行：先让文件内卸载 / 清理结束，再恢复 spy 并裁决。
+  afterEach(() => {
+    errorSpy.mockRestore();
+    collector.check();
+  });
 }
