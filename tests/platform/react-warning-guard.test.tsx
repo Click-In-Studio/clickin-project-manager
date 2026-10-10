@@ -2,6 +2,8 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import path from "node:path";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import type { JsonTestResults } from "vitest/reporters";
 import { describe, expect, it } from "vitest";
 import { createReactWarningCollector } from "../_support/react-warning";
 
@@ -13,6 +15,10 @@ describe("React 错误警告护栏", () => {
     const scratch = realpathSync(mkdtempSync(path.join(os.tmpdir(), "clickin-react-warning-")));
     const fixture = path.join(scratch, "warnings.test.tsx");
     const config = path.join(scratch, "vitest.config.mjs");
+    const reportPath = path.join(scratch, "results.json");
+    const vitestPackagePath = fileURLToPath(import.meta.resolve("vitest/package.json"));
+    const vitestPackage = JSON.parse(readFileSync(vitestPackagePath, "utf8")) as { bin: { vitest: string } };
+    const runner = path.resolve(path.dirname(vitestPackagePath), vitestPackage.bin.vitest);
     try {
       writeFileSync(fixture, `
 import React, { act, useState } from "react";
@@ -44,26 +50,31 @@ it("business-error", () => { console.error("保存失败：网络不可用"); })
       writeFileSync(config, `export default ${JSON.stringify({
         root: scratch,
         resolve: { alias: {
-          "react-dom/client": path.join(root, "node_modules/react-dom/client.js"),
-          react: path.join(root, "node_modules/react"),
-          vitest: path.join(root, "node_modules/vitest/dist/index.js"),
+          "react-dom/client": fileURLToPath(import.meta.resolve("react-dom/client")),
+          react: path.dirname(fileURLToPath(import.meta.resolve("react/package.json"))),
+          vitest: fileURLToPath(import.meta.resolve("vitest")),
         } },
         test: {
           include: [fixture], environment: "jsdom", fileParallelism: false,
           setupFiles: [path.join(root, "tests/_support/setup.ts")],
         },
       })};`);
-      const result = spawnSync(process.execPath, [path.join(root, "node_modules/vitest/vitest.mjs"), "run", "--config", config, "--reporter=verbose"], {
+      const result = spawnSync(process.execPath, [runner, "run", "--config", config, "--reporter=json", "--outputFile", reportPath], {
         cwd: root, encoding: "utf8", timeout: 30_000,
       });
       const output = `${result.stdout}\n${result.stderr}`;
       expect(result.error, output).toBeUndefined();
       expect(result.status, output).toBe(1);
-      expect(output).toContain("4 failed | 1 passed");
-      expect(output).toContain("React 错误警告");
+      const report = JSON.parse(readFileSync(reportPath, "utf8")) as JsonTestResults;
+      expect(report.numFailedTests, output).toBe(4);
+      expect(report.numPassedTests, output).toBe(1);
+      const assertions = report.testResults.flatMap(test => test.assertionResults);
       for (const name of ["missing-key", "uncontrolled-controlled", "controlled-uncontrolled", "render-update"]) {
-        expect(output, name).toContain(`> ${name}\nError: React 错误警告`);
+        const assertion = assertions.find(test => test.title === name);
+        expect(assertion?.status, output).toBe("failed");
+        expect(assertion?.failureMessages?.join("\n"), name).toContain("React 错误警告");
       }
+      expect(assertions.find(test => test.title === "business-error")?.status).toBe("passed");
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }

@@ -62,6 +62,7 @@ if (typeof document !== "undefined") {
       originalError(...args);
     });
   });
+  // 默认 afterEach 逆序执行：先让文件内卸载 / 清理结束，再恢复 spy 并裁决。
   afterEach(() => {
     errorSpy.mockRestore();
     collector.check();
