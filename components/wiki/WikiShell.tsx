@@ -26,6 +26,8 @@ import { aiTargetForNode } from "@/lib/node/ai-target";
 import { treeMenuItems, type TreeMenuKey, type AssetTreeActions } from "@/lib/node/tree-menu";
 import NavigationIcon from "@/components/shell/app-shell/NavigationIcon";
 
+import WikiRecentVisits from "@/components/wiki/WikiRecentVisits";
+
 type DropZone = "before" | "after" | "inside";
 
 type FlatNode = { item: NodeEntry; depth: number; hasChildren: boolean };
@@ -39,6 +41,7 @@ export default function WikiShell({
   canCreate,
   selectedId,
   navigationBasePath,
+  recentWikiId,
   rootParentId,
   rootAnchor,
   assetActions = {},
@@ -54,6 +57,8 @@ export default function WikiShell({
   selectedId?: string;
   /** Optional route namespace for a scoped wiki workspace. API paths stay unchanged. */
   navigationBasePath?: string;
+  /** 正文已过阅读门后传入 canonical wiki id；只供云文档最近访问使用。 */
+  recentWikiId?: string;
   /** Parent（node id）used when this shell presents a subtree as its visual root. */
   rootParentId?: string;
   /** 根锚点尚未懒建时的落位声明——服务端过完 create 门后解析成真正的 parentId。 */
@@ -652,6 +657,10 @@ export default function WikiShell({
             className="w-full rounded-lg border border-zinc-200 px-2.5 py-1.5 text-sm outline-none focus:border-zinc-400"
           />
         </div>
+        {!navigationBasePath && <WikiRecentVisits
+          key={`${productionId}:${selectedId ?? ""}`} productionId={productionId}
+          currentWikiId={recentWikiId} onNavigate={() => setMobileTreeOpen(false)}
+        />}
         {canCreate && (
           <div className="flex border-b border-zinc-200 bg-zinc-50/40">
             <button

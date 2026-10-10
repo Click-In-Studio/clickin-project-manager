@@ -146,7 +146,7 @@ export default async function WikiDocPage({ params }: { params: Promise<{ id: st
   return (
     <>
       <div style={{ padding: "16px clamp(12px, 1.8vw, 28px) 48px", minHeight: "100vh", background: "var(--paper)" }}>
-        <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} selectedId={wikiId} assetActions={assetActions}>
+        <WikiShell productionId={productionId} nodes={nodes} canCreate={canCreate} selectedId={wikiId} recentWikiId={docId} assetActions={assetActions}>
           <WikiDocClient
             productionId={productionId}
             wiki={wiki}
