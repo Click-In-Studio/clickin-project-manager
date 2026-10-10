@@ -17,7 +17,7 @@ beforeEach(() => {
   container = document.createElement("div"); document.body.append(container);
   root = createRoot(container);
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); fetchMock.mockReset(); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); fetchMock.mockReset(); });
 async function render(currentWikiId?: string, onNavigate = vi.fn()) {
   await act(async () => root.render(<WikiRecentVisits productionId="p1" currentWikiId={currentWikiId} onNavigate={onNavigate} />));
 }
@@ -71,4 +71,43 @@ describe("云文档最近访问", () => {
     await act(async () => resolveOld(response([item(1)])));
     expect(container.textContent).toContain("文档 2"); expect(container.textContent).not.toContain("文档 1");
   });
+  it("后台打开正文先不记录，首次可见只尝试一次", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    fetchMock.mockImplementation((_url, opts) => Promise.resolve(opts?.method === "POST" ? new Response(null, { status: 503 }) : response([item(2)])));
+    await render(id(1));
+    expect(fetchMock.mock.calls.filter(([, opts]) => opts?.method === "POST")).toHaveLength(0);
+    visibility.mockReturnValue("visible");
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    expect(fetchMock.mock.calls.filter(([, opts]) => opts?.method === "POST")).toHaveLength(1);
+  });
+  it("仅可见性恢复及 BFCache 返回都会重新读取其他设备的历史", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    fetchMock.mockResolvedValueOnce(response([item(1)])); await render();
+    visibility.mockReturnValue("hidden");
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    fetchMock.mockResolvedValueOnce(response([item(2)]));
+    visibility.mockReturnValue("visible");
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    expect(container.textContent).toContain("文档 2");
+    fetchMock.mockResolvedValueOnce(response([item(3)]));
+    await act(async () => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+    expect(container.textContent).toContain("文档 3");
+  });
+  it("上传结果未知时不声称漏记，恢复网络、焦点和重试列表均不重传", async () => {
+    fetchMock.mockImplementation((_url, opts) => opts?.method === "POST"
+      ? Promise.reject(new DOMException("timeout", "TimeoutError")) : Promise.resolve(response([], 503)));
+    await render(id(1));
+    expect(container.textContent).toContain("本次访问记录未能确认");
+    fetchMock.mockImplementation((_url, opts) => Promise.resolve(opts?.method === "POST" ? new Response() : response([item(2)])));
+    await act(async () => Array.from(container.querySelectorAll("button")).find(b => b.textContent === "重试")!.click());
+    await act(async () => {
+      window.dispatchEvent(new Event("online")); window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+    expect(fetchMock.mock.calls.filter(([, opts]) => opts?.method === "POST")).toHaveLength(1);
+    expect(container.textContent).toContain("文档 2");
+  });
+
 });
