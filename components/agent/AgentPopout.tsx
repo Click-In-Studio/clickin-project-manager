@@ -11,7 +11,7 @@ import {
   type QuestionItem,
   type StreamLine,
 } from "@/lib/agent/chat/stream-reducer";
-import { parseSessionIdentity } from "@/lib/agent/tools/session-identity";
+import { parseSessionIdentity } from "@/lib/agent/tools/session-identity-parse";
 import { buildUiContextMessage } from "@/lib/agent/agent-ui-context";
 import { getScriptFocus, getServerScriptFocus, subscribeScriptFocus } from "@/lib/script/script-focus";
 import { derivePageKey, pageLabelFor, pageSuggestionsFor } from "@/lib/agent/agent-page-context";

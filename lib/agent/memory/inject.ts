@@ -4,7 +4,7 @@
 
 import { buildUserContextMarkdown } from "@/lib/agent/tools/user-context";
 import { buildProductionContextMarkdown } from "@/lib/agent/tools/production-context";
-import { parseSessionIdentity } from "@/lib/agent/tools/session-identity";
+import { parseSessionIdentity } from "@/lib/agent/tools/session-identity-parse";
 import { buildInstructionsBlock } from "@/lib/agent/agent-instructions";
 import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
 import { readMemory, readRecentRuns } from "./store";

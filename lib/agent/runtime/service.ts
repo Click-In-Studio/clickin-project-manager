@@ -12,7 +12,7 @@
 // ——路由的所有权判定、前端持有的 key、localStorage 记忆全部不用改。
 
 import { getPool } from "@/lib/pg";
-import { parseSessionIdentity } from "@/lib/agent/tools/session-identity";
+import { parseSessionIdentity } from "@/lib/agent/tools/session-identity-parse";
 import { buildInjectContext } from "@/lib/agent/memory/inject";
 import { appendRunRecord } from "@/lib/agent/memory/store";
 import { attachmentIdsFromContext, attachTrustedAttachmentContext, stripUiContext } from "@/lib/agent/agent-ui-context";

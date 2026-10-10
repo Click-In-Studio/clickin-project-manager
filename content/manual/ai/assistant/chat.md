@@ -7,7 +7,7 @@ who: 所有成员（项目会话需要专业档项目）
 tier: all
 platform: [desktop, mobile]
 related: [ai/assistant/what-it-is, ai/skills/skills, ai/automation/schedules]
-updated: 2026-10-09
+updated: 2026-10-10
 ---
 
 ## 这是什么
@@ -27,7 +27,7 @@ updated: 2026-10-09
 - **个人**：项目外打开就是它。能查你自己的日程、任务、通知、参与的项目，管你的定时任务和个人指令。
 - **本项目**：在专业档项目里打开。多了这个项目的剧本、构作、文档库、人员、里程碑、通知。
 
-下拉切换，两边的对话历史分开存。
+通过下拉菜单切换会话，个人会话与本项目会话的历史记录分开保存。
 
 ### 附带上下文
 

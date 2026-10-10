@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 import { getPool } from "@/lib/pg";
-import { parseSessionIdentity } from "@/lib/agent/tools/session-identity";
+import { parseSessionIdentity } from "@/lib/agent/tools/session-identity-parse";
 import { newAttachmentId, newAttachmentObjectId } from "@/lib/agent/runtime/ids";
 import { deleteR2Object, putR2Object } from "@/lib/r2";
 

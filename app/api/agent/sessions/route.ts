@@ -5,7 +5,8 @@ import { listMyProductionsWithRoles } from "@/lib/production/production-db";
 import { getUserProfile } from "@/lib/account/user-db";
 import { requireProductionFeature } from "@/lib/account/plan";
 import { ADMIN_PANEL_NODE_PREFIXES } from "@/lib/perm/permissions";
-import { PRODUCTION_ID_RE, createNewSessionKey } from "@/lib/agent/tools/session-identity";
+import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
+import { PRODUCTION_ID_RE } from "@/lib/agent/tools/session-identity-parse";
 import { listSessions } from "@/lib/agent/runtime/client";
 
 export const runtime = "nodejs";

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUser, requireOwnership } from "@/lib/agent/chat/http";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { requireProductionFeature } from "@/lib/account/plan";
-import { parseSessionIdentity } from "@/lib/agent/tools/session-identity";
+import { parseSessionIdentity } from "@/lib/agent/tools/session-identity-parse";
 import { rootSessionIdentity } from "./session-runtime-db";
 
 /** 子任务不签发新权限，所有查看/停止入口都校验主会话所有权与当前制作成员资格。 */

@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireUser, requireOwnership, toErrorResponse } from "@/lib/agent/chat/http";
 import { getPool } from "@/lib/pg";
-import { parseSessionIdentity } from "@/lib/agent/tools/session-identity";
+import { parseSessionIdentity } from "@/lib/agent/tools/session-identity-parse";
 
 // 供确认卡「查看详情」modal 按 toolCallId 拉取剧本写提议的全量预览（卡片
 // description 硬上限 512 字符装不下逐块 diff 与方言全文）。
