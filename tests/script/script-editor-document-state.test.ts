@@ -123,6 +123,7 @@ describe("编辑器正文与保存依据的共同维护", () => {
     initial.characters = [{ id: "char", name: "old", isAggregate: false }];
     initial.scenes = [{ id: "scene", name: "old", number: "1", parentId: null }];
     const document = new ScriptDocument(initial);
+    expect(document.getSnapshot().sceneDetails.map(scene => scene.id)).toEqual(["scene"]);
     document.editCharacters(rows => rows.map(row => ({ ...row, name: "local" })));
     document.editStructure({ ...document.read(), scenes: initial.scenes.map(row => ({ ...row, name: "local" })) });
     const before = document.prepareSave(1)!;

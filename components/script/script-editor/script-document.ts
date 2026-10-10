@@ -53,7 +53,7 @@ export class ScriptDocument {
     this.baseline = bootstrap ? state : null;
     this.baselineTags = tagsToMap(bootstrap?.window.tags ?? []);
     this.snapshot = this.derive({
-      ...state, tags: this.baselineTags, tagGroups: bootstrap?.tagGroups ?? [], sceneDetails: [],
+      ...state, tags: this.baselineTags, tagGroups: bootstrap?.tagGroups ?? [], sceneDetails: syncSceneDetailsWithScenes([], state.scenes),
       loadedIds: new Set(bootstrap?.window.blocks.map(block => block.id) ?? blocks.map(block => block.id)),
       manifestIds: new Set(bootstrap?.manifest.map(block => block.id) ?? []),
       orderRevision: bootstrap?.orderRevision ?? "", serverPageMap: bootstrap?.pageMap ?? null,
