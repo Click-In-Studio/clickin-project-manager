@@ -462,7 +462,8 @@ export default function WikiDocClient({
   const outline = useMemo(() => extractWikiOutline(body), [body]);
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-3 xl:flex-row xl:items-start">
+    <div className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-start">
+      <WikiOutline items={outline} contentRef={contentRef} />
       <div className={`${styles.document} min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white flex flex-col`}>
       {/* 标题区 */}
       <header className={styles.header}>
@@ -801,7 +802,6 @@ export default function WikiDocClient({
         </AdminModal>
       )}
       </div>
-      <WikiOutline items={outline} contentRef={contentRef} />
     </div>
   );
 }

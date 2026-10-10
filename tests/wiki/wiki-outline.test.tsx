@@ -57,6 +57,8 @@ describe("云文档目录提取", () => {
       { id: "c", top: 260 },
     ])).toBe("b");
     expect(activeWikiOutlineId([{ id: "a", top: 300 }])).toBe("a");
+    expect(activeWikiOutlineId([{ id: "a", top: -200 }, { id: "b", top: 88.15 }], 88)).toBe("b");
+    expect(activeWikiOutlineId([{ id: "a", top: -200 }, { id: "b", top: 90 }], 88)).toBe("a");
   });
 });
 
@@ -97,7 +99,7 @@ describe("云文档目录交互", () => {
     expect(content.querySelector("h1")?.id).toBe("doc-heading-旧标题");
     const outlineNav = host.querySelector<HTMLElement>('nav[aria-label="当前文档目录"]')!;
     act(() => outlineNav.querySelector<HTMLButtonElement>("button")!.click());
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "instant", block: "start" });
 
     content.innerHTML = "<h1>新标题</h1><h2>细节</h2>";
     const next = extractWikiOutline("# 新标题\n## 细节");
@@ -110,6 +112,7 @@ describe("云文档目录交互", () => {
     const source = document.createElement("textarea");
     source.dataset.wikiSourceEditor = "";
     source.value = "开头\n## **排练** [计划](https://example.com) ##\n正文";
+    const unsavedValue = source.value;
     content.append(source);
     const contentRef = createRef<HTMLElement>();
     contentRef.current = content;
@@ -118,28 +121,67 @@ describe("云文档目录交互", () => {
 
     const outlineNav = host.querySelector<HTMLElement>('nav[aria-label="当前文档目录"]')!;
     act(() => outlineNav.querySelector<HTMLButtonElement>("button")!.click());
+    expect(source.value).toBe(unsavedValue);
     expect(source.selectionStart).toBe(items[0].offset);
     expect(source.selectionEnd).toBe(items[0].endOffset);
     expect(source.value.slice(source.selectionStart, source.selectionEnd)).toBe("**排练** [计划](https://example.com)");
   });
 
-  it("手机目录抽屉选择标题后关闭，桌面目录可收起并保留窄入口", () => {
+  it("编辑态跳转不回写编辑器标题 DOM，也不改变未保存文字", () => {
+    content.innerHTML = '<div contenteditable="true"><h1>未保存标题</h1><p>未保存正文</p></div>';
+    const contentRef = createRef<HTMLElement>();
+    contentRef.current = content;
+    const before = content.innerHTML;
+    act(() => root.render(<WikiOutline items={extractWikiOutline("# 未保存标题")} contentRef={contentRef} />));
+    act(() => host.querySelector<HTMLButtonElement>('nav button')!.click());
+    expect(content.innerHTML).toBe(before);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "instant", block: "start" });
+  });
+
+  it("无标题展示提示，长文档完整保留长标题与层级", () => {
+    const contentRef = createRef<HTMLElement>();
+    contentRef.current = content;
+    act(() => root.render(<WikiOutline items={[]} contentRef={contentRef} />));
+    expect(host.querySelector('nav')?.textContent).toContain("添加一级、二级或三级标题");
+    const longTitle = "很长的标题".repeat(30);
+    const items = extractWikiOutline(Array.from({ length: 100 }, (_, index) => `### ${index} ${longTitle}`).join("\n"));
+    act(() => root.render(<WikiOutline items={items} contentRef={contentRef} />));
+    const buttons = host.querySelectorAll<HTMLButtonElement>('nav button');
+    expect(buttons).toHaveLength(100);
+    expect(buttons[99].textContent?.trim()).toBe(`99 ${longTitle}`);
+    expect(buttons[99].title).toBe(`99 ${longTitle}`);
+  });
+
+  it("目录跳转保持展开，Escape 收起并把焦点交还入口", () => {
     content.innerHTML = "<h1>总览</h1>";
     const contentRef = createRef<HTMLElement>();
     contentRef.current = content;
     act(() => root.render(<WikiOutline items={extractWikiOutline("# 总览")} contentRef={contentRef} />));
+    const entry = host.querySelector<HTMLButtonElement>('button[aria-label="展开目录"]')!;
+    const panel = host.querySelector<HTMLElement>('aside')!;
+    expect(panel.hidden).toBe(true);
+    act(() => entry.click());
+    const heading = panel.querySelector<HTMLButtonElement>('nav button')!;
+    act(() => heading.click());
+    expect(panel.hidden).toBe(false);
+    expect(entry.getAttribute("aria-expanded")).toBe("true");
+    act(() => heading.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(panel.hidden).toBe(true);
+    expect(document.activeElement).toBe(entry);
+  });
 
-    const openMobile = host.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')!;
-    act(() => openMobile.click());
-    expect(host.querySelector('button[aria-label="关闭目录"]')).not.toBeNull();
-    const mobileAside = host.querySelector<HTMLElement>("aside.fixed")!;
-    const mobileNav = mobileAside.querySelector<HTMLElement>('nav[aria-label="当前文档目录"]')!;
-    act(() => mobileNav.querySelector<HTMLButtonElement>("button")!.click());
-    expect(openMobile.getAttribute("aria-expanded")).toBe("false");
-    expect(mobileAside.className).toContain("translate-x-[110%]");
-
-    const collapse = host.querySelector<HTMLButtonElement>('button[aria-label="收起目录"]')!;
-    act(() => collapse.click());
-    expect(host.querySelector('button[aria-label="展开目录"]')).not.toBeNull();
+  it("模式切换后的新 DOM 仍绑定重复标题，并只滚动正文容器", async () => {
+    host.id = "workspace-scroll";
+    const scrollTo = vi.fn();
+    host.scrollTo = scrollTo;
+    const contentRef = createRef<HTMLElement>();
+    contentRef.current = content;
+    const items = extractWikiOutline("# 同名\n## 同名");
+    act(() => root.render(<WikiOutline items={items} contentRef={contentRef} />));
+    await act(async () => { content.innerHTML = "<h1>同名</h1><h2>同名</h2>"; });
+    expect(content.querySelector('h2')?.id).toBe(items[1].id);
+    act(() => host.querySelector<HTMLButtonElement>('nav button:nth-child(2)')!.click());
+    expect(scrollTo).toHaveBeenCalledWith({ top: -24, behavior: "instant" });
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 });

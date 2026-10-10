@@ -92,7 +92,8 @@ export function activeWikiOutlineId(
   if (headings.length === 0) return null;
   let active = headings[0].id;
   for (const heading of headings) {
-    if (heading.top > readingLine) break;
+    // 浏览器滚动位置会量化为亚像素，跳转后的标题可能略高于阅读线。
+    if (heading.top > readingLine + 1) break;
     active = heading.id;
   }
   return active;
