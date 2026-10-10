@@ -28,8 +28,9 @@ describe("ScriptEditor 个人只读门接线", () => {
   });
 
   it("切只读时持续冲刷保存期间的新输入，不能只验证请求前的旧快照", () => {
-    expect(editor).toContain("flushLatestScriptState(readCurrent, pushPatchRef.current");
-    expect(editor).toContain("diffState(syncedStateRef.current, latest, 0)");
+    expect(editor).toContain("const flushPendingPatch = sync.flush;");
+    expect(editor).toContain("flushPendingPatchRef.current = flushPendingPatch");
+    expect(editor).toContain("useScriptSync(script, {");
   });
 
   it("从编辑进入排练前也必须冲刷待保存内容，失败时保持原模式", () => {

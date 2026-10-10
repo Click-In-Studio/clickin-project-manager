@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useRef, useLayoutEffect, useCallback } from "react";
+import { useState, useRef, useLayoutEffect, useCallback, useEffect } from "react";
 import type { Block } from "@/lib/script/script-types";
 
 /**
  * 重排锁：拖拽落下到块序提交期间锁住重排相关交互，提交后下一帧解锁；
  * 加一条 1.8s 自动消失的提示文案。从 ScriptEditor 主函数体原样搬出（#487 S6）。
- * frame / timer 的 ref 一并交出：离开页面与卸载时主体要统一取消。
+ * 锁与计时资源由这里释放，离页调用 stop 即可。
  */
 export function useReorderLock({ blocks }: { blocks: Block[] }) {
   const [isReorderLocked, setIsReorderLocked] = useState(false);
@@ -52,8 +52,17 @@ export function useReorderLock({ blocks }: { blocks: Block[] }) {
     }, 1800);
   }, []);
 
+  const stop = useCallback(() => {
+    if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
+    if (reorderNoticeTimer.current !== null) clearTimeout(reorderNoticeTimer.current);
+    reorderUnlockFrame.current = null;
+    reorderNoticeTimer.current = null;
+    pendingReorderUnlockRef.current = false;
+  }, []);
+  useEffect(() => stop, [stop]);
+
   return {
-    isReorderLocked, reorderNotice, isReorderLockedRef, reorderUnlockFrame, reorderNoticeTimer,
-    lockReorder, unlockReorder, unlockReorderAfterCommit, showReorderNotice,
+    isReorderLocked, reorderNotice, isReorderLockedRef,
+    lockReorder, unlockReorder, unlockReorderAfterCommit, showReorderNotice, stop,
   };
 }

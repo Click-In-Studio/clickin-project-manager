@@ -95,16 +95,18 @@ describe("真实 ScriptEditor 接线守卫", () => {
   });
   it("恢复先等待在途保存，带旧依据提交，再丢弃旧工作态重载窗口", () => {
     const reconcile = editor.slice(editor.indexOf("reconcile: async () =>"), editor.indexOf("useLayoutEffect(() => {\n    recoveryTriggerRef"));
-    expect(reconcile.indexOf("syncIdleWaitersRef.current.push")).toBeLessThan(reconcile.indexOf("await pushPatchRef.current"));
-    expect(reconcile.indexOf("await pushPatchRef.current")).toBeLessThan(reconcile.indexOf("await fetchScriptWindowBootstrap"));
-    expect(reconcile).toContain("syncedStateRef.current = null;");
-    expect(reconcile).toContain("serverSeqRef.current = 0;");
-    expect(editor).toContain("buildScriptPatchBasis(syncedStateRef.current, patch, syncedTagMap)");
-    expect(editor).toContain("if (recoverySuspendedRef.current && !recovering) return false;");
+    expect(reconcile.indexOf("await sync.waitForIdle()")).toBeGreaterThan(-1);
+    expect(reconcile.indexOf("await sync.waitForIdle()")).toBeLessThan(reconcile.indexOf("await sync.flush(true)"));
+    expect(reconcile.indexOf("await sync.flush(true)")).toBeLessThan(reconcile.indexOf("await fetchScriptWindowBootstrap"));
+    expect(reconcile).toContain("applyWindowBootstrap(bootstrap, true)");
+    expect(reconcile).toContain("sync.resetAfterRecovery()");
+    expect(reconcile).toContain("if (sync.isStopped()) return");
+    expect(editor).toContain("{ ...batch.patch, basis: batch.basis }");
   });
-  it("正常窗口读取不把脏块旧基线替换成远端新值", () => {
-    expect(editor).toContain("nextBaseline[nextIndex] = oldBaseline;");
-    expect(editor).toContain("if (!locallyDirty) {\n        nextBaselineBlocks[index] = serverBlock;");
+  it("正常窗口与骨架刷新都交给正文维护者，组件不单独改保存基线", () => {
+    expect(editor).toContain("script.applyBootstrap(bootstrap, replace)");
+    expect(editor).toContain("script.mergeWindow(body)");
+    expect(editor).not.toMatch(/syncedStateRef|syncedBlockTagMapRef|loadedBlockIdsRef/);
   });
   it("重连、失败与冲突有明确提示", () => {
     expect(editor).toContain('"重连失败，暂时无法编辑" : "重连中…"');
