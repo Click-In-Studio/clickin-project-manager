@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { productionIdOfSessionKey } from "@/lib/agent/tools/session-identity";
+import { productionIdOfSessionKey } from "@/lib/agent/tools/session-identity-parse";
 import { requireProductionFeature } from "@/lib/account/plan";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent/chat/http";
 import { neutralizeInboundMessage } from "@/lib/agent/agent-ui-context";

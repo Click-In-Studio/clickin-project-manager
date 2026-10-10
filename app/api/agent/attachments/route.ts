@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent/chat/http";
-import { productionIdOfSessionKey } from "@/lib/agent/tools/session-identity";
+import { productionIdOfSessionKey } from "@/lib/agent/tools/session-identity-parse";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { requireProductionFeature } from "@/lib/account/plan";
 import {
