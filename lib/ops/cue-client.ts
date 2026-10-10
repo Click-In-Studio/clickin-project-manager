@@ -1,12 +1,13 @@
 // cue 页的浏览器端 API 调用（#487 C4）。CuePage 及其族目录里所有打 cue 域端点的 fetch 都收在
 // 这里：组件只拿整形好的结果，不碰 URL / method / 响应体。每个函数的成功 / 失败语义与搬出
-// 前逐条一致——`null` / `false` / `[]` 各表示原来那处 `res.ok` 为假的分支。
+// 前的调用契约一致；Cue 对账的失败用 null，与成功返回空表区分。
 //
 // 跨域端点（/api/me、mention-users、contacts、assets/*/mounts）不在这里：它们属于各自的域，
 // 等那些域有自己的 client 再搬。
 import { BASE_PATH } from "@/lib/base-path";
 import type { Cue, CueAnchor } from "@/lib/ops/cue-types";
 import type { CueListGrant, CueListDeptAccess } from "@/lib/ops/cue-list-types";
+import type { CueFieldPatch, CuePatchBasis } from "./cue-edit-types";
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 
@@ -23,30 +24,28 @@ function cueUrl(productionId: string, listId: string, cueId: string, versionId: 
 
 // ── cue CRUD ─────────────────────────────────────────────────────────────────
 
-export type CueFieldPatch = {
-  number?: string; name?: string; content?: string; warning?: boolean; start?: CueAnchor; end?: CueAnchor;
-};
-
 /** PATCH 单条 cue。409 是权限 / 冲突拒绝，带服务端的 error 文案回去给调用方提示。 */
 export async function patchCue(
-  productionId: string, listId: string, cueId: string, versionId: string | null | undefined, fields: CueFieldPatch,
-): Promise<{ ok: true } | { ok: false; status: number; error?: string }> {
-  const res = await fetch(cueUrl(productionId, listId, cueId, versionId), {
-    method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify(fields),
-  });
-  if (res.ok) return { ok: true };
-  if (res.status === 409) {
-    const body = await res.json() as { error: string };
-    return { ok: false, status: 409, error: body.error };
-  }
-  return { ok: false, status: res.status };
+  productionId: string, listId: string, cueId: string, versionId: string | null | undefined, fields: CueFieldPatch, basis: CuePatchBasis,
+): Promise<{ ok: true; cue: Cue } | { ok: false; status: number; error?: string }> {
+  try {
+    const res = await fetch(cueUrl(productionId, listId, cueId, versionId), {
+      method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify({ ...fields, basis }),
+    });
+    if (res.ok) return { ok: true, cue: (await res.json()).cue as Cue };
+    if (res.status === 409) {
+      const body = await res.json() as { error: string };
+      return { ok: false, status: 409, error: body.error };
+    }
+    return { ok: false, status: res.status };
+  } catch { return { ok: false, status: 0 }; }
 }
 
-/** 一张表的全部 cue；失败按空表处理（重拉是对账，不阻塞）。 */
-export async function fetchListCues(productionId: string, listId: string, versionId: string | null | undefined): Promise<Cue[]> {
-  return fetch(cuesUrl(productionId, listId, versionId))
-    .then(r => r.ok ? (r.json() as Promise<Cue[]>) : [])
-    .catch(() => [] as Cue[]);
+/** 成功空表与读取失败必须区分；失败不能替换最后一次成功数据。 */
+export async function fetchListCues(productionId: string, listId: string, versionId: string | null | undefined, signal?: AbortSignal): Promise<Cue[] | null> {
+  return fetch(cuesUrl(productionId, listId, versionId), { signal })
+    .then(r => r.ok ? (r.json() as Promise<Cue[]>) : null)
+    .catch(() => null);
 }
 
 /** 新建一条 cue；服务端回整张表的 cue 列表（编号可能重排）。失败为 null。 */

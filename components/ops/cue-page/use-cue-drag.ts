@@ -9,8 +9,9 @@ import type { DragStateRef, DragType } from "./types";
  * cue 芯片 / 标记的鼠标拖拽：按下记起点，超过阈值后按鼠标位置解析锚点并实时预览，
  * 松手按拖拽类型（move / expand / 两端把手）落库。从 CuePage 主函数体原样搬出（#487 C3）。
  */
-export function useCueDrag({ cues, blockIndexMapRef, updateCueFieldRef }: {
+export function useCueDrag({ cues, blockIndexMapRef, updateCueFieldRef, editingCue }: {
   cues: Cue[];
+  editingCue?: (cue: Cue, editing: boolean) => void;
   blockIndexMapRef: MutableRefObject<Map<string, number>>;
   updateCueFieldRef: MutableRefObject<(
     cue: Cue,
@@ -29,6 +30,9 @@ export function useCueDrag({ cues, blockIndexMapRef, updateCueFieldRef }: {
   // Stable refs for use inside event handlers (avoid stale closures in global listeners)
   const cuesRef = useRef(cues);
   useEffect(() => { cuesRef.current = cues; }, [cues]);
+  const originalCueRef = useRef<Cue | null>(null);
+  const editingCueRef = useRef(editingCue);
+  editingCueRef.current = editingCue;
   // Suppresses the browser click event that fires immediately after a completed drag mouseup.
   const justDraggedRef = useRef(false);
 
@@ -72,6 +76,8 @@ export function useCueDrag({ cues, blockIndexMapRef, updateCueFieldRef }: {
     // End handle marks use "${cueId}:end" to avoid guide-line querySelector collision;
     // strip the suffix here to get the real cue id (same pattern as handleMarkClick).
     const realCueId = cueId.endsWith(":end") ? cueId.slice(0, -4) : cueId;
+    originalCueRef.current = cuesRef.current.find(cue => cue.id === realCueId) ?? null;
+    if (originalCueRef.current) editingCueRef.current?.(originalCueRef.current, true);
     dragStateRef.current = {
       active: true, dragType, cueId: realCueId,
       startX: e.clientX, startY: e.clientY,
@@ -110,9 +116,11 @@ export function useCueDrag({ cues, blockIndexMapRef, updateCueFieldRef }: {
       ds.originalAnchor = null;
       document.body.style.cursor = "";
       setDragLive(null);
+      const cue = originalCueRef.current;
+      originalCueRef.current = null;
+      if (cue) editingCueRef.current?.(cue, false);
       if (!wasThreshold || !anchor) return;
       justDraggedRef.current = true; // suppress the browser click that fires right after mouseup
-      const cue = cuesRef.current.find(c => c.id === ds.cueId);
       if (!cue) return;
       if (ds.dragType === "move") {
         updateCueFieldRef.current(cue, { start: anchor, end: anchor, warning: false });
@@ -134,6 +142,7 @@ export function useCueDrag({ cues, blockIndexMapRef, updateCueFieldRef }: {
     return () => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
+      if (originalCueRef.current) editingCueRef.current?.(originalCueRef.current, false);
     };
   }, [anchorFromPoint, blockIndexMapRef, updateCueFieldRef]);
 

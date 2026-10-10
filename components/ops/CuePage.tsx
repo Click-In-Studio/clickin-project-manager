@@ -22,7 +22,7 @@ import InlineField from "./cue-page/InlineField";
 import ShareModal from "./cue-page/ShareModal";
 import { LIST_COLORS, colorFor } from "./cue-page/colors";
 import type { CueSequenceItem, Props, Selection, CueMark, CuePresence } from "./cue-page/types";
-import { patchCue, fetchListCues, createCue, deleteCueRemote, selfConfirmCueListAccess } from "@/lib/ops/cue-client";
+import { createCue, deleteCueRemote, selfConfirmCueListAccess } from "@/lib/ops/cue-client";
 import { useCueLists } from "./cue-page/use-cue-lists";
 import { useCuePresence } from "./cue-page/use-cue-presence";
 import { useCueComments } from "./cue-page/use-cue-comments";
@@ -30,6 +30,7 @@ import { useCueToolbarMenus } from "./cue-page/use-cue-toolbar-menus";
 import { useCueVirtualWindow } from "./cue-page/use-cue-virtual-window";
 import { useCueDrag } from "./cue-page/use-cue-drag";
 import { useCueGuideLines } from "./cue-page/use-cue-guide-lines";
+import { useCueSync } from "./cue-page/use-cue-sync";
 
 // ─── Comment helpers ─────────────────────────────────────────────────────────
 
@@ -53,10 +54,8 @@ export default function CuePage({
   const versionIdRef = useRef(versionId);
   useEffect(() => {
     versionIdRef.current = versionId;
-    setCues(initialCues);
     setSelection({ kind: "none" });
-  }, [versionId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [cues, setCues] = useState<Cue[]>(initialCues);
+  }, [versionId]);
   const [copiedCue, setCopiedCue] = useState<Cue | null>(null);
   const [showExport, setShowExport] = useState(false);
   const [mobileChipSheetCueId, setMobileChipSheetCueId] = useState<string | null>(null);
@@ -69,8 +68,13 @@ export default function CuePage({
     activeCueList, canShareActive, visibleLists, listColorIndex, canEditActive, canEditCue,
     handleActivateList,
   } = useCueLists({ productionId, cueLists, editableListIds, manageListIds, myUserId });
+  const {
+    cues, saveStates, readFailed, updateCueField, editingCue, scheduleCueRefetch,
+    beginListWrite, replaceListCues, removeCue, retry, discardConflicts,
+  } = useCueSync({ productionId, versionId, initialCues, visibleListIdsRef, activeListIdRef });
+  const hasConflict = [...saveStates.values()].some(status => status === "conflict" || status === "failed");
+  const waitingForNetwork = [...saveStates.values()].some(status => status === "waiting");
   const [selection, setSelection] = useState<Selection>({ kind: "none" });
-  const [savingCueId, setSavingCueId] = useState<string | null>(null);
   const { comments, setComments, activeCommentCueId, setActiveCommentCueId } = useCueComments({ productionId, selection });
   const {
     jumpTarget, setJumpTarget, jumpValue, setJumpValue,
@@ -88,51 +92,13 @@ export default function CuePage({
   // Fetch real name from session (same localStorage key as ScriptEditor)
   // Load cue comments for this production
 
-  // ── updateCueField ────────────────────────────────────────────────────────
-  const updateCueField = useCallback(async (
-    cue: Cue,
-    fields: { number?: string; name?: string; content?: string; warning?: boolean; start?: CueAnchor; end?: CueAnchor }
-  ) => {
-    setSavingCueId(cue.id);
-    try {
-      const res = await patchCue(productionId, cue.cueListId, cue.id, versionIdRef.current, fields);
-      if (res.ok) {
-        setCues(prev => prev.map(c => c.id === cue.id ? { ...c, ...fields } : c));
-      } else if (res.status === 409) {
-        alert(res.error || "修改被拒绝");
-      }
-    } finally {
-      setSavingCueId(null);
-    }
-  }, [productionId]);
-
   const updateCueFieldRef = useRef(updateCueField);
   useEffect(() => { updateCueFieldRef.current = updateCueField; }, [updateCueField]);
 
-  const { dragLive, justDraggedRef, startCueDrag } = useCueDrag({ cues, blockIndexMapRef, updateCueFieldRef });
+  const { dragLive, justDraggedRef, startCueDrag } = useCueDrag({ cues, blockIndexMapRef, updateCueFieldRef, editingCue });
 
   // ── Cue SSE: refetch visible lists when any client mutates cues ───────────
   // 连接受可见性门控（#467）：后台标签不占同源连接名额。
-  const cueRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduleCueRefetch = useCallback(() => {
-    if (cueRefetchTimerRef.current) clearTimeout(cueRefetchTimerRef.current);
-    cueRefetchTimerRef.current = setTimeout(async () => {
-      cueRefetchTimerRef.current = null;
-      const ids = new Set(visibleListIdsRef.current);
-      if (activeListIdRef.current) ids.add(activeListIdRef.current);
-      const listIds = [...ids];
-      const vid = versionIdRef.current;
-      const results = await Promise.all(listIds.map(listId => fetchListCues(productionId, listId, vid)));
-      const fresh = results.flat();
-      setCues(prev => [...prev.filter(c => !ids.has(c.cueListId)), ...fresh]);
-    }, 300);
-  }, [productionId, visibleListIdsRef, activeListIdRef]);
-
-  // debounce timer 的生命周期比单次连接长（连接随可见性开合），挂 ref 由卸载统一清
-  useEffect(() => () => {
-    if (cueRefetchTimerRef.current) clearTimeout(cueRefetchTimerRef.current);
-  }, []);
-
   useVisibleEventSource(
     `${BASE_PATH}/api/production/${productionId}/cue-stream${clientId ? `?cid=${encodeURIComponent(clientId)}` : ""}`,
     {
@@ -304,24 +270,29 @@ export default function CuePage({
     const nums = existing.map(n => parseInt(n, 10)).filter(n => !isNaN(n));
     const next = nums.length ? Math.max(...nums) + 1 : 1;
 
-    const newCues = await createCue(productionId, activeListId, versionIdRef.current, { number: String(next), name: "", content: "", start, end });
+    const finish = beginListWrite(activeListId);
+    let newCues;
+    try {
+      newCues = await createCue(productionId, activeListId, versionIdRef.current, { number: String(next), name: "", content: "", start, end });
+      if (newCues) finish(() => replaceListCues(activeListId, newCues!));
+    } finally { finish(); }
     if (newCues) {
-      setCues(prev => {
-        const withoutList = prev.filter(c => c.cueListId !== activeListId);
-        return [...withoutList, ...newCues];
-      });
       const created = newCues.find(c => anchorEq(c.start, start) && anchorEq(c.end, end));
       if (created) setSelection({ kind: "cue", cueId: created.id });
     }
-  }, [selection, activeListId, canEditActive, cuesByList, productionId]);
+  }, [selection, activeListId, canEditActive, cuesByList, productionId, beginListWrite, replaceListCues]);
 
   // ── Delete cue ────────────────────────────────────────────────────────────
   const deleteCue = useCallback(async (cue: Cue) => {
-    if (await deleteCueRemote(productionId, cue.cueListId, cue.id, versionIdRef.current)) {
-      setCues(prev => prev.filter(c => c.id !== cue.id));
-      setSelection({ kind: "none" });
-    }
-  }, [productionId]);
+    if (saveStates.has(cue.id)) return;
+    const finish = beginListWrite(cue.cueListId);
+    try {
+      if (await deleteCueRemote(productionId, cue.cueListId, cue.id, versionIdRef.current)) {
+        removeCue(cue.id);
+        setSelection({ kind: "none" });
+      }
+    } finally { finish(); }
+  }, [productionId, saveStates, beginListWrite, removeCue]);
 
   const dismissWarning = useCallback(async (cue: Cue) => {
     await updateCueField(cue, { warning: false });
@@ -506,17 +477,18 @@ export default function CuePage({
       const existing = (cuesByList.get(activeListId) ?? []).map(c => c.number);
       const nums = existing.map(n => parseInt(n, 10)).filter(n => !isNaN(n));
       const next = nums.length ? Math.max(...nums) + 1 : 1;
-      const newCues = await createCue(productionId, activeListId, versionIdRef.current, { number: String(next), name: copiedCue.name, content: copiedCue.content, start, end });
+      const finish = beginListWrite(activeListId);
+      let newCues;
+      try {
+        newCues = await createCue(productionId, activeListId, versionIdRef.current, { number: String(next), name: copiedCue.name, content: copiedCue.content, start, end });
+        if (newCues) finish(() => replaceListCues(activeListId, newCues!));
+      } finally { finish(); }
       if (newCues) {
-        setCues(prev => {
-          const withoutList = prev.filter(c => c.cueListId !== activeListId);
-          return [...withoutList, ...newCues];
-        });
         const created = newCues.find(c => anchorEq(c.start, start) && anchorEq(c.end, end));
         if (created) setSelection({ kind: "cue", cueId: created.id });
       }
     };
-  }, [selection, activeListId, canEditActive, copiedCue, cuesByList, productionId]);
+  }, [selection, activeListId, canEditActive, copiedCue, cuesByList, productionId, beginListWrite, replaceListCues]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -580,8 +552,9 @@ export default function CuePage({
                     editable={canEditCue(cue)}
                     presenceUsers={presenceForCue.get(cue.id) ?? []}
                     onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
-                    onCommitNumber={value => updateCueField(cue, { number: value })}
-                    onCommitName={value => updateCueField(cue, { name: value })}
+                    onCommitNumber={(value, basis) => updateCueField(cue, { number: value }, { number: basis })}
+                    onEditingChange={editing => editingCue(cue, editing)}
+                    onCommitName={(value, basis) => updateCueField(cue, { name: value }, { name: basis })}
                     highlighted={highlightedCueId === cue.id}
                     onDragStart={canEditCue(cue) ? (event) => startCueDrag(event, cue.id, "move") : undefined}
                   />
@@ -915,6 +888,18 @@ export default function CuePage({
         )}
       </ProductionTopMenu>
 
+      {(saveStates.size > 0 || readFailed) && (
+        <div role="status" className="flex shrink-0 flex-wrap items-center gap-2 border-t border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-xs text-amber-700"
+          onClick={event => event.stopPropagation()}>
+          <span>{hasConflict ? "Cue 已被修改、删除或无法保存。本地修改未上传，仍保留在当前页面。"
+            : waitingForNetwork ? "等待网络，Cue 修改尚未同步。"
+            : saveStates.size > 0 ? "Cue 修改正在保存…"
+            : "Cue 更新失败，保留上次内容，正在重试。"}</span>
+          {(waitingForNetwork || readFailed) && <button type="button" onClick={retry} className="underline">重试</button>}
+          {hasConflict && <button type="button" onClick={discardConflicts} className="underline">放弃未上传修改并加载线上</button>}
+        </div>
+      )}
+
       {/* ── Jump bar panel ── */}
       {jumpTarget && (
         <div className="shrink-0 border-t border-[var(--line)] bg-[var(--surface)] px-4 py-2 flex items-center gap-3" onClick={e => e.stopPropagation()}>
@@ -1059,8 +1044,9 @@ export default function CuePage({
                                 editable={canEditCue(cue)}
                                 presenceUsers={presenceForCue.get(cue.id) ?? []}
                                 onSelect={() => setSelection({ kind: "cue", cueId: cue.id })}
-                                onCommitNumber={v => updateCueField(cue, { number: v })}
-                                onCommitName={v => updateCueField(cue, { name: v })}
+                                onCommitNumber={(v, basis) => updateCueField(cue, { number: v }, { number: basis })}
+                                onEditingChange={editing => editingCue(cue, editing)}
+                                onCommitName={(v, basis) => updateCueField(cue, { name: v }, { name: basis })}
                                 highlighted={highlightedCueId === cue.id}
                                 onDragStart={canEditCue(cue) ? (e) => startCueDrag(e, cue.id, "move") : undefined}
                               />
@@ -1193,21 +1179,21 @@ export default function CuePage({
             )}
             <span className="text-[10px] text-zinc-400 shrink-0">Q#</span>
             {canEdit ? (
-              <InlineField value={selectedCue.number} onCommit={v => updateCueField(selectedCue, { number: v })}
+              <InlineField key={`${selectedCue.id}:number`} value={selectedCue.number} onCommit={(v, basis) => updateCueField(selectedCue, { number: v }, { number: basis })} onEditingChange={editing => editingCue(selectedCue, editing)}
                 placeholder="编号" className="w-14 text-xs border border-zinc-200 rounded px-2 py-1 outline-none focus:border-zinc-400" />
             ) : (
               <span className="w-14 text-xs text-zinc-600 px-2 py-1">{selectedCue.number}</span>
             )}
             <span className="text-[10px] text-zinc-400 shrink-0">名称</span>
             {canEdit ? (
-              <InlineField value={selectedCue.name} onCommit={v => updateCueField(selectedCue, { name: v })}
+              <InlineField key={`${selectedCue.id}:name`} value={selectedCue.name} onCommit={(v, basis) => updateCueField(selectedCue, { name: v }, { name: basis })} onEditingChange={editing => editingCue(selectedCue, editing)}
                 placeholder="—" className="w-32 text-xs border border-zinc-200 rounded px-2 py-1 outline-none focus:border-zinc-400" />
             ) : (
               <span className="w-32 text-xs text-zinc-600 px-2 py-1">{selectedCue.name || "—"}</span>
             )}
             <span className="text-[10px] text-zinc-400 shrink-0">内容</span>
             {canEdit ? (
-              <InlineField value={selectedCue.content} onCommit={v => updateCueField(selectedCue, { content: v })}
+              <InlineField key={`${selectedCue.id}:content`} value={selectedCue.content} onCommit={(v, basis) => updateCueField(selectedCue, { content: v }, { content: basis })} onEditingChange={editing => editingCue(selectedCue, editing)}
                 placeholder="—" className="flex-1 text-xs border border-zinc-200 rounded px-2 py-1 outline-none focus:border-zinc-400" />
             ) : (
               <span className="flex-1 text-xs text-zinc-600 px-2 py-1">{selectedCue.content || "—"}</span>
@@ -1222,13 +1208,13 @@ export default function CuePage({
               {commentCount > 0 ? `评论 (${commentCount})` : "评论"}
             </button>
             {canEdit && selectedCue.warning && (
-              <button onClick={() => dismissWarning(selectedCue)} disabled={savingCueId === selectedCue.id}
+              <button onClick={() => dismissWarning(selectedCue)} disabled={saveStates.has(selectedCue.id)}
                 className="text-[10px] text-amber-500 hover:text-amber-700 underline shrink-0 disabled:opacity-50">
                 清除警告
               </button>
             )}
             {canEdit && (
-              <button onClick={() => deleteCue(selectedCue)}
+              <button onClick={() => deleteCue(selectedCue)} disabled={saveStates.has(selectedCue.id)}
                 className="text-xs text-red-400 hover:text-red-600 transition-colors shrink-0">
                 删除
               </button>
@@ -1260,7 +1246,7 @@ export default function CuePage({
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-zinc-400 w-10 shrink-0">Q#</span>
                   {canEdit ? (
-                    <InlineField value={sheetCue.number} onCommit={v => { updateCueField(sheetCue, { number: v }); }}
+                    <InlineField key={`${sheetCue.id}:number`} value={sheetCue.number} onCommit={(v, basis) => { updateCueField(sheetCue, { number: v }, { number: basis }); }} onEditingChange={editing => editingCue(sheetCue, editing)}
                       placeholder="编号" className="flex-1 text-sm border border-zinc-200 rounded px-3 py-2 outline-none focus:border-zinc-400" />
                   ) : (
                     <span className="flex-1 text-sm text-zinc-700">{sheetCue.number || "—"}</span>
@@ -1269,7 +1255,7 @@ export default function CuePage({
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-zinc-400 w-10 shrink-0">名称</span>
                   {canEdit ? (
-                    <InlineField value={sheetCue.name} onCommit={v => { updateCueField(sheetCue, { name: v }); }}
+                    <InlineField key={`${sheetCue.id}:name`} value={sheetCue.name} onCommit={(v, basis) => { updateCueField(sheetCue, { name: v }, { name: basis }); }} onEditingChange={editing => editingCue(sheetCue, editing)}
                       placeholder="—" className="flex-1 text-sm border border-zinc-200 rounded px-3 py-2 outline-none focus:border-zinc-400" />
                   ) : (
                     <span className="flex-1 text-sm text-zinc-700">{sheetCue.name || "—"}</span>
@@ -1278,7 +1264,7 @@ export default function CuePage({
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-zinc-400 w-10 shrink-0">内容</span>
                   {canEdit ? (
-                    <InlineField value={sheetCue.content} onCommit={v => { updateCueField(sheetCue, { content: v }); }}
+                    <InlineField key={`${sheetCue.id}:content`} value={sheetCue.content} onCommit={(v, basis) => { updateCueField(sheetCue, { content: v }, { content: basis }); }} onEditingChange={editing => editingCue(sheetCue, editing)}
                       placeholder="—" className="flex-1 text-sm border border-zinc-200 rounded px-3 py-2 outline-none focus:border-zinc-400" />
                   ) : (
                     <span className="flex-1 text-sm text-zinc-700">{sheetCue.content || "—"}</span>
@@ -1295,7 +1281,7 @@ export default function CuePage({
                 {canEdit && sheetCue.warning && (
                   <button
                     onClick={() => { dismissWarning(sheetCue); close(); }}
-                    disabled={savingCueId === sheetCue.id}
+                    disabled={saveStates.has(sheetCue.id)}
                     className="w-full px-5 py-3.5 text-left text-[15px] text-amber-500 border-b border-zinc-100 disabled:opacity-50"
                   >
                     清除偏移警告
@@ -1304,6 +1290,7 @@ export default function CuePage({
                 {canEdit && (
                   <button
                     onClick={() => { deleteCue(sheetCue); close(); }}
+                    disabled={saveStates.has(sheetCue.id)}
                     className="w-full px-5 py-3.5 text-left text-[15px] text-red-500"
                   >
                     删除此 Cue

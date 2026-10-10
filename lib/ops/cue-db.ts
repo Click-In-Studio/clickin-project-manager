@@ -16,6 +16,7 @@ import { getPool } from "../pg";
 import type { PoolClient } from "pg";
 import type { Cue, CueAnchor } from "./cue-types";
 import { adjustBlockAnchor, lcsAdjust } from "./cue-types";
+import { conditionCuePatch, CuePatchConflict, type CueFieldPatch, type CuePatchBasis } from "./cue-edit-types";
 
 // After migration: start_block_id/end_block_id are renamed to start_snapshot_id/end_snapshot_id.
 // The row also has start_block_id/end_block_id as computed aliases from the JOIN with script table.
@@ -44,11 +45,11 @@ function rowToCue(r: CueRow): Cue {
 
 // Resolve a CueAnchor to the snapshot_id stored in the DB.
 // snapshot_id 与 block_id 不同名时（遗留多版本数据）需按 version 查 script_version。
-async function anchorToDb(a: CueAnchor, versionId?: string): Promise<{ kind: string; snapshotId: string | null; offset: number | null }> {
+async function anchorToDb(a: CueAnchor, versionId?: string, pool: Pick<PoolClient, "query"> = getPool()): Promise<{ kind: string; snapshotId: string | null; offset: number | null }> {
   if (a.kind === "gap") {
     if (a.afterBlockId === null) return { kind: "gap", snapshotId: null, offset: null };
     if (versionId) {
-      const res = await getPool().query<{ snapshot_id: string }>(
+      const res = await pool.query<{ snapshot_id: string }>(
         "SELECT snapshot_id FROM script_version WHERE block_id = $1 AND version_id = $2 LIMIT 1",
         [a.afterBlockId, versionId]
       );
@@ -57,7 +58,7 @@ async function anchorToDb(a: CueAnchor, versionId?: string): Promise<{ kind: str
     return { kind: "gap", snapshotId: a.afterBlockId, offset: null };
   }
   if (versionId) {
-    const res = await getPool().query<{ snapshot_id: string }>(
+    const res = await pool.query<{ snapshot_id: string }>(
       "SELECT snapshot_id FROM script_version WHERE block_id = $1 AND version_id = $2 LIMIT 1",
       [a.blockId, versionId]
     );
@@ -195,9 +196,15 @@ export async function updateCue(
   fields: { number?: string; name?: string; content?: string; start?: CueAnchor; end?: CueAnchor; warning?: boolean },
   versionId?: string
 ): Promise<void> {
+  await writeCueFields(getPool(), id, cueListId, fields, versionId);
+}
+
+async function writeCueFields(
+  pool: Pick<PoolClient, "query">, id: string, cueListId: string, fields: CueFieldPatch, versionId?: string,
+): Promise<void> {
   // 锚点解析要查库（blockId → snapshotId），先于 UPDATE 做
-  const resolvedStart = fields.start !== undefined ? await anchorToDb(fields.start, versionId) : undefined;
-  const resolvedEnd   = fields.end   !== undefined ? await anchorToDb(fields.end,   versionId) : undefined;
+  const resolvedStart = fields.start !== undefined ? await anchorToDb(fields.start, versionId, pool) : undefined;
+  const resolvedEnd   = fields.end   !== undefined ? await anchorToDb(fields.end,   versionId, pool) : undefined;
 
   const sets: string[] = [];
   const vals: unknown[] = [id, cueListId];
@@ -214,7 +221,30 @@ export async function updateCue(
     sets.push(`end_kind=$${vals.push(e.kind)}, end_snapshot_id=$${vals.push(e.snapshotId)}, end_offset=$${vals.push(e.offset)}`);
   }
   if (!sets.length) return;
-  await getPool().query(`UPDATE cue SET ${sets.join(", ")} WHERE id = $1 AND cue_list_id = $2`, vals);
+  await pool.query(`UPDATE cue SET ${sets.join(", ")} WHERE id = $1 AND cue_list_id = $2`, vals);
+}
+
+/** 浏览器条件保存：行锁覆盖读取、依据检查和写入；同一旧依据的竞争者只能有一个成功。 */
+export async function updateCueConditionally(
+  id: string, cueListId: string, fields: CueFieldPatch, basis: CuePatchBasis, versionId?: string,
+): Promise<{ cue: Cue; warningNewlySet: boolean }> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const load = () => client.query<CueRow>(
+      `${CUE_SELECT} WHERE c.id = $1 AND c.cue_list_id = $2 FOR UPDATE OF c`, [id, cueListId],
+    );
+    const current = (await load()).rows[0];
+    if (!current) throw new CuePatchConflict();
+    const patch = conditionCuePatch(rowToCue(current), fields, basis);
+    await writeCueFields(client, id, cueListId, patch, versionId);
+    const cue = rowToCue((await load()).rows[0]);
+    await client.query("COMMIT");
+    return { cue, warningNewlySet: patch.warning === true && !current.warning };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally { client.release(); }
 }
 
 /** 物理删除一条 cue 修订行。cue_version 行随 `revision_id` 的 ON DELETE CASCADE 消失。 */
