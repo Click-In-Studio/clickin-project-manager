@@ -36,6 +36,7 @@ function req(url: string, opts: { session?: string; method?: string; body?: stri
 
 async function makeUser(tier?: "creator" | "internal"): Promise<{ userId: string; session: string }> {
   const { userId } = await upsertFeishuUser(`test-plan-${shortId()}`, `档位测试用户-${shortId()}`, null, false);
+  createdUsers.push(userId);
   if (tier) {
     await getPool().query(
       "INSERT INTO user_plan (user_id, tier, source) VALUES ($1, $2, 'test') ON CONFLICT (user_id) DO UPDATE SET tier = $2",
@@ -61,10 +62,13 @@ async function makeCode(over: Partial<{
 
 const createdProds: string[] = [];
 const createdCodes: string[] = [];
+const createdUsers: string[] = [];
 
 afterAll(async () => {
   for (const id of createdProds) await deleteProduction(id).catch(() => {});
   await getPool().query("DELETE FROM plan_code WHERE code = ANY($1)", [createdCodes]).catch(() => {});
+  // 用户档位与身份随账号级联删除，避免相同 seed 重跑时复用上次的等级。
+  await getPool().query("DELETE FROM app_user WHERE id = ANY($1)", [createdUsers]);
 });
 
 // ── 层 1：建项目门 ─────────────────────────────────────────────────────────────
