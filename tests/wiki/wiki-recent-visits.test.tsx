@@ -57,7 +57,7 @@ describe("云文档最近访问", () => {
     await act(async () => root.unmount()); root = createRoot(container); fetchMock.mockReset();
     fetchMock.mockImplementation((_url, opts) => Promise.resolve(opts?.method === "POST" ? new Response(null, { status: 403 }) : response([item(2)])));
     await render(id(1));
-    expect(container.textContent).toContain("本次访问未能记录");
+    expect(container.textContent).toContain("本次访问记录未能确认");
     expect(container.querySelectorAll('a[aria-current]')).toHaveLength(0);
     expect(fetchMock.mock.calls.filter(([, opts]) => opts?.method === "POST")).toHaveLength(1);
     expect(fetchMock.mock.calls.filter(([, opts]) => opts?.cache === "no-store").length).toBeGreaterThanOrEqual(2);

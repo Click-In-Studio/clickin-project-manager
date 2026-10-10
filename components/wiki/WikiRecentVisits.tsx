@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
 
@@ -38,11 +38,17 @@ export default function WikiRecentVisits({ productionId, currentWikiId, onNaviga
   const [retry, setRetry] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
 
+  const attemptedVisit = useRef<string | null>(null);
+
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
-    // 客户端挂载意味着正文已实际呈现；RSC 预取不会执行此 effect。
-    if (currentWikiId) {
+    // 后台挂载不代表已阅读；首次可见才尝试，失败与恢复页面都不补报。
+    function recordVisit() {
+      if (!currentWikiId || document.visibilityState !== "visible") return;
+      const visitKey = `${productionId}:${currentWikiId}`;
+      if (attemptedVisit.current === visitKey) return;
+      attemptedVisit.current = visitKey;
       void fetch(`${BASE_PATH}/api/production/${productionId}/wiki/${currentWikiId}/visit`, {
         method: "POST", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
       }).then(response => {
@@ -50,7 +56,12 @@ export default function WikiRecentVisits({ productionId, currentWikiId, onNaviga
       }).catch(() => { if (active) setVisitFailed(true); })
         .finally(() => { if (active) setVisitRevision(value => value + 1); });
     }
-    return () => { active = false; controller.abort(); };
+    recordVisit();
+    document.addEventListener("visibilitychange", recordVisit);
+    return () => {
+      active = false; controller.abort();
+      document.removeEventListener("visibilitychange", recordVisit);
+    };
   }, [productionId, currentWikiId]);
 
   useEffect(() => {
@@ -79,8 +90,17 @@ export default function WikiRecentVisits({ productionId, currentWikiId, onNaviga
     void load();
     // 访问 POST 完成（成功或失败）后重新读取服务端真相，不在本地虚构首项。
     const refresh = () => { void load(); };
+    const refreshVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    const restorePage = (event: PageTransitionEvent) => { if (event.persisted) refresh(); };
     window.addEventListener("focus", refresh);
-    return () => { active = false; controller?.abort(); window.removeEventListener("focus", refresh); };
+    document.addEventListener("visibilitychange", refreshVisible);
+    window.addEventListener("pageshow", restorePage);
+    return () => {
+      active = false; controller?.abort();
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refreshVisible);
+      window.removeEventListener("pageshow", restorePage);
+    };
   }, [productionId, currentWikiId, retry, visitRevision]);
 
   return (
@@ -106,7 +126,7 @@ export default function WikiRecentVisits({ productionId, currentWikiId, onNaviga
               </Link>
             </li>)}
           </ul>)}
-        {visitFailed && <p className="px-1 py-1 text-xs text-zinc-500">本次访问未能记录，阅读不受影响</p>}
+        {visitFailed && <p className="px-1 py-1 text-xs text-zinc-500">本次访问记录未能确认，阅读不受影响</p>}
       </div>}
     </section>
   );
