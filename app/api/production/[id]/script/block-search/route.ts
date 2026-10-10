@@ -3,10 +3,10 @@ import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getActiveVersionId, getVersion } from "@/lib/script/version-db";
-import { loadProduction } from "@/lib/script/script-state-db";
+import { loadScriptReadStructure, loadScriptReadBlocks } from "@/lib/script/script-local-read-db";
 import { getEstimatedPageMap } from "@/lib/script/page-map-db";
 import { getPool } from "@/lib/pg";
-import { isMarkerBlock, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script/script-marker-blocks";
+import { isMarkerBlock } from "@/lib/script/script-marker-blocks";
 import { buildMarkerLabelIndex, type MarkerLabelIndex } from "@/lib/script/script-generated-labels";
 import type { MentionSearchResult } from "@/lib/editor/mention-types";
 import type { Block } from "@/lib/script/script-types";
@@ -17,16 +17,10 @@ type Ctx = { params: Promise<{ id: string }> };
 type SceneRow = { id: string; num: string; name: string };
 const SCENE_REHEARSAL_LABEL_RE = /^(\d(?:[\d.\-]*\d)?)-?([A-Za-z]+)$/;
 
-/**
- * 一次请求内的剧本索引。正文只经 `loadProduction()` 读一次（#336：剧本正文的读取面
- * 收敛到这一个闸口，#339 的权限门只需加在那里），其余全部内存过滤——逐场 / 逐排练
- * 记号 / 逐页的候选本来就只取前 15 条，不值得各开一条 SQL。
- *
- * `textBlocks` 走与分页器、打印页同一条投影链（marker 归属 → legacy 投影），所以
- * 这里的 sceneId / rehearsalMark 与页码、与屏上的分组判定同源。
- */
+/** 引用候选只读结构；展开后再定点装前 15 块正文摘要（#461）。 */
 type ScriptIndex = {
   textBlocks: Block[];
+  readBlocks: (blocks: Block[]) => Promise<Block[]>;
   scenes: SceneRow[];
   labels: MarkerLabelIndex;
   pageMap: () => Promise<Record<string, number>>;
@@ -93,18 +87,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   function loadScript(): Promise<ScriptIndex | null> {
     return scriptPromise ??= (async () => {
       if (!versionId) return null;
-      const loaded = await loadProduction(productionId, versionId);
-      if (!loaded) return null;
-      const owned = withMarkerOwnership(loaded.state.blocks);
-      const textBlocks = withLegacyOwnershipProjection(owned).filter((block) => !isMarkerBlock(block));
+      const structure = await loadScriptReadStructure(versionId);
       let pageMapPromise: Promise<Record<string, number>> | null = null;
       return {
-        textBlocks,
-        scenes: loaded.state.scenes.map((scene) => ({ id: scene.id, num: scene.number, name: scene.name })),
-        labels: buildMarkerLabelIndex(owned),
-        pageMap: () => pageMapPromise ??= getEstimatedPageMap(productionId, versionId, loaded.state),
+        textBlocks: structure.blocks.filter(block => !isMarkerBlock(block)),
+        readBlocks: blocks => loadScriptReadBlocks(versionId, structure, blocks.map(block => block.id)),
+        scenes: structure.blocks.filter(block => block.type === "chapter_marker" || block.type === "scene_marker")
+          .map(block => ({ id: block.id, num: structure.labels.labelByMarkerId.get(block.id) ?? "", name: block.markerMeta?.name ?? "" })),
+        labels: structure.labels,
+        pageMap: () => pageMapPromise ??= getEstimatedPageMap(productionId, versionId),
       };
     })();
+  }
+
+  async function readCandidateBlocks(blocks: Block[]): Promise<Block[]> {
+    return (await loadScript())?.readBlocks(blocks) ?? [];
   }
 
   async function firstBlockInScene(sceneId: string): Promise<Block | null> {
@@ -114,7 +111,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   async function blocksInScene(sceneId: string): Promise<Block[]> {
     const script = await loadScript();
-    return script?.textBlocks.filter((block) => block.sceneId === sceneId).slice(0, 15) ?? [];
+    return script?.textBlocks.filter(block => block.sceneId === sceneId).slice(0, 15) ?? [];
   }
 
   /**
@@ -134,7 +131,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const script = await loadScript();
     if (!script) return [];
     const pageMap = await script.pageMap();
-    return script.textBlocks.filter((block) => pageMap[block.id] === pageNum).slice(0, 15);
+    return script.textBlocks.filter(block => pageMap[block.id] === pageNum).slice(0, 15);
   }
 
   async function queryScenes(numPattern: string, limit: number): Promise<SceneRow[]> {
@@ -314,7 +311,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const pageDrill = base.match(/^p\.(\d+)$/i);
     if (pageDrill) {
       const pageNum = parseInt(pageDrill[1]);
-      const rows = await blocksOnPage(pageNum);
+      const rows = await readCandidateBlocks(await blocksOnPage(pageNum));
       return Response.json({ results: rows.map((r, i) => ({
         kind: "block", displayMode: "page",
         id: r.id, displayLabel: `#p.${pageNum}-${i + 1}`, description: blockDesc(r),
@@ -331,7 +328,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           const labels = await loadRehearsalLabels();
           const prefix = labels.labelByMarkerId.get(found.markerId);
           if (!prefix) return Response.json({ results: [] });
-          return Response.json({ results: found.blocks.map((r, i) => ({
+          return Response.json({ results: (await readCandidateBlocks(found.blocks)).map((r, i) => ({
             kind: "block", displayMode: "rehearsal",
             id: r.id, displayLabel: `#${prefix}-${i + 1}`, description: blockDesc(r),
           })) });
@@ -352,7 +349,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       }
       const exactScenes = await queryScenes(base, 1);
       if (exactScenes[0]) {
-        const rows = await blocksInScene(exactScenes[0].id);
+        const rows = await readCandidateBlocks(await blocksInScene(exactScenes[0].id));
         const sceneNum = exactScenes[0].num;
         return Response.json({ results: rows.map((r, i) => ({
           kind: "block", displayMode: "scene",

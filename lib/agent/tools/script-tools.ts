@@ -15,10 +15,11 @@ import { resolveProductionActor, DENIED_NOT_MEMBER } from "./production-tools";
 import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { getActiveVersionId } from "@/lib/script/version-db";
-import { loadProduction } from "@/lib/script/script-state-db";
+import { loadScriptReadStructure, loadScriptReadBlocks, loadScriptCharacterNames } from "@/lib/script/script-local-read-db";
+import { searchScriptTextHits } from "@/lib/script/script-search-db";
 import { getEstimatedPageMap } from "@/lib/script/page-map-db";
-import { buildMarkerLabelIndex, type MarkerLabelIndex } from "@/lib/script/script-generated-labels";
-import { isMarkerBlock, markerBlockRank, withLegacyOwnershipProjection, withMarkerOwnership } from "@/lib/script/script-marker-blocks";
+import type { MarkerLabelIndex } from "@/lib/script/script-generated-labels";
+import { isMarkerBlock, markerBlockRank } from "@/lib/script/script-marker-blocks";
 import { serializeBlocksToDialect, SCRIPT_DIALECT_POINTER_READ } from "@/lib/script/script-dialect";
 import type { Block, Character } from "@/lib/script/script-types";
 
@@ -44,30 +45,30 @@ async function scriptReadGate(userId: string, productionId: string): Promise<str
 }
 
 type ScriptIndex = {
-  blocks: Block[]; // canonical 投影后的全量序列（含 marker），与分页器/打印同源
+  versionId: string;
+  byId: ReadonlyMap<string, Block>;
+  blocks: Block[]; // 完整轻量结构（正文为空），仅用于定位与段落边界
+  readBlocks: (blocks: Block[]) => Promise<Block[]>;
   characters: Character[];
   labels: MarkerLabelIndex;
   markerById: Map<string, Block>;
   pageMap: () => Promise<Record<string, number>>;
 };
 
-/** 一次调用只经 loadProduction 读一次正文（与 block-search 路由同款收敛）。 */
+/** 同源结构 + 局部正文。角色目录保留全项目同名判定，配置和人物详情不装载。 */
 async function loadScriptIndex(productionId: string): Promise<ScriptIndex | string> {
   const versionId = await getActiveVersionId(productionId);
   if (!versionId) return NO_VERSION;
-  const loaded = await loadProduction(productionId, versionId);
-  if (!loaded) return NO_VERSION;
-  const owned = withMarkerOwnership(loaded.state.blocks);
-  const blocks = withLegacyOwnershipProjection(owned);
+  const [structure, characters] = await Promise.all([
+    loadScriptReadStructure(versionId), loadScriptCharacterNames(versionId),
+  ]);
   let pageMapPromise: Promise<Record<string, number>> | null = null;
   return {
-    blocks,
-    characters: loaded.state.characters,
-    // labels 与 markerById 同源自 blocks：legacy 投影不动 id/type/markerMeta，
-    // owned 与 blocks 对标签索引等价，但同源派生免去"两张图对不上"的疑虑（AI review #400-2）
-    labels: buildMarkerLabelIndex(blocks),
-    markerById: new Map(blocks.filter(isMarkerBlock).map((b) => [b.id, b])),
-    pageMap: () => pageMapPromise ??= getEstimatedPageMap(productionId, versionId, loaded.state),
+    ...structure,
+    versionId,
+    characters,
+    readBlocks: blocks => loadScriptReadBlocks(versionId, structure, blocks.map(block => block.id)),
+    pageMap: () => pageMapPromise ??= getEstimatedPageMap(productionId, versionId),
   };
 }
 
@@ -146,7 +147,7 @@ export async function scriptReadSection(userId: string, productionId: string, se
   if (startIdx < 0 || !isMarkerBlock(index.blocks[startIdx])) {
     return "没有找到该章节/场次/排练标记——sectionId 用 production.scene_list 里的 id（正文中的 [m:<id>] 锚点同义）。";
   }
-  const range = index.blocks.slice(startIdx, sectionEndIndex(index.blocks, startIdx));
+  const range = await index.readBlocks(index.blocks.slice(startIdx, sectionEndIndex(index.blocks, startIdx)));
   const textCount = range.filter((b) => !isMarkerBlock(b)).length;
   const serialized = serializeRange(index, range);
 
@@ -223,7 +224,7 @@ export async function scriptReadWindow(
   const a0 = clamp(after, WINDOW_DEFAULT_AFTER);
   const start = Math.max(0, idx - b0);
   const end = Math.min(index.blocks.length, idx + a0 + 1);
-  const range = index.blocks.slice(start, end);
+  const range = await index.readBlocks(index.blocks.slice(start, end));
 
   const anchor = index.blocks[idx];
   const pm = await pageMapSafe(index);
@@ -277,25 +278,27 @@ export async function scriptSearch(
   const limit = Math.max(1, Math.min(SEARCH_MAX_LIMIT, opts.limit ?? SEARCH_DEFAULT_LIMIT));
   const qLower = q.toLowerCase();
 
-  type Hit = { block: Block; from: "content" | "stageComment" };
-  const hits: Hit[] = [];
-  for (const block of index.blocks) {
-    if (isMarkerBlock(block)) continue;
-    if (speakerIds && !block.characterIds.some((id) => speakerIds.has(id))) continue;
-    if ((block.content ?? "").toLowerCase().includes(qLower)) hits.push({ block, from: "content" });
-    else if ((block.stageComment ?? "").toLowerCase().includes(qLower)) hits.push({ block, from: "stageComment" });
-  }
-  if (hits.length === 0) return neutralizeInjectionTags(`没有找到包含「${q}」的正文块${opts.speaker ? `（说话人过滤：${opts.speaker}）` : ""}。`);
+  const result = await searchScriptTextHits(index.versionId, q, speakerIds ? [...speakerIds] : null, limit);
+  if (result.total === 0) return neutralizeInjectionTags(`没有找到包含「${q}」的正文块${opts.speaker ? `（说话人过滤：${opts.speaker}）` : ""}。`);
+  const blocks = await index.readBlocks(result.hits.flatMap(hit => {
+    const block = index.byId.get(hit.id);
+    return block ? [block] : [];
+  }));
+  const byId = new Map(blocks.map(block => [block.id, block]));
+  const hits = result.hits.flatMap(hit => {
+    const block = byId.get(hit.id);
+    return block ? [{ block, from: hit.from }] : [];
+  });
 
   const pm = await pageMapSafe(index);
-  const shown = hits.slice(0, limit).map(({ block, from }) => {
+  const shown = hits.map(({ block, from }) => {
     const page = pm[block.id];
     const who = block.type === "stage" ? "〔舞台提示〕" : (speakerNames(index, block) || "〔无说话人〕");
     const text = from === "stageComment" ? `提示:${snippet(block.stageComment ?? "", qLower)}` : snippet(block.content ?? "", qLower);
     return `- [b:${block.id}]｜${typeof page === "number" ? `第 ${page} 页` : "页码未知"}｜${blockLocation(index, block)}｜${who}：${text}`;
   });
   return neutralizeInjectionTags([
-    `共命中 ${hits.length} 处${hits.length > limit ? `（显示前 ${limit} 条）` : ""}：`,
+    `共命中 ${result.total} 处${result.total > limit ? `（显示前 ${limit} 条）` : ""}：`,
     ...shown,
     "看上下文用 production.script_read_window（以 [b:] 的 id 为锚点）。页码为估算值。",
   ].join("\n"));
@@ -324,7 +327,7 @@ export async function scriptReadPage(userId: string, productionId: string, page:
       : "当前剧本还没有页码数据（正文为空或页码尚未估算）。";
   }
   // 取该页首尾块之间的完整区间（把夹在中间的 marker 锚点一并带上，保住结构语境）
-  const range = index.blocks.slice(idxs[0], idxs[idxs.length - 1] + 1);
+  const range = await index.readBlocks(index.blocks.slice(idxs[0], idxs[idxs.length - 1] + 1));
   const textCount = range.filter((b) => !isMarkerBlock(b)).length;
   const neighbors = [page > 1 ? `第 ${page - 1} 页` : null, page < maxPage ? `第 ${page + 1} 页` : null]
     .filter(Boolean).join("、");
