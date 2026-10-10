@@ -21,6 +21,7 @@ let speaker: string, secondSpeaker: string;
 const a = shortId(), b = shortId(), c = shortId(), marker = shortId(), outside = shortId();
 const SECRET = "不应装载的其他章节正文";
 let canonical: Block[];
+let emptyProdId: string, emptyVersionId: string;
 
 async function insert(id: string, content: string, afterId: string, extra: Partial<Block> = {}) {
   await applyPatchToDB(prodId, versionId, {
@@ -48,9 +49,13 @@ beforeAll(async () => {
   await scheduleEstimatedPageMapSave(prodId, versionId, "full");
   const viewId = (await getPool().query<{ master_view_id: string }>("SELECT master_view_id FROM production WHERE id = $1", [prodId])).rows[0].master_view_id;
   await savePageMap(prodId, { [viewId]: { [a]: 1, [b]: 1, [c]: 2, [outside]: 3 } });
+  ({ prodId: emptyProdId, versionId: emptyVersionId } = await makeProduction(owner));
 });
 
-afterAll(async () => { await cleanupProduction(prodId).catch(() => {}); });
+afterAll(async () => {
+  await cleanupProduction(prodId).catch(() => {});
+  await cleanupProduction(emptyProdId).catch(() => {});
+});
 
 /** 观察真实 PG 返回的数据，不能只断言最终输出不含其他正文（全本过滤也能通过）。 */
 async function withoutOutsideBody<T>(work: () => Promise<T>): Promise<T> {
@@ -89,6 +94,21 @@ describe("结构与局部正文同源", () => {
     const section = await withoutOutsideBody(() => scriptReadSection(owner, prodId, chapter));
     expect(section).toContain(`[b:${c}]`);
     expect(section).not.toContain(`[m:${otherChapter}]`);
+  });
+
+  it("空剧本、缺失锚点与窗口首尾保持原有响应", async () => {
+    const empty = "（剧本还没有任何正文块）";
+    expect(await scriptReadWindow(owner, emptyProdId, "missing")).toBe(empty);
+    expect(await scriptReadSection(owner, emptyProdId, "missing")).toBe(empty);
+    expect(await scriptReadPage(owner, emptyProdId, 1)).toBe(empty);
+    expect(await scriptSearch(owner, emptyProdId, { query: "abc" })).toBe(empty);
+    expect(await searchScriptBlockMatches(emptyVersionId, "abc", false)).toEqual([]);
+    expect(await searchScriptTextHits(emptyVersionId, "abc", null, 10)).toEqual({ total: 0, hits: [] });
+    expect(await withoutOutsideBody(() => scriptReadWindow(owner, prodId, "missing"))).toContain("没有找到该块");
+    const first = await scriptReadWindow(owner, prodId, canonical[0].id, 50, 0);
+    expect(first).toContain("已到剧本开头");
+    const last = await scriptReadWindow(owner, prodId, canonical.at(-1)!.id, 0, 50);
+    expect(last).toContain("已到剧本结尾");
   });
 });
 
@@ -161,6 +181,7 @@ describe("Cue 导出只取锚点与 gap 邻块", () => {
       cue({ kind: "block", blockId: "missing", offset: 0 }),
       cue({ kind: "gap", afterBlockId: null }),
       cue({ kind: "gap", afterBlockId: "missing" }),
+      cue({ kind: "block", blockId: a, offset: 3 }, { kind: "gap", afterBlockId: a }),
     ];
     const context = await withoutOutsideBody(() => loadCueExportContext(versionId, cues));
     expect(formatCuePosition(cues[0], context).some(part => part.text === " " && part.underline)).toBe(true);
@@ -169,5 +190,9 @@ describe("Cue 导出只取锚点与 gap 邻块", () => {
     expect(formatCuePosition(cues[3], context)).toEqual([{ text: "（位置缺失）" }]);
     expect(formatCuePosition(cues[4], context)).toEqual([{ text: " ↓ " }]);
     expect(formatCuePosition(cues[5], context)).toEqual([{ text: " ↓ " }]);
+    expect(formatCuePosition(cues[6], context).map(part => part.text).join("")).toContain(" → ");
+    const tailGap = cue({ kind: "gap", afterBlockId: canonical.at(-1)!.id });
+    const tailContext = await loadCueExportContext(versionId, [tailGap]);
+    expect(formatCuePosition(tailGap, tailContext).at(-1)).toEqual({ text: " ↓ " });
   });
 });
